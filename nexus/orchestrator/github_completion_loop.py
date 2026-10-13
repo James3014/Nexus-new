@@ -56,6 +56,13 @@ MAX_INTEGRATION_GENERATIONS: int = 5
 DEFAULT_MAX_INTEGRATION_GENERATIONS: int = 5
 MAX_COMPLETION_ELAPSED_SECONDS: float = 2700.0
 
+# #1384 AC4: a TEST_IMPACT-only main movement is not revalidated by the host.
+# It is satisfied by the required exact-head CI run of this check on I_n.
+EXACT_BASE_IMPACT_GATE_CHECK_NAME: str = "Exact-base impact gate"
+TEST_IMPACT_DEFERRAL_DISPOSITION: str = "TEST_IMPACT deferred to exact-head required CI on I_n"
+# Dependency manifests change the test environment itself; a deferral cannot cover them.
+TEST_IMPACT_DEPENDENCY_MANIFESTS: frozenset[str] = frozenset({"pyproject.toml", "uv.lock"})
+
 _GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _RECEIPT_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -177,6 +184,64 @@ class IntegrationMaterializationResult(_FrozenModel):
         return None
 
 
+class HeadCheckRunObservation(_FrozenModel):
+    """One live GitHub check-run as reported for an exact commit SHA."""
+
+    name: StrictStr
+    status: StrictStr
+    conclusion: StrictStr | None = None
+    head_sha: StrictStr
+
+    @field_validator("head_sha")
+    @classmethod
+    def validate_head_sha(cls, value: str, info) -> str:
+        return _git_sha(value, info.field_name)
+
+
+def _evaluate_exact_head_impact_gate(
+    runs: Any, *, head_sha: str
+) -> tuple[str | None, dict[str, Any]]:
+    """Return (error, record) for the exact-head impact gate among live check-runs.
+
+    Only runs whose own ``head_sha`` equals ``head_sha`` count; a run reported for
+    any other commit (e.g. I_(n-1)) is stale.  Every exact-head run must be a
+    completed success, and at least one must exist.
+    """
+    if not isinstance(runs, (list, tuple)) or not all(
+        isinstance(r, HeadCheckRunObservation) for r in runs
+    ):
+        return "IMPACT_GATE_OBSERVATION_INVALID", {}
+    named = [r for r in runs if r.name == EXACT_BASE_IMPACT_GATE_CHECK_NAME]
+    if not named:
+        return "IMPACT_GATE_MISSING", {}
+    exact = [r for r in named if r.head_sha == head_sha]
+    if not exact:
+        return "IMPACT_GATE_STALE", {"observed_head_shas": sorted({r.head_sha for r in named})}
+    if any(
+        r.status.lower() != "completed" or (r.conclusion or "").lower() != "success" for r in exact
+    ):
+        return "IMPACT_GATE_NOT_GREEN", {
+            "observed": [(r.status, r.conclusion) for r in exact],
+        }
+    return None, {
+        "check_name": EXACT_BASE_IMPACT_GATE_CHECK_NAME,
+        "verified_head_sha": head_sha,
+        "exact_head_run_count": len(exact),
+    }
+
+
+def _read_exact_head_impact_gate(port: Any, *, head_sha: str) -> tuple[str | None, dict[str, Any]]:
+    """Read live check-runs for ``head_sha`` from the port and evaluate the impact gate."""
+    reader = getattr(port, "read_head_check_runs", None)
+    if not callable(reader):
+        return "IMPACT_GATE_PORT_UNAVAILABLE", {}
+    try:
+        live_runs = reader(head_sha=head_sha)
+    except Exception as exc:
+        return f"IMPACT_GATE_READ_FAILED:{exc}", {}
+    return _evaluate_exact_head_impact_gate(live_runs, head_sha=head_sha)
+
+
 @dataclass(frozen=True)
 class CasMergeResult:
     status: CasMergeStatus
@@ -281,6 +346,14 @@ class GitHubCompletionPort(Protocol):
         timeout_seconds: float | None = None,
     ) -> Sequence[CheckResult]:
         """Wait/read required checks for exact head_sha and generation."""
+        ...
+
+    def read_head_check_runs(self, *, head_sha: str) -> Sequence[HeadCheckRunObservation]:
+        """Read the live check-runs GitHub currently reports for exact ``head_sha``.
+
+        Used before CAS when a TEST_IMPACT movement was deferred to exact-head CI:
+        the result must carry each run's own head SHA so stale runs are rejected.
+        """
         ...
 
     def read_reviews(self) -> Sequence[ReviewResult]:
@@ -565,6 +638,9 @@ def run_github_completion_loop(
     last_produced_head_sha = initial_evidence.head_sha
     # Base SHA rejected by the last CAS BASE_MOVED signal, pending corroboration.
     cas_base_moved_from: str | None = None
+    # #1384 AC4: generations whose TEST_IMPACT was deferred to exact-head CI on I_n.
+    # Sticky for this run: every later I_n contains those main changes too.
+    test_impact_deferred_generations: list[int] = []
 
     while True:
         # Check elapsed time budget
@@ -710,10 +786,33 @@ def run_github_completion_loop(
                     evidence=current_evidence,
                 )
 
+            # #1384 AC4: a movement whose only affected dimension is TEST_IMPACT is not
+            # revalidated by the host (which would run before materialize, without a test
+            # selection, on a possibly stale venv).  It is deferred to the required
+            # exact-head "Exact-base impact gate" on I_n, checked live before CAS.
+            affected_dimensions = [
+                d.dimension for d in requalification.dimensions if d.action == "RECHECK_AFFECTED"
+            ]
+            test_impact_deferred = affected_dimensions == ["TEST_IMPACT"]
+            if test_impact_deferred:
+                dependency_changes = sorted(
+                    set(changed_main_paths) & TEST_IMPACT_DEPENDENCY_MANIFESTS
+                )
+                if dependency_changes:
+                    return CompletionLoopResult(
+                        outcome=CompletionLoopOutcome.BLOCKED,
+                        reason=(
+                            "FRESH_CANDIDATE_ACCEPTANCE_REQUIRED:TEST_IMPACT:"
+                            f"dependency_manifest_changed:{','.join(dependency_changes)}"
+                        ),
+                        generation=current_generation,
+                        evidence=current_evidence,
+                    )
+
             # Execute affected dimensions through port revalidation hook
             revalidation_receipts: list[DimensionRevalidationReceipt] = []
             for dim in requalification.dimensions:
-                if dim.action == "RECHECK_AFFECTED":
+                if dim.action == "RECHECK_AFFECTED" and not test_impact_deferred:
                     receipt = port.revalidate_affected_dimension(
                         dim.dimension,
                         evidence=current_evidence,
@@ -870,10 +969,20 @@ def run_github_completion_loop(
             current_generation = next_generation
 
             # Construct IntegrationBinding binding receipt hashes into requalification_hash
-            combined_requal_data = {
+            combined_requal_data: dict[str, Any] = {
                 "requalification_hash": canonical_hash(requalification.model_dump(mode="json")),
                 "revalidation_receipt_hashes": tuple(r.receipt_hash for r in revalidation_receipts),
             }
+            if test_impact_deferred:
+                # Candidate-owned blobs were proven byte-identical above; the deferral
+                # is bound into this generation's integration requalification hash.
+                test_impact_deferred_generations.append(current_generation)
+                combined_requal_data["test_impact_deferral"] = {
+                    "disposition": TEST_IMPACT_DEFERRAL_DISPOSITION,
+                    "check_name": EXACT_BASE_IMPACT_GATE_CHECK_NAME,
+                    "integration_head_sha": mat_result.integration_head_sha,
+                    "generation": current_generation,
+                }
             combined_requal_hash = canonical_hash(combined_requal_data)
 
             proof_hash = compute_candidate_equivalence_proof_hash(
@@ -1211,6 +1320,36 @@ def run_github_completion_loop(
                 intent=intent,
             )
 
+        # #1384 AC4: a deferred TEST_IMPACT is satisfied only by a successful
+        # "Exact-base impact gate" on the exact head being merged, read live.
+        deferral_details: dict[str, Any] = {}
+        if test_impact_deferred_generations:
+            gate_error, gate_record = _read_exact_head_impact_gate(
+                port, head_sha=current_evidence.head_sha
+            )
+            if gate_error is not None:
+                # Bounded requalification: if main moved meanwhile, re-enter the
+                # generation loop (MAX budget applies); otherwise fail closed.
+                observed_main_sha, _ = port.read_main_state()
+                if observed_main_sha != current_evidence.base_sha:
+                    continue
+                return CompletionLoopResult(
+                    outcome=CompletionLoopOutcome.BLOCKED,
+                    reason=f"TEST_IMPACT_DEFERRED_{gate_error}",
+                    generation=current_generation,
+                    integration_head_sha=last_produced_head_sha,
+                    evidence=current_evidence,
+                    intent=intent,
+                    details={"impact_gate": gate_record},
+                )
+            deferral_details = {
+                "test_impact_deferral": {
+                    "disposition": TEST_IMPACT_DEFERRAL_DISPOSITION,
+                    "deferred_generations": list(test_impact_deferred_generations),
+                    **gate_record,
+                }
+            }
+
         # Perform CAS merge operation
         cas_result = port.cas_merge(
             repository=current_evidence.repository,
@@ -1297,7 +1436,7 @@ def run_github_completion_loop(
                 merged_commit_sha=recon.observed_main_commit_sha,
                 evidence=current_evidence,
                 intent=intent,
-                details={"post_merge_verification": post_merge_recon},
+                details={"post_merge_verification": post_merge_recon, **deferral_details},
             )
 
         if cas_result.status == CasMergeStatus.SUCCESS:
@@ -1371,7 +1510,7 @@ def run_github_completion_loop(
                 merged_commit_sha=recon.observed_main_commit_sha,
                 evidence=current_evidence,
                 intent=intent,
-                details={"post_merge_verification": post_merge_recon},
+                details={"post_merge_verification": post_merge_recon, **deferral_details},
             )
 
         # Any other CAS status is a rejection/conflict/failure
