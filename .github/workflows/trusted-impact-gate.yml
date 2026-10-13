@@ -39,30 +39,34 @@ jobs:
           TRUSTED_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          fail() { echo "trusted impact gate: $*" >&2; exit 1; }
+          trap 'echo "trusted impact gate: command failed with exit $? at line $LINENO: $BASH_COMMAND" >&2' ERR
           bare_repo="$RUNNER_TEMP/trusted-impact-controller.git"
           trusted_dir="$RUNNER_TEMP/trusted-impact-source"
           runtime_dir="$RUNNER_TEMP/trusted-impact-runtime"
           workflow_path='.github/workflows/trusted-impact-gate.yml'
-          test "$EVENT_NAME" = pull_request_target
-          test "$REPOSITORY" = James3014/Nexus-new
-          test "$DEFAULT_BRANCH" = main
-          test "$WORKFLOW_REF" = "$REPOSITORY/$workflow_path@refs/heads/$DEFAULT_BRANCH"
-          test "$WORKFLOW_SHA" = "$(printf '%s' "$WORKFLOW_SHA" | grep -E '^[0-9a-f]{40}$')"
+          [ "$EVENT_NAME" = pull_request_target ] || fail "event is $EVENT_NAME, not pull_request_target"
+          [ "$REPOSITORY" = James3014/Nexus-new ] || fail "unexpected repository $REPOSITORY"
+          [ "$DEFAULT_BRANCH" = main ] || fail "default branch is $DEFAULT_BRANCH, not main"
+          [ "$WORKFLOW_REF" = "$REPOSITORY/$workflow_path@refs/heads/$DEFAULT_BRANCH" ] || fail "workflow ref $WORKFLOW_REF is not the default-branch workflow"
+          printf '%s' "$WORKFLOW_SHA" | grep -Eq '^[0-9a-f]{40}$' || fail "workflow sha is not a full lowercase SHA"
           basic_auth="$(printf 'x-access-token:%s' "$TRUSTED_TOKEN" | base64 | tr -d '\n')"
-          test -n "$basic_auth"
+          [ -n "$basic_auth" ] || fail "empty token header"
           git init --bare "$bare_repo"
           git -C "$bare_repo" remote add origin "https://github.com/$REPOSITORY.git"
           GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader GIT_CONFIG_VALUE_0="Authorization: basic $basic_auth" \
             git -C "$bare_repo" fetch --no-tags --depth=1 origin "$WORKFLOW_SHA"
-          test "$(git -C "$bare_repo" rev-parse "$WORKFLOW_SHA^{commit}")" = "$WORKFLOW_SHA"
-          test "$(git -C "$bare_repo" cat-file -t "$WORKFLOW_SHA")" = commit
+          [ "$(git -C "$bare_repo" rev-parse "$WORKFLOW_SHA^{commit}")" = "$WORKFLOW_SHA" ] || fail "fetched workflow commit does not match $WORKFLOW_SHA"
+          [ "$(git -C "$bare_repo" cat-file -t "$WORKFLOW_SHA")" = commit ] || fail "workflow sha is not a commit object"
           for path in scripts/__init__.py scripts/ops/__init__.py scripts/ops/pr_impact_gate.py scripts/ops/select_tests.py scripts/ops/trusted_deletion_anchor.py scripts/ops/trusted_impact_gate.py; do
             blob_id="$(git -C "$bare_repo" rev-parse "$WORKFLOW_SHA:$path")"
-            test "$(git -C "$bare_repo" ls-tree "$WORKFLOW_SHA" -- "$path")" = "100644 blob $blob_id"$'\t'"$path"
-            test "$(git -C "$bare_repo" cat-file -t "$blob_id")" = blob
+            # Regular files only (100644 or 100755); never symlinks or gitlinks.
+            entry="$(git -C "$bare_repo" ls-tree "$WORKFLOW_SHA" -- "$path")"
+            [ "$entry" = "100644 blob $blob_id"$'\t'"$path" ] || [ "$entry" = "100755 blob $blob_id"$'\t'"$path" ] || fail "trusted source $path is not a regular blob: $entry"
+            [ "$(git -C "$bare_repo" cat-file -t "$blob_id")" = blob ] || fail "trusted source $path is not a blob object"
             mkdir -p "$trusted_dir/$(dirname "$path")"
             git -C "$bare_repo" cat-file blob "$blob_id" > "$trusted_dir/$path"
-            test "$(git hash-object "$trusted_dir/$path")" = "$blob_id"
+            [ "$(git hash-object "$trusted_dir/$path")" = "$blob_id" ] || fail "extracted $path does not hash to blob $blob_id"
           done
           python -c 'import json, os; event=json.loads(os.environ["EVENT_JSON"]); event.update(event_name=os.environ["EVENT_NAME"], workflow_ref=os.environ["WORKFLOW_REF"], workflow_sha=os.environ["WORKFLOW_SHA"], run_id=int(os.environ["RUN_ID"])); json.dump(event, open(os.environ["RUNNER_TEMP"] + "/impact-event.json", "w"))'
           python -I "$trusted_dir/scripts/ops/trusted_deletion_anchor.py" runtime-builder --repo-root "$bare_repo" --workflow-sha "$WORKFLOW_SHA" --uv-executable "$(command -v uv)" --output-dir "$runtime_dir"
@@ -73,6 +77,8 @@ jobs:
         id: publish
         run: |
           set -euo pipefail
+          fail() { echo "trusted impact gate: $*" >&2; exit 1; }
+          trap 'echo "trusted impact gate: command failed with exit $? at line $LINENO: $BASH_COMMAND" >&2' ERR
           echo "manifest_sha256=$(sha256sum "$RUNNER_TEMP/trusted-impact-bundle/manifest.json" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - name: Upload controller bundle
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -102,13 +108,17 @@ jobs:
           EXPECTED_MANIFEST_SHA256: ${{ needs.trusted-controller.outputs.manifest_sha256 }}
         run: |
           set -euo pipefail
+          fail() { echo "trusted impact gate: $*" >&2; exit 1; }
+          trap 'echo "trusted impact gate: command failed with exit $? at line $LINENO: $BASH_COMMAND" >&2' ERR
           bundle="$RUNNER_TEMP/trusted-impact-bundle"
-          test "$(sha256sum "$bundle/manifest.json" | cut -d' ' -f1)" = "$EXPECTED_MANIFEST_SHA256"
-          python -I "$bundle/code/scripts/ops/trusted_impact_gate.py" executor --bundle-dir "$bundle" --side base --expected-manifest-sha256 "$EXPECTED_MANIFEST_SHA256" --output-dir "$RUNNER_TEMP/trusted-impact-evidence"
+          [ "$(sha256sum "$bundle/manifest.json" | cut -d' ' -f1)" = "$EXPECTED_MANIFEST_SHA256" ] || fail "controller manifest does not match the controller job output"
+          python -I -B "$bundle/code/scripts/ops/trusted_impact_gate.py" executor --bundle-dir "$bundle" --side base --expected-manifest-sha256 "$EXPECTED_MANIFEST_SHA256" --output-dir "$RUNNER_TEMP/trusted-impact-evidence"
       - name: Publish base evidence anchor
         id: publish
         run: |
           set -euo pipefail
+          fail() { echo "trusted impact gate: $*" >&2; exit 1; }
+          trap 'echo "trusted impact gate: command failed with exit $? at line $LINENO: $BASH_COMMAND" >&2' ERR
           echo "evidence_sha256=$(sha256sum "$RUNNER_TEMP/trusted-impact-evidence/executor-evidence.json" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - name: Upload base evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -136,9 +146,11 @@ jobs:
           EXPECTED_MANIFEST_SHA256: ${{ needs.trusted-controller.outputs.manifest_sha256 }}
         run: |
           set -euo pipefail
+          fail() { echo "trusted impact gate: $*" >&2; exit 1; }
+          trap 'echo "trusted impact gate: command failed with exit $? at line $LINENO: $BASH_COMMAND" >&2' ERR
           bundle="$RUNNER_TEMP/trusted-impact-bundle"
-          test "$(sha256sum "$bundle/manifest.json" | cut -d' ' -f1)" = "$EXPECTED_MANIFEST_SHA256"
-          python -I "$bundle/code/scripts/ops/trusted_impact_gate.py" executor --bundle-dir "$bundle" --side head --expected-manifest-sha256 "$EXPECTED_MANIFEST_SHA256" --output-dir "$RUNNER_TEMP/trusted-impact-evidence"
+          [ "$(sha256sum "$bundle/manifest.json" | cut -d' ' -f1)" = "$EXPECTED_MANIFEST_SHA256" ] || fail "controller manifest does not match the controller job output"
+          python -I -B "$bundle/code/scripts/ops/trusted_impact_gate.py" executor --bundle-dir "$bundle" --side head --expected-manifest-sha256 "$EXPECTED_MANIFEST_SHA256" --output-dir "$RUNNER_TEMP/trusted-impact-evidence"
       - name: Upload head evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -169,29 +181,33 @@ jobs:
           TRUSTED_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          fail() { echo "trusted impact gate: $*" >&2; exit 1; }
+          trap 'echo "trusted impact gate: command failed with exit $? at line $LINENO: $BASH_COMMAND" >&2' ERR
           bare_repo="$RUNNER_TEMP/trusted-impact-verifier.git"
           trusted_dir="$RUNNER_TEMP/trusted-impact-verifier-source"
           workflow_path='.github/workflows/trusted-impact-gate.yml'
-          test "$EVENT_NAME" = pull_request_target
-          test "$REPOSITORY" = James3014/Nexus-new
-          test "$DEFAULT_BRANCH" = main
-          test "$WORKFLOW_REF" = "$REPOSITORY/$workflow_path@refs/heads/$DEFAULT_BRANCH"
-          test "$WORKFLOW_SHA" = "$(printf '%s' "$WORKFLOW_SHA" | grep -E '^[0-9a-f]{40}$')"
+          [ "$EVENT_NAME" = pull_request_target ] || fail "event is $EVENT_NAME, not pull_request_target"
+          [ "$REPOSITORY" = James3014/Nexus-new ] || fail "unexpected repository $REPOSITORY"
+          [ "$DEFAULT_BRANCH" = main ] || fail "default branch is $DEFAULT_BRANCH, not main"
+          [ "$WORKFLOW_REF" = "$REPOSITORY/$workflow_path@refs/heads/$DEFAULT_BRANCH" ] || fail "workflow ref $WORKFLOW_REF is not the default-branch workflow"
+          printf '%s' "$WORKFLOW_SHA" | grep -Eq '^[0-9a-f]{40}$' || fail "workflow sha is not a full lowercase SHA"
           basic_auth="$(printf 'x-access-token:%s' "$TRUSTED_TOKEN" | base64 | tr -d '\n')"
-          test -n "$basic_auth"
+          [ -n "$basic_auth" ] || fail "empty token header"
           git init --bare "$bare_repo"
           git -C "$bare_repo" remote add origin "https://github.com/$REPOSITORY.git"
           GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader GIT_CONFIG_VALUE_0="Authorization: basic $basic_auth" \
             git -C "$bare_repo" fetch --no-tags --depth=1 origin "$WORKFLOW_SHA"
-          test "$(git -C "$bare_repo" rev-parse "$WORKFLOW_SHA^{commit}")" = "$WORKFLOW_SHA"
-          test "$(git -C "$bare_repo" cat-file -t "$WORKFLOW_SHA")" = commit
+          [ "$(git -C "$bare_repo" rev-parse "$WORKFLOW_SHA^{commit}")" = "$WORKFLOW_SHA" ] || fail "fetched workflow commit does not match $WORKFLOW_SHA"
+          [ "$(git -C "$bare_repo" cat-file -t "$WORKFLOW_SHA")" = commit ] || fail "workflow sha is not a commit object"
           for path in scripts/__init__.py scripts/ops/__init__.py scripts/ops/pr_impact_gate.py scripts/ops/select_tests.py scripts/ops/trusted_deletion_anchor.py scripts/ops/trusted_impact_gate.py; do
             blob_id="$(git -C "$bare_repo" rev-parse "$WORKFLOW_SHA:$path")"
-            test "$(git -C "$bare_repo" ls-tree "$WORKFLOW_SHA" -- "$path")" = "100644 blob $blob_id"$'\t'"$path"
-            test "$(git -C "$bare_repo" cat-file -t "$blob_id")" = blob
+            # Regular files only (100644 or 100755); never symlinks or gitlinks.
+            entry="$(git -C "$bare_repo" ls-tree "$WORKFLOW_SHA" -- "$path")"
+            [ "$entry" = "100644 blob $blob_id"$'\t'"$path" ] || [ "$entry" = "100755 blob $blob_id"$'\t'"$path" ] || fail "trusted source $path is not a regular blob: $entry"
+            [ "$(git -C "$bare_repo" cat-file -t "$blob_id")" = blob ] || fail "trusted source $path is not a blob object"
             mkdir -p "$trusted_dir/$(dirname "$path")"
             git -C "$bare_repo" cat-file blob "$blob_id" > "$trusted_dir/$path"
-            test "$(git hash-object "$trusted_dir/$path")" = "$blob_id"
+            [ "$(git hash-object "$trusted_dir/$path")" = "$blob_id" ] || fail "extracted $path does not hash to blob $blob_id"
           done
           python -c 'import json, os; event=json.loads(os.environ["EVENT_JSON"]); event.update(event_name=os.environ["EVENT_NAME"], workflow_ref=os.environ["WORKFLOW_REF"], workflow_sha=os.environ["WORKFLOW_SHA"], run_id=int(os.environ["RUN_ID"])); json.dump(event, open(os.environ["RUNNER_TEMP"] + "/impact-event.json", "w"))'
       - name: Download controller bundle
@@ -222,6 +238,7 @@ jobs:
           HEAD_EXECUTOR_RESULT: ${{ needs.unprivileged-head-executor.result }}
         run: |
           set -uo pipefail
+          fail() { echo "trusted impact gate: $*" >&2; exit 1; }
           basic_auth="$(printf 'x-access-token:%s' "$TRUSTED_TOKEN" | base64 | tr -d '\n')"
           GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader GIT_CONFIG_VALUE_0="Authorization: basic $basic_auth" \
             python -I "$RUNNER_TEMP/trusted-impact-verifier-source/scripts/ops/trusted_impact_gate.py" verifier \

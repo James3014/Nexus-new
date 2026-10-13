@@ -549,9 +549,14 @@ def _controller(args: argparse.Namespace) -> int:
     event = json.loads(Path(args.event_json).read_text(encoding="utf-8"))
     ident = identity(event)
     repo = Path(args.repo_root)
+    fetch_args = ["fetch", "--no-tags"]
+    if anchor._git(repo, "rev-parse", "--is-shallow-repository") == "true":
+        fetch_args.append("--unshallow")
     anchor._git(
-        repo, "fetch", "--no-tags", "--unshallow", "origin", ident["base_sha"], ident["head_sha"]
+        repo, *fetch_args, "origin", ident["base_sha"], ident["head_sha"], ident["workflow_sha"]
     )
+    if anchor._git(repo, "rev-parse", "--is-shallow-repository") != "false":
+        raise GateError("controller repository is still shallow after --unshallow")
     runtime_dir = Path(args.runtime_dir)
     runtime_files = {name: (runtime_dir / name).read_bytes() for name in anchor.RUNTIME_FILENAMES}
     runtime_identity = _check_runtime(
@@ -770,7 +775,13 @@ def validate_junit(junit: bytes, spec: dict[str, Any], files: set[str]) -> None:
     for node, observed in outcomes.items():
         if len(observed) > 1 and not all(observed):
             raise GateError(f"{spec['side']} junit node {node!r} is duplicated inconsistently")
-    uncovered = sorted(set(targets) - covered)
+    # Only test modules (pytest.ini python_files = test_*.py) must yield results;
+    # a changed conftest.py/helper or a directory may legitimately collect none.
+    uncovered = sorted(
+        target
+        for target in set(targets) - covered
+        if Path(target).name.startswith("test_") and target.endswith(".py")
+    )
     if uncovered:
         raise GateError(f"{spec['side']} junit has no results for planned targets {uncovered}")
 
@@ -1032,7 +1043,19 @@ def main(argv: list[str] | None = None) -> int:
     verifier.add_argument("--output", required=True)
     verifier.set_defaults(function=_verifier)
     args = parser.parse_args(argv)
-    return int(args.function(args))
+    try:
+        return int(args.function(args))
+    except subprocess.CalledProcessError as exc:
+        stderr = anchor._bounded_subprocess_output(exc.stderr)
+        print(
+            f"trusted impact gate: {args.command} failed: command {exc.cmd!r} exited "
+            f"{exc.returncode}: {stderr.strip()}",
+            file=sys.stderr,
+        )
+        return 1
+    except GateError as exc:
+        print(f"trusted impact gate: {args.command} failed closed: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
