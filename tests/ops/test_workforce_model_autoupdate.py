@@ -14,6 +14,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 from scripts.ops import workforce_model_autoupdate as wf
@@ -349,7 +350,10 @@ def test_reviewer_argv_is_pinned_and_read_only() -> None:
     argv = wf.Reviewer(claude_bin="claude").argv()
     assert argv[:2] == ["claude", "-p"]
     assert argv[argv.index("--model") + 1] == wf.DEFAULT_REVIEWER_MODEL
-    assert argv[argv.index("--tools") + 1] == "Read,Grep,Glob"
+    # B2: no tools at all, no MCP servers, no settings/hooks/plugins
+    assert argv[argv.index("--tools") + 1] == ""
+    assert "--strict-mcp-config" in argv and "--mcp-config" not in argv
+    assert argv[argv.index("--setting-sources") + 1] == ""
     assert argv[argv.index("--permission-mode") + 1] == "plan"
     assert "Bash" in argv[argv.index("--disallowedTools") + 1]
     assert "bypassPermissions" not in argv and "--dangerously-skip-permissions" not in argv
@@ -555,12 +559,6 @@ def test_idempotent_noop_and_open_pr_reuse(tmp_path: Path) -> None:
     assert key_a == wf.idempotency_key(wf.parse_catalog(noop_catalog.read_text()), b"yaml")
     assert key_a != wf.idempotency_key(wf.parse_catalog(noop_catalog.read_text()), b"yaml2")
 
-    fake = FakeGh()
-    fake.open_prs = [{"number": 41, "headRefOid": HEAD}]
-    prop = wf.Proposer(wf.GitHub(runner=fake), fake, tmp_path, tmp_path, tmp_path / "w")
-    assert prop.open_pr(wf.RUNTIME_REPO, "auto/x", "t", "b") == (41, HEAD)
-    assert not fake.ran("gh", "pr", "create")
-
 
 def test_lock_contention_returns_locked(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path)
@@ -658,82 +656,148 @@ def test_notify_mentions_gateway_pending(tmp_path: Path) -> None:
 
 
 class FakeWorld:
-    """git + gh + nexus-certify fake for the whole propose/review/merge/notify chain."""
+    """Stateful git + gh + nexus-certify fake: remote branches, commits, PRs and main per repo."""
 
     def __init__(self, tmp: Path) -> None:
         self.tmp = tmp
-        self.red_prs: set[int] = set()
         self.calls: list[list[str]] = []
+        self.main = {"runtime": "1" * 40, "nexus": "2" * 40}
+        self.commits: dict[str, dict[str, str]] = {}
+        self.branches: dict[tuple[str, str], str] = {}
         self.prs: dict[int, dict[str, Any]] = {}
-        self.next_pr = 100
-        self.staged: dict[str, list[str]] = {}
+        self.issues: list[dict[str, Any]] = []
+        self.wt_repo: dict[str, str] = {}
+        self.wt_head: dict[str, str] = {}
+        self.wt_files: dict[str, list[str]] = {}
+        self.red_prs: set[int] = set()
         self.comments: list[str] = []
+        self.counter = 0
+        self.next_pr = 100
 
-    def _pr(self, number: int) -> dict[str, Any]:
-        return self.prs[number]
+    def _new_sha(self) -> str:
+        self.counter += 1
+        return f"{self.counter:040x}"
 
-    def __call__(self, argv: Sequence[str], **kwargs: Any) -> wf.CmdResult:
+    @staticmethod
+    def _repo_of_path(path: Path) -> str:
+        return "runtime" if path.name == "runtime-clone" else "nexus"
+
+    @staticmethod
+    def _repo_of_slug(slug: str) -> str:
+        return "runtime" if slug == wf.RUNTIME_REPO else "nexus"
+
+    def content(self, repo: str, sha: str, rel: str) -> str:
+        if rel in self.commits.get(sha, {}):
+            return self.commits[sha][rel]
+        if repo == "runtime":
+            return YAML_FIXTURE.read_text()
+        return (REPO_ROOT / rel).read_text()
+
+    def head_of(self, pr: dict[str, Any]) -> str:
+        return pr["frozen_head"] if pr["merged"] else self.branches[(pr["repo"], pr["branch"])]
+
+    def __call__(self, argv: Sequence[str], **kwargs: Any) -> wf.CmdResult:  # noqa: C901
         a = list(argv)
         self.calls.append(a)
         text = str(kwargs.get("input_text") or "")
         if a[0] == "git":
-            repo, cmd = Path(a[2]), a[3]
-            if cmd in ("fetch", "commit", "push"):
+            where, cmd = Path(a[2]), a[3]
+            wt = str(where)
+            if cmd in ("fetch", "add"):
+                if cmd == "add":
+                    self.wt_files[wt] = a[5:]
                 return wf.CmdResult(0)
-            if cmd == "worktree" and a[4] == "add":
-                path = Path(a[7])
-                src = (
-                    {wf.RUNTIME_YAML_PATH: YAML_FIXTURE}
-                    if "runtime" in path.name
-                    else {
-                        rel: REPO_ROOT / rel
-                        for rel in (*wf.PIN_FILES, *wf.LOCK_DIGEST_FILES, *wf.SCOPE_FILES["anchor"])
-                    }
-                )
-                for rel, origin in src.items():
-                    (path / rel).parent.mkdir(parents=True, exist_ok=True)
-                    (path / rel).write_bytes(origin.read_bytes())
-                return wf.CmdResult(0)
-            if cmd == "add":
-                self.staged[str(repo)] = a[5:]
-                return wf.CmdResult(0)
-            if cmd == "diff":
-                return wf.CmdResult(0, "\n".join(self.staged[str(repo)]))
             if cmd == "rev-parse":
-                return wf.CmdResult(0, HEAD + "\n")
+                if a[5] == "origin/main^{commit}":
+                    return wf.CmdResult(0, self.main[self._repo_of_path(where)] + "\n")
+                return wf.CmdResult(0, self.wt_head[wt] + "\n")
+            if cmd == "worktree":
+                if a[4] == "remove":
+                    return wf.CmdResult(0)
+                path, base = Path(a[7]), a[8]
+                repo = self._repo_of_path(where)
+                self.wt_repo[str(path)] = repo
+                rels = (
+                    [wf.RUNTIME_YAML_PATH]
+                    if repo == "runtime"
+                    else [*wf.PIN_FILES, *wf.LOCK_DIGEST_FILES, *wf.SCOPE_FILES["anchor"]]
+                )
+                for rel in rels:
+                    (path / rel).parent.mkdir(parents=True, exist_ok=True)
+                    (path / rel).write_text(self.content(repo, base, rel))
+                return wf.CmdResult(0)
+            if cmd == "commit":
+                sha = self._new_sha()
+                self.commits[sha] = {rel: (where / rel).read_text() for rel in self.wt_files[wt]}
+                self.wt_head[wt] = sha
+                return wf.CmdResult(0)
+            if cmd == "diff-tree":
+                return wf.CmdResult(0, "\n".join(self.commits[a[-1]]))
+            if cmd == "push":
+                repo = self.wt_repo[wt]
+                lease = next((x for x in a if x.startswith("--force-with-lease=")), None)
+                sha, ref = a[-1].split(":", 1)
+                key = (repo, ref.removeprefix("refs/heads/"))
+                if lease:
+                    if self.branches.get(key) != lease.rsplit(":", 1)[1]:
+                        return wf.CmdResult(1, "", "stale info")
+                elif key in self.branches:
+                    return wf.CmdResult(1, "", "non-fast-forward")
+                self.branches[key] = sha
+                return wf.CmdResult(0)
             if cmd == "show":
-                ref, rel = a[4].split(":", 1)
-                if repo.name == "runtime-clone":
-                    wt = self.tmp / "state" / "work"
-                    found = list(wt.glob(f"*/runtime/{rel}"))
-                    return wf.CmdResult(0, found[0].read_text())
-                if ref == "origin/main":
-                    return wf.CmdResult(0, (REPO_ROOT / rel).read_text())
-                found = list((self.tmp / "state" / "work").glob(f"*/nexus-pin/{rel}"))
-                return wf.CmdResult(0, found[0].read_text())
+                sha, rel = a[4].split(":", 1)
+                assert re.fullmatch(r"[0-9a-f]{40}", sha), "never read the index"
+                return wf.CmdResult(0, self.content(self._repo_of_path(where), sha, rel))
         if a[0] == "nexus-certify":
             return wf.CmdResult(0, "Issue body: <!-- NEXUS_CORE_EVIDENCE_UNIVERSE: sha256:ab -->\n")
+        if a[:3] == ["gh", "issue", "list"]:
+            tag = a[a.index("--search") + 1].split(" ")[0]
+            hits = [i for i in self.issues if i["repo"] == a[4] and f"[{tag}]" in i["title"]]
+            return wf.CmdResult(0, json.dumps(hits))
         if a[:3] == ["gh", "issue", "create"]:
-            return wf.CmdResult(0, f"https://github.com/{a[4]}/issues/2000\n")
+            number = 2000 + len(self.issues)
+            title = a[a.index("--title") + 1]
+            self.issues.append({"repo": a[4], "number": number, "title": title})
+            return wf.CmdResult(0, f"https://github.com/{a[4]}/issues/{number}\n")
         if a[:3] == ["gh", "issue", "comment"]:
             self.comments.append(text)
             return wf.CmdResult(0)
         if a[:3] == ["gh", "pr", "list"]:
-            return wf.CmdResult(0, "[]")
+            repo, branch = self._repo_of_slug(a[4]), a[a.index("--head") + 1]
+            rows = [
+                {
+                    "number": n,
+                    "state": "MERGED" if p["merged"] else "OPEN",
+                    "headRefOid": self.head_of(p),
+                }
+                for n, p in self.prs.items()
+                if p["repo"] == repo and p["branch"] == branch
+            ]
+            return wf.CmdResult(0, json.dumps(rows))
         if a[:3] == ["gh", "pr", "create"]:
             self.next_pr += 1
             branch = a[a.index("--head") + 1]
-            self.prs[self.next_pr] = {"head": HEAD, "merged": False, "branch": branch, "body": text}
+            self.prs[self.next_pr] = {
+                "repo": self._repo_of_slug(a[4]),
+                "branch": branch,
+                "merged": False,
+                "body": text,
+                "extra_files": [],
+            }
             return wf.CmdResult(0, f"https://github.com/{a[4]}/pull/{self.next_pr}\n")
         if a[:3] == ["gh", "pr", "view"]:
-            pr = self._pr(int(a[3]))
+            pr = self.prs[int(a[3])]
+            head = self.head_of(pr)
+            files = [*self.commits.get(head, {}), *pr["extra_files"]]
             return wf.CmdResult(
                 0,
                 json.dumps({
                     "number": int(a[3]),
                     "state": "MERGED" if pr["merged"] else "OPEN",
-                    "headRefOid": pr["head"],
-                    "mergeCommit": {"oid": f"{int(a[3]):040d}"} if pr["merged"] else None,
+                    "headRefOid": head,
+                    "mergeCommit": {"oid": pr["merge"]} if pr["merged"] else None,
+                    "files": [{"path": f} for f in files],
                 }),
             )
         if a[:3] == ["gh", "pr", "checks"]:
@@ -743,15 +807,49 @@ class FakeWorld:
             return wf.CmdResult(0, f"diff for {a[3]}\n")
         if a[:3] == ["gh", "pr", "comment"]:
             return wf.CmdResult(0)
+        if a[:2] == ["gh", "api"]:
+            if a[2] == "-H":
+                match = re.fullmatch(r"repos/([^/]+/[^/]+)/contents/(.+)\?ref=([0-9a-f]{40})", a[4])
+                assert match
+                repo = self._repo_of_slug(match.group(1))
+                return wf.CmdResult(0, self.content(repo, match.group(3), match.group(2)))
+            slug = "/".join(a[2].split("/")[1:3])
+            return wf.CmdResult(0, self.main[self._repo_of_slug(slug)] + "\n")
         if a[:3] == ["gh", "pr", "merge"]:
-            pr = self._pr(int(a[3]))
-            assert a[a.index("--match-head-commit") + 1] == pr["head"]
-            pr["merged"] = True
-            return wf.CmdResult(0)
-        if a[:3] == ["gh", "pr", "update-branch"]:
-            self._pr(int(a[3]))["head"] = "9" * 40
+            pr = self.prs[int(a[3])]
+            head = self.head_of(pr)
+            assert a[a.index("--match-head-commit") + 1] == head
+            merge_sha = self._new_sha()
+            self.commits[merge_sha] = dict(self.commits[head])
+            pr.update(merged=True, merge=merge_sha, frozen_head=head)
+            self.main[pr["repo"]] = merge_sha
             return wf.CmdResult(0)
         raise AssertionError(f"unexpected command: {a}")
+
+
+def _world_cfg(tmp_path: Path, **overrides: Any) -> wf.Config:
+    return _cfg(
+        tmp_path,
+        runtime_repo=tmp_path / "runtime-clone",
+        nexus_repo=tmp_path / "nexus",
+        **overrides,
+    )
+
+
+def _world_deps(world: FakeWorld, reviewer: Any = None, **overrides: Any) -> wf.Deps:
+    values: dict[str, Any] = {
+        "runner": world,
+        "attest_call": lambda _m: _identity_payload(),
+        "reviewer": reviewer or (lambda _p: (wf.ACCEPT, ("in scope",))),
+        "validator": lambda _t: "",
+        "sleep": lambda _s: None,
+    }
+    values.update(overrides)
+    return wf.Deps(**values)
+
+
+def _state(tmp_path: Path) -> dict[str, Any]:
+    return json.loads((tmp_path / "state" / "state.json").read_text())
 
 
 def test_full_flow_merges_runtime_then_anchor_then_pin(tmp_path: Path) -> None:
@@ -762,47 +860,41 @@ def test_full_flow_merges_runtime_then_anchor_then_pin(tmp_path: Path) -> None:
         reviewed.append(re.search(r"PR #(\d+) at head (\w+)", prompt).group(0))  # type: ignore[union-attr]
         return wf.ACCEPT, ("in scope",)
 
-    cfg = _cfg(tmp_path, runtime_repo=tmp_path / "runtime-clone", nexus_repo=tmp_path / "nexus")
-    deps = wf.Deps(
-        runner=world,
-        attest_call=lambda _m: _identity_payload(),
-        reviewer=reviewer,
-        validator=lambda _t: "",
-        sleep=lambda _s: None,
-    )
-    result = wf.run(cfg, deps)
+    cfg = _world_cfg(tmp_path)
+    result = wf.run(cfg, _world_deps(world, reviewer))
     assert result.outcome == "MERGED", result.reason
     merges = [c for c in world.calls if c[:3] == ["gh", "pr", "merge"]]
     assert [(m[3], m[5]) for m in merges] == [
         ("101", wf.RUNTIME_REPO),  # runtime first
         ("103", wf.NEXUS_REPO),  # then the anchor
-        ("102", wf.NEXUS_REPO),  # then the pin, on its updated head
+        ("102", wf.NEXUS_REPO),  # then the pin, rebuilt by the tool on the new main
     ]
-    assert reviewed[-1] == f"PR #102 at head {'9' * 40}"
+    pin_head = world.prs[102]["frozen_head"]
+    assert reviewed[-1] == f"PR #102 at head {pin_head}"
+    assert (
+        pin_head
+        == _state(tmp_path)["keys"][next(iter(_state(tmp_path)["keys"]))]["kinds"]["pin"]["head"]
+    )
+    assert not any(c[:3] == ["gh", "pr", "update-branch"] for c in world.calls)
     pin_body = world.prs[102]["body"]
-    assert '"on_merge": "KEEP_OPEN"' in pin_body and "<!-- NEXUS_CORE_ISSUE: 2000 -->" in pin_body
+    assert '"on_merge": "KEEP_OPEN"' in pin_body and "<!-- NEXUS_CORE_ISSUE: 2001 -->" in pin_body
+    assert "ONLY when the predecessor is retired" in pin_body  # F3 scope text
     assert "Gateway reload is pending Owner #526 activation" in world.comments[-1]
+    assert str(tmp_path) not in world.comments[-1]  # public repo: no local paths
     receipt = json.loads(Path(result.receipt_path).read_text())
     assert set(receipt["merges"]) == {"runtime", "anchor", "pin"}
-    # the same state again creates nothing new
-    again = wf.run(cfg, deps)
+    assert len(world.issues) == 2
+    again = wf.run(cfg, _world_deps(world, reviewer))
     assert again.outcome == "SKIPPED_IDEMPOTENT"
 
 
 def test_inflight_switch_resumes_after_runtime_merge(tmp_path: Path) -> None:
     world = FakeWorld(tmp_path)
     world.red_prs.add(102)  # the pin PR is red on the first run
-    cfg = _cfg(tmp_path, runtime_repo=tmp_path / "runtime-clone", nexus_repo=tmp_path / "nexus")
-    deps = wf.Deps(
-        runner=world,
-        attest_call=lambda _m: _identity_payload(),
-        reviewer=lambda _p: (wf.ACCEPT, ("in scope",)),
-        validator=lambda _t: "",
-        sleep=lambda _s: None,
-    )
-    first = wf.run(cfg, deps)
+    deps = _world_deps(world)
+    first = wf.run(_world_cfg(tmp_path), deps)
     assert first.outcome == wf.BLOCKED and first.reason == "PIN_CHECKS_RED:ci"
-    state = json.loads((tmp_path / "state" / "state.json").read_text())
+    state = _state(tmp_path)
     assert state["pending"] and set(state["keys"][state["pending"]]["merges"]) == {
         "runtime",
         "anchor",
@@ -812,16 +904,317 @@ def test_inflight_switch_resumes_after_runtime_merge(tmp_path: Path) -> None:
     post_merge = tmp_path / "post.yaml"
     post_merge.write_text(state["keys"][state["pending"]]["rendered"])
     world.red_prs.clear()
-    second = wf.run(
-        _cfg(
-            tmp_path,
-            runtime_repo=tmp_path / "runtime-clone",
-            nexus_repo=tmp_path / "nexus",
-            yaml_path=post_merge,
-        ),
-        deps,
-    )
+    second = wf.run(_world_cfg(tmp_path, yaml_path=post_merge), deps)
     assert second.outcome == "MERGED", second.reason
     assert json.loads(Path(second.receipt_path).read_text())["resumed"] is True
     assert sum(c[:3] == ["gh", "pr", "create"] for c in world.calls) == 3  # nothing re-created
-    assert "pending" not in json.loads((tmp_path / "state" / "state.json").read_text())
+    assert sum(c[:3] == ["gh", "issue", "create"] for c in world.calls) == 2
+    assert "pending" not in _state(tmp_path)
+
+
+# ---------------------------------------------------------------- B1: tool-authored scope guard
+
+
+def test_foreign_commit_on_branch_blocks_merge(tmp_path: Path) -> None:
+    world = FakeWorld(tmp_path)
+
+    def reviewer(prompt: str) -> tuple[str, tuple[str, ...]]:
+        # someone pushes onto the runtime PR branch while it is under review
+        key = (
+            "runtime",
+            next(b for (r, b) in world.branches if r == "runtime"),
+        )
+        foreign = world._new_sha()
+        world.commits[foreign] = dict(world.commits[world.branches[key]])
+        world.branches[key] = foreign
+        return wf.ACCEPT, ("in scope",)
+
+    result = wf.run(_world_cfg(tmp_path), _world_deps(world, reviewer))
+    assert result.outcome == wf.BLOCKED
+    assert result.reason.startswith("RUNTIME_")
+    assert not any(c[:3] == ["gh", "pr", "merge"] for c in world.calls)
+
+
+def test_extra_file_in_pr_blocks_merge(tmp_path: Path) -> None:
+    world = FakeWorld(tmp_path)
+
+    def reviewer(prompt: str) -> tuple[str, tuple[str, ...]]:
+        world.prs[101]["extra_files"] = [".github/workflows/ci.yml"]
+        return wf.ACCEPT, ("in scope",)
+
+    result = wf.run(_world_cfg(tmp_path), _world_deps(world, reviewer))
+    assert result.outcome == wf.BLOCKED
+    assert result.reason == "RUNTIME_GUARD_FILE_SCOPE_MISMATCH"
+    assert not any(c[:3] == ["gh", "pr", "merge"] for c in world.calls)
+
+
+def test_reused_pr_with_other_content_blocks(tmp_path: Path) -> None:
+    world = FakeWorld(tmp_path)
+    world.red_prs.add(101)
+    deps = _world_deps(world)
+    first = wf.run(_world_cfg(tmp_path), deps)
+    assert first.reason == "RUNTIME_CHECKS_RED:ci"
+    # the authored head is rewritten in place (same SHA, other bytes served by GitHub)
+    head = _state(tmp_path)["keys"][_state(tmp_path)["pending"]]["kinds"]["runtime"]["head"]
+    world.commits[head][wf.RUNTIME_YAML_PATH] += "# tampered\n"
+    world.red_prs.clear()
+    second = wf.run(_world_cfg(tmp_path), deps)
+    assert second.outcome == wf.BLOCKED
+    assert second.reason == f"RUNTIME_GUARD_CONTENT_MISMATCH:{wf.RUNTIME_YAML_PATH}"
+    assert not any(c[:3] == ["gh", "pr", "merge"] for c in world.calls)
+
+
+def test_unknown_pr_on_branch_is_never_adopted(tmp_path: Path) -> None:
+    world = FakeWorld(tmp_path)
+    cfg = _world_cfg(tmp_path)
+    # Someone else opened a PR on the branch name this tool would use.
+    dry = wf.run(_cfg(tmp_path / "dry", dry_run=True), wf.Deps(validator=lambda _t: ""))
+    branch = next(s.detail.split(":")[0] for s in dry.plan if s.action == "branch+commit")
+    world.branches[("runtime", branch)] = "e" * 40
+    world.commits["e" * 40] = {wf.RUNTIME_YAML_PATH: "x"}
+    world.prs[50] = {
+        "repo": "runtime",
+        "branch": branch,
+        "merged": False,
+        "body": "",
+        "extra_files": [],
+    }
+    result = wf.run(cfg, _world_deps(world))
+    assert result.outcome == wf.BLOCKED and result.reason == "RUNTIME_UNKNOWN_PR_ON_BRANCH"
+    assert not any(c[:3] == ["gh", "pr", "merge"] for c in world.calls)
+
+
+# ---------------------------------------------------------------- F2: persisted effects, merged PR
+
+
+def test_crash_after_pr_creation_finds_pr_and_issue_again(tmp_path: Path) -> None:
+    world = FakeWorld(tmp_path)
+    world.red_prs.add(101)
+    deps = _world_deps(world)
+    wf.run(_world_cfg(tmp_path), deps)
+    state = _state(tmp_path)
+    ctx = state["keys"][state["pending"]]
+    assert ctx["kinds"]["runtime"]["pr"] == 101 and ctx["runtime_issue"] == 2000
+    # simulate a crash that lost the PR number and Issue number; the PR merged meanwhile
+    del ctx["kinds"]["runtime"]["pr"]
+    del ctx["runtime_issue"]
+    (tmp_path / "state" / "state.json").write_text(json.dumps(state))
+    head = world.branches[("runtime", world.prs[101]["branch"])]
+    world.commits["9" * 40] = dict(world.commits[head])
+    world.prs[101].update(merged=True, merge="9" * 40, frozen_head=head)
+    world.main["runtime"] = "9" * 40
+    world.red_prs.clear()
+    result = wf.run(_world_cfg(tmp_path), deps)
+    assert result.outcome == "MERGED", result.reason
+    assert sum(c[:3] == ["gh", "issue", "create"] for c in world.calls) == 2  # runtime + pin only
+    assert sum(c[:3] == ["gh", "pr", "create"] for c in world.calls) == 3
+    assert _state(tmp_path)["keys"][next(iter(_state(tmp_path)["keys"]))]["merges"]["runtime"] == (
+        "9" * 40
+    )
+
+
+# ---------------------------------------------------------------- F4: moved base
+
+
+def test_moved_base_is_rebuilt_by_tool_before_merge(tmp_path: Path) -> None:
+    world = FakeWorld(tmp_path)
+    moved: list[bool] = []
+
+    def reviewer(prompt: str) -> tuple[str, tuple[str, ...]]:
+        if not moved:
+            moved.append(True)
+            world.main["runtime"] = "a" * 40  # unrelated commit lands on runtime main
+        return wf.ACCEPT, ("in scope",)
+
+    result = wf.run(_world_cfg(tmp_path), _world_deps(world, reviewer))
+    assert result.outcome == "MERGED", result.reason
+    pushes = [c for c in world.calls if c[0] == "git" and c[3] == "push"]
+    assert any(x.startswith("--force-with-lease=") for x in pushes[1])  # rebuilt, own lease
+    runtime_merge = next(c for c in world.calls if c[:3] == ["gh", "pr", "merge"])
+    rebuilt_head = pushes[1][-1].split(":", 1)[0]
+    assert runtime_merge[-1] == rebuilt_head == world.prs[101]["frozen_head"]
+    assert world.commits[rebuilt_head] == world.commits[pushes[0][-1].split(":", 1)[0]]
+
+
+def test_scoped_file_changed_on_new_base_blocks(tmp_path: Path) -> None:
+    world = FakeWorld(tmp_path)
+
+    def reviewer(prompt: str) -> tuple[str, tuple[str, ...]]:
+        if world.main["runtime"] != "b" * 40:  # once: main moves and changes the yaml
+            new_main = "b" * 40
+            world.commits[new_main] = {wf.RUNTIME_YAML_PATH: YAML_FIXTURE.read_text() + "# x\n"}
+            world.main["runtime"] = new_main
+        return wf.ACCEPT, ("in scope",)
+
+    result = wf.run(_world_cfg(tmp_path), _world_deps(world, reviewer))
+    assert result.outcome == wf.BLOCKED
+    assert result.reason == "RUNTIME_RUNTIME_BASE_DRIFT"
+    assert not any(c[:3] == ["gh", "pr", "merge"] for c in world.calls)
+
+
+# ---------------------------------------------------------------- F1: resume re-checks the catalog
+
+
+def test_resume_requires_model_still_served_and_fresh_attestation(tmp_path: Path) -> None:
+    world = FakeWorld(tmp_path)
+    world.red_prs.add(101)
+    clock = [wf._dt.datetime(2026, 10, 13, 6, 0, tzinfo=wf._dt.timezone.utc)]
+    attest_calls: list[str] = []
+
+    def attest_call(model: str) -> dict[str, Any]:
+        attest_calls.append(model)
+        return _identity_payload()
+
+    deps = _world_deps(world, attest_call=attest_call, now=lambda: clock[0])
+    assert wf.run(_world_cfg(tmp_path), deps).reason == "RUNTIME_CHECKS_RED:ci"
+    assert len(attest_calls) == 1
+    # catalog no longer serves the new model -> blocked, nothing merged
+    gone = tmp_path / "gone.stdout"
+    gone.write_text("gemini-3.9-flash-high\tGemini 3.9 Flash (High)\n")
+    blocked = wf.run(_world_cfg(tmp_path, catalog_file=gone), deps)
+    assert blocked.reason == "RESUME_NEW_MODEL_NOT_SERVED"
+    # still served but the attestation is 25 h old -> re-attested before continuing
+    clock[0] += wf._dt.timedelta(hours=25)
+    world.red_prs.clear()
+    resumed = wf.run(_world_cfg(tmp_path), deps)
+    assert resumed.outcome == "MERGED", resumed.reason
+    assert len(attest_calls) == 2
+
+
+def test_stale_attestation_mismatch_on_resume_blocks(tmp_path: Path) -> None:
+    world = FakeWorld(tmp_path)
+    world.red_prs.add(101)
+    clock = [wf._dt.datetime(2026, 10, 13, 6, 0, tzinfo=wf._dt.timezone.utc)]
+    payloads = [_identity_payload(), _identity_payload(observed_model="gemini-3.8-flash-high")]
+    deps = _world_deps(world, attest_call=lambda _m: payloads.pop(0), now=lambda: clock[0])
+    wf.run(_world_cfg(tmp_path), deps)
+    clock[0] += wf._dt.timedelta(hours=30)
+    world.red_prs.clear()
+    result = wf.run(_world_cfg(tmp_path), deps)
+    assert result.reason == "RESUME_ATTESTATION:IDENTITY_MISMATCH"
+    assert not any(c[:3] == ["gh", "pr", "merge"] for c in world.calls)
+
+
+# ---------------------------------------------------------------- F5 / F6
+
+
+def test_show_refuses_non_sha_refs(tmp_path: Path) -> None:
+    fake = FakeGh()
+    prop = wf.Proposer(wf.GitHub(runner=fake), fake, tmp_path, tmp_path, tmp_path / "w")
+    for ref in ("", "HEAD", "origin/main", "abc", "A" * 40):
+        with pytest.raises(RuntimeError, match="not_a_commit_sha"):
+            prop.show(tmp_path, ref, "pyproject.toml")
+    assert not fake.calls
+
+
+def test_no_required_checks_is_blocked_explicitly() -> None:
+    def runner(argv: Sequence[str], **_: Any) -> wf.CmdResult:
+        if list(argv[1:3]) == ["pr", "checks"]:
+            return wf.CmdResult(1, "", "no required checks reported on the 'x' branch\n")
+        return wf.CmdResult(0, json.dumps({"headRefOid": HEAD, "state": "OPEN"}))
+
+    gh = wf.GitHub(runner=runner)
+    assert gh.required_checks(wf.NEXUS_REPO, 9) == []
+    assert wf.checks_state(gh, wf.NEXUS_REPO, 9, HEAD) == "NO_REQUIRED_CHECKS"
+    merged = wf.merge(gh, repo=wf.NEXUS_REPO, pr=9, head=HEAD, review_result=_accept())
+    assert merged.reason == "CHECKS_NO_REQUIRED_CHECKS"
+
+    def broken(argv: Sequence[str], **_: Any) -> wf.CmdResult:
+        return wf.CmdResult(1, "", "HTTP 502")
+
+    with pytest.raises(RuntimeError):
+        wf.GitHub(runner=broken).required_checks(wf.NEXUS_REPO, 9)
+
+
+# ---------------------------------------------------------------- mutants M4 / M5
+
+
+def test_m4_head_moving_while_checks_are_read_is_drift() -> None:
+    fake = FakeGh()
+    fake.heads = [HEAD, "c" * 40]  # first read OK, re-read after the checks shows a new head
+    assert wf.checks_state(wf.GitHub(runner=fake), wf.NEXUS_REPO, 9, HEAD) == "HEAD_DRIFT"
+
+
+def test_m5_unrecorded_accept_never_merges() -> None:
+    fake = FakeGh()
+    unrecorded = wf.ReviewResult(wf.ACCEPT, ("ok",), HEAD, recorded=False)
+    merged = wf.merge(
+        wf.GitHub(runner=fake), repo=wf.NEXUS_REPO, pr=9, head=HEAD, review_result=unrecorded
+    )
+    assert not merged.ok and merged.reason == "REVIEW_NOT_ACCEPT"
+    assert not fake.ran("gh", "pr", "merge")
+
+
+# ---------------------------------------------------------------- B2: sanitizing
+
+
+def test_malicious_agy_version_never_reaches_yaml() -> None:
+    assert wf.safe_agy_version("1.3.4") == "1.3.4"
+    for bad in ("1.3.4\nreason: x", "١.٣.٤", "1.3", "v1.3.4", "1.3.4 <!-- x -->", ""):
+        assert wf.safe_agy_version(bad) == "unknown"
+    catalog = wf.parse_catalog(CATALOG_FIXTURE.read_text(), agy_version="1.3.4'; rm -rf /")
+    assert catalog.agy_version == "unknown"
+    decision = wf.decide(_policy(), wf.parse_catalog(CATALOG_FIXTURE.read_text()))
+    result = wf.render_change(
+        YAML_FIXTURE.read_text(),
+        decision,
+        today=TODAY,
+        agy_version="9.9.9\n  injected: true",
+        validator=lambda _t: "",
+    )
+    assert result.ok
+    assert "injected" not in result.text
+    assert "provider_no_longer_serves_model_agy_unknown_" in result.text
+
+
+def test_reviewer_reasons_are_sanitized_and_capped() -> None:
+    fake = FakeGh()
+    reasons = (
+        "see /Users/james/.ssh/id_rsa and ~/secrets.txt",
+        "token ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+        "x" * 500,
+        *[f"r{i}" for i in range(20)],
+    )
+    result = wf.review(
+        wf.GitHub(runner=fake),
+        lambda _p: (wf.REJECT, reasons),
+        repo=wf.RUNTIME_REPO,
+        pr=7,
+        head=HEAD,
+        kind="runtime",
+        decision=DECISION,
+    )
+    posted = fake.inputs[-1]
+    assert "/Users/james" not in posted and "~/secrets" not in posted and "ghp_" not in posted
+    assert len(result.reasons) == wf.MAX_REASONS
+    assert all(len(r) <= wf.MAX_REASON_CHARS for r in result.reasons)
+
+
+# ---------------------------------------------------------------- B3: strict ASCII parsing
+
+
+def test_non_ascii_digits_and_leading_zeros_are_rejected() -> None:
+    for model_id in (
+        "gemini-٣.٩-flash-medium",  # Arabic-Indic digits
+        "gemini-3.09-flash-medium",  # leading zero
+        "gemini-03.9-flash-medium",
+        "gemini-3.9-flash-medium\n",
+        "gemini-３.9-flash-medium",  # fullwidth digit
+    ):
+        assert wf.parse_model_id(model_id) is None, model_id
+    catalog = wf.parse_catalog(
+        "gemini-٣.٩-flash-medium\tGemini ٣.٩ Flash (Medium)\n"
+        "gemini-3.09-flash-medium\tGemini 3.9 Flash (Medium)\n"
+        "gemini-3.7-flash-medium\tGemini 3.7 Flash (Medium)\n"
+    )
+    assert [e.model_id for e in catalog.entries] == ["gemini-3.7-flash-medium"]
+    assert len(catalog.unrecognized) == 2
+
+
+def test_duplicate_versions_fail_closed() -> None:
+    dup = wf.parse_catalog(
+        "gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\n"
+        "gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\n"
+    )
+    assert not dup.ok and dup.error.startswith("CATALOG_DUPLICATE_VERSION")
+    assert wf.decide(_policy(), dup).kind == wf.BLOCKED

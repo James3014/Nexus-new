@@ -10,9 +10,13 @@ before anything merges. Every stage fails closed.
 Stages (each returns a typed result; nothing raises past :func:`run`):
 
 1. :func:`discover` reads ``agy models`` (a catalog fetch, not inference) as ``id<TAB>label``
-   lines. Ids that match :data:`AGY_FLASH_RE` *and* carry the deterministic label
+   lines. Ids that match the ASCII-only :data:`AGY_FLASH_RE`, round-trip to the canonical form
+   ``gemini-<maj>.<min>-flash-<tier>`` (no leading zeros) *and* carry the deterministic label
    (``Gemini 3.8 Flash (Medium)``) are recognized; everything else is recorded in
-   ``unrecognized`` and never used for a decision.
+   ``unrecognized`` and never used for a decision. A duplicate id or version fails the whole
+   catalog closed. ``agy --version`` is kept only if it is ASCII ``X.Y.Z`` (else ``unknown``).
+   Campaign/consumer pins (Owner decision 2026-10-13, F3): they move with the default only when
+   the predecessor is retired (unservable); a superseded but still-served predecessor keeps them.
 2. :func:`decide` checks each ``route_defaults`` role whose default is an ``agy`` worker: is the
    exact default id still served, and is there a newer version in the same family and tier?
    Result: ``NOOP``, ``SWITCH`` or ``BLOCKED``. It never crosses provider, family or tier,
@@ -21,19 +25,30 @@ Stages (each returns a typed result; nothing raises past :func:`run`):
 3. :func:`attest` makes one live call through ``scripts.bench.agy_provider`` (``--mode plan
    --sandbox --model <id>``, no-tools prefix, account lease with a 5-hour-window allowlist that
    skips accounts other processes hold) and requires the observed resolved id and backend label
-   to match exactly.
+   to match exactly. A passing attestation is reused for at most ``--attestation-ttl-hours``
+   (24 h); a resumed switch whose runtime PR is not merged re-runs discovery (the new model must
+   still be served) and re-attests once the TTL expired.
 4. :func:`render_change` edits the yaml text surgically (register / flip / retire / bump
    ``last_verified``), checks the parsed result equals the intended dict transform, and runs the
    real ``WorkforcePolicyLoader`` validator on it.
 5. :func:`build_plan` / the propose helpers open the nexus-runtime PR, then the Nexus-new pin +
    mirror PR and the trusted-anchor PR (the procedure of #1908/#1914). ``--dry-run`` prints the
-   plan and makes no effect (no attestation, no git, no gh).
-6. :func:`review` runs ``claude -p`` (pinned model, read-only tools, plan mode) on the exact PR
-   diff with a fixed scope prompt; strict JSON ``{verdict, reasons}`` is posted on the PR.
+   plan and makes no effect (no attestation, no git, no gh). Each branch is built from the exact
+   current ``origin/main`` SHA, and the tool persists its authored head, base, per-file sha256,
+   PR number, Issue numbers and merge SHA immediately after each effect; a resumed run finds its
+   PRs (also merged ones) by branch and Issues by a title tag, so nothing is duplicated.
+6. :func:`review` runs an isolated ``claude -p`` (pinned model, ``--tools ""``,
+   ``--strict-mcp-config``, ``--setting-sources ""``, plan mode, empty temporary cwd) with the
+   exact PR diff inline and a fixed scope prompt; strict JSON ``{verdict, reasons}`` is posted on
+   the PR with reasons sanitized (no paths/secrets, length-capped: both repos are public).
    Anything else is ``REJECT``.
-7. :func:`merge` needs ACCEPT for the current head, every required check green on that head,
-   and an optional ``--pre-merge-hook`` GO; it merges with ``--match-head-commit``. Nexus-new
-   merges only after nexus-runtime.
+7. :func:`merge` needs a recorded ACCEPT for the current head, every required check green on
+   that head (no required checks = blocked), the deterministic :func:`verify_pr_scope` guard
+   (head == the SHA this tool pushed, changed files == exactly the scope list, each file's bytes at
+   that head == the rendered bytes, main still == the base it was built on; a moved base is
+   rebuilt once by the tool and re-reviewed), and an optional ``--pre-merge-hook`` GO; it merges
+   with ``--match-head-commit``. A head the tool did not author is never merged. Nexus-new
+   merges only after nexus-runtime; the pin PR is rebuilt by the tool after the anchor merge.
 8. :func:`notify` comments on #1996 (old -> new, receipts, merge SHAs, Gateway reload pending
    Owner #526 activation).
 9. :func:`run` adds a lock file, an idempotency key (catalog hash + yaml hash) with PR reuse, and
@@ -63,7 +78,7 @@ import textwrap
 import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -81,13 +96,14 @@ RUNTIME_YAML_PATH = "src/nexus_runtime/planning/config/model_workforce.yaml"
 MIRROR_YAML_PATH = "nexus/config/model_workforce.yaml"
 DEFAULT_STATE_DIR = Path.home() / ".local/state/nexus-workforce-autoupdate"
 DEFAULT_REVIEWER_MODEL = "claude-opus-5-5"
-REVIEWER_TOOLS = "Read,Grep,Glob"
+REVIEWER_TOOLS = ""  # no tools: the exact diff is inline in the prompt
 REVIEW_COMMENT_MARKER = "<!-- WORKFORCE_AUTOUPDATE_REVIEW_V1"
 NOTIFY_MARKER = "<!-- WORKFORCE_AUTOUPDATE_NOTIFY_V1"
 
-AGY_FLASH_RE = re.compile(r"^gemini-(\d+)\.(\d+)-flash-(high|medium|low)$")
-_AUTONOMY_RE = re.compile(r"^L(\d+)")
-_SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
+AGY_FLASH_RE = re.compile(r"\Agemini-([0-9]+)\.([0-9]+)-flash-(high|medium|low)\Z", re.ASCII)
+AGY_VERSION_RE = re.compile(r"\A[0-9]+\.[0-9]+\.[0-9]+\Z", re.ASCII)
+_AUTONOMY_RE = re.compile(r"\AL([0-9]+)", re.ASCII)
+_SHA40_RE = re.compile(r"\A[0-9a-f]{40}\Z", re.ASCII)
 NEW_WORKER_STATE = "REGISTERED_CONDITIONAL"
 INHERITABLE_STATES = frozenset({"PROVEN_MAINCHAIN", "REGISTERED_CONDITIONAL"})
 # Predecessor keys that describe the old model's evidence, never the new one's.
@@ -208,7 +224,16 @@ def parse_model_id(model_id: str) -> tuple[str, str, tuple[int, int]] | None:
     match = AGY_FLASH_RE.match(str(model_id or ""))
     if not match:
         return None
-    return "gemini-flash", match.group(3), (int(match.group(1)), int(match.group(2)))
+    major, minor, tier = int(match.group(1)), int(match.group(2)), match.group(3)
+    if f"gemini-{major}.{minor}-flash-{tier}" != model_id:  # canonical: no leading zeros
+        return None
+    return "gemini-flash", tier, (major, minor)
+
+
+def safe_agy_version(raw: str) -> str:
+    """ASCII ``X.Y.Z`` or ``unknown``: no free provider text reaches the yaml or notes."""
+    value = str(raw or "").strip()
+    return value if AGY_VERSION_RE.match(value) else "unknown"
 
 
 def expected_label(model_id: str) -> str | None:
@@ -224,6 +249,7 @@ def parse_catalog(stdout: str, *, agy_version: str = "") -> Catalog:
     entries: list[CatalogEntry] = []
     unrecognized: list[str] = []
     seen: set[str] = set()
+    versions: set[tuple[str, str, tuple[int, int]]] = set()
     for raw in stdout.splitlines():
         line = raw.rstrip("\r\n")
         if not line.strip():
@@ -234,10 +260,15 @@ def parse_catalog(stdout: str, *, agy_version: str = "") -> Catalog:
             continue
         model_id, label = parts[0].strip(), parts[1].strip()
         parsed = parse_model_id(model_id)
-        if parsed is None or expected_label(model_id) != label or model_id in seen:
+        if parsed is None or expected_label(model_id) != label:
             unrecognized.append(line)
             continue
+        if model_id in seen or parsed in versions:
+            return Catalog(
+                ok=False, raw_sha256=_sha256(stdout), error=f"CATALOG_DUPLICATE_VERSION:{model_id}"
+            )
         seen.add(model_id)
+        versions.add(parsed)
         family, tier, version = parsed
         entries.append(CatalogEntry(model_id, label, family, tier, version))
     if not entries and not unrecognized:
@@ -247,7 +278,7 @@ def parse_catalog(stdout: str, *, agy_version: str = "") -> Catalog:
         entries=tuple(entries),
         unrecognized=tuple(unrecognized),
         raw_sha256=_sha256(stdout),
-        agy_version=agy_version,
+        agy_version=safe_agy_version(agy_version) if agy_version else "",
     )
 
 
@@ -448,6 +479,7 @@ class Attestation:
     observed_model: str = ""
     observed_label: str = ""
     receipt: dict[str, Any] = field(default_factory=dict)
+    attested_at: str = ""
 
 
 AttestFn = Callable[[str], Mapping[str, Any]]
@@ -613,7 +645,7 @@ def validate_with_runtime(text: str, *, runtime_src: Path | None = None) -> str:
 
 def _retire_note(decision: Decision, agy_version: str, today: str) -> str:
     return (
-        f"Unavailable since {today}: Agy {agy_version or 'unknown'} no longer lists "
+        f"Unavailable since {today}: Agy {safe_agy_version(agy_version)} no longer lists "
         f"{decision.old_model} in its model catalog (agy models). Replaced as default by "
         f"{decision.new_worker} ({decision.new_model}) by the #1996 automatic updater after a "
         "live identity attestation. Kept registered for history."
@@ -658,7 +690,7 @@ def render_change(
     _set_key(old_block, "default_route", "false", after="preferred_context")
     pred["default_route"] = False
     if decision.predecessor_retired:
-        reason = f"provider_no_longer_serves_model_agy_{agy_version or 'unknown'}_{today}"
+        reason = f"provider_no_longer_serves_model_agy_{safe_agy_version(agy_version)}_{today}"
         _set_key(old_block, "availability", "UNAVAILABLE")
         _set_key(old_block, "reason", reason, after="availability")
         note = _retire_note(decision, agy_version, today)
@@ -918,6 +950,15 @@ def intent_block(issue: int) -> str:
     return f"<!-- NEXUS_ISSUE_INTENT_V1\n{body}\nNEXUS_ISSUE_INTENT_V1 -->"
 
 
+SCOPE_NOTE = (
+    f"\nScope (Nexus-new#{ISSUE_NUMBER}, Owner decision 2026-10-13): same provider, family and "
+    "tier only; autonomy inherited, never raised; fallbacks unchanged. Campaign/consumer pins "
+    "move with the default ONLY when the predecessor is retired (no longer served, so the pin is "
+    "unservable); a superseded but still-served predecessor keeps its pins, preserving exact "
+    "experiment identities. The live Gateway reload stays on #526 (Owner BREAK_GLASS).\n"
+)
+
+
 def summary_lines(decision: Decision) -> str:
     action = "registered" if decision.register_new_worker else "reused"
     return (
@@ -934,7 +975,7 @@ def runtime_pr_body(decision: Decision, attestation: Attestation, issue: int) ->
     receipt = json.dumps(attestation.receipt, indent=2, sort_keys=True)
     return (
         f"Automatic Workforce model update (Nexus-new#{ISSUE_NUMBER}, option A).\n\n"
-        f"{summary_lines(decision)}\n"
+        f"{summary_lines(decision)}{SCOPE_NOTE}\n"
         "Only `model_workforce.yaml` changes; the real `WorkforcePolicyLoader` validated it. "
         "Merges only after an independent AI review ACCEPTs this exact head.\n\n"
         f"Attestation receipt:\n```json\n{receipt}\n```\n\n"
@@ -951,7 +992,7 @@ def nexus_pr_body(kind: str, decision: Decision, issue: int, new_sha: str, extra
     )
     return (
         f"<!-- NEXUS_CORE_ISSUE: {issue} -->\n\nRefs #{issue}, #{ISSUE_NUMBER}.\n\n{what}\n\n"
-        f"{summary_lines(decision)}{extra}\n{intent_block(issue)}\n\n{merge_lane_block()}\n\n"
+        f"{summary_lines(decision)}{SCOPE_NOTE}{extra}\n{intent_block(issue)}\n\n{merge_lane_block()}\n\n"
         "🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
     )
 
@@ -980,11 +1021,12 @@ class GitHub:
             "-R",
             repo,
             "--json",
-            "number,state,headRefOid,mergeCommit",
+            "number,state,headRefOid,mergeCommit,files",
         ])
         return data if isinstance(data, dict) else {}
 
-    def open_pr_for_branch(self, repo: str, branch: str) -> dict[str, Any] | None:
+    def prs_for_branch(self, repo: str, branch: str) -> list[dict[str, Any]]:
+        """Every PR (any state) whose head is ``branch``: finds a merged one on resume."""
         data = self._json([
             "pr",
             "list",
@@ -993,24 +1035,75 @@ class GitHub:
             "--head",
             branch,
             "--state",
-            "open",
+            "all",
             "--json",
-            "number,headRefOid",
-        ])
-        return data[0] if isinstance(data, list) and len(data) == 1 else None
-
-    def required_checks(self, repo: str, pr: int) -> list[dict[str, Any]]:
-        data = self._json([
-            "pr",
-            "checks",
-            str(pr),
-            "-R",
-            repo,
-            "--required",
-            "--json",
-            "name,bucket",
+            "number,state,headRefOid",
         ])
         return [item for item in data or [] if isinstance(item, dict)]
+
+    def file_sha_at(self, repo: str, path: str, ref: str) -> str:
+        """sha256 of ``path`` at the exact commit ``ref`` as GitHub serves it."""
+        if not _SHA40_RE.match(ref):
+            raise RuntimeError("file_ref_not_sha40")
+        res = self.runner(
+            [
+                self.gh,
+                "api",
+                "-H",
+                "Accept: application/vnd.github.raw",
+                f"repos/{repo}/contents/{path}?ref={ref}",
+            ],
+            timeout=120.0,
+        )
+        if res.rc != 0:
+            raise RuntimeError(f"gh_contents_failed:{res.rc}")
+        return _sha256(res.stdout)
+
+    def main_sha(self, repo: str) -> str:
+        res = self.runner(
+            [self.gh, "api", f"repos/{repo}/commits/main", "--jq", ".sha"], timeout=120.0
+        )
+        sha = res.stdout.strip()
+        if res.rc != 0 or not _SHA40_RE.match(sha):
+            raise RuntimeError("main_sha_unavailable")
+        return sha
+
+    def find_issue_by_title_tag(self, repo: str, tag: str) -> int | None:
+        data = self._json([
+            "issue",
+            "list",
+            "-R",
+            repo,
+            "--state",
+            "all",
+            "--search",
+            f"{tag} in:title",
+            "--json",
+            "number,title",
+        ])
+        hits = [
+            int(item["number"])
+            for item in data or []
+            if isinstance(item, dict) and f"[{tag}]" in str(item.get("title"))
+        ]
+        if len(hits) > 1:
+            raise RuntimeError(f"duplicate_issues_for_tag:{tag}")
+        return hits[0] if hits else None
+
+    def required_checks(self, repo: str, pr: int) -> list[dict[str, Any]]:
+        """Required checks of the PR head; ``[]`` only for an explicit "no required checks"."""
+        res = self.runner(
+            [self.gh, "pr", "checks", str(pr), "-R", repo, "--required", "--json", "name,bucket"],
+            timeout=120.0,
+        )
+        if res.stdout.strip():
+            data = json.loads(res.stdout)
+            return [item for item in data or [] if isinstance(item, dict)]
+        if "no required checks" in (res.stderr + res.stdout).lower():
+            return []
+        if res.rc != 0:
+            raise RuntimeError(f"gh_checks_failed:{res.rc}")
+        return []
 
     def pr_diff(self, repo: str, pr: int) -> str:
         res = self.runner([self.gh, "pr", "diff", str(pr), "-R", repo], timeout=120.0)
@@ -1100,6 +1193,14 @@ Respond with JSON only: {{"verdict": "ACCEPT" | "REJECT", "reasons": [short stri
 
 @dataclass
 class Reviewer:
+    """Isolated ``claude -p``: no tools, no MCP servers, no settings/hooks, empty cwd.
+
+    The exact diff is inline in the prompt, so the reviewer needs nothing else. Flags verified
+    against ``claude --help``: ``--tools ""`` disables every built-in tool,
+    ``--strict-mcp-config`` (with no ``--mcp-config``) loads no MCP server, and
+    ``--setting-sources ""`` loads no user/project/local settings (hooks, plugins, permissions).
+    """
+
     runner: Runner = subprocess_runner
     claude_bin: str = str(Path.home() / ".local/bin/claude")
     model: str = DEFAULT_REVIEWER_MODEL
@@ -1114,12 +1215,15 @@ class Reviewer:
             "json",
             "--json-schema",
             json.dumps(REVIEW_SCHEMA),
-            "--permission-mode",
-            "plan",
             "--tools",
             REVIEWER_TOOLS,
+            "--strict-mcp-config",
+            "--setting-sources",
+            "",
+            "--permission-mode",
+            "plan",
             "--disallowedTools",
-            "Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch,Agent",
+            "Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch,Agent,Read,Grep,Glob",
             "--no-session-persistence",
         ]
 
@@ -1146,7 +1250,33 @@ def parse_review_output(stdout: str) -> tuple[str, tuple[str, ...]]:
     verdict, reasons = verdict_obj.get("verdict"), verdict_obj.get("reasons")
     if verdict not in (ACCEPT, REJECT) or not isinstance(reasons, list):
         return REJECT, ("reviewer_output_values",)
-    return str(verdict), tuple(str(item) for item in reasons)
+    return str(verdict), sanitize_reasons(reasons)
+
+
+MAX_REASONS = 10
+MAX_REASON_CHARS = 200
+_SECRET_RE = re.compile(
+    r"(?i)(?:sk-|ghp_|gho_|ghs_|ghu_|github_pat_|xox[abpr]-|ya29\.|akia)[a-z0-9_\-.]{6,}"
+    r"|[A-Za-z0-9+/=_\-]{32,}",
+    re.ASCII,
+)
+_PATH_RE = re.compile(
+    r"(?:~|\$HOME|\.{1,2})?/[^\s'\"`)\]]+|[A-Za-z]:\\[^\s'\"`]+|\b[\w.\-]+/[\w.\-/]+",
+    re.ASCII,
+)
+
+
+def sanitize_reason(text: object) -> str:
+    """Both repos are public: no secrets, no paths, no control characters, bounded length."""
+    value = _SECRET_RE.sub("<redacted>", str(text))
+    value = _PATH_RE.sub("<path>", value)
+    value = "".join(ch if ch.isprintable() else " " for ch in value)
+    value = " ".join(value.split())
+    return value[:MAX_REASON_CHARS]
+
+
+def sanitize_reasons(reasons: Sequence[object]) -> tuple[str, ...]:
+    return tuple(sanitize_reason(item) for item in list(reasons)[:MAX_REASONS])
 
 
 def review(
@@ -1166,7 +1296,7 @@ def review(
         if gh.pr_view(repo, pr).get("headRefOid") != head:
             return ReviewResult(REJECT, ("head_drift_during_review",), head)
     except (RuntimeError, ValueError) as exc:
-        return ReviewResult(REJECT, (f"review_input_unavailable:{exc}",), head)
+        return ReviewResult(REJECT, (sanitize_reason(f"review_input_unavailable:{exc}"),), head)
     prompt = REVIEW_PROMPT.format(
         repo=repo,
         pr=pr,
@@ -1186,6 +1316,9 @@ def review(
         verdict, reasons = reviewer(prompt)
     except Exception as exc:  # noqa: BLE001 - reviewer failure is a REJECT
         verdict, reasons = REJECT, (f"reviewer_failed:{type(exc).__name__}",)
+    if verdict not in (ACCEPT, REJECT):
+        verdict, reasons = REJECT, ("reviewer_verdict_invalid",)
+    reasons = sanitize_reasons(reasons)
     payload = {"verdict": verdict, "reasons": list(reasons), "head": head, "kind": kind}
     body = (
         f"{REVIEW_COMMENT_MARKER} head={head} -->\n"
@@ -1222,6 +1355,7 @@ def checks_state(gh: GitHub, repo: str, pr: int, head: str) -> str:
         return "RED:" + ",".join(red)
     if any(c.get("bucket") != "pass" for c in checks):
         return "PENDING"
+    # The checks belong to the head read before them; a push in between invalidates them.
     if gh.pr_view(repo, pr).get("headRefOid") != head:
         return "HEAD_DRIFT"
     return "GREEN"
@@ -1247,7 +1381,13 @@ def merge(
     head: str,
     review_result: ReviewResult,
     pre_merge_hook: str | None = None,
+    guard: Callable[[], str] | None = None,
 ) -> MergeResult:
+    """Merge only an ACCEPTed, recorded, green, in-scope, tool-authored, up-to-date head.
+
+    ``guard`` returns "" when the PR still has exactly the tool-authored head, exactly the scoped
+    files with the rendered bytes, and the base it was built on; any text blocks the merge.
+    """
     if review_result.verdict != ACCEPT or not review_result.recorded:
         return MergeResult(False, "REVIEW_NOT_ACCEPT")
     if review_result.head != head:
@@ -1255,11 +1395,15 @@ def merge(
     state = checks_state(gh, repo, pr, head)
     if state != "GREEN":
         return MergeResult(False, f"CHECKS_{state}")
+    if guard is not None and (problem := guard()):
+        return MergeResult(False, f"GUARD_{problem}")
     ok, detail = run_pre_merge_hook(pre_merge_hook, gh.runner, repo=repo, pr=pr, head=head)
     if not ok:
         return MergeResult(False, f"PRE_MERGE_HOOK:{detail}")
     if checks_state(gh, repo, pr, head) != "GREEN":
         return MergeResult(False, "CHECKS_CHANGED_AFTER_HOOK")
+    if guard is not None and (problem := guard()):
+        return MergeResult(False, f"GUARD_{problem}")
     res = gh.merge(repo, pr, head)
     if res.rc != 0:
         return MergeResult(False, f"MERGE_FAILED_RC_{res.rc}")
@@ -1270,9 +1414,23 @@ def merge(
     return MergeResult(True, merge_sha=sha)
 
 
-# ---------------------------------------------------------------------------
-# 8. Notify
-# ---------------------------------------------------------------------------
+def verify_pr_scope(gh: GitHub, *, repo: str, kind: str, rec: Mapping[str, Any]) -> str:
+    """Deterministic pre-merge scope check ("" = OK); independent of the AI reviewer."""
+    head, base, digests = rec.get("head"), rec.get("base"), rec.get("file_sha") or {}
+    if not (isinstance(head, str) and _SHA40_RE.match(head)) or not rec.get("pr"):
+        return "NO_TOOL_AUTHORED_HEAD"
+    view = gh.pr_view(repo, int(rec["pr"]))
+    if view.get("headRefOid") != head:
+        return "HEAD_NOT_TOOL_AUTHORED"
+    paths = sorted(str(item.get("path")) for item in view.get("files") or [])
+    if paths != sorted(SCOPE_FILES[kind]) or sorted(digests) != sorted(SCOPE_FILES[kind]):
+        return "FILE_SCOPE_MISMATCH"
+    for path, digest in sorted(digests.items()):
+        if gh.file_sha_at(repo, path, head) != digest:
+            return f"CONTENT_MISMATCH:{path}"
+    if gh.main_sha(repo) != base:
+        return "BASE_MOVED"
+    return ""
 
 
 def notify(gh: GitHub, *, decision: Decision, outcome: str, receipt: Mapping[str, Any]) -> bool:
@@ -1284,8 +1442,8 @@ def notify(gh: GitHub, *, decision: Decision, outcome: str, receipt: Mapping[str
         f"- PRs: {json.dumps(receipt.get('prs', {}))}\n"
         f"- Reviews: {json.dumps(receipt.get('reviews', {}))}\n"
         f"- Merge SHAs: {json.dumps(merges)}\n"
-        f"- Run receipt: `{receipt.get('receipt_path', '')}`\n"
-        f"- Blocker: {receipt.get('reason') or 'none'}\n\n"
+        f"- Run id: `{receipt.get('run_id', '')}` (receipt kept on the M5 host)\n"
+        f"- Blocker: {sanitize_reason(receipt.get('reason') or 'none')}\n\n"
         "Gateway reload is pending Owner #526 activation (BREAK_GLASS); this run did not "
         "touch the live Gateway. Issues opened here stay open (KEEP_OPEN) until `v12-closable` "
         "says 可關閉.\n"
@@ -1326,13 +1484,14 @@ def build_plan(decision: Decision, key: str, *, runtime_issue: int | None) -> li
             RUNTIME_REPO,
             "review",
             f"claude -p --model {DEFAULT_REVIEWER_MODEL} "
-            f"--tools {REVIEWER_TOOLS} --permission-mode plan; verdict posted on PR",
+            "--tools '' --strict-mcp-config --setting-sources '' (diff inline, empty cwd); "
+            "sanitized verdict posted on PR",
         ),
         PlanStep(
             RUNTIME_REPO,
             "merge",
-            "ACCEPT + required checks green on head; "
-            "gh pr merge --merge --match-head-commit <head>",
+            "ACCEPT + required checks green + exact scoped files/bytes at the tool-authored "
+            "head + base unmoved; gh pr merge --merge --match-head-commit <head>",
         ),
         PlanStep(
             NEXUS_REPO,
@@ -1354,14 +1513,18 @@ def build_plan(decision: Decision, key: str, *, runtime_issue: int | None) -> li
             + " (four-way hashes for the pin PR)",
         ),
         PlanStep(NEXUS_REPO, "pr+review+merge", "anchor PR first (--squash --match-head-commit)"),
-        PlanStep(NEXUS_REPO, "update-branch+review+merge", "pin PR after the anchor merged"),
+        PlanStep(
+            NEXUS_REPO,
+            "rebuild+review+merge",
+            "pin PR rebuilt by this tool on the new main after the anchor merged",
+        ),
         PlanStep(NEXUS_REPO, "notify", f"comment on #{ISSUE_NUMBER}; Gateway reload pending #526"),
     ]
 
 
 @dataclass
 class Proposer:
-    """Git/gh effects for one switch. Every step records into ``state`` for reuse."""
+    """Git/gh effects for one switch. Callers persist every return value immediately."""
 
     gh: GitHub
     runner: Runner
@@ -1388,36 +1551,76 @@ class Proposer:
             [self.gh.gh, "issue", "create", "-R", repo, "--title", title, "--body-file", "-"],
             input_text=body,
         )
-        match = re.search(r"/issues/(\d+)", res.stdout)
+        match = re.search(r"/issues/([0-9]+)", res.stdout)
         if res.rc != 0 or not match:
             raise RuntimeError(f"issue_create_failed:{repo}")
         return int(match.group(1))
 
-    def worktree(self, repo: Path, name: str, branch: str) -> Path:
-        path = self.work_dir / name
+    def remote_main(self, repo: Path) -> str:
+        """Fetch and resolve ``origin/main`` to an exact SHA (never a symbolic or index read)."""
         self.git(repo, "fetch", "origin", "main")
+        sha = self.git(repo, "rev-parse", "--verify", "origin/main^{commit}").stdout.strip()
+        if not _SHA40_RE.match(sha):
+            raise RuntimeError("origin_main_unresolved")
+        return sha
+
+    def show(self, repo: Path, sha: str, rel: str) -> str:
+        if not _SHA40_RE.match(str(sha or "")):
+            raise RuntimeError(f"not_a_commit_sha:{rel}")  # ':path' alone would read the index
+        return self.git(repo, "show", f"{sha}:{rel}").stdout
+
+    def worktree(self, repo: Path, name: str, branch: str) -> tuple[Path, str]:
+        """Fresh worktree for ``branch`` at the exact current ``origin/main``; ``(path, base)``."""
+        base = self.remote_main(repo)
+        path = self.work_dir / name
         if path.exists():
             self.git(repo, "worktree", "remove", "--force", str(path))
-        self.git(repo, "worktree", "add", "-B", branch, str(path), "origin/main")
-        return path
+        self.git(repo, "worktree", "add", "-B", branch, str(path), base)
+        return path, base
 
-    def commit_push(self, wt: Path, files: Mapping[str, bytes], message: str, branch: str) -> str:
+    def commit_push(
+        self,
+        wt: Path,
+        files: Mapping[str, bytes],
+        message: str,
+        branch: str,
+        *,
+        lease: str | None = None,
+    ) -> str:
+        """Commit exactly ``files`` and push; returns the tool-authored head SHA.
+
+        ``lease`` is the head this tool pushed earlier: the branch is only replaced if it still
+        points there (``--force-with-lease``), so a foreign commit is never overwritten.
+        """
         for rel, data in files.items():
             target = wt / rel
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
         self.git(wt, "add", "--", *files)
-        changed = self.git(wt, "diff", "--cached", "--name-only").stdout.split()
-        if sorted(changed) != sorted(files):
-            raise RuntimeError(f"unexpected_staged_files:{changed}")
         self.git(wt, "commit", "-m", message)
-        self.git(wt, "push", "-u", "origin", branch)
-        return self.git(wt, "rev-parse", "HEAD").stdout.strip()
+        head = self.git(wt, "rev-parse", "--verify", "HEAD^{commit}").stdout.strip()
+        if not _SHA40_RE.match(head):
+            raise RuntimeError("authored_head_unresolved")
+        changed = self.git(
+            wt, "diff-tree", "--no-commit-id", "--name-only", "-r", head
+        ).stdout.split()
+        if sorted(changed) != sorted(files):
+            raise RuntimeError(f"unexpected_committed_files:{changed}")
+        if lease:
+            if not _SHA40_RE.match(lease):
+                raise RuntimeError("bad_lease")
+            self.git(
+                wt,
+                "push",
+                f"--force-with-lease=refs/heads/{branch}:{lease}",
+                "origin",
+                f"{head}:refs/heads/{branch}",
+            )
+        else:
+            self.git(wt, "push", "origin", f"{head}:refs/heads/{branch}")
+        return head
 
-    def open_pr(self, repo: str, branch: str, title: str, body: str) -> tuple[int, str]:
-        existing = self.gh.open_pr_for_branch(repo, branch)
-        if existing:
-            return int(existing["number"]), str(existing["headRefOid"])
+    def open_pr(self, repo: str, branch: str, title: str, body: str) -> int:
         res = self.runner(
             [
                 self.gh.gh,
@@ -1436,11 +1639,10 @@ class Proposer:
             ],
             input_text=body,
         )
-        match = re.search(r"/pull/(\d+)", res.stdout)
+        match = re.search(r"/pull/([0-9]+)", res.stdout)
         if res.rc != 0 or not match:
             raise RuntimeError(f"pr_create_failed:{repo}")
-        number = int(match.group(1))
-        return number, str(self.gh.pr_view(repo, number).get("headRefOid") or "")
+        return int(match.group(1))
 
 
 # ---------------------------------------------------------------------------
@@ -1464,6 +1666,7 @@ class Config:
     poll_interval: float = 60.0
     today: str = ""
     clear_pending: bool = False
+    attestation_ttl_hours: float = 24.0
 
 
 @dataclass
@@ -1473,6 +1676,7 @@ class Deps:
     reviewer: Callable[[str], tuple[str, tuple[str, ...]]] | None = None
     validator: ValidatorFn | None = None
     sleep: Callable[[float], None] = time.sleep
+    now: Callable[[], _dt.datetime] = lambda: _dt.datetime.now(_dt.timezone.utc)
 
 
 @dataclass
@@ -1531,32 +1735,165 @@ def _wait_green(gh: GitHub, cfg: Config, deps: Deps, repo: str, pr: int, head: s
         waited += cfg.poll_interval
 
 
-def _review_and_merge(
+Builder = Callable[[Path, str], "dict[str, bytes] | str"]
+
+
+def _rec(ctx: dict[str, Any], kind: str) -> dict[str, Any]:
+    return ctx.setdefault("kinds", {}).setdefault(kind, {})
+
+
+def _sync_views(ctx: dict[str, Any]) -> None:
+    kinds = ctx.get("kinds") or {}
+    ctx["prs"] = {k: r["pr"] for k, r in kinds.items() if r.get("pr")}
+    ctx["merges"] = {k: r["merge"] for k, r in kinds.items() if r.get("merge")}
+
+
+def _ensure_issue(
     ctx: dict[str, Any],
-    gh: GitHub,
+    save: Callable[[], None],
+    prop: Proposer,
+    *,
+    slot: str,
+    repo: str,
+    tag: str,
+    title: str,
+    body: Callable[[], str],
+) -> int:
+    """One Issue per switch and slot: persisted at once, found again by its title tag."""
+    if ctx.get(slot):
+        return int(ctx[slot])
+    found = prop.gh.find_issue_by_title_tag(repo, tag)
+    number = found if found else prop.create_issue(repo, f"{title} [{tag}]", body())
+    ctx[slot] = number
+    save()
+    return number
+
+
+def _ensure_pr(
+    ctx: dict[str, Any],
+    save: Callable[[], None],
+    prop: Proposer,
+    *,
+    kind: str,
+    repo: str,
+    local_repo: Path,
+    branch: str,
+    build: Builder,
+    message: str,
+    title: str,
+    body: Callable[[], str],
+) -> str:
+    """Make sure the tool-authored PR for ``kind`` exists on the current main ("" = ready).
+
+    Every effect is persisted immediately: the authored head and base after the push, the PR
+    number after creation, the merge SHA when a resumed PR turns out merged. A PR or branch head
+    the tool did not author blocks; a moved base is rebuilt from scratch on the new main and must
+    reproduce exactly the bytes rendered before.
+    """
+    rec = _rec(ctx, kind)
+    gh = prop.gh
+    if rec.get("merge"):
+        return ""
+    if not rec.get("pr"):
+        found = gh.prs_for_branch(repo, branch)
+        if found:
+            if len(found) != 1 or not rec.get("head") or found[0].get("headRefOid") != rec["head"]:
+                return "UNKNOWN_PR_ON_BRANCH"
+            rec["pr"] = int(found[0]["number"])
+            save()
+    if rec.get("pr"):
+        view = gh.pr_view(repo, int(rec["pr"]))
+        if view.get("headRefOid") != rec.get("head"):
+            return "FOREIGN_HEAD"
+        if view.get("state") == "MERGED":
+            sha = str((view.get("mergeCommit") or {}).get("oid") or "")
+            if not _SHA40_RE.match(sha):
+                return "MERGE_UNCONFIRMED"
+            rec["merge"] = sha
+            _sync_views(ctx)
+            save()
+            return ""
+        if view.get("state") != "OPEN":
+            return "PR_NOT_OPEN"
+        if rec.get("base") == prop.remote_main(local_repo):
+            return ""
+    wt, base = prop.worktree(local_repo, kind, branch)
+    files = build(wt, base)
+    if isinstance(files, str):
+        return files
+    digests = {path: _sha256(data) for path, data in files.items()}
+    if sorted(digests) != sorted(SCOPE_FILES[kind]):
+        return "BUILD_FILE_SCOPE_MISMATCH"
+    if rec.get("file_sha") and rec["file_sha"] != digests:
+        return "SCOPED_CONTENT_CHANGED_ON_NEW_BASE"
+    head = prop.commit_push(wt, files, message, branch, lease=rec.get("head"))
+    rec.update(file_sha=digests, head=head, base=base)
+    save()
+    if not rec.get("pr"):
+        rec["pr"] = prop.open_pr(repo, branch, title, body())
+        _sync_views(ctx)
+        save()
+    return ""
+
+
+def _merge_kind(
+    ctx: dict[str, Any],
+    save: Callable[[], None],
     cfg: Config,
     deps: Deps,
+    prop: Proposer,
     reviewer: Any,
     *,
-    repo: str,
-    pr: int,
-    head: str,
     kind: str,
+    repo: str,
     decision: Decision,
-) -> MergeResult:
-    state = _wait_green(gh, cfg, deps, repo, pr, head)
-    if state != "GREEN":
-        return MergeResult(False, f"CHECKS_{state}")
-    reviews = ctx.setdefault("reviews", {})
-    key = f"{repo}#{pr}@{head}"
-    prior = reviews.get(key)
-    if prior and prior.get("verdict") == REJECT:
-        return MergeResult(False, "REVIEW_NOT_ACCEPT")  # same head already rejected; no re-review
-    result = review(gh, reviewer, repo=repo, pr=pr, head=head, kind=kind, decision=decision)
-    reviews[key] = {"verdict": result.verdict, "reasons": list(result.reasons)}
-    return merge(
-        gh, repo=repo, pr=pr, head=head, review_result=result, pre_merge_hook=cfg.pre_merge_hook
-    )
+    ensure: Callable[[], str],
+) -> str:
+    """Ensure, wait, review, guard and merge one PR ("" = merged). One rebuild on a moved base."""
+    gh = prop.gh
+    rec = _rec(ctx, kind)
+    for attempt in range(2):
+        problem = ensure()
+        if problem:
+            return problem
+        if rec.get("merge"):
+            return ""
+        pr, head = int(rec["pr"]), str(rec["head"])
+        state = _wait_green(gh, cfg, deps, repo, pr, head)
+        if state != "GREEN":
+            return f"CHECKS_{state}"
+        guard = lambda: verify_pr_scope(gh, repo=repo, kind=kind, rec=rec)  # noqa: E731
+        problem = guard()
+        if problem == "BASE_MOVED" and attempt == 0:
+            continue
+        if problem:
+            return f"GUARD_{problem}"
+        reviews = ctx.setdefault("reviews", {})
+        key = f"{repo}#{pr}@{head}"
+        prior = reviews.get(key)
+        if prior and prior.get("verdict") == REJECT:
+            return "REVIEW_NOT_ACCEPT"  # the same head is never re-reviewed
+        result = review(gh, reviewer, repo=repo, pr=pr, head=head, kind=kind, decision=decision)
+        reviews[key] = {"verdict": result.verdict, "reasons": list(result.reasons)}
+        save()
+        merged = merge(
+            gh,
+            repo=repo,
+            pr=pr,
+            head=head,
+            review_result=result,
+            pre_merge_hook=cfg.pre_merge_hook,
+            guard=guard,
+        )
+        if merged.reason == "GUARD_BASE_MOVED" and attempt == 0:
+            continue
+        if not merged.ok:
+            return merged.reason
+        rec["merge"] = merged.merge_sha
+        _sync_views(ctx)
+        save()
+        return ""
+    return "BASE_KEEPS_MOVING"
 
 
 def _propose_and_merge(
@@ -1568,6 +1905,7 @@ def _propose_and_merge(
     rendered: str,
     base_yaml: bytes,
     key: str,
+    save: Callable[[], None] = lambda: None,
 ) -> tuple[str, str]:
     gh = GitHub(runner=deps.runner)
     reviewer = deps.reviewer or Reviewer(runner=deps.runner)
@@ -1579,196 +1917,199 @@ def _propose_and_merge(
         cfg.state_dir / "work" / key[:12],
         cfg.certify_cmd,
     )
-    prs, merges = ctx.setdefault("prs", {}), ctx.setdefault("merges", {})
+    tag = f"wf-auto-{key[:12]}"
 
-    # --- nexus-runtime
-    if "runtime" not in merges:
-        issue = cfg.runtime_issue or ctx.get("runtime_issue")
-        if not issue:
-            markers = prop.markers(cfg.runtime_repo)
-            issue = prop.create_issue(
-                RUNTIME_REPO,
-                f"Workforce auto-update: {decision.old_model} -> {decision.new_model}",
-                f"Automatic Workforce model update under Nexus-new#{ISSUE_NUMBER}.\n\n"
-                f"{summary_lines(decision)}\n" + "\n".join(markers) + "\n",
-            )
-        ctx["runtime_issue"] = issue
-        branch = branch_name(decision, key, "model")
-        if "runtime" not in prs:
-            existing = gh.open_pr_for_branch(RUNTIME_REPO, branch)
-            if existing:
-                prs["runtime"] = int(existing["number"])
-            else:
-                wt = prop.worktree(cfg.runtime_repo, "runtime", branch)
-                if (wt / RUNTIME_YAML_PATH).read_bytes() != base_yaml:
-                    return BLOCKED, "RUNTIME_BASE_DRIFT"
-                err = (
-                    deps.validator or (lambda t: validate_with_runtime(t, runtime_src=wt / "src"))
-                )(rendered)
-                if err:
-                    return BLOCKED, f"VALIDATOR_REJECTED_ON_BASE:{err}"
-                prop.commit_push(
-                    wt,
-                    {RUNTIME_YAML_PATH: rendered.encode()},
-                    f"feat(workforce): {decision.old_worker} -> {decision.new_worker} "
-                    f"({decision.new_model}) (Nexus-new#{ISSUE_NUMBER})",
-                    branch,
-                )
-                prs["runtime"], _ = prop.open_pr(
-                    RUNTIME_REPO,
-                    branch,
-                    f"Workforce auto-update: default {decision.new_model} (#{issue})",
-                    runtime_pr_body(decision, attestation, int(issue)),
-                )
-        head = str(gh.pr_view(RUNTIME_REPO, prs["runtime"]).get("headRefOid") or "")
-        result = _review_and_merge(
+    # --- nexus-runtime: the Workforce yaml only
+    rt = _rec(ctx, "runtime")
+    if not rt.get("merge"):
+        issue = cfg.runtime_issue or _ensure_issue(
             ctx,
-            gh,
-            cfg,
-            deps,
-            reviewer,
+            save,
+            prop,
+            slot="runtime_issue",
             repo=RUNTIME_REPO,
-            pr=prs["runtime"],
-            head=head,
-            kind="runtime",
-            decision=decision,
+            tag=tag,
+            title=f"Workforce auto-update: {decision.old_model} -> {decision.new_model}",
+            body=lambda: (
+                f"Automatic Workforce model update under Nexus-new#{ISSUE_NUMBER}.\n\n"
+                f"{summary_lines(decision)}{SCOPE_NOTE}\n"
+                + "\n".join(prop.markers(cfg.runtime_repo))
+                + "\n"
+            ),
         )
-        if not result.ok:
-            return BLOCKED, f"RUNTIME_{result.reason}"
-        merges["runtime"] = result.merge_sha
 
-    # --- Nexus-new pin + mirror, then anchor (anchor merges first)
-    new_sha = merges["runtime"]
-    prop.git(cfg.runtime_repo, "fetch", "origin", "main")
-    mirror = deps.runner([
-        "git",
-        "-C",
-        str(cfg.runtime_repo),
-        "show",
-        f"{new_sha}:{RUNTIME_YAML_PATH}",
-    ])
-    if mirror.rc != 0 or mirror.stdout != rendered:
-        return BLOCKED, "MERGED_RUNTIME_YAML_DIFFERS_FROM_RENDER"
-    if "pin" not in prs:
-        pin_branch = branch_name(decision, key, "pin")
-        wt = prop.worktree(cfg.nexus_repo, "nexus-pin", pin_branch)
-        old_sha_match = re.search(
-            r"nexus-runtime\.git@([0-9a-f]{40})", (wt / "pyproject.toml").read_text()
-        )
-        if not old_sha_match:
-            return BLOCKED, "NEXUS_PIN_NOT_FOUND"
-        old_sha = old_sha_match.group(1)
-        ctx["old_runtime_sha"] = old_sha
-        pin_files = render_pin_files(
-            wt, old_sha=old_sha, new_sha=new_sha, mirror_yaml=rendered.encode()
-        )
-        if not pin_files.ok:
-            return BLOCKED, f"PIN_RENDER:{pin_files.reason}"
-        markers = prop.markers(
-            cfg.nexus_repo, "--material-transition", f"canonical-runtime=git-commit:{new_sha}"
-        )
-        pin_issue = ctx.get("pin_issue") or prop.create_issue(
-            NEXUS_REPO,
-            f"Workforce auto-update pin: nexus-runtime {new_sha[:7]} ({decision.new_model})",
-            f"Pin bump for the automatic Workforce update under #{ISSUE_NUMBER}.\n\n"
-            f"{summary_lines(decision)}\n" + "\n".join(markers) + "\n",
-        )
-        ctx["pin_issue"] = pin_issue
-        prop.commit_push(
-            wt,
-            pin_files.files,
-            f"chore(deps): pin nexus-runtime {new_sha[:7]} (#{pin_issue})",
-            pin_branch,
-        )
-        prs["pin"], _ = prop.open_pr(
-            NEXUS_REPO,
-            pin_branch,
-            f"Workforce auto-update: pin nexus-runtime {new_sha[:7]} (#{pin_issue})",
-            nexus_pr_body("pin", decision, int(pin_issue), new_sha),
-        )
-    pin_pr, pin_issue = int(prs["pin"]), int(ctx["pin_issue"])
-    if "anchor" not in merges:
-        if "anchor" not in prs:
-            anchor_branch = branch_name(decision, key, "anchor")
-            wt = prop.worktree(cfg.nexus_repo, "nexus-anchor", anchor_branch)
-            pin_head = str(gh.pr_view(NEXUS_REPO, pin_pr).get("headRefOid") or "")
-            show = [
-                deps.runner(["git", "-C", str(cfg.nexus_repo), "show", ref])
-                for ref in (
-                    "origin/main:pyproject.toml",
-                    "origin/main:uv.lock",
-                    f"{pin_head}:pyproject.toml",
-                    f"{pin_head}:uv.lock",
-                )
-            ]
-            if any(r.rc != 0 for r in show):
-                return BLOCKED, "ANCHOR_HASH_INPUTS_UNAVAILABLE"
-            transition = (
-                _sha256(show[0].stdout),
-                _sha256(show[1].stdout),
-                _sha256(show[2].stdout),
-                _sha256(show[3].stdout),
+        def build_runtime(wt: Path, _base: str) -> dict[str, bytes] | str:
+            if (wt / RUNTIME_YAML_PATH).read_bytes() != base_yaml:
+                return "RUNTIME_BASE_DRIFT"
+            err = (deps.validator or (lambda t: validate_with_runtime(t, runtime_src=wt / "src")))(
+                rendered
             )
-            anchor = render_anchor_files(
-                wt,
-                old_sha=str(ctx["old_runtime_sha"]),
-                new_sha=new_sha,
-                pin_pr=pin_pr,
-                pin_issue=pin_issue,
-                transition=transition,
+            return (
+                f"VALIDATOR_REJECTED_ON_BASE:{err}"
+                if err
+                else {RUNTIME_YAML_PATH: rendered.encode("utf-8")}
             )
-            if not anchor.ok:
-                return BLOCKED, f"ANCHOR_RENDER:{anchor.reason}"
-            prop.commit_push(
-                wt,
-                anchor.files,
-                f"ci: trusted runtime identity {new_sha[:7]} for #{pin_pr}",
-                anchor_branch,
-            )
-            prs["anchor"], _ = prop.open_pr(
-                NEXUS_REPO,
-                anchor_branch,
-                f"ci: trusted runtime identity {new_sha[:7]} and transition for #{pin_pr}",
-                nexus_pr_body("anchor", decision, pin_issue, new_sha),
-            )
-        head = str(gh.pr_view(NEXUS_REPO, prs["anchor"]).get("headRefOid") or "")
-        result = _review_and_merge(
+
+        problem = _merge_kind(
             ctx,
-            gh,
+            save,
             cfg,
             deps,
+            prop,
             reviewer,
-            repo=NEXUS_REPO,
-            pr=int(prs["anchor"]),
-            head=head,
-            kind="anchor",
+            kind="runtime",
+            repo=RUNTIME_REPO,
             decision=decision,
+            ensure=lambda: _ensure_pr(
+                ctx,
+                save,
+                prop,
+                kind="runtime",
+                repo=RUNTIME_REPO,
+                local_repo=cfg.runtime_repo,
+                branch=branch_name(decision, key, "model"),
+                build=build_runtime,
+                message=(
+                    f"feat(workforce): {decision.old_worker} -> {decision.new_worker} "
+                    f"({decision.new_model}) (Nexus-new#{ISSUE_NUMBER})"
+                ),
+                title=f"Workforce auto-update: default {decision.new_model} (#{issue})",
+                body=lambda: runtime_pr_body(decision, attestation, int(issue)),
+            ),
         )
-        if not result.ok:
-            return BLOCKED, f"ANCHOR_{result.reason}"
-        merges["anchor"] = result.merge_sha
-    if not ctx.get("pin_branch_updated"):
-        # The pin PR predates the anchor merge; bring it up to date (new head, re-reviewed).
-        upd = deps.runner([gh.gh, "pr", "update-branch", str(pin_pr), "-R", NEXUS_REPO])
-        if upd.rc != 0:
-            return BLOCKED, f"PIN_UPDATE_BRANCH_FAILED_RC_{upd.rc}"
-        ctx["pin_branch_updated"] = True
-    head = str(gh.pr_view(NEXUS_REPO, pin_pr).get("headRefOid") or "")
-    result = _review_and_merge(
+        if problem:
+            return BLOCKED, f"RUNTIME_{problem}"
+
+    new_sha = str(rt["merge"])
+    prop.remote_main(cfg.runtime_repo)
+    if prop.show(cfg.runtime_repo, new_sha, RUNTIME_YAML_PATH) != rendered:
+        return BLOCKED, "MERGED_RUNTIME_YAML_DIFFERS_FROM_RENDER"
+
+    # --- Nexus-new: pin + mirror PR first (its number feeds the anchor), anchor merges first
+    pin_issue = _ensure_issue(
         ctx,
-        gh,
+        save,
+        prop,
+        slot="pin_issue",
+        repo=NEXUS_REPO,
+        tag=tag,
+        title=f"Workforce auto-update pin: nexus-runtime {new_sha[:7]} ({decision.new_model})",
+        body=lambda: (
+            f"Pin bump for the automatic Workforce update under #{ISSUE_NUMBER}.\n\n"
+            f"{summary_lines(decision)}{SCOPE_NOTE}\n"
+            + "\n".join(
+                prop.markers(
+                    cfg.nexus_repo,
+                    "--material-transition",
+                    f"canonical-runtime=git-commit:{new_sha}",
+                )
+            )
+            + "\n"
+        ),
+    )
+
+    def build_pin(wt: Path, _base: str) -> dict[str, bytes] | str:
+        match = re.search(
+            r"nexus-runtime\.git@([0-9a-f]{40})", (wt / "pyproject.toml").read_text(), re.ASCII
+        )
+        if not match:
+            return "NEXUS_PIN_NOT_FOUND"
+        if ctx.setdefault("old_runtime_sha", match.group(1)) != match.group(1):
+            return "NEXUS_PIN_MOVED"
+        files = render_pin_files(
+            wt, old_sha=match.group(1), new_sha=new_sha, mirror_yaml=rendered.encode("utf-8")
+        )
+        return files.files if files.ok else f"PIN_RENDER:{files.reason}"
+
+    def ensure_pin() -> str:
+        return _ensure_pr(
+            ctx,
+            save,
+            prop,
+            kind="pin",
+            repo=NEXUS_REPO,
+            local_repo=cfg.nexus_repo,
+            branch=branch_name(decision, key, "pin"),
+            build=build_pin,
+            message=f"chore(deps): pin nexus-runtime {new_sha[:7]} (#{pin_issue})",
+            title=f"Workforce auto-update: pin nexus-runtime {new_sha[:7]} (#{pin_issue})",
+            body=lambda: nexus_pr_body("pin", decision, pin_issue, new_sha),
+        )
+
+    pin = _rec(ctx, "pin")
+    if not pin.get("pr"):
+        problem = ensure_pin()
+        if problem:
+            return BLOCKED, f"PIN_{problem}"
+
+    def build_anchor(wt: Path, base: str) -> dict[str, bytes] | str:
+        pin_head = str(pin.get("head") or "")
+        if not _SHA40_RE.match(pin_head):
+            return "PIN_HEAD_NOT_SHA40"
+        texts = [
+            prop.show(cfg.nexus_repo, base, "pyproject.toml"),
+            prop.show(cfg.nexus_repo, base, "uv.lock"),
+            prop.show(cfg.nexus_repo, pin_head, "pyproject.toml"),
+            prop.show(cfg.nexus_repo, pin_head, "uv.lock"),
+        ]
+        transition = (
+            _sha256(texts[0]),
+            _sha256(texts[1]),
+            _sha256(texts[2]),
+            _sha256(texts[3]),
+        )
+        anchor = render_anchor_files(
+            wt,
+            old_sha=str(ctx["old_runtime_sha"]),
+            new_sha=new_sha,
+            pin_pr=int(pin["pr"]),
+            pin_issue=pin_issue,
+            transition=transition,
+        )
+        return anchor.files if anchor.ok else f"ANCHOR_RENDER:{anchor.reason}"
+
+    problem = _merge_kind(
+        ctx,
+        save,
         cfg,
         deps,
+        prop,
         reviewer,
+        kind="anchor",
         repo=NEXUS_REPO,
-        pr=pin_pr,
-        head=head,
-        kind="pin",
         decision=decision,
+        ensure=lambda: _ensure_pr(
+            ctx,
+            save,
+            prop,
+            kind="anchor",
+            repo=NEXUS_REPO,
+            local_repo=cfg.nexus_repo,
+            branch=branch_name(decision, key, "anchor"),
+            build=build_anchor,
+            message=f"ci: trusted runtime identity {new_sha[:7]} for #{pin['pr']}",
+            title=f"ci: trusted runtime identity {new_sha[:7]} and transition for #{pin['pr']}",
+            body=lambda: nexus_pr_body("anchor", decision, pin_issue, new_sha),
+        ),
     )
-    if not result.ok:
-        return BLOCKED, f"PIN_{result.reason}"
-    merges["pin"] = result.merge_sha
+    if problem:
+        return BLOCKED, f"ANCHOR_{problem}"
+    # The anchor merge moved main: the pin PR is rebuilt on it by this tool (never by GitHub's
+    # update-branch, whose merge commit the tool would not have authored) and re-reviewed.
+    problem = _merge_kind(
+        ctx,
+        save,
+        cfg,
+        deps,
+        prop,
+        reviewer,
+        kind="pin",
+        repo=NEXUS_REPO,
+        decision=decision,
+        ensure=ensure_pin,
+    )
+    if problem:
+        return BLOCKED, f"PIN_{problem}"
     return "MERGED", ""
 
 
@@ -1824,8 +2165,28 @@ def _run_locked(
         if pctx.get("decision") and pctx.get("attestation") and pctx.get("rendered"):
             decision = _decision_from(pctx["decision"])
             receipt.update(resumed=True, idempotency_key=pending, decision=pctx["decision"])
-            receipt["attestation"] = pctx["attestation"]
             attestation = Attestation(**pctx["attestation"])
+            if not _rec(pctx, "runtime").get("merge"):
+                # Nothing merged yet: the model must still be served and the attestation fresh.
+                catalog = discover(
+                    agy_bin=cfg.agy_bin, catalog_file=cfg.catalog_file, runner=deps.runner
+                )
+                receipt["catalog"] = asdict(catalog)
+                reason = ""
+                if not catalog.ok or decision.new_model not in catalog.served_ids:
+                    reason = "RESUME_NEW_MODEL_NOT_SERVED"
+                elif not _attestation_fresh(attestation, cfg, deps):
+                    attestation = _attest_now(decision, deps)
+                    pctx["attestation"] = asdict(attestation)
+                    _save_json(state_path, state)
+                    if not attestation.ok:
+                        reason = f"RESUME_ATTESTATION:{attestation.reason}"
+                if reason:
+                    receipt["attestation"] = asdict(attestation)
+                    _notify_once(pctx, deps, decision, BLOCKED, reason, receipt)
+                    _save_json(state_path, state)
+                    return finish(BLOCKED, reason, decision=decision)
+            receipt["attestation"] = asdict(attestation)
             return _execute_switch(
                 cfg, deps, state, state_path, pending, decision, attestation, receipt, finish
             )
@@ -1879,10 +2240,15 @@ def _run_locked(
 
     attestation: Attestation | None = None
     if not cfg.dry_run:
-        if isinstance(ctx.get("attestation"), dict) and ctx["attestation"].get("ok"):
-            attestation = Attestation(**ctx["attestation"])
+        cached = ctx.get("attestation")
+        if (
+            isinstance(cached, dict)
+            and cached.get("ok")
+            and _attestation_fresh(Attestation(**cached), cfg, deps)
+        ):
+            attestation = Attestation(**cached)
         else:
-            attestation = attest(decision.new_model, decision.new_label, call=deps.attest_call)
+            attestation = _attest_now(decision, deps)
             ctx["attestation"] = asdict(attestation)
             _save_json(state_path, state)
         receipt["attestation"] = asdict(attestation)
@@ -1923,6 +2289,24 @@ def _run_locked(
     )
 
 
+def _attest_now(decision: Decision, deps: Deps) -> Attestation:
+    result = attest(decision.new_model, decision.new_label, call=deps.attest_call)
+    return replace(result, attested_at=deps.now().isoformat())
+
+
+def _attestation_fresh(attestation: Attestation, cfg: Config, deps: Deps) -> bool:
+    try:
+        stamp = _dt.datetime.fromisoformat(attestation.attested_at)
+    except ValueError:
+        return False
+    if stamp.tzinfo is None:
+        return False
+    age = deps.now() - stamp
+    return attestation.ok and _dt.timedelta(0) <= age <= _dt.timedelta(
+        hours=cfg.attestation_ttl_hours
+    )
+
+
 def _decision_from(data: Mapping[str, Any]) -> Decision:
     fields: dict[str, Any] = {
         key: tuple(value) if isinstance(value, list) else value for key, value in data.items()
@@ -1952,9 +2336,11 @@ def _execute_switch(
             str(ctx["rendered"]),
             str(ctx["base_yaml"]).encode("utf-8"),
             key,
+            save=lambda: _save_json(state_path, state),
         )
     except (RuntimeError, OSError, ValueError) as exc:
-        outcome, reason = BLOCKED, f"PROPOSE_ERROR:{exc}"
+        outcome, reason = BLOCKED, sanitize_reason(f"PROPOSE_ERROR:{exc}")
+    _sync_views(ctx)
     receipt.update(
         prs=ctx.get("prs", {}), merges=ctx.get("merges", {}), reviews=ctx.get("reviews", {})
     )
