@@ -557,13 +557,15 @@ def build_armor_snapshot(task: dict[str, Any], model: str) -> dict[str, Any]:
     return snapshot
 
 
-def resolve_armor_worker(model: str) -> dict[str, Any]:
+def resolve_armor_worker(model: str, experiment_authorization: bool = False) -> dict[str, Any]:
     """Workforce-admitted local worker for model, or ModelUnavailable.
 
     Armor-on runs through Workforce Admission, which pins the local model per worker. A model with
     no admitted bounded_code_candidate worker cannot run on the armor path; nothing is substituted.
+    An EXPERIMENT_ONLY worker is bound only with the operator's explicit experiment authorization
+    (--experiment-authorization), which Workforce Admission then evaluates; the state is unchanged.
     """
-    from nexus.services.model_workforce_policy import WorkforcePolicyLoader
+    from nexus.services.model_workforce_policy import NON_ADMISSIBLE_STATES, WorkforcePolicyLoader
 
     workers = WorkforcePolicyLoader().load().workers
     admitted = {
@@ -572,6 +574,7 @@ def resolve_armor_worker(model: str) -> dict[str, Any]:
         if w.provider == "ollama"
         and "bounded_code_candidate" in w.roles
         and w.availability == "AVAILABLE"
+        and w.state not in NON_ADMISSIBLE_STATES
     }
     if model not in admitted:
         raise ModelUnavailable(
@@ -579,7 +582,31 @@ def resolve_armor_worker(model: str) -> dict[str, Any]:
             f"admitted bounded_code_candidate models: {sorted(admitted)}"
         )
     worker = admitted[model]
-    return {"worker_id": worker.worker_id, "controls": list(worker.requires)}
+    binding: dict[str, Any] = {"worker_id": worker.worker_id, "controls": list(worker.requires)}
+    if worker.state == "EXPERIMENT_ONLY":
+        if not experiment_authorization:
+            raise ModelUnavailable(
+                f"worker {worker.worker_id!r} for model {model!r} is EXPERIMENT_ONLY; "
+                "pass --experiment-authorization to run it as an explicitly authorized experiment"
+            )
+        binding["explicit_experiment_authorization"] = True
+    return binding
+
+
+def armor_worker_identity(model: str, experiment_authorization: bool = False) -> dict[str, Any]:
+    """Workforce identity recorded in validation.json for an armor-on run."""
+    from nexus.services.model_workforce_policy import WorkforcePolicyLoader
+
+    binding = resolve_armor_worker(model, experiment_authorization)
+    worker = WorkforcePolicyLoader().load().workers[binding["worker_id"]]
+    return {
+        "worker_id": worker.worker_id,
+        "state": worker.state,
+        "autonomy": worker.autonomy,
+        "explicit_experiment_authorization": bool(
+            binding.get("explicit_experiment_authorization", False)
+        ),
+    }
 
 
 def probe_memory_hits(task: dict[str, Any], symbol: str, enabled: bool) -> tuple[int, str]:
@@ -615,6 +642,7 @@ def run_armor_mainchain(
     git_rev: str,
     python: str,
     patch_timeout: int,
+    experiment_authorization: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """One armor-on attempt: CapabilityPlanner -> run_mainchain(with_nexus_armor=True) -> local heal.
 
@@ -634,7 +662,7 @@ def run_armor_mainchain(
     receipt_path = run_root / "armor_receipts" / f"{arm}__{task_id}.json"
     receipt_path.parent.mkdir(parents=True, exist_ok=True)
     armor_root = run_root / "armor_artifacts"
-    worker = resolve_armor_worker(model)
+    worker = resolve_armor_worker(model, experiment_authorization)
     memory_hits, memory_probe = probe_memory_hits(task, symbol, memory_enabled)
     executor_sink: dict[str, Any] = {"memory_hits": memory_hits, "memory_probe": memory_probe}
 
@@ -988,6 +1016,7 @@ def run_attempt(
     state_root: Path,
     armor: str = "off",
     armor_profile: str = DEFAULT_ARMOR_PROFILE,
+    experiment_authorization: bool = False,
 ) -> dict[str, Any]:
     nexus_arm, memory_enabled, row_arm = ARMS[arm]
     task_id = task["id"]
@@ -1039,6 +1068,7 @@ def run_attempt(
                 git_rev=git_rev,
                 python=python,
                 patch_timeout=patch_timeout,
+                experiment_authorization=experiment_authorization,
             )
         else:
             run_pipeline(ctx, counter)
@@ -1303,6 +1333,7 @@ def build_validation(
     leaks: list[str],
     armor: str = "off",
     armor_profile: str = ARMOR_PROFILE_NONE,
+    workforce_worker: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     model_calls = sum(int(r["model_calls"]) for r in rows)
     prompts: dict[str, dict[str, str]] = {}
@@ -1336,6 +1367,7 @@ def build_validation(
         "with_nexus_armor_verified": all(r["with_nexus_armor"] for r in rows)
         if rows and armor == "on"
         else False,
+        "workforce_worker": workforce_worker,
         "state_root": str(state_root),
         "state_leaks": leaks,
         "claim_ceiling": "internal observational A/B on synthetic fixtures; no public, training or production claim",
@@ -1384,9 +1416,17 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=None,
         help=f"local armor execution profile when --armor on (default {DEFAULT_ARMOR_PROFILE})",
     )
+    parser.add_argument(
+        "--experiment-authorization",
+        action="store_true",
+        help="explicitly authorize an EXPERIMENT_ONLY workforce worker for this --armor on run; "
+        "passed to Workforce Admission, does not change the worker's state",
+    )
     args = parser.parse_args(argv)
     if args.armor == "off" and args.armor_profile is not None:
         parser.error("--armor-profile requires --armor on")
+    if args.armor == "off" and args.experiment_authorization:
+        parser.error("--experiment-authorization requires --armor on")
     args.armor_profile = (
         (args.armor_profile or DEFAULT_ARMOR_PROFILE) if args.armor == "on" else ARMOR_PROFILE_NONE
     )
@@ -1406,10 +1446,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     tasks = load_tasks(args.tasks_dir, args.limit, args.task_ids)
 
+    workforce_worker: dict[str, Any] | None = None
     try:
         preflight_model(args.model)
         if args.armor == "on":
-            resolve_armor_worker(args.model)
+            workforce_worker = armor_worker_identity(args.model, args.experiment_authorization)
     except ModelUnavailable as exc:
         print(f"PREFLIGHT_FAILED: {exc}", file=sys.stderr)
         return EXIT_PREFLIGHT
@@ -1453,6 +1494,7 @@ def main(argv: list[str] | None = None) -> int:
                 state_root=state_root,
                 armor=args.armor,
                 armor_profile=args.armor_profile,
+                experiment_authorization=args.experiment_authorization,
             )
             append_row(rows_path, row)
             rows.append(row)
@@ -1481,6 +1523,7 @@ def main(argv: list[str] | None = None) -> int:
         leaks=leaks,
         armor=args.armor,
         armor_profile=args.armor_profile,
+        workforce_worker=workforce_worker,
     )
     (run_root / "validation.json").write_text(
         json.dumps(validation, indent=2, sort_keys=True) + "\n", encoding="utf-8"
