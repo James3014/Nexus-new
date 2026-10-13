@@ -4054,6 +4054,54 @@ def _python_syntax_warning(code: str, filename: str = "<nexus_candidate>") -> st
     for warning in caught:
         if issubclass(warning.category, SyntaxWarning):
             return str(warning.message)
+    return _finally_control_flow_warning(code)
+
+
+def _finally_control_flow_warning(code: str) -> str:
+    """PEP 765 check for interpreters older than 3.14 (#1928).
+
+    Python 3.14 emits a SyntaxWarning for return/break/continue that leaves a
+    ``finally`` block; earlier interpreters compile it silently, so the same
+    candidate would be flagged or not depending on the runner's Python.
+    """
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return ""
+
+    def scan(body: list[ast.stmt], in_loop: bool) -> str:
+        for stmt in body:
+            if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            if isinstance(stmt, ast.Return):
+                return "return"
+            if isinstance(stmt, (ast.Break, ast.Continue)) and not in_loop:
+                return "break" if isinstance(stmt, ast.Break) else "continue"
+            for field, value in ast.iter_fields(stmt):
+                if not (isinstance(value, list) and value and isinstance(value[0], ast.stmt)):
+                    continue
+                nested_in_loop = in_loop or (
+                    isinstance(stmt, (ast.For, ast.AsyncFor, ast.While)) and field == "body"
+                )
+                found = scan(value, nested_in_loop)
+                if found:
+                    return found
+            for handler in getattr(stmt, "handlers", []) or []:
+                found = scan(handler.body, in_loop)
+                if found:
+                    return found
+            for case in getattr(stmt, "cases", []) or []:
+                found = scan(case.body, in_loop)
+                if found:
+                    return found
+        return ""
+
+    for node in ast.walk(tree):
+        finalbody = getattr(node, "finalbody", None)
+        if finalbody:
+            kind = scan(finalbody, in_loop=False)
+            if kind:
+                return f"'{kind}' in a 'finally' block"
     return ""
 
 

@@ -192,6 +192,48 @@ def _literal_assignment(tree: ast.AST, name: str) -> Any:
     return None
 
 
+# Canonical runtime order since 6a4c3a9a0 (pinned by
+# tests/engine/test_pipeline_phase_contract.py). Pre-contract trees, which
+# declared the legacy literal, are still held to that literal (#1928).
+_RUNTIME_STAGE_FLOW = ["S", "P", "D", "X", "R", "A", "C"]
+_LEGACY_STAGE_FLOW = ["S", "P", "X", "D", "R", "A", "C"]
+
+
+def _contract_phase_order(root: Path) -> list[str] | None:
+    """``RuntimePhase`` member order from nexus/engine/runtime_phase_contract.py.
+
+    ``RUNTIME_PHASE_FLOW = tuple(RuntimePhase)``, so the enum declaration order
+    is the canonical runtime phase order (#1928).
+    """
+    contract = root / "nexus/engine/runtime_phase_contract.py"
+    if not contract.exists():
+        return None
+    try:
+        contract_tree = ast.parse(contract.read_text(encoding="utf-8"))
+    except SyntaxError:
+        return None
+    for node in contract_tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == "RuntimePhase":
+            return [
+                item.value.value
+                for item in node.body
+                if isinstance(item, ast.Assign)
+                and isinstance(item.value, ast.Constant)
+                and isinstance(item.value.value, str)
+            ]
+    return None
+
+
+def _derives_from_runtime_phase_flow(pipeline_tree: ast.AST) -> bool:
+    """True for ``CANONICAL_STAGE_FLOW = [phase.value for phase in RUNTIME_PHASE_FLOW]``."""
+    return any(
+        isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "CANONICAL_STAGE_FLOW" for target in node.targets)
+        and "RUNTIME_PHASE_FLOW" in ast.dump(node.value)
+        for node in getattr(pipeline_tree, "body", [])
+    )
+
+
 def validate_s_stage_runtime_contract(root: Path) -> dict[str, Any]:
     rel_path = "nexus/engine/pipeline.py"
     path = root / rel_path
@@ -215,9 +257,15 @@ def validate_s_stage_runtime_contract(root: Path) -> dict[str, Any]:
             "checks": checks,
             "failures": [{"path": rel_path, "reason": "s_stage_runtime_contract_parse_error", "error": str(exc)}],
         }
+    contract_order = _contract_phase_order(root)
     stage_flow = _literal_assignment(tree, "CANONICAL_STAGE_FLOW")
+    if stage_flow is None and _derives_from_runtime_phase_flow(tree):
+        stage_flow = contract_order
     stage_descriptions = _literal_assignment(tree, "STAGE_DESCRIPTIONS")
-    checks["canonical_stage_flow"] = stage_flow == ["S", "P", "X", "D", "R", "A", "C"]
+    if contract_order is None:
+        checks["canonical_stage_flow"] = stage_flow == _LEGACY_STAGE_FLOW
+    else:
+        checks["canonical_stage_flow"] = contract_order == _RUNTIME_STAGE_FLOW and stage_flow == _RUNTIME_STAGE_FLOW
     checks["s_stage_description"] = isinstance(stage_descriptions, dict) and stage_descriptions.get("S") == "cold_start_seed"
     checks["stage_status_initializes_s"] = "stage_status" in text and "CANONICAL_STAGE_FLOW" in text and '"pending"' in text
     checks["decision_journal_accepts_s_origin"] = "decision_journal" in text and "origin_phase" in text and "event_type" in text

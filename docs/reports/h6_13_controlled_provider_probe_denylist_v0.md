@@ -52,7 +52,7 @@ python3 -m pytest tests/benchmark/test_h5_cloud_fallback_e2e_smoke.py -q
 
 ## Forbidden Scan False Positives
 
-- `"model_call_executed=true"`, `"production_ready=true"`, `"public_claim_allowed=true"` — test data patterns where we set fields to True to verify the helper blocks them. Assertion then checks `r["field"] is False`.
+- `model_call_executed`, `production_ready` and `public_claim_allowed` set to `true` — test data patterns where we set fields to True to verify the helper blocks them. Assertion then checks `r["field"] is False`.
 - `"subprocess."` — used in collect_only test for subprocess pytest invocation.
 - `"requests."`, `"urllib.request"` — existing production code not related to H6-13.
 

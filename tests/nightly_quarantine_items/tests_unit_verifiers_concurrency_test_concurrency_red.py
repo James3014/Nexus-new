@@ -4,8 +4,8 @@ from __future__ import annotations
 
 ENTRY: dict[str, object] = {
     "file": "tests/unit/verifiers/concurrency/test_concurrency_red.py",
-    "disposition": "quarantine",
+    "disposition": "delete-candidate",
     "issue": "#1928",
-    "cause": "timing-dependent RED demonstration (expects a deadlock within a fixed sleep); flaky on shared runners",
+    "cause": "target fixed in ac87243dc; deadlock no longer reproducible; fixed behaviour pinned by test_deadlock.py",
     "tests": ("TestConcurrencyTargetsRed::test_target3_deadlock_happens",),
 }

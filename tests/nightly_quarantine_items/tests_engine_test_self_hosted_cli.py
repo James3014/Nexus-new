@@ -6,6 +6,6 @@ ENTRY: dict[str, object] = {
     "file": "tests/engine/test_self_hosted_cli.py",
     "disposition": "quarantine",
     "issue": "#1928",
-    "cause": "passes in isolation on macOS at current main but fails in the Linux full-suite run (order-dependent state pollution or Linux-only environment difference); needs bisect",
+    "cause": "fails in isolation too: approve now requires a lifecycle-authorized contract kind (bare CLI submit records NONE) and a one-shot approval grant; needs a grant-issuing fixture in the lifecycle_guards area (#1884)",
     "tests": ("test_self_hosted_approve_exact_binding_and_mismatch",),
 }
