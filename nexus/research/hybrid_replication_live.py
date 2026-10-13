@@ -1713,71 +1713,39 @@ def _prepare_shadow_checkout(
     source: Path,
     default_branch: str = "main",
 ) -> None:
-    cloned = _run(
-        ["git", "clone", "--no-local", "--no-checkout", str(repo), str(source)],
-        cwd=repo.parent,
-        timeout=60,
-    )
-    if cloned.returncode != 0:
-        raise RuntimeError(f"shadow_clone_failed:{cloned.stderr.strip()}")
-    checked = _run(["git", "checkout", "--detach", revision], cwd=source, timeout=60)
-    if checked.returncode == 0:
-        _isolate_shadow_checkout(source=source, revision=revision)
-        return
+    """Materialize only ``revision`` and its ancestry for the agent (#1216 V12).
 
-    source_ref = f"refs/remotes/origin/{default_branch}"
-    hydrated_ref = f"refs/remotes/source-origin/{default_branch}"
+    A clone or worktree of ``repo`` carries every ref of the origin repo (V11: 335 refs,
+    including the human fix branch of the task). Instead fetch exactly the captured commit
+    into a fresh repository: no remote, no refs, no tags, and no later objects exist.
+    ``default_branch`` is kept for call compatibility; any commit present in ``repo``
+    (local or remote-tracking) can be fetched by id.
+    """
+    del default_branch
+    source.mkdir(parents=True, exist_ok=False)
+    initialized = _run(["git", "init", "-q"], cwd=source, timeout=60)
+    if initialized.returncode != 0:
+        raise RuntimeError(f"shadow_init_failed:{initialized.stderr.strip()}")
     fetched = _run(
-        [
-            "git",
-            "fetch",
-            "--no-tags",
-            str(repo),
-            f"+{source_ref}:{hydrated_ref}",
-        ],
+        ["git", "fetch", "-q", "--no-tags", "--update-shallow", str(repo), revision],
         cwd=source,
-        timeout=60,
+        timeout=300,
     )
     if fetched.returncode != 0:
-        raise RuntimeError(
-            f"shadow_revision_hydration_failed:{source_ref}:{fetched.stderr.strip()}"
-        )
-    checked = _run(["git", "checkout", "--detach", revision], cwd=source, timeout=60)
+        raise RuntimeError(f"shadow_revision_fetch_failed:{revision}:{fetched.stderr.strip()}")
+    checked = _run(
+        ["git", "-c", "advice.detachedHead=false", "checkout", "-q", "--detach", revision],
+        cwd=source,
+        timeout=120,
+    )
     if checked.returncode != 0:
         raise RuntimeError(f"shadow_checkout_failed:{checked.stderr.strip()}")
-    _isolate_shadow_checkout(source=source, revision=revision)
-
-
-def _isolate_shadow_checkout(*, source: Path, revision: str) -> None:
-    """Leave only ``revision`` and its ancestry in the agent-visible checkout.
-
-    The clone starts with every ref of the origin repo (V11: 335 refs, including
-    the human fix branch of the task). Remove the remote, all refs, reflogs and
-    fetch leftovers, then prune every object not reachable from the detached HEAD
-    so later commits cannot be read with ``git cat-file`` either.
-    """
-
-    def git(*args: str) -> None:
-        cp = _run(["git", *args], cwd=source, timeout=300)
-        if cp.returncode != 0:
-            raise RuntimeError(f"shadow_isolation_failed:{args[0]}:{cp.stderr.strip()}")
-
-    head = _run(["git", "rev-parse", "HEAD"], cwd=source, timeout=30)
-    if head.returncode != 0 or head.stdout.strip() != revision:
-        raise RuntimeError("shadow_isolation_head_mismatch")
-    remotes = _run(["git", "remote"], cwd=source, timeout=30).stdout.split()
-    for remote in remotes:
-        git("remote", "remove", remote)
-    refs = _run(["git", "for-each-ref", "--format=%(refname)"], cwd=source, timeout=60)
-    for ref in refs.stdout.split():
-        git("update-ref", "-d", ref)
     git_dir = Path(_git(source, "rev-parse", "--absolute-git-dir").strip())
-    for leftover in ("packed-refs", "FETCH_HEAD", "ORIG_HEAD", "MERGE_HEAD"):
-        (git_dir / leftover).unlink(missing_ok=True)
-    git("reflog", "expire", "--expire=now", "--expire-unreachable=now", "--all")
-    git("gc", "--prune=now", "--quiet")
-    leaked = _run(["git", "for-each-ref"], cwd=source, timeout=60).stdout.strip()
-    if leaked:
+    (git_dir / "FETCH_HEAD").unlink(missing_ok=True)
+    head = _git(source, "rev-parse", "HEAD").strip()
+    if head != revision:
+        raise RuntimeError("shadow_isolation_head_mismatch")
+    if _git(source, "for-each-ref").strip() or _git(source, "remote").strip():
         raise RuntimeError("shadow_isolation_refs_remain")
 
 
