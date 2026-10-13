@@ -58,7 +58,7 @@ jobs:
       - name: Derive bounded changed-path evidence
         id: paths
         env:
-          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           EVENT_NAME: ${{ github.event_name }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -69,28 +69,54 @@ jobs:
           set -euo pipefail
           out="$RUNNER_TEMP/fast-start-v2-paths.txt"
           : > "$out"
+          unavailable=false
+          status=0
           case "$EVENT_NAME" in
             pull_request_target)
               test "$PR_NUMBER" = "$(printf '%s' "$PR_NUMBER" | grep -E '^[0-9]+$')"
-              gh api --paginate "/repos/$REPOSITORY/pulls/$PR_NUMBER/files" --jq '.[].filename' \
-                | sort -u > "$out"
+              set +e
+              python scripts/ops/fast_start_v2_github.py changed-paths \
+                --repository "$REPOSITORY" \
+                --pr-number "$PR_NUMBER" \
+                --output "$out"
+              status=$?
+              set -e
               ;;
             push)
               test "$BEFORE_SHA" = "$(printf '%s' "$BEFORE_SHA" | grep -E '^[0-9a-f]{40}$')"
               test "$AFTER_SHA" = "$(printf '%s' "$AFTER_SHA" | grep -E '^[0-9a-f]{40}$')"
-              gh api "/repos/$REPOSITORY/compare/$BEFORE_SHA...$AFTER_SHA" --jq '.files[].filename' \
-                | sort -u > "$out"
+              set +e
+              python scripts/ops/fast_start_v2_github.py compare-paths \
+                --repository "$REPOSITORY" \
+                --before-sha "$BEFORE_SHA" \
+                --after-sha "$AFTER_SHA" \
+                --output "$out"
+              status=$?
+              set -e
               ;;
             issues|issue_comment)
+              status=0
               ;;
             *)
               echo "::error::unsupported event $EVENT_NAME"
               exit 2
               ;;
           esac
+          if [ "$status" -eq 75 ]; then
+            unavailable=true
+          elif [ "$status" -ne 0 ]; then
+            exit "$status"
+          fi
           echo "path_file=$out" >> "$GITHUB_OUTPUT"
+          echo "unavailable=$unavailable" >> "$GITHUB_OUTPUT"
+
+      - name: Record advisory invalidation unavailability
+        if: steps.paths.outputs.unavailable == 'true'
+        run: |
+          printf '%s\n' '{"schema":"nexus.fast_start_invalidation.v1","status":"UNAVAILABLE","authority":"WAKEUP_HINT_ONLY","reason":"GITHUB_RATE_LIMIT_EXHAUSTED"}'
 
       - name: Produce non-authoritative invalidation hint
+        if: steps.paths.outputs.unavailable != 'true'
         id: hint
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -129,7 +155,7 @@ jobs:
           echo "needs_attention=$needs_attention" >> "$GITHUB_OUTPUT"
 
       - name: Publish wakeup receipt only when relevant
-        if: steps.hint.outputs.affected != '0' || steps.hint.outputs.needs_attention == 'true'
+        if: steps.paths.outputs.unavailable != 'true' && (steps.hint.outputs.affected != '0' || steps.hint.outputs.needs_attention == 'true')
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
@@ -197,43 +223,54 @@ jobs:
           import json
           import os
           import re
-          import urllib.error
-          import urllib.request
           from typing import Any, Mapping
 
           from scripts.ops.fast_start_v2 import parse_registry_body, registry_payload_hash
+          from scripts.ops.fast_start_v2_github import (
+              GitHubMetadataClient,
+              GitHubRateLimitExhausted,
+              GitHubTransportError,
+              GitHubWriteOutcomeUnknown,
+          )
 
           REPOSITORY = "James3014/Nexus-new"
           REGISTRY_ISSUE = 549
           TOKEN = os.environ["GITHUB_TOKEN"]
           requested_paths: list[str] = []
+          write_attempted = False
+          github = GitHubMetadataClient(TOKEN, repository=REPOSITORY)
 
 
           def request(path: str, *, method: str = "GET", payload: Mapping[str, Any] | None = None) -> Any:
+              global write_attempted
               if not path.startswith("/"):
                   raise ValueError("GitHub path must start with /")
               requested_paths.append(path)
-              data = None if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
-              req = urllib.request.Request(
-                  f"https://api.github.com{path}",
-                  data=data,
-                  method=method,
-                  headers={
-                      "Accept": "application/vnd.github+json",
-                      "Authorization": f"Bearer {TOKEN}",
-                      "X-GitHub-Api-Version": "2022-11-28",
-                      "User-Agent": "nexus-fast-start-v2-reconciler",
-                      "Content-Type": "application/json",
-                  },
-              )
+              if method != "GET":
+                  write_attempted = True
               try:
-                  with urllib.request.urlopen(req, timeout=20) as response:
-                      raw = response.read()
-              except urllib.error.HTTPError as exc:
-                  raise RuntimeError(f"GitHub {method} failed: HTTP {exc.code} {path}") from exc
-              if not raw:
-                  return None
-              return json.loads(raw.decode("utf-8"))
+                  return github.request(path, method=method, payload=payload)
+              except GitHubRateLimitExhausted as exc:
+                  if write_attempted:
+                      raise RuntimeError(
+                          "FAST_START_POST_WRITE_READBACK_RATE_LIMIT_EXHAUSTED"
+                      ) from exc
+                  report = {
+                      "schema": "nexus.fast_start_registry_reconcile_report.v2",
+                      "authority": "ADVISORY_CACHE_ONLY",
+                      "event_name": os.environ.get("GITHUB_EVENT_NAME"),
+                      "action": "UNAVAILABLE",
+                      "reason": "GITHUB_RATE_LIMIT_EXHAUSTED",
+                      "retry_after_seconds": exc.retry_after,
+                      "requested_url_count": len(requested_paths),
+                      "implementation_source_or_test_body_reads": 0,
+                  }
+                  print(json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2))
+                  raise SystemExit(0) from exc
+              except GitHubWriteOutcomeUnknown as exc:
+                  raise RuntimeError(str(exc)) from exc
+              except GitHubTransportError as exc:
+                  raise RuntimeError(str(exc)) from exc
 
 
           def get(path: str) -> Any:
