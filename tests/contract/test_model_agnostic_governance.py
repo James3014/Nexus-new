@@ -50,8 +50,15 @@ class TestModelAgnosticGovernance(unittest.TestCase):
         
         # 幻覺應被 Normalizer 攔截並轉為 Escalate
         self.assertEqual(target_phase, FlowState.ESCALATE)
-        allowed = self.fsm.validate_transition(FlowState.INTAKE, target_phase)
-        self.assertTrue(allowed) # 逃生艙應始終可用
+        # #1924 Owner decision (2026-10-13): no INTAKE->ESCALATE escape hatch. Per
+        # flow_machine.contract.v1, INTAKE may only go to CLARIFY/OUTLINE/PLAN, so the
+        # hallucination-driven ESCALATE from INTAKE is rejected (fail-closed).
+        legal_from_intake = {
+            state for state in FlowState
+            if state is not FlowState.INTAKE and self.fsm.validate_transition(FlowState.INTAKE, state)
+        }
+        self.assertEqual(legal_from_intake, {FlowState.CLARIFY, FlowState.OUTLINE, FlowState.PLAN})
+        self.assertFalse(self.fsm.validate_transition(FlowState.INTAKE, target_phase))
 
 if __name__ == "__main__":
     unittest.main()

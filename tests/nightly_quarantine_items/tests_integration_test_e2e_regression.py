@@ -2,10 +2,5 @@
 
 from __future__ import annotations
 
-ENTRY: dict[str, object] = {
-    "file": "tests/integration/test_e2e_regression.py",
-    "disposition": "quarantine",
-    "issue": "#1924",
-    "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
-    "tests": ("TestE2EHybridGovernance::test_e2e_hallucination_handled",),
-}
+# Tombstone (#1924): all ids pass again; rewritten to the flow_machine.contract.v1 INTAKE rule per the Owner decision (Q2, 2026-10-13).
+ENTRY = None
