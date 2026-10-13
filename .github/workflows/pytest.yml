@@ -506,6 +506,36 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  nightly-signal:
+    # Makes a red scheduled full regression visible (#1897): opens or updates ONE
+    # tracking Issue with a run-linked comment, deduplicated per run id. Kept as a
+    # separate job so the test-running job never holds an Issue write token.
+    # Never blocks PRs and adds no merge authority.
+    name: Nightly regression signal
+    needs: full-regression
+    if: always() && github.event_name == 'schedule' && needs.full-regression.result == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: false
+          ref: ${{ github.sha }}
+      - name: Open or update nightly regression tracking Issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: >-
+          python3 scripts/ops/governance_signal_issue.py
+          --repo "$GITHUB_REPOSITORY" --run-url "$RUN_URL"
+          nightly --run-id "$GITHUB_RUN_ID" --sha "$GITHUB_SHA"
+
   dsh-seatbelt-physical-witness:
     # Required-check candidate: no `if`, path filter or continue-on-error, so it can
     # never be skipped into a green. Linux does not collect the two physical

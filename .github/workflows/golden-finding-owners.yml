@@ -1,0 +1,58 @@
+name: Golden finding owner freshness
+
+# Read-only observation of Golden finding owner Issues (#1897). It never edits
+# the corpus or repository content, never blocks a PR and adds no merge
+# authority. On a flag it comments on #117, deduplicated per distinct flag set.
+on:
+  schedule:
+    - cron: "41 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: golden-finding-owners
+  cancel-in-progress: false
+
+jobs:
+  check-owners:
+    name: Golden finding owners (strict)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: false
+          ref: ${{ github.sha }}
+      - name: Check Golden finding owners
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          python3 scripts/ops/check_golden_finding_owners.py --strict > "$RUNNER_TEMP/golden-owners.json"
+          status=$?
+          set -e
+          cat "$RUNNER_TEMP/golden-owners.json"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+      - name: Comment flagged findings on owner Issue
+        if: steps.check.outputs.status != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: >-
+          python3 scripts/ops/governance_signal_issue.py
+          --repo "$GITHUB_REPOSITORY" --run-url "$RUN_URL"
+          golden-owners --report "$RUNNER_TEMP/golden-owners.json" --issue 117
+      - name: Fail on flagged findings
+        if: steps.check.outputs.status != '0'
+        run: |
+          echo "Golden finding owners flagged; see the comment on #117." >&2
+          exit 1
