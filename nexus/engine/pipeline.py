@@ -461,6 +461,11 @@ class NexusPipeline(
         return ctx
 
     def _finalize_and_report(self, ctx: PipelineContext, success: bool, tracer: Any) -> bool:
+        if success and ctx.state.metadata.get("composition_crystallize_side_effects_verified") is not True:
+            # Success cannot be claimed without a verified C record (Refs #1923).
+            logger.error("🛑 [Pipeline] Success withheld: crystallize record missing or unverified.")
+            ctx.state.metadata["pipeline_terminal_state"] = "FAILED"
+            success = False
         if ctx.event_store:
             try:
                 event_log_path = self.engine.run_dir / "events_sourced.jsonl"
@@ -665,6 +670,9 @@ class NexusPipeline(
             self._run_crystallize_phase(ctx, success, tracer)
         except Exception as e:
             logger.error(f"Crystallize stage encountered an error (non-fatal): {e}")
+            # The verified-C flag is only set on a clean C run, so finalize
+            # will withhold success; keep the terminal state consistent.
+            ctx.state.metadata["pipeline_terminal_state"] = "FAILED"
             
         return self._finalize_and_report(ctx, success, tracer)
 

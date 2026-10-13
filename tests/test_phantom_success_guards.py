@@ -1,8 +1,94 @@
-from pathlib import Path
-from unittest.mock import ANY, MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
+from nexus.engine.phase_plugin import PhaseResult
 from nexus.engine.pipeline import NexusPipeline
 from nexus.services.reviewer import CodexLoopV2
+
+
+class _FakeExecutor:
+    """Composition phase executor injected through engine.phase_executors."""
+
+    def __init__(self, name, mutations, *, events=None, side_effect=None):
+        self.name = name
+        self.mutations = mutations
+        self.events = events
+        self.side_effect = side_effect
+        self.calls = 0
+
+    def should_run(self, _ctx):
+        return True
+
+    def execute(self, _pipeline, ctx):
+        self.calls += 1
+        if self.events is not None:
+            self.events.append(("phase", self.name))
+        if self.side_effect is not None:
+            self.side_effect(ctx)
+        return PhaseResult(status="success", mutations=dict(self.mutations), events=[])
+
+
+def _write_terminal_record(ctx):
+    metadata = ctx.state.metadata
+    metadata["pipeline_terminal_state"] = (
+        "SUCCESS" if metadata.get("pipeline_success") else "FAILED"
+    )
+    metadata["pipeline_outcome"] = {"terminal_state": metadata["pipeline_terminal_state"]}
+    metadata["nexus_outcome_v2"] = {"terminal_state": metadata["pipeline_terminal_state"]}
+
+
+def _composition_executors(*, events=None, c_writes_terminal_record=True):
+    return {
+        "P": _FakeExecutor("P", {"plan": "ok"}, events=events),
+        "X": _FakeExecutor("X", {"findings": ["forced"]}, events=events),
+        "D": _FakeExecutor("D", {"diagnosis": "ok"}, events=events),
+        "R": _FakeExecutor(
+            "R",
+            {
+                "status": "APPROVED",
+                "result_object": {
+                    "patch_generated": True,
+                    "patch_apply_success": True,
+                    "proof_type": "checksum",
+                    "proof_value": "abc123",
+                },
+            },
+            events=events,
+        ),
+        "A": _FakeExecutor("A", {"status": "APPROVED"}, events=events),
+        "C": _FakeExecutor(
+            "C",
+            {"status": "COMPLETED"},
+            events=events,
+            side_effect=_write_terminal_record if c_writes_terminal_record else None,
+        ),
+    }
+
+
+def _composition_engine(tmp_path, executors):
+    engine = MagicMock()
+    engine.project_root = tmp_path
+    engine.run_dir = tmp_path
+    engine.max_retries = 1
+    engine.health_evaluator.evaluate.return_value = 90.0
+    engine.phase_executors = executors
+    return engine
+
+
+def _capture_final_metadata(pipeline):
+    seen = {}
+    finalize = pipeline._finalize_and_report
+
+    def _finalize(ctx, success, tracer):
+        result = finalize(ctx, success, tracer)
+        seen.update(ctx.state.metadata)
+        return result
+
+    pipeline._finalize_and_report = _finalize
+    return seen
+
+
+def _receipt_phases(metadata):
+    return [receipt["phase"] for receipt in metadata.get("phase_receipts", [])]
 
 
 def _build_reviewer_with_llm_payload(payload, apply_patch=True, patch_apply_result=False):
@@ -94,39 +180,34 @@ def test_reviewer_rejects_when_patch_apply_succeeds_but_missing_proof():
 
 @patch("nexus.learning.knowledge_index.KnowledgeIndex")
 @patch("nexus.engine.pipeline_repair._auto_detect_verify_commands", return_value=[])
-def test_pipeline_blocks_audit_pass_when_patch_apply_failed(mock_auto_detect, mock_ki):
-    engine = MagicMock()
-    engine.hub.make_pre_routing_decision.return_value = {}
-    engine.hub.assemble_diag_pack.return_value = {"task": "t"}
-    engine.hub.assemble_feature_pack.return_value = {"task": "t"}
-    engine.accumulator.record.return_value = None
-    engine.health_evaluator.evaluate.return_value = 50.0
-    engine.research_policy.should_research.return_value = False
-    engine.max_retries = 1
-    engine._add_step_to_history.return_value = None
-    engine.ReviewStatusNormalizer.normalize.return_value = ("APPROVED", True)
-    engine.commander.crystallize.return_value = None
-    engine.state_io.save_global_state.return_value = None
-    engine.run_dir = Path(".")
-    engine.project_root = Path(".")
-
-    planner = MagicMock()
-    planner.run.return_value = {"ok": True}
-    researcher = MagicMock()
-    repairer = MagicMock()
-    repairer.run.return_value = {
-        "status": "APPROVED",
-        "result_object": {
-            "patch_generated": True,
-            "patch_apply_success": False,
-            "no_change_reason": "",
+def test_pipeline_blocks_audit_pass_when_patch_apply_failed(mock_auto_detect, mock_ki, tmp_path):
+    # R claims APPROVED with a generated but unapplied patch; the composed A
+    # executor would pass. The pipeline itself must withhold success and say why.
+    executors = _composition_executors()
+    executors["R"] = _FakeExecutor(
+        "R",
+        {
+            "status": "APPROVED",
+            "result_object": {
+                "patch_generated": True,
+                "patch_apply_success": False,
+                "no_change_reason": "",
+            },
         },
-    }
-    engine.phases = {"P": planner, "X": researcher, "R": repairer}
-
+    )
+    engine = _composition_engine(tmp_path, executors)
     pipeline = NexusPipeline(engine)
+    seen = _capture_final_metadata(pipeline)
+
     ok = pipeline.run("fix phantom success", task_type="bug")
+
     assert ok is False
+    assert executors["A"].calls == 1
+    assert seen["composition_audit_phase_rejection"] == "patch_apply_failed"
+    assert seen["phantom_success_reason"] == "patch_apply_failed"
+    assert seen["pipeline_terminal_state"] == "FAILED"
+    audit_receipts = [r for r in seen["phase_receipts"] if r["phase"] == "A"]
+    assert [r["block_class"] for r in audit_receipts] == ["RECOVERABLE_BLOCK"]
 
 
 def test_reviewer_bypass_carries_no_change_reason():
@@ -150,89 +231,66 @@ def test_reviewer_bypass_carries_no_change_reason():
 
 
 @patch("nexus.learning.knowledge_index.KnowledgeIndex")
-def test_pipeline_forces_x_phase_when_benchmark_force_research_enabled(mock_ki):
-    engine = MagicMock()
-    engine.hub.make_pre_routing_decision.return_value = {}
-    engine.hub.assemble_diag_pack.return_value = {"task": "t"}
-    engine.hub.assemble_feature_pack.return_value = {"task": "t"}
-    engine.accumulator.record.return_value = None
-    engine.health_evaluator.evaluate.return_value = 90.0
-    engine.research_policy.should_research.return_value = False
-    engine.max_retries = 1
-    engine._add_step_to_history.return_value = None
-    engine.ReviewStatusNormalizer.normalize.return_value = ("APPROVED", True)
-    engine.commander.next_step.return_value = None
-    engine.state_io.save_global_state.return_value = None
-    engine.policy_manager.apply_policy_to_state.return_value = None
+def test_pipeline_forces_x_phase_when_benchmark_force_research_enabled(mock_ki, tmp_path):
+    def _run(context):
+        executors = _composition_executors()
+        pipeline = NexusPipeline(_composition_engine(tmp_path, executors))
+        seen = _capture_final_metadata(pipeline)
+        ok = pipeline.run("force research", task_type="bug", context=context)
+        return ok, executors, seen
 
-    planner = MagicMock()
-    planner.run.return_value = {"ok": True}
-    researcher = MagicMock()
-    researcher.run.return_value = {"findings": ["forced"]}
-    repairer = MagicMock()
-    repairer.run.return_value = {
-        "status": "APPROVED",
-        "result_object": {
-            "patch_generated": True,
-            "patch_apply_success": True,
-            "proof_type": "checksum",
-            "proof_value": "abc123",
-        },
-    }
-    engine.phases = {"P": planner, "X": researcher, "R": repairer}
-
-    pipeline = NexusPipeline(engine)
-    ok = pipeline.run(
-        "force research",
-        task_type="bug",
-        context={"benchmark_force_research": True},
-    )
+    # Control: no research signal, so X stays off.
+    ok, executors, seen = _run({})
     assert ok is True
-    researcher.run.assert_called_once()
+    assert executors["X"].calls == 0
+    assert "X" not in _receipt_phases(seen)
+
+    # Benchmark force-research alone must make the X executor actually run.
+    ok, executors, seen = _run({"benchmark_force_research": True})
+    assert ok is True
+    assert executors["X"].calls == 1
+    assert _receipt_phases(seen) == ["P", "D", "X", "R", "A", "C"]
 
 
 @patch("nexus.learning.knowledge_index.KnowledgeIndex")
-def test_pipeline_records_c_before_commander_completion(mock_ki):
-    engine = MagicMock()
-    engine.hub.make_pre_routing_decision.return_value = {}
-    engine.hub.assemble_diag_pack.return_value = {"task": "t"}
-    engine.accumulator.record.return_value = None
-    engine.health_evaluator.evaluate.return_value = 90.0
-    engine.research_policy.should_research.return_value = False
-    engine.max_retries = 1
-    engine.ReviewStatusNormalizer.normalize.return_value = ("APPROVED", True)
-    engine.state_io.save_global_state.return_value = None
-    engine.policy_manager.apply_policy_to_state.return_value = None
-    engine.commander.next_step.return_value = None
+def test_pipeline_records_c_before_commander_completion(mock_ki, tmp_path):
+    events = []
 
-    phase_calls = []
+    def _run(executors):
+        engine = _composition_engine(tmp_path, executors)
+        engine.commander.next_step.side_effect = lambda **kwargs: events.append((
+            "commander",
+            kwargs.get("status"),
+        ))
+        pipeline = NexusPipeline(engine)
+        seen = _capture_final_metadata(pipeline)
+        ok = pipeline.run("validate c ordering", task_type="bug")
+        return ok, seen
 
-    def _record_step(state, phase, metadata=None):
-        phase_calls.append(phase)
-        return None
-
-    engine._add_step_to_history.side_effect = _record_step
-
-    planner = MagicMock()
-    planner.run.return_value = {"ok": True}
-    researcher = MagicMock()
-    repairer = MagicMock()
-    repairer.run.return_value = {
-        "status": "APPROVED",
-        "result_object": {
-            "patch_generated": True,
-            "patch_apply_success": True,
-            "proof_type": "checksum",
-            "proof_value": "abc123",
-        },
-    }
-    engine.phases = {"P": planner, "X": researcher, "R": repairer}
-
-    pipeline = NexusPipeline(engine)
-    ok = pipeline.run("validate c ordering", task_type="bug")
-
+    # With a C executor that writes the terminal record, success is claimed
+    # only after C is recorded, and no completion signal precedes C.
+    executors = _composition_executors(events=events)
+    ok, seen = _run(executors)
     assert ok is True
-    assert phase_calls[-1] == "C"
-    engine.commander.next_step.assert_has_calls(
-        [call(status="started"), call(status="completed", state=ANY)]
-    )
+    assert executors["C"].calls == 1
+    assert _receipt_phases(seen)[-1] == "C"
+    assert seen["composition_crystallize_side_effects_verified"] is True
+    assert seen["pipeline_terminal_state"] == "SUCCESS"
+    assert events[0] == ("commander", "started")
+    c_index = events.index(("phase", "C"))
+    assert all(event != ("commander", "completed") for event in events[:c_index])
+
+    # Without a verified C record the pipeline must not claim success.
+    executors = _composition_executors()
+    del executors["C"]
+    ok, seen = _run(executors)
+    assert ok is False
+    assert "C" not in _receipt_phases(seen)
+    assert seen["composition_crystallize_failure_reason"] == "missing_crystallize_executor"
+    assert seen["pipeline_terminal_state"] == "FAILED"
+
+    executors = _composition_executors(c_writes_terminal_record=False)
+    ok, seen = _run(executors)
+    assert ok is False
+    assert seen["composition_crystallize_failure_reason"] == "missing_terminal_outcome_side_effects"
+    assert seen["pipeline_terminal_state"] == "FAILED"
