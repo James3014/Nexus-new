@@ -25,10 +25,66 @@ def test_secret_audit_runs_scanner_from_exact_base() -> None:
         if step.get("name") == "Run full-history secret scan"
     )
     run = scan["run"]
-    assert "github.event.pull_request.base.sha" in run
-    assert 'git show "$scanner_rev:scripts/ops/git_history_secret_scan.py"' in run
+    assert "BASE_SHA" in run
+    assert '"$scanner_rev:$script_path"' in run
     assert 'python3 "$trusted_scanner"' in run
     assert "python3 scripts/ops/git_history_secret_scan.py" not in run
+
+
+def _audit_workflow() -> dict:
+    return yaml.safe_load((WORKFLOWS / "git-history-secret-audit.yml").read_text(encoding="utf-8"))
+
+
+def test_secret_audit_runs_from_default_branch_workflow() -> None:
+    data = _audit_workflow()
+    # PyYAML parses the bare key `on` as boolean True.
+    triggers = data.get("on", data.get(True))
+    assert "pull_request_target" in triggers
+    # TODO(#1754 A follow-up): bootstrap keeps `pull_request` so this PR itself
+    # gets the required context; the follow-up PR removes it and tightens this.
+    assert set(triggers) - {"pull_request"} >= {"pull_request_target"}
+    assert triggers["pull_request_target"]["branches"] == ["main"]
+    assert {"push", "schedule", "workflow_dispatch"} <= set(triggers)
+    job = data["jobs"]["full-history-secret-audit"]
+    assert job["name"] == "Full published Git history secret audit"
+
+
+def test_secret_audit_is_read_only_and_never_executes_pr_content() -> None:
+    data = _audit_workflow()
+    assert data["permissions"] == {"contents": "read"}
+    job = data["jobs"]["full-history-secret-audit"]
+    assert "permissions" not in job
+    text = (WORKFLOWS / "git-history-secret-audit.yml").read_text(encoding="utf-8")
+    assert "actions/checkout" not in text  # no PR-controlled workspace at all
+    assert "persist-credentials: true" not in text
+    for forbidden in ("uv sync", "PYTHONPATH", "pip install", "requirements", "./scripts"):
+        assert forbidden not in text
+    for step in job["steps"]:
+        for line in step.get("run", "").splitlines():
+            stripped = line.strip()
+            # Only the base-extracted scanner and inline -c code may run Python.
+            if stripped.startswith(("python", "bash ", "sh ", "./")):
+                assert stripped.startswith(('python3 "$trusted_scanner"', "python3 -c ")), line
+    # fork PR heads are fetched as data through the pull ref
+    assert "refs/pull/$PR_NUMBER/head" in text
+
+
+def test_secret_audit_scanner_comes_from_base_sha_with_pr_head_binding() -> None:
+    steps = _steps("git-history-secret-audit.yml")
+    fetch = next(s for s in steps if s.get("name", "").startswith("Fetch every published"))
+    scan = next(s for s in steps if s.get("name") == "Run full-history secret scan")
+    assert scan["env"]["BASE_SHA"] == "${{ github.event.pull_request.base.sha }}"
+    assert scan["env"]["PUSH_SHA"] == "${{ github.sha }}"
+    assert fetch["env"]["PR_HEAD_SHA"] == "${{ github.event.pull_request.head.sha }}"
+    assert 'scanner_rev="$BASE_SHA"' in scan["run"]
+    assert '"$scanner_rev:$script_path"' in scan["run"]
+    assert "scripts/ops/git_history_secret_scan.py" in scan["run"]
+    assert 'cat-file blob "$script_blob_id"' in scan["run"]
+    assert "100644 blob $script_blob_id" in scan["run"]
+    assert "published ref collides with PR head data ref" in fetch["run"]
+    assert fetch["run"].index("show-ref --verify") < fetch["run"].index("refs/pull/$PR_NUMBER/head")
+    assert 'p["source_revision"] == sys.argv[1]' in scan["run"]
+    assert 'p["published_ref_snapshot_sha256"] == sys.argv[2]' in scan["run"]
 
 
 def test_exact_base_tool_gate_classifies_with_base_copy() -> None:
