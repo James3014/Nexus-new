@@ -8,12 +8,20 @@ from nexus.engine.capability_receipt_adapters import RECEIPT_ADAPTERS, merge_cap
 
 
 def _selected_capabilities(plan: CapabilityPlan | dict[str, Any]) -> list[str]:
-    selected = plan.selected_capabilities if isinstance(plan, CapabilityPlan) else plan.get("selected_capabilities", []) or []
+    selected = (
+        plan.selected_capabilities
+        if isinstance(plan, CapabilityPlan)
+        else plan.get("selected_capabilities", []) or []
+    )
     return normalize_capability_names(selected)
 
 
 def _pending_capabilities(plan: CapabilityPlan | dict[str, Any]) -> set[str]:
-    pending = plan.pending_capabilities if isinstance(plan, CapabilityPlan) else plan.get("pending_capabilities", []) or []
+    pending = (
+        plan.pending_capabilities
+        if isinstance(plan, CapabilityPlan)
+        else plan.get("pending_capabilities", []) or []
+    )
     return set(normalize_capability_names(pending))
 
 
@@ -35,7 +43,11 @@ def selected_receipts(plan: CapabilityPlan | dict[str, Any]) -> list[CapabilityR
     receipts = []
     for name in _selected_capabilities(plan):
         capability = normalize_capability_name(name)
-        receipts.append(_pending_receipt(capability) if capability in pending else CapabilityReceipt(name=capability, selected=True))
+        receipts.append(
+            _pending_receipt(capability)
+            if capability in pending
+            else CapabilityReceipt(name=capability, selected=True)
+        )
     return receipts
 
 
@@ -74,7 +86,11 @@ def build_trace_receipts(
                 continue
             receipts.append(receipt)
             continue
-        receipts.append(_pending_receipt(name) if name in pending else CapabilityReceipt(name=name, selected=True))
+        receipts.append(
+            _pending_receipt(name)
+            if name in pending
+            else CapabilityReceipt(name=name, selected=True)
+        )
     return receipts
 
 
@@ -119,23 +135,13 @@ def build_skill_receipts(
     return receipts
 
 
-# --- Claim-boundary attestation (Nexus-new side) -------------------------------------------
+# --- Claim-boundary attestation -----------------------------------------------------------
 #
-# The pinned nexus-runtime ``CapabilityReceipt.to_dict()`` hands ``project_child_receipt_base``
-# a fixed claim boundary without ``simulated``, so ``ClaimBoundary`` defaults it to true for
-# every receipt.  The runtime offers no hook (``to_dict`` takes no argument and ``from_dict``
-# does not exist), so Nexus-new re-projects ``receipt_base`` with an evaluated boundary.
-# The runtime producer still needs a fix (``to_dict`` should accept a claim boundary); this is
-# the Nexus-new-side post-processing step until it lands.
-
-_NON_EXECUTION_ACTIONS = frozenset({
-    "auth_gate",
-    "skip",
-    "resolve",
-    "probe",
-    "fixture",
-    "construct",
-})
+# Since nexus-runtime #187 (pinned 6782e38) ``CapabilityReceipt.to_dict()`` derives
+# ``claim_boundary.simulated`` from the receipt's own execution evidence, so the runtime is the
+# attestation authority.  Nexus-new only adds what the runtime cannot see from the receipt
+# alone: the executor *outcome* (auth block, skip, construct-only, ...).  That extra input may
+# only tighten the boundary (simulated false -> true), never loosen it.
 
 
 def _outcome_evidence_refs(receipt: Any, outcome: Any) -> list[str]:
@@ -153,59 +159,57 @@ def evaluate_receipt_claim_boundary(
 ) -> Any:
     """Evaluate the claim boundary for one capability receipt (fail-closed).
 
-    ``simulated`` is False only when the receipt reports a real invocation, evidence refs exist,
-    and the executor outcome is not an auth block, skip, import/construct-only result, or error.
-    ``public_claim_allowed`` stays False regardless (``ClaimBoundary.evaluate`` never unlocks it).
+    Delegates to the runtime evaluator (``attested_claim_boundary``) with the executor
+    outcome attached.  ``public_claim_allowed`` stays False regardless.
     """
-    from nexus_runtime.planning.evidence.claim_boundary import evaluate_claim_boundary
+    from nexus_runtime.planning.evidence.claim_boundary import attested_claim_boundary
 
     outcome = (
         executor_outcome if executor_outcome is not None else getattr(receipt, "outcome", None)
     )
     outcome = outcome if isinstance(outcome, dict) else {}
-    refs = _outcome_evidence_refs(receipt, outcome)
-    invoked = bool(getattr(receipt, "invoked", False))
-    action = str(outcome.get("action") or "")
-    real = (
-        invoked
-        and bool(refs)
-        and action not in _NON_EXECUTION_ACTIONS
-        and str(outcome.get("error") or "") != "import_construct_not_execution"
-        and not outcome.get("auth_required")
-        and str(outcome.get("semantic_status") or "").upper() not in {"BLOCKED", "SKIPPED"}
-    )
+    executor_id = getattr(receipt, "executor_id", None)
     telemetries = getattr(receipt, "telemetries", None)
-    try:
-        model_calls = int((telemetries or {}).get("model_calls") or 0)
-    except (TypeError, ValueError):
-        model_calls = 0
-    return evaluate_claim_boundary(
-        simulated=not real,
-        claim_eligible=bool(real and getattr(receipt, "gate_passed", False)),
-        receipt_present=bool(refs),
-        model_calls=model_calls,
+    return attested_claim_boundary(
+        invoked=bool(getattr(receipt, "invoked", False)),
+        evidence_refs=_outcome_evidence_refs(receipt, outcome),
+        gate_passed=bool(getattr(receipt, "gate_passed", False)),
+        model_calls=telemetries.get("model_calls", 0) if isinstance(telemetries, dict) else 0,
+        physical_callable=None if executor_id is None else str(executor_id),
+        outcome=outcome,
+        failure_reason=str(getattr(receipt, "failure_reason", "") or ""),
     )
 
 
 def attested_receipt_dict(
     receipt: Any, executor_outcome: dict[str, Any] | None = None
 ) -> dict[str, Any]:
-    """``receipt.to_dict()`` with ``receipt_base`` re-projected under an evaluated boundary."""
+    """``receipt.to_dict()``; ``receipt_base`` is re-projected only to tighten the boundary.
+
+    The runtime-attested projection is returned unchanged unless the executor outcome shows a
+    non-execution the receipt alone could not (then ``simulated`` becomes true).
+    """
     base = receipt.to_dict()
+    old = base.get("receipt_base") if isinstance(base.get("receipt_base"), dict) else {}
+    runtime_cb = old.get("claim_boundary") if isinstance(old.get("claim_boundary"), dict) else {}
     try:
         boundary = evaluate_receipt_claim_boundary(receipt, executor_outcome)
+        if runtime_cb.get("simulated", True) or not boundary.simulated:
+            return base  # runtime already fail-closed, or the outcome agrees
+        from nexus_runtime.planning.evidence.claim_boundary import evaluate_claim_boundary
         from nexus_runtime.planning.evidence.receipt_base import project_child_receipt_base
 
-        name = str(
-            getattr(receipt, "name", "") or getattr(receipt, "capability_name", "") or "capability"
+        tightened = evaluate_claim_boundary(
+            simulated=True,
+            claim_eligible=False,
+            receipt_present=bool(runtime_cb.get("receipt_present")),
+            model_calls=int(runtime_cb.get("model_calls") or 0),
         )
-        old = base.get("receipt_base") if isinstance(base.get("receipt_base"), dict) else {}
-        refs = _outcome_evidence_refs(receipt, executor_outcome)
+        name = str(getattr(receipt, "name", "") or "capability")
         invoked = bool(getattr(receipt, "invoked", False))
         gate_passed = bool(getattr(receipt, "gate_passed", False))
-        contributed = getattr(receipt, "outcome_contributed", None)
-        if contributed is None:
-            contributed = bool(invoked and gate_passed and getattr(receipt, "outcome", None))
+        contributed = bool(getattr(receipt, "outcome_contributed", False))
+        refs = [str(r) for r in (getattr(receipt, "evidence_refs", ()) or ()) if str(r).strip()]
         base["receipt_base"] = project_child_receipt_base(
             source_world=str(old.get("source_world") or "B"),
             source_component=str(old.get("source_component") or "capability_receipt_engine"),
@@ -215,7 +219,7 @@ def attested_receipt_dict(
                 "selected": bool(getattr(receipt, "selected", False)),
                 "invoked": invoked,
                 "gate_passed": gate_passed,
-                "outcome_contributed": bool(contributed),
+                "outcome_contributed": contributed,
                 "executor_id": str(getattr(receipt, "executor_id", "") or ""),
             },
             stage_name=name,
@@ -224,13 +228,12 @@ def attested_receipt_dict(
             selected=bool(getattr(receipt, "selected", False)),
             injected=invoked,
             used=bool(invoked and contributed),
-            evidence_present=bool(refs),
+            evidence_present=bool(getattr(receipt, "evidence_present", bool(refs))),
             gate_passed=gate_passed,
-            outcome_contributed=bool(contributed),
-            claim_boundary=boundary.to_dict(),
+            outcome_contributed=contributed,
+            claim_boundary=tightened.to_dict(),
         )
-        base.pop("receipt_base_error", None)
-    except Exception as exc:  # noqa: BLE001 - keep the unattested (simulated=true) projection
+    except Exception as exc:  # noqa: BLE001 - keep the runtime projection, record why
         base["receipt_base_attestation_error"] = str(exc)[:200]
     return base
 
