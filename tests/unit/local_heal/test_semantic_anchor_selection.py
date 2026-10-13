@@ -1,20 +1,21 @@
 """P10: Semantic Anchor Selection Tests"""
-import hashlib
-import pytest
-from nexus.services.local_heal.semantic_anchor_selection import (
-    AnchorCandidate,
-    AnchorCandidateGenerator,
-    AnchorSelectionResult,
-    SemanticAnchorScorer,
-    SemanticAnchorSelector,
-    select_semantic_anchor,
-)
+
 import functools
+import hashlib
+
+import pytest
 
 from nexus.services.local_heal import semantic_anchor_selection
 from nexus.services.local_heal.memory_retrieval_adapter import (
     LocalJsonlLessonStore,
     MemoryRetrievalAdapter,
+)
+from nexus.services.local_heal.semantic_anchor_selection import (
+    AnchorCandidate,
+    AnchorCandidateGenerator,
+    SemanticAnchorScorer,
+    SemanticAnchorSelector,
+    select_semantic_anchor,
 )
 
 
@@ -40,6 +41,7 @@ def _make_source_hash(text):
 
 
 # ─── Candidate Generation Tests ───────────────────────────────────────────────
+
 
 def test_generator_finds_target_symbol():
     """Generator should find the target symbol as a candidate."""
@@ -104,10 +106,7 @@ def test_generator_finds_formatting_methods():
 
 def test_generator_deduplicates_candidates():
     """Generator should not produce duplicate candidates."""
-    source = (
-        "def calculate(x, y):\n"
-        "    return x + y\n"
-    )
+    source = "def calculate(x, y):\n    return x + y\n"
     generator = AnchorCandidateGenerator()
     candidates = generator.generate_candidates(
         file_path="calc.py",
@@ -131,6 +130,7 @@ def test_generator_returns_empty_for_syntax_error():
 
 
 # ─── Scoring Tests ────────────────────────────────────────────────────────────
+
 
 def test_scorer_prefers_behavior_ownership():
     """Scorer should prefer methods that own the failing behavior."""
@@ -273,6 +273,7 @@ def test_scorer_keyword_overlap():
 
 # ─── Selection Tests ──────────────────────────────────────────────────────────
 
+
 def test_selector_picks_highest_score():
     """Selector should pick the candidate with the highest score."""
     source_hash = _make_source_hash("x = 1")
@@ -337,6 +338,7 @@ def test_selector_respects_min_score():
 
 
 # ─── High-Level API Tests ─────────────────────────────────────────────────────
+
 
 def test_select_semantic_anchor_high_level():
     """High-level API should select the best anchor."""

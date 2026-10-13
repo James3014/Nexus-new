@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from nexus.services.local_heal.diversity_selector import select_diverse_candidate
 from nexus.services.local_heal.output_understanding import CanonicalPatchCandidate
 from nexus.services.local_heal.memory_decision_gate import evaluate_memory_decision
-from nexus.services.local_heal.memory_belief_signal import compute_memory_belief_signal
+from scripts.effects._feature_flags import scoped_feature_flags
 from nexus.services.local_heal.quota_policy_simulator import simulate_p6_quota_policy, QuotaState
 from nexus.services.local_heal.shadow_memory_ranking import shadow_score_lessons
 
@@ -294,31 +294,7 @@ def collect_shadow_data():
     return rows
 
 
-def _scoped_feature_flags(fn, keys):
-    """Restore the process environment after an in-process run (#1928).
-
-    The run toggles NEXUS_ENABLE_* feature flags on os.environ; left set, they
-    changed later behaviour in the same process (full-suite nightly: the P5
-    diversity selector stayed enabled for tests/unit/local_heal).
-    """
-    import functools
-
-    @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        saved = {key: os.environ.get(key) for key in keys}
-        try:
-            return fn(*args, **kwargs)
-        finally:
-            for key, value in saved.items():
-                if value is None:
-                    os.environ.pop(key, None)
-                else:
-                    os.environ[key] = value
-
-    return wrapper
-
-
-collect_shadow_data = _scoped_feature_flags(
+collect_shadow_data = scoped_feature_flags(
     collect_shadow_data,
     ("NEXUS_ENABLE_P5_DIVERSITY_SELECTION", "NEXUS_ENABLE_P4_COMMITTEE_ROUTED_TOOL"),
 )

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-# Fixed in #1928: submit payload supplies the now-mandatory verifier_commands.
-# Re-quarantined (#1926): host dependence, not order pollution.
+# Re-quarantined under #1926: host-only, host dependence not order pollution
+# (#1928 had fixed the submit payload to supply the now-mandatory verifier_commands).
 ENTRY: dict[str, object] = {
     "file": "tests/ops/test_nexus_cueline_worker.py",
     "disposition": "quarantine",

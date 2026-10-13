@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-# Fixed in #1928: stale expectations (#453 fail-closed gates, d9a3bb0e3 signal_snapshot, h6_13 report quote) and a PEP 765 fallback for Python < 3.14.
+# Re-quarantined under #1926: host-only (#1928 had fixed stale expectations (#453 fail-closed gates, d9a3bb0e3 signal_snapshot, h6_13 report quote) and a PEP 765 fallback for Python < 3.14, but the test still depends on the host).
 ENTRY: dict[str, object] = {
     "file": "tests/benchmark/test_capability_ab_runner.py",
     "disposition": "quarantine",
