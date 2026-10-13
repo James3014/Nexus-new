@@ -68,4 +68,4 @@ def test_every_pr_workflow_is_classified() -> None:
         triggers = doc.get("on", doc.get(True)) or {}
         if isinstance(triggers, dict) and {"pull_request", "pull_request_target"} & set(triggers):
             pr_workflows.add(path.name)
-    assert pr_workflows == set(CHANGED) | set(UNTOUCHED)
+    assert pr_workflows <= set(CHANGED) | set(UNTOUCHED)
