@@ -44,7 +44,9 @@ def _solve_controls(src_root: str) -> dict:
 
 def _planner_controls() -> dict:
     with mock.patch.dict(os.environ, {"NEXUS_LOCAL_MODEL_CALL_ALLOWED": "1"}):
-        plan = CapabilityPlanner().plan(task_desc="fix code", task_type="repair", route={"local_enabled": True})
+        plan = CapabilityPlanner().plan(
+            task_desc="fix code", task_type="repair", route={"local_enabled": True}
+        )
     return dict(build_execution_plan(plan).executor_controls)
 
 
@@ -58,7 +60,9 @@ def _run(controls: dict) -> tuple[object, object]:
             dry_run=False,
         )
     )
-    receipt = LocalHealReceiptAdapter().build(claim_verified=True, payload=response.capability_payload)
+    receipt = LocalHealReceiptAdapter().build(
+        claim_verified=True, payload=response.capability_payload
+    )
     return response, receipt
 
 
@@ -80,7 +84,10 @@ def test_forged_route_context_is_rejected() -> None:
             "model_call_allowed": True,
             "isolated_solve_enabled": True,
         }
-        response, receipt = _run({"route_context": {"signal_snapshot": forged}, **_solve_controls(src_root)})
+        response, receipt = _run({
+            "route_context": {"signal_snapshot": forged},
+            **_solve_controls(src_root),
+        })
         assert response.invoked is False
         assert response.hybrid_route.fallback_block_reason == ROUTE_CONTEXT_NOT_PLANNER_BOUND
         assert response.hybrid_route.local_model_called is False
@@ -95,9 +102,11 @@ def test_edited_planner_snapshot_is_rejected() -> None:
     try:
         controls = _planner_controls()
         snapshot = {**controls["route_context"]["signal_snapshot"], "isolated_solve_enabled": True}
-        response, receipt = _run(
-            {**controls, "route_context": {"signal_snapshot": snapshot}, **_solve_controls(src_root)}
-        )
+        response, receipt = _run({
+            **controls,
+            "route_context": {"signal_snapshot": snapshot},
+            **_solve_controls(src_root),
+        })
         assert response.hybrid_route.fallback_block_reason == ROUTE_CONTEXT_NOT_PLANNER_BOUND
         assert receipt.gate_passed is False
     finally:
@@ -139,9 +148,14 @@ def test_source_changed_during_verification_fails_closed() -> None:
                 locked_search="print('hello')",
             )
         )
-        assert "VERIFIED_SOURCE_CHANGED_DURING_VERIFICATION" in response.hybrid_route.fallback_block_reason
+        assert (
+            "VERIFIED_SOURCE_CHANGED_DURING_VERIFICATION"
+            in response.hybrid_route.fallback_block_reason
+        )
         assert "source_hash" not in response.capability_payload
-        receipt = LocalHealReceiptAdapter().build(claim_verified=True, payload=response.capability_payload)
+        receipt = LocalHealReceiptAdapter().build(
+            claim_verified=True, payload=response.capability_payload
+        )
         assert receipt.gate_passed is False
         workspace = response.apply_receipt.workspace_path
         if workspace and os.path.exists(workspace):

@@ -18,6 +18,7 @@ from nexus.services.local_heal.capability_adapter import (
     LocalHealCapabilityRequest,
 )
 
+
 def plan_fixture_executor_controls(problem_statement: str) -> dict:
     """Obtain executor controls from the canonical planning seam (#1924).
 
