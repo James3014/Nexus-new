@@ -116,3 +116,31 @@ def test_receipt_telemetry_and_claimability():
         },
     )
     assert engine_complete.public_claim_safe is True
+
+
+def test_replay_artifact_fallback_is_derived_from_repo_root(tmp_path, monkeypatch):
+    """When <evidence dir>/../.nexus/reports is absent, the replay artifact goes under the
+    repo root (never a hardcoded user path)."""
+    import nexus.core.policy_drift as policy_drift
+
+    fake_repo = tmp_path / "repo"
+    fake_repo.mkdir()
+    monkeypatch.setattr(policy_drift, "REPO_ROOT", fake_repo)
+
+    evidence_dir = tmp_path / "evidence"
+    evidence_dir.mkdir()
+    assert not (tmp_path / ".nexus" / "reports").exists()
+    mock_path = evidence_dir / "mock_evidence.log"
+    mock_path.write_text("Execution success! AST optimized.", encoding="utf-8")
+
+    res = DualGateVerifier().verify_receipt(
+        evidence_path=mock_path, intent="AST optimized", repro_command="pytest", cwd=str(tmp_path)
+    )
+
+    expected_dir = (fake_repo / ".nexus" / "reports").resolve()
+    replay = Path(res["replay_artifact_path"])
+    assert replay.parent == expected_dir
+    assert replay.exists()
+    assert "jameschen" not in str(replay)
+    assert res["evidence_bundle_referenced"] is True
+    assert DualGateVerifier().validate_replay_contract(replay) is True

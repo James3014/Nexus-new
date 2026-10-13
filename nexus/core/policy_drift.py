@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from nexus.core.repo_root import REPO_ROOT
+
 class DualGateVerifier:
     """🛡️ Dual-Gate Verifier: checks physical existence (Gate 1) and semantic alignment (Gate 2)"""
     
@@ -72,8 +74,8 @@ class DualGateVerifier:
             intent_hash = hashlib.md5(f"{intent}_{path}".encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
             reports_dir = path.parent.parent / ".nexus" / "reports"
             if not reports_dir.exists():
-                # Fallback to local .nexus/reports relative to workspace
-                reports_dir = Path("/Users/jameschen/Workspace/nexus/.nexus/reports")
+                # Fallback to this checkout's .nexus/reports (never a developer-specific path)
+                reports_dir = REPO_ROOT / ".nexus" / "reports"
             reports_dir.mkdir(parents=True, exist_ok=True)
             
             replay_path = reports_dir / f"gate_replay_{intent_hash}.json"
