@@ -100,6 +100,7 @@ ARMS: dict[str, tuple[str, bool, str]] = {
 ARMOR_MODES = ("off", "on")
 ARMOR_PROFILES = ("LITE", "STANDARD", "FULL")
 DEFAULT_ARMOR_PROFILE = "FULL"
+ARMOR_CANONICAL_CONTEXT = {"execution_world": "local_armor", "transport_ingress": "bench"}
 ARMOR_PROFILE_NONE = "none"
 # Capabilities whose local-path executors report invoked=True with an empty candidate pool
 # (advisory stubs in the localheal_pipeline topology); they count only with candidate evidence.
@@ -685,6 +686,11 @@ def run_armor_mainchain(
             evidence_refs=evidence,
             local_request=local_request,
             codeintel=codeintel,
+            # A local-only armored attempt runs in World C (local_armor), entered from a bench
+            # runner, as in scripts/bench/n30r_v1_full_armor_trace.py. Without this the planner
+            # defaults to product_runtime and the World C receipt is rejected with
+            # canonical_execution_world_mismatch, so no verified candidate is ever delivered.
+            canonical_context=dict(ARMOR_CANONICAL_CONTEXT),
         )
 
         def online_disabled(_context: Any) -> dict[str, Any]:

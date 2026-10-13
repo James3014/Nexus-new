@@ -732,6 +732,8 @@ class Scenario:
     extra_env: dict[str, str] = field(default_factory=dict)
     # Workforce route whose worker the audit binds for the online stand-in.
     online_route: str = "fast_bounded_implementation"
+    # UnifiedRuntimeRequest.canonical_context (execution world identity); None keeps the default.
+    canonical_context: dict[str, Any] | None = None
 
 
 Builder = Callable[[Path, str], "Scenario | None"]
@@ -942,6 +944,7 @@ def _build_request(cap: str, scen: Scenario, ws: Path, task_id: str, trigger: bo
         else None,
         codeintel=codeintel,
         local_request=scen.local_request_factory(task_id) if scen.local_request_factory else None,
+        canonical_context=dict(scen.canonical_context) if scen.canonical_context else None,
     )
 
 
@@ -2623,6 +2626,9 @@ def build_local_stage(cap: str) -> Builder:
             local_worker=worker,
             local_request_factory=factory,
             extra_env=local_stage_env(ws),
+            # Local-only armored execution is World C (local_armor), as the A/B armor lane
+            # declares. The World C receipt validator rejects any other world.
+            canonical_context={"execution_world": "local_armor"},
             check=check,
         )
 
