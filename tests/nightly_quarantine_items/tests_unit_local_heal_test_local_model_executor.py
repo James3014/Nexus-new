@@ -2,10 +2,5 @@
 
 from __future__ import annotations
 
-ENTRY: dict[str, object] = {
-    "file": "tests/unit/local_heal/test_local_model_executor.py",
-    "disposition": "quarantine",
-    "issue": "#1924",
-    "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
-    "tests": ("test_delegated_retry_committee_candidates_have_unique_ids",),
-}
+# Fixed in #1924: was polluted by run_june_regression_pack env leak; run_pack now restores env.
+ENTRY = None

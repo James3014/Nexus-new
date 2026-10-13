@@ -2,10 +2,5 @@
 
 from __future__ import annotations
 
-ENTRY: dict[str, object] = {
-    "file": "tests/engine/test_capability_coverage_gap.py",
-    "disposition": "quarantine",
-    "issue": "#1924",
-    "cause": "capability-phase e2e expectations (plan membership, invoked/gate_passed/wall_time) drifted from the current capability planner; stale expectations, needs owner fix-or-delete decision",
-    "tests": ("test_capability_coverage_gap_report_marks_reserved_and_pending",),
-}
+# Fixed in #1924: committee/local_model_executor/prompt_compression added to RULED_CAPABILITIES.
+ENTRY = None

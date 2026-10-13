@@ -2,10 +2,5 @@
 
 from __future__ import annotations
 
-ENTRY: dict[str, object] = {
-    "file": "tests/integration/test_real_model_probe.py",
-    "disposition": "quarantine",
-    "issue": "#1924",
-    "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
-    "tests": ("test_real_model_wiring_probe_contract",),
-}
+# Fixed in #1924: now a host-only probe gated by NEXUS_RUN_REAL_LOCAL_MODEL_TESTS=1 (skips elsewhere).
+ENTRY = None
