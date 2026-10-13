@@ -27,7 +27,10 @@ from nexus.services.external_intelligence_closure import (
     validate_worker_receipt,
 )
 from nexus.services.external_intelligence_core_binding import (
+    FRESHNESS_MARGIN_SECONDS,
     CoreBindingError,
+    binding_hash_for,
+    binding_validity_seconds,
     parse_bound_execution_envelope_v2,
     validate_repository_mutation_binding,
 )
@@ -88,6 +91,7 @@ def _bound_open_swe(
     *,
     continue_status: str = "BOUND",
     continue_hashes: tuple[str, str] | None = None,
+    max_repairs_per_unit: int = 1,
 ) -> SimpleNamespace:
     import nexus.services.open_swe_external_intelligence as module
 
@@ -131,6 +135,7 @@ def _bound_open_swe(
         allocator=GitWorktreeAllocator(scenario.repo, tmp_path / "workspaces"),
         store=store,
         transport=transport,
+        max_repairs_per_unit=max_repairs_per_unit,
     )
     first = runtime.run([unit], CapacityLease(1, 1, 1, 1))
     assert first["errors"] == {}
@@ -443,9 +448,7 @@ def test_closure_rejects_repair_that_drops_or_changes_the_parent_binding(tmp_pat
         validate_worker_receipt(_rehash(initial_with_root))
 
 
-def test_continuation_revalidation_ignores_expired_window_but_not_future_creation(
-    tmp_path, monkeypatch
-):
+def test_continuation_revalidation_enforces_window_and_creation_time(tmp_path, monkeypatch):
     ctx = _bound_open_swe(tmp_path, monkeypatch)
     receipt = ctx.receipt
     _semantic, binding, _sha = parse_bound_execution_envelope_v2(
@@ -470,10 +473,97 @@ def test_continuation_revalidation_ignores_expired_window_but_not_future_creatio
         "workspace_path": workspace,
         "allowed_paths": [TARGET],
     }
+    validate_repository_mutation_binding(binding, continuation=True, **kwargs)
     later = datetime.now(timezone.utc) + timedelta(days=1)
-    with pytest.raises(CoreBindingError, match="core_binding_freshness"):
-        validate_repository_mutation_binding(binding, now=later, **kwargs)
-    validate_repository_mutation_binding(binding, now=later, continuation=True, **kwargs)
+    for continuation in (False, True):
+        with pytest.raises(CoreBindingError, match="core_binding_freshness"):
+            validate_repository_mutation_binding(
+                binding, now=later, continuation=continuation, **kwargs
+            )
     earlier = datetime.now(timezone.utc) - timedelta(days=1)
     with pytest.raises(CoreBindingError, match="core_binding_freshness"):
         validate_repository_mutation_binding(binding, now=earlier, continuation=True, **kwargs)
+    open_ended = json.loads(json.dumps(binding))
+    open_ended["freshness"]["valid_until"] = None
+    open_ended["binding_hash"] = binding_hash_for(open_ended)
+    validate_repository_mutation_binding(open_ended, **kwargs)
+    with pytest.raises(CoreBindingError, match="core_binding_freshness"):
+        validate_repository_mutation_binding(open_ended, continuation=True, **kwargs)
+
+
+def test_binding_validity_covers_initial_run_plus_repair_budget():
+    assert binding_validity_seconds(300, 0) == 300 * 1 + FRESHNESS_MARGIN_SECONDS
+    assert binding_validity_seconds(300, 1) == 300 * 2 + FRESHNESS_MARGIN_SECONDS
+    assert binding_validity_seconds(900.0, 20) == 900 * 21 + FRESHNESS_MARGIN_SECONDS
+    for budget in (-1, 21, True, 1.0):
+        with pytest.raises(CoreBindingError, match="CORE_REPAIR_BUDGET_INVALID"):
+            binding_validity_seconds(300, budget)  # type: ignore[arg-type]
+    with pytest.raises(CoreBindingError, match="CORE_FRESHNESS_WINDOW_INVALID"):
+        binding_validity_seconds(0, 1)
+
+
+@pytest.mark.parametrize("budget", [0, 1, 3])
+def test_minted_binding_lifetime_follows_fanout_repair_budget(tmp_path, monkeypatch, budget):
+    ctx = _bound_open_swe(tmp_path, monkeypatch, max_repairs_per_unit=budget)
+    _semantic, binding, _sha = parse_bound_execution_envelope_v2(
+        Path(ctx.receipt["bound_envelope_ref"]).read_text(encoding="utf-8"),
+        semantic_envelope_sha256=ctx.receipt["envelope_sha256"],
+    )
+    created = datetime.fromisoformat(binding["freshness"]["created_at"].replace("Z", "+00:00"))
+    deadline = datetime.fromisoformat(binding["freshness"]["valid_until"].replace("Z", "+00:00"))
+    expected = ctx.transport.timeout * (1 + budget) + FRESHNESS_MARGIN_SECONDS
+    assert (deadline - created).total_seconds() == expected
+
+
+def test_expired_binding_blocks_continuation_before_effect(tmp_path, monkeypatch):
+    import nexus.services.external_intelligence_core_binding as core_binding
+
+    ctx = _bound_open_swe(tmp_path, monkeypatch)
+    real_datetime = core_binding.datetime
+
+    class _Later(real_datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return real_datetime.now(tz) + timedelta(days=1)
+
+    monkeypatch.setattr(core_binding, "datetime", _Later)
+    with pytest.raises(
+        FanoutError, match="CORE_BINDING_REVALIDATION_FAILED:core_binding_freshness"
+    ):
+        _continue(ctx)
+    assert [call for call in ctx.calls if call["operation"] == "worker_continue"] == []
+    assert not (ctx.store.attempts / "task-1--u1--repair-d001.json").exists()
+
+
+def test_repair_budgets_must_agree_between_closure_and_worker_runtime(tmp_path):
+    from nexus.services.external_intelligence_closure import (
+        ClosureStore,
+        CompositionWorkspaceAllocator,
+        ExternalIntelligenceClosureRuntime,
+    )
+
+    scenario = make_bound_repo(tmp_path)
+    with pytest.raises(FanoutError, match="INVALID_REPAIR_BUDGET"):
+        AdaptiveWorkerFanoutRuntime(
+            allocator=GitWorktreeAllocator(scenario.repo, tmp_path / "ws"),
+            store=FanoutStore(tmp_path / "state"),
+            max_repairs_per_unit=21,
+        )
+    worker = AdaptiveWorkerFanoutRuntime(
+        allocator=GitWorktreeAllocator(scenario.repo, tmp_path / "ws"),
+        store=FanoutStore(tmp_path / "state"),
+        max_repairs_per_unit=2,
+    )
+
+    def closure(budget: int) -> ExternalIntelligenceClosureRuntime:
+        return ExternalIntelligenceClosureRuntime(
+            repository_root=scenario.repo,
+            allocator=CompositionWorkspaceAllocator(scenario.repo, tmp_path / "closure"),
+            store=ClosureStore(tmp_path / "closure-state"),
+            c_runtime=worker,
+            max_repairs_per_unit=budget,
+        )
+
+    assert closure(2).max_repairs_per_unit == 2
+    with pytest.raises(ClosureError, match="REPAIR_BUDGET_EXCEEDS_WORKER_BUDGET"):
+        closure(3)

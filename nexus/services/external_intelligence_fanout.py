@@ -22,10 +22,11 @@ from nexus.services.external_intelligence import (
 )
 from nexus.services.external_intelligence_core_binding import (
     CAPABILITY_DISCOVERY_INDEX_PATH,
-    FRESHNESS_MARGIN_SECONDS,
+    MAX_REPAIRS_PER_UNIT_LIMIT,
     OPERATING_MODE_PATH,
     CoreAuthorityInputs,
     CoreBindingError,
+    binding_validity_seconds,
     bound_operation_material,
     build_acceptance_contract,
     build_capability_discovery_receipt,
@@ -1569,10 +1570,19 @@ class AdaptiveWorkerFanoutRuntime:
         allocator: GitWorktreeAllocator,
         store: FanoutStore,
         transport: OpenCodeWorkerTransport | Any | None = None,
+        max_repairs_per_unit: int = 1,
     ):
+        if (
+            isinstance(max_repairs_per_unit, bool)
+            or not isinstance(max_repairs_per_unit, int)
+            or not 0 <= max_repairs_per_unit <= MAX_REPAIRS_PER_UNIT_LIMIT
+        ):
+            raise FanoutError("INVALID_REPAIR_BUDGET")
         self.allocator = allocator
         self.store = store
         self.transport = transport or OpenCodeWorkerTransport()
+        # The closure's per-unit repair budget; it sizes the Core binding's lifetime.
+        self.max_repairs_per_unit = max_repairs_per_unit
 
     def _transport_for_unit(self, unit_or_receipt: ExecutionUnit | Mapping[str, Any]) -> Any:
         selected_worker = (
@@ -1859,8 +1869,9 @@ class AdaptiveWorkerFanoutRuntime:
                 acceptance_contract=preflight.acceptance_contract,
                 contract_hash=preflight.acceptance_contract_hash,
                 created_at=datetime.now(timezone.utc),
-                valid_for_seconds=float(getattr(transport, "timeout", 300.0))
-                + FRESHNESS_MARGIN_SECONDS,
+                valid_for_seconds=binding_validity_seconds(
+                    float(getattr(transport, "timeout", 300.0)), self.max_repairs_per_unit
+                ),
             )
             bound = derive_bound_envelope(preflight.semantic_envelope, binding)
         except CoreBindingError as exc:

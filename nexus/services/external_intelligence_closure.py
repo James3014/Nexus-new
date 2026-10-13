@@ -1286,6 +1286,11 @@ class ExternalIntelligenceClosureRuntime:
     ):
         if max_repairs_per_unit < 0 or max_repairs_per_unit > 20:
             raise ClosureError("INVALID_REPAIR_BUDGET")
+        worker_budget = getattr(c_runtime, "max_repairs_per_unit", None)
+        if isinstance(worker_budget, int) and worker_budget < max_repairs_per_unit:
+            # Core bindings are minted to live for the worker runtime's budget; a larger
+            # closure budget would continue repairs on an expired binding.
+            raise ClosureError("REPAIR_BUDGET_EXCEEDS_WORKER_BUDGET")
         self.repository_root = Path(repository_root).expanduser().resolve()
         self.allocator = allocator
         self.store = store
