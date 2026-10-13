@@ -16,6 +16,25 @@ def _test_executor(name: str) -> None:
     assert r.telemetries["wall_time_ms"] > 0, f"{name}: wall_time_ms=0"
 
 
+def _assert_fail_closed(
+    name: str,
+    error: str,
+    *,
+    status: str | None = "BLOCKED",
+    invoked: bool = True,
+) -> None:
+    # Stub success was removed on purpose (99c8295ba, 13df4578d, 7ae787b81; #1850 archive):
+    # the executor now fails closed and reports the specific reason below.
+    fn = EXECUTOR_REGISTRY.get(name)
+    assert fn is not None, f"{name} not in registry"
+    plan = _plan()
+    r = fn(plan, "test task")
+    assert r.invoked is invoked, f"{name}: invoked={r.invoked}"
+    assert r.gate_passed is False, f"{name}: gate_passed={r.gate_passed}"
+    assert r.outcome.get("semantic_status") == status, f"{name}: {r.outcome}"
+    assert r.outcome.get("error") == error, f"{name}: {r.outcome}"
+
+
 def _assert_retired(name: str) -> None:
     # Executor-only key with no planner node, archived 2026-10-13 (ARCHIVED_2026-10-13.md, #1906):
     # the historical node id is kept and now asserts the key is unreachable.
@@ -35,7 +54,7 @@ def test_exec_decision_formula_engine_runs() -> None:
 
 
 def test_exec_codeintel_runs() -> None:
-    _test_executor("codeintel")
+    _assert_fail_closed("codeintel", "TARGET_SYMBOL_REQUIRED")
 
 
 def test_exec_lancedb_runs() -> None:
@@ -43,7 +62,7 @@ def test_exec_lancedb_runs() -> None:
 
 
 def test_exec_research_runs() -> None:
-    _test_executor("research")
+    _assert_fail_closed("research", "BLOCKED_EXTERNAL_AUTH")
 
 
 def test_exec_research_and_source_discipline_runs() -> None:

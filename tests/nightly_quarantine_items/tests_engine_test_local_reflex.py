@@ -7,8 +7,5 @@ ENTRY: dict[str, object] = {
     "disposition": "quarantine",
     "issue": "#1924",
     "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
-    "tests": (
-        "test_local_reflex_ollama_unavailable_fails_closed_to_heuristic",
-        "test_parse_reflex_jsonish_extracts_embedded_json",
-    ),
+    "tests": ("test_local_reflex_ollama_unavailable_fails_closed_to_heuristic",),
 }

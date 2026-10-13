@@ -16,6 +16,25 @@ def _test_executor(name: str) -> None:
     assert r.telemetries["wall_time_ms"] > 0, f"{name}: wall_time_ms=0"
 
 
+def _assert_fail_closed(
+    name: str,
+    error: str,
+    *,
+    status: str | None = "BLOCKED",
+    invoked: bool = True,
+) -> None:
+    # Stub success was removed on purpose (99c8295ba, 13df4578d, 7ae787b81; #1850 archive):
+    # the executor now fails closed and reports the specific reason below.
+    fn = EXECUTOR_REGISTRY.get(name)
+    assert fn is not None, f"{name} not in registry"
+    plan = _plan()
+    r = fn(plan, "test task")
+    assert r.invoked is invoked, f"{name}: invoked={r.invoked}"
+    assert r.gate_passed is False, f"{name}: gate_passed={r.gate_passed}"
+    assert r.outcome.get("semantic_status") == status, f"{name}: {r.outcome}"
+    assert r.outcome.get("error") == error, f"{name}: {r.outcome}"
+
+
 def _assert_retired(name: str) -> None:
     # Executor-only key with no planner node, archived 2026-10-13 (ARCHIVED_2026-10-13.md, #1906):
     # the historical node id is kept and now asserts the key is unreachable.
@@ -31,7 +50,7 @@ def test_exec_autonomic_router_invoked_true() -> None:
 
 
 def test_exec_claim_gate_invoked_true() -> None:
-    _test_executor("claim_gate")
+    _assert_fail_closed("claim_gate", "missing_real_claim_context", status=None, invoked=False)
 
 
 def test_exec_reflex_loop_invoked_true() -> None:
@@ -43,11 +62,24 @@ def test_exec_zero_trust_v2_behavior_invoked_true() -> None:
 
 
 def test_all_36_executors_real_execution_100_percent() -> None:
+    # Executors that are not invoked now fail closed with a specific archived/missing-context
+    # reason instead of a stub success (99c8295ba, 13df4578d, #1850 archive). Every other
+    # registered executor is invoked.
     plan = _plan()
-    failed = []
+    not_invoked = {}
     for name in sorted(EXECUTOR_REGISTRY):
-        fn = EXECUTOR_REGISTRY[name]
-        r = fn(plan, "test task")
+        r = EXECUTOR_REGISTRY[name](plan, "test task")
         if not r.invoked:
-            failed.append(f"{name}: {r.outcome.get('error', 'unknown')[:80]}")
-    assert not failed, f"  {'; '.join(failed)}"
+            not_invoked[name] = r.outcome.get("error")
+    assert not_invoked == {
+        "benchmark": "archived_fake_benchmark_2026-10-12",
+        "claim_gate": "missing_real_claim_context",
+        "federation": "archived_federation_2026-10-12",
+        "integration_manager": "archived_retired_integration_manager_2026-10-13",
+        "learning_closure": "archived_hollow_learning_closure_2026-10-12",
+        "llm_judge_panel": "archived_alias_llm_judge_panel_2026-10-13",
+        "oracle_shadow": "archived_oracle_shadow_2026-10-12",
+        "stress_test": "archived_hollow_stress_test_2026-10-12",
+        "swarm_quiet_moment": "archived_echo_swarm_quiet_moment_2026-10-13",
+        "ui_validator": "archived_ui_validator_2026-10-12",
+    }

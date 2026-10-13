@@ -1,5 +1,6 @@
 import itertools
 import time as _real_time
+from pathlib import Path
 
 import pytest
 
@@ -51,6 +52,28 @@ def _test_executor(name: str) -> None:
     assert tel["wall_time_ms"] >= STEP_MS, f"{name}: wall_time_ms={tel['wall_time_ms']}"
 
 
+def _assert_fail_closed(
+    name: str,
+    error: str,
+    *,
+    status: str | None = "BLOCKED",
+    invoked: bool = True,
+    constraints: dict | None = None,
+) -> None:
+    # Stub success was removed on purpose (99c8295ba, 13df4578d, 7ae787b81; #1850 archive):
+    # the executor now fails closed and reports the specific reason below.
+    fn = EXECUTOR_REGISTRY.get(name)
+    assert fn is not None, f"{name} not in registry"
+    plan = CapabilityExecutionPlan(
+        plan_id="test-n25", task_id="n25", phases=["X"], constraints=dict(constraints or {})
+    )
+    r = fn(plan, "test task")
+    assert r.invoked is invoked, f"{name}: invoked={r.invoked}"
+    assert r.gate_passed is False, f"{name}: gate_passed={r.gate_passed}"
+    assert r.outcome.get("semantic_status") == status, f"{name}: {r.outcome}"
+    assert r.outcome.get("error") == error, f"{name}: {r.outcome}"
+
+
 def _assert_retired(name: str) -> None:
     # Executor-only key with no planner node, archived 2026-10-13 (ARCHIVED_2026-10-13.md, #1906):
     # the historical node id is kept and now asserts the key is unreachable.
@@ -61,8 +84,22 @@ def test_exec_learn_refresh_service_runs() -> None:
     _assert_retired("learn_refresh_service")
 
 
-def test_exec_learn_scheduler_service_runs() -> None:
-    _test_executor("learn_scheduler_service")
+def test_exec_learn_scheduler_service_runs(tmp_path: Path) -> None:
+    # LearnSchedulerService.run_scheduler returns exit code 2 ("DEGRADED") when the
+    # learn:phase-policy step succeeds but slo_readiness < 0.5; the registry executor
+    # (_exec_learn_scheduler_service) then reports error f"scheduler_exit_{result}". An empty
+    # workspace_root has no learn history, so readiness is 0.0 and the degraded path is certain.
+    _assert_fail_closed(
+        "learn_scheduler_service",
+        "scheduler_exit_2",
+        constraints={"workspace_root": str(tmp_path)},
+    )
+    import json
+
+    report = json.loads((tmp_path / ".nexus/reports/learn/scheduler_last_run.json").read_text())
+    assert report["exit_code"] == 2
+    assert report["steps"]["policy"]["returncode"] == 0
+    assert report["slo_readiness"] < 0.5
 
 
 def test_exec_belief_runs() -> None:
@@ -70,19 +107,19 @@ def test_exec_belief_runs() -> None:
 
 
 def test_exec_autoreason_runs() -> None:
-    _test_executor("autoreason")
+    _assert_fail_closed("autoreason", "BLOCKED_EXTERNAL_AUTH")
 
 
 def test_exec_repair_loop_runs() -> None:
-    _test_executor("repair_loop")
+    _assert_fail_closed("repair_loop", "REAL_REPAIR_ATTEMPT_RECEIPT_REQUIRED")
 
 
 def test_exec_hyper_sprint_runs() -> None:
-    _test_executor("hyper_sprint")
+    _assert_fail_closed("hyper_sprint", "BLOCKED_EXTERNAL_AUTH:local_or_online_model")
 
 
 def test_exec_swarm_multi_agent_runs() -> None:
-    _test_executor("swarm_multi_agent")
+    _assert_fail_closed("swarm_multi_agent", "BLOCKED_EXTERNAL_AUTH:local_or_online_workers")
 
 
 def test_exec_drone_runs() -> None:
