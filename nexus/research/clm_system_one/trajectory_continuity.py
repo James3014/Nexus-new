@@ -62,8 +62,15 @@ _FORBIDDEN_PRE_ACTION_KEYS = {
 # before hashing or persistence.  Conservative: prefer false-positive redaction
 # over accidental secret leakage.
 _URL_CREDENTIAL_PATTERN = re.compile(
-    r"(?i)\b[a-z][a-z0-9+.\-]{0,31}://[^/@\s:]{0,256}:[^/@\s]{1,512}@"
+    r"(?i)\b[a-z][a-z0-9+.\-]{0,31}://[^/@\s:]{0,256}:[^/\s]{1,512}@"
 )
+# Note on the URL pattern: the password class excludes "/" but allows "@", so a
+# password containing "@" is redacted up to the LAST "@" before the host (the
+# greedy match backtracks to it) instead of leaking the tail after the first "@".
+#
+# Out of scope (tracked in #1873): tokens split across lines or across separate
+# JSON fields (e.g. a key wrapped at 80 columns).  Each pattern matches within a
+# single token; reassembling fragments would need cross-string state.
 _SECRET_PATTERNS: list[re.Pattern[str]] = [
     # Full PEM private-key block (BEGIN..END inclusive). Must run first so a keyed
     # PEM (private_key: -----BEGIN ...) is not truncated by the generic assignment
@@ -85,27 +92,64 @@ _SECRET_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"sk-[A-Za-z0-9]{20,}"),
     # Provider key formats with separators in the body (sk-ant-api03-..., sk-proj-...).
     re.compile(r"sk-(?:ant|proj|svcacct|admin)-[A-Za-z0-9_\-]{16,}"),
-    re.compile(r"github_pat_[A-Za-z0-9_]{20,}"),
+    # Short/truncated fine-grained PATs are redacted too (real ones are ~82 chars).
+    re.compile(r"github_pat_[A-Za-z0-9_]{10,}"),
     re.compile(r"AIza[0-9A-Za-z_\-]{35}"),
-    re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
+    # Boundary is "not alphanumeric" rather than \b so a token directly after "_"
+    # (AWS_KEY_AKIA...) is still found; "_" is a word character for \b.
+    re.compile(r"(?<![A-Za-z0-9])(?:AKIA|ASIA)[0-9A-Z]{16}(?![A-Z0-9])"),
     re.compile(r"xox[abposr]-[A-Za-z0-9\-]{10,}"),
     # Stripe live keys (mirrors scripts/ops/git_history_secret_scan.py).
     re.compile(r"(?:sk|rk)_live_[A-Za-z0-9]{16,}"),
+    # Stripe secret test keys, live publishable keys and webhook signing secrets.
+    # pk_test_ (publishable TEST key) is deliberately NOT redacted: it is public by
+    # design, ships in client bundles, and grants no access.  pk_live_ is also
+    # public-by-design but identifies a production account, so it is redacted.
+    re.compile(r"(?:sk|rk)_test_[A-Za-z0-9]{16,}"),
+    re.compile(r"pk_live_[A-Za-z0-9]{16,}"),
+    re.compile(r"whsec_[A-Za-z0-9]{16,}"),
+    # Slack incoming-webhook URLs (the path is the credential).
+    re.compile(r"(?:https?://)?hooks\.slack\.com/services/[A-Za-z0-9_/\-]{8,256}"),
+    # Azure storage / Service Bus connection-string keys.
+    re.compile(r"(?i)(?:AccountKey|SharedAccessKey)\s*=\s*[^;\s\"']{1,512}"),
+    # SendGrid API keys: SG.<22>.<43>.
+    re.compile(r"(?<![A-Za-z0-9])SG\.[A-Za-z0-9_\-]{22}\.[A-Za-z0-9_\-]{43}"),
+    # Twilio API key SIDs: SK + 32 hex.
+    re.compile(r"(?<![A-Za-z0-9])SK[0-9a-f]{32}(?![A-Za-z0-9])"),
+    # Bare Google OAuth refresh tokens (1//0...).
+    re.compile(r"(?<![A-Za-z0-9])1//0[A-Za-z0-9_\-]{20,}"),
+    # DB password env assignments not covered by the generic "password" key.
+    re.compile(r"(?i)(?:db_pass|mysql_pwd)[\"']?\s*[=:]\s*(?:\"[^\"]*\"|'[^']*'|[\"']?\S+)"),
+    # mysql/mysqldump/mysqladmin -p<password> (password glued to -p, case-sensitive so
+    # "-p" alone, a prompt, and "-P <port>" are untouched).  Up to 8 option words
+    # of <=64 chars are skipped; words cannot cross ; | & or newlines, so the scan
+    # is bounded per "mysql" occurrence.
+    re.compile(
+        r"(?<![A-Za-z0-9_\-])mysql(?:dump|admin)?(?:[ \t]+[^\s;|&]{1,64}){0,8}?"
+        r"[ \t]+-p(?:\"[^\"]*\"|'[^']*'|[^\s;|&\"'-][^\s;|&]{0,255})"
+    ),
     # AWS secret access key assignments (env/ini style and JSON "SecretAccessKey").
     re.compile(r"(?i)secret[_\-]?access[_\-]?key[\"']?\s*[=:]\s*[\"']?[^\s\"',}]+"),
     # Bare provider tokens.
     re.compile(r"ya29\.[A-Za-z0-9_\-.]{20,}"),
-    re.compile(r"\bhf_[A-Za-z0-9]{30,}"),
-    re.compile(r"glpat-[A-Za-z0-9_\-]{20,}"),
-    re.compile(r"\bnpm_[A-Za-z0-9]{30,}"),
+    # "not alphanumeric" lookbehind (not \b): HFTOKEN_hf_... must match, while
+    # hf_hub_download (underscore inside the body) still does not.
+    re.compile(r"(?<![A-Za-z0-9])hf_[A-Za-z0-9]{30,}"),
+    # GitLab PATs are glpat- + 20 chars (>=20 includes exactly 20); routable tokens
+    # add dot-separated segments.
+    re.compile(r"glpat-[A-Za-z0-9_\-.]{20,}"),
+    re.compile(r"(?<![A-Za-z0-9])npm_[A-Za-z0-9]{30,}"),
     re.compile(r"xapp-[A-Za-z0-9\-]{10,}"),
     # JWT: three base64url segments, header and payload start with eyJ ({"...).
-    re.compile(r"\beyJ[A-Za-z0-9_\-]{5,}\.eyJ[A-Za-z0-9_\-]{5,}\.[A-Za-z0-9_\-]+"),
-    # Authorization header values (Bearer is covered above).
-    re.compile(r"(?i)authorization[\"']?\s*[:=]\s*[\"']?(?:basic|digest|negotiate)\s+[^\s\"']+"),
+    re.compile(r"(?<![A-Za-z0-9])eyJ[A-Za-z0-9_\-]{5,}\.eyJ[A-Za-z0-9_\-]{5,}\.[A-Za-z0-9_\-]+"),
+    # Authorization header values (Bearer is covered above; "token" is the
+    # non-prefixed GitHub header form).
+    re.compile(
+        r"(?i)authorization[\"']?\s*[:=]\s*[\"']?(?:basic|digest|negotiate|token)\s+[^\s\"']+"
+    ),
     # CLI flags carrying credentials: --token X / --token=X / --password X ...
     re.compile(
-        r"(?i)--(?:token|access-token|auth-token|password|passwd|secret|api-key)"
+        r"(?i)--(?:token|access-token|auth-token|password|passwd|secret|api[_-]key|client[_-]secret|key)"
         r"(?:=|\s+)(?:\"[^\"]*\"|'[^']*'|\S+)"
     ),
     re.compile(r"(?i)-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),

@@ -2483,3 +2483,147 @@ def test_redaction_is_linear_on_adversarial_strings(payload):
     start = time.monotonic()
     _redact_value(payload)
     assert time.monotonic() - start < 1.0
+
+
+# ---------------------------------------------------------------------------
+# #1873: remaining common credential formats
+# ---------------------------------------------------------------------------
+
+_B62 = "aB3dE5gH7jK9mN2pQ4rS6tU8vW"
+_SG_SAMPLE = "SG" + "." + "A" * 22 + "." + "B" * 43
+_REFRESH_SAMPLE = "1/" + "/0g" + "Hq7" * 15
+
+
+@pytest.mark.parametrize(
+    ("secret", "tail"),
+    [
+        ("sk_" + "test_" + _B62, _B62[-14:]),
+        ("rk_" + "test_" + _B62, _B62[-14:]),
+        ("pk_" + "live_" + _B62, _B62[-14:]),
+        ("whsec" + "_" + _B62, _B62[-14:]),
+        (
+            "https://hooks." + "slack.com/services/T0" + "ABCDEF/B0" + "GHIJKL/" + "x" * 24,
+            "x" * 12,
+        ),
+        ("hooks.slack" + ".com/services/T0" + "ABCDEF/B0" + "GHIJKL/" + "y" * 24, "y" * 12),
+        (
+            "DefaultEndpointsProtocol=https;AccountName=acct;AccountKey="
+            + "Zm9v" * 20
+            + "==;EndpointSuffix=core.windows.net",
+            "Zm9vZm9vZm9v",
+        ),
+        ("Account" + "Key = " + "Zm9v" * 10, "Zm9vZm9vZm9v"),
+        (_SG_SAMPLE, "B" * 20),
+        ("S" + "K" + "0123456789abcdef" * 2, "0123456789abcdef"),
+        (_REFRESH_SAMPLE, "Hq7Hq7Hq7"),
+        ("DB_" + "PASS=" + _B62, _B62[-14:]),
+        ("MYSQL_" + "PWD=" + _B62, _B62[-14:]),
+        ("DB_" + 'PASS="' + "two words " + _B62 + '"', _B62[-14:]),
+        ("mysql -u root -p" + _B62 + " mydb", _B62[-14:]),
+        ("mysqldump -h db.local -u root -p" + _B62 + " --all-databases", _B62[-14:]),
+        ("mysql -p'" + "pa ss " + _B62 + "' -e 'select 1'", _B62[-14:]),
+        ("--client" + "-secret " + _B62, _B62[-14:]),
+        ("--client" + "-secret=" + _B62, _B62[-14:]),
+        ("--api" + "_key " + _B62, _B62[-14:]),
+        ("--api" + "_key=" + _B62, _B62[-14:]),
+        ("--api" + "-key " + _B62, _B62[-14:]),
+        ("--api" + "-key=" + _B62, _B62[-14:]),
+        ("--key " + _B62, _B62[-14:]),
+        ("--key=" + _B62, _B62[-14:]),
+        ('--key "' + "two words " + _B62 + '"', _B62[-14:]),
+        ("--api" + "-key='" + "two words " + _B62 + "'", _B62[-14:]),
+        ("Authorization: token " + "gh" + "p_" + "A" * 36, "A" * 20),
+        ("Authorization: token " + _B62, _B62[-14:]),
+        ("https://alice:p@ss" + "@" + _B62 + "@example.com/x.git", _B62[-14:]),
+        ("https://alice:p@ss" + "w0rd@example.com/x.git", "w0rd"),
+        ("HFTOKEN_" + "hf" + "_" + "O" * 34, "O" * 12),
+        ("NPMTOKEN_" + "npm" + "_" + "Q" * 36, "Q" * 12),
+        ("AWS_KEY_" + "AKIA" + "F" * 16 + "_prod", "F" * 12),
+        ("glpat" + "-" + "P" * 20, "P" * 12),
+        ("glpat" + "-" + "P" * 20 + "_" + "Q" * 5, "Q" * 5),
+        ("github" + "_pat_" + "R" * 12, "R" * 12),
+        ("github" + "_pat_" + "R" * 20, "R" * 12),
+    ],
+)
+def test_redaction_issue_1873_formats(secret, tail):
+    out = _redact_value({"stdout": f"before\n{secret}\nafter"})["stdout"]
+    assert tail not in out, out
+    assert "[REDACTED]" in out
+    assert out.startswith("before\n") and out.endswith("\nafter")
+
+
+def test_redaction_issue_1873_before_after_text_is_preserved():
+    out = _redact_value("run mysql -u root -p" + _B62 + " -e 'select 1' done")
+    assert out.startswith("run ") and "[REDACTED]" in out and _B62 not in out
+    out = _redact_value("url=https://alice:p@ss" + "@" + "w0rd@example.com/x.git ok")
+    assert "w0rd" not in out and "example.com/x.git ok" in out
+    out = _redact_value("go --key " + _B62 + " --verbose")
+    assert out.endswith(" --verbose") and _B62 not in out
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "pk_" + "test_" + _B62,  # publishable TEST key: public by design, kept
+        "mysql -u root -p mydb",  # -p alone prompts for the password
+        "mysql -h db.local -P 3306 -u root",  # -P is the port
+        "mysql -P3306 -u root",
+        "pip install -p 3 --key-file /run/key.pem",
+        "--key-file /run/key.pem --keyring /run/ring --api-key-file /run/k",
+        "--api_key_file /run/k --client-secret-file /run/cs",
+        "hf_hub_download(repo_id, filename)",
+        "from huggingface_hub import hf_hub_download",
+        "0123456789abcdef0123456789abcdef01234567",
+        "sha256:" + "ab" * 32,
+        '{"manifest_sha256": "' + "ab" * 32 + '"}',
+        "123e4567-e89b-12d3-a456-426614174000",
+        "SK" + "0123456789abcdef0123456789abcdefAB",  # not 32 hex after SK
+        "see 1//0 and SG.short and whsec_",
+        "Authorization: tokens are listed below",
+        "https://example.com/a@b/c",
+        "AccountName=acct;EndpointSuffix=core.windows.net",
+        "hooks.slack.com/services/ is the webhook path",
+    ],
+)
+def test_redaction_issue_1873_keeps_non_secret_text(text):
+    assert _redact_value(text) == text
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "sk_test_" * 100_000,
+        "whsec_" * 150_000,
+        "hooks.slack.com/services/" * 40_000,
+        "AccountKey=" * 90_000,
+        "SG." * 300_000,
+        "SK" * 500_000,
+        "1//0" * 250_000,
+        "DB_PASS=" * 120_000,
+        "mysql " * 150_000,
+        "mysql -h " * 100_000,
+        "mysql -p" + "a" * 1_000_000,
+        "mysqldump " + "a " * 400_000,
+        "--key " * 150_000,
+        "--key=" * 150_000,
+        "--api_key " * 100_000,
+        "--client-secret " * 60_000,
+        "Authorization: token " * 40_000,
+        "https://a:" * 100_000,
+        "https://a:" + "@" * 500_000,
+        "https://a:" + "p@" * 250_000,
+        "HFTOKEN_hf_" * 90_000,
+        "hf_" + "a" * 29 + "_" * 1,
+        "glpat-" * 160_000,
+        "github_pat_" * 90_000,
+        "AKIA" * 250_000,
+        "_" * 1_000_000,
+    ],
+    ids=lambda payload: f"{payload[:14]!r}-len{len(payload)}",
+)
+def test_redaction_issue_1873_is_linear_on_adversarial_strings(payload):
+    import time
+
+    start = time.monotonic()
+    _redact_value(payload)
+    assert time.monotonic() - start < 1.0
