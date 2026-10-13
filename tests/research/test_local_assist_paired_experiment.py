@@ -25,7 +25,7 @@ from nexus.services.local_heal.local_model_provider import InjectedLocalModelPro
 from nexus.services.unified_runtime import normalize_online_invoker_payload
 
 
-def _online_invoker(*, tokens: int | None, label: str):
+def _online_invoker(*, tokens: int | None, label: str, provider: str = "fixture"):
     def invoker(context):
         task_id = str(context.get("task_id", ""))
         prompt = str(context.get("online_prompt") or "")
@@ -40,7 +40,7 @@ def _online_invoker(*, tokens: int | None, label: str):
         if local_outputs:
             refs.append(f"online:fixture:{task_id}:local_context_forwarded")
         return normalize_online_invoker_payload(
-            provider="fixture",
+            provider=provider,
             task_id=task_id,
             invoked=True,
             output_delivered=True,
@@ -64,7 +64,7 @@ def test_load_task_defs_from_campaign_tree() -> None:
     assert all(t.get("task_id") for t in tasks)
 
 
-def test_paired_arms_share_identity_and_separate_policies(tmp_path: Path) -> None:
+def test_paired_arms_share_identity_and_separate_policies(tmp_path: Path, governed_admission_advisor) -> None:
     task = {
         "task_id": "paired-1",
         "task_statement": "advise demo.py advisory",
@@ -78,8 +78,8 @@ def test_paired_arms_share_identity_and_separate_policies(tmp_path: Path) -> Non
     )
     comparison = run_paired_task_injected(
         task,
-        online_invoker_a=_online_invoker(tokens=100, label="A"),
-        online_invoker_b=_online_invoker(tokens=80, label="B"),
+        online_invoker_a=_online_invoker(tokens=100, label="A", provider="agy"),
+        online_invoker_b=_online_invoker(tokens=80, label="B", provider="agy"),
         local_service_b=local,
         project_root=tmp_path,
     )

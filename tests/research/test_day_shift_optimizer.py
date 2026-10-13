@@ -3,7 +3,7 @@ from pathlib import Path
 from nexus.research.day_shift_optimizer import DayShiftOptimizer
 
 
-def test_dayshift_generation_uses_unified_runtime_on_revisioned_workspace(monkeypatch, tmp_path: Path):
+def test_dayshift_generation_uses_unified_runtime_on_revisioned_workspace(monkeypatch, tmp_path: Path, governed_admission):
     optimizer = DayShiftOptimizer(
         project_root=tmp_path,
         swarm_dir=tmp_path,
@@ -25,7 +25,7 @@ def test_dayshift_generation_uses_unified_runtime_on_revisioned_workspace(monkey
         task_statement="improve demo",
         round_id=1,
         attempt=1,
-        model="gemini-test",
+        model="gemini-3.8-flash-medium",
         output_schema={"status": "APPROVED | FAIL", "patch": "full file"},
         task_kind="generation",
     )
