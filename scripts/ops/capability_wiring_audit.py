@@ -20,11 +20,12 @@ Verdicts: REAL, SIMULATED, STUB, BLOCKED_<reason>, NOT_SELECTABLE, RETIRING,
 MODEL_UNAVAILABLE.  No benchmark is scored.  Nothing here changes routing, policy, or
 admission; the script only observes.
 
-Why the verdict ignores ``claim_boundary.simulated`` (REAL_UNATTESTED when it is true): the runtime never sets
-that field for capability receipts, so the fail-closed ``ClaimBoundary`` default
-(``simulated=True``) is emitted for every receipt regardless of what ran.  The flag is
-recorded in the matrix (``receipt_claims_simulated``) but cannot discriminate; physical
-evidence can.  See docs/experiments/capability_wiring_audit_2026-10.md.
+``claim_boundary.simulated``: since nexus-runtime #187 the runtime derives the flag from
+the receipt's own execution evidence (``attested_claim_boundary``), so it is recorded in the
+matrix (``receipt_claims_simulated``) and must agree with the physical evidence.  A row whose
+executor ran and whose artifact assertion passed while the receipt still says
+``simulated=true`` is REAL_UNATTESTED: a producer that under-reports its own execution.
+See docs/experiments/capability_wiring_audit_2026-10.md.
 
 Usage::
 
@@ -587,21 +588,36 @@ def make_obs(
 def claim_boundary_simulated(
     obs: Obs, receipt: Mapping[str, Any] | None
 ) -> tuple[bool | None, str]:
-    """Where the ``simulated`` flag a downstream consumer would read comes from."""
+    """Where the ``simulated`` flag a downstream consumer would read comes from.
+
+    Most specific first: the executor's own ``CapabilityReceipt``, then this capability's row
+    in the UnifiedRuntime receipt (``capabilities[]``, runtime-attested per capability), and
+    only then the task-level ``receipt_base`` (which also covers the online stand-in).
+    """
     cap_cb = (
         ((obs.executor_receipt.get("receipt_base") or {}).get("claim_boundary") or {})
         if obs.executor_receipt
         else {}
     )
     if "simulated" in cap_cb:
-        return bool(
-            cap_cb["simulated"]
-        ), "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)"
+        # fail closed: only an explicit False is real
+        return (
+            cap_cb["simulated"] is not False,
+            "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
+        )
+    row_cb = (obs.row or {}).get("claim_boundary") if isinstance(obs.row, Mapping) else None
+    if isinstance(row_cb, Mapping) and "simulated" in row_cb:
+        # fail closed: only an explicit False is real
+        return (
+            row_cb["simulated"] is not False,
+            "UnifiedRuntime receipt.capabilities[<cap>].claim_boundary (runtime-attested)",
+        )
     rb_cb = ((receipt or {}).get("receipt_base") or {}).get("claim_boundary") or {}
     if "simulated" in rb_cb:
-        return bool(
-            rb_cb["simulated"]
-        ), "UnifiedRuntime receipt.receipt_base.claim_boundary (ClaimBoundary default)"
+        # fail closed: only an explicit False is real
+        return rb_cb[
+            "simulated"
+        ] is not False, "UnifiedRuntime receipt.receipt_base.claim_boundary (task level)"
     return None, "not_observed"
 
 
@@ -4642,7 +4658,7 @@ def run_audit(
         },
         "forcing_knob": "route-oracle line 'Expected capability receipts: <node>' in task_statement via plan_canonical_task_bundle",
         "online_channel": "deterministic no-model stand-in; Workforce binding from WorkforcePolicyLoader.resolve_route('fast_bounded_implementation')",
-        "claim_boundary_note": "receipt_claims_simulated is the ClaimBoundary fail-closed default (CapabilityReceipt.to_dict emits claim_boundary without simulated): the producer cannot attest execution; REAL_UNATTESTED = executor ran and the artifact assertion passed but the receipt still says simulated",
+        "claim_boundary_note": "receipt_claims_simulated is derived by the runtime from execution evidence (nexus-runtime #187); REAL_UNATTESTED = executor ran and the artifact assertion passed but the producer still reports simulated=true",
         "rows": rows,
         "verdict_counts": {},
         "executor_only": executor_only,

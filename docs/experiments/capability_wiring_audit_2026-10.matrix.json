@@ -1,7 +1,7 @@
 {
   "schema": "nexus.capability_wiring_audit.v1",
-  "generated_at": "2026-10-12T22:57:52.380962+00:00",
-  "git_head": "aa095b305cb4ab9268a420df65f2ccb666d49494",
+  "generated_at": "2026-10-13T11:11:51.396938+00:00",
+  "git_head": "ea28c8d86fc77e510b3bcf88176b18e70163e5c6",
   "model_probe": {
     "available": true,
     "url": "http://127.0.0.1:11434",
@@ -44,7 +44,7 @@
   },
   "forcing_knob": "route-oracle line 'Expected capability receipts: <node>' in task_statement via plan_canonical_task_bundle",
   "online_channel": "deterministic no-model stand-in; Workforce binding from WorkforcePolicyLoader.resolve_route('fast_bounded_implementation')",
-  "claim_boundary_note": "receipt_claims_simulated is the ClaimBoundary fail-closed default (CapabilityReceipt.to_dict emits claim_boundary without simulated): the producer cannot attest execution; REAL_UNATTESTED = executor ran and the artifact assertion passed but the receipt still says simulated",
+  "claim_boundary_note": "receipt_claims_simulated is derived by the runtime from execution evidence (nexus-runtime #187); REAL_UNATTESTED = executor ran and the artifact assertion passed but the producer still reports simulated=true",
   "rows": [
     {
       "capability": "codeintel",
@@ -54,7 +54,7 @@
         "reached_via": "EXECUTOR_REGISTRY",
         "function": "_exec_codeintel",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 758
+        "line": 662
       },
       "gaps": [
         "executor performs lookup_implementation only: no code graph, no impact set, no related tests are produced"
@@ -102,9 +102,9 @@
       "policy_used": "production_default",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_codeintel_bea342ed"
+        "ev_cap_codeintel_f109b590"
       ],
       "physical_callable": "capability_executor_registry:codeintel",
       "console_tail": [],
@@ -158,7 +158,7 @@
         ],
         "result": {
           "provider": "PythonCodeSkeletonProvider",
-          "root": "/Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/codeintel__pos_production_default",
+          "root": "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/codeintel__pos_production_default",
           "lookup_symbol": "compute_total",
           "found": true,
           "reason": "",
@@ -174,7 +174,7 @@
         "physical_callable": "nexus.services.codeintel.skeleton_provider.PythonCodeSkeletonProvider.lookup_implementation"
       },
       "receipt_path": "receipts/codeintel.json",
-      "audit_seconds": 0.51
+      "audit_seconds": 0.63
     },
     {
       "capability": "research",
@@ -184,7 +184,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_research",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 876
+        "line": 779
       },
       "gaps": [
         "(fixed in #1862) the executor passes the task under 'task'; outbound provider calls need NEXUS_EXTERNAL_RUNTIME_AUTHORIZED=1"
@@ -246,9 +246,9 @@
       "policy_used": "external_runtime_authorized_flag",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_research_3f8f4e35"
+        "ev_cap_research_8751650c"
       ],
       "physical_callable": "capability_executor_registry:research",
       "console_tail": [],
@@ -300,7 +300,7 @@
         "physical_callable": "nexus.engine.phases.research.ResearchPhaseHandler.run"
       },
       "receipt_path": "receipts/research.json",
-      "audit_seconds": 3.98
+      "audit_seconds": 2.77
     },
     {
       "capability": "research_route",
@@ -310,7 +310,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_research",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 876
+        "line": 779
       },
       "gaps": [
         "selected on every run (required node) but the invoker skips unless escalate-triggered; when triggered it reuses the research executor (same 'task_statement' vs 'task' key mismatch)"
@@ -370,9 +370,9 @@
       "policy_used": "external_runtime_authorized_flag",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_research_343d4b55"
+        "ev_cap_research_0ed29430"
       ],
       "physical_callable": "capability_executor_registry:research",
       "console_tail": [],
@@ -424,7 +424,7 @@
         "physical_callable": "nexus.engine.phases.research.ResearchPhaseHandler.run"
       },
       "receipt_path": "receipts/research_route.json",
-      "audit_seconds": 2.91
+      "audit_seconds": 2.74
     },
     {
       "capability": "hyper",
@@ -434,7 +434,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_hyper_sprint",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 1151
+        "line": 1150
       },
       "gaps": [
         "the learn-phase SLO guard drops llm_mode on any workspace without learn-phase history (audit sets NEXUS_FORCE_LLM_DESPITE_LEARN_SLO=1; the receipt reports llm_mode_effective)"
@@ -477,9 +477,9 @@
           "env": {
             "NEXUS_LOCAL_MODEL_CALL_ALLOWED": "1"
           },
-          "status": "SUCCEEDED",
+          "status": "BLOCKED",
           "path": "e2e",
-          "block_reason": ""
+          "block_reason": "semantic_status=FAILED"
         }
       ],
       "product_path_reachable": true,
@@ -496,17 +496,17 @@
       "policy_used": "local_model_call_allowed",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_hyper_sprint_76013308"
+        "ev_cap_hyper_sprint_d77274f1"
       ],
       "physical_callable": "capability_executor_registry:hyper_sprint",
       "console_tail": [
-        "⚠️ [MemPalace] Ethical blacklist file missing: /Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/hyper__pos_local_model_call_allowed/nexus/config/ethical_blacklist.json"
+        "⚠️ [MemPalace] Ethical blacklist file missing: /private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/hyper__pos_local_model_call_allowed/nexus/config/ethical_b"
       ],
       "negative_control": {
         "name": "negative_control:no_test_file_no_model_call",
-        "passed": true,
+        "passed": false,
         "detail": "neg.sprint_status=FAILED neg.model_calls=0 neg.local_runs=0 neg.block_reason=semantic_status=FAILED",
         "negative_status": "BLOCKED",
         "negative_block_reason": "semantic_status=FAILED"
@@ -515,13 +515,13 @@
       "checks": [
         {
           "name": "sprint_status_success",
-          "passed": true,
-          "detail": "status=SUCCESS reason=stage1_pass_local_channel"
+          "passed": false,
+          "detail": "status=FAILED reason=stage1_no_passing_candidate"
         },
         {
           "name": "sprint_produced_at_least_two_candidates",
           "passed": true,
-          "detail": "attempt_count=2"
+          "detail": "attempt_count=3"
         },
         {
           "name": "llm_mode_effective_local_channel",
@@ -530,13 +530,13 @@
         },
         {
           "name": "model_candidate_verified_by_sprint_pytest",
-          "passed": true,
-          "detail": "model_verified=2 model_calls=6 sources=['llm_local_armor', 'llm_local_armor']"
+          "passed": false,
+          "detail": "model_verified=0 model_calls=9 sources=['local', 'local', 'local']"
         },
         {
           "name": "local_lane_runs_succeeded",
-          "passed": true,
-          "detail": "local unified runs=2"
+          "passed": false,
+          "detail": "local unified runs=0"
         },
         {
           "name": "target_file_restored_after_scoring",
@@ -545,32 +545,36 @@
         },
         {
           "name": "negative_control:no_test_file_no_model_call",
-          "passed": true,
+          "passed": false,
           "detail": "neg.sprint_status=FAILED neg.model_calls=0 neg.local_runs=0 neg.block_reason=semantic_status=FAILED"
         }
       ],
-      "verdict": "REAL",
-      "verdict_reason": "invoked_with_evidence_and_artifact_assertions_passed",
+      "verdict": "BLOCKED_semantic_status=FAILED",
+      "verdict_reason": "executor_or_runtime_blocked",
       "verdict_production_default": "BLOCKED_EXTERNAL_AUTH:local_or_online_model",
       "outcome_excerpt": {
         "action": "run_hyper_sprint",
-        "semantic_status": "SUCCEEDED",
+        "semantic_status": "FAILED",
         "evidence_refs": [
           "ev_hyper_sprint_wiring-hyper-pos_local_model_call_allowed"
         ],
         "result": {
-          "status": "SUCCESS",
-          "reason": "stage1_pass_local_channel",
+          "status": "FAILED",
+          "reason": "stage1_no_passing_candidate",
           "target_file": "pricing.py",
-          "winner_source": "llm_local_armor",
-          "final_score": 1.0,
-          "elapsed_sec": 29.6437,
-          "attempt_count": 2,
-          "model_calls": 6,
+          "winner_source": "local",
+          "final_score": 0.4,
+          "elapsed_sec": 41.7237,
+          "attempt_count": 3,
+          "model_calls": 9,
           "model_name": "qwen2.5-coder:7b-instruct",
-          "model_patch_generated": true,
-          "fallback_used": false,
-          "error_codes": [],
+          "model_patch_generated": false,
+          "fallback_used": true,
+          "error_codes": [
+            "llm_error",
+            "semantic_guard",
+            "stage1_failed"
+          ],
           "pytest_cmd": [
             "/Users/jameschen/Workspace/Nexus-new/.venv/bin/python",
             "-m",
@@ -580,7 +584,7 @@
             "test_pricing.py"
           ]
         },
-        "sprint_status": "SUCCESS",
+        "sprint_status": "FAILED",
         "target_file": "pricing.py",
         "test_file": "test_pricing.py",
         "candidate_count": 3,
@@ -594,41 +598,53 @@
           "active": true,
           "reason": "benchmark_force_llm_despite_learn_slo"
         },
-        "attempt_count": 2,
-        "model_calls": 6,
+        "attempt_count": 3,
+        "model_calls": 9,
         "candidates": [
           {
             "seed": 0,
-            "source": "llm_local_armor",
-            "score": 1.0,
+            "source": "local",
+            "score": 0.4,
             "rejection": "",
-            "code_sha256": "f87a514ed53bb6036b37097e716358b021c810aabbf9a871ada0ca6e2fbe50ee"
+            "code_sha256": "d0909aedd5e0132e03009f4df6f304bdd8f8078abb8e5404c8eb15986e3b2d64"
           },
           {
             "seed": 1,
-            "source": "llm_local_armor",
-            "score": 1.0,
+            "source": "local",
+            "score": 0.4,
             "rejection": "",
-            "code_sha256": "f87a514ed53bb6036b37097e716358b021c810aabbf9a871ada0ca6e2fbe50ee"
-          }
-        ],
-        "model_verified_candidate_count": 2,
-        "unified_runtime_receipts": [
-          {
-            "task_id": "sprint-local-61c90278c9bf-s0",
-            "terminal_status": "INCOMPLETE",
-            "local_status": "SUCCEEDED"
+            "code_sha256": "d0909aedd5e0132e03009f4df6f304bdd8f8078abb8e5404c8eb15986e3b2d64"
           },
           {
-            "task_id": "sprint-local-61c90278c9bf-s1",
+            "seed": 2,
+            "source": "local",
+            "score": 0.0,
+            "rejection": "no_change_candidate",
+            "code_sha256": "05c85b3232ba08e47c291546569c23637898a4b2e8b610716ac3f222557da4ca"
+          }
+        ],
+        "model_verified_candidate_count": 0,
+        "unified_runtime_receipts": [
+          {
+            "task_id": "sprint-local-82d9a92d600a-s0",
             "terminal_status": "INCOMPLETE",
-            "local_status": "SUCCEEDED"
+            "local_status": "FAILED"
+          },
+          {
+            "task_id": "sprint-local-82d9a92d600a-s1",
+            "terminal_status": "INCOMPLETE",
+            "local_status": "FAILED"
+          },
+          {
+            "task_id": "sprint-local-82d9a92d600a-s2",
+            "terminal_status": "INCOMPLETE",
+            "local_status": "FAILED"
           }
         ],
         "physical_callable": "nexus.research.sprint_service.run_hyper_sprint"
       },
       "receipt_path": "receipts/hyper.json",
-      "audit_seconds": 34.14
+      "audit_seconds": 45.98
     },
     {
       "capability": "nightshift",
@@ -638,7 +654,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_nightshift",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 1350
+        "line": 1459
       },
       "gaps": [
         "AutoResearchNightShift runs one round with a bare task string; the phase policy reads <workspace_root>/.nexus/reports/learn/phase_slo_summary.json (right directory); until 2026-10-13 it read a never-written overall_pass_rate key, so every real summary was PassRate=0%; the fixture workspace has no summary, so it is still denied (SLO=phase_slo_summary_missing) before any model call and no recovery report is written"
@@ -701,10 +717,10 @@
       },
       "policy_used": "local_model_call_allowed",
       "path": "e2e",
-      "receipt_claims_simulated": true,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "receipt_claims_simulated": false,
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_nightshift_runner_service_a0331dc9"
+        "ev_cap_nightshift_runner_service_29e8fde8"
       ],
       "physical_callable": "capability_executor_registry:nightshift",
       "console_tail": [
@@ -735,7 +751,7 @@
           "terminal_status": "FAILED",
           "best_score": 0.0,
           "rounds_attempted": 0,
-          "report_path": "/Users/jameschen/Workspace/.scratch/20261013-wiring-batch2/audit2/20261013T041556Z/workspaces/nightshift__pos_local_model_call_allowed/.nexus/reports/nightshift_Nightshift pass over the README wording",
+          "report_path": "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/nightshift__pos_local_model_call_allowed/.nexus/reports/nightshif",
           "learning_closure_present": false,
           "runtime_receipt_present": false
         },
@@ -743,7 +759,7 @@
         "terminal_success": false
       },
       "receipt_path": "receipts/nightshift.json",
-      "audit_seconds": 1.0
+      "audit_seconds": 0.79
     },
     {
       "capability": "swarm",
@@ -753,7 +769,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_swarm_multi_agent",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 1309
+        "line": 1308
       },
       "gaps": [
         "integration goes through the single Candidate integration owner (SelfHostedTaskService.integrate_approved -> ControlledIntegrationManager, #947) and needs a persisted APPROVED lifecycle task (external acceptance bound to the candidate, consumed Owner approval grant, verified receipt); the executor never fabricates it, so a run stops BLOCKED at integration with the facade's refusal"
@@ -801,7 +817,7 @@
           },
           "status": "BLOCKED",
           "path": "e2e",
-          "block_reason": "INTEGRATION_OWNER_AUTHORITY_REQUIRED"
+          "block_reason": "NO_VERIFIED_WORKER"
         }
       ],
       "product_path_reachable": true,
@@ -817,40 +833,17 @@
       },
       "policy_used": "local_model_call_allowed",
       "path": "e2e",
-      "receipt_claims_simulated": true,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "receipt_claims_simulated": false,
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_swarm_multi_agent_ef984267"
+        "ev_cap_swarm_multi_agent_920c0430"
       ],
       "physical_callable": "capability_executor_registry:swarm_multi_agent",
-      "console_tail": [
-        "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC/nexus/contracts/autonomy_goal.py:115: UserWarning: Field name \"schema\" in \"StandingGrantContext\" shadows an attribute in parent \"_FrozenModel\"",
-        "  class StandingGrantContext(_FrozenModel):",
-        "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC/nexus/contracts/autonomy_goal.py:269: UserWarning: Field name \"schema\" in \"AutonomyGoalGrantSpec\" shadows an attribute in parent \"_FrozenModel\"",
-        "  class AutonomyGoalGrantSpec(_FrozenModel):",
-        "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC/nexus/contracts/collaboration_realm.py:101: UserWarning: Field name \"schema\" in \"CollaborationExecutionRealmSpec\" shadows an attribute in parent \"_FrozenModel\"",
-        "  class CollaborationExecutionRealmSpec(_FrozenModel):",
-        "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC/nexus/contracts/lifecycle_action.py:330: UserWarning: Field name \"schema\" in \"LifecycleActionEnvelope\" shadows an attribute in parent \"BaseModel\"",
-        "  class LifecycleActionEnvelope(BaseModel):",
-        "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC/nexus/contracts/lifecycle_action.py:417: UserWarning: Field name \"schema\" in \"ExternalCandidateAdoptionRequest\" shadows an attribute in parent \"BaseModel\"",
-        "  class ExternalCandidateAdoptionRequest(BaseModel):",
-        "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC/nexus/contracts/operator_outcome_receipt.py:86: UserWarning: Field name \"schema\" in \"OperatorOutcomeReceipt\" shadows an attribute in parent \"BaseModel\"",
-        "  class OperatorOutcomeReceipt(BaseModel):",
-        "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC/nexus/orchestrator/autonomy_policy.py:115: UserWarning: Field name \"schema\" in \"StandingGrantRequest\" shadows an attribute in parent \"_FrozenModel\"",
-        "  class StandingGrantRequest(_FrozenModel):",
-        "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC/nexus/orchestrator/autonomy_policy.py:137: UserWarning: Field name \"schema\" in \"StandingGrantDecision\" shadows an attribute in parent \"_FrozenModel\"",
-        "  class StandingGrantDecision(_FrozenModel):",
-        "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC/nexus/orchestrator/autonomy_policy.py:396: UserWarning: Field name \"schema\" in \"AutonomySubmissionBindingSpec\" shadows an attribute in parent \"_FrozenModel\"",
-        "  class AutonomySubmissionBindingSpec(_FrozenModel):",
-        "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC/nexus/orchestrator/autonomy_policy.py:457: UserWarning: Field name \"schema\" in \"AutonomyEvaluationInput\" shadows an attribute in parent \"_FrozenModel\"",
-        "  class AutonomyEvaluationInput(_FrozenModel):",
-        "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC/nexus/orchestrator/autonomy_policy.py:507: UserWarning: Field name \"schema\" in \"AutonomyDecision\" shadows an attribute in parent \"_FrozenModel\"",
-        "  class AutonomyDecision(_FrozenModel):"
-      ],
+      "console_tail": [],
       "negative_control": {
         "name": "negative_control:foreign_lock_blocks_before_worktrees",
         "passed": true,
-        "detail": "neg.block_reason=FILE_LOCK_CONFLICT worktrees=None lock={'lock_file': '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/swarm__neg/.nexus/multi_agent/locks/file_locks.json', 'files': ['calc.py'], 'conflicts': ['calc.py'], 'held_by_this_task': False}",
+        "detail": "neg.block_reason=FILE_LOCK_CONFLICT worktrees=None lock={'lock_file': '/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/swarm__neg/.nexus/multi_agent/locks/file_locks.json', 'files': ['calc.py'], 'conflicts': ['calc.py'], 'held_by_this_task': False}",
         "negative_status": "BLOCKED",
         "negative_block_reason": "FILE_LOCK_CONFLICT"
       },
@@ -858,63 +851,63 @@
       "checks": [
         {
           "name": "swarm_executed_workers",
-          "passed": true,
-          "detail": "action=run_bounded_swarm executed=2 model_calls=6"
+          "passed": false,
+          "detail": "action=run_bounded_swarm executed=0 model_calls=6"
         },
         {
           "name": "no_construct_only_rejection",
           "passed": true,
-          "detail": "error=INTEGRATION_OWNER_AUTHORITY_REQUIRED"
+          "detail": "error=NO_VERIFIED_WORKER"
         },
         {
           "name": "file_lock_held_then_released",
           "passed": true,
-          "detail": "lock={'lock_file': '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/multi_agent/locks/file_locks.json', 'files': ['calc.py'], 'conflicts': [], 'held_by_this_task': True, 'released': True}"
+          "detail": "lock={'lock_file': '/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/multi_agent/locks/file_locks.json', 'files': ['calc.py'], 'conflicts': [], 'held_by_this_task': True, 'released': True}"
         },
         {
           "name": "worker_commits_in_object_store",
-          "passed": true,
-          "detail": "commits=['719ff70563936e042563fcd5ae6140d97d292755', '1db3621c713fb126eaf71fa1b6a12e653c2c121e']"
+          "passed": false,
+          "detail": "commits=[]"
         },
         {
           "name": "winner_verified_by_repro",
-          "passed": true,
-          "detail": "winner={'strategy': 'conservative', 'worktree': '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_conservative', 'commit': '1db3621c713fb126eaf71fa1b6a12e653c2c121e', 'tree': '76c114375636bb682d74df2fc97efece0625a0d4', 'verify_result'"
+          "passed": false,
+          "detail": "winner={} results=[None, None]"
         },
         {
           "name": "integration_offered_to_controlled_manager",
-          "passed": true,
-          "detail": "integration={'authority': 'nexus.orchestrator.self_hosted_task_service.SelfHostedTaskService.integrate_approved -> ControlledIntegrationManager.integrate_authorized_task_state', 'attempted': True, 'merge_performed': False, 'candidate_commit_sha': '1db3621c713fb126eaf71fa1b6a12e653c2c121e', 'source_branch': 'battle_wiring-swarm-pos_local_model_call_allowed_conservative_0', 'target_base_revision': '"
+          "passed": false,
+          "detail": "integration={}"
         },
         {
           "name": "worktrees_removed_and_workspace_untouched",
           "passed": true,
-          "detail": "worktrees=['/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_conservative', '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle"
+          "detail": "worktrees=['/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_conservative', '/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/w"
         },
         {
           "name": "negative_control:foreign_lock_blocks_before_worktrees",
           "passed": true,
-          "detail": "neg.block_reason=FILE_LOCK_CONFLICT worktrees=None lock={'lock_file': '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/swarm__neg/.nexus/multi_agent/locks/file_locks.json', 'files': ['calc.py'], 'conflicts': ['calc.py'], 'held_by_this_task': False}"
+          "detail": "neg.block_reason=FILE_LOCK_CONFLICT worktrees=None lock={'lock_file': '/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/swarm__neg/.nexus/multi_agent/locks/file_locks.json', 'files': ['calc.py'], 'conflicts': ['calc.py'], 'held_by_this_task': False}"
         }
       ],
-      "verdict": "BLOCKED_INTEGRATION_OWNER_AUTHORITY_REQUIRED",
+      "verdict": "BLOCKED_NO_VERIFIED_WORKER",
       "verdict_reason": "executor_or_runtime_blocked",
       "verdict_production_default": "BLOCKED_EXTERNAL_AUTH:local_or_online_workers",
       "outcome_excerpt": {
         "action": "run_bounded_swarm",
-        "semantic_status": "BLOCKED",
+        "semantic_status": "FAILED",
         "evidence_refs": [
           "ev_swarm_wiring-swarm-pos_local_model_call_allowed"
         ],
-        "error": "INTEGRATION_OWNER_AUTHORITY_REQUIRED",
+        "error": "NO_VERIFIED_WORKER",
         "swarm_report": {
           "schema": "nexus.swarm_run.v1",
           "task_id": "wiring-swarm-pos_local_model_call_allowed",
-          "workspace_root": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/swarm__pos_local_model_call_allowed",
+          "workspace_root": "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/swarm__pos_local_model_call_allowed",
           "target_file": "calc.py",
           "verify_script": "repro.py",
           "lock": {
-            "lock_file": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/multi_agent/locks/file_locks.json",
+            "lock_file": "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/multi_agent/locks/file_locks.json",
             "files": [
               "calc.py"
             ],
@@ -925,76 +918,45 @@
           "workers": [
             {
               "strategy": "aggressive",
-              "worktree": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_aggressive",
-              "worker_status": "candidate_written",
-              "model_calls": 3,
-              "model_name": "qwen2.5-coder:7b-instruct",
-              "local_candidate_hash": "6e3cd5c1d45e5bae8c21839e0b556bf294182b0526d23b90e8d16fa6562cd31b",
-              "commit": "719ff70563936e042563fcd5ae6140d97d292755",
-              "tree": "76c114375636bb682d74df2fc97efece0625a0d4",
-              "verify_exit_codes": [
-                0
-              ],
-              "verify_result": "pass",
-              "candidate_state_hash": "719ff70563936e042563fcd5ae6140d97d292755"
+              "worktree": "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_aggressive",
+              "worker_status": "no_candidate",
+              "worker_error": "candidate_not_delivered",
+              "model_calls": 3
             },
             {
               "strategy": "conservative",
-              "worktree": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_conservative",
-              "worker_status": "candidate_written",
-              "model_calls": 3,
-              "model_name": "qwen2.5-coder:7b-instruct",
-              "local_candidate_hash": "6e3cd5c1d45e5bae8c21839e0b556bf294182b0526d23b90e8d16fa6562cd31b",
-              "commit": "1db3621c713fb126eaf71fa1b6a12e653c2c121e",
-              "tree": "76c114375636bb682d74df2fc97efece0625a0d4",
-              "verify_exit_codes": [
-                0
-              ],
-              "verify_result": "pass",
-              "candidate_state_hash": "1db3621c713fb126eaf71fa1b6a12e653c2c121e"
+              "worktree": "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_conservative",
+              "worker_status": "no_candidate",
+              "worker_error": "candidate_not_delivered",
+              "model_calls": 3
             }
           ],
-          "winner": {
-            "strategy": "conservative",
-            "worktree": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_conservative",
-            "commit": "1db3621c713fb126eaf71fa1b6a12e653c2c121e",
-            "tree": "76c114375636bb682d74df2fc97efece0625a0d4",
-            "verify_result": "pass"
-          },
-          "integration": {
-            "authority": "nexus.orchestrator.self_hosted_task_service.SelfHostedTaskService.integrate_approved -> ControlledIntegrationManager.integrate_authorized_task_state",
-            "attempted": true,
-            "merge_performed": false,
-            "candidate_commit_sha": "1db3621c713fb126eaf71fa1b6a12e653c2c121e",
-            "source_branch": "battle_wiring-swarm-pos_local_model_call_allowed_conservative_0",
-            "target_base_revision": "b73f198610e819b631be7c6d3a9a3043c87c2479",
-            "workspace_root": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/swarm__pos_local_model_call_allowed",
-            "refusal": "unknown task_id: wiring-swarm-pos_local_model_call_allowed"
-          },
-          "status": "BLOCKED",
-          "reason": "INTEGRATION_OWNER_AUTHORITY_REQUIRED",
-          "base_commit": "b73f198610e819b631be7c6d3a9a3043c87c2479",
+          "winner": {},
+          "integration": {},
+          "status": "FAILED",
+          "reason": "NO_VERIFIED_WORKER",
+          "base_commit": "c5de2dd807263e7a51600221d9ac36d53ee6b4f1",
           "worktrees": [
-            "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_conservative",
-            "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_aggressive"
+            "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_conservative",
+            "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_aggressive"
           ],
           "branches": [
             "battle_wiring-swarm-pos_local_model_call_allowed_conservative_0",
             "battle_wiring-swarm-pos_local_model_call_allowed_aggressive_1"
           ],
           "worktrees_removed": [
-            "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_conservative",
-            "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_aggressive"
+            "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_conservative",
+            "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_aggressive"
           ]
         },
         "worker_count": 2,
-        "workers_executed": 2,
-        "verified_workers": 2,
+        "workers_executed": 0,
+        "verified_workers": 0,
         "model_calls": 6,
         "physical_callable": "nexus.engine.swarm_run.run_bounded_swarm"
       },
       "receipt_path": "receipts/swarm.json",
-      "audit_seconds": 28.62
+      "audit_seconds": 28.83
     },
     {
       "capability": "multi_agent",
@@ -1004,7 +966,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_swarm_multi_agent",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 1309
+        "line": 1308
       },
       "gaps": [
         "alias of swarm_multi_agent (same executor)"
@@ -1050,7 +1012,7 @@
           },
           "status": "BLOCKED",
           "path": "e2e",
-          "block_reason": "INTEGRATION_OWNER_AUTHORITY_REQUIRED"
+          "block_reason": "NO_VERIFIED_WORKER"
         }
       ],
       "product_path_reachable": true,
@@ -1066,17 +1028,17 @@
       },
       "policy_used": "local_model_call_allowed",
       "path": "e2e",
-      "receipt_claims_simulated": true,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "receipt_claims_simulated": false,
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_swarm_multi_agent_d42b0489"
+        "ev_cap_swarm_multi_agent_9df3e5b6"
       ],
       "physical_callable": "capability_executor_registry:swarm_multi_agent",
       "console_tail": [],
       "negative_control": {
         "name": "negative_control:foreign_lock_blocks_before_worktrees",
         "passed": true,
-        "detail": "neg.block_reason=FILE_LOCK_CONFLICT worktrees=None lock={'lock_file': '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/multi_agent__neg/.nexus/multi_agent/locks/file_locks.json', 'files': ['calc.py'], 'conflicts': ['calc.py'], 'held_by_this_task': False}",
+        "detail": "neg.block_reason=FILE_LOCK_CONFLICT worktrees=None lock={'lock_file': '/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/multi_agent__neg/.nexus/multi_agent/locks/file_locks.json', 'files': ['calc.py'], 'conflicts': ['calc.py'], 'held_by_this_task': False}",
         "negative_status": "BLOCKED",
         "negative_block_reason": "FILE_LOCK_CONFLICT"
       },
@@ -1084,63 +1046,63 @@
       "checks": [
         {
           "name": "swarm_executed_workers",
-          "passed": true,
-          "detail": "action=run_bounded_swarm executed=2 model_calls=8"
+          "passed": false,
+          "detail": "action=run_bounded_swarm executed=0 model_calls=10"
         },
         {
           "name": "no_construct_only_rejection",
           "passed": true,
-          "detail": "error=INTEGRATION_OWNER_AUTHORITY_REQUIRED"
+          "detail": "error=NO_VERIFIED_WORKER"
         },
         {
           "name": "file_lock_held_then_released",
           "passed": true,
-          "detail": "lock={'lock_file': '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/multi_agent/locks/file_locks.json', 'files': ['calc.py'], 'conflicts': [], 'held_by_this_task': True, 'released': True}"
+          "detail": "lock={'lock_file': '/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/multi_agent/locks/file_locks.json', 'files': ['calc.py'], 'conflicts': [], 'held_by_this_task': True, 'released': True}"
         },
         {
           "name": "worker_commits_in_object_store",
-          "passed": true,
-          "detail": "commits=['6a725cb094536ae73a8e2c916660eff8c96611c9', '162be15c1dfd69db3d505a93681ba983d5d8e91b']"
+          "passed": false,
+          "detail": "commits=[]"
         },
         {
           "name": "winner_verified_by_repro",
-          "passed": true,
-          "detail": "winner={'strategy': 'aggressive', 'worktree': '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_aggressive', 'commit': '6a725cb094536ae73a8e2c916660eff8c96611c9', 'tree': '76c114375636bb682d74df2fc97efece0625a0d4', 'verify"
+          "passed": false,
+          "detail": "winner={} results=[None, None]"
         },
         {
           "name": "integration_offered_to_controlled_manager",
-          "passed": true,
-          "detail": "integration={'authority': 'nexus.orchestrator.self_hosted_task_service.SelfHostedTaskService.integrate_approved -> ControlledIntegrationManager.integrate_authorized_task_state', 'attempted': True, 'merge_performed': False, 'candidate_commit_sha': '6a725cb094536ae73a8e2c916660eff8c96611c9', 'source_branch': 'battle_wiring-multi_agent-pos_local_model_call_allowed_aggressive_1', 'target_base_revision"
+          "passed": false,
+          "detail": "integration={}"
         },
         {
           "name": "worktrees_removed_and_workspace_untouched",
           "passed": true,
-          "detail": "worktrees=['/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_conservative', '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/multi_agent__pos_local_model_call_allowed/"
+          "detail": "worktrees=['/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_conservative', '/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/202610"
         },
         {
           "name": "negative_control:foreign_lock_blocks_before_worktrees",
           "passed": true,
-          "detail": "neg.block_reason=FILE_LOCK_CONFLICT worktrees=None lock={'lock_file': '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/multi_agent__neg/.nexus/multi_agent/locks/file_locks.json', 'files': ['calc.py'], 'conflicts': ['calc.py'], 'held_by_this_task': False}"
+          "detail": "neg.block_reason=FILE_LOCK_CONFLICT worktrees=None lock={'lock_file': '/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/multi_agent__neg/.nexus/multi_agent/locks/file_locks.json', 'files': ['calc.py'], 'conflicts': ['calc.py'], 'held_by_this_task': False}"
         }
       ],
-      "verdict": "BLOCKED_INTEGRATION_OWNER_AUTHORITY_REQUIRED",
+      "verdict": "BLOCKED_NO_VERIFIED_WORKER",
       "verdict_reason": "executor_or_runtime_blocked",
       "verdict_production_default": "BLOCKED_EXTERNAL_AUTH:local_or_online_workers",
       "outcome_excerpt": {
         "action": "run_bounded_swarm",
-        "semantic_status": "BLOCKED",
+        "semantic_status": "FAILED",
         "evidence_refs": [
           "ev_swarm_wiring-multi_agent-pos_local_model_call_allowed"
         ],
-        "error": "INTEGRATION_OWNER_AUTHORITY_REQUIRED",
+        "error": "NO_VERIFIED_WORKER",
         "swarm_report": {
           "schema": "nexus.swarm_run.v1",
           "task_id": "wiring-multi_agent-pos_local_model_call_allowed",
-          "workspace_root": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/multi_agent__pos_local_model_call_allowed",
+          "workspace_root": "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/multi_agent__pos_local_model_call_allowed",
           "target_file": "calc.py",
           "verify_script": "repro.py",
           "lock": {
-            "lock_file": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/multi_agent/locks/file_locks.json",
+            "lock_file": "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/multi_agent/locks/file_locks.json",
             "files": [
               "calc.py"
             ],
@@ -1151,76 +1113,45 @@
           "workers": [
             {
               "strategy": "aggressive",
-              "worktree": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_aggressive",
-              "worker_status": "candidate_written",
-              "model_calls": 3,
-              "model_name": "qwen2.5-coder:7b-instruct",
-              "local_candidate_hash": "6e3cd5c1d45e5bae8c21839e0b556bf294182b0526d23b90e8d16fa6562cd31b",
-              "commit": "6a725cb094536ae73a8e2c916660eff8c96611c9",
-              "tree": "76c114375636bb682d74df2fc97efece0625a0d4",
-              "verify_exit_codes": [
-                0
-              ],
-              "verify_result": "pass",
-              "candidate_state_hash": "6a725cb094536ae73a8e2c916660eff8c96611c9"
+              "worktree": "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_aggressive",
+              "worker_status": "no_candidate",
+              "worker_error": "candidate_not_delivered",
+              "model_calls": 3
             },
             {
               "strategy": "conservative",
-              "worktree": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_conservative",
-              "worker_status": "candidate_written",
-              "model_calls": 5,
-              "model_name": "qwen2.5-coder:7b-instruct",
-              "local_candidate_hash": "a38e1153fd828c17a0f6ffd9fe45d7a6b9299226e8c27ec65ef12c5f5a570994",
-              "commit": "162be15c1dfd69db3d505a93681ba983d5d8e91b",
-              "tree": "1957e91467e819d99988e2b744cdb2bee660c693",
-              "verify_exit_codes": [
-                0
-              ],
-              "verify_result": "pass",
-              "candidate_state_hash": "162be15c1dfd69db3d505a93681ba983d5d8e91b"
+              "worktree": "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_conservative",
+              "worker_status": "no_candidate",
+              "worker_error": "candidate_not_delivered",
+              "model_calls": 7
             }
           ],
-          "winner": {
-            "strategy": "aggressive",
-            "worktree": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_aggressive",
-            "commit": "6a725cb094536ae73a8e2c916660eff8c96611c9",
-            "tree": "76c114375636bb682d74df2fc97efece0625a0d4",
-            "verify_result": "pass"
-          },
-          "integration": {
-            "authority": "nexus.orchestrator.self_hosted_task_service.SelfHostedTaskService.integrate_approved -> ControlledIntegrationManager.integrate_authorized_task_state",
-            "attempted": true,
-            "merge_performed": false,
-            "candidate_commit_sha": "6a725cb094536ae73a8e2c916660eff8c96611c9",
-            "source_branch": "battle_wiring-multi_agent-pos_local_model_call_allowed_aggressive_1",
-            "target_base_revision": "41ad7962de50afddd37bda7658bd2c85004f61e2",
-            "workspace_root": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/multi_agent__pos_local_model_call_allowed",
-            "refusal": "unknown task_id: wiring-multi_agent-pos_local_model_call_allowed"
-          },
-          "status": "BLOCKED",
-          "reason": "INTEGRATION_OWNER_AUTHORITY_REQUIRED",
-          "base_commit": "41ad7962de50afddd37bda7658bd2c85004f61e2",
+          "winner": {},
+          "integration": {},
+          "status": "FAILED",
+          "reason": "NO_VERIFIED_WORKER",
+          "base_commit": "041657e6f42e3b9014c583b3c2418b759cc2dbc5",
           "worktrees": [
-            "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_conservative",
-            "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_aggressive"
+            "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_conservative",
+            "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_aggressive"
           ],
           "branches": [
             "battle_wiring-multi_agent-pos_local_model_call_allowed_conservative_0",
             "battle_wiring-multi_agent-pos_local_model_call_allowed_aggressive_1"
           ],
           "worktrees_removed": [
-            "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_conservative",
-            "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_aggressive"
+            "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_conservative",
+            "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_aggressive"
           ]
         },
         "worker_count": 2,
-        "workers_executed": 2,
-        "verified_workers": 2,
-        "model_calls": 8,
+        "workers_executed": 0,
+        "verified_workers": 0,
+        "model_calls": 10,
         "physical_callable": "nexus.engine.swarm_run.run_bounded_swarm"
       },
       "receipt_path": "receipts/multi_agent.json",
-      "audit_seconds": 41.56
+      "audit_seconds": 72.09
     },
     {
       "capability": "drone",
@@ -1230,7 +1161,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_drone",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 1472
+        "line": 1400
       },
       "gaps": [
         "executor calls TacticalDrone.repair_response_schema/normalize_action on the task text only; no sub-task is dispatched and gate_passed is true for any task"
@@ -1283,9 +1214,9 @@
       "policy_used": "production_default",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_drone_922ebd61"
+        "ev_cap_drone_36345f30"
       ],
       "physical_callable": "capability_executor_registry:drone",
       "console_tail": [],
@@ -1332,7 +1263,7 @@
         "physical_callable": "nexus.core.drone_engine.TacticalDrone.repair_response_schema"
       },
       "receipt_path": "receipts/drone.json",
-      "audit_seconds": 0.63
+      "audit_seconds": 0.72
     },
     {
       "capability": "ultra_review",
@@ -1342,7 +1273,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_ultra_review",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 1606
+        "line": 1737
       },
       "gaps": [
         "fixed 2026-10-13 (group D): executor runs UltraReviewService.run(dry_run=False) in a sandbox git worktree; lanes run bandit + ruff S rules (added lines), py_compile + ruff correctness rules and pytest on mapped tests; untracked new files are overlaid but not part of the reviewed diff"
@@ -1395,9 +1326,9 @@
       "policy_used": "production_default",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_ultra_review_8971decc"
+        "ev_cap_ultra_review_841bcb5f"
       ],
       "physical_callable": "capability_executor_registry:ultra_review",
       "console_tail": [],
@@ -1447,11 +1378,11 @@
         "semantic_status": "SUCCEEDED",
         "evidence_refs": [
           "ev_ultra_review_wiring-ultra_review-pos_production_default",
-          "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupD/wt/artifacts/runtime/wiring_audit/20261013T053442Z/workspaces/ultra_review__pos_production_default/.nexus/reports/ultra_review/wiring-ultra_review-pos_production_default_capability_report.json",
-          "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupD/wt/artifacts/runtime/wiring_audit/20261013T053442Z/workspaces/ultra_review__pos_production_default/.nexus/reports/ultra_review/capability_sandboxes/ultra-review-20261013053442896394/changes.diff"
+          "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/ultra_review__pos_production_default/.nexus/reports/ultra_review/wiring-ultra_review-pos_production_default_capability_report.json",
+          "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/ultra_review__pos_production_default/.nexus/reports/ultra_review/capability_sandboxes/ultra-review-20261013111042112980/changes.diff"
         ],
         "result": {
-          "run_id": "ultra-review-20261013053442896394",
+          "run_id": "ultra-review-20261013111042112980",
           "review_status": "PASS",
           "mode": "review",
           "diff_bytes": 230,
@@ -1500,11 +1431,11 @@
         ],
         "findings": [],
         "blocked_reason": "",
-        "report_path": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupD/wt/artifacts/runtime/wiring_audit/20261013T053442Z/workspaces/ultra_review__pos_production_default/.nexus/reports/ultra_review/wiring-ultra_review-pos_production_default_capability_report.json",
+        "report_path": "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/ultra_review__pos_production_default/.nexus/reports/ultra_review/wiring-ultra_review-pos_production_default_capability_report.json",
         "physical_callable": "nexus.engine.ultra_review_service.UltraReviewService.run"
       },
       "receipt_path": "receipts/ultra_review.json",
-      "audit_seconds": 2.65
+      "audit_seconds": 2.63
     },
     {
       "capability": "autoreason",
@@ -1514,7 +1445,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_autoreason",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 1239
+        "line": 1057
       },
       "gaps": [
         "executor ranks one hard-coded candidate {'id': 'c0', 'score': 1.0}; context cannot carry candidates (no allowlisted constraint)"
@@ -1579,9 +1510,9 @@
       "policy_used": "external_runtime_authorized_flag",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_autoreason_213344b4"
+        "ev_cap_autoreason_82cd8c3b"
       ],
       "physical_callable": "capability_executor_registry:autoreason",
       "console_tail": [],
@@ -1770,7 +1701,7 @@
         "physical_callable": "nexus.engine.autoreason_service.AutoreasonService.run"
       },
       "receipt_path": "receipts/autoreason.json",
-      "audit_seconds": 1.47
+      "audit_seconds": 1.51
     },
     {
       "capability": "ddtree",
@@ -1780,7 +1711,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_ddtree",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 2523
+        "line": 2401
       },
       "gaps": [
         "executor plans one hard-coded candidate c0 with max_candidates=2, so nothing can be pruned (pruned_count is always 0)"
@@ -1846,9 +1777,9 @@
       "policy_used": "external_runtime_authorized_flag",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_ddtree_c8353a77"
+        "ev_cap_ddtree_cb827e40"
       ],
       "physical_callable": "capability_executor_registry:ddtree",
       "console_tail": [],
@@ -1929,7 +1860,7 @@
         "physical_callable": "nexus.engine.ddtree_adapter.DDTreeAdapter.plan"
       },
       "receipt_path": "receipts/ddtree.json",
-      "audit_seconds": 1.47
+      "audit_seconds": 1.58
     },
     {
       "capability": "lancedb",
@@ -1939,7 +1870,7 @@
         "reached_via": "EXECUTOR_REGISTRY",
         "function": "_exec_lancedb",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 833
+        "line": 737
       },
       "gaps": [
         "searches only the 'policy' FTS table of the workspace knowledge root; no vector search"
@@ -1985,9 +1916,9 @@
       "policy_used": "production_default",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_lancedb_cea5a848"
+        "ev_cap_lancedb_b56fde28"
       ],
       "physical_callable": "capability_executor_registry:lancedb",
       "console_tail": [],
@@ -2045,7 +1976,7 @@
         "physical_callable": "nexus.services.memory_repository.MemoryRepository.search_fts"
       },
       "receipt_path": "receipts/lancedb.json",
-      "audit_seconds": 0.48
+      "audit_seconds": 0.49
     },
     {
       "capability": "memory",
@@ -2055,7 +1986,7 @@
         "reached_via": "EXECUTOR_REGISTRY",
         "function": "_exec_memory",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 2092
+        "line": 1971
       },
       "gaps": [
         "the memory_query constraint is never fed (UnifiedRuntime context has no memory_query); the executor searches with the whole task statement as a LIKE pattern, so a hit needs a stored insight containing that entire text"
@@ -2101,9 +2032,9 @@
       "policy_used": "production_default",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_memory_4bc514f7"
+        "ev_cap_memory_773cb146"
       ],
       "physical_callable": "capability_executor_registry:memory",
       "console_tail": [],
@@ -2148,7 +2079,7 @@
         ],
         "result": {
           "hit_count": 1,
-          "root": "/Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/memory__pos_production_default"
+          "root": "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/memory__pos_production_default"
         },
         "query": "refund",
         "hit_count": 1,
@@ -2157,7 +2088,7 @@
         "physical_callable": "nexus.core.memory_manager.ProjectMemoryManager.search"
       },
       "receipt_path": "receipts/memory.json",
-      "audit_seconds": 0.41
+      "audit_seconds": 0.46
     },
     {
       "capability": "mempalace_gate",
@@ -2167,7 +2098,7 @@
         "reached_via": "EXECUTOR_REGISTRY",
         "function": "_exec_mempalace",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 396
+        "line": 416
       },
       "gaps": [
         "the blacklist check runs only on retrieved artifacts (MemPalace.verify), not on tool invocations"
@@ -2215,9 +2146,9 @@
       "policy_used": "production_default",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_mempalace_0aaa441f"
+        "ev_cap_mempalace_98f245da"
       ],
       "physical_callable": "capability_executor_registry:mempalace",
       "console_tail": [],
@@ -2261,7 +2192,7 @@
         ],
         "result": {
           "artifact_id": "wiring-clean-001",
-          "stored_aaak_id": "capability_evidence-1791845797",
+          "stored_aaak_id": "capability_evidence-1791889848",
           "retrieved_count": 1
         },
         "ingest_performed": true,
@@ -2271,7 +2202,7 @@
         "physical_callable": "nexus.services.mem_palace.MemPalace.ingest_to_shards+retrieve_from_shards+verify"
       },
       "receipt_path": "receipts/mempalace_gate.json",
-      "audit_seconds": 0.41
+      "audit_seconds": 0.45
     },
     {
       "capability": "belief",
@@ -2281,7 +2212,7 @@
         "reached_via": "EXECUTOR_REGISTRY",
         "function": "_exec_belief",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 1142
+        "line": 960
       },
       "gaps": [
         "read-only: assess_confidence on the task statement; no outcome update path exists in the registry executor"
@@ -2327,9 +2258,9 @@
       "policy_used": "production_default",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_belief_7f06f05d"
+        "ev_cap_belief_4e338188"
       ],
       "physical_callable": "capability_executor_registry:belief",
       "console_tail": [],
@@ -2375,7 +2306,7 @@
         "physical_callable": "nexus.core.belief_engine.BeliefEngine.assess_confidence"
       },
       "receipt_path": "receipts/belief.json",
-      "audit_seconds": 0.41
+      "audit_seconds": 0.46
     },
     {
       "capability": "artifact_gate",
@@ -2432,8 +2363,8 @@
       "policy_switches_needed": {},
       "policy_used": "production_default",
       "path": "e2e",
-      "receipt_claims_simulated": true,
-      "claim_boundary_simulated_source": "UnifiedRuntime receipt.receipt_base.claim_boundary (ClaimBoundary default)",
+      "receipt_claims_simulated": false,
+      "claim_boundary_simulated_source": "UnifiedRuntime receipt.capabilities[<cap>].claim_boundary (runtime-attested)",
       "evidence_refs": [
         "capability:artifact_gate:wiring-artifact_gate-pos_production_default:postflight"
       ],
@@ -2474,8 +2405,8 @@
           "detail": "pos.gate=True neg.gate=False neg.blockers=['verifier_gate_passed_false', 'verifier_status_fail', 'missing_verifier_source_hash']"
         }
       ],
-      "verdict": "REAL_UNATTESTED",
-      "verdict_reason": "executor_ran_and_artifact_passed_but_receipt_claims_simulated_true",
+      "verdict": "REAL",
+      "verdict_reason": "invoked_with_evidence_and_artifact_assertions_passed",
       "outcome_excerpt": {
         "status": "PASS",
         "action": "evaluate_postflight_gate",
@@ -2496,7 +2427,7 @@
           "verifier_gate_passed": true,
           "online_invoked": true,
           "local_invoked": false,
-          "bundle_hash": "996f65dfc0576fa7c4bd7b9a97d2915ebd4c0d80fbc1d0b108f6856857818f86",
+          "bundle_hash": "3bb58fa066e82955970069504f3a96368b1840696bced04a72b121f9c8968321",
           "context_task_id": "wiring-artifact_gate-pos_production_default"
         },
         "public_claim_allowed": false,
@@ -2525,7 +2456,7 @@
         }
       },
       "receipt_path": "receipts/artifact_gate.json",
-      "audit_seconds": 0.46
+      "audit_seconds": 0.49
     },
     {
       "capability": "claim_gate",
@@ -2584,8 +2515,8 @@
       "policy_switches_needed": {},
       "policy_used": "production_default",
       "path": "e2e",
-      "receipt_claims_simulated": true,
-      "claim_boundary_simulated_source": "UnifiedRuntime receipt.receipt_base.claim_boundary (ClaimBoundary default)",
+      "receipt_claims_simulated": false,
+      "claim_boundary_simulated_source": "UnifiedRuntime receipt.capabilities[<cap>].claim_boundary (runtime-attested)",
       "evidence_refs": [
         "capability:claim_gate:wiring-claim_gate-pos_production_default:postflight"
       ],
@@ -2626,8 +2557,8 @@
           "detail": "pos.gate=True neg.gate=False neg.blockers=['verifier_gate_passed_false', 'verifier_status_fail', 'missing_verifier_source_hash']"
         }
       ],
-      "verdict": "REAL_UNATTESTED",
-      "verdict_reason": "executor_ran_and_artifact_passed_but_receipt_claims_simulated_true",
+      "verdict": "REAL",
+      "verdict_reason": "invoked_with_evidence_and_artifact_assertions_passed",
       "outcome_excerpt": {
         "status": "PASS",
         "action": "evaluate_postflight_gate",
@@ -2648,7 +2579,7 @@
           "verifier_gate_passed": true,
           "online_invoked": true,
           "local_invoked": false,
-          "bundle_hash": "475157d86eb86958ab8d0cc4b66f2e1721fc92e0429398f2af5ddd39dd6e9aa8",
+          "bundle_hash": "9e219d2a5646fb28d234acc4069fba2b3ad18342323b70fd07778065cf63475a",
           "context_task_id": "wiring-claim_gate-pos_production_default"
         },
         "public_claim_allowed": false,
@@ -2677,7 +2608,7 @@
         }
       },
       "receipt_path": "receipts/claim_gate.json",
-      "audit_seconds": 0.45
+      "audit_seconds": 0.49
     },
     {
       "capability": "delivery_gate",
@@ -2730,8 +2661,8 @@
       "policy_switches_needed": {},
       "policy_used": "production_default",
       "path": "e2e",
-      "receipt_claims_simulated": true,
-      "claim_boundary_simulated_source": "UnifiedRuntime receipt.receipt_base.claim_boundary (ClaimBoundary default)",
+      "receipt_claims_simulated": false,
+      "claim_boundary_simulated_source": "UnifiedRuntime receipt.capabilities[<cap>].claim_boundary (runtime-attested)",
       "evidence_refs": [
         "capability:delivery_gate:wiring-delivery_gate-pos_production_default:postflight"
       ],
@@ -2772,8 +2703,8 @@
           "detail": "pos.gate=True neg.gate=False neg.blockers=['verifier_gate_passed_false', 'verifier_status_fail', 'missing_verifier_source_hash']"
         }
       ],
-      "verdict": "REAL_UNATTESTED",
-      "verdict_reason": "executor_ran_and_artifact_passed_but_receipt_claims_simulated_true",
+      "verdict": "REAL",
+      "verdict_reason": "invoked_with_evidence_and_artifact_assertions_passed",
       "outcome_excerpt": {
         "status": "PASS",
         "action": "evaluate_postflight_gate",
@@ -2794,7 +2725,7 @@
           "verifier_gate_passed": true,
           "online_invoked": true,
           "local_invoked": false,
-          "bundle_hash": "9b2bd2a2e27c4225b0a18832f3bb7bfb2175cab408ef0aceb9435c80aa00e181",
+          "bundle_hash": "1e22b3eafce69d53a47f74bcb78700791f40bfc1f47572424ea311bd7963619b",
           "context_task_id": "wiring-delivery_gate-pos_production_default"
         },
         "public_claim_allowed": false,
@@ -2823,7 +2754,7 @@
         }
       },
       "receipt_path": "receipts/delivery_gate.json",
-      "audit_seconds": 0.45
+      "audit_seconds": 0.49
     },
     {
       "capability": "acceptance_check",
@@ -2833,7 +2764,7 @@
         "reached_via": "EXECUTOR_REGISTRY (run after the verifier stage)",
         "function": "_exec_acceptance_check",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 2697
+        "line": 2577
       },
       "gaps": [],
       "trigger_switch": null,
@@ -2882,9 +2813,9 @@
       "policy_used": "production_default",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_acceptance_check_c0d621c0"
+        "ev_cap_acceptance_check_fe8a59c4"
       ],
       "physical_callable": "capability_executor_registry:acceptance_check",
       "console_tail": [],
@@ -2934,7 +2865,7 @@
         "task_id": "wiring-acceptance_check-pos_production_default"
       },
       "receipt_path": "receipts/acceptance_check.json",
-      "audit_seconds": 0.45
+      "audit_seconds": 0.49
     },
     {
       "capability": "pregate",
@@ -2944,7 +2875,7 @@
         "reached_via": "EXECUTOR_REGISTRY",
         "function": "_exec_pregate",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 2287
+        "line": 2167
       },
       "gaps": [],
       "trigger_switch": null,
@@ -2990,9 +2921,9 @@
       "policy_used": "production_default",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_pregate_5cc9ee8b"
+        "ev_cap_pregate_ec1c8387"
       ],
       "physical_callable": "capability_executor_registry:pregate",
       "console_tail": [],
@@ -3055,7 +2986,7 @@
         "physical_callable": "nexus.engine.cli_pregate.run_cli_pregate"
       },
       "receipt_path": "receipts/pregate.json",
-      "audit_seconds": 0.45
+      "audit_seconds": 0.48
     },
     {
       "capability": "forecast_gate",
@@ -3065,7 +2996,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_forecast_gate",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 3370
+        "line": 3429
       },
       "gaps": [],
       "untriggered_production_default": {
@@ -3115,14 +3046,14 @@
       "policy_used": "production_default",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_forecast_gate_22af3c2a"
+        "ev_cap_forecast_gate_bfd3804a"
       ],
       "physical_callable": "capability_executor_registry:forecast_pregate",
       "console_tail": [
-        "⚠️ [ASHLoader] Missing /Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/forecast_gate__pos_production_default/.nexus/ash_matrix.yaml, using defaults.",
-        "⚠️ [ASHTemplateLoader] Missing /Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/forecast_gate__pos_production_default/.nexus/ash_templates.yaml, using minimal built-",
+        "⚠️ [ASHLoader] Missing /private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/forecast_gate__pos_production_default/.nexus/ash_matrix.yaml, using defaults.",
+        "⚠️ [ASHTemplateLoader] Missing /private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/forecast_gate__pos_production_default/.nexus/ash_templates.yaml, using min",
         "🚨 [Gate:Reject] POLICY_VIOLATION[D-ROI]: 0.01 below threshold 0.5. Strategy too expensive.! Triggering Adaptive Self-Healing...",
         "🚨 [ASH:v24] Node [wiring-forecast_gate-pos_production_default] failed. Triggering adaptive repair...",
         "🛡️ [ASHResolver] Mandatory regression_test missing, injecting default.",
@@ -3152,7 +3083,7 @@
         {
           "name": "state_file_on_disk",
           "passed": true,
-          "detail": "/Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/forecast_gate__pos_production_default/.nexus/forecast/wiring-forecast_gate-pos_production_default/.musestate"
+          "detail": "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/forecast_gate__pos_production_default/.nexus/forecast/wiring-forecast_gate-pos_production_default/.musestate"
         },
         {
           "name": "negative_control:low_risk_task_proceeds",
@@ -3180,7 +3111,7 @@
         "decision_emitted": true,
         "ash_strategy": "research_first",
         "state_persisted": true,
-        "state_path": "/Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/forecast_gate__pos_production_default/.nexus/forecast/wiring-forecast_gate-pos_production_default/.musestate",
+        "state_path": "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/forecast_gate__pos_production_default/.nexus/forecast/wiring-forecast_gate-pos_production_default/.musestate",
         "predictor_influence": [
           {
             "name": "latent_predictor_v20",
@@ -3215,7 +3146,7 @@
         ]
       },
       "receipt_path": "receipts/forecast_gate.json",
-      "audit_seconds": 0.62
+      "audit_seconds": 0.67
     },
     {
       "capability": "plan_quality_gate",
@@ -3225,7 +3156,7 @@
         "reached_via": "EXECUTOR_REGISTRY",
         "function": "_exec_plan_quality_gate",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 2150
+        "line": 2029
       },
       "gaps": [],
       "trigger_switch": null,
@@ -3271,9 +3202,9 @@
       "policy_used": "production_default",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_plan_quality_gate_91bf9ded"
+        "ev_cap_plan_quality_gate_cecf311c"
       ],
       "physical_callable": "capability_executor_registry:plan_quality_gate",
       "console_tail": [],
@@ -3326,7 +3257,7 @@
         "physical_callable": "nexus.core.plan_quality_gate.PlanQualityGate.evaluate"
       },
       "receipt_path": "receipts/plan_quality_gate.json",
-      "audit_seconds": 0.41
+      "audit_seconds": 0.45
     },
     {
       "capability": "sandbox",
@@ -3336,7 +3267,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_sandbox_runner",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 1540
+        "line": 1463
       },
       "gaps": [],
       "untriggered_production_default": {
@@ -3387,9 +3318,9 @@
       "policy_used": "production_default",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_sandbox_runner_351f6ad7"
+        "ev_cap_sandbox_runner_36818a14"
       ],
       "physical_callable": "capability_executor_registry:sandbox_runner",
       "console_tail": [],
@@ -3410,7 +3341,7 @@
         {
           "name": "workspace_isolated_copy",
           "passed": true,
-          "detail": "effective_cwd=ult/.nexus/sandbox/runs/run_1791845801630_0febc24c/workspace"
+          "detail": "effective_cwd=ult/.nexus/sandbox/runs/run_1791889853043_47d4425b/workspace"
         },
         {
           "name": "exit_code_zero",
@@ -3437,9 +3368,9 @@
           "ev_sandbox_run_wiring-sandbox-pos_production_default"
         ],
         "result": {
-          "run_id": "run_1791845801630_0febc24c",
-          "report_path": "/Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/sandbox__pos_production_default/.nexus/sandbox/runs/run_1791845801630_0febc2",
-          "duration_sec": 0.02542901039123535
+          "run_id": "run_1791889853043_47d4425b",
+          "report_path": "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/sandbox__pos_production_default/.nexus/sandbox/runs/run_179188985",
+          "duration_sec": 0.025735139846801758
         },
         "sandbox_executed": true,
         "workspace_isolated": true,
@@ -3459,7 +3390,7 @@
         "reached_via": "EXECUTOR_REGISTRY",
         "function": "_exec_harness_preflight_sensor",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 2355
+        "line": 2233
       },
       "gaps": [
         "pending_capabilities/selected_capabilities are not in the UnifiedRuntime capability_context, so the sensor evaluates empty lists and passes vacuously"
@@ -3506,9 +3437,9 @@
       "policy_used": "production_default",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_harness_preflight_sensor_f20dda17"
+        "ev_cap_harness_preflight_sensor_41678339"
       ],
       "physical_callable": "capability_executor_registry:harness_preflight_sensor",
       "console_tail": [],
@@ -3594,7 +3525,7 @@
         ]
       },
       "receipt_path": "receipts/harness_preflight_sensor.json",
-      "audit_seconds": 0.43
+      "audit_seconds": 0.47
     },
     {
       "capability": "committee",
@@ -3604,7 +3535,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_committee",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 3006
+        "line": 3156
       },
       "gaps": [
         "the controller is off unless NEXUS_USE_COMMITTEE=1; without committee_verify_commands the global VerifierRegistry is empty by default, so no verdict is recorded and the receipt fails"
@@ -3680,9 +3611,9 @@
       "policy_used": "committee_feature_flag",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_committee_1893976c"
+        "ev_cap_committee_3a939b75"
       ],
       "physical_callable": "capability_executor_registry:committee",
       "console_tail": [
@@ -3711,7 +3642,7 @@
         {
           "name": "winner_or_abstain",
           "passed": true,
-          "detail": "winner=wiring-committee-pos_committee_feature_flag-wiring-proposer-a-1-aeef abstain=False"
+          "detail": "winner=wiring-committee-pos_committee_feature_flag-wiring-proposer-a-1-d280 abstain=False"
         },
         {
           "name": "each_candidate_executed_in_own_copy",
@@ -3746,7 +3677,7 @@
         "error": "",
         "result": {
           "task_id": "wiring-committee-pos_committee_feature_flag",
-          "winner_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-a-1-aeef",
+          "winner_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-a-1-d280",
           "abstained": false,
           "failure_bucket": "",
           "confidence": 0.7,
@@ -3759,31 +3690,31 @@
         "verdicts": [
           {
             "verifier": "patch_execution",
-            "candidate_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-a-1-aeef",
+            "candidate_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-a-1-d280",
             "verdict": "pass",
             "score": 1.0
           },
           {
             "verifier": "patch_execution",
-            "candidate_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-b-1-d7a2",
+            "candidate_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-b-1-1fff",
             "verdict": "fail",
             "score": 0.0
           },
           {
             "verifier": "patch_execution",
-            "candidate_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-c-1-f6fb",
+            "candidate_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-c-1-b48b",
             "verdict": "fail",
             "score": 0.0
           }
         ],
-        "winner_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-a-1-aeef",
+        "winner_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-a-1-d280",
         "winner_proposer_id": "wiring-proposer-a",
         "explicit_abstain": false,
         "verifier_mode": "patch_execution",
         "execution_results": [
           {
-            "candidate_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-a-1-aeef",
-            "workspace": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/committee__pos_committee_feature_flag/.nexus/committee/wiring-committee-pos_committee_feature_flag/candidate-0",
+            "candidate_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-a-1-d280",
+            "workspace": "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/committee__pos_committee_feature_flag/.nexus/committee/wiring-committee-pos_committee_feature_flag/candidate-0",
             "patch_sha256": "4c25d8cc4fbe181aa2f2f91b7d6295e8787f616feb6b5b75b88e620bf079f74f",
             "apply_status": "applied",
             "commands": [
@@ -3795,8 +3726,8 @@
             "verify_result": "pass"
           },
           {
-            "candidate_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-b-1-d7a2",
-            "workspace": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/committee__pos_committee_feature_flag/.nexus/committee/wiring-committee-pos_committee_feature_flag/candidate-1",
+            "candidate_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-b-1-1fff",
+            "workspace": "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/committee__pos_committee_feature_flag/.nexus/committee/wiring-committee-pos_committee_feature_flag/candidate-1",
             "patch_sha256": "52346d16453a301b3f2ce811431d6483eb6d262bcf1daf3219312464822c34bc",
             "apply_status": "applied",
             "commands": [
@@ -3808,8 +3739,8 @@
             "verify_result": "fail"
           },
           {
-            "candidate_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-c-1-f6fb",
-            "workspace": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/committee__pos_committee_feature_flag/.nexus/committee/wiring-committee-pos_committee_feature_flag/candidate-2",
+            "candidate_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-c-1-b48b",
+            "workspace": "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/committee__pos_committee_feature_flag/.nexus/committee/wiring-committee-pos_committee_feature_flag/candidate-2",
             "patch_sha256": "b579d2b6073b308b28744e2105152c67faecd1d922bd154f11824dce5048f8af",
             "apply_status": "applied",
             "commands": [
@@ -3823,7 +3754,7 @@
         ]
       },
       "receipt_path": "receipts/committee.json",
-      "audit_seconds": 1.23
+      "audit_seconds": 1.29
     },
     {
       "capability": "xray",
@@ -3833,7 +3764,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_xray",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 3591
+        "line": 3624
       },
       "gaps": [
         "scan target is hard-coded to <project_root>/nexus/services/capability_registry.py regardless of the task"
@@ -3885,9 +3816,9 @@
       "policy_used": "production_default",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_xray_ec7bad2a"
+        "ev_cap_xray_7a5a0cdb"
       ],
       "physical_callable": "capability_executor_registry:xray",
       "console_tail": [],
@@ -3929,7 +3860,7 @@
           "report_preview": ".nexus/runtime/wiring-xray-pos_production_default/xray_report_full.md"
         },
         "scan_targets": [
-          "/Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/xray__pos_production_default/nexus/services/capability_registry.py"
+          "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/xray__pos_production_default/nexus/services/capability_registry.py"
         ],
         "physical_callable": "nexus.services.xray_service.XRayService.run",
         "run_id": "wiring-xray-pos_production_default",
@@ -3939,7 +3870,7 @@
         ]
       },
       "receipt_path": "receipts/xray.json",
-      "audit_seconds": 0.62
+      "audit_seconds": 0.67
     },
     {
       "capability": "metabolism",
@@ -3949,7 +3880,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_metabolism_resume",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 1896
+        "line": 1852
       },
       "gaps": [],
       "untriggered_production_default": {
@@ -3999,9 +3930,9 @@
       "policy_used": "production_default",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_metabolism_resume_4e7401f2"
+        "ev_cap_metabolism_resume_29f97e07"
       ],
       "physical_callable": "capability_executor_registry:metabolism_resume",
       "console_tail": [],
@@ -4017,12 +3948,12 @@
         {
           "name": "checkpoint_on_disk",
           "passed": true,
-          "detail": "/Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/metabolism__pos_production_default/.nexus/metabolism/task_stack.json"
+          "detail": "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/metabolism__pos_production_default/.nexus/metabolism/task_stack.json"
         },
         {
           "name": "seed_on_disk_hash_matches",
           "passed": true,
-          "detail": "seed_hash=451677b42ced"
+          "detail": "seed_hash=a92ebe82eb1e"
         },
         {
           "name": "threshold_crossed",
@@ -4041,18 +3972,18 @@
         "action": "distill_and_checkpoint",
         "semantic_status": "VERIFIED",
         "evidence_refs": [
-          "file:/Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/metabolism__pos_production_default/.nexus/metabolism/task_stack.json",
-          "file:/Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/metabolism__pos_production_default/.nexus/metabolism/session_seed.json"
+          "file:/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/metabolism__pos_production_default/.nexus/metabolism/task_stack.json",
+          "file:/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/metabolism__pos_production_default/.nexus/metabolism/session_seed.json"
         ],
         "result": {
           "token_usage": 110000,
           "token_limit": 128000,
           "threshold_crossed": true,
           "checkpoint_before_hash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-          "checkpoint_after_hash": "f610da92313a4b0eca527fab833fae29fd5769661613a5547977a40a4c21bd66",
-          "checkpoint_path": "/Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/metabolism__pos_production_default/.nexus/metabolism/task_stack.json",
-          "seed_path": "/Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/metabolism__pos_production_default/.nexus/metabolism/session_seed.json",
-          "seed_hash": "451677b42ceda73ac09933439cb37422054986df2d6b25e64bf92464ff37de68",
+          "checkpoint_after_hash": "e617ab4488514012fb2f35dc00637cc212af16ad343b25662189fbffd28b3440",
+          "checkpoint_path": "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/metabolism__pos_production_default/.nexus/metabolism/task_stack.j",
+          "seed_path": "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/metabolism__pos_production_default/.nexus/metabolism/session_seed",
+          "seed_hash": "a92ebe82eb1e5f5061bef5e677bc7a9001cd6ba8a9ebe031fc501b9ec7854638",
           "transaction_id": null,
           "upload": "NOT_PERFORMED",
           "distill_status": "LOCAL_ONLY",
@@ -4064,7 +3995,7 @@
         "physical_callable": "nexus.services.metabolism_engine.SessionMetabolism.distill"
       },
       "receipt_path": "receipts/metabolism.json",
-      "audit_seconds": 0.62
+      "audit_seconds": 0.7
     },
     {
       "capability": "meta_opt",
@@ -4074,7 +4005,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_meta_opt",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 3778
+        "line": 3788
       },
       "gaps": [],
       "untriggered_production_default": {
@@ -4123,9 +4054,9 @@
       "policy_used": "production_default",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_meta_opt_ca140576"
+        "ev_cap_meta_opt_ef9c9bf6"
       ],
       "physical_callable": "capability_executor_registry:benchmark_meta_opt",
       "console_tail": [],
@@ -4165,8 +4096,8 @@
         "action": "save_episode_and_tune",
         "semantic_status": "VERIFIED",
         "evidence_refs": [
-          "file:/Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/meta_opt__pos_production_default/.nexus/memory/outcome_history.jsonl",
-          "file:/Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/meta_opt__pos_production_default/.nexus/memory/dynamic_learning_policy.json"
+          "file:/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/meta_opt__pos_production_default/.nexus/memory/outcome_history.jsonl",
+          "file:/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/meta_opt__pos_production_default/.nexus/memory/dynamic_learning_policy.json"
         ],
         "result": {
           "source_experiences_count": 1,
@@ -4180,7 +4111,7 @@
         "physical_callable": "nexus.learning.outcome_memory.OutcomeMemoryManager.save_episode_and_tune_sync"
       },
       "receipt_path": "receipts/meta_opt.json",
-      "audit_seconds": 0.62
+      "audit_seconds": 0.67
     },
     {
       "capability": "local_model_executor",
@@ -4226,7 +4157,7 @@
           },
           "status": "BLOCKED",
           "path": "e2e",
-          "block_reason": "SELECTED_NOT_EXECUTED:planner_selected_no_runtime_executor:local_stage[local_output_not_delivered,candidate_not_isolated,verifier_not_passed; executor_invoked=True; model_call_count=7]"
+          "block_reason": "SELECTED_NOT_EXECUTED:planner_selected_no_runtime_executor:local_stage[local_output_not_delivered,candidate_not_isolated,verifier_not_passed; executor_invoked=True; model_call_count=2]"
         }
       ],
       "product_path_reachable": true,
@@ -4243,7 +4174,7 @@
       "policy_used": "local_model_call_allowed",
       "path": "e2e",
       "receipt_claims_simulated": true,
-      "claim_boundary_simulated_source": "UnifiedRuntime receipt.receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "UnifiedRuntime receipt.capabilities[<cap>].claim_boundary (runtime-attested)",
       "evidence_refs": [
         "local:wiring-local_model_executor-pos_local_model_call_allowed:formal_runtime:local_output_not_delivered"
       ],
@@ -4259,17 +4190,17 @@
         {
           "name": "model_really_called",
           "passed": true,
-          "detail": "local_model_invoked=True model_call_count=7"
+          "detail": "local_model_invoked=True model_call_count=2"
         },
         {
           "name": "provider_ledger_has_ollama_metrics_for_audit_model",
           "passed": true,
-          "detail": "ledger phases=['spec_gen', 'patch', 'retry', 'spec_gen', 'retry', 'spec_gen', 'retry']"
+          "detail": "ledger phases=['spec_gen', 'patch']"
         },
         {
           "name": "candidate_edit_materialized_in_isolated_world",
           "passed": true,
-          "detail": "world-C calc.py files=['.armor/workspaces/world-c-wiring-local_model_executor-pos_-215ml67q/calc.py']"
+          "detail": "world-C calc.py files=['.armor/workspaces/world-c-wiring-local_model_executor-pos_-uioqhbxu/calc.py']"
         },
         {
           "name": "candidate_delivered_to_runtime",
@@ -4282,11 +4213,11 @@
           "detail": "calc.py hash unchanged"
         }
       ],
-      "verdict": "BLOCKED_SELECTED_NOT_EXECUTED:planner_selected_no_runtime_executor:local_stage[local_output_not_delivered,candidate_not_isolated,verifier_not_passed; executor_invoked=True; model_call_count=7]",
+      "verdict": "BLOCKED_SELECTED_NOT_EXECUTED:planner_selected_no_runtime_executor:local_stage[local_output_not_delivered,candidate_not_isolated,verifier_not_passed; executor_invoked=True; model_call_count=2]",
       "verdict_reason": "executor_or_runtime_blocked",
       "outcome_excerpt": {},
       "receipt_path": "receipts/local_model_executor.json",
-      "audit_seconds": 25.81
+      "audit_seconds": 6.12
     },
     {
       "capability": "repair_loop",
@@ -4347,7 +4278,7 @@
       "policy_used": "local_model_call_allowed",
       "path": "e2e",
       "receipt_claims_simulated": true,
-      "claim_boundary_simulated_source": "UnifiedRuntime receipt.receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "UnifiedRuntime receipt.capabilities[<cap>].claim_boundary (runtime-attested)",
       "evidence_refs": [
         "wiring-audit:wiring-repair_loop-pos_local_model_call_allowed:request"
       ],
@@ -4363,17 +4294,17 @@
         {
           "name": "model_really_called",
           "passed": true,
-          "detail": "local_model_invoked=True model_call_count=7"
+          "detail": "local_model_invoked=True model_call_count=2"
         },
         {
           "name": "provider_ledger_has_ollama_metrics_for_audit_model",
           "passed": true,
-          "detail": "ledger phases=['spec_gen', 'patch', 'retry', 'spec_gen', 'retry', 'spec_gen', 'retry']"
+          "detail": "ledger phases=['spec_gen', 'patch']"
         },
         {
           "name": "candidate_edit_materialized_in_isolated_world",
           "passed": true,
-          "detail": "world-C calc.py files=['.armor/workspaces/world-c-wiring-repair_loop-pos_local_mod-5y552u69/calc.py']"
+          "detail": "world-C calc.py files=['.armor/workspaces/world-c-wiring-repair_loop-pos_local_mod-jp_xe8gm/calc.py']"
         },
         {
           "name": "candidate_delivered_to_runtime",
@@ -4403,7 +4334,7 @@
         "hash_matched": false,
         "verifier_passed": false,
         "settlement_decision": "incomplete",
-        "receipt_path": "/Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/repair_loop__pos_local_model_call_allowed/.nexus/reports/local_assist/wiring-repair_loop-pos_local_model_call_allowed/execution_receipt.json",
+        "receipt_path": "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/repair_loop__pos_local_model_call_allowed/.nexus/reports/local_assist/wiring-repair_loop-pos_local_model_call_allowed/execution_receipt.json",
         "blockers": [
           "local_model_executor_not_proven",
           "missing_candidate_hash",
@@ -4414,7 +4345,7 @@
         "physical_callable": "LocalModelExecutor.run"
       },
       "receipt_path": "receipts/repair_loop.json",
-      "audit_seconds": 24.9
+      "audit_seconds": 6.33
     },
     {
       "capability": "semantic_failure_sensor",
@@ -4424,7 +4355,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_semantic_failure_sensor",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 2873
+        "line": 2763
       },
       "gaps": [
         "find_similar_bugs runs on Path('.') (the process cwd), not the workspace_root, with the whole task statement (oracle contract included) as the traceback; the outcome keeps only hit_count/top_hit_type, so the matched fix template never reaches a consumer"
@@ -4491,9 +4422,9 @@
       "policy_used": "production_default",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_semantic_failure_sensor_eeaad147"
+        "ev_cap_semantic_failure_sensor_ef5d82f3"
       ],
       "physical_callable": "capability_executor_registry:semantic_failure_sensor",
       "console_tail": [
@@ -4534,7 +4465,7 @@
         "physical_callable": "nexus.services.bug_fingerprint.find_similar_bugs"
       },
       "receipt_path": "receipts/semantic_failure_sensor.json",
-      "audit_seconds": 0.65
+      "audit_seconds": 0.69
     },
     {
       "capability": "bdd_acceptance_skill",
@@ -4544,7 +4475,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered) (run after the verifier stage)",
         "function": "_exec_bdd_acceptance_skill",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 2919
+        "line": 2809
       },
       "gaps": [
         "delegates to _exec_acceptance_check; no BDD scenario of its own is evaluated"
@@ -4612,9 +4543,9 @@
       "policy_used": "production_default",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_bdd_acceptance_skill_67aea0fd"
+        "ev_cap_bdd_acceptance_skill_468fe3ec"
       ],
       "physical_callable": "capability_executor_registry:bdd_acceptance_skill",
       "console_tail": [],
@@ -4661,7 +4592,7 @@
         "physical_callable": "nexus.core.capability_executor_registry._exec_acceptance_check"
       },
       "receipt_path": "receipts/bdd_acceptance_skill.json",
-      "audit_seconds": 0.68
+      "audit_seconds": 0.81
     },
     {
       "capability": "jit_validation",
@@ -4671,7 +4602,7 @@
         "reached_via": "EXECUTOR_REGISTRY",
         "function": "_exec_jit_validation",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 2527
+        "line": 2685
       },
       "gaps": [
         "JITToolInjector.apply_mask is a self-declared mock: it matches only the Chinese keywords 測試/核驗/具現/修復 and otherwise returns all_tools[:5]; the tool catalog (jit_all_tools) must be supplied by the request; since 2026-10-13 the receipt says so (simulated=True, mask_kind=keyword_mock, claim_boundary.claim=SIMULATED)"
@@ -4729,10 +4660,10 @@
       "policy_switches_needed": {},
       "policy_used": "production_default",
       "path": "e2e",
-      "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "receipt_claims_simulated": true,
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_jit_validation_848112e7"
+        "ev_cap_jit_validation_6d5b97a9"
       ],
       "physical_callable": "capability_executor_registry:jit_validation",
       "console_tail": [],
@@ -4821,7 +4752,7 @@
         "physical_callable": "nexus.core.jit_tool_injector.JITToolInjector.apply_mask+check_token_quota"
       },
       "receipt_path": "receipts/jit_validation.json",
-      "audit_seconds": 0.45
+      "audit_seconds": 0.47
     },
     {
       "capability": "semantic_searcher",
@@ -4831,7 +4762,7 @@
         "reached_via": "EXECUTOR_REGISTRY",
         "function": "_exec_semantic_searcher",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 2241
+        "line": 2120
       },
       "gaps": [
         "full-text search over the workspace knowledge 'policy' table (same store as lancedb); no embedding is computed (sentence_transformers is not installed in this venv)"
@@ -4892,9 +4823,9 @@
       "policy_used": "production_default",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_semantic_searcher_7e83ab4d"
+        "ev_cap_semantic_searcher_cbd46d0e"
       ],
       "physical_callable": "capability_executor_registry:semantic_searcher",
       "console_tail": [],
@@ -4952,7 +4883,7 @@
         "physical_callable": "nexus.services.semantic_searcher.SemanticSearcher.search"
       },
       "receipt_path": "receipts/semantic_searcher.json",
-      "audit_seconds": 0.43
+      "audit_seconds": 0.5
     },
     {
       "capability": "prompt_compression",
@@ -4962,7 +4893,7 @@
         "reached_via": "RUNTIME_INVOKER (registry maps prompt_compression to the runtime-owned compression edge, not _exec_prompt_compression)",
         "function": "build_prompt_compression_capability_invoker",
         "file": "nexus_runtime/kernel/capabilities.py",
-        "line": 408
+        "line": 427
       },
       "gaps": [
         "runtime-owned invoker (nexus_runtime.kernel.capabilities.build_prompt_compression_capability_invoker), not the Nexus executor _exec_prompt_compression; when selected it always replaces the online prompt with a JSON blob of prompt + capability results, so a short prompt becomes longer"
@@ -5022,8 +4953,8 @@
       "policy_switches_needed": {},
       "policy_used": "production_default",
       "path": "e2e",
-      "receipt_claims_simulated": true,
-      "claim_boundary_simulated_source": "UnifiedRuntime receipt.receipt_base.claim_boundary (ClaimBoundary default)",
+      "receipt_claims_simulated": false,
+      "claim_boundary_simulated_source": "UnifiedRuntime receipt.capabilities[<cap>].claim_boundary (runtime-attested)",
       "evidence_refs": [
         "compression:wiring-prompt_compression-pos_production_default:measured",
         "compression:wiring-prompt_compression-pos_production_default:truncated"
@@ -5033,7 +4964,7 @@
       "negative_control": {
         "name": "negative_control:short_prompt_gives_different_context",
         "passed": true,
-        "detail": "original pos=20152 neg=6351; compressed pos=2473 neg=471 (neg truncated=True, neg prompt kept=46 chars)",
+        "detail": "original pos=20224 neg=6423; compressed pos=2473 neg=471 (neg truncated=True, neg prompt kept=46 chars)",
         "negative_status": "SUCCEEDED",
         "negative_block_reason": ""
       },
@@ -5042,7 +4973,7 @@
         {
           "name": "context_truncated_to_budget",
           "passed": true,
-          "detail": "original=20152 compressed=2473"
+          "detail": "original=20224 compressed=2473"
         },
         {
           "name": "online_channel_received_compressed_prompt",
@@ -5057,22 +4988,22 @@
         {
           "name": "negative_control:short_prompt_gives_different_context",
           "passed": true,
-          "detail": "original pos=20152 neg=6351; compressed pos=2473 neg=471 (neg truncated=True, neg prompt kept=46 chars)"
+          "detail": "original pos=20224 neg=6423; compressed pos=2473 neg=471 (neg truncated=True, neg prompt kept=46 chars)"
         }
       ],
-      "verdict": "REAL_UNATTESTED",
-      "verdict_reason": "executor_ran_and_artifact_passed_but_receipt_claims_simulated_true",
+      "verdict": "REAL",
+      "verdict_reason": "invoked_with_evidence_and_artifact_assertions_passed",
       "outcome_excerpt": {
         "action": "compress_context",
         "semantic_status": "SUCCEEDED",
-        "original_context_chars": 20152,
+        "original_context_chars": 20224,
         "compressed_context_chars": 2473,
-        "compression_ratio": 0.8773,
+        "compression_ratio": 0.8777,
         "truncated": true,
-        "compressed_context": "{\"capability_results\":{\"harness_preflight_sensor\":{\"evidence_refs\":[\"ev_cap_harness_preflight_sensor_39fe9703\"],\"status\":\"FAILED\"},\"mempalace_gate\":{\"evidence_refs\":[\"ev_cap_mempalace_334fc9ee\"],\"status\":\"FAILED\"},\"plan_quality_gate\":{\"evidence_refs\":[\"ev_cap_plan_quality_gate_3b8ffcd9\"],\"status\":\"FAILED\"},\"pregate\":{\"evidence_refs\":[\"ev_cap_pregate_b0323cfa\"],\"status\":\"FAILED\"}},\"payload\":\"\",\"prompt\":\"Update target.py so the ledger stays balanced. Notes: step0 keeps the ledger balanced step1 keeps the ledger balanced step2 keeps the ledger balanced step3 keeps the ledger balanced step4 keeps the ledger balanced step5 keeps the ledger balanced step6 keeps the ledger balanced step7 keeps the ledger balanced step8 keeps the ledger balanced step9 keeps the ledger balanced step10 keeps the ledger balanced step11 keeps the ledger balanced step12 keeps the ledger balanced step13 keeps the ledger balanced step14 keeps the ledger balanced step15 keeps the ledger balanced step16 keeps the ledger balanced step17 keeps the ledger balanced step18 keeps the ledger balanced step19 keeps the ledger balanced step20 keeps the ledger balanced step21 keeps the ledger balanced step22 keeps the ledger balanced step23 keeps the ledger balanced step24 keeps the ledger balanced step25 keeps the ledger balanced step26 keeps the ledger balanced step27 keeps the ledger balanced step28 keeps the ledger balanced step29 keeps the ledger balanced step30 keeps the ledger balanced step31 keeps the ledger balanced step32 keeps the ledger balanced step33 keeps the ledger balanced step34 keeps the ledger balanced step35 keeps the ledger balanced step36 keeps the ledger balanced step37 keeps the ledger balanced step38 keeps the ledger balanced step39 keeps the ledger balanced step40 keeps the ledger balanced step41 keeps the ledger balanced step42 keeps the ledger balanced step43 keeps the ledger balanced step44 keeps the ledger balanced step45 keeps the ledger balanced step46 keeps the ledger balanced step47 keeps the ledger balanced step48 keeps the ledger balanced step49 keeps the ledger balanced step50 keeps the ledger balanced step51 keeps the ledger balanced step52 keeps the ledger balanced step53 keeps the ledger balanced step54 keeps the ledger balanced step55 keeps the ledger balanced step56 keeps the ledger balanced step57 keeps the ledger balanced step58 keeps the ledger balanced step59 keeps the ledger balanced step60 keeps the ledger \",\"truncated\":true}"
+        "compressed_context": "{\"capability_results\":{\"harness_preflight_sensor\":{\"evidence_refs\":[\"ev_cap_harness_preflight_sensor_2d70b3a4\"],\"status\":\"FAILED\"},\"mempalace_gate\":{\"evidence_refs\":[\"ev_cap_mempalace_8f20024c\"],\"status\":\"FAILED\"},\"plan_quality_gate\":{\"evidence_refs\":[\"ev_cap_plan_quality_gate_2096899d\"],\"status\":\"FAILED\"},\"pregate\":{\"evidence_refs\":[\"ev_cap_pregate_17e64f0a\"],\"status\":\"FAILED\"}},\"payload\":\"\",\"prompt\":\"Update target.py so the ledger stays balanced. Notes: step0 keeps the ledger balanced step1 keeps the ledger balanced step2 keeps the ledger balanced step3 keeps the ledger balanced step4 keeps the ledger balanced step5 keeps the ledger balanced step6 keeps the ledger balanced step7 keeps the ledger balanced step8 keeps the ledger balanced step9 keeps the ledger balanced step10 keeps the ledger balanced step11 keeps the ledger balanced step12 keeps the ledger balanced step13 keeps the ledger balanced step14 keeps the ledger balanced step15 keeps the ledger balanced step16 keeps the ledger balanced step17 keeps the ledger balanced step18 keeps the ledger balanced step19 keeps the ledger balanced step20 keeps the ledger balanced step21 keeps the ledger balanced step22 keeps the ledger balanced step23 keeps the ledger balanced step24 keeps the ledger balanced step25 keeps the ledger balanced step26 keeps the ledger balanced step27 keeps the ledger balanced step28 keeps the ledger balanced step29 keeps the ledger balanced step30 keeps the ledger balanced step31 keeps the ledger balanced step32 keeps the ledger balanced step33 keeps the ledger balanced step34 keeps the ledger balanced step35 keeps the ledger balanced step36 keeps the ledger balanced step37 keeps the ledger balanced step38 keeps the ledger balanced step39 keeps the ledger balanced step40 keeps the ledger balanced step41 keeps the ledger balanced step42 keeps the ledger balanced step43 keeps the ledger balanced step44 keeps the ledger balanced step45 keeps the ledger balanced step46 keeps the ledger balanced step47 keeps the ledger balanced step48 keeps the ledger balanced step49 keeps the ledger balanced step50 keeps the ledger balanced step51 keeps the ledger balanced step52 keeps the ledger balanced step53 keeps the ledger balanced step54 keeps the ledger balanced step55 keeps the ledger balanced step56 keeps the ledger balanced step57 keeps the ledger balanced step58 keeps the ledger balanced step59 keeps the ledger balanced step60 keeps the ledger \",\"truncated\":true}"
       },
       "receipt_path": "receipts/prompt_compression.json",
-      "audit_seconds": 0.41
+      "audit_seconds": 0.47
     },
     {
       "capability": "asi_constraint_extractor",
@@ -5082,7 +5013,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_asi_constraint_extractor",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 3097
+        "line": 3073
       },
       "gaps": [
         "records must be supplied in the request (asi_failure_records); nothing in the runtime feeds the ASI ledger to it"
@@ -5145,9 +5076,9 @@
       "policy_used": "production_default",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_asi_constraint_extractor_dcfb05cd"
+        "ev_cap_asi_constraint_extractor_85a1dbc9"
       ],
       "physical_callable": "capability_executor_registry:asi_constraint_extractor",
       "console_tail": [],
@@ -5220,7 +5151,7 @@
         ]
       },
       "receipt_path": "receipts/asi_constraint_extractor.json",
-      "audit_seconds": 0.61
+      "audit_seconds": 0.69
     },
     {
       "capability": "architecture_scout",
@@ -5230,7 +5161,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_architecture_scout",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 2845
+        "line": 2985
       },
       "gaps": [
         "fixed 2026-10-13 (group D): plateau comes from nexus.research.flow.runtime_decision.detect_plateau over the request's asi_failure_records; nothing in nexus run feeds that ledger to the node yet (the research flow feeds its own HistorySignalStore ledger)"
@@ -5295,9 +5226,9 @@
       "policy_used": "production_default",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_architecture_scout_e7e74363"
+        "ev_cap_architecture_scout_7415dd04"
       ],
       "physical_callable": "capability_executor_registry:architecture_scout",
       "console_tail": [],
@@ -5406,7 +5337,7 @@
         "physical_callable": "nexus.research.architecture_scout.DistantScoutPlanner.plan"
       },
       "receipt_path": "receipts/architecture_scout.json",
-      "audit_seconds": 8.75
+      "audit_seconds": 0.69
     },
     {
       "capability": "formal_report",
@@ -5416,7 +5347,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_formal_report",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 3480
+        "line": 3539
       },
       "gaps": [
         "judge votes, verification rows and route receipts must be supplied in the request; the runtime does not feed its own receipts"
@@ -5482,9 +5413,9 @@
       "policy_used": "production_default",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_formal_report_9d02713f"
+        "ev_cap_formal_report_a9aeea2a"
       ],
       "physical_callable": "capability_executor_registry:formal_report",
       "console_tail": [],
@@ -5545,7 +5476,7 @@
         "route_receipt_count": 1
       },
       "receipt_path": "receipts/formal_report.json",
-      "audit_seconds": 0.63
+      "audit_seconds": 0.74
     },
     {
       "capability": "learn_mode",
@@ -5555,7 +5486,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_learn_mode",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 2309
+        "line": 2467
       },
       "gaps": [
         "fixed 2026-10-13: the executor reads the project learn store LearnModeService(<workspace_root>) like the learn:* CLI (was a fresh empty <cwd>/.nexus/runtime/<task_id>); gate_passed is still 'report built', the claim count is in the result"
@@ -5619,9 +5550,9 @@
       "policy_used": "production_default",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_learn_mode_a5b36ec5"
+        "ev_cap_learn_mode_468fbc69"
       ],
       "physical_callable": "capability_executor_registry:learn_mode",
       "console_tail": [],
@@ -5637,7 +5568,7 @@
         {
           "name": "seeded_project_claims_counted",
           "passed": true,
-          "detail": "claims_count=2 run_root=/Users/jameschen/Workspace/.scratch/20261013-wiring-batch2/audit2/20261013T041556Z/workspaces/learn_mode__pos_production_default"
+          "detail": "claims_count=2 run_root=/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/learn_mode__pos_production_default"
         },
         {
           "name": "negative_control:unseeded_project_changes_claims_count",
@@ -5672,7 +5603,7 @@
             "refund-policy": 2
           },
           "top_sources": [
-            "file:///Users/jameschen/Workspace/.scratch/20261013-wiring-batch2/audit2/20261013T041556Z/workspaces/learn_mode__pos_production_default/notes.md"
+            "file:///private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/learn_mode__pos_production_default/notes.md"
           ],
           "coverage": 1.0,
           "self_question_pass_rate": 1.0,
@@ -5680,7 +5611,7 @@
           "answered_questions": [],
           "unresolved_questions": [],
           "converged": true,
-          "timestamp": "2026-10-13T04:15:59.471845+00:00",
+          "timestamp": "2026-10-13T11:11:15.166819+00:00",
           "phase_slo_summary": {
             "status": "SUCCESS",
             "window": 300,
@@ -5735,19 +5666,19 @@
                 "success_ratio": 1.0
               }
             },
-            "timestamp": "2026-10-13T04:15:59.471875+00:00"
+            "timestamp": "2026-10-13T11:11:15.166850+00:00"
           }
         },
         "physical_callable": "nexus.research.learn_mode.LearnModeService.build_report",
         "task_hint": "Learn the refund policy citations\n\nNexus route oracle contract:\n- Expected capab",
         "run_id": "wiring-learn_mode-pos_production_default",
-        "resolved_run_root": "/Users/jameschen/Workspace/.scratch/20261013-wiring-batch2/audit2/20261013T041556Z/workspaces/learn_mode__pos_production_default",
+        "resolved_run_root": "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/learn_mode__pos_production_default",
         "output_paths": [
-          "/Users/jameschen/Workspace/.scratch/20261013-wiring-batch2/audit2/20261013T041556Z/workspaces/learn_mode__pos_production_default/.nexus/reports/learn"
+          "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/learn_mode__pos_production_default/.nexus/reports/learn"
         ]
       },
       "receipt_path": "receipts/learn_mode.json",
-      "audit_seconds": 1.27
+      "audit_seconds": 0.75
     },
     {
       "capability": "learn_phase_slo",
@@ -5757,7 +5688,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_learn_phase_slo",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 2372
+        "line": 2530
       },
       "gaps": [
         "fixed 2026-10-13: reads the project phase ledger with the CLI window (300; was an empty per-task run_root with window=1); gate_passed means the report was built, phase_slo_pass is in the result"
@@ -5821,9 +5752,9 @@
       "policy_used": "production_default",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_learn_phase_slo_1796b28b"
+        "ev_cap_learn_phase_slo_17b6e553"
       ],
       "physical_callable": "capability_executor_registry:learn_phase_slo",
       "console_tail": [],
@@ -5920,17 +5851,17 @@
               "success_ratio": 1.0
             }
           },
-          "timestamp": "2026-10-13T04:16:00.149200+00:00"
+          "timestamp": "2026-10-13T11:11:15.875252+00:00"
         },
         "physical_callable": "nexus.research.learn_mode.LearnModeService.build_phase_slo_report",
         "run_id": "wiring-learn_phase_slo-pos_production_default",
-        "resolved_run_root": "/Users/jameschen/Workspace/.scratch/20261013-wiring-batch2/audit2/20261013T041556Z/workspaces/learn_phase_slo__pos_production_default",
+        "resolved_run_root": "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/learn_phase_slo__pos_production_default",
         "output_paths": [
-          "/Users/jameschen/Workspace/.scratch/20261013-wiring-batch2/audit2/20261013T041556Z/workspaces/learn_phase_slo__pos_production_default/.nexus/reports/learn/phase_slo_summary.json"
+          "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/learn_phase_slo__pos_production_default/.nexus/reports/learn/phase_slo_summary.json"
         ]
       },
       "receipt_path": "receipts/learn_phase_slo.json",
-      "audit_seconds": 0.68
+      "audit_seconds": 0.71
     },
     {
       "capability": "file_lock",
@@ -5940,7 +5871,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_file_lock",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 3008
+        "line": 3321
       },
       "gaps": [
         "fixed 2026-10-13: one registry per workspace (.nexus/multi_agent/locks/file_locks.json) keyed by file, holder = task id, flock-guarded; a second task is BLOCKED (FILE_LOCK_HELD_BY_OTHER_TASK), same-task re-lock is idempotent; locks are never released by the executor, a 1800 s TTL makes them stale"
@@ -6004,9 +5935,9 @@
       "policy_used": "production_default",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_file_lock_d3c98cc9"
+        "ev_cap_file_lock_447d9706"
       ],
       "physical_callable": "capability_executor_registry:file_lock_security_gate",
       "console_tail": [],
@@ -6022,12 +5953,12 @@
         {
           "name": "lock_file_on_disk",
           "passed": true,
-          "detail": "/Users/jameschen/Workspace/.scratch/20261013-wiring-batch2/audit2/20261013T041556Z/workspaces/file_lock__pos_production_default/.nexus/multi_agent/locks/file_locks.json"
+          "detail": "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/file_lock__pos_production_default/.nexus/multi_agent/locks/file_locks.json"
         },
         {
           "name": "lock_records_target_file",
           "passed": true,
-          "detail": "lock={\"locks\": {\"target.py\": \"wiring-file_lock-pos_production_default\"}, \"acquired_at\": {\"target.py\": 1791864960.828496}}"
+          "detail": "lock={\"locks\": {\"target.py\": \"wiring-file_lock-pos_production_default\"}, \"acquired_at\": {\"target.py\": 1791889876.621378}}"
         },
         {
           "name": "access_granted_and_files_match",
@@ -6046,14 +5977,14 @@
         "lock-task-a": {
           "gate_passed": true,
           "conflicts": [],
-          "lock_file": "/Users/jameschen/Workspace/.scratch/20261013-wiring-batch2/audit2/20261013T041556Z/workspaces/file_lock__probe/.nexus/multi_agent/locks/file_locks.json"
+          "lock_file": "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/file_lock__probe/.nexus/multi_agent/locks/file_locks.json"
         },
         "lock-task-b": {
           "gate_passed": false,
           "conflicts": [
             "target.py"
           ],
-          "lock_file": "/Users/jameschen/Workspace/.scratch/20261013-wiring-batch2/audit2/20261013T041556Z/workspaces/file_lock__probe/.nexus/multi_agent/locks/file_locks.json"
+          "lock_file": "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/file_lock__probe/.nexus/multi_agent/locks/file_locks.json"
         },
         "second_task_refused": true,
         "holders": {
@@ -6065,7 +5996,7 @@
         "action": "acquire+check_access",
         "semantic_status": "VERIFIED",
         "evidence_refs": [
-          "file:/Users/jameschen/Workspace/.scratch/20261013-wiring-batch2/audit2/20261013T041556Z/workspaces/file_lock__pos_production_default/.nexus/multi_agent/locks/file_locks.json"
+          "file:/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/file_lock__pos_production_default/.nexus/multi_agent/locks/file_locks.json"
         ],
         "result": {
           "conflicts": [],
@@ -6082,11 +6013,11 @@
         "lock_ttl_sec": 1800.0,
         "access_granted": true,
         "task_files_match": true,
-        "lock_file": "/Users/jameschen/Workspace/.scratch/20261013-wiring-batch2/audit2/20261013T041556Z/workspaces/file_lock__pos_production_default/.nexus/multi_agent/locks/file_locks.json",
+        "lock_file": "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/file_lock__pos_production_default/.nexus/multi_agent/locks/file_locks.json",
         "physical_callable": "nexus.orchestrator.file_lock_registry.FileLockRegistry.acquire+check_access"
       },
       "receipt_path": "receipts/file_lock.json",
-      "audit_seconds": 0.67
+      "audit_seconds": 0.75
     },
     {
       "capability": "direct_mode",
@@ -6162,7 +6093,7 @@
       "policy_used": "production_default",
       "path": "e2e",
       "receipt_claims_simulated": true,
-      "claim_boundary_simulated_source": "UnifiedRuntime receipt.receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "UnifiedRuntime receipt.capabilities[<cap>].claim_boundary (runtime-attested)",
       "evidence_refs": [
         "capability:direct_mode:wiring-direct_mode-pos_production_default:skipped:NOT_EXECUTABLE:control_plane_reference"
       ],
@@ -6182,7 +6113,7 @@
       "observed_verdict_reason": "explicit_skip_receipt",
       "outcome_excerpt": {},
       "receipt_path": "receipts/direct_mode.json",
-      "audit_seconds": 7.2
+      "audit_seconds": 0.48
     },
     {
       "capability": "msa_router",
@@ -6258,7 +6189,7 @@
       "policy_used": "production_default",
       "path": "e2e",
       "receipt_claims_simulated": true,
-      "claim_boundary_simulated_source": "UnifiedRuntime receipt.receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "UnifiedRuntime receipt.capabilities[<cap>].claim_boundary (runtime-attested)",
       "evidence_refs": [
         "capability:msa_router:wiring-msa_router-pos_production_default:skipped:NOT_EXECUTABLE:control_plane_reference"
       ],
@@ -6278,7 +6209,7 @@
       "observed_verdict_reason": "explicit_skip_receipt",
       "outcome_excerpt": {},
       "receipt_path": "receipts/msa_router.json",
-      "audit_seconds": 7.46
+      "audit_seconds": 0.47
     },
     {
       "capability": "research_control_plane",
@@ -6354,7 +6285,7 @@
       "policy_used": "production_default",
       "path": "e2e",
       "receipt_claims_simulated": true,
-      "claim_boundary_simulated_source": "UnifiedRuntime receipt.receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "UnifiedRuntime receipt.capabilities[<cap>].claim_boundary (runtime-attested)",
       "evidence_refs": [
         "capability:research_control_plane:wiring-research_control_plane-pos_production_default:skipped:NOT_EXECUTABLE:control_plane_reference"
       ],
@@ -6374,27 +6305,7 @@
       "observed_verdict_reason": "explicit_skip_receipt",
       "outcome_excerpt": {},
       "receipt_path": "receipts/research_control_plane.json",
-      "audit_seconds": 6.36
-    },
-    {
-      "capability": "swarm_quiet_moment",
-      "verdict": "RETIRING",
-      "verdict_reason": "archived_echo_swarm_quiet_moment_2026-10-13 (second archive batch)",
-      "executor": {},
-      "gaps": [
-        "archived: the production invoker returns an explicit skip (archived_echo_swarm_quiet_moment_2026-10-13)"
-      ],
-      "archived_skip_reason": "archived_echo_swarm_quiet_moment_2026-10-13"
-    },
-    {
-      "capability": "integration_manager",
-      "verdict": "RETIRING",
-      "verdict_reason": "archived_retired_integration_manager_2026-10-13 (second archive batch)",
-      "executor": {},
-      "gaps": [
-        "archived: the production invoker returns an explicit skip (archived_retired_integration_manager_2026-10-13)"
-      ],
-      "archived_skip_reason": "archived_retired_integration_manager_2026-10-13"
+      "audit_seconds": 0.48
     },
     {
       "capability": "autonomic_router",
@@ -6414,7 +6325,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_judge_panel",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 2700
+        "line": 2842
       },
       "gaps": [
         "fixed 2026-10-13 (group D): ranks the request's candidate_pool (codeintel.judge_panel_candidates) with OllamaJudgeProvider (Workforce local_first.classification worker, M5 tunnel) under NEXUS_LOCAL_MODEL_CALL_ALLOWED=1; no provider at production default; nexus run does not yet feed a candidate pool to the node"
@@ -6491,9 +6402,9 @@
       "policy_used": "local_model_call_allowed",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_judge_panel_ea00a81d"
+        "ev_cap_judge_panel_9ff606ec"
       ],
       "physical_callable": "capability_executor_registry:judge_panel",
       "console_tail": [],
@@ -6557,7 +6468,7 @@
           "unknown_ids_dropped": [],
           "omitted_by_model": [],
           "reason": "Candidate b is the best fix because it addresses the root cause of floating-point precision errors by rounding to two decimal places, which matches standard currency handling and allows all tests (inc",
-          "latency_ms": 10049,
+          "latency_ms": 12640,
           "response_sha256": "af26be016a76bcecb41009fbf8ee7ba2e0913bbf04a9408654a35a650209fba3",
           "eval_count": 128,
           "discarded_response_sha256": []
@@ -6579,17 +6490,7 @@
         "judge_model": "qwen3.5:9b"
       },
       "receipt_path": "receipts/judge_panel.json",
-      "audit_seconds": 33.35
-    },
-    {
-      "capability": "llm_judge_panel",
-      "verdict": "RETIRING",
-      "verdict_reason": "archived_alias_llm_judge_panel_2026-10-13 (second archive batch)",
-      "executor": {},
-      "gaps": [
-        "archived: the production invoker returns an explicit skip (archived_alias_llm_judge_panel_2026-10-13)"
-      ],
-      "archived_skip_reason": "archived_alias_llm_judge_panel_2026-10-13"
+      "audit_seconds": 28.54
     },
     {
       "capability": "external_doc_scout",
@@ -6599,7 +6500,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_external_doc_scout",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 3712
+        "line": 3951
       },
       "gaps": [
         "execution contract physical_callable=None; the EXECUTOR_REGISTRY entry is an auth gate with nothing behind it; since group D the planner-node invoker never calls it and the receipt says NOT_EXECUTABLE:no_live_connector"
@@ -6665,7 +6566,7 @@
       "policy_used": "production_default",
       "path": "e2e",
       "receipt_claims_simulated": true,
-      "claim_boundary_simulated_source": "UnifiedRuntime receipt.receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "UnifiedRuntime receipt.capabilities[<cap>].claim_boundary (runtime-attested)",
       "evidence_refs": [
         "capability:external_doc_scout:wiring-external_doc_scout-pos_production_default:skipped:NOT_EXECUTABLE:no_live_connector"
       ],
@@ -6685,7 +6586,7 @@
       "observed_verdict_reason": "explicit_skip_receipt",
       "outcome_excerpt": {},
       "receipt_path": "receipts/external_doc_scout.json",
-      "audit_seconds": 6.38
+      "audit_seconds": 0.45
     },
     {
       "capability": "learn_scheduler",
@@ -6695,7 +6596,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_learn_scheduler_service",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 900
+        "line": 899
       },
       "gaps": [
         "fixed 2026-10-13: learn:phase-policy --project-root <workspace_root> (the checkout only supplies the CLI script), and the phase policy reads the real summary schema (phase_slo_pass_rate; it read a never-written overall_pass_rate key, so readiness was always 0%); alerts are still written under the cwd"
@@ -6759,9 +6660,9 @@
       "policy_used": "production_default",
       "path": "e2e",
       "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_learn_scheduler_service_c31c4fc6"
+        "ev_cap_learn_scheduler_service_015cba5e"
       ],
       "physical_callable": "capability_executor_registry:learn_scheduler_service",
       "console_tail": [],
@@ -6777,7 +6678,7 @@
         {
           "name": "scheduler_report_on_disk",
           "passed": true,
-          "detail": "/Users/jameschen/Workspace/.scratch/20261013-wiring-batch2/audit2/20261013T041556Z/workspaces/learn_scheduler__pos_production_default/.nexus/reports/learn/scheduler_last_run.json"
+          "detail": "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/learn_scheduler__pos_production_default/.nexus/reports/learn/scheduler_last_run.json"
         },
         {
           "name": "scheduler_exit_zero",
@@ -6796,7 +6697,7 @@
         "action": "run_scheduler",
         "semantic_status": "SUCCEEDED",
         "evidence_refs": [
-          "file:/Users/jameschen/Workspace/.scratch/20261013-wiring-batch2/audit2/20261013T041556Z/workspaces/learn_scheduler__pos_production_default/.nexus/reports/learn/scheduler_last_run.json"
+          "file:/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/learn_scheduler__pos_production_default/.nexus/reports/learn/scheduler_last_run.json"
         ],
         "result": {
           "exit_code": 0,
@@ -6807,16 +6708,16 @@
             "nexus",
             "learn:phase-policy",
             "--project-root",
-            "/Users/jameschen/Workspace/.scratch/20261013-wiring-batch2/audit2/20261013T041556Z/workspaces/learn_scheduler__pos_production_default",
+            "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/learn_scheduler__pos_production_default",
             "--output-json"
           ],
-          "scheduler_report_path": "/Users/jameschen/Workspace/.scratch/20261013-wiring-batch2/audit2/20261013T041556Z/workspaces/learn_scheduler__pos_production_default/.nexus/reports/learn/scheduler_last_run.json",
+          "scheduler_report_path": "/private/tmp/claude-501/-Users-jameschen-Workspace/020dddfa-599e-42f0-a2f5-78c9cc81e3a8/scratchpad/audit2b/20261013T110806Z/workspaces/learn_scheduler__pos_production_default/.nexus/reports/learn/sche",
           "alert_dispatched": false
         },
         "physical_callable": "nexus.app.learn_scheduler_service.LearnSchedulerService.run_scheduler"
       },
       "receipt_path": "receipts/learn_scheduler.json",
-      "audit_seconds": 1.43
+      "audit_seconds": 1.45
     },
     {
       "capability": "registry_sync",
@@ -6826,7 +6727,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_registry_sync",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 3376
+        "line": 3689
       },
       "gaps": [
         "fixed 2026-10-13: the executor uses pull_from_peer_checked; a connection error is BLOCKED (REGISTRY_PEER_UNAVAILABLE:<error class>) with peer_contacted=False (pull_from_peer still returns [] for legacy callers); no live mTLS peer in the fixture, so there is no positive run"
@@ -6874,7 +6775,7 @@
           },
           "status": "BLOCKED",
           "path": "e2e",
-          "block_reason": "REGISTRY_PEER_UNAVAILABLE:ConnectionRefusedError:console:mTLS pull from 127.0.0.1:63185 failed: [Errno 61] Connection refused"
+          "block_reason": "REGISTRY_PEER_UNAVAILABLE:ConnectionRefusedError:console:mTLS pull from 127.0.0.1:60588 failed: [Errno 61] Connection refused"
         }
       ],
       "production_default_selection": {
@@ -6901,24 +6802,24 @@
       },
       "policy_used": "external_runtime_authorized_flag",
       "path": "e2e",
-      "receipt_claims_simulated": true,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "receipt_claims_simulated": false,
+      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
       "evidence_refs": [
-        "ev_cap_registry_sync_ecdb4000"
+        "ev_cap_registry_sync_72e8edf1"
       ],
       "physical_callable": "capability_executor_registry:registry_skills_sync",
       "console_tail": [
-        "mTLS pull from 127.0.0.1:63185 failed: [Errno 61] Connection refused"
+        "mTLS pull from 127.0.0.1:60588 failed: [Errno 61] Connection refused"
       ],
       "hard_coded_inputs": [],
       "checks": [
         {
           "name": "receipt_matches_peer_reachability",
           "passed": true,
-          "detail": "127.0.0.1:63185 reachable=False; receipt gate=False peer_contacted=False row_count=0 error=REGISTRY_PEER_UNAVAILABLE:ConnectionRefusedError"
+          "detail": "127.0.0.1:60588 reachable=False; receipt gate=False peer_contacted=False row_count=0 error=REGISTRY_PEER_UNAVAILABLE:ConnectionRefusedError"
         }
       ],
-      "verdict": "BLOCKED_REGISTRY_PEER_UNAVAILABLE:ConnectionRefusedError:console:mTLS pull from 127.0.0.1:63185 failed: [Errno 61] Connection refused",
+      "verdict": "BLOCKED_REGISTRY_PEER_UNAVAILABLE:ConnectionRefusedError:console:mTLS pull from 127.0.0.1:60588 failed: [Errno 61] Connection refused",
       "verdict_reason": "executor_or_runtime_blocked",
       "verdict_production_default": "BLOCKED_EXTERNAL_AUTH:registry_peer",
       "outcome_excerpt": {
@@ -6930,7 +6831,7 @@
         "error": "REGISTRY_PEER_UNAVAILABLE:ConnectionRefusedError",
         "result": {
           "peer_host": "127.0.0.1",
-          "peer_port": 63185,
+          "peer_port": 60588,
           "row_count": 0,
           "error_class": "ConnectionRefusedError",
           "error_detail": "[Errno 61] Connection refused"
@@ -6942,7 +6843,7 @@
         "error_class": "ConnectionRefusedError"
       },
       "receipt_path": "receipts/registry_sync.json",
-      "audit_seconds": 1.75
+      "audit_seconds": 1.92
     },
     {
       "capability": "federation",
@@ -6950,8 +6851,9 @@
       "verdict_reason": "federation (archive PR)",
       "executor": {},
       "gaps": [
-        "owned by the archive PR; not executed by this audit"
-      ]
+        "archived: the production invoker returns an explicit skip (archived_federation_2026-10-12)"
+      ],
+      "archived_skip_reason": "archived_federation_2026-10-12"
     },
     {
       "capability": "oracle_shadow",
@@ -6959,8 +6861,9 @@
       "verdict_reason": "aos_oracle / oracle promote (archive PR)",
       "executor": {},
       "gaps": [
-        "owned by the archive PR; not executed by this audit"
-      ]
+        "archived: the production invoker returns an explicit skip (archived_oracle_shadow_2026-10-12)"
+      ],
+      "archived_skip_reason": "archived_oracle_shadow_2026-10-12"
     },
     {
       "capability": "stress_test",
@@ -6968,8 +6871,9 @@
       "verdict_reason": "stress_test + _exec_stress_test (archive PR)",
       "executor": {},
       "gaps": [
-        "owned by the archive PR; not executed by this audit"
-      ]
+        "archived: the production invoker returns an explicit skip (archived_hollow_stress_test_2026-10-12)"
+      ],
+      "archived_skip_reason": "archived_hollow_stress_test_2026-10-12"
     },
     {
       "capability": "ui_validator",
@@ -6977,8 +6881,9 @@
       "verdict_reason": "ui_explorer / ui-validator + _exec_ui_validator (archive PR)",
       "executor": {},
       "gaps": [
-        "owned by the archive PR; not executed by this audit"
-      ]
+        "archived: the production invoker returns an explicit skip (archived_ui_validator_2026-10-12)"
+      ],
+      "archived_skip_reason": "archived_ui_validator_2026-10-12"
     },
     {
       "capability": "benchmark",
@@ -6986,8 +6891,9 @@
       "verdict_reason": "benchmark_service + _exec_benchmark (archive PR)",
       "executor": {},
       "gaps": [
-        "owned by the archive PR; not executed by this audit"
-      ]
+        "archived: the production invoker returns an explicit skip (archived_fake_benchmark_2026-10-12)"
+      ],
+      "archived_skip_reason": "archived_fake_benchmark_2026-10-12"
     },
     {
       "capability": "learning_closure",
@@ -6997,16 +6903,45 @@
       "gaps": [
         "owned by the archive PR; not executed by this audit"
       ]
+    },
+    {
+      "capability": "integration_manager",
+      "verdict": "RETIRING",
+      "verdict_reason": "archived_retired_integration_manager_2026-10-13 (second archive batch)",
+      "executor": {},
+      "gaps": [
+        "archived: the production invoker returns an explicit skip (archived_retired_integration_manager_2026-10-13)"
+      ],
+      "archived_skip_reason": "archived_retired_integration_manager_2026-10-13"
+    },
+    {
+      "capability": "swarm_quiet_moment",
+      "verdict": "RETIRING",
+      "verdict_reason": "archived_echo_swarm_quiet_moment_2026-10-13 (second archive batch)",
+      "executor": {},
+      "gaps": [
+        "archived: the production invoker returns an explicit skip (archived_echo_swarm_quiet_moment_2026-10-13)"
+      ],
+      "archived_skip_reason": "archived_echo_swarm_quiet_moment_2026-10-13"
+    },
+    {
+      "capability": "llm_judge_panel",
+      "verdict": "RETIRING",
+      "verdict_reason": "archived_alias_llm_judge_panel_2026-10-13 (second archive batch)",
+      "executor": {},
+      "gaps": [
+        "archived: the production invoker returns an explicit skip (archived_alias_llm_judge_panel_2026-10-13)"
+      ],
+      "archived_skip_reason": "archived_alias_llm_judge_panel_2026-10-13"
     }
   ],
   "verdict_counts": {
-    "BLOCKED": 7,
-    "NOT_EXECUTABLE": 4,
-    "REAL": 31,
-    "REAL_UNATTESTED": 4,
-    "RETIRING": 10,
+    "REAL": 34,
+    "BLOCKED": 8,
+    "STUB": 1,
     "SIMULATED": 1,
-    "STUB": 1
+    "NOT_EXECUTABLE": 4,
+    "RETIRING": 10
   },
   "executor_only": {
     "keys": {
@@ -7289,6 +7224,7 @@
     },
     "note": "row validator checked status/semantic_status/coverage/route_decision counts only; claim_boundary.simulated is never read"
   },
+  "tree": "origin/main ea28c8d86 + batch-3 attestation working tree (runtime pin 6782e38)",
   "partial_reruns": [
     {
       "generated_at": "2026-10-13T00:00:33.434238+00:00",
@@ -7465,5 +7401,30 @@
       },
       "reason": "legacy-engine archive (ARCHIVED_2026-10-13-legacy-engine.md): planner node autonomic_router resolves to archived_legacy_engine_autonomic_router_2026-10-13; only that row replaced in place (registry_sync differs only by an ephemeral port)"
     }
-  ]
+  ],
+  "previous_full_runs": [
+    {
+      "generated_at": "2026-10-12T22:57:52.380962+00:00",
+      "git_head": "aa095b305cb4ab9268a420df65f2ccb666d49494",
+      "verdict_counts_at_run": {
+        "BLOCKED": 7,
+        "NOT_EXECUTABLE": 4,
+        "REAL": 32,
+        "REAL_UNATTESTED": 4,
+        "RETIRING": 9,
+        "SIMULATED": 1,
+        "STUB": 1
+      },
+      "verdict_counts_with_partial_reruns": {
+        "BLOCKED": 7,
+        "NOT_EXECUTABLE": 4,
+        "REAL": 32,
+        "REAL_UNATTESTED": 4,
+        "RETIRING": 9,
+        "SIMULATED": 1,
+        "STUB": 1
+      }
+    }
+  ],
+  "rebase_note": "Rebased onto main 70351f4c4 after the legacy-engine archive (#2047, #2070): the autonomic_router row is main's archived RETIRING row; verdict_counts adjusted from the 11:11:51Z full rerun (REAL 35 -> 34, RETIRING 9 -> 10)."
 }
