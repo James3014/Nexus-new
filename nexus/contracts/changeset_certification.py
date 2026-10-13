@@ -1,4 +1,9 @@
-"""Compatibility facade for the v2 ChangeSet certification adapter."""
+"""Compatibility facade for the v2 ChangeSet certification adapter.
+
+The ``product`` namespace is not shipped in the nexus_legacy wheel (#821, #1929).
+In-tree it resolves from the checkout; a wheel-only install must also install
+nexus-certify (nexus-core), which nexus-legacy does not declare as a dependency.
+"""
 
 from product.adapters.changeset_certification_v2 import (
     CHANGESET_CERTIFICATION_SCHEMA as CHANGESET_CERTIFICATION_SCHEMA,
