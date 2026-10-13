@@ -310,3 +310,12 @@ def test_not_found_text_in_assertion_message_is_not_node_missing(
     )
     code, receipt = _gate(repo, tmp_path)
     assert code == 0, receipt
+
+
+def test_missing_python_receipt_records_intended_argv(repo: Path, tmp_path: Path) -> None:
+    _write_test(repo, VALID_TEST)
+    python_path = str(tmp_path / "nope" / "python")
+    code, receipt = _gate(repo, tmp_path, python=python_path)
+    command = receipt.get("command", [])
+    assert command[:6] == [python_path, "-m", "pytest", "-p", "no:cacheprovider", "-q"]
+    assert command[-1:] == receipt["contract"]["test_nodes"]
