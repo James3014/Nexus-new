@@ -8,6 +8,8 @@ fails when a new physical implementation appears outside the admitted seams.
 from __future__ import annotations
 
 import ast
+import functools
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Literal
@@ -167,7 +169,35 @@ EDGES = (
 )
 
 
+# Performance only: the real repository tree is scanned and parsed many times
+# per run, so its file list and ASTs are cached in-process. Synthetic inputs
+# (tmp_path roots / extra files outside the repository) are always rescanned and
+# parsed fresh. Parsed ASTs are keyed by (path, sha256 of content) and are only
+# ever read, never mutated, by this module.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_FILES_CACHE: dict[Path, tuple[Path, ...]] = {}
+_AST_CACHE: dict[tuple[Path, str], ast.Module] = {}
+
+
+def _in_repo(path: Path) -> bool:
+    try:
+        path.resolve().relative_to(_REPO_ROOT)
+    except ValueError:
+        return False
+    return True
+
+
 def _files(root: Path) -> tuple[Path, ...]:
+    cacheable = root.resolve() == _REPO_ROOT
+    if cacheable and root in _FILES_CACHE:
+        return _FILES_CACHE[root]
+    result = _scan_files(root)
+    if cacheable:
+        _FILES_CACHE[root] = result
+    return result
+
+
+def _scan_files(root: Path) -> tuple[Path, ...]:
     found: list[Path] = []
     for rel in (Path("nexus"), Path("scripts/ops")):
         base = root / rel
@@ -185,7 +215,14 @@ def _files(root: Path) -> tuple[Path, ...]:
 
 def _parse(path: Path) -> ast.Module:
     try:
-        return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        text = path.read_text(encoding="utf-8")
+        if not _in_repo(path):
+            return ast.parse(text, filename=str(path))
+        key = (path, hashlib.sha256(text.encode("utf-8")).hexdigest())
+        tree = _AST_CACHE.get(key)
+        if tree is None:
+            tree = _AST_CACHE[key] = ast.parse(text, filename=str(path))
+        return tree
     except (OSError, SyntaxError, UnicodeError) as exc:
         raise AssertionError(f"SOURCE_UNPARSEABLE:{path}:{exc}") from exc
 
@@ -233,6 +270,7 @@ def _expr(node: ast.AST) -> str | None:
     return None
 
 
+@functools.cache
 def _calls(record: Record) -> tuple[str, ...]:
     return tuple(
         expression
@@ -245,6 +283,7 @@ def _tail(call: str) -> str:
     return call.rsplit(".", 1)[-1].removesuffix("()")
 
 
+@functools.cache
 def _strings(record: Record) -> frozenset[str]:
     return frozenset(
         node.value
