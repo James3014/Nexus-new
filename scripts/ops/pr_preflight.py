@@ -72,6 +72,7 @@ DEPENDENCY_CONTRACT_DRIFT = "DEPENDENCY_CONTRACT_DRIFT"
 EXECUTOR_GIT_IDENTITY_MISMATCH = "EXECUTOR_GIT_IDENTITY_MISMATCH"
 MERGE_LANE_BINDING_MISSING = "MERGE_LANE_BINDING_MISSING"
 STATIC_NEW_REGRESSION = "NEW_REGRESSION"
+STATIC_TOOL_MISSING = "STATIC_TOOL_MISSING"
 
 TRUSTED_LANE_GATE_PATH = "scripts/ops/trusted_merge_lane_gate.py"
 TRUSTED_ANCHOR_PATH = "scripts/ops/trusted_deletion_anchor.py"
@@ -808,9 +809,10 @@ def check_static(ctx: Context, tool: str, worktrees: dict[str, Path]) -> CheckRe
     if not binary.is_file():
         return CheckResult(
             name,
-            SKIP,
-            detail=f"{binary} missing",
-            fix="uv sync --frozen --all-groups --all-extras (clean venv), or pass --tools-venv",
+            FAIL,
+            STATIC_TOOL_MISSING,
+            f"{binary} missing; a silent SKIP would hide regressions CI enforces",
+            "run `uv sync --frozen` (or the repo's documented tool install) then rerun",
         )
     files = _changed_files(ctx, spec)
     with tempfile.TemporaryDirectory(prefix=f"nexus-pr-preflight-{tool}-") as tmp:

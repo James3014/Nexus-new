@@ -529,15 +529,16 @@ def test_static_gate_without_python_change_passes_without_tools(repo, tmp_path, 
     assert _check(report, "static_pyright")["status"] == "PASS"
 
 
-def test_static_gate_with_change_but_no_tool_skips(repo, tmp_path, capsys):
+def test_static_gate_with_change_but_no_tool_fails(repo, tmp_path, capsys):
     _write(repo, "nexus/mod.py", "VALUE = 2\n")
     _commit(repo, "change python")
     argv = ["--repo", str(repo), "--no-fetch", "--json", "--only", "static_bandit"]
     argv += ["--tools-venv", str(tmp_path / "missing-venv")]
     _code, report = _report(capsys, argv)
     check = _check(report, "static_bandit")
-    assert check["status"] == "SKIP"
-    assert "uv sync" in check["fix"]
+    assert (check["status"], check["code"]) == ("FAIL", pf.STATIC_TOOL_MISSING)
+    assert "uv sync --frozen" in check["fix"]
+    assert _code == 1
 
 
 # ------------------------------------------------------- output and drift
