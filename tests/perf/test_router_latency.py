@@ -1,23 +1,24 @@
 from __future__ import annotations
 
-import os
 import time
 from unittest.mock import MagicMock
 
 import pytest
 
 
-def _make_router_stub(learning_enabled: bool):
+def _make_router_stub(learning_enabled: bool, monkeypatch: pytest.MonkeyPatch):
     """Build a minimal router stub that simulates routing latency."""
-    os.environ["NEXUS_LEARNING_LOOP_WRITE_ENABLED"] = "1" if learning_enabled else "0"
+    monkeypatch.setenv("NEXUS_LEARNING_LOOP_WRITE_ENABLED", "1" if learning_enabled else "0")
     stub = MagicMock()
     stub.route.side_effect = lambda phase, ctx: {"route": "direct", "phase": phase}
     return stub
 
 
-def _measure_router_latency_stub(learning_enabled: bool, num_tasks: int = 100) -> float:
+def _measure_router_latency_stub(
+    learning_enabled: bool, monkeypatch: pytest.MonkeyPatch, num_tasks: int = 100
+) -> float:
     """Measure average simulated router latency per task."""
-    router = _make_router_stub(learning_enabled)
+    router = _make_router_stub(learning_enabled, monkeypatch)
     total_ms = 0.0
 
     for i in range(num_tasks):
@@ -30,22 +31,26 @@ def _measure_router_latency_stub(learning_enabled: bool, num_tasks: int = 100) -
     return total_ms / num_tasks
 
 
-def test_router_latency_with_learning_loop_enabled():
+def test_router_latency_with_learning_loop_enabled(monkeypatch):
     """N10: Verify router latency with learning loop enabled is within tolerance."""
-    avg_enabled = _measure_router_latency_stub(learning_enabled=True, num_tasks=50)
+    avg_enabled = _measure_router_latency_stub(
+        learning_enabled=True, monkeypatch=monkeypatch, num_tasks=50
+    )
     assert avg_enabled >= 0, f"Negative latency: {avg_enabled}"
     assert avg_enabled < 5000, (
         f"Latency with learning loop enabled too high: {avg_enabled:.2f}ms > 5000ms"
     )
 
 
-def test_router_latency_with_learning_loop_disabled():
+def test_router_latency_with_learning_loop_disabled(monkeypatch):
     """N11: Verify baseline router latency without learning loop.
 
     Standalone test that measures latency when NEXUS_LEARNING_LOOP_WRITE_ENABLED=0.
     Provides baseline comparison for N10.
     """
-    avg_disabled = _measure_router_latency_stub(learning_enabled=False, num_tasks=50)
+    avg_disabled = _measure_router_latency_stub(
+        learning_enabled=False, monkeypatch=monkeypatch, num_tasks=50
+    )
     assert avg_disabled >= 0, f"Negative latency: {avg_disabled}"
     assert avg_disabled < 5000, (
         f"Latency without learning loop too high: {avg_disabled:.2f}ms > 5000ms"

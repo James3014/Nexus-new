@@ -9,6 +9,30 @@ from nexus.services.local_heal.semantic_anchor_selection import (
     SemanticAnchorSelector,
     select_semantic_anchor,
 )
+import functools
+
+from nexus.services.local_heal import semantic_anchor_selection
+from nexus.services.local_heal.memory_retrieval_adapter import (
+    LocalJsonlLessonStore,
+    MemoryRetrievalAdapter,
+)
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_lesson_memory(monkeypatch, tmp_path):
+    """Score against an empty lesson store, not the checkout's mutable memory.
+
+    The default scorer reads prior lessons from the repository's .nexus stores,
+    which earlier tests in a full serial run append to (learning_closure.jsonl,
+    findings memory). Those lessons added memory_success/failure deltas of +/-1.0
+    and flipped the failing-symbol preference in the nightly (#1928).
+    """
+    empty_store = LocalJsonlLessonStore(tmp_path / "no_prior_lessons.jsonl")
+    monkeypatch.setattr(
+        semantic_anchor_selection,
+        "MemoryRetrievalAdapter",
+        functools.partial(MemoryRetrievalAdapter, empty_store),
+    )
 
 
 def _make_source_hash(text):

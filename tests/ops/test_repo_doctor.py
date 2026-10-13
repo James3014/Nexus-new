@@ -70,6 +70,9 @@ def test_unsupported_python_blocks(tmp_path):
 def test_json_output_redacts_secret_values(tmp_path, monkeypatch, capsys):
     write_core(tmp_path)
     secret = "doctor-secret-must-not-appear"
+    # CI runners (astral-sh/setup-uv) export UV_CACHE_DIR outside the repo, which
+    # blocks the core check (exit 1); this test is about redaction, so use the default.
+    monkeypatch.delenv("UV_CACHE_DIR", raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", secret)
     monkeypatch.setattr(repo_doctor.shutil, "which", lambda _name: False)
 

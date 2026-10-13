@@ -126,6 +126,11 @@ def test_dry_mode_without_llm_reports_deterministic_rescue_not_solves(tmp_path: 
         "--neutralize-history",
         "--disable-learning-loop",
         "--evidence-bundle",
+        # The default 30s leg timeout made the row ineligible (avg_model_calls None)
+        # when the shared CI runner took 31s (nightly 38429695994); the dry lane
+        # takes ~11-13s on an idle host. Budget for runner load, not for the logic.
+        "--timeout-sec",
+        "240",
     )
     with_summary = result["benchmark_summary"]["with_nexus"]
     assert with_summary["total_n"] == 1

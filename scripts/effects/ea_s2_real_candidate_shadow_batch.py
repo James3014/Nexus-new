@@ -294,6 +294,36 @@ def collect_shadow_data():
     return rows
 
 
+def _scoped_feature_flags(fn, keys):
+    """Restore the process environment after an in-process run (#1928).
+
+    The run toggles NEXUS_ENABLE_* feature flags on os.environ; left set, they
+    changed later behaviour in the same process (full-suite nightly: the P5
+    diversity selector stayed enabled for tests/unit/local_heal).
+    """
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        saved = {key: os.environ.get(key) for key in keys}
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    return wrapper
+
+
+collect_shadow_data = _scoped_feature_flags(
+    collect_shadow_data,
+    ("NEXUS_ENABLE_P5_DIVERSITY_SELECTION", "NEXUS_ENABLE_P4_COMMITTEE_ROUTED_TOOL"),
+)
+
+
 if __name__ == "__main__":
     rows = collect_shadow_data()
     output_path = "artifacts/effect_reports/ea_s2_real_candidate_shadow_v0.jsonl"

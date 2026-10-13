@@ -2430,7 +2430,9 @@ def test_gateway_provider_executable_uses_shared_registered_resolver(monkeypatch
     metadata, executable = gateway._provider_executable("agy")
 
     assert metadata["binary_env"] == "NEXUS_AGY_BIN"
-    assert executable == "/bin/echo"
+    # The gateway binds the symlink-resolved path; /bin is a symlink to /usr/bin on
+    # merged-/usr Linux hosts, so compare against the resolved identity.
+    assert executable == str(Path("/bin/echo").resolve())
 
 
 def test_gateway_provider_executable_binds_canonical_user_local_agy_when_path_is_restricted(monkeypatch, tmp_path):
