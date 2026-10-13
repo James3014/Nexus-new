@@ -1,0 +1,4426 @@
+#!/usr/bin/env python3
+"""Guarded Nexus entrypoint for resuming tracked DSH goals.
+
+This command does not own Issue completion, DSH goal lifecycle, provider routing,
+leases, verification, merge, or release. It stores a durable tracking binding
+for a DSH session and re-reads authoritative workflow state before any resume
+can launch the DSH process. Any BLOCK_RESUME decision exits 75; the provider is
+never invoked unless the decision is ALLOW_RESUME.
+
+The ``red-gate`` subcommand is a deterministic, outer, pre-mutation test-evidence
+gate. It does not trust a model's RED_READY claim: from a controller-written
+contract it inspects the worktree diff (test-only changes, no duplicate
+definitions, no oracle asserting the buggy literal), re-runs the target pytest
+nodes with an explicit interpreter, and requires every node to fail with the
+contracted assertion signature. Any REVISE_RED decision exits 75. It holds no
+verifier or completion authority.
+"""
+
+from __future__ import annotations
+
+import argparse
+import ast
+import fnmatch
+import hashlib
+import json
+import math
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable, Sequence
+from xml.etree import ElementTree
+
+BINDING_SCHEMA = "nexus.dsh_tracking_binding.v1"
+PREFLIGHT_SCHEMA = "nexus.dsh_resume_preflight.v1"
+DOCTOR_SCHEMA = "nexus.workflow_doctor.v1"
+DOCTOR_CLAIM_CEILING = "READ_ONLY_WORKFLOW_OBSERVATION"
+PREFLIGHT_CLAIM_CEILING = "PRE_RESUME_GUARD_NO_COMPLETION_AUTHORITY"
+EXIT_BLOCKED = 75
+SESSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+
+
+class DshWorkflowError(RuntimeError):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _canonical_json(value: dict[str, Any]) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def _sha256_bytes(value: bytes) -> str:
+    return "sha256:" + hashlib.sha256(value).hexdigest()
+
+
+def _sha256_file(path: Path) -> str:
+    return _sha256_bytes(path.read_bytes())
+
+
+def _state_root(raw: str | None) -> Path:
+    configured = raw or os.getenv("NEXUS_DSH_WORKFLOW_STATE_ROOT")
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return Path.home() / ".local/state/nexus-dsh-workflows"
+
+
+def _binding_path(root: Path, session_id: str) -> Path:
+    digest = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+    return root / "bindings" / f"{digest}.json"
+
+
+def _preflight_dir(root: Path, session_id: str) -> Path:
+    digest = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+    return root / "preflights" / digest
+
+
+def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}")
+    tmp.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _binding_hash(payload_without_hash: dict[str, Any]) -> str:
+    return _sha256_bytes(_canonical_json(payload_without_hash).encode("utf-8"))
+
+
+def _validate_repository(repository: str) -> str:
+    value = repository.strip()
+    if not REPOSITORY_RE.fullmatch(value):
+        raise DshWorkflowError(
+            "DSH_TRACKING_REPOSITORY_INVALID",
+            "repository must be an owner/name slug",
+        )
+    return value
+
+
+def _validate_session_id(session_id: str) -> str:
+    value = session_id.strip()
+    if not SESSION_RE.fullmatch(value):
+        raise DshWorkflowError(
+            "DSH_TRACKING_SESSION_INVALID",
+            "session id must be a normalized DSH session identifier",
+        )
+    return value
+
+
+def _parse_created_goal_log(
+    path: Path, *, require_goal: bool = True, required_round_cap: int | None = None
+) -> dict[str, Any]:
+    session_id: str | None = None
+    observed_cwd: str | None = None
+    create_calls: set[str] = set()
+    goal: dict[str, Any] | None = None
+    round_caps: list[Any] = []
+
+    def record_session(candidate: str) -> None:
+        nonlocal session_id
+        candidate = _validate_session_id(candidate)
+        if session_id is not None and session_id != candidate:
+            raise DshWorkflowError(
+                "DSH_TRACKING_MULTIPLE_SESSIONS",
+                "log contains more than one session id",
+            )
+        session_id = candidate
+
+    def record_goal(candidate_goal: Any) -> None:
+        nonlocal goal
+        if not isinstance(candidate_goal, dict):
+            return
+        goal_id = candidate_goal.get("id")
+        revision = candidate_goal.get("revision")
+        objective = candidate_goal.get("objective")
+        if (
+            not isinstance(goal_id, str)
+            or not goal_id
+            or not isinstance(revision, int)
+            or revision < 1
+            or not isinstance(objective, str)
+            or not objective.strip()
+        ):
+            return
+        normalized = {
+            "id": goal_id,
+            "revision": revision,
+            "objective": objective.strip(),
+        }
+        if goal is not None and goal != normalized:
+            raise DshWorkflowError(
+                "DSH_TRACKING_MULTIPLE_GOALS",
+                "log contains multiple successful create_goal identities",
+            )
+        goal = normalized
+        round_caps.append(candidate_goal.get("maxGoalRounds"))
+
+    with path.open("r", encoding="utf-8") as handle:
+        for line_number, raw in enumerate(handle, start=1):
+            line = raw.strip()
+            if not line:
+                continue
+
+            if line.startswith("DSH_SESSION_ID="):
+                record_session(line.split("=", 1)[1])
+                continue
+
+            if line.startswith("DSH_EVENT="):
+                event_text = line.split("=", 1)[1]
+            elif line.startswith("{"):
+                event_text = line
+            else:
+                continue
+
+            try:
+                event = json.loads(event_text)
+            except json.JSONDecodeError as exc:
+                raise DshWorkflowError(
+                    "DSH_TRACKING_LOG_INVALID_JSON",
+                    f"line {line_number} is not valid JSON",
+                ) from exc
+            if not isinstance(event, dict):
+                continue
+
+            if event.get("type") == "session":
+                candidate = event.get("sessionId")
+                if isinstance(candidate, str):
+                    record_session(candidate)
+                cwd = event.get("cwd")
+                if isinstance(cwd, str) and cwd:
+                    observed_cwd = cwd
+
+            if event.get("type") == "goal/change":
+                data = event.get("data")
+                if (
+                    isinstance(data, dict)
+                    and data.get("kind") == "goal/change"
+                    and data.get("operation") == "create"
+                ):
+                    record_goal(data.get("goal"))
+
+            if event.get("type") == "tool_call" and event.get("tool") == "create_goal":
+                call_id = event.get("callId")
+                if isinstance(call_id, str) and call_id:
+                    create_calls.add(call_id)
+
+            if (
+                event.get("type") == "tool_result"
+                and event.get("status") == "completed"
+                and event.get("callId") in create_calls
+            ):
+                raw_result = event.get("result")
+                if not isinstance(raw_result, str):
+                    continue
+                try:
+                    result = json.loads(raw_result)
+                except json.JSONDecodeError:
+                    continue
+                record_goal(result.get("goal") if isinstance(result, dict) else None)
+
+    if session_id is None:
+        raise DshWorkflowError(
+            "DSH_TRACKING_SESSION_NOT_OBSERVED",
+            "log does not contain a DSH session identity",
+        )
+    if goal is None and require_goal:
+        raise DshWorkflowError(
+            "DSH_TRACKING_GOAL_NOT_OBSERVED",
+            "log does not contain a durable create_goal result",
+        )
+    # Fail closed: a model ignoring the header must not leave a 256-round Goal bound.
+    if (
+        required_round_cap is not None
+        and goal is not None
+        and not (
+            round_caps and all(type(cap) is int and cap == required_round_cap for cap in round_caps)
+        )
+    ):
+        raise DshWorkflowError(
+            "DSH_GOAL_ROUND_CAP_MISMATCH",
+            f"created goal maxGoalRounds must be exactly {required_round_cap}",
+        )
+    return {
+        "session_id": session_id,
+        "observed_cwd": observed_cwd,
+        "goal": goal,
+    }
+
+
+def build_binding_from_log(
+    *,
+    log_path: Path,
+    repository: str,
+    issue_number: int,
+    repo_root: Path,
+    dsh_home: Path,
+    created_at: str | None = None,
+    phase: str | None = None,
+    parent_session_id: str | None = None,
+    goal_objective: str | None = None,
+    required_round_cap: int | None = None,
+) -> dict[str, Any]:
+    """Build a binding; with ``phase`` set, a missing goal yields a phase-scoped binding."""
+    if issue_number < 1:
+        raise DshWorkflowError(
+            "DSH_TRACKING_ISSUE_INVALID",
+            "issue number must be positive",
+        )
+    observed = _parse_created_goal_log(
+        log_path, require_goal=phase is None, required_round_cap=required_round_cap
+    )
+    repo_root = repo_root.expanduser().resolve()
+    dsh_home = dsh_home.expanduser().resolve()
+    observed_cwd = observed.get("observed_cwd")
+    if observed_cwd and Path(observed_cwd).expanduser().resolve() != repo_root:
+        raise DshWorkflowError(
+            "DSH_TRACKING_REPO_ROOT_MISMATCH",
+            "DSH session cwd does not match the tracked repository root",
+        )
+
+    goal = observed["goal"] or {"id": None, "revision": None, "objective": goal_objective}
+    body: dict[str, Any] = {
+        "schema": BINDING_SCHEMA,
+        "session_id": observed["session_id"],
+        "goal_id": goal["id"],
+        "goal_revision_at_bind": goal["revision"],
+        "objective": goal["objective"],
+        "repository": _validate_repository(repository),
+        "issue_number": issue_number,
+        "repo_root": str(repo_root),
+        "dsh_home": str(dsh_home),
+        "source_log_sha256": _sha256_file(log_path),
+        "created_at": created_at or _utc_now(),
+        "authority": "TRACKING_METADATA_ONLY",
+    }
+    # Lineage fields are optional and hashed only when present, so legacy bindings
+    # keep their exact hash.
+    if phase is not None:
+        body["phase"] = phase
+    if parent_session_id is not None:
+        body["parent_session_id"] = _validate_session_id(parent_session_id)
+    return {**body, "binding_hash": _binding_hash(body)}
+
+
+def validate_binding(payload: dict[str, Any]) -> dict[str, Any]:
+    if payload.get("schema") != BINDING_SCHEMA:
+        raise DshWorkflowError(
+            "DSH_TRACKING_BINDING_SCHEMA_MISMATCH",
+            "tracking binding schema mismatch",
+        )
+    required = {
+        "session_id",
+        "goal_id",
+        "goal_revision_at_bind",
+        "objective",
+        "repository",
+        "issue_number",
+        "repo_root",
+        "dsh_home",
+        "source_log_sha256",
+        "created_at",
+        "authority",
+        "binding_hash",
+    }
+    if not required.issubset(payload):
+        raise DshWorkflowError(
+            "DSH_TRACKING_BINDING_INCOMPLETE",
+            "tracking binding is missing required fields",
+        )
+    _validate_session_id(str(payload["session_id"]))
+    _validate_repository(str(payload["repository"]))
+    if not isinstance(payload["issue_number"], int) or payload["issue_number"] < 1:
+        raise DshWorkflowError(
+            "DSH_TRACKING_BINDING_ISSUE_INVALID",
+            "tracking binding issue number is invalid",
+        )
+    if payload.get("authority") != "TRACKING_METADATA_ONLY":
+        raise DshWorkflowError(
+            "DSH_TRACKING_BINDING_AUTHORITY_INVALID",
+            "tracking binding cannot mint workflow authority",
+        )
+    without_hash = dict(payload)
+    observed_hash = str(without_hash.pop("binding_hash"))
+    expected_hash = _binding_hash(without_hash)
+    if observed_hash != expected_hash:
+        raise DshWorkflowError(
+            "DSH_TRACKING_BINDING_HASH_MISMATCH",
+            "tracking binding integrity check failed",
+        )
+    return payload
+
+
+def store_binding(root: Path, binding: dict[str, Any]) -> Path:
+    validate_binding(binding)
+    path = _binding_path(root, str(binding["session_id"]))
+    if path.exists():
+        existing = validate_binding(json.loads(path.read_text(encoding="utf-8")))
+        immutable = (
+            "session_id",
+            "goal_id",
+            "goal_revision_at_bind",
+            "objective",
+            "repository",
+            "issue_number",
+            "repo_root",
+            "dsh_home",
+            "source_log_sha256",
+            "phase",
+            "parent_session_id",
+        )
+        if any(existing.get(key) != binding.get(key) for key in immutable):
+            raise DshWorkflowError(
+                "DSH_TRACKING_BINDING_CONFLICT",
+                "session is already bound to different tracked work",
+            )
+        return path
+    _atomic_write_json(path, binding)
+    return path
+
+
+def load_binding(root: Path, session_id: str) -> dict[str, Any]:
+    session_id = _validate_session_id(session_id)
+    path = _binding_path(root, session_id)
+    if not path.is_file():
+        raise DshWorkflowError(
+            "DSH_TRACKING_BINDING_MISSING",
+            "tracked DSH resume requires a durable session binding",
+        )
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise DshWorkflowError(
+            "DSH_TRACKING_BINDING_UNREADABLE",
+            "tracking binding cannot be read",
+        ) from exc
+    if not isinstance(payload, dict):
+        raise DshWorkflowError(
+            "DSH_TRACKING_BINDING_INVALID",
+            "tracking binding must be a JSON object",
+        )
+    return validate_binding(payload)
+
+
+def load_goal_projection(binding: dict[str, Any]) -> dict[str, Any]:
+    session_id = _validate_session_id(str(binding["session_id"]))
+    path = (
+        Path(str(binding["dsh_home"])).expanduser().resolve()
+        / "storages"
+        / "session_projcache"
+        / "sessions"
+        / f"{session_id}.json"
+    )
+    if not path.is_file():
+        raise DshWorkflowError(
+            "DSH_GOAL_PROJECTION_MISSING",
+            "persisted DSH goal projection is unavailable",
+        )
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise DshWorkflowError(
+            "DSH_GOAL_PROJECTION_UNREADABLE",
+            "persisted DSH goal projection cannot be read",
+        ) from exc
+
+    rows = ((payload.get("record") or {}).get("rows") or {}) if isinstance(payload, dict) else {}
+    goal_row = rows.get("goal") if isinstance(rows, dict) else None
+    value = goal_row.get("val") if isinstance(goal_row, dict) else None
+    current = value.get("current") if isinstance(value, dict) else None
+    goal = current.get("goal") if isinstance(current, dict) else None
+    if not isinstance(goal, dict):
+        raise DshWorkflowError(
+            "DSH_GOAL_PROJECTION_MISSING_CURRENT",
+            "persisted DSH session has no current goal",
+        )
+
+    goal_id = goal.get("id")
+    revision = goal.get("revision")
+    objective = goal.get("objective")
+    phase = goal.get("phase")
+    if (
+        not isinstance(goal_id, str)
+        or not isinstance(revision, int)
+        or revision < 1
+        or not isinstance(objective, str)
+        or not objective.strip()
+        or phase not in {"active", "paused", "blocked", "complete"}
+    ):
+        raise DshWorkflowError(
+            "DSH_GOAL_PROJECTION_INVALID",
+            "persisted DSH current goal is malformed",
+        )
+    if goal_id != binding["goal_id"] or objective.strip() != binding["objective"]:
+        raise DshWorkflowError(
+            "DSH_GOAL_IDENTITY_MISMATCH",
+            "persisted DSH current goal no longer matches the tracked binding",
+        )
+    if revision < binding["goal_revision_at_bind"]:
+        raise DshWorkflowError(
+            "DSH_GOAL_REVISION_REGRESSED",
+            "persisted DSH goal revision predates the tracking binding",
+        )
+    if phase == "complete":
+        raise DshWorkflowError(
+            "DSH_GOAL_ALREADY_COMPLETE",
+            "persisted DSH goal is already complete and must not be resumed",
+        )
+
+    rounds_started = current.get("roundsStarted")
+    if not isinstance(rounds_started, int) or rounds_started < 0:
+        raise DshWorkflowError(
+            "DSH_GOAL_PROJECTION_INVALID",
+            "persisted DSH goal round counter is malformed",
+        )
+    return {
+        "goal_id": goal_id,
+        "goal_revision": revision,
+        "goal_objective": objective.strip(),
+        "goal_phase": phase,
+        "goal_rounds_started": rounds_started,
+        "projection_path": str(path),
+    }
+
+
+def _blocked_preflight(
+    binding: dict[str, Any],
+    *,
+    reason_code: str,
+    detail: str,
+    doctor: dict[str, Any] | None = None,
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    source = doctor.get("source") if isinstance(doctor, dict) else None
+    task = doctor.get("task") if isinstance(doctor, dict) else None
+    next_gate = doctor.get("next_gate") if isinstance(doctor, dict) else None
+    return {
+        "schema": PREFLIGHT_SCHEMA,
+        "claim_ceiling": PREFLIGHT_CLAIM_CEILING,
+        "generated_at": generated_at or _utc_now(),
+        "decision": "BLOCK_RESUME",
+        "reason_code": reason_code,
+        "detail": detail,
+        "provider_invocation_allowed": False,
+        "session_id": binding["session_id"],
+        "goal_id": binding["goal_id"],
+        "repository": binding["repository"],
+        "issue_number": binding["issue_number"],
+        "binding_hash": binding["binding_hash"],
+        "doctor_resume_disposition": (
+            doctor.get("resume_disposition") if isinstance(doctor, dict) else None
+        ),
+        "doctor_next_gate": (next_gate.get("code") if isinstance(next_gate, dict) else None),
+        "source_head": source.get("head") if isinstance(source, dict) else None,
+        "source_github_main": (source.get("github_main") if isinstance(source, dict) else None),
+        "task_state": task.get("state") if isinstance(task, dict) else None,
+        "task_updated_at": (task.get("updated_at") if isinstance(task, dict) else None),
+        "task_url": task.get("url") if isinstance(task, dict) else None,
+    }
+
+
+def evaluate_doctor(
+    binding: dict[str, Any],
+    doctor: dict[str, Any],
+    *,
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    if doctor.get("schema") != DOCTOR_SCHEMA:
+        return _blocked_preflight(
+            binding,
+            reason_code="WORKFLOW_DOCTOR_SCHEMA_MISMATCH",
+            detail="workflow doctor schema is not the expected version",
+            doctor=doctor,
+            generated_at=generated_at,
+        )
+    if doctor.get("claim_ceiling") != DOCTOR_CLAIM_CEILING:
+        return _blocked_preflight(
+            binding,
+            reason_code="WORKFLOW_DOCTOR_CLAIM_CEILING_MISMATCH",
+            detail="workflow doctor observation has an unexpected claim ceiling",
+            doctor=doctor,
+            generated_at=generated_at,
+        )
+
+    task = doctor.get("task")
+    if not isinstance(task, dict) or task.get("status") != "OBSERVED":
+        return _blocked_preflight(
+            binding,
+            reason_code="TRACKED_ISSUE_STATE_UNVERIFIED",
+            detail="tracked Issue state could not be authoritatively observed",
+            doctor=doctor,
+            generated_at=generated_at,
+        )
+    if task.get("issue_number") != binding["issue_number"]:
+        return _blocked_preflight(
+            binding,
+            reason_code="TRACKED_ISSUE_IDENTITY_MISMATCH",
+            detail="workflow doctor returned a different Issue identity",
+            doctor=doctor,
+            generated_at=generated_at,
+        )
+    if task.get("state") != "open":
+        return _blocked_preflight(
+            binding,
+            reason_code="TRACKED_ISSUE_TERMINAL",
+            detail="tracked Issue is terminal; resume requires a fresh reopened or successor contract",
+            doctor=doctor,
+            generated_at=generated_at,
+        )
+
+    disposition = doctor.get("resume_disposition")
+    next_gate = doctor.get("next_gate")
+    next_gate_code = next_gate.get("code") if isinstance(next_gate, dict) else None
+    if disposition != "SAFE":
+        return _blocked_preflight(
+            binding,
+            reason_code="WORKFLOW_NOT_SAFE_TO_RESUME",
+            detail="workflow doctor reported a non-safe disposition",
+            doctor=doctor,
+            generated_at=generated_at,
+        )
+    if next_gate_code != "CONTINUE_BOUNDED_ISSUE_WORK":
+        return _blocked_preflight(
+            binding,
+            reason_code="WORKFLOW_NEXT_GATE_NOT_RESUMABLE",
+            detail="tracked Issue is open but the current workflow gate is not bounded Issue work",
+            doctor=doctor,
+            generated_at=generated_at,
+        )
+
+    source = doctor.get("source")
+    return {
+        "schema": PREFLIGHT_SCHEMA,
+        "claim_ceiling": PREFLIGHT_CLAIM_CEILING,
+        "generated_at": generated_at or _utc_now(),
+        "decision": "ALLOW_RESUME",
+        "reason_code": "TRACKED_ISSUE_OPEN_AND_WORKFLOW_SAFE",
+        "detail": "fresh workflow evidence permits bounded tracked-Issue continuation",
+        "provider_invocation_allowed": True,
+        "session_id": binding["session_id"],
+        "goal_id": binding["goal_id"],
+        "repository": binding["repository"],
+        "issue_number": binding["issue_number"],
+        "binding_hash": binding["binding_hash"],
+        "doctor_resume_disposition": disposition,
+        "doctor_next_gate": next_gate_code,
+        "source_head": source.get("head") if isinstance(source, dict) else None,
+        "source_github_main": (source.get("github_main") if isinstance(source, dict) else None),
+        "task_state": task.get("state"),
+        "task_updated_at": task.get("updated_at"),
+        "task_url": task.get("url"),
+    }
+
+
+Runner = Callable[..., subprocess.CompletedProcess[str]]
+
+
+def run_preflight(
+    binding: dict[str, Any],
+    *,
+    doctor_bin: str,
+    runner: Runner = subprocess.run,
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    try:
+        goal_projection = load_goal_projection(binding)
+    except DshWorkflowError as exc:
+        return _blocked_preflight(
+            binding,
+            reason_code=exc.code,
+            detail=str(exc),
+            generated_at=generated_at,
+        )
+    receipt = run_issue_preflight(
+        binding, doctor_bin=doctor_bin, runner=runner, generated_at=generated_at
+    )
+    if receipt["decision"] == "ALLOW_RESUME":
+        receipt.update(goal_projection)
+    return receipt
+
+
+def issue_subject(repository: str, issue_number: int, repo_root: Path) -> dict[str, Any]:
+    """Binding-shaped subject for preflights that run before any session exists."""
+    repository = _validate_repository(repository)
+    return {
+        "session_id": f"start-phase-{repository.replace('/', '_')}-{issue_number}",
+        "goal_id": None,
+        "repository": repository,
+        "issue_number": issue_number,
+        "binding_hash": None,
+        "repo_root": str(repo_root.expanduser().resolve()),
+    }
+
+
+def run_issue_preflight(
+    binding: dict[str, Any],
+    *,
+    doctor_bin: str,
+    runner: Runner = subprocess.run,
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    """Authoritative Issue-open + doctor-SAFE preflight; needs no session binding."""
+    argv = [
+        doctor_bin,
+        "--json",
+        "--repo-root",
+        str(binding["repo_root"]),
+        "--repository",
+        str(binding["repository"]),
+        "--issue",
+        str(binding["issue_number"]),
+    ]
+    try:
+        proc = runner(
+            argv,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return _blocked_preflight(
+            binding,
+            reason_code="WORKFLOW_DOCTOR_UNAVAILABLE",
+            detail=f"{type(exc).__name__}: {exc}",
+            generated_at=generated_at,
+        )
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip()
+        return _blocked_preflight(
+            binding,
+            reason_code="WORKFLOW_DOCTOR_FAILED",
+            detail=detail[-1000:] or f"exit={proc.returncode}",
+            generated_at=generated_at,
+        )
+    try:
+        doctor = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        return _blocked_preflight(
+            binding,
+            reason_code="WORKFLOW_DOCTOR_OUTPUT_INVALID",
+            detail=f"{type(exc).__name__}: {exc}",
+            generated_at=generated_at,
+        )
+    if not isinstance(doctor, dict):
+        return _blocked_preflight(
+            binding,
+            reason_code="WORKFLOW_DOCTOR_OUTPUT_INVALID",
+            detail="workflow doctor output must be a JSON object",
+            generated_at=generated_at,
+        )
+    return evaluate_doctor(binding, doctor, generated_at=generated_at)
+
+
+def persist_preflight(root: Path, receipt: dict[str, Any]) -> Path:
+    body = dict(receipt)
+    body["receipt_hash"] = _sha256_bytes(_canonical_json(body).encode("utf-8"))
+    session_dir = _preflight_dir(root, str(receipt["session_id"]))
+    stamp = str(receipt["generated_at"]).replace(":", "").replace("-", "")
+    unique = session_dir / f"{stamp}-{body['receipt_hash'][7:19]}.json"
+    _atomic_write_json(unique, body)
+    _atomic_write_json(session_dir / "latest.json", body)
+    return unique
+
+
+def build_dsh_resume_argv(
+    *,
+    dsh_bin: str,
+    session_id: str,
+    profile: str,
+    patches: Sequence[str],
+    json_output: bool,
+    task: str,
+) -> list[str]:
+    argv = [dsh_bin, "--profile", profile]
+    for patch in patches:
+        argv.extend(["--patch", patch])
+    if json_output:
+        argv.append("--json")
+    argv.extend(["--session-id", _validate_session_id(session_id), task])
+    return argv
+
+
+def _print_result(payload: dict[str, Any], *, receipt_path: Path | None = None) -> None:
+    out = dict(payload)
+    if receipt_path is not None:
+        out["receipt_path"] = str(receipt_path)
+    print(json.dumps(out, sort_keys=True))
+
+
+def _default_binary(name: str) -> str:
+    return str(Path.home() / ".local/bin" / name)
+
+
+RED_CONTRACT_SCHEMA = "nexus.dsh_red_contract.v1"
+RED_RECEIPT_SCHEMA = "nexus.dsh_red_gate_receipt.v1"
+RED_CLAIM_CEILING = "PRE_MUTATION_RED_EVIDENCE_GATE_NO_COMPLETION_AUTHORITY"
+RED_SEMANTICS = "TARGET_DEFECT_REPRODUCED_BY_VALID_ORACLE"
+RED_CONTRACT_KEYS = {
+    "schema",
+    "repository",
+    "issue_number",
+    "invariant",
+    "test_nodes",
+    "expected_failure",
+    "forbidden_oracle_literals",
+    "test_path_globs",
+}
+RED_NODE_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_./-]*\.py::[^\s:][^\s]*$")
+RED_MESSAGE_LIMIT = 2000
+
+
+def _require(condition: bool, detail: str, code: str = "RED_CONTRACT_INVALID") -> None:
+    if not condition:
+        raise DshWorkflowError(code, detail)
+
+
+def _is_str_list(value: Any) -> bool:
+    return isinstance(value, list) and all(isinstance(v, str) and v for v in value)
+
+
+def validate_red_contract(contract: Any) -> dict[str, Any]:
+    _require(isinstance(contract, dict), "contract must be a JSON object")
+    keys = set(contract)
+    allowed = RED_CONTRACT_KEYS | {"python"}
+    _require(not (keys - allowed), f"unknown contract fields: {sorted(keys - allowed)}")
+    _require(
+        not (RED_CONTRACT_KEYS - keys),
+        f"missing contract fields: {sorted(RED_CONTRACT_KEYS - keys)}",
+    )
+    _require(contract["schema"] == RED_CONTRACT_SCHEMA, "contract schema mismatch")
+    repository = contract["repository"]
+    _require(
+        isinstance(repository, str) and bool(REPOSITORY_RE.fullmatch(repository)),
+        "repository must be an owner/name slug",
+    )
+    issue = contract["issue_number"]
+    _require(
+        isinstance(issue, int) and not isinstance(issue, bool) and issue > 0,
+        "issue_number must be positive int",
+    )
+    _require(
+        isinstance(contract["invariant"], str) and bool(contract["invariant"].strip()),
+        "invariant required",
+    )
+    nodes = contract["test_nodes"]
+    _require(_is_str_list(nodes) and bool(nodes), "test_nodes must be a non-empty list of strings")
+    for node in nodes:
+        path = node.split("::", 1)[0]
+        _require(
+            bool(RED_NODE_RE.fullmatch(node)) and ".." not in path.split("/"),
+            f"invalid pytest node id: {node}",
+        )
+    expected = contract["expected_failure"]
+    _require(
+        isinstance(expected, dict) and set(expected) == {"kind", "message_regex"},
+        "expected_failure must have exactly kind and message_regex",
+    )
+    _require(expected["kind"] == "assertion", "expected_failure.kind must be 'assertion'")
+    regex = expected["message_regex"]
+    _require(isinstance(regex, str) and bool(regex), "message_regex must be a non-empty string")
+    try:
+        re.compile(regex)
+    except re.error as exc:
+        raise DshWorkflowError("RED_CONTRACT_INVALID", f"message_regex invalid: {exc}") from exc
+    _require(
+        _is_str_list(contract["forbidden_oracle_literals"]),
+        "forbidden_oracle_literals must be a string list",
+    )
+    globs = contract["test_path_globs"]
+    _require(_is_str_list(globs) and bool(globs), "test_path_globs must be a non-empty string list")
+    if "python" in contract:
+        _require(
+            isinstance(contract["python"], str) and bool(contract["python"]),
+            "python must be a string",
+        )
+    return contract
+
+
+def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
+        ["git", "-c", "core.quotepath=off", *args],
+        cwd=str(repo),
+        capture_output=True,
+        check=False,
+    )
+
+
+def _git_ok(repo: Path, *args: str, code: str = "RED_ARGUMENT_INVALID") -> bytes:
+    proc = _git(repo, *args)
+    if proc.returncode != 0:
+        raise DshWorkflowError(
+            code,
+            f"git {' '.join(args[:2])} failed: {proc.stderr.decode('utf-8', 'replace').strip()}",
+        )
+    return proc.stdout
+
+
+def _split_z(raw: bytes) -> list[str]:
+    return [p.decode("utf-8", "surrogateescape") for p in raw.split(b"\0") if p]
+
+
+def _glob_match(path: str, pattern: str) -> bool:
+    candidates = {pattern, pattern.replace("**/", "")}
+    return any(fnmatch.fnmatchcase(path, c) for c in candidates)
+
+
+def _collect_worktree_changes(repo: Path, base: str) -> tuple[list[str], list[str], str]:
+    tracked = _split_z(_git_ok(repo, "diff", "--name-only", "--no-renames", "-z", base))
+    untracked = _split_z(_git_ok(repo, "ls-files", "--others", "--exclude-standard", "-z"))
+    diff_bytes = _git_ok(repo, "diff", "--binary", "--no-renames", base)
+    digest = hashlib.sha256()
+    digest.update(diff_bytes)
+    for rel in sorted(set(untracked)):
+        digest.update(b"\0untracked\0" + rel.encode("utf-8", "surrogateescape") + b"\0")
+        try:
+            digest.update((repo / rel).read_bytes())
+        except OSError:
+            digest.update(b"<unreadable>")
+    changed = sorted(set(tracked) | set(untracked))
+    return changed, sorted(set(untracked)), "sha256:" + digest.hexdigest()
+
+
+def _def_counts(tree: ast.AST) -> dict[str, dict[str, int]]:
+    scopes: dict[str, dict[str, int]] = {}
+
+    def visit(body: list[ast.stmt], scope: str) -> None:
+        counts = scopes.setdefault(scope, {})
+        for stmt in body:
+            if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                counts[stmt.name] = counts.get(stmt.name, 0) + 1
+                if isinstance(stmt, ast.ClassDef):
+                    visit(stmt.body, f"{scope}.{stmt.name}" if scope else stmt.name)
+
+    visit(tree.body, "")  # type: ignore[attr-defined]
+    return scopes
+
+
+def _find_duplicates(repo: Path, base: str, rel: str, tree: ast.AST) -> list[dict[str, Any]]:
+    base_counts: dict[str, dict[str, int]] = {}
+    proc = _git(repo, "show", f"{base}:{rel}")
+    if proc.returncode == 0:
+        try:
+            base_counts = _def_counts(ast.parse(proc.stdout))
+        except (SyntaxError, ValueError):
+            base_counts = {}
+    found: list[dict[str, Any]] = []
+    for scope, counts in sorted(_def_counts(tree).items()):
+        for name, count in sorted(counts.items()):
+            before = base_counts.get(scope, {}).get(name, 0)
+            if count > 1 and count > before:
+                found.append({
+                    "path": rel,
+                    "scope": scope or "<module>",
+                    "name": name,
+                    "count": count,
+                })
+    return found
+
+
+def _split_node(node: str) -> tuple[str, list[str]]:
+    path, _, rest = node.partition("::")
+    parts = [re.sub(r"\[.*\]$", "", p) for p in rest.split("::") if p]
+    return path, parts
+
+
+def _target_functions(tree: ast.AST, parts: list[str]) -> list[ast.AST]:
+    scope: list[ast.AST] = [tree]
+    for part in parts[:-1]:
+        scope = [
+            s
+            for container in scope
+            for s in getattr(container, "body", [])
+            if isinstance(s, ast.ClassDef) and s.name == part
+        ]
+    if not parts:
+        return []
+    return [
+        s
+        for container in scope
+        for s in getattr(container, "body", [])
+        if isinstance(s, (ast.FunctionDef, ast.AsyncFunctionDef)) and s.name == parts[-1]
+    ]
+
+
+def _str_const(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return None
+
+
+def _oracle_violations(func: ast.AST, forbidden: set[str]) -> list[tuple[int, str]]:
+    hits: list[tuple[int, str]] = []
+    for assertion in ast.walk(func):
+        if not isinstance(assertion, ast.Assert):
+            continue
+        for cmp_node in ast.walk(assertion.test):
+            if not isinstance(cmp_node, ast.Compare):
+                continue
+            operands = [cmp_node.left, *cmp_node.comparators]
+            for i, op in enumerate(cmp_node.ops):
+                left, right = operands[i], operands[i + 1]
+                if isinstance(op, (ast.Eq, ast.Is)):
+                    for side in (left, right):
+                        value = _str_const(side)
+                        if value in forbidden:
+                            hits.append((cmp_node.lineno, str(value)))
+                elif isinstance(op, ast.In) and isinstance(right, (ast.List, ast.Tuple, ast.Set)):
+                    for elt in right.elts:
+                        value = _str_const(elt)
+                        if value in forbidden:
+                            hits.append((cmp_node.lineno, str(value)))
+    return hits
+
+
+def _truncate(text: str) -> str:
+    return text if len(text) <= RED_MESSAGE_LIMIT else text[:RED_MESSAGE_LIMIT] + "...[truncated]"
+
+
+def _parse_junit(path: Path) -> tuple[list[dict[str, Any]] | None, bool]:
+    """Return testcase records (None if unreadable) and whether an <error> was seen."""
+    try:
+        root = ElementTree.parse(path).getroot()
+    except (OSError, ElementTree.ParseError):
+        return None, False
+    cases: list[dict[str, Any]] = []
+    has_error = False
+    for case in root.iter("testcase"):
+        outcome, message = "passed", ""
+        for child in case:
+            tag = child.tag
+            text = f"{child.get('message') or ''}\n{child.text or ''}"
+            if tag == "error":
+                has_error = True
+                outcome, message = "error", text
+            elif tag == "failure" and outcome != "error":
+                outcome, message = "failed", text
+            elif tag == "skipped" and outcome == "passed":
+                outcome, message = "skipped", text
+        cases.append({
+            "classname": case.get("classname") or "",
+            "name": case.get("name") or "",
+            "outcome": outcome,
+            "message": message.strip(),
+        })
+    return cases, has_error
+
+
+def _python_available(python: str) -> bool:
+    py_path = Path(python)
+    if py_path.is_file() and os.access(python, os.X_OK):
+        return True
+    return os.sep not in python and shutil.which(python) is not None
+
+
+# A pytest long traceback ends each raising frame with "path:line: ExceptionType";
+# intermediate frames carry no exception type.
+_CRASH_LINE_RE = re.compile(
+    r"^(?P<path>[^\s:][^:\n]*\.py):(?P<line>\d+): (?P<exc>[A-Za-z_][\w.]*)[ \t]*$", re.MULTILINE
+)
+
+
+def _crash_location(text: str) -> dict[str, Any]:
+    """Innermost failing location of one testcase; fails closed when not exactly one."""
+    crashes = list(_CRASH_LINE_RE.finditer(text))
+    if not crashes:
+        return {"status": "UNAVAILABLE"}
+    if len(crashes) > 1:  # chained exceptions: no single failing assertion
+        return {"status": "AMBIGUOUS"}
+    match = crashes[0]
+    return {
+        "status": "BOUND",
+        "path": match["path"],
+        "line": int(match["line"]),
+        "exception": match["exc"],
+    }
+
+
+def _file_sha256(repo: Path, rel: str) -> str | None:
+    if not _is_safe_rel(rel) or not (repo / rel).is_file():
+        return None
+    return "sha256:" + hashlib.sha256((repo / rel).read_bytes()).hexdigest()
+
+
+def _node_assertion_location(repo: Path, failed: list[dict[str, Any]]) -> dict[str, Any]:
+    """One location bound to the file bytes it points into, across all failed cases of a node."""
+    locations = [_crash_location(c["message"]) for c in failed]
+    statuses = {loc["status"] for loc in locations}
+    if "AMBIGUOUS" in statuses:
+        return {"status": "AMBIGUOUS"}
+    if statuses != {"BOUND"}:
+        return {"status": "UNAVAILABLE"}
+    distinct = {(loc["path"], loc["line"], loc["exception"]) for loc in locations}
+    if len(distinct) != 1:
+        return {"status": "AMBIGUOUS"}
+    location = locations[0]
+    digest = _file_sha256(repo, location["path"])
+    if digest is None:
+        return {"status": "UNAVAILABLE"}
+    return {**location, "path_sha256": digest}
+
+
+def _run_red_tests(
+    repo: Path, python: str, nodes: list[str], timeout: float, expected_regex: str
+) -> dict[str, Any]:
+    codes: set[str] = set()
+    result: dict[str, Any] = {"command": [], "exit_code": None, "node_results": [], "codes": codes}
+    if not _python_available(python):
+        codes.add("ENVIRONMENT_FAILURE")
+        result["command"] = [python, "-m", "pytest"]
+        return result
+    with tempfile.TemporaryDirectory(prefix="nexus-red-gate-") as tmp:
+        junit = Path(tmp) / "junit.xml"
+        argv = [
+            python,
+            "-m",
+            "pytest",
+            "-p",
+            "no:cacheprovider",
+            "-q",
+            f"--junitxml={junit}",
+            *nodes,
+        ]
+        result["command"] = argv
+        env = os.environ.copy()
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        try:
+            proc = subprocess.run(
+                argv, cwd=str(repo), env=env, capture_output=True, timeout=timeout, check=False
+            )
+        except subprocess.TimeoutExpired:
+            codes.add("TEST_RUN_TIMEOUT")
+            return result
+        except OSError:
+            codes.add("ENVIRONMENT_FAILURE")
+            return result
+        result["exit_code"] = proc.returncode
+        output = (proc.stdout + proc.stderr).decode("utf-8", "replace")
+        if proc.returncode in (126, 127):
+            codes.add("ENVIRONMENT_FAILURE")
+            return result
+        cases, has_error = _parse_junit(junit)
+    if "No module named pytest" in output:
+        codes.add("ENVIRONMENT_FAILURE")
+    elif proc.returncode == 5 or re.search(r"^ERROR: not found: ", output, re.MULTILINE):
+        codes.add("TEST_NODE_NOT_FOUND")
+    elif (
+        cases is None or proc.returncode in (2, 3, 4) or has_error or proc.returncode not in (0, 1)
+    ):
+        codes.add("COLLECTION_OR_SETUP_FAILURE")
+    if codes:
+        return result
+    regex = re.compile(expected_regex, re.MULTILINE)
+    for node in nodes:
+        path, parts = _split_node(node)
+        module = path[:-3].replace("/", ".")
+        raw_name = node.partition("::")[2].split("::")[-1]
+        classname = ".".join([module, *parts[:-1]])
+        match = [
+            c
+            for c in cases
+            if c["classname"] == classname
+            and (c["name"] == raw_name or c["name"].startswith(f"{parts[-1]}["))
+            and (c["name"] == raw_name or "[" not in raw_name)
+        ]
+        if not match:
+            codes.add("TEST_NODE_NOT_FOUND")
+            result["node_results"].append({"nodeid": node, "outcome": "not_found", "message": ""})
+            continue
+        failed = [c for c in match if c["outcome"] == "failed"]
+        if not failed:
+            codes.add("NO_RED_OBSERVED")
+            first = match[0]
+            result["node_results"].append({
+                "nodeid": node,
+                "outcome": first["outcome"],
+                "message": _truncate(first["message"]),
+            })
+            continue
+        bad = [c for c in failed if not (regex.search(c["message"]) and "assert" in c["message"])]
+        if bad:
+            codes.add("UNINTENDED_FAILURE")
+        first = failed[0]
+        result["node_results"].append({
+            "nodeid": node,
+            "outcome": "failed_unintended" if bad else "failed_expected",
+            "message": _truncate(first["message"]),
+            "assertion_location": _node_assertion_location(repo, failed),
+        })
+    return result
+
+
+def _red_receipt(body: dict[str, Any]) -> dict[str, Any]:
+    receipt = dict(body)
+    receipt["receipt_hash"] = _sha256_bytes(_canonical_json(body).encode("utf-8"))
+    return receipt
+
+
+def persist_red_gate(root: Path, receipt: dict[str, Any]) -> Path:
+    gate_dir = root / "red-gates" / str(receipt["contract_hash"])[7:]
+    stamp = str(receipt["generated_at"]).replace(":", "").replace("-", "")
+    unique = gate_dir / f"{stamp}-{receipt['receipt_hash'][7:19]}.json"
+    _atomic_write_json(unique, receipt)
+    _atomic_write_json(gate_dir / "latest.json", receipt)
+    return unique
+
+
+def run_red_gate(
+    *,
+    repo_root: Path,
+    base_revision: str,
+    contract_path: Path,
+    python: str | None,
+    timeout: float,
+) -> dict[str, Any]:
+    """Evaluate RED evidence. Raises DshWorkflowError for argument/contract errors.
+
+    The error carries ``contract`` / ``contract_hash`` attributes when known.
+    """
+    try:
+        raw = json.loads(contract_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise DshWorkflowError("RED_CONTRACT_INVALID", f"cannot read contract: {exc}") from exc
+    contract = validate_red_contract(raw)
+    contract_hash = _sha256_bytes(_canonical_json(contract).encode("utf-8"))
+    interpreter = python or contract.get("python")
+    if not interpreter:
+        raise DshWorkflowError("RED_ARGUMENT_INVALID", "--python is required")
+    if timeout <= 0:
+        raise DshWorkflowError("RED_ARGUMENT_INVALID", "timeout must be positive")
+    repo = repo_root.expanduser().resolve()
+    if not repo.is_dir():
+        raise DshWorkflowError("RED_ARGUMENT_INVALID", "repo root is not a directory")
+    _git_ok(repo, "rev-parse", "--show-toplevel")
+    base = _git_ok(repo, "rev-parse", "--verify", f"{base_revision}^{{commit}}").decode().strip()
+    head = _git_ok(repo, "rev-parse", "HEAD").decode().strip()
+
+    codes: set[str] = set()
+    changed, _untracked, diff_hash = _collect_worktree_changes(repo, base)
+    globs = contract["test_path_globs"]
+    test_paths = [p for p in changed if any(_glob_match(p, g) for g in globs)]
+    if any(p not in test_paths for p in changed):
+        codes.add("PRODUCTION_SOURCE_MODIFIED")
+    if not test_paths:
+        codes.add("NO_TEST_CHANGE")
+
+    trees: dict[str, ast.AST] = {}
+    duplicates: list[dict[str, Any]] = []
+    for rel in test_paths:
+        if not rel.endswith(".py") or not (repo / rel).is_file():
+            continue
+        try:
+            tree = ast.parse((repo / rel).read_bytes(), filename=rel)
+        except (SyntaxError, ValueError):
+            codes.add("TEST_FILE_SYNTAX_ERROR")
+            continue
+        trees[rel] = tree
+        duplicates.extend(_find_duplicates(repo, base, rel, tree))
+    if duplicates:
+        codes.add("DUPLICATE_TEST_DEFINITION")
+
+    forbidden = set(contract["forbidden_oracle_literals"])
+    violations: list[dict[str, Any]] = []
+    for node in contract["test_nodes"]:
+        path, parts = _split_node(node)
+        if path not in test_paths:
+            codes.add("RED_TEST_NOT_FROM_THIS_TURN")
+            continue
+        tree = trees.get(path)
+        if tree is None:
+            continue
+        for func in _target_functions(tree, parts):
+            for line, literal in _oracle_violations(func, forbidden):
+                violations.append({"nodeid": node, "line": line, "literal": literal})
+    if violations:
+        codes.add("ORACLE_ENCODES_BUGGY_BEHAVIOR")
+
+    run = _run_red_tests(
+        repo,
+        interpreter,
+        list(contract["test_nodes"]),
+        timeout,
+        contract["expected_failure"]["message_regex"],
+    )
+    codes |= run["codes"]
+
+    reason_codes = sorted(codes)
+    ready = not reason_codes
+    body = {
+        "schema": RED_RECEIPT_SCHEMA,
+        "claim_ceiling": RED_CLAIM_CEILING,
+        "decision": "RED_READY" if ready else "REVISE_RED",
+        "red_semantics": RED_SEMANTICS if ready else None,
+        "implementation_allowed": ready,
+        "reason_codes": reason_codes,
+        "contract_hash": contract_hash,
+        "contract": contract,
+        "repository": contract["repository"],
+        "issue_number": contract["issue_number"],
+        "base_revision": base,
+        "repo_head": head,
+        "worktree_diff_sha256": diff_hash,
+        "changed_paths": changed,
+        "changed_test_paths": test_paths,
+        "duplicate_definitions": duplicates,
+        "oracle_violations": violations,
+        "command": run["command"],
+        "exit_code": run["exit_code"],
+        "node_results": run["node_results"],
+        "generated_at": _utc_now(),
+    }
+    return _red_receipt(body)
+
+
+def _red_error_receipt(code: str, detail: str) -> dict[str, Any]:
+    return _red_receipt({
+        "schema": RED_RECEIPT_SCHEMA,
+        "claim_ceiling": RED_CLAIM_CEILING,
+        "decision": "REVISE_RED",
+        "red_semantics": None,
+        "implementation_allowed": False,
+        "reason_codes": [code],
+        "detail": detail,
+        "generated_at": _utc_now(),
+    })
+
+
+def _main_red_gate(args: argparse.Namespace) -> int:
+    try:
+        receipt = run_red_gate(
+            repo_root=Path(args.repo_root),
+            base_revision=args.base_revision,
+            contract_path=Path(args.contract).expanduser(),
+            python=args.python,
+            timeout=args.timeout,
+        )
+    except DshWorkflowError as exc:
+        print(json.dumps(_red_error_receipt(exc.code, str(exc)), sort_keys=True))
+        return EXIT_BLOCKED
+    except (OSError, ValueError) as exc:
+        print(
+            json.dumps(
+                _red_error_receipt("RED_GATE_ERROR", f"{type(exc).__name__}: {exc}"), sort_keys=True
+            )
+        )
+        return EXIT_BLOCKED
+    out = dict(receipt)
+    if args.state_root:
+        try:
+            out["receipt_path"] = str(
+                persist_red_gate_with_sidecar(
+                    _state_root(args.state_root),
+                    receipt,
+                    repo=Path(args.repo_root),
+                    base=receipt["base_revision"],
+                )
+            )
+        except DshWorkflowError as exc:
+            print(json.dumps(_red_error_receipt(exc.code, str(exc)), sort_keys=True))
+            return EXIT_BLOCKED
+    print(json.dumps(out, sort_keys=True))
+    return 0 if receipt["decision"] == "RED_READY" else EXIT_BLOCKED
+
+
+GREEN_CONTRACT_SCHEMA = "nexus.dsh_green_contract.v1"
+GREEN_RECEIPT_SCHEMA = "nexus.dsh_green_gate_receipt.v1"
+GREEN_CLAIM_CEILING = "POST_IMPLEMENTATION_EVIDENCE_GATE_NO_COMPLETION_AUTHORITY"
+GREEN_SEMANTICS = "TARGET_FIXED_REGRESSIONS_CLEAN_SCOPE_CLEAN"
+GREEN_CONTRACT_KEYS = {
+    "schema",
+    "repository",
+    "issue_number",
+    "target_test_nodes",
+    "regression_pytest_targets",
+    "allowed_change_globs",
+    "lint",
+}
+GREEN_LINT_KEYS = {"ruff_check_paths_from_changes", "ruff_format_preview"}
+GREEN_TARGET_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_./-]*(::[^\s:][^\s]*)?$")
+
+
+def _green_require(condition: bool, detail: str) -> None:
+    _require(condition, detail, "GREEN_CONTRACT_INVALID")
+
+
+def validate_green_contract(contract: Any) -> dict[str, Any]:
+    _green_require(isinstance(contract, dict), "contract must be a JSON object")
+    keys = set(contract)
+    _green_require(
+        not (keys - GREEN_CONTRACT_KEYS), f"unknown fields: {sorted(keys - GREEN_CONTRACT_KEYS)}"
+    )
+    _green_require(
+        not (GREEN_CONTRACT_KEYS - keys),
+        f"missing contract fields: {sorted(GREEN_CONTRACT_KEYS - keys)}",
+    )
+    _green_require(contract["schema"] == GREEN_CONTRACT_SCHEMA, "contract schema mismatch")
+    repository = contract["repository"]
+    _green_require(
+        isinstance(repository, str) and bool(REPOSITORY_RE.fullmatch(repository)),
+        "repository must be an owner/name slug",
+    )
+    issue = contract["issue_number"]
+    _green_require(
+        isinstance(issue, int) and not isinstance(issue, bool) and issue > 0,
+        "issue_number must be positive int",
+    )
+    nodes = contract["target_test_nodes"]
+    _green_require(
+        _is_str_list(nodes) and bool(nodes),
+        "target_test_nodes must be a non-empty list of strings",
+    )
+    for node in nodes:
+        path = node.split("::", 1)[0]
+        _green_require(
+            bool(RED_NODE_RE.fullmatch(node)) and ".." not in path.split("/"),
+            f"invalid pytest node id: {node}",
+        )
+    targets = contract["regression_pytest_targets"]
+    _green_require(_is_str_list(targets), "regression_pytest_targets must be a string list")
+    for target in targets:
+        path = target.split("::", 1)[0]
+        _green_require(
+            bool(GREEN_TARGET_RE.fullmatch(target)) and ".." not in path.split("/"),
+            f"invalid regression target: {target}",
+        )
+    globs = contract["allowed_change_globs"]
+    _green_require(
+        _is_str_list(globs) and bool(globs), "allowed_change_globs must be a non-empty string list"
+    )
+    lint = contract["lint"]
+    _green_require(
+        isinstance(lint, dict) and set(lint) == GREEN_LINT_KEYS,
+        f"lint must have exactly {sorted(GREEN_LINT_KEYS)}",
+    )
+    _green_require(
+        all(isinstance(lint[k], bool) for k in GREEN_LINT_KEYS), "lint flags must be booleans"
+    )
+    return contract
+
+
+def _node_cases(cases: list[dict[str, Any]], node: str) -> list[dict[str, Any]]:
+    path, parts = _split_node(node)
+    module = path[:-3].replace("/", ".")
+    raw_name = node.partition("::")[2].split("::")[-1]
+    classname = ".".join([module, *parts[:-1]])
+    return [
+        c
+        for c in cases
+        if c["classname"] == classname
+        and (c["name"] == raw_name or c["name"].startswith(f"{parts[-1]}["))
+        and (c["name"] == raw_name or "[" not in raw_name)
+    ]
+
+
+def _run_pytest(repo: Path, python: str, targets: list[str], timeout: float) -> dict[str, Any]:
+    """Run pytest once; returns command, exit_code, cases, output and error flags."""
+    result: dict[str, Any] = {
+        "command": [python, "-m", "pytest", *targets],
+        "exit_code": None,
+        "cases": None,
+        "codes": set(),
+        "not_found": False,
+        "output_tail": "",
+    }
+    codes: set[str] = result["codes"]
+    if not _python_available(python):
+        codes.add("ENVIRONMENT_FAILURE")
+        return result
+    with tempfile.TemporaryDirectory(prefix="nexus-green-gate-") as tmp:
+        junit = Path(tmp) / "junit.xml"
+        argv = [python, "-m", "pytest", "-p", "no:cacheprovider", "-q", f"--junitxml={junit}"]
+        argv.extend(targets)
+        result["command"] = argv
+        env = os.environ.copy()
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        try:
+            proc = subprocess.run(
+                argv, cwd=str(repo), env=env, capture_output=True, timeout=timeout, check=False
+            )
+        except subprocess.TimeoutExpired:
+            codes.add("TEST_RUN_TIMEOUT")
+            return result
+        except OSError:
+            codes.add("ENVIRONMENT_FAILURE")
+            return result
+        result["exit_code"] = proc.returncode
+        output = (proc.stdout + proc.stderr).decode("utf-8", "replace")
+        result["output_tail"] = _truncate(output[-RED_MESSAGE_LIMIT:])
+        if proc.returncode in (126, 127):
+            codes.add("ENVIRONMENT_FAILURE")
+            return result
+        cases, has_error = _parse_junit(junit)
+    result["cases"] = cases
+    if "No module named pytest" in output:
+        codes.add("ENVIRONMENT_FAILURE")
+    elif proc.returncode == 5 or re.search(r"^ERROR: not found: ", output, re.MULTILINE):
+        codes.add("TEST_NODE_NOT_FOUND")
+        result["not_found"] = True
+    elif (
+        cases is None or proc.returncode in (2, 3, 4) or has_error or proc.returncode not in (0, 1)
+    ):
+        codes.add("COLLECTION_OR_SETUP_FAILURE")
+    return result
+
+
+def _is_python_script(repo: Path, rel: str) -> bool:
+    if not rel.startswith("scripts/") or "." in Path(rel).name:
+        return False
+    try:
+        with (repo / rel).open("rb") as handle:
+            first = handle.readline(200)
+    except OSError:
+        return False
+    return first.startswith(b"#!") and b"python" in first
+
+
+def _run_ruff(
+    repo: Path, python: str, args: list[str], paths: list[str], timeout: float
+) -> dict[str, Any]:
+    argv = [python, "-m", "ruff", *args, *paths]
+    out: dict[str, Any] = {"command": argv, "exit_code": None, "output": "", "status": "ok"}
+    env = os.environ.copy()
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    try:
+        proc = subprocess.run(
+            argv, cwd=str(repo), env=env, capture_output=True, timeout=timeout, check=False
+        )
+    except subprocess.TimeoutExpired:
+        out["status"] = "timeout"
+        return out
+    except OSError:
+        out["status"] = "environment"
+        return out
+    out["exit_code"] = proc.returncode
+    out["output"] = _truncate((proc.stdout + proc.stderr).decode("utf-8", "replace"))
+    if proc.returncode == 0:
+        return out
+    out["status"] = "violation" if proc.returncode == 1 else "environment"
+    return out
+
+
+def _run_green_lint(
+    repo: Path,
+    python: str,
+    lint: dict[str, bool],
+    changed: list[str],
+    timeout: float,
+    codes: set[str],
+) -> dict[str, Any]:
+    existing = [p for p in changed if (repo / p).is_file()]
+    py_files = [p for p in existing if p.endswith(".py")]
+    check_paths = py_files + [p for p in existing if _is_python_script(repo, p)]
+    report: dict[str, Any] = {"ruff_check": None, "ruff_format": None}
+    wants = [
+        ("ruff_check", lint["ruff_check_paths_from_changes"], check_paths),
+        ("ruff_format", lint["ruff_format_preview"], py_files),
+    ]
+    if not any(flag and paths for _name, flag, paths in wants):
+        return report
+    if not _python_available(python):
+        codes.add("ENVIRONMENT_FAILURE")
+        return report
+    probe = subprocess.run(
+        [python, "-m", "ruff", "--version"], cwd=str(repo), capture_output=True, check=False
+    )
+    if probe.returncode != 0:
+        codes.add("ENVIRONMENT_FAILURE")
+        return report
+    for name, flag, paths in wants:
+        if not flag or not paths:
+            continue
+        if name == "ruff_check":
+            run = _run_ruff(repo, python, ["check", "--no-cache"], paths, timeout)
+            violation_code = "LINT_FAILURE"
+        else:
+            run = _run_ruff(
+                repo, python, ["format", "--check", "--preview", "--no-cache"], paths, timeout
+            )
+            violation_code = "FORMAT_FAILURE"
+        report[name] = run
+        if run["status"] == "violation":
+            codes.add(violation_code)
+        elif run["status"] == "timeout":
+            codes.add("TEST_RUN_TIMEOUT")
+        elif run["status"] == "environment":
+            codes.add("ENVIRONMENT_FAILURE")
+    return report
+
+
+def _green_receipt(body: dict[str, Any]) -> dict[str, Any]:
+    receipt = dict(body)
+    receipt["receipt_hash"] = _sha256_bytes(_canonical_json(body).encode("utf-8"))
+    return receipt
+
+
+def persist_green_gate(root: Path, receipt: dict[str, Any]) -> Path:
+    gate_dir = root / "green-gates" / str(receipt["contract_hash"])[7:]
+    stamp = str(receipt["generated_at"]).replace(":", "").replace("-", "")
+    unique = gate_dir / f"{stamp}-{receipt['receipt_hash'][7:19]}.json"
+    _atomic_write_json(unique, receipt)
+    _atomic_write_json(gate_dir / "latest.json", receipt)
+    return unique
+
+
+# Derived recovery evidence beside a gate receipt: the exact bytes that the
+# receipt's worktree_diff_sha256 covers. It is never verification or acceptance.
+GATE_SIDECAR_SCHEMA = "nexus.dsh_gate_sidecar.v1"
+GATE_SIDECAR_CLAIM_CEILING = "DERIVED_RECOVERY_EVIDENCE_ONLY"
+_SHA256_HEX = re.compile(r"[0-9a-f]{64}")
+
+
+_SHA256_PREFIXED = re.compile(r"sha256:[0-9a-f]{64}")
+GATE_SIDECAR_READY = {"red": "RED_READY", "green": "GREEN_READY"}
+
+
+def _gate_sidecar_dir(root: Path, gate: str, receipt: dict[str, Any]) -> Path:
+    contract_hash = receipt.get("contract_hash")
+    receipt_hash = receipt.get("receipt_hash")
+    if (
+        gate not in GATE_SIDECAR_READY
+        or not isinstance(contract_hash, str)
+        or not isinstance(receipt_hash, str)
+        or not _SHA256_PREFIXED.fullmatch(contract_hash)
+        or not _SHA256_PREFIXED.fullmatch(receipt_hash)
+    ):
+        raise DshWorkflowError(
+            "GATE_SIDECAR_INVALID", "gate sidecar identity is not a sha256 segment"
+        )
+    return root / "gate-sidecars" / gate / contract_hash[7:] / receipt_hash[7:]
+
+
+def _gate_scope_globs(gate: str, receipt: dict[str, Any]) -> list[str]:
+    contract = receipt.get("contract")
+    key = "test_path_globs" if gate == "red" else "allowed_change_globs"
+    globs = contract.get(key) if isinstance(contract, dict) else None
+    if not isinstance(globs, list) or not globs or not all(isinstance(g, str) for g in globs):
+        raise DshWorkflowError("GATE_SIDECAR_SCOPE_UNKNOWN", "gate receipt has no scope globs")
+    return globs
+
+
+def _private_write_bytes(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as handle:
+        handle.write(data)
+    os.replace(tmp, path)
+
+
+def _is_safe_rel(rel: str) -> bool:
+    parts = Path(rel).parts
+    return (
+        bool(parts)
+        and not Path(rel).is_absolute()
+        and all(part not in ("", ".", "..") for part in parts)
+    )
+
+
+def _safe_untracked_file(repo: Path, rel: str) -> Path:
+    if not _is_safe_rel(rel):
+        raise DshWorkflowError("GATE_SIDECAR_PATH_UNSAFE", f"untracked path is unsafe: {rel!r}")
+    current = repo
+    for part in Path(rel).parts:
+        current = current / part
+        if current.is_symlink():
+            raise DshWorkflowError(
+                "GATE_SIDECAR_SYMLINK_REFUSED", f"untracked path crosses a symlink: {rel!r}"
+            )
+    if not current.is_file():
+        raise DshWorkflowError(
+            "GATE_SIDECAR_PATH_UNSAFE", f"untracked path is not a regular file: {rel!r}"
+        )
+    return current
+
+
+def _gate_snapshot(
+    repo: Path, base: str, globs: list[str]
+) -> tuple[bytes, list[tuple[str, bytes]]]:
+    """Exact inputs of ``_collect_worktree_changes``, limited to the gate's allowed scope.
+
+    Scope is checked on names before any file bytes are read, so an out-of-scope
+    untracked file is never archived.
+    """
+    code = "GATE_SIDECAR_UNAVAILABLE"
+    tracked = _split_z(_git_ok(repo, "diff", "--name-only", "--no-renames", "-z", base, code=code))
+    untracked = sorted(
+        set(_split_z(_git_ok(repo, "ls-files", "--others", "--exclude-standard", "-z", code=code)))
+    )
+    for rel in [*tracked, *untracked]:
+        if not any(_glob_match(rel, g) for g in globs):
+            raise DshWorkflowError(
+                "GATE_SIDECAR_SCOPE_VIOLATION",
+                f"changed path is outside the gate scope; nothing archived: {rel!r}",
+            )
+    patch = _git_ok(repo, "diff", "--binary", "--no-renames", base, code=code)
+    return patch, [(rel, _safe_untracked_file(repo, rel).read_bytes()) for rel in untracked]
+
+
+def _snapshot_digest(patch: bytes, files: list[tuple[str, bytes]]) -> str:
+    digest = hashlib.sha256()
+    digest.update(patch)
+    for rel, data in files:
+        digest.update(b"\0untracked\0" + rel.encode("utf-8", "surrogateescape") + b"\0")
+        digest.update(data)
+    return "sha256:" + digest.hexdigest()
+
+
+def write_gate_sidecar(
+    root: Path, receipt: dict[str, Any], *, gate: str, repo: Path, base: str
+) -> Path:
+    """Persist the bytes behind ``receipt`` or raise; nothing is written on mismatch."""
+    head = _git_ok(repo, "rev-parse", "HEAD", code="GATE_SIDECAR_UNAVAILABLE").decode().strip()
+    if head != receipt.get("repo_head") or base != receipt.get("base_revision"):
+        raise DshWorkflowError(
+            "GATE_SIDECAR_IDENTITY_MISMATCH",
+            "repository head or base differs from the gate receipt; no sidecar written",
+        )
+    sdir = _gate_sidecar_dir(root, gate, receipt)
+    patch, files = _gate_snapshot(repo, base, _gate_scope_globs(gate, receipt))
+    expected = receipt["worktree_diff_sha256"]
+    if _snapshot_digest(patch, files) != expected:
+        raise DshWorkflowError(
+            "GATE_SIDECAR_DIGEST_MISMATCH",
+            "current worktree no longer matches the gate receipt digest; no sidecar written",
+        )
+
+    def _store(data: bytes) -> dict[str, Any]:
+        blob = hashlib.sha256(data).hexdigest()
+        _private_write_bytes(sdir / "blobs" / blob, data)
+        return {"blob": blob, "bytes": len(data)}
+
+    manifest = {
+        "schema": GATE_SIDECAR_SCHEMA,
+        "claim_ceiling": GATE_SIDECAR_CLAIM_CEILING,
+        "gate": gate,
+        "receipt_hash": receipt["receipt_hash"],
+        "contract_hash": receipt["contract_hash"],
+        "repository": receipt.get("repository"),
+        "issue_number": receipt.get("issue_number"),
+        "repo_head": head,
+        "base_revision": base,
+        "worktree_diff_sha256": expected,
+        "tracked_patch": _store(patch),
+        "untracked": [{"path": rel, **_store(data)} for rel, data in files],
+    }
+    manifest_path = sdir / "manifest.json"
+    _private_write_bytes(
+        manifest_path, (json.dumps(manifest, sort_keys=True, indent=2) + "\n").encode("utf-8")
+    )
+    return manifest_path
+
+
+def verify_gate_sidecar(root: Path, receipt: dict[str, Any], *, gate: str) -> dict[str, Any]:
+    """Integrity-check a sidecar against its receipt. Recovery evidence only, not acceptance."""
+    sdir = _gate_sidecar_dir(root, gate, receipt)
+    try:
+        manifest = json.loads((sdir / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise DshWorkflowError(
+            "GATE_SIDECAR_UNREADABLE", "gate sidecar cannot be read; failing closed"
+        ) from exc
+    if not isinstance(manifest, dict) or manifest.get("schema") != GATE_SIDECAR_SCHEMA:
+        raise DshWorkflowError("GATE_SIDECAR_INVALID", "gate sidecar is malformed; failing closed")
+    # receipt_path is an output-only annotation added by the CLI; the persisted
+    # receipt body never contains it, so it is excluded from the body digest.
+    body = {k: v for k, v in receipt.items() if k not in ("receipt_hash", "receipt_path")}
+    if _sha256_bytes(_canonical_json(body).encode("utf-8")) != receipt.get("receipt_hash"):
+        raise DshWorkflowError(
+            "GATE_SIDECAR_RECEIPT_TAMPERED",
+            "receipt body does not match its receipt_hash; failing closed",
+        )
+    bound_fields = (
+        "gate",
+        "receipt_hash",
+        "contract_hash",
+        "repository",
+        "issue_number",
+        "claim_ceiling",
+        "repo_head",
+        "base_revision",
+        "worktree_diff_sha256",
+    )
+    expected = {**receipt, "gate": gate, "claim_ceiling": GATE_SIDECAR_CLAIM_CEILING}
+    if any(manifest.get(field) != expected.get(field) for field in bound_fields):
+        raise DshWorkflowError(
+            "GATE_SIDECAR_INTEGRITY_FAILED", "gate sidecar is not bound to this receipt"
+        )
+
+    def _read(entry: Any) -> bytes:
+        blob = entry.get("blob") if isinstance(entry, dict) else None
+        if not isinstance(blob, str) or not _SHA256_HEX.fullmatch(blob):
+            raise DshWorkflowError("GATE_SIDECAR_INVALID", "gate sidecar blob reference is invalid")
+        try:
+            data = (sdir / "blobs" / blob).read_bytes()
+        except OSError as exc:
+            raise DshWorkflowError(
+                "GATE_SIDECAR_INTEGRITY_FAILED", "gate sidecar blob is missing"
+            ) from exc
+        if hashlib.sha256(data).hexdigest() != blob or len(data) != entry.get("bytes"):
+            raise DshWorkflowError(
+                "GATE_SIDECAR_INTEGRITY_FAILED", "gate sidecar blob failed its digest"
+            )
+        return data
+
+    patch = _read(manifest.get("tracked_patch"))
+    entries = manifest.get("untracked")
+    if not isinstance(entries, list):
+        raise DshWorkflowError("GATE_SIDECAR_INVALID", "gate sidecar is malformed; failing closed")
+    files: list[tuple[str, bytes]] = []
+    for entry in entries:
+        rel = entry.get("path") if isinstance(entry, dict) else None
+        if not isinstance(rel, str) or not _is_safe_rel(rel):
+            raise DshWorkflowError("GATE_SIDECAR_PATH_UNSAFE", "gate sidecar path is unsafe")
+        files.append((rel, _read(entry)))
+    if _snapshot_digest(patch, sorted(files)) != receipt.get("worktree_diff_sha256"):
+        raise DshWorkflowError(
+            "GATE_SIDECAR_INTEGRITY_FAILED", "gate sidecar does not reproduce the receipt digest"
+        )
+    return manifest
+
+
+def persist_gate_with_sidecar(
+    gate: str,
+    persist: Callable[[Path, dict[str, Any]], Path],
+    root: Path,
+    receipt: dict[str, Any],
+    *,
+    repo: Path,
+    base: str,
+) -> Path:
+    """Write the sidecar first so a mismatch leaves no receipt behind; then persist unchanged.
+
+    Only a ready receipt is archived. Failed or revise receipts persist exactly as before.
+    """
+    if receipt.get("decision") == GATE_SIDECAR_READY[gate]:
+        try:
+            write_gate_sidecar(root, receipt, gate=gate, repo=repo, base=base)
+        except OSError as exc:
+            raise DshWorkflowError(
+                "GATE_SIDECAR_WRITE_FAILED",
+                f"gate sidecar could not be written; no receipt persisted: {exc}",
+            ) from exc
+    return persist(root, receipt)
+
+
+def persist_green_gate_with_sidecar(
+    root: Path, receipt: dict[str, Any], *, repo: Path, base: str
+) -> Path:
+    return persist_gate_with_sidecar(
+        "green", persist_green_gate, root, receipt, repo=repo, base=base
+    )
+
+
+def persist_red_gate_with_sidecar(
+    root: Path, receipt: dict[str, Any], *, repo: Path, base: str
+) -> Path:
+    return persist_gate_with_sidecar("red", persist_red_gate, root, receipt, repo=repo, base=base)
+
+
+def _diff_check(repo: Path, base: str, untracked: list[str]) -> dict[str, Any]:
+    failures: list[str] = []
+    proc = _git(repo, "diff", "--check", "--no-renames", base)
+    if proc.returncode != 0:
+        failures.append(proc.stdout.decode("utf-8", "replace")[:RED_MESSAGE_LIMIT])
+    for rel in untracked:
+        # `--no-index` exits 1 whenever content differs, so 0/1 alone are normal
+        # comparison outcomes; `--check` problems are reported on stdout. Exit >1 or
+        # stderr (e.g. unreadable path) is an execution failure and fails closed.
+        extra = _git(repo, "diff", "--check", "--no-index", "--", os.devnull, rel)
+        out = extra.stdout.decode("utf-8", "replace")
+        err = extra.stderr.decode("utf-8", "replace")
+        if out.strip():
+            failures.append(out[:RED_MESSAGE_LIMIT])
+        elif extra.returncode not in (0, 1) or err.strip():
+            failures.append(
+                f"git diff --check --no-index {rel} exit {extra.returncode}: {err}"[
+                    :RED_MESSAGE_LIMIT
+                ]
+            )
+    return {"exit_code": proc.returncode, "failures": failures}
+
+
+def _load_red_oracle(
+    path: Path, contract: dict[str, Any], base: str
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Bind a RED_READY receipt for the same issue and base; anything else is INVALID."""
+
+    def invalid(detail: str) -> tuple[dict[str, Any], None]:
+        return {"status": "INVALID", "detail": detail}, None
+
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return invalid(f"cannot read red receipt: {type(exc).__name__}")
+    if not isinstance(receipt, dict) or receipt.get("schema") != RED_RECEIPT_SCHEMA:
+        return invalid("red receipt schema mismatch")
+    body = {k: v for k, v in receipt.items() if k not in ("receipt_hash", "receipt_path")}
+    if _sha256_bytes(_canonical_json(body).encode("utf-8")) != receipt.get("receipt_hash"):
+        return invalid("red receipt body does not match its receipt_hash")
+    if receipt.get("decision") != "RED_READY":
+        return invalid("red receipt is not RED_READY")
+    if (receipt.get("repository"), receipt.get("issue_number")) != (
+        contract["repository"],
+        contract["issue_number"],
+    ):
+        return invalid("red receipt is bound to a different repository or issue")
+    if receipt.get("base_revision") != base:
+        return invalid("red receipt is bound to a different base revision")
+    nodes = receipt.get("node_results")
+    test_paths = receipt.get("changed_test_paths")
+    if not (isinstance(nodes, list) and all(isinstance(n, dict) for n in nodes)) or not (
+        isinstance(test_paths, list) and all(isinstance(p, str) for p in test_paths)
+    ):
+        return invalid("red receipt node_results or changed_test_paths malformed")
+    red = {
+        "test_paths": set(test_paths),
+        "locations": {n.get("nodeid"): n.get("assertion_location") for n in nodes},
+    }
+    return {"status": "BOUND", "red_receipt_hash": receipt["receipt_hash"]}, red
+
+
+def _classify_target_failure(
+    repo: Path, node: str, failed: list[dict[str, Any]], red: dict[str, Any]
+) -> dict[str, Any]:
+    """RED_ORACLE_DEFECT only when both locations are exact, comparable and differ.
+
+    Every other ambiguity stays an ordinary target failure (UNCLASSIFIED).
+    """
+    green_loc = _node_assertion_location(repo, failed)
+    red_loc = red["locations"].get(node)
+    out: dict[str, Any] = {"assertion_location": green_loc, "red_assertion_location": red_loc}
+
+    def verdict(classification: str, detail: str | None = None) -> dict[str, Any]:
+        return {**out, "oracle_classification": classification, "oracle_detail": detail}
+
+    if any(c["outcome"] != "failed" for c in failed):
+        return verdict("UNCLASSIFIED", "GREEN_OUTCOME_NOT_FAILED")
+    if green_loc["status"] != "BOUND":
+        return verdict("UNCLASSIFIED", f"GREEN_LOCATION_{green_loc['status']}")
+    if green_loc["exception"] != "AssertionError":
+        return verdict("UNCLASSIFIED", "GREEN_FAILURE_NOT_ASSERTION")
+    if green_loc["path"] not in red["test_paths"]:
+        return verdict("IMPLEMENTATION_FAILURE", "GREEN_ASSERTION_OUTSIDE_RED_TESTS")
+    if not isinstance(red_loc, dict) or red_loc.get("status") not in ("BOUND", "AMBIGUOUS"):
+        return verdict("UNCLASSIFIED", "RED_LOCATION_UNAVAILABLE")
+    if red_loc["status"] == "AMBIGUOUS":
+        return verdict("UNCLASSIFIED", "RED_LOCATION_AMBIGUOUS")
+    red_path, red_line = red_loc.get("path"), red_loc.get("line")
+    if not isinstance(red_path, str) or not isinstance(red_line, int):
+        return verdict("UNCLASSIFIED", "RED_LOCATION_UNAVAILABLE")
+    if red_loc.get("path_sha256") != _file_sha256(repo, red_path):
+        return verdict("UNCLASSIFIED", "RED_LOCATION_FILE_CHANGED")
+    if (green_loc["path"], green_loc["line"]) == (red_path, red_line):
+        return verdict("IMPLEMENTATION_FAILURE", "SAME_ASSERTION_AS_RED")
+    return verdict("RED_ORACLE_DEFECT", "ASSERTION_DIFFERS_FROM_RED")
+
+
+def run_green_gate(
+    *,
+    repo_root: Path,
+    base_revision: str,
+    contract_path: Path,
+    python: str,
+    timeout: float,
+    red_receipt: Path | None = None,
+) -> dict[str, Any]:
+    """Evaluate post-implementation evidence. Raises DshWorkflowError for argument errors.
+
+    With ``red_receipt``, a target that now fails on a different assertion than the
+    one RED bound is reported as RED_ORACLE_DEFECT instead of TARGET_TESTS_NOT_PASSING.
+    Either way the decision is REVISE_GREEN; this is diagnostic only.
+    """
+    try:
+        raw = json.loads(contract_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise DshWorkflowError("GREEN_CONTRACT_INVALID", f"cannot read contract: {exc}") from exc
+    contract = validate_green_contract(raw)
+    contract_hash = _sha256_bytes(_canonical_json(contract).encode("utf-8"))
+    if not python:
+        raise DshWorkflowError("GREEN_ARGUMENT_INVALID", "--python is required")
+    if timeout <= 0:
+        raise DshWorkflowError("GREEN_ARGUMENT_INVALID", "timeout must be positive")
+    repo = repo_root.expanduser().resolve()
+    if not repo.is_dir():
+        raise DshWorkflowError("GREEN_ARGUMENT_INVALID", "repo root is not a directory")
+    bad = "GREEN_ARGUMENT_INVALID"
+    _git_ok(repo, "rev-parse", "--show-toplevel", code=bad)
+    base = (
+        _git_ok(repo, "rev-parse", "--verify", f"{base_revision}^{{commit}}", code=bad)
+        .decode()
+        .strip()
+    )
+    head = _git_ok(repo, "rev-parse", "HEAD", code=bad).decode().strip()
+
+    codes: set[str] = set()
+    changed, untracked, diff_hash = _collect_worktree_changes(repo, base)
+    globs = contract["allowed_change_globs"]
+    untracked_set = set(untracked)
+    outside_tracked = [
+        p for p in changed if p not in untracked_set and not any(_glob_match(p, g) for g in globs)
+    ]
+    outside_untracked = [p for p in untracked if not any(_glob_match(p, g) for g in globs)]
+    if outside_tracked:
+        codes.add("CHANGE_OUTSIDE_ALLOWED_GLOBS")
+    if outside_untracked:
+        codes.add("UNTRACKED_FILE_OUTSIDE_ALLOWED_GLOBS")
+    if not changed:
+        codes.add("NO_CHANGE")
+
+    diff_check = _diff_check(repo, base, [p for p in untracked if p not in outside_untracked])
+    if diff_check["failures"]:
+        codes.add("DIFF_CHECK_FAILURE")
+
+    red_oracle: dict[str, Any] | None = None
+    red: dict[str, Any] | None = None
+    if red_receipt is not None:
+        red_oracle, red = _load_red_oracle(red_receipt, contract, base)
+        if red is None:
+            codes.add("RED_RECEIPT_INVALID")
+
+    # Target nodes: every contracted node must be found and pass.
+    node_results: list[dict[str, Any]] = []
+    target_run = _run_pytest(repo, python, list(contract["target_test_nodes"]), timeout)
+    codes |= target_run["codes"]
+    if not target_run["codes"]:
+        for node in contract["target_test_nodes"]:
+            match = _node_cases(target_run["cases"], node)
+            if not match:
+                codes.add("TEST_NODE_NOT_FOUND")
+                node_results.append({"nodeid": node, "outcome": "not_found", "message": ""})
+                continue
+            failing = [c for c in match if c["outcome"] != "passed"]
+            bad_case = failing[0] if failing else None
+            oracle: dict[str, Any] = {}
+            if failing and red is not None:
+                oracle = _classify_target_failure(repo, node, failing, red)
+            if bad_case is not None:
+                if oracle.get("oracle_classification") == "RED_ORACLE_DEFECT":
+                    codes.add("RED_ORACLE_DEFECT")
+                else:
+                    codes.add("TARGET_TESTS_NOT_PASSING")
+            node_results.append({
+                "nodeid": node,
+                "outcome": bad_case["outcome"] if bad_case else "passed",
+                "message": _truncate(bad_case["message"]) if bad_case else "",
+                **oracle,
+            })
+    elif target_run["exit_code"] == 1 and target_run["cases"]:
+        codes.add("TARGET_TESTS_NOT_PASSING")
+
+    regression_run: dict[str, Any] | None = None
+    regression_failures: list[dict[str, Any]] = []
+    if contract["regression_pytest_targets"]:
+        regression_run = _run_pytest(
+            repo, python, list(contract["regression_pytest_targets"]), timeout
+        )
+        codes |= regression_run["codes"]
+        if not regression_run["codes"] and regression_run["exit_code"] == 1:
+            codes.add("REGRESSION_TESTS_FAILING")
+        for case in regression_run["cases"] or []:
+            if case["outcome"] in ("failed", "error"):
+                regression_failures.append({
+                    "classname": case["classname"],
+                    "name": case["name"],
+                    "outcome": case["outcome"],
+                    "message": _truncate(case["message"]),
+                })
+
+    lint_report = _run_green_lint(repo, python, contract["lint"], changed, timeout, codes)
+
+    reason_codes = sorted(codes)
+    ready = not reason_codes
+    body = {
+        "schema": GREEN_RECEIPT_SCHEMA,
+        "claim_ceiling": GREEN_CLAIM_CEILING,
+        "decision": "GREEN_READY" if ready else "REVISE_GREEN",
+        "green_semantics": GREEN_SEMANTICS if ready else None,
+        "reason_codes": reason_codes,
+        "contract_hash": contract_hash,
+        "contract": contract,
+        "repository": contract["repository"],
+        "issue_number": contract["issue_number"],
+        "base_revision": base,
+        "repo_head": head,
+        "worktree_diff_sha256": diff_hash,
+        "changed_paths": changed,
+        "untracked_paths": untracked,
+        "paths_outside_allowed_globs": outside_tracked,
+        "untracked_outside_allowed_globs": outside_untracked,
+        "diff_check": diff_check,
+        "commands": {
+            "target_tests": target_run["command"],
+            "regression_tests": regression_run["command"] if regression_run else None,
+            "ruff_check": (lint_report["ruff_check"] or {}).get("command"),
+            "ruff_format": (lint_report["ruff_format"] or {}).get("command"),
+        },
+        "exit_codes": {
+            "target_tests": target_run["exit_code"],
+            "regression_tests": regression_run["exit_code"] if regression_run else None,
+            "ruff_check": (lint_report["ruff_check"] or {}).get("exit_code"),
+            "ruff_format": (lint_report["ruff_format"] or {}).get("exit_code"),
+            "git_diff_check": diff_check["exit_code"],
+        },
+        "node_results": node_results,
+        "target_output_tail": target_run["output_tail"],
+        "regression_failures": regression_failures,
+        "regression_output_tail": regression_run["output_tail"] if regression_run else "",
+        "lint_output": {
+            "ruff_check": (lint_report["ruff_check"] or {}).get("output"),
+            "ruff_format": (lint_report["ruff_format"] or {}).get("output"),
+        },
+        "generated_at": _utc_now(),
+    }
+    if red_oracle is not None:
+        body["red_oracle"] = red_oracle
+    return _green_receipt(body)
+
+
+def _green_error_receipt(code: str, detail: str) -> dict[str, Any]:
+    return _green_receipt({
+        "schema": GREEN_RECEIPT_SCHEMA,
+        "claim_ceiling": GREEN_CLAIM_CEILING,
+        "decision": "REVISE_GREEN",
+        "green_semantics": None,
+        "reason_codes": [code],
+        "detail": detail,
+        "generated_at": _utc_now(),
+    })
+
+
+def _main_green_gate(args: argparse.Namespace) -> int:
+    try:
+        receipt = run_green_gate(
+            repo_root=Path(args.repo_root),
+            base_revision=args.base_revision,
+            contract_path=Path(args.contract).expanduser(),
+            python=args.python,
+            timeout=args.timeout,
+            red_receipt=Path(args.red_receipt).expanduser() if args.red_receipt else None,
+        )
+    except DshWorkflowError as exc:
+        print(json.dumps(_green_error_receipt(exc.code, str(exc)), sort_keys=True))
+        return EXIT_BLOCKED
+    except (OSError, ValueError) as exc:
+        detail = f"{type(exc).__name__}: {exc}"
+        print(json.dumps(_green_error_receipt("GREEN_GATE_ERROR", detail), sort_keys=True))
+        return EXIT_BLOCKED
+    out = dict(receipt)
+    if args.state_root:
+        try:
+            out["receipt_path"] = str(
+                persist_green_gate_with_sidecar(
+                    _state_root(args.state_root),
+                    receipt,
+                    repo=Path(args.repo_root),
+                    base=receipt["base_revision"],
+                )
+            )
+        except DshWorkflowError as exc:
+            print(json.dumps(_green_error_receipt(exc.code, str(exc)), sort_keys=True))
+            return EXIT_BLOCKED
+    print(json.dumps(out, sort_keys=True))
+    return 0 if receipt["decision"] == "GREEN_READY" else EXIT_BLOCKED
+
+
+TURN_STATE_SCHEMA = "nexus.dsh_turn_state.v1"
+QUARANTINE_SCHEMA = "nexus.dsh_turn_quarantine.v1"
+TURN_ACK_SCHEMA = "nexus.dsh_turn_failure_ack.v1"
+TURN_CLAIM_CEILING = "FAILED_TURN_RECORD_NO_COMPLETION_AUTHORITY"
+TURN_FAILED_DIRTY = "TURN_FAILED_DIRTY"
+TURN_FAILED_CLEAN = "TURN_FAILED_CLEAN"
+TURN_OK = "TURN_OK"
+TURN_ACKNOWLEDGED = "TURN_FAILURE_ACKNOWLEDGED"
+
+
+def _turn_state_path(root: Path, session_id: str) -> Path:
+    return root / "turn-state" / f"{_validate_session_id(session_id)}.json"
+
+
+def load_turn_state(root: Path, session_id: str) -> dict[str, Any] | None:
+    path = _turn_state_path(root, session_id)
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise DshWorkflowError(
+            "TURN_STATE_UNREADABLE", "turn state cannot be read; failing closed"
+        ) from exc
+    if not isinstance(payload, dict) or payload.get("schema") != TURN_STATE_SCHEMA:
+        raise DshWorkflowError("TURN_STATE_INVALID", "turn state is malformed; failing closed")
+    return payload
+
+
+def _write_turn_state(root: Path, session_id: str, state: str, **extra: Any) -> dict[str, Any]:
+    payload = {
+        "schema": TURN_STATE_SCHEMA,
+        "session_id": session_id,
+        "state": state,
+        "updated_at": _utc_now(),
+        **extra,
+    }
+    _atomic_write_json(_turn_state_path(root, session_id), payload)
+    return payload
+
+
+def _worktree_snapshot(repo: Path, base: str | None = None) -> dict[str, Any] | None:
+    """HEAD, worktree diff hash (vs ``base`` or HEAD) and untracked list; None if unavailable."""
+    try:
+        code = "TURN_SNAPSHOT_UNAVAILABLE"
+        head = _git_ok(repo, "rev-parse", "HEAD", code=code).decode().strip()
+        _changed, untracked, digest = _collect_worktree_changes(repo, base or head)
+    except (DshWorkflowError, OSError):
+        return None
+    return {"head": head, "worktree_diff_sha256": digest, "untracked_paths": untracked}
+
+
+def record_failed_turn(
+    root: Path,
+    binding: dict[str, Any],
+    *,
+    pre: dict[str, Any] | None,
+    exit_code: int,
+    force_dirty_reason: str | None = None,
+) -> dict[str, Any]:
+    """Persist quarantine receipt + turn state for a non-zero DSH exit. Never reverts files."""
+    session_id = str(binding["session_id"])
+    repo = Path(str(binding["repo_root"]))
+    post = _worktree_snapshot(repo, pre["head"] if pre else None)
+    if force_dirty_reason is not None:
+        dirty, why = True, force_dirty_reason
+    elif pre is None or post is None:
+        dirty, why = True, "SNAPSHOT_UNAVAILABLE"
+    else:
+        dirty = (
+            post["head"] != pre["head"]
+            or post["worktree_diff_sha256"] != pre["worktree_diff_sha256"]
+        )
+        why = "WORKTREE_CHANGED_DURING_TURN" if dirty else "WORKTREE_UNCHANGED"
+    state = TURN_FAILED_DIRTY if dirty else TURN_FAILED_CLEAN
+    generated_at = _utc_now()
+    qdir = root / "quarantine" / session_id
+    stamp = generated_at.replace(":", "").replace("-", "")
+    patch_info: dict[str, Any] | None = None
+    if pre is not None and post is not None and dirty:
+        patch = _git_ok(repo, "diff", "--binary", "--no-renames", pre["head"], code="TURN_PATCH")
+        patch_path = qdir / f"{stamp}-{hashlib.sha256(patch).hexdigest()[:12]}.patch"
+        patch_path.parent.mkdir(parents=True, exist_ok=True)
+        patch_path.write_bytes(patch)
+        patch_info = {
+            "path": str(patch_path),
+            "sha256": _sha256_bytes(patch),
+            "bytes": len(patch),
+            "base": pre["head"],
+        }
+    new_untracked = (
+        sorted(set(post["untracked_paths"]) - set(pre["untracked_paths"]))
+        if pre is not None and post is not None
+        else None
+    )
+    body = {
+        "schema": QUARANTINE_SCHEMA,
+        "claim_ceiling": TURN_CLAIM_CEILING,
+        "state": state,
+        "reason": why,
+        "dsh_exit_code": exit_code,
+        "session_id": session_id,
+        "goal_id": binding.get("goal_id"),
+        "repository": binding["repository"],
+        "issue_number": binding["issue_number"],
+        "binding_hash": binding.get("binding_hash"),
+        "repo_root": str(repo),
+        "pre_turn": pre,
+        "post_turn": post,
+        "turn_patch": patch_info,
+        "new_untracked_paths": new_untracked,
+        "automatic_revert": False,
+        "generated_at": generated_at,
+    }
+    receipt = {**body, "receipt_hash": _sha256_bytes(_canonical_json(body).encode("utf-8"))}
+    receipt_path = qdir / f"{stamp}-{receipt['receipt_hash'][7:19]}.json"
+    _atomic_write_json(receipt_path, receipt)
+    _atomic_write_json(qdir / "latest.json", receipt)
+    return _write_turn_state(
+        root,
+        session_id,
+        state,
+        quarantine_receipt=str(receipt_path),
+        quarantine_receipt_hash=receipt["receipt_hash"],
+        dsh_exit_code=exit_code,
+        repository=binding["repository"],
+        issue_number=binding["issue_number"],
+    )
+
+
+def acknowledge_turn_failure(
+    root: Path, binding: dict[str, Any], *, reason: str, acknowledged_by: str | None = None
+) -> tuple[dict[str, Any], Path]:
+    session_id = str(binding["session_id"])
+    if not reason.strip():
+        raise DshWorkflowError("TURN_ACK_REASON_REQUIRED", "ack requires a non-empty reason")
+    state = load_turn_state(root, session_id)
+    if state is None or state.get("state") not in (TURN_FAILED_DIRTY, TURN_FAILED_CLEAN):
+        raise DshWorkflowError("NO_TURN_FAILURE_TO_ACK", "no failed turn is pending for session")
+    snapshot = _worktree_snapshot(Path(str(binding["repo_root"])))
+    generated_at = _utc_now()
+    who = acknowledged_by or os.getenv("USER") or os.getenv("LOGNAME") or "unknown"
+    body = {
+        "schema": TURN_ACK_SCHEMA,
+        "claim_ceiling": TURN_CLAIM_CEILING,
+        "session_id": session_id,
+        "acknowledged_state": state["state"],
+        "quarantine_receipt": state.get("quarantine_receipt"),
+        "quarantine_receipt_hash": state.get("quarantine_receipt_hash"),
+        "acknowledged_by": who,
+        "reason": reason.strip(),
+        "current_worktree": snapshot,
+        "generated_at": generated_at,
+    }
+    receipt = {**body, "receipt_hash": _sha256_bytes(_canonical_json(body).encode("utf-8"))}
+    stamp = generated_at.replace(":", "").replace("-", "")
+    path = root / "turn-acks" / session_id / f"{stamp}-{receipt['receipt_hash'][7:19]}.json"
+    _atomic_write_json(path, receipt)
+    _write_turn_state(
+        root,
+        session_id,
+        TURN_ACKNOWLEDGED,
+        acknowledged_state=state["state"],
+        ack_receipt=str(path),
+        ack_receipt_hash=receipt["receipt_hash"],
+    )
+    return receipt, path
+
+
+PHASE_RUN_SCHEMA = "nexus.dsh_phase_run.v1"
+PHASES = ("red", "green", "repair")
+SAFE_EDIT_RULE = (
+    "Never edit files with sed -i, perl -pi, or scripts that insert or append text; use the"
+    " edit/write tools or a single anchored replacement that fails if the anchor is not found"
+    " exactly once; after every edit run `git diff --stat`."
+)
+INTERPRETER_RULE = "Use only the repository interpreter `.venv/bin/python`."
+
+
+def find_dirty_sibling(root: Path, repository: str, issue_number: int) -> dict[str, Any] | None:
+    """A TURN_FAILED_DIRTY state for any session tracked for this repository+issue, if any."""
+    turn_dir = root / "turn-state"
+    candidates: dict[str, dict[str, Any]] = {}
+    if turn_dir.is_dir():
+        for path in sorted(turn_dir.glob("*.json")):
+            state = load_turn_state(root, path.stem)
+            if state is not None:
+                candidates[path.stem] = state
+    for path in sorted((root / "bindings").glob("*.json")):
+        try:
+            binding = validate_binding(json.loads(path.read_text(encoding="utf-8")))
+        except (OSError, ValueError, DshWorkflowError):
+            continue
+        if binding["repository"] != repository or binding["issue_number"] != issue_number:
+            continue
+        state = load_turn_state(root, str(binding["session_id"]))
+        if state is not None:
+            candidates[str(binding["session_id"])] = {**state, "repository": repository}
+            candidates[str(binding["session_id"])]["issue_number"] = issue_number
+    for session_id, state in sorted(candidates.items()):
+        if (
+            state.get("state") == TURN_FAILED_DIRTY
+            and state.get("repository") == repository
+            and state.get("issue_number") == issue_number
+        ):
+            return {"session_id": session_id, **state}
+    return None
+
+
+def _load_prior_receipts(paths: Sequence[str]) -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = []
+    for raw in paths:
+        path = Path(raw).expanduser().resolve()
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise DshWorkflowError(
+                "PRIOR_RECEIPT_UNREADABLE", f"prior receipt {path} cannot be read"
+            ) from exc
+        digest = payload.get("receipt_hash") if isinstance(payload, dict) else None
+        if not isinstance(digest, str) or not digest:
+            raise DshWorkflowError(
+                "PRIOR_RECEIPT_HASH_MISSING", f"prior receipt {path} has no receipt_hash"
+            )
+        out.append((str(path), digest))
+    return out
+
+
+# DSH ``workspace-write`` grants writes only under the session cwd (plus host temp
+# areas). Exact-worktree Git metadata (index, index.lock, objects, refs) is
+# therefore writable only when it physically lives in ``<repo_root>/.git``. A
+# linked worktree keeps it in the parent repository's common Git dir, so DSH is
+# never spawned there; the supported mode is an explicit standalone clone (#1607,
+# donor pattern #1342). Because DSH also grants the host temp areas to every
+# session, neither the workspace nor any checkout of its repository family may
+# live under them. The DSH sandbox itself is unchanged.
+GIT_METADATA_CONTRACT_SCHEMA = "nexus.dsh_git_metadata_contract.v1"
+STANDALONE_CLONE_SCHEMA = "nexus.dsh_standalone_clone.v1"
+STANDALONE_CLAIM_CEILING = "DSH_EXECUTION_SURFACE_ONLY_NO_COPY_BACK_NO_PUBLICATION_AUTHORITY"
+GIT_IDENTITY_ENV = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_COMMON_DIR",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_NAMESPACE",
+)
+FULL_REVISION_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+ORIGIN_SLUG_RE = re.compile(r"[:/]([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?$")
+
+
+def dsh_temp_write_roots(env: dict[str, str] | None = None) -> list[Path]:
+    """Superset of the temp areas DSH workspace-write grants (``/tmp`` + ``os.tmpdir()``)."""
+    current = os.environ if env is None else env
+    node_tmpdir = next(
+        (current[key] for key in ("TMPDIR", "TMP", "TEMP") if current.get(key)), "/tmp"
+    )
+    raw = {"/tmp", node_tmpdir.rstrip("/") or "/", tempfile.gettempdir()}
+    return sorted({Path(path).resolve() for path in raw})
+
+
+def _under_temp_grant(path: Path, env: dict[str, str] | None = None) -> Path | None:
+    return next((root for root in dsh_temp_write_roots(env) if _within(path, root)), None)
+
+
+def _within(path: Path, root: Path) -> bool:
+    return path == root or root in path.parents
+
+
+def _identity_git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    env = {k: v for k, v in os.environ.items() if k not in GIT_IDENTITY_ENV}
+    return subprocess.run(
+        ["git", *args], cwd=str(repo), env=env, text=True, capture_output=True, check=False
+    )
+
+
+def git_metadata_contract(repo_root: Path, *, env: dict[str, str] | None = None) -> dict[str, Any]:
+    """Whether DSH Git metadata operations for ``repo_root`` stay inside its workspace."""
+    root = repo_root.expanduser().resolve()
+    result: dict[str, Any] = {
+        "schema": GIT_METADATA_CONTRACT_SCHEMA,
+        "contract": "STANDALONE_REAL_GIT_DIR_INSIDE_WORKSPACE",
+        "repo_root": str(root),
+        "ok": False,
+    }
+
+    def fail(code: str, detail: str, **extra: Any) -> dict[str, Any]:
+        return {**result, **extra, "reason_code": code, "detail": detail}
+
+    current_env = os.environ if env is None else env
+    overrides = sorted(key for key in GIT_IDENTITY_ENV if current_env.get(key))
+    if overrides:
+        return fail(
+            "DSH_GIT_IDENTITY_AMBIGUOUS",
+            f"Git identity environment overrides are set: {', '.join(overrides)}",
+        )
+    if not root.is_dir():
+        return fail("DSH_GIT_IDENTITY_UNRESOLVED", "repo root is not a directory")
+    proc = _identity_git(
+        root,
+        "rev-parse",
+        "--path-format=absolute",
+        "--show-toplevel",
+        "--git-dir",
+        "--git-common-dir",
+    )
+    lines = proc.stdout.splitlines()
+    if proc.returncode != 0 or len(lines) != 3:
+        return fail("DSH_GIT_IDENTITY_UNRESOLVED", "repo root is not a resolvable Git worktree")
+    toplevel, git_dir, common_dir = (Path(line).resolve() for line in lines)
+    paths = {"git_dir": str(git_dir), "git_common_dir": str(common_dir)}
+    if toplevel != root:
+        return fail(
+            "DSH_GIT_IDENTITY_AMBIGUOUS",
+            f"repo root is not the exact Git toplevel ({toplevel})",
+            **paths,
+        )
+    dot_git = root / ".git"
+    if dot_git.is_symlink():
+        return fail("DSH_GIT_IDENTITY_AMBIGUOUS", ".git is a symlink", **paths)
+    if dot_git.is_file() or git_dir != common_dir:
+        return fail(
+            "DSH_LINKED_WORKTREE_GIT_METADATA_OUTSIDE_WORKSPACE",
+            (
+                f"repo root is a linked Git worktree; its git dir {git_dir} and common dir "
+                f"{common_dir} are outside the DSH workspace-write root, so exact-worktree Git "
+                "metadata operations are denied. Run `nexus-dsh-workflow prepare-standalone "
+                "--repository <owner/name> --source-repo-root <this root> --base-revision "
+                "<full sha> --target <path>` and start DSH with --repo-root <target>"
+            ),
+            **paths,
+        )
+    if not dot_git.is_dir() or git_dir != dot_git:
+        return fail(
+            "DSH_GIT_IDENTITY_AMBIGUOUS", "git dir is not the real <repo_root>/.git", **paths
+        )
+    temp_root = _under_temp_grant(root, env=current_env)
+    if temp_root is not None:
+        return fail(
+            "DSH_WORKSPACE_UNDER_DSH_TEMP_GRANT",
+            f"repo root is under {temp_root}, which DSH grants writable to every session; "
+            "use a standalone clone under a non-temp root",
+            **paths,
+        )
+    alternates = common_dir / "objects" / "info" / "alternates"
+    if alternates.exists():
+        return fail(
+            "DSH_GIT_OBJECT_STORE_SHARED",
+            "object store borrows another repository through alternates",
+            **paths,
+        )
+    return {**result, **paths, "ok": True, "reason_code": None}
+
+
+def _origin_slug(url: str) -> str | None:
+    match = ORIGIN_SLUG_RE.search(url.strip())
+    return match.group(1) if match else None
+
+
+def _validate_standalone_target(target: Path, *, origin: str, base: str) -> dict[str, Any]:
+    contract = git_metadata_contract(target)
+    remote = _identity_git(target, "remote", "get-url", "origin").stdout.strip()
+    head = _identity_git(target, "rev-parse", "--verify", "HEAD").stdout.strip()
+    if not contract["ok"] or remote != origin or head != base:
+        raise DshWorkflowError(
+            "STANDALONE_TARGET_IDENTITY_MISMATCH",
+            f"target is not an exact standalone clone of {origin} at {base}: "
+            f"contract={contract.get('reason_code')} origin={remote!r} head={head!r}",
+        )
+    status = _identity_git(target, "status", "--porcelain", "--untracked-files=all")
+    if status.returncode != 0 or status.stdout:
+        raise DshWorkflowError("STANDALONE_TARGET_DIRTY", "standalone target is not clean")
+    return contract
+
+
+def prepare_standalone_clone(
+    *, repository: str, source_repo_root: Path, base_revision: str, target: Path
+) -> dict[str, Any]:
+    """Create or exactly reuse a clean standalone clone; never copies work back."""
+    repository = _validate_repository(repository)
+    if any(os.environ.get(key) for key in GIT_IDENTITY_ENV):
+        raise DshWorkflowError("STANDALONE_SOURCE_AMBIGUOUS", "Git identity overrides are set")
+    source = source_repo_root.expanduser().resolve()
+    probe = _identity_git(
+        source, "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir"
+    )
+    lines = probe.stdout.splitlines()
+    if probe.returncode != 0 or len(lines) != 2 or Path(lines[0]).resolve() != source:
+        raise DshWorkflowError(
+            "STANDALONE_SOURCE_AMBIGUOUS", "source repo root is not an exact Git toplevel"
+        )
+    common_dir = Path(lines[1]).resolve()
+    origin = _identity_git(source, "remote", "get-url", "origin").stdout.strip()
+    if not origin:
+        raise DshWorkflowError("STANDALONE_SOURCE_NO_ORIGIN", "source has no origin remote")
+    if _origin_slug(origin) != repository:
+        raise DshWorkflowError(
+            "STANDALONE_REPOSITORY_MISMATCH",
+            f"source origin {origin!r} does not identify {repository}",
+        )
+    base = base_revision.strip()
+    if not FULL_REVISION_RE.fullmatch(base):
+        raise DshWorkflowError("STANDALONE_BASE_INVALID", "base revision must be a full object id")
+    if _identity_git(source, "cat-file", "-e", f"{base}^{{commit}}").returncode != 0:
+        raise DshWorkflowError("STANDALONE_BASE_UNAVAILABLE", f"base {base} is not in the source")
+    dest = target.expanduser().resolve()
+    temp_root = _under_temp_grant(dest)
+    if temp_root is not None:
+        raise DshWorkflowError(
+            "STANDALONE_TARGET_UNDER_DSH_TEMP_GRANT",
+            f"target is under {temp_root}, which DSH grants writable to every session",
+        )
+    # Every checkout of the source repository family must stay outside the DSH temp
+    # grant, otherwise a session in the clone could still write parent/sibling source.
+    listing = _identity_git(source, "worktree", "list", "--porcelain")
+    if listing.returncode != 0:
+        raise DshWorkflowError("STANDALONE_SOURCE_AMBIGUOUS", "cannot list source worktrees")
+    family = {source, common_dir} | {
+        Path(line[len("worktree ") :]).resolve()
+        for line in listing.stdout.splitlines()
+        if line.startswith("worktree ") and Path(line[len("worktree ") :]).exists()
+    }
+    exposed = sorted(str(path) for path in family if _under_temp_grant(path) is not None)
+    if exposed:
+        raise DshWorkflowError(
+            "STANDALONE_SOURCE_EXPOSED_UNDER_DSH_TEMP_GRANT",
+            "source repository checkouts under the DSH temp grant would stay writable from "
+            f"the clone: {', '.join(exposed)}",
+        )
+    if any(_within(dest, root) or _within(root, dest) for root in (source, common_dir)):
+        raise DshWorkflowError(
+            "STANDALONE_TARGET_UNSAFE",
+            "target must be disjoint from the source worktree and its common Git dir",
+        )
+    if dest.exists() and not dest.is_dir():
+        raise DshWorkflowError("STANDALONE_TARGET_UNSAFE", "target exists and is not a directory")
+
+    reused = dest.is_dir() and any(dest.iterdir())
+    if not reused:
+        created = not dest.exists()
+        dest.parent.mkdir(parents=True, exist_ok=True)
+
+        def run(cwd: Path, *args: str) -> None:
+            proc = _identity_git(cwd, *args)
+            if proc.returncode == 0:
+                return
+            if created:
+                shutil.rmtree(dest, ignore_errors=True)
+            else:
+                for child in dest.iterdir():
+                    if child.is_dir() and not child.is_symlink():
+                        shutil.rmtree(child, ignore_errors=True)
+                    else:
+                        child.unlink(missing_ok=True)
+            raise DshWorkflowError(
+                "STANDALONE_CLONE_FAILED", f"git {args[0]} failed: {proc.stderr.strip()[-500:]}"
+            )
+
+        # --no-local: independent object store, no hardlinks, no alternates, no
+        # linked-worktree metadata. origin is restored to the exact source identity.
+        run(dest.parent, "clone", "--quiet", "--no-local", "--no-checkout", str(source), str(dest))
+        run(dest, "remote", "set-url", "origin", origin)
+        if _identity_git(dest, "cat-file", "-e", f"{base}^{{commit}}").returncode != 0:
+            run(dest, "fetch", "--quiet", "--no-tags", str(source), base)
+        run(dest, "-c", "advice.detachedHead=false", "checkout", "--quiet", "--detach", base)
+    contract = _validate_standalone_target(dest, origin=origin, base=base)
+    body: dict[str, Any] = {
+        "schema": STANDALONE_CLONE_SCHEMA,
+        "claim_ceiling": STANDALONE_CLAIM_CEILING,
+        "generated_at": _utc_now(),
+        "repository": repository,
+        "base_revision": base,
+        "origin_url": origin,
+        "source_repo_root": str(source),
+        "source_git_common_dir": str(common_dir),
+        "source_family_paths": sorted(str(path) for path in family),
+        "dsh_temp_write_roots": [str(path) for path in dsh_temp_write_roots()],
+        "target": str(dest),
+        "reused": reused,
+        "git_metadata_contract": contract,
+        "copy_back": "NONE",
+        "publication_authority": "NONE",
+    }
+    return {**body, "receipt_hash": _sha256_bytes(_canonical_json(body).encode("utf-8"))}
+
+
+def _main_prepare_standalone(args: argparse.Namespace) -> int:
+    try:
+        receipt = prepare_standalone_clone(
+            repository=args.repository,
+            source_repo_root=Path(args.source_repo_root),
+            base_revision=args.base_revision,
+            target=Path(args.target),
+        )
+    except (DshWorkflowError, OSError) as exc:
+        print(
+            json.dumps(
+                {
+                    "schema": STANDALONE_CLONE_SCHEMA,
+                    "claim_ceiling": STANDALONE_CLAIM_CEILING,
+                    "decision": "BLOCKED",
+                    "reason_code": getattr(exc, "code", "STANDALONE_CLONE_FAILED"),
+                    "detail": str(exc),
+                },
+                sort_keys=True,
+            )
+        )
+        return EXIT_BLOCKED
+    print(json.dumps(receipt, sort_keys=True))
+    return 0
+
+
+def build_phase_task(
+    *,
+    phase: str,
+    goal_objective: str | None,
+    parent_has_goal: bool,
+    prior_receipts: Sequence[tuple[str, str]],
+    contract_text: str,
+    green_gate_command: str | None = None,
+    red_gate_command: str | None = None,
+) -> str:
+    may_create = phase == "red" and not parent_has_goal
+    gate_lines = [
+        f"Before claiming {claim}, run this exact command and read its decision: `{command}`"
+        for claim, command in (("RED_READY", red_gate_command), ("GREEN_READY", green_gate_command))
+        if command
+    ]
+    lines = [
+        "NEXUS CONTROLLER HEADER (fixed; precedes the phase contract)",
+        f"Phase: {phase}",
+        f"Goal objective: {goal_objective or '(none supplied)'}",
+        "Do not call create_goal unless phase=red and no goal exists.",
+        (
+            "create_goal for this phase: call it once with the goal objective above"
+            " and max_goal_rounds=1 (single wave; never omit it)."
+            if may_create
+            else "create_goal for this phase: NOT allowed; do not call it."
+        ),
+        "Allowed paths: edit only the paths the phase contract below allows; touch nothing else.",
+        "Every bash action must include a short description.",
+        "Use precise idempotent edits; never re-run insertion scripts; no helper/scratch files.",
+        SAFE_EDIT_RULE,
+        INTERPRETER_RULE,
+        *gate_lines,
+        "Prior phase receipts:",
+    ]
+    if prior_receipts:
+        lines.extend(f"- {path} receipt_hash={digest}" for path, digest in prior_receipts)
+    else:
+        lines.append("- (none)")
+    return "\n".join(lines) + "\n\nPHASE CONTRACT\n\n" + contract_text
+
+
+AGY_OPERATION_SUMMARY_SCHEMA = "nexus.dsh_agy_operation_summary.v1"
+AGY_OPERATION_MARKER_PREFIX = "NEXUS_DSH_AGY_OPERATION "
+AGY_OPERATION_MARKER_SCHEMA = "nexus.dsh_agy_operation_marker.v1"
+AGY_OPERATION_ID = re.compile(r"agyop_[0-9a-f]{32}")
+AGY_OPERATION_PURPOSES = frozenset({"agent", "compaction", "session-title"})
+AGY_ACTION_REF_PREFIX = "dsh_action_contract:v1:"
+AGY_SESSION_REF_PREFIX = "dsh_session:v1:"
+AGY_PROMPT_CHARS = re.compile(r":prompt_chars=(\d+)(?::|$)")
+AGY_MAX_OPERATIONS = 16
+AGY_MAX_MARKER_LINES = 4096
+AGY_STATUS_TIMEOUT_SECONDS = 10
+
+
+def _agy_dispatch_bin() -> str:
+    return os.environ.get("NEXUS_AGY_DISPATCH") or str(
+        Path.home() / ".local" / "bin" / "nexus-agy-dispatch"
+    )
+
+
+def _valid_operation_marker(payload: Any) -> bool:
+    return (
+        isinstance(payload, dict)
+        and payload.get("schema") == AGY_OPERATION_MARKER_SCHEMA
+        and isinstance(payload.get("dsh_session_id"), str)
+        and isinstance(payload.get("operation_id"), str)
+        and AGY_OPERATION_ID.fullmatch(payload["operation_id"]) is not None
+        and payload.get("purpose") in AGY_OPERATION_PURPOSES
+    )
+
+
+def _unknown_operation(
+    op_id: str | None, purpose: str | None, reason: str, status: Any = None
+) -> dict[str, Any]:
+    return {
+        "operation_id": op_id,
+        "purpose": purpose,
+        "status": status,
+        "prompt_chars": None,
+        "prompt_chars_unit": "characters",
+        "evidence": "UNKNOWN",
+        "reason": reason,
+    }
+
+
+def _read_operation_status(op_id: str) -> tuple[dict[str, Any] | None, str | None]:
+    """Read-only canonical status; any failure is UNKNOWN, never an invented count."""
+    try:
+        proc = subprocess.run(
+            [_agy_dispatch_bin(), "--status", op_id],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=AGY_STATUS_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None, "STATUS_UNAVAILABLE"
+    if proc.returncode != 0:
+        return None, "STATUS_UNAVAILABLE"
+    try:
+        payload = json.loads(proc.stdout)
+    except ValueError:
+        return None, "STATUS_MALFORMED"
+    if not isinstance(payload, dict):
+        return None, "STATUS_MALFORMED"
+    return payload, None
+
+
+def _verify_operation_evidence(
+    status: dict[str, Any], op_id: str, session_id: str, purpose: str
+) -> tuple[int | None, str | None]:
+    """Return the canonical prompt_chars only when the record binds to this session and purpose."""
+    if status.get("operation_id") != op_id:
+        return None, "RECORD_OPERATION_MISMATCH"
+    refs = status.get("evidence_refs")
+    if not isinstance(refs, list) or not all(isinstance(ref, str) for ref in refs):
+        return None, "EVIDENCE_MALFORMED"
+    action_refs = [ref for ref in refs if ref.startswith(AGY_ACTION_REF_PREFIX)]
+    if not action_refs:
+        return None, "EVIDENCE_MISSING"
+    if len(action_refs) != 1:
+        if len(set(action_refs)) > 1:
+            return None, "EVIDENCE_CONFLICT"
+        return None, "EVIDENCE_DUPLICATE"
+    match = AGY_PROMPT_CHARS.search(action_refs[0])
+    if match is None:
+        return None, "EVIDENCE_MALFORMED"
+    prompt_chars = int(match.group(1))
+    session_refs = [ref for ref in refs if ref.startswith(AGY_SESSION_REF_PREFIX)]
+    if not session_refs:
+        return None, "SESSION_EVIDENCE_MISSING"
+    digest = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+    expected = f"{AGY_SESSION_REF_PREFIX}session_sha256={digest}:purpose={purpose}"
+    if len(session_refs) != 1:
+        return None, "SESSION_EVIDENCE_CONFLICT"
+    if session_refs[0] != expected:
+        return None, "SESSION_EVIDENCE_MISMATCH"
+    return prompt_chars, None
+
+
+def _agy_operation_summary(
+    session_id: str | None, coverage: str, operations: list[dict[str, Any]]
+) -> dict[str, Any]:
+    # A phase log cannot prove an exhaustive operation count (a lost ack leaves no marker),
+    # so exhaustive is always false.
+    return {
+        "schema": AGY_OPERATION_SUMMARY_SCHEMA,
+        "session_id": session_id,
+        "coverage": coverage,
+        "exhaustive": False,
+        "operations": operations,
+    }
+
+
+def read_canonical_agy_operations(log_path: Path, session_id: str | None) -> dict[str, Any]:
+    """Summarize Agy operations of one DSH session from its phase log, verified canonically.
+
+    Markers are correlation hints only. An operation is CANONICAL only when its
+    canonical --status record names the same operation, binds to this DSH session
+    by hash and purpose, and carries exactly one action-contract prompt_chars.
+    prompt_chars counts characters, not tokens. Gateway metrics are ignored.
+    """
+    if session_id is None:
+        return _agy_operation_summary(None, "NO_SESSION_IDENTITY", [])
+    try:
+        handle = log_path.open("r", encoding="utf-8", errors="replace")
+    except OSError:
+        return _agy_operation_summary(session_id, "UNKNOWN_LOG_UNREADABLE", [])
+    purposes: dict[str, str] = {}
+    conflicts: set[str] = set()
+    entries: list[dict[str, Any]] = []
+    matched = False
+    marker_lines = 0
+    truncated = False
+    with handle:
+        for raw in handle:
+            if not raw.startswith(AGY_OPERATION_MARKER_PREFIX):
+                continue
+            marker_lines += 1
+            if marker_lines > AGY_MAX_MARKER_LINES:
+                truncated = True
+                break
+            try:
+                payload = json.loads(raw[len(AGY_OPERATION_MARKER_PREFIX) :])
+            except ValueError:
+                payload = None
+            if not _valid_operation_marker(payload):
+                entries.append(_unknown_operation(None, None, "MARKER_MALFORMED"))
+                continue
+            if payload["dsh_session_id"] != session_id:
+                continue
+            matched = True
+            op_id = payload["operation_id"]
+            if op_id in purposes:
+                if purposes[op_id] != payload["purpose"]:
+                    conflicts.add(op_id)
+                continue
+            purposes[op_id] = payload["purpose"]
+    if truncated:
+        coverage = "NON_EXHAUSTIVE_LIMIT"
+    elif matched:
+        coverage = "OBSERVED_NON_EXHAUSTIVE"
+    else:
+        coverage = "NON_EXHAUSTIVE_NO_MARKER"
+    selected = list(purposes.items())
+    if len(selected) > AGY_MAX_OPERATIONS:
+        selected = selected[:AGY_MAX_OPERATIONS]
+        coverage = "NON_EXHAUSTIVE_LIMIT"
+    for op_id, purpose in selected:
+        if op_id in conflicts:
+            entries.append(_unknown_operation(op_id, purpose, "MARKER_CONFLICT"))
+            continue
+        status, reason = _read_operation_status(op_id)
+        if status is None:
+            entries.append(_unknown_operation(op_id, purpose, reason or "STATUS_UNAVAILABLE"))
+            continue
+        prompt_chars, reason = _verify_operation_evidence(status, op_id, session_id, purpose)
+        if reason is not None:
+            entries.append(_unknown_operation(op_id, purpose, reason, status.get("status")))
+            continue
+        entries.append({
+            "operation_id": op_id,
+            "purpose": purpose,
+            "status": status.get("status"),
+            "prompt_chars": prompt_chars,
+            "prompt_chars_unit": "characters",
+            "evidence": "CANONICAL",
+            "reason": None,
+        })
+    return _agy_operation_summary(session_id, coverage, entries)
+
+
+MODEL_ROUTE_SCHEMA = "nexus.dsh_model_route.v1"
+MODEL_ROUTE_CLAIM_CEILING = "PHASE_ROUTE_OBSERVATION_NO_COMPLETION_AUTHORITY"
+ROUTE_MODES = ("off", "auto")
+# Ordered cheapest first; top is never assigned.
+ROUTE_TIERS = ("light", "small", "mid")
+ROUTE_EFFORTS = ("low", "medium", "high")
+ROUTE_CONFIDENCE_FLOOR = 0.5
+ROUTE_PROVIDER = "nexus-agy-pool"
+ROUTE_CLASSIFIER_MODEL = "gemini-3.8-flash-low"
+ROUTE_CLASSIFIER_EFFORT = "low"
+ROUTE_CLASSIFIER_DENIES = ("command(*)", "read_file(*)", "write_file(*)")
+ROUTE_CLASSIFIER_TIMEOUT_SECONDS = 45.0
+ROUTE_CLASSIFIER_MAX_TIMEOUT_SECONDS = 120.0
+ROUTE_POLL_INTERVAL_SECONDS = 0.25
+ROUTE_START_TIMEOUT_SECONDS = 30
+ROUTE_ANSWER_MAX_CHARS = 4096
+ROUTE_REASON_MAX_CHARS = 500
+ROUTE_CONTRACT_MAX_CHARS = 24000
+ROUTE_MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+ROUTE_GEMINI_COST_RE = re.compile(r"^gemini-[0-9][0-9.]*-(flash|pro)(?:-(low|medium|high))?$")
+ROUTE_FAMILY_COST = {"flash": 0, "pro": 1}
+ROUTE_TERMINAL_FAILURES = frozenset({"FAILED", "CANCELLED", "OUTCOME_UNKNOWN"})
+# None means "the session default" (the --patch model).
+DEFAULT_ROUTE_TABLE: dict[str, dict[str, str] | None] = {
+    "light": {"model": "gemini-3.8-flash", "effort": "low"},
+    "small": {"model": "gemini-3.8-flash", "effort": "medium"},
+    "mid": None,
+}
+ROUTE_DEFAULT_ID_RE = re.compile(r"^(\s*)(?:-\s+)?id:\s*['\"]?agent-default-model['\"]?\s*$")
+ROUTE_LIST_ITEM_RE = re.compile(r"^(\s*)-\s")
+ROUTE_SCALAR_RE = re.compile(
+    r"^\s*(provider|model|reasoningEffort):\s*['\"]?([^'\"#\s]*)['\"]?\s*$"
+)
+# #1685 deterministic floors, applied after classification (they never pick a model).
+ROUTE_FLOOR_TIER = "mid"
+ROUTE_LARGE_FILE_LINES = 1500
+ROUTE_FLOOR_FEEDBACK_CODES = ("RED_ORACLE_DEFECT", "UNINTENDED_FAILURE")
+ROUTE_FEEDBACK_CODE_RE = re.compile(
+    r"(?<![A-Z0-9_])(" + "|".join(ROUTE_FLOOR_FEEDBACK_CODES) + r")(?![A-Z0-9_])"
+)
+ROUTE_PATH_TOKEN_RE = re.compile(r"(?<![\w./-])([\w.-]+(?:/[\w.-]+)*)")
+ROUTE_MAX_PATH_TOKENS = 256
+ROUTE_MAX_NAMED_FILES = 32
+
+
+def load_route_table(path: str | None) -> dict[str, dict[str, str] | None]:
+    """The tier table: the Issue default, overridden per tier by a JSON file."""
+    table = {tier: (dict(entry) if entry else None) for tier, entry in DEFAULT_ROUTE_TABLE.items()}
+    if path is None:
+        return table
+    try:
+        raw = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise DshWorkflowError("ROUTE_TABLE_INVALID", "route table cannot be read as JSON") from exc
+    if not isinstance(raw, dict):
+        raise DshWorkflowError("ROUTE_TABLE_INVALID", "route table must be a JSON object")
+    for tier, entry in raw.items():
+        if tier not in ROUTE_TIERS:
+            raise DshWorkflowError(
+                "ROUTE_TABLE_INVALID", f"route table tier {tier!r} is not allowed"
+            )
+        if entry is None:
+            table[tier] = None
+            continue
+        if (
+            not isinstance(entry, dict)
+            or set(entry) != {"model", "effort"}
+            or not isinstance(entry["model"], str)
+            or ROUTE_MODEL_RE.fullmatch(entry["model"]) is None
+            or entry["effort"] not in ROUTE_EFFORTS
+        ):
+            raise DshWorkflowError(
+                "ROUTE_TABLE_INVALID", f"route table tier {tier!r} needs exactly a model and effort"
+            )
+        table[tier] = {"model": entry["model"], "effort": entry["effort"]}
+    return table
+
+
+def _model_cost(model: str | None, effort: str | None) -> tuple[int, int] | None:
+    """A comparable cost rank, or None when the order is not known."""
+    match = ROUTE_GEMINI_COST_RE.fullmatch(model or "")
+    if match is None:
+        return None
+    suffix = match.group(2)
+    if suffix and effort and suffix != effort:
+        return None
+    level = effort or suffix
+    if level not in ROUTE_EFFORTS:
+        return None
+    return ROUTE_FAMILY_COST[match.group(1)], ROUTE_EFFORTS.index(level)
+
+
+def is_strictly_cheaper(
+    model: str | None, effort: str | None, default_model: str | None, default_effort: str | None
+) -> bool:
+    candidate = _model_cost(model, effort)
+    default = _model_cost(default_model, default_effort)
+    return candidate is not None and default is not None and candidate < default
+
+
+def default_model_from_patches(patches: Sequence[str]) -> dict[str, str | None]:
+    """The session default (agent-default-model) the caller's patches select; last patch wins."""
+    found: dict[str, str | None] = {"provider": None, "model": None, "effort": None}
+    for raw in patches:
+        try:
+            lines = Path(raw).expanduser().read_text(encoding="utf-8").splitlines()
+        except (OSError, ValueError):
+            return {"provider": None, "model": None, "effort": None}
+        for index, line in enumerate(lines):
+            head = ROUTE_DEFAULT_ID_RE.match(line)
+            if head is None:
+                continue
+            values: dict[str, str] = {}
+            for follow in lines[index + 1 :]:
+                item = ROUTE_LIST_ITEM_RE.match(follow)
+                if item is not None and len(item.group(1)) <= len(head.group(1)):
+                    break
+                scalar = ROUTE_SCALAR_RE.match(follow)
+                if scalar is not None:
+                    values[scalar.group(1)] = scalar.group(2)
+            if "model" in values:
+                model = values["model"]
+                found = {
+                    "provider": values.get("provider"),
+                    "model": model if ROUTE_MODEL_RE.fullmatch(model) else None,
+                    "effort": values.get("reasoningEffort"),
+                }
+    return found
+
+
+def _count_lines(path: Path) -> int:
+    count, last = 0, b"\n"
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            count += chunk.count(b"\n")
+            last = chunk[-1:]
+    return count + (0 if last == b"\n" else 1)
+
+
+def named_repository_files(repo_root: Path, contract_text: str) -> list[dict[str, Any]]:
+    """Regular repository files the contract names, with line counts, in first-mention order.
+
+    Only relative paths that resolve inside the repository count; absolute, parent-relative,
+    .git, symlink-escaping and missing paths are ignored.
+    """
+    repo = repo_root.resolve()
+    named: dict[str, int] = {}
+    tokens = 0
+    for match in ROUTE_PATH_TOKEN_RE.finditer(contract_text):
+        token = match.group(1).rstrip(".")
+        parts = token.split("/")
+        if (
+            token in named
+            or not ("/" in token or "." in token)
+            or any(part in ("", ".", "..", ".git") for part in parts)
+        ):
+            continue
+        tokens += 1
+        if tokens > ROUTE_MAX_PATH_TOKENS:
+            break
+        candidate = repo / token
+        try:
+            resolved = candidate.resolve()
+            resolved.relative_to(repo)
+            if not resolved.is_file():
+                continue
+            named[token] = _count_lines(resolved)
+        except (OSError, ValueError):
+            continue
+        if len(named) >= ROUTE_MAX_NAMED_FILES:
+            break
+    return [{"path": path, "lines": lines} for path, lines in named.items()]
+
+
+def route_floor(
+    phase: str, contract_text: str, named_files: Sequence[dict[str, Any]]
+) -> tuple[str | None, str | None]:
+    """The deterministic minimum tier for this phase task and why (#1685)."""
+    reasons: list[str] = []
+    if phase == "red":
+        # A wrong RED oracle is the costliest failure.
+        reasons.append("RED_PHASE")
+    reasons.extend(
+        f"LARGE_FILE:{item['path']}={item['lines']}"
+        for item in named_files
+        if item["lines"] > ROUTE_LARGE_FILE_LINES
+    )
+    if phase == "repair":
+        found = set(ROUTE_FEEDBACK_CODE_RE.findall(contract_text))
+        reasons.extend(
+            f"REPAIR_GATE_FEEDBACK:{code}" for code in ROUTE_FLOOR_FEEDBACK_CODES if code in found
+        )
+    if not reasons:
+        return None, None
+    return ROUTE_FLOOR_TIER, ";".join(reasons)
+
+
+def build_classifier_prompt(
+    phase: str, contract_text: str, named_files: Sequence[dict[str, Any]]
+) -> str:
+    if named_files:
+        facts = [
+            "Named repository files (line counts):",
+            *(f"- {item['path']}: {item['lines']} lines" for item in named_files),
+            f"Total: {sum(item['lines'] for item in named_files)} lines",
+        ]
+    else:
+        facts = ["Named repository files: (none found)"]
+    contract = contract_text
+    if len(contract) > ROUTE_CONTRACT_MAX_CHARS:
+        contract = contract[:ROUTE_CONTRACT_MAX_CHARS] + "\n[contract truncated for routing]"
+    return "\n".join([
+        "NEXUS DSH PHASE ROUTE CLASSIFIER",
+        "Classify the bounded phase task below into one cost tier. Do not use tools.",
+        "Do not solve the task. Judge only the phase name, the repository facts and the contract.",
+        "Judge the reading load (how much existing code must be read and understood),"
+        " not only the size of the edit.",
+        "Tiers:",
+        "- light: mechanical, checked at a glance",
+        "- small: needs reading, well specified",
+        "- mid: implementation with tests, or diagnosis",
+        "Answer with exactly one JSON object and nothing else:",
+        '{"tier":"light|small|mid","confidence":0..1,"reason":"..."}',
+        f"Phase: {phase}",
+        *facts,
+        "",
+        "PHASE CONTRACT",
+        "",
+        contract,
+    ])
+
+
+def parse_classifier_answer(text: str | None) -> tuple[dict[str, Any] | None, str | None]:
+    """Exactly one {tier, confidence, reason} object; anything else is a fallback code."""
+    malformed = (None, "CLASSIFIER_ANSWER_MALFORMED")
+    if not isinstance(text, str) or len(text) > ROUTE_ANSWER_MAX_CHARS:
+        return malformed
+    body = text.strip()
+    fenced = re.fullmatch(r"```(?:json)?\s*\n(.*)\n```", body, flags=re.DOTALL)
+    if fenced is not None:
+        body = fenced.group(1).strip()
+    try:
+        payload = json.loads(body)
+    except ValueError:
+        return malformed
+    if not isinstance(payload, dict) or set(payload) != {"tier", "confidence", "reason"}:
+        return malformed
+    confidence = payload["confidence"]
+    if (
+        isinstance(confidence, bool)
+        or not isinstance(confidence, (int, float))
+        or not 0 <= confidence <= 1
+        or not isinstance(payload["reason"], str)
+        or not isinstance(payload["tier"], str)
+    ):
+        return malformed
+    if payload["tier"] not in ROUTE_TIERS:
+        return None, "TIER_UNKNOWN"
+    return {
+        "tier": payload["tier"],
+        "confidence": float(confidence),
+        "reason": payload["reason"][:ROUTE_REASON_MAX_CHARS],
+    }, None
+
+
+def decide_route(
+    *,
+    answer_text: str | None,
+    classifier_error: str | None,
+    classifier_operation_id: str | None,
+    table: dict[str, dict[str, str] | None],
+    default_model: str | None,
+    default_effort: str | None,
+    floor_tier: str | None,
+    floor_reason: str | None,
+) -> dict[str, Any]:
+    """Pure, replayable mapping from one classifier answer to a phase route.
+
+    Every failure keeps the session default (fail open, with the reason recorded); a floor
+    only raises the tier, and a table model is used only when it is provably cheaper than
+    that default.
+    """
+    inputs = {
+        "answer_text": answer_text,
+        "classifier_error": classifier_error,
+        "classifier_operation_id": classifier_operation_id,
+        "table": table,
+        "default_model": default_model,
+        "default_effort": default_effort,
+        "floor_tier": floor_tier,
+        "floor_reason": floor_reason,
+    }
+    route: dict[str, Any] = {
+        "mode": "auto",
+        "tier": None,
+        "classified_tier": None,
+        "confidence": None,
+        "reason": None,
+        "model": default_model,
+        "effort": default_effort,
+        "classifier_operation_id": classifier_operation_id,
+        "fallback_reason": None,
+        "floor_reason": floor_reason,
+        "applied": False,
+        "decision_inputs_sha256": _sha256_bytes(_canonical_json(inputs).encode("utf-8")),
+    }
+    if classifier_error is not None:
+        route["fallback_reason"] = classifier_error
+        return route
+    answer, code = parse_classifier_answer(answer_text)
+    if answer is None:
+        route["fallback_reason"] = code
+        return route
+    route.update(
+        classified_tier=answer["tier"], confidence=answer["confidence"], reason=answer["reason"]
+    )
+    if answer["confidence"] < ROUTE_CONFIDENCE_FLOOR:
+        route["fallback_reason"] = "LOW_CONFIDENCE"
+        return route
+    tier = answer["tier"]
+    if floor_tier is not None and ROUTE_TIERS.index(floor_tier) > ROUTE_TIERS.index(tier):
+        tier = floor_tier
+    route["tier"] = tier
+    entry = table.get(tier)
+    if entry is None:
+        return route
+    if not is_strictly_cheaper(entry["model"], entry["effort"], default_model, default_effort):
+        route["fallback_reason"] = "NOT_CHEAPER_THAN_DEFAULT"
+        return route
+    route.update(model=entry["model"], effort=entry["effort"], applied=True)
+    return route
+
+
+def render_route_patch(route: dict[str, Any]) -> str:
+    """The derived agent-default-model patch; route facts are JSON-escaped comments only."""
+    facts = [
+        ("tier", route["tier"]),
+        ("classified_tier", route["classified_tier"]),
+        ("confidence", route["confidence"]),
+        ("reason", json.dumps(route["reason"])),
+        ("floor_reason", route["floor_reason"] or "none"),
+        ("classifier_operation_id", route["classifier_operation_id"]),
+        ("decision_inputs_sha256", route["decision_inputs_sha256"]),
+    ]
+    header = "".join(f"# route {key}: {value}\n" for key, value in facts)
+    return (
+        "# Derived by nexus-dsh-workflow --model-route auto for one phase only.\n"
+        + header
+        + "- id: agent-default-model\n"
+        "  config:\n"
+        f"    provider: {ROUTE_PROVIDER}\n"
+        f"    model: {route['model']}\n"
+        f"    reasoningEffort: {route['effort']}\n"
+    )
+
+
+def _classifier_scratch() -> Path:
+    scratch = Path(tempfile.mkdtemp(prefix="nexus-dsh-route-classifier-"))
+    (scratch / ".dsh-intelligence-scratch").write_text(
+        "DSH_AGY_INTELLIGENCE_NO_TARGET_EFFECTS\n", encoding="utf-8"
+    )
+    for cmd in (
+        ["init", "-q"],
+        ["add", ".dsh-intelligence-scratch"],
+        ["-c", "user.name=nexus", "-c", "user.email=nexus@localhost", "commit", "-q", "-m", "s"],
+    ):
+        subprocess.run(["git", *cmd], cwd=scratch, capture_output=True, check=False)
+    return scratch
+
+
+def run_route_classifier(prompt: str, timeout: float) -> tuple[str | None, str | None, str | None]:
+    """One plan-mode, no-tool classifier call through canonical nexus-agy-dispatch.
+
+    Returns (answer_text, operation_id, error_code). Never raises: every failure is a
+    fallback code so the phase keeps its session default.
+    """
+    scratch = _classifier_scratch()
+    preserve = False
+    fd, prompt_path = tempfile.mkstemp(prefix="nexus-dsh-route-", suffix=".txt")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(prompt)
+        argv = [
+            _agy_dispatch_bin(),
+            "--background",
+            "--cwd",
+            str(scratch),
+            "--mode",
+            "plan",
+            "--model",
+            ROUTE_CLASSIFIER_MODEL,
+            "--effort",
+            ROUTE_CLASSIFIER_EFFORT,
+        ]
+        for rule in ROUTE_CLASSIFIER_DENIES:
+            argv.extend(["--deny", rule])
+        # The dispatcher takes whole seconds; never truncate a sub-second budget to 0.
+        # The outer deadline below keeps the exact requested (possibly fractional) value.
+        argv.extend([
+            "--timeout",
+            str(max(1, math.ceil(timeout))),
+            "--max-calls",
+            "1",
+            "--prompt-file",
+            prompt_path,
+        ])
+        deadline = time.monotonic() + timeout
+        try:
+            started = subprocess.run(
+                argv,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=ROUTE_START_TIMEOUT_SECONDS,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None, None, "CLASSIFIER_DISPATCH_FAILED"
+        try:
+            op_id = json.loads(started.stdout).get("operation_id")
+        except (ValueError, AttributeError):
+            op_id = None
+        if (
+            started.returncode != 0
+            or not isinstance(op_id, str)
+            or AGY_OPERATION_ID.fullmatch(op_id) is None
+        ):
+            return None, None, "CLASSIFIER_DISPATCH_FAILED"
+        while True:
+            status, _ = _read_operation_status(op_id)
+            if status is not None:
+                if status.get("operation_id") != op_id:
+                    return None, op_id, "CLASSIFIER_STATUS_MISMATCH"
+                state = status.get("status")
+                if state == "COMPLETED":
+                    try:
+                        with open(str(status.get("stdout_path")), encoding="utf-8") as out:
+                            return out.read(ROUTE_ANSWER_MAX_CHARS + 1), op_id, None
+                    except (OSError, ValueError):
+                        return None, op_id, "CLASSIFIER_OUTPUT_UNREADABLE"
+                if state in ROUTE_TERMINAL_FAILURES:
+                    preserve = state == "OUTCOME_UNKNOWN"
+                    return None, op_id, "CLASSIFIER_OPERATION_FAILED"
+            if time.monotonic() >= deadline:
+                # The operation may still finish; keep its scratch for canonical reconcile.
+                preserve = True
+                code = "CLASSIFIER_STATUS_UNAVAILABLE" if status is None else "CLASSIFIER_TIMEOUT"
+                return None, op_id, code
+            time.sleep(ROUTE_POLL_INTERVAL_SECONDS)
+    finally:
+        Path(prompt_path).unlink(missing_ok=True)
+        if not preserve:
+            shutil.rmtree(scratch, ignore_errors=True)
+
+
+def _route_off(default: dict[str, str | None]) -> dict[str, Any]:
+    return {
+        "mode": "off",
+        "tier": None,
+        "classified_tier": None,
+        "confidence": None,
+        "reason": None,
+        "model": default["model"],
+        "effort": default["effort"],
+        "classifier_operation_id": None,
+        "fallback_reason": None,
+        "floor_reason": None,
+        "derived_patch_path": None,
+        "receipt_path": None,
+        "observation": None,
+    }
+
+
+def build_router(args: argparse.Namespace) -> dict[str, Any] | None:
+    """Validated --model-route inputs, or None when routing is off (argv stays unchanged)."""
+    if args.route_table is not None and args.model_route != "auto":
+        raise DshWorkflowError(
+            "ROUTE_ARGUMENT_INVALID", "--route-table requires --model-route auto"
+        )
+    if not 0 < args.route_classifier_timeout <= ROUTE_CLASSIFIER_MAX_TIMEOUT_SECONDS:
+        raise DshWorkflowError(
+            "ROUTE_ARGUMENT_INVALID",
+            f"--route-classifier-timeout must be in (0, {ROUTE_CLASSIFIER_MAX_TIMEOUT_SECONDS:g}]",
+        )
+    if args.model_route != "auto":
+        return None
+    table = load_route_table(args.route_table)
+    return {
+        "table": table,
+        "table_sha256": (
+            _sha256_file(Path(args.route_table).expanduser())
+            if args.route_table
+            else _sha256_bytes(_canonical_json(table).encode("utf-8"))
+        ),
+        "default": default_model_from_patches(args.patch),
+        "timeout": args.route_classifier_timeout,
+    }
+
+
+def route_phase(
+    router: dict[str, Any],
+    *,
+    root: Path,
+    stem: str,
+    repo_root: Path,
+    repository: str,
+    issue_number: int,
+    phase: str,
+    parent_session_id: str | None,
+    contract_text: str,
+) -> dict[str, Any]:
+    """Classify one phase task, apply #1685 floors, derive its patch, persist the receipt."""
+    default = router["default"]
+    named_files = named_repository_files(repo_root, contract_text)
+    floor_tier, floor_reason = route_floor(phase, contract_text, named_files)
+    prompt = build_classifier_prompt(phase, contract_text, named_files)
+    answer: str | None = None
+    op_id: str | None = None
+    error: str | None = None
+    started = time.monotonic()
+    if default["model"] is None or _model_cost(default["model"], default["effort"]) is None:
+        error = "DEFAULT_MODEL_UNKNOWN"
+    elif default["provider"] != ROUTE_PROVIDER:
+        error = "DEFAULT_PROVIDER_UNSUPPORTED"
+    else:
+        answer, op_id, error = run_route_classifier(prompt, router["timeout"])
+    wall_ms = int((time.monotonic() - started) * 1000)
+    route = decide_route(
+        answer_text=answer,
+        classifier_error=error,
+        classifier_operation_id=op_id,
+        table=router["table"],
+        default_model=default["model"],
+        default_effort=default["effort"],
+        floor_tier=floor_tier,
+        floor_reason=floor_reason,
+    )
+    route_dir = root / "routes" / str(issue_number)
+    derived_path: Path | None = None
+    derived_sha: str | None = None
+    if route["applied"]:
+        derived_path = route_dir / f"{stem}.patch.yml"
+        derived_path.parent.mkdir(parents=True, exist_ok=True)
+        derived_path.write_text(render_route_patch(route), encoding="utf-8")
+        derived_sha = _sha256_file(derived_path)
+    route.update(
+        derived_patch_path=str(derived_path) if derived_path else None,
+        derived_patch_sha256=derived_sha,
+        route_table_sha256=router["table_sha256"],
+        observation={
+            "classifier_wall_ms": wall_ms,
+            "classifier_prompt_chars": len(prompt),
+            "classifier_prompt_chars_unit": "characters",
+            "tokens": None,
+            "cost": None,
+            "cost_evidence": "NOT_OBSERVED",
+        },
+    )
+    body = {
+        "schema": MODEL_ROUTE_SCHEMA,
+        "claim_ceiling": MODEL_ROUTE_CLAIM_CEILING,
+        "generated_at": _utc_now(),
+        "repository": repository,
+        "issue_number": issue_number,
+        "phase": phase,
+        "parent_session_id": parent_session_id,
+        "phase_contract_sha256": _sha256_bytes(contract_text.encode("utf-8")),
+        "named_files": named_files,
+        "classifier_model": ROUTE_CLASSIFIER_MODEL,
+        "classifier_prompt_sha256": _sha256_bytes(prompt.encode("utf-8")),
+        "classifier_answer_raw": answer,
+        "route_table": router["table"],
+        "default_provider": default["provider"],
+        "default_model": default["model"],
+        "default_effort": default["effort"],
+        **route,
+    }
+    receipt = dict(body)
+    receipt["receipt_hash"] = _sha256_bytes(_canonical_json(body).encode("utf-8"))
+    receipt_path = route_dir / f"{stem}.route.json"
+    _atomic_write_json(receipt_path, receipt)
+    route.update(receipt_path=str(receipt_path), receipt_hash=receipt["receipt_hash"])
+    return route
+
+
+PHASE_CHAIN_SCHEMA = "nexus.dsh_phase_chain.v1"
+PHASE_CHAIN_CLAIM_CEILING = "PHASE_CHAIN_RECORD_NO_COMPLETION_AUTHORITY"
+AUTO_REPAIR_MAX = 3
+
+
+def _run_phase_turn(
+    args: argparse.Namespace,
+    root: Path,
+    *,
+    repository: str,
+    repo_root: Path,
+    dsh_home: Path,
+    phase: str,
+    contract_text: str,
+    prior: Sequence[tuple[str, str]],
+    parent: str | None,
+    green_gate_command: str | None,
+    red_gate_command: str | None = None,
+    router: dict[str, Any] | None = None,
+) -> tuple[int, dict[str, Any]]:
+    """Run one preflight-guarded DSH turn; returns its exit code and result payload."""
+    parent_has_goal = False
+    if parent:
+        try:
+            parent_has_goal = load_binding(root, parent).get("goal_id") is not None
+        except DshWorkflowError:
+            parent_has_goal = False
+
+    subject = issue_subject(repository, args.issue, repo_root)
+    sibling = find_dirty_sibling(root, repository, args.issue)
+    git_contract = git_metadata_contract(repo_root)
+    if sibling is not None:
+        preflight = _blocked_preflight(
+            subject,
+            reason_code="PREVIOUS_TURN_FAILED_DIRTY",
+            detail=(
+                f"session {sibling['session_id']} for this Issue failed dirty; inspect its "
+                "quarantine receipt and run ack-turn-failure before starting a new phase"
+            ),
+        )
+        preflight["quarantine_receipt"] = sibling.get("quarantine_receipt")
+        preflight["blocking_session_id"] = sibling["session_id"]
+    elif not git_contract["ok"]:
+        preflight = _blocked_preflight(
+            subject, reason_code=git_contract["reason_code"], detail=git_contract["detail"]
+        )
+    else:
+        preflight = run_issue_preflight(subject, doctor_bin=args.doctor_bin)
+    preflight["git_metadata_contract"] = git_contract
+    preflight["invocation"] = "start-phase"
+    preflight["phase"] = phase
+    receipt_path = persist_preflight(root, preflight)
+    if preflight["decision"] != "ALLOW_RESUME":
+        return EXIT_BLOCKED, {**preflight, "receipt_path": str(receipt_path)}
+
+    task = build_phase_task(
+        phase=phase,
+        goal_objective=args.goal_objective,
+        parent_has_goal=parent_has_goal,
+        prior_receipts=prior,
+        contract_text=contract_text,
+        green_gate_command=green_gate_command,
+        red_gate_command=red_gate_command,
+    )
+    stamp = _utc_now().replace(":", "").replace("-", "").replace(".", "")
+    stem = f"{stamp}-{os.getpid()}-{phase}"
+    patches = list(args.patch)
+    if router is None:
+        route = _route_off(default_model_from_patches(args.patch))
+    else:
+        # Route this phase task only; the derived patch overrides the session default for
+        # this one DSH process and is never recorded in the session binding.
+        route = route_phase(
+            router,
+            root=root,
+            stem=stem,
+            repo_root=repo_root,
+            repository=repository,
+            issue_number=args.issue,
+            phase=phase,
+            parent_session_id=parent,
+            contract_text=contract_text,
+        )
+        if route["derived_patch_path"]:
+            patches.append(route["derived_patch_path"])
+    dsh_argv = [args.dsh_bin, "--profile", args.profile]
+    for patch in patches:
+        dsh_argv.extend(["--patch", patch])
+    dsh_argv.extend(["--json", task])
+    log_path = root / "phases" / str(args.issue) / f"{stem}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    env = os.environ.copy()
+    env["DSH_HOME"] = str(dsh_home)
+    env["NEXUS_DSH_PREFLIGHT_RECEIPT"] = str(receipt_path)
+    pre_turn = _worktree_snapshot(repo_root)
+    phase_started = time.monotonic()
+    with log_path.open("wb") as sink:
+        proc = subprocess.run(
+            dsh_argv,
+            cwd=str(repo_root),
+            env=env,
+            stdout=sink,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+    phase_wall_ms = int((time.monotonic() - phase_started) * 1000)
+
+    session_id: str | None = None
+    try:
+        session_id = _parse_created_goal_log(log_path, require_goal=False)["session_id"]
+    except DshWorkflowError:
+        session_id = None
+    # Canonical operation evidence is read for the observed session only, never for the
+    # synthetic unobserved fallback id assigned below.
+    canonical_agy_operations = (
+        read_canonical_agy_operations(log_path, session_id) if session_id is not None else None
+    )
+    binding: dict[str, Any] | None = None
+    binding_error: str | None = None
+    if session_id is not None:
+        try:
+            binding = build_binding_from_log(
+                log_path=log_path,
+                repository=repository,
+                issue_number=args.issue,
+                repo_root=repo_root,
+                dsh_home=dsh_home,
+                phase=phase,
+                parent_session_id=parent,
+                goal_objective=args.goal_objective,
+                required_round_cap=1 if phase == "red" and not parent_has_goal else None,
+            )
+            # A red turn under a goal-bearing parent is told not to create a goal.
+            if phase == "red" and not parent_has_goal and binding["goal_id"] is None:
+                raise DshWorkflowError(
+                    "DSH_TRACKING_GOAL_NOT_OBSERVED", "red phase did not create a durable goal"
+                )
+            store_binding(root, binding)
+        except DshWorkflowError as exc:
+            binding_error = f"{exc.code}: {exc}"
+            binding = None
+    turn_subject = binding or {**subject, "session_id": session_id or ""}
+    forced: str | None = None
+    if session_id is None:
+        session_id = f"start-phase-unobserved-{args.issue}-{stamp}-{phase}"
+        turn_subject = {**subject, "session_id": session_id}
+        forced = "SESSION_NOT_OBSERVED"
+    if proc.returncode != 0 or forced:
+        turn = record_failed_turn(
+            root,
+            turn_subject,
+            pre=pre_turn,
+            exit_code=proc.returncode,
+            force_dirty_reason=forced,
+        )
+    else:
+        turn = _write_turn_state(
+            root, session_id, TURN_OK, repository=repository, issue_number=args.issue
+        )
+    summary = {
+        "schema": PHASE_RUN_SCHEMA,
+        "session_id": session_id,
+        "phase": phase,
+        "parent_session_id": parent,
+        "log_path": str(log_path),
+        "dsh_exit_code": proc.returncode,
+        "turn_state": turn["state"],
+        "binding_hash": binding["binding_hash"] if binding else None,
+        "preflight_receipt_path": str(receipt_path),
+        "route": route,
+        "phase_wall_ms": phase_wall_ms,
+    }
+    if canonical_agy_operations is not None:
+        summary["canonical_agy_operations"] = canonical_agy_operations
+    if binding_error:
+        summary["binding_error"] = binding_error
+    if proc.returncode == 0 and (binding_error or forced):
+        return EXIT_BLOCKED, summary
+    return proc.returncode, summary
+
+
+def _load_red_receipt(path: Path, repository: str, issue_number: int) -> dict[str, Any]:
+    """A hash-intact RED_READY receipt for this Issue, or RED_RECEIPT_INVALID."""
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise DshWorkflowError("RED_RECEIPT_INVALID", f"red receipt cannot be read: {exc}") from exc
+    if not isinstance(receipt, dict):
+        raise DshWorkflowError("RED_RECEIPT_INVALID", "red receipt must be a JSON object")
+    body = {k: v for k, v in receipt.items() if k not in ("receipt_hash", "receipt_path")}
+    problems = [
+        (receipt.get("schema") != RED_RECEIPT_SCHEMA, "schema mismatch"),
+        (receipt.get("decision") != "RED_READY", "decision is not RED_READY"),
+        (
+            _sha256_bytes(_canonical_json(body).encode("utf-8")) != receipt.get("receipt_hash"),
+            "body does not match receipt_hash",
+        ),
+        (receipt.get("repository") != repository, "repository mismatch"),
+        (receipt.get("issue_number") != issue_number, "issue mismatch"),
+        (not isinstance(receipt.get("base_revision"), str), "base_revision missing"),
+    ]
+    failed = [detail for bad, detail in problems if bad]
+    if failed:
+        raise DshWorkflowError("RED_RECEIPT_INVALID", "red receipt rejected: " + "; ".join(failed))
+    return receipt
+
+
+def green_gate_command(
+    *,
+    repo_root: Path,
+    base_revision: str,
+    contract_path: Path,
+    python: Path,
+    gate: str = "green",
+    red_receipt: str | None = None,
+) -> list[str]:
+    """The exact green-gate (or red-gate) argv the guard evaluates; shown to DSH in the header."""
+    argv = [
+        str(python),
+        str(Path(__file__).resolve()),
+        f"{gate}-gate",
+        "--repo-root",
+        str(repo_root),
+        "--base-revision",
+        base_revision,
+        "--contract",
+        str(contract_path),
+        "--python",
+        str(python),
+    ]
+    return [*argv, "--red-receipt", red_receipt] if red_receipt else argv
+
+
+def build_repair_contract(
+    contract_text: str,
+    receipt: dict[str, Any],
+    *,
+    receipt_path: str,
+    attempt: int,
+    limit: int,
+) -> str:
+    """Original phase contract plus the failing green-gate evidence for one repair turn."""
+    lines = [
+        "",
+        f"GREEN GATE FEEDBACK (auto-repair {attempt}/{limit}; generated by start-phase)",
+        f"Gate decision: {receipt.get('decision')}",
+        f"Gate receipt: {receipt_path} receipt_hash={receipt.get('receipt_hash')}",
+        "Reason codes: " + ", ".join(receipt.get("reason_codes") or []),
+        "Fix only what these reasons require, within the allowed paths above.",
+    ]
+    failing = [n for n in receipt.get("node_results") or [] if n.get("outcome") != "passed"]
+    if failing:
+        lines.append("Failing target nodes:")
+        lines.extend(f"- {n['nodeid']} [{n['outcome']}]: {n.get('message', '')}" for n in failing)
+    elif (receipt.get("exit_codes") or {}).get("target_tests") not in (0, None):
+        lines.extend(["Target test output (tail):", str(receipt.get("target_output_tail", ""))])
+    regressions = receipt.get("regression_failures") or []
+    if regressions:
+        lines.append("Regression failures:")
+        lines.extend(
+            f"- {r['classname']}::{r['name']} [{r['outcome']}]: {r.get('message', '')}"
+            for r in regressions
+        )
+    for name, output in (receipt.get("lint_output") or {}).items():
+        if output:
+            lines.extend([f"Lint output ({name}):", str(output)])
+    diff_failures = (receipt.get("diff_check") or {}).get("failures") or []
+    if diff_failures:
+        lines.extend(["git diff --check failures:", *map(str, diff_failures)])
+    outside = (receipt.get("paths_outside_allowed_globs") or []) + (
+        receipt.get("untracked_outside_allowed_globs") or []
+    )
+    if outside:
+        lines.append("Paths outside allowed globs: " + ", ".join(outside))
+    return contract_text.rstrip("\n") + "\n" + "\n".join(lines) + "\n"
+
+
+RED_REPAIR_RULE = (
+    "Edit only tests; make the target fail at an assertion that encodes the intended behavior."
+)
+
+
+def build_red_repair_contract(
+    contract_text: str,
+    receipt: dict[str, Any],
+    red_contract: dict[str, Any],
+    *,
+    receipt_path: str,
+    attempt: int,
+    limit: int,
+) -> str:
+    """Original RED phase contract plus the failing red-gate evidence for one repair turn."""
+    lines = [
+        "",
+        f"RED GATE FEEDBACK (auto-repair {attempt}/{limit}; generated by start-phase)",
+        f"Gate decision: {receipt.get('decision')}",
+        f"Gate receipt: {receipt_path} receipt_hash={receipt.get('receipt_hash')}",
+        "Reason codes: " + ", ".join(receipt.get("reason_codes") or []),
+        f"Invariant: {red_contract['invariant']}",
+        "Expected failure: assertion matching "
+        f"`{red_contract['expected_failure']['message_regex']}`",
+        RED_REPAIR_RULE,
+    ]
+    failing = [n for n in receipt.get("node_results") or [] if n["outcome"] != "failed_expected"]
+    if failing:
+        lines.append("Failing target nodes:")
+        lines.extend(f"- {n['nodeid']} [{n['outcome']}]: {n.get('message', '')}" for n in failing)
+    lines.append("Changed paths: " + (", ".join(receipt.get("changed_paths") or []) or "(none)"))
+    for key in ("duplicate_definitions", "oracle_violations"):
+        if receipt.get(key):
+            lines.append(f"{key}: {json.dumps(receipt[key], sort_keys=True)}")
+    return contract_text.rstrip("\n") + "\n" + "\n".join(lines) + "\n"
+
+
+def _run_internal_red_gate(
+    root: Path, *, repo_root: Path, base: str, contract_path: Path, python: Path
+) -> tuple[dict[str, Any], str | None]:
+    """In-process red-gate with #1700 sidecar persistence; returns (receipt, path)."""
+    try:
+        receipt = run_red_gate(
+            repo_root=repo_root,
+            base_revision=base,
+            contract_path=contract_path,
+            python=str(python),
+            timeout=600.0,
+        )
+        path = persist_red_gate_with_sidecar(root, receipt, repo=repo_root, base=base)
+    except DshWorkflowError as exc:
+        return _red_error_receipt(exc.code, str(exc)), None
+    except (OSError, ValueError) as exc:
+        return _red_error_receipt("RED_GATE_ERROR", f"{type(exc).__name__}: {exc}"), None
+    return receipt, str(path)
+
+
+def _turn_stop_reason(code: int, run: dict[str, Any]) -> str | None:
+    if run.get("schema") != PHASE_RUN_SCHEMA:
+        return "PHASE_PREFLIGHT_BLOCKED"
+    if run["dsh_exit_code"] != 0:
+        # Failed turns are never auto-repaired; quarantine rules already applied.
+        return "DSH_TURN_FAILED"
+    if code != 0:
+        return "PHASE_BINDING_FAILED"
+    return None
+
+
+def _chain_entry(
+    phase: str, contract_path: Path, contract_text: str, parent: str | None, run: dict[str, Any]
+) -> dict[str, Any]:
+    ran = run.get("schema") == PHASE_RUN_SCHEMA
+    return {
+        "phase": phase,
+        "contract_path": str(contract_path),
+        "contract_sha256": _sha256_bytes(contract_text.encode("utf-8")),
+        "parent_session_id": parent,
+        "session_id": run.get("session_id") if ran else None,
+        "dsh_exit_code": run.get("dsh_exit_code") if ran else None,
+        "turn_state": run.get("turn_state") if ran else None,
+        "route": run.get("route") if ran else None,
+        "run": run,
+        "gate": None,
+    }
+
+
+def _run_internal_green_gate(
+    root: Path,
+    *,
+    repo_root: Path,
+    base: str,
+    contract_path: Path,
+    python: Path,
+    red_receipt: Path | None = None,
+) -> tuple[dict[str, Any], str | None]:
+    """In-process green-gate with #1700 sidecar persistence; returns (receipt, path)."""
+    try:
+        receipt = run_green_gate(
+            repo_root=repo_root,
+            base_revision=base,
+            contract_path=contract_path,
+            python=str(python),
+            timeout=600.0,
+            red_receipt=red_receipt,
+        )
+        path = persist_green_gate_with_sidecar(root, receipt, repo=repo_root, base=base)
+    except DshWorkflowError as exc:
+        return _green_error_receipt(exc.code, str(exc)), None
+    except (OSError, ValueError) as exc:
+        detail = f"{type(exc).__name__}: {exc}"
+        return _green_error_receipt("GREEN_GATE_ERROR", detail), None
+    return receipt, str(path)
+
+
+def _read_phase_contract(raw: str) -> tuple[Path, str]:
+    path = Path(raw).expanduser().resolve()
+    try:
+        return path, path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise DshWorkflowError(
+            "PHASE_CONTRACT_UNREADABLE", "phase contract cannot be read"
+        ) from exc
+
+
+def _validate_chain_arguments(args: argparse.Namespace) -> None:
+    bad_arg = "START_PHASE_ARGUMENT_INVALID"
+    if not 0 <= args.auto_repair <= AUTO_REPAIR_MAX:
+        raise DshWorkflowError(bad_arg, f"--auto-repair must be 0..{AUTO_REPAIR_MAX}")
+    if not 0 <= args.auto_repair_red <= AUTO_REPAIR_MAX:
+        raise DshWorkflowError(bad_arg, f"--auto-repair-red must be 0..{AUTO_REPAIR_MAX}")
+    if (args.auto_repair_red or args.continue_to_green) and not args.red_contract:
+        raise DshWorkflowError(bad_arg, "--auto-repair-red/--continue-to-green need --red-contract")
+    if args.green_phase_contract and not args.continue_to_green:
+        raise DshWorkflowError(bad_arg, "--green-phase-contract requires --continue-to-green")
+    if args.red_contract:
+        if args.phase != "red":
+            raise DshWorkflowError(bad_arg, "--red-contract applies to the red phase only")
+        if args.red_receipt:
+            raise DshWorkflowError(bad_arg, "--red-receipt conflicts with --red-contract")
+        if args.green_contract and not args.continue_to_green:
+            raise DshWorkflowError(
+                bad_arg, "--green-contract with --red-contract needs --continue-to-green"
+            )
+        if args.continue_to_green and not (args.green_contract and args.green_phase_contract):
+            raise DshWorkflowError(
+                bad_arg, "--continue-to-green requires --green-contract and --green-phase-contract"
+            )
+    if (args.auto_repair or args.red_receipt) and not args.green_contract:
+        raise DshWorkflowError(bad_arg, "--auto-repair/--red-receipt require --green-contract")
+    if args.auto_repair and args.phase == "red" and not args.continue_to_green:
+        raise DshWorkflowError(bad_arg, "--auto-repair applies to green or repair phases only")
+
+
+def _load_red_contract(raw: str, repository: str, issue_number: int) -> tuple[Path, dict[str, Any]]:
+    path = Path(raw).expanduser().resolve()
+    try:
+        contract = validate_red_contract(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, ValueError) as exc:
+        raise DshWorkflowError("RED_CONTRACT_INVALID", f"cannot read contract: {exc}") from exc
+    if contract["repository"] != repository or contract["issue_number"] != issue_number:
+        raise DshWorkflowError(
+            "RED_CONTRACT_INVALID", "red contract is bound to a different repository/Issue"
+        )
+    return path, contract
+
+
+def _main_start_phase(args: argparse.Namespace, root: Path) -> int:
+    repository = _validate_repository(args.repository)
+    if args.issue < 1:
+        raise DshWorkflowError("DSH_TRACKING_ISSUE_INVALID", "issue number must be positive")
+    repo_root = Path(args.repo_root).expanduser().resolve()
+    dsh_home = Path(args.dsh_home).expanduser().resolve()
+    parent = _validate_session_id(args.parent_session_id) if args.parent_session_id else None
+    contract_path, contract_text = _read_phase_contract(args.phase_contract)
+    prior = _load_prior_receipts(args.prior_receipt)
+
+    bad_arg = "START_PHASE_ARGUMENT_INVALID"
+    _validate_chain_arguments(args)
+    turn = {
+        "repository": repository,
+        "repo_root": repo_root,
+        "dsh_home": dsh_home,
+        "router": build_router(args),
+    }
+    if not args.green_contract and not args.red_contract:
+        code, payload = _run_phase_turn(
+            args,
+            root,
+            **turn,
+            phase=args.phase,
+            contract_text=contract_text,
+            prior=prior,
+            parent=parent,
+            green_gate_command=None,
+        )
+        print(json.dumps(payload, sort_keys=True))
+        return code
+
+    red_path, red_contract = (
+        _load_red_contract(args.red_contract, repository, args.issue)
+        if args.red_contract
+        else (None, None)
+    )
+    green_phase = (
+        _read_phase_contract(args.green_phase_contract) if args.green_phase_contract else None
+    )
+    green_path: Path | None = None
+    green_hash: str | None = None
+    if args.green_contract:
+        green_path = Path(args.green_contract).expanduser().resolve()
+        try:
+            green_contract = validate_green_contract(
+                json.loads(green_path.read_text(encoding="utf-8"))
+            )
+        except (OSError, ValueError) as exc:
+            raise DshWorkflowError(
+                "GREEN_CONTRACT_INVALID", f"cannot read contract: {exc}"
+            ) from exc
+        if (
+            green_contract["repository"] != repository
+            or green_contract["issue_number"] != args.issue
+        ):
+            raise DshWorkflowError(
+                "GREEN_CONTRACT_INVALID", "green contract is bound to a different repository/Issue"
+            )
+        green_hash = _sha256_bytes(_canonical_json(green_contract).encode("utf-8"))
+    red = (
+        _load_red_receipt(Path(args.red_receipt).expanduser(), repository, args.issue)
+        if args.red_receipt
+        else None
+    )
+    # RED and GREEN gates share one base: the pre-turn HEAD (or the RED_READY receipt's base).
+    base = (
+        _git_ok(
+            repo_root,
+            "rev-parse",
+            "--verify",
+            f"{red['base_revision'] if red else 'HEAD'}^{{commit}}",
+            code=bad_arg,
+        )
+        .decode()
+        .strip()
+    )
+    python = repo_root / ".venv" / "bin" / "python"
+    gate_command = (
+        shlex.join(
+            green_gate_command(
+                repo_root=repo_root, base_revision=base, contract_path=green_path, python=python
+            )
+        )
+        if green_path
+        else None
+    )
+    stamp = _utc_now().replace(":", "").replace("-", "").replace(".", "")
+    chain_dir = root / "phase-chains" / str(args.issue) / f"{stamp}-{os.getpid()}"
+    chain: dict[str, Any] = {
+        "schema": PHASE_CHAIN_SCHEMA,
+        "claim_ceiling": PHASE_CHAIN_CLAIM_CEILING,
+        "repository": repository,
+        "issue_number": args.issue,
+        "base_revision": base,
+        "green_contract_path": str(green_path) if green_path else None,
+        "green_contract_hash": green_hash,
+        "red_receipt_hash": red["receipt_hash"] if red else None,
+        "green_gate_command": gate_command,
+        "auto_repair_limit": args.auto_repair,
+        "model_route": args.model_route,
+        "repairs_used": 0,
+        "phases": [],
+        "final_decision": None,
+        "stop_reason": None,
+    }
+    summary_path = chain_dir / "summary.json"
+
+    def _write_contract(name: str, text: str) -> Path:
+        path = chain_dir / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    phase, text, path, link = args.phase, contract_text, contract_path, parent
+    gate_red: tuple[str, str] | None = None
+    if red_contract is not None and red_path is not None:
+        red_hash = _sha256_bytes(_canonical_json(red_contract).encode("utf-8"))
+        red_command = shlex.join(
+            green_gate_command(
+                repo_root=repo_root,
+                base_revision=base,
+                contract_path=red_path,
+                python=python,
+                gate="red",
+            )
+        )
+        chain.update({
+            "red_contract_path": str(red_path),
+            "red_contract_hash": red_hash,
+            "red_gate_command": red_command,
+            "red_auto_repair_limit": args.auto_repair_red,
+            "red_repairs_used": 0,
+            "red_receipt_path": None,
+            "continue_to_green": args.continue_to_green,
+        })
+        red_prior = list(prior)
+        while True:
+            code, run = _run_phase_turn(
+                args,
+                root,
+                **turn,
+                phase="red",
+                contract_text=text,
+                prior=red_prior,
+                parent=link,
+                green_gate_command=None,
+                red_gate_command=red_command,
+            )
+            entry = _chain_entry("red", path, text, link, run)
+            chain["phases"].append(entry)
+            _atomic_write_json(summary_path, chain)
+            stop = _turn_stop_reason(code, run)
+            if stop:
+                chain["stop_reason"] = stop
+                break
+            receipt, receipt_path = _run_internal_red_gate(
+                root, repo_root=repo_root, base=base, contract_path=red_path, python=python
+            )
+            entry["gate"] = {
+                "kind": "red",
+                "decision": receipt["decision"],
+                "reason_codes": receipt["reason_codes"],
+                "receipt_hash": receipt["receipt_hash"],
+                "receipt_path": receipt_path,
+            }
+            chain["final_decision"] = receipt["decision"]
+            _atomic_write_json(summary_path, chain)
+            if receipt_path is None:
+                chain["stop_reason"] = "RED_GATE_ERROR"
+                break
+            if receipt.get("contract_hash") != red_hash:
+                chain["stop_reason"] = "RED_CONTRACT_DRIFT"
+                break
+            if receipt["decision"] == "RED_READY":
+                # Re-read the durable receipt: GREEN may only bind to the exact hash-intact
+                # RED_READY receipt for this contract and base.
+                try:
+                    durable = _load_red_receipt(Path(receipt_path), repository, args.issue)
+                except DshWorkflowError:
+                    durable = None
+                if (
+                    durable is None
+                    or durable["receipt_hash"] != receipt["receipt_hash"]
+                    or durable["base_revision"] != base
+                    or durable.get("contract_hash") != red_hash
+                ):
+                    chain["stop_reason"] = "RED_RECEIPT_INVALID"
+                    break
+                chain["red_receipt_path"] = receipt_path
+                chain["red_receipt_hash"] = receipt["receipt_hash"]
+                chain["stop_reason"] = "RED_READY"
+                break
+            if "ENVIRONMENT_FAILURE" in receipt["reason_codes"]:
+                chain["stop_reason"] = "RED_GATE_ENVIRONMENT_FAILURE"
+                break
+            if chain["red_repairs_used"] >= args.auto_repair_red:
+                chain["stop_reason"] = "RED_AUTO_REPAIR_EXHAUSTED"
+                break
+            chain["red_repairs_used"] += 1
+            attempt = chain["red_repairs_used"]
+            text = build_red_repair_contract(
+                contract_text,
+                receipt,
+                red_contract,
+                receipt_path=receipt_path,
+                attempt=attempt,
+                limit=args.auto_repair_red,
+            )
+            path = _write_contract(f"red-repair-{attempt}-contract.md", text)
+            red_prior = [*red_prior, (receipt_path, receipt["receipt_hash"])]
+            link = entry["session_id"]
+        if chain["stop_reason"] == "RED_READY" and args.continue_to_green and green_phase:
+            chain["stop_reason"] = None
+            prior = [*prior, (chain["red_receipt_path"], chain["red_receipt_hash"])]
+            phase, (path, text) = "green", green_phase
+            link = chain["phases"][-1]["session_id"]
+            # Every GREEN gate in this chain binds the exact RED_READY receipt, so a target
+            # failing on a different assertion than RED bound is RED_ORACLE_DEFECT (#1665).
+            gate_red = (chain["red_receipt_path"], chain["red_receipt_hash"])
+            gate_command = shlex.join(
+                green_gate_command(
+                    repo_root=repo_root,
+                    base_revision=base,
+                    contract_path=green_path,
+                    python=python,
+                    red_receipt=gate_red[0],
+                )
+            )
+            chain["green_gate_command"] = gate_command
+
+    while green_path is not None and chain["stop_reason"] is None:
+        code, run = _run_phase_turn(
+            args,
+            root,
+            **turn,
+            phase=phase,
+            contract_text=text,
+            prior=prior,
+            parent=link,
+            green_gate_command=gate_command,
+        )
+        entry = _chain_entry(phase, path, text, link, run)
+        chain["phases"].append(entry)
+        _atomic_write_json(summary_path, chain)
+        stop = _turn_stop_reason(code, run)
+        if stop:
+            chain["stop_reason"] = stop
+            break
+        if phase == "red":
+            chain["stop_reason"] = "NO_GATE_FOR_RED_PHASE"
+            break
+        receipt, receipt_path = _run_internal_green_gate(
+            root,
+            repo_root=repo_root,
+            base=base,
+            contract_path=green_path,
+            python=python,
+            red_receipt=Path(gate_red[0]) if gate_red else None,
+        )
+        entry["gate"] = {
+            "kind": "green",
+            "decision": receipt["decision"],
+            "reason_codes": receipt["reason_codes"],
+            "receipt_hash": receipt["receipt_hash"],
+            "receipt_path": receipt_path,
+        }
+        if gate_red:
+            entry["gate"].update({
+                "red_receipt_path": gate_red[0],
+                "red_receipt_hash": gate_red[1],
+                "red_oracle": receipt.get("red_oracle"),
+            })
+        chain["final_decision"] = receipt["decision"]
+        _atomic_write_json(summary_path, chain)
+        if receipt_path is None:
+            chain["stop_reason"] = "GREEN_GATE_ERROR"
+            break
+        if receipt.get("contract_hash") != green_hash:
+            chain["stop_reason"] = "GREEN_CONTRACT_DRIFT"
+            break
+        if gate_red and receipt.get("red_oracle") != {
+            "status": "BOUND",
+            "red_receipt_hash": gate_red[1],
+        }:
+            # The gate did not bind the exact RED_READY receipt; repair cannot fix that.
+            chain["stop_reason"] = "RED_RECEIPT_INVALID"
+            break
+        if receipt["decision"] == "GREEN_READY":
+            chain["stop_reason"] = "GREEN_READY"
+            break
+        if "ENVIRONMENT_FAILURE" in receipt["reason_codes"]:
+            # A repair turn cannot fix the gate's interpreter; do not spend budget on it.
+            chain["stop_reason"] = "GREEN_GATE_ENVIRONMENT_FAILURE"
+            break
+        if chain["repairs_used"] >= args.auto_repair:
+            chain["stop_reason"] = "AUTO_REPAIR_EXHAUSTED"
+            break
+        chain["repairs_used"] += 1
+        attempt = chain["repairs_used"]
+        text = build_repair_contract(
+            green_phase[1] if green_phase else contract_text,
+            receipt,
+            receipt_path=receipt_path,
+            attempt=attempt,
+            limit=args.auto_repair,
+        )
+        path = _write_contract(f"repair-{attempt}-contract.md", text)
+        prior = [*prior, (receipt_path, receipt["receipt_hash"])]
+        phase, link = "repair", entry["session_id"]
+
+    _atomic_write_json(summary_path, chain)
+    print(json.dumps({**chain, "summary_path": str(summary_path)}, sort_keys=True))
+    if chain["stop_reason"] in ("GREEN_READY", "RED_READY", "NO_GATE_FOR_RED_PHASE"):
+        return 0
+    if chain["stop_reason"] == "DSH_TURN_FAILED":
+        return int(chain["phases"][-1]["dsh_exit_code"])
+    return EXIT_BLOCKED
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p_bind = sub.add_parser("bind-log")
+    p_bind.add_argument("--log-file", required=True)
+    p_bind.add_argument("--repository", required=True)
+    p_bind.add_argument("--issue", required=True, type=int)
+    p_bind.add_argument("--repo-root", required=True)
+    p_bind.add_argument("--dsh-home", required=True)
+    p_bind.add_argument("--state-root")
+
+    p_check = sub.add_parser("check")
+    p_check.add_argument("--session-id", required=True)
+    p_check.add_argument("--state-root")
+    p_check.add_argument("--doctor-bin", default=_default_binary("nexus-workflow-doctor"))
+
+    p_resume = sub.add_parser("resume")
+    p_resume.add_argument("--session-id", required=True)
+    p_resume.add_argument("--state-root")
+    p_resume.add_argument("--doctor-bin", default=_default_binary("nexus-workflow-doctor"))
+    p_resume.add_argument("--dsh-bin", default=_default_binary("dsh"))
+    p_resume.add_argument("--profile", default="headless")
+    p_resume.add_argument("--patch", action="append", default=[])
+    p_resume.add_argument("--json", action="store_true", dest="json_output")
+    p_resume.add_argument("--task", required=True)
+
+    p_phase = sub.add_parser("start-phase")
+    p_phase.add_argument("--repository", required=True)
+    p_phase.add_argument("--issue", required=True, type=int)
+    p_phase.add_argument("--phase", required=True, choices=PHASES)
+    p_phase.add_argument("--repo-root", required=True)
+    p_phase.add_argument("--dsh-home", required=True)
+    p_phase.add_argument("--phase-contract", required=True)
+    p_phase.add_argument("--patch", action="append", default=[])
+    p_phase.add_argument("--profile", default="headless")
+    p_phase.add_argument("--parent-session-id")
+    p_phase.add_argument("--prior-receipt", action="append", default=[])
+    p_phase.add_argument("--dsh-bin", default=_default_binary("dsh"))
+    p_phase.add_argument("--doctor-bin", default=_default_binary("nexus-workflow-doctor"))
+    p_phase.add_argument("--state-root")
+    p_phase.add_argument("--goal-objective")
+    p_phase.add_argument("--green-contract")
+    p_phase.add_argument("--auto-repair", type=int, default=0)
+    p_phase.add_argument("--red-receipt")
+    p_phase.add_argument("--red-contract")
+    p_phase.add_argument("--auto-repair-red", type=int, default=0)
+    p_phase.add_argument("--continue-to-green", action="store_true")
+    p_phase.add_argument("--green-phase-contract")
+    p_phase.add_argument("--model-route", choices=ROUTE_MODES, default="off")
+    p_phase.add_argument("--route-table")
+    p_phase.add_argument(
+        "--route-classifier-timeout", type=float, default=ROUTE_CLASSIFIER_TIMEOUT_SECONDS
+    )
+
+    p_red = sub.add_parser("red-gate")
+    p_red.add_argument("--repo-root", required=True)
+    p_red.add_argument("--base-revision", required=True)
+    p_red.add_argument("--contract", required=True)
+    p_red.add_argument("--python", required=True)
+    p_red.add_argument("--state-root")
+    p_red.add_argument("--timeout", type=float, default=600.0)
+
+    p_green = sub.add_parser("green-gate")
+    p_green.add_argument("--repo-root", required=True)
+    p_green.add_argument("--base-revision", required=True)
+    p_green.add_argument("--contract", required=True)
+    p_green.add_argument("--python", required=True)
+    p_green.add_argument("--state-root")
+    p_green.add_argument("--timeout", type=float, default=600.0)
+    p_green.add_argument("--red-receipt")
+
+    p_clone = sub.add_parser("prepare-standalone")
+    p_clone.add_argument("--repository", required=True)
+    p_clone.add_argument("--source-repo-root", required=True)
+    p_clone.add_argument("--base-revision", required=True)
+    p_clone.add_argument("--target", required=True)
+
+    p_ack = sub.add_parser("ack-turn-failure")
+    p_ack.add_argument("--session-id", required=True)
+    p_ack.add_argument("--reason", required=True)
+    p_ack.add_argument("--state-root")
+
+    args = parser.parse_args(argv)
+    if args.command == "red-gate":
+        return _main_red_gate(args)
+    if args.command == "green-gate":
+        return _main_green_gate(args)
+    if args.command == "prepare-standalone":
+        return _main_prepare_standalone(args)
+    root = _state_root(getattr(args, "state_root", None))
+
+    try:
+        if args.command == "bind-log":
+            binding = build_binding_from_log(
+                log_path=Path(args.log_file).expanduser().resolve(),
+                repository=args.repository,
+                issue_number=args.issue,
+                repo_root=Path(args.repo_root),
+                dsh_home=Path(args.dsh_home),
+            )
+            path = store_binding(root, binding)
+            _print_result(binding, receipt_path=path)
+            return 0
+
+        if args.command == "start-phase":
+            return _main_start_phase(args, root)
+
+        binding = load_binding(root, args.session_id)
+        if args.command == "ack-turn-failure":
+            ack, ack_path = acknowledge_turn_failure(root, binding, reason=args.reason)
+            _print_result(ack, receipt_path=ack_path)
+            return 0
+
+        turn_state = load_turn_state(root, args.session_id)
+        previous_turn = turn_state.get("state") if turn_state else None
+        git_contract = git_metadata_contract(Path(str(binding["repo_root"])))
+        if previous_turn == TURN_FAILED_DIRTY:
+            assert turn_state is not None
+            preflight = _blocked_preflight(
+                binding,
+                reason_code="PREVIOUS_TURN_FAILED_DIRTY",
+                detail=(
+                    "previous DSH turn failed and changed the worktree; inspect the "
+                    "quarantine receipt and run ack-turn-failure to continue"
+                ),
+            )
+            preflight["quarantine_receipt"] = turn_state.get("quarantine_receipt")
+        elif not git_contract["ok"]:
+            preflight = _blocked_preflight(
+                binding, reason_code=git_contract["reason_code"], detail=git_contract["detail"]
+            )
+        else:
+            preflight = run_preflight(binding, doctor_bin=args.doctor_bin)
+        preflight["git_metadata_contract"] = git_contract
+        if previous_turn in (TURN_FAILED_DIRTY, TURN_FAILED_CLEAN):
+            preflight["previous_turn_state"] = previous_turn
+        preflight["invocation"] = args.command
+        receipt_path = persist_preflight(root, preflight)
+        if args.command == "check":
+            _print_result(preflight, receipt_path=receipt_path)
+            return 0 if preflight["decision"] == "ALLOW_RESUME" else EXIT_BLOCKED
+
+        if preflight["decision"] != "ALLOW_RESUME":
+            _print_result(preflight, receipt_path=receipt_path)
+            return EXIT_BLOCKED
+
+        dsh_argv = build_dsh_resume_argv(
+            dsh_bin=args.dsh_bin,
+            session_id=args.session_id,
+            profile=args.profile,
+            patches=args.patch,
+            json_output=args.json_output,
+            task=args.task,
+        )
+        env = os.environ.copy()
+        env["DSH_HOME"] = str(binding["dsh_home"])
+        env["NEXUS_DSH_PREFLIGHT_RECEIPT"] = str(receipt_path)
+        pre_turn = _worktree_snapshot(Path(str(binding["repo_root"])))
+        proc = subprocess.run(
+            dsh_argv,
+            cwd=str(binding["repo_root"]),
+            env=env,
+            check=False,
+        )
+        if proc.returncode != 0:
+            failed = record_failed_turn(root, binding, pre=pre_turn, exit_code=proc.returncode)
+            print(json.dumps(failed, sort_keys=True), file=sys.stderr)
+        else:
+            _write_turn_state(root, str(binding["session_id"]), TURN_OK)
+        return proc.returncode
+    except DshWorkflowError as exc:
+        payload = {
+            "schema": PREFLIGHT_SCHEMA,
+            "claim_ceiling": PREFLIGHT_CLAIM_CEILING,
+            "decision": "BLOCK_RESUME",
+            "reason_code": exc.code,
+            "detail": str(exc),
+            "provider_invocation_allowed": False,
+            "invocation": args.command,
+        }
+        print(json.dumps(payload, sort_keys=True))
+        return EXIT_BLOCKED
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        payload = {
+            "schema": PREFLIGHT_SCHEMA,
+            "claim_ceiling": PREFLIGHT_CLAIM_CEILING,
+            "decision": "BLOCK_RESUME",
+            "reason_code": "DSH_WORKFLOW_GUARD_ERROR",
+            "detail": f"{type(exc).__name__}: {exc}",
+            "provider_invocation_allowed": False,
+            "invocation": args.command,
+        }
+        print(json.dumps(payload, sort_keys=True))
+        return EXIT_BLOCKED
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

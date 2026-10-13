@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from nexus.core.repo_root import REPO_ROOT
 from nexus.engine.capability_receipts import build_trace_receipts
 from nexus.learning.shared_playbook import bind_shared_playbook_runtime_receipts
 
@@ -121,5 +122,6 @@ def build_capability_receipt_payloads(
     bound_receipts = bind_shared_playbook_runtime_receipts(
         capability_plan_payload=runtime_plan,
         receipts=receipts,
+        root=REPO_ROOT,
     )
     return _apply_planner_playbook_violations(runtime_plan, bound_receipts)

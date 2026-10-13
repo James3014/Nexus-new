@@ -1,6 +1,55 @@
-version = 1
+version = 2
 base_ref = "origin/main"
 allowed_patterns = ["**"]
 deletion_policy = "FORBID"
-verifier_command = ["bash", "scripts/ci/nexus-core-verify.sh"]
+universe_generation = 2
+
+[isolation]
+mode = "container"
+image = "ghcr.io/astral-sh/uv:python3.11-bookworm@sha256:58683a39536f1f4ed2e1dd79cf155edccfb47731aba8964bd0312aac942126cf"
+network = "bridge"
+
+[[materials]]
+id = "canonical-learning"
+observe_command = ["bash", "-lc", "PY=\"$(bash scripts/ci/nexus_core_material_env.sh)\" && exec \"$PY\" scripts/ci/nexus_core_observe_dependency.py nexus-learning"]
+timeout_seconds = 300
+logical_subject_id = "dependency/nexus-learning"
+evidence_kind = "resolved-dependency"
+requirement_mode = "REQUIRED"
+applicability = "APPLICABLE"
+expected_identity = "git-commit:a48bd876b758069f4dd15c24d0d32f1f2486d319"
+
+[[materials]]
+id = "canonical-runtime"
+observe_command = ["bash", "-lc", "PY=\"$(bash scripts/ci/nexus_core_material_env.sh)\" && exec \"$PY\" scripts/ci/nexus_core_observe_dependency.py nexus-runtime"]
+timeout_seconds = 300
+logical_subject_id = "dependency/nexus-runtime"
+evidence_kind = "resolved-dependency"
+requirement_mode = "REQUIRED"
+applicability = "APPLICABLE"
+expected_identity = "git-commit:2766c154ae9fa129a5d8d6a38244276e77b453bc"
+
+[[verifiers]]
+id = "fast-l1"
+command = ["bash", "-c", "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0='*' && exec bash scripts/ci/nexus-core-verify.sh"]
 timeout_seconds = 3600
+logical_subject_id = "nexus/fast-l1"
+evidence_kind = "test-result"
+requirement_mode = "REQUIRED"
+applicability = "APPLICABLE"
+required_material_ids = ["canonical-learning", "canonical-runtime"]
+
+# Owner-signed governed deletion exception (owner decision 2026-10-13).
+# deletion_policy stays FORBID; a change may delete only paths listed in an
+# owner-SSHSIG-signed .nexus-core/deletions/<id>.json, preserved in an archive
+# commit on main's history, in a PR touching nothing else. The same signature
+# is required to change any protected path (config.toml is always protected).
+[deletion_exception]
+mode = "OWNER_SIGNED_ARCHIVE"
+manifest_dir = ".nexus-core/deletions"
+signature_namespace = "nexus-core-deletion@v1"
+allowed_signers = ["james-owner ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMNfAGP7KssQm5t54EL3z4gOrDvTXQE1qmxZu6AOqBmm"]
+protected_paths = [
+  ".github/workflows/nexus-core-issue-completion.yml",
+  ".github/workflows/trusted-deletion-anchor.yml",
+]

@@ -224,6 +224,12 @@ def collect_from_github(
     comment_body = acceptance.get("body")
     if not isinstance(comment_author, str) or not isinstance(comment_body, str):
         raise ValueError("INDEPENDENT_ACCEPTANCE_MISSING")
+    issue_url = acceptance.get("issue_url")
+    if not isinstance(issue_url, str) or not issue_url.endswith(
+        f"/repos/{repository}/issues/{pull_request_number}"
+    ):
+        # The acceptance comment must belong to this pull request.
+        raise ValueError("INDEPENDENT_ACCEPTANCE_SUBJECT_MISMATCH")
 
     now = datetime.now(timezone.utc)
     return build_governed_orchestration_evidence(

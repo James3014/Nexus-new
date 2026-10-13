@@ -62,6 +62,7 @@ def _claim_request(task_id: str = "claim-task", **overrides):
         "source_hash": "s" * 64,
         "task_card_path": "tasks/card.md",
         "allowed_files": ["a.py"],
+        "verifier_commands": ["python -c pass"],
         "workforce_admission": {"receipt_id": "admission-1"},
     }
     values.update(overrides)
@@ -82,6 +83,7 @@ def _submission_request(tmp_path: Path, task_id: str, base_sha: str, **overrides
         "target_repo_root": str(tmp_path / "targets" / task_id),
         "target_worktree_root": str(tmp_path / "targets"),
         "allowed_files": ["nexus/orchestrator/self_hosted_task_service.py"],
+        "verifier_commands": ["python -c pass"],
         "worker": "codex",
         "model": "gpt-4",
         "execution_lane": "ISOLATED_TARGET",

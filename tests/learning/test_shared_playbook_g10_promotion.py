@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 
 from nexus.engine.capability_planner import CapabilityPlanner
-from nexus.learning import shared_playbook
 from nexus.learning.shared_playbook import (
     KNOWN_SHARED_WORKER_PLAYBOOKS,
     PROMOTION_RECORD_FILENAME,
@@ -210,10 +209,9 @@ def test_intake_rejects_self_promotion_to_active() -> None:
         )
 
 
-def test_planner_mounts_active_diagnose_by_default_path(tmp_path: Path, monkeypatch) -> None:
+def test_planner_mounts_active_diagnose_by_default_path(tmp_path: Path) -> None:
     """Executable proof that ACTIVE diagnose mounts through the default CapabilityPlanner path."""
     _copy_diagnose(tmp_path)
-    monkeypatch.setattr(shared_playbook, "DEFAULT_REPO_ROOT", tmp_path)
 
     # Create dummy status report
     report = tmp_path / "skill_status.json"
@@ -235,7 +233,7 @@ def test_planner_mounts_active_diagnose_by_default_path(tmp_path: Path, monkeypa
         encoding="utf-8",
     )
 
-    planner = CapabilityPlanner()
+    planner = CapabilityPlanner(shared_playbook_root=tmp_path)
     plan = planner.plan(
         task_desc="Diagnose flaky test regression\n- Expected capability receipts: xray",
         task_type="bugfix",

@@ -876,3 +876,106 @@ def test_reconcile_records_reconciled_at(tmp_path: Path) -> None:
 
     view = direct_journal.public_operation_view(result)
     assert view["reconciled_at"] == result["reconciled_at"]
+
+
+def test_reconcile_outcome_unknown_dead_provider_records_reconciled_at_and_exit(
+    tmp_path: Path,
+) -> None:
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id, _ = _create(journal, tmp_path)
+    journal.mark_started(operation_id, pid=999_999_999)
+    journal.update(
+        operation_id,
+        provider_pid=999_999_998,
+        provider_process_state="RUNNING",
+    )
+    journal.mark_terminal(
+        operation_id,
+        status="OUTCOME_UNKNOWN",
+        exit_code=None,
+        failure_kind="SUPERVISOR_SIGNAL:SIGTERM",
+        cwd=str(tmp_path),
+        reconciliation={"result": "OUTCOME_UNKNOWN", "retry_permitted": False},
+    )
+    assert journal.read(operation_id)["reconciled_at"] is None
+
+    result = journal.reconcile(operation_id)
+
+    assert result["status"] == "OUTCOME_UNKNOWN"
+    assert result["reconciliation"]["provider_alive_after"] is False
+    assert result["reconciled_at"] is not None
+    assert result["reconciled_at"] == result["reconciliation"]["at"]
+    # The reconcile pass physically observed the recorded provider PID as dead.
+    assert result["provider_process_state"] == "EXITED"
+    assert result["reconciliation"]["retry_permitted"] is False
+
+
+def test_reconcile_orphan_provider_termination_records_reconciled_at_and_exit(
+    tmp_path: Path,
+) -> None:
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id, _ = _create(journal, tmp_path)
+    marker = str(journal.operation_dir(operation_id) / "agy.log")
+    wrapper_code = (
+        "import subprocess,sys;"
+        "subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)',sys.argv[1]]);"
+    )
+    wrapper = subprocess.Popen(
+        [sys.executable, "-c", wrapper_code, marker],
+        start_new_session=True,
+    )
+    wrapper.wait(timeout=3)
+    assert _process_group_alive(wrapper.pid)
+
+    try:
+        journal.mark_started(operation_id, pid=wrapper.pid)
+        journal.mark_terminal(
+            operation_id,
+            status="OUTCOME_UNKNOWN",
+            exit_code=None,
+            failure_kind="PROCESS_NOT_RUNNING_WITHOUT_TERMINAL_RECEIPT",
+            cwd=str(tmp_path),
+            reconciliation={"result": "OUTCOME_UNKNOWN", "retry_permitted": False},
+        )
+
+        result = journal.reconcile(operation_id)
+
+        assert result["reconciliation"]["result"] == "ORPHAN_PROVIDER_TERMINATED"
+        assert result["reconciliation"]["provider_alive_after"] is False
+        assert result["reconciled_at"] == result["reconciliation"]["at"]
+        assert result["provider_process_state"] == "EXITED"
+    finally:
+        if _process_group_alive(wrapper.pid):
+            os.killpg(wrapper.pid, signal.SIGKILL)
+
+
+def test_terminal_reconciliation_receipt_records_reconciled_at(tmp_path: Path) -> None:
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id, _ = _create(journal, tmp_path)
+    journal.mark_started(operation_id, pid=os.getpid())
+    journal.mark_terminal(
+        operation_id,
+        status="COMPLETED",
+        exit_code=0,
+        cwd=str(tmp_path),
+    )
+    assert journal.read(operation_id)["reconciled_at"] is None
+
+    other_id, _ = _create(journal, tmp_path)
+    journal.mark_started(other_id, pid=os.getpid())
+    at = direct_journal.utc_now()
+    result = journal.mark_terminal(
+        other_id,
+        status="OUTCOME_UNKNOWN",
+        exit_code=None,
+        failure_kind="TIMEOUT",
+        cwd=str(tmp_path),
+        reconciliation={
+            "at": at,
+            "result": "PROVIDER_TURN_MAY_STILL_BE_RUNNING",
+            "retry_permitted": False,
+        },
+    )
+
+    assert result["reconciled_at"] == at
+    assert AgyOperationJournal(tmp_path / "journal").read(other_id)["reconciled_at"] == at

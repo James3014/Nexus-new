@@ -23,9 +23,38 @@ SKIP_LEGACY_ALIAS = "legacy_alias_no_separate_invoker"
 SKIP_CALLER_OMITTED = "caller_omitted_auto_skip"
 SKIP_POLICY_NOT_TRIGGERED = "SKIPPED_POLICY_NOT_TRIGGERED"
 BLOCKED_EXECUTOR_UNAVAILABLE = "BLOCKED_EXECUTOR_UNAVAILABLE"
+SKIP_NO_CANDIDATE_POOL = "no_candidate_pool"
+
+# Capabilities archived 2026-10-12 (ARCHIVED_2026-10-12.md): fail closed with an
+# explicit receipt reason instead of returning synthetic or hollow results.
+ARCHIVED_FAKE_BENCHMARK = "archived_fake_benchmark_2026-10-12"
+ARCHIVED_HOLLOW_STRESS_TEST = "archived_hollow_stress_test_2026-10-12"
+ARCHIVED_UI_VALIDATOR = "archived_ui_validator_2026-10-12"
+ARCHIVED_HOLLOW_LEARNING_CLOSURE = "archived_hollow_learning_closure_2026-10-12"
+ARCHIVED_FEDERATION = "archived_federation_2026-10-12"
+ARCHIVED_ORACLE_SHADOW = "archived_oracle_shadow_2026-10-12"
+# Planner nodes archived 2026-10-13 (ARCHIVED_2026-10-13.md, #1906). The node
+# definitions live in the pinned nexus-runtime; until its maturity flip lands the
+# Nexus-side invoker and executor resolve them to these explicit reasons.
+ARCHIVED_INTEGRATION_MANAGER = "archived_retired_integration_manager_2026-10-13"
+ARCHIVED_SWARM_QUIET_MOMENT = "archived_echo_swarm_quiet_moment_2026-10-13"
+ARCHIVED_LLM_JUDGE_PANEL = "archived_alias_llm_judge_panel_2026-10-13"
+
+ARCHIVED_CAPABILITY_REASONS: dict[str, str] = {
+    "benchmark": ARCHIVED_FAKE_BENCHMARK,
+    "stress_test": ARCHIVED_HOLLOW_STRESS_TEST,
+    "ui_validator": ARCHIVED_UI_VALIDATOR,
+    "learning_closure": ARCHIVED_HOLLOW_LEARNING_CLOSURE,
+    "federation": ARCHIVED_FEDERATION,
+    "oracle_shadow": ARCHIVED_ORACLE_SHADOW,
+    "integration_manager": ARCHIVED_INTEGRATION_MANAGER,
+    "swarm_quiet_moment": ARCHIVED_SWARM_QUIET_MOMENT,
+    "llm_judge_panel": ARCHIVED_LLM_JUDGE_PANEL,
+}
 
 SKIP_REASONS = frozenset(
     {
+        SKIP_NO_CANDIDATE_POOL,
         SKIP_NOT_IMPLEMENTED,
         SKIP_ESCALATE_ONLY,
         SKIP_LOCAL_STAGE,
@@ -34,6 +63,7 @@ SKIP_REASONS = frozenset(
         SKIP_CALLER_OMITTED,
         SKIP_POLICY_NOT_TRIGGERED,
         BLOCKED_EXECUTOR_UNAVAILABLE,
+        *ARCHIVED_CAPABILITY_REASONS.values(),
     }
 )
 
@@ -1784,6 +1814,22 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
         {"workspace_root", "target_file", "target_symbol", "search_paths"}
     )
     _MEMORY_CONSTRAINT_KEYS = frozenset({"workspace_root", "memory_query"})
+    _CANDIDATE_POOL_CONSTRAINT_KEYS = frozenset({"candidate_pool"})
+    _DDTREE_CONSTRAINT_KEYS = frozenset({"candidate_pool", "ddtree_max_candidates"})
+    _HYPER_CONSTRAINT_KEYS = frozenset(
+        {
+            "workspace_root",
+            "hyper_candidate_count",
+            "hyper_target_file",
+            "hyper_test_file",
+            "hyper_llm_mode",
+            "target_file",
+            "target_files",
+        }
+    )
+    _XRAY_CONSTRAINT_KEYS = frozenset(
+        {"workspace_root", "xray_targets", "target_file", "target_files"}
+    )
     _PREGATE_CONSTRAINT_KEYS = frozenset(
         {"workspace_root", "verify_commands", "verify_timeout_sec"}
     )
@@ -1858,6 +1904,14 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
             keys = _CODEINTEL_CONSTRAINT_KEYS
         elif name == "memory":
             keys = _MEMORY_CONSTRAINT_KEYS
+        elif name == "autoreason":
+            keys = _CANDIDATE_POOL_CONSTRAINT_KEYS
+        elif name == "ddtree":
+            keys = _DDTREE_CONSTRAINT_KEYS
+        elif name == "hyper":
+            keys = _HYPER_CONSTRAINT_KEYS
+        elif name == "xray":
+            keys = _XRAY_CONSTRAINT_KEYS
         elif name == "pregate":
             keys = _PREGATE_CONSTRAINT_KEYS
         elif name == "harness_preflight_sensor":
@@ -1914,6 +1968,13 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
             route = context.get("route") if isinstance(context.get("route"), Mapping) else {}
             if "workspace_root" not in out and route.get("workspace_root") not in (None, ""):
                 out["workspace_root"] = route.get("workspace_root")
+            raw_codeintel = context.get("codeintel")
+            memory_codeintel = raw_codeintel if isinstance(raw_codeintel, Mapping) else {}
+            if "memory_query" not in out and memory_codeintel.get("memory_query") not in (
+                None,
+                "",
+            ):
+                out["memory_query"] = memory_codeintel.get("memory_query")
             if "memory_query" not in out and context.get("task_statement") not in (None, ""):
                 out["memory_query"] = context.get("task_statement")
         if name == "pregate":
@@ -1947,6 +2008,30 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
                     out[key] = codeintel.get(key)
             if "workspace_root" not in out and route.get("workspace_root") not in (None, ""):
                 out["workspace_root"] = route.get("workspace_root")
+            raw_planner = context.get("planner")
+            planner_stage = raw_planner if isinstance(raw_planner, Mapping) else {}
+            for key in ("pending_capabilities", "selected_capabilities"):
+                listed = planner_stage.get(key)
+                if key not in out and isinstance(listed, (list, tuple)):
+                    out[key] = [str(item) for item in listed]
+        if name in {"autoreason", "ddtree", "hyper", "xray"}:
+            raw_route = context.get("route")
+            route = raw_route if isinstance(raw_route, Mapping) else {}
+            raw_ci = context.get("codeintel")
+            codeintel = raw_ci if isinstance(raw_ci, Mapping) else {}
+            for k in keys:
+                # workspace_root is runtime authority (context/route), never request codeintel.
+                if k == "workspace_root":
+                    continue
+                if k not in out and codeintel.get(k) not in (None, ""):
+                    out[k] = codeintel.get(k)
+            if name in {"autoreason", "ddtree"}:
+                specific = codeintel.get(f"{name}_candidates")
+                if "candidate_pool" not in out and specific not in (None, ""):
+                    out["candidate_pool"] = specific
+            if "workspace_root" in keys and "workspace_root" not in out:
+                if route.get("workspace_root") not in (None, ""):
+                    out["workspace_root"] = route.get("workspace_root")
         if name in {"lancedb", "semantic_searcher"}:
             route = context.get("route") if isinstance(context.get("route"), Mapping) else {}
             codeintel = (
@@ -2286,6 +2371,28 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
             or action in shallow_actions
             or str(outcome_map.get("error") or "") == "import_construct_not_execution"
         )
+        if not invoked and outcome_map.get("skip_reason") == SKIP_NO_CANDIDATE_POOL:
+            return {
+                "task_id": task_id,
+                "invoked": False,
+                "skipped": True,
+                "skip_reason": SKIP_NO_CANDIDATE_POOL,
+                "reason": SKIP_NO_CANDIDATE_POOL,
+                "gate_passed": False,
+                "outcome_contributed": False,
+                "evidence_refs": [evidence_id] if evidence_id else [],
+                "evidence_ids": [evidence_id] if evidence_id else [],
+                "physical_callable": f"capability_executor_registry:{registry_key}",
+                "telemetry": telemetry,
+                "stub": False,
+                "response": {
+                    "status": "SKIPPED",
+                    "skip_reason": SKIP_NO_CANDIDATE_POOL,
+                    "capability": name,
+                    "registry_key": registry_key,
+                    "outcome": outcome_map,
+                },
+            }
         # Import/construct without invoke must not count as real success
         if not invoked or is_shallow:
             return {
@@ -2380,6 +2487,37 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
     return invoke
 
 
+PLANNER_MAINCHAIN_GATE_TRIGGER_SOURCE = "planner_mainchain_gate_policy"
+# Decision-trace reasons emitted by the planner's #1737 mainchain gate policy.
+_PLANNER_MAINCHAIN_GATE_REASONS = frozenset(
+    {"mainchain_high_risk", "mainchain_multi_step", "mainchain_code_mutation_task_class"}
+)
+# Only these escalate-only executors are triggered by that policy selection.
+_PLANNER_MAINCHAIN_GATE_CAPABILITIES = frozenset({"forecast_gate"})
+
+
+def _planner_mainchain_gate_selected(name: str, context: Mapping[str, Any]) -> bool:
+    """True when the planner's mainchain gate policy explicitly selected ``name``."""
+    if name not in _PLANNER_MAINCHAIN_GATE_CAPABILITIES:
+        return False
+    planner = context.get("planner")
+    if not isinstance(planner, Mapping):
+        return False
+    selected = planner.get("selected_capabilities") or []
+    if not isinstance(selected, (list, tuple)) or name not in selected:
+        return False
+    trace = planner.get("decision_trace") or []
+    if not isinstance(trace, (list, tuple)):
+        return False
+    for item in trace:
+        if not isinstance(item, Mapping) or item.get("capability") != name:
+            continue
+        reasons = item.get("reasons") or []
+        if isinstance(reasons, (list, tuple)) and _PLANNER_MAINCHAIN_GATE_REASONS & set(reasons):
+            return True
+    return False
+
+
 def build_escalate_gated_invoker(
     capability_name: str,
     *,
@@ -2413,8 +2551,11 @@ def build_escalate_gated_invoker(
         return False
 
     def invoke(context: Mapping[str, Any]) -> dict[str, Any]:
+        planner_triggered = False
         if not _triggered(context):
-            return dict(skip_invoker(context))
+            if not _planner_mainchain_gate_selected(name, context):
+                return dict(skip_invoker(context))
+            planner_triggered = True
         if real_invoker is None:
             task_id = str(context.get("task_id") or "")
             return {
@@ -2435,7 +2576,10 @@ def build_escalate_gated_invoker(
                     "capability": name,
                 },
             }
-        return dict(real_invoker(context))
+        receipt = dict(real_invoker(context))
+        if planner_triggered:
+            receipt["trigger_source"] = PLANNER_MAINCHAIN_GATE_TRIGGER_SOURCE
+        return receipt
 
     return invoke
 
@@ -2532,13 +2676,15 @@ def build_default_mainchain_invokers(
             # Production LocalModelExecutor path (not explicit_skip theater).
             invokers[name] = build_local_model_executor_invoker()
             continue
+        if name in ARCHIVED_CAPABILITY_REASONS:
+            # Archived 2026-10-12 / 2026-10-13: always an explicit, receipt-visible skip.
+            invokers[name] = build_explicit_skip_invoker(
+                name, skip_reason=ARCHIVED_CAPABILITY_REASONS[name]
+            )
+            continue
         real = build_real_executor_invoker(name)
         # Escalation-only / probe-only reclass: untriggered → policy skip; triggered → real or BLOCKED.
-        if (
-            name in ESCALATE_ONLY
-            or name == "llm_judge_panel"
-            or name in PROBE_ONLY_REASON_CODES
-        ):
+        if name in ESCALATE_ONLY or name in PROBE_ONLY_REASON_CODES:
             invokers[name] = build_escalate_gated_invoker(name, real_invoker=real)
             continue
         if name in ONLINE_ARMOR_FLAG_CAPABILITIES:

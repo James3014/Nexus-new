@@ -34,6 +34,10 @@ version_scope:
 
 # Module - Skill Memory Closed Loop
 
+> [!warning] Evidence status (2026-10-12)
+> Phase 13 acceptance 27/27 為腳本驗收；2026-06-21 AM3 再稽核判定 Memory/LanceDB 與 Learning Closure 在 local_heal 路徑**未接線**，2026-10 記憶 A/B 九組設定皆 `DEFER`。閉環機制描述仍有效，效益數字登記為 `PHANTOM_PER_AM3`。見 [CAPABILITY_EVIDENCE_LEDGER_2026-10-12](../04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md) #10、#22。
+
+
 ## One-sentence summary
 本頁定義 Nexus 三系統（LanceDB / Memory / MemPalace）與技能選取、學習回寫之間的完整閉環資料流，是 Phase 13 Autonomic Routing Intelligence 的架構存根。
 

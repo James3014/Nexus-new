@@ -6,6 +6,15 @@ import logging
 
 from nexus.benchmark.workspace import BenchmarkWorkspace
 from nexus.benchmark.csv_reporter import BenchmarkCsvReporter
+import warnings
+
+warnings.warn(
+    "nexus.benchmark.benchmark_runner has no production caller and is kept as lab-only "
+    "(bench effort uses nexus.engine.benchmark_runner; see #1740).",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 
 logger = logging.getLogger(__name__)
 

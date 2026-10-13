@@ -607,6 +607,7 @@ def build_review_receipt(
         "review_launch_profile_sha256": operation_record.get("review_launch_profile_sha256"),
         "review_launch_mode": operation_record.get("review_launch_mode"),
         "review_launch_requested_effort": operation_record.get("review_launch_requested_effort"),
+        "review_launch_effective_effort": operation_record.get("review_launch_effective_effort"),
         "verdict": verdict,
         "subject_stable": stable,
         "review_applicable": applicable,

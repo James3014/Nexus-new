@@ -192,6 +192,74 @@ def _pre_effect_max_tool_events() -> int:
     )
 
 
+def _normalize_account_hash(raw: str) -> str:
+    cleaned = str(raw).strip()
+    if re.fullmatch(r"[0-9a-f]{12}", cleaned, re.IGNORECASE):
+        return cleaned.lower()
+    return hashlib.sha256(cleaned.encode("utf-8")).hexdigest()[:12]
+
+
+def _resolve_excluded_account_hashes(
+    raw_accounts: list[str] | None,
+    *,
+    manager: AgyAccountPoolManager | None = None,
+) -> set[str]:
+    cleaned = [str(item).strip() for item in (raw_accounts or []) if str(item).strip()]
+    if not cleaned:
+        return set()
+
+    exact_hashes = {
+        item.lower()
+        for item in cleaned
+        if re.fullmatch(r"[0-9a-f]{12}", item, re.IGNORECASE)
+    }
+    aliases = [
+        item
+        for item in cleaned
+        if not re.fullmatch(r"[0-9a-f]{12}", item, re.IGNORECASE)
+    ]
+    if not aliases:
+        return exact_hashes
+
+    if manager is None:
+        if not MANAGER.is_file() or not MANAGER_ROOT.is_dir():
+            raise RuntimeError("AGY_ACCOUNT_POOL_RUNTIME_MISSING")
+        manager = AgyAccountPoolManager(
+            manager_path=str(MANAGER),
+            manager_root=str(MANAGER_ROOT),
+            use_real_manager=True,
+        )
+
+    if getattr(manager, "_use_real_manager", False):
+        status = manager._call_manager_cli(["status", "--json"])
+        accounts_data = status.get("accounts") or {}
+        if isinstance(accounts_data, dict):
+            inventory_names = {
+                str(name).strip() for name in accounts_data if str(name).strip()
+            }
+        elif isinstance(accounts_data, list):
+            inventory_names = {
+                str(item.get("name") or "").strip()
+                for item in accounts_data
+                if isinstance(item, dict) and str(item.get("name") or "").strip()
+            }
+        else:
+            raise RuntimeError("AGY_ACCOUNT_POOL_INVENTORY_INVALID")
+    else:
+        inventory_names = {
+            str(getattr(account, "alias", "")).strip()
+            for account in getattr(manager, "_accounts", [])
+            if str(getattr(account, "alias", "")).strip()
+        }
+
+    unknown = sorted({alias for alias in aliases if alias not in inventory_names})
+    if unknown:
+        raise ValueError("UNKNOWN_EXCLUDED_ACCOUNT_ALIAS:" + ",".join(unknown))
+
+    exact_hashes.update(_normalize_account_hash(alias) for alias in aliases)
+    return exact_hashes
+
+
 def _read_new_provider_log_activity(
     log_path: Path | None,
     *,
@@ -580,6 +648,8 @@ def _quota_progress_projection(
         value = event.get(source_key)
         if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 10000:
             projected[target_key] = value
+    if "ok_count" in projected:
+        projected["ok_count_semantics"] = "successful_quota_queries"
 
     if isinstance(event.get("ok"), bool):
         projected["ok"] = event["ok"]
@@ -751,6 +821,50 @@ def _account_family_quota_state(
         state, reset_ts = _family_quota_state(groups, group_name, now_ts=current)
         return state, reset_ts, True
     return "unknown", None, False
+
+
+def _quota_preflight_decision(
+    *,
+    account_alias_hash: str | None,
+    model_family: str,
+    quota_state: str,
+    evidence_fresh: bool,
+    probe_state: str,
+    dispatch_decision: str,
+) -> dict[str, str | None]:
+    """Separate quota-query health from the policy decision.
+
+    ``account_alias_hash`` is None only for a family-level decision made before any claim.
+    """
+    evidence_state = (
+        "KNOWN_BLOCKED"
+        if evidence_fresh and quota_state == "blocked"
+        else "KNOWN_ELIGIBLE"
+        if evidence_fresh and quota_state in {"five_hour", "weekly"}
+        else "UNKNOWN"
+    )
+    return {
+        "account_alias_hash": account_alias_hash,
+        "model_family": model_family,
+        "evidence_state": evidence_state,
+        "quota_window_state": quota_state,
+        "probe_state": probe_state,
+        "dispatch_decision": dispatch_decision,
+    }
+
+
+def _selected_snapshot_probe_state(snapshot: dict, account_name: str) -> str:
+    rows = snapshot.get("accounts") if isinstance(snapshot, dict) else None
+    if not isinstance(rows, list):
+        return "NOT_RUN"
+    for row in rows:
+        if isinstance(row, dict) and row.get("account") == account_name:
+            if row.get("ok") is True:
+                return "CACHED_SUCCEEDED"
+            if row.get("ok") is False:
+                return "CACHED_FAILED"
+            return "CACHED_UNKNOWN"
+    return "NOT_RUN"
 
 
 def _dynamic_availability_state(
@@ -1024,6 +1138,21 @@ def classify_failure(
     if returncode == 2:
         return AccountFailureKind.SYNTAX_OR_IMPLEMENTATION_ERROR
     return AccountFailureKind.UNKNOWN
+
+
+# Only an error/fatal-severity errorreport line for the agent executor itself is
+# terminal; warnings, retries, and unrelated diagnostics (title generation) are not.
+_AGY_TERMINAL_EXECUTOR_ERROR_RE = re.compile(
+    r"(?m)^[EF]\d{4}\s+\S+\s+\d+\s+errorreport\.go:\d+\]\s+"
+    r"agent executor error:(?P<detail>[^\n]*)$"
+)
+
+
+def _has_terminal_quota_log_signal(text: str) -> bool:
+    return any(
+        _has_quota_failure_signal(match.group("detail"))
+        for match in _AGY_TERMINAL_EXECUTOR_ERROR_RE.finditer(text)
+    )
 
 
 _AGY_ALIAS_RESOLUTION_RE = re.compile(
@@ -1718,6 +1847,14 @@ def _runtime_revision() -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+# One wall-clock budget (--timeout) covers every attempt and account rotation
+# of a single dispatch. No further attempt starts below this floor (#1216 V12).
+TOTAL_DEADLINE_MIN_ATTEMPT_SECONDS = 5.0
+_monotonic = time.monotonic
+
+MAX_FAILURE_HISTORY_ENTRIES = 16
+
+
 def _operation_hook(callback: Any, **payload: Any) -> None:
     if callback is not None:
         callback(payload)
@@ -1744,6 +1881,15 @@ TEMP_COMMAND_DENY = [
     "command(scp)",
     "command(rsync)",
 ]
+
+# NO_TOOL_PACKET runs replace (never inherit) the lease account's persisted
+# allow/deny lists: a stale persisted ``command(*)`` would otherwise stay active.
+NO_TOOL_DENY = [
+    "command(*)",
+    "read_file(*)",
+    "write_file(*)",
+]
+NO_TOOL_PROFILE_VIOLATION = "NO_TOOL_PROFILE_VIOLATION"
 
 _UNSAFE_PERMISSION_RULES = {
     "command(*)",
@@ -1982,6 +2128,9 @@ def build_effective_permission_profile(
             kind = "READ_ONLY_RESEARCH"
         elif not effective_allow:
             kind = "NO_TOOL_PACKET"
+            for r in NO_TOOL_DENY:
+                if r not in effective_deny:
+                    effective_deny.append(r)
         else:
             kind = "CUSTOM"
 
@@ -2406,6 +2555,7 @@ def dispatch_hcom_collab(
     hcom_args: list[str],
     model: str | None,
     pool_wait_timeout: float = 15.0,
+    exclude_accounts: list[str] | None = None,
     coordinator: CrossProcessLeaseCoordinator | None = None,
     popen_factory: Any = subprocess.Popen,
     launcher_path: Path | None = None,
@@ -2444,7 +2594,10 @@ def dispatch_hcom_collab(
     model_family = str(availability_state["family"])
     scoped_model_family = model_family if model_family in {"gemini", "claude_gpt"} else None
     consumer_id = "hcom-" + uuid.uuid4().hex
-    exclude_hashes: set[str] = set()
+    exclude_hashes = _resolve_excluded_account_hashes(
+        exclude_accounts,
+        manager=getattr(coordinator, "manager", None),
+    )
     claim: AccountLeaseClaim | None = None
     child: Any = None
     status_read_fd: int | None = None
@@ -2655,7 +2808,9 @@ def _run_foreground_hcom_operation(
     model: str | None,
     pool_wait_timeout: float,
     operation_root: Path,
+    exclude_accounts: list[str] | None = None,
 ) -> int:
+    resolved_exclude_hashes = sorted(_resolve_excluded_account_hashes(exclude_accounts))
     journal = AgyOperationJournal(operation_root)
     operation_id = new_operation_id()
     attempt_id = new_attempt_id()
@@ -2671,7 +2826,11 @@ def _run_foreground_hcom_operation(
         effort=None,
         prompt_sha256=args_sha256,
         runtime_revision=_runtime_revision(),
-        initial_fields={"mode": "hcom_collab", "hcom_args_sha256": args_sha256},
+        initial_fields={
+            "mode": "hcom_collab",
+            "hcom_args_sha256": args_sha256,
+            "excluded_account_hashes": resolved_exclude_hashes,
+        },
     )
     journal.mark_started(operation_id, pid=os.getpid())
     journal.update(operation_id, phase="STARTING")
@@ -2700,6 +2859,7 @@ def _run_foreground_hcom_operation(
             hcom_args=hcom_args,
             model=model,
             pool_wait_timeout=pool_wait_timeout,
+            exclude_accounts=resolved_exclude_hashes,
             operation_hook=on_event,
         )
     except BaseException as exc:
@@ -2761,7 +2921,10 @@ def dispatch_run(
     stream_no_progress_seconds: float | None = None,
     pre_effect_max_seconds: float | None = None,
     pre_effect_max_tool_events: int | None = None,
+    exclude_accounts: list[str] | None = None,
 ) -> int:
+    total_budget_seconds = max(1, int(timeout))
+    total_deadline = _monotonic() + total_budget_seconds
     user_allow = list(allow or [])
     try:
         effective_permissions, permission_profile_kind, permission_profile_sha256 = (
@@ -2912,10 +3075,15 @@ def dispatch_run(
         + list(availability_state.get("fallback", []))
     )
     blocked_candidates = list(availability_state.get("blocked", []))
+    raw_unknown = availability_state.get("unknown")
+    unknown_candidates = list(raw_unknown) if isinstance(raw_unknown, list) else []
+    # Only a family whose every account is KNOWN blocked is exhausted. UNKNOWN
+    # (stale/failed evidence) accounts proceed to claim and bounded per-account refresh.
     if (
         availability_state.get("snapshot_fresh")
         and len(usable_candidates) == 0
         and len(blocked_candidates) > 0
+        and len(unknown_candidates) == 0
         and scoped_model_family is not None
     ):
         _operation_hook(
@@ -2930,7 +3098,18 @@ def dispatch_run(
                 "admission_state": "KNOWN_BLOCKED",
                 "probe_state": "PROBE_OK",
                 "quota_state": "blocked",
+                "usable_count": 0,
+                "blocked_count": len(blocked_candidates),
+                "unknown_count": 0,
             },
+            quota_preflight_decision=_quota_preflight_decision(
+                account_alias_hash=None,
+                model_family=scoped_model_family,
+                quota_state="blocked",
+                evidence_fresh=True,
+                probe_state="CACHED_SUCCEEDED",
+                dispatch_decision="BLOCK_KNOWN_QUOTA",
+            ),
         )
         emit_meta({
             "status": "failed",
@@ -2943,7 +3122,30 @@ def dispatch_run(
         return 75
 
     consumer_id = "desktop-" + uuid.uuid4().hex
-    exclude_hashes: set[str] = set()
+    try:
+        exclude_hashes = _resolve_excluded_account_hashes(
+            exclude_accounts,
+            manager=getattr(coordinator, "manager", None),
+        )
+    except ValueError as exc:
+        contract_failure = f"DISPATCH_CONTRACT_REJECTED:{exc}"
+        _operation_hook(
+            operation_hook,
+            phase="CONTRACT_REJECTED",
+            attempts=0,
+            rotations=0,
+            failure_kind=contract_failure,
+            provider_effect=False,
+        )
+        emit_meta({
+            "status": "invalid_contract",
+            "attempts": 0,
+            "rotations": 0,
+            "failure_kind": contract_failure,
+            "provider_effect": False,
+            "wall_ms": 0,
+        })
+        return 64
 
     claim: Optional[AccountLeaseClaim] = None
     try:
@@ -2953,22 +3155,32 @@ def dispatch_run(
             wait_timeout=pool_wait_timeout,
             model_family=scoped_model_family,
         )
-    except AgyAccountPoolBusyError:
-        emit_meta({
-            "status": "pool_busy",
+    except (AgyAccountPoolBusyError, AgyAccountPoolExhaustedError) as claim_exc:
+        busy = isinstance(claim_exc, AgyAccountPoolBusyError)
+        claim_failure = "AGY_ACCOUNT_POOL_BUSY" if busy else "ACCOUNT_UNAVAILABLE"
+        claim_event: dict[str, Any] = {
+            "phase": "ACCOUNT_CLAIM_FAILED",
             "attempts": 0,
             "rotations": 0,
-            "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
+            "failure_kind": claim_failure,
             "provider_effect": False,
-            "wall_ms": 0,
-        })
-        return 75
-    except AgyAccountPoolExhaustedError:
+        }
+        if scoped_model_family is not None:
+            claim_event["quota_preflight_progress"] = {
+                "phase": "PREFLIGHT_BLOCKED",
+                "admission_state": (
+                    "UNKNOWN_NOT_CLAIMABLE" if unknown_candidates else "NOT_CLAIMABLE"
+                ),
+                "usable_count": len(usable_candidates),
+                "blocked_count": len(blocked_candidates),
+                "unknown_count": len(unknown_candidates),
+            }
+        _operation_hook(operation_hook, **claim_event)
         emit_meta({
-            "status": "pool_exhausted",
+            "status": "pool_busy" if busy else "pool_exhausted",
             "attempts": 0,
             "rotations": 0,
-            "failure_kind": "ACCOUNT_UNAVAILABLE",
+            "failure_kind": claim_failure,
             "provider_effect": False,
             "wall_ms": 0,
         })
@@ -2984,10 +3196,14 @@ def dispatch_run(
     active_provider_pid: int | None = None
     active_provider_pgid: int | None = None
 
+    attempt_tool_event_count = 0
+
     def _inner_operation_hook(event: dict[str, Any] | None = None, **kwargs: Any) -> None:
-        nonlocal active_provider_pid, active_provider_pgid
+        nonlocal active_provider_pid, active_provider_pgid, attempt_tool_event_count
         merged = dict(event or {})
         merged.update(kwargs)
+        if isinstance(merged.get("tool_event_count"), int):
+            attempt_tool_event_count = max(attempt_tool_event_count, merged["tool_event_count"])
         if isinstance(merged.get("provider_pid"), int):
             active_provider_pid = merged["provider_pid"]
         if isinstance(merged.get("provider_pgid"), int):
@@ -3003,8 +3219,46 @@ def dispatch_run(
         rotations=rotations,
     )
 
+    def _budget_exhausted() -> bool:
+        """True when a further attempt/rotation would start below the budget floor."""
+        return attempts > 0 and (
+            total_deadline - _monotonic() < TOTAL_DEADLINE_MIN_ATTEMPT_SECONDS
+        )
+
+    def _emit_total_deadline_exhausted() -> int:
+        _operation_hook(
+            operation_hook,
+            phase="CLASSIFYING_FAILURE",
+            attempts=attempts,
+            rotations=rotations,
+            failure_kind="TIMEOUT",
+            timed_out=True,
+            account_alias_hash=claim.account_alias_hash,
+            lease_id_hash=claim.lease_id_hash,
+            provider_effect=None,
+            reconciliation_required=False,
+        )
+        emit_meta({
+            "status": "failed",
+            "attempts": attempts,
+            "rotations": rotations,
+            "failure_kind": "TIMEOUT",
+            "total_deadline_exhausted": True,
+            "total_timeout_seconds": total_budget_seconds,
+            "account_alias_hash": claim.account_alias_hash,
+            "lease_id_hash": claim.lease_id_hash,
+            "parallel_slot": True,
+            "wall_ms": total_wall_ms,
+        })
+        return 124
+
     try:
         while True:
+            if _budget_exhausted():
+                return _emit_total_deadline_exhausted()
+            quota_probe = {
+                "state": _selected_snapshot_probe_state(quota_snapshot, claim.internal_id)
+            }
             if scoped_model_family is not None:
                 quota_state, reset_ts, evidence_fresh = _account_family_quota_state(
                     quota_snapshot,
@@ -3012,9 +3266,24 @@ def dispatch_run(
                     model_family=scoped_model_family,
                 )
                 if not evidence_fresh:
+                    quota_probe["state"] = "UNKNOWN"
+
+                    def on_quota_progress(**event: Any) -> None:
+                        progress = event.get("quota_preflight_progress")
+                        if isinstance(progress, dict):
+                            if progress.get("phase") == "ACCOUNT_RESULT":
+                                quota_probe["state"] = (
+                                    "SUCCEEDED" if progress.get("ok") is True else "FAILED"
+                                )
+                            elif progress.get("phase") == "TIMED_OUT":
+                                quota_probe["state"] = "TIMED_OUT"
+                            elif progress.get("phase") == "START_FAILED":
+                                quota_probe["state"] = "START_FAILED"
+                        _operation_hook(operation_hook, **event)
+
                     quota_snapshot = _refresh_quota_snapshot_for_account(
                         claim.internal_id,
-                        on_phase_hook=lambda **event: _operation_hook(operation_hook, **event),
+                        on_phase_hook=on_quota_progress,
                         account_alias_hash=claim.account_alias_hash,
                     )
                     availability_state = _dynamic_availability_state(model, quota_snapshot)
@@ -3025,6 +3294,21 @@ def dispatch_run(
                         model_family=scoped_model_family,
                     )
                 if evidence_fresh and quota_state == "blocked":
+                    _operation_hook(
+                        operation_hook,
+                        quota_preflight_decision=_quota_preflight_decision(
+                            account_alias_hash=claim.account_alias_hash,
+                            model_family=scoped_model_family,
+                            quota_state=quota_state,
+                            evidence_fresh=evidence_fresh,
+                            probe_state=quota_probe["state"],
+                            dispatch_decision=(
+                                "BLOCK_KNOWN_QUOTA"
+                                if rotations >= max_failovers
+                                else "ROTATE_KNOWN_QUOTA"
+                            ),
+                        ),
+                    )
                     unavailable_until = (
                         reset_ts
                         if reset_ts is not None and reset_ts > time.time()
@@ -3119,13 +3403,43 @@ def dispatch_run(
                         "account_alias_hash": claim.account_alias_hash,
                     },
                 )
+                _operation_hook(
+                    operation_hook,
+                    quota_preflight_decision=_quota_preflight_decision(
+                        account_alias_hash=claim.account_alias_hash,
+                        model_family=scoped_model_family,
+                        quota_state=quota_state,
+                        evidence_fresh=evidence_fresh,
+                        probe_state=quota_probe["state"],
+                        dispatch_decision=(
+                            "ALLOW_KNOWN_ELIGIBLE"
+                            if evidence_fresh and quota_state in {"five_hour", "weekly"}
+                            else "ALLOW_UNKNOWN_QUOTA"
+                        ),
+                    ),
+                )
+            else:
+                _operation_hook(
+                    operation_hook,
+                    quota_preflight_decision=_quota_preflight_decision(
+                        account_alias_hash=claim.account_alias_hash,
+                        model_family=model_family,
+                        quota_state="not_applicable",
+                        evidence_fresh=False,
+                        probe_state="NOT_RUN",
+                        dispatch_decision="ALLOW_NO_QUOTA_FAMILY",
+                    ),
+                )
 
+            if _budget_exhausted():
+                return _emit_total_deadline_exhausted()
             attempts += 1
             _operation_hook(
                 operation_hook,
                 phase="EXECUTING",
                 attempts=attempts,
                 rotations=rotations,
+                failure_kind=None,
                 account_alias_hash=claim.account_alias_hash,
                 lease_id_hash=claim.lease_id_hash,
             )
@@ -3140,12 +3454,31 @@ def dispatch_run(
                     operation_hook,
                     effect_observation_error=f"ATTEMPT_BASELINE_CAPTURE_FAILED:{type(exc).__name__}",
                 )
+            provider_log_path = env.get("NEXUS_AGY_ATTESTATION_LOG") or os.getenv(
+                "NEXUS_AGY_ATTESTATION_LOG"
+            )
+            # None means this attempt's log span is unknown; never scan stale bytes.
+            provider_log_attempt_offset: int | None = 0
+            if provider_log_path:
+                try:
+                    provider_log_attempt_offset = (
+                        Path(provider_log_path).expanduser().stat().st_size
+                    )
+                except FileNotFoundError:
+                    provider_log_attempt_offset = 0
+                except OSError:
+                    provider_log_attempt_offset = None
             permission_token = None
+            attempt_tool_event_count = 0
             try:
                 allow_rules = list(effective_permissions.get("allow") or [])
                 deny_rules = list(effective_permissions.get("deny") or [])
                 replace_allow_deny = bool(
-                    mode == "accept-edits" or allow_rules or deny_rules or temp_command_permissions
+                    mode == "accept-edits"
+                    or allow_rules
+                    or deny_rules
+                    or temp_command_permissions
+                    or permission_profile_kind == "NO_TOOL_PACKET"
                 )
                 allow_unsafe_legacy = bool(temp_command_permissions or "command(*)" in allow_rules)
                 if allow_rules or deny_rules or replace_allow_deny:
@@ -3165,7 +3498,7 @@ def dispatch_run(
                     "mode": mode,
                     "model": model,
                     "effort": effort,
-                    "timeout": max(1, timeout),
+                    "timeout": max(1, int(total_deadline - _monotonic())),
                 }
                 if runner is run_agy or (
                     hasattr(runner, "__code__") and "operation_hook" in runner.__code__.co_varnames
@@ -3204,18 +3537,23 @@ def dispatch_run(
             total_wall_ms += wall_ms
 
             provider_log_text = ""
-            provider_log_path = env.get("NEXUS_AGY_ATTESTATION_LOG") or os.getenv(
-                "NEXUS_AGY_ATTESTATION_LOG"
-            )
+            attempt_log_text = ""
             if provider_log_path:
                 try:
-                    provider_log_text = (
-                        Path(provider_log_path)
-                        .expanduser()
-                        .read_text(encoding="utf-8", errors="replace")
-                    )
+                    provider_log_bytes = Path(provider_log_path).expanduser().read_bytes()
                 except OSError:
-                    provider_log_text = ""
+                    provider_log_bytes = b""
+                provider_log_text = provider_log_bytes.decode("utf-8", errors="replace")
+                if provider_log_attempt_offset is not None:
+                    # A log shorter than the pre-attempt offset was truncated or
+                    # replaced during this attempt, so all of it is current.
+                    if len(provider_log_bytes) >= provider_log_attempt_offset:
+                        provider_log_bytes = provider_log_bytes[provider_log_attempt_offset:]
+                    attempt_log_text = provider_log_bytes.decode("utf-8", errors="replace")
+            # Issue #1362: agy may exit 0 after a terminal executor quota failure.
+            provider_terminal_quota = (
+                code == 0 and not timed_out and _has_terminal_quota_log_signal(attempt_log_text)
+            )
             provider_log_lower = provider_log_text.lower()
             provider_headless_denial = (
                 "print mode: soft-denying tool confirmation" in provider_log_lower
@@ -3262,8 +3600,18 @@ def dispatch_run(
                 observed_changed_paths=attempt_changed_paths,
             )
             scope_blocked = bool(write_paths and scope_state == "VIOLATION_OUT_OF_SCOPE")
+            no_tool_violation = bool(
+                permission_profile_kind == "NO_TOOL_PACKET" and attempt_tool_event_count > 0
+            )
 
-            if code == 0 and not timed_out and not permission_blocked and not scope_blocked:
+            if (
+                code == 0
+                and not timed_out
+                and not permission_blocked
+                and not scope_blocked
+                and not no_tool_violation
+                and not provider_terminal_quota
+            ):
                 sys.stdout.write(out)
                 if err:
                     sys.stderr.write(err)
@@ -3282,14 +3630,21 @@ def dispatch_run(
 
             kind = (
                 AccountFailureKind.PERMISSION_OR_SCOPE_ERROR
-                if (permission_blocked or scope_blocked)
+                if (permission_blocked or scope_blocked or no_tool_violation)
+                else AccountFailureKind.QUOTA_EXHAUSTED
+                if provider_terminal_quota
                 else classify_failure(code, out, err, timed_out)
             )
             last_kind = kind.value
             provider_effect_observed: bool | None = False
             reconciliation_required = False
 
-            if permission_blocked and (provider_headless_denial or semantic_headless_denial):
+            if no_tool_violation:
+                # Quarantine: a no-tool packet must not report success after tool use.
+                last_kind = NO_TOOL_PROFILE_VIOLATION
+                provider_effect_observed = True if attempt_changed_paths else None
+                reconciliation_required = True
+            elif permission_blocked and (provider_headless_denial or semantic_headless_denial):
                 last_kind = "HEADLESS_TOOL_PERMISSION_DENIED"
                 if attempt_changed_paths:
                     provider_effect_observed = True
@@ -3314,6 +3669,9 @@ def dispatch_run(
                     reconciliation_required = True
             elif kind == AccountFailureKind.MODEL_OR_TASK_ERROR:
                 last_kind = "DISPATCH_MODEL_CONTRACT_REJECTED"
+                if attempt_changed_paths:
+                    provider_effect_observed = True
+                    reconciliation_required = True
             elif kind == AccountFailureKind.QUOTA_EXHAUSTED:
                 if attempt_changed_paths:
                     last_kind = "PROVIDER_QUOTA_EXHAUSTED_AFTER_EFFECT"
@@ -3530,6 +3888,16 @@ def _write_private_prompt(path: Path, prompt: str) -> None:
         os.fsync(fh.fileno())
 
 
+def _normalize_evidence_refs(values: list[str] | None) -> list[str]:
+    refs = [str(value).strip() for value in (values or [])]
+    if len(refs) > 16:
+        raise ValueError("EVIDENCE_REF_LIMIT_EXCEEDED")
+    for ref in refs:
+        if not ref or len(ref) > 512 or any(ord(char) < 0x20 for char in ref):
+            raise ValueError("EVIDENCE_REF_INVALID")
+    return refs
+
+
 def _spawn_background_operation(
     *,
     prompt: str,
@@ -3549,7 +3917,11 @@ def _spawn_background_operation(
     stream_no_progress_seconds: float | None = None,
     pre_effect_max_seconds: float | None = None,
     pre_effect_max_tool_events: int | None = None,
+    exclude_accounts: list[str] | None = None,
+    evidence_refs: list[str] | None = None,
 ) -> dict[str, Any]:
+    resolved_exclude_hashes = sorted(_resolve_excluded_account_hashes(exclude_accounts))
+    resolved_evidence_refs = _normalize_evidence_refs(evidence_refs)
     journal = AgyOperationJournal(operation_root)
     operation_id = new_operation_id()
     attempt_id = new_attempt_id()
@@ -3584,6 +3956,8 @@ def _spawn_background_operation(
         prompt_sha256=hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
         runtime_revision=_runtime_revision(),
         initial_fields={
+            "excluded_account_hashes": resolved_exclude_hashes,
+            "evidence_refs": resolved_evidence_refs,
             "liveness_policy": {
                 "coding_progress_required": coding_progress_required,
                 "provider_stall_seconds": resolved_provider_stall_seconds,
@@ -3638,6 +4012,8 @@ def _spawn_background_operation(
         argv += ["--deny", rule]
     for write_path in write_paths or []:
         argv += ["--write-path", write_path]
+    for account_hash in resolved_exclude_hashes:
+        argv += ["--exclude-account", account_hash]
 
     stdout_path = journal.stdout_path(operation_id)
     stderr_path = journal.stderr_path(operation_id)
@@ -3824,6 +4200,7 @@ def _run_background_operation(
     stream_no_progress_seconds: float | None = None,
     pre_effect_max_seconds: float | None = None,
     pre_effect_max_tool_events: int | None = None,
+    exclude_accounts: list[str] | None = None,
 ) -> int:
     journal = AgyOperationJournal(operation_root)
     prompt_path = Path(prompt_file)
@@ -3846,6 +4223,7 @@ def _run_background_operation(
         "account_alias_hash": None,
         "lease_id_hash": None,
         "failure_kind": None,
+        "failure_history": [],
         "timed_out": False,
         "provider_pid": None,
         "provider_pgid": None,
@@ -3860,6 +4238,7 @@ def _run_background_operation(
         "tool_event_count": 0,
         "provider_session_id": None,
         "quota_preflight_progress": None,
+        "quota_preflight_decision": None,
         "permission_profile_sha256": None,
         "permission_profile_kind": None,
         "effective_permissions": None,
@@ -3875,6 +4254,7 @@ def _run_background_operation(
             account_alias_hash=snapshot.get("account_alias_hash"),
             lease_id_hash=snapshot.get("lease_id_hash"),
             failure_kind=snapshot.get("failure_kind"),
+            failure_history=list(snapshot.get("failure_history") or []),
             provider_pid=snapshot.get("provider_pid"),
             provider_pgid=snapshot.get("provider_pgid"),
             provider_process_state=snapshot.get("provider_process_state") or "IDLE",
@@ -3888,6 +4268,7 @@ def _run_background_operation(
             tool_event_count=int(snapshot.get("tool_event_count") or 0),
             provider_session_id=snapshot.get("provider_session_id"),
             quota_preflight_progress=snapshot.get("quota_preflight_progress"),
+            quota_preflight_decision=snapshot.get("quota_preflight_decision"),
             permission_profile_sha256=snapshot.get("permission_profile_sha256"),
             permission_profile_kind=snapshot.get("permission_profile_kind"),
             effective_permissions=snapshot.get("effective_permissions"),
@@ -3896,6 +4277,22 @@ def _run_background_operation(
     def on_event(event: dict[str, Any]) -> None:
         with state_lock:
             state.update(event)
+            failure_kind = event.get("failure_kind")
+            if (
+                event.get("phase") == "CLASSIFYING_FAILURE"
+                and isinstance(failure_kind, str)
+                and failure_kind
+            ):
+                history = list(state.get("failure_history") or [])
+                history.append({
+                    "at": _agy_operation_journal.utc_now(),
+                    "attempts": int(state.get("attempts") or 0),
+                    "rotations": int(state.get("rotations") or 0),
+                    "failure_kind": failure_kind,
+                    "account_alias_hash": state.get("account_alias_hash"),
+                    "lease_id_hash": state.get("lease_id_hash"),
+                })
+                state["failure_history"] = history[-MAX_FAILURE_HISTORY_ENTRIES:]
             snapshot = dict(state)
         _heartbeat_snapshot(snapshot)
 
@@ -3938,6 +4335,7 @@ def _run_background_operation(
             stream_no_progress_seconds=stream_no_progress_seconds,
             pre_effect_max_seconds=pre_effect_max_seconds,
             pre_effect_max_tool_events=pre_effect_max_tool_events,
+            exclude_accounts=exclude_accounts,
         )
         with state_lock:
             snapshot = dict(state)
@@ -3988,6 +4386,7 @@ def _run_background_operation(
             return int(exit_code if exit_code not in (None, 0) else 1)
 
         timed_out = bool(snapshot.get("timed_out")) or failure_kind == "TIMEOUT"
+        effect_observed = snapshot.get("first_effect_at") is not None
         if timed_out:
             terminal_status = "OUTCOME_UNKNOWN"
             reconciliation = {
@@ -3998,6 +4397,16 @@ def _run_background_operation(
         elif exit_code == 0:
             terminal_status = "COMPLETED"
             reconciliation = None
+        elif effect_observed:
+            terminal_status = "OUTCOME_UNKNOWN"
+            failure_kind = failure_kind or "PROVIDER_EXIT_AFTER_EFFECT"
+            reconciliation = {
+                "at": _agy_operation_journal.utc_now(),
+                "result": "PROVIDER_EXIT_AFTER_OBSERVED_EFFECT",
+                "provider_alive_before": bool(provider_pid or provider_pgid),
+                "provider_alive_after": False,
+                "retry_permitted": False,
+            }
         else:
             terminal_status = "FAILED"
             reconciliation = None
@@ -4042,6 +4451,9 @@ def _run_background_operation(
             permission_profile_kind=snapshot.get("permission_profile_kind"),
             effective_permissions=snapshot.get("effective_permissions"),
             tool_event_count=int(snapshot.get("tool_event_count") or 0),
+            has_unresolved_external_effect=bool(
+                terminal_status == "OUTCOME_UNKNOWN" and effect_observed
+            ),
             **attestation,
         )
         if (
@@ -4316,6 +4728,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--status", metavar="OPERATION_ID")
     ap.add_argument("--reconcile", metavar="OPERATION_ID")
     ap.add_argument("--hcom-collab", action="store_true")
+    ap.add_argument(
+        "--exclude-account",
+        action="append",
+        default=[],
+        help="Account alias or 12-hex alias hash to ephemerally exclude; repeatable",
+    )
+    ap.add_argument(
+        "--evidence-ref",
+        action="append",
+        default=[],
+        help="Bounded non-secret operation evidence reference; repeatable",
+    )
     ap.add_argument("--hcom-args-json", default="[]", help=argparse.SUPPRESS)
     ap.add_argument(
         "--finalize-no-effect",
@@ -4362,6 +4786,7 @@ def main(argv: list[str] | None = None) -> int:
             model=args.model,
             pool_wait_timeout=args.pool_wait_timeout,
             operation_root=operation_root,
+            exclude_accounts=args.exclude_account,
         )
 
     # The internal --operation-run already receives the effective execution root
@@ -4388,6 +4813,9 @@ def main(argv: list[str] | None = None) -> int:
     if not prompt.strip():
         raise SystemExit("EMPTY_PROMPT")
 
+    if args.evidence_ref and not args.background and not args.operation_run:
+        raise SystemExit("EVIDENCE_REF_REQUIRES_BACKGROUND")
+
     if args.operation_run:
         return _run_background_operation(
             operation_id=args.operation_run,
@@ -4408,6 +4836,7 @@ def main(argv: list[str] | None = None) -> int:
             stream_no_progress_seconds=args.stream_no_progress_seconds,
             pre_effect_max_seconds=args.pre_effect_max_seconds,
             pre_effect_max_tool_events=args.pre_effect_max_tool_events,
+            exclude_accounts=args.exclude_account,
         )
 
     if args.background:
@@ -4429,6 +4858,8 @@ def main(argv: list[str] | None = None) -> int:
             stream_no_progress_seconds=args.stream_no_progress_seconds,
             pre_effect_max_seconds=args.pre_effect_max_seconds,
             pre_effect_max_tool_events=args.pre_effect_max_tool_events,
+            exclude_accounts=args.exclude_account,
+            evidence_refs=args.evidence_ref,
         )
         _print_operation(record)
         return 0
@@ -4450,6 +4881,7 @@ def main(argv: list[str] | None = None) -> int:
         stream_no_progress_seconds=args.stream_no_progress_seconds,
         pre_effect_max_seconds=args.pre_effect_max_seconds,
         pre_effect_max_tool_events=args.pre_effect_max_tool_events,
+        exclude_accounts=args.exclude_account,
     )
 
 

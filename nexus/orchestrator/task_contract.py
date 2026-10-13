@@ -293,6 +293,10 @@ class SelfHostedTaskContract(BaseModel):
     def _validate_self_hosted_boundaries(self):
         if not self.allowed_files:
             raise ValueError("allowed_files must be non-empty")
+        # Completion requires an applicable verifier (AGENTS.md): an empty
+        # manifest (including the default) would otherwise verify vacuously.
+        if not [c for c in self.verifier_commands if isinstance(c, str) and c.strip()]:
+            raise ValueError("verifier_commands must be non-empty")
         forbidden = set(self.forbidden_files)
         for path in self.authorized_deletions:
             if path.endswith("/"):

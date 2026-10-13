@@ -67,7 +67,7 @@ def build_heep_runtime_post_apply_smoke(
             budget={"runtime_skill_policy_overlay_path": overlay_path},
             selected_capabilities=[capability],
         )
-        planned = CapabilityPlanner._build_skill_mount_evidence(
+        planned = CapabilityPlanner(shared_playbook_root=PROJECT_ROOT)._build_skill_mount_evidence(
             skills=requests,
             budget={"skill_status_report": skill_status_report},
             selected_capabilities=[capability],

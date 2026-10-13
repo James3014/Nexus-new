@@ -14,6 +14,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from nexus.contracts.strategic_map import StrategicMap, load_strategic_map
+from scripts.ops.strict_file_discovery import strict_glob  # noqa: E402
 
 DEFAULT_MANIFEST = REPO_ROOT / "docs" / "ops" / "strategic_map_manifest.json"
 
@@ -71,10 +72,9 @@ def _audit_boundary_rules(root: Path, strategic_map: StrategicMap, failures: lis
     for rule in strategic_map.boundary_rules:
         matched: list[Path] = []
         for pattern in rule.source_globs:
-            matched.extend(sorted(root.glob(pattern)))
+            matched.extend(strict_glob(root, pattern, label=f"strategic boundary rule {rule.name}"))
         if not matched:
-            failures.append({"rule": rule.name, "reason": "boundary_rule_matched_no_files"})
-            continue
+            raise FileNotFoundError(f"strategic boundary rule {rule.name}: no source_globs configured")
         for path in matched:
             if path.suffix != ".py":
                 continue

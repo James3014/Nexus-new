@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_DOCS_CATALOG_PATH = PROJECT_ROOT / "docs/reports/NEXUS_SKILL_FIT_CATALOG_REPAIR_AND_CODING_2026-05-15.json"
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -336,7 +337,7 @@ def run_matrix(
         catalog = build_skill_fit_catalog(summary)
         catalog_path = output / "skill_fit_catalog.json"
         catalog_path.write_text(json.dumps(catalog, indent=2, ensure_ascii=False), encoding="utf-8")
-        docs_catalog = Path(docs_catalog_path) if docs_catalog_path is not None else PROJECT_ROOT / "docs/reports/NEXUS_SKILL_FIT_CATALOG_REPAIR_AND_CODING_2026-05-15.json"
+        docs_catalog = Path(docs_catalog_path) if docs_catalog_path is not None else DEFAULT_DOCS_CATALOG_PATH
         docs_catalog.write_text(json.dumps(catalog, indent=2, ensure_ascii=False), encoding="utf-8")
         summary["skill_fit_catalog_path"] = str(catalog_path)
         summary["docs_skill_fit_catalog_path"] = str(docs_catalog)

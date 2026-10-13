@@ -40,18 +40,29 @@ class CapabilityConstraints:
                 logger.error("🛡️ [MemPalace] verify_context error: %s", e)
 
         # 2. 獲取 TTL / 信念約束條件 (forbid / require / prefer)
-        constraints = {"require": [], "forbid": [], "prefer": []}
+        constraints: Dict[str, Any] = {"require": [], "forbid": [], "prefer": []}
         if hasattr(self.mem_palace, "get_skill_constraints"):
             try:
                 constraints = self.mem_palace.get_skill_constraints()
             except Exception as e:
                 logger.debug("🛡️ [MemPalace] get_skill_constraints error: %s", e)
 
+        # Surface (never enforce) an unreadable belief source: fail-open for routing,
+        # but "unavailable" must not look like "no constraints".
+        source = constraints.get("constraints_source")
+        source = source if isinstance(source, str) and source else "ok"
+        reason = constraints.get("constraints_unavailable_reason")
+        reason = reason if isinstance(reason, str) else ""
+        if source == "unavailable":
+            logger.warning("🛡️ [MemPalace] belief constraints unavailable: %s", reason)
+
         return {
             "status": "ALLOWED",
             "forbidden_skills_rules": list(constraints.get("forbid") or []),
             "required_skills_rules": list(constraints.get("require") or []),
             "preferred_skills_rules": list(constraints.get("prefer") or []),
+            "constraints_source": source,
+            "constraints_unavailable_reason": reason,
         }
 
     def authorize_skill_for_domain(self, skill_id: str, active_domain: str) -> bool:

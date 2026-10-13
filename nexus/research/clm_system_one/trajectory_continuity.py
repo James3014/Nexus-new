@@ -27,6 +27,19 @@ HEALTH_SCHEMA = "nexus.clm_trajectory_health.v1"
 # Minimum independent task families required before READY_TO_REAUDIT
 _MIN_TASK_FAMILIES = 5
 
+# Scientific grouping labels are declared by the Task Card issuer BEFORE the
+# first action. The existing task-card content hash is the producer authority;
+# this research consumer is not a task classifier or a second truth store.
+_TRACK1_FAMILY_TAXONOMY = "TRACK1_ENGINEERING_V1"
+_TRACK1_FAMILY_CATEGORIES = frozenset({
+    "defect_repair",  # repair existing, demonstrably incorrect behavior
+    "feature_extension",  # introduce previously absent capability
+    "test_oracle",  # test, verifier, or assertion correctness
+    "runtime_recovery",  # runtime/transport/restart continuity
+    "evidence_integrity",  # evidence identity, lineage, tamper safety
+    "architecture_maintenance",  # behavior-preserving internal restructuring
+})
+
 # Bounding limits (C: Redact -> Bound -> Hash -> Persist)
 _MAX_STATE_ACTION_CHARS = 16384  # max serialized chars for state/action blobs
 _MAX_RESULT_INLINE_BYTES = 4096  # results larger than this go to content-addressed blobs
@@ -48,18 +61,104 @@ _FORBIDDEN_PRE_ACTION_KEYS = {
 # Patterns used to detect and redact credentials/secrets from step payloads
 # before hashing or persistence.  Conservative: prefer false-positive redaction
 # over accidental secret leakage.
+_URL_CREDENTIAL_PATTERN = re.compile(
+    r"(?i)\b[a-z][a-z0-9+.\-]{0,31}://[^/@\s:]{0,256}:[^/\s\"'?#,}]{1,512}@"
+)
+# Note on the URL pattern: the password class excludes "/", quotes, ? # , } and
+# whitespace (so it cannot run across JSON fields) but allows "@", so a
+# password containing "@" is redacted up to the LAST "@" before the host (the
+# greedy match backtracks to it) instead of leaking the tail after the first "@".
+#
+# Out of scope (tracked in #1873): tokens split across lines or across separate
+# JSON fields (e.g. a key wrapped at 80 columns).  Each pattern matches within a
+# single token; reassembling fragments would need cross-string state.
 _SECRET_PATTERNS: list[re.Pattern[str]] = [
+    # Full PEM private-key block (BEGIN..END inclusive). Must run first so a keyed
+    # PEM (private_key: -----BEGIN ...) is not truncated by the generic assignment
+    # pattern; an unterminated block
+    # (truncated evidence) is redacted through the end of the string.
     re.compile(
-        r"(?i)(password|passwd|secret|token|api[_\-]?key|private[_\-]?key|auth[_\-]?key)\s*[=:]\s*\S+"
+        r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----"
+        r"(?:.*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----|.*\Z)",
+        re.DOTALL,
+    ),
+    # Quoted values (which may contain spaces) are redacted to the closing quote.
+    re.compile(
+        r"(?i)(password|passwd|secret|token|api[_\-]?key|private[_\-]?key|auth[_\-]?key"
+        r"|secret[_\-]?key|client[_\-]?secret|access[_\-]?token|auth[_\-]?token)"
+        r"[\"']?\s*[=:]\s*(?:\"[^\"]*\"|'[^']*'|[\"']?\S+)"
     ),
     re.compile(r"(?i)bearer\s+[A-Za-z0-9\-._~+/]+=*"),
     re.compile(r"(?i)(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}"),
     re.compile(r"sk-[A-Za-z0-9]{20,}"),
+    # Provider key formats with separators in the body (sk-ant-api03-..., sk-proj-...).
+    re.compile(r"sk-(?:ant|proj|svcacct|admin)-[A-Za-z0-9_\-]{16,}"),
+    # Short/truncated fine-grained PATs are redacted too (real ones are ~82 chars).
+    re.compile(r"github_pat_[A-Za-z0-9_]{10,}"),
+    re.compile(r"AIza[0-9A-Za-z_\-]{35}"),
+    # Boundary is "not alphanumeric" rather than \b so a token directly after "_"
+    # (AWS_KEY_AKIA...) is still found; "_" is a word character for \b.
+    re.compile(r"(?<![A-Za-z0-9])(?:AKIA|ASIA)[0-9A-Z]{16}(?![A-Z0-9])"),
+    re.compile(r"xox[abposr]-[A-Za-z0-9\-]{10,}"),
+    # Stripe live keys (mirrors scripts/ops/git_history_secret_scan.py).
+    re.compile(r"(?:sk|rk)_live_[A-Za-z0-9]{16,}"),
+    # Stripe secret test keys, live publishable keys and webhook signing secrets.
+    # pk_test_ (publishable TEST key) is deliberately NOT redacted: it is public by
+    # design, ships in client bundles, and grants no access.  pk_live_ is also
+    # public-by-design but identifies a production account, so it is redacted.
+    re.compile(r"(?:sk|rk)_test_[A-Za-z0-9]{16,}"),
+    re.compile(r"pk_live_[A-Za-z0-9]{16,}"),
+    re.compile(r"whsec_[A-Za-z0-9]{16,}"),
+    # Slack incoming-webhook URLs (the path is the credential).
+    re.compile(r"(?:https?://)?hooks\.slack\.com/services/[A-Za-z0-9_/\-]{8,256}"),
+    # Azure storage / Service Bus connection-string keys.
+    re.compile(r"(?i)(?:AccountKey|SharedAccessKey)\s*=\s*[^;\s\"']{1,512}"),
+    # SendGrid API keys: SG.<22>.<43>.
+    re.compile(r"(?<![A-Za-z0-9])SG\.[A-Za-z0-9_\-]{22}\.[A-Za-z0-9_\-]{43}"),
+    # Twilio API key SIDs: SK + 32 hex.
+    re.compile(r"(?<![A-Za-z0-9])SK[0-9a-f]{32}(?![A-Za-z0-9])"),
+    # Bare Google OAuth refresh tokens (1//0...).
+    re.compile(r"(?<![A-Za-z0-9])1//0[A-Za-z0-9_\-]{20,}"),
+    # DB password env assignments not covered by the generic "password" key.
+    re.compile(r"(?i)(?:db_pass|mysql_pwd)[\"']?\s*[=:]\s*(?:\"[^\"]*\"|'[^']*'|[\"']?\S+)"),
+    # mysql/mysqldump/mysqladmin -p<password> (password glued to -p, case-sensitive so
+    # "-p" alone, a prompt, and "-P <port>" are untouched).  Up to 8 option words
+    # of <=64 chars are skipped; words cannot cross ; | & or newlines, so the scan
+    # is bounded per "mysql" occurrence.
+    re.compile(
+        r"(?<![A-Za-z0-9_\-])mysql(?:dump|admin)?(?:[ \t]+[^\s;|&]{1,64}){0,8}?"
+        r"[ \t]+-p(?:\"[^\"]*\"|'[^']*'|[^\s;|&\"'-][^\s;|&]{0,255})"
+    ),
+    # AWS secret access key assignments (env/ini style and JSON "SecretAccessKey").
+    re.compile(r"(?i)secret[_\-]?access[_\-]?key[\"']?\s*[=:]\s*[\"']?[^\s\"',}]+"),
+    # Bare provider tokens.
+    re.compile(r"ya29\.[A-Za-z0-9_\-.]{20,}"),
+    # "not alphanumeric" lookbehind (not \b): HFTOKEN_hf_... must match, while
+    # hf_hub_download (underscore inside the body) still does not.
+    re.compile(r"(?<![A-Za-z0-9])hf_[A-Za-z0-9]{30,}"),
+    # GitLab PATs are glpat- + 20 chars (>=20 includes exactly 20); routable tokens
+    # add dot-separated segments.
+    re.compile(r"glpat-[A-Za-z0-9_\-.]{20,}"),
+    re.compile(r"(?<![A-Za-z0-9])npm_[A-Za-z0-9]{30,}"),
+    re.compile(r"xapp-[A-Za-z0-9\-]{10,}"),
+    # JWT: three base64url segments, header and payload start with eyJ ({"...).
+    re.compile(r"(?<![A-Za-z0-9])eyJ[A-Za-z0-9_\-]{5,}\.eyJ[A-Za-z0-9_\-]{5,}\.[A-Za-z0-9_\-]+"),
+    # Authorization header values (Bearer is covered above; "token" is the
+    # non-prefixed GitHub header form).
+    re.compile(
+        r"(?i)authorization[\"']?\s*[:=]\s*[\"']?(?:basic|digest|negotiate|token)\s+[^\s\"']+"
+    ),
+    # CLI flags carrying credentials: --token X / --token=X / --password X ...
+    re.compile(
+        r"(?i)--(?:token|access-token|auth-token|password|passwd|secret|api[_-]key|client[_-]secret|key)"
+        r"(?:=|\s+)(?:\"[^\"]*\"|'[^']*'|\S+)"
+    ),
     re.compile(r"(?i)-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
     # curl -u / --user basic-auth: -u user:password or --user user:password
     re.compile(r"(?i)(?:--user|-u)\s+\S+:\S+"),
     # URL-embedded credentials: scheme://user:password@host
-    re.compile(r"(?i)[a-z][a-z0-9+\-.]*://[^/@\s]+:[^/@\s]+@"),
+    # Bounded quantifiers keep this linear on adversarial input (see _redact_string).
+    _URL_CREDENTIAL_PATTERN,
 ]
 _REDACTED_SENTINEL = "[REDACTED]"
 
@@ -198,6 +297,8 @@ def _redact_string(value: str) -> str:
     """Redact known secret patterns from a string value."""
     result = value
     for pattern in _SECRET_PATTERNS:
+        if pattern is _URL_CREDENTIAL_PATTERN and "://" not in result:
+            continue
         result = pattern.sub(_REDACTED_SENTINEL, result)
     return result
 
@@ -1154,6 +1255,191 @@ def _write_readiness_snapshot(
     return str(path.relative_to(checkpoint_root)), digest
 
 
+def _verified_preexecution_task_families(
+    *,
+    repo: Path,
+    state_root: Path,
+    evidence_root: Path,
+    excluded_trajectory_ids: Sequence[str] = (),
+    holdout_task_ids: Sequence[str] = (),
+) -> tuple[dict[str, str], dict[str, dict[str, str]]]:
+    """Derive research family labels from pre-action, hash-bound Task Cards.
+
+    Only an issuer's declaration already frozen by the canonical lifecycle
+    state can count. There is no task-ID classifier, post-outcome labeling,
+    silent fallback, or new authority store. Missing/ambiguous material is
+    deliberately left unclassified.
+    """
+    families: dict[str, str] = {}
+    provenance: dict[str, dict[str, str]] = {}
+    rejected: set[str] = set()
+    excluded_ids = set(excluded_trajectory_ids)
+    holdout_ids = set(holdout_task_ids)
+    outcomes_root = (evidence_root / "trajectory" / "outcomes").resolve()
+    if not outcomes_root.is_dir():
+        return families, provenance
+
+    # The old readiness interface groups by task ID only. Until it has a
+    # per-attempt provenance binding, reject a task entirely when its outcomes
+    # span distinct attempts. Otherwise a later family declaration could
+    # silently relabel an earlier, unproven trajectory.
+    observed_attempts: dict[str, set[str]] = {}
+    for path in sorted(outcomes_root.glob("*.json")):
+        try:
+            outcome = json.loads(path.read_text(encoding="utf-8"))
+            task = str(outcome.get("task_id") or "")
+            if (
+                task
+                and task not in holdout_ids
+                and str(outcome.get("trajectory_id") or "") not in excluded_ids
+            ):
+                observed_attempts.setdefault(task, set()).add(str(outcome.get("attempt_id") or ""))
+        except (OSError, ValueError, TypeError):
+            continue
+    rejected.update(
+        task for task, attempts in observed_attempts.items() if len(attempts) > 1 or "" in attempts
+    )
+
+    def _one_card_field(text: str, key: str) -> str:
+        pattern = re.compile(rf"^{re.escape(key)}:[ \t]*([^\r\n]*?)[ \t]*$", re.MULTILINE)
+        found = pattern.findall(text)
+        return found[0] if len(found) == 1 else ""
+
+    for outcome_path in sorted(outcomes_root.glob("*.json")):
+        try:
+            outcome = json.loads(outcome_path.read_text(encoding="utf-8"))
+            task_id = str(outcome.get("task_id") or "")
+            if str(outcome.get("trajectory_id") or "") in excluded_ids or task_id in holdout_ids:
+                continue
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", task_id):
+                continue
+            if task_id in rejected:
+                continue
+            state_path = (state_root / f"{task_id}.json").resolve()
+            if state_root.resolve() not in state_path.parents or not state_path.is_file():
+                continue
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            contract = state.get("contract")
+            if not isinstance(contract, Mapping) or not contract:
+                continue
+            if not all(
+                str(row.get("task_id") or "") == task_id for row in (outcome, state, contract)
+            ):
+                continue
+            attempt_id = str(outcome.get("attempt_id") or "")
+            if not attempt_id or attempt_id != str(state.get("attempt_id") or ""):
+                continue
+
+            candidate_path = (
+                evidence_root / str(outcome.get("candidate_evidence_ref") or "")
+            ).resolve()
+            if evidence_root not in candidate_path.parents or not candidate_path.is_file():
+                continue
+            candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
+            if (
+                candidate.get("task_id") != task_id
+                or candidate.get("attempt_id") != attempt_id
+                or candidate.get("record_sha256") != outcome.get("candidate_record_sha256")
+                or candidate.get("record_sha256")
+                != _sha256_json({
+                    key: value for key, value in candidate.items() if key != "record_sha256"
+                })
+                or candidate.get("task_contract_sha256") != _sha256_json(contract)
+                or candidate.get("dataset_eligible") is not True
+                or candidate.get("verifier_status") not in {"PASS", "FAIL"}
+                or candidate.get("label_quality") not in _STRONG_LABELS
+            ):
+                continue
+            target_rev = str(
+                contract.get("target_base_revision") or contract.get("controller_revision") or ""
+            )
+            if target_rev and target_rev != str(candidate.get("source_revision") or ""):
+                continue
+
+            submitted = datetime.fromisoformat(str(state["submitted_at"]).replace("Z", "+00:00"))
+            bound = datetime.fromisoformat(str(outcome["bound_at"]).replace("Z", "+00:00"))
+            if submitted.tzinfo is None or bound.tzinfo is None or submitted > bound:
+                continue
+
+            card_path = Path(str(state.get("task_card_path") or ""))
+            if card_path.is_absolute():
+                controller_root = Path(str(contract.get("controller_repo_root") or ""))
+                if not controller_root.is_absolute():
+                    continue
+                try:
+                    card_rel = card_path.relative_to(controller_root)
+                except ValueError:
+                    continue
+            else:
+                card_rel = card_path
+            if (
+                ".." in card_rel.parts
+                or len(card_rel.parts) < 3
+                or card_rel.parts[0] != "tasks"
+                or card_rel.suffix != ".md"
+            ):
+                continue
+            card_revision = str(state.get("controller_revision") or "")
+            expected_sha = str(state.get("task_card_hash") or "")
+            if (
+                not re.fullmatch(r"[0-9a-f]{40}", card_revision)
+                or not re.fullmatch(r"[0-9a-f]{64}", expected_sha)
+                or contract.get("controller_revision") != card_revision
+            ):
+                continue
+            # Source is the immutable Git object at the issuer's recorded
+            # pre-execution revision, never the mutable current working tree.
+            proc = subprocess.run(
+                ["git", "show", f"{card_revision}:{card_rel.as_posix()}"],
+                cwd=repo,
+                capture_output=True,
+                check=False,
+                timeout=5,
+            )
+            if proc.returncode != 0 or hashlib.sha256(proc.stdout).hexdigest() != expected_sha:
+                continue
+            text = proc.stdout.decode("utf-8")
+            if f"task_id: `{task_id}`" not in text and f"task_id: {task_id}" not in text:
+                continue
+            # The issuer's metadata must occupy one explicit, frozen section;
+            # arbitrary objective or example text cannot become a label.
+            heading = "## Track 1 task-family declaration (issuer, pre-action)"
+            if text.count(heading) != 1:
+                continue
+            section = text.split(heading, 1)[1].split("\n## ", 1)[0]
+            taxonomy = _one_card_field(section, "track1_taxonomy")
+            family = _one_card_field(section, "track1_family")
+            rationale = _one_card_field(section, "track1_family_rationale")
+            if (
+                taxonomy != _TRACK1_FAMILY_TAXONOMY
+                or family not in _TRACK1_FAMILY_CATEGORIES
+                or len(rationale) < 15
+            ):
+                continue
+
+            ref = {
+                "family": family,
+                "taxonomy": taxonomy,
+                "verifier_status": str(candidate["verifier_status"]),
+                "task_card_sha256": expected_sha,
+                "task_contract_sha256": str(candidate["task_contract_sha256"]),
+                "task_card_path": card_rel.as_posix(),
+                "preexecution_revision": card_revision,
+            }
+            if task_id in families and provenance[task_id] != ref:
+                rejected.add(task_id)
+                families.pop(task_id, None)
+                provenance.pop(task_id, None)
+                continue
+            families[task_id] = family
+            provenance[task_id] = ref
+        except (OSError, ValueError, KeyError, TypeError, UnicodeError, subprocess.TimeoutExpired):
+            # A corrupt, absent, stale or post-effect declaration never
+            # manufactures an independently counted family.
+            continue
+    return families, provenance
+
+
 def refresh_registered_experiment(
     *,
     repo_root: str | Path,
@@ -1178,16 +1464,93 @@ def refresh_registered_experiment(
         if candidate_evidence_root is not None
         else resolve_research_evidence_root(repo)
     )
-    readiness = project_corpus_readiness(
-        evidence_root=evidence_root,
-        holdout_task_ids=holdout_tasks,
-        excluded_trajectory_ids=excluded_trajectories,
-    )
     state_root = (
         Path(canonical_state_root).expanduser().resolve()
         if canonical_state_root is not None
         else resolve_canonical_state_root()
     )
+    task_families, family_provenance = _verified_preexecution_task_families(
+        repo=repo,
+        state_root=state_root,
+        evidence_root=evidence_root,
+        excluded_trajectory_ids=excluded_trajectories,
+        holdout_task_ids=holdout_tasks,
+    )
+    readiness = project_corpus_readiness(
+        evidence_root=evidence_root,
+        holdout_task_ids=holdout_tasks,
+        task_family_by_task=task_families,
+        excluded_trajectory_ids=excluded_trajectories,
+    )
+    # A derived, hash-sealed readback of family provenance. The Task Cards and
+    # pre-execution state remain sole producers; this is not a second SSOT.
+    readiness["task_family_provenance"] = family_provenance
+    # The strong PASS and FAIL that unlock a family-disjoint re-audit must
+    # themselves have proven family provenance. An unmapped historical PASS
+    # must never complete the labeled family's binary coverage.
+    verified_labels = [row["verifier_status"] for row in family_provenance.values()]
+    readiness["mapped_family_strong_labels"] = {
+        status: verified_labels.count(status) for status in ("PASS", "FAIL")
+    }
+    if not {"PASS", "FAIL"} <= set(verified_labels):
+        readiness["blockers"].append("mapped_family_binary_coverage_unavailable")
+        readiness["disposition"] = "WAITING_FOR_DATA"
+    # A counted-family total alone is not a scientific split witness. Both
+    # train and dev must contain independently labeled PASS and FAIL tasks.
+    family_members: dict[str, list[tuple[str, str]]] = {}
+    for task_id, row in sorted(family_provenance.items()):
+        family_members.setdefault(row["family"], []).append((task_id, row["verifier_status"]))
+    ordered = sorted(family_members)
+    required_labels = {"PASS", "FAIL"}
+
+    def labels_for(groups: Sequence[str]) -> set[str]:
+        return {label for family in groups for _, label in family_members[family]}
+
+    dev_families: list[str] = []
+    # A single self-contained dev family is preferred. Otherwise two
+    # complementary families suffice for binary classification whenever a
+    # genuine split exists; deterministic and bounded by O(family_count^2).
+    for family in ordered:
+        other = [f for f in ordered if f != family]
+        if required_labels <= labels_for([family]) and required_labels <= labels_for(other):
+            dev_families = [family]
+            break
+    if not dev_families:
+        for i, first in enumerate(ordered):
+            for second in ordered[i + 1 :]:
+                other = [f for f in ordered if f not in {first, second}]
+                if required_labels <= labels_for([first, second]) and required_labels <= labels_for(
+                    other
+                ):
+                    dev_families = [first, second]
+                    break
+            if dev_families:
+                break
+
+    if not dev_families:
+        readiness["blockers"].append("family_disjoint_labeled_split_unavailable")
+        readiness["disposition"] = "WAITING_FOR_DATA"
+        readiness["family_disjoint_split_witness"] = None
+    else:
+        train_families = [f for f in ordered if f not in dev_families]
+        train_rows = sorted(row for f in train_families for row in family_members[f])
+        dev_rows = sorted(row for f in dev_families for row in family_members[f])
+        readiness["family_disjoint_split_witness"] = {
+            "train_families": train_families,
+            "dev_families": dev_families,
+            "train_tasks": [task for task, _ in train_rows],
+            "dev_tasks": [task for task, _ in dev_rows],
+            "train_label_counts": {
+                label: sum(status == label for _, status in train_rows)
+                for label in ("PASS", "FAIL")
+            },
+            "dev_label_counts": {
+                label: sum(status == label for _, status in dev_rows) for label in ("PASS", "FAIL")
+            },
+            "train_dev_overlap": sorted(
+                {task for task, _ in train_rows} & {task for task, _ in dev_rows}
+            ),
+        }
     continuity = dict(spec.get("continuity") or {})
     checkpoint_root = state_root / str(
         continuity.get("checkpoint_relative_root") or "research/clm_system_one"

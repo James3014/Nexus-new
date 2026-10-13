@@ -50,7 +50,8 @@ from nexus.services.issue_closure_guard import (
     verify_post_merge_state,
 )
 
-MAX_INTEGRATION_GENERATIONS: int = 3
+MAX_INTEGRATION_GENERATIONS: int = 5
+DEFAULT_MAX_INTEGRATION_GENERATIONS: int = 5
 MAX_COMPLETION_ELAPSED_SECONDS: float = 2700.0
 
 _GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -432,7 +433,7 @@ def run_github_completion_loop(
     initial_evidence: GitHubOrchestrationEvidence,
     request: StandingGrantRequest | Mapping[str, Any],
     port: GitHubCompletionPort,
-    max_generations: int = 3,
+    max_generations: int = DEFAULT_MAX_INTEGRATION_GENERATIONS,
     max_elapsed_seconds: float = 2700.0,
     git_root: Path | None = None,
     now_provider: Callable[[], datetime] | None = None,
@@ -440,7 +441,7 @@ def run_github_completion_loop(
 ) -> CompletionLoopResult:
     """Execute the bounded GitHub PR drift-completion loop.
 
-    Absorbs ordinary safe main drift automatically up to max_generations (default 3)
+    Absorbs ordinary safe main drift automatically up to max_generations (default 5)
     while failing closed on conflict, foreign push, check failure, authority drift,
     unknown impact, or standing grant mismatch.
     """
@@ -477,10 +478,18 @@ def run_github_completion_loop(
         )
 
     current_evidence = initial_evidence
-    current_generation = (
+    # Note: start_generation tracks the entry baseline generation for this loop invocation.
+    # Relative budgeting (current_generation - start_generation >= max_generations) ensures
+    # that an already-integrated candidate (e.g. resuming at generation 8) receives
+    # its full bounded drift budget for this completion loop run rather than immediately
+    # starving against an absolute generation threshold.
+    start_generation = (
         initial_evidence.integration.generation if initial_evidence.integration else 0
     )
+    current_generation = start_generation
     last_produced_head_sha = initial_evidence.head_sha
+    # Base SHA rejected by the last CAS BASE_MOVED signal, pending corroboration.
+    cas_base_moved_from: str | None = None
 
     while True:
         # Check elapsed time budget
@@ -507,10 +516,22 @@ def run_github_completion_loop(
         # Read current main state
         current_main_sha, current_main_tree_sha = port.read_main_state()
 
+        # A CAS BASE_MOVED signal must be corroborated by observed main movement.
+        # A stable main contradicts it: fail closed instead of re-merging the same generation.
+        if cas_base_moved_from is not None and current_main_sha == cas_base_moved_from:
+            return CompletionLoopResult(
+                outcome=CompletionLoopOutcome.BLOCKED,
+                reason=f"CAS_BASE_MOVED_UNCORROBORATED: main still {current_main_sha}",
+                generation=current_generation,
+                integration_head_sha=last_produced_head_sha,
+                evidence=current_evidence,
+            )
+        cas_base_moved_from = None
+
         # Check if main moved
         if current_main_sha != current_evidence.base_sha:
             # Main has moved! Check generation budget
-            if current_generation >= max_generations:
+            if current_generation - start_generation >= max_generations:
                 return CompletionLoopResult(
                     outcome=CompletionLoopOutcome.DEFERRED_CONCURRENCY,
                     reason="GENERATION_BUDGET_EXHAUSTED",
@@ -1113,7 +1134,8 @@ def run_github_completion_loop(
 
         if cas_result.status == CasMergeStatus.BASE_MOVED:
             # Main moved immediately before/during CAS merge!
-            # Loop to absorb drift (if within generation budget)
+            # Loop to absorb drift (if within generation budget) once main movement is observed
+            cas_base_moved_from = current_evidence.base_sha
             continue
 
         if cas_result.status == CasMergeStatus.AMBIGUOUS_ACK:

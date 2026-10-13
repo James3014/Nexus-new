@@ -1,38 +1,52 @@
 {
-  "commit_sha": "d11aaff8d8cd10234dbfec74e2d5a6a012796cce",
-  "timestamp": 1776438184.09037,
-  "nexus_participation_ratio": 0.85,
+  "commit_sha": "3360668ca10d5a0159416ab4ee5a7fe3eaface27",
+  "timestamp": 1791781672.290102,
+  "status": "SIMULATED",
+  "semantic_status": "UNVERIFIED",
+  "simulated": true,
+  "note": "All metrics are hard-coded constants; nothing was measured.",
+  "nexus_participation_ratio": null,
   "results": [
     {
       "name": "Isolation",
-      "status": "PASS",
+      "status": "SIMULATED",
+      "simulated": true,
+      "would_pass": true,
       "leakage": 0.0
     },
     {
       "name": "Hallucination",
-      "status": "PASS",
-      "rate": 0.0
+      "status": "SIMULATED",
+      "simulated": true,
+      "would_pass": true,
+      "rate": 0.005
     },
     {
       "name": "Concurrency",
-      "status": "PASS",
-      "p95_latency": 3.9352214392994775,
+      "status": "SIMULATED",
+      "simulated": true,
+      "would_pass": true,
+      "p95_latency": 4.048979591836735,
       "recall": 0.98
     },
     {
       "name": "Security",
-      "status": "PASS",
+      "status": "SIMULATED",
+      "simulated": true,
+      "would_pass": true,
       "audit_trail": "PRESENT"
     },
     {
       "name": "Integration",
-      "status": "PASS",
+      "status": "SIMULATED",
+      "simulated": true,
+      "would_pass": true,
       "latency": 2.3
     }
   ],
   "gate_summary": {
-    "acceptance_check": "PASS",
-    "contract_check": "PASS",
-    "ci_gate_full_dry_run": "PASS"
+    "acceptance_check": "NOT_RUN",
+    "contract_check": "NOT_RUN",
+    "ci_gate_full_dry_run": "NOT_RUN"
   }
 }

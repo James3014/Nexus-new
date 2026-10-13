@@ -2,26 +2,26 @@
   "schema": "nexus.wiki.content-freshness.v1",
   "authority": "derived_non_authoritative",
   "status": "PASS",
-  "source_commit": "4efc6d9f45a7d341903c3655074e7c3e37586ab8ca2de7fbf14eec08374a759d",
+  "source_commit": "84800a7adf17d6fbb86255c09a4fdc210a2c2657df45de149bd0649fba95d75e",
   "source_commits": [
+    "01cec356dd347fcd9b515429a3e788e39c1c52f3",
     "084403a64101ed1bb89718e143582db5d73940f7",
-    "0ea262de4144c78c2b72549fd1ece85822025068",
     "106f2c146f46ede727e6078d73e4f58f5669378c",
-    "1a132bdcf02da3abdd0bd8c191a0d509ade36ab2",
-    "1b9dfb1e6a8312f8e87ca73e5b90f66add9ef31d",
+    "21e4e7fd87117584e08ca47e87b0935c1ce34b7e",
     "27833e2e909a80d39b34bba0db9a701d5ffda4db",
+    "2f882cb29856fe5c790355702378e8a6ea594d13",
+    "3396c563322f474733e6ea04cf517abd32f5d852",
     "3fc4fd0d9a3424e5ff729eafbfd84b39fab80aeb",
-    "49f8844ddf3d4d20e429be1afc6d8aac231b4d7b",
     "53fe9d0f2bb6e6f9a9c6b60b7dd6f17f431b5f03",
     "7bcb611322d290cb974405434930db2437d8eab3",
-    "854c1c0a5da04e8e171b26bcd1abad7a20a68ce1",
     "85d0001b527a6fc0c8fd832712f8e43c240c38d4",
+    "895e53883b098b8bfcb9fb7981fc5e39dff825da",
     "9d5565370b90f4f0b321d90d87ce380b3b6629b9",
-    "c46780d326bed62f9dc10f0435c037b3f19463ae",
+    "b6b91b9a5cd0d52cc4d5377b33675014b4e2f399",
+    "ba1cc6a71213a6000ec3cbc97aec1d1dee2a3a51",
     "cbc6cc5ccc94f77925ee4fe880c413f7b6b92e35",
     "ce9ad1fcac384fac8e94cc1be4586205a895a2b1",
-    "dc09c61da6afda1917e52605d08fb67efc57decc",
-    "eed4af89084a7d0cfe8f3320f26f7481550ee948"
+    "ee914dd42faa6d41456a94e5d8b907df558dd241"
   ],
   "pages": [
     {
@@ -41,15 +41,15 @@
           "path": "AGENTS.md",
           "exists": true,
           "kind": "file",
-          "source_commit": "eed4af89084a7d0cfe8f3320f26f7481550ee948",
-          "sha256": "e9c0fe5a1484704075ead8a1ca6167800964c2d29ee7a9880717701336f642a9"
+          "source_commit": "895e53883b098b8bfcb9fb7981fc5e39dff825da",
+          "sha256": "c8d3dda6070e8ee855c2c3dc6f467733ba0eba33b93e4f552f419d77dd3f2935"
         },
         {
-          "path": "MUSE_PROTO.md",
+          "path": "docs/governance/current_operating_mode.yaml",
           "exists": true,
           "kind": "file",
-          "source_commit": "1b9dfb1e6a8312f8e87ca73e5b90f66add9ef31d",
-          "sha256": "76d8d99957500a8dcf2248c61ad9109a8dc1756e3f0ebf04d3b2c7c528c1f9e1"
+          "source_commit": "01cec356dd347fcd9b515429a3e788e39c1c52f3",
+          "sha256": "7aa7d34829d6eb09f153005e88d71593b9435376f6ed52df46413c054b2a4a1a"
         },
         {
           "path": "scripts/ops/check_wiki_governance_closure.py",
@@ -70,7 +70,7 @@
       "classification": "current_needs_review",
       "owner": "nexus-core",
       "exists": true,
-      "content_sha256": "11ef910a8c306f566b576582162ade289e90942d64cbd63216a74b3094a45c2c",
+      "content_sha256": "a3cbd95bc918b57fcbbafbd56171ab59b3540a45d933ef347140078cca97a6f8",
       "source_of_truth": "repository evidence and current runtime reports",
       "required_markers": [],
       "source_paths": [
@@ -78,20 +78,20 @@
           "path": "nexus/core/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "c46780d326bed62f9dc10f0435c037b3f19463ae"
+          "source_commit": "ee914dd42faa6d41456a94e5d8b907df558dd241"
         },
         {
           "path": "nexus/services/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "49f8844ddf3d4d20e429be1afc6d8aac231b4d7b"
+          "source_commit": "3396c563322f474733e6ea04cf517abd32f5d852"
         },
         {
           "path": "scripts/engine/nexus_cli.py",
           "exists": true,
           "kind": "file",
-          "source_commit": "854c1c0a5da04e8e171b26bcd1abad7a20a68ce1",
-          "sha256": "ec69714b08d31dbfe017f47d1b5e0f73f372d8501647137b0c72433e115bed69"
+          "source_commit": "21e4e7fd87117584e08ca47e87b0935c1ce34b7e",
+          "sha256": "debd2c739e7b23513c0adad37032beb907688a26e8e6312258e337e4d2c13f61"
         }
       ],
       "errors": []
@@ -105,7 +105,7 @@
       "classification": "current_needs_review",
       "owner": "nexus-core",
       "exists": true,
-      "content_sha256": "5070e9ef1bd644cfdb3d7cf5e23b0e4939ba2d76f91432b8a4c78ef5daaceb97",
+      "content_sha256": "a0c5220bca7485b8ad5ef340d01a05eac1af18637d798d0dc09ed186f91df873",
       "source_of_truth": "repository evidence and current runtime reports",
       "required_markers": [],
       "source_paths": [
@@ -113,20 +113,20 @@
           "path": "nexus/core/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "c46780d326bed62f9dc10f0435c037b3f19463ae"
+          "source_commit": "ee914dd42faa6d41456a94e5d8b907df558dd241"
         },
         {
           "path": "nexus/services/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "49f8844ddf3d4d20e429be1afc6d8aac231b4d7b"
+          "source_commit": "3396c563322f474733e6ea04cf517abd32f5d852"
         },
         {
           "path": "scripts/engine/nexus_cli.py",
           "exists": true,
           "kind": "file",
-          "source_commit": "854c1c0a5da04e8e171b26bcd1abad7a20a68ce1",
-          "sha256": "ec69714b08d31dbfe017f47d1b5e0f73f372d8501647137b0c72433e115bed69"
+          "source_commit": "21e4e7fd87117584e08ca47e87b0935c1ce34b7e",
+          "sha256": "debd2c739e7b23513c0adad37032beb907688a26e8e6312258e337e4d2c13f61"
         }
       ],
       "errors": []
@@ -155,8 +155,8 @@
           "path": "nexus_wiki_vault/00_Home/CURRENT_STATE.md",
           "exists": true,
           "kind": "file",
-          "source_commit": "1a132bdcf02da3abdd0bd8c191a0d509ade36ab2",
-          "sha256": "11ef910a8c306f566b576582162ade289e90942d64cbd63216a74b3094a45c2c"
+          "source_commit": "2f882cb29856fe5c790355702378e8a6ea594d13",
+          "sha256": "a3cbd95bc918b57fcbbafbd56171ab59b3540a45d933ef347140078cca97a6f8"
         }
       ],
       "errors": []
@@ -170,7 +170,7 @@
       "classification": "current_needs_review",
       "owner": "nexus-core",
       "exists": true,
-      "content_sha256": "7c4b45895c79531cf342e2135cfef8e9f61f47cef9c910da79d4d85f0f6b020c",
+      "content_sha256": "512a3575571fc12624f28c9e9dc952626bdcb1633f9553ece58cbb9d0dbb674f",
       "source_of_truth": "repository evidence and current runtime reports",
       "required_markers": [],
       "source_paths": [
@@ -178,19 +178,19 @@
           "path": "nexus/core/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "c46780d326bed62f9dc10f0435c037b3f19463ae"
+          "source_commit": "ee914dd42faa6d41456a94e5d8b907df558dd241"
         },
         {
           "path": "nexus/engine/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "0ea262de4144c78c2b72549fd1ece85822025068"
+          "source_commit": "ee914dd42faa6d41456a94e5d8b907df558dd241"
         },
         {
           "path": "nexus/services/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "49f8844ddf3d4d20e429be1afc6d8aac231b4d7b"
+          "source_commit": "3396c563322f474733e6ea04cf517abd32f5d852"
         }
       ],
       "errors": []
@@ -219,13 +219,13 @@
           "path": "nexus/core/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "c46780d326bed62f9dc10f0435c037b3f19463ae"
+          "source_commit": "ee914dd42faa6d41456a94e5d8b907df558dd241"
         },
         {
           "path": "nexus/services/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "49f8844ddf3d4d20e429be1afc6d8aac231b4d7b"
+          "source_commit": "3396c563322f474733e6ea04cf517abd32f5d852"
         }
       ],
       "errors": []
@@ -247,14 +247,14 @@
           "path": "nexus/services/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "49f8844ddf3d4d20e429be1afc6d8aac231b4d7b"
+          "source_commit": "3396c563322f474733e6ea04cf517abd32f5d852"
         },
         {
           "path": "scripts/engine/nexus_cli.py",
           "exists": true,
           "kind": "file",
-          "source_commit": "854c1c0a5da04e8e171b26bcd1abad7a20a68ce1",
-          "sha256": "ec69714b08d31dbfe017f47d1b5e0f73f372d8501647137b0c72433e115bed69"
+          "source_commit": "21e4e7fd87117584e08ca47e87b0935c1ce34b7e",
+          "sha256": "debd2c739e7b23513c0adad37032beb907688a26e8e6312258e337e4d2c13f61"
         }
       ],
       "errors": []
@@ -268,7 +268,7 @@
       "classification": "current_needs_review",
       "owner": "agent",
       "exists": true,
-      "content_sha256": "764777a151a3aadb9ec3ae2c045f35dbe5d51687132f401706a75d484a55dc40",
+      "content_sha256": "a585c6b5b7f4599d7a8341c97f0111da8076971bb92cda7a18e85473a1b8d28c",
       "source_of_truth": "compiled-wiki",
       "required_markers": [],
       "source_paths": [
@@ -306,8 +306,8 @@
           "path": "scripts/ops/ci_gate.py",
           "exists": true,
           "kind": "file",
-          "source_commit": "dc09c61da6afda1917e52605d08fb67efc57decc",
-          "sha256": "a2e071087ed6e56e374e030650ac515a1764643152d3afe69acf02c9e77a76e0"
+          "source_commit": "ba1cc6a71213a6000ec3cbc97aec1d1dee2a3a51",
+          "sha256": "fe5693c60c332a737edd7525b9156bafcaba324cf079102bbeb121dfe708d1a3"
         },
         {
           "path": "scripts/ops/wiki_truth_claims_check.py",
@@ -348,19 +348,19 @@
           "path": "nexus/core/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "c46780d326bed62f9dc10f0435c037b3f19463ae"
+          "source_commit": "ee914dd42faa6d41456a94e5d8b907df558dd241"
         },
         {
           "path": "nexus/engine/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "0ea262de4144c78c2b72549fd1ece85822025068"
+          "source_commit": "ee914dd42faa6d41456a94e5d8b907df558dd241"
         },
         {
           "path": "nexus/services/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "49f8844ddf3d4d20e429be1afc6d8aac231b4d7b"
+          "source_commit": "3396c563322f474733e6ea04cf517abd32f5d852"
         },
         {
           "path": "src/governance/transition_engine.rs",
@@ -392,14 +392,14 @@
           "path": "nexus/services/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "49f8844ddf3d4d20e429be1afc6d8aac231b4d7b"
+          "source_commit": "3396c563322f474733e6ea04cf517abd32f5d852"
         },
         {
           "path": "scripts/engine/nexus_cli.py",
           "exists": true,
           "kind": "file",
-          "source_commit": "854c1c0a5da04e8e171b26bcd1abad7a20a68ce1",
-          "sha256": "ec69714b08d31dbfe017f47d1b5e0f73f372d8501647137b0c72433e115bed69"
+          "source_commit": "21e4e7fd87117584e08ca47e87b0935c1ce34b7e",
+          "sha256": "debd2c739e7b23513c0adad37032beb907688a26e8e6312258e337e4d2c13f61"
         }
       ],
       "errors": []
@@ -413,7 +413,7 @@
       "classification": "current_verified",
       "owner": "agent",
       "exists": true,
-      "content_sha256": "a7ee95d9b1ce02cbde0457e6e107a3d3b27f47eb8f3dd54fedbbe4bfdf0af8cd",
+      "content_sha256": "295ff6e9e50d746bf3d84cd66af072f0932ed7a9a6035d2fd77062684a215bb2",
       "source_of_truth": "src/governance/transition_engine.rs",
       "required_markers": [
         "TransitionEngine",
@@ -432,8 +432,8 @@
           "path": "scripts/engine/nexus_cli.py",
           "exists": true,
           "kind": "file",
-          "source_commit": "854c1c0a5da04e8e171b26bcd1abad7a20a68ce1",
-          "sha256": "ec69714b08d31dbfe017f47d1b5e0f73f372d8501647137b0c72433e115bed69"
+          "source_commit": "21e4e7fd87117584e08ca47e87b0935c1ce34b7e",
+          "sha256": "debd2c739e7b23513c0adad37032beb907688a26e8e6312258e337e4d2c13f61"
         },
         {
           "path": "src/governance/transition_engine.rs",
@@ -473,8 +473,8 @@
           "path": "scripts/engine/nexus_cli.py",
           "exists": true,
           "kind": "file",
-          "source_commit": "854c1c0a5da04e8e171b26bcd1abad7a20a68ce1",
-          "sha256": "ec69714b08d31dbfe017f47d1b5e0f73f372d8501647137b0c72433e115bed69"
+          "source_commit": "21e4e7fd87117584e08ca47e87b0935c1ce34b7e",
+          "sha256": "debd2c739e7b23513c0adad37032beb907688a26e8e6312258e337e4d2c13f61"
         }
       ],
       "errors": []
@@ -507,15 +507,15 @@
           "path": "scripts/engine/nexus_cli.py",
           "exists": true,
           "kind": "file",
-          "source_commit": "854c1c0a5da04e8e171b26bcd1abad7a20a68ce1",
-          "sha256": "ec69714b08d31dbfe017f47d1b5e0f73f372d8501647137b0c72433e115bed69"
+          "source_commit": "21e4e7fd87117584e08ca47e87b0935c1ce34b7e",
+          "sha256": "debd2c739e7b23513c0adad37032beb907688a26e8e6312258e337e4d2c13f61"
         },
         {
           "path": "scripts/ops/ci_gate.py",
           "exists": true,
           "kind": "file",
-          "source_commit": "dc09c61da6afda1917e52605d08fb67efc57decc",
-          "sha256": "a2e071087ed6e56e374e030650ac515a1764643152d3afe69acf02c9e77a76e0"
+          "source_commit": "ba1cc6a71213a6000ec3cbc97aec1d1dee2a3a51",
+          "sha256": "fe5693c60c332a737edd7525b9156bafcaba324cf079102bbeb121dfe708d1a3"
         }
       ],
       "errors": []
@@ -540,8 +540,8 @@
           "path": "scripts/ops/ci_gate.py",
           "exists": true,
           "kind": "file",
-          "source_commit": "dc09c61da6afda1917e52605d08fb67efc57decc",
-          "sha256": "a2e071087ed6e56e374e030650ac515a1764643152d3afe69acf02c9e77a76e0"
+          "source_commit": "ba1cc6a71213a6000ec3cbc97aec1d1dee2a3a51",
+          "sha256": "fe5693c60c332a737edd7525b9156bafcaba324cf079102bbeb121dfe708d1a3"
         },
         {
           "path": "scripts/ops/incident_rca_adapter.py",
@@ -581,8 +581,8 @@
           "path": "scripts/ops/ci_gate.py",
           "exists": true,
           "kind": "file",
-          "source_commit": "dc09c61da6afda1917e52605d08fb67efc57decc",
-          "sha256": "a2e071087ed6e56e374e030650ac515a1764643152d3afe69acf02c9e77a76e0"
+          "source_commit": "ba1cc6a71213a6000ec3cbc97aec1d1dee2a3a51",
+          "sha256": "fe5693c60c332a737edd7525b9156bafcaba324cf079102bbeb121dfe708d1a3"
         },
         {
           "path": "scripts/ops/wiki_coverage_audit.py",
@@ -635,8 +635,8 @@
           "path": "scripts/ops/ci_gate.py",
           "exists": true,
           "kind": "file",
-          "source_commit": "dc09c61da6afda1917e52605d08fb67efc57decc",
-          "sha256": "a2e071087ed6e56e374e030650ac515a1764643152d3afe69acf02c9e77a76e0"
+          "source_commit": "ba1cc6a71213a6000ec3cbc97aec1d1dee2a3a51",
+          "sha256": "fe5693c60c332a737edd7525b9156bafcaba324cf079102bbeb121dfe708d1a3"
         },
         {
           "path": "scripts/ops/wiki_truth_claims_check.py",
@@ -662,18 +662,18 @@
       "required_markers": [],
       "source_paths": [
         {
+          "path": ".github/workflows/wiki-governance.yml",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "b6b91b9a5cd0d52cc4d5377b33675014b4e2f399",
+          "sha256": "41f8459582d513bc0f81ca00b7b2b7c3bd93f3cf616bfdfa71c5a571d55a538b"
+        },
+        {
           "path": "AGENTS.md",
           "exists": true,
           "kind": "file",
-          "source_commit": "eed4af89084a7d0cfe8f3320f26f7481550ee948",
-          "sha256": "e9c0fe5a1484704075ead8a1ca6167800964c2d29ee7a9880717701336f642a9"
-        },
-        {
-          "path": "MUSE_PROTO.md",
-          "exists": true,
-          "kind": "file",
-          "source_commit": "1b9dfb1e6a8312f8e87ca73e5b90f66add9ef31d",
-          "sha256": "76d8d99957500a8dcf2248c61ad9109a8dc1756e3f0ebf04d3b2c7c528c1f9e1"
+          "source_commit": "895e53883b098b8bfcb9fb7981fc5e39dff825da",
+          "sha256": "c8d3dda6070e8ee855c2c3dc6f467733ba0eba33b93e4f552f419d77dd3f2935"
         },
         {
           "path": "scripts/ops/check_wiki_governance_closure.py",
@@ -709,8 +709,8 @@
           "path": "nexus_wiki_vault/00_Home/CURRENT_STATE.md",
           "exists": true,
           "kind": "file",
-          "source_commit": "1a132bdcf02da3abdd0bd8c191a0d509ade36ab2",
-          "sha256": "11ef910a8c306f566b576582162ade289e90942d64cbd63216a74b3094a45c2c"
+          "source_commit": "2f882cb29856fe5c790355702378e8a6ea594d13",
+          "sha256": "a3cbd95bc918b57fcbbafbd56171ab59b3540a45d933ef347140078cca97a6f8"
         }
       ],
       "errors": []
@@ -720,7 +720,7 @@
     {
       "path": "scripts/engine/nexus_cli.py",
       "exists": true,
-      "source_commit": "854c1c0a5da04e8e171b26bcd1abad7a20a68ce1",
+      "source_commit": "21e4e7fd87117584e08ca47e87b0935c1ce34b7e",
       "symbols": [
         {
           "name": "nexus",
@@ -750,7 +750,7 @@
     {
       "path": "scripts/ops/ci_gate.py",
       "exists": true,
-      "source_commit": "dc09c61da6afda1917e52605d08fb67efc57decc",
+      "source_commit": "ba1cc6a71213a6000ec3cbc97aec1d1dee2a3a51",
       "symbols": [
         {
           "name": "main",
@@ -931,5 +931,5 @@
     "lifecycle_error_count": 0,
     "error_count": 0
   },
-  "source_fingerprint": "5540c26a52678611d9eadd95252810b1317ac6ff6e384adaf1d1e9edd77d41af"
+  "source_fingerprint": "40e166e12955254b4d07d5af356eea1cabf9db4c27160a8e89c7506da1f93fd3"
 }

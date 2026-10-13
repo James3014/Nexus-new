@@ -223,23 +223,36 @@ _CAPABILITY_COVERAGE_SPEC: dict[str, dict[str, Any]] = {
     },
     "swarm": {
         "selected": lambda r: "swarm" in _csvish(r.get("capability_plan_selected")) or _is_true(r.get("capability_swarm_used")),
-        "invoked": lambda r: _is_true(r.get("capability_swarm_used")),
-        "evidence": lambda r: _as_int(r.get("capability_swarm_evidence_count"), 0) > 0,
-        "gate": lambda r: _as_int(r.get("capability_swarm_evidence_count"), 0) > 0 and _is_true(r.get("capability_claim_verified")),
+        "invoked": lambda r: _is_true(r.get("capability_swarm_used")) and not _is_true(r.get("capability_swarm_synthetic")),
+        "evidence": lambda r: _as_int(r.get("capability_swarm_evidence_count"), 0) > 0
+        and not _is_true(r.get("capability_swarm_synthetic")),
+        "gate": lambda r: _as_int(r.get("capability_swarm_evidence_count"), 0) > 0
+        and _is_true(r.get("capability_claim_verified"))
+        and not _is_true(r.get("capability_swarm_synthetic")),
     },
     "drone": {
         "selected": lambda r: "drone" in _csvish(r.get("capability_plan_selected")) or _is_true(r.get("capability_drone_used")),
-        "invoked": lambda r: _is_true(r.get("capability_drone_used")) or _as_int(r.get("capability_drone_invoked_count"), 0) > 0,
-        "evidence": lambda r: _as_int(r.get("capability_drone_invoked_count"), 0) > 0,
-        "gate": lambda r: _as_int(r.get("capability_drone_invoked_count"), 0) > 0 and _is_true(r.get("capability_claim_verified")),
+        "invoked": lambda r: (_is_true(r.get("capability_drone_used")) or _as_int(r.get("capability_drone_invoked_count"), 0) > 0)
+        and not _is_true(r.get("capability_drone_synthetic")),
+        "evidence": lambda r: _as_int(r.get("capability_drone_invoked_count"), 0) > 0
+        and not _is_true(r.get("capability_drone_synthetic")),
+        "gate": lambda r: _as_int(r.get("capability_drone_invoked_count"), 0) > 0
+        and _is_true(r.get("capability_claim_verified"))
+        and not _is_true(r.get("capability_drone_synthetic")),
     },
     "nightshift": {
         "selected": lambda r: "nightshift" in _csvish(r.get("capability_plan_selected"))
         or _is_true(r.get("capability_nightshift_recommended"))
         or _is_true(r.get("guard_nightshift_recommended")),
-        "invoked": lambda r: _is_true(r.get("capability_nightshift_invoked")) or bool(str(r.get("capability_nightshift_report_path", "")).strip()),
-        "evidence": lambda r: bool(str(r.get("capability_nightshift_report_path", "")).strip()),
-        "gate": lambda r: _is_true(r.get("capability_nightshift_recovered")),
+        "invoked": lambda r: (
+            _is_true(r.get("capability_nightshift_invoked"))
+            or bool(str(r.get("capability_nightshift_report_path", "")).strip())
+        )
+        and not _is_true(r.get("capability_nightshift_synthetic")),
+        "evidence": lambda r: bool(str(r.get("capability_nightshift_report_path", "")).strip())
+        and not _is_true(r.get("capability_nightshift_synthetic")),
+        "gate": lambda r: _is_true(r.get("capability_nightshift_recovered"))
+        and not _is_true(r.get("capability_nightshift_synthetic")),
     },
     "autoreason": {
         "selected": lambda r: "autoreason" in _csvish(r.get("capability_plan_selected")) or _is_true(r.get("autoreason_enabled")),
@@ -694,15 +707,15 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "claim_verified_rate": _rate(rows, lambda r: _is_true(r.get("capability_claim_verified"))),
         "hyper_used_rate": _rate(rows, lambda r: _is_true(r.get("capability_hyper_used"))),
         "self_heal_used_rate": _rate(rows, lambda r: _is_true(r.get("capability_self_heal_used"))),
-        "swarm_used_rate": _rate(rows, lambda r: _is_true(r.get("capability_swarm_used"))),
-        "drone_used_rate": _rate(rows, lambda r: _is_true(r.get("capability_drone_used"))),
+        "swarm_used_rate": _rate(rows, lambda r: _is_true(r.get("capability_swarm_used")) and not _is_true(r.get("capability_swarm_synthetic"))),
+        "drone_used_rate": _rate(rows, lambda r: _is_true(r.get("capability_drone_used")) and not _is_true(r.get("capability_drone_synthetic"))),
         "nightshift_recommended_rate": _rate(
             rows,
             lambda r: _is_true(r.get("capability_nightshift_recommended"))
             or _is_true(r.get("guard_nightshift_recommended")),
         ),
-        "nightshift_invoked_rate": _rate(rows, lambda r: _is_true(r.get("capability_nightshift_invoked"))),
-        "nightshift_recovery_rate": _rate(rows, lambda r: _is_true(r.get("capability_nightshift_recovered"))),
+        "nightshift_invoked_rate": _rate(rows, lambda r: _is_true(r.get("capability_nightshift_invoked")) and not _is_true(r.get("capability_nightshift_synthetic"))),
+        "nightshift_recovery_rate": _rate(rows, lambda r: _is_true(r.get("capability_nightshift_recovered")) and not _is_true(r.get("capability_nightshift_synthetic"))),
         "autoreason_enabled_rate": _rate(rows, lambda r: _is_true(r.get("autoreason_enabled"))),
         "ddtree_enabled_rate": _rate(rows, lambda r: _is_true(r.get("ddtree_enabled"))),
         "ddtree_eligible_rate": _rate(rows, lambda r: _is_true(r.get("ddtree_eligible"))),

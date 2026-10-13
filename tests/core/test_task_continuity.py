@@ -842,3 +842,87 @@ def test_rehydration_projects_authority_revision_and_phase_receipts_when_present
     assert data["authority_binding"]["phase_receipts"] == [phase_receipt]
     assert "authority_revision" not in data["missing_durable_bindings"]
     assert "phase_receipts" not in data["missing_durable_bindings"]
+
+
+@pytest.mark.parametrize(
+    ("override", "value"),
+    [("source_revision", "src-stale"), ("contract_revision", "contract-stale")],
+)
+def test_resume_rejects_stale_snapshot_source_or_contract_revision(override, value):
+    first = event(1, "PLAN_FORMED", next_action="try A", claim_ceiling="bounded")
+    snapshot = project([first])
+    expected = {"source_revision": "src-a", "contract_revision": "contract-a", override: value}
+    with pytest.raises(ValueError, match="snapshot source or contract is stale"):
+        resume(
+            snapshot,
+            [],
+            task_id="task-1",
+            attempt_id="attempt-1",
+            snapshot_hash=snapshot.snapshot_hash,
+            **expected,
+        )
+
+
+def test_resume_rejects_substituted_snapshot_hash_with_correct_identity():
+    first = event(1, "PLAN_FORMED", next_action="try A", claim_ceiling="bounded")
+    snapshot = project([first])
+    other = project([event(1, "PLAN_FORMED", next_action="try B", claim_ceiling="bounded")])
+    assert other.task_id == snapshot.task_id and other.attempt_id == snapshot.attempt_id
+    assert other.snapshot_hash != snapshot.snapshot_hash
+    with pytest.raises(ValueError, match="snapshot hash mismatch"):
+        resume(
+            snapshot,
+            [],
+            task_id="task-1",
+            attempt_id="attempt-1",
+            source_revision="src-a",
+            contract_revision="contract-a",
+            snapshot_hash=other.snapshot_hash,
+        )
+
+
+@pytest.mark.parametrize(
+    ("task_id", "attempt_id"),
+    [("task-foreign", "attempt-1"), ("task-1", "attempt-foreign")],
+    ids=["cross_task", "cross_attempt"],
+)
+def test_resume_rejects_cross_task_or_attempt_tail_event(task_id, attempt_id):
+    first = event(1, "PLAN_FORMED", next_action="try A", claim_ceiling="bounded")
+    snapshot = project([first])
+    foreign = ContinuityEvent(
+        task_id=task_id,
+        attempt_id=attempt_id,
+        sequence=2,
+        event_type="OBSERVATION_RECORDED",
+        summary="foreign",
+        observation="x",
+        previous_hash=snapshot.event_root,
+        source_revision="src-a",
+        contract_revision="contract-a",
+    )
+    with pytest.raises(ValueError, match="foreign task or attempt event"):
+        resume(
+            snapshot,
+            [foreign],
+            task_id="task-1",
+            attempt_id="attempt-1",
+            source_revision="src-a",
+            contract_revision="contract-a",
+            snapshot_hash=snapshot.snapshot_hash,
+        )
+
+
+def test_project_rejects_event_hash_tamper():
+    first = event(1, "PLAN_FORMED", next_action="try A", claim_ceiling="bounded")
+    second = event(
+        2,
+        "ATTEMPT_REJECTED",
+        first.event_hash,
+        summary="A failed",
+        do_not_repeat=("A",),
+        next_action="try B",
+        claim_ceiling="bounded",
+    )
+    object.__setattr__(second, "do_not_repeat", ())
+    with pytest.raises(ValueError, match="continuity event tampered"):
+        project([first, second])

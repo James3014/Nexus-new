@@ -3,6 +3,15 @@ import subprocess
 import os
 import argparse
 import random
+import warnings
+
+warnings.warn(
+    "ARCHIVED 2026-10-12 (#1850; was lab-only #1740): stub fleet manager; "
+    "see ARCHIVED_2026-10-12.md. Scheduled for deletion; do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 
 def get_node_id(port: int, region: str) -> str:
     return f"node-{port}-{region}"

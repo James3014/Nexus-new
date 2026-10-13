@@ -556,8 +556,8 @@ class AgyAccountPoolManager:
                                     and ident.get("source") != "unavailable"
                                 ):
                                     is_avail = True
+                        _ensure_macos_isolated_keychain(str(snapshot_dir))
 
-                    _ensure_macos_isolated_keychain(str(snapshot_dir))
                     env = build_isolated_env(home_dir=str(snapshot_dir))
                     h = hashlib.sha256(name.encode("utf-8")).hexdigest()[:12]
                     records.append(
@@ -642,7 +642,8 @@ class AgyAccountPoolManager:
             if record is not None:
                 record.is_available = is_avail
             else:
-                _ensure_macos_isolated_keychain(str(snapshot_dir))
+                if snapshot_dir.is_dir():
+                    _ensure_macos_isolated_keychain(str(snapshot_dir))
                 env = build_isolated_env(home_dir=str(snapshot_dir))
                 h = hashlib.sha256(name.encode("utf-8")).hexdigest()[:12]
                 new_rec = InternalAccountRecord(

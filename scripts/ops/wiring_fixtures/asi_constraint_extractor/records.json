@@ -1,0 +1,10 @@
+{
+  "positive": [
+    {"status": "discard", "family": "retry_wrapper", "rollback_reason": "retry loop hid the timeout", "evidence": "asi:run-1:retry", "run_id": "run-1"},
+    {"status": "discard", "family": "retry_wrapper", "rollback_reason": "retry loop hid the timeout", "evidence": "asi:run-2:retry", "run_id": "run-2"}
+  ],
+  "negative": [
+    {"status": "discard", "family": "retry_wrapper", "rollback_reason": "retry loop hid the timeout", "evidence": "asi:run-1:retry", "run_id": "run-1"},
+    {"status": "discard", "family": "cache_layer", "rollback_reason": "stale cache served old totals", "evidence": "asi:run-3:cache", "run_id": "run-3"}
+  ]
+}

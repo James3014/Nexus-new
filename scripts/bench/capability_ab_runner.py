@@ -145,12 +145,14 @@ class BenchmarkTotalTimeout(RuntimeError):
     pass
 
 
-def _nexus_cli_subprocess_cmd(args: list[str]) -> list[str]:
+def _nexus_cli_subprocess_cmd(args: list[str], repo_root: Path | str | None = None) -> list[str]:
     python_bin = os.environ.get("NEXUS_BENCH_SUBPROCESS_PYTHON", "").strip()
     if not python_bin:
-        venv_python = Path(".venv/bin/python")
+        # Look for the venv where the subprocess will run (cwd=repo_root), not in this
+        # process's cwd; otherwise a relative path that exists here is missing there.
+        venv_python = Path(repo_root or ".") / ".venv" / "bin" / "python"
         if venv_python.exists():
-            python_bin = str(venv_python)
+            python_bin = str(venv_python.resolve())
     if python_bin:
         return [python_bin, "scripts/engine/nexus_cli.py", *args]
     return ["uv", "run", "scripts/engine/nexus_cli.py", *args]
@@ -2790,14 +2792,17 @@ def _extract_record(
         "capability_nightshift_recommended": bool(capabilities.get("nightshift_recommended", False)),
         "capability_nightshift_invoked": bool(capabilities.get("nightshift_invoked", False)),
         "capability_nightshift_recovered": bool(capabilities.get("nightshift_recovered", False)),
+        "capability_nightshift_synthetic": bool(nightshift_report.get("synthetic", False)),
         "capability_nightshift_report_path": str(capabilities.get("nightshift_report_path") or ""),
         "capability_nightshift_report_schema_version": str(nightshift_report.get("schema_version") or ""),
         "capability_nightshift_failure_reason": str(capabilities.get("nightshift_failure_reason") or nightshift_report.get("failure_reason") or ""),
         "capability_swarm_used": bool(capabilities.get("swarm_used", False)),
+        "capability_swarm_synthetic": bool(swarm_report.get("synthetic", False)),
         "capability_swarm_evidence_count": int(capabilities.get("swarm_evidence_count", 0) or 0),
         "capability_swarm_report_schema_version": str(swarm_report.get("schema_version") or ""),
         "capability_swarm_consensus": str(capabilities.get("swarm_consensus") or swarm_report.get("consensus") or ""),
         "capability_drone_used": bool(capabilities.get("drone_used", False)),
+        "capability_drone_synthetic": bool(drone_report.get("synthetic", False)),
         "capability_drone_invoked_count": int(capabilities.get("drone_invoked_count", 0) or 0),
         "capability_drone_report_schema_version": str(drone_report.get("schema_version") or ""),
         "capability_drone_artifact_path": str(capabilities.get("drone_artifact_path") or ""),
@@ -4019,7 +4024,7 @@ def _run_receipt_first_probe_payload(
     original_target = _read_preserved_target(target_file, materialize_missing=True)
     try:
         res = _run_process_group(
-            _nexus_cli_subprocess_cmd(args),
+            _nexus_cli_subprocess_cmd(args, repo_root),
             cwd=repo_root,
             env=env,
             timeout_sec=effective_timeout,
@@ -5165,9 +5170,11 @@ def _run_with_nexus_codex(
             "self_heal_status": self_heal_status,
         },
     }
+    from nexus.core.repo_root import REPO_ROOT
+
     capability_plan_payload = route.get("capability_plan") if isinstance(route.get("capability_plan"), dict) else None
     if capability_plan_payload is None:
-        capability_plan = CapabilityPlanner().plan(
+        capability_plan = CapabilityPlanner(shared_playbook_root=REPO_ROOT).plan(
             task_desc=task.task_desc,
             task_type=task.task_type,
             route=route,
@@ -5190,7 +5197,7 @@ def _run_with_nexus_codex(
         task_desc=task.task_desc,
         task_type=task.task_type,
         recommended_flow=str(route.get("recommended_flow") or ""),
-        plan=CapabilityPlanner().plan(
+        plan=CapabilityPlanner(shared_playbook_root=REPO_ROOT).plan(
             task_desc=task.task_desc,
             task_type=task.task_type,
             route=route,
@@ -15036,7 +15043,7 @@ def run_with_nexus(
     runner: CliRunner | None = None
     receipt_first_payload: dict[str, Any] | None = None
     if runner_mode == "subprocess":
-        cmd = _nexus_cli_subprocess_cmd(args)
+        cmd = _nexus_cli_subprocess_cmd(args, repo_root)
         env = os.environ.copy()
         env["NEXUS_MEMORY_DB_PATH"] = str(_benchmark_memory_db_path(repo_root, task, start_wall).resolve())
         codeintel_cache_key = task.manifest_hash or "default"
@@ -15120,7 +15127,7 @@ def run_with_nexus(
         if runner_mode == "subprocess":
             try:
                 fallback_res = _run_process_group(
-                    _nexus_cli_subprocess_cmd(fallback_args),
+                    _nexus_cli_subprocess_cmd(fallback_args, repo_root),
                     cwd=repo_root,
                     env=env,
                     timeout_sec=effective_timeout_sec,
@@ -15332,7 +15339,7 @@ def run_with_nexus(
         rescue_start = time.monotonic()
         try:
             if runner_mode == "subprocess":
-                rescue_cmd = _nexus_cli_subprocess_cmd(rescue_args)
+                rescue_cmd = _nexus_cli_subprocess_cmd(rescue_args, repo_root)
                 rescue_res = _run_process_group(rescue_cmd, cwd=repo_root, env=env, timeout_sec=timeout_sec)
                 rescue_output = rescue_res.stdout or ""
             else:
@@ -15544,7 +15551,7 @@ def run_with_nexus(
                     try:
                         retry_output = ""
                         if runner_mode == "subprocess":
-                            retry_cmd = _nexus_cli_subprocess_cmd(retry_args)
+                            retry_cmd = _nexus_cli_subprocess_cmd(retry_args, repo_root)
                             retry_res = _run_process_group(
                                 retry_cmd,
                                 cwd=repo_root,
@@ -15953,7 +15960,7 @@ def _run_without_nexus_impl(
     history_fail_threshold: int = 9999,
     mode: str = "service",
 ) -> dict[str, Any]:
-    if mode in {"gemini", "codex"}:
+    if mode in {"gemini", "codex", "agy"}:
         target_path = Path(target_file)
         test_path = Path(test_file)
         original = target_path.read_text(encoding="utf-8")
@@ -15982,11 +15989,11 @@ def _run_without_nexus_impl(
         direct_infra_retry_reasons: list[str] = []
         direct_infra_retry_raw_tails: list[str] = []
         task_deadline = start + max(1, int(timeout_sec))
-        direct_provider = "codex" if mode == "codex" else "gemini"
-        direct_ask = _ask_direct_codex_patch if direct_provider == "codex" else _ask_direct_gemini_flash_patch
+        direct_provider = mode if mode in {"codex", "agy"} else "gemini"
+        direct_ask = {"codex": _ask_direct_codex_patch, "agy": _ask_direct_agy_patch}.get(direct_provider, _ask_direct_gemini_flash_patch)
         if direct_provider == "codex":
             direct_model_label = os.environ.get("NEXUS_DIRECT_CODEX_MODEL") or os.environ.get("NEXUS_CODEX_MODEL_NAME") or "Codex"
-        else:
+        else:  # gemini (legacy CLI) and agy both label from the direct Gemini model env
             direct_model_label = os.environ.get("NEXUS_DIRECT_GEMINI_MODEL") or os.environ.get("NEXUS_GEMINI_MODEL_NAME") or "Gemini"
         prompt_actor = f"{direct_model_label} running without Nexus orchestration"
         try:
@@ -16028,7 +16035,9 @@ def _run_without_nexus_impl(
             warning_records.extend(_warning_records_from_text(raw, source=f"without_nexus_{direct_provider}_raw"))
             raw_tail = _tail_text(raw, max_chars=1000)
             if isinstance(out, dict):
-                if str(out.get("error_category", "") or "") == "binary_missing":
+                if str(out.get("error_category", "") or "") in {"binary_missing", "agy_missing"}:
+                    model_calls = 0
+                if out.get("provider_call_attempted") is False:  # e.g. no leasable Agy account
                     model_calls = 0
                 patch = str(out.get("patch") or "")
                 gateway_error_category = str(out.get("error_category", "") or "")
@@ -16831,8 +16840,8 @@ def _append_x1_readiness_history(
     max_entries: int = 20,
 ) -> list[dict[str, Any]]:
     history = _load_x1_readiness_history(path)
-    history.append(entry)
-    history = history[-max(1, int(max_entries)):]
+    history = [*history, entry][-max(1, int(max_entries)):]
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(history, indent=2, ensure_ascii=False), encoding="utf-8")
     return history
 
@@ -18997,7 +19006,7 @@ def _build_preflight_sentinel(
         "warning_ledger_required": bool(getattr(args, "evidence_bundle", False)),
         "wall_ledger_required": bool(getattr(args, "evidence_bundle", False)),
         "infra_quarantine_required": not bool(getattr(args, "nexus_only", False)),
-        "provider_token_measured_required": getattr(args, "without_mode", "") in {"gemini", "codex"}
+        "provider_token_measured_required": getattr(args, "without_mode", "") in {"gemini", "codex", "agy"}
         or getattr(args, "with_model_provider", "") in {"gemini", "codex", "ollama"},
         "hidden_verifier_required": True,
         "hidden_verifier_enabled": _hidden_verifier_mode_enabled(),
@@ -19155,12 +19164,12 @@ def build_public_benchmark_preflight(args: argparse.Namespace, *, repo_root: Pat
         failures.append("nexus_model_env_missing")
     force_learn_slo_ready = bool(getattr(args, "force_learn_slo_ready", False))
     external_model_requested = (
-        (not nexus_only and args.without_mode in {"gemini", "codex"})
+        (not nexus_only and args.without_mode in {"gemini", "codex", "agy"})
         or (not without_only and getattr(args, "with_model_provider", "") in {"gemini", "codex"})
     )
     external_export_policy = str(getattr(args, "external_model_export_policy", "unspecified") or "unspecified")
     export_policy_allows_live = external_export_policy in {"approved", "sanitized"}
-    if not nexus_only and args.without_mode in {"gemini", "codex"} and not direct_model:
+    if not nexus_only and args.without_mode in {"gemini", "codex", "agy"} and not direct_model:
         failures.append("direct_model_env_missing")
     if bool(getattr(args, "session_worker", False)) and external_model_requested and not export_policy_allows_live:
         failures.append("external_model_export_policy_required_for_session_worker")
@@ -19177,13 +19186,13 @@ def build_public_benchmark_preflight(args: argparse.Namespace, *, repo_root: Pat
     # PR1: explicit same-model baseline enforcement — fail closed if bare arm is not a real provider path.
     require_same_model_baseline = bool(getattr(args, "require_same_model_baseline", False))
     if require_same_model_baseline:
-        if args.without_mode not in {"gemini", "codex"}:
+        if args.without_mode not in {"gemini", "codex", "agy"}:
             failures.append("same_model_required_but_bare_arm_is_local")
         elif not direct_model:
             failures.append("same_model_required_but_direct_model_env_missing")
         elif env_model and direct_model and env_model != direct_model:
             failures.append("same_model_required_but_model_names_differ")
-    if args.without_mode in {"gemini", "codex"} and args.with_llm_mode == "off":
+    if args.without_mode in {"gemini", "codex", "agy"} and args.with_llm_mode == "off":
         warnings.append(f"with_nexus_llm_off_while_bare_uses_{args.without_mode}")
     if not _hidden_verifier_mode_enabled():
         failures.append("hidden_verifier_disabled")
@@ -19296,6 +19305,27 @@ def build_public_benchmark_preflight(args: argparse.Namespace, *, repo_root: Pat
         "preflight_sentinel": preflight_sentinel,
     }
     return report
+
+
+def _ask_direct_agy_patch(*, prompt: str, timeout_sec: int) -> tuple[dict[str, Any], str]:
+    """Bare-arm provider call through the agy print-mode CLI (see scripts/bench/agy_provider.py)."""
+    from scripts.bench.agy_provider import ask_direct_agy_patch
+
+    return ask_direct_agy_patch(prompt=prompt, timeout_sec=timeout_sec)
+
+
+def _summarize_with_strict_baseline(rows: list[dict[str, Any]], *, strict: bool) -> dict[str, dict[str, Any]]:
+    """Summarize rows; under --strict-llm-baseline model_calls==0 successes are not solves."""
+    from scripts.bench.strict_llm_baseline import (
+        apply_strict_llm_baseline_classification,
+        apply_strict_llm_baseline_to_summary,
+    )
+
+    summary = _summarize_benchmark_rows(rows)
+    if strict:
+        apply_strict_llm_baseline_classification(rows)
+        apply_strict_llm_baseline_to_summary(rows, summary)
+    return summary
 
 
 def main() -> int:
@@ -19429,7 +19459,7 @@ def main() -> int:
         action="store_true",
         help="Fail closed unless the Nexus treatment arm is allowed to auto-route without forced Hyper shortcuts.",
     )
-    parser.add_argument("--without-mode", choices=["service", "bare", "gemini", "codex"], default="bare")
+    parser.add_argument("--without-mode", choices=["service", "bare", "gemini", "codex", "agy"], default="bare")
     parser.add_argument(
         "--require-same-model-baseline",
         action="store_true",
@@ -19580,6 +19610,10 @@ def main() -> int:
 
     if args.gemini_model:
         os.environ["NEXUS_GEMINI_MODEL_NAME"] = str(args.gemini_model).strip()
+    if args.without_mode == "agy":
+        from scripts.bench.agy_provider import configure_agy_lane_env
+
+        configure_agy_lane_env(os.environ)
     if args.with_model_provider == "gemini" and _truthy_env("USE_LOCAL_OLLAMA"):
         args.with_model_provider = "ollama"
     if args.with_model_provider == "ollama":
@@ -19589,7 +19623,7 @@ def main() -> int:
     # PR1: same-model baseline enforcement — map flag into without_mode and env before preflight.
     # This must happen BEFORE build_public_benchmark_preflight reads env_model/direct_model.
     if getattr(args, "require_same_model_baseline", False):
-        args.without_mode = "gemini"
+        args.without_mode = "agy" if args.without_mode == "agy" else "gemini"
         # Propagate gemini-model to direct model env if not already set, so same_model check passes.
         _req_model = str(os.environ.get("NEXUS_GEMINI_MODEL_NAME") or "").strip()
         if _req_model and not os.environ.get("NEXUS_DIRECT_GEMINI_MODEL"):
@@ -19651,7 +19685,7 @@ def main() -> int:
         print(json.dumps(report, indent=2, ensure_ascii=False))
         return 0 if report["status"] == "PASS" else 2
     external_model_requested = (
-        (not bool(args.nexus_only) and args.without_mode in {"gemini", "codex"})
+        (not bool(args.nexus_only) and args.without_mode in {"gemini", "codex", "agy"})
         or (not bool(args.without_only) and args.with_model_provider in {"gemini", "codex"})
     )
     if (
@@ -19727,7 +19761,9 @@ def main() -> int:
             row["history_policy"] = history_policy
             row["learn_slo_policy"] = "forced_ready" if args.force_learn_slo_ready else "repo_state"
             row["hidden_verifier_mode"] = hidden_verifier_mode
-        benchmark_summary = _summarize_benchmark_rows([*with_rows, *without_rows])
+        benchmark_summary = _summarize_with_strict_baseline(
+            [*with_rows, *without_rows], strict=bool(args.strict_llm_baseline)
+        )
         with_path = out_dir / f"with_nexus_{ts}.jsonl"
         without_path = out_dir / f"without_nexus_{ts}.jsonl"
         write_jsonl(with_path, with_rows)
@@ -19771,7 +19807,7 @@ def main() -> int:
                         "parallel_arms": args.parallel_arms,
                         "warning_ledger_required": True,
                         "wall_ledger_required": True,
-                        "provider_token_measured_required": args.without_mode in {"gemini", "codex"}
+                        "provider_token_measured_required": args.without_mode in {"gemini", "codex", "agy"}
                         or args.with_model_provider in {"gemini", "codex", "ollama"},
                         "runner_command": " ".join(sys.argv),
                         "timeout_sec": int(args.timeout_sec),
@@ -20185,7 +20221,9 @@ def main() -> int:
         row["learn_slo_policy"] = "forced_ready" if args.force_learn_slo_ready else "repo_state"
         row["disable_promoted_route_cost_policy"] = bool(args.disable_promoted_route_cost_policy)
         row["hidden_verifier_mode"] = hidden_verifier_mode
-    benchmark_summary = _summarize_benchmark_rows([*with_rows, *without_rows])
+    benchmark_summary = _summarize_with_strict_baseline(
+        [*with_rows, *without_rows], strict=bool(args.strict_llm_baseline)
+    )
 
     with_path = out_dir / f"with_nexus_{ts}.jsonl"
     without_path = out_dir / f"without_nexus_{ts}.jsonl"
@@ -20241,7 +20279,7 @@ def main() -> int:
                     "single_arm_mode": "without_nexus" if args.without_only else "with_nexus" if args.nexus_only else "",
                     "warning_ledger_required": True,
                     "wall_ledger_required": True,
-                    "provider_token_measured_required": args.without_mode in {"gemini", "codex"}
+                    "provider_token_measured_required": args.without_mode in {"gemini", "codex", "agy"}
                     or (not bool(args.without_only) and args.with_model_provider in {"gemini", "codex", "ollama"}),
                     "runner_command": " ".join(sys.argv),
                     "timeout_sec": int(args.timeout_sec),

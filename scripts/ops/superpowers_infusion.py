@@ -6,7 +6,11 @@ from pathlib import Path
 from sentence_transformers import SentenceTransformer
 
 class OmniInfusion:
-    def __init__(self, db_path=str(__import__("pathlib").Path(__file__).resolve().parents[2] / ".nexus/vector_db/")):
+    def __init__(self, db_path=None):
+        if db_path is None:
+            from nexus.services.lancedb_roots import VECTOR_DB, resolve_lancedb_root
+
+            db_path = str(resolve_lancedb_root(VECTOR_DB, Path(__file__).resolve().parents[2]))
         self.db_path = os.path.expanduser(db_path)
         self.model = SentenceTransformer("all-MiniLM-L6-v2")
         self.db = lancedb.connect(self.db_path)

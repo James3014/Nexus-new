@@ -17,7 +17,7 @@ class LatentPredictorV20:
     def __init__(self, workspace_root: Path):
         self.workspace_root = workspace_root
         # 整合現有的 VectorRAG 用於隱空間檢索
-        self.rag = VectorRAG(db_path=".nexus/vector_db")
+        self.rag = VectorRAG()
         self.history_limit = 5
 
     def forecast_roi(self, task_desc: str) -> Dict[str, Any]:

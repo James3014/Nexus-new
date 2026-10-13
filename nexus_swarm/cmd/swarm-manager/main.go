@@ -1,3 +1,9 @@
+//go:build legacy_v18_demo
+
+// RETIRED legacy v17/v18 demo manager (kept for reference, not built). It targets the Sensing/Heartbeat messages that were
+// removed from api/proto, so it is excluded from `go build ./...`. The maintained
+// deploy binary is ./manager.
+
 package main
 
 import (

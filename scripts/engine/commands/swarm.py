@@ -40,8 +40,9 @@ def register(nexus_group, REPO_ROOT):
     @click.option("--verbose-prompt", is_flag=True, help="Display injected self-awareness prompt")
     @click.option("--delivery-mode", default="standard", help="Execution priority: low|standard|high")
     @click.option("--report-file", default=None, type=click.Path(path_type=Path), help="Optional completion envelope path.")
+    @click.option("--tag", "create_tag", is_flag=True, help="Opt in to git tagging of high-scoring spec packs (off by default; only tags verified runs).")
     @click.option("--output-json", is_flag=True)
-    def swarm_run(task_name, verbose_prompt, delivery_mode, report_file, output_json):
+    def swarm_run(task_name, verbose_prompt, delivery_mode, report_file, create_tag, output_json):
         """🚀 Initiate swarm mission with cognitive awareness."""
         # 🛡️ 物理化任務 ID 安全化 (防止檔名衝突與特殊字元)
         import hashlib
@@ -63,6 +64,12 @@ def register(nexus_group, REPO_ROOT):
                 print("--------------------------------------------")
             except (ImportError, AttributeError) as e:
                 print(f"⚠️  [Nexus:Swarm] Self-Awareness injection failed: {e}")
+
+        import os
+        if create_tag:
+            os.environ["NEXUS_SPEC_AUTO_TAG"] = "1"
+        else:
+            os.environ.pop("NEXUS_SPEC_AUTO_TAG", None)
 
         report_target = report_file or f".nexus/reports/swarm/{safe_task_id}.json"
 
@@ -110,30 +117,3 @@ def register(nexus_group, REPO_ROOT):
                 print(f"❌ [Nexus:Swarm] Critical execution error: {e}")
                 print(f"Report: {written}")
             sys.exit(1)
-
-    @swarm.command(name="quiet-moment")
-    @click.option("--reason", required=True, help="Why the swarm must pause.")
-    @click.option("--node", "nodes", multiple=True, help="Affected node id. Repeat for multiple nodes.")
-    @click.option("--resume-after", default=10, type=int, help="Expected pause duration in seconds.")
-    @click.option("--output-json", is_flag=True)
-    def swarm_quiet_moment(reason, nodes, resume_after, output_json):
-        """Emit a user-visible, non-mutating Quiet Moment packet."""
-        from nexus.core.evolution_protocols import build_quiet_moment_event
-
-        event = build_quiet_moment_event(
-            reason=reason,
-            affected_nodes=list(nodes) or ["local"],
-            resume_after_seconds=resume_after,
-        )
-        event["observe"] = {"status": "observed", "node_count": len(event["affected_nodes"])}
-        event["rollback"] = {"status": "armed", "allowed": True}
-        if output_json:
-            print(json.dumps(event, indent=2, ensure_ascii=False))
-            return
-        click.echo(f"Quiet Moment: {reason}")
-        click.echo(f"Affected nodes: {', '.join(event['affected_nodes'])}")
-        click.echo(f"Resume after: {event['resume_after_seconds']}s")
-        click.echo("Allowed actions: observe, report, rollback")
-        click.echo("Observe: observed")
-        click.echo("Rollback: armed")
-        click.echo("Production writes: blocked")

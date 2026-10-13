@@ -1,3 +1,9 @@
+"""LAB-ONLY synthetic demo (#1739). Not a delegation backend.
+
+It replays a fixed fake mission and is reachable only via `--synthetic-demo --root DIR`.
+`nexus delegate` is retired and no longer calls this module; real multi-agent work
+uses `nexus multi-agent create-task|start|submit|verify`.
+"""
 import json, sys, os
 from pathlib import Path
 from datetime import datetime
@@ -50,6 +56,25 @@ class SupervisorEngine:
         (self.repo_root / ".nexus" / "metabolism" / "mission_complete.json").write_text(json.dumps(summary, indent=2))
         print("✅ [Final] Mission Synthetic Completion. Manifest anchored at .nexus/metabolism/mission_complete.json")
 
+# Exit code for "no real delegation backend" (EX_CONFIG), matching LEGACY_EXTRA_REQUIRED.
+EXIT_NO_DELEGATION_BACKEND = 78
+
+
+def main(argv: list[str]) -> int:
+    """CLI entry. The engine only replays a fixed synthetic demo, so it must not
+    stand in for real delegation: refuse unless the demo is requested explicitly
+    against an explicit root, and never write into the caller's checkout by default."""
+    if len(argv) >= 3 and argv[0] == "--synthetic-demo" and argv[1] == "--root":
+        SupervisorEngine(Path(argv[2])).run_swarm_mission("Build Inventory Monolith")
+        return 0
+    task = " ".join(argv) or "<none>"
+    sys.stderr.write(
+        "DELEGATION_BACKEND_UNAVAILABLE: supervisor_engine only replays a fixed synthetic demo "
+        f"and cannot delegate task {task!r}. This module is LAB-ONLY (#1739); `nexus delegate` is retired. "
+        "Use `nexus multi-agent create-task|start|submit|verify` for real worktree delegation.\n"
+    )
+    return EXIT_NO_DELEGATION_BACKEND
+
+
 if __name__ == "__main__":
-    engine = SupervisorEngine(Path.cwd())
-    engine.run_swarm_mission("Build Inventory Monolith")
+    sys.exit(main(sys.argv[1:]))

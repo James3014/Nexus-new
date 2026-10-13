@@ -98,3 +98,23 @@ class OllamaClient:
                 f.write("="*80 + "\n")
         except Exception:
             pass
+
+
+HEAL_DEFAULT_NUM_CTX = 4096
+HEAL_DEFAULT_NUM_PREDICT = 768
+
+
+def default_heal_generation_options() -> Dict[str, Any]:
+    """Ollama options of the proven bare HealPipeline lane.
+
+    ``benchmarking.swebench_lite.swe_local_heal.nexus_local_generate`` sends these on every
+    call (the per-phase ``ollama_options`` never reach it). The armor lane bridge uses the
+    same values so both lanes share one generation contract.
+    """
+    import os
+
+    return {
+        "temperature": 0.0,
+        "num_ctx": int(os.environ.get("NEXUS_OLLAMA_NUM_CTX", HEAL_DEFAULT_NUM_CTX)),
+        "num_predict": int(os.environ.get("NEXUS_OLLAMA_NUM_PREDICT", HEAL_DEFAULT_NUM_PREDICT)),
+    }

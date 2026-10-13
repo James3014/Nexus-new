@@ -1,3 +1,4 @@
+import pytest
 import json
 from pathlib import Path
 
@@ -55,6 +56,14 @@ from scripts.ops.run_skill_fit_ablation_matrix import (
     run_matrix,
     run_resume_manifest,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_default_docs_catalog(tmp_path, monkeypatch):
+    """run_matrix writes the default docs catalog when no path is given; keep tests off the tracked file."""
+    import scripts.ops.run_skill_fit_ablation_matrix as matrix_mod
+
+    monkeypatch.setattr(matrix_mod, "DEFAULT_DOCS_CATALOG_PATH", tmp_path / "default_docs_catalog.json")
 
 
 def _candidate_pool():

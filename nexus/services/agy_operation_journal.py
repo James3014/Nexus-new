@@ -655,6 +655,12 @@ class AgyOperationJournal(DirectOperationJournal):
         if not group_alive and wrapper_pid:
             group_alive = _process_group_alive(wrapper_pid)
 
+        # Only a recorded provider PID that this pass observed dead may be projected EXITED.
+        observed_exit: dict[str, Any] = (
+            {"provider_process_state": "EXITED"}
+            if isinstance(provider_pid, int) and provider_pid > 0
+            else {}
+        )
         if not provider_alive and not group_alive:
             if status == "OUTCOME_UNKNOWN":
                 reconciliation = dict(record.get("reconciliation") or {})
@@ -670,6 +676,7 @@ class AgyOperationJournal(DirectOperationJournal):
                     operation_id,
                     phase="TERMINAL",
                     reconciliation=reconciliation,
+                    **observed_exit,
                 )
             result = super().reconcile(
                 operation_id,
@@ -735,4 +742,5 @@ class AgyOperationJournal(DirectOperationJournal):
                 "provider_alive_after": False,
                 "retry_permitted": False,
             },
+            **observed_exit,
         )

@@ -3,8 +3,12 @@ import json
 from pathlib import Path
 from datetime import datetime
 
+from nexus.services.lancedb_roots import VECTOR_DB, resolve_lancedb_root
+
 class WisdomVault:
-    def __init__(self, db_path=str(__import__("pathlib").Path(__file__).resolve().parents[3] / ".nexus/vector_db/")):
+    def __init__(self, db_path=None):
+        if db_path is None:
+            db_path = str(resolve_lancedb_root(VECTOR_DB, Path(__file__).resolve().parents[3]))
         self.db_path = os.path.expanduser(db_path)
         self._model = None
         self._db = None

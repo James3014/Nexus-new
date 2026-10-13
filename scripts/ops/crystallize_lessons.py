@@ -2,8 +2,20 @@ import json, sys, os
 from pathlib import Path
 from datetime import datetime, timezone
 
-def crystallize():
-    project_root = Path(__file__).resolve().parents[2]
+def _belief_recorded(beliefs_path: Path, belief_id: str) -> bool:
+    if not beliefs_path.exists():
+        return False
+    for line in beliefs_path.read_text(encoding="utf-8").splitlines():
+        try:
+            if json.loads(line).get("belief_id") == belief_id:
+                return True
+        except (json.JSONDecodeError, AttributeError):
+            continue
+    return False
+
+
+def crystallize(project_root: Path | None = None):
+    project_root = Path(project_root) if project_root else Path(__file__).resolve().parents[2]
     lessons_path = project_root / ".codex_lessons.md"
     knowledge_dir = project_root / ".nexusknowledge"
     
@@ -21,6 +33,12 @@ def crystallize():
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
     
+    # The belief is a fixed constant, so re-running must not append duplicates
+    # to the git-tracked knowledge base.
+    if _belief_recorded(knowledge_dir / "beliefs.jsonl", belief["belief_id"]):
+        print(f"ℹ️ {belief['belief_id']} already anchored; nothing to append.")
+        return
+
     # 寫入物理知識庫
     with open(knowledge_dir / "beliefs.jsonl", "a") as f:
         f.write(json.dumps(belief) + "\n")

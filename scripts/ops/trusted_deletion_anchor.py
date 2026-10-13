@@ -41,13 +41,13 @@ TRUSTED_EXTERNAL_RUNTIME_PACKAGES: tuple[tuple[str, str, str, str], ...] = (
         "nexus-learning",
         "nexus_learning",
         "https://github.com/James3014/nexus-learning.git",
-        "d09f05b942f35236562ae26e7b718d111368b0b1",
+        "a48bd876b758069f4dd15c24d0d32f1f2486d319",
     ),
     (
         "nexus-runtime",
         "nexus_runtime",
         "https://github.com/James3014/nexus-runtime.git",
-        "0a39e52770230a74c5431c0f9cc73a63fb090d8b",
+        "2766c154ae9fa129a5d8d6a38244276e77b453bc",
     ),
 )
 UV_VERSION = "uv 0.9.2"
@@ -166,6 +166,96 @@ TRUSTED_PR1507_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, s
         "db1bd37456a5d302c0f508ab5ca193750f9d715985f2dcf5e67743a70e9d2667",
     ),
 )
+# Exact one-use, four-way binding for Owner-authorized PR #1545 (Issue #1544
+# Runtime/Learning false-green consumer settlement).
+TRUSTED_PR1545_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    1545,
+    (
+        "10eb27a29cfb60d8cc45e223a68a1221f7f285b04d2b9ab58f1ed2096b11a829",
+        "db1bd37456a5d302c0f508ab5ca193750f9d715985f2dcf5e67743a70e9d2667",
+        "ae373bf727465af0a4692785ac2abf4cb521e5398dc721ee7dcf5fe05ebf07e2",
+        "28fcbc0a1cf233b3e2170545d9896042a9d99307480238426e00e3897490febb",
+    ),
+)
+# Exact one-use, four-way binding for Owner-authorized PR #1661 (Issue #1544
+# Runtime 0456b78 / Learning 33acad4 consumer settlement + Phase 2.5 import switch).
+TRUSTED_PR1661_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    1661,
+    (
+        "10eb27a29cfb60d8cc45e223a68a1221f7f285b04d2b9ab58f1ed2096b11a829",
+        "db1bd37456a5d302c0f508ab5ca193750f9d715985f2dcf5e67743a70e9d2667",
+        "ac96e101471ef46cea2e81af1859b68070fbf89af43ca7c004ecf58c19a7b0e4",
+        "dfe0167a759b83769fec605e88bb3186ba3eba36f4b243dffdcded71db4bdc4c",
+    ),
+)
+# Exact one-use, four-way binding for Owner-authorized PR #1637 (Issue #1636
+# nexus-learning canonical pin 33acad4 -> 1eb7229, BOUNDARY v2 Phases 1-4).
+TRUSTED_PR1637_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    1637,
+    (
+        "ac96e101471ef46cea2e81af1859b68070fbf89af43ca7c004ecf58c19a7b0e4",
+        "dfe0167a759b83769fec605e88bb3186ba3eba36f4b243dffdcded71db4bdc4c",
+        "ca23695a4cfbca27f64bc163655256ae45cb0b12933cffe7c07c5aff91da440d",
+        "2f5282586cbc972ad6990be39f5f7789efe1f7fcfa9b2b8eaa7508eccf03224f",
+    ),
+)
+
+# Exact one-use, four-way binding for Owner-authorized PR #1789 (Issue #1788
+# Phase 4b planner aliasing + Phase 5b-1; nexus-runtime 0456b78 -> ece9bd3).
+TRUSTED_PR1789_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    1789,
+    (
+        "ca23695a4cfbca27f64bc163655256ae45cb0b12933cffe7c07c5aff91da440d",
+        "2f5282586cbc972ad6990be39f5f7789efe1f7fcfa9b2b8eaa7508eccf03224f",
+        "96331173f3ce5c1c91f7a20d011f1af2d4a927602ede40eacf91c343a0453b9a",
+        "6df6eff22f2bb3dcddbd3c4fd16483a91aeac644ca1bc098ef0a7a153088e3e2",
+    ),
+)
+
+# Exact one-use, four-way binding for Owner-authorized PR #1796 (Issue #1795
+# Phase 5b-2 retry budget and identity; nexus-runtime ece9bd3 -> cfcb38d).
+TRUSTED_PR1796_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    1796,
+    (
+        "96331173f3ce5c1c91f7a20d011f1af2d4a927602ede40eacf91c343a0453b9a",
+        "6df6eff22f2bb3dcddbd3c4fd16483a91aeac644ca1bc098ef0a7a153088e3e2",
+        "16b2ee33278ec5fdf156b47f1d8f30bd167509616c3c8d506d358aa9bad1239d",
+        "0a50680697e7abbe0b26e6d3e6eef235d9c1e3244a5527b87ac47d57fe2f0015",
+    ),
+)
+# Exact one-use, four-way binding for Owner-authorized PR #1804 (Issue #1803
+# canonical nexus-learning 1eb7229 -> a48bd87).
+TRUSTED_PR1804_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    1804,
+    (
+        "16b2ee33278ec5fdf156b47f1d8f30bd167509616c3c8d506d358aa9bad1239d",
+        "0a50680697e7abbe0b26e6d3e6eef235d9c1e3244a5527b87ac47d57fe2f0015",
+        "91745c8beac9a1363e18b3dd13e743590c754a98d27dc2f0bff97874a94f0257",
+        "e605aa1109b70d6c99c124e30997f0acf45b72300624a155b4499cc8e2632f52",
+    ),
+)
+# Exact one-use, four-way binding for Owner-authorized PR #1857 (Issue #1853
+# External Intelligence ChatGPT Web consumer route; nexus-runtime cfcb38d -> 29a8dcf).
+TRUSTED_PR1857_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    1857,
+    (
+        "91745c8beac9a1363e18b3dd13e743590c754a98d27dc2f0bff97874a94f0257",
+        "e605aa1109b70d6c99c124e30997f0acf45b72300624a155b4499cc8e2632f52",
+        "57e07fd5272cb64774464bec61e3d8b475898782bcfd048d6930b873336afd75",
+        "7808d62f2eaf6ab80a4b56c74563c5053ebe2764d64591f46a5c30b7c4a96068",
+    ),
+)
+# Exact one-use, four-way binding for Owner-authorized PR #1908 (Issue #1904
+# External Intelligence on free-plan ChatGPT Thinking; nexus-runtime 29a8dcf -> 2766c15).
+TRUSTED_PR1908_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    1908,
+    (
+        "57e07fd5272cb64774464bec61e3d8b475898782bcfd048d6930b873336afd75",
+        "7808d62f2eaf6ab80a4b56c74563c5053ebe2764d64591f46a5c30b7c4a96068",
+        "275eceb0af8e4d07a7373359bd0811c8147a403f9fa4d49739f20dd1d974c762",
+        "09f17508d34972268d4c7cff6877c447cf8586eff8684bbbbc6170255ca368d4",
+    ),
+)
 
 REQUIRED_EVIDENCE_KEYS = {
     "schema_version",
@@ -249,6 +339,14 @@ def _validate_trusted_dependency_contract(
         TRUSTED_PR1375_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR1380_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR1507_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR1545_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR1661_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR1637_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR1789_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR1796_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR1804_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR1857_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR1908_DEPENDENCY_SNAPSHOT_TRANSITION,
     )
     for authorized_transition_record in authorized_transition_records:
         if authorized_transition_record is None:
@@ -961,6 +1059,24 @@ def _git(repo: Path, *args: str, binary: bool = False) -> bytes | str:
     return result.stdout if binary else result.stdout.decode().strip()
 
 
+def _init_ephemeral_bare_repo(path: Path) -> None:
+    """Create a bare repo with background maintenance off.
+
+    Fetches otherwise trigger detached commit-graph/gc writes that can outlive
+    the command and race TemporaryDirectory cleanup ("commit-graphs" not empty).
+    """
+
+    subprocess.run(["git", "init", "--bare", str(path)], check=True, capture_output=True)
+    for key, value in (
+        ("gc.auto", "0"),
+        ("gc.autoDetach", "false"),
+        ("gc.writeCommitGraph", "false"),
+        ("fetch.writeCommitGraph", "false"),
+        ("maintenance.auto", "false"),
+    ):
+        _git(path, "config", key, value)
+
+
 def _canonical_raw_diff(repo: Path, base_sha: str, head_sha: str) -> bytes:
     """Return a raw diff whose object ids are independent of repository abbrev state."""
 
@@ -986,7 +1102,7 @@ def _create_git_bundle(
 
     with tempfile.TemporaryDirectory(prefix="trusted-anchor-bundle-") as directory:
         ephemeral = Path(directory) / "repo.git"
-        subprocess.run(["git", "init", "--bare", str(ephemeral)], check=True, capture_output=True)
+        _init_ephemeral_bare_repo(ephemeral)
         _git(ephemeral, "fetch", "--no-tags", str(repo), base_sha, head_sha, workflow_sha)
         for ref, revision in (
             (BASE_REF, base_sha),
@@ -1403,9 +1519,14 @@ def _verifier(args: argparse.Namespace) -> None:
     if identity.get("run_id") != args.expected_run_id:
         raise SystemExit(1)
     git_bundle = (bundle / "git-objects.bundle").read_bytes()
-    with tempfile.TemporaryDirectory(prefix="trusted-anchor-verify-") as directory:
+    # Every verification decision below is made inside the block and raises
+    # before cleanup; a cleanup error must neither fail a PASS nor replace a
+    # failure, so it is ignored as a backstop to the quiescent repository.
+    with tempfile.TemporaryDirectory(
+        prefix="trusted-anchor-verify-", ignore_cleanup_errors=True
+    ) as directory:
         git_repo = Path(directory) / "repo.git"
-        subprocess.run(["git", "init", "--bare", str(git_repo)], check=True, capture_output=True)
+        _init_ephemeral_bare_repo(git_repo)
         subprocess.run(
             ["git", "bundle", "verify", str(bundle / "git-objects.bundle")],
             cwd=git_repo,

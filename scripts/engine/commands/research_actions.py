@@ -83,9 +83,10 @@ def _default_route_builder(**kwargs: Any) -> dict[str, Any]:
 
 
 def _default_planner_factory() -> ResearchPlannerLike:
+    from nexus.core.repo_root import REPO_ROOT
     from nexus.engine.capability_planner import CapabilityPlanner
 
-    return CapabilityPlanner()
+    return CapabilityPlanner(shared_playbook_root=REPO_ROOT)
 
 
 def _default_learning_policy_loader(repo_root: Path) -> Any:
@@ -246,6 +247,7 @@ def run_research_auto_flow(
 ) -> ResearchAutoFlowResult:
     from nexus.engine.completion_contract import build_completion_envelope
     from nexus.engine.completion_enforcer import CompletionEnforcementError
+    from nexus.research.flow.meta_opt_preset import apply_meta_opt_preset
 
     root = Path(repo_root)
     preflight: dict[str, Any] | None = None
@@ -281,6 +283,19 @@ def run_research_auto_flow(
                 blocked=True,
             )
 
+    tuned, meta_opt_evidence = apply_meta_opt_preset(
+        root,
+        {
+            "timeout_sec": timeout_sec,
+            "stage1_timeout_sec": stage1_timeout_sec,
+            "max_time_ratio_guard": max_time_ratio_guard,
+            "baseline_fast_sec": baseline_fast_sec,
+            "history_window": history_window,
+            "history_fail_threshold": history_fail_threshold,
+            "dynamic_timeout_multiplier": dynamic_timeout_multiplier,
+            "min_dynamic_stage1_timeout": min_dynamic_stage1_timeout,
+        },
+    )
     payload, out_path = (auto_flow_runner or _default_auto_flow_runner)(
         repo_root=root,
         task_desc=task_desc,
@@ -294,14 +309,14 @@ def run_research_auto_flow(
         llm_mode=llm_mode,
         llm_baseline=llm_baseline,
         llm_baseline_required=llm_baseline_required,
-        timeout_sec=timeout_sec,
-        stage1_timeout_sec=stage1_timeout_sec,
-        max_time_ratio_guard=max_time_ratio_guard,
-        baseline_fast_sec=baseline_fast_sec,
-        history_window=history_window,
-        history_fail_threshold=history_fail_threshold,
-        dynamic_timeout_multiplier=dynamic_timeout_multiplier,
-        min_dynamic_stage1_timeout=min_dynamic_stage1_timeout,
+        timeout_sec=tuned["timeout_sec"],
+        stage1_timeout_sec=tuned["stage1_timeout_sec"],
+        max_time_ratio_guard=tuned["max_time_ratio_guard"],
+        baseline_fast_sec=tuned["baseline_fast_sec"],
+        history_window=tuned["history_window"],
+        history_fail_threshold=tuned["history_fail_threshold"],
+        dynamic_timeout_multiplier=tuned["dynamic_timeout_multiplier"],
+        min_dynamic_stage1_timeout=tuned["min_dynamic_stage1_timeout"],
         force_flow=force_flow,
         report_file=report_file,
         output_file=output_file,
@@ -325,6 +340,8 @@ def run_research_auto_flow(
         semantic_failures=semantic_failures,
     )
     response_payload = _merge_completion_payload(payload, completion_payload)
+    if meta_opt_evidence is not None:
+        response_payload["meta_opt_preset"] = meta_opt_evidence
     if research_session_id:
         response_payload["research_preflight"] = preflight
         response_payload["research_session"] = (session_result_attacher or _default_research_session_attacher)(

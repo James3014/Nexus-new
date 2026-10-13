@@ -46,31 +46,57 @@ class MemPalace:
             return []
 
     def trigger_arweave_distillation(self, data: Dict[str, Any]) -> str:
-        """🔄 v25.5 Infinite Context Loop: 模擬 Arweave 永久化。"""
-        mock_tx_id = f"ARW-{os.urandom(8).hex()}"
-        logger.info(f"🌐 [Arweave] Distillation Complete. TX: {mock_tx_id}")
+        """SIMULATED Arweave permanence: nothing is uploaded.
+
+        The returned id is a random placeholder prefixed ``SIMULATED-`` so it can
+        never be mistaken for a real transaction.
+        """
+        mock_tx_id = f"SIMULATED-ARW-{os.urandom(8).hex()}"
+        logger.info(f"[Arweave] SIMULATED distillation (NOT uploaded). Placeholder id: {mock_tx_id}")
         return mock_tx_id
 
     def sync(self) -> Dict[str, Any]:
         """🔄 SYNC: Sync memory with Arweave/Registry and refresh blacklist."""
         blacklist_path = self.project_root / "nexus/config/ethical_blacklist.json"
         blacklist = []
+        blacklist_source = "missing"
         if blacklist_path.exists():
             try:
                 with open(blacklist_path, 'r') as f:
                     blacklist = json.load(f).get("patterns", [])
+                blacklist_source = "file"
             except Exception as e:
+                blacklist_source = "unreadable"
                 logger.error(f"❌ [MemPalace] Failed to load blacklist: {e}")
+        else:
+            logger.warning("⚠️ [MemPalace] Ethical blacklist file missing: %s", blacklist_path)
 
         self.cache.delete("nexus:ethical_blacklist")
         if blacklist:
             self.cache.sadd("nexus:ethical_blacklist", *blacklist)
-        return {"status": "SUCCESS", "synced_patterns": len(blacklist)}
+        self._blacklist_synced = True
+        return {
+            "status": "SUCCESS",
+            "synced_patterns": len(blacklist),
+            "blacklist_source": blacklist_source,
+        }
+
+    def _active_blacklist(self) -> set:
+        """Blacklist patterns, loading them from disk on first use in this process.
+
+        The cache is in-process only, so verifying without a prior sync() would
+        otherwise check against an empty blacklist even when the file exists.
+        """
+        patterns = self.cache.smembers("nexus:ethical_blacklist")
+        if not patterns and not getattr(self, "_blacklist_synced", False):
+            self.sync()
+            patterns = self.cache.smembers("nexus:ethical_blacklist")
+        return patterns
 
     def verify(self, candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """🛡️ VERIFY: Filter candidates against ethical blacklist."""
         if not candidates: return []
-        blacklist = self.cache.smembers("nexus:ethical_blacklist")
+        blacklist = self._active_blacklist()
         clean_candidates = []
         for cand in candidates:
             content = str(cand)
@@ -80,7 +106,7 @@ class MemPalace:
 
     def verify_context(self, context: str) -> Dict[str, Any]:
         """[TD-2] Quick contextual check against blacklist."""
-        blacklist = self.cache.smembers("nexus:ethical_blacklist")
+        blacklist = self._active_blacklist()
         for pattern in blacklist:
             if pattern in context:
                 return {"status": "BLOCKED", "reason": pattern}
@@ -95,7 +121,16 @@ class MemPalace:
     def get_skill_constraints(self) -> Dict[str, Any]:
         """🛡️ 從活躍且高信任度的信念中提取技能約束規則 (v24.0 Hardened)。"""
         beliefs = self.list_beliefs(status="ACTIVE")
-        constraints = {"require": [], "forbid": [], "prefer": []}
+        constraints: Dict[str, Any] = {"require": [], "forbid": [], "prefer": []}
+        # Make a failed belief read visible: empty constraints != "no constraints".
+        store_status = getattr(self.belief_store, "last_read_status", "ok")
+        if getattr(self, "_belief_read_failed", False) or store_status == "unavailable":
+            constraints["constraints_source"] = "unavailable"
+            constraints["constraints_unavailable_reason"] = (
+                getattr(self, "_belief_read_error", "") or getattr(self.belief_store, "last_read_error", "") or "belief_store_unavailable"
+            )
+        else:
+            constraints["constraints_source"] = "ok"
         now = datetime.now(timezone.utc)
         
         for b in beliefs:
@@ -125,9 +160,13 @@ class MemPalace:
 
     def list_beliefs(self, status: str = "ACTIVE") -> List[Dict[str, Any]]:
         """🕍 列出指定狀態的所有信念節點。"""
+        self._belief_read_failed = False
+        self._belief_read_error = ""
         try:
             return self.belief_store.list_beliefs(status=status)
         except Exception as e:
+            self._belief_read_failed = True
+            self._belief_read_error = f"{type(e).__name__}: {e}"
             logger.warning(f"🕍 [MemPalace] list_beliefs failed: {e}")
             return []
 

@@ -60,6 +60,7 @@ version_scope:
 
 ## Open questions / conflicts
 - [ ] 是否將 `PDRAC` (legacy) 與 `[[SYSTEM_ARCHITECTURE_BLUEPRINT|PXDRAC]]` (current) 的差異固定為獨立術語頁。
+- [ ] 2026-10-12：MSA 雙義、PXDRAC 字母語義、9/18 Rings、五位一體 5 vs 6 已在 [GLOSSARY](../00_Home/GLOSSARY.md) 補規範條目並登記 C-10 ~ C-13；本頁是否同步精簡為指向 GLOSSARY。
 - [ ] 是否建立術語版本化（v22/v23）避免未來升級時語義混淆。
 
 ---

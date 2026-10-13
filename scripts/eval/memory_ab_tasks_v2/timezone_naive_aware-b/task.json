@@ -1,0 +1,8 @@
+{
+  "id": "timezone_naive_aware-b",
+  "bug_class": "timezone_naive_aware",
+  "variant": "b",
+  "problem_statement": "in_window() raises TypeError when a record's 'at' has no UTC offset (for example '2026-05-02T06:00:00') while start and end are timezone-aware. Expected: an offset-less time is UTC, records are compared by instant, and the matches come back ordered by instant.",
+  "target_file": "audit_log.py",
+  "repro_file": "repro.py"
+}

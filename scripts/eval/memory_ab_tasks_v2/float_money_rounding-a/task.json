@@ -1,0 +1,8 @@
+{
+  "id": "float_money_rounding-a",
+  "bug_class": "float_money_rounding",
+  "variant": "a",
+  "problem_statement": "checkout_total(['2.675'], '0') returns '2.67' but should return '2.68'. checkout_total(['0.005'], '0') returns '0.01' but should return '0.00'. The expected results use round-half-even on the exact decimal amount.",
+  "target_file": "checkout.py",
+  "repro_file": "repro.py"
+}

@@ -14,6 +14,8 @@ def test_local_heal_receipt_adapter_legacy_payload() -> None:
         "solve_eligible": True,
         "verification_passed": True,
         "reasoning_mode": "INTUITIVE",
+        "verifier_status": "pass",
+        "source_hash": "sha256:" + "c" * 64,
     }
     
     receipt = adapter.build(claim_verified=True, payload=payload)
@@ -21,7 +23,9 @@ def test_local_heal_receipt_adapter_legacy_payload() -> None:
     assert receipt.invoked is True
     assert receipt.gate_passed is True
     assert receipt.evidence_present is True
-    assert receipt.outcome_contributed is True
+    # Gate needs verifier artifact + source hash (#1757); outcome stays fail-closed (#453).
+    assert receipt.outcome_contributed is False
+    assert receipt.public_claim_safe is False
     assert receipt.telemetries["reasoning_mode"] == "INTUITIVE"
     assert "hybrid_route_mode" not in receipt.telemetries
 

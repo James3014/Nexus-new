@@ -546,3 +546,158 @@ def test_pool_exhaustion(tmp_path):
     manager = AgyAccountPoolManager([])
     with pytest.raises(ExternalAccountPoolExhaustedError):
         manager.acquire("consumer-1")
+
+
+def test_ensure_pool_mixed_missing_and_healthy_initial_construction(tmp_path, monkeypatch):
+    """Missing snapshot dir records unavailable and skips keychain; healthy records available."""
+    from nexus.services.agy_account_pool import AgyAccountPoolManager
+
+    manager_root = tmp_path / "mgr_root"
+    accounts_dir = manager_root / "accounts"
+    (accounts_dir / "good").mkdir(parents=True)
+
+    manager = AgyAccountPoolManager(
+        manager_path="/not/used",
+        manager_root=str(manager_root),
+        use_real_manager=True,
+    )
+
+    def mock_cli(args, expect_json=True):
+        if "ensure-active" in args:
+            return {"active": "good", "switched_to": None}
+        if "status" in args:
+            return {
+                "active": "good",
+                "accounts": {
+                    "missing": {"enabled": True},
+                    "good": {"enabled": True},
+                },
+                "root": str(manager_root),
+            }
+        return {}
+
+    monkeypatch.setattr(manager, "_call_manager_cli", mock_cli)
+
+    keychain_calls = []
+
+    def mock_keychain(home_dir):
+        keychain_calls.append(home_dir)
+
+    monkeypatch.setattr(
+        "nexus.services.agy_account_pool._ensure_macos_isolated_keychain",
+        mock_keychain,
+    )
+
+    pool = manager._ensure_pool()
+
+    good_record = pool._accounts.get("good")
+    missing_record = pool._accounts.get("missing")
+    assert good_record is not None
+    assert missing_record is not None
+    assert good_record.is_available is True
+    assert missing_record.is_available is False
+
+    assert str(accounts_dir / "good") in keychain_calls
+    assert str(accounts_dir / "missing") not in keychain_calls
+
+
+def test_refresh_pool_health_new_missing_account_unavailable(tmp_path, monkeypatch):
+    """New account discovered during refresh with missing snapshot dir is registered unavailable."""
+    from nexus.services.agy_account_pool import AgyAccountPoolManager
+
+    manager_root = tmp_path / "mgr_root"
+    accounts_dir = manager_root / "accounts"
+    (accounts_dir / "good").mkdir(parents=True)
+
+    manager = AgyAccountPoolManager(
+        manager_path="/not/used",
+        manager_root=str(manager_root),
+        use_real_manager=True,
+    )
+
+    initial_status = {
+        "active": "good",
+        "accounts": {"good": {"enabled": True}},
+        "root": str(manager_root),
+    }
+    current_status = [initial_status]
+
+    def mock_cli(args, expect_json=True):
+        if "ensure-active" in args:
+            return {"active": "good", "switched_to": None}
+        if "status" in args:
+            return current_status[0]
+        return {}
+
+    monkeypatch.setattr(manager, "_call_manager_cli", mock_cli)
+
+    keychain_calls = []
+
+    def mock_keychain(home_dir):
+        keychain_calls.append(home_dir)
+
+    monkeypatch.setattr(
+        "nexus.services.agy_account_pool._ensure_macos_isolated_keychain",
+        mock_keychain,
+    )
+
+    pool = manager._ensure_pool()
+    assert pool._accounts.get("good") is not None
+    assert pool._accounts.get("good").is_available is True
+    assert pool._accounts.get("new_missing") is None
+
+    current_status[0] = {
+        "active": "good",
+        "accounts": {
+            "good": {"enabled": True},
+            "new_missing": {"enabled": True},
+        },
+        "root": str(manager_root),
+    }
+    keychain_calls.clear()
+
+    manager._refresh_pool_health()
+
+    new_record = pool._accounts.get("new_missing")
+    assert new_record is not None
+    assert new_record.is_available is False
+    assert str(accounts_dir / "new_missing") not in keychain_calls
+
+
+def test_ensure_pool_keychain_failure_on_existing_snapshot_propagates(tmp_path, monkeypatch):
+    """Keychain failure on a present snapshot dir must propagate, never be suppressed."""
+    from nexus.services.agy_account_pool import AgyAccountPoolManager, AgyAccountPoolManagerError
+
+    manager_root = tmp_path / "mgr_root"
+    accounts_dir = manager_root / "accounts"
+    (accounts_dir / "exists").mkdir(parents=True)
+
+    manager = AgyAccountPoolManager(
+        manager_path="/not/used",
+        manager_root=str(manager_root),
+        use_real_manager=True,
+    )
+
+    def mock_cli(args, expect_json=True):
+        if "ensure-active" in args:
+            return {"active": "exists", "switched_to": None}
+        if "status" in args:
+            return {
+                "active": "exists",
+                "accounts": {"exists": {"enabled": True}},
+                "root": str(manager_root),
+            }
+        return {}
+
+    monkeypatch.setattr(manager, "_call_manager_cli", mock_cli)
+
+    def mock_keychain_fail(home_dir):
+        raise AgyAccountPoolManagerError("AGY_KEYCHAIN_SETUP_FAILED:test")
+
+    monkeypatch.setattr(
+        "nexus.services.agy_account_pool._ensure_macos_isolated_keychain",
+        mock_keychain_fail,
+    )
+
+    with pytest.raises(AgyAccountPoolManagerError, match="AGY_KEYCHAIN_SETUP_FAILED"):
+        manager._ensure_pool()

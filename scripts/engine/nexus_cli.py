@@ -19,12 +19,14 @@ except ImportError:
     _LEGACY_AVAILABLE = False
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 repo_root = REPO_ROOT
 
 import shlex
+
 
 class SanitizedRunner:
     """🛡️ SanitizedRunner with AllowedTaskRegistry to prevent command injection & shell escape"""
@@ -75,9 +77,8 @@ class AsyncProcessExecutor:
     async def run_async(self, cmd: list[str], log_path: Path) -> tuple[int, int, int]:
         import os
         env = os.environ.copy()
-        # Secure UV cache isolation to prevent permission collision
-        workspace_tmp = Path("/Users/jameschen/Workspace/nexus/.tmp/uv-cache")
-        env["UV_CACHE_DIR"] = str(workspace_tmp.resolve())
+        # Isolate the uv cache under this checkout unless the caller already chose one.
+        env.setdefault("UV_CACHE_DIR", str((REPO_ROOT / ".tmp" / "uv-cache").resolve()))
 
         try:
             p = await asyncio.create_subprocess_exec(
@@ -88,7 +89,12 @@ class AsyncProcessExecutor:
                 env=env
             )
         except Exception as exc:
-            # Safe recovery if process creation itself fails
+            # Record why the process could not start; callers read the log as the run output.
+            try:
+                log_path.parent.mkdir(parents=True, exist_ok=True)
+                log_path.write_text(f"subprocess_spawn_failed: {type(exc).__name__}: {exc}\n", encoding="utf-8")
+            except OSError:
+                pass
             return 1, 0, 0
 
         stdout_len = 0
@@ -134,6 +140,8 @@ if not _LEGACY_AVAILABLE:
             print("")
             print("Options:")
             print("  --help  Show this message and exit.")
+            print("")
+            print("  Legacy commands are unavailable: install them with `uv sync --extra legacy`.")
             sys.exit(0)
         sys.stderr.write("LEGACY_EXTRA_REQUIRED\n")
         sys.exit(78)
@@ -223,10 +231,8 @@ else:
         get_multi_agent_metrics,
         get_multi_agent_task_audit,
         get_multi_agent_task_status,
-        integrate_multi_agent_tasks,
         render_multi_agent_metrics,
         render_multi_agent_task_audit,
-        render_multi_agent_task_integration,
         render_multi_agent_task_start,
         render_multi_agent_task_status,
         render_multi_agent_task_submission,
@@ -699,35 +705,111 @@ else:
             return
 
         crystals = list(drone_dir.glob("*_crystal.json"))
-        click.echo(f"Active/Completed Drones: {len(crystals)}")
-
-        for f in sorted(crystals, key=lambda x: x.stat().st_mtime, reverse=True)[:5]:
+        records = []
+        unreadable = []
+        for f in crystals:
             try:
                 data = json.loads(f.read_text(encoding="utf-8"))
-                drone_id = data.get("drone_id", "unknown")
-                status = data.get("status", "unknown")
-                belief = data.get("belief_score", 0.0)
+            except (OSError, ValueError) as exc:
+                unreadable.append((f, f"{type(exc).__name__}: {exc}"))
+                continue
+            if not isinstance(data, dict):
+                unreadable.append((f, "malformed: top-level JSON is not an object"))
+                continue
+            records.append((f, data))
 
-                color = "green" if status == "SUCCESS" else "red" if status in ["FAIL", "CRASH"] else "yellow"
-                click.secho(f"\n🐝 Drone: {drone_id} | Status: {status} | Belief: {belief:.2f}", fg=color, bold=True)
+        def _kind(data):
+            if data.get("synthetic") is True:
+                return "SYNTHETIC"
+            if not data.get("drone_id") or not data.get("status"):
+                return "INVALID"
+            return "REAL"
 
-                traces = data.get("tracelog", [])[-3:] # Show last 3
-                for t in traces:
-                    phase = t.get("phase", "")
-                    msg = t.get("message", "")
-                    click.echo(f"  [{phase}] {msg[:80]}...")
-            except:
-                pass
+        real = [(f, d) for f, d in records if _kind(d) == "REAL"]
+        click.echo(f"Active/Completed Drones: {len(real)}")
+        if not real:
+            click.secho("No real drone records found.", fg="yellow")
+        n_syn = sum(1 for _, d in records if _kind(d) == "SYNTHETIC")
+        n_inv = sum(1 for _, d in records if _kind(d) == "INVALID")
+        if n_syn or n_inv or unreadable:
+            click.echo(f"Ignored: {n_syn} synthetic, {n_inv} invalid, {len(unreadable)} unreadable")
+
+        def _mtime(f):
+            try:
+                return f.stat().st_mtime
+            except OSError:
+                return 0.0
+
+        for f, data in sorted(records, key=lambda x: _mtime(x[0]), reverse=True)[:5]:
+            kind = _kind(data)
+            if kind == "SYNTHETIC":
+                click.secho(f"\n[SYNTHETIC] {f.name} | not a real drone result (generated by local bench executor)", fg="yellow", bold=True)
+                continue
+            if kind == "INVALID":
+                click.secho(f"\n[INVALID] {f.name} | missing drone_id/status", fg="red", bold=True)
+                continue
+            drone_id = data["drone_id"]
+            status = data["status"]
+            raw_belief = data.get("belief_score")
+            try:
+                belief_text = "N/A" if raw_belief is None else f"{float(raw_belief):.2f}"
+            except (TypeError, ValueError):
+                belief_text = "N/A"
+            color = "green" if status == "SUCCESS" else "red" if status in ["FAIL", "CRASH"] else "yellow"
+            click.secho(f"\n🐝 Drone: {drone_id} | Status: {status} | Belief: {belief_text}", fg=color, bold=True)
+
+            traces = data.get("tracelog", [])
+            traces = traces[-3:] if isinstance(traces, list) else []  # Show last 3
+            for t in traces:
+                if not isinstance(t, dict):
+                    continue
+                phase = t.get("phase", "")
+                msg = str(t.get("message", ""))
+                click.echo(f"  [{phase}] {msg[:80]}...")
+
+        for f, reason in unreadable:
+            click.secho(f"\n[UNREADABLE] {f.name} | {reason}", fg="red", bold=True)
+
+    @nexus_group.group(name="drone")
+    def drone_group():
+        """🚁 Tactical Drone missions."""
+        pass
+
+    @drone_group.command(name="run")
+    @click.option("--task", required=True, help="Mission task intent for the drone.")
+    @click.option("--drone-id", default=None, help="Drone id (default: drone-<timestamp>).")
+    @click.option("--max-rounds", default=3, show_default=True, type=int)
+    def drone_run(task, drone_id, max_rounds):
+        """Run ONE real drone mission; writes .nexus/reports/drones/<id>_crystal.json. Fails closed if the LLM is down."""
+        from nexus.core.drone_engine import TacticalDrone
+
+        drone_id = drone_id or f"drone-{int(time.time())}"
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", drone_id):
+            click.secho(f"Invalid drone id: {drone_id!r}", fg="red", err=True)
+            raise SystemExit(2)
+        drone = TacticalDrone(drone_id=drone_id, project_root=repo_root, max_rounds=max_rounds)
+        drone.task_intent = task
+        if not drone.local_brain.health_check():
+            drone.abort_unavailable(f"LLM endpoint unavailable: {drone.local_brain.api_url}")
+            click.secho(f"FAIL: LLM endpoint unavailable ({drone.local_brain.api_url}); crystal recorded with status FAIL.", fg="red", err=True)
+            raise SystemExit(1)
+        result = drone.sense_think_act(task)
+        outcome = result.get("outcome")
+        click.echo(f"Drone {drone_id}: {outcome} (crystal: {drone.crystal_path()})")
+        if outcome != "SUCCESS":
+            raise SystemExit(1)
 
     @nexus_group.command(name="status")
     @click.option("--json", "as_json", is_flag=True)
     def status(as_json):
-        """📊 Show system status and trust scores."""
+        """📊 Show observed repo/evidence facts (no fabricated metrics; not a health claim)."""
+        from nexus.delivery.status_report import build_status_report, render_status_report
+
+        report = build_status_report(repo_root)
         if as_json:
-            res = {"status": "OPERATIONAL", "version": "v23.7", "fleet_size": 50, "mcp": "READY"}
-            click.echo(json.dumps(res, indent=2))
+            click.echo(json.dumps(report, indent=2))
         else:
-            subprocess.run([sys.executable, str(repo_root / "scripts/ops/enterprise_audit_v22.py")], check=True)
+            click.echo(render_status_report(report))
 
 
     @nexus_group.group(name="code")
@@ -1136,7 +1218,11 @@ else:
         ]
         if not allow_cold_start:
             verify_cmd.insert(4, "--require-acceptance-pass")
-        subprocess.run(verify_cmd, check=True)
+        verify_res = subprocess.run(verify_cmd)
+        if verify_res.returncode != 0:
+            raise click.ClickException(
+                f"Report claim verification failed (verify_report_claims.py exit {verify_res.returncode})."
+            )
 
         # 2. 執行幻覺審計 (always render; hard-fail only when explicit evidence gets REJECTED)
         if not check_hallucination(evidence_path):
@@ -1147,11 +1233,22 @@ else:
     @click.option("--evidence", "evidence_path", type=click.Path(exists=True), required=True)
     @click.option("--router-benchmark", is_flag=True, help="Run router benchmark as part of delivery verification.")
     @click.option("--receipt", "receipt_path", default=".nexus/reports/delivery_gate.json", show_default=True, type=click.Path())
-    def delivery_gate(evidence_path, router_benchmark, receipt_path):
+    @click.option("--allow-no-replay", "allow_no_replay", is_flag=True, help="Explicitly accept notes-only evidence (no replayed command); labelled replay_waived.")
+    def delivery_gate(evidence_path, router_benchmark, receipt_path, allow_no_replay):
         """🚪 Run fail-closed delivery verification before completion claims."""
-        cmd = [str(repo_root / "scripts/ops/nexus_delivery_gate.sh"), "--evidence", str(evidence_path), "--receipt", str(receipt_path)]
+        # The gate script runs from the repo root, so pass caller-relative paths as absolute paths.
+        cmd = [
+            "bash",
+            str(repo_root / "scripts/ops/nexus_delivery_gate.sh"),
+            "--evidence",
+            str(Path(evidence_path).resolve()),
+            "--receipt",
+            str(Path(receipt_path).resolve()),
+        ]
         if router_benchmark:
             cmd.append("--router-benchmark")
+        if allow_no_replay:
+            cmd.append("--allow-no-replay")
         result = subprocess.run(cmd)
         if result.returncode != 0:
             raise click.ClickException("Delivery gate failed.")
@@ -1318,15 +1415,24 @@ else:
             task_desc=task_id,
             artifact_paths=artifact_paths,
         )
+        from nexus.engine.completion_contract import evaluate_delivery_closeout
+
+        receipt_file = REPO_ROOT / ".nexus" / "reports" / "delivery_gate.json"
+        delivery_failures = evaluate_delivery_closeout(
+            receipt_path=receipt_file,
+            run_id=str(task_id),
+            head_sha=revision,
+        )
         report_payload = build_completion_envelope(
             command_name="run",
             task_name=task_id,
             runtime_ok=runtime_ok,
             execution_path="cli->canonical_task_seam->mainchain",
             artifact_paths=artifact_paths,
-            semantic_failures=direct_mode_audit["semantic_failures"],
+            semantic_failures=[*direct_mode_audit["semantic_failures"], *delivery_failures],
             tests_run=direct_mode_audit["verify_results"],
         )
+        report_payload["delivery_receipt_path"] = str(receipt_file)
         if direct_mode_audit["enabled"]:
             report_payload["direct_mode"] = direct_mode_audit["spec"]
             report_payload["changed_targets"] = direct_mode_audit["changed_targets"]
@@ -1599,7 +1705,7 @@ else:
                 # Keep skill-routing compatibility effects, but route/depth truth is
                 # consumed directly from the canonical CapabilityPlanner.
                 router.route_candidates("R", router_context)
-                planner_plan = CapabilityPlanner().plan(
+                planner_plan = CapabilityPlanner(shared_playbook_root=REPO_ROOT).plan(
                     task_desc=task_desc,
                     task_type="learn_ingest",
                     route={
@@ -1618,7 +1724,7 @@ else:
                 is_light = False
 
         if is_light:
-            click.echo("⚡ [Learn:Ingest] Autonomic Router triggered LIGHT_ROUTE. Skipping heavy ingestion.")
+            click.echo("⚡ [Learn:Ingest] LIGHT_ROUTE selected by CapabilityPlanner execution depth (not the retired Autonomic Router). Skipping heavy ingestion.")
             os.environ["NEXUS_LIGHT_ROUTE"] = "1"
             class LightResult:
                 def __init__(self):
@@ -1785,7 +1891,7 @@ else:
                     "tenant_id": "default",
                 }
                 router.route_candidates("R", router_context)
-                planner_plan = CapabilityPlanner().plan(
+                planner_plan = CapabilityPlanner(shared_playbook_root=REPO_ROOT).plan(
                     task_desc=task_desc,
                     task_type="learn_converge",
                     route={
@@ -1804,7 +1910,7 @@ else:
                 is_light = False
 
         if is_light:
-            click.echo("⚡ [Learn:Converge] Autonomic Router triggered LIGHT_ROUTE. Skipping heavy convergence.")
+            click.echo("⚡ [Learn:Converge] LIGHT_ROUTE selected by CapabilityPlanner execution depth (not the retired Autonomic Router). Skipping heavy convergence.")
             class LightResult:
                 def __init__(self):
                     self.payload = {
@@ -2185,30 +2291,48 @@ else:
     def contract_check(contract_file):
         """📜 [Governance] Validate task contract against physical state."""
         cmd = [sys.executable, str(repo_root / "scripts/ops/closeout_guard.py"), "--contract", contract_file]
-        subprocess.run(cmd, check=True)
+        res = subprocess.run(cmd)
+        if res.returncode != 0:
+            raise click.ClickException(f"Contract check failed (closeout_guard.py exit {res.returncode}).")
 
 
     @nexus_group.command(name="contract-snapshot")
     @click.option("--output", "output_path", default=".nexus/reports/closeout_contract.json", show_default=True, type=click.Path())
     @click.option("--task-id", default="runtime-closeout", show_default=True)
-    @click.option("--tests-passed/--no-tests-passed", default=True, show_default=True)
-    @click.option("--linter-exit-code", default=0, show_default=True, type=int)
-    @click.option("--ci-gate-exit-code", default=0, show_default=True, type=int)
-    def contract_snapshot(output_path, task_id, tests_passed, linter_exit_code, ci_gate_exit_code):
-        """🧾 Emit a runtime closeout contract for the current HEAD."""
+    @click.option("--tests-passed/--no-tests-passed", default=None, help="Caller-supplied test result. Omitted means NOT_RUN (unknown).")
+    @click.option("--linter-exit-code", default=None, type=int, help="Caller-supplied linter exit code. Omitted means NOT_RUN (unknown).")
+    @click.option("--ci-gate-exit-code", default=None, type=int, help="Caller-supplied CI gate exit code. Omitted means NOT_RUN (unknown).")
+    @click.option(
+        "--evidence-ref",
+        default=None,
+        type=click.Path(exists=True, dir_okay=False),
+        help="Path to the receipt/log that measured the supplied results. Without it supplied values are only caller_supplied and contract-check rejects them.",
+    )
+    @click.option("--base-ref", default="origin/main", show_default=True, help="Base branch for changed_files (merge-base diff).")
+    def contract_snapshot(output_path, task_id, tests_passed, linter_exit_code, ci_gate_exit_code, evidence_ref, base_ref):
+        """🧾 Emit a runtime closeout contract for the current HEAD (never self-attests unrun results)."""
         head = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=repo_root).decode().strip()
-        changed_raw = subprocess.check_output(
-            ["git", "show", "--name-only", "--format=", "HEAD"],
-            cwd=repo_root,
-        ).decode()
-        changed_files = [line.strip() for line in changed_raw.splitlines() if line.strip()]
+        from scripts.ops.closeout_guard import build_attestation, compute_changed_files
+
+        changed_files, changed_base = compute_changed_files(repo_root, base_ref)
+        evidence_path = Path(evidence_ref).resolve() if evidence_ref else None
+
+        def _attest(value):
+            return build_attestation(value, evidence_path, repo_root)
+
         payload = {
             "task_id": task_id,
             "commit_sha": head,
-            "linter_exit_code": int(linter_exit_code),
-            "ci_gate_exit_code": int(ci_gate_exit_code),
-            "required_tests_passed": bool(tests_passed),
+            "linter_exit_code": None if linter_exit_code is None else int(linter_exit_code),
+            "ci_gate_exit_code": None if ci_gate_exit_code is None else int(ci_gate_exit_code),
+            "required_tests_passed": None if tests_passed is None else bool(tests_passed),
+            "attestation": {
+                "linter_exit_code": _attest(linter_exit_code),
+                "ci_gate_exit_code": _attest(ci_gate_exit_code),
+                "required_tests_passed": _attest(tests_passed),
+            },
             "changed_files": changed_files,
+            "changed_files_base": changed_base,
             "done_criteria": [
                 "delivery gate passed",
                 "contract check passed",
@@ -2218,7 +2342,18 @@ else:
         out = out if out.is_absolute() else (repo_root / out).resolve()
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        click.echo(json.dumps({"ok": True, "output": str(out), "commit_sha": head}, indent=2, ensure_ascii=False))
+        click.echo(
+            json.dumps(
+                {
+                    "ok": True,
+                    "output": str(out),
+                    "commit_sha": head,
+                    "attestation": {k: v["source"] for k, v in payload["attestation"].items()},
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
 
     @nexus_group.command(name="distill")
     @click.option("--report-file", default=".nexus/reports/metabolism/distill_report.json", show_default=True, type=click.Path())
@@ -2226,61 +2361,53 @@ else:
     def distill(report_file, output_json):
         """🌬️ [Metabolism] Distill session essence."""
         from nexus.services.metabolism_engine import metabolism
-        tx = metabolism.distill({"goal": "v23.7 Recovery", "done": ["Wiki Sync"], "todo": ["Command Recovery"]})
-        payload = {"status": "SUCCESS", "tx": tx}
+        payload = metabolism.distill_local()
         out_path = (repo_root / report_file).resolve()
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
         if output_json:
             click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
         else:
-            click.echo(f"💎 Session distilled. Arweave TX: {tx}")
+            click.echo(f"💎 Local seed written (status: {payload['status']}): {payload['seed_path']}")
+            click.echo(f"Upload: {payload['upload']} (no Arweave transaction)")
+            click.echo(f"Context source: {payload['context_source']}")
+            if payload["objective"] is None:
+                click.echo("Objective: none recorded (no mission or checkpoint found)")
             click.echo(f"Report: {out_path}")
 
     # --- v23.7 艦隊指揮 ---
     @nexus_group.command(name="resume")
     def resume():
         """🌬️ [Metabolism] Resume task from last physical checkpoint."""
+        from nexus.core.mission_contracts import (
+            MissionStatus,
+            MissionTransitionError,
+            NexusMission,
+            transition,
+        )
         from nexus.services.metabolism_engine import metabolism
         checkpoint = metabolism.load_checkpoint()
-        if not checkpoint:
+        if not checkpoint or not checkpoint.get("task_id"):
             click.echo("❌ No checkpoint found.")
-            return
-        click.echo(f"🌬️ Resuming Task: {checkpoint['task_id']}")
-
-    @nexus_group.command(name="delegate")
-    @click.argument("task_name")
-    @click.option("--report-file", default=".nexus/reports/delegate/delegate_report.json", show_default=True, type=click.Path())
-    @click.option("--output-json", is_flag=True)
-    def delegate(task_name, report_file, output_json):
-        """📡 [Supervisor] Decompose and delegate task to fleet."""
-        if not SanitizedRunner.validate_task_name(task_name):
-            click.echo("❌ Invalid task name: only alphanumeric, spaces, dashes, and underscores allowed.")
             sys.exit(1)
-
-        sanitized_task_name = SanitizedRunner.sanitize_arg(task_name)
-        res = SanitizedRunner.run_safe([sys.executable, str(repo_root / "scripts/ops/supervisor_engine.py"), sanitized_task_name], check=False)
-        payload = build_completion_envelope(
-            command_name="delegate",
-            task_name=task_name,
-            runtime_ok=(res.returncode == 0),
-            execution_path="cli->supervisor_engine",
-        )
-        out_path = write_completion_envelope(repo_root, report_file, payload)
-        if output_json:
-            click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
-        else:
-            click.echo(f"{'✅' if payload['status'] == 'SUCCESS' else '❌'} Delegated task: {task_name}")
-            click.echo(f"Report: {out_path}")
-        try:
-            ensure_verified_completion(payload, context="delegate")
-        except CompletionEnforcementError as exc:
-            handoff = _persist_completion_handoff(payload, context="delegate", report_file=out_path)
-            out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-            if not output_json:
-                click.echo(f"Next Action: {handoff}")
-            raise click.ClickException(str(exc))
-
+        click.echo(f"🌬️ Resuming Task: {checkpoint['task_id']}")
+        click.echo(f"- Last active step: {checkpoint.get('last_active_step')}")
+        click.echo(f"- Pending steps: {len(checkpoint.get('pending_steps') or [])}")
+        # Restore: bind the mission to the checkpoint and re-activate it if it was paused/blocked.
+        mission = NexusMission.load(repo_root)
+        if mission is not None:
+            stack_path = Path(metabolism.stack_path)
+            try:
+                mission.last_snapshot_path = str(stack_path.relative_to(repo_root))
+            except ValueError:
+                mission.last_snapshot_path = str(stack_path)
+            if mission.status in (MissionStatus.PAUSED, MissionStatus.BLOCKED):
+                try:
+                    transition(mission, MissionStatus.ACTIVE)
+                except MissionTransitionError as exc:
+                    click.secho(f"❌ {exc}", fg="red")
+                    sys.exit(1)
+            mission.persist(repo_root)
 
     @nexus_group.command(name="research:route")
     @click.option("--task-desc", required=True)
@@ -2806,9 +2933,16 @@ else:
     @click.option("--llm-baseline", is_flag=True, help="Enable LLM assistance for baseline generation in feature/refactor cases.")
     def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, max_wall_time_sec, mode, ab_trials, ab_llm_mode, llm_baseline):
         """📊 [Control Plane] Gladiator Benchmark: Real evaluation for multiple cases."""
-        from nexus.app.research_benchmark_service import ResearchBenchmarkService
+        from nexus.app.research_benchmark_service import (
+            ArchivedResearchBenchmarkError,
+            ResearchBenchmarkService,
+        )
         svc = ResearchBenchmarkService(repo_root)
-        svc.run_benchmark(mode, manifest_file, report_file, budget_limit, timeout_sec, max_wall_time_sec, ab_trials, ab_llm_mode, llm_baseline)
+        try:
+            svc.run_benchmark(mode, manifest_file, report_file, budget_limit, timeout_sec, max_wall_time_sec, ab_trials, ab_llm_mode, llm_baseline)
+        except ArchivedResearchBenchmarkError as exc:
+            click.echo(f"BLOCKED: {exc.reason} (simulated benchmark archived 2026-10-12)", err=True)
+            raise SystemExit(1)
 
     @nexus_group.command(name="research:meta-opt")
     @click.option("--manifest-file", required=True, type=click.Path(exists=True))
@@ -2922,7 +3056,11 @@ else:
                 try:
                     report_payload = json.loads(run_report.read_text(encoding="utf-8"))
                     agg = report_payload.get("aggregates", {})
-                    if isinstance(agg, dict):
+                    if isinstance(report_payload, dict) and report_payload.get("simulated") is True:
+                        # A simulated child report carries no measured signal; never rank it.
+                        status = "simulated_report"
+                        error = "child benchmark report is simulated, not measured"
+                    elif isinstance(agg, dict):
                         aggregates["algorithm_success_rate"] = float(
                             agg.get("algorithm_success_rate", agg.get("success_rate", 0.0)) or 0.0
                         )
@@ -2974,76 +3112,10 @@ else:
 
     # --- External Command Registration ---
     try:
-        from scripts.engine.commands.ui_explorer import register as register_ui_explorer
-        register_ui_explorer(nexus_group, repo_root)
-
         from scripts.engine.commands.swarm import register as register_swarm
         register_swarm(nexus_group, repo_root)
-
-        from scripts.engine.commands.stress_test import register as register_stress_test
-        register_stress_test(nexus_group, repo_root)
     except ImportError as e:
         click.echo(f"⚠️  [Nexus:CLI] Could not load external command module: {e}")
-
-    # --- v0.9 聯邦指令 (RESTORED) ---
-
-    @nexus.command(name="fed-init")
-    @click.option("--tenants", default=10)
-    @click.option("--report-file", default=".nexus/reports/federation/fed_init_report.json", show_default=True, type=click.Path())
-    @click.option("--output-json", is_flag=True)
-    def fed_init(tenants, report_file, output_json):
-        """🌐 [v0.9] Federated Init"""
-        from scripts.ops.federated_engine_v09 import FederatedEngineV09
-        FederatedEngineV09(repo_root).fed_init(num_tenants=tenants)
-        payload = {"status": "SUCCESS", "tenants": tenants}
-        out_path = (repo_root / report_file).resolve()
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-        if output_json:
-            click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
-        else:
-            click.echo(f"📡 Fleet Initialized: {tenants} tenants.")
-            click.echo(f"Report: {out_path}")
-
-    @nexus.command(name="fed-run")
-    @click.option("--report-file", default=".nexus/reports/federation/fed_run_report.json", show_default=True, type=click.Path())
-    @click.option("--output-json", is_flag=True)
-    def fed_run(report_file, output_json):
-        """🚀 [v0.9] Fed-Run: Execute Federated NAS"""
-        from scripts.ops.federated_engine_v09 import FederatedEngineV09
-        res = FederatedEngineV09(repo_root).fed_sync()
-        payload = {"status": "SUCCESS", "result": res}
-        out_path = (repo_root / report_file).resolve()
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-        if output_json:
-            click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
-        else:
-            click.echo(f"🧬 [v0.9 Federated NAS] Synchronized {res['aggregation_ratio']} tenants.")
-            click.echo(f"Report: {out_path}")
-        lesson_script = repo_root / ("scripts/ops/crystal" + "lize_lessons.py")
-        subprocess.run([sys.executable, str(lesson_script)], check=False)
-
-    # --- v0.8 元進化 (RESTORED) ---
-    @nexus.command(name="meta-run")
-    @click.option("--count", default=128)
-    @click.option("--hybrid", default=0.6)
-    @click.option("--report-file", default=".nexus/reports/meta/meta_run_report.json", show_default=True, type=click.Path())
-    @click.option("--output-json", is_flag=True)
-    def meta_run(count, hybrid, report_file, output_json):
-        """🧬 [v0.8] Meta-Evolve"""
-        from scripts.ops.evolution_engine_v08 import EvolutionEngineV08
-        best = EvolutionEngineV08(repo_root).meta_evolve(count=count, hybrid_ratio=hybrid)
-        payload = {"status": "SUCCESS", "best": best}
-        out_path = (repo_root / report_file).resolve()
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-        if output_json:
-            click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
-        else:
-            click.echo(f"🧬 [NAS] Gen {best['gen']} Evolved. Fitness: {best['fitness']}")
-            click.echo(f"Report: {out_path}")
-
 
     @nexus.command(name="run-bug")
     @click.argument("task")
@@ -3119,8 +3191,13 @@ else:
     )
     @click.pass_context
     def compat_research_sprint(ctx: click.Context):
-        """Compatibility alias for `nexus research:sprint`."""
-        _forward_to_nested_nexus(ctx, "research:sprint")
+        """Retired: the nested `nexus research:sprint` command no longer exists."""
+        # Forwarding would only reach "No such command"; say where Hyper/Sprint lives now.
+        raise click.UsageError(
+            "`research:sprint` is no longer a CLI command. Hyper/Sprint runs through "
+            "`nexus research:auto-flow` (route-selected hyper_sprint) or "
+            "nexus.services.mainchain_entry.run_mainchain."
+        )
 
 
     @nexus.command(
@@ -3184,30 +3261,6 @@ else:
         click.echo(render_learn_precision_benchmark_complete(summary))
 
 
-    @nexus_group.command(name="oracle:apply")
-    @click.argument("shadow_tid")
-    @click.option("--report-file", default=".nexus/reports/oracle/oracle_apply_report.json", show_default=True, type=click.Path())
-    @click.option("--output-json", is_flag=True)
-    def oracle_apply(shadow_tid, report_file, output_json):
-        """🚀 [Oracle] Promote a successful shadow patch to main workspace."""
-        from nexus.core.exit_codes import NexusExitCode
-        from nexus.oracle.promote import promote_shadow_patch
-        ok = promote_shadow_patch(repo_root, shadow_tid)
-        payload = {"status": "SUCCESS" if ok else "FAILED", "shadow_tid": shadow_tid}
-        out_path = (repo_root / report_file).resolve()
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-        if output_json:
-            click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
-        elif ok:
-            click.secho(f"✅ Successfully promoted future patch {shadow_tid} to the present.", fg="green")
-            click.echo(f"Report: {out_path}")
-        else:
-            click.secho("❌ Promotion failed.", fg="red")
-            click.echo(f"Report: {out_path}")
-        if not ok:
-            raise click.exceptions.Exit(NexusExitCode.FAILED)
-
     @nexus_group.group(name="multi-agent")
     def multi_agent_group():
         """🤖 Multi-Agent Orchestration & Fleet Management"""
@@ -3251,14 +3304,19 @@ else:
         view = get_multi_agent_task_status(task_id)
         for line in render_multi_agent_task_status(view, output_json=output_json):
             click.echo(line)
+        if not view.found:
+            sys.exit(1)
 
     @multi_agent_group.command(name="verify")
     @click.option("--task-id", required=True)
     @translate_action_exceptions
     def verify_task_cmd(task_id):
         """✅ Run verification gates for a task."""
-        for line in render_multi_agent_task_verification(verify_multi_agent_task(task_id)):
+        view = verify_multi_agent_task(task_id)
+        for line in render_multi_agent_task_verification(view):
             click.echo(line)
+        if not view.passed:
+            sys.exit(1)
 
     @multi_agent_group.command(name="close")
     @click.option("--task-id", required=True)
@@ -3269,23 +3327,16 @@ else:
         for line in close_multi_agent_task(task_id, no_cleanup=no_cleanup):
             click.echo(line)
 
-    @multi_agent_group.command(name="integrate")
-    @click.option("--task-ids", required=True, help="Comma separated task IDs")
-    @click.option("--target-branch", default="main")
-    @translate_action_exceptions
-    def integrate_tasks_cmd(task_ids, target_branch):
-        """🚢 Integrate multiple tasks into target branch."""
-        view = integrate_multi_agent_tasks(task_ids, target_branch=target_branch)
-        for line in render_multi_agent_task_integration(view):
-            click.echo(line)
-
     @multi_agent_group.command(name="audit")
     @click.option("--task-id", required=True)
     @translate_action_exceptions
     def audit_task_cmd(task_id):
         """🔍 Audit task evidence chain."""
-        for line in render_multi_agent_task_audit(get_multi_agent_task_audit(task_id)):
+        view = get_multi_agent_task_audit(task_id)
+        for line in render_multi_agent_task_audit(view):
             click.echo(line)
+        if not view.found:
+            sys.exit(1)
 
     @multi_agent_group.command(name="metrics")
     @click.option("--json", "output_json", is_flag=True)
@@ -3304,8 +3355,11 @@ else:
     @translate_action_exceptions
     def submit_task_cmd(task_id):
         """🚀 Submit task with full verification & protocol evidence."""
-        for line in render_multi_agent_task_submission(submit_multi_agent_task(task_id, repo_root=repo_root)):
+        view = submit_multi_agent_task(task_id, repo_root=repo_root)
+        for line in render_multi_agent_task_submission(view):
             click.echo(line)
+        if not view.submitted:
+            sys.exit(1)
 
 
     # --- v4.0: Skills & Registry Management ---
@@ -3382,6 +3436,8 @@ else:
         )
         for line in render_sandbox_run_result(result):
             click.secho(line, fg="cyan")
+        if not result.success:
+            sys.exit(1)
 
 
     # --- v26 Mission Control (持久化編排戰役) ---
@@ -3419,11 +3475,18 @@ else:
     def mission_start():
         """🚀 Run budget & fingerprint checks, switch state, and launch the loop."""
         import uuid
-        from nexus.core.mission_contracts import NexusMission, MissionStatus
+        from nexus.core.mission_contracts import MissionStatus, MissionTransitionError, NexusMission, transition
 
         mission = NexusMission.load(repo_root)
         if not mission:
             click.secho("❌ No mission found. Run 'nexus mission create' first.", fg="red")
+            sys.exit(1)
+
+        if mission.status in (MissionStatus.COMPLETED, MissionStatus.ABORTED):
+            click.secho(
+                f"❌ Mission {mission.mission_id} is {mission.status.value}; create a new mission instead.",
+                fg="red",
+            )
             sys.exit(1)
 
         # 1. 環境指紋與 preflight 檢查 (Environment Fingerprinting)
@@ -3437,7 +3500,11 @@ else:
             sys.exit(1)
 
         # 3. 激活狀態並開啟戰役
-        mission.status = MissionStatus.ACTIVE
+        try:
+            transition(mission, MissionStatus.ACTIVE)
+        except MissionTransitionError as exc:
+            click.secho(f"❌ {exc}", fg="red")
+            sys.exit(1)
         run_id = "RUN-" + uuid.uuid4().hex[:6].upper()
         mission.current_run_id = run_id
         mission.run_history.append(run_id)
@@ -3447,29 +3514,36 @@ else:
 
         # 4. 呼叫實體戰役執行
         # 複用現有的 nexus run 命令子進程，以便完整使用自癒與 TDD 驗證
-        cmd = [sys.executable, str(repo_root / "scripts/engine/nexus_cli.py"), "nexus", "run", mission.mission_id]
+        # `nexus run` uses its argument as the task statement, so pass the objective, not the id.
+        cmd = [sys.executable, str(repo_root / "scripts/engine/nexus_cli.py"), "nexus", "run", mission.objective]
         res = subprocess.run(cmd, check=False)
 
         # 5. 更新結束後的狀態與 telemetry 統計
         # 實作上可檢查報告判定完戰
-        mission = NexusMission.load(repo_root) # 重新載入，避免執行期間被子進程修改
+        mission = NexusMission.load(repo_root) or mission # 重新載入，避免執行期間被子進程修改
         if res.returncode == 0:
-            # 完戰 gate 驗收
+            # 完戰 gate 驗收: ACTIVE -> VERIFYING -> COMPLETED (or back to ACTIVE if not passed)
+            transition(mission, MissionStatus.VERIFYING)
+            mission.persist(repo_root)
+            passed = False
             acceptance_report = repo_root / ".nexus" / "reports" / "acceptance_check.json"
             if acceptance_report.exists():
                 try:
                     data = json.loads(acceptance_report.read_text(encoding="utf-8"))
-                    if data.get("status") == "PASS" and data.get("gate_passed") is True:
-                        mission.status = MissionStatus.COMPLETED
+                    passed = data.get("status") == "PASS" and data.get("gate_passed") is True
                 except Exception:
-                    pass
+                    passed = False
+            transition(mission, MissionStatus.COMPLETED if passed else MissionStatus.ACTIVE)
         else:
             mission.accumulated_usage["retries"] += 1
             if mission.accumulated_usage["retries"] >= mission.budget.get("max_retries", 10.0):
-                mission.status = MissionStatus.BLOCKED
+                transition(mission, MissionStatus.BLOCKED)
 
         mission.persist(repo_root)
         click.echo(f"🏁 Campaign execution terminated. Status: {mission.status.value}")
+        if res.returncode != 0:
+            click.secho(f"❌ Campaign run failed (exit {res.returncode}).", fg="red")
+            sys.exit(1)
 
     @mission_group.command(name="status")
     def mission_status():
@@ -3478,7 +3552,7 @@ else:
         mission = NexusMission.load(repo_root)
         if not mission:
             click.echo("❌ No active mission registered.")
-            return
+            sys.exit(1)
 
         click.secho(f"🛡️ [Mission Control Status: {mission.mission_id}]", fg="cyan", bold=True)
         click.echo(f"- Objective: {mission.objective}")
@@ -3495,20 +3569,32 @@ else:
     @mission_group.command(name="pause")
     def mission_pause():
         """⏸️ Force snapshot of current state and pause the campaign."""
-        from nexus.core.mission_contracts import NexusMission, MissionStatus
+        from nexus.core.mission_contracts import (
+            MissionStatus,
+            MissionTransitionError,
+            NexusMission,
+            transition,
+        )
         mission = NexusMission.load(repo_root)
         if not mission:
             click.echo("❌ No mission found.")
-            return
+            sys.exit(1)
 
-        mission.status = MissionStatus.PAUSED
+        try:
+            transition(mission, MissionStatus.PAUSED)
+        except MissionTransitionError as exc:
+            click.secho(f"❌ {exc}", fg="red")
+            sys.exit(1)
 
         # 呼叫現有 metabolism 引擎保存實體 checkpoint 快照
         from nexus.services.metabolism_engine import metabolism
         checkpoint = metabolism.load_checkpoint()
         if checkpoint:
-            # 假設以當前 checkpoint 作為 resume 還原點
-            mission.last_snapshot_path = ".nexus/metabolism/mission_complete.json"
+            stack_path = Path(metabolism.stack_path)
+            try:
+                mission.last_snapshot_path = str(stack_path.relative_to(repo_root))
+            except ValueError:
+                mission.last_snapshot_path = str(stack_path)
 
         mission.persist(repo_root)
         click.secho(f"⏸️ Mission {mission.mission_id} successfully paused.", fg="yellow", bold=True)
@@ -3516,11 +3602,23 @@ else:
     @mission_group.command(name="resume")
     def mission_resume():
         """🌬️ Check environment preflight, budget, and restore the loop from snapshot."""
-        from nexus.core.mission_contracts import NexusMission, MissionStatus
+        from nexus.core.mission_contracts import (
+            MissionStatus,
+            MissionTransitionError,
+            NexusMission,
+            transition,
+        )
         mission = NexusMission.load(repo_root)
         if not mission:
             click.echo("❌ No paused mission found.")
-            return
+            sys.exit(1)
+
+        if mission.status in (MissionStatus.COMPLETED, MissionStatus.ABORTED):
+            click.secho(
+                f"❌ Mission {mission.mission_id} is {mission.status.value}; create a new mission instead.",
+                fg="red",
+            )
+            sys.exit(1)
 
         # 1. 環境指紋校對 (Environment Fingerprinting)
         if not mission.run_fingerprint_preflight(repo_root):
@@ -3533,14 +3631,46 @@ else:
             sys.exit(1)
 
         # 3. 切換狀態並恢復
-        mission.status = MissionStatus.ACTIVE
+        try:
+            transition(mission, MissionStatus.ACTIVE)
+        except MissionTransitionError as exc:
+            click.secho(f"❌ {exc}", fg="red")
+            sys.exit(1)
         mission.persist(repo_root)
 
         click.secho(f"🌬️ Resuming mission: {mission.mission_id}", fg="green", bold=True)
 
-        # 4. 呼叫 metabolism 實體 resume 恢復機制
+        # 4. 呼叫 metabolism 實體 resume 恢復機制; failure (e.g. no checkpoint) re-pauses the mission
         cmd = [sys.executable, str(repo_root / "scripts/engine/nexus_cli.py"), "nexus", "resume"]
-        subprocess.run(cmd, check=False)
+        res = subprocess.run(cmd, check=False)
+        if res.returncode != 0:
+            mission = NexusMission.load(repo_root) or mission
+            if mission.status == MissionStatus.ACTIVE:
+                transition(mission, MissionStatus.PAUSED)
+                mission.persist(repo_root)
+            click.secho("❌ Resume failed: no restorable checkpoint.", fg="red", bold=True)
+            sys.exit(1)
+
+    @mission_group.command(name="abort")
+    def mission_abort():
+        """🛑 Abort the campaign (terminal state)."""
+        from nexus.core.mission_contracts import (
+            MissionStatus,
+            MissionTransitionError,
+            NexusMission,
+            transition,
+        )
+        mission = NexusMission.load(repo_root)
+        if not mission:
+            click.echo("❌ No mission found.")
+            sys.exit(1)
+        try:
+            transition(mission, MissionStatus.ABORTED)
+        except MissionTransitionError as exc:
+            click.secho(f"❌ {exc}", fg="red")
+            sys.exit(1)
+        mission.persist(repo_root)
+        click.secho(f"🛑 Mission {mission.mission_id} aborted.", fg="yellow", bold=True)
 
 
     @nexus_group.group(name="self-hosted")

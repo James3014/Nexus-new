@@ -1,40 +1,15 @@
-from __future__ import annotations
+"""Alias of ``nexus_runtime.planning.engine.planner.ab_evaluator``; the planner source is owned by nexus-runtime (D2, Phase 4b)."""
 
-from typing import Any
+import importlib
+import sys
+from typing import TYPE_CHECKING
 
-from nexus.engine.capability_contracts import CapabilityNode, CapabilityScoringConfig
+from nexus_runtime._compat_aliases import install_alias
 
+if TYPE_CHECKING:  # static re-export for type checkers; runtime identity comes from the alias below
+    from nexus_runtime.planning.engine.planner.ab_evaluator import *  # noqa: F403  # pyright: ignore[reportWildcardImportFromLibrary]
 
-def build_decision_trace(
-    *,
-    nodes: dict[str, CapabilityNode],
-    states: dict[str, str],
-    reasons: dict[str, list[str]],
-    scoring: CapabilityScoringConfig,
-    s2t_shadow_score: dict[str, Any],
-    leverage_roles: dict[str, Any],
-    cost_tier: Any,
-) -> tuple[int, list[dict[str, Any]]]:
-    score = 0
-    decision_trace: list[dict[str, Any]] = []
-    for name, node in nodes.items():
-        state = states[name]
-        score_delta = scoring.score(node) if state in {"required", "conditional"} else 0
-        score += score_delta
-        decision_trace.append(
-            {
-                "capability": name,
-                "state": state,
-                "phase_hooks": list(node.phase_hooks),
-                "reasons": reasons[name] or ["available_but_not_selected"],
-                "dependencies": list(node.dependencies),
-                "parallelizable_with": list(node.parallelizable_with),
-                "cost_tier": cost_tier(int(node.cost)),
-                "score_delta": score_delta,
-                "score_components": scoring.components(node),
-                "scoring_weights": scoring.to_dict(),
-                "s2t_shadow_policy": s2t_shadow_score.get("capability_hints", {}).get(name, {}),
-                "leverage_role": leverage_roles.get(name, ""),
-            }
-        )
-    return score, decision_trace
+install_alias(__name__, "nexus_runtime.planning.engine.planner.ab_evaluator")
+sys.modules[__name__] = importlib.import_module(
+    "nexus_runtime.planning.engine.planner.ab_evaluator"
+)

@@ -1,7 +1,13 @@
-import pytest
-from playwright.async_api import async_playwright
+# ARCHIVED 2026-10-13 (#1906): the module under test is archived (ARCHIVED_2026-10-13.md);
+# this test is kept, unchanged in behavior, until the deletion PR removes both.
 from pathlib import Path
+
+import pytest
+
 from nexus.core.web_dom_mapper import WebDomMapper
+
+# playwright is in the optional `browser` extra; skip instead of aborting collection.
+async_playwright = pytest.importorskip("playwright.async_api").async_playwright
 
 @pytest.mark.asyncio
 async def test_web_dom_mapper_basic():

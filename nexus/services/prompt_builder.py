@@ -6,6 +6,7 @@ import hashlib
 import logging
 from nexus.governance.capability_gate import CapabilityGate
 from nexus.services.mem_palace import MemPalace
+from nexus.services.lancedb_roots import VECTOR_DB, resolve_lancedb_root
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +141,7 @@ Rules:
         try:
             if self._wisdom_vault is None:
                 from nexus.research.wisdom.wisdom_vault import WisdomVault
-                db_path = str(self.project_root / ".nexus" / "vector_db")
+                db_path = str(resolve_lancedb_root(VECTOR_DB, self.project_root))
                 self._wisdom_vault = WisdomVault(db_path=db_path)
             
             results = self._wisdom_vault.search_wisdom(task, limit=2)
@@ -167,6 +168,11 @@ Rules:
             if constraints["prefer"]:
                 sections.append("💡 [PREFER/優先]\n" + "\n".join([f"- {c}" for c in constraints["prefer"]]))
             
+            if constraints.get("constraints_source") == "unavailable":
+                reason = constraints.get("constraints_unavailable_reason") or "belief_store_unavailable"
+                sections.append(f"⚠️ Belief constraints unavailable: {reason}")
+                if len(sections) == 1:
+                    return sections[0]
             return "\n\n".join(sections) if sections else "None (Constitutional Firewall Clean)"
         except Exception as e:
             return f"Error retrieving constraints: {e}"

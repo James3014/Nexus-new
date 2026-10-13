@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import json
 
 try:
@@ -13,6 +13,7 @@ import pandas as pd
 import logging
 import urllib.request
 from nexus.core.config import NexusGlobalConfig
+from nexus.services.lancedb_roots import VECTOR_DB, resolve_lancedb_root
 
 logger = logging.getLogger("nexus.vector_rag")
 
@@ -45,9 +46,12 @@ class VectorRAG:
     對齊 P10.2 實施標準 (Top-K=5)。
     """
 
-    def __init__(self, db_path: str = ".nexus/vector_db"):
+    def __init__(self, db_path: Optional[str] = None):
         self.project_root = Path(__file__).resolve().parents[2]
-        self.db_path = self.project_root / db_path
+        if db_path is None:
+            self.db_path = resolve_lancedb_root(VECTOR_DB, self.project_root)
+        else:
+            self.db_path = self.project_root / db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.table_name = "nexus_knowledge"
         self.fallback_file = self.db_path.parent / f"{self.table_name}.json"

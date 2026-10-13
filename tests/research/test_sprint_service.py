@@ -560,11 +560,13 @@ def test_run_hyper_sprint_rejects_syntax_warning_candidate(monkeypatch, tmp_path
 
         def generate(self, *args, **kwargs):
             return (
+                # `is` against a literal raises SyntaxWarning on every supported
+                # Python (return-in-finally only warns on 3.14+).
                 "def value():\n"
-                "    try:\n"
-                "        return 1\n"
-                "    finally:\n"
-                "        return 2\n",
+                "    x = 1\n"
+                "    if x is 1:\n"
+                "        return 2\n"
+                "    return 1\n",
                 {"source": "llm", "model_calls": 1, "quota_backoffs": 0},
             )
 
@@ -875,7 +877,7 @@ def test_hidden_verifier_mode_omits_initial_test_source(monkeypatch, tmp_path: P
     captured: dict[str, str] = {}
 
     class FakeGenerator:
-        def generate(self, *, source_code, task, mutation_hint, seed, test_source=""):
+        def generate(self, *, source_code, task, mutation_hint, seed, test_source="", codeintel_block=""):
             captured["test_source"] = test_source
             raise RuntimeError("stop")
 

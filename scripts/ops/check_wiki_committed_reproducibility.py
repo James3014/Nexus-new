@@ -78,15 +78,20 @@ def list_wiki_files_at_ref(repo_root: Path, ref: str) -> list[str]:
     """List all .md files in the wiki vault at a specific Git ref."""
     try:
         result = subprocess.run(
-            ["git", "ls-tree", "-r", "--name-only", ref, "nexus_wiki_vault/"],
+            ["git", "ls-tree", "-r", "-z", "--name-only", ref, "nexus_wiki_vault/"],
             cwd=repo_root,
             capture_output=True,
-            text=True,
             timeout=30,
         )
         if result.returncode != 0:
             return []
-        return [f for f in result.stdout.strip().splitlines() if f.endswith(".md")]
+        # Git quotes non-ASCII paths in line mode. NUL-delimited output retains
+        # the exact pathname bytes so rebuilding cannot silently omit Wiki pages.
+        return [
+            path.decode("utf-8", errors="surrogateescape")
+            for path in result.stdout.split(b"\x00")
+            if path.endswith(b".md")
+        ]
     except Exception:
         return []
 

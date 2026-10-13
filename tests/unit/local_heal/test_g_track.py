@@ -1,4 +1,8 @@
-"""G1-G6: GitHub-Backed Repair Upgrade Track Tests"""
+"""G1-G6: GitHub-Backed Repair Upgrade Track Tests
+
+ARCHIVED 2026-10-13 (#1906): linear_replay_runner is archived (ARCHIVED_2026-10-13.md);
+its tests here are kept until the deletion PR removes both.
+"""
 import hashlib
 import pytest
 from nexus.services.local_heal.agentless_pipeline import (

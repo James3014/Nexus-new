@@ -32,8 +32,8 @@ def test_stage_b():
         data = json.loads(res.stdout)
         assert data["replay"]["status"] == "PARTIAL"
 
-        # Case 3: Valid test_artifacts
-        print("Case 3: Valid test_artifacts")
+        # Case 3: Notes-only test_artifacts are NOT verified evidence
+        print("Case 3: Notes-only test_artifacts (UNVERIFIED unless explicitly allowed)")
         evidence_path.write_text(json.dumps({
             "final_response": "The task is ready for review.",
             "evidence_bundle": {
@@ -43,12 +43,20 @@ def test_stage_b():
             }
         }))
         res = subprocess.run(["python3", "scripts/ops/evidence_verifier.py", str(evidence_path)], capture_output=True, text=True)
-        # Should be VERIFIED and exit 0
+        data = json.loads(res.stdout)
+        assert res.returncode != 0
+        assert data["status"] == "UNVERIFIED"
+        assert data["overall_trust"] == "LOW"
+        assert data["reason"] == "NO_REPLAYABLE_COMMANDS"
+        assert data["replay"]["status"] == "UNVERIFIED"
+        assert data["replay_verified"] is False
+        # Explicit waiver: allowed, but labelled as not replay-verified.
+        res = subprocess.run(["python3", "scripts/ops/evidence_verifier.py", str(evidence_path), "--allow-no-replay"], capture_output=True, text=True)
         data = json.loads(res.stdout)
         assert res.returncode == 0
-        assert data["status"] == "VERIFIED"
-        assert data["overall_trust"] == "HIGH"
-        assert data["replay"]["status"] == "PASS"
+        assert data["replay_verified"] is False
+        assert data["replay_waived"] is True
+        assert data["overall_trust"] == "MEDIUM"
 
         print("✅ Stage B Validation PASS")
 

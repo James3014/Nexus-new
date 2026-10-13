@@ -16,8 +16,14 @@ def _test_executor(name: str) -> None:
     assert r.telemetries["wall_time_ms"] > 0, f"{name}: wall_time_ms=0"
 
 
+def _assert_retired(name: str) -> None:
+    # Executor-only key with no planner node, archived 2026-10-13 (ARCHIVED_2026-10-13.md, #1906):
+    # the historical node id is kept and now asserts the key is unreachable.
+    assert name not in EXECUTOR_REGISTRY, f"{name} must not be registered"
+
+
 def test_exec_learn_refresh_service_runs() -> None:
-    _test_executor("learn_refresh_service")
+    _assert_retired("learn_refresh_service")
 
 
 def test_exec_learn_scheduler_service_runs() -> None:

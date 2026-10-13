@@ -2,8 +2,9 @@ import json
 import logging
 import time
 import hashlib
+import os
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Protocol, runtime_checkable
 
 try:
     from nexus.core.ui import InfrastructureError
@@ -14,14 +15,92 @@ except (ImportError, ModuleNotFoundError):
 
 logger = logging.getLogger(__name__)
 
+EMBEDDING_PROVIDER_ENV = "NEXUS_MEMORY_EMBEDDING_PROVIDER"
+OLLAMA_AAAK_ENV = "NEXUS_MEMORY_OLLAMA_AAAK"
+OLLAMA_ENDPOINT_ENV = "NEXUS_OLLAMA_ENDPOINT"
+OLLAMA_EMBED_MODEL_ENV = "NEXUS_MEMORY_EMBEDDING_MODEL"
+EMBEDDING_METADATA_COLUMNS = ("embedding_status", "embedding_provider", "embedding_reason")
+# Dual-mode metadata that semantic_dedup_ingest stamps on every row; old tables may predate it.
+INGEST_METADATA_COLUMNS = ("tenant_id", "drawer_id", "aaak_content")
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+@runtime_checkable
+class EmbeddingProvider(Protocol):
+    """Injectable embedding port. Return None when no vector is available.
+
+    Implementations may raise; the repository records the failure (status/reason
+    + warning log) and keeps writing the row without a vector.
+    """
+
+    name: str
+
+    def embed(self, text: str) -> Optional[List[float]]:
+        ...
+
+    # Optional: providers may also expose ``dimension: Optional[int]`` (fixed vector width).
+    # When set, new tables get a fixed-size vector column up front. It is deliberately not a
+    # Protocol member so providers written before it existed still satisfy isinstance().
+
+
+class NoEmbeddingProvider:
+    """Default provider: never embeds and never touches the network."""
+
+    name = "none"
+    dimension: Optional[int] = None
+
+    def embed(self, text: str) -> Optional[List[float]]:
+        return None
+
+
+class OllamaEmbeddingProvider:
+    """Explicit opt-in provider (NEXUS_MEMORY_EMBEDDING_PROVIDER=ollama)."""
+
+    name = "ollama"
+
+    def __init__(self, endpoint: Optional[str] = None, model: Optional[str] = None, timeout: float = 2.0):
+        self.endpoint = (endpoint or os.environ.get(OLLAMA_ENDPOINT_ENV) or "http://localhost:11434").rstrip("/")
+        self.model = model or os.environ.get(OLLAMA_EMBED_MODEL_ENV) or "nomic-embed-text"
+        self.timeout = timeout
+
+    def embed(self, text: str) -> Optional[List[float]]:
+        import urllib.request
+
+        req = urllib.request.Request(
+            f"{self.endpoint}/api/embeddings",
+            data=json.dumps({"model": self.model, "prompt": text[:2000]}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=self.timeout) as response:
+            result = json.loads(response.read())
+        vec = result.get("embedding")
+        return [float(x) for x in vec] if vec else None
+
+
+def default_embedding_provider() -> EmbeddingProvider:
+    """Resolve the provider from env; anything but an explicit opt-in is 'none'."""
+    choice = os.environ.get(EMBEDDING_PROVIDER_ENV, "none").strip().lower()
+    if choice == "ollama":
+        return OllamaEmbeddingProvider()
+    if choice not in {"", "none"}:
+        logger.warning("Unknown %s=%r; using no embedding provider", EMBEDDING_PROVIDER_ENV, choice)
+    return NoEmbeddingProvider()
+
+
 class MemoryRepository:
     """
     Authoritative DAO for Nexus Brain (LanceDB).
     Implements v23.5 Hardened Semantic Dedup and v24.0 AAAK Eternal Compression.
     """
-    def __init__(self, db_path: Path):
+    def __init__(self, db_path: Path, embedding_provider: Optional[EmbeddingProvider] = None):
         self.db_path = db_path
         self._db = None
+        self.embedding_provider: EmbeddingProvider = embedding_provider or default_embedding_provider()
+        # Visible outcome of the most recent embedding attempt: {"status","provider","reason"}.
+        self.last_embedding: Dict[str, str] = {}
+        # Outcome of the most recent schema evolution attempt on an existing table.
+        self.last_schema_evolution: Dict[str, Any] = {}
 
     def compress_to_aaak(self, text: str) -> str:
         """⚡ AAAK (Aggressive Agentic Knowledge) 30x Compression Dialect."""
@@ -29,26 +108,26 @@ class MemoryRepository:
         
         digest = hashlib.md5(text.encode()).hexdigest()[:8]
         
-        # 嘗試使用 Local LLM (如 Ollama) 進行原生提煉
-        import urllib.request
-        import json
-        try:
-            req = urllib.request.Request(
-                "http://localhost:11434/api/generate",
-                data=json.dumps({
-                    "model": "llama3",
-                    "prompt": f"Compress to extreme AAAK shorthand dialect (max 1/30 length, keep nouns/verbs/code/paths only). Source: {text[:2000]}",
-                    "stream": False
-                }).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-                method="POST"
-            )
-            with urllib.request.urlopen(req, timeout=2.0) as response:
-                result = json.loads(response.read())
-                if "response" in result:
-                    return f"aaak:{digest}: {result['response'].strip()}"
-        except Exception:
-            pass
+        # Local LLM (Ollama) distillation is explicit opt-in: no network on the default write path.
+        if os.environ.get(OLLAMA_AAAK_ENV, "").strip().lower() in _TRUTHY:
+            try:
+                import urllib.request
+                req = urllib.request.Request(
+                    "http://localhost:11434/api/generate",
+                    data=json.dumps({
+                        "model": "llama3",
+                        "prompt": f"Compress to extreme AAAK shorthand dialect (max 1/30 length, keep nouns/verbs/code/paths only). Source: {text[:2000]}",
+                        "stream": False
+                    }).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=2.0) as response:
+                    result = json.loads(response.read())
+                    if "response" in result:
+                        return f"aaak:{digest}: {result['response'].strip()}"
+            except Exception as exc:
+                logger.warning("AAAK Ollama compression failed, using heuristic fallback: %s", exc)
 
         # AAAK Heuristic Dialect Fallback (Regex-driven structural compression)
         import re
@@ -88,25 +167,77 @@ class MemoryRepository:
         return [str(name) for name in list(tables or [])]
 
 
+    def _resolve_embedding(self, record: Dict[str, Any], vector_col: str) -> Optional[List[float]]:
+        """Fill embedding_status/provider/reason on the record; never raises, never swallows silently."""
+        provider_name = str(getattr(self.embedding_provider, "name", type(self.embedding_provider).__name__))
+        vec = record.get(vector_col)
+        reason = ""
+        if vec is None:
+            text = str(record.get("content") or "")
+            if not text:
+                reason = "no_content"
+            else:
+                try:
+                    vec = self.embedding_provider.embed(text)
+                except Exception as exc:
+                    reason = f"provider_error:{type(exc).__name__}"
+                    logger.warning("Embedding provider %s failed: %s", provider_name, exc)
+                else:
+                    if not vec:
+                        vec = None
+                        reason = "provider_none" if provider_name == "none" else "provider_returned_no_vector"
+        if vec is not None:
+            record[vector_col] = [float(x) for x in vec]
+            status = "ok"
+        else:
+            record.pop(vector_col, None)
+            status = "missing"
+        record["embedding_status"] = status
+        record["embedding_provider"] = provider_name
+        record["embedding_reason"] = reason
+        self.last_embedding = {"status": status, "provider": provider_name, "reason": reason}
+        return record.get(vector_col)
+
     def semantic_dedup_ingest(self, table_name: str, new_record: Dict[str, Any], vector_col: str = "vector", tenant_id: str = "default"):
-        """🚀 Nexus v23.5/v24.0/v24.5 Hardened Ingest: <0.1 discard / 0.1-0.3 merge / >0.3 new."""
+        """Hardened ingest: <0.1 DUPLICATE / 0.1-0.3 MERGED / >0.3 NEW.
+
+        Vectors come from the record or the injected EmbeddingProvider. Without a vector the
+        row is still written with embedding_status="missing" (no dedup, no blocking call).
+        """
         # 🛡️ Dual-Mode Metadata Injection
         new_record["tenant_id"] = tenant_id
         content = new_record.get("content", "")
         new_record["drawer_id"] = hashlib.md5(f"{tenant_id}:{content}".encode()).hexdigest()
         new_record["aaak_content"] = self.compress_to_aaak(content)
-        
+        query_vec = self._resolve_embedding(new_record, vector_col)
+
         db = self._get_db()
         if db is None or table_name not in self.list_tables():
-            self.add_rows(table_name, [new_record])
+            self.add_rows(table_name, [new_record], vector_col=vector_col)
             return "NEW_INITIAL"
 
         table = db.open_table(table_name)
-        if vector_col not in new_record:
+        # LanceDB rejects columns absent from the table schema; drop (visibly) rather than fail the write.
+        self._evolve_table_schema(table, table_name, vector_col)
+        columns = set(table.schema.names)
+        for key in INGEST_METADATA_COLUMNS:
+            if key in new_record and key not in columns:
+                logger.warning("Table %s has no %s column; field dropped, row stored without it", table_name, key)
+                new_record.pop(key, None)
+        provider_name = str(new_record.get("embedding_provider", ""))
+        for key in (vector_col, "embedding_status", "embedding_provider", "embedding_reason"):
+            if key in new_record and key not in columns:
+                if key == vector_col:
+                    logger.warning("Table %s has no %s column; vector dropped, row stored without it", table_name, vector_col)
+                    new_record["embedding_status"] = "missing"
+                    new_record["embedding_reason"] = "table_has_no_vector_column"
+                    self.last_embedding = {"status": "missing", "provider": provider_name, "reason": "table_has_no_vector_column"}
+                    query_vec = None
+                new_record.pop(key, None)
+        if query_vec is None:
             self.add_rows(table_name, [new_record])
             return "NEW_NO_VECTOR"
 
-        query_vec = new_record[vector_col]
         # Search for the nearest neighbor to calculate semantic distance
         results = table.search(query_vec).limit(1).to_pandas()
         
@@ -120,8 +251,8 @@ class MemoryRepository:
         
         # 🛡️ Threshold Enforcement
         if dist_sq < 0.01: # < 0.1 distance
-            logger.info(f"DEDUP: Discarded highly similar record (dist_sq: {dist_sq:.4f})")
-            return "DISCARDED"
+            logger.info(f"DEDUP: Duplicate record not written (dist_sq: {dist_sq:.4f})")
+            return "DUPLICATE"
         
         elif dist_sq <= 0.09: # 0.1 - 0.3 distance
             # MERGE: Update metadata of the existing record
@@ -145,21 +276,92 @@ class MemoryRepository:
             table.add([new_record])
             return "NEW"
 
-    def ensure_table(self, table_name: str, initial_data: List[Dict[str, Any]] = None, fts_column: Optional[str] = None):
+    def _vector_dimension(self) -> Optional[int]:
+        dim = getattr(self.embedding_provider, "dimension", None)
+        return dim if isinstance(dim, int) and not isinstance(dim, bool) and dim > 0 else None
+
+    def _metadata_fields(self, vector_col: str, existing: Optional[Any] = None) -> List[Any]:
+        """Fields every table must carry so schema never depends on the first row written."""
+        import pyarrow as pa
+
+        have = set(existing.names) if existing is not None else set()
+        fields = [pa.field(n, pa.string(), nullable=True) for n in EMBEDDING_METADATA_COLUMNS if n not in have]
+        dim = self._vector_dimension()
+        if dim and vector_col not in have:
+            fields.append(pa.field(vector_col, pa.list_(pa.float32(), dim), nullable=True))
+        return fields
+
+    def _build_schema(self, rows: List[Dict[str, Any]], vector_col: str):
+        """Infer the row schema, then force the metadata/vector columns to stable nullable types."""
+        import pyarrow as pa
+
+        inferred = pa.Table.from_pylist(
+            [{k: v for k, v in row.items() if k != vector_col} for row in rows]
+        ).schema
+        fields = []
+        for field in inferred:
+            if field.name in EMBEDDING_METADATA_COLUMNS:
+                field = pa.field(field.name, pa.string(), nullable=True)
+            fields.append(field)
+        extra = self._metadata_fields(vector_col, existing=pa.schema(fields))
+        dim = self._vector_dimension()
+        if not dim and any(row.get(vector_col) is not None for row in rows):
+            width = len(next(row[vector_col] for row in rows if row.get(vector_col) is not None))
+            extra.append(pa.field(vector_col, pa.list_(pa.float32(), width), nullable=True))
+        return pa.schema(fields + extra)
+
+    def _evolve_table_schema(self, table: Any, table_name: str, vector_col: str = "vector") -> bool:
+        """Add missing embedding metadata, ingest metadata (tenant_id/drawer_id/aaak_content) and vector columns.
+
+        The vector column is added only when the embedding dimension is known.
+
+        Uses LanceDB add_columns (all-null backfill; existing rows are never rewritten or dropped).
+        On failure, records the reason and leaves the caller's warn-and-strip path in place.
+        """
+        missing = self._metadata_fields(vector_col, existing=table.schema)
+        have = set(table.schema.names)
+        import pyarrow as pa
+
+        missing += [pa.field(n, pa.string(), nullable=True) for n in INGEST_METADATA_COLUMNS if n not in have]
+        if not missing:
+            return True
+
+        try:
+            table.add_columns(pa.schema(missing))
+        except Exception as exc:
+            reason = f"schema_evolution_failed:{type(exc).__name__}"
+            logger.warning("Table %s missing columns %s; %s: %s", table_name, [f.name for f in missing], reason, exc)
+            self.last_schema_evolution = {"table": table_name, "status": "failed", "reason": reason}
+            return False
+        self.last_schema_evolution = {"table": table_name, "status": "added", "columns": [f.name for f in missing]}
+        return True
+
+    def ensure_table(
+        self,
+        table_name: str,
+        initial_data: List[Dict[str, Any]] = None,
+        fts_column: Optional[str] = None,
+        vector_col: str = "vector",
+    ):
         db = self._get_db()
         if db is None:
             return
-        
+
         if table_name in self.list_tables() or not initial_data:
             return
 
         try:
-            tbl = db.create_table(table_name, data=initial_data)
+            import pyarrow as pa
+
+            schema = self._build_schema(initial_data, vector_col)
+            data = pa.Table.from_pylist(initial_data, schema=schema)
+            tbl = db.create_table(table_name, data=data, schema=schema)
         except Exception as e:
             if "already exists" in str(e).lower() or table_name in self.list_tables():
                 logger.debug(f"LanceDB table already exists during ensure_table race: {table_name}")
                 return
-            raise
+            logger.warning("Explicit-schema create of %s failed (%s); falling back to inferred schema", table_name, e)
+            tbl = db.create_table(table_name, data=initial_data)
 
         if fts_column:
             try:
@@ -167,16 +369,17 @@ class MemoryRepository:
             except Exception as e:
                 logger.debug(f"LanceDB FTS index init skipped for {table_name}: {e}")
 
-    def add_rows(self, table_name: str, rows: List[Dict[str, Any]]):
+    def add_rows(self, table_name: str, rows: List[Dict[str, Any]], vector_col: str = "vector"):
         db = self._get_db()
         if db is None:
             return
+        # Stamp before create/append so the first row's schema matches later appends.
+        for row in rows:
+            if "updated_at" not in row: row["updated_at"] = time.time()
         if table_name not in self.list_tables():
-            self.ensure_table(table_name, initial_data=rows)
+            self.ensure_table(table_name, initial_data=rows, vector_col=vector_col)
         else:
             table = db.open_table(table_name)
-            for row in rows:
-                if "updated_at" not in row: row["updated_at"] = time.time()
             table.add(rows)
 
     def update_table(self, table_name: str, data: Any) -> None:

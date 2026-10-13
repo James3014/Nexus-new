@@ -1,0 +1,8 @@
+{
+  "id": "shallow_copy_nested-a",
+  "bug_class": "shallow_copy_nested",
+  "variant": "a",
+  "problem_statement": "build_profile({'display': {'font': 14}}) drops the default theme and returns display == {'font': 14}. Also, mutating a profile built earlier changes the defaults that later profiles start from. Expected: nested dicts merge key by key, and profiles share no state with the defaults or the overrides.",
+  "target_file": "profiles.py",
+  "repro_file": "repro.py"
+}

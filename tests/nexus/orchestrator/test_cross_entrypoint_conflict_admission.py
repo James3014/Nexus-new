@@ -1175,7 +1175,7 @@ def test_live_governed_target_vs_dev_mcp_overlap(tmp_path: Path, monkeypatch: py
         target_worktree_root=str(target_root),
         allowed_files=["src/base.py"],
         forbidden_files=[],
-        verifier_commands=[],
+        verifier_commands=["python -c pass"],
         protected_contracts=[],
     )
     manager.create_lease(contract_target)

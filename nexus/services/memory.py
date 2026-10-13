@@ -8,6 +8,7 @@ import os
 from dataclasses import dataclass
 from datetime import datetime
 from nexus.core.memory_coordinator import MemoryCoordinator
+from nexus.services.lancedb_roots import KNOWLEDGE, resolve_lancedb_root
 from nexus.services.memory_repository import MemoryRepository
 from nexus.services.semantic_searcher import SemanticSearcher
 from nexus.infrastructure.storage_implementations import FileJsonlStore
@@ -40,8 +41,7 @@ class MemoryService:
     def __init__(self, project_root: str, run_dir: Optional[str] = None, repo: Any = None, redis_client: Any = None, jsonl_store: Any = None):
         self.project_root = Path(project_root)
         self.run_dir = Path(run_dir) if run_dir else None
-        db_path_override = os.environ.get("NEXUS_MEMORY_DB_PATH")
-        self.db_path = Path(db_path_override) if db_path_override else self.project_root / ".nexus" / "knowledge" / "lancedb"
+        self.db_path = resolve_lancedb_root(KNOWLEDGE, self.project_root)
         self.fault_lessons_jsonl = self.project_root / ".nexus" / "knowledge" / "fault_lessons.jsonl"
         self.policy_memory_jsonl = self.project_root / ".nexus" / "knowledge" / "policy_memory.jsonl"
         self.coordinator = MemoryCoordinator()

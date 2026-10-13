@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Protocol
+
+from nexus.services.lancedb_roots import REPOSITORY, resolve_lancedb_root
+from nexus.services.local_heal.lesson_embedding import embed_text
 
 
 @dataclass(frozen=True)
@@ -475,7 +479,7 @@ class MemoryRepositoryLessonStore:
             return self.repository
         from nexus.services.memory_repository import MemoryRepository
 
-        self.repository = MemoryRepository(self.project_root / ".nexus" / "memory_repository")
+        self.repository = MemoryRepository(resolve_lancedb_root(REPOSITORY, self.project_root))
         return self.repository
 
     def query(self, *, query_text: str, limit: int) -> list[dict[str, Any]]:
@@ -712,11 +716,110 @@ class CanonicalEpisodicMemoryLessonStore:
         return selected[:limit] if limit and limit > 0 else selected
 
 
+def _canonical_relevance(hit: dict[str, Any], source_lesson: dict[str, Any]) -> float:
+    """Relevance for a canonical lesson row; judge-reflected lessons get a floor of 0.5."""
+    score = float(hit.get("relevance_score") or 0.0)
+    reflector = source_lesson.get("reflector") if isinstance(source_lesson, dict) else None
+    if isinstance(reflector, dict) and str(reflector.get("kind") or "") == "judge":
+        return max(score, 0.5)
+    return score
+
+
+class CanonicalLessonStore:
+    """Read-only adapter over the canonical nexus.learning_lesson.v1 ledger.
+
+    Lessons are read through nexus_learning.lessons; this class never opens the
+    ledger for writing and never mutates it. Only retrieval-eligible (physical
+    evidence) lessons are returned; simulated lessons are excluded. Fail-open.
+    """
+
+    backend = "canonical_lesson"
+
+    def __init__(self, *, project_root: Path | None = None, path: Path | None = None) -> None:
+        self.project_root = (
+            Path(project_root) if project_root is not None else Path(__file__).resolve().parents[3]
+        )
+        self.path = Path(path) if path is not None else None
+        self.last_error = ""
+        self.last_metadata: dict[str, Any] = {}
+
+    def _resolve_path(self) -> Path:
+        if self.path is not None:
+            return self.path.expanduser().resolve()
+        from nexus_learning.state_root import LearningStateRoot
+
+        return LearningStateRoot.from_project_root(self.project_root).lessons_path
+
+    @staticmethod
+    def _to_row(hit: dict[str, Any], source_lesson: dict[str, Any]) -> dict[str, Any]:
+        lesson_id = str(hit.get("lesson_id") or "")
+        evidence_refs = [str(ref) for ref in hit.get("evidence_refs") or [] if str(ref).strip()]
+        first_ref = evidence_refs[0] if evidence_refs else ""
+        source_task_ids = [
+            str(task) for task in source_lesson.get("source_task_ids") or [] if str(task).strip()
+        ]
+        row = dict(hit)
+        polarity = str(hit.get("classification") or hit.get("pattern_type") or "")
+        row.update({
+            "lesson_id": lesson_id,
+            "finding_id": lesson_id,
+            "summary": str(hit.get("summary") or ""),
+            "classification": polarity,
+            "pattern_type": polarity,
+            "source": "canonical_lesson",
+            "provenance": f"lesson:{lesson_id}:{first_ref}" if first_ref else f"lesson:{lesson_id}",
+            "task_id": source_task_ids[0] if source_task_ids else "",
+            "evidence_ref": first_ref,
+            "relevance_score": _canonical_relevance(hit, source_lesson),
+            "title": str(hit.get("title") or ""),
+            "applies_when": list(hit.get("applies_when") or []),
+            "avoid_when": list(hit.get("avoid_when") or []),
+        })
+        return row
+
+    def query(self, *, query_text: str, limit: int) -> list[dict[str, Any]]:
+        self.last_error = ""
+        self.last_metadata = {
+            "backend": self.backend,
+            "query_attempted": True,
+            "query_succeeded": False,
+            "result_count": 0,
+            "error": "",
+        }
+        try:
+            from nexus_learning.lessons import load_lessons, retrieve_lessons
+
+            path = self._resolve_path()
+            if not path.exists():
+                self.last_metadata["query_succeeded"] = True
+                return []
+            lessons = load_lessons(path)
+            by_id = {str(lesson.get("lesson_id")): lesson for lesson in lessons}
+            kwargs: dict[str, Any] = {
+                "query_text": query_text,
+                "limit": limit,
+                "require_physical": True,
+            }
+            if "query_embedding" in inspect.signature(retrieve_lessons).parameters:
+                kwargs["query_embedding"] = embed_text(query_text)
+            hits = retrieve_lessons(lessons, **kwargs)
+            rows = [self._to_row(hit, by_id.get(str(hit.get("lesson_id")), {})) for hit in hits]
+        except Exception as exc:  # fail open: memory must never block the caller
+            self.last_error = exc.__class__.__name__
+            self.last_metadata["error"] = self.last_error
+            return []
+        self.last_metadata["query_succeeded"] = True
+        self.last_metadata["result_count"] = len(rows)
+        return rows
+
+
 class NexusCompositeLessonStore:
     """Composite Nexus memory read path with bounded, fail-open sources."""
 
     def __init__(self, stores: list[LessonStore] | None = None) -> None:
+        # Distilled canonical lessons first: raw episode rows must not crowd them out.
         self.stores = stores or [
+            CanonicalLessonStore(),
             LocalJsonlLessonStore(),
             FindingsMemoryLessonStore(),
             MemoryRepositoryLessonStore(),

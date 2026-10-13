@@ -80,6 +80,7 @@ PUBLIC_OPERATION_KEYS = (
     "input_delivery_truncations",
     "quota_preflight_progress",
     "liveness_policy",
+    "quota_preflight_decision",
     "reconciliation",
     "stdout_path",
     "stderr_path",
@@ -113,6 +114,7 @@ PUBLIC_OPERATION_KEYS = (
     "permission_profile_sha256",
     "permission_profile_kind",
     "effective_permissions",
+    "excluded_account_hashes",
     "write_paths",
     "scope_validation_state",
     "scope_violations",
@@ -603,6 +605,7 @@ class DirectOperationJournal:
             "tool_event_count": 0,
             "command_sha256": None,
             "failure_kind": None,
+            "failure_history": [],
             "exit_code": None,
             "observed_changed_paths": [],
             "source_baseline": source_baseline,
@@ -612,6 +615,7 @@ class DirectOperationJournal:
             "input_delivery_source": None,
             "input_delivery_truncations": [],
             "quota_preflight_progress": None,
+            "quota_preflight_decision": None,
             "reconciliation": None,
             "permission_profile_sha256": None,
             "permission_profile_kind": None,
@@ -688,6 +692,15 @@ class DirectOperationJournal:
                         changes.setdefault("scope_validation_state", "PENDING")
                     else:
                         changes.setdefault("scope_validation_state", "UNCONSTRAINED")
+                reconciliation = changes.get("reconciliation")
+                if (
+                    "reconciled_at" not in changes
+                    and isinstance(reconciliation, dict)
+                    and isinstance(reconciliation.get("at"), str)
+                ):
+                    # Every reconciliation receipt carries its observation time;
+                    # keep the durable top-level timeline field bound to it.
+                    changes["reconciled_at"] = reconciliation["at"]
                 candidate_record = {**record, **changes}
                 _validate_continuity_fields(candidate_record)
                 record.update(changes)

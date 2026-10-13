@@ -20,6 +20,22 @@ PHASE_OBSERVATION_FIELDS = {
     "A": "phase_a",
     "C": "phase_c",
 }
+# Agy bench fail-closed outcomes (scripts/bench/agy_account_lease.py, #1932): the answer cannot be
+# attributed to the requested model, or no allowlisted account with 5-hour quota could be leased.
+# They are infrastructure-invalid, never a model failure, and keep their exact reason.
+AGY_FAIL_CLOSED_INFRA_REASONS = frozenset({
+    "MODEL_IDENTITY_MISMATCH",
+    "MODEL_IDENTITY_UNOBSERVED",
+    "AGY_NO_ELIGIBLE_ACCOUNT",
+    "QUOTA_WINDOW_UNKNOWN",
+    "AGY_ACCOUNT_POOL_BUSY",
+    "AGY_ACCOUNT_POOL_EXHAUSTED",
+    "AGY_ACCOUNT_POOL_RUNTIME_MISSING",
+    "PROVIDER_QUOTA_EXHAUSTED_PRE_EFFECT",
+    "PROVIDER_QUOTA_EXHAUSTED_AFTER_EFFECT",
+    "PROVIDER_QUOTA_EXHAUSTED_UNKNOWN_EFFECT",
+    "PROVIDER_QUOTA_ROTATIONS_EXHAUSTED",
+})
 LOCAL_INTERNAL_DELIVERY_SOURCES = {
     "local_hidden_contract_fast_path",
     "local_deterministic_pre_model_rescue",
@@ -97,6 +113,8 @@ def classify_infra_invalid_reason(
         and len(phases) >= len(PHASE_OBSERVATION_FIELDS)
     )
 
+    if gateway_error in AGY_FAIL_CLOSED_INFRA_REASONS:
+        return gateway_error.lower()
     if (
         "quota" in combined
         or "resource exhausted" in combined
@@ -113,6 +131,8 @@ def classify_infra_invalid_reason(
         or "auth_confirmation_required" in combined
     ):
         return "auth_failed"
+    if gateway_error == "agy_missing":
+        return "agy_missing"
     if gateway_error == "binary_missing":
         return "cli_missing"
     if gateway_error == "parse_failure":

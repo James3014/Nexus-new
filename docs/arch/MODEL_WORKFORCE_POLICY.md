@@ -9,7 +9,7 @@
 **Machine source:** `nexus/config/model_workforce.yaml`
 
 **Benchmark matrix:** `nexus/config/model_three_arm_matrix.yaml`
-**Last verified:** 2026-08-17
+**Last verified:** 2026-10-12
 
 This file defines workforce eligibility: which model workers Nexus may admit,
 the context each worker may receive, its autonomy ceiling, and the conditions
@@ -78,6 +78,7 @@ The 2026-07-29 matrix is a historical baseline and comparative diagnostic instru
 | Agy Flash Medium — `gemini-3.6-flash-medium` | Bounded candidate/implementation and focused verification only | L1 | **Nexus-bounded** | Existing registered conditional identity preserved for backward compatibility; exact Task Card, parser/verifier, and independent verification required; non-default route |
 | Agy Flash 3.7 Medium — `gemini-3.7-flash-medium` | Bounded candidate/implementation and focused verification | L3 | **Nexus-bounded** | Distinct registered conditional identity; admitted autonomy ceiling L3; exact Task Card, parser/verifier, and independent verification required; non-default route; experimental L4 non-admitted |
 | OpenCLI ChatGPT Web — `opencli_chatgpt/balanced` | Campaign-scoped bounded Candidate generation | L1 | **Nexus-bounded** | Owner-approved conditional identity only for `open-swe-resident-five-repo-canary-20260908`; `balanced` is a mutable UI capability alias, not a fixed backend model revision; never a global default; host transport identity is enforced by External Intelligence activation/runtime gates |
+| OpenCLI ChatGPT Web — `opencli_chatgpt/advanced` | External Intelligence consumer bounded Candidate generation | L1 | **Nexus-bounded** | Owner-approved conditional identity only for consumer `external_intelligence` (owner decision 2026-10-13); runs on the personal free plan where `advanced` is the Thinking toggle (`aria-pressed=true`), a mutable UI alias, not a fixed backend model revision; never a global default |
 | Grok 4.5 | Independent review, hidden-defect search, evidence audit; bounded candidate generation | L2+ | Bounded or Full semantic context | Available; benchmark 11/11 on all arms |
 | OpenCode MiMo — `opencode/mimo-v2.5-free` | Bounded code candidate | L1 | Bounded isolated prompt | Available; admitted ceiling stays L1; 2026-08-17 cumulative calibration records semantic stable floor L1.5 and semantic frontier L3 separately; NOT_PROMOTED; tool-discipline requalification pending; high fixed input-token overhead |
 | OpenCode Ling — `opencode/ling-3.0-flash-free` | Bounded code candidate | Current L1 | Bounded isolated prompt | Available; 11/11 all arms; high fixed input-token overhead. The unapproved v2 proposal would lower it to read-only L0 |
@@ -322,3 +323,24 @@ The Owner-approved MiMo cumulative calibration / governance writeback amendment 
 ## 12. Pending v2 collaboration proposal
 
 `NEXUS_MULTI_MODEL_COLLABORATION_STANDARD_v2.0_20260728` remains `PROPOSED_FOR_OWNER_APPROVAL`. Its proposed changes—including Ling at read-only L0—are recorded as review inputs, not active authority. This policy and `nexus/config/model_workforce.yaml` remain current until James explicitly approves a replacement or amendment.
+
+## 13. Dated amendment — 2026-10-12 (M5 inference host alignment)
+
+All local model inference runs on the M5 host (64 GB); the 16 GB M4 no longer hosts models. The Ollama-compatible gateway (tunnel `127.0.0.1:11434`) and raw Ollama (`:11435`) serve exactly `qwen2.5-coder:14b-instruct-q3_K_M`, `qwen2.5-coder:7b`, `qwen2.5-coder:7b-instruct`, `qwen3.5:9b` and `nomic-embed-text:latest`; the gateway additionally maps `incoai/Qwen3.6-35B-A3B-Splash` to Splash on M5. `nexus/config/model_workforce.yaml` was aligned accordingly (`last_verified` 2026-10-12; `benchmark_snapshot` unchanged):
+
+- **Added `local_splash_qwen36`** (`incoai/Qwen3.6-35B-A3B-Splash`): `LOCAL_CONDITIONAL`, L1, `bounded_code_candidate` and `bounded_reasoning_candidate`, same requirements and forbidden actions as `local_coder_7b`. Full-agent autonomy stays NOT_ADMITTED per lineage `qwen-3.6-35b-a3b` (CONDITIONAL/WATCH). Evidence: lineage waves in #1412 and 72 bounded local-heal repair attempts at about 50% calibrated solve (nexus-learning memory A/B rounds 8-9).
+- **Added `local_splash_qwen38_27b`** (`incoai/Qwen3.8-27B-Splash`): `EXPERIMENT_ONLY`, L0. Installed on M5 but not served and not mapped by the gateway; lineage config `qwen3.8-27b-splash-q4-opencode-64k-wave3` shows tool-loop smoke PASS but full-agent T01 `STACK_UNQUALIFIED`.
+- **Added `agy_flash_38`** (Gemini 3.8 Flash via agy, `gemini-3.8-flash-medium`): `REGISTERED_CONDITIONAL`, roles and autonomy copied from `agy_flash_37_medium`, not the default route. The model id is taken from the dsh-agy-adapter model catalog and is not yet attested by a live agy run.
+- **`local_advisor_3b`, `local_deepseek67b`, `local_qwythos9b`** are not present on M5 Ollama: state `INSTALLED_NOT_CONNECTED`, reason `not_present_on_m5_ollama_2026-10-12`, roles kept for history. `routing.local_first` entries naming it were remapped later the same day (see the interim remap item below).
+- **`local_qwen14b`** stays `DISABLED_RESOURCE_RISK`; the reason is now `no_semantic_uplift_over_7b; resource note superseded by m5_64gb_host_2026-10-12` (the 16 GB-host latency rationale is stale, the no-uplift finding stands).
+- **Interim local advisor remap (issue #1845):** the 3B advisor is retired for now (its LoRA weights exist nowhere; `docs/reports/qwen3b_s2t_adapter_manifest.json` records `training_data_hash: sim_dataset_smoke_fixture`; `3b_override_verified_rate_analysis.md` measured abstain accuracy 40%). `routing.local_first` now maps `classification`, `extraction`, `compression` and `compact_diagnosis` to `local_qwen35_9b` (`qwen3.5:9b`, `LOCAL_CONDITIONAL`, L1, present on M5), whose roles gain those four with note `interim_replacement_for_local_advisor_3b_2026-10-12; unvalidated_for_role`. `routing.local_first.bounded_reasoning_shadow` is also remapped from `local_qwen3_8b` to `local_qwen35_9b` (note `bounded_reasoning_shadow_interim_2026-10-12; unvalidated_for_role`, nexus-runtime#173). `candidate_ranking` is not referenced by any routing entry and stays on the retired 3B worker. Claim ceiling `WORKFORCE_ROLE_REMAP_CONFIG_ONLY`: the 9B is not validated for these roles. The GB019 advisory tests no longer need a pre-M5 policy fixture and run against the live policy with the 9B worker identity.
+
+The planner source copy of the YAML is `src/nexus_runtime/planning/config/model_workforce.yaml` in nexus-runtime and must stay byte-identical; this repository's copy aligns with the runtime package after the next runtime pin bump.
+
+## 14. Dated amendment — 2026-10-13 (runtime pin bump to nexus-runtime #173, #177, #175)
+
+This repository's `nexus/config/model_workforce.yaml` is again byte-identical to the pinned nexus-runtime planner copy.
+
+- **nexus-runtime #173:** four more workers not present on M5 are `INSTALLED_NOT_CONNECTED`; `routing.local_first.bounded_reasoning_shadow` moves to `local_qwen35_9b` (see section 13).
+- **nexus-runtime #177:** `local_splash_qwen38_27b` stays `EXPERIMENT_ONLY` but gains `bounded_code_candidate` at L1 so an explicitly authorized armor-on calibration can pass Workforce Admission; no routing entry names it and every admission still needs `explicit_experiment_authorization`.
+- **nexus-runtime #175 (owner decision 2026-10-13):** External Intelligence runs on the personal free ChatGPT plan, whose only selectable level is the Thinking toggle. New worker `opencli_chatgpt_advanced_web` (`opencli_chatgpt/advanced`, `REGISTERED_CONDITIONAL`, L1, `CANDIDATE_ONLY`, same contract as the balanced web worker) receives `routing.online.consumer_routing.external_intelligence.bounded_candidate_generation` and the EIA consumer approval (`owner-decision-2026-10-13-eia-gpt-web-free-thinking`). `opencli_chatgpt_balanced_web` and the `open-swe-resident-five-repo-canary-20260908` campaign route are unchanged.

@@ -8,7 +8,7 @@ from typing import Any, Callable
 
 from nexus.engine.cli_pregate import run_cli_pregate
 from nexus.engine.target_env_context import TargetEnvContext
-from nexus.learning.lewm_predictor import LeWMPredictor
+from nexus.learning.predictor_toggle import LEWM_PREDICTOR, influence_entry, record_influence
 
 logger = logging.getLogger(__name__)
 
@@ -67,12 +67,31 @@ class RepairAttemptService:
         project_root: Path,
         run_cli_pregate_fn: Callable[..., tuple[bool, list[dict[str, Any]]]] = run_cli_pregate,
         subprocess_run: Callable[..., Any] = subprocess.run,
-        lewm_cls: type[LeWMPredictor] = LeWMPredictor,
     ):
         self.project_root = Path(project_root)
         self.run_cli_pregate_fn = run_cli_pregate_fn
         self.subprocess_run = subprocess_run
-        self.lewm_cls = lewm_cls
+
+    def _run_lewm_sim(self, state: Any) -> dict[str, Any] | None:
+        """LeWM was archived 2026-10-12: it is never consulted and never aborts an attempt.
+
+        Kept so the frozen ablation harness can still probe this site; it records the
+        module-absent decision (``consulted=False``) and always continues.
+        """
+        if not state.metadata.get("sim_lewm"):
+            return None
+        record_influence(
+            influence_entry(
+                LEWM_PREDICTOR,
+                enabled=False,
+                consulted=False,
+                before="continue",
+                after="continue",
+                site="repair_attempt_service",
+            ),
+            metadata=state.metadata,
+        )
+        return None
 
     def execute_attempt(
         self,
@@ -90,22 +109,6 @@ class RepairAttemptService:
         wisdom_vault: Any = None,
         target_env: TargetEnvContext | None = None,
     ) -> dict[str, Any]:
-        if state.metadata.get("sim_lewm"):
-            lewm = self.lewm_cls()
-            sim_res = lewm.simulate(state.metadata.get("task_description", ""), None)
-            sim_status = sim_res.get("status")
-            if sim_status == "REJECTED":
-                logger.warning("🚫 [JEPA] Simulator Rejected (Cost: %s)", sim_res.get("cost"))
-                state.metadata["lewm_sim_status"] = "REJECTED"
-                state.metadata["lewm_rejected_cost"] = sim_res.get("cost")
-                return {"status": "abort", "passed": False, "gate_results": []}
-            if sim_status == "PASSED":
-                state.metadata["lewm_sim_status"] = "PASSED"
-                state.metadata["lewm_prediction_cost"] = sim_res.get("cost")
-            else:
-                logger.info("ℹ️ [JEPA] Simulator %s. Continuing standard flow.", sim_status)
-                state.metadata["lewm_sim_status"] = sim_status
-
         git_exists = (self.project_root / ".git").exists()
         if attempt == 2 and battle_swarm is not None and git_exists:
             workers = 4

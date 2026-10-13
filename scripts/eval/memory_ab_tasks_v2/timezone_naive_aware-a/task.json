@@ -1,0 +1,8 @@
+{
+  "id": "timezone_naive_aware-a",
+  "bug_class": "timezone_naive_aware",
+  "variant": "a",
+  "problem_statement": "earliest_due() raises TypeError when a task's 'due' has no UTC offset (for example '2026-03-01T08:15:00') while `now` is timezone-aware. Expected: a timestamp without an offset is read as UTC and the earliest pending task is returned.",
+  "target_file": "schedule.py",
+  "repro_file": "repro.py"
+}

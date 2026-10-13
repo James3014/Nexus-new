@@ -59,6 +59,8 @@ version_scope: '[v30]'
 - **驗收狀態**: [[04_State/NEXUS_FINAL_ACCEPTANCE_MATRIX_2026-05-06|Final Acceptance Matrix]]
 - **路線圖**: [[09_Roadmap/CAPABILITY_ROUTING_MIGRATION_PLAN_2026-04-29|Migration Roadmap]]
 - **文碼對位**: [[08_Diffs/Code_to_Wiki_Alignment_Matrix|Alignment Matrix]]
+- **拆分對位 (2026-10-12)**: [[08_Diffs/Diff - Legacy Monolith vs Split Repo Family (2026-10-12)|Legacy vs Split Repo Family]]
+- **證據可引用性 (2026-10-12)**: [[04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12|Capability Evidence Ledger]]
 
 ---
 

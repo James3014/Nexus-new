@@ -19,6 +19,7 @@ from nexus.services.capability_registry import (
     PLANNER_EXECUTION_CONTRACTS,
     build_default_mainchain_invokers,
 )
+from nexus.services.lancedb_roots import KNOWLEDGE, resolve_lancedb_root
 from nexus.services.mainchain_entry import run_mainchain
 from nexus.services.unified_runtime import (
     UnifiedRuntimeRequest,
@@ -79,7 +80,7 @@ def _run_canary_mainchain_cached(
     if positive and name in {"semantic_searcher", "lancedb"}:
         from nexus.services.memory_repository import MemoryRepository
 
-        memory_root = canary_root / ".nexus" / "knowledge" / "lancedb"
+        memory_root = resolve_lancedb_root(KNOWLEDGE, canary_root, honor_env=False)
         memory_repository = MemoryRepository(memory_root)
         try:
             memory_repository.search_fts(

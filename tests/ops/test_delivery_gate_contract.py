@@ -227,3 +227,46 @@ def test_delivery_gate_physical_freshness_decision_bearing(tmp_path):
     assert res.returncode == 17
     assert '"error": "report_older_than_reference"' in output
     assert "Report integrity check failed" in output
+
+
+def test_delivery_gate_shebang_does_not_require_zsh():
+    """The gate must be executable on hosts without zsh (Linux CI, containers)."""
+    first_line = (
+        (ROOT / "scripts/ops/nexus_delivery_gate.sh").read_text(encoding="utf-8").splitlines()[0]
+    )
+    assert first_line == "#!/usr/bin/env bash"
+
+
+def _run_delivery_gate_args(tmp_path: Path, *args: str) -> subprocess.CompletedProcess:
+    env = dict(os.environ)
+    env["PYTHONPATH"] = f"{ROOT}:{env.get('PYTHONPATH', '')}"
+    env["UV_PYTHON"] = sys.executable
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["PATH"] = f"{tmp_path / 'bin'}:{env.get('PATH', '')}"
+    return subprocess.run(
+        ["bash", "scripts/ops/nexus_delivery_gate.sh", *args],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_delivery_gate_honors_evidence_argument(tmp_path):
+    """--evidence must replace the default path instead of being silently dropped."""
+    _build_delivery_fixture(tmp_path)
+    missing = tmp_path / "custom" / "evidence.json"
+
+    res = _run_delivery_gate_args(tmp_path, "--evidence", str(missing))
+    assert res.returncode == 1
+    assert f"Missing evidence file: {missing}" in res.stderr
+
+
+def test_delivery_gate_rejects_unsupported_argument(tmp_path):
+    """Unimplemented flags (e.g. --router-benchmark) fail closed instead of being ignored."""
+    _build_delivery_fixture(tmp_path)
+
+    res = _run_delivery_gate_args(tmp_path, "--router-benchmark")
+    assert res.returncode == 2
+    assert "Unsupported delivery-gate argument: --router-benchmark" in res.stderr
+    assert "Step 1" not in res.stdout

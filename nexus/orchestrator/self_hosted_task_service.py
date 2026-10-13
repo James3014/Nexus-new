@@ -24,6 +24,28 @@ from typing import Any, Callable, Iterable, Iterator, Mapping, Optional, Sequenc
 from uuid import uuid4
 
 from nexus_runtime.execution_state import ExecutionStateStore
+from nexus_runtime.task_lifecycle import (
+    ACTIVE_EXECUTION_STATUSES,
+    DURABLE_SELF_HOSTED_STATUSES,
+    INVALID_STATE_STATUSES,
+    PENDING_CANDIDATE_STATUSES,
+    RESUMABLE_STATUSES,
+    RETRYABLE_TASK_STATUSES,
+    TERMINAL_STATUSES,
+)
+from nexus_runtime.task_lifecycle import (
+    DIRECT_EXECUTION_STATUSES as DIRECT_EXECUTION_STATUSES,
+)
+from nexus_runtime.task_lifecycle import (
+    INTEGRATION_INTERMEDIATE_STATUSES as INTEGRATION_INTERMEDIATE_STATUSES,
+)
+from nexus_runtime.task_lifecycle import (
+    KNOWN_SELF_HOSTED_STATUSES as KNOWN_SELF_HOSTED_STATUSES,
+)
+from nexus_runtime.task_retry import (
+    DEFAULT_MAXIMUM_ATTEMPTS_PER_TASK as DEFAULT_MAXIMUM_ATTEMPTS_PER_TASK,
+)
+from nexus_runtime.task_retry import mint_retry_identity
 
 from nexus.contracts.autonomy_goal import AutonomyActionClass, AutonomyGoalGrant
 from nexus.contracts.collaboration_realm import CollaborationExecutionRealm
@@ -91,12 +113,16 @@ from nexus.orchestrator.governed_integration import (
 )
 from nexus.orchestrator.lifecycle_guards import (
     pre_action_guard,
+    require_bound_approval_grant,
     trusted_runtime_manifest_hash,
     validate_approval_grant,
     validate_architecture_approval,
 )
 from nexus.orchestrator.repository_contract_gate import RepositoryContractGate
-from nexus.orchestrator.runtime_retry_bridge import retry_task_via_runtime
+from nexus.orchestrator.runtime_retry_bridge import (
+    project_candidate_acceptance_for_runtime_repair,
+    retry_task_via_runtime,
+)
 from nexus.orchestrator.runtime_state_bridge import RuntimeStateBridge
 from nexus.orchestrator.self_hosted_controller import SelfHostedDevelopmentController
 from nexus.orchestrator.target_integration_lifecycle import TargetIntegrationLifecycle
@@ -126,29 +152,6 @@ Runner = Callable[
     [ArchitectTaskContract, Mapping[str, Any], Callable[[str, dict[str, Any]], None]],
     dict[str, Any],
 ]
-TERMINAL_STATUSES = frozenset(
-    {
-        "FINAL_BLOCK",
-        "RETAINED_FOR_REVIEW",
-        "REJECTED",
-        "SUPERSEDED",
-        "INTEGRATED",
-        "INTEGRATION_FAILED",
-        "CANCELLED",
-        "REHEARSAL_VERIFIED",
-        "DIRECT_COMPLETED",
-        "DIRECT_RECONCILE_REQUIRED",
-        "INTEGRATED_AND_CLEANED",
-    }
-)
-PENDING_CANDIDATE_STATUSES = frozenset(
-    {
-        "PENDING_HUMAN_APPROVAL",
-        "APPROVED",
-        "APPROVAL_INVALIDATED",
-        "INTEGRATING",
-    }
-)
 _LEGACY_V1_NEGATIVE_OMISSION_SET = frozenset(
     {
         "candidate_status",
@@ -175,62 +178,7 @@ _PROJECT_ENTRY_AUTHORITY_HINTS = frozenset(
         "required_action_family",
     }
 )
-RESUMABLE_STATUSES = frozenset(
-    {
-        "WORKER_COMPLETED",
-        "WORKER_ESCALATING",
-        "CANDIDATE_CAPTURED",
-        "VERIFIED",
-    }
-)
-ACTIVE_EXECUTION_STATUSES = frozenset(
-    {
-        "ADOPTING",
-        "SUBMITTED",
-        "TARGET_LEASED",
-        "WORKER_RUNNING",
-        "CANDIDATE_COMMITTED",
-        "CANDIDATE_REF_PROTECTED",
-        "TARGET_CLEANED",
-    }
-)
 _EXTERNAL_ADOPTION_CLAIM_CEILING = ("CANDIDATE_ADOPTED_PENDING_HUMAN_APPROVAL_ONLY",)
-INTEGRATION_INTERMEDIATE_STATUSES = frozenset(
-    {
-        "INTEGRATION_FAILED_PRE_APPLY",
-        "INTEGRATION_VERIFY_FAILED_AFTER_APPLY",
-        "INTEGRATED_TARGET_RETAINED",
-    }
-)
-DIRECT_EXECUTION_STATUSES = frozenset(
-    {
-        "DIRECT_INTENT_RECORDED",
-        "DIRECT_STARTED",
-        "DIRECT_APPLIED",
-        "DIRECT_VERIFIED",
-        "DIRECT_COMMITTED",
-    }
-)
-INVALID_STATE_STATUSES = frozenset(
-    {
-        "BLOCKED_INVALID_STATE",
-    }
-)
-DURABLE_SELF_HOSTED_STATUSES = frozenset(
-    TERMINAL_STATUSES
-    | PENDING_CANDIDATE_STATUSES
-    | RESUMABLE_STATUSES
-    | ACTIVE_EXECUTION_STATUSES
-    | INTEGRATION_INTERMEDIATE_STATUSES
-    | DIRECT_EXECUTION_STATUSES
-)
-KNOWN_SELF_HOSTED_STATUSES = frozenset(DURABLE_SELF_HOSTED_STATUSES | INVALID_STATE_STATUSES)
-RETRYABLE_TASK_STATUSES = frozenset(
-    {
-        "FINAL_BLOCK",
-        "CANCELLED",
-    }
-)
 
 
 def _temporary_state_roots() -> tuple[Path, ...]:
@@ -869,17 +817,11 @@ def _retry_request(state: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(raw_request, Mapping):
         raise ValueError("RETRY_REQUEST_MISSING")
     request = json.loads(json.dumps(dict(raw_request)))
-    task_id = str(state.get("task_id") or request.get("task_id") or "").strip()
-    if not task_id:
-        raise ValueError("RETRY_TASK_ID_MISSING")
-
-    token = uuid4().hex
-    attempt_id = f"attempt-{token}"
-    action_id = f"action-{token}"
-    previous_key = str(state.get("idempotency_key") or request.get("idempotency_key") or task_id)
-    base_key = previous_key.split(":retry-", 1)[0]
-    suffix = f":retry-{token}"
-    idempotency_key = f"{base_key[: max(1, 256 - len(suffix))]}{suffix}"
+    identity = mint_retry_identity(state, request, token=uuid4().hex)
+    task_id = identity.task_id
+    attempt_id = identity.attempt_id
+    action_id = identity.action_id
+    idempotency_key = identity.idempotency_key
 
     raw_action = request.get("action")
     if isinstance(raw_action, Mapping):
@@ -1567,6 +1509,19 @@ def resolve_execution_lane(
         "blockers": blockers,
         "next_action": "edit_canonical_checkout" if not blockers else "prepare_governed_target",
     }
+
+
+
+
+def _require_verified_receipt_binding(receipt: Any, packet: Mapping[str, Any]) -> None:
+    """Consumers recompute the verified receipt hash instead of trusting the packet."""
+    if not isinstance(receipt, Mapping) or receipt.get("verified") is not True:
+        raise RuntimeError("APPROVAL_UNVERIFIED_CANDIDATE: verified receipt is missing or not verified")
+    canonical = json.dumps(
+        _jsonable(receipt), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+    if hashlib.sha256(canonical).hexdigest() != str(packet.get("verified_receipt_hash") or ""):
+        raise RuntimeError("APPROVAL_VERIFIED_RECEIPT_HASH_MISMATCH")
 
 
 class SelfHostedTaskService:
@@ -3647,7 +3602,7 @@ class SelfHostedTaskService:
             provider_order=provider_order,
             maximum_provider_calls=len(provider_order) if requested_worker == "auto" else (2 if fallback_worker else 1),
             maximum_replans=0,
-            maximum_attempts_per_task=int(request.get("maximum_attempts_per_task", 5) or 5),
+            maximum_attempts_per_task=int(request.get("maximum_attempts_per_task", DEFAULT_MAXIMUM_ATTEMPTS_PER_TASK) or DEFAULT_MAXIMUM_ATTEMPTS_PER_TASK),
             maximum_wall_time_seconds=float(request.get("maximum_wall_time_seconds", 0) or 0),
             maximum_changed_files=int(request.get("maximum_changed_files", 0) or 0),
             maximum_deleted_files=int(request.get("maximum_deleted_files", 0) or 0),
@@ -3913,6 +3868,16 @@ class SelfHostedTaskService:
     ) -> None:
         """Re-read all governed identity immediately before provider-side work."""
         state = self._read_state(task_id) or {}
+        if state.get("status") == "BLOCKED_INVALID_STATE" or state.get("state_valid") is False:
+            # An unreadable persisted state cannot prove the task is untracked.
+            raise RuntimeError("WORKFORCE_ADMISSION_BINDING_MISSING: persisted state invalid")
+        if binding is None and _tracked_dispatch_required(request, state):
+            # Tracked (Task Card) dispatch never reaches a model worker without
+            # a fresh Workforce Admission binding, on any execution lane.
+            # Untracked ISOLATED_TARGET dispatch has no admission path yet
+            # (known gap, see WORKFORCE_EXECUTION_OVERLAY.md); DIRECT_CANONICAL
+            # is Owner-exempt per AGENTS.md (#1761).
+            raise RuntimeError("WORKFORCE_ADMISSION_BINDING_MISSING")
         self._revalidate_tracked_dispatch_task_card(contract, request, state, binding)
         self._assert_persisted_workforce_dispatch(
             state,
@@ -9391,6 +9356,29 @@ class SelfHostedTaskService:
         )
         return result.to_dict()
 
+    def project_candidate_acceptance_for_retry(
+        self,
+        request: CandidateAcceptanceRequest | Mapping[str, Any],
+        review: IndependentReviewReceipt | Mapping[str, Any],
+        *,
+        verified_repair_evidence: Mapping[str, Any] | None = None,
+        repair_target: str = "IMPLEMENTATION",
+    ) -> dict[str, Any]:
+        """Project one existing REPAIRABLE acceptance into Runtime retry evidence.
+
+        The existing acceptance reducer remains authoritative. This method only
+        persists the exact evidence bindings needed by the canonical Runtime
+        RetryService and grants no approval, routing, worker, verifier,
+        completion, merge, release, or production authority.
+        """
+        return project_candidate_acceptance_for_runtime_repair(
+            self,
+            request,
+            review,
+            verified_repair_evidence=verified_repair_evidence,
+            repair_target=repair_target,
+        )
+
     def verify_task(self, task_id: str) -> dict[str, Any]:
         """Read-only verification of a self-hosted task.
 
@@ -9781,6 +9769,9 @@ class SelfHostedTaskService:
 
         valid = bool(packet) and not any(packet.get(k) != v for k, v in expected.items())
         status = "APPROVED" if valid else "APPROVAL_INVALIDATED"
+        if approval_context is None:
+            # Models and callers cannot mint approval; every surface needs a grant.
+            raise RuntimeError("APPROVAL_GRANT_REQUIRED: candidate approval requires an approval grant")
         grant = dict(approval_context or {}) if approval_context is not None else None
         if grant is not None and (
             grant.get("claim_ceiling") == "CLAIM_PROTOCOL_CANDIDATE_PR_ONLY"
@@ -9788,37 +9779,18 @@ class SelfHostedTaskService:
             or "work_claim" in grant
         ):
             raise RuntimeError("IMPLEMENTER_CLAIM_CANNOT_AUTHORIZE_APPROVAL")
-        public_grant_identity_fields = (
-            "bound_task_id",
-            "bound_attempt_id",
-            "bound_action_type",
-            "contract_kind",
-            "contract_hash",
-            "tool_manifest_hash",
-            "full_tool_schema_hash",
-            "permission_policy_hash",
-            "lifecycle_revision",
-            "server_instance_id",
+        # Every surface needs a grant naming its approver and bound to this task,
+        # attempt and action; a bare schema marker is not authority.
+        require_bound_approval_grant(
+            grant,
+            task_id=task_id,
+            attempt_id=str(state.get("attempt_id") or ""),
+            action_type=LifecycleActionType.CANDIDATE_APPROVE.value,
+            task_card_hash=identity["task_card_hash"],
+            contract_kind=identity["contract_kind"],
+            contract_hash=identity["contract_hash"],
+            owner_inline_contract=identity["owner_inline_contract"],
         )
-        complete_public_grant = grant is not None and all(
-            str(grant.get(field) or "").strip() for field in public_grant_identity_fields
-        )
-        if identity["contract_kind"] == ContractKind.OWNER_INLINE.value or complete_public_grant:
-            validate_approval_grant(
-                grant,
-                task_id=task_id,
-                attempt_id=str(state.get("attempt_id") or ""),
-                action_type=LifecycleActionType.CANDIDATE_APPROVE.value,
-                task_card_hash=identity["task_card_hash"],
-                contract_kind=identity["contract_kind"],
-                contract_hash=identity["contract_hash"],
-                owner_inline_contract=identity["owner_inline_contract"],
-                tool_manifest_hash=str(grant.get("tool_manifest_hash") or ""),
-                full_tool_schema_hash=str(grant.get("full_tool_schema_hash") or ""),
-                permission_policy_hash=str(grant.get("permission_policy_hash") or ""),
-                lifecycle_revision=str(grant.get("lifecycle_revision") or ""),
-                server_instance_id=str(grant.get("server_instance_id") or ""),
-            )
         architecture_approval = grant.get("architecture_approval") if isinstance(grant, Mapping) else None
         receipt = state.get("verified_receipt") if isinstance(state.get("verified_receipt"), Mapping) else {}
         authority_required = bool(packet.get("authority_change_required") or receipt.get("authority_change_required"))
@@ -9880,6 +9852,8 @@ class SelfHostedTaskService:
                 external_acceptance = acceptance_obj.to_dict()
                 integration_authorization = authorization_obj.to_dict()
                 integration_authorization["authorization_hash"] = authorization_obj.authorization_hash
+        if valid:
+            _require_verified_receipt_binding(state.get("verified_receipt"), packet)
         now = _utc_now()
         duplicate = False
         initial_status = state.get("status")
@@ -10143,7 +10117,22 @@ class SelfHostedTaskService:
 
         clean_lease = {k: v for k, v in lease_dict.items() if k in lease_fields} if lease_fields else lease_dict
 
-        if isinstance(contract_dict, dict):
+        contract = None
+        if isinstance(contract_dict, dict) and contract_fields and contract_dict.get("contract_hash"):
+            # Restore the persisted contract exactly: rebuilding it through
+            # build_contract changes derived fields (and so contract_hash),
+            # which the receipt identity binding (#1760) rightly rejects.
+            try:
+                restored = ArchitectTaskContract.model_validate(
+                    {k: v for k, v in contract_dict.items() if k in contract_fields}
+                )
+            except Exception:  # noqa: BLE001 - fall back to the legacy rebuild
+                restored = None
+            if restored is not None and restored.contract_hash == contract_dict.get("contract_hash"):
+                contract = restored
+        if contract is not None:
+            pass
+        elif isinstance(contract_dict, dict):
             c_dict = contract_dict.copy()
             if not c_dict.get("what"):
                 c_dict["what"] = c_dict.get("objective", "Recover candidate")

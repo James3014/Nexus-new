@@ -16,6 +16,7 @@ import subprocess
 import time
 from typing import Any, Callable, Mapping
 
+from nexus.core.repo_root import REPO_ROOT
 from nexus.contracts.canonical_execution import validate_canonical_execution_identity
 from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.services.local_heal.isolated_verifier import (
@@ -1126,6 +1127,8 @@ class LocalAssistService:
         candidate_patch: str,
         candidate_hash: str,
     ) -> dict[str, Any]:
+        from nexus.services.local_heal.pipeline_isolation import verifier_input_files
+
         apply_receipt = self._apply_runner(
             IsolatedApplyRequest(
                 task_id=request.task_id,
@@ -1135,6 +1138,7 @@ class LocalAssistService:
                 selected_candidate_hash=candidate_hash,
                 mutation_allowed=True,
                 search_text=request.locked_search,
+                verifier_files=verifier_input_files(request.workspace_root, request.verifier_command),
             )
         )
         # Trust IsolatedApplyReceipt hash match only — never re-project a mismatch into a match.
@@ -1226,7 +1230,7 @@ class LocalAssistService:
 
 def build_planner_snapshot(*, task_statement: str, model: str, topology: str = "single_local_model") -> dict[str, Any]:
     """Build an explicit planner snapshot for callers that have enabled the gate."""
-    plan = CapabilityPlanner().plan(
+    plan = CapabilityPlanner(shared_playbook_root=REPO_ROOT).plan(
         task_desc=task_statement,
         task_type="local_assist",
         route={"difficulty": "medium", "pillar_signals": {}},
@@ -1253,7 +1257,6 @@ def load_request_file(path: str | Path) -> LocalAssistRequest:
     """
     from nexus.services.local_assist_live_smoke import (
         is_live_smoke_payload,
-        load_local_assist_payload,
         translate_live_smoke_to_request,
     )
 

@@ -10,6 +10,7 @@ from nexus.selection.calibrator import ConfidenceCalibrator
 from nexus.selection.decision_policy import DecisionPolicy
 from nexus.feedback.router import FeedbackRouter
 from nexus.retry_policy.policy import RetryPolicy
+from nexus.search.sampler import AdaptiveResampler, directive_to_dict
 from nexus.committee.models import CommitteeReceipt
 
 class CommitteeControllerV263:
@@ -28,6 +29,8 @@ class CommitteeControllerV263:
         self.calibrator = ConfidenceCalibrator()
         self.decision_policy = DecisionPolicy()
         self.last_candidate_evidence_collection: Dict[str, Any] = {}
+        self.resampler = AdaptiveResampler()
+        self.last_retry_directive: Dict[str, Any] = {}
 
     def process_proposals(self, raw_proposals: List[Dict[str, Any]]) -> CommitteeReceipt:
         if not self.enabled:
@@ -58,14 +61,24 @@ class CommitteeControllerV263:
         selection_res = self.decision_policy.evaluate_and_decide(calibrated_data, calibrated_data["calibrated_confidence"])
         
         # 4. Feedback & Retry (Decoupled Data-Flow)
+        self.last_retry_directive = {}
         if selection_res.abstained:
             # Stage 1: Map (Mapper)
             patterns = FeedbackRouter.map_verdicts(all_verdicts)
             # Stage 2: Decide (Decider)
             retry_action = RetryPolicy.decide(patterns, len(candidates))
-            
-            if retry_action.action != "ABSTAIN":
-                print(f"🔄 [Feedback] Action: {retry_action.action} | Patterns: {[p.pattern_code for p in patterns]}")
+            # Stage 3: Resample — verifier feedback first, then bucket / diversity.
+            directive = self.resampler.evaluate_and_decide(
+                failure_bucket=selection_res.failure_bucket,
+                candidate_contents=[c.artifact_refs[0] if c.artifact_refs else "" for c in candidates],
+                current_k=len(candidates),
+                feedback_action=retry_action,
+                pattern_codes=[p.pattern_code for p in patterns],
+            )
+            self.last_retry_directive = directive_to_dict(directive)
+
+            if directive.should_retry:
+                print(f"🔄 [Feedback] Action: {directive.mode} | Params: {directive.modified_params}")
         
         receipt = CommitteeReceipt(
             task_id=self.task_id,

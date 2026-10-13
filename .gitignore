@@ -130,3 +130,6 @@ artifacts/external_sources/
 # Nexus Core local evidence/bindings
 .nexus-core/receipts/
 .nexus-core/issues/
+
+# Pinned Repository Intelligence engine checkout (guard-delta advisory job)
+.rie-engine/

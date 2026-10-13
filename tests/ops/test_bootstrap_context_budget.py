@@ -61,15 +61,49 @@ def test_muse_remains_response_overlay_only():
 
 
 def test_context_budget_is_bounded_by_bytes_and_semantics():
+    # AGENTS.md is loaded at every agent start; 12 KB keeps it well inside the
+    # 24 KB rule-file loader limit (#1341).
     assert (ROOT / "AGENTS.md").stat().st_size <= 12_000
-    overlay_bytes = sum(
-        (ROOT / "docs/agents" / name).stat().st_size
-        for name in (
-            "TASK_EXECUTION_CONTRACT.md",
-            "WORKFORCE_EXECUTION_OVERLAY.md",
-            "CLAIM_AND_RECEIPT_OVERLAY.md",
-            "LEARNING_WRITEBACK_OVERLAY.md",
-        )
-    )
-    assert overlay_bytes <= 24_000
+    # Overlays are read on demand per the load map, not loaded at start, so the
+    # loader limit does not apply. These caps only stop unbounded growth:
+    # current size plus about 10% headroom, set by Owner decision in #1858.
+    overlay_caps = {
+        "TASK_EXECUTION_CONTRACT.md": 36_000,
+        "WORKFORCE_EXECUTION_OVERLAY.md": 4_000,
+        "CLAIM_AND_RECEIPT_OVERLAY.md": 4_000,
+        "LEARNING_WRITEBACK_OVERLAY.md": 4_000,
+    }
+    sizes = {name: (ROOT / "docs/agents" / name).stat().st_size for name in overlay_caps}
+    for name, cap in overlay_caps.items():
+        assert sizes[name] <= cap, (name, sizes[name], cap)
+    assert sum(sizes.values()) <= 42_000
+    # Advisory design defaults: its own growth cap, outside the 42 KB total.
+    defaults = ROOT / "docs/agents/OWNER_DESIGN_DEFAULTS.md"
+    assert defaults.stat().st_size <= 9_000, defaults.stat().st_size
     assert "active Git-tracked Task Card" in _read("AGENTS.md")
+
+
+def test_owner_design_defaults_is_advisory_and_not_read_by_code():
+    text = _read("docs/agents/OWNER_DESIGN_DEFAULTS.md")
+    assert "artifact_authority: advisory_guidance_only" in text
+    assert "grants nothing and selects nothing" in text
+    assert "Pending Owner confirmation" in text
+    assert "OWNER_DESIGN_DEFAULTS" in _read("AGENTS.md")
+    # No Python or script may read the file or treat it as a flag. Docs and
+    # tests are excluded; this test itself lives under tests/.
+    skip_dirs = {".git", ".venv", "node_modules", "docs", "tests", "__pycache__"}
+    suffixes = {".py", ".sh", ".bash", ".zsh", ".js", ".mjs", ".ts", ".yml", ".yaml", ".toml"}
+    offenders = []
+    for path in ROOT.rglob("*"):
+        rel = path.relative_to(ROOT)
+        if skip_dirs.intersection(rel.parts) or not path.is_file():
+            continue
+        if path.suffix not in suffixes | {""}:
+            continue
+        try:
+            body = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        if "OWNER_DESIGN_DEFAULTS" in body:
+            offenders.append(str(rel))
+    assert not offenders, offenders

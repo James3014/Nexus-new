@@ -1,0 +1,8 @@
+{
+  "id": "mutable_default_argument-b",
+  "bug_class": "mutable_default_argument",
+  "variant": "b",
+  "problem_statement": "build_record() reuses the same fields dict across calls, so a record built for 'y' still carries 'x' from an earlier call.",
+  "target_file": "records.py",
+  "repro_file": "repro.py"
+}

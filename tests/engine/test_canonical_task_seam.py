@@ -686,3 +686,143 @@ def test_b3_near_match_verified_campaign_does_not_select_mimo(tmp_path):
     assert demand["requested_role"] == "fast_bounded_implementation"
     assert result["binding"]["worker_id"] == "agy_flash_37_medium"
 
+
+def test_external_intelligence_consumer_routes_to_chatgpt_web(tmp_path):
+    from nexus.engine.canonical_task_seam import build_canonical_planner_admission
+
+    task_id, card, _campaign = _verified_campaign_test_identities(
+        tmp_path, "unrelated-campaign-20261012"
+    )
+    result = build_canonical_planner_admission(
+        task_id=task_id,
+        task_text="integration change for the bounded candidate",
+        allowed_files=("README.md",),
+        verifier_command=("python", "-m", "pytest"),
+        task_card_identity=card,
+        workforce_consumer="external_intelligence",
+    )
+
+    demand = result["workforce_demands"]["demands"][0]
+    assert demand["requested_role"] == "bounded_candidate_generation"
+    assert result["binding"]["worker_id"] == "opencli_chatgpt_advanced_web"
+    assert result["binding"]["provider"] == "opencli_chatgpt"
+    assert result["binding"]["model"] == "opencli_chatgpt/advanced"
+
+
+def test_default_consumer_keeps_global_route_for_integration_text(tmp_path):
+    from nexus.engine.canonical_task_seam import build_canonical_planner_admission
+
+    task_id, card, _campaign = _verified_campaign_test_identities(
+        tmp_path, "unrelated-campaign-20261012"
+    )
+    result = build_canonical_planner_admission(
+        task_id=task_id,
+        task_text="integration change for the bounded candidate",
+        allowed_files=("README.md",),
+        verifier_command=("python", "-m", "pytest"),
+        task_card_identity=card,
+    )
+
+    demand = result["workforce_demands"]["demands"][0]
+    assert demand["requested_role"] == "main_engineering"
+    assert result["binding"]["worker_id"] == "codex_luna"
+
+
+@pytest.mark.parametrize("consumer", ["unknown", "External_Intelligence", " ", None, 1])
+def test_unknown_workforce_consumer_is_rejected_before_planning(tmp_path, consumer):
+    from nexus.engine.canonical_task_seam import build_canonical_planner_admission
+
+    task_id, card, _campaign = _verified_campaign_test_identities(
+        tmp_path, "unrelated-campaign-20261012"
+    )
+    with pytest.raises(ValueError, match="canonical_workforce_consumer_unknown"):
+        build_canonical_planner_admission(
+            task_id=task_id,
+            task_text="bounded change",
+            allowed_files=("README.md",),
+            verifier_command=("python", "-m", "pytest"),
+            task_card_identity=card,
+            workforce_consumer=consumer,
+        )
+
+
+class _StopAfterPlan(Exception):
+    pass
+
+
+def test_canonical_planner_admission_passes_repo_root_to_planning_seam(monkeypatch, tmp_path):
+    import hashlib
+
+    from nexus.core.repo_root import REPO_ROOT
+    from nexus.engine.canonical_task_seam import (
+        VerifiedTaskCardIdentity,
+        build_canonical_planner_admission,
+    )
+
+    calls = []
+
+    def spy(context, **kwargs):
+        calls.append(kwargs)
+        raise _StopAfterPlan
+
+    monkeypatch.setattr(
+        "nexus.engine.canonical_execution.plan_canonical_task_bundle", spy
+    )
+    card_path = "tasks/campaign/root-1.md"
+    card = tmp_path / card_path
+    card.parent.mkdir(parents=True)
+    card.write_text("task_id: `root-1`\nAUTO_CHAIN: false\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.CANONICAL_SOURCE_ROOT", tmp_path
+    )
+    with pytest.raises(_StopAfterPlan):
+        build_canonical_planner_admission(
+            task_id="root-1",
+            task_text="bounded change",
+            allowed_files=("a.txt",),
+            verifier_command=("true",),
+            task_card_identity=VerifiedTaskCardIdentity(
+                task_id="root-1",
+                task_card_path=card_path,
+                canonical_task_card_path=str(card.resolve()),
+                task_card_hash=hashlib.sha256(card.read_bytes()).hexdigest(),
+            ),
+        )
+    assert calls == [{"shared_playbook_root": REPO_ROOT}]
+
+
+def test_runtime_compat_plan_function_is_bound_to_repo_root(monkeypatch):
+    """mainchain_entry plans through runtime_compat; its root is bound, not per call."""
+    from nexus.core.repo_root import REPO_ROOT
+    from nexus.services import runtime_compat
+
+    seen = []
+    from nexus_runtime.planning.engine.capability_planner import CapabilityPlanner as real
+
+    class Spy(real):
+        def __init__(self, *args, **kwargs):
+            seen.append(kwargs.get("shared_playbook_root"))
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr("nexus_runtime.support.engine.canonical_execution.CapabilityPlanner", Spy)
+    context = runtime_compat.CanonicalTaskContext(
+        task_id="bound-root-1",
+        task_type="repair",
+        task_desc="bound root witness",
+        execution_world="local_armor",
+        execution_channels=("online", "local"),
+        task_facts={"mutation_requested": True, "candidate_required": True},
+        authority_inputs={
+            "direct_canonical_eligible": False,
+            "isolation_required": True,
+            "owner_authorized": False,
+            "assisted_execution_required": False,
+        },
+        route_features={
+            "bounded_allowed_file_count": 1,
+            "deterministic_verifier_available": True,
+        },
+        codeintel={"target_file": "target.py"},
+    )
+    runtime_compat.plan_canonical_task_bundle(context)
+    assert seen == [REPO_ROOT]

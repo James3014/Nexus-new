@@ -1,7 +1,10 @@
 from pathlib import Path
 
 from nexus.learning.skill_fit_closure import read_json
-from scripts.ops.build_sf_final_live_compare_matrix import build_sf_final_live_compare_artifacts
+from scripts.ops.build_sf_final_live_compare_matrix import (
+    PROJECT_ROOT,
+    build_sf_final_live_compare_artifacts,
+)
 
 
 def test_build_sf_final_live_compare_artifacts_dedupes_baseline_and_keeps_all_candidates(tmp_path: Path):
@@ -26,7 +29,7 @@ def test_build_sf_final_live_compare_artifacts_dedupes_baseline_and_keeps_all_ca
                 "candidate_role": "Audit",
                 "static_fit_score": 50,
                 "fit_reason": "term_hits:2",
-                "canonical_source_path": "/Users/jameschen/Workspace/nexus/.agents/skills/candidate-b/SKILL.md",
+                "canonical_source_path": str(PROJECT_ROOT / ".agents" / "skills" / "candidate-b" / "SKILL.md"),
                 "decision": "READY_FOR_LIVE_COMPARE",
             },
         ]
@@ -47,6 +50,8 @@ def test_build_sf_final_live_compare_artifacts_dedupes_baseline_and_keeps_all_ca
     assert matrix["summary"]["row_count"] == 3
     assert [row["arm_id"] for row in matrix["rows"]] == ["current_primary_skill", "candidate_skill", "candidate_skill"]
     assert matrix["rows"][1]["skill_mount_requests"] == ["current-repair", "candidate-a"]
+    # source_type is derived from whether the skill path lives inside this repo.
+    assert matrix["rows"][1]["source_type"] == "external_reference_candidate"
     assert matrix["rows"][2]["source_type"] == "nexus_curated_candidate"
     assert (tmp_path / "tasks.json").exists()
     assert (tmp_path / "status.json").exists()

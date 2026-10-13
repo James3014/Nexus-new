@@ -2,6 +2,15 @@ import json
 import asyncio
 from typing import Dict, Any, Optional, TYPE_CHECKING
 
+import warnings as _archived_warnings
+
+_archived_warnings.warn(
+    "ARCHIVED 2026-10-13 (#1906): orphan of the retired ui_validator (archived 2026-10-12); see ARCHIVED_2026-10-13.md. "
+    "Scheduled for deletion; do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 if TYPE_CHECKING:
     from playwright.async_api import Page
 

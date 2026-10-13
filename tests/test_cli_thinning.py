@@ -59,7 +59,7 @@ def test_command_service_feature_params(tmp_path):
 
     mock_engine.run_feature.assert_called_once_with(
         task="新增 SSO",
-        context={"delivery_mode": "standard"},
+        context={"delivery_mode": "standard", "benchmark_run": True},
         domain="auth",
         dry_run=True,
         skill="coding",

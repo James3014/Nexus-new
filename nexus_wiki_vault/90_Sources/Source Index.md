@@ -27,6 +27,8 @@ version_scope: '[v17.1, v22, v23]'
 | **Tier 1** | **Active Spec** | `MUSE-NEXUS-v22-SPEC.md` | HIGH | [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md] |
 | **Tier 2** | **Wisdom Layer** | `[[v23_wisdom_spec]].md` | MEDIUM | [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]]] |
 | **Tier 2** | **Truth Dashboard** | `nexus_wiki_vault/Reference/nexus_truth_dashboard.md` | MEDIUM | [Source: nexus_wiki_vault/Reference/nexus_truth_dashboard.md] |
+| **Tier 2** | **Evidence Ledger** | `nexus_wiki_vault/04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md` | MEDIUM | [Source: nexus_wiki_vault/04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md] |
+| **Tier 2** | **Split Diff** | `nexus_wiki_vault/08_Diffs/Diff - Legacy Monolith vs Split Repo Family (2026-10-12).md` | MEDIUM | [Source: nexus_wiki_vault/08_Diffs/Diff - Legacy Monolith vs Split Repo Family (2026-10-12).md] |
 | **Tier 3** | **Legacy Spec** | `MUSE_ENGINE_SPEC_V17.1_HARDENED.md` | REFERENCE | [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md] |
 | **Tier 4** | **Orchestrator** | `scripts/engine/nexus_cli.py` | CODE | [Code: nexus_cli.py] |
 | **Tier 4** | **Janitor** | `scripts/ops/disk_janitor.py` | CODE | [Code: disk_janitor.py] |

@@ -96,7 +96,7 @@ def build_heep_runtime_apply_gate(
             for skill_id in skill_ids
         ]
         budget = {"skill_status_report": skill_status_report}
-        planned = CapabilityPlanner._build_skill_mount_evidence(
+        planned = CapabilityPlanner(shared_playbook_root=PROJECT_ROOT)._build_skill_mount_evidence(
             skills=requests,
             budget=budget,
             selected_capabilities=[capability],

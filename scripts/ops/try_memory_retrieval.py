@@ -4,7 +4,9 @@ import lancedb
 sys.path.append('.')
 
 def search_memory(query: str):
-    db = lancedb.connect(".nexus/memory/memory_index.lancedb")
+    from nexus.services.lancedb_roots import MEMORY_INDEX, resolve_lancedb_root
+
+    db = lancedb.connect(str(resolve_lancedb_root(MEMORY_INDEX, ".", honor_env=False)))
     tbl = db.open_table("memory_index")
     # Fetch random 3 records with no filter
     results = tbl.search().limit(3).to_pandas()

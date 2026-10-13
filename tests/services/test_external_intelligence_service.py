@@ -336,6 +336,24 @@ def test_build_automation_keeps_opencli_as_default(tmp_path):
     )
 
 
+def test_build_automation_sets_workforce_consumer_by_worker_backend(tmp_path, monkeypatch):
+    class FakeOpenSWEWorkerTransport:
+        def __init__(self, **kwargs):
+            pass
+
+    monkeypatch.setattr(
+        service_module,
+        "OpenSWEWorkerTransport",
+        FakeOpenSWEWorkerTransport,
+        raising=False,
+    )
+    open_swe = build_automation(_config(tmp_path, worker_backend="open_swe"), "o/r")
+    opencode = build_automation(_config(tmp_path, worker_backend="opencode"), "o/r")
+
+    assert open_swe.workforce_consumer == "external_intelligence"
+    assert opencode.workforce_consumer == ""
+
+
 def test_build_automation_selects_open_swe_only_when_explicit(tmp_path, monkeypatch):
     calls = []
 

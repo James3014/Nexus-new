@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -58,6 +60,7 @@ def _candidate_row(
     candidate_id: str,
     status: str,
     label: str = "ISOLATED_VERIFIER",
+    contract_identity: dict | None = None,
 ) -> tuple[Path, str]:
     root = tmp_path / "evidence"
     monkeypatch.setenv("NEXUS_CLM_CANDIDATE_EVIDENCE_ROOT", str(root))
@@ -67,7 +70,7 @@ def _candidate_row(
         attempt_id=f"attempt-{candidate_id}",
         collector_source="trajectory_test",
         source_revision="a" * 40,
-        contract_identity={"task_id": task_id},
+        contract_identity=contract_identity or {"task_id": task_id},
         verifier_identity={"kind": "pytest"},
         candidates=[_candidate(candidate_id, f"patch-{candidate_id}", status, label=label)],
         winner_id=candidate_id,
@@ -690,7 +693,8 @@ class TestSecretRedaction:
     def test_private_key_pattern_is_redacted(self, tmp_path: Path):
         root = tmp_path / "evidence"
         sensitive_state = {
-            "key_material": "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----"
+            "key_material": "-----BEGIN "
+            + "RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----"
         }
         seal_trajectory_step(
             evidence_root=root,
@@ -1799,6 +1803,382 @@ class TestBoundingAndOffload:
             )
 
 
+# #1677: family provenance must originate in immutable, pre-execution Task Cards.
+# These fixtures deliberately NEVER use the live central corpus.
+def _preexecution_card_family_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import subprocess
+
+    repo = tmp_path / "repo"
+    state_root = tmp_path / "state"
+    evidence_root = tmp_path / "evidence"
+    expected = {
+        f"task-f{i}-{status}": f"family-{i}"
+        for i in range(_MIN_TASK_FAMILIES)
+        for status in ("pass", "fail")
+    }
+    docs = repo / "docs" / "research" / "trajectory_verifier_v2"
+    spec_dir = repo / "nexus" / "research" / "clm_system_one"
+    docs.mkdir(parents=True)
+    spec_dir.mkdir(parents=True)
+    (docs / "FINAL_HOLDOUT_DO_NOT_TRAIN.json").write_text('{"historical_replay_tasks":[]}')
+    (docs / "TRAJECTORY_CORPUS_READINESS_REPORT.md").write_text("fixture only")
+    (docs / "TRAJECTORY_VERIFIER_EXPERIMENT_REPORT.md").write_text("fixture only")
+
+    def sha(path: Path) -> str:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    spec = {
+        "schema": "nexus.research_experiment_spec.v1",
+        "experiment_id": "NEXUS_SYSTEM_ONE_CLM_V2",
+        "track_id": "TRACK_1_TRAJECTORY_VERIFIER_HEAD",
+        "claim_ceiling": "EXPERIMENTAL_SHADOW_ONLY",
+        "holdout_manifest": {
+            "path": "docs/research/trajectory_verifier_v2/FINAL_HOLDOUT_DO_NOT_TRAIN.json",
+            "sha256": sha(docs / "FINAL_HOLDOUT_DO_NOT_TRAIN.json"),
+        },
+        "last_corpus_audit": {
+            "path": "docs/research/trajectory_verifier_v2/TRAJECTORY_CORPUS_READINESS_REPORT.md",
+            "sha256": sha(docs / "TRAJECTORY_CORPUS_READINESS_REPORT.md"),
+        },
+        "continuity": {"checkpoint_relative_root": "research/clm_system_one"},
+    }
+    (spec_dir / "trajectory_verifier_v2_spec.json").write_text(json.dumps(spec))
+    categories = [
+        "defect_repair",
+        "feature_extension",
+        "test_oracle",
+        "runtime_recovery",
+        "evidence_integrity",
+    ]
+    cards = {}
+    for task_id, family in expected.items():
+        family_id = int(family.removeprefix("family-"))
+        rel = Path("tasks") / family / f"{task_id}.md"
+        path = repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            f"task_id: `{task_id}`\n"
+            "## Track 1 task-family declaration (issuer, pre-action)\n"
+            f"track1_taxonomy: TRACK1_ENGINEERING_V1\n"
+            f"track1_family: {categories[family_id]}\n"
+            f"track1_family_rationale: Task issuer declares a bounded, pre-effect category\n"
+            "AUTO_CHAIN: false\n"
+        )
+        cards[task_id] = rel
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "tasks", "docs", "nexus"], cwd=repo, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=fixture",
+            "-c",
+            "user.email=fixture@example.org",
+            "commit",
+            "-qm",
+            "freeze pre-execution family declaration",
+        ],
+        cwd=repo,
+        check=True,
+    )
+    revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+    state_root.mkdir(parents=True)
+    for task_id, rel in cards.items():
+        cand_id = "cand-" + task_id.removeprefix("task-")
+        contract_identity = {
+            "task_id": task_id,
+            "controller_revision": revision,
+            "controller_repo_root": str(repo),
+            "target_base_revision": "a" * 40,
+        }
+        state = {
+            "schema": "nexus.self_hosted_task_state.v1",
+            "task_id": task_id,
+            "attempt_id": "attempt-" + cand_id,
+            "submitted_at": "2026-09-28T00:00:00+00:00",
+            "controller_revision": revision,
+            "task_card_path": rel.as_posix(),
+            "task_card_hash": sha(repo / rel),
+            "contract": contract_identity,
+        }
+        (state_root / f"{task_id}.json").write_text(json.dumps(state))
+        _, row_ref = _candidate_row(
+            tmp_path,
+            monkeypatch,
+            task_id=task_id,
+            candidate_id=cand_id,
+            status=task_id.rsplit("-", 1)[1],
+            contract_identity=contract_identity,
+        )
+        _trajectory(
+            evidence_root,
+            task_id=task_id,
+            trajectory_id=f"traj-{cand_id}",
+            candidate_id=cand_id,
+            candidate_ref=row_ref,
+        )
+    return repo, state_root, evidence_root, cards
+
+
+def test_registered_refresh_uses_verified_preexecution_task_family(tmp_path, monkeypatch):
+    repo, state_root, evidence_root, _ = _preexecution_card_family_fixture(tmp_path, monkeypatch)
+    refresh = refresh_registered_experiment(
+        repo_root=repo,
+        canonical_state_root=state_root,
+        candidate_evidence_root=evidence_root,
+    )
+    readiness = refresh["readiness"]
+    assert readiness["task_family_count"] == 5
+    assert readiness["disposition"] == "READY_TO_REAUDIT"
+    assert len(readiness["task_family_provenance"]) == 10
+    assert all("task_card_sha256" in row for row in readiness["task_family_provenance"].values())
+    assert refresh["checkpoint"]["status"] == "READY_TO_REAUDIT"
+    assert refresh["checkpoint"]["auto_chain"] is False
+    assert refresh["checkpoint"]["next_allowed_action"] == "T0_T1_REAUDIT_ONLY"
+
+
+def test_absolute_card_path_bound_to_original_controller_root(tmp_path, monkeypatch):
+    repo, state_root, evidence_root, cards = _preexecution_card_family_fixture(
+        tmp_path, monkeypatch
+    )
+    for task_id in ("task-f0-pass", "task-f0-fail"):
+        state_path = state_root / f"{task_id}.json"
+        state = json.loads(state_path.read_text())
+        state["task_card_path"] = str(repo / cards[task_id])
+        state_path.write_text(json.dumps(state))
+    readiness = refresh_registered_experiment(
+        repo_root=repo,
+        canonical_state_root=state_root,
+        candidate_evidence_root=evidence_root,
+    )["readiness"]
+    assert readiness["task_family_count"] == 5
+    assert readiness["disposition"] == "READY_TO_REAUDIT"
+
+
+def test_absolute_card_path_outside_original_controller_root_fails_closed(tmp_path, monkeypatch):
+    repo, state_root, evidence_root, _ = _preexecution_card_family_fixture(tmp_path, monkeypatch)
+    for task_id in ("task-f0-pass", "task-f0-fail"):
+        state_path = state_root / f"{task_id}.json"
+        state = json.loads(state_path.read_text())
+        state["task_card_path"] = str(tmp_path / "other-repo" / "tasks" / f"{task_id}.md")
+        state_path.write_text(json.dumps(state))
+    readiness = refresh_registered_experiment(
+        repo_root=repo,
+        canonical_state_root=state_root,
+        candidate_evidence_root=evidence_root,
+    )["readiness"]
+    assert readiness["task_family_count"] == 4
+    assert readiness["disposition"] == "WAITING_FOR_DATA"
+
+
+def test_task_family_fails_closed_on_tampered_card_identity(tmp_path, monkeypatch):
+    repo, state_root, evidence_root, cards = _preexecution_card_family_fixture(
+        tmp_path, monkeypatch
+    )
+    for task_id in ("task-f0-pass", "task-f0-fail"):
+        state_path = state_root / f"{task_id}.json"
+        state = json.loads(state_path.read_text())
+        state["task_card_hash"] = "0" * 64
+        state_path.write_text(json.dumps(state))
+    refresh = refresh_registered_experiment(
+        repo_root=repo,
+        canonical_state_root=state_root,
+        candidate_evidence_root=evidence_root,
+    )
+    assert refresh["readiness"]["task_family_count"] == 4
+    assert refresh["readiness"]["disposition"] == "WAITING_FOR_DATA"
+    assert refresh["checkpoint"]["auto_chain"] is False
+
+
+def test_task_family_fails_closed_when_legacy_state_missing(tmp_path, monkeypatch):
+    repo, state_root, evidence_root, _ = _preexecution_card_family_fixture(tmp_path, monkeypatch)
+    for path in state_root.glob("*.json"):
+        path.unlink()
+    refresh = refresh_registered_experiment(
+        repo_root=repo,
+        canonical_state_root=state_root,
+        candidate_evidence_root=evidence_root,
+    )
+    assert refresh["readiness"]["task_family_count"] == 0
+    assert refresh["readiness"]["disposition"] == "WAITING_FOR_DATA"
+    assert refresh["checkpoint"]["auto_chain"] is False
+
+
+def test_issuer_card_current_worktree_edits_cannot_relabel_frozen_task(tmp_path, monkeypatch):
+    repo, state_root, evidence_root, cards = _preexecution_card_family_fixture(
+        tmp_path, monkeypatch
+    )
+    for task_id in ("task-f0-pass", "task-f0-fail"):
+        path = repo / cards[task_id]
+        path.write_text(
+            path.read_text().replace(
+                "track1_family: defect_repair", "track1_family: runtime_recovery"
+            )
+        )
+    readiness = refresh_registered_experiment(
+        repo_root=repo,
+        canonical_state_root=state_root,
+        candidate_evidence_root=evidence_root,
+    )["readiness"]
+    assert readiness["task_family_count"] == 5
+    assert readiness["task_family_provenance"]["task-f0-pass"]["family"] == "defect_repair"
+    assert readiness["family_disjoint_split_witness"]["train_dev_overlap"] == []
+
+
+def test_issuer_card_post_effect_retrofit_cannot_mint_family(tmp_path, monkeypatch):
+    repo, state_root, evidence_root, cards = _preexecution_card_family_fixture(
+        tmp_path, monkeypatch
+    )
+    for task_id in ("task-f0-pass", "task-f0-fail"):
+        path = repo / cards[task_id]
+        revised = path.read_text().replace(
+            "track1_family: defect_repair", "track1_family: runtime_recovery"
+        )
+        path.write_text(revised)
+        state_path = state_root / f"{task_id}.json"
+        state = json.loads(state_path.read_text())
+        state["task_card_hash"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        state_path.write_text(json.dumps(state))
+    readiness = refresh_registered_experiment(
+        repo_root=repo,
+        canonical_state_root=state_root,
+        candidate_evidence_root=evidence_root,
+    )["readiness"]
+    assert readiness["task_family_count"] == 4
+    assert readiness["disposition"] == "WAITING_FOR_DATA"
+
+
+def test_unknown_issuer_family_and_duplicate_declaration_fail_closed(tmp_path, monkeypatch):
+    import subprocess
+
+    repo, state_root, evidence_root, cards = _preexecution_card_family_fixture(
+        tmp_path, monkeypatch
+    )
+    # Both members of one family now have newly committed invalid declarations.
+    for task_id, corruption in (
+        ("task-f0-pass", "track1_family: arbitrary_label"),
+        ("task-f0-fail", "track1_family: defect_repair\\ntrack1_family: runtime_recovery"),
+    ):
+        path = repo / cards[task_id]
+        path.write_text(path.read_text().replace("track1_family: defect_repair", corruption))
+    subprocess.run(["git", "add", "tasks"], cwd=repo, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=fixture",
+            "-c",
+            "user.email=fixture@example.org",
+            "commit",
+            "-qm",
+            "forge invalid family declarations",
+        ],
+        cwd=repo,
+        check=True,
+    )
+    revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+    for task_id in ("task-f0-pass", "task-f0-fail"):
+        state_path = state_root / f"{task_id}.json"
+        state = json.loads(state_path.read_text())
+        state["controller_revision"] = revision
+        state["task_card_hash"] = hashlib.sha256((repo / cards[task_id]).read_bytes()).hexdigest()
+        state_path.write_text(json.dumps(state))
+    readiness = refresh_registered_experiment(
+        repo_root=repo,
+        canonical_state_root=state_root,
+        candidate_evidence_root=evidence_root,
+    )["readiness"]
+    assert readiness["task_family_count"] == 4
+    assert readiness["disposition"] == "WAITING_FOR_DATA"
+
+
+def test_holdout_task_does_not_gain_family_provenance(tmp_path, monkeypatch):
+    repo, state_root, evidence_root, _ = _preexecution_card_family_fixture(tmp_path, monkeypatch)
+    holdout_path = repo / "docs/research/trajectory_verifier_v2/FINAL_HOLDOUT_DO_NOT_TRAIN.json"
+    holdout_path.write_text(json.dumps({"historical_replay_tasks": ["task-f0-pass"]}))
+    readiness = refresh_registered_experiment(
+        repo_root=repo,
+        canonical_state_root=state_root,
+        candidate_evidence_root=evidence_root,
+    )["readiness"]
+    assert "task-f0-pass" not in readiness["task_family_provenance"]
+    assert "holdout_overlap" in readiness["blockers"]
+    assert readiness["disposition"] == "WAITING_FOR_DATA"
+
+
+def test_cross_attempt_outcomes_cannot_relabel_prior_task_trajectories(tmp_path, monkeypatch):
+    repo, state_root, evidence_root, _ = _preexecution_card_family_fixture(tmp_path, monkeypatch)
+    # Older and newer attempts with one task_id cannot share the current
+    # task-id-only family map without independent attempt-level proof.
+    for task_id in ("task-f0-pass", "task-f0-fail"):
+        state = json.loads((state_root / f"{task_id}.json").read_text())
+        candidate_id = f"cross-{task_id}"
+        _, row_ref = _candidate_row(
+            tmp_path,
+            monkeypatch,
+            task_id=task_id,
+            candidate_id=candidate_id,
+            status=task_id.rsplit("-", 1)[1],
+            contract_identity=state["contract"],
+        )
+        _trajectory(
+            evidence_root,
+            task_id=task_id,
+            trajectory_id=f"traj-{candidate_id}",
+            candidate_id=candidate_id,
+            candidate_ref=row_ref,
+        )
+    readiness = refresh_registered_experiment(
+        repo_root=repo,
+        canonical_state_root=state_root,
+        candidate_evidence_root=evidence_root,
+    )["readiness"]
+    assert readiness["task_family_count"] == 4
+    assert "task-f0-pass" not in readiness["task_family_provenance"]
+    assert "task-f0-fail" not in readiness["task_family_provenance"]
+    assert readiness["disposition"] == "WAITING_FOR_DATA"
+
+
+def test_family_disjoint_split_needs_both_labels_on_each_side(tmp_path, monkeypatch):
+    repo, state_root, evidence_root, _ = _preexecution_card_family_fixture(tmp_path, monkeypatch)
+    # All five families have FAIL, but only one family has a labeled PASS;
+    # there is no family-disjoint train/dev partition with both classes.
+    for i in range(1, _MIN_TASK_FAMILIES):
+        task_id = f"task-f{i}-pass"
+        state_path = state_root / f"{task_id}.json"
+        state = json.loads(state_path.read_text())
+        state["task_card_hash"] = "0" * 64
+        state_path.write_text(json.dumps(state))
+    readiness = refresh_registered_experiment(
+        repo_root=repo,
+        canonical_state_root=state_root,
+        candidate_evidence_root=evidence_root,
+    )["readiness"]
+    assert readiness["task_family_count"] == 5
+    assert readiness["mapped_family_strong_labels"]["PASS"] == 1
+    assert readiness["disposition"] == "WAITING_FOR_DATA"
+    assert "family_disjoint_labeled_split_unavailable" in readiness["blockers"]
+    assert readiness["family_disjoint_split_witness"] is None
+
+
+def test_unmapped_pass_labels_cannot_unlock_family_readiness(tmp_path, monkeypatch):
+    repo, state_root, evidence_root, _ = _preexecution_card_family_fixture(tmp_path, monkeypatch)
+    for i in range(_MIN_TASK_FAMILIES):
+        task_id = f"task-f{i}-pass"
+        state_path = state_root / f"{task_id}.json"
+        state = json.loads(state_path.read_text())
+        state["task_card_hash"] = "0" * 64
+        state_path.write_text(json.dumps(state))
+    readiness = refresh_registered_experiment(
+        repo_root=repo,
+        canonical_state_root=state_root,
+        candidate_evidence_root=evidence_root,
+    )["readiness"]
+    assert readiness["task_family_count"] == 5
+    assert readiness["disposition"] == "WAITING_FOR_DATA"
+    assert "mapped_family_binary_coverage_unavailable" in readiness["blockers"]
+
+
 # Preserve the historical node ID consumed by exact-base impact evidence while
 # exercising the hardened >=5-family readiness semantics.
 def test_registered_refresh_persists_ready_to_reaudit_without_auto_chain(
@@ -1807,3 +2187,462 @@ def test_registered_refresh_persists_ready_to_reaudit_without_auto_chain(
     TestRegisteredRefreshWithFiveFamilies().test_five_family_refresh_ready_no_auto_chain(
         tmp_path, monkeypatch
     )
+
+
+@pytest.mark.parametrize(
+    "secret",
+    [
+        "ghp_" + "A" * 36,
+        "sk-ant-api03-" + "A" * 40,
+        "sk-proj-" + "B" * 40,
+        "github_pat_11ABCDEFG0" + "C" * 60,
+        '{"access_token": "ya29.' + "D" * 30 + '"}',
+        "AIza" + "E" * 35,
+        "AKIA" + "F" * 16,
+    ],
+)
+def test_redaction_covers_common_secret_formats(secret):
+    from nexus.research.clm_system_one.trajectory_continuity import _redact_value
+
+    out = _redact_value({"stdout": f"before\n{secret}\nafter"})["stdout"]
+    assert "[REDACTED]" in out
+    body = secret.split('"')[-2] if secret.startswith("{") else secret
+    assert body[-20:] not in out
+    assert "before" in out and "after" in out  # benign text preserved
+
+
+def _redaction_leaks(secret: str, tail: str) -> bool:
+    out = _redact_value({"stdout": f"before\n{secret}\nafter"})["stdout"]
+    return tail in out
+
+
+@pytest.mark.parametrize(
+    "secret",
+    [
+        "sk-ant-admin01-" + "A" * 40,
+        "sk-svcacct-" + "B" * 40,
+        "ASIA" + "F" * 16,
+        "ghs_" + "E" * 36,
+        "xo" + "xb-1234-5678-" + "L" * 24,
+        '{"refresh_token": "1//0g' + "G" * 40 + '"}',
+        '{"client_secret": "GOCSPX-' + "H" * 28 + '"}',
+        '{ "access_token" : "' + "J" * 30 + '" }',
+    ],
+)
+def test_redaction_covers_provider_family_variants(secret):
+    assert not _redaction_leaks(secret, secret.rstrip('"} ')[-12:])
+
+
+_AWS_SECRET_SAMPLE = "wJalrXUtnFEMI/" + "K7MDENG/bPxRfiC" + "YEXAMPLEKEY"
+
+
+@pytest.mark.parametrize(
+    ("secret", "tail"),
+    [
+        ("sk_live_" + "N" * 24, "N" * 12),
+        ("rk_live_" + "N" * 24, "N" * 12),
+        (
+            "-----BEGIN " + "PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0B" + "T" * 40 + "\n"
+            "-----END PRIVATE KEY-----",
+            "T" * 12,
+        ),
+        (
+            "-----BEGIN " + "RSA PRIVATE KEY-----\nMIIEow" + "T" * 40 + "\nZZZZ\n"
+            "-----END RSA PRIVATE KEY-----",
+            "ZZZZ",
+        ),
+        (
+            "-----BEGIN ENCRYPTED PRIVATE KEY-----\nMIIFH" + "T" * 40 + "\n"
+            "-----END ENCRYPTED PRIVATE KEY-----",
+            "T" * 12,
+        ),
+        ("aws_secret_access_key = " + _AWS_SECRET_SAMPLE, "EXAMPLEKEY"),
+        ('{"SecretAccessKey": ' + '"' + _AWS_SECRET_SAMPLE + '"}', "EXAMPLEKEY"),
+        ("ya29." + "K" * 60, "K" * 12),
+        ("hf_" + "O" * 34, "O" * 12),
+        ("glpat-" + "P" * 20, "P" * 12),
+        ("npm_" + "Q" * 36, "Q" * 12),
+        ("xapp-1-A0-" + "M" * 30, "M" * 12),
+        ("eyJ" + "a" * 20 + ".eyJ" + "b" * 20 + "." + "c" * 30, "c" * 12),
+        ("Authorization: Basic dXNlcjpwYXNzd29yZA==", "cjpwYXNzd29yZA=="),
+        ("Authorization: Bearer " + "V" * 30, "V" * 12),
+        ("--token " + "U" * 40, "U" * 12),
+        ("--token=" + "U" * 40, "U" * 12),
+        ("--password " + "W" * 20, "W" * 12),
+        ("--password=" + "W" * 20, "W" * 12),
+    ],
+)
+def test_redaction_formerly_open_formats(secret, tail):
+    out = _redact_value({"stdout": f"before\n{secret}\nafter"})["stdout"]
+    assert tail not in out
+    assert "[REDACTED]" in out
+    assert out.startswith("before\n") and out.endswith("\nafter")
+
+
+def test_redaction_pem_block_does_not_swallow_text_after_end():
+    pem = "-----BEGIN " + "PRIVATE KEY-----\nAAAA" + "T" * 30 + "\n-----END PRIVATE KEY-----"
+    out = _redact_value("keep-this\n" + pem + "\nkeep-that")
+    assert out == "keep-this\n[REDACTED]\nkeep-that"
+
+
+def test_redaction_unterminated_pem_block_redacts_through_end():
+    out = _redact_value("before\n-----BEGIN " + "PRIVATE KEY-----\nMIIEvQ" + "T" * 40)
+    assert out == "before\n[REDACTED]"
+
+
+def test_redaction_leaves_benign_prose_untouched():
+    text = "basic information about tokens; use --verbose and --tokenizer-path ./x"
+    assert _redact_value(text) == text
+
+
+def _load_secret_scanner():
+    import importlib.util
+
+    path = Path(__file__).resolve().parents[2] / "scripts" / "ops" / "git_history_secret_scan.py"
+    spec = importlib.util.spec_from_file_location("_git_history_secret_scan_drift", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # dataclasses needs the module registered
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(spec.name, None)
+    return module
+
+
+# One or more samples per scanner detector, covering each alternation branch of
+# its pattern. The scanner must stay a standalone single file (CI runs it
+# extracted from the base revision), so the detector set cannot be imported
+# here; this table is the drift guard instead.
+_SCANNER_DETECTOR_SAMPLES = {
+    "google_api_key": ["AIza" + "a" * 35],
+    "aws_access_key": ["AKIA" + "B" * 16, "ASIA" + "B" * 16],
+    "github_token": ["gh" + p + "_" + "C" * 36 for p in "pousr"] + ["github_pat_" + "C" * 36],
+    "anthropic_api_key": ["sk-" + "ant-api03-" + "D" * 30],
+    "openai_api_key": ["sk-" + "proj-" + "E" * 30, "sk-" + "E" * 30],
+    "slack_token": ["xo" + "x" + t + "-1234567890-" + "F" * 12 for t in "baprs"],
+    "stripe_live_key": ["sk_" + "live_" + "G" * 24, "rk_" + "live_" + "G" * 24],
+}
+
+# Keys of the scanner's ASSIGNMENT_PATTERN (regex source -> concrete sample name).
+_SCANNER_ASSIGNMENT_KEY_SAMPLES = {
+    "api[_-]?key": ["api_key", "api-key", "apikey"],
+    "access[_-]?token": ["access_token", "access-token"],
+    "auth[_-]?token": ["auth_token"],
+    "client[_-]?secret": ["client_secret"],
+    "password": ["password"],
+    "secret[_-]?access[_-]?key": ["secret_access_key", "secret-access-key"],
+    "secret[_-]?key": ["secret_key"],
+    "private[_-]?key": ["private_key"],
+}
+_SCANNER_ENV_SUFFIXES = [
+    "API_KEY",
+    "ACCESS_TOKEN",
+    "AUTH_TOKEN",
+    "CLIENT_SECRET",
+    "PASSWORD",
+    "SECRET_ACCESS_KEY",
+    "SECRET_KEY",
+    "PRIVATE_KEY",
+]
+_ASSIGNMENT_VALUE = "x9Kq2LmP7vR4tW8yZ3bN6c" + "Tz5Uh1Jd"
+
+
+def test_redaction_covers_every_git_history_scanner_detector():
+    scanner = _load_secret_scanner()
+    names = {name for name, _ in scanner.PROVIDER_PATTERNS}
+    assert names == set(_SCANNER_DETECTOR_SAMPLES), (
+        "scanner detector set changed: add/remove a sample here and extend "
+        "_SECRET_PATTERNS in trajectory_continuity.py"
+    )
+    for name, pattern in scanner.PROVIDER_PATTERNS:
+        for sample in _SCANNER_DETECTOR_SAMPLES[name]:
+            assert pattern.search(sample.encode()), f"sample does not trigger {name}"
+            out = _redact_value({"stdout": f"before {sample} after"})["stdout"]
+            assert out == "before [REDACTED] after", f"{name} not redacted: {sample[:8]}"
+    pem = (
+        "-----BEGIN " + "RSA PRIVATE KEY-----\n" + "H" * 40 + "\n-----END " + "RSA PRIVATE KEY-----"
+    )
+    assert scanner.PEM_PATTERN.search(pem.encode())
+    assert _redact_value("a\n" + pem + "\nb") == "a\n[REDACTED]\nb"
+
+    labels = ["", "RSA ", "EC ", "DSA ", "OPENSSH "]
+    for label in labels:
+        block = "-----BEGIN " + label + "PRIVATE KEY-----\n" + "H" * 40 + "\n-----END "
+        block += label + "PRIVATE KEY-----"
+        assert scanner.PEM_PATTERN.search(block.encode())
+        assert _redact_value("a\n" + block + "\nb") == "a\n[REDACTED]\nb"
+
+
+def test_redaction_covers_every_git_history_scanner_assignment_key():
+    scanner = _load_secret_scanner()
+    source = scanner.ASSIGNMENT_PATTERN.pattern.decode()
+    lower = re.search(r"\(\?i:([^)]*)\)", source).group(1).split("|")
+    env = re.search(r"_\(\?:([A-Z_|]+)\)\)", source).group(1).split("|")
+    assert set(lower) == set(_SCANNER_ASSIGNMENT_KEY_SAMPLES), "scanner assignment keys drifted"
+    assert set(env) == set(_SCANNER_ENV_SUFFIXES), "scanner env-style assignment keys drifted"
+    keys = [k for group in _SCANNER_ASSIGNMENT_KEY_SAMPLES.values() for k in group]
+    keys += ["APP_" + suffix for suffix in _SCANNER_ENV_SUFFIXES]
+    for key in keys:
+        for line in (
+            f"{key}={_ASSIGNMENT_VALUE}",
+            f"{key}: {_ASSIGNMENT_VALUE}",
+            f'{{"{key}": "{_ASSIGNMENT_VALUE}"}}',
+            f"export {key}='{_ASSIGNMENT_VALUE}'",
+        ):
+            assert scanner.ASSIGNMENT_PATTERN.search(line.encode()), f"scanner misses: {key}"
+            assert _ASSIGNMENT_VALUE not in _redact_value(line), f"leaks via key: {key}"
+
+
+_PEM_BODY = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC" + "Q" * 20 + "LEAKBODY"
+
+
+def _pem(label: str, nl: str = "\n") -> str:
+    return (
+        "-----BEGIN " + label + "-----" + nl + _PEM_BODY + nl + "-----END " + label + "-----" + nl
+    )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '{"type": "service_account", "private_key": "'
+        + _pem("PRIVATE KEY").replace("\n", "\\n")
+        + '", "client_email": "a@b"}',
+        '{"type": "service_account", "private_key": "' + _pem("PRIVATE KEY") + '"}',
+        "private_key: " + _pem("RSA PRIVATE KEY"),
+        'PRIVATE_KEY="' + _pem("EC PRIVATE KEY") + '"',
+        "SSH_PRIVATE_KEY=" + _pem("OPENSSH PRIVATE KEY"),
+        _pem("PRIVATE KEY", "\r\n"),
+        _pem("DSA PRIVATE KEY"),
+        _pem("PGP PRIVATE KEY BLOCK"),
+    ],
+)
+def test_redaction_keyed_and_variant_pem_blocks_do_not_leak_body(text):
+    out = _redact_value({"stdout": "pre\n" + text + "\npost"})["stdout"]
+    assert "LEAKBODY" not in out
+    assert "QQQQQQQQ" not in out
+    assert out.startswith("pre\n") and out.endswith("\npost")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "SECRET_KEY=" + "x9Kq2LmP7vR4tW8yZ3bN6c",
+        "DJANGO_SECRET_KEY=" + "x9Kq2LmP7vR4tW8yZ3bN6c",
+        "STRIPE_SECRET_KEY=" + "x9Kq2LmP7vR4tW8yZ3bN6c",
+        "secret_key: " + "x9Kq2LmP7vR4tW8yZ3bN6c",
+        '{"secret_key": "' + "x9Kq2LmP7vR4tW8yZ3bN6c" + '"}',
+        "export SECRET_KEY='" + "x9Kq2LmP7vR4tW8yZ3bN6c" + "'",
+        "CLIENT_SECRET=" + "x9Kq2LmP7vR4tW8yZ3bN6c",
+        "SERVICE_AUTH_TOKEN=" + "x9Kq2LmP7vR4tW8yZ3bN6c",
+        "GITHUB_ACCESS_TOKEN=" + "x9Kq2LmP7vR4tW8yZ3bN6c",
+        'password = "a b c ' + "x9Kq2LmP7vR4tW8yZ3bN6c" + '" next',
+        "password: 'correct horse " + "x9Kq2LmP7vR4tW8yZ3bN6c" + "' next",
+        '--token "abc def ' + "x9Kq2LmP7vR4tW8yZ3bN6c" + '" next',
+        "--password 'abc def " + "x9Kq2LmP7vR4tW8yZ3bN6c" + "' next",
+    ],
+)
+def test_redaction_assignment_keys_and_quoted_values(text):
+    out = _redact_value("pre " + text)
+    assert "x9Kq2LmP7vR4tW8yZ3bN6c" not in out
+    assert "[REDACTED]" in out
+    if text.endswith(" next"):
+        assert out.endswith(" next")  # redaction stops at the closing quote
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "0123456789abcdef0123456789abcdef01234567",
+        "sha256:" + "ab" * 32,
+        '{"manifest_sha256": "' + "ab" * 32 + '"}',
+        "--tokenizer ./tok.json --token-budget 5 --password-file /run/pw --password-stdin",
+        "token_count: 5 and tokens=12",
+        "123e4567-e89b-12d3-a456-426614174000",
+        "https://example.com/path:with@colon-free",
+    ],
+)
+def test_redaction_keeps_non_secret_identifiers(text):
+    assert _redact_value(text) == text
+
+
+def test_redaction_url_credentials_still_redacted():
+    out = _redact_value("clone https://alice:s3cr3tLEAKBODY@example.com/x now")
+    assert "LEAKBODY" not in out and "alice" not in out
+    out = _redact_value("https://x-access-token:" + "ghs_" + "a" * 30 + "@github.com/o/r.git")
+    assert "aaaaaaaa" not in out
+
+
+@pytest.mark.parametrize(
+    "payload",
+    ["a" * 1_000_000, "a-" * 500_000, "https://" + "a-" * 300_000, "://" * 300_000],
+)
+def test_redaction_is_linear_on_adversarial_strings(payload):
+    import time
+
+    start = time.monotonic()
+    _redact_value(payload)
+    assert time.monotonic() - start < 1.0
+
+
+# ---------------------------------------------------------------------------
+# #1873: remaining common credential formats
+# ---------------------------------------------------------------------------
+
+_B62 = "aB3dE5gH7jK9mN2pQ4rS6tU8vW"
+_SG_SAMPLE = "SG" + "." + "A" * 22 + "." + "B" * 43
+_REFRESH_SAMPLE = "1/" + "/0g" + "Hq7" * 15
+
+
+@pytest.mark.parametrize(
+    ("secret", "tail"),
+    [
+        ("sk_" + "test_" + _B62, _B62[-14:]),
+        ("rk_" + "test_" + _B62, _B62[-14:]),
+        ("pk_" + "live_" + _B62, _B62[-14:]),
+        ("whsec" + "_" + _B62, _B62[-14:]),
+        (
+            "https://hooks." + "slack.com/services/T0" + "ABCDEF/B0" + "GHIJKL/" + "x" * 24,
+            "x" * 12,
+        ),
+        ("hooks.slack" + ".com/services/T0" + "ABCDEF/B0" + "GHIJKL/" + "y" * 24, "y" * 12),
+        (
+            "DefaultEndpointsProtocol=https;AccountName=acct;AccountKey="
+            + "Zm9v" * 20
+            + "==;EndpointSuffix=core.windows.net",
+            "Zm9vZm9vZm9v",
+        ),
+        ("Account" + "Key = " + "Zm9v" * 10, "Zm9vZm9vZm9v"),
+        (_SG_SAMPLE, "B" * 20),
+        ("S" + "K" + "0123456789abcdef" * 2, "0123456789abcdef"),
+        (_REFRESH_SAMPLE, "Hq7Hq7Hq7"),
+        ("DB_" + "PASS=" + _B62, _B62[-14:]),
+        ("MYSQL_" + "PWD=" + _B62, _B62[-14:]),
+        ("DB_" + 'PASS="' + "two words " + _B62 + '"', _B62[-14:]),
+        ("mysql -u root -p" + _B62 + " mydb", _B62[-14:]),
+        ("mysqldump -h db.local -u root -p" + _B62 + " --all-databases", _B62[-14:]),
+        ("mysql -p'" + "pa ss " + _B62 + "' -e 'select 1'", _B62[-14:]),
+        ("--client" + "-secret " + _B62, _B62[-14:]),
+        ("--client" + "-secret=" + _B62, _B62[-14:]),
+        ("--api" + "_key " + _B62, _B62[-14:]),
+        ("--api" + "_key=" + _B62, _B62[-14:]),
+        ("--api" + "-key " + _B62, _B62[-14:]),
+        ("--api" + "-key=" + _B62, _B62[-14:]),
+        ("--key " + _B62, _B62[-14:]),
+        ("--key=" + _B62, _B62[-14:]),
+        ('--key "' + "two words " + _B62 + '"', _B62[-14:]),
+        ("--api" + "-key='" + "two words " + _B62 + "'", _B62[-14:]),
+        ("Authorization: token " + "gh" + "p_" + "A" * 36, "A" * 20),
+        ("Authorization: token " + _B62, _B62[-14:]),
+        ("https://alice:p@ss" + "@" + _B62 + "@example.com/x.git", _B62[-14:]),
+        ("https://alice:p@ss" + "w0rd@example.com/x.git", "w0rd"),
+        ("HFTOKEN_" + "hf" + "_" + "O" * 34, "O" * 12),
+        ("NPMTOKEN_" + "npm" + "_" + "Q" * 36, "Q" * 12),
+        ("AWS_KEY_" + "AKIA" + "F" * 16 + "_prod", "F" * 12),
+        ("glpat" + "-" + "P" * 20, "P" * 12),
+        ("glpat" + "-" + "P" * 20 + "_" + "Q" * 5, "Q" * 5),
+        ("github" + "_pat_" + "R" * 12, "R" * 12),
+        ("github" + "_pat_" + "R" * 20, "R" * 12),
+    ],
+)
+def test_redaction_issue_1873_formats(secret, tail):
+    out = _redact_value({"stdout": f"before\n{secret}\nafter"})["stdout"]
+    assert tail not in out, out
+    assert "[REDACTED]" in out
+    assert out.startswith("before\n") and out.endswith("\nafter")
+
+
+def test_redaction_issue_1873_before_after_text_is_preserved():
+    out = _redact_value("run mysql -u root -p" + _B62 + " -e 'select 1' done")
+    assert out.startswith("run ") and "[REDACTED]" in out and _B62 not in out
+    out = _redact_value("url=https://alice:p@ss" + "@" + "w0rd@example.com/x.git ok")
+    assert "w0rd" not in out and "example.com/x.git ok" in out
+    out = _redact_value("go --key " + _B62 + " --verbose")
+    assert out.endswith(" --verbose") and _B62 not in out
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "pk_" + "test_" + _B62,  # publishable TEST key: public by design, kept
+        "mysql -u root -p mydb",  # -p alone prompts for the password
+        "mysql -h db.local -P 3306 -u root",  # -P is the port
+        "mysql -P3306 -u root",
+        "pip install -p 3 --key-file /run/key.pem",
+        "--key-file /run/key.pem --keyring /run/ring --api-key-file /run/k",
+        "--api_key_file /run/k --client-secret-file /run/cs",
+        "hf_hub_download(repo_id, filename)",
+        "from huggingface_hub import hf_hub_download",
+        "0123456789abcdef0123456789abcdef01234567",
+        "sha256:" + "ab" * 32,
+        '{"manifest_sha256": "' + "ab" * 32 + '"}',
+        "123e4567-e89b-12d3-a456-426614174000",
+        "SK" + "0123456789abcdef0123456789abcdefAB",  # not 32 hex after SK
+        "see 1//0 and SG.short and whsec_",
+        "Authorization: tokens are listed below",
+        "https://example.com/a@b/c",
+        "AccountName=acct;EndpointSuffix=core.windows.net",
+        "hooks.slack.com/services/ is the webhook path",
+    ],
+)
+def test_redaction_issue_1873_keeps_non_secret_text(text):
+    assert _redact_value(text) == text
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "sk_test_" * 100_000,
+        "whsec_" * 150_000,
+        "hooks.slack.com/services/" * 40_000,
+        "AccountKey=" * 90_000,
+        "SG." * 300_000,
+        "SK" * 500_000,
+        "1//0" * 250_000,
+        "DB_PASS=" * 120_000,
+        "mysql " * 150_000,
+        "mysql -h " * 100_000,
+        "mysql -p" + "a" * 1_000_000,
+        "mysqldump " + "a " * 400_000,
+        "--key " * 150_000,
+        "--key=" * 150_000,
+        "--api_key " * 100_000,
+        "--client-secret " * 60_000,
+        "Authorization: token " * 40_000,
+        "https://a:" * 100_000,
+        "https://a:" + "@" * 500_000,
+        "https://a:" + "p@" * 250_000,
+        "HFTOKEN_hf_" * 90_000,
+        "hf_" + "a" * 29 + "_" * 1,
+        "glpat-" * 160_000,
+        "github_pat_" * 90_000,
+        "AKIA" * 250_000,
+        "_" * 1_000_000,
+    ],
+    ids=lambda payload: f"{payload[:14]!r}-len{len(payload)}",
+)
+def test_redaction_issue_1873_is_linear_on_adversarial_strings(payload):
+    import time
+
+    start = time.monotonic()
+    _redact_value(payload)
+    assert time.monotonic() - start < 1.0
+
+
+def test_redaction_url_credential_does_not_swallow_json_fields():
+    text = '{"u":"http://localhost:8000","a":"x@y.com","note":"keepme","c":"z@w.org"}'
+    assert _redact_value(text) == text
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "redis://:p@ss@host:6379/0",
+        "https://alice:p@ss@host.example/x",
+        "https://alice:p@ss" + "@" + "w0rd@host.example/x",
+    ],
+)
+def test_redaction_url_password_with_at_is_still_fully_redacted(url):
+    out = _redact_value('{"x":"' + url + '","note":"keepme"}')
+    assert "ss" not in out.split("host")[0] and "w0rd" not in out and "p@" not in out
+    assert '"note":"keepme"' in out

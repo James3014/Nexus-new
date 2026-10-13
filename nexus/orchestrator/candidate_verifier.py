@@ -9,7 +9,7 @@ import shlex
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Optional
+from typing import Iterable, Mapping, Optional
 
 from nexus.executors.cli_worker import (
     CliWorkerRequest,
@@ -18,6 +18,7 @@ from nexus.executors.cli_worker import (
     bounded_environment_receipt,
     run_cli_worker,
 )
+from nexus.executors.exec_policy import is_forwarder_executable
 from nexus.orchestrator.code_integrity_verifier import run_code_integrity_v1
 from nexus.orchestrator.repository_contract_gate import (
     RepositoryContractFinding,
@@ -98,6 +99,9 @@ class VerifiedCandidateReceipt:
     core_verification_result_hash: str = ""
 
 
+_VERIFIER_PYTHON_EXECUTABLE_RE = re.compile(r"python[0-9.]*(\.exe)?")
+
+
 class CandidateVerifier:
     VERIFIER_TIMEOUT_SECONDS = 300.0
 
@@ -118,7 +122,9 @@ class CandidateVerifier:
         ):
             raise ValueError("invalid task contract allowed_files")
         commands = getattr(contract, "verifier_commands", None)
-        if not isinstance(commands, (list, tuple)):
+        if not isinstance(commands, (list, tuple)) or not [
+            item for item in commands if isinstance(item, str) and item.strip()
+        ]:
             raise ValueError("invalid verifier command manifest")
         try:
             deduplicated = CandidateVerifier._deduplicate_verifier_commands(tuple(str(item) for item in commands))
@@ -182,6 +188,8 @@ class CandidateVerifier:
         ):
             raise ValueError("verifier command must contain a safe executable")
         executable_path = Path(executable)
+        if is_forwarder_executable(executable):
+            raise ValueError("shell and shell-forwarding executables are not allowed as verifiers")
         if ".." in executable_path.parts:
             raise ValueError("verifier executable path traversal is not allowed")
         if not executable_path.is_absolute() and len(executable_path.parts) > 1:
@@ -200,7 +208,9 @@ class CandidateVerifier:
             )):
                 raise ValueError("invalid verifier argument")
             if any(char in token for char in ";&|<>()$`") and not (
-                arg_index > 0 and verifier_args[arg_index - 1] == "-c"
+                arg_index > 0
+                and verifier_args[arg_index - 1] == "-c"
+                and _VERIFIER_PYTHON_EXECUTABLE_RE.fullmatch(Path(executable).name.lower())
             ):
                 raise ValueError("shell metacharacters are not allowed in verifier arguments")
         for token in verifier_args:
@@ -264,6 +274,9 @@ class CandidateVerifier:
     ) -> tuple[bool, tuple[VerifierEvidence, ...], list[str]]:
         evidence: list[VerifierEvidence] = []
         failures: list[str] = []
+        if not [c for c in contract.verifier_commands if isinstance(c, str) and c.strip()]:
+            # Completion requires an applicable verifier; never pass vacuously.
+            return False, (), ["verifier_manifest_empty"]
         for command in CandidateVerifier._deduplicate_verifier_commands(
             tuple(contract.verifier_commands)
         ):
@@ -348,6 +361,19 @@ class CandidateVerifier:
             except (OSError, ValueError) as exc:
                 failures.append(f"verifier_invalid:{command}:{exc}")
         return not failures, tuple(evidence), failures
+
+    @staticmethod
+    def effective_verifier_manifest(commands: Iterable[str]) -> tuple[str, ...]:
+        """Return the exact ordered commands the verifier executes for a contract."""
+        return CandidateVerifier._deduplicate_verifier_commands(tuple(commands))
+
+    @staticmethod
+    def verifier_manifest_sha256(commands: Iterable[str]) -> str:
+        """Hash the effective verifier manifest (single source for producer and sink)."""
+        manifest = CandidateVerifier.effective_verifier_manifest(commands)
+        return hashlib.sha256(
+            json.dumps(manifest, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
 
     @staticmethod
     def _deduplicate_verifier_commands(commands: tuple[str, ...]) -> tuple[str, ...]:
@@ -481,9 +507,6 @@ class CandidateVerifier:
         failures.extend(verifier_state_failures)
         failures.extend(repository_contract.blocking_reasons)
         verified = not failures
-        verifier_manifest = CandidateVerifier._deduplicate_verifier_commands(
-            tuple(contract.verifier_commands)
-        )
         return VerifiedCandidateReceipt(
             schema="nexus.verified_candidate_receipt.v1",
             task_id=contract.task_id,
@@ -513,9 +536,9 @@ class CandidateVerifier:
             repository_contract_findings=repository_contract.findings,
             authority_change_required=repository_contract.authority_change_required,
             authority_findings_sha256=repository_contract.authority_findings_sha256,
-            verifier_manifest_sha256=hashlib.sha256(
-                json.dumps(verifier_manifest, separators=(",", ":")).encode("utf-8")
-            ).hexdigest(),
+            verifier_manifest_sha256=CandidateVerifier.verifier_manifest_sha256(
+                contract.verifier_commands
+            ),
             verification_wall_time_ms=max(0, int((time.monotonic() - verification_started) * 1000)),
             collaboration_gate_passed=collaboration_passed,
             collaboration_provenance=post_verifier.collaboration_provenance,

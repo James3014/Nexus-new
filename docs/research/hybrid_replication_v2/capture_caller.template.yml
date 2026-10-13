@@ -1,0 +1,24 @@
+name: Nexus Hybrid Replication Capture
+
+on:
+  issues:
+    types: [opened, edited]
+
+permissions: {}
+
+concurrency:
+  group: nexus-hybrid-replication-capture-${{ github.repository }}-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  capture:
+    permissions:
+      contents: read
+      issues: write
+    uses: James3014/Nexus-new/.github/workflows/hybrid-replication-capture-reusable.yml@__PIN_SHA__
+    with:
+      activation_state: ${{ vars.NEXUS_HYBRID_REPLICATION_ACTIVATION_STATE }}
+      t_auto: ${{ vars.NEXUS_HYBRID_REPLICATION_T_AUTO }}
+      excluded_tasks: ${{ vars.NEXUS_HYBRID_REPLICATION_EXCLUDED_TASKS }}
+      exclusion_set_sha256: ${{ vars.NEXUS_HYBRID_REPLICATION_EXCLUSION_SET_SHA256 }}
+      readiness_control_token: ${{ vars.NEXUS_HYBRID_REPLICATION_READINESS_CONTROL_TOKEN }}

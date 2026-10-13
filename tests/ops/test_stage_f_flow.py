@@ -46,7 +46,7 @@ def test_stage_f():
     # 確保基本環境
     evidence_path.write_text(json.dumps({
         "final_response": "The task is ready for review.",
-        "evidence_bundle": {"test_artifacts": [{"aggregates": {"success_rate": 1.0}}]}
+        "evidence_bundle": {"test_artifacts": [{"command": "python3 -m pytest --version", "exit_code": 0}]}
     }))
     
     try:

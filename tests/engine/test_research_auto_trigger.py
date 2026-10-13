@@ -6,11 +6,20 @@ from nexus.core.state_contracts import NexusState
 from nexus.engine.policies.research_policy import ResearchDecision
 
 class MockPipeline(PipelineStagesMixin):
+    # Set per test by _isolate_run_dir; a MagicMock run_dir is path-like and
+    # made stages write "MagicMock/mock.run_dir/..." into the current directory.
+    default_run_dir = None
+
     def __init__(self):
         self.engine = MagicMock()
         self.engine.project_root = "/tmp"
-        self.engine.run_dir = MagicMock()
+        self.engine.run_dir = MockPipeline.default_run_dir
         self.engine._add_step_to_history = MagicMock()
+
+@pytest.fixture(autouse=True)
+def _isolate_run_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr(MockPipeline, "default_run_dir", tmp_path)
+
 
 @pytest.fixture
 def mock_ctx():
