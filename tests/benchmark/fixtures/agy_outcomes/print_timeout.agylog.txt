@@ -1,4 +1,0 @@
-I1013 10:40:01.109309       1 model_resolver.go:93] Resolving model gemini-3.8-flash-medium
-I1013 10:40:01.109340       1 model_config_manager.go:328] Propagating selected model override to backend: label="Gemini 3.8 Flash (Medium)"
-I1013 10:40:02.013098       1 server.go:1278] Created conversation 456eeb10-6ec6-4767-99e1-978ca8910fb1
-W1013 10:40:07.041287       1 poll.go:188] Print mode: print timeout after 5s with turn in progress after 194 polls (printed=1)

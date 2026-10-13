@@ -1,3 +1,0 @@
-I1013 10:36:21.492269       1 model_resolver.go:93] Resolving model gemini-3.8-flash-medium
-I1013 10:36:21.492300       1 model_config_manager.go:328] Propagating selected model override to backend: label="Gemini 3.8 Flash (Medium)"
-I1013 10:36:22.546810       1 server.go:1278] Created conversation 628a20ea-a1d0-4dbf-b7b6-95ae4a94dbfd

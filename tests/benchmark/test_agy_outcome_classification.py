@@ -28,14 +28,12 @@ from scripts.bench.agy_provider import (
     ask_direct_agy_patch,
 )
 from scripts.bench.benchmark_eligibility import classify_infra_invalid_reason
-
-FIXTURES = Path(__file__).parent / "fixtures" / "agy_outcomes"
+from tests.benchmark.agy_outcome_fixtures import AGY_OUTCOME_FIXTURES
 
 
 def _sample(name: str) -> tuple[str, str, str]:
     return tuple(  # type: ignore[return-value]
-        (FIXTURES / f"{name}.{suffix}").read_text(encoding="utf-8")
-        for suffix in ("stdout", "stderr", "agylog.txt")
+        AGY_OUTCOME_FIXTURES[(name, suffix)] for suffix in ("stdout", "stderr", "agylog.txt")
     )
 
 
@@ -83,9 +81,9 @@ def _eligibility(out: dict[str, Any], raw: str) -> str | None:
 
 
 def test_fixtures_hold_no_account_data_or_secrets():
-    for path in sorted(FIXTURES.iterdir()):
-        text = path.read_text(encoding="utf-8").lower()
-        assert not re.search(r"[\w.+-]+@[\w-]+\.[\w.-]+", text), path.name
+    for key, raw in sorted(AGY_OUTCOME_FIXTURES.items()):
+        text = raw.lower()
+        assert not re.search(r"[\w.+-]+@[\w-]+\.[\w.-]+", text), key
         for needle in (
             "jameschen",
             "bearer",
@@ -94,7 +92,7 @@ def test_fixtures_hold_no_account_data_or_secrets():
             "refresh_token",
             "/users/",
         ):
-            assert needle not in text, (path.name, needle)
+            assert needle not in text, (key, needle)
 
 
 @pytest.mark.parametrize("name", ["denied_command", "denied_read_file"])
