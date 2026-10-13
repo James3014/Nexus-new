@@ -208,7 +208,7 @@ def test_http_error_message_has_no_secrets(app, monkeypatch, capsys):
     assert "eyJ" not in err and "BEGIN" not in err
 
 
-def _urlmatch(env, url, tmp_path, pre=()):
+def _urlmatch(env, url, tmp_path):
     env = {k: v for k, v in env.items() if not k.startswith("GIT_CONFIG_GLOBAL")}
     env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1", HOME=str(tmp_path))
     out = subprocess.run(
@@ -236,6 +236,16 @@ def test_real_git_extraheader_urlmatch(tmp_path):
     }
     env = ident.git_env(fake_tok, pre)
     assert _urlmatch(env, "https://github.com/x", tmp_path) == [f"Authorization: basic {basic}"]
+    # --get-urlmatch shows only the last value, so also check that an empty
+    # reset entry for the same key comes right before the real header.
+    pairs = [
+        (env[f"GIT_CONFIG_KEY_{i}"], env[f"GIT_CONFIG_VALUE_{i}"])
+        for i in range(int(env["GIT_CONFIG_COUNT"]))
+    ]
+    key = "http.https://github.com/.extraheader"
+    real = pairs.index((key, f"Authorization: basic {basic}"))
+    assert real > 1 and pairs[real - 1] == (key, "")
+    assert pairs[0] == (key, "Authorization: basic OLD")
 
 
 def test_env_hardening_and_gh_includes_git_pairs():
