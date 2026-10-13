@@ -38,6 +38,25 @@ def test_load_impact_rules_reads_active_markdown_rows(tmp_path):
     ]
 
 
+
+def test_issue1531_core_pin_policy_maps_without_fallback():
+    details = select_target_details(
+        ["scripts/ci/nexus_core_trusted_pin_policy.py"],
+        load_impact_rules(),
+        index_path=Path("/tmp/missing-issue1531-impact-index.json"),
+        history_path=Path("/tmp/missing-issue1531-history.jsonl"),
+    )
+
+    assert "tests/ops/test_nexus_core_trusted_pin_policy.py" in details.targets
+    assert "tests/ops/test_select_tests.py" in details.targets
+    assert "tests/ops/test_pr_impact_gate.py" in details.targets
+    assert "tests/services/test_policy_gate.py" in details.targets
+    assert details.unmatched_paths == []
+    assert details.fallback_used is False
+    assert details.risk == "high"
+    assert details.high_risk_escalated is True
+    assert details.risk_reasons == ["nexus_core_trusted_pin_maintenance_contract"]
+
 def test_issue153_event_feedback_rows_map_without_fallback():
     rules = load_impact_rules()
     details = select_target_details(
