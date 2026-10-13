@@ -2,6 +2,15 @@ import json
 from pathlib import Path
 from typing import List, Dict, Any
 
+import warnings as _archived_warnings
+
+_archived_warnings.warn(
+    "ARCHIVED 2026-10-13 (#1906): orphan of the retired ui_validator (archived 2026-10-12); see ARCHIVED_2026-10-13.md. "
+    "Scheduled for deletion; do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 class WebDomMapper:
     """
     WebDomMapper extracts a simplified, text-based representation of a webpage's DOM

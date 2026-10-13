@@ -131,10 +131,12 @@ def test_multi_agent_real_status_and_audit_missing_task_exit_nonzero(monkeypatch
 
 
 def test_multi_agent_integrate_keeps_exit_one_for_retired_route() -> None:
+    # Historical node id retained: `multi-agent integrate` is removed by the 2026-10-13
+    # archive batch (#1906); ControlledIntegrationManager / `self-hosted integrate` is the path.
     result = _invoke("multi-agent", "integrate", "--task-ids", "SMK-1")
 
-    assert result.exit_code == 1
-    assert "LEGACY_INTEGRATION_PATH_RETIRED" in result.output
+    assert result.exit_code == 2
+    assert "No such command" in result.output
 
 
 def _start_mission(tmp_path: Path, run_rc: int):

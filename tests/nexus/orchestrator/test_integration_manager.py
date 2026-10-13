@@ -50,15 +50,13 @@ def test_batch_integrate_conflict():
     receipt = executor(plan, "attempt retired legacy integration")
     outcome = dict(receipt.outcome or {})
 
-    assert receipt.invoked is True
+    # Planner node integration_manager archived 2026-10-13 (#1906): explicit skip reason.
+    assert receipt.invoked is False
     assert receipt.gate_passed is False
     assert outcome["semantic_status"] == "BLOCKED"
-    assert outcome["error"] == LEGACY_INTEGRATION_PATH_RETIRED
-    assert outcome["mutation_performed"] is False
-    assert "physical_callable" not in outcome
-    assert outcome["replacement_callable"].endswith(
-        "SelfHostedTaskService.integrate_approved"
-    )
+    assert outcome["skip_reason"] == "archived_retired_integration_manager_2026-10-13"
+    assert outcome["archived"] is True
+    assert "mutation_performed" not in outcome
 
 
 def test_production_surfaces_do_not_import_or_invoke_legacy_integration_manager():

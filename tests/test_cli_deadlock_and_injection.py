@@ -16,9 +16,11 @@ def test_cli_command_injection():
     is blocked / safely handled or sanitized.
     """
     runner = CliRunner()
+    # `nexus delegate` is archived 2026-10-13 (#1906): the malicious name never reaches a
+    # command body; task-name sanitizing is covered by the SanitizedRunner test below.
     result = runner.invoke(nexus, ["nexus", "delegate", "malicious; rm -rf /"])
     assert result.exit_code != 0
-    assert "Invalid task name" in result.output
+    assert "No such command" in result.output
 
 def test_cli_output_deadlock():
     """

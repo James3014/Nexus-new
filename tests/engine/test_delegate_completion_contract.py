@@ -1,5 +1,3 @@
-import json
-
 from click.testing import CliRunner
 
 import scripts.engine.nexus_cli as cli_mod
@@ -13,70 +11,52 @@ def _forbid_subprocess(monkeypatch):
     monkeypatch.setattr(cli_mod.SanitizedRunner, "run_safe", staticmethod(_boom))
 
 
-def test_delegate_writes_completion_envelope(monkeypatch, tmp_path):
-    """Retired (#1739): the envelope is still written, now as a non-retryable BLOCKED result."""
+def _invoke_removed_delegate(monkeypatch, tmp_path, *args):
+    """`nexus delegate` (retired #1739) is removed by the 2026-10-13 archive batch (#1906)."""
     monkeypatch.setattr(cli_mod, "repo_root", tmp_path)
     _forbid_subprocess(monkeypatch)
+    return CliRunner().invoke(cli_mod.nexus, ["nexus", "delegate", *args])
 
+
+def _assert_no_such_command(res) -> None:
+    assert res.exit_code == 2, res.output
+    assert "No such command" in res.output
+
+
+def test_delegate_writes_completion_envelope(monkeypatch, tmp_path):
+    # Historical node id retained; the command is gone, so no envelope is written.
     report_path = tmp_path / "reports" / "delegate_report.json"
-    res = CliRunner().invoke(
-        cli_mod.nexus,
-        ["nexus", "delegate", "repair completion contract", "--report-file", str(report_path), "--output-json"],
+    res = _invoke_removed_delegate(
+        monkeypatch, tmp_path, "repair completion contract", "--report-file", str(report_path), "--output-json"
     )
 
-    assert res.exit_code == 78, res.output
-    payload = json.loads(res.output)
-    assert payload["status"] == "FAILED"
-    assert payload["semantic_status"] == "BLOCKED"
-    assert payload["retryable"] is False
-    assert payload["execution_path"] == "retired"
-    assert "delegate_retired_1739" in payload["semantic_failures"]
-    assert report_path.exists()
+    _assert_no_such_command(res)
+    assert not report_path.exists()
 
 
 def test_delegate_message_names_retirement_and_multi_agent_commands(monkeypatch, tmp_path):
-    monkeypatch.setattr(cli_mod, "repo_root", tmp_path)
-    _forbid_subprocess(monkeypatch)
+    # Historical node id retained; `nexus multi-agent` remains the real path.
+    res = _invoke_removed_delegate(monkeypatch, tmp_path, "repair completion contract")
 
-    res = CliRunner().invoke(
-        cli_mod.nexus,
-        ["nexus", "delegate", "repair completion contract", "--report-file", str(tmp_path / "r.json")],
-    )
-
-    assert res.exit_code == 78
-    assert "retired" in res.output and "#1739" in res.output
-    for sub in ("create-task", "start", "submit", "verify"):
-        assert f"nexus multi-agent {sub} --task-id" in res.output
-    help_res = CliRunner().invoke(cli_mod.nexus, ["nexus", "delegate", "--help"])
-    assert "RETIRED" in help_res.output and "multi-agent" in help_res.output
+    _assert_no_such_command(res)
+    help_res = CliRunner().invoke(cli_mod.nexus, ["nexus", "--help"])
+    assert "multi-agent" in help_res.output
+    assert not hasattr(cli_mod, "DELEGATE_RETIRED_MESSAGE")
 
 
 def test_delegate_fails_closed_when_supervisor_fails(monkeypatch, tmp_path):
-    """Retired (#1739): delegate fails closed without ever invoking the supervisor backend."""
-    monkeypatch.setattr(cli_mod, "repo_root", tmp_path)
-    _forbid_subprocess(monkeypatch)
+    # Historical node id retained; the removed command never reaches a backend.
+    res = _invoke_removed_delegate(monkeypatch, tmp_path, "repair completion contract")
 
-    res = CliRunner().invoke(
-        cli_mod.nexus,
-        ["nexus", "delegate", "repair completion contract", "--report-file", str(tmp_path / "r.json")],
-    )
-
-    assert res.exit_code == 78
-    assert "DELEGATION_BACKEND_UNAVAILABLE" in res.output
+    _assert_no_such_command(res)
+    assert "DELEGATION_BACKEND_UNAVAILABLE" not in res.output
 
 
 def test_delegate_passes_task_name_unquoted(monkeypatch, tmp_path):
-    """The validated task name is recorded verbatim (no shell quoting) in the envelope."""
-    monkeypatch.setattr(cli_mod, "repo_root", tmp_path)
-    _forbid_subprocess(monkeypatch)
+    # Historical node id retained; no envelope (and so no task name) is produced.
+    res = _invoke_removed_delegate(monkeypatch, tmp_path, "repair completion contract", "--output-json")
 
-    res = CliRunner().invoke(
-        cli_mod.nexus,
-        ["nexus", "delegate", "repair completion contract", "--report-file", str(tmp_path / "r.json"), "--output-json"],
-    )
-
-    payload = json.loads(res.output)
-    assert payload["task_name"] == "repair completion contract"
+    _assert_no_such_command(res)
 
 
 def test_supervisor_engine_refuses_real_tasks_without_writing(tmp_path):
@@ -100,10 +80,6 @@ def test_supervisor_engine_refuses_real_tasks_without_writing(tmp_path):
 
 
 def test_delegate_rejects_invalid_task_name_without_backend(monkeypatch, tmp_path):
-    monkeypatch.setattr(cli_mod, "repo_root", tmp_path)
-    _forbid_subprocess(monkeypatch)
+    res = _invoke_removed_delegate(monkeypatch, tmp_path, "bad; rm -rf /")
 
-    res = CliRunner().invoke(cli_mod.nexus, ["nexus", "delegate", "bad; rm -rf /"])
-
-    assert res.exit_code == 1
-    assert "Invalid task name" in res.output
+    _assert_no_such_command(res)
