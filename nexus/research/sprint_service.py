@@ -10,7 +10,7 @@ import warnings
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 from nexus.core.outcome_schema import SprintOutcome
 from nexus.engine.autoreason_service import AutoreasonService
@@ -296,7 +296,7 @@ class LLMCandidateGenerator:
 
         from nexus.services.unified_runtime import build_online_route, extract_online_stage_payload
 
-        def response_contract(context: dict[str, Any]) -> dict[str, Any]:
+        def response_contract(context: Mapping[str, Any]) -> dict[str, Any]:
             online = context.get("online", {})
             provider_response, _raw, _payload = extract_online_stage_payload(
                 online if isinstance(online, dict) else {}
@@ -359,12 +359,14 @@ class LLMCandidateGenerator:
                 receipt_path=receipt_path,
                 with_nexus_armor=True,
             )
-        self.last_unified_runtime_receipt = dict(receipt)
-        online_stage = receipt.get("online", {}) if isinstance(receipt.get("online"), dict) else {}
+        unified: dict[str, Any] = dict(receipt) if isinstance(receipt, Mapping) else {}
+        self.last_unified_runtime_receipt = unified
+        raw_online = unified.get("online")
+        online_stage: dict[str, Any] = dict(raw_online) if isinstance(raw_online, Mapping) else {}
         provider_response, raw_response, _payload = extract_online_stage_payload(online_stage)
         if isinstance(provider_response, dict):
-            return dict(provider_response), raw_response, receipt
-        return {"status": "APPROVED" if online_stage.get("status") == "SUCCEEDED" else "FAIL", "patch": str(provider_response or "")}, raw_response, receipt
+            return dict(provider_response), raw_response, unified
+        return {"status": "APPROVED" if online_stage.get("status") == "SUCCEEDED" else "FAIL", "patch": str(provider_response or "")}, raw_response, unified
 
     def _model_chain(self) -> list[str]:
         override = str(os.environ.get("NEXUS_GEMINI_MODEL_NAME", "") or "").strip()
@@ -467,7 +469,7 @@ class LLMCandidateGenerator:
 LOCAL_CANDIDATE_MODEL_ENVS = ("NEXUS_LOCAL_MODEL_EXECUTOR_MODEL", "NEXUS_LOCAL_MODEL_NAME")
 
 
-def _local_online_channel_disabled(_context: dict[str, Any]) -> dict[str, Any]:
+def _local_online_channel_disabled(_context: Mapping[str, Any]) -> Mapping[str, Any]:
     raise RuntimeError("online_channel_disabled_for_local_sprint_candidate")
 
 
@@ -614,9 +616,14 @@ class LocalArmorCandidateGenerator:
                 with_nexus_armor=True,
             )
         )
-        local_stage = receipt.get("local") if isinstance(receipt.get("local"), dict) else {}
-        response = local_stage.get("response") if isinstance(local_stage.get("response"), dict) else {}
-        summary = response.get("candidate_summary") if isinstance(response.get("candidate_summary"), dict) else {}
+        raw_local = receipt.get("local")
+        local_stage: dict[str, Any] = dict(raw_local) if isinstance(raw_local, Mapping) else {}
+        raw_response = local_stage.get("response")
+        response: dict[str, Any] = dict(raw_response) if isinstance(raw_response, Mapping) else {}
+        raw_summary = response.get("candidate_summary")
+        summary: dict[str, Any] = dict(raw_summary) if isinstance(raw_summary, Mapping) else {}
+        raw_verifier = response.get("verifier_summary")
+        verifier_summary: dict[str, Any] = dict(raw_verifier) if isinstance(raw_verifier, Mapping) else {}
         model_calls = int(response.get("model_call_count", 0) or 0)
         evidence = {
             "unified_runtime_receipt": receipt,
@@ -626,7 +633,7 @@ class LocalArmorCandidateGenerator:
             "local_worker_id": str(worker.get("worker_id") or ""),
             "local_candidate_hash": str(summary.get("selected_candidate_hash") or ""),
             "local_isolated_workspace": str(summary.get("isolated_workspace") or ""),
-            "local_verifier_status": str((response.get("verifier_summary") or {}).get("verifier_status") or ""),
+            "local_verifier_status": str(verifier_summary.get("verifier_status") or ""),
         }
         isolated = Path(str(summary.get("isolated_workspace") or ""))
         delivered = (
