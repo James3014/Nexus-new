@@ -600,19 +600,24 @@ def claim_boundary_simulated(
         else {}
     )
     if "simulated" in cap_cb:
-        return bool(
-            cap_cb["simulated"]
-        ), "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)"
+        # fail closed: only an explicit False is real
+        return (
+            cap_cb["simulated"] is not False,
+            "CapabilityReceipt.to_dict().receipt_base.claim_boundary (runtime-attested, #187)",
+        )
     row_cb = (obs.row or {}).get("claim_boundary") if isinstance(obs.row, Mapping) else None
     if isinstance(row_cb, Mapping) and "simulated" in row_cb:
-        return bool(
-            row_cb["simulated"]
-        ), "UnifiedRuntime receipt.capabilities[<cap>].claim_boundary (runtime-attested)"
+        # fail closed: only an explicit False is real
+        return (
+            row_cb["simulated"] is not False,
+            "UnifiedRuntime receipt.capabilities[<cap>].claim_boundary (runtime-attested)",
+        )
     rb_cb = ((receipt or {}).get("receipt_base") or {}).get("claim_boundary") or {}
     if "simulated" in rb_cb:
-        return bool(
-            rb_cb["simulated"]
-        ), "UnifiedRuntime receipt.receipt_base.claim_boundary (task level)"
+        # fail closed: only an explicit False is real
+        return rb_cb[
+            "simulated"
+        ] is not False, "UnifiedRuntime receipt.receipt_base.claim_boundary (task level)"
     return None, "not_observed"
 
 

@@ -186,23 +186,29 @@ def attested_receipt_dict(
 ) -> dict[str, Any]:
     """``receipt.to_dict()``; ``receipt_base`` is re-projected only to tighten the boundary.
 
-    The runtime-attested projection is returned unchanged unless the executor outcome shows a
-    non-execution the receipt alone could not (then ``simulated`` becomes true).
+    Fail-closed: only an explicit ``simulated is False`` set by the runtime producer
+    (nexus-runtime #187) counts as real.  A runtime ``True`` is returned unchanged (Nexus-new
+    can never flip it); a missing / null / non-bool ``simulated`` is re-projected as
+    ``simulated=True, claim_eligible=False``; an executor outcome showing a non-execution the
+    receipt alone could not see also tightens to ``simulated=True``.  Never loosens.
     """
     base = receipt.to_dict()
     old = base.get("receipt_base") if isinstance(base.get("receipt_base"), dict) else {}
     runtime_cb = old.get("claim_boundary") if isinstance(old.get("claim_boundary"), dict) else {}
+    runtime_simulated = runtime_cb.get("simulated")
+    if runtime_simulated is True:
+        return base  # already fail-closed; nothing local may override it
     try:
         boundary = evaluate_receipt_claim_boundary(receipt, executor_outcome)
-        if runtime_cb.get("simulated", True) or not boundary.simulated:
-            return base  # runtime already fail-closed, or the outcome agrees
+        if runtime_simulated is False and boundary.simulated is False:
+            return base  # runtime attests a real execution and the outcome agrees
         from nexus_runtime.planning.evidence.claim_boundary import evaluate_claim_boundary
         from nexus_runtime.planning.evidence.receipt_base import project_child_receipt_base
 
         tightened = evaluate_claim_boundary(
             simulated=True,
             claim_eligible=False,
-            receipt_present=bool(runtime_cb.get("receipt_present")),
+            receipt_present=runtime_cb.get("receipt_present") is True,
             model_calls=int(runtime_cb.get("model_calls") or 0),
         )
         name = str(getattr(receipt, "name", "") or "capability")
@@ -233,8 +239,12 @@ def attested_receipt_dict(
             outcome_contributed=contributed,
             claim_boundary=tightened.to_dict(),
         )
-    except Exception as exc:  # noqa: BLE001 - keep the runtime projection, record why
+    except Exception as exc:  # noqa: BLE001 - fail closed, record why
         base["receipt_base_attestation_error"] = str(exc)[:200]
+        if isinstance(base.get("receipt_base"), dict):
+            cb = dict(runtime_cb)
+            cb.update(simulated=True, claim_eligible=False, public_claim_allowed=False)
+            base["receipt_base"]["claim_boundary"] = cb
     return base
 
 

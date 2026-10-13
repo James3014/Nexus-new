@@ -686,3 +686,68 @@ def test_executor_outcome_only_tightens_runtime_boundary(tmp_path: Path) -> None
     assert tightened["receipt_base"]["claim_boundary"]["claim_eligible"] is False
     # (never loosening a runtime simulated=true receipt is covered by
     # test_trace_receipts_without_executor_outcome_stay_simulated)
+
+
+class _FakeRuntimeReceipt:
+    """A receipt whose runtime projection carries a chosen ``simulated`` value."""
+
+    name = "memory"
+    selected = True
+    invoked = True
+    gate_passed = True
+    outcome_contributed = True
+    evidence_present = True
+    executor_id = "capability_executor_registry:memory"
+    evidence_refs = ("ev_fake",)
+    failure_reason = ""
+    telemetries: dict[str, Any] = {}
+    outcome: dict[str, Any] = {"action": "search", "evidence_refs": ["ev_fake"]}
+
+    def __init__(self, cb: dict[str, Any] | None) -> None:
+        self._cb = cb
+
+    def to_dict(self) -> dict[str, Any]:
+        rb: dict[str, Any] = {"source_world": "B", "consumption_chain": [{"consumer": "engine"}]}
+        if self._cb is not None:
+            rb["claim_boundary"] = dict(self._cb)
+        return {"name": self.name, "receipt_base": rb}
+
+
+def test_runtime_simulated_true_cannot_be_flipped_by_nexus_new() -> None:
+    receipt = _FakeRuntimeReceipt({"simulated": True, "claim_eligible": False})
+    for outcome in (None, {"action": "search", "evidence_refs": ["ev_x", "ev_y"]}):
+        attested = attested_receipt_dict(receipt, outcome)
+        assert attested["receipt_base"]["claim_boundary"]["simulated"] is True
+        assert attested["receipt_base"]["claim_boundary"]["claim_eligible"] is False
+        assert attested == receipt.to_dict()  # no state drift from the runtime projection
+
+
+@pytest.mark.parametrize(
+    "cb", [None, {}, {"simulated": None}, {"simulated": "false"}, {"simulated": 0}]
+)
+def test_missing_or_non_bool_simulated_is_treated_as_simulated(cb: dict[str, Any] | None) -> None:
+    attested = attested_receipt_dict(_FakeRuntimeReceipt(cb))
+    boundary = attested["receipt_base"]["claim_boundary"]
+    assert boundary["simulated"] is True
+    assert boundary["claim_eligible"] is False
+    assert boundary["public_claim_allowed"] is False
+
+
+def test_audit_reads_missing_or_non_bool_simulated_as_simulated() -> None:
+    import importlib
+
+    audit = importlib.import_module("scripts.ops.capability_wiring_audit")
+    for value in (None, "false", 0):
+        obs = audit.Obs(
+            source="t",
+            stage={},
+            resp={},
+            outcome={},
+            row={"claim_boundary": {"simulated": value}},
+            receipt_terminal="",
+            receipt_failure_class="",
+            admission={},
+            executor_receipt={},
+            receipt={},
+        )
+        assert audit.claim_boundary_simulated(obs, {})[0] is True
