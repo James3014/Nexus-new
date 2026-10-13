@@ -94,7 +94,7 @@ except ImportError as exc:
 # truth for the runtime check; it must equal the nexus-certify SHA pinned in
 # .github/workflows/nexus-core-issue-completion.yml (a test asserts the two
 # agree).
-CANONICAL_CORE_REVISION = "9942db770e96ab88e3e1700aaec2e911bcec241b"
+CANONICAL_CORE_REVISION = "a0d22e81fc0698285e58bea18780b6605019cc58"
 CANONICAL_CORE_DISTRIBUTION = "nexus-certify"
 CANONICAL_CORE_INTERFACE = "product.adapters.generic_verification.verify_generic_changeset"
 

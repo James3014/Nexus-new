@@ -21,14 +21,21 @@ CHANGED = (
     "policy-lane-gate.yml",
     "pytest.yml",
     "security.yml",
+    "trusted-deletion-anchor.yml",
     "trusted-impact-gate.yml",
     "typecheck.yml",
     "wiki-governance.yml",
 )
-# Core-protected (needs Owner signature) or already own a concurrency policy.
-UNTOUCHED = (
+# Core-protected workflows change only with an Owner-signed manifest
+# (.nexus-core/config.toml [deletion_exception].protected_paths).
+PROTECTED = (
     "nexus-core-issue-completion.yml",
     "trusted-deletion-anchor.yml",
+)
+# Already own a concurrency policy.
+UNTOUCHED = (
+    "nexus-core-issue-completion.yml",
+    "deletion-guard.yml",
     "fast-start-v2-invalidator.yml",
     "repository-intelligence.yml",
 )
@@ -50,14 +57,28 @@ def test_non_pr_events_never_share_a_group(name: str) -> None:
     assert "github.ref" not in _load(name)["concurrency"]["group"]
 
 
-def test_protected_workflows_are_not_modified_by_this_policy() -> None:
+def test_protected_workflows_keep_their_owner_signed_policies() -> None:
     config = (ROOT / ".nexus-core" / "config.toml").read_text(encoding="utf-8")
-    for name in UNTOUCHED[:2]:
+    for name in PROTECTED:
         assert f".github/workflows/{name}" in config
-    assert "pull_request.number || github.run_id" not in (
-        WORKFLOWS / "nexus-core-issue-completion.yml"
-    ).read_text(encoding="utf-8")
-    assert "concurrency" not in _load("trusted-deletion-anchor.yml")
+    # The Core gate keeps its own per-PR group (changed only with the Owner manifest).
+    assert _load("nexus-core-issue-completion.yml")["concurrency"] == {
+        "group": "nexus-core-issue-completion-${{ github.event.pull_request.number }}",
+        "cancel-in-progress": True,
+    }
+    # The anchor keeps 'edited': its merge-lane binding lives in the PR body.
+    anchor = _load("trusted-deletion-anchor.yml")
+    assert "edited" in anchor[True]["pull_request_target"]["types"]
+
+
+def test_core_issue_gate_is_not_rerun_by_body_edits() -> None:
+    # A skipped required 'verify' job would report success, so 'edited' cannot be
+    # narrowed to marker edits inside the workflow; it is dropped instead.
+    gate = _load("nexus-core-issue-completion.yml")
+    assert gate[True] == {"pull_request_target": {"types": ["opened", "synchronize", "reopened"]}}
+    assert gate["jobs"]["run"]["outputs"]["outcome"] == "${{ steps.gate.outputs.outcome }}"
+    (verify_step,) = gate["jobs"]["verify"]["steps"]
+    assert verify_step["with"]["gate-outcome"] == "${{ needs.run.outputs.outcome }}"
 
 
 def test_every_pr_workflow_is_classified() -> None:

@@ -7,9 +7,19 @@ name: Nexus Core issue completion
 #   head, base config and Issue.
 # Requires container isolation ([isolation] mode = "container") in the
 # committed .nexus-core/config.toml.
+#
+# No 'edited' trigger: a body edit re-ran the whole gate and, through the
+# concurrency group, cancelled the run for the real head. It cannot be narrowed to
+# marker edits inside this workflow, because a skipped 'verify' job reports as a
+# passing required check. After editing the NEXUS_CORE_ISSUE marker, push a commit
+# (or close and reopen the PR) to re-run the gate; 'gh run rerun' replays the old body.
+#
+# A run that starts after its PR already merged or closed gets the neutral
+# PR_ALREADY_CLOSED_SKIPPED outcome from issue-gate; receipt-verify accepts it only
+# when the live PR is merged at exactly this head (never VERIFIED).
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
@@ -38,11 +48,12 @@ jobs:
       artifact-name: ${{ steps.gate.outputs.artifact-name }}
       artifact-id: ${{ steps.gate.outputs.artifact-id }}
       issue-number: ${{ steps.gate.outputs.issue-number }}
+      outcome: ${{ steps.gate.outputs.outcome }}
     steps:
       - id: gate
-        uses: James3014/nexus-core/.github/actions/issue-gate@9942db770e96ab88e3e1700aaec2e911bcec241b
+        uses: James3014/nexus-core/.github/actions/issue-gate@a0d22e81fc0698285e58bea18780b6605019cc58
         with:
-          nexus-certify-ref: "9942db770e96ab88e3e1700aaec2e911bcec241b"
+          nexus-certify-ref: "a0d22e81fc0698285e58bea18780b6605019cc58"
 
   verify:
     name: Nexus Core issue completion
@@ -56,8 +67,10 @@ jobs:
     permissions:
       contents: read
       actions: read
+      # PR_ALREADY_CLOSED_SKIPPED: receipt-verify re-reads the live PR.
+      pull-requests: read
     steps:
-      - uses: James3014/nexus-core/.github/actions/receipt-verify@9942db770e96ab88e3e1700aaec2e911bcec241b
+      - uses: James3014/nexus-core/.github/actions/receipt-verify@a0d22e81fc0698285e58bea18780b6605019cc58
         with:
           artifact-name: ${{ needs.run.outputs.artifact-name }}
           artifact-id: ${{ needs.run.outputs.artifact-id }}
@@ -66,4 +79,5 @@ jobs:
           head-sha: ${{ github.event.pull_request.head.sha }}
           base-sha: ${{ github.event.pull_request.base.sha }}
           issue-number: ${{ needs.run.outputs.issue-number }}
-          nexus-certify-ref: "9942db770e96ab88e3e1700aaec2e911bcec241b"
+          gate-outcome: ${{ needs.run.outputs.outcome }}
+          nexus-certify-ref: "a0d22e81fc0698285e58bea18780b6605019cc58"
