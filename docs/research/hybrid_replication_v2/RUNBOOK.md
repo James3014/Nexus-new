@@ -240,3 +240,77 @@ set the state back to `NOT_READY` by pushing a manifest with `activation_state:
 - Activation variables change only through the manifest (`push`, then `readback`). Drift
   reported by `readback` (exit 2) is corrected by pushing the manifest again, never by
   editing a repository variable.
+
+## 8. Collecting-phase daemon: parallel advance (V12, #1934)
+
+Run the launchd daemon with `--max-concurrent-tasks 4` (default `1` = serial, unchanged):
+
+```
+uv run python scripts/ops/hybrid_replication_daemon.py \
+  --root <STORE_ROOT> --since <t_auto> \
+  --frozen-policy-sha256 <frozen-policy-sha256> \
+  --stack-command "<same stack command, with --store-root <STORE_ROOT>>" \
+  --ground-truth-command "<same ground-truth command>" \
+  --max-concurrent-tasks 4
+```
+
+- Why: serial processing put a task behind other tasks' 15 to 30 minute stack calls, so
+  quickly closed issues hit `TERMINAL_BEFORE_EXECUTION_START` (10 of 47 primary tasks in V11).
+- With N > 1 the daemon first takes `execution_start.json` for every ADMITTED primary task
+  (under a non-blocking flock on the per-task `execution.lock`; a task whose lock is held is
+  already executing), then advances up to N tasks at a time. The stack subprocess reuses the
+  existing `execution_start.json`. The readiness control task is never pre-fenced.
+- The `execution.lock` is a `flock` on a per-open file, exclusive across threads and
+  processes. Keep the launchd wrapper's `shlock` so only one daemon invocation runs.
+- The advance report keeps `advanced` and `failures` and gains `excluded_protocol_loss`:
+  tasks with a `prospective_protocol_loss.json` are skipped, listed there, and never produce
+  exit 5. A loss first recorded during the run appears with `"newly_recorded": true`, also
+  non-failing (it is a recorded D2 exclusion). Exit codes 0/3/4/5/6 are unchanged; 5 now means
+  a real, non-excluded advance failure.
+
+### 8.1 Fence-only pass (`--fence-only`)
+
+The early fence in 8 runs only at the start of an invocation, and one invocation with a backlog
+can last hours. Issues admitted meanwhile would wait. `--fence-only` closes that gap: it
+ingests, takes `execution_start.json` for every ADMITTED primary task, prints a report
+(`nexus.hybrid_replication.daemon_fence.v1`: `fenced`, `already_executing`, `failures`,
+`excluded_protocol_loss`) and exits. It never advances a task and never calls the stack or
+ground-truth commands, so neither command is required. Exit codes: 5 on a real fence failure,
+else 3/4 for missing capture/admission (as `--ingest-only`), else 0.
+
+Safety beside a running main daemon:
+
+- The per-task fence uses a non-blocking flock on `execution.lock`. A task whose stack call is
+  running holds that lock and is reported in `already_executing`.
+- Ingest takes a short blocking flock on `<STORE_ROOT>/ingest.lock` (held only while ingesting,
+  never across advance), so a fence-only ingest and the main daemon's start-of-run ingest
+  serialize. `state.json` is published atomically (unique temp file, then link/rename), so a
+  concurrent scan never sees a partial file and two writers never share a temp file.
+
+Suggested `run.sh` (the real script lives outside the repo; adjust paths):
+
+```
+#!/bin/bash
+# launchd StartInterval=60. Two independent locks.
+COMMON=(--root "$STORE_ROOT" --since "$T_AUTO")
+
+# 1. Fence pass: short, own lock, never waits behind the main daemon.
+if shlock -f /tmp/hybrid-replication-fence.lock -p $$; then
+  uv run python scripts/ops/hybrid_replication_daemon.py "${COMMON[@]}" --fence-only
+  rm -f /tmp/hybrid-replication-fence.lock
+fi
+
+# 2. Main daemon: long-running, its own lock (as before).
+if shlock -f /tmp/hybrid-replication.lock -p $$; then
+  uv run python scripts/ops/hybrid_replication_daemon.py "${COMMON[@]}" \
+    --frozen-policy-sha256 "$POLICY_SHA" \
+    --stack-command "$STACK_COMMAND" --ground-truth-command "$GT_COMMAND" \
+    --max-concurrent-tasks 4
+  rm -f /tmp/hybrid-replication.lock
+fi
+```
+
+Step 1 must run before step 2 in each tick and must not be gated by the main daemon's lock.
+Because each launchd tick runs `run.sh` to completion, a long main daemon blocks the next tick;
+to keep the fence pass running every minute, start the main daemon in the background
+(`... &`) or run the fence pass from a second launchd job.

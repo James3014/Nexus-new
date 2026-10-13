@@ -1,3 +1,5 @@
+# ARCHIVED 2026-10-13 (#1906): the module under test is archived (ARCHIVED_2026-10-13.md);
+# this test is kept, unchanged in behavior, until the deletion PR removes both.
 from pathlib import Path
 
 import pytest

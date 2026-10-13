@@ -47,7 +47,8 @@ def _plan(task_id: str = "arch-1") -> CapabilityExecutionPlan:
 
 
 def test_reason_table_matches_expected_and_whitelist():
-    assert ARCHIVED_CAPABILITY_REASONS == EXPECTED_REASONS
+    # The second batch (2026-10-13) extends the table; the first-batch rows are unchanged.
+    assert EXPECTED_REASONS.items() <= ARCHIVED_CAPABILITY_REASONS.items()
     assert set(EXPECTED_REASONS.values()) <= SKIP_REASONS
 
 

@@ -33,6 +33,12 @@ ARCHIVED_UI_VALIDATOR = "archived_ui_validator_2026-10-12"
 ARCHIVED_HOLLOW_LEARNING_CLOSURE = "archived_hollow_learning_closure_2026-10-12"
 ARCHIVED_FEDERATION = "archived_federation_2026-10-12"
 ARCHIVED_ORACLE_SHADOW = "archived_oracle_shadow_2026-10-12"
+# Planner nodes archived 2026-10-13 (ARCHIVED_2026-10-13.md, #1906). The node
+# definitions live in the pinned nexus-runtime; until its maturity flip lands the
+# Nexus-side invoker and executor resolve them to these explicit reasons.
+ARCHIVED_INTEGRATION_MANAGER = "archived_retired_integration_manager_2026-10-13"
+ARCHIVED_SWARM_QUIET_MOMENT = "archived_echo_swarm_quiet_moment_2026-10-13"
+ARCHIVED_LLM_JUDGE_PANEL = "archived_alias_llm_judge_panel_2026-10-13"
 
 ARCHIVED_CAPABILITY_REASONS: dict[str, str] = {
     "benchmark": ARCHIVED_FAKE_BENCHMARK,
@@ -41,6 +47,9 @@ ARCHIVED_CAPABILITY_REASONS: dict[str, str] = {
     "learning_closure": ARCHIVED_HOLLOW_LEARNING_CLOSURE,
     "federation": ARCHIVED_FEDERATION,
     "oracle_shadow": ARCHIVED_ORACLE_SHADOW,
+    "integration_manager": ARCHIVED_INTEGRATION_MANAGER,
+    "swarm_quiet_moment": ARCHIVED_SWARM_QUIET_MOMENT,
+    "llm_judge_panel": ARCHIVED_LLM_JUDGE_PANEL,
 }
 
 SKIP_REASONS = frozenset(
@@ -2668,18 +2677,14 @@ def build_default_mainchain_invokers(
             invokers[name] = build_local_model_executor_invoker()
             continue
         if name in ARCHIVED_CAPABILITY_REASONS:
-            # Archived 2026-10-12: always an explicit, receipt-visible skip.
+            # Archived 2026-10-12 / 2026-10-13: always an explicit, receipt-visible skip.
             invokers[name] = build_explicit_skip_invoker(
                 name, skip_reason=ARCHIVED_CAPABILITY_REASONS[name]
             )
             continue
         real = build_real_executor_invoker(name)
         # Escalation-only / probe-only reclass: untriggered → policy skip; triggered → real or BLOCKED.
-        if (
-            name in ESCALATE_ONLY
-            or name == "llm_judge_panel"
-            or name in PROBE_ONLY_REASON_CODES
-        ):
+        if name in ESCALATE_ONLY or name in PROBE_ONLY_REASON_CODES:
             invokers[name] = build_escalate_gated_invoker(name, real_invoker=real)
             continue
         if name in ONLINE_ARMOR_FLAG_CAPABILITIES:

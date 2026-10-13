@@ -35,7 +35,6 @@ def test_core_command_paths_emit_semantic_contract_fields():
     )
     required_in_cli = {
         "run": ("build_completion_envelope(", "write_completion_envelope(", "ensure_verified_completion("),
-        "delegate": ("build_completion_envelope(", "write_completion_envelope(", "ensure_verified_completion("),
         "learn:ingest": ("run_learn_ingest(", "enforce_learn_ingest_semantic_contract("),
         "learn:register-source": ("run_learn_register_source(", "verify_learn_source_lifecycle_completion("),
         "learn:refresh": ("run_learn_refresh(", "verify_learn_source_lifecycle_completion("),

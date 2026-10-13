@@ -7,7 +7,8 @@ def test_learn_mode_service_facade_integrity(tmp_path: Path):
     
     # Check if sub-services are initialized
     assert hasattr(svc, "_ingest_svc")
-    assert hasattr(svc, "_claim_svc")
+    # ClaimService archived 2026-10-13 (#1906): duplicate of the inline claim path.
+    assert not hasattr(svc, "_claim_svc")
     assert hasattr(svc, "_converge_svc")
     assert hasattr(svc, "_ask_svc")
     assert hasattr(svc, "_slo_svc")

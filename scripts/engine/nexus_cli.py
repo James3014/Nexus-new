@@ -27,17 +27,6 @@ repo_root = REPO_ROOT
 
 import shlex
 
-# `nexus delegate` retirement (#1739): fail closed (EX_CONFIG) and point at the real orchestrator.
-DELEGATE_RETIRED_EXIT_CODE = 78
-DELEGATE_RETIRED_MESSAGE = (
-    "DELEGATION_BACKEND_UNAVAILABLE: `nexus delegate` is retired (#1739) and does not delegate work.\n"
-    "Use the multi-agent orchestrator instead:\n"
-    "  nexus multi-agent create-task --task-id ID --owner OWNER --allowed-files a.py,b.py\n"
-    "  nexus multi-agent start --task-id ID\n"
-    "  nexus multi-agent submit --task-id ID\n"
-    "  nexus multi-agent verify --task-id ID"
-)
-
 
 class SanitizedRunner:
     """🛡️ SanitizedRunner with AllowedTaskRegistry to prevent command injection & shell escape"""
@@ -242,10 +231,8 @@ else:
         get_multi_agent_metrics,
         get_multi_agent_task_audit,
         get_multi_agent_task_status,
-        integrate_multi_agent_tasks,
         render_multi_agent_metrics,
         render_multi_agent_task_audit,
-        render_multi_agent_task_integration,
         render_multi_agent_task_start,
         render_multi_agent_task_status,
         render_multi_agent_task_submission,
@@ -2422,52 +2409,6 @@ else:
                     sys.exit(1)
             mission.persist(repo_root)
 
-    @nexus_group.command(name="delegate")
-    @click.argument("task_name")
-    @click.option("--report-file", default=".nexus/reports/delegate/delegate_report.json", show_default=True, type=click.Path())
-    @click.option("--output-json", is_flag=True)
-    def delegate(task_name, report_file, output_json):
-        """📡 [RETIRED #1739] Use `nexus multi-agent` instead (always exits 78).
-
-        `nexus delegate` is retired and never delegates work: its only backend was a
-        synthetic demo. Real multi-agent flow:
-
-        \b
-          nexus multi-agent create-task --task-id ID --owner OWNER --allowed-files a.py,b.py
-          nexus multi-agent start --task-id ID
-          nexus multi-agent submit --task-id ID
-          nexus multi-agent verify --task-id ID
-        """
-        if not SanitizedRunner.validate_task_name(task_name):
-            click.echo("❌ Invalid task name: only alphanumeric, spaces, dashes, and underscores allowed.")
-            sys.exit(1)
-
-        # Retired (#1739): fail closed without invoking any backend (no supervisor_engine).
-        payload = build_completion_envelope(
-            command_name="delegate",
-            task_name=task_name,
-            runtime_ok=False,
-            execution_path="retired",
-            semantic_failures=["delegate_retired_1739"],
-            semantic_status="BLOCKED",
-            retryable=False,
-            blocker_type="governance",
-            next_action="use_nexus_multi_agent",
-        )
-        out_path = write_completion_envelope(repo_root, report_file, payload)
-        if output_json:
-            click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
-        else:
-            click.echo(DELEGATE_RETIRED_MESSAGE)
-            click.echo(f"Report: {out_path}")
-        try:
-            ensure_verified_completion(payload, context="delegate")
-        except CompletionEnforcementError:
-            _persist_completion_handoff(payload, context="delegate", report_file=out_path)
-            out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-            sys.exit(DELEGATE_RETIRED_EXIT_CODE)
-
-
     @nexus_group.command(name="research:route")
     @click.option("--task-desc", required=True)
     @click.option("--task-type", default="bug")
@@ -3384,16 +3325,6 @@ else:
     def close_task_cmd(task_id, no_cleanup):
         """🏁 Close a task and release locks."""
         for line in close_multi_agent_task(task_id, no_cleanup=no_cleanup):
-            click.echo(line)
-
-    @multi_agent_group.command(name="integrate")
-    @click.option("--task-ids", required=True, help="Comma separated task IDs")
-    @click.option("--target-branch", default="main")
-    @translate_action_exceptions
-    def integrate_tasks_cmd(task_ids, target_branch):
-        """🚢 Integrate multiple tasks into target branch."""
-        view = integrate_multi_agent_tasks(task_ids, target_branch=target_branch)
-        for line in render_multi_agent_task_integration(view):
             click.echo(line)
 
     @multi_agent_group.command(name="audit")
