@@ -341,6 +341,26 @@ def test_certify_missing_issue_marker_fails_unavailable(repo, tmp_path, capsys):
     _assert_certify_unavailable(_check(report, "issue"))
 
 
+def test_certify_live_check_stale_exit_one_is_stale_not_unavailable(
+    repo, tmp_path, capsys, monkeypatch
+):
+    payload = json.dumps({
+        "issue_marker": f"<!-- NEXUS_CORE_EVIDENCE_UNIVERSE: {MARKER} -->",
+        "issue_check": {"status": "STALE"},
+    })
+    stub = _certify_script(
+        tmp_path,
+        'if [ "$2" = "--help" ]; then echo "usage: markers [--json] [--check]"; exit 0; fi\n'
+        f"cat <<'EOF'\n{payload}\nEOF\nexit 1\n",
+    )
+    stale = {"state": "OPEN", "body": f"<!-- NEXUS_CORE_EVIDENCE_UNIVERSE: {OTHER_MARKER} -->"}
+    monkeypatch.setattr(pf, "_fetch_issue", lambda ctx, issue: stale)
+    argv = _run(repo, tmp_path, "--only", "issue", body=_body(), certify=stub)
+    _code, report = _report(capsys, argv)
+    check = _check(report, "issue")
+    assert (check["status"], check["code"]) == ("FAIL", pf.ISSUE_EVIDENCE_UNIVERSE_STALE)
+
+
 def test_certify_valid_marker_unchanged(repo, tmp_path, capsys, fake_certify):
     issue = {"state": "OPEN", "body": f"<!-- NEXUS_CORE_EVIDENCE_UNIVERSE: {MARKER} -->\n"}
     argv = _run(repo, tmp_path, "--only", "issue", body=_body(), issue=issue, certify=fake_certify)

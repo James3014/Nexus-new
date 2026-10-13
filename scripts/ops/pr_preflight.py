@@ -362,6 +362,9 @@ def _resolve_nexus_certify(explicit: str | None) -> str | None:
 _CORE_PIN_RE = re.compile(r"James3014/nexus-core/[^\s@]+@([0-9a-f]{40})")
 
 
+_CHECK_OUTCOME_STATUSES = frozenset({"MISSING", "STALE", "MALFORMED"})
+
+
 def _certify_hint(ctx: Context) -> str:
     pin = "<pin>"
     workflow = ctx.repo / ".github/workflows/nexus-core-issue-completion.yml"
@@ -391,15 +394,22 @@ def _expected_markers(ctx: Context, issue: int) -> tuple[dict[str, Any] | None, 
     if "--check" in help_text and ctx.issue_json is None:
         command.append("--check")
     proc = subprocess.run(command, capture_output=True, text=True, check=False)
-    if proc.returncode != 0:
-        output = (proc.stderr or proc.stdout).strip()[:300]
-        return None, f"nexus-certify markers exited {proc.returncode}: {output}"
     try:
         payload = json.loads(proc.stdout)
     except json.JSONDecodeError:
-        return None, f"nexus-certify markers failed: {(proc.stderr or proc.stdout).strip()[:300]}"
+        payload = None
     if not isinstance(payload, dict):
-        return None, "nexus-certify markers returned non-object JSON"
+        output = (proc.stderr or proc.stdout).strip()[:300]
+        return None, f"nexus-certify markers exited {proc.returncode}: {output}"
+    if proc.returncode != 0:
+        check = payload.get("issue_check")
+        status = check.get("status") if isinstance(check, dict) else None
+        documented = (
+            proc.returncode == 1 and "--check" in command and status in _CHECK_OUTCOME_STATUSES
+        )
+        if not documented:
+            output = (proc.stderr or proc.stdout).strip()[:300]
+            return None, f"nexus-certify markers exited {proc.returncode}: {output}"
     payload["_tool"] = tool
     return payload, ""
 
