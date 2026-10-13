@@ -284,8 +284,8 @@ def test_closure_receipt_structural_gates_required() -> None:
     assert RECEIPT_PATH.is_file()
     assert RECEIPT_TMP.is_file()
     loaded = json.loads(RECEIPT_PATH.read_text(encoding="utf-8"))
-    assert loaded["planner_contract_count"] == 57
-    assert loaded["promotable_count"] == 50
+    assert loaded["planner_contract_count"] == 58
+    assert loaded["promotable_count"] == 51
     assert loaded["promotable_missing_engine_count"] == 0
     assert loaded["probe_only_success_count"] == 0
     assert loaded["fixture_callable_count"] == 0
