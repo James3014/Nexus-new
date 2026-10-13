@@ -21,6 +21,17 @@
 | tasks/trajectory-verifier-wave1-runtime-20260930/01-source-acceptance-evidence.json | tests/contracts/test_gateway_deployment_contract.py, tests/ops/test_mcp_gateway_durable.py | active | high | trajectory_verifier_wave1_source_acceptance_contract |
 | tasks/trajectory-verifier-wave1-runtime-20260930/02-derived-recovery-request.json | tests/contracts/test_gateway_deployment_contract.py, tests/ops/test_mcp_gateway_durable.py | active | high | trajectory_verifier_wave1_recovery_request_contract |
 | .gitmodules | tests/ops/test_gitmodules_declares_gitlinks.py | active | high | checkout_gitlink_metadata_contract |
+| SWE-bench | tests/ops/test_gitmodules_declares_gitlinks.py | active | low | governed_deletion_retired_path |
+| nexus-mempalace | tests/ops/test_gitmodules_declares_gitlinks.py | active | low | governed_deletion_retired_path |
+| nexus-rust-v16 | tests/ops/test_gitmodules_declares_gitlinks.py | active | low | governed_deletion_retired_path |
+| notebooklm-py-audit | tests/ops/test_gitmodules_declares_gitlinks.py | active | low | governed_deletion_retired_path |
+| nexus-evolve | tests/ops/test_gitmodules_declares_gitlinks.py | active | low | governed_deletion_retired_path |
+| scripts/Jaden_Storybook.html | tests/ops/test_gitmodules_declares_gitlinks.py | active | low | governed_deletion_retired_path |
+| scripts/Jaden_Storybook_v1.md | tests/ops/test_gitmodules_declares_gitlinks.py | active | low | governed_deletion_retired_path |
+| scripts/dashboard.html | tests/ops/test_gitmodules_declares_gitlinks.py | active | low | governed_deletion_retired_path |
+| configs/federated_dna.yaml | tests/ops/test_gitmodules_declares_gitlinks.py | active | low | governed_deletion_retired_path |
+| tenants | tests/ops/test_gitmodules_declares_gitlinks.py | active | low | governed_deletion_retired_path |
+| .nexus-core/deletions | tests/ops/test_gitmodules_declares_gitlinks.py | active | low | governed_deletion_retired_path |
 | .claude | tests/ops/test_claude_handoff_hooks.py | active | medium | claude_handoff_hook_contract |
 | HANDOFF.md | tests/ops/test_claude_handoff_hooks.py | active | medium | claude_handoff_hook_contract |
 | tests/ops/test_claude_handoff_hooks.py | tests/ops/test_claude_handoff_hooks.py | active | medium | test_contract |
