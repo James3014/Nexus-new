@@ -5796,235 +5796,23 @@
     },
     {
       "capability": "swarm_quiet_moment",
-      "fixture": null,
-      "executor": {
-        "registry_key": "swarm_quiet_moment",
-        "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
-        "function": "_exec_swarm_quiet_moment",
-        "file": "nexus/core/capability_executor_registry.py",
-        "line": 3651
-      },
+      "verdict": "RETIRING",
+      "verdict_reason": "archived_echo_swarm_quiet_moment_2026-10-13 (second archive batch)",
+      "executor": {},
       "gaps": [
-        "executor only builds the quiet-moment dict (build_quiet_moment_event) and returns it; nothing pauses writes, persists the event or consumes it (consumer_effect NONE)"
+        "archived: the production invoker returns an explicit skip (archived_echo_swarm_quiet_moment_2026-10-13)"
       ],
-      "untriggered_production_default": {
-        "status": "SKIPPED",
-        "skip_reason": "SKIPPED_POLICY_NOT_TRIGGERED",
-        "reached": true
-      },
-      "trigger_switch": "route.escalate_triggered=True (set by product_capability_canary_helper; not by nexus run)",
-      "planner": {
-        "selected": true,
-        "state": "required",
-        "reasons": [
-          "route_oracle_expected_capability",
-          "swarm_write_boundary_required",
-          "route_oracle_expected_receipt_required"
-        ],
-        "selected_capabilities": [
-          "harness_preflight_sensor",
-          "swarm_quiet_moment",
-          "research_route",
-          "delivery_gate",
-          "pregate",
-          "plan_quality_gate",
-          "mempalace_gate",
-          "artifact_gate",
-          "claim_gate"
-        ],
-        "plan_hash": "fda82f474568f7b750a24a41c2f1a256b076c4c1ef6947fe3239ab837ec31a39",
-        "forcing": "route-oracle line 'Expected capability receipts: swarm_quiet_moment' in task_statement"
-      },
-      "policy_attempts": [
-        {
-          "policy": "production_default",
-          "env": {},
-          "status": "SUCCEEDED",
-          "path": "e2e",
-          "block_reason": ""
-        }
-      ],
-      "production_default_selection": {
-        "rule": "policy_evaluator: 'swarm' in task text or cross-module risk>=70",
-        "trigger_statement": "Run a swarm pass over target.py",
-        "trigger_route_features": {},
-        "trigger_route_keys_dropped_by_seam": [],
-        "selected_without_forcing": true,
-        "state": "conditional",
-        "reasons": [
-          "swarm_write_boundary_required"
-        ]
-      },
-      "product_path_reachable": true,
-      "receipt_terminal_status": "INCOMPLETE",
-      "workforce_admission": {
-        "decision": "ALLOW",
-        "reasons": [
-          "demand_online: All constraints and required controls passed"
-        ]
-      },
-      "policy_switches_needed": {},
-      "policy_used": "production_default",
-      "path": "e2e",
-      "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
-      "evidence_refs": [
-        "ev_cap_swarm_quiet_moment_5de3feef"
-      ],
-      "physical_callable": "capability_executor_registry:swarm_quiet_moment",
-      "console_tail": [],
-      "negative_control": {
-        "name": "negative_control:event_differs_beyond_echoed_reason",
-        "passed": false,
-        "detail": "identical_apart_from_echo=True",
-        "negative_status": "SUCCEEDED",
-        "negative_block_reason": ""
-      },
-      "hard_coded_inputs": [],
-      "checks": [
-        {
-          "name": "quiet_moment_event_built",
-          "passed": true,
-          "detail": "result={'schema_version': 'nexus_quiet_moment.v1', 'event_type': 'quiet_moment', 'reason': 'Pause writes while target.py is mutated\\n\\nNexus route oracle contract:\\n- Expected capability receipts: swarm_quiet_moment', 'affected_nodes': ['wiring-swarm_quiet_moment-pos_production_default'], 'resume_after_seconds': 1, 'allowed_actions': ['observe', 'report', 'rollback'], 'production_writes_allowed': "
-        },
-        {
-          "name": "pause_persisted_or_enforced",
-          "passed": true,
-          "detail": "files matching *quiet* under the workspace: ['/Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/swarm_quiet_moment__pos_production_default/.nexus/research/wiring-swarm_quiet_moment-pos_production_default']"
-        },
-        {
-          "name": "negative_control:event_differs_beyond_echoed_reason",
-          "passed": false,
-          "detail": "identical_apart_from_echo=True"
-        }
-      ],
-      "verdict": "STUB",
-      "verdict_reason": "outcome_independent_of_fixture_input",
-      "outcome_excerpt": {
-        "action": "build_quiet_moment_event",
-        "semantic_status": "SUCCEEDED",
-        "evidence_refs": [
-          "ev_swarm_quiet_wiring-swarm_quiet_moment-pos_production_default"
-        ],
-        "result": {
-          "schema_version": "nexus_quiet_moment.v1",
-          "event_type": "quiet_moment",
-          "reason": "Pause writes while target.py is mutated\n\nNexus route oracle contract:\n- Expected capability receipts: swarm_quiet_moment",
-          "affected_nodes": [
-            "wiring-swarm_quiet_moment-pos_production_default"
-          ],
-          "resume_after_seconds": 1,
-          "allowed_actions": [
-            "observe",
-            "report",
-            "rollback"
-          ],
-          "production_writes_allowed": false
-        },
-        "control_plane_reference": true,
-        "not_production_executor_f": true,
-        "physical_callable": "nexus.core.swarm.build_quiet_moment_event"
-      },
-      "receipt_path": "receipts/swarm_quiet_moment.json",
-      "audit_seconds": 0.63
+      "archived_skip_reason": "archived_echo_swarm_quiet_moment_2026-10-13"
     },
     {
       "capability": "integration_manager",
-      "fixture": null,
-      "executor": {
-        "registry_key": "integration_manager",
-        "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
-        "function": "_exec_integration_manager",
-        "file": "nexus/core/capability_executor_registry.py",
-        "line": 3560
-      },
+      "verdict": "RETIRING",
+      "verdict_reason": "archived_retired_integration_manager_2026-10-13 (second archive batch)",
+      "executor": {},
       "gaps": [
-        "retired quarantine: executor always returns BLOCKED LEGACY_INTEGRATION_PATH_RETIRED_USE_CONTROLLED_INTEGRATION, mutation_performed=False"
+        "archived: the production invoker returns an explicit skip (archived_retired_integration_manager_2026-10-13)"
       ],
-      "untriggered_production_default": {
-        "status": "SKIPPED",
-        "skip_reason": "SKIPPED_POLICY_NOT_TRIGGERED",
-        "reached": true
-      },
-      "trigger_switch": "route.escalate_triggered=True (set by product_capability_canary_helper; not by nexus run)",
-      "planner": {
-        "selected": true,
-        "state": "required",
-        "reasons": [
-          "route_oracle_expected_capability",
-          "integration_or_merge_signal",
-          "route_oracle_expected_receipt_required"
-        ],
-        "selected_capabilities": [
-          "harness_preflight_sensor",
-          "research_route",
-          "integration_manager",
-          "delivery_gate",
-          "pregate",
-          "plan_quality_gate",
-          "mempalace_gate",
-          "artifact_gate",
-          "claim_gate"
-        ],
-        "plan_hash": "3dc6994403ee80fcb1b5ed5d629523d4727abe28592dff49db6570350947ac48",
-        "forcing": "route-oracle line 'Expected capability receipts: integration_manager' in task_statement"
-      },
-      "policy_attempts": [
-        {
-          "policy": "production_default",
-          "env": {},
-          "status": "BLOCKED",
-          "path": "e2e",
-          "block_reason": "LEGACY_INTEGRATION_PATH_RETIRED_USE_CONTROLLED_INTEGRATION"
-        }
-      ],
-      "production_default_selection": {
-        "rule": "policy_evaluator: 'merge'/'integrate'/'integration' in task text",
-        "trigger_statement": "Merge the approved change for target.py",
-        "trigger_route_features": {},
-        "trigger_route_keys_dropped_by_seam": [],
-        "selected_without_forcing": true,
-        "state": "conditional",
-        "reasons": [
-          "integration_or_merge_signal"
-        ]
-      },
-      "product_path_reachable": true,
-      "receipt_terminal_status": "INCOMPLETE",
-      "workforce_admission": {
-        "decision": "ALLOW",
-        "reasons": [
-          "demand_online: All constraints and required controls passed"
-        ]
-      },
-      "policy_switches_needed": {},
-      "policy_used": "production_default",
-      "path": "e2e",
-      "receipt_claims_simulated": true,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
-      "evidence_refs": [
-        "ev_cap_integration_manager_c9213420"
-      ],
-      "physical_callable": "capability_executor_registry:integration_manager",
-      "console_tail": [],
-      "hard_coded_inputs": [],
-      "checks": [],
-      "verdict": "BLOCKED_LEGACY_INTEGRATION_PATH_RETIRED_USE_CONTROLLED_INTEGRATION",
-      "verdict_reason": "executor_or_runtime_blocked",
-      "outcome_excerpt": {
-        "action": "legacy_integration_quarantine",
-        "semantic_status": "BLOCKED",
-        "evidence_refs": [
-          "ev_integration_retired_wiring-integration_manager-pos_production_default"
-        ],
-        "error": "LEGACY_INTEGRATION_PATH_RETIRED_USE_CONTROLLED_INTEGRATION",
-        "task_hint": "Merge the approved change for target.py\n\nNexus route oracle contract:\n- Expected",
-        "mutation_performed": false,
-        "retired_callable": "nexus.orchestrator.integration_manager.IntegrationManager.batch_integrate",
-        "replacement_callable": "nexus.orchestrator.self_hosted_task_service.SelfHostedTaskService.integrate_approved"
-      },
-      "receipt_path": "receipts/integration_manager.json",
-      "audit_seconds": 0.41
+      "archived_skip_reason": "archived_retired_integration_manager_2026-10-13"
     },
     {
       "capability": "autonomic_router",
@@ -6260,75 +6048,13 @@
     },
     {
       "capability": "llm_judge_panel",
-      "fixture": null,
-      "executor": {
-        "registry_key": "llm_judge_panel",
-        "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
-        "function": "_exec_llm_judge_panel",
-        "file": "nexus/core/capability_executor_registry.py",
-        "line": 3029
-      },
+      "verdict": "RETIRING",
+      "verdict_reason": "archived_alias_llm_judge_panel_2026-10-13 (second archive batch)",
+      "executor": {},
       "gaps": [
-        "legacy alias of judge_panel; not selected even when forced"
+        "archived: the production invoker returns an explicit skip (archived_alias_llm_judge_panel_2026-10-13)"
       ],
-      "trigger_switch": "route.escalate_triggered=True (set by product_capability_canary_helper; not by nexus run)",
-      "planner": {
-        "selected": false,
-        "state": "optional",
-        "reasons": [
-          "available_but_not_selected"
-        ],
-        "selected_capabilities": [
-          "harness_preflight_sensor",
-          "judge_panel",
-          "research_route",
-          "delivery_gate",
-          "pregate",
-          "plan_quality_gate",
-          "mempalace_gate",
-          "artifact_gate",
-          "claim_gate"
-        ],
-        "plan_hash": "87f2244baeb1681c6af210ae3950e4ae9fdab3cf70815274c5fe38dc18eae66a",
-        "forcing": "route-oracle line 'Expected capability receipts: llm_judge_panel' in task_statement"
-      },
-      "policy_attempts": [
-        {
-          "policy": "production_default",
-          "env": {},
-          "status": "MISSING",
-          "path": "none",
-          "block_reason": ""
-        }
-      ],
-      "production_default_selection": {
-        "rule": "none (legacy alias; never enabled)",
-        "trigger_statement": "Rank the candidate fixes for target.py",
-        "trigger_route_features": {
-          "adjusted_root_cause_confidence": 0.5
-        },
-        "trigger_route_keys_dropped_by_seam": [],
-        "selected_without_forcing": false,
-        "state": "optional",
-        "reasons": [
-          "available_but_not_selected"
-        ]
-      },
-      "verdict": "NOT_SELECTABLE",
-      "verdict_reason": "planner_reasons=available_but_not_selected;state=optional",
-      "component_probe": {
-        "production_default": {
-          "gate_passed": false,
-          "error": "BLOCKED_EXTERNAL_AUTH",
-          "legacy_alias_of": "judge_panel"
-        },
-        "external_runtime_authorized_flag": {
-          "gate_passed": false,
-          "error": "BLOCKED_EXTERNAL_AUTH:no_judge_provider_configured",
-          "legacy_alias_of": "judge_panel"
-        }
-      },
-      "audit_seconds": 0.01
+      "archived_skip_reason": "archived_alias_llm_judge_panel_2026-10-13"
     },
     {
       "capability": "external_doc_scout",
@@ -6743,35 +6469,17 @@
   ],
   "verdict_counts": {
     "REAL": 24,
-    "BLOCKED": 12,
-    "STUB": 6,
+    "BLOCKED": 11,
+    "STUB": 5,
     "REAL_UNATTESTED": 4,
     "SIMULATED": 1,
     "NOT_EXECUTABLE": 4,
-    "NOT_SELECTABLE": 1,
-    "RETIRING": 6
+    "RETIRING": 9
   },
   "executor_only": {
     "keys": {
       "computed": [
-        "aos_oracle",
-        "attempt_settlement_service",
-        "battle_swarm",
-        "decision_formula_engine",
-        "dual_loop",
-        "entropy_guard_v2",
-        "learn_refresh_service",
-        "learning_closure",
-        "mfp_gate",
-        "nightshift_runner_service",
-        "policy_capability_gate",
-        "predictive_auditor",
-        "promotion_engine",
-        "reflex_loop",
-        "research_and_source_discipline",
-        "spec_guarded",
-        "subagent_outcome_service",
-        "zero_trust_v2_behavior"
+        "learning_closure"
       ],
       "retiring_excluded": [
         "learning_closure"
@@ -6796,584 +6504,235 @@
         "zero_trust_v2_behavior"
       ],
       "unlisted": [],
-      "listed_but_reachable": []
+      "listed_but_reachable": [],
+      "retired_from_registry": [
+        "aos_oracle",
+        "attempt_settlement_service",
+        "battle_swarm",
+        "decision_formula_engine",
+        "dual_loop",
+        "entropy_guard_v2",
+        "learn_refresh_service",
+        "mfp_gate",
+        "nightshift_runner_service",
+        "policy_capability_gate",
+        "predictive_auditor",
+        "promotion_engine",
+        "reflex_loop",
+        "research_and_source_discipline",
+        "spec_guarded",
+        "subagent_outcome_service",
+        "zero_trust_v2_behavior"
+      ]
     },
     "rows": [
       {
         "executor_key": "aos_oracle",
-        "verdict": "UNREACHABLE_NO_PLANNER_NODE",
+        "verdict": "RETIRING",
+        "verdict_reason": "archived_executor_only_no_planner_node_2026-10-13: executor and registry key removed 2026-10-13",
         "kind": "STUB_CONSTANT_STATUS",
         "does": "AosService(repo_root=/tmp).get_status() returns the literal {'status': 'OPERATIONAL', 'aos_version': '145.2', 'trust_score': 0.98, 'governance': 'ACTIVE'} (aos_service.py); oracle_shadow / oracle:apply are archived, this key is a leftover",
-        "executor": {
-          "function": "_exec_aos_oracle",
-          "file": "nexus/core/capability_executor_registry.py",
-          "line": 1028
-        },
-        "invoked": true,
-        "gate_passed": true,
-        "raised": "",
-        "outcome_excerpt": {
-          "status": "{'status': 'OPERATIONAL', 'aos_version': '145.2', 'trust_score': 0.98, 'governance': 'ACTIVE'}"
-        },
-        "quoted_lines": [
-          {
-            "pattern": "cls(repo_root=Path(\"/tmp\"))",
-            "file": "nexus/core/capability_executor_registry.py",
-            "line": 1036,
-            "text": "inst = cls(repo_root=Path(\"/tmp\"))"
-          }
-        ],
-        "literals_missing": [],
-        "tmp_paths_written": [],
-        "console_tail": [
-          "{",
-          "  \"status\": \"OPERATIONAL\",",
-          "  \"aos_version\": \"145.2\",",
-          "  \"trust_score\": 0.98,",
-          "  \"governance\": \"ACTIVE\"",
-          "}"
-        ],
-        "audit_seconds": 0.0
+        "executor": {},
+        "invoked": null,
+        "gate_passed": null,
+        "quoted_lines": [],
+        "literals_missing": []
       },
       {
         "executor_key": "attempt_settlement_service",
-        "verdict": "UNREACHABLE_NO_PLANNER_NODE",
+        "verdict": "RETIRING",
+        "verdict_reason": "archived_executor_only_no_planner_node_2026-10-13: executor and registry key removed 2026-10-13",
         "kind": "STUB_CONSTRUCT_ONLY",
         "does": "constructs AttemptSettlementService with /tmp paths, zero metrics and transaction_mgr={'status': 'simulated'}; rejected as import_construct_not_execution",
-        "executor": {
-          "function": "_exec_attempt_settlement_service",
-          "file": "nexus/core/capability_executor_registry.py",
-          "line": 2064
-        },
-        "invoked": false,
-        "gate_passed": false,
-        "raised": "",
-        "outcome_excerpt": {
-          "class_instantiated": true,
-          "error": "import_construct_not_execution",
-          "detail": "physical method call required; import/construct alone is insufficient"
-        },
-        "quoted_lines": [
-          {
-            "pattern": "run_dir=Path(\"/tmp/run\")",
-            "file": "nexus/core/capability_executor_registry.py",
-            "line": 2074,
-            "text": "run_dir=Path(\"/tmp/run\"),"
-          },
-          {
-            "pattern": "transaction_mgr={\"status\": \"simulated\"}",
-            "file": "nexus/core/capability_executor_registry.py",
-            "line": 2077,
-            "text": "transaction_mgr={\"status\": \"simulated\"},"
-          }
-        ],
-        "literals_missing": [],
-        "tmp_paths_written": [],
-        "console_tail": [],
-        "audit_seconds": 0.0
+        "executor": {},
+        "invoked": null,
+        "gate_passed": null,
+        "quoted_lines": [],
+        "literals_missing": []
       },
       {
         "executor_key": "battle_swarm",
-        "verdict": "UNREACHABLE_NO_PLANNER_NODE",
+        "verdict": "RETIRING",
+        "verdict_reason": "archived_executor_only_no_planner_node_2026-10-13: alias key removed 2026-10-13; swarm / multi_agent nodes keep the real executor",
         "kind": "ALIAS",
         "does": "delegates to _exec_swarm_multi_agent (same body as the swarm / multi_agent rows); auth-blocked at production default",
-        "executor": {
-          "function": "_exec_battle_swarm",
-          "file": "nexus/core/capability_executor_registry.py",
-          "line": 1535
-        },
-        "invoked": true,
-        "gate_passed": false,
-        "raised": "",
-        "outcome_excerpt": {
-          "action": "auth_gate",
-          "semantic_status": "BLOCKED",
-          "evidence_refs": [
-            "ev_auth_block_swarm_multi_agent"
-          ],
-          "error": "BLOCKED_EXTERNAL_AUTH:local_or_online_workers",
-          "auth_required": true
-        },
-        "quoted_lines": [
-          {
-            "pattern": "return _exec_swarm_multi_agent(plan, task_desc)",
-            "file": "nexus/core/capability_executor_registry.py",
-            "line": 1537,
-            "text": "return _exec_swarm_multi_agent(plan, task_desc)"
-          }
-        ],
-        "literals_missing": [],
-        "tmp_paths_written": [],
-        "console_tail": [],
-        "audit_seconds": 0.0
+        "executor": {},
+        "invoked": null,
+        "gate_passed": null,
+        "quoted_lines": [],
+        "literals_missing": []
       },
       {
         "executor_key": "decision_formula_engine",
-        "verdict": "UNREACHABLE_NO_PLANNER_NODE",
+        "verdict": "RETIRING",
+        "verdict_reason": "archived_executor_only_no_planner_node_2026-10-13: executor and registry key removed 2026-10-13",
         "kind": "STUB_CONSTRUCT_ONLY",
         "does": "constructs DecisionFormulaEngine(context=...) and reports class_instantiated; no formula evaluated; rejected as import_construct_not_execution",
-        "executor": {
-          "function": "_exec_decision_formula_engine",
-          "file": "nexus/core/capability_executor_registry.py",
-          "line": 733
-        },
-        "invoked": false,
-        "gate_passed": false,
-        "raised": "",
-        "outcome_excerpt": {
-          "class_instantiated": true,
-          "context_keys": [
-            "task_id",
-            "plan_id",
-            "constraints",
-            "description"
-          ],
-          "error": "import_construct_not_execution",
-          "detail": "physical method call required; import/construct alone is insufficient"
-        },
-        "quoted_lines": [
-          {
-            "pattern": "\"class_instantiated\": True",
-            "file": "nexus/core/capability_executor_registry.py",
-            "line": 749,
-            "text": "outcome={\"class_instantiated\": True, \"context_keys\": list(context.keys())})"
-          }
-        ],
-        "literals_missing": [],
-        "tmp_paths_written": [],
-        "console_tail": [],
-        "audit_seconds": 0.0
+        "executor": {},
+        "invoked": null,
+        "gate_passed": null,
+        "quoted_lines": [],
+        "literals_missing": []
       },
       {
         "executor_key": "dual_loop",
-        "verdict": "UNREACHABLE_NO_PLANNER_NODE",
+        "verdict": "RETIRING",
+        "verdict_reason": "archived_executor_only_no_planner_node_2026-10-13: executor and registry key removed 2026-10-13",
         "kind": "STUB_CONSTRUCT_ONLY",
         "does": "constructs DualLoopOrchestrator(project_root=/tmp) and reports class_instantiated; rejected as import_construct_not_execution",
-        "executor": {
-          "function": "_exec_dual_loop",
-          "file": "nexus/core/capability_executor_registry.py",
-          "line": 1616
-        },
-        "invoked": false,
-        "gate_passed": false,
-        "raised": "",
-        "outcome_excerpt": {
-          "class_instantiated": true,
-          "error": "import_construct_not_execution",
-          "detail": "physical method call required; import/construct alone is insufficient"
-        },
-        "quoted_lines": [
-          {
-            "pattern": "cls(project_root=\"/tmp\")",
-            "file": "nexus/core/capability_executor_registry.py",
-            "line": 1623,
-            "text": "inst = cls(project_root=\"/tmp\")"
-          },
-          {
-            "pattern": "\"class_instantiated\": True",
-            "file": "nexus/core/capability_executor_registry.py",
-            "line": 1626,
-            "text": "outcome={\"class_instantiated\": True})"
-          }
-        ],
-        "literals_missing": [],
-        "tmp_paths_written": [],
-        "console_tail": [],
-        "audit_seconds": 0.0
+        "executor": {},
+        "invoked": null,
+        "gate_passed": null,
+        "quoted_lines": [],
+        "literals_missing": []
       },
       {
         "executor_key": "entropy_guard_v2",
-        "verdict": "UNREACHABLE_NO_PLANNER_NODE",
+        "verdict": "RETIRING",
+        "verdict_reason": "archived_executor_only_no_planner_node_2026-10-13: registry key removed 2026-10-13; module nexus/services/entropy_v2.py kept, planner node + fixture tracked in #1907",
         "kind": "REAL_CALL",
         "does": "EntropyGuardV2().audit_payload(task_desc); outcome keeps only entropy_ok (defaults True)",
-        "executor": {
-          "function": "_exec_entropy_guard_v2",
-          "file": "nexus/core/capability_executor_registry.py",
-          "line": 504
-        },
-        "invoked": true,
-        "gate_passed": true,
-        "raised": "",
-        "outcome_excerpt": {
-          "entropy_ok": true
-        },
-        "quoted_lines": [
-          {
-            "pattern": "result.get(\"passed\", True)",
-            "file": "nexus/core/capability_executor_registry.py",
-            "line": 515,
-            "text": "outcome={\"entropy_ok\": result.get(\"passed\", True)})"
-          }
-        ],
-        "literals_missing": [],
-        "tmp_paths_written": [],
-        "console_tail": [],
-        "audit_seconds": 0.0
+        "executor": {},
+        "invoked": null,
+        "gate_passed": null,
+        "quoted_lines": [],
+        "literals_missing": []
       },
       {
         "executor_key": "learn_refresh_service",
-        "verdict": "UNREACHABLE_NO_PLANNER_NODE",
+        "verdict": "RETIRING",
+        "verdict_reason": "archived_executor_only_no_planner_node_2026-10-13: executor and registry key removed 2026-10-13",
         "kind": "STUB_CONSTRUCT_ONLY",
         "does": "constructs LearnRefreshService(repo_root=/tmp) and reports class_instantiated; no refresh runs; the registry's construct-only guard then rejects it (import_construct_not_execution)",
-        "executor": {
-          "function": "_exec_learn_refresh_service",
-          "file": "nexus/core/capability_executor_registry.py",
-          "line": 1047
-        },
-        "invoked": false,
-        "gate_passed": false,
-        "raised": "",
-        "outcome_excerpt": {
-          "class_instantiated": true,
-          "error": "import_construct_not_execution",
-          "detail": "physical method call required; import/construct alone is insufficient"
-        },
-        "quoted_lines": [
-          {
-            "pattern": "cls(repo_root=Path(\"/tmp\"))",
-            "file": "nexus/core/capability_executor_registry.py",
-            "line": 1055,
-            "text": "inst = cls(repo_root=Path(\"/tmp\"))"
-          },
-          {
-            "pattern": "\"class_instantiated\": True",
-            "file": "nexus/core/capability_executor_registry.py",
-            "line": 1058,
-            "text": "outcome={\"class_instantiated\": True})"
-          }
-        ],
-        "literals_missing": [],
-        "tmp_paths_written": [],
-        "console_tail": [],
-        "audit_seconds": 0.0
+        "executor": {},
+        "invoked": null,
+        "gate_passed": null,
+        "quoted_lines": [],
+        "literals_missing": []
       },
       {
         "executor_key": "mfp_gate",
-        "verdict": "UNREACHABLE_NO_PLANNER_NODE",
+        "verdict": "RETIRING",
+        "verdict_reason": "archived_executor_only_no_planner_node_2026-10-13: executor and registry key removed 2026-10-13",
         "kind": "REAL_CALL_CONSTANT_INPUTS",
         "does": "evaluate_mfp with constant confidence=0.99, semantic_entropy=0.1, history_success_rate=0.96, so it always returns passed=True (input-independent)",
-        "executor": {
-          "function": "_exec_mfp_gate",
-          "file": "nexus/core/capability_executor_registry.py",
-          "line": 2012
-        },
-        "invoked": true,
-        "gate_passed": true,
-        "raised": "",
-        "outcome_excerpt": {
-          "verdict": "MFPVerdict(passed=True, reason='mfp_pass', confidence=0.99, semantic_entropy=0.1, history_success_rate=0.96)"
-        },
-        "quoted_lines": [
-          {
-            "pattern": "confidence=0.99, semantic_entropy=0.1, history_success_rate=0.96",
-            "file": "nexus/core/capability_executor_registry.py",
-            "line": 2019,
-            "text": "result = fn(confidence=0.99, semantic_entropy=0.1, history_success_rate=0.96)"
-          }
-        ],
-        "literals_missing": [],
-        "tmp_paths_written": [],
-        "console_tail": [],
-        "audit_seconds": 0.0
+        "executor": {},
+        "invoked": null,
+        "gate_passed": null,
+        "quoted_lines": [],
+        "literals_missing": []
       },
       {
         "executor_key": "nightshift_runner_service",
-        "verdict": "UNREACHABLE_NO_PLANNER_NODE",
+        "verdict": "RETIRING",
+        "verdict_reason": "archived_executor_only_no_planner_node_2026-10-13: alias key removed 2026-10-13; the function stays as the body of the nightshift node",
         "kind": "AUTH_GATED_REAL_CALL",
         "does": "same body as the nightshift row (nightshift aliases it); blocked without NEXUS_LOCAL_MODEL_CALL_ALLOWED / NEXUS_EXTERNAL_RUNTIME_AUTHORIZED; default target README.md",
-        "executor": {
-          "function": "_exec_nightshift_runner_service",
-          "file": "nexus/core/capability_executor_registry.py",
-          "line": 537
-        },
-        "invoked": true,
-        "gate_passed": false,
-        "raised": "",
-        "outcome_excerpt": {
-          "action": "auth_gate",
-          "semantic_status": "BLOCKED",
-          "evidence_refs": [
-            "ev_auth_block_nightshift_runner_service"
-          ],
-          "error": "BLOCKED_EXTERNAL_AUTH:nightshift_model",
-          "auth_required": true
-        },
-        "quoted_lines": [
-          {
-            "pattern": "constraints.get(\"nightshift_target_file\") or \"README.md\"",
-            "file": "nexus/core/capability_executor_registry.py",
-            "line": 559,
-            "text": "target_file = str(constraints.get(\"nightshift_target_file\") or \"README.md\")"
-          }
-        ],
-        "literals_missing": [],
-        "tmp_paths_written": [],
-        "console_tail": [],
-        "audit_seconds": 0.0
+        "executor": {},
+        "invoked": null,
+        "gate_passed": null,
+        "quoted_lines": [],
+        "literals_missing": []
       },
       {
         "executor_key": "policy_capability_gate",
-        "verdict": "UNREACHABLE_NO_PLANNER_NODE",
+        "verdict": "RETIRING",
+        "verdict_reason": "archived_executor_only_no_planner_node_2026-10-13: executor removed 2026-10-13; nexus/services/policy_gate.py kept (legacy self_heal_selector)",
         "kind": "REAL_CALL_FIXTURE_INPUTS",
         "does": "calls nexus.services.policy_gate.apply_policy_gate with fixed health metrics and repo_root=/tmp (writes /tmp/.nexus/knowledge/policy_memory.jsonl); returns str(GateDecision), always INFO for these metrics",
-        "executor": {
-          "function": "_exec_policy_capability_gate",
-          "file": "nexus/core/capability_executor_registry.py",
-          "line": 480
-        },
-        "invoked": true,
-        "gate_passed": true,
-        "raised": "",
-        "outcome_excerpt": {
-          "result": "GateDecision(route_id='wiring-executor-only:policy_capability_gate', original_score=0.85, gated_score=0.85, signals=[], decision=<GateSeverity.INFO: 'info'>, policy_version='v1.0')"
-        },
-        "quoted_lines": [
-          {
-            "pattern": "health_metrics={\"memory_usage\"",
-            "file": "nexus/core/capability_executor_registry.py",
-            "line": 492,
-            "text": "health_metrics={\"memory_usage\": 0.5, \"cpu_usage\": 0.3, \"error_rate\": 0.01},"
-          },
-          {
-            "pattern": "repo_root=Path(\"/tmp\")",
-            "file": "nexus/core/capability_executor_registry.py",
-            "line": 493,
-            "text": "repo_root=Path(\"/tmp\"),"
-          }
-        ],
-        "literals_missing": [],
-        "tmp_paths_written": [
-          "/private/tmp/.nexus/knowledge/policy_memory.jsonl"
-        ],
-        "console_tail": [],
-        "audit_seconds": 0.0
+        "executor": {},
+        "invoked": null,
+        "gate_passed": null,
+        "quoted_lines": [],
+        "literals_missing": []
       },
       {
         "executor_key": "predictive_auditor",
-        "verdict": "UNREACHABLE_NO_PLANNER_NODE",
+        "verdict": "RETIRING",
+        "verdict_reason": "archived_executor_only_no_planner_node_2026-10-13: executor and registry key removed 2026-10-13",
         "kind": "REAL_CALL_DEGRADED",
         "does": "PredictiveAuditor().audit_risk({task_id, constraints}); with no Wisdom Registry table it returns risk_score 0.0 / PROCEED (with a table it would embed locally via self.model.encode)",
-        "executor": {
-          "function": "_exec_predictive_auditor",
-          "file": "nexus/core/capability_executor_registry.py",
-          "line": 697
-        },
-        "invoked": true,
-        "gate_passed": true,
-        "raised": "",
-        "outcome_excerpt": {
-          "risk_score": "0.0"
-        },
-        "quoted_lines": [
-          {
-            "pattern": "\"risk_score\"",
-            "file": "nexus/core/capability_executor_registry.py",
-            "line": 708,
-            "text": "outcome={\"risk_score\": str(result.get(\"risk_score\", \"N/A\"))[:100]})"
-          }
-        ],
-        "literals_missing": [],
-        "tmp_paths_written": [],
-        "console_tail": [
-          "\u26a0\ufe0f [Auditor] wisdom_registry table not found. Run 'nexus wisdom sync' first.",
-          "\u26a0\ufe0f [Auditor] wisdom_registry table not found. Run 'nexus wisdom sync' first."
-        ],
-        "audit_seconds": 0.0
+        "executor": {},
+        "invoked": null,
+        "gate_passed": null,
+        "quoted_lines": [],
+        "literals_missing": []
       },
       {
         "executor_key": "promotion_engine",
-        "verdict": "UNREACHABLE_NO_PLANNER_NODE",
+        "verdict": "RETIRING",
+        "verdict_reason": "archived_executor_only_no_planner_node_2026-10-13: executor and registry key removed 2026-10-13",
         "kind": "STUB_CONSTRUCT_ONLY",
         "does": "constructs PromotionEngine() and reports class_instantiated; rejected as import_construct_not_execution",
-        "executor": {
-          "function": "_exec_promotion_engine",
-          "file": "nexus/core/capability_executor_registry.py",
-          "line": 2029
-        },
-        "invoked": false,
-        "gate_passed": false,
-        "raised": "",
-        "outcome_excerpt": {
-          "class_instantiated": true,
-          "error": "import_construct_not_execution",
-          "detail": "physical method call required; import/construct alone is insufficient"
-        },
-        "quoted_lines": [
-          {
-            "pattern": "\"class_instantiated\": True",
-            "file": "nexus/core/capability_executor_registry.py",
-            "line": 2039,
-            "text": "outcome={\"class_instantiated\": True})"
-          }
-        ],
-        "literals_missing": [],
-        "tmp_paths_written": [],
-        "console_tail": [],
-        "audit_seconds": 0.0
+        "executor": {},
+        "invoked": null,
+        "gate_passed": null,
+        "quoted_lines": [],
+        "literals_missing": []
       },
       {
         "executor_key": "reflex_loop",
-        "verdict": "UNREACHABLE_NO_PLANNER_NODE",
+        "verdict": "RETIRING",
+        "verdict_reason": "archived_executor_only_no_planner_node_2026-10-13: executor and registry key removed 2026-10-13",
         "kind": "REAL_CALL_HARD_CODED_TMP",
         "does": "ReflexLoop(project_root=/tmp).run_cycle(): NAS tuner + BattleSwarm tuning against /tmp logs; writes /tmp/.nexus/config/reflex_params.json",
-        "executor": {
-          "function": "_exec_reflex_loop",
-          "file": "nexus/core/capability_executor_registry.py",
-          "line": 1122
-        },
-        "invoked": true,
-        "gate_passed": true,
-        "raised": "",
-        "outcome_excerpt": {
-          "cycle_result": "{}"
-        },
-        "quoted_lines": [
-          {
-            "pattern": "cls(project_root=\"/tmp\")",
-            "file": "nexus/core/capability_executor_registry.py",
-            "line": 1129,
-            "text": "inst = cls(project_root=\"/tmp\")"
-          }
-        ],
-        "literals_missing": [],
-        "tmp_paths_written": [],
-        "console_tail": [],
-        "audit_seconds": 0.0
+        "executor": {},
+        "invoked": null,
+        "gate_passed": null,
+        "quoted_lines": [],
+        "literals_missing": []
       },
       {
         "executor_key": "research_and_source_discipline",
-        "verdict": "UNREACHABLE_NO_PLANNER_NODE",
+        "verdict": "RETIRING",
+        "verdict_reason": "archived_executor_only_no_planner_node_2026-10-13: executor and registry key removed 2026-10-13",
         "kind": "REAL_CALL_MISUSED_INPUT",
         "does": "PythonCodeSkeletonProvider(root=cwd).lookup_implementation(<whole task text>) - the task sentence is looked up as a symbol name",
-        "executor": {
-          "function": "_exec_research_and_source_discipline",
-          "file": "nexus/core/capability_executor_registry.py",
-          "line": 996
-        },
-        "invoked": true,
-        "gate_passed": true,
-        "raised": "",
-        "outcome_excerpt": {
-          "action": "lookup_or_snapshot",
-          "result": "CodeSkeletonLookupResult(symbol='Update target.py to round totals', found=False, matches=[], reason='symbol_not_found', schema_version='codeintel-v1')"
-        },
-        "quoted_lines": [
-          {
-            "pattern": "inst.lookup_implementation(str(task_desc or plan.task_id))",
-            "file": "nexus/core/capability_executor_registry.py",
-            "line": 1004,
-            "text": "result = inst.lookup_implementation(str(task_desc or plan.task_id))"
-          }
-        ],
-        "literals_missing": [],
-        "tmp_paths_written": [],
-        "console_tail": [],
-        "audit_seconds": 0.0
+        "executor": {},
+        "invoked": null,
+        "gate_passed": null,
+        "quoted_lines": [],
+        "literals_missing": []
       },
       {
         "executor_key": "spec_guarded",
-        "verdict": "UNREACHABLE_NO_PLANNER_NODE",
+        "verdict": "RETIRING",
+        "verdict_reason": "archived_executor_only_no_planner_node_2026-10-13: executor and registry key removed 2026-10-13",
         "kind": "REAL_CALL_FIXTURE_INPUTS",
         "does": "SpecGuardV2().validate_diagnosis({'task_id'}, constraints) with an empty diagnosis and empty constraints; reports validated (defaults True)",
-        "executor": {
-          "function": "_exec_spec_guarded",
-          "file": "nexus/core/capability_executor_registry.py",
-          "line": 715
-        },
-        "invoked": true,
-        "gate_passed": true,
-        "raised": "",
-        "outcome_excerpt": {
-          "validated": "True"
-        },
-        "quoted_lines": [
-          {
-            "pattern": "inst.validate_diagnosis({\"task_id\": plan.task_id}",
-            "file": "nexus/core/capability_executor_registry.py",
-            "line": 723,
-            "text": "result = inst.validate_diagnosis({\"task_id\": plan.task_id}, dict(plan.constraints))"
-          },
-          {
-            "pattern": "result.get(\"validated\", True)",
-            "file": "nexus/core/capability_executor_registry.py",
-            "line": 726,
-            "text": "outcome={\"validated\": str(result.get(\"validated\", True))})"
-          }
-        ],
-        "literals_missing": [],
-        "tmp_paths_written": [],
-        "console_tail": [],
-        "audit_seconds": 0.0
+        "executor": {},
+        "invoked": null,
+        "gate_passed": null,
+        "quoted_lines": [],
+        "literals_missing": []
       },
       {
         "executor_key": "subagent_outcome_service",
-        "verdict": "UNREACHABLE_NO_PLANNER_NODE",
+        "verdict": "RETIRING",
+        "verdict_reason": "archived_executor_only_no_planner_node_2026-10-13: executor and registry key removed 2026-10-13",
         "kind": "STUB_CONSTRUCT_ONLY",
         "does": "constructs SubagentOutcomeService(project_root=/tmp) and reports class_instantiated; rejected as import_construct_not_execution",
-        "executor": {
-          "function": "_exec_subagent_outcome_service",
-          "file": "nexus/core/capability_executor_registry.py",
-          "line": 2046
-        },
-        "invoked": false,
-        "gate_passed": false,
-        "raised": "",
-        "outcome_excerpt": {
-          "class_instantiated": true,
-          "error": "import_construct_not_execution",
-          "detail": "physical method call required; import/construct alone is insufficient"
-        },
-        "quoted_lines": [
-          {
-            "pattern": "cls(project_root=Path(\"/tmp\"))",
-            "file": "nexus/core/capability_executor_registry.py",
-            "line": 2054,
-            "text": "inst = cls(project_root=Path(\"/tmp\"))"
-          },
-          {
-            "pattern": "\"class_instantiated\": True",
-            "file": "nexus/core/capability_executor_registry.py",
-            "line": 2057,
-            "text": "outcome={\"class_instantiated\": True})"
-          }
-        ],
-        "literals_missing": [],
-        "tmp_paths_written": [],
-        "console_tail": [],
-        "audit_seconds": 0.0
+        "executor": {},
+        "invoked": null,
+        "gate_passed": null,
+        "quoted_lines": [],
+        "literals_missing": []
       },
       {
         "executor_key": "zero_trust_v2_behavior",
-        "verdict": "UNREACHABLE_NO_PLANNER_NODE",
+        "verdict": "RETIRING",
+        "verdict_reason": "archived_executor_only_no_planner_node_2026-10-13: executor and registry key removed 2026-10-13",
         "kind": "STUB_CONSTRUCT_ONLY",
         "does": "builds the behavior runner adapter and returns function_called=True (gate passes); the adapter is never run",
-        "executor": {
-          "function": "_exec_zero_trust_v2_behavior",
-          "file": "nexus/core/capability_executor_registry.py",
-          "line": 522
-        },
-        "invoked": true,
-        "gate_passed": true,
-        "raised": "",
-        "outcome_excerpt": {
-          "function_called": true
-        },
-        "quoted_lines": [
-          {
-            "pattern": "\"function_called\": True",
-            "file": "nexus/core/capability_executor_registry.py",
-            "line": 530,
-            "text": "outcome={\"function_called\": True})"
-          }
-        ],
-        "literals_missing": [],
-        "tmp_paths_written": [],
-        "console_tail": [],
-        "audit_seconds": 0.0
+        "executor": {},
+        "invoked": null,
+        "gate_passed": null,
+        "quoted_lines": [],
+        "literals_missing": []
       }
     ],
     "verdict_counts": {
-      "UNREACHABLE_NO_PLANNER_NODE": 17
+      "RETIRING": 17
     },
     "kind_counts": {
       "ALIAS": 1,
@@ -7397,5 +6756,23 @@
       "scripts/bench/gemini_nexus_report.py": 0
     },
     "note": "row validator checked status/semantic_status/coverage/route_decision counts only; claim_boundary.simulated is never read"
-  }
+  },
+  "partial_reruns": [
+    {
+      "generated_at": "2026-10-13T00:00:33.434238+00:00",
+      "git_head": "3976f1d0fc3e81870132cca4b7c7399a3b2e8cd5",
+      "tree": "origin/main 3976f1d0f + second archive batch (#1906) working tree",
+      "only": [
+        "integration_manager",
+        "swarm_quiet_moment",
+        "llm_judge_panel",
+        "executor_only"
+      ],
+      "model_probe": {
+        "available": false,
+        "reason": "--no-model"
+      },
+      "reason": "second archive batch (ARCHIVED_2026-10-13.md): rows replaced in place, executor_only section replaced"
+    }
+  ]
 }

@@ -62,6 +62,8 @@ def test_swarm_run_exception_still_writes_completion_contract(monkeypatch, tmp_p
 
 
 def test_swarm_quiet_moment_cli_emits_non_mutating_packet(tmp_path):
+    # Historical node id retained: `swarm quiet-moment` was an echo stub and is
+    # archived 2026-10-13 (ARCHIVED_2026-10-13.md, #1906); the command is gone.
     @click.group()
     def root():
         pass
@@ -69,27 +71,8 @@ def test_swarm_quiet_moment_cli_emits_non_mutating_packet(tmp_path):
     swarm_cmd.register(root, tmp_path)
 
     runner = CliRunner()
-    res = runner.invoke(
-        root,
-        [
-            "swarm",
-            "quiet-moment",
-            "--reason",
-            "shadow promotion boundary",
-            "--node",
-            "pilot-a",
-            "--resume-after",
-            "12",
-            "--output-json",
-        ],
-    )
+    res = runner.invoke(root, ["swarm", "quiet-moment", "--reason", "x", "--output-json"])
 
-    assert res.exit_code == 0, res.output
-    payload = json.loads(res.output)
-    assert payload["schema_version"] == "nexus_quiet_moment.v1"
-    assert payload["production_writes_allowed"] is False
-    assert payload["allowed_actions"] == ["observe", "report", "rollback"]
-    assert payload["affected_nodes"] == ["pilot-a"]
-    assert payload["resume_after_seconds"] == 12
-    assert payload["observe"]["status"] == "observed"
-    assert payload["rollback"]["status"] == "armed"
+    assert res.exit_code == 2
+    assert "No such command" in res.output
+    assert "nexus_quiet_moment.v1" not in res.output

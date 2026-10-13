@@ -312,7 +312,6 @@ def run_integrity_check():
     print("\n🚀 [CI-Gate] Running Physical Integrity Check...")
     required_sigs = {
         "scripts/ops/supervisor_engine.py": ["class SupervisorEngine", "def run_swarm_mission"],
-        "scripts/engine/nexus_cli.py": ["def delegate"]
     }
     
     for path, sigs in required_sigs.items():

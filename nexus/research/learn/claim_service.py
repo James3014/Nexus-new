@@ -18,6 +18,15 @@ from nexus.services.mem_palace import MemPalace
 from nexus.core.skill_outcomes import OutcomePayload, build_outcome_event, append_skill_outcome_event
 from nexus.services.memory import MemoryService
 
+import warnings as _archived_warnings
+
+_archived_warnings.warn(
+    "ARCHIVED 2026-10-13 (#1906): ClaimService duplicates the inline LearnModeService claim path and is no longer constructed; see ARCHIVED_2026-10-13.md. "
+    "Scheduled for deletion; do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 class ClaimService:
     def __init__(self, ctx: LearnContextProtocol):
         self.ctx = ctx

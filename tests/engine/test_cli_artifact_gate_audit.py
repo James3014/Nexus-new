@@ -41,7 +41,6 @@ MUTATING_COMMANDS_REQUIRING_ARTIFACTS = {
     "learn:gate": ("report_file", "evidence_file", "acceptance-check", "contract-check"),
     "contract-snapshot": ("output_path", "write_text("),
     "distill": ("report_file", "write_text("),
-    "delegate": ("report_file", "write_completion_envelope"),
     "research:report": ("output", "write_text("),
     "research:auto-flow": ("report_file", "semantic_status"),
     "research:run": ("report_file", "semantic_status", "write_text("),

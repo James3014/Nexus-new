@@ -1573,13 +1573,13 @@ def test_retired_integration_manager_is_quarantine_reference_only() -> None:
     contract = PLANNER_EXECUTION_CONTRACTS["integration_manager"]
     assert contract["execution_class"] == EXECUTION_CLASS_CONTROL_PLANE_REFERENCE
     assert contract["provider_authorization_required"] is False
-    assert result["final_status"] == "OK"
-    assert result["action"] == "legacy_integration_quarantine"
-    assert result["semantic_status"] == "BLOCKED"
-    assert result["gate_passed"] is False
-    assert result["mutation_performed"] is False
-    assert result["retired_callable"].endswith("IntegrationManager.batch_integrate")
-    assert result["replacement_callable"].endswith("SelfHostedTaskService.integrate_approved")
+    # Archived 2026-10-13 (#1906): the node resolves to an explicit, receipt-visible skip.
+    assert ARCHIVED_CAPABILITY_REASONS["integration_manager"] == (
+        "archived_retired_integration_manager_2026-10-13"
+    )
+    assert result["invoked"] is False
+    assert result["skipped"] is True
+    assert result["public_claim_allowed"] is False
 
 
 def test_retired_integration_reference_proof_rejects_false_green() -> None:

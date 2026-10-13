@@ -1,5 +1,5 @@
 import pytest
-from nexus.core.capability_gate import CapabilityGate, Phase
+from nexus.governance.capability_gate import CapabilityGate
 from nexus.core.planner_executor import Planner, Executor
 from nexus.core.ci_healer import CIHealer
 from nexus.core.state_contracts import NexusState

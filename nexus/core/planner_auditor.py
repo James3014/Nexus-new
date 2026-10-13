@@ -4,8 +4,8 @@ import logging
 import warnings
 
 warnings.warn(
-    "nexus.core.planner_auditor has no production caller and is kept as lab-only "
-    "(see #1740).",
+    "ARCHIVED 2026-10-13 (#1906): nexus.core.planner_auditor has no production caller "
+    "(lab-only since #1740); see ARCHIVED_2026-10-13.md. Scheduled for deletion; do not import.",
     DeprecationWarning,
     stacklevel=2,
 )

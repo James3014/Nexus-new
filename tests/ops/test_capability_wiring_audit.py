@@ -242,6 +242,8 @@ def test_every_scope_capability_has_a_spec_or_is_marked_retiring() -> None:
         "ui_validator",
         "benchmark",
         "learning_closure",
+        # second archive batch (ARCHIVED_2026-10-13.md, #1906)
+        *ARCHIVED_2026_10_13_NODES,
     } == set(audit.RETIRING_CAPABILITIES)
     assert not set(audit.SPECS) & set(audit.RETIRING_CAPABILITIES)
     for spec in audit.SPECS.values():
@@ -343,6 +345,13 @@ def test_route_smoke_row_validator_ignores_the_simulated_flag(tmp_path: Path) ->
 # --------------------------------------------- 2026-10-13 extension: every planner node
 
 
+# Planner nodes archived 2026-10-13: the audit reports them RETIRING with the archived skip reason.
+ARCHIVED_2026_10_13_NODES = {
+    "integration_manager": "archived_retired_integration_manager_2026-10-13",
+    "swarm_quiet_moment": "archived_echo_swarm_quiet_moment_2026-10-13",
+    "llm_judge_panel": "archived_alias_llm_judge_panel_2026-10-13",
+}
+
 EXTENSION_NODES = {
     "semantic_failure_sensor",
     "bdd_acceptance_skill",
@@ -375,8 +384,13 @@ def test_every_pinned_planner_node_has_a_spec_or_is_retiring() -> None:
     planner = set(list_planner_capability_names())
     covered = set(audit.SPECS) | set(audit.RETIRING_CAPABILITIES)
     assert planner - covered == set()
-    assert EXTENSION_NODES <= set(audit.SPECS)
+    assert EXTENSION_NODES - set(ARCHIVED_2026_10_13_NODES) <= set(audit.SPECS)
+    assert set(ARCHIVED_2026_10_13_NODES) <= set(audit.RETIRING_CAPABILITIES)
     assert EXTENSION_NODES <= set(audit.NATURAL_TRIGGERS)
+    for cap, reason in ARCHIVED_2026_10_13_NODES.items():
+        row = audit.retiring_row(cap, audit.RETIRING_CAPABILITIES[cap])
+        assert row["verdict"] == audit.RETIRING
+        assert row["archived_skip_reason"] == reason
 
 
 def test_not_executable_specs_are_exactly_the_nodes_without_a_runnable_callable() -> None:
@@ -399,28 +413,32 @@ def test_verdict_bucket_collapses_prefixed_verdicts() -> None:
 
 
 def test_executor_only_keys_are_the_seventeen_unreachable_executors() -> None:
+    # Second archive batch (2026-10-13, #1906): all seventeen keys left EXECUTOR_REGISTRY.
     keys = audit.executor_only_keys()
     assert keys["unlisted"] == [] and keys["listed_but_reachable"] == []
-    assert set(keys["computed"]) - set(keys["retiring_excluded"]) == set(audit.EXECUTOR_ONLY)
+    assert set(keys["computed"]) - set(keys["retiring_excluded"]) == set()
+    assert set(keys["retired_from_registry"]) == set(audit.EXECUTOR_ONLY)
     assert len(audit.EXECUTOR_ONLY) == 17
 
 
 def test_executor_only_quotes_hard_coded_tmp_lines() -> None:
+    # The /tmp-bound executors were archived 2026-10-13; their recorded description keeps the
+    # evidence and the registry no longer exposes them.
     from nexus.core.capability_executor_registry import EXECUTOR_REGISTRY
 
     for key in ("policy_capability_gate", "learn_refresh_service", "reflex_loop"):
+        assert key not in EXECUTOR_REGISTRY, key
         literals = audit.EXECUTOR_ONLY[key]["literals"]
-        found = audit.scan_hard_coded(EXECUTOR_REGISTRY[key], literals)
-        assert {item["pattern"] for item in found} == set(literals), key
-        assert any("/tmp" in item["text"] for item in found), key
+        assert any("/tmp" in literal for literal in literals), key
 
 
 def test_executor_only_direct_invocation_records_outcome(tmp_path: Path) -> None:
+    # entropy_guard_v2: dead registry key removed 2026-10-13; module kept, planner node in #1907.
     row = audit.audit_executor_only("entropy_guard_v2", tmp_path)
-    assert row["verdict"] == audit.UNREACHABLE_NO_PLANNER_NODE
-    assert row["invoked"] is True and row["gate_passed"] is True
-    assert row["outcome_excerpt"] == {"entropy_ok": True}
-    assert row["quoted_lines"] and not row["literals_missing"]
+    assert row["verdict"] == audit.RETIRING
+    assert row["verdict_reason"].startswith(audit.RETIRED_EXECUTOR_ONLY_REASON)
+    assert "#1907" in row["verdict_reason"]
+    assert row["invoked"] is None and row["gate_passed"] is None
 
 
 def test_natural_selection_reports_rules_whose_input_the_seam_drops() -> None:
