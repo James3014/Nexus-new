@@ -79,6 +79,9 @@ TOOL_GATE_PATH = "scripts/ops/exact_base_tool_gate.py"
 # Where Nexus-new pins nexus-core (the Core gates and the certify build).
 CERTIFY_PIN_WORKFLOW = ".github/workflows/nexus-core-issue-completion.yml"
 CERTIFY_PIN_RE = re.compile(r"nexus-certify-ref:\s*[\"']?([0-9a-f]{40})[\"']?\s*$", re.MULTILINE)
+TRUSTED_UNIVERSE_RE = re.compile(
+    r"^\s*evidence-universe:\s*[\"']?trusted-config[\"']?\s*$", re.MULTILINE
+)
 CERTIFY_REPO_URL = "git+https://github.com/James3014/nexus-core"
 HEX40_RE = re.compile(r"^[0-9a-f]{40}$")
 
@@ -397,6 +400,15 @@ def _certify_pin(ctx: Context) -> tuple[str | None, str]:
     return None, f"{CERTIFY_PIN_WORKFLOW} pins several nexus-certify-ref values: {sorted(refs)}"
 
 
+def _trusted_config_universe(ctx: Context) -> bool:
+    """True when the issue-gate workflow derives the evidence universe from trusted config."""
+    for rev in (ctx.base_sha, ctx.head_sha):
+        text = _git(ctx.repo, "show", f"{rev}:{CERTIFY_PIN_WORKFLOW}", check=False).stdout
+        if text:
+            return TRUSTED_UNIVERSE_RE.search(text) is not None
+    return False
+
+
 def _resolve_nexus_certify(ctx: Context) -> tuple[list[str] | None, str, str]:
     """Return (argv prefix, pinned ref or 'override', error).
 
@@ -439,7 +451,7 @@ def _expected_markers(ctx: Context, issue: int) -> tuple[dict[str, Any] | None, 
     if tool is None:
         return None, f"cannot resolve nexus-certify: {error}", ref
     command = [*tool, "markers", "--repo", str(ctx.repo), "--issue", str(issue), "--json"]
-    # `markers --check` exists at the pinned ref (nexus-core 9942db7); it reads the live
+    # `markers --check` exists at the pinned ref (nexus-core b245430b); it reads the live
     # Issue itself, so it is skipped for offline --issue-json runs and, for an
     # override build, when that build predates it.
     use_check = ctx.issue_json is None
@@ -513,6 +525,12 @@ def check_issue(ctx: Context) -> CheckResult:
             ISSUE_NOT_OPEN,
             f"Issue #{issue} is {data.get('state')}",
             "reopen the Issue or bind the PR to an open Issue",
+        )
+    if _trusted_config_universe(ctx):
+        return CheckResult(
+            name,
+            PASS,
+            detail=f"Issue #{issue} open; evidence universe derived from trusted base config",
         )
     expected, error, ref = _expected_markers(ctx, issue)
     if expected is None:

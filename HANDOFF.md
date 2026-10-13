@@ -19,7 +19,7 @@
 ## 卡住 / 注意
 - Golden Behavior Corpus：100 個案例，96 個已覆蓋。剩下的 finding 是 GBF-002（live Gateway，只能實機驗）、GBF-003（#29）、GBF-005（#49）、GBF-007（#1750）。執行方式：`.venv/bin/python scripts/ops/run_golden_behavior_eval.py`。用 `scripts/ops/check_golden_finding_owners.py --strict` 檢查 finding 的 owner Issue 是否已經過期。
 - live MCP Gateway 跑的是 `10d6dcea`：沒有推上 GitHub，而且落後 main 171 個 commit（#1900）。它的 `reload_required=false` 只拿 deployment 跟自己比，看不出這種落後。
-- Issue body 的 `NEXUS_CORE_EVIDENCE_UNIVERSE` marker 會隨 `.nexus-core/config.toml` 改變。現在的值是 `sha256:51cba620…`，用 `nexus-certify markers --repo .` 重算。main 在開 PR 前後若有前進，Core gate 會回 `BASE_REF_NOT_ANCESTOR`，要 rebase（nexus-core#243）。
+- Issue 不再需要手寫 `NEXUS_CORE_EVIDENCE_UNIVERSE` marker：issue-gate 用 `evidence-universe: trusted-config`，證據範圍由 base ref 的 `.nexus-core/config.toml` 推導（nexus-core b245430b）。`NEXUS_CORE_MATERIAL_TRANSITION` 不變，改 material 身分時仍要。main 在開 PR 前後若有前進，Core gate 會回 `BASE_REF_NOT_ANCESTOR`，要 rebase（nexus-core#243）。
 - 機密掃描涵蓋所有已發佈的 ref。測試 fixture 裡的權杖必須拆開寫（例如 `"xo" + "xb-"`），否則會擋住全 repo（#1898）。
 - 工作模式檔有 fail-closed 驗證器 `scripts/ops/check_operating_mode.py`。YAML 新增欄位時要在同一個 PR 更新驗證器。
 - AGENTS.md ≤ 12 KB；overlay 各有上限（task contract ≤ 36 KB）；task-class context ≤ 36 KB。這些上限透過 Golden GB-097 在每個 PR 檢查。
