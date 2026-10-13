@@ -133,7 +133,10 @@ class TestMemoryService(unittest.TestCase):
             audit_pass_rate=0.91,
             metadata={"k": "v"},
         ))
-        hits = self.service.lookup_fault_lessons(fault_hash, limit=2)
+        # LanceDB is preferred when reachable; make it unavailable so the
+        # durable JSONL fallback is the path under test.
+        with patch.object(self.service.repo, "get_all_rows", side_effect=RuntimeError("db unavailable")):
+            hits = self.service.lookup_fault_lessons(fault_hash, limit=2)
         self.assertTrue(hits)
         self.assertEqual(hits[0]["source"], "jsonl-fault-lessons")
         self.assertIn("lesson", hits[0]["content"])

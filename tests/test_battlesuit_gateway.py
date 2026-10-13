@@ -7,9 +7,16 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def setup_default_provider(monkeypatch):
+def setup_default_provider(monkeypatch, tmp_path):
     monkeypatch.setenv("NEXUS_OAUTH_PROVIDER", "gemini")
     monkeypatch.setenv("NEXUS_PREFER_AGY", "0")
+    # The Gateway resolves the Gemini entry point before spawning the CLI, so a
+    # host without a real `gemini` install would fail with binary_missing before
+    # the (patched) runner is reached. Point it at a stand-in file.
+    fake_gemini = tmp_path / "bin" / "gemini"
+    fake_gemini.parent.mkdir(parents=True, exist_ok=True)
+    fake_gemini.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setenv("NEXUS_GEMINI_BIN", str(fake_gemini))
 
 
 def _bind_valid_online_decision(gateway, provider="gemini"):
@@ -415,14 +422,20 @@ def test_exact_registered_provider_authority_routes_only_that_provider(provider)
 
 @pytest.mark.parametrize("provider", ["agy", "grok", "openai"])
 def test_authority_registered_provider_without_model_binding_makes_zero_physical_calls(provider):
+    from nexus.services.unified_runtime import (
+        REGISTERED_CLI_MODEL_BINDING_UNSUPPORTED_PROVIDERS,
+    )
+
     gateway = BattlesuitGateway(project_root=".")
     gateway.oauth_provider = provider
     _bind_valid_online_decision(gateway, provider=provider)
     model = "provider-model"
 
-    with patch.object(gateway, "_ask_via_registered_print_cli") as registered, patch(
-        "nexus.services.gateway.resolve_binary"
-    ) as resolve_binary, patch("nexus.services.gateway._run_cli_with_hard_timeout") as run:
+    with patch.object(
+        gateway, "_ask_via_registered_print_cli", return_value=({"status": "APPROVED"}, "registered-raw")
+    ) as registered, patch("nexus.services.gateway.resolve_binary") as resolve_binary, patch(
+        "nexus.services.gateway._run_cli_with_hard_timeout"
+    ) as run:
         data, raw = gateway.ask_structured(
             "Return provider result",
             "{}",
@@ -430,10 +443,17 @@ def test_authority_registered_provider_without_model_binding_makes_zero_physical
             gateway_invocation_authority=_gateway_authority(provider=provider, model=model),
         )
 
-    assert data["error"] == "gateway_invocation_authority_model_binding_unsupported"
-    assert data["invoked"] is False
-    assert data["provider_call_count"] == 0
-    assert raw == data["error"]
-    registered.assert_not_called()
     resolve_binary.assert_not_called()
     run.assert_not_called()
+    if provider in REGISTERED_CLI_MODEL_BINDING_UNSUPPORTED_PROVIDERS:
+        assert data["error"] == "gateway_invocation_authority_model_binding_unsupported"
+        assert data["invoked"] is False
+        assert data["provider_call_count"] == 0
+        assert raw == data["error"]
+        registered.assert_not_called()
+    else:
+        # Providers whose registered CLI can bind the admitted model are routed
+        # to exactly that provider (never to the Gemini binary path).
+        registered.assert_called_once()
+        assert registered.call_args.kwargs["provider"] == provider
+        assert raw == "registered-raw"
