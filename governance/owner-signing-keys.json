@@ -1,5 +1,10 @@
 {
   "schema": "nexus.owner_signing_keys.v1",
   "owner_id": "James3014",
-  "keys": []
+  "keys": [
+    {
+      "key_id": "addb4a4588c6629021ecd06792d2843c9049849cf1fd9cd6261ab79e6ae9b8b4",
+      "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEroiblVESftYvIm+L7uesQAcrJKW4\n8Iq5caLdjL53bcwZq+jRZaEmvITgV7HVRAtINXm1pNCWCOWWFa9oxpnNkQ==\n-----END PUBLIC KEY-----\n"
+    }
+  ]
 }
