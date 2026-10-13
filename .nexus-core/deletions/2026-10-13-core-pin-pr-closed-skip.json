@@ -25,13 +25,13 @@
       "path": "tests/nexus/orchestrator/test_canonical_core_transport.py"
     },
     {
-      "after_oid": "b3024f69dde69b5e812332204e13fd43a08a1c49",
+      "after_oid": "fb7169587e62b0dbc781ff79e554330f047dfb42",
       "change_type": "MODIFY",
       "path": "tests/ops/test_pr_workflow_concurrency.py"
     }
   ],
   "deletions": [],
   "id": "2026-10-13-core-pin-pr-closed-skip",
-  "reason": "Owner-authorized change of protected paths .github/workflows/nexus-core-issue-completion.yml and .github/workflows/trusted-deletion-anchor.yml: move the nexus-core gate pins from 9942db7 to a0d22e8 (nexus-core PR #253 merge commit, Issue #250 neutral PR_ALREADY_CLOSED_SKIPPED) with CANONICAL_CORE_REVISION and its test constant, pass gate-outcome run->verify, drop the issue-completion 'edited' trigger, add per-PR cancel-in-progress concurrency to the anchor (keeps 'edited'), reclassify tests/ops/test_pr_workflow_concurrency.py; no deletions; tracking Issue #2010",
+  "reason": "Owner-authorized change of protected paths .github/workflows/nexus-core-issue-completion.yml and .github/workflows/trusted-deletion-anchor.yml: move the nexus-core gate pins from 9942db7 to a0d22e8 (nexus-core PR #253 merge commit, Issue #250 neutral PR_ALREADY_CLOSED_SKIPPED) with CANONICAL_CORE_REVISION and its test constant, pass gate-outcome run->verify, drop the issue-completion 'edited' trigger, add per-PR cancel-in-progress concurrency to the anchor (keeps 'edited'), reclassify tests/ops/test_pr_workflow_concurrency.py (also classifies deletion-guard.yml from #2014, which left main red); no deletions; tracking Issue #2010",
   "schema": "nexus.core.deletion-manifest.v1"
 }

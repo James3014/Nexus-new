@@ -35,6 +35,7 @@ PROTECTED = (
 # Already own a concurrency policy.
 UNTOUCHED = (
     "nexus-core-issue-completion.yml",
+    "deletion-guard.yml",
     "fast-start-v2-invalidator.yml",
     "repository-intelligence.yml",
 )
