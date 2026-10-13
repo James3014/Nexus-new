@@ -332,6 +332,16 @@ class Acquisition:
     comments: tuple[dict[str, Any], ...]
 
 
+def _map(value: Any) -> Mapping[str, Any]:
+    """Untrusted JSON object, or an empty mapping."""
+    return value if isinstance(value, Mapping) else {}
+
+
+def _list(value: Any) -> list[Any]:
+    """Untrusted JSON array, or an empty list."""
+    return value if isinstance(value, list) else []
+
+
 def check_summary(node: Mapping[str, Any]) -> dict[str, Any] | None:
     """Normalize a GraphQL rollup context into the engine's check shape.
 
@@ -343,21 +353,18 @@ def check_summary(node: Mapping[str, Any]) -> dict[str, Any] | None:
         status = node.get("conclusion") or node.get("status")
         if not isinstance(name, str) or not isinstance(status, str):
             return None
-        summary: dict[str, Any] = {"name": name, "status": status.lower()}
-        suite = node.get("checkSuite") if isinstance(node.get("checkSuite"), Mapping) else {}
-        run = suite.get("workflowRun") if isinstance(suite.get("workflowRun"), Mapping) else {}
-        app = suite.get("app") if isinstance(suite.get("app"), Mapping) else {}
-        workflow = run.get("workflow") if isinstance(run.get("workflow"), Mapping) else {}
-        file = run.get("file") if isinstance(run.get("file"), Mapping) else {}
+        suite = _map(node.get("checkSuite"))
+        run = _map(suite.get("workflowRun"))
         optional = {
             "check_run_id": node.get("databaseId"),
             "completed_at": node.get("completedAt"),
             "started_at": node.get("startedAt"),
             "check_suite_id": suite.get("databaseId"),
-            "app_slug": app.get("slug"),
-            "workflow_id": workflow.get("databaseId"),
-            "workflow_path": file.get("path"),
+            "app_slug": _map(suite.get("app")).get("slug"),
+            "workflow_id": _map(run.get("workflow")).get("databaseId"),
+            "workflow_path": _map(run.get("file")).get("path"),
         }
+        summary: dict[str, Any] = {"name": name, "status": status.lower()}
         summary.update({key: value for key, value in optional.items() if value is not None})
         return summary
     if node.get("__typename") == "StatusContext":
@@ -372,11 +379,8 @@ def check_summary(node: Mapping[str, Any]) -> dict[str, Any] | None:
 
 
 def _contexts(rollup_owner: Any) -> tuple[list[dict[str, Any]], bool]:
-    rollup = rollup_owner.get("statusCheckRollup") if isinstance(rollup_owner, Mapping) else None
-    contexts = rollup.get("contexts") if isinstance(rollup, Mapping) else None
-    if not isinstance(contexts, Mapping):
-        return [], False
-    nodes = contexts.get("nodes") if isinstance(contexts.get("nodes"), list) else []
+    contexts = _map(_map(_map(rollup_owner).get("statusCheckRollup")).get("contexts"))
+    nodes = _list(contexts.get("nodes"))
     checks = [c for c in (check_summary(n) for n in nodes if isinstance(n, Mapping)) if c]
     total = contexts.get("totalCount")
     return checks, isinstance(total, int) and total > len(nodes)
@@ -386,22 +390,15 @@ def _pull_request(node: Mapping[str, Any]) -> PullRequestData | None:
     number, head, base = node.get("number"), node.get("headRefOid"), node.get("baseRefOid")
     if not isinstance(number, int) or not isinstance(head, str) or not isinstance(base, str):
         return None
-    files = node.get("files") if isinstance(node.get("files"), Mapping) else {}
+    files = _map(node.get("files"))
     paths = tuple(
         sorted({
-            f["path"]
-            for f in files.get("nodes") or []
-            if isinstance(f, Mapping) and isinstance(f.get("path"), str)
+            path for f in _list(files.get("nodes")) if isinstance(path := _map(f).get("path"), str)
         })
     )
     total = files.get("totalCount")
-    commits = node.get("commits") if isinstance(node.get("commits"), Mapping) else {}
-    commit_nodes = commits.get("nodes") or []
-    commit = (
-        commit_nodes[-1].get("commit")
-        if commit_nodes and isinstance(commit_nodes[-1], Mapping)
-        else None
-    )
+    commit_nodes = _list(_map(node.get("commits")).get("nodes"))
+    commit = _map(commit_nodes[-1]).get("commit") if commit_nodes else None
     checks, checks_truncated = _contexts(commit)
     return PullRequestData(
         number=number,
@@ -418,30 +415,30 @@ def _pull_request(node: Mapping[str, Any]) -> PullRequestData | None:
 def collect(client: GitHubClient, repository: str, pr_number: int) -> Acquisition:
     owner, _, name = repository.partition("/")
     data = client.graphql(OVERVIEW_QUERY, {"owner": owner, "name": name, "number": pr_number})
-    repo = data.get("repository")
-    if not isinstance(repo, Mapping):
-        raise CommentError("repository unavailable")
-    target = (repo.get("defaultBranchRef") or {}).get("target") or {}
+    repo = _map(data.get("repository"))
+    target = _map(_map(repo.get("defaultBranchRef")).get("target"))
     main_sha = target.get("oid")
     if not isinstance(main_sha, str) or len(main_sha) != 40:
         raise CommentError("default branch SHA unavailable")
     main_checks: list[dict[str, Any]] = []
-    for commit in (target.get("history") or {}).get("nodes") or []:
+    for commit in _list(_map(target.get("history")).get("nodes")):
         main_checks.extend(_contexts(commit)[0])
 
-    listing = repo.get("pullRequests") or {}
+    listing = _map(repo.get("pullRequests"))
     by_number: dict[int, PullRequestData] = {}
-    for node in listing.get("nodes") or []:
-        pr = _pull_request(node) if isinstance(node, Mapping) else None
+    for node in _list(listing.get("nodes")):
+        pr = _pull_request(_map(node))
         if pr is not None:
             by_number[pr.number] = pr
-    this_node = repo.get("pullRequest")
-    this_pr = _pull_request(this_node) if isinstance(this_node, Mapping) else None
+    this_node = _map(repo.get("pullRequest"))
+    this_pr = _pull_request(this_node)
     if this_pr is None:
         raise CommentError("pull request unavailable")
     by_number[this_pr.number] = this_pr
     comments = tuple(
-        c for c in (this_node.get("comments") or {}).get("nodes") or [] if isinstance(c, Mapping)
+        dict(c)
+        for c in _list(_map(this_node.get("comments")).get("nodes"))
+        if isinstance(c, Mapping)
     )
     open_total = listing.get("totalCount")
     return Acquisition(
@@ -473,16 +470,13 @@ def collect_workflow_changes(
     variables: dict[str, Any] = {"owner": owner, "name": name}
     variables.update({f"p{i}": path for i, path in enumerate(paths)})
     data = client.graphql(workflow_changes_query(len(paths)), variables)
-    target = ((data.get("repository") or {}).get("defaultBranchRef") or {}).get("target") or {}
+    target = _map(_map(_map(data.get("repository")).get("defaultBranchRef")).get("target"))
     changed: dict[str, str] = {}
     for i, path in enumerate(paths):
-        nodes = (target.get(f"w{i}") or {}).get("nodes") or []
-        if (
-            nodes
-            and isinstance(nodes[0], Mapping)
-            and isinstance(nodes[0].get("committedDate"), str)
-        ):
-            changed[path] = nodes[0]["committedDate"]
+        nodes = _list(_map(target.get(f"w{i}")).get("nodes"))
+        committed = _map(nodes[0]).get("committedDate") if nodes else None
+        if isinstance(committed, str):
+            changed[path] = committed
     return changed
 
 
@@ -734,7 +728,7 @@ def analyze(
 def find_sticky_comment(comments: Iterable[Mapping[str, Any]]) -> Mapping[str, Any] | None:
     """The bot-authored comment carrying MARKER; user comments are ignored."""
     for comment in comments:
-        author = comment.get("author") if isinstance(comment.get("author"), Mapping) else {}
+        author = _map(comment.get("author"))
         if (
             isinstance(comment.get("body"), str)
             and comment["body"].startswith(MARKER)
