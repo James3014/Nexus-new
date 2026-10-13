@@ -15,8 +15,33 @@ def mock_llm_output():
         "stats": {"models": {"default": {"tokens": {"total": 1420}}}}
     })
 
-def test_llm_client_token_capture(mock_llm_output):
+def test_llm_client_token_capture(mock_llm_output, monkeypatch, tmp_path):
+    from nexus.services.online_execution_policy import (
+        DEFAULT_APPROVED_PROVIDERS,
+        ONLINE_READY,
+        OnlineExecutionDecision,
+    )
+
+    # Physical Online paths fail closed unless an OnlineExecutionDecision is
+    # bound, and the Gemini entry point must resolve before the (patched) runner.
+    fake_gemini = tmp_path / "gemini"
+    fake_gemini.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setenv("NEXUS_GEMINI_BIN", str(fake_gemini))
+    monkeypatch.setenv("NEXUS_OAUTH_PROVIDER", "gemini")
+    monkeypatch.setenv("NEXUS_PREFER_AGY", "0")
     client = LLMClient(project_root=".")
+    client.bind_online_execution_decision(
+        OnlineExecutionDecision(
+            online_policy="auto",
+            online_execution_requested=True,
+            online_execution_authorized=True,
+            online_authorization_source="cli_task_policy",
+            approved_online_providers=DEFAULT_APPROVED_PROVIDERS,
+            preflight_status=ONLINE_READY,
+            requested_provider="gemini",
+            physical_invocation_allowed=True,
+        )
+    )
     with patch("nexus.services.gateway._run_cli_with_hard_timeout") as mock_run:
         mock_run.return_value = MagicMock(
             stdout=mock_llm_output, stderr="", returncode=0

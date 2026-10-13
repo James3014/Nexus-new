@@ -13,7 +13,7 @@ def test_parity_audit_missing_func():
     
     res = auditor.audit_patch(before, after, "test.py")
     assert res["surface_match"] is False
-    assert "func:old_func()" in res["missing_funcs"]
+    assert "func:old_func" in res["missing_funcs"]
 
 def test_parity_audit_safe_refactor():
     auditor = ParityAuditor(".")

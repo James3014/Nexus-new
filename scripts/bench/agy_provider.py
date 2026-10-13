@@ -15,6 +15,22 @@ Identity and accounts (#1932): every call passes the exact ``--model``, runs und
 account leased from the shared Agy account pool (allowlist + available 5-hour quota window),
 and fails closed with ``MODEL_IDENTITY_MISMATCH`` / ``MODEL_IDENTITY_UNOBSERVED`` unless Agy's
 own log shows the requested model was served. See :mod:`scripts.bench.agy_account_lease`.
+
+Outcome classification (#1932 R0/R3): Agy print mode reports ``rc=0`` / ``status=SUCCESS`` with an
+empty ``response`` for three different events that must never be scored as ``parse_failure``:
+
+* a quota failure recorded only in stderr or Agy's own log (#1362 shape) -> the lease loop's quota
+  handling (rotate before any provider effect, retire after one);
+* ``[agy] print timeout`` on stderr (``Print mode: print timeout`` in the log) -> ``timeout``;
+* a tool call auto-denied by headless plan/sandbox mode (stdout ``denied_actions`` or stderr
+  ``jetski: no output produced``) -> ``agy_no_delivery_permission_denied``. The requested model was
+  served and billed but chose a tool the contained lane forbids instead of answering, so like a billed
+  unparsable answer it is a model failure (``benchmark_eligibility`` keeps the row eligible as long as
+  tokens were measured), not infrastructure.
+
+Bench prompts get a "do not use tools; answer directly" prefix by default
+(``NEXUS_AGY_BENCH_NO_TOOLS_PREFIX``, on unless set to 0/false/no/off); every result records
+whether it was applied (``agy_no_tools_prefix_applied``).
 """
 
 from __future__ import annotations
@@ -50,6 +66,25 @@ from scripts.bench.agy_account_lease import (
 AGY_DEFAULT_MODEL = "gemini-3.8-flash-medium"
 AGY_FALLBACK_BIN = "/Users/jameschen/.local/bin/agy"
 AGY_MISSING = "agy_missing"
+# The existing timeout category (benchmark_eligibility, capability_ab_runner).
+AGY_TIMEOUT = "timeout"
+AGY_NO_DELIVERY_PERMISSION_DENIED = "agy_no_delivery_permission_denied"
+
+# Bench prompt prefix (#1932 R0: delivery rose from 1/3 to 3/3 with it). Default ON.
+AGY_NO_TOOLS_PREFIX_ENV = "NEXUS_AGY_BENCH_NO_TOOLS_PREFIX"
+AGY_NO_TOOLS_PREFIX_ID = "agy_no_tools_v1"
+AGY_NO_TOOLS_PREFIX = (
+    "Do not use any tools (no commands, no file reads, no file writes). "
+    "Answer directly in this reply.\n\n"
+)
+
+# Agy print-mode markers, recorded in #1932 R0/R3 (agy 1.3.3).
+_AGY_PRINT_TIMEOUT_STDERR = "[agy] print timeout"
+_AGY_PRINT_TIMEOUT_LOG_RE = re.compile(r"(?m)^W\d{4}\s.*\]\s+Print mode: print timeout\b")
+_AGY_NO_DELIVERY_STDERR_MARKERS = (
+    "jetski: no output produced",
+    "permission that headless mode cannot prompt",
+)
 
 
 def agy_model(env: Mapping[str, str] | None = None) -> str:
@@ -81,6 +116,16 @@ AGY_LANE_CONTROLS = (
     "verifier",
     "independent_verification",
 )
+
+
+def no_tools_prefix_enabled(env: Mapping[str, str] | None = None) -> bool:
+    values = env if env is not None else os.environ
+    raw = str(values.get(AGY_NO_TOOLS_PREFIX_ENV) or "").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def apply_no_tools_prefix(prompt: str, enabled: bool) -> str:
+    return AGY_NO_TOOLS_PREFIX + prompt if enabled else prompt
 
 
 def agy_workforce_bindings(model: str) -> dict[str, Any]:
@@ -220,6 +265,45 @@ def _provider_effect(stdout: str, workdir_touched: bool) -> bool | None:
     return bool(str(envelope.get("response") or "").strip()) or tokens > 0
 
 
+def _no_response_delivered(stdout: str) -> bool:
+    """True when stdout is blank or an Agy envelope whose ``response`` is empty."""
+    if not str(stdout or "").strip():
+        return True
+    envelope = _agy_envelope(stdout)
+    return envelope is not None and not str(envelope.get("response") or "").strip()
+
+
+def _print_timeout_logged(log_text: str) -> bool:
+    return bool(_AGY_PRINT_TIMEOUT_LOG_RE.search(str(log_text or "")))
+
+
+def _print_timed_out(stderr: str, signals: Mapping[str, Any]) -> bool:
+    return _AGY_PRINT_TIMEOUT_STDERR in str(stderr or "") or bool(
+        signals.get("print_timeout_logged")
+    )
+
+
+def _denied_actions(envelope: Mapping[str, Any]) -> list[str]:
+    actions = envelope.get("denied_actions")
+    if not isinstance(actions, list):
+        return []
+    return sorted({
+        str(item.get("action") or item.get("display_name") or "unknown")
+        if isinstance(item, Mapping)
+        else str(item)
+        for item in actions
+    })
+
+
+def _no_delivery_permission_denied(envelope: Mapping[str, Any], stderr: str) -> bool:
+    if str(envelope.get("response") or "").strip():
+        return False
+    lowered = str(stderr or "").lower()
+    return bool(_denied_actions(envelope)) or any(
+        marker in lowered for marker in _AGY_NO_DELIVERY_STDERR_MARKERS
+    )
+
+
 def _agy_attempt(
     *, prompt: str, model: str, timeout: int, agy_bin: str, runner: Callable[..., Any]
 ) -> Callable[[dict[str, str]], AgyAttemptOutcome]:
@@ -237,17 +321,26 @@ def _agy_attempt(
                     runner=runner,
                 )
             except subprocess.TimeoutExpired as exc:
+                log_text = _read_text(log_path)
                 return AgyAttemptOutcome(
-                    result=("timeout", exc, parse_agy_model_observation(_read_text(log_path)))
+                    result=(
+                        "timeout",
+                        exc,
+                        parse_agy_model_observation(log_text),
+                        {"print_timeout_logged": _print_timeout_logged(log_text)},
+                    )
                 )
             log_text = _read_text(log_path)
         observation = parse_agy_model_observation(log_text)
-        quota = res.returncode != 0 and (
+        stdout = str(res.stdout or "")
+        # #1362: Agy can exit 0 with nothing delivered while stderr/its log record a quota failure.
+        quota = (res.returncode != 0 or _no_response_delivered(stdout)) and (
             has_quota_failure_signal(str(res.stderr or ""))
             or has_terminal_quota_log_signal(log_text)
         )
+        signals = {"print_timeout_logged": _print_timeout_logged(log_text)}
         return AgyAttemptOutcome(
-            result=("completed", res, observation),
+            result=("completed", res, observation, signals),
             quota_exhausted=quota,
             provider_effect=_provider_effect(str(res.stdout or ""), touched) if quota else True,
         )
@@ -263,15 +356,27 @@ def ask_direct_agy_patch(
     runner: Callable[..., Any] = subprocess.run,
     coordinator: CrossProcessLeaseCoordinator | None = None,
     lease_config: BenchLeaseConfig | None = None,
+    no_tools_prefix: bool | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Ask agy for a ``{status, patch}`` JSON answer. Same ``(payload, raw)`` shape as the gemini path.
 
     The call runs under one leased pool account (allowlist + available 5-hour quota window, see
     :mod:`scripts.bench.agy_account_lease`) and fails closed unless Agy's log shows it served
     exactly the requested model.
+
+    ``no_tools_prefix`` (default: ``NEXUS_AGY_BENCH_NO_TOOLS_PREFIX``, on) prepends
+    :data:`AGY_NO_TOOLS_PREFIX`; every returned payload records whether it was applied.
     """
     values = dict(env if env is not None else os.environ)
     model = agy_model(values)
+    prefix_on = (
+        no_tools_prefix_enabled(values) if no_tools_prefix is None else bool(no_tools_prefix)
+    )
+    prefix_fields = {
+        "agy_no_tools_prefix_applied": prefix_on,
+        "agy_no_tools_prefix_id": AGY_NO_TOOLS_PREFIX_ID if prefix_on else "",
+    }
+    prompt = apply_no_tools_prefix(prompt, prefix_on)
     agy_bin = resolve_agy_bin(values)
     if not agy_bin:
         return {
@@ -279,6 +384,7 @@ def ask_direct_agy_patch(
             "error_category": AGY_MISSING,
             "tokens_used": 0,
             "model_name": model,
+            **prefix_fields,
         }, AGY_MISSING
     config = lease_config or BenchLeaseConfig.from_env(values)
     pool_source = "injected"
@@ -293,6 +399,7 @@ def ask_direct_agy_patch(
                 "tokens_used": 0,
                 "model_name": model,
                 "requested_model": model,
+                **prefix_fields,
             }, f"{type(exc).__name__}: {exc}"
     timeout = max(5, int(timeout_sec))
     start = time.monotonic()
@@ -320,12 +427,25 @@ def ask_direct_agy_patch(
                 str(info.get("state")) for info in run.eligibility.values()
             }),
             **lease_fields,
+            **prefix_fields,
         }, run.failure_kind
-    kind, res, observation = run.result
+    kind, res, observation, signals = run.result
     identity = model_identity_verdict(model, observation)
-    common = {"model_name": model, "provider_call_attempted": True, **identity, **lease_fields}
+    common = {
+        "model_name": model,
+        "provider_call_attempted": True,
+        **identity,
+        **lease_fields,
+        **prefix_fields,
+    }
     if kind == "timeout":
-        payload = {"status": "FAIL", "error_category": "timeout", "tokens_used": 0, **common}
+        payload = {
+            "status": "FAIL",
+            "error_category": AGY_TIMEOUT,
+            "timeout_source": "subprocess_deadline",
+            "tokens_used": 0,
+            **common,
+        }
         payload.update(gateway_process_sec=wall, gateway_total_sec=wall, timeout_sec=timeout)
         return payload, _tail(res.stderr or res.stdout)
     timing = {
@@ -349,6 +469,18 @@ def ask_direct_agy_patch(
             "tokens_used": 0,
             **common,
             **timing,
+        }
+        return payload, _tail(res.stderr or res.stdout)
+    if _print_timed_out(str(res.stderr or ""), signals):
+        # rc=0/SUCCESS but Agy's own print deadline cut the turn: never parsed, never scored.
+        payload = {
+            "status": "FAIL",
+            "error_category": AGY_TIMEOUT,
+            "timeout_source": "agy_print_timeout",
+            "tokens_used": 0,
+            **common,
+            **timing,
+            "timeout_sec": timeout,
         }
         return payload, _tail(res.stderr or res.stdout)
     failure = {
@@ -385,6 +517,17 @@ def ask_direct_agy_patch(
             "error_category": identity["model_identity_status"],
             "agy_conversation_id": conversation,
         }, f"{identity['model_identity_status']}: {identity['model_identity_reason']}"
+    if _no_delivery_permission_denied(envelope, str(res.stderr or "")):
+        # The served model spent tokens on a tool call the contained lane auto-denies and delivered
+        # nothing: a model failure (tokens stay measured), distinct from an unparsable answer.
+        denied = _denied_actions(envelope)
+        return {
+            **failure,
+            **token_fields,
+            "error_category": AGY_NO_DELIVERY_PERMISSION_DENIED,
+            "agy_denied_actions": denied,
+            "agy_conversation_id": conversation,
+        }, f"{AGY_NO_DELIVERY_PERMISSION_DENIED}: denied_actions={','.join(denied) or 'none'}"
     try:
         payload = _parse_patch_json(raw)
     except Exception as exc:  # noqa: BLE001
