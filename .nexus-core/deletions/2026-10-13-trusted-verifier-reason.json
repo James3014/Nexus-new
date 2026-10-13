@@ -1,0 +1,27 @@
+{
+  "archive": {
+    "commit": "3976f1d0fc3e81870132cca4b7c7399a3b2e8cd5",
+    "ref": "refs/heads/archive/2026-10-13-second-batch"
+  },
+  "companion_changes": [
+    {
+      "after_oid": "7cbf5d4eb0652722f15642d0c6c361daca4f916d",
+      "change_type": "MODIFY",
+      "path": ".github/workflows/trusted-deletion-anchor.yml"
+    },
+    {
+      "after_oid": "fe855540d83e12cc6adfa76439f074e7a576a563",
+      "change_type": "MODIFY",
+      "path": "scripts/ops/trusted_deletion_anchor.py"
+    },
+    {
+      "after_oid": "d78d6154e5aa7243d6f606ddb724f8273b43e5f5",
+      "change_type": "MODIFY",
+      "path": "tests/ops/test_trusted_deletion_anchor.py"
+    }
+  ],
+  "deletions": [],
+  "id": "2026-10-13-trusted-verifier-reason",
+  "reason": "Owner-authorized change of protected path .github/workflows/trusted-deletion-anchor.yml: on controller failure, upload a fixed-schema failure reason and have the default-branch Trusted verifier print it (reason code + remedy) before failing closed; no gate weakened, no deletions; tracking Issue #1974 (#1895 rows 2-3)",
+  "schema": "nexus.core.deletion-manifest.v1"
+}
