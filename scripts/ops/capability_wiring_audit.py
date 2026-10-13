@@ -1761,7 +1761,10 @@ def build_swarm(ws: Path, variant: str) -> Scenario:
             Check(
                 "integration_offered_to_controlled_manager",
                 integration.get("attempted") is True
-                and "ControlledIntegrationManager" in str(integration.get("authority") or ""),
+                and "SelfHostedTaskService.integrate_approved"
+                in str(integration.get("authority") or "")
+                and integration.get("merge_performed") is False
+                and bool(integration.get("refusal")),
                 f"integration={dict(integration)}",
             ),
             Check(
@@ -4056,7 +4059,7 @@ _SPEC_LIST: list[CapSpec] = [
         needs_model=True,
         negative_check=neg_swarm,
         gaps=(
-            "integration through ControlledIntegrationManager needs persisted lifecycle authority (external acceptance bound to the candidate, consumed Owner approval grant, verified receipt); the executor never fabricates it, so a run stops BLOCKED at integration with the manager's refusal",
+            "integration goes through the single Candidate integration owner (SelfHostedTaskService.integrate_approved -> ControlledIntegrationManager, #947) and needs a persisted APPROVED lifecycle task (external acceptance bound to the candidate, consumed Owner approval grant, verified receipt); the executor never fabricates it, so a run stops BLOCKED at integration with the facade's refusal",
         ),
     ),
     CapSpec(

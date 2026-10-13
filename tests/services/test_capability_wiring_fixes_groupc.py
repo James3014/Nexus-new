@@ -309,6 +309,8 @@ def test_swarm_runs_workers_in_worktrees_and_integration_refuses_without_authori
             return source_code.replace("a - b", "a + b"), {"model_calls": 0, "model_name": "stub"}
 
     monkeypatch.setattr(sprint, "LocalArmorCandidateGenerator", _StubWorker)
+    state_dir = tmp_path / "self-hosted-state"
+    monkeypatch.setenv("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR", str(state_dir))
     report = run_bounded_swarm(
         workspace_root=ws, task_id="t2", task="fix", target_file="calc.py", verify_script="repro.py"
     )
@@ -316,7 +318,13 @@ def test_swarm_runs_workers_in_worktrees_and_integration_refuses_without_authori
         "BLOCKED",
         "INTEGRATION_OWNER_AUTHORITY_REQUIRED",
     )
-    assert report["integration"]["refusal"] == "exact approved binding is required"
+    integration = report["integration"]
+    assert integration["authority"].startswith(
+        "nexus.orchestrator.self_hosted_task_service.SelfHostedTaskService.integrate_approved"
+    )
+    assert integration["attempted"] is True and integration["merge_performed"] is False
+    assert integration["refusal"] == "unknown task_id: t2"
+    assert integration["candidate_commit_sha"] == report["winner"]["commit"]
     assert report["winner"]["verify_result"] == "pass"
     assert len(report["workers"]) == 2
     for worker in report["workers"]:

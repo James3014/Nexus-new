@@ -9,18 +9,19 @@ One call does, in the caller's git workspace:
    the armored local lane (``LocalArmorCandidateGenerator``; model calls are serialized), written
    into the worktree and committed;
 4. verify each worktree with the request's verify script (no-shell CLI pre-gate runner);
-5. hand the winning commit to ``ControlledIntegrationManager`` (the live integration authority).
+5. offer the winning commit to the canonical Candidate integration facade
+   (``SelfHostedTaskService.integrate_approved``, which delegates to
+   ``ControlledIntegrationManager``); this module never calls the Git-apply sink itself (#947).
 
-Integration needs persisted lifecycle authority (external acceptance bound to the candidate, a
-consumed Owner approval grant, a verified receipt). This module never fabricates those, so
-without them the manager refuses and the run reports that refusal verbatim. Worktrees and battle
+Integration needs a persisted, APPROVED lifecycle task (external acceptance bound to the
+candidate, a consumed Owner approval grant, a verified receipt). This module never fabricates
+those, so without them the facade refuses and the run reports that refusal verbatim. Worktrees and battle
 branches are removed afterwards (``git worktree remove``; never ``git worktree prune``); the
 candidate commits stay in the object store as evidence.
 """
 
 from __future__ import annotations
 
-import hashlib
 import re
 import subprocess  # nosec B404 - fixed git argv only
 import sys
@@ -30,6 +31,10 @@ from typing import Any
 
 SCHEMA = "nexus.swarm_run.v1"
 MAX_WORKERS = 4
+AUTHORITY = (
+    "nexus.orchestrator.self_hosted_task_service.SelfHostedTaskService.integrate_approved"
+    " -> ControlledIntegrationManager.integrate_authorized_task_state"
+)
 
 
 def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -215,46 +220,49 @@ def run_bounded_swarm(
 def _integrate(
     root: Path, task_id: str, winner: dict[str, Any], branch: str, base: str
 ) -> dict[str, Any]:
-    """Offer the verified winner to the live integration authority with what this run holds.
+    """Offer the verified winner to the canonical Candidate integration facade.
 
-    The state carries only facts this run produced (candidate commit/tree, source branch, base).
-    It has no external acceptance, approval grant or verified lifecycle receipt, so the manager is
-    expected to refuse; that refusal is the recorded result.
+    Candidate integration has one effect owner: ``SelfHostedTaskService.integrate_approved``
+    delegating to ``ControlledIntegrationManager.integrate_authorized_task_state`` (#947). This
+    run never calls the physical sink itself. The facade integrates only a persisted, APPROVED
+    lifecycle task; a swarm run creates none, so the facade is expected to refuse and that
+    refusal is the recorded result. If a lifecycle task with this id exists, its persisted
+    candidate must be this run's winner commit, otherwise nothing is offered.
     """
-    from nexus.orchestrator.governed_integration import ControlledIntegrationManager
+    from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
 
-    state = {
-        "task_id": task_id,
-        "status": "CANDIDATE_COMMITTED",
-        "contract": {
-            "task_id": task_id,
-            "controller_repo_root": str(root),
-            "target_base_revision": base,
-        },
-        "lease": {"target_branch": branch},
-        "promotion_packet": {
-            "candidate_commit_sha": str(winner.get("commit") or ""),
-            "candidate_tree_sha": str(winner.get("tree") or ""),
-            "candidate_state_hash": hashlib.sha256(
-                str(winner.get("commit") or "").encode("utf-8")
-            ).hexdigest(),
-        },
+    record: dict[str, Any] = {
+        "authority": AUTHORITY,
+        "attempted": False,
+        "merge_performed": False,
+        "candidate_commit_sha": str(winner.get("commit") or ""),
+        "source_branch": branch,
+        "target_base_revision": base,
+        "workspace_root": str(root),
     }
-    manager = ControlledIntegrationManager(integration_root=root / ".nexus" / "integration")
     try:
-        receipt = manager.integrate_task_state(
-            state, integration_branch=f"nexus/integration/{task_id}"
+        service = SelfHostedTaskService(auto_reconcile=False)
+        existing = service.get_task(task_id)
+        if existing is not None:
+            packet = existing.get("promotion_packet")
+            persisted = str(
+                existing.get("candidate_commit_sha")
+                or (packet.get("candidate_commit_sha") if isinstance(packet, dict) else "")
+                or ""
+            )
+            if persisted != record["candidate_commit_sha"]:
+                record["refusal"] = "LIFECYCLE_CANDIDATE_MISMATCH"
+                return record
+        record["attempted"] = True
+        result = service.integrate_approved(
+            task_id, integration_branch=f"nexus/integration/{task_id}"
         )
+    except KeyError as exc:  # the facade's unknown-task refusal
+        record["refusal"] = str(exc.args[0] if exc.args else exc)[:300]
+        return record
     except Exception as exc:  # noqa: BLE001 - the refusal is the evidence
-        return {
-            "authority": "nexus.orchestrator.governed_integration.ControlledIntegrationManager.integrate_task_state",
-            "attempted": True,
-            "merge_performed": False,
-            "refusal": str(exc)[:300],
-        }
-    return {
-        "authority": "nexus.orchestrator.governed_integration.ControlledIntegrationManager.integrate_task_state",
-        "attempted": True,
-        "merge_performed": bool(receipt.merge_performed),
-        "integration_commit_sha": receipt.integration_commit_sha,
-    }
+        record["refusal"] = str(exc)[:300]
+        return record
+    record["merge_performed"] = bool(result.get("merge_performed"))
+    record["integration_commit_sha"] = str(result.get("integration_commit_sha") or "")
+    return record

@@ -498,11 +498,11 @@
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_hyper_sprint_9e0dd752"
+        "ev_cap_hyper_sprint_920c99e4"
       ],
       "physical_callable": "capability_executor_registry:hyper_sprint",
       "console_tail": [
-        "\u26a0\ufe0f [MemPalace] Ethical blacklist file missing: /Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/hyper__pos_local_model_call_allowed/nexus/config/ethical_blacklist.json"
+        "\u26a0\ufe0f [MemPalace] Ethical blacklist file missing: /Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/hyper__pos_local_model_call_allowed/nexus/config/ethical_blacklist.json"
       ],
       "negative_control": {
         "name": "negative_control:no_test_file_no_model_call",
@@ -564,7 +564,7 @@
           "target_file": "pricing.py",
           "winner_source": "llm_local_armor",
           "final_score": 1.0,
-          "elapsed_sec": 54.0138,
+          "elapsed_sec": 26.2344,
           "attempt_count": 2,
           "model_calls": 6,
           "model_name": "qwen2.5-coder:7b-instruct",
@@ -615,12 +615,12 @@
         "model_verified_candidate_count": 2,
         "unified_runtime_receipts": [
           {
-            "task_id": "sprint-local-cb19613bdb2a-s0",
+            "task_id": "sprint-local-897ac3c0011b-s0",
             "terminal_status": "INCOMPLETE",
             "local_status": "SUCCEEDED"
           },
           {
-            "task_id": "sprint-local-cb19613bdb2a-s1",
+            "task_id": "sprint-local-897ac3c0011b-s1",
             "terminal_status": "INCOMPLETE",
             "local_status": "SUCCEEDED"
           }
@@ -628,7 +628,7 @@
         "physical_callable": "nexus.research.sprint_service.run_hyper_sprint"
       },
       "receipt_path": "receipts/hyper.json",
-      "audit_seconds": 70.0
+      "audit_seconds": 30.63
     },
     {
       "capability": "nightshift",
@@ -756,7 +756,7 @@
         "line": 1287
       },
       "gaps": [
-        "integration through ControlledIntegrationManager needs persisted lifecycle authority (external acceptance bound to the candidate, consumed Owner approval grant, verified receipt); the executor never fabricates it, so a run stops BLOCKED at integration with the manager's refusal"
+        "integration goes through the single Candidate integration owner (SelfHostedTaskService.integrate_approved -> ControlledIntegrationManager, #947) and needs a persisted APPROVED lifecycle task (external acceptance bound to the candidate, consumed Owner approval grant, verified receipt); the executor never fabricates it, so a run stops BLOCKED at integration with the facade's refusal"
       ],
       "untriggered_production_default": {
         "status": "SKIPPED",
@@ -820,25 +820,37 @@
       "receipt_claims_simulated": true,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_swarm_multi_agent_1d9407e0"
+        "ev_cap_swarm_multi_agent_253350dd"
       ],
       "physical_callable": "capability_executor_registry:swarm_multi_agent",
       "console_tail": [
-        "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC/nexus/contracts/lifecycle_action.py:330: UserWarning: Field name \"schema\" in \"LifecycleActionEnvelope\" shadows an attribute in parent \"BaseModel\"",
-        "  class LifecycleActionEnvelope(BaseModel):",
-        "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC/nexus/contracts/lifecycle_action.py:417: UserWarning: Field name \"schema\" in \"ExternalCandidateAdoptionRequest\" shadows an attribute in parent \"BaseModel\"",
-        "  class ExternalCandidateAdoptionRequest(BaseModel):",
         "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC/nexus/contracts/autonomy_goal.py:115: UserWarning: Field name \"schema\" in \"StandingGrantContext\" shadows an attribute in parent \"_FrozenModel\"",
         "  class StandingGrantContext(_FrozenModel):",
         "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC/nexus/contracts/autonomy_goal.py:269: UserWarning: Field name \"schema\" in \"AutonomyGoalGrantSpec\" shadows an attribute in parent \"_FrozenModel\"",
         "  class AutonomyGoalGrantSpec(_FrozenModel):",
         "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC/nexus/contracts/collaboration_realm.py:101: UserWarning: Field name \"schema\" in \"CollaborationExecutionRealmSpec\" shadows an attribute in parent \"_FrozenModel\"",
-        "  class CollaborationExecutionRealmSpec(_FrozenModel):"
+        "  class CollaborationExecutionRealmSpec(_FrozenModel):",
+        "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC/nexus/contracts/lifecycle_action.py:330: UserWarning: Field name \"schema\" in \"LifecycleActionEnvelope\" shadows an attribute in parent \"BaseModel\"",
+        "  class LifecycleActionEnvelope(BaseModel):",
+        "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC/nexus/contracts/lifecycle_action.py:417: UserWarning: Field name \"schema\" in \"ExternalCandidateAdoptionRequest\" shadows an attribute in parent \"BaseModel\"",
+        "  class ExternalCandidateAdoptionRequest(BaseModel):",
+        "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC/nexus/contracts/operator_outcome_receipt.py:86: UserWarning: Field name \"schema\" in \"OperatorOutcomeReceipt\" shadows an attribute in parent \"BaseModel\"",
+        "  class OperatorOutcomeReceipt(BaseModel):",
+        "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC/nexus/orchestrator/autonomy_policy.py:115: UserWarning: Field name \"schema\" in \"StandingGrantRequest\" shadows an attribute in parent \"_FrozenModel\"",
+        "  class StandingGrantRequest(_FrozenModel):",
+        "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC/nexus/orchestrator/autonomy_policy.py:137: UserWarning: Field name \"schema\" in \"StandingGrantDecision\" shadows an attribute in parent \"_FrozenModel\"",
+        "  class StandingGrantDecision(_FrozenModel):",
+        "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC/nexus/orchestrator/autonomy_policy.py:396: UserWarning: Field name \"schema\" in \"AutonomySubmissionBindingSpec\" shadows an attribute in parent \"_FrozenModel\"",
+        "  class AutonomySubmissionBindingSpec(_FrozenModel):",
+        "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC/nexus/orchestrator/autonomy_policy.py:457: UserWarning: Field name \"schema\" in \"AutonomyEvaluationInput\" shadows an attribute in parent \"_FrozenModel\"",
+        "  class AutonomyEvaluationInput(_FrozenModel):",
+        "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC/nexus/orchestrator/autonomy_policy.py:507: UserWarning: Field name \"schema\" in \"AutonomyDecision\" shadows an attribute in parent \"_FrozenModel\"",
+        "  class AutonomyDecision(_FrozenModel):"
       ],
       "negative_control": {
         "name": "negative_control:foreign_lock_blocks_before_worktrees",
         "passed": true,
-        "detail": "neg.block_reason=FILE_LOCK_CONFLICT worktrees=None lock={'lock_file': '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/swarm__neg/.nexus/multi_agent/locks/file_locks.json', 'files': ['calc.py'], 'conflicts': ['calc.py'], 'held_by_this_task': False}",
+        "detail": "neg.block_reason=FILE_LOCK_CONFLICT worktrees=None lock={'lock_file': '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/swarm__neg/.nexus/multi_agent/locks/file_locks.json', 'files': ['calc.py'], 'conflicts': ['calc.py'], 'held_by_this_task': False}",
         "negative_status": "BLOCKED",
         "negative_block_reason": "FILE_LOCK_CONFLICT"
       },
@@ -857,32 +869,32 @@
         {
           "name": "file_lock_held_then_released",
           "passed": true,
-          "detail": "lock={'lock_file': '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/multi_agent/locks/file_locks.json', 'files': ['calc.py'], 'conflicts': [], 'held_by_this_task': True, 'released': True}"
+          "detail": "lock={'lock_file': '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/multi_agent/locks/file_locks.json', 'files': ['calc.py'], 'conflicts': [], 'held_by_this_task': True, 'released': True}"
         },
         {
           "name": "worker_commits_in_object_store",
           "passed": true,
-          "detail": "commits=['12527f35b05214b28ece7426d19c97873dcc830f', '36431cc34bb5992b9950e79ad4a571b860d04cc0']"
+          "detail": "commits=['0aac02dc218e7d4d91e8e6306ac4f0325b792a3f', '8c760e7bfc248cc95b81dcf15fb5eaf86804aca8']"
         },
         {
           "name": "winner_verified_by_repro",
           "passed": true,
-          "detail": "winner={'strategy': 'conservative', 'worktree': '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_conservative', 'commit': '36431cc34bb5992b9950e79ad4a571b860d04cc0', 'tree': '770e0013d7d744b401d8c4f9e676cb604edde31b', 'verify_result':"
+          "detail": "winner={'strategy': 'aggressive', 'worktree': '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_aggressive', 'commit': '0aac02dc218e7d4d91e8e6306ac4f0325b792a3f', 'tree': '76c114375636bb682d74df2fc97efece0625a0d4', 'verify_result': 'p"
         },
         {
           "name": "integration_offered_to_controlled_manager",
           "passed": true,
-          "detail": "integration={'authority': 'nexus.orchestrator.governed_integration.ControlledIntegrationManager.integrate_task_state', 'attempted': True, 'merge_performed': False, 'refusal': 'exact approved binding is required'}"
+          "detail": "integration={'authority': 'nexus.orchestrator.self_hosted_task_service.SelfHostedTaskService.integrate_approved -> ControlledIntegrationManager.integrate_authorized_task_state', 'attempted': True, 'merge_performed': False, 'candidate_commit_sha': '0aac02dc218e7d4d91e8e6306ac4f0325b792a3f', 'source_branch': 'battle_wiring-swarm-pos_local_model_call_allowed_aggressive_1', 'target_base_revision': 'f4"
         },
         {
           "name": "worktrees_removed_and_workspace_untouched",
           "passed": true,
-          "detail": "worktrees=['/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_conservative', '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_s"
+          "detail": "worktrees=['/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_conservative', '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle"
         },
         {
           "name": "negative_control:foreign_lock_blocks_before_worktrees",
           "passed": true,
-          "detail": "neg.block_reason=FILE_LOCK_CONFLICT worktrees=None lock={'lock_file': '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/swarm__neg/.nexus/multi_agent/locks/file_locks.json', 'files': ['calc.py'], 'conflicts': ['calc.py'], 'held_by_this_task': False}"
+          "detail": "neg.block_reason=FILE_LOCK_CONFLICT worktrees=None lock={'lock_file': '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/swarm__neg/.nexus/multi_agent/locks/file_locks.json', 'files': ['calc.py'], 'conflicts': ['calc.py'], 'held_by_this_task': False}"
         }
       ],
       "verdict": "BLOCKED_INTEGRATION_OWNER_AUTHORITY_REQUIRED",
@@ -898,11 +910,11 @@
         "swarm_report": {
           "schema": "nexus.swarm_run.v1",
           "task_id": "wiring-swarm-pos_local_model_call_allowed",
-          "workspace_root": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/swarm__pos_local_model_call_allowed",
+          "workspace_root": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/swarm__pos_local_model_call_allowed",
           "target_file": "calc.py",
           "verify_script": "repro.py",
           "lock": {
-            "lock_file": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/multi_agent/locks/file_locks.json",
+            "lock_file": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/multi_agent/locks/file_locks.json",
             "files": [
               "calc.py"
             ],
@@ -913,62 +925,66 @@
           "workers": [
             {
               "strategy": "aggressive",
-              "worktree": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_aggressive",
+              "worktree": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_aggressive",
               "worker_status": "candidate_written",
               "model_calls": 3,
               "model_name": "qwen2.5-coder:7b-instruct",
               "local_candidate_hash": "6e3cd5c1d45e5bae8c21839e0b556bf294182b0526d23b90e8d16fa6562cd31b",
-              "commit": "12527f35b05214b28ece7426d19c97873dcc830f",
-              "tree": "770e0013d7d744b401d8c4f9e676cb604edde31b",
+              "commit": "0aac02dc218e7d4d91e8e6306ac4f0325b792a3f",
+              "tree": "76c114375636bb682d74df2fc97efece0625a0d4",
               "verify_exit_codes": [
                 0
               ],
               "verify_result": "pass",
-              "candidate_state_hash": "12527f35b05214b28ece7426d19c97873dcc830f"
+              "candidate_state_hash": "0aac02dc218e7d4d91e8e6306ac4f0325b792a3f"
             },
             {
               "strategy": "conservative",
-              "worktree": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_conservative",
+              "worktree": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_conservative",
               "worker_status": "candidate_written",
               "model_calls": 3,
               "model_name": "qwen2.5-coder:7b-instruct",
               "local_candidate_hash": "6e3cd5c1d45e5bae8c21839e0b556bf294182b0526d23b90e8d16fa6562cd31b",
-              "commit": "36431cc34bb5992b9950e79ad4a571b860d04cc0",
-              "tree": "770e0013d7d744b401d8c4f9e676cb604edde31b",
+              "commit": "8c760e7bfc248cc95b81dcf15fb5eaf86804aca8",
+              "tree": "76c114375636bb682d74df2fc97efece0625a0d4",
               "verify_exit_codes": [
                 0
               ],
               "verify_result": "pass",
-              "candidate_state_hash": "36431cc34bb5992b9950e79ad4a571b860d04cc0"
+              "candidate_state_hash": "8c760e7bfc248cc95b81dcf15fb5eaf86804aca8"
             }
           ],
           "winner": {
-            "strategy": "conservative",
-            "worktree": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_conservative",
-            "commit": "36431cc34bb5992b9950e79ad4a571b860d04cc0",
-            "tree": "770e0013d7d744b401d8c4f9e676cb604edde31b",
+            "strategy": "aggressive",
+            "worktree": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_aggressive",
+            "commit": "0aac02dc218e7d4d91e8e6306ac4f0325b792a3f",
+            "tree": "76c114375636bb682d74df2fc97efece0625a0d4",
             "verify_result": "pass"
           },
           "integration": {
-            "authority": "nexus.orchestrator.governed_integration.ControlledIntegrationManager.integrate_task_state",
+            "authority": "nexus.orchestrator.self_hosted_task_service.SelfHostedTaskService.integrate_approved -> ControlledIntegrationManager.integrate_authorized_task_state",
             "attempted": true,
             "merge_performed": false,
-            "refusal": "exact approved binding is required"
+            "candidate_commit_sha": "0aac02dc218e7d4d91e8e6306ac4f0325b792a3f",
+            "source_branch": "battle_wiring-swarm-pos_local_model_call_allowed_aggressive_1",
+            "target_base_revision": "f4ed2008c72d6b6e0b8e1ab74226afc5c490a2f5",
+            "workspace_root": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/swarm__pos_local_model_call_allowed",
+            "refusal": "unknown task_id: wiring-swarm-pos_local_model_call_allowed"
           },
           "status": "BLOCKED",
           "reason": "INTEGRATION_OWNER_AUTHORITY_REQUIRED",
-          "base_commit": "199e46dc8ea3cf2541463e859bc1a92924c10117",
+          "base_commit": "f4ed2008c72d6b6e0b8e1ab74226afc5c490a2f5",
           "worktrees": [
-            "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_conservative",
-            "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_aggressive"
+            "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_conservative",
+            "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_aggressive"
           ],
           "branches": [
             "battle_wiring-swarm-pos_local_model_call_allowed_conservative_0",
             "battle_wiring-swarm-pos_local_model_call_allowed_aggressive_1"
           ],
           "worktrees_removed": [
-            "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_conservative",
-            "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_aggressive"
+            "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_conservative",
+            "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_aggressive"
           ]
         },
         "worker_count": 2,
@@ -978,7 +994,7 @@
         "physical_callable": "nexus.engine.swarm_run.run_bounded_swarm"
       },
       "receipt_path": "receipts/swarm.json",
-      "audit_seconds": 39.73
+      "audit_seconds": 24.88
     },
     {
       "capability": "multi_agent",
@@ -1053,14 +1069,14 @@
       "receipt_claims_simulated": true,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_swarm_multi_agent_02fac7db"
+        "ev_cap_swarm_multi_agent_cfbdae86"
       ],
       "physical_callable": "capability_executor_registry:swarm_multi_agent",
       "console_tail": [],
       "negative_control": {
         "name": "negative_control:foreign_lock_blocks_before_worktrees",
         "passed": true,
-        "detail": "neg.block_reason=FILE_LOCK_CONFLICT worktrees=None lock={'lock_file': '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/multi_agent__neg/.nexus/multi_agent/locks/file_locks.json', 'files': ['calc.py'], 'conflicts': ['calc.py'], 'held_by_this_task': False}",
+        "detail": "neg.block_reason=FILE_LOCK_CONFLICT worktrees=None lock={'lock_file': '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/multi_agent__neg/.nexus/multi_agent/locks/file_locks.json', 'files': ['calc.py'], 'conflicts': ['calc.py'], 'held_by_this_task': False}",
         "negative_status": "BLOCKED",
         "negative_block_reason": "FILE_LOCK_CONFLICT"
       },
@@ -1079,32 +1095,32 @@
         {
           "name": "file_lock_held_then_released",
           "passed": true,
-          "detail": "lock={'lock_file': '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/multi_agent/locks/file_locks.json', 'files': ['calc.py'], 'conflicts': [], 'held_by_this_task': True, 'released': True}"
+          "detail": "lock={'lock_file': '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/multi_agent/locks/file_locks.json', 'files': ['calc.py'], 'conflicts': [], 'held_by_this_task': True, 'released': True}"
         },
         {
           "name": "worker_commits_in_object_store",
           "passed": true,
-          "detail": "commits=['e1d4315f7c10feb7e8608c87ce97ec166107a32e', '8ee8d311cdc1fce254b69cf4b87b28d62145bbc6']"
+          "detail": "commits=['0d0899bb18128267283a6269a99fe47d4672d90c', 'c87f38bab9c446093b067232a03e17eb6319db81']"
         },
         {
           "name": "winner_verified_by_repro",
           "passed": true,
-          "detail": "winner={'strategy': 'conservative', 'worktree': '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_conservative', 'commit': '8ee8d311cdc1fce254b69cf4b87b28d62145bbc6', 'tree': '82cde51b81e7c879388bff4939798d12cb68c6fb', 'ver"
+          "detail": "winner={'strategy': 'aggressive', 'worktree': '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_aggressive', 'commit': '0d0899bb18128267283a6269a99fe47d4672d90c', 'tree': '76c114375636bb682d74df2fc97efece0625a0d4', 'verify"
         },
         {
           "name": "integration_offered_to_controlled_manager",
           "passed": true,
-          "detail": "integration={'authority': 'nexus.orchestrator.governed_integration.ControlledIntegrationManager.integrate_task_state', 'attempted': True, 'merge_performed': False, 'refusal': 'exact approved binding is required'}"
+          "detail": "integration={'authority': 'nexus.orchestrator.self_hosted_task_service.SelfHostedTaskService.integrate_approved -> ControlledIntegrationManager.integrate_authorized_task_state', 'attempted': True, 'merge_performed': False, 'candidate_commit_sha': '0d0899bb18128267283a6269a99fe47d4672d90c', 'source_branch': 'battle_wiring-multi_agent-pos_local_model_call_allowed_aggressive_1', 'target_base_revision"
         },
         {
           "name": "worktrees_removed_and_workspace_untouched",
           "passed": true,
-          "detail": "worktrees=['/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_conservative', '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/multi_agent__pos_local_model_call_allowed/.n"
+          "detail": "worktrees=['/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_conservative', '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/multi_agent__pos_local_model_call_allowed/"
         },
         {
           "name": "negative_control:foreign_lock_blocks_before_worktrees",
           "passed": true,
-          "detail": "neg.block_reason=FILE_LOCK_CONFLICT worktrees=None lock={'lock_file': '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/multi_agent__neg/.nexus/multi_agent/locks/file_locks.json', 'files': ['calc.py'], 'conflicts': ['calc.py'], 'held_by_this_task': False}"
+          "detail": "neg.block_reason=FILE_LOCK_CONFLICT worktrees=None lock={'lock_file': '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/multi_agent__neg/.nexus/multi_agent/locks/file_locks.json', 'files': ['calc.py'], 'conflicts': ['calc.py'], 'held_by_this_task': False}"
         }
       ],
       "verdict": "BLOCKED_INTEGRATION_OWNER_AUTHORITY_REQUIRED",
@@ -1120,11 +1136,11 @@
         "swarm_report": {
           "schema": "nexus.swarm_run.v1",
           "task_id": "wiring-multi_agent-pos_local_model_call_allowed",
-          "workspace_root": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/multi_agent__pos_local_model_call_allowed",
+          "workspace_root": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/multi_agent__pos_local_model_call_allowed",
           "target_file": "calc.py",
           "verify_script": "repro.py",
           "lock": {
-            "lock_file": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/multi_agent/locks/file_locks.json",
+            "lock_file": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/multi_agent/locks/file_locks.json",
             "files": [
               "calc.py"
             ],
@@ -1135,62 +1151,66 @@
           "workers": [
             {
               "strategy": "aggressive",
-              "worktree": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_aggressive",
+              "worktree": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_aggressive",
               "worker_status": "candidate_written",
               "model_calls": 3,
               "model_name": "qwen2.5-coder:7b-instruct",
               "local_candidate_hash": "6e3cd5c1d45e5bae8c21839e0b556bf294182b0526d23b90e8d16fa6562cd31b",
-              "commit": "e1d4315f7c10feb7e8608c87ce97ec166107a32e",
-              "tree": "770e0013d7d744b401d8c4f9e676cb604edde31b",
+              "commit": "0d0899bb18128267283a6269a99fe47d4672d90c",
+              "tree": "76c114375636bb682d74df2fc97efece0625a0d4",
               "verify_exit_codes": [
                 0
               ],
               "verify_result": "pass",
-              "candidate_state_hash": "e1d4315f7c10feb7e8608c87ce97ec166107a32e"
+              "candidate_state_hash": "0d0899bb18128267283a6269a99fe47d4672d90c"
             },
             {
               "strategy": "conservative",
-              "worktree": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_conservative",
+              "worktree": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_conservative",
               "worker_status": "candidate_written",
               "model_calls": 5,
               "model_name": "qwen2.5-coder:7b-instruct",
               "local_candidate_hash": "a38e1153fd828c17a0f6ffd9fe45d7a6b9299226e8c27ec65ef12c5f5a570994",
-              "commit": "8ee8d311cdc1fce254b69cf4b87b28d62145bbc6",
-              "tree": "82cde51b81e7c879388bff4939798d12cb68c6fb",
+              "commit": "c87f38bab9c446093b067232a03e17eb6319db81",
+              "tree": "1957e91467e819d99988e2b744cdb2bee660c693",
               "verify_exit_codes": [
                 0
               ],
               "verify_result": "pass",
-              "candidate_state_hash": "8ee8d311cdc1fce254b69cf4b87b28d62145bbc6"
+              "candidate_state_hash": "c87f38bab9c446093b067232a03e17eb6319db81"
             }
           ],
           "winner": {
-            "strategy": "conservative",
-            "worktree": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_conservative",
-            "commit": "8ee8d311cdc1fce254b69cf4b87b28d62145bbc6",
-            "tree": "82cde51b81e7c879388bff4939798d12cb68c6fb",
+            "strategy": "aggressive",
+            "worktree": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_aggressive",
+            "commit": "0d0899bb18128267283a6269a99fe47d4672d90c",
+            "tree": "76c114375636bb682d74df2fc97efece0625a0d4",
             "verify_result": "pass"
           },
           "integration": {
-            "authority": "nexus.orchestrator.governed_integration.ControlledIntegrationManager.integrate_task_state",
+            "authority": "nexus.orchestrator.self_hosted_task_service.SelfHostedTaskService.integrate_approved -> ControlledIntegrationManager.integrate_authorized_task_state",
             "attempted": true,
             "merge_performed": false,
-            "refusal": "exact approved binding is required"
+            "candidate_commit_sha": "0d0899bb18128267283a6269a99fe47d4672d90c",
+            "source_branch": "battle_wiring-multi_agent-pos_local_model_call_allowed_aggressive_1",
+            "target_base_revision": "6566f122e0d3ff5f5b2471027e3c786a64366aaa",
+            "workspace_root": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/multi_agent__pos_local_model_call_allowed",
+            "refusal": "unknown task_id: wiring-multi_agent-pos_local_model_call_allowed"
           },
           "status": "BLOCKED",
           "reason": "INTEGRATION_OWNER_AUTHORITY_REQUIRED",
-          "base_commit": "047a987f3ae10171e2546d3a535b225657f43171",
+          "base_commit": "6566f122e0d3ff5f5b2471027e3c786a64366aaa",
           "worktrees": [
-            "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_conservative",
-            "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_aggressive"
+            "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_conservative",
+            "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_aggressive"
           ],
           "branches": [
             "battle_wiring-multi_agent-pos_local_model_call_allowed_conservative_0",
             "battle_wiring-multi_agent-pos_local_model_call_allowed_aggressive_1"
           ],
           "worktrees_removed": [
-            "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_conservative",
-            "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_aggressive"
+            "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_conservative",
+            "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_aggressive"
           ]
         },
         "worker_count": 2,
@@ -1200,7 +1220,7 @@
         "physical_callable": "nexus.engine.swarm_run.run_bounded_swarm"
       },
       "receipt_path": "receipts/multi_agent.json",
-      "audit_seconds": 65.22
+      "audit_seconds": 50.22
     },
     {
       "capability": "drone",
@@ -3662,7 +3682,7 @@
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_committee_0b33301a"
+        "ev_cap_committee_1bf5eeb3"
       ],
       "physical_callable": "capability_executor_registry:committee",
       "console_tail": [
@@ -3691,7 +3711,7 @@
         {
           "name": "winner_or_abstain",
           "passed": true,
-          "detail": "winner=wiring-committee-pos_committee_feature_flag-wiring-proposer-a-1-d7b9 abstain=False"
+          "detail": "winner=wiring-committee-pos_committee_feature_flag-wiring-proposer-a-1-23df abstain=False"
         },
         {
           "name": "each_candidate_executed_in_own_copy",
@@ -3726,7 +3746,7 @@
         "error": "",
         "result": {
           "task_id": "wiring-committee-pos_committee_feature_flag",
-          "winner_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-a-1-d7b9",
+          "winner_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-a-1-23df",
           "abstained": false,
           "failure_bucket": "",
           "confidence": 0.7,
@@ -3739,31 +3759,31 @@
         "verdicts": [
           {
             "verifier": "patch_execution",
-            "candidate_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-a-1-d7b9",
+            "candidate_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-a-1-23df",
             "verdict": "pass",
             "score": 1.0
           },
           {
             "verifier": "patch_execution",
-            "candidate_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-b-1-d9b3",
+            "candidate_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-b-1-0945",
             "verdict": "fail",
             "score": 0.0
           },
           {
             "verifier": "patch_execution",
-            "candidate_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-c-1-53c3",
+            "candidate_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-c-1-2f46",
             "verdict": "fail",
             "score": 0.0
           }
         ],
-        "winner_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-a-1-d7b9",
+        "winner_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-a-1-23df",
         "winner_proposer_id": "wiring-proposer-a",
         "explicit_abstain": false,
         "verifier_mode": "patch_execution",
         "execution_results": [
           {
-            "candidate_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-a-1-d7b9",
-            "workspace": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/committee__pos_committee_feature_flag/.nexus/committee/wiring-committee-pos_committee_feature_flag/candidate-0",
+            "candidate_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-a-1-23df",
+            "workspace": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/committee__pos_committee_feature_flag/.nexus/committee/wiring-committee-pos_committee_feature_flag/candidate-0",
             "patch_sha256": "4c25d8cc4fbe181aa2f2f91b7d6295e8787f616feb6b5b75b88e620bf079f74f",
             "apply_status": "applied",
             "commands": [
@@ -3775,8 +3795,8 @@
             "verify_result": "pass"
           },
           {
-            "candidate_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-b-1-d9b3",
-            "workspace": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/committee__pos_committee_feature_flag/.nexus/committee/wiring-committee-pos_committee_feature_flag/candidate-1",
+            "candidate_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-b-1-0945",
+            "workspace": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/committee__pos_committee_feature_flag/.nexus/committee/wiring-committee-pos_committee_feature_flag/candidate-1",
             "patch_sha256": "52346d16453a301b3f2ce811431d6483eb6d262bcf1daf3219312464822c34bc",
             "apply_status": "applied",
             "commands": [
@@ -3788,8 +3808,8 @@
             "verify_result": "fail"
           },
           {
-            "candidate_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-c-1-53c3",
-            "workspace": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/committee__pos_committee_feature_flag/.nexus/committee/wiring-committee-pos_committee_feature_flag/candidate-2",
+            "candidate_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-c-1-2f46",
+            "workspace": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun2/20261013T064143Z/workspaces/committee__pos_committee_feature_flag/.nexus/committee/wiring-committee-pos_committee_feature_flag/candidate-2",
             "patch_sha256": "b579d2b6073b308b28744e2105152c67faecd1d922bd154f11824dce5048f8af",
             "apply_status": "applied",
             "commands": [
@@ -3803,7 +3823,7 @@
         ]
       },
       "receipt_path": "receipts/committee.json",
-      "audit_seconds": 18.92
+      "audit_seconds": 1.23
     },
     {
       "capability": "xray",
@@ -7491,6 +7511,33 @@
         "reason": ""
       },
       "reason": "group C wiring fixes (#1978): hyper local channel, committee proposer_id + execution verifier, swarm bounded run; rows replaced in place"
+    },
+    {
+      "generated_at": "2026-10-13T06:43:30.958448+00:00",
+      "git_head": "3d4cfbd107fd78c85e00b669b7f1fb517c689813",
+      "tree": "origin/main ab9537a9f + group C wiring fixes (#1978) rebased; swarm integration routed through the single Candidate integration owner (#947)",
+      "only": [
+        "hyper",
+        "committee",
+        "swarm",
+        "multi_agent"
+      ],
+      "model_probe": {
+        "available": true,
+        "url": "http://127.0.0.1:11434",
+        "model": "qwen2.5-coder:7b-instruct",
+        "models": [
+          "incoai/Qwen3.6-35B-A3B-Splash",
+          "incoai/Qwen3.8-27B-Splash",
+          "nomic-embed-text:latest",
+          "qwen2.5-coder:14b-instruct-q3_K_M",
+          "qwen2.5-coder:7b",
+          "qwen2.5-coder:7b-instruct",
+          "qwen3.5:9b"
+        ],
+        "reason": ""
+      },
+      "reason": "group C rerun after routing swarm/multi_agent integration through SelfHostedTaskService.integrate_approved (effect-owner uniqueness, #947); rows replaced in place"
     }
   ]
 }
