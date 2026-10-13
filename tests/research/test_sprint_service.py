@@ -942,7 +942,7 @@ def test_llm_edit_protocol_rejects_ambiguous_snippet():
     assert reason == "llm_target_snippet_not_unique"
 
 
-def test_llm_generator_applies_edit_protocol(monkeypatch, tmp_path: Path):
+def test_llm_generator_applies_edit_protocol(monkeypatch, tmp_path: Path, governed_admission):
     _write_ready_learn_slo(tmp_path)
     target = tmp_path / "demo.py"
     target.write_text("def normalize(text):\n    return text\n", encoding="utf-8")
@@ -990,7 +990,7 @@ def test_llm_generator_applies_edit_protocol(monkeypatch, tmp_path: Path):
     assert "target_snippet" in captured["schema"]
 
 
-def test_llm_generator_uses_unified_runtime_on_revisioned_workspace(monkeypatch, tmp_path: Path):
+def test_llm_generator_uses_unified_runtime_on_revisioned_workspace(monkeypatch, tmp_path: Path, governed_admission):
     generator = LLMCandidateGenerator(tmp_path, safe_mode=True)
     monkeypatch.setattr(generator, "_workspace_revision", lambda: "revision-001")
     monkeypatch.setattr(
@@ -1023,7 +1023,7 @@ def test_llm_generator_uses_unified_runtime_on_revisioned_workspace(monkeypatch,
     assert receipt["claim_boundary"]["public_claim_allowed"] is False
 
 
-def test_llm_generator_can_route_local_assist_into_online_context(monkeypatch, tmp_path: Path):
+def test_llm_generator_can_route_local_assist_into_online_context(monkeypatch, tmp_path: Path, governed_admission_advisor):
     from nexus.services.local_assist_service import LocalAssistService
     from nexus.services.local_heal.local_model_provider import InjectedLocalModelProvider
 
@@ -1031,7 +1031,11 @@ def test_llm_generator_can_route_local_assist_into_online_context(monkeypatch, t
     generator = LLMCandidateGenerator(tmp_path, safe_mode=True, target_file="demo.py")
     generator._workspace_revision = lambda: "revision-hybrid-001"
     generator.local_service = LocalAssistService(
-        provider=InjectedLocalModelProvider(lambda _request: "local diagnosis: prefer strip")
+        provider=InjectedLocalModelProvider(
+            lambda _request: "local diagnosis: prefer strip",
+            provider_identity="ollama",
+            model_identity="qwen3.5:9b",
+        )
     )
     online_calls: list[tuple[tuple, dict]] = []
 
@@ -1059,12 +1063,12 @@ def test_llm_generator_can_route_local_assist_into_online_context(monkeypatch, t
     assert code.endswith("return text.strip()\n")
     assert receipt["local"]["status"] == "SUCCEEDED"
     assert receipt["online"]["status"] == "SUCCEEDED"
-    assert "local diagnosis: prefer strip" in online_calls[0][0][0]
+    assert "local diagnosis: prefer strip" in online_calls[0][1]["prompt"]
     assert receipt["claim_boundary"]["local_online_continuation"] is True
     assert receipt["claim_boundary"]["public_claim_allowed"] is False
 
 
-def test_llm_mode_estimates_tokens_when_gateway_stats_missing(monkeypatch, tmp_path: Path):
+def test_llm_mode_estimates_tokens_when_gateway_stats_missing(monkeypatch, tmp_path: Path, governed_admission):
     _write_ready_learn_slo(tmp_path)
     target = tmp_path / "demo.py"
     target.write_text("print('x')\n", encoding="utf-8")
@@ -1112,7 +1116,7 @@ def test_llm_mode_estimates_tokens_when_gateway_stats_missing(monkeypatch, tmp_p
     assert res.gateway_timeout_sec == 7
 
 
-def test_llm_failure_preserves_gateway_token_source(monkeypatch, tmp_path: Path):
+def test_llm_failure_preserves_gateway_token_source(monkeypatch, tmp_path: Path, governed_admission):
     _write_ready_learn_slo(tmp_path)
     target = tmp_path / "demo.py"
     target.write_text("print('x')\n", encoding="utf-8")
@@ -1162,7 +1166,7 @@ def test_llm_failure_preserves_gateway_token_source(monkeypatch, tmp_path: Path)
     assert res.fallback_used is True
 
 
-def test_llm_model_name_can_be_overridden(monkeypatch, tmp_path: Path):
+def test_llm_model_name_can_be_overridden(monkeypatch, tmp_path: Path, governed_admission):
     _write_ready_learn_slo(tmp_path)
     target = tmp_path / "demo.py"
     target.write_text("print('x')\n", encoding="utf-8")
@@ -1186,19 +1190,19 @@ def test_llm_model_name_can_be_overridden(monkeypatch, tmp_path: Path):
         def evaluate_candidate(self, **kwargs):
             return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code="print('ok')\n", source=kwargs["source"])
 
-    monkeypatch.setenv("NEXUS_GEMINI_MODEL_NAME", "gemini-3.1-pro-preview")
+    monkeypatch.setenv("NEXUS_GEMINI_MODEL_NAME", "gemini-3.8-flash-medium")
     monkeypatch.setattr("nexus.services.gateway.BattlesuitGateway", FakeGateway)
     monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
 
     cfg = SprintConfig(task="fix", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
 
-    assert captured["model_name"] == "gemini-3.1-pro-preview"
-    assert res.model_name == "gemini-3.1-pro-preview"
+    assert captured["model_name"] == "gemini-3.8-flash-medium"
+    assert res.model_name == "gemini-3.8-flash-medium"
     assert res.model_patch_generated is True
 
 
-def test_llm_gateway_fail_payload_falls_back_to_local(monkeypatch, tmp_path: Path):
+def test_llm_gateway_fail_payload_falls_back_to_local(monkeypatch, tmp_path: Path, governed_admission):
     _write_ready_learn_slo(tmp_path)
     target = tmp_path / "demo.py"
     target.write_text("print('x')\n", encoding="utf-8")
