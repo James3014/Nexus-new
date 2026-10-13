@@ -10,12 +10,12 @@
       "path": ".github/workflows/trusted-deletion-anchor.yml"
     },
     {
-      "after_oid": "fe855540d83e12cc6adfa76439f074e7a576a563",
+      "after_oid": "fff55ddac69104df1ca543a93a6246c5ca13d6f4",
       "change_type": "MODIFY",
       "path": "scripts/ops/trusted_deletion_anchor.py"
     },
     {
-      "after_oid": "d78d6154e5aa7243d6f606ddb724f8273b43e5f5",
+      "after_oid": "99987229019a169f3010166fa60ce7cb3f49e412",
       "change_type": "MODIFY",
       "path": "tests/ops/test_trusted_deletion_anchor.py"
     }
