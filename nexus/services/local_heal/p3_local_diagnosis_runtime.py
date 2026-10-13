@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from nexus.services.local_heal.local_model_provider import (
@@ -123,17 +123,45 @@ def _parse_advisor_response(raw_text: str) -> str:
 
 
 class RealLocalDiagnosis:
-    MODEL_NAME = "qwen2.5-s2t-advisor:3b"
+    # The model is never hard-coded: it is the worker the Workforce policy admits
+    # for this role (nexus-runtime#185).  No admitted worker -> no model call.
+    MODEL_ROLE = "compact_diagnosis"
     PROVIDER_NAME = "OllamaLocalModelProvider"
 
     def __init__(self) -> None:
         self.ollama_enabled = os.environ.get("NEXUS_OLLAMA_ENABLED") == "1"
+        self.model_resolution_error = ""
+
+    def resolve_model_name(self) -> str:
+        """Return the admitted model, or raise ``ModelDefaultNotAdmittedError``."""
+        from nexus_runtime.planning.services.model_default_resolution import (
+            resolve_default_model,
+        )
+
+        return resolve_default_model(self.MODEL_ROLE)
 
     def compute_p3_local_diagnosis_runtime(
         self, skeleton: dict[str, Any], anchor: dict[str, Any]
     ) -> P3LocalDiagnosisRuntimeReceipt:
         if not self.ollama_enabled:
             return _compute_p3_local_diagnosis_runtime(skeleton, anchor)
+
+        from nexus_runtime.planning.services.model_default_resolution import (
+            ModelDefaultNotAdmittedError,
+        )
+
+        try:
+            model_name = self.resolve_model_name()
+        except ModelDefaultNotAdmittedError as exc:
+            # Fail closed: no admitted model means no model call and no
+            # runtime-enabled claim; return the deterministic receipt.
+            self.model_resolution_error = str(exc)
+            return replace(
+                _compute_p3_local_diagnosis_runtime(skeleton, anchor),
+                reason=f"MODEL_DEFAULT_NOT_ADMITTED:{exc.role}",
+                cloud_call_invoked=False,
+                runtime_behavior_changed=False,
+            )
 
         try:
             provider = OllamaLocalModelProvider()
@@ -142,7 +170,7 @@ class RealLocalDiagnosis:
                 task_id=skeleton.get("task_id", ""),
                 prompt=prompt,
                 evidence_refs=(),
-                model_name=self.MODEL_NAME,
+                model_name=model_name,
                 api_type="generate",
                 phase=skeleton.get("phase", "planning"),
                 attempt_id=skeleton.get("attempt_id", "attempt-1"),

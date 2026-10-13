@@ -131,14 +131,6 @@ models:
     requires_live_preflight: true
     stable_promotion_proven: false
 
-  local_advisor_3b:
-    cohort: required
-    provider: ollama
-    transport: ollama_http
-    model: qwen2.5-s2t-advisor:3b
-    timeout_sec: 180
-    resource_tier: local_light
-
   local_qwen7b:
     cohort: required
     provider: ollama
@@ -281,3 +273,10 @@ excluded:
   local_ornith9b:
     model: ornith:9b
     reason: local_model_removed_from_machine
+  local_advisor_3b:
+    # History label only: the 2026-07-29 matrix scored this tag, but it was
+    # stock qwen2.5:3b under a custom name (adapter weights absent).  Retired
+    # 2026-10-13; never enrolled again.  See model_workforce.yaml worker
+    # local_advisor_3b (REGISTERED_BLOCKED) for the evidence refs.
+    historical_model: qwen2.5-s2t-advisor:3b
+    reason: retired_2026-10-13_stock_qwen25_3b_under_custom_name_weights_absent
