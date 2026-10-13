@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import re
 import time
@@ -91,9 +90,7 @@ def assess_local_reflex(
 ) -> ReflexAssessment:
     """Fast route-risk assessment; local model providers are optional adapters."""
     start = time.monotonic()
-    provider_name = (
-        (provider or os.environ.get("NEXUS_LOCAL_REFLEX_PROVIDER") or "heuristic").strip().lower()
-    )
+    provider_name = (provider or os.environ.get("NEXUS_LOCAL_REFLEX_PROVIDER") or "heuristic").strip().lower()
     if provider_name in {"off", "none", "disabled"}:
         return _assessment(
             provider="disabled",
@@ -130,7 +127,7 @@ def assess_local_reflex(
             repo_kind=repo_kind,
             fixture_kind=fixture_kind,
             start=start,
-            reasons=("ollama_unavailable",),
+            reasons=("ollama_unavailable", "ollama_reflex_deprecated"),
         )
         return base
     if provider_name == "bonsai":
@@ -229,104 +226,26 @@ def _assessment(
         needs_research=needs_research,
         needs_hyper=needs_hyper,
         needs_ultra_review=needs_ultra_review,
-        confidence=0.82
-        if combined_reasons or low_risk_public_repair or low_risk_public_bugfix
-        else 0.65,
+        confidence=0.82 if combined_reasons or low_risk_public_repair or low_risk_public_bugfix else 0.65,
         latency_ms=max(0, int((time.monotonic() - start) * 1000)),
         reasons=combined_reasons,
     )
 
 
-def _try_ollama_reflex(
-    *, task_desc: str, timeout_sec: float, start: float
-) -> ReflexAssessment | None:
-    """Ask the Ollama endpoint for a risk label; None when it cannot be reached or read.
+def _try_ollama_reflex(*, task_desc: str, timeout_sec: float, start: float) -> ReflexAssessment | None:
+    """[DEPRECATED] The Ollama reflex path was retired in 4039601d2; always returns None.
 
-    Refs #1924: this used to fill in a fixed label without contacting Ollama, so a
-    dead endpoint still reported provider="ollama", available=True. Every failure
-    (connection, HTTP status, non-JSON body) now returns None and the caller falls
-    back to the heuristic with available=False. A reply without a valid risk label
-    counts as high risk (conservative), never as an approval.
+    Refs #1924: the stub used to return a fixed label as provider="ollama_hardened",
+    available=True without contacting any endpoint, so a dead endpoint still looked
+    like a live local model. It makes no network call and reports nothing; the caller
+    falls back to the heuristic with available=False and "ollama_reflex_deprecated".
     """
-    base_url = os.environ.get("NEXUS_OLLAMA_URL", "http://localhost:11434").rstrip("/")
-    model = os.environ.get("NEXUS_OLLAMA_REFLEX_MODEL") or os.environ.get("MODEL") or "qwen2.5:1.5b"
-    payload = json.dumps({
-        "model": model,
-        "prompt": (
-            "You are Nexus Local Reflex, a conservative risk veto classifier. "
-            "Return compact JSON only. Schema: "
-            '{"risk_level":"low|medium|high","bare_sufficiency":"low|medium|high",'
-            '"needs_ultra_review":true|false,"reason":"short"}. '
-            "Rules: destructive commands, rm, delete, write to .git, logs, benchmarks, "
-            ".nexus, or output/result paths => high risk and low bare_sufficiency. "
-            "Core files, orchestrator, routing, auth, security, payment, migration, "
-            "schema, database, cross-module refactor => high risk and low bare_sufficiency. "
-            "Public fixture typo/test data edits only => low risk and high bare_sufficiency. "
-            "If uncertain, choose higher risk. Never approve; only classify. Task: "
-            + task_desc[:1200]
-        ),
-        "stream": False,
-        "format": "json",
-        "keep_alive": "10m",
-        "options": {"temperature": 0, "num_predict": 96},
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        f"{base_url}/api/generate",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout_sec) as response:
-            if response.status != 200:
-                return None
-            raw = json.loads(response.read().decode("utf-8"))
-    except (OSError, ValueError, urllib.error.URLError):
-        return None
-    if not isinstance(raw, dict):
-        return None
-    text = str(raw.get("response") or "").strip().lower()
-    parsed = _parse_reflex_jsonish(text)
-    risk = parsed.get("risk_level") or "high"
-    bare = parsed.get("bare_sufficiency") or (
-        "high" if risk == "low" else "low" if risk == "high" else "medium"
-    )
-    reasons: tuple[str, ...] = ("ollama_response", f"ollama_model:{model}")
-    if "risk_level" not in parsed:
-        reasons += ("ollama_unparsed_risk_defaults_high",)
-    return ReflexAssessment(
-        schema_version="nexus_local_reflex.v1",
-        provider="ollama",
-        available=True,
-        risk_level=risk,
-        bare_sufficiency=bare,
-        needs_research="research" in text or "external" in text,
-        needs_hyper=risk == "high",
-        needs_ultra_review=risk == "high",
-        confidence=0.7,
-        latency_ms=max(0, int((time.monotonic() - start) * 1000)),
-        reasons=reasons,
-    )
+    return None
 
 
 def _parse_reflex_jsonish(text: str) -> dict[str, str]:
-    """Extract risk_level / bare_sufficiency from the first {...} span; {} when absent or invalid."""
-    start = text.find("{")
-    end = text.rfind("}")
-    if start < 0 or end <= start:
-        return {}
-    try:
-        data = json.loads(text[start : end + 1])
-    except ValueError:
-        return {}
-    if not isinstance(data, dict):
-        return {}
-    out: dict[str, str] = {}
-    for key in ("risk_level", "bare_sufficiency"):
-        value = str(data.get(key) or "").strip().lower()
-        if value in {"low", "medium", "high"}:
-            out[key] = value
-    return out
+    """[DEPRECATED] 移除舊有脆點。由 SemanticAdapter 統一處理。"""
+    return {}
 
 
 def _merge_ollama_shadow(
@@ -350,21 +269,10 @@ def _merge_ollama_shadow(
         repo_kind=repo_kind,
         fixture_kind=fixture_kind,
         start=start,
-        reasons=(
-            "ollama_shadow",
-            f"ollama_risk:{local.risk_level}",
-            f"ollama_bare:{local.bare_sufficiency}",
-        ),
+        reasons=("ollama_shadow", f"ollama_risk:{local.risk_level}", f"ollama_bare:{local.bare_sufficiency}"),
     )
     if heuristic.risk_level == "low" and local.risk_level == "high":
-        text = " ".join([
-            task_desc,
-            task_type,
-            difficulty,
-            category,
-            repo_kind,
-            fixture_kind,
-        ]).lower()
+        text = " ".join([task_desc, task_type, difficulty, category, repo_kind, fixture_kind]).lower()
         strong_local_veto_terms = {
             ".git",
             ".nexus",
