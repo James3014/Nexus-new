@@ -732,7 +732,24 @@ class TestV1TraceFailClosedGuards:
         # source_hash is the typed workspace_revision_task_statement_v1 hash; the
         # physical source is bound through workspace_revision (verified in-trace).
         assert receipt["capability_evidence_source_hash_kind"] == "workspace_revision_task_statement_v1"
-        assert receipt["capability_evidence_workspace_revision"] == f"sha256:{receipt['source_sha256']}"
+        # Independent oracle: hash the physical fixture's ORIGINAL ourselves.
+        import ast
+        import hashlib
+
+        fixture = Path(__file__).resolve().parents[2] / "tests/fixtures/n30r/smoke/semantic_task.py"
+        original = next(
+            node.value.value
+            for node in ast.parse(fixture.read_text(encoding="utf-8")).body
+            if isinstance(node, ast.Assign)
+            and any(isinstance(t, ast.Name) and t.id == "ORIGINAL" for t in node.targets)
+            and isinstance(node.value, ast.Constant)
+        )
+        physical_sha256 = hashlib.sha256(original.encode("utf-8")).hexdigest()
+        # Pinned identity of the committed fixture: any byte change must be a
+        # reviewed edit to this constant, not a silent pass.
+        assert physical_sha256 == "810f8dc57fa3502b3f19aa0252769779186957132067876b76cc3f6b8ad520ae"
+        assert receipt["source_sha256"] == physical_sha256
+        assert receipt["capability_evidence_workspace_revision"] == f"sha256:{physical_sha256}"
         assert len(receipt["capability_evidence_source_hash"]) == 64
         assert receipt["capability_evidence_source_hash"] != receipt["source_sha256"]
         assert len(receipt["capability_evidence_bundle_hash"]) == 64
