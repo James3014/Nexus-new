@@ -90,6 +90,10 @@ if str(REPO_ROOT) not in sys.path:
 
 ISSUE_NUMBER = 1996
 NEXUS_REPO = "James3014/Nexus-new"
+_ISSUE_GATE_WORKFLOW = ".github/workflows/nexus-core-issue-completion.yml"
+_TRUSTED_UNIVERSE_RE = re.compile(
+    r"^\s*evidence-universe:\s*[\"']?trusted-config[\"']?\s*$", re.MULTILINE
+)
 RUNTIME_REPO = "James3014/nexus-runtime"
 RUNTIME_GIT_URL = "https://github.com/James3014/nexus-runtime.git"
 RUNTIME_YAML_PATH = "src/nexus_runtime/planning/config/model_workforce.yaml"
@@ -1496,8 +1500,8 @@ def build_plan(decision: Decision, key: str, *, runtime_issue: int | None) -> li
         PlanStep(
             NEXUS_REPO,
             "issue",
-            "pin Issue with NEXUS_CORE_EVIDENCE_UNIVERSE + "
-            "NEXUS_CORE_MATERIAL_TRANSITION canonical-runtime markers (KEEP_OPEN)",
+            "pin Issue with the NEXUS_CORE_MATERIAL_TRANSITION canonical-runtime marker "
+            "(+ NEXUS_CORE_EVIDENCE_UNIVERSE only if the gate is in issue-marker mode) (KEEP_OPEN)",
         ),
         PlanStep(
             NEXUS_REPO,
@@ -1539,12 +1543,35 @@ class Proposer:
             raise RuntimeError(f"git_failed:{args[0]}:{res.rc}:{res.stderr.strip()[-200:]}")
         return res
 
+    def trusted_config_universe(self) -> bool:
+        """True when the Nexus-new issue gate derives the evidence universe from trusted config.
+
+        Same logic as ``scripts/ops/pr_preflight.py::_trusted_config_universe``, read at the exact
+        ``origin/main`` SHA. In that mode Issues carry no NEXUS_CORE_EVIDENCE_UNIVERSE marker.
+        """
+        try:
+            text = self.show(
+                self.nexus_repo, self.remote_main(self.nexus_repo), _ISSUE_GATE_WORKFLOW
+            )
+        except RuntimeError:
+            return False
+        return _TRUSTED_UNIVERSE_RE.search(text) is not None
+
     def markers(self, repo: Path, *extra: str) -> list[str]:
+        trusted = self.trusted_config_universe()
+        if trusted and not extra:
+            return []  # the universe marker was the only output; nothing to ask certify for
         res = self.runner([*shlex.split(self.certify_cmd), "markers", "--repo", str(repo), *extra])
         found = re.findall(r"<!-- NEXUS_CORE_[A-Z_]+: [^\n]*? -->", res.stdout)
-        if res.rc != 0 or not any("NEXUS_CORE_EVIDENCE_UNIVERSE" in m for m in found):
+        has_universe = any("NEXUS_CORE_EVIDENCE_UNIVERSE" in m for m in found)
+        if res.rc != 0 or not (trusted or has_universe):
             raise RuntimeError("certify_markers_unavailable")
-        return [m for m in found if "NEXUS_CORE_ISSUE:" not in m]
+        skip = (
+            ("NEXUS_CORE_ISSUE:", "NEXUS_CORE_EVIDENCE_UNIVERSE:")
+            if trusted
+            else ("NEXUS_CORE_ISSUE:",)
+        )
+        return [m for m in found if not any(k in m for k in skip)]
 
     def create_issue(self, repo: str, title: str, body: str) -> int:
         res = self.runner(

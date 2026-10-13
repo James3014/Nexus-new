@@ -671,6 +671,7 @@ class FakeWorld:
         self.wt_files: dict[str, list[str]] = {}
         self.red_prs: set[int] = set()
         self.comments: list[str] = []
+        self.workflow_text: str | None = None  # override the Nexus issue-gate workflow
         self.counter = 0
         self.next_pr = 100
 
@@ -689,6 +690,8 @@ class FakeWorld:
     def content(self, repo: str, sha: str, rel: str) -> str:
         if rel in self.commits.get(sha, {}):
             return self.commits[sha][rel]
+        if repo == "nexus" and rel == wf._ISSUE_GATE_WORKFLOW and self.workflow_text is not None:
+            return self.workflow_text
         if repo == "runtime":
             return YAML_FIXTURE.read_text()
         return (REPO_ROOT / rel).read_text()
@@ -750,7 +753,10 @@ class FakeWorld:
                 assert re.fullmatch(r"[0-9a-f]{40}", sha), "never read the index"
                 return wf.CmdResult(0, self.content(self._repo_of_path(where), sha, rel))
         if a[0] == "nexus-certify":
-            return wf.CmdResult(0, "Issue body: <!-- NEXUS_CORE_EVIDENCE_UNIVERSE: sha256:ab -->\n")
+            out = "Issue body: <!-- NEXUS_CORE_EVIDENCE_UNIVERSE: sha256:ab -->\n"
+            if "--material-transition" in a:
+                out += "<!-- NEXUS_CORE_MATERIAL_TRANSITION: canonical-runtime sha256:cd -->\n"
+            return wf.CmdResult(0, out)
         if a[:3] == ["gh", "issue", "list"]:
             tag = a[a.index("--search") + 1].split(" ")[0]
             hits = [i for i in self.issues if i["repo"] == a[4] and f"[{tag}]" in i["title"]]
@@ -758,7 +764,7 @@ class FakeWorld:
         if a[:3] == ["gh", "issue", "create"]:
             number = 2000 + len(self.issues)
             title = a[a.index("--title") + 1]
-            self.issues.append({"repo": a[4], "number": number, "title": title})
+            self.issues.append({"repo": a[4], "number": number, "title": title, "body": text})
             return wf.CmdResult(0, f"https://github.com/{a[4]}/issues/{number}\n")
         if a[:3] == ["gh", "issue", "comment"]:
             self.comments.append(text)
@@ -884,8 +890,23 @@ def test_full_flow_merges_runtime_then_anchor_then_pin(tmp_path: Path) -> None:
     receipt = json.loads(Path(result.receipt_path).read_text())
     assert set(receipt["merges"]) == {"runtime", "anchor", "pin"}
     assert len(world.issues) == 2
+    # trusted-config (current main): no Issue carries the evidence-universe marker, the pin Issue
+    # keeps its material-transition marker, and certify is not asked for the runtime Issue at all.
+    assert all("NEXUS_CORE_EVIDENCE_UNIVERSE" not in i["body"] for i in world.issues)
+    assert "NEXUS_CORE_MATERIAL_TRANSITION" in world.issues[1]["body"]
+    assert sum(c[0] == "nexus-certify" for c in world.calls) == 1
     again = wf.run(cfg, _world_deps(world, reviewer))
     assert again.outcome == "SKIPPED_IDEMPOTENT"
+
+
+def test_issue_marker_mode_still_writes_and_requires_universe_marker(tmp_path: Path) -> None:
+    world = FakeWorld(tmp_path)
+    world.workflow_text = "with:\n  evidence-universe: issue-marker\n"
+    result = wf.run(_world_cfg(tmp_path), _world_deps(world))
+    assert result.outcome == "MERGED", result.reason
+    assert all("NEXUS_CORE_EVIDENCE_UNIVERSE" in i["body"] for i in world.issues)
+    assert "NEXUS_CORE_MATERIAL_TRANSITION" in world.issues[1]["body"]
+    assert sum(c[0] == "nexus-certify" for c in world.calls) == 2
 
 
 def test_inflight_switch_resumes_after_runtime_merge(tmp_path: Path) -> None:
