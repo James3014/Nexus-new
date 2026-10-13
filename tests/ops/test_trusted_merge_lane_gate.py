@@ -72,19 +72,24 @@ def _event(
     body: str | None,
     number: int = PR_NUMBER,
     sender: str = "James3014",
+    author: str | None = "James3014",
+    author_type: str = "User",
     **pr_extras,
 ):
+    pull_request = {
+        "number": number,
+        "body": body,
+        "base": {"sha": base},
+        "head": {"sha": head},
+        **pr_extras,
+    }
+    if author is not None:
+        pull_request["user"] = {"login": author, "type": author_type}
     return {
         "event_name": "pull_request_target",
         "repository": {"full_name": REPOSITORY},
         "sender": {"login": sender},
-        "pull_request": {
-            "number": number,
-            "body": body,
-            "base": {"sha": base},
-            "head": {"sha": head},
-            **pr_extras,
-        },
+        "pull_request": pull_request,
     }
 
 
@@ -98,12 +103,13 @@ def _binding(
     task_id: str = TASK_ID,
     attempt_id: str = ATTEMPT_ID,
     rebind: bool = False,
+    contract_kind: str = "OWNER_INLINE",
 ):
     if card_bytes is None:
         value = {
             "schema": BINDING_SCHEMA,
             "execution_lane": lane,
-            "contract_kind": "OWNER_INLINE",
+            "contract_kind": contract_kind,
             "owner_id": "James3014",
             "issue_number": None,
             "task_id": None,
@@ -567,3 +573,166 @@ def test_keep_open_blocks_candidate_commit_message_closing_keyword_without_event
             ),
             repo_root=repo,
         )
+
+
+AGENT_APP = "james3014-nexus-agent[bot]"
+
+
+@pytest.mark.parametrize("lane", ["DIRECT_CANONICAL", "DIRECT_DELEGATED"])
+def test_owner_authored_owner_inline_passes_with_author_identity(tmp_path: Path, lane: str):
+    repo, base, head, _ = _repo(tmp_path)
+    binding = _binding(lane=lane, head=head)
+    result = validate_event(
+        _event(base=base, head=head, body=render_binding(binding)), repo_root=repo
+    )
+    assert result["reason"] == "GENUINE_DIRECT_OWNER_INLINE"
+    assert result["contract_kind"] == "OWNER_INLINE"
+    assert result["author_identity"] == "James3014"
+
+
+@pytest.mark.parametrize(
+    ("author", "author_type"),
+    [
+        (AGENT_APP, "Bot"),
+        (AGENT_APP, "User"),
+        ("app/james3014-nexus-agent", "User"),
+        ("James3014", "Bot"),
+        ("some-collaborator", "User"),
+    ],
+)
+def test_non_owner_or_app_author_claiming_owner_inline_blocks(
+    tmp_path: Path, author: str, author_type: str
+):
+    repo, base, head, _ = _repo(tmp_path)
+    binding = _binding(lane="DIRECT_CANONICAL", head=head)
+    with pytest.raises(LaneBindingError, match="OWNER_INLINE_AUTHOR_MISMATCH"):
+        validate_event(
+            _event(
+                base=base,
+                head=head,
+                body=render_binding(binding),
+                author=author,
+                author_type=author_type,
+            ),
+            repo_root=repo,
+        )
+
+
+def test_inline_binding_without_pr_author_fails_closed(tmp_path: Path):
+    repo, base, head, _ = _repo(tmp_path)
+    binding = _binding(lane="DIRECT_CANONICAL", head=head)
+    with pytest.raises(LaneBindingError, match="PULL_REQUEST_AUTHOR_REQUIRED"):
+        validate_event(
+            _event(base=base, head=head, body=render_binding(binding), author=None),
+            repo_root=repo,
+        )
+
+
+@pytest.mark.parametrize("lane", ["DIRECT_CANONICAL", "DIRECT_DELEGATED"])
+def test_app_authored_agent_inline_passes_and_records_app_identity(tmp_path: Path, lane: str):
+    repo, base, head, _ = _repo(tmp_path)
+    binding = _binding(lane=lane, head=head, contract_kind="AGENT_INLINE")
+    body = (
+        "Closes #4242\n"
+        + render_intent({"issue": 4242, "on_merge": "CLOSE"})
+        + "\n"
+        + render_binding(binding)
+    )
+    result = validate_event(
+        _event(base=base, head=head, body=body, author=AGENT_APP, author_type="Bot"),
+        repo_root=repo,
+    )
+    assert result["status"] == "PASS"
+    assert result["reason"] == "GENUINE_DIRECT_AGENT_INLINE"
+    assert result["contract_kind"] == "AGENT_INLINE"
+    assert result["execution_lane"] == lane
+    assert result["author_identity"] == "app/james3014-nexus-agent"
+    assert result["binding_hash"] == binding["binding_hash"]
+
+
+def test_agent_inline_with_wrong_binding_hash_blocks(tmp_path: Path):
+    repo, base, head, _ = _repo(tmp_path)
+    binding = _binding(lane="DIRECT_CANONICAL", head=head, contract_kind="AGENT_INLINE")
+    binding["binding_hash"] = _binding(lane="DIRECT_CANONICAL", head=head)["binding_hash"]
+    with pytest.raises(LaneBindingError, match="BINDING_HASH_INVALID"):
+        validate_event(
+            _event(
+                base=base,
+                head=head,
+                body=render_binding(binding),
+                author=AGENT_APP,
+                author_type="Bot",
+            ),
+            repo_root=repo,
+        )
+
+
+@pytest.mark.parametrize(
+    ("author", "author_type"),
+    [("James3014", "User"), ("other-app[bot]", "Bot"), ("some-collaborator", "User")],
+)
+def test_agent_inline_requires_allowlisted_app_author(
+    tmp_path: Path, author: str, author_type: str
+):
+    repo, base, head, _ = _repo(tmp_path)
+    binding = _binding(lane="DIRECT_CANONICAL", head=head, contract_kind="AGENT_INLINE")
+    with pytest.raises(LaneBindingError, match="AGENT_INLINE_AUTHOR_NOT_ALLOWLISTED_APP"):
+        validate_event(
+            _event(
+                base=base,
+                head=head,
+                body=render_binding(binding),
+                author=author,
+                author_type=author_type,
+            ),
+            repo_root=repo,
+        )
+
+
+def test_agent_inline_cannot_replace_governed_card_or_go_governed(tmp_path: Path):
+    repo, base, head, _ = _repo(tmp_path, card_lane="GOVERNED")
+    binding = _binding(lane="DIRECT_CANONICAL", head=head, contract_kind="AGENT_INLINE")
+    body = (
+        "Closes #1023\n"
+        + render_intent({"issue": 1023, "on_merge": "CLOSE"})
+        + "\n"
+        + render_binding(binding)
+    )
+    event = _event(base=base, head=head, body=body, author=AGENT_APP, author_type="Bot")
+    with pytest.raises(LaneBindingError, match="AGENT_INLINE_CANNOT_REPLACE_GOVERNED_TASK_CARD"):
+        validate_event(event, repo_root=repo)
+    governed = _binding(lane="GOVERNED", head=head, contract_kind="AGENT_INLINE")
+    with pytest.raises(LaneBindingError, match="AGENT_INLINE_MUST_BE_DIRECT"):
+        validate_event(
+            _event(
+                base=base,
+                head=head,
+                body=render_binding(governed),
+                author=AGENT_APP,
+                author_type="Bot",
+            ),
+            repo_root=repo,
+        )
+
+
+@pytest.mark.parametrize(
+    ("lane", "expected"),
+    [
+        ("DIRECT_CANONICAL", "8c215d813aacbae084aacaf3b5c353b0c499b5aa8dcae35f65771bdabb972ee7"),
+        ("DIRECT_DELEGATED", "09fff5b93836cb322726390b8e1da21b8ffb0f917ff0691b4a6ae4dc3e9035a3"),
+    ],
+)
+def test_documented_agent_inline_binding_hashes(lane: str, expected: str):
+    value = {
+        "schema": BINDING_SCHEMA,
+        "execution_lane": lane,
+        "contract_kind": "AGENT_INLINE",
+        "owner_id": "James3014",
+        "issue_number": None,
+        "task_id": None,
+        "attempt_id": None,
+        "task_card_path": None,
+        "task_card_sha256": None,
+        "owner_lane_rebind": None,
+    }
+    assert canonical_hash(value) == expected

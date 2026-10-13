@@ -144,6 +144,7 @@ class Context:
     tools_venv: Path
     lane_owner_pending: bool
     module_cache: dict[str, ModuleType] = field(default_factory=dict)
+    author: str | None = None
 
 
 # --------------------------------------------------------------------------
@@ -317,6 +318,7 @@ def check_merge_lane(ctx: Context) -> CheckResult:
             "head": {"sha": ctx.head_sha},
             "body": ctx.body,
             "title": ctx.title,
+            **_author_user(ctx.author),
         },
         # No sender: preflight cannot speak for the Owner, so a rebind that
         # needs the Owner as event sender is reported as unverifiable.
@@ -325,6 +327,15 @@ def check_merge_lane(ctx: Context) -> CheckResult:
         result = gate.validate_event(event, repo_root=ctx.repo)
     except gate.LaneBindingError as exc:
         code = str(exc).split(":", 1)[0]
+        if code == "PULL_REQUEST_AUTHOR_REQUIRED":
+            return CheckResult(
+                name,
+                SKIP,
+                code,
+                "inline lane bindings are checked against the PR author; author unknown",
+                "pass --author LOGIN (e.g. James3014 or app/james3014-nexus-agent) or --pr N",
+                {"present": True, "parses": True},
+            )
         if code == "OWNER_LANE_REBIND_SENDER_NOT_OWNER":
             return CheckResult(
                 name,
@@ -348,6 +359,15 @@ def check_merge_lane(ctx: Context) -> CheckResult:
         detail=f"lane gate PASS ({result.get('reason')})",
         data={"present": True, "parses": True},
     )
+
+
+def _author_user(author: str | None) -> dict[str, Any]:
+    """Project a gh-style author login into the event's ``pull_request.user``."""
+    if not author:
+        return {}
+    is_app = author.startswith("app/") or author.endswith("[bot]")
+    login = author.removeprefix("app/") + "[bot]" if author.startswith("app/") else author
+    return {"user": {"login": login, "type": "Bot" if is_app else "User"}}
 
 
 def _resolve_nexus_certify(explicit: str | None) -> str | None:
@@ -878,7 +898,16 @@ def _repository_slug(repo: Path) -> str:
 
 def _load_pr(repository: str, number: int) -> dict[str, Any]:
     proc = subprocess.run(
-        ["gh", "pr", "view", str(number), "-R", repository, "--json", "body,title,headRefOid"],
+        [
+            "gh",
+            "pr",
+            "view",
+            str(number),
+            "-R",
+            repository,
+            "--json",
+            "body,title,headRefOid,author",
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -901,6 +930,9 @@ def build_parser() -> argparse.ArgumentParser:
     body.add_argument("--pr", type=int, help="read body/title from this PR via gh")
     parser.add_argument("--pr-number", type=int, help="PR number for --body-file runs")
     parser.add_argument("--title", help="PR title (squash commit title)")
+    parser.add_argument(
+        "--author", help="PR author login (default: from --pr); inline lanes depend on it"
+    )
     parser.add_argument("--issue", type=int, help="Issue number (default: body marker)")
     parser.add_argument("--issue-json", type=Path, help="offline Issue JSON {state, body}")
     parser.add_argument("--nexus-certify", help="path to nexus-certify")
@@ -955,9 +987,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     body: str | None = None
     title = args.title
     pr_number = args.pr_number
+    author = args.author
     if args.pr is not None:
         pr = _load_pr(repository, args.pr)
         body, title, pr_number = pr.get("body") or "", title or pr.get("title"), args.pr
+        pr_author = pr.get("author") if isinstance(pr.get("author"), dict) else {}
+        author = author or pr_author.get("login")
     elif args.body_file is not None:
         body = (
             sys.stdin.read()
@@ -983,6 +1018,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         nexus_certify=args.nexus_certify,
         tools_venv=args.tools_venv or repo / ".venv",
         lane_owner_pending=args.lane_owner_pending,
+        author=author,
     )
     selected = list(CHECK_ORDER)
     if args.only:
