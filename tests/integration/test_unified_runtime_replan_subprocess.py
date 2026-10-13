@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -14,6 +14,14 @@ from nexus.services.unified_runtime import (
     UnifiedRuntimeRequest,
     build_subprocess_online_invoker,
 )
+
+# A physical subprocess is a provider-identified Online edge, so the runtime
+# requires fresh Workforce Admission before it may run (#560, PR #612). The
+# planner demands fast_bounded_implementation at L2 for this task, which
+# agy_flash admits; direct_gemini is REGISTERED_BLOCKED in the policy.
+_ADMITTED_PROVIDER = "agy"
+_ADMITTED_WORKER = "agy_flash"
+_ADMITTED_MODEL = "gemini-3.6-flash-high"
 
 
 def _create_child_script(tmp_path: Path) -> Path:
@@ -27,6 +35,10 @@ ledger_path = sys.argv[1]
 mode = sys.argv[2] if len(sys.argv) > 2 else "normal"
 
 stdin_data = sys.stdin.read()
+# The admitted registered-CLI shape delivers the prompt as the argument after
+# the print flag; any other shape delivers it on stdin.
+argv_tail = sys.argv[3:]
+prompt = argv_tail[argv_tail.index("-p") + 1] if "-p" in argv_tail else stdin_data
 
 records = []
 if os.path.exists(ledger_path):
@@ -40,8 +52,9 @@ inv_num = len(records) + 1
 record = {
     "pid": os.getpid(),
     "invocation_number": inv_num,
-    "stdin_sha256": hashlib.sha256(stdin_data.encode("utf-8")).hexdigest(),
-    "stdin_chars": len(stdin_data),
+    "argv": argv_tail,
+    "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+    "prompt_chars": len(prompt),
 }
 
 with open(ledger_path, "a", encoding="utf-8") as f:
@@ -62,6 +75,21 @@ print(json.dumps(out))
     return script_path
 
 
+def _admitted_cli_spec(script_path: Path, ledger_path: Path, mode: str) -> OnlineCliSpec:
+    """Wrap the child in a single-executable command for the admitted provider.
+
+    The runtime binds the admitted model onto a registered CLI only for a
+    one-element command, so the ledger path and mode are baked into a launcher.
+    """
+    launcher = script_path.with_name(f"launch_{ledger_path.stem}.sh")
+    launcher.write_text(
+        f'#!/bin/sh\nexec "{sys.executable}" "{script_path}" "{ledger_path}" "{mode}" "$@"\n',
+        encoding="utf-8",
+    )
+    launcher.chmod(0o755)
+    return OnlineCliSpec(provider=_ADMITTED_PROVIDER, command=(str(launcher),))
+
+
 def _build_request(task_id: str) -> UnifiedRuntimeRequest:
     return UnifiedRuntimeRequest(
         task_id=task_id,
@@ -73,6 +101,21 @@ def _build_request(task_id: str) -> UnifiedRuntimeRequest:
             "recommended_flow": "baseline",
             "route_features": {"risk_score": 10},
             "capability_stack": {"selected_capabilities": ["baseline"]},
+            "workforce_admission_enabled": True,
+            "injected_transport": True,
+            "online_enabled": True,
+            "local_enabled": False,
+            "workforce_bindings": {
+                "online": {
+                    "worker_id": _ADMITTED_WORKER,
+                    "controls": [
+                        "task_card",
+                        "allowed_files",
+                        "mandatory_commands",
+                        "independent_verification",
+                    ],
+                },
+            },
         },
         online_enabled=True,
         local_enabled=False,
@@ -110,10 +153,7 @@ def test_physical_subprocess_light_to_standard_replan_lifecycle(tmp_path: Path):
     receipt1_path = tmp_path / "receipt1.json"
     receipt2_path = tmp_path / "receipt2.json"
 
-    spec = OnlineCliSpec(
-        provider="gemini",
-        command=(sys.executable, str(script_path), str(ledger_path), "normal"),
-    )
+    spec = _admitted_cli_spec(script_path, ledger_path, "normal")
     invoker = build_subprocess_online_invoker(spec)
     runtime = UnifiedRuntime()
     req = _build_request("task-sub-lifecycle-1")
@@ -133,7 +173,13 @@ def test_physical_subprocess_light_to_standard_replan_lifecycle(tmp_path: Path):
             "evidence": "attempt 1 failed verifier check",
             "evidence_refs": ["v:fail1"],
         },
-        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence": "l1", "evidence_refs": ["l:1"], "gate_passed": True},
+        learning=lambda ctx: {
+            "status": "SUCCEEDED",
+            "invoked": True,
+            "evidence": "l1",
+            "evidence_refs": ["l:1"],
+            "gate_passed": True,
+        },
         receipt_path=receipt1_path,
     )
 
@@ -159,7 +205,13 @@ def test_physical_subprocess_light_to_standard_replan_lifecycle(tmp_path: Path):
             "evidence": "attempt 2 passed verifier check",
             "evidence_refs": ["v:pass2"],
         },
-        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence": "l2", "evidence_refs": ["l:2"], "gate_passed": True},
+        learning=lambda ctx: {
+            "status": "SUCCEEDED",
+            "invoked": True,
+            "evidence": "l2",
+            "evidence_refs": ["l:2"],
+            "gate_passed": True,
+        },
         receipt_path=receipt2_path,
     )
 
@@ -171,7 +223,11 @@ def test_physical_subprocess_light_to_standard_replan_lifecycle(tmp_path: Path):
     assert receipt1_path.read_bytes() == attempt1_bytes
 
     # Physical invocation ledger checks
-    ledger_lines = [line.strip() for line in ledger_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    ledger_lines = [
+        line.strip()
+        for line in ledger_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     assert len(ledger_lines) == 2
     rec1 = json.loads(ledger_lines[0])
     rec2 = json.loads(ledger_lines[1])
@@ -179,11 +235,16 @@ def test_physical_subprocess_light_to_standard_replan_lifecycle(tmp_path: Path):
     assert isinstance(rec1["pid"], int) and rec1["pid"] > 0
     assert isinstance(rec2["pid"], int) and rec2["pid"] > 0
     assert rec1["invocation_number"] == 1
+    # Both physical processes ran under fresh Workforce Admission with the
+    # admitted model bound onto the registered CLI command.
+    assert r1["workforce_admission"]["overall_decision"] == "ALLOW"
+    for rec in (rec1, rec2):
+        assert rec["argv"][rec["argv"].index("--model") + 1] == _ADMITTED_MODEL
     assert rec2["invocation_number"] == 2
-    assert len(rec1["stdin_sha256"]) == 64
-    assert len(rec2["stdin_sha256"]) == 64
-    assert rec1["stdin_chars"] > 0
-    assert rec2["stdin_chars"] > 0
+    assert len(rec1["prompt_sha256"]) == 64
+    assert len(rec2["prompt_sha256"]) == 64
+    assert rec1["prompt_chars"] > 0
+    assert rec2["prompt_chars"] > 0
 
     # Lineage and strict validation checks
     v1_res = validate_receipt_base(r1, mode="strict")
@@ -194,8 +255,13 @@ def test_physical_subprocess_light_to_standard_replan_lifecycle(tmp_path: Path):
 
     assert r2["receipt_base"]["parent_receipt_hashes"] == [r2["receipt_base"]["run_anchor_hash"]]
     assert r2["execution_attempt"]["parent_receipt_hash"] == r1["receipt_base"]["receipt_hash"]
-    assert r2["execution_attempt"]["parent_run_anchor_hash"] == r1["receipt_base"]["run_anchor_hash"]
-    assert r2["execution_attempt"]["source_replan_request_id"] == r1["execution_replan_request"]["replan_request_id"]
+    assert (
+        r2["execution_attempt"]["parent_run_anchor_hash"] == r1["receipt_base"]["run_anchor_hash"]
+    )
+    assert (
+        r2["execution_attempt"]["source_replan_request_id"]
+        == r1["execution_replan_request"]["replan_request_id"]
+    )
     assert r2["planner_decision_id"] != r1["planner_decision_id"]
     assert r2["execution_attempt"]["attempt_number"] == 2
 
@@ -204,10 +270,7 @@ def test_physical_subprocess_receipts_form_strict_valid_lineage(tmp_path: Path):
     script_path = _create_child_script(tmp_path)
     ledger_path = tmp_path / "ledger_lineage.jsonl"
 
-    spec = OnlineCliSpec(
-        provider="gemini",
-        command=(sys.executable, str(script_path), str(ledger_path), "normal"),
-    )
+    spec = _admitted_cli_spec(script_path, ledger_path, "normal")
     invoker = build_subprocess_online_invoker(spec)
     runtime = UnifiedRuntime()
     req = _build_request("task-sub-lineage-1")
@@ -215,15 +278,39 @@ def test_physical_subprocess_receipts_form_strict_valid_lineage(tmp_path: Path):
     r1 = runtime.run(
         req,
         online_invoker=invoker,
-        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "FAILED", "evidence": "fail", "evidence_refs": ["v:f1"]},
-        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {
+            "task_id": ctx["task_id"],
+            "invoked": True,
+            "gate_passed": False,
+            "status": "FAILED",
+            "evidence": "fail",
+            "evidence_refs": ["v:f1"],
+        },
+        learning=lambda ctx: {
+            "status": "SUCCEEDED",
+            "invoked": True,
+            "evidence_present": True,
+            "gate_passed": True,
+        },
     )
     r2 = runtime.run_replan(
         r1,
         req,
         online_invoker=invoker,
-        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "SUCCEEDED", "evidence": "ok", "evidence_refs": ["v:ok2"]},
-        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {
+            "task_id": ctx["task_id"],
+            "invoked": True,
+            "gate_passed": True,
+            "status": "SUCCEEDED",
+            "evidence": "ok",
+            "evidence_refs": ["v:ok2"],
+        },
+        learning=lambda ctx: {
+            "status": "SUCCEEDED",
+            "invoked": True,
+            "evidence_present": True,
+            "gate_passed": True,
+        },
     )
 
     assert validate_receipt_base(r1, mode="strict")["ok"] is True
@@ -236,10 +323,7 @@ def test_physical_subprocess_attempt_one_bytes_remain_unchanged(tmp_path: Path):
     ledger_path = tmp_path / "ledger_bytes.jsonl"
     r1_path = tmp_path / "r1_bytes.json"
 
-    spec = OnlineCliSpec(
-        provider="gemini",
-        command=(sys.executable, str(script_path), str(ledger_path), "normal"),
-    )
+    spec = _admitted_cli_spec(script_path, ledger_path, "normal")
     invoker = build_subprocess_online_invoker(spec)
     runtime = UnifiedRuntime()
     req = _build_request("task-sub-bytes-1")
@@ -247,8 +331,20 @@ def test_physical_subprocess_attempt_one_bytes_remain_unchanged(tmp_path: Path):
     r1 = runtime.run(
         req,
         online_invoker=invoker,
-        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "FAILED", "evidence": "fail", "evidence_refs": ["v:f1"]},
-        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {
+            "task_id": ctx["task_id"],
+            "invoked": True,
+            "gate_passed": False,
+            "status": "FAILED",
+            "evidence": "fail",
+            "evidence_refs": ["v:f1"],
+        },
+        learning=lambda ctx: {
+            "status": "SUCCEEDED",
+            "invoked": True,
+            "evidence_present": True,
+            "gate_passed": True,
+        },
         receipt_path=r1_path,
     )
     bytes_before = r1_path.read_bytes()
@@ -257,8 +353,20 @@ def test_physical_subprocess_attempt_one_bytes_remain_unchanged(tmp_path: Path):
         r1,
         req,
         online_invoker=invoker,
-        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "SUCCEEDED", "evidence": "ok", "evidence_refs": ["v:ok2"]},
-        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {
+            "task_id": ctx["task_id"],
+            "invoked": True,
+            "gate_passed": True,
+            "status": "SUCCEEDED",
+            "evidence": "ok",
+            "evidence_refs": ["v:ok2"],
+        },
+        learning=lambda ctx: {
+            "status": "SUCCEEDED",
+            "invoked": True,
+            "evidence_present": True,
+            "gate_passed": True,
+        },
     )
     bytes_after = r1_path.read_bytes()
     assert bytes_before == bytes_after
@@ -268,10 +376,7 @@ def test_physical_subprocess_invoked_exactly_twice(tmp_path: Path):
     script_path = _create_child_script(tmp_path)
     ledger_path = tmp_path / "ledger_twice.jsonl"
 
-    spec = OnlineCliSpec(
-        provider="gemini",
-        command=(sys.executable, str(script_path), str(ledger_path), "normal"),
-    )
+    spec = _admitted_cli_spec(script_path, ledger_path, "normal")
     invoker = build_subprocess_online_invoker(spec)
     runtime = UnifiedRuntime()
     req = _build_request("task-sub-twice-1")
@@ -279,18 +384,46 @@ def test_physical_subprocess_invoked_exactly_twice(tmp_path: Path):
     r1 = runtime.run(
         req,
         online_invoker=invoker,
-        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "FAILED", "evidence": "fail", "evidence_refs": ["v:f1"]},
-        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {
+            "task_id": ctx["task_id"],
+            "invoked": True,
+            "gate_passed": False,
+            "status": "FAILED",
+            "evidence": "fail",
+            "evidence_refs": ["v:f1"],
+        },
+        learning=lambda ctx: {
+            "status": "SUCCEEDED",
+            "invoked": True,
+            "evidence_present": True,
+            "gate_passed": True,
+        },
     )
     runtime.run_replan(
         r1,
         req,
         online_invoker=invoker,
-        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "SUCCEEDED", "evidence": "ok", "evidence_refs": ["v:ok2"]},
-        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {
+            "task_id": ctx["task_id"],
+            "invoked": True,
+            "gate_passed": True,
+            "status": "SUCCEEDED",
+            "evidence": "ok",
+            "evidence_refs": ["v:ok2"],
+        },
+        learning=lambda ctx: {
+            "status": "SUCCEEDED",
+            "invoked": True,
+            "evidence_present": True,
+            "gate_passed": True,
+        },
     )
 
-    records = [json.loads(line) for line in ledger_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    records = [
+        json.loads(line)
+        for line in ledger_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     assert len(records) == 2
 
 
@@ -298,10 +431,7 @@ def test_physical_subprocess_second_failure_stops_without_third_attempt(tmp_path
     script_path = _create_child_script(tmp_path)
     ledger_path = tmp_path / "ledger_fail_second.jsonl"
 
-    spec = OnlineCliSpec(
-        provider="gemini",
-        command=(sys.executable, str(script_path), str(ledger_path), "fail_second"),
-    )
+    spec = _admitted_cli_spec(script_path, ledger_path, "fail_second")
     invoker = build_subprocess_online_invoker(spec)
     runtime = UnifiedRuntime()
     req = _build_request("task-sub-fail2-1")
@@ -309,22 +439,50 @@ def test_physical_subprocess_second_failure_stops_without_third_attempt(tmp_path
     r1 = runtime.run(
         req,
         online_invoker=invoker,
-        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "FAILED", "evidence": "fail", "evidence_refs": ["v:f1"]},
-        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {
+            "task_id": ctx["task_id"],
+            "invoked": True,
+            "gate_passed": False,
+            "status": "FAILED",
+            "evidence": "fail",
+            "evidence_refs": ["v:f1"],
+        },
+        learning=lambda ctx: {
+            "status": "SUCCEEDED",
+            "invoked": True,
+            "evidence_present": True,
+            "gate_passed": True,
+        },
     )
 
     r2 = runtime.run_replan(
         r1,
         req,
         online_invoker=invoker,
-        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "SUCCEEDED", "evidence": "ok", "evidence_refs": ["v:ok2"]},
-        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {
+            "task_id": ctx["task_id"],
+            "invoked": True,
+            "gate_passed": True,
+            "status": "SUCCEEDED",
+            "evidence": "ok",
+            "evidence_refs": ["v:ok2"],
+        },
+        learning=lambda ctx: {
+            "status": "SUCCEEDED",
+            "invoked": True,
+            "evidence_present": True,
+            "gate_passed": True,
+        },
     )
 
     assert r2["terminal_status"] == "INCOMPLETE"
     assert r2["receipt_complete"] is False
 
-    records = [json.loads(line) for line in ledger_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    records = [
+        json.loads(line)
+        for line in ledger_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     assert len(records) == 2
 
 
@@ -332,10 +490,7 @@ def test_physical_subprocess_second_verifier_failure_stops_without_third_attempt
     script_path = _create_child_script(tmp_path)
     ledger_path = tmp_path / "ledger_fail_v2.jsonl"
 
-    spec = OnlineCliSpec(
-        provider="gemini",
-        command=(sys.executable, str(script_path), str(ledger_path), "normal"),
-    )
+    spec = _admitted_cli_spec(script_path, ledger_path, "normal")
     invoker = build_subprocess_online_invoker(spec)
     runtime = UnifiedRuntime()
     req = _build_request("task-sub-v2-1")
@@ -343,20 +498,48 @@ def test_physical_subprocess_second_verifier_failure_stops_without_third_attempt
     r1 = runtime.run(
         req,
         online_invoker=invoker,
-        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "FAILED", "evidence": "fail1", "evidence_refs": ["v:f1"]},
-        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {
+            "task_id": ctx["task_id"],
+            "invoked": True,
+            "gate_passed": False,
+            "status": "FAILED",
+            "evidence": "fail1",
+            "evidence_refs": ["v:f1"],
+        },
+        learning=lambda ctx: {
+            "status": "SUCCEEDED",
+            "invoked": True,
+            "evidence_present": True,
+            "gate_passed": True,
+        },
     )
 
     r2 = runtime.run_replan(
         r1,
         req,
         online_invoker=invoker,
-        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "FAILED", "evidence": "fail2", "evidence_refs": ["v:f2"]},
-        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {
+            "task_id": ctx["task_id"],
+            "invoked": True,
+            "gate_passed": False,
+            "status": "FAILED",
+            "evidence": "fail2",
+            "evidence_refs": ["v:f2"],
+        },
+        learning=lambda ctx: {
+            "status": "SUCCEEDED",
+            "invoked": True,
+            "evidence_present": True,
+            "gate_passed": True,
+        },
     )
 
     assert r2["terminal_status"] == "INCOMPLETE"
-    records = [json.loads(line) for line in ledger_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    records = [
+        json.loads(line)
+        for line in ledger_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     assert len(records) == 2
 
     # Attempting a 3rd attempt budget fails
@@ -365,11 +548,27 @@ def test_physical_subprocess_second_verifier_failure_stops_without_third_attempt
             r2,
             req,
             online_invoker=invoker,
-            verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "SUCCEEDED", "evidence": "ok", "evidence_refs": ["v:ok"]},
-            learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+            verifier=lambda ctx: {
+                "task_id": ctx["task_id"],
+                "invoked": True,
+                "gate_passed": True,
+                "status": "SUCCEEDED",
+                "evidence": "ok",
+                "evidence_refs": ["v:ok"],
+            },
+            learning=lambda ctx: {
+                "status": "SUCCEEDED",
+                "invoked": True,
+                "evidence_present": True,
+                "gate_passed": True,
+            },
         )
 
-    records_after = [json.loads(line) for line in ledger_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    records_after = [
+        json.loads(line)
+        for line in ledger_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     assert len(records_after) == 2
 
 
@@ -377,10 +576,7 @@ def test_physical_subprocess_tampered_prior_receipt_blocks_before_second_process
     script_path = _create_child_script(tmp_path)
     ledger_path = tmp_path / "ledger_tamper_block.jsonl"
 
-    spec = OnlineCliSpec(
-        provider="gemini",
-        command=(sys.executable, str(script_path), str(ledger_path), "normal"),
-    )
+    spec = _admitted_cli_spec(script_path, ledger_path, "normal")
     invoker = build_subprocess_online_invoker(spec)
     runtime = UnifiedRuntime()
     req = _build_request("task-sub-tamper-1")
@@ -388,23 +584,56 @@ def test_physical_subprocess_tampered_prior_receipt_blocks_before_second_process
     r1 = runtime.run(
         req,
         online_invoker=invoker,
-        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "FAILED", "evidence": "fail1", "evidence_refs": ["v:f1"]},
-        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {
+            "task_id": ctx["task_id"],
+            "invoked": True,
+            "gate_passed": False,
+            "status": "FAILED",
+            "evidence": "fail1",
+            "evidence_refs": ["v:f1"],
+        },
+        learning=lambda ctx: {
+            "status": "SUCCEEDED",
+            "invoked": True,
+            "evidence_present": True,
+            "gate_passed": True,
+        },
     )
 
     tampered_r1 = dict(r1)
-    tampered_r1["verifier"] = {"task_id": req.task_id, "invoked": True, "gate_passed": True, "status": "SUCCEEDED"}
+    tampered_r1["verifier"] = {
+        "task_id": req.task_id,
+        "invoked": True,
+        "gate_passed": True,
+        "status": "SUCCEEDED",
+    }
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="prior_receipt_base_invalid"):
         runtime.run_replan(
             tampered_r1,
             req,
             online_invoker=invoker,
-            verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "SUCCEEDED", "evidence": "ok", "evidence_refs": ["v:ok"]},
-            learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+            verifier=lambda ctx: {
+                "task_id": ctx["task_id"],
+                "invoked": True,
+                "gate_passed": True,
+                "status": "SUCCEEDED",
+                "evidence": "ok",
+                "evidence_refs": ["v:ok"],
+            },
+            learning=lambda ctx: {
+                "status": "SUCCEEDED",
+                "invoked": True,
+                "evidence_present": True,
+                "gate_passed": True,
+            },
         )
 
-    records = [json.loads(line) for line in ledger_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    records = [
+        json.loads(line)
+        for line in ledger_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     assert len(records) == 1
 
 
@@ -412,10 +641,7 @@ def test_physical_subprocess_receipt_does_not_claim_live_model_provider(tmp_path
     script_path = _create_child_script(tmp_path)
     ledger_path = tmp_path / "ledger_claim.jsonl"
 
-    spec = OnlineCliSpec(
-        provider="gemini",
-        command=(sys.executable, str(script_path), str(ledger_path), "normal"),
-    )
+    spec = _admitted_cli_spec(script_path, ledger_path, "normal")
     invoker = build_subprocess_online_invoker(spec)
     runtime = UnifiedRuntime()
     req = _build_request("task-sub-claim-1")
@@ -423,8 +649,20 @@ def test_physical_subprocess_receipt_does_not_claim_live_model_provider(tmp_path
     r1 = runtime.run(
         req,
         online_invoker=invoker,
-        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "SUCCEEDED", "evidence": "ok", "evidence_refs": ["v:ok"]},
-        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {
+            "task_id": ctx["task_id"],
+            "invoked": True,
+            "gate_passed": True,
+            "status": "SUCCEEDED",
+            "evidence": "ok",
+            "evidence_refs": ["v:ok"],
+        },
+        learning=lambda ctx: {
+            "status": "SUCCEEDED",
+            "invoked": True,
+            "evidence_present": True,
+            "gate_passed": True,
+        },
     )
 
     base = r1["receipt_base"]
