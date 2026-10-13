@@ -113,6 +113,7 @@ from nexus.orchestrator.governed_integration import (
 )
 from nexus.orchestrator.lifecycle_guards import (
     pre_action_guard,
+    require_bound_approval_grant,
     trusted_runtime_manifest_hash,
     validate_approval_grant,
     validate_architecture_approval,
@@ -9778,37 +9779,18 @@ class SelfHostedTaskService:
             or "work_claim" in grant
         ):
             raise RuntimeError("IMPLEMENTER_CLAIM_CANNOT_AUTHORIZE_APPROVAL")
-        public_grant_identity_fields = (
-            "bound_task_id",
-            "bound_attempt_id",
-            "bound_action_type",
-            "contract_kind",
-            "contract_hash",
-            "tool_manifest_hash",
-            "full_tool_schema_hash",
-            "permission_policy_hash",
-            "lifecycle_revision",
-            "server_instance_id",
+        # Every surface needs a grant naming its approver and bound to this task,
+        # attempt and action; a bare schema marker is not authority.
+        require_bound_approval_grant(
+            grant,
+            task_id=task_id,
+            attempt_id=str(state.get("attempt_id") or ""),
+            action_type=LifecycleActionType.CANDIDATE_APPROVE.value,
+            task_card_hash=identity["task_card_hash"],
+            contract_kind=identity["contract_kind"],
+            contract_hash=identity["contract_hash"],
+            owner_inline_contract=identity["owner_inline_contract"],
         )
-        complete_public_grant = grant is not None and all(
-            str(grant.get(field) or "").strip() for field in public_grant_identity_fields
-        )
-        if identity["contract_kind"] == ContractKind.OWNER_INLINE.value or complete_public_grant:
-            validate_approval_grant(
-                grant,
-                task_id=task_id,
-                attempt_id=str(state.get("attempt_id") or ""),
-                action_type=LifecycleActionType.CANDIDATE_APPROVE.value,
-                task_card_hash=identity["task_card_hash"],
-                contract_kind=identity["contract_kind"],
-                contract_hash=identity["contract_hash"],
-                owner_inline_contract=identity["owner_inline_contract"],
-                tool_manifest_hash=str(grant.get("tool_manifest_hash") or ""),
-                full_tool_schema_hash=str(grant.get("full_tool_schema_hash") or ""),
-                permission_policy_hash=str(grant.get("permission_policy_hash") or ""),
-                lifecycle_revision=str(grant.get("lifecycle_revision") or ""),
-                server_instance_id=str(grant.get("server_instance_id") or ""),
-            )
         architecture_approval = grant.get("architecture_approval") if isinstance(grant, Mapping) else None
         receipt = state.get("verified_receipt") if isinstance(state.get("verified_receipt"), Mapping) else {}
         authority_required = bool(packet.get("authority_change_required") or receipt.get("authority_change_required"))
