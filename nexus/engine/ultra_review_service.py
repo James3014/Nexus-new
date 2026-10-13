@@ -113,6 +113,13 @@ GIT_SAFE_CONFIG = (
 # Caller variables a review git call keeps (no tokens, credentials or GIT_* overrides).
 GIT_ENV_ALLOWLIST = ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "SYSTEMROOT", "TMPDIR")
 SYMLINK_MODE = "120000"
+# ``git apply --summary`` lines that make a patch unreviewable: link/gitlink creation,
+# deletion or mode change, and rename/copy (diff capture uses --no-renames, so a
+# rename/copy header can only come from a crafted patch).
+UNSAFE_PATCH_SUMMARY = re.compile(
+    r"^\s*(?:(?:create|delete) mode (?:120000|160000)\b|mode change .*\b(?:120000|160000)\b|rename |copy )",
+    re.MULTILINE,
+)
 
 
 def os_sandbox_available() -> bool:
@@ -258,6 +265,19 @@ class UltraReviewService:
         regression_map = self._derive_regression_candidate_map(diff_text)
         test_candidates = self._existing_regression_candidates(regression_map)
         execution_root, mirror_metadata = self._prepare_execution_workspace(sandbox_path, diff_path=diff_path)
+        mirror_violations = self._post_apply_violations(execution_root)
+        if self._neutralized_head_links:
+            mirror_metadata["neutralized_head_links"] = self._neutralized_head_links[:20]
+        if mirror_violations:
+            # Whatever the patch parser did, the mirror now holds a link/special entry: unlink
+            # them (unlink never follows), mark the mirror unusable and fail the lane below.
+            for rel in mirror_violations:
+                try:
+                    os.unlink(execution_root / rel)
+                except OSError:
+                    pass
+            mirror_metadata["diff_applied"] = False
+            mirror_metadata["post_apply_violations"] = mirror_violations[:20]
         self._bind_sandbox(sandbox_path=sandbox_path, execution_root=execution_root)
         security_sentry = self._run_security_sentry(
             diff_text=diff_text,
@@ -277,6 +297,38 @@ class UltraReviewService:
             execution_root=execution_root,
             sandbox_path=sandbox_path,
         )
+        for rule_id, tool, paths, summary in (
+            (
+                "mirror_link_or_escape",
+                "post-apply-lstat-walk",
+                mirror_violations,
+                "Applied mirror contains a symlink/special entry not tracked by HEAD: ",
+            ),
+            (
+                "unsafe_patch_summary",
+                "git-apply-summary",
+                list(mirror_metadata.get("git_summary") or []),
+                "git apply --summary reports link/gitlink/rename/copy (patch refused): ",
+            ),
+        ):
+            if not paths:
+                continue
+            logic_breaker["passed"] = False
+            logic_breaker["findings"].append(
+                {
+                    "id": f"logic-breaker-{len(logic_breaker['findings']) + 1}",
+                    "lane": "logic_breaker",
+                    "rule_id": rule_id,
+                    "tool": tool,
+                    "state": "VERIFIED_FINDING",
+                    "severity": "high",
+                    "file": paths[0],
+                    "line": 0,
+                    "repro_command": "",
+                    "summary": summary + ", ".join(paths[:5]),
+                    "execution_cwd": str(execution_root),
+                }
+            )
         self._record_progress(progress, progress_path, "logic_breaker_complete", passed=logic_breaker["passed"])
         ghost_regression = self._run_ghost_regression(test_candidates, execution_root=execution_root)
         self._record_progress(progress, progress_path, "ghost_regression_complete", passed=ghost_regression["passed"])
@@ -409,7 +461,13 @@ class UltraReviewService:
         return removed
 
     def _prepare_execution_workspace(self, sandbox_path: Path, *, diff_path: Path) -> tuple[Path, dict[str, Any]]:
-        violations = self._diff_policy_violations(diff_path.read_text(encoding="utf-8") if diff_path.exists() else "")
+        diff_text = diff_path.read_text(encoding="utf-8") if diff_path.exists() else ""
+        violations = self._diff_policy_violations(diff_text)
+        # Git's own parser is the authority on what the patch does; the hand parser above
+        # is only a fast pre-filter. Unparseable or link/rename/copy patches are refused.
+        violations["git_summary"] = self._unsafe_patch_summary(diff_path) if diff_text.strip() else []
+        if violations["git_summary"] and not violations["symlinks"]:
+            violations["symlinks"] = [line.strip() for line in violations["git_summary"]]
         if violations["symlinks"] or violations["nested_git"]:
             # Never apply a patch that creates/edits a symlink or touches a .git path: the
             # mirror stays empty, the lanes find nothing to verify and the gate fails closed.
@@ -421,6 +479,7 @@ class UltraReviewService:
                 "refused_reason": "diff_creates_symlink" if violations["symlinks"] else "diff_touches_git_dir",
                 "symlinks": violations["symlinks"][:20],
                 "nested_git": violations["nested_git"][:20],
+                "git_summary": violations["git_summary"][:20],
             }
         if os.getenv(ULTRA_REUSE_WORKTREE_ENV, "").strip().lower() in {"1", "true", "yes", "on"}:
             reusable_root = self._resolve(".nexus/reports/ultra_review/reusable_worktree")
@@ -1008,7 +1067,9 @@ class UltraReviewService:
         return run, findings
 
     def _capture_diff(self, base_ref: str) -> str:
-        return self._filter_diff(self._git(["diff", "--no-ext-diff", "--no-textconv", "--binary", base_ref]))
+        return self._filter_diff(
+            self._git(["diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--binary", base_ref])
+        )
 
     def _capture_status(self) -> str:
         lines: list[str] = []
@@ -1817,6 +1878,81 @@ class UltraReviewService:
         if admin not in git_dir.resolve().parents:
             raise UltraReviewError("mirror_git_dir_outside_repository")
         return git_dir.resolve()
+
+    def _unsafe_patch_summary(self, diff_path: Path) -> list[str]:
+        """``git apply --summary`` lines (git's parser) that create/delete/re-mode a symlink or
+        gitlink, or rename/copy a path; ``["patch_unparseable"]`` when git rejects the patch."""
+
+        # Run at the repository top: from a subdirectory git apply silently skips paths
+        # outside it, which would hide exactly the entries this check exists to see.
+        summary = self._git_run(["apply", "--summary", "--numstat", str(diff_path)], cwd=self.project_root)
+        if summary.returncode != 0:
+            return ["patch_unparseable"]
+        return [match.group(0) for match in re.finditer(r"^.*$", summary.stdout or "", re.MULTILINE)
+                if UNSAFE_PATCH_SUMMARY.search(match.group(0))]
+
+    def _post_apply_violations(self, execution_root: Path) -> list[str]:
+        """Authoritative containment check after the patch is applied: lstat-walk the mirror
+        (never following links). Any non-regular, non-directory entry fails, except a symlink
+        HEAD already tracks with the identical target (not patch-introduced): kept when it
+        resolves inside the mirror, unlinked when it points outside. Returns the offending
+        relative paths."""
+
+        root = execution_root.resolve()
+        offending: list[str] = []
+        self._neutralized_head_links: list[str] = []
+        head_links: dict[str, str] | None = None
+        for current, dirs, files in os.walk(execution_root, followlinks=False):
+            for name in [*dirs, *files]:
+                path = Path(current) / name
+                rel = path.relative_to(execution_root).as_posix()
+                if rel == ".git":
+                    continue
+                info = os.lstat(path)
+                if stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode):
+                    continue
+                if stat.S_ISLNK(info.st_mode):
+                    if head_links is None:
+                        head_links = self._head_symlink_targets()
+                    target = os.readlink(path)
+                    resolved = path.resolve()
+                    inside = resolved == root or root in resolved.parents
+                    if head_links.get(rel) == target:
+                        if not inside:
+                            # Already in HEAD (not introduced by the patch) but pointing
+                            # outside: removed from the mirror so nothing can read through it.
+                            os.unlink(path)
+                            self._neutralized_head_links.append(rel)
+                        continue
+                offending.append(rel)
+        return offending
+
+    def _head_symlink_targets(self) -> dict[str, str]:
+        listed = subprocess.run(  # noqa: S603 - argv list, no shell
+            ["git", "ls-tree", "-r", "-z", "HEAD"],
+            cwd=self.project_root,
+            env=self._git_env(),
+            capture_output=True,
+            check=False,
+        )
+        links: dict[str, str] = {}
+        for record in (listed.stdout or b"").split(b"\0"):
+            if not record.startswith(SYMLINK_MODE.encode() + b" "):
+                continue
+            meta, _, raw_path = record.partition(b"\t")
+            sha = meta.split()[-1].decode("ascii", errors="ignore")
+            blob = subprocess.run(  # noqa: S603 - argv list, no shell
+                ["git", "cat-file", "blob", sha],
+                cwd=self.project_root,
+                env=self._git_env(),
+                capture_output=True,
+                check=False,
+            )
+            if blob.returncode == 0:
+                links[raw_path.decode("utf-8", errors="surrogateescape")] = blob.stdout.decode(
+                    "utf-8", errors="surrogateescape"
+                )
+        return links
 
     @staticmethod
     def _diff_policy_violations(diff_text: str) -> dict[str, list[str]]:

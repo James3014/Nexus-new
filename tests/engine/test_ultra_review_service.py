@@ -1137,7 +1137,11 @@ def test_ultra_review_refuses_to_apply_a_patch_that_creates_a_symlink(tmp_path, 
     assert payload["gate_passed"] is False
     assert payload["sandbox_mirror"]["strategy"] == "refused"
     assert payload["sandbox_mirror"]["symlinks"] == ["link.py"]
-    assert not any(cmd[:2] == ["git", "apply"] or cmd[:3] == ["git", "worktree", "add"] for cmd in seen)
+    # Only the read-only `git apply --summary` classification runs; nothing is applied.
+    assert not any(
+        (cmd[:2] == ["git", "apply"] and "--summary" not in cmd) or cmd[:3] == ["git", "worktree", "add"]
+        for cmd in seen
+    )
     rules = {(f["rule_id"], f["file"]) for f in payload["findings"]}
     assert ("symlink_in_diff", "link.py") in rules
     assert ("path_outside_worktree", "link.py") in rules
@@ -1177,3 +1181,130 @@ def test_sandbox_read_roots_exclude_home_users_tmp_and_repo_root(tmp_path, monke
     monkeypatch.setattr(sys, "prefix", temp_roots[0])
     with pytest.raises(UltraReviewError, match="sandbox_read_root_overbroad"):
         service._sandbox_read_roots()
+
+
+RENAME_FROM_SYMLINK_PATCH = (
+    "diff --git a/link.py b/renamed.py\n"
+    "similarity index 100%\n"
+    "rename from link.py\n"
+    "rename to renamed.py\n"
+)
+
+
+def test_git_summary_refuses_rename_from_symlink_patch_even_if_hand_parser_misses(tmp_path):
+    """parser-differential: git's own --summary rejects a rename/copy patch the hand parser
+    never classifies as a symlink."""
+    _init_app_repo(tmp_path)
+    (tmp_path / "link.py").symlink_to(tmp_path / "app.py")
+    subprocess.run(["git", "add", "link.py"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "link"], cwd=tmp_path, check=True)
+    patch = tmp_path.parent / f"{tmp_path.name}_rename.diff"
+    patch.write_text(RENAME_FROM_SYMLINK_PATCH, encoding="utf-8")
+    service = UltraReviewService(tmp_path)
+
+    assert service._diff_policy_violations(RENAME_FROM_SYMLINK_PATCH)["symlinks"] == []
+    summary = service._unsafe_patch_summary(patch)
+    assert summary and "rename" in summary[0]
+    copy_patch = patch.with_name(patch.stem + "_copy.diff")
+    copy_patch.write_text(RENAME_FROM_SYMLINK_PATCH.replace("rename", "copy"), encoding="utf-8")
+    assert any("copy" in line for line in service._unsafe_patch_summary(copy_patch))
+
+
+def _binary_symlink_patch(tmp_path, monkeypatch):
+    """A crafted ``GIT binary patch`` whose new entry has mode 120000 (a symlink pointing
+    outside the repo), served to the review as its captured diff."""
+    _init_app_repo(tmp_path)
+    outside = tmp_path.parent / f"{tmp_path.name}_bin_outside.txt"
+    outside.write_text("binary-secret-content", encoding="utf-8")
+    (tmp_path / ".gitattributes").write_text("blink -diff\n", encoding="utf-8")
+    subprocess.run(["git", "add", ".gitattributes"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "attrs"], cwd=tmp_path, check=True)
+    (tmp_path / "blink").write_text(str(outside), encoding="utf-8")
+    subprocess.run(["git", "add", "blink"], cwd=tmp_path, check=True)
+    diff = subprocess.run(
+        ["git", "diff", "--cached", "--binary", "HEAD"], cwd=tmp_path, check=True, capture_output=True, text=True
+    ).stdout
+    subprocess.run(["git", "rm", "-q", "--cached", "blink"], cwd=tmp_path, check=True)
+    (tmp_path / "blink").unlink()
+    diff = diff.replace("new file mode 100644", "new file mode 120000")
+    (tmp_path / "app.py").write_text("def handler(value):\n    return value.strip()  # x\n", encoding="utf-8")
+    monkeypatch.setattr(UltraReviewService, "_capture_diff", lambda self, base_ref: diff)
+    return diff, outside
+
+
+def test_binary_symlink_patch_is_refused_by_git_summary_without_the_hand_parser(tmp_path, monkeypatch):
+    diff, _ = _binary_symlink_patch(tmp_path, monkeypatch)
+    assert "GIT binary patch" in diff and "120000" in diff
+    monkeypatch.setattr(
+        UltraReviewService, "_diff_policy_violations", staticmethod(lambda text: {"symlinks": [], "nested_git": []})
+    )
+
+    payload = UltraReviewService(tmp_path).run(
+        dry_run=False, report_path="reports/ultra.json", sandbox_root="reports/sandboxes"
+    )
+
+    assert payload["gate_passed"] is False
+    assert payload["sandbox_mirror"]["strategy"] == "refused"
+    assert any("create mode 120000" in line for line in payload["sandbox_mirror"]["git_summary"])
+    assert any(f["rule_id"] == "unsafe_patch_summary" for f in payload["findings"])
+    assert "binary-secret-content" not in json.dumps(payload)
+
+
+def test_post_apply_lstat_walk_is_authoritative_when_both_patch_checks_are_bypassed(tmp_path, monkeypatch):
+    """Even if the hand parser and git --summary both miss it, the applied mirror is walked
+    with lstat; a link git created is unlinked and the lane fails closed."""
+    diff, outside = _binary_symlink_patch(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        UltraReviewService, "_diff_policy_violations", staticmethod(lambda text: {"symlinks": [], "nested_git": []})
+    )
+    monkeypatch.setattr(UltraReviewService, "_unsafe_patch_summary", lambda self, path: [])
+
+    payload = UltraReviewService(tmp_path).run(
+        dry_run=False, report_path="reports/ultra.json", sandbox_root="reports/sandboxes"
+    )
+
+    assert payload["gate_passed"] is False
+    assert payload["sandbox_mirror"]["diff_applied"] is False
+    assert payload["sandbox_mirror"]["post_apply_violations"] == ["blink"]
+    assert any(f["rule_id"] == "mirror_link_or_escape" and f["file"] == "blink" for f in payload["findings"])
+    assert not (Path(payload["sandbox_path"]) / "worktree" / "blink").is_symlink()
+    assert outside.read_text(encoding="utf-8") == "binary-secret-content"
+    assert "binary-secret-content" not in json.dumps(payload)
+
+
+def test_post_apply_walk_allows_only_head_tracked_inside_symlinks(tmp_path):
+    _init_app_repo(tmp_path)
+    (tmp_path / "inside_link.py").symlink_to("app.py")
+    subprocess.run(["git", "add", "inside_link.py"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "link"], cwd=tmp_path, check=True)
+    service = UltraReviewService(tmp_path)
+    mirror = tmp_path.parent / f"{tmp_path.name}_mirror"
+    mirror.mkdir()
+    (mirror / "app.py").write_text("x = 1\n", encoding="utf-8")
+    (mirror / "inside_link.py").symlink_to("app.py")
+    assert service._post_apply_violations(mirror) == []
+    (mirror / "inside_link.py").unlink()
+    (mirror / "inside_link.py").symlink_to("../elsewhere.py")
+    (mirror / "new_link").symlink_to("app.py")
+    assert sorted(service._post_apply_violations(mirror)) == ["inside_link.py", "new_link"]
+
+
+def test_post_apply_walk_unlinks_head_tracked_symlinks_that_point_outside(tmp_path):
+    _init_app_repo(tmp_path)
+    outside = tmp_path.parent / f"{tmp_path.name}_head_outside.txt"
+    outside.write_text("head-link-secret", encoding="utf-8")
+    (tmp_path / "state.json").symlink_to(outside)
+    subprocess.run(["git", "add", "state.json"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "runtime link"], cwd=tmp_path, check=True)
+    (tmp_path / "app.py").write_text("def handler(value):\n    return value.strip()  # x\n", encoding="utf-8")
+
+    payload = UltraReviewService(tmp_path).run(
+        dry_run=False, report_path="reports/ultra.json", sandbox_root="reports/sandboxes"
+    )
+
+    mirror = payload["sandbox_mirror"]
+    assert mirror["neutralized_head_links"] == ["state.json"]
+    assert "post_apply_violations" not in mirror
+    assert not any(f["rule_id"] == "mirror_link_or_escape" for f in payload["findings"])
+    assert outside.read_text(encoding="utf-8") == "head-link-secret"
+    assert "head-link-secret" not in json.dumps(payload)
