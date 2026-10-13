@@ -1,5 +1,5 @@
-from pathlib import Path
 import json
+from pathlib import Path
 
 from nexus.core.router import SkillsRouter
 
@@ -8,24 +8,24 @@ def test_router_emits_decision_id_in_candidates_and_log(tmp_path: Path):
     inventory_path = tmp_path / "scripts" / "skills_inventory.json"
     inventory_path.parent.mkdir(parents=True, exist_ok=True)
     inventory_path.write_text(
-        json.dumps(
-            {
-                "skills": {
-                    "demo-skill": {
-                        "description": "demo",
-                        "phases": ["R"],
-                        "triggers": ["demo"],
-                    }
+        json.dumps({
+            "skills": {
+                "demo-skill": {
+                    "description": "demo",
+                    "phases": ["R"],
+                    "triggers": ["demo"],
                 }
             }
-        ),
+        }),
         encoding="utf-8",
     )
     skill_file = tmp_path / "scripts" / "skills_builtin" / "demo-skill" / "SKILL.md"
     skill_file.parent.mkdir(parents=True, exist_ok=True)
     skill_file.write_text("# Demo\n", encoding="utf-8")
 
-    router = SkillsRouter(project_root=str(tmp_path), run_dir=str(tmp_path / ".nexus" / "runs" / "t1"))
+    router = SkillsRouter(
+        project_root=str(tmp_path), run_dir=str(tmp_path / ".nexus" / "runs" / "t1")
+    )
     candidates = router.route_candidates("R", {"task_id": "demo task"})
     assert candidates
     assert str(candidates[0].get("decision_id", "")).startswith("dec_r_")
@@ -45,7 +45,9 @@ def test_router_returns_no_candidates_without_real_skill_artifact(tmp_path: Path
         encoding="utf-8",
     )
 
-    router = SkillsRouter(project_root=str(tmp_path), run_dir=str(tmp_path / ".nexus" / "runs" / "t2"))
+    router = SkillsRouter(
+        project_root=str(tmp_path), run_dir=str(tmp_path / ".nexus" / "runs" / "t2")
+    )
     candidates = router.route_candidates("R", {"task_id": "demo task"})
 
     assert candidates == []
@@ -53,3 +55,29 @@ def test_router_returns_no_candidates_without_real_skill_artifact(tmp_path: Path
     row = json.loads(log_path.read_text(encoding="utf-8").splitlines()[-1])
     assert row["candidate_count"] == 0
     assert row["fallback_used"] is False
+
+
+def test_router_marks_fallback_used_when_inventory_fallback_supplies_candidates(tmp_path: Path):
+    inventory_path = tmp_path / "scripts" / "skills_inventory.json"
+    inventory_path.parent.mkdir(parents=True, exist_ok=True)
+    inventory_path.write_text(
+        json.dumps({
+            "skills": {"demo-skill": {"description": "demo", "phases": ["R"], "triggers": ["demo"]}}
+        }),
+        encoding="utf-8",
+    )
+    skill_file = tmp_path / "scripts" / "skills_builtin" / "demo-skill" / "SKILL.md"
+    skill_file.parent.mkdir(parents=True, exist_ok=True)
+    skill_file.write_text("# Demo\n", encoding="utf-8")
+
+    router = SkillsRouter(
+        project_root=str(tmp_path), run_dir=str(tmp_path / ".nexus" / "runs" / "t3")
+    )
+    candidates = router.route_candidates("R", {"task_id": "demo task"})
+
+    assert candidates
+    assert all(c.get("source") != "autonomic_selector" for c in candidates)
+    log_path = tmp_path / ".nexus" / "runs" / "t3" / "router_decisions.jsonl"
+    row = json.loads(log_path.read_text(encoding="utf-8").splitlines()[-1])
+    assert row["candidate_count"] == len(candidates)
+    assert row["fallback_used"] is True
