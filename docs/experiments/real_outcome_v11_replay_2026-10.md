@@ -144,7 +144,7 @@ non-code paths, would need a versioned v2 spec. It is not applied here.
 
 | # | Check | Scope | Result |
 |---|---|---|---|
-| a | candidate := GOLD | all 14 valid-oracle tasks | see the follow-up section below |
+| a | candidate := GOLD | all 14 valid-oracle tasks | 14/14 RESOLVED (F2P all pass; 0 P2P new failures) |
 | b | candidate := empty | all 14 valid-oracle tasks | 14/14 NO_CANDIDATE |
 | c | syntax error in a GOLD-changed non-test module | nexus-runtime#162 (`src/nexus_runtime/support/services/capability_registry.py`) | BROKE_EXISTING (691 P2P new failures) |
 | d | one byte of `raw.json` changed (copy) | nexus-runtime#176 | refused (`raw_sha256_mismatch`), exit 3, no receipt |
@@ -186,8 +186,15 @@ The self-check receipts are in sibling stores under
 - **Silent selector failure.** `p2p_selector_failed` has no label effect under v1.
   It is false for every Nexus-new task in this run.
 
-## Self-check (a) follow-up
+## Self-check (a) detail
 
-Status: running at the time of this commit (gold-as-candidate, one task at a
-time). Results will be appended in a follow-up commit. Until (a) passes, the
-headline above is provisional under spec §11.
+Gold-as-candidate gave 14/14 RESOLVED, so all spec §11 checks pass and the
+headline is no longer provisional.
+
+- In 3 tasks, a few P2P nodes that pass on BASE+T fail on GOLD itself. These
+  tests are broken by the human change, so they are dropped as `gold_also_fails`:
+  - Nexus-new#1904: 3 nodes;
+  - nexus-runtime#162: 1 node;
+  - nexus-runtime#176: 1 node.
+- Nexus-new#1904 also has 22 flaky nodes dropped.
+- Receipts are in `selfcheck-a-gold/`.
