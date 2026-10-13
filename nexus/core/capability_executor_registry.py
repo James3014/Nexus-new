@@ -3266,7 +3266,10 @@ _FILE_LOCK_DEFAULT_TTL_SEC = 1800.0
 def _exec_file_lock(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
     start = time.monotonic()
     try:
-        from nexus.orchestrator.file_lock_registry import FileLockRegistry
+        from nexus.orchestrator.file_lock_registry import (
+            FileLockRegistry,
+            register_task_lock_file,
+        )
 
         constraints = dict(plan.constraints or {})
         target_files = [
@@ -3298,6 +3301,9 @@ def _exec_file_lock(plan: CapabilityExecutionPlan, task_desc: str) -> Capability
         ttl_sec = float(constraints.get("file_lock_ttl_sec") or _FILE_LOCK_DEFAULT_TTL_SEC)
         reg = FileLockRegistry(lock_file=str(lock_file), ttl_sec=ttl_sec)
         acquired = reg.acquire_detailed(plan.task_id, target_files)
+        if not acquired["conflicts"]:
+            # Released by the mainchain entry when the task completes (TTL is the backstop).
+            register_task_lock_file(plan.task_id, str(lock_file))
         conflicts = list(acquired["conflicts"])
         holders = dict(acquired["holders"])
         if conflicts:
