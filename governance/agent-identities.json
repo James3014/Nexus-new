@@ -1,4 +1,6 @@
 {
   "schema": "nexus.agent_identities.v1",
-  "agents": []
+  "agents": [
+    "nexus-agent-james3014[bot]"
+  ]
 }
