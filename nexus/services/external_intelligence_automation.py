@@ -34,6 +34,7 @@ from nexus.services.external_intelligence_closure import (
     _path_matches,
     parse_task_card_authority,
 )
+from nexus.services.external_intelligence_core_binding import CoreAuthorityInputs
 from nexus.services.external_intelligence_fanout import (
     AdaptiveWorkerFanoutRuntime,
     CapacityLease,
@@ -416,6 +417,7 @@ class ExternalIntelligenceAutomation:
         self.d_runtime = d_runtime
         self.capacity_factory = capacity_factory or self._default_capacity
         self._worker_binding: dict[str, str] | None = None
+        self._task_card_authority: TaskCardAuthority | None = None
 
     @staticmethod
     def _default_capacity(contract: Mapping[str, Any]) -> CapacityLease:
@@ -824,6 +826,7 @@ class ExternalIntelligenceAutomation:
             raise AutomationError("INTELLIGENCE_ENVELOPE_ARTIFACT_MISMATCH")
         units: list[dict[str, Any]] = []
         contract_worker = self._worker_binding
+        core_authority = self._core_authority_inputs(item)
         for unit in item.contract["execution_units"]:
             # Issue prose is never workforce authority; every unit inherits the
             # single binding resolved by the canonical planner seam.
@@ -841,8 +844,52 @@ class ExternalIntelligenceAutomation:
             }
             if unit_worker:
                 unit_data["selected_worker"] = dict(unit_worker)
+            if core_authority is not None:
+                # Authority inputs only; fanout mints the per-attempt Core binding.
+                # Not part of unit identity, so existing attempts/receipts are unchanged.
+                unit_data["core_authority"] = core_authority
             units.append(unit_data)
         return units
+
+    def _core_authority_inputs(self, item: IssueWorkItem) -> dict[str, Any] | None:
+        """Issue contract + Task Card + worker binding inputs for Core binding minting.
+
+        Missing Task Card Core fields (execution_lane, capability_*) are passed through
+        empty; they fail closed only when an Open SWE bound dispatch needs them.
+        """
+        authority = self._task_card_authority
+        worker = self._worker_binding
+        if authority is None or worker is None:
+            return None
+        contract = item.contract
+
+        def rows(specs: Any) -> tuple[tuple[str, tuple[str, ...], float], ...]:
+            parsed = (VerifierSpec.from_value(value) for value in specs)
+            return tuple((spec.verifier_id, spec.argv, spec.timeout) for spec in parsed)
+
+        inputs = CoreAuthorityInputs(
+            repository=item.repository,
+            issue_number=item.issue_number,
+            revision=str(contract["revision"]),
+            intent=(item.title or "").strip() or str(contract["task_id"]),
+            issue_contract_sha256=_sha256_json(contract),
+            item_identity_hash=item.identity_hash,
+            task_id=str(contract["task_id"]),
+            task_card_ref=str(contract["task_card_ref"]),
+            task_card_hash=str(contract["task_card_hash"]).lower(),
+            main_sha=str(contract["main_sha"]).lower(),
+            execution_lane=authority.execution_lane,
+            capability_disposition=authority.capability_disposition,
+            capability_ids=authority.capability_ids,
+            capability_justification=authority.capability_justification,
+            unit_verifiers={
+                str(unit_id): rows(specs)
+                for unit_id, specs in sorted((contract.get("unit_verifiers") or {}).items())
+            },
+            whole_verifiers=rows(contract["whole_verifiers"]),
+            worker_binding_sha256=_sha256_json(dict(worker)),
+        )
+        return inputs.to_mapping()
 
     def _validate_worker_transport_binding(self) -> None:
         """Reject a planner binding incompatible with the configured worker before effect."""
@@ -1020,6 +1067,7 @@ class ExternalIntelligenceAutomation:
         self, repository: str, issue_number: int, title: str, body: str
     ) -> dict[str, Any]:
         self._worker_binding = None
+        self._task_card_authority = None
         try:
             contract = parse_issue_contract(body)
         except AutomationError as exc:
@@ -1075,7 +1123,7 @@ class ExternalIntelligenceAutomation:
         try:
             self._validate_source_lineage(item.repository, str(contract["main_sha"]))
             task_card_path, task_card_text = self._task_card(contract)
-            self._validate_task_card_authority(contract, task_card_text)
+            self._task_card_authority = self._validate_task_card_authority(contract, task_card_text)
             record = self._record(item)
             intake = normalize_intake(record)
             if intake["disposition"] == "EXECUTABLE":

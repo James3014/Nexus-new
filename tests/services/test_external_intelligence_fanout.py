@@ -1811,3 +1811,172 @@ def test_v2_transport_dispatch_exact_identity_and_unsupported_fails_closed(tmp_p
     )
     assert "u2" in unsupported_res["errors"]
     assert unsupported_res["errors"]["u2"] == "UNSUPPORTED_WORKER_TRANSPORT"
+
+
+# ---------------------------------------------------------------------------
+# Core repository_mutation_binding wiring
+# ---------------------------------------------------------------------------
+
+
+class _CoreBoundTransport:
+    supports_core_mutation_binding = True
+
+    def __init__(self, *, core_status: str = "BOUND", tamper_hash: bool = False):
+        from tests.services.test_external_intelligence_core_binding import (
+            bound_worker,
+            worker_sha,
+        )
+
+        self.provider_id = "google_genai"
+        self.model_id = "gemini-test"
+        self.model = "google_genai/gemini-test"
+        self.timeout = 300.0
+        self.worker_identity_sha256 = worker_sha(bound_worker())
+        self.core_status = core_status
+        self.tamper_hash = tamper_hash
+        self.runs: list[dict] = []
+
+    def bind_worker(self, _worker):
+        return self
+
+    def prepare_operation_id(self, operation, *, operation_material=None, **_kwargs):
+        assert operation == "worker_run" and operation_material is not None
+        return hashlib.sha256(
+            json.dumps(operation_material, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+
+    def run_new(self, **kwargs):
+        from tests.services.test_external_intelligence_core_binding import TARGET
+
+        self.runs.append(dict(kwargs))
+        target = Path(kwargs["workspace_path"]) / TARGET
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("def test_bound():\n    assert True\n", encoding="utf-8")
+        core = kwargs["core_binding"]
+        return OpenCodeRunResult(
+            status="COMPLETED",
+            worker_backend="open_swe",
+            session_id="ses_open_swe_1234567890abcdef1234",
+            response_text=json.dumps({
+                "schema": "external_intelligence_worker_result.v1",
+                "task_id": "task-1",
+                "unit_id": "u1",
+                "status": "IMPLEMENTATION_COMPLETED",
+                "summary": "bound",
+            }),
+            provider_id=self.provider_id,
+            model_id=self.model_id,
+            directory=str(Path(kwargs["workspace_path"]).resolve()),
+            process_started=True,
+            operation_id=kwargs["operation_id"],
+            core_binding_status=self.core_status,
+            core_binding_hash="sha256:" + "0" * 64
+            if self.tamper_hash
+            else core["core_binding_hash"],
+            acceptance_contract_hash=core["acceptance_contract_hash"],
+        )
+
+
+def _core_bound_fanout(tmp_path: Path, transport: _CoreBoundTransport):
+    from tests.services.test_external_intelligence_core_binding import (
+        bound_unit_mapping,
+        make_bound_repo,
+    )
+
+    scenario = make_bound_repo(tmp_path)
+    unit_mapping = bound_unit_mapping(tmp_path, scenario)
+    store = FanoutStore(tmp_path / "state")
+    runtime = AdaptiveWorkerFanoutRuntime(
+        allocator=GitWorktreeAllocator(scenario.repo, tmp_path / "workspaces"),
+        store=store,
+        transport=transport,
+    )
+    return unit_mapping, store, runtime
+
+
+def test_core_bound_fanout_keeps_semantic_envelope_and_binds_prompt_to_bound_sha(tmp_path):
+    from nexus.services.external_intelligence_core_binding import parse_bound_execution_envelope_v2
+
+    transport = _CoreBoundTransport()
+    unit_mapping, store, runtime = _core_bound_fanout(tmp_path, transport)
+    semantic_bytes = Path(unit_mapping["envelope_ref"]).read_bytes()
+    identity = ExecutionUnit.from_mapping(unit_mapping).identity()
+
+    result = runtime.run([unit_mapping], CapacityLease(1, 1, 1, 1))
+
+    assert result["errors"] == {}
+    assert Path(unit_mapping["envelope_ref"]).read_bytes() == semantic_bytes
+    assert "core_authority" not in identity
+    assert ExecutionUnit.from_mapping(unit_mapping).identity() == identity
+    run = transport.runs[0]
+    assert run["artifact_path"] != unit_mapping["envelope_ref"]
+    _semantic, binding, bound_sha = parse_bound_execution_envelope_v2(
+        Path(run["artifact_path"]).read_text(encoding="utf-8"),
+        semantic_envelope_sha256=unit_mapping["envelope_sha256"],
+    )
+    assert f"\nenvelope_sha256={bound_sha}\n" in run["prompt"]
+    assert f"\nsemantic_envelope_sha256={unit_mapping['envelope_sha256']}\n" in run["prompt"]
+    assert binding["operation_id"] == run["operation_id"]
+    assert run["operation_material"]["attempt_id"] == binding["attempt_id"]
+    receipt = result["receipts"]["u1"]
+    assert receipt["envelope_sha256"] == unit_mapping["envelope_sha256"]
+    assert receipt["core_binding_hash"] == binding["binding_hash"]
+    attempt = json.loads((store.attempts / "task-1--u1--initial.json").read_text("utf-8"))
+    assert attempt["state"] == "COMPLETED"
+    assert (
+        attempt["unit_identity_sha256"] == ExecutionUnit.from_mapping(unit_mapping).identity_sha256
+    )
+
+
+@pytest.mark.parametrize(
+    "transport_kwargs", [{"core_status": "LEGACY_UNBOUND"}, {"tamper_hash": True}]
+)
+def test_core_bound_fanout_unbound_or_mismatched_attestation_is_outcome_unknown(
+    tmp_path, transport_kwargs
+):
+    transport = _CoreBoundTransport(**transport_kwargs)
+    unit_mapping, store, runtime = _core_bound_fanout(tmp_path, transport)
+    result = runtime.run([unit_mapping], CapacityLease(1, 1, 1, 1))
+    assert result["errors"] == {"u1": "CORE_BINDING_ATTESTATION_MISMATCH"}
+    attempt = json.loads((store.attempts / "task-1--u1--initial.json").read_text("utf-8"))
+    assert attempt["state"] == "OUTCOME_UNKNOWN"
+    assert attempt["transport_status"] == "CORE_BINDING_ATTESTATION_MISMATCH"
+    assert not store.receipts.exists() or not list(store.receipts.glob("*.json"))
+
+
+def test_core_bound_fanout_index_missing_at_main_sha_fails_before_attempt(tmp_path):
+    from tests.services.test_external_intelligence_core_binding import (
+        bound_unit_mapping,
+        make_bound_repo,
+    )
+
+    scenario = make_bound_repo(tmp_path, with_index=False)
+    transport = _CoreBoundTransport()
+    store = FanoutStore(tmp_path / "state")
+    runtime = AdaptiveWorkerFanoutRuntime(
+        allocator=GitWorktreeAllocator(scenario.repo, tmp_path / "workspaces"),
+        store=store,
+        transport=transport,
+    )
+    result = runtime.run([bound_unit_mapping(tmp_path, scenario)], CapacityLease(1, 1, 1, 1))
+    assert result["errors"] == {"u1": "CAPABILITY_DISCOVERY_INDEX_MISSING"}
+    assert transport.runs == []
+    assert not (store.attempts / "task-1--u1--initial.json").exists()
+
+
+def test_build_worker_bootstrap_bound_identity_requires_both_fields(tmp_path):
+    repo, base = make_repo(tmp_path)
+    env_path = tmp_path / "env.json"
+    env_sha = make_envelope(env_path, base, allowed=["a.py"])
+    execution_unit = ExecutionUnit.from_mapping(unit(base, env_path, env_sha, "u1", ["a.py"]))
+    lease = WorkspaceLease("ws-1", str(repo), base)
+    legacy = build_worker_bootstrap(execution_unit, lease)
+    assert f"\nenvelope_sha256={env_sha}\n" in legacy
+    assert "semantic_envelope_sha256=" not in legacy
+    bound = build_worker_bootstrap(
+        execution_unit, lease, bound_envelope_ref="/bound.json", bound_envelope_sha256="9" * 64
+    )
+    assert "\nenvelope_sha256=" + "9" * 64 + "\n" in bound
+    assert f"\nsemantic_envelope_sha256={env_sha}\n" in bound
+    with pytest.raises(FanoutError, match="BOUND_ENVELOPE_IDENTITY_INCOMPLETE"):
+        build_worker_bootstrap(execution_unit, lease, bound_envelope_sha256="9" * 64)

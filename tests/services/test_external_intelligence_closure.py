@@ -1062,3 +1062,59 @@ def test_validate_repair_result_enforces_exact_parent_worker_identity(tmp_path):
     child_worker_mismatch["receipt_id"] = _receipt_identity(child_worker_mismatch)
     with pytest.raises(ClosureError, match="REPAIR_WORKER_BINDING_MISMATCH"):
         _validate_repair_result(parent_bound, child_worker_mismatch)
+
+
+# ---------------------------------------------------------------------------
+# Core-bound worker receipts
+# ---------------------------------------------------------------------------
+
+
+def _bound_receipt(tmp_path, monkeypatch) -> dict:
+    from nexus.services.external_intelligence_fanout import CapacityLease
+    from tests.services.test_open_swe_worker_transport import _bound_runtime
+
+    ctx = _bound_runtime(tmp_path, monkeypatch)
+    result = ctx.runtime.run([ctx.unit], CapacityLease(1, 1, 1, 1))
+    assert result["errors"] == {}
+    return dict(result["receipts"]["u1"])
+
+
+def _reidentify(receipt: dict) -> dict:
+    from nexus.services.external_intelligence_closure import _receipt_identity
+
+    receipt = dict(receipt)
+    receipt["receipt_id"] = _receipt_identity(receipt)
+    return receipt
+
+
+def test_core_bound_receipt_validates_against_bound_envelope(tmp_path, monkeypatch):
+    receipt = _bound_receipt(tmp_path, monkeypatch)
+    bound = validate_worker_receipt(receipt)
+    assert bound["core_binding_status"] == "BOUND"
+    assert bound["core_binding_hash"] == receipt["core_binding_hash"]
+    assert bound["acceptance_contract_hash"] == receipt["acceptance_contract_hash"]
+
+
+@pytest.mark.parametrize(
+    ("mutation", "error"),
+    [
+        ({"core_binding_status": "LEGACY_UNBOUND"}, "CORE_BINDING_NOT_BOUND"),
+        ({"core_binding_hash": "sha256:" + "0" * 64}, "CORE_BINDING_RECEIPT_MISMATCH"),
+        ({"acceptance_contract_hash": "sha256:" + "0" * 64}, "CORE_BINDING_RECEIPT_MISMATCH"),
+        ({"bound_envelope_sha256": "0" * 64}, "CORE_BINDING_RECEIPT_MISMATCH"),
+        ({"bound_envelope_ref": "/nonexistent/bound.json"}, "CORE_BINDING_ENVELOPE_INVALID"),
+    ],
+)
+def test_core_bound_receipt_requires_bound_status_and_recorded_hashes(
+    tmp_path, monkeypatch, mutation, error
+):
+    receipt = _bound_receipt(tmp_path, monkeypatch)
+    with pytest.raises(ClosureError, match=error):
+        validate_worker_receipt(_reidentify({**receipt, **mutation}))
+
+
+def test_core_bound_receipt_with_partial_bound_fields_is_invalid(tmp_path, monkeypatch):
+    receipt = _bound_receipt(tmp_path, monkeypatch)
+    receipt.pop("acceptance_contract_hash")
+    with pytest.raises(ClosureError, match="CORE_BINDING_RECEIPT_INVALID"):
+        validate_worker_receipt(_reidentify(receipt))
