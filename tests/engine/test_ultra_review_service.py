@@ -887,3 +887,139 @@ def test_ultra_review_dotdot_paths_are_never_inside_the_worktree(tmp_path):
     assert service._changed_python_files(diff, root) == []
     assert service._uncontained_changed_files(diff, root) == ["../outside.py"]
     assert service._contained_path("pkg/../../outside.py", root) is None
+
+
+SBPL_INJECTION_NAME = 'x") (allow default) ("'
+
+
+def test_sbpl_path_rejects_policy_injection_and_relative_paths(tmp_path):
+    import pytest
+
+    from nexus.engine.ultra_review_service import UltraReviewError, sbpl_path
+
+    for bad in (
+        str(tmp_path / SBPL_INJECTION_NAME),
+        str(tmp_path / "a)b"),
+        str(tmp_path / 'q"q'),
+        str(tmp_path / "back\\slash"),
+        str(tmp_path / "new\nline"),
+        "relative/path",
+        "",
+    ):
+        with pytest.raises(UltraReviewError):
+            sbpl_path(bad)
+    assert sbpl_path(tmp_path) == str(tmp_path.resolve())
+
+
+def test_ultra_review_sandbox_root_with_sbpl_injection_fails_closed(tmp_path, monkeypatch):
+    _init_app_repo(tmp_path)
+    (tmp_path / "app.py").write_text("def handler(value):\n    return value.strip()\n", encoding="utf-8")
+    seen = []
+    original_run = subprocess.run
+
+    def spy(cmd, **kwargs):
+        seen.append(list(cmd))
+        return original_run(cmd, **kwargs)
+
+    monkeypatch.setattr("nexus.engine.ultra_review_service.subprocess.run", spy)
+    payload = UltraReviewService(tmp_path).run(
+        dry_run=False, report_path="reports/ultra.json", sandbox_root=f"reports/{SBPL_INJECTION_NAME}"
+    )
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["gate_passed"] is False
+    assert "sandbox_path_unsafe_for_policy" in payload["blocked_reason"]
+    assert not any(cmd and cmd[0] == "sandbox-exec" and "-p" in cmd[1:2] for cmd in seen)
+    assert not any("(allow default)" in " ".join(cmd) for cmd in seen if cmd and cmd[0] != "git")
+
+
+def _bound_service(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    service = UltraReviewService(root)
+    sandbox = root / ".nexus" / "sandbox"
+    execution_root = sandbox / "worktree"
+    execution_root.mkdir(parents=True)
+    service._bind_sandbox(sandbox_path=sandbox, execution_root=execution_root)
+    return service, sandbox, execution_root
+
+
+def test_sandbox_profile_reads_are_default_deny_and_home_denied_before_allows(tmp_path):
+    service, sandbox, _ = _bound_service(tmp_path)
+    lines = service._sandbox_profile().splitlines()
+    home = str(Path("~").expanduser().resolve())
+
+    assert "(allow file-read*)" not in lines  # no blanket read grant
+    assert "(allow default)" not in lines
+    home_deny = lines.index(f'(deny file-read* (subpath "{home}"))')
+    read_allow = next(i for i, line in enumerate(lines) if line.startswith("(allow file-read* "))
+    assert home_deny < read_allow
+    assert '(subpath "/")' not in lines[read_allow]
+    assert '(subpath "/Users")' not in lines[read_allow]
+    assert f'(subpath "{home}")' not in lines[read_allow]
+    assert f'(subpath "{sandbox.resolve()}")' in lines[read_allow]
+    # Credential stores are denied again after every allow (last match wins).
+    assert lines[-1].startswith("(deny file-read* ") and f"{home}/.ssh" in lines[-1]
+
+
+def test_sandboxed_run_pins_cwd_interpreter_and_isolation(tmp_path, monkeypatch):
+    import sys
+
+    import pytest
+
+    from nexus.engine.ultra_review_service import UltraReviewError
+
+    service, sandbox, execution_root = _bound_service(tmp_path)
+    monkeypatch.setenv("NEXUS_ULTRA_REVIEW_DISABLE_OS_SANDBOX", "1")
+    with pytest.raises(UltraReviewError, match="lane_cwd_outside_sandbox"):
+        service._sandboxed_run([sys.executable, "-I", "-c", "pass"], cwd=tmp_path, timeout=10)
+    with pytest.raises(UltraReviewError, match="python_lane_not_isolated"):
+        service._sandboxed_run([sys.executable, "-c", "pass"], cwd=execution_root, timeout=10)
+    monkeypatch.setattr(sys, "executable", str(execution_root / "bin" / "python"))
+    with pytest.raises(UltraReviewError, match="interpreter_inside_reviewed_tree"):
+        service._sandboxed_run([sys.executable, "-I", "-c", "pass"], cwd=execution_root, timeout=10)
+
+
+def test_sandbox_env_path_never_points_into_reviewed_tree(tmp_path, monkeypatch):
+    service, sandbox, execution_root = _bound_service(tmp_path)
+    monkeypatch.setenv("PATH", f"{execution_root}/bin:{service.project_root}/bin:relative/bin:/usr/bin:/bin")
+    monkeypatch.setenv("PYTHONPATH", str(execution_root))
+    env = service._sandbox_env()
+
+    assert env["PATH"].split(":") == ["/usr/bin", "/bin"]
+    assert "PYTHONPATH" not in env
+
+
+def test_mirror_writes_never_follow_pr_symlinks(tmp_path):
+    from nexus.engine.ultra_review_service import _write_no_follow
+
+    service, sandbox, execution_root = _bound_service(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    victim = outside / "victim.txt"
+    victim.write_text("keep", encoding="utf-8")
+    (execution_root / "changes.diff").symlink_to(victim)
+    _write_no_follow(execution_root / "changes.diff", b"diff")
+    assert victim.read_text(encoding="utf-8") == "keep"
+    assert not (execution_root / "changes.diff").is_symlink()
+
+    (execution_root / "linked_dir").symlink_to(outside, target_is_directory=True)
+    assert service._target_inside(execution_root / "linked_dir" / "new.txt", execution_root) is False
+    assert service._target_inside(execution_root / "pkg" / "new.txt", execution_root) is True
+
+
+def test_untracked_overlay_does_not_write_through_a_mirror_symlink(tmp_path):
+    _init_app_repo(tmp_path)
+    outside = tmp_path.parent / f"{tmp_path.name}_overlay_outside"
+    outside.mkdir()
+    service = UltraReviewService(tmp_path)
+    sandbox = tmp_path / "reports" / "sbx"
+    execution_root = sandbox / "worktree"
+    execution_root.mkdir(parents=True)
+    (execution_root / "drop").symlink_to(outside, target_is_directory=True)
+    (tmp_path / "drop").mkdir()
+    (tmp_path / "drop" / "payload.txt").write_text("x", encoding="utf-8")
+
+    service._overlay_untracked_files(execution_root, sandbox_path=sandbox)
+
+    assert not (outside / "payload.txt").exists()

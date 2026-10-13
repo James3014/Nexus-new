@@ -74,6 +74,24 @@ SANDBOX_DENIED_HOME_PATHS = (
 # Files whose change alters how the ghost-regression test run itself behaves.
 TEST_HARNESS_FILES = ("conftest.py", "pytest.ini", "tox.ini", "setup.cfg", "pyproject.toml", "sitecustomize.py", "usercustomize.py")
 _OS_SANDBOX_PROBE: dict[str, bool] = {}
+# Every path interpolated into the sandbox-exec (SBPL) profile must match this: no quote,
+# backslash, paren, whitespace or control character can reach an SBPL string literal, so
+# no PR-, branch- or user-derived text can close a literal and rewrite the policy.
+SBPL_SAFE_PATH = re.compile(r"^/[A-Za-z0-9._/@+-]*$")
+# System locations the confined interpreter needs to start (dyld, frameworks, locale,
+# timezone, devices). Nothing under a user's home directory.
+SANDBOX_SYSTEM_READ_ROOTS = (
+    "/usr/lib",
+    "/usr/share",
+    "/System/Library",
+    "/System/Cryptexes",
+    "/Library/Apple",
+    "/private/var/db/dyld",
+    "/private/var/db/timezone",
+    "/private/etc/localtime",
+    "/private/etc/ssl",
+    "/dev",
+)
 
 
 def os_sandbox_available() -> bool:
@@ -106,6 +124,35 @@ DRY_RUN_MODE = "dry-run"
 
 class UltraReviewError(RuntimeError):
     """Raised when ultra-review cannot produce a trustworthy report."""
+
+
+def sbpl_path(path: Path | str) -> str:
+    """Return ``path`` resolved and absolute, safe to embed in an SBPL string literal.
+
+    Raises UltraReviewError (fail closed) instead of escaping: a path that needs escaping is
+    never placed in the sandbox policy.
+    """
+
+    text = str(path)
+    if not text or not os.path.isabs(text):
+        raise UltraReviewError("sandbox_path_not_absolute")
+    resolved = str(Path(text).resolve())
+    if not SBPL_SAFE_PATH.fullmatch(resolved) or "/../" in resolved + "/" or resolved.endswith("/.."):
+        raise UltraReviewError("sandbox_path_unsafe_for_policy")
+    return resolved
+
+
+def _write_no_follow(target: Path, data: bytes) -> None:
+    """Write ``data`` to ``target`` without following a symlink at (or replacing into) it."""
+
+    if target.is_symlink() or target.exists():
+        if target.is_dir() and not target.is_symlink():
+            raise UltraReviewError(f"refusing_to_overwrite_directory:{target.name}")
+        target.unlink()
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(target, flags, 0o600)
+    with os.fdopen(fd, "wb") as handle:
+        handle.write(data)
 
 
 class UltraReviewService:
@@ -483,10 +530,35 @@ class UltraReviewService:
                     continue
             except OSError:
                 continue
+            if not self._target_inside(target, execution_root):
+                # A PR-tracked symlinked directory (or file) at the target must not redirect
+                # the overlay write outside the mirror.
+                continue
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, target)
+            if not self._target_inside(target, execution_root):
+                continue
+            _write_no_follow(target, source.read_bytes())
             count += 1
         return count
+
+    @staticmethod
+    def _target_inside(target: Path, execution_root: Path) -> bool:
+        """True when no existing component of ``target`` below ``execution_root`` is a symlink."""
+
+        root = execution_root.resolve()
+        try:
+            rel_parts = target.relative_to(execution_root).parts
+        except ValueError:
+            return False
+        if ".." in rel_parts:
+            return False
+        current = execution_root
+        for part in rel_parts:
+            current = current / part
+            if current.is_symlink():
+                return False
+        parent = target.parent.resolve() if target.parent.exists() else None
+        return parent is None or parent == root or root in parent.parents
 
     def _copy_execution_workspace(self, execution_root: Path, sandbox_path: Path) -> dict[str, Any]:
         ignored_patterns = shutil.ignore_patterns(
@@ -501,6 +573,9 @@ class UltraReviewService:
 
         def ignore(path: str, names: list[str]) -> set[str]:
             ignored = set(ignored_patterns(path, names))
+            # Never copy a symlink (dangling or not): following it could pull a file from
+            # outside the checkout (for example a credential) into the mirror.
+            ignored.update(name for name in names if os.path.islink(os.path.join(path, name)))
             current = Path(path).resolve()
             if current == self.project_root:
                 try:
@@ -519,6 +594,8 @@ class UltraReviewService:
             self.project_root,
             execution_root,
             ignore=ignore,
+            # Defence in depth: symlinks are already ignored above; never dereference one.
+            symlinks=True,
             ignore_dangling_symlinks=True,
         )
         return {"strategy": "copytree", "diff_applied": True}
@@ -529,23 +606,25 @@ class UltraReviewService:
         home.mkdir(parents=True, exist_ok=True)
         tmp.mkdir(parents=True, exist_ok=True)
         self._sandbox_ctx = {
-            "sandbox_path": sandbox_path.resolve(),
-            "execution_root": execution_root.resolve(),
-            "home": home.resolve(),
-            "tmp": tmp.resolve(),
+            "sandbox_path": Path(sbpl_path(sandbox_path.resolve())),
+            "execution_root": Path(sbpl_path(execution_root.resolve())),
+            "home": Path(sbpl_path(home.resolve())),
+            "tmp": Path(sbpl_path(tmp.resolve())),
         }
 
     def _sandbox_env(self) -> dict[str, str]:
         ctx = getattr(self, "_sandbox_ctx", None) or {}
         env = {key: os.environ[key] for key in SANDBOX_ENV_ALLOWLIST if key in os.environ}
-        project = str(self.project_root)
-        python_path = [
-            part
-            for part in os.environ.get("PYTHONPATH", "").split(os.pathsep)
-            if part and not str(Path(part).resolve()).startswith(project)
-        ]
-        execution_root = str(ctx.get("execution_root") or "")
-        env["PYTHONPATH"] = os.pathsep.join([p for p in [execution_root, *python_path] if p])
+        # PATH never resolves into the reviewed checkout, the mirror or the sandbox, so a
+        # PR-supplied executable cannot shadow a tool. Every Python lane runs with -I, so
+        # PYTHONPATH is not set at all (the ghost re-run gets the mirror via pytest's
+        # ``pythonpath`` ini override after interpreter start-up).
+        if "PATH" in env:
+            env["PATH"] = os.pathsep.join(
+                part for part in env["PATH"].split(os.pathsep) if part and os.path.isabs(part) and not self._in_untrusted_tree(part)
+            )
+        if "VIRTUAL_ENV" in env and self._in_untrusted_tree(env["VIRTUAL_ENV"]):
+            env.pop("VIRTUAL_ENV")
         env["HOME"] = str(ctx.get("home") or "")
         env["TMPDIR"] = str(ctx.get("tmp") or "")
         env["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -555,13 +634,22 @@ class UltraReviewService:
         return env
 
     def _sandbox_profile(self) -> str:
+        """SBPL policy for one lane command (last matching rule wins).
+
+        Reads: default-deny; only the sandbox/mirror, the trusted interpreter prefixes and
+        import roots, and fixed system locations are readable. ``$HOME`` is denied before
+        those allows, and credential stores are denied again last, so they stay unreadable
+        even if an allowed root contains them. Every interpolated path goes through
+        ``sbpl_path`` (absolute, resolved, ``SBPL_SAFE_PATH``) or the profile is refused.
+        """
+
         ctx = getattr(self, "_sandbox_ctx", None) or {}
-        writable = [str(ctx.get("execution_root") or ""), str(ctx.get("sandbox_path") or "")]
-        real_home = Path(os.path.expanduser("~")).resolve()
-        denied = " ".join(f'(subpath "{real_home / rel}")' for rel in SANDBOX_DENIED_HOME_PATHS)
-        writes = " ".join(f'(subpath "{path}")' for path in writable if path)
-        # $HOME is unreadable except the reviewer's interpreter/venv, its import path and the
-        # sandbox itself; credential stores stay denied even inside those roots.
+        if not ctx.get("execution_root") or not ctx.get("sandbox_path"):
+            raise UltraReviewError("sandbox_not_bound")
+        writable = [sbpl_path(ctx["execution_root"]), sbpl_path(ctx["sandbox_path"])]
+        real_home = sbpl_path(Path(os.path.expanduser("~")).resolve())
+        denied = " ".join(f'(subpath "{sbpl_path(Path(real_home) / rel)}")' for rel in SANDBOX_DENIED_HOME_PATHS)
+        writes = " ".join(f'(subpath "{path}")' for path in writable)
         readable = " ".join(f'(subpath "{path}")' for path in self._sandbox_read_roots())
         return "\n".join(
             [
@@ -569,10 +657,10 @@ class UltraReviewService:
                 "(deny default)",
                 "(allow process-fork)",
                 "(allow process-exec*)",
-                "(allow file-read*)",
                 f'(deny file-read* (subpath "{real_home}"))',
                 "(allow file-read-metadata)",
-                f"(allow file-read* {readable})",
+                # The root directory entry itself (dyld/realpath walk), not its subtree.
+                f'(allow file-read* (literal "/") {readable})',
                 "(allow sysctl-read)",
                 "(allow mach-lookup)",
                 "(allow ipc-posix-shm)",
@@ -585,19 +673,46 @@ class UltraReviewService:
 
     def _sandbox_read_roots(self) -> list[str]:
         ctx = getattr(self, "_sandbox_ctx", None) or {}
-        roots = {str(ctx.get("execution_root") or ""), str(ctx.get("sandbox_path") or "")}
-        roots.update({str(Path(sys.prefix).resolve()), str(Path(sys.base_prefix).resolve())})
-        project = self.project_root.resolve()
-        for entry in [*sys.path, *os.environ.get("PYTHONPATH", "").split(os.pathsep)]:
-            if not entry:
+        # Required roots fail closed when unsafe for the policy.
+        roots = {sbpl_path(ctx["execution_root"]), sbpl_path(ctx["sandbox_path"])}
+        roots.update({sbpl_path(Path(sys.prefix).resolve()), sbpl_path(Path(sys.base_prefix).resolve())})
+        roots.update(path for path in SANDBOX_SYSTEM_READ_ROOTS if os.path.exists(path))
+        for entry in sys.path:
+            if not entry or not os.path.isabs(entry):
                 continue
             candidate = Path(entry).resolve()
-            # The reviewed checkout itself is never on the sandbox import path.
-            if candidate == project or project in candidate.parents:
+            # The reviewed checkout itself is never an extra readable import root.
+            if self._in_untrusted_tree(candidate) or not candidate.is_dir():
                 continue
-            if candidate.is_dir():
-                roots.add(str(candidate))
-        return sorted(root for root in roots if root)
+            try:
+                roots.add(sbpl_path(candidate))
+            except UltraReviewError:
+                # Optional root: leaving it unreadable is the safe direction.
+                continue
+        return sorted(roots)
+
+    def _in_untrusted_tree(self, path: Path | str) -> bool:
+        """True when ``path`` resolves into the reviewed checkout, the mirror or the sandbox."""
+
+        ctx = getattr(self, "_sandbox_ctx", None) or {}
+        candidate = Path(path).resolve()
+        for root in (self.project_root, ctx.get("execution_root"), ctx.get("sandbox_path")):
+            if not root:
+                continue
+            root_path = Path(root).resolve()
+            if candidate == root_path or root_path in candidate.parents:
+                return True
+        return False
+
+    def _trusted_interpreter(self) -> str:
+        """The reviewer's own interpreter; refused if it lives in the mirror or the sandbox."""
+
+        ctx = getattr(self, "_sandbox_ctx", None) or {}
+        interpreter = Path(sys.executable).resolve()
+        for root in (ctx.get("execution_root"), ctx.get("sandbox_path")):
+            if root and (interpreter == Path(root) or Path(root) in interpreter.parents):
+                raise UltraReviewError("interpreter_inside_reviewed_tree")
+        return sys.executable
 
     def sandbox_isolation(self) -> dict[str, Any]:
         contained = os_sandbox_available()
@@ -619,6 +734,20 @@ class UltraReviewService:
         and (when available) an OS barrier denying network, credential reads and writes
         outside the sandbox. Never a shell; raises subprocess.TimeoutExpired on timeout."""
         argv = list(cmd)
+        if not argv:
+            raise UltraReviewError("empty_lane_command")
+        if argv[0] == sys.executable:
+            argv[0] = self._trusted_interpreter()
+            if "-I" not in argv[1:2]:
+                raise UltraReviewError("python_lane_not_isolated")
+        ctx = getattr(self, "_sandbox_ctx", None) or {}
+        resolved_cwd = Path(cwd).resolve()
+        if not any(
+            root and (resolved_cwd == Path(root) or Path(root) in resolved_cwd.parents)
+            for root in (ctx.get("execution_root"), ctx.get("sandbox_path"))
+        ):
+            raise UltraReviewError("lane_cwd_outside_sandbox")
+        cwd = resolved_cwd
         if os_sandbox_available():
             argv = ["sandbox-exec", "-p", self._sandbox_profile(), *argv]
         return subprocess.run(  # noqa: S603 - argv list, no shell
@@ -1099,7 +1228,7 @@ class UltraReviewService:
                 ),
                 encoding="utf-8",
             )
-            shutil.copy2(self._resolve(sandbox_path / "changes.diff"), execution_root / "changes.diff")
+            _write_no_follow(execution_root / "changes.diff", self._resolve(sandbox_path / "changes.diff").read_bytes())
             cmd = [sys.executable, "-I", str(script_path)]
             executed_checks.append(script_name)
             timeout = False
@@ -1200,7 +1329,7 @@ class UltraReviewService:
     def _run_logic_breaker(self, *, diff_path: Path, execution_root: Path, sandbox_path: Path) -> dict[str, Any]:
         repro_script = sandbox_path / "ultra_logic_repro.py"
         mirror_diff_path = execution_root / ".nexus_ultra_changes.diff"
-        shutil.copy2(diff_path, mirror_diff_path)
+        _write_no_follow(mirror_diff_path, Path(diff_path).read_bytes())
         repro_script.write_text(
             "\n".join(
                 [
@@ -1403,8 +1532,11 @@ class UltraReviewService:
 
         # rootdir pins conftest discovery to the sandbox mirror (the sandbox may sit inside the
         # reviewed repo); no cache dir is written into the mirror.
+        # -I: no PYTHONPATH, user site or cwd at start-up, so a PR sitecustomize/.pth never
+        # loads; the mirror is put on sys.path by pytest's ``pythonpath`` ini override.
         cmd = [
             sys.executable,
+            "-I",
             "-m",
             "pytest",
             "-q",
@@ -1412,6 +1544,8 @@ class UltraReviewService:
             "no:cacheprovider",
             "--rootdir",
             str(execution_root),
+            "-o",
+            f"pythonpath={sbpl_path(execution_root)}",
             *test_candidates,
         ]
         sanitized_env = [key for key in BENCHMARK_ONLY_ENV_VARS if key in os.environ]
