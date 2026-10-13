@@ -32,19 +32,42 @@ entry needs a cause and a real Issue number.
 
 from __future__ import annotations
 
-import importlib
-import pkgutil
+import importlib.util
 from pathlib import Path
 
 
-def _assemble() -> tuple[dict[str, object], ...]:
-    names = sorted(
-        info.name
-        for info in pkgutil.iter_modules([str(Path(__file__).parent)])
-        if not info.name.startswith("_")
+def discover(directory: Path) -> list[Path]:
+    """Entry modules: top-level ``*.py`` files only, sorted, ``_*`` excluded.
+
+    Stray ``.pyc`` files and subpackages are ignored on purpose.
+    """
+    return sorted(
+        path for path in directory.glob("*.py") if path.is_file() and not path.name.startswith("_")
     )
-    entries = (importlib.import_module(f"{__name__}.{name}").ENTRY for name in names)
-    return tuple(entry for entry in entries if entry is not None)
 
 
-QUARANTINE: tuple[dict[str, object], ...] = _assemble()
+def load_entry(path: Path) -> object:
+    spec = importlib.util.spec_from_file_location(f"{__name__}.{path.stem}", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load quarantine item {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.ENTRY
+
+
+def assemble(directory: Path) -> tuple[dict[str, object], ...]:
+    entries: list[dict[str, object]] = []
+    seen: dict[str, str] = {}
+    for path in discover(directory):
+        entry = load_entry(path)
+        if entry is None:
+            continue
+        file = str(entry["file"])  # type: ignore[index]
+        if file in seen:
+            raise ValueError(f"duplicate quarantine item file {file}: {seen[file]} and {path.name}")
+        seen[file] = path.name
+        entries.append(entry)  # type: ignore[arg-type]
+    return tuple(entries)
+
+
+QUARANTINE: tuple[dict[str, object], ...] = assemble(Path(__file__).parent)

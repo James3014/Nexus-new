@@ -1,6 +1,8 @@
 """Explicit quarantine for the scheduled Tier 3 full regression (Refs #1897).
 
-The list lives in ``tests/nightly_quarantine_entries.py``. It only applies when
+The list lives one module per entry in ``tests/nightly_quarantine_items/<slug>.py``
+(``tests/nightly_quarantine_entries.py`` re-exports it; retire an entry with
+``ENTRY = None``, never delete the file). It only applies when
 ``NEXUS_NIGHTLY_QUARANTINE=1``; every other run sees the tests unchanged.
 Quarantined tests still run and are marked ``xfail(strict=False)``, so a fix
 shows up as XPASS instead of being hidden by a skip.
