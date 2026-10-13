@@ -272,6 +272,8 @@ def get_learn_phase_policy(
     service_factory: LearnModeServiceFactory | None = None,
     derive_actions: DerivePhaseActions | None = None,
 ) -> dict[str, Any]:
+    from nexus.research.learn.phase_policy import phase_slo_pass_rate
+
     root = Path(repo_root)
     service = (service_factory or _default_learn_mode_service_factory)(root)
     slo_summary = service.read_phase_slo_summary()
@@ -279,7 +281,7 @@ def get_learn_phase_policy(
     return {
         "task_type": task_type,
         "risk": risk,
-        "slo_readiness": slo_summary.get("overall_pass_rate", 0.0),
+        "slo_readiness": phase_slo_pass_rate(slo_summary),
         "policy": {
             "allow_research": actions.allow_research,
             "force_baseline": actions.force_baseline,

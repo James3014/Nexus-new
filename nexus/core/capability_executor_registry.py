@@ -384,6 +384,26 @@ def _resolve_run_root(plan: CapabilityExecutionPlan) -> tuple[Path, Path, str]:
     return project_root, run_root, run_id
 
 
+def _resolve_learn_store(plan: CapabilityExecutionPlan) -> tuple[Path, Path, str]:
+    """Project-level learn store: the directory the ``learn:*`` CLI reads.
+
+    ``LearnModeService(<project>)`` keeps claims and the phase ledger under
+    ``<project>/.nexus``.  The project is the runtime-supplied ``workspace_root`` (else
+    ``project_root``, else the cwd).  An explicit ``run_root`` / ``runtime_root`` constraint
+    still isolates the run (tests); without one the executor must not invent a fresh,
+    empty per-task directory, because the report would then never see the project data.
+    """
+    constraints = plan.constraints or {}
+    raw_root = str(
+        constraints.get("workspace_root") or constraints.get("project_root") or ""
+    ).strip()
+    project_root = Path(raw_root).expanduser().resolve() if raw_root else Path.cwd().resolve()
+    run_id = str(constraints.get("run_id") or plan.task_id)
+    raw_run = constraints.get("run_root") or constraints.get("runtime_root")
+    run_root = Path(str(raw_run)) if raw_run else project_root
+    return project_root, run_root, run_id
+
+
 def _assert_outputs_in_run_root(output_paths: list[Path], run_root: Path) -> None:
     rr = run_root.resolve()
     for p in output_paths:
@@ -886,11 +906,13 @@ def _exec_learn_scheduler_service(plan: CapabilityExecutionPlan, task_desc: str)
     try:
         from pathlib import Path
         constraints = dict(plan.constraints or {})
+        # The checkout only provides the CLI script; the policy is evaluated on the
+        # request's workspace learn store (workspace_root), not on the checkout's data.
         repo_root = Path(__file__).resolve().parents[2]
         report_root = Path(
             str(constraints.get("workspace_root") or repo_root)
         ).expanduser().resolve()
-        inst = cls(repo_root=repo_root, report_root=report_root)
+        inst = cls(repo_root=repo_root, report_root=report_root, project_root=report_root)
         if not hasattr(inst, "run_scheduler"):
             raise RuntimeError("run_scheduler missing")
         result = int(inst.run_scheduler())
@@ -2300,7 +2322,7 @@ def _exec_learn_mode(plan: CapabilityExecutionPlan, task_desc: str) -> Capabilit
             ),
         )
     try:
-        project_root, run_root, run_id = _resolve_run_root(plan)
+        project_root, run_root, run_id = _resolve_learn_store(plan)
         inst = cls(project_root=project_root, run_root=run_root)
         if hasattr(inst, "build_report") and callable(inst.build_report):
             result = inst.build_report()
@@ -2352,9 +2374,11 @@ def _exec_learn_phase_slo(plan: CapabilityExecutionPlan, task_desc: str) -> Capa
     try:
         from nexus.research.learn_mode import LearnModeService
 
-        project_root, run_root, run_id = _resolve_run_root(plan)
+        project_root, run_root, run_id = _resolve_learn_store(plan)
         lm = LearnModeService(project_root=project_root, run_root=run_root)
-        result = lm.build_phase_slo_report(window=1)
+        # Same window as ``learn:phase-slo`` (default 300); window=1 judged one row at most.
+        window = max(1, int((plan.constraints or {}).get("phase_slo_window") or 300))
+        result = lm.build_phase_slo_report(window=window)
         physical = "nexus.research.learn_mode.LearnModeService.build_phase_slo_report"
         elapsed = int((time.monotonic() - start) * 1000)
         ok = result is not None
@@ -2547,6 +2571,16 @@ def _exec_jit_validation(plan: CapabilityExecutionPlan, task_desc: str) -> Capab
                     "quota_limit": JITToolInjector.MAX_TOKEN_PER_SHARD,
                 },
                 mask_applied=True,
+                # apply_mask is a self-declared keyword mock (jit_tool_injector.py); only the
+                # quota check is real.  Say so on the receipt until a real mask exists.
+                simulated=True,
+                mask_kind="keyword_mock",
+                claim_boundary={
+                    "simulated": True,
+                    "claim": "SIMULATED",
+                    "reason": "jit_mask_is_keyword_mock_until_real_mask",
+                    "real_parts": ["check_token_quota"],
+                },
                 quota_checked=True,
                 quota_passed=quota_ok,
                 selected_tool_count=len(selected_tools),
@@ -2968,6 +3002,9 @@ def _exec_committee(plan: CapabilityExecutionPlan, task_desc: str) -> Capability
         )
 
 
+_FILE_LOCK_DEFAULT_TTL_SEC = 1800.0
+
+
 def _exec_file_lock(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
     start = time.monotonic()
     try:
@@ -2997,15 +3034,43 @@ def _exec_file_lock(plan: CapabilityExecutionPlan, task_desc: str) -> Capability
                     physical_callable="nexus.orchestrator.file_lock_registry.FileLockRegistry.acquire",
                 ),
             )
-        lock_file = workspace_root / ".nexus" / "multi_agent" / "locks" / f"{plan.task_id}.json"
-        reg = FileLockRegistry(lock_file=str(lock_file))
-        conflicts = list(reg.acquire(plan.task_id, target_files))
+        # One registry per workspace keyed by file path (holder = task id), so a second
+        # task locking the same file is refused; a lock older than the TTL is stale.
+        lock_file = workspace_root / ".nexus" / "multi_agent" / "locks" / "file_locks.json"
+        ttl_sec = float(constraints.get("file_lock_ttl_sec") or _FILE_LOCK_DEFAULT_TTL_SEC)
+        reg = FileLockRegistry(lock_file=str(lock_file), ttl_sec=ttl_sec)
+        acquired = reg.acquire_detailed(plan.task_id, target_files)
+        conflicts = list(acquired["conflicts"])
+        holders = dict(acquired["holders"])
+        if conflicts:
+            return _make_receipt(
+                "file_lock",
+                plan,
+                invoked=True,
+                gate_passed=False,
+                wall_time_ms=int((time.monotonic() - start) * 1000),
+                outcome=_structured_outcome(
+                    action="acquire+check_access",
+                    semantic_status="BLOCKED",
+                    error="FILE_LOCK_HELD_BY_OTHER_TASK:"
+                    + ",".join(f"{path}@{holder}" for path, holder in sorted(holders.items())),
+                    evidence_refs=[f"file:{lock_file}"],
+                    conflicts=conflicts,
+                    holders=holders,
+                    access_granted=False,
+                    task_files_match=False,
+                    lock_file=str(lock_file),
+                    physical_callable="nexus.orchestrator.file_lock_registry.FileLockRegistry.acquire_detailed",
+                ),
+            )
         access_results = {
             target: bool(reg.check_access(plan.task_id, target))
             for target in target_files
         }
-        task_files = sorted(reg.get_task_files(plan.task_id))
-        expected_files = sorted(os.path.normpath(item) for item in target_files)
+        task_files = sorted(
+            f for f in reg.get_task_files(plan.task_id) if f in {os.path.normpath(t) for t in target_files}
+        )
+        expected_files = sorted({os.path.normpath(item) for item in target_files})
         ok = not conflicts and all(access_results.values()) and task_files == expected_files
         elapsed = int((time.monotonic() - start) * 1000)
         return _make_receipt(
@@ -3024,6 +3089,8 @@ def _exec_file_lock(plan: CapabilityExecutionPlan, task_desc: str) -> Capability
                     "task_hint": str(task_desc or "")[:80],
                 },
                 conflicts=conflicts,
+                stale_taken_over=dict(acquired["stale_taken_over"]),
+                lock_ttl_sec=ttl_sec,
                 access_granted=all(access_results.values()),
                 task_files_match=task_files == expected_files,
                 lock_file=str(lock_file),
@@ -3349,23 +3416,39 @@ def _exec_registry_sync(plan: CapabilityExecutionPlan, task_desc: str) -> Capabi
         tls = TLSProvider(root / ".nexus" / "certs", node_id=f"sync-{plan.task_id}")
         registry = SkillRegistry(root / ".nexus" / "registry" / "skills.db")
         sync = SecureRegistrySync(tls=tls, registry=registry)
-        rows = sync.pull_from_peer(host, port, query_tokens)
+        pulled = sync.pull_from_peer_checked(host, port, query_tokens)
+        rows = list(pulled.get("rows") or [])
         elapsed = int((time.monotonic() - start) * 1000)
-        ok = isinstance(rows, list)
+        ok = bool(pulled.get("ok"))
+        error_class = str(pulled.get("error_class") or "")
         return _make_receipt(
             "registry_sync",
             plan,
+            invoked=True,
             wall_time_ms=elapsed,
             gate_passed=ok,
             outcome=_structured_outcome(
                 action="pull_from_peer",
-                semantic_status="VERIFIED" if ok else "FAILED",
-                evidence_refs=[f"registry-peer:{host}:{port}"],
-                result={"peer_host": host, "peer_port": port, "row_count": len(rows)},
-                physical_callable="nexus.security.secure_sync.SecureRegistrySync.pull_from_peer",
+                # Fail closed: an unreachable / failing peer is BLOCKED, never VERIFIED with 0 rows.
+                semantic_status="VERIFIED" if ok else "BLOCKED",
+                error=None if ok else f"REGISTRY_PEER_UNAVAILABLE:{error_class}",
+                evidence_refs=(
+                    [f"registry-peer:{host}:{port}"]
+                    if ok
+                    else [f"ev_registry_sync_blocked_{plan.task_id}"]
+                ),
+                result={
+                    "peer_host": host,
+                    "peer_port": port,
+                    "row_count": len(rows),
+                    "error_class": error_class,
+                    "error_detail": str(pulled.get("error") or "")[:300],
+                },
+                physical_callable="nexus.security.secure_sync.SecureRegistrySync.pull_from_peer_checked",
                 task_hint=str(task_desc or "")[:80],
-                peer_contacted=True,
+                peer_contacted=bool(pulled.get("peer_contacted")),
                 row_count=len(rows),
+                error_class=error_class,
             ),
         )
     except Exception as exc:
@@ -3577,6 +3660,68 @@ def _exec_external_doc_scout(
             evidence_refs=[f"ev_external_doc_scout_{plan.task_id}"],
         ),
     )
+
+
+def _exec_entropy_guard_v2(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
+    """Shannon-entropy audit of the output under review (not the task text).
+
+    Input: ``entropy_audit_text`` (required) and optional ``entropy_audit_tokens``.  No
+    fallback to ``task_desc``: auditing the request instead of the output was the reason the
+    old key was archived.  VETOED -> BLOCKED; PASSED -> VERIFIED with the measured entropies.
+    """
+    start = time.monotonic()
+    constraints = dict(plan.constraints or {})
+    text = str(constraints.get("entropy_audit_text") or "")
+    raw_tokens = constraints.get("entropy_audit_tokens") or []
+    tokens = [int(t) for t in raw_tokens if isinstance(t, int) and not isinstance(t, bool)]
+    if not text.strip():
+        return _make_receipt(
+            "entropy_guard_v2",
+            plan,
+            invoked=True,
+            gate_passed=False,
+            wall_time_ms=int((time.monotonic() - start) * 1000),
+            outcome=_structured_outcome(
+                action="audit_payload",
+                semantic_status="BLOCKED",
+                error="ENTROPY_AUDIT_TEXT_REQUIRED",
+                evidence_refs=[f"ev_entropy_guard_v2_blocked_{plan.task_id}"],
+            ),
+        )
+    from nexus.services.entropy_v2 import EntropyGuardV2
+
+    audit = EntropyGuardV2().audit_payload(text, tokens or None)
+    passed = str(audit.get("status")) == "PASSED"
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return _make_receipt(
+        "entropy_guard_v2",
+        plan,
+        gate_passed=passed,
+        wall_time_ms=int((time.monotonic() - start) * 1000),
+        outcome=_structured_outcome(
+            action="audit_payload",
+            semantic_status="VERIFIED" if passed else "BLOCKED",
+            error=None if passed else "ENTROPY_VETO",
+            evidence_refs=[f"sha256:{digest}"],
+            result={
+                "text_entropy": round(float(audit.get("text_entropy") or 0.0), 4),
+                "token_entropy": round(float(audit.get("token_entropy") or 0.0), 4),
+                "status": str(audit.get("status")),
+                "text_sha256": digest,
+                "text_chars": len(text),
+            },
+            physical_callable="nexus.services.entropy_v2.EntropyGuardV2.audit_payload",
+        ),
+    )
+
+
+# Executors written and tested here but deliberately NOT in EXECUTOR_REGISTRY: the planner
+# node lives in nexus-runtime and does not exist yet.  Registering a key no node can reach
+# recreates the silent second catalogue archived in #1906.  Move the entry into
+# EXECUTOR_REGISTRY in the PR that bumps the runtime pin to a revision defining the node.
+PENDING_PLANNER_NODE_EXECUTORS: dict[str, CapabilityExecutor] = {
+    "entropy_guard_v2": _exec_entropy_guard_v2,  # runtime node: #1907
+}
 
 
 EXECUTOR_REGISTRY: dict[str, CapabilityExecutor] = {

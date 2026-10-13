@@ -212,14 +212,24 @@ class SecureRegistrySync:
         finally:
             conn.close()
 
-    def pull_from_peer(self, peer_host: str, peer_port: int, query_tokens: set, task_type: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Client: Pull skills via mTLS."""
-        context = self.tls.get_client_context()
+    def pull_from_peer_checked(
+        self, peer_host: str, peer_port: int, query_tokens: set, task_type: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Client: pull skills via mTLS without hiding failures.
+
+        Returns ``{"ok", "peer_contacted", "rows", "error_class", "error"}``.  ``peer_contacted``
+        is true only once the TCP connection was established; any exception, an empty answer
+        or a non-``ok`` status is ``ok=False`` with the reason.
+        """
+        out: Dict[str, Any] = {
+            "ok": False, "peer_contacted": False, "rows": [], "error_class": "", "error": "",
+        }
         try:
+            context = self.tls.get_client_context()
             with socket.create_connection((peer_host, peer_port), timeout=10) as sock:
+                out["peer_contacted"] = True
                 with context.wrap_socket(sock, server_hostname=peer_host) as ssock:
                     f = ssock.makefile("rwb")
-                    
                     req = {
                         "action": "pull",
                         "query_tokens": list(query_tokens),
@@ -228,15 +238,25 @@ class SecureRegistrySync:
                     }
                     f.write((json.dumps(req) + "\n").encode("utf-8"))
                     f.flush()
-                    
                     resp_line = f.readline().decode("utf-8")
-                    if not resp_line:
-                        return []
-                        
-                    resp = json.loads(resp_line)
-                    if resp.get("status") == "ok":
-                        return resp.get("payload", [])
-                    return []
+            if not resp_line:
+                out.update(error_class="EmptyPeerResponse", error="peer closed without a response")
+                return out
+            resp = json.loads(resp_line)
+            if not isinstance(resp, dict) or resp.get("status") != "ok":
+                status = resp.get("status") if isinstance(resp, dict) else type(resp).__name__
+                message = resp.get("message", "") if isinstance(resp, dict) else ""
+                out.update(error_class="PeerRejected", error=f"status={status} {message}".strip())
+                return out
+            payload = resp.get("payload", [])
+            out.update(ok=True, rows=list(payload) if isinstance(payload, list) else [])
+            return out
         except Exception as e:
             logger.warning("mTLS pull from %s:%d failed: %s", peer_host, peer_port, e)
-            return []
+            out.update(error_class=type(e).__name__, error=str(e)[:300])
+            return out
+
+    def pull_from_peer(self, peer_host: str, peer_port: int, query_tokens: set, task_type: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Client: Pull skills via mTLS (rows only; [] on any failure -- use
+        ``pull_from_peer_checked`` when the caller must distinguish failure from no rows)."""
+        return list(self.pull_from_peer_checked(peer_host, peer_port, query_tokens, task_type)["rows"])

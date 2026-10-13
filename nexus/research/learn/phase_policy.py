@@ -17,9 +17,38 @@ class PhaseActions:
     audit_strictness: AuditStrictness
     reasoning: str
 
+def phase_slo_pass_rate(phase_slo_summary: Dict[str, Any]) -> float:
+    """Share of observed phases meeting the SLO, read from the real summary schema.
+
+    ``PhaseSLOService.build_phase_slo_report`` writes ``phases.<P>.{total,
+    required_done_ratio, success_ratio}`` and never ``overall_pass_rate``; reading only that
+    key made every real summary look like PassRate=0%.  An explicit ``overall_pass_rate`` is
+    still honoured.  A missing/unavailable summary or one with no observed phase rows is 0.0
+    (no evidence -> not ready).
+    """
+    summary = phase_slo_summary if isinstance(phase_slo_summary, dict) else {}
+    if "overall_pass_rate" in summary:
+        return float(summary.get("overall_pass_rate") or 0.0)
+    if str(summary.get("status") or "").upper() != "SUCCESS":
+        return 0.0
+    phases = summary.get("phases") if isinstance(summary.get("phases"), dict) else {}
+    observed = [
+        row for row in phases.values() if isinstance(row, dict) and int(row.get("total") or 0) > 0
+    ]
+    if not observed:
+        return 0.0
+    passing = sum(
+        1
+        for row in observed
+        if float(row.get("required_done_ratio") or 0.0) >= 0.95
+        and float(row.get("success_ratio") or 0.0) >= 0.5
+    )
+    return round(passing / len(observed), 4)
+
+
 def derive_phase_actions(phase_slo_summary: Dict[str, Any], task_type: str, risk_level: str) -> PhaseActions:
     # SLO Readiness check
-    pass_rate = phase_slo_summary.get("overall_pass_rate", 0.0)
+    pass_rate = phase_slo_pass_rate(phase_slo_summary)
     ready = pass_rate >= 0.8  # 80% threshold for "stable" research
     
     is_bug = task_type.lower() in ["bug", "bugfix"]
@@ -45,6 +74,8 @@ def derive_phase_actions(phase_slo_summary: Dict[str, Any], task_type: str, risk
         
     reasoning = f"PassRate={pass_rate:.1%}, Task={task_type}, Risk={risk_level}. "
     reasoning += "AllowResearch." if allow_research else "DenyResearch."
+    if isinstance(phase_slo_summary, dict) and phase_slo_summary.get("reason"):
+        reasoning += f" SLO={phase_slo_summary.get('reason')}."
     
     return PhaseActions(
         allow_research=allow_research,

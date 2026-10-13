@@ -288,7 +288,7 @@
         ],
         "result": {
           "findings": [
-            "{\"results\": [{\"id\": \"aws/mypy-boto3-athena\", \"name\": \"mypy-boto3-athena\", \"description\": \"mypy-boto3-athena type stubs for boto3 Athena clients, paginators, TypedDict request shapes, and editor/type-checker setup\", \"source\": \"maintainer\", \"tags\": [\"aws\", \"athena\", \"boto3\", \"type-stubs\", \"mypy\", \"pyright\", \"python\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"1.42.43\", \"path\": \"aws/docs/mypy-boto3-athena/python\", \"files\": [\"DOC.md\"], \"size\": 8953, \"lastUpdated\": \"2026-03-12\"}], \"recommendedVersion\": \"1.42.43\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 205}, {\"id\": \"spring-boot/spring-boot-actuator\", \"name\": \"spring-boot-actuator\", \"description\": \"Spring Boot Actuator 4.0.x \u2014 health checks, metrics, Prometheus, info endpoint, custom endpoints, and production monitoring\", \"source\": \"community\", \"tags\": [\"spring-boot-actuator\", \"monitoring\", \"health-check\", \"metrics\", \"prometheus\", \"production\", \"endpoints\"], \"languages\": [{\"language\": \"java\", \"versions\": [{\"version\": \"4.0.5\", \"path\": \"spring-boot/docs/actuator/java\", \"files\": [\"DOC.md\"], \"size\": 5877, \"lastUpdated\": \"2026-03-28\"}], \"recommendedVersion\": \"4.0.5\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 195}, {\"id\": \"babel/plugin-proposal-pipeline-operator\", \"name\": \"plugin-proposal-pipeline-operator\", \"description\": \"Configure Babel 7 to compile the pipeline operator proposal with minimal, F#, or Hack-style syntax\", \"source\": \"maintainer\", \"tags\": [\"babel\", \"build\", \"javascript\", \"pipeline-operator\", \"syntax\", \"proposal\"], \"languages\": [{\"language\": \"javascript\", \"versions\": [{\"version\": \"7.28.6\", \"path\": \"babel/docs/plugin-proposal-pipeline-operator/javascript\", \"files\": [\"DOC.md\"], \"size\": 5833, \"lastUpdated\": \"2026-03-13\"}], \"recommendedVersion\": \"7.28.6\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 170}, {\"id\": \"together/package\", \"name\": \"package\", \"description\": \"Together Python SDK for chat, completions, embeddings, images, rerank, and fine-tuning\", \"source\": \"maintainer\", \"tags\": [\"together\", \"python\", \"llm\", \"chat\", \"embeddings\", \"images\", \"rerank\", \"fine-tuning\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"2.16.0\", \"path\": \"together/docs/package/python\", \"files\": [\"DOC.md\"], \"size\": 7793, \"lastUpdated\": \"2026-05-29\"}], \"recommendedVersion\": \"2.16.0\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 170}, {\"id\": \"azure/mgmt-applicationinsights\", \"name\": \"mgmt-applicationinsights\", \"description\": \"Azure Application Insights management SDK for Python for ARM components, billing and quota settings, web tests, and workbooks\", \"source\": \"maintainer\", \"tags\": [\"azure\", \"application-insights\", \"monitoring\", \"arm\", \"workbooks\", \"synthetics\", \"python\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"4.1.0\", \"path\": \"azure/docs/mgmt-applicationinsights/python\", \"files\": [\"DOC.md\"], \"size\": 10982, \"lastUpdated\": \"2026-03-13\"}], \"recommendedVersion\": \"4.1.0\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 160}], \"total\": 5, \"query\": \"How does compute_total apply the discount in the fixture?\\n\\nNexus route oracle contract:\\n- Expected capability receipts: research. (provide a concise summary only, limit to 300 words)\"}"
+            "{\"results\": [{\"id\": \"aws/mypy-boto3-athena\", \"name\": \"mypy-boto3-athena\", \"description\": \"mypy-boto3-athena type stubs for boto3 Athena clients, paginators, TypedDict request shapes, and editor/type-checker setup\", \"source\": \"maintainer\", \"tags\": [\"aws\", \"athena\", \"boto3\", \"type-stubs\", \"mypy\", \"pyright\", \"python\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"1.42.43\", \"path\": \"aws/docs/mypy-boto3-athena/python\", \"files\": [\"DOC.md\"], \"size\": 8953, \"lastUpdated\": \"2026-03-12\"}], \"recommendedVersion\": \"1.42.43\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 205}, {\"id\": \"spring-boot/spring-boot-actuator\", \"name\": \"spring-boot-actuator\", \"description\": \"Spring Boot Actuator 4.0.x — health checks, metrics, Prometheus, info endpoint, custom endpoints, and production monitoring\", \"source\": \"community\", \"tags\": [\"spring-boot-actuator\", \"monitoring\", \"health-check\", \"metrics\", \"prometheus\", \"production\", \"endpoints\"], \"languages\": [{\"language\": \"java\", \"versions\": [{\"version\": \"4.0.5\", \"path\": \"spring-boot/docs/actuator/java\", \"files\": [\"DOC.md\"], \"size\": 5877, \"lastUpdated\": \"2026-03-28\"}], \"recommendedVersion\": \"4.0.5\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 195}, {\"id\": \"babel/plugin-proposal-pipeline-operator\", \"name\": \"plugin-proposal-pipeline-operator\", \"description\": \"Configure Babel 7 to compile the pipeline operator proposal with minimal, F#, or Hack-style syntax\", \"source\": \"maintainer\", \"tags\": [\"babel\", \"build\", \"javascript\", \"pipeline-operator\", \"syntax\", \"proposal\"], \"languages\": [{\"language\": \"javascript\", \"versions\": [{\"version\": \"7.28.6\", \"path\": \"babel/docs/plugin-proposal-pipeline-operator/javascript\", \"files\": [\"DOC.md\"], \"size\": 5833, \"lastUpdated\": \"2026-03-13\"}], \"recommendedVersion\": \"7.28.6\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 170}, {\"id\": \"together/package\", \"name\": \"package\", \"description\": \"Together Python SDK for chat, completions, embeddings, images, rerank, and fine-tuning\", \"source\": \"maintainer\", \"tags\": [\"together\", \"python\", \"llm\", \"chat\", \"embeddings\", \"images\", \"rerank\", \"fine-tuning\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"2.16.0\", \"path\": \"together/docs/package/python\", \"files\": [\"DOC.md\"], \"size\": 7793, \"lastUpdated\": \"2026-05-29\"}], \"recommendedVersion\": \"2.16.0\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 170}, {\"id\": \"azure/mgmt-applicationinsights\", \"name\": \"mgmt-applicationinsights\", \"description\": \"Azure Application Insights management SDK for Python for ARM components, billing and quota settings, web tests, and workbooks\", \"source\": \"maintainer\", \"tags\": [\"azure\", \"application-insights\", \"monitoring\", \"arm\", \"workbooks\", \"synthetics\", \"python\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"4.1.0\", \"path\": \"azure/docs/mgmt-applicationinsights/python\", \"files\": [\"DOC.md\"], \"size\": 10982, \"lastUpdated\": \"2026-03-13\"}], \"recommendedVersion\": \"4.1.0\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 160}], \"total\": 5, \"query\": \"How does compute_total apply the discount in the fixture?\\n\\nNexus route oracle contract:\\n- Expected capability receipts: research. (provide a concise summary only, limit to 300 words)\"}"
           ],
           "source": "chub",
           "status": "SUCCESS",
@@ -412,7 +412,7 @@
         ],
         "result": {
           "findings": [
-            "{\"results\": [{\"id\": \"aws/mypy-boto3-athena\", \"name\": \"mypy-boto3-athena\", \"description\": \"mypy-boto3-athena type stubs for boto3 Athena clients, paginators, TypedDict request shapes, and editor/type-checker setup\", \"source\": \"maintainer\", \"tags\": [\"aws\", \"athena\", \"boto3\", \"type-stubs\", \"mypy\", \"pyright\", \"python\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"1.42.43\", \"path\": \"aws/docs/mypy-boto3-athena/python\", \"files\": [\"DOC.md\"], \"size\": 8953, \"lastUpdated\": \"2026-03-12\"}], \"recommendedVersion\": \"1.42.43\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 205}, {\"id\": \"spring-boot/spring-boot-actuator\", \"name\": \"spring-boot-actuator\", \"description\": \"Spring Boot Actuator 4.0.x \u2014 health checks, metrics, Prometheus, info endpoint, custom endpoints, and production monitoring\", \"source\": \"community\", \"tags\": [\"spring-boot-actuator\", \"monitoring\", \"health-check\", \"metrics\", \"prometheus\", \"production\", \"endpoints\"], \"languages\": [{\"language\": \"java\", \"versions\": [{\"version\": \"4.0.5\", \"path\": \"spring-boot/docs/actuator/java\", \"files\": [\"DOC.md\"], \"size\": 5877, \"lastUpdated\": \"2026-03-28\"}], \"recommendedVersion\": \"4.0.5\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 195}, {\"id\": \"babel/plugin-proposal-pipeline-operator\", \"name\": \"plugin-proposal-pipeline-operator\", \"description\": \"Configure Babel 7 to compile the pipeline operator proposal with minimal, F#, or Hack-style syntax\", \"source\": \"maintainer\", \"tags\": [\"babel\", \"build\", \"javascript\", \"pipeline-operator\", \"syntax\", \"proposal\"], \"languages\": [{\"language\": \"javascript\", \"versions\": [{\"version\": \"7.28.6\", \"path\": \"babel/docs/plugin-proposal-pipeline-operator/javascript\", \"files\": [\"DOC.md\"], \"size\": 5833, \"lastUpdated\": \"2026-03-13\"}], \"recommendedVersion\": \"7.28.6\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 170}, {\"id\": \"together/package\", \"name\": \"package\", \"description\": \"Together Python SDK for chat, completions, embeddings, images, rerank, and fine-tuning\", \"source\": \"maintainer\", \"tags\": [\"together\", \"python\", \"llm\", \"chat\", \"embeddings\", \"images\", \"rerank\", \"fine-tuning\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"2.16.0\", \"path\": \"together/docs/package/python\", \"files\": [\"DOC.md\"], \"size\": 7793, \"lastUpdated\": \"2026-05-29\"}], \"recommendedVersion\": \"2.16.0\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 170}, {\"id\": \"azure/mgmt-applicationinsights\", \"name\": \"mgmt-applicationinsights\", \"description\": \"Azure Application Insights management SDK for Python for ARM components, billing and quota settings, web tests, and workbooks\", \"source\": \"maintainer\", \"tags\": [\"azure\", \"application-insights\", \"monitoring\", \"arm\", \"workbooks\", \"synthetics\", \"python\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"4.1.0\", \"path\": \"azure/docs/mgmt-applicationinsights/python\", \"files\": [\"DOC.md\"], \"size\": 10982, \"lastUpdated\": \"2026-03-13\"}], \"recommendedVersion\": \"4.1.0\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 160}], \"total\": 5, \"query\": \"How does compute_total apply the discount in the fixture?\\n\\nNexus route oracle contract:\\n- Expected capability receipts: research_route. (provide a concise summary only, limit to 300 words)\"}"
+            "{\"results\": [{\"id\": \"aws/mypy-boto3-athena\", \"name\": \"mypy-boto3-athena\", \"description\": \"mypy-boto3-athena type stubs for boto3 Athena clients, paginators, TypedDict request shapes, and editor/type-checker setup\", \"source\": \"maintainer\", \"tags\": [\"aws\", \"athena\", \"boto3\", \"type-stubs\", \"mypy\", \"pyright\", \"python\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"1.42.43\", \"path\": \"aws/docs/mypy-boto3-athena/python\", \"files\": [\"DOC.md\"], \"size\": 8953, \"lastUpdated\": \"2026-03-12\"}], \"recommendedVersion\": \"1.42.43\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 205}, {\"id\": \"spring-boot/spring-boot-actuator\", \"name\": \"spring-boot-actuator\", \"description\": \"Spring Boot Actuator 4.0.x — health checks, metrics, Prometheus, info endpoint, custom endpoints, and production monitoring\", \"source\": \"community\", \"tags\": [\"spring-boot-actuator\", \"monitoring\", \"health-check\", \"metrics\", \"prometheus\", \"production\", \"endpoints\"], \"languages\": [{\"language\": \"java\", \"versions\": [{\"version\": \"4.0.5\", \"path\": \"spring-boot/docs/actuator/java\", \"files\": [\"DOC.md\"], \"size\": 5877, \"lastUpdated\": \"2026-03-28\"}], \"recommendedVersion\": \"4.0.5\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 195}, {\"id\": \"babel/plugin-proposal-pipeline-operator\", \"name\": \"plugin-proposal-pipeline-operator\", \"description\": \"Configure Babel 7 to compile the pipeline operator proposal with minimal, F#, or Hack-style syntax\", \"source\": \"maintainer\", \"tags\": [\"babel\", \"build\", \"javascript\", \"pipeline-operator\", \"syntax\", \"proposal\"], \"languages\": [{\"language\": \"javascript\", \"versions\": [{\"version\": \"7.28.6\", \"path\": \"babel/docs/plugin-proposal-pipeline-operator/javascript\", \"files\": [\"DOC.md\"], \"size\": 5833, \"lastUpdated\": \"2026-03-13\"}], \"recommendedVersion\": \"7.28.6\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 170}, {\"id\": \"together/package\", \"name\": \"package\", \"description\": \"Together Python SDK for chat, completions, embeddings, images, rerank, and fine-tuning\", \"source\": \"maintainer\", \"tags\": [\"together\", \"python\", \"llm\", \"chat\", \"embeddings\", \"images\", \"rerank\", \"fine-tuning\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"2.16.0\", \"path\": \"together/docs/package/python\", \"files\": [\"DOC.md\"], \"size\": 7793, \"lastUpdated\": \"2026-05-29\"}], \"recommendedVersion\": \"2.16.0\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 170}, {\"id\": \"azure/mgmt-applicationinsights\", \"name\": \"mgmt-applicationinsights\", \"description\": \"Azure Application Insights management SDK for Python for ARM components, billing and quota settings, web tests, and workbooks\", \"source\": \"maintainer\", \"tags\": [\"azure\", \"application-insights\", \"monitoring\", \"arm\", \"workbooks\", \"synthetics\", \"python\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"4.1.0\", \"path\": \"azure/docs/mgmt-applicationinsights/python\", \"files\": [\"DOC.md\"], \"size\": 10982, \"lastUpdated\": \"2026-03-13\"}], \"recommendedVersion\": \"4.1.0\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 160}], \"total\": 5, \"query\": \"How does compute_total apply the discount in the fixture?\\n\\nNexus route oracle contract:\\n- Expected capability receipts: research_route. (provide a concise summary only, limit to 300 words)\"}"
           ],
           "source": "chub",
           "status": "SUCCESS",
@@ -502,7 +502,7 @@
       ],
       "physical_callable": "capability_executor_registry:hyper_sprint",
       "console_tail": [
-        "\u26a0\ufe0f [MemPalace] Ethical blacklist file missing: /Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/hyper__pos_local_model_call_allowed/nexus/config/ethical_blacklist.js"
+        "⚠️ [MemPalace] Ethical blacklist file missing: /Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/hyper__pos_local_model_call_allowed/nexus/config/ethical_blacklist.js"
       ],
       "hard_coded_inputs": [],
       "checks": [
@@ -570,10 +570,10 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_nightshift",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 1531
+        "line": 1350
       },
       "gaps": [
-        "AutoResearchNightShift runs one round with a bare task string; the phase policy denies research at PassRate=0% so no recovery report is written"
+        "AutoResearchNightShift runs one round with a bare task string; the phase policy reads <workspace_root>/.nexus/reports/learn/phase_slo_summary.json (right directory); until 2026-10-13 it read a never-written overall_pass_rate key, so every real summary was PassRate=0%; the fixture workspace has no summary, so it is still denied (SLO=phase_slo_summary_missing) before any model call and no recovery report is written"
       ],
       "untriggered_production_default": {
         "status": "SKIPPED",
@@ -617,7 +617,7 @@
           },
           "status": "BLOCKED",
           "path": "e2e",
-          "block_reason": "semantic_status=BLOCKED(terminal_status=FAILED):console:\u274c [NightShift] Blocked by Phase Policy: PassRate=0.0%, Task=bug, Risk=standard. DenyResearch."
+          "block_reason": "semantic_status=BLOCKED(terminal_status=FAILED):console:❌ [NightShift] Blocked by Phase Policy: PassRate=0.0%, Task=bug, Risk=standard. DenyResearch. SLO=phase_slo_summary_missing."
         }
       ],
       "product_path_reachable": true,
@@ -636,11 +636,11 @@
       "receipt_claims_simulated": true,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_nightshift_runner_service_289497d9"
+        "ev_cap_nightshift_runner_service_a0331dc9"
       ],
       "physical_callable": "capability_executor_registry:nightshift",
       "console_tail": [
-        "\u274c [NightShift] Blocked by Phase Policy: PassRate=0.0%, Task=bug, Risk=standard. DenyResearch."
+        "❌ [NightShift] Blocked by Phase Policy: PassRate=0.0%, Task=bug, Risk=standard. DenyResearch. SLO=phase_slo_summary_missing."
       ],
       "hard_coded_inputs": [],
       "checks": [
@@ -655,7 +655,7 @@
           "detail": "terminal_success=False"
         }
       ],
-      "verdict": "BLOCKED_semantic_status=BLOCKED(terminal_status=FAILED):console:\u274c [NightShift] Blocked by Phase Policy: PassRate=0.0%, Task=bug, Risk=standard. DenyResearch.",
+      "verdict": "BLOCKED_semantic_status=BLOCKED(terminal_status=FAILED):console:❌ [NightShift] Blocked by Phase Policy: PassRate=0.0%, Task=bug, Risk=standard. DenyResearch. SLO=phase_slo_summary_missing.",
       "verdict_reason": "executor_or_runtime_blocked",
       "verdict_production_default": "BLOCKED_EXTERNAL_AUTH:nightshift_model",
       "outcome_excerpt": {
@@ -667,7 +667,7 @@
           "terminal_status": "FAILED",
           "best_score": 0.0,
           "rounds_attempted": 0,
-          "report_path": "/Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/nightshift__pos_local_model_call_allowed/.nexus/reports/nightshift_Nightshif",
+          "report_path": "/Users/jameschen/Workspace/.scratch/20261013-wiring-batch2/audit2/20261013T041556Z/workspaces/nightshift__pos_local_model_call_allowed/.nexus/reports/nightshift_Nightshift pass over the README wording",
           "learning_closure_present": false,
           "runtime_receipt_present": false
         },
@@ -675,7 +675,7 @@
         "terminal_success": false
       },
       "receipt_path": "receipts/nightshift.json",
-      "audit_seconds": 0.64
+      "audit_seconds": 1.0
     },
     {
       "capability": "swarm",
@@ -2735,14 +2735,14 @@
       ],
       "physical_callable": "capability_executor_registry:forecast_pregate",
       "console_tail": [
-        "\u26a0\ufe0f [ASHLoader] Missing /Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/forecast_gate__pos_production_default/.nexus/ash_matrix.yaml, using defaults.",
-        "\u26a0\ufe0f [ASHTemplateLoader] Missing /Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/forecast_gate__pos_production_default/.nexus/ash_templates.yaml, using minimal built-",
-        "\ud83d\udea8 [Gate:Reject] POLICY_VIOLATION[D-ROI]: 0.01 below threshold 0.5. Strategy too expensive.! Triggering Adaptive Self-Healing...",
-        "\ud83d\udea8 [ASH:v24] Node [wiring-forecast_gate-pos_production_default] failed. Triggering adaptive repair...",
-        "\ud83d\udee1\ufe0f [ASHResolver] Mandatory regression_test missing, injecting default.",
-        "\ud83d\udee1\ufe0f [ASHResolver] Mandatory regression_test missing, injecting default.",
-        "\u274c [ASHResolver] Unknown command ref: replan",
-        "\u26a0\ufe0f [ASHSelector] Skipping strategy [replan_swarm] due to resolution error: Unknown command ref: replan"
+        "⚠️ [ASHLoader] Missing /Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/forecast_gate__pos_production_default/.nexus/ash_matrix.yaml, using defaults.",
+        "⚠️ [ASHTemplateLoader] Missing /Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/forecast_gate__pos_production_default/.nexus/ash_templates.yaml, using minimal built-",
+        "🚨 [Gate:Reject] POLICY_VIOLATION[D-ROI]: 0.01 below threshold 0.5. Strategy too expensive.! Triggering Adaptive Self-Healing...",
+        "🚨 [ASH:v24] Node [wiring-forecast_gate-pos_production_default] failed. Triggering adaptive repair...",
+        "🛡️ [ASHResolver] Mandatory regression_test missing, injecting default.",
+        "🛡️ [ASHResolver] Mandatory regression_test missing, injecting default.",
+        "❌ [ASHResolver] Unknown command ref: replan",
+        "⚠️ [ASHSelector] Skipping strategy [replan_swarm] due to resolution error: Unknown command ref: replan"
       ],
       "negative_control": {
         "name": "negative_control:low_risk_task_proceeds",
@@ -4028,7 +4028,7 @@
       ],
       "physical_callable": "capability_executor_registry:semantic_failure_sensor",
       "console_tail": [
-        "\u26a0\ufe0f [Retrieval:Vector] LanceDB failed, falling back: Table 'memory_index' was not found"
+        "⚠️ [Retrieval:Vector] LanceDB failed, falling back: Table 'memory_index' was not found"
       ],
       "negative_control": {
         "name": "negative_control:unrelated_failure_has_no_similar_bug",
@@ -4202,10 +4202,10 @@
         "reached_via": "EXECUTOR_REGISTRY",
         "function": "_exec_jit_validation",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 2805
+        "line": 2527
       },
       "gaps": [
-        "JITToolInjector.apply_mask is a self-declared mock: it matches only the Chinese keywords \u6e2c\u8a66/\u6838\u9a57/\u5177\u73fe/\u4fee\u5fa9 and otherwise returns all_tools[:5]; the tool catalog (jit_all_tools) must be supplied by the request"
+        "JITToolInjector.apply_mask is a self-declared mock: it matches only the Chinese keywords 測試/核驗/具現/修復 and otherwise returns all_tools[:5]; the tool catalog (jit_all_tools) must be supplied by the request; since 2026-10-13 the receipt says so (simulated=True, mask_kind=keyword_mock, claim_boundary.claim=SIMULATED)"
       ],
       "trigger_switch": null,
       "planner": {
@@ -4263,7 +4263,7 @@
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_jit_validation_27170ac6"
+        "ev_cap_jit_validation_848112e7"
       ],
       "physical_callable": "capability_executor_registry:jit_validation",
       "console_tail": [],
@@ -4279,7 +4279,7 @@
           "pattern": "Mock",
           "file": "nexus/core/jit_tool_injector.py",
           "line": 23,
-          "text": "# \u6a19\u7c64\u5316\u7be9\u9078 (Mock \u5be6\u4f5c\uff1a\u50c5\u793a\u7bc4\u9694\u96e2\u6548\u679c)"
+          "text": "# 標籤化篩選 (Mock 實作：僅示範隔離效果)"
         }
       ],
       "checks": [
@@ -4292,6 +4292,11 @@
           "name": "quota_checked_and_passed",
           "passed": true,
           "detail": "quota_passed=True usage=1200"
+        },
+        {
+          "name": "receipt_declares_simulated_mask",
+          "passed": true,
+          "detail": "simulated=True mask_kind=keyword_mock"
         },
         {
           "name": "negative_control:over_quota_usage_fails_gate",
@@ -4313,7 +4318,7 @@
           "read_file",
           "run_tests"
         ],
-        "note": "apply_mask matches only the Chinese keywords \u6e2c\u8a66/\u6838\u9a57/\u5177\u73fe/\u4fee\u5fa9; any other goal gets all_tools[:5]"
+        "note": "apply_mask matches only the Chinese keywords 測試/核驗/具現/修復; any other goal gets all_tools[:5]"
       },
       "outcome_excerpt": {
         "action": "apply_mask+check_token_quota",
@@ -4331,13 +4336,23 @@
           "quota_limit": 15000
         },
         "mask_applied": true,
+        "simulated": true,
+        "mask_kind": "keyword_mock",
+        "claim_boundary": {
+          "simulated": true,
+          "claim": "SIMULATED",
+          "reason": "jit_mask_is_keyword_mock_until_real_mask",
+          "real_parts": [
+            "check_token_quota"
+          ]
+        },
         "quota_checked": true,
         "quota_passed": true,
         "selected_tool_count": 2,
         "physical_callable": "nexus.core.jit_tool_injector.JITToolInjector.apply_mask+check_token_quota"
       },
       "receipt_path": "receipts/jit_validation.json",
-      "audit_seconds": 0.42
+      "audit_seconds": 0.45
     },
     {
       "capability": "semantic_searcher",
@@ -5002,10 +5017,10 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_learn_mode",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 2589
+        "line": 2309
       },
       "gaps": [
-        "executor builds LearnModeService(run_root=<cwd>/.nexus/runtime/<task_id>), a fresh empty directory per task, so the report never sees the project's learned claims; gate_passed = result is not None"
+        "fixed 2026-10-13: the executor reads the project learn store LearnModeService(<workspace_root>) like the learn:* CLI (was a fresh empty <cwd>/.nexus/runtime/<task_id>); gate_passed is still 'report built', the claim count is in the result"
       ],
       "untriggered_production_default": {
         "status": "SKIPPED",
@@ -5068,14 +5083,14 @@
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_learn_mode_15ef542e"
+        "ev_cap_learn_mode_a5b36ec5"
       ],
       "physical_callable": "capability_executor_registry:learn_mode",
       "console_tail": [],
       "negative_control": {
         "name": "negative_control:unseeded_project_changes_claims_count",
-        "passed": false,
-        "detail": "claims_count seeded=0 unseeded=0",
+        "passed": true,
+        "detail": "claims_count seeded=2 unseeded=0",
         "negative_status": "SUCCEEDED",
         "negative_block_reason": ""
       },
@@ -5083,21 +5098,21 @@
       "checks": [
         {
           "name": "seeded_project_claims_counted",
-          "passed": false,
-          "detail": "claims_count=0 run_root=.nexus/runtime/wiring-learn_mode-pos_production_default"
+          "passed": true,
+          "detail": "claims_count=2 run_root=/Users/jameschen/Workspace/.scratch/20261013-wiring-batch2/audit2/20261013T041556Z/workspaces/learn_mode__pos_production_default"
         },
         {
           "name": "negative_control:unseeded_project_changes_claims_count",
-          "passed": false,
-          "detail": "claims_count seeded=0 unseeded=0"
+          "passed": true,
+          "detail": "claims_count seeded=2 unseeded=0"
         }
       ],
-      "verdict": "STUB",
-      "verdict_reason": "outcome_independent_of_fixture_input",
+      "verdict": "REAL",
+      "verdict_reason": "invoked_with_evidence_and_artifact_assertions_passed",
       "component_probe": {
         "project_root_report_claims_count": 2,
         "per_task_run_root_claims_count": 0,
-        "note": "same service; the executor passes run_root=<project>/.nexus/runtime/<task_id>, a fresh empty directory"
+        "note": "same service; before 2026-10-13 the executor passed run_root=<project>/.nexus/runtime/<task_id> (the per_task value), now it reads the project store"
       },
       "outcome_excerpt": {
         "action": "build_report",
@@ -5108,22 +5123,26 @@
         "result": {
           "status": "SUCCESS",
           "topic": "",
-          "sources_count": 0,
-          "claims_count": 0,
-          "claims_with_valid_citation": 0,
-          "citation_valid_ratio": 0.0,
-          "high_strength_claims": 0,
+          "sources_count": 1,
+          "claims_count": 2,
+          "claims_with_valid_citation": 2,
+          "citation_valid_ratio": 1.0,
+          "high_strength_claims": 2,
           "stale_claims_count": 0,
           "conflict_candidate_count": 0,
-          "topic_packs": {},
-          "top_sources": [],
-          "coverage": 0.0,
-          "self_question_pass_rate": 0.0,
+          "topic_packs": {
+            "refund-policy": 2
+          },
+          "top_sources": [
+            "file:///Users/jameschen/Workspace/.scratch/20261013-wiring-batch2/audit2/20261013T041556Z/workspaces/learn_mode__pos_production_default/notes.md"
+          ],
+          "coverage": 1.0,
+          "self_question_pass_rate": 1.0,
           "question_set": [],
           "answered_questions": [],
           "unresolved_questions": [],
-          "converged": false,
-          "timestamp": "2026-10-12T22:57:42.008153+00:00",
+          "converged": true,
+          "timestamp": "2026-10-13T04:15:59.471845+00:00",
           "phase_slo_summary": {
             "status": "SUCCESS",
             "window": 300,
@@ -5178,19 +5197,19 @@
                 "success_ratio": 1.0
               }
             },
-            "timestamp": "2026-10-12T22:57:42.008174+00:00"
+            "timestamp": "2026-10-13T04:15:59.471875+00:00"
           }
         },
         "physical_callable": "nexus.research.learn_mode.LearnModeService.build_report",
         "task_hint": "Learn the refund policy citations\n\nNexus route oracle contract:\n- Expected capab",
         "run_id": "wiring-learn_mode-pos_production_default",
-        "resolved_run_root": ".nexus/runtime/wiring-learn_mode-pos_production_default",
+        "resolved_run_root": "/Users/jameschen/Workspace/.scratch/20261013-wiring-batch2/audit2/20261013T041556Z/workspaces/learn_mode__pos_production_default",
         "output_paths": [
-          ".nexus/runtime/wiring-learn_mode-pos_production_default/.nexus/reports/learn"
+          "/Users/jameschen/Workspace/.scratch/20261013-wiring-batch2/audit2/20261013T041556Z/workspaces/learn_mode__pos_production_default/.nexus/reports/learn"
         ]
       },
       "receipt_path": "receipts/learn_mode.json",
-      "audit_seconds": 0.66
+      "audit_seconds": 1.27
     },
     {
       "capability": "learn_phase_slo",
@@ -5200,10 +5219,10 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_learn_phase_slo",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 2652
+        "line": 2372
       },
       "gaps": [
-        "same per-task empty run_root as learn_mode, and window=1: the SLO is computed over zero writebacks and always passes"
+        "fixed 2026-10-13: reads the project phase ledger with the CLI window (300; was an empty per-task run_root with window=1); gate_passed means the report was built, phase_slo_pass is in the result"
       ],
       "untriggered_production_default": {
         "status": "SKIPPED",
@@ -5266,14 +5285,14 @@
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_learn_phase_slo_07160d03"
+        "ev_cap_learn_phase_slo_1796b28b"
       ],
       "physical_callable": "capability_executor_registry:learn_phase_slo",
       "console_tail": [],
       "negative_control": {
         "name": "negative_control:unseeded_project_changes_phase_slo_pass",
-        "passed": false,
-        "detail": "phase_slo_pass seeded=True unseeded=True",
+        "passed": true,
+        "detail": "phase_slo_pass seeded=False unseeded=True",
         "negative_status": "SUCCEEDED",
         "negative_block_reason": ""
       },
@@ -5281,22 +5300,22 @@
       "checks": [
         {
           "name": "seeded_writebacks_counted",
-          "passed": false,
-          "detail": "global={'writeback_required': 0, 'writeback_done': 0, 'required_done_ratio': 1.0, 'success_ratio': 1.0}"
+          "passed": true,
+          "detail": "global={'writeback_required': 3, 'writeback_done': 1, 'required_done_ratio': 0.3333, 'success_ratio': 0.3333}"
         },
         {
           "name": "missing_writebacks_fail_slo",
-          "passed": false,
-          "detail": "phase_slo_pass=True"
+          "passed": true,
+          "detail": "phase_slo_pass=False"
         },
         {
           "name": "negative_control:unseeded_project_changes_phase_slo_pass",
-          "passed": false,
-          "detail": "phase_slo_pass seeded=True unseeded=True"
+          "passed": true,
+          "detail": "phase_slo_pass seeded=False unseeded=True"
         }
       ],
-      "verdict": "STUB",
-      "verdict_reason": "outcome_independent_of_fixture_input",
+      "verdict": "REAL",
+      "verdict_reason": "invoked_with_evidence_and_artifact_assertions_passed",
       "component_probe": {
         "project_root_phase_slo_pass": false,
         "project_root_writeback_required": 3,
@@ -5311,13 +5330,13 @@
         ],
         "result": {
           "status": "SUCCESS",
-          "window": 1,
-          "phase_slo_pass": true,
+          "window": 300,
+          "phase_slo_pass": false,
           "global": {
-            "writeback_required": 0,
-            "writeback_done": 0,
-            "required_done_ratio": 1.0,
-            "success_ratio": 1.0
+            "writeback_required": 3,
+            "writeback_done": 1,
+            "required_done_ratio": 0.3333,
+            "success_ratio": 0.3333
           },
           "phases": {
             "P": {
@@ -5328,11 +5347,11 @@
               "success_ratio": 1.0
             },
             "X": {
-              "total": 0,
-              "writeback_required": 0,
+              "total": 2,
+              "writeback_required": 2,
               "writeback_done": 0,
-              "required_done_ratio": 1.0,
-              "success_ratio": 1.0
+              "required_done_ratio": 0.0,
+              "success_ratio": 0.0
             },
             "D": {
               "total": 0,
@@ -5342,9 +5361,9 @@
               "success_ratio": 1.0
             },
             "R": {
-              "total": 0,
-              "writeback_required": 0,
-              "writeback_done": 0,
+              "total": 1,
+              "writeback_required": 1,
+              "writeback_done": 1,
               "required_done_ratio": 1.0,
               "success_ratio": 1.0
             },
@@ -5363,17 +5382,17 @@
               "success_ratio": 1.0
             }
           },
-          "timestamp": "2026-10-12T22:57:42.648985+00:00"
+          "timestamp": "2026-10-13T04:16:00.149200+00:00"
         },
         "physical_callable": "nexus.research.learn_mode.LearnModeService.build_phase_slo_report",
         "run_id": "wiring-learn_phase_slo-pos_production_default",
-        "resolved_run_root": ".nexus/runtime/wiring-learn_phase_slo-pos_production_default",
+        "resolved_run_root": "/Users/jameschen/Workspace/.scratch/20261013-wiring-batch2/audit2/20261013T041556Z/workspaces/learn_phase_slo__pos_production_default",
         "output_paths": [
-          ".nexus/runtime/wiring-learn_phase_slo-pos_production_default/.nexus/reports/learn/phase_slo_summary.json"
+          "/Users/jameschen/Workspace/.scratch/20261013-wiring-batch2/audit2/20261013T041556Z/workspaces/learn_phase_slo__pos_production_default/.nexus/reports/learn/phase_slo_summary.json"
         ]
       },
       "receipt_path": "receipts/learn_phase_slo.json",
-      "audit_seconds": 0.62
+      "audit_seconds": 0.68
     },
     {
       "capability": "file_lock",
@@ -5383,10 +5402,10 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_file_lock",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 3292
+        "line": 3008
       },
       "gaps": [
-        "lock file path is .nexus/multi_agent/locks/<task_id>.json, one file per task, so a second task locking the same file does not see the first lock (see component_probe)"
+        "fixed 2026-10-13: one registry per workspace (.nexus/multi_agent/locks/file_locks.json) keyed by file, holder = task id, flock-guarded; a second task is BLOCKED (FILE_LOCK_HELD_BY_OTHER_TASK), same-task re-lock is idempotent; locks are never released by the executor, a 1800 s TTL makes them stale"
       ],
       "untriggered_production_default": {
         "status": "SKIPPED",
@@ -5449,7 +5468,7 @@
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_file_lock_8df89db6"
+        "ev_cap_file_lock_d3c98cc9"
       ],
       "physical_callable": "capability_executor_registry:file_lock_security_gate",
       "console_tail": [],
@@ -5465,12 +5484,12 @@
         {
           "name": "lock_file_on_disk",
           "passed": true,
-          "detail": "/Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/file_lock__pos_production_default/.nexus/multi_agent/locks/wiring-file_lock-pos_production_default.json"
+          "detail": "/Users/jameschen/Workspace/.scratch/20261013-wiring-batch2/audit2/20261013T041556Z/workspaces/file_lock__pos_production_default/.nexus/multi_agent/locks/file_locks.json"
         },
         {
           "name": "lock_records_target_file",
           "passed": true,
-          "detail": "lock={\"locks\": {\"target.py\": \"wiring-file_lock-pos_production_default\"}}"
+          "detail": "lock={\"locks\": {\"target.py\": \"wiring-file_lock-pos_production_default\"}, \"acquired_at\": {\"target.py\": 1791864960.828496}}"
         },
         {
           "name": "access_granted_and_files_match",
@@ -5489,21 +5508,26 @@
         "lock-task-a": {
           "gate_passed": true,
           "conflicts": [],
-          "lock_file": "/Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/file_lock__probe/.nexus/multi_agent/locks/lock-task-a.json"
+          "lock_file": "/Users/jameschen/Workspace/.scratch/20261013-wiring-batch2/audit2/20261013T041556Z/workspaces/file_lock__probe/.nexus/multi_agent/locks/file_locks.json"
         },
         "lock-task-b": {
-          "gate_passed": true,
-          "conflicts": [],
-          "lock_file": "/Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/file_lock__probe/.nexus/multi_agent/locks/lock-task-b.json"
+          "gate_passed": false,
+          "conflicts": [
+            "target.py"
+          ],
+          "lock_file": "/Users/jameschen/Workspace/.scratch/20261013-wiring-batch2/audit2/20261013T041556Z/workspaces/file_lock__probe/.nexus/multi_agent/locks/file_locks.json"
         },
-        "second_task_refused": false,
-        "note": "the executor keys the lock file by task id (.nexus/multi_agent/locks/<task_id>.json)"
+        "second_task_refused": true,
+        "holders": {
+          "target.py": "lock-task-a"
+        },
+        "note": "one registry per workspace (.nexus/multi_agent/locks/file_locks.json) keyed by file; before 2026-10-13 the file was keyed by task id and the second task was not refused"
       },
       "outcome_excerpt": {
         "action": "acquire+check_access",
         "semantic_status": "VERIFIED",
         "evidence_refs": [
-          "file:/Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/file_lock__pos_production_default/.nexus/multi_agent/locks/wiring-file_lock-pos_production_default.json"
+          "file:/Users/jameschen/Workspace/.scratch/20261013-wiring-batch2/audit2/20261013T041556Z/workspaces/file_lock__pos_production_default/.nexus/multi_agent/locks/file_locks.json"
         ],
         "result": {
           "conflicts": [],
@@ -5516,13 +5540,15 @@
           "task_hint": "Coordinate the write boundary for target.py\n\nNexus route oracle contract:\n- Expe"
         },
         "conflicts": [],
+        "stale_taken_over": {},
+        "lock_ttl_sec": 1800.0,
         "access_granted": true,
         "task_files_match": true,
-        "lock_file": "/Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/file_lock__pos_production_default/.nexus/multi_agent/locks/wiring-file_lock-pos_production_default.json",
+        "lock_file": "/Users/jameschen/Workspace/.scratch/20261013-wiring-batch2/audit2/20261013T041556Z/workspaces/file_lock__pos_production_default/.nexus/multi_agent/locks/file_locks.json",
         "physical_callable": "nexus.orchestrator.file_lock_registry.FileLockRegistry.acquire+check_access"
       },
       "receipt_path": "receipts/file_lock.json",
-      "audit_seconds": 0.62
+      "audit_seconds": 0.67
     },
     {
       "capability": "direct_mode",
@@ -6171,10 +6197,10 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_learn_scheduler_service",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 1065
+        "line": 900
       },
       "gaps": [
-        "runs nexus_cli.py learn:phase-policy as a subprocess in the code checkout (repo_root is the checkout, not the workspace), so readiness comes from the checkout's own .nexus learning data; PassRate 0% there gives exit 2 and a local alert file"
+        "fixed 2026-10-13: learn:phase-policy --project-root <workspace_root> (the checkout only supplies the CLI script), and the phase policy reads the real summary schema (phase_slo_pass_rate; it read a never-written overall_pass_rate key, so readiness was always 0%); alerts are still written under the cwd"
       ],
       "untriggered_production_default": {
         "status": "SKIPPED",
@@ -6207,9 +6233,9 @@
         {
           "policy": "production_default",
           "env": {},
-          "status": "BLOCKED",
+          "status": "SUCCEEDED",
           "path": "e2e",
-          "block_reason": "scheduler_exit_2"
+          "block_reason": ""
         }
       ],
       "production_default_selection": {
@@ -6234,61 +6260,65 @@
       "policy_switches_needed": {},
       "policy_used": "production_default",
       "path": "e2e",
-      "receipt_claims_simulated": true,
+      "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_learn_scheduler_service_b0a6ef2d"
+        "ev_cap_learn_scheduler_service_c31c4fc6"
       ],
       "physical_callable": "capability_executor_registry:learn_scheduler_service",
-      "console_tail": [
-        "\ud83d\udea8 [Learn-Alert] DEGRADED: Low SLO readiness: 0.0%"
-      ],
-      "hard_coded_inputs": [
-        {
-          "pattern": "repo_root = Path(__file__).resolve().parents[2]",
-          "file": "nexus/core/capability_executor_registry.py",
-          "line": 1074,
-          "text": "repo_root = Path(__file__).resolve().parents[2]"
-        }
-      ],
+      "console_tail": [],
+      "negative_control": {
+        "name": "negative_control:no_workspace_slo_summary_exits_2",
+        "passed": true,
+        "detail": "seeded_exit=0 unseeded_exit=2",
+        "negative_status": "BLOCKED",
+        "negative_block_reason": "scheduler_exit_2"
+      },
+      "hard_coded_inputs": [],
       "checks": [
         {
           "name": "scheduler_report_on_disk",
           "passed": true,
-          "detail": "/Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/learn_scheduler__pos_production_default/.nexus/reports/learn/scheduler_last_run.json"
+          "detail": "/Users/jameschen/Workspace/.scratch/20261013-wiring-batch2/audit2/20261013T041556Z/workspaces/learn_scheduler__pos_production_default/.nexus/reports/learn/scheduler_last_run.json"
         },
         {
           "name": "scheduler_exit_zero",
-          "passed": false,
-          "detail": "exit_code=2 slo_readiness=0.0"
+          "passed": true,
+          "detail": "exit_code=0 slo_readiness=1.0"
+        },
+        {
+          "name": "negative_control:no_workspace_slo_summary_exits_2",
+          "passed": true,
+          "detail": "seeded_exit=0 unseeded_exit=2"
         }
       ],
-      "verdict": "BLOCKED_scheduler_exit_2",
-      "verdict_reason": "executor_or_runtime_blocked",
+      "verdict": "REAL",
+      "verdict_reason": "invoked_with_evidence_and_artifact_assertions_passed",
       "outcome_excerpt": {
         "action": "run_scheduler",
-        "semantic_status": "BLOCKED",
+        "semantic_status": "SUCCEEDED",
         "evidence_refs": [
-          "file:/Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/learn_scheduler__pos_production_default/.nexus/reports/learn/scheduler_last_run.json"
+          "file:/Users/jameschen/Workspace/.scratch/20261013-wiring-batch2/audit2/20261013T041556Z/workspaces/learn_scheduler__pos_production_default/.nexus/reports/learn/scheduler_last_run.json"
         ],
-        "error": "scheduler_exit_2",
         "result": {
-          "exit_code": 2,
-          "slo_readiness": 0.0,
+          "exit_code": 0,
+          "slo_readiness": 1.0,
           "policy_command": [
             "/Users/jameschen/Workspace/Nexus-new/.venv/bin/python",
             "scripts/engine/nexus_cli.py",
             "nexus",
             "learn:phase-policy",
+            "--project-root",
+            "/Users/jameschen/Workspace/.scratch/20261013-wiring-batch2/audit2/20261013T041556Z/workspaces/learn_scheduler__pos_production_default",
             "--output-json"
           ],
-          "scheduler_report_path": "/Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/learn_scheduler__pos_production_default/.nexus/reports/learn/scheduler_last_",
-          "alert_dispatched": true
+          "scheduler_report_path": "/Users/jameschen/Workspace/.scratch/20261013-wiring-batch2/audit2/20261013T041556Z/workspaces/learn_scheduler__pos_production_default/.nexus/reports/learn/scheduler_last_run.json",
+          "alert_dispatched": false
         },
         "physical_callable": "nexus.app.learn_scheduler_service.LearnSchedulerService.run_scheduler"
       },
       "receipt_path": "receipts/learn_scheduler.json",
-      "audit_seconds": 0.85
+      "audit_seconds": 1.43
     },
     {
       "capability": "registry_sync",
@@ -6298,10 +6328,10 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_registry_sync",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 3695
+        "line": 3376
       },
       "gaps": [
-        "SecureRegistrySync.pull_from_peer swallows every connection error and returns []; the executor then reports VERIFIED, peer_contacted=True, row_count=0 for a peer that never answered"
+        "fixed 2026-10-13: the executor uses pull_from_peer_checked; a connection error is BLOCKED (REGISTRY_PEER_UNAVAILABLE:<error class>) with peer_contacted=False (pull_from_peer still returns [] for legacy callers); no live mTLS peer in the fixture, so there is no positive run"
       ],
       "untriggered_production_default": {
         "status": "SKIPPED",
@@ -6344,9 +6374,9 @@
           "env": {
             "NEXUS_EXTERNAL_RUNTIME_AUTHORIZED": "1"
           },
-          "status": "SUCCEEDED",
+          "status": "BLOCKED",
           "path": "e2e",
-          "block_reason": ""
+          "block_reason": "REGISTRY_PEER_UNAVAILABLE:ConnectionRefusedError:console:mTLS pull from 127.0.0.1:63185 failed: [Errno 61] Connection refused"
         }
       ],
       "production_default_selection": {
@@ -6373,44 +6403,48 @@
       },
       "policy_used": "external_runtime_authorized_flag",
       "path": "e2e",
-      "receipt_claims_simulated": false,
+      "receipt_claims_simulated": true,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_registry_sync_349f115f"
+        "ev_cap_registry_sync_ecdb4000"
       ],
       "physical_callable": "capability_executor_registry:registry_skills_sync",
       "console_tail": [
-        "mTLS pull from 127.0.0.1:55903 failed: [Errno 61] Connection refused"
+        "mTLS pull from 127.0.0.1:63185 failed: [Errno 61] Connection refused"
       ],
       "hard_coded_inputs": [],
       "checks": [
         {
-          "name": "peer_actually_reachable",
-          "passed": false,
-          "detail": "127.0.0.1:55903 reachable=False; receipt peer_contacted=True row_count=0"
+          "name": "receipt_matches_peer_reachability",
+          "passed": true,
+          "detail": "127.0.0.1:63185 reachable=False; receipt gate=False peer_contacted=False row_count=0 error=REGISTRY_PEER_UNAVAILABLE:ConnectionRefusedError"
         }
       ],
-      "verdict": "STUB",
-      "verdict_reason": "gate_passed_without_checkable_effect:peer_actually_reachable",
+      "verdict": "BLOCKED_REGISTRY_PEER_UNAVAILABLE:ConnectionRefusedError:console:mTLS pull from 127.0.0.1:63185 failed: [Errno 61] Connection refused",
+      "verdict_reason": "executor_or_runtime_blocked",
       "verdict_production_default": "BLOCKED_EXTERNAL_AUTH:registry_peer",
       "outcome_excerpt": {
         "action": "pull_from_peer",
-        "semantic_status": "VERIFIED",
+        "semantic_status": "BLOCKED",
         "evidence_refs": [
-          "registry-peer:127.0.0.1:55903"
+          "ev_registry_sync_blocked_wiring-registry_sync-pos_external_runtime_authorized_flag"
         ],
+        "error": "REGISTRY_PEER_UNAVAILABLE:ConnectionRefusedError",
         "result": {
           "peer_host": "127.0.0.1",
-          "peer_port": 55903,
-          "row_count": 0
+          "peer_port": 63185,
+          "row_count": 0,
+          "error_class": "ConnectionRefusedError",
+          "error_detail": "[Errno 61] Connection refused"
         },
-        "physical_callable": "nexus.security.secure_sync.SecureRegistrySync.pull_from_peer",
+        "physical_callable": "nexus.security.secure_sync.SecureRegistrySync.pull_from_peer_checked",
         "task_hint": "Sync the skill registry from the peer\n\nNexus route oracle contract:\n- Expected c",
-        "peer_contacted": true,
-        "row_count": 0
+        "peer_contacted": false,
+        "row_count": 0,
+        "error_class": "ConnectionRefusedError"
       },
       "receipt_path": "receipts/registry_sync.json",
-      "audit_seconds": 1.61
+      "audit_seconds": 1.75
     },
     {
       "capability": "federation",
@@ -6468,9 +6502,9 @@
     }
   ],
   "verdict_counts": {
-    "REAL": 24,
+    "REAL": 27,
     "BLOCKED": 11,
-    "STUB": 5,
+    "STUB": 2,
     "REAL_UNATTESTED": 4,
     "SIMULATED": 1,
     "NOT_EXECUTABLE": 4,
@@ -6773,6 +6807,36 @@
         "reason": "--no-model"
       },
       "reason": "second archive batch (ARCHIVED_2026-10-13.md): rows replaced in place, executor_only section replaced"
+    },
+    {
+      "generated_at": "2026-10-13T04:16:04.237470+00:00",
+      "git_head": "fe29afcee2cb4109046f93b4d3e5dcb3ba938bc2",
+      "tree": "origin/main fe29afcee + second-batch wiring fixes working tree (learn_mode/learn_phase_slo/learn_scheduler/phase policy, file_lock, registry_sync, jit_validation)",
+      "only": [
+        "file_lock",
+        "jit_validation",
+        "learn_mode",
+        "learn_phase_slo",
+        "learn_scheduler",
+        "nightshift",
+        "registry_sync"
+      ],
+      "model_probe": {
+        "available": true,
+        "url": "http://127.0.0.1:11434",
+        "model": "qwen2.5-coder:7b-instruct",
+        "models": [
+          "incoai/Qwen3.6-35B-A3B-Splash",
+          "incoai/Qwen3.8-27B-Splash",
+          "nomic-embed-text:latest",
+          "qwen2.5-coder:14b-instruct-q3_K_M",
+          "qwen2.5-coder:7b",
+          "qwen2.5-coder:7b-instruct",
+          "qwen3.5:9b"
+        ],
+        "reason": ""
+      },
+      "reason": "second-batch wiring fixes: rows replaced in place; no model call (nightshift is denied by the phase policy before any model call)"
     }
   ]
 }
