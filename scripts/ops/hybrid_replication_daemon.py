@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import subprocess  # nosec B404
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -16,8 +18,13 @@ from nexus.research.hybrid_replication_pipeline import (
     AutomaticReplicationStore,
     ExternalFrozenStackRunner,
     ExternalGroundTruthResolver,
+    TaskSnapshot,
     parse_admission_comment,
     parse_capture_comment,
+)
+from nexus.research.hybrid_replication_prospective import (
+    ProspectiveExecutionGuard,
+    ProspectiveProtocolLoss,
 )
 
 CANDIDATE_REPOSITORIES = (
@@ -202,6 +209,49 @@ def _partition_missing_admission_for_mode(
     return blockers, deferred
 
 
+def _protocol_loss_path(store: AutomaticReplicationStore, task_key: str) -> Path:
+    return store._dir(task_key) / "prospective_protocol_loss.json"  # noqa: SLF001
+
+
+def _loss_entry(
+    store: AutomaticReplicationStore, task_key: str, *, newly_recorded: bool
+) -> dict[str, Any]:
+    reason = ""
+    try:
+        payload = json.loads(_protocol_loss_path(store, task_key).read_text(encoding="utf-8"))
+        reason = str(payload.get("reason") or "")
+    except (OSError, ValueError):
+        pass
+    return {"task_key": task_key, "reason": reason, "newly_recorded": newly_recorded}
+
+
+def _take_execution_start_fence(store: AutomaticReplicationStore, task_key: str) -> bool:
+    """Write execution_start for an ADMITTED task now, without waiting for its stack call.
+
+    Uses a non-blocking flock on the per-task ``execution.lock`` (a per-open-file-description
+    lock, exclusive across threads and processes). If another worker already holds the lock the
+    task is executing (its subprocess takes the fence itself) and nothing is done. Returns True
+    when this call held the lock. The stack subprocess later finds ``execution_start.json`` and
+    reuses it (idempotent).
+    """
+    state = store.load_task(task_key)
+    if state is None:
+        raise ValueError("task_capture_missing")
+    snapshot = TaskSnapshot.from_capture_payload(dict(state["snapshot"]))
+    guard = ProspectiveExecutionGuard(store_root=store.root, snapshot=snapshot)
+    guard.task_dir.mkdir(parents=True, exist_ok=True)
+    with (guard.task_dir / "execution.lock").open("a+", encoding="utf-8") as handle:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return False
+        try:
+            guard.ensure_execution_start()
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    return True
+
+
 def advance_all(
     *,
     store: AutomaticReplicationStore,
@@ -209,7 +259,21 @@ def advance_all(
     stack_command: str,
     ground_truth_command: str,
     readiness_control_task_key: str | None = None,
+    max_concurrent_tasks: int = 1,
 ) -> dict[str, Any]:
+    """Advance every executable task.
+
+    ``max_concurrent_tasks == 1`` keeps the historical serial behaviour. With N > 1 the
+    execution_start fence is first taken for every ADMITTED primary task (so a task never
+    waits behind another task's long provider call), then up to N tasks advance concurrently.
+
+    Tasks with an existing ``prospective_protocol_loss.json`` (D2 exclusion) are skipped and
+    listed in ``excluded_protocol_loss``; they never count as failures. A loss first recorded
+    during this run is also reported there with ``newly_recorded: true`` and does not make the
+    run fail: it is a recorded, non-counting exclusion, not an operational error.
+    """
+    if max_concurrent_tasks < 1:
+        raise ValueError("max_concurrent_tasks_must_be_positive")
     stack_runner = ExternalFrozenStackRunner(stack_command)
     ground_truth_resolver = ExternalGroundTruthResolver(ground_truth_command)
 
@@ -229,8 +293,9 @@ def advance_all(
             .replace("+00:00", "Z")
         ),
     )
-    advanced: list[dict[str, Any]] = []
-    failures: list[dict[str, Any]] = []
+    excluded: list[dict[str, Any]] = []
+    # (task_key, phase_before, is_readiness_control)
+    work: list[tuple[str, str, bool]] = []
     for state_path in sorted(store.tasks_root.glob("*/state.json")):
         state = json.loads(state_path.read_text(encoding="utf-8"))
         task_key = str(state["task_key"])
@@ -243,26 +308,80 @@ def advance_all(
         )
         if not (is_primary or is_readiness_control):
             continue
-        before = str(state.get("phase"))
-        try:
-            after = controller.advance(task_key)
-        except Exception as exc:  # noqa: BLE001 - per-task fail-closed isolation
-            failures.append({
-                "task_key": task_key,
-                "phase": before,
-                "error_type": type(exc).__name__,
-                "error": str(exc)[:500],
-            })
+        if _protocol_loss_path(store, task_key).is_file():
+            excluded.append(_loss_entry(store, task_key, newly_recorded=False))
             continue
-        advanced.append({
+        work.append((task_key, str(state.get("phase")), is_readiness_control))
+
+    advanced_by_key: dict[str, dict[str, Any]] = {}
+    failures_by_key: dict[str, dict[str, Any]] = {}
+
+    def record_failure(task_key: str, before: str, exc: Exception) -> None:
+        if _protocol_loss_path(store, task_key).is_file():
+            excluded.append(_loss_entry(store, task_key, newly_recorded=True))
+            return
+        failures_by_key[task_key] = {
             "task_key": task_key,
-            "before": before,
-            "after": after.get("phase"),
-        })
+            "phase": before,
+            "error_type": type(exc).__name__,
+            "error": str(exc)[:500],
+        }
+
+    runnable = list(work)
+    if max_concurrent_tasks > 1:
+        fence_keys = [
+            (key, before)
+            for key, before, is_control in work
+            if before == "ADMITTED" and not is_control
+        ]
+
+        def fence(item: tuple[str, str]) -> tuple[str, str, Exception | None]:
+            try:
+                _take_execution_start_fence(store, item[0])
+            except ProspectiveProtocolLoss as exc:
+                return item[0], item[1], exc
+            except Exception as exc:  # noqa: BLE001 - per-task fail-closed isolation
+                return item[0], item[1], exc
+            return item[0], item[1], None
+
+        if fence_keys:
+            with ThreadPoolExecutor(max_workers=min(len(fence_keys), 8)) as pool:
+                fence_results = list(pool.map(fence, fence_keys))
+            fenced_out = set()
+            for key, before, exc in fence_results:
+                if exc is not None:
+                    fenced_out.add(key)
+                    record_failure(key, before, exc)
+            runnable = [item for item in work if item[0] not in fenced_out]
+
+    def run_one(item: tuple[str, str, bool]) -> tuple[str, str, dict[str, Any] | Exception]:
+        task_key, before, _ = item
+        try:
+            return task_key, before, controller.advance(task_key)
+        except Exception as exc:  # noqa: BLE001 - per-task fail-closed isolation
+            return task_key, before, exc
+
+    if runnable:
+        with ThreadPoolExecutor(max_workers=max_concurrent_tasks) as pool:
+            results = list(pool.map(run_one, runnable))
+        for task_key, before, outcome in results:
+            if isinstance(outcome, Exception):
+                record_failure(task_key, before, outcome)
+            else:
+                advanced_by_key[task_key] = {
+                    "task_key": task_key,
+                    "before": before,
+                    "after": outcome.get("phase"),
+                }
+
+    order = [item[0] for item in work]
+    advanced = [advanced_by_key[k] for k in order if k in advanced_by_key]
+    failures = [failures_by_key[k] for k in order if k in failures_by_key]
     return {
         "schema": "nexus.hybrid_replication.daemon_advance.v1",
         "advanced": advanced,
         "failures": failures,
+        "excluded_protocol_loss": sorted(excluded, key=lambda e: e["task_key"]),
     }
 
 
@@ -420,6 +539,12 @@ def main() -> int:
     parser.add_argument("--stack-command")
     parser.add_argument("--ground-truth-command")
     parser.add_argument("--ingest-only", action="store_true")
+    parser.add_argument(
+        "--max-concurrent-tasks",
+        type=int,
+        default=1,
+        help="Advance up to N tasks concurrently (default 1 = serial).",
+    )
     parser.add_argument("--readiness-control-task-key")
     parser.add_argument("--deferred-admission-control-task-key")
     parser.add_argument("--launchd-label", default="com.nexus.hybrid-replication")
@@ -430,6 +555,8 @@ def main() -> int:
         help="Owner waiver: accept a readiness control that never reached the DM1 intercept.",
     )
     args = parser.parse_args()
+    if args.max_concurrent_tasks < 1:
+        raise SystemExit("--max-concurrent-tasks must be >= 1")
     if (
         args.readiness_control_task_key
         and args.deferred_admission_control_task_key
@@ -457,6 +584,7 @@ def main() -> int:
         stack_command=args.stack_command,
         ground_truth_command=args.ground_truth_command,
         readiness_control_task_key=args.readiness_control_task_key,
+        max_concurrent_tasks=args.max_concurrent_tasks,
     )
     print(json.dumps(advance_report, ensure_ascii=False, sort_keys=True, indent=2))
     if args.readiness_control_task_key:

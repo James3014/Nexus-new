@@ -240,3 +240,30 @@ set the state back to `NOT_READY` by pushing a manifest with `activation_state:
 - Activation variables change only through the manifest (`push`, then `readback`). Drift
   reported by `readback` (exit 2) is corrected by pushing the manifest again, never by
   editing a repository variable.
+
+## 8. Collecting-phase daemon: parallel advance (V12, #1934)
+
+Run the launchd daemon with `--max-concurrent-tasks 4` (default `1` = serial, unchanged):
+
+```
+uv run python scripts/ops/hybrid_replication_daemon.py \
+  --root <STORE_ROOT> --since <t_auto> \
+  --frozen-policy-sha256 <frozen-policy-sha256> \
+  --stack-command "<same stack command, with --store-root <STORE_ROOT>>" \
+  --ground-truth-command "<same ground-truth command>" \
+  --max-concurrent-tasks 4
+```
+
+- Why: serial processing put a task behind other tasks' 15 to 30 minute stack calls, so
+  quickly closed issues hit `TERMINAL_BEFORE_EXECUTION_START` (10 of 47 primary tasks in V11).
+- With N > 1 the daemon first takes `execution_start.json` for every ADMITTED primary task
+  (under a non-blocking flock on the per-task `execution.lock`; a task whose lock is held is
+  already executing), then advances up to N tasks at a time. The stack subprocess reuses the
+  existing `execution_start.json`. The readiness control task is never pre-fenced.
+- The `execution.lock` is a `flock` on a per-open file, exclusive across threads and
+  processes. Keep the launchd wrapper's `shlock` so only one daemon invocation runs.
+- The advance report keeps `advanced` and `failures` and gains `excluded_protocol_loss`:
+  tasks with a `prospective_protocol_loss.json` are skipped, listed there, and never produce
+  exit 5. A loss first recorded during the run appears with `"newly_recorded": true`, also
+  non-failing (it is a recorded D2 exclusion). Exit codes 0/3/4/5/6 are unchanged; 5 now means
+  a real, non-excluded advance failure.
