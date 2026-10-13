@@ -330,20 +330,20 @@ def test_gateway_rca_analyzer_tool(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_context_sync_capped_offline_async_vector_spike_and_receipt_lite():
+async def test_context_sync_capped_offline_async_vector_spike_and_receipt_lite(tmp_path):
     """
     TDD Task 5 (GREEN): Offline spike for context_sync_capped async vector retrieval
     and receipt-lite validation.
     This test verifies the desired interface for asynchronous offline vector queries
     and compact receipt-lite evidence generation under the context_sync_capped lane is now functional.
     """
+    (tmp_path / ".nexus").mkdir()  # hermetic: offline lane needs a local .nexus root
     router = SkillsRouter(
-        project_root="/Users/jameschen/Workspace/nexus",
+        project_root=str(tmp_path),
         route_lane="context_sync_capped",
         enable_offline_vector_sync=True,
         vector_db_capped_size=1000
     )
-    
     # Desired interface for async offline vector sync
     vector_results = await router.async_query_offline_vectors(
         query="find_relevant_ast_nodes",

@@ -84,7 +84,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
         "file": "tests/benchmark/test_p12_replay.py",
         "disposition": "delete-candidate",
         "issue": "#1926",
-        "cause": "depends on host-only state (absolute /Users/jameschen paths, .nexus/ runtime state, generated artifacts/runtime or baseline reports not tracked in git); cannot pass on a clean runner",
+        "cause": "host-only probe: test_p12_manifest_parser and test_bundle_summary_keys audit the generated, gitignored artifacts/runtime/local_model_armor_p12_real_june_b_replay_v0 bundle; test_missing_controls_taxonomy is not host state, it is stale (the legacy adapter path never supplies route_context.signal_snapshot, so it returns missing_signal_snapshot instead of missing_required_control) and needs an owner fix-or-delete decision",
         "tests": (
             "test_bundle_summary_keys",
             "test_missing_controls_taxonomy",
@@ -276,7 +276,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
         "file": "tests/integration/test_june_regression_pack.py",
         "disposition": "delete-candidate",
         "issue": "#1926",
-        "cause": "depends on host-only state (absolute /Users/jameschen paths, .nexus/ runtime state, generated artifacts/runtime or baseline reports not tracked in git); cannot pass on a clean runner",
+        "cause": "host-only probe: run_pack replays real astropy/sympy workspaces (hard-coded /Users/jameschen/.../.nexus/workspaces/astropy venvs and external_sources checkouts) that a clean runner lacks; faking them would defeat the governance-integrity check",
         "tests": ("test_june_regression_pack_governance_integrity",),
     },
     {
@@ -477,13 +477,6 @@ QUARANTINE: tuple[dict[str, object], ...] = (
         "tests": ("test_clean_wheel_contains_and_runs_registered_cli_entrypoints",),
     },
     {
-        "file": "tests/ops/test_learn_refresh_launchd.py",
-        "disposition": "delete-candidate",
-        "issue": "#1926",
-        "cause": "depends on host-only state (absolute /Users/jameschen paths, .nexus/ runtime state, generated artifacts/runtime or baseline reports not tracked in git); cannot pass on a clean runner",
-        "tests": ("test_build_plist_payload_contains_schedule_and_program_args",),
-    },
-    {
         "file": "tests/ops/test_nexus_cueline_worker.py",
         "disposition": "quarantine",
         "issue": "#1928",
@@ -524,20 +517,6 @@ QUARANTINE: tuple[dict[str, object], ...] = (
             "test_render_brain_hub_coverage_classifies_manifest_docs",
             "test_render_brain_hub_coverage_writes_full_json_artifact",
         ),
-    },
-    {
-        "file": "tests/ops/test_stage_a_baseline.py",
-        "disposition": "delete-candidate",
-        "issue": "#1926",
-        "cause": "depends on host-only state (absolute /Users/jameschen paths, .nexus/ runtime state, generated artifacts/runtime or baseline reports not tracked in git); cannot pass on a clean runner",
-        "tests": ("test_stage_a",),
-    },
-    {
-        "file": "tests/ops/test_stage_d_regression.py",
-        "disposition": "delete-candidate",
-        "issue": "#1926",
-        "cause": "depends on host-only state (absolute /Users/jameschen paths, .nexus/ runtime state, generated artifacts/runtime or baseline reports not tracked in git); cannot pass on a clean runner",
-        "tests": ("test_stage_d",),
     },
     {
         "file": "tests/ops/test_stage_f_flow.py",
@@ -624,11 +603,8 @@ QUARANTINE: tuple[dict[str, object], ...] = (
         "file": "tests/test_route_cost_efficiency_opt.py",
         "disposition": "delete-candidate",
         "issue": "#1926",
-        "cause": "depends on host-only state (absolute /Users/jameschen paths, .nexus/ runtime state, generated artifacts/runtime or baseline reports not tracked in git); cannot pass on a clean runner",
-        "tests": (
-            "test_context_compaction_is_observation_only",
-            "test_context_sync_capped_offline_async_vector_spike_and_receipt_lite",
-        ),
+        "cause": "stale, not host state: BattlesuitGateway.ask_structured now fails closed with online_execution_not_authorized and returns no shadow_compaction_ratio telemetry, so the observation-only compaction expectation drifted from the gateway authority gate; needs owner fix-or-delete decision (project_root path was also host-specific)",
+        "tests": ("test_context_compaction_is_observation_only",),
     },
     {
         "file": "tests/test_route_optimization.py",
@@ -662,24 +638,17 @@ QUARANTINE: tuple[dict[str, object], ...] = (
         "tests": ("test_state_repository_append_mode",),
     },
     {
-        "file": "tests/test_wisdom_synthesis.py",
-        "disposition": "delete-candidate",
-        "issue": "#1926",
-        "cause": "depends on host-only state (absolute /Users/jameschen paths, .nexus/ runtime state, generated artifacts/runtime or baseline reports not tracked in git); cannot pass on a clean runner",
-        "tests": ("test_wisdom_synthesis_loop",),
-    },
-    {
         "file": "tests/train/test_s2t_repair_dataset_contract.py",
         "disposition": "delete-candidate",
         "issue": "#1926",
-        "cause": "depends on host-only state (absolute /Users/jameschen paths, .nexus/ runtime state, generated artifacts/runtime or baseline reports not tracked in git); cannot pass on a clean runner",
+        "cause": "host-only probe: validates the generated, untracked .nexus/training/s2t_3b_repair_v2.jsonl fine-tuning dataset; mark as a host-only probe or commit a reduced fixture with owner approval",
         "tests": ("test_s2t_repair_dataset_contract",),
     },
     {
         "file": "tests/unit/local_heal/test_c6bb_target_grounding.py",
         "disposition": "delete-candidate",
         "issue": "#1926",
-        "cause": "depends on host-only state (absolute /Users/jameschen paths, .nexus/ runtime state, generated artifacts/runtime or baseline reports not tracked in git); cannot pass on a clean runner",
+        "cause": "host-only probe: needs the real astropy git workspace (.nexus/workspaces/astropy at fix commit a04fb7c355) to read pre-fix source; cannot be rebuilt in tmp without cloning astropy",
         "tests": (
             "test_grounding_locked_search_exists_in_real_source",
             "test_grounding_not_classified_as_search_span_mismatch",
@@ -689,7 +658,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
         "file": "tests/unit/local_heal/test_c6bd_anchor_shaping.py",
         "disposition": "delete-candidate",
         "issue": "#1926",
-        "cause": "depends on host-only state (absolute /Users/jameschen paths, .nexus/ runtime state, generated artifacts/runtime or baseline reports not tracked in git); cannot pass on a clean runner",
+        "cause": "host-only probe: needs the real astropy git workspace (.nexus/workspaces/astropy at fix commit a04fb7c355) to read pre-fix source; cannot be rebuilt in tmp without cloning astropy",
         "tests": (
             "test_astropy_13236_anchor_exists_uniquely_in_real_source",
             "test_astropy_13236_anchor_near_table_init_region",
@@ -758,7 +727,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
         "file": "tests/unit/local_heal/test_memory_eval_10_outcome_candidate_selection.py",
         "disposition": "delete-candidate",
         "issue": "#1926",
-        "cause": "depends on host-only state (absolute /Users/jameschen paths, .nexus/ runtime state, generated artifacts/runtime or baseline reports not tracked in git); cannot pass on a clean runner",
+        "cause": "host-only probe: audits generated, gitignored artifacts/runtime evidence (real model call receipts, selected candidates, evidence bundles) that a clean runner lacks; faking them would defeat the audit",
         "tests": (
             "test_c12481_excluded_from_selected",
             "test_memory_availability_matrix_exists",
@@ -777,7 +746,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
         "file": "tests/unit/local_heal/test_memory_eval_11_c13453_real_model_ab.py",
         "disposition": "delete-candidate",
         "issue": "#1926",
-        "cause": "depends on host-only state (absolute /Users/jameschen paths, .nexus/ runtime state, generated artifacts/runtime or baseline reports not tracked in git); cannot pass on a clean runner",
+        "cause": "host-only probe: audits generated, gitignored artifacts/runtime evidence (real model call receipts, selected candidates, evidence bundles) that a clean runner lacks; faking them would defeat the audit",
         "tests": (
             "test_both_arm_artifact_directories_exist",
             "test_comparison_file_aligns_with_artifacts",
@@ -797,14 +766,14 @@ QUARANTINE: tuple[dict[str, object], ...] = (
         "file": "tests/unit/local_heal/test_memory_eval_9_real_model_influence_ab.py",
         "disposition": "delete-candidate",
         "issue": "#1926",
-        "cause": "depends on host-only state (absolute /Users/jameschen paths, .nexus/ runtime state, generated artifacts/runtime or baseline reports not tracked in git); cannot pass on a clean runner",
+        "cause": "host-only probe: audits generated, gitignored artifacts/runtime evidence (real model call receipts, selected candidates, evidence bundles) that a clean runner lacks; faking them would defeat the audit",
         "tests": ("test_memory_eval_9_real_model_influence_ab_verification",),
     },
     {
         "file": "tests/unit/local_heal/test_memory_eval_identity_and_path.py",
         "disposition": "delete-candidate",
         "issue": "#1926",
-        "cause": "depends on host-only state (absolute /Users/jameschen paths, .nexus/ runtime state, generated artifacts/runtime or baseline reports not tracked in git); cannot pass on a clean runner",
+        "cause": "host-only probe: audits generated, gitignored artifacts/runtime evidence (real model call receipts, selected candidates, evidence bundles) that a clean runner lacks; faking them would defeat the audit",
         "tests": (
             "TestArtifactExistence::test_memory_path_matrix_exists",
             "TestArtifactExistence::test_rrl3c_artifacts_exist",
@@ -878,7 +847,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
         "file": "tests/unit/local_heal/test_rrl3c_evidence_harness_proof.py",
         "disposition": "delete-candidate",
         "issue": "#1926",
-        "cause": "depends on host-only state (absolute /Users/jameschen paths, .nexus/ runtime state, generated artifacts/runtime or baseline reports not tracked in git); cannot pass on a clean runner",
+        "cause": "host-only probe: audits generated, gitignored artifacts/runtime evidence (real model call receipts, selected candidates, evidence bundles) that a clean runner lacks; faking them would defeat the audit",
         "tests": (
             "TestOrchestratorHookBehavior::test_committed_bundle_has_task_id",
             "TestOrchestratorHookBehavior::test_runtime_artifact_exists_at_committed_path",

@@ -14,7 +14,7 @@ def test_build_plist_payload_contains_schedule_and_program_args():
     )
     assert payload["Label"] == "com.nexus.learn-refresh.test"
     assert payload["StartInterval"] == 1800
-    assert payload["WorkingDirectory"].endswith("/nexus")
+    assert payload["WorkingDirectory"] == str(launchd.REPO_ROOT)
     assert launchd.REPO_ROOT.exists()
     args = payload["ProgramArguments"]
     assert args[0] == "/usr/local/bin/uv"
