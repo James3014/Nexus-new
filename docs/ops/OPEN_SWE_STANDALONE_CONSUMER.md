@@ -70,3 +70,61 @@ The overlay does not enable or reload a service, start a daemon, or contain a
 temporary acceptance virtualenv path. Rollback keeps the overlay's
 provider/model fields if desired and changes only `semantic_backend` to `opencli` and
 `worker_backend` to `opencode`.
+
+## Issue contract verifiers and closure integrity checks
+
+The `nexus-external-intelligence` Issue contract (`nexus.external_intelligence_issue.v1`)
+lists `unit_verifiers` (per unit) and `whole_verifiers` as `{id, argv, timeout}`
+entries; every `argv` must also appear verbatim in the Task Card's
+`## Verification commands`. Closure runs them without a shell, in a clean checkout
+whose `HEAD` is already the committed candidate (the unit workspace for unit
+verifiers, the composed assembly worktree for whole verifiers).
+
+Consequences and rules:
+
+- A `git diff` verifier without a revision operand (for example
+  `["git", "diff", "--check"]`, or one whose only revision is `HEAD`/`@`) compares
+  the clean checkout with itself and always passes. Contract parsing rejects it
+  with `ISSUE_CONTRACT_UNIT_VERIFIERS_UNSCOPED_GIT_DIFF` or
+  `ISSUE_CONTRACT_WHOLE_VERIFIERS_UNSCOPED_GIT_DIFF`. Only direct `git` argv is
+  inspected; shell wrappers are not parsed.
+- Closure exports `NEXUS_BASE_SHA` (the bound base commit) and
+  `NEXUS_CANDIDATE_SHA` (the candidate commit under verification) to every
+  contract verifier. Scope a diff verifier through them, for example the argv
+  `["sh", "-c", "git diff --check \"$NEXUS_BASE_SHA\" \"$NEXUS_CANDIDATE_SHA\""]`
+  with the Task Card line
+  `sh -c 'git diff --check "$NEXUS_BASE_SHA" "$NEXUS_CANDIDATE_SHA"'`.
+- Independently of the contract, closure always runs three built-in checks of
+  `<base>..<candidate>` with rename detection off, at unit and at whole-task level,
+  and records them in each verification record (`integrity_checks`,
+  `integrity_status`, `failed_integrity_check_ids`, `integrity_base_sha`) and in the
+  acceptance packet (`integrity_checks`):
+  - `nexus.integrity.diff-check`: `git diff --check <base> <candidate>` must be
+    clean, else `INTEGRITY_WHITESPACE_ERRORS`;
+  - `nexus.integrity.deletions`: deleted paths (a rename counts as a deletion of
+    its source) must be authorized (unit: `allow_deletions` within its mutation
+    paths; whole task: only deletions composition already authorized), else
+    `INTEGRITY_DELETION_NOT_AUTHORIZED`;
+  - `nexus.integrity.scope`: changed paths must lie within the authorized mutation
+    paths, else `INTEGRITY_SCOPE_WIDENING`.
+
+  A git error or timeout fails closed with `INTEGRITY_CHECK_ERROR`. A failed unit
+  check fails that unit's verification and becomes a repair finding; a failed
+  whole-task check has no single owning unit and ends closure with
+  `SCOPE_DELTA_REQUIRED`. Acceptance packets are only built when every built-in
+  check passed.
+
+The Core `repository_mutation_binding` freshness window
+(`binding_validity_seconds`) covers, per repair cycle, the worker timeout plus
+that unit's verifier timeouts plus the whole-task verifier timeouts, times
+`1 + max_repairs_per_unit`, plus a fixed margin. The runtime only reads
+`valid_until`.
+
+Candidate commits created by EIA carry an explicit identity derived from the
+bound worker, never from host git configuration: author and committer
+`EIA <backend> worker (<provider/model>)` `<eia-worker+<provider>@nexus.invalid>`
+(for example `EIA open-swe worker (opencli_chatgpt/advanced)`), and the trailers
+`Nexus-EIA-Worker`, `Nexus-EIA-Model` and `Nexus-EIA-Backend`. The composed
+whole-task candidate is committed as `EIA closure composer
+<eia-closure@nexus.invalid>` with one `Nexus-EIA-Worker`/`Nexus-EIA-Model`
+trailer pair per distinct unit worker.

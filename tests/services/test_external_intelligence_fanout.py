@@ -1980,3 +1980,123 @@ def test_build_worker_bootstrap_bound_identity_requires_both_fields(tmp_path):
     assert f"\nsemantic_envelope_sha256={env_sha}\n" in bound
     with pytest.raises(FanoutError, match="BOUND_ENVELOPE_IDENTITY_INCOMPLETE"):
         build_worker_bootstrap(execution_unit, lease, bound_envelope_sha256="9" * 64)
+
+
+_HOST_IDENTITY_KEYS = (
+    "GIT_AUTHOR_NAME",
+    "GIT_AUTHOR_EMAIL",
+    "GIT_COMMITTER_NAME",
+    "GIT_COMMITTER_EMAIL",
+)
+
+
+def _bogus_global_git_identity(tmp_path: Path, monkeypatch) -> None:
+    """Simulate a host whose global git identity is an unrelated agent (and signs)."""
+    bogus = tmp_path / "bogus-global.gitconfig"
+    bogus.write_text(
+        "[user]\n\tname = Antigravity\n\temail = antigravity@gemini.local\n"
+        "[commit]\n\tgpgsign = true\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(bogus))
+    for key in _HOST_IDENTITY_KEYS:
+        monkeypatch.delenv(key, raising=False)
+
+
+def _commit_identity(root: Path, commit: str) -> tuple[str, str, list[str]]:
+    author = _git(root, "log", "-1", "--format=%an <%ae>", commit)
+    committer = _git(root, "log", "-1", "--format=%cn <%ce>", commit)
+    trailers = _git(root, "log", "-1", "--format=%(trailers:only,unfold)", commit).splitlines()
+    return author, committer, trailers
+
+
+def test_candidate_commit_identity_comes_from_bound_worker_not_host_git_config(
+    tmp_path, monkeypatch
+):
+    repo, base = make_repo(tmp_path)
+    envelope = tmp_path / "artifacts" / "envelope.json"
+    envelope_sha = make_envelope(envelope, base)
+    _bogus_global_git_identity(tmp_path, monkeypatch)
+    runtime = AdaptiveWorkerFanoutRuntime(
+        allocator=GitWorktreeAllocator(repo, tmp_path / "workspaces"),
+        store=FanoutStore(tmp_path / "state"),
+        transport=EditingTransport(),
+    )
+    result = runtime.run(
+        [unit(base, envelope, envelope_sha, "ua", ["a.py"])], CapacityLease(1, 1, 1, 1)
+    )
+    receipt = result["receipts"]["ua"]
+    assert receipt["status"] == "CANDIDATE_READY_FOR_VERIFICATION"
+    workspace = Path(receipt["workspace_path"])
+    author, committer, trailers = _commit_identity(workspace, receipt["candidate_commit"])
+    expected = f"EIA opencode worker ({MODEL}) <eia-worker+opencode@nexus.invalid>"
+    assert author == committer == expected
+    assert trailers == [
+        "Nexus-EIA-Worker: unbound",
+        f"Nexus-EIA-Model: {MODEL}",
+        "Nexus-EIA-Backend: opencode",
+    ]
+    body = _git(workspace, "log", "-1", "--format=%B%n%an%ae%cn%ce", receipt["candidate_commit"])
+    assert "antigravity" not in body.lower()
+
+
+def test_open_swe_chatgpt_candidate_commit_identity_and_trailers(tmp_path, monkeypatch):
+    from nexus.services.external_intelligence_fanout import _capture_candidate
+
+    repo, base = make_repo(tmp_path)
+    workspace = tmp_path / "ws"
+    _git(repo, "worktree", "add", "--detach", str(workspace), base)
+    # Only the bogus global identity remains for git to fall back on.
+    _git(repo, "config", "--local", "--unset", "user.name")
+    _git(repo, "config", "--local", "--unset", "user.email")
+    _bogus_global_git_identity(tmp_path, monkeypatch)
+    (workspace / "a.py").write_text("VALUE = 2\n", encoding="utf-8")
+    envelope = tmp_path / "envelope.json"
+    bound = replace(
+        ExecutionUnit.from_mapping(unit(base, envelope, "a" * 64, "ua", ["a.py"])),
+        selected_worker={"worker_id": "eia-chatgpt-web-advanced"},
+        provider="opencli_chatgpt",
+        model="opencli_chatgpt/advanced",
+    )
+    candidate = _capture_candidate(
+        bound,
+        WorkspaceLease("ws-ua", str(workspace), base),
+        expected_head=base,
+        worker_backend="open_swe",
+    )
+    author, committer, trailers = _commit_identity(workspace, candidate["candidate_commit"])
+    expected = (
+        "EIA open-swe worker (opencli_chatgpt/advanced) <eia-worker+opencli_chatgpt@nexus.invalid>"
+    )
+    assert author == committer == expected
+    assert trailers == [
+        "Nexus-EIA-Worker: eia-chatgpt-web-advanced",
+        "Nexus-EIA-Model: opencli_chatgpt/advanced",
+        "Nexus-EIA-Backend: open_swe",
+    ]
+    # the bogus global config is not consulted and nothing is written to any git config
+    assert "Antigravity" in (tmp_path / "bogus-global.gitconfig").read_text(encoding="utf-8")
+    local = subprocess.run(
+        ["git", "config", "--local", "--get-regexp", "^user\\."],
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert local.stdout == ""
+
+
+def test_eia_worker_identity_is_deterministic_and_sanitized():
+    from nexus.services.external_intelligence_fanout import eia_worker_identity
+
+    first = eia_worker_identity(
+        provider="Open CLI<x>", model="m\nodel", worker_id="w\n1", worker_backend="open_swe"
+    )
+    assert first == eia_worker_identity(
+        provider="Open CLI<x>", model="m\nodel", worker_id="w\n1", worker_backend="open_swe"
+    )
+    assert first["name"] == "EIA open-swe worker (Open CLI x/m odel)"
+    assert first["email"] == "eia-worker+open-cli-x@nexus.invalid"
+    assert first["worker_id"] == "w 1"
+    for value in first.values():
+        assert "\n" not in value and "<" not in value and ">" not in value
