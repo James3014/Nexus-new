@@ -21,7 +21,10 @@ jobs:
     name: Exact-base impact gate
     if: github.event_name != 'workflow_dispatch' && github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # An unmapped path runs the full tests/ suite on exact base and exact head
+    # (#2092). Nightly Tier 3 took 23-42 min per pass (2026-10-04..13), so two
+    # passes plus ~5 min setup need ~90 min; 110 leaves ~20% headroom.
+    timeout-minutes: 110
 
     steps:
       - name: Initialize evidence directory
@@ -210,6 +213,34 @@ jobs:
             --base-sha "$BASE_SHA" \
             --head-sha "${{ steps.base.outputs.head_sha }}" \
             --output .ci-impact/plan.json
+
+      - name: Summarize unmapped-path fallback
+        run: |
+          set -euo pipefail
+          .venv/bin/python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          plan = json.loads(Path(".ci-impact/plan.json").read_text(encoding="utf-8"))
+          if plan.get("fallback") == "FULL_SUITE":
+              paths = plan.get("unmatched_paths", [])
+              lines = [
+                  "## Impact gate: FULL_SUITE fallback",
+                  "",
+                  "These changed paths have no impact-map entry, so the whole `tests/` suite "
+                  "runs on exact base and exact head (slow). The gate passes only with no new "
+                  "failures and no new collection errors.",
+                  "",
+                  *(f"- `{path}`" for path in paths),
+                  "",
+                  "Hint: add a `docs/testing/test_impact_map.md` row for these paths to get a "
+                  "scoped, faster selection.",
+              ]
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+                  summary.write("\n".join(lines) + "\n")
+              print(f"::notice title=Impact gate FULL_SUITE fallback::unmapped paths: {', '.join(paths)}")
+          PY
 
       - name: Validate workflow syntax when required
         run: |

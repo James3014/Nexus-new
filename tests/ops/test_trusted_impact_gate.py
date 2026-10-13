@@ -440,8 +440,12 @@ HEAD_MAPPING_VECTORS = {
 
 def test_existing_unmapped_path_without_head_data_keeps_base_fallback(pr_repo):
     plan = _existing_unmapped(pr_repo, {})
-    assert plan["impact_class"] == "IMPACT_UNKNOWN"
+    # #2092: the base fallback is now the full tests/ suite (subsumes FALLBACK).
+    assert plan["impact_class"] == "UNMAPPED_FULL_SUITE"
+    assert plan["fallback"] == "FULL_SUITE"
+    assert "tests" in plan["pytest_targets"]
     assert set(FALLBACK) <= set(plan["pytest_targets"])
+    assert plan["unmatched_paths"]
 
 
 @pytest.mark.parametrize("vector", sorted(HEAD_MAPPING_VECTORS))
@@ -526,6 +530,86 @@ def test_combine_plans_never_lowers_tier_or_drops_targets():
         0.4,
     )
     assert combined["workflow_validation_required"] is True
+
+
+def _plan_stub(**overrides):
+    plan = {
+        "pytest_targets": ["tests/test_a.py"],
+        "pytest_required": True,
+        "workflow_validation_required": False,
+        "impact_class": "SCOPED_IMPLEMENTATION",
+        "tier": 1,
+        "confidence": 0.9,
+        "reasons": [],
+        "unmatched_paths": [],
+        "fallback": "",
+    }
+    plan.update(overrides)
+    return plan
+
+
+def test_combine_plans_head_row_resolves_full_suite_fallback_but_keeps_base_targets():
+    base_only = _plan_stub(
+        pytest_targets=["tests/core", "tests/test_b.py", "tests"],
+        impact_class="UNMAPPED_FULL_SUITE",
+        tier=3,
+        confidence=0.4,
+        unmatched_paths=["legacy/core.py"],
+        fallback="FULL_SUITE",
+    )
+    combined = tig.combine_plans(base_only, _plan_stub())
+    assert combined["pytest_targets"] == ["tests/test_a.py", "tests/core", "tests/test_b.py"]
+    assert combined["impact_class"] == "SCOPED_IMPLEMENTATION"
+    assert combined["fallback"] == ""
+    assert combined["unmatched_paths"] == []
+
+
+def test_combine_plans_keeps_full_suite_when_both_plans_fall_back():
+    fallback = {
+        "pytest_targets": ["tests/core", "tests"],
+        "impact_class": "UNMAPPED_FULL_SUITE",
+        "tier": 3,
+        "confidence": 0.4,
+        "fallback": "FULL_SUITE",
+    }
+    base_only = _plan_stub(**fallback, unmatched_paths=["legacy/core.py", "other.cfg"])
+    merged = _plan_stub(**fallback, unmatched_paths=["other.cfg"])
+    combined = tig.combine_plans(base_only, merged)
+    assert "tests" in combined["pytest_targets"]
+    assert combined["impact_class"] == "UNMAPPED_FULL_SUITE"
+    assert combined["fallback"] == "FULL_SUITE"
+    assert combined["unmatched_paths"] == ["other.cfg", "legacy/core.py"]
+
+
+def test_combine_plans_never_lets_full_suite_fallback_replace_a_merged_unknown():
+    base_only = _plan_stub(
+        pytest_targets=["tests"],
+        impact_class="UNMAPPED_FULL_SUITE",
+        tier=3,
+        unmatched_paths=["legacy/core.py"],
+        fallback="FULL_SUITE",
+    )
+    merged = _plan_stub(impact_class="IMPACT_UNKNOWN", tier=2, confidence=0.0)
+    combined = tig.combine_plans(base_only, merged)
+    assert combined["impact_class"] == "IMPACT_UNKNOWN"
+    assert combined["fallback"] == ""
+
+
+def test_combine_plans_full_suite_head_plan_may_resolve_a_base_unknown_without_dropping_targets():
+    merged = _plan_stub(
+        pytest_targets=["tests/core", "tests"],
+        impact_class="UNMAPPED_FULL_SUITE",
+        tier=3,
+        unmatched_paths=["legacy/core.py"],
+        fallback="FULL_SUITE",
+    )
+    base_only = _plan_stub(
+        pytest_targets=["tests/test_b.py"], impact_class="IMPACT_UNKNOWN", tier=2, confidence=0.0
+    )
+    combined = tig.combine_plans(base_only, merged)
+    assert combined["pytest_targets"] == ["tests/core", "tests", "tests/test_b.py"]
+    assert combined["impact_class"] == "UNMAPPED_FULL_SUITE"
+    assert combined["fallback"] == "FULL_SUITE"
 
 
 def test_utf16_junit_with_doctype_is_rejected(pr_repo):
