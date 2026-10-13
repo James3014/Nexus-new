@@ -3531,3 +3531,191 @@ def test_pr2016_dependency_snapshot_transition_allows_only_exact_binding(monkeyp
                 pull_request_number=other_pr,
                 head_product_init_is_regular=True,
             )
+
+
+# --- controller bash steps record a bootstrap reason (failure before Python runs) ---
+
+_BOOTSTRAP_STEP = "Acquire and execute exact trusted controller source"
+
+
+def _run_bootstrap_step(tmp_path: Path, **env: str) -> subprocess.CompletedProcess[str]:
+    run = _named_step("trusted-controller", _BOOTSTRAP_STEP)["run"]
+    return subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", run],
+        env={**os.environ, "RUNNER_TEMP": str(tmp_path), **env},
+        capture_output=True,
+        text=True,
+    )
+
+
+def _bootstrap_env(**overrides: str) -> dict[str, str]:
+    return {
+        "EVENT_JSON": "{}",
+        "EVENT_NAME": "pull_request",  # not pull_request_target: first fail-closed test trips
+        "WORKFLOW_REF": "x",
+        "WORKFLOW_SHA": "0" * 40,
+        "RUN_ID": "1",
+        "REPOSITORY": "James3014/Nexus-new",
+        "DEFAULT_BRANCH": "main",
+        "TRUSTED_TOKEN": "ghs_" + "A" * 36,
+        **overrides,
+    }
+
+
+def test_bootstrap_bash_failure_records_allowlisted_reason_and_still_fails(tmp_path: Path):
+    completed = _run_bootstrap_step(tmp_path, **_bootstrap_env())
+    assert completed.returncode != 0
+    reason_path = tmp_path / "trusted-anchor-failure" / "controller-failure.json"
+    record = json.loads(reason_path.read_text(encoding="utf-8"))
+    assert record["schema"] == trusted_anchor.CONTROLLER_FAILURE_SCHEMA
+    assert record["reason_code"] == "CONTROLLER_BOOTSTRAP_FAILED"
+    assert _BOOTSTRAP_STEP in record["detail"]
+    assert "ghs_" not in reason_path.read_text(encoding="utf-8")
+    assert "ghs_" not in completed.stderr
+    result = trusted_anchor.resolve_controller_failure(
+        reason_path.parent, controller_result="failure"
+    )
+    assert result["status"] == "BLOCK"
+    assert result["reason_code"] == "CONTROLLER_BOOTSTRAP_FAILED"
+    assert (
+        result["remedy"]
+        == trusted_anchor.CONTROLLER_FAILURE_REMEDIES["CONTROLLER_BOOTSTRAP_FAILED"]
+    )
+    assert _BOOTSTRAP_STEP in result["detail"]
+
+
+def test_bootstrap_failure_never_overwrites_python_controller_record(tmp_path: Path):
+    reason_path = tmp_path / "trusted-anchor-failure" / "controller-failure.json"
+    reason_path.parent.mkdir()
+    original = json.dumps({
+        "schema": trusted_anchor.CONTROLLER_FAILURE_SCHEMA,
+        "reason_code": "DEPENDENCY_CONTRACT_DRIFT",
+        "detail": "drift",
+    })
+    reason_path.write_text(original, encoding="utf-8")
+    completed = _run_bootstrap_step(tmp_path, **_bootstrap_env())
+    assert completed.returncode != 0
+    assert reason_path.read_text(encoding="utf-8") == original
+
+
+def test_bootstrap_trap_keeps_failed_command_text_unexpanded():
+    run = _named_step("trusted-controller", _BOOTSTRAP_STEP)["run"]
+    trap_lines = [line for line in run.splitlines() if "trap '" in line and "ERR" in line]
+    assert len(trap_lines) == 1
+    assert "$BASH_COMMAND" in trap_lines[0]
+    assert trap_lines[0].strip().startswith("trap '")  # single-quoted: expands only on error
+    assert "set -x" not in run
+
+
+def test_bootstrap_failure_does_not_print_token_from_failed_command(tmp_path: Path):
+    completed = _run_bootstrap_step(
+        tmp_path, **_bootstrap_env(EVENT_NAME="pull_request_target", REPOSITORY="evil/x")
+    )
+    assert completed.returncode != 0
+    assert "ghs_" not in completed.stderr
+    assert "ghs_" not in completed.stdout
+
+
+def test_collect_step_falls_back_to_bootstrap_reason_when_nothing_recorded(tmp_path: Path):
+    run = _named_step("trusted-controller", "Collect controller failure reason")["run"]
+    completed = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", run],
+        env={
+            **os.environ,
+            "RUNNER_TEMP": str(tmp_path),
+            "GITHUB_RUN_ID": "7",
+            "RUNTIME_BUILDER_OUTCOME": "failure",
+            "TRUSTED_SOURCE_OUTCOME": "skipped",
+            "EXTERNAL_ANCHOR_OUTCOME": "skipped",
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    failure_dir = tmp_path / "trusted-anchor-failure"
+    result = trusted_anchor.resolve_controller_failure(failure_dir, controller_result="failure")
+    assert result["reason_code"] == "CONTROLLER_BOOTSTRAP_FAILED"
+    assert "runtime-builder=failure" in result["detail"]
+
+
+def test_collect_step_keeps_existing_reason_record(tmp_path: Path):
+    run = _named_step("trusted-controller", "Collect controller failure reason")["run"]
+    failure_dir = tmp_path / "trusted-anchor-failure"
+    failure_dir.mkdir()
+    existing = '{"schema":"x","reason_code":"CONTROLLER_ERROR","detail":"d"}\n'
+    (failure_dir / "controller-failure.json").write_text(existing)
+    completed = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", run],
+        env={**os.environ, "RUNNER_TEMP": str(tmp_path), "GITHUB_RUN_ID": "7"},
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert (failure_dir / "controller-failure.json").read_text() == existing
+
+
+def test_lane_gate_block_outranks_bootstrap_record(tmp_path: Path):
+    failure_dir = _controller_failure_dir(
+        tmp_path,
+        {
+            "controller-failure.json": {
+                "schema": trusted_anchor.CONTROLLER_FAILURE_SCHEMA,
+                "reason_code": "CONTROLLER_BOOTSTRAP_FAILED",
+                "detail": "step=x",
+            },
+            "merge-lane-gate.json": {
+                "status": "BLOCK",
+                "reason": "EXACTLY_ONE_MERGE_LANE_BINDING_REQUIRED",
+            },
+        },
+    )
+    result = trusted_anchor.resolve_controller_failure(failure_dir, controller_result="failure")
+    assert result["reason_code"] == "MERGE_LANE_BINDING_MISSING"
+
+
+def test_bootstrap_record_detail_is_sanitized_display_data(tmp_path: Path):
+    ghs = "ghs_" + "B" * 36
+    failure_dir = _controller_failure_dir(
+        tmp_path,
+        {
+            "controller-failure.json": {
+                "schema": trusted_anchor.CONTROLLER_FAILURE_SCHEMA,
+                "reason_code": "CONTROLLER_BOOTSTRAP_FAILED",
+                "detail": f"step=a\nline {ghs} " + "z" * 1000,
+            }
+        },
+    )
+    detail = trusted_anchor.resolve_controller_failure(failure_dir, controller_result="failure")[
+        "detail"
+    ]
+    assert ghs not in detail and "\n" not in detail
+    assert len(detail) <= trusted_anchor.CONTROLLER_FAILURE_DETAIL_LIMIT
+
+
+def test_failure_upload_runs_on_failure_regardless_of_failing_step():
+    controller = _workflow()["jobs"]["trusted-controller"]["steps"]
+    names = [step.get("name") for step in controller]
+    collect = _named_step("trusted-controller", "Collect controller failure reason")
+    upload = _named_step("trusted-controller", "Upload controller failure reason")
+    assert collect["if"] == "failure()" and upload["if"] == "failure()"
+    assert names.index("Acquire fixed trusted runtime builder") < names.index(collect["name"])
+
+
+def test_bootstrap_failure_preserves_distinct_exit_status(tmp_path: Path):
+    run = _named_step("trusted-controller", _BOOTSTRAP_STEP)["run"]
+    marker = 'test "$EVENT_NAME" = pull_request_target'
+    assert marker in run
+    run = run.replace(marker, "exit 7", 1)
+    completed = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", run],
+        env={**os.environ, "RUNNER_TEMP": str(tmp_path), **_bootstrap_env()},
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 7, completed.stderr
+    record = json.loads(
+        (tmp_path / "trusted-anchor-failure" / "controller-failure.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert "exit=7" in record["detail"]
