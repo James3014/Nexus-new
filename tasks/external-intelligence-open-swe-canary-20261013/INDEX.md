@@ -21,15 +21,15 @@ Git-blob SHA-256 of the Task Card at that commit.
 
 ## Ordered Cards
 
-1. [00-open-swe-unattended-canary.md](00-open-swe-unattended-canary.md) - `eia-open-swe-canary-20261013`
+1. [00-open-swe-unattended-canary.md](00-open-swe-unattended-canary.md) - `eia-open-swe-canary-20261013b`
 
 ## Current Frontier
 
-`eia-open-swe-canary-20261013`
+`eia-open-swe-canary-20261013b`
 
 ## Ready Cards
 
-- `eia-open-swe-canary-20261013`
+- `eia-open-swe-canary-20261013b`
 
 ## Completed Cards
 
