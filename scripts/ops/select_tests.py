@@ -288,6 +288,8 @@ def _tree_files(root: Path, rel_dirs: tuple[str, ...], base_sha: str) -> dict[st
         for n in listing.stdout.decode("utf-8", "replace").split("\0")
         if n and not (set(n.split("/")) & _SKIP_DIR_PARTS) and _wanted_source(n)
     ]
+    if any("\n" in n for n in names):
+        raise _TreeUnreadable("newline in tracked path")  # cat-file --batch is line based
     batch = subprocess.run(
         ["git", "-C", str(root), "cat-file", "--batch"],
         input="".join(f"{base_sha}:{n}\n" for n in names).encode(),
@@ -431,6 +433,10 @@ def derive_ops_targets(changed_path: str, base_sha: str = "") -> list[str]:
                     return []  # helper/conftest: its consumers are unknown
                 selected.add(rel)
                 break
+    # A derived test that no longer exists at head (deleted by the PR) would be
+    # dropped silently downstream, leaving the script without direct tests.
+    if any(not (ROOT / rel).is_file() for rel in selected):
+        return []
     return sorted(selected)
 
 

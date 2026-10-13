@@ -1346,3 +1346,58 @@ def test_added_script_with_preexisting_named_test_keeps_full_directory(tmp_path,
     base = _git(tmp_path, "rev-parse", "HEAD")
     _write(tmp_path, {"scripts/ops/fresh.py": "X = 1\n"})
     assert st.derive_ops_targets("scripts/ops/fresh.py", base) == []
+
+
+def test_derived_test_deleted_at_head_falls_back_to_full_directory(tmp_path, monkeypatch):
+    st = _empty_ops_root(tmp_path, monkeypatch)
+    _write(tmp_path, {"scripts/ops/alpha.py": "X = 1\n", "tests/ops/test_alpha.py": "x = 1\n"})
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "base")
+    base = _git(tmp_path, "rev-parse", "HEAD")
+    _write(tmp_path, {"scripts/ops/alpha.py": "X = 2\n"})
+    (tmp_path / "tests/ops/test_alpha.py").unlink()
+    assert st.derive_ops_targets("scripts/ops/alpha.py", base) == []
+
+
+def test_bare_hyphenated_name_mention_makes_importer(tmp_path, monkeypatch):
+    st = _empty_ops_root(tmp_path, monkeypatch)
+    _write(
+        tmp_path,
+        {
+            "scripts/ops/my-tool": "#!/usr/bin/env python3\nX = 1\n",
+            "scripts/ops/runner": "# delegates to my-tool\nimport os\n",
+            "tests/ops/test_runner.py": "x = 1\n",
+        },
+    )
+    assert _details(st, "scripts/ops/my-tool", tmp_path).targets == ["tests/ops/test_runner.py"]
+
+
+def test_quoted_literal_of_identifier_extensionless_name_makes_importer(tmp_path, monkeypatch):
+    st = _empty_ops_root(tmp_path, monkeypatch)
+    _write(
+        tmp_path,
+        {
+            "scripts/ops/tool": "#!/usr/bin/env python3\nX = 1\n",
+            "scripts/ops/runner": "import os\nTARGET = 'tool'\n",
+            "tests/ops/test_runner.py": "x = 1\n",
+        },
+    )
+    assert _details(st, "scripts/ops/tool", tmp_path).targets == ["tests/ops/test_runner.py"]
+
+
+def test_scripts_ops_path_with_newline_in_base_tree_fails_closed(tmp_path, monkeypatch):
+    st = _empty_ops_root(tmp_path, monkeypatch)
+    _write(
+        tmp_path,
+        {
+            "scripts/ops/alpha.py": "X = 1\n",
+            "tests/ops/test_alpha.py": "x = 1\n",
+            "tests/ops/weird\nname.py": "x = 1\n",
+        },
+    )
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "base")
+    base = _git(tmp_path, "rev-parse", "HEAD")
+    assert st.derive_ops_targets("scripts/ops/alpha.py", base) == []
