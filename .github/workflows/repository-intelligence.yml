@@ -13,6 +13,7 @@ permissions:
   pull-requests: read
   checks: read
   statuses: read
+  actions: read  # engine resolves its own workflow's check suites to exclude them
 
 concurrency:
   group: repository-intelligence-${{ github.event.pull_request.number }}
@@ -25,7 +26,7 @@ jobs:
     steps:
       - name: Collect Repository Intelligence
         id: ri
-        uses: James3014/repository-intelligence-engine@60210c2395dc3bb631304db09dd9dd3ba56dacfb
+        uses: James3014/repository-intelligence-engine@d52029f771f4bf375b4f4a1e044f2fcdcb5f4471  # v0.1.5 candidate (engine #99): superseded/self cancels ignored, STALE_BASE informational
 
       - name: Validate advisory envelope
         shell: bash
