@@ -179,6 +179,33 @@ def _read_record(path: Path) -> dict[str, Any] | None:
     return record if isinstance(record, dict) else None
 
 
+def _auto_local_prefilter(repo_root: Path, head: str, branch: str) -> None:
+    """Cheap, offline skips for the Stop hook, which runs at every turn end.
+
+    Only narrows when to go online; every condition is re-checked against origin
+    afterwards, so a stale local tracking ref can only cause a skip, never a dispatch.
+    """
+    if not branch or branch in {"main", "master"}:
+        raise Outcome("SKIPPED_DEFAULT_BRANCH", "detached or default branch (local check)")
+    try:
+        tracking = _git(repo_root, "rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}")
+    except PrecheckError:  # no tracking ref means not pushed
+        tracking = ""
+    if tracking != head:
+        raise Outcome("SKIPPED_NOT_PUSHED", "HEAD differs from the local origin tracking ref")
+    directory = _dedupe_path(repo_root, head, 0).parent
+    now = time.time()
+    for path in directory.glob(f"{head}-*.json") if directory.is_dir() else ():
+        record = _read_record(path) or {}
+        age = now - float(record.get("dispatched_at_epoch", 0))
+        if 0 <= age < DEDUPE_SECONDS:
+            raise Outcome(
+                "SKIPPED_ALREADY_DISPATCHED",
+                f"dispatched {int(age // 60)} min ago (local check)",
+                previous=record,
+            )
+
+
 def _workflow_enrolled(slug: str, ref: str) -> bool:
     result = _gh("api", f"repos/{slug}/contents/{WORKFLOW_PATH}?ref={ref}")
     if result.returncode != 0:
@@ -215,6 +242,8 @@ def cmd_dispatch(args: argparse.Namespace, out: dict[str, Any]) -> int:
     out["head"] = head
     branch = _current_branch(repo_root)
     out["branch"] = branch or None
+    if args.auto:
+        _auto_local_prefilter(repo_root, head, branch)
     meta = _gh_json("api", f"repos/{slug}")
     default_branch = str((meta or {}).get("default_branch") or "main")
     if branch == default_branch:

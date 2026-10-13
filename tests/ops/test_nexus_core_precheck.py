@@ -242,6 +242,22 @@ def test_dedupe_and_force(env: Env) -> None:
     assert len(env.dispatches()) == 3
 
 
+def test_auto_prefilter_skips_offline_when_local_tracking_ref_differs(env: Env) -> None:
+    env.branch("feat/2018-core-precheck", push=False)
+    code, out = env.run("dispatch", "--auto")
+    assert (code, out["status"]) == (0, "SKIPPED_NOT_PUSHED")
+    assert env.gh_calls() == []
+
+
+def test_auto_prefilter_skips_offline_when_head_already_dispatched(env: Env) -> None:
+    env.branch("feat/2018-core-precheck")
+    assert env.run("dispatch", "--auto")[1]["status"] == "DISPATCHED"
+    env.calls.unlink()
+    code, out = env.run("dispatch", "--auto")
+    assert (code, out["status"]) == (0, "SKIPPED_ALREADY_DISPATCHED")
+    assert env.gh_calls() == []
+
+
 def test_tool_failure_is_error(env: Env) -> None:
     env.branch("feat/7-x")
     env.state["offline"] = True
