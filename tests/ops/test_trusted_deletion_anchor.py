@@ -3776,7 +3776,11 @@ def _mb_history(root: Path, scenario: str) -> dict[str, object]:
     main_files: dict[str, bytes | None] = {"docs/main-added.md": b"main added\n"}
     pr_files: dict[str, bytes | None] = {"docs/pr.md": b"pr work\n"}
     if scenario == "main_golden":
-        main_files["tests/golden_behavior/corpus.py"] = b"CASES = ()\n# main moved\n"
+        main_files["tests/golden_behavior/corpus.py"] = (
+            b'CASES = ("tests/contracts/test_witness.py::test_witness",)\n# main moved\n'
+        )
+    elif scenario.startswith("main_delete:"):
+        main_files[scenario.removeprefix("main_delete:")] = None
     elif scenario.startswith("main_touch:"):
         main_files[scenario.removeprefix("main_touch:")] = b"# main moved\n"
     elif scenario == "main_selected_test":
@@ -4161,8 +4165,7 @@ def test_golden_witness_paths_are_read_statically_from_corpus_source():
         "tests/a/test_one.py",
         "tests/b/test_two.py",
     }
-    assert trusted_anchor._golden_witness_paths(b"") == set()
-    with pytest.raises(ValueError, match="Golden corpus"):
+    with pytest.raises(ValueError, match="GOLDEN_CORPUS_UNVERIFIABLE"):
         trusted_anchor._golden_witness_paths(b"def (")
 
 
@@ -4202,10 +4205,133 @@ def test_unparseable_main_corpus_fails_closed(tmp_path: Path):
     source = Path(history["source"])
     (source / "tests/golden_behavior/corpus.py").write_text("def (\n")
     _run_git(source, "commit", "-q", "--no-verify", "-am", "broken corpus")
-    with pytest.raises(ValueError, match="Golden corpus is not parseable"):
+    with pytest.raises(ValueError, match="GOLDEN_CORPUS_UNVERIFIABLE"):
         trusted_anchor._main_moved_overlap(
             source,
             str(history["fork"]),
             _run_git(source, "rev-parse", "HEAD"),
             str(history["head"]),
         )
+
+
+# --- follow-up A: Golden witness extraction must fail closed, never open ---
+
+_GOOD_WITNESS = '"tests/contracts/test_witness.py::test_witness"'
+
+
+@pytest.mark.parametrize(
+    ("source", "why"),
+    [
+        (b"", "empty"),
+        (b"CASES = ()\n", "zero witnesses"),
+        (b'CASES = (f"tests/contracts/test_{1}.py::test_witness",)\n', "f-string"),
+        (b'CASES = ("tests/contracts/" + "test_witness.py::test_witness",)\n', "concatenation"),
+        (b'CASES = (b"tests/contracts/test_witness.py::test_witness",)\n', "bytes"),
+        (b'X = "tests/contracts/test_witness.py ::bad"\n', "malformed path string"),
+        (
+            b"W = ()\n_c('GB-1', 't', 'c', 's', 'e', (), W)\n",
+            "positional automated_tests is a name",
+        ),
+        (
+            b"_c('GB-1', 't', 'c', 's', 'e', (), automated_tests=tuple(['x']))\n",
+            "keyword automated_tests is a call",
+        ),
+        (
+            b"_c('GB-1', 't', 'c', 's', 'e', (), (" + _GOOD_WITNESS.encode() + b", W))\n",
+            "non-literal element",
+        ),
+    ],
+)
+def test_golden_witness_extraction_fails_closed(source: bytes, why: str):
+    with pytest.raises(ValueError, match="GOLDEN_CORPUS_UNVERIFIABLE"):
+        trusted_anchor._golden_witness_paths(source)
+
+
+def test_golden_witness_extraction_accepts_literal_case_calls_and_helper_body():
+    source = (
+        b"def _c(case_id, t, c, s, e, a, automated_tests=()):\n"
+        b"    return GoldenCase(case_id, t, c, s, e, a, automated_tests)\n"
+        b"CASES = (\n"
+        b"    _c('GB-1', 't', 'c', 's', 'e', (), (" + _GOOD_WITNESS.encode() + b",)),\n"
+        b"    _c('GB-2', 't', 'c', 's', 'e', (), automated_tests=['tests/a/test_b.py::t']),\n"
+        b"    _c('GB-3', 't', 'c', 's', 'e', ()),\n"
+        b")\n"
+    )
+    assert trusted_anchor._golden_witness_paths(source) == {
+        "tests/contracts/test_witness.py",
+        "tests/a/test_b.py",
+    }
+
+
+def test_real_golden_corpus_extracts_witnesses():
+    paths = trusted_anchor._golden_witness_paths(
+        (ROOT / "tests/golden_behavior/corpus.py").read_bytes()
+    )
+    assert len(paths) >= 30
+    assert "tests/ops/test_trusted_merge_lane_gate.py" in paths
+
+
+def _corpus_repo(root: Path, main_corpus: bytes | None) -> tuple[Path, str, str, str]:
+    repo = root / "corpus-repo"
+    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+    _run_git(repo, "config", "user.email", "test@example.invalid")
+    _run_git(repo, "config", "user.name", "corpus-test")
+    fork = _mb_commit(repo, "fork", _mb_root_files())
+    _run_git(repo, "checkout", "-q", "-b", "feature")
+    head = _mb_commit(repo, "pr", {"docs/pr.md": b"pr\n"})
+    _run_git(repo, "checkout", "-q", "main")
+    base = _mb_commit(
+        repo,
+        "main corpus",
+        {"tests/golden_behavior/corpus.py": main_corpus, "docs/main.md": b"m\n"},
+    )
+    return repo, fork, base, head
+
+
+@pytest.mark.parametrize(
+    "main_corpus",
+    [
+        None,
+        b"CASES = ()\n",
+        b'CASES = (f"tests/contracts/test_{1}.py::test_witness",)\n',
+        b'CASES = ("tests/contracts/" + "test_witness.py::test_witness",)\n',
+    ],
+    ids=["missing-at-base-tip", "zero-witnesses", "f-string", "concatenation"],
+)
+def test_main_moved_overlap_fails_closed_on_unverifiable_base_tip_corpus(
+    tmp_path: Path, main_corpus: bytes | None
+):
+    repo, fork, base, head = _corpus_repo(tmp_path, main_corpus)
+    with pytest.raises(ValueError, match="GOLDEN_CORPUS_UNVERIFIABLE"):
+        trusted_anchor._main_moved_overlap(repo, fork, base, head)
+
+
+def test_controller_records_unverifiable_corpus_reason(tmp_path: Path):
+    history = _mb_history(tmp_path, "main_delete:tests/golden_behavior/corpus.py")
+    with pytest.raises(ValueError, match="GOLDEN_CORPUS_UNVERIFIABLE") as caught:
+        _mb_run_controller(history)
+    record = trusted_anchor._controller_failure_record(caught.value)
+    assert record["reason_code"] == "GOLDEN_CORPUS_UNVERIFIABLE"
+    assert "GOLDEN_CORPUS_UNVERIFIABLE" in trusted_anchor.CONTROLLER_FAILURE_REMEDIES
+    assert "GOLDEN_CORPUS_UNVERIFIABLE" in trusted_anchor._CONTROLLER_RECORDED_CODES
+
+
+def test_corpus_absent_everywhere_contributes_no_witnesses(tmp_path: Path):
+    repo = tmp_path / "no-corpus"
+    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+    _run_git(repo, "config", "user.email", "test@example.invalid")
+    _run_git(repo, "config", "user.name", "corpus-test")
+    fork = _mb_commit(repo, "fork", {"docs/a.md": b"a\n"})
+    _run_git(repo, "checkout", "-q", "-b", "feature")
+    head = _mb_commit(repo, "pr", {"docs/pr.md": b"pr\n"})
+    _run_git(repo, "checkout", "-q", "main")
+    base = _mb_commit(repo, "main", {"docs/main.md": b"m\n"})
+    assert trusted_anchor._main_moved_overlap(repo, fork, base, head) == []
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["tests/nightly_quarantine_items/x/__init__.py", "scripts/ops/wiring_fixtures/y/__init__.py"],
+)
+def test_fixture_data_packages_are_not_import_chain_surface(path: str):
+    assert trusted_anchor._is_gate_oracle_surface(path) is False

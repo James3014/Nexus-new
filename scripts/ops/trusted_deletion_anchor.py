@@ -328,8 +328,16 @@ _GATE_ORACLE_TRUSTED_SCRIPT_RE = re.compile(r"scripts/ops/trusted_[^/]*\.py")
 _GATE_ORACLE_IMPORT_CHAIN_RE = re.compile(r"(?:tests|scripts)/(?:.*/)?(?:conftest|__init__)\.py")
 GOLDEN_CORPUS_PATH = "tests/golden_behavior/corpus.py"
 _GOLDEN_WITNESS_RE = re.compile(r"(tests/[^\s:]+\.py)(?:::.*)?")
+# Fixture data trees that are never on the pytest import path.
+_GATE_ORACLE_IMPORT_CHAIN_EXCLUDED = (
+    "tests/nightly_quarantine_items/",
+    "scripts/ops/wiring_fixtures/",
+)
+_GOLDEN_CASE_CONSTRUCTORS = ("_c", "GoldenCase")
+_GOLDEN_AUTOMATED_TESTS_POSITION = 6
 MAIN_MOVED_OVER_GATE_SURFACE = "MAIN_MOVED_OVER_GATE_SURFACE"
 MERGE_BASE_NOT_UNIQUE = "MERGE_BASE_NOT_UNIQUE"
+GOLDEN_CORPUS_UNVERIFIABLE = "GOLDEN_CORPUS_UNVERIFIABLE"
 
 
 def _is_gate_oracle_surface(path: str) -> bool:
@@ -337,25 +345,88 @@ def _is_gate_oracle_surface(path: str) -> bool:
         path in GATE_ORACLE_SURFACE_PATHS
         or path.startswith(GATE_ORACLE_SURFACE_PREFIXES)
         or _GATE_ORACLE_TRUSTED_SCRIPT_RE.fullmatch(path) is not None
-        or _GATE_ORACLE_IMPORT_CHAIN_RE.fullmatch(path) is not None
+        or (
+            _GATE_ORACLE_IMPORT_CHAIN_RE.fullmatch(path) is not None
+            and not path.startswith(_GATE_ORACLE_IMPORT_CHAIN_EXCLUDED)
+        )
     )
 
 
-def _golden_witness_paths(corpus_source: bytes) -> set[str]:
-    """Witness test files named by the Golden corpus, read as data (never imported)."""
+def _corpus_unverifiable(reason: str) -> ValueError:
+    return ValueError(f"{GOLDEN_CORPUS_UNVERIFIABLE}: {reason}")
 
-    if not corpus_source:
-        return set()
+
+def _module_level_calls(tree: ast.Module) -> list[ast.Call]:
+    """Calls outside function and class bodies (a helper forwarding its parameter is code)."""
+
+    calls: list[ast.Call] = []
+    pending: list[ast.AST] = list(tree.body)
+    while pending:
+        node = pending.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        if isinstance(node, ast.Call):
+            calls.append(node)
+        pending.extend(ast.iter_child_nodes(node))
+    return calls
+
+
+def _golden_witness_paths(corpus_source: bytes) -> set[str]:
+    """Witness test files named by the Golden corpus, read as data (never imported).
+
+    Fails closed (``GOLDEN_CORPUS_UNVERIFIABLE``) instead of under-reporting: the
+    corpus must parse, every ``automated_tests`` must be a literal tuple or list of
+    string literals, every string mentioning ``tests/`` must be a well-formed
+    witness, no f-string or bytes may mention ``tests/``, and at least one witness
+    must be found.
+    """
+
     try:
         tree = ast.parse(corpus_source)
     except (SyntaxError, ValueError) as error:
-        raise ValueError(f"Golden corpus is not parseable: {error}") from None
-    paths = set()
+        raise _corpus_unverifiable(f"corpus is not parseable: {error}") from None
+    paths: set[str] = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        if isinstance(node, ast.JoinedStr) and any(
+            isinstance(part, ast.Constant) and "tests/" in str(part.value) for part in node.values
+        ):
+            raise _corpus_unverifiable(f"line {node.lineno}: f-string names a test path")
+        if not isinstance(node, ast.Constant):
+            continue
+        if isinstance(node.value, bytes) and b"tests/" in node.value:
+            raise _corpus_unverifiable(f"line {node.lineno}: bytes literal names a test path")
+        if isinstance(node.value, str) and "tests/" in node.value:
             match = _GOLDEN_WITNESS_RE.fullmatch(node.value)
-            if match:
-                paths.add(match.group(1))
+            if match is None:
+                raise _corpus_unverifiable(
+                    f"line {node.lineno}: test path string is not a witness: {node.value[:80]!r}"
+                )
+            paths.add(match.group(1))
+    for call in _module_level_calls(tree):
+        if not (isinstance(call.func, ast.Name) and call.func.id in _GOLDEN_CASE_CONSTRUCTORS):
+            continue
+        keywords = {keyword.arg: keyword.value for keyword in call.keywords}
+        if None in keywords:
+            raise _corpus_unverifiable(f"line {call.lineno}: **kwargs in a case")
+        if any(isinstance(arg, ast.Starred) for arg in call.args):
+            raise _corpus_unverifiable(f"line {call.lineno}: *args in a case")
+        value = keywords.get("automated_tests")
+        if value is None and len(call.args) > _GOLDEN_AUTOMATED_TESTS_POSITION:
+            value = call.args[_GOLDEN_AUTOMATED_TESTS_POSITION]
+        if value is None:
+            continue
+        if not isinstance(value, (ast.Tuple, ast.List)) or any(
+            not (isinstance(element, ast.Constant) and isinstance(element.value, str))
+            for element in value.elts
+        ):
+            raise _corpus_unverifiable(
+                f"line {call.lineno}: automated_tests is not a literal tuple/list of strings"
+            )
+        for element in value.elts:
+            if _GOLDEN_WITNESS_RE.fullmatch(element.value) is None:  # type: ignore[union-attr]
+                raise _corpus_unverifiable(f"line {call.lineno}: malformed witness node id")
+    if not paths:
+        raise _corpus_unverifiable("corpus names zero witness tests")
     return paths
 
 
@@ -1211,11 +1282,17 @@ def _changed_paths(repo: Path, old: str, new: str) -> list[str]:
     return [path.decode() for path in result.split(b"\0") if path]
 
 
-def _blob_or_empty(repo: Path, revision: str, path: str) -> bytes:
-    result = subprocess.run(
-        ["git", "-C", str(repo), "show", f"{revision}:{path}"], capture_output=True
-    )
-    return result.stdout if result.returncode == 0 else b""
+def _corpus_blob(repo: Path, revision: str) -> bytes | None:
+    """The corpus at ``revision``; None only when the path is absent there."""
+
+    spec = f"{revision}:{GOLDEN_CORPUS_PATH}"
+    exists = subprocess.run(["git", "-C", str(repo), "cat-file", "-e", spec], capture_output=True)
+    if exists.returncode != 0:
+        return None
+    result = subprocess.run(["git", "-C", str(repo), "show", spec], capture_output=True)
+    if result.returncode != 0:
+        raise _corpus_unverifiable(f"corpus at {revision[:12]} is unreadable")
+    return result.stdout
 
 
 def _main_moved_overlap(repo: Path, merge_base_sha: str, base_sha: str, head_sha: str) -> list[str]:
@@ -1223,13 +1300,23 @@ def _main_moved_overlap(repo: Path, merge_base_sha: str, base_sha: str, head_sha
 
     The Golden witnesses are read from the corpus at both the merge-base and the
     base tip, so a witness main added, dropped or tightened is always covered.
+    A corpus absent at either side while present anywhere else fails closed.
     """
 
     if merge_base_sha == base_sha:
         return []
-    witnesses = _golden_witness_paths(
-        _blob_or_empty(repo, merge_base_sha, GOLDEN_CORPUS_PATH)
-    ) | _golden_witness_paths(_blob_or_empty(repo, base_sha, GOLDEN_CORPUS_PATH))
+    corpora = {
+        "merge-base": _corpus_blob(repo, merge_base_sha),
+        "base tip": _corpus_blob(repo, base_sha),
+        "head": _corpus_blob(repo, head_sha),
+    }
+    witnesses: set[str] = set()
+    if any(blob is not None for blob in corpora.values()):
+        for label in ("merge-base", "base tip"):
+            blob = corpora[label]
+            if blob is None:
+                raise _corpus_unverifiable(f"corpus is absent at the {label}")
+            witnesses |= _golden_witness_paths(blob)
     return _gate_surface_overlap(
         _changed_paths(repo, merge_base_sha, base_sha),
         _changed_paths(repo, merge_base_sha, head_sha),
@@ -1819,6 +1906,11 @@ CONTROLLER_FAILURE_REMEDIES = {
         "merge origin/main into the PR branch (no force-push) and push: main changed the "
         "gate-oracle surface or this PR's own paths since the merge-base"
     ),
+    GOLDEN_CORPUS_UNVERIFIABLE: (
+        "tests/golden_behavior/corpus.py must exist at the merge-base and on main and name "
+        "every witness as a literal 'tests/...py::node' string in a literal automated_tests "
+        "tuple; fix the corpus, then merge origin/main"
+    ),
     MERGE_BASE_NOT_UNIQUE: (
         "merge origin/main into the PR branch so it shares exactly one merge-base with "
         "main (no criss-cross merges, no unrelated history)"
@@ -1849,6 +1941,7 @@ _CONTROLLER_RECORDED_CODES = frozenset({
     "DEPENDENCY_CONTRACT_DRIFT",
     MAIN_MOVED_OVER_GATE_SURFACE,
     MERGE_BASE_NOT_UNIQUE,
+    GOLDEN_CORPUS_UNVERIFIABLE,
     "CONTROLLER_ERROR",
 })
 # Written by the controller job's bash steps, which run before/around the Python
@@ -1878,6 +1971,8 @@ def _controller_failure_record(error: BaseException) -> dict[str, str]:
         code = MAIN_MOVED_OVER_GATE_SURFACE
     elif message.startswith(f"{MERGE_BASE_NOT_UNIQUE}:"):
         code = MERGE_BASE_NOT_UNIQUE
+    elif message.startswith(f"{GOLDEN_CORPUS_UNVERIFIABLE}:"):
+        code = GOLDEN_CORPUS_UNVERIFIABLE
     else:
         code = "CONTROLLER_ERROR"
     return {
