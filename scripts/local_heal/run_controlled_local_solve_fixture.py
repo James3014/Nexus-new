@@ -19,7 +19,7 @@ from nexus.services.local_heal.capability_adapter import (
 )
 
 
-def plan_fixture_executor_controls(problem_statement: str) -> dict:
+def plan_fixture_executor_controls(problem_statement: str, task_id: str) -> dict:
     """Obtain executor controls from the canonical planning seam (#1924).
 
     The route and every LocalHeal mode grant come from CapabilityPlanner.plan(); the
@@ -32,7 +32,7 @@ def plan_fixture_executor_controls(problem_statement: str) -> dict:
         task_type="repair",
         route={"local_enabled": True},
     )
-    return dict(build_execution_plan(plan).executor_controls)
+    return dict(build_execution_plan(plan, task_id=task_id).executor_controls)
 
 
 def main() -> int:
@@ -98,7 +98,7 @@ def main() -> int:
     from unittest.mock import patch
 
     with patch.dict(os.environ, env_updates):
-        controls = {**plan_fixture_executor_controls(args.problem_statement), **fixture_controls}
+        controls = {**plan_fixture_executor_controls(args.problem_statement, args.task_id), **fixture_controls}
         request = LocalHealCapabilityRequest(
             task_id=args.task_id,
             problem_statement=args.problem_statement,
