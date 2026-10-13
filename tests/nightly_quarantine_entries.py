@@ -7,8 +7,8 @@ only when NEXUS_NIGHTLY_QUARANTINE=1, which the nightly job sets. Other runs
 passing shows up as XPASS: remove its id here in the same change.
 
 disposition: quarantine | delete-candidate | quarantine-product-bug?
-issue: replace "TBD" with the tracking Issue once filed; never add an entry
-without a cause.
+issue: the tracking Issue ("#N") that owns the fix-or-delete decision; every
+entry needs a cause and a real Issue number.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/app/test_research_flow_service.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "capability-phase e2e expectations (plan membership, invoked/gate_passed/wall_time) drifted from the current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_auto_flow_writes_semantic_research_runtime_receipts",
@@ -27,7 +27,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/app/test_research_receipt_runtime.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "capability-phase e2e expectations (plan membership, invoked/gate_passed/wall_time) drifted from the current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_build_capability_receipt_payloads_marks_runtime_autoreason_safe",
@@ -38,7 +38,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/bench/test_n30r_v1_vertical_slice.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1925",
         "cause": "nexus_runtime planner (installed canonical package) rejects the bench fixture: source_hash_does_not_match_workspace_revision_task_statement_v1; cross-repo contract drift",
         "tests": (
             "TestBenchmarkWorkspace::test_artifact_collision_does_not_delete_existing_run",
@@ -104,7 +104,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/bench/test_n30r_w0_contract_audit.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1925",
         "cause": "nexus_runtime planner (installed canonical package) rejects the bench fixture: source_hash_does_not_match_workspace_revision_task_statement_v1; cross-repo contract drift",
         "tests": (
             "test_w0_records_actual_provider_prompt",
@@ -114,7 +114,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/benchmark/test_capability_ab_runner.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1928",
         "cause": "passes in isolation on macOS at current main but fails in the Linux full-suite run (order-dependent state pollution or Linux-only environment difference); needs bisect",
         "tests": (
             "test_h6_0_audit_report_lock",
@@ -127,21 +127,19 @@ QUARANTINE: tuple[dict[str, object], ...] = (
             "test_nexus_with_local_model_adapter_alone_no_call",
             "test_python_syntax_warning_detects_return_in_finally",
             "test_run_with_nexus_codex_provider_delivers_nexus_context",
-            "test_sanitized_runner_learn_metadata_hook_commits_only_allowed_files",
-            "test_sanitized_runner_learn_metadata_hook_does_not_hide_other_dirty_entries",
         ),
     },
     {
         "file": "tests/benchmark/test_local_model_executor_full_capability_solve.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": ("test_deterministic_full_capability_solve",),
     },
     {
         "file": "tests/benchmark/test_local_model_executor_two_task_armor_smoke.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_finalize_with_nexus_row_capability_execution_smoke",
@@ -151,7 +149,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/benchmark/test_p12_replay.py",
         "disposition": "delete-candidate",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1926",
         "cause": "depends on host-only state (absolute /Users/jameschen paths, .nexus/ runtime state, generated artifacts/runtime or baseline reports not tracked in git); cannot pass on a clean runner",
         "tests": (
             "test_bundle_summary_keys",
@@ -162,7 +160,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/contract/test_boundary_compliance.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1927",
         "cause": "needs the Rust nexus_core extension (target/release), which the nightly runner does not build; decide build-in-CI or delete",
         "tests": (
             "TestBoundaryCompliance::test_error_transparency_from_rust_to_python",
@@ -173,28 +171,28 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/contract/test_model_agnostic_governance.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "capability-phase e2e expectations (plan membership, invoked/gate_passed/wall_time) drifted from the current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": ("TestModelAgnosticGovernance::test_hallucination_protection_is_constant",),
     },
     {
         "file": "tests/effects/test_p7_armor_integration_evidence_bundle.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "capability-phase e2e expectations (plan membership, invoked/gate_passed/wall_time) drifted from the current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": ("test_safety_assertions_all_safe",),
     },
     {
         "file": "tests/engine/test_capability_coverage_gap.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "capability-phase e2e expectations (plan membership, invoked/gate_passed/wall_time) drifted from the current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": ("test_capability_coverage_gap_report_marks_reserved_and_pending",),
     },
     {
         "file": "tests/engine/test_capability_receipt_policy.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "capability-phase e2e expectations (plan membership, invoked/gate_passed/wall_time) drifted from the current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_receipt_backed_capabilities_match_adapter_registry_after_alias_normalization",
@@ -203,7 +201,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/engine/test_capability_routing_contracts.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "capability-phase e2e expectations (plan membership, invoked/gate_passed/wall_time) drifted from the current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_autoreason_receipt_requires_winner_and_exposes_tournament_context",
@@ -219,7 +217,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/engine/test_cli_artifact_gate_audit.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1929",
         "cause": "source-scan test asserts a CLI/source layout that has since been refactored (paths now repo-relative, assertions still stale); stale expectations",
         "tests": (
             "test_mutating_commands_expose_artifact_or_gate_contracts",
@@ -229,7 +227,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/engine/test_cli_local_assist_advisor_gate2.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1929",
         "cause": "source-scan test asserts a CLI/source layout that has since been refactored (paths now repo-relative, assertions still stale); stale expectations",
         "tests": (
             "test_advisor_degrades_when_local_provider_fails",
@@ -244,21 +242,21 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/engine/test_cli_semantic_contract_audit.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1929",
         "cause": "source-scan test asserts a CLI/source layout that has since been refactored (paths now repo-relative, assertions still stale); stale expectations",
         "tests": ("test_core_command_paths_emit_semantic_contract_fields",),
     },
     {
         "file": "tests/engine/test_cli_work_path_audit.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1929",
         "cause": "source-scan test asserts a CLI/source layout that has since been refactored (paths now repo-relative, assertions still stale); stale expectations",
         "tests": ("test_run_family_uses_canonical_seams",),
     },
     {
         "file": "tests/engine/test_local_heal_receipt_adapter.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_local_heal_receipt_adapter_hybrid_route_blocked",
@@ -268,7 +266,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/engine/test_local_reflex.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_local_reflex_ollama_unavailable_fails_closed_to_heuristic",
@@ -278,7 +276,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/engine/test_rlm_outcome_integration.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1929",
         "cause": "source-scan test asserts a CLI/source layout that has since been refactored (paths now repo-relative, assertions still stale); stale expectations",
         "tests": (
             "test_outcome_memory_excludes_trust_mismatch_from_policy_scores",
@@ -290,17 +288,14 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/engine/test_self_hosted_cli.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1928",
         "cause": "passes in isolation on macOS at current main but fails in the Linux full-suite run (order-dependent state pollution or Linux-only environment difference); needs bisect",
-        "tests": (
-            "test_self_hosted_approve_exact_binding_and_mismatch",
-            "test_self_hosted_list_actionable_empty_and_populated",
-        ),
+        "tests": ("test_self_hosted_approve_exact_binding_and_mismatch",),
     },
     {
         "file": "tests/gates/test_s2t_rollout_control.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1929",
         "cause": "source-scan test asserts a CLI/source layout that has since been refactored (paths now repo-relative, assertions still stale); stale expectations",
         "tests": (
             "test_rollout_control_canary_rate",
@@ -310,14 +305,14 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/governance/test_claw_dna.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1929",
         "cause": "source-scan test asserts a CLI/source layout that has since been refactored (paths now repo-relative, assertions still stale); stale expectations",
         "tests": ("test_parity_audit_missing_func",),
     },
     {
         "file": "tests/health/test_c_phase_episode.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "capability-phase e2e expectations (plan membership, invoked/gate_passed/wall_time) drifted from the current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_record_episode_falls_back_to_review_status_when_flag_missing",
@@ -327,7 +322,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/integration/test_a_c_phases_9_capabilities_e2e.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "capability-phase e2e expectations (plan membership, invoked/gate_passed/wall_time) drifted from the current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_a_c_9_capabilities_disable_each_breaks_task[artifact_gate-NEXUS_SKIP_ARTIFACT_GATE]",
@@ -339,7 +334,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/integration/test_abc_local_heal_full_isolated_solve_seam.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_abc_local_heal_full_isolated_solve_seam",
@@ -349,7 +344,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/integration/test_abc_local_heal_shadow_seam.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_abc_local_heal_advisory_seam",
@@ -361,14 +356,14 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/integration/test_adapter_hardening.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": ("TestAdapterFailClosed::test_consistency_drift_detection_mock",),
     },
     {
         "file": "tests/integration/test_controlled_local_solve_fixture_runner.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_fixture_diff_normalization_success",
@@ -382,7 +377,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/integration/test_d_phase_2_capabilities_e2e.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "capability-phase e2e expectations (plan membership, invoked/gate_passed/wall_time) drifted from the current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_d_2_capabilities_disable_each_breaks_task[autoreason-NEXUS_SKIP_AUTOREASON]",
@@ -392,28 +387,28 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/integration/test_e2e_regression.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": ("TestE2EHybridGovernance::test_e2e_hallucination_handled",),
     },
     {
         "file": "tests/integration/test_june_regression_pack.py",
         "disposition": "delete-candidate",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1926",
         "cause": "depends on host-only state (absolute /Users/jameschen paths, .nexus/ runtime state, generated artifacts/runtime or baseline reports not tracked in git); cannot pass on a clean runner",
         "tests": ("test_june_regression_pack_governance_integrity",),
     },
     {
         "file": "tests/integration/test_legacy_path_blocked.py",
         "disposition": "quarantine-product-bug?",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1923",
         "cause": "assertion encodes a safety/boundary invariant that the product currently violates; possible real product bug, file a new Issue before fixing",
         "tests": ("TestLegacyPathBlocked::test_no_json_loads_on_model_response",),
     },
     {
         "file": "tests/integration/test_local_model_ollama_smoke_contract.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_ollama_smoke_advisory_contract",
@@ -423,7 +418,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/integration/test_n24_fallback_7_S_P_X.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "capability-phase e2e expectations (plan membership, invoked/gate_passed/wall_time) drifted from the current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_exec_codeintel_runs",
@@ -436,7 +431,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/integration/test_n25_fallback_8_X_D_R.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "capability-phase e2e expectations (plan membership, invoked/gate_passed/wall_time) drifted from the current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_exec_autoreason_runs",
@@ -452,7 +447,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/integration/test_n26_fallback_10_R_A_C.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "capability-phase e2e expectations (plan membership, invoked/gate_passed/wall_time) drifted from the current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_exec_attempt_settlement_service_runs",
@@ -469,7 +464,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/integration/test_n27_five_preexisting_to_100_percent.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "capability-phase e2e expectations (plan membership, invoked/gate_passed/wall_time) drifted from the current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_all_36_executors_real_execution_100_percent",
@@ -482,21 +477,21 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/integration/test_p_phase_4_capabilities_e2e.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "capability-phase e2e expectations (plan membership, invoked/gate_passed/wall_time) drifted from the current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": ("test_p_4_capabilities_invoked_in_real_task",),
     },
     {
         "file": "tests/integration/test_pipeline_e2e.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": ("test_full_chain_cli_to_engine",),
     },
     {
         "file": "tests/integration/test_r_phase_8_capabilities_e2e.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "capability-phase e2e expectations (plan membership, invoked/gate_passed/wall_time) drifted from the current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_r_8_capabilities_disable_each_breaks_task[drone-NEXUS_SKIP_DRONE]",
@@ -510,14 +505,14 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/integration/test_real_model_probe.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": ("test_real_model_wiring_probe_contract",),
     },
     {
         "file": "tests/integration/test_rust_kernel_smoke.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1927",
         "cause": "needs the Rust nexus_core extension (target/release), which the nightly runner does not build; decide build-in-CI or delete",
         "tests": (
             "test_rust_kernel_contamination_check",
@@ -528,7 +523,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/integration/test_s_phase_5_capabilities_e2e.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "capability-phase e2e expectations (plan membership, invoked/gate_passed/wall_time) drifted from the current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_s_5_capabilities_disable_each_breaks_task[mempalace-NEXUS_SKIP_MEMPALACE]",
@@ -539,7 +534,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/integration/test_unified_runtime_replan_subprocess.py",
         "disposition": "quarantine-product-bug?",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1923",
         "cause": "assertion encodes a safety/boundary invariant that the product currently violates; possible real product bug, file a new Issue before fixing",
         "tests": (
             "test_physical_subprocess_attempt_one_bytes_remain_unchanged",
@@ -555,7 +550,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/integration/test_x_phase_8_capabilities_e2e.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "capability-phase e2e expectations (plan membership, invoked/gate_passed/wall_time) drifted from the current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_x_8_capabilities_disable_each_breaks_task[codeintel-NEXUS_SKIP_CODEINTEL]",
@@ -563,64 +558,37 @@ QUARANTINE: tuple[dict[str, object], ...] = (
         ),
     },
     {
-        "file": "tests/nexus/orchestrator/test_self_hosted_task_service.py",
-        "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
-        "cause": "passes in isolation on macOS at current main but fails in the Linux full-suite run (order-dependent state pollution or Linux-only environment difference); needs bisect",
-        "tests": (
-            "test_build_contract_binds_selected_admission_identity_and_rejects_override",
-            "test_workforce_admission_accepts_forward_derived_age_rollover",
-            "test_workforce_dispatch_binding_is_canonical_and_fail_closed",
-        ),
-    },
-    {
         "file": "tests/nexus/orchestrator/test_target_integration_authority_closure.py",
         "disposition": "quarantine-product-bug?",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1923",
         "cause": "assertion encodes a safety/boundary invariant that the product currently violates; possible real product bug, file a new Issue before fixing",
         "tests": ("test_owner_finish_delegates_full_authorized_integration_then_cleanup",),
     },
     {
         "file": "tests/nexus/orchestrator/test_target_integration_git_canary.py",
         "disposition": "quarantine-product-bug?",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1923",
         "cause": "assertion encodes a safety/boundary invariant that the product currently violates; possible real product bug, file a new Issue before fixing",
         "tests": ("test_real_git_staging_failure_and_success_do_not_fake_ancestry",),
     },
     {
-        "file": "tests/nexus/orchestrator/test_unified_mcp_gateway.py",
-        "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
-        "cause": "passes in isolation on macOS at current main but fails in the Linux full-suite run (order-dependent state pollution or Linux-only environment difference); needs bisect",
-        "tests": (
-            "test_calibration_actions_never_call_provider_or_submit_tasks",
-            "test_cline_runner_timeout_fails_closed",
-            "test_cline_runner_uses_provider_qualified_model_and_decodes_event_stream",
-            "test_gateway_provider_executable_uses_shared_registered_resolver",
-            "test_grok_runner_uses_positional_prompt",
-        ),
-    },
-    {
         "file": "tests/nexus/orchestrator/test_workflow_repair.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1928",
         "cause": "passes in isolation on macOS at current main but fails in the Linux full-suite run (order-dependent state pollution or Linux-only environment difference); needs bisect",
         "tests": (
-            "test_candidate_commit_ignores_user_global_hooks",
             "test_closeout_salvage_failure_preserves_retained_target_and_error",
             "test_failed_dirty_worker_auto_invokes_salvage_and_cleanup",
             "test_integrate_approved_accepts_integration_branch_keyword",
             "test_integrate_approved_is_idempotent_after_integration",
             "test_integration_failure_records_failed_without_merge",
-            "test_recover_verified_uncommitted_candidate_without_model_recall",
-            "test_recovery_surface_zero_model_calls_and_maximum_returned_status",
             "test_timeout_dirty_worker_auto_invokes_salvage_and_cleanup",
         ),
     },
     {
         "file": "tests/ops/test_audit_cli_contracts.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1928",
         "cause": "passes in isolation on macOS at current main but fails in the Linux full-suite run (order-dependent state pollution or Linux-only environment difference); needs bisect",
         "tests": (
             "test_brain_hub_audit_accepts_output_json_flag",
@@ -630,7 +598,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/ops/test_build_sf_final_live_compare_matrix.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1929",
         "cause": "source-scan test asserts a CLI/source layout that has since been refactored (paths now repo-relative, assertions still stale); stale expectations",
         "tests": (
             "test_build_sf_final_live_compare_artifacts_dedupes_baseline_and_keeps_all_candidates",
@@ -639,46 +607,35 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/ops/test_clean_wheel_entrypoints.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1928",
         "cause": "passes in isolation on macOS at current main but fails in the Linux full-suite run (order-dependent state pollution or Linux-only environment difference); needs bisect",
         "tests": ("test_clean_wheel_contains_and_runs_registered_cli_entrypoints",),
     },
     {
-        "file": "tests/ops/test_codex_task_context_index.py",
-        "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
-        "cause": "passes in isolation on macOS at current main but fails in the Linux full-suite run (order-dependent state pollution or Linux-only environment difference); needs bisect",
-        "tests": (
-            "test_canonical_index_is_valid_complete_and_bounded",
-            "test_cli_emits_bounded_summary",
-            "test_duplicate_task_class_is_not_hidden_by_set_comprehension",
-        ),
-    },
-    {
         "file": "tests/ops/test_learn_refresh_launchd.py",
         "disposition": "delete-candidate",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1926",
         "cause": "depends on host-only state (absolute /Users/jameschen paths, .nexus/ runtime state, generated artifacts/runtime or baseline reports not tracked in git); cannot pass on a clean runner",
         "tests": ("test_build_plist_payload_contains_schedule_and_program_args",),
     },
     {
         "file": "tests/ops/test_nexus_cueline_worker.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1928",
         "cause": "passes in isolation on macOS at current main but fails in the Linux full-suite run (order-dependent state pollution or Linux-only environment difference); needs bisect",
         "tests": ("test_nexus_cueline_worker_full_pipeline_subprocess",),
     },
     {
         "file": "tests/ops/test_nexus_p30_acceptance_gate.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1928",
         "cause": "passes in isolation on macOS at current main but fails in the Linux full-suite run (order-dependent state pollution or Linux-only environment difference); needs bisect",
         "tests": ("test_p30_acceptance_gate_can_block_only_on_required_flash",),
     },
     {
         "file": "tests/ops/test_nexus_pre_flash_gate.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1928",
         "cause": "passes in isolation on macOS at current main but fails in the Linux full-suite run (order-dependent state pollution or Linux-only environment difference); needs bisect",
         "tests": (
             "test_benchmark_autodata_manifest_gate_accepts_real_flash_and_pro_manifests",
@@ -689,14 +646,14 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/ops/test_openwiki_source_contract.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1928",
         "cause": "passes in isolation on macOS at current main but fails in the Linux full-suite run (order-dependent state pollution or Linux-only environment difference); needs bisect",
         "tests": ("test_openwiki_issue10_claims_match_current_inventory",),
     },
     {
         "file": "tests/ops/test_render_brain_hub_coverage.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1928",
         "cause": "passes in isolation on macOS at current main but fails in the Linux full-suite run (order-dependent state pollution or Linux-only environment difference); needs bisect",
         "tests": (
             "test_render_brain_hub_coverage_classifies_manifest_docs",
@@ -704,93 +661,79 @@ QUARANTINE: tuple[dict[str, object], ...] = (
         ),
     },
     {
-        "file": "tests/ops/test_repo_doctor.py",
-        "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
-        "cause": "passes in isolation on macOS at current main but fails in the Linux full-suite run (order-dependent state pollution or Linux-only environment difference); needs bisect",
-        "tests": ("test_json_output_redacts_secret_values",),
-    },
-    {
         "file": "tests/ops/test_stage_a_baseline.py",
         "disposition": "delete-candidate",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1926",
         "cause": "depends on host-only state (absolute /Users/jameschen paths, .nexus/ runtime state, generated artifacts/runtime or baseline reports not tracked in git); cannot pass on a clean runner",
         "tests": ("test_stage_a",),
     },
     {
         "file": "tests/ops/test_stage_d_regression.py",
         "disposition": "delete-candidate",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1926",
         "cause": "depends on host-only state (absolute /Users/jameschen paths, .nexus/ runtime state, generated artifacts/runtime or baseline reports not tracked in git); cannot pass on a clean runner",
         "tests": ("test_stage_d",),
     },
     {
-        "file": "tests/ops/test_stage_e_immutable.py",
-        "disposition": "delete-candidate",
-        "issue": "TBD (Refs #1897)",
-        "cause": "depends on host-only state (absolute /Users/jameschen paths, .nexus/ runtime state, generated artifacts/runtime or baseline reports not tracked in git); cannot pass on a clean runner",
-        "tests": ("test_stage_e",),
-    },
-    {
         "file": "tests/ops/test_stage_f_flow.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1928",
         "cause": "passes in isolation on macOS at current main but fails in the Linux full-suite run (order-dependent state pollution or Linux-only environment difference); needs bisect",
         "tests": ("test_stage_f",),
     },
     {
         "file": "tests/ops/test_strict_file_discovery.py",
         "disposition": "quarantine-product-bug?",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1923",
         "cause": "assertion encodes a safety/boundary invariant that the product currently violates; possible real product bug, file a new Issue before fixing",
         "tests": ("test_strategic_map_audit_fails_fast_for_empty_boundary_glob",),
     },
     {
         "file": "tests/pilot_cli/test_gateway_integration.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1929",
         "cause": "source-scan test asserts a CLI/source layout that has since been refactored (paths now repo-relative, assertions still stale); stale expectations",
         "tests": ("test_coerce_long_gemini_answer_uses_second_pass_for_non_json",),
     },
     {
         "file": "tests/product/test_robustness.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1929",
         "cause": "source-scan test asserts a CLI/source layout that has since been refactored (paths now repo-relative, assertions still stale); stale expectations",
         "tests": ("test_poetry_packages_include_product_without_version_change",),
     },
     {
         "file": "tests/research/test_day_shift_optimizer.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1929",
         "cause": "source-scan test asserts a CLI/source layout that has since been refactored (paths now repo-relative, assertions still stale); stale expectations",
         "tests": ("test_dayshift_generation_uses_unified_runtime_on_revisioned_workspace",),
     },
     {
         "file": "tests/research/test_local_assist_paired_experiment.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "capability-phase e2e expectations (plan membership, invoked/gate_passed/wall_time) drifted from the current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": ("test_paired_arms_share_identity_and_separate_policies",),
     },
     {
         "file": "tests/research/test_research_isolation.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "capability-phase e2e expectations (plan membership, invoked/gate_passed/wall_time) drifted from the current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": ("test_research_receipt_l1_requires_facts_guard_pass",),
     },
     {
         "file": "tests/research/test_research_stack_contract.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "capability-phase e2e expectations (plan membership, invoked/gate_passed/wall_time) drifted from the current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": ("test_hyper_runtime_usage_backfills_receipt_when_planner_omits_hyper",),
     },
     {
         "file": "tests/research/test_sprint_service.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1929",
         "cause": "source-scan test asserts a CLI/source layout that has since been refactored (paths now repo-relative, assertions still stale); stale expectations",
         "tests": (
             "test_llm_failure_preserves_gateway_token_source",
@@ -806,7 +749,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/test_battlesuit_gateway.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1929",
         "cause": "source-scan test asserts a CLI/source layout that has since been refactored (paths now repo-relative, assertions still stale); stale expectations",
         "tests": (
             "test_authority_registered_provider_without_model_binding_makes_zero_physical_calls[agy]",
@@ -824,7 +767,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/test_cli_learn_mode.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1929",
         "cause": "source-scan test asserts a CLI/source layout that has since been refactored (paths now repo-relative, assertions still stale); stale expectations",
         "tests": (
             "test_learn_ask_cross_pack_allowed_when_flag_enabled",
@@ -839,14 +782,14 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/test_cli_thinning.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1929",
         "cause": "source-scan test asserts a CLI/source layout that has since been refactored (paths now repo-relative, assertions still stale); stale expectations",
         "tests": ("test_command_service_feature_params",),
     },
     {
         "file": "tests/test_cost_evidence_contracts_characterization.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1929",
         "cause": "source-scan test asserts a CLI/source layout that has since been refactored (paths now repo-relative, assertions still stale); stale expectations",
         "tests": (
             "test_cost_evidence_class_characterization_fixtures[local_winner_with_measured_model_call-inputs1-rescue_with_model_fallback_measured]",
@@ -856,49 +799,49 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/test_cost_evidence_policy.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1929",
         "cause": "source-scan test asserts a CLI/source layout that has since been refactored (paths now repo-relative, assertions still stale); stale expectations",
         "tests": ("TestCostEvidencePolicy::test_rescue_only_classification",),
     },
     {
         "file": "tests/test_disk_janitor.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1929",
         "cause": "source-scan test asserts a CLI/source layout that has since been refactored (paths now repo-relative, assertions still stale); stale expectations",
         "tests": ("test_prune_registry",),
     },
     {
         "file": "tests/test_dynamic_feedback.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": ("test_pipeline_injects_audit_failure_to_repairer",),
     },
     {
         "file": "tests/test_governance_telemetry_closure.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "capability-phase e2e expectations (plan membership, invoked/gate_passed/wall_time) drifted from the current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": ("test_evidence_replay_artifact_generation",),
     },
     {
         "file": "tests/test_layer_boundaries.py",
         "disposition": "quarantine-product-bug?",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1923",
         "cause": "assertion encodes a safety/boundary invariant that the product currently violates; possible real product bug, file a new Issue before fixing",
         "tests": ("test_forbidden_imports",),
     },
     {
         "file": "tests/test_memory.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1929",
         "cause": "source-scan test asserts a CLI/source layout that has since been refactored (paths now repo-relative, assertions still stale); stale expectations",
         "tests": ("TestMemoryService::test_fault_lessons_roundtrip_jsonl",),
     },
     {
         "file": "tests/test_nightshift_local_convergence.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1929",
         "cause": "source-scan test asserts a CLI/source layout that has since been refactored (paths now repo-relative, assertions still stale); stale expectations",
         "tests": (
             "test_run_round_generates_validated_scored_candidate",
@@ -908,7 +851,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/test_phantom_success_guards.py",
         "disposition": "quarantine-product-bug?",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1923",
         "cause": "assertion encodes a safety/boundary invariant that the product currently violates; possible real product bug, file a new Issue before fixing",
         "tests": (
             "test_pipeline_forces_x_phase_when_benchmark_force_research_enabled",
@@ -921,7 +864,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/test_route_cost_efficiency_opt.py",
         "disposition": "delete-candidate",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1926",
         "cause": "depends on host-only state (absolute /Users/jameschen paths, .nexus/ runtime state, generated artifacts/runtime or baseline reports not tracked in git); cannot pass on a clean runner",
         "tests": (
             "test_context_compaction_is_observation_only",
@@ -931,7 +874,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/test_route_optimization.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1929",
         "cause": "source-scan test asserts a CLI/source layout that has since been refactored (paths now repo-relative, assertions still stale); stale expectations",
         "tests": (
             "TestRouteOptimization::test_capability_pruning_logic",
@@ -944,63 +887,56 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/test_router_decision_id.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1929",
         "cause": "source-scan test asserts a CLI/source layout that has since been refactored (paths now repo-relative, assertions still stale); stale expectations",
         "tests": ("test_router_returns_no_candidates_without_real_skill_artifact",),
     },
     {
         "file": "tests/test_skill_memory.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": ("test_query_failure_patterns",),
     },
     {
         "file": "tests/test_skill_outcome_pipeline.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "capability-phase e2e expectations (plan membership, invoked/gate_passed/wall_time) drifted from the current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": ("test_pipeline_writes_skill_outcome_events",),
     },
     {
         "file": "tests/test_state_io_split_hardened.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1929",
         "cause": "source-scan test asserts a CLI/source layout that has since been refactored (paths now repo-relative, assertions still stale); stale expectations",
         "tests": ("test_state_repository_append_mode",),
     },
     {
         "file": "tests/test_token_pipeline_contract.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1929",
         "cause": "source-scan test asserts a CLI/source layout that has since been refactored (paths now repo-relative, assertions still stale); stale expectations",
         "tests": ("test_llm_client_token_capture",),
     },
     {
-        "file": "tests/test_uv_cache_isolation.py",
-        "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
-        "cause": "passes in isolation on macOS at current main but fails in the Linux full-suite run (order-dependent state pollution or Linux-only environment difference); needs bisect",
-        "tests": ("test_uv_cache_env_isolation[asyncio]",),
-    },
-    {
         "file": "tests/test_wisdom_synthesis.py",
         "disposition": "delete-candidate",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1926",
         "cause": "depends on host-only state (absolute /Users/jameschen paths, .nexus/ runtime state, generated artifacts/runtime or baseline reports not tracked in git); cannot pass on a clean runner",
         "tests": ("test_wisdom_synthesis_loop",),
     },
     {
         "file": "tests/train/test_s2t_repair_dataset_contract.py",
         "disposition": "delete-candidate",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1926",
         "cause": "depends on host-only state (absolute /Users/jameschen paths, .nexus/ runtime state, generated artifacts/runtime or baseline reports not tracked in git); cannot pass on a clean runner",
         "tests": ("test_s2t_repair_dataset_contract",),
     },
     {
         "file": "tests/unit/local_heal/test_c6bb_target_grounding.py",
         "disposition": "delete-candidate",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1926",
         "cause": "depends on host-only state (absolute /Users/jameschen paths, .nexus/ runtime state, generated artifacts/runtime or baseline reports not tracked in git); cannot pass on a clean runner",
         "tests": (
             "test_grounding_locked_search_exists_in_real_source",
@@ -1010,7 +946,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/unit/local_heal/test_c6bd_anchor_shaping.py",
         "disposition": "delete-candidate",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1926",
         "cause": "depends on host-only state (absolute /Users/jameschen paths, .nexus/ runtime state, generated artifacts/runtime or baseline reports not tracked in git); cannot pass on a clean runner",
         "tests": (
             "test_astropy_13236_anchor_exists_uniquely_in_real_source",
@@ -1020,7 +956,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/unit/local_heal/test_capability_adapter.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_capability_adapter_advisory_enabled_by_env",
@@ -1038,7 +974,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/unit/local_heal/test_decoupled_architecture_tdd.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_behavior_collapse_guard_during_retry",
@@ -1052,7 +988,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/unit/local_heal/test_delegated_retry_signal.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_capability_planner_injects_committee_model_specs",
@@ -1062,14 +998,14 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/unit/local_heal/test_local_model_executor.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": ("test_delegated_retry_committee_candidates_have_unique_ids",),
     },
     {
         "file": "tests/unit/local_heal/test_localheal_pipeline_seam_truth.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "TestPipelineResultProjectionB3::test_pipeline_result_non_empty_final_patch_projects_candidate_hash",
@@ -1079,7 +1015,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/unit/local_heal/test_memory_eval_10_outcome_candidate_selection.py",
         "disposition": "delete-candidate",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1926",
         "cause": "depends on host-only state (absolute /Users/jameschen paths, .nexus/ runtime state, generated artifacts/runtime or baseline reports not tracked in git); cannot pass on a clean runner",
         "tests": (
             "test_c12481_excluded_from_selected",
@@ -1098,7 +1034,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/unit/local_heal/test_memory_eval_11_c13453_real_model_ab.py",
         "disposition": "delete-candidate",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1926",
         "cause": "depends on host-only state (absolute /Users/jameschen paths, .nexus/ runtime state, generated artifacts/runtime or baseline reports not tracked in git); cannot pass on a clean runner",
         "tests": (
             "test_both_arm_artifact_directories_exist",
@@ -1118,14 +1054,14 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/unit/local_heal/test_memory_eval_9_real_model_influence_ab.py",
         "disposition": "delete-candidate",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1926",
         "cause": "depends on host-only state (absolute /Users/jameschen paths, .nexus/ runtime state, generated artifacts/runtime or baseline reports not tracked in git); cannot pass on a clean runner",
         "tests": ("test_memory_eval_9_real_model_influence_ab_verification",),
     },
     {
         "file": "tests/unit/local_heal/test_memory_eval_identity_and_path.py",
         "disposition": "delete-candidate",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1926",
         "cause": "depends on host-only state (absolute /Users/jameschen paths, .nexus/ runtime state, generated artifacts/runtime or baseline reports not tracked in git); cannot pass on a clean runner",
         "tests": (
             "TestArtifactExistence::test_memory_path_matrix_exists",
@@ -1136,7 +1072,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/unit/local_heal/test_n30r_v31_production_slices.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_slice_a_lite_success",
@@ -1147,7 +1083,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/unit/local_heal/test_n30r_w1c_capability_projection.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_classify_single_control_plane",
@@ -1158,7 +1094,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/unit/local_heal/test_p3_cloud_local_assist_shadow.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_p3_shadow_flag_off_preserves_existing_topology",
@@ -1168,21 +1104,14 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/unit/local_heal/test_p3_stage5_escalation_stub.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": ("test_executor_includes_stage5_in_flow",),
     },
     {
-        "file": "tests/unit/local_heal/test_p4_committee_real_winner_path.py",
-        "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
-        "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
-        "tests": ("test_selection_strategy_recorded",),
-    },
-    {
         "file": "tests/unit/local_heal/test_real_capability_wiring.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_memory_retrieval_rejects_fake_lesson_without_provenance",
@@ -1192,7 +1121,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/unit/local_heal/test_router_learning_loop.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_router_empty_receipts_are_unverified_not_success",
@@ -1206,7 +1135,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/unit/local_heal/test_rrl3c_evidence_harness_proof.py",
         "disposition": "delete-candidate",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1926",
         "cause": "depends on host-only state (absolute /Users/jameschen paths, .nexus/ runtime state, generated artifacts/runtime or baseline reports not tracked in git); cannot pass on a clean runner",
         "tests": (
             "TestOrchestratorHookBehavior::test_committed_bundle_has_task_id",
@@ -1214,37 +1143,30 @@ QUARANTINE: tuple[dict[str, object], ...] = (
         ),
     },
     {
-        "file": "tests/unit/local_heal/test_semantic_anchor_selection.py",
-        "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
-        "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
-        "tests": ("test_select_semantic_anchor_with_failing_symbol",),
-    },
-    {
         "file": "tests/unit/test_context_budget.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": ("test_context_budget_dynamic_cutting",),
     },
     {
         "file": "tests/unit/test_context_guard.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": ("TestContextGuard::test_truncate_files_logic",),
     },
     {
         "file": "tests/unit/test_fast_matcher_drift.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1927",
         "cause": "needs the Rust nexus_core extension (target/release), which the nightly runner does not build; decide build-in-CI or delete",
         "tests": ("test_fast_matcher_drift_zero",),
     },
     {
         "file": "tests/unit/test_fast_matcher_exist.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1927",
         "cause": "needs the Rust nexus_core extension (target/release), which the nightly runner does not build; decide build-in-CI or delete",
         "tests": (
             "test_fast_matcher_metadata_exists",
@@ -1255,21 +1177,21 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/unit/test_localizer_srp.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": ("test_localizer_granular_slicing_functional_purity",),
     },
     {
         "file": "tests/unit/test_orchestrator.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": ("test_orchestrator_runs_patch_and_verification_phases",),
     },
     {
         "file": "tests/unit/test_patch_synthesis_phase.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_patch_synthesis_phase_applies_valid_search_replace",
@@ -1279,7 +1201,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/unit/test_pipeline.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_pipeline_apology_patch_response_records_model_refusal",
@@ -1299,7 +1221,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/unit/test_pipeline_trace.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_pipeline_trace_has_start_and_end",
@@ -1309,7 +1231,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/unit/test_prompt_hardening.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_system_prompt_contains_anti_apology",
@@ -1319,7 +1241,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/unit/test_search_replace_protocol.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1924",
         "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
         "tests": (
             "test_protocol_validate_match_chain_fallback",
@@ -1330,14 +1252,14 @@ QUARANTINE: tuple[dict[str, object], ...] = (
     {
         "file": "tests/unit/verifiers/concurrency/test_concurrency_red.py",
         "disposition": "quarantine",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1928",
         "cause": "timing-dependent RED demonstration (expects a deadlock within a fixed sleep); flaky on shared runners",
         "tests": ("TestConcurrencyTargetsRed::test_target3_deadlock_happens",),
     },
     {
         "file": "tests/unit/verifiers/concurrency/test_race.py",
         "disposition": "quarantine-product-bug?",
-        "issue": "TBD (Refs #1897)",
+        "issue": "#1923",
         "cause": "assertion encodes a safety/boundary invariant that the product currently violates; possible real product bug, file a new Issue before fixing",
         "tests": ("TestBatchB02RaceFixed::test_idempotent_executor_green_stress",),
     },

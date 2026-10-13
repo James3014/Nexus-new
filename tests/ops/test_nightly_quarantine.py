@@ -31,8 +31,27 @@ def test_every_quarantined_id_names_an_existing_test_with_a_cause() -> None:
             assert re.search(rf"def {re.escape(function)}\(", source), f"{entry.file}::{test}"
 
 
+@pytest.mark.parametrize("issue", ["TBD", "", "#TBD", "TBD (Refs #1897)", "1923", "#0"])
+def test_entries_without_a_real_issue_number_are_rejected(issue: str) -> None:
+    raw = {
+        "file": "tests/x.py",
+        "disposition": "quarantine",
+        "issue": issue,
+        "cause": "cause",
+        "tests": ("test_a",),
+    }
+    with pytest.raises(ValueError, match="real Issue number"):
+        load_quarantine([raw])
+
+
+def test_entries_without_an_issue_key_are_rejected() -> None:
+    raw = {"file": "tests/x.py", "disposition": "quarantine", "cause": "c", "tests": ("t",)}
+    with pytest.raises(KeyError):
+        load_quarantine([raw])
+
+
 def test_duplicate_ids_are_rejected() -> None:
-    entry = QuarantineEntry("tests/x.py", "quarantine", "TBD", "cause", ("test_a",))
+    entry = QuarantineEntry("tests/x.py", "quarantine", "#1", "cause", ("test_a",))
     with pytest.raises(ValueError, match="duplicate"):
         quarantine_reasons((entry, entry))
 
@@ -54,7 +73,7 @@ def test_apply_marks_only_listed_items_as_non_strict_xfail() -> None:
             self.markers.append(marker)
 
     listed, other = _Item("tests/x.py::test_a"), _Item("tests/x.py::test_b")
-    entry = QuarantineEntry("tests/x.py", "quarantine", "TBD", "cause", ("test_a",))
+    entry = QuarantineEntry("tests/x.py", "quarantine", "#1", "cause", ("test_a",))
     assert (
         apply_quarantine(cast(list[pytest.Item], [listed, other]), quarantine_reasons((entry,)))
         == 1

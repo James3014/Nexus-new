@@ -9,12 +9,14 @@ shows up as XPASS instead of being hidden by a skip.
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
 import pytest
 
 QUARANTINE_ENV = "NEXUS_NIGHTLY_QUARANTINE"
+ISSUE_REFERENCE = re.compile(r"#[1-9][0-9]*")
 DISPOSITIONS = frozenset({"quarantine", "delete-candidate", "quarantine-product-bug?"})
 
 
@@ -47,8 +49,10 @@ def load_quarantine(
             raise ValueError(
                 f"unknown quarantine disposition for {entry.file}: {entry.disposition}"
             )
-        if not entry.cause.strip() or not entry.issue.strip() or not entry.tests:
-            raise ValueError(f"quarantine entry for {entry.file} needs cause, issue and tests")
+        if not entry.cause.strip() or not entry.tests:
+            raise ValueError(f"quarantine entry for {entry.file} needs a cause and tests")
+        if not ISSUE_REFERENCE.fullmatch(entry.issue):
+            raise ValueError(f"quarantine entry for {entry.file} needs a real Issue number (#N)")
         entries.append(entry)
     return tuple(entries)
 
