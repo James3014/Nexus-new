@@ -36,3 +36,12 @@ extraheader via `GIT_CONFIG_*` environment variables, never argv.
 
 The App has contents, pull_requests and issues write. It has no workflow
 permission (cannot change `.github/workflows`) and no admin rights.
+
+## Security notes
+
+- `gh` and `git` are resolved once via `PATH` (`shutil.which`) and exec'd by
+  absolute path; PATH is trusted.
+- The token is passed to the child through its environment, so git hooks and any
+  other child processes inherit it. Run only trusted repositories.
+- SSH remotes now fail by design (`protocol.ssh.allow=never`); use https remotes.
+  Git prompts and askpass helpers are disabled.

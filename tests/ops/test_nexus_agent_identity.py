@@ -42,17 +42,16 @@ def app(tmp_path, monkeypatch):
 def fake(monkeypatch):
     state = {
         "calls": [],
-        "installs": [
-            {"id": 1, "account": {"login": "other"}},
-            {"id": 77, "account": {"login": "James3014"}},
-        ],
+        "install": {"id": 77},
         "expires": _iso(3600),
     }
 
     def http(method, path, bearer):
         state["calls"].append((method, path, bearer))
-        if path == "/app/installations":
-            return state["installs"]
+        if path == "/users/James3014/installation":
+            if state["install"] is None:
+                raise ident.IdentityError("GitHub HTTP 404: Not Found")
+            return state["install"]
         if path.endswith("/access_tokens"):
             return {"token": TOKEN, "expires_at": state["expires"]}
         if path == "/app":
@@ -89,25 +88,30 @@ def test_jwt_header_claims_and_signature(app, tmp_path):
     assert ok.returncode == 0
 
 
-def test_openssl_ownership_enforced_by_default(tmp_path):
+def test_openssl_ownership_enforced_by_default(tmp_path, monkeypatch):
+    monkeypatch.setattr(ident, "OPENSSL_ENFORCE_OWNER", True)
     f = tmp_path / "openssl"
-    f.write_text("#!/bin/sh\n")
+    shutil.copy(OPENSSL, f)
     f.chmod(0o755)
     if os.getuid() != 0:
         with pytest.raises(ident.IdentityError, match="root-owned"):
-            ident.check_openssl(str(f))
+            ident.check_openssl(str(f))  # explicit path does not disable the check
+    monkeypatch.setattr(ident, "OPENSSL_ENFORCE_OWNER", False)
     f.chmod(0o775)
     with pytest.raises(ident.IdentityError, match="writable"):
-        ident.check_openssl(str(f), enforce_owner=False)
+        ident.check_openssl(str(f))
     with pytest.raises(ident.IdentityError, match="not found"):
         ident.check_openssl(str(tmp_path / "nope"))
 
 
-def test_make_jwt_enforces_owner_by_default(app, monkeypatch):
+def test_make_jwt_enforces_owner_by_default(app, monkeypatch, tmp_path):
     monkeypatch.setattr(ident, "OPENSSL_ENFORCE_OWNER", True)
-    if os.stat(OPENSSL).st_uid != 0:
+    mine = tmp_path / "openssl"
+    shutil.copy(OPENSSL, mine)
+    mine.chmod(0o755)
+    if os.getuid() != 0:
         with pytest.raises(ident.IdentityError, match="root-owned"):
-            ident.make_jwt(app)
+            ident.make_jwt(app, openssl=str(mine))
 
 
 def test_token_selects_installation_and_caches(app, fake):
@@ -148,28 +152,32 @@ def test_refuses_loose_key(app, fake):
 
 
 def test_no_matching_installation(app, fake):
-    fake["installs"] = [{"id": 1, "account": {"login": "other"}}]
-    with pytest.raises(ident.IdentityError, match="James3014"):
+    fake["install"] = None
+    with pytest.raises(ident.IdentityError, match="404"):
         ident.get_token()
 
 
 def test_gh_and_git_exec(app, fake, monkeypatch):
     seen = []
     monkeypatch.setattr(os, "execvpe", lambda f, a, e: seen.append((f, a, e)))
+    monkeypatch.setattr(ident.shutil, "which", lambda c: f"/abs/{c}")
     monkeypatch.setenv("GITHUB_TOKEN", "x")
     monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
     assert ident.main(["gh", "--", "pr", "list"]) == 0
     f, a, e = seen[-1]
-    assert (f, a) == ("gh", ["gh", "pr", "list"])
+    assert (f, a) == ("/abs/gh", ["/abs/gh", "pr", "list"])
     assert e["GH_TOKEN"] == TOKEN and "GITHUB_TOKEN" not in e
     assert ident.main(["git", "--", "push", "origin", "HEAD:b"]) == 0
     f, a, e = seen[-1]
-    assert (f, a) == ("git", ["git", "push", "origin", "HEAD:b"])
+    assert (f, a) == ("/abs/git", ["/abs/git", "push", "origin", "HEAD:b"])
     basic = base64.b64encode(f"x-access-token:{TOKEN}".encode()).decode()
-    assert e["GIT_CONFIG_COUNT"] == "3"
+    assert e["GIT_CONFIG_COUNT"] == "5"
     assert e["GIT_CONFIG_KEY_1"] == "credential.helper" and e["GIT_CONFIG_VALUE_1"] == ""
-    assert e["GIT_CONFIG_KEY_2"] == "http.https://github.com/.extraheader"
-    assert e["GIT_CONFIG_VALUE_2"] == f"Authorization: basic {basic}"
+    assert (e["GIT_CONFIG_KEY_2"], e["GIT_CONFIG_VALUE_2"]) == ("protocol.ssh.allow", "never")
+    assert e["GIT_CONFIG_KEY_3"] == "http.https://github.com/.extraheader"
+    assert e["GIT_CONFIG_VALUE_3"] == ""
+    assert e["GIT_CONFIG_KEY_4"] == "http.https://github.com/.extraheader"
+    assert e["GIT_CONFIG_VALUE_4"] == f"Authorization: basic {basic}"
     for _, argv, _ in seen:
         assert not any(TOKEN in x or basic in x for x in argv)
 
@@ -198,3 +206,98 @@ def test_http_error_message_has_no_secrets(app, monkeypatch, capsys):
     err = capsys.readouterr().err
     assert "401" in err and "Bad credentials" in err
     assert "eyJ" not in err and "BEGIN" not in err
+
+
+def _urlmatch(env, url, tmp_path, pre=()):
+    env = {k: v for k, v in env.items() if not k.startswith("GIT_CONFIG_GLOBAL")}
+    env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1", HOME=str(tmp_path))
+    out = subprocess.run(
+        ["git", "config", "--get-urlmatch", "http.extraheader", url],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    return out.stdout.strip().splitlines()
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git required")
+def test_real_git_extraheader_urlmatch(tmp_path):
+    fake_tok = "ghs_" + "F" * 36
+    basic = base64.b64encode(f"x-access-token:{fake_tok}".encode()).decode()
+    env = ident.git_env(fake_tok, {"PATH": os.environ["PATH"]})
+    assert _urlmatch(env, "https://github.com/x", tmp_path) == [f"Authorization: basic {basic}"]
+    assert _urlmatch(env, "https://example.com/x", tmp_path) == []
+    # inherited header is reset, not doubled
+    pre = {
+        "PATH": os.environ["PATH"],
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",
+        "GIT_CONFIG_VALUE_0": "Authorization: basic OLD",
+    }
+    env = ident.git_env(fake_tok, pre)
+    assert _urlmatch(env, "https://github.com/x", tmp_path) == [f"Authorization: basic {basic}"]
+
+
+def test_env_hardening_and_gh_includes_git_pairs():
+    base = {
+        "GIT_ASKPASS": "a",
+        "SSH_ASKPASS": "b",
+        "GH_HOST": "h",
+        "GITHUB_TOKEN": "t",
+        "GH_ENTERPRISE_TOKEN": "e",
+        "GITHUB_ENTERPRISE_TOKEN": "e",
+    }
+    g = ident.git_env("tok", base)
+    assert g["GIT_TERMINAL_PROMPT"] == "0"
+    assert "GIT_ASKPASS" not in g and "SSH_ASKPASS" not in g
+    pairs = {(g[f"GIT_CONFIG_KEY_{i}"], g[f"GIT_CONFIG_VALUE_{i}"]) for i in range(4)}
+    assert ("protocol.ssh.allow", "never") in pairs
+    h = ident.gh_env("tok", base)
+    assert h["GH_TOKEN"] == "tok"
+    for k in ("GH_HOST", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"):
+        assert k not in h
+    assert all(
+        h[f"GIT_CONFIG_{x}_{i}"] == g[f"GIT_CONFIG_{x}_{i}"]
+        for i in range(4)
+        for x in ("KEY", "VALUE")
+    )
+
+
+def test_symlinked_cache_refused(app, fake, tmp_path):
+    real = tmp_path / "real"
+    real.write_text(json.dumps({"token": TOKEN}))
+    os.chmod(real, 0o600)
+    (app / "agent.token").symlink_to(real)
+    with pytest.raises(ident.IdentityError, match="cache"):
+        ident.get_token()
+
+
+def test_loose_credentials_dir_refused(app, fake):
+    os.chmod(app, 0o755)
+    with pytest.raises(ident.IdentityError, match="dir"):
+        ident.get_token()
+
+
+def test_cache_mismatch_refetches(app, fake):
+    cache = app / "agent.token"
+    good = {"token": TOKEN, "expires_at": _iso(3600), "app_id": "4242", "installation_id": 77}
+    for bad in ({"app_id": "999"}, {"installation_id": "77"}, {"installation_id": None}):
+        cache.write_text(json.dumps({**good, **bad}))
+        os.chmod(cache, 0o600)
+        n = len(fake["calls"])
+        assert ident.get_token() == (TOKEN, 77)
+        assert len(fake["calls"]) > n
+    cache.write_text(json.dumps(good))
+    os.chmod(cache, 0o600)
+    assert ident.get_token() == (TOKEN, None)
+
+
+def test_unexpected_exception_prints_type_only(app, monkeypatch, capsys):
+    def boom(*a, **k):
+        raise RuntimeError(TOKEN)
+
+    monkeypatch.setattr(ident, "get_token", boom)
+    monkeypatch.setattr(ident.sys, "argv", ["x", "token"])
+    assert ident.run() == 1
+    err = capsys.readouterr().err
+    assert "RuntimeError" in err and TOKEN not in err

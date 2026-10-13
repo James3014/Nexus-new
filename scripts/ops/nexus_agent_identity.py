@@ -10,9 +10,11 @@ from __future__ import annotations
 import base64
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -21,6 +23,7 @@ from pathlib import Path
 API = "https://api.github.com"
 OWNER_LOGIN = "James3014"
 OPENSSL = "/usr/bin/openssl"
+OPENSSL_ENFORCE_OWNER = True
 REFRESH_MARGIN = 300
 TIMEOUT = 30
 
@@ -38,7 +41,7 @@ def _b64(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 
 
-def check_openssl(path: str | None = None, *, enforce_owner: bool = True) -> str:
+def check_openssl(path: str | None = None) -> str:
     path = path or OPENSSL
     try:
         st = os.stat(path)
@@ -46,7 +49,7 @@ def check_openssl(path: str | None = None, *, enforce_owner: bool = True) -> str
         raise IdentityError(f"openssl not found at {path}") from None
     if not stat.S_ISREG(st.st_mode) or not os.access(path, os.X_OK):
         raise IdentityError(f"{path} is not an executable file")
-    if enforce_owner and st.st_uid != 0:
+    if OPENSSL_ENFORCE_OWNER and st.st_uid != 0:
         raise IdentityError(f"{path} is not root-owned")
     if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
         raise IdentityError(f"{path} is group/other-writable")
@@ -81,7 +84,7 @@ def make_jwt(app_dir: Path, *, now: int | None = None, openssl: str | None = Non
         ).encode()
     )
     signing_input = f"{header}.{claims}".encode()
-    binary = check_openssl(openssl, enforce_owner=openssl is None and OPENSSL_ENFORCE_OWNER)
+    binary = check_openssl(openssl)
     try:
         proc = subprocess.run(
             [binary, "dgst", "-sha256", "-sign", str(pem)],
@@ -95,9 +98,6 @@ def make_jwt(app_dir: Path, *, now: int | None = None, openssl: str | None = Non
     if proc.returncode != 0 or not proc.stdout:
         raise IdentityError("openssl signing failed")
     return f"{header}.{claims}.{_b64(proc.stdout)}"
-
-
-OPENSSL_ENFORCE_OWNER = True
 
 
 def http(method: str, path: str, bearer: str) -> dict:
@@ -127,13 +127,11 @@ def http(method: str, path: str, bearer: str) -> dict:
 
 
 def find_installation(jwt: str) -> int:
-    data = http("GET", "/app/installations", jwt)
-    if not isinstance(data, list):
-        raise IdentityError("unexpected installations response")
-    for inst in data:
-        if (inst.get("account") or {}).get("login") == OWNER_LOGIN:
-            return int(inst["id"])
-    raise IdentityError(f"no installation for account {OWNER_LOGIN}")
+    data = http("GET", f"/users/{OWNER_LOGIN}/installation", jwt)
+    inst = data.get("id") if isinstance(data, dict) else None
+    if not isinstance(inst, int) or isinstance(inst, bool):
+        raise IdentityError(f"no installation for account {OWNER_LOGIN}")
+    return inst
 
 
 def _parse_expiry(value: str) -> float:
@@ -142,25 +140,48 @@ def _parse_expiry(value: str) -> float:
     return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
 
 
-def _read_cache(path: Path) -> dict | None:
-    if not os.path.lexists(path):
-        return None
-    st = os.lstat(path)
-    if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or st.st_mode & 0o077:
-        raise IdentityError("token cache not owned by user or has group/other permissions")
+def _check_dir(path: Path) -> None:
     try:
-        data = json.loads(path.read_text())
-        if isinstance(data.get("token"), str) and isinstance(data.get("expires_at"), str):
-            return data
-    except (OSError, ValueError, AttributeError):
-        pass
-    return None
+        st = os.stat(path)
+    except OSError:
+        raise IdentityError(f"credentials dir missing: {path}") from None
+    if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid() or st.st_mode & 0o077:
+        raise IdentityError("credentials dir not user-owned or has group/other permissions")
+
+
+def _read_cache(path: Path, app_id: str) -> dict | None:
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return None
+    except OSError:
+        raise IdentityError("token cache cannot be opened safely (symlink?)") from None
+    with os.fdopen(fd, "rb") as fh:
+        st = os.fstat(fh.fileno())
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or st.st_mode & 0o077:
+            raise IdentityError("token cache not owned by user or has group/other permissions")
+        try:
+            data = json.loads(fh.read().decode())
+        except ValueError:
+            return None
+    if not isinstance(data, dict):
+        return None
+    inst = data.get("installation_id")
+    if (
+        not isinstance(data.get("token"), str)
+        or not isinstance(data.get("expires_at"), str)
+        or data.get("app_id") != app_id
+        or not isinstance(inst, int)
+        or isinstance(inst, bool)
+    ):
+        return None
+    return data
 
 
 def _write_cache(path: Path, data: dict) -> None:
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     try:
+        os.fchmod(fd, 0o600)
         with os.fdopen(fd, "w") as fh:
             json.dump(data, fh)
         os.replace(tmp, path)
@@ -172,12 +193,23 @@ def _write_cache(path: Path, data: dict) -> None:
         raise
 
 
+def _app_id(app_dir: Path) -> str:
+    cfg = app_dir / "agent.json"
+    _check_private_file(cfg, "agent.json")
+    try:
+        return str(json.loads(cfg.read_text())["id"])
+    except (OSError, ValueError, KeyError, TypeError):
+        raise IdentityError("agent.json unreadable or has no id") from None
+
+
 def get_token(*, now: float | None = None, openssl: str | None = None) -> tuple[str, int | None]:
     """Return (token, installation_id or None when served from cache)."""
     app_dir = cred_dir()
+    _check_dir(app_dir)
     cache = app_dir / "agent.token"
     now = time.time() if now is None else now
-    cached = _read_cache(cache)
+    app_id = _app_id(app_dir)
+    cached = _read_cache(cache, app_id)
     if cached:
         try:
             if _parse_expiry(cached["expires_at"]) - now > REFRESH_MARGIN:
@@ -190,7 +222,9 @@ def get_token(*, now: float | None = None, openssl: str | None = None) -> tuple[
     token, exp = resp.get("token"), resp.get("expires_at")
     if not isinstance(token, str) or not isinstance(exp, str):
         raise IdentityError("access token response malformed")
-    _write_cache(cache, {"token": token, "expires_at": exp})
+    _write_cache(
+        cache, {"token": token, "expires_at": exp, "app_id": app_id, "installation_id": inst}
+    )
     return token, inst
 
 
@@ -206,13 +240,6 @@ def cmd_whoami() -> int:
     return 0
 
 
-def gh_env(token: str, base: dict | None = None) -> dict:
-    env = dict(os.environ if base is None else base)
-    env.pop("GITHUB_TOKEN", None)
-    env["GH_TOKEN"] = token
-    return env
-
-
 def git_env(token: str, base: dict | None = None) -> dict:
     env = dict(os.environ if base is None else base)
     try:
@@ -220,16 +247,28 @@ def git_env(token: str, base: dict | None = None) -> dict:
     except ValueError:
         n = 0
     basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    header_key = "http.https://github.com/.extraheader"
     pairs = [
         ("credential.helper", ""),
-        ("http.https://github.com/.extraheader", f"Authorization: basic {basic}"),
+        ("protocol.ssh.allow", "never"),
+        (header_key, ""),  # list reset: drop any inherited extraheader
+        (header_key, f"Authorization: basic {basic}"),
     ]
     for i, (k, v) in enumerate(pairs, start=n):
         env[f"GIT_CONFIG_KEY_{i}"] = k
         env[f"GIT_CONFIG_VALUE_{i}"] = v
     env["GIT_CONFIG_COUNT"] = str(n + len(pairs))
-    env.pop("GITHUB_TOKEN", None)
-    env.pop("GH_TOKEN", None)
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    for k in ("GIT_ASKPASS", "SSH_ASKPASS", "GITHUB_TOKEN", "GH_TOKEN"):
+        env.pop(k, None)
+    return env
+
+
+def gh_env(token: str, base: dict | None = None) -> dict:
+    env = git_env(token, base)
+    for k in ("GITHUB_TOKEN", "GH_HOST", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"):
+        env.pop(k, None)
+    env["GH_TOKEN"] = token
     return env
 
 
@@ -247,10 +286,11 @@ def main(argv: list[str]) -> int:
     if rest[:1] == ["--"]:
         rest = rest[1:]
     token, _ = get_token()
-    if cmd == "gh":
-        os.execvpe("gh", ["gh", *rest], gh_env(token))
-    else:
-        os.execvpe("git", ["git", *rest], git_env(token))
+    exe = shutil.which(cmd)
+    if not exe:
+        raise IdentityError(f"{cmd} not found on PATH")
+    env = gh_env(token) if cmd == "gh" else git_env(token)
+    os.execvpe(exe, [exe, *rest], env)
     return 0
 
 
@@ -260,8 +300,8 @@ def run() -> int:
     except IdentityError as exc:
         print(f"nexus_agent_identity: {exc}", file=sys.stderr)
         return 1
-    except OSError as exc:
-        print(f"nexus_agent_identity: {type(exc).__name__}", file=sys.stderr)
+    except Exception as exc:
+        print(f"nexus_agent_identity: unexpected {type(exc).__name__}", file=sys.stderr)
         return 1
 
 
