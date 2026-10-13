@@ -146,6 +146,10 @@ class SprintConfig:
     enable_ddtree_executor: bool | None = None
     ddtree_max_candidates: int = 2
     distant_scout_plan: dict[str, Any] = field(default_factory=dict)
+    # "online" (gateway provider) or "local" (Workforce-admitted ollama worker, armored lane).
+    llm_channel: str = "online"
+    # Verified candidates to collect before safe mode may stop early (1 = stop at first pass).
+    min_candidate_pool: int = 1
 
 
 @dataclass
@@ -274,7 +278,7 @@ class LLMCandidateGenerator:
         )
         local_request = None
         if self.local_service is not None and self.target_file and not Path(self.target_file).is_absolute():
-            from nexus.services.local_assist_service import LocalAssistRequest, REQUEST_SCHEMA
+            from nexus.services.local_assist_service import REQUEST_SCHEMA, LocalAssistRequest
 
             local_request = LocalAssistRequest(
                 schema=REQUEST_SCHEMA,
@@ -458,6 +462,199 @@ class LLMCandidateGenerator:
                     continue
                 raise
         raise RuntimeError(last_err or "all_models_failed")
+
+
+LOCAL_CANDIDATE_MODEL_ENVS = ("NEXUS_LOCAL_MODEL_EXECUTOR_MODEL", "NEXUS_LOCAL_MODEL_NAME")
+
+
+def _local_online_channel_disabled(_context: dict[str, Any]) -> dict[str, Any]:
+    raise RuntimeError("online_channel_disabled_for_local_sprint_candidate")
+
+
+class LocalArmorCandidateGenerator:
+    """Model candidates from the Workforce-admitted local worker, through the armored local lane.
+
+    Each candidate is one ``verified-subtask`` LocalAssist request run by ``run_mainchain`` on a
+    local-only route: Workforce Admission resolves the ollama worker (local channel,
+    ``bounded_code_candidate``), the local model edits an isolated World C copy, and the patch is
+    applied and verified in an isolated workspace. The sprint then re-scores the delivered file
+    with its own pytest command. Nothing is called when the model or the worker is unbound.
+    """
+
+    source = "llm_local_armor"
+
+    def __init__(
+        self,
+        project_root: Path,
+        *,
+        target_file: str,
+        test_file: str | None,
+        verifier_command: tuple[str, ...] | None = None,
+    ):
+        self.project_root = Path(project_root).resolve()
+        self.target_file = str(target_file or "").strip()
+        self.test_file = str(test_file or "").strip()
+        # Explicit verifier (e.g. (python, "repro.py")); default is pytest on the test file.
+        self.verifier_command = tuple(str(item) for item in verifier_command or ())
+        self.model = next(
+            (str(os.environ.get(name) or "").strip() for name in LOCAL_CANDIDATE_MODEL_ENVS if str(os.environ.get(name) or "").strip()),
+            "",
+        )
+        self.model_chain = [self.model] if self.model else []
+
+    def _worker_binding(self) -> dict[str, Any] | None:
+        from nexus.services.model_workforce_policy import WorkforcePolicyLoader
+
+        for worker in WorkforcePolicyLoader().load().workers.values():
+            if (
+                worker.provider == "ollama"
+                and worker.model == self.model
+                and "bounded_code_candidate" in worker.roles
+            ):
+                return {"worker_id": worker.worker_id, "controls": list(worker.requires)}
+        return None
+
+    def _fail(self, category: str, **extra: Any) -> LLMCandidateError:
+        metadata = {
+            "source": self.source,
+            "model_calls": int(extra.pop("model_calls", 0) or 0),
+            "model_name": self.model,
+            "tokens_used": 0,
+            "token_capture_status": "not_captured_local_lane",
+            **extra,
+        }
+        return LLMCandidateError(category, metadata)
+
+    def generate(
+        self,
+        *,
+        source_code: str,
+        task: str,
+        mutation_hint: str,
+        seed: int,
+        test_source: str = "",
+        codeintel_block: str = "",
+    ) -> tuple[str, dict[str, Any]]:
+        if not self.model:
+            raise self._fail("local_model_unbound")
+        if not self.target_file or Path(self.target_file).is_absolute():
+            raise self._fail("local_target_must_be_relative")
+        if self.verifier_command:
+            verifier_command = self.verifier_command
+        elif self.test_file and (self.project_root / self.test_file).is_file():
+            verifier_command = (sys.executable, "-m", "pytest", "-q", self.test_file)
+        else:
+            # The armored lane verifies every candidate; without a focused test there is no verifier.
+            raise self._fail("local_channel_requires_test_file")
+        worker = self._worker_binding()
+        if worker is None:
+            raise self._fail("local_worker_not_registered")
+
+        from nexus.services.local_assist_service import (
+            REQUEST_SCHEMA,
+            LocalAssistRequest,
+            LocalAssistService,
+            build_planner_snapshot,
+        )
+        from nexus.services.mainchain_entry import run_mainchain
+        from nexus.services.runtime_compat import UnifiedRuntimeRequest
+
+        digest = hashlib.sha256(
+            f"{task}\n{self.target_file}\n{self.project_root}".encode("utf-8")
+        ).hexdigest()[:12]
+        task_id = f"sprint-local-{digest}-s{int(seed)}"
+        statement = task if not mutation_hint else f"{task}\n\nCandidate focus: {mutation_hint}"
+        snapshot = build_planner_snapshot(
+            task_statement=statement, model=self.model, topology="localheal_pipeline"
+        )
+        snapshot.update({"model_call_allowed": True, "mutation_allowed": True, "verifier_allowed": True})
+        local_request = LocalAssistRequest(
+            schema=REQUEST_SCHEMA,
+            task_id=task_id,
+            parent_task_id=task_id,
+            workspace_root=str(self.project_root),
+            workspace_revision=f"sprint-{digest}",
+            task_statement=statement,
+            action="verified-subtask",
+            allowed_files=(self.target_file,),
+            target_file=self.target_file,
+            target_symbol="",
+            evidence_refs=(f"sprint:{task_id}:local_request",),
+            verifier_command=verifier_command,
+            time_budget=240.0,
+            requested_role="candidate",
+            planner_snapshot=snapshot,
+        )
+        route = {
+            "recommended_flow": "local_only",
+            "online_policy": "deny",
+            "workspace_root": str(self.project_root),
+            "workforce_admission_enabled": True,
+            "workforce_bindings": {"local": worker},
+            "route_features": {"deterministic_verifier_available": True},
+        }
+        request = UnifiedRuntimeRequest(
+            task_id=task_id,
+            workspace_revision=f"sprint-{digest}",
+            task_statement=statement,
+            task_type="repair",
+            route=route,
+            online_enabled=False,
+            local_enabled=True,
+            local_request=local_request,
+            canonical_context={"execution_world": "local_armor"},
+        )
+        receipt_path = self.project_root / ".nexus" / "reports" / "unified_runtime" / f"{task_id}.json"
+        receipt = dict(
+            run_mainchain(
+                request,
+                online_invoker=_local_online_channel_disabled,
+                local_service=LocalAssistService(),
+                receipt_path=receipt_path,
+                with_nexus_armor=True,
+            )
+        )
+        local_stage = receipt.get("local") if isinstance(receipt.get("local"), dict) else {}
+        response = local_stage.get("response") if isinstance(local_stage.get("response"), dict) else {}
+        summary = response.get("candidate_summary") if isinstance(response.get("candidate_summary"), dict) else {}
+        model_calls = int(response.get("model_call_count", 0) or 0)
+        evidence = {
+            "unified_runtime_receipt": receipt,
+            "unified_runtime_status": str(receipt.get("terminal_status") or ""),
+            "unified_runtime_receipt_path": str(receipt_path),
+            "local_task_id": task_id,
+            "local_worker_id": str(worker.get("worker_id") or ""),
+            "local_candidate_hash": str(summary.get("selected_candidate_hash") or ""),
+            "local_isolated_workspace": str(summary.get("isolated_workspace") or ""),
+            "local_verifier_status": str((response.get("verifier_summary") or {}).get("verifier_status") or ""),
+        }
+        isolated = Path(str(summary.get("isolated_workspace") or ""))
+        delivered = (
+            str(local_stage.get("status") or "") == "SUCCEEDED"
+            and response.get("output_delivered") is True
+            and summary.get("patch_apply_status") == "applied"
+            and summary.get("selected_candidate_hash_matches_applied") is True
+            and isolated.is_dir()
+            and (isolated / self.target_file).is_file()
+        )
+        if not delivered:
+            raise self._fail(
+                str(response.get("fallback_reason") or local_stage.get("reason") or "local_candidate_not_delivered"),
+                model_calls=model_calls,
+                **evidence,
+            )
+        code = (isolated / self.target_file).read_text(encoding="utf-8")
+        return code, {
+            "source": self.source,
+            "model_calls": model_calls,
+            "quota_backoffs": 0,
+            "tokens_used": 0,
+            "token_capture_status": "not_captured_local_lane",
+            "model_name": self.model,
+            "model_patch_generated": code != source_code,
+            "llm_edit_protocol": "local_armor_verified_subtask",
+            **evidence,
+        }
 
 
 def _estimate_tokens(text: str) -> int:
@@ -930,7 +1127,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     start = time.time()
     policy = ResearchPolicy()
     scope_files = [config.target_file] + ([config.test_file] if config.test_file else [])
-    effective_timeout = compute_time_budget(config.timeout_sec)
+    _effective_timeout = compute_time_budget(config.timeout_sec)
     pytest_cmd = [sys.executable, "-m", "pytest", "-q", "--maxfail=1"] + ([config.test_file] if config.test_file else [])
 
     target_path = repo_root / config.target_file
@@ -979,17 +1176,26 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
 
         codeintel_block, codeintel_status = sprint_codeintel_block(repo_root, target_file=config.target_file)
 
-    llm_generator: Optional[LLMCandidateGenerator] = (
-        LLMCandidateGenerator(repo_root, config.safe_mode, target_file=config.target_file)
-        if llm_mode_effective
-        else None
-    )
+    llm_channel = str(config.llm_channel or "online").strip().lower()
+    if llm_channel not in {"online", "local"}:
+        raise ValueError(f"unsupported_llm_channel:{llm_channel}")
+    llm_generator: Optional[LLMCandidateGenerator | LocalArmorCandidateGenerator] = None
+    if llm_mode_effective and llm_channel == "local":
+        llm_generator = LocalArmorCandidateGenerator(
+            repo_root, target_file=config.target_file, test_file=config.test_file
+        )
+    elif llm_mode_effective:
+        llm_generator = LLMCandidateGenerator(repo_root, config.safe_mode, target_file=config.target_file)
     local_generator = LocalCandidateGenerator()
     # Local-first fast path: avoid heavy swarm sync when no external LLM is used.
     force_inplace_executor = os.environ.get("NEXUS_FORCE_INPLACE_EXECUTOR", "").strip().lower() in {"1", "true", "yes"}
     enable_local_swarm_executor = os.environ.get("NEXUS_ENABLE_LOCAL_SWARM_EXECUTOR", "").strip().lower() in {"1", "true", "yes"}
     executor_init_start = time.monotonic()
-    if (llm_mode_effective or enable_local_swarm_executor) and not force_inplace_executor:
+    # The local channel already isolates every model candidate (World C + isolated apply), so the
+    # sprint scores it in place instead of waiting on a swarm worktree.
+    if (
+        (llm_mode_effective and llm_channel != "local") or enable_local_swarm_executor
+    ) and not force_inplace_executor:
         executor_selected = "swarm"
         executor = SprintExecutor(
             repo_root,
@@ -1026,6 +1232,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         routing_min_pool = min(config.candidate_count, config.ddtree_max_candidates + 1)
     elif routing_autoreason_enabled and config.candidate_count > 1:
         routing_min_pool = 2
+    routing_min_pool = max(routing_min_pool, min(config.candidate_count, max(1, int(config.min_candidate_pool or 1))))
     model_calls = 0
     model_names: set[str] = set()
     model_patch_generated = False
@@ -1056,6 +1263,9 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         "memory_written": False,
         "arweave_tx_id": None,
         "learn_slo_guard": learn_slo_guard,
+        "llm_channel": llm_channel,
+        "llm_mode_requested": bool(config.llm_mode),
+        "llm_mode_effective": llm_mode_effective,
         "executor": {
             "selected": executor_selected,
             "forced_inplace": force_inplace_executor,
@@ -1136,7 +1346,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         feature_words = ("implement", "add", "create", "introduce", "support", "enable")
         
         is_feature = any(w in task_l for w in feature_words)
-        is_refactor = "refactor" in task_l
+        _is_refactor = "refactor" in task_l
         is_contract_repair = any(
             word in task_l
             for word in (
@@ -1521,7 +1731,8 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                     if isinstance(failure_receipt, dict):
                         unified_runtime_receipts.append(failure_receipt)
                     meta_model_calls = int(failure_meta.get("model_calls", 0) or 0)
-                    model_calls += meta_model_calls if meta_model_calls > 0 else 1
+                    # A generator that refused before any provider call reports model_calls=0.
+                    model_calls += meta_model_calls if (meta_model_calls > 0 or "model_calls" in failure_meta) else 1
                     meta_model_name = str(failure_meta.get("model_name") or "")
                     if meta_model_name:
                         model_names.add(meta_model_name)
@@ -2036,7 +2247,10 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     final_reason = "stage1_pass"
     disable_dayshift = os.environ.get("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "").strip().lower() in {"1", "true", "yes"}
     # Stage 2 is optional enhancement only. Core success must not depend on external quota.
-    if llm_mode_effective and "quota" not in error_codes and not disable_dayshift:
+    if llm_mode_effective and llm_channel == "local":
+        # DayShiftOptimizer scores with online gateway models; the local channel stops at stage 1.
+        final_reason = "stage1_pass_local_channel"
+    elif llm_mode_effective and "quota" not in error_codes and not disable_dayshift:
         swarm_dir = SwarmBroker(repo_root).acquire(timeout_sec=config.timeout_sec)
         if swarm_dir:
             try:

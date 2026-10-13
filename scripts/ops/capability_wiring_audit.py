@@ -1570,28 +1570,101 @@ def neg_research(pos: Obs, neg: Obs) -> Check:
 
 
 def build_hyper(ws: Path, variant: str) -> Scenario:
-    def check(_ws: Path, obs: Obs) -> list[Check]:
+    # Local channel: every model candidate is a verified-subtask of the Workforce-admitted ollama
+    # worker (armored local lane, M5 endpoint); the sprint re-scores it with its own pytest run.
+    # The negative variant drops the test file, so the local channel has no verifier and must not
+    # call the model.
+    original_hash = sha256_file(ws / "pricing.py")
+    codeintel: dict[str, Any] = {
+        "hyper_candidate_count": 3,
+        "hyper_min_candidate_pool": 2,
+        "hyper_target_file": "pricing.py",
+        "hyper_llm_mode": True,
+        "hyper_llm_channel": "local",
+    }
+    if variant == "positive":
+        codeintel["hyper_test_file"] = "test_pricing.py"
+
+    def check(root: Path, obs: Obs) -> list[Check]:
         result = _result(obs)
-        text = f"SprintResult(status={result.get('status')!r}, attempt_count={result.get('attempt_count')})"
-        attempts = re.search(r"attempt_count=(\d+)", text)
+        candidates = [c for c in obs.outcome.get("candidates") or [] if isinstance(c, Mapping)]
+        model_ok = [
+            c
+            for c in candidates
+            if str(c.get("source") or "").startswith("llm") and float(c.get("score") or 0) >= 1.0
+        ]
+        local_runs = [
+            u
+            for u in obs.outcome.get("unified_runtime_receipts") or []
+            if isinstance(u, Mapping) and u.get("local_status") == "SUCCEEDED"
+        ]
         return [
             Check(
                 "sprint_status_success",
-                "status='SUCCESS'" in text or "status='SUCCEEDED'" in text,
-                text[:120],
+                str(result.get("status") or "").upper() in {"SUCCESS", "SUCCEEDED"},
+                f"status={result.get('status')} reason={result.get('reason')}",
             ),
             Check(
                 "sprint_produced_at_least_two_candidates",
-                bool(attempts) and int(attempts.group(1)) >= 2,
-                f"attempt_count={attempts.group(1) if attempts else 'n/a'}",
+                int(result.get("attempt_count") or 0) >= 2,
+                f"attempt_count={result.get('attempt_count')}",
+            ),
+            Check(
+                "llm_mode_effective_local_channel",
+                obs.outcome.get("llm_mode_effective") is True
+                and obs.outcome.get("llm_channel") == "local",
+                f"llm_mode_effective={obs.outcome.get('llm_mode_effective')} channel={obs.outcome.get('llm_channel')} guard={obs.outcome.get('learn_slo_guard')}",
+            ),
+            Check(
+                "model_candidate_verified_by_sprint_pytest",
+                bool(model_ok) and int(obs.outcome.get("model_calls") or 0) >= 1,
+                f"model_verified={len(model_ok)} model_calls={obs.outcome.get('model_calls')} sources={[c.get('source') for c in candidates]}",
+            ),
+            Check(
+                "local_lane_runs_succeeded",
+                bool(local_runs),
+                f"local unified runs={len(local_runs)}",
+            ),
+            Check(
+                "target_file_restored_after_scoring",
+                sha256_file(root / "pricing.py") == original_hash,
+                "pricing.py hash unchanged",
             ),
         ]
 
     return Scenario(
-        statement="Improve the README wording of the hyper fixture",
+        statement=(
+            "Fix apply_discount in pricing.py: the percent must be divided by 100, not 10, "
+            "so test_pricing.py passes"
+        ),
         task_type="research",
-        codeintel={"hyper_candidate_count": 3, "hyper_target_file": "README.md"},
+        codeintel=codeintel,
+        # Same armor-on local switches as the Local stage rows, plus the documented benchmark
+        # override of the learn-phase SLO guard (a fresh fixture has no learn-phase history; without
+        # it the sprint silently drops llm_mode, which the receipt now reports).
+        # NEXUS_LOCAL_MODEL_CALL_ALLOWED stays with the policy attempts, so the production default
+        # attempt still runs without it.
+        extra_env={
+            **{
+                key: value
+                for key, value in local_stage_env(ws).items()
+                if key != "NEXUS_LOCAL_MODEL_CALL_ALLOWED"
+            },
+            "NEXUS_FORCE_LLM_DESPITE_LEARN_SLO": "1",
+        },
         check=check,
+    )
+
+
+def neg_hyper(pos: Obs, neg: Obs) -> Check:
+    neg_calls = int(neg.outcome.get("model_calls") or 0)
+    neg_status = str(neg.outcome.get("sprint_status") or "")
+    neg_runs = len(neg.outcome.get("unified_runtime_receipts") or [])
+    ok = pos.gate_passed and not neg.gate_passed and neg_calls == 0 and neg_runs == 0
+    return Check(
+        "negative_control:no_test_file_no_model_call",
+        ok,
+        f"neg.sprint_status={neg_status} neg.model_calls={neg_calls} neg.local_runs={neg_runs} neg.block_reason={neg.block_reason()}",
     )
 
 
@@ -1621,23 +1694,119 @@ def build_nightshift(ws: Path, variant: str) -> Scenario:
     )
 
 
+def _commit_fixture_repo(ws: Path) -> None:
+    """Swarm worktrees need a git workspace: commit the copied fixture to a scratch repository."""
+    git = ["git", "-c", "user.name=wiring-audit", "-c", "user.email=wiring-audit@invalid"]
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=ws, check=True)  # nosec B603 B607
+    subprocess.run([*git, "add", "-A"], cwd=ws, check=True)  # nosec B603 B607
+    subprocess.run([*git, "commit", "-q", "-m", "fixture"], cwd=ws, check=True)  # nosec B603 B607
+
+
 def build_swarm(ws: Path, variant: str) -> Scenario:
-    def check(_ws: Path, obs: Obs) -> list[Check]:
+    _commit_fixture_repo(ws)
+    if variant != "positive":
+        # Another task already holds calc.py: the run must stop at the lock, before any worktree.
+        lock = ws / ".nexus" / "multi_agent" / "locks" / "file_locks.json"
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_text(json.dumps({"locks": {"calc.py": "other-task"}}), encoding="utf-8")
+    original_hash = sha256_file(ws / "calc.py")
+
+    def check(root: Path, obs: Obs) -> list[Check]:
+        report = (
+            obs.outcome.get("swarm_report")
+            if isinstance(obs.outcome.get("swarm_report"), Mapping)
+            else {}
+        )
+        workers = [w for w in report.get("workers") or [] if isinstance(w, Mapping)]
+        commits = [str(w.get("commit") or "") for w in workers if w.get("commit")]
+        commits_exist = bool(commits) and all(
+            subprocess.run(  # nosec B603 B607
+                ["git", "cat-file", "-e", f"{sha}^{{commit}}"], cwd=root, capture_output=True
+            ).returncode
+            == 0
+            for sha in commits
+        )
+        integration = (
+            report.get("integration") if isinstance(report.get("integration"), Mapping) else {}
+        )
+        lock = report.get("lock") if isinstance(report.get("lock"), Mapping) else {}
         return [
             Check(
                 "swarm_executed_workers",
-                obs.outcome.get("action") not in {"cleanup", "probe"},
-                f"action={obs.outcome.get('action')}",
+                obs.outcome.get("action") == "run_bounded_swarm"
+                and int(obs.outcome.get("workers_executed") or 0) >= 2
+                and int(obs.outcome.get("model_calls") or 0) >= 1,
+                f"action={obs.outcome.get('action')} executed={obs.outcome.get('workers_executed')} model_calls={obs.outcome.get('model_calls')}",
             ),
             Check(
                 "no_construct_only_rejection",
                 obs.outcome.get("error") != "import_construct_not_execution",
                 f"error={obs.outcome.get('error')}",
             ),
+            Check(
+                "file_lock_held_then_released",
+                lock.get("held_by_this_task") is True and lock.get("released") is True,
+                f"lock={dict(lock)}",
+            ),
+            Check(
+                "worker_commits_in_object_store",
+                commits_exist and len(commits) >= 2,
+                f"commits={commits}",
+            ),
+            Check(
+                "winner_verified_by_repro",
+                (report.get("winner") or {}).get("verify_result") == "pass",
+                f"winner={report.get('winner')} results={[w.get('verify_result') for w in workers]}",
+            ),
+            Check(
+                "integration_offered_to_controlled_manager",
+                integration.get("attempted") is True
+                and "ControlledIntegrationManager" in str(integration.get("authority") or ""),
+                f"integration={dict(integration)}",
+            ),
+            Check(
+                "worktrees_removed_and_workspace_untouched",
+                sorted(report.get("worktrees_removed") or [])
+                == sorted(report.get("worktrees") or [])
+                and sha256_file(root / "calc.py") == original_hash,
+                f"worktrees={report.get('worktrees')} removed={report.get('worktrees_removed')}",
+            ),
         ]
 
     return Scenario(
-        statement="Coordinate two agents on the swarm fixture", task_type="research", check=check
+        statement="Coordinate two agents on the swarm fixture: fix add in calc.py so repro.py passes",
+        task_type="research",
+        codeintel={
+            "swarm_target_file": "calc.py",
+            "swarm_verify_script": "repro.py",
+            "swarm_parallelism": 2,
+        },
+        # Armor-on local switches of the Local stage rows (M5 endpoint); the model-call switch
+        # itself stays with the policy attempts.
+        extra_env={
+            key: value
+            for key, value in local_stage_env(ws).items()
+            if key != "NEXUS_LOCAL_MODEL_CALL_ALLOWED"
+        },
+        check=check,
+    )
+
+
+def neg_swarm(pos: Obs, neg: Obs) -> Check:
+    report = (
+        neg.outcome.get("swarm_report")
+        if isinstance(neg.outcome.get("swarm_report"), Mapping)
+        else {}
+    )
+    ok = (
+        "FILE_LOCK_CONFLICT" in neg.block_reason()
+        and not report.get("worktrees")
+        and int(neg.outcome.get("model_calls") or 0) == 0
+    )
+    return Check(
+        "negative_control:foreign_lock_blocks_before_worktrees",
+        ok,
+        f"neg.block_reason={neg.block_reason()} worktrees={report.get('worktrees')} lock={report.get('lock')}",
     )
 
 
@@ -2352,11 +2521,17 @@ def neg_harness_sensor(pos: Obs, neg: Obs) -> Check:
 
 
 def build_committee(ws: Path, variant: str) -> Scenario:
+    # Proposals name their proposer "proposer_id" (the canonical context seam rejects any
+    # "model" key). Each candidate patch is applied to its own workspace copy and judged by
+    # running repro.py there; only candidate-a (a + b) passes, so the committee must pick it.
     proposals = read_json(ws / "proposals.json")
     if variant != "positive":
         proposals = proposals[:1]
+    original_hash = sha256_file(ws / "calc.py")
 
-    def check(_ws: Path, obs: Obs) -> list[Check]:
+    def check(root: Path, obs: Obs) -> list[Check]:
+        results = [r for r in obs.outcome.get("execution_results") or [] if isinstance(r, Mapping)]
+        worlds = [Path(str(r.get("workspace") or "")) for r in results]
         return [
             Check(
                 "quorum_of_candidates",
@@ -2371,14 +2546,35 @@ def build_committee(ws: Path, variant: str) -> Scenario:
             Check(
                 "winner_or_abstain",
                 bool(obs.outcome.get("winner_id")) or obs.outcome.get("explicit_abstain") is True,
-                f"winner={obs.outcome.get('winner_id')}",
+                f"winner={obs.outcome.get('winner_id')} abstain={obs.outcome.get('explicit_abstain')}",
+            ),
+            Check(
+                "each_candidate_executed_in_own_copy",
+                len(results) >= 2
+                and all(r.get("apply_status") == "applied" for r in results)
+                and all(w.is_dir() and w.is_relative_to(root) for w in worlds),
+                f"apply={[r.get('apply_status') for r in results]} exit_codes={[r.get('exit_codes') for r in results]}",
+            ),
+            Check(
+                "winner_is_the_only_passing_candidate",
+                obs.outcome.get("winner_proposer_id") == "wiring-proposer-a"
+                and [r.get("verify_result") for r in results] == ["pass", "fail", "fail"],
+                f"winner_proposer={obs.outcome.get('winner_proposer_id')} results={[r.get('verify_result') for r in results]}",
+            ),
+            Check(
+                "workspace_untouched",
+                sha256_file(root / "calc.py") == original_hash,
+                "calc.py hash unchanged",
             ),
         ]
 
     return Scenario(
         statement="Pick between three independent candidate patches",
         task_type="repair",
-        codeintel={"committee_proposals": proposals},
+        codeintel={
+            "committee_proposals": proposals,
+            "committee_verify_commands": ["python3 repro.py"],
+        },
         check=check,
     )
 
@@ -3836,9 +4032,11 @@ _SPEC_LIST: list[CapSpec] = [
         "hyper",
         build_hyper,
         policies=(POLICY_PRODUCTION, POLICY_LOCAL_MODEL),
+        needs_model=True,
         hard_coded=("candidate_count=1", 'target_file="README.md"', "llm_mode=False"),
+        negative_check=neg_hyper,
         gaps=(
-            "executor config fixes candidate_count=1, target_file=README.md, llm_mode=False; outcome carries no semantic_status/evidence_refs so the invoker contract check always rejects it",
+            "the learn-phase SLO guard drops llm_mode on any workspace without learn-phase history (audit sets NEXUS_FORCE_LLM_DESPITE_LEARN_SLO=1; the receipt reports llm_mode_effective)",
         ),
     ),
     CapSpec(
@@ -3855,8 +4053,10 @@ _SPEC_LIST: list[CapSpec] = [
         "swarm",
         build_swarm,
         policies=(POLICY_PRODUCTION, POLICY_LOCAL_MODEL),
+        needs_model=True,
+        negative_check=neg_swarm,
         gaps=(
-            "executor only constructs BattleSwarm and calls cleanup() with empty lists; the P4 shallow-action guard then rejects it as import_construct_not_execution",
+            "integration through ControlledIntegrationManager needs persisted lifecycle authority (external acceptance bound to the candidate, consumed Owner approval grant, verified receipt); the executor never fabricates it, so a run stops BLOCKED at integration with the manager's refusal",
         ),
     ),
     CapSpec(
@@ -3864,6 +4064,8 @@ _SPEC_LIST: list[CapSpec] = [
         "swarm",
         build_swarm,
         policies=(POLICY_PRODUCTION, POLICY_LOCAL_MODEL),
+        needs_model=True,
+        negative_check=neg_swarm,
         gaps=("alias of swarm_multi_agent (same executor)",),
     ),
     CapSpec(
@@ -3973,7 +4175,7 @@ _SPEC_LIST: list[CapSpec] = [
         policies=(POLICY_PRODUCTION, POLICY_LOCAL_MODEL, POLICY_COMMITTEE_FLAG),
         negative_check=neg_committee,
         gaps=(
-            "each proposal needs a 'model' key but the canonical context seam forbids any key containing 'model' under codeintel, so proposals cannot reach the executor through UnifiedRuntime; the controller is also off unless NEXUS_USE_COMMITTEE=1",
+            "the controller is off unless NEXUS_USE_COMMITTEE=1; without committee_verify_commands the global VerifierRegistry is empty by default, so no verdict is recorded and the receipt fails",
         ),
     ),
     CapSpec(

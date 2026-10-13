@@ -288,7 +288,7 @@
         ],
         "result": {
           "findings": [
-            "{\"results\": [{\"id\": \"aws/mypy-boto3-athena\", \"name\": \"mypy-boto3-athena\", \"description\": \"mypy-boto3-athena type stubs for boto3 Athena clients, paginators, TypedDict request shapes, and editor/type-checker setup\", \"source\": \"maintainer\", \"tags\": [\"aws\", \"athena\", \"boto3\", \"type-stubs\", \"mypy\", \"pyright\", \"python\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"1.42.43\", \"path\": \"aws/docs/mypy-boto3-athena/python\", \"files\": [\"DOC.md\"], \"size\": 8953, \"lastUpdated\": \"2026-03-12\"}], \"recommendedVersion\": \"1.42.43\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 205}, {\"id\": \"spring-boot/spring-boot-actuator\", \"name\": \"spring-boot-actuator\", \"description\": \"Spring Boot Actuator 4.0.x — health checks, metrics, Prometheus, info endpoint, custom endpoints, and production monitoring\", \"source\": \"community\", \"tags\": [\"spring-boot-actuator\", \"monitoring\", \"health-check\", \"metrics\", \"prometheus\", \"production\", \"endpoints\"], \"languages\": [{\"language\": \"java\", \"versions\": [{\"version\": \"4.0.5\", \"path\": \"spring-boot/docs/actuator/java\", \"files\": [\"DOC.md\"], \"size\": 5877, \"lastUpdated\": \"2026-03-28\"}], \"recommendedVersion\": \"4.0.5\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 195}, {\"id\": \"babel/plugin-proposal-pipeline-operator\", \"name\": \"plugin-proposal-pipeline-operator\", \"description\": \"Configure Babel 7 to compile the pipeline operator proposal with minimal, F#, or Hack-style syntax\", \"source\": \"maintainer\", \"tags\": [\"babel\", \"build\", \"javascript\", \"pipeline-operator\", \"syntax\", \"proposal\"], \"languages\": [{\"language\": \"javascript\", \"versions\": [{\"version\": \"7.28.6\", \"path\": \"babel/docs/plugin-proposal-pipeline-operator/javascript\", \"files\": [\"DOC.md\"], \"size\": 5833, \"lastUpdated\": \"2026-03-13\"}], \"recommendedVersion\": \"7.28.6\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 170}, {\"id\": \"together/package\", \"name\": \"package\", \"description\": \"Together Python SDK for chat, completions, embeddings, images, rerank, and fine-tuning\", \"source\": \"maintainer\", \"tags\": [\"together\", \"python\", \"llm\", \"chat\", \"embeddings\", \"images\", \"rerank\", \"fine-tuning\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"2.16.0\", \"path\": \"together/docs/package/python\", \"files\": [\"DOC.md\"], \"size\": 7793, \"lastUpdated\": \"2026-05-29\"}], \"recommendedVersion\": \"2.16.0\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 170}, {\"id\": \"azure/mgmt-applicationinsights\", \"name\": \"mgmt-applicationinsights\", \"description\": \"Azure Application Insights management SDK for Python for ARM components, billing and quota settings, web tests, and workbooks\", \"source\": \"maintainer\", \"tags\": [\"azure\", \"application-insights\", \"monitoring\", \"arm\", \"workbooks\", \"synthetics\", \"python\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"4.1.0\", \"path\": \"azure/docs/mgmt-applicationinsights/python\", \"files\": [\"DOC.md\"], \"size\": 10982, \"lastUpdated\": \"2026-03-13\"}], \"recommendedVersion\": \"4.1.0\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 160}], \"total\": 5, \"query\": \"How does compute_total apply the discount in the fixture?\\n\\nNexus route oracle contract:\\n- Expected capability receipts: research. (provide a concise summary only, limit to 300 words)\"}"
+            "{\"results\": [{\"id\": \"aws/mypy-boto3-athena\", \"name\": \"mypy-boto3-athena\", \"description\": \"mypy-boto3-athena type stubs for boto3 Athena clients, paginators, TypedDict request shapes, and editor/type-checker setup\", \"source\": \"maintainer\", \"tags\": [\"aws\", \"athena\", \"boto3\", \"type-stubs\", \"mypy\", \"pyright\", \"python\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"1.42.43\", \"path\": \"aws/docs/mypy-boto3-athena/python\", \"files\": [\"DOC.md\"], \"size\": 8953, \"lastUpdated\": \"2026-03-12\"}], \"recommendedVersion\": \"1.42.43\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 205}, {\"id\": \"spring-boot/spring-boot-actuator\", \"name\": \"spring-boot-actuator\", \"description\": \"Spring Boot Actuator 4.0.x \u2014 health checks, metrics, Prometheus, info endpoint, custom endpoints, and production monitoring\", \"source\": \"community\", \"tags\": [\"spring-boot-actuator\", \"monitoring\", \"health-check\", \"metrics\", \"prometheus\", \"production\", \"endpoints\"], \"languages\": [{\"language\": \"java\", \"versions\": [{\"version\": \"4.0.5\", \"path\": \"spring-boot/docs/actuator/java\", \"files\": [\"DOC.md\"], \"size\": 5877, \"lastUpdated\": \"2026-03-28\"}], \"recommendedVersion\": \"4.0.5\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 195}, {\"id\": \"babel/plugin-proposal-pipeline-operator\", \"name\": \"plugin-proposal-pipeline-operator\", \"description\": \"Configure Babel 7 to compile the pipeline operator proposal with minimal, F#, or Hack-style syntax\", \"source\": \"maintainer\", \"tags\": [\"babel\", \"build\", \"javascript\", \"pipeline-operator\", \"syntax\", \"proposal\"], \"languages\": [{\"language\": \"javascript\", \"versions\": [{\"version\": \"7.28.6\", \"path\": \"babel/docs/plugin-proposal-pipeline-operator/javascript\", \"files\": [\"DOC.md\"], \"size\": 5833, \"lastUpdated\": \"2026-03-13\"}], \"recommendedVersion\": \"7.28.6\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 170}, {\"id\": \"together/package\", \"name\": \"package\", \"description\": \"Together Python SDK for chat, completions, embeddings, images, rerank, and fine-tuning\", \"source\": \"maintainer\", \"tags\": [\"together\", \"python\", \"llm\", \"chat\", \"embeddings\", \"images\", \"rerank\", \"fine-tuning\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"2.16.0\", \"path\": \"together/docs/package/python\", \"files\": [\"DOC.md\"], \"size\": 7793, \"lastUpdated\": \"2026-05-29\"}], \"recommendedVersion\": \"2.16.0\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 170}, {\"id\": \"azure/mgmt-applicationinsights\", \"name\": \"mgmt-applicationinsights\", \"description\": \"Azure Application Insights management SDK for Python for ARM components, billing and quota settings, web tests, and workbooks\", \"source\": \"maintainer\", \"tags\": [\"azure\", \"application-insights\", \"monitoring\", \"arm\", \"workbooks\", \"synthetics\", \"python\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"4.1.0\", \"path\": \"azure/docs/mgmt-applicationinsights/python\", \"files\": [\"DOC.md\"], \"size\": 10982, \"lastUpdated\": \"2026-03-13\"}], \"recommendedVersion\": \"4.1.0\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 160}], \"total\": 5, \"query\": \"How does compute_total apply the discount in the fixture?\\n\\nNexus route oracle contract:\\n- Expected capability receipts: research. (provide a concise summary only, limit to 300 words)\"}"
           ],
           "source": "chub",
           "status": "SUCCESS",
@@ -412,7 +412,7 @@
         ],
         "result": {
           "findings": [
-            "{\"results\": [{\"id\": \"aws/mypy-boto3-athena\", \"name\": \"mypy-boto3-athena\", \"description\": \"mypy-boto3-athena type stubs for boto3 Athena clients, paginators, TypedDict request shapes, and editor/type-checker setup\", \"source\": \"maintainer\", \"tags\": [\"aws\", \"athena\", \"boto3\", \"type-stubs\", \"mypy\", \"pyright\", \"python\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"1.42.43\", \"path\": \"aws/docs/mypy-boto3-athena/python\", \"files\": [\"DOC.md\"], \"size\": 8953, \"lastUpdated\": \"2026-03-12\"}], \"recommendedVersion\": \"1.42.43\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 205}, {\"id\": \"spring-boot/spring-boot-actuator\", \"name\": \"spring-boot-actuator\", \"description\": \"Spring Boot Actuator 4.0.x — health checks, metrics, Prometheus, info endpoint, custom endpoints, and production monitoring\", \"source\": \"community\", \"tags\": [\"spring-boot-actuator\", \"monitoring\", \"health-check\", \"metrics\", \"prometheus\", \"production\", \"endpoints\"], \"languages\": [{\"language\": \"java\", \"versions\": [{\"version\": \"4.0.5\", \"path\": \"spring-boot/docs/actuator/java\", \"files\": [\"DOC.md\"], \"size\": 5877, \"lastUpdated\": \"2026-03-28\"}], \"recommendedVersion\": \"4.0.5\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 195}, {\"id\": \"babel/plugin-proposal-pipeline-operator\", \"name\": \"plugin-proposal-pipeline-operator\", \"description\": \"Configure Babel 7 to compile the pipeline operator proposal with minimal, F#, or Hack-style syntax\", \"source\": \"maintainer\", \"tags\": [\"babel\", \"build\", \"javascript\", \"pipeline-operator\", \"syntax\", \"proposal\"], \"languages\": [{\"language\": \"javascript\", \"versions\": [{\"version\": \"7.28.6\", \"path\": \"babel/docs/plugin-proposal-pipeline-operator/javascript\", \"files\": [\"DOC.md\"], \"size\": 5833, \"lastUpdated\": \"2026-03-13\"}], \"recommendedVersion\": \"7.28.6\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 170}, {\"id\": \"together/package\", \"name\": \"package\", \"description\": \"Together Python SDK for chat, completions, embeddings, images, rerank, and fine-tuning\", \"source\": \"maintainer\", \"tags\": [\"together\", \"python\", \"llm\", \"chat\", \"embeddings\", \"images\", \"rerank\", \"fine-tuning\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"2.16.0\", \"path\": \"together/docs/package/python\", \"files\": [\"DOC.md\"], \"size\": 7793, \"lastUpdated\": \"2026-05-29\"}], \"recommendedVersion\": \"2.16.0\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 170}, {\"id\": \"azure/mgmt-applicationinsights\", \"name\": \"mgmt-applicationinsights\", \"description\": \"Azure Application Insights management SDK for Python for ARM components, billing and quota settings, web tests, and workbooks\", \"source\": \"maintainer\", \"tags\": [\"azure\", \"application-insights\", \"monitoring\", \"arm\", \"workbooks\", \"synthetics\", \"python\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"4.1.0\", \"path\": \"azure/docs/mgmt-applicationinsights/python\", \"files\": [\"DOC.md\"], \"size\": 10982, \"lastUpdated\": \"2026-03-13\"}], \"recommendedVersion\": \"4.1.0\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 160}], \"total\": 5, \"query\": \"How does compute_total apply the discount in the fixture?\\n\\nNexus route oracle contract:\\n- Expected capability receipts: research_route. (provide a concise summary only, limit to 300 words)\"}"
+            "{\"results\": [{\"id\": \"aws/mypy-boto3-athena\", \"name\": \"mypy-boto3-athena\", \"description\": \"mypy-boto3-athena type stubs for boto3 Athena clients, paginators, TypedDict request shapes, and editor/type-checker setup\", \"source\": \"maintainer\", \"tags\": [\"aws\", \"athena\", \"boto3\", \"type-stubs\", \"mypy\", \"pyright\", \"python\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"1.42.43\", \"path\": \"aws/docs/mypy-boto3-athena/python\", \"files\": [\"DOC.md\"], \"size\": 8953, \"lastUpdated\": \"2026-03-12\"}], \"recommendedVersion\": \"1.42.43\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 205}, {\"id\": \"spring-boot/spring-boot-actuator\", \"name\": \"spring-boot-actuator\", \"description\": \"Spring Boot Actuator 4.0.x \u2014 health checks, metrics, Prometheus, info endpoint, custom endpoints, and production monitoring\", \"source\": \"community\", \"tags\": [\"spring-boot-actuator\", \"monitoring\", \"health-check\", \"metrics\", \"prometheus\", \"production\", \"endpoints\"], \"languages\": [{\"language\": \"java\", \"versions\": [{\"version\": \"4.0.5\", \"path\": \"spring-boot/docs/actuator/java\", \"files\": [\"DOC.md\"], \"size\": 5877, \"lastUpdated\": \"2026-03-28\"}], \"recommendedVersion\": \"4.0.5\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 195}, {\"id\": \"babel/plugin-proposal-pipeline-operator\", \"name\": \"plugin-proposal-pipeline-operator\", \"description\": \"Configure Babel 7 to compile the pipeline operator proposal with minimal, F#, or Hack-style syntax\", \"source\": \"maintainer\", \"tags\": [\"babel\", \"build\", \"javascript\", \"pipeline-operator\", \"syntax\", \"proposal\"], \"languages\": [{\"language\": \"javascript\", \"versions\": [{\"version\": \"7.28.6\", \"path\": \"babel/docs/plugin-proposal-pipeline-operator/javascript\", \"files\": [\"DOC.md\"], \"size\": 5833, \"lastUpdated\": \"2026-03-13\"}], \"recommendedVersion\": \"7.28.6\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 170}, {\"id\": \"together/package\", \"name\": \"package\", \"description\": \"Together Python SDK for chat, completions, embeddings, images, rerank, and fine-tuning\", \"source\": \"maintainer\", \"tags\": [\"together\", \"python\", \"llm\", \"chat\", \"embeddings\", \"images\", \"rerank\", \"fine-tuning\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"2.16.0\", \"path\": \"together/docs/package/python\", \"files\": [\"DOC.md\"], \"size\": 7793, \"lastUpdated\": \"2026-05-29\"}], \"recommendedVersion\": \"2.16.0\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 170}, {\"id\": \"azure/mgmt-applicationinsights\", \"name\": \"mgmt-applicationinsights\", \"description\": \"Azure Application Insights management SDK for Python for ARM components, billing and quota settings, web tests, and workbooks\", \"source\": \"maintainer\", \"tags\": [\"azure\", \"application-insights\", \"monitoring\", \"arm\", \"workbooks\", \"synthetics\", \"python\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"4.1.0\", \"path\": \"azure/docs/mgmt-applicationinsights/python\", \"files\": [\"DOC.md\"], \"size\": 10982, \"lastUpdated\": \"2026-03-13\"}], \"recommendedVersion\": \"4.1.0\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 160}], \"total\": 5, \"query\": \"How does compute_total apply the discount in the fixture?\\n\\nNexus route oracle contract:\\n- Expected capability receipts: research_route. (provide a concise summary only, limit to 300 words)\"}"
           ],
           "source": "chub",
           "status": "SUCCESS",
@@ -434,10 +434,10 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_hyper_sprint",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 1332
+        "line": 1129
       },
       "gaps": [
-        "executor config fixes candidate_count=1, target_file=README.md, llm_mode=False; outcome carries no semantic_status/evidence_refs so the invoker contract check always rejects it"
+        "the learn-phase SLO guard drops llm_mode on any workspace without learn-phase history (audit sets NEXUS_FORCE_LLM_DESPITE_LEARN_SLO=1; the receipt reports llm_mode_effective)"
       ],
       "untriggered_production_default": {
         "status": "SKIPPED",
@@ -461,7 +461,7 @@
           "artifact_gate",
           "claim_gate"
         ],
-        "plan_hash": "68990d7a938ca48498c925df4aa5b2a6804e73e547ae3a906ecfcf97ecec79bd",
+        "plan_hash": "922d0d2f981db5389db1e9337b3533ee4574e76dfd82b67785f36756e7d59755",
         "forcing": "route-oracle line 'Expected capability receipts: hyper' in task_statement"
       },
       "policy_attempts": [
@@ -477,9 +477,9 @@
           "env": {
             "NEXUS_LOCAL_MODEL_CALL_ALLOWED": "1"
           },
-          "status": "BLOCKED",
+          "status": "SUCCEEDED",
           "path": "e2e",
-          "block_reason": "semantic_status=FAILED"
+          "block_reason": ""
         }
       ],
       "product_path_reachable": true,
@@ -498,69 +498,137 @@
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_hyper_sprint_17a9ba90"
+        "ev_cap_hyper_sprint_9e0dd752"
       ],
       "physical_callable": "capability_executor_registry:hyper_sprint",
       "console_tail": [
-        "⚠️ [MemPalace] Ethical blacklist file missing: /Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/hyper__pos_local_model_call_allowed/nexus/config/ethical_blacklist.js"
+        "\u26a0\ufe0f [MemPalace] Ethical blacklist file missing: /Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/hyper__pos_local_model_call_allowed/nexus/config/ethical_blacklist.json"
       ],
+      "negative_control": {
+        "name": "negative_control:no_test_file_no_model_call",
+        "passed": true,
+        "detail": "neg.sprint_status=FAILED neg.model_calls=0 neg.local_runs=0 neg.block_reason=semantic_status=FAILED",
+        "negative_status": "BLOCKED",
+        "negative_block_reason": "semantic_status=FAILED"
+      },
       "hard_coded_inputs": [],
       "checks": [
         {
           "name": "sprint_status_success",
-          "passed": false,
-          "detail": "SprintResult(status='FAILED', attempt_count=3)"
+          "passed": true,
+          "detail": "status=SUCCESS reason=stage1_pass_local_channel"
         },
         {
           "name": "sprint_produced_at_least_two_candidates",
           "passed": true,
-          "detail": "attempt_count=3"
+          "detail": "attempt_count=2"
+        },
+        {
+          "name": "llm_mode_effective_local_channel",
+          "passed": true,
+          "detail": "llm_mode_effective=True channel=local guard={'phase_slo_pass': False, 'required_done_ratio': 0.0, 'active': True, 'reason': 'benchmark_force_llm_despite_learn_slo'}"
+        },
+        {
+          "name": "model_candidate_verified_by_sprint_pytest",
+          "passed": true,
+          "detail": "model_verified=2 model_calls=6 sources=['llm_local_armor', 'llm_local_armor']"
+        },
+        {
+          "name": "local_lane_runs_succeeded",
+          "passed": true,
+          "detail": "local unified runs=2"
+        },
+        {
+          "name": "target_file_restored_after_scoring",
+          "passed": true,
+          "detail": "pricing.py hash unchanged"
+        },
+        {
+          "name": "negative_control:no_test_file_no_model_call",
+          "passed": true,
+          "detail": "neg.sprint_status=FAILED neg.model_calls=0 neg.local_runs=0 neg.block_reason=semantic_status=FAILED"
         }
       ],
-      "verdict": "BLOCKED_semantic_status=FAILED",
-      "verdict_reason": "executor_or_runtime_blocked",
+      "verdict": "REAL",
+      "verdict_reason": "invoked_with_evidence_and_artifact_assertions_passed",
       "verdict_production_default": "BLOCKED_EXTERNAL_AUTH:local_or_online_model",
       "outcome_excerpt": {
         "action": "run_hyper_sprint",
-        "semantic_status": "FAILED",
+        "semantic_status": "SUCCEEDED",
         "evidence_refs": [
           "ev_hyper_sprint_wiring-hyper-pos_local_model_call_allowed"
         ],
         "result": {
-          "status": "FAILED",
-          "reason": "stage1_no_passing_candidate",
-          "target_file": "README.md",
-          "winner_source": "local",
-          "final_score": 0.0,
-          "elapsed_sec": 3.7521,
-          "attempt_count": 3,
-          "model_calls": 0,
-          "quota_backoffs": 0,
-          "test_timeouts": 0,
-          "total_tokens": 0,
-          "token_capture_status": "not_applicable_local_only",
-          "gateway_stats_present": false,
-          "gateway_usage_metadata_present": false,
-          "gateway_token_source": "missing",
-          "gateway_error_category": "",
-          "gateway_prompt_chars": 0,
-          "gateway_payload_chars": 0,
-          "gateway_total_chars": 0,
-          "gateway_timeout_sec": 0,
-          "gateway_total_sec": 0.0,
-          "gateway_invocation_build_sec": 0.0,
-          "gateway_process_sec": 0.0,
-          "gateway_provider_wait_sec": 0.0
+          "status": "SUCCESS",
+          "reason": "stage1_pass_local_channel",
+          "target_file": "pricing.py",
+          "winner_source": "llm_local_armor",
+          "final_score": 1.0,
+          "elapsed_sec": 54.0138,
+          "attempt_count": 2,
+          "model_calls": 6,
+          "model_name": "qwen2.5-coder:7b-instruct",
+          "model_patch_generated": true,
+          "fallback_used": false,
+          "error_codes": [],
+          "pytest_cmd": [
+            "/Users/jameschen/Workspace/Nexus-new/.venv/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "--maxfail=1",
+            "test_pricing.py"
+          ]
         },
-        "sprint_status": "FAILED",
-        "target_file": "README.md",
+        "sprint_status": "SUCCESS",
+        "target_file": "pricing.py",
+        "test_file": "test_pricing.py",
         "candidate_count": 3,
-        "llm_mode": false,
-        "attempt_count": 3,
+        "min_candidate_pool": 2,
+        "llm_mode": true,
+        "llm_channel": "local",
+        "llm_mode_effective": true,
+        "learn_slo_guard": {
+          "phase_slo_pass": false,
+          "required_done_ratio": 0.0,
+          "active": true,
+          "reason": "benchmark_force_llm_despite_learn_slo"
+        },
+        "attempt_count": 2,
+        "model_calls": 6,
+        "candidates": [
+          {
+            "seed": 0,
+            "source": "llm_local_armor",
+            "score": 1.0,
+            "rejection": "",
+            "code_sha256": "f87a514ed53bb6036b37097e716358b021c810aabbf9a871ada0ca6e2fbe50ee"
+          },
+          {
+            "seed": 1,
+            "source": "llm_local_armor",
+            "score": 1.0,
+            "rejection": "",
+            "code_sha256": "f87a514ed53bb6036b37097e716358b021c810aabbf9a871ada0ca6e2fbe50ee"
+          }
+        ],
+        "model_verified_candidate_count": 2,
+        "unified_runtime_receipts": [
+          {
+            "task_id": "sprint-local-cb19613bdb2a-s0",
+            "terminal_status": "INCOMPLETE",
+            "local_status": "SUCCEEDED"
+          },
+          {
+            "task_id": "sprint-local-cb19613bdb2a-s1",
+            "terminal_status": "INCOMPLETE",
+            "local_status": "SUCCEEDED"
+          }
+        ],
         "physical_callable": "nexus.research.sprint_service.run_hyper_sprint"
       },
       "receipt_path": "receipts/hyper.json",
-      "audit_seconds": 4.37
+      "audit_seconds": 70.0
     },
     {
       "capability": "nightshift",
@@ -617,7 +685,7 @@
           },
           "status": "BLOCKED",
           "path": "e2e",
-          "block_reason": "semantic_status=BLOCKED(terminal_status=FAILED):console:❌ [NightShift] Blocked by Phase Policy: PassRate=0.0%, Task=bug, Risk=standard. DenyResearch. SLO=phase_slo_summary_missing."
+          "block_reason": "semantic_status=BLOCKED(terminal_status=FAILED):console:\u274c [NightShift] Blocked by Phase Policy: PassRate=0.0%, Task=bug, Risk=standard. DenyResearch. SLO=phase_slo_summary_missing."
         }
       ],
       "product_path_reachable": true,
@@ -640,7 +708,7 @@
       ],
       "physical_callable": "capability_executor_registry:nightshift",
       "console_tail": [
-        "❌ [NightShift] Blocked by Phase Policy: PassRate=0.0%, Task=bug, Risk=standard. DenyResearch. SLO=phase_slo_summary_missing."
+        "\u274c [NightShift] Blocked by Phase Policy: PassRate=0.0%, Task=bug, Risk=standard. DenyResearch. SLO=phase_slo_summary_missing."
       ],
       "hard_coded_inputs": [],
       "checks": [
@@ -655,7 +723,7 @@
           "detail": "terminal_success=False"
         }
       ],
-      "verdict": "BLOCKED_semantic_status=BLOCKED(terminal_status=FAILED):console:❌ [NightShift] Blocked by Phase Policy: PassRate=0.0%, Task=bug, Risk=standard. DenyResearch. SLO=phase_slo_summary_missing.",
+      "verdict": "BLOCKED_semantic_status=BLOCKED(terminal_status=FAILED):console:\u274c [NightShift] Blocked by Phase Policy: PassRate=0.0%, Task=bug, Risk=standard. DenyResearch. SLO=phase_slo_summary_missing.",
       "verdict_reason": "executor_or_runtime_blocked",
       "verdict_production_default": "BLOCKED_EXTERNAL_AUTH:nightshift_model",
       "outcome_excerpt": {
@@ -685,10 +753,10 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_swarm_multi_agent",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 1427
+        "line": 1287
       },
       "gaps": [
-        "executor only constructs BattleSwarm and calls cleanup() with empty lists; the P4 shallow-action guard then rejects it as import_construct_not_execution"
+        "integration through ControlledIntegrationManager needs persisted lifecycle authority (external acceptance bound to the candidate, consumed Owner approval grant, verified receipt); the executor never fabricates it, so a run stops BLOCKED at integration with the manager's refusal"
       ],
       "untriggered_production_default": {
         "status": "SKIPPED",
@@ -715,7 +783,7 @@
           "artifact_gate",
           "claim_gate"
         ],
-        "plan_hash": "89e8216843b0493e9eec5b687981d1c77e129b372e79a51f06956768f8ee9537",
+        "plan_hash": "d95b280152bbdfcd91845450a76cee144635a5439f4585190145b6cca2fd8446",
         "forcing": "route-oracle line 'Expected capability receipts: swarm' in task_statement"
       },
       "policy_attempts": [
@@ -733,7 +801,7 @@
           },
           "status": "BLOCKED",
           "path": "e2e",
-          "block_reason": "BLOCKED_EXECUTOR_UNAVAILABLE:import_construct_not_execution"
+          "block_reason": "INTEGRATION_OWNER_AUTHORITY_REQUIRED"
         }
       ],
       "product_path_reachable": true,
@@ -752,34 +820,165 @@
       "receipt_claims_simulated": true,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_swarm_multi_agent_5595ca15"
+        "ev_cap_swarm_multi_agent_1d9407e0"
       ],
       "physical_callable": "capability_executor_registry:swarm_multi_agent",
-      "console_tail": [],
+      "console_tail": [
+        "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC/nexus/contracts/lifecycle_action.py:330: UserWarning: Field name \"schema\" in \"LifecycleActionEnvelope\" shadows an attribute in parent \"BaseModel\"",
+        "  class LifecycleActionEnvelope(BaseModel):",
+        "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC/nexus/contracts/lifecycle_action.py:417: UserWarning: Field name \"schema\" in \"ExternalCandidateAdoptionRequest\" shadows an attribute in parent \"BaseModel\"",
+        "  class ExternalCandidateAdoptionRequest(BaseModel):",
+        "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC/nexus/contracts/autonomy_goal.py:115: UserWarning: Field name \"schema\" in \"StandingGrantContext\" shadows an attribute in parent \"_FrozenModel\"",
+        "  class StandingGrantContext(_FrozenModel):",
+        "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC/nexus/contracts/autonomy_goal.py:269: UserWarning: Field name \"schema\" in \"AutonomyGoalGrantSpec\" shadows an attribute in parent \"_FrozenModel\"",
+        "  class AutonomyGoalGrantSpec(_FrozenModel):",
+        "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC/nexus/contracts/collaboration_realm.py:101: UserWarning: Field name \"schema\" in \"CollaborationExecutionRealmSpec\" shadows an attribute in parent \"_FrozenModel\"",
+        "  class CollaborationExecutionRealmSpec(_FrozenModel):"
+      ],
+      "negative_control": {
+        "name": "negative_control:foreign_lock_blocks_before_worktrees",
+        "passed": true,
+        "detail": "neg.block_reason=FILE_LOCK_CONFLICT worktrees=None lock={'lock_file': '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/swarm__neg/.nexus/multi_agent/locks/file_locks.json', 'files': ['calc.py'], 'conflicts': ['calc.py'], 'held_by_this_task': False}",
+        "negative_status": "BLOCKED",
+        "negative_block_reason": "FILE_LOCK_CONFLICT"
+      },
       "hard_coded_inputs": [],
       "checks": [
         {
           "name": "swarm_executed_workers",
-          "passed": false,
-          "detail": "action=cleanup"
+          "passed": true,
+          "detail": "action=run_bounded_swarm executed=2 model_calls=6"
         },
         {
           "name": "no_construct_only_rejection",
-          "passed": false,
-          "detail": "error=import_construct_not_execution"
+          "passed": true,
+          "detail": "error=INTEGRATION_OWNER_AUTHORITY_REQUIRED"
+        },
+        {
+          "name": "file_lock_held_then_released",
+          "passed": true,
+          "detail": "lock={'lock_file': '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/multi_agent/locks/file_locks.json', 'files': ['calc.py'], 'conflicts': [], 'held_by_this_task': True, 'released': True}"
+        },
+        {
+          "name": "worker_commits_in_object_store",
+          "passed": true,
+          "detail": "commits=['12527f35b05214b28ece7426d19c97873dcc830f', '36431cc34bb5992b9950e79ad4a571b860d04cc0']"
+        },
+        {
+          "name": "winner_verified_by_repro",
+          "passed": true,
+          "detail": "winner={'strategy': 'conservative', 'worktree': '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_conservative', 'commit': '36431cc34bb5992b9950e79ad4a571b860d04cc0', 'tree': '770e0013d7d744b401d8c4f9e676cb604edde31b', 'verify_result':"
+        },
+        {
+          "name": "integration_offered_to_controlled_manager",
+          "passed": true,
+          "detail": "integration={'authority': 'nexus.orchestrator.governed_integration.ControlledIntegrationManager.integrate_task_state', 'attempted': True, 'merge_performed': False, 'refusal': 'exact approved binding is required'}"
+        },
+        {
+          "name": "worktrees_removed_and_workspace_untouched",
+          "passed": true,
+          "detail": "worktrees=['/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_conservative', '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_s"
+        },
+        {
+          "name": "negative_control:foreign_lock_blocks_before_worktrees",
+          "passed": true,
+          "detail": "neg.block_reason=FILE_LOCK_CONFLICT worktrees=None lock={'lock_file': '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/swarm__neg/.nexus/multi_agent/locks/file_locks.json', 'files': ['calc.py'], 'conflicts': ['calc.py'], 'held_by_this_task': False}"
         }
       ],
-      "verdict": "BLOCKED_EXECUTOR_UNAVAILABLE:import_construct_not_execution",
+      "verdict": "BLOCKED_INTEGRATION_OWNER_AUTHORITY_REQUIRED",
       "verdict_reason": "executor_or_runtime_blocked",
       "verdict_production_default": "BLOCKED_EXTERNAL_AUTH:local_or_online_workers",
       "outcome_excerpt": {
-        "action": "cleanup",
-        "result": "{'cleaned': True}",
-        "error": "import_construct_not_execution",
-        "detail": "physical method call required; import/construct alone is insufficient"
+        "action": "run_bounded_swarm",
+        "semantic_status": "BLOCKED",
+        "evidence_refs": [
+          "ev_swarm_wiring-swarm-pos_local_model_call_allowed"
+        ],
+        "error": "INTEGRATION_OWNER_AUTHORITY_REQUIRED",
+        "swarm_report": {
+          "schema": "nexus.swarm_run.v1",
+          "task_id": "wiring-swarm-pos_local_model_call_allowed",
+          "workspace_root": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/swarm__pos_local_model_call_allowed",
+          "target_file": "calc.py",
+          "verify_script": "repro.py",
+          "lock": {
+            "lock_file": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/multi_agent/locks/file_locks.json",
+            "files": [
+              "calc.py"
+            ],
+            "conflicts": [],
+            "held_by_this_task": true,
+            "released": true
+          },
+          "workers": [
+            {
+              "strategy": "aggressive",
+              "worktree": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_aggressive",
+              "worker_status": "candidate_written",
+              "model_calls": 3,
+              "model_name": "qwen2.5-coder:7b-instruct",
+              "local_candidate_hash": "6e3cd5c1d45e5bae8c21839e0b556bf294182b0526d23b90e8d16fa6562cd31b",
+              "commit": "12527f35b05214b28ece7426d19c97873dcc830f",
+              "tree": "770e0013d7d744b401d8c4f9e676cb604edde31b",
+              "verify_exit_codes": [
+                0
+              ],
+              "verify_result": "pass",
+              "candidate_state_hash": "12527f35b05214b28ece7426d19c97873dcc830f"
+            },
+            {
+              "strategy": "conservative",
+              "worktree": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_conservative",
+              "worker_status": "candidate_written",
+              "model_calls": 3,
+              "model_name": "qwen2.5-coder:7b-instruct",
+              "local_candidate_hash": "6e3cd5c1d45e5bae8c21839e0b556bf294182b0526d23b90e8d16fa6562cd31b",
+              "commit": "36431cc34bb5992b9950e79ad4a571b860d04cc0",
+              "tree": "770e0013d7d744b401d8c4f9e676cb604edde31b",
+              "verify_exit_codes": [
+                0
+              ],
+              "verify_result": "pass",
+              "candidate_state_hash": "36431cc34bb5992b9950e79ad4a571b860d04cc0"
+            }
+          ],
+          "winner": {
+            "strategy": "conservative",
+            "worktree": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_conservative",
+            "commit": "36431cc34bb5992b9950e79ad4a571b860d04cc0",
+            "tree": "770e0013d7d744b401d8c4f9e676cb604edde31b",
+            "verify_result": "pass"
+          },
+          "integration": {
+            "authority": "nexus.orchestrator.governed_integration.ControlledIntegrationManager.integrate_task_state",
+            "attempted": true,
+            "merge_performed": false,
+            "refusal": "exact approved binding is required"
+          },
+          "status": "BLOCKED",
+          "reason": "INTEGRATION_OWNER_AUTHORITY_REQUIRED",
+          "base_commit": "199e46dc8ea3cf2541463e859bc1a92924c10117",
+          "worktrees": [
+            "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_conservative",
+            "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_aggressive"
+          ],
+          "branches": [
+            "battle_wiring-swarm-pos_local_model_call_allowed_conservative_0",
+            "battle_wiring-swarm-pos_local_model_call_allowed_aggressive_1"
+          ],
+          "worktrees_removed": [
+            "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_conservative",
+            "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/swarm__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-swarm-pos_local_model_call_allowed/worktree_aggressive"
+          ]
+        },
+        "worker_count": 2,
+        "workers_executed": 2,
+        "verified_workers": 2,
+        "model_calls": 6,
+        "physical_callable": "nexus.engine.swarm_run.run_bounded_swarm"
       },
       "receipt_path": "receipts/swarm.json",
-      "audit_seconds": 0.64
+      "audit_seconds": 39.73
     },
     {
       "capability": "multi_agent",
@@ -789,7 +988,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_swarm_multi_agent",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 1427
+        "line": 1287
       },
       "gaps": [
         "alias of swarm_multi_agent (same executor)"
@@ -817,7 +1016,7 @@
           "artifact_gate",
           "claim_gate"
         ],
-        "plan_hash": "3b7d2003fddbe090ea349a3a0be75308ebc3a8663ee9e16a0ce4e96cecb9d0f7",
+        "plan_hash": "e0a5ddc83a54a57bc3f2edf03c047f3badf08cbee583a7b057326bed1067ac67",
         "forcing": "route-oracle line 'Expected capability receipts: multi_agent' in task_statement"
       },
       "policy_attempts": [
@@ -835,7 +1034,7 @@
           },
           "status": "BLOCKED",
           "path": "e2e",
-          "block_reason": "BLOCKED_EXECUTOR_UNAVAILABLE:import_construct_not_execution"
+          "block_reason": "INTEGRATION_OWNER_AUTHORITY_REQUIRED"
         }
       ],
       "product_path_reachable": true,
@@ -854,34 +1053,154 @@
       "receipt_claims_simulated": true,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_swarm_multi_agent_bf8ad25c"
+        "ev_cap_swarm_multi_agent_02fac7db"
       ],
       "physical_callable": "capability_executor_registry:swarm_multi_agent",
       "console_tail": [],
+      "negative_control": {
+        "name": "negative_control:foreign_lock_blocks_before_worktrees",
+        "passed": true,
+        "detail": "neg.block_reason=FILE_LOCK_CONFLICT worktrees=None lock={'lock_file': '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/multi_agent__neg/.nexus/multi_agent/locks/file_locks.json', 'files': ['calc.py'], 'conflicts': ['calc.py'], 'held_by_this_task': False}",
+        "negative_status": "BLOCKED",
+        "negative_block_reason": "FILE_LOCK_CONFLICT"
+      },
       "hard_coded_inputs": [],
       "checks": [
         {
           "name": "swarm_executed_workers",
-          "passed": false,
-          "detail": "action=cleanup"
+          "passed": true,
+          "detail": "action=run_bounded_swarm executed=2 model_calls=8"
         },
         {
           "name": "no_construct_only_rejection",
-          "passed": false,
-          "detail": "error=import_construct_not_execution"
+          "passed": true,
+          "detail": "error=INTEGRATION_OWNER_AUTHORITY_REQUIRED"
+        },
+        {
+          "name": "file_lock_held_then_released",
+          "passed": true,
+          "detail": "lock={'lock_file': '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/multi_agent/locks/file_locks.json', 'files': ['calc.py'], 'conflicts': [], 'held_by_this_task': True, 'released': True}"
+        },
+        {
+          "name": "worker_commits_in_object_store",
+          "passed": true,
+          "detail": "commits=['e1d4315f7c10feb7e8608c87ce97ec166107a32e', '8ee8d311cdc1fce254b69cf4b87b28d62145bbc6']"
+        },
+        {
+          "name": "winner_verified_by_repro",
+          "passed": true,
+          "detail": "winner={'strategy': 'conservative', 'worktree': '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_conservative', 'commit': '8ee8d311cdc1fce254b69cf4b87b28d62145bbc6', 'tree': '82cde51b81e7c879388bff4939798d12cb68c6fb', 'ver"
+        },
+        {
+          "name": "integration_offered_to_controlled_manager",
+          "passed": true,
+          "detail": "integration={'authority': 'nexus.orchestrator.governed_integration.ControlledIntegrationManager.integrate_task_state', 'attempted': True, 'merge_performed': False, 'refusal': 'exact approved binding is required'}"
+        },
+        {
+          "name": "worktrees_removed_and_workspace_untouched",
+          "passed": true,
+          "detail": "worktrees=['/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_conservative', '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/multi_agent__pos_local_model_call_allowed/.n"
+        },
+        {
+          "name": "negative_control:foreign_lock_blocks_before_worktrees",
+          "passed": true,
+          "detail": "neg.block_reason=FILE_LOCK_CONFLICT worktrees=None lock={'lock_file': '/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/multi_agent__neg/.nexus/multi_agent/locks/file_locks.json', 'files': ['calc.py'], 'conflicts': ['calc.py'], 'held_by_this_task': False}"
         }
       ],
-      "verdict": "BLOCKED_EXECUTOR_UNAVAILABLE:import_construct_not_execution",
+      "verdict": "BLOCKED_INTEGRATION_OWNER_AUTHORITY_REQUIRED",
       "verdict_reason": "executor_or_runtime_blocked",
       "verdict_production_default": "BLOCKED_EXTERNAL_AUTH:local_or_online_workers",
       "outcome_excerpt": {
-        "action": "cleanup",
-        "result": "{'cleaned': True}",
-        "error": "import_construct_not_execution",
-        "detail": "physical method call required; import/construct alone is insufficient"
+        "action": "run_bounded_swarm",
+        "semantic_status": "BLOCKED",
+        "evidence_refs": [
+          "ev_swarm_wiring-multi_agent-pos_local_model_call_allowed"
+        ],
+        "error": "INTEGRATION_OWNER_AUTHORITY_REQUIRED",
+        "swarm_report": {
+          "schema": "nexus.swarm_run.v1",
+          "task_id": "wiring-multi_agent-pos_local_model_call_allowed",
+          "workspace_root": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/multi_agent__pos_local_model_call_allowed",
+          "target_file": "calc.py",
+          "verify_script": "repro.py",
+          "lock": {
+            "lock_file": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/multi_agent/locks/file_locks.json",
+            "files": [
+              "calc.py"
+            ],
+            "conflicts": [],
+            "held_by_this_task": true,
+            "released": true
+          },
+          "workers": [
+            {
+              "strategy": "aggressive",
+              "worktree": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_aggressive",
+              "worker_status": "candidate_written",
+              "model_calls": 3,
+              "model_name": "qwen2.5-coder:7b-instruct",
+              "local_candidate_hash": "6e3cd5c1d45e5bae8c21839e0b556bf294182b0526d23b90e8d16fa6562cd31b",
+              "commit": "e1d4315f7c10feb7e8608c87ce97ec166107a32e",
+              "tree": "770e0013d7d744b401d8c4f9e676cb604edde31b",
+              "verify_exit_codes": [
+                0
+              ],
+              "verify_result": "pass",
+              "candidate_state_hash": "e1d4315f7c10feb7e8608c87ce97ec166107a32e"
+            },
+            {
+              "strategy": "conservative",
+              "worktree": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_conservative",
+              "worker_status": "candidate_written",
+              "model_calls": 5,
+              "model_name": "qwen2.5-coder:7b-instruct",
+              "local_candidate_hash": "a38e1153fd828c17a0f6ffd9fe45d7a6b9299226e8c27ec65ef12c5f5a570994",
+              "commit": "8ee8d311cdc1fce254b69cf4b87b28d62145bbc6",
+              "tree": "82cde51b81e7c879388bff4939798d12cb68c6fb",
+              "verify_exit_codes": [
+                0
+              ],
+              "verify_result": "pass",
+              "candidate_state_hash": "8ee8d311cdc1fce254b69cf4b87b28d62145bbc6"
+            }
+          ],
+          "winner": {
+            "strategy": "conservative",
+            "worktree": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_conservative",
+            "commit": "8ee8d311cdc1fce254b69cf4b87b28d62145bbc6",
+            "tree": "82cde51b81e7c879388bff4939798d12cb68c6fb",
+            "verify_result": "pass"
+          },
+          "integration": {
+            "authority": "nexus.orchestrator.governed_integration.ControlledIntegrationManager.integrate_task_state",
+            "attempted": true,
+            "merge_performed": false,
+            "refusal": "exact approved binding is required"
+          },
+          "status": "BLOCKED",
+          "reason": "INTEGRATION_OWNER_AUTHORITY_REQUIRED",
+          "base_commit": "047a987f3ae10171e2546d3a535b225657f43171",
+          "worktrees": [
+            "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_conservative",
+            "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_aggressive"
+          ],
+          "branches": [
+            "battle_wiring-multi_agent-pos_local_model_call_allowed_conservative_0",
+            "battle_wiring-multi_agent-pos_local_model_call_allowed_aggressive_1"
+          ],
+          "worktrees_removed": [
+            "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_conservative",
+            "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/multi_agent__pos_local_model_call_allowed/.nexus/runs/battle_swarm/wiring-multi_agent-pos_local_model_call_allowed/worktree_aggressive"
+          ]
+        },
+        "worker_count": 2,
+        "workers_executed": 2,
+        "verified_workers": 2,
+        "model_calls": 8,
+        "physical_callable": "nexus.engine.swarm_run.run_bounded_swarm"
       },
       "receipt_path": "receipts/multi_agent.json",
-      "audit_seconds": 0.63
+      "audit_seconds": 65.22
     },
     {
       "capability": "drone",
@@ -2782,14 +3101,14 @@
       ],
       "physical_callable": "capability_executor_registry:forecast_pregate",
       "console_tail": [
-        "⚠️ [ASHLoader] Missing /Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/forecast_gate__pos_production_default/.nexus/ash_matrix.yaml, using defaults.",
-        "⚠️ [ASHTemplateLoader] Missing /Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/forecast_gate__pos_production_default/.nexus/ash_templates.yaml, using minimal built-",
-        "🚨 [Gate:Reject] POLICY_VIOLATION[D-ROI]: 0.01 below threshold 0.5. Strategy too expensive.! Triggering Adaptive Self-Healing...",
-        "🚨 [ASH:v24] Node [wiring-forecast_gate-pos_production_default] failed. Triggering adaptive repair...",
-        "🛡️ [ASHResolver] Mandatory regression_test missing, injecting default.",
-        "🛡️ [ASHResolver] Mandatory regression_test missing, injecting default.",
-        "❌ [ASHResolver] Unknown command ref: replan",
-        "⚠️ [ASHSelector] Skipping strategy [replan_swarm] due to resolution error: Unknown command ref: replan"
+        "\u26a0\ufe0f [ASHLoader] Missing /Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/forecast_gate__pos_production_default/.nexus/ash_matrix.yaml, using defaults.",
+        "\u26a0\ufe0f [ASHTemplateLoader] Missing /Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/forecast_gate__pos_production_default/.nexus/ash_templates.yaml, using minimal built-",
+        "\ud83d\udea8 [Gate:Reject] POLICY_VIOLATION[D-ROI]: 0.01 below threshold 0.5. Strategy too expensive.! Triggering Adaptive Self-Healing...",
+        "\ud83d\udea8 [ASH:v24] Node [wiring-forecast_gate-pos_production_default] failed. Triggering adaptive repair...",
+        "\ud83d\udee1\ufe0f [ASHResolver] Mandatory regression_test missing, injecting default.",
+        "\ud83d\udee1\ufe0f [ASHResolver] Mandatory regression_test missing, injecting default.",
+        "\u274c [ASHResolver] Unknown command ref: replan",
+        "\u26a0\ufe0f [ASHSelector] Skipping strategy [replan_swarm] due to resolution error: Unknown command ref: replan"
       ],
       "negative_control": {
         "name": "negative_control:low_risk_task_proceeds",
@@ -3265,15 +3584,15 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_committee",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 3180
+        "line": 2972
       },
       "gaps": [
-        "each proposal needs a 'model' key but the canonical context seam forbids any key containing 'model' under codeintel, so proposals cannot reach the executor through UnifiedRuntime; the controller is also off unless NEXUS_USE_COMMITTEE=1"
+        "the controller is off unless NEXUS_USE_COMMITTEE=1; without committee_verify_commands the global VerifierRegistry is empty by default, so no verdict is recorded and the receipt fails"
       ],
       "untriggered_production_default": {
-        "status": "MISSING",
-        "skip_reason": "",
-        "reached": false
+        "status": "SKIPPED",
+        "skip_reason": "SKIPPED_POLICY_NOT_TRIGGERED",
+        "reached": true
       },
       "trigger_switch": "route.escalate_triggered=True (set by product_capability_canary_helper; not by nexus run)",
       "planner": {
@@ -3303,7 +3622,7 @@
           "policy": "production_default",
           "env": {},
           "status": "BLOCKED",
-          "path": "registry",
+          "path": "e2e",
           "block_reason": "BLOCKED_EXTERNAL_AUTH:committee_candidates"
         },
         {
@@ -3312,7 +3631,7 @@
             "NEXUS_LOCAL_MODEL_CALL_ALLOWED": "1"
           },
           "status": "BLOCKED",
-          "path": "registry",
+          "path": "e2e",
           "block_reason": "COMMITTEE_FEATURE_DISABLED"
         },
         {
@@ -3321,17 +3640,17 @@
             "NEXUS_LOCAL_MODEL_CALL_ALLOWED": "1",
             "NEXUS_USE_COMMITTEE": "1"
           },
-          "status": "BLOCKED",
-          "path": "registry",
-          "block_reason": "semantic_status=FAILED"
+          "status": "SUCCEEDED",
+          "path": "e2e",
+          "block_reason": ""
         }
       ],
-      "product_path_reachable": false,
-      "receipt_terminal_status": "REJECTED_AT_REQUEST",
+      "product_path_reachable": true,
+      "receipt_terminal_status": "INCOMPLETE",
       "workforce_admission": {
-        "decision": "NOT_EVALUATED",
+        "decision": "ALLOW",
         "reasons": [
-          "canonical_context_route_override_forbidden:codeintel.committee_proposals[].model"
+          "demand_online: All constraints and required controls passed"
         ]
       },
       "policy_switches_needed": {
@@ -3339,17 +3658,20 @@
         "NEXUS_USE_COMMITTEE": "1"
       },
       "policy_used": "committee_feature_flag",
-      "path": "registry",
+      "path": "e2e",
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_committee_1f95bd9e"
+        "ev_cap_committee_0b33301a"
       ],
       "physical_callable": "capability_executor_registry:committee",
-      "console_tail": [],
+      "console_tail": [
+        "\u274c CLI Pre-Gate FAIL: python3 repro.py (rc=1)",
+        "\u274c CLI Pre-Gate FAIL: python3 repro.py (rc=1)"
+      ],
       "negative_control": {
         "name": "negative_control:single_candidate_blocks",
-        "passed": false,
+        "passed": true,
         "detail": "neg.block_reason=TWO_INDEPENDENT_CANDIDATES_REQUIRED",
         "negative_status": "BLOCKED",
         "negative_block_reason": "TWO_INDEPENDENT_CANDIDATES_REQUIRED"
@@ -3363,45 +3685,125 @@
         },
         {
           "name": "verdicts_recorded",
-          "passed": false,
-          "detail": "verdict_count=0"
+          "passed": true,
+          "detail": "verdict_count=3"
         },
         {
           "name": "winner_or_abstain",
-          "passed": false,
-          "detail": "winner="
+          "passed": true,
+          "detail": "winner=wiring-committee-pos_committee_feature_flag-wiring-proposer-a-1-d7b9 abstain=False"
+        },
+        {
+          "name": "each_candidate_executed_in_own_copy",
+          "passed": true,
+          "detail": "apply=['applied', 'applied', 'applied'] exit_codes=[[0], [1], [1]]"
+        },
+        {
+          "name": "winner_is_the_only_passing_candidate",
+          "passed": true,
+          "detail": "winner_proposer=wiring-proposer-a results=['pass', 'fail', 'fail']"
+        },
+        {
+          "name": "workspace_untouched",
+          "passed": true,
+          "detail": "calc.py hash unchanged"
         },
         {
           "name": "negative_control:single_candidate_blocks",
-          "passed": false,
+          "passed": true,
           "detail": "neg.block_reason=TWO_INDEPENDENT_CANDIDATES_REQUIRED"
         }
       ],
-      "verdict": "BLOCKED_canonical_context_rejected: canonical_context_route_override_forbidden:codeintel.committee_proposals[].model",
-      "verdict_reason": "capability_never_invoked",
-      "executor_level_verdict": "BLOCKED_semantic_status=FAILED",
-      "executor_level_reason": "executor_or_runtime_blocked",
+      "verdict": "REAL",
+      "verdict_reason": "invoked_with_evidence_and_artifact_assertions_passed",
       "verdict_production_default": "BLOCKED_EXTERNAL_AUTH:committee_candidates",
       "outcome_excerpt": {
         "action": "process_proposals",
-        "semantic_status": "FAILED",
+        "semantic_status": "SUCCEEDED",
         "evidence_refs": [
-          "ev_committee_wiring-committee-pos_committee_feature_flag_reg"
+          "ev_committee_wiring-committee-pos_committee_feature_flag"
         ],
+        "error": "",
         "result": {
-          "task_id": "wiring-committee-pos_committee_feature_flag_reg",
-          "winner_id": null,
-          "abstained": true,
+          "task_id": "wiring-committee-pos_committee_feature_flag",
+          "winner_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-a-1-d7b9",
+          "abstained": false,
+          "failure_bucket": "",
+          "confidence": 0.7,
+          "verifier_gap": 22.05,
           "receipt_type": "CommitteeReceipt"
         },
         "physical_callable": "nexus.committee.controller.CommitteeControllerV263.process_proposals",
         "candidate_count": 3,
-        "verdict_count": 0,
-        "winner_id": "",
-        "explicit_abstain": false
+        "verdict_count": 3,
+        "verdicts": [
+          {
+            "verifier": "patch_execution",
+            "candidate_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-a-1-d7b9",
+            "verdict": "pass",
+            "score": 1.0
+          },
+          {
+            "verifier": "patch_execution",
+            "candidate_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-b-1-d9b3",
+            "verdict": "fail",
+            "score": 0.0
+          },
+          {
+            "verifier": "patch_execution",
+            "candidate_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-c-1-53c3",
+            "verdict": "fail",
+            "score": 0.0
+          }
+        ],
+        "winner_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-a-1-d7b9",
+        "winner_proposer_id": "wiring-proposer-a",
+        "explicit_abstain": false,
+        "verifier_mode": "patch_execution",
+        "execution_results": [
+          {
+            "candidate_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-a-1-d7b9",
+            "workspace": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/committee__pos_committee_feature_flag/.nexus/committee/wiring-committee-pos_committee_feature_flag/candidate-0",
+            "patch_sha256": "4c25d8cc4fbe181aa2f2f91b7d6295e8787f616feb6b5b75b88e620bf079f74f",
+            "apply_status": "applied",
+            "commands": [
+              "python3 repro.py"
+            ],
+            "exit_codes": [
+              0
+            ],
+            "verify_result": "pass"
+          },
+          {
+            "candidate_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-b-1-d9b3",
+            "workspace": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/committee__pos_committee_feature_flag/.nexus/committee/wiring-committee-pos_committee_feature_flag/candidate-1",
+            "patch_sha256": "52346d16453a301b3f2ce811431d6483eb6d262bcf1daf3219312464822c34bc",
+            "apply_status": "applied",
+            "commands": [
+              "python3 repro.py"
+            ],
+            "exit_codes": [
+              1
+            ],
+            "verify_result": "fail"
+          },
+          {
+            "candidate_id": "wiring-committee-pos_committee_feature_flag-wiring-proposer-c-1-53c3",
+            "workspace": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_after/20261013T043737Z/workspaces/committee__pos_committee_feature_flag/.nexus/committee/wiring-committee-pos_committee_feature_flag/candidate-2",
+            "patch_sha256": "b579d2b6073b308b28744e2105152c67faecd1d922bd154f11824dce5048f8af",
+            "apply_status": "applied",
+            "commands": [
+              "python3 repro.py"
+            ],
+            "exit_codes": [
+              1
+            ],
+            "verify_result": "fail"
+          }
+        ]
       },
       "receipt_path": "receipts/committee.json",
-      "audit_seconds": 2.14
+      "audit_seconds": 18.92
     },
     {
       "capability": "xray",
@@ -4075,7 +4477,7 @@
       ],
       "physical_callable": "capability_executor_registry:semantic_failure_sensor",
       "console_tail": [
-        "⚠️ [Retrieval:Vector] LanceDB failed, falling back: Table 'memory_index' was not found"
+        "\u26a0\ufe0f [Retrieval:Vector] LanceDB failed, falling back: Table 'memory_index' was not found"
       ],
       "negative_control": {
         "name": "negative_control:unrelated_failure_has_no_similar_bug",
@@ -4252,7 +4654,7 @@
         "line": 2527
       },
       "gaps": [
-        "JITToolInjector.apply_mask is a self-declared mock: it matches only the Chinese keywords 測試/核驗/具現/修復 and otherwise returns all_tools[:5]; the tool catalog (jit_all_tools) must be supplied by the request; since 2026-10-13 the receipt says so (simulated=True, mask_kind=keyword_mock, claim_boundary.claim=SIMULATED)"
+        "JITToolInjector.apply_mask is a self-declared mock: it matches only the Chinese keywords \u6e2c\u8a66/\u6838\u9a57/\u5177\u73fe/\u4fee\u5fa9 and otherwise returns all_tools[:5]; the tool catalog (jit_all_tools) must be supplied by the request; since 2026-10-13 the receipt says so (simulated=True, mask_kind=keyword_mock, claim_boundary.claim=SIMULATED)"
       ],
       "trigger_switch": null,
       "planner": {
@@ -4326,7 +4728,7 @@
           "pattern": "Mock",
           "file": "nexus/core/jit_tool_injector.py",
           "line": 23,
-          "text": "# 標籤化篩選 (Mock 實作：僅示範隔離效果)"
+          "text": "# \u6a19\u7c64\u5316\u7be9\u9078 (Mock \u5be6\u4f5c\uff1a\u50c5\u793a\u7bc4\u9694\u96e2\u6548\u679c)"
         }
       ],
       "checks": [
@@ -4365,7 +4767,7 @@
           "read_file",
           "run_tests"
         ],
-        "note": "apply_mask matches only the Chinese keywords 測試/核驗/具現/修復; any other goal gets all_tools[:5]"
+        "note": "apply_mask matches only the Chinese keywords \u6e2c\u8a66/\u6838\u9a57/\u5177\u73fe/\u4fee\u5fa9; any other goal gets all_tools[:5]"
       },
       "outcome_excerpt": {
         "action": "apply_mask+check_token_quota",
@@ -6685,9 +7087,9 @@
     }
   ],
   "verdict_counts": {
-    "BLOCKED": 9,
+    "BLOCKED": 7,
     "NOT_EXECUTABLE": 4,
-    "REAL": 30,
+    "REAL": 32,
     "REAL_UNATTESTED": 4,
     "RETIRING": 9,
     "SIMULATED": 1,
@@ -7062,6 +7464,33 @@
         "reason": "--no-model"
       },
       "reason": "ultra_review row re-run after lane subprocesses moved behind the OS sandbox"
+    },
+    {
+      "generated_at": "2026-10-13T04:40:51.064283+00:00",
+      "git_head": "fe29afcee2cb4109046f93b4d3e5dcb3ba938bc2",
+      "tree": "origin/main fe29afcee + group C wiring fixes (#1978) working tree",
+      "only": [
+        "hyper",
+        "committee",
+        "swarm",
+        "multi_agent"
+      ],
+      "model_probe": {
+        "available": true,
+        "url": "http://127.0.0.1:11434",
+        "model": "qwen2.5-coder:7b-instruct",
+        "models": [
+          "incoai/Qwen3.6-35B-A3B-Splash",
+          "incoai/Qwen3.8-27B-Splash",
+          "nomic-embed-text:latest",
+          "qwen2.5-coder:14b-instruct-q3_K_M",
+          "qwen2.5-coder:7b",
+          "qwen2.5-coder:7b-instruct",
+          "qwen3.5:9b"
+        ],
+        "reason": ""
+      },
+      "reason": "group C wiring fixes (#1978): hyper local channel, committee proposer_id + execution verifier, swarm bounded run; rows replaced in place"
     }
   ]
 }

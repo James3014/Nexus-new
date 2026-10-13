@@ -1889,6 +1889,18 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
             "hyper_target_file",
             "hyper_test_file",
             "hyper_llm_mode",
+            "hyper_llm_channel",
+            "hyper_min_candidate_pool",
+            "target_file",
+            "target_files",
+        }
+    )
+    _SWARM_CONSTRAINT_KEYS = frozenset(
+        {
+            "workspace_root",
+            "swarm_target_file",
+            "swarm_verify_script",
+            "swarm_parallelism",
             "target_file",
             "target_files",
         }
@@ -1931,7 +1943,14 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
         {"workspace_root", "metabolism_token_usage", "metabolism_token_limit"}
     )
     _ASI_CONSTRAINT_KEYS = frozenset({"asi_failure_records"})
-    _COMMITTEE_CONSTRAINT_KEYS = frozenset({"committee_proposals"})
+    _COMMITTEE_CONSTRAINT_KEYS = frozenset(
+        {
+            "workspace_root",
+            "committee_proposals",
+            "committee_verify_commands",
+            "committee_verify_timeout_sec",
+        }
+    )
     _FILE_LOCK_CONSTRAINT_KEYS = frozenset({"workspace_root", "target_files"})
     _FORECAST_CONSTRAINT_KEYS = frozenset(
         {"workspace_root", "forecast_roi_score", "forecast_tokens", "forecast_reject_prob"}
@@ -1983,6 +2002,8 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
             keys = _HYPER_CONSTRAINT_KEYS
         elif name == "xray":
             keys = _XRAY_CONSTRAINT_KEYS
+        elif name in {"swarm", "multi_agent"}:
+            keys = _SWARM_CONSTRAINT_KEYS
         elif name == "pregate":
             keys = _PREGATE_CONSTRAINT_KEYS
         elif name == "harness_preflight_sensor":
@@ -2092,7 +2113,16 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
             )
             if "workspace_root" not in out and workspace_root not in (None, ""):
                 out["workspace_root"] = workspace_root
-        if name in {"autoreason", "ddtree", "hyper", "xray", "judge_panel"}:
+        if name in {
+            "autoreason",
+            "ddtree",
+            "hyper",
+            "xray",
+            "judge_panel",
+            "committee",
+            "swarm",
+            "multi_agent",
+        }:
             raw_route = context.get("route")
             route = raw_route if isinstance(raw_route, Mapping) else {}
             raw_ci = context.get("codeintel")
@@ -2176,7 +2206,6 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
             "plan_quality_gate": _PLAN_QUALITY_CONSTRAINT_KEYS,
             "asi_constraint_extractor": _ASI_CONSTRAINT_KEYS,
             "architecture_scout": _ASI_CONSTRAINT_KEYS,
-            "committee": _COMMITTEE_CONSTRAINT_KEYS,
             "file_lock": _FILE_LOCK_CONSTRAINT_KEYS,
             "forecast_gate": _FORECAST_CONSTRAINT_KEYS,
             "formal_report": _FORMAL_REPORT_CONSTRAINT_KEYS,

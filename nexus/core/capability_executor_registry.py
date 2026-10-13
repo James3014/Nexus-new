@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import importlib
-import dataclasses
 import hashlib
+import importlib
 import json
 import logging
 import os
@@ -980,10 +979,10 @@ def _exec_belief(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRec
         # Prefer assess_confidence; fall back to get_confidence only if present.
         if hasattr(inst, "assess_confidence") and callable(getattr(inst, "assess_confidence")):
             raw = inst.assess_confidence(task_id, assumption)
-            action = "assess_confidence"
+            _action = "assess_confidence"
         elif hasattr(inst, "get_confidence") and callable(getattr(inst, "get_confidence")):
             raw = inst.get_confidence(task_id, assumption)
-            action = "assess_confidence"  # report canonical action name
+            _action = "assess_confidence"  # report canonical action name
         else:
             elapsed = int((time.monotonic() - start) * 1000)
             return _make_receipt(
@@ -1193,6 +1192,17 @@ def _exec_hyper_sprint(plan: CapabilityExecutionPlan, task_desc: str) -> Capabil
                 wall_time_ms=int((time.monotonic() - start) * 1000),
                 reason="BLOCKED_EXTERNAL_AUTH:local_model",
             )
+        # "local" = Workforce-admitted ollama worker through the armored local lane (needs a
+        # test file as verifier); "online" = the gateway provider (the previous behaviour).
+        hyper_channel = str(hyper.get("hyper_llm_channel") or "online").strip().lower()
+        if hyper_channel not in {"online", "local"}:
+            return _scope_blocked_receipt(
+                "hyper_sprint", plan, f"unsupported_hyper_llm_channel:{hyper_channel}", start
+            )
+        try:
+            hyper_min_pool = max(1, int(hyper.get("hyper_min_candidate_pool") or 1))
+        except (TypeError, ValueError):
+            hyper_min_pool = 1
         cfg = SprintConfig(
             task=str(task_desc or plan.task_id),
             target_file=hyper_target,
@@ -1203,12 +1213,59 @@ def _exec_hyper_sprint(plan: CapabilityExecutionPlan, task_desc: str) -> Capabil
             safe_mode=True,
             llm_mode=bool(hyper_llm),
             stage1_max_parallel=1,
-            stage1_timeout_sec=5,
+            stage1_timeout_sec=30,
+            llm_channel=hyper_channel,
+            min_candidate_pool=hyper_min_pool,
         )
         result = fn(repo_root=hyper_root, config=cfg)
         elapsed = int((time.monotonic() - start) * 1000)
         sprint_status = str(getattr(result, "status", "") or "").upper()
         sprint_ok = sprint_status in {"SUCCESS", "SUCCEEDED"}
+        trace = getattr(result, "learning_trace", None)
+        trace = trace if isinstance(trace, Mapping) else {}
+        candidates = [
+            {
+                "seed": getattr(item, "seed", None),
+                "source": str(getattr(item, "source", "") or ""),
+                "score": float(getattr(item, "score", 0.0) or 0.0),
+                "rejection": str(getattr(item, "error", "") or "")[:160],
+                "code_sha256": hashlib.sha256(
+                    str(getattr(item, "candidate_code", "") or "").encode("utf-8")
+                ).hexdigest(),
+            }
+            for item in list(getattr(result, "candidates", []) or [])
+        ]
+        model_verified = [
+            item
+            for item in candidates
+            if item["source"].startswith("llm") and item["score"] >= 1.0
+        ]
+        unified = [
+            {
+                "task_id": str(item.get("task_id") or ""),
+                "terminal_status": str(item.get("terminal_status") or ""),
+                "local_status": str((item.get("local") or {}).get("status") or "")
+                if isinstance(item.get("local"), Mapping)
+                else "",
+            }
+            for item in list(getattr(result, "unified_runtime_receipts", []) or [])
+            if isinstance(item, Mapping)
+        ]
+        summary_keys = (
+            "status",
+            "reason",
+            "target_file",
+            "winner_source",
+            "final_score",
+            "elapsed_sec",
+            "attempt_count",
+            "model_calls",
+            "model_name",
+            "model_patch_generated",
+            "fallback_used",
+            "error_codes",
+            "pytest_cmd",
+        )
         return _make_receipt(
             "hyper_sprint",
             plan,
@@ -1218,16 +1275,21 @@ def _exec_hyper_sprint(plan: CapabilityExecutionPlan, task_desc: str) -> Capabil
                 action="run_hyper_sprint",
                 semantic_status="SUCCEEDED" if sprint_ok else "FAILED",
                 evidence_refs=[f"ev_hyper_sprint_{plan.task_id}"],
-                result=(
-                    dataclasses.asdict(result)
-                    if dataclasses.is_dataclass(result) and not isinstance(result, type)
-                    else str(result)[:200]
-                ),
+                result={key: getattr(result, key, None) for key in summary_keys},
                 sprint_status=sprint_status,
                 target_file=hyper_target,
+                test_file=hyper_test,
                 candidate_count=hyper_candidates,
+                min_candidate_pool=hyper_min_pool,
                 llm_mode=bool(hyper_llm),
+                llm_channel=hyper_channel,
+                llm_mode_effective=bool(trace.get("llm_mode_effective")),
+                learn_slo_guard=dict(trace.get("learn_slo_guard") or {}),
                 attempt_count=getattr(result, "attempt_count", None),
+                model_calls=int(getattr(result, "model_calls", 0) or 0),
+                candidates=candidates,
+                model_verified_candidate_count=len(model_verified),
+                unified_runtime_receipts=unified,
                 physical_callable="nexus.research.sprint_service.run_hyper_sprint",
             ),
         )
@@ -1256,36 +1318,84 @@ def _exec_swarm_multi_agent(plan: CapabilityExecutionPlan, task_desc: str) -> Ca
             wall_time_ms=elapsed,
             reason="BLOCKED_EXTERNAL_AUTH:local_or_online_workers",
         )
-    cls = _try_port("battle_swarm.BattleSwarm")
-    if cls is None:
-        return _make_receipt("swarm_multi_agent", plan, invoked=False, gate_passed=False,
-                             outcome={"error": _port_error("battle_swarm.BattleSwarm")})
+    constraints = dict(plan.constraints or {})
     try:
-        inst = cls(project_root=".")
-        # Prefer non-spawn physical call when available.
-        if hasattr(inst, "cleanup"):
-            inst.cleanup({"worktrees_to_clean": [], "branches_to_clean": []})
-            action = "cleanup"
-            result = {"cleaned": True}
-        else:
-            raise RuntimeError("BattleSwarm has no physical probe method")
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt(
-            "swarm_multi_agent",
-            plan,
-            wall_time_ms=elapsed,
-            outcome={"action": action, "result": str(result)[:200]},
+        swarm_root = _scoped_workspace(constraints, Path(".").resolve())
+        target = str(constraints.get("swarm_target_file") or "").strip() or _first_task_file(constraints)
+        verify_script = str(constraints.get("swarm_verify_script") or "").strip()
+        if not target or not verify_script:
+            return _make_receipt(
+                "swarm_multi_agent",
+                plan,
+                invoked=True,
+                gate_passed=False,
+                wall_time_ms=int((time.monotonic() - start) * 1000),
+                outcome=_structured_outcome(
+                    action="run_bounded_swarm",
+                    semantic_status="BLOCKED",
+                    error="SWARM_TARGET_AND_VERIFY_SCRIPT_REQUIRED",
+                    evidence_refs=[f"ev_swarm_blocked_{plan.task_id}"],
+                    physical_callable="nexus.engine.swarm_run.run_bounded_swarm",
+                ),
+            )
+        _scoped_path(swarm_root, target)
+        _scoped_path(swarm_root, verify_script)
+    except _ScopeError as scope:
+        return _scope_blocked_receipt("swarm_multi_agent", plan, str(scope), start)
+    try:
+        workers = max(1, min(4, int(constraints.get("swarm_parallelism") or 2)))
+    except (TypeError, ValueError):
+        workers = 2
+    try:
+        from nexus.engine.swarm_run import run_bounded_swarm
+
+        report = run_bounded_swarm(
+            workspace_root=swarm_root,
+            task_id=str(plan.task_id),
+            task=str(task_desc or plan.task_id),
+            target_file=target,
+            verify_script=verify_script,
+            workers=workers,
         )
     except Exception as exc:
-        elapsed = int((time.monotonic() - start) * 1000)
         return _make_receipt(
             "swarm_multi_agent",
             plan,
             invoked=True,
             gate_passed=False,
-            wall_time_ms=elapsed,
-            outcome={"action": "probe", "error": str(exc)[:300]},
+            wall_time_ms=int((time.monotonic() - start) * 1000),
+            outcome=_structured_outcome(
+                action="run_bounded_swarm",
+                semantic_status="FAILED",
+                error=f"swarm_run_error:{type(exc).__name__}:{str(exc)[:200]}",
+                evidence_refs=[f"ev_swarm_error_{plan.task_id}"],
+                physical_callable="nexus.engine.swarm_run.run_bounded_swarm",
+            ),
         )
+    status = str(report.get("status") or "")
+    ok = status == "SUCCEEDED"
+    worker_rows = [w for w in report.get("workers") or [] if isinstance(w, Mapping)]
+    return _make_receipt(
+        "swarm_multi_agent",
+        plan,
+        invoked=True,
+        gate_passed=ok,
+        wall_time_ms=int((time.monotonic() - start) * 1000),
+        outcome=_structured_outcome(
+            action="run_bounded_swarm",
+            # BLOCKED when a step refused (lock conflict, integration authority); the workers'
+            # worktrees, commits and verifier results are still in the report.
+            semantic_status="SUCCEEDED" if ok else ("BLOCKED" if status == "BLOCKED" else "FAILED"),
+            error="" if ok else str(report.get("reason") or "SWARM_RUN_INCOMPLETE"),
+            evidence_refs=[f"ev_swarm_{plan.task_id}"],
+            swarm_report=report,
+            worker_count=len(worker_rows),
+            workers_executed=sum(1 for w in worker_rows if w.get("worker_status") == "candidate_written"),
+            verified_workers=sum(1 for w in worker_rows if w.get("verify_result") == "pass"),
+            model_calls=sum(int(w.get("model_calls") or 0) for w in worker_rows),
+            physical_callable="nexus.engine.swarm_run.run_bounded_swarm",
+        ),
+    )
 
 
 def _exec_drone(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
@@ -2018,6 +2128,7 @@ def _exec_semantic_searcher(plan: CapabilityExecutionPlan, task_desc: str) -> Ca
         )
     try:
         from pathlib import Path
+
         from nexus.services.lancedb_roots import KNOWLEDGE, resolve_lancedb_root
         from nexus.services.memory_repository import MemoryRepository
 
@@ -3064,13 +3175,19 @@ def _exec_committee(plan: CapabilityExecutionPlan, task_desc: str) -> Capability
             for row in constraints.get("committee_proposals", []) or []
             if isinstance(row, Mapping)
         ]
-        valid = [
-            row
-            for row in raw
-            if str(row.get("model") or "").strip()
-            and str(row.get("raw_label") or "").strip()
-            and list(row.get("artifacts") or [])
-        ]
+        # Proposals name their proposer "proposer_id": the canonical context seam rejects any
+        # request key containing "model", so a "model" field could never reach this executor
+        # through UnifiedRuntime. "model" is still read for direct in-process callers.
+        valid = []
+        for row in raw:
+            proposer = str(row.get("proposer_id") or row.get("model") or "").strip()
+            if not (proposer and str(row.get("raw_label") or "").strip() and list(row.get("artifacts") or [])):
+                continue
+            try:
+                attempt = max(1, int(row.get("attempt") or 1))
+            except (TypeError, ValueError):
+                attempt = 1
+            valid.append({**row, "proposer_id": proposer, "attempt": attempt})
         if len(valid) < 2:
             return _make_receipt(
                 "committee",
@@ -3087,7 +3204,34 @@ def _exec_committee(plan: CapabilityExecutionPlan, task_desc: str) -> Capability
                     physical_callable="nexus.committee.controller.CommitteeControllerV263.process_proposals",
                 ),
             )
-        ctrl = CommitteeControllerV263(task_id=str(plan.task_id), domains=["mainchain"])
+        verify_commands = [
+            str(item)
+            for item in (constraints.get("committee_verify_commands") or [])
+            if str(item).strip()
+        ]
+        execution_verifier = None
+        verifiers = None
+        if verify_commands:
+            from nexus.committee.execution_verifier import PatchExecutionVerifier
+
+            try:
+                committee_root = _scoped_workspace(constraints, Path(".").resolve())
+            except _ScopeError as scope:
+                return _scope_blocked_receipt("committee", plan, str(scope), start)
+            try:
+                verify_timeout = max(1, min(120, int(constraints.get("committee_verify_timeout_sec") or 30)))
+            except (TypeError, ValueError):
+                verify_timeout = 30
+            execution_verifier = PatchExecutionVerifier(
+                workspace_root=committee_root,
+                commands=verify_commands,
+                task_id=str(plan.task_id),
+                timeout_sec=verify_timeout,
+            )
+            verifiers = [execution_verifier]
+        ctrl = CommitteeControllerV263(
+            task_id=str(plan.task_id), domains=["mainchain"], verifiers=verifiers
+        )
         if not ctrl.enabled:
             return _make_receipt(
                 "committee",
@@ -3106,22 +3250,26 @@ def _exec_committee(plan: CapabilityExecutionPlan, task_desc: str) -> Capability
             )
         result = ctrl.process_proposals(valid)
         elapsed = int((time.monotonic() - start) * 1000)
-        # CommitteeReceipt may be dataclass — normalize.
-        if hasattr(result, "__dict__") and not isinstance(result, Mapping):
-            payload: Any = {
-                k: getattr(result, k)
-                for k in ("task_id", "winner_id", "abstained", "proposal_count")
-                if hasattr(result, k)
-            }
-            payload["receipt_type"] = type(result).__name__
-        else:
-            payload = result
         candidates = list(getattr(result, "candidates", []) or [])
         verdicts = list(getattr(result, "verdicts", []) or [])
         winner_id = str(getattr(result, "winner_id", "") or "")
         failure_bucket = str(getattr(result, "failure_bucket", "") or "")
-        explicit_abstain = failure_bucket.upper() in {"ABSTAIN", "NO_WINNER"}
+        # An abstention only counts when verdicts exist: with no verifier nothing was judged.
+        explicit_abstain = bool(verdicts) and not winner_id and (
+            bool(getattr(result, "abstained", False))
+            or failure_bucket.upper() in {"ABSTAIN", "NO_WINNER"}
+        )
+        winner = next((c for c in candidates if getattr(c, "candidate_id", "") == winner_id), None)
         ok = len(candidates) >= 2 and bool(verdicts) and bool(winner_id or explicit_abstain)
+        verdict_rows = [
+            {
+                "verifier": str(getattr(v, "verifier_name", "") or getattr(v, "critic_name", "")),
+                "candidate_id": str(getattr(v, "candidate_id", "") or ""),
+                "verdict": "pass" if getattr(v, "passed", False) else "fail",
+                "score": float(getattr(v, "score", 0.0) or 0.0),
+            }
+            for v in verdicts
+        ]
         return _make_receipt(
             "committee",
             plan,
@@ -3131,12 +3279,25 @@ def _exec_committee(plan: CapabilityExecutionPlan, task_desc: str) -> Capability
                 action="process_proposals",
                 semantic_status="SUCCEEDED" if ok else "FAILED",
                 evidence_refs=[f"ev_committee_{plan.task_id}"],
-                result=payload if isinstance(payload, Mapping) else {"value": str(payload)[:200]},
+                error="" if (ok or verdicts) else "NO_COMMITTEE_VERIFIER_VERDICTS",
+                result={
+                    "task_id": getattr(result, "task_id", ""),
+                    "winner_id": winner_id,
+                    "abstained": bool(getattr(result, "abstained", False)),
+                    "failure_bucket": failure_bucket,
+                    "confidence": float(getattr(result, "confidence", 0.0) or 0.0),
+                    "verifier_gap": float(getattr(result, "verifier_gap", 0.0) or 0.0),
+                    "receipt_type": type(result).__name__,
+                },
                 physical_callable="nexus.committee.controller.CommitteeControllerV263.process_proposals",
                 candidate_count=len(candidates),
                 verdict_count=len(verdicts),
+                verdicts=verdict_rows,
                 winner_id=winner_id,
+                winner_proposer_id=str(getattr(winner, "source_model", "") or "") if winner else "",
                 explicit_abstain=explicit_abstain,
+                verifier_mode="patch_execution" if execution_verifier else "registry",
+                execution_results=list(execution_verifier.results) if execution_verifier else [],
             ),
         )
     except Exception as exc:

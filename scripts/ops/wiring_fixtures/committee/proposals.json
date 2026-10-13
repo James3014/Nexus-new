@@ -1,6 +1,6 @@
 [
   {
-    "model": "wiring-model-a",
+    "proposer_id": "wiring-proposer-a",
     "attempt": 1,
     "raw_label": "candidate-a",
     "artifacts": [
@@ -8,15 +8,15 @@
     ]
   },
   {
-    "model": "wiring-model-b",
+    "proposer_id": "wiring-proposer-b",
     "attempt": 1,
     "raw_label": "candidate-b",
     "artifacts": [
-      "--- a/calc.py\n+++ b/calc.py\n@@ -1,2 +1,2 @@\n def add(a: int, b: int) -> int:\n-    return a - b\n+    return b + a\n"
+      "--- a/calc.py\n+++ b/calc.py\n@@ -1,2 +1,2 @@\n def add(a: int, b: int) -> int:\n-    return a - b\n+    return abs(a) + abs(b)\n"
     ]
   },
   {
-    "model": "wiring-model-c",
+    "proposer_id": "wiring-proposer-c",
     "attempt": 1,
     "raw_label": "candidate-c",
     "artifacts": [
