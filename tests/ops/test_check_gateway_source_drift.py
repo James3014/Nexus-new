@@ -107,10 +107,13 @@ def test_in_sync_is_ok(repo: Repo, capsys: pytest.CaptureFixture[str]) -> None:
     assert report["published_base"] == head and report["pr_head_lookup"] == "NOT_NEEDED"
 
 
-def test_task_only_unpublished_commits_are_bind_only_info(
+def test_task_only_unpublished_commits_still_alert(
     repo: Repo, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Owner refinement 2026-10-13T02:09:54Z: tasks/**-only unpublished commits are INFO."""
+    """Owner refinement 2026-10-13T02:09:54Z: tasks/**-only unpublished commits are INFO.
+
+    The test id is kept stable for the exact-base impact gate; it no longer alerts.
+    """
     base = repo.git("rev-parse", "HEAD")
     head = deploy_branch(repo, base, "tasks/issue-1384/a.md", "tasks/issue-1384/b.json")
     code, report = run(repo, health(head), capsys)
