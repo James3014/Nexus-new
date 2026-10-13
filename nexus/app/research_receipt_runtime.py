@@ -5,6 +5,7 @@ from typing import Any
 from nexus.core.repo_root import REPO_ROOT
 from nexus.engine.capability_receipts import build_trace_receipts
 from nexus.learning.shared_playbook import bind_shared_playbook_runtime_receipts
+from nexus.research.flow.unified_capability_projection import overlay_unified_capability_receipts
 
 
 def runtime_receipt_plan_payload(
@@ -119,6 +120,11 @@ def build_capability_receipt_payloads(
             codeintel=nexus_usage_trace.get("codeintel", {}) if isinstance(nexus_usage_trace.get("codeintel"), dict) else {},
         )
     ]
+    unified_stages = nexus_usage_trace.get("unified_runtime_capabilities")
+    if isinstance(unified_stages, list) and unified_stages:
+        # Executed-runtime truth: a capability the UnifiedRuntime really ran is not
+        # "selected_without_invocation", and a skipped one names the runtime reason.
+        receipts = overlay_unified_capability_receipts(receipts, unified_stages)
     bound_receipts = bind_shared_playbook_runtime_receipts(
         capability_plan_payload=runtime_plan,
         receipts=receipts,

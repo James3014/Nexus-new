@@ -2650,6 +2650,97 @@ def _planner_mainchain_gate_selected(name: str, context: Mapping[str, Any]) -> b
     return False
 
 
+PLANNER_SIGNAL_TRIGGER_SOURCE = "planner_task_signal"
+# Escalate-only executors whose trigger is a *task signal* the CapabilityPlanner already
+# evaluated.  The planner selects these on that signal (policy_evaluator) but the gate only
+# looked at ``route.escalate*`` / ``recommended_flow``, which the online mainchain path never
+# sets, so they were always SKIPPED_POLICY_NOT_TRIGGERED.  A capability triggers here only
+# when (a) the planner selected it, (b) its decision-trace reasons include one of the
+# listed reasons (``None`` = any planner reason) and (c) one of the listed signal_snapshot
+# signals is truthy in the same plan.  Deliberately absent:
+#   * ultra_review / sandbox: review/run a *candidate*; the preflight seam has none yet.
+#   * hyper: escalation after a failed verified candidate is the flow's hyper admission.
+#   * file_lock: acquiring a lock per attempt without the batch-3 release would self-block.
+PLANNER_SIGNAL_TRIGGERS: dict[str, tuple[frozenset[str] | None, tuple[str, ...]]] = {
+    "research": (
+        frozenset(
+            {
+                "context_or_retrieval_gap",
+                "autonomic_research_signal",
+                "plateau_detected_requires_new_hypothesis",
+                "tier_l3_deep_governance",
+            }
+        ),
+        (
+            "autonomic_research_requested",
+            "plateau_detected",
+            "doc_scout_hits",
+            "memory_hits",
+            "findings_hits",
+            "claim_uncertainty",
+            "cross_module",
+        ),
+    ),
+    # research_route is planner-required on every routed task (routing_contract_required);
+    # the route itself is satisfied by the planner, the research body runs only when the
+    # task actually needs a lookup.
+    "research_route": (
+        None,
+        ("autonomic_research_requested", "plateau_detected", "doc_scout_hits"),
+    ),
+    "learn_mode": (frozenset({"claim_or_citation_learning_signal"}), ("learning_signal",)),
+    "learn_phase_slo": (frozenset({"learn_phase_policy_needed"}), ("learning_signal",)),
+    "multi_agent": (frozenset({"coordinated_ownership_required"}), ("multi_agent_signal", "swarm_signal")),
+}
+
+
+ROUTE_RESEARCH_DECISION_CAPABILITIES = frozenset({"research", "research_route"})
+
+
+def planner_signal_trigger(name: str, context: Mapping[str, Any]) -> str:
+    """Return the triggering task signal for ``name`` ("" when not signal-triggered)."""
+
+    spec = PLANNER_SIGNAL_TRIGGERS.get(name)
+    if spec is None:
+        return ""
+    reasons_required, signal_keys = spec
+    planner = context.get("planner")
+    if not isinstance(planner, Mapping):
+        return ""
+    selected = planner.get("selected_capabilities") or []
+    if not isinstance(selected, (list, tuple)) or name not in selected:
+        return ""
+    snapshot = planner.get("signal_snapshot")
+    if not isinstance(snapshot, Mapping):
+        return ""
+    if reasons_required is not None:
+        trace = planner.get("decision_trace") or []
+        if not isinstance(trace, (list, tuple)):
+            return ""
+        reasons: set[str] = set()
+        for item in trace:
+            if isinstance(item, Mapping) and item.get("capability") == name:
+                raw = item.get("reasons") or []
+                if isinstance(raw, (list, tuple)):
+                    reasons.update(str(r) for r in raw)
+        if not reasons_required & reasons:
+            return ""
+    for key in signal_keys:
+        value = snapshot.get(key)
+        if isinstance(value, bool):
+            if value:
+                return key
+        elif isinstance(value, (int, float)) and value > 0:
+            return key
+    # The flow's route decision (route_decider) is not projected through the canonical seam;
+    # it reaches the gate on the request route.
+    raw_route = context.get("route")
+    route: Mapping[str, Any] = raw_route if isinstance(raw_route, Mapping) else {}
+    if name in ROUTE_RESEARCH_DECISION_CAPABILITIES and route.get("should_research") is True:
+        return "route_should_research"
+    return ""
+
+
 def build_escalate_gated_invoker(
     capability_name: str,
     *,
@@ -2684,10 +2775,14 @@ def build_escalate_gated_invoker(
 
     def invoke(context: Mapping[str, Any]) -> dict[str, Any]:
         planner_triggered = False
+        signal_trigger = ""
         if not _triggered(context):
-            if not _planner_mainchain_gate_selected(name, context):
-                return dict(skip_invoker(context))
-            planner_triggered = True
+            if _planner_mainchain_gate_selected(name, context):
+                planner_triggered = True
+            else:
+                signal_trigger = planner_signal_trigger(name, context)
+                if not signal_trigger:
+                    return dict(skip_invoker(context))
         if real_invoker is None:
             task_id = str(context.get("task_id") or "")
             return {
@@ -2711,6 +2806,8 @@ def build_escalate_gated_invoker(
         receipt = dict(real_invoker(context))
         if planner_triggered:
             receipt["trigger_source"] = PLANNER_MAINCHAIN_GATE_TRIGGER_SOURCE
+        elif signal_trigger:
+            receipt["trigger_source"] = f"{PLANNER_SIGNAL_TRIGGER_SOURCE}:{signal_trigger}"
         return receipt
 
     return invoke

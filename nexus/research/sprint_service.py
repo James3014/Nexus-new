@@ -150,6 +150,9 @@ class SprintConfig:
     llm_channel: str = "online"
     # Verified candidates to collect before safe mode may stop early (1 = stop at first pass).
     min_candidate_pool: int = 1
+    # Task signals from the flow's route decision, forwarded to the mainchain planner
+    # (see ``planner_route_signals``); empty keeps the bare online route.
+    route_signals: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -163,6 +166,75 @@ class CandidateEval:
     candidate_code: str = ""
     source: str = "local"
     elapsed_sec: float = 0.0
+
+
+# Task signals forwarded from the flow's route decision onto the mainchain request route.
+# ``route_features`` is the only route field the canonical planning seam projects into the
+# CapabilityPlanner (``CanonicalTaskContext.route_features``); ``should_research`` stays on
+# the request route where the escalate gate reads it.  ``recommended_flow`` / ``escalate``
+# are deliberately absent: they are escalation switches, not task evidence.
+PLANNER_ROUTE_SIGNAL_KEYS: tuple[str, ...] = ("should_research", "route_features")
+# Mirrors the canonical seam's fail-closed key rule (nexus_runtime canonical_execution
+# ``_forbidden_context_key``): such keys are selection/authority inputs, not task facts, and
+# the seam rejects the whole request when one is present.
+_CANONICAL_FORBIDDEN_EXACT = frozenset(
+    {
+        "capability_stack",
+        "execution_topology",
+        "fallback_provider",
+        "preferred_provider",
+        "selected_capabilities",
+        "selected_route",
+        "isolated_target",
+        "target",
+        "target_id",
+        "target_path",
+        "target_ref",
+        "target_worktree",
+    }
+)
+_CANONICAL_FORBIDDEN_FRAGMENTS = ("lane", "lifecycle", "model", "provider", "route", "worker", "world")
+
+
+def _canonical_fact_key_allowed(key: str) -> bool:
+    normalized = key.strip().lower()
+    return normalized not in _CANONICAL_FORBIDDEN_EXACT and not any(
+        fragment in normalized for fragment in _CANONICAL_FORBIDDEN_FRAGMENTS
+    )
+
+
+def _canonical_fact_tree(value: Any, depth: int = 0) -> Any:
+    """JSON-only copy with canonical-forbidden keys dropped (bounded depth/width)."""
+
+    if isinstance(value, bool) or value is None or isinstance(value, (str, int)):
+        return value
+    if isinstance(value, float):
+        return value if value == value and value not in (float("inf"), float("-inf")) else None
+    if depth >= 3:
+        return None
+    if isinstance(value, Mapping):
+        return {
+            str(k): _canonical_fact_tree(v, depth + 1)
+            for k, v in list(value.items())[:64]
+            if isinstance(k, str) and _canonical_fact_key_allowed(k)
+        }
+    if isinstance(value, (list, tuple)):
+        return [_canonical_fact_tree(v, depth + 1) for v in list(value)[:32]]
+    return None
+
+
+def planner_route_signals(route: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Bounded copy of the flow route's task signals for the mainchain request route."""
+
+    if not isinstance(route, Mapping):
+        return {}
+    out: dict[str, Any] = {}
+    if "should_research" in route:
+        out["should_research"] = bool(route.get("should_research"))
+    features = route.get("route_features")
+    if isinstance(features, Mapping):
+        out["route_features"] = _canonical_fact_tree(features)
+    return out
 
 
 class LLMCandidateError(RuntimeError):
@@ -223,7 +295,13 @@ class SprintResult:
 class LLMCandidateGenerator:
     source = "llm"
 
-    def __init__(self, project_root: Path, safe_mode: bool, target_file: str = ""):
+    def __init__(
+        self,
+        project_root: Path,
+        safe_mode: bool,
+        target_file: str = "",
+        route_signals: Mapping[str, Any] | None = None,
+    ):
         from nexus.services.gateway import BattlesuitGateway
         self.project_root = Path(project_root).resolve()
         self.gateway = BattlesuitGateway(project_root=self.project_root)
@@ -236,6 +314,7 @@ class LLMCandidateGenerator:
             self.local_service = LocalAssistService()
         self.model_chain = self._model_chain()
         self.last_unified_runtime_receipt: dict[str, Any] = {}
+        self.route_signals = planner_route_signals(route_signals)
 
     def _workspace_revision(self) -> str:
         try:
@@ -318,6 +397,12 @@ class LLMCandidateGenerator:
         bench_bindings = _bench_workforce_bindings_from_env()
         if bench_bindings is not None:
             route["workforce_bindings"] = bench_bindings
+        for key, value in self.route_signals.items():
+            route.setdefault(key, value)
+        # The sprint candidate is the with-Nexus product path: the gateway derives
+        # run_mainchain(with_nexus_armor=...) from this flag, and without it the online
+        # candidate ran armor-off (host-default invokers, no prompt armor).
+        route.setdefault("with_nexus_armor", True)
         request = UnifiedRuntimeRequest(
             task_id=task_id,
             workspace_revision=revision,
@@ -1192,7 +1277,12 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             repo_root, target_file=config.target_file, test_file=config.test_file
         )
     elif llm_mode_effective:
-        llm_generator = LLMCandidateGenerator(repo_root, config.safe_mode, target_file=config.target_file)
+        llm_generator = LLMCandidateGenerator(
+            repo_root,
+            config.safe_mode,
+            target_file=config.target_file,
+            route_signals=config.route_signals,
+        )
     local_generator = LocalCandidateGenerator()
     # Local-first fast path: avoid heavy swarm sync when no external LLM is used.
     force_inplace_executor = os.environ.get("NEXUS_FORCE_INPLACE_EXECUTOR", "").strip().lower() in {"1", "true", "yes"}
