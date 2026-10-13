@@ -2128,37 +2128,38 @@ def _r1_replace_value_store_cas(
     ):
         raise _gateway_error("R1 successor materialization payload size invalid")
     path = _safe_store_path(path, leaf_mode=0o600, create=True)
-    try:
-        current = path.read_bytes()
-    except OSError as exc:
-        raise _gateway_error("R1 successor materialization store missing", exc) from exc
-    if current == target:
-        return current
-    if current != expected:
-        raise _gateway_error("R1 successor materialization store CAS conflict")
+    # #1958 F3: the re-read, compare, write, replace and readback form one
+    # critical section under the gateway lock (reentrant, so materialization
+    # callers that already hold it are unaffected). Without it two writers can
+    # both pass the compare and the later os.replace silently drops history.
+    with InterProcessLock(GATEWAY_LOCK):
+        try:
+            current = path.read_bytes()
+        except OSError as exc:
+            raise _gateway_error("R1 successor materialization store missing", exc) from exc
+        if current == target:
+            return current
+        if current != expected:
+            raise _gateway_error("R1 successor materialization store CAS conflict")
 
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
-    try:
-        os.chmod(tmp, 0o600)
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(target)
-            handle.flush()
-            os.fsync(handle.fileno())
-        if path.read_bytes() != expected:
-            raise _gateway_error(
-                "R1 successor materialization store CAS conflict"
-            )
-        os.replace(tmp, path)
-        _fsync_dir(path.parent)
-    finally:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
-    written = path.read_bytes()
-    if written != target:
-        raise _gateway_error(
-            "R1 successor materialization write identity mismatch"
-        )
-    return written
+        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+        try:
+            os.chmod(tmp, 0o600)
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(target)
+                handle.flush()
+                os.fsync(handle.fileno())
+            if path.read_bytes() != expected:
+                raise _gateway_error("R1 successor materialization store CAS conflict")
+            os.replace(tmp, path)
+            _fsync_dir(path.parent)
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+        written = path.read_bytes()
+        if written != target:
+            raise _gateway_error("R1 successor materialization write identity mismatch")
+        return written
 
 
 def _r1_materialize_recovery_store_pair(
@@ -2726,6 +2727,61 @@ def _reserve_post_effect_reconcile_attempt(
 
 
 
+R1_CONCURRENT_RECOVERY_FORBIDDEN = "R1_CONCURRENT_RECOVERY_FORBIDDEN"
+
+
+def _derive_terminal_recovery_states() -> frozenset[DeploymentState]:
+    """States with no legal successor in the contract state machine."""
+    from nexus.contracts.gateway_deployment import transition
+
+    terminal: set[DeploymentState] = set()
+    for previous in DeploymentState:
+        has_exit = False
+        for current in DeploymentState:
+            try:
+                transition(previous, current)
+            except ContractError:
+                continue
+            has_exit = True
+            break
+        if not has_exit:
+            terminal.add(previous)
+    return frozenset(terminal)
+
+
+# Derived, not hand-listed: VERIFIED, ROLLED_BACK and BLOCKED today.
+R1_TERMINAL_RECOVERY_STATES = _derive_terminal_recovery_states()
+
+
+def _refuse_concurrent_r1_recovery_unlocked(rows: list[dict[str, Any]], request_id: str) -> None:
+    """Refuse a NEW R1 request while any other R1 request is non-terminal.
+
+    ``rows`` must come from ``GatewayLedger._scan_unlocked`` under the ledger
+    lock. Continuing or reconciling ``request_id`` itself is always allowed.
+    """
+    last_state: dict[str, str] = {}
+    for row in rows:
+        if (
+            row["schema"] == "nexus.gateway.ledger.v2"
+            or row["effect_class"] == EffectClass.GATEWAY_DURABLE_RECOVERY.value
+        ):
+            last_state[row["request_id"]] = row["state"]
+    if request_id in last_state:
+        return
+    open_requests = sorted(
+        other
+        for other, state in last_state.items()
+        if DeploymentState(state) not in R1_TERMINAL_RECOVERY_STATES
+    )
+    if open_requests:
+        raise GatewayContractError(
+            f"{R1_CONCURRENT_RECOVERY_FORBIDDEN}: new R1 request {request_id} "
+            "refused while R1 request(s) "
+            + ", ".join(f"{other}={last_state[other]}" for other in open_requests)
+            + " are non-terminal"
+        )
+
+
 class GatewayLedger:
     """Bounded JSONL state ledger with sequence, parent, self-hash, and CAS."""
 
@@ -2989,6 +3045,26 @@ class GatewayLedger:
             return self._append_recovery_unlocked(rows, record)
 
     def _append_recovery_unlocked(
+        self,
+        rows: list[dict[str, Any]],
+        record: RecoveryLedgerRecord,
+    ) -> RecoveryLedgerRecord:
+        if record.state is DeploymentState.REQUESTED:
+            # #1958 F1/F2: the single sink every R1 caller (bootstrap, stdio
+            # host, direct import) passes before a request first exists.
+            # Re-enter the ledger lock (reentrant for callers that hold it),
+            # re-scan, and refuse a new request while another is non-terminal.
+            with InterProcessLock(self.lock_path):
+                current = self._scan_unlocked()
+                if (current[-1]["record_hash"] if current else "") != (
+                    rows[-1]["record_hash"] if rows else ""
+                ):
+                    raise GatewayContractError("recovery ledger compare-and-swap conflict")
+                _refuse_concurrent_r1_recovery_unlocked(current, record.request_id)
+                return self._write_recovery_unlocked(rows, record)
+        return self._write_recovery_unlocked(rows, record)
+
+    def _write_recovery_unlocked(
         self,
         rows: list[dict[str, Any]],
         record: RecoveryLedgerRecord,

@@ -651,3 +651,105 @@ def test_main_rejects_all_caller_arguments(monkeypatch, capsys):
         "reason": "CALLER_ARGUMENTS_FORBIDDEN",
         "status": "BLOCKED",
     }
+
+
+# --- #1958 F1: the manager, not the deletable marker, forbids concurrent R1 ---
+
+_UNCERTAIN_PATH = [
+    "REQUESTED",
+    "PREFLIGHTED",
+    "TARGET_READY",
+    "ROLLBACK_READY",
+    "EFFECT_STARTED",
+    "UNCERTAIN_EFFECT",
+]
+
+
+class LedgerBoundManager(FakeManager):
+    """Fake launchctl/adapters only: the live seam records REQUESTED through the
+    real ``GatewayLedger`` sink, which enforces the #1958 invariant."""
+
+    def __init__(self, root: Path) -> None:
+        super().__init__(root)
+        self.live_states = list(_VERIFIED_PATH)
+        self.effects: list[str] = []
+
+    def _gateway_recover_live(self, request):
+        assert request is self.request
+        generation = b._generation_fields(self.receipt, self.request, self.materialization_request)
+        ledger = real_manager.GatewayLedger(self.ledger_path)
+        with real_manager.InterProcessLock(ledger.lock_path):
+            rows = ledger._scan_unlocked()
+            record = real_manager.RecoveryLedgerRecord.model_validate(
+                _ledger_row(self, generation, "REQUESTED", rows)
+            )
+            ledger._append_recovery_unlocked(rows, record)
+        self.effects.append(request.request_id)
+        _append_ledger(self, generation, self.live_states[1:])
+        result = super()._gateway_recover_live(request)
+        result["result"] = self.live_states[-1]
+        return result
+
+
+def _request_rows(manager, request_id):
+    if not manager.ledger_path.exists():
+        return []
+    return [
+        row
+        for row in (json.loads(line) for line in manager.ledger_path.read_bytes().splitlines())
+        if row["request_id"] == request_id
+    ]
+
+
+def test_1958_deleted_marker_cannot_start_gen2_while_gen1_uncertain(tmp_path):
+    manager = LedgerBoundManager(tmp_path / "gateway-direct")
+    manager.live_states = list(_UNCERTAIN_PATH)
+    assert b._run_bootstrap(manager)["status"] == "UNCERTAIN_EFFECT"
+    (manager.GATEWAY_STATE_ROOT / b.CONSUMPTION_FILENAME).unlink()
+    before = manager.ledger_path.read_bytes()
+
+    manager.advance_generation("2")
+    manager.live_states = list(_VERIFIED_PATH)
+    with pytest.raises(
+        real_manager.GatewayContractError,
+        match="^R1_CONCURRENT_RECOVERY_FORBIDDEN: .*request-v1=UNCERTAIN_EFFECT",
+    ):
+        b._run_bootstrap(manager)
+
+    assert manager.effects == ["request-v1"]
+    assert manager.ledger_path.read_bytes() == before
+    assert _request_rows(manager, "request-v2") == []
+
+
+def test_1958_rolled_back_marker_cannot_start_gen3_while_gen2_uncertain(tmp_path):
+    manager = LedgerBoundManager(tmp_path / "gateway-direct")
+    assert b._run_bootstrap(manager)["status"] == "VERIFIED"
+    gen1_marker_bytes = _marker_bytes(manager)
+
+    manager.advance_generation("2")
+    manager.live_states = list(_UNCERTAIN_PATH)
+    assert b._run_bootstrap(manager)["status"] == "UNCERTAIN_EFFECT"
+    assert _marker_bytes(manager) != gen1_marker_bytes
+
+    (manager.GATEWAY_STATE_ROOT / b.CONSUMPTION_FILENAME).write_bytes(gen1_marker_bytes)
+    before = manager.ledger_path.read_bytes()
+    manager.advance_generation("3")
+    manager.live_states = list(_VERIFIED_PATH)
+    with pytest.raises(
+        real_manager.GatewayContractError,
+        match="^R1_CONCURRENT_RECOVERY_FORBIDDEN: .*request-v2=UNCERTAIN_EFFECT",
+    ):
+        b._run_bootstrap(manager)
+
+    assert manager.effects == ["request-v1", "request-v2"]
+    assert manager.ledger_path.read_bytes() == before
+    assert _request_rows(manager, "request-v3") == []
+
+
+def test_1958_successor_runs_when_all_prior_requests_are_terminal(tmp_path):
+    manager = LedgerBoundManager(tmp_path / "gateway-direct")
+    assert b._run_bootstrap(manager)["status"] == "VERIFIED"
+    manager.advance_generation("2")
+    assert b._run_bootstrap(manager)["status"] == "VERIFIED"
+    assert manager.effects == ["request-v1", "request-v2"]
+    assert _request_rows(manager, "request-v2")[-1]["state"] == "VERIFIED"
