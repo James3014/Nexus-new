@@ -691,7 +691,8 @@ def test_self_check_gold_executes_candidate_runs(tmp_path, fx):
     assert any("tests/test_mul.py" in m and "role=CAND+T" in m for m in lines)
 
 
-# Item 6: an unknown P2P baseline is never a clean empty baseline.
+# Item 6: P2P runs that time out or fail to collect are recorded as a diagnostic only;
+# scoring follows v1 (§6.2, §8: their expected nodes count as fail).
 
 
 class _FaultyRunner(ros.PytestRunner):
@@ -715,48 +716,211 @@ def _faulty_ctx(tmp: Path, fx: Fixture, fail_tree: str) -> ros.ScoreContext:
     return ctx
 
 
-def test_p2p_baseline_timeout_is_not_scorable(tmp_path, fx):
+def test_p2p_baseline_timeout_is_recorded_without_label_effect(tmp_path, fx):
     task = fx.task(fx.diff_from_base({"pkg/calc.py": FIXED}))
     r = ros.score_task(task, _faulty_ctx(tmp_path, fx, "baset"))["receipt"]
-    assert (r["label"], r["sub_reason"]) == (
-        ros.NOT_SCORABLE_ORACLE_INVALID,
-        "P2P_BASELINE_FAILED",
-    )
+    # v1: a timed-out BASE+T run has no passing nodes, so the P2P(c) base set is empty.
+    assert r["label"] == ros.RESOLVED and r["sub_reason"] is None
+    assert r["p2p_bc_total"] == 0
     assert r["p2p_baseline_failures"] == [
         {"exit_code": -1, "run": 0, "target": "tests", "timed_out": True, "tree": "BASE+T"}
     ]
-    assert r["evaluated_label"] == ros.NOT_SCORABLE_ORACLE_INVALID
-    assert ros.summarize([r])["valid_oracle_n"] == 0
 
 
-def test_p2p_gold_timeout_does_not_drop_suspects_silently(tmp_path, fx):
-    # The candidate breaks add(); GOLD's P2P run times out, which used to turn the
-    # regression into a silent `gold_also_fails`.
+def test_p2p_gold_timeout_makes_suspects_gold_also_fails(tmp_path, fx):
+    # The candidate breaks add(); GOLD's P2P run times out, so under v1 every node of it
+    # counts as fail on GOLD and the suspect is `gold_also_fails`. The diagnostic shows why.
     calc = FIXED.replace("return a + b", "return a - b")
     task = fx.task(fx.diff_from_base({"pkg/calc.py": calc}))
     r = ros.score_task(task, _faulty_ctx(tmp_path, fx, "gold"))["receipt"]
-    assert (r["label"], r["sub_reason"]) == (
-        ros.NOT_SCORABLE_ORACLE_INVALID,
-        "P2P_BASELINE_FAILED",
-    )
-    assert r["p2p_baseline_failures"][0]["tree"] == "GOLD"
+    assert r["label"] == ros.RESOLVED
+    assert r["gold_also_fails"] == ["tests.test_add::test_add"]
+    assert [d["tree"] for d in r["p2p_baseline_failures"]] == ["GOLD"]
 
 
-def test_p2p_baseline_collection_error_is_not_scorable(tmp_path):
+def test_p2p_baseline_collection_error_is_recorded(tmp_path):
     fx = Fixture(tmp_path, extra_base={"tests/test_import_error.py": "import no_such_mod_xyz\n"})
     r = _score(tmp_path, fx, fx.task(fx.diff_from_base({"pkg/calc.py": FIXED})))
-    assert (r["label"], r["sub_reason"]) == (
-        ros.NOT_SCORABLE_ORACLE_INVALID,
-        "P2P_BASELINE_FAILED",
-    )
+    assert r["label"] == ros.RESOLVED
+    assert r["p2p_baseline_failures"][0]["tree"] == "BASE+T"
     assert r["p2p_baseline_failures"][0]["exit_code"] == 2
 
 
-def test_p2p_baseline_failure_on_timeout_candidate_keeps_not_runnable(tmp_path, fx):
+def test_p2p_baseline_failure_on_timeout_candidate_keeps_shadow_label(tmp_path, fx):
     task = fx.task(fx.diff_from_base({"pkg/calc.py": FIXED}), status="TIMEOUT")
     r = ros.score_task(task, _faulty_ctx(tmp_path, fx, "baset"))["receipt"]
     assert (r["label"], r["sub_reason"]) == (ros.NOT_RUNNABLE, "SEALED_WHILE_PROVIDER_RUNNING")
-    assert r["shadow_label"] is None
+    assert r["shadow_label"] == ros.RESOLVED
+    assert r["p2p_baseline_failures"]
+
+
+def test_gold_deleting_imported_module_is_gold_also_fails(tmp_path):
+    # Review repro: the human fix deletes pkg/old.py, which an unchanged P2P test imports.
+    # GOLD's P2P run fails to collect (exit 2); under v1 those nodes fail on GOLD, so
+    # candidate := GOLD is RESOLVED with them in gold_also_fails.
+    fx = Fixture(
+        tmp_path,
+        extra_base={
+            "pkg/old.py": "X = 1\n",
+            "tests/test_old_user.py": "import pkg.old\n\n\ndef test_old():\n    assert pkg.old.X == 1\n",
+        },
+    )
+    up = fx.upstream
+    _git(up, "checkout", "-q", "--detach", fx.base)
+    _write(up, {"pkg/calc.py": FIXED, "tests/test_mul.py": MUL_TEST})
+    _git(up, "rm", "-q", "pkg/old.py")
+    _git(up, "add", "-A")
+    _git(up, "commit", "-qm", "human fix removing old")
+    merge = _git(up, "rev-parse", "HEAD").strip()
+    task = fx.task(b"", merge=merge)
+    r = ros.score_task(task, _ctx(tmp_path, fx), candidate_override="gold")["receipt"]
+    assert r["label"] == ros.RESOLVED
+    assert "tests.test_old_user::test_old" in r["gold_also_fails"]
+    assert r["p2p_new_failures"] == []
+    assert any(d["tree"] == "GOLD" and d["exit_code"] == 2 for d in r["p2p_baseline_failures"])
+
+
+# Review round 2 (F3-F5): symlinks at ignored paths, .git components, shape checks.
+
+
+def _apply_lab(tmp_path: Path):
+    """A BASE repo with `*.log` git-ignored, its scorer repo, and an outside dir."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    up = tmp_path / "lab-up"
+    up.mkdir()
+    _git(up, "init", "-q")
+    _write(
+        up,
+        {
+            ".gitignore": "*.log\n",
+            "pkg/a.py": "x = 1\n",
+            "tests/test_a.py": "def test_a():\n    pass\n",
+        },
+    )
+    _git(up, "add", "-A")
+    _git(up, "commit", "-qm", "base")
+    base = _git(up, "rev-parse", "HEAD").strip()
+    repo = ros.GitRepo(tmp_path / "lab-repo", [str(up)])
+    assert repo.ensure_commit(base)
+    return up, base, repo, outside
+
+
+def _forced_diff(up: Path, base: str, make) -> bytes:
+    """Diff vs BASE that also includes git-ignored paths (``add -f``)."""
+    w = up.parent / f"mk-{abs(hash(make)) % 10**8}"
+    _git(up, "worktree", "add", "-q", "--detach", str(w), base)
+    make(w)
+    _git(w, "add", "-A", "-f")
+    return _git(w, "diff", "--cached", "--binary", "--no-renames").encode()
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        pytest.param(lambda w, out: (w / "evil.log").symlink_to(out), id="ignored-absolute"),
+        pytest.param(lambda w, out: (w / "rel.log").symlink_to("../../outside"), id="relative"),
+        pytest.param(
+            lambda w, out: (
+                (w / "a.log").symlink_to("evil2.log"),
+                (w / "evil2.log").symlink_to(out),
+            ),
+            id="chain",
+        ),
+    ],
+)
+def test_escaping_symlink_at_ignored_path_is_apply_failed(tmp_path, make):
+    up, base, repo, outside = _apply_lab(tmp_path)
+    diff = _forced_diff(up, base, lambda w: make(w, outside))
+    # The candidate worktree sits at <tmp>/wts/cand, so ../../outside is <tmp>/outside.
+    wt = repo.worktree(tmp_path / "wts" / "cand", base)
+    err = ros.apply_candidate(repo, wt, ros.Candidate(diff, []))
+    assert err and err.startswith("symlink_escapes_tree:")
+    assert list(outside.iterdir()) == []
+
+
+def test_base_tracked_escaping_symlink_is_not_blamed_on_candidate(tmp_path):
+    up, _, _, outside = _apply_lab(tmp_path)
+    (up / "docs").mkdir()
+    (up / "docs" / "LATEST.md").symlink_to(outside / "rca.md")
+    _git(up, "add", "-A")
+    _git(up, "commit", "-qm", "tracked absolute link, as in Nexus-new")
+    base = _git(up, "rev-parse", "HEAD").strip()
+    repo = ros.GitRepo(tmp_path / "lab-repo2", [str(up)])
+    assert repo.ensure_commit(base)
+    diff = _forced_diff(up, base, lambda w: (w / "pkg" / "a.py").write_text("x = 2\n"))
+    wt = repo.worktree(tmp_path / "wts" / "cand2", base)
+    assert ros.apply_candidate(repo, wt, ros.Candidate(diff, [])) is None
+
+
+@pytest.mark.parametrize("path", [".git/config", ".GIT/config", "pkg/.git/hooks/x", "a/.Git"])
+def test_untracked_git_component_is_unsafe(tmp_path, path):
+    wt = tmp_path / "wt"
+    repo = ros.GitRepo(wt, [])
+    data = b"x\n"
+    cand = ros.Candidate(
+        b"", [{"path": path, "sha256": hashlib.sha256(data).hexdigest(), "data": data}]
+    )
+    assert ros.apply_candidate(repo, wt, cand) == f"untracked_path_unsafe:{path}"
+
+
+def test_oracle_parent_symlink_escape_is_apply_failed(tmp_path, monkeypatch, fx):
+    # If an escaping parent link ever reaches the oracle overwrite, the task is
+    # NOT_RUNNABLE/APPLY_FAILED rather than a scorer error.
+    def boom(wt, gold_wt, files):
+        if wt.name == "candt":
+            raise ros.UnsafeTreePath("oracle_path_escapes:tests/test_mul.py")
+        return real(wt, gold_wt, files)
+
+    real = ros.overwrite_oracle_files
+    monkeypatch.setattr(ros, "overwrite_oracle_files", boom)
+    r = _score(tmp_path, fx, fx.task(fx.diff_from_base({"pkg/calc.py": FIXED})))
+    assert (r["label"], r["sub_reason"]) == (ros.NOT_RUNNABLE, "APPLY_FAILED")
+    assert r["detail"] == "oracle_path_escapes:tests/test_mul.py"
+
+
+def test_overwrite_oracle_files_refuses_escaping_parent(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    gold, wt = tmp_path / "gold", tmp_path / "wt"
+    (gold / "tests" / "sub").mkdir(parents=True)
+    (gold / "tests" / "sub" / "test_o.py").write_text("gold\n")
+    (wt / "tests").mkdir(parents=True)
+    (wt / "tests" / "sub").symlink_to(outside)
+    with pytest.raises(ros.UnsafeTreePath):
+        ros.overwrite_oracle_files(wt, gold, ["tests/sub/test_o.py"])
+    assert list(outside.iterdir()) == []
+
+
+@pytest.mark.parametrize("size", ["abc", 1.5, True, [6]])
+def test_malformed_untracked_size_is_seal_refused(tmp_path, fx, size):
+    task = fx.task(b"", untracked={"pkg/fast.py": "x = 1\n"})
+    _reseal(task, lambda so: so["untracked_files"][0].update({"size": size}))
+    with pytest.raises(ros.SealRefused, match="untracked_size_invalid"):
+        ros.load_sealed_task(task)
+
+
+@pytest.mark.parametrize(
+    "gt", [{"details": "x", "terminal_state": "CLOSED_WITH_MERGED_PR"}, ["not", "an", "object"]]
+)
+def test_malformed_ground_truth_shape_is_seal_refused(tmp_path, fx, gt):
+    task = fx.task(fx.gold_diff)
+    gt_bytes = json.dumps(gt).encode()
+    (task / "ground_truth.json").write_bytes(gt_bytes)
+    state = json.loads((task / "state.json").read_text())
+    state["ground_truth"]["sha256"] = hashlib.sha256(gt_bytes).hexdigest()
+    (task / "state.json").write_text(json.dumps(state))
+    with pytest.raises(ros.SealRefused, match="ground_truth_shape_invalid"):
+        _score(tmp_path, fx, task)
+
+
+def test_ensure_commit_option_like_source_is_not_an_option(tmp_path, fx):
+    marker = tmp_path / "PWNED3"
+    repo = ros.GitRepo(tmp_path / "scorer-repo3", [f"--upload-pack=touch {marker};git-upload-pack"])
+    assert repo.ensure_commit(fx.fix) is False
+    assert not marker.exists()
+    repo.sources.append(str(fx.upstream))
+    assert repo.ensure_commit(fx.fix) is True
 
 
 # Item 7: malformed payloads, memory wait, env cache key, version.

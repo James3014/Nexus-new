@@ -16,28 +16,28 @@ The v1 header names `SCORER_VERSION = "1.0.0"`. The scorer versions are:
 |---|---|---|
 | `1.0.0` | first implementation (#1951) | v1 |
 | `1.0.1` | the trusted impact-gate copy is registered in `sys.modules`, so the P2P(b) selector no longer fails silently | v1, unchanged |
-| `1.1.0` | post-merge review follow-ups (#1951 review): input validation, write containment, P2P baseline failures recorded, summary fix, cache keys | v1, unchanged; A2–A4 below are clarifications |
+| `1.1.0` | post-merge review follow-ups (#1951 review): input validation, write containment, a P2P run diagnostic, a summary fix and cache keys | v1, unchanged; A2–A4 below only add diagnostics, refusals for malformed or unsafe input, and operational behaviour |
 
 Current scorer: `SCORER_VERSION = "1.1.0"`. Receipts record the version that wrote them.
 
-## 2026-10-14: A2, P2P(b/c) runs with an unknown result (clarification)
+## 2026-10-14: A2, P2P(b/c) run diagnostic (no rule change)
 
-v1 §6.3 defines the P2P(b/c) base set as the nodes that pass on `BASE+T`, and §8
-says a timed-out invocation yields no junit. v1 does not say what happens when the
-`BASE+T` run of a target (or a `BASE+T` rerun, or the `GOLD` run for suspects) times out
-or exits with a code other than 0, 1 or 5. Exit code 5 means nothing was collected.
-Treating that result as an empty, clean baseline would claim "no regression" for nodes
-that were never observed.
+v1 already decides what happens when a P2P(b/c) run times out or fails to collect:
+- §8: "A timeout yields no junit; all expected nodes of that invocation count as `fail`".
+- §6.2: collection failure and absence from the junit count as `fail`.
 
-Scorer 1.1.0 handles this case as follows:
+So scoring stays exactly as v1 says:
+- A failed `BASE+T` run contributes no base-pass nodes.
+- A failed `GOLD` suspect run makes its suspects `gold_also_fails`. One case: the
+  human fix deletes a module that an unchanged test imports.
 
-- Each such run is recorded in the receipt as `p2p_baseline_failures[]`, with tree,
-  target, run, exit code and `timed_out`.
-- A confirmed P2P new failure (§6.4) still gives `BROKE_EXISTING`.
-- Otherwise the task is `NOT_SCORABLE_ORACLE_INVALID` with sub-reason
-  `P2P_BASELINE_FAILED`, so it leaves the valid-oracle set.
-- For `NOT_RUNNABLE/SEALED_WHILE_PROVIDER_RUNNING`, the label stays `NOT_RUNNABLE`
-  and `shadow_label` is left unset.
+Scorer 1.1.0 only adds a diagnostic field, `p2p_baseline_failures[]`, to the receipt.
+It lists every candidate-independent P2P run (`BASE+T` runs 0–2, and the `GOLD` suspect
+run) that timed out or exited with a code other than 0, 1 or 5. Exit code 5 means
+nothing was collected. Each entry records tree, target, run, exit code and `timed_out`.
+The field never changes a label, a sub-reason or `shadow_label`. It shows a reader
+where a P2P set is empty, or a `gold_also_fails` comes from, because a run failed
+rather than because tests failed.
 
 ## 2026-10-14: A3, input validation and write containment (clarification)
 
@@ -46,9 +46,24 @@ Scorer 1.1.0 handles this case as follows:
   (`ground_truth_merge_commit_sha_invalid`). The scorer refuses before any git call.
 - A malformed base64 or gzip candidate payload is a seal refusal
   (`payload_malformed:*`, §3.4).
-- A candidate diff that creates a symlink resolving outside the tree, or an untracked
-  file whose resolved target escapes the tree or already exists (including a dangling
-  symlink), is `NOT_RUNNABLE/APPLY_FAILED` (§7 row 6, "escapes the tree").
+- A malformed untracked `size` (not an integer) is a seal refusal
+  (`untracked_size_invalid`). A malformed ground-truth shape is also a seal refusal
+  (`ground_truth_shape_invalid`). That covers:
+  - the document is not an object;
+  - `details` is not an object;
+  - `merged_prs` is not a list.
+- The following are `NOT_RUNNABLE/APPLY_FAILED` (§7 row 6, "escapes the tree"):
+  - After the candidate diff is applied, any symlink anywhere in the worktree that
+    resolves outside the tree. This covers git-ignored paths and chains of links. The
+    worktree is walked without following links, and `.git` is skipped. A symlink
+    tracked unchanged in BASE belongs to the repository and is not counted.
+  - An untracked file whose resolved target escapes the tree or already exists. This
+    includes a dangling symlink.
+  - An oracle-file overwrite that would pass through an escaping parent symlink.
+- An untracked path with a `.git` component at any depth, matched case-insensitively,
+  is `untracked_path_unsafe` (APPLY_FAILED).
+
+None of these changes how a candidate that applies cleanly is scored.
 
 ## 2026-10-14: A4, memory check and caches (clarification)
 

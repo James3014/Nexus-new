@@ -132,8 +132,16 @@ def _require_rev(rev: str) -> str:
 
 
 def _safe_relpath(path: str) -> bool:
+    """Relative, no ``..``, and no ``.git`` component at any depth (case-insensitive:
+    ``.GIT`` is the same directory on a case-insensitive filesystem)."""
+    if not isinstance(path, str) or not path:
+        return False
     p = PurePosixPath(path)
-    return bool(path) and not p.is_absolute() and ".." not in p.parts and p.parts[0] != ".git"
+    return (
+        not p.is_absolute()
+        and ".." not in p.parts
+        and not any(part.lower() == ".git" for part in p.parts)
+    )
 
 
 # --------------------------------------------------------------- sealed inputs
@@ -217,8 +225,12 @@ def load_sealed_task(task_dir: Path) -> TaskInputs:
         data = _decode_payload(item.get("gzip_base64"), f"untracked:{item['path']}")
         if sha256_bytes(data) != item.get("sha256"):
             raise SealRefused(f"untracked_sha256_mismatch:{item.get('path')}")
-        if item.get("size") is not None and len(data) != int(item["size"]):
-            raise SealRefused(f"untracked_size_mismatch:{item.get('path')}")
+        size = item.get("size")
+        if size is not None:
+            if isinstance(size, bool) or not isinstance(size, int):
+                raise SealRefused(f"untracked_size_invalid:{item.get('path')}")
+            if len(data) != size:
+                raise SealRefused(f"untracked_size_mismatch:{item.get('path')}")
         untracked.append({"path": item["path"], "sha256": item["sha256"], "data": data})
     owner, repo, issue = parse_task_key(task_dir.name)
     wall = raw.get("wall_time_seconds")
@@ -249,11 +261,23 @@ def load_ground_truth(inputs: TaskInputs) -> dict[str, Any] | None:
     data = path.read_bytes()
     if sha256_bytes(data) != state_gt.get("sha256"):
         raise SealRefused("ground_truth_sha256_mismatch")
-    gt = json.loads(data)
+    try:
+        gt = json.loads(data)
+    except ValueError as exc:
+        raise SealRefused("ground_truth_shape_invalid:json") from exc
+    if not isinstance(gt, dict):
+        raise SealRefused("ground_truth_shape_invalid:not_object")
+    details = gt.get("details", {})
+    if details is None:
+        details = {}
+    if not isinstance(details, dict):
+        raise SealRefused("ground_truth_shape_invalid:details")
+    prs = details.get("merged_prs") or []
+    if not isinstance(prs, list):
+        raise SealRefused("ground_truth_shape_invalid:merged_prs")
     # Every SHA taken from ground truth is validated before any git call (it is passed to
     # `git fetch`, where a value such as `--upload-pack=...` would be an option).
-    details = gt.get("details") if isinstance(gt, dict) else None
-    for pr in (details or {}).get("merged_prs") or []:
+    for pr in prs:
         if not isinstance(pr, dict) or not is_full_sha(pr.get("merge_commit_sha")):
             raise SealRefused("ground_truth_merge_commit_sha_invalid")
     return gt
@@ -350,19 +374,42 @@ def _inside(root_real: Path, path: Path) -> bool:
     return True
 
 
-def _escaping_symlinks(repo: GitRepo, wt: Path) -> list[str]:
-    """Symlinks among the paths the candidate diff touched that resolve outside ``wt``."""
-    root_real = wt.resolve()
-    out = repo.git(
-        "status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames", cwd=wt
-    ).stdout.decode(errors="surrogateescape")
-    bad = []
-    for entry in out.split("\0"):
-        rel = entry[3:]
-        if not rel:
+def _base_symlinks(repo: GitRepo, wt: Path) -> dict[str, str]:
+    """Symlinks tracked in the worktree's HEAD commit (BASE): path -> link target."""
+    out = repo.git("ls-tree", "-r", "-z", "HEAD", cwd=wt).stdout
+    links: dict[str, str] = {}
+    for entry in out.split(b"\0"):
+        if not entry.startswith(b"120000 "):
             continue
-        p = wt / rel
-        if p.is_symlink() and not _inside(root_real, p.resolve()):
+        meta, _, path = entry.partition(b"\t")
+        blob = meta.split()[2].decode()
+        target = repo.git("cat-file", "blob", blob, cwd=wt).stdout
+        links[path.decode(errors="surrogateescape")] = target.decode(errors="surrogateescape")
+    return links
+
+
+def _escaping_symlinks(repo: GitRepo, wt: Path) -> list[str]:
+    """Every symlink in ``wt`` (``.git`` skipped, links not followed) that resolves
+    outside ``wt``, including git-ignored paths and chains of links.
+
+    A symlink tracked unchanged in BASE is part of the repository, not of the candidate,
+    and is not reported (Nexus-new tracks a few absolute links).
+    """
+    root_real = wt.resolve()
+    bad: list[str] = []
+    base_links: dict[str, str] | None = None
+    for dirpath, dirnames, filenames in os.walk(wt, followlinks=False):
+        if Path(dirpath) == wt:
+            dirnames[:] = [d for d in dirnames if d != ".git"]
+        for name in dirnames + filenames:
+            p = Path(dirpath) / name
+            if not p.is_symlink() or _inside(root_real, p.resolve()):
+                continue
+            rel = p.relative_to(wt).as_posix()
+            if base_links is None:
+                base_links = _base_symlinks(repo, wt)
+            if base_links.get(rel) == os.readlink(p):
+                continue
             bad.append(rel)
     return sorted(bad)
 
@@ -418,12 +465,16 @@ def apply_candidate(repo: GitRepo, wt: Path, cand: Candidate) -> str | None:
     return None
 
 
+class UnsafeTreePath(ValueError):
+    """An oracle-file write would leave the worktree (through a parent symlink)."""
+
+
 def overwrite_oracle_files(wt: Path, gold_wt: Path, oracle_files: Iterable[str]) -> None:
     root_real = wt.resolve()
     for rel in oracle_files:
         src, dst = gold_wt / rel, wt / rel
         if not _inside(root_real, dst.parent.resolve()):
-            raise ValueError(f"oracle file path escapes the tree: {rel}")
+            raise UnsafeTreePath(f"oracle_path_escapes:{rel}")
         if dst.is_symlink():
             dst.unlink()  # never write through a link the candidate may have placed
         if src.exists():
@@ -1090,7 +1141,14 @@ def score_task(
             return _finish(receipt, timing, t0, ctx)
         untracked_paths = [u["path"] for u in cand.untracked]
         cand_tree = repo.tree_id(wts["candt"], untracked_paths)
-        overwrite_oracle_files(wts["candt"], wts["gold"], files)
+        try:
+            overwrite_oracle_files(wts["candt"], wts["gold"], files)
+        except UnsafeTreePath as exc:
+            receipt["label"] = NOT_RUNNABLE
+            receipt["sub_reason"] = not_runnable or "APPLY_FAILED"
+            receipt["detail"] = str(exc)
+            receipt["flaky_dropped"] = len(flaky)
+            return _finish(receipt, timing, t0, ctx)
         candt_tree = repo.tree_id(wts["candt"], untracked_paths)
         receipt["trees"].update({"CAND": cand_tree, "CAND+T": candt_tree})
         if not_runnable == "SCOPE_INVALID":
@@ -1123,12 +1181,9 @@ def score_task(
         if not_runnable:
             receipt["label"] = NOT_RUNNABLE
             receipt["sub_reason"] = not_runnable
-            # shadow_label is one of labels 7-10 only; an unknown P2P baseline leaves it unset.
-            receipt["shadow_label"] = evaluated if evaluated in VALID_ORACLE_LABELS else None
+            receipt["shadow_label"] = evaluated
         else:
             receipt["label"] = evaluated
-            if evaluated == NOT_SCORABLE_ORACLE_INVALID:
-                receipt["sub_reason"] = "P2P_BASELINE_FAILED"
         return _finish(receipt, timing, t0, ctx)
     finally:
         if not ctx.keep_trees:
@@ -1216,8 +1271,10 @@ def _evaluate_candidate(
     ignores = list(files)
     base_p2p: dict[str, dict[str, str]] = {}
     cand_p2p: dict[str, dict[str, str]] = {}
-    # Candidate-independent P2P runs (BASE+T, GOLD) that timed out or did not produce a
-    # trustworthy report: their node set is unknown, not empty (amendment A2).
+    # Diagnostic only (amendment A2): candidate-independent P2P runs (BASE+T, GOLD) that
+    # timed out or exited outside {0, 1, 5}. Scoring follows v1 unchanged: such a run's
+    # expected nodes count as fail (§6.2, §8), so a BASE+T failure leaves no base-pass
+    # nodes and a GOLD failure makes suspects `gold_also_fails`. The label is unaffected.
     baseline_failures: list[dict[str, Any]] = []
 
     def baseline_run(tree_key: str, tree_id: str, t: str, i: int) -> dict[str, str]:
@@ -1264,11 +1321,7 @@ def _evaluate_candidate(
                 new_failures.add(n)
 
     if new_failures:
-        # A confirmed regression stands even if another target's baseline is unknown.
         label = BROKE_EXISTING
-    elif baseline_failures:
-        # The regression check is incomplete, so no "no regression" label can be claimed.
-        label = NOT_SCORABLE_ORACLE_INVALID
     elif len(f2p_pass) == len(f2p):
         label = RESOLVED
     elif f2p_pass:

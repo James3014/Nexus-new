@@ -238,15 +238,21 @@ from the read-only receipts and pytest cache:
 
 - **Merge-SHA validation and `--` before git positionals.** All V11 merge-commit SHAs
   and base SHAs are 40-hex, so no label changes.
-- **Write containment (symlinks or untracked files that escape the tree → APPLY_FAILED).**
-  No V11 diff contains a symlink (mode `120000`), and no untracked path is absolute or
-  contains `..`. No label changes.
+- **Write containment (symlinks anywhere in the tree, or untracked files, that escape
+  it → APPLY_FAILED; `.git` components refused).** No V11 diff contains a symlink (mode
+  `120000`). Nexus-new tracks three symlinks in BASE, two of them absolute; these are
+  exempt because they are unchanged. No untracked path is absolute, contains `..` or
+  has a `.git` component. No label changes.
+- **Shape checks (untracked `size`, ground-truth `details`/`merged_prs`).** Every V11
+  size is an integer, and every ground-truth file has the expected shape. No refusal
+  changes.
 - **`by_raw_status` with a `None` status.** Every V11 valid-oracle task has a string
   raw status, so the breakdown above is unchanged.
-- **P2P baseline timeout or collect failure → `NOT_SCORABLE_ORACLE_INVALID/P2P_BASELINE_FAILED`.**
-  Every P2P(b/c) run in the cache for the 11 tasks with P2P targets exited with 0 or 1,
-  with no timeout. That covers BASE+T runs 0–2, the GOLD runs and the CAND+T runs, in
-  both `receipts/` and `selfcheck-a-gold/`. No label changes.
+- **P2P run diagnostic (`p2p_baseline_failures[]`).** This field is diagnostic only,
+  and scoring stays v1. As it happens, every P2P(b/c) run in the cache for the 11 tasks
+  with P2P targets exited with 0 or 1, with no timeout. That covers BASE+T runs 0–2,
+  the GOLD runs and the CAND+T runs, in both `receipts/` and `selfcheck-a-gold/`. So
+  the field would be empty for every V11 task.
 - **Malformed payloads → seal refusal.** All V11 payloads decode under strict base64
   and gzip, so no refusal changes.
 - **Memory-check unknown handling and the cache keys.** These have no label effect.
