@@ -152,6 +152,18 @@ ALL: tuple[PublicationRoute, ...] = (
         "subprocess-invokes gh against a third-party repo.",
     ),
     PublicationRoute(
+        route_id="workforce_model_autoupdate",
+        capability_surface="scripts/ops/workforce_model_autoupdate.py (#1996/#1997)",
+        observed_write_seam="gh issue create / gh pr create subprocess calls (Proposer.create_issue, "
+        "runtime PR plan step) against the NEXUS_REPO / RUNTIME_REPO constants",
+        state=PublicationRouteState.BOUNDED_INTERNAL_ONLY,
+        evidence="Owner decision on #1924: internal collaboration only. The autoupdater "
+        "opens Issues and PRs solely in James3014's own repositories "
+        "(James3014/Nexus-new, James3014/nexus-runtime) as the Nexus agent bot; it "
+        "never targets a third-party repository and is not Owner representation.",
+        physical_witnesses=("scripts/ops/workforce_model_autoupdate.py",),
+    ),
+    PublicationRoute(
         route_id="owner_representation_seam",
         capability_surface="Canonical Owner-representation publication seam",
         observed_write_seam="nexus/orchestrator/owner_representation.py + owner_representation_store.py",
@@ -266,6 +278,35 @@ FORBIDDEN_PROGRAMMATIC_GITHUB_WRITE_PATTERNS: tuple[tuple[str, str, str], ...] =
 )
 
 
+# Source files whose matches of specific FORBIDDEN_PROGRAMMATIC_GITHUB_WRITE_PATTERNS
+# are explicitly inventoried as BOUNDED_INTERNAL_ONLY routes: path -> (route_id,
+# exempted pattern names).  Only the named patterns are exempt for that one file;
+# every other pattern and every other file stays under the source-parity scan.
+INVENTORIED_INTERNAL_WRITE_SINKS: Mapping[str, tuple[str, frozenset[str]]] = MappingProxyType({
+    "scripts/ops/workforce_model_autoupdate.py": (
+        "workforce_model_autoupdate",
+        frozenset({"gh_cli_issue_pr_create"}),
+    ),
+})
+
+
+def inventoried_internal_write_sink_patterns(source_path: str) -> frozenset[str]:
+    """Pattern names exempted for ``source_path`` by an internal-only inventoried route.
+
+    Fails closed: the exemption holds only while the bound route is inventoried
+    as ``BOUNDED_INTERNAL_ONLY`` and lists ``source_path`` as a physical witness.
+    """
+    entry = INVENTORIED_INTERNAL_WRITE_SINKS.get(source_path)
+    if entry is None:
+        return frozenset()
+    route_id, pattern_names = entry
+    if classify_transport_route(route_id) is not PublicationRouteState.BOUNDED_INTERNAL_ONLY:
+        return frozenset()
+    if source_path not in physical_witnesses_for(route_id):
+        return frozenset()
+    return pattern_names
+
+
 def expected_write_seam_for(route_id: str) -> str:
     for route in ALL:
         if route.route_id == route_id:
@@ -285,11 +326,13 @@ __all__ = [
     "EXTERNAL_CLASSIFICATION_IDS",
     "FORBIDDEN_PROGRAMMATIC_GITHUB_WRITE_PATTERNS",
     "INTERNAL_ONLY_ROUTE_IDS",
+    "INVENTORIED_INTERNAL_WRITE_SINKS",
     "PublicationRoute",
     "PublicationRouteState",
     "assert_no_unknown_routes",
     "classify_transport_route",
     "expected_write_seam_for",
+    "inventoried_internal_write_sink_patterns",
     "physical_witnesses_for",
     "route_for_transport",
     "transport_inventory_status",
