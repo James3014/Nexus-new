@@ -759,3 +759,157 @@ def test_missing_history_for_the_merge_base_fails_closed(world):
     event["workflow_sha"] = "f" * 40
     with pytest.raises(LaneBindingError):
         validate_event(event, repo_root=world["repo"], now=NOW)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "src/claude.md",
+        "src/Claude.md",
+        "src/agents.md",
+        "src/Conftest.py",
+        "src/.Claude/settings.json",
+        "src/.MCP.json",
+        "src/.VSCode/tasks.json",
+        "src/Gemini.md",
+    ],
+)
+def test_protected_paths_match_case_insensitively(world, path):
+    # The Owner's Mac is case-insensitive APFS: these all resolve to protected files.
+    head = _head(world, {path: "x\n"})
+    with pytest.raises(LaneBindingError, match="ATTESTATION_PROTECTED_PATH"):
+        _validate(world, head, _body(_envelope(world, _payload())))
+
+
+def test_new_file_differing_only_in_case_from_a_tracked_path_is_rejected(world):
+    repo = world["repo"]
+    (repo / "src" / "x").mkdir()
+    (repo / "src" / "x" / "Module.py").write_text("a = 1\n", encoding="utf-8")
+    base = _commit(repo, "tracked")
+    world = {**world, "base": base}
+    # Write via git plumbing so the test also works on a case-insensitive filesystem.
+    blob = subprocess.run(
+        ["git", "-C", str(repo), "hash-object", "-w", "--stdin"],
+        input="a = 2\n",
+        text=True,
+        check=True,
+        capture_output=True,
+    ).stdout.strip()
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            f"100644,{blob},src/x/module.py",
+        ],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-m", "case"], check=True, capture_output=True
+    )
+    head = _git(repo, "rev-parse", "HEAD")
+    with pytest.raises(LaneBindingError, match="ATTESTATION_CASE_COLLISION_PATH"):
+        _validate(world, head, _body(_envelope(world, _payload())))
+
+
+def test_new_directory_differing_only_in_case_is_rejected(world):
+    repo = world["repo"]
+    blob = subprocess.run(
+        ["git", "-C", str(repo), "hash-object", "-w", "--stdin"],
+        input="a = 2\n",
+        text=True,
+        check=True,
+        capture_output=True,
+    ).stdout.strip()
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            f"100644,{blob},Src/new.py",
+        ],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-m", "case"], check=True, capture_output=True
+    )
+    head = _git(repo, "rev-parse", "HEAD")
+    with pytest.raises(LaneBindingError, match="ATTESTATION_CASE_COLLISION_PATH"):
+        _validate(
+            world, head, _body(_envelope(world, _payload(allowed_paths=["Src/**", "src/**"])))
+        )
+
+
+def test_non_ascii_paths_are_rejected(world):
+    head = _head(world, {"src/café.py": "x = 1\n"})
+    with pytest.raises(LaneBindingError, match="ATTESTATION_NON_ASCII_PATH"):
+        _validate(world, head, _body(_envelope(world, _payload())))
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "scripts/__init__.py",
+        "scripts/ops/__init__.py",
+        "scripts/ops/pr_impact_gate.py",
+        "scripts/ops/select_tests.py",
+        "scripts/ops/trusted_impact_gate.py",
+        ".nexus/test_impact_index.json",
+    ],
+)
+def test_gate_inputs_read_from_the_trusted_revision_are_protected(world, path):
+    head = _head(world, {path: "x\n"})
+    with pytest.raises(LaneBindingError, match="ATTESTATION_PROTECTED_PATH"):
+        _validate(world, head, _body(_envelope(world, _payload(allowed_paths=[path]))))
+
+
+def test_directory_glob_also_matches_the_directory_path_itself():
+    from scripts.ops.trusted_merge_lane_gate import _path_matches
+
+    assert _path_matches("src", ["src/**"])
+    assert _path_matches("src/a/b.py", ["src/**"])
+    assert not _path_matches("srcx", ["src/**"])
+    assert _path_matches("pkg/.Claude", ["**/.claude/**"], casefold=True)
+
+
+@pytest.mark.parametrize("mode,kind", [("120000", "blob"), ("160000", "commit")])
+def test_symlink_and_gitlink_changes_are_rejected(world, mode, kind):
+    repo = world["repo"]
+    if kind == "blob":
+        sha = subprocess.run(
+            ["git", "-C", str(repo), "hash-object", "-w", "--stdin"],
+            input="../governance",
+            text=True,
+            check=True,
+            capture_output=True,
+        ).stdout.strip()
+    else:
+        sha = "1" * 40
+    subprocess.run(
+        ["git", "-C", str(repo), "update-index", "--add", "--cacheinfo", f"{mode},{sha},src/link"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-m", "link"], check=True, capture_output=True
+    )
+    head = _git(repo, "rev-parse", "HEAD")
+    with pytest.raises(LaneBindingError, match="ATTESTATION_SYMLINK_OR_GITLINK"):
+        _validate(world, head, _body(_envelope(world, _payload())))
+
+
+def test_owner_attestation_cli_does_not_put_the_repo_root_first_on_sys_path():
+    import sys
+
+    root = Path(__file__).resolve().parents[2]
+    code = (
+        "import runpy, sys\n"
+        f"runpy.run_path({str(root / 'scripts/ops/owner_attestation.py')!r}, run_name='probe')\n"
+        f"assert sys.path[0] != {str(root)!r}, sys.path[:3]\n"
+    )
+    subprocess.run([sys.executable, "-c", code], check=True, cwd=str(root))

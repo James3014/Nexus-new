@@ -85,7 +85,8 @@ The decision looks only at content, never at who sent the event. It approves:
   file. Grant narrow paths.
   - `governance/**`, `.github/**`, `tasks/**`, `requirements/**`;
   - `scripts/ops/trusted_*`, `scripts/ops/owner_attestation.py`,
-    `scripts/ops/__init__.py`;
+    `scripts/ops/__init__.py`, `scripts/__init__.py`,
+    `scripts/ops/pr_impact_gate.py`, `scripts/ops/select_tests.py`;
   - `tools/owner-signer/**`;
   - `.claude/**` and `.mcp.json`, at any depth;
   - `AGENTS.md` and `CLAUDE.md`, at any depth;
@@ -93,9 +94,16 @@ The decision looks only at content, never at who sent the event. It approves:
     `conftest.py`, at any depth;
   - `.gitmodules`, `.gitattributes`, `.nexus-core/**`, `.cargo/**`;
   - `MUSE_PROTO.md`, `pyproject.toml`, `uv.lock`.
-  - `docs/governance/**` and `docs/testing/test_impact_map.md`;
+  - `docs/governance/**`, `docs/testing/test_impact_map.md` and
+    `.nexus/test_impact_index.json` (gate inputs read from the trusted revision);
   - this gate's own tests: `tests/ops/test_owner_attestation_gate.py` and
     `tests/ops/test_trusted_*`.
+- **Case, Unicode and link tricks.** The Owner's Mac uses case-insensitive
+  APFS, so protected patterns are matched case-insensitively. The gate also
+  refuses any changed path that contains non-ASCII characters, differs only in
+  case from a tracked path (file or directory) in the trusted revision or the
+  head, or whose old or new mode is a symlink (120000) or gitlink (160000).
+  `X/**` also matches the path `X` itself.
 - **The per-event lane check.** The trusted merge-lane gate also refuses
   agent-sent events without a valid grant. This is only an extra signal; the
   required `Owner grant` check is what decides merges.
@@ -206,3 +214,28 @@ The decision looks only at content, never at who sent the event. It approves:
   - The local gateway's grant tools.
   - `task_card_authority_switch` and `task_card_authority_restore`.
   - The other model-supplied confirmations in `OWNER_CONFIRMATION_PHASE1.md`.
+- **Still undecided (left for a later Owner decision).**
+  `scripts/ops/run_golden_behavior_eval.py`, `tests/golden_behavior/corpus.py`
+  and `fast_start_v2.py` are not protected yet.
+
+## Notes
+
+- **User presence proves presence, not what was approved.** The signer's
+  prompt text is chosen by the caller (the text shown comes from the caller
+  that runs `owner-signer sign`), so Touch ID or the login password shows that
+  you were at the Mac, not that you read the exact grant. Always read the
+  summary the signer prints from the signed bytes. This note lives here
+  rather than in `tools/owner-signer/**` on purpose: the installed binary must
+  keep matching its source, so `main.swift` is not touched.
+- **Interaction with #1943 (Owner SSH deletion signing).** The two mechanisms
+  are independent. `.nexus-core/**` is a protected path, so an agent PR can never
+  carry a deletion manifest; deletions need an Owner bypass merge.
+
+## Ruleset checklist
+
+When updating the ruleset on `main`, keep the existing rules and make sure:
+
+- the required status checks include
+  `{"context": "Owner grant", "integration_id": 5294703}`;
+- `bypass_actors` is the `RepositoryRole` admin (`actor_id` 5) with
+  `bypass_mode` `"pull_request"`.

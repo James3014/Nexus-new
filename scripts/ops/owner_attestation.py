@@ -16,6 +16,8 @@ them against the public key pinned on the base branch.
 
 from __future__ import annotations
 
+# Stdlib imports come first and the repo root is appended (never prepended) to
+# sys.path afterwards, so a json.py or secrets.py in the repo cannot shadow them.
 import argparse
 import base64
 import json
@@ -24,7 +26,9 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+_REPO_ROOT = str(Path(__file__).resolve().parents[2])
+if _REPO_ROOT not in sys.path:
+    sys.path.append(_REPO_ROOT)
 
 from scripts.ops.trusted_merge_lane_gate import (  # noqa: E402
     ATTESTATION_ACTION,

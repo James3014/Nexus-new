@@ -612,6 +612,9 @@ ATTESTATION_PROTECTED_PATTERNS = (
     "scripts/ops/trusted_*",
     "scripts/ops/owner_attestation.py",
     "scripts/ops/__init__.py",
+    "scripts/__init__.py",
+    "scripts/ops/pr_impact_gate.py",
+    "scripts/ops/select_tests.py",
     "tools/owner-signer/**",
     "tasks/**",
     ".claude/**",
@@ -647,6 +650,7 @@ ATTESTATION_PROTECTED_PATTERNS = (
     # this gate (#1817 review).
     "docs/governance/**",
     "docs/testing/test_impact_map.md",
+    ".nexus/test_impact_index.json",
     "tests/ops/test_owner_attestation_gate.py",
     "tests/ops/test_trusted_*",
 )
@@ -680,11 +684,21 @@ def _glob_regex(pattern: str) -> re.Pattern[str]:
         else:
             out.append(re.escape(pattern[index]))
             index += 1
-    return re.compile("".join(out))
+    regex = "".join(out)
+    if pattern.endswith("/**"):
+        # ``X/**`` also names the path ``X`` itself (a file or symlink at X).
+        regex = regex[: -len("/.*")] + "(?:/.*)?"
+    return re.compile(regex)
 
 
-def _path_matches(path: str, patterns: Sequence[str]) -> bool:
-    return any(_glob_regex(pattern).fullmatch(path) for pattern in patterns)
+def _path_matches(path: str, patterns: Sequence[str], *, casefold: bool = False) -> bool:
+    """Glob match; ``casefold`` compares case-insensitively (APFS checkouts)."""
+    if casefold:
+        path = path.casefold()
+    return any(
+        _glob_regex(pattern.casefold() if casefold else pattern).fullmatch(path)
+        for pattern in patterns
+    )
 
 
 def _parse_utc(value: Any, label: str) -> datetime:
@@ -854,15 +868,83 @@ def verify_p256_signature(pem: str, message: bytes, signature_der: bytes) -> boo
     return proc.returncode == 0 and proc.stdout.strip() == "Verified OK"
 
 
-def _diff_names(repo_root: Path, left: str, right: str) -> set[str]:
+_SPECIAL_MODES = frozenset({"120000", "160000"})
+
+
+def _diff_entries(repo_root: Path, left: str, right: str) -> dict[str, tuple[str, str]]:
+    """Changed paths between two revisions mapped to their (old, new) modes."""
     proc = subprocess.run(
-        ["git", "-C", str(repo_root), "diff", "--name-only", "--no-renames", "-z", left, right],
+        [
+            "git",
+            "-C",
+            str(repo_root),
+            "diff",
+            "--raw",
+            "--no-abbrev",
+            "--no-renames",
+            "-z",
+            left,
+            right,
+        ],
         check=False,
         capture_output=True,
     )
     if proc.returncode != 0:
         raise LaneBindingError("ATTESTATION_CHANGED_PATHS_UNAVAILABLE")
-    return {part.decode("utf-8", errors="strict") for part in proc.stdout.split(b"\0") if part}
+    parts = proc.stdout.split(b"\0")
+    entries: dict[str, tuple[str, str]] = {}
+    index = 0
+    while index + 1 < len(parts):
+        meta = parts[index].decode("ascii", errors="replace").split()
+        if len(meta) != 5 or not meta[0].startswith(":"):
+            raise LaneBindingError("ATTESTATION_CHANGED_PATHS_UNAVAILABLE")
+        path = parts[index + 1].decode("utf-8", errors="strict")
+        entries[path] = (meta[0][1:], meta[1])
+        index += 2
+    return entries
+
+
+def _tree_paths(repo_root: Path, revision: str) -> set[str]:
+    proc = subprocess.run(
+        ["git", "-C", str(repo_root), "ls-tree", "-r", "-z", "--name-only", revision],
+        check=False,
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        raise LaneBindingError("ATTESTATION_CHANGED_PATHS_UNAVAILABLE")
+    return {part.decode("utf-8", errors="replace") for part in proc.stdout.split(b"\0") if part}
+
+
+def _reject_unsafe_paths(
+    repo_root: Path,
+    entries: Mapping[str, tuple[str, str]],
+    trusted_revision: str,
+    head_sha: str,
+) -> None:
+    """Refuse paths whose meaning differs between the gate and the Owner's Mac.
+
+    The Owner's checkout is case-insensitive APFS, so a path that differs from
+    a tracked one only in case, or any non-ASCII path (Unicode normalization),
+    can land on a protected file there; symlinks and gitlinks redirect writes.
+    """
+    for path, (old_mode, new_mode) in entries.items():
+        if not path.isascii():
+            raise LaneBindingError(f"ATTESTATION_NON_ASCII_PATH:{ascii(path)}")
+        if old_mode in _SPECIAL_MODES or new_mode in _SPECIAL_MODES:
+            raise LaneBindingError(f"ATTESTATION_SYMLINK_OR_GITLINK:{path}")
+    known: dict[str, set[str]] = {}
+    for revision in (trusted_revision, head_sha):
+        for tracked in _tree_paths(repo_root, revision):
+            parts = tracked.split("/")
+            for end in range(1, len(parts) + 1):
+                prefix = "/".join(parts[:end])
+                known.setdefault(prefix.casefold(), set()).add(prefix)
+    for path in entries:
+        parts = path.split("/")
+        for end in range(1, len(parts) + 1):
+            prefix = "/".join(parts[:end])
+            if known.get(prefix.casefold(), {prefix}) - {prefix}:
+                raise LaneBindingError(f"ATTESTATION_CASE_COLLISION_PATH:{path}")
 
 
 def _changed_paths(
@@ -883,12 +965,12 @@ def _changed_paths(
     merge_base = proc.stdout.strip()
     if proc.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40}", merge_base):
         raise LaneBindingError("ATTESTATION_MERGE_BASE_UNAVAILABLE")
-    paths = _diff_names(repo_root, base_sha, head_sha) | _diff_names(
-        repo_root, merge_base, head_sha
-    )
-    if not paths:
+    entries = _diff_entries(repo_root, base_sha, head_sha)
+    entries.update(_diff_entries(repo_root, merge_base, head_sha))
+    if not entries:
         raise LaneBindingError("ATTESTATION_CHANGED_PATHS_EMPTY")
-    return sorted(paths)
+    _reject_unsafe_paths(repo_root, entries, trusted_revision, head_sha)
+    return sorted(entries)
 
 
 def _bound_issue_numbers(body: Any, binding: Mapping[str, Any]) -> set[int]:
@@ -992,7 +1074,7 @@ def verify_owner_attestation(
     if now >= expires_at:
         raise LaneBindingError("ATTESTATION_EXPIRED")
     for path in changed_paths:
-        if _path_matches(path, ATTESTATION_PROTECTED_PATTERNS):
+        if _path_matches(path, ATTESTATION_PROTECTED_PATTERNS, casefold=True):
             raise LaneBindingError(f"ATTESTATION_PROTECTED_PATH:{path}")
         if not _path_matches(path, patterns):
             raise LaneBindingError(f"ATTESTATION_PATH_OUT_OF_SCOPE:{path}")
