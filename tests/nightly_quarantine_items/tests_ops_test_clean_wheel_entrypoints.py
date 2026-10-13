@@ -2,5 +2,10 @@
 
 from __future__ import annotations
 
-# Fixed in #1928: nexus-cueline-worker console script restored (dropped by #770).
-ENTRY = None
+ENTRY: dict[str, object] = {
+    "file": "tests/ops/test_clean_wheel_entrypoints.py",
+    "disposition": "quarantine",
+    "issue": "#1928",
+    "cause": "console script nexus-cueline-worker dropped in #770; restore needs a trusted dependency snapshot transition (pyproject change) — separate PR",
+    "tests": ("test_clean_wheel_contains_and_runs_registered_cli_entrypoints",),
+}
