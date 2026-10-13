@@ -22,6 +22,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StrictBool,
+    StrictInt,
     StrictStr,
     field_validator,
     model_validator,
@@ -58,10 +59,33 @@ MAX_COMPLETION_ELAPSED_SECONDS: float = 2700.0
 
 # #1384 AC4: a TEST_IMPACT-only main movement is not revalidated by the host.
 # It is satisfied by the required exact-head CI run of this check on I_n.
+#
+# Known coverage gap (accepted): the impact gate selects tests from the Candidate's
+# diff against the exact base M_n, at their I_n contents.  A main-side test change
+# for code the Candidate also changes may not be selected on I_n; such a regression
+# is caught post-merge by the nightly Tier 3 full regression, not by this gate.
 EXACT_BASE_IMPACT_GATE_CHECK_NAME: str = "Exact-base impact gate"
+# Only the genuine run counts: GitHub Actions app, from the pytest workflow.  A
+# same-named job in another workflow, or a check-run posted by any other app with
+# checks:write, is ignored (it can neither satisfy nor veto the gate).
+GITHUB_ACTIONS_APP_ID: int = 15368
+EXACT_BASE_IMPACT_GATE_WORKFLOW_PATH: str = ".github/workflows/pytest.yml"
 TEST_IMPACT_DEFERRAL_DISPOSITION: str = "TEST_IMPACT deferred to exact-head required CI on I_n"
-# Dependency manifests change the test environment itself; a deferral cannot cover them.
-TEST_IMPACT_DEPENDENCY_MANIFESTS: frozenset[str] = frozenset({"pyproject.toml", "uv.lock"})
+
+
+def _test_impact_dependency_files() -> frozenset[str] | None:
+    """Return the canonical impact-gate dependency file set (None if unavailable).
+
+    Dependency/config files change the test environment itself; a TEST_IMPACT
+    deferral cannot cover them.  Reuses ``pr_impact_gate.DEPENDENCY_FILES`` so
+    there is one authority for that list.
+    """
+    try:
+        from scripts.ops.pr_impact_gate import DEPENDENCY_FILES
+    except Exception:
+        return None
+    return frozenset(DEPENDENCY_FILES)
+
 
 _GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _RECEIPT_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -191,11 +215,20 @@ class HeadCheckRunObservation(_FrozenModel):
     status: StrictStr
     conclusion: StrictStr | None = None
     head_sha: StrictStr
+    app_id: StrictInt = Field(ge=1)
+    workflow_path: StrictStr
 
     @field_validator("head_sha")
     @classmethod
     def validate_head_sha(cls, value: str, info) -> str:
         return _git_sha(value, info.field_name)
+
+    @field_validator("workflow_path")
+    @classmethod
+    def validate_workflow_path(cls, value: str) -> str:
+        if not value or value != value.strip() or value.startswith("/") or ".." in value:
+            raise ValueError(f"workflow_path_invalid: {value!r}")
+        return value
 
 
 def _evaluate_exact_head_impact_gate(
@@ -203,17 +236,25 @@ def _evaluate_exact_head_impact_gate(
 ) -> tuple[str | None, dict[str, Any]]:
     """Return (error, record) for the exact-head impact gate among live check-runs.
 
-    Only runs whose own ``head_sha`` equals ``head_sha`` count; a run reported for
-    any other commit (e.g. I_(n-1)) is stale.  Every exact-head run must be a
-    completed success, and at least one must exist.
+    Only genuine runs count: the GitHub Actions app and the pytest workflow
+    (other same-named runs are ignored).  Of those, only runs whose own
+    ``head_sha`` equals ``head_sha`` count; a run reported for any other commit
+    (e.g. I_(n-1)) is stale.  Every exact-head genuine run must be a completed
+    success, and at least one must exist.
     """
     if not isinstance(runs, (list, tuple)) or not all(
         isinstance(r, HeadCheckRunObservation) for r in runs
     ):
         return "IMPACT_GATE_OBSERVATION_INVALID", {}
-    named = [r for r in runs if r.name == EXACT_BASE_IMPACT_GATE_CHECK_NAME]
+    same_name = [r for r in runs if r.name == EXACT_BASE_IMPACT_GATE_CHECK_NAME]
+    named = [
+        r
+        for r in same_name
+        if r.app_id == GITHUB_ACTIONS_APP_ID
+        and r.workflow_path == EXACT_BASE_IMPACT_GATE_WORKFLOW_PATH
+    ]
     if not named:
-        return "IMPACT_GATE_MISSING", {}
+        return "IMPACT_GATE_MISSING", {"ignored_foreign_run_count": len(same_name)}
     exact = [r for r in named if r.head_sha == head_sha]
     if not exact:
         return "IMPACT_GATE_STALE", {"observed_head_shas": sorted({r.head_sha for r in named})}
@@ -225,6 +266,8 @@ def _evaluate_exact_head_impact_gate(
         }
     return None, {
         "check_name": EXACT_BASE_IMPACT_GATE_CHECK_NAME,
+        "app_id": GITHUB_ACTIONS_APP_ID,
+        "workflow_path": EXACT_BASE_IMPACT_GATE_WORKFLOW_PATH,
         "verified_head_sha": head_sha,
         "exact_head_run_count": len(exact),
     }
@@ -795,9 +838,15 @@ def run_github_completion_loop(
             ]
             test_impact_deferred = affected_dimensions == ["TEST_IMPACT"]
             if test_impact_deferred:
-                dependency_changes = sorted(
-                    set(changed_main_paths) & TEST_IMPACT_DEPENDENCY_MANIFESTS
-                )
+                dependency_files = _test_impact_dependency_files()
+                if dependency_files is None:
+                    return CompletionLoopResult(
+                        outcome=CompletionLoopOutcome.BLOCKED,
+                        reason="TEST_IMPACT_DEPENDENCY_FILES_UNAVAILABLE",
+                        generation=current_generation,
+                        evidence=current_evidence,
+                    )
+                dependency_changes = sorted(set(changed_main_paths) & dependency_files)
                 if dependency_changes:
                     return CompletionLoopResult(
                         outcome=CompletionLoopOutcome.BLOCKED,
@@ -1330,7 +1379,18 @@ def run_github_completion_loop(
             if gate_error is not None:
                 # Bounded requalification: if main moved meanwhile, re-enter the
                 # generation loop (MAX budget applies); otherwise fail closed.
-                observed_main_sha, _ = port.read_main_state()
+                try:
+                    observed_main_sha, _ = port.read_main_state()
+                except Exception as exc:
+                    return CompletionLoopResult(
+                        outcome=CompletionLoopOutcome.BLOCKED,
+                        reason=f"TEST_IMPACT_DEFERRED_{gate_error}:MAIN_STATE_READ_FAILED:{exc}",
+                        generation=current_generation,
+                        integration_head_sha=last_produced_head_sha,
+                        evidence=current_evidence,
+                        intent=intent,
+                        details={"impact_gate": gate_record},
+                    )
                 if observed_main_sha != current_evidence.base_sha:
                     continue
                 return CompletionLoopResult(
