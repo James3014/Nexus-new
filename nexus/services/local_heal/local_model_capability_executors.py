@@ -327,9 +327,11 @@ class LocalHealPipelineCapabilityExecutor:
                 # Actual parse with anchor_text from source_anchor
                 anchor_text = ctx.source_anchor.get("hash", "") or ""
                 # Use problem_statement as raw_output for parsing test
-                import os
-                os.environ.setdefault("NEXUS_PROTOCOL_MODE", "anchored_edit")
-                parse_result = protocol.parse(ctx.problem_statement, anchor_text=anchor_text)
+                parse_result = protocol.parse(
+                    ctx.problem_statement,
+                    anchor_text=anchor_text,
+                    protocol_mode="anchored_edit",
+                )
                 invoked_modules.append("solid_search_replace_protocol")
                 path_a_actual_execution = True
             except Exception:
