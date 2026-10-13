@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from nexus.research.flow.unified_capability_projection import project_unified_capability_stages
+
 
 def _int_field(report: Mapping[str, Any], key: str) -> int:
     return int(report.get(key, 0) or 0)
@@ -21,7 +23,7 @@ def build_hyper_sprint_report(
 ) -> dict[str, Any]:
     learning_trace = getattr(result, "learning_trace", {}) or {}
     learning_trace = learning_trace if isinstance(learning_trace, dict) else {}
-    return {
+    report = {
         "status": result.status,
         "reason": result.reason,
         "winner_source": result.winner_source,
@@ -48,6 +50,10 @@ def build_hyper_sprint_report(
         "distant_scout_execution": learning_trace.get("distant_scout_execution", {}),
         "r_phase_breakdown_sec": dict(r_phase_breakdown_sec),
     }
+    stages = project_unified_capability_stages(getattr(result, "unified_runtime_receipts", None) or [])
+    if stages:
+        report["unified_runtime_capability_stages"] = stages
+    return report
 
 
 def build_verification_only_rescue_report(previous_result: Mapping[str, Any], *, ok: bool) -> dict[str, Any]:

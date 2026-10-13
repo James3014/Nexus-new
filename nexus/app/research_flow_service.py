@@ -18,7 +18,7 @@ import click
 from nexus.core.repo_root import REPO_ROOT
 from nexus.research.flow.auto_flow_decision import decide_auto_flow_routing, enrich_route_on_plateau
 from nexus.research.local_sprint_mutator import generate_local_candidate, generate_local_companion_edits
-from nexus.research.sprint_service import SprintConfig, run_hyper_sprint, LLMCandidateGenerator, LLMCandidateError, _candidate_summaries
+from nexus.research.sprint_service import SprintConfig, run_hyper_sprint, LLMCandidateGenerator, LLMCandidateError, _candidate_summaries, planner_route_signals
 from nexus.contracts import RLMTraceEvent, RLMTraceWriter
 from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.engine.route_decision_adapter import build_route_decision
@@ -127,6 +127,17 @@ from nexus.research.flow.task_classifier import is_strictly_doc_fix as _is_stric
 
 
 RESEARCH_SOURCE_PROJECTS = tuple(research_stack_source_projects())
+
+
+def _unified_runtime_capability_stages(result_report: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Capability stages of the UnifiedRuntime run(s) behind the delivered flow result."""
+
+    if not isinstance(result_report, dict):
+        return []
+    stages = result_report.get("unified_runtime_capability_stages")
+    if not isinstance(stages, list):
+        return []
+    return [dict(item) for item in stages if isinstance(item, dict)]
 
 
 def _write_source_text(path: Path, text: str) -> None:
@@ -810,7 +821,7 @@ def _build_baseline_patch(
     if llm_baseline:
         try:
             # Use a very short timeout for baseline assistance to avoid blocking
-            gen = LLMCandidateGenerator(repo_root, safe_mode=True)
+            gen = LLMCandidateGenerator(repo_root, safe_mode=True, route_signals=route)
             patched, meta = gen.generate(source_code=original_code, task=task_desc_for_llm, mutation_hint="baseline", seed=trial)
             if patched and patched != original_code:
                 meta = dict(meta)
@@ -1196,6 +1207,7 @@ def run_auto_flow(
             stage1_timeout_sec=effective_stage1_timeout,
             llm_mode=llm_mode,
             distant_scout_plan=distant_scout_plan,
+            route_signals=planner_route_signals(route),
             **sprint_executor_flags,
         )
         breakdown["setup_sec"] = round(time.monotonic() - setup_started_at, 4)
@@ -1741,6 +1753,7 @@ def run_auto_flow(
         )
         nexus_usage_trace["capabilities"]["rlm_trace_path"] = nexus_usage_trace["rlm_trace_path"]
         nexus_usage_trace["capabilities"]["rlm_trace_present"] = bool(nexus_usage_trace["rlm_trace_path"])
+    nexus_usage_trace["unified_runtime_capabilities"] = _unified_runtime_capability_stages(result_report)
     nexus_usage_trace["capability_receipts"] = build_capability_receipt_payloads(capability_plan_payload, nexus_usage_trace)
     for receipt in nexus_usage_trace["capability_receipts"]:
         if isinstance(receipt, dict) and receipt.get("name") == "research":

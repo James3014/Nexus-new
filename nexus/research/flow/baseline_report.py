@@ -2,11 +2,16 @@ from __future__ import annotations
 
 from typing import Any
 
+from nexus.research.flow.unified_capability_projection import (
+    project_unified_capability_stages,
+    unified_receipts_from_meta,
+)
+
 
 def baseline_report_from_meta(source: str, meta: dict[str, Any]) -> dict[str, Any]:
     model_calls = int(meta.get("model_calls", 0) or 0)
     total_tokens = int(meta.get("tokens_used", meta.get("total_tokens", 0)) or 0)
-    return {
+    report = {
         "source": source,
         "attempt_count": 1,
         "model_calls": model_calls,
@@ -26,6 +31,10 @@ def baseline_report_from_meta(source: str, meta: dict[str, Any]) -> dict[str, An
         "baseline_llm_required": bool(meta.get("baseline_llm_required", False)),
         "baseline_source_policy": str(meta.get("baseline_source_policy", "")),
     }
+    stages = project_unified_capability_stages(unified_receipts_from_meta(meta))
+    if stages:
+        report["unified_runtime_capability_stages"] = stages
+    return report
 
 
 def local_baseline_meta(*, fallback_reason: str | None = None) -> dict[str, Any]:
