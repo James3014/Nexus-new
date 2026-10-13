@@ -441,6 +441,7 @@ def select_target_details(
             for rule in rules
             if changed_path == rule.code_path or changed_path.startswith(f"{rule.code_path}/")
         ]
+        matched_rules: list[ImpactRule] = []
         if matching_rules:
             most_specific_len = max(len(rule.code_path) for rule in matching_rules)
             matched_rules = [
@@ -457,7 +458,7 @@ def select_target_details(
         mapped_targets, mapped_reasons = select_targets([changed_path], rules, ())
         if (
             mapped_targets
-            and matching_rules
+            and matched_rules
             and all(rule.code_path == DERIVED_CATCHALL_PREFIX for rule in matched_rules)
         ):
             derived = derive_ops_targets(changed_path, base_sha)
