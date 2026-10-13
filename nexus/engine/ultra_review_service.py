@@ -1,17 +1,48 @@
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
 import shutil
 import stat
 import subprocess
-import tempfile
 import sys
+import tempfile
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
+from nexus.engine.sandboxed_lane import (  # noqa: F401 - re-exported for callers and tests
+    _OS_SANDBOX_PROBE,
+    GIT_ENV_ALLOWLIST,
+    GIT_SAFE_CONFIG,
+    SANDBOX_DENIED_HOME_PATHS,
+    SANDBOX_ENV_ALLOWLIST,
+    SANDBOX_FORBIDDEN_READ_ROOTS,
+    SANDBOX_SYSTEM_READ_LITERALS,
+    SANDBOX_SYSTEM_READ_SUBPATHS,
+    SBPL_SAFE_PATH,
+    SYMLINK_MODE,
+    UNSAFE_PATCH_SUMMARY,
+    SandboxError,
+    build_sandbox_profile,
+    checked_read_roots,
+    diff_policy_violations,
+    git_safe_env,
+    in_tree,
+    interpreter_read_roots,
+    lstat_walk_violations,
+    os_sandbox_available,
+    run_confined,
+    scrubbed_env,
+    unsafe_summary_lines,
+    write_no_follow,
+)
+from nexus.engine.sandboxed_lane import sbpl_path as _lane_sbpl_path
+
+_T = TypeVar("_T")
 
 DEFAULT_FLEET_LANES = ("security_sentry", "logic_breaker", "ghost_regression")
 SCHEMA_VERSION = "ultra-review.v1"
@@ -55,132 +86,32 @@ REVIEW_MODE = "review"
 # Set in the ghost-regression pytest environment: a review started from inside a review's
 # test run (a test that reviews "."), would review the sandbox again; refuse instead.
 ULTRA_REVIEW_NESTED_ENV = "NEXUS_ULTRA_REVIEW_IN_PROGRESS"
-# Lane subprocesses (tools, repro scripts, the test re-run) see only these caller variables;
-# everything else (tokens, credentials, provider keys) is dropped.
-SANDBOX_ENV_ALLOWLIST = ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "VIRTUAL_ENV", "SYSTEMROOT")
-# Read-denied even inside the OS sandbox (credential stores under $HOME).
-SANDBOX_DENIED_HOME_PATHS = (
-    ".ssh",
-    ".gnupg",
-    ".aws",
-    ".netrc",
-    ".git-credentials",
-    ".config/gh",
-    ".config/gcloud",
-    ".docker",
-    ".kube",
-    ".claude",
-    ".codex",
-    "Library/Keychains",
-)
 # Files whose change alters how the ghost-regression test run itself behaves.
 TEST_HARNESS_FILES = ("conftest.py", "pytest.ini", "tox.ini", "setup.cfg", "pyproject.toml", "sitecustomize.py", "usercustomize.py")
-_OS_SANDBOX_PROBE: dict[str, bool] = {}
-# Every path interpolated into the sandbox-exec (SBPL) profile must match this: no quote,
-# backslash, paren, whitespace or control character can reach an SBPL string literal, so
-# no PR-, branch- or user-derived text can close a literal and rewrite the policy.
-SBPL_SAFE_PATH = re.compile(r"^/[A-Za-z0-9._/@+-]*$")
-# System locations the confined interpreter needs to start: subtrees, then single files.
-# Nothing under a user's home directory, no temp tree, no repository root.
-SANDBOX_SYSTEM_READ_SUBPATHS = ("/usr/lib", "/usr/share/zoneinfo", "/System/Library")
-SANDBOX_SYSTEM_READ_LITERALS = ("/", "/private/etc/passwd", "/private/etc/localtime", "/dev/null", "/dev/urandom")
-# A readable subtree may never be (or contain) one of these.
-# (The bare temp roots are joined, not literal: this is a deny list, not a temp-file use.)
-SANDBOX_FORBIDDEN_READ_ROOTS = (
-    "/",
-    "/Users",
-    "/home",
-    "/private",
-    "/private/tmp",
-    os.path.join(os.sep, "tmp"),
-    "/private/var",
-    "/var",
-)
-# Git never runs hooks, fsmonitor, LFS/other filter processes or external diff/textconv for
-# the review, and never reads system/global config. Passed as GIT_CONFIG_COUNT/KEY/VALUE
-# (equivalent to ``git -c``, highest precedence) by _git_env.
-GIT_SAFE_CONFIG = (
-    ("core.hooksPath", "/dev/null"),
-    ("core.fsmonitor", "false"),
-    ("filter.lfs.required", "false"),
-    ("filter.lfs.process", ""),
-    ("filter.lfs.smudge", ""),
-    ("filter.lfs.clean", ""),
-    ("diff.external", ""),
-    ("core.pager", "cat"),
-    ("protocol.allow", "never"),
-)
-# Caller variables a review git call keeps (no tokens, credentials or GIT_* overrides).
-GIT_ENV_ALLOWLIST = ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "SYSTEMROOT", "TMPDIR")
-SYMLINK_MODE = "120000"
-# ``git apply --summary`` lines that make a patch unreviewable: link/gitlink creation,
-# deletion or mode change, and rename/copy (diff capture uses --no-renames, so a
-# rename/copy header can only come from a crafted patch).
-UNSAFE_PATCH_SUMMARY = re.compile(
-    r"^\s*(?:(?:create|delete) mode (?:120000|160000)\b|mode change .*\b(?:120000|160000)\b|rename |copy )",
-    re.MULTILINE,
-)
-
-
-def os_sandbox_available() -> bool:
-    """True when an OS-level barrier (macOS sandbox-exec) can confine lane subprocesses.
-
-    ``NEXUS_ULTRA_REVIEW_DISABLE_OS_SANDBOX=1`` only removes the barrier (fail closed), it
-    can never grant one; it lets non-macOS behaviour be exercised anywhere.
-    """
-    if os.getenv("NEXUS_ULTRA_REVIEW_DISABLE_OS_SANDBOX", "").strip() == "1":
-        return False
-    if "sandbox-exec" not in _OS_SANDBOX_PROBE:
-        ok = False
-        if sys.platform == "darwin" and shutil.which("sandbox-exec"):
-            try:
-                ok = (
-                    subprocess.run(  # noqa: S603 - fixed argv probe
-                        ["sandbox-exec", "-p", "(version 1) (allow default)", "/usr/bin/true"],
-                        capture_output=True,
-                        timeout=5,
-                        check=False,
-                    ).returncode
-                    == 0
-                )
-            except (OSError, subprocess.SubprocessError):
-                ok = False
-        _OS_SANDBOX_PROBE["sandbox-exec"] = ok
-    return _OS_SANDBOX_PROBE["sandbox-exec"]
 DRY_RUN_MODE = "dry-run"
 
 
-class UltraReviewError(RuntimeError):
+class UltraReviewError(SandboxError):
     """Raised when ultra-review cannot produce a trustworthy report."""
 
 
-def sbpl_path(path: Path | str) -> str:
-    """Return ``path`` resolved and absolute, safe to embed in an SBPL string literal.
+def _as_review_error(func: Callable[..., _T]) -> Callable[..., _T]:
+    """Re-raise a shared ``SandboxError`` as ``UltraReviewError`` (one type for callers)."""
 
-    Raises UltraReviewError (fail closed) instead of escaping: a path that needs escaping is
-    never placed in the sandbox policy.
-    """
+    @functools.wraps(func)
+    def wrapper(*args: Any, **kwargs: Any) -> _T:
+        try:
+            return func(*args, **kwargs)
+        except UltraReviewError:
+            raise
+        except SandboxError as exc:
+            raise UltraReviewError(str(exc)) from exc
 
-    text = str(path)
-    if not text or not os.path.isabs(text):
-        raise UltraReviewError("sandbox_path_not_absolute")
-    resolved = str(Path(text).resolve())
-    if not SBPL_SAFE_PATH.fullmatch(resolved) or "/../" in resolved + "/" or resolved.endswith("/.."):
-        raise UltraReviewError("sandbox_path_unsafe_for_policy")
-    return resolved
+    return wrapper
 
 
-def _write_no_follow(target: Path, data: bytes) -> None:
-    """Write ``data`` to ``target`` without following a symlink at (or replacing into) it."""
-
-    if target.is_symlink() or target.exists():
-        if target.is_dir() and not target.is_symlink():
-            raise UltraReviewError(f"refusing_to_overwrite_directory:{target.name}")
-        target.unlink()
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-    fd = os.open(target, flags, 0o600)
-    with os.fdopen(fd, "wb") as handle:
-        handle.write(data)
+sbpl_path = _as_review_error(_lane_sbpl_path)
+_write_no_follow = _as_review_error(write_no_follow)
 
 
 class UltraReviewService:
@@ -207,7 +138,7 @@ class UltraReviewService:
                 report_path=report_path,
                 sandbox_root=sandbox_root,
             )
-        except (UltraReviewError, OSError, subprocess.SubprocessError) as exc:
+        except (SandboxError, OSError, subprocess.SubprocessError) as exc:
             # Fail closed with a reason instead of an unhandled traceback.
             out_path = self._resolve(report_path)
             payload = {
@@ -705,99 +636,51 @@ class UltraReviewService:
 
     def _sandbox_env(self) -> dict[str, str]:
         ctx = getattr(self, "_sandbox_ctx", None) or {}
-        env = {key: os.environ[key] for key in SANDBOX_ENV_ALLOWLIST if key in os.environ}
         # PATH never resolves into the reviewed checkout, the mirror or the sandbox, so a
         # PR-supplied executable cannot shadow a tool. Every Python lane runs with -I, so
         # PYTHONPATH is not set at all (the ghost re-run gets the mirror via pytest's
         # ``pythonpath`` ini override after interpreter start-up).
-        if "PATH" in env:
-            env["PATH"] = os.pathsep.join(
-                part for part in env["PATH"].split(os.pathsep) if part and os.path.isabs(part) and not self._in_untrusted_tree(part)
-            )
-        if "VIRTUAL_ENV" in env and self._in_untrusted_tree(env["VIRTUAL_ENV"]):
-            env.pop("VIRTUAL_ENV")
-        env["HOME"] = str(ctx.get("home") or "")
-        env["TMPDIR"] = str(ctx.get("tmp") or "")
-        env["PYTHONDONTWRITEBYTECODE"] = "1"
-        env["PYTHONNOUSERSITE"] = "1"
-        env["NEXUS_SANDBOX_NO_NETWORK"] = "1"
+        env = scrubbed_env(
+            home=ctx.get("home") or "",
+            tmp=ctx.get("tmp") or "",
+            untrusted_roots=(self.project_root, ctx.get("execution_root"), ctx.get("sandbox_path")),
+        )
         env[ULTRA_REVIEW_NESTED_ENV] = "1"
         return env
 
+    @_as_review_error
     def _sandbox_profile(self) -> str:
-        """SBPL policy for one lane command (last matching rule wins).
+        """SBPL policy for one lane command (see ``sandboxed_lane.build_sandbox_profile``).
 
         Reads: default-deny; only the sandbox/mirror, the trusted interpreter prefixes and
-        import roots, and fixed system locations are readable. ``$HOME`` is denied before
-        those allows, and credential stores are denied again last, so they stay unreadable
-        even if an allowed root contains them. Every interpolated path goes through
-        ``sbpl_path`` (absolute, resolved, ``SBPL_SAFE_PATH``) or the profile is refused.
+        fixed system locations are readable; ``$HOME`` and credential stores are denied.
         """
 
         ctx = getattr(self, "_sandbox_ctx", None) or {}
         if not ctx.get("execution_root") or not ctx.get("sandbox_path"):
             raise UltraReviewError("sandbox_not_bound")
-        writable = [sbpl_path(ctx["execution_root"]), sbpl_path(ctx["sandbox_path"])]
-        real_home = sbpl_path(Path(os.path.expanduser("~")).resolve())
-        denied = " ".join(f'(subpath "{sbpl_path(Path(real_home) / rel)}")' for rel in SANDBOX_DENIED_HOME_PATHS)
-        writes = " ".join(f'(subpath "{path}")' for path in writable)
-        readable = " ".join(f'(subpath "{path}")' for path in self._sandbox_read_roots())
-        return "\n".join(
-            [
-                "(version 1)",
-                "(deny default)",
-                "(allow process-fork)",
-                "(allow process-exec*)",
-                f'(deny file-read* (subpath "{real_home}"))',
-                "(allow file-read-metadata)",
-                # Single system files (and the "/" entry itself, not its subtree).
-                "(allow file-read* " + " ".join(f'(literal "{path}")' for path in SANDBOX_SYSTEM_READ_LITERALS) + ")",
-                f"(allow file-read* {readable})",
-                "(allow sysctl-read)",
-                "(allow mach-lookup)",
-                "(allow ipc-posix-shm)",
-                "(allow signal (target self))",
-                "(deny network*)",
-                f'(allow file-write* {writes} (literal "/dev/null") (literal "/dev/tty") (literal "/dev/dtracehelper"))',
-                f"(deny file-read* {denied})",
-            ]
+        return build_sandbox_profile(
+            writable=[ctx["execution_root"], ctx["sandbox_path"]],
+            read_roots=self._sandbox_read_roots(),
         )
 
+    @_as_review_error
     def _sandbox_read_roots(self) -> list[str]:
         """Readable subtrees: the sandbox (mirror included) and the trusted interpreter
-        prefixes only, plus SANDBOX_SYSTEM_READ_SUBPATHS. No other ``sys.path`` entry, no
-        repository root, no ``$HOME``/``/Users``/temp tree; any such root fails closed."""
+        prefixes only, plus the system subpaths. No repository root, no
+        ``$HOME``/``/Users``/temp tree; any such root fails closed."""
 
         ctx = getattr(self, "_sandbox_ctx", None) or {}
-        roots = {
-            sbpl_path(ctx["execution_root"]),
-            sbpl_path(ctx["sandbox_path"]),
-            sbpl_path(Path(sys.prefix).resolve()),
-            sbpl_path(Path(sys.base_prefix).resolve()),
-        }
-        forbidden = {Path(path) for path in SANDBOX_FORBIDDEN_READ_ROOTS}
-        forbidden.add(Path(os.path.expanduser("~")).resolve())
-        forbidden.add(self.project_root.resolve())
-        forbidden.add(Path(tempfile.gettempdir()).resolve())
-        for root in roots:
-            root_path = Path(root)
-            if any(root_path == bad or root_path in bad.parents for bad in forbidden):
-                raise UltraReviewError(f"sandbox_read_root_overbroad:{root}")
-        roots.update(path for path in SANDBOX_SYSTEM_READ_SUBPATHS if os.path.exists(path))
-        return sorted(roots)
+        return checked_read_roots(
+            [ctx["execution_root"], ctx["sandbox_path"], *interpreter_read_roots()],
+            extra_forbidden=[self.project_root],
+        )
 
     def _in_untrusted_tree(self, path: Path | str) -> bool:
         """True when ``path`` resolves into the reviewed checkout, the mirror or the sandbox."""
 
         ctx = getattr(self, "_sandbox_ctx", None) or {}
-        candidate = Path(path).resolve()
-        for root in (self.project_root, ctx.get("execution_root"), ctx.get("sandbox_path")):
-            if not root:
-                continue
-            root_path = Path(root).resolve()
-            if candidate == root_path or root_path in candidate.parents:
-                return True
-        return False
+        return in_tree(path, (self.project_root, ctx.get("execution_root"), ctx.get("sandbox_path")))
 
     def _trusted_interpreter(self) -> str:
         """The reviewer's own interpreter; refused if it lives in the mirror or the sandbox."""
@@ -824,6 +707,7 @@ class UltraReviewService:
             "credential_paths_read_denied": list(SANDBOX_DENIED_HOME_PATHS) if contained else [],
         }
 
+    @_as_review_error
     def _sandboxed_run(self, cmd: list[str], *, cwd: Path, timeout: float) -> subprocess.CompletedProcess:
         """Run a lane command on PR-controlled content: scrubbed env, sandbox cwd, timeout,
         and (when available) an OS barrier denying network, credential reads and writes
@@ -836,22 +720,12 @@ class UltraReviewService:
             if "-I" not in argv[1:2]:
                 raise UltraReviewError("python_lane_not_isolated")
         ctx = getattr(self, "_sandbox_ctx", None) or {}
-        resolved_cwd = Path(cwd).resolve()
-        if not any(
-            root and (resolved_cwd == Path(root) or Path(root) in resolved_cwd.parents)
-            for root in (ctx.get("execution_root"), ctx.get("sandbox_path"))
-        ):
-            raise UltraReviewError("lane_cwd_outside_sandbox")
-        cwd = resolved_cwd
-        if os_sandbox_available():
-            argv = ["sandbox-exec", "-p", self._sandbox_profile(), *argv]
-        return subprocess.run(  # noqa: S603 - argv list, no shell
+        return run_confined(
             argv,
-            cwd=cwd,
+            cwd=Path(cwd),
+            confine_roots=(ctx.get("execution_root"), ctx.get("sandbox_path")),
+            profile=self._sandbox_profile,
             env=self._sandbox_env(),
-            capture_output=True,
-            text=True,
-            check=False,
             timeout=timeout,
         )
 
@@ -1771,42 +1645,20 @@ class UltraReviewService:
         explicit ``git_dir`` git never discovers a ``.git`` the PR content might add.
         """
 
-        env = {key: os.environ[key] for key in GIT_ENV_ALLOWLIST if key in os.environ}
         home = getattr(self, "_git_home", None)
         if home is None:
             home = Path(tempfile.mkdtemp(prefix="nexus-ultra-git-home-")).resolve()
             self._git_home = home
-        env.update(
-            {
-                "HOME": str(home),
-                "XDG_CONFIG_HOME": str(home),
-                "GIT_CONFIG_NOSYSTEM": "1",
-                "GIT_CONFIG_GLOBAL": os.devnull,
-                "GIT_TERMINAL_PROMPT": "0",
-                "GIT_ATTR_NOSYSTEM": "1",
-                "GIT_LFS_SKIP_SMUDGE": "1",
-            }
-        )
         # Every filter driver the repository config defines is blanked, so an in-tree
         # .gitattributes cannot select a driver that runs a command on checkout/apply.
-        overrides = [*GIT_SAFE_CONFIG]
-        for name in self._configured_filter_drivers(env):
-            overrides.extend(
-                [
-                    (f"filter.{name}.smudge", ""),
-                    (f"filter.{name}.clean", ""),
-                    (f"filter.{name}.process", ""),
-                    (f"filter.{name}.required", "false"),
-                ]
-            )
-        env["GIT_CONFIG_COUNT"] = str(len(overrides))
-        for index, (key, value) in enumerate(overrides):
-            env[f"GIT_CONFIG_KEY_{index}"] = key
-            env[f"GIT_CONFIG_VALUE_{index}"] = value
-        if git_dir is not None:
-            env["GIT_DIR"] = str(git_dir)
-            env["GIT_WORK_TREE"] = str(work_tree or "")
-        return env
+        base = {key: os.environ[key] for key in GIT_ENV_ALLOWLIST if key in os.environ}
+        base.update({"HOME": str(home), "XDG_CONFIG_HOME": str(home), "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull})
+        return git_safe_env(
+            home=home,
+            filter_drivers=self._configured_filter_drivers(base),
+            git_dir=git_dir,
+            work_tree=work_tree,
+        )
 
     def _configured_filter_drivers(self, base_env: dict[str, str]) -> list[str]:
         cached = getattr(self, "_filter_drivers", None)
@@ -1888,8 +1740,7 @@ class UltraReviewService:
         summary = self._git_run(["apply", "--summary", "--numstat", str(diff_path)], cwd=self.project_root)
         if summary.returncode != 0:
             return ["patch_unparseable"]
-        return [match.group(0) for match in re.finditer(r"^.*$", summary.stdout or "", re.MULTILINE)
-                if UNSAFE_PATCH_SUMMARY.search(match.group(0))]
+        return unsafe_summary_lines(summary.stdout or "")
 
     def _post_apply_violations(self, execution_root: Path) -> list[str]:
         """Authoritative containment check after the patch is applied: lstat-walk the mirror
@@ -1899,33 +1750,27 @@ class UltraReviewService:
         relative paths."""
 
         root = execution_root.resolve()
-        offending: list[str] = []
         self._neutralized_head_links: list[str] = []
         head_links: dict[str, str] | None = None
-        for current, dirs, files in os.walk(execution_root, followlinks=False):
-            for name in [*dirs, *files]:
-                path = Path(current) / name
-                rel = path.relative_to(execution_root).as_posix()
-                if rel == ".git":
-                    continue
-                info = os.lstat(path)
-                if stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode):
-                    continue
-                if stat.S_ISLNK(info.st_mode):
-                    if head_links is None:
-                        head_links = self._head_symlink_targets()
-                    target = os.readlink(path)
-                    resolved = path.resolve()
-                    inside = resolved == root or root in resolved.parents
-                    if head_links.get(rel) == target:
-                        if not inside:
-                            # Already in HEAD (not introduced by the patch) but pointing
-                            # outside: removed from the mirror so nothing can read through it.
-                            os.unlink(path)
-                            self._neutralized_head_links.append(rel)
-                        continue
-                offending.append(rel)
-        return offending
+
+        def accept_symlink(path: Path, rel: str) -> bool:
+            nonlocal head_links
+            if head_links is None:
+                head_links = self._head_symlink_targets()
+            target = os.readlink(path)
+            if head_links.get(rel) != target:
+                return False
+            resolved = path.resolve()
+            if resolved != root and root not in resolved.parents:
+                # Already in HEAD (not introduced by the patch) but pointing outside:
+                # removed from the mirror so nothing can read through it.
+                os.unlink(path)
+                self._neutralized_head_links.append(rel)
+            return True
+
+        return [
+            rel for rel in lstat_walk_violations(execution_root, on_symlink=accept_symlink) if rel != ".git"
+        ]
 
     def _head_symlink_targets(self) -> dict[str, str]:
         listed = subprocess.run(  # noqa: S603 - argv list, no shell
@@ -1958,24 +1803,7 @@ class UltraReviewService:
     def _diff_policy_violations(diff_text: str) -> dict[str, list[str]]:
         """Paths the diff makes (or keeps) symlinks, and paths with a ``.git`` component."""
 
-        symlinks: list[str] = []
-        nested_git: list[str] = []
-        current = ""
-        for line in diff_text.splitlines():
-            if line.startswith("diff --git "):
-                match = re.match(r"^diff --git a/(.*) b/(.*)$", line)
-                current = match.group(2) if match else ""
-                if current and any(part.lower() == ".git" for part in Path(current).parts):
-                    nested_git.append(current)
-                continue
-            if not current:
-                continue
-            mode_line = line.startswith(("new file mode ", "new mode ", "old mode ", "deleted file mode "))
-            index_line = line.startswith("index ") and line.rstrip().endswith(" " + SYMLINK_MODE)
-            if (mode_line and line.rstrip().endswith(SYMLINK_MODE)) or index_line:
-                if current not in symlinks:
-                    symlinks.append(current)
-        return {"symlinks": symlinks, "nested_git": nested_git}
+        return diff_policy_violations(diff_text)
 
     def _git(self, args: list[str]) -> str:
         result = self._git_run(args)
