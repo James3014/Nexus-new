@@ -1,5 +1,5 @@
-from nexus.core.capability_executor_registry import EXECUTOR_REGISTRY
 from nexus.core.belief_contracts import CapabilityExecutionPlan
+from nexus.core.capability_executor_registry import EXECUTOR_REGISTRY
 
 
 def _plan() -> CapabilityExecutionPlan:
@@ -13,7 +13,15 @@ def _test_executor(name: str) -> None:
     r = fn(plan, "test task")
     assert r.invoked, f"{name}: invoked={r.invoked}"
     assert r.gate_passed, f"{name}: gate_passed={r.gate_passed}"
-    assert r.telemetries["wall_time_ms"] > 0, f"{name}: wall_time_ms=0"
+    # wall_time_ms is a real time.monotonic() delta truncated to whole ms, so a fast
+    # executor legitimately measures 0. Assert a real sample exists (measured source,
+    # non-negative int) instead of "> 0", which only held on slow machines.
+    tel = r.telemetries
+    assert tel["telemetry_source"] == "measured", (
+        f"{name}: telemetry_source={tel['telemetry_source']}"
+    )
+    assert isinstance(tel["wall_time_ms"], int), f"{name}: wall_time_ms={tel['wall_time_ms']!r}"
+    assert tel["wall_time_ms"] >= 0, f"{name}: wall_time_ms={tel['wall_time_ms']}"
 
 
 def _assert_retired(name: str) -> None:

@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 from dataclasses import dataclass, field
-from unittest.mock import patch
+from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from nexus.core.router import SkillsRouter
 
@@ -13,6 +13,8 @@ from nexus.core.router import SkillsRouter
 class _MockPlan:
     plan_id = "p1"
     task_id = "t001"
+    # The router refuses any plan that is not Planner-authored (selection_authority gate).
+    constraints = {"selection_authority": "CapabilityPlanner"}
 
 
 @dataclass(frozen=True)
@@ -24,17 +26,27 @@ class _MockCapReceipt:
     gate_passed: bool = True
     outcome: dict = field(default_factory=lambda: {"status": "pass"})
     evidence_alignment: bool = True
-    telemetries: dict = field(default_factory=lambda: {"wall_time_ms": 100, "token_usage": 50, "model_calls": 1, "telemetry_source": "measured"})
+    telemetries: dict = field(
+        default_factory=lambda: {
+            "wall_time_ms": 100,
+            "token_usage": 50,
+            "model_calls": 1,
+            "telemetry_source": "measured",
+        }
+    )
     timestamp: str = "2026-01-01T00:00:00"
     skill_receipts: list = field(default_factory=list)
 
     def to_dict(self) -> dict:
         import dataclasses
+
         return dataclasses.asdict(self)
 
 
 def _setup_router(tmp_path: Path, run_dir: str | None = None) -> SkillsRouter:
-    return SkillsRouter(project_root=str(tmp_path), run_dir=run_dir or str(tmp_path / ".nexus" / "runs" / "t"))
+    return SkillsRouter(
+        project_root=str(tmp_path), run_dir=run_dir or str(tmp_path / ".nexus" / "runs" / "t")
+    )
 
 
 SELECTOR_PATH = "nexus.core.capability_selector.CapabilitySelector"
@@ -63,7 +75,7 @@ def test_router_outcome_memory_failure_does_not_block(tmp_path: Path):
         MockSel.return_value.select_capabilities.return_value = _MockPlan()
         with patch(EXECUTOR_PATH) as MockCtrl:
             MockCtrl.return_value.execute_plan.return_value = mock_receipts
-            with patch(OUTCOME_PATH, side_effect=RuntimeError("boom")) as mock_save:
+            with patch(OUTCOME_PATH, side_effect=RuntimeError("boom")):
                 candidates = router.route_candidates("R", context)
                 assert candidates is not None
 
@@ -142,21 +154,23 @@ def test_router_empty_receipts_are_unverified_not_success(tmp_path: Path):
 
 
 def test_localheal_adoption_requires_patch_and_verifier_receipts():
-    from nexus.services.local_heal.orchestrator import HealOrchestrator
     from nexus.services.local_heal.memory_trace import MemoryTrace
+    from nexus.services.local_heal.orchestrator import HealOrchestrator
 
     orchestrator = HealOrchestrator.__new__(HealOrchestrator)
-    ctx = SimpleNamespace(op=SimpleNamespace(
-        _memory_influence_trace=MemoryTrace(
-            trace_status="TRACE_AVAILABLE",
-            prompt_included=True,
-            memory_evidence_ids=["lesson-1"],
-        ),
-        applied_patch_hash="patch-hash",
-        selected_candidate_hash_matches_applied=True,
-        verifier_receipt=SimpleNamespace(verifier_status="pass", receipt_id="verifier-1"),
-        patch_receipt_path="patch-1",
-    ))
+    ctx = SimpleNamespace(
+        op=SimpleNamespace(
+            _memory_influence_trace=MemoryTrace(
+                trace_status="TRACE_AVAILABLE",
+                prompt_included=True,
+                memory_evidence_ids=["lesson-1"],
+            ),
+            applied_patch_hash="patch-hash",
+            selected_candidate_hash_matches_applied=True,
+            verifier_receipt=SimpleNamespace(verifier_status="pass", receipt_id="verifier-1"),
+            patch_receipt_path="patch-1",
+        )
+    )
 
     orchestrator._record_authoritative_memory_adoption(ctx)
 
@@ -165,18 +179,20 @@ def test_localheal_adoption_requires_patch_and_verifier_receipts():
 
 
 def test_localheal_adoption_fails_closed_without_receipts():
-    from nexus.services.local_heal.orchestrator import HealOrchestrator
     from nexus.services.local_heal.memory_trace import MemoryTrace
+    from nexus.services.local_heal.orchestrator import HealOrchestrator
 
     orchestrator = HealOrchestrator.__new__(HealOrchestrator)
-    ctx = SimpleNamespace(op=SimpleNamespace(
-        _memory_influence_trace=MemoryTrace(
-            trace_status="TRACE_AVAILABLE",
-            prompt_included=True,
-            memory_evidence_ids=["lesson-1"],
-        ),
-        solve_eligible=True,
-    ))
+    ctx = SimpleNamespace(
+        op=SimpleNamespace(
+            _memory_influence_trace=MemoryTrace(
+                trace_status="TRACE_AVAILABLE",
+                prompt_included=True,
+                memory_evidence_ids=["lesson-1"],
+            ),
+            solve_eligible=True,
+        )
+    )
 
     orchestrator._record_authoritative_memory_adoption(ctx)
 
