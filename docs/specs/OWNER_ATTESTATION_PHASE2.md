@@ -118,7 +118,7 @@ The decision looks only at content, never at who sent the event. It approves:
    cd tools/owner-signer && swift build -c release
    sudo install -o root -g wheel -m 0755 .build/release/owner-signer /usr/local/bin/
    owner-signer init > ~/owner.pem                     # key_id on stderr
-   python scripts/ops/owner_attestation.py pin --public-key ~/owner.pem
+   python3 -I scripts/ops/owner_attestation.py pin --public-key ~/owner.pem
    ```
 
    Install the signer root-owned. On some Macs `/usr/local/bin` is
@@ -163,10 +163,10 @@ The decision looks only at content, never at who sent the event. It approves:
 5. **Granting work.**
 
    ```sh
-   python scripts/ops/owner_attestation.py draft --agent <agent-login> --issue <N> \
+   python3 -I scripts/ops/owner_attestation.py draft --agent <agent-login> --issue <N> \
        --path 'nexus/orchestrator/**' --hours 24 --out grant.json
    owner-signer sign grant.json > grant.sig                     # Touch ID or login password
-   python scripts/ops/owner_attestation.py assemble --payload grant.json \
+   python3 -I scripts/ops/owner_attestation.py assemble --payload grant.json \
        --signature grant.sig --public-key ~/owner.pem
    ```
 
@@ -224,7 +224,7 @@ The decision looks only at content, never at who sent the event. It approves:
   prompt text is chosen by the caller (the text shown comes from the caller
   that runs `owner-signer sign`), so Touch ID or the login password shows that
   you were at the Mac, not that you read the exact grant. Always read the
-  summary the signer prints from the signed bytes. This note lives here
+  summary shown in the macOS authentication prompt. This note lives here
   rather than in `tools/owner-signer/**` on purpose: the installed binary must
   keep matching its source, so `main.swift` is not touched.
 - **Interaction with #1943 (Owner SSH deletion signing).** The two mechanisms
@@ -239,3 +239,11 @@ When updating the ruleset on `main`, keep the existing rules and make sure:
   `{"context": "Owner grant", "integration_id": 5294703}`;
 - `bypass_actors` is the `RepositoryRole` admin (`actor_id` 5) with
   `bypass_mode` `"pull_request"`.
+- merge #1817 first, so that the `Owner grant` check exists before the ruleset
+  requires it;
+- never add the agent App 5294709, the approver App, github-actions or deploy
+  keys as bypass actors;
+- Owner-authored PRs always get `Owner grant` = failure and merge only through
+  admin bypass, which also skips the other required checks, so confirm those
+  are green first;
+- keep the existing five required contexts pinned to integration 15368.

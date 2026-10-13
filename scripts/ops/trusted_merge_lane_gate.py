@@ -871,8 +871,8 @@ def verify_p256_signature(pem: str, message: bytes, signature_der: bytes) -> boo
 _SPECIAL_MODES = frozenset({"120000", "160000"})
 
 
-def _diff_entries(repo_root: Path, left: str, right: str) -> dict[str, tuple[str, str]]:
-    """Changed paths between two revisions mapped to their (old, new) modes."""
+def _diff_entries(repo_root: Path, left: str, right: str) -> dict[str, set[str]]:
+    """Changed paths between two revisions mapped to every old/new mode seen."""
     proc = subprocess.run(
         [
             "git",
@@ -892,14 +892,14 @@ def _diff_entries(repo_root: Path, left: str, right: str) -> dict[str, tuple[str
     if proc.returncode != 0:
         raise LaneBindingError("ATTESTATION_CHANGED_PATHS_UNAVAILABLE")
     parts = proc.stdout.split(b"\0")
-    entries: dict[str, tuple[str, str]] = {}
+    entries: dict[str, set[str]] = {}
     index = 0
     while index + 1 < len(parts):
         meta = parts[index].decode("ascii", errors="replace").split()
         if len(meta) != 5 or not meta[0].startswith(":"):
             raise LaneBindingError("ATTESTATION_CHANGED_PATHS_UNAVAILABLE")
         path = parts[index + 1].decode("utf-8", errors="strict")
-        entries[path] = (meta[0][1:], meta[1])
+        entries[path] = {meta[0][1:], meta[1]}
         index += 2
     return entries
 
@@ -917,7 +917,7 @@ def _tree_paths(repo_root: Path, revision: str) -> set[str]:
 
 def _reject_unsafe_paths(
     repo_root: Path,
-    entries: Mapping[str, tuple[str, str]],
+    entries: Mapping[str, set[str]],
     trusted_revision: str,
     head_sha: str,
 ) -> None:
@@ -927,10 +927,10 @@ def _reject_unsafe_paths(
     a tracked one only in case, or any non-ASCII path (Unicode normalization),
     can land on a protected file there; symlinks and gitlinks redirect writes.
     """
-    for path, (old_mode, new_mode) in entries.items():
+    for path, modes in entries.items():
         if not path.isascii():
             raise LaneBindingError(f"ATTESTATION_NON_ASCII_PATH:{ascii(path)}")
-        if old_mode in _SPECIAL_MODES or new_mode in _SPECIAL_MODES:
+        if modes & _SPECIAL_MODES:
             raise LaneBindingError(f"ATTESTATION_SYMLINK_OR_GITLINK:{path}")
     known: dict[str, set[str]] = {}
     for revision in (trusted_revision, head_sha):
@@ -966,7 +966,8 @@ def _changed_paths(
     if proc.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40}", merge_base):
         raise LaneBindingError("ATTESTATION_MERGE_BASE_UNAVAILABLE")
     entries = _diff_entries(repo_root, base_sha, head_sha)
-    entries.update(_diff_entries(repo_root, merge_base, head_sha))
+    for path, modes in _diff_entries(repo_root, merge_base, head_sha).items():
+        entries.setdefault(path, set()).update(modes)
     if not entries:
         raise LaneBindingError("ATTESTATION_CHANGED_PATHS_EMPTY")
     _reject_unsafe_paths(repo_root, entries, trusted_revision, head_sha)

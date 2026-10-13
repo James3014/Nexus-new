@@ -913,3 +913,21 @@ def test_owner_attestation_cli_does_not_put_the_repo_root_first_on_sys_path():
         f"assert sys.path[0] != {str(root)!r}, sys.path[:3]\n"
     )
     subprocess.run([sys.executable, "-c", code], check=True, cwd=str(root))
+
+
+def test_symlink_mode_seen_in_either_diff_is_rejected(world):
+    # base.sha has src/feature.py as a symlink; the trusted revision (older) has a
+    # regular file. diff(base, head) shows 120000 -> 100644, diff(merge-base, head)
+    # shows 100644 -> 100644; the symlink must not be lost when merging the two.
+    repo = world["repo"]
+    original = world["base"]
+    (repo / "src" / "feature.py").unlink()
+    (repo / "src" / "feature.py").symlink_to("../governance/owner-signing-keys.json")
+    symlinked = _commit(repo, "symlink on main")
+    (repo / "src" / "feature.py").unlink()
+    head = _head(world, {"src/feature.py": "value = 3\n"})
+    event = _event(world, head, _body(_envelope(world, _payload())))
+    event["pull_request"]["base"]["sha"] = symlinked
+    event["workflow_sha"] = original
+    with pytest.raises(LaneBindingError, match="ATTESTATION_SYMLINK_OR_GITLINK"):
+        validate_event(event, repo_root=repo, now=NOW)

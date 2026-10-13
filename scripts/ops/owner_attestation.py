@@ -3,10 +3,10 @@
 
 Typical flow on the Owner's Mac:
 
-    python scripts/ops/owner_attestation.py draft --agent nexus-agent-bot \\
+    python3 -I scripts/ops/owner_attestation.py draft --agent nexus-agent-bot \\
         --issue 1750 --path 'nexus/orchestrator/**' --hours 24 --out grant.json
     owner-signer sign grant.json > grant.sig          # Touch ID / login-password prompt
-    python scripts/ops/owner_attestation.py assemble --payload grant.json \\
+    python3 -I scripts/ops/owner_attestation.py assemble --payload grant.json \\
         --signature grant.sig --public-key owner.pem   # prints the PR marker
 
 The payload file holds the exact bytes that are signed; the signer shows a
@@ -16,8 +16,11 @@ them against the public key pinned on the base branch.
 
 from __future__ import annotations
 
-# Stdlib imports come first and the repo root is appended (never prepended) to
-# sys.path afterwards, so a json.py or secrets.py in the repo cannot shadow them.
+# Run as `python3 -I scripts/ops/owner_attestation.py ...`: -I drops the script
+# directory (scripts/ops/) and the current directory from sys.path, so a file
+# such as secrets.py there cannot shadow the stdlib. Without -I that is NOT
+# guaranteed. Stdlib imports come first; the repo root is then appended
+# explicitly (never prepended) because -I does not add it.
 import argparse
 import base64
 import json
