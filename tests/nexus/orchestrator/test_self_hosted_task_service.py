@@ -11089,6 +11089,20 @@ def test_tracked_dispatch_without_admission_fails_closed_on_every_lane(tmp_path,
         )
 
 
+def test_untracked_dispatch_without_admission_fails_closed(tmp_path):
+    """An untracked request cannot select the GOVERNED lane; that path stays closed."""
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    import nexus.orchestrator.self_hosted_task_service as shs_module
+
+    request = _request(tmp_path, task_id="untracked-governed", execution_lane="GOVERNED")
+    with pytest.raises(ValueError, match="DIRECT_CANONICAL or ISOLATED_TARGET"):
+        resolve_execution_lane(request)
+    with pytest.raises(ValueError, match="PROJECT_ENTRY_AUTHORITY_BINDING_REQUIRED"):
+        shs_module._reject_unbound_project_entry_authority_hints(request)
+    with pytest.raises(ValueError):
+        service.submit_task(request)
+
+
 def test_provider_boundary_fails_closed_on_invalid_persisted_state(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
     request = _request(tmp_path, task_id="invalid-state", execution_lane="ISOLATED_TARGET")
