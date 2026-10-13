@@ -50,7 +50,7 @@ def _local_heal_plan() -> CapabilityPlan:
 def test_abc_local_heal_shadow_seam() -> None:
     plan = _local_heal_plan()
     
-    exe_plan = build_execution_plan(plan)
+    exe_plan = build_execution_plan(plan, task_id="task-e2e-shadow")
     
     controls = exe_plan.executor_controls
     assert controls["enable_local_heal"] is True
@@ -102,7 +102,7 @@ def test_abc_local_heal_advisory_seam() -> None:
     with mock.patch.dict(os.environ, {"NEXUS_LOCAL_MODEL_ADVISORY_ENABLE": "1"}):
         plan = _local_heal_plan()
         
-        exe_plan = build_execution_plan(plan)
+        exe_plan = build_execution_plan(plan, task_id="task-e2e-advisory")
         controls = exe_plan.executor_controls
         
         request = LocalHealCapabilityRequest(
@@ -137,7 +137,7 @@ def test_abc_local_heal_fail_closed_seam() -> None:
     with mock.patch.dict(os.environ, {"NEXUS_LOCAL_GUARD_FAIL_CLOSED_ENABLE": "1"}):
         plan = _local_heal_plan()
         
-        exe_plan = build_execution_plan(plan)
+        exe_plan = build_execution_plan(plan, task_id="task-e2e-fail-closed")
         controls = dict(exe_plan.executor_controls)
         controls["verifier_result"] = "fail"
         
@@ -175,7 +175,7 @@ def test_abc_local_heal_candidate_seam() -> None:
     }):
         plan = _local_heal_plan()
         
-        exe_plan = build_execution_plan(plan)
+        exe_plan = build_execution_plan(plan, task_id="task-e2e-candidate")
         controls = dict(exe_plan.executor_controls)
         
         def mock_gen(req) -> str:

@@ -255,8 +255,8 @@ class LocalHealCapabilityAdapter:
                 capability_payload=capability_payload,
             )
 
-        # #1924: the snapshot must be the one build_execution_plan passed through in-process.
-        if not _snapshot_is_planner_bound(signal_snapshot):
+        # #1924: the snapshot must be the one build_execution_plan bound in-process to this task_id.
+        if not _snapshot_is_planner_bound(signal_snapshot, request.task_id):
             return _planner_binding_rejection(request)
         enable_local_heal = bool(controls.get("enable_local_heal", False))
         local_heal_mode = controls.get("local_heal_mode", "disabled")
@@ -706,10 +706,10 @@ class LocalHealCapabilityAdapter:
         )
 
 
-def _snapshot_is_planner_bound(signal_snapshot: object) -> bool:
+def _snapshot_is_planner_bound(signal_snapshot: object, task_id: object) -> bool:
     from nexus.contracts.planner_snapshot_binding import is_planner_bound
 
-    return is_planner_bound(signal_snapshot)
+    return is_planner_bound(signal_snapshot, task_id=task_id)
 
 
 def _planner_binding_rejection(request: LocalHealCapabilityRequest) -> LocalHealCapabilityResponse:
@@ -727,7 +727,7 @@ def _planner_binding_rejection(request: LocalHealCapabilityRequest) -> LocalHeal
         verifier_result=VerifierResult.NOT_RUN,
         evidence_refs=request.evidence_refs,
         fallback_block_reason=ROUTE_CONTEXT_NOT_PLANNER_BOUND,
-        metadata={"error": "route_context signal_snapshot was not passed through build_execution_plan"},
+        metadata={"error": "route_context signal_snapshot was not bound to this task_id by build_execution_plan"},
     )
     decision = hybrid_route_decision_from_payload(payload)
     capability_payload = capability_payload_from_hybrid_route(decision)

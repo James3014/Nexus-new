@@ -79,7 +79,7 @@ def build_route_decision(
     stop_policy: dict[str, Any] | None = None,
     tuning_snapshot: dict[str, Any] | None = None,
 ) -> RouteDecision:
-    execution = build_execution_plan(plan)
+    execution = build_execution_plan(plan, task_id=task_id)
     selected = tuple(plan.selected_capabilities)
     acceleration = tuple(item for item in ("ddtree",) if item in selected)
     governance = tuple(item for item in ("ultra_review", "mempalace_gate", "artifact_gate", "claim_gate") if item in selected)

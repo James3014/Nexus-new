@@ -18,9 +18,9 @@ from nexus.engine.capability_planner import CapabilityPlanner
 # #1924: controls come from a real CapabilityPlanner.plan() passed through build_execution_plan(),
 # whose planner-bound route_context must not be edited. Isolated solve is reachable only once the
 # planner itself grants it (quarantined until then).
-def _planned_controls(**fixture_controls: object) -> dict:
+def _planned_controls(task_id: str, **fixture_controls: object) -> dict:
     plan = CapabilityPlanner().plan(task_desc="fix code", task_type="repair", route={"local_enabled": True})
-    controls = dict(build_execution_plan(plan).executor_controls)
+    controls = dict(build_execution_plan(plan, task_id=task_id).executor_controls)
     assert controls["route_context"]["signal_snapshot"]["planner_version"] == "capability_planner_v1"
     return {**controls, **fixture_controls}
 
@@ -54,6 +54,7 @@ def test_abc_local_heal_full_isolated_solve_seam() -> None:
                 problem_statement="fix code",
                 evidence_refs=("ref1",),
                 executor_controls=_planned_controls(
+                    "t_abc",
                     source_root=src_root,
                     target_file=test_file,
                     target_symbol="print",
@@ -121,6 +122,7 @@ def test_abc_local_heal_full_isolated_solve_with_fail_closed_guard_enabled() -> 
                 problem_statement="fix code",
                 evidence_refs=("ref1",),
                 executor_controls=_planned_controls(
+                    "t_abc_guard",
                     source_root=src_root,
                     target_file=test_file,
                     target_symbol="print",
