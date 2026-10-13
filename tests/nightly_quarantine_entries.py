@@ -620,13 +620,6 @@ QUARANTINE: tuple[dict[str, object], ...] = (
         "tests": ("test_coerce_long_gemini_answer_uses_second_pass_for_non_json",),
     },
     {
-        "file": "tests/product/test_robustness.py",
-        "disposition": "quarantine",
-        "issue": "#1929",
-        "cause": "possible product bug: pyproject packages = [nexus, scripts] no longer include the product package that nexus/contracts imports; owner decision on packaging",
-        "tests": ("test_poetry_packages_include_product_without_version_change",),
-    },
-    {
         "file": "tests/research/test_day_shift_optimizer.py",
         "disposition": "quarantine",
         "issue": "#1929",
@@ -729,13 +722,6 @@ QUARANTINE: tuple[dict[str, object], ...] = (
             "TestRouteOptimization::test_risk_driven_lazy_activation",
             "TestRouteOptimization::test_rule_driven_lazy_activation",
         ),
-    },
-    {
-        "file": "tests/test_router_decision_id.py",
-        "disposition": "quarantine",
-        "issue": "#1929",
-        "cause": "possible product bug: router_decisions fallback_used is computed as len(candidates)==0 after the legacy-trigger fallback ran; owner decision on intended semantics",
-        "tests": ("test_router_returns_no_candidates_without_real_skill_artifact",),
     },
     {
         "file": "tests/test_skill_memory.py",
