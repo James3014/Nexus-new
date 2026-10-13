@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template for the #1996 automatic Workforce model-version updater (M5 host, daily).
+  Replace every __PLACEHOLDER__, then install as a user LaunchAgent. Agents must not install it;
+  the Owner/operator does (see docs/ops/release-gates.md, "Workforce Model Auto-Update").
+    __HOME__            home directory of the M5 user (e.g. /Users/james)
+    __NEXUS_REPO__      clean Nexus-new clone used for pin/anchor worktrees
+    __RUNTIME_REPO__    clean nexus-runtime clone (origin = James3014/nexus-runtime)
+    __PYTHON__          Nexus-new venv python (e.g. __NEXUS_REPO__/.venv/bin/python)
+    __AGY_ALLOWLIST__   comma-separated Agy pool accounts allowed for the attestation call
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.nexus.workforce-model-autoupdate</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__PYTHON__</string>
+    <string>__NEXUS_REPO__/scripts/ops/workforce_model_autoupdate.py</string>
+    <string>--runtime-repo</string>
+    <string>__RUNTIME_REPO__</string>
+    <string>--nexus-repo</string>
+    <string>__NEXUS_REPO__</string>
+    <string>--state-dir</string>
+    <string>__HOME__/.local/state/nexus-workforce-autoupdate</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__NEXUS_REPO__</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>__HOME__/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>NEXUS_AGY_ACCOUNT_ALLOWLIST</key>
+    <string>__AGY_ALLOWLIST__</string>
+  </dict>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>6</integer>
+    <key>Minute</key>
+    <integer>17</integer>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>__HOME__/.local/state/nexus-workforce-autoupdate/launchd.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>__HOME__/.local/state/nexus-workforce-autoupdate/launchd.err.log</string>
+</dict>
+</plist>
