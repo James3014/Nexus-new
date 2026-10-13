@@ -1,9 +1,11 @@
-import inspect
-import json
 import re
-from typing import Any, Dict, List
+from typing import TYPE_CHECKING, Any, List
 
+from nexus.contracts.model_output_json import parse_model_json_object
 from nexus.services.local_heal.llm_client import ILLMClient, OllamaLLMClient
+
+if TYPE_CHECKING:
+    from nexus.services.local_heal.interface import RepairPlan
 
 
 class DeterministicSymbolExtractor:
@@ -15,18 +17,47 @@ class DeterministicSymbolExtractor:
     """
 
     # Patterns for Python identifiers in issue text
-    _BACKTICK_IDENT = re.compile(r'`([A-Za-z_][A-Za-z0-9_.]*)`')
+    _BACKTICK_IDENT = re.compile(r"`([A-Za-z_][A-Za-z0-9_.]*)`")
     _TRACEBACK_FUNC = re.compile(r'(?:in |File "[^"]+", line \d+, in )([A-Za-z_][A-Za-z0-9_]*)')
-    _DOTTED_PATH = re.compile(r'\b([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]+)+)\b')
-    _CAMEL_WORDS = re.compile(r'\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\b')  # CamelCase class names
+    _DOTTED_PATH = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]+)+)\b")
+    _CAMEL_WORDS = re.compile(r"\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\b")  # CamelCase class names
 
     # Noise tokens to filter out
     _NOISE = frozenset({
-        'python', 'error', 'traceback', 'none', 'true', 'false', 'self',
-        'import', 'return', 'class', 'def', 'int', 'str', 'list', 'dict',
-        'tuple', 'set', 'type', 'any', 'bool', 'float', 'print',
-        'django', 'auth', 'contrib', 'models', 'fields', 'db', 'utils', 'test',
-        'validator', 'validators', 'username', 'user'
+        "python",
+        "error",
+        "traceback",
+        "none",
+        "true",
+        "false",
+        "self",
+        "import",
+        "return",
+        "class",
+        "def",
+        "int",
+        "str",
+        "list",
+        "dict",
+        "tuple",
+        "set",
+        "type",
+        "any",
+        "bool",
+        "float",
+        "print",
+        "django",
+        "auth",
+        "contrib",
+        "models",
+        "fields",
+        "db",
+        "utils",
+        "test",
+        "validator",
+        "validators",
+        "username",
+        "user",
     })
 
     @classmethod
@@ -61,10 +92,7 @@ class DeterministicSymbolExtractor:
                 candidates.add(parts[-1])
 
         # Filter noise + very short tokens
-        result = [
-            s for s in candidates
-            if s.lower() not in cls._NOISE and len(s) >= 3
-        ]
+        result = [s for s in candidates if s.lower() not in cls._NOISE and len(s) >= 3]
         return sorted(result)[:15]  # Cap at 15 to avoid BM25 dilution
 
 
@@ -107,6 +135,7 @@ class Planner:
         options: dict[str, Any] | None = None,
     ) -> "RepairPlan":
         from nexus.services.local_heal.interface import RepairPlan
+
         # P0-5: Always seed with deterministic symbols first (no hallucinations)
         det_symbols = DeterministicSymbolExtractor.extract(problem, evidence)
 
@@ -114,7 +143,7 @@ class Planner:
             return RepairPlan(
                 search_symbols=det_symbols,
                 repair_strategy="Deterministic symbol extraction (no LLM).",
-                violated_invariants=[]
+                violated_invariants=[],
             )
 
         prompt = f"""You are a software architect. Analyze the bug report and output a compact JSON repair plan.
@@ -131,29 +160,33 @@ Reproduction Evidence:
 
 JSON Output:
 """
-        response = self._generate("", prompt, model_name=model_name, timeout_seconds=timeout_seconds, options=options)
+        response = self._generate(
+            "", prompt, model_name=model_name, timeout_seconds=timeout_seconds, options=options
+        )
         try:
             match = re.search(r"(\{.*\})", response, re.DOTALL)
             if match:
-                parsed = json.loads(match.group(1))
+                parsed = parse_model_json_object(match.group(1), mode="strict")
                 # P0-5: Merge deterministic symbols with LLM symbols, dedup
                 llm_syms = parsed.get("search_symbols", [])
-                merged = list(dict.fromkeys(det_symbols + [s for s in llm_syms if isinstance(s, str)]))[:15]
+                merged = list(
+                    dict.fromkeys(det_symbols + [s for s in llm_syms if isinstance(s, str)])
+                )[:15]
                 return RepairPlan(
                     search_symbols=merged,
                     repair_strategy=parsed.get("repair_strategy", "Apply surgical fix."),
-                    violated_invariants=parsed.get("violated_invariants", [])
+                    violated_invariants=parsed.get("violated_invariants", []),
                 )
-            
+
             # LLM failed to produce JSON — use deterministic baseline
             return RepairPlan(
                 search_symbols=det_symbols,
                 repair_strategy=response[:500] if response else "Apply fix per issue description.",
-                violated_invariants=[]
+                violated_invariants=[],
             )
         except Exception:
             return RepairPlan(
                 search_symbols=det_symbols,
                 repair_strategy="Apply fix per issue description.",
-                violated_invariants=[]
+                violated_invariants=[],
             )

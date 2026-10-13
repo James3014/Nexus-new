@@ -34,7 +34,10 @@ def test_reviewer_rejects_pass_without_patch_or_no_change_reason():
         apply_patch=False,
     )
     result = reviewer.run_review()
-    assert result["status"] == "REJECTED"
+    # Issue #436: a phantom-success guard trip is a repairable, non-accepting
+    # block; terminal REJECTED is reserved for an explicit reviewer disposition.
+    assert result["status"] == "RECOVERABLE_BLOCK"
+    assert result["status"] != "APPROVED"
     assert "no_change_reason" in result["summary"]
 
 
@@ -55,7 +58,10 @@ def test_reviewer_rejects_when_patch_apply_fails():
         patch_apply_result=False,
     )
     result = reviewer.run_review()
-    assert result["status"] == "REJECTED"
+    # Issue #436: a phantom-success guard trip is a repairable, non-accepting
+    # block; terminal REJECTED is reserved for an explicit reviewer disposition.
+    assert result["status"] == "RECOVERABLE_BLOCK"
+    assert result["status"] != "APPROVED"
     assert result["patch_apply_success"] is False
     patcher.apply.assert_called_once()
 
@@ -78,7 +84,10 @@ def test_reviewer_rejects_when_patch_apply_succeeds_but_missing_proof():
     )
     reviewer._collect_physical_proof = MagicMock(return_value=("", ""))
     result = reviewer.run_review()
-    assert result["status"] == "REJECTED"
+    # Issue #436: a phantom-success guard trip is a repairable, non-accepting
+    # block; terminal REJECTED is reserved for an explicit reviewer disposition.
+    assert result["status"] == "RECOVERABLE_BLOCK"
+    assert result["status"] != "APPROVED"
     assert result["summary"].endswith("missing_physical_proof")
     patcher.apply.assert_called_once()
 

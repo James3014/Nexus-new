@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
+from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from nexus.services.cloud_agent_contract import CloudAgentAdapter, CloudAgentRequest, CloudAgentResponse
-
+from nexus.contracts.model_output_json import parse_model_json_object
+from nexus.services.cloud_agent_contract import (
+    CloudAgentAdapter,
+    CloudAgentRequest,
+    CloudAgentResponse,
+)
 
 CommandBuilder = Callable[[CloudAgentRequest], tuple[Sequence[str], str | None]]
 _API_KEY_ENV_VARS = frozenset({"GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY"})
@@ -44,7 +48,7 @@ class SubprocessCloudAgentAdapter(CloudAgentAdapter):
             return {}, "cloud_response_invalid_json"
         if isinstance(payload, dict) and isinstance(payload.get("response"), str):
             try:
-                nested = json.loads(payload["response"])
+                nested = parse_model_json_object(payload["response"], mode="strict")
             except (TypeError, ValueError, json.JSONDecodeError):
                 nested = {}
             if isinstance(nested, dict):
@@ -107,7 +111,12 @@ class SubprocessCloudAgentAdapter(CloudAgentAdapter):
                 error=parse_error,
                 provider_call_confirmed=True,
             )
-        response_identity = str(payload.get("response_identity") or payload.get("response_id") or payload.get("id") or "")
+        response_identity = str(
+            payload.get("response_identity")
+            or payload.get("response_id")
+            or payload.get("id")
+            or ""
+        )
         candidate_payload = str(payload.get("candidate_payload") or "")
         error = str(payload.get("error") or "")
         if candidate_payload and not response_identity:

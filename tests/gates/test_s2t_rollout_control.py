@@ -19,7 +19,7 @@ def _candidate(candidate_id: str, verifier_result: str = "pass") -> S2TCandidate
 @pytest.fixture
 def mock_advisor():
     class MockAdvisor(S2T3BAdvisor):
-        def advise(self, risk_tier, candidates):
+        def advise(self, risk_tier, candidates, task_id=""):
             # Always suggest B
             return {
                 "selected_candidate_id": "B",

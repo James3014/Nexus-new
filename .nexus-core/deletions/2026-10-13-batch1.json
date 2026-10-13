@@ -1,0 +1,78 @@
+{
+  "archive": {
+    "commit": "929a953d01c805a72f9d23b2ac9bcdf95545d5fd",
+    "ref": "refs/heads/archive/2026-10-12-first-batch"
+  },
+  "companion_changes": [
+    {
+      "after_oid": "cc060edb7dcf88d6e46e83bdb0a1be03448fc578",
+      "change_type": "MODIFY",
+      "path": ".gitmodules"
+    },
+    {
+      "after_oid": "0e2ea8d6a2eef6a8caf75b875e27723032ebd03f",
+      "change_type": "MODIFY",
+      "path": "ARCHIVED_2026-10-12.md"
+    }
+  ],
+  "deletions": [
+    {
+      "before_mode": "160000",
+      "before_oid": "f7bbbb2ccdf479001d6467c9e34af59e44a840f9",
+      "path": "SWE-bench"
+    },
+    {
+      "before_mode": "120000",
+      "before_oid": "efad2c4f81109b95d36de2e0c1af9aae5a50ee9a",
+      "path": "nexus-evolve"
+    },
+    {
+      "before_mode": "160000",
+      "before_oid": "71736a3f4f1afe01982d5b0d4c36eb5405eaab91",
+      "path": "nexus-mempalace"
+    },
+    {
+      "before_mode": "160000",
+      "before_oid": "bf3bc3eaafc78e8dd666cf2937d875ea637bb724",
+      "path": "nexus-rust-v16"
+    },
+    {
+      "before_mode": "160000",
+      "before_oid": "d6cef809dee4f03794e89bd089dd426b34a67345",
+      "path": "notebooklm-py-audit"
+    },
+    {
+      "before_mode": "100644",
+      "before_oid": "1565f8d8665503d152dc881d2201499aa5312da5",
+      "path": "scripts/Jaden_Storybook.html"
+    },
+    {
+      "before_mode": "100644",
+      "before_oid": "25b26647a67afc7548fbf8119c0d8a9571383cc8",
+      "path": "scripts/Jaden_Storybook_v1.md"
+    },
+    {
+      "before_mode": "100644",
+      "before_oid": "8daff74b149df0f0ace136c775cc0106431c997d",
+      "path": "scripts/dashboard.html"
+    },
+    {
+      "before_mode": "100644",
+      "before_oid": "e1f77f110063124d88124437707857e541efb74c",
+      "path": "scripts/engine/commands/stress_test.py"
+    },
+    {
+      "before_mode": "100644",
+      "before_oid": "321f37744f55d3dfd8535a76f0fba8af252d52c8",
+      "path": "scripts/ops/evolution_engine_v08.py"
+    },
+    {
+      "before_mode": "100644",
+      "before_oid": "061bd5f28e99248ec23acb8251a896f78d35ea0f",
+      "path": "scripts/ops/federated_engine_v09.py"
+    }
+  ],
+  "id": "2026-10-13-batch1",
+  "reason": "Owner-approved retirement of first-batch archived paths (ARCHIVED_2026-10-12.md, #1850/#1863), originals preserved in archive commit 929a953d0; tracking Issue #1946",
+  "schema": "nexus.core.deletion-manifest.v1"
+}

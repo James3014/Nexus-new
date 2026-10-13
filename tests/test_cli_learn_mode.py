@@ -1,3 +1,4 @@
+import hashlib
 import json
 from datetime import datetime, timezone
 from click.testing import CliRunner
@@ -6,6 +7,39 @@ from unittest.mock import MagicMock
 from nexus.research.learn_mode import LearnModeService
 from scripts.engine import nexus_cli
 from scripts.engine.nexus_cli import nexus
+
+
+def _admit_claims(root) -> None:
+    """Rewrite ``learn_claims.jsonl`` so every claim carries a valid admission.
+
+    ``LearnModeService.load_claims`` only returns claims whose admission proof
+    verifies against a stored source snapshot, so raw fixture claims are made
+    snapshot-backed (snapshot text == claim text, span covers it) before use.
+    """
+    svc = LearnModeService(root)
+    svc.raw_dir.mkdir(parents=True, exist_ok=True)
+    rows = [
+        json.loads(line)
+        for line in svc.claims_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    for row in rows:
+        text = str(row["claim"])
+        row["citation_span"] = [0, len(text)]
+        # ask() drops claims older than max_staleness_days (180); keep the fixture
+        # fresh relative to the real clock instead of a hard-coded date.
+        row["created_at"] = datetime.now(timezone.utc).isoformat()
+        snapshot = svc._save_source_snapshot(str(row["source_url"]), text)
+        snapshot_sha = hashlib.sha256(snapshot.read_bytes()).hexdigest()
+        claim_key = svc._claim_key(row)
+        row["admission_status"] = "ADMITTED"
+        row["admission_verifier"] = "mempalace.verify"
+        row["admission_claim_key"] = claim_key
+        row["source_snapshot_sha256"] = snapshot_sha
+        row["admission_proof"] = svc._compute_admission_proof(claim_key, snapshot_sha, "mempalace.verify")
+    svc.claims_path.write_text(
+        "\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n", encoding="utf-8"
+    )
 
 
 def test_learn_report_formats_structured_unresolved_questions(tmp_path, monkeypatch):
@@ -405,6 +439,7 @@ def test_learn_ask_returns_unknown_when_min_evidence_not_met(tmp_path, monkeypat
         + "\n",
         encoding="utf-8",
     )
+    _admit_claims(tmp_path)
 
     ask = runner.invoke(
         nexus,
@@ -453,6 +488,7 @@ def test_learn_ask_strict_topic_no_drift_when_topic_has_claims(tmp_path, monkeyp
         },
     ]
     claims_path.write_text("\n".join(json.dumps(c) for c in claims) + "\n", encoding="utf-8")
+    _admit_claims(tmp_path)
 
     for _ in range(5):
         ask = runner.invoke(
@@ -499,6 +535,7 @@ def test_learn_mode_service_strict_topic_keeps_requested_pack_for_hermes_questio
         },
     ]
     claims_path.write_text("\n".join(json.dumps(c) for c in claims) + "\n", encoding="utf-8")
+    _admit_claims(tmp_path)
 
     payload = service.ask(
         topic="agent-sprite-forge",
@@ -533,6 +570,7 @@ def test_learn_ask_strict_topic_returns_unknown_when_topic_empty(tmp_path, monke
         + "\n",
         encoding="utf-8",
     )
+    _admit_claims(tmp_path)
 
     ask = runner.invoke(
         nexus,
@@ -577,6 +615,7 @@ def test_learn_ask_cross_pack_allowed_when_flag_enabled(tmp_path, monkeypatch):
         + "\n",
         encoding="utf-8",
     )
+    _admit_claims(tmp_path)
 
     ask = runner.invoke(
         nexus,
@@ -625,6 +664,7 @@ def test_learn_ask_returns_conflict_for_contradictory_claims(tmp_path, monkeypat
         },
     ]
     claims_path.write_text("\n".join(json.dumps(c) for c in claims) + "\n", encoding="utf-8")
+    _admit_claims(tmp_path)
 
     ask = runner.invoke(
         nexus,
@@ -664,6 +704,7 @@ def test_learn_gate_runs_acceptance_contract_and_ci(tmp_path, monkeypatch):
         + "\n",
         encoding="utf-8",
     )
+    _admit_claims(tmp_path)
     contract = tmp_path / ".nexus" / "config" / "task_contract.example.json"
     contract.parent.mkdir(parents=True, exist_ok=True)
     contract.write_text("{}", encoding="utf-8")

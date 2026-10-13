@@ -107,8 +107,8 @@ def test_bounded_rlm_orchestration_stops_cleanly_on_gate_passed_high_belief() ->
 
 
 def test_outcome_memory_writes_learning_policy(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(OutcomeMemoryManager, "STORAGE_PATH", tmp_path / "history.jsonl")
-    monkeypatch.setattr(OutcomeMemoryManager, "POLICY_PATH", tmp_path / "policy.json")
+    history_path = tmp_path / ".nexus" / "memory" / "outcome_history.jsonl"
+    policy_path = tmp_path / ".nexus" / "memory" / "dynamic_learning_policy.json"
 
     record = EpisodeOutcomeRecord.from_task(
         task_id="test-001",
@@ -131,11 +131,11 @@ def test_outcome_memory_writes_learning_policy(tmp_path, monkeypatch) -> None:
         ],
     )
 
-    summary = OutcomeMemoryManager.save_episode_and_tune_sync(record)
-    policy = json.loads((tmp_path / "policy.json").read_text(encoding="utf-8"))
+    summary = OutcomeMemoryManager.save_episode_and_tune_sync(record, project_root=tmp_path)
+    policy = json.loads(policy_path.read_text(encoding="utf-8"))
 
     assert summary["status"] == "PASS"
-    assert (tmp_path / "history.jsonl").exists()
+    assert history_path.exists()
     assert policy["promoted_capabilities"] == ["hyper"]
     assert policy["penalized_capabilities"] == []
     assert policy["aging_window"]["records_used"] == 1
@@ -143,8 +143,7 @@ def test_outcome_memory_writes_learning_policy(tmp_path, monkeypatch) -> None:
 
 
 def test_outcome_memory_penalizes_selected_without_invocation(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(OutcomeMemoryManager, "STORAGE_PATH", tmp_path / "history.jsonl")
-    monkeypatch.setattr(OutcomeMemoryManager, "POLICY_PATH", tmp_path / "policy.json")
+    policy_path = tmp_path / ".nexus" / "memory" / "dynamic_learning_policy.json"
 
     record = EpisodeOutcomeRecord.from_task(
         task_id="test-002",
@@ -157,8 +156,8 @@ def test_outcome_memory_penalizes_selected_without_invocation(tmp_path, monkeypa
         receipts=[{"name": "swarm", "selected": True, "invoked": False}],
     )
 
-    OutcomeMemoryManager.save_episode_and_tune_sync(record)
-    policy = json.loads((tmp_path / "policy.json").read_text(encoding="utf-8"))
+    OutcomeMemoryManager.save_episode_and_tune_sync(record, project_root=tmp_path)
+    policy = json.loads(policy_path.read_text(encoding="utf-8"))
 
     assert policy["promoted_capabilities"] == []
     assert policy["penalized_capabilities"] == ["swarm"]
@@ -166,8 +165,7 @@ def test_outcome_memory_penalizes_selected_without_invocation(tmp_path, monkeypa
 
 
 def test_outcome_memory_excludes_trust_mismatch_from_policy_scores(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(OutcomeMemoryManager, "STORAGE_PATH", tmp_path / "history.jsonl")
-    monkeypatch.setattr(OutcomeMemoryManager, "POLICY_PATH", tmp_path / "policy.json")
+    policy_path = tmp_path / ".nexus" / "memory" / "dynamic_learning_policy.json"
 
     poisoned = EpisodeOutcomeRecord.from_task(
         task_id="trust-mismatch",
@@ -190,8 +188,8 @@ def test_outcome_memory_excludes_trust_mismatch_from_policy_scores(tmp_path, mon
         ],
     )
 
-    OutcomeMemoryManager.save_episode_and_tune_sync(poisoned)
-    policy = json.loads((tmp_path / "policy.json").read_text(encoding="utf-8"))
+    OutcomeMemoryManager.save_episode_and_tune_sync(poisoned, project_root=tmp_path)
+    policy = json.loads(policy_path.read_text(encoding="utf-8"))
 
     assert policy["source_experiences_count"] == 1
     assert policy["eligible_experiences_count"] == 0
@@ -200,8 +198,7 @@ def test_outcome_memory_excludes_trust_mismatch_from_policy_scores(tmp_path, mon
 
 
 def test_outcome_memory_recency_aging_resolves_newer_signal(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(OutcomeMemoryManager, "STORAGE_PATH", tmp_path / "history.jsonl")
-    monkeypatch.setattr(OutcomeMemoryManager, "POLICY_PATH", tmp_path / "policy.json")
+    policy_path = tmp_path / ".nexus" / "memory" / "dynamic_learning_policy.json"
 
     older_penalty = EpisodeOutcomeRecord.from_task(
         task_id="test-003",
@@ -234,9 +231,9 @@ def test_outcome_memory_recency_aging_resolves_newer_signal(tmp_path, monkeypatc
         ],
     )
 
-    OutcomeMemoryManager.save_episode_and_tune_sync(older_penalty)
-    OutcomeMemoryManager.save_episode_and_tune_sync(newer_promotion)
-    policy = json.loads((tmp_path / "policy.json").read_text(encoding="utf-8"))
+    OutcomeMemoryManager.save_episode_and_tune_sync(older_penalty, project_root=tmp_path)
+    OutcomeMemoryManager.save_episode_and_tune_sync(newer_promotion, project_root=tmp_path)
+    policy = json.loads(policy_path.read_text(encoding="utf-8"))
 
     assert policy["promoted_capabilities"] == ["research"]
     assert policy["penalized_capabilities"] == []
