@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -828,6 +829,11 @@ def test_ultra_review_sandbox_env_is_scrubbed_and_cwd_is_the_sandbox(tmp_path, m
         assert shell is None
         assert "GITHUB_TOKEN" not in env and "ANTHROPIC_API_KEY" not in env
         assert env["HOME"].startswith(payload["sandbox_path"])
+        if cmd[0] == "git":
+            # Review git calls (mirror setup) run with a scrubbed env, sandbox HOME and no
+            # system/global config; they are not lane commands.
+            assert env["GIT_CONFIG_NOSYSTEM"] == "1" and env["GIT_CONFIG_GLOBAL"] == os.devnull
+            continue
         assert cwd.startswith(payload["sandbox_path"])
         assert "-I" in cmd  # static tools / repro scripts never import from the PR tree
 
@@ -952,8 +958,9 @@ def test_sandbox_profile_reads_are_default_deny_and_home_denied_before_allows(tm
     assert "(allow file-read*)" not in lines  # no blanket read grant
     assert "(allow default)" not in lines
     home_deny = lines.index(f'(deny file-read* (subpath "{home}"))')
-    read_allow = next(i for i, line in enumerate(lines) if line.startswith("(allow file-read* "))
-    assert home_deny < read_allow
+    first_allow = next(i for i, line in enumerate(lines) if line.startswith("(allow file-read* "))
+    read_allow = next(i for i, line in enumerate(lines) if line.startswith("(allow file-read* (subpath "))
+    assert home_deny < first_allow <= read_allow
     assert '(subpath "/")' not in lines[read_allow]
     assert '(subpath "/Users")' not in lines[read_allow]
     assert f'(subpath "{home}")' not in lines[read_allow]
@@ -1023,3 +1030,150 @@ def test_untracked_overlay_does_not_write_through_a_mirror_symlink(tmp_path):
     service._overlay_untracked_files(execution_root, sandbox_path=sandbox)
 
     assert not (outside / "payload.txt").exists()
+
+
+def test_review_git_calls_never_run_hooks_filters_or_global_config(tmp_path, monkeypatch):
+    """sandbox-escape-git-config: hooks, in-tree .gitattributes filters and user/global
+    config never execute anything during mirror setup, diff capture or apply."""
+    _init_app_repo(tmp_path)
+    marker_dir = tmp_path.parent / f"{tmp_path.name}_git_markers"
+    marker_dir.mkdir()
+    hooks = tmp_path.parent / f"{tmp_path.name}_hooks"
+    hooks.mkdir()
+    for hook in ("post-checkout", "pre-commit", "post-index-change"):
+        script = hooks / hook
+        script.write_text(f"#!/bin/sh\ntouch {marker_dir}/{hook}\n", encoding="utf-8")
+        script.chmod(0o755)
+    subprocess.run(["git", "config", "core.hooksPath", str(hooks)], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "config", "filter.evil.smudge", f"sh -c 'touch {marker_dir}/smudge; cat'"], cwd=tmp_path, check=True
+    )
+    subprocess.run(
+        ["git", "config", "filter.evil.clean", f"sh -c 'touch {marker_dir}/clean; cat'"], cwd=tmp_path, check=True
+    )
+    fake_home = tmp_path.parent / f"{tmp_path.name}_home"
+    fake_home.mkdir()
+    (fake_home / ".gitconfig").write_text(
+        f"[core]\n\tfsmonitor = sh -c 'touch {marker_dir}/fsmonitor'\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("HOME", str(fake_home))
+    (tmp_path / ".gitattributes").write_text("*.py filter=evil\n", encoding="utf-8")
+    subprocess.run(["git", "add", ".gitattributes"], cwd=tmp_path, check=True)
+    (tmp_path / "app.py").write_text("def handler(value):\n    return value.strip()  # x\n", encoding="utf-8")
+    for leftover in marker_dir.iterdir():
+        leftover.unlink()
+
+    service = UltraReviewService(tmp_path)
+    service.run(dry_run=False, report_path="reports/ultra.json", sandbox_root="reports/sandboxes")
+
+    assert sorted(path.name for path in marker_dir.iterdir()) == []
+    env = service._git_env()
+    assert env["GIT_CONFIG_NOSYSTEM"] == "1"
+    assert env["GIT_CONFIG_GLOBAL"] == os.devnull
+    assert env["HOME"] != str(fake_home)
+    assert not any(key.startswith("GIT_DIR") for key in env)
+
+
+def test_mirror_git_dir_refuses_a_pr_supplied_git_entry(tmp_path):
+    import pytest
+
+    from nexus.engine.ultra_review_service import UltraReviewError
+
+    _init_app_repo(tmp_path)
+    service = UltraReviewService(tmp_path)
+    fake = tmp_path / "mirror"
+    (fake / ".git").mkdir(parents=True)  # a nested .git directory, not our worktree file
+    with pytest.raises(UltraReviewError, match="mirror_git_dir_not_regular_file"):
+        service._mirror_git_dir(fake)
+    (fake / ".git").rmdir()
+    (fake / ".git").write_text(f"gitdir: {tmp_path / 'elsewhere'}\n", encoding="utf-8")
+    with pytest.raises(UltraReviewError, match="mirror_git_dir_outside_repository"):
+        service._mirror_git_dir(fake)
+
+
+def test_diff_policy_flags_symlink_modes_and_nested_git_paths():
+    diff = "\n".join(
+        [
+            "diff --git a/link.py b/link.py",
+            "new file mode 120000",
+            "index 0000000..1111111",
+            "diff --git a/old_link b/old_link",
+            "index 2222222..3333333 120000",
+            "diff --git a/became_link b/became_link",
+            "old mode 100644",
+            "new mode 120000",
+            "diff --git a/pkg/.git/config b/pkg/.git/config",
+            "new file mode 100644",
+            "diff --git a/plain.py b/plain.py",
+            "index 4444444..5555555 100644",
+            "",
+        ]
+    )
+    violations = UltraReviewService._diff_policy_violations(diff)
+    assert violations["symlinks"] == ["link.py", "old_link", "became_link"]
+    assert violations["nested_git"] == ["pkg/.git/config"]
+
+
+def test_ultra_review_refuses_to_apply_a_patch_that_creates_a_symlink(tmp_path, monkeypatch):
+    """sandbox-escape-symlink-follow: a diff creating a symlink is never applied (no git apply,
+    no copy), the lane reports symlink_in_diff, and the gate fails closed."""
+    _init_app_repo(tmp_path)
+    outside = tmp_path.parent / f"{tmp_path.name}_outside_target.py"
+    outside.write_text("SECRET_VALUE = 'never-read-by-review'\n", encoding="utf-8")
+    (tmp_path / "link.py").symlink_to(outside)
+    subprocess.run(["git", "add", "link.py"], cwd=tmp_path, check=True)
+    seen = []
+    original_run = subprocess.run
+
+    def spy(cmd, **kwargs):
+        seen.append(list(cmd))
+        return original_run(cmd, **kwargs)
+
+    monkeypatch.setattr("nexus.engine.ultra_review_service.subprocess.run", spy)
+    payload = UltraReviewService(tmp_path).run(
+        dry_run=False, report_path="reports/ultra.json", sandbox_root="reports/sandboxes"
+    )
+
+    assert payload["gate_passed"] is False
+    assert payload["sandbox_mirror"]["strategy"] == "refused"
+    assert payload["sandbox_mirror"]["symlinks"] == ["link.py"]
+    assert not any(cmd[:2] == ["git", "apply"] or cmd[:3] == ["git", "worktree", "add"] for cmd in seen)
+    rules = {(f["rule_id"], f["file"]) for f in payload["findings"]}
+    assert ("symlink_in_diff", "link.py") in rules
+    assert ("path_outside_worktree", "link.py") in rules
+    assert not (Path(payload["sandbox_path"]) / "worktree" / "link.py").is_symlink()
+    assert "never-read-by-review" not in json.dumps(payload)
+
+
+def test_sandbox_read_roots_exclude_home_users_tmp_and_repo_root(tmp_path, monkeypatch):
+    import sys
+
+    import pytest
+
+    from nexus.engine.ultra_review_service import UltraReviewError
+
+    service, sandbox, execution_root = _bound_service(tmp_path)
+    roots = service._sandbox_read_roots()
+    home = str(Path("~").expanduser().resolve())
+    temp_roots = (os.path.join(os.sep, "private", "tmp"), os.path.join(os.sep, "tmp"))
+    for forbidden in ("/", "/Users", *temp_roots, home, str(service.project_root)):
+        assert forbidden not in roots
+    allowed_prefixes = (
+        str(sandbox.resolve()),
+        str(Path(sys.prefix).resolve()),
+        str(Path(sys.base_prefix).resolve()),
+        "/usr/lib",
+        "/usr/share/zoneinfo",
+        "/System/Library",
+    )
+    assert all(root.startswith(allowed_prefixes) for root in roots)
+    profile = service._sandbox_profile()
+    assert '(subpath "/usr/share")' not in profile and '(subpath "/dev")' not in profile
+    assert '(literal "/dev/urandom")' in profile and '(literal "/private/etc/passwd")' in profile
+
+    monkeypatch.setattr(sys, "prefix", home)
+    with pytest.raises(UltraReviewError, match="sandbox_read_root_overbroad"):
+        service._sandbox_read_roots()
+    monkeypatch.setattr(sys, "prefix", temp_roots[0])
+    with pytest.raises(UltraReviewError, match="sandbox_read_root_overbroad"):
+        service._sandbox_read_roots()

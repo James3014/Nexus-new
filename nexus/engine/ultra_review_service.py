@@ -4,7 +4,9 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
+import tempfile
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -78,20 +80,39 @@ _OS_SANDBOX_PROBE: dict[str, bool] = {}
 # backslash, paren, whitespace or control character can reach an SBPL string literal, so
 # no PR-, branch- or user-derived text can close a literal and rewrite the policy.
 SBPL_SAFE_PATH = re.compile(r"^/[A-Za-z0-9._/@+-]*$")
-# System locations the confined interpreter needs to start (dyld, frameworks, locale,
-# timezone, devices). Nothing under a user's home directory.
-SANDBOX_SYSTEM_READ_ROOTS = (
-    "/usr/lib",
-    "/usr/share",
-    "/System/Library",
-    "/System/Cryptexes",
-    "/Library/Apple",
-    "/private/var/db/dyld",
-    "/private/var/db/timezone",
-    "/private/etc/localtime",
-    "/private/etc/ssl",
-    "/dev",
+# System locations the confined interpreter needs to start: subtrees, then single files.
+# Nothing under a user's home directory, no temp tree, no repository root.
+SANDBOX_SYSTEM_READ_SUBPATHS = ("/usr/lib", "/usr/share/zoneinfo", "/System/Library")
+SANDBOX_SYSTEM_READ_LITERALS = ("/", "/private/etc/passwd", "/private/etc/localtime", "/dev/null", "/dev/urandom")
+# A readable subtree may never be (or contain) one of these.
+# (The bare temp roots are joined, not literal: this is a deny list, not a temp-file use.)
+SANDBOX_FORBIDDEN_READ_ROOTS = (
+    "/",
+    "/Users",
+    "/home",
+    "/private",
+    "/private/tmp",
+    os.path.join(os.sep, "tmp"),
+    "/private/var",
+    "/var",
 )
+# Git never runs hooks, fsmonitor, LFS/other filter processes or external diff/textconv for
+# the review, and never reads system/global config. Passed as GIT_CONFIG_COUNT/KEY/VALUE
+# (equivalent to ``git -c``, highest precedence) by _git_env.
+GIT_SAFE_CONFIG = (
+    ("core.hooksPath", "/dev/null"),
+    ("core.fsmonitor", "false"),
+    ("filter.lfs.required", "false"),
+    ("filter.lfs.process", ""),
+    ("filter.lfs.smudge", ""),
+    ("filter.lfs.clean", ""),
+    ("diff.external", ""),
+    ("core.pager", "cat"),
+    ("protocol.allow", "never"),
+)
+# Caller variables a review git call keeps (no tokens, credentials or GIT_* overrides).
+GIT_ENV_ALLOWLIST = ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "SYSTEMROOT", "TMPDIR")
+SYMLINK_MODE = "120000"
 
 
 def os_sandbox_available() -> bool:
@@ -371,6 +392,9 @@ class UltraReviewService:
         root.mkdir(parents=True, exist_ok=True)
         sandbox_path = root / run_id
         sandbox_path.mkdir(parents=False, exist_ok=False)
+        git_home = sandbox_path / "git-home"
+        git_home.mkdir()
+        self._git_home = git_home.resolve()
         (sandbox_path / "README.txt").write_text(
             "Nexus ultra-review dry-run sandbox. Contains captured diff artifacts only.\n",
             encoding="utf-8",
@@ -385,6 +409,19 @@ class UltraReviewService:
         return removed
 
     def _prepare_execution_workspace(self, sandbox_path: Path, *, diff_path: Path) -> tuple[Path, dict[str, Any]]:
+        violations = self._diff_policy_violations(diff_path.read_text(encoding="utf-8") if diff_path.exists() else "")
+        if violations["symlinks"] or violations["nested_git"]:
+            # Never apply a patch that creates/edits a symlink or touches a .git path: the
+            # mirror stays empty, the lanes find nothing to verify and the gate fails closed.
+            execution_root = sandbox_path / "worktree"
+            execution_root.mkdir()
+            return execution_root, {
+                "strategy": "refused",
+                "diff_applied": False,
+                "refused_reason": "diff_creates_symlink" if violations["symlinks"] else "diff_touches_git_dir",
+                "symlinks": violations["symlinks"][:20],
+                "nested_git": violations["nested_git"][:20],
+            }
         if os.getenv(ULTRA_REUSE_WORKTREE_ENV, "").strip().lower() in {"1", "true", "yes", "on"}:
             reusable_root = self._resolve(".nexus/reports/ultra_review/reusable_worktree")
             reusable_root.mkdir(parents=True, exist_ok=True)
@@ -404,7 +441,7 @@ class UltraReviewService:
     def _prepare_reusable_git_worktree(self, execution_root: Path, *, diff_path: Path, sandbox_path: Path) -> dict[str, Any]:
         if not (execution_root / ".git").exists():
             add_cmd = ["git", "worktree", "add", "--detach", str(execution_root), "HEAD"]
-            add = subprocess.run(add_cmd, cwd=self.project_root, capture_output=True, text=True, check=False)
+            add = self._git_run(add_cmd[1:])
             if add.returncode != 0:
                 return {
                     "strategy": "copytree",
@@ -416,8 +453,8 @@ class UltraReviewService:
 
         reset_cmd = ["git", "reset", "--hard", "HEAD"]
         clean_cmd = ["git", "clean", "-fd"]
-        reset = subprocess.run(reset_cmd, cwd=execution_root, capture_output=True, text=True, check=False)
-        clean = subprocess.run(clean_cmd, cwd=execution_root, capture_output=True, text=True, check=False)
+        reset = self._git_run(reset_cmd[1:], mirror=execution_root)
+        clean = self._git_run(clean_cmd[1:], mirror=execution_root)
         if reset.returncode != 0 or clean.returncode != 0:
             return {
                 "strategy": "copytree",
@@ -433,7 +470,7 @@ class UltraReviewService:
         diff_has_content = bool(diff_path.read_text(encoding="utf-8").strip()) if diff_path.exists() else False
         if diff_has_content:
             apply_cmd = ["git", "apply", "--binary", str(diff_path)]
-            apply = subprocess.run(apply_cmd, cwd=execution_root, capture_output=True, text=True, check=False)
+            apply = self._git_run(apply_cmd[1:], mirror=execution_root)
             if apply.returncode != 0:
                 return {
                     "strategy": "copytree",
@@ -451,7 +488,7 @@ class UltraReviewService:
 
     def _prepare_git_worktree_mirror(self, execution_root: Path, *, diff_path: Path, sandbox_path: Path) -> dict[str, Any]:
         add_cmd = ["git", "worktree", "add", "--detach", str(execution_root), "HEAD"]
-        add = subprocess.run(add_cmd, cwd=self.project_root, capture_output=True, text=True, check=False)
+        add = self._git_run(add_cmd[1:])
         if add.returncode != 0:
             return {
                 "strategy": "copytree",
@@ -470,18 +507,12 @@ class UltraReviewService:
             }
 
         apply_cmd = ["git", "apply", "--index", "--binary", str(diff_path)]
-        apply = subprocess.run(apply_cmd, cwd=execution_root, capture_output=True, text=True, check=False)
+        apply = self._git_run(apply_cmd[1:], mirror=execution_root)
         if apply.returncode != 0:
             apply_cmd = ["git", "apply", "--binary", str(diff_path)]
-            apply = subprocess.run(apply_cmd, cwd=execution_root, capture_output=True, text=True, check=False)
+            apply = self._git_run(apply_cmd[1:], mirror=execution_root)
         if apply.returncode != 0:
-            subprocess.run(
-                ["git", "worktree", "remove", "--force", str(execution_root)],
-                cwd=self.project_root,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
+            self._git_run(["worktree", "remove", "--force", str(execution_root)])
             return {
                 "strategy": "copytree",
                 "diff_applied": False,
@@ -498,9 +529,10 @@ class UltraReviewService:
         }
 
     def _overlay_untracked_files(self, execution_root: Path, *, sandbox_path: Path) -> int:
-        ls = subprocess.run(
+        ls = subprocess.run(  # noqa: S603 - argv list, no shell
             ["git", "ls-files", "--others", "--exclude-standard", "-z"],
             cwd=self.project_root,
+            env=self._git_env(),
             capture_output=True,
             text=False,
             check=False,
@@ -659,8 +691,9 @@ class UltraReviewService:
                 "(allow process-exec*)",
                 f'(deny file-read* (subpath "{real_home}"))',
                 "(allow file-read-metadata)",
-                # The root directory entry itself (dyld/realpath walk), not its subtree.
-                f'(allow file-read* (literal "/") {readable})',
+                # Single system files (and the "/" entry itself, not its subtree).
+                "(allow file-read* " + " ".join(f'(literal "{path}")' for path in SANDBOX_SYSTEM_READ_LITERALS) + ")",
+                f"(allow file-read* {readable})",
                 "(allow sysctl-read)",
                 "(allow mach-lookup)",
                 "(allow ipc-posix-shm)",
@@ -672,23 +705,26 @@ class UltraReviewService:
         )
 
     def _sandbox_read_roots(self) -> list[str]:
+        """Readable subtrees: the sandbox (mirror included) and the trusted interpreter
+        prefixes only, plus SANDBOX_SYSTEM_READ_SUBPATHS. No other ``sys.path`` entry, no
+        repository root, no ``$HOME``/``/Users``/temp tree; any such root fails closed."""
+
         ctx = getattr(self, "_sandbox_ctx", None) or {}
-        # Required roots fail closed when unsafe for the policy.
-        roots = {sbpl_path(ctx["execution_root"]), sbpl_path(ctx["sandbox_path"])}
-        roots.update({sbpl_path(Path(sys.prefix).resolve()), sbpl_path(Path(sys.base_prefix).resolve())})
-        roots.update(path for path in SANDBOX_SYSTEM_READ_ROOTS if os.path.exists(path))
-        for entry in sys.path:
-            if not entry or not os.path.isabs(entry):
-                continue
-            candidate = Path(entry).resolve()
-            # The reviewed checkout itself is never an extra readable import root.
-            if self._in_untrusted_tree(candidate) or not candidate.is_dir():
-                continue
-            try:
-                roots.add(sbpl_path(candidate))
-            except UltraReviewError:
-                # Optional root: leaving it unreadable is the safe direction.
-                continue
+        roots = {
+            sbpl_path(ctx["execution_root"]),
+            sbpl_path(ctx["sandbox_path"]),
+            sbpl_path(Path(sys.prefix).resolve()),
+            sbpl_path(Path(sys.base_prefix).resolve()),
+        }
+        forbidden = {Path(path) for path in SANDBOX_FORBIDDEN_READ_ROOTS}
+        forbidden.add(Path(os.path.expanduser("~")).resolve())
+        forbidden.add(self.project_root.resolve())
+        forbidden.add(Path(tempfile.gettempdir()).resolve())
+        for root in roots:
+            root_path = Path(root)
+            if any(root_path == bad or root_path in bad.parents for bad in forbidden):
+                raise UltraReviewError(f"sandbox_read_root_overbroad:{root}")
+        roots.update(path for path in SANDBOX_SYSTEM_READ_SUBPATHS if os.path.exists(path))
         return sorted(roots)
 
     def _in_untrusted_tree(self, path: Path | str) -> bool:
@@ -764,13 +800,7 @@ class UltraReviewService:
         """Remove the per-run git worktree registration (review artifacts stay in the sandbox)."""
         strategy = str(mirror_metadata.get("strategy") or "")
         if strategy == "git_worktree":
-            removed = subprocess.run(
-                ["git", "worktree", "remove", "--force", str(execution_root)],
-                cwd=self.project_root,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
+            removed = self._git_run(["worktree", "remove", "--force", str(execution_root)])
             return {
                 "strategy": strategy,
                 "removed": removed.returncode == 0,
@@ -820,11 +850,16 @@ class UltraReviewService:
         return resolved
 
     def _uncontained_changed_files(self, diff_text: str, execution_root: Path) -> list[str]:
+        # A path the diff makes a symlink is never contained, whether or not it was applied.
+        symlinks = set(self._diff_policy_violations(diff_text)["symlinks"])
         return [
             rel
             for rel in self._changed_files(diff_text)
-            if (execution_root / rel).exists() or (execution_root / rel).is_symlink() or ".." in Path(rel).parts
-            if self._contained_path(rel, execution_root) is None
+            if rel in symlinks
+            or (
+                ((execution_root / rel).exists() or (execution_root / rel).is_symlink() or ".." in Path(rel).parts)
+                and self._contained_path(rel, execution_root) is None
+            )
         ]
 
     def _changed_python_files(self, diff_text: str, execution_root: Path) -> list[str]:
@@ -973,7 +1008,7 @@ class UltraReviewService:
         return run, findings
 
     def _capture_diff(self, base_ref: str) -> str:
-        return self._filter_diff(self._git(["diff", "--binary", base_ref]))
+        return self._filter_diff(self._git(["diff", "--no-ext-diff", "--no-textconv", "--binary", base_ref]))
 
     def _capture_status(self) -> str:
         lines: list[str] = []
@@ -1218,7 +1253,7 @@ class UltraReviewService:
                         f"target = Path({str(observation.get('file', ''))!r})",
                         "# The smell must be present in the sandbox tree the diff was applied to,",
                         "# not merely in the diff text.",
-                        "if not target.is_file():",
+                        "if target.is_symlink() or not target.is_file():",
                         "    raise SystemExit('changed file missing from sandbox mirror')",
                         "if expected not in target.read_text(encoding='utf-8', errors='replace'):",
                         "    raise SystemExit('security observation not reproduced')",
@@ -1422,6 +1457,28 @@ class UltraReviewService:
                     "execution_cwd": str(execution_root),
                 }
             )
+        # Part of path containment: a symlink or .git path in the diff is never contained.
+        violations = self._diff_policy_violations(diff_text)
+        for rule_id, paths, summary in (
+            ("symlink_in_diff", violations["symlinks"], "Diff creates or edits a symlink (patch refused): "),
+            ("nested_git_in_diff", violations["nested_git"], "Diff touches a .git path (patch refused): "),
+        ):
+            if paths:
+                findings.append(
+                    {
+                        "id": f"logic-breaker-{len(findings) + 1}",
+                        "lane": "logic_breaker",
+                        "rule_id": rule_id,
+                        "tool": "diff-policy",
+                        "state": "VERIFIED_FINDING",
+                        "severity": "high",
+                        "file": paths[0],
+                        "line": 0,
+                        "repro_command": "",
+                        "summary": summary + ", ".join(paths[:5]),
+                        "execution_cwd": str(execution_root),
+                    }
+                )
         harness = [rel for rel in self._changed_files(diff_text) if Path(rel).name in TEST_HARNESS_FILES]
         executed_checks.append("test-harness-guard")
         if harness:
@@ -1646,14 +1703,146 @@ class UltraReviewService:
             return path_obj
         return (self.project_root / path_obj).resolve()
 
-    def _git(self, args: list[str]) -> str:
-        result = subprocess.run(
-            ["git", *args],
+    def _git_env(self, *, git_dir: Path | None = None, work_tree: Path | None = None) -> dict[str, str]:
+        """Environment for every review git call: no system/global config, no inherited GIT_*.
+
+        ``HOME`` is the sandbox home (empty, review-owned) so no user config is read; with an
+        explicit ``git_dir`` git never discovers a ``.git`` the PR content might add.
+        """
+
+        env = {key: os.environ[key] for key in GIT_ENV_ALLOWLIST if key in os.environ}
+        home = getattr(self, "_git_home", None)
+        if home is None:
+            home = Path(tempfile.mkdtemp(prefix="nexus-ultra-git-home-")).resolve()
+            self._git_home = home
+        env.update(
+            {
+                "HOME": str(home),
+                "XDG_CONFIG_HOME": str(home),
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_CONFIG_GLOBAL": os.devnull,
+                "GIT_TERMINAL_PROMPT": "0",
+                "GIT_ATTR_NOSYSTEM": "1",
+                "GIT_LFS_SKIP_SMUDGE": "1",
+            }
+        )
+        # Every filter driver the repository config defines is blanked, so an in-tree
+        # .gitattributes cannot select a driver that runs a command on checkout/apply.
+        overrides = [*GIT_SAFE_CONFIG]
+        for name in self._configured_filter_drivers(env):
+            overrides.extend(
+                [
+                    (f"filter.{name}.smudge", ""),
+                    (f"filter.{name}.clean", ""),
+                    (f"filter.{name}.process", ""),
+                    (f"filter.{name}.required", "false"),
+                ]
+            )
+        env["GIT_CONFIG_COUNT"] = str(len(overrides))
+        for index, (key, value) in enumerate(overrides):
+            env[f"GIT_CONFIG_KEY_{index}"] = key
+            env[f"GIT_CONFIG_VALUE_{index}"] = value
+        if git_dir is not None:
+            env["GIT_DIR"] = str(git_dir)
+            env["GIT_WORK_TREE"] = str(work_tree or "")
+        return env
+
+    def _configured_filter_drivers(self, base_env: dict[str, str]) -> list[str]:
+        cached = getattr(self, "_filter_drivers", None)
+        if cached is not None:
+            return cached
+        listed = subprocess.run(  # noqa: S603 - argv list, no shell; reads config only
+            ["git", "config", "--name-only", "--get-regexp", r"^filter\."],
             cwd=self.project_root,
+            env=base_env,
             capture_output=True,
             text=True,
             check=False,
         )
+        names = sorted(
+            {
+                line[len("filter.") : line.rfind(".")]
+                for line in (listed.stdout or "").splitlines()
+                if line.startswith("filter.") and line.count(".") >= 2
+            }
+        )
+        self._filter_drivers = names
+        return names
+
+    def _git_run(
+        self, args: list[str], *, cwd: Path | None = None, mirror: Path | None = None
+    ) -> subprocess.CompletedProcess:
+        """Run git with GIT_SAFE_CONFIG. ``mirror`` runs it in the per-run worktree with the
+        git dir pinned (validated) instead of discovered from PR-controlled content."""
+
+        if mirror is not None:
+            git_dir = self._mirror_git_dir(mirror)
+            return subprocess.run(  # noqa: S603 - argv list, no shell
+                ["git", *args],
+                cwd=mirror,
+                env=self._git_env(git_dir=git_dir, work_tree=mirror),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        return subprocess.run(  # noqa: S603 - argv list, no shell
+            ["git", *args],
+            cwd=cwd or self.project_root,
+            env=self._git_env(),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def _mirror_git_dir(self, execution_root: Path) -> Path:
+        """The worktree git dir written by our own ``git worktree add``, validated: ``.git``
+        must be a regular file (not a symlink/dir) naming a dir under this repo's
+        ``worktrees/`` admin area."""
+
+        dot_git = execution_root / ".git"
+        try:
+            info = os.lstat(dot_git)
+        except OSError as exc:
+            raise UltraReviewError("mirror_git_dir_missing") from exc
+        if not stat.S_ISREG(info.st_mode):
+            raise UltraReviewError("mirror_git_dir_not_regular_file")
+        text = dot_git.read_text(encoding="utf-8").strip()
+        if not text.startswith("gitdir: "):
+            raise UltraReviewError("mirror_git_dir_unparseable")
+        git_dir = Path(text[len("gitdir: ") :])
+        if not git_dir.is_absolute():
+            git_dir = (execution_root / git_dir).resolve()
+        common = self._git(["rev-parse", "--path-format=absolute", "--git-common-dir"]).strip()
+        admin = Path(common).resolve() / "worktrees"
+        if admin not in git_dir.resolve().parents:
+            raise UltraReviewError("mirror_git_dir_outside_repository")
+        return git_dir.resolve()
+
+    @staticmethod
+    def _diff_policy_violations(diff_text: str) -> dict[str, list[str]]:
+        """Paths the diff makes (or keeps) symlinks, and paths with a ``.git`` component."""
+
+        symlinks: list[str] = []
+        nested_git: list[str] = []
+        current = ""
+        for line in diff_text.splitlines():
+            if line.startswith("diff --git "):
+                match = re.match(r"^diff --git a/(.*) b/(.*)$", line)
+                current = match.group(2) if match else ""
+                if current and any(part.lower() == ".git" for part in Path(current).parts):
+                    nested_git.append(current)
+                continue
+            if not current:
+                continue
+            mode_line = line.startswith(("new file mode ", "new mode ", "old mode ", "deleted file mode "))
+            index_line = line.startswith("index ") and line.rstrip().endswith(" " + SYMLINK_MODE)
+            if (mode_line and line.rstrip().endswith(SYMLINK_MODE)) or index_line:
+                if current not in symlinks:
+                    symlinks.append(current)
+        return {"symlinks": symlinks, "nested_git": nested_git}
+
+    def _git(self, args: list[str]) -> str:
+        result = self._git_run(args)
         if result.returncode != 0:
             raise UltraReviewError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
         return result.stdout
