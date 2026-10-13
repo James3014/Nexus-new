@@ -507,6 +507,8 @@ def _validate_core_binding_receipt(
     Receipts without any bound field are legacy/unbound dispatches and stay valid.
     A bound receipt is re-checked against its durable bound envelope artifact (the
     attempt-side record of what was sent), not against the runtime's own claim.
+    A bound repair continuation reuses its parent's binding, so its binding pins the
+    recorded root operation/attempt instead of the continuation's own ids.
     """
     present = [field for field in _CORE_BOUND_RECEIPT_FIELDS if field in receipt]
     if not present:
@@ -539,12 +541,23 @@ def _validate_core_binding_receipt(
         )
     except (OSError, UnicodeDecodeError, CoreBindingError) as exc:
         raise ClosureError("CORE_BINDING_ENVELOPE_INVALID") from exc
+    root_fields = ("core_binding_operation_id", "core_binding_attempt_id")
+    if receipt.get("mode") == "REPAIR_CONTINUE":
+        root_operation = receipt.get("core_binding_operation_id")
+        root_attempt = receipt.get("core_binding_attempt_id")
+        if not isinstance(root_operation, str) or not isinstance(root_attempt, str):
+            raise ClosureError("CORE_BINDING_RECEIPT_INVALID")
+    elif any(field in receipt for field in root_fields):
+        raise ClosureError("CORE_BINDING_RECEIPT_INVALID")
+    else:
+        root_operation = receipt.get("operation_id")
+        root_attempt = receipt.get("attempt_id")
     if (
         observed_bound_sha != bound_sha
         or binding.get("binding_hash") != binding_hash
         or binding["core"].get("acceptance_contract_hash") != contract_hash
-        or binding.get("attempt_id") != receipt.get("attempt_id")
-        or binding.get("operation_id") != receipt.get("operation_id")
+        or binding.get("attempt_id") != root_attempt
+        or binding.get("operation_id") != root_operation
     ):
         raise ClosureError("CORE_BINDING_RECEIPT_MISMATCH")
     return {
@@ -552,6 +565,8 @@ def _validate_core_binding_receipt(
         "core_binding_hash": binding_hash,
         "acceptance_contract_hash": contract_hash,
         "bound_envelope_sha256": bound_sha,
+        "core_binding_operation_id": str(root_operation),
+        "core_binding_attempt_id": str(root_attempt),
     }
 
 
@@ -948,6 +963,18 @@ def _validate_repair_result(parent_bound: Mapping[str, Any], repaired: Mapping[s
             raise ClosureError("REPAIR_WORKER_BINDING_MISMATCH")
     if repaired.get("parent_receipt_id") != parent_bound["receipt_id"]:
         raise ClosureError("REPAIR_PARENT_RECEIPT_MISMATCH")
+    # A bound unit stays bound to the same Core binding across every repair; an
+    # unbound (or differently bound) repair of a bound parent is never accepted.
+    for field in (
+        "core_binding_status",
+        "core_binding_hash",
+        "acceptance_contract_hash",
+        "bound_envelope_sha256",
+        "core_binding_operation_id",
+        "core_binding_attempt_id",
+    ):
+        if repaired_bound.get(field) != parent_bound.get(field):
+            raise ClosureError("REPAIR_CORE_BINDING_MISMATCH")
 
 
 def compose_task_candidate(

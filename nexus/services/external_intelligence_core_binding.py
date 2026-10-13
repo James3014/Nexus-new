@@ -724,10 +724,19 @@ def validate_repository_mutation_binding(
     workspace_path: str | Path,
     allowed_paths: Sequence[str],
     now: datetime | None = None,
+    continuation: bool = False,
 ) -> None:
     """Mirror runtime ``_validate_repository_mutation_binding`` for pre-effect revalidation.
 
     Raises ``CoreBindingError`` with the runtime's reason code.
+
+    ``continuation=True`` revalidates the binding of an already BOUND session before a
+    repair continuation.  ``freshness.valid_until`` bounds when a binding may admit the
+    session's *first* effect, which the runtime enforced before persisting the BOUND
+    session identity; a continuation re-presents no binding to the runtime and so is
+    not re-gated by that window.  Every other predicate (identity, repository, source
+    tree of the bound base, workspace, authority, discovery, contract scope) and a
+    ``created_at`` that is not in the future are still required.
     """
     validate_binding_structure(binding)
     assert isinstance(binding, Mapping)
@@ -790,14 +799,19 @@ def validate_repository_mutation_binding(
     freshness = binding["freshness"]
     if freshness.get("revalidate_before_first_effect") is not True:
         raise CoreBindingError("core_binding_freshness")
-    if _parse_rfc3339(freshness.get("created_at")) is None:
+    created_at = _parse_rfc3339(freshness.get("created_at"))
+    if created_at is None:
         raise CoreBindingError("core_binding_freshness")
+    current = now or datetime.now(timezone.utc)
     valid_until = freshness.get("valid_until")
-    if valid_until is not None:
-        deadline = _parse_rfc3339(valid_until)
-        current = now or datetime.now(timezone.utc)
-        if deadline is None or deadline <= current:
+    deadline = _parse_rfc3339(valid_until) if valid_until is not None else None
+    if valid_until is not None and deadline is None:
+        raise CoreBindingError("core_binding_freshness")
+    if continuation:
+        if created_at > current:
             raise CoreBindingError("core_binding_freshness")
+    elif deadline is not None and deadline <= current:
+        raise CoreBindingError("core_binding_freshness")
 
 
 # ---------------------------------------------------------------------------

@@ -548,6 +548,7 @@ class FanoutStore:
         repair_id: str,
         repair_ref: str,
         repair_sha256: str,
+        core_binding: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         task_id = _safe_slug(previous_receipt.get("task_id"), "task_id")
         unit_id = _safe_slug(previous_receipt.get("unit_id"), "unit_id")
@@ -586,6 +587,10 @@ class FanoutStore:
             "repair_sha256": repair_sha256,
             "parent_receipt_id": previous_receipt.get("receipt_id"),
         }
+        if core_binding is not None:
+            # A bound continuation reuses the parent's binding; the root bound
+            # operation/attempt it was minted for are recorded alongside.
+            attempt.update({key: str(core_binding[key]) for key in _CORE_CONTINUATION_FIELDS})
         _atomic_json(path, attempt)
         return attempt
 
@@ -1483,6 +1488,57 @@ def _git_blob_bytes(root: Path, revision: str, rel_path: str) -> bytes | None:
     return result.stdout
 
 
+_CORE_BOUND_RECEIPT_FIELDS = (
+    "bound_envelope_ref",
+    "bound_envelope_sha256",
+    "core_binding_status",
+    "core_binding_hash",
+    "acceptance_contract_hash",
+)
+_CORE_CONTINUATION_FIELDS = (
+    *_CORE_BOUND_ATTEMPT_FIELDS,
+    "core_binding_operation_id",
+    "core_binding_attempt_id",
+)
+
+
+def _receipt_core_binding(receipt: Mapping[str, Any]) -> dict[str, str] | None:
+    """Return the Core identity a bound parent receipt pins, or None for unbound ones.
+
+    The root operation/attempt are the ones the binding was minted for: the receipt's
+    own ids for the initial dispatch, the recorded root ids for a bound continuation.
+    """
+    present = [key for key in _CORE_BOUND_RECEIPT_FIELDS if key in receipt]
+    if not present:
+        return None
+    if (
+        len(present) != len(_CORE_BOUND_RECEIPT_FIELDS)
+        or receipt.get("core_binding_status") != "BOUND"
+    ):
+        raise FanoutError("CORE_BINDING_PARENT_RECEIPT_INVALID")
+    if receipt.get("mode") == "REPAIR_CONTINUE":
+        root_operation = receipt.get("core_binding_operation_id")
+        root_attempt = receipt.get("core_binding_attempt_id")
+    else:
+        root_operation = receipt.get("operation_id")
+        root_attempt = receipt.get("attempt_id")
+    if (
+        not isinstance(root_operation, str)
+        or _SHA256_RE.fullmatch(root_operation) is None
+        or not isinstance(root_attempt, str)
+        or not root_attempt.strip()
+    ):
+        raise FanoutError("CORE_BINDING_PARENT_RECEIPT_INVALID")
+    return {
+        "bound_envelope_ref": str(receipt["bound_envelope_ref"]),
+        "bound_envelope_sha256": str(receipt["bound_envelope_sha256"]),
+        "core_binding_hash": str(receipt["core_binding_hash"]),
+        "acceptance_contract_hash": str(receipt["acceptance_contract_hash"]),
+        "core_binding_operation_id": root_operation,
+        "core_binding_attempt_id": root_attempt,
+    }
+
+
 def _attempt_core_hashes(attempt: Mapping[str, Any]) -> tuple[str, str] | None:
     """Return the Core hashes recorded for a bound attempt, or None for unbound ones."""
     present = [key for key in _CORE_BOUND_ATTEMPT_FIELDS if key in attempt]
@@ -1864,6 +1920,51 @@ class AdaptiveWorkerFanoutRuntime:
             allowed_paths=unit.mutation_paths,
         )
 
+    @staticmethod
+    def _revalidate_core_binding_for_continuation(
+        previous_receipt: Mapping[str, Any],
+        core_binding: Mapping[str, str],
+        workspace: WorkspaceLease,
+    ) -> None:
+        """Re-check the parent's binding before a bound repair continuation.
+
+        The workspace now holds the parent candidate commit, so the binding is checked
+        against the bound base's tree (not HEAD), and freshness in continuation mode.
+        """
+        root = Path(workspace.path)
+        base = str(previous_receipt.get("base_sha") or "")
+        try:
+            origin = _run_git(root, "remote", "get-url", "origin")
+            tree = _run_git(root, "rev-parse", "--verify", f"{base}^{{tree}}")
+        except FanoutError as exc:
+            raise CoreBindingError("workspace_observation") from exc
+        try:
+            text = Path(core_binding["bound_envelope_ref"]).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise CoreBindingError("bound_envelope_read") from exc
+        semantic, binding, observed_sha = parse_bound_execution_envelope_v2(
+            text, semantic_envelope_sha256=str(previous_receipt.get("envelope_sha256") or "")
+        )
+        if (
+            observed_sha != core_binding["bound_envelope_sha256"]
+            or binding.get("binding_hash") != core_binding["core_binding_hash"]
+            or binding["core"].get("acceptance_contract_hash")
+            != core_binding["acceptance_contract_hash"]
+        ):
+            raise CoreBindingError("core_binding_hash")
+        validate_repository_mutation_binding(
+            binding,
+            operation_id=core_binding["core_binding_operation_id"],
+            attempt_id=core_binding["core_binding_attempt_id"],
+            repository=str(semantic["binding"].get("repository") or ""),
+            expected_base=base,
+            observed_origin=origin,
+            observed_base_tree=tree,
+            workspace_path=workspace.path,
+            allowed_paths=list(previous_receipt.get("mutation_paths") or []),
+            continuation=True,
+        )
+
     def _dispatch_initial(
         self,
         unit: ExecutionUnit,
@@ -2189,12 +2290,26 @@ class AdaptiveWorkerFanoutRuntime:
             provider=str(previous_receipt.get("provider") or PROVIDER),
             model=str(previous_receipt.get("model") or MODEL),
         )
+        core_binding = _receipt_core_binding(previous_receipt)
+        if core_binding is not None:
+            if not getattr(transport, "supports_core_mutation_binding", False) or not hasattr(
+                transport, "prepare_operation_id"
+            ):
+                raise FanoutError("CORE_BINDING_TRANSPORT_UNSUPPORTED")
+            try:
+                self._revalidate_core_binding_for_continuation(
+                    previous_receipt, core_binding, workspace
+                )
+            except CoreBindingError as exc:
+                # No repair attempt exists yet and the worker was never invoked.
+                raise FanoutError(f"CORE_BINDING_REVALIDATION_FAILED:{exc}") from exc
         suffix = f"repair-{_safe_slug(repair_id, 'repair_id')}"
         attempt = self.store.prepare_repair(
             previous_receipt,
             repair_id=repair_id,
             repair_ref=str(repair_path),
             repair_sha256=repair_sha256,
+            core_binding=core_binding,
         )
         prompt = build_repair_bootstrap(
             previous_receipt,
@@ -2212,8 +2327,21 @@ class AdaptiveWorkerFanoutRuntime:
             )
             attempt = self.store.bind_operation_id(attempt, operation_id, suffix=suffix)
         attempt = self.store.mark_dispatching(attempt, suffix=suffix)
-        if hasattr(transport, "prepare_operation_id"):
+        expected_core = _attempt_core_hashes(attempt)
+        if expected_core is not None:
             result: OpenCodeRunResult = transport.continue_session(
+                session_id=str(previous_receipt["session_id"]),
+                prompt=prompt,
+                artifact_path=str(repair_path),
+                workspace_path=workspace.path,
+                operation_id=str(attempt["operation_id"]),
+                core_binding={
+                    "core_binding_hash": expected_core[0],
+                    "acceptance_contract_hash": expected_core[1],
+                },
+            )
+        elif hasattr(transport, "prepare_operation_id"):
+            result = transport.continue_session(
                 session_id=str(previous_receipt["session_id"]),
                 prompt=prompt,
                 artifact_path=str(repair_path),
@@ -2256,6 +2384,17 @@ class AdaptiveWorkerFanoutRuntime:
                     suffix=suffix,
                 )
                 raise FanoutError("OPERATION_ID_MISMATCH")
+        if expected_core is not None and (
+            result.core_binding_status != "BOUND"
+            or (result.core_binding_hash, result.acceptance_contract_hash) != expected_core
+        ):
+            self.store.finish_attempt(
+                attempt,
+                state="OUTCOME_UNKNOWN",
+                transport_status="CORE_BINDING_ATTESTATION_MISMATCH",
+                suffix=suffix,
+            )
+            raise FanoutError("CORE_BINDING_ATTESTATION_MISMATCH")
         if result.provider_id != transport_provider_id or result.model_id != transport_model_id:
             self.store.finish_attempt(
                 attempt,
@@ -2397,6 +2536,11 @@ class AdaptiveWorkerFanoutRuntime:
                 "core_binding_hash": result.core_binding_hash,
                 "acceptance_contract_hash": result.acceptance_contract_hash,
             })
+            if "core_binding_operation_id" in attempt:
+                receipt.update({
+                    "core_binding_operation_id": str(attempt["core_binding_operation_id"]),
+                    "core_binding_attempt_id": str(attempt["core_binding_attempt_id"]),
+                })
         if candidate is not None:
             receipt.update(candidate)
         material = dict(receipt)
