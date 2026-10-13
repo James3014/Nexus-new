@@ -3769,3 +3769,109 @@ def test_issue1384_requalification_fetch_failure_fails_closed(tmp_path: Path, mo
     assert "REQUALIFICATION_MAIN_FETCH_FAILED" in result.reason
     assert len(port.materialize_calls) == 0
     assert len(port.cas_merge_calls) == 0
+
+
+def _run_unfetched_loop(fixture, monkeypatch, *, live_main_sha=None, live_main_tree_sha=None):
+    initial_ev = _base_evidence(
+        base_sha=fixture["old_main_sha"], current_main_sha=fixture["old_main_sha"]
+    )
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    req = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+    port = _unfetched_loop_port(
+        fixture,
+        live_main_sha=live_main_sha or fixture["new_main_sha"],
+        live_main_tree_sha=live_main_tree_sha or fixture["new_main_tree_sha"],
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.github_completion_loop.resolve_durable_merge_authorization",
+        lambda *a, **k: evaluate_action(ctx, req),
+    )
+    root = fixture.get("local", fixture["repo"])
+    result = run_github_completion_loop(
+        initial_evidence=initial_ev, request=req, port=port, git_root=root
+    )
+    return result, port
+
+
+def test_issue1384_requalification_uses_fetch_head_not_stale_tracking_ref(
+    tmp_path: Path, monkeypatch
+):
+    """A stale/forged refs/remotes/origin/main differing from FETCH_HEAD is never trusted."""
+    import subprocess
+
+    fixture = _make_unfetched_local_checkout(tmp_path)
+    local = fixture["local"]
+    # Without a configured refspec the exact-ref fetch updates only FETCH_HEAD,
+    # so the tracking ref stays stale at old main (forged to differ from live main).
+    subprocess.run(["git", "config", "--unset-all", "remote.origin.fetch"], cwd=local, check=True)
+    subprocess.run(
+        ["git", "update-ref", "refs/remotes/origin/main", fixture["old_main_sha"]],
+        cwd=local,
+        check=True,
+    )
+
+    result, port = _run_unfetched_loop(fixture, monkeypatch)
+
+    def rev(ref: str) -> str:
+        return subprocess.check_output(["git", "rev-parse", ref], cwd=local, text=True).strip()
+
+    assert rev("FETCH_HEAD") == fixture["new_main_sha"]
+    assert rev("refs/remotes/origin/main") == fixture["old_main_sha"]
+    assert result.outcome is CompletionLoopOutcome.COMPLETED, result.reason
+    assert port.cas_merge_calls[0]["expected_base_sha"] == fixture["new_main_sha"]
+
+
+def test_issue1384_requalification_present_commit_skips_fetch(tmp_path: Path, monkeypatch):
+    """Live main already present locally: content-addressed, so no fetch runs at all."""
+    fixture = _make_requalify_git_repo(tmp_path, include_agents_change=False)
+    fetch_calls: list[Any] = []
+
+    def forbidden_fetch(root):
+        fetch_calls.append(root)
+        raise AssertionError("fetch must not run when live main is present locally")
+
+    monkeypatch.setattr(
+        "nexus.orchestrator.github_completion_loop._fetch_exact_remote_main", forbidden_fetch
+    )
+
+    result, port = _run_unfetched_loop(fixture, monkeypatch)
+
+    assert result.outcome is CompletionLoopOutcome.COMPLETED, result.reason
+    assert fetch_calls == []
+    assert not (fixture["repo"] / ".git" / "FETCH_HEAD").exists()
+    assert len(port.cas_merge_calls) == 1
+
+
+def test_issue1384_requalification_fetch_is_hardened_and_timeout_fails_closed(
+    tmp_path: Path, monkeypatch
+):
+    """Fetch never prompts, refuses ext::, is time-bounded; a timeout fails closed."""
+    import subprocess
+
+    import nexus.orchestrator.github_completion_loop as loop_mod
+
+    fixture = _make_unfetched_local_checkout(tmp_path)
+    real_run = subprocess.run
+    seen: list[dict[str, Any]] = []
+
+    def fake_run(args, *a, **k):
+        if "fetch" in args:
+            seen.append({"args": list(args), **k})
+            raise subprocess.TimeoutExpired(args, k.get("timeout"))
+        return real_run(args, *a, **k)
+
+    monkeypatch.setattr(loop_mod.subprocess, "run", fake_run)
+
+    result, port = _run_unfetched_loop(fixture, monkeypatch)
+
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert "REQUALIFICATION_MAIN_FETCH_FAILED" in result.reason
+    assert "timed out" in result.reason
+    assert len(seen) == 1
+    call = seen[0]
+    assert call["args"][1:3] == ["-c", "protocol.ext.allow=never"]
+    assert call["args"][3:] == ["fetch", "--no-tags", "--quiet", "origin", "refs/heads/main"]
+    assert call["env"]["GIT_TERMINAL_PROMPT"] == "0"
+    assert 0 < call["timeout"] <= 600
+    assert len(port.materialize_calls) == 0
+    assert len(port.cas_merge_calls) == 0
