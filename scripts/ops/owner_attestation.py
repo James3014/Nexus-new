@@ -19,8 +19,9 @@ from __future__ import annotations
 # Run as `python3 -I scripts/ops/owner_attestation.py ...`: -I drops the script
 # directory (scripts/ops/) and the current directory from sys.path, so a file
 # such as secrets.py there cannot shadow the stdlib. Without -I that is NOT
-# guaranteed. Stdlib imports come first; the repo root is then appended
-# explicitly (never prepended) because -I does not add it.
+# guaranteed. Stdlib imports come first; the repo root is then put first
+# explicitly (after them) because -I does not add it and a .pth file could
+# otherwise resolve `scripts` to another checkout.
 import argparse
 import base64
 import json
@@ -30,8 +31,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 _REPO_ROOT = str(Path(__file__).resolve().parents[2])
-if _REPO_ROOT not in sys.path:
-    sys.path.append(_REPO_ROOT)
+sys.path.insert(0, _REPO_ROOT)
 
 from scripts.ops.trusted_merge_lane_gate import (  # noqa: E402
     ATTESTATION_ACTION,

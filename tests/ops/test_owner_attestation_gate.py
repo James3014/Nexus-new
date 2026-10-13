@@ -903,16 +903,18 @@ def test_symlink_and_gitlink_changes_are_rejected(world, mode, kind):
         _validate(world, head, _body(_envelope(world, _payload())))
 
 
-def test_owner_attestation_cli_does_not_put_the_repo_root_first_on_sys_path():
+def test_owner_attestation_cli_runs_under_isolated_mode_with_stdlib_first():
     import sys
 
     root = Path(__file__).resolve().parents[2]
     code = (
-        "import runpy, sys\n"
+        "import runpy, sys, json\n"
         f"runpy.run_path({str(root / 'scripts/ops/owner_attestation.py')!r}, run_name='probe')\n"
-        f"assert sys.path[0] != {str(root)!r}, sys.path[:3]\n"
+        f"assert not json.__file__.startswith({str(root)!r}), json.__file__\n"
+        "import scripts.ops.owner_attestation as m\n"
+        f"assert m.__file__.startswith({str(root)!r}), m.__file__\n"
     )
-    subprocess.run([sys.executable, "-c", code], check=True, cwd=str(root))
+    subprocess.run([sys.executable, "-I", "-c", code], check=True, cwd=str(root))
 
 
 def test_symlink_mode_seen_in_either_diff_is_rejected(world):
