@@ -1829,6 +1829,11 @@ def _runtime_revision() -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+# One wall-clock budget (--timeout) covers every attempt and account rotation
+# of a single dispatch. No further attempt starts below this floor (#1216 V12).
+TOTAL_DEADLINE_MIN_ATTEMPT_SECONDS = 5.0
+_monotonic = time.monotonic
+
 MAX_FAILURE_HISTORY_ENTRIES = 16
 
 
@@ -2900,6 +2905,8 @@ def dispatch_run(
     pre_effect_max_tool_events: int | None = None,
     exclude_accounts: list[str] | None = None,
 ) -> int:
+    total_budget_seconds = max(1, int(timeout))
+    total_deadline = _monotonic() + total_budget_seconds
     user_allow = list(allow or [])
     try:
         effective_permissions, permission_profile_kind, permission_profile_sha256 = (
@@ -3194,8 +3201,43 @@ def dispatch_run(
         rotations=rotations,
     )
 
+    def _budget_exhausted() -> bool:
+        """True when a further attempt/rotation would start below the budget floor."""
+        return attempts > 0 and (
+            total_deadline - _monotonic() < TOTAL_DEADLINE_MIN_ATTEMPT_SECONDS
+        )
+
+    def _emit_total_deadline_exhausted() -> int:
+        _operation_hook(
+            operation_hook,
+            phase="CLASSIFYING_FAILURE",
+            attempts=attempts,
+            rotations=rotations,
+            failure_kind="TIMEOUT",
+            timed_out=True,
+            account_alias_hash=claim.account_alias_hash,
+            lease_id_hash=claim.lease_id_hash,
+            provider_effect=None,
+            reconciliation_required=False,
+        )
+        emit_meta({
+            "status": "failed",
+            "attempts": attempts,
+            "rotations": rotations,
+            "failure_kind": "TIMEOUT",
+            "total_deadline_exhausted": True,
+            "total_timeout_seconds": total_budget_seconds,
+            "account_alias_hash": claim.account_alias_hash,
+            "lease_id_hash": claim.lease_id_hash,
+            "parallel_slot": True,
+            "wall_ms": total_wall_ms,
+        })
+        return 124
+
     try:
         while True:
+            if _budget_exhausted():
+                return _emit_total_deadline_exhausted()
             quota_probe = {
                 "state": _selected_snapshot_probe_state(quota_snapshot, claim.internal_id)
             }
@@ -3371,6 +3413,8 @@ def dispatch_run(
                     ),
                 )
 
+            if _budget_exhausted():
+                return _emit_total_deadline_exhausted()
             attempts += 1
             _operation_hook(
                 operation_hook,
@@ -3436,7 +3480,7 @@ def dispatch_run(
                     "mode": mode,
                     "model": model,
                     "effort": effort,
-                    "timeout": max(1, timeout),
+                    "timeout": max(1, int(total_deadline - _monotonic())),
                 }
                 if runner is run_agy or (
                     hasattr(runner, "__code__") and "operation_hook" in runner.__code__.co_varnames

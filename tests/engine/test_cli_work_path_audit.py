@@ -24,7 +24,6 @@ WORK_COMMANDS = (
     "learn:gate",
     "distill",
     "resume",
-    "delegate",
     "research:route",
     "research:report",
     "research:auto-flow",

@@ -77,4 +77,33 @@ def test_context_budget_is_bounded_by_bytes_and_semantics():
     for name, cap in overlay_caps.items():
         assert sizes[name] <= cap, (name, sizes[name], cap)
     assert sum(sizes.values()) <= 42_000
+    # Advisory design defaults: its own growth cap, outside the 42 KB total.
+    defaults = ROOT / "docs/agents/OWNER_DESIGN_DEFAULTS.md"
+    assert defaults.stat().st_size <= 9_000, defaults.stat().st_size
     assert "active Git-tracked Task Card" in _read("AGENTS.md")
+
+
+def test_owner_design_defaults_is_advisory_and_not_read_by_code():
+    text = _read("docs/agents/OWNER_DESIGN_DEFAULTS.md")
+    assert "artifact_authority: advisory_guidance_only" in text
+    assert "grants nothing and selects nothing" in text
+    assert "Pending Owner confirmation" in text
+    assert "OWNER_DESIGN_DEFAULTS" in _read("AGENTS.md")
+    # No Python or script may read the file or treat it as a flag. Docs and
+    # tests are excluded; this test itself lives under tests/.
+    skip_dirs = {".git", ".venv", "node_modules", "docs", "tests", "__pycache__"}
+    suffixes = {".py", ".sh", ".bash", ".zsh", ".js", ".mjs", ".ts", ".yml", ".yaml", ".toml"}
+    offenders = []
+    for path in ROOT.rglob("*"):
+        rel = path.relative_to(ROOT)
+        if skip_dirs.intersection(rel.parts) or not path.is_file():
+            continue
+        if path.suffix not in suffixes | {""}:
+            continue
+        try:
+            body = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        if "OWNER_DESIGN_DEFAULTS" in body:
+            offenders.append(str(rel))
+    assert not offenders, offenders

@@ -15,11 +15,19 @@ import json
 import os
 import subprocess
 import tempfile
+import warnings as _archived_warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
 from nexus.services.local_heal.armor_artifact_storage import resolve_repro_script_dir
+
+_archived_warnings.warn(
+    "ARCHIVED 2026-10-13 (#1906): lab-only replay runner with zero production importers; see ARCHIVED_2026-10-13.md. "
+    "Scheduled for deletion; do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 
 @dataclass

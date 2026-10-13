@@ -5,8 +5,9 @@ import warnings
 from nexus.governance.capability_gate import CapabilityGate, Phase
 
 warnings.warn(
-    "nexus.core.capability_gate has no production caller and is kept as lab-only "
-    "(use nexus.governance.capability_gate; see #1740).",
+    "ARCHIVED 2026-10-13 (#1906): nexus.core.capability_gate facade has no production caller "
+    "(lab-only since #1740; use nexus.governance.capability_gate); "
+    "see ARCHIVED_2026-10-13.md. Scheduled for deletion; do not import.",
     DeprecationWarning,
     stacklevel=2,
 )

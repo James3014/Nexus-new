@@ -1,9 +1,17 @@
 """Fail-closed compatibility quarantine for the retired legacy integration path."""
 
+import warnings as _archived_warnings
 from pathlib import Path
 
 from nexus.orchestrator.evidence_collector import EvidenceCollector
 from nexus.orchestrator.state_store import StateStore
+
+_archived_warnings.warn(
+    "ARCHIVED 2026-10-13 (#1906): retired pre-#957 integration quarantine; use ControlledIntegrationManager; see ARCHIVED_2026-10-13.md. "
+    "Scheduled for deletion; do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 LEGACY_INTEGRATION_PATH_RETIRED = (
     "LEGACY_INTEGRATION_PATH_RETIRED_USE_CONTROLLED_INTEGRATION"

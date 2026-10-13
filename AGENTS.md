@@ -96,8 +96,6 @@ inferred from G10, tests, an agent, a Task Card, CI, or runtime state.
 ### DIRECT_CANONICAL
 
 Owner -> primary agent -> one bounded direct change in the canonical checkout.
-Eligible direct work needs no Task Card, lifecycle state, or Candidate.
-Keep the diff scoped; run checks plus `git diff --check`.
 
 `AUTHORITY_PRESERVING_EVIDENCE_WRITEBACK` is a semantic authority classification
 inside `DIRECT_CANONICAL`, not a fourth execution lane. A future additive
@@ -145,6 +143,7 @@ replaces program correctness.
   onboarding, audit, or an authority dispute. See `docs/agents/WORKFORCE_EXECUTION_OVERLAY.md`.
 - Claim/release/benchmark/audit/verifier work, or Issue-bound `nexus-certify` completion evidence: `docs/agents/CLAIM_AND_RECEIPT_OVERLAY.md`.
 - Novel repeatable failure with a prevention rule: `docs/agents/LEARNING_WRITEBACK_OVERLAY.md`.
+- Design options, no authority change: `docs/agents/OWNER_DESIGN_DEFAULTS.md` (advisory only).
 
 ## Authority invariants
 
