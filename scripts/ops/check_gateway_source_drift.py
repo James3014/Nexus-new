@@ -9,6 +9,11 @@ only commits published on GitHub ``main``, or an exact published PR head
 * a loaded ``git_head`` that is neither reachable from published main nor an
   exact published PR head: alert ``GATEWAY_SOURCE_UNPUBLISHED(n)``, where n is
   the number of commits not on main (the JSON lists the paths they touch);
+  Owner refinement (#1900, 2026-10-13T02:09:54Z): when EVERY unpublished commit
+  touches only ``tasks/`` paths (a merge is judged by its diff against its
+  first parent) the finding is INFO ``GATEWAY_BIND_ONLY_LOCAL_COMMITS(n)``
+  instead; root cause is tracked in #1939.  Any path outside ``tasks/`` keeps
+  the alert;
 * lag of the published base (newest ancestor of ``git_head`` on main) behind
   main: warning ``GATEWAY_BEHIND_MAIN(n)`` when n > 50 commits or main's tip is
   more than 7 days newer than the base; below that, OK.
@@ -47,6 +52,7 @@ TASK_BINDING_PREFIX = "tasks/"
 BEHIND_MAX_COMMITS = 50
 BEHIND_MAX_SECONDS = 7 * 24 * 60 * 60
 REMEDY = "rebind via #526 governed path; Owner decision"
+BIND_ONLY_NOTE = "bind-only local task commits; root cause tracked in #1939"
 
 OK, INFO, WARN, ALERT, PROBE_FAILURE = "OK", "INFO", "WARN", "ALERT", "PROBE_FAILURE"
 EXIT_CODES = {OK: 0, INFO: 0, WARN: 1, ALERT: 1, PROBE_FAILURE: 2}
@@ -112,7 +118,12 @@ def _resolve_head(repo: Path, head: str, source_repo: str | None) -> None:
 
 
 def _changed_paths(repo: Path, commit: str) -> list[str]:
-    out = _git_out(repo, "diff-tree", "-m", "-r", "--no-commit-id", "--name-only", commit)
+    # A merge is judged by its diff against its first parent; plain commits by
+    # their own diff.
+    if _git(repo, "rev-parse", "--verify", "--quiet", f"{commit}^2^{{commit}}").returncode == 0:
+        out = _git_out(repo, "diff", "--name-only", f"{commit}^1", commit)
+    else:
+        out = _git_out(repo, "diff-tree", "-r", "--no-commit-id", "--name-only", "--root", commit)
     return [line for line in out.splitlines() if line]
 
 
@@ -152,13 +163,18 @@ def analyze(
             })
         else:
             touched = sorted({p for commit in unpublished for p in _changed_paths(repo, commit)})
+            outside = [p for p in touched if not p.startswith(TASK_BINDING_PREFIX)]
+            bind_only = not outside
             findings.append({
-                "code": f"GATEWAY_SOURCE_UNPUBLISHED({len(unpublished)})",
-                "severity": ALERT,
+                "code": (
+                    f"GATEWAY_BIND_ONLY_LOCAL_COMMITS({len(unpublished)})"
+                    if bind_only
+                    else f"GATEWAY_SOURCE_UNPUBLISHED({len(unpublished)})"
+                ),
+                "severity": INFO if bind_only else ALERT,
                 "touched_paths": touched[:100],
-                "touched_paths_outside_tasks": [
-                    p for p in touched if not p.startswith(TASK_BINDING_PREFIX)
-                ][:100],
+                "touched_paths_outside_tasks": outside[:100],
+                **({"note": BIND_ONLY_NOTE} if bind_only else {}),
             })
 
     behind = int(_git_out(repo, "rev-list", "--count", f"{base}..{main}").strip())
@@ -220,6 +236,8 @@ def summarize(report: dict[str, Any]) -> str:
         line += f" -- remedy: {REMEDY}"
     elif report["verdict"] == PROBE_FAILURE:
         line += " -- drift unknown (fail closed)"
+    if any(f["code"].startswith("GATEWAY_BIND_ONLY_LOCAL_COMMITS") for f in report["findings"]):
+        line += f" -- {BIND_ONLY_NOTE}"
     return line
 
 
