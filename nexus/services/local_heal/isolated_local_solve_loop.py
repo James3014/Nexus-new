@@ -297,7 +297,12 @@ def run_isolated_local_solve_loop(request: IsolatedLocalSolveRequest) -> Isolate
         "still_within_locked_span": repair_receipt.still_within_locked_span,
     })
     capability_payload["metadata"] = metadata
-    
+    # #1757/#1924: bind the verifier verdict and the verified bytes for the receipt claim gate.
+    capability_payload["verifier_status"] = verifier_receipt.verifier_status
+    verified_source_hash = _verified_source_hash(apply_receipt)
+    if verified_source_hash:
+        capability_payload["source_hash"] = verified_source_hash
+
     return IsolatedLocalSolveResponse(
         patch_envelope=envelope,
         apply_receipt=apply_receipt,
@@ -306,3 +311,16 @@ def run_isolated_local_solve_loop(request: IsolatedLocalSolveRequest) -> Isolate
         hybrid_route=final_decision,
         capability_payload=capability_payload,
     )
+
+
+def _verified_source_hash(apply_receipt: IsolatedApplyReceipt) -> str:
+    """sha256 of the patched target file the isolated verifier ran against; "" if none was applied."""
+    if apply_receipt.patch_apply_status != "applied" or not apply_receipt.workspace_path:
+        return ""
+    path = os.path.join(apply_receipt.workspace_path, apply_receipt.target_file)
+    if not os.path.isfile(path):
+        return ""
+    import hashlib
+
+    with open(path, "rb") as handle:
+        return "sha256:" + hashlib.sha256(handle.read()).hexdigest()

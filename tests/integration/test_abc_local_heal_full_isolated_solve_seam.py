@@ -11,6 +11,27 @@ from nexus.services.local_heal.capability_adapter import (
     LocalHealCapabilityRequest,
 )
 from nexus.engine.capability_receipt_adapters import LocalHealReceiptAdapter
+from nexus.engine.capability_executor_controls import build_execution_plan
+from nexus.engine.capability_planner import CapabilityPlanner
+
+
+# #1924: the adapter reads its mode switches only from CapabilityPlanner's signal_snapshot,
+# passed through build_execution_plan() as route_context. The fixture projects the test's
+# env opt-ins onto that real planner snapshot; mutation/verifier grants stay the planner's.
+_ENV_MODE_OPT_INS = {
+    "isolated_solve_enabled": "NEXUS_LOCAL_SOLVE_ISOLATED_ENABLE",
+    "fail_closed_enabled": "NEXUS_LOCAL_GUARD_FAIL_CLOSED_ENABLE",
+}
+
+
+def _planned_controls(**fixture_controls: object) -> dict:
+    plan = CapabilityPlanner().plan(task_desc="fix code", task_type="repair", route={"local_enabled": True})
+    controls = dict(build_execution_plan(plan).executor_controls)
+    snapshot = dict(controls["route_context"]["signal_snapshot"])
+    assert snapshot["planner_version"] == "capability_planner_v1"
+    assert snapshot["mutation_allowed"] is True and snapshot["verifier_allowed"] is True
+    snapshot.update({flag: os.environ.get(env) == "1" for flag, env in _ENV_MODE_OPT_INS.items()})
+    return {**controls, "route_context": {"signal_snapshot": snapshot}, **fixture_controls}
 
 
 def test_abc_local_heal_full_isolated_solve_seam() -> None:
@@ -41,15 +62,15 @@ def test_abc_local_heal_full_isolated_solve_seam() -> None:
                 task_id="t_abc",
                 problem_statement="fix code",
                 evidence_refs=("ref1",),
-                executor_controls={
-                    "source_root": src_root,
-                    "target_file": test_file,
-                    "target_symbol": "print",
-                    "locked_search": "print('hello')",
-                    "verifier_command": ["python3", "-c", "import os; assert os.path.exists('f.py')"],
-                    "work_dir": "",
-                    "candidate_generate_fn": mock_gen,
-                },
+                executor_controls=_planned_controls(
+                    source_root=src_root,
+                    target_file=test_file,
+                    target_symbol="print",
+                    locked_search="print('hello')",
+                    verifier_command=["python3", "-c", "import os; assert os.path.exists('f.py')"],
+                    work_dir="",
+                    candidate_generate_fn=mock_gen,
+                ),
                 dry_run=False,
             )
             
@@ -66,7 +87,9 @@ def test_abc_local_heal_full_isolated_solve_seam() -> None:
             assert receipt1.invoked is True
             assert receipt1.gate_passed is True
             assert receipt1.evidence_present is True
-            assert receipt1.outcome_contributed is True
+            # #453 closure (ADVISORY_ONLY_FAIL_CLOSED): adapter payloads cannot mint verifier
+            # authority, so even a verified claim does not contribute an outcome here.
+            assert receipt1.outcome_contributed is False
             
             receipt2 = receipt_adapter.build(claim_verified=False, payload=response.capability_payload)
             assert receipt2.gate_passed is True
@@ -106,15 +129,15 @@ def test_abc_local_heal_full_isolated_solve_with_fail_closed_guard_enabled() -> 
                 task_id="t_abc_guard",
                 problem_statement="fix code",
                 evidence_refs=("ref1",),
-                executor_controls={
-                    "source_root": src_root,
-                    "target_file": test_file,
-                    "target_symbol": "print",
-                    "locked_search": "print('hello')",
-                    "verifier_command": ["python3", "-c", "import os; assert os.path.exists('f.py')"],
-                    "work_dir": "",
-                    "candidate_generate_fn": mock_gen,
-                },
+                executor_controls=_planned_controls(
+                    source_root=src_root,
+                    target_file=test_file,
+                    target_symbol="print",
+                    locked_search="print('hello')",
+                    verifier_command=["python3", "-c", "import os; assert os.path.exists('f.py')"],
+                    work_dir="",
+                    candidate_generate_fn=mock_gen,
+                ),
                 dry_run=False,
             )
             

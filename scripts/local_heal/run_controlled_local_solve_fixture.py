@@ -11,10 +11,37 @@ repo_root = str(Path(__file__).resolve().parents[2])
 if repo_root not in sys.path:
     sys.path.insert(0, repo_root)
 
+from nexus.engine.capability_executor_controls import build_execution_plan  # noqa: E402
+from nexus.engine.capability_planner import CapabilityPlanner  # noqa: E402
 from nexus.services.local_heal.capability_adapter import (
     LocalHealCapabilityAdapter,
     LocalHealCapabilityRequest,
 )
+
+# Permissions CapabilityPlanner.plan() must have granted before this fixture lane
+# may request the isolated-solve mode (#1924). The lane never grants them itself.
+_ISOLATED_SOLVE_PLANNER_GRANTS = ("candidate_enabled", "mutation_allowed", "verifier_allowed")
+
+
+def plan_fixture_executor_controls(problem_statement: str) -> dict:
+    """Obtain executor controls from the canonical planning seam (#1924).
+
+    The route is decided by CapabilityPlanner.plan(); build_execution_plan() passes the
+    planner's signal_snapshot through as ``route_context``. The only addition is the
+    isolated-solve mode request, and only when the planner already granted every
+    permission it needs; otherwise the adapter fails closed on the planner's snapshot.
+    """
+    plan = CapabilityPlanner().plan(
+        task_desc=problem_statement,
+        task_type="repair",
+        route={"local_enabled": True},
+    )
+    controls = dict(build_execution_plan(plan).executor_controls)
+    route_context = controls.get("route_context")
+    snapshot = route_context.get("signal_snapshot") if isinstance(route_context, dict) else None
+    if isinstance(snapshot, dict) and all(snapshot.get(key) is True for key in _ISOLATED_SOLVE_PLANNER_GRANTS):
+        controls["route_context"] = {"signal_snapshot": {**snapshot, "isolated_solve_enabled": True}}
+    return controls
 
 
 def main() -> int:
@@ -52,15 +79,12 @@ def main() -> int:
     except Exception:
         verifier_cmd = []
         
+    # Planner inputs only: CapabilityPlanner.plan() reads these when it selects the local executor.
     env_updates = {
-        "NEXUS_LOCAL_MODEL_CANDIDATE_ENABLE": "1",
         "NEXUS_LOCAL_MODEL_CALL_ALLOWED": "1",
-        "NEXUS_LOCAL_SOLVE_ISOLATED_ENABLE": "1",
-        "NEXUS_LOCAL_SOLVE_MUTATION_ALLOWED": "1",
-        "NEXUS_LOCAL_SOLVE_VERIFIER_ALLOWED": "1",
     }
-    
-    controls = {
+
+    fixture_controls = {
         "source_root": args.source_root,
         "target_file": args.target_file,
         "target_symbol": args.target_symbol,
@@ -70,26 +94,27 @@ def main() -> int:
     }
     
     if args.provider_mode == "injected":
-        controls["candidate_generate_fn"] = lambda req: model_output
+        fixture_controls["candidate_generate_fn"] = lambda req: model_output
     else:
-        env_updates["NEXUS_LOCAL_MODEL_PROVIDER"] = "ollama"
-        if "NEXUS_LOCAL_MODEL_NAME" not in os.environ:
-            env_updates["NEXUS_LOCAL_MODEL_NAME"] = "qwen2.5-coder"
+        env_updates["NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER"] = "ollama"
+        env_updates["NEXUS_LOCAL_MODEL_EXECUTOR_MODEL"] = os.environ.get("NEXUS_LOCAL_MODEL_NAME", "qwen2.5-coder")
             
     if args.no_evidence:
         evidence_refs = ()
     else:
         evidence_refs = tuple(args.evidence_ref) if args.evidence_ref else ("fixture-ref",)
 
-    request = LocalHealCapabilityRequest(
-        task_id=args.task_id,
-        problem_statement=args.problem_statement,
-        evidence_refs=evidence_refs,
-        executor_controls=controls,
-    )
-    
     from unittest.mock import patch
+
     with patch.dict(os.environ, env_updates):
+        controls = {**plan_fixture_executor_controls(args.problem_statement), **fixture_controls}
+        request = LocalHealCapabilityRequest(
+            task_id=args.task_id,
+            problem_statement=args.problem_statement,
+            evidence_refs=evidence_refs,
+            executor_controls=controls,
+            dry_run=False,
+        )
         response = LocalHealCapabilityAdapter.run(request)
     
     from nexus.engine.capability_receipt_adapters import LocalHealReceiptAdapter

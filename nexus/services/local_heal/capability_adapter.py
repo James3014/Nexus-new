@@ -222,7 +222,7 @@ class LocalHealCapabilityAdapter:
 
         # N31-C: anti-tampering — require fields that only CapabilityPlanner.plan() produces
         REQUIRED_PLANNER_FIELDS = {
-            "pillars_signature",
+            "canonical_execution_topology_source",  # #1924: planner never emitted "pillars_signature"
             "ssd_route_map",
             "context_slimming_policy",
             "harness_relevance_policy",

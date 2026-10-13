@@ -46,11 +46,35 @@ def build_executor_controls(plan: CapabilityPlan | dict[str, Any]) -> dict[str, 
     return controls
 
 
+# Capabilities whose executors (LocalHealCapabilityAdapter) read the planner's
+# signal_snapshot from ``executor_controls["route_context"]`` (#1924).
+_ROUTE_CONTEXT_CONSUMERS = frozenset({"local_heal", "local_model_executor"})
+
+
+def _planner_route_context(plan: CapabilityPlan | dict[str, Any]) -> dict[str, Any] | None:
+    """Pass CapabilityPlanner's signal_snapshot through unchanged (a copy, never augmented)."""
+    if isinstance(plan, CapabilityPlan):
+        selected, pending, snapshot = plan.selected_capabilities, plan.pending_capabilities, plan.signal_snapshot
+    else:
+        selected = plan.get("selected_capabilities", []) or []
+        pending = plan.get("pending_capabilities", []) or []
+        snapshot = plan.get("signal_snapshot") or {}
+    if not (set(selected) - set(pending)) & _ROUTE_CONTEXT_CONSUMERS:
+        return None
+    if not isinstance(snapshot, dict) or not snapshot:
+        return None
+    return {"signal_snapshot": dict(snapshot)}
+
+
 def build_execution_plan(plan: CapabilityPlan | dict[str, Any]) -> CapabilityExecutionPlan:
     selected = tuple(plan.selected_capabilities if isinstance(plan, CapabilityPlan) else plan.get("selected_capabilities", []) or [])
+    controls = build_executor_controls(plan)
+    route_context = _planner_route_context(plan)
+    if route_context is not None:
+        controls["route_context"] = route_context
     return CapabilityExecutionPlan(
         schema_version="nexus_capability_execution_plan_v1",
         phase_order=PHASES,
         selected_capabilities=selected,
-        executor_controls=build_executor_controls(plan),
+        executor_controls=controls,
     )

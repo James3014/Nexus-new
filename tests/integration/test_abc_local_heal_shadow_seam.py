@@ -5,15 +5,33 @@ from unittest import mock
 
 from nexus.engine.capability_contracts import CapabilityPlan
 from nexus.engine.capability_executor_controls import build_execution_plan
+from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.engine.capability_receipt_adapters import LocalHealReceiptAdapter
 from nexus.services.local_heal.capability_adapter import (
     LocalHealCapabilityAdapter,
     LocalHealCapabilityRequest,
 )
 
+# #1924: LocalHealCapabilityAdapter reads its mode switches only from CapabilityPlanner's
+# signal_snapshot. The fixture starts from a real CapabilityPlanner.plan() snapshot and
+# projects the test's env opt-ins onto it; candidate/mutation flags can only narrow planner grants.
+_ENV_MODE_OPT_INS = {
+    "candidate_enabled": "NEXUS_LOCAL_MODEL_CANDIDATE_ENABLE",
+    "mutation_allowed": "NEXUS_LOCAL_SOLVE_MUTATION_ALLOWED",
+    "advisory_enabled": "NEXUS_LOCAL_MODEL_ADVISORY_ENABLE",
+    "fail_closed_enabled": "NEXUS_LOCAL_GUARD_FAIL_CLOSED_ENABLE",
+}
 
-def test_abc_local_heal_shadow_seam() -> None:
-    plan = CapabilityPlan(
+
+def _local_heal_plan() -> CapabilityPlan:
+    planner_plan = CapabilityPlanner().plan(
+        task_desc="fix test seam", task_type="repair", route={"local_enabled": True}
+    )
+    snapshot = dict(planner_plan.signal_snapshot)
+    assert snapshot["planner_version"] == "capability_planner_v1"
+    assert snapshot["candidate_enabled"] is True and snapshot["mutation_allowed"] is True
+    snapshot.update({flag: os.environ.get(env) == "1" for flag, env in _ENV_MODE_OPT_INS.items()})
+    return CapabilityPlan(
         schema_version="nexus_capability_plan_v1",
         selected_capabilities=["local_heal"],
         required_capabilities=["local_heal"],
@@ -25,7 +43,12 @@ def test_abc_local_heal_shadow_seam() -> None:
         decision_trace=[],
         replan_trace=[],
         score=95.0,
+        signal_snapshot=snapshot,
     )
+
+
+def test_abc_local_heal_shadow_seam() -> None:
+    plan = _local_heal_plan()
     
     exe_plan = build_execution_plan(plan)
     
@@ -44,6 +67,7 @@ def test_abc_local_heal_shadow_seam() -> None:
         problem_statement="fix test file",
         evidence_refs=("ref-e2e-1",),
         executor_controls=controls,
+        dry_run=False,  # #1924: a seam run, not the adapter's dry-run default
     )
     response = LocalHealCapabilityAdapter.run(request)
     
@@ -76,19 +100,7 @@ def test_abc_local_heal_shadow_seam() -> None:
 
 def test_abc_local_heal_advisory_seam() -> None:
     with mock.patch.dict(os.environ, {"NEXUS_LOCAL_MODEL_ADVISORY_ENABLE": "1"}):
-        plan = CapabilityPlan(
-            schema_version="nexus_capability_plan_v1",
-            selected_capabilities=["local_heal"],
-            required_capabilities=["local_heal"],
-            optional_capabilities=[],
-            conditional_capabilities=[],
-            pending_capabilities=[],
-            forbidden_capabilities=[],
-            constraints=[],
-            decision_trace=[],
-            replan_trace=[],
-            score=95.0,
-        )
+        plan = _local_heal_plan()
         
         exe_plan = build_execution_plan(plan)
         controls = exe_plan.executor_controls
@@ -98,6 +110,7 @@ def test_abc_local_heal_advisory_seam() -> None:
             problem_statement="refactor test seam",
             evidence_refs=("ref-e2e-1",),
             executor_controls=controls,
+            dry_run=False,  # #1924: a seam run, not the adapter's dry-run default
         )
         response = LocalHealCapabilityAdapter.run(request)
         
@@ -122,19 +135,7 @@ def test_abc_local_heal_advisory_seam() -> None:
 
 def test_abc_local_heal_fail_closed_seam() -> None:
     with mock.patch.dict(os.environ, {"NEXUS_LOCAL_GUARD_FAIL_CLOSED_ENABLE": "1"}):
-        plan = CapabilityPlan(
-            schema_version="nexus_capability_plan_v1",
-            selected_capabilities=["local_heal"],
-            required_capabilities=["local_heal"],
-            optional_capabilities=[],
-            conditional_capabilities=[],
-            pending_capabilities=[],
-            forbidden_capabilities=[],
-            constraints=[],
-            decision_trace=[],
-            replan_trace=[],
-            score=95.0,
-        )
+        plan = _local_heal_plan()
         
         exe_plan = build_execution_plan(plan)
         controls = dict(exe_plan.executor_controls)
@@ -145,6 +146,7 @@ def test_abc_local_heal_fail_closed_seam() -> None:
             problem_statement="fix test seam",
             evidence_refs=("ref-e2e-1",),
             executor_controls=controls,
+            dry_run=False,  # #1924: a seam run, not the adapter's dry-run default
         )
         response = LocalHealCapabilityAdapter.run(request)
         
@@ -171,19 +173,7 @@ def test_abc_local_heal_candidate_seam() -> None:
         "NEXUS_LOCAL_MODEL_CANDIDATE_ENABLE": "1",
         "NEXUS_LOCAL_MODEL_CALL_ALLOWED": "1",
     }):
-        plan = CapabilityPlan(
-            schema_version="nexus_capability_plan_v1",
-            selected_capabilities=["local_heal"],
-            required_capabilities=["local_heal"],
-            optional_capabilities=[],
-            conditional_capabilities=[],
-            pending_capabilities=[],
-            forbidden_capabilities=[],
-            constraints=[],
-            decision_trace=[],
-            replan_trace=[],
-            score=95.0,
-        )
+        plan = _local_heal_plan()
         
         exe_plan = build_execution_plan(plan)
         controls = dict(exe_plan.executor_controls)
@@ -191,12 +181,22 @@ def test_abc_local_heal_candidate_seam() -> None:
         def mock_gen(req) -> str:
             return "candidate proposal code"
         controls["candidate_generate_fn"] = mock_gen
+        # #1924: candidate mode requires the locked-span controls before any model call.
+        controls.update(
+            source_root=".",
+            target_file="f.py",
+            target_symbol="fix",
+            locked_search="return",
+            verifier_command=["true"],
+            work_dir="",
+        )
         
         request = LocalHealCapabilityRequest(
             task_id="task-e2e-candidate",
             problem_statement="fix test seam",
             evidence_refs=("ref-e2e-1",),
             executor_controls=controls,
+            dry_run=False,  # #1924: a seam run, not the adapter's dry-run default
         )
         response = LocalHealCapabilityAdapter.run(request)
         

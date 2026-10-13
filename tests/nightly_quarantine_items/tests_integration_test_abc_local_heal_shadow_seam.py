@@ -2,15 +2,5 @@
 
 from __future__ import annotations
 
-ENTRY: dict[str, object] = {
-    "file": "tests/integration/test_abc_local_heal_shadow_seam.py",
-    "disposition": "quarantine",
-    "issue": "#1924",
-    "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
-    "tests": (
-        "test_abc_local_heal_advisory_seam",
-        "test_abc_local_heal_candidate_seam",
-        "test_abc_local_heal_fail_closed_seam",
-        "test_abc_local_heal_shadow_seam",
-    ),
-}
+# Tombstone (#1924): all ids pass again; LocalHeal planner snapshot pass-through fixed per the Owner decision (Q1, 2026-10-13).
+ENTRY = None
