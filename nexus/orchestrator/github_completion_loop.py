@@ -80,6 +80,12 @@ GITHUB_ACTIONS_APP_ID: int = 15368
 # re-run attempt must not block forever); any other non-success conclusion vetoes.
 _IMPACT_GATE_IGNORABLE_CONCLUSIONS: frozenset[str] = frozenset({"cancelled", "skipped"})
 TEST_IMPACT_DEFERRAL_DISPOSITION: str = "TEST_IMPACT deferred to exact-head required CI on I_n"
+# The trusted verdict job is not a ruleset-required check, so read_required_checks
+# does not wait for it, and GitHub creates its check-run only after the jobs it
+# needs finish.  Before CAS the loop polls for it while it is absent or pending,
+# at a fixed interval, for at most min(remaining time budget, this cap).
+AC4_IMPACT_GATE_POLL_INTERVAL_SECONDS: float = 30.0
+AC4_IMPACT_GATE_MAX_WAIT_SECONDS: float = 1800.0
 
 
 def _test_impact_dependency_files() -> frozenset[str] | None:
@@ -265,16 +271,30 @@ def _evaluate_exact_head_impact_gate(
         if r.app_id == GITHUB_ACTIONS_APP_ID
         and r.workflow_path == TRUSTED_IMPACT_GATE_WORKFLOW_PATH
     ]
+    # "retryable" marks an absent or pending verdict, which may still appear/finish.
     if not named:
-        return "IMPACT_GATE_MISSING", {"ignored_foreign_run_count": len(same_name)}
+        return "IMPACT_GATE_MISSING", {
+            "ignored_foreign_run_count": len(same_name),
+            "retryable": True,
+        }
     exact = [r for r in named if r.head_sha == head_sha]
     if not exact:
-        return "IMPACT_GATE_STALE", {"observed_head_shas": sorted({r.head_sha for r in named})}
-    observed = {"observed": [(r.status, r.conclusion) for r in exact]}
-    if any(r.status.lower() != "completed" for r in exact):
-        return "IMPACT_GATE_NOT_GREEN", observed  # pending
+        return "IMPACT_GATE_STALE", {
+            "observed_head_shas": sorted({r.head_sha for r in named}),
+            "retryable": True,
+        }
+    observed: dict[str, Any] = {"observed": [(r.status, r.conclusion) for r in exact]}
     conclusions = [(r.conclusion or "").lower() for r in exact]
-    if any(c != "success" and c not in _IMPACT_GATE_IGNORABLE_CONCLUSIONS for c in conclusions):
+    vetoed = any(
+        r.status.lower() == "completed"
+        and c != "success"
+        and c not in _IMPACT_GATE_IGNORABLE_CONCLUSIONS
+        for r, c in zip(exact, conclusions)
+    )
+    if any(r.status.lower() != "completed" for r in exact):
+        # pending; a completed veto beside it fails immediately, without waiting
+        return "IMPACT_GATE_NOT_GREEN", {**observed, "retryable": not vetoed}
+    if vetoed:
         return "IMPACT_GATE_NOT_GREEN", observed
     if "success" not in conclusions:
         return "IMPACT_GATE_NOT_GREEN", observed
@@ -643,6 +663,7 @@ def run_github_completion_loop(
     git_root: Path | None = None,
     now_provider: Callable[[], datetime] | None = None,
     monotonic_clock: Callable[[], float] | None = None,
+    sleep_fn: Callable[[float], None] | None = None,
 ) -> CompletionLoopResult:
     """Execute the bounded GitHub PR drift-completion loop.
 
@@ -667,6 +688,7 @@ def run_github_completion_loop(
 
     now_fn = now_provider or (lambda: datetime.now(timezone.utc))
     clock_fn = monotonic_clock or time.monotonic
+    sleep = sleep_fn or time.sleep
 
     start_monotonic = clock_fn()
     source_candidate = initial_evidence.candidate
@@ -1387,9 +1409,41 @@ def run_github_completion_loop(
         # "Trusted impact gate (default branch)" on the exact head being merged, read live.
         deferral_details: dict[str, Any] = {}
         if test_impact_deferred_generations:
-            gate_error, gate_record = _read_exact_head_impact_gate(
-                port, head_sha=current_evidence.head_sha
-            )
+            # Bounded wait while the pinned verdict is absent or pending.  A veto
+            # conclusion stops immediately; main moving stops the wait and re-enters
+            # requalification; a timeout falls through to the structured BLOCKED below.
+            remaining_budget = max(0.0, max_elapsed_seconds - (clock_fn() - start_monotonic))
+            wait_cap = min(remaining_budget, AC4_IMPACT_GATE_MAX_WAIT_SECONDS)
+            wait_start = clock_fn()
+            gate_polls = 0
+            main_moved_during_wait = False
+            while True:
+                gate_error, gate_record = _read_exact_head_impact_gate(
+                    port, head_sha=current_evidence.head_sha
+                )
+                if gate_error is None or not gate_record.get("retryable"):
+                    break
+                if clock_fn() - wait_start + AC4_IMPACT_GATE_POLL_INTERVAL_SECONDS > wait_cap:
+                    break
+                sleep(AC4_IMPACT_GATE_POLL_INTERVAL_SECONDS)
+                gate_polls += 1
+                try:
+                    polled_main_sha, _ = port.read_main_state()
+                except Exception as exc:
+                    return CompletionLoopResult(
+                        outcome=CompletionLoopOutcome.BLOCKED,
+                        reason=f"TEST_IMPACT_DEFERRED_{gate_error}:MAIN_STATE_READ_FAILED:{exc}",
+                        generation=current_generation,
+                        integration_head_sha=last_produced_head_sha,
+                        evidence=current_evidence,
+                        intent=intent,
+                        details={"impact_gate": gate_record, "gate_polls": gate_polls},
+                    )
+                if polled_main_sha != current_evidence.base_sha:
+                    main_moved_during_wait = True
+                    break
+            if main_moved_during_wait:
+                continue
             if gate_error is not None:
                 # Bounded requalification: if main moved meanwhile, re-enter the
                 # generation loop (MAX budget applies); otherwise fail closed.
@@ -1414,12 +1468,13 @@ def run_github_completion_loop(
                     integration_head_sha=last_produced_head_sha,
                     evidence=current_evidence,
                     intent=intent,
-                    details={"impact_gate": gate_record},
+                    details={"impact_gate": gate_record, "gate_polls": gate_polls},
                 )
             deferral_details = {
                 "test_impact_deferral": {
                     "disposition": TEST_IMPACT_DEFERRAL_DISPOSITION,
                     "deferred_generations": list(test_impact_deferred_generations),
+                    "gate_polls": gate_polls,
                     **gate_record,
                 }
             }

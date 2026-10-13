@@ -367,7 +367,8 @@ class SpyGitHubCompletionPort:
         """Live check-runs GitHub reports for exact ``head_sha`` (default: green impact gate)."""
         self.head_check_runs_calls.append(head_sha)
         if self.head_check_runs is not None and head_sha in self.head_check_runs:
-            res = tuple(self.head_check_runs[head_sha])
+            spec = self.head_check_runs[head_sha]
+            res = tuple(spec() if callable(spec) else spec)
         elif self.head_check_runs is not None and "*" in self.head_check_runs:
             res = tuple(self.head_check_runs["*"])
         else:
@@ -3945,7 +3946,30 @@ def _ac4_patch_requalifier(monkeypatch, *, impact_class: str = "TEST_ONLY"):
     )
 
 
-def _ac4_run(monkeypatch, *, changed_paths, main_states, impact_class="TEST_ONLY", **port_kw):
+class _FakeClock:
+    """Deterministic monotonic clock + sleep for the AC4 verdict wait."""
+
+    def __init__(self):
+        self.now = 0.0
+        self.sleeps: list[float] = []
+
+    def __call__(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+def _ac4_run(
+    monkeypatch,
+    *,
+    changed_paths,
+    main_states,
+    impact_class="TEST_ONLY",
+    run_kw=None,
+    **port_kw,
+):
     m0_sha = "00" * 20
     initial_ev = _base_evidence(base_sha=m0_sha, current_main_sha=m0_sha)
     ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
@@ -3962,7 +3986,16 @@ def _ac4_run(monkeypatch, *, changed_paths, main_states, impact_class="TEST_ONLY
         "nexus.orchestrator.github_completion_loop.resolve_durable_merge_authorization",
         lambda *a, **k: evaluate_action(ctx, req),
     )
-    result = run_github_completion_loop(initial_evidence=initial_ev, request=req, port=port)
+    clock = _FakeClock()
+    port.fake_clock = clock
+    result = run_github_completion_loop(
+        initial_evidence=initial_ev,
+        request=req,
+        port=port,
+        monotonic_clock=clock,
+        sleep_fn=clock.sleep,
+        **(run_kw or {}),
+    )
     return result, port, initial_ev
 
 
@@ -4046,7 +4079,7 @@ def test_issue1384_ac4_stale_i_n_minus_1_gate_never_counts_for_i_n(monkeypatch):
 
     assert result.outcome is CompletionLoopOutcome.BLOCKED
     assert "IMPACT_GATE_STALE" in result.reason
-    assert port.head_check_runs_calls == [_I2]
+    assert set(port.head_check_runs_calls) == {_I2}  # polled while absent, never I_1
     assert port.cas_merge_calls == []
 
 
@@ -4321,10 +4354,18 @@ def test_issue1384_ac4_deferral_persists_into_later_irrelevant_generation(
         "nexus.orchestrator.github_completion_loop.resolve_durable_merge_authorization",
         lambda *a, **k: evaluate_action(ctx, req),
     )
-    result = run_github_completion_loop(initial_evidence=initial_ev, request=req, port=port)
+    clock = _FakeClock()
+    result = run_github_completion_loop(
+        initial_evidence=initial_ev,
+        request=req,
+        port=port,
+        monotonic_clock=clock,
+        sleep_fn=clock.sleep,
+    )
 
     assert port.revalidation_calls == []
-    assert port.head_check_runs_calls == [_I2]  # gate is read for I_(n+1), not skipped
+    # gate is read for I_(n+1) (possibly polled), never skipped and never for I_n
+    assert set(port.head_check_runs_calls) == {_I2}
     if expect_completed:
         assert result.outcome is CompletionLoopOutcome.COMPLETED, result.reason
         assert result.generation == 2
@@ -4527,3 +4568,184 @@ def test_issue1384_ac4_bridge_wire_non_actions_run_contract(monkeypatch):
     assert deferral["check_name"] == "Trusted impact gate (default branch)"
     assert deferral["workflow_path"] == ".github/workflows/trusted-impact-gate.yml"
     assert deferral["exact_head_run_count"] == 1
+
+
+# ==============================================================================
+# Issue 1384 AC4: bounded wait for the trusted verdict before CAS
+# ==============================================================================
+
+
+def _sequenced_runs(*responses):
+    """Return successive live check-run responses; the last one repeats."""
+    queue = list(responses)
+
+    def _next():
+        return queue.pop(0) if len(queue) > 1 else queue[0]
+
+    return _next
+
+
+def test_issue1384_ac4_wait_verdict_appears_after_polls_and_merges(monkeypatch):
+    runs = _sequenced_runs(
+        [],  # verdict check-run not created yet (needed jobs still running)
+        [],
+        [_impact_gate_run(_I1, conclusion=None, status="queued")],
+        [_impact_gate_run(_I1, conclusion=None, status="in_progress")],
+        [_impact_gate_run(_I1)],
+    )
+    result, port, _ = _ac4_run(
+        monkeypatch,
+        changed_paths=("tests/unit/test_runner.py",),
+        main_states=[_M1],
+        head_check_runs={_I1: runs},
+    )
+
+    assert result.outcome is CompletionLoopOutcome.COMPLETED, result.reason
+    assert port.fake_clock.sleeps == [30.0] * 4
+    assert port.head_check_runs_calls == [_I1] * 5
+    assert result.details["test_impact_deferral"]["gate_polls"] == 4
+    assert len(port.cas_merge_calls) == 1
+    assert port.cas_merge_calls[0]["expected_head_sha"] == _I1
+
+
+@pytest.mark.parametrize(
+    ("spec", "reason_token"),
+    [
+        ([], "IMPACT_GATE_MISSING"),
+        ([("x", None, "in_progress")], "IMPACT_GATE_NOT_GREEN"),
+        ([("0f" * 20, "success", "completed")], "IMPACT_GATE_STALE"),
+    ],
+    ids=["absent", "pending", "stale-only"],
+)
+def test_issue1384_ac4_wait_timeout_blocks_and_never_merges(monkeypatch, spec, reason_token):
+    runs = [_impact_gate_run(_I1 if h == "x" else h, conclusion=c, status=st) for h, c, st in spec]
+    result, port, _ = _ac4_run(
+        monkeypatch,
+        changed_paths=("tests/unit/test_runner.py",),
+        main_states=[_M1],
+        head_check_runs={_I1: runs},
+    )
+
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert f"TEST_IMPACT_DEFERRED_{reason_token}" in result.reason
+    # 30-minute cap at a fixed 30 s interval: exactly 60 polls, never past the cap.
+    assert port.fake_clock.sleeps == [30.0] * 60
+    assert sum(port.fake_clock.sleeps) <= 1800.0
+    assert result.details["gate_polls"] == 60
+    assert port.cas_merge_calls == []
+
+
+def test_issue1384_ac4_wait_is_capped_by_remaining_time_budget(monkeypatch):
+    result, port, _ = _ac4_run(
+        monkeypatch,
+        changed_paths=("tests/unit/test_runner.py",),
+        main_states=[_M1],
+        head_check_runs={_I1: []},
+        run_kw={"max_elapsed_seconds": 200.0},
+    )
+
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert "TEST_IMPACT_DEFERRED_IMPACT_GATE_MISSING" in result.reason
+    assert port.fake_clock.sleeps == [30.0] * 6  # 6 * 30 = 180 <= 200 < 210
+    assert port.cas_merge_calls == []
+
+
+def test_issue1384_ac4_main_moving_during_wait_reenters_requalification(monkeypatch):
+    result, port, _ = _ac4_run(
+        monkeypatch,
+        changed_paths=("tests/unit/test_runner.py",),
+        # gen1 start, gen1 post-checks, poll 1 (same), poll 2 (moved), gen2 start, ...
+        main_states=[_M1, _M1, _M1, _M2, _M2],
+        head_check_runs={_I1: [], _I2: [_impact_gate_run(_I2)]},
+    )
+
+    assert result.outcome is CompletionLoopOutcome.COMPLETED, result.reason
+    assert result.generation == 2
+    assert port.fake_clock.sleeps == [30.0, 30.0]
+    assert port.head_check_runs_calls == [_I1, _I1, _I2]
+    assert len(port.materialize_calls) == 2
+    assert len(port.cas_merge_calls) == 1
+    assert port.cas_merge_calls[0]["expected_head_sha"] == _I2
+    assert port.revalidation_calls == []
+
+
+@pytest.mark.parametrize(
+    "red_conclusion", ["failure", "timed_out", "action_required"], ids=lambda c: c
+)
+def test_issue1384_ac4_red_verdict_during_wait_blocks_immediately(monkeypatch, red_conclusion):
+    runs = _sequenced_runs(
+        [_impact_gate_run(_I1, conclusion=None, status="in_progress")],
+        [_impact_gate_run(_I1, conclusion=red_conclusion)],
+        [_impact_gate_run(_I1)],  # would turn green later: must never be reached
+    )
+    result, port, _ = _ac4_run(
+        monkeypatch,
+        changed_paths=("tests/unit/test_runner.py",),
+        main_states=[_M1],
+        head_check_runs={_I1: runs},
+    )
+
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert "TEST_IMPACT_DEFERRED_IMPACT_GATE_NOT_GREEN" in result.reason
+    assert port.fake_clock.sleeps == [30.0]
+    assert port.head_check_runs_calls == [_I1, _I1]
+    assert port.cas_merge_calls == []
+
+
+def test_issue1384_ac4_veto_beside_pending_does_not_wait(monkeypatch):
+    result, port, _ = _ac4_run(
+        monkeypatch,
+        changed_paths=("tests/unit/test_runner.py",),
+        main_states=[_M1],
+        head_check_runs={
+            _I1: [
+                _impact_gate_run(_I1, conclusion="failure"),
+                _impact_gate_run(_I1, conclusion=None, status="in_progress"),
+            ]
+        },
+    )
+
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert "TEST_IMPACT_DEFERRED_IMPACT_GATE_NOT_GREEN" in result.reason
+    assert port.fake_clock.sleeps == []
+    assert port.cas_merge_calls == []
+
+
+def test_issue1384_ac4_main_read_failure_during_wait_blocks_structured(monkeypatch):
+    class _FailOnPoll(SpyGitHubCompletionPort):
+        main_reads = 0
+
+        def read_main_state(self):
+            self.main_reads += 1
+            if self.main_reads == 3:  # gen1 start, gen1 post-checks, first poll
+                raise RuntimeError("github 503")
+            return super().read_main_state()
+
+    m0 = "00" * 20
+    initial_ev = _base_evidence(base_sha=m0, current_main_sha=m0)
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    req = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+    port = _FailOnPoll(
+        main_states=[_M1],
+        default_pr_head="b" * 40,
+        default_changed_paths=("tests/unit/test_runner.py",),
+        head_check_runs={_I1: []},
+    )
+    _ac4_patch_requalifier(monkeypatch)
+    monkeypatch.setattr(
+        "nexus.orchestrator.github_completion_loop.resolve_durable_merge_authorization",
+        lambda *a, **k: evaluate_action(ctx, req),
+    )
+    clock = _FakeClock()
+    result = run_github_completion_loop(
+        initial_evidence=initial_ev,
+        request=req,
+        port=port,
+        monotonic_clock=clock,
+        sleep_fn=clock.sleep,
+    )
+
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert "TEST_IMPACT_DEFERRED_IMPACT_GATE_MISSING:MAIN_STATE_READ_FAILED" in result.reason
+    assert "github 503" in result.reason
+    assert port.cas_merge_calls == []
