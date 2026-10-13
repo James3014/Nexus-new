@@ -196,6 +196,7 @@ def test_run_agy_dispatch_kills_process_before_returning(
     size = tree.stat().st_size
     time.sleep(0.4)
     assert tree.stat().st_size == size
+    assert record is not None
     pgid = record["provider_pgid"]
     with pytest.raises(ProcessLookupError):
         os.killpg(pgid, 0)

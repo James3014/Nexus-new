@@ -1503,12 +1503,12 @@ def _agy_operation_process_groups(*records: Mapping[str, Any] | None) -> tuple[i
         pid = record.get("pid")
         if isinstance(pid, int) and pid > 1:
             try:
-                pgid = os.getpgid(pid)
+                leads_group = os.getpgid(pid) == pid
             except OSError:
-                pgid = None
+                leads_group = False
             # The supervisor is spawned with start_new_session, so it leads its group.
-            if pgid == pid:
-                groups.append(pgid)
+            if leads_group:
+                groups.append(pid)
         provider_pgid = record.get("provider_pgid")
         if isinstance(provider_pgid, int) and provider_pgid > 1:
             groups.append(provider_pgid)
