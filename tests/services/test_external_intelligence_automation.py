@@ -2442,3 +2442,81 @@ def test_default_consumer_without_campaign_is_rejected_by_chatgpt_web_transport(
     assert "CANONICAL_WORKER_TRANSPORT_BINDING_INVALID:MODEL_SUBSTITUTION_FORBIDDEN" in str(
         result.get("error", "")
     )
+
+
+def _setup_with_core_card_fields(tmp_path: Path):
+    repo, card, _contract_value, _body_value, store = _setup(tmp_path)
+    card.write_text(
+        card.read_text(encoding="utf-8").replace(
+            "- status: ACTIVE\n",
+            "- status: ACTIVE\n"
+            "- execution_lane: `DIRECT_DELEGATED`\n"
+            "- capability_disposition: `EXTEND_EXISTING`\n"
+            "- capability_ids: `chatgpt_web_semantic_transport`\n",
+        ),
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "."], cwd=repo, capture_output=True, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "core fields"], cwd=repo, capture_output=True, check=True
+    )
+    head_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "update-ref", "refs/remotes/origin/main", head_sha],
+        cwd=repo,
+        capture_output=True,
+        check=True,
+    )
+    contract = _contract("tasks/x.md", _sha(card), main_sha=head_sha)
+    return repo, contract, _body(contract), store
+
+
+def test_c_units_pass_core_authority_inputs_without_changing_unit_identity(tmp_path):
+    from nexus.services.external_intelligence_core_binding import CoreAuthorityInputs
+    from nexus.services.external_intelligence_fanout import ExecutionUnit
+
+    repo, contract, body, store = _setup_with_core_card_fields(tmp_path)
+    c = FakeC()
+    result = _automation(tmp_path, repo, store, c=c).run_issue("o/r", 77, "Bound title", body)
+
+    assert result["state"] == "COMPLETE"
+    units, _lease = c.calls[0]
+    for unit_data in units:
+        inputs = CoreAuthorityInputs.from_mapping(unit_data["core_authority"])
+        assert inputs.execution_lane == "DIRECT_DELEGATED"
+        assert inputs.capability_disposition == "EXTEND_EXISTING"
+        assert inputs.capability_ids == ("chatgpt_web_semantic_transport",)
+        assert inputs.repository == "o/r" and inputs.issue_number == 77
+        assert inputs.intent == "Bound title"
+        assert inputs.task_card_hash == contract["task_card_hash"]
+        assert inputs.main_sha == contract["main_sha"]
+        assert set(inputs.unit_verifiers) == {"u1", "u2"}
+        assert (
+            inputs.worker_binding_sha256
+            == hashlib.sha256(
+                json.dumps(
+                    unit_data["selected_worker"],
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                ).encode()
+            ).hexdigest()
+        )
+        without = {key: value for key, value in unit_data.items() if key != "core_authority"}
+        assert (
+            ExecutionUnit.from_mapping(unit_data).identity_sha256
+            == ExecutionUnit.from_mapping(without).identity_sha256
+        )
+
+
+def test_c_units_core_authority_tolerates_cards_without_core_fields(tmp_path):
+    repo, _, contract, body, store = _setup(tmp_path)
+    c = FakeC()
+    result = _automation(tmp_path, repo, store, c=c).run_issue("o/r", 78, "title", body)
+
+    assert result["state"] == "COMPLETE"
+    units, _lease = c.calls[0]
+    assert all(unit["core_authority"]["execution_lane"] == "" for unit in units)
+    assert all(unit["core_authority"]["capability_ids"] is None for unit in units)

@@ -18,6 +18,11 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from nexus.services.external_intelligence import TransportResult
+from nexus.services.external_intelligence_core_binding import (
+    BOUND_OPERATION_SCHEMA,
+    CoreBindingError,
+    parse_bound_execution_envelope_v2,
+)
 from nexus.services.external_intelligence_fanout import FanoutError, OpenCodeRunResult
 
 PROTOCOL_REQUEST_SCHEMA = "nexus.open_swe_runtime.request.v1"
@@ -53,6 +58,17 @@ REPAIR_TOOL_SURFACE = frozenset({
 })
 _SESSION_RE = re.compile(r"^ses_open_swe_[0-9a-f]{20}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_PREFIXED_SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_BOUND_OPERATION_KEYS = frozenset({
+    "schema",
+    "operation",
+    "workspace",
+    "attempt_id",
+    "unit_identity_sha256",
+    "semantic_envelope_sha256",
+    "session_id",
+    "worker_identity_sha256",
+})
 OPEN_SWE_DISTRIBUTION = "nexus-open-swe-runtime"
 _SYSTEM_ENV_ALLOWLIST = (
     "HOME",
@@ -549,6 +565,10 @@ class OpenSWEExternalIntelligenceTransport:
 class OpenSWEWorkerTransport:
     """Nexus-side client for external Open SWE diagnosis/repair execution."""
 
+    # The runtime admits external_execution_envelope.v2 only with a Core
+    # repository_mutation_binding; fanout mints it per attempt for this transport.
+    supports_core_mutation_binding = True
+
     def __init__(
         self,
         *,
@@ -602,6 +622,39 @@ class OpenSWEWorkerTransport:
         self._bound_worker_sha256 = _sha256(_canonical_json(worker))
         return self
 
+    @property
+    def worker_identity_sha256(self) -> str:
+        return self._bound_worker_sha256
+
+    def _bound_operation_id(
+        self,
+        operation: str,
+        *,
+        workspace_path: str,
+        session_id: str,
+        operation_material: Mapping[str, Any],
+    ) -> str:
+        """Binding-free id for a Core-bound dispatch (the binding itself pins this id)."""
+        material = dict(operation_material)
+        if (
+            set(material) != _BOUND_OPERATION_KEYS
+            or material.get("schema") != BOUND_OPERATION_SCHEMA
+            or material.get("operation") != operation
+            or operation != "worker_run"
+            or material.get("workspace") != str(Path(workspace_path).expanduser().resolve())
+            or material.get("session_id") != session_id
+            or session_id != ""
+            or material.get("worker_identity_sha256") != self._bound_worker_sha256
+            or not isinstance(material.get("attempt_id"), str)
+            or not str(material["attempt_id"]).strip()
+            or not isinstance(material.get("unit_identity_sha256"), str)
+            or _SHA256_RE.fullmatch(material["unit_identity_sha256"]) is None
+            or not isinstance(material.get("semantic_envelope_sha256"), str)
+            or _SHA256_RE.fullmatch(material["semantic_envelope_sha256"]) is None
+        ):
+            raise FanoutError("OPERATION_MATERIAL_INVALID")
+        return _sha256(_canonical_json(material))
+
     def _operation_id(
         self,
         operation: str,
@@ -634,7 +687,15 @@ class OpenSWEWorkerTransport:
         artifact_path: str,
         workspace_path: str,
         session_id: str,
+        operation_material: Mapping[str, Any] | None = None,
     ) -> str:
+        if operation_material is not None:
+            return self._bound_operation_id(
+                operation,
+                workspace_path=workspace_path,
+                session_id=session_id,
+                operation_material=operation_material,
+            )
         operation_id = self._operation_id(
             operation,
             prompt=prompt,
@@ -656,6 +717,8 @@ class OpenSWEWorkerTransport:
         argv_sha256: str = "",
         effect_authorization_hash: str = "",
         tool_projection_hash: str = "",
+        core_binding_hash: str = "",
+        acceptance_contract_hash: str = "",
     ) -> OpenCodeRunResult:
         return OpenCodeRunResult(
             status=status,
@@ -671,6 +734,8 @@ class OpenSWEWorkerTransport:
             worker_identity_sha256=self._bound_worker_sha256,
             effect_authorization_hash=effect_authorization_hash,
             tool_projection_hash=tool_projection_hash,
+            core_binding_hash=core_binding_hash,
+            acceptance_contract_hash=acceptance_contract_hash,
         )
 
     def _request(
@@ -684,9 +749,27 @@ class OpenSWEWorkerTransport:
         operation_id: str = "",
         effect_authorization: Mapping[str, Any] | None = None,
         tool_projection_manifest: Mapping[str, Any] | None = None,
+        operation_material: Mapping[str, Any] | None = None,
+        core_binding: Mapping[str, Any] | None = None,
     ) -> OpenCodeRunResult:
         if session_id and _SESSION_RE.fullmatch(session_id) is None:
             raise FanoutError("INVALID_SESSION_ID")
+        expected_core: tuple[str, str] | None = None
+        if core_binding is not None:
+            expected_core = (
+                str(core_binding.get("core_binding_hash") or ""),
+                str(core_binding.get("acceptance_contract_hash") or ""),
+            )
+            if any(_PREFIXED_SHA256_RE.fullmatch(value) is None for value in expected_core):
+                raise FanoutError("CORE_BINDING_HASHES_REQUIRED")
+        if operation == "worker_run" and (operation_material is None) != (core_binding is None):
+            raise FanoutError("CORE_BINDING_OPERATION_MATERIAL_PAIR_REQUIRED")
+        if operation == "worker_continue" and (
+            operation_material is not None or core_binding is not None
+        ):
+            raise FanoutError("CORE_BINDING_CONTINUATION_UNSUPPORTED")
+        if operation == "worker_reconcile" and operation_material is not None:
+            raise FanoutError("OPERATION_MATERIAL_RECONCILE_FORBIDDEN")
         effect_requested = effect_authorization is not None or tool_projection_manifest is not None
         if effect_requested and (
             not isinstance(effect_authorization, Mapping)
@@ -732,6 +815,7 @@ class OpenSWEWorkerTransport:
                 artifact_path=artifact_path,
                 workspace_path=str(workspace),
                 session_id=session_id,
+                operation_material=operation_material,
             )
             if operation_id and operation_id != computed_operation_id:
                 return self._local_failure(
@@ -741,6 +825,36 @@ class OpenSWEWorkerTransport:
                     error="OPERATION_ID_MISMATCH",
                 )
             operation_id = computed_operation_id
+        bound_attempt_id = ""
+        if operation_material is not None and expected_core is not None:
+            # The bound artifact must pin exactly this operation, attempt and Core identity.
+            try:
+                text = Path(artifact_path).expanduser().resolve().read_text(encoding="utf-8")
+                _semantic, mutation_binding, _bound_sha = parse_bound_execution_envelope_v2(
+                    text,
+                    semantic_envelope_sha256=str(operation_material["semantic_envelope_sha256"]),
+                )
+            except (OSError, UnicodeDecodeError, CoreBindingError):
+                return self._local_failure(
+                    "OPEN_SWE_CORE_BINDING_INVALID",
+                    workspace_path=str(workspace),
+                    error="CORE_BOUND_ENVELOPE_INVALID",
+                )
+            bound_attempt_id = str(operation_material["attempt_id"])
+            if (
+                mutation_binding.get("operation_id") != operation_id
+                or mutation_binding.get("attempt_id") != bound_attempt_id
+                or (
+                    mutation_binding.get("binding_hash"),
+                    mutation_binding["core"].get("acceptance_contract_hash"),
+                )
+                != expected_core
+            ):
+                return self._local_failure(
+                    "OPEN_SWE_CORE_BINDING_INVALID",
+                    workspace_path=str(workspace),
+                    error="CORE_BINDING_OPERATION_MISMATCH",
+                )
 
         effect_authorization_hash = ""
         tool_projection_hash = ""
@@ -753,6 +867,8 @@ class OpenSWEWorkerTransport:
             attempt_id = str(effect_authorization.get("attempt_id") or "").strip()
             if not attempt_id:
                 raise FanoutError("EFFECT_AUTHORIZATION_ATTEMPT_ID_REQUIRED")
+            if bound_attempt_id and attempt_id != bound_attempt_id:
+                raise FanoutError("EFFECT_AUTHORIZATION_CORE_ATTEMPT_MISMATCH")
             if tool_projection_manifest.get("operation_id") != operation_id:
                 raise FanoutError("TOOL_PROJECTION_OPERATION_MISMATCH")
             if tool_projection_manifest.get("attempt_id") != attempt_id:
@@ -785,6 +901,13 @@ class OpenSWEWorkerTransport:
                 "effect_authorization": dict(effect_authorization),
                 "tool_projection_manifest": dict(tool_projection_manifest),
             })
+        elif bound_attempt_id:
+            payload["attempt_id"] = bound_attempt_id
+        if expected_core is not None:
+            # Reconcile carries no artifact; the runtime treats BOUND state as
+            # mismatched unless the request supplies the same Core hashes.
+            payload["core_binding_hash"] = expected_core[0]
+            payload["acceptance_contract_hash"] = expected_core[1]
         argv_sha256 = _safe_request_hash(payload)
         value, _stderr, process_started, failure = _runtime_call(
             self.executable,
@@ -901,6 +1024,28 @@ class OpenSWEWorkerTransport:
                         tool_projection_hash=tool_projection_hash,
                     )
 
+        returned_core_status = str(value.get("core_binding_status") or "")
+        returned_core = (
+            str(value.get("core_binding_hash") or ""),
+            str(value.get("acceptance_contract_hash") or ""),
+        )
+        if expected_core is not None:
+            completed = str(value.get("status") or "") == "COMPLETED"
+            if (any(returned_core) and returned_core != expected_core) or (
+                completed and (returned_core_status != "BOUND" or returned_core != expected_core)
+            ):
+                return self._local_failure(
+                    "OPEN_SWE_OUTCOME_UNKNOWN",
+                    workspace_path=str(workspace),
+                    process_started=bool(value.get("process_started", process_started)),
+                    outcome_unknown=True,
+                    error="CORE_BINDING_ATTESTATION_MISMATCH",
+                    argv_sha256=argv_sha256,
+                    effect_authorization_hash=effect_authorization_hash,
+                    tool_projection_hash=tool_projection_hash,
+                    core_binding_hash=expected_core[0],
+                    acceptance_contract_hash=expected_core[1],
+                )
         evidence_paths_raw = value.get("diagnosis_evidence_paths") or []
         evidence_paths = (
             tuple(str(path) for path in evidence_paths_raw)
@@ -934,6 +1079,9 @@ class OpenSWEWorkerTransport:
             effect_authorization_hash=effect_authorization_hash,
             tool_projection_hash=tool_projection_hash,
             execution_exposure_receipt=exposure_receipt,
+            core_binding_status=returned_core_status,
+            core_binding_hash=returned_core[0],
+            acceptance_contract_hash=returned_core[1],
         )
 
     def _ensure_runtime_identity(self) -> bool:
@@ -965,6 +1113,8 @@ class OpenSWEWorkerTransport:
         operation_id: str = "",
         effect_authorization: Mapping[str, Any] | None = None,
         tool_projection_manifest: Mapping[str, Any] | None = None,
+        operation_material: Mapping[str, Any] | None = None,
+        core_binding: Mapping[str, Any] | None = None,
     ) -> OpenCodeRunResult:
         return self._request(
             "worker_run",
@@ -974,6 +1124,8 @@ class OpenSWEWorkerTransport:
             operation_id=operation_id,
             effect_authorization=effect_authorization,
             tool_projection_manifest=tool_projection_manifest,
+            operation_material=operation_material,
+            core_binding=core_binding,
         )
 
     def continue_session(
@@ -1005,6 +1157,7 @@ class OpenSWEWorkerTransport:
         operation_id: str = "",
         effect_authorization: Mapping[str, Any] | None = None,
         tool_projection_manifest: Mapping[str, Any] | None = None,
+        core_binding: Mapping[str, Any] | None = None,
     ) -> OpenCodeRunResult:
         return self._request(
             "worker_reconcile",
@@ -1012,6 +1165,7 @@ class OpenSWEWorkerTransport:
             operation_id=operation_id,
             effect_authorization=effect_authorization,
             tool_projection_manifest=tool_projection_manifest,
+            core_binding=core_binding,
         )
 
 

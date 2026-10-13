@@ -51,6 +51,12 @@ class TaskCardAuthority:
     allowed_files: tuple[str, ...]
     verification_commands: tuple[tuple[str, ...], ...]
     allow_deletions: bool = False
+    # Owner-authored Core binding inputs.  They are only required (fail closed) when
+    # an Open SWE bound dispatch mints a repository_mutation_binding.
+    execution_lane: str = ""
+    capability_disposition: str = ""
+    capability_ids: tuple[str, ...] | None = None
+    capability_justification: str = ""
 
     @property
     def is_executable(self) -> bool:
@@ -296,12 +302,27 @@ def parse_task_card_authority(text: str) -> TaskCardAuthority:
     )
     allow_del = str(del_val).lower() in ("true", "1", "yes") if del_val else False
 
+    raw_capability_ids = _frontmatter_value(text, "capability_ids")
+    capability_ids: tuple[str, ...] | None
+    if raw_capability_ids is None:
+        capability_ids = None
+    elif raw_capability_ids.strip().lower() == "none":
+        capability_ids = ()
+    else:
+        capability_ids = tuple(part.strip() for part in raw_capability_ids.split(","))
+
     return TaskCardAuthority(
         task_id=task_id,
         status=status,
         allowed_files=tuple(sorted(dict.fromkeys(cleaned_allowed))),
         verification_commands=tuple(sorted(commands)),
         allow_deletions=allow_del,
+        execution_lane=(_frontmatter_value(text, "execution_lane") or "").strip(),
+        capability_disposition=(_frontmatter_value(text, "capability_disposition") or "").strip(),
+        capability_ids=capability_ids,
+        capability_justification=(
+            _frontmatter_value(text, "capability_justification") or ""
+        ).strip(),
     )
 
 
@@ -469,6 +490,71 @@ class CompositionWorkspaceAllocator:
         return AssemblyLease(workspace_id=workspace_id, path=str(path), base_sha=base_sha)
 
 
+_CORE_BOUND_RECEIPT_FIELDS = (
+    "bound_envelope_ref",
+    "bound_envelope_sha256",
+    "core_binding_status",
+    "core_binding_hash",
+    "acceptance_contract_hash",
+)
+
+
+def _validate_core_binding_receipt(
+    receipt: Mapping[str, Any], *, worker_backend: str
+) -> dict[str, Any]:
+    """Require BOUND Core identity for receipts produced by a bound dispatch.
+
+    Receipts without any bound field are legacy/unbound dispatches and stay valid.
+    A bound receipt is re-checked against its durable bound envelope artifact (the
+    attempt-side record of what was sent), not against the runtime's own claim.
+    """
+    present = [field for field in _CORE_BOUND_RECEIPT_FIELDS if field in receipt]
+    if not present:
+        return {}
+    if len(present) != len(_CORE_BOUND_RECEIPT_FIELDS) or worker_backend != "open_swe":
+        raise ClosureError("CORE_BINDING_RECEIPT_INVALID")
+    if receipt.get("core_binding_status") != "BOUND":
+        raise ClosureError("CORE_BINDING_NOT_BOUND")
+    binding_hash = str(receipt.get("core_binding_hash") or "")
+    contract_hash = str(receipt.get("acceptance_contract_hash") or "")
+    bound_sha = str(receipt.get("bound_envelope_sha256") or "")
+    if (
+        not binding_hash.startswith("sha256:")
+        or not _is_hex(binding_hash[7:], 64)
+        or not contract_hash.startswith("sha256:")
+        or not _is_hex(contract_hash[7:], 64)
+        or not _is_hex(bound_sha, 64)
+    ):
+        raise ClosureError("CORE_BINDING_RECEIPT_INVALID")
+    from nexus.services.external_intelligence_core_binding import (
+        CoreBindingError,
+        parse_bound_execution_envelope_v2,
+    )
+
+    bound_path = Path(str(receipt.get("bound_envelope_ref") or "")).expanduser()
+    try:
+        text = bound_path.read_text(encoding="utf-8")
+        _semantic, binding, observed_bound_sha = parse_bound_execution_envelope_v2(
+            text, semantic_envelope_sha256=str(receipt.get("envelope_sha256") or "")
+        )
+    except (OSError, UnicodeDecodeError, CoreBindingError) as exc:
+        raise ClosureError("CORE_BINDING_ENVELOPE_INVALID") from exc
+    if (
+        observed_bound_sha != bound_sha
+        or binding.get("binding_hash") != binding_hash
+        or binding["core"].get("acceptance_contract_hash") != contract_hash
+        or binding.get("attempt_id") != receipt.get("attempt_id")
+        or binding.get("operation_id") != receipt.get("operation_id")
+    ):
+        raise ClosureError("CORE_BINDING_RECEIPT_MISMATCH")
+    return {
+        "core_binding_status": "BOUND",
+        "core_binding_hash": binding_hash,
+        "acceptance_contract_hash": contract_hash,
+        "bound_envelope_sha256": bound_sha,
+    }
+
+
 def validate_worker_receipt(receipt: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(receipt, Mapping) or receipt.get("schema") != WORKER_RECEIPT_SCHEMA:
         raise ClosureError("INVALID_WORKER_RECEIPT")
@@ -542,6 +628,7 @@ def validate_worker_receipt(receipt: Mapping[str, Any]) -> dict[str, Any]:
         expected_worker_sha = _sha256(_canonical_json(selected_worker))
         if worker_identity_sha256 != expected_worker_sha:
             raise ClosureError("OPEN_SWE_WORKER_IDENTITY_MISMATCH")
+    core_binding = _validate_core_binding_receipt(receipt, worker_backend=worker_backend)
     session_id = str(receipt.get("session_id") or "")
     if not session_id.startswith(_SESSION_PREFIX) or len(session_id) < 12:
         raise ClosureError("INVALID_SESSION_ID")
@@ -613,6 +700,7 @@ def validate_worker_receipt(receipt: Mapping[str, Any]) -> dict[str, Any]:
         else None,
         "worker_backend": worker_backend,
         "operation_id": str(receipt.get("operation_id") or ""),
+        **core_binding,
     }
 
 
