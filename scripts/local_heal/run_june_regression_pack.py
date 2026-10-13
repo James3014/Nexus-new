@@ -714,7 +714,8 @@ def _run_pack(replay_mode: str, *, workspace_root: Path, results_dir: Path) -> d
                 "manual_source_edit_detected": manual_source_edit_detected,
                 "replay_mode": replay_mode,
                 "mock_oracle_used": replay_mode == "mock_oracle",
-                "real_model_called": replay_mode == "real_model",
+                # Blocked before any model call: do not claim one happened.
+                "real_model_called": False,
                 "provider_name": "none" if replay_mode == "mock_oracle" else "ollama",
                 "model_name": "mock_oracle_patch"
                 if replay_mode == "mock_oracle"
