@@ -1,0 +1,8 @@
+{
+  "id": "timezone_naive_aware-a",
+  "bug_class": "timezone_naive_aware",
+  "variant": "a",
+  "problem_statement": "next_departure() raises TypeError when a flight's 'departs' value has no UTC offset (for example '2026-03-01T08:15:00') while `now` is timezone-aware. Expected: an offset-less timestamp is read as UTC and the soonest upcoming flight code is returned.",
+  "target_file": "departures.py",
+  "repro_file": "repro.py"
+}

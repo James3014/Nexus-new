@@ -54,3 +54,9 @@ def test_unsupported_effort_fails_closed() -> None:
             "claude-sonnet-4-6",
             requested_effort="high",
         )
+
+
+def test_gemini_flash_profile_declares_required_default_effort() -> None:
+    profile = resolve_reviewer_launch_profile("gemini-3.8-flash")
+    assert profile.supported_efforts == ("low", "medium", "high")
+    assert getattr(profile, "default_effort", None) == "medium"

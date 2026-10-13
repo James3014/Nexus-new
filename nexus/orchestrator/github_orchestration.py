@@ -565,11 +565,13 @@ def _parse_legacy_acceptance(
     reviewer = one(r"(?:reviewer transport/session|reviewer session):[^`\n]*`([^`\n]+)`")
     output_hash = one(r"reviewer output SHA-256:\s*`([0-9a-f]{64})`")
     max_claim = one(r"(?:Maximum claim|max(?:imum)? claim):\s*`([^`]+)`")
-    lower = body.lower()
-    accepted = (
-        "blockers: none" in lower or "accept_candidate" in lower or "accept candidate" in lower
-    )
-    if not accepted:
+    # One anchored verdict line with an exact acceptance token; substring
+    # matching accepted negations such as "I do not accept candidate".
+    verdicts = re.findall(r"(?im)^\s*verdict:\s*(.+?)\s*$", body)
+    if len(verdicts) != 1:
+        raise _projection_error("INDEPENDENT_ACCEPTANCE_MISSING")
+    verdict = re.sub(r"[*`]", "", verdicts[0]).strip().rstrip(".!").strip().lower()
+    if not re.fullmatch(r"blockers:\s*none|accept_candidate|accept candidate", verdict):
         raise _projection_error("INDEPENDENT_ACCEPTANCE_MISSING")
     if (observed_base, observed_head, observed_tree, observed_card) != (
         base_sha,

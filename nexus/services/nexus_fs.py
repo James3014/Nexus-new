@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 from dataclasses import dataclass
+from nexus.services.lancedb_roots import KNOWLEDGE, VECTOR_DB, resolve_lancedb_root
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,7 @@ class NexusFS:
             self._map_logical_knowledge(knowledge_root, self.root_node.children["knowledge"])
 
         # 3. 映射 Wisdom (.nexus/vector_db)
-        wisdom_root = self.project_root / ".nexus" / "vector_db"
+        wisdom_root = resolve_lancedb_root(VECTOR_DB, self.project_root)
         if wisdom_root.exists():
             self._map_logical_wisdom(wisdom_root, self.root_node.children["wisdom"])
 
@@ -168,8 +169,12 @@ class NexusFS:
         palace = MemPalace(str(self.project_root))
         
         if node.name == "router_bias":
-            bias = palace.get_router_bias()
-            return json.dumps({"global_router_bias": bias}, indent=2)
+            # ARCHIVED 2026-10-13 (#1906): configs/federated_dna.yaml holds Laplace noise
+            # from the retired federation, so it is no longer read or shown as data.
+            return json.dumps(
+                {"global_router_bias": "n/a", "reason": "archived_federated_dna_2026-10-13"},
+                indent=2,
+            )
             
         if "/beliefs/current/" in path:
             belief = palace.get_belief(node.name)
@@ -182,7 +187,7 @@ class NexusFS:
         if self._wisdom_vault is None:
             try:
                 from nexus.research.wisdom.wisdom_vault import WisdomVault
-                db_path = str(self.project_root / ".nexus" / "vector_db")
+                db_path = str(resolve_lancedb_root(VECTOR_DB, self.project_root))
                 self._wisdom_vault = WisdomVault(db_path=db_path)
             except Exception as e:
                 logger.debug(f"Failed to instantiate WisdomVault: {e}")
@@ -195,7 +200,7 @@ class NexusFS:
         # 1. LanceDB 跨表 FTS (Knowledge 層)
         try:
             from nexus.services.memory_repository import MemoryRepository
-            repo = MemoryRepository(self.project_root / ".nexus" / "knowledge" / "lancedb")
+            repo = MemoryRepository(resolve_lancedb_root(KNOWLEDGE, self.project_root, honor_env=False))
             tables = ["policy", "fault_lessons"]
             df = repo.search_fts_across_tables(query, tables)
             if not df.empty:

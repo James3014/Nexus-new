@@ -11,6 +11,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
+from nexus.services import agy_operation_journal as agy_journal
 from nexus.services import direct_operation_journal as direct_journal
 from nexus.services.agy_operation_journal import (
     AgyOperationJournal,
@@ -272,6 +275,85 @@ def test_review_metadata_flows_through_agy_facade_and_public_view(
     assert "private_review_secret" not in public
 
 
+def test_timeline_fields_project_through_public_view(tmp_path: Path) -> None:
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id, _ = _create(journal, tmp_path)
+
+    now = "2026-10-03T12:00:00+00:00"
+    journal.update(
+        operation_id,
+        provider_started_at=now,
+        first_stream_activity_at=now,
+        provider_stream_last_activity_at=now,
+        first_tool_activity_at=now,
+        last_progress_activity_at=now,
+        first_effect_at=now,
+        time_to_first_effect_ms=1234,
+        tool_event_count=2,
+        liveness_policy={
+            "coding_progress_required": True,
+            "provider_stall_seconds": 90.0,
+            "stream_no_progress_seconds": 120.0,
+        },
+        provider_pid=12345,
+        provider_process_state="RUNNING",
+    )
+
+    record = journal.read(operation_id)
+    public = public_operation_view(record)
+
+    assert public["provider_started_at"] == now
+    assert public["first_stream_activity_at"] == now
+    assert public["provider_stream_last_activity_at"] == now
+    assert public["first_tool_activity_at"] == now
+    assert public["last_progress_activity_at"] == now
+    assert public["first_effect_at"] == now
+    assert public["time_to_first_effect_ms"] == 1234
+    assert public["tool_event_count"] == 2
+    assert public["liveness_policy"] == {
+        "coding_progress_required": True,
+        "provider_stall_seconds": 90.0,
+        "stream_no_progress_seconds": 120.0,
+    }
+    assert public["provider_pid"] == 12345
+    assert public["provider_process_state"] == "RUNNING"
+    assert public["input_delivery_state"] == "UNKNOWN"
+    assert public["input_delivery_source"] is None
+    assert public["input_delivery_truncations"] == []
+
+
+def test_physical_effect_is_recorded_when_tool_event_count_is_zero(tmp_path: Path) -> None:
+    root = _make_source_repo(tmp_path)
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id = _create_source_operation(journal, root)
+    (root / "provider-effect.txt").write_text("effect\n", encoding="utf-8")
+
+    record = journal.mark_terminal(
+        operation_id,
+        status="COMPLETED",
+        exit_code=0,
+        cwd=str(root),
+    )
+
+    assert record["tool_event_count"] == 0
+    assert record["observed_changed_paths"] == ["provider-effect.txt"]
+    assert record["source_attribution_state"] == "ATTRIBUTED"
+
+
+def test_reconcile_checks_real_provider_pid_liveness(tmp_path: Path) -> None:
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id, _ = _create(journal, tmp_path)
+    journal.update(
+        operation_id,
+        provider_pid=999_999_999,
+        provider_process_state="RUNNING",
+    )
+
+    reconciled = journal.reconcile(operation_id)
+
+    assert reconciled["provider_process_state"] == "EXITED"
+
+
 def _git(root: Path, *args: str) -> str:
     proc = subprocess.run(
         ["git", *args],
@@ -451,6 +533,86 @@ def test_malformed_source_baseline_fails_closed(tmp_path: Path) -> None:
     assert record["source_attribution_state"] == "UNAVAILABLE"
 
 
+def test_source_state_unchanged_proof_is_exact_and_source_scoped(tmp_path: Path) -> None:
+    root = _make_source_repo(tmp_path)
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id = _create_source_operation(journal, root)
+    journal.mark_terminal(
+        operation_id,
+        status="OUTCOME_UNKNOWN",
+        exit_code=None,
+        failure_kind="TIMEOUT",
+        cwd=str(root),
+        reconciliation={
+            "result": "PROVIDER_TURN_MAY_STILL_BE_RUNNING",
+            "provider_alive_after": False,
+            "retry_permitted": False,
+        },
+    )
+
+    proof = journal.prove_source_state_unchanged(operation_id)
+
+    assert proof["proof_scope"] == "SOURCE_STATE_ONLY"
+    assert proof["base_head"] == _git(root, "rev-parse", "HEAD")
+    assert proof["source_baseline_sha256"]
+    assert proof["observed_changed_paths"] == []
+    assert proof["first_effect_at"] is None
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected"),
+    [
+        ("dirty", "SOURCE_STATE_CHANGED"),
+        ("observed-effect", "SOURCE_EFFECT_PREVIOUSLY_OBSERVED"),
+        ("missing-baseline", "SOURCE_BASELINE_UNAVAILABLE"),
+        ("attribution-unavailable", "SOURCE_ATTRIBUTION_UNAVAILABLE"),
+        ("observation-error", "SOURCE_EFFECT_OBSERVATION_UNRELIABLE"),
+        ("head-changed", "SOURCE_IDENTITY_CHANGED"),
+    ],
+)
+def test_source_state_unchanged_proof_fails_closed(
+    tmp_path: Path,
+    mutation: str,
+    expected: str,
+) -> None:
+    root = _make_source_repo(tmp_path)
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id = _create_source_operation(journal, root)
+    journal.mark_terminal(
+        operation_id,
+        status="OUTCOME_UNKNOWN",
+        exit_code=None,
+        failure_kind="TIMEOUT",
+        cwd=str(root),
+        reconciliation={
+            "result": "PROVIDER_TURN_MAY_STILL_BE_RUNNING",
+            "provider_alive_after": False,
+            "retry_permitted": False,
+        },
+    )
+    if mutation == "dirty":
+        (root / "tracked.txt").write_text("changed\n", encoding="utf-8")
+    elif mutation == "observed-effect":
+        journal.update(operation_id, first_effect_at=direct_journal.utc_now())
+    elif mutation == "missing-baseline":
+        journal.update(
+            operation_id,
+            source_baseline=None,
+            source_baseline_sha256=None,
+        )
+    elif mutation == "attribution-unavailable":
+        journal.update(operation_id, source_attribution_state="UNAVAILABLE")
+    elif mutation == "observation-error":
+        journal.update(operation_id, effect_observation_error="EFFECT_OBSERVATION_UNAVAILABLE")
+    elif mutation == "head-changed":
+        (root / "later.txt").write_text("later\n", encoding="utf-8")
+        _git(root, "add", "later.txt")
+        _git(root, "commit", "-m", "later")
+
+    with pytest.raises(direct_journal.DirectOperationJournalError, match=expected):
+        journal.prove_source_state_unchanged(operation_id)
+
+
 def test_source_baseline_is_secret_free_and_not_public(tmp_path: Path) -> None:
     root = _make_source_repo(tmp_path)
     (root / "tracked.txt").write_text("private-dirty-content\n", encoding="utf-8")
@@ -466,3 +628,354 @@ def test_source_baseline_is_secret_free_and_not_public(tmp_path: Path) -> None:
     assert record["source_attribution_state"] == "BASELINE_CAPTURED"
     assert "source_baseline" not in public
     assert public["source_baseline_sha256"] == record["source_baseline_sha256"]
+
+
+def test_reconcile_dead_wrapper_with_live_provider_pid_terminates_exact_child(
+    tmp_path: Path,
+) -> None:
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id, _ = _create(journal, tmp_path)
+    marker = str(journal.operation_dir(operation_id) / "agy.log")
+
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)", marker],
+    )
+    try:
+        journal.mark_started(operation_id, pid=999_999_998)
+        journal.update(operation_id, provider_pid=child.pid)
+
+        result = journal.reconcile(operation_id)
+
+        assert result["status"] == "OUTCOME_UNKNOWN"
+        assert result["reconciliation"]["result"] == "ORPHAN_PROVIDER_TERMINATED"
+        assert result["reconciliation"]["provider_alive_before"] is True
+        assert result["reconciliation"]["provider_alive_after"] is False
+        assert not _process_group_alive(child.pid)
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+
+
+def test_reconcile_dead_wrapper_with_reused_provider_pid_does_not_kill_unverified_process(
+    tmp_path: Path,
+) -> None:
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id, _ = _create(journal, tmp_path)
+
+    unrelated = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)", "unrelated_payload"],
+    )
+    try:
+        journal.mark_started(operation_id, pid=999_999_998)
+        journal.update(operation_id, provider_pid=unrelated.pid)
+
+        result = journal.reconcile(operation_id)
+
+        assert result["status"] == "RUNNING"
+        assert result["phase"] == "RECONCILE_REQUIRED"
+        assert result["reconciliation"]["result"] == "ORPHAN_PROCESS_GROUP_UNVERIFIED"
+        assert result["reconciliation"]["retry_permitted"] is False
+        assert unrelated.poll() is None, "Unrelated process must not be killed"
+    finally:
+        unrelated.kill()
+        unrelated.wait()
+
+
+def test_stop_operation_processes_kills_verified_group_before_leader_marker_disappears(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    op_dir = tmp_path / "agyop_test"
+    op_dir.mkdir()
+    marker = str(op_dir / "agy.log")
+    alive = {111: True, 222: True}
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        agy_journal,
+        "_process_group_process_rows",
+        lambda pgid: (
+            [
+                (111, "S", f"agy --log-file {marker}"),
+                (222, "S", "tool-child"),
+            ]
+            if pgid == 111 and (alive[111] or alive[222])
+            else []
+        ),
+    )
+    monkeypatch.setattr(
+        agy_journal,
+        "_process_alive",
+        lambda pid: bool(alive.get(pid, False)),
+    )
+    monkeypatch.setattr(
+        agy_journal,
+        "_pid_has_operation_marker",
+        lambda pid, *_args, **_kwargs: pid == 111 and alive[111],
+    )
+    monkeypatch.setattr(
+        agy_journal,
+        "_group_has_operation_marker",
+        lambda pgid, *_args, **_kwargs: pgid == 111 and alive[111],
+    )
+    monkeypatch.setattr(
+        agy_journal,
+        "_process_group_alive",
+        lambda pgid: pgid == 111 and (alive[111] or alive[222]),
+    )
+
+    def stop_group(pgid: int, **_kwargs) -> bool:
+        assert pgid == 111
+        assert alive[111] is True
+        calls.append("group")
+        alive[111] = False
+        alive[222] = False
+        return True
+
+    def stop_pid(pid: int, **_kwargs) -> bool:
+        calls.append(f"pid:{pid}")
+        alive[pid] = False
+        return True
+
+    monkeypatch.setattr(agy_journal, "_stop_process_group", stop_group)
+    monkeypatch.setattr(agy_journal, "_stop_process", stop_pid)
+
+    result = agy_journal._stop_operation_processes(
+        "agyop_test",
+        op_dir,
+        provider_pid=111,
+        provider_pgid=111,
+        grace_seconds=0.1,
+    )
+
+    assert result == (True, False, False)
+    assert calls == ["group"]
+
+
+def test_direct_journal_reconcile_keeps_operation_running_when_provider_is_alive(
+    tmp_path: Path,
+) -> None:
+    journal = direct_journal.DirectOperationJournal(
+        tmp_path / "journal",
+        schema="nexus.direct_operation.v1",
+        operation_prefix="testop_",
+    )
+    operation_id = direct_journal.new_operation_id("testop_")
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=direct_journal.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort="medium",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    journal.mark_started(operation_id, pid=999_999_998)
+
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        journal.update(operation_id, provider_pid=child.pid)
+        result = journal.reconcile(operation_id)
+
+        assert result["status"] == "RUNNING"
+        assert result["phase"] == "RECONCILE_REQUIRED"
+        assert result["finished_at"] is None
+        assert result["reconciliation"]["result"] == "PROVIDER_PROCESS_STILL_RUNNING"
+        assert result["reconciliation"]["pid_alive"] is False
+        assert result["reconciliation"]["provider_alive_after"] is True
+        assert result["reconciliation"]["retry_permitted"] is False
+    finally:
+        child.kill()
+        child.wait()
+
+
+def test_reconcile_discovers_unrecorded_provider_by_marker_and_terminates(
+    tmp_path: Path,
+) -> None:
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id, _ = _create(journal, tmp_path)
+    marker = str(journal.operation_dir(operation_id) / "agy.log")
+
+    child = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import sys, time; time.sleep(30)",
+            "--log-file",
+            marker,
+        ],
+        start_new_session=True,
+    )
+    try:
+        journal.mark_started(operation_id, pid=999_999_998)
+        # Note: provider_pid is intentionally NOT recorded prior to reconcile.
+        # Verify that _find_operation_process explicitly discovers child by marker:
+        found_pid, found_pgid = agy_journal._find_operation_process(marker, operation_id)
+        assert found_pid == child.pid
+        assert found_pgid is not None
+
+        result = journal.reconcile(operation_id)
+
+        assert result["status"] == "OUTCOME_UNKNOWN"
+        assert result["reconciliation"]["result"] == "ORPHAN_PROVIDER_TERMINATED"
+        assert result["reconciliation"]["provider_alive_before"] is True
+        assert result["reconciliation"]["provider_alive_after"] is False
+        assert result["provider_pid"] == child.pid
+        assert result["provider_pgid"] == found_pgid
+        assert not agy_journal._process_alive(child.pid)
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+
+
+def test_reconcile_leaves_operation_running_when_discovered_provider_cannot_be_stopped(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id, _ = _create(journal, tmp_path)
+    marker = str(journal.operation_dir(operation_id) / "agy.log")
+
+    monkeypatch.setattr(
+        agy_journal,
+        "_find_operation_process",
+        lambda m, operation_id=None: (88888, 88888) if marker in m else (None, None),
+    )
+    monkeypatch.setattr(
+        agy_journal,
+        "_stop_operation_processes",
+        lambda *args, **kwargs: (True, True, False),
+    )
+    monkeypatch.setattr(agy_journal, "_process_alive", lambda pid: pid == 88888)
+    monkeypatch.setattr(agy_journal, "_process_group_alive", lambda pgid: pgid == 88888)
+
+    journal.mark_started(operation_id, pid=999_999_998)
+    result = journal.reconcile(operation_id)
+
+    assert result["status"] == "RUNNING"
+    assert result["phase"] == "RECONCILE_REQUIRED"
+    assert result["reconciliation"]["result"] == "ORPHAN_PROVIDER_STILL_RUNNING"
+    assert result["reconciliation"]["provider_alive_after"] is True
+    assert result["reconciliation"]["retry_permitted"] is False
+
+
+def test_reconcile_records_reconciled_at(tmp_path: Path) -> None:
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id, _ = _create(journal, tmp_path)
+    record = journal.read(operation_id)
+    assert record["reconciled_at"] is None
+
+    journal.mark_started(operation_id, pid=999_999_999)
+    result = journal.reconcile(operation_id)
+    assert result["reconciled_at"] is not None
+    assert result["reconciliation"]["at"] == result["reconciled_at"]
+    assert result["status"] == "OUTCOME_UNKNOWN"
+
+    view = direct_journal.public_operation_view(result)
+    assert view["reconciled_at"] == result["reconciled_at"]
+
+
+def test_reconcile_outcome_unknown_dead_provider_records_reconciled_at_and_exit(
+    tmp_path: Path,
+) -> None:
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id, _ = _create(journal, tmp_path)
+    journal.mark_started(operation_id, pid=999_999_999)
+    journal.update(
+        operation_id,
+        provider_pid=999_999_998,
+        provider_process_state="RUNNING",
+    )
+    journal.mark_terminal(
+        operation_id,
+        status="OUTCOME_UNKNOWN",
+        exit_code=None,
+        failure_kind="SUPERVISOR_SIGNAL:SIGTERM",
+        cwd=str(tmp_path),
+        reconciliation={"result": "OUTCOME_UNKNOWN", "retry_permitted": False},
+    )
+    assert journal.read(operation_id)["reconciled_at"] is None
+
+    result = journal.reconcile(operation_id)
+
+    assert result["status"] == "OUTCOME_UNKNOWN"
+    assert result["reconciliation"]["provider_alive_after"] is False
+    assert result["reconciled_at"] is not None
+    assert result["reconciled_at"] == result["reconciliation"]["at"]
+    # The reconcile pass physically observed the recorded provider PID as dead.
+    assert result["provider_process_state"] == "EXITED"
+    assert result["reconciliation"]["retry_permitted"] is False
+
+
+def test_reconcile_orphan_provider_termination_records_reconciled_at_and_exit(
+    tmp_path: Path,
+) -> None:
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id, _ = _create(journal, tmp_path)
+    marker = str(journal.operation_dir(operation_id) / "agy.log")
+    wrapper_code = (
+        "import subprocess,sys;"
+        "subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)',sys.argv[1]]);"
+    )
+    wrapper = subprocess.Popen(
+        [sys.executable, "-c", wrapper_code, marker],
+        start_new_session=True,
+    )
+    wrapper.wait(timeout=3)
+    assert _process_group_alive(wrapper.pid)
+
+    try:
+        journal.mark_started(operation_id, pid=wrapper.pid)
+        journal.mark_terminal(
+            operation_id,
+            status="OUTCOME_UNKNOWN",
+            exit_code=None,
+            failure_kind="PROCESS_NOT_RUNNING_WITHOUT_TERMINAL_RECEIPT",
+            cwd=str(tmp_path),
+            reconciliation={"result": "OUTCOME_UNKNOWN", "retry_permitted": False},
+        )
+
+        result = journal.reconcile(operation_id)
+
+        assert result["reconciliation"]["result"] == "ORPHAN_PROVIDER_TERMINATED"
+        assert result["reconciliation"]["provider_alive_after"] is False
+        assert result["reconciled_at"] == result["reconciliation"]["at"]
+        assert result["provider_process_state"] == "EXITED"
+    finally:
+        if _process_group_alive(wrapper.pid):
+            os.killpg(wrapper.pid, signal.SIGKILL)
+
+
+def test_terminal_reconciliation_receipt_records_reconciled_at(tmp_path: Path) -> None:
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id, _ = _create(journal, tmp_path)
+    journal.mark_started(operation_id, pid=os.getpid())
+    journal.mark_terminal(
+        operation_id,
+        status="COMPLETED",
+        exit_code=0,
+        cwd=str(tmp_path),
+    )
+    assert journal.read(operation_id)["reconciled_at"] is None
+
+    other_id, _ = _create(journal, tmp_path)
+    journal.mark_started(other_id, pid=os.getpid())
+    at = direct_journal.utc_now()
+    result = journal.mark_terminal(
+        other_id,
+        status="OUTCOME_UNKNOWN",
+        exit_code=None,
+        failure_kind="TIMEOUT",
+        cwd=str(tmp_path),
+        reconciliation={
+            "at": at,
+            "result": "PROVIDER_TURN_MAY_STILL_BE_RUNNING",
+            "retry_permitted": False,
+        },
+    )
+
+    assert result["reconciled_at"] == at
+    assert AgyOperationJournal(tmp_path / "journal").read(other_id)["reconciled_at"] == at

@@ -1,0 +1,8 @@
+{
+  "id": "bit_width_overflow-b",
+  "bug_class": "bit_width_overflow",
+  "variant": "b",
+  "problem_statement": "unpack_id(pack_id(3, 2**45)) returns shard 35 instead of 3, so ids with large sequence numbers are corrupted. Expected: a 16-bit shard and a 48-bit sequence round-trip through pack_id and unpack_id, and an out-of-range sequence raises ValueError.",
+  "target_file": "ids.py",
+  "repro_file": "repro.py"
+}

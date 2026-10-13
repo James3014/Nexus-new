@@ -1,0 +1,6 @@
+[submodule "packages/core"]
+	path = packages/core
+	url = .
+[submodule "repro/astropy__astropy-13398/astropy"]
+	path = repro/astropy__astropy-13398/astropy
+	url = .

@@ -39,8 +39,9 @@ def _sha256_json(obj: object) -> str:
 
 
 def _invoke_planner(task_desc: str) -> dict:
+    from nexus.core.repo_root import REPO_ROOT
     from nexus.engine.capability_planner import CapabilityPlanner
-    planner = CapabilityPlanner()
+    planner = CapabilityPlanner(shared_playbook_root=REPO_ROOT)
     os.environ["NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR"] = "1"
     os.environ["NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY"] = "localheal_pipeline"
     os.environ["NEXUS_LOCAL_MODEL_CALL_ALLOWED"] = "1"

@@ -82,3 +82,5 @@ Physical file existence has been checked for all mapped paths. Caller and author
 - [GLOSSARY](GLOSSARY.md) - term definitions
 - [System Overview](System Overview.md) - architecture and three worlds
 - [CURRENT_STATE](CURRENT_STATE.md) - what is proven
+- [Diff - Legacy Monolith vs Split Repo Family (2026-10-12)](../08_Diffs/Diff - Legacy Monolith vs Split Repo Family (2026-10-12).md) - where each capability lives after the split and the four open regressions
+- [CAPABILITY_EVIDENCE_LEDGER_2026-10-12](../04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md) - which headline numbers may be cited

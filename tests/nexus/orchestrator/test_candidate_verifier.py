@@ -154,7 +154,7 @@ def test_python_c_verifier_rejects_extra_arguments_and_non_python_executables(tm
         CandidateVerifier._build_verifier_request(
             "python3 -c 'assert 1 == 1\nassert 2 == 2' extra", str(tmp_path)
         )
-    with pytest.raises(ValueError, match="invalid verifier argument"):
+    with pytest.raises(ValueError, match="shell and shell-forwarding executables"):
         CandidateVerifier._build_verifier_request(
             "sh -c 'assert 1 == 1\nassert 2 == 2'", str(tmp_path)
         )
@@ -727,3 +727,90 @@ def test_candidate_verifier_fails_closed_when_verifier_mutates_candidate_state(s
     assert receipt.verified is False
     assert receipt.candidate_commit_allowed is False
     assert "verifier_mutated_candidate_state" in receipt.failure_reasons
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "sh -c 'echo ok; touch PWNED && exit 0'",
+        "bash -c 'git -C . push origin HEAD:main || true'",
+        "zsh -c 'a | b'",
+        "env sh -c 'true'",
+        "xargs echo",
+    ],
+)
+def test_verifier_rejects_shell_executables_and_c_exemption_is_python_only(tmp_path, command):
+    with pytest.raises(ValueError):
+        CandidateVerifier._build_verifier_request(command, str(tmp_path))
+
+
+def test_c_exemption_not_granted_to_non_python_executable(tmp_path):
+    with pytest.raises(ValueError, match="shell metacharacters"):
+        CandidateVerifier._build_verifier_request("git -c 'a;b' status", str(tmp_path))
+    # honest positive path: python -c with a pipeline-looking literal still works
+    req = CandidateVerifier._build_verifier_request("python3 -c 'print(1 | 2)'", str(tmp_path))
+    assert req.argv[0] == "-c"
+
+
+def test_empty_verifier_manifest_fails_closed(tmp_path):
+    from nexus.orchestrator.task_contract import SelfHostedTaskContract
+
+    kwargs = dict(
+        task_id="t-empty", objective="x", controller_revision="a" * 40, target_base_revision="a" * 40,
+        controller_repo_root="/tmp/ctrl-x", target_repo_root="/tmp/tgt-x", target_worktree_root="/tmp/wt-x",
+        allowed_files=["src/"],
+    )
+    with pytest.raises(ValueError, match="verifier_commands must be non-empty"):
+        SelfHostedTaskContract(verifier_commands=[], **kwargs)
+    with pytest.raises(ValueError, match="verifier_commands must be non-empty"):
+        SelfHostedTaskContract(**kwargs)
+    contract = SelfHostedTaskContract(verifier_commands=["python3 -c pass"], **kwargs)
+    CandidateVerifier.validate_static_contract(contract, str(tmp_path))
+    # Defensive sink check: an unvalidated empty manifest must not pass vacuously.
+    empty = contract.model_copy(update={"verifier_commands": []})
+    with pytest.raises(ValueError):
+        CandidateVerifier.validate_static_contract(empty, str(tmp_path))
+    passed, evidence, failures = CandidateVerifier._run_verifiers(empty, str(tmp_path), None)
+    assert passed is False and evidence == () and failures == ["verifier_manifest_empty"]
+
+
+# --- #1753: forwarders/alias cannot reach a shell ----------------------------
+_NOSHELL_COMMANDS = [
+    "nice sh -c 'touch PWNED'",
+    "/usr/bin/time sh -c 'touch PWNED'",
+    "find . -maxdepth 0 -exec sh -c 'touch PWNED' {} +",
+    "git -c 'alias.x=!touch PWNED' x",
+    "env git -C . push",
+    "/bin/sh -c 'touch PWNED'",
+    "busybox sh -c 'touch PWNED'",
+    "timeout 5 sh -c 'touch PWNED'",
+]
+
+
+@pytest.mark.parametrize("command", _NOSHELL_COMMANDS)
+def test_verifier_cannot_reach_shell_via_forwarder(tmp_path, command):
+    from nexus.executors.cli_worker import run_cli_worker
+
+    with pytest.raises(ValueError):
+        run_cli_worker(CandidateVerifier._build_verifier_request(command, str(tmp_path)))
+    assert not (tmp_path / "PWNED").exists()
+
+
+@pytest.mark.parametrize("command", ["nice sh -c 'x'", "env git status", "sudo ls"])
+def test_verifier_forwarder_error_message_preserved(tmp_path, command):
+    with pytest.raises(ValueError, match="shell and shell-forwarding executables are not allowed"):
+        CandidateVerifier._build_verifier_request(command, str(tmp_path))
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "/bin/bash -c 'touch PWNED'",
+        "dash -c 'touch PWNED'",
+        "nohup sh -c 'touch PWNED'",
+        "BASH -c 'touch PWNED'",
+    ],
+)
+def test_verifier_rejects_additional_shell_spellings(tmp_path, command):
+    with pytest.raises(ValueError):
+        CandidateVerifier._build_verifier_request(command, str(tmp_path))

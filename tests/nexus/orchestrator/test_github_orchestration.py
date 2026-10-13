@@ -1256,3 +1256,31 @@ def test_governed_evidence_projection_rejects_explicit_non_governed_card():
         match="UNSUPPORTED_LEGACY_CONTRACT_GENERATION",
     ):
         build_governed_orchestration_evidence(**values)
+
+
+@pytest.mark.parametrize(
+    "verdict",
+    [
+        "Verdict: REJECT. I do not accept candidate; blockers: 3 failing tests",
+        "Verdict: **BLOCKERS: 2**",
+        "Verdict: not ACCEPT_CANDIDATE",
+        "Verdict: **BLOCKERS: none**\nVerdict: REJECT",
+        "No verdict line, but accept candidate and blockers: none appear in prose",
+    ],
+)
+def test_legacy_acceptance_requires_one_exact_accepting_verdict_line(verdict):
+    values = _compat_projection_inputs()
+    values["acceptance_comment_body"] = values["acceptance_comment_body"].replace(
+        "Verdict: **BLOCKERS: none**", verdict
+    )
+    with pytest.raises(GovernedEvidenceProjectionError, match="INDEPENDENT_ACCEPTANCE_MISSING"):
+        build_governed_orchestration_evidence(**values)
+
+
+@pytest.mark.parametrize("verdict", ["Verdict: ACCEPT_CANDIDATE", "verdict: `blockers: none`."])
+def test_legacy_acceptance_accepts_exact_tokens(verdict):
+    values = _compat_projection_inputs()
+    values["acceptance_comment_body"] = values["acceptance_comment_body"].replace(
+        "Verdict: **BLOCKERS: none**", verdict
+    )
+    assert build_governed_orchestration_evidence(**values).candidate.reviewer == "review-session-1"

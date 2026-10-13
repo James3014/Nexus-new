@@ -1,0 +1,8 @@
+{
+  "id": "mutate_while_iterating-a",
+  "bug_class": "mutate_while_iterating",
+  "variant": "a",
+  "problem_statement": "drop_expired() removes some expired records but not all. For a(5), b(5), c(20), d(1), e(30) at now=10 it reports ['a', 'd'] as removed and leaves b, which is also expired, in the list.",
+  "target_file": "expiry.py",
+  "repro_file": "repro.py"
+}

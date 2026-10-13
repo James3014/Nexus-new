@@ -15,7 +15,7 @@ from nexus.learning import learning_closure_effectiveness as legacy_closure
 from nexus.learning import learning_episode_projection as legacy_projection
 from nexus.learning import outcome_memory as legacy_memory
 
-CANONICAL_LEARNING_COMMIT = "d09f05b942f35236562ae26e7b718d111368b0b1"
+CANONICAL_LEARNING_COMMIT = "a48bd876b758069f4dd15c24d0d32f1f2486d319"
 
 
 def test_forwarding_facades_bind_canonical_symbol_identity() -> None:

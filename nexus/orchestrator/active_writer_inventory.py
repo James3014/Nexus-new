@@ -32,7 +32,7 @@ from nexus.orchestrator.worktree_manager import (
     CONFLICT_STALE,
     CONFLICT_UNKNOWN,
 )
-from nexus.services.agy_operation_journal import AgyOperationJournal
+from nexus.services.agy_operation_journal import AgyOperationJournal, AgyOperationJournalError
 from nexus.services.direct_operation_journal import (
     ACTIVE_STATES,
     TERMINAL_STATES,
@@ -247,6 +247,26 @@ class ActiveWriterInventoryCollector:
             reconcil_res = reconcil.get("result") if isinstance(reconcil, Mapping) else None
 
             if status == "OUTCOME_UNKNOWN" or reconcil_res == "OUTCOME_UNKNOWN":
+                if isinstance(journal, AgyOperationJournal):
+                    try:
+                        resolution = journal.read_effect_resolution(entry.name, record=data)
+                    except AgyOperationJournalError as exc:
+                        return (
+                            ActiveWriterInventoryResult(
+                                active_writers=[],
+                                complete=False,
+                                disposition=CONFLICT_RECONCILE_REQUIRED,
+                                reason=(
+                                    "ACTIVE_WRITER_EFFECT_RESOLUTION_INVALID: "
+                                    f"operation {entry.name}: {exc}"
+                                ),
+                                conflicting_writers=[entry.name],
+                                sources_scanned=(source_name,),
+                            ),
+                            [],
+                        )
+                    if resolution is not None:
+                        continue
                 return (
                     ActiveWriterInventoryResult(
                         active_writers=[],

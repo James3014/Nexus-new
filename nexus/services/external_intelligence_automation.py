@@ -405,7 +405,9 @@ class ExternalIntelligenceAutomation:
         c_runtime: AdaptiveWorkerFanoutRuntime | Any,
         d_runtime: ExternalIntelligenceClosureRuntime | Any,
         capacity_factory: Callable[[Mapping[str, Any]], CapacityLease] | None = None,
+        workforce_consumer: str = "",
     ):
+        self.workforce_consumer = workforce_consumer
         self.repository_root = Path(repository_root).expanduser().resolve()
         self.state_store = state_store
         self.intelligence_store = intelligence_store
@@ -716,6 +718,7 @@ class ExternalIntelligenceAutomation:
                 allowed_files=allowed_files,
                 verifier_command=verifier_command,
                 task_card_identity=identity,
+                workforce_consumer=self.workforce_consumer,
             )
         except (TypeError, ValueError, RuntimeError) as exc:
             raise AutomationError(f"CANONICAL_WORKFORCE_BINDING_INVALID:{exc}") from exc

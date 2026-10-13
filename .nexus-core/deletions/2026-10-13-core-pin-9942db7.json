@@ -1,0 +1,27 @@
+{
+  "archive": {
+    "commit": "3976f1d0fc3e81870132cca4b7c7399a3b2e8cd5",
+    "ref": "refs/heads/archive/2026-10-13-second-batch"
+  },
+  "companion_changes": [
+    {
+      "after_oid": "5c6654639699d55c8178cab3970993e52c493b5c",
+      "change_type": "MODIFY",
+      "path": ".github/workflows/nexus-core-issue-completion.yml"
+    },
+    {
+      "after_oid": "73f05adeedbd322072be5b8a51a4b4cbabfb9145",
+      "change_type": "MODIFY",
+      "path": "nexus/orchestrator/canonical_core_transport.py"
+    },
+    {
+      "after_oid": "a6d0889b8cd26b6b50c5a2e38e3d26a718e19d43",
+      "change_type": "MODIFY",
+      "path": "tests/nexus/orchestrator/test_canonical_core_transport.py"
+    }
+  ],
+  "deletions": [],
+  "id": "2026-10-13-core-pin-9942db7",
+  "reason": "Owner-authorized change of protected path .github/workflows/nexus-core-issue-completion.yml: move the nexus-core gate pins from 85e2ffd to 9942db7 (nexus-core #249, Issue #243 merge-base ancestry, #246 diagnostics) with CANONICAL_CORE_REVISION and its test constant; no deletions; tracking Issue #1953",
+  "schema": "nexus.core.deletion-manifest.v1"
+}

@@ -1895,7 +1895,10 @@ def test_exact_current_wrapper_bytes_are_the_only_wrapper_rollback_identity():
         ),
         pytest.param(
             lambda value: value["ProgramArguments"].__setitem__(
-                2, value["ProgramArguments"][2].replace(contract.STATE_DIR, "/tmp/state")
+                2,
+                value["ProgramArguments"][2].replace(
+                    contract.LEGACY_ROLLBACK_STATE_DIR, "/tmp/state"
+                ),
             ),
             id="state",
         ),

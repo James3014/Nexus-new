@@ -1,0 +1,8 @@
+{
+  "id": "mutate_while_iterating-b",
+  "bug_class": "mutate_while_iterating",
+  "variant": "b",
+  "problem_statement": "expire_sessions() crashes with RuntimeError ('dictionary changed size during iteration') as soon as a session has expired. Expected: expired tokens are deleted from the store and returned sorted, and live sessions remain.",
+  "target_file": "sessions.py",
+  "repro_file": "repro.py"
+}

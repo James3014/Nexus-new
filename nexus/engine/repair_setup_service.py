@@ -20,13 +20,11 @@ class RepairSetupService:
         project_root: Path,
         hardened_validator: Any,
         swarm_planner: Any,
-        federation: Any,
         detect_verify_commands_fn: Callable[[Path], list[str]] = _auto_detect_verify_commands,
     ):
         self.project_root = Path(project_root)
         self.hardened_validator = hardened_validator
         self.swarm_planner = swarm_planner
-        self.federation = federation
         self.detect_verify_commands_fn = detect_verify_commands_fn
 
     def prepare(self, *, state: Any, target_env: TargetEnvContext | None = None) -> dict[str, Any]:
@@ -61,15 +59,6 @@ class RepairSetupService:
             logger.info("🛰️ [Phase P] Orchestrated %d nodes in Swarm Graph.", len(ready))
             v_path = self.swarm_planner.create_virtual_workspace(state.task_id)
             logger.info("🛰️ [Swarm] Virtual Workspace deployed at: %s", v_path)
-
-        if self.federation.quorum_check():
-            selected_node = self.federation.select_node()
-            logger.info(
-                "🛰️ [NSP:Sensing] Quorum PASS. Transition: ISOLATED -> DISPATCHED (Node: %s)",
-                selected_node or "all",
-            )
-        else:
-            logger.warning("🛑 [NSP:Sensing] Quorum FAIL. Transition: ISOLATED -> FALLBACK_LOCAL")
 
         verify_cmds = state.metadata.get("verify_commands")
         if not verify_cmds:

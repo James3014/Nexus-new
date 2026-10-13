@@ -11,6 +11,7 @@ import io
 import json
 import os
 import re
+import signal
 import subprocess  # nosec B404
 import sys
 import tarfile
@@ -18,21 +19,29 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterator, Mapping, Sequence
 
 from nexus.research.hybrid_replication_pipeline import (
     FrozenStackOutcome,
     RawRouteResult,
     TaskSnapshot,
 )
+from nexus.research.hybrid_replication_prospective import (
+    ProspectiveExecutionGuard,
+)
 from nexus.services.direct_operation_journal import TERMINAL_STATES
 
 EXACT_AGY_MODEL = "gemini-3.8-flash-medium"
 CANONICAL_AGY_DISPATCH_NAME = "nexus-agy-dispatch"
-CANONICAL_AGY_DISPATCH_SHA256 = "238979e3e83d3868deba1f53faf73313d0f62379d52894e9ca0ec54bc519d63f"
+# Defaults for new bindings only; the frozen binding file is the validation authority.
+CANONICAL_AGY_DISPATCH_SHA256 = "cd2b6a2bfdd4466434da529a5b6bb47914131c0fc4cb6c305c1a52a016c71037"
+CANONICAL_AGY_EXECUTION_GENERATION = "AGY_GEMINI_3_8_FLASH_MEDIUM_V11"
+AGY_EXECUTION_GENERATION_PATTERN = re.compile(r"^AGY_[A-Z0-9_]+_V\d+$")
 AGY_PROVIDER_TERMINAL_GRACE_SECONDS = 30.0
+AGY_TERMINATION_GRACE_SECONDS = 5.0
 MAX_AGY_PROVIDER_OUTPUT_BYTES = 5_000_000
 AGY_RAW_RECEIPT_SCHEMA = "nexus.hybrid_replication.agy_live_raw.v1"
 AGY_SHADOW_CANDIDATE_SCHEMA = "nexus.hybrid_replication.agy_shadow_candidate.v1"
@@ -51,25 +60,82 @@ FROZEN_RECEIPT_SHA256S = {
     "dm1": "d85acab617dca8e2eab04c0e63246b41e1382ca0871607a96a424828bb05be99",
     "re2": "ae1414c73107140b234d38178165769faad9d33f217a3b1f8064953e144efc63",
 }
+FROZEN_RECEIPT_DURABLE_AUTHORITIES = {
+    "r3": {
+        "schema": "nexus.hybrid_replication.frozen_receipt_authority.v1",
+        "repository": "James3014/Nexus-new",
+        "issue": 1185,
+        "comment_id": 5887636459,
+        "comment_url": "https://github.com/James3014/Nexus-new/issues/1185#issuecomment-5887636459",
+        "author_login": "James3014",
+        "created_at": "2026-09-29T09:39:50Z",
+        "updated_at": "2026-09-29T09:39:50Z",
+        "comment_body_sha256": "7c7bb09ef46700f69dae6d14986f0313c57282325ecbb0b5f6e336da2b319729",
+        "artifact_name": "R3_PRIMARY_FINAL_24_OF_24.json",
+        "subject_sha256": "77dee0030b022240ec8b23c388b0a957dc70878dc28ebae03d0d4d720402db37",
+    },
+    "d2": {
+        "schema": "nexus.hybrid_replication.frozen_receipt_authority.v1",
+        "repository": "James3014/Nexus-new",
+        "issue": 1201,
+        "comment_id": 5890070954,
+        "comment_url": "https://github.com/James3014/Nexus-new/issues/1201#issuecomment-5890070954",
+        "author_login": "James3014",
+        "created_at": "2026-09-29T12:13:40Z",
+        "updated_at": "2026-09-29T12:13:40Z",
+        "comment_body_sha256": "271bc095c407b5272a40c4e0c643f5c341ad3afaeacf26ebc011fba86698bdb4",
+        "artifact_name": "D2_FINAL_RECEIPT.json",
+        "subject_sha256": "4873ae4c96b63a0306c5dcc3afff039ab8df8ff6c7ee7070382eebb4d4268e79",
+    },
+}
 JEV_ENDPOINT = "https://api.typesafe.ai/v1/systemone"
 DM1_TOP_PROBABILITY_MIN = 0.70
 DM1_MARGIN_MIN = 0.30
-DEFAULT_LIVE_BINDING = Path(
-    "/Users/james/nexus-hybrid-deployment-replication-20260930/live/LIVE_BINDING.json"
+_DEFAULT_REPO_NAMES = (
+    "Nexus-new",
+    "devspace",
+    "nexus-core",
+    "nexus-learning",
+    "nexus-open-swe-runtime",
+    "repository-intelligence-engine",
+    "nexus-runtime",
+    "nexus-opencli-reviewer",
 )
 
-DEFAULT_REPO_ROOTS = {
-    "James3014/Nexus-new": "/Users/james/Workspace/Nexus-new",
-    "James3014/devspace": "/Users/james/Workspace/devspace",
-    "James3014/nexus-core": "/Users/james/Workspace/nexus-core",
-    "James3014/nexus-learning": "/Users/james/Workspace/nexus-learning",
-    "James3014/nexus-open-swe-runtime": "/Users/james/Workspace/nexus-open-swe-runtime",
-    "James3014/repository-intelligence-engine": (
-        "/Users/james/Workspace/repository-intelligence-engine"
-    ),
-    "James3014/nexus-runtime": "/Users/james/Workspace/nexus-runtime",
-    "James3014/nexus-opencli-reviewer": "/Users/james/Workspace/nexus-opencli-reviewer",
-}
+
+def resolve_workspace_root(env: Mapping[str, str] | None = None, home: Path | None = None) -> Path:
+    """Workspace root: NEXUS_WORKSPACE_ROOT if set, else ``<home>/Workspace``."""
+    env = os.environ if env is None else env
+    override = env.get("NEXUS_WORKSPACE_ROOT")
+    if override:
+        return Path(override)
+    return (Path.home() if home is None else home) / "Workspace"
+
+
+def resolve_live_binding(env: Mapping[str, str] | None = None, home: Path | None = None) -> Path:
+    """Live binding: NEXUS_HYBRID_LIVE_BINDING if set, else the home-relative default."""
+    env = os.environ if env is None else env
+    override = env.get("NEXUS_HYBRID_LIVE_BINDING")
+    if override:
+        return Path(override)
+    return (
+        (Path.home() if home is None else home)
+        / "nexus-hybrid-deployment-replication-20260930"
+        / "live"
+        / "LIVE_BINDING.json"
+    )
+
+
+def resolve_default_repo_roots(
+    env: Mapping[str, str] | None = None, home: Path | None = None
+) -> dict[str, str]:
+    root = resolve_workspace_root(env, home)
+    return {f"James3014/{name}": str(root / name) for name in _DEFAULT_REPO_NAMES}
+
+
+DEFAULT_LIVE_BINDING = resolve_live_binding()
+
+DEFAULT_REPO_ROOTS = resolve_default_repo_roots()
 
 _PATH_RE = re.compile(
     r"(?<![A-Za-z0-9_.-])((?:[A-Za-z0-9_.-]+/)+"
@@ -128,45 +194,6 @@ def extract_literal_paths(text: str) -> tuple[str, ...]:
         if path not in found:
             found.append(path)
     return tuple(found)
-
-
-def classify_frozen_task_family(*, title: str, body: str) -> str:
-    text = f"{title}\n{body}".lower()
-    a_markers = (
-        "perform dependency discovery",
-        "direct imported modules",
-        "repository files that directly import",
-        "public top-level functions/classes",
-    )
-    if all(marker in text for marker in a_markers):
-        return "A"
-
-    b_markers = (
-        "repository localization",
-        "identify and rank",
-        "rank the supplied candidate",
-        "rank supplied candidate",
-        "which candidate file",
-        "which file",
-        "locate the file",
-        "localize the file",
-        "localise the file",
-    )
-    mutation_markers = (
-        "implement ",
-        "fix ",
-        "repair ",
-        "change ",
-        "add regression",
-        "modify ",
-        "delete ",
-        "refactor ",
-    )
-    if any(marker in text for marker in b_markers) and not any(
-        marker in text for marker in mutation_markers
-    ):
-        return "B"
-    return "C"
 
 
 def build_d2_candidate_packet(
@@ -276,21 +303,9 @@ def resolve_ground_truth_payload(
 
 
 def _snapshot_from_capture_payload(payload: Mapping[str, Any]) -> TaskSnapshot:
-    body = gzip.decompress(
-        base64.b64decode(str(payload["body_gzip_base64"]).encode("ascii"))
-    ).decode("utf-8")
-    return TaskSnapshot.create(
-        repository=str(payload["repository"]),
-        issue_number=int(payload["issue_number"]),
-        created_at=str(payload["created_at"]),
-        captured_at=str(payload["captured_at"]),
-        issue_updated_at=str(payload["issue_updated_at"]),
-        title=str(payload["title"]),
-        body=body,
-        pre_implementation_revision=str(payload["pre_implementation_revision"]),
-        default_branch=str(payload["default_branch"]),
-        source_event_id=str(payload["source_event_id"]),
-    )
+    # Keep the captured body_gzip_base64 and hashes: re-gzipping locally yields different
+    # bytes than the capture workflow's zlib and breaks capture identity.
+    return TaskSnapshot.from_capture_payload(payload)
 
 
 def _frozen_receipt_hashes(
@@ -305,21 +320,45 @@ def _frozen_receipt_hashes(
         row = rows.get(name)
         if not isinstance(row, Mapping):
             raise ValueError(f"frozen_receipt_binding_invalid:{name}")
-        path = Path(str(row.get("path") or ""))
-        if not path.is_file():
-            raise ValueError(f"frozen_receipt_missing:{name}:{path}")
-        actual[name] = _sha256_file(path)
         declared[name] = str(row.get("sha256") or "")
+        path = Path(str(row.get("path") or ""))
+        expected_authority = FROZEN_RECEIPT_DURABLE_AUTHORITIES.get(name)
+        authority = row.get("durable_authority")
+
+        if authority is not None:
+            if expected_authority is None:
+                raise ValueError(f"frozen_receipt_authority_undeclared:{name}")
+            if not isinstance(authority, Mapping) or dict(authority) != expected_authority:
+                raise ValueError(f"frozen_receipt_authority_mismatch:{name}")
+            if expected_authority["subject_sha256"] != FROZEN_RECEIPT_SHA256S[name]:
+                raise ValueError(f"frozen_receipt_authority_subject_mismatch:{name}")
+
+        if path.is_file():
+            actual[name] = _sha256_file(path)
+            continue
+        if expected_authority is None:
+            raise ValueError(f"frozen_receipt_missing:{name}:{path}")
+        if authority is None:
+            raise ValueError(f"frozen_receipt_authority_missing:{name}")
+        actual[name] = str(expected_authority["subject_sha256"])
     return actual, declared
 
 
-def _load_binding(path: Path, *, require_activation: bool = True) -> dict[str, Any]:
+def _load_binding(
+    path: Path,
+    *,
+    require_activation: bool = True,
+    readiness_control: bool = False,
+) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if payload.get("schema") != "nexus.hybrid_replication.live_binding.v1":
         raise ValueError("live_binding_schema_mismatch")
-    if require_activation and payload.get("activation_state") != "AUTOMATIC_CAPTURE_READY":
-        raise ValueError("live_binding_not_activated")
     if require_activation:
+        expected_state = (
+            "READINESS_CONTROL_PENDING" if readiness_control else "AUTOMATIC_CAPTURE_READY"
+        )
+        if payload.get("activation_state") != expected_state:
+            raise ValueError("live_binding_not_activated")
         actual_receipts, declared_receipts = _frozen_receipt_hashes(payload)
         if actual_receipts != FROZEN_RECEIPT_SHA256S:
             raise ValueError("frozen_receipt_physical_identity_drift")
@@ -339,9 +378,17 @@ def _load_binding(path: Path, *, require_activation: bool = True) -> dict[str, A
         if provider == "agy":
             if str(online.get("requested_model") or "") != EXACT_AGY_MODEL:
                 raise ValueError("agy_requested_model_identity_drift")
-            if str(online.get("execution_generation") or "") != "AGY_GEMINI_3_8_FLASH_MEDIUM_V1":
+            generation = online.get("execution_generation")
+            if not isinstance(generation, str) or not AGY_EXECUTION_GENERATION_PATTERN.fullmatch(
+                generation
+            ):
                 raise ValueError("agy_execution_generation_identity_drift")
-            resolve_canonical_agy_dispatch_path(payload)
+            try:
+                resolve_canonical_agy_dispatch_path(payload)
+            except RuntimeError as exc:
+                if str(exc).startswith("agy_dispatch_hash_drift:"):
+                    raise ValueError("agy_dispatch_physical_identity_drift") from exc
+                raise
         elif provider == "codex" or "codex_executable_sha256" in online:
             if str(online.get("codex_executable_sha256") or "") != CODEX_EXECUTABLE_SHA256:
                 raise ValueError("codex_declared_executable_identity_drift")
@@ -445,14 +492,12 @@ def build_agy_identity_preflight_receipt(
         dict(frozen_receipt_sha256s) == FROZEN_RECEIPT_SHA256S
         and dict(declared_frozen_receipt_sha256s) == FROZEN_RECEIPT_SHA256S
     )
-    transport_identity_match = (
-        agy_dispatch_sha256 == CANONICAL_AGY_DISPATCH_SHA256
-        and expected_agy_dispatch_sha256 == CANONICAL_AGY_DISPATCH_SHA256
-    )
+    transport_identity_match = agy_dispatch_sha256 == expected_agy_dispatch_sha256
+
     strong_online_identity_match = (
         requested_provider == "agy"
         and requested_model == EXACT_AGY_MODEL
-        and execution_generation == "AGY_GEMINI_3_8_FLASH_MEDIUM_V1"
+        and bool(AGY_EXECUTION_GENERATION_PATTERN.fullmatch(execution_generation))
     )
     provider_drift = jev_resolved_model != expected_jev_resolved_model
     generation_change = execution_generation != previous_execution_generation
@@ -679,6 +724,7 @@ def _jev_request(
     snapshot: TaskSnapshot,
     packet: Mapping[str, Any],
     binding: Mapping[str, Any],
+    prospective_guard: ProspectiveExecutionGuard | None = None,
 ) -> tuple[dict[str, Any], int, float]:
     catalog = list(packet["candidate_catalog"])
     criteria = {
@@ -719,6 +765,14 @@ def _jev_request(
             }
         },
     }
+
+    if prospective_guard is not None:
+        prospective_guard.ensure_synchronous_effect_start(
+            slot="jev",
+            effect_identity_sha256=_sha256_bytes(_canonical_bytes(payload)),
+            provider="typesafe",
+            model=str(binding["jev"]["requested_model"]),
+        )
 
     key = _jev_key(binding)
     attempts: list[dict[str, Any]] = []
@@ -991,13 +1045,9 @@ def _run_codex_candidate(
     with tempfile.TemporaryDirectory(prefix="nexus-hybrid-replication-c-") as temp:
         root = Path(temp)
         source = root / "source"
-        added = _run(
-            ["git", "worktree", "add", "--detach", str(source), revision],
-            cwd=repo,
-            timeout=60,
-        )
-        if added.returncode != 0:
-            raise RuntimeError(f"shadow_worktree_add_failed:{added.stderr.strip()}")
+        # Isolated clone (not a worktree): a worktree shares the parent's refs and
+        # object store, so the agent could read branches that postdate the revision.
+        _prepare_shadow_checkout(repo=repo, revision=revision, source=source)
         try:
             schema_path = root / "schema.json"
             output_path = root / "last.json"
@@ -1113,12 +1163,7 @@ def _run_codex_candidate(
                 wall,
             )
         finally:
-            _run(
-                ["git", "worktree", "remove", "--force", str(source)],
-                cwd=repo,
-                timeout=60,
-            )
-            _run(["git", "worktree", "prune"], cwd=repo, timeout=30)
+            pass
 
 
 def _b_fallback_prompt(
@@ -1161,8 +1206,8 @@ def _expected_agy_dispatch_sha256(binding: Mapping[str, Any] | None) -> str:
         if expected is None and isinstance(agy, Mapping):
             expected = agy.get("dispatch_sha256")
     value = str(expected or CANONICAL_AGY_DISPATCH_SHA256)
-    if value != CANONICAL_AGY_DISPATCH_SHA256:
-        raise RuntimeError(f"agy_dispatch_generation_drift:{value}:{CANONICAL_AGY_DISPATCH_SHA256}")
+    if not re.fullmatch(r"[0-9a-f]{64}", value):
+        raise RuntimeError(f"agy_dispatch_declared_sha256_malformed:{value}")
     return value
 
 
@@ -1297,6 +1342,7 @@ def evaluate_agy_receipt(
     wall_time_seconds: float = 0.0,
     schema: str = AGY_RAW_RECEIPT_SCHEMA,
     extra_checks: Mapping[str, Any] | None = None,
+    expected_dispatch_sha256: str | None = None,
 ) -> dict[str, Any]:
     stdout_bytes = stdout_path.read_bytes() if (stdout_path and stdout_path.is_file()) else b""
     stderr_bytes = stderr_path.read_bytes() if (stderr_path and stderr_path.is_file()) else b""
@@ -1310,10 +1356,12 @@ def evaluate_agy_receipt(
 
     if dispatch_path.name == "agy":
         status = "UNEXPECTED_TRANSPORT_IDENTITY"
-    elif dispatch_sha256 != CANONICAL_AGY_DISPATCH_SHA256:
+    elif dispatch_sha256 != (expected_dispatch_sha256 or CANONICAL_AGY_DISPATCH_SHA256):
         status = "UNEXPECTED_TRANSPORT_IDENTITY"
     elif output_oversized:
         status = "OVERSIZED_PROVIDER_OUTPUT_REJECTED"
+    elif error_reason and error_reason.startswith("SPAWN_FAILED:"):
+        status = "SPAWN_FAILED"
     elif error_reason == "MISSING_OR_CORRUPT_JOURNAL" or record is None:
         status = "MISSING_OR_CORRUPT_JOURNAL" if not timed_out else "TIMEOUT"
     elif timed_out:
@@ -1445,6 +1493,85 @@ def seal_shadow_candidate(
     }
 
 
+def _agy_operation_process_groups(*records: Mapping[str, Any] | None) -> tuple[int, ...]:
+    """Process groups owned by one dispatcher operation (supervisor and provider)."""
+    own = os.getpgrp()
+    groups: list[int] = []
+    for record in records:
+        if not isinstance(record, Mapping):
+            continue
+        pid = record.get("pid")
+        if isinstance(pid, int) and pid > 1:
+            try:
+                leads_group = os.getpgid(pid) == pid
+            except OSError:
+                leads_group = False
+            # The supervisor is spawned with start_new_session, so it leads its group.
+            if leads_group:
+                groups.append(pid)
+        provider_pgid = record.get("provider_pgid")
+        if isinstance(provider_pgid, int) and provider_pgid > 1:
+            groups.append(provider_pgid)
+    return tuple(dict.fromkeys(g for g in groups if g != own))
+
+
+def _signal_groups(groups: Sequence[int], sig: int) -> None:
+    for pgid in groups:
+        try:
+            os.killpg(pgid, sig)
+        except (ProcessLookupError, PermissionError):
+            continue
+
+
+def _groups_alive(groups: Sequence[int]) -> bool:
+    for pgid in groups:
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            continue
+        except PermissionError:
+            pass  # macOS reports EPERM for zombie-only groups; ps decides below
+        # A group holding only zombies is gone for our purposes.
+        rows = _run(["ps", "-A", "-o", "pgid=,stat="], timeout=15).stdout.splitlines()
+        for row in rows:
+            parts = row.split()
+            if len(parts) >= 2 and parts[0] == str(pgid) and not parts[1].startswith("Z"):
+                return True
+    return False
+
+
+def terminate_agy_operation(
+    operation_json: Path,
+    *,
+    initial: Mapping[str, Any] | None = None,
+    grace_seconds: float = AGY_TERMINATION_GRACE_SECONDS,
+) -> bool:
+    """SIGTERM then SIGKILL the dispatcher/provider process groups; True once all are gone.
+
+    Called when the harness deadline passes so nothing keeps writing to the source
+    tree after the candidate is sealed (#1216 V12: deadline must be total).
+    """
+    current: dict[str, Any] | None = None
+    try:
+        loaded = json.loads(operation_json.read_text(encoding="utf-8"))
+        current = loaded if isinstance(loaded, dict) else None
+    except (OSError, json.JSONDecodeError):
+        current = None
+    groups = _agy_operation_process_groups(current, initial)
+    if not groups:
+        return True
+    _signal_groups(groups, signal.SIGTERM)
+    end = time.monotonic() + max(0.0, grace_seconds)
+    while time.monotonic() < end and _groups_alive(groups):
+        time.sleep(0.05)
+    if _groups_alive(groups):
+        _signal_groups(groups, signal.SIGKILL)
+        end = time.monotonic() + 5.0
+        while time.monotonic() < end and _groups_alive(groups):
+            time.sleep(0.05)
+    return not _groups_alive(groups)
+
+
 def _run_agy_dispatch(
     *,
     cwd: Path,
@@ -1455,6 +1582,8 @@ def _run_agy_dispatch(
     poll_timeout: float = 300.0,
     poll_interval: float = 0.05,
     operation_root: Path | None = None,
+    prospective_guard: ProspectiveExecutionGuard | None = None,
+    effect_slot: str = "agy",
 ) -> tuple[dict[str, Any] | None, float, Path | None, Path | None, bool, str | None, Path]:
     dispatch_path = resolve_canonical_agy_dispatch_path(binding)
     if operation_root is None:
@@ -1473,39 +1602,54 @@ def _run_agy_dispatch(
 
     online = binding.get("strong_online")
     effort = str(online.get("effort") or "medium") if isinstance(online, Mapping) else "medium"
-    cmd = [
-        str(dispatch_path),
-        "--background",
-        "--cwd",
-        str(cwd),
-        "--mode",
-        mode,
-        "--model",
-        EXACT_AGY_MODEL,
-        "--effort",
-        effort,
-        "--timeout",
-        str(timeout),
-        "--max-calls",
-        "1",
-        "--operation-root",
-        str(operation_root),
-        *_agy_permission_args(cwd, mode=mode),
-    ]
-
+    prompt_sha256 = _sha256_bytes(prompt.encode("utf-8"))
     started = time.perf_counter()
-    cp = _run(cmd, input_text=prompt, timeout=60)
-    if cp.returncode != 0:
-        wall = time.perf_counter() - started
-        return None, wall, None, None, False, f"SPAWN_FAILED:{cp.stderr.strip()}", dispatch_path
+    recovered = None
+    if prospective_guard is not None:
+        recovered = prospective_guard.recover_provider_operation(
+            slot=effect_slot,
+            operation_root=operation_root,
+            prompt_sha256=prompt_sha256,
+            cwd=cwd,
+            model=EXACT_AGY_MODEL,
+            mode=mode,
+        )
 
-    try:
-        initial = json.loads(cp.stdout.strip())
-        operation_id = str(initial.get("operation_id") or "")
-    except Exception:
-        wall = time.perf_counter() - started
-        return None, wall, None, None, False, "MISSING_OR_CORRUPT_JOURNAL", dispatch_path
+    if recovered is None:
+        if prospective_guard is not None:
+            prospective_guard.before_provider_start()
+        cmd = [
+            str(dispatch_path),
+            "--background",
+            "--cwd",
+            str(cwd),
+            "--mode",
+            mode,
+            "--model",
+            EXACT_AGY_MODEL,
+            "--effort",
+            effort,
+            "--timeout",
+            str(timeout),
+            "--max-calls",
+            "1",
+            "--operation-root",
+            str(operation_root),
+            *_agy_permission_args(cwd, mode=mode),
+        ]
+        cp = _run(cmd, input_text=prompt, timeout=60)
+        if cp.returncode != 0:
+            wall = time.perf_counter() - started
+            return None, wall, None, None, False, f"SPAWN_FAILED:{cp.stderr.strip()}", dispatch_path
+        try:
+            initial = json.loads(cp.stdout.strip())
+        except Exception:
+            wall = time.perf_counter() - started
+            return None, wall, None, None, False, "MISSING_OR_CORRUPT_JOURNAL", dispatch_path
+    else:
+        initial = recovered
 
+    operation_id = str(initial.get("operation_id") or "")
     if not operation_id:
         wall = time.perf_counter() - started
         return None, wall, None, None, False, "MISSING_OR_CORRUPT_JOURNAL", dispatch_path
@@ -1517,6 +1661,24 @@ def _run_agy_dispatch(
         initial.get("stderr_path") or (operation_root / "operations" / operation_id / "stderr.log")
     )
     operation_json = stdout_path.parent / "operation.json"
+    if prospective_guard is not None and recovered is None:
+        journal_record = (
+            json.loads(operation_json.read_text(encoding="utf-8"))
+            if operation_json.is_file()
+            else initial
+        )
+        prospective_guard.bind_provider_operation(
+            slot=effect_slot,
+            operation_root=operation_root,
+            record=journal_record,
+            prompt_sha256=prompt_sha256,
+            cwd=cwd,
+            mode=mode,
+            recovered_from_journal=False,
+        )
+        prospective_guard.observe_provider_start(slot=effect_slot, record=journal_record)
+    elif prospective_guard is not None:
+        prospective_guard.observe_provider_start(slot=effect_slot, record=initial)
 
     effective_poll_timeout = max(
         float(poll_timeout),
@@ -1527,8 +1689,101 @@ def _run_agy_dispatch(
         timeout=effective_poll_timeout,
         poll_interval=poll_interval,
     )
+    if timed_out:
+        # Harness deadline passed: stop the dispatcher before anyone seals the source
+        # tree. Callers seal only after this function returns.
+        gone = terminate_agy_operation(operation_json, initial=initial)
+        if not gone:
+            err = "DISPATCH_PROCESS_GROUP_SURVIVED_KILL"
+        else:
+            try:
+                record = json.loads(operation_json.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                pass
+    if prospective_guard is not None and record is not None:
+        prospective_guard.observe_provider_start(slot=effect_slot, record=record)
     wall = time.perf_counter() - started
     return record, wall, stdout_path, stderr_path, timed_out, err, dispatch_path
+
+
+def _prepare_shadow_checkout(
+    *,
+    repo: Path,
+    revision: str,
+    source: Path,
+    default_branch: str = "main",
+) -> None:
+    """Materialize only ``revision`` and its ancestry for the agent (#1216 V12).
+
+    A clone or worktree of ``repo`` carries every ref of the origin repo (V11: 335 refs,
+    including the human fix branch of the task). Instead fetch exactly the captured commit
+    into a fresh repository: no remote, no refs, no tags, and no later objects exist.
+    ``default_branch`` is kept for call compatibility; any commit present in ``repo``
+    (local or remote-tracking) can be fetched by id.
+    """
+    del default_branch
+    source.mkdir(parents=True, exist_ok=False)
+    initialized = _run(["git", "init", "-q"], cwd=source, timeout=60)
+    if initialized.returncode != 0:
+        raise RuntimeError(f"shadow_init_failed:{initialized.stderr.strip()}")
+    fetched = _run(
+        ["git", "fetch", "-q", "--no-tags", "--update-shallow", str(repo), revision],
+        cwd=source,
+        timeout=300,
+    )
+    if fetched.returncode != 0:
+        raise RuntimeError(f"shadow_revision_fetch_failed:{revision}:{fetched.stderr.strip()}")
+    checked = _run(
+        ["git", "-c", "advice.detachedHead=false", "checkout", "-q", "--detach", revision],
+        cwd=source,
+        timeout=120,
+    )
+    if checked.returncode != 0:
+        raise RuntimeError(f"shadow_checkout_failed:{checked.stderr.strip()}")
+    git_dir = Path(_git(source, "rev-parse", "--absolute-git-dir").strip())
+    (git_dir / "FETCH_HEAD").unlink(missing_ok=True)
+    head = _git(source, "rev-parse", "HEAD").strip()
+    if head != revision:
+        raise RuntimeError("shadow_isolation_head_mismatch")
+    if _git(source, "for-each-ref").strip() or _git(source, "remote").strip():
+        raise RuntimeError("shadow_isolation_refs_remain")
+
+
+@contextmanager
+def _agy_shadow_checkout(
+    *,
+    repo: Path,
+    revision: str,
+    default_branch: str,
+    prospective_guard: ProspectiveExecutionGuard | None,
+    effect_slot: str,
+) -> Iterator[Path]:
+    if prospective_guard is None:
+        with tempfile.TemporaryDirectory(prefix=f"nexus-hybrid-replication-{effect_slot}-") as temp:
+            source = Path(temp) / "source"
+            _prepare_shadow_checkout(
+                repo=repo,
+                revision=revision,
+                source=source,
+                default_branch=default_branch,
+            )
+            yield source
+        return
+
+    source = prospective_guard.shadow_source(effect_slot)
+    if source.exists():
+        head = _run(["git", "rev-parse", "HEAD"], cwd=source, timeout=30)
+        if head.returncode != 0 or head.stdout.strip() != revision:
+            raise RuntimeError("persistent_shadow_revision_mismatch")
+    else:
+        source.parent.mkdir(parents=True, exist_ok=True)
+        _prepare_shadow_checkout(
+            repo=repo,
+            revision=revision,
+            source=source,
+            default_branch=default_branch,
+        )
+    yield source
 
 
 def _run_agy_b_fallback(
@@ -1537,20 +1792,19 @@ def _run_agy_b_fallback(
     revision: str,
     prompt: str,
     binding: Mapping[str, Any],
+    default_branch: str = "main",
     timeout: int = 300,
     poll_timeout: float = 300.0,
     poll_interval: float = 0.05,
+    prospective_guard: ProspectiveExecutionGuard | None = None,
 ) -> tuple[dict[str, Any], float]:
-    with tempfile.TemporaryDirectory(prefix="nexus-hybrid-replication-b-") as temp:
-        root = Path(temp)
-        source = root / "source"
-        added = _run(
-            ["git", "worktree", "add", "--detach", str(source), revision],
-            cwd=repo,
-            timeout=60,
-        )
-        if added.returncode != 0:
-            raise RuntimeError(f"shadow_worktree_add_failed:{added.stderr.strip()}")
+    with _agy_shadow_checkout(
+        repo=repo,
+        revision=revision,
+        default_branch=default_branch,
+        prospective_guard=prospective_guard,
+        effect_slot="b-fallback",
+    ) as source:
         try:
             record, wall, stdout_path, stderr_path, timed_out, err, dispatch_path = (
                 _run_agy_dispatch(
@@ -1561,6 +1815,8 @@ def _run_agy_b_fallback(
                     timeout=timeout,
                     poll_timeout=poll_timeout,
                     poll_interval=poll_interval,
+                    prospective_guard=prospective_guard,
+                    effect_slot="b-fallback",
                 )
             )
             status_check = _run(["git", "status", "--porcelain=v1"], cwd=source, timeout=30)
@@ -1579,17 +1835,13 @@ def _run_agy_b_fallback(
                 wall_time_seconds=wall,
                 schema=AGY_RAW_RECEIPT_SCHEMA,
                 extra_checks=extra_checks,
+                expected_dispatch_sha256=_expected_agy_dispatch_sha256(binding),
             )
             receipt["mode"] = "plan"
             receipt["repository_mutated"] = mutated
             return receipt, wall
         finally:
-            _run(
-                ["git", "worktree", "remove", "--force", str(source)],
-                cwd=repo,
-                timeout=60,
-            )
-            _run(["git", "worktree", "prune"], cwd=repo, timeout=30)
+            pass
 
 
 def _run_agy_candidate(
@@ -1598,21 +1850,20 @@ def _run_agy_candidate(
     revision: str,
     prompt: str,
     binding: Mapping[str, Any],
+    default_branch: str = "main",
     timeout: int = 300,
     poll_timeout: float = 300.0,
     poll_interval: float = 0.05,
     allowed_paths: Sequence[str] | None = None,
+    prospective_guard: ProspectiveExecutionGuard | None = None,
 ) -> tuple[dict[str, Any], float]:
-    with tempfile.TemporaryDirectory(prefix="nexus-hybrid-replication-c-") as temp:
-        root = Path(temp)
-        source = root / "source"
-        added = _run(
-            ["git", "worktree", "add", "--detach", str(source), revision],
-            cwd=repo,
-            timeout=60,
-        )
-        if added.returncode != 0:
-            raise RuntimeError(f"shadow_worktree_add_failed:{added.stderr.strip()}")
+    with _agy_shadow_checkout(
+        repo=repo,
+        revision=revision,
+        default_branch=default_branch,
+        prospective_guard=prospective_guard,
+        effect_slot="c",
+    ) as source:
         try:
             record, wall, stdout_path, stderr_path, timed_out, err, dispatch_path = (
                 _run_agy_dispatch(
@@ -1623,6 +1874,8 @@ def _run_agy_candidate(
                     timeout=timeout,
                     poll_timeout=poll_timeout,
                     poll_interval=poll_interval,
+                    prospective_guard=prospective_guard,
+                    effect_slot="c",
                 )
             )
             sealing = seal_shadow_candidate(source, allowed_paths=allowed_paths)
@@ -1652,20 +1905,35 @@ def _run_agy_candidate(
                 wall_time_seconds=wall,
                 schema=AGY_SHADOW_CANDIDATE_SCHEMA,
                 extra_checks=extra_checks,
+                expected_dispatch_sha256=_expected_agy_dispatch_sha256(binding),
             )
             receipt["mode"] = "accept-edits"
             receipt.update(sealing)
             return receipt, wall
         finally:
-            _run(
-                ["git", "worktree", "remove", "--force", str(source)],
-                cwd=repo,
-                timeout=60,
-            )
-            _run(["git", "worktree", "prune"], cwd=repo, timeout=30)
+            pass
 
 
-def _c_prompt(snapshot: TaskSnapshot) -> tuple[str, dict[str, Any]]:
+def _complete_token_usage_metrics(
+    *usage_records: Mapping[str, Any],
+) -> tuple[int | None, int | None, int | None]:
+    if not usage_records or any(not usage for usage in usage_records):
+        return None, None, None
+    input_tokens = sum(int(usage.get("input_tokens", 0) or 0) for usage in usage_records)
+    uncached_input_tokens = sum(
+        max(
+            0,
+            int(usage.get("input_tokens", 0) or 0) - int(usage.get("cached_input_tokens", 0) or 0),
+        )
+        for usage in usage_records
+    )
+    output_tokens = sum(int(usage.get("output_tokens", 0) or 0) for usage in usage_records)
+    return input_tokens, uncached_input_tokens, output_tokens
+
+
+def _c_prompt(
+    snapshot: TaskSnapshot, *, localization_hint_path: str | None = None
+) -> tuple[str, dict[str, Any]]:
     schema = {
         "type": "object",
         "additionalProperties": False,
@@ -1692,209 +1960,219 @@ def _c_prompt(snapshot: TaskSnapshot) -> tuple[str, dict[str, Any]]:
         "outcome information (such as future PRs, changed-file lists, CI/check verifiers, "
         "merge commits, or final-worker outcomes). Return only the bounded execution summary "
         "required by the output schema; the harness separately seals the physical diff.\n\n"
+        "SANDBOX BOUNDARY: you can only read and write files inside the current working "
+        "directory, which is an isolated checkout of the repository named in TASK KEY at "
+        "SOURCE REVISION. Any absolute host path in the task text (for example "
+        "/Users/james/workspace/<repo>/..., /Users/james/.local/..., ~/...) refers to the "
+        "same repository or to host state you cannot see; map repository paths onto the "
+        "current checkout and treat everything else as unavailable context. Never call a "
+        "file tool on a path outside the current working directory and never use ~ or "
+        "/Users/... paths: in this headless run a single denied tool call aborts the whole "
+        "task with no output. Use relative paths from the checkout root.\n\n"
         f"TASK KEY: {snapshot.task_key}\n"
         f"SOURCE REVISION: {snapshot.pre_implementation_revision}\n"
         f"TITLE: {snapshot.title}\n\n{snapshot.body}"
     )
+    if localization_hint_path:
+        prompt += (
+            "\n\nLOCALIZATION (DM1-accepted under the frozen policy): start at "
+            f"`{localization_hint_path}`. This is a hint only; verify it before relying on "
+            "it. Everything else above is unchanged."
+        )
     return prompt, schema
+
+
+def _strong_online_timeout_seconds(binding: Mapping[str, Any]) -> int:
+    section = binding.get("strong_online")
+    if not isinstance(section, Mapping) or "candidate_timeout_seconds" not in section:
+        return 300
+    raw = section["candidate_timeout_seconds"]
+    try:
+        if isinstance(raw, bool) or (isinstance(raw, float) and not raw.is_integer()):
+            raise ValueError
+        value = int(raw)
+    except (TypeError, ValueError):
+        raise ValueError("strong_online_candidate_timeout_invalid") from None
+    if not 60 <= value <= 7200:
+        raise ValueError("strong_online_candidate_timeout_invalid")
+    return value
 
 
 def run_frozen_stack(
     snapshot: TaskSnapshot,
     *,
     binding: Mapping[str, Any],
+    prospective_guard: ProspectiveExecutionGuard | None = None,
 ) -> FrozenStackOutcome:
     repo = _repo_root(snapshot.repository, binding)
     _revision_exists(repo, snapshot.pre_implementation_revision)
-    family = classify_frozen_task_family(title=snapshot.title, body=snapshot.body)
-
-    if family == "A":
-        started = time.perf_counter()
-        deterministic = _dependency_discovery(snapshot=snapshot, repo=repo)
-        wall = time.perf_counter() - started
-        if deterministic is not None:
-            raw = RawRouteResult.create(
-                route="A",
-                provider="deterministic",
-                requested_model="",
-                resolved_model="",
-                model_call_count=0,
-                input_tokens=0,
-                uncached_input_tokens=0,
-                output_tokens=0,
-                wall_time_seconds=wall,
-                failures=(),
-                retries=0,
-                fallbacks=(),
-                raw_response=deterministic,
-            )
-            return FrozenStackOutcome(
-                stratum="A",
-                deterministic_receipt=deterministic,
-                candidate_packet=None,
-                jev_raw_response=None,
-                dm1_decision=None,
-                strong_online_raw_response=None,
-                raw_result=raw,
-            )
-
-    if family == "B":
-        ranked, evidence = _rank_candidates(snapshot=snapshot, repo=repo, binding=binding)
-        repo_files = set(
-            _git(
-                repo, "ls-tree", "-r", "--name-only", snapshot.pre_implementation_revision
-            ).splitlines()
+    a_started = time.perf_counter()
+    deterministic = _dependency_discovery(snapshot=snapshot, repo=repo)
+    a_wall = time.perf_counter() - a_started
+    if deterministic is not None:
+        raw = RawRouteResult.create(
+            route="A",
+            provider="deterministic",
+            requested_model="",
+            resolved_model="",
+            model_call_count=0,
+            input_tokens=0,
+            uncached_input_tokens=0,
+            output_tokens=0,
+            wall_time_seconds=a_wall,
+            failures=(),
+            retries=0,
+            fallbacks=(),
+            raw_response=deterministic,
         )
-        literal = tuple(
-            path
-            for path in extract_literal_paths(f"{snapshot.title}\n{snapshot.body}")
-            if path in repo_files
+        return FrozenStackOutcome(
+            stratum="A",
+            deterministic_receipt=deterministic,
+            candidate_packet=None,
+            jev_raw_response=None,
+            dm1_decision=None,
+            strong_online_raw_response=None,
+            raw_result=raw,
         )
-        packet = build_d2_candidate_packet(
-            task_key=snapshot.task_key,
-            source_revision=snapshot.pre_implementation_revision,
-            task_contract=f"{snapshot.title}\n\n{snapshot.body}",
-            literal_paths=literal,
-            ranked_paths=ranked,
-            evidence=evidence,
-        )
-        if len(packet["candidate_catalog"]) >= 2:
-            jev_raw, jev_retries, jev_wall = _jev_request(
-                snapshot=snapshot,
-                packet=packet,
-                binding=binding,
-            )
-            decision = {
-                "choice": jev_raw.get("choice", "ESCALATE"),
-                "top_probability": float(jev_raw.get("top_probability") or 0.0),
-                "margin": float(jev_raw.get("margin") or 0.0),
-                "policy_top_probability_min": DM1_TOP_PROBABILITY_MIN,
-                "policy_margin_min": DM1_MARGIN_MIN,
-            }
-            accepted = (
-                jev_raw.get("status") == "VALID"
-                and decision["choice"] != "ESCALATE"
-                and decision["top_probability"] >= DM1_TOP_PROBABILITY_MIN
-                and decision["margin"] >= DM1_MARGIN_MIN
-            )
-            strong = None
-            fallbacks: tuple[str, ...] = ()
-            strong_wall = 0.0
-            if not accepted:
-                prompt, schema = _b_fallback_prompt(snapshot, packet)
-                strong, strong_wall = _run_agy_b_fallback(
-                    repo=repo,
-                    revision=snapshot.pre_implementation_revision,
-                    prompt=prompt,
-                    binding=binding,
-                )
-                fallbacks = ("DM1_TO_STRONG_ONLINE",)
-            jev_usage = jev_raw.get("usage") or {}
-            strong_usage = (strong or {}).get("usage") or {}
-            raw_response = {
-                "candidate_packet": packet,
-                "jev_raw_response": jev_raw,
-                "dm1_decision": decision,
-                "strong_online_raw_response": strong,
-                "accepted_by_frozen_policy": accepted,
-            }
-            raw = RawRouteResult.create(
-                route="B",
-                provider="typesafe" if accepted else "typesafe+agy",
-                requested_model=(
-                    str(binding["jev"]["requested_model"])
-                    if accepted
-                    else f"{binding['jev']['requested_model']}+{EXACT_AGY_MODEL}"
-                ),
-                resolved_model=(
-                    str(binding["jev"]["resolved_model"])
-                    if accepted
-                    else f"{binding['jev']['resolved_model']}+{(strong or {}).get('resolved_model') or (strong or {}).get('observed_model') or EXACT_AGY_MODEL}"
-                ),
-                model_call_count=1 if accepted else 2,
-                input_tokens=int(jev_usage.get("input_tokens", 0) or 0)
-                + int(strong_usage.get("input_tokens", 0) or 0),
-                uncached_input_tokens=int(jev_usage.get("input_tokens", 0) or 0)
-                + max(
-                    0,
-                    int(strong_usage.get("input_tokens", 0) or 0)
-                    - int(strong_usage.get("cached_input_tokens", 0) or 0),
-                ),
-                output_tokens=int(jev_usage.get("output_tokens", 0) or 0)
-                + int(strong_usage.get("output_tokens", 0) or 0),
-                wall_time_seconds=jev_wall + strong_wall,
-                failures=()
-                if jev_raw.get("status") == "VALID"
-                and (accepted or (strong or {}).get("status") == "VALID")
-                else (
-                    *(
-                        ()
-                        if jev_raw.get("status") == "VALID"
-                        else (str(jev_raw.get("status") or "JEV_FAILURE"),)
-                    ),
-                    *(
-                        ()
-                        if accepted or (strong or {}).get("status") == "VALID"
-                        else (str((strong or {}).get("status") or "AGY_FAILURE"),)
-                    ),
-                ),
-                retries=jev_retries,
-                fallbacks=fallbacks,
-                raw_response=raw_response,
-            )
-            return FrozenStackOutcome(
-                stratum="B",
-                deterministic_receipt={
-                    "status": "INSUFFICIENT_FOR_TERMINAL_CLOSURE",
-                    "d0_implementation_sha256": D0_IMPLEMENTATION_SHA256,
-                    "d2_packet_sha256": packet["packet_sha256"],
-                },
-                candidate_packet=packet,
-                jev_raw_response=jev_raw,
-                dm1_decision=decision,
-                strong_online_raw_response=strong,
-                raw_result=raw,
-            )
 
-    prompt, schema = _c_prompt(snapshot)
-    strong, wall = _run_agy_candidate(
+    strong_timeout = _strong_online_timeout_seconds(binding)
+    d0_started = time.perf_counter()
+    ranked, evidence = _rank_candidates(snapshot=snapshot, repo=repo, binding=binding)
+    d0_wall = time.perf_counter() - d0_started
+    repo_files = set(
+        _git(
+            repo, "ls-tree", "-r", "--name-only", snapshot.pre_implementation_revision
+        ).splitlines()
+    )
+    literal = tuple(
+        path
+        for path in extract_literal_paths(f"{snapshot.title}\n{snapshot.body}")
+        if path in repo_files
+    )
+    packet = build_d2_candidate_packet(
+        task_key=snapshot.task_key,
+        source_revision=snapshot.pre_implementation_revision,
+        task_contract=f"{snapshot.title}\n\n{snapshot.body}",
+        literal_paths=literal,
+        ranked_paths=ranked,
+        evidence=evidence,
+    )
+    catalog = list(packet["candidate_catalog"])
+
+    jev_raw: dict[str, Any] | None = None
+    jev_retries = 0
+    jev_wall = 0.0
+    localization_hint_path: str | None = None
+    if len(catalog) >= 2:
+        jev_raw, jev_retries, jev_wall = _jev_request(
+            snapshot=snapshot,
+            packet=packet,
+            binding=binding,
+            prospective_guard=prospective_guard,
+        )
+        decision: dict[str, Any] = {
+            "applicable": True,
+            "choice": jev_raw.get("choice", "ESCALATE"),
+            "top_probability": float(jev_raw.get("top_probability") or 0.0),
+            "margin": float(jev_raw.get("margin") or 0.0),
+            "policy_top_probability_min": DM1_TOP_PROBABILITY_MIN,
+            "policy_margin_min": DM1_MARGIN_MIN,
+        }
+        accepted = (
+            jev_raw.get("status") == "VALID"
+            and decision["choice"] != "ESCALATE"
+            and decision["top_probability"] >= DM1_TOP_PROBABILITY_MIN
+            and decision["margin"] >= DM1_MARGIN_MIN
+        )
+        if accepted:
+            # Jev chooses a candidate ID (e.g. "C1"); map it to the packet path.
+            by_id = {str(item["id"]): str(item["path"]) for item in catalog}
+            localization_hint_path = by_id.get(str(decision["choice"]))
+            if localization_hint_path is None:
+                accepted = False
+                decision["unmapped_choice"] = True
+    else:
+        decision = {
+            "applicable": False,
+            "reason": "candidate_set_below_two",
+            "choice": None,
+            "top_probability": 0.0,
+            "margin": 0.0,
+            "policy_top_probability_min": DM1_TOP_PROBABILITY_MIN,
+            "policy_margin_min": DM1_MARGIN_MIN,
+        }
+        accepted = False
+    jev_called = jev_raw is not None
+
+    prompt, schema = _c_prompt(snapshot, localization_hint_path=localization_hint_path)
+    strong, strong_wall = _run_agy_candidate(
         repo=repo,
         revision=snapshot.pre_implementation_revision,
         prompt=prompt,
         binding=binding,
+        default_branch=snapshot.default_branch,
+        prospective_guard=prospective_guard,
+        timeout=strong_timeout,
+        poll_timeout=float(strong_timeout + 60),
     )
-    usage = strong.get("usage") or {}
+    strong_usage = strong.get("usage") or {}
+    usage_records = (jev_raw.get("usage") or {}, strong_usage) if jev_raw else (strong_usage,)
+    input_tokens, uncached_input_tokens, output_tokens = _complete_token_usage_metrics(
+        *usage_records
+    )
+    strong_model = strong.get("resolved_model") or strong.get("observed_model") or EXACT_AGY_MODEL
+    failures: list[str] = []
+    if jev_raw is not None and jev_raw.get("status") != "VALID":
+        failures.append(str(jev_raw.get("status") or "JEV_FAILURE"))
+    if strong.get("status") != "VALID":
+        failures.append(str(strong.get("status") or "AGY_FAILURE"))
+    stratum = "B" if accepted else "C"
+    raw_response = {
+        "candidate_packet": packet,
+        "jev_raw_response": jev_raw,
+        "dm1_decision": decision,
+        "dm1_applicable": bool(decision["applicable"]),
+        "localization_hint_path": localization_hint_path,
+        "accepted_by_frozen_policy": accepted,
+        "d0_wall_seconds": d0_wall,
+        "d0_top8_paths": list(ranked[:8]),
+        "strong_online_timeout_seconds": strong_timeout,
+        "strong_online_raw_response": strong,
+    }
     raw = RawRouteResult.create(
-        route="C",
-        provider="agy",
-        requested_model=EXACT_AGY_MODEL,
-        resolved_model=str(
-            strong.get("resolved_model") or strong.get("observed_model") or EXACT_AGY_MODEL
+        route=stratum,
+        provider="typesafe+agy" if jev_called else "agy",
+        requested_model=(
+            f"{binding['jev']['requested_model']}+{EXACT_AGY_MODEL}"
+            if jev_called
+            else EXACT_AGY_MODEL
         ),
-        model_call_count=1,
-        input_tokens=int(usage.get("input_tokens", 0) or 0),
-        uncached_input_tokens=max(
-            0,
-            int(usage.get("input_tokens", 0) or 0) - int(usage.get("cached_input_tokens", 0) or 0),
+        resolved_model=(
+            f"{binding['jev']['resolved_model']}+{strong_model}"
+            if jev_called
+            else str(strong_model)
         ),
-        output_tokens=int(usage.get("output_tokens", 0) or 0),
-        wall_time_seconds=wall,
-        failures=()
-        if strong.get("status") == "VALID"
-        else (str(strong.get("status") or "AGY_FAILURE"),),
-        retries=0,
-        fallbacks=(),
-        raw_response=strong,
+        model_call_count=(1 if jev_called else 0) + 1,
+        input_tokens=input_tokens,
+        uncached_input_tokens=uncached_input_tokens,
+        output_tokens=output_tokens,
+        wall_time_seconds=d0_wall + jev_wall + strong_wall,
+        failures=tuple(failures),
+        retries=jev_retries if jev_called else 0,
+        fallbacks=("DM1_TO_STRONG_ONLINE",) if jev_called and not accepted else (),
+        raw_response=raw_response,
     )
     return FrozenStackOutcome(
-        stratum="C",
+        stratum=stratum,
         deterministic_receipt={
             "status": "INSUFFICIENT_FOR_TERMINAL_CLOSURE",
-            "family_probe": family,
+            "d0_implementation_sha256": D0_IMPLEMENTATION_SHA256,
+            "d2_packet_sha256": packet["packet_sha256"],
+            "dm1_applicable": bool(decision["applicable"]),
         },
-        candidate_packet=None,
-        jev_raw_response=None,
-        dm1_decision=None,
+        candidate_packet=packet,
+        jev_raw_response=jev_raw,
+        dm1_decision=decision,
         strong_online_raw_response=strong,
         raw_result=raw,
     )
@@ -1929,6 +2207,191 @@ def _gh_list(path: str, *, accept: str | None = None) -> list[dict[str, Any]]:
         if len(payload) < 100:
             return rows
     raise RuntimeError("github_pagination_exceeds_bound")
+
+
+POST_TERMINAL_REVISION_SCHEMA = "nexus.hybrid_replication.post_terminal_revision.v1"
+
+
+def build_post_terminal_revision_events(
+    *,
+    state: Mapping[str, Any],
+    timeline: Sequence[Mapping[str, Any]],
+) -> tuple[dict[str, Any], ...]:
+    """Return immutable lifecycle events that supersede an already-bound terminal snapshot.
+
+    A post-terminal reopen never rewrites admission, route, raw evidence, ground truth,
+    or score bytes. It only proves that the previously bound terminal snapshot is no
+    longer final-valid evidence for cohort analysis.
+    """
+
+    if state.get("phase") != "SCORED":
+        return ()
+    snapshot = state.get("snapshot") or {}
+    repository = str(snapshot.get("repository") or "")
+    issue_number = int(snapshot.get("issue_number") or 0)
+    task_key = str(state.get("task_key") or "")
+    ground_truth = state.get("ground_truth") or {}
+    score = state.get("score") or {}
+    terminal_at = str(ground_truth.get("terminal_at") or "")
+    terminal_time = _parse_timestamp(terminal_at)
+    if not repository or not issue_number or not task_key:
+        raise ValueError("post_terminal_task_identity_missing")
+    if terminal_time is None:
+        raise ValueError("post_terminal_original_terminal_time_missing")
+    ground_truth_sha = str(ground_truth.get("sha256") or "")
+    score_sha = str(score.get("sha256") or "")
+    if not ground_truth_sha or not score_sha:
+        raise ValueError("post_terminal_score_identity_missing")
+
+    events: list[dict[str, Any]] = []
+    reopened_seen = False
+    for item in timeline:
+        event = str(item.get("event") or "")
+        if event not in {"reopened", "closed"}:
+            continue
+        event_at = str(item.get("created_at") or "")
+        event_time = _parse_timestamp(event_at)
+        if event_time is None or event_time <= terminal_time:
+            continue
+        event_id = item.get("id")
+        if not isinstance(event_id, int):
+            raise ValueError("post_terminal_event_id_missing")
+        if event == "reopened":
+            reopened_seen = True
+        elif not reopened_seen:
+            # A later close matters only after the original terminal snapshot was reopened.
+            continue
+        actor = item.get("actor") or {}
+        events.append({
+            "schema": POST_TERMINAL_REVISION_SCHEMA,
+            "task_key": task_key,
+            "repository": repository,
+            "issue_number": issue_number,
+            "original_terminal_at": terminal_at,
+            "original_ground_truth_sha256": ground_truth_sha,
+            "original_score_sha256": score_sha,
+            "event_id": event_id,
+            "event": event,
+            "event_at": event_at,
+            "actor_login": str(actor.get("login") or "") if isinstance(actor, Mapping) else "",
+            "score_effect": (
+                "SUPERSEDED_BY_POST_TERMINAL_REOPEN"
+                if event == "reopened"
+                else "POST_REOPEN_RECLOSURE_OBSERVED"
+            ),
+            "material_false_safe_classification": "UNCLASSIFIED_FINAL_ANALYSIS_REQUIRED",
+            "raw_rewrite": False,
+            "route_rewrite": False,
+            "score_rewrite": False,
+            "evidence_refs": [f"issue_event:{event_id}:{event}@{event_at}"],
+        })
+    return tuple(events)
+
+
+def _write_create_only_json(path: Path, payload: Mapping[str, Any]) -> str:
+    expected = _canonical_bytes(dict(payload)) + b"\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        if path.read_bytes() != expected:
+            raise ValueError(f"immutable_post_terminal_revision_conflict:{path}")
+        return "REUSED_SAME_BYTES"
+
+    temp = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
+    try:
+        fd = os.open(str(temp), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(expected)
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            os.link(temp, path)
+        except FileExistsError:
+            if path.read_bytes() != expected:
+                raise ValueError(f"immutable_post_terminal_revision_conflict:{path}") from None
+            return "REUSED_SAME_BYTES"
+        dir_fd = os.open(str(path.parent), os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+        return "CREATED"
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+def audit_post_terminal_revisions(
+    *,
+    store_root: Path,
+    output_root: Path,
+) -> dict[str, Any]:
+    """Audit SCORED tasks for GitHub reopen events without mutating task evidence."""
+
+    tasks_root = Path(store_root) / "tasks"
+    scored = 0
+    effective_scored = 0
+    superseded: list[str] = []
+    receipts: list[dict[str, Any]] = []
+
+    for state_path in sorted(tasks_root.glob("*/state.json")):
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        if state.get("admission_disposition") != "ADMITTED_PRIMARY_FRESH_TASK":
+            continue
+        if state.get("phase") != "SCORED":
+            continue
+        scored += 1
+
+        task_key = str(state.get("task_key") or "")
+        snapshot = state.get("snapshot") or {}
+        repository = str(snapshot.get("repository") or "")
+        issue_number = int(snapshot.get("issue_number") or 0)
+        score = state.get("score") or {}
+        ground_truth = state.get("ground_truth") or {}
+        if not task_key or not repository or not issue_number:
+            raise ValueError("post_terminal_task_identity_missing")
+
+        score_path = state_path.parent / str(score.get("path") or "score.json")
+        ground_truth_path = state_path.parent / "ground_truth.json"
+        if _sha256_file(score_path) != str(score.get("sha256") or ""):
+            raise ValueError(f"post_terminal_score_hash_mismatch:{task_key}")
+        if _sha256_file(ground_truth_path) != str(ground_truth.get("sha256") or ""):
+            raise ValueError(f"post_terminal_ground_truth_hash_mismatch:{task_key}")
+
+        timeline = _gh_list(
+            f"repos/{repository}/issues/{issue_number}/timeline",
+            accept="application/vnd.github+json",
+        )
+        revision_events = build_post_terminal_revision_events(state=state, timeline=timeline)
+        has_reopen = any(item["event"] == "reopened" for item in revision_events)
+        if has_reopen:
+            superseded.append(task_key)
+        else:
+            effective_scored += 1
+
+        key_dir = output_root / hashlib.sha256(task_key.encode("utf-8")).hexdigest()
+        for item in revision_events:
+            filename = f"{int(item['event_id'])}-{item['event']}.json"
+            disposition = _write_create_only_json(key_dir / filename, item)
+            receipts.append({
+                "task_key": task_key,
+                "event_id": item["event_id"],
+                "event": item["event"],
+                "path": str((key_dir / filename).resolve()),
+                "sha256": _sha256_file(key_dir / filename),
+                "write_disposition": disposition,
+            })
+
+    return {
+        "schema": "nexus.hybrid_replication.post_terminal_revision_audit.v1",
+        "store_root": str(Path(store_root).resolve()),
+        "output_root": str(Path(output_root).resolve()),
+        "scored_primary_count": scored,
+        "effective_scored_primary_count": effective_scored,
+        "superseded_score_count": len(superseded),
+        "superseded_task_keys": sorted(superseded),
+        "revision_receipts": receipts,
+        "raw_or_route_rewrite": False,
+        "score_rewrite": False,
+    }
 
 
 def _check_runs_until(
@@ -2078,11 +2541,7 @@ def _identity_preflight_main(binding_path: Path) -> int:
             frozen_receipt_sha256s=frozen_actual,
             declared_frozen_receipt_sha256s=frozen_declared,
             agy_dispatch_sha256=_sha256_file(dispatch_path),
-            expected_agy_dispatch_sha256=str(
-                online.get("agy_dispatch_sha256")
-                or binding.get("agy_dispatch_sha256")
-                or CANONICAL_AGY_DISPATCH_SHA256
-            ),
+            expected_agy_dispatch_sha256=_expected_agy_dispatch_sha256(binding),
             requested_provider=provider,
             requested_model=str(online.get("requested_model") or ""),
             execution_generation=str(online.get("execution_generation") or ""),
@@ -2127,11 +2586,26 @@ def _identity_preflight_main(binding_path: Path) -> int:
     return 0 if receipt["activation_allowed"] else 5
 
 
-def _stack_main(binding_path: Path) -> int:
+def _stack_main(
+    binding_path: Path,
+    *,
+    readiness_control: bool = False,
+    store_root: Path | None = None,
+) -> int:
     payload = json.load(sys.stdin)
     snapshot = _snapshot_from_capture_payload(payload)
-    binding = _load_binding(binding_path)
-    outcome = run_frozen_stack(snapshot, binding=binding)
+    binding = _load_binding(binding_path, readiness_control=readiness_control)
+    if store_root is None:
+        outcome = run_frozen_stack(snapshot, binding=binding)
+    else:
+        prospective_guard = ProspectiveExecutionGuard(store_root=store_root, snapshot=snapshot)
+        with prospective_guard.task_lock():
+            prospective_guard.ensure_execution_start()
+            outcome = run_frozen_stack(
+                snapshot,
+                binding=binding,
+                prospective_guard=prospective_guard,
+            )
     print(json.dumps(asdict(outcome), ensure_ascii=False, sort_keys=True))
     return 0
 
@@ -2152,12 +2626,34 @@ def main() -> int:
     preflight.add_argument("--binding", default=str(DEFAULT_LIVE_BINDING))
     stack = sub.add_parser("stack")
     stack.add_argument("--binding", default=str(DEFAULT_LIVE_BINDING))
+    stack.add_argument("--readiness-control", action="store_true")
+    stack.add_argument("--store-root")
     sub.add_parser("ground-truth")
+    post_terminal = sub.add_parser("post-terminal-audit")
+    post_terminal.add_argument("--store-root", required=True)
+    post_terminal.add_argument("--output-root")
     args = parser.parse_args()
     if args.command == "identity-preflight":
         return _identity_preflight_main(Path(args.binding))
     if args.command == "stack":
-        return _stack_main(Path(args.binding))
+        return _stack_main(
+            Path(args.binding),
+            readiness_control=args.readiness_control,
+            store_root=Path(args.store_root).expanduser().resolve() if args.store_root else None,
+        )
+    if args.command == "post-terminal-audit":
+        store_root = Path(args.store_root).expanduser().resolve()
+        output_root = (
+            Path(args.output_root).expanduser().resolve()
+            if args.output_root
+            else store_root.parent / "post-terminal-revisions"
+        )
+        result = audit_post_terminal_revisions(
+            store_root=store_root,
+            output_root=output_root,
+        )
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+        return 0
     return _ground_truth_main()
 
 

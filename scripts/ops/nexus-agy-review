@@ -35,6 +35,7 @@ from nexus.services.agy_operation_journal import (  # noqa: E402
 from nexus.services.agy_reviewer_profiles import (  # noqa: E402
     AgyReviewerLaunchProfile,
     AgyReviewerProfileError,
+    effective_reviewer_effort,
     launch_profile_evidence,
     resolve_reviewer_launch_profile,
 )
@@ -303,6 +304,10 @@ def launch_review(args: argparse.Namespace) -> dict[str, Any]:
         profile,
         requested_effort=args.effort,
     )
+    effective_effort = effective_reviewer_effort(
+        profile,
+        requested_effort=args.effort,
+    )
     subject = collect_review_subject(
         args.cwd,
         expected_repository=args.repository,
@@ -329,7 +334,7 @@ def launch_review(args: argparse.Namespace) -> dict[str, Any]:
             cwd=subject.repo_root,
             provider="agy",
             model=profile.model,
-            effort=args.effort,
+            effort=effective_effort,
             prompt_sha256=hashlib.sha256(build_review_prompt(packet).encode("utf-8")).hexdigest(),
             runtime_revision=None,
             initial_fields={
@@ -402,7 +407,7 @@ def launch_review(args: argparse.Namespace) -> dict[str, Any]:
         journal=journal,
         dispatcher=dispatcher,
         profile=profile,
-        requested_effort=args.effort,
+        requested_effort=effective_effort,
         timeout=args.timeout,
         max_calls=args.max_calls,
         pool_wait_timeout=args.pool_wait_timeout,

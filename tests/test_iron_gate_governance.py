@@ -276,7 +276,7 @@ def test_replay_runner_success(mock_run):
     bundle = {
         "version": "1.1.0",
         "test_artifacts": [
-            {"command": "echo ok", "exit_code": 0}
+            {"command": "pytest -q", "exit_code": 0}
         ]
     }
     report = runner.run_replay(bundle)
@@ -291,7 +291,7 @@ def test_replay_runner_mismatch_fail(mock_run):
     bundle = {
         "version": "1.1.0",
         "test_artifacts": [
-            {"command": "echo fail", "exit_code": 0}
+            {"command": "pytest -q tests/fail", "exit_code": 0}
         ]
     }
     report = runner.run_replay(bundle)

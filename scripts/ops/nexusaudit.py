@@ -65,32 +65,7 @@ def generate_swarm_stats(project_root: Path, args):
     runs_dir = project_root / ".nexus" / "runs"
     
     if args.swarm_stats:
-        # 🛡️ Swarm 並行度報表
-        from nexus.engine.federation import FederationLayer
-        fed = FederationLayer(".")
-        fed.load_registry()
-        
         print("\n🐝 --- Nexus v19 Tactical Swarm OS Stats ---")
-
-    if args.global_stats:
-        # 🛰️ v21-A 全球聯邦報表
-        from nexus.engine.federation import FederationLayer
-        fed = FederationLayer(".")
-        fed.sync_all_clusters() # 動態同步 10 叢集
-        
-        print("\n🌍 --- Nexus v21-A 'Simple Global' Federation Stats ---")
-        print(f"Time: {datetime.now().isoformat()}")
-        print("-" * 65)
-        print(f"{'Region':<15} | {'Clusters':<10} | {'Parallelism':<12} | {'ROI'}")
-        print("-" * 65)
-        
-        total_clusters = len(fed.nodes)
-        avg_latency = sum(n.get('latency', 0.0) for n in fed.nodes) / total_clusters
-        
-        print(f"{'Global Hub':<15} | {total_clusters:<10} | {'90 Tasks':<12} | {'+450%'}")
-        print("-" * 65)
-        print(f"Avg Latency: {avg_latency:.1f}ms | Quorum: 10/10 PASS | Failover: AUTO")
-        print("-" * 65)
 
     if not runs_dir.exists():
         print("❌ [Swarm Audit] No run history found.")
@@ -170,21 +145,20 @@ def main():
     parser = argparse.ArgumentParser(description="Nexus Guard Audit")
     parser.add_argument("--lewm-report", action="store_true", help="Generate JEPA Latent Planning report")
     parser.add_argument("--swarm-stats", action="store_true", help="Show swarm parallelism stats")
-    parser.add_argument("--global-stats", action="store_true", help="Show v21-A global federation stats")
     parser.add_argument("--latent-forecast", action="store_true", help="Show v20 latent prediction errors")
     parser.add_argument("--project-root", default=".")
     
     args = parser.parse_args()
     root = Path(args.project_root).resolve()
     
-    if args.swarm_stats or args.global_stats:
+    if args.swarm_stats:
         generate_swarm_stats(root, args)
     elif args.latent_forecast:
         generate_latent_report(root)
     elif args.lewm_report:
         generate_lewm_report(root)
     else:
-        print("🛡️ [Audit] Nexus v21-A Global Federation: COMPLIANT")
+        print("🛡️ [Audit] Nexus Guard: no report selected")
 
 if __name__ == "__main__":
     main()

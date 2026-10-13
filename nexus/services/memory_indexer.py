@@ -10,9 +10,10 @@ from typing import Any, Dict, Iterable, List, Optional
 import logging
 from datetime import datetime, timezone, timedelta
 
+from nexus.services.lancedb_roots import MEMORY_INDEX, resolve_lancedb_root
+
 # 配置
 TABLE_NAME = "memory_index"
-DB_CORE_PATH = ".nexus/memory/memory_index.lancedb"
 
 # 配額 (Disk Quotas)
 QUOTA_RUN_MANIFESTS = 50
@@ -27,7 +28,7 @@ def stable_hash(*parts: str) -> str:
 
 def connect_memory_db(repo_root: Path):
     import lancedb
-    db_path = repo_root / DB_CORE_PATH
+    db_path = resolve_lancedb_root(MEMORY_INDEX, repo_root, honor_env=False)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     key = str(db_path.resolve())
     if key not in _DB_CACHE:
@@ -293,5 +294,5 @@ def rebuild_memory_index(repo_root: Path) -> Dict[str, Any]:
         "status": "ok", 
         "records_processed": len(rows),
         "total_records_searched": len(all_records),
-        "db_path": str(repo_root / DB_CORE_PATH)
+        "db_path": str(resolve_lancedb_root(MEMORY_INDEX, repo_root, honor_env=False))
     }

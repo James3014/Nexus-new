@@ -434,3 +434,120 @@ def test_candidate_commit_fails_closed_when_git_home_unresolvable(tmp_path, monk
 
     with pytest.raises(RuntimeError, match="Failed to resolve safe Git HOME"):
         CandidateCommitter(manager).create_candidate_commit(contract, lease, verified)
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"task_id": "other-task"},
+        {"contract_hash": "0" * 64},
+        {"lease_id": "other-lease"},
+    ],
+)
+def test_candidate_commit_rejects_receipt_minted_for_another_identity(tmp_path, params):
+    contract, lease, verified, manager = _scenario(tmp_path)
+    foreign = replace(verified, **params)
+
+    with pytest.raises(RuntimeError, match="identity does not bind"):
+        CandidateCommitter(manager).create_candidate_commit(contract, lease, foreign)
+
+
+def test_candidate_commit_rejects_receipt_without_verifier_evidence(tmp_path):
+    contract, lease, verified, manager = _scenario(tmp_path)
+    assert contract.verifier_commands
+    empty = replace(verified, verifier_evidence=())
+
+    with pytest.raises(RuntimeError, match="no verifier evidence"):
+        CandidateCommitter(manager).create_candidate_commit(contract, lease, empty)
+
+
+def _assert_not_committed(lease, head_before):
+    assert _git(Path(lease.target_worktree), "rev-parse", "HEAD") == head_before
+
+
+def test_candidate_commit_accepts_receipt_that_exactly_binds_contract_verifiers(tmp_path):
+    contract, lease, verified, manager = _scenario(tmp_path)
+    assert verified.verifier_manifest_sha256 == CandidateVerifier.verifier_manifest_sha256(
+        contract.verifier_commands
+    )
+    assert [e.command for e in verified.verifier_evidence] == list(
+        CandidateVerifier.effective_verifier_manifest(contract.verifier_commands)
+    )
+
+    packet = CandidateCommitter(manager).create_candidate_commit(contract, lease, verified)
+
+    assert packet.candidate_commit_created is True
+    assert packet.promotion_status == "PENDING_HUMAN_APPROVAL"
+
+
+def test_candidate_commit_rejects_verifier_manifest_hash_mismatch(tmp_path):
+    contract, lease, verified, manager = _scenario(tmp_path)
+    head = _git(Path(lease.target_worktree), "rev-parse", "HEAD")
+    forged = replace(verified, verifier_manifest_sha256="deadbeef")
+
+    with pytest.raises(RuntimeError, match="verifier manifest does not bind"):
+        CandidateCommitter(manager).create_candidate_commit(contract, lease, forged)
+    _assert_not_committed(lease, head)
+
+
+def test_candidate_commit_rejects_evidence_count_mismatch(tmp_path):
+    contract, lease, verified, manager = _scenario(tmp_path)
+    head = _git(Path(lease.target_worktree), "rev-parse", "HEAD")
+    duplicated = replace(
+        verified, verifier_evidence=verified.verifier_evidence * 2
+    )
+
+    with pytest.raises(RuntimeError, match="does not cover the contract verifier commands"):
+        CandidateCommitter(manager).create_candidate_commit(contract, lease, duplicated)
+    _assert_not_committed(lease, head)
+
+
+def test_candidate_commit_rejects_evidence_for_a_different_command(tmp_path):
+    contract, lease, verified, manager = _scenario(tmp_path)
+    head = _git(Path(lease.target_worktree), "rev-parse", "HEAD")
+    unrelated = replace(verified.verifier_evidence[0], command="python3 -c pass")
+    forged = replace(verified, verifier_evidence=(unrelated,))
+
+    with pytest.raises(RuntimeError, match="does not cover the contract verifier commands"):
+        CandidateCommitter(manager).create_candidate_commit(contract, lease, forged)
+    _assert_not_committed(lease, head)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [{"status": "FAILED"}, {"exit_code": 1}, {"exit_code": None}],
+)
+def test_candidate_commit_rejects_failing_verifier_evidence(tmp_path, changes):
+    contract, lease, verified, manager = _scenario(tmp_path)
+    head = _git(Path(lease.target_worktree), "rev-parse", "HEAD")
+    failing = replace(verified.verifier_evidence[0], **changes)
+    forged = replace(verified, verifier_evidence=(failing,))
+
+    with pytest.raises(RuntimeError, match="not a passing result"):
+        CandidateCommitter(manager).create_candidate_commit(contract, lease, forged)
+    _assert_not_committed(lease, head)
+
+
+def test_candidate_commit_rejects_multi_verifier_contract_with_partial_unrelated_evidence(
+    tmp_path,
+):
+    """#1760 residual probe: 2 contract verifiers, 1 unrelated evidence entry, bogus manifest."""
+    contract, lease, verified, manager = _scenario(tmp_path)
+    head = _git(Path(lease.target_worktree), "rev-parse", "HEAD")
+    contract = SelfHostedTaskContract(
+        **{
+            **contract.model_dump(exclude={"contract_hash"}),
+            "verifier_commands": ["python3 -m pytest tests/", "python3 -m ruff check ."],
+        }
+    )
+    unrelated = replace(verified.verifier_evidence[0], command="python3 -c pass")
+    forged = replace(
+        verified,
+        contract_hash=contract.contract_hash,
+        verifier_evidence=(unrelated,),
+        verifier_manifest_sha256="deadbeef",
+    )
+
+    with pytest.raises(RuntimeError):
+        CandidateCommitter(manager).create_candidate_commit(contract, lease, forged)
+    _assert_not_committed(lease, head)

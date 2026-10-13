@@ -1,0 +1,4 @@
+[
+  {"rule_id": "wiring-policy-001", "condition": "wiring audit refund window", "action": "refund window is 30 days for the wiring audit fixture", "confidence": 0.9},
+  {"rule_id": "wiring-policy-002", "condition": "wiring audit shipping", "action": "shipping within 5 business days for the wiring audit fixture", "confidence": 0.8}
+]

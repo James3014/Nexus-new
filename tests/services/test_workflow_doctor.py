@@ -228,6 +228,33 @@ def test_outcome_unknown_operation_requires_reconcile() -> None:
     assert gate["code"] == "RECONCILE_OPERATION"
 
 
+def test_source_no_effect_reconciled_failure_releases_reconcile_gate() -> None:
+    operation = _no_operation()
+    operation["requested_id"] = "agyop_" + "2" * 32
+    operation["selected"] = {
+        "operation_id": operation["requested_id"],
+        "status": "FAILED",
+        "reconciliation": {
+            "result": "SOURCE_NO_DURABLE_EFFECT_PROVEN",
+            "reconciliation_scope": "SOURCE_ONLY",
+            "retry_permitted": True,
+        },
+    }
+
+    disposition, gate = doctor._derive_next_gate(
+        source=_base_source(),
+        runtime=_base_runtime(),
+        task={"status": "OBSERVED", "state": "open", "issue_number": 1274},
+        operation=operation,
+        pr={"status": "NOT_REQUESTED", "pr_number": None},
+        required_gates=[],
+        leases=_no_leases(),
+    )
+
+    assert disposition == "SAFE"
+    assert gate["code"] == "CONTINUE_BOUNDED_ISSUE_WORK"
+
+
 def test_quota_snapshot_projection_omits_email(tmp_path: Path) -> None:
     home = tmp_path
     path = home / ".nexus/agy-account-pool/quota-snapshot.json"
@@ -415,3 +442,660 @@ def test_build_parser_repo_root_default_is_none() -> None:
     parser = doctor.build_parser()
     args = parser.parse_args([])
     assert args.repo_root is None
+
+
+def test_workflow_doctor_reconcile_required_operation_projects_reconcile_gate() -> None:
+    """An operation in RECONCILE_REQUIRED triggers RECONCILE gate instead of WAIT or SAFE."""
+    op = _no_operation()
+    op["active"] = [
+        {"operation_id": "agyop_123", "phase": "RECONCILE_REQUIRED", "status": "RUNNING"}
+    ]
+    disposition, next_action = doctor._derive_next_gate(
+        source=_base_source(),
+        runtime=_base_runtime(),
+        task={"status": "OBSERVED", "state": "open", "issue_number": 1373},
+        operation=op,
+        pr={"status": "NONE", "pr_number": None},
+        required_gates=[],
+        leases=_no_leases(),
+    )
+    assert disposition == "RECONCILE"
+    assert next_action["code"] == "RECONCILE_OPERATION"
+    assert "agyop_123" in next_action["operation_ids"]
+
+
+def test_workflow_doctor_dead_wrapper_pid_projects_reconcile_gate() -> None:
+    """An active operation whose wrapper PID is dead triggers RECONCILE gate instead of WAIT."""
+    op = _no_operation()
+    op["active"] = [
+        {
+            "operation_id": "agyop_dead_wrapper",
+            "phase": "PROVIDER_RUNNING",
+            "status": "RUNNING",
+            "pid": 999_999_998,
+        }
+    ]
+    disposition, next_action = doctor._derive_next_gate(
+        source=_base_source(),
+        runtime=_base_runtime(),
+        task={"status": "OBSERVED", "state": "open", "issue_number": 1274},
+        operation=op,
+        pr={"status": "NONE", "pr_number": None},
+        required_gates=[],
+        leases=_no_leases(),
+    )
+    assert disposition == "RECONCILE"
+    assert next_action["code"] == "RECONCILE_OPERATION"
+    assert "agyop_dead_wrapper" in next_action["operation_ids"]
+
+
+def test_workflow_doctor_collects_claimed_at_and_consumer_id(tmp_path: Path) -> None:
+    """_collect_leases accurately reads claimed_at and consumer_id from receipt."""
+    leases_dir = tmp_path / ".nexus" / "agy-account-pool" / "leases"
+    leases_dir.mkdir(parents=True)
+    receipt_data = {
+        "account_alias_hash": "alias123",
+        "lease_id_hash": "lease456",
+        "consumer_id": "hcom_collab:1234:abc",
+        "pid": 5678,
+        "claimed_at": 1728000000.0,
+    }
+    (leases_dir / "alias123.receipt.json").write_text(json.dumps(receipt_data), encoding="utf-8")
+    collected = doctor._collect_leases(tmp_path)
+    assert len(collected["active"]) == 1
+    item = collected["active"][0]
+    assert item["account_alias_hash"] == "alias123"
+    assert item["lease_id_hash"] == "lease456"
+    assert item["consumer_id"] == "hcom_collab:1234:abc"
+    assert item["claimed_at"] == 1728000000.0
+
+
+# ---------------------------------------------------------------------------
+# Issue #1436 Wave 1 RED contract: false-completion projection
+# ---------------------------------------------------------------------------
+
+
+def _completion_layers(payload: dict) -> dict[str, dict]:
+    """Return completion rows without freezing the final public wrapper name."""
+    matrix = payload.get("completion_matrix") or payload.get("completion")
+    assert matrix is not None, (
+        "Issue #1436 requires a current read-only completion projection; "
+        "workflow doctor currently exposes no completion-layer view"
+    )
+    rows = matrix.get("layers") if isinstance(matrix, dict) else matrix
+    assert isinstance(rows, list), "completion projection must expose independent layer rows"
+    return {str(row["layer"]): row for row in rows}
+
+
+def _collect_with_observations(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    source: dict | None = None,
+    runtime: dict | None = None,
+    operation: dict | None = None,
+    pr: dict | None = None,
+    task: dict | None = None,
+) -> dict:
+    """Exercise collect_workflow_doctor through producer-shaped read-only observations."""
+    repository = "James3014/Nexus-new"
+    source = source or {
+        "status": "OBSERVED",
+        "repository": repository,
+        "github_main": "b" * 40,
+        "head": "b" * 40,
+        "head_is_github_main": True,
+    }
+    runtime = runtime or {
+        "status": "OBSERVED",
+        "state": "INSTALLED",
+        "installed_revision": "b" * 40,
+        "components": {},
+    }
+    operation = operation or _no_operation()
+    pr = pr or {"status": "NOT_REQUESTED", "pr_number": None}
+    task = task or {
+        "status": "OBSERVED",
+        "state": "open",
+        "issue_number": 1436,
+    }
+
+    monkeypatch.setattr(
+        doctor,
+        "_collect_source",
+        lambda *args, **kwargs: (dict(source), repository),
+    )
+    monkeypatch.setattr(doctor, "_collect_task", lambda *args, **kwargs: dict(task))
+    monkeypatch.setattr(
+        doctor,
+        "_collect_pr",
+        lambda *args, **kwargs: (dict(pr), [], [], []),
+    )
+    monkeypatch.setattr(doctor, "_collect_runtime", lambda *args, **kwargs: dict(runtime))
+    monkeypatch.setattr(
+        doctor,
+        "_collect_quota_snapshot",
+        lambda *args, **kwargs: {"status": "UNAVAILABLE", "accounts": []},
+    )
+    monkeypatch.setattr(
+        doctor,
+        "_collect_operations",
+        lambda *args, **kwargs: dict(operation),
+    )
+    monkeypatch.setattr(doctor, "_collect_leases", lambda *args, **kwargs: _no_leases())
+
+    return doctor.collect_workflow_doctor(
+        repo_root=tmp_path,
+        repository=repository,
+        issue_number=1436,
+        pr_number=pr.get("pr_number"),
+        home=tmp_path,
+    )
+
+
+def test_completion_projection_keeps_merged_integration_separate_from_runtime_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """PR integration evidence must not make runtime/native-entrypoint evidence green."""
+    payload = _collect_with_observations(
+        monkeypatch,
+        tmp_path,
+        runtime={
+            "status": "UNAVAILABLE",
+            "error": "NEXUS_HOST_SYNC_NOT_FOUND",
+            "components": {},
+        },
+        pr={
+            "status": "OBSERVED",
+            "state": "closed",
+            "merged": True,
+            "pr_number": 1437,
+            "head_sha": "b" * 40,
+            "merge_commit_sha": "b" * 40,
+        },
+    )
+
+    layers = _completion_layers(payload)
+
+    assert payload["completion_matrix"]["claim_ceiling"] == (
+        "READ_ONLY_PROJECTION_NO_COMPLETION_AUTHORITY"
+    )
+    assert layers["Integration"]["status"] == "PASS"
+    assert layers["Runtime"]["status"] != "PASS"
+    assert layers["Native / real entrypoint"]["status"] != "PASS"
+
+
+def test_completion_projection_closed_unmerged_pr_does_not_pass_integration(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A terminal PR without merge evidence must not count as integration PASS."""
+    payload = _collect_with_observations(
+        monkeypatch,
+        tmp_path,
+        pr={
+            "status": "OBSERVED",
+            "state": "closed",
+            "merged": False,
+            "merged_at": None,
+            "pr_number": 1437,
+            "head_sha": "b" * 40,
+            "merge_commit_sha": None,
+        },
+    )
+
+    integration = _completion_layers(payload)["Integration"]
+
+    assert integration["status"] != "PASS"
+    assert integration["gap"] == "MERGED_INTEGRATION_NOT_PROVEN"
+
+
+def test_completion_projection_does_not_reuse_main_runtime_for_open_pr_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Runtime aligned to main A must not satisfy open Candidate B."""
+    payload = _collect_with_observations(
+        monkeypatch,
+        tmp_path,
+        source={
+            "status": "OBSERVED",
+            "repository": "James3014/Nexus-new",
+            "github_main": "a" * 40,
+            "head": "b" * 40,
+            "head_is_github_main": False,
+        },
+        runtime={
+            "status": "OBSERVED",
+            "state": "INSTALLED",
+            "installed_revision": "a" * 40,
+            "components": {
+                "host_sync": {"status": "VERIFIED"},
+                "workflow_doctor": {"status": "VERIFIED"},
+            },
+        },
+        pr={
+            "status": "OBSERVED",
+            "state": "open",
+            "merged": False,
+            "pr_number": 1437,
+            "head_sha": "b" * 40,
+            "base_sha": "a" * 40,
+        },
+    )
+
+    layers = _completion_layers(payload)
+
+    assert layers["Install/package"]["status"] != "PASS"
+    assert layers["Runtime"]["status"] != "PASS"
+    assert layers["Install/package"]["revision"] == "a" * 40
+    assert layers["Install/package"]["gap"] == "CURRENT_INSTALL_BINDING_NOT_PROVEN"
+
+
+def test_completion_projection_accepts_runtime_bound_to_open_pr_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Exact installed Candidate B is valid runtime evidence even before merge."""
+    payload = _collect_with_observations(
+        monkeypatch,
+        tmp_path,
+        source={
+            "status": "OBSERVED",
+            "repository": "James3014/Nexus-new",
+            "github_main": "a" * 40,
+            "head": "b" * 40,
+            "head_is_github_main": False,
+        },
+        runtime={
+            "status": "OBSERVED",
+            "state": "INSTALLED",
+            "installed_revision": "b" * 40,
+            "components": {
+                "host_sync": {"status": "VERIFIED"},
+                "workflow_doctor": {"status": "VERIFIED"},
+            },
+        },
+        pr={
+            "status": "OBSERVED",
+            "state": "open",
+            "merged": False,
+            "pr_number": 1437,
+            "head_sha": "b" * 40,
+            "base_sha": "a" * 40,
+        },
+    )
+
+    layers = _completion_layers(payload)
+
+    assert layers["Install/package"]["status"] == "PASS"
+    assert layers["Runtime"]["status"] == "PASS"
+    assert layers["Install/package"]["revision"] == "b" * 40
+
+
+def test_completion_projection_binds_post_merge_runtime_to_merge_revision(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Merged PR runtime evidence binds to the integrated merge revision."""
+    payload = _collect_with_observations(
+        monkeypatch,
+        tmp_path,
+        source={
+            "status": "OBSERVED",
+            "repository": "James3014/Nexus-new",
+            "github_main": "c" * 40,
+            "head": "c" * 40,
+            "head_is_github_main": True,
+        },
+        runtime={
+            "status": "OBSERVED",
+            "state": "INSTALLED",
+            "installed_revision": "c" * 40,
+            "components": {
+                "host_sync": {"status": "VERIFIED"},
+                "workflow_doctor": {"status": "VERIFIED"},
+            },
+        },
+        pr={
+            "status": "OBSERVED",
+            "state": "closed",
+            "merged": True,
+            "merged_at": "2026-10-05T05:00:00Z",
+            "pr_number": 1437,
+            "head_sha": "b" * 40,
+            "merge_commit_sha": "c" * 40,
+        },
+    )
+
+    layers = _completion_layers(payload)
+
+    assert layers["Integration"]["status"] == "PASS"
+    assert layers["Integration"]["revision"] == "c" * 40
+    assert layers["Install/package"]["status"] == "PASS"
+    assert layers["Runtime"]["status"] == "PASS"
+    assert layers["Install/package"]["evidence"]["subject_revision"] == "c" * 40
+
+
+def test_completion_projection_rejects_pass_bound_to_previous_candidate_revision(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A PASS for Candidate A must not silently satisfy changed Candidate B."""
+    operation = _no_operation()
+    operation["selected"] = {
+        "operation_id": "agyop_" + "1" * 32,
+        "status": "COMPLETED",
+        "phase": "TERMINAL",
+        "review_candidate_head": "a" * 40,
+        "candidate_digest": "c" * 64,
+        "current_candidate_digest": "d" * 64,
+        "review_state": "TERMINAL",
+        "review_verdict": "ACCEPT",
+        "review_applicable": False,
+        "subject_stable": False,
+    }
+
+    payload = _collect_with_observations(
+        monkeypatch,
+        tmp_path,
+        operation=operation,
+    )
+    layers = _completion_layers(payload)
+
+    acceptance = layers["Independent acceptance"]
+    assert acceptance["status"] != "PASS"
+    assert acceptance["revision"] == "a" * 40
+    assert acceptance["freshness"] == "STALE"
+    assert acceptance["gap"] == "REVIEW_SUBJECT_NOT_CURRENT"
+
+
+def test_pre_gate_review_cannot_project_independent_acceptance_pass(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A review-only PRE-GATE may not mint post-Candidate acceptance truth."""
+    operation = _no_operation()
+    operation["selected"] = {
+        "operation_id": "agyop_" + "2" * 32,
+        "status": "COMPLETED",
+        "phase": "TERMINAL",
+        "review_effect_id": "e" * 64,
+        "review_candidate_head": "b" * 40,
+        "candidate_digest": "d" * 64,
+        "current_candidate_digest": "d" * 64,
+        "review_state": "TERMINAL",
+        "review_verdict": "ACCEPT",
+        "review_applicable": True,
+        "subject_stable": True,
+    }
+
+    payload = _collect_with_observations(
+        monkeypatch,
+        tmp_path,
+        operation=operation,
+    )
+    layers = _completion_layers(payload)
+
+    acceptance = layers["Independent acceptance"]
+    assert acceptance["status"] != "PASS"
+    assert acceptance["source"] == "direct_operation_review"
+    assert acceptance["gap"] == "INDEPENDENT_ACCEPTANCE_AUTHORITY_NOT_OBSERVED"
+
+
+def test_completed_terminal_operation_with_dead_wrapper_is_not_reconcile_required(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(doctor, "_process_alive", lambda _pid: False)
+    operation = _no_operation()
+    operation["requested_id"] = "agyop_completed"
+    operation["selected"] = {
+        "operation_id": "agyop_completed",
+        "status": "COMPLETED",
+        "phase": "TERMINAL",
+        "pid": 4242,
+        "provider_process_state": "EXITED",
+        "has_unresolved_external_effect": False,
+    }
+
+    disposition, gate = doctor._derive_next_gate(
+        source=_base_source(),
+        runtime=_base_runtime(),
+        task={"status": "NOT_REQUESTED"},
+        operation=operation,
+        pr={
+            "status": "OBSERVED",
+            "state": "open",
+            "draft": False,
+            "mergeable": True,
+            "base_sha": "a" * 40,
+            "head_sha": "b" * 40,
+            "pr_number": 1274,
+        },
+        required_gates=[],
+        leases=_no_leases(),
+    )
+
+    assert disposition == "SAFE"
+    assert gate["code"] == "EXACT_HEAD_MERGE_GATE"
+
+
+def test_active_operation_with_dead_wrapper_still_requires_reconciliation(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(doctor, "_process_alive", lambda _pid: False)
+    operation = _no_operation()
+    operation["requested_id"] = "agyop_running"
+    operation["selected"] = {
+        "operation_id": "agyop_running",
+        "status": "RUNNING",
+        "phase": "EXECUTING",
+        "pid": 4242,
+    }
+
+    disposition, gate = doctor._derive_next_gate(
+        source=_base_source(),
+        runtime=_base_runtime(),
+        task={"status": "NOT_REQUESTED"},
+        operation=operation,
+        pr={"status": "NOT_REQUESTED", "pr_number": None},
+        required_gates=[],
+        leases=_no_leases(),
+    )
+
+    assert disposition == "RECONCILE"
+    assert gate["code"] == "RECONCILE_OPERATION"
+
+
+def test_cross_repo_runtime_binding_valid_is_safe() -> None:
+    runtime = _base_runtime()
+    runtime["installed_revision"] = "a" * 40
+    runtime["source_revision_match"] = True
+    runtime["components"]["workflow_source_binding"] = {
+        "status": "VERIFIED",
+        "repository": "james3014/nexus-new",
+    }
+
+    source = _base_source()
+    source["repository"] = "James3014/repository-intelligence-engine"
+    source["github_main"] = "b" * 40
+
+    disposition, gate = doctor._derive_next_gate(
+        source=source,
+        runtime=runtime,
+        task={"status": "OBSERVED", "state": "closed", "issue_number": 1599},
+        operation=_no_operation(),
+        pr={"status": "NOT_REQUESTED", "pr_number": None},
+        required_gates=[],
+        leases=_no_leases(),
+    )
+
+    assert disposition == "SAFE"
+    assert gate["code"] == "NO_PENDING_GATE"
+
+
+def test_cross_repo_runtime_binding_missing_fails_closed() -> None:
+    runtime = _base_runtime()
+    runtime["installed_revision"] = "a" * 40
+
+    source = _base_source()
+    source["repository"] = "James3014/repository-intelligence-engine"
+    source["github_main"] = "b" * 40
+
+    disposition, gate = doctor._derive_next_gate(
+        source=source,
+        runtime=runtime,
+        task={"status": "OBSERVED", "state": "closed", "issue_number": 1599},
+        operation=_no_operation(),
+        pr={"status": "NOT_REQUESTED", "pr_number": None},
+        required_gates=[],
+        leases=_no_leases(),
+    )
+
+    assert disposition == "BLOCKED"
+    assert gate["code"] == "RUNTIME_SOURCE_BINDING_UNVERIFIED"
+
+
+def test_cross_repo_runtime_binding_unverified_fails_closed() -> None:
+    runtime = _base_runtime()
+    runtime["installed_revision"] = "a" * 40
+    runtime["components"]["workflow_source_binding"] = {
+        "status": "UNKNOWN",
+        "repository": "james3014/nexus-new",
+    }
+
+    source = _base_source()
+    source["repository"] = "James3014/repository-intelligence-engine"
+    source["github_main"] = "b" * 40
+
+    disposition, gate = doctor._derive_next_gate(
+        source=source,
+        runtime=runtime,
+        task={"status": "OBSERVED", "state": "closed", "issue_number": 1599},
+        operation=_no_operation(),
+        pr={"status": "NOT_REQUESTED", "pr_number": None},
+        required_gates=[],
+        leases=_no_leases(),
+    )
+
+    assert disposition == "BLOCKED"
+    assert gate["code"] == "RUNTIME_SOURCE_BINDING_UNVERIFIED"
+
+
+def test_same_repo_runtime_drift_preserves_sync_behavior() -> None:
+    runtime = _base_runtime()
+    runtime["installed_revision"] = "a" * 40
+    runtime["components"]["workflow_source_binding"] = {
+        "status": "VERIFIED",
+        "repository": "James3014/Nexus-new",
+    }
+
+    source = _base_source()
+    source["repository"] = "james3014/nexus-new"
+    source["github_main"] = "b" * 40
+
+    disposition, gate = doctor._derive_next_gate(
+        source=source,
+        runtime=runtime,
+        task={"status": "OBSERVED", "state": "closed", "issue_number": 1599},
+        operation=_no_operation(),
+        pr={"status": "NOT_REQUESTED", "pr_number": None},
+        required_gates=[],
+        leases=_no_leases(),
+    )
+
+    assert disposition == "RECONCILE"
+    assert gate["code"] == "SYNC_RUNTIME_TO_CURRENT_MAIN"
+
+
+def test_cross_repo_report_does_not_project_target_main_as_runtime_main(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source = {
+        "status": "OBSERVED",
+        "repository": "James3014/repository-intelligence-engine",
+        "github_main": "b" * 40,
+        "head": "c" * 40,
+        "head_is_github_main": False,
+    }
+    runtime = {
+        "status": "OBSERVED",
+        "state": "INSTALLED",
+        "installed_revision": "a" * 40,
+        "installed_bundle_sha256": "bundle-a",
+        "source_revision_match": True,
+        "components": {
+            "host_sync": {"status": "VERIFIED"},
+            "workflow_doctor": {"status": "VERIFIED"},
+            "workflow_source_binding": {
+                "status": "VERIFIED",
+                "repository": "james3014/nexus-new",
+            },
+        },
+        "last_sync": {
+            "state": "ALIGNED",
+            "desired_revision": "a" * 40,
+            "desired_bundle_sha256": "bundle-a",
+            "installed_bundle_sha256": "bundle-a",
+        },
+    }
+
+    payload = _collect_with_observations(
+        monkeypatch,
+        tmp_path,
+        source=source,
+        runtime=runtime,
+        task={"status": "OBSERVED", "state": "closed", "issue_number": 1599},
+    )
+
+    alignment = payload["runtime"]["current_main_alignment"]
+    assert alignment["status"] == "NOT_APPLICABLE"
+    assert alignment["basis"] == "CROSS_REPOSITORY_SOURCE_BINDING"
+    assert alignment["target_repository"] == "James3014/repository-intelligence-engine"
+    assert alignment["runtime_source_repository"] == "james3014/nexus-new"
+    assert alignment["current_main"] is None
+
+    install = _completion_layers(payload)["Install/package"]
+    assert install["evidence"]["alignment"] == "NOT_APPLICABLE"
+    assert install["evidence"]["alignment_basis"] == "CROSS_REPOSITORY_SOURCE_BINDING"
+
+
+def test_same_repo_report_preserves_runtime_main_drift_projection(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source = {
+        "status": "OBSERVED",
+        "repository": "James3014/Nexus-new",
+        "github_main": "b" * 40,
+        "head": "b" * 40,
+        "head_is_github_main": True,
+    }
+    runtime = {
+        "status": "OBSERVED",
+        "state": "INSTALLED",
+        "installed_revision": "a" * 40,
+        "components": {
+            "host_sync": {"status": "VERIFIED"},
+            "workflow_doctor": {"status": "VERIFIED"},
+            "workflow_source_binding": {
+                "status": "VERIFIED",
+                "repository": "james3014/nexus-new",
+            },
+        },
+    }
+
+    payload = _collect_with_observations(
+        monkeypatch,
+        tmp_path,
+        source=source,
+        runtime=runtime,
+        task={"status": "OBSERVED", "state": "closed", "issue_number": 1599},
+    )
+
+    alignment = payload["runtime"]["current_main_alignment"]
+    assert alignment["status"] == "DRIFT"
+    assert alignment["basis"] == "NO_CURRENT_MAIN_BINDING"
+    assert alignment["current_main"] == "b" * 40

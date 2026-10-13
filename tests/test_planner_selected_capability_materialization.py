@@ -200,7 +200,7 @@ def test_run_once_uses_shared_materialization_helper(monkeypatch):
 
 
 def test_run_once_preserves_structured_seal_failure_receipt(monkeypatch):
-    import nexus_runtime_support_candidate.composition as bundle_module
+    import nexus_runtime.support.composition as bundle_module
 
     from nexus.services import runtime_compat
     from tests.services.test_unified_runtime import _Planner, _request

@@ -31,6 +31,11 @@ class LocalModelProviderRequest:
     # N30R-V3.1: Linkage metrics
     attempt_id: str = ""
     execution_profile: str = ""
+    # HealPipeline system/user split. When user_prompt is set, the Ollama edge sends
+    # system_prompt as the system message and user_prompt as the prompt. ``prompt`` stays the
+    # concatenated text that ledgers hash and non-Ollama providers read.
+    system_prompt: str = ""
+    user_prompt: str | None = None
 
 
 @dataclass(frozen=True)
@@ -494,13 +499,14 @@ class OllamaLocalModelProvider(LocalModelProvider):
         resolution = resolve_local_model_name(requested_model)
         model_name = resolution.resolved_name
 
+        split_prompt = request.user_prompt is not None
         if request.api_type == "chat":
             raw_prompt = request.prompt
-            system_content = ""
-            user_content = raw_prompt
+            system_content = request.system_prompt if split_prompt else ""
+            user_content = request.user_prompt if split_prompt else raw_prompt
             sys_marker = "[SYSTEM]\n"
             user_marker = "\n\n[USER]\n"
-            if sys_marker in raw_prompt and user_marker in raw_prompt:
+            if not split_prompt and sys_marker in raw_prompt and user_marker in raw_prompt:
                 parts = raw_prompt.split(sys_marker, 1)
                 after_sys = parts[1]
                 sys_end = after_sys.find(user_marker)
@@ -521,9 +527,11 @@ class OllamaLocalModelProvider(LocalModelProvider):
             url = os.environ.get("NEXUS_OLLAMA_URL", "http://127.0.0.1:11434/api/generate").strip()
             payload = {
                 "model": model_name,
-                "prompt": request.prompt,
+                "prompt": request.user_prompt if split_prompt else request.prompt,
                 "stream": False
             }
+            if split_prompt and request.system_prompt:
+                payload["system"] = request.system_prompt
         if request.options:
             payload["options"] = request.options
         if request.think is not None:

@@ -7,6 +7,15 @@ DEFAULT_RELATIVE_ROOT = Path(".nexus") / "research" / "clm_system_one" / "candid
 CANONICAL_STATE_RELATIVE_ROOT = Path("research") / "clm_system_one" / "candidate_evidence"
 
 
+def explicit_research_evidence_root_configured() -> bool:
+    """Return whether durable shared research evidence has an explicit binding."""
+
+    return bool(
+        os.getenv("NEXUS_CLM_CANDIDATE_EVIDENCE_ROOT", "").strip()
+        or os.getenv("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR", "").strip()
+    )
+
+
 def resolve_research_evidence_root(repo_root: str | Path) -> Path:
     """Resolve the shared System-One research evidence root.
 

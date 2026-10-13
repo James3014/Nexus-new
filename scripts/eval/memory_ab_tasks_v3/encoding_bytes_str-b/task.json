@@ -1,0 +1,8 @@
+{
+  "id": "encoding_bytes_str-b",
+  "bug_class": "encoding_bytes_str",
+  "variant": "b",
+  "problem_statement": "fingerprint(['user', '42']) raises TypeError for a list of plain strings. Expected: str parts are hashed as UTF-8 and bytes parts unchanged, joined by a 0x1f byte, and the sha256 hex digest of the joined bytes is returned.",
+  "target_file": "cache_key.py",
+  "repro_file": "repro.py"
+}

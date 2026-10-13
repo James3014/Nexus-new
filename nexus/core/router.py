@@ -5,6 +5,7 @@ import os
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 from pathlib import Path
+from nexus.services.lancedb_roots import MEMORY_INDEX, resolve_lancedb_root
 from nexus.learning.learning_closure_effectiveness import (
     normalize_learning_episode,
     append_learning_episode,
@@ -199,7 +200,7 @@ class SkillsRouter:
                 return {"status": "SUCCESS", "hit_rate": 1.0 if results else 0.0, "results": results, "tenant": tenant_id}
             from nexus.services.memory_repository import MemoryRepository
             from pathlib import Path
-            repo = MemoryRepository(Path(self.project_root) / ".nexus" / "memory" / "memory_index.lancedb")
+            repo = MemoryRepository(resolve_lancedb_root(MEMORY_INDEX, Path(self.project_root), honor_env=False))
             tables = repo.list_tables()
             if not tables:
                 return {"status": "SUCCESS", "hit_rate": 0.0, "results": [], "tenant": tenant_id}
@@ -316,7 +317,9 @@ class SkillsRouter:
         receipt_dicts = []
         for receipt in receipts:
             if hasattr(receipt, "to_dict"):
-                receipt_dicts.append(receipt.to_dict())
+                from nexus.engine.capability_receipts import attested_receipt_dict
+
+                receipt_dicts.append(attested_receipt_dict(receipt))
             elif hasattr(receipt, "__dict__"):
                 receipt_dicts.append(dict(vars(receipt)))
             elif isinstance(receipt, dict):

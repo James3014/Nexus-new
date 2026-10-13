@@ -342,6 +342,13 @@ class SkillRegistry:
             row = cursor.fetchone()
             return dict(row) if row else None
 
+    def list_all(self) -> List[Dict[str, Any]]:
+        """Return every registered skill row, ordered by id."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute("SELECT * FROM skills ORDER BY id ASC")
+            return [dict(row) for row in cursor.fetchall()]
+
     def get_stats(self) -> Dict[str, Any]:
         """Fast aggregation without scanning file system."""
         try:

@@ -1,6 +1,8 @@
 import json
 import subprocess
 
+import pytest
+
 from scripts.ops import github_orchestration_evidence as cli
 from tests.nexus.orchestrator.test_github_orchestration import _compat_projection_inputs
 
@@ -65,6 +67,7 @@ def test_collect_from_github_calls_canonical_builder_with_raw_evidence(monkeypat
             return {
                 "body": values["acceptance_comment_body"],
                 "user": {"login": "James3014"},
+                "issue_url": "https://api.github.com/repos/James3014/Nexus-new/issues/1210",
             }
         if endpoint.endswith("/rulesets"):
             return [{"id": 77, "enforcement": "active"}]
@@ -123,3 +126,36 @@ def test_required_check_discovery_fails_when_ruleset_has_no_checks(monkeypatch):
         assert str(exc) == "REQUIRED_CHECK_STATE_UNPROVEN"
     else:
         raise AssertionError("missing required checks must fail closed")
+
+
+def test_collect_from_github_rejects_acceptance_comment_from_another_pr(monkeypatch):
+    def fake_gh_json(endpoint):
+        if endpoint.endswith("/pulls/1210"):
+            return {"body": "x", "head": {"sha": "a" * 40}}
+        if endpoint.endswith("/issues/comments/99"):
+            return {
+                "body": "Verdict: **BLOCKERS: none**",
+                "user": {"login": "reviewer"},
+                "issue_url": "https://api.github.com/repos/James3014/Nexus-new/issues/777",
+            }
+        raise AssertionError(endpoint)
+
+    monkeypatch.setattr(cli, "_gh_json", fake_gh_json)
+    for name in (
+        "governed_evidence_task_card_path",
+        "_content_bytes",
+        "_latest_check_observations",
+        "_trusted_run_id",
+        "_impact_artifact_id",
+    ):
+        monkeypatch.setattr(cli, name, lambda *args, **kwargs: "x")
+    monkeypatch.setattr(cli, "_trusted_artifact_ids", lambda *args, **kwargs: ("c", "v"))
+    monkeypatch.setattr(cli, "_artifact_member", lambda *args, **kwargs: b"{}")
+    with pytest.raises(ValueError, match="INDEPENDENT_ACCEPTANCE_SUBJECT_MISMATCH"):
+        cli.collect_from_github(
+            repository="James3014/Nexus-new",
+            issue_number=1211,
+            pull_request_number=1210,
+            acceptance_comment_id=99,
+            implementer="coordinator-implementer",
+        )

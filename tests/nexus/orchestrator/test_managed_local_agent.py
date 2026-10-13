@@ -322,6 +322,7 @@ def test_c7_reconcile_preserves_durable_binding(tmp_path: Path):
         target_root=str(tmp_path / "targets"),
         ambient_core_port=port,
         core_envelope_required=True,
+        verifier_commands=("python -c pass",),
     )
     launcher.launch_managed_agent(req)
     reconcile = launcher.reconcile_attempt("c7-reconcile-durable")
@@ -386,6 +387,7 @@ def test_c10_provider_neutrality(tmp_path: Path, provider: str):
         target_root=str(tmp_path / f"targets-{provider}"),
         ambient_core_port=port,
         core_envelope_required=True,
+        verifier_commands=("python -c pass",),
     )
     receipt = launcher.launch_managed_agent(req)
     assert receipt.terminal_status == "PENDING_HUMAN_APPROVAL"

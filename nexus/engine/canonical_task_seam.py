@@ -8,6 +8,9 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
+from nexus.core.repo_root import REPO_ROOT
+
+KNOWN_WORKFORCE_CONSUMERS = frozenset({"", "external_intelligence"})
 _FEATURE_INTENT_TOKENS = frozenset({"build", "create", "add", "implement", "feature"})
 _FEATURE_INTENT_TOKEN_RE = re.compile(r"(?<!\w)([A-Za-z]+)(?!\w)")
 
@@ -424,6 +427,7 @@ def _resolve_policy_workforce_bindings(
     allowed_files: tuple[str, ...],
     verifier_command: tuple[str, ...],
     campaign_id: str = "",
+    consumer: str = "",
 ) -> tuple[dict[str, Any], dict[str, str]]:
     """Resolve Planner demands through the tracked Workforce policy.
 
@@ -432,7 +436,8 @@ def _resolve_policy_workforce_bindings(
     only Workforce Admission evaluates that mapped identity's eligibility.
 
     Campaign resolution is exact-match only; blank, missing, prefixed,
-    or unrelated campaign IDs use the global route.
+    or unrelated campaign IDs use the global route.  Consumer resolution is
+    exact-match only as well; a blank consumer uses the global route.
     """
     from nexus.services.model_workforce_policy import WorkforcePolicyLoader
 
@@ -464,8 +469,8 @@ def _resolve_policy_workforce_bindings(
             raise ValueError(f"canonical_workforce_demand_conflict:{channel}")
         seen_channels.add(channel)
         if channel == "online":
-            # Use campaign-aware resolution for online channel
-            worker_id = policy.resolve_route(role, campaign_id=campaign_id)
+            # Use campaign- and consumer-aware resolution for online channel
+            worker_id = policy.resolve_route(role, campaign_id=campaign_id, consumer=consumer)
         else:
             route_group_name = "local_first" if channel == "local" else channel
             route_group = snapshot.routing.get(route_group_name)
@@ -493,12 +498,22 @@ def build_canonical_planner_admission(
     verifier_command: tuple[str, ...],
     task_card_identity: VerifiedTaskCardIdentity,
     campaign_identity: VerifiedCampaignIdentity | None = None,
+    workforce_consumer: str = "",
 ) -> dict[str, Any]:
-    """Run the sole planner and current Workforce Admission for one gateway task."""
+    """Run the sole planner and current Workforce Admission for one gateway task.
+
+    ``workforce_consumer`` is exact-match only: ``""`` (global route) or one of
+    ``KNOWN_WORKFORCE_CONSUMERS``; anything else is rejected before planning.
+    """
     from nexus.contracts.canonical_execution import CanonicalTaskContext
     from nexus.services.model_workforce_policy import WorkforcePolicyLoader
     from nexus.services.runtime_workforce_admission import evaluate_runtime_workforce_admission
 
+    if (
+        not isinstance(workforce_consumer, str)
+        or workforce_consumer not in KNOWN_WORKFORCE_CONSUMERS
+    ):
+        raise ValueError("canonical_workforce_consumer_unknown")
     if not isinstance(task_card_identity, VerifiedTaskCardIdentity):
         raise ValueError("canonical_task_card_identity_unverified")
     if task_card_identity.task_id != task_id:
@@ -524,6 +539,7 @@ def build_canonical_planner_admission(
     candidate_generation_only = (
         task_card_campaign_id == "open-swe-resident-five-repo-canary-20260908"
         or verified_campaign_id == "github-issue-982-wave-b-20260919"
+        or workforce_consumer == "external_intelligence"
     )
     context = CanonicalTaskContext(
         task_id=str(task_id),
@@ -554,7 +570,7 @@ def build_canonical_planner_admission(
     )
     from nexus.engine.canonical_execution import plan_canonical_task_bundle
 
-    bundle = plan_canonical_task_bundle(context)
+    bundle = plan_canonical_task_bundle(context, shared_playbook_root=REPO_ROOT)
     planner_output = bundle.to_dict()
     plan_payload = planner_output["plan_payload"]
     demands = (plan_payload.get("signal_snapshot") or {}).get("workforce_demands")
@@ -567,6 +583,7 @@ def build_canonical_planner_admission(
         allowed_files=allowed_files,
         verifier_command=verifier_command,
         campaign_id=campaign_id,
+        consumer=workforce_consumer,
     )
     runtime_bindings: dict[str, Any] = {}
     for channel, policy_binding in policy_bindings.items():
@@ -797,7 +814,9 @@ def execute_canonical_product_task(
         codeintel=codeintel,
         budget=runtime_budget,
     )
-    bundle = plan_canonical_task_bundle(canonical_context)
+    bundle = plan_canonical_task_bundle(
+        canonical_context, shared_playbook_root=REPO_ROOT
+    )
     plan_payload = bundle.to_dict()["plan_payload"]
     bindings, policy_providers = _resolve_policy_workforce_bindings(
         plan_payload,

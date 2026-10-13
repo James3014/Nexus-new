@@ -94,3 +94,29 @@ def test_bench_effort_cli_translates_action_errors(monkeypatch, tmp_path: Path):
 
     assert result.exit_code == 6
     assert "Error: bench effort unavailable" in result.output
+
+
+def test_effort_roi_report_from_real_outcome_events(tmp_path: Path):
+    """Default runner reads skill outcome events instead of crashing."""
+    import json
+
+    events = tmp_path / ".nexus" / "metrics" / "skill_outcome_events.jsonl"
+    events.parent.mkdir(parents=True)
+    rows = [
+        {"effort_level": "low", "pass": True},
+        {"effort_level": "low", "pass": False},
+        {"effort_level": "high", "pass": True, "duration_sec": 4.0},
+    ]
+    events.write_text("\n".join(json.dumps(r) for r in rows) + "\nnot-json\n", encoding="utf-8")
+
+    report = get_effort_roi_report(tmp_path)
+
+    assert report == {
+        "high": EffortRoiRow(success_rate=1.0, avg_duration_sec=4.0, count=1),
+        "low": EffortRoiRow(success_rate=0.5, avg_duration_sec=None, count=2),
+    }
+    assert "  Avg Duration: n/a" in render_effort_roi_report(report)
+
+
+def test_effort_roi_report_without_events_is_empty(tmp_path: Path):
+    assert get_effort_roi_report(tmp_path) == {}

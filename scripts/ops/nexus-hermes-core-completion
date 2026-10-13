@@ -1,0 +1,846 @@
+#!/usr/bin/env python3
+"""Thin standalone Core completion adapter for Hermes (Issues #1417 / #1419).
+
+Evaluates whether external-worker work products satisfy canonical nexus-core
+Completion Core contracts. Never certifies production, merge, or release;
+it only deterministically derives completion evidence sufficiency and binds
+exact Core revision and verdict hashes.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+WORK_PRODUCT_ENVELOPE_SCHEMA = "nexus.hermes_work_product_envelope.v1"
+CORE_COMPLETION_RESULT_SCHEMA = "nexus.hermes_core_completion_result.v1"
+CORE_COMPLETION_CLAIM_CEILING = "HERMES_CORE_COMPLETION_EXACT_VERIFIED_ONLY"
+HASH_PREFIX = "sha256:"
+
+_RUNNER_CODE = r"""
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(sys.stdin.read())
+
+from product.evidence import (
+    AcceptanceContract,
+    ChangeSet,
+    VerificationPlan,
+    EvidenceBundle,
+    Observation,
+    ObservationStatus,
+)
+from product.completion import (
+    CompletionClaim,
+    analyze_completion_evidence,
+    validate_completion_evidence_analysis,
+)
+
+c_data = payload["contract"]
+contract = AcceptanceContract(
+    contract_id=c_data["contract_id"],
+    requirements_hash=c_data["requirements_hash"],
+    required_verifier_ids=tuple(c_data["required_verifier_ids"]),
+    allowed_paths=tuple(c_data["allowed_paths"]),
+    deletion_policy=c_data["deletion_policy"],
+)
+
+cs_data = payload["change_set"]
+change_set = ChangeSet(
+    change_set_id=cs_data["change_set_id"],
+    source_revision=cs_data["source_revision"],
+    target_revision=cs_data["target_revision"],
+    diff_hash=cs_data["diff_hash"],
+    paths=tuple(cs_data["paths"]),
+    deleted_paths=tuple(cs_data.get("deleted_paths", ())),
+)
+
+p_data = payload["plan"]
+plan = VerificationPlan(
+    plan_id=p_data["plan_id"],
+    acceptance_contract_hash=contract.hash,
+    change_set_hash=change_set.hash,
+    required_verifier_ids=tuple(p_data["required_verifier_ids"]),
+)
+
+obs_list = []
+for o in payload["evidence"]["observations"]:
+    obs_list.append(
+        Observation(
+            verifier_id=o["verifier_id"],
+            artifact_id=o["artifact_id"],
+            artifact_hash=o["artifact_hash"],
+            status=ObservationStatus(o["status"]),
+        )
+    )
+
+evidence = EvidenceBundle(
+    bundle_id=payload["evidence"]["bundle_id"],
+    acceptance_contract_hash=contract.hash,
+    change_set_hash=change_set.hash,
+    verification_plan_hash=plan.hash,
+    observations=tuple(obs_list),
+)
+
+cl_data = payload["claim"]
+claim = None
+if cl_data is not None:
+    claim = CompletionClaim(
+        claim_id=cl_data["claim_id"],
+        target_revision=cl_data["target_revision"],
+        content_hashes=tuple((p, h) for p, h in cl_data["content_hashes"]),
+        verified_artifacts=tuple((v, a, p) for v, a, p in cl_data["verified_artifacts"]),
+        asserted_by=cl_data["asserted_by"],
+        claimed_complete=cl_data.get("claimed_complete", True),
+    )
+
+analysis = analyze_completion_evidence(claim, contract, change_set, plan, evidence)
+is_valid = validate_completion_evidence_analysis(analysis, claim, contract, change_set, plan, evidence)
+
+out = {
+    "claims_complete": analysis.claims_complete,
+    "claims_verified": analysis.claims_verified,
+    "verification_applies": analysis.verification_applies,
+    "analysis_hash": analysis.hash,
+    "reason_codes": list(analysis.reason_codes),
+    "dispositions": [
+        {
+            "verifier_id": d.verifier_id,
+            "artifact_id": d.artifact_id,
+            "path": d.path,
+            "status": d.status.value,
+            "disposition": d.disposition.value,
+            "reason_codes": list(d.reason_codes),
+        }
+        for d in analysis.dispositions
+    ],
+    "is_valid": is_valid,
+    "core_module_path": str(Path(sys.modules["product"].__file__).resolve()),
+}
+print(json.dumps(out))
+"""
+
+
+class CoreCompletionError(Exception):
+    """Raised when Core completion fails closed."""
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def canonical_bytes(value: Any) -> bytes:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def canonical_hash(value: Any) -> str:
+    return HASH_PREFIX + hashlib.sha256(canonical_bytes(value)).hexdigest()
+
+
+def read_operation_evidence(
+    operation_id: str,
+    *,
+    dispatch_bin: str | None = None,
+) -> dict[str, Any]:
+    """Read the canonical public operation journal through nexus-agy-dispatch."""
+    binary = dispatch_bin or os.environ.get(
+        "NEXUS_AGY_DISPATCH_BIN",
+        str(Path.home() / ".local/bin/nexus-agy-dispatch"),
+    )
+    try:
+        proc = subprocess.run(
+            [binary, "--status", operation_id],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise CoreCompletionError("OPERATION_EVIDENCE_TIMEOUT") from exc
+    except OSError as exc:
+        raise CoreCompletionError(f"OPERATION_EVIDENCE_UNAVAILABLE:{type(exc).__name__}") from exc
+    if proc.returncode != 0:
+        raise CoreCompletionError(
+            f"OPERATION_EVIDENCE_UNAVAILABLE:{proc.stderr.strip() or proc.stdout.strip()}"
+        )
+    try:
+        payload = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise CoreCompletionError("OPERATION_EVIDENCE_MALFORMED") from exc
+    if not isinstance(payload, dict):
+        raise CoreCompletionError("OPERATION_EVIDENCE_MALFORMED")
+    return payload
+
+
+def validate_operation_evidence(
+    evidence: dict[str, Any] | None,
+    *,
+    expected_operation_id: str,
+    expected_source_revision: str | None = None,
+) -> list[str]:
+    """Validate canonical dispatcher/journal facts without re-owning them."""
+    errors: list[str] = []
+    if not isinstance(evidence, dict):
+        return ["OPERATION_EVIDENCE_MISSING"]
+    if evidence.get("schema") != "nexus.agy_operation.v1":
+        errors.append("OPERATION_EVIDENCE_SCHEMA_MISMATCH")
+    if evidence.get("operation_id") != expected_operation_id:
+        errors.append("OPERATION_EVIDENCE_ID_MISMATCH")
+    if evidence.get("status") != "COMPLETED" or evidence.get("phase") != "TERMINAL":
+        errors.append("OPERATION_NOT_COMPLETED")
+    if evidence.get("exit_code") != 0:
+        errors.append("OPERATION_EXIT_NONZERO")
+    if evidence.get("has_unresolved_external_effect") is not False:
+        errors.append("OPERATION_EXTERNAL_EFFECT_UNRESOLVED")
+
+    permission_sha = evidence.get("permission_profile_sha256")
+    if (
+        not isinstance(permission_sha, str)
+        or len(permission_sha) != 64
+        or any(ch not in "0123456789abcdef" for ch in permission_sha)
+    ):
+        errors.append("OPERATION_PERMISSION_PROFILE_MISSING")
+    if not isinstance(evidence.get("permission_profile_kind"), str):
+        errors.append("OPERATION_PERMISSION_PROFILE_KIND_MISSING")
+    perms = evidence.get("effective_permissions")
+    if (
+        not isinstance(perms, dict)
+        or not isinstance(perms.get("allow"), list)
+        or not isinstance(perms.get("deny"), list)
+    ):
+        errors.append("OPERATION_EFFECTIVE_PERMISSIONS_MISSING")
+
+    if evidence.get("scope_validation_state") not in {
+        "UNCONSTRAINED",
+        "VERIFIED_IN_SCOPE",
+    }:
+        errors.append("OPERATION_SCOPE_NOT_VERIFIED")
+    if evidence.get("scope_violations") != []:
+        errors.append("OPERATION_SCOPE_VIOLATION")
+    if evidence.get("source_attribution_state") != "ATTRIBUTED":
+        errors.append("OPERATION_SOURCE_ATTRIBUTION_UNVERIFIED")
+    if (
+        expected_source_revision
+        and evidence.get("base_head")
+        and evidence.get("base_head") != expected_source_revision
+    ):
+        errors.append("OPERATION_SOURCE_REVISION_MISMATCH")
+    return errors
+
+
+def _is_valid_hash(value: Any) -> bool:
+    if not isinstance(value, str) or not value.startswith(HASH_PREFIX):
+        return False
+    tail = value[len(HASH_PREFIX) :]
+    return len(tail) == 64 and all(c in "0123456789abcdef" for c in tail)
+
+
+def prove_clean_core_repo(
+    core_root: Path | str,
+    *,
+    expected_commit: str | None = None,
+    expected_tree: str | None = None,
+) -> tuple[str, str]:
+    """Prove explicit Core root is a clean Git repo and return (commit, tree)."""
+    root = Path(core_root).expanduser().resolve()
+    if not root.is_dir():
+        raise CoreCompletionError("CORE_ROOT_MISSING")
+
+    rev_proc = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if rev_proc.returncode != 0:
+        raise CoreCompletionError("CORE_NOT_A_GIT_REPOSITORY")
+
+    observed_root = Path(rev_proc.stdout.strip()).resolve()
+    if observed_root != root:
+        raise CoreCompletionError("CORE_ROOT_MISMATCH")
+
+    status_proc = subprocess.run(
+        ["git", "-C", str(root), "status", "--porcelain=v1", "--untracked-files=all"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if status_proc.returncode != 0:
+        raise CoreCompletionError("CORE_STATUS_FAILED")
+    if status_proc.stdout.strip():
+        raise CoreCompletionError("CORE_REPO_DIRTY")
+
+    commit_proc = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD^{commit}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if commit_proc.returncode != 0:
+        raise CoreCompletionError("CORE_COMMIT_UNAVAILABLE")
+    core_commit = commit_proc.stdout.strip()
+
+    tree_proc = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD^{tree}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if tree_proc.returncode != 0:
+        raise CoreCompletionError("CORE_TREE_UNAVAILABLE")
+    core_tree = tree_proc.stdout.strip()
+
+    if expected_commit and core_commit != expected_commit.strip():
+        raise CoreCompletionError("CORE_COMMIT_MISMATCH")
+    if expected_tree and core_tree != expected_tree.strip():
+        raise CoreCompletionError("CORE_TREE_MISMATCH")
+
+    return core_commit, core_tree
+
+
+def materialize_work_product_envelope(
+    *,
+    issue_number: int,
+    run_id: str,
+    operation_id: str,
+    source_revision: str,
+    source_tree: str,
+    target_revision: str,
+    artifacts: list[dict[str, str]],
+    verifier_observation: dict[str, Any],
+) -> dict[str, Any]:
+    """Materialize one exact-bound semantic work-product envelope."""
+    if not isinstance(issue_number, int) or issue_number <= 0:
+        raise ValueError("issue_number must be a positive integer")
+    for name, val in [
+        ("run_id", run_id),
+        ("operation_id", operation_id),
+        ("source_revision", source_revision),
+        ("source_tree", source_tree),
+        ("target_revision", target_revision),
+    ]:
+        if not isinstance(val, str) or not val.strip():
+            raise ValueError(f"{name} must be a non-empty string")
+
+    if not isinstance(artifacts, list) or not artifacts:
+        raise ValueError("artifacts must be a non-empty list")
+
+    normalized_artifacts = []
+    seen_paths = set()
+    for index, art in enumerate(artifacts):
+        if not isinstance(art, dict):
+            raise ValueError(f"artifacts[{index}] must be a dict")
+        path = str(art.get("path", "")).strip()
+        art_id = str(art.get("artifact_id", "")).strip()
+        c_hash = str(art.get("content_hash", "")).strip()
+        if not path or path.startswith("/") or ".." in path.split("/"):
+            raise ValueError(f"artifacts[{index}].path must be a relative POSIX path")
+        if path in seen_paths:
+            raise ValueError(f"duplicate artifact path: {path}")
+        seen_paths.add(path)
+        if not art_id:
+            raise ValueError(f"artifacts[{index}].artifact_id must be non-empty")
+        if not _is_valid_hash(c_hash):
+            raise ValueError(f"artifacts[{index}].content_hash must be sha256:<64 hex>")
+        normalized_artifacts.append({
+            "artifact_id": art_id,
+            "content_hash": c_hash,
+            "path": path,
+        })
+    normalized_artifacts.sort(key=lambda x: x["path"])
+
+    if not isinstance(verifier_observation, dict):
+        raise ValueError("verifier_observation must be a dict")
+    vid = str(verifier_observation.get("verifier_id", "")).strip()
+    obs_art_id = str(verifier_observation.get("artifact_id", "")).strip()
+    obs_hash = str(verifier_observation.get("artifact_hash", "")).strip()
+    obs_status = str(verifier_observation.get("status", "")).strip()
+    if not vid:
+        raise ValueError("verifier_observation.verifier_id must be non-empty")
+    if not obs_art_id:
+        raise ValueError("verifier_observation.artifact_id must be non-empty")
+    if not _is_valid_hash(obs_hash):
+        raise ValueError("verifier_observation.artifact_hash must be sha256:<64 hex>")
+    if obs_status not in {"PASS", "FAIL"}:
+        raise ValueError("verifier_observation.status must be PASS or FAIL")
+
+    norm_obs = {
+        "artifact_id": obs_art_id,
+        "artifact_hash": obs_hash,
+        "status": obs_status,
+        "verifier_id": vid,
+    }
+
+    binding_body = {
+        "artifacts": normalized_artifacts,
+        "issue_number": issue_number,
+        "operation_id": operation_id,
+        "run_id": run_id,
+        "schema": WORK_PRODUCT_ENVELOPE_SCHEMA,
+        "source_revision": source_revision,
+        "source_tree": source_tree,
+        "target_revision": target_revision,
+        "verifier_observation": norm_obs,
+    }
+    evidence_binding_identity = canonical_hash(binding_body)
+
+    envelope = {
+        **binding_body,
+        "evidence_binding_identity": evidence_binding_identity,
+    }
+    envelope["envelope_hash"] = canonical_hash(envelope)
+    return envelope
+
+
+def validate_work_product_envelope(
+    envelope: Any,
+    *,
+    expected_issue: int | None = None,
+    expected_run_id: str | None = None,
+    expected_operation_id: str | None = None,
+    expected_source_revision: str | None = None,
+    expected_source_tree: str | None = None,
+) -> tuple[bool, list[str]]:
+    """Validate a work-product envelope payload fail-closed."""
+    if not isinstance(envelope, dict):
+        return False, ["EMPTY_WORK_PRODUCT_ENVELOPE"]
+    errors: list[str] = []
+    if envelope.get("schema") != WORK_PRODUCT_ENVELOPE_SCHEMA:
+        errors.append("ENVELOPE_SCHEMA_MISMATCH")
+
+    claimed_envelope_hash = envelope.get("envelope_hash")
+    claimed_binding_id = envelope.get("evidence_binding_identity")
+    if not _is_valid_hash(claimed_envelope_hash) or not _is_valid_hash(claimed_binding_id):
+        errors.append("ENVELOPE_HASH_MALFORMED")
+    else:
+        body = {k: v for k, v in envelope.items() if k != "envelope_hash"}
+        if canonical_hash(body) != claimed_envelope_hash:
+            errors.append("ENVELOPE_HASH_MISMATCH")
+        binding_body = {k: v for k, v in body.items() if k != "evidence_binding_identity"}
+        if canonical_hash(binding_body) != claimed_binding_id:
+            errors.append("BINDING_IDENTITY_MISMATCH")
+
+    issue = envelope.get("issue_number")
+    if not isinstance(issue, int) or issue <= 0:
+        errors.append("MALFORMED_ISSUE_NUMBER")
+    elif expected_issue is not None and issue != expected_issue:
+        errors.append("WRONG_ISSUE_NUMBER")
+
+    run_id = envelope.get("run_id")
+    if not isinstance(run_id, str) or not run_id.strip():
+        errors.append("MALFORMED_RUN_ID")
+    elif expected_run_id is not None and run_id != expected_run_id:
+        errors.append("WRONG_RUN_ID")
+
+    op_id = envelope.get("operation_id")
+    if not isinstance(op_id, str) or not op_id.strip():
+        errors.append("MALFORMED_OPERATION_ID")
+    elif expected_operation_id is not None and op_id != expected_operation_id:
+        errors.append("WRONG_OPERATION_ID")
+
+    src = envelope.get("source_revision")
+    if not isinstance(src, str) or not src.strip():
+        errors.append("MALFORMED_SOURCE_REVISION")
+    elif expected_source_revision is not None:
+        norm_expected = expected_source_revision.removeprefix("git-commit:")
+        norm_src = src.removeprefix("git-commit:")
+        if norm_src != norm_expected:
+            errors.append("WRONG_SOURCE_REVISION")
+
+    src_tree = envelope.get("source_tree")
+    if not isinstance(src_tree, str) or not src_tree.strip():
+        errors.append("MALFORMED_SOURCE_TREE")
+    elif expected_source_tree is not None:
+        norm_expected_tree = expected_source_tree.removeprefix("git-tree:")
+        norm_src_tree = src_tree.removeprefix("git-tree:")
+        if norm_src_tree != norm_expected_tree:
+            errors.append("WRONG_SOURCE_TREE")
+
+    artifacts = envelope.get("artifacts")
+    if not isinstance(artifacts, list) or not artifacts:
+        errors.append("NO_SEMANTIC_WORK_PRODUCT")
+    else:
+        paths = [a.get("path") for a in artifacts if isinstance(a, dict)]
+        if len(paths) != len(set(paths)):
+            errors.append("DUPLICATE_ARTIFACT_PATHS")
+
+    obs = envelope.get("verifier_observation")
+    if not isinstance(obs, dict):
+        errors.append("MISSING_VERIFIER_OBSERVATION")
+    else:
+        if not obs.get("verifier_id") or not obs.get("artifact_id"):
+            errors.append("MALFORMED_VERIFIER_OBSERVATION")
+        if not _is_valid_hash(obs.get("artifact_hash")):
+            errors.append("MALFORMED_VERIFIER_HASH")
+        if obs.get("status") not in {"PASS", "FAIL"}:
+            errors.append("MALFORMED_VERIFIER_STATUS")
+
+    return len(errors) == 0, sorted(set(errors))
+
+
+def invoke_canonical_completion_core(
+    core_root: Path,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Invoke canonical Completion Core in an isolated subprocess."""
+    root = core_root.resolve()
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        "PYTHONPATH": str(root),
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
+    proc = subprocess.run(
+        [sys.executable, "-c", _RUNNER_CODE],
+        cwd=str(root),
+        input=json.dumps(payload),
+        text=True,
+        capture_output=True,
+        env=env,
+        check=False,
+    )
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout).strip()
+        raise CoreCompletionError(f"CORE_EXECUTION_FAILED: {detail}")
+
+    try:
+        result = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise CoreCompletionError(f"CORE_RESPONSE_MALFORMED: {proc.stdout!r}") from exc
+
+    module_path = str(result.get("core_module_path", ""))
+    if not module_path.startswith(str(root)):
+        raise CoreCompletionError(f"CORE_IMPORT_ESCAPE: {module_path}")
+
+    return result
+
+
+def evaluate_core_completion(
+    *,
+    core_root: Path | str,
+    envelope: dict[str, Any] | None,
+    expected_issue: int | None = None,
+    expected_run_id: str | None = None,
+    expected_operation_id: str | None = None,
+    expected_source_revision: str | None = None,
+    expected_source_tree: str | None = None,
+    expected_core_commit: str | None = None,
+    expected_core_tree: str | None = None,
+    allowed_paths: list[str] | None = None,
+    operation_evidence: dict[str, Any] | None = None,
+    dispatch_bin: str | None = None,
+) -> dict[str, Any]:
+    """Evaluate work product completion against canonical nexus-core."""
+    root = Path(core_root).expanduser().resolve()
+    core_commit = ""
+    core_tree = ""
+    core_error: str | None = None
+
+    try:
+        core_commit, core_tree = prove_clean_core_repo(
+            root,
+            expected_commit=expected_core_commit,
+            expected_tree=expected_core_tree,
+        )
+    except CoreCompletionError as exc:
+        core_error = str(exc)
+
+    valid_env, env_errors = validate_work_product_envelope(
+        envelope,
+        expected_issue=expected_issue,
+        expected_run_id=expected_run_id,
+        expected_operation_id=expected_operation_id,
+        expected_source_revision=expected_source_revision,
+        expected_source_tree=expected_source_tree,
+    )
+
+    operation_errors: list[str] = []
+    if expected_operation_id:
+        if operation_evidence is None:
+            try:
+                operation_evidence = read_operation_evidence(
+                    expected_operation_id,
+                    dispatch_bin=dispatch_bin,
+                )
+            except CoreCompletionError as exc:
+                operation_errors.append(str(exc))
+        if not operation_errors:
+            operation_errors.extend(
+                validate_operation_evidence(
+                    operation_evidence,
+                    expected_operation_id=expected_operation_id,
+                    expected_source_revision=expected_source_revision,
+                )
+            )
+
+    all_errors: list[str] = []
+    if core_error:
+        all_errors.append(core_error)
+    all_errors.extend(env_errors)
+    all_errors.extend(operation_errors)
+
+    if all_errors or not valid_env or envelope is None:
+        res = {
+            "analysis_hash": None,
+            "claim_ceiling": CORE_COMPLETION_CLAIM_CEILING,
+            "claims_complete": False,
+            "claims_verified": False,
+            "core_commit": core_commit,
+            "core_root": str(root),
+            "core_tree": core_tree,
+            "dispositions": [],
+            "evaluated_at": _now(),
+            "evidence_binding_identity": envelope.get("evidence_binding_identity")
+            if envelope
+            else None,
+            "reason_codes": sorted(set(all_errors)),
+            "schema": CORE_COMPLETION_RESULT_SCHEMA,
+            "verification_applies": False,
+            "work_product_envelope_hash": envelope.get("envelope_hash") if envelope else None,
+            "operation_evidence_hash": canonical_hash(operation_evidence)
+            if operation_evidence
+            else None,
+        }
+        res["result_hash"] = canonical_hash({k: v for k, v in res.items() if k != "result_hash"})
+        return res
+
+    artifacts = envelope["artifacts"]
+    paths = sorted(a["path"] for a in artifacts)
+    content_hashes = sorted([a["path"], a["content_hash"]] for a in artifacts)
+
+    obs = envelope["verifier_observation"]
+    verified_artifacts = []
+    for art in artifacts:
+        if art["artifact_id"] == obs["artifact_id"]:
+            verified_artifacts.append([obs["verifier_id"], obs["artifact_id"], art["path"]])
+    verified_artifacts.sort()
+
+    payload = {
+        "claim": {
+            "asserted_by": envelope["operation_id"],
+            "claim_id": f"claim-{envelope['operation_id']}",
+            "claimed_complete": True,
+            "content_hashes": content_hashes,
+            "target_revision": envelope["target_revision"],
+            "verified_artifacts": verified_artifacts,
+        },
+        "contract": {
+            "allowed_paths": sorted(allowed_paths or paths),
+            "contract_id": f"contract-{envelope['issue_number']}-{envelope['operation_id']}",
+            "deletion_policy": "FORBID",
+            "required_verifier_ids": [obs["verifier_id"]],
+            "requirements_hash": envelope["evidence_binding_identity"],
+        },
+        "change_set": {
+            "change_set_id": f"change-{envelope['operation_id']}",
+            "deleted_paths": [],
+            "diff_hash": canonical_hash(content_hashes),
+            "paths": paths,
+            "source_revision": envelope["source_revision"],
+            "target_revision": envelope["target_revision"],
+        },
+        "plan": {
+            "plan_id": f"plan-{envelope['operation_id']}",
+            "required_verifier_ids": [obs["verifier_id"]],
+        },
+        "evidence": {
+            "bundle_id": f"evidence-{envelope['operation_id']}",
+            "observations": [obs],
+        },
+    }
+
+    try:
+        core_res = invoke_canonical_completion_core(root, payload)
+    except CoreCompletionError as exc:
+        res = {
+            "analysis_hash": None,
+            "claim_ceiling": CORE_COMPLETION_CLAIM_CEILING,
+            "claims_complete": False,
+            "claims_verified": False,
+            "core_commit": core_commit,
+            "core_root": str(root),
+            "core_tree": core_tree,
+            "dispositions": [],
+            "evaluated_at": _now(),
+            "evidence_binding_identity": envelope["evidence_binding_identity"],
+            "reason_codes": [str(exc)],
+            "schema": CORE_COMPLETION_RESULT_SCHEMA,
+            "verification_applies": False,
+            "work_product_envelope_hash": envelope["envelope_hash"],
+            "operation_evidence_hash": canonical_hash(operation_evidence)
+            if operation_evidence
+            else None,
+        }
+        res["result_hash"] = canonical_hash({k: v for k, v in res.items() if k != "result_hash"})
+        return res
+
+    claims_verified = bool(core_res.get("claims_verified")) and bool(core_res.get("is_valid"))
+    reason_codes = list(core_res.get("reason_codes", []))
+    for disp in core_res.get("dispositions", []):
+        reason_codes.extend(disp.get("reason_codes", []))
+
+    final_result = {
+        "analysis_hash": core_res.get("analysis_hash"),
+        "claim_ceiling": CORE_COMPLETION_CLAIM_CEILING,
+        "claims_complete": bool(core_res.get("claims_complete")),
+        "claims_verified": claims_verified,
+        "core_commit": core_commit,
+        "core_root": str(root),
+        "core_tree": core_tree,
+        "dispositions": core_res.get("dispositions", []),
+        "evaluated_at": _now(),
+        "evidence_binding_identity": envelope["evidence_binding_identity"],
+        "reason_codes": sorted(set(reason_codes)),
+        "schema": CORE_COMPLETION_RESULT_SCHEMA,
+        "verification_applies": bool(core_res.get("verification_applies")),
+        "work_product_envelope_hash": envelope["envelope_hash"],
+        "operation_evidence_hash": canonical_hash(operation_evidence)
+        if operation_evidence
+        else None,
+    }
+    final_result["result_hash"] = canonical_hash({
+        k: v for k, v in final_result.items() if k != "result_hash"
+    })
+    return final_result
+
+
+def validate_core_completion_result(result: Any) -> bool:
+    """Validate that a core completion result payload has not been tampered with."""
+    if not isinstance(result, dict):
+        return False
+    if result.get("schema") != CORE_COMPLETION_RESULT_SCHEMA:
+        return False
+    if result.get("claim_ceiling") != CORE_COMPLETION_CLAIM_CEILING:
+        return False
+    claimed_hash = result.get("result_hash")
+    if not _is_valid_hash(claimed_hash):
+        return False
+    body = {k: v for k, v in result.items() if k != "result_hash"}
+    return canonical_hash(body) == claimed_hash
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    ev = sub.add_parser("evaluate", help="Evaluate a work product envelope with Core")
+    ev.add_argument("--core-root", required=True)
+    ev.add_argument("--envelope", required=True, help="Path to envelope JSON or raw JSON")
+    ev.add_argument("--expected-issue", type=int)
+    ev.add_argument("--expected-run-id")
+    ev.add_argument("--expected-operation-id")
+    ev.add_argument("--expected-source-revision")
+    ev.add_argument("--expected-core-commit")
+    ev.add_argument("--expected-core-tree")
+    ev.add_argument("--expected-source-tree")
+    ev.add_argument("--allowed-paths", nargs="*")
+    ev.add_argument(
+        "--operation-evidence",
+        help="Optional canonical nexus-agy-dispatch --status JSON for deterministic verification",
+    )
+    ev.add_argument("--dispatch-bin")
+
+    mat = sub.add_parser("materialize", help="Materialize a work product envelope")
+    mat.add_argument("--issue-number", type=int, required=True)
+    mat.add_argument("--run-id", required=True)
+    mat.add_argument("--operation-id", required=True)
+    mat.add_argument("--source-revision", required=True)
+    mat.add_argument("--source-tree", required=True)
+    mat.add_argument("--target-revision", required=True)
+    mat.add_argument("--artifacts", required=True, help="JSON list of artifacts or file path")
+    mat.add_argument(
+        "--verifier-observation", required=True, help="JSON dict of observation or file path"
+    )
+    mat.add_argument("--output", help="Output file path (prints to stdout if omitted)")
+
+    sub.add_parser("prove-core", help="Prove clean Core repository")
+    return parser
+
+
+def main() -> int:
+    args = build_parser().parse_args()
+    if args.command == "materialize":
+
+        def _parse_json_or_file(val: str) -> Any:
+            if Path(val).is_file():
+                return json.loads(Path(val).read_text(encoding="utf-8"))
+            return json.loads(val)
+
+        try:
+            envelope = materialize_work_product_envelope(
+                issue_number=args.issue_number,
+                run_id=args.run_id,
+                operation_id=args.operation_id,
+                source_revision=args.source_revision,
+                source_tree=args.source_tree,
+                target_revision=args.target_revision,
+                artifacts=_parse_json_or_file(args.artifacts),
+                verifier_observation=_parse_json_or_file(args.verifier_observation),
+            )
+            out_str = json.dumps(envelope, indent=2, sort_keys=True)
+            if args.output:
+                Path(args.output).write_text(out_str + "\n", encoding="utf-8")
+            else:
+                print(out_str)
+            return 0
+        except Exception as exc:
+            print(json.dumps({"error": str(exc)}), file=sys.stderr)
+            return 2
+
+    if args.command == "evaluate":
+        raw = args.envelope
+        env_dict = None
+        if Path(raw).is_file():
+            env_dict = json.loads(Path(raw).read_text(encoding="utf-8"))
+        else:
+            try:
+                env_dict = json.loads(raw)
+            except json.JSONDecodeError:
+                pass
+
+        operation_evidence = None
+        if args.operation_evidence:
+            raw_operation_evidence = args.operation_evidence
+            if Path(raw_operation_evidence).is_file():
+                operation_evidence = json.loads(
+                    Path(raw_operation_evidence).read_text(encoding="utf-8")
+                )
+            else:
+                operation_evidence = json.loads(raw_operation_evidence)
+
+        result = evaluate_core_completion(
+            core_root=args.core_root,
+            envelope=env_dict,
+            expected_issue=args.expected_issue,
+            expected_run_id=args.expected_run_id,
+            expected_operation_id=args.expected_operation_id,
+            expected_source_revision=args.expected_source_revision,
+            expected_source_tree=args.expected_source_tree,
+            expected_core_commit=args.expected_core_commit,
+            expected_core_tree=args.expected_core_tree,
+            allowed_paths=args.allowed_paths,
+            operation_evidence=operation_evidence,
+            dispatch_bin=args.dispatch_bin,
+        )
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0 if result.get("claims_verified") else 4
+
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

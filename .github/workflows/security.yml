@@ -102,7 +102,7 @@ jobs:
           if ! git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- scripts/ops/exact_base_tool_gate.py; then
             REQUIRED="true"
           fi
-          if [[ "$REQUIRED" != "true" ]] && git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- 'nexus/core/*.py' 'nexus/core/**/*.py' | grep -q .; then
+          if [[ "$REQUIRED" != "true" ]] && git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- 'nexus/*.py' 'nexus/**/*.py' 'scripts/ops/*.py' 'scripts/ops/**/*.py' | grep -q .; then
             REQUIRED="true"
           fi
           echo "required=$REQUIRED" >> "$GITHUB_OUTPUT"
@@ -136,7 +136,7 @@ jobs:
           BASE_WORKTREE=$(mktemp -d /tmp/nexus-bandit-base.XXXXXX)
           git worktree add --detach "$BASE_WORKTREE" "$BASE_SHA"
           if git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- pyproject.toml .bandit bandit.yaml; then
-            git diff --name-only -z "$BASE_SHA" "$HEAD_SHA" -- 'nexus/core/*.py' 'nexus/core/**/*.py' > .ci-bandit/changed.nul
+            git diff --name-only -z "$BASE_SHA" "$HEAD_SHA" -- 'nexus/*.py' 'nexus/**/*.py' 'scripts/ops/*.py' 'scripts/ops/**/*.py' > .ci-bandit/changed.nul
           else
             { git ls-tree -r -z --name-only "$BASE_SHA" -- nexus/core; git ls-tree -r -z --name-only "$HEAD_SHA" -- nexus/core; } \
               | .venv/bin/python -c 'import sys; data=sys.stdin.buffer.read().split(b"\0"); paths=sorted({p for p in data if p.endswith(b".py")}); sys.stdout.buffer.write(b"\0".join(paths) + (b"\0" if paths else b""))' \
@@ -174,7 +174,9 @@ jobs:
         if: steps.impact.outputs.required == 'true'
         run: |
           set +e
-          .venv/bin/python scripts/ops/exact_base_tool_gate.py \
+          # Classify with the exact-base copy of the gate so a candidate cannot
+          # rewrite the classifier that judges it (#1754).
+          .venv/bin/python "${{ steps.revisions.outputs.base_worktree }}/scripts/ops/exact_base_tool_gate.py" \
             --tool bandit \
             --base .ci-bandit/base.json \
             --head .ci-bandit/head.json \

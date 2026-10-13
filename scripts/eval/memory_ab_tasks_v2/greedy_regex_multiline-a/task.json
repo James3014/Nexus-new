@@ -1,0 +1,8 @@
+{
+  "id": "greedy_regex_multiline-a",
+  "bug_class": "greedy_regex_multiline",
+  "variant": "a",
+  "problem_statement": "extract_blocks('x <<begin>>one<<end>> y <<begin>>two<<end>>') returns one item containing 'one<<end>> y <<begin>>two' instead of ['one', 'two']. Blocks that span several lines are not found at all.",
+  "target_file": "markers.py",
+  "repro_file": "repro.py"
+}

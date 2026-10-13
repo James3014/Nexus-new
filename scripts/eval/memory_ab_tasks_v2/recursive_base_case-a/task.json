@@ -1,0 +1,8 @@
+{
+  "id": "recursive_base_case-a",
+  "bug_class": "recursive_base_case",
+  "variant": "a",
+  "problem_statement": "flatten() returns tuples as single items: flatten([1, (2, 3)]) returns [1, (2, 3)]. flatten([[], 1]) returns [[], 1] and flatten(()) returns [()], although empty containers should contribute nothing.",
+  "target_file": "flatten.py",
+  "repro_file": "repro.py"
+}

@@ -1,0 +1,8 @@
+{
+  "id": "integer_division-b",
+  "bug_class": "integer_division",
+  "variant": "b",
+  "problem_statement": "percent() returns whole numbers only. percent(1, 3) should be about 33.33 but returns 33.",
+  "target_file": "ratios.py",
+  "repro_file": "repro.py"
+}

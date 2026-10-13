@@ -735,6 +735,7 @@ def build_automation(config: ServiceConfig, repository: str) -> ExternalIntellig
         c_runtime=c_runtime,
         d_runtime=d_runtime,
         capacity_factory=capacity,
+        workforce_consumer=("external_intelligence" if config.worker_backend == "open_swe" else ""),
     )
 
 

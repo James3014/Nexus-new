@@ -365,7 +365,7 @@ content_freshness:
       required_markers: ["Rust Governance Kernel", "P → X → D → R → A → C", "Fail-Closed"]
     00_Home/AGENT_BOOTSTRAP.md:
       classification: current_needs_review
-      source_paths: [AGENTS.md, MUSE_PROTO.md, scripts/ops/check_wiki_governance_closure.py]
+      source_paths: [AGENTS.md, docs/governance/current_operating_mode.yaml, scripts/ops/check_wiki_governance_closure.py]
     00_Home/PARTNER_ONBOARDING.md:
       classification: current_needs_review
       source_paths: [README.md, nexus_wiki_vault/00_Home/CURRENT_STATE.md]
@@ -374,7 +374,7 @@ content_freshness:
       source_paths: [scripts/ops/wiki_truth_claims_check.py, scripts/ops/ci_gate.py]
     99_Schema/WIKI_GOVERNANCE_CHARTER.md:
       classification: current_needs_review
-      source_paths: [AGENTS.md, MUSE_PROTO.md, scripts/ops/check_wiki_governance_closure.py]
+      source_paths: [AGENTS.md, .github/workflows/wiki-governance.yml, scripts/ops/check_wiki_governance_closure.py]
     00_Home/Wiki Index and Coverage Map.md:
       classification: current_needs_review
       source_paths: [scripts/ops/build_wiki_agent_index.py, scripts/ops/wiki_coverage_audit.py]

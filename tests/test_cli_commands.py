@@ -1034,111 +1034,37 @@ def test_research_run_multi_candidate(tmp_path, monkeypatch):
     assert report["semantic_status"] == "VERIFIED"
 
 def test_research_benchmark(tmp_path, monkeypatch):
+    # Historical node id: `research:benchmark` was archived 2026-10-12 and fails closed.
     runner = CliRunner()
     monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
-    
+
     manifest_path = tmp_path / "manifest.json"
-    manifest_path.write_text(json.dumps({
-        "cases": [
-            {"id": "c1", "task_desc": "SDK bug", "task_type": "bug", "candidate_count": 1, "root_cause_confidence": 1.0}
-        ]
-    }))
-    
-    result = runner.invoke(nexus, ["nexus", "research:benchmark", "--manifest-file", str(manifest_path)])
-    assert result.exit_code == 0
-    assert "Benchmark Complete" in result.output
-    
-    report_path = tmp_path / ".nexus" / "reports" / "research" / "benchmark-report.json"
-    assert report_path.exists()
-    report = json.loads(report_path.read_text())
-    assert report["total_cases"] == 1
-    assert report["research_chosen_cases"] == 1
-    assert "success_cases" in report
+    manifest_path.write_text(json.dumps({"cases": [{"id": "c1"}]}))
+
+    for extra in ([], ["--mode", "ab", "--ab-trials", "2"]):
+        result = runner.invoke(
+            nexus, ["nexus", "research:benchmark", "--manifest-file", str(manifest_path), *extra]
+        )
+        assert result.exit_code == 1
+        assert "archived_fake_benchmark_2026-10-12" in result.output
+        assert "Benchmark Complete" not in result.output
+    assert not (tmp_path / ".nexus" / "reports" / "research" / "benchmark-report.json").exists()
 
 
 def test_research_benchmark_ab_mode(tmp_path, monkeypatch):
+    # Historical node id: A/B mode fails closed too (covered with the default mode above).
+    test_research_benchmark(tmp_path, monkeypatch)
+
+
+def test_archived_cli_commands_are_absent_from_help():
     runner = CliRunner()
-    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
-
-    target = tmp_path / "demo.py"
-    target.write_text("print('buggy')\n", encoding="utf-8")
-    test_file = tmp_path / "tests" / "test_demo.py"
-    test_file.parent.mkdir(parents=True, exist_ok=True)
-    test_file.write_text("def test_ok():\n    assert True\n", encoding="utf-8")
-
-    manifest_path = tmp_path / "manifest_ab.json"
-    manifest_path.write_text(json.dumps({
-        "cases": [
-            {
-                "id": "ab1",
-                "task_desc": "fix bug",
-                "target_file": "demo.py",
-                "test_file": "tests/test_demo.py",
-                "candidate_count": 1,
-            }
-        ]
-    }))
-
-    from nexus.research.sprint_service import SprintResult
-
-    def fake_run_hyper_sprint(*_args, **_kwargs):
-        return SprintResult(
-            status="SUCCESS",
-            reason="stage1_pass",
-            target_file="demo.py",
-            winner_source="local",
-            final_score=1.0,
-            elapsed_sec=0.1,
-            attempt_count=1,
-            model_calls=0,
-            quota_backoffs=0,
-            test_timeouts=0,
-            error_codes=[],
-            candidates=[],
-            pytest_cmd=["uv", "run", "pytest", "-q", "--maxfail=1", "tests/test_demo.py"],
-            promotable=True,
-            patch="print('fixed')\n",
-        )
-
-    def fake_generate_local_candidate(source, *_args, **_kwargs):
-        return source.replace("buggy", "fixed")
-
-    class _Res:
-        def __init__(self, returncode=0):
-            self.returncode = returncode
-            self.stdout = ""
-            self.stderr = ""
-
-    def fake_subprocess_run(*args, **kwargs):
-        return _Res(returncode=0)
-
-    monkeypatch.setattr("nexus.research.sprint_service.run_hyper_sprint", fake_run_hyper_sprint)
-    monkeypatch.setattr("nexus.research.local_sprint_mutator.generate_local_candidate", fake_generate_local_candidate)
-    monkeypatch.setattr("subprocess.run", fake_subprocess_run)
-
-    result = runner.invoke(
-        nexus,
-        [
-            "nexus",
-            "research:benchmark",
-            "--manifest-file",
-            str(manifest_path),
-            "--mode",
-            "ab",
-            "--ab-trials",
-            "2",
-        ],
-    )
+    result = runner.invoke(nexus, ["nexus", "--help"])
     assert result.exit_code == 0
-    assert "A/B Benchmark Complete" in result.output
+    for name in ("fed-init", "fed-run", "meta-run", "oracle:apply", "stress-test", "ui-validator"):
+        assert name not in result.output.split(), name
+        assert runner.invoke(nexus, ["nexus", name]).exit_code != 0
 
-    report_path = tmp_path / ".nexus" / "reports" / "research" / "benchmark-report.json"
-    report = json.loads(report_path.read_text())
-    assert report["mode"] == "ab"
-    assert report["ab_trials"] == 2
-    case = report["per_case"][0]
-    assert case["baseline"]["summary"]["success_rate"] == 1.0
-    assert case["hyper_sprint"]["summary"]["success_rate"] == 1.0
+
 def _write_ready_learn_slo(tmp_path):
     phase_slo = tmp_path / ".nexus" / "reports" / "learn" / "phase_slo_summary.json"
     phase_slo.parent.mkdir(parents=True, exist_ok=True)

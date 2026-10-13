@@ -4,8 +4,8 @@ type: compliance
 status: active
 version_scope: v22.5
 owner: agent
-confidence: high
-last_compiled: 2026-04-17
+confidence: low
+last_compiled: 2026-10-12
 source_of_truth: 07_Compliance/Compliance_Dashboard.md
 tags:
   - compliance
@@ -14,23 +14,24 @@ tags:
 ---
 
 # 🛡️ Compliance Status: Nexus Enterprise v22.5
-- **Timestamp**: 2026-04-17 23:03:04
-- **Commit SHA**: `d11aaff8d8cd10234dbfec74e2d5a6a012796cce`
-- **Nexus Participation Ratio**: 85.0%
+- **Timestamp**: 2026-10-12 05:07:52
+- **Commit SHA**: `3360668ca10d5a0159416ab4ee5a7fe3eaface27`
+- **Report Status**: SIMULATED (semantic: UNVERIFIED; simulated: True)
+- **Nexus Participation Ratio**: NOT_MEASURED
 
 ## 🔍 Core Audit Dimensions (SOC2-like)
 | Dimension | Status | Metrics |
 |-----------|--------|---------|
-| Isolation | ✅ PASS | leakage: 0.0 |
-| Hallucination | ✅ PASS | rate: 0.0 |
-| Concurrency | ✅ PASS | p95_latency: 3.9352214392994775, recall: 0.98 |
-| Security | ✅ PASS | audit_trail: PRESENT |
-| Integration | ✅ PASS | latency: 2.3 |
+| Isolation | ⚠️ SIMULATED (not measured) | simulated: True, would_pass: True, leakage: 0.0 |
+| Hallucination | ⚠️ SIMULATED (not measured) | simulated: True, would_pass: True, rate: 0.005 |
+| Concurrency | ⚠️ SIMULATED (not measured) | simulated: True, would_pass: True, p95_latency: 4.048979591836735, recall: 0.98 |
+| Security | ⚠️ SIMULATED (not measured) | simulated: True, would_pass: True, audit_trail: PRESENT |
+| Integration | ⚠️ SIMULATED (not measured) | simulated: True, would_pass: True, latency: 2.3 |
 
 ## 🧱 Gate Summary
-- **acceptance_check**: PASS
-- **contract_check**: PASS
-- **ci_gate_full_dry_run**: PASS
+- **acceptance_check**: NOT_RUN
+- **contract_check**: NOT_RUN
+- **ci_gate_full_dry_run**: NOT_RUN
 
 ## One-sentence summary
 本頁彙整最新合規交付狀態與關鍵門禁結果，作為治理決策的即時快照。 [Source: 07_Compliance/Compliance_Dashboard.md]
@@ -56,7 +57,7 @@ tags:
 - 本頁與 CI Gate 報表結果保持一致。 [Source: scripts/ops/ci_gate.py]
 
 ## Open questions / conflicts
-- [ ] 是否將 85.0% 的參與比率定義為門檻前提還是告警閾值？
+- [ ] Nexus 參與比率目前為 NOT_MEASURED（企業審計為 SIMULATED，未實測）；待真實量測後再定義門檻前提或告警閾值。
 
 **[Source: 07_Compliance/Compliance_Dashboard.md]**
 

@@ -30,7 +30,6 @@ from nexus.services.memory import MemoryService
 
 from .learn.ask_service import AskService
 from .learn.benchmark_service import BenchmarkService
-from .learn.claim_service import ClaimService
 from .learn.converge_service import ConvergeService
 from .learn.ingest_service import IngestService
 from .learn.phase_bridge_service import PhaseBridgeService
@@ -96,7 +95,6 @@ class LearnModeService:
         self.closure_log = self.reports_dir / "learning_closure.jsonl"
 
         self._ingest_svc = IngestService(self)
-        self._claim_svc = ClaimService(self)
         self._converge_svc = ConvergeService(self)
         self._ask_svc = AskService(self)
         self._slo_svc = PhaseSLOService(self)

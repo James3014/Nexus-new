@@ -1,0 +1,8 @@
+{
+  "id": "consumed_iterator-a",
+  "bug_class": "consumed_iterator",
+  "variant": "a",
+  "problem_statement": "summarize() reports heaviest_id as None when it is given a generator of parcels, even though the count and total are right. Expected: a generator and a list give the same (count, total_kg, heaviest_id).",
+  "target_file": "manifest.py",
+  "repro_file": "repro.py"
+}

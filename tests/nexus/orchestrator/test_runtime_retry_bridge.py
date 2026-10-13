@@ -3,7 +3,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from nexus.orchestrator.runtime_retry_bridge import _Dispatch, _State, retry_task_via_runtime
+import pytest
+
+from nexus.orchestrator.runtime_retry_bridge import (
+    _Contract,
+    _Dispatch,
+    _State,
+    retry_task_via_runtime,
+)
 
 
 class Owner:
@@ -98,3 +105,33 @@ def test_rebind_refreshes_nested_bound_action_hash(monkeypatch):
         "attempt_id": "a2",
     }
     assert result["action"]["request_hash"] == result["action_request_hash"]
+
+
+class _NoBuildOwner:
+    def build_contract(self, request):
+        raise AssertionError("must not be called")
+
+
+def test_contract_budget_defaults_to_service_default_for_minimal_request():
+    from nexus.orchestrator.self_hosted_task_service import DEFAULT_MAXIMUM_ATTEMPTS_PER_TASK
+
+    assert (
+        _Contract(_NoBuildOwner()).maximum_attempts({"task_id": "t"})
+        == DEFAULT_MAXIMUM_ATTEMPTS_PER_TASK
+        == 5
+    )
+
+
+def test_contract_budget_uses_request_override():
+    contract = _Contract(_NoBuildOwner())
+    assert contract.maximum_attempts({"task_id": "t", "maximum_attempts_per_task": 3}) == 3
+    assert contract.maximum_attempts({"task_id": "t", "maximum_attempts_per_task": "3"}) == 3
+
+
+@pytest.mark.parametrize("value", [0, -1, "x", None, True])
+def test_contract_budget_rejects_invalid_values(value):
+    with pytest.raises(ValueError):
+        _Contract(_NoBuildOwner()).maximum_attempts({
+            "task_id": "t",
+            "maximum_attempts_per_task": value,
+        })

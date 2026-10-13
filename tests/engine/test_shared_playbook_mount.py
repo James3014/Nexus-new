@@ -7,7 +7,6 @@ from pathlib import Path
 import yaml
 
 from nexus.engine.planner.skill_mount_evidence import build_skill_mount_evidence
-from nexus.learning import shared_playbook
 from nexus.learning.shared_playbook import load_selected_shared_playbook
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -54,15 +53,15 @@ def _status_report(tmp_path: Path, names: list[str]) -> Path:
     return report
 
 
-def test_planner_mount_binds_one_exact_primary_shared_playbook(tmp_path: Path, monkeypatch) -> None:
+def test_planner_mount_binds_one_exact_primary_shared_playbook(tmp_path: Path) -> None:
     _copy_skill(tmp_path)
     report = _status_report(tmp_path, ["diagnose"])
-    monkeypatch.setattr(shared_playbook, "DEFAULT_REPO_ROOT", tmp_path)
 
     result = build_skill_mount_evidence(
         skills=[{"skill_id": "diagnose", "capability_id": "xray"}],
         budget={"skill_status_report": str(report)},
         selected_capabilities=["xray"],
+        shared_playbook_root=tmp_path,
     )
 
     assert result["skill_mount_violations"] == []
@@ -75,16 +74,14 @@ def test_planner_mount_binds_one_exact_primary_shared_playbook(tmp_path: Path, m
     assert "shared_playbook_exact_identity_bound" in contract["load_reason_codes"]
 
 
-def test_planner_mount_fails_closed_when_required_playbook_is_missing(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_planner_mount_fails_closed_when_required_playbook_is_missing(tmp_path: Path) -> None:
     report = _status_report(tmp_path, ["diagnose"])
-    monkeypatch.setattr(shared_playbook, "DEFAULT_REPO_ROOT", tmp_path)
 
     result = build_skill_mount_evidence(
         skills=[{"skill_id": "diagnose", "capability_id": "xray"}],
         budget={"skill_status_report": str(report)},
         selected_capabilities=["xray"],
+        shared_playbook_root=tmp_path,
     )
 
     assert result["skill_mount_contracts"] == []
@@ -94,16 +91,16 @@ def test_planner_mount_fails_closed_when_required_playbook_is_missing(
     assert result["skill_mount_violations"][0]["capability_mount"] == "xray"
 
 
-def test_planner_mount_rejects_unselected_playbook_injection(tmp_path: Path, monkeypatch) -> None:
+def test_planner_mount_rejects_unselected_playbook_injection(tmp_path: Path) -> None:
     _copy_skill(tmp_path)
     report = _status_report(tmp_path, ["diagnose"])
-    monkeypatch.setattr(shared_playbook, "DEFAULT_REPO_ROOT", tmp_path)
 
     selected_capabilities = ["benchmark"]
     result = build_skill_mount_evidence(
         skills=[{"skill_id": "diagnose", "capability_id": "xray"}],
         budget={"skill_status_report": str(report)},
         selected_capabilities=selected_capabilities,
+        shared_playbook_root=tmp_path,
     )
 
     assert selected_capabilities == ["benchmark"]
@@ -113,11 +110,10 @@ def test_planner_mount_rejects_unselected_playbook_injection(tmp_path: Path, mon
     ]
 
 
-def test_planner_mount_rejects_second_primary_playbook(tmp_path: Path, monkeypatch) -> None:
+def test_planner_mount_rejects_second_primary_playbook(tmp_path: Path) -> None:
     _copy_skill(tmp_path)
     _copy_skill(tmp_path, target_id="diagnose-alt")
     report = _status_report(tmp_path, ["diagnose", "diagnose-alt"])
-    monkeypatch.setattr(shared_playbook, "DEFAULT_REPO_ROOT", tmp_path)
 
     result = build_skill_mount_evidence(
         skills=[
@@ -126,6 +122,7 @@ def test_planner_mount_rejects_second_primary_playbook(tmp_path: Path, monkeypat
         ],
         budget={"skill_status_report": str(report)},
         selected_capabilities=["xray"],
+        shared_playbook_root=tmp_path,
     )
 
     assert [item["skill_id"] for item in result["skill_mount_contracts"]] == ["diagnose"]
@@ -134,16 +131,14 @@ def test_planner_mount_rejects_second_primary_playbook(tmp_path: Path, monkeypat
     ]
 
 
-def test_planner_mount_preserves_optional_skill_without_shared_playbook(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_planner_mount_preserves_optional_skill_without_shared_playbook(tmp_path: Path) -> None:
     report = _status_report(tmp_path, ["plain-skill"])
-    monkeypatch.setattr(shared_playbook, "DEFAULT_REPO_ROOT", tmp_path)
 
     result = build_skill_mount_evidence(
         skills=[{"skill_id": "plain-skill", "capability_id": "xray"}],
         budget={"skill_status_report": str(report)},
         selected_capabilities=["xray"],
+        shared_playbook_root=tmp_path,
     )
 
     assert result["skill_mount_violations"] == []

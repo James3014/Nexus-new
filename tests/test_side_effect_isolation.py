@@ -39,6 +39,13 @@ def _make_plan(task_id: str, **constraints: object) -> CapabilityExecutionPlan:
     )
 
 
+def _write_xray_target(project_root: Path) -> None:
+    """Seed a scan target under project_root; the request names it via ``xray_targets``."""
+    target = project_root / "nexus" / "services" / "capability_registry.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("def scanned_symbol():\n    return 1\n")
+
+
 # ── X-Ray isolation ──────────────────────────────────────────────
 
 
@@ -134,16 +141,29 @@ def test_executor_xray_sentinel_unchanged(tmp_path: Path) -> None:
     sentinel = tmp_path / "xray_report_full.md"
     sentinel.write_text("SENTINEL")
     sentinel_before = _file_hash(sentinel)
+    _write_xray_target(tmp_path)
     plan = _make_plan(
         "t_xray_nc",
         project_root=str(tmp_path),
         run_root=str(tmp_path / "runtime" / "t_xray_nc"),
+        xray_targets=["nexus/services/capability_registry.py"],
     )
     executor = get_executor("xray")
     assert executor is not None
     receipt = executor(plan, "test")
     assert receipt.gate_passed, receipt.outcome.get("error", "")
     assert _file_hash(sentinel) == sentinel_before
+
+
+def test_executor_xray_fails_when_scan_target_missing(tmp_path: Path) -> None:
+    """XRayService.run always returns a path; an empty scan must not pass the gate."""
+    plan = _make_plan(
+        "t_xray_missing",
+        project_root=str(tmp_path),
+        run_root=str(tmp_path / "runtime" / "t_xray_missing"),
+    )
+    receipt = get_executor("xray")(plan, "test")
+    assert receipt.gate_passed is False
 
 
 def test_executor_learn_mode_sentinels_unchanged(tmp_path: Path) -> None:
@@ -187,10 +207,12 @@ def test_executor_learn_phase_slo_sentinels_unchanged(tmp_path: Path) -> None:
 
 
 def test_executor_receipt_has_runtime_metadata(tmp_path: Path) -> None:
+    _write_xray_target(tmp_path)
     plan = _make_plan(
         "t_meta",
         project_root=str(tmp_path),
         run_root=str(tmp_path / "runtime" / "t_meta"),
+        xray_targets=["nexus/services/capability_registry.py"],
     )
     for cap_name in ("xray", "learn_mode", "learn_phase_slo"):
         executor = get_executor(cap_name)
@@ -206,15 +228,18 @@ def test_executor_receipt_has_runtime_metadata(tmp_path: Path) -> None:
 
 
 def test_two_task_ids_do_not_overwrite(tmp_path: Path) -> None:
+    _write_xray_target(tmp_path)
     plan_a = _make_plan(
         "task_a",
         project_root=str(tmp_path),
         run_root=str(tmp_path / "runtime" / "task_a"),
+        xray_targets=["nexus/services/capability_registry.py"],
     )
     plan_b = _make_plan(
         "task_b",
         project_root=str(tmp_path),
         run_root=str(tmp_path / "runtime" / "task_b"),
+        xray_targets=["nexus/services/capability_registry.py"],
     )
     executor = get_executor("xray")
     assert executor is not None
@@ -228,3 +253,20 @@ def test_two_task_ids_do_not_overwrite(tmp_path: Path) -> None:
         for pa in op_a:
             for pb in op_b:
                 assert pa != pb, f"task_a and task_b collided on {pa}"
+
+
+def test_executor_benchmark_writes_report_inside_run_root(tmp_path: Path, monkeypatch) -> None:
+    """Archived 2026-10-12: the benchmark fails closed and writes no report anywhere."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    run_root = tmp_path / "runtime" / "t_bench"
+    plan = _make_plan("t_bench", project_root=str(tmp_path), run_root=str(run_root))
+
+    receipt = get_executor("benchmark")(plan, "test")
+
+    assert receipt.invoked is False and receipt.gate_passed is False
+    assert receipt.outcome["skip_reason"] == "archived_fake_benchmark_2026-10-12"
+    assert not (cwd / "dual_core_benchmark.md").exists()
+    assert not (tmp_path / "dual_core_benchmark.md").exists()
+    assert not (run_root / "dual_core_benchmark.md").exists()

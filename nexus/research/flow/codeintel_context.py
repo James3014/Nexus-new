@@ -47,6 +47,60 @@ def load_codeintel_graph(path: Path) -> dict[str, Any] | None:
     return None
 
 
+def sprint_codeintel_block(
+    repo_root: Path,
+    *,
+    target_file: str,
+    max_items: int = 12,
+) -> tuple[str, dict[str, Any]]:
+    """Impacted files/symbols for a Hyper-Sprint candidate prompt.
+
+    Uses the graph index that research:auto-flow already cached, so the sprint
+    never triggers a full-repository scan; without an index it reports
+    ``no_index`` instead of silently omitting context.
+    """
+    repo_root = Path(repo_root)
+    graph_path = codeintel_run_cache_graph_path(repo_root) or (
+        repo_root / ".nexus" / "reports" / "codeintel" / "shared_code_graph.json"
+    )
+    target = rel_path_for_report(repo_root, target_file)
+    status: dict[str, Any] = {"status": "", "graph_index_path": str(graph_path), "files": 0, "symbols": 0, "chars": 0}
+    if not graph_path.exists():
+        status["status"] = "no_index"
+        return "", status
+    try:
+        impact = analyze_impact(repo_root, [target], index_path=graph_path)
+    except Exception as exc:  # noqa: BLE001 - recorded, prompt falls back to no context
+        status["status"] = f"error:{type(exc).__name__}"
+        return "", status
+    target_module = target[:-3].replace("/", ".") if target.endswith(".py") else target
+    files = [item for item in impact.impacted_files if item != target]
+    symbols = [item for item in impact.impacted_symbols if item != target_module]
+    status["files"] = len(files)
+    status["symbols"] = len(symbols)
+    if not files and not symbols:
+        status["status"] = "empty"
+        return "", status
+
+    def _listing(items: list[str]) -> str:
+        shown = [f"- {item}" for item in items[:max_items]]
+        if len(items) > max_items:
+            shown.append(f"- (+{len(items) - max_items} more)")
+        return "\n".join(shown)
+
+    block = (
+        "[CODEINTEL IMPACT]\n"
+        f"Target: {target}\n"
+        "These modules depend on the target; keep their usage working:\n"
+        f"{_listing(files)}\n"
+    )
+    if symbols:
+        block += f"Impacted symbols:\n{_listing(symbols)}\n"
+    status["status"] = "ok"
+    status["chars"] = len(block)
+    return block, status
+
+
 def build_codeintel_evidence(repo_root: Path, *, target_file: str, task_desc: str) -> dict[str, Any]:
     slug = _safe_codeintel_slug(task_desc)
     report_dir = repo_root / ".nexus" / "reports" / "codeintel"

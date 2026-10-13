@@ -1,6 +1,15 @@
 from typing import Any, Dict, List, Optional, Tuple
 import re
 import logging
+import warnings
+
+warnings.warn(
+    "ARCHIVED 2026-10-13 (#1906): nexus.core.planner_auditor has no production caller "
+    "(lab-only since #1740); see ARCHIVED_2026-10-13.md. Scheduled for deletion; do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 
 logger = logging.getLogger(__name__)
 

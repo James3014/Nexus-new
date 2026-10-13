@@ -1,0 +1,8 @@
+{
+  "id": "float_money_rounding-b",
+  "bug_class": "float_money_rounding",
+  "variant": "b",
+  "problem_statement": "split_evenly('10.00', 3) returns ['3.33', '3.33', '3.33'], which adds up to 9.99 instead of 10.00. The shares of a split should always add up exactly to the total.",
+  "target_file": "bill_split.py",
+  "repro_file": "repro.py"
+}

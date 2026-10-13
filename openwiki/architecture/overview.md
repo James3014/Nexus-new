@@ -6,7 +6,7 @@ tags: [architecture, runtime, execution, spdxrac]
 openwiki:
   roles: [architecture, domain]
   change_kinds: [public-api, lifecycle]
-  source_paths: [nexus/services/unified_runtime.py, scripts/engine/nexus_cli.py]
+  source_paths: [nexus/services/unified_runtime.py, scripts/engine/nexus_cli.py, docs/architecture/REPOSITORY_BOUNDARIES.md, docs/architecture/AI_CONTROL_PLANE_BOUNDARY.md, docs/architecture/PLANNER_RUNTIME_LAYERING_WAVE2.md, docs/architecture/LEARNING_CONSUMER_CUTOVER.md, docs/architecture/EXTRACTION_PROVENANCE.md]
   symbols: [UnifiedRuntime, SanitizedRunner, AsyncProcessExecutor]
   test_paths: [tests/engine/test_runtime_phase_contract.py, tests/core/test_task_continuity.py, tests/test_service_decomposition.py]
   invariants: [Runtime flow is S-P-D-X-R-A-C. A-to-C requires explicit audit pass. TaskContinuity is projection-only. CapabilityPlanner remains sole route and capability-selection authority.]
@@ -84,6 +84,22 @@ This distinction matters for implementation work:
 - use the task/lifecycle service to decide **what action is legal next**;
 - use `CapabilityPlanner` to decide **route/capability selection**;
 - use independent verification/acceptance to decide **whether a Candidate is acceptable**.
+
+---
+
+## 🧬 Repository Family After the Split (observed 2026-10-12)
+
+Since September 2026 Nexus is a family of separately governed repositories. The repository boundary documents under `docs/architecture/` are the current source for each repo's declared role; the roles below are quoted from them, not inferred.
+
+| Repository | Declared role | What it physically holds (current source) | Boundary document |
+| :--- | :--- | :--- | :--- |
+| `James3014/Nexus-new` | `LEGACY_INTEGRATION_LAB` and Compatibility Host; keeps route-decision authority; `product/`, `runtimes/open_swe/`, `nexus/learning/` are `LEGACY_COMPATIBILITY_SNAPSHOT` | The full `nexus/` package, the live CLI `scripts/engine/nexus_cli.py`, the executor registry; 27 planner modules are `install_alias` shims onto `nexus_runtime.planning.*` | `docs/architecture/REPOSITORY_BOUNDARIES.md`, `docs/architecture/PLANNER_RUNTIME_LAYERING_WAVE2.md` |
+| `James3014/nexus-runtime` | Planner source owner and execution coordination; `runtime_is_planner_authority = false` | Planner nodes, capability contract table, `ExecutionCoordinator`; no capability engines and no `from nexus.` imports | `docs/architecture/PLANNER_RUNTIME_LAYERING_WAVE2.md`, pinned via `requirements/canonical-runtime.txt` |
+| `James3014/nexus-learning` | Evidence-bounded learning; "Recommendation != Authority" | Canonical episode projection, closure effectiveness, outcome memory, lessons, adoption; Nexus-new keeps facades under `nexus/learning/` | `docs/architecture/LEARNING_CONSUMER_CUTOVER.md`, `docs/architecture/EXTRACTION_PROVENANCE.md` |
+| `James3014/nexus-core` | `nexus-certify` completion verification | Product lifecycle / certification / benchmark modules; none of the Nexus capability engines | `docs/architecture/EXTRACTION_PROVENANCE.md` |
+| `James3014/devspace`, `James3014/repository-intelligence-engine` | Execution transport; PR/CI advisory | No Nexus capability engines | `docs/architecture/AI_CONTROL_PLANE_BOUNDARY.md` |
+
+`docs/architecture/AI_CONTROL_PLANE_BOUNDARY.md` classes Swarm, Committee/Judge and AutoReason choreography as replaceable **STRATEGY/ADAPTER** layers that must be "justified by measured task-class value", while explicitly not authorizing deletion of legacy code. Where each capability node lands after the split, and which executors are physically reachable per surface, is tracked in [Capability Execution Status](../routing/capability-execution-status.md).
 
 ---
 

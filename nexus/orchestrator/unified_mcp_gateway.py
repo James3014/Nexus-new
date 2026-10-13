@@ -11,6 +11,7 @@ import ast
 import copy
 import difflib
 import hashlib
+import importlib
 import json
 import os
 import re
@@ -29,6 +30,7 @@ from typing import Any, Mapping, Optional
 from urllib.parse import urlsplit
 from uuid import uuid4
 
+import nexus.orchestrator.standing_grant_store as _standing_grant_store_module
 from nexus.contracts.autonomy_goal import (
     AutonomyActionClass,
     RepositoryIdentity,
@@ -44,8 +46,12 @@ from nexus.contracts.execution_readiness import (
 )
 from nexus.contracts.gateway_convergence import (
     ConvergenceAction,
+    ConvergenceReason,
+    DesiredDeploymentMode,
     GatewayConvergenceRequest,
+    RecoveryEffectState,
 )
+from nexus.contracts.gateway_deployment import RECOVERY_RECEIPT_PATH
 from nexus.contracts.lifecycle_action import (
     ContractKind,
     ExternalCandidateAdoptionRequest,
@@ -92,6 +98,20 @@ from nexus.orchestrator.lifecycle_guards import (
     pre_action_guard,
     validate_approval_grant,
 )
+from nexus.orchestrator.mutation_admission import (
+    CANONICAL_REPOSITORIES,
+    MutationAdmissionError,
+    MutationAdmissionStore,
+)
+from nexus.orchestrator.owner_confirmation import (
+    LEGACY_PROTOCOL_VERSION,
+    NEGOTIATED_ELICITATION_PROTOCOL,
+    OwnerConfirmationError,
+    OwnerConfirmationRequest,
+    StdioElicitationChannel,
+    UnavailableConfirmationChannel,
+    client_supports_form_elicitation,
+)
 from nexus.orchestrator.self_hosted_task_service import (
     CANONICAL_SOURCE_ROOT,
     SelfHostedTaskService,
@@ -109,6 +129,12 @@ from nexus.orchestrator.standing_grant_store import (
     restore_task_card_authority,
     switch_task_card_authority,
     write_keyed_standing_grant_receipt,
+)
+from nexus.services.agy_account_pool import (
+    AgyAccountPoolBusyError,
+    AgyAccountPoolExhaustedError,
+    CrossProcessLeaseCoordinator,
+    get_account_pool_manager,
 )
 from nexus.services.model_capability_lineage import (
     CHANGE_KIND_VALUES,
@@ -183,6 +209,7 @@ PERMISSION_ENFORCEMENT_SHA256_AT_START: str
 # compiler so a hard-coded default can never override the model identity.
 AGY_EFFORT_TIERS: tuple[str, ...] = ("high", "medium", "low")
 AGY_PRINT_TIMEOUT = "25s"
+AGY_MODEL_PROBE_PRINT_TIMEOUT = "300s"
 
 
 def _agy_effort_tier(model: str) -> str:
@@ -201,6 +228,7 @@ def _compile_agy_command(
     prompt: str,
     json_schema: str = "",
     explicit_effort: str = "",
+    print_timeout: str = AGY_PRINT_TIMEOUT,
 ) -> list[str]:
     """Single source of truth for Agy CLI argument compilation.
 
@@ -233,12 +261,25 @@ def _compile_agy_command(
         raise GatewayInputError("agy model requires an explicit effort or an embedded tier suffix")
     if name:
         command.extend(["--model", name])
-    command.extend(["--print-timeout", AGY_PRINT_TIMEOUT, "--prompt", prompt])
+    command.extend(["--print-timeout", print_timeout, "--prompt", prompt])
     return command
 
 
 class GatewayInputError(ValueError):
     """Raised when a public gateway request is outside its bounded contract."""
+
+
+# Until per-effect scope enforcement exists (#1750 phase 2), host-confirmed
+# grants may not carry merge-, integration-, release- or grant-class authority.
+_SCOPE_ENFORCEMENT_REQUIRED_ACTIONS = frozenset(
+    {
+        AutonomyActionClass.GITHUB_MERGE,
+        AutonomyActionClass.CANDIDATE_INTEGRATE,
+        AutonomyActionClass.PRODUCTION_RELEASE,
+        AutonomyActionClass.RUNTIME_ACTIVATE,
+        AutonomyActionClass.OWNER_REPRESENTATION_GRANT_ISSUE,
+    }
+)
 
 
 def _text(value: Any, field: str, *, max_length: int = 4096) -> str:
@@ -684,6 +725,120 @@ def observe_github_issue(repository: str, issue_number: int) -> dict[str, Any]:
         "observed_at": datetime.now(timezone.utc).isoformat(),
     }
 
+
+def observe_github_repository_default_head(repository: str) -> dict[str, Any]:
+    """Freshly observe one canonical repository default-branch head."""
+
+    if repository not in CANONICAL_REPOSITORIES:
+        return {
+            "ok": False,
+            "blocker": "MUTATION_ADMISSION_REPOSITORY_NOT_CANONICAL",
+            "detail": repository,
+        }
+    github_cli, resolution_error = _resolve_github_cli()
+    if github_cli is None:
+        return {
+            "ok": False,
+            "blocker": "GITHUB_OBSERVER_EXECUTABLE_UNAVAILABLE",
+            "detail": resolution_error or "GitHub CLI executable unavailable",
+        }
+
+    def api(path: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        try:
+            result = subprocess.run(
+                [github_cli, "api", path],
+                cwd=CANONICAL_SOURCE_ROOT,
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            return None, {
+                "ok": False,
+                "blocker": "GITHUB_OBSERVER_TIMEOUT",
+                "detail": str(exc),
+            }
+        except OSError as exc:
+            return None, {
+                "ok": False,
+                "blocker": "GITHUB_OBSERVER_EXECUTABLE_UNAVAILABLE",
+                "detail": str(exc),
+            }
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout).strip()
+            lowered = detail.lower()
+            auth_failure = any(
+                marker in lowered
+                for marker in (
+                    "auth login",
+                    "authentication",
+                    "not logged into",
+                    "gh_token",
+                    "github_token",
+                )
+            )
+            return None, {
+                "ok": False,
+                "blocker": (
+                    "GITHUB_OBSERVER_AUTH_UNAVAILABLE"
+                    if auth_failure
+                    else "GITHUB_OBSERVER_REQUEST_FAILED"
+                ),
+                "detail": detail,
+            }
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            return None, {
+                "ok": False,
+                "blocker": "GITHUB_OBSERVER_MALFORMED_RESPONSE",
+                "detail": str(exc),
+            }
+        if not isinstance(payload, dict):
+            return None, {
+                "ok": False,
+                "blocker": "GITHUB_OBSERVER_MALFORMED_RESPONSE",
+                "detail": "GitHub response must be an object",
+            }
+        return payload, None
+
+    repo_payload, error = api(f"repos/{repository}")
+    if error is not None:
+        return error
+    assert repo_payload is not None
+    if repo_payload.get("full_name") != repository:
+        return {
+            "ok": False,
+            "blocker": "GITHUB_OBSERVER_MALFORMED_RESPONSE",
+            "detail": "repository identity mismatch",
+        }
+    default_branch = str(repo_payload.get("default_branch") or "").strip()
+    if not default_branch:
+        return {
+            "ok": False,
+            "blocker": "GITHUB_OBSERVER_MALFORMED_RESPONSE",
+            "detail": "default branch missing",
+        }
+    branch_payload, error = api(f"repos/{repository}/branches/{default_branch}")
+    if error is not None:
+        return error
+    assert branch_payload is not None
+    commit = branch_payload.get("commit")
+    head_sha = str(commit.get("sha") or "") if isinstance(commit, Mapping) else ""
+    if branch_payload.get("name") != default_branch or not _SHA_RE.fullmatch(head_sha):
+        return {
+            "ok": False,
+            "blocker": "GITHUB_OBSERVER_MALFORMED_RESPONSE",
+            "detail": "default branch head identity mismatch",
+        }
+    return {
+        "ok": True,
+        "repository": repository,
+        "default_branch": default_branch,
+        "head_sha": head_sha,
+        "observed_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 def _canonical_remote_matches(origin: str, repository: str) -> bool:
     value = str(origin).strip()
@@ -1360,6 +1515,83 @@ def _evaluate_upstream_freshness(
     }
 
 
+def _receipt_only_main_movement(
+    *,
+    deployed_source_head: str | None,
+    observed_upstream_main_head: str | None,
+) -> bool:
+    """Prove that upstream movement changed only the tracked recovery receipt.
+
+    This is deliberately narrower than generic path-impact analysis.  Any
+    missing, divergent, truncated, malformed, or unavailable comparison fails
+    closed and preserves the existing recovery request.
+    """
+    deployed = str(deployed_source_head or "").strip().lower()
+    upstream = str(observed_upstream_main_head or "").strip().lower()
+    if (
+        not _SHA_RE.fullmatch(deployed)
+        or not _SHA_RE.fullmatch(upstream)
+        or deployed == upstream
+    ):
+        return False
+
+    github_cli, _resolution_error = _resolve_github_cli()
+    if github_cli is None:
+        return False
+    try:
+        result = subprocess.run(
+            [
+                github_cli,
+                "api",
+                (
+                    f"repos/{GITHUB_REPOSITORY.repository_id}/compare/"
+                    f"{deployed}...{upstream}"
+                ),
+            ],
+            cwd=CANONICAL_SOURCE_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if result.returncode != 0:
+        return False
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(payload, Mapping):
+        return False
+
+    base_commit = payload.get("base_commit")
+    head_commit = payload.get("head_commit")
+    merge_base = payload.get("merge_base_commit")
+    files = payload.get("files")
+    if (
+        payload.get("status") != "ahead"
+        or payload.get("behind_by") != 0
+        or not isinstance(payload.get("ahead_by"), int)
+        or payload["ahead_by"] <= 0
+        or not isinstance(base_commit, Mapping)
+        or base_commit.get("sha") != deployed
+        or not isinstance(head_commit, Mapping)
+        or head_commit.get("sha") != upstream
+        or not isinstance(merge_base, Mapping)
+        or merge_base.get("sha") != deployed
+        or not isinstance(files, list)
+        or len(files) != 1
+        or not isinstance(files[0], Mapping)
+    ):
+        return False
+    changed = files[0]
+    return (
+        changed.get("filename") == RECOVERY_RECEIPT_PATH
+        and changed.get("status") == "modified"
+    )
+
+
 def _default_observe_upstream_main(
     *,
     timeout_seconds: float = 3.0,
@@ -1461,6 +1693,24 @@ def _evaluate_freshness(
     }
 
 
+def _gateway_recovery_manager() -> Any:
+    """Load the repository-owned #526 recovery manager only for recovery actions."""
+
+    return importlib.import_module("scripts.ops.mcp_gateway_durable")
+
+
+def _gateway_recovery_result(result: Any) -> dict[str, Any]:
+    if isinstance(result, Mapping):
+        return dict(result)
+    dump = getattr(result, "model_dump", None)
+    if not callable(dump):
+        raise GatewayInputError("GATEWAY_RECOVERY_MANAGER_RESULT_INVALID")
+    payload = dump()
+    if not isinstance(payload, Mapping):
+        raise GatewayInputError("GATEWAY_RECOVERY_MANAGER_RESULT_INVALID")
+    return dict(payload)
+
+
 class UnifiedMCPGateway:
     """JSON-RPC MCP server with one public identity and bounded tools."""
 
@@ -1471,10 +1721,19 @@ class UnifiedMCPGateway:
         model_runner: Any = None,
         apply_runner: Any = None,
         github_issue_observer: Any = None,
+        mutation_repository_observer: Any = None,
         upstream_observer: Any = None,
         upstream_cache_ttl_seconds: float = 30.0,
+        owner_confirmation_channel: Any = None,
     ):
         self.service = service or SelfHostedTaskService()
+        # Owner confirmation is never a tool argument (#1750). Without a host
+        # channel that can ask the human, authority issuance fails closed.
+        self._owner_confirmation_injected = owner_confirmation_channel is not None
+        self._owner_confirmation_channel = (
+            owner_confirmation_channel or UnavailableConfirmationChannel()
+        )
+        self._stdio_streams: tuple[Any, Any] | None = None
         # These kwargs remain accepted for compatibility with older callers,
         # but neither runner is a gateway authority.  Assisted jobs are
         # provider probes/advice only; governed implementation enters through
@@ -1486,8 +1745,17 @@ class UnifiedMCPGateway:
         self._lineage_registry = ModelCapabilityLineageRegistry()
         self._calibration_planner = CalibrationPlanner(self._lineage_registry)
         self._assist_processes: dict[str, subprocess.Popen[str]] = {}
+        self._assist_account_claims: dict[str, Any] = {}
         self._assist_lock = threading.RLock()
         self._github_issue_observer = github_issue_observer or observe_github_issue
+        self._mutation_repository_observer = (
+            mutation_repository_observer or observe_github_repository_default_head
+        )
+        admission_state_root = (
+            getattr(self.service, "state_dir", None)
+            or SelfHostedTaskService.canonical_state_dir()
+        )
+        self._mutation_admissions = MutationAdmissionStore(admission_state_root)
         self._upstream_observer = upstream_observer or _default_observe_upstream_main
         self._upstream_cache_ttl_seconds = float(upstream_cache_ttl_seconds)
         self._upstream_cache: tuple[float, dict[str, Any]] | None = None
@@ -1896,14 +2164,28 @@ class UnifiedMCPGateway:
         return value
 
     @staticmethod
-    def _assist_command(*, executable: str, provider: str, model: str, prompt: str, explicit_effort: str = "") -> list[str]:
+    def _assist_command(
+        *,
+        executable: str,
+        provider: str,
+        model: str,
+        prompt: str,
+        explicit_effort: str = "",
+        agy_print_timeout: str = AGY_PRINT_TIMEOUT,
+    ) -> list[str]:
         if provider == "cline":
             selected = model or "glm-5.2"
             if "/" not in selected:
                 selected = f"cline-pass/{selected}"
             return [executable, "--json", "--plan", "--auto-approve", "false", "--thinking", "none", "--timeout", str(CLINE_RUN_TIMEOUT_SECONDS), "--model", selected, prompt]
         if provider == "agy":
-            return _compile_agy_command(executable=executable, model=model, prompt=prompt, explicit_effort=explicit_effort)
+            return _compile_agy_command(
+                executable=executable,
+                model=model,
+                prompt=prompt,
+                explicit_effort=explicit_effort,
+                print_timeout=agy_print_timeout,
+            )
         if provider == "gemini":
             return [executable, "--skip-trust", "--approval-mode", "auto_edit", "-m", model, "-p", prompt, "--output-format", "json"]
         if provider == "opencode":
@@ -1957,9 +2239,19 @@ class UnifiedMCPGateway:
     def _decode_model_probe_payload(text: str, provider: str, resolved_model: str) -> tuple[Optional[dict[str, Any]], Optional[str]]:
         """Return only a model-originated JSON payload, never transport metadata."""
 
-        def decode_document(raw: str) -> Optional[dict[str, Any]]:
+        def decode_document(
+            raw: str, *, allow_single_json_fence: bool = False
+        ) -> Optional[dict[str, Any]]:
+            if not isinstance(raw, str):
+                return None
+            candidate = raw.strip()
+            if allow_single_json_fence:
+                if candidate.startswith("```json\n") and candidate.endswith("\n```"):
+                    candidate = candidate[len("```json\n") : -len("\n```")].strip()
+                elif candidate.startswith("```") or candidate.endswith("```"):
+                    return None
             try:
-                value = json.loads(raw.strip())
+                value = json.loads(candidate)
             except (json.JSONDecodeError, TypeError):
                 return None
             return value if isinstance(value, dict) else None
@@ -1976,7 +2268,18 @@ class UnifiedMCPGateway:
             "turn.started",
             "turn.completed",
         }
-        if provider not in {"cline", "codex"} and direct is not None and direct.get("type") not in transport_types:
+        if provider == "agy" and direct is not None:
+            if str(direct.get("status") or "").upper() != "SUCCESS":
+                return None, None
+            response = direct.get("response")
+            if isinstance(response, Mapping):
+                return dict(response), "agy_json_envelope"
+            if isinstance(response, str):
+                payload = decode_document(response, allow_single_json_fence=True)
+                if payload is not None:
+                    return payload, "agy_json_envelope"
+            return None, None
+        if provider not in {"cline", "codex", "agy"} and direct is not None and direct.get("type") not in transport_types:
             return direct, "direct_json_document"
 
         events: list[dict[str, Any]] = []
@@ -2135,6 +2438,14 @@ class UnifiedMCPGateway:
                 return f"output_schema_type:{path}:{expected}"
             if "enum" in shape and current not in shape.get("enum", []):
                 return f"output_schema_enum:{path}"
+            min_length = shape.get("minLength")
+            if (
+                isinstance(current, str)
+                and isinstance(min_length, int)
+                and not isinstance(min_length, bool)
+                and len(current.strip()) < min_length
+            ):
+                return f"output_schema_min_length:{path}:{min_length}"
             if isinstance(current, Mapping):
                 missing = [str(field) for field in shape.get("required", []) or [] if str(field) not in current]
                 if missing:
@@ -2196,21 +2507,33 @@ class UnifiedMCPGateway:
         stderr_path = Path(str(job.get("stderr_artifact") or ""))
         stdout = stdout_path.read_text(encoding="utf-8", errors="replace") if stdout_path.exists() else ""
         stderr = stderr_path.read_text(encoding="utf-8", errors="replace") if stderr_path.exists() else ""
+        provider = str(job.get("provider") or "")
+        stderr_lower = stderr.lower()
+        agy_print_timed_out = (
+            provider == "agy"
+            and "[agy] print timeout after" in stderr_lower
+            and "turn in progress" in stderr_lower
+        )
         is_model_probe = str(job.get("job_kind") or "assist") == "model_probe"
         response_provenance: Optional[str] = None
         if is_model_probe:
             parsed, response_provenance = self._decode_model_probe_payload(
                 stdout,
-                str(job.get("provider") or ""),
+                provider,
                 str(job.get("resolved_model") or ""),
             )
         else:
             parsed = self._decode_assist_payload(
                 stdout,
-                str(job.get("provider") or ""),
+                provider,
                 require_patch=True,
             )
-        schema_valid, schema_error = self._validate_output_schema(parsed, job.get("output_schema"))
+        if agy_print_timed_out:
+            parsed = None
+            response_provenance = None
+            schema_valid, schema_error = False, ""
+        else:
+            schema_valid, schema_error = self._validate_output_schema(parsed, job.get("output_schema"))
         started_at = job.get("started_at")
         provider_time_ms = 0
         if started_at:
@@ -2220,27 +2543,69 @@ class UnifiedMCPGateway:
                 provider_time_ms = 0
         model_response_verified = bool(
             is_model_probe
+            and not agy_print_timed_out
             and returncode == 0
             and parsed is not None
             and schema_valid
             and response_provenance
         )
-        provider_error_sha256 = hashlib.sha256(stderr.encode("utf-8")).hexdigest() if returncode != 0 and stderr else None
+        provider_error_sha256 = (
+            hashlib.sha256(stderr.encode("utf-8")).hexdigest()
+            if stderr and (returncode != 0 or agy_print_timed_out)
+            else None
+        )
+        if agy_print_timed_out:
+            status = "FAILED"
+            blocker = "ASSIST_PROVIDER_PRINT_TIMEOUT"
+            provider_error = "provider print timeout while turn remained in progress"
+        else:
+            degenerate_patch = bool(
+                not is_model_probe
+                and returncode == 0
+                and parsed is not None
+                and not self._assist_patch_is_substantive(parsed.get("patch"))
+            )
+            status = (
+                "COMPLETED"
+                if returncode == 0 and parsed is not None and schema_valid and not degenerate_patch
+                else "FAILED"
+            )
+            blocker = (
+                "ASSIST_PROVIDER_DEGENERATE_OUTPUT"
+                if degenerate_patch
+                else "ASSIST_PROVIDER_MALFORMED_OUTPUT"
+                if returncode == 0 and (parsed is None or not schema_valid)
+                else ("ASSIST_PROVIDER_FAILED" if returncode != 0 else None)
+            )
+            if degenerate_patch:
+                parsed = None
+                schema_error = "degenerate_patch"
+            provider_error = "provider process failed" if returncode != 0 else ""
         job.update({
-            "status": "COMPLETED" if returncode == 0 and parsed is not None and schema_valid else "FAILED",
+            "status": status,
             "finished_at": self._utc_now(),
             "exit_code": returncode,
             "result": parsed,
             "model_response_verified": model_response_verified,
             "model_response_provenance": response_provenance,
-            "blocker": ("ASSIST_PROVIDER_MALFORMED_OUTPUT" if returncode == 0 and (parsed is None or not schema_valid) else ("ASSIST_PROVIDER_FAILED" if returncode != 0 else None)),
+            "blocker": blocker,
+            "retry_required": blocker == "ASSIST_PROVIDER_DEGENERATE_OUTPUT",
             "schema_error": schema_error,
             "schema_validation_level": "bounded_subset",
-            "provider_error": "provider process failed" if returncode != 0 else "",
+            "provider_error": provider_error,
             "provider_error_sha256": provider_error_sha256,
+            "provider_print_timeout": agy_print_timed_out,
             "provider_time_ms": provider_time_ms,
         })
         self._assist_record_stream_artifacts(job)
+        lease_cleanup_ok = self._release_assist_account_claim(task_id, job)
+        if is_model_probe and job.get("account_lease_id_hash") and not lease_cleanup_ok:
+            job.update({
+                "status": "UNKNOWN_REQUIRES_RECONCILE",
+                "blocker": "ASSIST_ACCOUNT_LEASE_RECONCILIATION_REQUIRED",
+                "reconciliation_required": True,
+                "model_response_verified": False,
+            })
         workspace_root = Path(str(job.get("workspace_root") or ""))
         if workspace_root.exists() and workspace_root != CANONICAL_SOURCE_ROOT:
             after = self._snapshot_workspace(workspace_root)
@@ -2268,6 +2633,110 @@ class UnifiedMCPGateway:
             job["probe_evidence_path"] = str(self._probe_evidence_read_root() / (identity + ".json"))
         return self._assist_write(job)
 
+    _ASSIST_HUNK_HEADER_RE = re.compile(r"^@@ -\d{1,9}(?:,(\d{1,9}))? \+\d{1,9}(?:,(\d{1,9}))? @@")
+    _ASSIST_GIT_HEADER_RE = re.compile(r"^diff --git \S.* \S.*$")
+    # Git extended header lines. The first group needs no hunk to be a real change.
+    _ASSIST_GIT_CHANGE_RE = re.compile(
+        r"^(new file mode [0-7]{6}|deleted file mode [0-7]{6}|old mode [0-7]{6}|new mode [0-7]{6}|"
+        r"rename from \S.*|rename to \S.*|Binary files .* differ|GIT binary patch)$"
+    )
+    _ASSIST_GIT_OTHER_RE = re.compile(
+        r"^(index \S+( [0-7]{6})?|similarity index \d+%|dissimilarity index \d+%|copy from \S.*|copy to \S.*)$"
+    )
+
+    @staticmethod
+    def _assist_patch_is_substantive(patch: Any) -> bool:
+        """A patch must be a structurally valid unified diff, never null/empty/refusal prose.
+
+        Accepts a `--- `/`+++ ` file section with a hunk header followed by at least one
+        `+`/`-` change line, or a `diff --git` section whose extended header needs no hunk
+        (new/deleted file, rename, mode change, binary). Single linear pass.
+        """
+        if not isinstance(patch, str):
+            return False
+        cls = UnifiedMCPGateway
+        lines = patch.splitlines()
+        count = len(lines)
+        index = 0
+        while index < count:
+            line = lines[index]
+            if line.startswith("--- ") and index + 1 < count and lines[index + 1].startswith("+++ "):
+                index += 2
+                while index < count:
+                    header = cls._ASSIST_HUNK_HEADER_RE.match(lines[index])
+                    if header is None:
+                        break
+                    # Consume the hunk by its header counts (like git apply), so removed or
+                    # added lines that look like `--- `/`+++ ` are body, not file headers.
+                    try:
+                        old_left = 1 if header.group(1) is None else int(header.group(1))
+                        new_left = 1 if header.group(2) is None else int(header.group(2))
+                    except ValueError:
+                        return False
+                    index += 1
+                    body_start = index
+                    changed = False
+                    counted = True
+                    while old_left > 0 or new_left > 0:
+                        if index >= count:
+                            counted = False
+                            break
+                        body = lines[index]
+                        marker = body[:1]
+                        if marker == "\\":
+                            index += 1
+                            continue
+                        if marker in ("", " ") and old_left > 0 and new_left > 0:
+                            old_left -= 1
+                            new_left -= 1
+                        elif marker == "-" and old_left > 0:
+                            old_left -= 1
+                            changed = True
+                        elif marker == "+" and new_left > 0:
+                            new_left -= 1
+                            changed = True
+                        else:
+                            counted = False
+                            break
+                        index += 1
+                    if counted:
+                        while index < count and lines[index].startswith("\\"):
+                            index += 1
+                    else:
+                        # Counts not satisfied: the applier uses `git apply --recount`, so
+                        # re-read this hunk by line shape up to the next real section header.
+                        index = body_start
+                        changed = False
+                        while index < count:
+                            body = lines[index]
+                            if body.startswith(("diff --git ", "@@ ")) or (
+                                body.startswith("--- ")
+                                and index + 1 < count
+                                and lines[index + 1].startswith("+++ ")
+                            ):
+                                break
+                            marker = body[:1]
+                            if marker in ("+", "-"):
+                                changed = True
+                            elif marker not in ("", " ", "\\"):
+                                return False
+                            index += 1
+                    if changed:
+                        return True
+                continue
+            if cls._ASSIST_GIT_HEADER_RE.match(line):
+                index += 1
+                while index < count:
+                    header = lines[index]
+                    if cls._ASSIST_GIT_CHANGE_RE.match(header):
+                        return True
+                    if not cls._ASSIST_GIT_OTHER_RE.match(header):
+                        break
+                    index += 1
+                continue
+            index += 1
+        return False
+
     @staticmethod
     def _assist_action(job: Mapping[str, Any]) -> dict[str, Any]:
         """Project one Assisted job into current action and pending-count state."""
@@ -2282,7 +2751,7 @@ class UnifiedMCPGateway:
             and job.get("durable_exit_marker") is True
             and not job.get("uncertain_mutation")
         )
-        if status == "UNKNOWN_REQUIRES_RECONCILE":
+        if status == "UNKNOWN_REQUIRES_RECONCILE" or reconciliation_required:
             next_action = "nexus_task_reconcile"
         else:
             result_tool = "nexus_model_probe_result" if str(job.get("job_kind") or "assist") == "model_probe" else "nexus_assist_result"
@@ -2306,6 +2775,7 @@ class UnifiedMCPGateway:
             "attempt_id": job.get("attempt_id"),
             "attempt_history": job.get("attempt_history", []),
             "status": status,
+            "retry_required": bool(job.get("retry_required")) or action["next_action"] == "nexus_task_retry",
             "execution_lane": "ASSISTED_CANONICAL",
             "candidate_only": True,
             "apply_requested": bool(job.get("apply_requested")),
@@ -2349,6 +2819,10 @@ class UnifiedMCPGateway:
             "requested_tools_policy": job.get("requested_tools_policy", []),
             "tool_policy_enforcement": job.get("tool_policy_enforcement", "not_enforced"),
             "filesystem_delta": job.get("filesystem_delta", {"created": [], "removed": [], "changed": []}),
+            "account_alias_hash": job.get("account_alias_hash"),
+            "account_lease_id_hash": job.get("account_lease_id_hash"),
+            "account_lease_released": job.get("account_lease_released"),
+            "account_lease_cleanup_status": job.get("account_lease_cleanup_status"),
             "process_cleanup": job.get("process_cleanup", False),
             "process_killed": bool(job.get("process_killed", False)),
             "stream_flush_status": job.get("stream_flush_status", "not_observed"),
@@ -2436,7 +2910,11 @@ class UnifiedMCPGateway:
             "filesystem_after": None,
             "filesystem_delta": {"created": [], "removed": [], "changed": []},
             "process_cleanup": False,
-            "output_schema": {"type": "object", "required": ["patch"]},
+            "output_schema": {
+                "type": "object",
+                "required": ["patch"],
+                "properties": {"patch": {"type": "string", "minLength": 1}},
+            },
             "result_artifact": str(self._assist_path(task_id)),
             "provider": provider,
             "model": model if "/" in model else f"cline-pass/{model}",
@@ -2599,6 +3077,15 @@ class UnifiedMCPGateway:
             self._cleanup_assist_workspace(job)
             with self._assist_lock:
                 self._assist_processes.pop(task_id, None)
+            if terminated:
+                self._release_assist_account_claim(task_id, job)
+            elif job.get("account_lease_id_hash"):
+                self._abandon_assist_account_claim(task_id, job)
+                job["status"] = "UNKNOWN_REQUIRES_RECONCILE"
+                job["blocker"] = "ASSIST_CANCEL_CLEANUP_INCOMPLETE"
+            self._assist_write(job)
+        elif job.get("account_lease_id_hash") and not job.get("account_lease_released"):
+            self._release_assist_account_claim(task_id, job)
             self._assist_write(job)
         return self._assist_response(job, operation="cancel")
 
@@ -2608,6 +3095,13 @@ class UnifiedMCPGateway:
             raise KeyError(f"unknown task_id: {task_id}")
         if job.get("status") not in {"FAILED", "CANCELLED"}:
             raise GatewayInputError("ASSIST_RETRY_REQUIRES_TERMINAL_FAILURE")
+        if job.get("reconciliation_required"):
+            raise GatewayInputError("ASSIST_RETRY_REQUIRES_RECONCILIATION")
+        if (
+            job.get("account_lease_id_hash")
+            and job.get("account_lease_cleanup_status") != "RELEASED"
+        ):
+            raise GatewayInputError("ASSIST_RETRY_REQUIRES_AGY_LEASE_CLEANUP")
 
         action_dict = job.get("action")
         if not isinstance(action_dict, Mapping):
@@ -2856,8 +3350,22 @@ class UnifiedMCPGateway:
             return {}, None
         try:
             executable = resolve_registered_provider_executable(provider)
-        except ValueError:
-            return metadata, None
+        except ValueError as exc:
+            if provider != "agy" or str(exc) != "provider_binary_not_found":
+                return metadata, None
+            candidate = Path.home() / ".local/bin/agy"
+            if not candidate.is_file() or not os.access(candidate, os.X_OK):
+                return metadata, None
+            fallback_env = dict(os.environ)
+            fallback_env["NEXUS_AGY_BIN"] = str(candidate)
+            fallback_env["NEXUS_AGY_EXECUTABLE"] = str(candidate)
+            try:
+                executable = resolve_registered_provider_executable(
+                    provider,
+                    environ=fallback_env,
+                )
+            except ValueError:
+                return metadata, None
         return metadata, str(Path(executable).resolve())
 
     def _provider_preflight(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
@@ -3205,7 +3713,6 @@ class UnifiedMCPGateway:
         execute GitHub actions, or create another grant authority.
         """
         allowed_keys = {
-            "ownerConfirmation",
             "repository",
             "coordinatorId",
             "goalId",
@@ -3215,11 +3722,12 @@ class UnifiedMCPGateway:
             "issuedAt",
             "expectedCurrentReceiptHash",
         }
+        if "ownerConfirmation" in arguments:
+            # A model-supplied Boolean is not Owner consent (#1750).
+            raise GatewayInputError("OWNER_CONFIRMATION_PARAMETER_REMOVED")
         unknown_keys = set(arguments.keys()) - allowed_keys
         if unknown_keys:
             raise GatewayInputError(f"unknown arguments: {', '.join(sorted(unknown_keys))}")
-        if arguments.get("ownerConfirmation") is not True:
-            raise GatewayInputError("OWNER_CONFIRMATION_REQUIRED")
         if str(arguments.get("repository") or "").strip() != GITHUB_REPOSITORY.repository_id:
             raise GatewayInputError("STANDING_GRANT_REPOSITORY_MISMATCH")
 
@@ -3242,6 +3750,10 @@ class UnifiedMCPGateway:
                 raise GatewayInputError(f"STANDING_GRANT_ACTION_INVALID:{raw_action}") from exc
             if action in parsed_actions:
                 raise GatewayInputError("STANDING_GRANT_ACTION_DUPLICATE")
+            if action in _SCOPE_ENFORCEMENT_REQUIRED_ACTIONS:
+                raise GatewayInputError(
+                    f"STANDING_GRANT_ACTION_REQUIRES_SCOPE_ENFORCEMENT:{action.value}"
+                )
             parsed_actions.append(action)
         parsed_actions.sort(key=lambda action: action.value)
 
@@ -3309,6 +3821,24 @@ class UnifiedMCPGateway:
             context=context,
             supersedes_grant_hash=expected_current,
         )
+        def ask_owner() -> dict[str, Any]:
+            return self._confirm_with_owner(
+                tool="nexus_owner_standing_grant_issue",
+                draft={**request_identity, "ownerId": context.owner_id, "receiptHash": receipt.receipt_hash},
+                summary_lines=(
+                    f"Repository: {GITHUB_REPOSITORY.repository_id}",
+                    f"Goal: {goal_id}",
+                    f"Coordination scope: {coordination_scope_id}",
+                    f"Coordinator: {coordinator_id}",
+                    f"Allowed actions: {', '.join(action.value for action in parsed_actions)}",
+                    f"Valid: {issued_at.isoformat()} -> {expires_at.isoformat()}",
+                    f"Supersedes: {expected_current or 'none'}",
+                ),
+                now=now,
+                not_after=expires_at,
+            )
+
+        confirmation: dict[str, Any] | None = None
         key = StandingGrantKey(
             GITHUB_REPOSITORY,
             goal_id,
@@ -3339,6 +3869,9 @@ class UnifiedMCPGateway:
                     and current_hash != expected_current
                 ):
                     raise StandingGrantReceiptError("CAS_MISMATCH")
+                # Ask only once the write is otherwise admissible; the store
+                # re-checks the predecessor (CAS) when the write happens.
+                confirmation = ask_owner()
                 write_keyed_standing_grant_receipt(
                     receipt,
                     expected_receipt_hash=expected_current,
@@ -3347,6 +3880,14 @@ class UnifiedMCPGateway:
                 if rebound is None or rebound.receipt_hash != receipt.receipt_hash:
                     raise StandingGrantReceiptError("ISSUANCE_READBACK_MISMATCH")
                 status = "ISSUED"
+                self._append_owner_confirmation_audit(
+                    {
+                        "schema": "nexus.owner_confirmation_outcome.v1",
+                        "evidence_hash": confirmation["evidence_hash"],
+                        "outcome": status,
+                        "receipt_hash": receipt.receipt_hash,
+                    }
+                )
         except StandingGrantReceiptError as exc:
             raise GatewayInputError(str(exc)) from exc
 
@@ -3368,11 +3909,66 @@ class UnifiedMCPGateway:
             "idempotent_replay": status == "REPLAYED",
             "merge_performed": False,
             "claim_ceiling": "STANDING_GRANT_ISSUED_ONLY",
+            "owner_confirmation": confirmation,
         }
+
+    def _confirm_with_owner(
+        self,
+        *,
+        tool: str,
+        draft: Mapping[str, Any],
+        summary_lines: tuple[str, ...],
+        now: datetime,
+        not_after: datetime,
+    ) -> dict[str, Any]:
+        """Ask the Owner through the host and record the answer before any write."""
+        request = OwnerConfirmationRequest.build(
+            tool=tool,
+            draft=draft,
+            summary_lines=summary_lines,
+            now=now,
+            not_after=not_after,
+        )
+        try:
+            evidence = self._owner_confirmation_channel.confirm(request)
+        except OwnerConfirmationError as exc:
+            raise GatewayInputError(str(exc)) from exc
+        if evidence.draft_hash != request.draft_hash or evidence.request_id != request.request_id:
+            raise GatewayInputError("OWNER_CONFIRMATION_BINDING_MISMATCH")
+        record = {
+            **evidence.to_dict(),
+            "evidence_hash": evidence.evidence_hash,
+            # The draft carries the receipt hash, so the record names the exact
+            # grant the Owner was shown.
+            "draft": dict(request.draft),
+        }
+        self._append_owner_confirmation_audit(record)
+        return record
+
+    @staticmethod
+    def _append_owner_confirmation_audit(record: Mapping[str, Any]) -> None:
+        directory = _standing_grant_store_module.DEFAULT_RECEIPT_PATH.parent
+        try:
+            _standing_grant_store_module._assert_dir_chain_safe(directory, create=True)
+            fd = os.open(
+                str(directory / "owner-confirmations.jsonl"),
+                os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW,
+                0o600,
+            )
+            try:
+                os.write(
+                    fd,
+                    (json.dumps(dict(record), sort_keys=True, ensure_ascii=False) + "\n").encode(
+                        "utf-8"
+                    ),
+                )
+            finally:
+                os.close(fd)
+        except (OSError, _standing_grant_store_module.StandingGrantReceiptError) as exc:
+            raise GatewayInputError("OWNER_CONFIRMATION_AUDIT_WRITE_FAILED") from exc
 
     def _task_card_authority_switch(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         allowed_keys = {
-            "ownerConfirmation",
             "attemptKey",
             "expectedCurrentReceiptHash",
             "expectedCurrentGoalId",
@@ -3381,12 +3977,13 @@ class UnifiedMCPGateway:
             "successorThreadId",
             "ttlMinutes",
         }
+        if "ownerConfirmation" in arguments:
+            # A switch writes a new grant at a new key, so it needs the same
+            # host-mediated Owner confirmation as issuance (#1750).
+            raise GatewayInputError("OWNER_CONFIRMATION_PARAMETER_REMOVED")
         unknown_keys = set(arguments.keys()) - allowed_keys
         if unknown_keys:
             raise GatewayInputError(f"unknown arguments: {', '.join(sorted(unknown_keys))}")
-        owner_confirmation = arguments.get("ownerConfirmation")
-        if owner_confirmation is not True:
-            raise GatewayInputError("OWNER_CONFIRMATION_REQUIRED")
         attempt_key = _text(arguments.get("attemptKey"), "attemptKey", max_length=128)
         expected_current_receipt_hash = _text(
             arguments.get("expectedCurrentReceiptHash"),
@@ -3421,6 +4018,30 @@ class UnifiedMCPGateway:
         if isinstance(raw_ttl, bool) or not isinstance(raw_ttl, int) or raw_ttl < 1 or raw_ttl > 30:
             raise GatewayInputError("ttlMinutes must be an integer between 1 and 30")
         ttl_minutes = raw_ttl
+        now = datetime.now(timezone.utc)
+        self._confirm_with_owner(
+            tool="nexus_task_card_authority_switch",
+            draft={
+                "repository": GITHUB_REPOSITORY.repository_id,
+                "attemptKey": attempt_key,
+                "expectedCurrentReceiptHash": expected_current_receipt_hash,
+                "expectedCurrentGoalId": expected_current_goal_id,
+                "expectedCurrentThreadId": expected_current_thread_id,
+                "successorGoalId": successor_goal_id,
+                "successorThreadId": successor_thread_id,
+                "allowedActions": ["TASK_CARD_COMMIT", "TASK_CARD_CREATE"],
+                "ttlMinutes": ttl_minutes,
+            },
+            summary_lines=(
+                f"Repository: {GITHUB_REPOSITORY.repository_id}",
+                f"From grant: {expected_current_receipt_hash} (goal {expected_current_goal_id})",
+                f"New task-card scope: goal {successor_goal_id}, thread {successor_thread_id}",
+                "Allowed actions: TASK_CARD_COMMIT, TASK_CARD_CREATE",
+                f"Valid for: {ttl_minutes} minutes (never beyond the current grant)",
+            ),
+            now=now,
+            not_after=now + timedelta(minutes=ttl_minutes),
+        )
 
         try:
             return switch_task_card_authority(
@@ -3488,6 +4109,57 @@ class UnifiedMCPGateway:
         except StandingGrantReceiptError as exc:
             raise GatewayInputError(str(exc)) from exc
 
+    @staticmethod
+    def _agy_probe_model_family(model: str) -> str:
+        value = str(model or "").strip().lower()
+        if value.startswith("gemini-"):
+            return "gemini"
+        if value.startswith("claude-") or value.startswith("gpt-"):
+            return "claude_gpt"
+        raise GatewayInputError("AGY_MODEL_FAMILY_UNSUPPORTED")
+
+    def _acquire_agy_probe_claim(self, *, task_id: str, model: str):
+        manager = get_account_pool_manager()
+        coordinator = CrossProcessLeaseCoordinator(manager)
+        try:
+            return coordinator.acquire_claim(
+                consumer_id=f"model-probe:{task_id}",
+                wait_timeout=0.0,
+                model_family=self._agy_probe_model_family(model),
+            )
+        except AgyAccountPoolBusyError as exc:
+            raise GatewayInputError("AGY_ACCOUNT_POOL_BUSY") from exc
+        except AgyAccountPoolExhaustedError as exc:
+            raise GatewayInputError("AGY_ACCOUNT_POOL_EXHAUSTED") from exc
+
+    def _release_assist_account_claim(self, task_id: str, job: dict[str, Any]) -> bool:
+        with self._assist_lock:
+            claim = self._assist_account_claims.pop(task_id, None)
+        if claim is None:
+            if job.get("account_lease_id_hash"):
+                job["account_lease_released"] = False
+                job["account_lease_cleanup_status"] = "RECONCILIATION_REQUIRED"
+                return False
+            return True
+        try:
+            claim.release()
+        except Exception:
+            job["account_lease_released"] = False
+            job["account_lease_cleanup_status"] = "RELEASE_FAILED"
+            return False
+        job["account_lease_released"] = True
+        job["account_lease_cleanup_status"] = "RELEASED"
+        return True
+
+    def _abandon_assist_account_claim(self, task_id: str, job: dict[str, Any]) -> None:
+        with self._assist_lock:
+            claim = self._assist_account_claims.pop(task_id, None)
+        if claim is not None:
+            claim.abandon_parent_reference()
+        job["account_lease_released"] = False
+        job["account_lease_cleanup_status"] = "RECONCILIATION_REQUIRED"
+        job["reconciliation_required"] = True
+
     def _model_probe_submit(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         provider = str(arguments.get("provider") or "cline").strip().lower()
         metadata, executable = self._provider_executable(provider)
@@ -3549,7 +4221,13 @@ class UnifiedMCPGateway:
         stderr_path = root / f"{job_id}.stderr"
         workspace_root = Path(tempfile.mkdtemp(prefix=f"nexus-probe-{task_id}-", dir="/tmp"))
         probe_prompt = f"{prompt}\nReturn JSON matching this schema exactly: {json.dumps(schema, ensure_ascii=False)}"
-        command = self._assist_command(executable=executable, provider=provider, model=model, prompt=probe_prompt)
+        command = self._assist_command(
+            executable=executable,
+            provider=provider,
+            model=model,
+            prompt=probe_prompt,
+            agy_print_timeout=AGY_MODEL_PROBE_PRINT_TIMEOUT,
+        )
         job: dict[str, Any] = {
             "schema": "nexus.assisted_provider_job.v1",
             "job_kind": "model_probe",
@@ -3644,13 +4322,58 @@ class UnifiedMCPGateway:
                 "process_cleanup": True,
             })
             return self._assist_response(self._assist_write(job), operation="submit")
-        stdout_handle = stdout_path.open("w", encoding="utf-8")
-        stderr_handle = stderr_path.open("w", encoding="utf-8")
+        provider_env = None
+        account_claim = None
+        if provider == "agy":
+            try:
+                account_claim = self._acquire_agy_probe_claim(task_id=task_id, model=model)
+            except GatewayInputError as exc:
+                shutil.rmtree(workspace_root, ignore_errors=True)
+                job.update({
+                    "status": "FAILED",
+                    "finished_at": self._utc_now(),
+                    "blocker": str(exc),
+                    "provider_error": "Agy account pool unavailable for model probe",
+                    "model_response_verified": False,
+                    "process_cleanup": True,
+                })
+                return self._assist_response(self._assist_write(job), operation="submit")
+            provider_env = dict(account_claim.lease.execution_env)
+            job["account_alias_hash"] = account_claim.account_alias_hash
+            job["account_lease_id_hash"] = account_claim.lease_id_hash
+            job["account_lease_owner_pid"] = os.getpid()
+            job["account_lease_released"] = False
+            job["account_lease_cleanup_status"] = "HELD"
+            with self._assist_lock:
+                self._assist_account_claims[task_id] = account_claim
+            self._assist_write(job)
+        stdout_handle = None
+        stderr_handle = None
         try:
-            process = subprocess.Popen(command, cwd=workspace_root, stdout=stdout_handle, stderr=stderr_handle, text=True, start_new_session=True)
+            stdout_handle = stdout_path.open("w", encoding="utf-8")
+            stderr_handle = stderr_path.open("w", encoding="utf-8")
+            pass_fds: tuple[int, ...] = ()
+            if account_claim is not None:
+                if account_claim.lock_file_obj is None:
+                    raise RuntimeError("AGY_ACCOUNT_LEASE_LOCK_MISSING_BEFORE_LAUNCH")
+                pass_fds = (account_claim.lock_file_obj.fileno(),)
+            process = subprocess.Popen(
+                command,
+                cwd=workspace_root,
+                stdout=stdout_handle,
+                stderr=stderr_handle,
+                text=True,
+                start_new_session=True,
+                env=provider_env,
+                pass_fds=pass_fds,
+            )
         except Exception:
-            stdout_handle.close()
-            stderr_handle.close()
+            if stdout_handle is not None:
+                stdout_handle.close()
+            if stderr_handle is not None:
+                stderr_handle.close()
+            if account_claim is not None:
+                self._release_assist_account_claim(task_id, job)
             shutil.rmtree(workspace_root, ignore_errors=True)
             job.update({"status": "FAILED", "finished_at": self._utc_now(), "blocker": "ASSIST_PROVIDER_FAILED", "provider_error": "provider process could not start"})
             return self._assist_response(self._assist_write(job), operation="submit")
@@ -3696,8 +4419,12 @@ class UnifiedMCPGateway:
                     terminated = False
             if terminated:
                 shutil.rmtree(workspace_root, ignore_errors=True)
+                if account_claim is not None:
+                    self._release_assist_account_claim(task_id, job)
+            elif account_claim is not None:
+                self._abandon_assist_account_claim(task_id, job)
             job.update({
-                "status": "FAILED",
+                "status": "FAILED" if terminated else "UNKNOWN_REQUIRES_RECONCILE",
                 "finished_at": self._utc_now(),
                 "blocker": (
                     "ASSIST_PROVIDER_IDENTITY_DRIFT"
@@ -4078,11 +4805,150 @@ class UnifiedMCPGateway:
 
     @staticmethod
     def tool_specs() -> list[dict[str, Any]]:
+        recovery_request_schema = {
+            "type": "object",
+            "required": [
+                "request_id",
+                "idempotency_fence",
+                "operation",
+                "effect_class",
+                "recovery_authority_id",
+                "recovery_authority_hash",
+                "desired_manifest_id",
+                "desired_manifest_hash",
+                "predecessor_manifest_id",
+                "predecessor_manifest_hash",
+                "request_hash",
+                "schema",
+            ],
+            "properties": {
+                "request_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                },
+                "idempotency_fence": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                },
+                "operation": {"type": "string", "enum": ["gateway-recover"]},
+                "effect_class": {
+                    "type": "string",
+                    "enum": ["GATEWAY_DURABLE_RECOVERY"],
+                },
+                "recovery_authority_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                },
+                "recovery_authority_hash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                },
+                "desired_manifest_id": {
+                    "type": "string",
+                    "pattern": "^r1-[0-9a-f]{40}$",
+                },
+                "desired_manifest_hash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                },
+                "predecessor_manifest_id": {
+                    "type": "string",
+                    "pattern": "^r1-[0-9a-f]{40}$",
+                },
+                "predecessor_manifest_hash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                },
+                "request_hash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                },
+                "schema": {
+                    "type": "string",
+                    "enum": ["nexus.gateway.durable_recovery_request.v2"],
+                },
+            },
+            "additionalProperties": False,
+        }
+        materialization_request_schema = {
+            "type": "object",
+            "required": [
+                "request_id",
+                "idempotency_fence",
+                "operation",
+                "effect_class",
+                "recovery_authority_id",
+                "recovery_authority_hash",
+                "request_hash",
+                "schema",
+            ],
+            "properties": {
+                "request_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                },
+                "idempotency_fence": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                },
+                "operation": {
+                    "type": "string",
+                    "enum": ["gateway-recovery-materialize"],
+                },
+                "effect_class": {
+                    "type": "string",
+                    "enum": ["GATEWAY_RECOVERY_MATERIALIZATION"],
+                },
+                "recovery_authority_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                },
+                "recovery_authority_hash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                },
+                "request_hash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                },
+                "schema": {
+                    "type": "string",
+                    "enum": [
+                        "nexus.gateway.durable_recovery_materialization_request.v1"
+                    ],
+                },
+            },
+            "additionalProperties": False,
+        }
         return [
             {
                 "name": "nexus_gateway_status",
                 "description": "Read the single gateway identity, manifest, route stages, and lifecycle counts.",
                 "inputSchema": {"type": "object", "properties": {}},
+            },
+            {
+                "name": "nexus_gateway_recovery_materialize",
+                "description": (
+                    "Materialize one exact protected #526 recovery authority into the "
+                    "repository-owned manager stores. This starts no Gateway host effect."
+                ),
+                "inputSchema": materialization_request_schema,
+            },
+            {
+                "name": "nexus_gateway_recovery_preflight",
+                "description": (
+                    "Run the existing repository-owned #526 recovery manager to the "
+                    "effect-free TARGET_READY + ROLLBACK_READY checkpoint."
+                ),
+                "inputSchema": copy.deepcopy(recovery_request_schema),
+            },
+            {
+                "name": "nexus_gateway_recover",
+                "description": (
+                    "Execute or reconcile one exact protected #526 Gateway recovery "
+                    "request through the existing durable manager state machine."
+                ),
+                "inputSchema": copy.deepcopy(recovery_request_schema),
             },
             {
                 "name": "nexus_project_entry",
@@ -4097,6 +4963,83 @@ class UnifiedMCPGateway:
                         "repository_owner": {"type": "string", "maxLength": 128},
                         "repository_name": {"type": "string", "maxLength": 128},
                         "issue_number": {"type": "integer", "minimum": 1},
+                    },
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "nexus_mutation_admit",
+                "description": (
+                    "Issue one durable Nexus-owned, transport-neutral repository mutation admission. "
+                    "This records repo/base/lane/authority/scope only and grants no route, execution, "
+                    "verification, acceptance, merge, release, deployment, or production authority."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "required": [
+                        "operation_id",
+                        "repository",
+                        "base_sha",
+                        "execution_lane",
+                        "authority_kind",
+                        "allowed_paths",
+                    ],
+                    "properties": {
+                        "operation_id": {"type": "string", "maxLength": 128},
+                        "repository": {
+                            "type": "string",
+                            "enum": ["James3014/devspace","James3014/Nexus-new","James3014/nexus-core","James3014/nexus-learning","James3014/nexus-open-swe-runtime","James3014/repository-intelligence-engine","James3014/nexus-runtime","James3014/nexus-opencli-reviewer","James3014/nexus-deployment-lab"],
+                        },
+                        "base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                        "execution_lane": {
+                            "type": "string",
+                            "enum": ["DIRECT_CANONICAL", "DIRECT_DELEGATED", "GOVERNED"],
+                        },
+                        "authority_kind": {
+                            "type": "string",
+                            "enum": ["OWNER_INLINE", "TRACKED_TASK_CARD"],
+                        },
+                        "allowed_paths": {
+                            "type": "array",
+                            "items": {"type": "string", "maxLength": 1024},
+                            "minItems": 1,
+                            "maxItems": 64,
+                        },
+                        "authority_goal_id": {"type": "string", "maxLength": 128},
+                        "authority_coordination_scope_id": {"type": "string", "maxLength": 128},
+                        "issue_number": {"type": "integer", "minimum": 1},
+                        "task_id": {"type": "string", "maxLength": 128},
+                        "attempt_id": {"type": "string", "maxLength": 128},
+                        "task_card_path": {"type": "string", "maxLength": 1024},
+                        "task_card_hash": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$",
+                        },
+                        "ttl_minutes": {
+                            "type": "integer",
+                            "minimum": 5,
+                            "maximum": 43200,
+                            "default": 10080,
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "nexus_mutation_admission_status",
+                "description": (
+                    "Read and revalidate one exact durable Nexus mutation admission receipt. "
+                    "Observe-only; this grants no new mutation or integration authority."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["admission_id", "receipt_hash"],
+                    "properties": {
+                        "admission_id": {"type": "string", "maxLength": 64},
+                        "receipt_hash": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$",
+                        },
                     },
                     "additionalProperties": False,
                 },
@@ -4463,15 +5406,17 @@ class UnifiedMCPGateway:
             {
                 "name": "nexus_owner_standing_grant_issue",
                 "description": (
-                    "Materialize one explicit Owner-confirmed keyed standing grant "
-                    "through the canonical CAS store. Issues authority only; never "
-                    "executes merge, push, route, approval, release, or production effects."
+                    "Draft one keyed standing grant and ask the Owner to confirm it through "
+                    "the host (MCP elicitation); the grant is written only after the host "
+                    "returns the Owner's acceptance. Fails closed when the host cannot ask. "
+                    "Merge, integration, release, activation and grant-issuing actions are "
+                    "not grantable yet. Never executes merge, push, route, approval, release, "
+                    "or production effects."
                 ),
                 "inputSchema": {
                     "type": "object",
                     "additionalProperties": False,
                     "required": [
-                        "ownerConfirmation",
                         "repository",
                         "coordinatorId",
                         "goalId",
@@ -4481,7 +5426,6 @@ class UnifiedMCPGateway:
                         "issuedAt",
                     ],
                     "properties": {
-                        "ownerConfirmation": {"type": "boolean", "const": True},
                         "repository": {
                             "type": "string",
                             "const": "James3014/Nexus-new",
@@ -4510,12 +5454,11 @@ class UnifiedMCPGateway:
             },
             {
                 "name": "nexus_task_card_authority_switch",
-                "description": "Switch canonical standing grant to a bounded temporary task-card authority scope.",
+                "description": "Switch canonical standing grant to a bounded temporary task-card authority scope after the Owner confirms it through the host (MCP elicitation); fails closed when the host cannot ask.",
                 "inputSchema": {
                     "type": "object",
                     "additionalProperties": False,
                     "required": [
-                        "ownerConfirmation",
                         "attemptKey",
                         "expectedCurrentReceiptHash",
                         "expectedCurrentGoalId",
@@ -4525,7 +5468,6 @@ class UnifiedMCPGateway:
                         "ttlMinutes",
                     ],
                     "properties": {
-                        "ownerConfirmation": {"type": "boolean", "const": True},
                         "attemptKey": {"type": "string", "maxLength": 128},
                         "expectedCurrentReceiptHash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
                         "expectedCurrentGoalId": {"type": "string", "maxLength": 128},
@@ -4934,6 +5876,29 @@ class UnifiedMCPGateway:
             "lifecycle": lifecycle,
         }
 
+    @staticmethod
+    def _gateway_recovery_materialize(
+        arguments: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        manager = _gateway_recovery_manager()
+        return _gateway_recovery_result(
+            manager.gateway_recovery_materialize(dict(arguments))
+        )
+
+    @staticmethod
+    def _gateway_recovery_preflight(
+        arguments: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        manager = _gateway_recovery_manager()
+        return _gateway_recovery_result(manager.gateway_recover(dict(arguments)))
+
+    @staticmethod
+    def _gateway_recover_exact(
+        arguments: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        manager = _gateway_recovery_manager()
+        return _gateway_recovery_result(manager._gateway_recover_live(dict(arguments)))
+
     def _gateway_convergence(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         """Classify one #1064 convergence generation without performing effects."""
 
@@ -4980,6 +5945,30 @@ class UnifiedMCPGateway:
             result = evaluate_gateway_convergence(request)
         except ValueError as exc:
             raise GatewayInputError(str(exc)) from exc
+
+        if (
+            result.action is ConvergenceAction.REQUEST_RECOVERY
+            and request.policy.mode is DesiredDeploymentMode.TRACK_ACCEPTED_MAIN
+            and (
+                request.active_effect is None
+                or request.active_effect.state is RecoveryEffectState.TERMINAL_SUCCESS
+            )
+            and status.get("upstream_freshness") == "STALE"
+            and _receipt_only_main_movement(
+                deployed_source_head=result.observed_loaded_commit,
+                observed_upstream_main_head=status.get("observed_upstream_main_head"),
+            )
+        ):
+            # Keep exact Git freshness telemetry as STALE.  The NOOP applies
+            # only to the recovery decision because the sole upstream delta is
+            # the tracked recovery authority receipt itself.
+            result = result.model_copy(
+                update={
+                    "action": ConvergenceAction.NOOP,
+                    "reason": ConvergenceReason.ALREADY_CONVERGED,
+                    "next_generation_required": False,
+                }
+            )
 
         next_action = {
             ConvergenceAction.NOOP: "none",
@@ -5114,6 +6103,190 @@ class UnifiedMCPGateway:
             "satisfied": result.request_satisfies_certification_fence(),
         }
         return payload
+
+    @staticmethod
+    def _mutation_task_card_authority(
+        *,
+        issue_number: int,
+        task_id: str,
+        attempt_id: str,
+        task_card_path: str,
+        task_card_hash: str,
+    ) -> dict[str, str]:
+        _safe_relative_path(task_card_path, "task_card_path")
+        if not task_card_path.startswith("tasks/") or not task_card_path.endswith(".md"):
+            raise GatewayInputError("MUTATION_ADMISSION_TASK_CARD_PATH_INVALID")
+        root = CANONICAL_SOURCE_ROOT.resolve()
+        card = (root / task_card_path).resolve()
+        try:
+            relative = card.relative_to(root).as_posix()
+        except ValueError as exc:
+            raise GatewayInputError("MUTATION_ADMISSION_TASK_CARD_PATH_INVALID") from exc
+        if relative != task_card_path or not card.is_file():
+            raise GatewayInputError("MUTATION_ADMISSION_TASK_CARD_NOT_FOUND")
+        try:
+            raw = card.read_bytes()
+            source = raw.decode("utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise GatewayInputError("MUTATION_ADMISSION_TASK_CARD_UNREADABLE") from exc
+        actual_hash = hashlib.sha256(raw).hexdigest()
+        if actual_hash != task_card_hash:
+            raise GatewayInputError("MUTATION_ADMISSION_TASK_CARD_HASH_MISMATCH")
+
+        def field(name: str) -> str:
+            match = re.search(
+                rf"(?m)^{re.escape(name)}:\s*`?([^`\n]+)`?\s*$",
+                source,
+            )
+            return match.group(1).strip() if match else ""
+
+        if field("artifact_authority") != "current" or field("status") != "ACTIVE":
+            raise GatewayInputError("MUTATION_ADMISSION_TASK_CARD_NOT_ACTIVE")
+        if field("task_id") != task_id or field("attempt_id") != attempt_id:
+            raise GatewayInputError("MUTATION_ADMISSION_TASK_CARD_IDENTITY_MISMATCH")
+        issue_marker = f"James3014/Nexus-new#{issue_number}"
+        if issue_marker not in source:
+            raise GatewayInputError("MUTATION_ADMISSION_TASK_CARD_ISSUE_MISMATCH")
+        governance_source_head = _git("rev-parse", "HEAD").strip()
+        if not re.fullmatch(r"[0-9a-f]{40}", governance_source_head):
+            raise GatewayInputError("MUTATION_ADMISSION_GOVERNANCE_SOURCE_INVALID")
+        return {
+            "task_id": task_id,
+            "attempt_id": attempt_id,
+            "task_card_path": task_card_path,
+            "task_card_hash": actual_hash,
+            "governance_source_head": governance_source_head,
+        }
+
+    def _mutation_admit(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        if "owner_confirmation" in arguments:
+            raise GatewayInputError("MUTATION_ADMISSION_CALLER_AUTHORITY_FORBIDDEN")
+        repository = _text(arguments.get("repository"), "repository", max_length=256)
+        operation_id = _text(arguments.get("operation_id"), "operation_id", max_length=128)
+        base_sha = _text(arguments.get("base_sha"), "base_sha", max_length=40)
+        lane = _text(arguments.get("execution_lane"), "execution_lane", max_length=32).upper()
+        authority_kind = _text(arguments.get("authority_kind"), "authority_kind", max_length=32).upper()
+        allowed_paths = list(
+            dict.fromkeys(
+                str(path).strip()
+                for path in (arguments.get("allowed_paths") or [])
+                if str(path).strip()
+            )
+        )
+        issue_number = arguments.get("issue_number")
+        task_id = str(arguments.get("task_id") or "").strip()
+        attempt_id = str(arguments.get("attempt_id") or "").strip()
+        task_card_path = str(arguments.get("task_card_path") or "").strip()
+        task_card_hash = str(arguments.get("task_card_hash") or "").strip()
+        ttl_minutes = arguments.get("ttl_minutes", 10080)
+
+        observation = self._mutation_repository_observer(repository)
+        if not isinstance(observation, Mapping) or observation.get("ok") is not True:
+            blocker = (
+                observation.get("blocker")
+                if isinstance(observation, Mapping)
+                else "GITHUB_OBSERVER_REQUEST_FAILED"
+            )
+            detail = (
+                observation.get("detail")
+                if isinstance(observation, Mapping)
+                else "repository observation unavailable"
+            )
+            raise GatewayInputError(f"MUTATION_ADMISSION_SOURCE_OBSERVER_FAILED:{blocker}:{detail}")
+        observed_head = str(observation.get("head_sha") or "")
+        if observed_head != base_sha:
+            raise GatewayInputError(
+                f"MUTATION_ADMISSION_BASE_STALE:expected={observed_head}:requested={base_sha}"
+            )
+
+        authority_reference: Mapping[str, Any] | None = None
+        governance_binding: dict[str, str] = {}
+        if lane == "GOVERNED":
+            if authority_kind != "TRACKED_TASK_CARD":
+                raise GatewayInputError("GOVERNED_TASK_CARD_REQUIRED")
+            if (
+                not isinstance(issue_number, int)
+                or isinstance(issue_number, bool)
+                or issue_number < 1
+                or not task_id
+                or not attempt_id
+                or not task_card_path
+                or not re.fullmatch(r"[0-9a-f]{64}", task_card_hash)
+            ):
+                raise GatewayInputError("GOVERNED_TASK_CARD_REQUIRED")
+            governance_binding = self._mutation_task_card_authority(
+                issue_number=issue_number,
+                task_id=task_id,
+                attempt_id=attempt_id,
+                task_card_path=task_card_path,
+                task_card_hash=task_card_hash,
+            )
+        else:
+            if authority_kind != "OWNER_INLINE":
+                raise GatewayInputError("DIRECT_OWNER_AUTHORITY_REQUIRED")
+            if any((task_id, attempt_id, task_card_path, task_card_hash)):
+                raise GatewayInputError("DIRECT_TASK_CARD_INVALID")
+            key = self._owner_effect_key(arguments)
+            effect = {
+                "operation_id": operation_id,
+                "target_repository": repository,
+                "base_sha": base_sha,
+                "execution_lane": lane,
+                "allowed_paths": allowed_paths,
+                "issue_number": issue_number,
+            }
+            authority_reference = self._require_owner_effect_authority(
+                AutonomyActionClass.TASK_SUBMIT,
+                effect,
+                key=key,
+            )
+
+        runtime_identity = {
+            "server_instance_id": SERVER_INSTANCE_ID,
+            "tool_manifest_revision": TOOL_MANIFEST_REVISION,
+            "full_tool_schema_hash": FULL_TOOL_SCHEMA_HASH,
+            "permission_policy_hash": PERMISSION_POLICY_HASH,
+            "gateway_source_head": _git("rev-parse", "HEAD").strip(),
+            "repository_observed_at": observation.get("observed_at"),
+            "default_branch": observation.get("default_branch"),
+        }
+        try:
+            return self._mutation_admissions.admit(
+                operation_id=operation_id,
+                repository=repository,
+                base_sha=base_sha,
+                execution_lane=lane,
+                authority_kind=authority_kind,
+                allowed_paths=allowed_paths,
+                authority_reference=authority_reference,
+                issue_number=issue_number,
+                task_id=governance_binding.get("task_id"),
+                attempt_id=governance_binding.get("attempt_id"),
+                task_card_path=governance_binding.get("task_card_path"),
+                task_card_hash=governance_binding.get("task_card_hash"),
+                governance_source_head=governance_binding.get("governance_source_head"),
+                ttl_minutes=ttl_minutes,
+                runtime_identity=runtime_identity,
+            )
+        except MutationAdmissionError as exc:
+            raise GatewayInputError(str(exc)) from exc
+
+    def _mutation_admission_status(
+        self, arguments: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        admission_id = _text(
+            arguments.get("admission_id"), "admission_id", max_length=64
+        )
+        receipt_hash = _text(
+            arguments.get("receipt_hash"), "receipt_hash", max_length=64
+        )
+        try:
+            return self._mutation_admissions.status(
+                admission_id,
+                expected_receipt_hash=receipt_hash,
+            )
+        except MutationAdmissionError as exc:
+            raise GatewayInputError(str(exc)) from exc
 
     def _project_entry(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         owner = _text(arguments.get("repository_owner"), "repository_owner", max_length=128)
@@ -5333,11 +6506,38 @@ class UnifiedMCPGateway:
         assisted = self._assist_read(task_id)
         if assisted is not None:
             current = self._assist_refresh(task_id) or assisted
-            if current.get("status") == "UNKNOWN_REQUIRES_RECONCILE":
+            needs_reconcile = (
+                current.get("status") == "UNKNOWN_REQUIRES_RECONCILE"
+                or bool(current.get("reconciliation_required"))
+            )
+            if needs_reconcile:
+                lease_hash = str(current.get("account_lease_id_hash") or "")
+                if lease_hash and current.get("account_lease_cleanup_status") != "RELEASED":
+                    coordinator = CrossProcessLeaseCoordinator(get_account_pool_manager())
+                    lease_result = coordinator.reconcile_claim_receipt(
+                        account_alias_hash=str(current.get("account_alias_hash") or ""),
+                        lease_id_hash=lease_hash,
+                        owner_pid=int(current.get("account_lease_owner_pid") or 0),
+                    )
+                    current["account_lease_reconciliation_result"] = lease_result.get("result")
+                    if lease_result.get("result") not in {"ALREADY_ABSENT", "LEASE_RECEIPT_REMOVED"}:
+                        current.update({
+                            "status": "UNKNOWN_REQUIRES_RECONCILE",
+                            "blocker": "ASSIST_ACCOUNT_LEASE_RECONCILIATION_REQUIRED",
+                            "reconciliation_required": True,
+                            "account_lease_released": False,
+                            "account_lease_cleanup_status": "RECONCILIATION_REQUIRED",
+                            "last_polled_at": self._utc_now(),
+                        })
+                        current = self._assist_write(current)
+                        return self._assist_response(current, operation="reconcile")
+                    current["account_lease_released"] = True
+                    current["account_lease_cleanup_status"] = "RELEASED"
+
                 # No durable exit marker means the provider outcome is not
-                # recoverable from output alone.  Reconciliation deliberately
-                # converges to a retryable process-loss failure and performs
-                # isolated-workspace cleanup; it never upgrades to success.
+                # recoverable from output alone.  Only after lease cleanup is
+                # proven may reconciliation converge to a retryable failure;
+                # output alone never upgrades the result to success.
                 current.update({
                     "status": "FAILED",
                     "blocker": "ASSIST_PROVIDER_PROCESS_LOST",
@@ -6400,12 +7600,22 @@ class UnifiedMCPGateway:
     def _call_tool(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
         if name == "nexus_gateway_status":
             return self._gateway_status()
+        if name == "nexus_gateway_recovery_materialize":
+            return self._gateway_recovery_materialize(arguments)
+        if name == "nexus_gateway_recovery_preflight":
+            return self._gateway_recovery_preflight(arguments)
+        if name == "nexus_gateway_recover":
+            return self._gateway_recover_exact(arguments)
         if name == "nexus_gateway_convergence":
             return self._gateway_convergence(arguments)
         if name == EXECUTION_READINESS_TOOL_NAME:
             return self._gateway_execution_readiness(arguments)
         if name == "nexus_project_entry":
             return self._project_entry(arguments)
+        if name == "nexus_mutation_admit":
+            return self._mutation_admit(arguments)
+        if name == "nexus_mutation_admission_status":
+            return self._mutation_admission_status(arguments)
         if name == "nexus_workspace_snapshot":
             return self._workspace_snapshot()
         if name == "nexus_read":
@@ -6510,13 +7720,16 @@ class UnifiedMCPGateway:
     def handle(self, request: Mapping[str, Any]) -> Optional[dict[str, Any]]:
         method = request.get("method")
         request_id = request.get("id")
-        if method == "notifications/initialized" or request_id is None:
+        if method is None or method == "notifications/initialized" or request_id is None:
+            # Responses to gateway-initiated requests are consumed by the
+            # confirmation channel; a stray one is never a new request.
             return None
         if method == "initialize":
+            protocol_version = self._negotiate_initialize(request.get("params"))
             return {
                 "jsonrpc": "2.0", "id": request_id,
                 "result": {
-                    "protocolVersion": "2024-11-05",
+                    "protocolVersion": protocol_version,
                     "capabilities": {"tools": {"listChanged": False}},
                     "serverInfo": {
                         "name": GATEWAY_NAME,
@@ -6543,8 +7756,36 @@ class UnifiedMCPGateway:
                 return self._error(request_id, exc)
         return {"jsonrpc": "2.0", "id": request_id, "error": {"code": -32601, "message": f"method not found: {method}"}}
 
+    def _negotiate_initialize(self, params: Any) -> str:
+        params = params if isinstance(params, Mapping) else {}
+        requested = str(params.get("protocolVersion") or "")
+        capabilities = params.get("capabilities")
+        client_info = params.get("clientInfo")
+        if (
+            self._stdio_streams is not None
+            and not self._owner_confirmation_injected
+            and client_supports_form_elicitation(requested, capabilities)
+        ):
+            input_stream, output_stream = self._stdio_streams
+            self._owner_confirmation_channel = StdioElicitationChannel(
+                input_stream=input_stream,
+                output_stream=output_stream,
+                protocol_version=NEGOTIATED_ELICITATION_PROTOCOL,
+                client_info=client_info if isinstance(client_info, Mapping) else {},
+            )
+            return NEGOTIATED_ELICITATION_PROTOCOL
+        if not self._owner_confirmation_injected:
+            self._owner_confirmation_channel = UnavailableConfirmationChannel()
+        return LEGACY_PROTOCOL_VERSION
+
     def serve(self, input_stream, output_stream) -> None:
-        for line in input_stream:
+        # One stdio session: the confirmation channel reads its answer from the
+        # same stream, so lines are pulled with readline rather than iteration.
+        self._stdio_streams = (input_stream, output_stream)
+        while True:
+            line = input_stream.readline()
+            if not line:
+                break
             if not line.strip():
                 continue
             response = self.handle(json.loads(line))

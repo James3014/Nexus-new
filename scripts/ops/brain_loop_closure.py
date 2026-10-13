@@ -11,7 +11,9 @@ class BrainLoopClosure:
     def __init__(self, repo_root: Optional[Path] = None):
         self.repo_root = repo_root or Path(__import__("pathlib").Path(__file__).resolve().parents[2])
         self.knowledge_dir = self.repo_root / ".nexusknowledge"
-        self.db_path = self.repo_root / ".nexus/vector_db/"
+        from nexus.services.lancedb_roots import VECTOR_DB, resolve_lancedb_root
+
+        self.db_path = resolve_lancedb_root(VECTOR_DB, self.repo_root)
         
         self.beliefs_path = self.knowledge_dir / "beliefs.jsonl"
         self.artifacts_path = self.knowledge_dir / "artifacts.jsonl"

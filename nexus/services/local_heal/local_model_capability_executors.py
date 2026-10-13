@@ -400,6 +400,7 @@ class LocalHealPipelineCapabilityExecutor:
                     # the requested name here so ledger requested_model stays truthful.
 
                     _provider_options = _signal_snap.get("provider_options")
+                    from nexus.services.local_heal.client import default_heal_generation_options
 
                     def _provider_generate(system_prompt_or_req, user_prompt=None, **kwargs):
                         nonlocal _last_provider_diag
@@ -407,6 +408,10 @@ class LocalHealPipelineCapabilityExecutor:
                         # OllamaLLMClient passes (system_prompt, user_prompt) as two strings
                         # LocalModelProviderRequest passes a single request object
                         api_type = kwargs.get("api_type", "generate")
+                        # Same contract as the bare HealPipeline lane: system prompt sent as
+                        # the system message, user prompt as the prompt (OllamaClient.generate).
+                        split_system = str(system_prompt_or_req or "") if user_prompt is not None else ""
+                        split_user = str(user_prompt) if user_prompt is not None else None
                         if user_prompt is not None:
                             prompt = f"{system_prompt_or_req}\n\n{user_prompt}"
                         else:
@@ -446,10 +451,12 @@ class LocalHealPipelineCapabilityExecutor:
                             model_name=model_name,
                             timeout_sec=_provider_timeout_sec,
                             api_type=api_type,
-                            options=_provider_options,
+                            options=_provider_options or default_heal_generation_options(),
                             phase=phase_val,
                             attempt_id=attempt_id_val,
                             execution_profile=execution_profile_val,
+                            system_prompt=split_system,
+                            user_prompt=split_user,
                         )
                         prov_resp = real_provider.generate(prov_req)
 
@@ -587,13 +594,21 @@ class LocalHealPipelineCapabilityExecutor:
                 _candidate_cap = int(_armor_controls.get("candidate_cap", 3) or 3)
                 _max_tries = max(1, _candidate_cap)
 
-                from nexus.services.local_heal.pipeline_isolation import prepare_world_c_workspace
+                from nexus.services.local_heal.pipeline_isolation import (
+                    prepare_world_c_workspace,
+                    verifier_input_files,
+                )
 
                 world_c_workspace = prepare_world_c_workspace(
                     ctx.source_root,
                     ctx.task_id,
                     target_file=ctx.target_file,
                     repro_script=repro_script,
+                    # The verifier runs inside World C; without its script every candidate
+                    # fails verification with "can't open file" (e.g. python repro.py).
+                    verifier_files=verifier_input_files(
+                        ctx.source_root, route_ctx.get("verifier_command") or ()
+                    ),
                 )
                 world_c_workspace_path = str(world_c_workspace)
                 route_ctx["world_c_source_root"] = str(ctx.source_root)

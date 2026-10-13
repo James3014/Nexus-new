@@ -1,0 +1,8 @@
+{
+  "id": "mutate_while_iterating-a",
+  "bug_class": "mutate_while_iterating",
+  "variant": "a",
+  "problem_statement": "drop_stale() reports ['a', 'd'] as removed for items a(12), b(12), c(3), d(20), e(11) with max_age 10, and b and e are still in the list. Expected: every item with age above max_age is removed and reported, and items at exactly max_age stay.",
+  "target_file": "stock.py",
+  "repro_file": "repro.py"
+}

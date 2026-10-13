@@ -23,7 +23,9 @@ def test_workforce_status_is_compact_read_only_and_policy_bound() -> None:
         "can_approve_or_integrate": False,
     }
     assert payload["summary"]["eligible"] > 0
-    assert all("worker_id" in row and "eligible" in row and "reason" in row for row in payload["workers"])
+    assert all(
+        "worker_id" in row and "eligible" in row and "reason" in row for row in payload["workers"]
+    )
 
 
 def test_workforce_status_fails_closed_when_policy_load_fails(monkeypatch) -> None:
@@ -52,24 +54,15 @@ def test_workforce_status_fails_closed_when_policy_load_fails(monkeypatch) -> No
 def test_oracle_apply_writes_bounded_report_and_uses_canonical_exit(
     monkeypatch, tmp_path, promoted, expected_exit, expected_status
 ) -> None:
-    import nexus.oracle.promote as promote_module
-
+    # Historical node ids: `oracle:apply` was archived 2026-10-12. Whatever the promotion
+    # outcome would have been, the command no longer exists and writes no report.
     monkeypatch.setattr(cli_module, "repo_root", tmp_path)
-    monkeypatch.setattr(promote_module, "promote_shadow_patch", lambda _root, _tid: promoted)
 
     result = CliRunner().invoke(
         cli_module.nexus,
-        [
-            "nexus",
-            "oracle:apply",
-            "shadow-1",
-            "--report-file",
-            "reports/oracle-apply.json",
-            "--output-json",
-        ],
+        ["nexus", "oracle:apply", "shadow-1", "--report-file", "reports/oracle-apply.json"],
     )
 
-    expected_payload = {"status": expected_status, "shadow_tid": "shadow-1"}
-    assert result.exit_code == expected_exit, result.output
-    assert json.loads(result.output) == expected_payload
-    assert json.loads((tmp_path / "reports/oracle-apply.json").read_text()) == expected_payload
+    assert result.exit_code != 0
+    assert "No such command" in result.output
+    assert not (tmp_path / "reports/oracle-apply.json").exists()

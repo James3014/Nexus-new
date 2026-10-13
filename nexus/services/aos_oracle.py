@@ -2,6 +2,15 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import json
 import logging
+import warnings
+
+warnings.warn(
+    "ARCHIVED 2026-10-12 (#1850; was lab-only #1740): hard-coded history and prediction; "
+    "see ARCHIVED_2026-10-12.md. Scheduled for deletion; do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 
 logger = logging.getLogger(__name__)
 

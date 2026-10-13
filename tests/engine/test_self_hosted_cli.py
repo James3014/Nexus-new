@@ -79,6 +79,7 @@ def _valid_request(tmp_path: Path, **overrides) -> dict:
         "target_repo_root": str(target_root / "test-sh-001"),
         "target_worktree_root": str(target_root),
         "allowed_files": "file1.py,file2.py",
+        "verifier_commands": ["python -c pass"],
         "worker": "codex",
     }
     req.update(overrides)
@@ -154,6 +155,7 @@ def test_self_hosted_submit_and_status_success(tmp_path: Path):
         "--target-repo-root", req["target_repo_root"],
         "--target-worktree-root", req["target_worktree_root"],
         "--allowed-files", req["allowed_files"],
+        "--verifier-commands", "python -c pass",
         "--worker", req["worker"],
         "--state-dir", state_dir,
     ]
@@ -383,6 +385,7 @@ def test_self_hosted_cli_subgroup_invocation(tmp_path: Path):
         "--target-repo-root", req["target_repo_root"],
         "--target-worktree-root", req["target_worktree_root"],
         "--allowed-files", req["allowed_files"],
+        "--verifier-commands", "python -c pass",
         "--worker", req["worker"],
         "--state-dir", state_dir,
     ]
@@ -409,6 +412,7 @@ def test_self_hosted_wait_success(tmp_path: Path):
         "--target-repo-root", req["target_repo_root"],
         "--target-worktree-root", req["target_worktree_root"],
         "--allowed-files", req["allowed_files"],
+        "--verifier-commands", "python -c pass",
         "--worker", req["worker"],
         "--state-dir", state_dir,
     ]
@@ -471,6 +475,7 @@ def test_self_hosted_list_actionable_empty_and_populated(tmp_path: Path):
         "--target-repo-root", req["target_repo_root"],
         "--target-worktree-root", req["target_worktree_root"],
         "--allowed-files", req["allowed_files"],
+        "--verifier-commands", "python -c pass",
         "--worker", req["worker"],
         "--state-dir", state_dir,
     ]
@@ -543,6 +548,7 @@ def test_self_hosted_approve_exact_binding_and_mismatch(tmp_path: Path):
         "--target-repo-root", req["target_repo_root"],
         "--target-worktree-root", req["target_worktree_root"],
         "--allowed-files", req["allowed_files"],
+        "--verifier-commands", "python -c pass",
         "--worker", req["worker"],
         "--state-dir", state_dir,
     ]
@@ -614,6 +620,7 @@ def test_self_hosted_integrate_requires_approved(tmp_path: Path):
         "--target-repo-root", req["target_repo_root"],
         "--target-worktree-root", req["target_worktree_root"],
         "--allowed-files", req["allowed_files"],
+        "--verifier-commands", "python -c pass",
         "--worker", req["worker"],
         "--state-dir", state_dir,
     ]
@@ -653,6 +660,7 @@ def test_self_hosted_dispose_candidate(tmp_path: Path):
         "--target-repo-root", req["target_repo_root"],
         "--target-worktree-root", req["target_worktree_root"],
         "--allowed-files", req["allowed_files"],
+        "--verifier-commands", "python -c pass",
         "--worker", req["worker"],
         "--state-dir", state_dir,
     ]
@@ -698,6 +706,7 @@ def test_self_hosted_cancel_task(tmp_path: Path):
         "--target-repo-root", req["target_repo_root"],
         "--target-worktree-root", req["target_worktree_root"],
         "--allowed-files", req["allowed_files"],
+        "--verifier-commands", "python -c pass",
         "--worker", req["worker"],
         "--state-dir", state_dir,
     ]
@@ -1024,7 +1033,7 @@ def test_self_hosted_recover_verified_uncommitted_cli_command(tmp_path: Path, mo
     req = _valid_request(tmp_path, task_id=task_id, allowed_files=["README"], target_repo_root=str(tmp_path / "targets" / task_id), target_worktree_root=str(tmp_path / "targets"))
     contract = svc.build_contract(req)
     from nexus.orchestrator.worktree_manager import WorktreeManager
-    from nexus.orchestrator.candidate_verifier import VerifiedCandidateReceipt
+    from nexus.orchestrator.candidate_verifier import VerifiedCandidateReceipt, VerifierEvidence
 
     wm = WorktreeManager(root_dir=contract.target_worktree_root)
     lease = wm.create_lease(contract)
@@ -1047,7 +1056,17 @@ def test_self_hosted_recover_verified_uncommitted_cli_command(tmp_path: Path, mo
         public_claim_allowed=False,
         production_ready=False,
         failure_reasons=[],
-        verifier_evidence=(),
+        # A verified receipt must carry evidence for the contract's verifiers (#1760).
+        verifier_evidence=(
+            VerifierEvidence(
+                command=contract.verifier_commands[0],
+                status="PASS",
+                exit_code=0,
+                stdout_sha256="0" * 64,
+                stderr_sha256="0" * 64,
+                wall_time_ms=1,
+            ),
+        ),
         candidate_commit_created=False,
         merge_performed=False,
     )
@@ -1102,3 +1121,34 @@ def test_self_hosted_recover_verified_uncommitted_fail_closed_non_verified(tmp_p
         )
         assert result.exit_code == 1
         assert "status must be RETAINED_FOR_REVIEW or FINAL_BLOCK" in result.output
+
+
+def test_cli_approve_requires_grant(tmp_path):
+    from scripts.engine.commands.self_hosted_actions import run_self_hosted_approve
+
+    receipt = {"verified": True, "verifier_gate_passed": True, "verifier_evidence": []}
+    receipt_hash = hashlib.sha256(
+        json.dumps(receipt, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    ).hexdigest()
+    packet = {
+        "candidate_commit_sha": "c" * 40,
+        "candidate_tree_sha": "d" * 40,
+        "candidate_state_hash": "e" * 64,
+        "verified_receipt_hash": receipt_hash,
+    }
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    service._write_state(
+        "cli-approve",
+        {
+            "task_id": "cli-approve",
+            "status": "CANDIDATE_COMMITTED",
+            "promotion_status": "PENDING_HUMAN_APPROVAL",
+            "promotion_packet": dict(packet),
+            "verified_receipt": dict(receipt),
+            "merge_performed": False,
+            "push_performed": False,
+        },
+    )
+    with pytest.raises(NexusCliActionError, match="APPROVAL_GRANT_REQUIRED"):
+        run_self_hosted_approve("cli-approve", service=service, **packet)
+    assert service._read_state("cli-approve")["promotion_status"] == "PENDING_HUMAN_APPROVAL"

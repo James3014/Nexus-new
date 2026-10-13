@@ -1,0 +1,8 @@
+{
+  "id": "exception_swallowing-b",
+  "bug_class": "exception_swallowing",
+  "variant": "b",
+  "problem_statement": "load_profile() returns None when the database fails with a TimeoutError, which makes an outage look like a missing user. Expected: an unknown user gives None, and a database failure reaches the caller.",
+  "target_file": "profiles_store.py",
+  "repro_file": "repro.py"
+}

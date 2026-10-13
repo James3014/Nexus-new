@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import shlex
@@ -11,13 +12,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from nexus.contracts.target_integration_lifecycle import IntegrationAuthorizationEnvelope
+from nexus.contracts.lifecycle_action import ContractKind, LifecycleActionType
+from nexus.contracts.target_integration_lifecycle import (
+    ExternalAcceptanceReceipt,
+    IntegrationAuthorizationEnvelope,
+)
 from nexus.executors.cli_worker import (
     CliWorkerRequest,
     CliWorkerStatus,
     bounded_environment_receipt,
     run_cli_worker,
 )
+from nexus.orchestrator.lifecycle_guards import LifecycleGuardError, require_bound_approval_grant
 from nexus.orchestrator.worktree_manager import get_canonical_git_hooks_dir
 
 _SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -321,6 +327,85 @@ class ControlledIntegrationManager:
                     f"stderr_sha256={result.stderr_sha256}"
                 )
 
+    @staticmethod
+    def _require_bound_acceptance(
+        acceptance: Any, *, state: Mapping[str, Any], task_id: str, candidate_sha: str
+    ) -> None:
+        """Acceptance must pass and name this task, attempt and candidate commit."""
+        if not isinstance(acceptance, Mapping) or not acceptance.get("passed"):
+            raise RuntimeError("external acceptance is required before integration")
+        fields: dict[str, Any] = {
+            key: acceptance.get(key)
+            for key in (
+                "schema", "task_id", "attempt_id", "candidate_commit",
+                "receipt_hash", "reviewer_id", "passed", "verifier_artifact",
+            )
+        }
+        try:
+            ExternalAcceptanceReceipt(**fields)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("external acceptance is not bound to this task and candidate") from exc
+        attempt_id = str(state.get("attempt_id") or "")
+        if (
+            not task_id
+            or not candidate_sha
+            or str(acceptance.get("task_id") or "") != task_id
+            or str(acceptance.get("candidate_commit") or "") != candidate_sha
+            or not str(acceptance.get("receipt_hash") or "").strip()
+            or (attempt_id and str(acceptance.get("attempt_id") or "") != attempt_id)
+        ):
+            raise RuntimeError("external acceptance is not bound to this task and candidate")
+
+    @staticmethod
+    def _require_integration_authority(
+        state: Mapping[str, Any], approved: Mapping[str, Any], packet: Mapping[str, Any]
+    ) -> None:
+        """Re-establish acceptance, consumed grant and verified receipt at the sink."""
+        task_id = str(state.get("task_id") or (state.get("contract") or {}).get("task_id") or "")
+        candidate_sha = str(packet.get("candidate_commit_sha") or packet.get("candidate_commit") or "")
+        ControlledIntegrationManager._require_bound_acceptance(
+            state.get("external_acceptance"), state=state, task_id=task_id, candidate_sha=candidate_sha
+        )
+        integration_grant = state.get("integration_approval_grant")
+        grant = integration_grant or approved.get("approval_grant")
+        if not isinstance(grant, Mapping) or not grant.get("consumed_at"):
+            raise RuntimeError("consumed approval grant is required before integration")
+        contract_kind = str(state.get("contract_kind") or ContractKind.TRACKED_TASK_CARD.value)
+        task_card_hash = str(state.get("task_card_hash") or "").strip() or None
+        contract_hash = str(state.get("contract_hash") or "").strip() or task_card_hash
+        if contract_kind == ContractKind.OWNER_INLINE.value:
+            contract_hash = str((state.get("owner_inline_contract") or {}).get("contract_hash") or contract_hash or "")
+            task_card_hash = None
+        action_type = (
+            LifecycleActionType.CANDIDATE_INTEGRATE
+            if isinstance(integration_grant, Mapping) and integration_grant
+            else LifecycleActionType.CANDIDATE_APPROVE
+        ).value
+        try:
+            require_bound_approval_grant(
+                grant,
+                task_id=task_id,
+                attempt_id=str(state.get("attempt_id") or ""),
+                action_type=action_type,
+                task_card_hash=task_card_hash,
+                contract_kind=contract_kind,
+                contract_hash=contract_hash,
+                owner_inline_contract=state.get("owner_inline_contract"),
+                allow_consumed=True,
+            )
+        except LifecycleGuardError as exc:
+            raise RuntimeError(
+                f"approval grant is not bound to this task and action: {exc}"
+            ) from exc
+        receipt = state.get("verified_receipt")
+        if not isinstance(receipt, Mapping) or receipt.get("verified") is not True:
+            raise RuntimeError("verified candidate receipt is required before integration")
+        canonical = json.dumps(
+            receipt, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
+        if hashlib.sha256(canonical).hexdigest() != str(packet.get("verified_receipt_hash") or ""):
+            raise RuntimeError("verified receipt hash does not bind to promotion packet")
+
     def integrate_task_state(
         self,
         state: Mapping[str, Any],
@@ -351,6 +436,7 @@ class ControlledIntegrationManager:
             approved.get(field) != packet.get(field) for field in binding_fields
         ):
             raise RuntimeError("exact approved binding is required")
+        self._require_integration_authority(state, approved, packet)
         if not _SHA.fullmatch(candidate_sha) or not _SHA.fullmatch(target_base_revision):
             raise RuntimeError("candidate and target base revisions must be exact Git SHAs")
         if not source_branch:
@@ -367,6 +453,8 @@ class ControlledIntegrationManager:
         if self._git(["rev-parse", f"{target_base_revision}^{{commit}}"], controller_root) != target_base_revision:
             raise RuntimeError("target base revision is not present")
         admitted_verifiers = self._bound_manifest(state, contract)
+        if not admitted_verifiers:
+            raise RuntimeError("integration requires at least one admitted verifier")
 
         self.integration_root.mkdir(parents=True, exist_ok=True)
         integration_path = self.integration_root / task_id
@@ -442,8 +530,9 @@ class ControlledIntegrationManager:
         expected_head = str(authorization.get("expected_canonical_head") or "")
         if not task_id or not candidate_sha or not expected_head:
             raise RuntimeError("authorized integration identity is incomplete")
-        if not acceptance.get("passed"):
-            raise RuntimeError("external acceptance is required before integration")
+        self._require_bound_acceptance(
+            state.get("external_acceptance"), state=state, task_id=task_id, candidate_sha=candidate_sha
+        )
         if not authorization.get("cleanup_requested") and "CLEANUP_OWNED_TARGET" in (authorization.get("action_set") or []):
             raise RuntimeError("authorization cleanup binding is inconsistent")
         if "INTEGRATION_STAGING" not in (authorization.get("action_set") or []) or "APPLY_VERIFIED_INTEGRATION" not in (authorization.get("action_set") or []):

@@ -31,7 +31,7 @@ from scripts.ops.select_tests import (  # noqa: E402, I001
 
 DOC_PREFIXES = ("docs/", "openwiki/", "nexus_wiki_vault/")
 GOVERNANCE_FILES = {"AGENTS.md", "MUSE_PROTO.md"}
-WORKFLOW_PREFIXES = (".github/workflows/", "scripts/ops/")
+WORKFLOW_PREFIXES = (".github/workflows/", "scripts/ops/", "scripts/ci/")
 DEPENDENCY_FILES = {
     "pyproject.toml",
     "uv.lock",
@@ -707,7 +707,10 @@ def _is_docs_or_governance(path: str) -> bool:
 
 
 def _is_workflow_or_ci(path: str) -> bool:
-    return path.startswith(WORKFLOW_PREFIXES) or path in {".github/dependabot.yml"}
+    return path.startswith(WORKFLOW_PREFIXES) or path in {
+        ".github/dependabot.yml",
+        ".nexus-core/config.toml",
+    }
 
 
 def build_impact_plan(

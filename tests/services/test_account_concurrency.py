@@ -11,6 +11,7 @@ import fcntl
 import json
 import os
 import shutil
+import subprocess
 import tempfile
 import threading
 import time
@@ -670,7 +671,7 @@ class TestAccountConcurrencyModel(unittest.TestCase):
         self.assertFalse(path.exists())
 
     def test_n_final_attempt_rotation_eligible_retires_without_replacement(self):
-        """N. Non-quota rotation-eligible failure still consumes max_calls and retires without replacement."""
+        """N. Account failover failure (429 rate limit) does not consume max_calls and rotates to healthy account."""
         if not dispatch_module:
             self.skipTest("dispatch_module not loaded")
 
@@ -684,7 +685,9 @@ class TestAccountConcurrencyModel(unittest.TestCase):
 
         def mock_run_agy(*, env, prompt, cwd, mode, model, effort, timeout):
             calls.append(dict(env))
-            return 1, "", "429 rate limit", False, 50
+            if len(calls) == 1:
+                return 1, "", "429 rate limit", False, 50
+            return 0, "SUCCESS", "", False, 50
 
         code = dispatch_module.dispatch_run(
             prompt="test prompt final attempt",
@@ -693,22 +696,201 @@ class TestAccountConcurrencyModel(unittest.TestCase):
             coordinator=coord,
             run_agy_fn=mock_run_agy,
         )
-        self.assertEqual(code, 1)
-        self.assertEqual(len(calls), 1)
+        self.assertEqual(code, 0)
+        self.assertEqual(len(calls), 2)
 
         # Bind assertions to the account actually selected by the coordinator.
         selected_home = calls[0]["HOME"]
+        second_home = calls[1]["HOME"]
         by_home = {acc1.home_dir: acc1, acc2.home_dir: acc2}
         selected = by_home[selected_home]
-        other = acc2 if selected is acc1 else acc1
+        second = by_home[second_home]
+        self.assertNotEqual(selected.alias_hash, second.alias_hash)
         self.assertTrue(coord.is_quarantined(selected.alias_hash))
-        self.assertFalse(coord.is_quarantined(other.alias_hash))
-        self.assertFalse((self.leases_dir / f"{other.alias_hash}.receipt.json").exists())
+        self.assertFalse(coord.is_quarantined(second.alias_hash))
 
-        # No replacement was acquired by the failed run; the other account remains available.
-        claim_next = coord.acquire_claim("worker-next", wait_timeout=0.1)
-        self.assertEqual(claim_next.account_alias_hash, other.alias_hash)
-        claim_next.release()
+    def test_agy_failover_budget_g0_account_unavailable_red_fixture(self):
+        """AGY_FAILOVER_BUDGET_G0_ACCOUNT_UNAVAILABLE_RED_FIXTURE:
+
+        ACCOUNT_UNAVAILABLE on account A with max_calls=1 rotates to healthy
+        account B and permits one real model call without burning work budget.
+        """
+        if not dispatch_module:
+            self.skipTest("dispatch_module not loaded")
+
+        acc1 = AgyAccount(alias="acc_g0_1", home_dir=f"{self.test_dir}/home_g0_1")
+        acc2 = AgyAccount(alias="acc_g0_2", home_dir=f"{self.test_dir}/home_g0_2")
+
+        mgr = self._create_manager([acc1, acc2])
+        coord = self._create_coordinator(mgr)
+
+        calls: list[dict[str, str]] = []
+
+        def mock_run_agy(*, env, prompt, cwd, mode, model, effort, timeout):
+            calls.append(dict(env))
+            if len(calls) == 1:
+                return 1, "", "HTTP 503: Service Unavailable", False, 50
+            return 0, "SUCCESS ON B", "", False, 50
+
+        code = dispatch_module.dispatch_run(
+            prompt="test g0 fixture",
+            cwd=self.test_dir,
+            max_calls=1,
+            coordinator=coord,
+            run_agy_fn=mock_run_agy,
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(len(calls), 2)
+        selected_home = calls[0]["HOME"]
+        second_home = calls[1]["HOME"]
+        by_home = {acc1.home_dir: acc1, acc2.home_dir: acc2}
+        selected = by_home[selected_home]
+        second = by_home[second_home]
+        self.assertNotEqual(selected.alias_hash, second.alias_hash)
+        self.assertTrue(coord.is_quarantined(selected.alias_hash))
+        self.assertFalse(coord.is_quarantined(second.alias_hash))
+
+    def test_auth_invalid_failover_does_not_consume_work_budget(self):
+        """Auth/session invalid failure rotates without consuming work budget."""
+        if not dispatch_module:
+            self.skipTest("dispatch_module not loaded")
+
+        acc1 = AgyAccount(alias="acc_auth_1", home_dir=f"{self.test_dir}/home_auth_1")
+        acc2 = AgyAccount(alias="acc_auth_2", home_dir=f"{self.test_dir}/home_auth_2")
+
+        mgr = self._create_manager([acc1, acc2])
+        coord = self._create_coordinator(mgr)
+
+        calls: list[dict[str, str]] = []
+
+        def mock_run_agy(*, env, prompt, cwd, mode, model, effort, timeout):
+            calls.append(dict(env))
+            if len(calls) == 1:
+                return 1, "", "HTTP 401: Unauthorized: token expired", False, 50
+            return 0, "SUCCESS ON B", "", False, 50
+
+        code = dispatch_module.dispatch_run(
+            prompt="test auth invalid",
+            cwd=self.test_dir,
+            max_calls=1,
+            coordinator=coord,
+            run_agy_fn=mock_run_agy,
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(len(calls), 2)
+
+    def test_all_accounts_unavailable_terminates_with_pool_exhausted(self):
+        """All accounts failing with account unavailable exhausts pool and exits 75."""
+        if not dispatch_module:
+            self.skipTest("dispatch_module not loaded")
+
+        acc1 = AgyAccount(alias="acc_all_1", home_dir=f"{self.test_dir}/home_all_1")
+        acc2 = AgyAccount(alias="acc_all_2", home_dir=f"{self.test_dir}/home_all_2")
+
+        mgr = self._create_manager([acc1, acc2])
+        coord = self._create_coordinator(mgr)
+
+        calls: list[dict[str, str]] = []
+
+        def mock_run_agy(*, env, prompt, cwd, mode, model, effort, timeout):
+            calls.append(dict(env))
+            return 1, "", "HTTP 503: Service Unavailable", False, 50
+
+        code = dispatch_module.dispatch_run(
+            prompt="test all unavailable",
+            cwd=self.test_dir,
+            max_calls=1,
+            coordinator=coord,
+            run_agy_fn=mock_run_agy,
+        )
+        self.assertEqual(code, 75)
+        self.assertEqual(len(calls), 2)
+
+    def test_failover_ceiling_terminates_with_account_failover_limit(self):
+        """Failover ceiling limit (rotations >= max_failovers) terminates with ACCOUNT_FAILOVER_LIMIT."""
+        if not dispatch_module:
+            self.skipTest("dispatch_module not loaded")
+
+        accounts = [
+            AgyAccount(alias=f"ceil_{i}", home_dir=f"{self.test_dir}/home_ceil_{i}")
+            for i in range(4)
+        ]
+        mgr = self._create_manager(accounts)
+        coord = self._create_coordinator(mgr)
+
+        calls: list[dict[str, str]] = []
+
+        def mock_run_agy(*, env, prompt, cwd, mode, model, effort, timeout):
+            calls.append(dict(env))
+            return 1, "", "HTTP 503: Service Unavailable", False, 50
+
+        old_limit = os.environ.get("NEXUS_AGY_MAX_ACCOUNT_FAILOVERS")
+        try:
+            os.environ["NEXUS_AGY_MAX_ACCOUNT_FAILOVERS"] = "2"
+            code = dispatch_module.dispatch_run(
+                prompt="test ceiling",
+                cwd=self.test_dir,
+                max_calls=1,
+                coordinator=coord,
+                run_agy_fn=mock_run_agy,
+            )
+            self.assertEqual(code, 75)
+            self.assertEqual(len(calls), 3)  # Initial attempt + 2 rotations
+        finally:
+            if old_limit is None:
+                os.environ.pop("NEXUS_AGY_MAX_ACCOUNT_FAILOVERS", None)
+            else:
+                os.environ["NEXUS_AGY_MAX_ACCOUNT_FAILOVERS"] = old_limit
+
+    def test_account_unavailable_after_effect_never_rotates(self):
+        """ACCOUNT_UNAVAILABLE after repository effect must not rotate and requires reconciliation."""
+        if not dispatch_module:
+            self.skipTest("dispatch_module not loaded")
+
+        work = Path(self.test_dir) / "repo_effect"
+        work.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "-C", str(work), "init", "-q"], check=True)
+        subprocess.run(
+            ["git", "-C", str(work), "config", "user.email", "test@example.invalid"],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(work), "config", "user.name", "Nexus Test"],
+            check=True,
+        )
+        (work / "seed.txt").write_text("seed\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(work), "add", "seed.txt"], check=True)
+        subprocess.run(
+            ["git", "-C", str(work), "commit", "-q", "-m", "seed"],
+            check=True,
+        )
+
+        acc1 = AgyAccount(alias="effect_1", home_dir=f"{self.test_dir}/home_eff_1")
+        acc2 = AgyAccount(alias="effect_2", home_dir=f"{self.test_dir}/home_eff_2")
+        mgr = self._create_manager([acc1, acc2])
+        coord = self._create_coordinator(mgr)
+
+        calls: list[dict[str, str]] = []
+        events: list[dict[str, object]] = []
+
+        def mock_run_agy(*, env, prompt, cwd, mode, model, effort, timeout):
+            calls.append(dict(env))
+            (work / "modified_during_run.txt").write_text("partial change", encoding="utf-8")
+            return 1, "", "HTTP 503: Service Unavailable", False, 50
+
+        code = dispatch_module.dispatch_run(
+            prompt="test post effect failure",
+            cwd=str(work),
+            max_calls=1,
+            coordinator=coord,
+            run_agy_fn=mock_run_agy,
+            operation_hook=lambda event: events.append(event),
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(len(calls), 1)  # Must NOT rotate to acc2
+        classifying = [e for e in events if e.get("phase") == "CLASSIFYING_FAILURE"]
+        self.assertTrue(classifying and classifying[0].get("reconciliation_required") is True)
+        self.assertTrue(classifying[0].get("provider_effect") is True)
 
     def test_o_non_rotation_failure_releases_normally_without_quarantine(self):
         """O. Non-rotation failure still only releases normally and does NOT quarantine or switch accounts."""
@@ -766,6 +948,29 @@ class TestAccountConcurrencyModel(unittest.TestCase):
         mgr = self._create_manager([acc1, acc2])
         coord = self._create_coordinator(mgr)
 
+        # dispatch_run fail-closes when it cannot prove whether quota exhaustion
+        # happened before or after a source effect. Give this rotation test a
+        # real, clean Git workspace so pre-effect is physically observable.
+        # Keep Agy HOME directories outside that worktree so temporary
+        # permission files are not mistaken for repository effects.
+        worktree = Path(self.test_dir) / "repo_p"
+        worktree.mkdir()
+        subprocess.run(["git", "-C", str(worktree), "init", "-q"], check=True)
+        subprocess.run(
+            ["git", "-C", str(worktree), "config", "user.email", "test@example.invalid"],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(worktree), "config", "user.name", "Nexus Test"],
+            check=True,
+        )
+        (worktree / "seed.txt").write_text("seed\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(worktree), "add", "seed.txt"], check=True)
+        subprocess.run(
+            ["git", "-C", str(worktree), "commit", "-q", "-m", "seed"],
+            check=True,
+        )
+
         first_home: list[str] = []
         retired_hashes: list[str] = []
         perms_restored_before_retire: list[bool] = []
@@ -794,7 +999,7 @@ class TestAccountConcurrencyModel(unittest.TestCase):
 
         code = dispatch_module.dispatch_run(
             prompt="test prompt permission lifecycle",
-            cwd=self.test_dir,
+            cwd=str(worktree),
             max_calls=2,
             temp_command_permissions=True,
             coordinator=coord,
@@ -1040,6 +1245,96 @@ class TestAccountConcurrencyModel(unittest.TestCase):
         coord.retire_failed_claim(claim, AccountFailureKind.TIMEOUT)
         self.assertTrue(claim.released)
         self.assertFalse(coord.is_quarantined(acc.alias_hash))
+
+    def test_w_abandoned_parent_reference_and_surviving_receipt_fails_closed(self):
+        acc = AgyAccount(alias="abandon_acc", home_dir=f"{self.test_dir}/abandon_acc")
+        mgr = self._create_manager([acc])
+        coord = self._create_coordinator(mgr, timeout=0.1)
+        claim = coord.acquire_claim("worker-collab")
+        inherited_fd = os.dup(claim.lock_file_obj.fileno())
+        receipt_path = claim.receipt_path
+        try:
+            # Parent abandons reference while child holds inherited_fd
+            claim.abandon_parent_reference()
+            self.assertTrue(claim.released)
+            self.assertTrue(receipt_path.exists())
+
+            # Attempting to acquire by another worker fails because flock is held
+            with self.assertRaises(AgyAccountPoolBusyError):
+                coord.acquire_claim("worker-dispatcher", wait_timeout=0.1)
+        finally:
+            # Child terminates, closing inherited_fd
+            os.close(inherited_fd)
+
+        # Even after child process exits and flock is unlocked, the surviving receipt fails closed!
+        self.assertTrue(receipt_path.exists())
+        with self.assertRaises(AgyAccountPoolBusyError):
+            coord.acquire_claim("worker-dispatcher-2", wait_timeout=0.1)
+
+    def test_y_reconcile_claim_receipt_requires_free_lock_and_exact_identity(self):
+        acc = AgyAccount(alias="reconcile_acc", home_dir=f"{self.test_dir}/reconcile_acc")
+        mgr1 = self._create_manager([acc])
+        coord1 = self._create_coordinator(mgr1, timeout=0.1)
+        claim = coord1.acquire_claim("worker-before-crash")
+        receipt_path = claim.receipt_path
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        inherited_fd = os.dup(claim.lock_file_obj.fileno())
+        claim.abandon_parent_reference()
+
+        mgr2 = self._create_manager([acc])
+        coord2 = self._create_coordinator(mgr2, timeout=0.1)
+        busy = coord2.reconcile_claim_receipt(
+            account_alias_hash=claim.account_alias_hash,
+            lease_id_hash=claim.lease_id_hash,
+            owner_pid=receipt["pid"],
+        )
+        self.assertEqual(busy["result"], "LEASE_BUSY_PRESERVED")
+        self.assertTrue(receipt_path.exists())
+
+        os.close(inherited_fd)
+        mismatch = coord2.reconcile_claim_receipt(
+            account_alias_hash=claim.account_alias_hash,
+            lease_id_hash="0" * 12,
+            owner_pid=receipt["pid"],
+        )
+        self.assertEqual(mismatch["result"], "LEASE_IDENTITY_MISMATCH_PRESERVED")
+        self.assertTrue(receipt_path.exists())
+
+        removed = coord2.reconcile_claim_receipt(
+            account_alias_hash=claim.account_alias_hash,
+            lease_id_hash=claim.lease_id_hash,
+            owner_pid=receipt["pid"],
+        )
+        self.assertEqual(removed["result"], "LEASE_RECEIPT_REMOVED")
+        self.assertFalse(receipt_path.exists())
+        replacement = coord2.acquire_claim("worker-after-reconcile", wait_timeout=0.1)
+        replacement.release()
+
+    def test_x_collaborative_and_dispatcher_coexistence_and_mutual_exclusion(self):
+        acc_a = AgyAccount(alias="acc_a", home_dir=f"{self.test_dir}/acc_a")
+        acc_b = AgyAccount(alias="acc_b", home_dir=f"{self.test_dir}/acc_b")
+        mgr = self._create_manager([acc_a, acc_b])
+        coord = self._create_coordinator(mgr, timeout=0.5)
+
+        # 1. Collaborative acquires account A
+        collab_claim = coord.acquire_claim("hcom_collab:1001:canary", wait_timeout=0.5)
+        held_alias = collab_claim.internal_id
+
+        # 2. Dispatcher acquires concurrently -> must receive account B, not account A
+        dispatch_claim = coord.acquire_claim("dispatcher:2002:gov", wait_timeout=0.5)
+        self.assertNotEqual(dispatch_claim.internal_id, held_alias)
+
+        # 3. Third claim cannot be acquired (pool busy)
+        with self.assertRaises(AgyAccountPoolBusyError):
+            coord.acquire_claim("worker-third", wait_timeout=0.1)
+
+        # 4. Release collaborative lease -> third claim can now acquire that released account
+        collab_claim.release()
+        third_claim = coord.acquire_claim("worker-third", wait_timeout=0.5)
+        self.assertEqual(third_claim.internal_id, held_alias)
+
+        third_claim.release()
+        dispatch_claim.release()
 
 
 if __name__ == "__main__":

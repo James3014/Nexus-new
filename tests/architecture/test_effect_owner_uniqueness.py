@@ -8,6 +8,8 @@ fails when a new physical implementation appears outside the admitted seams.
 from __future__ import annotations
 
 import ast
+import functools
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Literal
@@ -136,6 +138,7 @@ NON_GATEWAY_LAUNCHCTL_WRITERS = frozenset({
     "scripts/ops/learn_refresh_launchd.py:install",
     "scripts/ops/learn_refresh_launchd.py:status",
     "scripts/ops/learn_refresh_launchd.py:uninstall",
+    "scripts/ops/nexus-hermes-launchd:_launchctl",
 })
 
 DECLARED = (
@@ -166,7 +169,29 @@ EDGES = (
 )
 
 
+# Performance only: the real repository tree is parsed many times
+# per run, so its ASTs are cached in-process (the file list is always rescanned). Synthetic inputs
+# (tmp_path roots / extra files outside the repository) are always rescanned and
+# parsed fresh. Parsed ASTs are keyed by (path, sha256 of content) and are only
+# ever read, never mutated, by this module.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_AST_CACHE: dict[tuple[Path, str], ast.Module] = {}
+
+
+def _in_repo(path: Path) -> bool:
+    try:
+        path.resolve().relative_to(_REPO_ROOT)
+    except ValueError:
+        return False
+    return True
+
+
 def _files(root: Path) -> tuple[Path, ...]:
+    # Never cached: rglob is cheap and a cached list goes stale in-process.
+    return _scan_files(root)
+
+
+def _scan_files(root: Path) -> tuple[Path, ...]:
     found: list[Path] = []
     for rel in (Path("nexus"), Path("scripts/ops")):
         base = root / rel
@@ -184,7 +209,14 @@ def _files(root: Path) -> tuple[Path, ...]:
 
 def _parse(path: Path) -> ast.Module:
     try:
-        return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        text = path.read_text(encoding="utf-8")
+        if not _in_repo(path):
+            return ast.parse(text, filename=str(path))
+        key = (path, hashlib.sha256(text.encode("utf-8")).hexdigest())
+        tree = _AST_CACHE.get(key)
+        if tree is None:
+            tree = _AST_CACHE[key] = ast.parse(text, filename=str(path))
+        return tree
     except (OSError, SyntaxError, UnicodeError) as exc:
         raise AssertionError(f"SOURCE_UNPARSEABLE:{path}:{exc}") from exc
 
@@ -232,6 +264,7 @@ def _expr(node: ast.AST) -> str | None:
     return None
 
 
+@functools.cache
 def _calls(record: Record) -> tuple[str, ...]:
     return tuple(
         expression
@@ -244,6 +277,7 @@ def _tail(call: str) -> str:
     return call.rsplit(".", 1)[-1].removesuffix("()")
 
 
+@functools.cache
 def _strings(record: Record) -> frozenset[str]:
     return frozenset(
         node.value
@@ -513,3 +547,19 @@ def test_inventory_labels_are_strict_and_compatibility_is_explicit():
     labels = {entry["label"] for entry in report["entries"]}
     assert labels <= {"CANONICAL", "COMPATIBILITY_ONLY", "RETIRED"}
     assert "COMPATIBILITY_ONLY" in labels
+
+
+def test_rescan_sees_file_added_after_initial_scan():
+    verify(_REPO_ROOT)  # warm the AST cache
+    rogue = _REPO_ROOT / "nexus" / "_zz_effect_owner_rescan_probe.py"
+    try:
+        rogue.write_text("def rogue(pr):\n    pr.merge_pull_request()\n", encoding="utf-8")
+        try:
+            verify(_REPO_ROOT)
+        except AssertionError as exc:
+            assert "DUPLICATE_EFFECT_IMPLEMENTATION:protected_github_merge" in str(exc)
+        else:
+            raise AssertionError("file added after first scan was not detected")
+    finally:
+        rogue.unlink(missing_ok=True)
+    assert verify(_REPO_ROOT)["classification"] == "SINGLE_EFFECT_OWNER"

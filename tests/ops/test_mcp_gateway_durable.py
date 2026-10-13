@@ -1,4 +1,5 @@
 # ruff: noqa: E701, E702, E731
+import dataclasses
 import fcntl
 import hashlib
 import json
@@ -13,6 +14,7 @@ import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -319,6 +321,9 @@ def _r1b1_fixture(
     gitlink_path="nested-repository", external_bootstrap=False,
 ):
     from nexus.contracts.gateway_deployment import (
+        PLIST as LEGACY_RECOVERY_PLIST,
+    )
+    from nexus.contracts.gateway_deployment import (
         RECOVERY_CARD_PATH,
         RECOVERY_CARD_SHA256,
         SOURCE_BASE_MERGE,
@@ -334,6 +339,10 @@ def _r1b1_fixture(
     )
 
     seed = identity_seed or hashlib.sha256(str(tmp_path).encode()).hexdigest()[:12]
+    # #1940: GATEWAY_PLIST now derives from the running user's home.  Pin the
+    # fixture to the legacy host binding that pairs with the default
+    # InterpreterIdentity() so it stays host-independent.
+    monkeypatch.setattr(g, "GATEWAY_PLIST", Path(LEGACY_RECOVERY_PLIST))
     monkeypatch.setattr(g, "_ACTUAL_INTERPRETER", sys.executable)
     monkeypatch.setattr(
         g,
@@ -417,6 +426,10 @@ def _r1b1_fixture(
     monkeypatch.setattr(g, "HOST_GID", os.getgid())
     state = tmp_path / "state"
     state.mkdir(mode=0o700)
+    # BSD/macOS children inherit the parent directory group, not the process
+    # group (pytest tmp under /tmp is gid 0). Pin the manager state root to the
+    # exact fenced identity so descendants inherit HOST_UID/HOST_GID/0700.
+    os.chown(state, g.HOST_UID, g.HOST_GID)
     state.chmod(0o700)
     monkeypatch.setattr(g, "GATEWAY_STATE_ROOT", state)
     monkeypatch.setattr(g, "GATEWAY_SOURCE_BUNDLES_ROOT", state / "source-bundles")
@@ -474,6 +487,7 @@ def _r1b1_fixture(
     predecessor_manifest = derive_deployment_manifest(source_set, role="predecessor")
     artifact_root = g.GATEWAY_PREDECESSOR_ARTIFACT_ROOT
     artifact_root.mkdir(mode=0o700)
+    artifact_root.chmod(0o700)
     artifact_candidate = artifact_root / "candidate.bundle"
     subprocess.run(
         [
@@ -1560,6 +1574,316 @@ def test_r1b1_named_role_swap_extra_refs_and_valid_bundle_encodings(tmp_path, mo
         encoded.append(hashlib.sha256(path.read_bytes()).hexdigest())
     assert encoded[0] != encoded[1]
     assert fixture["desired_manifest"].deployment_id == fixture["receipt"].desired_manifest_id
+
+
+def _r1_bundle_harness(tmp_path, monkeypatch, *, after_command=None):
+    """Real-git harness around the manager bundle seam.
+
+    The spy only observes and forwards to real git; ``after_command`` may apply
+    a real post-command ref mutation to witness fail-closed role binding.
+    """
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    fresh_main = subprocess.check_output(
+        ["git", "-C", str(fixture["mirror"]), "rev-parse", "HEAD"], text=True
+    ).strip()
+    expected = {
+        "refs/nexus-r1/fresh-main": fresh_main,
+        "refs/nexus-r1/desired": fixture["desired"],
+        "refs/nexus-r1/predecessor": fixture["predecessor"],
+    }
+    observed = {"bundle_create_refs": None, "host_calls": []}
+    real_run = g._r1_run
+
+    def spy(*command, **kwargs):
+        if command[:2] == ("git", "--git-dir") and command[3:5] == ("bundle", "create"):
+            observed["bundle_create_refs"] = subprocess.check_output(
+                [
+                    "git",
+                    "--git-dir",
+                    command[2],
+                    "for-each-ref",
+                    "--format=%(refname) %(objectname)",
+                ],
+                text=True,
+            ).splitlines()
+        result = real_run(*command, **kwargs)
+        if after_command and command[:2] == ("git", "--git-dir"):
+            after_command(Path(command[2]), command[3:], fixture)
+        return result
+
+    monkeypatch.setattr(g, "_r1_run", spy)
+    monkeypatch.setattr(
+        g,
+        "_launchctl_observation",
+        lambda *args, **kwargs: observed["host_calls"].append((args, kwargs)),
+    )
+    return fixture, fresh_main, expected, observed
+
+
+def _r1_bundle_call(fixture, fresh_main, receipt=None, predecessor_store=None):
+    scratch, verified_store = g._r1_verify_predecessor_artifact(fixture["receipt"])
+    try:
+        return g._r1_create_or_verify_bundle(
+            receipt or fixture["receipt"],
+            fresh_main,
+            predecessor_store or verified_store,
+        )
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def _r1_shallow_authority_mirror(tmp_path, monkeypatch, fixture, depth=3):
+    """Model the live host: a shallow fixed mirror of a complete fixed origin."""
+    shallow = tmp_path / "shallow-authority"
+    subprocess.run(
+        [
+            "git",
+            "clone",
+            "-q",
+            f"--depth={depth}",
+            "--branch",
+            "main",
+            f"file://{fixture['mirror']}",
+            str(shallow),
+        ],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(shallow), "remote", "set-url", "origin", g.HOST_AUTHORITY_REMOTE],
+        check=True,
+    )
+    monkeypatch.setattr(g, "HOST_AUTHORITY_SOURCE_ROOT", shallow)
+    return shallow
+
+
+def _r1_assert_self_contained_bundle(tmp_path, bundle, expected):
+    """The bundle alone reproduces exactly the three role refs with full history."""
+    empty = tmp_path / f"verify-{bundle.stem[:12]}.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(empty)], check=True)
+    verified = subprocess.run(
+        ["git", "--git-dir", str(empty), "bundle", "verify", str(bundle)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert verified.returncode == 0, verified.stderr
+    assert "requires" not in verified.stdout + verified.stderr
+    subprocess.run(
+        [
+            "git",
+            "--git-dir",
+            str(empty),
+            "fetch",
+            "-q",
+            "--no-tags",
+            str(bundle),
+            *(f"+{ref}:{ref}" for ref in expected),
+        ],
+        check=True,
+    )
+    subprocess.run(["git", "--git-dir", str(empty), "fsck", "--full", "--strict"], check=True)
+    assert (
+        subprocess.check_output(
+            ["git", "--git-dir", str(empty), "rev-parse", "--is-shallow-repository"], text=True
+        ).strip()
+        == "false"
+    )
+    assert sorted(
+        subprocess.check_output(
+            [
+                "git",
+                "--git-dir",
+                str(empty),
+                "for-each-ref",
+                "--format=%(refname) %(objectname)",
+            ],
+            text=True,
+        ).splitlines()
+    ) == sorted(f"{ref} {commit}" for ref, commit in expected.items())
+
+
+def test_r1_bundle_binds_exact_three_role_refs_before_bundle_create(tmp_path, monkeypatch):
+    fixture, fresh_main, expected, observed = _r1_bundle_harness(tmp_path, monkeypatch)
+    bundle, heads = _r1_bundle_call(fixture, fresh_main)
+
+    assert sorted(observed["bundle_create_refs"]) == sorted(
+        f"{ref} {commit}" for ref, commit in expected.items()
+    )
+    assert {head.ref: head.commit for head in heads} == expected
+    _r1_assert_self_contained_bundle(tmp_path, bundle, expected)
+    persisted = bundle.read_bytes()
+
+    # Persisted-bundle identity/semantic verification is unchanged on replay.
+    replay_bundle, replay_heads = _r1_bundle_call(fixture, fresh_main)
+    assert (replay_bundle, replay_heads) == (bundle, heads)
+    assert replay_bundle.read_bytes() == persisted
+    assert observed["host_calls"] == []
+    assert not g.GATEWAY_REPOSITORY.exists()
+    assert not g.GATEWAY_DEPLOYMENTS_ROOT.exists()
+
+
+def test_r1_shallow_authority_mirror_stages_complete_three_role_bundle(tmp_path, monkeypatch):
+    """#526 v31: the fixed mirror is shallow; desired is its shallow root."""
+    fixture, fresh_main, expected, observed = _r1_bundle_harness(tmp_path, monkeypatch)
+    shallow = _r1_shallow_authority_mirror(tmp_path, monkeypatch, fixture)
+    assert (
+        subprocess.check_output(
+            ["git", "-C", str(shallow), "rev-parse", "--is-shallow-repository"], text=True
+        ).strip()
+        == "true"
+    )
+    assert (shallow / ".git/shallow").read_text().split() == [fixture["desired"]]
+    # Live failure layer 1: the fixed shallow-mirror fetch exits 0 without the ref.
+    probe = tmp_path / "probe.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(probe)], check=True)
+    subprocess.run(
+        [
+            "git",
+            "--git-dir",
+            str(probe),
+            "fetch",
+            "-q",
+            "--no-tags",
+            str(shallow),
+            f"+{fresh_main}:refs/nexus-r1/fresh-main",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    assert (
+        subprocess.run(
+            [
+                "git",
+                "--git-dir",
+                str(probe),
+                "rev-parse",
+                "--verify",
+                "-q",
+                "refs/nexus-r1/fresh-main",
+            ],
+            check=False,
+            capture_output=True,
+        ).returncode
+        != 0
+    )
+
+    def mirror_state():
+        return (
+            (shallow / ".git/shallow").read_bytes(),
+            subprocess.check_output(
+                ["git", "-C", str(shallow), "for-each-ref", "--format=%(refname) %(objectname)"]
+            ),
+            subprocess.check_output(["git", "-C", str(shallow), "count-objects", "-v"]),
+        )
+
+    before = mirror_state()
+    staged = g.stage_verified_git_store(fixture["request"], fixture["receipt"])
+
+    bundle = g.GATEWAY_SOURCE_BUNDLES_ROOT / f"{fixture['receipt'].receipt_hash}.bundle"
+    assert sorted(observed["bundle_create_refs"]) == sorted(
+        f"{ref} {commit}" for ref, commit in expected.items()
+    )
+    assert {head.ref: head.commit for head in staged.bundle_evidence.role_heads} == expected
+    _r1_assert_self_contained_bundle(tmp_path, bundle, expected)
+    assert staged.desired_path.is_dir() and staged.predecessor_path.is_dir()
+    # The host authority mirror is observed only, never unshallowed or mutated.
+    assert mirror_state() == before
+    assert observed["host_calls"] == []
+
+
+def test_r1_shallow_mirror_fixed_remote_moved_during_bundle_fails_closed(tmp_path, monkeypatch):
+    fixture, fresh_main, _, observed = _r1_bundle_harness(tmp_path, monkeypatch)
+    _r1_shallow_authority_mirror(tmp_path, monkeypatch, fixture)
+    real_verify = g._r1_verify_predecessor_artifact
+    origin = fixture["mirror"]
+
+    def verify_then_move_origin(receipt):
+        verified = real_verify(receipt)
+        subprocess.run(
+            ["git", "-C", str(origin), "commit", "-q", "--allow-empty", "-m", "moved"],
+            check=True,
+        )
+        return verified
+
+    monkeypatch.setattr(g, "_r1_verify_predecessor_artifact", verify_then_move_origin)
+    with pytest.raises(g.GatewayContractError, match="fixed remote main moved"):
+        g.stage_verified_git_store(fixture["request"], fixture["receipt"])
+
+    assert observed["bundle_create_refs"] is None
+    assert list(g.GATEWAY_SOURCE_BUNDLES_ROOT.iterdir()) == []
+    assert observed["host_calls"] == []
+    assert not g.GATEWAY_REPOSITORY.exists()
+
+
+@pytest.mark.parametrize("substitution", ("fresh-main", "desired", "predecessor-store"))
+def test_r1_shallow_mirror_bundle_identity_substitution_fails_closed(
+    tmp_path, monkeypatch, substitution
+):
+    fixture, fresh_main, _, observed = _r1_bundle_harness(tmp_path, monkeypatch)
+    _r1_shallow_authority_mirror(tmp_path, monkeypatch, fixture)
+    receipt = fixture["receipt"]
+    predecessor_store = None
+    if substitution == "fresh-main":
+        # A caller-observed head other than the fixed remote main is rejected.
+        fresh_main, match = receipt.accepted_source_merge, "fixed remote main moved"
+    elif substitution == "desired":
+        # Exact commit outside fresh-main history (here: the predecessor side).
+        receipt = dataclasses.replace(receipt, desired_commit=fixture["predecessor"])
+        match = "desired outside fresh main"
+    else:
+        predecessor_store = tmp_path / "empty-predecessor.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(predecessor_store)], check=True)
+        match = "fixed subprocess rejected"
+    with pytest.raises(g.GatewayContractError, match=match):
+        _r1_bundle_call(fixture, fresh_main, receipt, predecessor_store)
+
+    assert observed["bundle_create_refs"] is None
+    assert list(g.GATEWAY_SOURCE_BUNDLES_ROOT.iterdir()) == []
+    assert observed["host_calls"] == []
+
+
+@pytest.mark.parametrize(
+    ("role", "mutation"),
+    (
+        ("desired", "rebind"),
+        ("predecessor", "delete"),
+        ("extra", "add"),
+    ),
+)
+def test_r1_bundle_mismatched_missing_or_extra_role_ref_fails_closed(
+    tmp_path, monkeypatch, role, mutation
+):
+    def mutate(source, command, fixture):
+        if (
+            not source.parent.name.startswith(".bundle-source.")
+            or command[0]
+            not in {
+                "fetch",
+                "update-ref",
+            }
+            or not any(
+                f"refs/nexus-r1/{'predecessor' if role == 'extra' else role}" in arg
+                for arg in command
+            )
+        ):
+            return
+        target = f"refs/nexus-r1/{role}"
+        if mutation == "delete":
+            argv = ["update-ref", "-d", target]
+        else:
+            argv = ["update-ref", target, fixture["receipt"].accepted_source_merge]
+        subprocess.run(["git", "--git-dir", str(source), *argv], check=True)
+
+    fixture, fresh_main, _, observed = _r1_bundle_harness(
+        tmp_path, monkeypatch, after_command=mutate
+    )
+    with pytest.raises(g.GatewayContractError, match="role ref set mismatch"):
+        _r1_bundle_call(fixture, fresh_main)
+
+    assert observed["bundle_create_refs"] is None
+    assert list(g.GATEWAY_SOURCE_BUNDLES_ROOT.iterdir()) == []
+    assert observed["host_calls"] == []
+    assert not g.GATEWAY_REPOSITORY.exists()
 
 
 def test_r1b1_bounded_subprocess_import_failure_is_rejected(tmp_path, monkeypatch):
@@ -4063,6 +4387,24 @@ def test_r1_live_production_wrapper_and_plist_are_fixed_and_secret_free(
         g._recovery_expected_plist_bytes("/tmp/caller-selected")
 
 
+def test_r1_recovery_state_root_stays_outside_workspace_when_shadow_exists(
+    tmp_path, monkeypatch
+):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    home = tmp_path / "test-home"
+    (home / "Workspace/Nexus-new-self-hosted-state").mkdir(parents=True)
+    (home / "workspace/Nexus-new-self-hosted-state").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(Path, "home", lambda: home)
+    plan = g._recovery_plan(fixture["request"], fixture["receipt"])
+    wrapper = g._recovery_wrapper_command(plan.desired_root)
+    expected_state_dir = home / ".local/state/Nexus-new-self-hosted-state"
+    assert f'NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR="{expected_state_dir}"' in wrapper
+    assert "Workspace/Nexus-new-self-hosted-state" not in wrapper
+    assert "workspace/Nexus-new-self-hosted-state" not in wrapper
+    plist = plistlib.loads(g._recovery_expected_plist_bytes(plan.desired_root))
+    assert plist["ProgramArguments"][2] == wrapper
+
+
 def test_r1_live_production_effect_blocks_before_launchctl_without_bound_github_cli(
     tmp_path, monkeypatch
 ):
@@ -5980,6 +6322,44 @@ def _build_valid_v2_fill_rows(fixture, count):
     return rows
 
 
+def _build_terminal_v2_fill_rows(fixture, count):
+    """Like ``_build_valid_v2_fill_rows`` but every fill request is terminal.
+
+    #1958 refuses a new R1 request while any other R1 request is non-terminal,
+    so capacity witnesses that must reach the reserve check fill the ledger
+    with closed requests: REQUESTED->BLOCKED pairs, and one
+    REQUESTED->PREFLIGHTED->BLOCKED triple when ``count`` is odd.
+    """
+    from nexus.contracts.gateway_deployment import canonical_hash
+
+    assert count >= 2
+    chains = []
+    remaining = count
+    if remaining % 2:
+        chains.append(["REQUESTED", "PREFLIGHTED", "BLOCKED"])
+        remaining -= 3
+    chains.extend(["REQUESTED", "BLOCKED"] for _ in range(remaining // 2))
+    templates = _build_valid_v2_fill_rows(fixture, len(chains))
+    out = []
+    parent_hash = ""
+    for index, (template, chain) in enumerate(zip(templates, chains)):
+        for state in chain:
+            values = {key: value for key, value in template.items() if key != "record_hash"}
+            values.update({
+                "state": state,
+                "sequence": len(out) + 1,
+                "parent_hash": parent_hash,
+                "source_bundle_evidence_hash": (
+                    None if state == "REQUESTED" else f"{index % 10}" * 64
+                ),
+            })
+            values["record_hash"] = canonical_hash(values)
+            out.append(values)
+            parent_hash = values["record_hash"]
+    assert len(out) == count
+    return out
+
+
 def test_hostile_1_ledger_just_over_old_64k_reads_under_new_contract(tmp_path, monkeypatch):
     """A ledger slightly larger than the old 64 KiB generic bound (but below the
     new explicit Gateway-ledger total bound) must read successfully under the
@@ -6657,7 +7037,7 @@ def test_hostile_15_real_recovery_blocks_pre_effect_when_reserve_does_not_fit(
     )
     _write_v2_rows(
         fixture["ledger_path"],
-        _build_valid_v2_fill_rows(fixture, 3),
+        _build_terminal_v2_fill_rows(fixture, 3),
     )
     ledger = g.GatewayLedger(
         fixture["ledger_path"], lock_path=fixture["lock_path"]
@@ -6830,3 +7210,399 @@ def test_hostile_17_pre_effect_reserve_cannot_be_stolen_during_external_effect(
     assert scanned[-1]["state"] == "VERIFIED"
     assert len(effect_calls) == 1
     assert external_calls == ["fixed-effect"]
+
+
+# --- #1940: plist derivation and in-process self-replacement refusal ---------
+
+
+def test_1940_gateway_plist_defaults_to_current_user_launch_agents(tmp_path):
+    home = tmp_path / "home"
+    expected = home / "Library/LaunchAgents/com.nexus.mcp.gateway.direct.plist"
+
+    assert g._derive_gateway_plist({}, home) == expected
+    assert g._derive_gateway_plist({"NEXUS_GATEWAY_PLIST": ""}, home) == expected
+    assert "jameschen" not in str(g._derive_gateway_plist({}, home))
+
+
+def test_1940_gateway_plist_env_override_wins(tmp_path):
+    override = tmp_path / "explicit.plist"
+
+    assert g._derive_gateway_plist({"NEXUS_GATEWAY_PLIST": str(override)}, tmp_path) == override
+
+
+def test_1940_gateway_plist_module_default_uses_path_home(monkeypatch, tmp_path):
+    import importlib.util
+
+    home = tmp_path / "m5-home"
+    monkeypatch.delenv("NEXUS_GATEWAY_PLIST", raising=False)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    spec = importlib.util.spec_from_file_location("_issue1940_manager_copy", g.__file__)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)
+    spec.loader.exec_module(module)
+
+    assert module.GATEWAY_PLIST == (
+        home / "Library/LaunchAgents/com.nexus.mcp.gateway.direct.plist"
+    )
+
+
+def _1940_forbid_recovery_progress(monkeypatch):
+    for name in ("GatewayLedger", "_production_recovery_adapters"):
+        monkeypatch.setattr(
+            g,
+            name,
+            lambda *_a, _n=name, **_k: pytest.fail(f"{_n} reached after refusal"),
+        )
+    real_run = g.subprocess.run
+
+    def guarded_run(command, *args, **kwargs):
+        if command and Path(str(command[0])).name == "launchctl":
+            pytest.fail("launchctl reached after refusal")
+        return real_run(command, *args, **kwargs)
+
+    monkeypatch.setattr(g.subprocess, "run", guarded_run)
+
+
+def test_1940_recover_live_plist_binding_mismatch_fails_before_any_effect(tmp_path, monkeypatch):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    assert fixture["receipt"].plist_path == str(g.GATEWAY_PLIST)
+    monkeypatch.delenv("XPC_SERVICE_NAME", raising=False)
+    monkeypatch.setattr(g, "GATEWAY_PLIST", tmp_path / "other-user.plist")
+    _1940_forbid_recovery_progress(monkeypatch)
+
+    with pytest.raises(g.GatewayContractError, match="plist binding mismatch"):
+        g._gateway_recover_live(fixture["request"])
+    assert not fixture["ledger_path"].exists()
+
+
+def test_1940_recover_live_interpreter_binding_mismatch_fails_before_any_effect(
+    tmp_path, monkeypatch
+):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    monkeypatch.delenv("XPC_SERVICE_NAME", raising=False)
+    monkeypatch.setattr(g, "_r1_interpreter_identity", lambda: object())
+    _1940_forbid_recovery_progress(monkeypatch)
+
+    with pytest.raises(g.GatewayContractError, match="interpreter binding mismatch"):
+        g._gateway_recover_live(fixture["request"])
+    assert not fixture["ledger_path"].exists()
+
+
+def test_1940_self_replacement_signals():
+    fake_main = SimpleNamespace(
+        __file__="/deployments/r1-" + "a" * 40 + "/scripts/ops/nexus_mcp_gateway_http.py"
+    )
+    other_main = SimpleNamespace(
+        __file__="/repo/scripts/ops/nexus_gateway_recovery_actuator_bootstrap.py"
+    )
+
+    assert g._r1_in_process_self_replacement_signals(
+        {"XPC_SERVICE_NAME": g.GATEWAY_LABEL}, other_main
+    ) == ("LAUNCHD_JOB_LABEL",)
+    assert g._r1_in_process_self_replacement_signals({}, fake_main) == (
+        "GATEWAY_ENTRYPOINT_PROCESS",
+    )
+    assert g._r1_in_process_self_replacement_signals({"XPC_SERVICE_NAME": "0"}, other_main) == ()
+    assert (
+        g._r1_in_process_self_replacement_signals(
+            {"XPC_SERVICE_NAME": "com.nexus.mcp.gateway"}, SimpleNamespace()
+        )
+        == ()
+    )
+
+
+@pytest.mark.parametrize("signal", ["launchd-label", "gateway-entrypoint"])
+def test_1940_recover_live_refuses_in_process_self_replacement_before_anything(monkeypatch, signal):
+    import types
+
+    if signal == "launchd-label":
+        monkeypatch.setenv("XPC_SERVICE_NAME", g.GATEWAY_LABEL)
+    else:
+        monkeypatch.delenv("XPC_SERVICE_NAME", raising=False)
+        fake_main = types.ModuleType("__main__")
+        fake_main.__file__ = "/x/scripts/ops/nexus_mcp_gateway_http.py"
+        monkeypatch.setitem(sys.modules, "__main__", fake_main)
+    monkeypatch.setattr(
+        g,
+        "_load_recovery_authority",
+        lambda *_a, **_k: pytest.fail("authority read after refusal"),
+    )
+    _1940_forbid_recovery_progress(monkeypatch)
+
+    with pytest.raises(
+        g.GatewayContractError, match="^R1_IN_PROCESS_SELF_REPLACEMENT_FORBIDDEN"
+    ) as excinfo:
+        g._gateway_recover_live({"request_id": "anything"})
+    assert "nexus_gateway_recovery_actuator_bootstrap.py" in str(excinfo.value)
+
+
+# --- #1958: no concurrent R1 request; atomic value-store CAS -----------------
+
+_R1958_UNCERTAIN_PATH = (
+    "REQUESTED",
+    "PREFLIGHTED",
+    "TARGET_READY",
+    "ROLLBACK_READY",
+    "EFFECT_STARTED",
+    "UNCERTAIN_EFFECT",
+)
+_R1958_VERIFIED_PATH = (
+    "REQUESTED",
+    "PREFLIGHTED",
+    "TARGET_READY",
+    "ROLLBACK_READY",
+    "EFFECT_STARTED",
+    "SERVICE_OBSERVED",
+    "IDENTITY_VERIFIED",
+    "CLIENT_BOUND",
+    "VERIFIED",
+)
+
+
+def _r1958_seed_other_request(fixture, ledger, request_id, states):
+    """Append another R1 generation through the real ledger write sink."""
+    other: Any = SimpleNamespace(
+        request_id=request_id,
+        request_hash=hashlib.sha256(request_id.encode()).hexdigest(),
+        operation=fixture["request"].operation,
+        effect_class=fixture["request"].effect_class,
+        idempotency_fence=f"{request_id}-fence",
+    )
+    evidence: Any = SimpleNamespace(evidence_hash="8" * 64)
+    with g.InterProcessLock(ledger.lock_path):
+        rows = ledger._scan_unlocked()
+        for state in states:
+            record = g._recovery_record(
+                rows, other, fixture["receipt"], evidence, g.DeploymentState(state)
+            )
+            ledger._append_recovery_unlocked(rows, record)
+            rows.append(record.model_dump())
+
+
+def _r1958_request_rows(ledger_path, request_id):
+    if not Path(ledger_path).exists():
+        return []
+    return [
+        row
+        for row in (json.loads(line) for line in Path(ledger_path).read_bytes().splitlines())
+        if row["request_id"] == request_id
+    ]
+
+
+def test_1958_terminal_states_are_derived_from_the_contract_state_machine():
+    from nexus.contracts.gateway_deployment import DeploymentState, transition
+
+    assert g.R1_TERMINAL_RECOVERY_STATES == {
+        DeploymentState.VERIFIED,
+        DeploymentState.ROLLED_BACK,
+        DeploymentState.BLOCKED,
+    }
+    for state in g.R1_TERMINAL_RECOVERY_STATES:
+        for successor in DeploymentState:
+            with pytest.raises(g.ContractError):
+                transition(state, successor)
+
+
+@pytest.mark.parametrize(
+    "other_states",
+    [
+        ("REQUESTED",),
+        ("REQUESTED", "PREFLIGHTED", "TARGET_READY", "ROLLBACK_UNAVAILABLE"),
+        _R1958_UNCERTAIN_PATH[:5],
+        _R1958_UNCERTAIN_PATH,
+    ],
+    ids=["requested", "rollback-unavailable", "effect-started", "uncertain-effect"],
+)
+def test_1958_manager_refuses_new_request_while_other_r1_is_non_terminal(
+    tmp_path, monkeypatch, other_states
+):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(fixture["ledger_path"], lock_path=fixture["lock_path"])
+    _r1958_seed_other_request(fixture, ledger, "gen1-request", other_states)
+    before = fixture["ledger_path"].read_bytes()
+    effect_calls = []
+    adapters = _r1b2_adapters(fixture, ledger, effect_calls=effect_calls)
+
+    with pytest.raises(
+        g.GatewayContractError, match="^R1_CONCURRENT_RECOVERY_FORBIDDEN: "
+    ) as excinfo:
+        g._gateway_recover_with_adapters(fixture["request"], adapters=adapters, ledger=ledger)
+
+    assert f"gen1-request={other_states[-1]}" in str(excinfo.value)
+    assert effect_calls == []
+    assert fixture["ledger_path"].read_bytes() == before
+    assert _r1958_request_rows(fixture["ledger_path"], fixture["request"].request_id) == []
+
+
+def test_1958_stdio_host_live_path_is_refused_by_the_manager_invariant(tmp_path, monkeypatch):
+    """F2: ``nexus_gateway_recover`` -> ``_gateway_recover_live`` skips the
+    bootstrap gates; the manager invariant must still refuse it."""
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(fixture["ledger_path"], lock_path=fixture["lock_path"])
+    _r1958_seed_other_request(fixture, ledger, "gen1-request", _R1958_UNCERTAIN_PATH)
+    before = fixture["ledger_path"].read_bytes()
+    effect_calls = []
+    adapters = _r1b2_adapters(fixture, ledger, effect_calls=effect_calls)
+    monkeypatch.setattr(g, "_production_recovery_adapters", lambda _receipt: adapters)
+    monkeypatch.setattr(g, "GatewayLedger", lambda: ledger)
+
+    with pytest.raises(g.GatewayContractError, match="^R1_CONCURRENT_RECOVERY_FORBIDDEN: "):
+        g._gateway_recover_live(fixture["request"])
+
+    assert effect_calls == []
+    assert fixture["ledger_path"].read_bytes() == before
+
+
+def test_1958_new_request_proceeds_when_every_prior_r1_is_terminal(tmp_path, monkeypatch):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(fixture["ledger_path"], lock_path=fixture["lock_path"])
+    _r1958_seed_other_request(fixture, ledger, "gen1-request", _R1958_VERIFIED_PATH)
+    _r1958_seed_other_request(fixture, ledger, "gen2-request", ("REQUESTED", "BLOCKED"))
+    _r1958_seed_other_request(
+        fixture,
+        ledger,
+        "gen3-request",
+        _R1958_UNCERTAIN_PATH + ("ROLLED_BACK",),
+    )
+    effect_calls = []
+    adapters = _r1b2_adapters(fixture, ledger, effect_calls=effect_calls)
+
+    outcome = g._gateway_recover_with_adapters(fixture["request"], adapters=adapters, ledger=ledger)
+
+    assert outcome.result == "VERIFIED"
+    assert len(effect_calls) == 1
+    assert (
+        _r1958_request_rows(fixture["ledger_path"], fixture["request"].request_id)[-1]["state"]
+        == "VERIFIED"
+    )
+
+
+def test_1958_same_request_reconcile_is_allowed_and_blocks_others_until_terminal(
+    tmp_path, monkeypatch
+):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(fixture["ledger_path"], lock_path=fixture["lock_path"])
+    _r1958_seed_other_request(fixture, ledger, "gen0-request", _R1958_VERIFIED_PATH)
+    effect_calls = []
+    lost = _r1b2_adapters(fixture, ledger, lost_ack=True, effect_calls=effect_calls)
+    first = g._gateway_recover_with_adapters(fixture["request"], adapters=lost, ledger=ledger)
+    assert first.result == "UNCERTAIN_EFFECT"
+
+    # While this request is UNCERTAIN_EFFECT no other generation may begin.
+    before = fixture["ledger_path"].read_bytes()
+    with pytest.raises(
+        g.GatewayContractError, match="^R1_CONCURRENT_RECOVERY_FORBIDDEN: "
+    ) as excinfo:
+        _r1958_seed_other_request(fixture, ledger, "gen2-request", ("REQUESTED",))
+    assert f"{fixture['request'].request_id}=UNCERTAIN_EFFECT" in str(excinfo.value)
+    assert fixture["ledger_path"].read_bytes() == before
+
+    # Reconciling the same request id is not a new request and is allowed.
+    recovered = _r1b2_adapters(fixture, ledger)
+    recovered = recovered.__class__(
+        observe=recovered.observe,
+        effect=lambda _plan: pytest.fail("reconcile must not re-apply the effect"),
+        postflight=recovered.postflight,
+        clock=recovered.clock,
+        crash_hook=recovered.crash_hook,
+    )
+    second = g._gateway_recover_with_adapters(fixture["request"], adapters=recovered, ledger=ledger)
+    assert second.result == "VERIFIED"
+    assert len(effect_calls) == 1
+
+    # Once terminal, the next generation may record REQUESTED.
+    _r1958_seed_other_request(fixture, ledger, "gen2-request", ("REQUESTED",))
+    assert [
+        row["state"] for row in _r1958_request_rows(fixture["ledger_path"], "gen2-request")
+    ] == ["REQUESTED"]
+
+
+def test_1958_requested_sink_rejects_stale_rows_snapshot(tmp_path, monkeypatch):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(fixture["ledger_path"], lock_path=fixture["lock_path"])
+    stale_rows: list = []
+    _r1958_seed_other_request(fixture, ledger, "gen1-request", _R1958_UNCERTAIN_PATH)
+    before = fixture["ledger_path"].read_bytes()
+    other: Any = SimpleNamespace(
+        request_id="gen2-request",
+        request_hash="c" * 64,
+        operation=fixture["request"].operation,
+        effect_class=fixture["request"].effect_class,
+        idempotency_fence="gen2-fence",
+    )
+    record = g._recovery_record(
+        stale_rows, other, fixture["receipt"], None, g.DeploymentState.REQUESTED
+    )
+    with pytest.raises(g.GatewayContractError, match="compare-and-swap conflict"):
+        ledger._append_recovery_unlocked(stale_rows, record)
+    assert fixture["ledger_path"].read_bytes() == before
+
+
+def _r1958_cas_worker(path, expected, target, replace_delay, barrier, results):
+    import tempfile as _tempfile
+
+    real_mkstemp = _tempfile.mkstemp
+    real_replace = os.replace
+
+    def slow_mkstemp(*args, **kwargs):
+        time.sleep(0.2)
+        return real_mkstemp(*args, **kwargs)
+
+    def slow_replace(src, dst):
+        time.sleep(replace_delay)
+        return real_replace(src, dst)
+
+    g.tempfile.mkstemp = slow_mkstemp
+    g.os.replace = slow_replace
+    barrier.wait(timeout=5)
+    try:
+        written = g._r1_replace_value_store_cas(Path(path), expected=expected, target=target)
+    except g.GatewayContractError as exc:
+        results.put(("error", type(exc).__name__, str(exc), target))
+    except BaseException as exc:  # pragma: no cover - reported to parent
+        results.put(("crash", type(exc).__name__, str(exc), target))
+    else:
+        results.put(("ok", "", written.decode(), target))
+
+
+@pytest.mark.filterwarnings("ignore:lance is not fork-safe")
+@pytest.mark.filterwarnings("ignore:This process .*multi-threaded.*:DeprecationWarning")
+def test_1958_two_process_marker_cas_race_has_exactly_one_winner(tmp_path, monkeypatch):
+    """F3: two real processes race the same CAS; one wins, one gets a typed
+    conflict, and the winner's history is never silently overwritten."""
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    marker = fixture["state"] / "recovery-actuator-bootstrap-consumed.json"
+    expected = json.dumps({"history": ["gen1"]}, sort_keys=True).encode()
+    marker.write_bytes(expected)
+    marker.chmod(0o600)
+    target_a = json.dumps({"history": ["gen1", "gen2-a"]}, sort_keys=True).encode()
+    target_b = json.dumps({"history": ["gen1", "gen2-b"]}, sort_keys=True).encode()
+
+    context = multiprocessing.get_context("fork")
+    barrier = context.Barrier(2)
+    results = context.Queue()
+    workers = [
+        context.Process(
+            target=_r1958_cas_worker,
+            args=(str(marker), expected, target, delay, barrier, results),
+        )
+        for target, delay in ((target_a, 0.0), (target_b, 0.4))
+    ]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=10)
+        assert worker.exitcode == 0
+    outcomes = [results.get(timeout=2) for _ in workers]
+
+    winners = [item for item in outcomes if item[0] == "ok"]
+    losers = [item for item in outcomes if item[0] != "ok"]
+    assert len(winners) == 1, outcomes
+    assert len(losers) == 1, outcomes
+    assert losers[0][:2] == ("error", "GatewayContractError")
+    assert "CAS conflict" in losers[0][2]
+    winner_target = winners[0][3]
+    assert marker.read_bytes() == winner_target
+    assert json.loads(marker.read_bytes())["history"][0] == "gen1"
+    assert sorted(p.name for p in marker.parent.glob(f".{marker.name}.*")) == []

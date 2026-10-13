@@ -5,15 +5,23 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import secrets
 import shutil
 import signal
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, Tuple
 
+from nexus.executors.exec_policy import (
+    assert_git_repo_config_safe,
+    git_target_directory,
+    is_git_executable,
+    validate_exec,
+)
 from nexus.services.agy_account_pool import GITHUB_CREDENTIAL_KEYS
 
 _logger = logging.getLogger(__name__)
@@ -25,40 +33,10 @@ class CliWorkerStatus(str, Enum):
     START_FAILED = "START_FAILED"
 
 
-_FORBIDDEN_SUBCOMMANDS = (
-    ("git", "commit"),
-    ("git", "merge"),
-    ("git", "push"),
-    ("git", "rebase"),
-    ("gh", "issue", "create"),
-    ("gh", "issue", "comment"),
-    ("gh", "issue", "close"),
-    ("gh", "issue", "edit"),
-    ("gh", "issue", "delete"),
-    ("gh", "issue", "lock"),
-    ("gh", "issue", "pin"),
-    ("gh", "issue", "reopen"),
-    ("gh", "issue", "unlock"),
-    ("gh", "issue", "unpin"),
-    ("gh", "issue", "transfer"),
-    ("gh", "pr", "create"),
-    ("gh", "pr", "comment"),
-    ("gh", "pr", "close"),
-    ("gh", "pr", "edit"),
-    ("gh", "pr", "lock"),
-    ("gh", "pr", "reopen"),
-    ("gh", "pr", "unlock"),
-    ("gh", "pr", "review"),
-    ("gh", "pr", "merge"),
-    ("gh", "pr", "ready"),
-    ("gh", "pr", "revert"),
-    ("gh", "pr", "update-branch"),
-    ("gh", "repo", "fork"),
-    ("gh", "api"),
-)
-
-_GLOBAL_FLAGS_WITH_VALUES = frozenset({"--config", "--hostname", "--repo", "-r", "-R"})
-
+# HOME stays inherited because model worker CLIs keep their own provider login
+# there; the GitHub credential channels (gh config dir, git global config and
+# its credential helper) are redirected per request instead. See
+# _isolated_github_credential_environment.
 _INHERITED_ENV_ALLOWLIST = frozenset({
     "HOME",
     "LANG",
@@ -107,31 +85,10 @@ def _resolve_executable(executable: str) -> str:
 
 
 def _validate_worker_argv(argv: Tuple[str, ...]) -> None:
+    """Thin wrapper kept for compatibility; policy lives in exec_policy."""
     if not argv:
         raise ValueError("argv must be non-empty")
-    normalized = tuple(str(item).strip().lower() for item in argv)
-    # Ignore global options and their values (e.g. `gh --repo org/repo issue
-    # comment`) before matching a forbidden verb sequence.  Options after the
-    # verb are naturally irrelevant because the verb sequence has already
-    # matched.
-    filtered_items = []
-    index = 0
-    while index < len(normalized):
-        item = normalized[index]
-        if item.startswith("-"):
-            if "=" not in item and item in _GLOBAL_FLAGS_WITH_VALUES:
-                index += 2
-            else:
-                index += 1
-            continue
-        filtered_items.append(item)
-        index += 1
-    filtered = tuple(filtered_items)
-    for block in _FORBIDDEN_SUBCOMMANDS:
-        block_tuple = tuple(block)
-        for index in range(len(filtered) - len(block_tuple) + 1):
-            if filtered[index : index + len(block_tuple)] == block_tuple:
-                raise ValueError(f"worker command cannot invoke {' '.join(block)}")
+    validate_exec(argv[0], argv[1:])
 
 
 # GitHub credentials (GH_TOKEN / GITHUB_TOKEN / GITHUB_PAT / ...) must never
@@ -151,6 +108,31 @@ def _reject_github_credentials(environment: Optional[Mapping[str, str]]) -> None
         raise ValueError(
             "worker environment cannot carry GitHub credentials: " + ", ".join(present)
         )
+
+
+_POST_KILL_DRAIN_SECONDS = 2.0
+
+
+def _isolated_github_credential_environment(
+    config_root: str, supplied: Optional[Mapping[str, str]]
+) -> dict[str, str]:
+    """Point GitHub credential lookups at an empty per-request directory.
+
+    gh reads ``GH_CONFIG_DIR`` and git only reaches ``~/.git-credentials`` through
+    a credential helper configured in global/system config, so both channels are
+    cut without moving the worker's own provider login out of ``HOME``. Keys
+    explicitly supplied through ``request.env`` (already GitHub-credential
+    checked) win.
+    """
+    isolated = {
+        "GH_CONFIG_DIR": os.path.join(config_root, "gh"),
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
+    for key in supplied or ():
+        isolated.pop(str(key), None)
+    return isolated
 
 
 def _hash_file(path: str) -> str:
@@ -199,7 +181,7 @@ class CliWorkerRequest:
     def __post_init__(self) -> None:
         object.__setattr__(self, "executable", _resolve_executable(self.executable))
         object.__setattr__(self, "argv", tuple(str(item) for item in self.argv))
-        _validate_worker_argv((Path(self.executable).name, *self.argv))
+        validate_exec(self.executable, self.argv)
         target_cwd = Path(self.cwd).expanduser().resolve(strict=False)
         if not target_cwd.is_dir():
             raise ValueError("cwd must be an existing directory")
@@ -248,6 +230,62 @@ def _kill_process_group(process: subprocess.Popen[bytes]) -> bool:
         os.killpg(process.pid, signal.SIGKILL)
         return True
     except ProcessLookupError:
+        return False
+
+
+_RUN_TAG_ENV = "NEXUS_CLI_WORKER_RUN_TAG"
+_SWEEP_DEADLINE_SECONDS = 2.0
+
+
+def _tagged_pids(tag: str) -> set[int]:
+    """PIDs (other than ours) whose environment carries ``tag``."""
+    own = os.getpid()
+    needle = f"{_RUN_TAG_ENV}={tag}"
+    found: set[int] = set()
+    proc = Path("/proc")
+    if proc.is_dir() and (proc / "self" / "environ").exists():
+        needle_bytes = needle.encode()
+        for entry in proc.iterdir():
+            if not entry.name.isdigit() or int(entry.name) == own:
+                continue
+            try:
+                if needle_bytes in (entry / "environ").read_bytes():
+                    found.add(int(entry.name))
+            except OSError:
+                continue
+        return found
+    out = subprocess.run(
+        ["ps", "-axww", "-E", "-o", "pid=,command="],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=True,
+    ).stdout
+    for line in out.splitlines():
+        parts = line.split(None, 1)
+        if len(parts) == 2 and parts[0].isdigit() and int(parts[0]) != own and needle in parts[1]:
+            found.add(int(parts[0]))
+    return found
+
+
+def _sweep_tagged_processes(tag: str) -> bool:
+    """SIGKILL processes carrying the run tag; True only when none survive."""
+    try:
+        deadline = time.monotonic() + _SWEEP_DEADLINE_SECONDS
+        while True:
+            pids = _tagged_pids(tag)
+            if not pids:
+                return True
+            for pid in pids:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+            if time.monotonic() >= deadline:
+                return not _tagged_pids(tag)
+            time.sleep(0.1)
+    except Exception as exc:  # noqa: BLE001
+        _logger.debug("timeout sweep failed (treated as not clean): %s", exc)
         return False
 
 
@@ -366,6 +404,24 @@ def run_cli_worker(
     if request.env is not None:
         environment.update({str(key): str(value) for key, value in request.env.items()})
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    run_tag = secrets.token_hex(16)
+    environment[_RUN_TAG_ENV] = run_tag
+    isolated_home = tempfile.mkdtemp(prefix="nexus-cli-worker-home-")
+    for key, value in _isolated_github_credential_environment(isolated_home, request.env).items():
+        environment[key] = value
+
+    if is_git_executable(request.executable):
+        # Global/system config is neutralised above, but the target repository's
+        # own config and .gitattributes would still run repo-defined programs.
+        try:
+            assert_git_repo_config_safe(
+                git_target_directory(request.argv, request.cwd),
+                environment,
+                request.executable,
+            )
+        except ValueError:
+            shutil.rmtree(isolated_home, ignore_errors=True)
+            raise
 
     # ------------------------------------------------------------------
     # Passive trajectory telemetry seam (pre-Popen)
@@ -400,7 +456,30 @@ def run_cli_worker(
             status = CliWorkerStatus.COMPLETED
         except subprocess.TimeoutExpired as exc:
             group_killed = _kill_process_group(process)
-            stdout, stderr = process.communicate()
+            # Descendants that called setsid() left the group; find them by the
+            # per-run tag in their environment and kill them too.  A receipt may
+            # only claim a clean kill when no tagged process survives.
+            if not _sweep_tagged_processes(run_tag):
+                group_killed = False
+            try:
+                stdout, stderr = process.communicate(timeout=_POST_KILL_DRAIN_SECONDS)
+            except subprocess.TimeoutExpired as drain_exc:
+                # A descendant escaped the process group (setsid) and still
+                # holds the pipes: do not block the controller, and record the
+                # kill as not clean.
+                group_killed = False
+                stdout = drain_exc.stdout or b""
+                stderr = drain_exc.stderr or b""
+                for pipe in (process.stdout, process.stderr):
+                    try:
+                        if pipe is not None:
+                            pipe.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+                try:
+                    process.wait(timeout=_POST_KILL_DRAIN_SECONDS)
+                except subprocess.TimeoutExpired:
+                    pass
             if exc.stdout:
                 stdout = (exc.stdout or b"") + stdout
             if exc.stderr:
@@ -420,6 +499,7 @@ def run_cli_worker(
     finally:
         if on_process_group is not None:
             on_process_group(None)
+        shutil.rmtree(isolated_home, ignore_errors=True)
 
     wall_time_ms = max(0, int((time.monotonic() - started) * 1000))
     result = CliWorkerResult(

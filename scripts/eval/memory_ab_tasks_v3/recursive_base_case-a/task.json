@@ -1,0 +1,8 @@
+{
+  "id": "recursive_base_case-a",
+  "bug_class": "recursive_base_case",
+  "variant": "a",
+  "problem_statement": "deep_sum([]) raises IndexError, and deep_sum((4, [5])) returns 0 for a tuple that holds numbers. Expected: lists and tuples are summed the same way, while None and empty containers add 0.",
+  "target_file": "tally.py",
+  "repro_file": "repro.py"
+}

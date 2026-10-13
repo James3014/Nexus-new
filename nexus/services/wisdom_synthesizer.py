@@ -38,7 +38,7 @@ class WisdomSynthesizer:
         with open(template_path, "w") as f:
             json.dump(template_data, f, indent=2, ensure_ascii=False)
         
-        print(f"💎 [Wisdom] New template synthesized: {template_path}")
+        print(f"[Wisdom] Template written locally from an UNVERIFIED spec heuristic score: {template_path}")
         return template_path
 
     def log_learning_event(self, task_id: str, category: str, outcome: str, metadata: dict):

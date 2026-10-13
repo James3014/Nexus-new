@@ -398,7 +398,9 @@ def test_git_error_fails_closed(tmp_path: Path) -> None:
 
 def test_workflow_enforces_continuous_repository_coverage() -> None:
     workflow = Path(".github/workflows/git-history-secret-audit.yml").read_text(encoding="utf-8")
-    pull_request_block = workflow.split("  pull_request:\n", 1)[1].split("  push:\n", 1)[0]
+    assert "  pull_request:\n" not in workflow
+    assert "  pull_request_target:\n" in workflow
+    pull_request_block = workflow.split("  pull_request_target:\n", 1)[1].split("  push:\n", 1)[0]
     assert "branches: [main]" in pull_request_block
     assert "paths:" not in pull_request_block
     assert "  push:\n    branches: [main]\n" in workflow
@@ -417,3 +419,13 @@ def test_workflow_preserves_least_privilege_and_immutable_actions() -> None:
         ref = line.split("@", 1)[1].split()[0]
         assert len(ref) == 40
         assert all(char in "0123456789abcdef" for char in ref)
+
+
+def test_anthropic_api_key_is_blocking(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    anthropic_token = "sk-" + "ant-api03-" + "Q7x9mN2pR4sT6vW8yZ1aB3cD5eF7gH9jK2L_x-Yz"
+    _commit(repo, "add key", {"cfg.txt": f"ANTHROPIC={anthropic_token}\n"})
+    _refresh_remote_ref(repo, "main", _git(repo, "rev-parse", "HEAD").stdout.strip())
+    receipt = scan_repository(repo)
+    assert receipt["status"] == "FAIL"
+    assert any(f["blocking"] for f in receipt["findings"])

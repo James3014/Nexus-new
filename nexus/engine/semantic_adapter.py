@@ -1,14 +1,35 @@
-from typing import Optional, Tuple
-from nexus.engine.governance_bridge import GovernanceBridge
+from typing import Tuple
+
+from nexus.contracts.model_output_json import (
+    ModelOutputParseError,
+    ModelOutputShapeError,
+    parse_model_json,
+    parse_model_json_object,
+)
 from nexus.engine.capability_contracts import FlowState
+from nexus.engine.governance_bridge import GovernanceBridge
+
+# Model-output JSON parsing lives in nexus.contracts (importable from core);
+# re-exported here so engine callers keep a single SemanticAdapter entry point.
+__all__ = [
+    "ModelOutputParseError",
+    "ModelOutputShapeError",
+    "SemanticAdapter",
+    "parse_model_json",
+    "parse_model_json_object",
+]
+
 
 class SemanticAdapter:
     """
     [NEXUS v26] Semantic Adapter (Hybrid Governance 2.0)
     負責接收模型的字串輸出，呼叫 Rust Normalizer，若不合規一律回退至 ESCALATE。
     """
+
     def __init__(self):
         self.bridge = GovernanceBridge()
+
+    parse_json_object = staticmethod(parse_model_json_object)
 
     _ROUTE_CODES = {
         "0": "LOCAL",
@@ -42,11 +63,11 @@ class SemanticAdapter:
         如果模型吐出自然語言或格式錯誤，Rust 將回傳 None，這裡直接捕捉並 Escalation。
         """
         normalized = self.bridge.normalize_intent(raw_output)
-        
+
         if normalized is None:
             # 觸發 Fail-Closed 安全網：模型格式錯誤，不允許推進
             return ("LARGE", "STOP", FlowState.ESCALATE, "LOW")
-            
+
         route_raw, decision_raw, phase_raw, confidence_raw = normalized
         route_str = self._decode_label(route_raw, self._ROUTE_CODES, "LARGE")
         decision_str = self._decode_label(decision_raw, self._DECISION_CODES, "STOP")
@@ -68,11 +89,12 @@ class SemanticAdapter:
 
         return (route_str, decision_str, phase, confidence_str)
 
+
 if __name__ == "__main__":
     adapter = SemanticAdapter()
-    
+
     # 測試合法輸入
     print("Valid:", adapter.process_model_output("r:0,d:0,p:1,c:0"))
-    
+
     # 測試非法輸入 (回聲效應/自然語言)
     print("Invalid:", adapter.process_model_output("I think we should proceed to Phase R"))

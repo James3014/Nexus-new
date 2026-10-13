@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 import os
 import subprocess
@@ -165,6 +166,10 @@ class _Worker:
 
     def invoke(self, provider, contract, lease, **kwargs):
         task_id = getattr(contract, "task_id", None)
+        state = {}
+        attempt_id = ""
+        trajectory_root = None
+        trajectory_ref = None
         if task_id:
             state = self.service._read_state(task_id) or {}
             attempt_id = str(state.get("attempt_id") or "")
@@ -177,7 +182,124 @@ class _Worker:
                     contract, request, lease, state, task_id=task_id, attempt_id=attempt_id
                 )
                 self.service._mutate_state(task_id, lambda s: s.update({"host_preparation": prep}))
-        return self.service.worker_registry.invoke(provider, contract, lease, **kwargs)
+
+            # Passive Track-1 trajectory capture for the already-selected worker.
+            # Correlation is derived from task/attempt/provider, so this sidecar
+            # never mutates lifecycle state. Any telemetry failure is fail-open.
+            try:
+                from nexus.research.clm_system_one.research_evidence_root import (
+                    explicit_research_evidence_root_configured,
+                )
+
+                if not explicit_research_evidence_root_configured():
+                    raise RuntimeError("shared Track-1 evidence root is not configured")
+
+                from nexus.research.clm_system_one.trajectory_continuity import (
+                    bind_trajectory_step_result,
+                    resolve_research_evidence_root,
+                    seal_trajectory_step,
+                    self_hosted_worker_trajectory_id,
+                )
+
+                repo_root = str(
+                    getattr(contract, "controller_repo_root", "")
+                    or getattr(contract, "target_repo_root", "")
+                )
+                source_revision = str(
+                    getattr(contract, "target_base_revision", "")
+                    or getattr(contract, "controller_revision", "")
+                )
+                trajectory_root = resolve_research_evidence_root(repo_root)
+                prompt = str(kwargs.get("prompt") or "")
+                envelope = state.get("canonical_dispatch_envelope")
+                envelope = envelope if isinstance(envelope, Mapping) else {}
+                selected_model = str(
+                    kwargs.get("model")
+                    or state.get("selected_model")
+                    or envelope.get("model")
+                    or ""
+                )
+                trajectory_id = self_hosted_worker_trajectory_id(
+                    task_id=str(task_id),
+                    attempt_id=attempt_id,
+                    provider=str(provider),
+                )
+                trajectory_ref = seal_trajectory_step(
+                    evidence_root=trajectory_root,
+                    task_id=str(task_id),
+                    trajectory_id=trajectory_id,
+                    attempt_id=attempt_id,
+                    candidate_id=None,
+                    step_index=0,
+                    source_revision=source_revision,
+                    base_source_revision=source_revision,
+                    pre_action_state={
+                        "task_objective": str(getattr(contract, "objective", "") or ""),
+                        "target_base_revision": source_revision,
+                        "allowed_files": list(getattr(contract, "allowed_files", ()) or ()),
+                        "verifier_command_sha256": [
+                            hashlib.sha256(str(command).encode("utf-8")).hexdigest()
+                            for command in (getattr(contract, "verifier_commands", ()) or ())
+                        ],
+                        "provider": str(provider),
+                        "model": selected_model,
+                    },
+                    action_type="self_hosted_worker_invoke",
+                    action_payload={
+                        "provider": str(provider),
+                        "model": selected_model,
+                        "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+                        "prompt_chars": len(prompt),
+                        "target_worktree_sha256": hashlib.sha256(
+                            str(getattr(lease, "target_worktree", "")).encode("utf-8")
+                        ).hexdigest(),
+                    },
+                )
+            except Exception:
+                trajectory_root = None
+                trajectory_ref = None
+
+        try:
+            receipt = self.service.worker_registry.invoke(provider, contract, lease, **kwargs)
+        except Exception as exc:
+            if trajectory_root is not None and trajectory_ref is not None:
+                try:
+                    bind_trajectory_step_result(
+                        evidence_root=trajectory_root,
+                        step_ref=trajectory_ref,
+                        action_result={
+                            "response_type": "Exception",
+                            "exception_type": type(exc).__name__,
+                            "provider": str(provider),
+                        },
+                    )
+                except Exception:
+                    pass
+            raise
+
+        if trajectory_root is not None and trajectory_ref is not None:
+            try:
+                bind_trajectory_step_result(
+                    evidence_root=trajectory_root,
+                    step_ref=trajectory_ref,
+                    action_result={
+                        "provider": str(getattr(receipt, "provider", provider) or provider),
+                        "worker_status": str(getattr(receipt, "worker_status", "") or ""),
+                        "outcome": str(getattr(receipt, "outcome", "") or ""),
+                        "exit_code": getattr(receipt, "exit_code", None),
+                        "stdout_sha256": str(getattr(receipt, "stdout_sha256", "") or ""),
+                        "stderr_sha256": str(getattr(receipt, "stderr_sha256", "") or ""),
+                        "wall_time_ms": int(getattr(receipt, "wall_time_ms", 0) or 0),
+                        "provider_calls": int(getattr(receipt, "provider_calls", 0) or 0),
+                        "provider_attempt_count": int(
+                            getattr(receipt, "provider_attempt_count", 0) or 0
+                        ),
+                        "evidence_complete": bool(getattr(receipt, "evidence_complete", False)),
+                    },
+                )
+            except Exception:
+                pass
+        return receipt
 
 
 class _Target:
@@ -333,59 +455,26 @@ class RuntimeCoordinationBridge:
         self.service = service
 
     def _coordinator(self, task_id, attempt_id, *, request=None, update=None):
+        # Nexus-new pins one exact nexus-runtime, whose ExecutionCoordinator always
+        # takes the preparation port and the model-call gate; no version sniffing.
         processes = _Processes()
         processes.service = self.service
         finalization = _Finalization(
             self.service, update=update, task_id=task_id, attempt_id=attempt_id
         )
-        args = [
+        return ExecutionCoordinator(
             _State(self.service, request=request, update=update),
             _Contract(self.service),
             _Worker(self.service),
             _Target(self.service),
             processes,
             finalization,
-        ]
-        sig = inspect.signature(ExecutionCoordinator.__init__)
-        has_var_positional = any(
-            p.kind == inspect.Parameter.VAR_POSITIONAL for p in sig.parameters.values()
+            preparation=_Preparation(self.service),
+            model_call_gate=_WorkerInvocationModelCallGate(),
         )
-        if "preparation" in sig.parameters or len(sig.parameters) > 7 or has_var_positional:
-            args.append(_Preparation(self.service))
-        if "model_call_gate" in sig.parameters:
-            return ExecutionCoordinator(
-                *args,
-                model_call_gate=_WorkerInvocationModelCallGate(),
-            )
-        return ExecutionCoordinator(*args)
-
-    def _ensure_preparation_compat(self, task_id, attempt_id, *, request=None):
-        sig = inspect.signature(ExecutionCoordinator.__init__)
-        has_var_positional = any(
-            p.kind == inspect.Parameter.VAR_POSITIONAL for p in sig.parameters.values()
-        )
-        if "preparation" in sig.parameters or len(sig.parameters) > 7 or has_var_positional:
-            return
-        state = self.service._read_state(task_id) or {}
-        req = request or state.get("request") or {}
-        if not state.get("lease"):
-            return
-        try:
-            contract = self.service._contract_from_state(state)
-        except Exception:
-            return
-        if not self.service._ambient_core_required(contract, req):
-            return
-        if not state.get("host_preparation"):
-            lease = self.service._lease_from_state(state)
-            prep = self.service._prepare_ambient_core(
-                contract, req, lease, state, task_id=task_id, attempt_id=attempt_id
-            )
-            self.service._mutate_state(task_id, lambda s: s.update({"host_preparation": prep}))
 
     def run_owned_attempt(self, task_id, attempt_id, custom_runner=None):
         self.service._bridge_validate_claim(task_id, attempt_id, operation="RUN_OWNED_ATTEMPT")
-        self._ensure_preparation_compat(task_id, attempt_id)
         return self._coordinator(task_id, attempt_id).run_owned_attempt(
             task_id, attempt_id, custom_runner
         )
@@ -401,7 +490,6 @@ class RuntimeCoordinationBridge:
 
     def execute(self, task_id, attempt_id, *, contract=None, request=None, update=None):
         self.service._bridge_validate_claim(task_id, attempt_id, operation="EXECUTE")
-        self._ensure_preparation_compat(task_id, attempt_id, request=request)
         return self._coordinator(
             task_id, attempt_id, request=request, update=update
         ).execute_attempt(task_id, attempt_id, contract=contract, request=request)

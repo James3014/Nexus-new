@@ -57,6 +57,18 @@ uv run ruff check $(git diff --name-only --diff-filter=ACMR HEAD~1...HEAD -- '*.
 
 ---
 
+## Golden Behavior corpus: two-stage change rule
+
+The trusted Golden check loads the PR's `tests/golden_behavior/corpus.py` but
+evaluates it with the **base-branch** evaluator (`scripts/ops/run_golden_behavior_eval.py`).
+A corpus that uses a probe id, field value or class the base evaluator does not
+know yet is rejected (`unknown_finding_probe`, `unclassified_finding_probe`,
+`invalid_classification`, ...), followed by the hint
+`EVALUATOR_GENERATION_MISMATCH: land evaluator changes first; bind in a follow-up PR`.
+
+Rule: land the evaluator change first (its own PR, no corpus change), then bind
+the corpus to it in a follow-up PR. Never combine both in one PR.
+
 ## ⚠️ Forbidden Actions
 - **Direct Push to main**: Avoid using workflows that automatically commit to `main`. Use artifacts instead.
 - **Staging `.tmp_build`**: This directory is for internal build state and must never be committed.

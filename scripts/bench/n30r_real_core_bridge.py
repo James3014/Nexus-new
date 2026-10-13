@@ -111,8 +111,9 @@ def invoke_capability_planner(
     task_spec: N30RTaskSpec,
     source_code: str,
 ) -> dict[str, Any]:
+    from nexus.core.repo_root import REPO_ROOT
     from nexus.engine.capability_planner import CapabilityPlanner
-    planner = CapabilityPlanner()
+    planner = CapabilityPlanner(shared_playbook_root=REPO_ROOT)
     route = {
         "task_id": task_spec.task_id,
         "task_desc": task_spec.task_statement,

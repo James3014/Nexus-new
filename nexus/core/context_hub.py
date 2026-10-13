@@ -17,6 +17,7 @@ from nexus.core.context_text_store import ContextTextStore
 from nexus.core.context_view import ContextDependencies, StateView
 from nexus.core.state_contracts import NexusState
 from nexus.core.state_io import StateIO
+from nexus.services.lancedb_roots import KNOWLEDGE, resolve_lancedb_root
 from nexus.services.memory import MemoryService
 
 logger = logging.getLogger("nexus.context_hub")
@@ -76,7 +77,7 @@ class ContextHub:
             try:
                 from nexus.research.wisdom.wisdom_vault import WisdomVault
 
-                db_path = str(self.project_root / ".nexus" / "knowledge" / "lancedb")
+                db_path = str(resolve_lancedb_root(KNOWLEDGE, self.project_root, honor_env=False))
                 self.wisdom_vault = WisdomVault(db_path=db_path)
             except Exception as e:
                 logger.warning(f"⚠️ [ContextHub] WisdomVault auto-injection skipped: {e}")

@@ -1,4 +1,5 @@
 import hashlib
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -188,12 +189,14 @@ def _authorized_verifier_state(tmp_path: Path):
             "canonical_branch": branch,
             "canonical_root": str(repo),
             "cleanup_requested": False,
+            "acceptance_receipt_hash": "9" * 64,
+            "reviewer_id": "reviewer-1",
             "action_set": [
                 "INTEGRATION_STAGING",
                 "APPLY_VERIFIED_INTEGRATION",
             ],
         },
-        "external_acceptance": {"passed": True},
+        "external_acceptance": _bound_acceptance("integration-identity", candidate),
         "verified_receipt": {"verifier_evidence": [evidence]},
         "lease": {"target_branch": "candidate"},
     }
@@ -338,6 +341,31 @@ def test_staging_verifier_failure_exposes_digests_not_raw_output(
     assert _git(repo, "rev-parse", branch) == base
 
 
+def _bound_acceptance(task_id, candidate):
+    return {
+        "schema": "nexus.external_acceptance_receipt.v1",
+        "task_id": task_id,
+        "attempt_id": "attempt-1",
+        "candidate_commit": candidate,
+        "receipt_hash": "9" * 64,
+        "reviewer_id": "reviewer-1",
+        "passed": True,
+        "verifier_artifact": "artifact-1",
+    }
+
+
+def _bound_grant(task_id, action="CANDIDATE_APPROVE"):
+    return {
+        "schema": "nexus.approval.v2",
+        "approval_id": "grant",
+        "approved_by": "owner",
+        "approval_scope": "ALLOW_ACTION_ONCE",
+        "bound_task_id": task_id,
+        "bound_action_type": action,
+        "consumed_at": "2026-10-12T00:00:00+00:00",
+    }
+
+
 def _candidate_state(repo: Path, base: str, candidate: str, tree: str):
     executable = Path(sys.executable)
     command = f"{executable} -c 'print(\"integration-pass\")'"
@@ -376,6 +404,20 @@ def _candidate_state(repo: Path, base: str, candidate: str, tree: str):
     state["integration_verifier_manifest"] = list(
         ControlledIntegrationManager._admitted_manifest(state, state["contract"])
     )
+    state["verified_receipt"]["verified"] = True
+    state["approved_binding"]["approval_grant"] = _bound_grant("integration-task")
+    state["external_acceptance"] = _bound_acceptance("integration-task", candidate)
+    return _bind_verified_receipt(state)
+
+
+def _bind_verified_receipt(state):
+    receipt_hash = hashlib.sha256(
+        json.dumps(
+            state["verified_receipt"], sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
+    ).hexdigest()
+    state["promotion_packet"]["verified_receipt_hash"] = receipt_hash
+    state["approved_binding"]["verified_receipt_hash"] = receipt_hash
     return state
 
 
@@ -487,6 +529,7 @@ def test_controlled_integration_rolls_back_failed_verifier(tmp_path):
     state["integration_verifier_manifest"] = list(
         ControlledIntegrationManager._admitted_manifest(state, state["contract"])
     )
+    _bind_verified_receipt(state)
 
     with pytest.raises(RuntimeError, match="staging verifier failed"):
         ControlledIntegrationManager(integration_root=tmp_path / "integrations").integrate_task_state(
@@ -495,3 +538,208 @@ def test_controlled_integration_rolls_back_failed_verifier(tmp_path):
 
     assert _git(repo, "rev-parse", "nexus/integration/test") == base
     assert not (tmp_path / "integrations" / "integration-task").exists()
+
+
+def _authorized_candidate_repo(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.name", "Test")
+    _git(repo, "config", "user.email", "test@example.com")
+    (repo / "README").write_text("base\n")
+    _git(repo, "add", "README")
+    _git(repo, "commit", "-m", "base")
+    base = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "branch", "nexus/integration", base)
+    _git(repo, "branch", "nexus/task/integration-task", base)
+    target = tmp_path / "target"
+    _git(repo, "worktree", "add", str(target), "nexus/task/integration-task")
+    (target / "change.txt").write_text("candidate\n")
+    _git(target, "add", "change.txt")
+    _git(target, "commit", "-m", "candidate")
+    candidate = _git(target, "rev-parse", "HEAD")
+    tree = _git(target, "rev-parse", "HEAD^{tree}")
+    return repo, base, _candidate_state(repo, base, candidate, tree)
+
+
+@pytest.mark.parametrize(
+    ("tamper", "message"),
+    [
+        (lambda state: state.pop("external_acceptance"), "external acceptance"),
+        (lambda state: state["approved_binding"].pop("approval_grant"), "consumed approval grant"),
+        (lambda state: state["verified_receipt"].update(verified=False), "verified candidate receipt"),
+        (
+            lambda state: state["verified_receipt"].update(extra="tampered"),
+            "verified receipt hash",
+        ),
+    ],
+)
+def test_controlled_integration_requires_authority_at_sink(tmp_path, tamper, message):
+    repo, base, state = _authorized_candidate_repo(tmp_path)
+    tamper(state)
+
+    with pytest.raises(RuntimeError, match=message):
+        ControlledIntegrationManager(integration_root=tmp_path / "integrations").integrate_task_state(
+            state
+        )
+
+    assert _git(repo, "rev-parse", "nexus/integration") == base
+
+
+def _assert_sink_rejects(tmp_path, mutate, message):
+    repo, base, state = _authorized_candidate_repo(tmp_path)
+    mutate(state)
+    with pytest.raises(RuntimeError, match=message):
+        ControlledIntegrationManager(
+            integration_root=tmp_path / "integrations"
+        ).integrate_task_state(state)
+    assert _git(repo, "rev-parse", "nexus/integration") == base
+
+
+def test_sink_rejects_acceptance_for_another_task(tmp_path):
+    def mutate(state):
+        state["external_acceptance"]["task_id"] = "other-task"
+
+    _assert_sink_rejects(tmp_path, mutate, "external acceptance is not bound")
+
+
+def test_sink_rejects_acceptance_for_another_candidate(tmp_path):
+    def mutate(state):
+        state["external_acceptance"]["candidate_commit"] = "0" * 40
+
+    _assert_sink_rejects(tmp_path, mutate, "external acceptance is not bound")
+
+
+def test_sink_rejects_acceptance_without_receipt_hash(tmp_path):
+    def mutate(state):
+        state["external_acceptance"] = {"passed": True}
+
+    _assert_sink_rejects(tmp_path, mutate, "external acceptance is not bound")
+
+
+def test_sink_rejects_identityless_grant_and_wrong_task_acceptance(tmp_path):
+    def mutate(state):
+        state["external_acceptance"] = {
+            "passed": True,
+            "task_id": "other-task",
+            "candidate_commit": "0" * 40,
+        }
+        state["approved_binding"]["approval_grant"] = {"consumed_at": "x"}
+
+    _assert_sink_rejects(tmp_path, mutate, "external acceptance is not bound")
+
+
+def test_sink_rejects_grant_without_approver(tmp_path):
+    def mutate(state):
+        state["approved_binding"]["approval_grant"].pop("approved_by")
+
+    _assert_sink_rejects(tmp_path, mutate, "approval grant is not bound")
+
+
+def test_sink_rejects_shape_only_consumed_grant(tmp_path):
+    def mutate(state):
+        state["approved_binding"]["approval_grant"] = {"consumed_at": "x"}
+
+    _assert_sink_rejects(tmp_path, mutate, "approval grant is not bound")
+
+
+def test_sink_rejects_grant_bound_to_another_task(tmp_path):
+    def mutate(state):
+        state["approved_binding"]["approval_grant"]["bound_task_id"] = "other-task"
+
+    _assert_sink_rejects(tmp_path, mutate, "approval grant is not bound")
+
+
+def test_sink_rejects_grant_bound_to_another_action(tmp_path):
+    def mutate(state):
+        state["approved_binding"]["approval_grant"]["bound_action_type"] = "CANDIDATE_INTEGRATE"
+
+    _assert_sink_rejects(tmp_path, mutate, "approval grant is not bound")
+
+
+def test_sink_integration_grant_must_bind_integrate_action(tmp_path):
+    def mutate(state):
+        state["integration_approval_grant"] = _bound_grant("integration-task", "CANDIDATE_APPROVE")
+
+    _assert_sink_rejects(tmp_path, mutate, "approval grant is not bound")
+
+
+def test_sink_accepts_fully_bound_flow_with_integrate_grant(tmp_path):
+    repo, base, state = _authorized_candidate_repo(tmp_path)
+    state["integration_approval_grant"] = _bound_grant("integration-task", "CANDIDATE_INTEGRATE")
+    receipt = ControlledIntegrationManager(
+        integration_root=tmp_path / "integrations"
+    ).integrate_task_state(state)
+    assert receipt.verifier_passed
+    assert _git(repo, "rev-parse", "nexus/integration") != base
+
+
+def test_authorized_integration_rejects_acceptance_not_bound_to_candidate(tmp_path):
+    repo, base, _, branch, _, state = _authorized_verifier_state(tmp_path)
+    state["external_acceptance"]["candidate_commit"] = "0" * 40
+    with pytest.raises(RuntimeError, match="external acceptance is not bound"):
+        ControlledIntegrationManager(
+            integration_root=tmp_path / "integrations"
+        ).integrate_authorized_task_state(
+            state, integration_branch=branch, staging_root=tmp_path / "staging"
+        )
+    assert _git(repo, "rev-parse", branch) == base
+
+
+def test_authorized_integration_rejects_acceptance_for_another_task(tmp_path):
+    repo, base, _, branch, _, state = _authorized_verifier_state(tmp_path)
+    state["external_acceptance"]["task_id"] = "other-task"
+    with pytest.raises(RuntimeError, match="external acceptance is not bound"):
+        ControlledIntegrationManager(
+            integration_root=tmp_path / "integrations"
+        ).integrate_authorized_task_state(
+            state, integration_branch=branch, staging_root=tmp_path / "staging"
+        )
+    assert _git(repo, "rev-parse", branch) == base
+
+
+def test_sink_rejects_grant_without_attempt_when_state_has_attempt(tmp_path):
+    def mutate(state):
+        state["attempt_id"] = "attempt-9"
+        state["external_acceptance"]["attempt_id"] = "attempt-9"
+
+    _assert_sink_rejects(tmp_path, mutate, "approval grant is not bound")
+
+
+def test_sink_accepts_grant_with_matching_attempt(tmp_path):
+    repo, base, state = _authorized_candidate_repo(tmp_path)
+    state["attempt_id"] = "attempt-9"
+    state["external_acceptance"]["attempt_id"] = "attempt-9"
+    state["approved_binding"]["approval_grant"]["bound_attempt_id"] = "attempt-9"
+    receipt = ControlledIntegrationManager(
+        integration_root=tmp_path / "integrations"
+    ).integrate_task_state(state)
+    assert receipt.verifier_passed
+
+
+@pytest.mark.parametrize("drop", ["schema", "reviewer_id", "verifier_artifact"])
+def test_sink_rejects_acceptance_failing_receipt_model(tmp_path, drop):
+    def mutate(state):
+        state["external_acceptance"].pop(drop)
+
+    _assert_sink_rejects(tmp_path, mutate, "external acceptance is not bound")
+
+
+def test_sink_rejects_acceptance_with_malformed_receipt_hash(tmp_path):
+    def mutate(state):
+        state["external_acceptance"]["receipt_hash"] = "not-a-hash"
+
+    _assert_sink_rejects(tmp_path, mutate, "external acceptance is not bound")
+
+
+def test_competition_integration_requires_admitted_verifier(tmp_path):
+    repo, base, state = _authorized_candidate_repo(tmp_path)
+    state["contract"]["verifier_commands"] = []
+    state["integration_verifier_manifest"] = []
+
+    with pytest.raises(RuntimeError, match="at least one admitted verifier"):
+        ControlledIntegrationManager(integration_root=tmp_path / "integrations").integrate_task_state(
+            state
+        )
+
+    assert _git(repo, "rev-parse", "nexus/integration") == base

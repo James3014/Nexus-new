@@ -11,6 +11,28 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from nexus.core.decorators import nexus_metabolize
 
+__import__("warnings").warn(
+    "ARCHIVED 2026-10-12 (#1850): always BLOCKED no_live_browser_session, CLI ui-validator removed; see ARCHIVED_2026-10-12.md. "
+    "Scheduled for deletion; do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
+# Login credentials are never embedded in source; the operator supplies them.
+USER_ENV_VAR = "NEXUS_UI_VALIDATOR_USER"
+PASSWORD_ENV_VAR = "NEXUS_UI_VALIDATOR_PASSWORD"
+FINISH_SUCCESS = "Sequence completed successfully."
+FINISH_NO_CREDENTIALS = "credentials_not_configured"
+
+
+def _configured_credentials():
+    user = os.environ.get(USER_ENV_VAR, "")
+    password = os.environ.get(PASSWORD_ENV_VAR, "")
+    if not user or not password:
+        return None
+    return user, password
+
+
 async def agent_get_action(task: str, dom_text: str) -> str:
     """
     Placeholder for Nexus LLM Agent. 
@@ -53,22 +75,30 @@ async def agent_get_action(task: str, dom_text: str) -> str:
         return json.dumps({"action": "wait", "value": "1.0"})
 
     if user_input and pass_input and auth_btn:
-        has_user = "nexus_admin" in dom_text
-        has_pass = "singularity" in dom_text
-        
+        credentials = _configured_credentials()
+        if credentials is None:
+            print(
+                f"🤖 [Agent:Thought] Login form found but {USER_ENV_VAR} / "
+                f"{PASSWORD_ENV_VAR} are not set. Stopping."
+            )
+            return json.dumps({"action": "finish", "value": FINISH_NO_CREDENTIALS})
+        user, password = credentials
+        has_user = user in dom_text
+        has_pass = password in dom_text
+
         if not has_user:
             print(f"🤖 [Agent:Thought] Type operator ID.")
-            return json.dumps({"action": "type", "target_id": user_input, "value": "nexus_admin"})
+            return json.dumps({"action": "type", "target_id": user_input, "value": user})
         if not has_pass:
             print(f"🤖 [Agent:Thought] Type passcode.")
-            return json.dumps({"action": "type", "target_id": pass_input, "value": "singularity"})
+            return json.dumps({"action": "type", "target_id": pass_input, "value": password})
         
         print(f"🤖 [Agent:Thought] Credentials entered. Submitting.")
         return json.dumps({"action": "click", "target_id": auth_btn})
 
     if "Dashboard Loaded" in dom_text:
         print(f"🤖 [Agent:Thought] Dashboard loaded. Task is successfully finished.")
-        return json.dumps({"action": "finish", "value": "Sequence completed successfully."})
+        return json.dumps({"action": "finish", "value": FINISH_SUCCESS})
 
     return json.dumps({"action": "finish", "value": "No elements found, ending session."})
 
@@ -96,6 +126,7 @@ async def run_ui_validation(url, agentic_mode=False, task=None, max_steps=5):
         print(f"🚀 [UI:Validator] Navigating to: {url}")
         await page.goto(url)
         
+        status = "incomplete"
         if agentic_mode:
             print(f"🧠 [UI:Validator] Entering Agentic Mode. Task: {task}")
             executor = WebActionExecutor(page)
@@ -114,15 +145,19 @@ async def run_ui_validation(url, agentic_mode=False, task=None, max_steps=5):
                 
                 if action_result.get("status") == "finished":
                     print(f"🏁 [UI:Validator] Task Finished: {action_result.get('message')}")
+                    # Only the agent's explicit success terminal counts as success.
+                    if action_result.get("message") == FINISH_SUCCESS:
+                        status = "success"
                     break
         else:
-            # Traditional Mock Interaction
+            # Traditional Mock Interaction: nothing is validated, so never report success.
             print("🧱 [UI:Validator] Running standard interaction matrix (Mock)")
-            results["steps"].append({"action": "scan", "status": "success"})
+            results["steps"].append({"action": "scan", "status": "simulated"})
+            status = "simulated"
 
         video_path = await page.video.path() if page.video else ""
         results["video_path"] = video_path
-        results["status"] = "success"
+        results["status"] = status
         
         await browser.close()
     

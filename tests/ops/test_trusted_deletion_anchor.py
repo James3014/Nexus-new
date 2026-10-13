@@ -19,6 +19,7 @@ import pytest
 import yaml
 
 import scripts.ops.trusted_deletion_anchor as trusted_anchor
+import scripts.ops.trusted_merge_lane_gate as lane_gate
 from scripts.ops.trusted_deletion_anchor import (
     SCHEMA_VERSION,
     _json,
@@ -77,13 +78,13 @@ def test_trusted_external_runtime_package_pair_is_exact() -> None:
             "nexus-learning",
             "nexus_learning",
             "https://github.com/James3014/nexus-learning.git",
-            "d09f05b942f35236562ae26e7b718d111368b0b1",
+            "a48bd876b758069f4dd15c24d0d32f1f2486d319",
         ),
         (
             "nexus-runtime",
             "nexus_runtime",
             "https://github.com/James3014/nexus-runtime.git",
-            "8f16c41f8a1838248901393274c853af4dca7f9b",
+            "2766c154ae9fa129a5d8d6a38244276e77b453bc",
         ),
     )
 
@@ -435,6 +436,175 @@ def test_pr1375_dependency_snapshot_transition_allows_only_exact_binding(monkeyp
             pull_request_number=1376,
             head_product_init_is_regular=True,
         )
+
+
+def test_pr1380_dependency_snapshot_transition_is_exact_and_separate() -> None:
+    assert trusted_anchor.TRUSTED_PR1380_DEPENDENCY_SNAPSHOT_TRANSITION == (
+        1380,
+        (
+            "2fce493ab2843794c1d44665fa68e8292c321fb937e04918795b39b124a99c4e",
+            "1defe6b2b7251fd060fb3613bbb9875ec38b4c6ea4dbd8febc36dcb10d1724f1",
+            "0ff95ecbe90a66299ff40bc411ddd1045d978d43726729b454e5c1acf8d4a160",
+            "6068e086cbdf1e08723520a339269033346ff5a7553d87008cc8e9f1f22260b4",
+        ),
+    )
+
+
+def test_pr1380_dependency_snapshot_transition_allows_only_exact_binding(monkeypatch) -> None:
+    values = [b"trusted pyproject\n", b"trusted lock\n", b"head pyproject\n", b"head lock\n"]
+    hashes = trusted_anchor.TRUSTED_PR1380_DEPENDENCY_SNAPSHOT_TRANSITION[1]
+    original_sha = trusted_anchor._sha
+    digest_by_value = dict(zip(values, hashes, strict=True))
+    monkeypatch.setattr(
+        trusted_anchor,
+        "_sha",
+        lambda value: digest_by_value.get(value, original_sha(value)),
+    )
+
+    trusted_anchor._validate_trusted_dependency_contract(
+        values[0],
+        values[2],
+        values[1],
+        values[3],
+        pull_request_number=1380,
+        head_product_init_is_regular=True,
+    )
+
+    for index in range(4):
+        tampered = list(values)
+        tampered[index] += b"tampered"
+        with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+            trusted_anchor._validate_trusted_dependency_contract(
+                tampered[0],
+                tampered[2],
+                tampered[1],
+                tampered[3],
+                pull_request_number=1380,
+                head_product_init_is_regular=True,
+            )
+
+    with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+        trusted_anchor._validate_trusted_dependency_contract(
+            values[0],
+            values[2],
+            values[1],
+            values[3],
+            pull_request_number=1381,
+            head_product_init_is_regular=True,
+        )
+
+
+def test_pr1507_dependency_snapshot_transition_is_exact_and_separate() -> None:
+    assert trusted_anchor.TRUSTED_PR1507_DEPENDENCY_SNAPSHOT_TRANSITION == (
+        1507,
+        (
+            "0ff95ecbe90a66299ff40bc411ddd1045d978d43726729b454e5c1acf8d4a160",
+            "6068e086cbdf1e08723520a339269033346ff5a7553d87008cc8e9f1f22260b4",
+            "10eb27a29cfb60d8cc45e223a68a1221f7f285b04d2b9ab58f1ed2096b11a829",
+            "db1bd37456a5d302c0f508ab5ca193750f9d715985f2dcf5e67743a70e9d2667",
+        ),
+    )
+
+
+def test_pr1507_dependency_snapshot_transition_allows_only_exact_binding(monkeypatch) -> None:
+    values = [b"trusted pyproject\n", b"trusted lock\n", b"head pyproject\n", b"head lock\n"]
+    hashes = trusted_anchor.TRUSTED_PR1507_DEPENDENCY_SNAPSHOT_TRANSITION[1]
+    original_sha = trusted_anchor._sha
+    digest_by_value = dict(zip(values, hashes, strict=True))
+    monkeypatch.setattr(
+        trusted_anchor,
+        "_sha",
+        lambda value: digest_by_value.get(value, original_sha(value)),
+    )
+
+    trusted_anchor._validate_trusted_dependency_contract(
+        values[0],
+        values[2],
+        values[1],
+        values[3],
+        pull_request_number=1507,
+        head_product_init_is_regular=True,
+    )
+
+    for index in range(4):
+        tampered = list(values)
+        tampered[index] += b"tampered"
+        with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+            trusted_anchor._validate_trusted_dependency_contract(
+                tampered[0],
+                tampered[2],
+                tampered[1],
+                tampered[3],
+                pull_request_number=1507,
+                head_product_init_is_regular=True,
+            )
+
+    with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+        trusted_anchor._validate_trusted_dependency_contract(
+            values[0],
+            values[2],
+            values[1],
+            values[3],
+            pull_request_number=1508,
+            head_product_init_is_regular=True,
+        )
+
+
+def test_pr1661_dependency_snapshot_transition_is_exact_and_separate() -> None:
+    assert trusted_anchor.TRUSTED_PR1661_DEPENDENCY_SNAPSHOT_TRANSITION == (
+        1661,
+        (
+            "10eb27a29cfb60d8cc45e223a68a1221f7f285b04d2b9ab58f1ed2096b11a829",
+            "db1bd37456a5d302c0f508ab5ca193750f9d715985f2dcf5e67743a70e9d2667",
+            "ac96e101471ef46cea2e81af1859b68070fbf89af43ca7c004ecf58c19a7b0e4",
+            "dfe0167a759b83769fec605e88bb3186ba3eba36f4b243dffdcded71db4bdc4c",
+        ),
+    )
+
+
+def test_pr1661_dependency_snapshot_transition_allows_only_exact_binding(monkeypatch) -> None:
+    values = [b"trusted pyproject\n", b"trusted lock\n", b"head pyproject\n", b"head lock\n"]
+    hashes = trusted_anchor.TRUSTED_PR1661_DEPENDENCY_SNAPSHOT_TRANSITION[1]
+    original_sha = trusted_anchor._sha
+    digest_by_value = dict(zip(values, hashes, strict=True))
+    monkeypatch.setattr(
+        trusted_anchor,
+        "_sha",
+        lambda value: digest_by_value.get(value, original_sha(value)),
+    )
+
+    trusted_anchor._validate_trusted_dependency_contract(
+        values[0],
+        values[2],
+        values[1],
+        values[3],
+        pull_request_number=1661,
+        head_product_init_is_regular=True,
+    )
+
+    for index in range(4):
+        tampered = list(values)
+        tampered[index] += b"tampered"
+        with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+            trusted_anchor._validate_trusted_dependency_contract(
+                tampered[0],
+                tampered[2],
+                tampered[1],
+                tampered[3],
+                pull_request_number=1661,
+                head_product_init_is_regular=True,
+            )
+
+    for other_pr in (1660, 1662):
+        with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+            trusted_anchor._validate_trusted_dependency_contract(
+                values[0],
+                values[2],
+                values[1],
+                values[3],
+                pull_request_number=other_pr,
+                head_product_init_is_regular=True,
+            )
 
 
 def _pr910_snapshot_fixture(monkeypatch):
@@ -1014,6 +1184,23 @@ def _acquisition_environment(
     event["workflow_sha"] = workflow_sha
     event["pull_request"]["base"]["sha"] = workflow_sha  # type: ignore[index]
     event["pull_request"]["head"]["sha"] = head_sha  # type: ignore[index]
+    # Legacy PR numbers are no longer exempt by number alone (#1749); carry a
+    # genuine Owner-inline DIRECT binding so the lane gate step passes.
+    event["pull_request"]["number"] = lane_gate.ENFORCEMENT_START_PR_NUMBER  # type: ignore[index]
+    binding = {
+        "schema": lane_gate.BINDING_SCHEMA,
+        "execution_lane": "DIRECT_CANONICAL",
+        "contract_kind": "OWNER_INLINE",
+        "owner_id": "James3014",
+        "issue_number": None,
+        "task_id": None,
+        "attempt_id": None,
+        "task_card_path": None,
+        "task_card_sha256": None,
+        "owner_lane_rebind": None,
+    }
+    binding["binding_hash"] = lane_gate.canonical_hash(binding)
+    event["pull_request"]["body"] = lane_gate.render_binding(binding)  # type: ignore[index]
     path, argv_log = _git_logging_path(run_root)
     _synthetic_runtime(
         run_root,
@@ -1366,6 +1553,53 @@ def test_runtime_builder_uses_frozen_hash_bound_binary_only_contract(tmp_path: P
         isinstance(item["direct_url_sha256"], str) and len(item["direct_url_sha256"]) == 64
         for item in metadata["external_packages"]
     )
+
+
+def test_runtime_builder_failure_is_bounded_and_redacted(tmp_path: Path):
+    repo = tmp_path / "repo"
+    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+    _run_git(repo, "config", "user.email", "test@example.invalid")
+    _run_git(repo, "config", "user.name", "runtime-builder-test")
+    (repo / "pyproject.toml").write_text("[project]\nname='fixture'\nversion='0'\n")
+    (repo / "uv.lock").write_text("version = 1\nrevision = 3\n")
+    _run_git(repo, "add", ".")
+    _run_git(repo, "commit", "-m", "runtime contract")
+    workflow_sha = _run_git(repo, "rev-parse", "HEAD")
+    fake_uv = tmp_path / "uv"
+    fake_uv.write_text(
+        f"#!{sys.executable}\n"
+        "import sys\n"
+        "from pathlib import Path\n"
+        "args=sys.argv[1:]\n"
+        "if args and args[0] == 'export':\n"
+        " Path(args[args.index('--output-file')+1]).write_text('pytest==9 --hash=sha256:abc\\n')\n"
+        " raise SystemExit(0)\n"
+        "if args[:2] == ['pip','install'] and '--requirements' in args:\n"
+        " sys.stdout.write('Authorization: Bearer ghp_supersecret\\n')\n"
+        " sys.stderr.write('https://x-access-token:github_pat_secret@example.invalid/repo ' + ('x' * 5000))\n"
+        " raise SystemExit(23)\n"
+        "raise SystemExit(2)\n"
+    )
+    fake_uv.chmod(0o755)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        trusted_anchor._build_runtime(
+            argparse.Namespace(
+                repo_root=str(repo),
+                workflow_sha=workflow_sha,
+                uv_executable=str(fake_uv),
+                output_dir=str(tmp_path / "built-runtime"),
+            )
+        )
+
+    message = str(exc_info.value)
+    assert "stage=locked-binary-install" in message
+    assert "exit_code=23" in message
+    assert "<truncated>" in message
+    assert "<redacted>" in message
+    assert "ghp_supersecret" not in message
+    assert "github_pat_secret" not in message
+    assert len(message) < trusted_anchor.SUBPROCESS_DIAGNOSTIC_LIMIT + 1000
 
 
 @pytest.mark.parametrize(
@@ -2514,3 +2748,333 @@ def test_trusted_jobs_never_execute_head_code_or_materialize_a_worktree():
         assert "worktree" not in serialized
         assert "submodule" not in serialized
         assert "source.tar" not in serialized or job_name == "trusted-controller"
+
+
+def test_canonical_raw_diff_ignores_git_abbrev_config(tmp_path: Path):
+    repo = tmp_path / "raw-diff-source"
+    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+    _run_git(repo, "config", "user.email", "test@example.invalid")
+    _run_git(repo, "config", "user.name", "trusted-anchor-test")
+    source = repo / "sample.txt"
+    source.write_text("before\n", encoding="utf-8")
+    _run_git(repo, "add", "sample.txt")
+    _run_git(repo, "commit", "-m", "base")
+    base_sha = _run_git(repo, "rev-parse", "HEAD")
+    source.write_text("after\n", encoding="utf-8")
+    _run_git(repo, "commit", "-am", "head")
+    head_sha = _run_git(repo, "rev-parse", "HEAD")
+
+    _run_git(repo, "config", "core.abbrev", "9")
+    nine = trusted_anchor._canonical_raw_diff(repo, base_sha, head_sha)
+    _run_git(repo, "config", "core.abbrev", "8")
+    eight = trusted_anchor._canonical_raw_diff(repo, base_sha, head_sha)
+
+    assert nine == eight
+    metadata = nine.split(b"\0", 1)[0].split()
+    assert len(metadata[2]) == 40
+    assert len(metadata[3]) == 40
+
+
+def test_ephemeral_bare_repo_disables_background_maintenance(tmp_path: Path) -> None:
+    repo = tmp_path / "repo.git"
+    trusted_anchor._init_ephemeral_bare_repo(repo)
+
+    def config(key: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(repo), "config", "--get", key],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    assert config("core.bare") == "true"
+    assert config("gc.auto") == "0"
+    assert config("gc.autoDetach") == "false"
+    assert config("gc.writeCommitGraph") == "false"
+    assert config("fetch.writeCommitGraph") == "false"
+    assert config("maintenance.auto") == "false"
+
+
+def test_pr1789_dependency_snapshot_transition_is_exact_and_separate() -> None:
+    assert trusted_anchor.TRUSTED_PR1789_DEPENDENCY_SNAPSHOT_TRANSITION == (
+        1789,
+        (
+            "ca23695a4cfbca27f64bc163655256ae45cb0b12933cffe7c07c5aff91da440d",
+            "2f5282586cbc972ad6990be39f5f7789efe1f7fcfa9b2b8eaa7508eccf03224f",
+            "96331173f3ce5c1c91f7a20d011f1af2d4a927602ede40eacf91c343a0453b9a",
+            "6df6eff22f2bb3dcddbd3c4fd16483a91aeac644ca1bc098ef0a7a153088e3e2",
+        ),
+    )
+
+
+def test_pr1789_dependency_snapshot_transition_allows_only_exact_binding(monkeypatch) -> None:
+    values = [b"trusted pyproject\n", b"trusted lock\n", b"head pyproject\n", b"head lock\n"]
+    hashes = trusted_anchor.TRUSTED_PR1789_DEPENDENCY_SNAPSHOT_TRANSITION[1]
+    original_sha = trusted_anchor._sha
+    digest_by_value = dict(zip(values, hashes, strict=True))
+    monkeypatch.setattr(
+        trusted_anchor,
+        "_sha",
+        lambda value: digest_by_value.get(value, original_sha(value)),
+    )
+
+    trusted_anchor._validate_trusted_dependency_contract(
+        values[0],
+        values[2],
+        values[1],
+        values[3],
+        pull_request_number=1789,
+        head_product_init_is_regular=True,
+    )
+
+    for index in range(4):
+        tampered = list(values)
+        tampered[index] += b"tampered"
+        with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+            trusted_anchor._validate_trusted_dependency_contract(
+                tampered[0],
+                tampered[2],
+                tampered[1],
+                tampered[3],
+                pull_request_number=1789,
+                head_product_init_is_regular=True,
+            )
+
+    for other_pr in (1788, 1790):
+        with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+            trusted_anchor._validate_trusted_dependency_contract(
+                values[0],
+                values[2],
+                values[1],
+                values[3],
+                pull_request_number=other_pr,
+                head_product_init_is_regular=True,
+            )
+
+
+def test_pr1796_dependency_snapshot_transition_is_exact_and_separate() -> None:
+    assert trusted_anchor.TRUSTED_PR1796_DEPENDENCY_SNAPSHOT_TRANSITION == (
+        1796,
+        (
+            "96331173f3ce5c1c91f7a20d011f1af2d4a927602ede40eacf91c343a0453b9a",
+            "6df6eff22f2bb3dcddbd3c4fd16483a91aeac644ca1bc098ef0a7a153088e3e2",
+            "16b2ee33278ec5fdf156b47f1d8f30bd167509616c3c8d506d358aa9bad1239d",
+            "0a50680697e7abbe0b26e6d3e6eef235d9c1e3244a5527b87ac47d57fe2f0015",
+        ),
+    )
+
+
+def test_pr1796_dependency_snapshot_transition_allows_only_exact_binding(monkeypatch) -> None:
+    values = [b"trusted pyproject\n", b"trusted lock\n", b"head pyproject\n", b"head lock\n"]
+    hashes = trusted_anchor.TRUSTED_PR1796_DEPENDENCY_SNAPSHOT_TRANSITION[1]
+    original_sha = trusted_anchor._sha
+    digest_by_value = dict(zip(values, hashes, strict=True))
+    monkeypatch.setattr(
+        trusted_anchor,
+        "_sha",
+        lambda value: digest_by_value.get(value, original_sha(value)),
+    )
+
+    trusted_anchor._validate_trusted_dependency_contract(
+        values[0],
+        values[2],
+        values[1],
+        values[3],
+        pull_request_number=1796,
+        head_product_init_is_regular=True,
+    )
+
+    for index in range(4):
+        tampered = list(values)
+        tampered[index] += b"tampered"
+        with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+            trusted_anchor._validate_trusted_dependency_contract(
+                tampered[0],
+                tampered[2],
+                tampered[1],
+                tampered[3],
+                pull_request_number=1796,
+                head_product_init_is_regular=True,
+            )
+
+    for other_pr in (1795, 1797):
+        with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+            trusted_anchor._validate_trusted_dependency_contract(
+                values[0],
+                values[2],
+                values[1],
+                values[3],
+                pull_request_number=other_pr,
+                head_product_init_is_regular=True,
+            )
+
+
+def test_pr1804_dependency_snapshot_transition_is_exact_and_separate() -> None:
+    assert trusted_anchor.TRUSTED_PR1804_DEPENDENCY_SNAPSHOT_TRANSITION == (
+        1804,
+        (
+            "16b2ee33278ec5fdf156b47f1d8f30bd167509616c3c8d506d358aa9bad1239d",
+            "0a50680697e7abbe0b26e6d3e6eef235d9c1e3244a5527b87ac47d57fe2f0015",
+            "91745c8beac9a1363e18b3dd13e743590c754a98d27dc2f0bff97874a94f0257",
+            "e605aa1109b70d6c99c124e30997f0acf45b72300624a155b4499cc8e2632f52",
+        ),
+    )
+
+
+def test_pr1804_dependency_snapshot_transition_allows_only_exact_binding(monkeypatch) -> None:
+    values = [b"trusted pyproject\n", b"trusted lock\n", b"head pyproject\n", b"head lock\n"]
+    hashes = trusted_anchor.TRUSTED_PR1804_DEPENDENCY_SNAPSHOT_TRANSITION[1]
+    original_sha = trusted_anchor._sha
+    digest_by_value = dict(zip(values, hashes, strict=True))
+    monkeypatch.setattr(
+        trusted_anchor,
+        "_sha",
+        lambda value: digest_by_value.get(value, original_sha(value)),
+    )
+
+    trusted_anchor._validate_trusted_dependency_contract(
+        values[0],
+        values[2],
+        values[1],
+        values[3],
+        pull_request_number=1804,
+        head_product_init_is_regular=True,
+    )
+
+    for index in range(4):
+        tampered = list(values)
+        tampered[index] += b"tampered"
+        with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+            trusted_anchor._validate_trusted_dependency_contract(
+                tampered[0],
+                tampered[2],
+                tampered[1],
+                tampered[3],
+                pull_request_number=1804,
+                head_product_init_is_regular=True,
+            )
+
+    for other_pr in (1803, 1805):
+        with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+            trusted_anchor._validate_trusted_dependency_contract(
+                values[0],
+                values[2],
+                values[1],
+                values[3],
+                pull_request_number=other_pr,
+                head_product_init_is_regular=True,
+            )
+
+
+def test_pr1857_dependency_snapshot_transition_is_exact_and_separate() -> None:
+    assert trusted_anchor.TRUSTED_PR1857_DEPENDENCY_SNAPSHOT_TRANSITION == (
+        1857,
+        (
+            "91745c8beac9a1363e18b3dd13e743590c754a98d27dc2f0bff97874a94f0257",
+            "e605aa1109b70d6c99c124e30997f0acf45b72300624a155b4499cc8e2632f52",
+            "57e07fd5272cb64774464bec61e3d8b475898782bcfd048d6930b873336afd75",
+            "7808d62f2eaf6ab80a4b56c74563c5053ebe2764d64591f46a5c30b7c4a96068",
+        ),
+    )
+
+
+def test_pr1857_dependency_snapshot_transition_allows_only_exact_binding(monkeypatch) -> None:
+    values = [b"trusted pyproject\n", b"trusted lock\n", b"head pyproject\n", b"head lock\n"]
+    hashes = trusted_anchor.TRUSTED_PR1857_DEPENDENCY_SNAPSHOT_TRANSITION[1]
+    original_sha = trusted_anchor._sha
+    digest_by_value = dict(zip(values, hashes, strict=True))
+    monkeypatch.setattr(
+        trusted_anchor,
+        "_sha",
+        lambda value: digest_by_value.get(value, original_sha(value)),
+    )
+
+    trusted_anchor._validate_trusted_dependency_contract(
+        values[0],
+        values[2],
+        values[1],
+        values[3],
+        pull_request_number=1857,
+        head_product_init_is_regular=True,
+    )
+
+    for index in range(4):
+        tampered = list(values)
+        tampered[index] += b"tampered"
+        with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+            trusted_anchor._validate_trusted_dependency_contract(
+                tampered[0],
+                tampered[2],
+                tampered[1],
+                tampered[3],
+                pull_request_number=1857,
+                head_product_init_is_regular=True,
+            )
+
+    for other_pr in (1856, 1858):
+        with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+            trusted_anchor._validate_trusted_dependency_contract(
+                values[0],
+                values[2],
+                values[1],
+                values[3],
+                pull_request_number=other_pr,
+                head_product_init_is_regular=True,
+            )
+
+
+def test_pr1908_dependency_snapshot_transition_is_exact_and_separate() -> None:
+    assert trusted_anchor.TRUSTED_PR1908_DEPENDENCY_SNAPSHOT_TRANSITION == (
+        1908,
+        (
+            "57e07fd5272cb64774464bec61e3d8b475898782bcfd048d6930b873336afd75",
+            "7808d62f2eaf6ab80a4b56c74563c5053ebe2764d64591f46a5c30b7c4a96068",
+            "275eceb0af8e4d07a7373359bd0811c8147a403f9fa4d49739f20dd1d974c762",
+            "09f17508d34972268d4c7cff6877c447cf8586eff8684bbbbc6170255ca368d4",
+        ),
+    )
+
+
+def test_pr1908_dependency_snapshot_transition_allows_only_exact_binding(monkeypatch) -> None:
+    values = [b"trusted pyproject\n", b"trusted lock\n", b"head pyproject\n", b"head lock\n"]
+    hashes = trusted_anchor.TRUSTED_PR1908_DEPENDENCY_SNAPSHOT_TRANSITION[1]
+    original_sha = trusted_anchor._sha
+    digest_by_value = dict(zip(values, hashes, strict=True))
+    monkeypatch.setattr(
+        trusted_anchor,
+        "_sha",
+        lambda value: digest_by_value.get(value, original_sha(value)),
+    )
+
+    trusted_anchor._validate_trusted_dependency_contract(
+        values[0],
+        values[2],
+        values[1],
+        values[3],
+        pull_request_number=1908,
+        head_product_init_is_regular=True,
+    )
+
+    for index in range(4):
+        tampered = list(values)
+        tampered[index] += b"tampered"
+        with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+            trusted_anchor._validate_trusted_dependency_contract(
+                tampered[0],
+                tampered[2],
+                tampered[1],
+                tampered[3],
+                pull_request_number=1908,
+                head_product_init_is_regular=True,
+            )
+
+    for other_pr in (1907, 1909):
+        with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+            trusted_anchor._validate_trusted_dependency_contract(
+                values[0],
+                values[2],
+                values[1],
+                values[3],
+                pull_request_number=other_pr,
+                head_product_init_is_regular=True,
+            )

@@ -59,9 +59,10 @@ def _default_registry_factory(repo_root: Path) -> RegistryClient:
 
 
 def _default_skill_loader_factory(repo_root: Path) -> ExternalSkillLoaderLike:
-    from nexus.learning.external_skill_loader import ExternalSkillLoader
+    from nexus.core.unified_registry import UnifiedRegistry
 
-    return ExternalSkillLoader(repo_root)
+    # UnifiedRegistry owns the skills.db path and the external scan directories.
+    return UnifiedRegistry(repo_root).external_loader
 
 
 def get_registry_status(

@@ -141,7 +141,7 @@ def _contract(
         target_worktree_root=str(target_root),
         allowed_files=allowed_files or ["src/"],
         forbidden_files=forbidden_files or [],
-        verifier_commands=[],
+        verifier_commands=["python -c pass"],
         protected_contracts=[],
         preferred_provider=None,
         fallback_provider=None,

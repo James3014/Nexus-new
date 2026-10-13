@@ -109,11 +109,20 @@ def test_exact_base_classification_contract_is_unchanged() -> None:
     classification = _step("Classify exact-base regression")
     run = classification["run"]
 
-    assert "scripts/ops/pr_impact_gate.py classify" in run
+    # The verdict comes from the exact-base classifier, not the candidate copy (#1754).
+    assert '"${{ steps.trusted-impact.outputs.gate }}" classify' in run
+    assert ".venv/bin/python scripts/ops/pr_impact_gate.py classify" not in run
     assert "--base-result .ci-impact/base-result.json" in run
     assert "--head-result .ci-impact/head-result.json" in run
     assert "--output .ci-impact/classification.json" in run
     assert classification["env"] == {"NEXUS_TEST_MODE": "CI", "PYTHONPATH": "."}
+
+
+def test_impact_classifier_is_extracted_from_exact_base() -> None:
+    extract = _step("Extract exact-base impact classifier")
+    assert extract["env"] == {"BASE_SHA": "${{ steps.base.outputs.sha }}"}
+    assert 'git show "$BASE_SHA:$f"' in extract["run"]
+    assert "scripts/ops/pr_impact_gate.py scripts/ops/select_tests.py" in extract["run"]
 
 
 def test_impact_artifact_path_retention_and_failure_behavior_are_unchanged() -> None:

@@ -1,3 +1,14 @@
+"""Autonomic Router (legacy; retired from the mainchain, see #1737).
+
+Lab-only status: CapabilityPlanner is the single place that decides capability
+selection and execution depth for the mainchain, and it never selects
+``autonomic_router``. This module is NOT marked with a module-level
+DeprecationWarning because the legacy ``NexusPipeline`` path still reaches it
+(``nexus.engine.coordinator`` -> ``AutonomicRoutingService``) and
+``nexus.learning.router_nas_tuner`` imports it at module import time.
+``capability:coverage-gap`` lists it as reserved.
+"""
+
 import os
 from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional

@@ -45,8 +45,20 @@ PUBLIC_OPERATION_KEYS = (
     "created_at",
     "started_at",
     "last_heartbeat_at",
+    "dispatcher_heartbeat_at",
+    "provider_pid",
+    "provider_pgid",
+    "provider_process_state",
+    "provider_started_at",
+    "provider_stream_last_activity_at",
+    "first_stream_activity_at",
+    "first_tool_activity_at",
+    "last_progress_activity_at",
+    "first_effect_at",
+    "time_to_first_effect_ms",
     "last_output_at",
     "finished_at",
+    "reconciled_at",
     "attempts",
     "rotations",
     "account_alias_hash",
@@ -63,6 +75,12 @@ PUBLIC_OPERATION_KEYS = (
     "observed_changed_paths",
     "source_baseline_sha256",
     "source_attribution_state",
+    "input_delivery_state",
+    "input_delivery_source",
+    "input_delivery_truncations",
+    "quota_preflight_progress",
+    "liveness_policy",
+    "quota_preflight_decision",
     "reconciliation",
     "stdout_path",
     "stderr_path",
@@ -93,7 +111,66 @@ PUBLIC_OPERATION_KEYS = (
     "review_receipt_path",
     "review_receipt_sha256",
     "review_failure_kind",
+    "permission_profile_sha256",
+    "permission_profile_kind",
+    "effective_permissions",
+    "excluded_account_hashes",
+    "write_paths",
+    "scope_validation_state",
+    "scope_violations",
+    "predecessor_operation_id",
+    "predecessor_attempt_id",
+    "transition_role",
+    "continuation_role",
+    "evidence_refs",
+    "handoff_hash",
+    "first_pass_receipt_linkage",
+    "has_unresolved_external_effect",
 )
+
+
+def _validate_continuity_fields(record: dict[str, Any]) -> None:
+    """Validate durable continuity metadata without granting continuity authority."""
+    predecessor_operation_id = record.get("predecessor_operation_id")
+    predecessor_attempt_id = record.get("predecessor_attempt_id")
+    if bool(predecessor_operation_id) != bool(predecessor_attempt_id):
+        raise DirectOperationJournalError("CONTINUITY_PREDECESSOR_INCOMPLETE")
+    if predecessor_operation_id is not None:
+        if not isinstance(predecessor_operation_id, str) or not predecessor_operation_id.strip():
+            raise DirectOperationJournalError("CONTINUITY_PREDECESSOR_OPERATION_INVALID")
+        if predecessor_operation_id == record.get("operation_id"):
+            raise DirectOperationJournalError("CONTINUITY_SELF_PREDECESSOR")
+    if predecessor_attempt_id is not None and (
+        not isinstance(predecessor_attempt_id, str) or not predecessor_attempt_id.strip()
+    ):
+        raise DirectOperationJournalError("CONTINUITY_PREDECESSOR_ATTEMPT_INVALID")
+
+    for field_name in ("transition_role", "continuation_role"):
+        value = record.get(field_name)
+        if value is not None and (not isinstance(value, str) or not value.strip()):
+            raise DirectOperationJournalError(f"CONTINUITY_{field_name.upper()}_INVALID")
+
+    evidence_refs = record.get("evidence_refs", [])
+    if not isinstance(evidence_refs, list) or any(
+        not isinstance(ref, str) or not ref.strip() for ref in evidence_refs
+    ):
+        raise DirectOperationJournalError("CONTINUITY_EVIDENCE_REFS_INVALID")
+    if len(evidence_refs) != len(set(evidence_refs)):
+        raise DirectOperationJournalError("CONTINUITY_EVIDENCE_REFS_DUPLICATE")
+
+    for field_name in ("handoff_hash", "first_pass_receipt_linkage"):
+        value = record.get(field_name)
+        if value is None:
+            continue
+        if (
+            not isinstance(value, str)
+            or len(value) != 64
+            or any(ch not in "0123456789abcdef" for ch in value)
+        ):
+            raise DirectOperationJournalError(f"CONTINUITY_{field_name.upper()}_INVALID")
+
+    if not isinstance(record.get("has_unresolved_external_effect", False), bool):
+        raise DirectOperationJournalError("CONTINUITY_EXTERNAL_EFFECT_FLAG_INVALID")
 
 
 class DirectOperationJournalError(RuntimeError):
@@ -140,7 +217,7 @@ def _atomic_json_write(path: Path, payload: dict[str, Any]) -> None:
             pass
 
 
-def _process_alive(pid: object) -> bool:
+def process_alive(pid: object) -> bool:
     if not isinstance(pid, int) or pid <= 0:
         return False
     try:
@@ -149,7 +226,20 @@ def _process_alive(pid: object) -> bool:
         return False
     except PermissionError:
         return True
+    proc = subprocess.run(
+        ["ps", "-p", str(pid), "-o", "stat="],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode == 0:
+        stat = proc.stdout.strip()
+        if stat.startswith("Z"):
+            return False
     return True
+
+
+_process_alive = process_alive
 
 
 def _git_identity(cwd: str) -> tuple[str | None, str | None]:
@@ -346,6 +436,61 @@ def observed_changed_paths(cwd: str) -> list[str]:
     return sorted(snapshot["entries"])
 
 
+def normalize_write_paths(
+    repo_root: str | Path,
+    write_paths: Any,
+) -> list[str]:
+    """Normalize declared write paths to canonical repo-relative paths."""
+    if not write_paths or not isinstance(write_paths, (list, tuple, set)):
+        return []
+    root = Path(repo_root).resolve()
+    normalized: set[str] = set()
+    for raw in write_paths:
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        candidate = Path(raw).expanduser()
+        if not candidate.is_absolute():
+            candidate = root / candidate
+        try:
+            rel = candidate.resolve().relative_to(root)
+            normalized.add(str(rel))
+        except ValueError:
+            normalized.add(str(raw).strip())
+    return sorted(normalized)
+
+
+def _is_path_in_scope(path: str, allowed_paths: set[str]) -> bool:
+    for allowed in allowed_paths:
+        if path == allowed or path.startswith(allowed.rstrip("/") + "/"):
+            return True
+    return False
+
+
+def validate_write_scope(
+    repo_root: str | Path,
+    write_paths: Any,
+    observed_changed_paths: list[str] | None,
+) -> tuple[str, list[str]]:
+    """Validate observed changed paths against declared write paths.
+
+    Returns:
+        (scope_validation_state, scope_violations)
+        Where scope_validation_state is one of:
+        - "UNCONSTRAINED": write_paths is None or empty.
+        - "VERIFIED_IN_SCOPE": all observed paths are within write_paths.
+        - "VIOLATION_OUT_OF_SCOPE": one or more paths are outside write_paths.
+    """
+    if not write_paths:
+        return "UNCONSTRAINED", []
+    if observed_changed_paths is None:
+        return "UNCONSTRAINED", []
+    allowed = set(normalize_write_paths(repo_root, write_paths))
+    violations = [p for p in observed_changed_paths if not _is_path_in_scope(p, allowed)]
+    if violations:
+        return "VIOLATION_OUT_OF_SCOPE", sorted(violations)
+    return "VERIFIED_IN_SCOPE", []
+
+
 class DirectOperationJournal:
     """Filesystem-backed journal for one direct external-worker provider."""
 
@@ -401,6 +546,7 @@ class DirectOperationJournal:
         effort: str | None,
         prompt_sha256: str,
         runtime_revision: str | None,
+        write_paths: list[str] | None = None,
         initial_fields: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         operation_id = self._validate_operation_id(operation_id)
@@ -413,10 +559,6 @@ class DirectOperationJournal:
         source_attribution_state = (
             "BASELINE_CAPTURED" if source_baseline_hash is not None else "UNAVAILABLE"
         )
-        try:
-            op_dir.mkdir(parents=True, mode=0o700, exist_ok=False)
-        except FileExistsError as exc:
-            raise DirectOperationJournalError("OPERATION_ALREADY_EXISTS") from exc
         now = utc_now()
         record: dict[str, Any] = {
             "schema": self.schema,
@@ -437,8 +579,20 @@ class DirectOperationJournal:
             "created_at": now,
             "started_at": None,
             "last_heartbeat_at": None,
+            "dispatcher_heartbeat_at": None,
+            "provider_pid": None,
+            "provider_pgid": None,
+            "provider_process_state": "IDLE",
+            "provider_started_at": None,
+            "provider_stream_last_activity_at": None,
+            "first_stream_activity_at": None,
+            "first_tool_activity_at": None,
+            "last_progress_activity_at": None,
+            "first_effect_at": None,
+            "time_to_first_effect_ms": None,
             "last_output_at": None,
             "finished_at": None,
+            "reconciled_at": None,
             "attempts": 0,
             "rotations": 0,
             "account_alias_hash": None,
@@ -451,12 +605,32 @@ class DirectOperationJournal:
             "tool_event_count": 0,
             "command_sha256": None,
             "failure_kind": None,
+            "failure_history": [],
             "exit_code": None,
             "observed_changed_paths": [],
             "source_baseline": source_baseline,
             "source_baseline_sha256": source_baseline_hash,
             "source_attribution_state": source_attribution_state,
+            "input_delivery_state": "UNKNOWN",
+            "input_delivery_source": None,
+            "input_delivery_truncations": [],
+            "quota_preflight_progress": None,
+            "quota_preflight_decision": None,
             "reconciliation": None,
+            "permission_profile_sha256": None,
+            "permission_profile_kind": None,
+            "effective_permissions": None,
+            "write_paths": list(write_paths) if write_paths else [],
+            "scope_validation_state": "UNCONSTRAINED",
+            "scope_violations": [],
+            "predecessor_operation_id": None,
+            "predecessor_attempt_id": None,
+            "transition_role": None,
+            "continuation_role": None,
+            "evidence_refs": [],
+            "handoff_hash": None,
+            "first_pass_receipt_linkage": None,
+            "has_unresolved_external_effect": False,
             "stdout_path": str(self.stdout_path(operation_id)),
             "stderr_path": str(self.stderr_path(operation_id)),
         }
@@ -475,6 +649,11 @@ class DirectOperationJournal:
             if reserved.intersection(initial_fields):
                 raise DirectOperationJournalError("INITIAL_FIELD_RESERVED")
             record.update(initial_fields)
+        _validate_continuity_fields(record)
+        try:
+            op_dir.mkdir(parents=True, mode=0o700, exist_ok=False)
+        except FileExistsError as exc:
+            raise DirectOperationJournalError("OPERATION_ALREADY_EXISTS") from exc
         _atomic_json_write(self.record_path(operation_id), record)
         return record
 
@@ -504,6 +683,26 @@ class DirectOperationJournal:
                 record = self.read(operation_id)
                 if "status" in changes and changes["status"] not in _ALLOWED_STATES:
                     raise DirectOperationJournalError("OPERATION_STATUS_INVALID")
+                if "write_paths" in changes and changes["write_paths"] is not None:
+                    record_root = record.get("repo_root") or record.get("cwd") or "."
+                    changes["write_paths"] = normalize_write_paths(
+                        record_root, changes["write_paths"]
+                    )
+                    if changes["write_paths"]:
+                        changes.setdefault("scope_validation_state", "PENDING")
+                    else:
+                        changes.setdefault("scope_validation_state", "UNCONSTRAINED")
+                reconciliation = changes.get("reconciliation")
+                if (
+                    "reconciled_at" not in changes
+                    and isinstance(reconciliation, dict)
+                    and isinstance(reconciliation.get("at"), str)
+                ):
+                    # Every reconciliation receipt carries its observation time;
+                    # keep the durable top-level timeline field bound to it.
+                    changes["reconciled_at"] = reconciliation["at"]
+                candidate_record = {**record, **changes}
+                _validate_continuity_fields(candidate_record)
                 record.update(changes)
                 _atomic_json_write(self.record_path(operation_id), record)
                 return record
@@ -520,6 +719,7 @@ class DirectOperationJournal:
             "phase": "STARTING",
             "started_at": now,
             "last_heartbeat_at": now,
+            "dispatcher_heartbeat_at": now,
         }
         if pid is not None:
             changes["pid"] = int(pid)
@@ -534,7 +734,10 @@ class DirectOperationJournal:
         **changes: Any,
     ) -> dict[str, Any]:
         now = utc_now()
-        payload: dict[str, Any] = {"last_heartbeat_at": now}
+        payload: dict[str, Any] = {
+            "last_heartbeat_at": now,
+            "dispatcher_heartbeat_at": now,
+        }
         if output_observed:
             payload["last_output_at"] = now
         if phase is not None:
@@ -554,14 +757,17 @@ class DirectOperationJournal:
     ) -> dict[str, Any]:
         if status not in TERMINAL_STATES:
             raise DirectOperationJournalError("TERMINAL_STATUS_REQUIRED")
+        now = utc_now()
         payload: dict[str, Any] = {
             "status": status,
             "phase": "TERMINAL",
-            "finished_at": utc_now(),
-            "last_heartbeat_at": utc_now(),
+            "finished_at": now,
+            "last_heartbeat_at": now,
+            "dispatcher_heartbeat_at": now,
             "exit_code": exit_code,
             "failure_kind": failure_kind,
         }
+        payload.update(changes)
         if cwd:
             record = self.read(operation_id)
             baseline = record.get("source_baseline")
@@ -591,8 +797,86 @@ class DirectOperationJournal:
             else:
                 payload["observed_changed_paths"] = delta
                 payload["source_attribution_state"] = "ATTRIBUTED"
-        payload.update(changes)
+
+            effective_write_paths = payload.get("write_paths", record.get("write_paths"))
+            scope_state, violations = validate_write_scope(
+                repo_root=record_root or cwd,
+                write_paths=effective_write_paths,
+                observed_changed_paths=delta,
+            )
+            payload["scope_validation_state"] = scope_state
+            payload["scope_violations"] = violations
+            if violations and payload.get("status") == "COMPLETED":
+                payload["status"] = "FAILED"
+                payload["failure_kind"] = "SCOPE_VIOLATION_UNAUTHORIZED_MUTATION"
         return self.update(operation_id, **payload)
+
+    def prove_source_state_unchanged(self, operation_id: str) -> dict[str, Any]:
+        """Prove only that the repository source state still equals the captured baseline.
+
+        This is intentionally narrower than proving the provider had no external
+        effects. It is suitable only for releasing a source-mutation retry fence.
+        """
+        record = self.read(operation_id)
+        if record.get("status") != "OUTCOME_UNKNOWN":
+            raise DirectOperationJournalError("SOURCE_PROOF_REQUIRES_OUTCOME_UNKNOWN")
+        if record.get("source_attribution_state") != "ATTRIBUTED":
+            raise DirectOperationJournalError("SOURCE_ATTRIBUTION_UNAVAILABLE")
+        if record.get("effect_observation_error"):
+            raise DirectOperationJournalError("SOURCE_EFFECT_OBSERVATION_UNRELIABLE")
+        if record.get("first_effect_at") is not None:
+            raise DirectOperationJournalError("SOURCE_EFFECT_PREVIOUSLY_OBSERVED")
+        observed = record.get("observed_changed_paths")
+        if observed != []:
+            raise DirectOperationJournalError("SOURCE_STATE_CHANGED")
+
+        baseline = record.get("source_baseline")
+        baseline_hash = record.get("source_baseline_sha256")
+        valid_baseline_hash = source_baseline_sha256(baseline)
+        if (
+            not isinstance(baseline_hash, str)
+            or valid_baseline_hash is None
+            or valid_baseline_hash != baseline_hash
+        ):
+            raise DirectOperationJournalError("SOURCE_BASELINE_UNAVAILABLE")
+
+        cwd = record.get("cwd")
+        record_root = record.get("repo_root")
+        base_head = record.get("base_head")
+        if (
+            not isinstance(cwd, str)
+            or not cwd
+            or not isinstance(record_root, str)
+            or not record_root
+            or not isinstance(base_head, str)
+            or not base_head
+        ):
+            raise DirectOperationJournalError("SOURCE_IDENTITY_UNAVAILABLE")
+
+        current_root, current_head = _git_identity(cwd)
+        try:
+            same_root = bool(
+                isinstance(current_root, str) and os.path.samefile(record_root, current_root)
+            )
+        except OSError:
+            same_root = False
+        if not same_root or current_head != base_head:
+            raise DirectOperationJournalError("SOURCE_IDENTITY_CHANGED")
+
+        delta = observed_changed_paths_since(cwd, baseline)
+        if delta is None:
+            raise DirectOperationJournalError("SOURCE_STATE_UNAVAILABLE")
+        if delta:
+            raise DirectOperationJournalError("SOURCE_STATE_CHANGED")
+
+        return {
+            "proof_scope": "SOURCE_STATE_ONLY",
+            "repo_root": record_root,
+            "base_head": base_head,
+            "source_baseline_sha256": baseline_hash,
+            "observed_changed_paths": [],
+            "first_effect_at": None,
+        }
 
     def reconcile(
         self,
@@ -616,7 +900,36 @@ class DirectOperationJournal:
             except ValueError:
                 heartbeat_age = None
 
+        reconciled_now = utc_now()
+        extra_changes: dict[str, Any] = {
+            "reconciled_at": reconciled_now,
+        }
+        provider_pid = record.get("provider_pid")
+        provider_alive = (
+            _process_alive(provider_pid)
+            if isinstance(provider_pid, int) and provider_pid > 0
+            else False
+        )
+        if isinstance(provider_pid, int) and provider_pid > 0:
+            extra_changes["provider_process_state"] = "RUNNING" if provider_alive else "EXITED"
+
         if not pid_alive:
+            if provider_alive:
+                return self.update(
+                    operation_id,
+                    status="RUNNING",
+                    phase="RECONCILE_REQUIRED",
+                    reconciliation={
+                        "at": reconciled_now,
+                        "result": "PROVIDER_PROCESS_STILL_RUNNING",
+                        "pid_alive": False,
+                        "provider_alive_before": True,
+                        "provider_alive_after": True,
+                        "heartbeat_age_seconds": heartbeat_age,
+                        "retry_permitted": False,
+                    },
+                    **extra_changes,
+                )
             return self.mark_terminal(
                 operation_id,
                 status="OUTCOME_UNKNOWN",
@@ -624,12 +937,13 @@ class DirectOperationJournal:
                 failure_kind="PROCESS_NOT_RUNNING_WITHOUT_TERMINAL_RECEIPT",
                 cwd=record.get("cwd"),
                 reconciliation={
-                    "at": utc_now(),
+                    "at": reconciled_now,
                     "result": "OUTCOME_UNKNOWN",
                     "pid_alive": False,
                     "heartbeat_age_seconds": heartbeat_age,
                     "retry_permitted": False,
                 },
+                **extra_changes,
             )
 
         result = (
@@ -640,12 +954,13 @@ class DirectOperationJournal:
         return self.update(
             operation_id,
             reconciliation={
-                "at": utc_now(),
+                "at": reconciled_now,
                 "result": result,
                 "pid_alive": True,
                 "heartbeat_age_seconds": heartbeat_age,
                 "retry_permitted": False,
             },
+            **extra_changes,
         )
 
 

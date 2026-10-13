@@ -1,0 +1,466 @@
+#!/usr/bin/env python3
+"""Bounded wall-clock soak harness for the Nexus Hermes continuation controller.
+
+The harness is a qualification observer, not a workflow authority. It verifies
+the installed host runtime, local model endpoint, process-level controller
+behavior, and durable controller receipts across fresh invocations.
+
+Default mode is observe-only. External effects require both --mode execute and
+--allow-effect-canary. Even then, the continuation controller remains the
+effect/replay fence and nexus-agy-dispatch remains the canonical effect owner.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import tempfile
+import time
+import urllib.error
+import urllib.request
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+STATE_SCHEMA = "nexus.hermes_soak_state.v1"
+CYCLE_SCHEMA = "nexus.hermes_soak_cycle.v1"
+CLAIM_CEILING = "SOAK_QUALIFICATION_ONLY_NO_ACCEPTANCE_MERGE_RELEASE"
+
+
+class SoakError(RuntimeError):
+    pass
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _atomic_json(path: Path, value: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        "w",
+        encoding="utf-8",
+        dir=path.parent,
+        delete=False,
+    ) as handle:
+        json.dump(value, handle, ensure_ascii=False, sort_keys=True, indent=2)
+        handle.write("\n")
+        temp = Path(handle.name)
+    os.replace(temp, path)
+
+
+def _run(
+    argv: list[str],
+    *,
+    cwd: Path | None = None,
+    timeout: int = 60,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        argv,
+        cwd=str(cwd) if cwd else None,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+    )
+
+
+def _read_json_object(text: str, *, label: str) -> dict[str, Any]:
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise SoakError(f"{label}_INVALID_JSON") from exc
+    if not isinstance(value, dict):
+        raise SoakError(f"{label}_NOT_OBJECT")
+    return value
+
+
+def _load_state(state_dir: Path, run_id: str) -> dict[str, Any]:
+    path = state_dir / "state.json"
+    if not path.exists():
+        return {
+            "schema": STATE_SCHEMA,
+            "claim_ceiling": CLAIM_CEILING,
+            "run_id": run_id,
+            "next_cycle": 1,
+            "in_progress_cycle": None,
+            "completed_cycles": 0,
+            "failed": False,
+            "created_at": _now(),
+            "updated_at": _now(),
+        }
+    value = _read_json_object(path.read_text(encoding="utf-8"), label="SOAK_STATE")
+    if value.get("schema") != STATE_SCHEMA:
+        raise SoakError("SOAK_STATE_SCHEMA_MISMATCH")
+    if value.get("run_id") != run_id:
+        raise SoakError("SOAK_STATE_RUN_ID_MISMATCH")
+    return value
+
+
+def _save_state(state_dir: Path, state: dict[str, Any]) -> None:
+    state["updated_at"] = _now()
+    _atomic_json(state_dir / "state.json", state)
+
+
+def _host_status(host_sync: str) -> dict[str, Any]:
+    desired_result = _run([host_sync, "desired", "--track-ref", "main"], timeout=60)
+    if desired_result.returncode != 0:
+        raise SoakError(
+            f"HOST_SYNC_DESIRED_FAILED:{desired_result.stderr.strip() or desired_result.stdout.strip()}"
+        )
+    desired = _read_json_object(desired_result.stdout, label="HOST_SYNC_DESIRED")
+    bundle = desired.get("desired_bundle_sha256")
+    if not isinstance(bundle, str) or not bundle:
+        raise SoakError("HOST_SYNC_DESIRED_BUNDLE_MISSING")
+
+    result = _run(
+        [host_sync, "verify", "--desired-bundle-sha256", bundle],
+        timeout=30,
+    )
+    if result.returncode != 0:
+        payload = _read_json_object(result.stdout, label="HOST_SYNC_VERIFY")
+        raise SoakError(f"HOST_RUNTIME_NOT_ALIGNED:{payload.get('state')}")
+    payload = _read_json_object(result.stdout, label="HOST_SYNC_VERIFY")
+    if payload.get("state") != "ALIGNED":
+        raise SoakError(f"HOST_RUNTIME_NOT_ALIGNED:{payload.get('state')}")
+    payload["desired_revision"] = desired.get("desired_revision")
+    components = payload.get("components")
+    if not isinstance(components, dict):
+        raise SoakError("HOST_RUNTIME_COMPONENTS_MISSING")
+    for name in ("hermes_controller_guard", "hermes_continuation_controller"):
+        row = components.get(name)
+        if not isinstance(row, dict) or row.get("status") != "VERIFIED":
+            raise SoakError(f"HOST_RUNTIME_COMPONENT_NOT_VERIFIED:{name}")
+    return payload
+
+
+def _endpoint_health(endpoint: str, *, timeout: float = 3.0) -> dict[str, Any]:
+    try:
+        with urllib.request.urlopen(endpoint, timeout=timeout) as response:
+            raw = response.read()
+            status = int(getattr(response, "status", 200))
+    except (OSError, urllib.error.URLError) as exc:
+        raise SoakError(f"LOCAL_MODEL_ENDPOINT_UNAVAILABLE:{type(exc).__name__}") from exc
+    if status != 200:
+        raise SoakError(f"LOCAL_MODEL_ENDPOINT_HTTP_{status}")
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SoakError("LOCAL_MODEL_ENDPOINT_INVALID_JSON") from exc
+    if not isinstance(payload, dict):
+        raise SoakError("LOCAL_MODEL_ENDPOINT_NOT_OBJECT")
+    models = payload.get("data") or payload.get("models")
+    if not isinstance(models, list) or not models:
+        raise SoakError("LOCAL_MODEL_ENDPOINT_NO_MODELS")
+    names: list[str] = []
+    for item in models:
+        if isinstance(item, dict):
+            value = item.get("id") or item.get("name")
+            if isinstance(value, str):
+                names.append(value)
+    return {"status": "HEALTHY", "models": names}
+
+
+def _memory_health() -> dict[str, Any]:
+    command = os.getenv("NEXUS_HERMES_SOAK_MEMORY_COMMAND", "memory_pressure")
+    result = _run([command], timeout=10)
+    if result.returncode != 0:
+        return {
+            "status": "UNAVAILABLE",
+            "command": command,
+            "returncode": result.returncode,
+            "stderr": result.stderr[-1000:],
+        }
+    free_percentage = None
+    for line in result.stdout.splitlines():
+        if "System-wide memory free percentage:" in line:
+            free_percentage = line.split(":", 1)[1].strip()
+            break
+    return {
+        "status": "OBSERVED",
+        "command": command,
+        "free_percentage": free_percentage,
+    }
+
+
+def _controller_run(
+    *,
+    controller: str,
+    policy: Path,
+    repo_root: Path,
+    repository: str,
+    issue: int | None,
+    pr: int | None,
+    mode: str,
+    receipt_dir: Path,
+    controller_run_id: str,
+    max_cycles: int,
+) -> tuple[dict[str, Any], subprocess.CompletedProcess[str]]:
+    argv = [
+        controller,
+        "run",
+        "--policy",
+        str(policy),
+        "--repo-root",
+        str(repo_root),
+        "--repository",
+        repository,
+        "--mode",
+        mode,
+        "--receipt-dir",
+        str(receipt_dir),
+        "--run-id",
+        controller_run_id,
+        "--max-cycles",
+        str(max_cycles),
+    ]
+    if issue is not None:
+        argv += ["--issue", str(issue)]
+    if pr is not None:
+        argv += ["--pr", str(pr)]
+    result = _run(argv, cwd=repo_root, timeout=240)
+    payload = _read_json_object(result.stdout.strip().splitlines()[-1], label="CONTROLLER_STDOUT")
+    if result.returncode != 0:
+        raise SoakError(
+            f"CONTROLLER_FAILED:{result.returncode}:{payload.get('outcome')}:{result.stderr[-1000:]}"
+        )
+    return payload, result
+
+
+def _controller_cycle_receipt(
+    receipt_dir: Path,
+    controller_run_id: str,
+) -> tuple[Path, dict[str, Any]]:
+    run_dir = receipt_dir / controller_run_id
+    paths = sorted(run_dir.glob("cycle-*.json"))
+    if not paths:
+        raise SoakError("CONTROLLER_CYCLE_RECEIPT_MISSING")
+    path = paths[-1]
+    payload = _read_json_object(path.read_text(encoding="utf-8"), label="CONTROLLER_RECEIPT")
+    if payload.get("schema") != "nexus.hermes_controller_cycle_receipt.v1":
+        raise SoakError("CONTROLLER_RECEIPT_SCHEMA_MISMATCH")
+    return path, payload
+
+
+def _validate_controller_observation(
+    *,
+    mode: str,
+    controller_stdout: dict[str, Any],
+    controller_receipt: dict[str, Any],
+) -> None:
+    disposition = controller_receipt.get("doctor_disposition")
+    if disposition != "SAFE":
+        raise SoakError(f"CONTROLLER_DOCTOR_NOT_SAFE:{disposition}")
+    if mode == "observe" and controller_stdout.get("outcome") != "OBSERVED_ONLY":
+        raise SoakError(f"OBSERVE_MODE_UNEXPECTED_OUTCOME:{controller_stdout.get('outcome')}")
+    if mode == "execute" and controller_stdout.get("outcome") in {
+        "STOP_WAIT",
+        "STOP_BLOCKED",
+        "STOP_UNKNOWN",
+        "RECONCILED_STILL_UNKNOWN",
+        "BLOCK_UNBOUND_EFFECT_INTENT",
+    }:
+        raise SoakError(f"EXECUTE_MODE_UNSAFE_OUTCOME:{controller_stdout.get('outcome')}")
+
+
+def _cycle_path(state_dir: Path, cycle: int) -> Path:
+    return state_dir / "cycles" / f"cycle-{cycle:05d}.json"
+
+
+def run_soak(args: argparse.Namespace) -> int:
+    if args.mode == "execute" and not args.allow_effect_canary:
+        raise SoakError("EXECUTE_MODE_REQUIRES_ALLOW_EFFECT_CANARY")
+    if args.mode == "execute" and args.cycles != 1:
+        raise SoakError("EXECUTE_MODE_REQUIRES_SINGLE_CYCLE")
+
+    state_dir = Path(args.state_dir).expanduser().resolve()
+    repo_root = Path(args.repo_root).expanduser().resolve()
+    policy = Path(args.policy).expanduser().resolve()
+    receipt_dir = state_dir / "controller-receipts"
+    run_id = args.run_id
+    state = _load_state(state_dir, run_id)
+
+    target_completed = int(state.get("completed_cycles", 0)) + int(args.cycles)
+    while int(state.get("completed_cycles", 0)) < target_completed:
+        in_progress = state.get("in_progress_cycle")
+        cycle = int(in_progress or state.get("next_cycle") or 1)
+        controller_run_id = f"{run_id}-cycle-{cycle:05d}"
+
+        state["in_progress_cycle"] = cycle
+        _save_state(state_dir, state)
+
+        started = _now()
+        cycle_record: dict[str, Any] = {
+            "schema": CYCLE_SCHEMA,
+            "claim_ceiling": CLAIM_CEILING,
+            "run_id": run_id,
+            "cycle": cycle,
+            "controller_run_id": controller_run_id,
+            "mode": args.mode,
+            "started_at": started,
+            "outcome": "STARTED",
+        }
+        _atomic_json(_cycle_path(state_dir, cycle), cycle_record)
+
+        try:
+            host = _host_status(args.host_sync)
+            endpoint = _endpoint_health(args.endpoint)
+            memory = _memory_health()
+            controller_stdout, _ = _controller_run(
+                controller=args.controller,
+                policy=policy,
+                repo_root=repo_root,
+                repository=args.repository,
+                issue=args.issue,
+                pr=args.pr,
+                mode=args.mode,
+                receipt_dir=receipt_dir,
+                controller_run_id=controller_run_id,
+                max_cycles=args.controller_max_cycles,
+            )
+            receipt_path, controller_receipt = _controller_cycle_receipt(
+                receipt_dir,
+                controller_run_id,
+            )
+            _validate_controller_observation(
+                mode=args.mode,
+                controller_stdout=controller_stdout,
+                controller_receipt=controller_receipt,
+            )
+            cycle_record.update({
+                "outcome": "PASS",
+                "finished_at": _now(),
+                "host_runtime": {
+                    "state": host.get("state"),
+                    "installed_revision": host.get("installed_revision"),
+                    "installed_bundle_sha256": host.get("installed_bundle_sha256"),
+                    "hermes_controller_guard": (host.get("components") or {}).get(
+                        "hermes_controller_guard"
+                    ),
+                    "hermes_continuation_controller": (host.get("components") or {}).get(
+                        "hermes_continuation_controller"
+                    ),
+                },
+                "local_model": endpoint,
+                "memory": memory,
+                "controller_stdout": controller_stdout,
+                "controller_receipt_path": str(receipt_path),
+                "controller_receipt_hash": controller_receipt.get("receipt_hash"),
+                "doctor_disposition": controller_receipt.get("doctor_disposition"),
+                "next_gate": controller_receipt.get("next_gate"),
+            })
+            _atomic_json(_cycle_path(state_dir, cycle), cycle_record)
+            state["completed_cycles"] = int(state.get("completed_cycles", 0)) + 1
+            state["next_cycle"] = cycle + 1
+            state["in_progress_cycle"] = None
+            state["failed"] = False
+            state.pop("failure_cycle", None)
+            state.pop("failure", None)
+            _save_state(state_dir, state)
+        except Exception as exc:
+            cycle_record.update({
+                "outcome": "FAIL",
+                "finished_at": _now(),
+                "error": type(exc).__name__,
+                "detail": str(exc),
+            })
+            _atomic_json(_cycle_path(state_dir, cycle), cycle_record)
+            state["failed"] = True
+            state["failure_cycle"] = cycle
+            state["failure"] = str(exc)
+            _save_state(state_dir, state)
+            print(
+                json.dumps(
+                    {
+                        "run_id": run_id,
+                        "outcome": "SOAK_FAILED",
+                        "cycle": cycle,
+                        "detail": str(exc),
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 3
+
+        if int(state.get("completed_cycles", 0)) < target_completed and args.interval_seconds > 0:
+            time.sleep(args.interval_seconds)
+
+    print(
+        json.dumps(
+            {
+                "run_id": run_id,
+                "outcome": "SOAK_SEGMENT_PASS",
+                "completed_cycles": state.get("completed_cycles"),
+                "next_cycle": state.get("next_cycle"),
+                "state_dir": str(state_dir),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--policy", required=True)
+    parser.add_argument("--repo-root", required=True)
+    parser.add_argument("--repository", default="James3014/Nexus-new")
+    parser.add_argument("--issue", type=int)
+    parser.add_argument("--pr", type=int)
+    parser.add_argument(
+        "--controller",
+        default=os.getenv(
+            "NEXUS_HERMES_CONTINUATION_CONTROLLER_TARGET",
+            str(Path.home() / ".local/bin/nexus-hermes-continuation-controller"),
+        ),
+    )
+    parser.add_argument(
+        "--host-sync",
+        default=os.getenv(
+            "NEXUS_HOST_SYNC_TARGET",
+            str(Path.home() / ".local/bin/nexus-host-sync"),
+        ),
+    )
+    parser.add_argument(
+        "--endpoint",
+        default=os.getenv(
+            "NEXUS_HERMES_LOCAL_MODELS_ENDPOINT",
+            "http://127.0.0.1:8000/v1/models",
+        ),
+    )
+    parser.add_argument("--state-dir", required=True)
+    parser.add_argument("--run-id", default=f"soak-{uuid.uuid4().hex[:10]}")
+    parser.add_argument("--cycles", type=int, default=1)
+    parser.add_argument("--interval-seconds", type=float, default=300.0)
+    parser.add_argument("--mode", choices=["observe", "execute"], default="observe")
+    parser.add_argument("--allow-effect-canary", action="store_true")
+    parser.add_argument("--controller-max-cycles", type=int, default=3)
+    return parser
+
+
+def main() -> int:
+    args = build_parser().parse_args()
+    if args.cycles < 1:
+        print(json.dumps({"outcome": "SOAK_ERROR", "detail": "cycles must be >= 1"}))
+        return 2
+    try:
+        return run_soak(args)
+    except (OSError, SoakError, subprocess.TimeoutExpired, ValueError) as exc:
+        print(
+            json.dumps(
+                {
+                    "outcome": "SOAK_ERROR",
+                    "error": type(exc).__name__,
+                    "detail": str(exc),
+                },
+                sort_keys=True,
+            )
+        )
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

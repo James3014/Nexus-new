@@ -427,12 +427,30 @@ def main() -> int:
     except (GateError, subprocess.CalledProcessError) as exc: p.error(str(exc))
     return 0
 GATEWAY_LABEL = "com.nexus.mcp.gateway.direct"
-GATEWAY_PLIST = Path(
-    os.environ.get(
-        "NEXUS_GATEWAY_PLIST",
-        "/Users/jameschen/Library/LaunchAgents/com.nexus.mcp.gateway.direct.plist",
-    )
-)
+GATEWAY_PLIST_ENV = "NEXUS_GATEWAY_PLIST"
+GATEWAY_PLIST_FILENAME = f"{GATEWAY_LABEL}.plist"
+
+
+def _derive_gateway_plist(
+    environ: Mapping[str, str] | None = None,
+    home: Path | None = None,
+) -> Path:
+    """Derive the direct-Gateway plist from the running user's home (#1940).
+
+    An explicit, non-empty ``NEXUS_GATEWAY_PLIST`` wins; otherwise the path is
+    ``~/Library/LaunchAgents/com.nexus.mcp.gateway.direct.plist`` for the
+    current user.  This only chooses the candidate path: R1 still requires it
+    to equal the receipt-bound ``plist_path`` before any recovery effect.
+    """
+    env = os.environ if environ is None else environ
+    override = env.get(GATEWAY_PLIST_ENV)
+    if override:
+        return Path(override)
+    base = Path.home() if home is None else Path(home)
+    return base / "Library/LaunchAgents" / GATEWAY_PLIST_FILENAME
+
+
+GATEWAY_PLIST = _derive_gateway_plist()
 # R1 binds the interpreter that is physically running the fixed manager.
 # It must never fall back to a historical host path or accept a caller-selected
 # interpreter environment override.  The pure contract validates the observed
@@ -451,6 +469,7 @@ GATEWAY_SOURCE_BUNDLES_ROOT = GATEWAY_STATE_ROOT / "source-bundles"
 GATEWAY_PREDECESSOR_ARTIFACT_ROOT = GATEWAY_STATE_ROOT / "predecessor-artifacts"
 GATEWAY_REPOSITORY = GATEWAY_STATE_ROOT / "repository.git"
 _R1_PERSISTENT_FSCK_TIMEOUT_SECONDS = 120
+_R1_AUTHORITY_FETCH_TIMEOUT_SECONDS = 300
 GATEWAY_RECOVERY_AUTHORITY_STORE = GATEWAY_STATE_ROOT / "recovery-authority.json"
 GATEWAY_RECOVERY_MATERIALIZATION_ROOT = GATEWAY_STATE_ROOT / "recovery-materializations"
 RECOVERY_AUTHORITY_SOURCE_PATH = RECOVERY_RECEIPT_PATH
@@ -1327,16 +1346,62 @@ def _r1_create_or_verify_bundle(
         source = scratch / "source.git"
         candidate = scratch / "candidate.bundle"
         _r1_run("git", "init", "--bare", str(source))
-        for (role, ref), commit in zip(_R1_ROLE_REFS, expected, strict=True):
-            source_root = (
-                predecessor_store
-                if role == "predecessor"
-                else Path(HOST_AUTHORITY_SOURCE_ROOT)
-            )
+        git = ("git", "--git-dir", str(source))
+        refs = dict(_R1_ROLE_REFS)
+        # The fixed authority mirror may be shallow: fetching from it exits 0
+        # without writing the role ref, and update-ref alone would bundle
+        # truncated history.  Read complete fresh-main history only from the
+        # fixed remote ref and require it to still be the observed fresh main.
+        _r1_run(
+            *git,
+            "fetch",
+            "--no-tags",
+            HOST_AUTHORITY_REMOTE,
+            f"+{HOST_AUTHORITY_REF}:{refs['fresh-main']}",
+            timeout=_R1_AUTHORITY_FETCH_TIMEOUT_SECONDS,
+        )
+        if (
             _r1_run(
-                "git", "--git-dir", str(source), "fetch", "--no-tags",
-                str(source_root), f"+{commit}:{ref}",
+                *git,
+                "rev-parse",
+                "--verify",
+                "--end-of-options",
+                f"{refs['fresh-main']}^{{commit}}",
             )
+            != fresh_main
+        ):
+            raise _gateway_error("R1 fixed remote main moved during bundle construction")
+        try:
+            _r1_run(*git, "merge-base", "--is-ancestor", receipt.desired_commit, fresh_main)
+        except GatewayContractError as exc:
+            raise _gateway_error("R1 bundle desired outside fresh main", exc) from exc
+        # Name desired by fetching it from the scratch repository itself: the
+        # complete history is already present, the non-forced refspec only
+        # creates the role ref, and no Git ref-writer primitive is introduced.
+        _r1_run(
+            *git,
+            "fetch",
+            "--no-tags",
+            str(source),
+            f"{receipt.desired_commit}:{refs['desired']}",
+        )
+        _r1_run(
+            *git,
+            "fetch",
+            "--no-tags",
+            str(predecessor_store),
+            f"+{receipt.predecessor_commit}:{refs['predecessor']}",
+        )
+        if str(
+            _r1_run(
+                *git,
+                "for-each-ref",
+                "--format=%(refname) %(objectname)",
+            )
+        ).splitlines() != sorted(
+            f"{ref} {commit}" for (_, ref), commit in zip(_R1_ROLE_REFS, expected, strict=True)
+        ):
+            raise _gateway_error("R1 bundle role ref set mismatch")
         _r1_run(
             "git", "--git-dir", str(source), "bundle", "create",
             str(candidate), *(ref for _, ref in _R1_ROLE_REFS),
@@ -2063,37 +2128,38 @@ def _r1_replace_value_store_cas(
     ):
         raise _gateway_error("R1 successor materialization payload size invalid")
     path = _safe_store_path(path, leaf_mode=0o600, create=True)
-    try:
-        current = path.read_bytes()
-    except OSError as exc:
-        raise _gateway_error("R1 successor materialization store missing", exc) from exc
-    if current == target:
-        return current
-    if current != expected:
-        raise _gateway_error("R1 successor materialization store CAS conflict")
+    # #1958 F3: the re-read, compare, write, replace and readback form one
+    # critical section under the gateway lock (reentrant, so materialization
+    # callers that already hold it are unaffected). Without it two writers can
+    # both pass the compare and the later os.replace silently drops history.
+    with InterProcessLock(GATEWAY_LOCK):
+        try:
+            current = path.read_bytes()
+        except OSError as exc:
+            raise _gateway_error("R1 successor materialization store missing", exc) from exc
+        if current == target:
+            return current
+        if current != expected:
+            raise _gateway_error("R1 successor materialization store CAS conflict")
 
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
-    try:
-        os.chmod(tmp, 0o600)
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(target)
-            handle.flush()
-            os.fsync(handle.fileno())
-        if path.read_bytes() != expected:
-            raise _gateway_error(
-                "R1 successor materialization store CAS conflict"
-            )
-        os.replace(tmp, path)
-        _fsync_dir(path.parent)
-    finally:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
-    written = path.read_bytes()
-    if written != target:
-        raise _gateway_error(
-            "R1 successor materialization write identity mismatch"
-        )
-    return written
+        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+        try:
+            os.chmod(tmp, 0o600)
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(target)
+                handle.flush()
+                os.fsync(handle.fileno())
+            if path.read_bytes() != expected:
+                raise _gateway_error("R1 successor materialization store CAS conflict")
+            os.replace(tmp, path)
+            _fsync_dir(path.parent)
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+        written = path.read_bytes()
+        if written != target:
+            raise _gateway_error("R1 successor materialization write identity mismatch")
+        return written
 
 
 def _r1_materialize_recovery_store_pair(
@@ -2661,6 +2727,61 @@ def _reserve_post_effect_reconcile_attempt(
 
 
 
+R1_CONCURRENT_RECOVERY_FORBIDDEN = "R1_CONCURRENT_RECOVERY_FORBIDDEN"
+
+
+def _derive_terminal_recovery_states() -> frozenset[DeploymentState]:
+    """States with no legal successor in the contract state machine."""
+    from nexus.contracts.gateway_deployment import transition
+
+    terminal: set[DeploymentState] = set()
+    for previous in DeploymentState:
+        has_exit = False
+        for current in DeploymentState:
+            try:
+                transition(previous, current)
+            except ContractError:
+                continue
+            has_exit = True
+            break
+        if not has_exit:
+            terminal.add(previous)
+    return frozenset(terminal)
+
+
+# Derived, not hand-listed: VERIFIED, ROLLED_BACK and BLOCKED today.
+R1_TERMINAL_RECOVERY_STATES = _derive_terminal_recovery_states()
+
+
+def _refuse_concurrent_r1_recovery_unlocked(rows: list[dict[str, Any]], request_id: str) -> None:
+    """Refuse a NEW R1 request while any other R1 request is non-terminal.
+
+    ``rows`` must come from ``GatewayLedger._scan_unlocked`` under the ledger
+    lock. Continuing or reconciling ``request_id`` itself is always allowed.
+    """
+    last_state: dict[str, str] = {}
+    for row in rows:
+        if (
+            row["schema"] == "nexus.gateway.ledger.v2"
+            or row["effect_class"] == EffectClass.GATEWAY_DURABLE_RECOVERY.value
+        ):
+            last_state[row["request_id"]] = row["state"]
+    if request_id in last_state:
+        return
+    open_requests = sorted(
+        other
+        for other, state in last_state.items()
+        if DeploymentState(state) not in R1_TERMINAL_RECOVERY_STATES
+    )
+    if open_requests:
+        raise GatewayContractError(
+            f"{R1_CONCURRENT_RECOVERY_FORBIDDEN}: new R1 request {request_id} "
+            "refused while R1 request(s) "
+            + ", ".join(f"{other}={last_state[other]}" for other in open_requests)
+            + " are non-terminal"
+        )
+
+
 class GatewayLedger:
     """Bounded JSONL state ledger with sequence, parent, self-hash, and CAS."""
 
@@ -2924,6 +3045,26 @@ class GatewayLedger:
             return self._append_recovery_unlocked(rows, record)
 
     def _append_recovery_unlocked(
+        self,
+        rows: list[dict[str, Any]],
+        record: RecoveryLedgerRecord,
+    ) -> RecoveryLedgerRecord:
+        if record.state is DeploymentState.REQUESTED:
+            # #1958 F1/F2: the single sink every R1 caller (bootstrap, stdio
+            # host, direct import) passes before a request first exists.
+            # Re-enter the ledger lock (reentrant for callers that hold it),
+            # re-scan, and refuse a new request while another is non-terminal.
+            with InterProcessLock(self.lock_path):
+                current = self._scan_unlocked()
+                if (current[-1]["record_hash"] if current else "") != (
+                    rows[-1]["record_hash"] if rows else ""
+                ):
+                    raise GatewayContractError("recovery ledger compare-and-swap conflict")
+                _refuse_concurrent_r1_recovery_unlocked(current, record.request_id)
+                return self._write_recovery_unlocked(rows, record)
+        return self._write_recovery_unlocked(rows, record)
+
+    def _write_recovery_unlocked(
         self,
         rows: list[dict[str, Any]],
         record: RecoveryLedgerRecord,
@@ -3273,11 +3414,9 @@ def _recovery_wrapper_command(root: str) -> str:
         for token in (";", "&&", "|", "$", "`", "\n", "\r", "\x00")
     ):
         raise _gateway_error("R1 recovery wrapper path contains shell metacharacter")
-    state_dir = (
-        Path.home() / "Workspace/Nexus-new-self-hosted-state"
-        if (Path.home() / "Workspace/Nexus-new-self-hosted-state").exists()
-        else (Path.home() / "workspace/Nexus-new-self-hosted-state")
-    )
+    # Durable lifecycle and research evidence belong to host state storage,
+    # never an incidental directory under the repository workspace (#1539).
+    state_dir = Path.home() / ".local/state/Nexus-new-self-hosted-state"
     return (
         f'cd "{root_path}" ; source "{ENV_PATH}" ; export PYTHONDONTWRITEBYTECODE=1 ; '
         f'export NEXUS_CANONICAL_SOURCE_ROOT="{root_path}" ; '
@@ -4015,10 +4154,56 @@ def _production_recovery_adapters(
     )
 
 
+R1_IN_PROCESS_SELF_REPLACEMENT_FORBIDDEN = "R1_IN_PROCESS_SELF_REPLACEMENT_FORBIDDEN"
+R1_OUT_OF_PROCESS_ACTUATOR = "scripts/ops/nexus_gateway_recovery_actuator_bootstrap.py"
+
+
+def _r1_in_process_self_replacement_signals(
+    environ: Mapping[str, str] | None = None,
+    main_module: Any = None,
+) -> tuple[str, ...]:
+    """Return why this process is (or belongs to) the Gateway R1 would boot out.
+
+    The R1 effect runs ``launchctl bootout`` on ``GATEWAY_LABEL`` before it
+    rewrites the plist and bootstraps the desired generation.  Running that
+    inside the Gateway service (or any child that inherited its launchd job)
+    would kill the actuator mid-effect, so either signal is disqualifying:
+
+    * launchd exports ``XPC_SERVICE_NAME=<label>`` to every process of a job;
+    * the process ``__main__`` is the fixed Gateway HTTP entrypoint.
+    """
+    env = os.environ if environ is None else environ
+    signals: list[str] = []
+    if env.get("XPC_SERVICE_NAME") == GATEWAY_LABEL:
+        signals.append("LAUNCHD_JOB_LABEL")
+    main = sys.modules.get("__main__") if main_module is None else main_module
+    main_file = getattr(main, "__file__", None)
+    if isinstance(main_file, str) and Path(main_file).as_posix().endswith("/" + GATEWAY_ENTRYPOINT):
+        signals.append("GATEWAY_ENTRYPOINT_PROCESS")
+    return tuple(signals)
+
+
+def _refuse_in_process_self_replacement() -> None:
+    signals = _r1_in_process_self_replacement_signals()
+    if signals:
+        raise _gateway_error(
+            f"{R1_IN_PROCESS_SELF_REPLACEMENT_FORBIDDEN}: the R1 effect would "
+            f"boot out {GATEWAY_LABEL} from inside its own process "
+            f"({','.join(signals)}); run the out-of-process actuator "
+            f"{R1_OUT_OF_PROCESS_ACTUATOR} instead"
+        )
+
+
 def _gateway_recover_live(
     request: GatewayRecoveryRequest | Mapping[str, Any],
 ) -> GatewayReconcileOutcome:
-    """Manager-local R1 host seam; deliberately absent from public CLI/MCP dispatch."""
+    """Manager-local R1 host seam; deliberately absent from public CLI/MCP dispatch.
+
+    It refuses before any ledger write or host effect when called inside the
+    Gateway service it would replace (#1940); the sole lawful caller of the
+    effect is the out-of-process bootstrap actuator.
+    """
+    _refuse_in_process_self_replacement()
     try:
         typed = GatewayRecoveryRequest.model_validate(request)
         validate_recovery_request(typed)

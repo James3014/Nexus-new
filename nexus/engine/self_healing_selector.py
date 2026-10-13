@@ -1,9 +1,15 @@
-from typing import Any, Dict, List, Optional, Tuple
 import logging
-from nexus.learning.latent_predictor_v20 import LatentPredictorV20
+from typing import Any, Dict, List, Optional
+
 from nexus.core.ash_matrix import ASHMatrix
 from nexus.core.ash_template_resolver import ASHTemplateResolver
-from nexus.core.ash_contracts import ASHExecutionPlan
+from nexus.learning.latent_predictor_v20 import LatentPredictorV20
+from nexus.learning.predictor_toggle import (
+    LATENT_PREDICTOR,
+    influence_entry,
+    predictor_enabled,
+    record_influence,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -13,10 +19,11 @@ class SelfHealingSelector:
     職責: 基於外部注入的 ASH Matrix 與 Template Resolver，對蜂群失敗進行戰略計畫編排。
     """
     
-    def __init__(self, predictor: LatentPredictorV20, matrix: ASHMatrix, resolver: ASHTemplateResolver):
+    def __init__(self, predictor: Optional[LatentPredictorV20], matrix: ASHMatrix, resolver: ASHTemplateResolver):
         self.predictor = predictor
         self.matrix = matrix
         self.resolver = resolver # 注入解析器內容及性能。
+        self.last_influence: Optional[Dict[str, Any]] = None
 
     def rank_strategies(self, task_desc: str, failure_context: str, env: str = "dev") -> List[Dict[str, Any]]:
         """
@@ -25,6 +32,9 @@ class SelfHealingSelector:
         logger.info("📡 [ASH:v24] Ranking self-healing strategies for failure: %s", task_desc[:50])
         
         ranked = []
+        predictor = self.predictor if predictor_enabled(LATENT_PREDICTOR) else None
+        use_predictor = predictor is not None
+        baseline = []
         context = {"env": env, "task_desc": task_desc, "failure_context": failure_context}
         
         for s_id, strat in self.matrix.strategies.items():
@@ -36,12 +46,24 @@ class SelfHealingSelector:
                 logger.warning("⚠️ [ASHSelector] Skipping strategy [%s] due to resolution error: %s", s_id, e)
                 continue
 
+            baseline.append({"strategy": s_id, "success_prob": round(strat.success_base, 2)})
+            if predictor is None:
+                # Predictor absent: rank by the matrix prior alone.
+                ranked.append({
+                    "strategy": s_id,
+                    "success_prob": round(strat.success_base, 2),
+                    "prediction": None,
+                    "risk_status": "NOT_EVALUATED",
+                    "plan": plan,
+                })
+                continue
+
             # 2. 物理對位：預測 ROI
-            prediction = self.predictor.forecast_roi(f"Self-heal via {s_id}: {task_desc}")
+            prediction = predictor.forecast_roi(f"Self-heal via {s_id}: {task_desc}")
             success_prob = strat.success_base * prediction["roi_score"]
             
             # 3. 風險懲罰內容及其性質分析。內容、及性能。
-            risk = self.predictor.predict_risk(failure_context)
+            risk = predictor.predict_risk(failure_context)
             if risk["status"] == "CAUTION":
                 success_prob *= (1.0 - risk["reject_prob"])
                 
@@ -53,7 +75,22 @@ class SelfHealingSelector:
                 "plan": plan # 帶回完整的 ASHExecutionPlan 對象其性能內容分析性能。性能分析。
             })
             
-        return sorted(ranked, key=lambda x: x["success_prob"], reverse=True)
+        ranked = sorted(ranked, key=lambda x: x["success_prob"], reverse=True)
+        baseline = sorted(baseline, key=lambda x: x["success_prob"], reverse=True)
+        base_order = [b["strategy"] for b in baseline]
+        final_order = [r["strategy"] for r in ranked]
+        self.last_influence = record_influence(
+            influence_entry(
+                LATENT_PREDICTOR,
+                enabled=use_predictor,
+                consulted=use_predictor and bool(ranked),
+                before=base_order[0] if base_order else None,
+                after=final_order[0] if final_order else None,
+                site="self_healing_selector",
+            )
+            | {"before_order": base_order, "after_order": final_order}
+        )
+        return ranked
 
     def trigger_ash(self, node_id: str, task_desc: str, failure_context: str, env: str = "dev") -> Dict[str, Any]:
         """
@@ -76,17 +113,18 @@ class SelfHealingSelector:
             "selected_strategy": best_plan.strategy_id,
             "confidence": best_candidate["success_prob"],
             "plan": best_plan,
-            "candidates": candidates
+            "candidates": candidates,
+            "predictor_influence": self.last_influence,
         }
 
 def get_self_healing_selector(root: str = ".", env: str = "dev") -> SelfHealingSelector:
     """物理工廠：升級為具備 Resolver 注入之自癒選擇器具現化入口。"""
-    from nexus.learning.latent_predictor_v20 import get_latent_forecaster
     from nexus.core.ash_matrix import ASHMatrixLoader
     from nexus.core.ash_template_loader import ASHTemplateLoader
     from nexus.core.ash_template_resolver import ASHTemplateResolver
+    from nexus.learning.latent_predictor_v20 import get_latent_forecaster
     
-    predictor = get_latent_forecaster(root)
+    predictor = get_latent_forecaster(root) if predictor_enabled(LATENT_PREDICTOR) else None
     matrix = ASHMatrixLoader.load(root, env=env)
     
     # Phase 4: 載入模板並具現化解析器其性能及對度解析內容及其對等內容分析性能。性能分析。

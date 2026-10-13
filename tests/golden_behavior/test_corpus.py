@@ -122,3 +122,69 @@ def test_gb082_hostile_preference_directive_is_not_authority() -> None:
     assert result["records"][0]["decision"] == "ALLOW"
     assert result["records"][0]["provider"] == "agy"
     assert result["records"][0]["model"] == "gemini-3.6-flash-high"
+
+
+def test_corpus_extension_gb084_to_gb100_is_bound() -> None:
+    ids = [case.case_id for case in CASES]
+    assert len(CASES) == 100
+    assert ids == [f"GB-{index:03d}" for index in range(1, 101)]
+    by_id = {case.case_id: case for case in CASES}
+    for index in (*range(84, 98), 99, 100):
+        case = by_id[f"GB-{index:03d}"]
+        assert case.status == "covered"
+        assert case.finding_id is None
+        assert case.automated_tests
+    new_findings = {"GB-098": "GBF-007"}
+    for case_id, finding_id in new_findings.items():
+        case = by_id[case_id]
+        assert case.status == "finding"
+        assert case.finding_id == finding_id
+        assert case.automated_tests == ()
+        assert "2026-10-12" in FINDINGS[finding_id]
+    assert "GBF-006" not in FINDINGS
+    assert "GBF-008" not in FINDINGS
+    assert "GBF-009" not in FINDINGS
+
+
+def test_stale_owner_findings_are_refreshed_but_not_promoted() -> None:
+    by_id = {case.case_id: case for case in CASES}
+    case = by_id["GB-077"]
+    assert case.status == "finding"
+    assert case.finding_id == "GBF-002"
+    assert case.automated_tests == ()
+    assert case.finding_probe == "gb077_live_gateway_identity"
+    finding = FINDINGS["GBF-002"]
+    for fragment in (
+        "2026-08-17",
+        "#117",
+        "gb077_live_gateway_identity",
+        "RUNTIME_IDENTITY_PROBE",
+        "Latest host observation 2026-10-13",
+    ):
+        assert fragment in finding
+    assert "remains open" not in finding
+
+
+def test_gb079_reconciled_to_covered_with_exact_negative_witnesses() -> None:
+    case = next(case for case in CASES if case.case_id == "GB-079")
+    assert case.status == "covered"
+    assert case.finding_id is None
+    assert case.finding_probe is None
+    assert "GBF-004" not in FINDINGS
+    assert "https://github.com/James3014/Nexus-new/issues/31" in case.authority_sources
+    prefix = "tests/core/test_task_continuity.py::"
+    required = {
+        "test_snapshot_tail_matches_projection",
+        "test_canonical_attempt_records_round_trip_protected_continuity_fields",
+        "test_resume_rejects_stale_snapshot_source_or_contract_revision[source_revision-src-stale]",
+        "test_resume_rejects_stale_snapshot_source_or_contract_revision[contract_revision-contract-stale]",
+        "test_resume_rejects_substituted_snapshot_hash_with_correct_identity",
+        "test_resume_rejects_cross_task_or_attempt_tail_event[cross_task]",
+        "test_resume_rejects_cross_task_or_attempt_tail_event[cross_attempt]",
+        "test_project_rejects_event_hash_tamper",
+        "test_forged_snapshot_is_rejected_without_optional_hash",
+        "test_resume_rejects_tail_revision_drift[source_revision]",
+        "test_resume_rejects_tail_revision_drift[contract_revision]",
+    }
+    assert {prefix + name for name in required} <= set(case.automated_tests)
+    assert len(case.automated_tests) == len(set(case.automated_tests)) == 20

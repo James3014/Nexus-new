@@ -2,6 +2,15 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import logging
 
+import warnings as _archived_warnings
+
+_archived_warnings.warn(
+    "ARCHIVED 2026-10-12 (#1850): checkpoint never loaded; predictor ablation measured consulted=0 / changed_decision=0 (PR #1831); see ARCHIVED_2026-10-12.md. "
+    "Scheduled for deletion; do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 try:
     import torch  # type: ignore
 except ModuleNotFoundError:  # pragma: no cover - optional dependency

@@ -2,8 +2,9 @@
 """Consumer verification for Repository Intelligence terminal advisory evidence (#1200).
 
 Consumes the terminal evidence produced by
-`James3014/repository-intelligence-engine/terminal@b1a0bd882e37a08a3a540947ae767a23d752bd67`
-(repository-intelligence-engine#32 / PR #34).
+`James3014/repository-intelligence-engine/terminal@88285acf570688befbc8e36eb73f46987171bd4e`
+(repository-intelligence-engine main 2026-10-08: #32/#34 terminal observation plus the
+#45/#48 bounded installation rate-limit retry).
 
 Preserves artifact upload and exact review identity (repository, PR number, head SHA,
 base SHA, current main SHA) while gracefully representing advisory timeout / incomplete
@@ -30,7 +31,7 @@ TERMINAL_OBSERVATION_SCHEMA = "reviewer.repository_intelligence_terminal_observa
 TERMINAL_SNAPSHOT_SEMANTICS = "OBSERVED_CHECK_SET_TERMINAL_AFTER_QUIESCENCE"
 CLOUD_SCHEMA = "reviewer.repository_intelligence_cloud.v1"
 
-PINNED_ACTION_COMMIT = "b1a0bd882e37a08a3a540947ae767a23d752bd67"
+PINNED_ACTION_COMMIT = "88285acf570688befbc8e36eb73f46987171bd4e"
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
 SHA64 = re.compile(r"^[0-9a-f]{64}$")
 

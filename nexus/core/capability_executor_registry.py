@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import dataclasses
 import hashlib
 import json
 import logging
@@ -345,6 +346,31 @@ def _auth_blocked_receipt(
     )
 
 
+def _archived_receipt(
+    cap_name: str, plan: CapabilityExecutionPlan, task_desc: str = ""
+) -> CapabilityReceipt:
+    """Receipt-visible fail-closed result for a capability archived 2026-10-12 or 2026-10-13."""
+    from nexus.services.capability_registry import ARCHIVED_CAPABILITY_REASONS
+
+    reason = ARCHIVED_CAPABILITY_REASONS[cap_name]
+    return _make_receipt(
+        cap_name,
+        plan,
+        invoked=False,
+        gate_passed=False,
+        wall_time_ms=0,
+        outcome=_structured_outcome(
+            action="archived",
+            semantic_status="BLOCKED",
+            error=reason,
+            evidence_refs=[f"ev_archived_{cap_name}_{plan.task_id}"],
+            skip_reason=reason,
+            archived=True,
+            task_hint=str(task_desc or "")[:80],
+        ),
+    )
+
+
 def _resolve_run_root(plan: CapabilityExecutionPlan) -> tuple[Path, Path, str]:
     constraints = plan.constraints or {}
     project_root = Path(str(constraints.get("project_root", ".")))
@@ -448,63 +474,6 @@ def _exec_mempalace(plan: CapabilityExecutionPlan, task_desc: str) -> Capability
     except Exception as exc:
         elapsed = int((time.monotonic() - start) * 1000)
         return _make_receipt("mempalace", plan, invoked=False, gate_passed=False, wall_time_ms=elapsed,
-                             outcome={"error": str(exc)})
-
-
-def _exec_policy_capability_gate(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    start = time.monotonic()
-    fn = _try_import_class("nexus.services.policy_gate", "apply_policy_gate")
-    if fn is None:
-        return _make_receipt("policy_capability_gate", plan, invoked=False, gate_passed=False,
-                             outcome={"error": "apply_policy_gate not importable"})
-    try:
-        from pathlib import Path
-        result = fn(
-            route_id=plan.plan_id,
-            original_score=plan.constraints.get("original_score", 0.85),
-            phase=plan.phases[0] if plan.phases else "S",
-            health_metrics={"memory_usage": 0.5, "cpu_usage": 0.3, "error_rate": 0.01},
-            repo_root=Path("/tmp"),
-        )
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("policy_capability_gate", plan, wall_time_ms=elapsed,
-                             outcome={"result": str(result)[:200]})
-    except Exception as exc:
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("policy_capability_gate", plan, invoked=False, gate_passed=False, wall_time_ms=elapsed,
-                             outcome={"error": str(exc)})
-
-
-def _exec_entropy_guard_v2(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    start = time.monotonic()
-    cls = _try_import_class("nexus.services.entropy_v2", "EntropyGuardV2")
-    if cls is None:
-        return _make_receipt("entropy_guard_v2", plan, invoked=False, gate_passed=False,
-                             outcome={"error": "EntropyGuardV2 not importable"})
-    try:
-        inst = cls()
-        result = inst.audit_payload(task_desc or "no-op")
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("entropy_guard_v2", plan, wall_time_ms=elapsed,
-                             outcome={"entropy_ok": result.get("passed", True)})
-    except Exception as exc:
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("entropy_guard_v2", plan, invoked=False, gate_passed=False, wall_time_ms=elapsed,
-                             outcome={"error": str(exc)})
-
-
-def _exec_zero_trust_v2_behavior(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    start = time.monotonic()
-    try:
-        from nexus.learning.zero_trust_v2_behavior_adapter import build_behavior_runner_adapter
-        item = {"task_id": plan.task_id, "plan_id": plan.plan_id, "description": task_desc}
-        inst = build_behavior_runner_adapter(item=item)
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("zero_trust_v2_behavior", plan, wall_time_ms=elapsed,
-                             outcome={"function_called": True})
-    except Exception as exc:
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("zero_trust_v2_behavior", plan, invoked=False, gate_passed=False, wall_time_ms=elapsed,
                              outcome={"error": str(exc)})
 
 
@@ -668,65 +637,6 @@ def _exec_autonomic_router(plan: CapabilityExecutionPlan, task_desc: str) -> Cap
         )
 
 
-def _exec_predictive_auditor(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    start = time.monotonic()
-    cls = _try_import_class("nexus.services.predictive_audit", "PredictiveAuditor")
-    if cls is None:
-        return _make_receipt("predictive_auditor", plan, invoked=False, gate_passed=False,
-                             outcome={"error": "PredictiveAuditor not importable"})
-    try:
-        inst = cls()
-        result = inst.audit_risk({"task_id": plan.task_id, "constraints": dict(plan.constraints)})
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("predictive_auditor", plan, wall_time_ms=elapsed,
-                             outcome={"risk_score": str(result.get("risk_score", "N/A"))[:100]})
-    except Exception as exc:
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("predictive_auditor", plan, invoked=False, gate_passed=False, wall_time_ms=elapsed,
-                             outcome={"error": str(exc)})
-
-
-def _exec_spec_guarded(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    start = time.monotonic()
-    cls = _try_import_class("nexus.services.spec_guard_v2", "SpecGuardV2")
-    if cls is None:
-        return _make_receipt("spec_guarded", plan, invoked=False, gate_passed=False,
-                             outcome={"error": "SpecGuardV2 not importable"})
-    try:
-        inst = cls()
-        result = inst.validate_diagnosis({"task_id": plan.task_id}, dict(plan.constraints))
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("spec_guarded", plan, wall_time_ms=elapsed,
-                             outcome={"validated": str(result.get("validated", True))})
-    except Exception as exc:
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("spec_guarded", plan, invoked=False, gate_passed=False, wall_time_ms=elapsed,
-                             outcome={"error": str(exc)})
-
-
-def _exec_decision_formula_engine(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    start = time.monotonic()
-    cls = _try_import_class("nexus.services.decision_formula_engine", "DecisionFormulaEngine")
-    if cls is None:
-        return _make_receipt("decision_formula_engine", plan, invoked=False, gate_passed=False,
-                             outcome={"error": "DecisionFormulaEngine not importable"})
-    try:
-        context = {
-            "task_id": plan.task_id,
-            "plan_id": plan.plan_id,
-            "constraints": dict(plan.constraints),
-            "description": task_desc,
-        }
-        inst = cls(context=context)
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("decision_formula_engine", plan, wall_time_ms=elapsed,
-                             outcome={"class_instantiated": True, "context_keys": list(context.keys())})
-    except Exception as exc:
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("decision_formula_engine", plan, invoked=False, gate_passed=False, wall_time_ms=elapsed,
-                             outcome={"error": str(exc)})
-
-
 # ─── X-phase ──────────────────────────────────────────────────────────────────
 
 def _exec_codeintel(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
@@ -808,6 +718,7 @@ def _exec_lancedb(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRe
     start = time.monotonic()
     try:
         from pathlib import Path
+        from nexus.services.lancedb_roots import KNOWLEDGE, resolve_lancedb_root
         from nexus.services.memory_repository import MemoryRepository
 
         constraints = dict(plan.constraints or {})
@@ -815,7 +726,7 @@ def _exec_lancedb(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRe
         query = str(constraints.get("search_query") or task_desc or "").strip()
         table = str(constraints.get("search_table") or "policy").strip()
         limit = max(1, min(20, int(constraints.get("search_limit") or 5)))
-        repository = MemoryRepository(root / ".nexus" / "knowledge" / "lancedb")
+        repository = MemoryRepository(resolve_lancedb_root(KNOWLEDGE, root, honor_env=False))
         frame = repository.search_fts(
             table,
             query,
@@ -864,19 +775,78 @@ def _exec_research(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityR
     try:
         from nexus.core.state_contracts import NexusState
 
-        inst = cls(project_root=".", run_dir="/tmp")
+        try:
+            research_root = _scoped_workspace(plan.constraints, Path(".").resolve())
+        except _ScopeError as scope:
+            return _scope_blocked_receipt("research", plan, str(scope), start)
+        # Per-task run dir: the handler caches researchpack.json there, so a shared
+        # directory would return one task's pack for every other task.
+        research_dir = research_root / ".nexus" / "research" / _safe_run_id(plan.task_id)
+        research_dir.mkdir(parents=True, exist_ok=True)
+        inst = cls(project_root=research_root, run_dir=research_dir)
+        # The handler's default LanceDB cache lives under ~/.openclaw; keep cache writes in the
+        # per-task run dir (researchpack.json) instead.
+        inst._get_lancedb = lambda: None  # type: ignore[method-assign]
+        # Outbound calls (chub CLI / felo) only with the operator switch; authorization is
+        # env-only, never a request constraint.  The providers are blocked at the egress
+        # methods, so a stubbed provider (tests) still runs hermetically.
+        research_authorized = _provider_auth_allowed(require_external=True)
+        if not research_authorized:
+            blocked_pack = {
+                "findings": [],
+                "source": "BLOCKED_EXTERNAL_AUTH",
+                "status": "FAIL",
+                "tokens_used": 0,
+                "error": "BLOCKED_EXTERNAL_AUTH",
+            }
+            inst._run_chub = lambda query: dict(blocked_pack)  # type: ignore[method-assign]
+            inst._run_felo = lambda query: dict(blocked_pack)  # type: ignore[method-assign]
         state = NexusState(task_id=plan.task_id, metadata={})
         # Real physical run path — not should_run probe alone.
+        # ResearchPhaseHandler.run reads context["task"]; "task_statement" is kept
+        # for callers that still key on the old name.
+        # The task is an opaque payload.  The handler would scan it for URLs and route them to
+        # the UCC reach router, so URL extraction is removed from this executor entirely (no
+        # parsing of request text for endpoints); providers use their own configured endpoint.
+        inst._extract_urls = lambda text: []  # type: ignore[method-assign]
+        research_task = str(task_desc or "").strip()
         result = inst.run(
             state,
             {
-                "task_statement": str(task_desc or plan.task_id),
+                "task": research_task,
+                "task_statement": research_task,
                 "dry_run": True,
                 "bounded": True,
             },
         )
         elapsed = int((time.monotonic() - start) * 1000)
-        ok = isinstance(result, Mapping) and not result.get("error")
+        if (
+            not research_authorized
+            and isinstance(result, Mapping)
+            and "BLOCKED_EXTERNAL_AUTH" in str(result.get("error") or "")
+        ):
+            return _make_receipt(
+                "research",
+                plan,
+                invoked=True,
+                gate_passed=False,
+                wall_time_ms=elapsed,
+                outcome=_structured_outcome(
+                    action="auth_gate",
+                    semantic_status="BLOCKED",
+                    error="BLOCKED_EXTERNAL_AUTH",
+                    evidence_refs=["ev_auth_block_research"],
+                    auth_required=True,
+                    provider_call_count=0,
+                ),
+            )
+        ok = (
+            isinstance(result, Mapping)
+            and not result.get("error")
+            and result.get("status") != "FAIL"
+            and bool(research_task)
+            and list(result.get("findings") or []) != ["Empty research task."]
+        )
         return _make_receipt(
             "research",
             plan,
@@ -905,75 +875,6 @@ def _exec_research(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityR
                 evidence_refs=[f"ev_research_err_{plan.task_id}"],
             ),
         )
-
-
-def _exec_research_and_source_discipline(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    start = time.monotonic()
-    try:
-        from pathlib import Path
-        from nexus.services.codeintel.skeleton_provider import PythonCodeSkeletonProvider
-        inst = PythonCodeSkeletonProvider(root=str(Path(".").resolve()))
-        if hasattr(inst, "lookup_implementation"):
-            try:
-                result = inst.lookup_implementation(str(task_desc or plan.task_id))
-            except TypeError:
-                result = inst.lookup_implementation(symbol=str(task_desc or "main"))
-        else:
-            result = inst.export_symbol_snapshot() if hasattr(inst, "export_symbol_snapshot") else {}
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt(
-            "research_and_source_discipline",
-            plan,
-            wall_time_ms=elapsed,
-            outcome={"action": "lookup_or_snapshot", "result": str(result)[:200]},
-        )
-    except Exception as exc:
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt(
-            "research_and_source_discipline",
-            plan,
-            invoked=False,
-            gate_passed=False,
-            wall_time_ms=elapsed,
-            outcome={"error": str(exc)[:300]},
-        )
-
-
-def _exec_aos_oracle(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    start = time.monotonic()
-    cls = _try_import_class("nexus.services.aos_service", "AosService")
-    if cls is None:
-        return _make_receipt("aos_oracle", plan, invoked=False, gate_passed=False,
-                             outcome={"error": "AosService not importable"})
-    try:
-        from pathlib import Path
-        inst = cls(repo_root=Path("/tmp"))
-        status = inst.get_status()
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("aos_oracle", plan, wall_time_ms=elapsed,
-                             outcome={"status": str(status)[:200]})
-    except Exception as exc:
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("aos_oracle", plan, invoked=False, gate_passed=False, wall_time_ms=elapsed,
-                             outcome={"error": str(exc)})
-
-
-def _exec_learn_refresh_service(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    start = time.monotonic()
-    cls = _try_import_class("nexus.app.learn_refresh_service", "LearnRefreshService")
-    if cls is None:
-        return _make_receipt("learn_refresh_service", plan, invoked=False, gate_passed=False,
-                             outcome={"error": "LearnRefreshService not importable"})
-    try:
-        from pathlib import Path
-        inst = cls(repo_root=Path("/tmp"))
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("learn_refresh_service", plan, wall_time_ms=elapsed,
-                             outcome={"class_instantiated": True})
-    except Exception as exc:
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("learn_refresh_service", plan, invoked=False, gate_passed=False, wall_time_ms=elapsed,
-                             outcome={"error": str(exc)})
 
 
 def _exec_learn_scheduler_service(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
@@ -1031,24 +932,6 @@ def _exec_learn_scheduler_service(plan: CapabilityExecutionPlan, task_desc: str)
             wall_time_ms=elapsed,
             outcome={"action": "run_scheduler", "error": str(exc)[:300]},
         )
-
-
-def _exec_reflex_loop(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    start = time.monotonic()
-    cls = _try_import_class("nexus.engine.reflex_loop", "ReflexLoop")
-    if cls is None:
-        return _make_receipt("reflex_loop", plan, invoked=False, gate_passed=False,
-                             outcome={"error": "ReflexLoop not importable"})
-    try:
-        inst = cls(project_root="/tmp")
-        result = inst.run_cycle()
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("reflex_loop", plan, wall_time_ms=elapsed,
-                             outcome={"cycle_result": str(result)[:200]})
-    except Exception as exc:
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("reflex_loop", plan, invoked=False, gate_passed=False, wall_time_ms=elapsed,
-                             outcome={"error": str(exc)})
 
 
 # ─── D-phase ──────────────────────────────────────────────────────────────────
@@ -1174,8 +1057,10 @@ def _exec_autoreason(plan: CapabilityExecutionPlan, task_desc: str) -> Capabilit
             ),
         )
     try:
+        candidates = _candidate_pool(plan)
+        if not candidates:
+            return _no_candidate_pool_receipt("autoreason", plan, start)
         inst = cls()
-        candidates = [{"id": "c0", "text": str(task_desc or plan.task_id), "score": 1.0}]
         result = inst.run(candidates=candidates, task_desc=str(task_desc or plan.task_id))
         elapsed = int((time.monotonic() - start) * 1000)
         ok = isinstance(result, Mapping) and not result.get("error")
@@ -1259,26 +1144,70 @@ def _exec_hyper_sprint(plan: CapabilityExecutionPlan, task_desc: str) -> Capabil
         return _make_receipt("hyper_sprint", plan, invoked=False, gate_passed=False,
                              outcome={"error": "run_hyper_sprint not importable"})
     try:
-        from pathlib import Path
         from nexus.research.sprint_service import SprintConfig
+        hyper = dict(plan.constraints or {})
+        try:
+            hyper_root = _scoped_workspace(hyper, Path(".").resolve())
+            hyper_target = str(hyper.get("hyper_target_file") or "").strip()
+            if not hyper_target:
+                hyper_target = _first_task_file(hyper) or "README.md"
+            _scoped_path(hyper_root, hyper_target)
+            hyper_test = str(hyper.get("hyper_test_file") or "").strip()
+            if hyper_test:
+                _scoped_path(hyper_root, hyper_test)
+        except _ScopeError as scope:
+            return _scope_blocked_receipt("hyper_sprint", plan, str(scope), start)
+        try:
+            hyper_candidates = max(1, int(hyper.get("hyper_candidate_count") or 1))
+        except (TypeError, ValueError):
+            hyper_candidates = 1
+        # LLM candidates are opt-in per request; the default stays deterministic.
+        hyper_llm = _truthy(hyper.get("hyper_llm_mode"))
+        if hyper_llm and not _provider_auth_allowed(require_local_model=True):
+            # A request flag is never authorization: llm_mode needs the local-model switch.
+            return _auth_blocked_receipt(
+                "hyper_sprint",
+                plan,
+                wall_time_ms=int((time.monotonic() - start) * 1000),
+                reason="BLOCKED_EXTERNAL_AUTH:local_model",
+            )
         cfg = SprintConfig(
             task=str(task_desc or plan.task_id),
-            target_file="README.md",
-            candidate_count=1,
+            target_file=hyper_target,
+            test_file=hyper_test or None,
+            candidate_count=hyper_candidates,
             max_rounds=1,
             timeout_sec=10,
             safe_mode=True,
-            llm_mode=False,
+            llm_mode=bool(hyper_llm),
             stage1_max_parallel=1,
             stage1_timeout_sec=5,
         )
-        result = fn(repo_root=Path(".").resolve(), config=cfg)
+        result = fn(repo_root=hyper_root, config=cfg)
         elapsed = int((time.monotonic() - start) * 1000)
+        sprint_status = str(getattr(result, "status", "") or "").upper()
+        sprint_ok = sprint_status in {"SUCCESS", "SUCCEEDED"}
         return _make_receipt(
             "hyper_sprint",
             plan,
             wall_time_ms=elapsed,
-            outcome={"action": "run_hyper_sprint", "result": str(result)[:200]},
+            gate_passed=sprint_ok,
+            outcome=_structured_outcome(
+                action="run_hyper_sprint",
+                semantic_status="SUCCEEDED" if sprint_ok else "FAILED",
+                evidence_refs=[f"ev_hyper_sprint_{plan.task_id}"],
+                result=(
+                    dataclasses.asdict(result)
+                    if dataclasses.is_dataclass(result) and not isinstance(result, type)
+                    else str(result)[:200]
+                ),
+                sprint_status=sprint_status,
+                target_file=hyper_target,
+                candidate_count=hyper_candidates,
+                llm_mode=bool(hyper_llm),
+                attempt_count=getattr(result, "attempt_count", None),
+                physical_callable="nexus.research.sprint_service.run_hyper_sprint",
+            ),
         )
     except Exception as exc:
         elapsed = int((time.monotonic() - start) * 1000)
@@ -1400,11 +1329,6 @@ def _exec_nightshift(plan: CapabilityExecutionPlan, task_desc: str) -> Capabilit
     return _exec_nightshift_runner_service(plan, task_desc)
 
 
-def _exec_battle_swarm(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    # Same physical surface as swarm_multi_agent.
-    return _exec_swarm_multi_agent(plan, task_desc)
-
-
 def _exec_sandbox_runner(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
     start = time.monotonic()
     cls = _try_import_class("nexus.engine.sandbox_runner", "SandboxRunner")
@@ -1479,23 +1403,6 @@ def _exec_sandbox_runner(plan: CapabilityExecutionPlan, task_desc: str) -> Capab
             wall_time_ms=elapsed,
             outcome={"action": "build_elastic_profile", "error": str(exc)[:300]},
         )
-
-
-def _exec_dual_loop(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    start = time.monotonic()
-    cls = _try_import_class("nexus.core.dual_loop_orchestrator", "DualLoopOrchestrator")
-    if cls is None:
-        return _make_receipt("dual_loop", plan, invoked=False, gate_passed=False,
-                             outcome={"error": "DualLoopOrchestrator not importable"})
-    try:
-        inst = cls(project_root="/tmp")
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("dual_loop", plan, wall_time_ms=elapsed,
-                             outcome={"class_instantiated": True})
-    except Exception as exc:
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("dual_loop", plan, invoked=False, gate_passed=False, wall_time_ms=elapsed,
-                             outcome={"error": str(exc)})
 
 
 # ─── A-phase ──────────────────────────────────────────────────────────────────
@@ -1757,20 +1664,8 @@ def _exec_ultra_review(plan: CapabilityExecutionPlan, task_desc: str) -> Capabil
 
 
 def _exec_learning_closure(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    start = time.monotonic()
-    cls = _try_import_class("nexus.services.local_heal.learning_closure_bridge", "LearningClosureBridge")
-    if cls is None:
-        return _make_receipt("learning_closure", plan, invoked=False, gate_passed=False,
-                             outcome={"error": "LearningClosureBridge not importable"})
-    try:
-        inst = cls()
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("learning_closure", plan, wall_time_ms=elapsed,
-                             outcome={"class_instantiated": True})
-    except Exception as exc:
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("learning_closure", plan, invoked=False, gate_passed=False, wall_time_ms=elapsed,
-                             outcome={"error": str(exc)})
+    """ARCHIVED 2026-10-12: fail closed with an explicit receipt reason."""
+    return _archived_receipt("learning_closure", plan, task_desc)
 
 
 def _exec_metabolism_resume(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
@@ -1823,13 +1718,15 @@ def _exec_metabolism_resume(plan: CapabilityExecutionPlan, task_desc: str) -> Ca
             "capability_executor",
             ["resume_after_distill"],
         )
-        transaction_id = inst.distill(
+        distill_result = inst.distill_local(
             {
                 "goal": str(task_desc or plan.task_id),
                 "done": [],
                 "errors": [],
+                "context_source": "CAPABILITY_PLAN",
             }
         )
+        transaction_id = distill_result["tx"]
         checkpoint = inst.load_checkpoint()
         checkpoint_hash = hashlib.sha256(
             json.dumps(checkpoint, sort_keys=True, default=str).encode("utf-8")
@@ -1837,7 +1734,7 @@ def _exec_metabolism_resume(plan: CapabilityExecutionPlan, task_desc: str) -> Ca
         seed_path = workspace_root / ".nexus" / "metabolism" / "session_seed.json"
         seed_hash = hashlib.sha256(seed_path.read_bytes()).hexdigest()
         passed = bool(
-            transaction_id
+            distill_result["status"] == "LOCAL_ONLY"
             and checkpoint.get("task_id") == plan.task_id
             and seed_path.is_file()
         )
@@ -1863,7 +1760,9 @@ def _exec_metabolism_resume(plan: CapabilityExecutionPlan, task_desc: str) -> Ca
                     "checkpoint_path": str(inst.stack_path),
                     "seed_path": str(seed_path),
                     "seed_hash": seed_hash,
-                    "transaction_id": str(transaction_id),
+                    "transaction_id": transaction_id,
+                    "upload": distill_result["upload"],
+                    "distill_status": distill_result["status"],
                     "resume_available": bool(checkpoint),
                     "pending_steps": list(checkpoint.get("pending_steps") or []),
                 },
@@ -1883,83 +1782,6 @@ def _exec_metabolism_resume(plan: CapabilityExecutionPlan, task_desc: str) -> Ca
             wall_time_ms=elapsed,
             outcome={"action": "should_distill", "error": str(exc)[:300]},
         )
-
-
-def _exec_mfp_gate(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    start = time.monotonic()
-    fn = _try_import_class("nexus.engine.mfp_gate", "evaluate_mfp")
-    if fn is None:
-        return _make_receipt("mfp_gate", plan, invoked=False, gate_passed=False,
-                             outcome={"error": "evaluate_mfp not importable"})
-    try:
-        result = fn(confidence=0.99, semantic_entropy=0.1, history_success_rate=0.96)
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("mfp_gate", plan, wall_time_ms=elapsed,
-                             outcome={"verdict": str(result)})
-    except Exception as exc:
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("mfp_gate", plan, invoked=False, gate_passed=False, wall_time_ms=elapsed,
-                             outcome={"error": str(exc)})
-
-
-def _exec_promotion_engine(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    start = time.monotonic()
-    cls = _try_import_class("nexus.evaluation.promotion_engine", "PromotionEngine")
-    if cls is None:
-        return _make_receipt("promotion_engine", plan, invoked=False, gate_passed=False,
-                             outcome={"error": "PromotionEngine not importable"})
-    try:
-        inst = cls()
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("promotion_engine", plan, wall_time_ms=elapsed,
-                             outcome={"class_instantiated": True})
-    except Exception as exc:
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("promotion_engine", plan, invoked=False, gate_passed=False, wall_time_ms=elapsed,
-                             outcome={"error": str(exc)})
-
-
-def _exec_subagent_outcome_service(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    start = time.monotonic()
-    cls = _try_import_class("nexus.engine.subagent_outcome_service", "SubagentOutcomeService")
-    if cls is None:
-        return _make_receipt("subagent_outcome_service", plan, invoked=False, gate_passed=False,
-                             outcome={"error": "SubagentOutcomeService not importable"})
-    try:
-        from pathlib import Path
-        inst = cls(project_root=Path("/tmp"))
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("subagent_outcome_service", plan, wall_time_ms=elapsed,
-                             outcome={"class_instantiated": True})
-    except Exception as exc:
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("subagent_outcome_service", plan, invoked=False, gate_passed=False, wall_time_ms=elapsed,
-                             outcome={"error": str(exc)})
-
-
-def _exec_attempt_settlement_service(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    start = time.monotonic()
-    cls = _try_import_class("nexus.engine.attempt_settlement_service", "AttemptSettlementService")
-    if cls is None:
-        return _make_receipt("attempt_settlement_service", plan, invoked=False, gate_passed=False,
-                             outcome={"error": "AttemptSettlementService not importable"})
-    try:
-        from pathlib import Path
-        inst = cls(
-            project_root=Path("/tmp"),
-            run_dir=Path("/tmp/run"),
-            metrics_agg={"total": 0, "passed": 0, "failed": 0},
-            crystallize_fn=lambda d: {"crystal": d},
-            transaction_mgr={"status": "simulated"},
-            learning_finalize_fn=lambda: {"finalized": True, "task_id": plan.task_id},
-        )
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("attempt_settlement_service", plan, wall_time_ms=elapsed,
-                             outcome={"class_instantiated": True})
-    except Exception as exc:
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("attempt_settlement_service", plan, invoked=False, gate_passed=False, wall_time_ms=elapsed,
-                             outcome={"error": str(exc)})
 
 
 # ─── Mainchain residual production/beta (real method calls, not import-only) ──
@@ -1996,7 +1818,8 @@ def _exec_memory(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRec
                 ),
             )
         inst = cls(root)
-        hits = list(inst.search(query) or [])[:5]
+        hits = _memory_retrieve(inst, query, limit=5)
+        findings_hits = _memory_findings_hits(root, query, limit=5)
         elapsed = int((time.monotonic() - start) * 1000)
         return _make_receipt(
             "memory",
@@ -2009,6 +1832,7 @@ def _exec_memory(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRec
                 result={"hit_count": len(hits), "root": str(root)},
                 query=query[:200],
                 hit_count=len(hits),
+                findings_hit_count=len(findings_hits),
                 search_performed=True,
                 physical_callable="nexus.core.memory_manager.ProjectMemoryManager.search",
             ),
@@ -2122,6 +1946,7 @@ def _exec_semantic_searcher(plan: CapabilityExecutionPlan, task_desc: str) -> Ca
         )
     try:
         from pathlib import Path
+        from nexus.services.lancedb_roots import KNOWLEDGE, resolve_lancedb_root
         from nexus.services.memory_repository import MemoryRepository
 
         constraints = dict(plan.constraints or {})
@@ -2129,7 +1954,7 @@ def _exec_semantic_searcher(plan: CapabilityExecutionPlan, task_desc: str) -> Ca
         query = str(constraints.get("search_query") or task_desc or "").strip()
         table = str(constraints.get("search_table") or "policy").strip()
         limit = max(1, min(20, int(constraints.get("search_limit") or 5)))
-        repository = MemoryRepository(root / ".nexus" / "knowledge" / "lancedb")
+        repository = MemoryRepository(resolve_lancedb_root(KNOWLEDGE, root, honor_env=False))
         inst = cls(repository)
         hits = list(inst.search(query=query, table_name=table, limit=limit) or [])[:limit]
         elapsed = int((time.monotonic() - start) * 1000)
@@ -2414,18 +2239,18 @@ def _exec_ddtree(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRec
             ),
         )
     try:
+        candidates = _candidate_pool(plan)
+        if not candidates:
+            return _no_candidate_pool_receipt("ddtree", plan, start)
         inst = cls()
-        candidates = [
-            {
-                "candidate_id": "c0",
-                "text": str(task_desc or plan.task_id),
-                "score": 1.0,
-            }
-        ]
+        try:
+            max_candidates = max(1, int((plan.constraints or {}).get("ddtree_max_candidates") or 2))
+        except (TypeError, ValueError):
+            max_candidates = 2
         result = inst.plan(
             candidates,
             enabled=True,
-            max_candidates=2,
+            max_candidates=max_candidates,
             task_desc=str(task_desc or ""),
         )
         elapsed = int((time.monotonic() - start) * 1000)
@@ -2900,27 +2725,8 @@ def _exec_judge_panel(plan: CapabilityExecutionPlan, task_desc: str) -> Capabili
 
 
 def _exec_llm_judge_panel(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    """LEGACY_ALIAS of judge_panel — no independent second executor."""
-    base = _exec_judge_panel(plan, task_desc)
-    base_out = dict(base.outcome or {})
-    return _make_receipt(
-        "llm_judge_panel",
-        plan,
-        invoked=base.invoked,
-        gate_passed=base.gate_passed,
-        wall_time_ms=(base.telemetries or {}).get("wall_time_ms"),
-        outcome=_structured_outcome(
-            action=str(base_out.get("action") or "rank"),
-            semantic_status=str(base_out.get("semantic_status") or ("SUCCEEDED" if base.gate_passed else "FAILED")),
-            evidence_refs=list(base_out.get("evidence_refs") or [f"ev_llm_judge_alias_{plan.task_id}"]),
-            result={k: base_out[k] for k in ("result", "result_type", "result_repr") if k in base_out}
-            or {"delegated": "judge_panel"},
-            legacy_alias_of="judge_panel",
-            error=base_out.get("error"),
-            physical_callable="legacy_alias:judge_panel",
-            execution_class="LEGACY_ALIAS",
-        ),
-    )
+    """ARCHIVED 2026-10-13: legacy alias of judge_panel; fail closed with an explicit reason."""
+    return _archived_receipt("llm_judge_panel", plan, task_desc)
 
 
 # ── Phase 3: thin adapters over existing unregistered engines ───────────────
@@ -3046,70 +2852,8 @@ def _exec_asi_constraint_extractor(
 
 
 def _exec_benchmark(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    start = time.monotonic()
-    try:
-        from nexus.services.benchmark_service import BenchmarkService
-
-        inst = BenchmarkService(project_root=".")
-        # Bounded: zero-task construct of run kwargs path without full suite.
-        # Prefer a dry structural call: run with tasks_count=0 if accepted, else
-        # reflect service readiness via class binding + method presence.
-        if not hasattr(inst, "run") or not callable(inst.run):
-            raise RuntimeError("BenchmarkService.run missing")
-        try:
-            result = inst.run(
-                dataset="structural_bind",
-                repeat=1,
-                dual_core_physical=False,
-                ablation=False,
-                tasks_count=1,
-            )
-        except Exception as exc:
-            # Still count as physical entry when method was invoked.
-            elapsed = int((time.monotonic() - start) * 1000)
-            return _make_receipt(
-                "benchmark",
-                plan,
-                wall_time_ms=elapsed,
-                gate_passed=False,
-                outcome=_structured_outcome(
-                    action="run",
-                    semantic_status="FAILED",
-                    error=str(exc)[:300],
-                    evidence_refs=[f"ev_benchmark_{plan.task_id}"],
-                    physical_callable="nexus.services.benchmark_service.BenchmarkService.run",
-                ),
-            )
-        elapsed = int((time.monotonic() - start) * 1000)
-        ok = isinstance(result, Mapping)
-        return _make_receipt(
-            "benchmark",
-            plan,
-            wall_time_ms=elapsed,
-            gate_passed=ok,
-            outcome=_structured_outcome(
-                action="run",
-                semantic_status="SUCCEEDED" if ok else "FAILED",
-                evidence_refs=[f"ev_benchmark_{plan.task_id}"],
-                result=result if isinstance(result, Mapping) else {"value": str(result)[:200]},
-                physical_callable="nexus.services.benchmark_service.BenchmarkService.run",
-                task_hint=str(task_desc or "")[:80],
-            ),
-        )
-    except Exception as exc:
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt(
-            "benchmark",
-            plan,
-            invoked=True,
-            gate_passed=False,
-            wall_time_ms=elapsed,
-            outcome=_structured_outcome(
-                action="run",
-                semantic_status="FAILED",
-                error=str(exc)[:300],
-            ),
-        )
+    """ARCHIVED 2026-10-12: fail closed with an explicit receipt reason."""
+    return _archived_receipt("benchmark", plan, task_desc)
 
 
 def _exec_committee(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
@@ -3314,13 +3058,18 @@ def _exec_forecast_gate(plan: CapabilityExecutionPlan, task_desc: str) -> Capabi
         from nexus.engine.forecast_gate_service import ForecastGateService
         from nexus.engine.self_healing_selector import get_self_healing_selector
         from nexus.learning.latent_predictor_v20 import LatentPredictorV20
+        from nexus.learning.predictor_toggle import LATENT_PREDICTOR, predictor_enabled
 
         constraints = dict(plan.constraints or {})
         root = Path(
             str(constraints.get("workspace_root") or "/tmp/nexus-forecast")
         ).expanduser().resolve()
         root.mkdir(parents=True, exist_ok=True)
-        latent = LatentPredictorV20(workspace_root=root)
+        latent = (
+            LatentPredictorV20(workspace_root=root)
+            if predictor_enabled(LATENT_PREDICTOR)
+            else None
+        )
         gate_eval = GateEvaluator()
         state_io = StateIO(str(root), run_dir=str(root / ".nexus" / "forecast" / plan.task_id))
         inst = ForecastGateService(
@@ -3388,6 +3137,7 @@ def _exec_forecast_gate(plan: CapabilityExecutionPlan, task_desc: str) -> Capabi
                 ash_strategy=ash_strategy,
                 state_persisted=persisted,
                 state_path=state_path,
+                predictor_influence=list(state.metadata.get("predictor_influence") or []),
             ),
         )
     except Exception as exc:
@@ -3486,35 +3236,9 @@ def _exec_formal_report(plan: CapabilityExecutionPlan, task_desc: str) -> Capabi
         )
 
 
-def _exec_integration_manager(
-    plan: CapabilityExecutionPlan, task_desc: str
-) -> CapabilityReceipt:
-    """Compatibility executor for the retired pre-#957 integration path."""
-
-    start = time.monotonic()
-    return _make_receipt(
-        "integration_manager",
-        plan,
-        invoked=True,
-        gate_passed=False,
-        wall_time_ms=int((time.monotonic() - start) * 1000),
-        outcome=_structured_outcome(
-            action="legacy_integration_quarantine",
-            semantic_status="BLOCKED",
-            error="LEGACY_INTEGRATION_PATH_RETIRED_USE_CONTROLLED_INTEGRATION",
-            evidence_refs=[f"ev_integration_retired_{plan.task_id}"],
-            task_hint=str(task_desc or "")[:80],
-            mutation_performed=False,
-            retired_callable=(
-                "nexus.orchestrator.integration_manager."
-                "IntegrationManager.batch_integrate"
-            ),
-            replacement_callable=(
-                "nexus.orchestrator.self_hosted_task_service."
-                "SelfHostedTaskService.integrate_approved"
-            ),
-        ),
-    )
+def _exec_integration_manager(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
+    """ARCHIVED 2026-10-13: retired pre-#957 integration path (use ControlledIntegrationManager)."""
+    return _archived_receipt("integration_manager", plan, task_desc)
 
 
 def _exec_xray(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
@@ -3528,9 +3252,22 @@ def _exec_xray(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRecei
         _assert_outputs_in_run_root(output_paths, run_root)
 
         inst = XRayService(project_root=str(project_root), report_path=str(report_path))
-        result = inst.run(targets=["nexus/services/capability_registry.py"], recursive=False, docker=False)
+        # Absolute targets: XRayObserver silently skips paths that do not exist relative to cwd.
+        # Targets come from the request (task files); fall back to the repo root.
+        try:
+            targets = _xray_targets(plan, Path(project_root))
+        except _ScopeError as scope:
+            return _scope_blocked_receipt("xray", plan, str(scope), start)
+        result = inst.run(targets=[str(t) for t in targets], recursive=False, docker=False)
         elapsed = int((time.monotonic() - start) * 1000)
-        ok = result is not None
+        # run() always returns the report path, so success must come from the scan itself.
+        scanned = getattr(inst, "last_report", None)
+        ok = bool(
+            all(t.exists() for t in targets)
+            and report_path.exists()
+            and scanned is not None
+            and scanned.symbols
+        )
         return _make_receipt(
             "xray",
             plan,
@@ -3541,6 +3278,7 @@ def _exec_xray(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRecei
                 semantic_status="SUCCEEDED" if ok else "FAILED",
                 evidence_refs=[f"ev_xray_{plan.task_id}"],
                 result={"report_type": type(result).__name__, "report_preview": str(result)[:200]},
+                scan_targets=[str(t) for t in targets][:8],
                 physical_callable="nexus.services.xray_service.XRayService.run",
                 run_id=run_id,
                 resolved_run_root=str(run_root),
@@ -3563,48 +3301,9 @@ def _exec_xray(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRecei
         )
 
 
-def _exec_swarm_quiet_moment(
-    plan: CapabilityExecutionPlan, task_desc: str
-) -> CapabilityReceipt:
-    start = time.monotonic()
-    try:
-        from nexus.core.swarm import build_quiet_moment_event
-
-        result = build_quiet_moment_event(
-            reason=str(task_desc or plan.task_id)[:120],
-            affected_nodes=[plan.task_id],
-            resume_after_seconds=1,
-        )
-        elapsed = int((time.monotonic() - start) * 1000)
-        ok = isinstance(result, Mapping)
-        return _make_receipt(
-            "swarm_quiet_moment",
-            plan,
-            wall_time_ms=elapsed,
-            gate_passed=ok,
-            outcome=_structured_outcome(
-                action="build_quiet_moment_event",
-                semantic_status="SUCCEEDED" if ok else "FAILED",
-                evidence_refs=[f"ev_swarm_quiet_{plan.task_id}"],
-                result=result if isinstance(result, Mapping) else {"value": str(result)[:200]},
-                physical_callable="nexus.core.swarm.build_quiet_moment_event",
-                control_plane=True,
-            ),
-        )
-    except Exception as exc:
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt(
-            "swarm_quiet_moment",
-            plan,
-            invoked=True,
-            gate_passed=False,
-            wall_time_ms=elapsed,
-            outcome=_structured_outcome(
-                action="build_quiet_moment_event",
-                semantic_status="FAILED",
-                error=str(exc)[:300],
-            ),
-        )
+def _exec_swarm_quiet_moment(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
+    """ARCHIVED 2026-10-13: echo stub (nothing paused, saved, or read); fail closed."""
+    return _archived_receipt("swarm_quiet_moment", plan, task_desc)
 
 
 def _exec_registry_sync(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
@@ -3686,42 +3385,8 @@ def _exec_registry_sync(plan: CapabilityExecutionPlan, task_desc: str) -> Capabi
 
 
 def _exec_stress_test(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    start = time.monotonic()
-    try:
-        from nexus.engine.red_team_audit import RedTeamAudit
-
-        result = RedTeamAudit(project_root=".").stress_test(
-            patch=f"# structural stress bind for {plan.task_id}\n{str(task_desc or '')[:200]}\n"
-        )
-        elapsed = int((time.monotonic() - start) * 1000)
-        ok = isinstance(result, Mapping)
-        return _make_receipt(
-            "stress_test",
-            plan,
-            wall_time_ms=elapsed,
-            gate_passed=ok,
-            outcome=_structured_outcome(
-                action="stress_test",
-                semantic_status="SUCCEEDED" if ok else "FAILED",
-                evidence_refs=[f"ev_stress_test_{plan.task_id}"],
-                result=result if isinstance(result, Mapping) else {"value": str(result)[:200]},
-                physical_callable="nexus.engine.red_team_audit.RedTeamAudit.stress_test",
-            ),
-        )
-    except Exception as exc:
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt(
-            "stress_test",
-            plan,
-            invoked=True,
-            gate_passed=False,
-            wall_time_ms=elapsed,
-            outcome=_structured_outcome(
-                action="stress_test",
-                semantic_status="FAILED",
-                error=str(exc)[:300],
-            ),
-        )
+    """ARCHIVED 2026-10-12: fail closed with an explicit receipt reason."""
+    return _archived_receipt("stress_test", plan, task_desc)
 
 
 def _exec_meta_opt(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
@@ -3873,89 +3538,18 @@ def _exec_prompt_compression(
 
 
 def _exec_federation(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    """EXPERIMENTAL_NOT_PROMOTED — real module, not production-promoted."""
-    start = time.monotonic()
-    try:
-        from nexus.engine.federation import FederationLayer
-
-        layer = FederationLayer(project_root=".")
-        result = layer.load_registry()
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt(
-            "federation",
-            plan,
-            wall_time_ms=elapsed,
-            gate_passed=True,
-            outcome=_structured_outcome(
-                action="load_registry",
-                semantic_status="SUCCEEDED",
-                evidence_refs=[f"ev_federation_{plan.task_id}"],
-                result=result if isinstance(result, Mapping) else {"value": str(result)[:200]},
-                physical_callable="nexus.engine.federation.FederationLayer.load_registry",
-                experimental_not_promoted=True,
-            ),
-        )
-    except Exception as exc:
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt(
-            "federation",
-            plan,
-            invoked=True,
-            gate_passed=False,
-            wall_time_ms=elapsed,
-            outcome=_structured_outcome(
-                action="load_registry",
-                semantic_status="FAILED",
-                error=str(exc)[:300],
-                experimental_not_promoted=True,
-            ),
-        )
+    """ARCHIVED 2026-10-12: fail closed with an explicit receipt reason."""
+    return _archived_receipt("federation", plan, task_desc)
 
 
 def _exec_oracle_shadow(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    """EXPERIMENTAL_NOT_PROMOTED — no independent promotion evidence."""
-    start = time.monotonic()
-    elapsed = int((time.monotonic() - start) * 1000)
-    return _make_receipt(
-        "oracle_shadow",
-        plan,
-        wall_time_ms=elapsed if elapsed is not None else None,
-        gate_passed=False,
-        invoked=True,
-        outcome=_structured_outcome(
-            action="experimental_hold",
-            semantic_status="BLOCKED",
-            error="EXPERIMENTAL_NOT_PROMOTED",
-            evidence_refs=[f"ev_oracle_shadow_{plan.task_id}"],
-            experimental_not_promoted=True,
-            task_hint=str(task_desc or "")[:80],
-        ),
-    )
+    """ARCHIVED 2026-10-12: fail closed with an explicit receipt reason."""
+    return _archived_receipt("oracle_shadow", plan, task_desc)
 
 
 def _exec_ui_validator(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    start = time.monotonic()
-    if not _provider_auth_allowed(require_external=True):
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _auth_blocked_receipt(
-            "ui_validator",
-            plan,
-            wall_time_ms=elapsed,
-            reason="BLOCKED_EXTERNAL_AUTH:browser_connector",
-        )
-    elapsed = int((time.monotonic() - start) * 1000)
-    return _make_receipt(
-        "ui_validator",
-        plan,
-        wall_time_ms=elapsed,
-        gate_passed=False,
-        outcome=_structured_outcome(
-            action="browser_validate",
-            semantic_status="BLOCKED",
-            error="BLOCKED_EXTERNAL_AUTH:no_live_browser_session",
-            evidence_refs=[f"ev_ui_validator_{plan.task_id}"],
-        ),
-    )
+    """ARCHIVED 2026-10-12: fail closed with an explicit receipt reason."""
+    return _archived_receipt("ui_validator", plan, task_desc)
 
 
 def _exec_external_doc_scout(
@@ -3987,22 +3581,11 @@ def _exec_external_doc_scout(
 
 EXECUTOR_REGISTRY: dict[str, CapabilityExecutor] = {
     "mempalace": _exec_mempalace,
-    "policy_capability_gate": _exec_policy_capability_gate,
-    "entropy_guard_v2": _exec_entropy_guard_v2,
-    "zero_trust_v2_behavior": _exec_zero_trust_v2_behavior,
-    "nightshift_runner_service": _exec_nightshift_runner_service,
     "autonomic_router": _exec_autonomic_router,
-    "predictive_auditor": _exec_predictive_auditor,
-    "spec_guarded": _exec_spec_guarded,
-    "decision_formula_engine": _exec_decision_formula_engine,
     "codeintel": _exec_codeintel,
     "lancedb": _exec_lancedb,
     "research": _exec_research,
-    "research_and_source_discipline": _exec_research_and_source_discipline,
-    "aos_oracle": _exec_aos_oracle,
-    "learn_refresh_service": _exec_learn_refresh_service,
     "learn_scheduler_service": _exec_learn_scheduler_service,
-    "reflex_loop": _exec_reflex_loop,
     "belief": _exec_belief,
     "autoreason": _exec_autoreason,
     "repair_loop": _exec_repair_loop,
@@ -4010,18 +3593,12 @@ EXECUTOR_REGISTRY: dict[str, CapabilityExecutor] = {
     "swarm_multi_agent": _exec_swarm_multi_agent,
     "drone": _exec_drone,
     "nightshift": _exec_nightshift,
-    "battle_swarm": _exec_battle_swarm,
     "sandbox_runner": _exec_sandbox_runner,
-    "dual_loop": _exec_dual_loop,
     "artifact_gate": _exec_artifact_gate,
     "claim_gate": _exec_claim_gate,
     "ultra_review": _exec_ultra_review,
     "learning_closure": _exec_learning_closure,
     "metabolism_resume": _exec_metabolism_resume,
-    "mfp_gate": _exec_mfp_gate,
-    "promotion_engine": _exec_promotion_engine,
-    "subagent_outcome_service": _exec_subagent_outcome_service,
-    "attempt_settlement_service": _exec_attempt_settlement_service,
     # Mainchain residual production/beta
     "memory": _exec_memory,
     "plan_quality_gate": _exec_plan_quality_gate,
@@ -4065,3 +3642,168 @@ EXECUTOR_REGISTRY: dict[str, CapabilityExecutor] = {
 
 def get_executor(cap_name: str) -> CapabilityExecutor | None:
     return EXECUTOR_REGISTRY.get(cap_name)
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
+def _safe_run_id(task_id: Any) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(task_id or "")).strip("._")
+    return cleaned[:96] or "task"
+
+
+def _task_files(constraints: Mapping[str, Any], *keys: str) -> list[str]:
+    """Task files named by the request, in key order, de-duplicated."""
+    out: list[str] = []
+    for key in keys:
+        raw = constraints.get(key)
+        if isinstance(raw, (str, os.PathLike)):
+            items = [raw]
+        elif isinstance(raw, (list, tuple)):
+            items = list(raw)
+        else:
+            items = []
+        for item in items:
+            text = str(item or "").strip()
+            if text and text not in out:
+                out.append(text)
+    return out
+
+
+def _first_task_file(constraints: Mapping[str, Any]) -> str:
+    files = _task_files(constraints, "hyper_target_file", "target_file", "target_files")
+    return files[0] if files else ""
+
+
+class _ScopeError(Exception):
+    """Request-supplied path or root escapes the trusted project root."""
+
+
+def _scoped_workspace(constraints: Mapping[str, Any] | None, project_root: Path) -> Path:
+    """Executor root: the runtime-supplied ``workspace_root`` constraint, else the project root.
+
+    The registry only forwards ``workspace_root`` from the runtime context / route, never from
+    request ``codeintel``, so a request cannot move an executor; request files are then
+    checked against this root by ``_scoped_path``.
+    """
+    raw = str((constraints or {}).get("workspace_root") or "").strip()
+    return Path(raw).resolve() if raw else project_root.resolve()
+
+
+def _scoped_path(root: Path, raw: str) -> Path:
+    """Resolve a request path under ``root``; it must stay inside and exist."""
+    resolved = (root / raw).resolve() if not Path(raw).is_absolute() else Path(raw).resolve()
+    if not resolved.is_relative_to(root.resolve()) or not resolved.exists():
+        raise _ScopeError("path_outside_workspace")
+    return resolved
+
+
+def _scope_blocked_receipt(
+    cap_name: str, plan: CapabilityExecutionPlan, reason: str, start: float
+) -> CapabilityReceipt:
+    return _make_receipt(
+        cap_name,
+        plan,
+        invoked=True,
+        gate_passed=False,
+        wall_time_ms=int((time.monotonic() - start) * 1000),
+        outcome=_structured_outcome(
+            action="scope_gate",
+            semantic_status="BLOCKED",
+            error=reason,
+            evidence_refs=[f"ev_scope_block_{cap_name}_{plan.task_id}"],
+        ),
+    )
+
+
+def _xray_targets(plan: CapabilityExecutionPlan, project_root: Path) -> list[Path]:
+    """Scan targets from the request, contained in the project root; root as fallback."""
+    constraints = dict(plan.constraints or {})
+    root = _scoped_workspace(constraints, project_root)
+    named = _task_files(constraints, "xray_targets", "target_file", "target_files")[:16]
+    if not named:
+        legacy = root / "nexus" / "services" / "capability_registry.py"
+        return [legacy if legacy.exists() else root]
+    return [_scoped_path(root, n) for n in named]
+
+
+NO_CANDIDATE_POOL = "no_candidate_pool"
+
+
+def _candidate_pool(plan: CapabilityExecutionPlan) -> list[dict[str, Any]]:
+    """Real candidate pool from the plan constraints (fed from request.codeintel)."""
+    raw = (plan.constraints or {}).get("candidate_pool")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return []
+    if not isinstance(raw, (list, tuple)):
+        return []
+    return [dict(item) for item in raw if isinstance(item, Mapping)]
+
+
+def _no_candidate_pool_receipt(
+    cap_name: str, plan: CapabilityExecutionPlan, start: float
+) -> CapabilityReceipt:
+    """Explicit skip: never fabricate a single placeholder candidate."""
+    return _make_receipt(
+        cap_name,
+        plan,
+        invoked=False,
+        gate_passed=False,
+        wall_time_ms=int((time.monotonic() - start) * 1000),
+        outcome=_structured_outcome(
+            action="skip",
+            semantic_status="SKIPPED",
+            skip_reason=NO_CANDIDATE_POOL,
+            evidence_refs=[f"ev_{cap_name}_skip_{NO_CANDIDATE_POOL}_{plan.task_id}"],
+        ),
+    )
+
+
+def _memory_retrieve(manager: Any, query: str, *, limit: int) -> list[Any]:
+    """Project-memory retrieval: whole query first, then per-keyword (local_heal pattern).
+
+    ProjectMemoryManager.search is a SQL LIKE substring, so a whole task statement
+    only hits when an insight contains it verbatim. Mirror the local_heal retrieval
+    adapter: exact query, and when empty, de-duplicated per-keyword lookups.
+    """
+    hits = list(manager.search(query) or [])
+    if hits:
+        return hits[:limit]
+    head = query.split("Nexus route oracle contract", 1)[0]
+    seen: set[tuple[Any, ...]] = set()
+    for token in [t for t in re.split(r"[_\W]+", head.lower()) if len(t) >= 3][:8]:
+        if token in _MEMORY_STOPWORDS:
+            continue
+        for row in manager.search(token) or []:
+            key = tuple(row)
+            if key in seen:
+                continue
+            seen.add(key)
+            hits.append(row)
+            if len(hits) >= limit:
+                return hits
+    return hits
+
+
+_MEMORY_STOPWORDS = frozenset(
+    {"the", "and", "for", "with", "that", "this", "from", "into", "what", "how", "recall", "find"}
+)
+
+
+def _memory_findings_hits(root: Path, query: str, *, limit: int) -> list[dict[str, Any]]:
+    """Episode cards from the local_heal FindingsMemoryStore (read-only; none if never created)."""
+    if not (root / ".nexus" / "memory").is_dir():
+        return []
+    try:
+        from nexus.services.local_heal.memory_retrieval_adapter import FindingsMemoryLessonStore
+
+        head = query.split("Nexus route oracle contract", 1)[0]
+        return FindingsMemoryLessonStore(project_root=root).query(query_text=head, limit=limit)
+    except Exception:
+        return []

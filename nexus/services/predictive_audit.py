@@ -3,6 +3,7 @@ import logging
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 from datetime import datetime, timezone
+from nexus.services.lancedb_roots import MEMORY_INDEX, resolve_lancedb_root
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +16,7 @@ class PredictiveAuditor:
     
     def __init__(self, project_root: str = str(__import__("pathlib").Path(__file__).resolve().parents[2])):
         self.project_root = Path(project_root)
-        self.db_path = self.project_root / ".nexus/memory/memory_index.lancedb"
+        self.db_path = resolve_lancedb_root(MEMORY_INDEX, self.project_root, honor_env=False)
         
         self._model = None
         self._db = None

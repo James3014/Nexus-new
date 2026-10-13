@@ -830,6 +830,7 @@ def _run_nexus(
     timeout_sec: float,
     run_root: Path,
 ) -> dict[str, Any]:
+    from nexus.core.repo_root import REPO_ROOT
     from nexus.engine.capability_planner import CapabilityPlanner
     from nexus.services.gateway import BattlesuitGateway
     from nexus.services.local_assist_service import (
@@ -1055,7 +1056,7 @@ def _run_nexus(
         )
     else:
         receipt = UnifiedRuntime(
-            planner=CapabilityPlanner(),
+            planner=CapabilityPlanner(shared_playbook_root=REPO_ROOT),
             local_service=local_service,
         ).run(
             request,

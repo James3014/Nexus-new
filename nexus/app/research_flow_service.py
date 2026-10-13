@@ -15,6 +15,7 @@ from typing import Any
 from dataclasses import asdict
 import click
 
+from nexus.core.repo_root import REPO_ROOT
 from nexus.research.flow.auto_flow_decision import decide_auto_flow_routing, enrich_route_on_plateau
 from nexus.research.local_sprint_mutator import generate_local_candidate, generate_local_companion_edits
 from nexus.research.sprint_service import SprintConfig, run_hyper_sprint, LLMCandidateGenerator, LLMCandidateError, _candidate_summaries
@@ -70,6 +71,8 @@ from nexus.research.flow.evidence_packer import (
     _doc_scout_supports_specific_claim,
     _infer_research_role,
     _write_msa_receipt_reports,
+    apply_nightshift_auto_run,
+    maybe_run_nightshift_after_hyper_failure,
 )
 from nexus.research.flow.baseline_report import (
     baseline_report_from_meta,
@@ -1359,6 +1362,14 @@ def run_auto_flow(
                     else:
                         chosen_flow = "hyper_sprint"
                         strategy_path = "probe_then_hyper_guard_fallback_rejected"
+    nightshift_auto_run = maybe_run_nightshift_after_hyper_failure(
+        repo_root=repo_root,
+        result=result,
+        nightshift_recommended=nightshift_recommended,
+        task_desc=task_desc,
+        target_file=target_file,
+        test_file=test_file,
+    )
     phase_clock.mark("R")
 
     baseline_probe_for_report = None
@@ -1433,6 +1444,7 @@ def run_auto_flow(
         learning_trace=hyper_learning_trace,
         nightshift_recommended=nightshift_recommended,
     )
+    capability_evidence = apply_nightshift_auto_run(capability_evidence, nightshift_auto_run)
     capability_evidence = _augment_local_msa_bench_evidence(
         repo_root,
         task_id=task_id,
@@ -1622,7 +1634,7 @@ def run_auto_flow(
     nexus_usage_trace["capabilities"]["claim_probe_gate_passed"] = claim_probe["gate_passed"]
     capability_plan_payload = route.get("capability_plan") if isinstance(route.get("capability_plan"), dict) else None
     if capability_plan_payload is None:
-        capability_plan = CapabilityPlanner().plan(
+        capability_plan = CapabilityPlanner(shared_playbook_root=REPO_ROOT).plan(
             task_desc=task_desc,
             task_type=task_type,
             route=route,
@@ -1639,7 +1651,7 @@ def run_auto_flow(
         task_desc=task_desc,
         task_type=task_type,
         recommended_flow=str(route.get("recommended_flow") or ""),
-        plan=CapabilityPlanner().plan(
+        plan=CapabilityPlanner(shared_playbook_root=REPO_ROOT).plan(
             task_desc=task_desc,
             task_type=task_type,
             route=route,

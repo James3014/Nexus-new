@@ -2411,7 +2411,7 @@ class LocalModelExecutor:
                             unified_diff=candidate_patch,
                             selected_candidate_hash=candidate_hash,
                             mutation_allowed=mutation_allowed,
-                            search_text=_apply_search_text,
+                            search_text=_apply_search_text, **_world_c_verifier_files(request),
                         )
                     )
                     isolated_apply_status = apply_receipt.patch_apply_status
@@ -3507,7 +3507,7 @@ class LocalModelExecutor:
                         else:
                             heal_ctx = LegacyHealContext(
                                 instance_id=request.task_id,
-                                repo_dir=_Path(request.repo_root),
+                                repo_dir=_delegated_retry_world_c(request, route_ctx),
                                 problem_statement=request.problem_statement,
                                 user_prompt=retry_prompt,
                                 attempt=1,
@@ -4673,3 +4673,39 @@ def _try_invoke_p4_committee(
     # Merge receipt fragment
     raw_meta.update(result.receipt_fragment)
     return raw_meta
+
+
+def _world_c_verifier_files(request: LocalModelExecutorRequest) -> dict[str, Any]:
+    """``verifier_files`` kwarg for IsolatedApplyRequest: the files the verifier command reads."""
+    from nexus.services.local_heal.pipeline_isolation import verifier_input_files
+
+    route = request.route_context if isinstance(request.route_context, dict) else {}
+    command = tuple(route.get("verifier_command") or ())
+    if not request.repo_root or not command:
+        return {}
+    return {"verifier_files": verifier_input_files(request.repo_root, command)}
+
+
+def _delegated_retry_world_c(request: LocalModelExecutorRequest, route_ctx: dict[str, Any]) -> Any:
+    """Isolated World C copy for the delegated retry pipeline.
+
+    The retry HealPipeline patches and verifies inside ``repo_dir``. Running it in
+    ``request.repo_root`` mutated the caller's source, so the later isolated apply of the same
+    candidate failed ("patch does not apply") and the source-untouched invariant broke.
+    """
+    from nexus.services.local_heal.pipeline_isolation import (
+        prepare_world_c_workspace,
+        verifier_input_files,
+    )
+
+    workspace = prepare_world_c_workspace(
+        request.repo_root,
+        f"{request.task_id}-retry",
+        target_file=request.target_file,
+        verifier_files=verifier_input_files(
+            request.repo_root, route_ctx.get("verifier_command") or ()
+        ),
+    )
+    route_ctx["world_c_source_root"] = str(request.repo_root)
+    route_ctx["world_c_workspace_path"] = str(workspace)
+    return workspace

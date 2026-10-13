@@ -1,0 +1,69 @@
+name: Nexus Core issue completion
+
+# Two-job consumer workflow for the Nexus Core issue gate.
+# - 'run' produces and Sigstore-signs the receipt (needs id-token: write).
+# - 'verify' is the required check: it verifies the signature against THIS
+#   workflow file on the default branch and checks the receipt against the exact
+#   head, base config and Issue.
+# Requires container isolation ([isolation] mode = "container") in the
+# committed .nexus-core/config.toml.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: nexus-core-issue-completion-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  run:
+    name: Nexus Core issue run
+    # Same-repository branches only; fork PRs are intentionally excluded.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.repo.fork == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      id-token: write
+    outputs:
+      artifact-name: ${{ steps.gate.outputs.artifact-name }}
+      artifact-id: ${{ steps.gate.outputs.artifact-id }}
+      issue-number: ${{ steps.gate.outputs.issue-number }}
+    steps:
+      - id: gate
+        uses: James3014/nexus-core/.github/actions/issue-gate@9942db770e96ab88e3e1700aaec2e911bcec241b
+        with:
+          nexus-certify-ref: "9942db770e96ab88e3e1700aaec2e911bcec241b"
+
+  verify:
+    name: Nexus Core issue completion
+    needs: run
+    if: >-
+      always() &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.repo.fork == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: James3014/nexus-core/.github/actions/receipt-verify@9942db770e96ab88e3e1700aaec2e911bcec241b
+        with:
+          artifact-name: ${{ needs.run.outputs.artifact-name }}
+          artifact-id: ${{ needs.run.outputs.artifact-id }}
+          expected-identity: https://github.com/James3014/Nexus-new/.github/workflows/nexus-core-issue-completion.yml@refs/heads/main
+          github-repository: ${{ github.repository }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          base-sha: ${{ github.event.pull_request.base.sha }}
+          issue-number: ${{ needs.run.outputs.issue-number }}
+          nexus-certify-ref: "9942db770e96ab88e3e1700aaec2e911bcec241b"

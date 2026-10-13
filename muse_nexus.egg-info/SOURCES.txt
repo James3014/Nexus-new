@@ -409,7 +409,6 @@ scripts/engine/collectors/__init__.py
 scripts/engine/collectors/edge_resolver_v1.py
 scripts/engine/collectors/node_collector_v1.py
 scripts/engine/commands/config.py
-scripts/engine/commands/stress_test.py
 scripts/engine/commands/swarm.py
 scripts/housekeeping/archive_repair_yamls.py
 scripts/ops/calc_learning_velocity.py

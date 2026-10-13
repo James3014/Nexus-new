@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import subprocess
 import sys
 import sysconfig
@@ -40,16 +41,17 @@ TRUSTED_EXTERNAL_RUNTIME_PACKAGES: tuple[tuple[str, str, str, str], ...] = (
         "nexus-learning",
         "nexus_learning",
         "https://github.com/James3014/nexus-learning.git",
-        "d09f05b942f35236562ae26e7b718d111368b0b1",
+        "a48bd876b758069f4dd15c24d0d32f1f2486d319",
     ),
     (
         "nexus-runtime",
         "nexus_runtime",
         "https://github.com/James3014/nexus-runtime.git",
-        "8f16c41f8a1838248901393274c853af4dca7f9b",
+        "2766c154ae9fa129a5d8d6a38244276e77b453bc",
     ),
 )
 UV_VERSION = "uv 0.9.2"
+SUBPROCESS_DIAGNOSTIC_LIMIT = 4096
 # Historical one-use, four-way binding for the Owner-approved TASK-001 Open SWE
 # optional-dependency transition. The corrective external-runtime architecture
 # restored the root dependency contract to the trusted baseline, so this
@@ -142,6 +144,118 @@ TRUSTED_PR1375_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, s
         "1defe6b2b7251fd060fb3613bbb9875ec38b4c6ea4dbd8febc36dcb10d1724f1",
     ),
 )
+# Exact one-use, four-way binding for Owner-approved PR #1380 (Issue #456
+# final strict typed source-hash Runtime pin adoption).
+TRUSTED_PR1380_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    1380,
+    (
+        "2fce493ab2843794c1d44665fa68e8292c321fb937e04918795b39b124a99c4e",
+        "1defe6b2b7251fd060fb3613bbb9875ec38b4c6ea4dbd8febc36dcb10d1724f1",
+        "0ff95ecbe90a66299ff40bc411ddd1045d978d43726729b454e5c1acf8d4a160",
+        "6068e086cbdf1e08723520a339269033346ff5a7553d87008cc8e9f1f22260b4",
+    ),
+)
+# Exact one-use, four-way binding for Owner-approved PR #1507 (Issue #1506
+# Wave 20 bounded reconciliation Runtime pin adoption).
+TRUSTED_PR1507_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    1507,
+    (
+        "0ff95ecbe90a66299ff40bc411ddd1045d978d43726729b454e5c1acf8d4a160",
+        "6068e086cbdf1e08723520a339269033346ff5a7553d87008cc8e9f1f22260b4",
+        "10eb27a29cfb60d8cc45e223a68a1221f7f285b04d2b9ab58f1ed2096b11a829",
+        "db1bd37456a5d302c0f508ab5ca193750f9d715985f2dcf5e67743a70e9d2667",
+    ),
+)
+# Exact one-use, four-way binding for Owner-authorized PR #1545 (Issue #1544
+# Runtime/Learning false-green consumer settlement).
+TRUSTED_PR1545_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    1545,
+    (
+        "10eb27a29cfb60d8cc45e223a68a1221f7f285b04d2b9ab58f1ed2096b11a829",
+        "db1bd37456a5d302c0f508ab5ca193750f9d715985f2dcf5e67743a70e9d2667",
+        "ae373bf727465af0a4692785ac2abf4cb521e5398dc721ee7dcf5fe05ebf07e2",
+        "28fcbc0a1cf233b3e2170545d9896042a9d99307480238426e00e3897490febb",
+    ),
+)
+# Exact one-use, four-way binding for Owner-authorized PR #1661 (Issue #1544
+# Runtime 0456b78 / Learning 33acad4 consumer settlement + Phase 2.5 import switch).
+TRUSTED_PR1661_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    1661,
+    (
+        "10eb27a29cfb60d8cc45e223a68a1221f7f285b04d2b9ab58f1ed2096b11a829",
+        "db1bd37456a5d302c0f508ab5ca193750f9d715985f2dcf5e67743a70e9d2667",
+        "ac96e101471ef46cea2e81af1859b68070fbf89af43ca7c004ecf58c19a7b0e4",
+        "dfe0167a759b83769fec605e88bb3186ba3eba36f4b243dffdcded71db4bdc4c",
+    ),
+)
+# Exact one-use, four-way binding for Owner-authorized PR #1637 (Issue #1636
+# nexus-learning canonical pin 33acad4 -> 1eb7229, BOUNDARY v2 Phases 1-4).
+TRUSTED_PR1637_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    1637,
+    (
+        "ac96e101471ef46cea2e81af1859b68070fbf89af43ca7c004ecf58c19a7b0e4",
+        "dfe0167a759b83769fec605e88bb3186ba3eba36f4b243dffdcded71db4bdc4c",
+        "ca23695a4cfbca27f64bc163655256ae45cb0b12933cffe7c07c5aff91da440d",
+        "2f5282586cbc972ad6990be39f5f7789efe1f7fcfa9b2b8eaa7508eccf03224f",
+    ),
+)
+
+# Exact one-use, four-way binding for Owner-authorized PR #1789 (Issue #1788
+# Phase 4b planner aliasing + Phase 5b-1; nexus-runtime 0456b78 -> ece9bd3).
+TRUSTED_PR1789_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    1789,
+    (
+        "ca23695a4cfbca27f64bc163655256ae45cb0b12933cffe7c07c5aff91da440d",
+        "2f5282586cbc972ad6990be39f5f7789efe1f7fcfa9b2b8eaa7508eccf03224f",
+        "96331173f3ce5c1c91f7a20d011f1af2d4a927602ede40eacf91c343a0453b9a",
+        "6df6eff22f2bb3dcddbd3c4fd16483a91aeac644ca1bc098ef0a7a153088e3e2",
+    ),
+)
+
+# Exact one-use, four-way binding for Owner-authorized PR #1796 (Issue #1795
+# Phase 5b-2 retry budget and identity; nexus-runtime ece9bd3 -> cfcb38d).
+TRUSTED_PR1796_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    1796,
+    (
+        "96331173f3ce5c1c91f7a20d011f1af2d4a927602ede40eacf91c343a0453b9a",
+        "6df6eff22f2bb3dcddbd3c4fd16483a91aeac644ca1bc098ef0a7a153088e3e2",
+        "16b2ee33278ec5fdf156b47f1d8f30bd167509616c3c8d506d358aa9bad1239d",
+        "0a50680697e7abbe0b26e6d3e6eef235d9c1e3244a5527b87ac47d57fe2f0015",
+    ),
+)
+# Exact one-use, four-way binding for Owner-authorized PR #1804 (Issue #1803
+# canonical nexus-learning 1eb7229 -> a48bd87).
+TRUSTED_PR1804_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    1804,
+    (
+        "16b2ee33278ec5fdf156b47f1d8f30bd167509616c3c8d506d358aa9bad1239d",
+        "0a50680697e7abbe0b26e6d3e6eef235d9c1e3244a5527b87ac47d57fe2f0015",
+        "91745c8beac9a1363e18b3dd13e743590c754a98d27dc2f0bff97874a94f0257",
+        "e605aa1109b70d6c99c124e30997f0acf45b72300624a155b4499cc8e2632f52",
+    ),
+)
+# Exact one-use, four-way binding for Owner-authorized PR #1857 (Issue #1853
+# External Intelligence ChatGPT Web consumer route; nexus-runtime cfcb38d -> 29a8dcf).
+TRUSTED_PR1857_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    1857,
+    (
+        "91745c8beac9a1363e18b3dd13e743590c754a98d27dc2f0bff97874a94f0257",
+        "e605aa1109b70d6c99c124e30997f0acf45b72300624a155b4499cc8e2632f52",
+        "57e07fd5272cb64774464bec61e3d8b475898782bcfd048d6930b873336afd75",
+        "7808d62f2eaf6ab80a4b56c74563c5053ebe2764d64591f46a5c30b7c4a96068",
+    ),
+)
+# Exact one-use, four-way binding for Owner-authorized PR #1908 (Issue #1904
+# External Intelligence on free-plan ChatGPT Thinking; nexus-runtime 29a8dcf -> 2766c15).
+TRUSTED_PR1908_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    1908,
+    (
+        "57e07fd5272cb64774464bec61e3d8b475898782bcfd048d6930b873336afd75",
+        "7808d62f2eaf6ab80a4b56c74563c5053ebe2764d64591f46a5c30b7c4a96068",
+        "275eceb0af8e4d07a7373359bd0811c8147a403f9fa4d49739f20dd1d974c762",
+        "09f17508d34972268d4c7cff6877c447cf8586eff8684bbbbc6170255ca368d4",
+    ),
+)
 
 REQUIRED_EVIDENCE_KEYS = {
     "schema_version",
@@ -223,6 +337,16 @@ def _validate_trusted_dependency_contract(
         TRUSTED_PR1013_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR1288_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR1375_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR1380_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR1507_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR1545_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR1661_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR1637_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR1789_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR1796_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR1804_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR1857_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR1908_DEPENDENCY_SNAPSHOT_TRANSITION,
     )
     for authorized_transition_record in authorized_transition_records:
         if authorized_transition_record is None:
@@ -329,6 +453,53 @@ def _runtime_subprocess_env(home: Path) -> dict[str, str]:
         if os.environ.get(key):
             environment[key] = os.environ[key]
     return environment
+
+
+def _bounded_subprocess_output(value: bytes | str | None) -> str:
+    if value is None:
+        return ""
+    text = value.decode("utf-8", errors="replace") if isinstance(value, bytes) else value
+    text = re.sub(
+        r"(?i)(authorization:\s*(?:basic|bearer)\s+)\S+",
+        r"\1<redacted>",
+        text,
+    )
+    text = re.sub(
+        r"(?i)(https?://)[^/\s:@]+:[^@\s/]+@",
+        r"\1<redacted>@",
+        text,
+    )
+    text = re.sub(r"(?i)\b(?:ghp|github_pat)_[A-Za-z0-9_]+", "<redacted>", text)
+    if len(text) > SUBPROCESS_DIAGNOSTIC_LIMIT:
+        text = "<truncated>" + text[-SUBPROCESS_DIAGNOSTIC_LIMIT:]
+    return text
+
+
+def _run_runtime_subprocess(
+    args: list[str],
+    *,
+    stage: str,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+    text: bool = False,
+) -> subprocess.CompletedProcess[Any]:
+    try:
+        return subprocess.run(
+            args,
+            cwd=cwd,
+            env=env,
+            check=True,
+            capture_output=True,
+            text=text,
+        )
+    except subprocess.CalledProcessError as exc:
+        stdout = _bounded_subprocess_output(exc.stdout)
+        stderr = _bounded_subprocess_output(exc.stderr)
+        raise RuntimeError(
+            "trusted runtime subprocess failed: "
+            f"stage={stage} exit_code={exc.returncode} "
+            f"stdout={stdout!r} stderr={stderr!r}"
+        ) from None
 
 
 def _trusted_external_package_contract() -> list[dict[str, str]]:
@@ -460,25 +631,22 @@ def _build_runtime(args: argparse.Namespace) -> None:
         export_args.extend(["--extra", "legacy"])
         for distribution, _package, _repository, _commit in TRUSTED_EXTERNAL_RUNTIME_PACKAGES:
             export_args.extend(["--no-emit-package", distribution])
-        export_args.extend(
-            [
-                "--no-emit-project",
-                "--no-emit-workspace",
-                "--no-emit-local",
-                "--output-file",
-                str(requirements_path),
-            ]
-        )
-        subprocess.run(
+        export_args.extend([
+            "--no-emit-project",
+            "--no-emit-workspace",
+            "--no-emit-local",
+            "--output-file",
+            str(requirements_path),
+        ])
+        _run_runtime_subprocess(
             export_args,
+            stage="dependency-export",
             cwd=contract,
             env=environment,
-            check=True,
-            capture_output=True,
         )
         requirements = requirements_path.read_bytes()
         site_packages = build_root / "site-packages"
-        subprocess.run(
+        _run_runtime_subprocess(
             [
                 args.uv_executable,
                 "pip",
@@ -495,13 +663,12 @@ def _build_runtime(args: argparse.Namespace) -> None:
                 "--requirements",
                 str(requirements_path),
             ],
+            stage="locked-binary-install",
             cwd=contract,
             env=environment,
-            check=True,
-            capture_output=True,
         )
         for distribution, _package, repository, commit in TRUSTED_EXTERNAL_RUNTIME_PACKAGES:
-            subprocess.run(
+            _run_runtime_subprocess(
                 [
                     args.uv_executable,
                     "pip",
@@ -515,17 +682,15 @@ def _build_runtime(args: argparse.Namespace) -> None:
                     sys.executable,
                     f"{distribution} @ git+{repository}@{commit}",
                 ],
+                stage=f"external-package-install:{distribution}",
                 cwd=contract,
                 env=environment,
-                check=True,
-                capture_output=True,
             )
         external_packages = _verify_external_runtime_packages(site_packages)
-        uv_version = subprocess.run(
+        uv_version = _run_runtime_subprocess(
             [args.uv_executable, "--version"],
+            stage="uv-version",
             env=environment,
-            check=True,
-            capture_output=True,
             text=True,
         ).stdout.strip()
         if uv_version != UV_VERSION:
@@ -831,7 +996,8 @@ def verify_evidence(
                 metadata.get("schema_version") != RUNTIME_SCHEMA_VERSION
                 or metadata.get("pytest_plugins") != PYTEST_PLUGINS
                 or metadata.get("dependency_groups") != list(TRUSTED_RUNTIME_DEPENDENCY_GROUPS)
-                or metadata.get("external_packages") != _trusted_external_package_contract_with_provenance(
+                or metadata.get("external_packages")
+                != _trusted_external_package_contract_with_provenance(
                     metadata.get("external_packages")
                 )
                 or metadata.get("builder") != {"uv_version": UV_VERSION}
@@ -893,6 +1059,42 @@ def _git(repo: Path, *args: str, binary: bool = False) -> bytes | str:
     return result.stdout if binary else result.stdout.decode().strip()
 
 
+def _init_ephemeral_bare_repo(path: Path) -> None:
+    """Create a bare repo with background maintenance off.
+
+    Fetches otherwise trigger detached commit-graph/gc writes that can outlive
+    the command and race TemporaryDirectory cleanup ("commit-graphs" not empty).
+    """
+
+    subprocess.run(["git", "init", "--bare", str(path)], check=True, capture_output=True)
+    for key, value in (
+        ("gc.auto", "0"),
+        ("gc.autoDetach", "false"),
+        ("gc.writeCommitGraph", "false"),
+        ("fetch.writeCommitGraph", "false"),
+        ("maintenance.auto", "false"),
+    ):
+        _git(path, "config", key, value)
+
+
+def _canonical_raw_diff(repo: Path, base_sha: str, head_sha: str) -> bytes:
+    """Return a raw diff whose object ids are independent of repository abbrev state."""
+
+    result = _git(
+        repo,
+        "diff",
+        "--raw",
+        "-z",
+        "--no-renames",
+        "--no-abbrev",
+        base_sha,
+        head_sha,
+        binary=True,
+    )
+    assert isinstance(result, bytes)
+    return result
+
+
 def _create_git_bundle(
     repo: Path, output: Path, base_sha: str, head_sha: str, workflow_sha: str
 ) -> bytes:
@@ -900,7 +1102,7 @@ def _create_git_bundle(
 
     with tempfile.TemporaryDirectory(prefix="trusted-anchor-bundle-") as directory:
         ephemeral = Path(directory) / "repo.git"
-        subprocess.run(["git", "init", "--bare", str(ephemeral)], check=True, capture_output=True)
+        _init_ephemeral_bare_repo(ephemeral)
         _git(ephemeral, "fetch", "--no-tags", str(repo), base_sha, head_sha, workflow_sha)
         for ref, revision in (
             (BASE_REF, base_sha),
@@ -943,8 +1145,7 @@ def _controller(args: argparse.Namespace) -> None:
         tree = _exact_sha(_git(repo, "rev-parse", f"{revision}^{{tree}}"), f"{label}_tree")
         _git(repo, "cat-file", "-e", f"{tree}^{{tree}}")
         trees[label] = tree
-    raw_diff = _git(repo, "diff", "--raw", "-z", "--no-renames", base_sha, head_sha, binary=True)
-    assert isinstance(raw_diff, bytes)
+    raw_diff = _canonical_raw_diff(repo, base_sha, head_sha)
     inventory = _git(repo, "ls-tree", "-r", "--name-only", head_sha, "--", "tests", binary=False)
     assert isinstance(inventory, str)
     selected = [
@@ -1006,7 +1207,8 @@ def _controller(args: argparse.Namespace) -> None:
         or runtime_identity.get("runtime_probe") != _runtime_probe()
         or runtime_identity.get("pytest_plugins") != PYTEST_PLUGINS
         or runtime_identity.get("dependency_groups") != list(TRUSTED_RUNTIME_DEPENDENCY_GROUPS)
-        or runtime_identity.get("external_packages") != _trusted_external_package_contract_with_provenance(
+        or runtime_identity.get("external_packages")
+        != _trusted_external_package_contract_with_provenance(
             runtime_identity.get("external_packages")
         )
         or runtime_identity.get("builder") != {"uv_version": UV_VERSION}
@@ -1077,7 +1279,8 @@ def _executor(args: argparse.Namespace) -> None:
         or runtime_metadata.get("runtime_probe") != _runtime_probe()
         or runtime_metadata.get("pytest_plugins") != PYTEST_PLUGINS
         or runtime_metadata.get("dependency_groups") != list(TRUSTED_RUNTIME_DEPENDENCY_GROUPS)
-        or runtime_metadata.get("external_packages") != _trusted_external_package_contract_with_provenance(
+        or runtime_metadata.get("external_packages")
+        != _trusted_external_package_contract_with_provenance(
             runtime_metadata.get("external_packages")
         )
         or runtime_metadata.get("builder") != {"uv_version": UV_VERSION}
@@ -1316,9 +1519,14 @@ def _verifier(args: argparse.Namespace) -> None:
     if identity.get("run_id") != args.expected_run_id:
         raise SystemExit(1)
     git_bundle = (bundle / "git-objects.bundle").read_bytes()
-    with tempfile.TemporaryDirectory(prefix="trusted-anchor-verify-") as directory:
+    # Every verification decision below is made inside the block and raises
+    # before cleanup; a cleanup error must neither fail a PASS nor replace a
+    # failure, so it is ignored as a backstop to the quiescent repository.
+    with tempfile.TemporaryDirectory(
+        prefix="trusted-anchor-verify-", ignore_cleanup_errors=True
+    ) as directory:
         git_repo = Path(directory) / "repo.git"
-        subprocess.run(["git", "init", "--bare", str(git_repo)], check=True, capture_output=True)
+        _init_ephemeral_bare_repo(git_repo)
         subprocess.run(
             ["git", "bundle", "verify", str(bundle / "git-objects.bundle")],
             cwd=git_repo,
@@ -1340,15 +1548,10 @@ def _verifier(args: argparse.Namespace) -> None:
                 raise SystemExit(1)
             if _git(git_repo, "rev-parse", f"{ref}^{{commit}}") != revision:
                 raise SystemExit(1)
-        recomputed_diff = _git(
+        recomputed_diff = _canonical_raw_diff(
             git_repo,
-            "diff",
-            "--raw",
-            "-z",
-            "--no-renames",
             manifest["base_sha"],
             manifest["head_sha"],
-            binary=True,
         )
         if recomputed_diff != (bundle / "raw-diff.bin").read_bytes():
             raise SystemExit(1)

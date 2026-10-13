@@ -311,10 +311,7 @@ def run_integrity_check():
     """🛡️ [CI-Gate] Physical Integrity Check (Life-Sign Scan)"""
     print("\n🚀 [CI-Gate] Running Physical Integrity Check...")
     required_sigs = {
-        "scripts/ops/evolution_engine_v08.py": ["class EvolutionEngineV08"],
-        "scripts/ops/federated_engine_v09.py": ["class FederatedEngineV09", "def fed_sync"],
         "scripts/ops/supervisor_engine.py": ["class SupervisorEngine", "def run_swarm_mission"],
-        "scripts/engine/nexus_cli.py": ["def fed_run", "def meta_run", "def delegate"]
     }
     
     for path, sigs in required_sigs.items():
@@ -557,6 +554,8 @@ def run_ultra_review_check() -> bool:
         print(truncate_output(gate.stdout, label="ultra_gate_stdout"))
     if gate.returncode != 0:
         print(truncate_output(gate.stderr, label="ultra_gate_stderr"))
+        if "dry_run_not_verified" in (gate.stdout or "") + (gate.stderr or ""):
+            print("❌ Ultra Review NOT VERIFIED: report is a dry-run (nothing was actually checked)")
         print(f"❌ Ultra Review Gate FAILED (RC: {gate.returncode})")
         return False
     print("✅ Ultra Review Gate PASSED")
