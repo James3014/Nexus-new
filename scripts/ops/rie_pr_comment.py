@@ -287,7 +287,7 @@ query($owner: String!, $name: String!, $number: Int!) {{
     }}
     pullRequest(number: $number) {{
       ...Pr
-      comments(last: {MAX_COMMENTS}) {{ nodes {{ databaseId body author {{ login __typename }} }} }}
+      comments(last: {MAX_COMMENTS}) {{ totalCount nodes {{ databaseId body author {{ login __typename }} }} }}
     }}
   }}
 }}
@@ -330,6 +330,8 @@ class Acquisition:
     main_sha: str
     main_checks: tuple[dict[str, Any], ...]
     comments: tuple[dict[str, Any], ...]
+    main_checks_truncated: bool = False
+    comments_truncated: bool = False
 
 
 def _map(value: Any) -> Mapping[str, Any]:
@@ -421,8 +423,11 @@ def collect(client: GitHubClient, repository: str, pr_number: int) -> Acquisitio
     if not isinstance(main_sha, str) or len(main_sha) != 40:
         raise CommentError("default branch SHA unavailable")
     main_checks: list[dict[str, Any]] = []
+    main_truncated = False
     for commit in _list(_map(target.get("history")).get("nodes")):
-        main_checks.extend(_contexts(commit)[0])
+        commit_checks, commit_truncated = _contexts(commit)
+        main_checks.extend(commit_checks)
+        main_truncated = main_truncated or commit_truncated
 
     listing = _map(repo.get("pullRequests"))
     by_number: dict[int, PullRequestData] = {}
@@ -435,11 +440,9 @@ def collect(client: GitHubClient, repository: str, pr_number: int) -> Acquisitio
     if this_pr is None:
         raise CommentError("pull request unavailable")
     by_number[this_pr.number] = this_pr
-    comments = tuple(
-        dict(c)
-        for c in _list(_map(this_node.get("comments")).get("nodes"))
-        if isinstance(c, Mapping)
-    )
+    comment_listing = _map(this_node.get("comments"))
+    comments = tuple(dict(c) for c in _list(comment_listing.get("nodes")) if isinstance(c, Mapping))
+    comment_total = comment_listing.get("totalCount")
     open_total = listing.get("totalCount")
     return Acquisition(
         this_pr=this_pr,
@@ -448,22 +451,29 @@ def collect(client: GitHubClient, repository: str, pr_number: int) -> Acquisitio
         main_sha=main_sha,
         main_checks=tuple(main_checks),
         comments=comments,
+        main_checks_truncated=main_truncated,
+        comments_truncated=isinstance(comment_total, int) and comment_total > len(comments),
     )
 
 
 _FAILING = {"failure", "failed", "error", "timed_out"}
 
 
-def collect_workflow_changes(
-    client: GitHubClient, repository: str, pulls: Sequence[PullRequestData]
-) -> dict[str, str]:
-    """When each failing check's workflow file last changed on main."""
-    paths = sorted({
+def failing_workflow_paths(pulls: Sequence[PullRequestData]) -> list[str]:
+    """Every workflow file with a failing check on some open PR (uncapped)."""
+    return sorted({
         check["workflow_path"]
         for pr in pulls
         for check in pr.checks
         if isinstance(check.get("workflow_path"), str) and check.get("status") in _FAILING
-    })[:MAX_WORKFLOW_PATHS]
+    })
+
+
+def collect_workflow_changes(
+    client: GitHubClient, repository: str, pulls: Sequence[PullRequestData]
+) -> dict[str, str]:
+    """When each failing check's workflow file last changed on main."""
+    paths = failing_workflow_paths(pulls)[:MAX_WORKFLOW_PATHS]
     if not paths:
         return {}
     owner, _, name = repository.partition("/")
@@ -502,6 +512,19 @@ def truncation_notes(acq: Acquisition) -> list[str]:
     if checks:
         notes.append(
             f"check lists of open PRs {_pr_refs(checks, MAX_NOTE_PRS)} were cut at {MAX_CONTEXTS}; systemic detection may be incomplete"
+        )
+    if acq.main_checks_truncated:
+        notes.append(
+            f"main check history was cut at {MAX_CONTEXTS} checks per commit; systemic cutoffs may be incomplete"
+        )
+    workflows = len(failing_workflow_paths(acq.pulls))
+    if workflows > MAX_WORKFLOW_PATHS:
+        notes.append(
+            f"only {MAX_WORKFLOW_PATHS} of {workflows} failing workflows were checked for recent changes on main"
+        )
+    if acq.comments_truncated:
+        notes.append(
+            f"this PR has more than {MAX_COMMENTS} comments; an earlier RIE comment outside that window may be duplicated"
         )
     return notes
 

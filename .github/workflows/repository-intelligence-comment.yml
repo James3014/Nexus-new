@@ -31,6 +31,10 @@ jobs:
     permissions:
       contents: read
       checks: read
+      # GraphQL checkSuite.workflowRun (workflow id/path) is an Actions resource;
+      # without actions: read the installation token may return it as null,
+      # which would silently disable the engine's workflow-scoped checks.
+      actions: read
       pull-requests: write
     steps:
       - name: Debounce rapid pushes (a newer event for this PR cancels this run)
@@ -45,7 +49,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: James3014/repository-intelligence-engine
-          ref: 23a872ff7b4df8e68213c716371929e356134bea
+          ref: 77a937b67c3da4756f535a41b59cdf5555a25e31  # v0.1.5
           path: .rie-engine
           persist-credentials: false
 
@@ -56,7 +60,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          RIE_PIN: 23a872ff7b4df8e68213c716371929e356134bea
+          RIE_PIN: 77a937b67c3da4756f535a41b59cdf5555a25e31
         run: |
           set -euo pipefail
           [ "$EVENT_NAME" = pull_request_target ] || { echo "event is $EVENT_NAME, not pull_request_target" >&2; exit 1; }

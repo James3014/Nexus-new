@@ -268,6 +268,39 @@ def test_collect_reads_everything_in_one_graphql_query() -> None:
     ]
 
 
+def test_collect_flags_main_and_comment_truncation() -> None:
+    overview = _overview()
+    repo = overview["repository"]
+    repo["defaultBranchRef"]["target"]["history"]["nodes"][0]["statusCheckRollup"]["contexts"][
+        "totalCount"
+    ] = 150
+    repo["pullRequest"]["comments"]["totalCount"] = 250
+    acq = rpc.collect(FakeGraphQL([overview]), "o/r", 7)  # type: ignore[arg-type]
+    assert acq.main_checks_truncated is True
+    assert acq.comments_truncated is True
+    notes = rpc.truncation_notes(acq)
+    assert (
+        "main check history was cut at 100 checks per commit; systemic cutoffs may be incomplete"
+        in notes
+    )
+    assert (
+        "this PR has more than 100 comments; an earlier RIE comment outside that window may be duplicated"
+        in notes
+    )
+
+
+def test_note_when_failing_workflow_paths_exceed_the_lookup_cap() -> None:
+    checks = tuple(
+        {"name": "x", "status": "failure", "workflow_path": f".github/workflows/w{i}.yml"}
+        for i in range(rpc.MAX_WORKFLOW_PATHS + 3)
+    )
+    this = rpc.PullRequestData(7, "h", "b", (), checks)
+    acq = rpc.Acquisition(this, (this,), 1, "m" * 40, (), ())
+    assert rpc.truncation_notes(acq) == [
+        f"only {rpc.MAX_WORKFLOW_PATHS} of {rpc.MAX_WORKFLOW_PATHS + 3} failing workflows were checked for recent changes on main"
+    ]
+
+
 def test_workflow_paths_travel_only_as_graphql_variables() -> None:
     hostile = '.github/workflows/x.yml") { evil }'
     pr = rpc.PullRequestData(
@@ -466,7 +499,13 @@ def test_comment_workflow_runs_only_default_branch_code_with_scoped_write() -> N
     assert set(wf["on"]) == {"pull_request_target"}
     assert wf["permissions"] == {}
     (job,) = wf["jobs"].values()
-    assert job["permissions"] == {"contents": "read", "checks": "read", "pull-requests": "write"}
+    # actions: read lets the token resolve checkSuite.workflowRun (workflow id/path).
+    assert job["permissions"] == {
+        "contents": "read",
+        "checks": "read",
+        "actions": "read",
+        "pull-requests": "write",
+    }
     assert job["if"] == "github.event.pull_request.head.repo.full_name == github.repository"
     for step in job["steps"]:
         with_ = step.get("with", {})

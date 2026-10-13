@@ -38,6 +38,8 @@ UNTOUCHED = (
     "deletion-guard.yml",
     "fast-start-v2-invalidator.yml",
     "repository-intelligence.yml",
+    # Own per-PR group (cancel-in-progress) plus a debounce step (#2012).
+    "repository-intelligence-comment.yml",
 )
 
 
