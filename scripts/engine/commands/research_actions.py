@@ -400,6 +400,18 @@ def render_research_auto_flow_result(result: ResearchAutoFlowResult) -> list[str
     return lines
 
 
+def _scope_test_targets(cwd: Path, scope_list: list[str]) -> list[str]:
+    """Scope entries that are test files/dirs; empty list means run the default suite."""
+    targets: list[str] = []
+    for item in scope_list:
+        path = Path(item)
+        if not (cwd / path).exists():
+            continue
+        if path.name.startswith("test_") or any(part in {"tests", "test"} for part in path.parts):
+            targets.append(item)
+    return targets
+
+
 def run_research_run(
     repo_root: str | Path,
     *,
@@ -486,6 +498,8 @@ def run_research_run(
     rejected_reasons: list[str] = []
     decision_log: list[str] = []
     status = "success"
+    verification_failed = False
+    verification_failures: dict[str, list[str]] = {}
     winner = None
     promoted = False
     file_scope: list[str] = []
@@ -592,50 +606,49 @@ def run_research_run(
                     time.sleep(timeout_sec + 1.0)
                     return {"seed": seed, "score": 0.0, "cost": estimated_cost_per_round}
 
-                if "real-run" in hypothesis.lower():
+                # Honest verification: every seed executes the scoped tests.
+                # No score is ever derived from scope-file existence alone.
+                try:
+                    run_cwd = root
+                    broker = None
+                    swarm_dir = None
                     try:
                         from nexus.research.swarm_broker import SwarmBroker
 
                         broker = SwarmBroker(root)
-                        swarm_dir = broker.acquire(timeout_sec=timeout_sec)
-                        if not swarm_dir:
-                            return {
-                                "seed": seed,
-                                "score": 0.0,
-                                "cost": estimated_cost_per_round,
-                                "error": "broker_timeout",
-                            }
-
-                        try:
+                        if broker.swarm_dirs:
+                            swarm_dir = broker.acquire(timeout_sec=timeout_sec)
+                            if not swarm_dir:
+                                verification_failures.setdefault(cid, []).append("broker_timeout")
+                                return {"seed": seed, "score": 0.0, "cost": estimated_cost_per_round, "error": "broker_timeout"}
                             broker.sync_scope(swarm_dir, scope_files=scope_list)
-                            res = (subprocess_runner or subprocess.run)(
-                                [sys.executable, "-m", "pytest", "-q", "--maxfail=1"],
-                                capture_output=True,
-                                text=True,
-                                timeout=timeout_sec,
-                                cwd=swarm_dir,
-                            )
-                            score = 1.0 if res.returncode == 0 else 0.4
-                            return {
-                                "seed": seed,
-                                "score": score,
-                                "cost": estimated_cost_per_round,
-                                "stdout": res.stdout,
-                            }
-                        finally:
+                            run_cwd = swarm_dir
+                    except ImportError:
+                        broker = None
+                    try:
+                        cmd = [sys.executable, "-m", "pytest", "-q", "--maxfail=1", *_scope_test_targets(run_cwd, scope_list)]
+                        res = (subprocess_runner or subprocess.run)(
+                            cmd, capture_output=True, text=True, timeout=timeout_sec, cwd=run_cwd
+                        )
+                    finally:
+                        if broker is not None and swarm_dir:
                             broker.release(swarm_dir)
-                    except subprocess.TimeoutExpired:
-                        return {"seed": seed, "score": 0.0, "cost": estimated_cost_per_round, "error": "timeout"}
-                    except Exception as exc:  # noqa: BLE001
-                        return {"seed": seed, "score": 0.0, "cost": estimated_cost_per_round, "error": str(exc)}
-
-                valid_scope_count = sum(1 for path in scope_list if scheduler.validate_write(cid, path))
-                total_scope = len(scope_list) or 1
-                valid_ratio = valid_scope_count / total_scope
-                src_exists_count = sum(1 for path in scope_list if (candidate_root / path).exists())
-                coverage_ratio = src_exists_count / total_scope
-                score = round((0.2 + 0.8 * valid_ratio * coverage_ratio), 4)
-                return {"seed": seed, "score": score, "cost": estimated_cost_per_round}
+                    passed = res.returncode == 0
+                    if not passed:
+                        verification_failures.setdefault(cid, []).append(f"pytest_exit_{res.returncode}")
+                    return {
+                        "seed": seed,
+                        "score": 1.0 if passed else 0.0,
+                        "cost": estimated_cost_per_round,
+                        "stdout": str(getattr(res, "stdout", ""))[-2000:],
+                        "verification": {"executed": True, "command": " ".join(cmd), "exit_code": res.returncode},
+                    }
+                except subprocess.TimeoutExpired:
+                    verification_failures.setdefault(cid, []).append("timeout")
+                    return {"seed": seed, "score": 0.0, "cost": estimated_cost_per_round, "error": "timeout"}
+                except Exception as exc:  # noqa: BLE001
+                    verification_failures.setdefault(cid, []).append(f"verification_error:{exc}")
+                    return {"seed": seed, "score": 0.0, "cost": estimated_cost_per_round, "error": str(exc)}
 
             eval_report = evaluator.evaluate(
                 candidate_id=current_cid,
@@ -645,6 +658,13 @@ def run_research_run(
                 max_retries=max_retries,
                 timeout_sec=timeout_sec,
             )
+            if verification_failures.get(current_cid):
+                eval_report["passed_gate"] = False
+                verification_failed = True
+                decision_log.append(f"candidate:{current_cid}:verification_failed")
+            elif any("error" in detail for detail in eval_report.get("seed_details", [])):
+                eval_report["passed_gate"] = False
+            evaluator.scoreboard[current_cid] = eval_report
             scheduler.finish_evaluation(current_cid, eval_report)
 
             if not eval_report.get("passed_gate"):
@@ -697,7 +717,9 @@ def run_research_run(
                     else:
                         rollback_trace.append(f"promotion_failed:{winner} -> restore_scope_failed")
         else:
-            status = "failed"
+            status = "FAILED_VERIFICATION" if verification_failed else "failed"
+            if verification_failed:
+                rejected_reasons.append("verification_failed")
             decision_log.append("select: no_candidates_passed")
 
     def apply_retention_policy() -> dict[str, Any]:

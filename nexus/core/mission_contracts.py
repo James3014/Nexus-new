@@ -53,6 +53,38 @@ def transition(mission: "NexusMission", new_status: MissionStatus) -> MissionSta
     return new_status
 
 
+def _usage_tokens(usage: Dict[str, Any]) -> float:
+    def num(key: str) -> float:
+        value = usage.get(key)
+        return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0 else 0.0
+
+    total = num("total_tokens") or num("tokens_used") or num("tokens")
+    if total:
+        return total
+    return (
+        num("input_tokens") + num("output_tokens")
+        or num("prompt_tokens") + num("completion_tokens")
+        or num("prompt_eval_count") + num("eval_count")
+    )
+
+
+def extract_receipt_tokens(payload: Any) -> float:
+    """Sum token counts from every ``usage`` mapping (and top-level token fields) in a receipt tree."""
+    total = 0.0
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            if key == "usage" and isinstance(value, dict):
+                total += _usage_tokens(value)
+            elif key in ("tokens_used", "total_tokens") and isinstance(value, (int, float)) and not isinstance(value, bool):
+                total += max(0.0, float(value))
+            else:
+                total += extract_receipt_tokens(value)
+    elif isinstance(payload, list):
+        for item in payload:
+            total += extract_receipt_tokens(item)
+    return total
+
+
 class NexusMission(BaseModel):
     mission_id: str
     objective: str
@@ -82,6 +114,9 @@ class NexusMission(BaseModel):
     # 歷史追蹤
     run_history: List[str] = Field(default_factory=list)
 
+    # Wall-clock accounting: epoch seconds of the current active stretch (start/resume), None when idle.
+    active_since: Optional[float] = None
+
     def persist(self, project_root: Path) -> None:
         """安全寫入到 .nexus/mission.json 中"""
         out_dir = project_root / ".nexus"
@@ -110,6 +145,40 @@ class NexusMission(BaseModel):
                 return cls.parse_obj(payload)
         except Exception:
             return None
+
+    def begin_wall_clock(self, now: Optional[float] = None) -> None:
+        """Start (or keep) the active stretch used for wall-time accounting (start/resume)."""
+        if self.active_since is None:
+            self.active_since = time.time() if now is None else float(now)
+
+    def settle_wall_clock(self, now: Optional[float] = None) -> float:
+        """Fold the active stretch into accumulated wall time (pause/abort/run end). Returns seconds added."""
+        if self.active_since is None:
+            return 0.0
+        current = time.time() if now is None else float(now)
+        elapsed = max(0.0, current - self.active_since)
+        self.accumulated_usage["wall_time_sec"] = self.accumulated_usage.get("wall_time_sec", 0.0) + elapsed
+        self.active_since = None
+        return elapsed
+
+    def wall_time_remaining(self, now: Optional[float] = None) -> Optional[float]:
+        """Seconds left before the wall-time limit trips, counting any open stretch; None when unlimited."""
+        limit = self.budget.get("max_wall_time_sec", 0.0)
+        if limit <= 0.0:
+            return None
+        current = time.time() if now is None else float(now)
+        open_stretch = max(0.0, current - self.active_since) if self.active_since is not None else 0.0
+        return limit - self.accumulated_usage.get("wall_time_sec", 0.0) - open_stretch
+
+    def add_tokens_from_receipt_file(self, receipt_path: Path) -> float:
+        """Add tokens recorded in a run receipt/report JSON to accumulated usage. Returns tokens added."""
+        try:
+            payload = json.loads(Path(receipt_path).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return 0.0
+        added = extract_receipt_tokens(payload)
+        self.accumulated_usage["tokens"] = self.accumulated_usage.get("tokens", 0.0) + added
+        return added
 
     def check_telemetry_budget(self) -> bool:
         """

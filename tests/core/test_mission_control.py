@@ -117,7 +117,7 @@ def test_mission_start_passes_objective_to_run(tmp_path: Path) -> None:
 
     run_cmds = [c for c in calls if "run" in c]
     assert run_cmds, result.output
-    assert run_cmds[0][-1] == "Fix deadlock in transfer"
+    assert run_cmds[0][4] == "Fix deadlock in transfer"
     assert "MSN-OBJ" not in run_cmds[0]
 
 

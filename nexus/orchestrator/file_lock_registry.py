@@ -1,7 +1,10 @@
+import contextlib
+import fcntl
 import json
 import os
+import time
 from pathlib import Path
-from typing import Dict, List, Set, Optional
+from typing import Any, Dict, Iterator, List, Optional
 from pydantic import BaseModel
 
 class LockEntry(BaseModel):
@@ -9,52 +12,105 @@ class LockEntry(BaseModel):
     files: List[str]
 
 class FileLockRegistry:
-    def __init__(self, lock_file: str = ".nexus/multi_agent/locks/file_locks.json"):
+    """One registry file shared by every task: ``locks`` maps file path -> holder task id.
+
+    acquire/release re-read the file under an exclusive ``flock`` so two processes (two
+    tasks) see each other's locks.  A lock older than ``ttl_sec`` (when set) is stale and
+    may be taken over; the takeover is reported by ``acquire_detailed``.
+    """
+
+    def __init__(
+        self,
+        lock_file: str = ".nexus/multi_agent/locks/file_locks.json",
+        *,
+        ttl_sec: Optional[float] = None,
+    ):
         self.lock_file = Path(lock_file)
         self.lock_file.parent.mkdir(parents=True, exist_ok=True)
-        self.locks: Dict[str, str] = {} # file_path -> task_id
+        self.ttl_sec = ttl_sec
+        self.locks: Dict[str, str] = {}  # file_path -> task_id (holder)
+        self.acquired_at: Dict[str, float] = {}  # file_path -> epoch seconds
         self._load()
 
+    @contextlib.contextmanager
+    def _exclusive(self) -> Iterator[None]:
+        guard = self.lock_file.with_name(self.lock_file.name + ".flock")
+        with open(guard, "a") as fh:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            try:
+                self._load()
+                yield
+            finally:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
     def _load(self):
+        self.locks, self.acquired_at = {}, {}
         if self.lock_file.exists():
             try:
                 with open(self.lock_file, "r") as f:
                     data = json.load(f)
-                    self.locks = data.get("locks", {})
+                self.locks = dict(data.get("locks", {}))
+                self.acquired_at = {
+                    k: float(v) for k, v in dict(data.get("acquired_at", {})).items()
+                }
             except Exception:
-                self.locks = {}
+                self.locks, self.acquired_at = {}, {}
 
     def _save(self):
-        with open(self.lock_file, "w") as f:
-            json.dump({"locks": self.locks}, f, indent=2)
+        tmp = self.lock_file.with_name(self.lock_file.name + ".tmp")
+        with open(tmp, "w") as f:
+            json.dump({"locks": self.locks, "acquired_at": self.acquired_at}, f, indent=2)
+        os.replace(tmp, self.lock_file)
+
+    def _stale(self, path: str, now: float) -> bool:
+        if self.ttl_sec is None:
+            return False
+        return now - self.acquired_at.get(path, 0.0) > float(self.ttl_sec)
+
+    def acquire_detailed(self, task_id: str, files: List[str]) -> Dict[str, Any]:
+        """All-or-nothing acquire.  Returns conflicts with their holders and stale takeovers."""
+        paths = [os.path.normpath(f) for f in files]
+        now = time.time()
+        with self._exclusive():
+            holders = {
+                p: self.locks[p]
+                for p in paths
+                if p in self.locks and self.locks[p] != task_id and not self._stale(p, now)
+            }
+            taken_over = {
+                p: self.locks[p]
+                for p in paths
+                if p in self.locks and self.locks[p] != task_id and p not in holders
+            }
+            if not holders:
+                for p in paths:
+                    if self.locks.get(p) != task_id:
+                        self.acquired_at[p] = now
+                    self.locks[p] = task_id
+                self._save()
+        return {"conflicts": list(holders), "holders": holders, "stale_taken_over": taken_over}
 
     def acquire(self, task_id: str, files: List[str]) -> List[str]:
         """
         Attempts to acquire locks for a list of files.
         Returns a list of conflicting files (files already locked by others).
         If no conflicts, saves the locks and returns an empty list.
+        Re-locking files a task already holds is idempotent.
         """
-        conflicts = []
-        for f in files:
-            normalized_path = os.path.normpath(f)
-            if normalized_path in self.locks and self.locks[normalized_path] != task_id:
-                conflicts.append(normalized_path)
-        
-        if not conflicts:
-            for f in files:
-                normalized_path = os.path.normpath(f)
-                self.locks[normalized_path] = task_id
-            self._save()
-        
-        return conflicts
+        return list(self.acquire_detailed(task_id, files)["conflicts"])
 
     def release(self, task_id: str):
         """Releases all locks held by a task."""
-        to_remove = [f for f, t in self.locks.items() if t == task_id]
-        for f in to_remove:
-            del self.locks[f]
-        if to_remove:
-            self._save()
+        with self._exclusive():
+            to_remove = [f for f, t in self.locks.items() if t == task_id]
+            for f in to_remove:
+                del self.locks[f]
+                self.acquired_at.pop(f, None)
+            if to_remove:
+                self._save()
+
+    def holder(self, file_path: str) -> Optional[str]:
+        return self.locks.get(os.path.normpath(file_path))
 
     def check_access(self, task_id: str, file_path: str) -> bool:
         """Checks if a task has access to a specific file."""

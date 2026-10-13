@@ -790,8 +790,9 @@ else:
         drone = TacticalDrone(drone_id=drone_id, project_root=repo_root, max_rounds=max_rounds)
         drone.task_intent = task
         if not drone.local_brain.health_check():
-            drone.abort_unavailable(f"LLM endpoint unavailable: {drone.local_brain.api_url}")
-            click.secho(f"FAIL: LLM endpoint unavailable ({drone.local_brain.api_url}); crystal recorded with status FAIL.", fg="red", err=True)
+            reason = drone.local_brain.last_unavailable_reason or "unknown"
+            drone.abort_unavailable(f"LLM endpoint unavailable: {reason}")
+            click.secho(f"FAIL: LLM endpoint unavailable ({reason}); crystal recorded with status FAIL.", fg="red", err=True)
             raise SystemExit(1)
         result = drone.sense_think_act(task)
         outcome = result.get("outcome")
@@ -1507,7 +1508,7 @@ else:
     @click.option("--input-file", required=True, type=click.Path(exists=True, path_type=Path), help="Source text/markdown file.")
     @click.option("--output-file", required=True, type=click.Path(path_type=Path, dir_okay=False), help="Output rewritten file path.")
     @click.option("--task", default="Rewrite for clarity while preserving meaning.", show_default=True, help="Rewrite instruction.")
-    @click.option("--llm-mode/--no-llm-mode", default=False, show_default=True, help="Use LLM rewrite mode. Falls back to local-safe mode on failure.")
+    @click.option("--llm-mode/--no-llm-mode", default=False, show_default=True, help="Use LLM rewrite mode. Fails closed (non-zero exit) when the LLM runtime cannot run; there is no silent fallback.")
     @click.option("--report-file", default=".nexus/reports/content/rewrite-report.json", show_default=True, type=click.Path(path_type=Path))
     def content_rewrite(input_file, output_file, task, llm_mode, report_file):
         """📝 Rewrite content with explicit file IO contract."""
@@ -1521,6 +1522,10 @@ else:
         method = "local_safe"
         error = ""
         unified_runtime_receipt = None
+        task_explicit = (
+            click.get_current_context().get_parameter_source("task") == click.core.ParameterSource.COMMANDLINE
+        )
+        failure_status = ""
 
         if llm_mode:
             try:
@@ -1637,17 +1642,24 @@ else:
                     raise RuntimeError("unified_runtime_incomplete")
                 method = "llm"
             except Exception as exc:  # noqa: BLE001
-                error = str(exc)
-                rewritten = _local_rewrite_text(original)
-                method = "local_safe_fallback"
+                error = str(exc) or exc.__class__.__name__
+                method = "llm_failed"
+                failure_status = "FAILED_LLM_UNAVAILABLE"
         else:
-            rewritten = _local_rewrite_text(original)
+            method = "local_whitespace_normalization"
+            if task_explicit:
+                error = "task_not_honoured_in_local_mode"
+                failure_status = "TASK_IGNORED"
+            else:
+                rewritten = _local_rewrite_text(original)
 
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(rewritten, encoding="utf-8")
+        if not failure_status:
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(rewritten, encoding="utf-8")
 
         payload = {
-            "status": "SUCCESS",
+            "status": failure_status or "SUCCESS",
+            "task_applied": method == "llm",
             "task": task,
             "method": method,
             "error": error,
@@ -1655,7 +1667,7 @@ else:
             "io": {
                 "input_path": str(source_path),
                 "output_path": str(out_path),
-                "output_written": True,
+                "output_written": not failure_status,
             },
             "stats": {
                 "input_chars": len(original),
@@ -1666,6 +1678,22 @@ else:
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
+        if failure_status == "FAILED_LLM_UNAVAILABLE":
+            click.secho(f"FAIL: --llm-mode could not run ({error}); no output written, no local fallback.", fg="red", err=True)
+            click.echo(f"Report: {report_path}")
+            raise SystemExit(1)
+        if failure_status == "TASK_IGNORED":
+            click.secho(
+                "FAIL: --task was given but the default (no-LLM) mode only normalizes whitespace and cannot honour it. "
+                "Use --llm-mode, or omit --task for whitespace normalization only.",
+                fg="red",
+                err=True,
+            )
+            click.echo(f"Report: {report_path}")
+            raise SystemExit(2)
+
+        if method != "llm":
+            click.echo("NOTE: default mode only normalizes whitespace; --task was not applied (use --llm-mode).")
         click.echo(f"✅ [Content-Rewrite] Completed. Method: {method}")
         click.echo(f"Output Written: {payload['io']['output_written']}")
         click.echo(f"Output Path: {payload['io']['output_path']}")
@@ -3213,11 +3241,17 @@ else:
     @nexus_group.command(name="learn:phase-policy")
     @click.option("--task-type", default="bug")
     @click.option("--risk", default="standard")
+    @click.option(
+        "--project-root",
+        default=None,
+        type=click.Path(file_okay=False),
+        help="Project whose learn store is read (default: this checkout).",
+    )
     @click.option("--output-json", is_flag=True)
     @translate_action_exceptions
-    def learn_phase_policy_cmd(task_type, risk, output_json):
+    def learn_phase_policy_cmd(task_type, risk, project_root, output_json):
         """🧠 Show phase-policy decisions for a hypothetical task."""
-        out = get_learn_phase_policy(repo_root, task_type=task_type, risk=risk)
+        out = get_learn_phase_policy(project_root or repo_root, task_type=task_type, risk=risk)
         if output_json:
             click.echo(json.dumps(out, indent=2))
         else:
@@ -3508,6 +3542,7 @@ else:
         run_id = "RUN-" + uuid.uuid4().hex[:6].upper()
         mission.current_run_id = run_id
         mission.run_history.append(run_id)
+        mission.begin_wall_clock()
         mission.persist(repo_root)
 
         click.secho(f"🚀 Launching campaign for mission {mission.mission_id} (Run: {run_id})", fg="cyan", bold=True)
@@ -3515,13 +3550,34 @@ else:
         # 4. 呼叫實體戰役執行
         # 複用現有的 nexus run 命令子進程，以便完整使用自癒與 TDD 驗證
         # `nexus run` uses its argument as the task statement, so pass the objective, not the id.
-        cmd = [sys.executable, str(repo_root / "scripts/engine/nexus_cli.py"), "nexus", "run", mission.objective]
-        res = subprocess.run(cmd, check=False)
+        run_report = repo_root / ".nexus" / "reports" / "mission" / f"{run_id}_run_report.json"
+        cmd = [
+            sys.executable,
+            str(repo_root / "scripts/engine/nexus_cli.py"),
+            "nexus",
+            "run",
+            mission.objective,
+            "--report-file",
+            str(run_report),
+        ]
+        # The remaining wall-time budget bounds the subprocess so the limit can actually trip.
+        remaining = mission.wall_time_remaining()
+        wall_timed_out = False
+        try:
+            res = subprocess.run(cmd, check=False, timeout=max(remaining, 1.0) if remaining is not None else None)
+        except subprocess.TimeoutExpired:
+            wall_timed_out = True
+            res = subprocess.CompletedProcess(cmd, 124)
 
         # 5. 更新結束後的狀態與 telemetry 統計
         # 實作上可檢查報告判定完戰
         mission = NexusMission.load(repo_root) or mission # 重新載入，避免執行期間被子進程修改
-        if res.returncode == 0:
+        mission.settle_wall_clock()
+        tokens_added = mission.add_tokens_from_receipt_file(run_report)
+        click.echo(
+            f"📈 Usage: +{tokens_added:.0f} tokens, wall {mission.accumulated_usage['wall_time_sec']:.1f}s total"
+        )
+        if res.returncode == 0 and mission.check_telemetry_budget():
             # 完戰 gate 驗收: ACTIVE -> VERIFYING -> COMPLETED (or back to ACTIVE if not passed)
             transition(mission, MissionStatus.VERIFYING)
             mission.persist(repo_root)
@@ -3535,14 +3591,24 @@ else:
                     passed = False
             transition(mission, MissionStatus.COMPLETED if passed else MissionStatus.ACTIVE)
         else:
-            mission.accumulated_usage["retries"] += 1
-            if mission.accumulated_usage["retries"] >= mission.budget.get("max_retries", 10.0):
+            if res.returncode != 0:
+                mission.accumulated_usage["retries"] += 1
+            if not mission.check_telemetry_budget():
                 transition(mission, MissionStatus.BLOCKED)
+                click.secho("❌ [Budget Violation] A mission budget limit tripped; mission BLOCKED.", fg="red", bold=True)
+                if res.returncode == 0:
+                    mission.persist(repo_root)
+                    sys.exit(1)
 
         mission.persist(repo_root)
         click.echo(f"🏁 Campaign execution terminated. Status: {mission.status.value}")
         if res.returncode != 0:
-            click.secho(f"❌ Campaign run failed (exit {res.returncode}).", fg="red")
+            click.secho(
+                "❌ Campaign run exceeded the wall-time budget and was stopped."
+                if wall_timed_out
+                else f"❌ Campaign run failed (exit {res.returncode}).",
+                fg="red",
+            )
             sys.exit(1)
 
     @mission_group.command(name="status")
@@ -3585,6 +3651,7 @@ else:
         except MissionTransitionError as exc:
             click.secho(f"❌ {exc}", fg="red")
             sys.exit(1)
+        mission.settle_wall_clock()
 
         # 呼叫現有 metabolism 引擎保存實體 checkpoint 快照
         from nexus.services.metabolism_engine import metabolism
@@ -3636,6 +3703,7 @@ else:
         except MissionTransitionError as exc:
             click.secho(f"❌ {exc}", fg="red")
             sys.exit(1)
+        mission.begin_wall_clock()
         mission.persist(repo_root)
 
         click.secho(f"🌬️ Resuming mission: {mission.mission_id}", fg="green", bold=True)
@@ -3669,6 +3737,7 @@ else:
         except MissionTransitionError as exc:
             click.secho(f"❌ {exc}", fg="red")
             sys.exit(1)
+        mission.settle_wall_clock()
         mission.persist(repo_root)
         click.secho(f"🛑 Mission {mission.mission_id} aborted.", fg="yellow", bold=True)
 

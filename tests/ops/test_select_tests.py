@@ -38,6 +38,25 @@ def test_load_impact_rules_reads_active_markdown_rows(tmp_path):
     ]
 
 
+
+def test_issue1531_core_pin_policy_maps_without_fallback():
+    details = select_target_details(
+        ["scripts/ci/nexus_core_trusted_pin_policy.py"],
+        load_impact_rules(),
+        index_path=Path("/tmp/missing-issue1531-impact-index.json"),
+        history_path=Path("/tmp/missing-issue1531-history.jsonl"),
+    )
+
+    assert "tests/ops/test_nexus_core_trusted_pin_policy.py" in details.targets
+    assert "tests/ops/test_select_tests.py" in details.targets
+    assert "tests/ops/test_pr_impact_gate.py" in details.targets
+    assert "tests/services/test_policy_gate.py" in details.targets
+    assert details.unmatched_paths == []
+    assert details.fallback_used is False
+    assert details.risk == "high"
+    assert details.high_risk_escalated is True
+    assert details.risk_reasons == ["nexus_core_trusted_pin_maintenance_contract"]
+
 def test_issue153_event_feedback_rows_map_without_fallback():
     rules = load_impact_rules()
     details = select_target_details(
@@ -1033,3 +1052,371 @@ def test_main_json_includes_selection_metadata(tmp_path, capsys):
     assert payload["high_risk_escalated"] is True
     assert payload["unmatched_paths"] == []
     assert payload["retry_recommended"] == []
+
+
+def _ops_tree(tmp_path, monkeypatch):
+    import scripts.ops.select_tests as st
+
+    monkeypatch.setattr(st, "ROOT", tmp_path)
+    for rel, body in {
+        "scripts/ops/alpha.py": "X = 1\n",
+        "scripts/ops/beta.py": "from scripts.ops import alpha\n",
+        "scripts/ops/lonely.py": "Y = 1\n",
+        "scripts/ops/shared.py": "Z = 1\n",
+        "scripts/ops/runner.sh": "echo hi\n",
+        "nexus/core/uses_shared.py": "from scripts.ops.shared import Z\n",
+        "tests/ops/test_alpha_cli.py": "def test_a(): pass\n",
+        "tests/ops/test_beta.py": "from scripts.ops import beta\n",
+        "tests/ops/test_other.py": "import scripts.ops.alpha as a\n",
+        "tests/ops/test_runner_sh.py": "P = 'scripts/ops/runner.sh'\n",
+        "tests/ops/test_unrelated.py": "def test_u(): pass\n",
+    }.items():
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+    return st
+
+
+def _catchall():
+    return [ImpactRule("scripts/ops", ("tests/ops",), "active", "medium", "ops_tooling")]
+
+
+def _details(st, path, tmp_path):
+    return st.select_target_details(
+        [path],
+        _catchall(),
+        index_path=tmp_path / "no-index.json",
+        history_path=tmp_path / "no-history.jsonl",
+    )
+
+
+def test_scripts_ops_catchall_narrows_to_name_and_importer_tests(tmp_path, monkeypatch):
+    st = _ops_tree(tmp_path, monkeypatch)
+    details = _details(st, "scripts/ops/alpha.py", tmp_path)
+    # naming convention + direct importer test + transitive (beta imports alpha)
+    assert sorted(details.targets) == [
+        "tests/ops/test_alpha_cli.py",
+        "tests/ops/test_beta.py",
+        "tests/ops/test_other.py",
+    ]
+    assert not details.fallback_used
+
+
+def test_scripts_ops_shell_script_matched_by_path_reference(tmp_path, monkeypatch):
+    st = _ops_tree(tmp_path, monkeypatch)
+    assert _details(st, "scripts/ops/runner.sh", tmp_path).targets == [
+        "tests/ops/test_runner_sh.py"
+    ]
+
+
+def test_scripts_ops_with_no_tests_keeps_full_directory_fallback(tmp_path, monkeypatch):
+    st = _ops_tree(tmp_path, monkeypatch)
+    assert _details(st, "scripts/ops/lonely.py", tmp_path).targets == ["tests/ops"]
+
+
+def test_scripts_ops_with_non_ops_importer_fails_closed_to_directory(tmp_path, monkeypatch):
+    st = _ops_tree(tmp_path, monkeypatch)
+    (tmp_path / "tests/ops/test_shared.py").write_text("x = 1\n", encoding="utf-8")
+    assert _details(st, "scripts/ops/shared.py", tmp_path).targets == ["tests/ops"]
+
+
+def test_scripts_ops_nested_and_non_code_files_keep_catchall(tmp_path, monkeypatch):
+    st = _ops_tree(tmp_path, monkeypatch)
+    assert _details(st, "scripts/ops/data/foo.json", tmp_path).targets == ["tests/ops"]
+    assert _details(st, "scripts/ops/__init__.py", tmp_path).targets == ["tests/ops"]
+
+
+def test_specific_row_still_beats_derivation(tmp_path, monkeypatch):
+    st = _ops_tree(tmp_path, monkeypatch)
+    rules = [
+        *_catchall(),
+        ImpactRule("scripts/ops/alpha.py", ("tests/ops/test_unrelated.py",), "active"),
+    ]
+    details = st.select_target_details(
+        ["scripts/ops/alpha.py"],
+        rules,
+        index_path=tmp_path / "no-index.json",
+        history_path=tmp_path / "no-history.jsonl",
+    )
+    assert details.targets == ["tests/ops/test_unrelated.py"]
+
+
+def test_scripts_ops_extensionless_executable_uses_hyphen_naming_and_refs(tmp_path, monkeypatch):
+    st = _ops_tree(tmp_path, monkeypatch)
+    (tmp_path / "scripts/ops/my-tool").write_text("#!/bin/sh\n", encoding="utf-8")
+    (tmp_path / "tests/ops/test_my_tool_cli.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "tests/ops/test_ref.py").write_text("N = 'my-tool'\n", encoding="utf-8")
+    assert sorted(_details(st, "scripts/ops/my-tool", tmp_path).targets) == [
+        "tests/ops/test_my_tool_cli.py",
+        "tests/ops/test_ref.py",
+    ]
+
+
+def test_scripts_ops_deleted_file_keeps_full_directory_for_inventory_tests(tmp_path, monkeypatch):
+    # #1947: deleting scripts/ops files broke inventory tests only the catch-all selected.
+    st = _ops_tree(tmp_path, monkeypatch)
+    (tmp_path / "scripts/ops/alpha.py").unlink()
+    assert _details(st, "scripts/ops/alpha.py", tmp_path).targets == ["tests/ops"]
+
+
+def test_scripts_ops_added_file_keeps_full_directory_when_absent_at_base(tmp_path, monkeypatch):
+    import subprocess
+
+    st = _ops_tree(tmp_path, monkeypatch)
+    git = ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run([*git, "init", "-q"], check=True)
+    subprocess.run([*git, "add", "-A"], check=True)
+    subprocess.run([*git, "commit", "-qm", "base"], check=True)
+    base = subprocess.run(
+        [*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+    (tmp_path / "scripts/ops/fresh.py").write_text("A = 1\n", encoding="utf-8")
+    (tmp_path / "tests/ops/test_fresh.py").write_text("x = 1\n", encoding="utf-8")
+    kwargs = {
+        "index_path": tmp_path / "no-index.json",
+        "history_path": tmp_path / "no-history.jsonl",
+        "base_sha": base,
+    }
+    added = st.select_target_details(["scripts/ops/fresh.py"], _catchall(), **kwargs)
+    modified = st.select_target_details(["scripts/ops/alpha.py"], _catchall(), **kwargs)
+    assert added.targets == ["tests/ops"]
+    assert "tests/ops" not in modified.targets
+
+
+def _write(tmp_path, files):
+    for rel, body in files.items():
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+
+
+def _empty_ops_root(tmp_path, monkeypatch):
+    import scripts.ops.select_tests as st
+
+    monkeypatch.setattr(st, "ROOT", tmp_path)
+    return st
+
+
+def test_scripts_ops_extensionless_importer_pair_is_in_closure(tmp_path, monkeypatch):
+    # Real pair: nexus-hermes-continuation-controller loads nexus-hermes-core-completion
+    # via SourceFileLoader; its test must run when core-completion changes.
+    st = _empty_ops_root(tmp_path, monkeypatch)
+    _write(
+        tmp_path,
+        {
+            "scripts/ops/nexus-hermes-core-completion": "#!/usr/bin/env python3\nX = 1\n",
+            "scripts/ops/nexus-hermes-continuation-controller": (
+                "from importlib.machinery import SourceFileLoader\n"
+                "L = SourceFileLoader('c', str(HERE / 'nexus-hermes-core-completion'))\n"
+            ),
+            "tests/ops/test_nexus_hermes_continuation_controller.py": (
+                "CTRL = 'nexus-hermes-continuation-controller'\n"
+            ),
+            "tests/ops/test_nexus_hermes_core_completion.py": "x = 1\n",
+        },
+    )
+    assert _details(st, "scripts/ops/nexus-hermes-core-completion", tmp_path).targets == [
+        "tests/ops/test_nexus_hermes_continuation_controller.py",
+        "tests/ops/test_nexus_hermes_core_completion.py",
+    ]
+
+
+def test_scripts_ops_shell_importer_is_in_closure(tmp_path, monkeypatch):
+    st = _empty_ops_root(tmp_path, monkeypatch)
+    _write(
+        tmp_path,
+        {
+            "scripts/ops/core.py": "X = 1\n",
+            "scripts/ops/wrap.sh": "python scripts/ops/core.py\n",
+            "tests/ops/test_wrap.py": "x = 1\n",
+            "tests/ops/test_core.py": "x = 1\n",
+        },
+    )
+    assert _details(st, "scripts/ops/core.py", tmp_path).targets == [
+        "tests/ops/test_core.py",
+        "tests/ops/test_wrap.py",
+    ]
+
+
+def test_scripts_ops_three_level_import_chain(tmp_path, monkeypatch):
+    st = _empty_ops_root(tmp_path, monkeypatch)
+    _write(
+        tmp_path,
+        {
+            "scripts/ops/a.py": "X = 1\n",
+            "scripts/ops/b.py": "from scripts.ops import a\n",
+            "scripts/ops/c.py": "from scripts.ops import b\n",
+            "scripts/ops/d.py": "from scripts.ops import c\n",
+            "tests/ops/test_d.py": "x = 1\n",
+        },
+    )
+    assert _details(st, "scripts/ops/a.py", tmp_path).targets == ["tests/ops/test_d.py"]
+
+
+def test_scripts_ops_unparseable_importer_is_conservative(tmp_path, monkeypatch):
+    st = _empty_ops_root(tmp_path, monkeypatch)
+    _write(
+        tmp_path,
+        {
+            "scripts/ops/alpha.py": "X = 1\n",
+            "scripts/ops/broken.py": "def (:\n# uses alpha\n",
+            "tests/ops/test_broken.py": "x = 1\n",
+            "tests/ops/test_alpha.py": "x = 1\n",
+        },
+    )
+    assert _details(st, "scripts/ops/alpha.py", tmp_path).targets == [
+        "tests/ops/test_alpha.py",
+        "tests/ops/test_broken.py",
+    ]
+
+
+def test_scripts_ops_existing_nested_nonspecial_files_keep_catchall(tmp_path, monkeypatch):
+    # The files EXIST, so only the derivation guards (not the deleted-file path) can reject them.
+    st = _empty_ops_root(tmp_path, monkeypatch)
+    _write(
+        tmp_path,
+        {
+            "scripts/ops/sub/foo.py": "X = 1\n",
+            "scripts/ops/data.json": "{}\n",
+            "scripts/ops/notes.txt": "x\n",
+            "scripts/ops/__init__.py": "\n",
+            "tests/ops/test_foo.py": "x = 1\n",
+            "tests/ops/test_data.py": "x = 1\n",
+            "tests/ops/test_notes.py": "x = 1\n",
+            "tests/ops/test___init___x.py": "x = 1\n",
+        },
+    )
+    for rel in (
+        "scripts/ops/sub/foo.py",
+        "scripts/ops/data.json",
+        "scripts/ops/notes.txt",
+        "scripts/ops/__init__.py",
+    ):
+        assert _details(st, rel, tmp_path).targets == ["tests/ops"], rel
+
+
+def test_scripts_ops_helper_reference_falls_back(tmp_path, monkeypatch):
+    st = _empty_ops_root(tmp_path, monkeypatch)
+    _write(
+        tmp_path,
+        {
+            "scripts/ops/alpha.py": "X = 1\n",
+            "tests/ops/test_alpha.py": "x = 1\n",
+            "tests/ops/conftest.py": "from scripts.ops import alpha\n",
+        },
+    )
+    assert _details(st, "scripts/ops/alpha.py", tmp_path).targets == ["tests/ops"]
+
+
+def _git(tmp_path, *args):
+    import subprocess
+
+    return subprocess.run(
+        ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t", *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+def test_head_added_test_cannot_narrow_base_derivation(tmp_path, monkeypatch):
+    # Trust invariant: a PR adding tests/ops/test_<stem>_x.py must not turn the
+    # base-only whole-directory fallback into a narrow selection.
+    st = _empty_ops_root(tmp_path, monkeypatch)
+    _write(tmp_path, {"scripts/ops/lonely.py": "X = 1\n", "tests/ops/test_other.py": "x = 1\n"})
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "base")
+    base = _git(tmp_path, "rev-parse", "HEAD")
+    _write(
+        tmp_path,
+        {"scripts/ops/lonely.py": "X = 2\n", "tests/ops/test_lonely_x.py": "x = 1\n"},
+    )
+    kwargs = {
+        "index_path": tmp_path / "no-index.json",
+        "history_path": tmp_path / "no-history.jsonl",
+    }
+    with_base = st.select_target_details(
+        ["scripts/ops/lonely.py"], _catchall(), base_sha=base, **kwargs
+    )
+    assert with_base.targets == ["tests/ops"]
+
+
+def test_head_added_importer_test_is_ignored_for_base_derivation(tmp_path, monkeypatch):
+    st = _empty_ops_root(tmp_path, monkeypatch)
+    _write(
+        tmp_path,
+        {"scripts/ops/alpha.py": "X = 1\n", "tests/ops/test_alpha.py": "x = 1\n"},
+    )
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "base")
+    base = _git(tmp_path, "rev-parse", "HEAD")
+    _write(tmp_path, {"tests/ops/test_head_only.py": "from scripts.ops import alpha\n"})
+    assert st.derive_ops_targets("scripts/ops/alpha.py", base) == ["tests/ops/test_alpha.py"]
+
+
+def test_added_script_with_preexisting_named_test_keeps_full_directory(tmp_path, monkeypatch):
+    st = _empty_ops_root(tmp_path, monkeypatch)
+    _write(tmp_path, {"tests/ops/test_fresh.py": "x = 1\n", "scripts/ops/other.py": "X = 1\n"})
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "base")
+    base = _git(tmp_path, "rev-parse", "HEAD")
+    _write(tmp_path, {"scripts/ops/fresh.py": "X = 1\n"})
+    assert st.derive_ops_targets("scripts/ops/fresh.py", base) == []
+
+
+def test_derived_test_deleted_at_head_falls_back_to_full_directory(tmp_path, monkeypatch):
+    st = _empty_ops_root(tmp_path, monkeypatch)
+    _write(tmp_path, {"scripts/ops/alpha.py": "X = 1\n", "tests/ops/test_alpha.py": "x = 1\n"})
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "base")
+    base = _git(tmp_path, "rev-parse", "HEAD")
+    _write(tmp_path, {"scripts/ops/alpha.py": "X = 2\n"})
+    (tmp_path / "tests/ops/test_alpha.py").unlink()
+    assert st.derive_ops_targets("scripts/ops/alpha.py", base) == []
+
+
+def test_bare_hyphenated_name_mention_makes_importer(tmp_path, monkeypatch):
+    st = _empty_ops_root(tmp_path, monkeypatch)
+    _write(
+        tmp_path,
+        {
+            "scripts/ops/my-tool": "#!/usr/bin/env python3\nX = 1\n",
+            "scripts/ops/runner": "# delegates to my-tool\nimport os\n",
+            "tests/ops/test_runner.py": "x = 1\n",
+        },
+    )
+    assert _details(st, "scripts/ops/my-tool", tmp_path).targets == ["tests/ops/test_runner.py"]
+
+
+def test_quoted_literal_of_identifier_extensionless_name_makes_importer(tmp_path, monkeypatch):
+    st = _empty_ops_root(tmp_path, monkeypatch)
+    _write(
+        tmp_path,
+        {
+            "scripts/ops/tool": "#!/usr/bin/env python3\nX = 1\n",
+            "scripts/ops/runner": "import os\nTARGET = 'tool'\n",
+            "tests/ops/test_runner.py": "x = 1\n",
+        },
+    )
+    assert _details(st, "scripts/ops/tool", tmp_path).targets == ["tests/ops/test_runner.py"]
+
+
+def test_scripts_ops_path_with_newline_in_base_tree_fails_closed(tmp_path, monkeypatch):
+    st = _empty_ops_root(tmp_path, monkeypatch)
+    _write(
+        tmp_path,
+        {
+            "scripts/ops/alpha.py": "X = 1\n",
+            "tests/ops/test_alpha.py": "x = 1\n",
+            "tests/ops/weird\nname.py": "x = 1\n",
+        },
+    )
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "base")
+    base = _git(tmp_path, "rev-parse", "HEAD")
+    assert st.derive_ops_targets("scripts/ops/alpha.py", base) == []

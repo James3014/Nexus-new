@@ -8,8 +8,10 @@ conservative list of pytest targets. It does not run pytest or write reports.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +23,15 @@ DEFAULT_IMPACT_STATS = ROOT / ".nexus" / "test_impact_stats.json"
 DEFAULT_TEST_HISTORY = ROOT / ".nexus" / "reports" / "test_history.jsonl"
 DEFAULT_FALLBACK_TARGETS = ("tests/core", "tests/services/test_policy_gate.py")
 HIGH_RISK_TARGETS = ("tests/services/test_policy_gate.py",)
+
+# Catch-all rows whose directory-wide test set is narrowed per file by derivation
+# (naming convention + import/path references).  The row stays the fail-closed
+# fallback whenever derivation finds nothing or cannot prove the file is only
+# consumed by scripts/ops itself.
+DERIVED_CATCHALL_PREFIX = "scripts/ops"
+DERIVED_TESTS_DIR = "tests/ops"
+_SOURCE_SCAN_DIRS = ("nexus", "scripts", "product")
+_SKIP_DIR_PARTS = {"__pycache__", ".venv", "venv", "node_modules", ".git"}
 
 
 @dataclass(frozen=True)
@@ -232,6 +243,203 @@ def _predictive_scores(
     return scores
 
 
+def _wanted_source(rel: str) -> bool:
+    head, _, leaf = rel.rpartition("/")
+    if leaf.endswith(".py"):
+        return True
+    # direct scripts/ops children may be shell or extensionless executables
+    return head == DERIVED_CATCHALL_PREFIX and ("." not in leaf or leaf.endswith(".sh"))
+
+
+class _TreeUnreadable(Exception):
+    """The base tree could not be read; derivation must fail closed."""
+
+
+def _tree_files(root: Path, rel_dirs: tuple[str, ...], base_sha: str) -> dict[str, str]:
+    """Map repo-relative path -> text for source files, from ``base_sha`` when given.
+
+    Reading the exact base tree keeps head-controlled files (new tests, new
+    importers) out of the derivation, so head data can never narrow a plan.
+    """
+    out: dict[str, str] = {}
+    if not base_sha:
+        for rel in rel_dirs:
+            base = root / rel
+            if base.is_dir():
+                for p in sorted(base.rglob("*")):
+                    if (
+                        p.is_file()
+                        and not (set(p.parts) & _SKIP_DIR_PARTS)
+                        and _wanted_source(str(p.relative_to(root)))
+                    ):
+                        out[str(p.relative_to(root))] = p.read_text(
+                            encoding="utf-8", errors="replace"
+                        )
+        return out
+    listing = subprocess.run(
+        ["git", "-C", str(root), "ls-tree", "-r", "-z", "--name-only", base_sha, "--", *rel_dirs],
+        capture_output=True,
+        check=False,
+    )
+    if listing.returncode != 0:
+        raise _TreeUnreadable(base_sha)
+    names = [
+        n
+        for n in listing.stdout.decode("utf-8", "replace").split("\0")
+        if n and not (set(n.split("/")) & _SKIP_DIR_PARTS) and _wanted_source(n)
+    ]
+    if any("\n" in n for n in names):
+        raise _TreeUnreadable("newline in tracked path")  # cat-file --batch is line based
+    batch = subprocess.run(
+        ["git", "-C", str(root), "cat-file", "--batch"],
+        input="".join(f"{base_sha}:{n}\n" for n in names).encode(),
+        capture_output=True,
+        check=False,
+    )
+    if batch.returncode != 0:
+        raise _TreeUnreadable(base_sha)
+    data, pos = batch.stdout, 0
+    for name in names:
+        eol = data.index(b"\n", pos)
+        header = data[pos:eol].split()
+        if len(header) != 3 or header[1] != b"blob":
+            pos = eol + 1
+            continue  # submodule/symlink/missing: not source text
+        size = int(header[2])
+        out[name] = data[eol + 1 : eol + 1 + size].decode("utf-8", "replace")
+        pos = eol + 1 + size + 1
+    return out
+
+
+def _refs_module(text: str, name: str, stem: str, *, inside_ops: bool) -> bool:
+    """True if ``text`` imports or path-references scripts/ops/<name>."""
+    if re.search(rf"scripts[./]ops[./]{re.escape(stem)}\b", text):
+        return True
+    if not stem.isidentifier() and re.search(rf"(?<![\w-]){re.escape(stem)}(?![\w-])", text):
+        return True  # hyphenated/extensionless executable referenced by bare name
+    if name != stem and re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", text):
+        return True  # file name with extension, e.g. Path(...) / "alpha.py"
+    if name == stem and re.search(rf"[\"']{re.escape(stem)}[\"']", text):
+        return True  # extensionless executable named by a string literal
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        # Unparseable file (shell script, broken source) that mentions the stem:
+        # be conservative.
+        return re.search(rf"\b{re.escape(stem)}\b", text) is not None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            mod = node.module or ""
+            if mod == "scripts.ops" and any(a.name == stem for a in node.names):
+                return True
+            if mod == stem or mod.startswith(f"{stem}."):
+                if inside_ops:
+                    return True
+            if inside_ops and node.level and not mod and any(a.name == stem for a in node.names):
+                return True
+            if inside_ops and node.level and mod == stem:
+                return True
+        elif isinstance(node, ast.Import) and inside_ops:
+            if any(a.name == stem or a.name.startswith(f"{stem}.") for a in node.names):
+                return True
+    return False
+
+
+def _is_test_module(rel: str) -> bool:
+    name = rel.rsplit("/", 1)[-1]
+    return name.startswith("test_") or name.endswith("_test.py")
+
+
+def derive_ops_targets(changed_path: str, base_sha: str = "") -> list[str]:
+    """Derive tests for one direct ``scripts/ops/<file>`` without a specific row.
+
+    Selected: ``tests/ops/test_<stem>*.py`` plus every test file referencing the
+    module (import, ``scripts/ops/<file>`` path or bare file name), closed
+    transitively over importers that are direct children of scripts/ops (.py, .sh
+    and extensionless).  The derivation reads the exact ``base_sha`` tree when
+    given, so PR-controlled head files cannot narrow the selection.  Returns ``[]``
+    (caller keeps the whole-directory fallback) when nothing is found, the file is
+    not a pure modification, an importer lives outside scripts/ops and tests, or a
+    referencing file under tests/ is not a ``test_*.py`` module (helper/conftest).
+    """
+    path = _normalize_path(changed_path)
+    parent, _, filename = path.rpartition("/")
+    stem, dot, ext = filename.rpartition(".")
+    if not dot:  # extensionless executable, e.g. scripts/ops/nexus-agy-dispatch
+        stem, ext = filename, ""
+    if parent != DERIVED_CATCHALL_PREFIX or ext not in {"py", "sh", ""}:
+        return []
+    if filename.startswith("__init__") or not re.fullmatch(r"[\w-]+", stem):
+        return []
+    # Added/deleted/renamed files change repository inventories (source-inventory,
+    # openwiki, gitlink tests...) that no per-file derivation can see: keep the
+    # whole-directory fallback unless the file exists at head and, when the base
+    # is known, already existed at base (i.e. a pure modification).
+    if not (ROOT / path).is_file():
+        return []
+    try:
+        tree = _tree_files(ROOT, (*_SOURCE_SCAN_DIRS, "tests"), base_sha)
+    except (_TreeUnreadable, OSError, ValueError):
+        return []
+    if base_sha and path not in tree:
+        return []
+
+    ops_files = {
+        rel: text for rel, text in tree.items() if rel.rpartition("/")[0] == DERIVED_CATCHALL_PREFIX
+    }
+    outside = {
+        rel: text
+        for rel, text in tree.items()
+        if rel.endswith(".py")
+        and rel not in ops_files
+        and not rel.startswith("tests/")
+        and rel.split("/", 1)[0] in _SOURCE_SCAN_DIRS
+    }
+    test_files = {
+        rel: text for rel, text in tree.items() if rel.startswith("tests/") and rel.endswith(".py")
+    }
+
+    closure = {(stem, filename)}
+    frontier = [(stem, filename)]
+    while frontier:
+        cur_stem, cur_name = frontier.pop()
+        for text in outside.values():
+            if cur_stem in text and _refs_module(text, cur_name, cur_stem, inside_ops=False):
+                return []  # non-ops production importer: fail closed
+        for rel, text in ops_files.items():
+            leaf = rel.rsplit("/", 1)[-1]
+            if leaf == cur_name or cur_stem not in text:
+                continue
+            if _refs_module(text, cur_name, cur_stem, inside_ops=True):
+                key = (leaf.rpartition(".")[0] if "." in leaf else leaf, leaf)
+                if key not in closure:
+                    closure.add(key)
+                    frontier.append(key)
+
+    selected: set[str] = set()
+    for cur_stem, cur_name in closure:
+        prefix = f"{DERIVED_TESTS_DIR}/test_{cur_stem.replace('-', '_')}"
+        selected.update(
+            rel
+            for rel in test_files
+            if rel.startswith(prefix)
+            and rel.endswith(".py")
+            and "/" not in rel[len(DERIVED_TESTS_DIR) + 1 :]
+        )
+    for rel, text in test_files.items():
+        for cur_stem, cur_name in closure:
+            if cur_stem in text and _refs_module(text, cur_name, cur_stem, inside_ops=False):
+                if not _is_test_module(rel):
+                    return []  # helper/conftest: its consumers are unknown
+                selected.add(rel)
+                break
+    # A derived test that no longer exists at head (deleted by the PR) would be
+    # dropped silently downstream, leaving the script without direct tests.
+    if any(not (ROOT / rel).is_file() for rel in selected):
+        return []
+    return sorted(selected)
+
+
 def select_targets(
     changed_paths: list[str],
     rules: list[ImpactRule],
@@ -284,6 +492,7 @@ def select_target_details(
     stats_path: Path = DEFAULT_IMPACT_STATS,
     history_path: Path = DEFAULT_TEST_HISTORY,
     ranking: str = "static",
+    base_sha: str = "",
 ) -> SelectionDetails:
     selected: list[str] = []
     reasons: list[str] = []
@@ -314,6 +523,7 @@ def select_target_details(
             for rule in rules
             if changed_path == rule.code_path or changed_path.startswith(f"{rule.code_path}/")
         ]
+        matched_rules: list[ImpactRule] = []
         if matching_rules:
             most_specific_len = max(len(rule.code_path) for rule in matching_rules)
             matched_rules = [
@@ -328,6 +538,15 @@ def select_target_details(
                 ):
                     risk_reasons.append(rule.risk_reason)
         mapped_targets, mapped_reasons = select_targets([changed_path], rules, ())
+        if (
+            mapped_targets
+            and matched_rules
+            and all(rule.code_path == DERIVED_CATCHALL_PREFIX for rule in matched_rules)
+        ):
+            derived = derive_ops_targets(changed_path, base_sha)
+            if derived:
+                mapped_targets = derived
+                mapped_reasons = [f"{changed_path}: derived scripts/ops tests"]
         for target in mapped_targets:
             if target not in selected:
                 selected.append(target)

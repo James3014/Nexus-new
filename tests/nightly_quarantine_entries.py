@@ -701,16 +701,6 @@ QUARANTINE: tuple[dict[str, object], ...] = (
         ),
     },
     {
-        "file": "tests/test_phantom_success_guards.py",
-        "disposition": "quarantine-product-bug?",
-        "issue": "#1923",
-        "cause": "assertion encodes a safety/boundary invariant that the product currently violates; possible real product bug, file a new Issue before fixing",
-        "tests": (
-            "test_pipeline_forces_x_phase_when_benchmark_force_research_enabled",
-            "test_pipeline_records_c_before_commander_completion",
-        ),
-    },
-    {
         "file": "tests/test_route_cost_efficiency_opt.py",
         "disposition": "delete-candidate",
         "issue": "#1926",

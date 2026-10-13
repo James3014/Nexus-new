@@ -14,6 +14,7 @@ from pathlib import Path
 
 from scripts.bench.agy_provider import (
     AGY_DEFAULT_MODEL,
+    AGY_NO_TOOLS_PREFIX,
     agy_model,
     ask_direct_agy_patch,
     configure_agy_lane_env,
@@ -46,7 +47,8 @@ def test_ask_parses_patch_tokens_and_uses_contained_invocation(agy_pool):
     assert "--sandbox" in argv
     assert "--new-project" in argv
     assert "--dangerously-skip-permissions" not in argv
-    assert argv[argv.index("--print") + 1] == "fix it"
+    assert argv[argv.index("--print") + 1] == AGY_NO_TOOLS_PREFIX + "fix it"
+    assert out["agy_no_tools_prefix_applied"] is True
 
 
 def test_missing_agy_fails_closed_without_a_model_call():

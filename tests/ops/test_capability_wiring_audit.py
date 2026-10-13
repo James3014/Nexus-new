@@ -468,14 +468,17 @@ def test_end_to_end_file_lock_writes_a_lock_and_blocks_without_targets(
     row = extension_matrix["file_lock"]
     assert row["verdict"] == audit.REAL, row.get("checks")
     assert row["negative_control"]["passed"] is True
-    # one lock file per task id: a second task is not refused
-    assert row["component_probe"]["second_task_refused"] is False
+    # one registry per workspace keyed by file: the second task is refused (2026-10-13)
+    assert row["component_probe"]["second_task_refused"] is True
+    assert row["component_probe"]["holders"] == {"target.py": "lock-task-a"}
     assert row["production_default_selection"]["selected_without_forcing"] is True
 
 
 def test_end_to_end_learn_mode_ignores_project_claims(extension_matrix: dict[str, Any]) -> None:
+    # name kept for the exact-base impact gate; since 2026-10-13 it asserts the store is read
     row = extension_matrix["learn_mode"]
-    assert row["verdict"] == audit.STUB
+    assert row["verdict"] == audit.REAL, row.get("checks")
+    assert row["negative_control"]["passed"] is True
     probe = row["component_probe"]
     assert probe["project_root_report_claims_count"] >= 1
     assert probe["per_task_run_root_claims_count"] == 0
