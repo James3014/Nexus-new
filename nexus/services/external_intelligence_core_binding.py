@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -598,12 +599,30 @@ def build_repository_mutation_binding(
     return binding
 
 
-def binding_validity_seconds(worker_timeout_seconds: float, max_repairs_per_unit: int) -> float:
+def unit_verifier_cycle_seconds(inputs: CoreAuthorityInputs, unit_id: str) -> float:
+    """Upper bound of one closure verification cycle for ``unit_id``.
+
+    Sum of that unit's verifier timeouts plus every whole-task verifier timeout,
+    taken from the same Core authority inputs that pin the acceptance contract.
+    """
+    if unit_id not in inputs.unit_verifiers:
+        raise CoreBindingError("CORE_UNIT_VERIFIERS_MISSING")
+    rows = [*inputs.unit_verifiers[unit_id], *inputs.whole_verifiers]
+    return float(sum(float(row[2]) for row in rows))
+
+
+def binding_validity_seconds(
+    worker_timeout_seconds: float,
+    max_repairs_per_unit: int,
+    verifier_cycle_seconds: float = 0.0,
+) -> float:
     """Freshness window covering the initial bound run plus every budgeted repair run.
 
     The binding must stay valid for the whole bounded repair lifecycle of one unit:
     one initial worker run and at most ``max_repairs_per_unit`` same-session repair
-    continuations, each bounded by the worker timeout, plus a fixed margin.
+    continuations, each bounded by the worker timeout and each followed by one
+    closure verification cycle (``verifier_cycle_seconds``: the unit's verifier
+    timeouts plus the whole-task verifier timeouts), plus a fixed margin.  Pure.
     """
     if (
         isinstance(max_repairs_per_unit, bool)
@@ -614,7 +633,12 @@ def binding_validity_seconds(worker_timeout_seconds: float, max_repairs_per_unit
     timeout = float(worker_timeout_seconds)
     if timeout <= 0:
         raise CoreBindingError("CORE_FRESHNESS_WINDOW_INVALID")
-    return timeout * (1 + max_repairs_per_unit) + FRESHNESS_MARGIN_SECONDS
+    if isinstance(verifier_cycle_seconds, bool):
+        raise CoreBindingError("CORE_VERIFIER_WINDOW_INVALID")
+    verifier = float(verifier_cycle_seconds)
+    if not math.isfinite(verifier) or verifier < 0:
+        raise CoreBindingError("CORE_VERIFIER_WINDOW_INVALID")
+    return (timeout + verifier) * (1 + max_repairs_per_unit) + FRESHNESS_MARGIN_SECONDS
 
 
 def bound_operation_material(
@@ -910,6 +934,7 @@ __all__ = [
     "acceptance_contract_hash",
     "binding_hash_for",
     "binding_validity_seconds",
+    "unit_verifier_cycle_seconds",
     "binding_id_for",
     "bound_operation_material",
     "build_acceptance_contract",

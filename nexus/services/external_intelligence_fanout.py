@@ -37,6 +37,7 @@ from nexus.services.external_intelligence_core_binding import (
     derive_bound_envelope,
     envelope_sha256,
     parse_bound_execution_envelope_v2,
+    unit_verifier_cycle_seconds,
     validate_repository_mutation_binding,
 )
 
@@ -121,6 +122,90 @@ def _run_git(root: Path, *args: str, timeout: float = 30.0) -> str:
         detail = (result.stderr or result.stdout).strip()[:1000]
         raise FanoutError(f"GIT_COMMAND_FAILED:{args[0]}:{detail}")
     return result.stdout.strip()
+
+
+EIA_COMMIT_EMAIL_DOMAIN = "nexus.invalid"
+EIA_COMPOSER_NAME = "EIA closure composer"
+EIA_COMPOSER_EMAIL = f"eia-closure@{EIA_COMMIT_EMAIL_DOMAIN}"
+EIA_TRAILER_WORKER = "Nexus-EIA-Worker"
+EIA_TRAILER_MODEL = "Nexus-EIA-Model"
+EIA_TRAILER_BACKEND = "Nexus-EIA-Backend"
+_IDENTITY_UNSAFE_RE = re.compile(r"[<>\x00-\x1f\x7f]+")
+_EMAIL_TAG_UNSAFE_RE = re.compile(r"[^a-z0-9._-]+")
+
+
+def _identity_text(value: Any, fallback: str) -> str:
+    text = _IDENTITY_UNSAFE_RE.sub(" ", str(value or "")).strip()
+    return " ".join(text.split())[:200] or fallback
+
+
+def eia_worker_identity(
+    *,
+    provider: str,
+    model: str,
+    worker_id: str = "",
+    worker_backend: str = "",
+) -> dict[str, str]:
+    """Deterministic git identity + provenance for an EIA-created candidate commit.
+
+    Derived only from the bound worker, never from host git config, e.g.
+    ``EIA open-swe worker (opencli_chatgpt/advanced)
+    <eia-worker+opencli_chatgpt@nexus.invalid>``.
+    """
+    provider_text = _identity_text(provider, "unknown")
+    model_text = _identity_text(model, "unknown")
+    model_label = model_text if "/" in model_text else f"{provider_text}/{model_text}"
+    backend = _identity_text(worker_backend, "worker")
+    backend_label = backend.replace("_", "-")
+    tag = _EMAIL_TAG_UNSAFE_RE.sub("-", provider_text.lower()).strip("-.")[:64] or "unknown"
+    return {
+        "name": f"EIA {backend_label} worker ({model_label})",
+        "email": f"eia-worker+{tag}@{EIA_COMMIT_EMAIL_DOMAIN}",
+        "worker_id": _identity_text(worker_id, "unbound"),
+        "model": model_label,
+        "backend": backend,
+    }
+
+
+def eia_git_commit(
+    root: Path,
+    *,
+    subject: str,
+    name: str,
+    email: str,
+    trailers: Sequence[tuple[str, str]],
+    timeout: float = 60.0,
+) -> subprocess.CompletedProcess[str]:
+    """``git commit`` with an explicit, command-scoped identity.
+
+    Author and committer come from ``GIT_AUTHOR_*``/``GIT_COMMITTER_*`` set only on
+    this subprocess (they take precedence over every git config level), so the
+    host's global/system/repo ``user.*`` is never consulted and nothing is
+    written to any git config.  Signing is disabled for the same reason: a host
+    signing key would attest the wrong producer.
+    """
+    env = dict(os.environ)
+    env.update({
+        "GIT_AUTHOR_NAME": name,
+        "GIT_AUTHOR_EMAIL": email,
+        "GIT_COMMITTER_NAME": name,
+        "GIT_COMMITTER_EMAIL": email,
+    })
+    trailer_block = "\n".join(
+        f"{key}: {_identity_text(value, 'unknown')}" for key, value in trailers
+    )
+    argv = ["git", "-c", "commit.gpgsign=false", "commit", "-m", subject]
+    if trailer_block:
+        argv.extend(["-m", trailer_block])
+    return subprocess.run(
+        argv,
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+        timeout=timeout,
+    )
 
 
 def _safe_slug(value: Any, field: str) -> str:
@@ -1381,6 +1466,7 @@ def _capture_candidate(
     workspace: WorkspaceLease,
     *,
     expected_head: str,
+    worker_backend: str = "",
 ) -> dict[str, Any]:
     root = Path(workspace.path)
     observed_head = _run_git(root, "rev-parse", "HEAD")
@@ -1415,12 +1501,22 @@ def _capture_candidate(
     ]
     if sorted(staged) != sorted(changed):
         raise FanoutError("CANDIDATE_STAGED_SCOPE_MISMATCH")
-    commit = subprocess.run(
-        ["git", "commit", "-m", f"candidate: {unit.task_id}/{unit.unit_id}"],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=False,
+    identity = eia_worker_identity(
+        provider=unit.provider,
+        model=unit.model,
+        worker_id=str((unit.selected_worker or {}).get("worker_id") or ""),
+        worker_backend=worker_backend,
+    )
+    commit = eia_git_commit(
+        root,
+        subject=f"candidate: {unit.task_id}/{unit.unit_id}",
+        name=identity["name"],
+        email=identity["email"],
+        trailers=(
+            (EIA_TRAILER_WORKER, identity["worker_id"]),
+            (EIA_TRAILER_MODEL, identity["model"]),
+            (EIA_TRAILER_BACKEND, identity["backend"]),
+        ),
     )
     if commit.returncode != 0:
         raise FanoutError(
@@ -1870,7 +1966,9 @@ class AdaptiveWorkerFanoutRuntime:
                 contract_hash=preflight.acceptance_contract_hash,
                 created_at=datetime.now(timezone.utc),
                 valid_for_seconds=binding_validity_seconds(
-                    float(getattr(transport, "timeout", 300.0)), self.max_repairs_per_unit
+                    float(getattr(transport, "timeout", 300.0)),
+                    self.max_repairs_per_unit,
+                    unit_verifier_cycle_seconds(preflight.inputs, unit.unit_id),
                 ),
             )
             bound = derive_bound_envelope(preflight.semantic_envelope, binding)
@@ -2215,7 +2313,12 @@ class AdaptiveWorkerFanoutRuntime:
             )
             return receipt
         try:
-            candidate = _capture_candidate(unit, workspace, expected_head=unit.expected_base_sha)
+            candidate = _capture_candidate(
+                unit,
+                workspace,
+                expected_head=unit.expected_base_sha,
+                worker_backend=result.worker_backend,
+            )
         except FanoutError as exc:
             hard_block = (
                 str(exc) == "EMPTY_IMPLEMENTATION_RESULT"
@@ -2457,7 +2560,10 @@ class AdaptiveWorkerFanoutRuntime:
             )
             return receipt
         candidate = _capture_candidate(
-            unit, workspace, expected_head=str(previous_receipt["candidate_commit"])
+            unit,
+            workspace,
+            expected_head=str(previous_receipt["candidate_commit"]),
+            worker_backend=result.worker_backend,
         )
         receipt = self._build_receipt(
             unit=unit,
@@ -2565,6 +2671,12 @@ AdaptiveDeepSeekFanoutRuntime = AdaptiveWorkerFanoutRuntime
 __all__ = [
     "CLAIM_CEILING",
     "DISPATCH_ATTEMPT_SCHEMA",
+    "EIA_COMMIT_EMAIL_DOMAIN",
+    "EIA_COMPOSER_EMAIL",
+    "EIA_COMPOSER_NAME",
+    "EIA_TRAILER_BACKEND",
+    "EIA_TRAILER_MODEL",
+    "EIA_TRAILER_WORKER",
     "FANOUT_DECISION_SCHEMA",
     "FANOUT_RUN_SCHEMA",
     "MODEL",
@@ -2586,6 +2698,8 @@ __all__ = [
     "WorkspaceLease",
     "build_repair_bootstrap",
     "build_worker_bootstrap",
+    "eia_git_commit",
+    "eia_worker_identity",
     "parse_worker_result",
     "plan_fanout",
 ]
