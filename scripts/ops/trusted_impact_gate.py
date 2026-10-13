@@ -24,6 +24,7 @@ import functools
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tarfile
@@ -214,8 +215,17 @@ def _trees(repo: Path, revision: str) -> tuple[str, str]:
 # --------------------------------------------------------------------------- plan
 
 
-def _trusted_rules(base_map: bytes, head_map: bytes, directory: Path) -> list[Any]:
-    """Base rows always win; head rows only map paths no base row covers."""
+def _trusted_rules(
+    base_map: bytes, head_map: bytes, directory: Path
+) -> tuple[list[Any], list[Any]]:
+    """Return ``(base-only rules, merged rules)``.
+
+    Merged rules are the base rows plus head rows for code paths no base row
+    covers.  Head rows are *additive only*: ``combine_plans`` unions the merged
+    plan's targets with the base-only plan's, so a head row -- even one whose
+    code path (file or directory prefix) already exists in the base tree but
+    is unmapped -- can add targets but can never remove a base-only target.
+    """
 
     rules: dict[str, list[Any]] = {}
     for label, data in (("base", base_map), ("head", head_map)):
@@ -229,20 +239,67 @@ def _trusted_rules(base_map: bytes, head_map: bytes, directory: Path) -> list[An
             for rule in rules["base"]
         )
 
-    return [*rules["base"], *(rule for rule in rules["head"] if not covered(rule.code_path))]
+    merged = [*rules["base"], *(rule for rule in rules["head"] if not covered(rule.code_path))]
+    return list(rules["base"]), merged
 
 
-def _trusted_index(base_index: bytes, head_index: bytes, directory: Path) -> Path:
-    """Base import-index entries win; head entries can only add new keys."""
+def _trusted_index(base_index: bytes, head_index: bytes, directory: Path) -> tuple[Path, Path]:
+    """Return ``(base-only index, merged index)``; head keys never replace base keys.
 
-    merged: dict[str, list[str]] = {}
+    Like head map rows, head index keys are additive only (see ``combine_plans``).
+    """
+
+    loaded: dict[str, dict[str, list[str]]] = {}
     for label, data in (("head", head_index), ("base", base_index)):
         path = directory / f"{label}-impact-index.json"
         path.write_bytes(data)
-        merged.update(select_tests.load_impact_index(path))
-    output = directory / "trusted-impact-index.json"
-    output.write_text(json.dumps({"mappings": merged}, sort_keys=True), encoding="utf-8")
-    return output
+        loaded[label] = select_tests.load_impact_index(path)
+    outputs = []
+    for label, mappings in (
+        ("base-only", loaded["base"]),
+        ("merged", {**loaded["head"], **loaded["base"]}),
+    ):
+        output = directory / f"trusted-{label}-impact-index.json"
+        output.write_text(json.dumps({"mappings": mappings}, sort_keys=True), encoding="utf-8")
+        outputs.append(output)
+    return outputs[0], outputs[1]
+
+
+def combine_plans(base_only: dict[str, Any], merged: dict[str, Any]) -> dict[str, Any]:
+    """Head impact data may ADD, never REMOVE.
+
+    * Targets are the union of both plans, so every base-only target (fallback,
+      mandatory Tier-2, mapped tests) for any changed path stays selected.
+    * Impact class/tier/confidence come from the merged plan but never drop
+      below the base-only plan, except when the base-only plan was
+      ``IMPACT_UNKNOWN`` and head rows/keys now map the paths (the merged plan
+      is no longer unknown); then the merged class/tier is used, still with
+      the union of targets.
+    """
+
+    combined = dict(merged)
+    targets = list(merged["pytest_targets"])
+    targets += [target for target in base_only["pytest_targets"] if target not in targets]
+    combined["pytest_targets"] = targets
+    combined["pytest_required"] = bool(targets) or bool(
+        merged["pytest_required"] or base_only["pytest_required"]
+    )
+    combined["workflow_validation_required"] = bool(
+        merged["workflow_validation_required"] or base_only["workflow_validation_required"]
+    )
+    head_resolved_unknown = (
+        base_only["impact_class"] == gate._UNKNOWN and merged["impact_class"] != gate._UNKNOWN
+    )
+    if not head_resolved_unknown:
+        combined["confidence"] = min(merged["confidence"], base_only["confidence"])
+        if base_only["tier"] > merged["tier"] or base_only["impact_class"] == gate._UNKNOWN:
+            combined["tier"] = base_only["tier"]
+            combined["impact_class"] = base_only["impact_class"]
+    reasons = list(merged["reasons"])
+    if targets != merged["pytest_targets"] or head_resolved_unknown:
+        reasons.append("trusted gate: head impact data may add but never remove base-only targets")
+    combined["reasons"] = reasons
+    return combined
 
 
 @contextlib.contextmanager
@@ -267,8 +324,10 @@ def derive_plan(repo: Path, base_sha: str, head_sha: str) -> dict[str, Any]:
     """Compute the impact plan with trusted code over the exact base/head trees.
 
     The head tree is materialized only as data (existence checks); nothing from
-    it is imported or executed.  Selection data comes from the base revision,
-    with head rows admitted only for paths the base map does not cover.
+    it is imported or executed.  Two plans are built -- base-only selection
+    data, and base data plus admissible head rows/index keys -- and combined
+    with ``combine_plans`` so head data can add targets but never remove one.
+    The verifier calls this same function, so its re-derivation is identical.
     """
 
     for revision in (base_sha, head_sha):
@@ -287,21 +346,27 @@ def derive_plan(repo: Path, base_sha: str, head_sha: str) -> dict[str, Any]:
             env=_git_env(work / "home"),
         )
         try:
-            rules = _trusted_rules(
+            base_rules, merged_rules = _trusted_rules(
                 _show_or_empty(repo, base_sha, IMPACT_MAP_PATH),
                 _show_or_empty(repo, head_sha, IMPACT_MAP_PATH),
                 work,
             )
-            index_path = _trusted_index(
+            base_index, merged_index = _trusted_index(
                 _show_or_empty(repo, base_sha, IMPACT_INDEX_PATH),
                 _show_or_empty(repo, head_sha, IMPACT_INDEX_PATH),
                 work,
             )
             changed = gate._git_changed_paths(base_sha, head_sha, root=head_root)
-            with _trusted_selection(head_root, rules, index_path):
-                plan = gate.build_impact_plan(
-                    changed, base_sha=base_sha, head_sha=head_sha, root=head_root
-                )
+            plans = []
+            for rules, index_path in ((base_rules, base_index), (merged_rules, merged_index)):
+                with _trusted_selection(head_root, rules, index_path):
+                    plans.append(
+                        asdict(
+                            gate.build_impact_plan(
+                                changed, base_sha=base_sha, head_sha=head_sha, root=head_root
+                            )
+                        )
+                    )
         finally:
             subprocess.run(
                 ["git", "-C", str(repo), "worktree", "remove", "--force", str(head_root)],
@@ -313,7 +378,7 @@ def derive_plan(repo: Path, base_sha: str, head_sha: str) -> dict[str, Any]:
                 capture_output=True,
                 env=_git_env(work / "home"),
             )
-    return asdict(plan)
+    return combine_plans(plans[0], plans[1])
 
 
 def plan_digest(plan: dict[str, Any]) -> str:
@@ -641,7 +706,16 @@ def validate_junit(junit: bytes, spec: dict[str, Any], files: set[str]) -> None:
 
     if len(junit) > MAX_JUNIT_BYTES:
         raise GateError(f"{spec['side']} junit exceeds the size limit")
-    if b"<!DOCTYPE" in junit or b"<!ENTITY" in junit:
+    try:
+        text = junit.decode("utf-8")
+    except UnicodeDecodeError:
+        raise GateError(f"{spec['side']} junit is not UTF-8") from None
+    declaration = re.match(r"\s*<\?xml[^>]*?encoding\s*=\s*[\"']([^\"']+)[\"']", text)
+    if text.startswith("\ufeff") or (
+        declaration and declaration.group(1).lower().replace("_", "-") not in {"utf-8", "utf8"}
+    ):
+        raise GateError(f"{spec['side']} junit declares a non-UTF-8 encoding")
+    if "<!DOCTYPE" in text or "<!ENTITY" in text or b"<!DOCTYPE" in junit or b"<!ENTITY" in junit:
         raise GateError(f"{spec['side']} junit declares a DTD or entity")
     try:
         root = ET.fromstring(junit)

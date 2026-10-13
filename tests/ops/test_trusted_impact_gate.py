@@ -60,6 +60,9 @@ def pr_repo(tmp_path: Path) -> dict:
             "tests/test_mod.py": TEST_MOD.format(value="True"),
             "tests/test_other.py": TEST_OTHER,
             "tests/test_unplanned.py": "def test_x():\n    assert True\n",
+            "tests/core/test_core.py": "def test_ok():\n    assert True\n",
+            "tests/core/test_web_dom_mapper.py": "def test_browser():\n    assert True\n",
+            "tests/services/test_policy_gate.py": "def test_ok():\n    assert True\n",
         },
     )
     base = _commit(repo, "base")
@@ -382,6 +385,163 @@ def test_head_map_cannot_narrow_rows_the_base_map_covers(pr_repo):
 
 
 # ----------------------------------------------------------------------------- verifier
+
+
+FALLBACK = ["tests/core", "tests/services/test_policy_gate.py"]
+
+
+def _existing_unmapped(pr_repo: dict, head_files: dict[str, str]) -> dict:
+    repo = pr_repo["repo"]
+    _write(
+        repo,
+        {
+            "legacy/__init__.py": "",
+            "legacy/core.py": "VALUE = 1\n",
+            # Base maps the index file itself so editing it is not unmatched.
+            ".nexus/test_impact_index.json": json.dumps({
+                "mappings": {".nexus/test_impact_index.json": ["tests/test_other.py"]}
+            }),
+        },
+    )
+    pr_repo["base"] = _commit(repo, "base with an existing unmapped module")
+    _write(repo, {"legacy/core.py": "VALUE = 2\n", **head_files})
+    pr_repo["head"] = _commit(repo, "head maps the existing module")
+    return tig.derive_plan(repo, pr_repo["base"], pr_repo["head"])
+
+
+def _base_map(pr_repo: dict) -> str:
+    return (pr_repo["repo"] / "docs/testing/test_impact_map.md").read_text(encoding="utf-8")
+
+
+HEAD_MAPPING_VECTORS = {
+    "exact_row": lambda pr_repo: {
+        "docs/testing/test_impact_map.md": _base_map(pr_repo)
+        + "| legacy/core.py | tests/test_unplanned.py | active | low | head |\n"
+    },
+    "prefix_row": lambda pr_repo: {
+        "docs/testing/test_impact_map.md": _base_map(pr_repo)
+        + "| legacy | tests/test_unplanned.py | active | low | head |\n"
+    },
+    "index_key": lambda pr_repo: {
+        ".nexus/test_impact_index.json": json.dumps({
+            "mappings": {
+                ".nexus/test_impact_index.json": ["tests/test_other.py"],
+                "legacy/core.py": ["tests/test_unplanned.py"],
+            }
+        })
+    },
+}
+
+
+def test_existing_unmapped_path_without_head_data_keeps_base_fallback(pr_repo):
+    plan = _existing_unmapped(pr_repo, {})
+    assert plan["impact_class"] == "IMPACT_UNKNOWN"
+    assert set(FALLBACK) <= set(plan["pytest_targets"])
+
+
+@pytest.mark.parametrize("vector", sorted(HEAD_MAPPING_VECTORS))
+def test_head_mapping_for_existing_unmapped_path_adds_but_never_removes(pr_repo, vector):
+    plan = _existing_unmapped(pr_repo, HEAD_MAPPING_VECTORS[vector](pr_repo))
+    assert set(FALLBACK) <= set(plan["pytest_targets"])
+    assert "tests/test_unplanned.py" in plan["pytest_targets"]
+
+    bundle, manifest, manifest_sha = _bundle(pr_repo)
+    assert json.loads((bundle / "plan.json").read_text(encoding="utf-8")) == plan
+    head_spec = manifest["sides"]["head"]
+    assert set(FALLBACK) <= set(head_spec["executed_targets"])
+    evidence = pr_repo["tmp"] / "evidence"
+    known = {
+        "tests/core": ("tests.core.test_core", "test_ok", "pass"),
+        "tests/services/test_policy_gate.py": (
+            "tests.services.test_policy_gate",
+            "test_ok",
+            "pass",
+        ),
+        "tests/test_other.py": ("tests.test_other.TestOther", "test_c", "pass"),
+        "tests/test_mod.py": ("tests.test_mod", "test_a", "pass"),
+    }
+    cases = [known[target] for target in head_spec["executed_targets"] if target in known]
+    cases.append(("tests.test_unplanned", "test_x", "pass"))
+    base_sha256 = _evidence(evidence, manifest, manifest_sha, "base", junit=_junit(cases))
+    # The attack: head runs only the head-picked target and reports it passing.
+    _evidence(
+        evidence,
+        manifest,
+        manifest_sha,
+        "head",
+        junit=_junit(cases[-1:]),
+        pytest_args=["tests/test_unplanned.py"],
+    )
+    with pytest.raises(tig.GateError, match="pytest_args does not match"):
+        _verify(pr_repo, bundle, manifest_sha, base_sha256)
+    # Honest evidence for the union plan passes the verifier's re-derivation.
+    _evidence(evidence, manifest, manifest_sha, "head", junit=_junit(cases))
+    assert _verify(pr_repo, bundle, manifest_sha, base_sha256)["classification"] == "PASS"
+
+
+def test_head_row_for_a_new_path_still_maps(pr_repo):
+    repo = pr_repo["repo"]
+    _write(
+        repo,
+        {
+            "docs/testing/test_impact_map.md": _base_map(pr_repo)
+            + "| newpkg | tests/test_unplanned.py | active | low | new |\n",
+            "newpkg/__init__.py": "",
+        },
+    )
+    head = _commit(repo, "new package with its own row")
+    plan = tig.derive_plan(repo, pr_repo["base"], head)
+    assert plan["impact_class"] != "IMPACT_UNKNOWN"
+    assert "tests/test_unplanned.py" in plan["pytest_targets"]
+
+
+def test_combine_plans_never_lowers_tier_or_drops_targets():
+    base_only = {
+        "pytest_targets": ["a", "b"],
+        "pytest_required": True,
+        "workflow_validation_required": True,
+        "impact_class": "HIGH_RISK_INTEGRATION",
+        "tier": 2,
+        "confidence": 0.4,
+        "reasons": [],
+    }
+    merged = {
+        **base_only,
+        "pytest_targets": ["c"],
+        "workflow_validation_required": False,
+        "impact_class": "SCOPED_IMPLEMENTATION",
+        "tier": 1,
+        "confidence": 0.9,
+    }
+    combined = tig.combine_plans(base_only, merged)
+    assert combined["pytest_targets"] == ["c", "a", "b"]
+    assert (combined["impact_class"], combined["tier"], combined["confidence"]) == (
+        "HIGH_RISK_INTEGRATION",
+        2,
+        0.4,
+    )
+    assert combined["workflow_validation_required"] is True
+
+
+def test_utf16_junit_with_doctype_is_rejected(pr_repo):
+    bundle, manifest, manifest_sha, base_sha256 = _honest(pr_repo)
+    body = (
+        '<?xml version="1.0" encoding="utf-16"?><!DOCTYPE t [<!ENTITY p "pass">]>'
+        + (_junit(HONEST).decode().split("?>", 1)[1])
+    )
+    junit = body.encode("utf-16")
+    assert b"<!DOCTYPE" not in junit
+    _evidence(pr_repo["tmp"] / "evidence", manifest, manifest_sha, "head", junit=junit)
+    with pytest.raises(tig.GateError, match="not UTF-8"):
+        _verify(pr_repo, bundle, manifest_sha, base_sha256)
+
+
+def test_utf8_bytes_declaring_another_encoding_are_rejected(pr_repo):
+    bundle, manifest, manifest_sha, base_sha256 = _honest(pr_repo)
+    junit = _junit(HONEST).replace(b'encoding="utf-8"', b'encoding="latin-1"')
+    _evidence(pr_repo["tmp"] / "evidence", manifest, manifest_sha, "head", junit=junit)
+    with pytest.raises(tig.GateError, match="non-UTF-8 encoding"):
+        _verify(pr_repo, bundle, manifest_sha, base_sha256)
 
 
 def test_honest_pass_passes(pr_repo):
