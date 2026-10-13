@@ -226,20 +226,38 @@ def test_registered_cli_enforces_canonical_decision(tmp_path: Path, monkeypatch)
     assert result["invoked"] is False
     assert result["error"] == "online_execution_not_authorized"
 
-    # Explicit authorized decision allows physical path (still may fail process, but not auth)
-    authorized = resolve_online_execution_decision(
+    # Explicit authorized decision allows physical path (still may fail process, but not auth).
+    # Only a decision object issued by the runtime's own resolver is recognised
+    # (nexus-runtime#178/#189), so resolve through the runtime policy module.
+    from nexus_runtime.support.services.online_execution_policy import (
+        resolve_online_execution_decision as resolve_runtime_decision,
+    )
+
+    authorized = resolve_runtime_decision(
         task_online_policy="auto",
         project_root=tmp_path,
         planner_online_needed=True,
         requested_provider="grok",
         environ={"NEXUS_EXTERNAL_RUNTIME_AUTHORIZED": "1", "XAI_API_KEY": "x"},
     )
-    # With env override and no workspace file, authorized
+    # A serialized decision is caller-controlled data and never authorizes
+    # (nexus-runtime#178/#189): only the runtime-resolved object counts.
+    serialized = invoker(
+        {
+            "task_id": "auth-task-serialized",
+            "task_statement": "x",
+            "online_execution_decision": authorized.to_dict(),
+        }
+    )
+    assert serialized["invoked"] is False
+    assert serialized["error"] == "online_execution_not_authorized"
+
+    # With env override and no workspace file, the resolved decision authorizes
     result2 = invoker(
         {
             "task_id": "auth-task-2",
             "task_statement": "x",
-            "online_execution_decision": authorized.to_dict(),
+            "online_execution_decision": authorized,
         }
     )
     # echo may succeed as subprocess

@@ -1453,7 +1453,7 @@ def test_negative_control_deny_invalid_provider(monkeypatch) -> None:
     assert result["provider"] == "nonexistent_provider"
 
 
-def test_negative_control_authorized_missing_provider_binary(monkeypatch) -> None:
+def test_negative_control_authorized_missing_provider_binary(monkeypatch, tmp_path) -> None:
     """authorized + missing provider binary: subprocess adapter not executed."""
     import shutil
     from nexus.services.unified_runtime import build_subprocess_online_invoker
@@ -1473,11 +1473,28 @@ def test_negative_control_authorized_missing_provider_binary(monkeypatch) -> Non
         _build_sentinel,
     )
 
+    from nexus_runtime.support.services.online_execution_policy import (
+        resolve_online_execution_decision as resolve_runtime_decision,
+    )
+
+    # A bare ``online_execution_authorized`` field is self-attestation and is
+    # ignored (nexus-runtime#178/#189); authorize through a runtime-resolved
+    # decision object instead.
+    authorized = resolve_runtime_decision(
+        task_online_policy="auto",
+        project_root=tmp_path,
+        planner_online_needed=True,
+        requested_provider="gemini",
+        environ={"NEXUS_EXTERNAL_RUNTIME_AUTHORIZED": "1"},
+    )
+    assert authorized.online_execution_authorized is True
+    assert authorized.physical_invocation_allowed is True
+
     invoker = build_registered_online_invoker("gemini")
     result = invoker({
         "task_id": "nc-3",
         "task_statement": "try to run",
-        "online_execution_authorized": True,
+        "online_execution_decision": authorized,
     })
 
     # shutil.which returning None → resolve fails before build_subprocess_online_invoker.

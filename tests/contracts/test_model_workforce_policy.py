@@ -192,9 +192,13 @@ def test_local_workers_have_evidence_specific_context_and_autonomy_boundaries() 
     workers = _manifest()["workers"]
 
     advisor = workers["local_advisor_3b"]
-    # Not present on the M5 Ollama host as of 2026-10-12; roles kept for history.
-    assert advisor["state"] == "INSTALLED_NOT_CONNECTED"
-    assert advisor["reason"] == "not_present_on_m5_ollama_2026-10-12"
+    # Retired 2026-10-13 (nexus-runtime #184): blocked, unavailable, no roles.
+    assert advisor["state"] == "REGISTERED_BLOCKED"
+    assert advisor["reason"] == (
+        "retired_2026-10-13_stock_qwen25_3b_under_custom_name_weights_absent_see_advisor_3b_eval"
+    )
+    assert advisor["availability"] == "UNAVAILABLE"
+    assert advisor["roles"] == []
     assert advisor["preferred_context"] == "nexus_bounded"
     assert {"code_mutation", "full_context_assignment", "claim_authority"} <= set(
         advisor["forbidden_actions"]

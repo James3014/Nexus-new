@@ -349,7 +349,8 @@ def test_executor_receipt_with_evidence_is_not_simulated(tmp_path: Path) -> None
     )
     receipt = get_executor("memory")(plan, "refund")
     raw = receipt.to_dict()
-    assert raw["receipt_base"]["claim_boundary"]["simulated"] is True  # pinned runtime default
+    # nexus-runtime #187: the runtime itself now derives ``simulated`` from evidence.
+    assert raw["receipt_base"]["claim_boundary"]["simulated"] is False
     attested = attested_receipt_dict(receipt)
     boundary = attested["receipt_base"]["claim_boundary"]
     assert boundary["simulated"] is False

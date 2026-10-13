@@ -2803,7 +2803,12 @@ def test_capability_planner_local_committee_topology_metadata(monkeypatch):
     assert snapshot.get("execution_topology") == "ASSISTED_CANONICAL"
     assert snapshot.get("executor_topology") == "local_committee_only"
     assert snapshot.get("committee_profile") == "qwen_3b_judge_plus_qwen_7b_plus_deepseek_6_7b"
-    assert snapshot.get("local_committee_enabled") is True
+    # nexus-runtime #184/#188: the 3B judge is retired and no committee_judge route is
+    # admitted, so the committee fails closed instead of using a dead model tag.
+    assert snapshot.get("committee_judge_error_code") == "MODEL_DEFAULT_NOT_ADMITTED"
+    assert snapshot.get("local_committee_enabled") is False
+    assert snapshot.get("diagnosis_committee_enabled") is False
+    assert snapshot.get("audit_committee_enabled") is False
 
 
 # ── P0-T1: execution_depth contract tests ──────────────────────────────────
