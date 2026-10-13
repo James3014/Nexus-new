@@ -428,6 +428,44 @@ def _verify_post_merge_issues(
     return record, None
 
 
+_MAIN_FETCH_REMOTE = "origin"
+_MAIN_FETCH_REF = "refs/heads/main"
+
+
+def _ensure_live_main_resolvable(git_root: Path | None, live_main_sha: str) -> str | None:
+    """Make the live main commit resolvable in ``git_root`` for requalification.
+
+    Returns ``None`` when ``live_main_sha`` is (or became) a local commit, else a
+    fail-closed BLOCKED reason.  Only an explicit ``git_root`` is fetched into;
+    a commit already present locally is content-addressed and needs no fetch.
+    When fetched, ``FETCH_HEAD`` of exact remote main must equal the live SHA.
+    """
+    if git_root is None:
+        return None
+    from scripts.ops.pr_impact_gate import _run_trusted_git
+
+    root = Path(git_root)
+    present = _run_trusted_git(root, ["cat-file", "-e", f"{live_main_sha}^{{commit}}"], text=True)
+    if present.returncode == 0:
+        return None
+    fetched = _run_trusted_git(
+        root,
+        ["fetch", "--no-tags", "--quiet", _MAIN_FETCH_REMOTE, _MAIN_FETCH_REF],
+        text=True,
+    )
+    if fetched.returncode != 0:
+        detail = (fetched.stderr or "").strip().splitlines()[-1:] or ["git fetch failed"]
+        return f"REQUALIFICATION_MAIN_FETCH_FAILED:{detail[0]}"
+    fetched_head = _run_trusted_git(root, ["rev-parse", "FETCH_HEAD^{commit}"], text=True)
+    fetched_sha = fetched_head.stdout.strip() if fetched_head.returncode == 0 else ""
+    if fetched_sha != live_main_sha:
+        return (
+            "REQUALIFICATION_MAIN_FETCH_MISMATCH: "
+            f"live {live_main_sha}, fetched {fetched_sha or 'unresolved'}"
+        )
+    return None
+
+
 def run_github_completion_loop(
     *,
     initial_evidence: GitHubOrchestrationEvidence,
@@ -599,6 +637,18 @@ def run_github_completion_loop(
                     outcome=CompletionLoopOutcome.BLOCKED,
                     reason=f"MAIN_MOVEMENT_EVIDENCE_INVALID:{exc}",
                     generation=current_generation,
+                )
+
+            # #1384: a main merge that landed during integration CI may be absent
+            # from the local checkout; fetch exact remote main before requalification
+            # resolves it, and require it to equal the live main SHA read above.
+            fetch_error = _ensure_live_main_resolvable(git_root, current_main_sha)
+            if fetch_error is not None:
+                return CompletionLoopResult(
+                    outcome=CompletionLoopOutcome.BLOCKED,
+                    reason=fetch_error,
+                    generation=current_generation,
+                    evidence=current_evidence,
                 )
 
             # Call existing requalify_main_movement

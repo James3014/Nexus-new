@@ -3594,3 +3594,178 @@ def test_issue1384_criterion10_hostile_drift_fails_closed(monkeypatch):
     assert res_conflict.outcome is CompletionLoopOutcome.BLOCKED
     assert "INTEGRATION_MATERIALIZATION_FAILED:CONFLICT_IN_TREE_MERGE" in res_conflict.reason
     assert len(port_conflict.cas_merge_calls) == 0
+
+
+# ==============================================================================
+# Issue 1384: requalification must fetch live main before resolving it locally
+# ==============================================================================
+
+
+def _make_unfetched_local_checkout(tmp_path: Path, *, include_agents_change: bool = False):
+    """Bare origin advanced to new main while the local checkout only has old main."""
+    import subprocess
+
+    fixture = _make_requalify_git_repo(tmp_path, include_agents_change=include_agents_change)
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "clone", "-q", "--bare", str(fixture["repo"]), str(origin)], check=True)
+    subprocess.run(
+        ["git", "update-ref", "refs/heads/main", fixture["old_main_sha"]],
+        cwd=origin,
+        check=True,
+    )
+    subprocess.run(["git", "symbolic-ref", "HEAD", "refs/heads/main"], cwd=origin, check=True)
+    for ref in subprocess.check_output(
+        ["git", "for-each-ref", "--format=%(refname)", "refs/heads/"], cwd=origin, text=True
+    ).split():
+        if ref != "refs/heads/main":
+            subprocess.run(["git", "update-ref", "-d", ref], cwd=origin, check=True)
+    local = tmp_path / "local"
+    subprocess.run(
+        ["git", "clone", "-q", "--no-local", "--single-branch", str(origin), str(local)],
+        check=True,
+    )
+    # A main merge lands on origin during integration CI; local has not fetched it.
+    subprocess.run(
+        ["git", "update-ref", "refs/heads/main", fixture["new_main_sha"]],
+        cwd=origin,
+        check=True,
+    )
+    missing = subprocess.run(
+        ["git", "cat-file", "-e", f"{fixture['new_main_sha']}^{{commit}}"],
+        cwd=local,
+        check=False,
+    )
+    assert missing.returncode != 0, "fixture invariant: local checkout must lack new main"
+    return {**fixture, "origin": origin, "local": local}
+
+
+def _unfetched_loop_port(fixture, *, live_main_sha: str, live_main_tree_sha: str):
+    return SpyGitHubCompletionPort(
+        main_states=[
+            (live_main_sha, live_main_tree_sha),
+            (live_main_sha, live_main_tree_sha),
+        ],
+        default_pr_head="b" * 40,
+        tree_shas={
+            fixture["old_main_sha"]: fixture["old_main_tree_sha"],
+            fixture["new_main_sha"]: fixture["new_main_tree_sha"],
+        },
+        default_changed_paths=("docs/unrelated.md",),
+    )
+
+
+def test_issue1384_requalification_fetches_live_main_missing_from_local_checkout(
+    tmp_path: Path, monkeypatch
+):
+    """A concurrent main merge absent locally is fetched and classified, not BLOCKED."""
+    fixture = _make_unfetched_local_checkout(tmp_path)
+    initial_ev = _base_evidence(
+        base_sha=fixture["old_main_sha"], current_main_sha=fixture["old_main_sha"]
+    )
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    req = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+    port = _unfetched_loop_port(
+        fixture,
+        live_main_sha=fixture["new_main_sha"],
+        live_main_tree_sha=fixture["new_main_tree_sha"],
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.github_completion_loop.resolve_durable_merge_authorization",
+        lambda *a, **k: evaluate_action(ctx, req),
+    )
+
+    result = run_github_completion_loop(
+        initial_evidence=initial_ev, request=req, port=port, git_root=fixture["local"]
+    )
+
+    assert result.outcome is CompletionLoopOutcome.COMPLETED, result.reason
+    assert result.generation == 1
+    assert len(port.cas_merge_calls) == 1
+    assert port.cas_merge_calls[0]["expected_base_sha"] == fixture["new_main_sha"]
+
+
+def test_issue1384_requalification_fetch_still_blocks_authority_drift(tmp_path: Path, monkeypatch):
+    """Fetching does not widen acceptance: unfetched AGENTS.md drift still BLOCKS."""
+    fixture = _make_unfetched_local_checkout(tmp_path, include_agents_change=True)
+    initial_ev = _base_evidence(
+        base_sha=fixture["old_main_sha"], current_main_sha=fixture["old_main_sha"]
+    )
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    req = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+    port = _unfetched_loop_port(
+        fixture,
+        live_main_sha=fixture["new_main_sha"],
+        live_main_tree_sha=fixture["new_main_tree_sha"],
+    )
+    port.default_changed_paths = ("AGENTS.md", "docs/unrelated.md")
+    monkeypatch.setattr(
+        "nexus.orchestrator.github_completion_loop.resolve_durable_merge_authorization",
+        lambda *a, **k: evaluate_action(ctx, req),
+    )
+
+    result = run_github_completion_loop(
+        initial_evidence=initial_ev, request=req, port=port, git_root=fixture["local"]
+    )
+
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert "REQUALIFICATION_BLOCKED" in result.reason
+    assert "new_main_sha cannot be resolved" not in result.reason
+    assert len(port.materialize_calls) == 0
+    assert len(port.cas_merge_calls) == 0
+
+
+def test_issue1384_requalification_fetched_main_mismatch_fails_closed(tmp_path: Path, monkeypatch):
+    """Live GitHub main differs from fetched origin main -> BLOCKED before materialize/CAS."""
+    fixture = _make_unfetched_local_checkout(tmp_path)
+    initial_ev = _base_evidence(
+        base_sha=fixture["old_main_sha"], current_main_sha=fixture["old_main_sha"]
+    )
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    req = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+    phantom_main = "9" * 40  # live read reports a SHA that origin main does not carry
+    port = _unfetched_loop_port(fixture, live_main_sha=phantom_main, live_main_tree_sha="5" * 40)
+    monkeypatch.setattr(
+        "nexus.orchestrator.github_completion_loop.resolve_durable_merge_authorization",
+        lambda *a, **k: evaluate_action(ctx, req),
+    )
+
+    result = run_github_completion_loop(
+        initial_evidence=initial_ev, request=req, port=port, git_root=fixture["local"]
+    )
+
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert "REQUALIFICATION_MAIN_FETCH_MISMATCH" in result.reason
+    assert len(port.revalidation_calls) == 0
+    assert len(port.materialize_calls) == 0
+    assert len(port.cas_merge_calls) == 0
+
+
+def test_issue1384_requalification_fetch_failure_fails_closed(tmp_path: Path, monkeypatch):
+    """No reachable origin for a missing live main -> BLOCKED, never a guessed classification."""
+    import subprocess
+
+    fixture = _make_unfetched_local_checkout(tmp_path)
+    subprocess.run(["git", "remote", "remove", "origin"], cwd=fixture["local"], check=True)
+    initial_ev = _base_evidence(
+        base_sha=fixture["old_main_sha"], current_main_sha=fixture["old_main_sha"]
+    )
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    req = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+    port = _unfetched_loop_port(
+        fixture,
+        live_main_sha=fixture["new_main_sha"],
+        live_main_tree_sha=fixture["new_main_tree_sha"],
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.github_completion_loop.resolve_durable_merge_authorization",
+        lambda *a, **k: evaluate_action(ctx, req),
+    )
+
+    result = run_github_completion_loop(
+        initial_evidence=initial_ev, request=req, port=port, git_root=fixture["local"]
+    )
+
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert "REQUALIFICATION_MAIN_FETCH_FAILED" in result.reason
+    assert len(port.materialize_calls) == 0
+    assert len(port.cas_merge_calls) == 0
