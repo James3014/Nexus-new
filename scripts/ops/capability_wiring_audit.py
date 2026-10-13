@@ -1900,7 +1900,8 @@ def owner_fixture_integrate_swarm_winner(
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
-    history = final.get("status_history") if isinstance(final.get("status_history"), list) else []
+    raw_history = final.get("status_history")
+    history: list[Any] = list(raw_history) if isinstance(raw_history, list) else []
     return {
         "approver": SWARM_OWNER_FIXTURE_APPROVER,
         "bound_status": bound.get("status"),
