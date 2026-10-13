@@ -301,7 +301,7 @@ def test_ultra_review_ghost_regression_timeout_becomes_verified_finding(tmp_path
     def fake_run(cmd, **kwargs):
         if "pytest" in cmd and "-q" in cmd:
             raise subprocess.TimeoutExpired(cmd=cmd, timeout=30, output="running", stderr="timeout")
-        if cmd[:1] == ["sandbox-exec"] and not OS_SANDBOX:
+        if cmd and os.path.basename(cmd[0]) == "sandbox-exec" and not OS_SANDBOX:
             cmd = cmd[3:]
         return original_run(cmd, **kwargs)
 
@@ -935,7 +935,7 @@ def test_ultra_review_sandbox_root_with_sbpl_injection_fails_closed(tmp_path, mo
     assert payload["status"] == "BLOCKED"
     assert payload["gate_passed"] is False
     assert "sandbox_path_unsafe_for_policy" in payload["blocked_reason"]
-    assert not any(cmd and cmd[0] == "sandbox-exec" and "-p" in cmd[1:2] for cmd in seen)
+    assert not any(cmd and os.path.basename(cmd[0]) == "sandbox-exec" and "-p" in cmd[1:2] for cmd in seen)
     assert not any("(allow default)" in " ".join(cmd) for cmd in seen if cmd and cmd[0] != "git")
 
 

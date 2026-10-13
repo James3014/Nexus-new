@@ -94,6 +94,26 @@ def test_post_apply_walk_flags_any_symlink(tmp_path: Path) -> None:
         "python3 -m pip install x",
         "ruff check --fix .",
         ["sh", "-c", "true"],
+        # allowlist bypass shapes
+        "FOO=bar python3 repro.py",
+        "/usr/bin/python3 repro.py",
+        "./python3 repro.py",
+        "python3 -- repro.py",
+        "python3 -I -X dev repro.py",
+        "python3 repro.py --flag",
+        "python3 ../outside.py",
+        "python3 /etc/outside.py",
+        "python -m pytest -p evil",
+        "python -m pytest --rootdir=/",
+        "python -m pytest -c conftest.py",
+        "python -m pytest --import-mode=append",
+        "python -m pytest -k -pevil",
+        "python -m pytest -o addopts=-pevil",
+        "python -m pytest -- tests",
+        "python -m pytest ../tests",
+        "ruff check --config ruff.toml .",
+        "ruff check --config=/tmp/ruff.toml .",
+        "ruff check /etc",
         "",
     ],
 )
@@ -107,7 +127,7 @@ def test_command_outside_allowlist_is_rejected(
     assert verdict.passed is False
     assert _codes(verdict) in (["COMMAND_NOT_ALLOWED"], ["NO_OS_BARRIER"], ["NO_VERIFY_COMMANDS"])
     assert verifier.results[0]["exit_codes"] == []
-    assert not any("sandbox-exec" in argv or argv[:1] != ["git"] for argv in seen)
+    assert not any(os.path.basename(argv[0]) != "git" for argv in seen)
 
 
 def test_command_paths_must_resolve_inside_the_sandbox(tmp_path: Path) -> None:
@@ -151,7 +171,7 @@ def test_no_os_barrier_executes_nothing_and_candidate_stays_unverified(
     assert record["verify_result"] == ev.NOT_EXECUTED_NO_BARRIER
     assert record["exit_codes"] == []
     # Only git (safe env) ran; no interpreter ever saw candidate code.
-    assert seen and all(argv[0] == "git" for argv in seen)
+    assert seen and all(os.path.basename(argv[0]) == "git" for argv in seen)
     with pytest.raises(lane.SandboxError, match="no_os_barrier"):
         lane.run_confined(
             ["true"],
@@ -221,3 +241,41 @@ def test_benign_candidate_passes_only_with_a_barrier(tmp_path: Path) -> None:
     else:
         assert verdict.passed is False and record["verify_result"] == ev.NOT_EXECUTED_NO_BARRIER
     assert (ws / "calc.py").read_text(encoding="utf-8") == CALC
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["conftest.py", "tests/conftest.py", "pyproject.toml", "pytest.ini", "setup.cfg", "evil.pth"],
+)
+def test_patch_touching_the_test_harness_is_rejected(tmp_path: Path, path: str) -> None:
+    ws = _workspace(tmp_path)
+    patch = f"--- /dev/null\n+++ b/{path}\n@@ -0,0 +1 @@\n+import os\n"
+    verifier = ev.PatchExecutionVerifier(ws, ["python -m pytest -q"], "harness")
+    verdict = verifier.evaluate("c0", patch)
+    assert _codes(verdict) == ["PATCH_REJECTED"]
+    assert verifier.results[0]["reject_reasons"] == [f"test_harness:{path}"]
+    assert verifier.results[0]["exit_codes"] == []
+
+
+def test_confined_argv_uses_the_pinned_interpreter_and_neutralises_addopts(tmp_path: Path) -> None:
+    import sys
+
+    mirror = tmp_path / "mirror"
+    mirror.mkdir()
+    argv = ev.build_argv(
+        ev.parse_command(["python3", "-m", "pytest", "-q"]),
+        mirror=mirror,
+        interpreter=sys.executable,
+    )
+    assert argv[:4] == [sys.executable, "-I", "-m", "pytest"]
+    assert ["-o", "addopts="] == argv[argv.index("addopts=") - 1 : argv.index("addopts=") + 1]
+    assert ["-p", "no:cacheprovider"] == argv[4:6]
+    with pytest.raises(lane.SandboxError, match="python_lane_not_isolated"):
+        lane.run_confined(
+            [sys.executable, "x.py"],
+            cwd=mirror,
+            confine_roots=(mirror,),
+            profile=lambda: "",
+            env={},
+            timeout=5,
+        )

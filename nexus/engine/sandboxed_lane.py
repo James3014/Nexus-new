@@ -48,6 +48,15 @@ SANDBOX_DENIED_HOME_PATHS = (
     "Library/Keychains",
 )
 _OS_SANDBOX_PROBE: dict[str, bool] = {}
+# The barrier binary is never looked up on the inherited PATH (a planted ``sandbox-exec``
+# earlier on PATH could "confine" nothing).
+SANDBOX_EXEC = "/usr/bin/sandbox-exec"
+# Runs a script with its own directory on sys.path, as ``python script.py`` would (``-I``
+# alone drops it). Fixed code: the script path arrives as argv, never interpolated.
+SCRIPT_BOOTSTRAP = (
+    "import os, runpy, sys; s = sys.argv[1]; sys.argv = sys.argv[1:]; "
+    "sys.path.insert(0, os.path.dirname(s)); runpy.run_path(s, run_name='__main__')"
+)
 # Every path interpolated into the sandbox-exec (SBPL) profile must match this: no quote,
 # backslash, paren, whitespace or control character can reach an SBPL string literal, so
 # no PR-, branch- or user-derived text can close a literal and rewrite the policy.
@@ -110,11 +119,11 @@ def os_sandbox_available() -> bool:
         return False
     if "sandbox-exec" not in _OS_SANDBOX_PROBE:
         ok = False
-        if sys.platform == "darwin" and shutil.which("sandbox-exec"):
+        if sys.platform == "darwin" and os.path.isfile(SANDBOX_EXEC):
             try:
                 ok = (
                     subprocess.run(  # noqa: S603 - fixed argv probe
-                        ["sandbox-exec", "-p", "(version 1) (allow default)", "/usr/bin/true"],
+                        [SANDBOX_EXEC, "-p", "(version 1) (allow default)", "/usr/bin/true"],
                         capture_output=True,
                         timeout=5,
                         check=False,
@@ -438,8 +447,10 @@ def run_confined(
     if not in_tree(resolved_cwd, confine_roots):
         raise SandboxError("lane_cwd_outside_sandbox")
     command = list(argv)
+    if command[0] == sys.executable and command[1:2] != ["-I"]:
+        raise SandboxError("python_lane_not_isolated")
     if os_sandbox_available():
-        command = ["sandbox-exec", "-p", profile(), *command]
+        command = [SANDBOX_EXEC, "-p", profile(), *command]
     elif require_barrier:
         raise SandboxError("no_os_barrier")
     return subprocess.run(  # noqa: S603 - argv list, no shell
@@ -451,3 +462,102 @@ def run_confined(
         check=False,
         timeout=timeout,
     )
+
+
+def trusted_executable(name: str, *, untrusted_roots: Iterable[Path | str | None]) -> str:
+    """Absolute path of ``name`` from the caller's PATH, skipping relative entries and every
+    entry inside an untrusted tree. Raises SandboxError when none is found."""
+
+    roots = list(untrusted_roots)
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if not entry or not os.path.isabs(entry) or in_tree(entry, roots):
+            continue
+        candidate = Path(entry) / name
+        if candidate.is_file() and os.access(candidate, os.X_OK) and not in_tree(candidate, roots):
+            return str(candidate)
+    raise SandboxError(f"tool_unavailable:{name}")
+
+
+def python_script_argv(script: Path, args: Iterable[str] = ()) -> list[str]:
+    """Trusted interpreter, ``-I``, fixed bootstrap, then the (already scoped) script."""
+
+    return [sys.executable, "-I", "-c", SCRIPT_BOOTSTRAP, str(script), *args]
+
+
+class Confinement:
+    """A bound sandbox: one profile and one env for every command run in it. Only exists when
+    an OS barrier exists; every run requires it."""
+
+    def __init__(self, *, profile: str, env: dict[str, str], roots: tuple[Path, ...]) -> None:
+        self.profile = profile
+        self.env = env
+        self.roots = roots
+
+    def describe(self) -> dict[str, object]:
+        return {
+            "barrier": "macos_sandbox_exec",
+            "network": "denied",
+            "writes_confined_to": [str(root) for root in self.roots],
+            "env": "allowlist:" + ",".join(SANDBOX_ENV_ALLOWLIST) + "+HOME/TMPDIR in sandbox",
+            "credential_paths_read_denied": list(SANDBOX_DENIED_HOME_PATHS),
+        }
+
+    def run(self, argv: list[str], *, cwd: Path, timeout: float) -> subprocess.CompletedProcess:
+        return run_confined(
+            argv,
+            cwd=cwd,
+            confine_roots=self.roots,
+            profile=lambda: self.profile,
+            env=self.env,
+            timeout=timeout,
+            require_barrier=True,
+        )
+
+
+def confinement(
+    *,
+    sandbox: Path,
+    extra_writable: Iterable[Path] = (),
+    untrusted_roots: Iterable[Path] = (),
+    extra_forbidden: Iterable[Path] = (),
+) -> Confinement:
+    """Bind a sandbox (``home/`` and ``tmp/`` created inside ``sandbox``): writes and reads only
+    in ``sandbox`` + ``extra_writable`` (+ interpreter prefixes and system paths for reads).
+    Raises SandboxError("no_os_barrier") when there is no OS barrier: nothing may run."""
+
+    if not os_sandbox_available():
+        raise SandboxError("no_os_barrier")
+    home, tmp = sandbox / "home", sandbox / "tmp"
+    home.mkdir(parents=True, exist_ok=True)
+    tmp.mkdir(parents=True, exist_ok=True)
+    writable = tuple(Path(sbpl_path(path)) for path in (sandbox, *extra_writable))
+    if in_tree(sys.executable, writable):
+        raise SandboxError("interpreter_inside_sandbox")
+    read_roots = checked_read_roots(
+        [*(str(path) for path in writable), *interpreter_read_roots()],
+        extra_forbidden=extra_forbidden,
+    )
+    profile = build_sandbox_profile(writable=[str(p) for p in writable], read_roots=read_roots)
+    env = scrubbed_env(
+        home=sbpl_path(home), tmp=sbpl_path(tmp), untrusted_roots=(*untrusted_roots, *writable)
+    )
+    return Confinement(profile=profile, env=env, roots=writable)
+
+
+def diff_target_paths(diff_text: str) -> list[str]:
+    """Every path a diff names (``diff --git`` sides and ``---``/``+++`` lines, a/ b/ stripped)."""
+
+    paths: list[str] = []
+    for line in diff_text.splitlines():
+        names: list[str] = []
+        if line.startswith("diff --git "):
+            match = re.match(r"^diff --git a/(.*) b/(.*)$", line)
+            names = [match.group(1), match.group(2)] if match else []
+        elif line.startswith(("--- ", "+++ ")):
+            names = [line[4:].split("\t", 1)[0].strip()]
+        for name in names:
+            if name.startswith(("a/", "b/")):
+                name = name[2:]
+            if name and name != "/dev/null" and name not in paths:
+                paths.append(name)
+    return paths

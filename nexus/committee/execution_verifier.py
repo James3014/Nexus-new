@@ -59,12 +59,20 @@ _PYTEST_VALUE_FLAGS = frozenset({"-k", "-m"})
 _RUFF_SUBCOMMANDS = frozenset({"check", "format"})
 _RUFF_FLAGS = frozenset({"--no-fix", "--diff", "--check", "--quiet", "-q", "--preview"})
 _RUFF_FLAG_PREFIXES = ("--select=", "--ignore=", "--output-format=", "--line-length=")
-# Runs a candidate script with its directory on sys.path (as ``python script.py`` would);
-# ``-I`` alone drops it. Fixed code: the script path arrives as argv, never interpolated.
-_RUN_SCRIPT = (
-    "import os, runpy, sys; s = sys.argv[1]; sys.argv = sys.argv[1:]; "
-    "sys.path.insert(0, os.path.dirname(s)); runpy.run_path(s, run_name='__main__')"
-)
+# Files that change how a verify command itself runs (pytest/ruff config, conftest plugins,
+# interpreter start-up hooks). A candidate patch touching one is refused: it is code or config
+# that would run with the verifier's authority and could make the verdict report green.
+_HARNESS_NAMES = frozenset({
+    "conftest.py",
+    "pytest.ini",
+    "tox.ini",
+    "setup.cfg",
+    "pyproject.toml",
+    "ruff.toml",
+    ".ruff.toml",
+    "sitecustomize.py",
+    "usercustomize.py",
+})
 
 
 class CommandNotAllowed(ValueError):
@@ -92,6 +100,8 @@ def parse_command(command: Any) -> list[str]:
         raise CommandNotAllowed("not_argv")
     if not argv or any(not part or "\x00" in part for part in argv):
         raise CommandNotAllowed("empty_argument")
+    if any(".." in part for part in argv):
+        raise CommandNotAllowed("dotdot_argument")
     kind, args = _classify(argv)
     _checked_args(kind, args, None)
     return argv
@@ -139,6 +149,8 @@ def _checked_args(kind: str, args: list[str], mirror: Path | None) -> list[str]:
         expect_value = False
         for arg in args:
             if expect_value:
+                if arg.startswith("-"):
+                    raise CommandNotAllowed(f"pytest_flag_value_is_a_flag:{arg[:40]}")
                 checked.append(arg)
                 expect_value = False
             elif arg in _PYTEST_VALUE_FLAGS:
@@ -160,7 +172,9 @@ def _checked_args(kind: str, args: list[str], mirror: Path | None) -> list[str]:
             if resolved is None or not resolved.is_file():
                 raise CommandNotAllowed(f"script_outside_sandbox:{script[:80]}")
             script = str(resolved)
-        return [script, *(a if a.startswith("-") else _scoped_arg(mirror, a) for a in args[1:])]
+        if any(arg.startswith("-") for arg in args[1:]):
+            raise CommandNotAllowed("script_flag_not_allowed")
+        return [script, *(_scoped_arg(mirror, arg) for arg in args[1:])]
     checked.append(args[0])
     for arg in args[1:]:
         if arg.startswith("-"):
@@ -191,10 +205,12 @@ def build_argv(command: list[str], *, mirror: Path, interpreter: str) -> list[st
             root,
             "-o",
             f"pythonpath={root}",
+            "-o",
+            "addopts=",
             *checked,
         ]
     if kind == "script":
-        return [interpreter, "-I", "-c", _RUN_SCRIPT, *checked]
+        return [interpreter, "-I", "-c", lane.SCRIPT_BOOTSTRAP, *checked]
     ruff = Path(sys.prefix) / "bin" / "ruff"
     if not ruff.is_file():
         raise CommandNotAllowed("ruff_unavailable")
@@ -262,6 +278,13 @@ class PatchExecutionVerifier:
             return self._reject(
                 candidate_id, mirror, record, [*policy["symlinks"], *policy["nested_git"]]
             )
+        harness = [
+            f"test_harness:{path}"
+            for path in lane.diff_target_paths(patch_text)
+            if Path(path).name.lower() in _HARNESS_NAMES or path.lower().endswith(".pth")
+        ]
+        if harness:
+            return self._reject(candidate_id, mirror, record, harness)
 
         self._prepare_sandbox(sandbox, mirror)
         home = sandbox / "home"
@@ -271,13 +294,16 @@ class PatchExecutionVerifier:
             (patch_text if patch_text.endswith("\n") else patch_text + "\n").encode("utf-8"),
         )
         git_env = lane.git_safe_env(home=home, ceiling=sandbox.resolve())
-        summary = self._git(["apply", "--summary", "--numstat", str(patch_file)], mirror, git_env)
+        git = lane.trusted_executable("git", untrusted_roots=(self.workspace_root,))
+        summary = self._git(
+            git, ["apply", "--summary", "--numstat", str(patch_file)], mirror, git_env
+        )
         if summary.returncode != 0:
             return self._reject(candidate_id, mirror, record, ["patch_unparseable"])
         unsafe = lane.unsafe_summary_lines(summary.stdout or "")
         if unsafe:
             return self._reject(candidate_id, mirror, record, [line.strip() for line in unsafe])
-        applied = self._git(["apply", "--whitespace=nowarn", str(patch_file)], mirror, git_env)
+        applied = self._git(git, ["apply", "--whitespace=nowarn", str(patch_file)], mirror, git_env)
         if applied.returncode != 0:
             record["apply_status"] = "apply_failed"
             record["apply_stderr"] = (applied.stderr or "")[-300:]
@@ -300,7 +326,7 @@ class PatchExecutionVerifier:
                 "NO_OS_BARRIER",
                 "no OS sandbox barrier on this host; candidate code was not executed",
             )
-        interpreter = self._trusted_interpreter(sandbox)
+        interpreter = self._trusted_interpreter(sandbox)  # the pinned one, never PATH
         try:
             argvs = [build_argv(c, mirror=mirror, interpreter=interpreter) for c in commands]
         except CommandNotAllowed as exc:
@@ -311,34 +337,16 @@ class PatchExecutionVerifier:
     def _run(
         self, candidate_id: str, sandbox: Path, mirror: Path, argvs: list[list[str]], record: dict
     ) -> VerifierVerdict:
-        read_roots = lane.checked_read_roots(
-            [str(sandbox), *lane.interpreter_read_roots()], extra_forbidden=[self.workspace_root]
+        confined = lane.confinement(
+            sandbox=sandbox,
+            untrusted_roots=(self.workspace_root,),
+            extra_forbidden=(self.workspace_root,),
         )
-        profile = lane.build_sandbox_profile(writable=[str(sandbox)], read_roots=read_roots)
-        env = lane.scrubbed_env(
-            home=lane.sbpl_path(sandbox / "home"),
-            tmp=lane.sbpl_path(sandbox / "tmp"),
-            untrusted_roots=(self.workspace_root, sandbox),
-        )
-        record["isolation"] = {
-            "barrier": "macos_sandbox_exec",
-            "network": "denied",
-            "writes_confined_to": [str(sandbox)],
-            "env": "allowlist:" + ",".join(lane.SANDBOX_ENV_ALLOWLIST) + "+HOME/TMPDIR in sandbox",
-            "credential_paths_read_denied": list(lane.SANDBOX_DENIED_HOME_PATHS),
-        }
+        record["isolation"] = confined.describe()
         failure_tail = ""
         for argv in argvs:
             try:
-                run = lane.run_confined(
-                    argv,
-                    cwd=mirror,
-                    confine_roots=(sandbox,),
-                    profile=lambda: profile,
-                    env=env,
-                    timeout=self.timeout_sec,
-                    require_barrier=True,
-                )
+                run = confined.run(argv, cwd=mirror, timeout=self.timeout_sec)
                 record["exit_codes"].append(run.returncode)
                 if run.returncode != 0 and not failure_tail:
                     failure_tail = (run.stderr or run.stdout or "")[-200:]
@@ -367,9 +375,13 @@ class PatchExecutionVerifier:
         lane.copy_tree_no_symlinks(self.workspace_root, mirror, ignore_names=_COPY_IGNORE)
 
     @staticmethod
-    def _git(args: list[str], cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess:
-        return subprocess.run(  # nosec B603 B607 - fixed git argv, safe env, patch file we wrote
-            ["git", *args],
+    def _git(
+        git: str, args: list[str], cwd: Path, env: dict[str, str]
+    ) -> subprocess.CompletedProcess:
+        # Trusted git binary (resolved outside the workspace), safe env, patch file we wrote;
+        # git only reads the patch and writes the copy, it never runs candidate code.
+        return subprocess.run(  # nosec B603 - absolute trusted git, fixed argv
+            [git, *args],
             cwd=cwd,
             env=env,
             capture_output=True,

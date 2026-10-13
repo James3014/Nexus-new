@@ -326,6 +326,14 @@ def test_swarm_runs_workers_in_worktrees_and_integration_refuses_without_authori
     report = run_bounded_swarm(
         workspace_root=ws, task_id="t2", task="fix", target_file="calc.py", verify_script="repro.py"
     )
+    if not os_sandbox_available():
+        # No OS barrier (Linux CI): the model-written code is never executed, nobody wins.
+        assert (report["status"], report["reason"]) == ("FAILED", "NO_VERIFIED_WORKER")
+        assert [w["verify_result"] for w in report["workers"]] == [NOT_EXECUTED_NO_BARRIER] * 2
+        assert all(w["verify_exit_codes"] == [] for w in report["workers"])
+        assert sorted(report["worktrees_removed"]) == sorted(report["worktrees"])
+        assert "a - b" in (ws / "calc.py").read_text(encoding="utf-8")
+        return
     assert (report["status"], report["reason"]) == (
         "BLOCKED",
         "INTEGRATION_OWNER_AUTHORITY_REQUIRED",
