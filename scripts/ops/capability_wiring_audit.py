@@ -3361,9 +3361,15 @@ def build_file_lock(ws: Path, variant: str) -> Scenario:
         return [
             Check("lock_file_on_disk", lock_path.is_file(), str(lock_path)),
             Check(
-                "lock_records_target_file",
-                "target.py" in json.dumps(payload),
-                f"lock={json.dumps(payload)[:160]}",
+                "lock_recorded_target_file",
+                "target.py"
+                in json.dumps((obs.outcome.get("result") or {}).get("task_files") or []),
+                f"task_files={(obs.outcome.get('result') or {}).get('task_files')}",
+            ),
+            Check(
+                "lock_released_on_task_completion",
+                "target.py" not in dict(payload.get("locks") or {}),
+                f"lock_after_run={json.dumps(payload)[:160]}",
             ),
             Check(
                 "access_granted_and_files_match",
@@ -4312,7 +4318,7 @@ _SPEC_LIST += [
         negative_check=neg_file_lock,
         probe=probe_file_lock,
         gaps=(
-            "fixed 2026-10-13: one registry per workspace (.nexus/multi_agent/locks/file_locks.json) keyed by file, holder = task id, flock-guarded; a second task is BLOCKED (FILE_LOCK_HELD_BY_OTHER_TASK), same-task re-lock is idempotent; locks are never released by the executor, a 1800 s TTL makes them stale",
+            "fixed 2026-10-13: one registry per workspace (.nexus/multi_agent/locks/file_locks.json) keyed by file, holder = task id, flock-guarded; a second task is BLOCKED (FILE_LOCK_HELD_BY_OTHER_TASK), same-task re-lock is idempotent; since #2041 the mainchain entry releases the task's locks on completion (release_task_locks), the 1800 s TTL is only the backstop",
         ),
     ),
     CapSpec(

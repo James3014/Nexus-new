@@ -51,17 +51,22 @@ class LearnSchedulerService:
                 results["slo_readiness"] = readiness
                 results["policy"] = policy_data.get("policy", {})
                 if readiness < 0.5:
-                    dispatch_alert("DEGRADED", f"Low SLO readiness: {readiness:.1%}", policy_data)
+                    dispatch_alert(
+                        "DEGRADED",
+                        f"Low SLO readiness: {readiness:.1%}",
+                        policy_data,
+                        root=self.project_root,
+                    )
                     results["alert_dispatched"] = True
                     exit_code = 2
                 else:
                     results["alert_dispatched"] = False
                     exit_code = 0
             else:
-                dispatch_alert("FAILED", "Policy check failed")
+                dispatch_alert("FAILED", "Policy check failed", root=self.project_root)
                 results["alert_dispatched"] = True
         except Exception as e:
-            dispatch_alert("FAILED", f"Error: {e}")
+            dispatch_alert("FAILED", f"Error: {e}", root=self.project_root)
             results["alert_dispatched"] = True
             results["error"] = str(e)[:1000]
         finally:

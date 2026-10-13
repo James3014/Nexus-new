@@ -2,6 +2,7 @@ import contextlib
 import fcntl
 import json
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
@@ -121,3 +122,36 @@ class FileLockRegistry:
         """Returns all files currently locked by a task."""
         return [f for f, t in self.locks.items() if t == task_id]
 # integrity-seal: 1776512137
+
+
+# --- Task-completion release ---------------------------------------------------------------
+#
+# The ``file_lock`` capability acquires locks for the running task inside a registry file under
+# the task's workspace.  The registry files a task touched are remembered (in-process) so the
+# mainchain entry can release them when the task completes instead of waiting for the TTL.
+
+_TASK_LOCK_FILES: Dict[str, set[str]] = {}
+_TASK_LOCK_FILES_GUARD = threading.Lock()
+
+
+def register_task_lock_file(task_id: str, lock_file: str) -> None:
+    """Remember that ``task_id`` holds locks in ``lock_file`` (released on completion)."""
+    if not str(task_id or "").strip() or not str(lock_file or "").strip():
+        return
+    with _TASK_LOCK_FILES_GUARD:
+        _TASK_LOCK_FILES.setdefault(str(task_id), set()).add(str(lock_file))
+
+
+def release_task_locks(task_id: str) -> Dict[str, List[str]]:
+    """Release every lock ``task_id`` holds in the registries it touched; returns lock_file -> files."""
+    with _TASK_LOCK_FILES_GUARD:
+        lock_files = sorted(_TASK_LOCK_FILES.pop(str(task_id or ""), set()))
+    released: Dict[str, List[str]] = {}
+    for lock_file in lock_files:
+        if not Path(lock_file).is_file():
+            continue
+        registry = FileLockRegistry(lock_file=lock_file)
+        held = sorted(f for f, holder in registry.locks.items() if holder == task_id)
+        registry.release(task_id)
+        released[lock_file] = held
+    return released
