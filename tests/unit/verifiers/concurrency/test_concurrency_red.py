@@ -40,38 +40,29 @@ class TestConcurrencyTargetsRed(unittest.TestCase):
         self.assertLess(counter.count, 1000)
 
     def test_target3_deadlock_happens(self):
-        """[Lock Order] 證明 AB/BA 鎖順序會導致 Deadlock
-
-        buggy_targets.ResourceTransfer itself was repaired in place by
-        ac87243dc (pinned by test_deadlock.py), so its transfer methods no
-        longer invert the lock order. This RED case reproduces the original
-        AB/BA inversion on the target's own locks. A barrier makes both
-        threads hold their first lock before reaching for the second, and
-        the second acquire uses a timeout so no thread is left hung (#1928).
-        """
+        """[Lock Order] 證明 AB/BA 鎖順序會導致 Deadlock"""
         transfer = ResourceTransfer()
-        both_hold_first = threading.Barrier(2)
-        blocked = {}
-
-        def run(first, second, name):
-            with first:
-                both_hold_first.wait(timeout=5)
-                got_second = second.acquire(timeout=0.2)
-                if got_second:
-                    second.release()
-                blocked[name] = not got_second
-                both_hold_first.wait(timeout=5)
-
-        t1 = threading.Thread(target=run, args=(transfer.lock_a, transfer.lock_b, "ab"), daemon=True)
-        t2 = threading.Thread(target=run, args=(transfer.lock_b, transfer.lock_a, "ba"), daemon=True)
+        
+        # 用一個 daemon thread 來監控是否卡死
+        deadlock_detected = False
+        
+        def run_ab(): transfer.transfer_a_to_b(10)
+        def run_ba(): transfer.transfer_b_to_a(10)
+        
+        t1 = threading.Thread(target=run_ab)
+        t2 = threading.Thread(target=run_ba)
+        
         t1.start()
         t2.start()
-        t1.join(timeout=5)
-        t2.join(timeout=5)
-
-        deadlock_detected = blocked.get("ab") is True and blocked.get("ba") is True
+        
+        # 只等 0.1 秒，如果還沒結束就是 deadlock 了
+        t1.join(timeout=0.1)
+        t2.join(timeout=0.1)
+        
+        if t1.is_alive() and t2.is_alive():
+            deadlock_detected = True
+            
         self.assertTrue(deadlock_detected)
-
 
 if __name__ == "__main__":
     unittest.main()

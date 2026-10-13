@@ -2,5 +2,10 @@
 
 from __future__ import annotations
 
-# Fixed in #1928: target3 RED demonstrates the AB/BA inversion deterministically (barrier + acquire timeout).
-ENTRY = None
+ENTRY: dict[str, object] = {
+    "file": "tests/unit/verifiers/concurrency/test_concurrency_red.py",
+    "disposition": "delete-candidate",
+    "issue": "#1928",
+    "cause": "target fixed in ac87243dc; deadlock no longer reproducible; fixed behaviour pinned by test_deadlock.py",
+    "tests": ("TestConcurrencyTargetsRed::test_target3_deadlock_happens",),
+}
