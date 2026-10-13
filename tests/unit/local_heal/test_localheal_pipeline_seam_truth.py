@@ -310,8 +310,10 @@ class TestLocalhealPipelineTopologySingleLocalModelNotAffected:
 class TestLocalhealPipelineTopologyModelCallBypassesPipeline:
     """Test 6: Model call goes through provider, NOT through pipeline retry loop."""
 
-    def test_model_call_goes_through_provider(self, tmp_path):
+    def test_model_call_goes_through_provider(self, tmp_path, monkeypatch):
         """provider.generate() is called — through pipeline orchestrator."""
+        monkeypatch.setenv("NEXUS_ARMOR_ALLOW_EPHEMERAL", "1")
+        monkeypatch.setenv("NEXUS_ARMOR_ARTIFACT_ROOT", str(tmp_path / "armor_artifacts"))
         provider = _build_provider_mock()
 
         with patch(
@@ -606,8 +608,10 @@ class TestHealPipelineRunInvocationTruth:
                 # Retry was NOT invoked
                 assert result.telemetries.get("semantic_retry_invoked") is False
 
-    def test_full_executor_calls_healpipeline_run(self, tmp_path):
+    def test_full_executor_calls_healpipeline_run(self, tmp_path, monkeypatch):
         """End-to-end: LocalModelExecutor.run with localheal_pipeline DOES call HealPipeline.run()."""
+        monkeypatch.setenv("NEXUS_ARMOR_ALLOW_EPHEMERAL", "1")
+        monkeypatch.setenv("NEXUS_ARMOR_ARTIFACT_ROOT", str(tmp_path / "armor_artifacts"))
         from nexus.services.local_heal.pipeline import HealPipeline
 
         pipeline_run_mock = MagicMock()
@@ -1218,3 +1222,21 @@ class TestPlannerOwnedOrchestratorSelectionB6:
                 # Pipeline still runs — committee defaults to False
                 pipeline_run_mock.assert_called_once()
                 assert result.telemetries.get("localheal_pipeline_run_called") is True
+
+
+class TestProtocolModeEnvDoesNotLeak:
+    """The repair_loop executor must not leave NEXUS_PROTOCOL_MODE set in the process."""
+
+    def test_repair_loop_executor_leaves_no_protocol_mode_env(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("NEXUS_PROTOCOL_MODE", raising=False)
+        monkeypatch.setenv("NEXUS_ARMOR_ALLOW_EPHEMERAL", "1")
+        monkeypatch.setenv("NEXUS_ARMOR_ARTIFACT_ROOT", str(tmp_path / "armor_artifacts"))
+        provider = _build_provider_mock()
+
+        with patch(
+            "nexus.services.local_heal.local_model_executor.build_local_model_provider_from_signal_snapshot",
+            return_value=provider,
+        ):
+            LocalModelExecutor.run(_build_request(repo_root=str(tmp_path)), provider=provider)
+
+        assert "NEXUS_PROTOCOL_MODE" not in os.environ
