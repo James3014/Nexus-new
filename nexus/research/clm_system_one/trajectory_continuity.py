@@ -62,9 +62,10 @@ _FORBIDDEN_PRE_ACTION_KEYS = {
 # before hashing or persistence.  Conservative: prefer false-positive redaction
 # over accidental secret leakage.
 _URL_CREDENTIAL_PATTERN = re.compile(
-    r"(?i)\b[a-z][a-z0-9+.\-]{0,31}://[^/@\s:]{0,256}:[^/\s]{1,512}@"
+    r"(?i)\b[a-z][a-z0-9+.\-]{0,31}://[^/@\s:]{0,256}:[^/\s\"'?#,}]{1,512}@"
 )
-# Note on the URL pattern: the password class excludes "/" but allows "@", so a
+# Note on the URL pattern: the password class excludes "/", quotes, ? # , } and
+# whitespace (so it cannot run across JSON fields) but allows "@", so a
 # password containing "@" is redacted up to the LAST "@" before the host (the
 # greedy match backtracks to it) instead of leaking the tail after the first "@".
 #

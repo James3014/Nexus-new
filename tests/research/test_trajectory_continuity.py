@@ -2627,3 +2627,22 @@ def test_redaction_issue_1873_is_linear_on_adversarial_strings(payload):
     start = time.monotonic()
     _redact_value(payload)
     assert time.monotonic() - start < 1.0
+
+
+def test_redaction_url_credential_does_not_swallow_json_fields():
+    text = '{"u":"http://localhost:8000","a":"x@y.com","note":"keepme","c":"z@w.org"}'
+    assert _redact_value(text) == text
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "redis://:p@ss@host:6379/0",
+        "https://alice:p@ss@host.example/x",
+        "https://alice:p@ss" + "@" + "w0rd@host.example/x",
+    ],
+)
+def test_redaction_url_password_with_at_is_still_fully_redacted(url):
+    out = _redact_value('{"x":"' + url + '","note":"keepme"}')
+    assert "ss" not in out.split("host")[0] and "w0rd" not in out and "p@" not in out
+    assert '"note":"keepme"' in out
