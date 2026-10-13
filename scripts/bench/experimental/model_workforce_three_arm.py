@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import json
 import os
@@ -38,6 +38,12 @@ from nexus.services.unified_runtime import (
     UnifiedRuntime,
     UnifiedRuntimeRequest,
     normalize_online_invoker_payload,
+)
+from scripts.bench.agy_account_lease import (
+    MODEL_IDENTITY_OK,
+    assert_contained_agy_argv,
+    model_identity_verdict,
+    read_agy_model_observation,
 )
 
 
@@ -137,6 +143,8 @@ class Invocation:
     usage: dict[str, Any]
     error: str
     provider_call_confirmed: bool
+    # Agy only: requested vs observed model (from Agy's own log), see agy_account_lease.
+    model_identity: dict[str, Any] = field(default_factory=dict)
 
     @property
     def delivered(self) -> bool:
@@ -377,6 +385,11 @@ def _binary_for(spec: ModelSpec) -> str:
     return str(fallback) if fallback.is_file() else ""
 
 
+def _agy_log_path(isolated_dir: Path) -> Path:
+    """Agy's log (observed-model witness) sits next to, never inside, the isolated workdir."""
+    return isolated_dir.parent / f"{isolated_dir.name}.agy.log"
+
+
 def _subprocess_command(spec: ModelSpec, prompt: str, isolated_dir: Path) -> list[str]:
     binary = _binary_for(spec)
     if not binary:
@@ -402,18 +415,26 @@ def _subprocess_command(spec: ModelSpec, prompt: str, isolated_dir: Path) -> lis
             prompt,
         ]
     if spec.transport == "agy_cli":
-        return [
+        # Exact model and contained posture: without --model Agy silently uses its default.
+        command = [
             binary,
             "--new-project",
             "--add-dir",
             str(isolated_dir),
             "--mode",
             "plan",
+            "--sandbox",
+            "--model",
+            spec.model,
+            "--log-file",
+            str(_agy_log_path(isolated_dir)),
             "--print-timeout",
             timeout_label,
             "--print",
             prompt,
         ]
+        assert_contained_agy_argv(command)
+        return command
     if spec.transport == "grok_cli":
         return [
             binary,
@@ -531,6 +552,9 @@ def invoke_subprocess(spec: ModelSpec, prompt: str, isolated_dir: Path) -> Invoc
             error="provider_binary_not_found",
             provider_call_confirmed=False,
         )
+    agy_log = _agy_log_path(isolated_dir) if spec.transport == "agy_cli" else None
+    if agy_log is not None:
+        agy_log.unlink(missing_ok=True)  # never attribute a stale log to this call
     started = time.monotonic()
     try:
         completed = subprocess.run(
@@ -553,6 +577,7 @@ def invoke_subprocess(spec: ModelSpec, prompt: str, isolated_dir: Path) -> Invoc
             usage={},
             error="provider_timeout",
             provider_call_confirmed=True,
+            model_identity=_agy_identity(spec, agy_log),
         )
     except OSError as exc:
         return Invocation(
@@ -587,6 +612,14 @@ def invoke_subprocess(spec: ModelSpec, prompt: str, isolated_dir: Path) -> Invoc
             error = "provider_auth_blocked"
         elif completed.returncode == 0:
             error = "benchmark_envelope_not_found"
+    model_identity = _agy_identity(spec, agy_log)
+    if (
+        model_identity
+        and model_identity["model_identity_status"] != MODEL_IDENTITY_OK
+        and completed.returncode == 0
+    ):
+        # Fail closed: an answer not provably from the requested model is never scored.
+        error = model_identity["model_identity_status"]
     return Invocation(
         provider=spec.provider,
         model=spec.model,
@@ -598,7 +631,14 @@ def invoke_subprocess(spec: ModelSpec, prompt: str, isolated_dir: Path) -> Invoc
         usage=_usage_from_stdout(stdout),
         error=error,
         provider_call_confirmed=True,
+        model_identity=model_identity,
     )
+
+
+def _agy_identity(spec: ModelSpec, agy_log: Path | None) -> dict[str, Any]:
+    if agy_log is None:
+        return {}
+    return model_identity_verdict(spec.model, read_agy_model_observation(agy_log))
 
 
 def invoke_ollama(spec: ModelSpec, prompt: str) -> Invocation:
@@ -687,6 +727,7 @@ def _invocation_payload(invocation: Invocation, verification: Mapping[str, Any])
         "stdout_sha256": hashlib.sha256(invocation.raw_stdout.encode()).hexdigest(),
         "stderr_tail": invocation.raw_stderr[-800:],
         "raw_preview": invocation.raw_stdout[:800],
+        "model_identity": dict(invocation.model_identity),
     }
 
 
