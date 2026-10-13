@@ -2,7 +2,6 @@ import json
 import subprocess
 from pathlib import Path
 
-import pytest
 from click.testing import CliRunner
 
 import scripts.engine.nexus_cli as cli_mod
@@ -11,7 +10,17 @@ from nexus.engine.ultra_review_service import UltraReviewService, os_sandbox_ava
 # The ghost-regression lane executes PR-controlled tests only behind an OS barrier
 # (macOS sandbox-exec); elsewhere it refuses and the lane fails closed.
 OS_SANDBOX = os_sandbox_available()
-requires_os_sandbox = pytest.mark.skipif(not OS_SANDBOX, reason="needs macOS sandbox-exec")
+
+
+def _assert_no_barrier_fail_closed(payload):
+    """Without an OS barrier (every Linux CI runner) the PR's tests never run and the gate
+    fails closed. Sandbox-dependent tests assert this instead of skipping, so they pass
+    (and prove the no-barrier contract) on every platform."""
+    assert payload["isolation"]["barrier"] == "none"
+    assert payload["gate_passed"] is False
+    assert payload["ghost_regression"]["executed_tests"] == []
+    if payload["mode"] == "review":
+        assert payload["blocked_reason"] == "ghost_regression_not_executed:no_os_barrier"
 
 
 def _init_repo(path):
@@ -478,7 +487,6 @@ def _init_app_repo(path):
     subprocess.run(["git", "commit", "-m", "init"], cwd=path, check=True, capture_output=True)
 
 
-@requires_os_sandbox
 def test_ultra_review_review_mode_flags_eval_and_failing_test(tmp_path):
     _init_app_repo(tmp_path)
     (tmp_path / "app.py").write_text(
@@ -490,6 +498,10 @@ def test_ultra_review_review_mode_flags_eval_and_failing_test(tmp_path):
         dry_run=False, report_path="reports/ultra.json", sandbox_root="reports/sandboxes"
     )
 
+    if not OS_SANDBOX:
+        _assert_no_barrier_fail_closed(payload)
+        assert any(f["rule_id"] == "bandit:B307" for f in payload["findings"])
+        return
     assert payload["mode"] == "review"
     assert payload["status"] == "FAIL"
     assert payload["gate_passed"] is False
@@ -509,7 +521,6 @@ def test_ultra_review_review_mode_flags_eval_and_failing_test(tmp_path):
     assert len(listed.strip().splitlines()) == 1
 
 
-@requires_os_sandbox
 def test_ultra_review_review_mode_passes_clean_change(tmp_path):
     _init_app_repo(tmp_path)
     (tmp_path / "app.py").write_text(
@@ -521,6 +532,9 @@ def test_ultra_review_review_mode_passes_clean_change(tmp_path):
         dry_run=False, report_path="reports/ultra.json", sandbox_root="reports/sandboxes"
     )
 
+    if not OS_SANDBOX:
+        _assert_no_barrier_fail_closed(payload)
+        return
     assert payload["status"] == "PASS"
     assert payload["gate_passed"] is True
     assert payload["findings"] == []
@@ -623,7 +637,6 @@ def test_ultra_review_review_mode_without_os_sandbox_refuses_to_run_pr_tests(tmp
     assert not marker.exists()
 
 
-@requires_os_sandbox
 def test_ultra_review_contains_a_diff_that_escapes_the_sandbox(tmp_path, monkeypatch):
     """A PR test that writes outside the worktree, reads credentials and calls the network
     is contained (no write, no token, no connection) and reported as a failing test."""
@@ -652,9 +665,13 @@ def test_ultra_review_contains_a_diff_that_escapes_the_sandbox(tmp_path, monkeyp
         dry_run=True, report_path="reports/ultra.json", sandbox_root="reports/sandboxes"
     )
 
+    assert not marker.exists()
+    if not OS_SANDBOX:
+        _assert_no_barrier_fail_closed(payload)
+        assert not (Path(payload["sandbox_path"]) / "worktree" / "env_seen.json").exists()
+        return
     assert payload["isolation"]["barrier"] == "macos_sandbox_exec"
     assert payload["gate_passed"] is False
-    assert not marker.exists()
     ghost = payload["ghost_regression"]
     assert ghost["passed"] is False
     assert any(f["rule_id"] == "regression_test_failed" for f in payload["findings"])
@@ -667,7 +684,6 @@ def test_ultra_review_contains_a_diff_that_escapes_the_sandbox(tmp_path, monkeyp
     assert seen == {}
 
 
-@requires_os_sandbox
 def test_ultra_review_ghost_lane_timeout_fails_the_gate_closed(tmp_path, monkeypatch):
     _init_app_repo(tmp_path)
     (tmp_path / "app.py").write_text(
@@ -680,6 +696,9 @@ def test_ultra_review_ghost_lane_timeout_fails_the_gate_closed(tmp_path, monkeyp
         dry_run=False, report_path="reports/ultra.json", sandbox_root="reports/sandboxes"
     )
 
+    if not OS_SANDBOX:
+        _assert_no_barrier_fail_closed(payload)
+        return
     assert payload["ghost_regression"]["timeout"] is True
     assert payload["gate_passed"] is False
     assert payload["status"] == "FAIL"

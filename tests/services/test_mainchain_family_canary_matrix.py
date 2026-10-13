@@ -1306,6 +1306,18 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
         ):
             # nexus-runtime #171: an honestly unselected retired node is not a structural failure.
             final_status = "RETIRED_NOT_SELECTED"
+        no_barrier_fail_closed = (
+            name == "ultra_review"
+            and not os_sandbox_available()
+            and pos["invoked"]
+            and pos.get("gate_passed") is False
+            and pos["final_status"] == "FAIL"
+            and neg["final_status"] == "OK"
+        )
+        if no_barrier_fail_closed:
+            # Without an OS barrier (Linux CI) the review refuses to run PR tests and fails
+            # closed by design; that is not a wiring failure. Still not OK (semantic blocker).
+            final_status = "FAIL_CLOSED_NO_OS_BARRIER"
         archived = name in ARCHIVED_CAPABILITY_REASONS
         if archived and final_status != "RETIRED_NOT_SELECTED":
             # Archived 2026-10-12 / 2026-10-13: the only acceptable result is an explicit
@@ -1324,6 +1336,7 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
         if (
             name in promotable
             and not archived
+            and not no_barrier_fail_closed
             and contract["execution_class"] in REAL_EXECUTION_CLASSES
             and pos["final_status"] in {"FAIL", "PROBE", "IMPLEMENTATION_FAILURE"}
         ):

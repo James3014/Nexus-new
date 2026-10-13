@@ -217,12 +217,18 @@ def _git_repo(root: Path) -> None:
     git("commit", "-q", "-m", "base")
 
 
-requires_os_sandbox = pytest.mark.skipif(
-    not os_sandbox_available(), reason="ghost regression runs PR tests only behind sandbox-exec"
-)
+def _assert_no_barrier_fail_closed(receipt) -> bool:
+    """Without an OS barrier (Linux CI) the PR's tests never run and the review fails
+    closed; sandbox-dependent tests assert that instead of skipping."""
+    if os_sandbox_available():
+        return False
+    assert receipt.invoked is True
+    assert receipt.gate_passed is False
+    assert receipt.outcome["error"] == "ghost_regression_not_executed:no_os_barrier"
+    assert not any(c.startswith("tests/") for c in receipt.outcome["executed_checks"])
+    return True
 
 
-@requires_os_sandbox
 def test_ultra_review_executor_flags_planted_eval_and_failing_test(tmp_path) -> None:
     _git_repo(tmp_path)
     (tmp_path / "app.py").write_text(
@@ -230,6 +236,8 @@ def test_ultra_review_executor_flags_planted_eval_and_failing_test(tmp_path) -> 
         encoding="utf-8",
     )
     receipt = EXECUTOR_REGISTRY["ultra_review"](_plan(workspace_root=str(tmp_path)), "review")
+    if _assert_no_barrier_fail_closed(receipt):
+        return
     assert receipt.invoked is True
     assert receipt.gate_passed is False
     assert receipt.outcome["semantic_status"] == "FAILED"
@@ -240,7 +248,6 @@ def test_ultra_review_executor_flags_planted_eval_and_failing_test(tmp_path) -> 
     )
 
 
-@requires_os_sandbox
 def test_ultra_review_executor_passes_benign_diff(tmp_path) -> None:
     _git_repo(tmp_path)
     (tmp_path / "app.py").write_text(
@@ -248,6 +255,8 @@ def test_ultra_review_executor_passes_benign_diff(tmp_path) -> None:
         encoding="utf-8",
     )
     receipt = EXECUTOR_REGISTRY["ultra_review"](_plan(workspace_root=str(tmp_path)), "review")
+    if _assert_no_barrier_fail_closed(receipt):
+        return
     assert receipt.gate_passed is True, receipt.outcome
     assert receipt.outcome["semantic_status"] == "SUCCEEDED"
     assert receipt.outcome["lanes"]["security_sentry"]["executed_checks"] == [
