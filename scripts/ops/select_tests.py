@@ -8,8 +8,10 @@ conservative list of pytest targets. It does not run pytest or write reports.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +23,15 @@ DEFAULT_IMPACT_STATS = ROOT / ".nexus" / "test_impact_stats.json"
 DEFAULT_TEST_HISTORY = ROOT / ".nexus" / "reports" / "test_history.jsonl"
 DEFAULT_FALLBACK_TARGETS = ("tests/core", "tests/services/test_policy_gate.py")
 HIGH_RISK_TARGETS = ("tests/services/test_policy_gate.py",)
+
+# Catch-all rows whose directory-wide test set is narrowed per file by derivation
+# (naming convention + import/path references).  The row stays the fail-closed
+# fallback whenever derivation finds nothing or cannot prove the file is only
+# consumed by scripts/ops itself.
+DERIVED_CATCHALL_PREFIX = "scripts/ops"
+DERIVED_TESTS_DIR = "tests/ops"
+_SOURCE_SCAN_DIRS = ("nexus", "scripts", "product")
+_SKIP_DIR_PARTS = {"__pycache__", ".venv", "venv", "node_modules", ".git"}
 
 
 @dataclass(frozen=True)
@@ -232,6 +243,121 @@ def _predictive_scores(
     return scores
 
 
+def _py_files(root: Path, rel_dirs: tuple[str, ...]) -> list[Path]:
+    out: list[Path] = []
+    for rel in rel_dirs:
+        base = root / rel
+        if base.is_dir():
+            out.extend(
+                p for p in sorted(base.rglob("*.py")) if not (set(p.parts) & _SKIP_DIR_PARTS)
+            )
+    return out
+
+
+def _refs_module(text: str, name: str, stem: str, *, inside_ops: bool) -> bool:
+    """True if ``text`` imports or path-references scripts/ops/<name>."""
+    if re.search(rf"scripts[./]ops[./]{re.escape(stem)}\b", text):
+        return True
+    if not stem.isidentifier() and re.search(rf"(?<![\w-]){re.escape(stem)}(?![\w-])", text):
+        return True  # hyphenated/extensionless executable referenced by bare name
+    if name != stem and re.search(rf"scripts[./]ops[./]{re.escape(name)}(?![\w.])", text):
+        return True
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        # Unparseable file that mentions the stem: be conservative.
+        return re.search(rf"\b{re.escape(stem)}\b", text) is not None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            mod = node.module or ""
+            if mod == "scripts.ops" and any(a.name == stem for a in node.names):
+                return True
+            if mod == stem or mod.startswith(f"{stem}."):
+                if inside_ops:
+                    return True
+            if inside_ops and node.level and not mod and any(a.name == stem for a in node.names):
+                return True
+            if inside_ops and node.level and mod == stem:
+                return True
+        elif isinstance(node, ast.Import) and inside_ops:
+            if any(a.name == stem or a.name.startswith(f"{stem}.") for a in node.names):
+                return True
+    return False
+
+
+def derive_ops_targets(changed_path: str, base_sha: str = "") -> list[str]:
+    """Derive tests for one direct ``scripts/ops/<file>`` without a specific row.
+
+    Selected: ``tests/ops/test_<stem>*.py`` plus every test file referencing the
+    module (import or ``scripts/ops/<file>`` path), closed transitively over
+    importers inside scripts/ops.  Returns ``[]`` (caller keeps the whole-directory
+    fallback) when nothing is found or when any importer outside scripts/ops and
+    tests exists, since its tests cannot be derived here.
+    """
+    path = _normalize_path(changed_path)
+    parent, _, filename = path.rpartition("/")
+    stem, dot, ext = filename.rpartition(".")
+    if not dot:  # extensionless executable, e.g. scripts/ops/nexus-agy-dispatch
+        stem, ext = filename, ""
+    if parent != DERIVED_CATCHALL_PREFIX or ext not in {"py", "sh", ""}:
+        return []
+    if filename.startswith("__init__") or not re.fullmatch(r"[\w-]+", stem):
+        return []
+    # Added/deleted/renamed files change repository inventories (source-inventory,
+    # openwiki, gitlink tests...) that no per-file derivation can see: keep the
+    # whole-directory fallback unless the file exists at head and, when the base
+    # is known, already existed at base (i.e. a pure modification).
+    if not (ROOT / path).is_file():
+        return []
+    if base_sha:
+        probe = subprocess.run(
+            ["git", "-C", str(ROOT), "cat-file", "-e", f"{base_sha}:{path}"],
+            capture_output=True,
+            check=False,
+        )
+        if probe.returncode != 0:
+            return []
+
+    ops_files = {
+        p: p.read_text(encoding="utf-8", errors="replace")
+        for p in _py_files(ROOT, (DERIVED_CATCHALL_PREFIX,))
+    }
+    outside = {
+        p: p.read_text(encoding="utf-8", errors="replace")
+        for p in _py_files(ROOT, _SOURCE_SCAN_DIRS)
+        if p not in ops_files
+    }
+    closure = {(stem, filename)}
+    frontier = [(stem, filename)]
+    while frontier:
+        cur_stem, cur_name = frontier.pop()
+        for p, text in outside.items():
+            if cur_stem in text and _refs_module(text, cur_name, cur_stem, inside_ops=False):
+                return []  # non-ops production importer: fail closed
+        for p, text in ops_files.items():
+            if p.stem == cur_stem or cur_stem not in text:
+                continue
+            if _refs_module(text, cur_name, cur_stem, inside_ops=True):
+                key = (p.stem, p.name)
+                if key not in closure:
+                    closure.add(key)
+                    frontier.append(key)
+
+    tests_root = ROOT / DERIVED_TESTS_DIR
+    selected: set[str] = set()
+    for cur_stem, cur_name in closure:
+        if tests_root.is_dir():
+            for match in tests_root.glob(f"test_{cur_stem.replace('-', '_')}*.py"):
+                selected.add(str(match.relative_to(ROOT)))
+    for p in _py_files(ROOT, ("tests",)):
+        text = p.read_text(encoding="utf-8", errors="replace")
+        for cur_stem, cur_name in closure:
+            if cur_stem in text and _refs_module(text, cur_name, cur_stem, inside_ops=False):
+                selected.add(str(p.relative_to(ROOT)))
+                break
+    return sorted(selected)
+
+
 def select_targets(
     changed_paths: list[str],
     rules: list[ImpactRule],
@@ -284,6 +410,7 @@ def select_target_details(
     stats_path: Path = DEFAULT_IMPACT_STATS,
     history_path: Path = DEFAULT_TEST_HISTORY,
     ranking: str = "static",
+    base_sha: str = "",
 ) -> SelectionDetails:
     selected: list[str] = []
     reasons: list[str] = []
@@ -328,6 +455,15 @@ def select_target_details(
                 ):
                     risk_reasons.append(rule.risk_reason)
         mapped_targets, mapped_reasons = select_targets([changed_path], rules, ())
+        if (
+            mapped_targets
+            and matching_rules
+            and all(rule.code_path == DERIVED_CATCHALL_PREFIX for rule in matched_rules)
+        ):
+            derived = derive_ops_targets(changed_path, base_sha)
+            if derived:
+                mapped_targets = derived
+                mapped_reasons = [f"{changed_path}: derived scripts/ops tests"]
         for target in mapped_targets:
             if target not in selected:
                 selected.append(target)

@@ -791,7 +791,7 @@ def build_impact_plan(
     ]
 
     if other_paths:
-        details = select_target_details(other_paths, load_impact_rules())
+        details = select_target_details(other_paths, load_impact_rules(), base_sha=base_sha)
         details_targets = list(details.targets)
         details_reasons = list(details.reasons)
         details_confidence = details.confidence
