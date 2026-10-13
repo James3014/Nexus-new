@@ -12,6 +12,11 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
+from nexus.contracts.model_output_json import (
+    ModelOutputParseError,
+    ModelOutputShapeError,
+    parse_model_json,
+)
 from nexus.engine.autoreason_service import AutoreasonCandidate, JudgeProvider
 
 
@@ -243,15 +248,17 @@ class OllamaJudgeProvider:
 def _parse_json_object(content: str) -> Any:
     """The model's JSON object; tolerate prose or code fences around one object."""
     try:
-        return json.loads(content)
-    except json.JSONDecodeError:
+        return parse_model_json(content, expect="object", mode="strict")
+    except ModelOutputShapeError:
+        return None
+    except ModelOutputParseError:
         pass
     start, end = content.find("{"), content.rfind("}")
     if start < 0 or end <= start:
         return None
     try:
-        return json.loads(content[start : end + 1])
-    except json.JSONDecodeError:
+        return parse_model_json(content[start : end + 1], expect="object", mode="strict")
+    except ModelOutputParseError:
         return None
 
 
