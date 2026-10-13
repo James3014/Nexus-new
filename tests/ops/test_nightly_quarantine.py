@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import cast
 
 import pytest
 import yaml
@@ -54,7 +55,10 @@ def test_apply_marks_only_listed_items_as_non_strict_xfail() -> None:
 
     listed, other = _Item("tests/x.py::test_a"), _Item("tests/x.py::test_b")
     entry = QuarantineEntry("tests/x.py", "quarantine", "TBD", "cause", ("test_a",))
-    assert apply_quarantine([listed, other], quarantine_reasons((entry,))) == 1
+    assert (
+        apply_quarantine(cast(list[pytest.Item], [listed, other]), quarantine_reasons((entry,)))
+        == 1
+    )
     assert other.markers == []
     (marker,) = listed.markers
     assert marker.name == "xfail"
