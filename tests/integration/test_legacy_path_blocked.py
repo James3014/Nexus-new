@@ -6,6 +6,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # The sanctioned seam: raw model text is parsed only inside these modules.
 SANCTIONED_MODULES = frozenset({
+    "nexus/contracts/model_output_json.py",
     "nexus/engine/semantic_adapter.py",
     "nexus/engine/governance_bridge.py",
 })
@@ -62,6 +63,13 @@ NON_MODEL_JSON_PARSE_ALLOWLIST = {
         "nexus/services/local_assist_advisor_canary.py",
         "run_advisor_canary",
         "Path(response.receipt_path).read_text(encoding='utf-8')",
+    ),
+    # Measurement: the Apple FM structured-JSON probe scores whether the model emits strict JSON;
+    # a bare json.loads is the measurement itself (a sanctioned lenient parse would hide failures).
+    (
+        "nexus/calibration/provider_adoption/apple_fm_adapter.py",
+        "AppleFMCandidateAdapter._run_structured_json_probe.semantic_validator",
+        "output_text",
     ),
     # MCP JSON-RPC envelope: Serena tool-result text read via read_response(); a tool result, not model text.
     ("nexus/services/mcp_delegator.py", "MCPDelegator.delegate_mcp", "text"),
@@ -198,7 +206,7 @@ class TestLegacyPathBlocked(unittest.TestCase):
     """
 
     def test_no_json_loads_on_model_response(self):
-        """禁止直接對模型回應進行 json.loads (應使用 SemanticAdapter.parse_json_object)"""
+        """禁止直接對模型回應進行 json.loads (應使用 nexus.contracts.model_output_json / SemanticAdapter.parse_json_object)"""
         # Negative controls: the detector must flag model-output parses ...
         flagged_controls = {
             "direct": "import json\ndef f(model_response):\n    return json.loads(model_response)\n",
@@ -236,7 +244,7 @@ class TestLegacyPathBlocked(unittest.TestCase):
         self.assertEqual(
             violations,
             [],
-            f"Legacy path detected: {violations}. Use SemanticAdapter.parse_json_object instead.",
+            f"Legacy path detected: {violations}. Use nexus.contracts.model_output_json (SemanticAdapter.parse_json_object) instead.",
         )
         stale = NON_MODEL_JSON_PARSE_ALLOWLIST - {f[:3] for f in found}
         self.assertEqual(

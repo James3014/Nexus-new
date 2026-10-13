@@ -7,8 +7,8 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
+from nexus.contracts.model_output_json import ModelOutputShapeError, parse_model_json_object
 from nexus.contracts.s2t_policy import S2TCandidate, S2TSelector, S2TStrictGate
-from nexus.engine.semantic_adapter import ModelOutputNotObjectError, parse_model_json_object
 
 
 @dataclass(frozen=True)
@@ -23,7 +23,7 @@ class S2TStrictDecision:
 
 
 def robust_json_parse(response: str) -> dict:
-    """Parse a Qwen advisor response into a dict via the sanctioned SemanticAdapter parser.
+    """Parse a Qwen advisor response into a dict via the sanctioned model-output parser.
 
     Kept as the public name used by benches and tests; raises ``ValueError``
     (``ModelOutputParseError``) for anything that is not a JSON object.
@@ -269,7 +269,7 @@ class S2T3BAdvisor:
 
             try:
                 parsed = robust_json_parse(output_text)
-            except ModelOutputNotObjectError:
+            except ModelOutputShapeError:
                 parsed = None
             if isinstance(parsed, dict) and "selected_candidate_id" in parsed:
                 # 測量 thought/answer token 比例
@@ -381,7 +381,7 @@ class S2T3BAdvisor:
 
             try:
                 response_json = robust_json_parse(response)
-            except ModelOutputNotObjectError:
+            except ModelOutputShapeError:
                 return {"abstain_reason": "invalid_schema"}
             except Exception:
                 return {"abstain_reason": "fail_parse"}

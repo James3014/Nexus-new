@@ -1,68 +1,23 @@
-import ast
-import json
-import re
-from typing import Any, Tuple
+from typing import Tuple
 
+from nexus.contracts.model_output_json import (
+    ModelOutputParseError,
+    ModelOutputShapeError,
+    parse_model_json,
+    parse_model_json_object,
+)
 from nexus.engine.capability_contracts import FlowState
 from nexus.engine.governance_bridge import GovernanceBridge
 
-
-class ModelOutputParseError(ValueError):
-    """Raw model output could not be parsed into a JSON object (fail-closed)."""
-
-
-class ModelOutputNotObjectError(ModelOutputParseError):
-    """Raw model output parsed, but to something other than a JSON object."""
-
-
-def parse_model_json_object(raw_output: str) -> dict[str, Any]:
-    """Sanctioned parser for model output that is expected to be one JSON object.
-
-    Every ``json.loads`` on raw model text belongs here, not at the call site
-    (tests/integration/test_legacy_path_blocked.py enforces this). Accepts
-    strict JSON, then the Python-dict dialect small local models emit
-    (single quotes, None/True/False), then ``ast.literal_eval``. Anything that
-    is not a dict raises: callers must treat a raise as "no decision".
-    """
-    if not isinstance(raw_output, str):
-        raise ModelOutputParseError(f"model output must be str, got {type(raw_output).__name__}")
-
-    parsed: Any = None
-    parsed_ok = False
-    # 1. Strict JSON.
-    try:
-        parsed = json.loads(raw_output)
-        parsed_ok = True
-    except Exception:
-        pass
-
-    # 2. Python-dict dialect mapped onto strict JSON.
-    if not parsed_ok:
-        try:
-            cleaned = raw_output.replace("'", '"')
-            cleaned = re.sub(r"\bNone\b", "null", cleaned)
-            cleaned = re.sub(r"\bTrue\b", "true", cleaned)
-            cleaned = re.sub(r"\bFalse\b", "false", cleaned)
-            parsed = json.loads(cleaned)
-            parsed_ok = True
-        except Exception:
-            pass
-
-    # 3. Python literal fallback.
-    if not parsed_ok:
-        try:
-            py_str = re.sub(r"\bnull\b", "None", raw_output)
-            py_str = re.sub(r"\btrue\b", "True", py_str)
-            py_str = re.sub(r"\bfalse\b", "False", py_str)
-            parsed = ast.literal_eval(py_str)
-        except Exception as exc:
-            raise ModelOutputParseError(f"Failed to parse response: {exc}") from exc
-
-    if not isinstance(parsed, dict):
-        raise ModelOutputNotObjectError(
-            f"model output is a {type(parsed).__name__}, not a JSON object"
-        )
-    return parsed
+# Model-output JSON parsing lives in nexus.contracts (importable from core);
+# re-exported here so engine callers keep a single SemanticAdapter entry point.
+__all__ = [
+    "ModelOutputParseError",
+    "ModelOutputShapeError",
+    "SemanticAdapter",
+    "parse_model_json",
+    "parse_model_json_object",
+]
 
 
 class SemanticAdapter:

@@ -399,13 +399,6 @@ QUARANTINE: tuple[dict[str, object], ...] = (
         "tests": ("test_june_regression_pack_governance_integrity",),
     },
     {
-        "file": "tests/integration/test_legacy_path_blocked.py",
-        "disposition": "quarantine-product-bug?",
-        "issue": "#1923",
-        "cause": "real product violations: s2t_strict is fixed, but the AST check still flags json.loads on model output in campaign_general, cloud_agent_cli_adapter, committee_orchestrator (x2), local_heal/planner and apple_fm_adapter; un-quarantine once those route through the sanctioned parser",
-        "tests": ("TestLegacyPathBlocked::test_no_json_loads_on_model_response",),
-    },
-    {
         "file": "tests/integration/test_local_model_ollama_smoke_contract.py",
         "disposition": "quarantine",
         "issue": "#1924",
