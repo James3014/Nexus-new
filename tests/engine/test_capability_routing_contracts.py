@@ -17,10 +17,14 @@ from nexus.engine.route_decision_adapter import build_route_decision
 
 
 def _real_verifier_evidence(tmp_path: Path) -> dict:
-    """Evidence the current receipt contract asks for (#453, #1757).
+    """Verifier result, artifact hash, source hash and measured telemetry for a receipt payload.
 
-    Runs a real verifier over a real source file and returns its result, the sha256 of the
-    verifier artifact, the source hash and telemetry measured around the run.
+    Runs a small verifier over a source file and returns its result, the sha256 of the verifier
+    log, the source hash and the telemetry measured around the run. This evidence does not make a
+    receipt public_claim_safe, because #453 keeps outcome_contributed False whatever the payload
+    carries. It feeds only (a) the telemetry assertions (telemetry_source == "measured") and (b)
+    the #1757 claim/delivery binding reasons (unbound_verifier_proof instead of
+    missing_verifier_artifact;missing_source_hash). Tests that assert neither would pass with {}.
     """
     source = tmp_path / "target.py"
     source.write_text("VALUE = 2\n", encoding="utf-8")
@@ -52,9 +56,9 @@ def _real_verifier_evidence(tmp_path: Path) -> dict:
 
 def _assert_gate_held_fail_closed(receipt: CapabilityReceipt) -> None:
     """Contract (#453 ADVISORY_ONLY_FAIL_CLOSED): a generic adapter payload cannot mint verifier
-    authority. With a real verifier result, source hash and measured telemetry, the receipt keeps
-    its invocation, evidence and gate pass, but it never contributes an outcome and is never
-    public_claim_safe until an authenticated upstream verifier authority is bound."""
+    authority. The receipt keeps its invocation, evidence and gate pass, but it never contributes
+    an outcome and is never public_claim_safe until an authenticated upstream verifier authority
+    is bound, whatever evidence the payload carries."""
     assert receipt.selected is True
     assert receipt.invoked is True
     assert receipt.evidence_present is True
@@ -566,8 +570,9 @@ def test_capability_receipts_canonicalize_legacy_aliases():
 def test_core_gate_receipts_require_specific_evidence_before_public_claim(tmp_path):
     """Contract: core gates need specific evidence, and #1757 binds claim/delivery to verifier proof.
 
-    Even with a real verifier result and source hash, the gates do not pass while no
-    authenticated upstream verifier authority is bound (#453), so nothing is public_claim_safe.
+    The verifier evidence in the proven case only moves the claim/delivery failure reason from
+    missing_verifier_artifact;missing_source_hash to unbound_verifier_proof. No gate passes while
+    no authenticated upstream verifier authority is bound (#453), so nothing is public_claim_safe.
     """
     plan = {
         "selected_capabilities": ["mempalace_gate", "artifact_gate", "claim_gate", "delivery_gate"],
@@ -623,7 +628,15 @@ def test_core_gate_receipts_require_specific_evidence_before_public_claim(tmp_pa
 
 
 def test_core_gate_failed_receipts_count_as_fail_closed_outcomes_not_public_safe():
-    """Contract: failed gates keep fail-closed evidence refs; outcome_contributed implies gate_passed."""
+    """Contract: failed gates are fail-closed, and a failed gate never counts as a contributed outcome.
+
+    The id predates #453, when a failed gate was itself counted as a fail-closed outcome
+    (outcome_contributed=True with gate_passed=False). Under #453, merge_capability_receipt enforces
+    outcome_contributed -> gate_passed -> evidence_present -> invoked, and the gate adapters need a
+    bound verifier authority to contribute. So a failed gate keeps its fail-closed evidence ref
+    (e.g. "claim:gate_failed") and stays invoked and evidenced, but outcome_contributed and
+    public_claim_safe are both False. The id is kept unchanged so that coverage stays traceable.
+    """
     plan = {
         "selected_capabilities": ["mempalace_gate", "artifact_gate", "claim_gate", "delivery_gate"],
     }

@@ -2,5 +2,5 @@
 
 from __future__ import annotations
 
-# Tombstone (#1924): every listed id was converted to a contract test of current behaviour: with a real verifier result, source hash and measured telemetry the receipt keeps its gate pass but stays fail-closed (#453 ADVISORY_ONLY_FAIL_CLOSED, #1757).
+# Tombstone (#1924): every listed id was converted to a contract test of current behaviour: evidenced, gate-passed receipts stay fail-closed (outcome_contributed and public_claim_safe False) under #453 ADVISORY_ONLY_FAIL_CLOSED; claim/delivery report the #1757 reasons.
 ENTRY = None

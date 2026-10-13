@@ -119,7 +119,7 @@ def test_capability_adapter_shadow_only_with_evidence() -> None:
         executor_controls={
             "enable_local_heal": True, 
             "local_heal_mode": "shadow_only",
-            "route_context": _bound_route_context("t2", enable_pipeline=True, model_call_allowed=True)
+            "route_context": _bound_route_context("t2", model_call_allowed=True)
         },
         dry_run=False,
     )
@@ -145,7 +145,7 @@ def test_capability_adapter_shadow_only_missing_evidence() -> None:
         executor_controls={
             "enable_local_heal": True, 
             "local_heal_mode": "shadow_only",
-            "route_context": _bound_route_context("t3", enable_pipeline=True, model_call_allowed=True)
+            "route_context": _bound_route_context("t3", model_call_allowed=True)
         },
         dry_run=False,
     )
@@ -340,7 +340,7 @@ def test_capability_adapter_dry_run_default() -> None:
         executor_controls={
             "enable_local_heal": True,
             "local_heal_mode": "candidate",
-            "route_context": _bound_route_context("t_dry", enable_pipeline=True)
+            "route_context": _bound_route_context("t_dry")
         },
     )
     response = LocalHealCapabilityAdapter.run(request)

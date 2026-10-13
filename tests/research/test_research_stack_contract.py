@@ -107,10 +107,14 @@ def test_hyper_runtime_usage_backfills_receipt_when_planner_omits_hyper(tmp_path
 
 
 def _real_verifier_evidence(tmp_path) -> dict:
-    """Evidence the current receipt contract asks for (#453, #1757).
+    """Verifier result, artifact hash, source hash and measured telemetry for a receipt payload.
 
-    Runs a real verifier over a real source file and returns its result, the sha256 of the
-    verifier artifact, the source hash and telemetry measured around the run.
+    Runs a small verifier over a source file and returns its result, the sha256 of the verifier
+    log, the source hash and the telemetry measured around the run. This evidence does not make a
+    receipt public_claim_safe, because #453 keeps outcome_contributed False whatever the payload
+    carries. It feeds only (a) the telemetry assertions (telemetry_source == "measured") and (b)
+    the #1757 claim/delivery binding reasons (unbound_verifier_proof instead of
+    missing_verifier_artifact;missing_source_hash). Tests that assert neither would pass with {}.
     """
     import hashlib
     import subprocess
