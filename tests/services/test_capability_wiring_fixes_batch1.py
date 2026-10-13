@@ -356,9 +356,7 @@ def test_executor_receipt_with_evidence_is_not_simulated(tmp_path: Path) -> None
     assert boundary["simulated"] is False
     assert boundary["receipt_present"] is True
     assert boundary["public_claim_allowed"] is False
-    # The runtime projection is authoritative; Nexus-new no longer re-projects it.
-    assert attested["receipt_base"]["receipt_hash"] == raw["receipt_base"]["receipt_hash"]
-    assert "receipt_base_attestation_error" not in attested
+    assert attested == raw  # runtime projection is authoritative (#187); no re-projection
 
 
 def test_auth_block_and_skip_stay_simulated(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -678,7 +676,9 @@ def test_executor_outcome_only_tightens_runtime_boundary(tmp_path: Path) -> None
         phases=["R"],
         constraints={"workspace_root": str(tmp_path), "memory_query": "refund"},
     )
-    receipt = get_executor("memory")(plan, "refund")
+    executor = get_executor("memory")
+    assert executor is not None
+    receipt = executor(plan, "refund")
     assert receipt.to_dict()["receipt_base"]["claim_boundary"]["simulated"] is False
     # an outcome revealing a non-execution flips simulated to true ...
     tightened = attested_receipt_dict(receipt, {"action": "skip", "skipped": True})

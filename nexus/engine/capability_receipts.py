@@ -192,9 +192,11 @@ def attested_receipt_dict(
     ``simulated=True, claim_eligible=False``; an executor outcome showing a non-execution the
     receipt alone could not see also tightens to ``simulated=True``.  Never loosens.
     """
-    base = receipt.to_dict()
-    old = base.get("receipt_base") if isinstance(base.get("receipt_base"), dict) else {}
-    runtime_cb = old.get("claim_boundary") if isinstance(old.get("claim_boundary"), dict) else {}
+    base: dict[str, Any] = dict(receipt.to_dict())
+    raw_rb = base.get("receipt_base")
+    old: dict[str, Any] = dict(raw_rb) if isinstance(raw_rb, dict) else {}
+    raw_cb = old.get("claim_boundary")
+    runtime_cb: dict[str, Any] = dict(raw_cb) if isinstance(raw_cb, dict) else {}
     runtime_simulated = runtime_cb.get("simulated")
     if runtime_simulated is True:
         return base  # already fail-closed; nothing local may override it
@@ -241,10 +243,14 @@ def attested_receipt_dict(
         )
     except Exception as exc:  # noqa: BLE001 - fail closed, record why
         base["receipt_base_attestation_error"] = str(exc)[:200]
-        if isinstance(base.get("receipt_base"), dict):
-            cb = dict(runtime_cb)
-            cb.update(simulated=True, claim_eligible=False, public_claim_allowed=False)
-            base["receipt_base"]["claim_boundary"] = cb
+        if isinstance(raw_rb, dict):
+            cb: dict[str, Any] = {
+                **runtime_cb,
+                "simulated": True,
+                "claim_eligible": False,
+                "public_claim_allowed": False,
+            }
+            base["receipt_base"] = {**old, "claim_boundary": cb}
     return base
 
 
