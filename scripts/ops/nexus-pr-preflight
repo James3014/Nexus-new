@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Pre-push PR ceremony check (#1916). See scripts/ops/pr_preflight.py --help.
+# Stdlib-only; any Python >= 3.11 works. Static gates use REPO/.venv tools.
+set -euo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+python_bin="${NEXUS_PR_PREFLIGHT_PYTHON:-python3}"
+exec "$python_bin" -I "$here/pr_preflight.py" "$@"
