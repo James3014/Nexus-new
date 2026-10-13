@@ -52,9 +52,23 @@ ARCHIVED_CAPABILITY_REASONS: dict[str, str] = {
     "llm_judge_panel": ARCHIVED_LLM_JUDGE_PANEL,
 }
 
+# Planner nodes kept for selection whose execution contract has no physical callable
+# (capability disposition 2026-10-13, KEEP/FIX item 9). Their receipt states explicitly
+# that nothing ran; no executor is invented for them.
+NOT_EXECUTABLE_PREFIX = "NOT_EXECUTABLE"
+NOT_EXECUTABLE_CONTROL_PLANE = f"{NOT_EXECUTABLE_PREFIX}:control_plane_reference"
+NOT_EXECUTABLE_NO_LIVE_CONNECTOR = f"{NOT_EXECUTABLE_PREFIX}:no_live_connector"
+NOT_EXECUTABLE_CAPABILITY_REASONS: dict[str, str] = {
+    "direct_mode": NOT_EXECUTABLE_CONTROL_PLANE,
+    "msa_router": NOT_EXECUTABLE_CONTROL_PLANE,
+    "research_control_plane": NOT_EXECUTABLE_CONTROL_PLANE,
+    "external_doc_scout": NOT_EXECUTABLE_NO_LIVE_CONNECTOR,
+}
+
 SKIP_REASONS = frozenset(
     {
         SKIP_NO_CANDIDATE_POOL,
+        *NOT_EXECUTABLE_CAPABILITY_REASONS.values(),
         SKIP_NOT_IMPLEMENTED,
         SKIP_ESCALATE_ONLY,
         SKIP_LOCAL_STAGE,
@@ -657,6 +671,15 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
             provider_authorization_required=True,
             consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
             reason_code="requires_model_execution_boundary",
+            required_context_fields=("task_id", "candidate_pool"),
+            required_outcome_fields=(
+                "action",
+                "semantic_status",
+                "evidence_refs",
+                "candidate_count",
+                "ranking",
+            ),
+            success_predicate="judge_ranked_real_candidates",
         ),
         "ui_validator": _ec(
             "ui_validator",
@@ -773,6 +796,14 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
             executor_key="ultra_review",
             physical_callable=f"{reg}:ultra_review",
             consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
+            required_outcome_fields=(
+                "action",
+                "semantic_status",
+                "evidence_refs",
+                "executed_checks",
+                "lanes",
+            ),
+            success_predicate="ultra_review_lanes_executed",
         ),
         "bdd_acceptance_skill": _ec(
             "bdd_acceptance_skill",
@@ -878,6 +909,15 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
             executor_key="architecture_scout",
             physical_callable=f"{reg}:architecture_scout",
             consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
+            required_context_fields=("task_id", "asi_failure_records"),
+            required_outcome_fields=(
+                "action",
+                "semantic_status",
+                "evidence_refs",
+                "plateau_detected",
+                "plan_status",
+            ),
+            success_predicate="architecture_plateau_detected_and_plan_ready",
         ),
         "asi_constraint_extractor": _ec(
             "asi_constraint_extractor",
@@ -1753,6 +1793,32 @@ def build_explicit_skip_invoker(
     return invoke
 
 
+def build_not_executable_invoker(capability_name: str, *, reason: str) -> CapabilityInvoker:
+    """Receipt for a selected planner node that has no physical callable.
+
+    Accounted for (explicit skip, never silent) but states ``NOT_EXECUTABLE`` so no
+    receipt can be read as the capability having run: invoked=false,
+    outcome_contributed=false, model_calls=0.
+    """
+    name = str(capability_name)
+    skip = build_explicit_skip_invoker(name, skip_reason=reason)
+
+    def invoke(context: Mapping[str, Any]) -> dict[str, Any]:
+        out = dict(skip(context))
+        out["execution_state"] = NOT_EXECUTABLE_PREFIX
+        out["not_executable"] = True
+        out["not_executable_reason"] = reason
+        out["physical_callable"] = None
+        out["delegated_to"] = "PlannerOnly"
+        response = dict(out.get("response") or {})
+        response["status"] = NOT_EXECUTABLE_PREFIX
+        response["not_executable_reason"] = reason
+        out["response"] = response
+        return out
+
+    return invoke
+
+
 def _resolve_executor_registry_key(capability_name: str) -> str:
     key = str(capability_name or "").strip()
     return EXECUTOR_REGISTRY_ALIASES.get(key, key)
@@ -1891,6 +1957,7 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
         {"workspace_root", "registry_peer_host", "registry_peer_port", "registry_query_tokens"}
     )
     _NIGHTSHIFT_CONSTRAINT_KEYS = frozenset({"workspace_root", "nightshift_target_file"})
+    _ULTRA_REVIEW_CONSTRAINT_KEYS = frozenset({"workspace_root"})
 
     def _allowlisted_constraints(context: Mapping[str, Any]) -> dict[str, Any]:
         keys: frozenset[str]
@@ -1904,8 +1971,12 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
             keys = _CODEINTEL_CONSTRAINT_KEYS
         elif name == "memory":
             keys = _MEMORY_CONSTRAINT_KEYS
-        elif name == "autoreason":
+        elif name in {"autoreason", "judge_panel"}:
             keys = _CANDIDATE_POOL_CONSTRAINT_KEYS
+        elif name == "ultra_review":
+            keys = _ULTRA_REVIEW_CONSTRAINT_KEYS
+        elif name == "architecture_scout":
+            keys = _ASI_CONSTRAINT_KEYS
         elif name == "ddtree":
             keys = _DDTREE_CONSTRAINT_KEYS
         elif name == "hyper":
@@ -2014,7 +2085,11 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
                 listed = planner_stage.get(key)
                 if key not in out and isinstance(listed, (list, tuple)):
                     out[key] = [str(item) for item in listed]
-        if name in {"autoreason", "ddtree", "hyper", "xray"}:
+        if name == "ultra_review":
+            route = context.get("route") if isinstance(context.get("route"), Mapping) else {}
+            if "workspace_root" not in out and route.get("workspace_root") not in (None, ""):
+                out["workspace_root"] = route.get("workspace_root")
+        if name in {"autoreason", "ddtree", "hyper", "xray", "judge_panel"}:
             raw_route = context.get("route")
             route = raw_route if isinstance(raw_route, Mapping) else {}
             raw_ci = context.get("codeintel")
@@ -2025,7 +2100,7 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
                     continue
                 if k not in out and codeintel.get(k) not in (None, ""):
                     out[k] = codeintel.get(k)
-            if name in {"autoreason", "ddtree"}:
+            if name in {"autoreason", "ddtree", "judge_panel"}:
                 specific = codeintel.get(f"{name}_candidates")
                 if "candidate_pool" not in out and specific not in (None, ""):
                     out["candidate_pool"] = specific
@@ -2097,6 +2172,7 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
         extra_context_keys = {
             "plan_quality_gate": _PLAN_QUALITY_CONSTRAINT_KEYS,
             "asi_constraint_extractor": _ASI_CONSTRAINT_KEYS,
+            "architecture_scout": _ASI_CONSTRAINT_KEYS,
             "committee": _COMMITTEE_CONSTRAINT_KEYS,
             "file_lock": _FILE_LOCK_CONSTRAINT_KEYS,
             "forecast_gate": _FORECAST_CONSTRAINT_KEYS,
@@ -2283,6 +2359,25 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
                 violations.append("integration_has_failed_tasks")
             if outcome.get("transactional_rollback_supported") is not True:
                 violations.append("integration_rollback_not_supported")
+        if predicate == "ultra_review_lanes_executed":
+            lanes = outcome.get("lanes") if isinstance(outcome.get("lanes"), Mapping) else {}
+            for lane in ("security_sentry", "logic_breaker"):
+                lane_row = lanes.get(lane) if isinstance(lanes.get(lane), Mapping) else {}
+                if not lane_row.get("executed_checks"):
+                    violations.append(f"ultra_review_{lane}_no_executed_checks")
+                if lane_row.get("unavailable_checks"):
+                    violations.append(f"ultra_review_{lane}_check_unavailable")
+        if predicate == "judge_ranked_real_candidates":
+            if int(outcome.get("candidate_count") or 0) < 2:
+                violations.append("judge_insufficient_candidates")
+            ranking = outcome.get("ranking") if isinstance(outcome.get("ranking"), (list, tuple)) else []
+            if len(ranking) != int(outcome.get("candidate_count") or 0):
+                violations.append("judge_ranking_not_a_permutation")
+        if predicate == "architecture_plateau_detected_and_plan_ready":
+            if outcome.get("plateau_detected") is not True:
+                violations.append("architecture_scout_plateau_not_detected")
+            if outcome.get("plan_status") != "READY":
+                violations.append("architecture_scout_plan_not_ready")
         if predicate == "registry_peer_contacted":
             if outcome.get("peer_contacted") is not True:
                 violations.append("registry_peer_not_contacted")
@@ -2680,6 +2775,12 @@ def build_default_mainchain_invokers(
             # Archived 2026-10-12 / 2026-10-13: always an explicit, receipt-visible skip.
             invokers[name] = build_explicit_skip_invoker(
                 name, skip_reason=ARCHIVED_CAPABILITY_REASONS[name]
+            )
+            continue
+        if name in NOT_EXECUTABLE_CAPABILITY_REASONS:
+            # Control-plane-only nodes: selectable, never reported as executed.
+            invokers[name] = build_not_executable_invoker(
+                name, reason=NOT_EXECUTABLE_CAPABILITY_REASONS[name]
             )
             continue
         real = build_real_executor_invoker(name)

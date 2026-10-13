@@ -40,6 +40,20 @@ BENCHMARK_ONLY_ENV_VARS = (
 )
 ULTRA_REUSE_WORKTREE_ENV = "NEXUS_ULTRA_REUSE_WORKTREE"
 ULTRA_SKIP_GHOST_ENV = "NEXUS_ULTRA_SKIP_GHOST_REGRESSION"
+TOOL_CHECK_TIMEOUT_SEC = 60
+# Static-analysis rules that are noise for a diff review (asserts, subprocess import,
+# argument-list subprocess calls, partial executable paths, non-crypto random).
+BANDIT_IGNORED_TESTS = frozenset({"B101", "B311", "B404", "B603", "B607"})
+RUFF_SECURITY_IGNORED_CODES = frozenset({"S101", "S311", "S404", "S603", "S607"})
+# pyflakes/pycodestyle subset that means the changed code cannot run as written:
+# syntax errors, invalid comparisons/statements, undefined names.
+RUFF_LOGIC_SELECT = "E9,F63,F7,F82"
+SECURITY_BLOCKING_SEVERITIES = frozenset({"medium", "high", "critical"})
+REVIEW_MODE = "review"
+# Set in the ghost-regression pytest environment: a review started from inside a review's
+# test run (a test that reviews "."), would review the sandbox again; refuse instead.
+ULTRA_REVIEW_NESTED_ENV = "NEXUS_ULTRA_REVIEW_IN_PROGRESS"
+DRY_RUN_MODE = "dry-run"
 
 
 class UltraReviewError(RuntimeError):
@@ -59,9 +73,52 @@ class UltraReviewService:
         report_path: Path | str = ".nexus/reports/ultra_review_report.json",
         sandbox_root: Path | str = ".nexus/reports/ultra_review/sandboxes",
     ) -> dict[str, Any]:
-        if not dry_run:
-            raise UltraReviewError("ultra-review currently supports --dry-run only")
+        mode = DRY_RUN_MODE if dry_run else REVIEW_MODE
+        try:
+            if os.getenv(ULTRA_REVIEW_NESTED_ENV, "").strip():
+                raise UltraReviewError("nested_ultra_review_refused")
+            return self._run(
+                dry_run=dry_run,
+                task=task,
+                base_ref=base_ref,
+                report_path=report_path,
+                sandbox_root=sandbox_root,
+            )
+        except (UltraReviewError, OSError, subprocess.SubprocessError) as exc:
+            # Fail closed with a reason instead of an unhandled traceback.
+            out_path = self._resolve(report_path)
+            payload = {
+                "schema_version": SCHEMA_VERSION,
+                "run_id": "",
+                "status": "BLOCKED",
+                "blocked_reason": f"{type(exc).__name__}: {exc}"[:500],
+                "gate_passed": False,
+                "mode": mode,
+                "task": task,
+                "base_ref": base_ref,
+                "project_root": str(self.project_root),
+                "fleet": [],
+                "findings": [],
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "report_path": str(out_path),
+            }
+            try:
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+            except OSError:
+                payload["report_path"] = ""
+            return payload
 
+    def _run(
+        self,
+        *,
+        dry_run: bool,
+        task: str,
+        base_ref: str,
+        report_path: Path | str,
+        sandbox_root: Path | str,
+    ) -> dict[str, Any]:
+        mode = DRY_RUN_MODE if dry_run else REVIEW_MODE
         run_id = self._run_id()
         sandbox_path = self._prepare_sandbox(Path(sandbox_root), run_id)
         progress_path = sandbox_path / "progress.jsonl"
@@ -107,19 +164,48 @@ class UltraReviewService:
         ghost_regression = self._run_ghost_regression(test_candidates, execution_root=execution_root)
         self._record_progress(progress, progress_path, "ghost_regression_complete", passed=ghost_regression["passed"])
         findings = [*security_sentry["findings"], *logic_breaker["findings"], *ghost_regression["findings"]]
-        gate_passed = bool(security_sentry["passed"] and logic_breaker["passed"] and ghost_regression["passed"])
+        sub_checks_passed = bool(security_sentry["passed"] and logic_breaker["passed"] and ghost_regression["passed"])
         fleet = self._build_dry_run_fleet(test_candidates, security_sentry, logic_breaker, ghost_regression)
         out_path = self._resolve(report_path)
         self._record_progress(progress, progress_path, "report_written", report_path=str(out_path))
-        # Dry-run executes no real review: a clean dry-run is NOT_VERIFIED, never a pass.
-        sub_checks_passed = gate_passed
-        gate_passed = False
+        lanes_blocked = [
+            lane_name
+            for lane_name, lane in (
+                ("security_sentry", security_sentry),
+                ("logic_breaker", logic_breaker),
+            )
+            if lane.get("unavailable_checks")
+        ]
+        mirror_ok = bool(mirror_metadata.get("diff_applied", False))
+        blocked_reason = ""
+        if not changed_files:
+            blocked_reason = "no_diff_to_review"
+        elif not mirror_ok:
+            blocked_reason = "sandbox_mirror_diff_not_applied"
+        elif lanes_blocked:
+            blocked_reason = "check_tool_unavailable:" + ",".join(lanes_blocked)
+        if dry_run:
+            # Dry-run is advisory: checks execute but a clean dry-run is NOT_VERIFIED, never a pass.
+            gate_passed = False
+            status = "DRY_RUN_NOT_VERIFIED" if sub_checks_passed else "DRY_RUN_FAIL"
+        else:
+            # Review mode: the gate is the conjunction of executed lane results; fail closed when
+            # there is nothing to review or a required check could not run.
+            if blocked_reason:
+                gate_passed = False
+                status = "BLOCKED"
+            else:
+                gate_passed = sub_checks_passed
+                status = "PASS" if sub_checks_passed else "FAIL"
+        worktree_cleanup = self._cleanup_execution_worktree(execution_root, mirror_metadata) if not dry_run else {}
         payload = {
             "schema_version": SCHEMA_VERSION,
             "run_id": run_id,
-            "status": "DRY_RUN_NOT_VERIFIED" if sub_checks_passed else "DRY_RUN_FAIL",
+            "status": status,
+            "blocked_reason": blocked_reason if not dry_run else "",
             "gate_passed": gate_passed,
-            "mode": "dry-run",
+            "mode": mode,
+            "worktree_cleanup": worktree_cleanup,
             "task": task,
             "base_ref": base_ref,
             "project_root": str(self.project_root),
@@ -372,6 +458,197 @@ class UltraReviewService:
         )
         return {"strategy": "copytree", "diff_applied": True}
 
+    def _cleanup_execution_worktree(self, execution_root: Path, mirror_metadata: dict[str, Any]) -> dict[str, Any]:
+        """Remove the per-run git worktree registration (review artifacts stay in the sandbox)."""
+        strategy = str(mirror_metadata.get("strategy") or "")
+        if strategy == "git_worktree":
+            removed = subprocess.run(
+                ["git", "worktree", "remove", "--force", str(execution_root)],
+                cwd=self.project_root,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            return {
+                "strategy": strategy,
+                "removed": removed.returncode == 0,
+                "detail": (removed.stderr or removed.stdout or "")[-300:],
+            }
+        if strategy == "copytree" and execution_root.exists():
+            shutil.rmtree(execution_root, ignore_errors=False)
+            return {"strategy": strategy, "removed": True, "detail": ""}
+        return {"strategy": strategy, "removed": False, "detail": "kept_for_reuse_or_missing"}
+
+    def _added_lines(self, diff_text: str) -> dict[str, set[int]]:
+        """New-side line numbers added by the diff, per changed file."""
+        added: dict[str, set[int]] = {}
+        current_file = ""
+        new_line = 0
+        for raw_line in diff_text.splitlines():
+            if raw_line.startswith("diff --git "):
+                current_file = self._path_from_diff_header(raw_line)
+                new_line = 0
+                continue
+            if raw_line.startswith("@@"):
+                parsed = re.search(r"\+(\d+)", raw_line)
+                new_line = int(parsed.group(1)) - 1 if parsed else 0
+                continue
+            if raw_line.startswith("+++") or raw_line.startswith("---"):
+                continue
+            if raw_line.startswith("+"):
+                new_line += 1
+                if current_file:
+                    added.setdefault(current_file, set()).add(new_line)
+                continue
+            if raw_line.startswith("-") or raw_line.startswith("\\"):
+                continue
+            if current_file:
+                new_line += 1
+        return added
+
+    def _changed_python_files(self, diff_text: str, execution_root: Path) -> list[str]:
+        return [
+            rel
+            for rel in self._changed_files(diff_text)
+            if rel.endswith(".py") and (execution_root / rel).is_file()
+        ]
+
+    def _run_tool(self, cmd: list[str], *, cwd: Path) -> dict[str, Any]:
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=TOOL_CHECK_TIMEOUT_SEC,
+            )
+        except FileNotFoundError as exc:
+            return {"available": False, "error": str(exc)[:300], "command": " ".join(cmd)}
+        except subprocess.TimeoutExpired:
+            return {"available": True, "timeout": True, "returncode": None, "stdout": "", "stderr": "", "command": " ".join(cmd)}
+        stderr = result.stderr or ""
+        if result.returncode != 0 and "No module named" in stderr:
+            return {"available": False, "error": stderr.strip()[-300:], "command": " ".join(cmd)}
+        return {
+            "available": True,
+            "timeout": False,
+            "returncode": result.returncode,
+            "stdout": result.stdout or "",
+            "stderr": stderr,
+            "command": " ".join(cmd),
+        }
+
+    def _relative_to_root(self, filename: str, execution_root: Path) -> str:
+        path = Path(filename)
+        if path.is_absolute():
+            try:
+                return path.resolve().relative_to(execution_root.resolve()).as_posix()
+            except ValueError:
+                return path.as_posix()
+        text = path.as_posix()
+        while text.startswith("./"):
+            text = text[2:]
+        return text
+
+    def _bandit_findings(
+        self, py_files: list[str], *, execution_root: Path, added: dict[str, set[int]]
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        cmd = [sys.executable, "-m", "bandit", "-f", "json", "-q", *py_files]
+        run = self._run_tool(cmd, cwd=execution_root)
+        if not run.get("available") or run.get("timeout"):
+            return run, []
+        try:
+            data = json.loads(run.get("stdout") or "{}")
+        except json.JSONDecodeError:
+            run["available"] = False
+            run["error"] = "bandit_output_not_json"
+            return run, []
+        findings: list[dict[str, Any]] = []
+        for item in data.get("results") or []:
+            test_id = str(item.get("test_id") or "")
+            if test_id in BANDIT_IGNORED_TESTS:
+                continue
+            rel = self._relative_to_root(str(item.get("filename") or ""), execution_root)
+            line = int(item.get("line_number") or 0)
+            if line not in added.get(rel, set()):
+                continue
+            findings.append(
+                {
+                    "lane": "security_sentry",
+                    "rule_id": f"bandit:{test_id}",
+                    "tool": "bandit",
+                    "state": "VERIFIED_FINDING",
+                    "severity": str(item.get("issue_severity") or "").lower() or "low",
+                    "confidence": str(item.get("issue_confidence") or "").lower(),
+                    "file": rel,
+                    "line": line,
+                    "repro_command": run["command"],
+                    "execution_cwd": str(execution_root),
+                    "summary": str(item.get("issue_text") or "")[:300],
+                }
+            )
+        run["errors"] = list(data.get("errors") or [])[:5]
+        return run, findings
+
+    def _ruff_findings(
+        self,
+        py_files: list[str],
+        *,
+        execution_root: Path,
+        added: dict[str, set[int]],
+        select: str,
+        lane: str,
+        ignored: frozenset[str] = frozenset(),
+        added_only: bool = True,
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        cmd = [
+            sys.executable,
+            "-m",
+            "ruff",
+            "check",
+            "--no-cache",
+            "--isolated",
+            "--select",
+            select,
+            "--output-format",
+            "json",
+            *py_files,
+        ]
+        run = self._run_tool(cmd, cwd=execution_root)
+        if not run.get("available") or run.get("timeout"):
+            return run, []
+        try:
+            data = json.loads(run.get("stdout") or "[]")
+        except json.JSONDecodeError:
+            run["available"] = False
+            run["error"] = "ruff_output_not_json"
+            return run, []
+        findings: list[dict[str, Any]] = []
+        for item in data if isinstance(data, list) else []:
+            code = str(item.get("code") or "")
+            if not code or code in ignored:
+                continue
+            rel = self._relative_to_root(str(item.get("filename") or ""), execution_root)
+            line = int(((item.get("location") or {}).get("row")) or 0)
+            if added_only and line not in added.get(rel, set()):
+                continue
+            findings.append(
+                {
+                    "lane": lane,
+                    "rule_id": f"ruff:{code}",
+                    "tool": "ruff",
+                    "state": "VERIFIED_FINDING",
+                    "severity": "medium" if lane == "security_sentry" else "high",
+                    "file": rel,
+                    "line": line,
+                    "repro_command": run["command"],
+                    "execution_cwd": str(execution_root),
+                    "summary": str(item.get("message") or "")[:300],
+                }
+            )
+        return run, findings
+
     def _capture_diff(self, base_ref: str) -> str:
         return self._filter_diff(self._git(["diff", "--binary", base_ref]))
 
@@ -450,6 +727,18 @@ class UltraReviewService:
             script_area = path.parts[1] if len(path.parts) > 1 else ""
             test_dir = "tests/ops" if script_area == "ops" else "tests/engine"
             candidates.append(f"{test_dir}/test_{path.stem}.py")
+        if path.parts[0] not in {"nexus", "scripts"} and path.suffix == ".py":
+            if path.name.startswith("test_"):
+                # A changed test file is its own regression candidate.
+                candidates.append(path.as_posix())
+            else:
+                parent = path.parent.as_posix()
+                candidates.extend(
+                    [
+                        f"tests/test_{path.stem}.py",
+                        f"{parent}/test_{path.stem}.py" if parent not in ("", ".") else f"test_{path.stem}.py",
+                    ]
+                )
 
         seen: set[str] = set()
         deduped: list[str] = []
@@ -554,18 +843,22 @@ class UltraReviewService:
             {
                 "lane": "security_sentry",
                 "status": "PASS" if security_sentry.get("passed", True) else "FAIL",
-                "planned_checks": ["secret-pattern-scan", "dangerous-subprocess-scan"],
+                "planned_checks": ["diff-pattern-scan", "bandit", "ruff-security"],
                 "executed_checks": security_sentry.get("executed_checks", []),
+                "unavailable_checks": security_sentry.get("unavailable_checks", []),
                 "unverified_observations": security_sentry.get("unverified_observations", 0),
                 "verified_findings": security_sentry.get("verified_findings", 0),
             },
             {
                 "lane": "logic_breaker",
                 "status": logic_status,
-                "planned_checks": ["edge-case-review-card-generation"],
-                "executed_checks": ["ultra_logic_repro.py"],
+                "planned_checks": ["ultra_logic_repro.py", "py_compile", "ruff-correctness"],
+                "executed_checks": logic_breaker.get("executed_checks", ["ultra_logic_repro.py"]),
+                "unavailable_checks": logic_breaker.get("unavailable_checks", []),
                 "repro_script": logic_breaker.get("repro_script", ""),
-                "verified_findings": 0 if logic_breaker.get("passed", True) else 1,
+                "verified_findings": len(logic_breaker.get("findings", []) or [])
+                if logic_breaker.get("findings") is not None
+                else (0 if logic_breaker.get("passed", True) else 1),
             },
             {
                 "lane": "ghost_regression",
@@ -582,7 +875,9 @@ class UltraReviewService:
     def _run_security_sentry(self, *, diff_text: str, execution_root: Path, sandbox_path: Path) -> dict[str, Any]:
         observations = self._scan_security_observations(diff_text)
         findings: list[dict[str, Any]] = []
-        executed_checks: list[str] = []
+        executed_checks: list[str] = ["diff-pattern-scan"]
+        unavailable_checks: list[dict[str, Any]] = []
+        tool_runs: dict[str, Any] = {}
         verified_count = 0
         unverified_count = 0
 
@@ -596,8 +891,12 @@ class UltraReviewService:
                         "from pathlib import Path",
                         "",
                         f"expected = {expected!r}",
-                        "diff_text = Path('changes.diff').read_text(encoding='utf-8')",
-                        "if expected not in diff_text:",
+                        f"target = Path({str(observation.get('file', ''))!r})",
+                        "# The smell must be present in the sandbox tree the diff was applied to,",
+                        "# not merely in the diff text.",
+                        "if not target.is_file():",
+                        "    raise SystemExit('changed file missing from sandbox mirror')",
+                        "if expected not in target.read_text(encoding='utf-8', errors='replace'):",
                         "    raise SystemExit('security observation not reproduced')",
                         "print('security_repro_ok')",
                         "",
@@ -647,9 +946,60 @@ class UltraReviewService:
                 unverified_count += 1
             findings.append(finding)
 
+        py_files = self._changed_python_files(diff_text, execution_root)
+        added = self._added_lines(diff_text)
+        tool_findings: list[dict[str, Any]] = []
+        if py_files:
+            for check_name, runner in (
+                ("bandit", lambda: self._bandit_findings(py_files, execution_root=execution_root, added=added)),
+                (
+                    "ruff-security",
+                    lambda: self._ruff_findings(
+                        py_files,
+                        execution_root=execution_root,
+                        added=added,
+                        select="S",
+                        lane="security_sentry",
+                        ignored=RUFF_SECURITY_IGNORED_CODES,
+                    ),
+                ),
+            ):
+                run, found = runner()
+                tool_runs[check_name] = {
+                    key: run.get(key)
+                    for key in ("available", "timeout", "returncode", "command", "error", "errors")
+                    if key in run
+                }
+                if not run.get("available") or run.get("timeout"):
+                    unavailable_checks.append({"check": check_name, **tool_runs[check_name]})
+                    continue
+                executed_checks.append(check_name)
+                tool_findings.extend(found)
+        # ruff's S-rules mirror bandit's B-rules: keep one finding per file/line/rule number.
+        seen_keys: dict[tuple[str, int, str], dict[str, Any]] = {}
+        for finding in tool_findings:
+            number = re.sub(r"\D", "", str(finding["rule_id"]).split(":", 1)[-1])
+            key = (str(finding["file"]), int(finding["line"]), number)
+            if key in seen_keys:
+                seen_keys[key].setdefault("corroborated_by", []).append(finding["rule_id"])
+                continue
+            seen_keys[key] = finding
+            finding["id"] = f"security-{len(findings) + 1}"
+            findings.append(finding)
+        blocking = [
+            finding
+            for finding in findings
+            if finding.get("state") == "VERIFIED_FINDING"
+            and str(finding.get("severity") or "").lower() in SECURITY_BLOCKING_SEVERITIES
+        ]
+        verified_count = sum(1 for finding in findings if finding.get("state") == "VERIFIED_FINDING")
         return {
-            "passed": verified_count == 0,
+            "passed": not blocking and not unavailable_checks,
             "executed_checks": executed_checks,
+            "unavailable_checks": unavailable_checks,
+            "tool_runs": tool_runs,
+            "scanned_python_files": py_files,
+            "blocking_findings": len(blocking),
             "verified_findings": verified_count,
             "unverified_observations": unverified_count,
             "timeout_sec": SECURITY_REPRO_TIMEOUT_SEC,
@@ -722,6 +1072,8 @@ class UltraReviewService:
             summary = "Logic Breaker deterministic repro timed out in ultra-review dry-run."
 
         findings = []
+        executed_checks = ["ultra_logic_repro.py"]
+        unavailable_checks: list[dict[str, Any]] = []
         if not passed:
             findings.append(
                 {
@@ -740,8 +1092,52 @@ class UltraReviewService:
                 }
             )
 
+        diff_text = diff_path.read_text(encoding="utf-8") if diff_path.exists() else ""
+        py_files = self._changed_python_files(diff_text, execution_root)
+        if py_files:
+            compile_cmd = [sys.executable, "-m", "py_compile", *py_files]
+            compiled = self._run_tool(compile_cmd, cwd=execution_root)
+            executed_checks.append("py_compile")
+            if compiled.get("timeout") or compiled.get("returncode") not in (0, None):
+                findings.append(
+                    {
+                        "id": f"logic-breaker-{len(findings) + 1}",
+                        "lane": "logic_breaker",
+                        "rule_id": "py_compile_failed",
+                        "tool": "py_compile",
+                        "state": "VERIFIED_FINDING",
+                        "severity": "high",
+                        "file": "",
+                        "line": 0,
+                        "repro_command": compiled.get("command", ""),
+                        "summary": "Changed Python file does not compile.",
+                        "execution_cwd": str(execution_root),
+                        "stderr_tail": str(compiled.get("stderr") or "")[-2000:],
+                    }
+                )
+            run, found = self._ruff_findings(
+                py_files,
+                execution_root=execution_root,
+                added=self._added_lines(diff_text),
+                select=RUFF_LOGIC_SELECT,
+                lane="logic_breaker",
+            )
+            if not run.get("available") or run.get("timeout"):
+                unavailable_checks.append(
+                    {"check": "ruff-correctness", "command": run.get("command"), "error": run.get("error", "timeout")}
+                )
+            else:
+                executed_checks.append("ruff-correctness")
+                for finding in found:
+                    finding["id"] = f"logic-breaker-{len(findings) + 1}"
+                    findings.append(finding)
+        passed = bool(passed and not findings and not unavailable_checks)
+
         return {
             "passed": passed,
+            "executed_checks": executed_checks,
+            "unavailable_checks": unavailable_checks,
+            "scanned_python_files": py_files,
             "repro_script": str(repro_script),
             "repro_command": " ".join(cmd),
             "execution_mode": "sandbox_mirror",
@@ -785,8 +1181,21 @@ class UltraReviewService:
                 "pytest_stderr_tail": "",
             }
 
-        cmd = [sys.executable, "-m", "pytest", "-q", *test_candidates]
+        # rootdir pins conftest discovery to the sandbox mirror (the sandbox may sit inside the
+        # reviewed repo); no cache dir is written into the mirror.
+        cmd = [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            "--rootdir",
+            str(execution_root),
+            *test_candidates,
+        ]
         env = os.environ.copy()
+        env[ULTRA_REVIEW_NESTED_ENV] = "1"
         sanitized_env = []
         for key in BENCHMARK_ONLY_ENV_VARS:
             if key in env:

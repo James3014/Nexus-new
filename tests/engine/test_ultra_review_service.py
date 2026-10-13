@@ -73,7 +73,9 @@ def test_ultra_review_dry_run_writes_report_and_sandbox(tmp_path, monkeypatch):
     assert (tmp_path / "reports" / "sandboxes" / payload["run_id"] / "ultra_logic_repro.py").exists()
     logic_lane = next(item for item in payload["fleet"] if item["lane"] == "logic_breaker")
     assert logic_lane["status"] == "PASS"
-    assert logic_lane["executed_checks"] == ["ultra_logic_repro.py"]
+    assert logic_lane["executed_checks"] == ["ultra_logic_repro.py", "py_compile", "ruff-correctness"]
+    security_lane = next(item for item in payload["fleet"] if item["lane"] == "security_sentry")
+    assert security_lane["executed_checks"] == ["diff-pattern-scan", "bandit", "ruff-security"]
     assert payload["regression_candidate_map"] == [
         {
             "changed_file": "nexus/engine/sample.py",
@@ -435,3 +437,138 @@ def test_ultra_review_cli_outputs_json(monkeypatch, tmp_path):
     payload = json.loads(result.output)
     assert payload["task"] == "review cli route"
     assert payload["gate_passed"] is False  # dry-run never verifies
+
+
+def _init_app_repo(path):
+    subprocess.run(["git", "init"], cwd=path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=path, check=True)
+    (path / "app.py").write_text("def handler(value):\n    return value.strip()\n", encoding="utf-8")
+    (path / "tests").mkdir()
+    (path / "tests" / "test_app.py").write_text(
+        "from app import handler\n\n\ndef test_handler_strips():\n    assert handler('  a ') == 'a'\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "."], cwd=path, check=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=path, check=True, capture_output=True)
+
+
+def test_ultra_review_review_mode_flags_eval_and_failing_test(tmp_path):
+    _init_app_repo(tmp_path)
+    (tmp_path / "app.py").write_text(
+        "def handler(value):\n    return value\n\n\ndef unsafe():\n    return eval(input())\n",
+        encoding="utf-8",
+    )
+
+    payload = UltraReviewService(tmp_path).run(
+        dry_run=False, report_path="reports/ultra.json", sandbox_root="reports/sandboxes"
+    )
+
+    assert payload["mode"] == "review"
+    assert payload["status"] == "FAIL"
+    assert payload["gate_passed"] is False
+    rules = {(f["lane"], f["rule_id"]) for f in payload["findings"]}
+    assert ("security_sentry", "bandit:B307") in rules
+    assert ("ghost_regression", "regression_test_failed") in rules
+    security = payload["security_sentry"]
+    assert security["passed"] is False
+    assert security["executed_checks"] == ["diff-pattern-scan", "bandit", "ruff-security"]
+    eval_finding = next(f for f in payload["findings"] if f["rule_id"] == "bandit:B307")
+    assert eval_finding["file"] == "app.py" and eval_finding["line"] == 6
+    assert "ruff:S307" in eval_finding.get("corroborated_by", [])
+    assert payload["ghost_regression"]["executed_tests"] == ["tests/test_app.py"]
+    # the per-run git worktree registration is removed in review mode
+    assert payload["worktree_cleanup"]["removed"] is True
+    listed = subprocess.run(["git", "worktree", "list"], cwd=tmp_path, capture_output=True, text=True).stdout
+    assert len(listed.strip().splitlines()) == 1
+
+
+def test_ultra_review_review_mode_passes_clean_change(tmp_path):
+    _init_app_repo(tmp_path)
+    (tmp_path / "app.py").write_text(
+        "def handler(value):\n    return value.strip()\n\n\ndef shout(value):\n    return handler(value).upper()\n",
+        encoding="utf-8",
+    )
+
+    payload = UltraReviewService(tmp_path).run(
+        dry_run=False, report_path="reports/ultra.json", sandbox_root="reports/sandboxes"
+    )
+
+    assert payload["status"] == "PASS"
+    assert payload["gate_passed"] is True
+    assert payload["findings"] == []
+    lanes = {item["lane"]: item for item in payload["fleet"]}
+    assert lanes["security_sentry"]["executed_checks"] == ["diff-pattern-scan", "bandit", "ruff-security"]
+    assert lanes["ghost_regression"]["executed_checks"] == ["tests/test_app.py"]
+
+
+def test_ultra_review_review_mode_logic_breaker_flags_undefined_name(tmp_path):
+    _init_app_repo(tmp_path)
+    (tmp_path / "app.py").write_text(
+        "def handler(value):\n    return value.strip()\n\n\ndef broken():\n    return missing_name\n",
+        encoding="utf-8",
+    )
+
+    payload = UltraReviewService(tmp_path).run(
+        dry_run=False, report_path="reports/ultra.json", sandbox_root="reports/sandboxes"
+    )
+
+    assert payload["gate_passed"] is False
+    assert payload["logic_breaker"]["passed"] is False
+    assert any(f["rule_id"] == "ruff:F821" for f in payload["findings"])
+
+
+def test_ultra_review_review_mode_empty_diff_fails_closed(tmp_path):
+    _init_app_repo(tmp_path)
+
+    payload = UltraReviewService(tmp_path).run(
+        dry_run=False, report_path="reports/ultra.json", sandbox_root="reports/sandboxes"
+    )
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["blocked_reason"] == "no_diff_to_review"
+    assert payload["gate_passed"] is False
+
+
+def test_ultra_review_review_mode_missing_tool_fails_closed(tmp_path, monkeypatch):
+    _init_app_repo(tmp_path)
+    (tmp_path / "app.py").write_text("def handler(value):\n    return value.strip()  # ok\n", encoding="utf-8")
+    original_run = subprocess.run
+
+    def fake_run(cmd, **kwargs):
+        if len(cmd) > 2 and cmd[1:3] == ["-m", "bandit"]:
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="No module named bandit")
+        return original_run(cmd, **kwargs)
+
+    monkeypatch.setattr("nexus.engine.ultra_review_service.subprocess.run", fake_run)
+    payload = UltraReviewService(tmp_path).run(
+        dry_run=False, report_path="reports/ultra.json", sandbox_root="reports/sandboxes"
+    )
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["blocked_reason"] == "check_tool_unavailable:security_sentry"
+    assert "bandit" not in payload["security_sentry"]["executed_checks"]
+    assert payload["gate_passed"] is False
+
+
+def test_ultra_review_outside_git_repo_fails_closed_without_raising(tmp_path):
+    payload = UltraReviewService(tmp_path).run(
+        dry_run=False, report_path="reports/ultra.json", sandbox_root="reports/sandboxes"
+    )
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["gate_passed"] is False
+    assert "UltraReviewError" in payload["blocked_reason"]
+
+
+def test_ultra_review_refuses_nested_review_from_its_own_test_run(tmp_path, monkeypatch):
+    _init_app_repo(tmp_path)
+    (tmp_path / "app.py").write_text("def handler(value):\n    return value.strip()  # x\n", encoding="utf-8")
+    monkeypatch.setenv("NEXUS_ULTRA_REVIEW_IN_PROGRESS", "1")
+
+    payload = UltraReviewService(tmp_path).run(
+        dry_run=False, report_path="reports/ultra.json", sandbox_root="reports/sandboxes"
+    )
+
+    assert payload["status"] == "BLOCKED"
+    assert "nested_ultra_review_refused" in payload["blocked_reason"]

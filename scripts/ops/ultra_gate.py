@@ -55,8 +55,10 @@ def evaluate_report(
     if str(payload.get("status", "")) in {"DRY_RUN_PASS", "DRY_RUN_NOT_VERIFIED"}:
         # Dry-run checks nothing (legacy DRY_RUN_PASS is a fake pass): never verified.
         failures.append("dry_run_not_verified")
-    if payload.get("mode") != "dry-run":
+    if payload.get("mode") not in {"dry-run", "review"}:
         failures.append("unsupported_mode")
+    if payload.get("mode") == "review" and str(payload.get("status", "")) != "PASS":
+        failures.append(f"review_status:{payload.get('status', '')}")
     if not payload.get("sandbox_path"):
         failures.append("missing_sandbox_path")
 
