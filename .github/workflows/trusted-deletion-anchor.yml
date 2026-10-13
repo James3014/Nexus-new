@@ -6,6 +6,12 @@ on:
 
 permissions: {}
 
+# Superseded runs of the same PR are cancelled. 'edited' stays: the merge-lane
+# binding lives in the PR body. Non-PR events fall back to a per-run group.
+concurrency:
+  group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   trusted-controller:
     name: Trusted controller (default branch)

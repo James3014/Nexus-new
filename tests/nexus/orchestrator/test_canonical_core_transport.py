@@ -269,7 +269,7 @@ def test_transport_import_uses_configured_core_root_when_set(tmp_path: Path):
 
 
 # --- NN-1 phase 2: installed-package identity from PEP 610 direct_url.json ---
-EXPECTED_CORE_REVISION = "9942db770e96ab88e3e1700aaec2e911bcec241b"
+EXPECTED_CORE_REVISION = "73d9278b6b25eea55a8224b8819386739298f821"
 
 
 def _install_fake_certify(
