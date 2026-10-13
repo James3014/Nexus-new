@@ -63,6 +63,7 @@ description = "Nexus Singularity OS: Hardened Governance & Swarm Engine"
 authors = ["Nexus Engineers <eng@nexus-singularity.os>"]
 packages = [
     {include = "nexus"},
+    {include = "product"},
     {include = "scripts"},
 ]
 

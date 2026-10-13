@@ -420,10 +420,12 @@ class SkillsRouter:
                     })
 
         # Fallback to legacy triggers if no candidate found
+        fallback_used = False
         if not candidates:
             candidates = self._inventory_candidates(phase, context)
             for c in candidates:
                 c["decision_id"] = decision_id
+            fallback_used = bool(candidates)
 
         # 記錄 decision log
         run_dir = __import__("pathlib").Path(self.run_dir)
@@ -434,7 +436,7 @@ class SkillsRouter:
             "phase": phase,
             "task_id": context.get("task_id", ""),
             "candidate_count": len(candidates),
-            "fallback_used": len(candidates) == 0,
+            "fallback_used": fallback_used,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         with open(log_path, "a", encoding="utf-8") as handle:
