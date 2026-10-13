@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from nexus.core.belief_contracts import CapabilityExecutionPlan, CapabilityReceipt
-from nexus.core.layer_ports import resolve_port
+from nexus.core.layer_ports import registered_ports, resolve_port
 
 logger = logging.getLogger(__name__)
 
@@ -590,7 +590,7 @@ def _exec_autonomic_router(plan: CapabilityExecutionPlan, task_desc: str) -> Cap
             outcome=_structured_outcome(
                 action="route_suggest",
                 semantic_status="FAILED",
-                error="AutonomicRouter not importable",
+                error=_port_error("autonomic_router.AutonomicRouter"),
                 control_plane=True,
             ),
         )
@@ -769,7 +769,7 @@ def _exec_research(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityR
             outcome=_structured_outcome(
                 action="run",
                 semantic_status="FAILED",
-                error="ResearchPhaseHandler not importable",
+                error=_port_error("research.ResearchPhaseHandler"),
             ),
         )
     try:
@@ -882,7 +882,7 @@ def _exec_learn_scheduler_service(plan: CapabilityExecutionPlan, task_desc: str)
     cls = _try_port("learn_scheduler.LearnSchedulerService")
     if cls is None:
         return _make_receipt("learn_scheduler_service", plan, invoked=False, gate_passed=False,
-                             outcome={"error": "LearnSchedulerService not importable"})
+                             outcome={"error": _port_error("learn_scheduler.LearnSchedulerService")})
     try:
         from pathlib import Path
         constraints = dict(plan.constraints or {})
@@ -1053,7 +1053,7 @@ def _exec_autoreason(plan: CapabilityExecutionPlan, task_desc: str) -> Capabilit
             outcome=_structured_outcome(
                 action="run",
                 semantic_status="FAILED",
-                error="AutoreasonService not importable",
+                error=_port_error("autoreason.AutoreasonService"),
             ),
         )
     try:
@@ -1237,7 +1237,7 @@ def _exec_swarm_multi_agent(plan: CapabilityExecutionPlan, task_desc: str) -> Ca
     cls = _try_port("battle_swarm.BattleSwarm")
     if cls is None:
         return _make_receipt("swarm_multi_agent", plan, invoked=False, gate_passed=False,
-                             outcome={"error": "BattleSwarm not importable"})
+                             outcome={"error": _port_error("battle_swarm.BattleSwarm")})
     try:
         inst = cls(project_root=".")
         # Prefer non-spawn physical call when available.
@@ -1334,7 +1334,7 @@ def _exec_sandbox_runner(plan: CapabilityExecutionPlan, task_desc: str) -> Capab
     cls = _try_port("sandbox_runner.SandboxRunner")
     if cls is None:
         return _make_receipt("sandbox_runner", plan, invoked=False, gate_passed=False,
-                             outcome={"error": "SandboxRunner not importable"})
+                             outcome={"error": _port_error("sandbox_runner.SandboxRunner")})
     try:
         from pathlib import Path
         constraints = dict(plan.constraints or {})
@@ -1615,7 +1615,7 @@ def _exec_ultra_review(plan: CapabilityExecutionPlan, task_desc: str) -> Capabil
             outcome=_structured_outcome(
                 action="capture_diff",
                 semantic_status="FAILED",
-                error="UltraReviewService not importable",
+                error=_port_error("ultra_review.UltraReviewService"),
             ),
         )
     try:
@@ -2233,7 +2233,7 @@ def _exec_ddtree(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRec
             outcome=_structured_outcome(
                 action="plan",
                 semantic_status="FAILED",
-                error="DDTreeAdapter not importable",
+                error=_port_error("ddtree.DDTreeAdapter"),
             ),
         )
     try:
@@ -3643,6 +3643,12 @@ def _try_port(port: str) -> Any:
     except Exception as exc:
         logger.debug("executor_registry: cannot resolve port %s: %s", port, exc)
         return None
+
+
+def _port_error(port: str) -> str:
+    """Receipt error for a ``_try_port`` miss: PORT_UNBOUND or PORT_LOAD_FAILED, with the port name."""
+    reason = "PORT_LOAD_FAILED" if port in registered_ports() else "PORT_UNBOUND"
+    return f"{reason}:{port}"
 
 
 def get_executor(cap_name: str) -> CapabilityExecutor | None:

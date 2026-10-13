@@ -43,6 +43,10 @@ CORE_ENGINE_PORTS: dict[str, tuple[str, str]] = {
         "nexus.engine.self_healing_selector",
         "get_self_healing_selector",
     ),
+    # nexus.core.commander
+    "audit.AuditPhaseHandler": ("nexus.engine.phases.audit", "AuditPhaseHandler"),
+    # nexus.core.learning_steward (resolved at import time)
+    "openseeker.MIN_EVOLUTION_STEPS": ("nexus.engine.openseeker_alignment", "MIN_EVOLUTION_STEPS"),
     # nexus.core.capability_selector
     "planner.CapabilityPlanner": ("nexus.engine.capability_planner", "CapabilityPlanner"),
     # nexus.core.router
