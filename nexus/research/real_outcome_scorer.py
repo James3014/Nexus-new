@@ -330,6 +330,9 @@ class TestEnv:
     python: str
     recipe: str
     description: Mapping[str, str] = field(default_factory=dict)
+    # Import roots appended after the scored tree, for an interpreter whose packages are not
+    # in its own site-packages (e.g. a CI executor that supplies them via PYTHONPATH).
+    extra_pythonpath: tuple[str, ...] = ()
 
 
 class EnvProvider(Protocol):
@@ -525,6 +528,7 @@ class PytestRunner:
         pythonpath = [str(tree)]
         if (tree / "src").is_dir():
             pythonpath.append(str(tree / "src"))
+        pythonpath.extend(env.extra_pythonpath)
         return {
             "PATH": f"{Path(env.python).parent}:/usr/bin:/bin",
             "HOME": str(home),
@@ -643,7 +647,7 @@ def trusted_impact_plan(
         env={
             "PATH": f"{Path(env.python).parent}:/usr/bin:/bin",
             "HOME": str(home),
-            "PYTHONPATH": str(base_wt),
+            "PYTHONPATH": os.pathsep.join([str(base_wt), *env.extra_pythonpath]),
             "PYTHONDONTWRITEBYTECODE": "1",
         },
         timeout=600,

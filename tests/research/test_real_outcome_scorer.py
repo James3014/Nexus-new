@@ -156,8 +156,18 @@ class Fixture:
 
 
 class LocalEnv:
+    """Runs fixture trees with this interpreter and its import roots.
+
+    Some CI executors run a system Python with packages supplied via PYTHONPATH, which the
+    scorer's hermetic env would otherwise drop.
+    """
+
     def get(self, repo: str, base_wt: Path) -> ros.TestEnv:
-        return ros.TestEnv("fixture-env", sys.executable, "fixture")
+        repo_root = Path(__file__).resolve().parents[2]
+        roots = tuple(
+            p for p in sys.path if p and Path(p).is_dir() and Path(p).resolve() != repo_root
+        )
+        return ros.TestEnv("fixture-env", sys.executable, "fixture", extra_pythonpath=roots)
 
 
 def _ctx(tmp: Path, fx: Fixture, work: str = "work") -> ros.ScoreContext:
