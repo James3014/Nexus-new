@@ -1,4 +1,7 @@
 import ast
+import importlib.util
+import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -118,6 +121,19 @@ def test_verification_result_rejects_contradictory_states():
 
 
 def test_poetry_packages_include_product_without_version_change():
-    text = (Path(__file__).parents[2] / "pyproject.toml").read_text()
-    assert '{include = "product"}' in text
-    assert 'version = "28.3.0"' in text
+    root = Path(__file__).parents[2]
+    poetry = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["tool"]["poetry"]
+    assert {"include": "product"} in poetry["packages"]
+    assert poetry["version"] == "28.3.0"
+
+    # `product` must actually resolve as a package from the repo root.
+    sys.path.insert(0, str(root))
+    try:
+        spec = importlib.util.find_spec("product")
+    finally:
+        sys.path.remove(str(root))
+    assert spec is not None
+    assert spec.submodule_search_locations is not None
+    assert (
+        Path(next(iter(spec.submodule_search_locations))).resolve() == (root / "product").resolve()
+    )
