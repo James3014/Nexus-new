@@ -229,6 +229,7 @@ def test_local_workers_have_evidence_specific_context_and_autonomy_boundaries() 
         "extraction",
         "compression",
         "compact_diagnosis",
+        "committee_judge",
     ]
     assert qwen35["requires"] == [
         "bounded_context",
@@ -294,6 +295,7 @@ def test_routing_is_deterministic_first_bounded_first_and_fail_closed() -> None:
         "compact_diagnosis": "local_qwen35_9b",
         "bounded_code_candidate": "local_coder_7b",
         "bounded_reasoning_shadow": "local_qwen35_9b",
+        "committee_judge": "local_qwen35_9b",
     }
     assert routing["online"]["fast_bounded_implementation"] == "agy_flash_38"
     assert routing["online"]["fast_bounded_implementation_fallback"] is None
@@ -678,7 +680,17 @@ def test_m5_host_alignment_2026_10_12_admission() -> None:
     workers = manifest["workers"]
     assert manifest["last_verified"] == "2026-10-13"
 
-    for worker_id in ("local_deepseek67b", "local_qwythos9b"):
+    # local_deepseek67b was pulled to M5 Ollama on 2026-10-14 (nexus-runtime#202).
+    deepseek = workers["local_deepseek67b"]
+    assert deepseek["state"] == "LOCAL_CONDITIONAL"
+    assert deepseek["prior_state"] == "INSTALLED_NOT_CONNECTED"
+    assert deepseek["roles"] == ["committee_secondary_proposer_only"]
+    assert deepseek["default_route"] is False
+    assert deepseek["installation_evidence"]["digest"] == (
+        "ce298d984115b93bb1b191b47fee6b39e4e9fbd5f18e651c02f9fa74e0edcd13"
+    )
+
+    for worker_id in ("local_qwythos9b",):
         assert workers[worker_id]["state"] == "INSTALLED_NOT_CONNECTED"
         assert workers[worker_id]["reason"] == "not_present_on_m5_ollama_2026-10-12"
         assert workers[worker_id]["roles"]
