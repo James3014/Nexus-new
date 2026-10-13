@@ -47,7 +47,7 @@
   "issuer_id": "owner-james",
   "operation": "gateway-recover",
   "owner_activation_id": "BREAK_GLASS_ISSUE526_GATEWAY_R1_REBIND_RUNTIME_6782E38_20261013_V33",
-  "owner_activation_sha256": "PENDING_OWNER_ACTIVATION_COMMENT",
+  "owner_activation_sha256": "1048c9045b7da2722f94ef04744fc6031ac6003b6374ac2c6fbbfebd6ddbe7df",
   "plist_path": "/Users/james/Library/LaunchAgents/com.nexus.mcp.gateway.direct.plist",
   "predecessor_artifact_format": "git-bundle-self-contained-v1",
   "predecessor_artifact_sha256": "4bf47634df03a1107231ee477adc64f069dca3ec7c46ed8c1f35a5dd4bf2a56d",
@@ -81,7 +81,7 @@
   "predecessor_manifest_id": "r1-b982b7303bb99aaf84196977a450f933858a52e5",
   "predecessor_manifest_sha256": "1605f0e4e5c19c37722a243e562c513c71decc16cbdac38bb650ef9563481883",
   "predecessor_tree": "e3e1f6bd3014c692051ce731fcaf87955756cea4",
-  "receipt_hash": "3f7962799dc3111f0342a23cdc7ecc595751e8d9d44c223ee176fc3eb2f41e92",
+  "receipt_hash": "94561f54ca6c6000d13d7991d24519438d3f8f0fa951971caa0601932f934c7e",
   "receipt_id": "issue526-gateway-r1-rebind-runtime-6782e38-authority-20261013-v33",
   "receipt_version": 2,
   "repository": "James3014/Nexus-new",
@@ -129,7 +129,7 @@
     "repository": "James3014/Nexus-new",
     "source_set_sha256": "e4dde83e7b3bdd9faa8780f8dbbd9f143e9887a3cc65ffb1426e5529a0fe0c98"
   },
-  "source_thread": "issue526-comment-PENDING",
+  "source_thread": "issue526-comment-6143051179",
   "standing_grant_id": null,
   "standing_grant_receipt_sha256": null
 }
