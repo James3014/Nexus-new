@@ -1658,12 +1658,20 @@ CONTROLLER_FAILURE_REMEDIES = {
         "read the Trusted controller (default branch) job log; the controller failed "
         "before publishing its bundle"
     ),
+    "CONTROLLER_BOOTSTRAP_FAILED": (
+        "a bash step of the Trusted controller (default branch) job failed before the "
+        "Python controller could record a reason (fetch, runtime build, or self-test); "
+        "the detail names the step; read that step's log and re-run the job"
+    ),
     "CONTROLLER_REASON_UNAVAILABLE": (
         "read the Trusted controller (default branch) job log; it published no "
         "machine-readable reason"
     ),
 }
 _CONTROLLER_RECORDED_CODES = frozenset({"DEPENDENCY_CONTRACT_DRIFT", "CONTROLLER_ERROR"})
+# Written by the controller job's bash steps, which run before/around the Python
+# controller.  Lower priority than a lane-gate BLOCK, whose reason is more specific.
+_CONTROLLER_BOOTSTRAP_CODE = "CONTROLLER_BOOTSTRAP_FAILED"
 _LANE_BINDING_MISSING_REASONS = frozenset({
     "PR_BODY_REQUIRED",
     "EXACTLY_ONE_MERGE_LANE_BINDING_REQUIRED",
@@ -1747,6 +1755,13 @@ def resolve_controller_failure(failure_dir: Path, *, controller_result: str) -> 
                 else "MERGE_LANE_BINDING_BLOCKED"
             )
             detail = reason
+    elif (
+        recorded is not None
+        and recorded.get("schema") == CONTROLLER_FAILURE_SCHEMA
+        and recorded.get("reason_code") == _CONTROLLER_BOOTSTRAP_CODE
+    ):
+        code = _CONTROLLER_BOOTSTRAP_CODE
+        detail = recorded.get("detail", "")
     return {
         "schema": CONTROLLER_FAILURE_SCHEMA,
         "status": "BLOCK",
