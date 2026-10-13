@@ -399,13 +399,6 @@ QUARANTINE: tuple[dict[str, object], ...] = (
         "tests": ("test_june_regression_pack_governance_integrity",),
     },
     {
-        "file": "tests/integration/test_legacy_path_blocked.py",
-        "disposition": "quarantine-product-bug?",
-        "issue": "#1923",
-        "cause": "assertion encodes a safety/boundary invariant that the product currently violates; possible real product bug, file a new Issue before fixing",
-        "tests": ("TestLegacyPathBlocked::test_no_json_loads_on_model_response",),
-    },
-    {
         "file": "tests/integration/test_local_model_ollama_smoke_contract.py",
         "disposition": "quarantine",
         "issue": "#1924",
