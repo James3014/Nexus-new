@@ -229,14 +229,22 @@ class GitRepo:
             self.git("init", "-q")
             self.git("config", "gc.auto", "0")
 
-    def git(self, *args: str, cwd: Path | None = None, input: bytes | None = None,
-            check: bool = True) -> subprocess.CompletedProcess[bytes]:
+    def git(
+        self, *args: str, cwd: Path | None = None, input: bytes | None = None, check: bool = True
+    ) -> subprocess.CompletedProcess[bytes]:
         env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-        env.update({"GIT_TERMINAL_PROMPT": "0", "GIT_AUTHOR_NAME": "scorer",
-                    "GIT_AUTHOR_EMAIL": "scorer@invalid", "GIT_COMMITTER_NAME": "scorer",
-                    "GIT_COMMITTER_EMAIL": "scorer@invalid"})
-        proc = subprocess.run(["git", *args], cwd=str(cwd or self.path), input=input,
-                              capture_output=True, env=env)
+        env.update(
+            {
+                "GIT_TERMINAL_PROMPT": "0",
+                "GIT_AUTHOR_NAME": "scorer",
+                "GIT_AUTHOR_EMAIL": "scorer@invalid",
+                "GIT_COMMITTER_NAME": "scorer",
+                "GIT_COMMITTER_EMAIL": "scorer@invalid",
+            }
+        )
+        proc = subprocess.run(
+            ["git", *args], cwd=str(cwd or self.path), input=input, capture_output=True, env=env
+        )
         if check and proc.returncode != 0:
             raise RuntimeError(f"git {' '.join(args[:3])} failed: {proc.stderr.decode()[-400:]}")
         return proc
@@ -338,18 +346,28 @@ class UvEnvProvider:
     """Spec §8 env build. Envs are cached by key under ``envs_dir``."""
 
     PYTHON = "3.12"
-    RUNTIME_PINS = ("pytest==9.0.2", "pytest-asyncio==1.3.0", "anyio==4.12.1",
-                    "pydantic==2.13.5", "PyYAML==6.0.3")
+    RUNTIME_PINS = (
+        "pytest==9.0.2",
+        "pytest-asyncio==1.3.0",
+        "anyio==4.12.1",
+        "pydantic==2.13.5",
+        "PyYAML==6.0.3",
+    )
 
     def __init__(self, envs_dir: Path, log: Callable[[str], None] = print):
         self.envs_dir = Path(envs_dir)
         self.log = log
 
     def _recipe(self, repo: str, base_wt: Path) -> tuple[str, dict[str, str]]:
-        files = ["pyproject.toml", "uv.lock", "requirements/canonical-learning.txt",
-                 "requirements/canonical-runtime.txt"]
-        digests = {f: sha256_bytes((base_wt / f).read_bytes()) for f in files
-                   if (base_wt / f).exists()}
+        files = [
+            "pyproject.toml",
+            "uv.lock",
+            "requirements/canonical-learning.txt",
+            "requirements/canonical-runtime.txt",
+        ]
+        digests = {
+            f: sha256_bytes((base_wt / f).read_bytes()) for f in files if (base_wt / f).exists()
+        }
         if repo in IMPACT_GATE_REPOS:
             recipe = "uv-sync-all-extras+canonical"
         elif (base_wt / "uv.lock").exists():
@@ -361,8 +379,9 @@ class UvEnvProvider:
 
     def get(self, repo: str, base_wt: Path) -> TestEnv:
         recipe, digests = self._recipe(repo, base_wt)
-        key = sha256_bytes(json.dumps([repo, recipe, self.PYTHON, digests],
-                                      sort_keys=True).encode())
+        key = sha256_bytes(
+            json.dumps([repo, recipe, self.PYTHON, digests], sort_keys=True).encode()
+        )
         env_dir = self.envs_dir / key[:16]
         marker = env_dir / ".real_outcome_env.json"
         if marker.exists():
@@ -374,21 +393,33 @@ class UvEnvProvider:
 
         def run(cmd: list[str]) -> None:
             self.log("env: " + " ".join(cmd[:6]))
-            proc = subprocess.run(cmd, cwd=str(base_wt), env=env, capture_output=True,
-                                  text=True, timeout=3600)
+            proc = subprocess.run(
+                cmd, cwd=str(base_wt), env=env, capture_output=True, text=True, timeout=3600
+            )
             if proc.returncode != 0:
                 raise EnvBuildError(f"{' '.join(cmd[:4])}: {proc.stderr[-600:]}")
 
         py = str(env_dir / "bin" / "python")
         try:
             if recipe.startswith("uv-sync"):
-                cmd = ["uv", "sync", "--directory", str(base_wt), "--frozen", "--all-groups",
-                       "--no-install-project", "--python", self.PYTHON]
+                cmd = [
+                    "uv",
+                    "sync",
+                    "--directory",
+                    str(base_wt),
+                    "--frozen",
+                    "--all-groups",
+                    "--no-install-project",
+                    "--python",
+                    self.PYTHON,
+                ]
                 if recipe == "uv-sync-all-extras+canonical":
                     cmd.append("--all-extras")
                 run(cmd)
-                for req in ("requirements/canonical-learning.txt",
-                            "requirements/canonical-runtime.txt"):
+                for req in (
+                    "requirements/canonical-learning.txt",
+                    "requirements/canonical-runtime.txt",
+                ):
                     if recipe.endswith("canonical") and (base_wt / req).exists():
                         run(["uv", "pip", "install", "--python", py, "-r", str(base_wt / req)])
             else:
@@ -396,16 +427,31 @@ class UvEnvProvider:
                 if not pin:
                     raise EnvBuildError("nexus-learning pin not found in tests.yml")
                 run(["uv", "venv", "-q", "--python", self.PYTHON, str(env_dir)])
-                run(["uv", "pip", "install", "--python", py, *self.RUNTIME_PINS,
-                     f"nexus-learning @ git+https://github.com/James3014/nexus-learning.git@{pin}"])
+                run(
+                    [
+                        "uv",
+                        "pip",
+                        "install",
+                        "--python",
+                        py,
+                        *self.RUNTIME_PINS,
+                        f"nexus-learning @ git+https://github.com/James3014/nexus-learning.git@{pin}",
+                    ]
+                )
         except (subprocess.TimeoutExpired, OSError) as exc:
             raise EnvBuildError(str(exc)) from exc
-        version = subprocess.run([py, "-c", "import sys;print(sys.version.split()[0])"],
-                                 capture_output=True, text=True).stdout.strip()
-        uv_version = subprocess.run(["uv", "--version"], capture_output=True,
-                                    text=True).stdout.strip()
-        desc = {"python": version, "uv": uv_version, "recipe": recipe,
-                "inputs": json.dumps(digests, sort_keys=True)}
+        version = subprocess.run(
+            [py, "-c", "import sys;print(sys.version.split()[0])"], capture_output=True, text=True
+        ).stdout.strip()
+        uv_version = subprocess.run(
+            ["uv", "--version"], capture_output=True, text=True
+        ).stdout.strip()
+        desc = {
+            "python": version,
+            "uv": uv_version,
+            "recipe": recipe,
+            "inputs": json.dumps(digests, sort_keys=True),
+        }
         marker.write_text(json.dumps(desc, sort_keys=True))
         return TestEnv(key, py, recipe, desc)
 
@@ -425,8 +471,14 @@ def parse_junit(path: Path) -> dict[str, str]:
     outcomes: dict[str, str] = {}
     if not path.exists():
         return outcomes
+    data = path.read_bytes()
+    # The junit file is produced by candidate-controlled test code: refuse any
+    # DTD/entity declaration (entity expansion), which is the only XML feature
+    # that makes the stdlib parser unsafe here.
+    if b"<!DOCTYPE" in data or b"<!ENTITY" in data:
+        return outcomes
     try:
-        root = ET.parse(path).getroot()
+        root = ET.fromstring(data)  # nosec B314 - DTD/entities rejected above
     except ET.ParseError:
         return outcomes
     for case in root.iter("testcase"):
@@ -451,8 +503,12 @@ def parse_junit(path: Path) -> dict[str, str]:
 class PytestRunner:
     """Spec §8 test run. Results are cached by (env, tree id, target, ignores, run index)."""
 
-    def __init__(self, scratch: Path, timeout: int = PYTEST_TIMEOUT_SECONDS,
-                 log: Callable[[str], None] = print):
+    def __init__(
+        self,
+        scratch: Path,
+        timeout: int = PYTEST_TIMEOUT_SECONDS,
+        log: Callable[[str], None] = print,
+    ):
         self.scratch = Path(scratch)
         self.cache = self.scratch / "pytest-cache"
         self.cache.mkdir(parents=True, exist_ok=True)
@@ -479,8 +535,15 @@ class PytestRunner:
             "TZ": "UTC",
         }
 
-    def run(self, env: TestEnv, tree: Path, tree_id: str, target: str,
-            ignores: Sequence[str], run_idx: int) -> RunResult:
+    def run(
+        self,
+        env: TestEnv,
+        tree: Path,
+        tree_id: str,
+        target: str,
+        ignores: Sequence[str],
+        run_idx: int,
+    ) -> RunResult:
         ignores = sorted(set(ignores))
         key = sha256_bytes(json.dumps([env.key, tree_id, target, ignores, run_idx]).encode())
         cached = self.cache / f"{key}.json"
@@ -490,13 +553,27 @@ class PytestRunner:
         junit = self.scratch / "tmp" / f"junit-{key}.xml"
         junit.parent.mkdir(parents=True, exist_ok=True)
         junit.unlink(missing_ok=True)
-        cmd = [env.python, "-m", "pytest", target, "-q", "-p", "no:cacheprovider",
-               f"--junitxml={junit}", *[f"--ignore={p}" for p in ignores]]
+        cmd = [
+            env.python,
+            "-m",
+            "pytest",
+            target,
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            f"--junitxml={junit}",
+            *[f"--ignore={p}" for p in ignores],
+        ]
         start = time.monotonic()
         timed_out = False
         try:
-            proc = subprocess.run(cmd, cwd=str(tree), env=self._env(env, tree),
-                                  capture_output=True, timeout=self.timeout)
+            proc = subprocess.run(
+                cmd,
+                cwd=str(tree),
+                env=self._env(env, tree),
+                capture_output=True,
+                timeout=self.timeout,
+            )
             exit_code = proc.returncode
         except subprocess.TimeoutExpired:
             timed_out, exit_code = True, -1
@@ -504,10 +581,15 @@ class PytestRunner:
         self.total_seconds += seconds
         outcomes = {} if timed_out else parse_junit(junit)
         junit.unlink(missing_ok=True)
-        self.log(f"  pytest {target} run={run_idx} exit={exit_code} nodes={len(outcomes)} "
-                 f"{seconds:.0f}s")
-        cached.write_text(json.dumps({"outcomes": outcomes, "exit_code": exit_code,
-                                      "timed_out": timed_out}, sort_keys=True))
+        self.log(
+            f"  pytest {target} run={run_idx} exit={exit_code} nodes={len(outcomes)} {seconds:.0f}s"
+        )
+        cached.write_text(
+            json.dumps(
+                {"outcomes": outcomes, "exit_code": exit_code, "timed_out": timed_out},
+                sort_keys=True,
+            )
+        )
         return RunResult(outcomes, exit_code, timed_out, seconds)
 
 
@@ -542,8 +624,9 @@ print(json.dumps(dataclasses.asdict(plan), sort_keys=True))
 """
 
 
-def trusted_impact_plan(env: TestEnv, base_wt: Path, changed: Sequence[str],
-                        scratch: Path) -> dict[str, Any] | None:
+def trusted_impact_plan(
+    env: TestEnv, base_wt: Path, changed: Sequence[str], scratch: Path
+) -> dict[str, Any] | None:
     """Spec §6.3 P2P(b): trusted BASE copy of the impact gate selects targets."""
     if not (base_wt / "scripts" / "ops" / "pr_impact_gate.py").exists():
         return None
@@ -551,9 +634,16 @@ def trusted_impact_plan(env: TestEnv, base_wt: Path, changed: Sequence[str],
     home.mkdir(parents=True, exist_ok=True)
     proc = subprocess.run(
         [env.python, "-c", _TRUSTED_PLAN_CODE, str(base_wt)],
-        cwd=str(base_wt), input=json.dumps(sorted(changed)), capture_output=True, text=True,
-        env={"PATH": f"{Path(env.python).parent}:/usr/bin:/bin", "HOME": str(home),
-             "PYTHONPATH": str(base_wt), "PYTHONDONTWRITEBYTECODE": "1"},
+        cwd=str(base_wt),
+        input=json.dumps(sorted(changed)),
+        capture_output=True,
+        text=True,
+        env={
+            "PATH": f"{Path(env.python).parent}:/usr/bin:/bin",
+            "HOME": str(home),
+            "PYTHONPATH": str(base_wt),
+            "PYTHONDONTWRITEBYTECODE": "1",
+        },
         timeout=600,
     )
     if proc.returncode != 0:
@@ -603,7 +693,8 @@ def _base_receipt(inputs: TaskInputs, ctx: ScoreContext) -> dict[str, Any]:
         "scope_valid": inputs.so.get("scope_valid"),
         "capped": _capped(inputs),
         "leakage_flags": sorted([ctx.leakage_flags[inputs.task_key]])
-        if inputs.task_key in ctx.leakage_flags else [],
+        if inputs.task_key in ctx.leakage_flags
+        else [],
         "label": None,
         "sub_reason": None,
         "shadow_label": None,
@@ -625,13 +716,15 @@ class Oracle:
     gold_outcomes: list[dict[str, str]]
 
 
-def _run_modules(ctx: ScoreContext, env: TestEnv, tree: Path, tree_id: str,
-                 modules: Sequence[str], run_idx: int) -> list[RunResult]:
+def _run_modules(
+    ctx: ScoreContext, env: TestEnv, tree: Path, tree_id: str, modules: Sequence[str], run_idx: int
+) -> list[RunResult]:
     return [ctx.runner.run(env, tree, tree_id, m, (), run_idx) for m in modules]
 
 
-def score_task(task_dir: Path, ctx: ScoreContext,
-               candidate_override: str | None = None) -> dict[str, Any]:
+def score_task(
+    task_dir: Path, ctx: ScoreContext, candidate_override: str | None = None
+) -> dict[str, Any]:
     """Score one task. Returns {"receipt", "timing"}. Raises SealRefused."""
     t0 = time.monotonic()
     inputs = load_sealed_task(task_dir)  # §4 step 1
@@ -647,10 +740,13 @@ def score_task(task_dir: Path, ctx: ScoreContext,
         receipt["label"] = NOT_SCORABLE_NO_MERGED_PR
         receipt["terminal_state"] = gt.get("terminal_state")
         return _finish(receipt, timing, t0, ctx)
-    prs = sorted(gt.get("details", {}).get("merged_prs") or [],
-                 key=lambda p: (str(p.get("merged_at", "")), int(p.get("number", 0))))
-    receipt["merged_prs"] = [{"number": p["number"], "merge_commit_sha": p["merge_commit_sha"]}
-                             for p in prs]
+    prs = sorted(
+        gt.get("details", {}).get("merged_prs") or [],
+        key=lambda p: (str(p.get("merged_at", "")), int(p.get("number", 0))),
+    )
+    receipt["merged_prs"] = [
+        {"number": p["number"], "merge_commit_sha": p["merge_commit_sha"]} for p in prs
+    ]
     if not prs:
         receipt["label"] = NOT_SCORABLE_NO_MERGED_PR
         return _finish(receipt, timing, t0, ctx)
@@ -683,8 +779,9 @@ def score_task(task_dir: Path, ctx: ScoreContext,
             patch = repo.pr_patch(p["merge_commit_sha"])
             if not patch.strip():
                 continue
-            proc = repo.git("apply", "--3way", "--binary", "-", cwd=wts["gold"], input=patch,
-                            check=False)
+            proc = repo.git(
+                "apply", "--3way", "--binary", "-", cwd=wts["gold"], input=patch, check=False
+            )
             unmerged = repo.git("ls-files", "-u", cwd=wts["gold"]).stdout.strip()
             if proc.returncode != 0 or unmerged:
                 receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
@@ -715,8 +812,9 @@ def score_task(task_dir: Path, ctx: ScoreContext,
             inputs.candidate = Candidate(diff, [], override="gold")
             inputs.so = {**inputs.so, "status": "VALID", "scope_valid": True}
         elif candidate_override and candidate_override.startswith("broken"):
-            inputs.candidate = _broken_candidate(repo, wts["base"], base_tree, gold_tree,
-                                                 candidate_override)
+            inputs.candidate = _broken_candidate(
+                repo, wts["base"], base_tree, gold_tree, candidate_override
+            )
             inputs.so = {**inputs.so, "status": "VALID", "scope_valid": True}
         if candidate_override:
             receipt["candidate_override"] = inputs.candidate.override
@@ -732,26 +830,40 @@ def score_task(task_dir: Path, ctx: ScoreContext,
                 receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
                 receipt["sub_reason"] = "GOLD_COLLECTION_FAILED"
                 receipt["detail"] = ",".join(
-                    f"{m}:{r.exit_code}" for m, r in zip(modules, gr)
-                    if r.timed_out or r.exit_code not in (0, 1))
+                    f"{m}:{r.exit_code}"
+                    for m, r in zip(modules, gr)
+                    if r.timed_out or r.exit_code not in (0, 1)
+                )
                 return _finish(receipt, timing, t0, ctx)
             gold_runs.append(_merge(gr))
             base_runs.append(_merge(_run_modules(ctx, env, wts["baset"], baset_tree, modules, i)))
         nodes = sorted(set().union(*gold_runs, *base_runs))
-        flaky = sorted(n for n in nodes
-                       if len({_get(r, n) for r in gold_runs}) > 1
-                       or len({_get(r, n) for r in base_runs}) > 1)
+        flaky = sorted(
+            n
+            for n in nodes
+            if len({_get(r, n) for r in gold_runs}) > 1 or len({_get(r, n) for r in base_runs}) > 1
+        )
         stable = [n for n in nodes if n not in set(flaky)]
-        f2p = [n for n in stable if all(_get(r, n) == PASS for r in gold_runs)
-               and all(_get(r, n) == FAIL for r in base_runs)]
+        f2p = [
+            n
+            for n in stable
+            if all(_get(r, n) == PASS for r in gold_runs)
+            and all(_get(r, n) == FAIL for r in base_runs)
+        ]
         p2p_a = [n for n in stable if all(_get(r, n) == PASS for r in gold_runs + base_runs)]
         timing["oracle_seconds"] = round(time.monotonic() - tq, 1)
-        receipt.update({
-            "f2p": f2p, "p2p_a": p2p_a, "f2p_total": len(f2p),
-            "oracle_flaky": flaky,
-            "outcome_digests": {"GOLD": [_digest_outcomes(r) for r in gold_runs],
-                                "BASE+T": [_digest_outcomes(r) for r in base_runs]},
-        })
+        receipt.update(
+            {
+                "f2p": f2p,
+                "p2p_a": p2p_a,
+                "f2p_total": len(f2p),
+                "oracle_flaky": flaky,
+                "outcome_digests": {
+                    "GOLD": [_digest_outcomes(r) for r in gold_runs],
+                    "BASE+T": [_digest_outcomes(r) for r in base_runs],
+                },
+            }
+        )
         if not f2p:
             receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
             receipt["sub_reason"] = "EMPTY_F2P"
@@ -789,9 +901,23 @@ def score_task(task_dir: Path, ctx: ScoreContext,
             return _finish(receipt, timing, t0, ctx)
 
         tc = time.monotonic()
-        evaluation = _evaluate_candidate(ctx, env, repo, inputs, wts, files, modules,
-                                         base_tree, cand_tree, gold_tree, baset_tree,
-                                         candt_tree, f2p, p2p_a, flaky)
+        evaluation = _evaluate_candidate(
+            ctx,
+            env,
+            repo,
+            inputs,
+            wts,
+            files,
+            modules,
+            base_tree,
+            cand_tree,
+            gold_tree,
+            baset_tree,
+            candt_tree,
+            f2p,
+            p2p_a,
+            flaky,
+        )
         timing["candidate_seconds"] = round(time.monotonic() - tc, 1)
         receipt.update(evaluation)
         if not_runnable:
@@ -808,15 +934,18 @@ def score_task(task_dir: Path, ctx: ScoreContext,
             shutil.rmtree(trees_dir, ignore_errors=True)
 
 
-def _broken_candidate(repo: GitRepo, base_wt: Path, base_tree: str, gold_tree: str,
-                      override: str) -> Candidate:
+def _broken_candidate(
+    repo: GitRepo, base_wt: Path, base_tree: str, gold_tree: str, override: str
+) -> Candidate:
     """Self-check (c): syntax error injected into a non-test module."""
     if ":" in override:
         module = override.split(":", 1)[1]
     else:
-        candidates = [p for p in repo.changed_paths(base_tree, gold_tree)
-                      if p.endswith(".py") and not is_oracle_test_file(p)
-                      and (base_wt / p).exists()]
+        candidates = [
+            p
+            for p in repo.changed_paths(base_tree, gold_tree)
+            if p.endswith(".py") and not is_oracle_test_file(p) and (base_wt / p).exists()
+        ]
         if not candidates:
             raise ValueError("no non-test python module changed by GOLD")
         module = candidates[0]
@@ -827,11 +956,23 @@ def _broken_candidate(repo: GitRepo, base_wt: Path, base_tree: str, gold_tree: s
     return Candidate(diff, [], override=f"broken:{module}")
 
 
-def _evaluate_candidate(ctx: ScoreContext, env: TestEnv, repo: GitRepo, inputs: TaskInputs,
-                        wts: Mapping[str, Path], files: Sequence[str], modules: Sequence[str],
-                        base_tree: str, cand_tree: str, gold_tree: str, baset_tree: str,
-                        candt_tree: str, f2p: Sequence[str], p2p_a: Sequence[str],
-                        flaky: Sequence[str]) -> dict[str, Any]:
+def _evaluate_candidate(
+    ctx: ScoreContext,
+    env: TestEnv,
+    repo: GitRepo,
+    inputs: TaskInputs,
+    wts: Mapping[str, Path],
+    files: Sequence[str],
+    modules: Sequence[str],
+    base_tree: str,
+    cand_tree: str,
+    gold_tree: str,
+    baset_tree: str,
+    candt_tree: str,
+    f2p: Sequence[str],
+    p2p_a: Sequence[str],
+    flaky: Sequence[str],
+) -> dict[str, Any]:
     """Spec §6.3-§6.4."""
     out: dict[str, Any] = {}
     flaky_dropped = set(flaky)
@@ -851,8 +992,10 @@ def _evaluate_candidate(ctx: ScoreContext, env: TestEnv, repo: GitRepo, inputs: 
     p2p_a_fail = sorted(n for n in p2p_a if not majority_pass(n))
 
     # 2. P2P(b/c).
-    changed = sorted(set(repo.changed_paths(base_tree, cand_tree))
-                     | set(repo.changed_paths(base_tree, gold_tree)))
+    changed = sorted(
+        set(repo.changed_paths(base_tree, cand_tree))
+        | set(repo.changed_paths(base_tree, gold_tree))
+    )
     plan_sha = None
     selector_failed = False
     if _repo_kind(inputs.repo) == "impact_gate":
@@ -881,14 +1024,17 @@ def _evaluate_candidate(ctx: ScoreContext, env: TestEnv, repo: GitRepo, inputs: 
         suspects = [n for n in base_pass if _get(cand_p2p[t], n) != PASS]
         if not suspects:
             continue
-        c_runs = [cand_p2p[t]] + [ctx.runner.run(env, wts["candt"], candt_tree, t, ignores,
-                                                 i).outcomes for i in (1, 2)]
-        b_runs = [base_p2p[t]] + [ctx.runner.run(env, wts["baset"], baset_tree, t, ignores,
-                                                 i).outcomes for i in (1, 2)]
+        c_runs = [cand_p2p[t]] + [
+            ctx.runner.run(env, wts["candt"], candt_tree, t, ignores, i).outcomes for i in (1, 2)
+        ]
+        b_runs = [base_p2p[t]] + [
+            ctx.runner.run(env, wts["baset"], baset_tree, t, ignores, i).outcomes for i in (1, 2)
+        ]
         g_run = ctx.runner.run(env, wts["gold"], gold_tree, t, ignores, 0).outcomes
         for n in suspects:
-            if not all(_get(r, n) != PASS for r in c_runs) or \
-                    not all(_get(r, n) == PASS for r in b_runs):
+            if not all(_get(r, n) != PASS for r in c_runs) or not all(
+                _get(r, n) == PASS for r in b_runs
+            ):
                 flaky_dropped.add(n)
             elif _get(g_run, n) != PASS:
                 gold_also_fails.add(n)
@@ -903,32 +1049,37 @@ def _evaluate_candidate(ctx: ScoreContext, env: TestEnv, repo: GitRepo, inputs: 
         label = PARTIAL
     else:
         label = UNRESOLVED
-    out.update({
-        "evaluated_label": label,
-        "f2p_pass": len(f2p_pass),
-        "f2p_passed_nodes": f2p_pass,
-        "p2p_total": len(p2p_a) + p2p_bc_total,
-        "p2p_a_total": len(p2p_a),
-        "p2p_bc_total": p2p_bc_total,
-        "p2p_new_failures": sorted(new_failures),
-        "flaky_dropped": len(flaky_dropped),
-        "gold_also_fails": sorted(gold_also_fails),
-        "p2p_targets": targets,
-        "p2p_selector_failed": selector_failed,
-        "impact_plan_sha256": plan_sha,
-        "candidate_changed_paths_digest": sha256_bytes("\n".join(changed).encode()),
-    })
+    out.update(
+        {
+            "evaluated_label": label,
+            "f2p_pass": len(f2p_pass),
+            "f2p_passed_nodes": f2p_pass,
+            "p2p_total": len(p2p_a) + p2p_bc_total,
+            "p2p_a_total": len(p2p_a),
+            "p2p_bc_total": p2p_bc_total,
+            "p2p_new_failures": sorted(new_failures),
+            "flaky_dropped": len(flaky_dropped),
+            "gold_also_fails": sorted(gold_also_fails),
+            "p2p_targets": targets,
+            "p2p_selector_failed": selector_failed,
+            "impact_plan_sha256": plan_sha,
+            "candidate_changed_paths_digest": sha256_bytes("\n".join(changed).encode()),
+        }
+    )
     out.setdefault("outcome_digests_cand", [_digest_outcomes(r) for r in runs])
     return out
 
 
-def _finish(receipt: dict[str, Any], timing: dict[str, Any], t0: float,
-            ctx: ScoreContext) -> dict[str, Any]:
+def _finish(
+    receipt: dict[str, Any], timing: dict[str, Any], t0: float, ctx: ScoreContext
+) -> dict[str, Any]:
     receipt.setdefault("flaky_dropped", 0)
     timing["wall_seconds"] = round(time.monotonic() - t0, 1)
-    ctx.log(f"{receipt['task_key']}: {receipt['label']}"
-            f"{'/' + receipt['sub_reason'] if receipt.get('sub_reason') else ''}"
-            f" ({timing['wall_seconds']}s)")
+    ctx.log(
+        f"{receipt['task_key']}: {receipt['label']}"
+        f"{'/' + receipt['sub_reason'] if receipt.get('sub_reason') else ''}"
+        f" ({timing['wall_seconds']}s)"
+    )
     return {"receipt": receipt, "timing": timing}
 
 
@@ -946,8 +1097,11 @@ def write_receipt(out_store: Path, result: Mapping[str, Any]) -> Path:
             fh.write(body)
     except FileExistsError as exc:
         raise ReceiptExists(str(path)) from exc
-    seal = {"schema": RECEIPT_SEAL_SCHEMA, "path": "real_outcome.json",
-            "sha256": sha256_bytes(body)}
+    seal = {
+        "schema": RECEIPT_SEAL_SCHEMA,
+        "path": "real_outcome.json",
+        "sha256": sha256_bytes(body),
+    }
     with open(task_dir / "real_outcome_seal.json", "xb") as fh:
         fh.write(canonical_bytes(seal))
     with open(task_dir / "real_outcome_timing.json", "xb") as fh:
@@ -959,7 +1113,7 @@ def write_receipt(out_store: Path, result: Mapping[str, Any]) -> Path:
 
 
 def _binom_cdf(k: int, n: int, p: float) -> float:
-    return sum(math.comb(n, i) * p ** i * (1 - p) ** (n - i) for i in range(k + 1))
+    return sum(math.comb(n, i) * p**i * (1 - p) ** (n - i) for i in range(k + 1))
 
 
 def clopper_pearson(k: int, n: int, alpha: float = 0.05) -> tuple[float, float]:
@@ -995,19 +1149,32 @@ def summarize(receipts: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         a, b = clopper_pearson(k, len(rows))
         return {"resolved": k, "n": len(rows), "ci95": [round(a, 4), round(b, 4)]}
 
-    by_route = {route: rate([r for r in valid if r["route"] == route])
-                for route in sorted({r["route"] for r in valid})}
-    by_status = {s: rate([r for r in valid if r["candidate_raw_status"] == s])
-                 for s in sorted({str(r["candidate_raw_status"]) for r in valid})}
+    by_route = {
+        route: rate([r for r in valid if r["route"] == route])
+        for route in sorted({r["route"] for r in valid})
+    }
+    by_status = {
+        s: rate([r for r in valid if r["candidate_raw_status"] == s])
+        for s in sorted({str(r["candidate_raw_status"]) for r in valid})
+    }
     by_capped = {str(c): rate([r for r in valid if r["capped"] == c]) for c in (True, False)}
     no_leak = rate([r for r in valid if not r.get("leakage_flags")])
     partial_timeouts = [
-        {"task_key": r["task_key"], "label": r["label"], "shadow_label": r.get("shadow_label"),
-         "status": r["candidate_raw_status"], "capped": r["capped"],
-         "f2p": f"{r.get('f2p_pass', '-')}/{r.get('f2p_total', '-')}"}
+        {
+            "task_key": r["task_key"],
+            "label": r["label"],
+            "shadow_label": r.get("shadow_label"),
+            "status": r["candidate_raw_status"],
+            "capped": r["capped"],
+            "f2p": f"{r.get('f2p_pass', '-')}/{r.get('f2p_total', '-')}",
+        }
         for r in valid
-        if not r["candidate_empty"] and (r["candidate_raw_status"] == "TIMEOUT"
-                                         or r.get("failure_kind") == "TIMEOUT" or r["capped"])
+        if not r["candidate_empty"]
+        and (
+            r["candidate_raw_status"] == "TIMEOUT"
+            or r.get("failure_kind") == "TIMEOUT"
+            or r["capped"]
+        )
     ]
     return {
         "counts": dict(sorted(counts.items())),

@@ -31,8 +31,7 @@ from nexus.research import real_outcome_scorer as ros  # noqa: E402
 
 def free_memory_percent() -> int | None:
     try:
-        out = subprocess.run(["memory_pressure"], capture_output=True, text=True,
-                             timeout=60).stdout
+        out = subprocess.run(["memory_pressure"], capture_output=True, text=True, timeout=60).stdout
     except (OSError, subprocess.TimeoutExpired):
         return None
     m = re.search(r"free percentage:\s*(\d+)%", out)
@@ -52,17 +51,23 @@ def wait_for_memory(min_free: int, log) -> float:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     p.add_argument("--store", type=Path, help="store dir containing tasks/ (read only)")
     p.add_argument("--out", type=Path, required=True, help="outcome store (create-only)")
     p.add_argument("--work", type=Path, help="scorer scratch: repos, trees, envs, cache")
     p.add_argument("--task", action="append", default=[], help="task key (repeatable)")
-    p.add_argument("--candidate-override", default=None,
-                   help="self-check only: gold | empty | broken[:path]")
+    p.add_argument(
+        "--candidate-override", default=None, help="self-check only: gold | empty | broken[:path]"
+    )
     p.add_argument("--leakage-flags", type=Path, help="JSON {task_key: reason}")
-    p.add_argument("--repo-source", action="append", default=[],
-                   help="REPO=PATH_OR_URL extra git source (repeatable)")
+    p.add_argument(
+        "--repo-source",
+        action="append",
+        default=[],
+        help="REPO=PATH_OR_URL extra git source (repeatable)",
+    )
     p.add_argument("--min-free-percent", type=int, default=20)
     p.add_argument("--keep-trees", action="store_true")
     p.add_argument("--dry-run", action="store_true", help="verify seals and list labels only")
@@ -78,24 +83,26 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     log = lambda msg: print(msg, flush=True)  # noqa: E731
     if args.summarize:
-        receipts = [json.loads(p.read_text())
-                    for p in sorted(args.out.glob("tasks/*/real_outcome.json"))]
+        receipts = [
+            json.loads(p.read_text()) for p in sorted(args.out.glob("tasks/*/real_outcome.json"))
+        ]
         print(json.dumps(ros.summarize(receipts), indent=1, sort_keys=True))
         return 0
     if not args.store or not args.work:
         print("--store and --work are required", file=sys.stderr)
         return 2
     tasks_dir = args.store / "tasks"
-    keys = args.task or sorted(d.name for d in tasks_dir.iterdir()
-                               if (d / "raw.json").exists())
+    keys = args.task or sorted(d.name for d in tasks_dir.iterdir() if (d / "raw.json").exists())
     if args.dry_run:
         rc = 0
         for key in keys:
             try:
                 inputs = ros.load_sealed_task(tasks_dir / key)
                 gt = ros.load_ground_truth(inputs)
-                print(f"{key}: seal OK, candidate_empty={inputs.candidate.empty}, "
-                      f"terminal={gt.get('terminal_state') if gt else None}")
+                print(
+                    f"{key}: seal OK, candidate_empty={inputs.candidate.empty}, "
+                    f"terminal={gt.get('terminal_state') if gt else None}"
+                )
             except ros.SealRefused as exc:
                 print(f"{key}: REFUSED_SEAL {exc}")
                 rc = 3
@@ -127,7 +134,9 @@ def main(argv: list[str] | None = None) -> int:
             continue
         waited = wait_for_memory(args.min_free_percent, log)
         try:
-            result = ros.score_task(tasks_dir / key, ctx, candidate_override=args.candidate_override)
+            result = ros.score_task(
+                tasks_dir / key, ctx, candidate_override=args.candidate_override
+            )
         except ros.SealRefused as exc:
             log(f"{key}: REFUSED_SEAL {exc}")
             rc = 3

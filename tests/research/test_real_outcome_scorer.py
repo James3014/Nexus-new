@@ -25,10 +25,17 @@ FIXED = "def add(a, b):\n    return a + b\n\n\ndef mul(a, b):\n    return a * b\
 
 
 def _git(cwd: Path, *args: str, input: bytes | None = None) -> str:
-    env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
-           "GIT_COMMITTER_EMAIL": "t@t", "PATH": "/usr/bin:/bin", "HOME": str(cwd)}
-    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True,
-                          input=input, env=env).stdout.decode()
+    env = {
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@t",
+        "PATH": "/usr/bin:/bin",
+        "HOME": str(cwd),
+    }
+    return subprocess.run(
+        ["git", *args], cwd=cwd, check=True, capture_output=True, input=input, env=env
+    ).stdout.decode()
 
 
 def _write(root: Path, files: dict[str, str]) -> None:
@@ -46,8 +53,12 @@ class Fixture:
         self.upstream = tmp / "upstream"
         self.upstream.mkdir()
         _git(self.upstream, "init", "-q")
-        files = {"pkg/__init__.py": "", "pkg/calc.py": BUGGY, "tests/test_add.py": ADD_TEST,
-                 "README.md": "base\n"}
+        files = {
+            "pkg/__init__.py": "",
+            "pkg/calc.py": BUGGY,
+            "tests/test_add.py": ADD_TEST,
+            "README.md": "base\n",
+        }
         if gate:
             files["scripts/ops/pr_impact_gate.py"] = gate
         _write(self.upstream, files)
@@ -75,34 +86,68 @@ class Fixture:
         _write(wt, files)
         return _git(wt, "diff", "--binary", "HEAD").encode()
 
-    def task(self, diff: bytes = b"", untracked: dict[str, str] | None = None,
-             status: str = "VALID", terminal: str | None = "CLOSED_WITH_MERGED_PR",
-             merge: str | None = None, number: int | None = None) -> Path:
+    def task(
+        self,
+        diff: bytes = b"",
+        untracked: dict[str, str] | None = None,
+        status: str = "VALID",
+        terminal: str | None = "CLOSED_WITH_MERGED_PR",
+        merge: str | None = None,
+        number: int | None = None,
+    ) -> Path:
         self.n += 1
         key = f"James3014__{self.repo_name}--{number or self.n}"
         d = self.store / "tasks" / key
         d.mkdir(parents=True)
-        so = {"status": status, "scope_valid": True, "failure_kind": None,
-              "diff_gzip_base64": base64.b64encode(gzip.compress(diff, mtime=0)).decode(),
-              "diff_sha256": hashlib.sha256(diff).hexdigest(), "untracked_files": []}
+        so = {
+            "status": status,
+            "scope_valid": True,
+            "failure_kind": None,
+            "diff_gzip_base64": base64.b64encode(gzip.compress(diff, mtime=0)).decode(),
+            "diff_sha256": hashlib.sha256(diff).hexdigest(),
+            "untracked_files": [],
+        }
         for path, text in (untracked or {}).items():
             data = text.encode()
-            so["untracked_files"].append({
-                "path": path, "sha256": hashlib.sha256(data).hexdigest(), "size": len(data),
-                "gzip_base64": base64.b64encode(gzip.compress(data, mtime=0)).decode()})
-        raw = {"route": "B", "wall_time_seconds": 120.0, "raw_response": {
-            "candidate_packet": {"source_revision": self.base},
-            "strong_online_timeout_seconds": 1800, "strong_online_raw_response": so}}
+            so["untracked_files"].append(
+                {
+                    "path": path,
+                    "sha256": hashlib.sha256(data).hexdigest(),
+                    "size": len(data),
+                    "gzip_base64": base64.b64encode(gzip.compress(data, mtime=0)).decode(),
+                }
+            )
+        raw = {
+            "route": "B",
+            "wall_time_seconds": 120.0,
+            "raw_response": {
+                "candidate_packet": {"source_revision": self.base},
+                "strong_online_timeout_seconds": 1800,
+                "strong_online_raw_response": so,
+            },
+        }
         raw_bytes = json.dumps(raw).encode()
         (d / "raw.json").write_bytes(raw_bytes)
-        seal = {"path": "raw.json", "raw_sha256": hashlib.sha256(raw_bytes).hexdigest(),
-                "schema": "nexus.hybrid_replication.raw_seal.v1"}
+        seal = {
+            "path": "raw.json",
+            "raw_sha256": hashlib.sha256(raw_bytes).hexdigest(),
+            "schema": "nexus.hybrid_replication.raw_seal.v1",
+        }
         (d / "raw_seal.json").write_text(json.dumps(seal))
         state = {"raw_seal": seal, "phase": "RAW_SEALED", "ground_truth": None}
         if terminal:
-            prs = [] if terminal != "CLOSED_WITH_MERGED_PR" else [
-                {"number": 7, "merge_commit_sha": merge or self.fix, "head_sha": merge or self.fix,
-                 "merged_at": "2026-10-12T00:00:00Z"}]
+            prs = (
+                []
+                if terminal != "CLOSED_WITH_MERGED_PR"
+                else [
+                    {
+                        "number": 7,
+                        "merge_commit_sha": merge or self.fix,
+                        "head_sha": merge or self.fix,
+                        "merged_at": "2026-10-12T00:00:00Z",
+                    }
+                ]
+            )
             gt = {"details": {"merged_prs": prs}, "terminal_state": terminal}
             gt_bytes = json.dumps(gt).encode()
             (d / "ground_truth.json").write_bytes(gt_bytes)
@@ -119,10 +164,14 @@ class LocalEnv:
 
 def _ctx(tmp: Path, fx: Fixture, work: str = "work") -> ros.ScoreContext:
     w = tmp / work
-    return ros.ScoreContext(work=w, env_provider=LocalEnv(),
-                            runner=ros.PytestRunner(w / "scratch", timeout=300, log=lambda m: None),
-                            repo_sources={fx.repo_name: [str(fx.upstream)]},
-                            spec_sha256="0" * 64, log=lambda m: None)
+    return ros.ScoreContext(
+        work=w,
+        env_provider=LocalEnv(),
+        runner=ros.PytestRunner(w / "scratch", timeout=300, log=lambda m: None),
+        repo_sources={fx.repo_name: [str(fx.upstream)]},
+        spec_sha256="0" * 64,
+        log=lambda m: None,
+    )
 
 
 @pytest.fixture()
@@ -172,8 +221,14 @@ def test_broken_patch_scores_broke_existing(tmp_path, fx):
 def test_unresolved_and_partial(tmp_path, fx):
     still_buggy = fx.diff_from_base({"pkg/calc.py": BUGGY.replace("a + b\n", "a + b  # x\n")})
     assert _score(tmp_path, fx, fx.task(still_buggy))["label"] == ros.UNRESOLVED
-    partial = fx.diff_from_base({"pkg/calc.py": BUGGY.replace(
-        "def mul(a, b):\n    return a + b", "def mul(a, b):\n    return 6 if (a, b) == (2, 3) else a + b")})
+    partial = fx.diff_from_base(
+        {
+            "pkg/calc.py": BUGGY.replace(
+                "def mul(a, b):\n    return a + b",
+                "def mul(a, b):\n    return 6 if (a, b) == (2, 3) else a + b",
+            )
+        }
+    )
     r = _score(tmp_path, fx, fx.task(partial))
     assert r["label"] == ros.PARTIAL
     assert 0 < r["f2p_pass"] < r["f2p_total"]
@@ -188,8 +243,13 @@ def test_candidate_test_edits_are_overwritten(tmp_path, fx):
 
 
 def test_untracked_files_are_applied(tmp_path, fx):
-    diff = fx.diff_from_base({"pkg/calc.py": BUGGY.replace(
-        "def mul(a, b):\n    return a + b", "from pkg.fast import mul  # noqa: F811")})
+    diff = fx.diff_from_base(
+        {
+            "pkg/calc.py": BUGGY.replace(
+                "def mul(a, b):\n    return a + b", "from pkg.fast import mul  # noqa: F811"
+            )
+        }
+    )
     task = fx.task(diff, untracked={"pkg/fast.py": "def mul(a, b):\n    return a * b\n"})
     assert _score(tmp_path, fx, task)["label"] == ros.RESOLVED
 
@@ -200,8 +260,11 @@ def test_untracked_sha_mismatch_refused(tmp_path, fx):
     raw["raw_response"]["strong_online_raw_response"]["untracked_files"][0]["sha256"] = "0" * 64
     raw_bytes = json.dumps(raw).encode()
     (task / "raw.json").write_bytes(raw_bytes)
-    seal = {"path": "raw.json", "raw_sha256": hashlib.sha256(raw_bytes).hexdigest(),
-            "schema": "nexus.hybrid_replication.raw_seal.v1"}
+    seal = {
+        "path": "raw.json",
+        "raw_sha256": hashlib.sha256(raw_bytes).hexdigest(),
+        "schema": "nexus.hybrid_replication.raw_seal.v1",
+    }
     (task / "raw_seal.json").write_text(json.dumps(seal))
     state = json.loads((task / "state.json").read_text())
     state["raw_seal"] = seal
@@ -231,9 +294,24 @@ def test_cli_refuses_tampered_seal_and_writes_nothing(tmp_path, fx):
     (task / "raw.json").write_bytes((task / "raw.json").read_bytes() + b" ")
     script = Path(__file__).resolve().parents[2] / "scripts/research/score_real_outcome.py"
     out = tmp_path / "out"
-    proc = subprocess.run([sys.executable, str(script), "--store", str(fx.store), "--out",
-                           str(out), "--work", str(tmp_path / "w"), "--task", task.name,
-                           "--min-free-percent", "0"], capture_output=True, text=True)
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--store",
+            str(fx.store),
+            "--out",
+            str(out),
+            "--work",
+            str(tmp_path / "w"),
+            "--task",
+            task.name,
+            "--min-free-percent",
+            "0",
+        ],
+        capture_output=True,
+        text=True,
+    )
     assert proc.returncode == 3
     assert "REFUSED_SEAL" in proc.stdout
     assert not list(out.glob("tasks/*/real_outcome.json"))
@@ -281,14 +359,16 @@ def test_self_check_overrides(tmp_path, fx):
     task = fx.task(b"", status="TIMEOUT")
     ctx = _ctx(tmp_path, fx)
     assert ros.score_task(task, ctx, candidate_override="gold")["receipt"]["label"] == ros.RESOLVED
-    assert ros.score_task(task, ctx, candidate_override="empty")["receipt"]["label"] == \
-        ros.NO_CANDIDATE
+    assert (
+        ros.score_task(task, ctx, candidate_override="empty")["receipt"]["label"]
+        == ros.NO_CANDIDATE
+    )
     r = ros.score_task(task, ctx, candidate_override="broken")["receipt"]
     assert r["label"] == ros.BROKE_EXISTING
     assert r["candidate_override"] == "broken:pkg/calc.py"
 
 
-GATE_SOURCE = '''
+GATE_SOURCE = """
 from dataclasses import dataclass, field
 
 
@@ -301,15 +381,16 @@ class ImpactPlan:
 def build_impact_plan(changed_paths, *, base_sha="", head_sha="", root=None):
     return ImpactPlan(pytest_targets=["tests/test_add.py", "tests/test_mul.py"],
                       changed_paths=list(changed_paths))
-'''
+"""
 
 
 def test_impact_gate_targets_come_from_trusted_base(tmp_path):
     fx = Fixture(tmp_path, repo_name="Nexus-new", gate=GATE_SOURCE)
     # Candidate breaks add() and also neuters the gate so it would select nothing.
     evil_gate = GATE_SOURCE.replace('["tests/test_add.py", "tests/test_mul.py"]', "[]")
-    diff = fx.diff_from_base({"pkg/calc.py": FIXED.replace("a + b", "a - b"),
-                              "scripts/ops/pr_impact_gate.py": evil_gate})
+    diff = fx.diff_from_base(
+        {"pkg/calc.py": FIXED.replace("a + b", "a - b"), "scripts/ops/pr_impact_gate.py": evil_gate}
+    )
     r = _score(tmp_path, fx, fx.task(diff))
     assert r["p2p_targets"] == ["tests/test_add.py"]  # oracle file removed from targets
     assert r["impact_plan_sha256"]
@@ -325,11 +406,26 @@ def test_clopper_pearson():
 
 
 def test_summary_denominator_counts_no_candidate_as_failure():
-    rows = [{"label": lab, "route": "B", "candidate_raw_status": "VALID", "capped": False,
-             "candidate_empty": lab == ros.NO_CANDIDATE, "failure_kind": None,
-             "task_key": str(i)}
-            for i, lab in enumerate([ros.RESOLVED, ros.NO_CANDIDATE, ros.NOT_RUNNABLE,
-                                     ros.NOT_SCORABLE_NO_ORACLE, ros.PENDING_GROUND_TRUTH])]
+    rows = [
+        {
+            "label": lab,
+            "route": "B",
+            "candidate_raw_status": "VALID",
+            "capped": False,
+            "candidate_empty": lab == ros.NO_CANDIDATE,
+            "failure_kind": None,
+            "task_key": str(i),
+        }
+        for i, lab in enumerate(
+            [
+                ros.RESOLVED,
+                ros.NO_CANDIDATE,
+                ros.NOT_RUNNABLE,
+                ros.NOT_SCORABLE_NO_ORACLE,
+                ros.PENDING_GROUND_TRUTH,
+            ]
+        )
+    ]
     s = ros.summarize(rows)
     assert s["valid_oracle_n"] == 3 and s["resolved"] == 1
     assert s["counts"][ros.PENDING_GROUND_TRUTH] == 1
