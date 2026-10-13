@@ -4330,8 +4330,35 @@ def test_corpus_absent_everywhere_contributes_no_witnesses(tmp_path: Path):
 
 
 @pytest.mark.parametrize(
-    "path",
-    ["tests/nightly_quarantine_items/x/__init__.py", "scripts/ops/wiring_fixtures/y/__init__.py"],
+    ("path", "gated"),
+    [
+        # The quarantine package __init__ is loader code (exec_module, imported via
+        # tests/conftest.py under NEXUS_NIGHTLY_QUARANTINE=1) and can xfail witnesses.
+        ("tests/nightly_quarantine_items/__init__.py", True),
+        ("tests/nightly_quarantine_items/tests_unit_test_orchestrator.py", False),
+        ("scripts/ops/wiring_fixtures/codeintel/app/__init__.py", False),
+    ],
 )
-def test_fixture_data_packages_are_not_import_chain_surface(path: str):
-    assert trusted_anchor._is_gate_oracle_surface(path) is False
+def test_fixture_data_packages_are_not_import_chain_surface(path: str, gated: bool):
+    assert trusted_anchor._is_gate_oracle_surface(path) is gated
+
+
+def test_main_moved_over_quarantine_loader_fails_closed(tmp_path: Path):
+    history = _mb_history(tmp_path, "main_touch:tests/nightly_quarantine_items/__init__.py")
+    with pytest.raises(ValueError, match="MAIN_MOVED_OVER_GATE_SURFACE: merge origin/main"):
+        _mb_run_controller(history)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        b"W = ()\n_c('GB-1', 't', 'c', 's', 'e', (), ('tests/a/test_b.py::t',) + W)\n",
+        b"W = ()\n_c('GB-1', 't', 'c', 's', 'e', (), automated_tests=W + ('tests/a/test_b.py::t',))\n",
+        b"_c('GB-1', 't', 'c', 's', 'e', (), list(('tests/a/test_b.py::t',)))\n",
+        b"_c('GB-1', 't', 'c', 's', 'e', (), automated_tests=tuple(('tests/a/test_b.py::t',)))\n",
+    ],
+    ids=["positional-binop", "keyword-binop", "positional-call", "keyword-call"],
+)
+def test_automated_tests_binop_or_call_fails_closed(source: bytes):
+    with pytest.raises(ValueError, match="automated_tests is not a literal"):
+        trusted_anchor._golden_witness_paths(source)

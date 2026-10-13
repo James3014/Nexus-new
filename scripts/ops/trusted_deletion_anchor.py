@@ -328,11 +328,11 @@ _GATE_ORACLE_TRUSTED_SCRIPT_RE = re.compile(r"scripts/ops/trusted_[^/]*\.py")
 _GATE_ORACLE_IMPORT_CHAIN_RE = re.compile(r"(?:tests|scripts)/(?:.*/)?(?:conftest|__init__)\.py")
 GOLDEN_CORPUS_PATH = "tests/golden_behavior/corpus.py"
 _GOLDEN_WITNESS_RE = re.compile(r"(tests/[^\s:]+\.py)(?:::.*)?")
-# Fixture data trees that are never on the pytest import path.
-_GATE_ORACLE_IMPORT_CHAIN_EXCLUDED = (
-    "tests/nightly_quarantine_items/",
-    "scripts/ops/wiring_fixtures/",
-)
+# Fixture data trees that are never on the pytest import path.  The
+# tests/nightly_quarantine_items/ package __init__ is loader code (it runs
+# exec_module via tests/conftest.py) and stays on the surface; its per-entry item
+# modules never match the conftest/__init__ pattern in the first place.
+_GATE_ORACLE_IMPORT_CHAIN_EXCLUDED = ("scripts/ops/wiring_fixtures/",)
 _GOLDEN_CASE_CONSTRUCTORS = ("_c", "GoldenCase")
 _GOLDEN_AUTOMATED_TESTS_POSITION = 6
 MAIN_MOVED_OVER_GATE_SURFACE = "MAIN_MOVED_OVER_GATE_SURFACE"
