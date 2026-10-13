@@ -85,11 +85,21 @@ def test_exec_learn_refresh_service_runs() -> None:
 
 
 def test_exec_learn_scheduler_service_runs(tmp_path: Path) -> None:
+    # LearnSchedulerService.run_scheduler returns exit code 2 ("DEGRADED") when the
+    # learn:phase-policy step succeeds but slo_readiness < 0.5; the registry executor
+    # (_exec_learn_scheduler_service) then reports error f"scheduler_exit_{result}". An empty
+    # workspace_root has no learn history, so readiness is 0.0 and the degraded path is certain.
     _assert_fail_closed(
         "learn_scheduler_service",
         "scheduler_exit_2",
         constraints={"workspace_root": str(tmp_path)},
     )
+    import json
+
+    report = json.loads((tmp_path / ".nexus/reports/learn/scheduler_last_run.json").read_text())
+    assert report["exit_code"] == 2
+    assert report["steps"]["policy"]["returncode"] == 0
+    assert report["slo_readiness"] < 0.5
 
 
 def test_exec_belief_runs() -> None:

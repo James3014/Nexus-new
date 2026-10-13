@@ -36,7 +36,7 @@ def _make_sig(**kw):
 def test_p_4_capabilities_disable_each_breaks_task(skip_cap, skip_env, monkeypatch, tmp_path):
     """Contract: NEXUS_SKIP_* no longer changes the planner's selection (#514); the planner decides."""
     assert_skip_env_is_inert(
-        _make_sig(), skip_env, monkeypatch=monkeypatch, project_root=str(tmp_path)
+        _make_sig(), skip_cap, skip_env, monkeypatch=monkeypatch, project_root=str(tmp_path)
     )
 
 

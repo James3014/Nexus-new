@@ -14,6 +14,7 @@ from nexus.core import executor_controls
 from nexus.core.belief_contracts import (
     CapabilityReceipt,  # pyright: ignore[reportAttributeAccessIssue]
 )
+from nexus.core.capability_registry import CapabilityRegistry
 from nexus.core.capability_selector import CapabilityConstraints, CapabilitySelector
 from nexus.core.capability_signal_set import CapabilitySignalSet
 
@@ -50,10 +51,16 @@ def executed_names(plan: Any, monkeypatch: pytest.MonkeyPatch, project_root: str
         plan, "task"
     )
     names = [r.capability_name for r in receipts]
-    assert set(called) <= set(plan.required_capabilities), (
-        "executed a capability the planner did not select"
-    )
-    assert set(names) <= set(plan.required_capabilities)
+    assert sorted(set(called) - set(names)) == [], "executor called but no receipt"
+    # Exact filter (ExecutorControls.execute_plan): a planned capability runs iff the registry
+    # knows it and one of its phases is in the plan's phases. Nothing else may run or be dropped.
+    registry = CapabilityRegistry()
+    expected = []
+    for cap in plan.required_capabilities:
+        info = registry.get_capability(cap)
+        if info and set(info.phases) & set(plan.phases):
+            expected.append(cap)
+    assert sorted(names) == sorted(expected)
     return sorted(names)
 
 
@@ -70,6 +77,7 @@ def assert_planner_selection(
     assert frozenset(plan.required_capabilities) == expected
     for cap in absent:
         assert cap not in plan.required_capabilities, f"{cap} is not planned for this task"
+    assert plan.required_capabilities, "the planner must select something"
     ran = executed_names(plan, monkeypatch, project_root)
     assert ran, "the planned capabilities must run"
     assert not set(ran) & set(absent)
@@ -77,17 +85,29 @@ def assert_planner_selection(
 
 def assert_skip_env_is_inert(
     sig: CapabilitySignalSet,
+    skip_cap: str,
     skip_env: str,
     *,
     monkeypatch: pytest.MonkeyPatch,
     project_root: str,
 ) -> None:
-    """NEXUS_SKIP_<CAP>=1 changes neither the planned set nor what runs (#514, c46780d32)."""
+    """NEXUS_SKIP_<CAP>=1 changes neither the planned set nor what runs (#514, c46780d32).
+
+    When the capability is planned, the skip env must not remove it. When the planner does not
+    select it at all, the env is irrelevant: the capability stays absent and the plan is unchanged.
+    """
     monkeypatch.delenv(skip_env, raising=False)
     baseline = plan_for(sig)
+    assert baseline.required_capabilities, "the planner must select something"
     baseline_ran = executed_names(baseline, monkeypatch, project_root)
     monkeypatch.setenv(skip_env, "1")
     skipped = plan_for(sig)
     assert skipped.required_capabilities == baseline.required_capabilities
     assert skipped.phases == baseline.phases
     assert executed_names(skipped, monkeypatch, project_root) == baseline_ran
+    if skip_cap in baseline.required_capabilities:
+        assert skip_cap in skipped.required_capabilities, "skip env must not drop a planned cap"
+    else:
+        # Not planned for this task: skip env is irrelevant, the planner alone decides.
+        assert skip_cap not in skipped.required_capabilities
+        assert skip_cap not in baseline_ran
