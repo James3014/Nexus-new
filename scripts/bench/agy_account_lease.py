@@ -27,11 +27,14 @@ The quota snapshot (``~/.nexus/agy-account-pool/quota-snapshot.json``) is read o
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
+import signal
+import threading
 import time
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -610,6 +613,30 @@ def run_with_account_lease(
         return run
 
 
+@contextlib.contextmanager
+def _sigterm_releases_claim() -> Iterator[None]:
+    """Turn SIGTERM into SystemExit while an attempt holds a claim.
+
+    A provider timeout terminates the leaseholder's whole process group (nexus-runtime
+    transport). Python's default SIGTERM action exits without unwinding, which left the
+    durable claim receipt behind and blocked the account (online A/B 20261013b). Raising
+    SystemExit lets the ``except BaseException`` path below release the claim first.
+    Signal handlers can only be set from the main thread; elsewhere this is a no-op.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
+    def _raise_exit(signum: int, _frame: Any) -> None:
+        raise SystemExit(128 + signum)
+
+    previous = signal.signal(signal.SIGTERM, _raise_exit)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
 def _attempt_under_claim(
     run: LeasedRunResult,
     claim: AccountLeaseClaim,
@@ -631,7 +658,8 @@ def _attempt_under_claim(
             raise AgyAccountPoolError("LEASE_HOME_MISSING")
         # The leased account's HOME (its Agy credentials/config); sensitive API keys stripped.
         env = build_isolated_env(home_dir=home, base_env=dict(base_env))
-        outcome = attempt(env)
+        with _sigterm_releases_claim():
+            outcome = attempt(env)
     except BaseException:
         claim.release()
         raise
