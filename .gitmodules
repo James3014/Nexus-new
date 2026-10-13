@@ -1,15 +1,3 @@
-[submodule "SWE-bench"]
-	path = SWE-bench
-	url = .
-[submodule "nexus-mempalace"]
-	path = nexus-mempalace
-	url = .
-[submodule "nexus-rust-v16"]
-	path = nexus-rust-v16
-	url = .
-[submodule "notebooklm-py-audit"]
-	path = notebooklm-py-audit
-	url = .
 [submodule "packages/core"]
 	path = packages/core
 	url = .
