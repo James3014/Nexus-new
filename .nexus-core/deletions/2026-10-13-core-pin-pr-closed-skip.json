@@ -5,7 +5,7 @@
   },
   "companion_changes": [
     {
-      "after_oid": "a43722d0a4cae13ad947138a92e62070ca79a2bb",
+      "after_oid": "7c0b8c1314a46db183b96140c044b6b82de0cdb3",
       "change_type": "MODIFY",
       "path": ".github/workflows/nexus-core-issue-completion.yml"
     },
@@ -15,12 +15,12 @@
       "path": ".github/workflows/trusted-deletion-anchor.yml"
     },
     {
-      "after_oid": "d3f740d52372be83c57bcf844eec80e33f90679a",
+      "after_oid": "1e093a89876c40e93af28ec6dde06cf9448e7a45",
       "change_type": "MODIFY",
       "path": "nexus/orchestrator/canonical_core_transport.py"
     },
     {
-      "after_oid": "80b76ca5ccd5e827e6d716906305c5813b78f40e",
+      "after_oid": "00c4cdad5eb0c81d56a71cfdbc79141d86ea2bf1",
       "change_type": "MODIFY",
       "path": "tests/nexus/orchestrator/test_canonical_core_transport.py"
     },
@@ -32,6 +32,6 @@
   ],
   "deletions": [],
   "id": "2026-10-13-core-pin-pr-closed-skip",
-  "reason": "Owner-authorized change of protected paths .github/workflows/nexus-core-issue-completion.yml and .github/workflows/trusted-deletion-anchor.yml: move the nexus-core gate pins from 9942db7 to 73d9278 (nexus-core PR #253, Issue #250 neutral PR_ALREADY_CLOSED_SKIPPED) with CANONICAL_CORE_REVISION and its test constant, pass gate-outcome run->verify, drop the issue-completion 'edited' trigger, add per-PR cancel-in-progress concurrency to the anchor (keeps 'edited'), reclassify tests/ops/test_pr_workflow_concurrency.py; no deletions; tracking Issue #2010",
+  "reason": "Owner-authorized change of protected paths .github/workflows/nexus-core-issue-completion.yml and .github/workflows/trusted-deletion-anchor.yml: move the nexus-core gate pins from 9942db7 to a0d22e8 (nexus-core PR #253 merge commit, Issue #250 neutral PR_ALREADY_CLOSED_SKIPPED) with CANONICAL_CORE_REVISION and its test constant, pass gate-outcome run->verify, drop the issue-completion 'edited' trigger, add per-PR cancel-in-progress concurrency to the anchor (keeps 'edited'), reclassify tests/ops/test_pr_workflow_concurrency.py; no deletions; tracking Issue #2010",
   "schema": "nexus.core.deletion-manifest.v1"
 }
