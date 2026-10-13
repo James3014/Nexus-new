@@ -2,10 +2,5 @@
 
 from __future__ import annotations
 
-ENTRY: dict[str, object] = {
-    "file": "tests/engine/test_local_reflex.py",
-    "disposition": "quarantine",
-    "issue": "#1924",
-    "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
-    "tests": ("test_local_reflex_ollama_unavailable_fails_closed_to_heuristic",),
-}
+# Fixed in #1924: deprecated Ollama reflex now reports available=False honestly; the parse id was handled by #2029.
+ENTRY = None
