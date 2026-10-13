@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -450,8 +451,21 @@ class LLMCandidateGenerator:
         online_stage: dict[str, Any] = dict(raw_online) if isinstance(raw_online, Mapping) else {}
         provider_response, raw_response, _payload = extract_online_stage_payload(online_stage)
         if isinstance(provider_response, dict):
-            return dict(provider_response), raw_response, unified
-        return {"status": "APPROVED" if online_stage.get("status") == "SUCCEEDED" else "FAIL", "patch": str(provider_response or "")}, raw_response, unified
+            structured = dict(provider_response)
+            structured.setdefault("candidate_response_path", "structured")
+            return structured, raw_response, unified
+        stage_status = "APPROVED" if online_stage.get("status") == "SUCCEEDED" else "FAIL"
+        operation = _parse_operation_payload(str(provider_response or ""))
+        if operation is not None:
+            operation.setdefault("status", stage_status)
+            operation["candidate_response_path"] = "operation_json"
+            return operation, raw_response, unified
+        # Not an edit-operation payload: keep the legacy whole-file fallback.
+        return (
+            {"status": stage_status, "patch": str(provider_response or ""), "candidate_response_path": "whole_file_text"},
+            raw_response,
+            unified,
+        )
 
     def _model_chain(self) -> list[str]:
         override = str(os.environ.get("NEXUS_GEMINI_MODEL_NAME", "") or "").strip()
@@ -522,6 +536,7 @@ class LLMCandidateGenerator:
                     "model_name": model,
                     "model_patch_generated": False,
                     "llm_edit_protocol": str(out.get("operation") or "legacy_patch") if isinstance(out, dict) else "invalid",
+                    "candidate_response_path": str(out.get("candidate_response_path") or "") if isinstance(out, dict) else "",
                     "unified_runtime_receipt": unified_receipt,
                     "unified_runtime_status": str(unified_receipt.get("terminal_status") or unified_receipt.get("status") or ""),
                     "unified_runtime_claim_boundary": dict(unified_receipt.get("claim_boundary") or {}),
@@ -752,6 +767,33 @@ class LocalArmorCandidateGenerator:
 def _estimate_tokens(text: str) -> int:
     # Fallback estimate when gateway does not return token usage.
     return max(1, len(text) // 4)
+
+
+_OPERATION_PAYLOAD_KEYS = frozenset({"operation", "target_snippet", "replacement", "patch"})
+_JSON_FENCE_RE = re.compile(r"^```[a-zA-Z0-9_-]*\s*\n(.*?)\n?```\s*$", re.DOTALL)
+
+
+def _parse_operation_payload(text: str) -> Optional[dict[str, Any]]:
+    """Return the edit-operation JSON object a text-only provider sent, else None.
+
+    Text transports (agy) return the model's JSON answer as plain text. Only an object
+    that carries the requested edit keys counts; anything else stays whole-file text.
+    """
+    body = str(text or "").strip()
+    fence = _JSON_FENCE_RE.match(body)
+    if fence:
+        body = fence.group(1).strip()
+    if not body.startswith("{"):
+        return None
+    try:
+        parsed = json.loads(body)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(parsed, dict) or not (_OPERATION_PAYLOAD_KEYS & parsed.keys()):
+        return None
+    if "operation" in parsed and not isinstance(parsed["operation"], str):
+        return None
+    return parsed
 
 
 def _candidate_code_from_llm_output(source_code: str, out: dict[str, Any]) -> tuple[Optional[str], str]:
