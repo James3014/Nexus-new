@@ -1,0 +1,27 @@
+{
+  "candidates_jsonl_sha256": {
+    "candidates.jsonl": "132030945ea389b8f6d9954ce5c0f858bbf8f16b845af9fee129fedb6ebf5aa0",
+    "candidates_14b.jsonl": "6e31624d705cabc70ce42e3a064ff6d3502d9c64ac15d8b8f196e93e2652c759"
+  },
+  "counts": {
+    "B": 10,
+    "D": 40,
+    "W": 10
+  },
+  "holdout": "entire set is holdout: the production judge prompt is used unmodified, no tuning",
+  "labels": "hidden verifier only (original repro.py exit code 0 = pass)",
+  "max_summary_chars": 1500,
+  "pairs_jsonl_sha256": "ab2a84565b86f059c2b940386175b10b4ebc22edc6627a099ad7c81d0e1c4334",
+  "proposer_models": [
+    "qwen2.5-coder:7b-instruct",
+    "qwen2.5-coder:14b-instruct-q3_K_M"
+  ],
+  "sample_temperature": 0.8,
+  "samples_per_task": 6,
+  "schema": "nexus.judge_pair_set.v1",
+  "task_sets": [
+    "memory_ab_tasks_v1",
+    "memory_ab_tasks_v2",
+    "memory_ab_tasks_v3"
+  ]
+}
