@@ -3699,3 +3699,23 @@ def test_failure_upload_runs_on_failure_regardless_of_failing_step():
     upload = _named_step("trusted-controller", "Upload controller failure reason")
     assert collect["if"] == "failure()" and upload["if"] == "failure()"
     assert names.index("Acquire fixed trusted runtime builder") < names.index(collect["name"])
+
+
+def test_bootstrap_failure_preserves_distinct_exit_status(tmp_path: Path):
+    run = _named_step("trusted-controller", _BOOTSTRAP_STEP)["run"]
+    marker = 'test "$EVENT_NAME" = pull_request_target'
+    assert marker in run
+    run = run.replace(marker, "exit 7", 1)
+    completed = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", run],
+        env={**os.environ, "RUNNER_TEMP": str(tmp_path), **_bootstrap_env()},
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 7, completed.stderr
+    record = json.loads(
+        (tmp_path / "trusted-anchor-failure" / "controller-failure.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert "exit=7" in record["detail"]
