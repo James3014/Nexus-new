@@ -46,6 +46,8 @@ BINDING_KEY = "repository_mutation_binding"
 WORKSPACE_MODE = "managed_worktree"
 DELETION_POLICY = "FORBID"
 FRESHNESS_MARGIN_SECONDS = 120
+# Upper bound of ExternalIntelligenceClosureRuntime.max_repairs_per_unit.
+MAX_REPAIRS_PER_UNIT_LIMIT = 20
 EXECUTION_LANES = frozenset({"DIRECT_CANONICAL", "DIRECT_DELEGATED", "GOVERNED"})
 CAPABILITY_DISPOSITIONS = frozenset({
     "REUSE_EXISTING",
@@ -596,6 +598,25 @@ def build_repository_mutation_binding(
     return binding
 
 
+def binding_validity_seconds(worker_timeout_seconds: float, max_repairs_per_unit: int) -> float:
+    """Freshness window covering the initial bound run plus every budgeted repair run.
+
+    The binding must stay valid for the whole bounded repair lifecycle of one unit:
+    one initial worker run and at most ``max_repairs_per_unit`` same-session repair
+    continuations, each bounded by the worker timeout, plus a fixed margin.
+    """
+    if (
+        isinstance(max_repairs_per_unit, bool)
+        or not isinstance(max_repairs_per_unit, int)
+        or not 0 <= max_repairs_per_unit <= MAX_REPAIRS_PER_UNIT_LIMIT
+    ):
+        raise CoreBindingError("CORE_REPAIR_BUDGET_INVALID")
+    timeout = float(worker_timeout_seconds)
+    if timeout <= 0:
+        raise CoreBindingError("CORE_FRESHNESS_WINDOW_INVALID")
+    return timeout * (1 + max_repairs_per_unit) + FRESHNESS_MARGIN_SECONDS
+
+
 def bound_operation_material(
     *,
     operation: str,
@@ -724,10 +745,17 @@ def validate_repository_mutation_binding(
     workspace_path: str | Path,
     allowed_paths: Sequence[str],
     now: datetime | None = None,
+    continuation: bool = False,
 ) -> None:
     """Mirror runtime ``_validate_repository_mutation_binding`` for pre-effect revalidation.
 
     Raises ``CoreBindingError`` with the runtime's reason code.
+
+    ``continuation=True`` revalidates the binding of an already BOUND session before a
+    repair continuation.  ``valid_until`` still bounds the whole bounded repair
+    lifecycle (it is minted to cover the initial run plus every budgeted repair), so a
+    continuation additionally requires a deadline to exist and ``created_at`` not to
+    lie in the future, mirroring the runtime's continuation admission.
     """
     validate_binding_structure(binding)
     assert isinstance(binding, Mapping)
@@ -790,14 +818,18 @@ def validate_repository_mutation_binding(
     freshness = binding["freshness"]
     if freshness.get("revalidate_before_first_effect") is not True:
         raise CoreBindingError("core_binding_freshness")
-    if _parse_rfc3339(freshness.get("created_at")) is None:
+    created_at = _parse_rfc3339(freshness.get("created_at"))
+    if created_at is None:
         raise CoreBindingError("core_binding_freshness")
+    current = now or datetime.now(timezone.utc)
     valid_until = freshness.get("valid_until")
-    if valid_until is not None:
-        deadline = _parse_rfc3339(valid_until)
-        current = now or datetime.now(timezone.utc)
-        if deadline is None or deadline <= current:
-            raise CoreBindingError("core_binding_freshness")
+    deadline = _parse_rfc3339(valid_until) if valid_until is not None else None
+    if valid_until is not None and deadline is None:
+        raise CoreBindingError("core_binding_freshness")
+    if continuation and (deadline is None or created_at > current):
+        raise CoreBindingError("core_binding_freshness")
+    if deadline is not None and deadline <= current:
+        raise CoreBindingError("core_binding_freshness")
 
 
 # ---------------------------------------------------------------------------
@@ -870,12 +902,14 @@ __all__ = [
     "CORE_PROTOCOL_VERSION",
     "EXECUTION_LANES",
     "FRESHNESS_MARGIN_SECONDS",
+    "MAX_REPAIRS_PER_UNIT_LIMIT",
     "MUTATING_CAPABILITY_DISPOSITIONS",
     "OPERATING_MODE_PATH",
     "CoreAuthorityInputs",
     "CoreBindingError",
     "acceptance_contract_hash",
     "binding_hash_for",
+    "binding_validity_seconds",
     "binding_id_for",
     "bound_operation_material",
     "build_acceptance_contract",

@@ -764,10 +764,10 @@ class OpenSWEWorkerTransport:
                 raise FanoutError("CORE_BINDING_HASHES_REQUIRED")
         if operation == "worker_run" and (operation_material is None) != (core_binding is None):
             raise FanoutError("CORE_BINDING_OPERATION_MATERIAL_PAIR_REQUIRED")
-        if operation == "worker_continue" and (
-            operation_material is not None or core_binding is not None
-        ):
-            raise FanoutError("CORE_BINDING_CONTINUATION_UNSUPPORTED")
+        if operation == "worker_continue" and operation_material is not None:
+            # A bound continuation reuses the BOUND session's Core identity: it carries
+            # the binding hashes but never mints a binding or bound operation material.
+            raise FanoutError("CORE_BINDING_CONTINUATION_MATERIAL_FORBIDDEN")
         if operation == "worker_reconcile" and operation_material is not None:
             raise FanoutError("OPERATION_MATERIAL_RECONCILE_FORBIDDEN")
         effect_requested = effect_authorization is not None or tool_projection_manifest is not None
@@ -904,8 +904,9 @@ class OpenSWEWorkerTransport:
         elif bound_attempt_id:
             payload["attempt_id"] = bound_attempt_id
         if expected_core is not None:
-            # Reconcile carries no artifact; the runtime treats BOUND state as
-            # mismatched unless the request supplies the same Core hashes.
+            # Reconcile carries no artifact and a bound continuation carries only a
+            # repair delta; the runtime treats BOUND state as mismatched unless the
+            # request supplies the same Core hashes.
             payload["core_binding_hash"] = expected_core[0]
             payload["acceptance_contract_hash"] = expected_core[1]
         argv_sha256 = _safe_request_hash(payload)
@@ -1138,6 +1139,7 @@ class OpenSWEWorkerTransport:
         operation_id: str = "",
         effect_authorization: Mapping[str, Any] | None = None,
         tool_projection_manifest: Mapping[str, Any] | None = None,
+        core_binding: Mapping[str, Any] | None = None,
     ) -> OpenCodeRunResult:
         return self._request(
             "worker_continue",
@@ -1148,6 +1150,7 @@ class OpenSWEWorkerTransport:
             operation_id=operation_id,
             effect_authorization=effect_authorization,
             tool_projection_manifest=tool_projection_manifest,
+            core_binding=core_binding,
         )
 
     def reconcile_workspace(
