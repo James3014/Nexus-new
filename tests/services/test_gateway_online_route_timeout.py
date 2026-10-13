@@ -11,9 +11,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from nexus_runtime.kernel.request import UnifiedRuntimeRequest
 
 from nexus.services.gateway import BattlesuitGateway
+from nexus.services.unified_runtime import UnifiedRuntimeRequest
 
 
 def _timeouts(
