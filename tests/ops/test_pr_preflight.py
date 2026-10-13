@@ -308,7 +308,8 @@ def _assert_certify_unavailable(check: dict) -> None:
     assert check["code"] == pf.NEXUS_CERTIFY_UNAVAILABLE
     assert "nexus-core-issue-completion.yml" in check["fix"]
     assert "uvx --from git+https://github.com/James3014/nexus-core@" in check["fix"]
-    assert "sha256:" not in check["detail"]
+    assert "sha256:" + "a" * 64 not in check["detail"]
+    assert "NEXUS_CORE_EVIDENCE_UNIVERSE: sha256" not in check["detail"]
 
 
 def test_certify_nonzero_exit_fails_unavailable(repo, tmp_path, capsys):
