@@ -8,7 +8,10 @@ One call does, in the caller's git workspace:
 3. run one worker step per worktree: a candidate from the Workforce-admitted local worker through
    the armored local lane (``LocalArmorCandidateGenerator``; model calls are serialized), written
    into the worktree and committed;
-4. verify each worktree with the request's verify script (no-shell CLI pre-gate runner);
+4. verify each worktree with the request's verify script inside the shared OS sandbox
+   (``nexus.engine.sandboxed_lane``: trusted interpreter with ``-I``, scrubbed env, HOME/TMPDIR
+   in a per-worker sandbox dir, no network, writes only in the worktree and that dir); without
+   an OS barrier the script is not run and the worker is unverified;
 5. offer the winning commit to the canonical Candidate integration facade
    (``SelfHostedTaskService.integrate_approved``, which delegates to
    ``ControlledIntegrationManager``); this module never calls the Git-apply sink itself (#947).
@@ -30,6 +33,8 @@ from pathlib import Path
 from typing import Any
 
 SCHEMA = "nexus.swarm_run.v1"
+NOT_EXECUTED_NO_BARRIER = "not_executed:no_os_barrier"
+VERIFY_TIMEOUT_SEC = 60
 MAX_WORKERS = 4
 AUTHORITY = (
     "nexus.orchestrator.self_hosted_task_service.SelfHostedTaskService.integrate_approved"
@@ -47,6 +52,31 @@ def _safe(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_-]+", "_", str(value or ""))[:48] or "task"
 
 
+def _unsafe_relpath(value: str) -> bool:
+    """A request path that could become a flag, escape the worktree or name its git dir."""
+
+    path = Path(str(value or ""))
+    return (
+        not str(value or "").strip()
+        or str(value).startswith("-")
+        or "\x00" in str(value)
+        or path.is_absolute()
+        or ".." in path.parts
+        or any(part.lower() == ".git" for part in path.parts)
+    )
+
+
+def _scoped_file(worktree: Path, rel: str) -> Path | None:
+    """``worktree/rel`` when it is a regular file inside the worktree with no symlink on the way."""
+
+    from nexus.engine.sandboxed_lane import scoped_path
+
+    target = scoped_path(worktree, rel)
+    if target is None or target.is_symlink() or not target.is_file():
+        return None
+    return target
+
+
 def run_bounded_swarm(
     *,
     workspace_root: Path,
@@ -56,8 +86,8 @@ def run_bounded_swarm(
     verify_script: str,
     workers: int = 2,
 ) -> dict[str, Any]:
+    from nexus.engine import sandboxed_lane as lane
     from nexus.engine.battle_swarm import BattleSwarm
-    from nexus.engine.cli_pregate import run_cli_pregate
     from nexus.orchestrator.file_lock_registry import FileLockRegistry
     from nexus.research.sprint_service import LocalArmorCandidateGenerator
 
@@ -76,6 +106,10 @@ def run_bounded_swarm(
         "status": "",
         "reason": "",
     }
+    for field, value in (("target_file", target_file), ("verify_script", verify_script)):
+        if _unsafe_relpath(value):
+            report.update(status="BLOCKED", reason=f"UNSAFE_PATH:{field}")
+            return report
     head = _git(["rev-parse", "HEAD"], root)
     if head.returncode != 0:
         report.update(status="BLOCKED", reason="WORKSPACE_NOT_GIT_REPOSITORY")
@@ -102,7 +136,12 @@ def run_bounded_swarm(
     ) -> dict[str, Any]:
         wt = Path(worktree)
         record: dict[str, Any] = {"strategy": strategy["name"], "worktree": str(wt)}
-        source = (wt / target_file).read_text(encoding="utf-8")
+        target = _scoped_file(wt, target_file)
+        script = _scoped_file(wt, verify_script)
+        if target is None or script is None:
+            record.update(worker_status="unsafe_path", verify_result="not_executed:unsafe_path")
+            return {**record, "passed": False, "score": 0.0}
+        source = target.read_text(encoding="utf-8")
         generator = LocalArmorCandidateGenerator(
             wt,
             target_file=target_file,
@@ -131,7 +170,12 @@ def run_bounded_swarm(
             model_name=str(meta.get("model_name") or ""),
             local_candidate_hash=str(meta.get("local_candidate_hash") or ""),
         )
-        (wt / target_file).write_text(code, encoding="utf-8")
+        # Model output: never written through a symlink (O_NOFOLLOW, re-checked containment).
+        target = _scoped_file(wt, target_file)
+        if target is None:
+            record.update(worker_status="unsafe_path", verify_result="not_executed:unsafe_path")
+            return {**record, "passed": False, "score": 0.0}
+        lane.write_no_follow(target, code.encode("utf-8"))
         _git(["add", target_file], wt)
         commit = _git(
             [
@@ -152,8 +196,33 @@ def run_bounded_swarm(
             return {**record, "passed": False, "score": 0.0}
         record["commit"] = _git(["rev-parse", "HEAD"], wt).stdout.strip()
         record["tree"] = _git(["rev-parse", "HEAD^{tree}"], wt).stdout.strip()
-        all_passed, runs = run_cli_pregate(wt, [f"python3 {verify_script}"], timeout_per_cmd=60)
-        record["verify_exit_codes"] = [run.get("exit_code") for run in runs]
+        script = _scoped_file(wt, verify_script)
+        if script is None:
+            record.update(verify_result="not_executed:unsafe_path")
+            return {**record, "passed": False, "score": 0.0}
+        all_passed = False
+        record["verify_exit_codes"] = []
+        if not lane.os_sandbox_available():
+            # The verify script imports and runs model-written code: without an OS barrier it
+            # does not run at all and the worker stays unverified (it cannot win).
+            record["verify_result"] = NOT_EXECUTED_NO_BARRIER
+            return {**record, "passed": False, "score": 0.0}
+        try:
+            confined = lane.confinement(
+                sandbox=wt.parent / f"sandbox_{_safe(strategy['name'])}",
+                extra_writable=(wt,),
+                untrusted_roots=(root,),
+                extra_forbidden=(root,),
+            )
+            record["isolation"] = confined.describe()
+            run = confined.run(lane.python_script_argv(script), cwd=wt, timeout=VERIFY_TIMEOUT_SEC)
+            record["verify_exit_codes"] = [run.returncode]
+            all_passed = run.returncode == 0
+        except subprocess.TimeoutExpired:
+            record["verify_exit_codes"] = [None]
+        except lane.SandboxError as exc:
+            record.update(verify_result=f"not_executed:sandbox_error:{exc}"[:120])
+            return {**record, "passed": False, "score": 0.0}
         record["verify_result"] = "pass" if all_passed else "fail"
         return {
             **record,
