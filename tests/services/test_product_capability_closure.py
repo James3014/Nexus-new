@@ -253,7 +253,7 @@ def _valid_record(
 
 
 def test_product_denominator_is_frozen_to_34_contract_nodes() -> None:
-    assert len(PRODUCT_CAPABILITIES) == 34
+    assert len(PRODUCT_CAPABILITIES) == 35
     assert PRODUCT_CAPABILITIES == (
         "acceptance_check",
         "architecture_scout",
@@ -266,6 +266,7 @@ def test_product_denominator_is_frozen_to_34_contract_nodes() -> None:
         "codeintel",
         "delivery_gate",
         "drone",
+        "entropy_guard_v2",
         "file_lock",
         "forecast_gate",
         "formal_report",
@@ -395,12 +396,12 @@ def test_68_entry_matrix_requires_one_live_pass_per_origin_capability(tmp_path: 
         for capability in PRODUCT_CAPABILITIES
     ]
     summary = summarize_origin_matrix(records)
-    assert summary["online_origin_pass"] == 34
-    assert summary["local_origin_pass"] == 34
-    assert summary["matrix_pass"] == 68
-    assert summary["matrix_total"] == 68
+    assert summary["online_origin_pass"] == 35
+    assert summary["local_origin_pass"] == 35
+    assert summary["matrix_pass"] == 70
+    assert summary["matrix_total"] == 70
     assert summary["complete"] is True
-    assert summary["receipt_hash_verified_count"] == 68
+    assert summary["receipt_hash_verified_count"] == 70
     assert summary["synthetic_live_pass"] == 0
     assert summary["public_claim_allowed"] is False
 
@@ -412,7 +413,7 @@ def test_68_entry_matrix_requires_one_live_pass_per_origin_capability(tmp_path: 
     )
     summary = summarize_origin_matrix(bad)
     assert summary["complete"] is False
-    assert summary["matrix_pass"] == 67
+    assert summary["matrix_pass"] == 69
     assert summary["policy_skip_pass_count"] == 0
     assert summary["policy_skip_count"] == 1
 
@@ -420,7 +421,7 @@ def test_68_entry_matrix_requires_one_live_pass_per_origin_capability(tmp_path: 
     bad_hash[0]["receipt_hash"] = "0" * 64
     summary = summarize_origin_matrix(bad_hash)
     assert summary["complete"] is False
-    assert summary["receipt_hash_verified_count"] == 67
+    assert summary["receipt_hash_verified_count"] == 69
 
 
 def test_runtime_coverage_keeps_surface_coverage_but_rejects_all_skip_live_green() -> None:

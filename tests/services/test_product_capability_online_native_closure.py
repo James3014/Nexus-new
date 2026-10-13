@@ -171,7 +171,8 @@ RETIRED_ONLINE_NATIVE = frozenset({"benchmark", "federation", "oracle_shadow", "
 
 
 def test_online_native_denominator_is_exactly_28() -> None:
-    assert len(ONLINE_NATIVE) == 28
+    # Node id kept: entropy_guard_v2 (runtime 68e86ed, #1907) makes it 29.
+    assert len(ONLINE_NATIVE) == 29
     assert set(ONLINE_NATIVE) | STAGE_OWNED | LOCAL_NATIVE == set(PRODUCT_CAPABILITIES)
 
 

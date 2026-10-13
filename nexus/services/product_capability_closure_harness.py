@@ -1,4 +1,4 @@
-"""Reusable execution harness for the 34 capability × 2 origin matrix.
+"""Reusable execution harness for the 35 capability × 2 origin matrix.
 
 The harness owns task identity, timing, raw-receipt persistence, and hash
 consistency.  It never fabricates invocation, evidence, observable effects, or
@@ -109,6 +109,10 @@ def _task_fixture(
         "search_limit": 3,
         "jit_all_tools": ["read_file", "run_test", "write_file"],
         "jit_token_usage": 120,
+        # entropy_guard_v2 audits an output under review (never the task text).
+        "entropy_audit_text": (
+            f"Closure note for {capability}: target.py compiles and the isolated verifier passes."
+        ),
         "mempalace_tenant_id": "product-closure",
         "mempalace_artifact_type": "capability_evidence",
         "mempalace_artifact": {
@@ -240,7 +244,7 @@ def _task_fixture(
 
 
 def build_product_task_catalog(workspace_root: str | Path) -> tuple[ClosureTaskSpec, ...]:
-    """Build the frozen 68 task specifications from the Planner contract SSOT."""
+    """Build the frozen 70 task specifications from the Planner contract SSOT."""
 
     root = Path(workspace_root).resolve()
     tasks: list[ClosureTaskSpec] = []
@@ -306,7 +310,7 @@ def validate_task_catalog(tasks: Iterable[ClosureTaskSpec]) -> list[str]:
         for capability in PRODUCT_CAPABILITIES
     }
     keys = [(task.origin, task.capability) for task in rows]
-    if len(rows) != 68:
+    if len(rows) != 70:
         errors.append(f"task_count:{len(rows)}")
     if len(set(keys)) != len(keys):
         errors.append("duplicate_origin_capability")
@@ -481,7 +485,7 @@ def run_origin_capability_matrix(
     *,
     output_dir: str | Path,
 ) -> dict[str, Any]:
-    """Run an exact 68-cell catalog and persist one hash-bound matrix receipt."""
+    """Run an exact 70-cell catalog and persist one hash-bound matrix receipt."""
 
     catalog = tuple(tasks)
     errors = validate_task_catalog(catalog)
