@@ -4,6 +4,12 @@
 Executes a genuine end-to-end task execution verifying physical local (Ollama)
 and physical online (Gemini) provider calls, evidence hash freezing, online
 consumption binding, tamper-resistance, and World C verifier gate.
+
+NOT CLOSURE EVIDENCE (Issue #29 Owner decision 4, 2026-10-13): this script
+calls Ollama and the Gemini REST API directly, bypasses CapabilityPlanner,
+Workforce Admission and the runtime, writes its own verifier string, and has
+no RootReceipt or learning stage.  It is kept only as history; the governed
+replacement is ``scripts/ops/issue29_governed_canary.py``.
 """
 
 from __future__ import annotations
