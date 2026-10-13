@@ -128,7 +128,11 @@ def test_genuine_build_execution_plan_snapshot_is_accepted() -> None:
         shutil.rmtree(src_root, ignore_errors=True)
 
 
-def test_source_changed_during_verification_fails_closed() -> None:
+def test_source_changed_during_verification_fails_closed(monkeypatch, tmp_path) -> None:
+    # The isolated workspace writes Armor artifacts; CI checks out the tree under OS temp,
+    # so opt in to ephemeral Armor storage for this test only (same as the armor lane tests).
+    monkeypatch.setenv("NEXUS_ARMOR_ALLOW_EPHEMERAL", "1")
+    monkeypatch.setenv("NEXUS_ARMOR_ARTIFACT_ROOT", str(tmp_path / "armor"))
     src_root = _source_root()
     try:
         response = run_isolated_local_solve_loop(
