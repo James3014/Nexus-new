@@ -97,7 +97,7 @@ jobs:
     needs: trusted-controller
     if: needs.trusted-controller.result == 'success'
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 75
     permissions: {}
     outputs:
       evidence_sha256: ${{ steps.publish.outputs.evidence_sha256 }}
@@ -137,7 +137,7 @@ jobs:
     needs: trusted-controller
     if: needs.trusted-controller.result == 'success'
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 75
     permissions: {}
     steps:
       - name: Download controller bundle

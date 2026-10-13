@@ -11,7 +11,7 @@ import shutil
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -82,6 +82,16 @@ OPTIONAL_BROWSER_EXCLUSION = "tests/core/test_web_dom_mapper.py"
 PYTEST_PER_TEST_TIMEOUT_SECONDS = 120
 EXACT_GIT_EVIDENCE_ONLY = "EXACT_GIT_EVIDENCE_ONLY"
 _UNKNOWN = "IMPACT_UNKNOWN"
+# Unmapped paths (#2092): instead of a permanent IMPACT_UNKNOWN deadlock, run the
+# whole tests/ tree -- the nightly Tier 3 target set -- exact-base and exact-head.
+# The fallback is a superset of every mapped selection, never a looser check.
+FULL_SUITE_FALLBACK = "FULL_SUITE"
+FULL_SUITE_IMPACT_CLASS = "UNMAPPED_FULL_SUITE"
+FULL_SUITE_TARGETS = ("tests",)
+# Collection errors become JUnit error nodes instead of aborting the session, so a
+# pre-existing base collection error cannot deadlock the fallback while a newly
+# introduced one is still caught by the exact-base comparison.
+FULL_SUITE_PYTEST_ARGS = ("--continue-on-collection-errors",)
 _FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 _AWARE_ISO_DATETIME = re.compile(
     r"(?<![0-9A-Za-z])"
@@ -112,6 +122,7 @@ class ImpactPlan:
     test_inventory_tree: str = ""
     base_source_tree: str = ""
     base_test_inventory_tree: str = ""
+    fallback: str = ""
 
 
 @dataclass(frozen=True)
@@ -141,6 +152,7 @@ class PytestRunResult:
     failed_node_ids: list[str] = field(default_factory=list)
     terminal_status: str = ""
     provenance_digest: str = ""
+    unmatched_paths: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -152,6 +164,8 @@ class RegressionClassification:
     new_failures: list[str]
     resolved_failures: list[str]
     reason: str
+    fallback: str = ""
+    unmatched_paths: list[str] = field(default_factory=list)
 
 
 def _exact_sha(value: str, label: str) -> None:
@@ -851,12 +865,29 @@ def build_impact_plan(
         targets = _unique_existing([*targets, *MANDATORY_TIER2_TARGETS], root=root)
         reasons.append("authority/contract/dependency/high-risk seam escalated to Tier 2")
 
+    fallback = ""
     if unknown_unmatched:
-        impact_class = "IMPACT_UNKNOWN"
-        tier = 2
+        impact_class = FULL_SUITE_IMPACT_CLASS
+        tier = 3
         confidence = min(confidence, 0.4)
-        targets = _unique_existing([*targets, *MANDATORY_TIER2_TARGETS], root=root)
+        fallback = FULL_SUITE_FALLBACK
+        # tests/ subsumes every other target; the scoped and Tier 2 targets stay
+        # listed (pytest de-duplicates them) so the trusted gate can still apply
+        # its "head data may add, never remove" rule to them.
+        targets = _unique_existing(
+            [*targets, *MANDATORY_TIER2_TARGETS, *FULL_SUITE_TARGETS], root=root
+        )
+        if not all(target in targets for target in FULL_SUITE_TARGETS):
+            impact_class = "IMPACT_UNKNOWN"
+            tier = 2
+            reasons.append("FULL_SUITE fallback has no tests/ tree to run")
         reasons.append("unmatched paths fail closed to broader verification")
+        reasons.append(
+            "FULL_SUITE fallback: the whole tests/ tree runs exact-base and exact-head; "
+            "add a docs/testing/test_impact_map.md row for "
+            + ", ".join(unknown_unmatched)
+            + " to get a scoped selection"
+        )
 
     if changed_python and not targets:
         impact_class = "IMPACT_UNKNOWN"
@@ -880,6 +911,10 @@ def build_impact_plan(
         pytest_required = True
         reasons.append("empty verification set failed closed")
 
+    if impact_class != FULL_SUITE_IMPACT_CLASS:
+        # Any other true-unknown reason (provenance, empty set) keeps IMPACT_UNKNOWN.
+        fallback = ""
+
     return ImpactPlan(
         base_sha=base_sha,
         head_sha=head_sha,
@@ -898,7 +933,69 @@ def build_impact_plan(
         test_inventory_tree=test_inventory_tree,
         base_source_tree=base_source_tree,
         base_test_inventory_tree=base_test_inventory_tree,
+        fallback=fallback,
     )
+
+
+def full_suite_pytest_args(impact_class: str) -> list[str]:
+    """Extra pytest arguments for one impact class (only the FULL_SUITE fallback)."""
+    return list(FULL_SUITE_PYTEST_ARGS) if impact_class == FULL_SUITE_IMPACT_CLASS else []
+
+
+def _collection_error_nodes(result: PytestRunResult) -> set[str]:
+    # pytest records a collection failure as a classname-less JUnit error node
+    # ("tests.pkg.test_mod"), so it never carries the "::" of a real test node.
+    return {node for node in result.error_node_ids if "::" not in node}
+
+
+def _full_suite_untrusted(base: PytestRunResult, head: PytestRunResult) -> bool:
+    """A FULL_SUITE comparison must prove it really ran the whole suite on both sides."""
+    # Extra targets (e.g. head-mapped files the trusted gate unions in) are allowed:
+    # they are subsumed by tests/, which must be selected AND executed on both sides.
+    # A base-missing target is allowed only as the scoped path allows it: a test
+    # file the PR adds (absent at base, so not in unexpected_missing_targets, which
+    # the shared evidence check already rejects). Head must miss nothing.
+    return (
+        base.impact_class != head.impact_class
+        or not base.unmatched_paths
+        or base.unmatched_paths != head.unmatched_paths
+        or bool(head.missing_targets)
+        or bool(base.unexpected_missing_targets)
+        or any(
+            any(target not in result.selected_targets for target in FULL_SUITE_TARGETS)
+            or any(target not in result.executed_targets for target in FULL_SUITE_TARGETS)
+            or result.collection_count <= 0
+            for result in (base, head)
+        )
+    )
+
+
+def _collection_error_path(node: str) -> str:
+    return node.replace(".", "/")
+
+
+def _scoped_targets_in_collection_errors(result: PytestRunResult) -> list[str]:
+    """Scoped (non-tests/) targets that a collection-error node of ``result`` covers.
+
+    On the mapped path such a target makes pytest exit 2 (CI_BOOTSTRAP_DEFECT);
+    under FULL_SUITE --continue-on-collection-errors would otherwise turn it into
+    ordinary baseline debt, i.e. weaker than the mapped check.
+    """
+    covered: list[str] = []
+    error_paths = [_collection_error_path(node) for node in _collection_error_nodes(result)]
+    for target in result.selected_targets:
+        if target in FULL_SUITE_TARGETS:
+            continue
+        target_path = target.split("::", 1)[0].removesuffix(".py")
+        for error_path in error_paths:
+            if (
+                target_path == error_path
+                or target_path.startswith(f"{error_path}/")
+                or error_path.startswith(f"{target_path}/")
+            ):
+                covered.append(target)
+                break
+    return sorted(covered)
 
 
 def parse_junit_failures(path: Path) -> list[str]:
@@ -1233,6 +1330,20 @@ def _valid_test_provenance(result: PytestRunResult) -> bool:
 
 
 def classify_regression(base: PytestRunResult, head: PytestRunResult) -> RegressionClassification:
+    full_suite = FULL_SUITE_IMPACT_CLASS in {base.impact_class, head.impact_class}
+    result = _classify_regression(base, head, full_suite=full_suite)
+    if not full_suite:
+        return result
+    return replace(
+        result,
+        fallback=FULL_SUITE_FALLBACK,
+        unmatched_paths=sorted(set(base.unmatched_paths) | set(head.unmatched_paths)),
+    )
+
+
+def _classify_regression(
+    base: PytestRunResult, head: PytestRunResult, *, full_suite: bool
+) -> RegressionClassification:
     base_failures = sorted(set(base.failures))
     head_failures = sorted(set(head.failures))
     base_failure_index = _logical_node_index(base_failures)
@@ -1289,7 +1400,19 @@ def classify_regression(base: PytestRunResult, head: PytestRunResult) -> Regress
         != sorted(set(head.selected_targets))
         or base.impact_class == "IMPACT_UNKNOWN"
         or head.impact_class == "IMPACT_UNKNOWN"
+        or (full_suite and _full_suite_untrusted(base, head))
     )
+    new_collection_errors = sorted(_collection_error_nodes(head) - _collection_error_nodes(base))
+    if full_suite and new_collection_errors:
+        return RegressionClassification(
+            "NEW_REGRESSION",
+            True,
+            base_failures,
+            head_failures,
+            sorted(set(new_failures) | set(new_collection_errors)),
+            resolved,
+            "exact head introduced pytest collection errors absent from exact base",
+        )
     if evidence_mismatch or base.status == "IMPACT_UNKNOWN" or head.status == "IMPACT_UNKNOWN":
         return RegressionClassification(
             "IMPACT_UNKNOWN",
@@ -1299,6 +1422,20 @@ def classify_regression(base: PytestRunResult, head: PytestRunResult) -> Regress
             new_failures,
             resolved,
             "test execution metadata did not prove a trustworthy exact-base comparison",
+        )
+    bootstrap_targets = _scoped_targets_in_collection_errors(base) if full_suite else []
+    if bootstrap_targets and not (head.exit_code == 0 and head.status == "COMPLETE"):
+        # Same verdict the mapped path gives a base collection error in a selected
+        # target: red unless the exact head is completely clean (a repair).
+        return RegressionClassification(
+            "CI_BOOTSTRAP_DEFECT",
+            True,
+            base_failures,
+            head_failures,
+            new_failures,
+            resolved,
+            "exact base has pytest collection errors in scoped targets "
+            + ", ".join(bootstrap_targets),
         )
     if head.exit_code == 0 and head.status == "COMPLETE":
         return RegressionClassification(
@@ -1389,6 +1526,7 @@ def run_pytest_plan(
     verifier_digest = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     targets = [str(item) for item in plan.get("pytest_targets", []) if str(item).strip()]
     impact_class = str(plan.get("impact_class", "IMPACT_UNKNOWN"))
+    unmatched_paths = [str(path) for path in plan.get("unmatched_paths", [])]
     existing_targets = [target for target in targets if (cwd / target.split("::", 1)[0]).exists()]
     missing_targets = [target for target in targets if target not in existing_targets]
     changed_paths = {str(path) for path in plan.get("changed_paths", [])}
@@ -1448,7 +1586,10 @@ def run_pytest_plan(
             terminal_status="IMPACT_UNKNOWN",
             provenance_digest=provenance_digest,
         )
-        result_path.write_text(json.dumps(asdict(result), indent=2) + "\n", encoding="utf-8")
+        result_path.write_text(
+            json.dumps(asdict(replace(result, unmatched_paths=unmatched_paths)), indent=2) + "\n",
+            encoding="utf-8",
+        )
         return 5
     if not targets:
         result = PytestRunResult(
@@ -1470,7 +1611,10 @@ def run_pytest_plan(
             terminal_status="IMPACT_UNKNOWN",
             provenance_digest=provenance_digest,
         )
-        result_path.write_text(json.dumps(asdict(result), indent=2) + "\n", encoding="utf-8")
+        result_path.write_text(
+            json.dumps(asdict(replace(result, unmatched_paths=unmatched_paths)), indent=2) + "\n",
+            encoding="utf-8",
+        )
         return 5
     if not existing_targets:
         stdout_path.write_text(
@@ -1512,7 +1656,10 @@ def run_pytest_plan(
                 impact_class=impact_class,
             ),
         )
-        result_path.write_text(json.dumps(asdict(result), indent=2) + "\n", encoding="utf-8")
+        result_path.write_text(
+            json.dumps(asdict(replace(result, unmatched_paths=unmatched_paths)), indent=2) + "\n",
+            encoding="utf-8",
+        )
         return 0
     if "tests/core" in existing_targets:
         diagnostic = _validate_optional_browser_exclusion(cwd)
@@ -1568,11 +1715,16 @@ def run_pytest_plan(
                     impact_class=impact_class,
                 ),
             )
-            result_path.write_text(json.dumps(asdict(result), indent=2) + "\n", encoding="utf-8")
+            result_path.write_text(
+                json.dumps(asdict(replace(result, unmatched_paths=unmatched_paths)), indent=2)
+                + "\n",
+                encoding="utf-8",
+            )
             return 2
     pytest_args = list(existing_targets)
     if "tests/core" in existing_targets:
         pytest_args.append(f"--ignore={OPTIONAL_BROWSER_EXCLUSION}")
+    pytest_args.extend(full_suite_pytest_args(impact_class))
     command = [
         sys.executable,
         "-m",
@@ -1644,7 +1796,10 @@ def run_pytest_plan(
             impact_class=impact_class,
         ),
     )
-    result_path.write_text(json.dumps(asdict(result), indent=2) + "\n", encoding="utf-8")
+    result_path.write_text(
+        json.dumps(asdict(replace(result, unmatched_paths=unmatched_paths)), indent=2) + "\n",
+        encoding="utf-8",
+    )
     return 0 if status == "COMPLETE" else completed.returncode or 2
 
 
@@ -1678,6 +1833,7 @@ def _load_run_result(path: Path) -> PytestRunResult:
         skipped_node_ids=[str(item) for item in payload.get("skipped_node_ids", [])],
         terminal_status=str(payload.get("terminal_status", "")),
         provenance_digest=str(payload.get("provenance_digest", "")),
+        unmatched_paths=[str(item) for item in payload.get("unmatched_paths", [])],
     )
 
 

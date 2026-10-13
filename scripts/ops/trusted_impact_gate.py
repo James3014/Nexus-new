@@ -271,16 +271,33 @@ def combine_plans(base_only: dict[str, Any], merged: dict[str, Any]) -> dict[str
 
     * Targets are the union of both plans, so every base-only target (fallback,
       mandatory Tier-2, mapped tests) for any changed path stays selected.
+      The single exception: when head rows/keys map every path the base-only
+      plan left unmapped (base-only ``UNMAPPED_FULL_SUITE``, merged plan
+      neither unknown nor FULL_SUITE), only the ``tests`` FULL_SUITE target is
+      lifted; the base-only scoped and Tier 2 targets stay selected.
     * Impact class/tier/confidence come from the merged plan but never drop
       below the base-only plan, except when the base-only plan was
-      ``IMPACT_UNKNOWN`` and head rows/keys now map the paths (the merged plan
-      is no longer unknown); then the merged class/tier is used, still with
-      the union of targets.
+      ``IMPACT_UNKNOWN`` or the FULL_SUITE fallback and head rows/keys now map
+      the paths; then the merged class/tier is used, still with the union of
+      the remaining targets.
+    * A merged ``IMPACT_UNKNOWN`` is never replaced by the Tier 3 fallback.
     """
 
     combined = dict(merged)
+    full_suite = gate.FULL_SUITE_IMPACT_CLASS
+    # #2092: head rows may resolve a path the base map left unmapped, exactly as
+    # they could resolve the former IMPACT_UNKNOWN; the base-only scoped and Tier 2
+    # targets are still kept, only the tests/ fallback itself is dropped.
+    head_resolved_fallback = base_only["impact_class"] == full_suite and merged[
+        "impact_class"
+    ] not in {gate._UNKNOWN, full_suite}
+    base_targets = [
+        target
+        for target in base_only["pytest_targets"]
+        if not (head_resolved_fallback and target in gate.FULL_SUITE_TARGETS)
+    ]
     targets = list(merged["pytest_targets"])
-    targets += [target for target in base_only["pytest_targets"] if target not in targets]
+    targets += [target for target in base_targets if target not in targets]
     combined["pytest_targets"] = targets
     combined["pytest_required"] = bool(targets) or bool(
         merged["pytest_required"] or base_only["pytest_required"]
@@ -290,14 +307,34 @@ def combine_plans(base_only: dict[str, Any], merged: dict[str, Any]) -> dict[str
     )
     head_resolved_unknown = (
         base_only["impact_class"] == gate._UNKNOWN and merged["impact_class"] != gate._UNKNOWN
-    )
+    ) or head_resolved_fallback
     if not head_resolved_unknown:
         combined["confidence"] = min(merged["confidence"], base_only["confidence"])
-        if base_only["tier"] > merged["tier"] or base_only["impact_class"] == gate._UNKNOWN:
+        # A merged IMPACT_UNKNOWN is never replaced by a higher-tier base class
+        # (the Tier 3 FULL_SUITE fallback): unknown stays unknown.
+        if base_only["impact_class"] == gate._UNKNOWN or (
+            base_only["tier"] > merged["tier"] and merged["impact_class"] != gate._UNKNOWN
+        ):
             combined["tier"] = base_only["tier"]
             combined["impact_class"] = base_only["impact_class"]
+    # A combined FULL_SUITE fallback records every path either plan left unmapped;
+    # any other combined class carries no fallback.
+    if combined["impact_class"] == full_suite:
+        unmatched = list(merged.get("unmatched_paths", []))
+        unmatched += [
+            path for path in base_only.get("unmatched_paths", []) if path not in unmatched
+        ]
+        combined["unmatched_paths"] = unmatched
+        combined["fallback"] = gate.FULL_SUITE_FALLBACK
+    else:
+        combined["fallback"] = ""
     reasons = list(merged["reasons"])
-    if targets != merged["pytest_targets"] or head_resolved_unknown:
+    if head_resolved_fallback:
+        reasons.append(
+            "trusted gate: head impact rows lifted only the tests/ FULL_SUITE fallback; "
+            "base-only scoped and Tier 2 targets stay selected"
+        )
+    elif targets != merged["pytest_targets"] or head_resolved_unknown:
         reasons.append("trusted gate: head impact data may add but never remove base-only targets")
     combined["reasons"] = reasons
     return combined
@@ -432,6 +469,7 @@ def side_spec(repo: Path, plan: dict[str, Any], side: str) -> dict[str, Any]:
         pytest_args = list(existing)
         if "tests/core" in existing:
             pytest_args.append(f"--ignore={gate.OPTIONAL_BROWSER_EXCLUSION}")
+        pytest_args.extend(gate.full_suite_pytest_args(str(plan.get("impact_class", ""))))
     return {
         "side": side,
         "revision": revision,
@@ -847,6 +885,7 @@ def reconstruct_result(
         "test_inventory_tree": spec["test_inventory_tree"],
         "bound_source_tree": spec["source_tree"],
         "bound_test_inventory_tree": spec["test_inventory_tree"],
+        "unmatched_paths": [str(path) for path in plan.get("unmatched_paths", [])],
     }
     if spec["mode"] == "no_targets":
         return gate.PytestRunResult(
