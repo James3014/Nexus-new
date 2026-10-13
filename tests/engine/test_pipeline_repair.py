@@ -197,3 +197,8 @@ def test_write_hallucination_evidence_bundle_persists_expected_shape(tmp_path, m
     assert "evidence_bundle" in payload
     assert payload["evidence_bundle"]["code_artifacts"] == ["nexus/engine/pipeline_repair.py"]
     assert payload["evidence_bundle"]["command_artifacts"] == ["uv run pytest -q tests/a.py -> rc=0"]
+
+
+# ARCHIVED 2026-10-13 legacy-engine: this file tests (in whole or in part) modules archived with
+# the legacy NexusEngine (nexus.engine.pipeline_repair); see ARCHIVED_2026-10-13-legacy-engine.md.
+# It keeps running with unchanged node ids until the deletion PR removes it with those modules.

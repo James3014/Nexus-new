@@ -33,158 +33,75 @@ def test_infer_task_kind_uses_identifier_safe_feature_intent(task_text, expected
     assert infer_task_kind(task_text) == expected
 
 
+# ARCHIVED 2026-10-13 legacy-engine (ARCHIVED_2026-10-13-legacy-engine.md): the legacy
+# NexusEngine / CommandService builders fail closed.  Historical node ids are kept and now
+# assert that nothing builds the engine, even when its classes are importable.
+
+
+def _forbid_legacy_engine(monkeypatch):
+    def _boom(*_args, **_kwargs):  # pragma: no cover - must not be reached
+        raise AssertionError("archived legacy NexusEngine must not be constructed")
+
+    monkeypatch.setattr("nexus.engine.config.EngineConfig", _boom)
+
+
+def _assert_archived(excinfo, entry):
+    from nexus.engine.canonical_task_seam import LEGACY_ENGINE_ARCHIVED
+
+    assert excinfo.value.entry == entry
+    assert excinfo.value.reason == LEGACY_ENGINE_ARCHIVED == "archived_legacy_engine_2026-10-13"
+    assert "ARCHIVED 2026-10-13 legacy-engine" in str(excinfo.value)
+
+
 def test_build_command_service_constructs_engine_once(monkeypatch, tmp_path):
-    from nexus.engine.canonical_task_seam import build_command_service
+    from nexus.engine.canonical_task_seam import LegacyEngineArchivedError, build_command_service
 
-    captured = {}
-
-    class _FakeEngineConfig:
-        def __init__(self, project_root):
-            captured["config_project_root"] = project_root
-
-    class _FakeEngine:
-        def __init__(self, config):
-            captured["engine_config"] = config
-
-    class _FakeService:
-        def __init__(self, engine):
-            captured["service_engine"] = engine
-
-    monkeypatch.setattr("nexus.engine.config.EngineConfig", _FakeEngineConfig)
-    monkeypatch.setattr("nexus.engine.coordinator.NexusEngine", _FakeEngine)
-    monkeypatch.setattr("nexus.app.command_service.NexusCommandService", _FakeService)
-
-    service = build_command_service(tmp_path)
-
-    assert isinstance(service, _FakeService)
-    assert captured["config_project_root"] == tmp_path
-    assert captured["service_engine"] is not None
+    _forbid_legacy_engine(monkeypatch)
+    with pytest.raises(LegacyEngineArchivedError) as excinfo:
+        build_command_service(tmp_path)
+    _assert_archived(excinfo, "build_command_service")
 
 
 def test_build_engine_passes_config_overrides(monkeypatch, tmp_path):
-    from nexus.engine.canonical_task_seam import build_engine
+    from nexus.engine.canonical_task_seam import LegacyEngineArchivedError, build_engine
 
-    captured = {}
-
-    class _FakeEngineConfig:
-        def __init__(self, project_root, **kwargs):
-            captured["project_root"] = project_root
-            captured["kwargs"] = kwargs
-
-    class _FakeEngine:
-        def __init__(self, config):
-            captured["config"] = config
-
-    monkeypatch.setattr("nexus.engine.config.EngineConfig", _FakeEngineConfig)
-    monkeypatch.setattr("nexus.engine.coordinator.NexusEngine", _FakeEngine)
-
-    engine = build_engine(tmp_path, benchmark_mode=True, silent=True)
-
-    assert isinstance(engine, _FakeEngine)
-    assert captured["project_root"] == tmp_path
-    assert captured["kwargs"] == {"benchmark_mode": True, "silent": True}
+    _forbid_legacy_engine(monkeypatch)
+    with pytest.raises(LegacyEngineArchivedError) as excinfo:
+        build_engine(tmp_path, benchmark_mode=True, silent=True)
+    _assert_archived(excinfo, "build_engine")
 
 
 def test_execute_single_task_via_service_uses_build_command_service(monkeypatch, tmp_path):
-    from nexus.engine.canonical_task_seam import execute_single_task_via_service
+    from nexus.engine.canonical_task_seam import (
+        LegacyEngineArchivedError,
+        execute_single_task_via_service,
+    )
 
-    called = {}
-
-    class _FakeService:
-        def execute_bug(self, request):
-            called["kind"] = "bug"
-            called["task"] = request.task
-            return True
-
-        def execute_feature(self, request):
-            called["kind"] = "feature"
-            called["task"] = request.task
-            return True
-
-    def _fake_build_command_service(project_root):
-        called["project_root"] = project_root
-        return _FakeService()
-
-    monkeypatch.setattr("nexus.engine.canonical_task_seam.build_command_service", _fake_build_command_service)
-
-    ok = execute_single_task_via_service("fix race", tmp_path)
-
-    assert ok is True
-    assert called["project_root"] == tmp_path
-    assert called["kind"] == "bug"
-    assert called["task"] == "fix race"
+    _forbid_legacy_engine(monkeypatch)
+    with pytest.raises(LegacyEngineArchivedError) as excinfo:
+        execute_single_task_via_service(
+            "fix bug in parser", tmp_path, execution_context={"task_id": "t-1"}
+        )
+    _assert_archived(excinfo, "execute_single_task_via_service")
 
 
 def test_build_legacy_cli_service_shapes_bug_request(monkeypatch, tmp_path):
-    from nexus.engine.canonical_task_seam import build_legacy_cli_service
+    from nexus.engine.canonical_task_seam import LegacyEngineArchivedError, build_legacy_cli_service
 
-    captured = {}
-
-    class _FakeCommandService:
-        def execute_bug(self, request):
-            captured["request"] = request
-            return True
-
-        def execute_feature(self, request):
-            raise AssertionError("feature path should not be used")
-
-    monkeypatch.setattr(
-        "nexus.engine.canonical_task_seam.build_command_service",
-        lambda project_root: _FakeCommandService(),
-    )
-
-    service = build_legacy_cli_service(tmp_path)
-    ok = service.execute_bug(
-        "fix bug",
-        delivery_mode="high",
-        bug_id="BUG-1",
-        verify_commands=["pytest -q"],
-        artifact_paths=["report.json"],
-        plan_only=True,
-    )
-
-    assert ok is True
-    request = captured["request"]
-    assert request.task == "fix bug"
-    assert request.task_id == "BUG-1"
-    assert request.delivery_mode == "high"
-    assert request.verify_commands == ["pytest -q"]
-    assert request.artifact_paths == ["report.json"]
-    assert request.plan_only is True
+    _forbid_legacy_engine(monkeypatch)
+    with pytest.raises(LegacyEngineArchivedError) as excinfo:
+        build_legacy_cli_service(tmp_path)
+    _assert_archived(excinfo, "build_legacy_cli_service")
 
 
 def test_build_legacy_cli_service_shapes_feature_request(monkeypatch, tmp_path):
-    from nexus.engine.canonical_task_seam import build_legacy_cli_service
+    import nexus.engine.canonical_task_seam as seam
 
-    captured = {}
-
-    class _FakeCommandService:
-        def execute_bug(self, request):
-            raise AssertionError("bug path should not be used")
-
-        def execute_feature(self, request):
-            captured["request"] = request
-            return True
-
-    monkeypatch.setattr(
-        "nexus.engine.canonical_task_seam.build_command_service",
-        lambda project_root: _FakeCommandService(),
-    )
-
-    service = build_legacy_cli_service(tmp_path)
-    ok = service.execute_feature(
-        "build dashboard",
-        domain="frontend",
-        delivery_mode="standard",
-        verify_commands=["pytest -q tests/ui"],
-    )
-
-    assert ok is True
-    request = captured["request"]
-    assert request.task == "build dashboard"
-    assert request.domain == "frontend"
-    assert request.delivery_mode == "standard"
-    assert request.verify_commands == ["pytest -q tests/ui"]
+    # The adapter class that shaped bug/feature TaskRequests is gone with the engine.
+    assert not hasattr(seam, "LegacyTaskServiceAdapter")
+    _forbid_legacy_engine(monkeypatch)
+    with pytest.raises(seam.LegacyEngineArchivedError):
+        seam.build_legacy_cli_service(tmp_path)
 
 
 def test_canonical_product_task_enters_gateway_once_without_legacy_fallback(
@@ -663,7 +580,7 @@ def test_b3_campaign_text_without_verified_identity_does_not_mint_route(tmp_path
     demand = result["workforce_demands"]["demands"][0]
     assert demand["requested_role"] == "fast_bounded_implementation"
     assert demand["mutation_intent"] is True
-    assert result["binding"]["worker_id"] == "agy_flash_37_medium"
+    assert result["binding"]["worker_id"] == "agy_flash_38"
 
 
 def test_b3_near_match_verified_campaign_does_not_select_mimo(tmp_path):
@@ -684,7 +601,7 @@ def test_b3_near_match_verified_campaign_does_not_select_mimo(tmp_path):
 
     demand = result["workforce_demands"]["demands"][0]
     assert demand["requested_role"] == "fast_bounded_implementation"
-    assert result["binding"]["worker_id"] == "agy_flash_37_medium"
+    assert result["binding"]["worker_id"] == "agy_flash_38"
 
 
 def test_external_intelligence_consumer_routes_to_chatgpt_web(tmp_path):

@@ -85,6 +85,32 @@ def _is_verified(row: dict[str, Any]) -> bool:
     return str(row.get("semantic_status", "")).strip().upper() == "VERIFIED"
 
 
+def _strict_scorecard_lines(
+    rows_without: list[dict[str, Any]], rows_with: list[dict[str, Any]]
+) -> list[str]:
+    """Strict-v2 honest scorecard (all rows in the denominator); empty unless strict rows."""
+
+    rows = [*rows_without, *rows_with]
+    if not any(r.get("strict_llm_baseline_applied") for r in rows):
+        return []
+    from scripts.bench.strict_llm_baseline import honest_scorecard
+
+    lines = [
+        "## Strict-v2 Honest Scorecard (denominator = all rows)",
+        "",
+        "| Arm | Rows | Solved by model | Rescued by local | Failed | Contract violation (wiring defect) | Infra invalid |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for label, mode in (("Without Nexus", "without_nexus"), ("With Nexus", "with_nexus")):
+        card = honest_scorecard(rows, mode)
+        lines.append(
+            f"| {label} | {card['total_n']} | {card['solved_by_model']} | {card['rescued_by_local']} | "
+            f"{card['failed']} | {card['contract_violation']} | {card['infra_invalid']} |"
+        )
+    lines.append("")
+    return lines
+
+
 def _eligible_solve_rate(rows: list[dict[str, Any]]) -> float:
     eligible = [row for row in rows if bool(row.get("run_eligible", True))]
     if not eligible:
@@ -991,6 +1017,7 @@ def render_markdown_report(
         f"| RLM trace quality | {_num(a['avg_rlm_trace_quality_score'])} | {_num(b['avg_rlm_trace_quality_score'])} | {_num(delta['avg_rlm_trace_quality_score_delta'])} |",
         f"| Token public-safe claim | {token_public_safe} | {token_public_safe} | n/a |",
         "",
+        *_strict_scorecard_lines(rows_without, rows_with),
         "## Trustworthy Delivery KPIs",
         "",
         "| KPI | Without Nexus | With Nexus | Delta | Public interpretation |",
@@ -1001,7 +1028,7 @@ def render_markdown_report(
         f"| Replay pass rate | {_pct(a['replay_pass_rate'])} | {_pct(b['replay_pass_rate'])} | {_pct(delta['replay_pass_rate_delta'])} | Pass rate among rows with replay evidence |",
         f"| Policy-hit success rate | {_pct(a['policy_hit_success_rate'])} | {_pct(b['policy_hit_success_rate'])} | {_pct(delta['policy_hit_success_rate_delta'])} | Success after policy/memory/governance hit |",
         f"| Policy-hit lift within arm | {_pct(a['policy_hit_success_lift'])} | {_pct(b['policy_hit_success_lift'])} | {_pct(delta['policy_hit_success_lift_delta'])} | Policy-hit rows vs non-policy rows |",
-        f"| 7-day onboarding success | observation | observation | n/a | Requires separate onboarding suite, not single-run A/B |",
+        "| 7-day onboarding success | observation | observation | n/a | Requires separate onboarding suite, not single-run A/B |",
         "",
         "## Five-Pillar Contribution",
         "",

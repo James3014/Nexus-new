@@ -1,5 +1,4 @@
 import hashlib
-import importlib
 import json
 import os
 import re
@@ -31,55 +30,39 @@ def infer_task_kind(task_text: str) -> str:
     return "bug"
 
 
-def build_engine(project_root: Path, **config_overrides):
-    from nexus.engine.config import EngineConfig
-    from nexus.engine.coordinator import NexusEngine
+LEGACY_ENGINE_ARCHIVED = "archived_legacy_engine_2026-10-13"
 
-    return NexusEngine(EngineConfig(project_root=project_root, **config_overrides))
+
+class LegacyEngineArchivedError(RuntimeError):
+    """The legacy NexusEngine / CommandService path was archived on 2026-10-13.
+
+    See ARCHIVED_2026-10-13-legacy-engine.md. ``execute_canonical_product_task`` is the
+    only product entry; nothing here builds or falls back to the legacy engine.
+    """
+
+    def __init__(self, entry: str) -> None:
+        super().__init__(
+            f"ARCHIVED 2026-10-13 legacy-engine: {entry} built the retired legacy NexusEngine "
+            f"({LEGACY_ENGINE_ARCHIVED}); use execute_canonical_product_task "
+            "(nexus run / MCP gateway / self-hosted). See ARCHIVED_2026-10-13-legacy-engine.md."
+        )
+        self.entry = entry
+        self.reason = LEGACY_ENGINE_ARCHIVED
+
+
+def build_engine(project_root: Path, **config_overrides):
+    """ARCHIVED 2026-10-13 legacy-engine: fails closed, never builds NexusEngine."""
+    raise LegacyEngineArchivedError("build_engine")
 
 
 def build_command_service(project_root: Path):
-    NexusCommandService = importlib.import_module("nexus." + "app.command_service").NexusCommandService
-    return NexusCommandService(build_engine(project_root))
-
-
-class LegacyTaskServiceAdapter:
-    def __init__(self, command_service):
-        self._command_service = command_service
-
-    def execute_bug(self, task: str, delivery_mode: str = "standard", bug_id: str | None = None, **kwargs):
-        TaskRequest = importlib.import_module("nexus." + "app.command_service").TaskRequest
-
-        request = TaskRequest(
-            task=task,
-            task_id=bug_id,
-            plan_only=bool(kwargs.get("plan_only", False)),
-            delivery_mode=delivery_mode,
-            verify_commands=kwargs.get("verify_commands"),
-            artifact_paths=kwargs.get("artifact_paths"),
-        )
-        return self._command_service.execute_bug(request)
-
-    def execute_feature(self, task: str, domain: str | None = None, delivery_mode: str = "standard", **kwargs):
-        TaskRequest = importlib.import_module("nexus." + "app.command_service").TaskRequest
-
-        request = TaskRequest(
-            task=task,
-            domain=domain,
-            plan_only=bool(kwargs.get("plan_only", False)),
-            delivery_mode=delivery_mode,
-            verify_commands=kwargs.get("verify_commands"),
-            artifact_paths=kwargs.get("artifact_paths"),
-        )
-        return self._command_service.execute_feature(request)
+    """ARCHIVED 2026-10-13 legacy-engine: fails closed, never builds NexusCommandService."""
+    raise LegacyEngineArchivedError("build_command_service")
 
 
 def build_legacy_cli_service(project_root: Path):
-    """Build the compatibility-only legacy command surface.
-
-    The daily ``nexus run`` product entry must not call this adapter.
-    """
-    return LegacyTaskServiceAdapter(build_command_service(project_root))
+    """ARCHIVED 2026-10-13 legacy-engine: fails closed (was the NexusCLI / swarm run surface)."""
+    raise LegacyEngineArchivedError("build_legacy_cli_service")
 
 
 def execute_single_task_via_service(
@@ -87,24 +70,8 @@ def execute_single_task_via_service(
     project_root: Path,
     execution_context: dict | None = None,
 ) -> bool:
-    """Run one CLI task through CommandService with optional task-level context.
-
-    ``execution_context`` is the sole task-scoped carrier for Local Assist mode
-    and identity fields. Environment variables must not replace this context.
-    """
-    TaskRequest = importlib.import_module("nexus." + "app.command_service").TaskRequest
-
-    service = build_command_service(project_root)
-    context = dict(execution_context or {})
-    request = TaskRequest(
-        task=task_text,
-        delivery_mode="standard",
-        execution_context=context or None,
-        task_id=str(context.get("task_id") or "") or None,
-    )
-    if infer_task_kind(task_text) == "feature":
-        return bool(service.execute_feature(request))
-    return bool(service.execute_bug(request))
+    """ARCHIVED 2026-10-13 legacy-engine: fails closed (was the CommandService task runner)."""
+    raise LegacyEngineArchivedError("execute_single_task_via_service")
 
 
 @dataclass(frozen=True)
@@ -655,12 +622,21 @@ def execute_canonical_product_task(
     task_text: str,
     project_root: Path,
     execution_context: Mapping[str, Any] | None = None,
+    *,
+    task_card_identity: VerifiedTaskCardIdentity | None = None,
 ) -> CanonicalProductExecutionResult:
     """Execute daily product work through one Planner and one Mainchain entry.
 
     This path has no CommandService/NexusEngine/NexusPipeline fallback.  Route,
     provider, model, topology, and legacy/new runtime selectors are rejected as
     caller inputs.
+
+    ``task_card_identity`` is the only way the ``task_card`` Workforce control
+    is supplied on this path.  It must be a lifecycle-verified tracked Task
+    Card for this exact ``task_id`` whose canonical bytes still hash to the
+    bound value; it is re-verified here and mirrors
+    ``build_canonical_planner_admission``.  It never selects a route, worker,
+    provider, or model: those remain Planner/Workforce outputs.
     """
     from nexus.contracts.canonical_execution import CanonicalTaskContext
     from nexus.contracts.root_receipt import (
@@ -697,6 +673,13 @@ def execute_canonical_product_task(
         raise ValueError(f"canonical_product_caller_override_forbidden:{supplied_forbidden[0]}")
 
     task_id = _product_task_id(task_text, str(context.get("task_id") or ""))
+    if task_card_identity is not None:
+        if not isinstance(task_card_identity, VerifiedTaskCardIdentity):
+            raise ValueError("canonical_task_card_identity_unverified")
+        if task_card_identity.task_id != task_id:
+            raise ValueError("canonical_task_card_task_mismatch")
+        # Re-read the canonical card bytes; raises on hash drift.
+        _derive_campaign_id_from_task_card(task_card_identity)
     revision = str(context.get("workspace_revision") or "").strip()
     if not revision:
         raise ValueError("canonical_product_workspace_revision_missing")
@@ -823,6 +806,9 @@ def execute_canonical_product_task(
         allowed_files=allowed_files,
         verifier_command=verifier_command,
     )
+    if task_card_identity is not None:
+        for binding in bindings.values():
+            binding["controls"] = sorted({*binding["controls"], "task_card"})
 
     selected_online_provider = policy_providers.get("online", "")
     online_decision = resolve_online_execution_decision(

@@ -171,3 +171,8 @@ def test_swarm_run_tagging_is_opt_in(tmp_path, monkeypatch):
     monkeypatch.setenv("NEXUS_SPEC_AUTO_TAG", "1")
     assert _invoke_swarm(monkeypatch, tmp_path, [])["env"] is None
     assert _invoke_swarm(monkeypatch, tmp_path, ["--tag"])["env"] == "1"
+
+
+# ARCHIVED 2026-10-13 legacy-engine: this file tests (in whole or in part) modules archived with
+# the legacy NexusEngine (scripts.engine.commands.swarm); see ARCHIVED_2026-10-13-legacy-engine.md.
+# It keeps running with unchanged node ids until the deletion PR removes it with those modules.

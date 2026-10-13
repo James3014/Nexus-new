@@ -35,11 +35,13 @@ def _make_request(task_id: str = "v1-vertical-001") -> UnifiedRuntimeRequest:
             "online_invoker_provider": "agy",
             "workforce_bindings": {
                 "online": {
-                    "worker_id": "agy_flash",
+                    "worker_id": "agy_flash_38",
                     "controls": [
                         "task_card",
                         "allowed_files",
                         "mandatory_commands",
+                        "parser",
+                        "verifier",
                         "independent_verification",
                     ],
                 }
@@ -367,11 +369,13 @@ def test_nc_v1_7_harness_preflight_failure_blocks_receipt() -> None:
             "online_invoker_provider": "agy",
             "workforce_bindings": {
                 "online": {
-                    "worker_id": "agy_flash",
+                    "worker_id": "agy_flash_38",
                     "controls": [
                         "task_card",
                         "allowed_files",
                         "mandatory_commands",
+                        "parser",
+                        "verifier",
                         "independent_verification",
                     ],
                 }

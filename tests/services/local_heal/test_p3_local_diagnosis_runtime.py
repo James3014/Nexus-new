@@ -72,7 +72,13 @@ class TestRealLocalDiagnosis:
         os.environ["NEXUS_OLLAMA_ENABLED"] = "1"
         diag = RealLocalDiagnosis()
         assert diag.ollama_enabled is True
-        assert diag.MODEL_NAME == "qwen2.5-s2t-advisor:3b"
+        from nexus_runtime.planning.services.model_default_resolution import (
+            resolve_default_model,
+        )
+
+        # The model comes from the Workforce policy, never the retired 3b tag.
+        assert diag.resolve_model_name() == resolve_default_model("compact_diagnosis")
+        assert diag.resolve_model_name() != "qwen2.5-s2t-advisor:3b"
         skeleton = {"task_id": "t1", "p3_task_difficulty": "medium"}
         anchor = {"target_file": "a.py", "target_symbol": "foo"}
         receipt = diag.compute_p3_local_diagnosis_runtime(skeleton, anchor)
@@ -153,3 +159,27 @@ class TestRealLocalDiagnosis:
         assert _parse_advisor_response("") == ""
         assert _parse_advisor_response("  ") == ""
         assert _parse_advisor_response("not json") != ""  # fallback truncation
+
+
+def test_model_not_admitted_fails_closed_without_model_call(monkeypatch) -> None:
+    from nexus_runtime.planning.services.model_default_resolution import (
+        ModelDefaultNotAdmittedError,
+    )
+
+    def _not_admitted(self) -> str:
+        raise ModelDefaultNotAdmittedError("compact_diagnosis", "no_local_first_route")
+
+    monkeypatch.setenv("NEXUS_OLLAMA_ENABLED", "1")
+    monkeypatch.setattr(RealLocalDiagnosis, "resolve_model_name", _not_admitted)
+    with patch(
+        "nexus.services.local_heal.p3_local_diagnosis_runtime.OllamaLocalModelProvider.generate"
+    ) as mock_generate:
+        diag = RealLocalDiagnosis()
+        receipt = diag.compute_p3_local_diagnosis_runtime(
+            {"task_id": "t1"}, {"target_file": "a.py"}
+        )
+    mock_generate.assert_not_called()
+    assert receipt.cloud_call_invoked is False
+    assert receipt.advisor_recommendation == ""
+    assert receipt.reason == "MODEL_DEFAULT_NOT_ADMITTED:compact_diagnosis"
+    assert diag.model_resolution_error.startswith("MODEL_DEFAULT_NOT_ADMITTED")

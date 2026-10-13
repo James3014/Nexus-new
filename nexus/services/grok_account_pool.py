@@ -12,6 +12,8 @@ import json
 import os
 import re
 import stat
+import subprocess
+import sys
 import time
 import uuid
 from dataclasses import dataclass
@@ -51,6 +53,16 @@ class GrokLease:
 
 
 @dataclass(frozen=True)
+class GrokHostBinding:
+    """Non-secret machine binding for the local credential pool."""
+
+    status: str
+    owner_host_id_hash: str | None
+    current_host_id_hash: str
+    matches: bool
+
+
+@dataclass(frozen=True)
 class GrokLocalAccount:
     """Machine-local operator view. Never put this object in public receipts."""
 
@@ -66,10 +78,45 @@ class GrokLocalAccount:
 
 
 _ALIAS_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_HOST_BINDING_SCHEMA = "nexus.grok_pool_host_binding.v1"
 
 
 def _hash(value: str, length: int = 12) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:length]
+
+
+def _machine_identity() -> str:
+    """Return one stable OS machine identity without persisting a second registry."""
+
+    for candidate in (Path("/etc/machine-id"), Path("/var/lib/dbus/machine-id")):
+        try:
+            value = candidate.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if value:
+            return f"machine-id:{value}"
+
+    if sys.platform == "darwin":
+        proc = subprocess.run(
+            ["/usr/sbin/ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        if proc.returncode == 0:
+            match = re.search(r'"IOPlatformUUID"\s*=\s*"([^"]+)"', proc.stdout)
+            if match:
+                return f"ioplatformuuid:{match.group(1).strip().lower()}"
+
+    raise GrokAccountPoolError("GROK_HOST_IDENTITY_UNAVAILABLE")
+
+
+def _host_identity_hash(value: str) -> str:
+    normalized = str(value).strip()
+    if not normalized:
+        raise GrokAccountPoolError("GROK_HOST_IDENTITY_UNAVAILABLE")
+    return hashlib.sha256(f"nexus.grok.host.v1:{normalized}".encode("utf-8")).hexdigest()
 
 
 def _pid_alive(pid: object) -> bool:
@@ -137,12 +184,21 @@ def classify_grok_failure(text: str, *, timed_out: bool = False) -> AccountFailu
 class GrokAccountPoolManager:
     """File-lock-backed allocator shared by local external-worker processes."""
 
-    def __init__(self, root: Path | None = None, *, cooldown_seconds: float = 300.0) -> None:
+    def __init__(
+        self,
+        root: Path | None = None,
+        *,
+        cooldown_seconds: float = 300.0,
+        host_identity: str | None = None,
+    ) -> None:
         self.root = Path(root or Path.home() / ".nexus/grok-account-pool").expanduser()
         self.state_path = self.root / "state.json"
         self.lock_path = self.root / "pool.lock"
         self.profile_root = self.root / "profiles"
         self.cooldown_seconds = float(cooldown_seconds)
+        self.host_id_hash = _host_identity_hash(
+            host_identity if host_identity is not None else _machine_identity()
+        )
 
     def _load_state(self) -> dict[str, Any]:
         try:
@@ -195,12 +251,82 @@ class GrokAccountPoolManager:
                 "updated_at": 0.0,
             }
 
+    def _host_binding_from_state(self, state: dict[str, Any]) -> GrokHostBinding:
+        raw = state.get("host_binding")
+        if raw is None:
+            return GrokHostBinding(
+                status="UNBOUND",
+                owner_host_id_hash=None,
+                current_host_id_hash=self.host_id_hash,
+                matches=False,
+            )
+        if (
+            not isinstance(raw, dict)
+            or raw.get("schema") != _HOST_BINDING_SCHEMA
+            or not isinstance(raw.get("host_id_hash"), str)
+            or not re.fullmatch(r"[0-9a-f]{64}", str(raw.get("host_id_hash")))
+        ):
+            raise GrokAccountPoolError("GROK_ACCOUNT_POOL_HOST_BINDING_INVALID")
+        owner = str(raw["host_id_hash"])
+        matches = owner == self.host_id_hash
+        return GrokHostBinding(
+            status="BOUND" if matches else "HOST_MISMATCH",
+            owner_host_id_hash=owner,
+            current_host_id_hash=self.host_id_hash,
+            matches=matches,
+        )
+
+    def _assert_host_binding(self, state: dict[str, Any]) -> None:
+        binding = self._host_binding_from_state(state)
+        if binding.owner_host_id_hash is None:
+            if state.get("accounts"):
+                raise GrokAccountPoolError("GROK_ACCOUNT_POOL_HOST_UNBOUND")
+            return
+        if not binding.matches:
+            raise GrokAccountPoolError("GROK_ACCOUNT_POOL_HOST_MISMATCH")
+
+    def host_binding(self) -> GrokHostBinding:
+        """Read host ownership without exposing raw machine identity."""
+
+        lock = self._lock()
+        try:
+            return self._host_binding_from_state(self._load_state_or_empty())
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+            lock.close()
+
+    def bind_host(self, *, confirm_existing_pool: bool = False) -> GrokHostBinding:
+        """Bind one legacy/unbound pool to this host; never rebind a mismatch."""
+
+        lock = self._lock()
+        try:
+            state = self._load_state_or_empty()
+            binding = self._host_binding_from_state(state)
+            if binding.owner_host_id_hash is not None:
+                if not binding.matches:
+                    raise GrokAccountPoolError("GROK_ACCOUNT_POOL_HOST_MISMATCH")
+                return binding
+            if state.get("accounts") and not confirm_existing_pool:
+                raise GrokAccountPoolError("GROK_ACCOUNT_POOL_HOST_BINDING_CONFIRMATION_REQUIRED")
+            state["host_binding"] = {
+                "schema": _HOST_BINDING_SCHEMA,
+                "host_id_hash": self.host_id_hash,
+                "bound_at": time.time(),
+            }
+            state["updated_at"] = time.time()
+            self._write_state(state)
+            return self._host_binding_from_state(state)
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+            lock.close()
+
     def local_accounts(self) -> tuple[GrokLocalAccount, ...]:
         """Read machine-local inventory without reading credential contents."""
 
         lock = self._lock()
         try:
             state = self._load_state_or_empty()
+            self._assert_host_binding(state)
             live_aliases = {
                 str(record.get("alias"))
                 for record in state.get("leases", {}).values()
@@ -260,6 +386,17 @@ class GrokAccountPoolManager:
             state = self._load_state_or_empty()
             self._prune_dead_leases(state)
             accounts = state.setdefault("accounts", {})
+            binding = self._host_binding_from_state(state)
+            if binding.owner_host_id_hash is None:
+                if accounts:
+                    raise GrokAccountPoolError("GROK_ACCOUNT_POOL_HOST_UNBOUND")
+                state["host_binding"] = {
+                    "schema": _HOST_BINDING_SCHEMA,
+                    "host_id_hash": self.host_id_hash,
+                    "bound_at": time.time(),
+                }
+            elif not binding.matches:
+                raise GrokAccountPoolError("GROK_ACCOUNT_POOL_HOST_MISMATCH")
             if normalized_alias in accounts:
                 raise GrokAccountPoolError("GROK_ACCOUNT_ALIAS_ALREADY_REGISTERED")
             for record in accounts.values():
@@ -394,6 +531,7 @@ class GrokAccountPoolManager:
         lock = self._lock()
         try:
             state = self._load_state()
+            self._assert_host_binding(state)
             self._prune_dead_leases(state)
             if any(
                 isinstance(record, dict) and record.get("consumer_id") == consumer
@@ -409,6 +547,7 @@ class GrokAccountPoolManager:
         lock = self._lock()
         try:
             state = self._load_state()
+            self._assert_host_binding(state)
             self._prune_dead_leases(state)
             record = state["leases"].get(lease.lease_id)
             if (
@@ -429,11 +568,12 @@ class GrokAccountPoolManager:
         lease: GrokLease,
         failure_kind: AccountFailureKind,
     ) -> GrokLease | None:
-        if not is_rotation_eligible(failure_kind):
-            return None
         lock = self._lock()
         try:
             state = self._load_state()
+            self._assert_host_binding(state)
+            if not is_rotation_eligible(failure_kind):
+                return None
             self._prune_dead_leases(state)
             record = state["leases"].get(lease.lease_id)
             if not isinstance(record, dict) or record.get("consumer_id") != lease.consumer_id:

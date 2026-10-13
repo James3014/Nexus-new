@@ -575,15 +575,23 @@ def _classify_single_capability(
     'executable', 'advisory', 'control_plane', 'unknown'.
 
     Lookup order:
-      1. wiring_map (registry-based, 34 entries)
-      2. _DEFINITIONS_STANDALONE (non-registry capabilities with local support)
-      3. CONTROLLER_PLANE_CAPABILITIES (known planner-level concepts)
+      1. CONTROLLER_PLANE_CAPABILITIES (known planner-level concepts; never executor input)
+      2. wiring_map (registry-based, 34 entries)
+      3. _DEFINITIONS_STANDALONE (non-registry capabilities with local support)
       4. Unknown
+
+    The control-plane set is checked first: once harness_preflight_sensor and
+    mempalace_gate also appeared in the registry wiring map, checking the registry
+    first classified them "advisory" and dispatched them to the executor, breaking
+    the 17f63ea82 contract (Refs #1924).
     """
     if not cap_str:
         return "unknown", cap_str
 
-    # 1. Registry-based wiring map
+    if cap_str in CONTROLLER_PLANE_CAPABILITIES:
+        return "control_plane", cap_str
+
+    # 2. Registry-based wiring map
     wiring = wiring_map.get(cap_str)
     if wiring is not None:
         if wiring.local_model_supported:
@@ -599,7 +607,7 @@ def _classify_single_capability(
         else:
             return "advisory", cap_str
 
-    # 2. Standalone definitions (non-registry capabilities with local wiring)
+    # 3. Standalone definitions (non-registry capabilities with local wiring)
     standalone_def = _DEFINITIONS_STANDALONE.get(cap_str)
     if standalone_def is not None:
         if standalone_def.get("local_model_supported", False):
@@ -615,10 +623,6 @@ def _classify_single_capability(
                 return "advisory", cap_str
         return "advisory", cap_str
 
-    # 3. Known control-plane capabilities
-    if cap_str in CONTROLLER_PLANE_CAPABILITIES:
-        return "control_plane", cap_str
-
     return "unknown", cap_str
 
 
@@ -632,18 +636,19 @@ def project_planner_capabilities_for_local_executor(
     Validates against local model executor wiring registry.
 
     Classification order per capability:
-      1. Wiring registry lookup (executable / advisory)
-      2. Known control-plane capability set (control_plane)
+      1. Known control-plane capability set (control_plane; kept out of the executor)
+      2. Wiring registry lookup (executable / advisory)
       3. Unknown (projection becomes invalid)
     """
-    _empty_proj = lambda src="", fr="": LocalExecutorCapabilityProjection(
-        selected_capabilities=(), source=src,
-        planner_selected_count=0, projected_count=0,
-        dropped_capabilities=(), unknown_capabilities=(),
-        advisory_capabilities=(), executable_capabilities=(),
-        control_plane_capabilities=(),
-        dependency_errors=(), valid=False, failure_reason=fr,
-    )
+    def _empty_proj(src: str = "", fr: str = "") -> LocalExecutorCapabilityProjection:
+        return LocalExecutorCapabilityProjection(
+            selected_capabilities=(), source=src,
+            planner_selected_count=0, projected_count=0,
+            dropped_capabilities=(), unknown_capabilities=(),
+            advisory_capabilities=(), executable_capabilities=(),
+            control_plane_capabilities=(),
+            dependency_errors=(), valid=False, failure_reason=fr,
+        )
 
     # Priority 1: explicit top-level
     explicit_caps = signal_snapshot.get("selected_capabilities")

@@ -63,7 +63,10 @@ def test_prune_registry():
         registry = SkillRegistry(db_path)
         
         # Insert test records
-        now_str = "2026-03-30T00:00:00Z"
+        # Must be "recent" relative to the real clock, not a hard-coded date.
+        from datetime import datetime, timezone
+
+        now_str = datetime.now(timezone.utc).isoformat()
         old_str = "2020-01-01T00:00:00Z" # Way over 90 days
         
         with sqlite3.connect(db_path) as conn:

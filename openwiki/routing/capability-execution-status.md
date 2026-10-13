@@ -6,7 +6,7 @@ tags: [routing, capability-registry, executor, split, evidence]
 openwiki:
   roles: [architecture, operations]
   change_kinds: [routing, public-api]
-  source_paths: [nexus/services/capability_registry.py, nexus/core/capability_executor_registry.py, nexus/engine/red_team_audit.py, scripts/engine/commands/stress_test.py, nexus/services/local_heal/orchestrator.py, scripts/eval/run_memory_ab_v1.py, requirements/canonical-runtime.txt]
+  source_paths: [nexus/services/capability_registry.py, nexus/core/capability_executor_registry.py, nexus/engine/red_team_audit.py, nexus/services/local_heal/orchestrator.py, scripts/eval/run_memory_ab_v1.py, requirements/canonical-runtime.txt]
   symbols: [EXECUTOR_REGISTRY, build_real_executor_invoker, BLOCKED_EXECUTOR_UNAVAILABLE, _exec_stress_test, _exec_learning_closure, _exec_ui_validator, _exec_meta_opt]
   test_paths: [tests/engine/test_capability_planner.py, tests/services/test_forecast_gate_mainchain_e2e.py, tests/benchmark/test_capability_regression_guard.py]
   invariants: [CapabilityPlanner is the sole route and capability-selection authority. Selection is not invocation; a receipt must carry invocation evidence before a capability may be claimed. Wiring on the Nexus-new CLI surface does not imply wiring on the nexus-runtime surface.]

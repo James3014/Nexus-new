@@ -206,14 +206,21 @@ def run_mainchain(
         codeintel=dict(stamped.codeintel) if isinstance(stamped.codeintel, Mapping) else {},
         enable=with_nexus_armor,
     )
-    return UnifiedRuntime(local_service=local_service).run(
-        stamped,
-        online_invoker=invoker,
-        capability_invokers=caps,
-        verifier=verifier,
-        learning=learning,
-        receipt_path=receipt_path,
-    )
+    try:
+        return UnifiedRuntime(local_service=local_service).run(
+            stamped,
+            online_invoker=invoker,
+            capability_invokers=caps,
+            verifier=verifier,
+            learning=learning,
+            receipt_path=receipt_path,
+        )
+    finally:
+        # Task completion (any terminal outcome): release the file locks this task acquired
+        # through the file_lock capability instead of leaving them to the TTL.
+        from nexus.orchestrator.file_lock_registry import release_task_locks
+
+        release_task_locks(str(request.task_id or ""))
 
 
 def run_mainchain_replan(
@@ -340,15 +347,20 @@ def run_mainchain_replan(
         enable=True,
     )
 
-    return UnifiedRuntime(local_service=local_service).run_replan(
-        previous_receipt,
-        stamped,
-        online_invoker=invoker,
-        capability_invokers=caps,
-        verifier=verifier,
-        learning=learning,
-        receipt_path=receipt_path,
-    )
+    try:
+        return UnifiedRuntime(local_service=local_service).run_replan(
+            previous_receipt,
+            stamped,
+            online_invoker=invoker,
+            capability_invokers=caps,
+            verifier=verifier,
+            learning=learning,
+            receipt_path=receipt_path,
+        )
+    finally:
+        from nexus.orchestrator.file_lock_registry import release_task_locks
+
+        release_task_locks(str(request.task_id or ""))
 
 
 def summarize_arm_receipt(receipt: Mapping[str, Any], *, prompt: str = "") -> dict[str, Any]:
@@ -497,11 +509,13 @@ def run_three_arm_structural(
         "online_policy": "auto",
         "workforce_bindings": {
             "online": {
-                "worker_id": "agy_flash",
+                "worker_id": "agy_flash_38",
                 "controls": [
                     "task_card",
                     "allowed_files",
                     "mandatory_commands",
+                    "parser",
+                    "verifier",
                     "independent_verification",
                 ],
             }

@@ -1,4 +1,5 @@
 """P3-I7: Stage 5 Hard-Case Escalation Stub Tests."""
+
 from __future__ import annotations
 
 import os
@@ -60,9 +61,13 @@ def test_executor_includes_stage5_in_flow():
     os.environ["NEXUS_LOCAL_MODEL_EXECUTOR_MODEL"] = "qwen2.5-coder:7b"
     try:
         planner = CapabilityPlanner()
-        plan = planner.plan(task_desc="test", task_type="bug", route={"difficulty": "hard", "pillar_signals": {}})
+        plan = planner.plan(
+            task_desc="test", task_type="bug", route={"difficulty": "hard", "pillar_signals": {}}
+        )
         ss = plan.signal_snapshot
-        assert ss.get("execution_topology") == "cloud_with_local_assist"
+        assert ss.get("suggested_executor_topology") == "cloud_with_local_assist"
+        assert ss.get("executor_topology") == "single_local_model"
+        assert ss.get("execution_topology") == "ASSISTED_CANONICAL"
     finally:
         os.environ.pop("NEXUS_ENABLE_CLOUD_WITH_LOCAL_ASSIST_SHADOW", None)
         os.environ.pop("NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR", None)
@@ -107,6 +112,7 @@ def test_executor_runs_stage5_and_updates_p3_status():
                 provider_invoked = False
                 model_called = False
                 model_name = ""
+
             return R()
 
     req = LocalModelExecutorRequest(

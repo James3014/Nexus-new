@@ -102,3 +102,8 @@ def test_autonomic_router_consistent_with_capability_planner_authority(router):
     assert plan.mode_hint == plan.mode
     assert "autonomic_route" not in state.metadata
     assert "swarm_mode" not in state.metadata
+
+
+# ARCHIVED 2026-10-13 legacy-engine: this file tests (in whole or in part) modules archived with
+# the legacy NexusEngine (nexus.engine.autonomic_router); see ARCHIVED_2026-10-13-legacy-engine.md.
+# It keeps running with unchanged node ids until the deletion PR removes it with those modules.

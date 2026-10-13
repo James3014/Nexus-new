@@ -204,3 +204,8 @@ class TestH75DRouteTruthProtection:
         assert os.environ.get("NEXUS_MODEL_EXECUTION_ENABLED", "0") != "1"
         assert os.environ.get("NEXUS_NETWORK_ACCESS_ENABLED", "0") != "1"
         assert os.environ.get("NEXUS_ROUTING_RUNTIME_STARTED", "0") != "1"
+
+
+# ARCHIVED 2026-10-13 legacy-engine: this file tests (in whole or in part) modules archived with
+# the legacy NexusEngine (nexus.engine.autonomic_router); see ARCHIVED_2026-10-13-legacy-engine.md.
+# It keeps running with unchanged node ids until the deletion PR removes it with those modules.

@@ -190,3 +190,8 @@ def test_orphan_release_facades_are_not_exposed():
 
     assert not hasattr(AuditService, "run_release")
     assert not hasattr(CliCommandsService, "release")
+
+
+# ARCHIVED 2026-10-13 legacy-engine: this file tests (in whole or in part) modules archived with
+# the legacy NexusEngine (nexus.services.cli_commands_service); see ARCHIVED_2026-10-13-legacy-engine.md.
+# It keeps running with unchanged node ids until the deletion PR removes it with those modules.

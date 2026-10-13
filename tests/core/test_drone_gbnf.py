@@ -1,36 +1,50 @@
-import json
-import pytest
-from unittest.mock import patch, MagicMock
-from nexus.core.drone_engine import LocalBonsaiBrain
+from unittest.mock import MagicMock, patch
 
-def test_gbnf_grammar_injection():
-    """
-    Test that the GBNF grammar strictly constraint 'action' values to
-    ['BASH', 'EDIT', 'DONE']. This ensures zero-hallucination action types.
-    """
-    brain = LocalBonsaiBrain("http://dummy")
-    
+from nexus.core.drone_engine import DRONE_ADMITTED_MODEL, LocalBonsaiBrain
+
+
+def test_gbnf_grammar_injection(monkeypatch):
+    monkeypatch.delenv("NEXUS_OLLAMA_URL", raising=False)
+    brain = LocalBonsaiBrain()
+    assert brain.api_url == "http://127.0.0.1:11434"
+    assert brain.model == DRONE_ADMITTED_MODEL == "qwen3.5:9b"
+
     with patch("nexus.core.drone_engine.requests.post") as mock_post:
-        # Mock successful JSON response
         mock_resp = MagicMock()
         mock_resp.status_code = 200
-        mock_resp.json.return_value = {"content": '{"action": "BASH", "command": "pwd"}'}
+        mock_resp.json.return_value = {"message": {"content": '{"action": "BASH", "command": "pwd"}'}}
         mock_post.return_value = mock_resp
-        
-        messages = [{"role": "user", "content": "List files"}]
-        result = brain.ask_structured(messages)
-        
-        # Verify grammar is sent in payload
-        assert mock_post.called
-        call_kwargs = mock_post.call_args.kwargs
-        assert "json" in call_kwargs
-        payload = call_kwargs["json"]
-        
-        assert "grammar" in payload
-        grammar_str = payload["grammar"]
-        
-        # Verify the tight constraints are in the grammar
-        assert "action_val ::= \"\\\"BASH\\\"\" | \"\\\"EDIT\\\"\" | \"\\\"DONE\\\"\"" in grammar_str
-        assert "root   ::= \"{\" space \"\\\"action\\\"\" space \":\" space action_val" in grammar_str
-        
-        assert result.get("action") == "BASH"
+
+        result = brain.ask_structured([{"role": "user", "content": "List files"}])
+
+    url = mock_post.call_args.args[0]
+    payload = mock_post.call_args.kwargs["json"]
+    assert url == "http://127.0.0.1:11434/api/chat"
+    assert payload["model"] == "qwen3.5:9b"
+    assert payload["format"]["properties"]["action"]["enum"] == ["BASH", "EDIT", "DONE"]
+    assert "grammar" not in payload
+    assert result["action"] == "BASH"
+
+
+def test_env_url_override_and_never_retired_model(monkeypatch):
+    monkeypatch.setenv("NEXUS_OLLAMA_URL", "http://example:1/")
+    brain = LocalBonsaiBrain()
+    assert brain.api_url == "http://example:1"
+    assert "qwen2.5-s2t-advisor" not in brain.model
+
+
+def test_health_check_fails_closed_with_reason():
+    brain = LocalBonsaiBrain("http://dummy")
+    with patch("nexus.core.drone_engine.requests.get", side_effect=OSError("refused")):
+        assert brain.health_check() is False
+    assert "unreachable" in brain.last_unavailable_reason
+
+    resp = MagicMock(status_code=200)
+    resp.json.return_value = {"models": [{"name": "other:1b"}]}
+    with patch("nexus.core.drone_engine.requests.get", return_value=resp):
+        assert brain.health_check() is False
+    assert "not installed" in brain.last_unavailable_reason
+
+    resp.json.return_value = {"models": [{"name": "qwen3.5:9b"}]}
+    with patch("nexus.core.drone_engine.requests.get", return_value=resp):
+        assert brain.health_check() is True

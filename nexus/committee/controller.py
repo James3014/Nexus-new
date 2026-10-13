@@ -18,7 +18,7 @@ class CommitteeControllerV263:
     🎮 [NEXUS v26.7] 資料流精修版控制器
     職責: 透過明確的 Bounded Contexts 驅動解題管線，消除特殊分支。
     """
-    def __init__(self, task_id: str, domains: List[str] = None):
+    def __init__(self, task_id: str, domains: List[str] = None, verifiers: Optional[List[Any]] = None):
         self.enabled = os.getenv("NEXUS_USE_COMMITTEE", "0") == "1"
         self.packs_enabled = os.getenv("NEXUS_USE_PACKS", "0") == "1"
         self.task_id = task_id
@@ -31,6 +31,13 @@ class CommitteeControllerV263:
         self.last_candidate_evidence_collection: Dict[str, Any] = {}
         self.resampler = AdaptiveResampler()
         self.last_retry_directive: Dict[str, Any] = {}
+        # Explicit per-call verifiers (e.g. PatchExecutionVerifier); None keeps the global registry.
+        self.verifiers = list(verifiers) if verifiers is not None else None
+
+    @staticmethod
+    def _proposer(p: Dict[str, Any]) -> str:
+        # "proposer_id" is the canonical-context-safe name; "model" stays for in-process callers.
+        return str(p.get("proposer_id") or p.get("model") or "")
 
     def process_proposals(self, raw_proposals: List[Dict[str, Any]]) -> CommitteeReceipt:
         if not self.enabled:
@@ -38,7 +45,7 @@ class CommitteeControllerV263:
 
         # 1. Ingress
         for p in raw_proposals:
-            candidate = self.adapter.create_candidate(self.task_id, p["model"], p["attempt"], p["raw_label"], p.get("artifacts", []))
+            candidate = self.adapter.create_candidate(self.task_id, self._proposer(p), p["attempt"], p["raw_label"], p.get("artifacts", []))
             self.registry.register(candidate)
         
         candidates = self.registry.get_all()
@@ -52,7 +59,10 @@ class CommitteeControllerV263:
                 for pack in PackRegistry.get_enabled_packs(self.domains):
                     all_verdicts.extend(pack.evaluate_all(c.candidate_id, patch))
             # 基礎驗證 (Fallback if no pack)
-            if not all_verdicts:
+            if self.verifiers is not None:
+                for v in self.verifiers:
+                    all_verdicts.append(v.evaluate(c.candidate_id, patch))
+            elif not all_verdicts:
                 for v in VerifierRegistry.get_all_verifiers():
                     all_verdicts.append(v.evaluate(c.candidate_id, patch))
             
@@ -195,5 +205,5 @@ class CommitteeControllerV263:
 
     def _fallback_receipt(self, raw_proposals):
         p = raw_proposals[0]
-        candidate = self.adapter.create_candidate(self.task_id, p['model'], p['attempt'], p['raw_label'], [])
+        candidate = self.adapter.create_candidate(self.task_id, self._proposer(p), p['attempt'], p['raw_label'], [])
         return CommitteeReceipt(self.task_id, 1, [candidate], [], candidate.candidate_id, 'feature_disabled_fallback')

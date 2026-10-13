@@ -12,6 +12,11 @@
         "hooks": [
           { "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/handoff-check.sh\"" }
         ]
+      },
+      {
+        "hooks": [
+          { "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/core-precheck-on-stop.sh\"", "timeout": 45 }
+        ]
       }
     ]
   }

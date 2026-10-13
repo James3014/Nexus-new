@@ -193,6 +193,16 @@ def test_online_native_canary_is_structurally_valid_but_not_live_claimable(
         assert receipt.invoked is False and receipt.gate_passed is False
         assert receipt.outcome["skip_reason"] == ARCHIVED_CAPABILITY_REASONS[capability]
         return
+    if capability == "ultra_review":
+        from nexus.engine.ultra_review_service import os_sandbox_available
+
+        if not os_sandbox_available():
+            # PR tests run only behind an OS sandbox (macOS sandbox-exec); elsewhere the
+            # review fails closed and the online-native canary must not be green.
+            result = _run_family_canary(capability, positive=True)
+            assert result["final_status"] == "FAIL", result
+            assert result["gate_passed"] is not True
+            return
     task = _online_task(capability, tmp_path / "workspace")
     row = run_closure_task(
         task,

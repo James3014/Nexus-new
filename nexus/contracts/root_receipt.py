@@ -49,8 +49,12 @@ def build_world_c_verifier_projection(context: Mapping[str, Any]) -> dict[str, A
     )
     world_c_hash = str(world_c.get("receipt_hash") or "")
     verifier_status = "pass" if valid else "failed"
+    # Runtime-owned attempt identity (never a World C or caller field), so the
+    # runtime can bind this verifier verdict to the exact execution attempt.
+    attempt_id = str(_mapping(context.get("execution_attempt")).get("attempt_id") or "")
     return {
         "task_id": str(context.get("task_id") or world_c.get("task_id") or ""),
+        "attempt_id": attempt_id,
         "status": verifier_status,
         "verifier_status": verifier_status,
         "invoked": bool(verifier.get("invoked")),

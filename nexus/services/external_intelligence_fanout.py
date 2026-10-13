@@ -9,7 +9,8 @@ import subprocess
 import tempfile
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -18,6 +19,25 @@ from nexus.services.external_intelligence import (
     ExternalIntelligenceError,
     parse_external_execution_envelope,
     validate_selected_worker,
+)
+from nexus.services.external_intelligence_core_binding import (
+    CAPABILITY_DISCOVERY_INDEX_PATH,
+    MAX_REPAIRS_PER_UNIT_LIMIT,
+    OPERATING_MODE_PATH,
+    CoreAuthorityInputs,
+    CoreBindingError,
+    binding_validity_seconds,
+    bound_operation_material,
+    build_acceptance_contract,
+    build_capability_discovery_receipt,
+    build_integration_authority,
+    build_repository_mutation_binding,
+    canonical_origin_repository,
+    core_hash,
+    derive_bound_envelope,
+    envelope_sha256,
+    parse_bound_execution_envelope_v2,
+    validate_repository_mutation_binding,
 )
 
 FANOUT_DECISION_SCHEMA = "external_intelligence_fanout_decision.v1"
@@ -152,6 +172,10 @@ class ExecutionUnit:
     selected_worker: Mapping[str, Any] | None = None
     provider: str = PROVIDER
     model: str = MODEL
+    # Core binding authority inputs (Issue contract + Task Card + worker binding).
+    # Deliberately excluded from identity(): unit identity, attempts and receipts of
+    # unbound dispatch stay byte-identical; the minted binding pins this authority.
+    core_authority: Mapping[str, Any] | None = field(default=None, compare=False, hash=False)
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "ExecutionUnit":
@@ -204,6 +228,9 @@ class ExecutionUnit:
             selected_worker=selected_worker,
             provider=provider,
             model=model,
+            core_authority=dict(value["core_authority"])
+            if isinstance(value.get("core_authority"), Mapping)
+            else None,
         )
 
     def identity(self) -> dict[str, Any]:
@@ -310,6 +337,9 @@ class OpenCodeRunResult:
     effect_authorization_hash: str = ""
     tool_projection_hash: str = ""
     execution_exposure_receipt: dict[str, Any] | None = None
+    core_binding_status: str = ""
+    core_binding_hash: str = ""
+    acceptance_contract_hash: str = ""
 
 
 def plan_fanout(
@@ -432,6 +462,8 @@ class FanoutStore:
         self.attempts = self.root / "attempts"
         self.receipts = self.root / "receipts"
         self.sessions = self.root / "sessions"
+        self.bound_envelopes = self.root / "bound-envelopes"
+        self.capability_discovery = self.root / "capability-discovery"
 
     @staticmethod
     def _unit_key(task_id: str, unit_id: str) -> str:
@@ -517,6 +549,7 @@ class FanoutStore:
         repair_id: str,
         repair_ref: str,
         repair_sha256: str,
+        core_binding: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         task_id = _safe_slug(previous_receipt.get("task_id"), "task_id")
         unit_id = _safe_slug(previous_receipt.get("unit_id"), "unit_id")
@@ -555,8 +588,58 @@ class FanoutStore:
             "repair_sha256": repair_sha256,
             "parent_receipt_id": previous_receipt.get("receipt_id"),
         }
+        if core_binding is not None:
+            # A bound continuation reuses the parent's binding; the root bound
+            # operation/attempt it was minted for are recorded alongside.
+            attempt.update({key: str(core_binding[key]) for key in _CORE_CONTINUATION_FIELDS})
         _atomic_json(path, attempt)
         return attempt
+
+    def bound_envelope_path(self, task_id: str, unit_id: str, attempt_id: str) -> Path:
+        attempt_key = _safe_slug(attempt_id, "attempt_id")
+        return self.bound_envelopes / f"{self._unit_key(task_id, unit_id)}--{attempt_key}.json"
+
+    def write_bound_envelope(
+        self, attempt: Mapping[str, Any], bound_envelope: Mapping[str, Any]
+    ) -> Path:
+        path = self.bound_envelope_path(
+            str(attempt["task_id"]), str(attempt["unit_id"]), str(attempt["attempt_id"])
+        )
+        _atomic_json(path, bound_envelope)
+        return path
+
+    def write_capability_discovery_receipt(self, receipt: Mapping[str, Any]) -> Path:
+        digest = core_hash(dict(receipt)).removeprefix("sha256:")
+        path = self.capability_discovery / f"{digest}.json"
+        if path.exists():
+            existing = json.loads(path.read_text(encoding="utf-8"))
+            if existing != dict(receipt):
+                raise FanoutError("CAPABILITY_DISCOVERY_RECEIPT_COLLISION")
+            return path
+        _atomic_json(path, receipt)
+        return path
+
+    def record_core_binding(
+        self,
+        attempt: Mapping[str, Any],
+        *,
+        bound_envelope_ref: str,
+        bound_envelope_sha256: str,
+        core_binding_hash: str,
+        acceptance_contract_hash: str,
+        capability_discovery_receipt_ref: str,
+        suffix: str = "initial",
+    ) -> dict[str, Any]:
+        value = dict(attempt)
+        value.update({
+            "bound_envelope_ref": bound_envelope_ref,
+            "bound_envelope_sha256": bound_envelope_sha256,
+            "core_binding_hash": core_binding_hash,
+            "acceptance_contract_hash": acceptance_contract_hash,
+            "capability_discovery_receipt_ref": capability_discovery_receipt_ref,
+        })
+        _atomic_json(self._attempt_path(value["task_id"], value["unit_id"], suffix), value)
+        return value
 
     def mark_dispatching(
         self, attempt: Mapping[str, Any], *, suffix: str = "initial"
@@ -1128,8 +1211,21 @@ def _bootstrap_evidence_refs(unit: ExecutionUnit, envelope_text: str) -> tuple[s
     return task_card_path, target_paths
 
 
-def build_worker_bootstrap(unit: ExecutionUnit, workspace: WorkspaceLease) -> str:
-    """Build a self-contained handoff with provenance-only artifact metadata."""
+def build_worker_bootstrap(
+    unit: ExecutionUnit,
+    workspace: WorkspaceLease,
+    *,
+    bound_envelope_ref: str | None = None,
+    bound_envelope_sha256: str | None = None,
+) -> str:
+    """Build a self-contained handoff with provenance-only artifact metadata.
+
+    For a Core-bound dispatch ``envelope_sha256`` names the bound envelope (the
+    artifact the runtime admits) and ``semantic_envelope_sha256`` keeps the immutable
+    semantic envelope identity.
+    """
+    if (bound_envelope_ref is None) != (bound_envelope_sha256 is None):
+        raise FanoutError("BOUND_ENVELOPE_IDENTITY_INCOMPLETE")
     artifact = _verify_envelope_scope(unit)
     envelope_text = artifact.read_text(encoding="utf-8")
     task_card_path, target_paths = _bootstrap_evidence_refs(unit, envelope_text)
@@ -1158,14 +1254,24 @@ def build_worker_bootstrap(unit: ExecutionUnit, workspace: WorkspaceLease) -> st
         model_adapt_line = "Read and follow the model_adaptation brief inside the embedded envelope above: role_contract, task_local_invariants, known_failure_guards, execution_strategy, forbidden_inferences, repair_policy."
         guard_line = "Apply only the task-relevant known_failure_guards; encode one evidence-guided same-unit repair and no blind retry or auto-chain."
 
+    if bound_envelope_sha256 is not None:
+        envelope_lines = [
+            f"envelope_artifact_ref={json.dumps(bound_envelope_ref, ensure_ascii=True)}",
+            f"envelope_sha256={bound_envelope_sha256}",
+            f"semantic_envelope_sha256={unit.envelope_sha256}",
+        ]
+    else:
+        envelope_lines = [
+            f"envelope_artifact_ref={json.dumps(unit.envelope_ref, ensure_ascii=True)}",
+            f"envelope_sha256={unit.envelope_sha256}",
+        ]
     return "\n".join([
         header,
         f"task_id={unit.task_id}",
         f"unit_id={unit.unit_id}",
         f"expected_base_sha={unit.expected_base_sha}",
         f"workspace_id={workspace.workspace_id}",
-        f"envelope_artifact_ref={json.dumps(unit.envelope_ref, ensure_ascii=True)}",
-        f"envelope_sha256={unit.envelope_sha256}",
+        *envelope_lines,
         "The full external_execution_envelope.v1 is embedded in Controller evidence above; use it as the authoritative task brief.",
         "envelope_artifact_ref is provenance/readback metadata only. Do not open envelope_artifact_ref through workspace tools.",
         f"task_card_workspace_path={task_card_path}",
@@ -1362,6 +1468,101 @@ def _resolve_worker_transport_identity(
     return exec_model, provider_id, model_id
 
 
+_CORE_BOUND_ATTEMPT_FIELDS = (
+    "bound_envelope_ref",
+    "bound_envelope_sha256",
+    "core_binding_hash",
+    "acceptance_contract_hash",
+)
+
+
+def _git_blob_bytes(root: Path, revision: str, rel_path: str) -> bytes | None:
+    result = subprocess.run(
+        ["git", "cat-file", "blob", f"{revision}:{rel_path}"],
+        cwd=root,
+        capture_output=True,
+        timeout=30.0,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout
+
+
+_CORE_BOUND_RECEIPT_FIELDS = (
+    "bound_envelope_ref",
+    "bound_envelope_sha256",
+    "core_binding_status",
+    "core_binding_hash",
+    "acceptance_contract_hash",
+)
+_CORE_CONTINUATION_FIELDS = (
+    *_CORE_BOUND_ATTEMPT_FIELDS,
+    "core_binding_operation_id",
+    "core_binding_attempt_id",
+)
+
+
+def _receipt_core_binding(receipt: Mapping[str, Any]) -> dict[str, str] | None:
+    """Return the Core identity a bound parent receipt pins, or None for unbound ones.
+
+    The root operation/attempt are the ones the binding was minted for: the receipt's
+    own ids for the initial dispatch, the recorded root ids for a bound continuation.
+    """
+    present = [key for key in _CORE_BOUND_RECEIPT_FIELDS if key in receipt]
+    if not present:
+        return None
+    if (
+        len(present) != len(_CORE_BOUND_RECEIPT_FIELDS)
+        or receipt.get("core_binding_status") != "BOUND"
+    ):
+        raise FanoutError("CORE_BINDING_PARENT_RECEIPT_INVALID")
+    if receipt.get("mode") == "REPAIR_CONTINUE":
+        root_operation = receipt.get("core_binding_operation_id")
+        root_attempt = receipt.get("core_binding_attempt_id")
+    else:
+        root_operation = receipt.get("operation_id")
+        root_attempt = receipt.get("attempt_id")
+    if (
+        not isinstance(root_operation, str)
+        or _SHA256_RE.fullmatch(root_operation) is None
+        or not isinstance(root_attempt, str)
+        or not root_attempt.strip()
+    ):
+        raise FanoutError("CORE_BINDING_PARENT_RECEIPT_INVALID")
+    return {
+        "bound_envelope_ref": str(receipt["bound_envelope_ref"]),
+        "bound_envelope_sha256": str(receipt["bound_envelope_sha256"]),
+        "core_binding_hash": str(receipt["core_binding_hash"]),
+        "acceptance_contract_hash": str(receipt["acceptance_contract_hash"]),
+        "core_binding_operation_id": root_operation,
+        "core_binding_attempt_id": root_attempt,
+    }
+
+
+def _attempt_core_hashes(attempt: Mapping[str, Any]) -> tuple[str, str] | None:
+    """Return the Core hashes recorded for a bound attempt, or None for unbound ones."""
+    present = [key for key in _CORE_BOUND_ATTEMPT_FIELDS if key in attempt]
+    if not present:
+        return None
+    if len(present) != len(_CORE_BOUND_ATTEMPT_FIELDS):
+        raise FanoutError("CORE_BINDING_ATTEMPT_RECORD_INCOMPLETE")
+    return str(attempt["core_binding_hash"]), str(attempt["acceptance_contract_hash"])
+
+
+@dataclass(frozen=True)
+class _CoreBindingPreflight:
+    inputs: CoreAuthorityInputs
+    semantic_envelope: Mapping[str, Any]
+    worker_identity_sha256: str
+    origin: str
+    source_tree: str
+    capability_receipt: Mapping[str, Any]
+    integration_authority: Mapping[str, str]
+    acceptance_contract: Mapping[str, Any]
+    acceptance_contract_hash: str
+
+
 class AdaptiveWorkerFanoutRuntime:
     def __init__(
         self,
@@ -1369,10 +1570,19 @@ class AdaptiveWorkerFanoutRuntime:
         allocator: GitWorktreeAllocator,
         store: FanoutStore,
         transport: OpenCodeWorkerTransport | Any | None = None,
+        max_repairs_per_unit: int = 1,
     ):
+        if (
+            isinstance(max_repairs_per_unit, bool)
+            or not isinstance(max_repairs_per_unit, int)
+            or not 0 <= max_repairs_per_unit <= MAX_REPAIRS_PER_UNIT_LIMIT
+        ):
+            raise FanoutError("INVALID_REPAIR_BUDGET")
         self.allocator = allocator
         self.store = store
         self.transport = transport or OpenCodeWorkerTransport()
+        # The closure's per-unit repair budget; it sizes the Core binding's lifetime.
+        self.max_repairs_per_unit = max_repairs_per_unit
 
     def _transport_for_unit(self, unit_or_receipt: ExecutionUnit | Mapping[str, Any]) -> Any:
         selected_worker = (
@@ -1505,6 +1715,267 @@ class AdaptiveWorkerFanoutRuntime:
         result["run_sha256"] = _sha256(_canonical_json(result))
         return result
 
+    @staticmethod
+    def _requires_core_binding(artifact: Path, transport: Any) -> bool:
+        """Open SWE admits a v2 envelope only with a Core repository_mutation_binding."""
+        if not getattr(transport, "supports_core_mutation_binding", False):
+            return False
+        envelope = json.loads(artifact.read_text(encoding="utf-8"))
+        return isinstance(envelope, Mapping) and (
+            envelope.get("schema") == "external_execution_envelope.v2"
+        )
+
+    def _core_binding_preflight(
+        self,
+        unit: ExecutionUnit,
+        workspace: WorkspaceLease,
+        artifact: Path,
+        transport: Any,
+    ) -> _CoreBindingPreflight:
+        """Everything a binding needs except the attempt identity; no attempt is written."""
+        if unit.core_authority is None:
+            raise FanoutError("CORE_BINDING_AUTHORITY_REQUIRED")
+        try:
+            inputs = CoreAuthorityInputs.from_mapping(unit.core_authority)
+            semantic = json.loads(artifact.read_text(encoding="utf-8"))
+            if not isinstance(semantic, Mapping) or envelope_sha256(semantic) != (
+                unit.envelope_sha256
+            ):
+                raise FanoutError("ENVELOPE_SHA256_MISMATCH")
+            envelope_binding = semantic.get("binding")
+            if (
+                not isinstance(envelope_binding, Mapping)
+                or inputs.task_id != unit.task_id
+                or inputs.main_sha != unit.expected_base_sha
+                or envelope_binding.get("main_sha") != inputs.main_sha
+                or str(envelope_binding.get("repository") or "").lower()
+                != inputs.repository.lower()
+                or envelope_binding.get("task_card_ref") != inputs.task_card_ref
+                or str(envelope_binding.get("task_card_hash") or "").lower()
+                != inputs.task_card_hash
+            ):
+                raise FanoutError("CORE_AUTHORITY_ENVELOPE_MISMATCH")
+            if unit.selected_worker is None:
+                raise FanoutError("CORE_BINDING_WORKER_REQUIRED")
+            worker_sha = _sha256(_canonical_json(dict(unit.selected_worker)))
+            if worker_sha != inputs.worker_binding_sha256 or worker_sha != getattr(
+                transport, "worker_identity_sha256", worker_sha
+            ):
+                raise FanoutError("CORE_AUTHORITY_WORKER_MISMATCH")
+            root = Path(workspace.path)
+            base = unit.expected_base_sha
+            try:
+                origin = _run_git(root, "remote", "get-url", "origin")
+                source_tree = _run_git(root, "rev-parse", "--verify", f"{base}^{{tree}}")
+            except FanoutError as exc:
+                raise FanoutError("CORE_BINDING_WORKSPACE_IDENTITY_UNAVAILABLE") from exc
+            if (
+                not canonical_origin_repository(origin)
+                or canonical_origin_repository(origin) != inputs.repository.lower()
+            ):
+                raise FanoutError("CORE_BINDING_ORIGIN_MISMATCH")
+            index_bytes = _git_blob_bytes(root, base, CAPABILITY_DISCOVERY_INDEX_PATH)
+            operating_mode = _git_blob_bytes(root, base, OPERATING_MODE_PATH)
+            if operating_mode is None:
+                raise CoreBindingError("CORE_OPERATING_MODE_MISSING")
+            worker = dict(unit.selected_worker)
+            receipt = build_capability_discovery_receipt(
+                repository=inputs.repository,
+                main_sha=base,
+                index_bytes=index_bytes,
+                intent=inputs.intent,
+                disposition=inputs.capability_disposition,
+                matched_capability_ids=inputs.capability_ids,
+                justification=inputs.capability_justification,
+                evidence={
+                    "architecture": [
+                        f"git:{base}:{CAPABILITY_DISCOVERY_INDEX_PATH}",
+                        f"git:{base}:{OPERATING_MODE_PATH}",
+                    ],
+                    "source": [f"git:{base}:{path}" for path in unit.mutation_paths],
+                    "history": [
+                        f"github://{inputs.repository}/issues/{inputs.issue_number}"
+                        f"@{inputs.revision}",
+                        f"task_card:{inputs.task_card_ref}@{inputs.task_card_hash}",
+                    ],
+                    "runtime": [
+                        f"{worker['admission_evidence_ref']}@{worker['admission_evidence_hash']}",
+                        f"{worker['selection_evidence_ref']}@{worker['selection_evidence_hash']}",
+                    ],
+                },
+            )
+            authority = build_integration_authority(
+                inputs, operating_mode_sha256=hashlib.sha256(operating_mode).hexdigest()
+            )
+            contract, contract_hash = build_acceptance_contract(
+                inputs,
+                unit_id=unit.unit_id,
+                mutation_paths=unit.mutation_paths,
+                allow_deletions=unit.allow_deletions,
+            )
+        except CoreBindingError as exc:
+            raise FanoutError(str(exc)) from exc
+        return _CoreBindingPreflight(
+            inputs=inputs,
+            semantic_envelope=semantic,
+            worker_identity_sha256=worker_sha,
+            origin=origin,
+            source_tree=source_tree,
+            capability_receipt=receipt,
+            integration_authority=authority,
+            acceptance_contract=contract,
+            acceptance_contract_hash=contract_hash,
+        )
+
+    def _mint_core_binding(
+        self,
+        unit: ExecutionUnit,
+        workspace: WorkspaceLease,
+        attempt: Mapping[str, Any],
+        transport: Any,
+        preflight: _CoreBindingPreflight,
+    ) -> dict[str, Any]:
+        """Mint the per-attempt binding and write the derived bound envelope."""
+        attempt_id = str(attempt["attempt_id"])
+        material = bound_operation_material(
+            operation="worker_run",
+            workspace_path=workspace.path,
+            attempt_id=attempt_id,
+            unit_identity_sha256=unit.identity_sha256,
+            semantic_envelope_sha256=unit.envelope_sha256,
+            worker_identity_sha256=preflight.worker_identity_sha256,
+        )
+        operation_id = transport.prepare_operation_id(
+            "worker_run",
+            prompt="",
+            artifact_path="",
+            workspace_path=workspace.path,
+            session_id="",
+            operation_material=material,
+        )
+        receipt_path = self.store.write_capability_discovery_receipt(preflight.capability_receipt)
+        try:
+            binding = build_repository_mutation_binding(
+                operation_id=operation_id,
+                attempt_id=attempt_id,
+                repository=preflight.inputs.repository,
+                origin=preflight.origin,
+                source_revision=unit.expected_base_sha,
+                source_tree=preflight.source_tree,
+                workspace_path=workspace.path,
+                integration_authority=preflight.integration_authority,
+                capability_receipt_hash=core_hash(dict(preflight.capability_receipt)),
+                index_revision=unit.expected_base_sha,
+                acceptance_contract=preflight.acceptance_contract,
+                contract_hash=preflight.acceptance_contract_hash,
+                created_at=datetime.now(timezone.utc),
+                valid_for_seconds=binding_validity_seconds(
+                    float(getattr(transport, "timeout", 300.0)), self.max_repairs_per_unit
+                ),
+            )
+            bound = derive_bound_envelope(preflight.semantic_envelope, binding)
+        except CoreBindingError as exc:
+            raise FanoutError(str(exc)) from exc
+        bound_path = self.store.write_bound_envelope(attempt, bound)
+        return {
+            "operation_id": operation_id,
+            "operation_material": material,
+            "bound_envelope_ref": str(bound_path),
+            "bound_envelope_sha256": envelope_sha256(bound),
+            "core_binding_hash": str(binding["binding_hash"]),
+            "acceptance_contract_hash": preflight.acceptance_contract_hash,
+            "capability_discovery_receipt_ref": str(receipt_path),
+        }
+
+    @staticmethod
+    def _revalidate_core_binding(
+        unit: ExecutionUnit, workspace: WorkspaceLease, attempt: Mapping[str, Any]
+    ) -> None:
+        """Re-observe the workspace and binding immediately before the first effect."""
+        root = Path(workspace.path)
+        base = unit.expected_base_sha
+        try:
+            head = _run_git(root, "rev-parse", "HEAD")
+            dirty = _run_git(root, "status", "--porcelain=v1")
+            tree = _run_git(root, "rev-parse", "--verify", f"{base}^{{tree}}")
+            origin = _run_git(root, "remote", "get-url", "origin")
+        except FanoutError as exc:
+            raise CoreBindingError("workspace_observation") from exc
+        if head != base:
+            raise CoreBindingError("workspace_head")
+        if dirty:
+            raise CoreBindingError("workspace_dirty")
+        try:
+            text = Path(str(attempt["bound_envelope_ref"])).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise CoreBindingError("bound_envelope_read") from exc
+        semantic, binding, observed_sha = parse_bound_execution_envelope_v2(
+            text, semantic_envelope_sha256=unit.envelope_sha256
+        )
+        if (
+            observed_sha != attempt.get("bound_envelope_sha256")
+            or binding.get("binding_hash") != attempt.get("core_binding_hash")
+            or binding["core"].get("acceptance_contract_hash")
+            != attempt.get("acceptance_contract_hash")
+        ):
+            raise CoreBindingError("core_binding_hash")
+        validate_repository_mutation_binding(
+            binding,
+            operation_id=str(attempt.get("operation_id") or ""),
+            attempt_id=str(attempt.get("attempt_id") or ""),
+            repository=str(semantic["binding"].get("repository") or ""),
+            expected_base=base,
+            observed_origin=origin,
+            observed_base_tree=tree,
+            workspace_path=workspace.path,
+            allowed_paths=unit.mutation_paths,
+        )
+
+    @staticmethod
+    def _revalidate_core_binding_for_continuation(
+        previous_receipt: Mapping[str, Any],
+        core_binding: Mapping[str, str],
+        workspace: WorkspaceLease,
+    ) -> None:
+        """Re-check the parent's binding before a bound repair continuation.
+
+        The workspace now holds the parent candidate commit, so the binding is checked
+        against the bound base's tree (not HEAD), and freshness in continuation mode.
+        """
+        root = Path(workspace.path)
+        base = str(previous_receipt.get("base_sha") or "")
+        try:
+            origin = _run_git(root, "remote", "get-url", "origin")
+            tree = _run_git(root, "rev-parse", "--verify", f"{base}^{{tree}}")
+        except FanoutError as exc:
+            raise CoreBindingError("workspace_observation") from exc
+        try:
+            text = Path(core_binding["bound_envelope_ref"]).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise CoreBindingError("bound_envelope_read") from exc
+        semantic, binding, observed_sha = parse_bound_execution_envelope_v2(
+            text, semantic_envelope_sha256=str(previous_receipt.get("envelope_sha256") or "")
+        )
+        if (
+            observed_sha != core_binding["bound_envelope_sha256"]
+            or binding.get("binding_hash") != core_binding["core_binding_hash"]
+            or binding["core"].get("acceptance_contract_hash")
+            != core_binding["acceptance_contract_hash"]
+        ):
+            raise CoreBindingError("core_binding_hash")
+        validate_repository_mutation_binding(
+            binding,
+            operation_id=core_binding["core_binding_operation_id"],
+            attempt_id=core_binding["core_binding_attempt_id"],
+            repository=str(semantic["binding"].get("repository") or ""),
+            expected_base=base,
+            observed_origin=origin,
+            observed_base_tree=tree,
+            workspace_path=workspace.path,
+            allowed_paths=list(previous_receipt.get("mutation_paths") or []),
+            continuation=True,
+        )
+
     def _dispatch_initial(
         self,
         unit: ExecutionUnit,
@@ -1513,12 +1984,21 @@ class AdaptiveWorkerFanoutRuntime:
     ) -> dict[str, Any]:
         artifact = _verify_envelope_scope(unit)
         transport = self._transport_for_unit(unit)
+        preflight = (
+            self._core_binding_preflight(unit, workspace, artifact, transport)
+            if self._requires_core_binding(artifact, transport)
+            else None
+        )
         if resume_prepared:
             attempt = self.store.existing_initial_attempt(unit)
             if attempt is None or attempt.get("state") != "PREPARED":
                 raise FanoutError("FANOUT_PREPARED_ATTEMPT_REQUIRED")
         else:
             attempt = self.store.prepare_initial(unit, workspace)
+        if preflight is not None:
+            return self._dispatch_initial_bound(
+                unit, workspace, attempt, artifact, transport, preflight
+            )
         prompt = build_worker_bootstrap(unit, workspace)
         if artifact.read_text(encoding="utf-8") in prompt:
             raise FanoutError("FULL_ENVELOPE_IN_CONTROLLER_PROMPT")
@@ -1547,6 +2027,59 @@ class AdaptiveWorkerFanoutRuntime:
             )
         return self._finalize_initial(unit, workspace, attempt, result, transport=transport)
 
+    def _dispatch_initial_bound(
+        self,
+        unit: ExecutionUnit,
+        workspace: WorkspaceLease,
+        attempt: Mapping[str, Any],
+        artifact: Path,
+        transport: Any,
+        preflight: _CoreBindingPreflight,
+    ) -> dict[str, Any]:
+        minted = self._mint_core_binding(unit, workspace, attempt, transport, preflight)
+        attempt = self.store.record_core_binding(
+            attempt,
+            bound_envelope_ref=minted["bound_envelope_ref"],
+            bound_envelope_sha256=minted["bound_envelope_sha256"],
+            core_binding_hash=minted["core_binding_hash"],
+            acceptance_contract_hash=minted["acceptance_contract_hash"],
+            capability_discovery_receipt_ref=minted["capability_discovery_receipt_ref"],
+        )
+        prompt = build_worker_bootstrap(
+            unit,
+            workspace,
+            bound_envelope_ref=minted["bound_envelope_ref"],
+            bound_envelope_sha256=minted["bound_envelope_sha256"],
+        )
+        bound_artifact = Path(minted["bound_envelope_ref"])
+        if (
+            artifact.read_text(encoding="utf-8") in prompt
+            or bound_artifact.read_text(encoding="utf-8") in prompt
+        ):
+            raise FanoutError("FULL_ENVELOPE_IN_CONTROLLER_PROMPT")
+        operation_id = str(minted["operation_id"])
+        attempt = self.store.bind_operation_id(attempt, operation_id)
+        attempt = self.store.mark_dispatching(attempt)
+        try:
+            self._revalidate_core_binding(unit, workspace, attempt)
+        except CoreBindingError as exc:
+            reason = f"CORE_BINDING_REVALIDATION_FAILED:{exc}"
+            # No effect has started: the worker was never invoked.
+            self.store.finish_attempt(attempt, state="FAILED", transport_status=reason)
+            raise FanoutError(reason) from exc
+        result: OpenCodeRunResult = transport.run_new(
+            prompt=prompt,
+            artifact_path=str(bound_artifact),
+            workspace_path=workspace.path,
+            operation_id=operation_id,
+            operation_material=minted["operation_material"],
+            core_binding={
+                "core_binding_hash": minted["core_binding_hash"],
+                "acceptance_contract_hash": minted["acceptance_contract_hash"],
+            },
+        )
+        return self._finalize_initial(unit, workspace, attempt, result, transport=transport)
+
     def _reconcile_initial(
         self,
         unit: ExecutionUnit,
@@ -1559,12 +2092,27 @@ class AdaptiveWorkerFanoutRuntime:
         if attempt is None or attempt.get("state") not in {"DISPATCHING", "OUTCOME_UNKNOWN"}:
             raise FanoutError("FANOUT_RECONCILIATION_REQUIRED")
         operation_id = attempt.get("operation_id")
+        core_hashes = _attempt_core_hashes(attempt)
+        if core_hashes is not None and not getattr(
+            transport, "supports_core_mutation_binding", False
+        ):
+            raise FanoutError("CORE_BINDING_TRANSPORT_UNSUPPORTED")
         if hasattr(transport, "prepare_operation_id"):
             if not isinstance(operation_id, str) or _SHA256_RE.fullmatch(operation_id) is None:
                 raise FanoutError("OPERATION_ID_REQUIRED")
-            result: OpenCodeRunResult = transport.reconcile_workspace(
-                workspace_path=workspace.path, operation_id=operation_id
-            )
+            if core_hashes is not None:
+                result: OpenCodeRunResult = transport.reconcile_workspace(
+                    workspace_path=workspace.path,
+                    operation_id=operation_id,
+                    core_binding={
+                        "core_binding_hash": core_hashes[0],
+                        "acceptance_contract_hash": core_hashes[1],
+                    },
+                )
+            else:
+                result = transport.reconcile_workspace(
+                    workspace_path=workspace.path, operation_id=operation_id
+                )
         else:
             result = transport.reconcile_workspace(workspace_path=workspace.path)
         return self._finalize_initial(unit, workspace, attempt, result, transport=transport)
@@ -1604,6 +2152,17 @@ class AdaptiveWorkerFanoutRuntime:
                     attempt, state="OUTCOME_UNKNOWN", transport_status="OPERATION_ID_MISMATCH"
                 )
                 raise FanoutError("OPERATION_ID_MISMATCH")
+        expected_core = _attempt_core_hashes(attempt)
+        if expected_core is not None and (
+            result.core_binding_status != "BOUND"
+            or (result.core_binding_hash, result.acceptance_contract_hash) != expected_core
+        ):
+            self.store.finish_attempt(
+                attempt,
+                state="OUTCOME_UNKNOWN",
+                transport_status="CORE_BINDING_ATTESTATION_MISMATCH",
+            )
+            raise FanoutError("CORE_BINDING_ATTESTATION_MISMATCH")
         expected_provider_id = getattr(active_transport, "provider_id", PROVIDER_ID)
         expected_model_id = getattr(active_transport, "model_id", MODEL_ID)
         if result.provider_id != expected_provider_id or result.model_id != expected_model_id:
@@ -1742,12 +2301,26 @@ class AdaptiveWorkerFanoutRuntime:
             provider=str(previous_receipt.get("provider") or PROVIDER),
             model=str(previous_receipt.get("model") or MODEL),
         )
+        core_binding = _receipt_core_binding(previous_receipt)
+        if core_binding is not None:
+            if not getattr(transport, "supports_core_mutation_binding", False) or not hasattr(
+                transport, "prepare_operation_id"
+            ):
+                raise FanoutError("CORE_BINDING_TRANSPORT_UNSUPPORTED")
+            try:
+                self._revalidate_core_binding_for_continuation(
+                    previous_receipt, core_binding, workspace
+                )
+            except CoreBindingError as exc:
+                # No repair attempt exists yet and the worker was never invoked.
+                raise FanoutError(f"CORE_BINDING_REVALIDATION_FAILED:{exc}") from exc
         suffix = f"repair-{_safe_slug(repair_id, 'repair_id')}"
         attempt = self.store.prepare_repair(
             previous_receipt,
             repair_id=repair_id,
             repair_ref=str(repair_path),
             repair_sha256=repair_sha256,
+            core_binding=core_binding,
         )
         prompt = build_repair_bootstrap(
             previous_receipt,
@@ -1765,8 +2338,21 @@ class AdaptiveWorkerFanoutRuntime:
             )
             attempt = self.store.bind_operation_id(attempt, operation_id, suffix=suffix)
         attempt = self.store.mark_dispatching(attempt, suffix=suffix)
-        if hasattr(transport, "prepare_operation_id"):
+        expected_core = _attempt_core_hashes(attempt)
+        if expected_core is not None:
             result: OpenCodeRunResult = transport.continue_session(
+                session_id=str(previous_receipt["session_id"]),
+                prompt=prompt,
+                artifact_path=str(repair_path),
+                workspace_path=workspace.path,
+                operation_id=str(attempt["operation_id"]),
+                core_binding={
+                    "core_binding_hash": expected_core[0],
+                    "acceptance_contract_hash": expected_core[1],
+                },
+            )
+        elif hasattr(transport, "prepare_operation_id"):
+            result = transport.continue_session(
                 session_id=str(previous_receipt["session_id"]),
                 prompt=prompt,
                 artifact_path=str(repair_path),
@@ -1809,6 +2395,17 @@ class AdaptiveWorkerFanoutRuntime:
                     suffix=suffix,
                 )
                 raise FanoutError("OPERATION_ID_MISMATCH")
+        if expected_core is not None and (
+            result.core_binding_status != "BOUND"
+            or (result.core_binding_hash, result.acceptance_contract_hash) != expected_core
+        ):
+            self.store.finish_attempt(
+                attempt,
+                state="OUTCOME_UNKNOWN",
+                transport_status="CORE_BINDING_ATTESTATION_MISMATCH",
+                suffix=suffix,
+            )
+            raise FanoutError("CORE_BINDING_ATTESTATION_MISMATCH")
         if result.provider_id != transport_provider_id or result.model_id != transport_model_id:
             self.store.finish_attempt(
                 attempt,
@@ -1940,6 +2537,21 @@ class AdaptiveWorkerFanoutRuntime:
         }
         if unit.selected_worker is not None:
             receipt["selected_worker"] = dict(unit.selected_worker)
+        if _attempt_core_hashes(attempt) is not None:
+            # The receipt's envelope_sha256 stays the semantic identity; the bound
+            # envelope and the runtime-attested Core identity are added alongside.
+            receipt.update({
+                "bound_envelope_ref": str(attempt["bound_envelope_ref"]),
+                "bound_envelope_sha256": str(attempt["bound_envelope_sha256"]),
+                "core_binding_status": result.core_binding_status,
+                "core_binding_hash": result.core_binding_hash,
+                "acceptance_contract_hash": result.acceptance_contract_hash,
+            })
+            if "core_binding_operation_id" in attempt:
+                receipt.update({
+                    "core_binding_operation_id": str(attempt["core_binding_operation_id"]),
+                    "core_binding_attempt_id": str(attempt["core_binding_attempt_id"]),
+                })
         if candidate is not None:
             receipt.update(candidate)
         material = dict(receipt)

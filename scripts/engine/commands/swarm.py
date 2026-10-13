@@ -118,29 +118,12 @@ def register(nexus_group, REPO_ROOT):
                 print(f"Report: {written}")
             sys.exit(1)
 
-    @swarm.command(name="quiet-moment")
-    @click.option("--reason", required=True, help="Why the swarm must pause.")
-    @click.option("--node", "nodes", multiple=True, help="Affected node id. Repeat for multiple nodes.")
-    @click.option("--resume-after", default=10, type=int, help="Expected pause duration in seconds.")
-    @click.option("--output-json", is_flag=True)
-    def swarm_quiet_moment(reason, nodes, resume_after, output_json):
-        """Emit a user-visible, non-mutating Quiet Moment packet."""
-        from nexus.core.evolution_protocols import build_quiet_moment_event
 
-        event = build_quiet_moment_event(
-            reason=reason,
-            affected_nodes=list(nodes) or ["local"],
-            resume_after_seconds=resume_after,
-        )
-        event["observe"] = {"status": "observed", "node_count": len(event["affected_nodes"])}
-        event["rollback"] = {"status": "armed", "allowed": True}
-        if output_json:
-            print(json.dumps(event, indent=2, ensure_ascii=False))
-            return
-        click.echo(f"Quiet Moment: {reason}")
-        click.echo(f"Affected nodes: {', '.join(event['affected_nodes'])}")
-        click.echo(f"Resume after: {event['resume_after_seconds']}s")
-        click.echo("Allowed actions: observe, report, rollback")
-        click.echo("Observe: observed")
-        click.echo("Rollback: armed")
-        click.echo("Production writes: blocked")
+# ARCHIVED 2026-10-13 legacy-engine (ARCHIVED_2026-10-13-legacy-engine.md).
+__import__("warnings").warn(
+    "ARCHIVED 2026-10-13 legacy-engine: "
+    "scripts.engine.commands.swarm (nexus nexus swarm run) only dispatched to the retired legacy NexusEngine and is no longer registered; "
+    "see ARCHIVED_2026-10-13-legacy-engine.md. Scheduled for deletion; do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)

@@ -78,33 +78,33 @@ def test_execution_context_fields_for_propagation() -> None:
 
 
 def test_execute_single_task_propagates_execution_context(monkeypatch, tmp_path: Path) -> None:
-    from nexus.engine.canonical_task_seam import execute_single_task_via_service
+    # ARCHIVED 2026-10-13 legacy-engine (ARCHIVED_2026-10-13-legacy-engine.md): the CommandService
+    # task runner fails closed; the Local Assist context fields are still built for nexus run.
+    import pytest
 
-    captured: dict = {}
-
-    class _FakeService:
-        def execute_bug(self, request):
-            captured["request"] = request
-            return True
-
-        def execute_feature(self, request):
-            raise AssertionError("unexpected feature path")
-
-    monkeypatch.setattr(
-        "nexus.engine.canonical_task_seam.build_command_service",
-        lambda _root: _FakeService(),
+    from nexus.engine.canonical_task_seam import (
+        LegacyEngineArchivedError,
+        execute_single_task_via_service,
     )
+
+    def _boom(_root):  # pragma: no cover - must not be reached
+        raise AssertionError("archived CommandService must not be built")
+
+    monkeypatch.setattr("nexus.engine.canonical_task_seam.build_command_service", _boom)
     ctx = build_execution_context_fields(
         policy="shadow",
         task_id="fix-race",
         workspace_revision="rev-1",
     )
-    ok = execute_single_task_via_service("fix race condition", tmp_path, execution_context=ctx)
-    assert ok is True
-    request = captured["request"]
-    assert request.execution_context["local_assist_mode"] == "shadow"
-    assert request.execution_context["workspace_revision"] == "rev-1"
-    assert request.execution_context["task_id"] == "fix-race"
+    assert ctx["local_assist_mode"] == "shadow"
+    assert ctx["workspace_revision"] == "rev-1"
+    assert ctx["task_id"] == "fix-race"
+    with pytest.raises(LegacyEngineArchivedError) as excinfo:
+        execute_single_task_via_service("fix race condition", tmp_path, execution_context=ctx)
+    assert excinfo.value.entry == "execute_single_task_via_service"
+    assert excinfo.value.reason == "archived_legacy_engine_2026-10-13"
+    # The context is not consumed: nothing was dispatched.
+    assert ctx["task_id"] == "fix-race"
 
 
 def test_command_service_merges_local_assist_into_engine_context(monkeypatch, tmp_path: Path) -> None:

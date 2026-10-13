@@ -202,11 +202,13 @@ def test_mainchain_entry_uses_full_registry_not_partial_handpick() -> None:
             "online_invoker_provider": "agy",
             "workforce_bindings": {
                 "online": {
-                    "worker_id": "agy_flash",
+                    "worker_id": "agy_flash_38",
                     "controls": [
                         "task_card",
                         "allowed_files",
                         "mandatory_commands",
+                        "parser",
+                        "verifier",
                         "independent_verification",
                     ],
                 }

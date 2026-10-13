@@ -1,0 +1,75 @@
+name: Repository Intelligence comment
+
+# Owner decision 2026-10-13: one concise, actionable sticky PR comment.
+# pull_request_target runs this file and scripts/ops/rie_pr_comment.py from the
+# default branch, so a PR cannot change the code that holds the write token.
+# The PR head is never checked out or executed; PR data is read only through
+# the GitHub API and rendered as sanitized, length-limited text.
+#
+# API budget per event: 2 GraphQL queries (about 3 points) plus at most one
+# REST write. Fork PRs are skipped, and rapid pushes to the same PR are
+# debounced: the per-PR group cancels a run still waiting in its debounce step.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: repository-intelligence-comment-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  sticky-comment:
+    name: RIE sticky comment
+    # Same-repository PRs only: a fork cannot spend this job's token budget.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      checks: read
+      # GraphQL checkSuite.workflowRun (workflow id/path) is an Actions resource;
+      # without actions: read the installation token may return it as null,
+      # which would silently disable the engine's workflow-scoped checks.
+      actions: read
+      pull-requests: write
+    steps:
+      - name: Debounce rapid pushes (a newer event for this PR cancels this run)
+        run: sleep 30
+
+      - name: Checkout default branch (never the PR head)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Checkout pinned Repository Intelligence engine
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: James3014/repository-intelligence-engine
+          ref: 77a937b67c3da4756f535a41b59cdf5555a25e31  # v0.1.5
+          path: .rie-engine
+          persist-credentials: false
+
+      - name: Render and upsert the sticky comment
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          RIE_PIN: 77a937b67c3da4756f535a41b59cdf5555a25e31
+        run: |
+          set -euo pipefail
+          [ "$EVENT_NAME" = pull_request_target ] || { echo "event is $EVENT_NAME, not pull_request_target" >&2; exit 1; }
+          [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ] || { echo "workspace is not the default-branch commit" >&2; exit 1; }
+          python3 -I scripts/ops/rie_pr_comment.py \
+            --repository "$REPOSITORY" \
+            --pr-number "$PR_NUMBER" \
+            --repo-root "$GITHUB_WORKSPACE" \
+            --engine-root "$GITHUB_WORKSPACE/.rie-engine" \
+            --engine-pin "$RIE_PIN" \
+            --post \
+            --step-summary "$GITHUB_STEP_SUMMARY"

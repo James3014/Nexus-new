@@ -702,6 +702,7 @@ def build_automation(config: ServiceConfig, repository: str) -> ExternalIntellig
         ),
         store=FanoutStore(repo_state / "fanout"),
         transport=worker_transport,
+        max_repairs_per_unit=config.max_repairs_per_unit,
     )
     d_runtime = ExternalIntelligenceClosureRuntime(
         repository_root=repo_root,

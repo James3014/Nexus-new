@@ -1090,3 +1090,8 @@ def test_repair_audit_loop_composed_a_contradictory_fail_flag_is_recoverable(tmp
     assert audit_receipts[0]["status"] == "RECOVERABLE_BLOCK"
     assert audit_receipts[0]["block_class"] == "RECOVERABLE_BLOCK"
     assert audit_receipts[0]["next_action"] == "repair_or_replan"
+
+
+# ARCHIVED 2026-10-13 legacy-engine: this file tests (in whole or in part) modules archived with
+# the legacy NexusEngine (nexus.engine.pipeline); see ARCHIVED_2026-10-13-legacy-engine.md.
+# It keeps running with unchanged node ids until the deletion PR removes it with those modules.

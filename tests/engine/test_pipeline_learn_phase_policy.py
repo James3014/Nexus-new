@@ -55,3 +55,8 @@ def test_research_stage_skips_when_forced_baseline(tmp_path: Path, monkeypatch):
     
     stage._stage_research(ctx, tracer)
     assert ctx.state.metadata["chosen_research_engine"] == "baseline"
+
+
+# ARCHIVED 2026-10-13 legacy-engine: this file tests (in whole or in part) modules archived with
+# the legacy NexusEngine (nexus.engine.pipeline_stages); see ARCHIVED_2026-10-13-legacy-engine.md.
+# It keeps running with unchanged node ids until the deletion PR removes it with those modules.

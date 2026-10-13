@@ -30,13 +30,15 @@ def _member_demand(*, route_authority: str = "CapabilityPlanner") -> dict[str, o
 
 def _member_binding(**overrides: object) -> dict[str, object]:
     binding: dict[str, object] = {
-        "worker_id": "agy_flash",
+        "worker_id": "agy_flash_38",
         "provider": "agy",
-        "model": "gemini-3.6-flash-high",
+        "model": "gemini-3.8-flash-medium",
         "controls": [
             "task_card",
             "allowed_files",
             "mandatory_commands",
+            "parser",
+            "verifier",
             "independent_verification",
         ],
     }
@@ -115,7 +117,7 @@ def test_gb021_admission_decision_preserves_fail_closed_reason() -> None:
     assert record["decision"] == AdmissionDecision.ALLOW.value
     assert record["member_id"] == "member-a"
     assert record["provider"] == "agy"
-    assert record["model"] == "gemini-3.6-flash-high"
+    assert record["model"] == "gemini-3.8-flash-medium"
 
     hostile_route = evaluate_committee_member_admission(
         [_member_demand(route_authority="HostileRouter")],

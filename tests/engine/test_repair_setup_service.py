@@ -74,3 +74,8 @@ def test_repair_setup_service_marks_skip_when_no_verify_and_no_git(tmp_path: Pat
     assert out["proceed"] is True
     assert out["verify_cmds"] == []
     assert out["skip_pregate"] is True
+
+
+# ARCHIVED 2026-10-13 legacy-engine: this file tests (in whole or in part) modules archived with
+# the legacy NexusEngine (nexus.engine.repair_setup_service); see ARCHIVED_2026-10-13-legacy-engine.md.
+# It keeps running with unchanged node ids until the deletion PR removes it with those modules.

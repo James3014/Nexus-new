@@ -33,6 +33,15 @@ ARCHIVED_UI_VALIDATOR = "archived_ui_validator_2026-10-12"
 ARCHIVED_HOLLOW_LEARNING_CLOSURE = "archived_hollow_learning_closure_2026-10-12"
 ARCHIVED_FEDERATION = "archived_federation_2026-10-12"
 ARCHIVED_ORACLE_SHADOW = "archived_oracle_shadow_2026-10-12"
+# Planner nodes archived 2026-10-13 (ARCHIVED_2026-10-13.md, #1906). The node
+# definitions live in the pinned nexus-runtime; until its maturity flip lands the
+# Nexus-side invoker and executor resolve them to these explicit reasons.
+ARCHIVED_INTEGRATION_MANAGER = "archived_retired_integration_manager_2026-10-13"
+ARCHIVED_SWARM_QUIET_MOMENT = "archived_echo_swarm_quiet_moment_2026-10-13"
+ARCHIVED_LLM_JUDGE_PANEL = "archived_alias_llm_judge_panel_2026-10-13"
+# Legacy-engine batch (ARCHIVED_2026-10-13-legacy-engine.md): the node's only body was the
+# legacy NexusEngine AutonomicRouter; no policy rule enables it and nothing consumes it.
+ARCHIVED_AUTONOMIC_ROUTER = "archived_legacy_engine_autonomic_router_2026-10-13"
 
 ARCHIVED_CAPABILITY_REASONS: dict[str, str] = {
     "benchmark": ARCHIVED_FAKE_BENCHMARK,
@@ -41,11 +50,29 @@ ARCHIVED_CAPABILITY_REASONS: dict[str, str] = {
     "learning_closure": ARCHIVED_HOLLOW_LEARNING_CLOSURE,
     "federation": ARCHIVED_FEDERATION,
     "oracle_shadow": ARCHIVED_ORACLE_SHADOW,
+    "integration_manager": ARCHIVED_INTEGRATION_MANAGER,
+    "swarm_quiet_moment": ARCHIVED_SWARM_QUIET_MOMENT,
+    "llm_judge_panel": ARCHIVED_LLM_JUDGE_PANEL,
+    "autonomic_router": ARCHIVED_AUTONOMIC_ROUTER,
+}
+
+# Planner nodes kept for selection whose execution contract has no physical callable
+# (capability disposition 2026-10-13, KEEP/FIX item 9). Their receipt states explicitly
+# that nothing ran; no executor is invented for them.
+NOT_EXECUTABLE_PREFIX = "NOT_EXECUTABLE"
+NOT_EXECUTABLE_CONTROL_PLANE = f"{NOT_EXECUTABLE_PREFIX}:control_plane_reference"
+NOT_EXECUTABLE_NO_LIVE_CONNECTOR = f"{NOT_EXECUTABLE_PREFIX}:no_live_connector"
+NOT_EXECUTABLE_CAPABILITY_REASONS: dict[str, str] = {
+    "direct_mode": NOT_EXECUTABLE_CONTROL_PLANE,
+    "msa_router": NOT_EXECUTABLE_CONTROL_PLANE,
+    "research_control_plane": NOT_EXECUTABLE_CONTROL_PLANE,
+    "external_doc_scout": NOT_EXECUTABLE_NO_LIVE_CONNECTOR,
 }
 
 SKIP_REASONS = frozenset(
     {
         SKIP_NO_CANDIDATE_POOL,
+        *NOT_EXECUTABLE_CAPABILITY_REASONS.values(),
         SKIP_NOT_IMPLEMENTED,
         SKIP_ESCALATE_ONLY,
         SKIP_LOCAL_STAGE,
@@ -648,6 +675,15 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
             provider_authorization_required=True,
             consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
             reason_code="requires_model_execution_boundary",
+            required_context_fields=("task_id", "candidate_pool"),
+            required_outcome_fields=(
+                "action",
+                "semantic_status",
+                "evidence_refs",
+                "candidate_count",
+                "ranking",
+            ),
+            success_predicate="judge_ranked_real_candidates",
         ),
         "ui_validator": _ec(
             "ui_validator",
@@ -764,6 +800,14 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
             executor_key="ultra_review",
             physical_callable=f"{reg}:ultra_review",
             consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
+            required_outcome_fields=(
+                "action",
+                "semantic_status",
+                "evidence_refs",
+                "executed_checks",
+                "lanes",
+            ),
+            success_predicate="ultra_review_lanes_executed",
         ),
         "bdd_acceptance_skill": _ec(
             "bdd_acceptance_skill",
@@ -869,6 +913,15 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
             executor_key="architecture_scout",
             physical_callable=f"{reg}:architecture_scout",
             consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
+            required_context_fields=("task_id", "asi_failure_records"),
+            required_outcome_fields=(
+                "action",
+                "semantic_status",
+                "evidence_refs",
+                "plateau_detected",
+                "plan_status",
+            ),
+            success_predicate="architecture_plateau_detected_and_plan_ready",
         ),
         "asi_constraint_extractor": _ec(
             "asi_constraint_extractor",
@@ -1744,6 +1797,32 @@ def build_explicit_skip_invoker(
     return invoke
 
 
+def build_not_executable_invoker(capability_name: str, *, reason: str) -> CapabilityInvoker:
+    """Receipt for a selected planner node that has no physical callable.
+
+    Accounted for (explicit skip, never silent) but states ``NOT_EXECUTABLE`` so no
+    receipt can be read as the capability having run: invoked=false,
+    outcome_contributed=false, model_calls=0.
+    """
+    name = str(capability_name)
+    skip = build_explicit_skip_invoker(name, skip_reason=reason)
+
+    def invoke(context: Mapping[str, Any]) -> dict[str, Any]:
+        out = dict(skip(context))
+        out["execution_state"] = NOT_EXECUTABLE_PREFIX
+        out["not_executable"] = True
+        out["not_executable_reason"] = reason
+        out["physical_callable"] = None
+        out["delegated_to"] = "PlannerOnly"
+        response = dict(out.get("response") or {})
+        response["status"] = NOT_EXECUTABLE_PREFIX
+        response["not_executable_reason"] = reason
+        out["response"] = response
+        return out
+
+    return invoke
+
+
 def _resolve_executor_registry_key(capability_name: str) -> str:
     key = str(capability_name or "").strip()
     return EXECUTOR_REGISTRY_ALIASES.get(key, key)
@@ -1814,6 +1893,18 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
             "hyper_target_file",
             "hyper_test_file",
             "hyper_llm_mode",
+            "hyper_llm_channel",
+            "hyper_min_candidate_pool",
+            "target_file",
+            "target_files",
+        }
+    )
+    _SWARM_CONSTRAINT_KEYS = frozenset(
+        {
+            "workspace_root",
+            "swarm_target_file",
+            "swarm_verify_script",
+            "swarm_parallelism",
             "target_file",
             "target_files",
         }
@@ -1856,7 +1947,14 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
         {"workspace_root", "metabolism_token_usage", "metabolism_token_limit"}
     )
     _ASI_CONSTRAINT_KEYS = frozenset({"asi_failure_records"})
-    _COMMITTEE_CONSTRAINT_KEYS = frozenset({"committee_proposals"})
+    _COMMITTEE_CONSTRAINT_KEYS = frozenset(
+        {
+            "workspace_root",
+            "committee_proposals",
+            "committee_verify_commands",
+            "committee_verify_timeout_sec",
+        }
+    )
     _FILE_LOCK_CONSTRAINT_KEYS = frozenset({"workspace_root", "target_files"})
     _FORECAST_CONSTRAINT_KEYS = frozenset(
         {"workspace_root", "forecast_roi_score", "forecast_tokens", "forecast_reject_prob"}
@@ -1882,6 +1980,7 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
         {"workspace_root", "registry_peer_host", "registry_peer_port", "registry_query_tokens"}
     )
     _NIGHTSHIFT_CONSTRAINT_KEYS = frozenset({"workspace_root", "nightshift_target_file"})
+    _ULTRA_REVIEW_CONSTRAINT_KEYS = frozenset({"workspace_root"})
 
     def _allowlisted_constraints(context: Mapping[str, Any]) -> dict[str, Any]:
         keys: frozenset[str]
@@ -1895,14 +1994,20 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
             keys = _CODEINTEL_CONSTRAINT_KEYS
         elif name == "memory":
             keys = _MEMORY_CONSTRAINT_KEYS
-        elif name == "autoreason":
+        elif name in {"autoreason", "judge_panel"}:
             keys = _CANDIDATE_POOL_CONSTRAINT_KEYS
+        elif name == "ultra_review":
+            keys = _ULTRA_REVIEW_CONSTRAINT_KEYS
+        elif name == "architecture_scout":
+            keys = _ASI_CONSTRAINT_KEYS
         elif name == "ddtree":
             keys = _DDTREE_CONSTRAINT_KEYS
         elif name == "hyper":
             keys = _HYPER_CONSTRAINT_KEYS
         elif name == "xray":
             keys = _XRAY_CONSTRAINT_KEYS
+        elif name in {"swarm", "multi_agent"}:
+            keys = _SWARM_CONSTRAINT_KEYS
         elif name == "pregate":
             keys = _PREGATE_CONSTRAINT_KEYS
         elif name == "harness_preflight_sensor":
@@ -2005,7 +2110,23 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
                 listed = planner_stage.get(key)
                 if key not in out and isinstance(listed, (list, tuple)):
                     out[key] = [str(item) for item in listed]
-        if name in {"autoreason", "ddtree", "hyper", "xray"}:
+        if name == "ultra_review":
+            ultra_route = context.get("route")
+            workspace_root = (
+                ultra_route.get("workspace_root") if isinstance(ultra_route, Mapping) else None
+            )
+            if "workspace_root" not in out and workspace_root not in (None, ""):
+                out["workspace_root"] = workspace_root
+        if name in {
+            "autoreason",
+            "ddtree",
+            "hyper",
+            "xray",
+            "judge_panel",
+            "committee",
+            "swarm",
+            "multi_agent",
+        }:
             raw_route = context.get("route")
             route = raw_route if isinstance(raw_route, Mapping) else {}
             raw_ci = context.get("codeintel")
@@ -2016,7 +2137,7 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
                     continue
                 if k not in out and codeintel.get(k) not in (None, ""):
                     out[k] = codeintel.get(k)
-            if name in {"autoreason", "ddtree"}:
+            if name in {"autoreason", "ddtree", "judge_panel"}:
                 specific = codeintel.get(f"{name}_candidates")
                 if "candidate_pool" not in out and specific not in (None, ""):
                     out["candidate_pool"] = specific
@@ -2088,7 +2209,7 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
         extra_context_keys = {
             "plan_quality_gate": _PLAN_QUALITY_CONSTRAINT_KEYS,
             "asi_constraint_extractor": _ASI_CONSTRAINT_KEYS,
-            "committee": _COMMITTEE_CONSTRAINT_KEYS,
+            "architecture_scout": _ASI_CONSTRAINT_KEYS,
             "file_lock": _FILE_LOCK_CONSTRAINT_KEYS,
             "forecast_gate": _FORECAST_CONSTRAINT_KEYS,
             "formal_report": _FORMAL_REPORT_CONSTRAINT_KEYS,
@@ -2274,6 +2395,30 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
                 violations.append("integration_has_failed_tasks")
             if outcome.get("transactional_rollback_supported") is not True:
                 violations.append("integration_rollback_not_supported")
+        if predicate == "ultra_review_lanes_executed":
+            raw_lanes = outcome.get("lanes")
+            lanes: Mapping[str, Any] = raw_lanes if isinstance(raw_lanes, Mapping) else {}
+            for lane in ("security_sentry", "logic_breaker"):
+                raw_lane_row = lanes.get(lane)
+                lane_row: Mapping[str, Any] = (
+                    raw_lane_row if isinstance(raw_lane_row, Mapping) else {}
+                )
+                if not lane_row.get("executed_checks"):
+                    violations.append(f"ultra_review_{lane}_no_executed_checks")
+                if lane_row.get("unavailable_checks"):
+                    violations.append(f"ultra_review_{lane}_check_unavailable")
+        if predicate == "judge_ranked_real_candidates":
+            if int(outcome.get("candidate_count") or 0) < 2:
+                violations.append("judge_insufficient_candidates")
+            raw_ranking = outcome.get("ranking")
+            ranking = raw_ranking if isinstance(raw_ranking, (list, tuple)) else []
+            if len(ranking) != int(outcome.get("candidate_count") or 0):
+                violations.append("judge_ranking_not_a_permutation")
+        if predicate == "architecture_plateau_detected_and_plan_ready":
+            if outcome.get("plateau_detected") is not True:
+                violations.append("architecture_scout_plateau_not_detected")
+            if outcome.get("plan_status") != "READY":
+                violations.append("architecture_scout_plan_not_ready")
         if predicate == "registry_peer_contacted":
             if outcome.get("peer_contacted") is not True:
                 violations.append("registry_peer_not_contacted")
@@ -2509,6 +2654,97 @@ def _planner_mainchain_gate_selected(name: str, context: Mapping[str, Any]) -> b
     return False
 
 
+PLANNER_SIGNAL_TRIGGER_SOURCE = "planner_task_signal"
+# Escalate-only executors whose trigger is a *task signal* the CapabilityPlanner already
+# evaluated.  The planner selects these on that signal (policy_evaluator) but the gate only
+# looked at ``route.escalate*`` / ``recommended_flow``, which the online mainchain path never
+# sets, so they were always SKIPPED_POLICY_NOT_TRIGGERED.  A capability triggers here only
+# when (a) the planner selected it, (b) its decision-trace reasons include one of the
+# listed reasons (``None`` = any planner reason) and (c) one of the listed signal_snapshot
+# signals is truthy in the same plan.  Deliberately absent:
+#   * ultra_review / sandbox: review/run a *candidate*; the preflight seam has none yet.
+#   * hyper: escalation after a failed verified candidate is the flow's hyper admission.
+#   * file_lock: acquiring a lock per attempt without the batch-3 release would self-block.
+PLANNER_SIGNAL_TRIGGERS: dict[str, tuple[frozenset[str] | None, tuple[str, ...]]] = {
+    "research": (
+        frozenset(
+            {
+                "context_or_retrieval_gap",
+                "autonomic_research_signal",
+                "plateau_detected_requires_new_hypothesis",
+                "tier_l3_deep_governance",
+            }
+        ),
+        (
+            "autonomic_research_requested",
+            "plateau_detected",
+            "doc_scout_hits",
+            "memory_hits",
+            "findings_hits",
+            "claim_uncertainty",
+            "cross_module",
+        ),
+    ),
+    # research_route is planner-required on every routed task (routing_contract_required);
+    # the route itself is satisfied by the planner, the research body runs only when the
+    # task actually needs a lookup.
+    "research_route": (
+        None,
+        ("autonomic_research_requested", "plateau_detected", "doc_scout_hits"),
+    ),
+    "learn_mode": (frozenset({"claim_or_citation_learning_signal"}), ("learning_signal",)),
+    "learn_phase_slo": (frozenset({"learn_phase_policy_needed"}), ("learning_signal",)),
+    "multi_agent": (frozenset({"coordinated_ownership_required"}), ("multi_agent_signal", "swarm_signal")),
+}
+
+
+ROUTE_RESEARCH_DECISION_CAPABILITIES = frozenset({"research", "research_route"})
+
+
+def planner_signal_trigger(name: str, context: Mapping[str, Any]) -> str:
+    """Return the triggering task signal for ``name`` ("" when not signal-triggered)."""
+
+    spec = PLANNER_SIGNAL_TRIGGERS.get(name)
+    if spec is None:
+        return ""
+    reasons_required, signal_keys = spec
+    planner = context.get("planner")
+    if not isinstance(planner, Mapping):
+        return ""
+    selected = planner.get("selected_capabilities") or []
+    if not isinstance(selected, (list, tuple)) or name not in selected:
+        return ""
+    snapshot = planner.get("signal_snapshot")
+    if not isinstance(snapshot, Mapping):
+        return ""
+    if reasons_required is not None:
+        trace = planner.get("decision_trace") or []
+        if not isinstance(trace, (list, tuple)):
+            return ""
+        reasons: set[str] = set()
+        for item in trace:
+            if isinstance(item, Mapping) and item.get("capability") == name:
+                raw = item.get("reasons") or []
+                if isinstance(raw, (list, tuple)):
+                    reasons.update(str(r) for r in raw)
+        if not reasons_required & reasons:
+            return ""
+    for key in signal_keys:
+        value = snapshot.get(key)
+        if isinstance(value, bool):
+            if value:
+                return key
+        elif isinstance(value, (int, float)) and value > 0:
+            return key
+    # The flow's route decision (route_decider) is not projected through the canonical seam;
+    # it reaches the gate on the request route.
+    raw_route = context.get("route")
+    route: Mapping[str, Any] = raw_route if isinstance(raw_route, Mapping) else {}
+    if name in ROUTE_RESEARCH_DECISION_CAPABILITIES and route.get("should_research") is True:
+        return "route_should_research"
+    return ""
+
+
 def build_escalate_gated_invoker(
     capability_name: str,
     *,
@@ -2543,10 +2779,14 @@ def build_escalate_gated_invoker(
 
     def invoke(context: Mapping[str, Any]) -> dict[str, Any]:
         planner_triggered = False
+        signal_trigger = ""
         if not _triggered(context):
-            if not _planner_mainchain_gate_selected(name, context):
-                return dict(skip_invoker(context))
-            planner_triggered = True
+            if _planner_mainchain_gate_selected(name, context):
+                planner_triggered = True
+            else:
+                signal_trigger = planner_signal_trigger(name, context)
+                if not signal_trigger:
+                    return dict(skip_invoker(context))
         if real_invoker is None:
             task_id = str(context.get("task_id") or "")
             return {
@@ -2570,6 +2810,8 @@ def build_escalate_gated_invoker(
         receipt = dict(real_invoker(context))
         if planner_triggered:
             receipt["trigger_source"] = PLANNER_MAINCHAIN_GATE_TRIGGER_SOURCE
+        elif signal_trigger:
+            receipt["trigger_source"] = f"{PLANNER_SIGNAL_TRIGGER_SOURCE}:{signal_trigger}"
         return receipt
 
     return invoke
@@ -2668,18 +2910,20 @@ def build_default_mainchain_invokers(
             invokers[name] = build_local_model_executor_invoker()
             continue
         if name in ARCHIVED_CAPABILITY_REASONS:
-            # Archived 2026-10-12: always an explicit, receipt-visible skip.
+            # Archived 2026-10-12 / 2026-10-13: always an explicit, receipt-visible skip.
             invokers[name] = build_explicit_skip_invoker(
                 name, skip_reason=ARCHIVED_CAPABILITY_REASONS[name]
             )
             continue
+        if name in NOT_EXECUTABLE_CAPABILITY_REASONS:
+            # Control-plane-only nodes: selectable, never reported as executed.
+            invokers[name] = build_not_executable_invoker(
+                name, reason=NOT_EXECUTABLE_CAPABILITY_REASONS[name]
+            )
+            continue
         real = build_real_executor_invoker(name)
         # Escalation-only / probe-only reclass: untriggered → policy skip; triggered → real or BLOCKED.
-        if (
-            name in ESCALATE_ONLY
-            or name == "llm_judge_panel"
-            or name in PROBE_ONLY_REASON_CODES
-        ):
+        if name in ESCALATE_ONLY or name in PROBE_ONLY_REASON_CODES:
             invokers[name] = build_escalate_gated_invoker(name, real_invoker=real)
             continue
         if name in ONLINE_ARMOR_FLAG_CAPABILITIES:

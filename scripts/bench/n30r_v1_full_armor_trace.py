@@ -59,7 +59,6 @@ def _invoke_planner(
     task_desc: str,
     *,
     task_id: str,
-    source_hash: str,
     workspace_revision: str,
 ) -> dict:
     """Build the benchmark snapshot through the same canonical identity producers as Runtime."""
@@ -68,6 +67,7 @@ def _invoke_planner(
     from nexus.engine.canonical_execution import plan_canonical_task_bundle
     from nexus.services.capability_evidence_bundle import (
         build_capability_evidence_bundle,
+        build_source_hash_subject,
         verify_capability_evidence_bundle,
     )
     from nexus.services.unified_runtime import canonical_execution_identity
@@ -113,10 +113,14 @@ def _invoke_planner(
             planner_decision_id=planner_decision_id,
             capability_results={},
             selected_capabilities=list(bundle.decision.selected_capabilities),
-            source_hash=source_hash,
         )
-        verdict = verify_capability_evidence_bundle(evidence_bundle)
-        if verdict.get("ok") is not True:
+        # source_hash is typed (workspace_revision_task_statement_v1) and derived
+        # by the runtime; bind it to the physical source via workspace_revision.
+        verdict = verify_capability_evidence_bundle(
+            evidence_bundle,
+            source_hash_subject=build_source_hash_subject(workspace_revision, task_desc),
+        )
+        if verdict.get("ok") is not True or verdict.get("source_hash_verified") is not True:
             raise RuntimeError("n30r_v1_capability_evidence_bundle_invalid")
 
         snapshot = dict(bundle.plan.signal_snapshot)
@@ -368,7 +372,6 @@ def _run_v1_trace_in_workspace(
     signal_snapshot = _invoke_planner(
         task.task_statement,
         task_id=task.task_id,
-        source_hash=source_sha256,
         workspace_revision=f"sha256:{source_sha256}",
     )
     planner_snapshot_sha256 = _sha256_json(signal_snapshot)
@@ -595,6 +598,12 @@ def _run_v1_trace_in_workspace(
         ],
         "capability_evidence_bundle_hash": signal_snapshot["capability_evidence_bundle"]["bundle_hash"],
         "capability_evidence_source_hash": signal_snapshot["capability_evidence_bundle"]["source_hash"],
+        "capability_evidence_source_hash_kind": signal_snapshot["capability_evidence_bundle"][
+            "source_hash_kind"
+        ],
+        "capability_evidence_workspace_revision": signal_snapshot["capability_evidence_bundle"][
+            "workspace_revision"
+        ],
         "planner_capabilities": planner_caps,
         "executor_capabilities": list(projection.executable_capabilities),
         "projection_hash": projection_hash,

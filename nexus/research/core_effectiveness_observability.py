@@ -177,6 +177,196 @@ def from_devspace_core_session(
     })
 
 
+def from_devspace_core_session_readback(
+    *,
+    repository: str,
+    work_item_id: str,
+    attempt_index: int,
+    task_family: str,
+    risk_class: str,
+    execution_lane: str,
+    census_entry: Mapping[str, Any],
+    independent_terminal: Mapping[str, Any] | None = None,
+    transport: str = "DEVSPACE",
+) -> dict[str, Any]:
+    """Join a DevSpace session, Candidate, Core observation, and independent outcome.
+
+    The Core observation remains an input from the durable DevSpace census. This
+    projection never derives a verdict, repairs missingness, or treats the Core
+    verdict as the independent terminal result.
+    """
+
+    session = census_entry.get("session")
+    candidate = census_entry.get("candidate")
+    observation = census_entry.get("coreAcquisitionObservation")
+    if not isinstance(session, Mapping):
+        raise ObservabilityContractError("devspace_session_missing")
+    if not isinstance(candidate, Mapping):
+        raise ObservabilityContractError("devspace_candidate_missing")
+
+    def require_text(record: Mapping[str, Any], field: str, error: str) -> str:
+        value = record.get(field)
+        if not isinstance(value, str) or not value.strip():
+            raise ObservabilityContractError(error)
+        return value
+
+    session_id = require_text(session, "id", "devspace_session_id_missing")
+    candidate_session_id = require_text(candidate, "sessionId", "candidate_session_id_missing")
+    if candidate_session_id != session_id:
+        raise ObservabilityContractError("candidate_session_identity_mismatch")
+    for field in ("workspaceSessionId", "bindingHash", "sourceHead", "sourceTree"):
+        if candidate.get(field) != session.get(field):
+            raise ObservabilityContractError(f"candidate_{field}_mismatch")
+
+    candidate_head = require_text(candidate, "candidateHead", "candidate_head_missing")
+    candidate_tree = require_text(candidate, "candidateTree", "candidate_tree_missing")
+
+    if not isinstance(observation, Mapping):
+        observation = {}
+        observation_missing = True
+    else:
+        observation_missing = False
+        for field, expected in (
+            ("sessionId", session_id),
+            ("candidateHead", candidate_head),
+            ("candidateTree", candidate_tree),
+            ("sourceRevision", session.get("sourceHead")),
+            ("bindingHash", session.get("bindingHash")),
+            ("acceptanceContractHash", candidate.get("acceptanceContractHash")),
+            ("changeSetHash", candidate.get("changeSetHash")),
+        ):
+            if observation.get(field) != expected:
+                raise ObservabilityContractError(f"core_observation_{field}_mismatch")
+
+    session_binding = session.get("binding")
+    session_core = session_binding.get("core") if isinstance(session_binding, Mapping) else None
+    bound_profile = (
+        session_core.get("verification_profile") if isinstance(session_core, Mapping) else None
+    )
+    bound_profile_hash = (
+        bound_profile.get("profile_hash") if isinstance(bound_profile, Mapping) else None
+    )
+    observed_profile_hash = observation.get("profileHash")
+    if (
+        observed_profile_hash is not None
+        and bound_profile_hash is not None
+        and observed_profile_hash != bound_profile_hash
+    ):
+        raise ObservabilityContractError("core_observation_profile_hash_mismatch")
+    if observation.get("acquisitionStatus") == "VERDICT_RECORDED":
+        if observation.get("coreInvoked") is not True:
+            raise ObservabilityContractError("core_verdict_without_invocation")
+        if not _present(observed_profile_hash) or not _present(bound_profile_hash):
+            raise ObservabilityContractError("core_verdict_without_bound_profile")
+        if not _present(observation.get("coreVerdict")):
+            raise ObservabilityContractError("core_verdict_record_missing")
+        if not _present(observation.get("coreReason")):
+            raise ObservabilityContractError("core_reason_record_missing")
+        if not _present(observation.get("receiptHash")):
+            raise ObservabilityContractError("core_receipt_record_missing")
+        if _timestamp(observation.get("tCoreDetection")) is None:
+            raise ObservabilityContractError("core_detection_timestamp_invalid")
+
+    row = from_devspace_core_session(
+        repository=repository,
+        work_item_id=work_item_id,
+        attempt_index=attempt_index,
+        task_family=task_family,
+        risk_class=risk_class,
+        execution_lane=execution_lane,
+        session=session,
+        transport=transport,
+    )
+    missingness = dict(row["missingness"])
+    missing_reason = (
+        str(observation.get("missingnessDetail") or observation.get("missingnessCode") or "")
+        if not observation_missing
+        else "Core acquisition observation not returned by durable census."
+    )
+    core_fields = {
+        "core_invoked": observation.get("coreInvoked"),
+        "core_verdict": observation.get("coreVerdict"),
+        "core_reason": observation.get("coreReason"),
+        "receipt_hash": observation.get("receiptHash"),
+        "t_core_detection": observation.get("tCoreDetection"),
+        "core_orchestration_runtime_ms": observation.get("orchestrationRuntimeMs"),
+    }
+    verdict_recorded = observation.get("acquisitionStatus") == "VERDICT_RECORDED"
+    if not verdict_recorded:
+        for field in ("core_verdict", "core_reason", "receipt_hash", "t_core_detection"):
+            core_fields[field] = None
+    for field, value in core_fields.items():
+        if not _present(value):
+            missingness[field] = missing_reason or "Core verdict was not durably recorded."
+
+    row.update({
+        "target_revision": candidate_head,
+        "target_tree": candidate_tree,
+        "candidate_head": candidate_head,
+        "candidate_tree": candidate_tree,
+        "candidate_created_at": candidate.get("createdAt"),
+        "candidate_change_set_hash": candidate.get("changeSetHash"),
+        "candidate_change_manifest_hash": candidate.get("changeManifestHash"),
+        "core_invoked": core_fields["core_invoked"],
+        "core_verdict": core_fields["core_verdict"],
+        "core_reason": core_fields["core_reason"],
+        "receipt_hash": core_fields["receipt_hash"],
+        "t_core_detection": core_fields["t_core_detection"],
+        "core_orchestration_runtime_ms": core_fields["core_orchestration_runtime_ms"],
+        "core_acquisition_status": observation.get("acquisitionStatus"),
+        "core_acquisition_operation_id": (
+            observation.get("durableOperationId") or observation.get("operationId")
+        ),
+        "core_missingness_code": observation.get("missingnessCode"),
+        "core_missingness_detail": observation.get("missingnessDetail"),
+        "verification_profile_hash": observed_profile_hash,
+        "missingness": missingness,
+    })
+
+    row["terminal"] = independent_terminal is not None
+    if independent_terminal is not None:
+        terminal_candidate_head = require_text(
+            independent_terminal, "candidate_head", "terminal_candidate_head_missing"
+        )
+        if terminal_candidate_head != candidate_head:
+            raise ObservabilityContractError("terminal_candidate_identity_mismatch")
+        row.update({
+            "terminal_evidence_id": require_text(
+                independent_terminal, "evidence_id", "terminal_evidence_id_missing"
+            ),
+            "terminal_candidate_head": terminal_candidate_head,
+            "baseline_result": independent_terminal.get("baseline_result"),
+            "terminal_outcome": require_text(
+                independent_terminal, "terminal_outcome", "terminal_outcome_missing"
+            ),
+            "t_baseline_detection": independent_terminal.get("t_baseline_detection"),
+            "t_terminal_result": require_text(
+                independent_terminal, "t_terminal_result", "terminal_timestamp_missing"
+            ),
+            "verifier_runtime_ms": independent_terminal.get("verifier_runtime_ms"),
+            "duplicate_verifier_runtime_ms": independent_terminal.get(
+                "duplicate_verifier_runtime_ms"
+            ),
+            "reviewer_calls": independent_terminal.get("reviewer_calls"),
+            "manual_interventions": independent_terminal.get("manual_interventions"),
+            "attempts_to_green": independent_terminal.get("attempts_to_green"),
+        })
+        for field in TERMINAL_FIELDS:
+            if not _present(row.get(field)):
+                reason = (
+                    independent_terminal.get("missingness", {}).get(field)
+                    if isinstance(independent_terminal.get("missingness"), Mapping)
+                    else None
+                )
+                missingness.setdefault(
+                    field,
+                    str(reason or "Independent terminal evidence did not provide this field."),
+                )
+        row["missingness"] = missingness
+
+    return normalize_observation(row)
+
+
 def identity_gap(
     *,
     repository: str,

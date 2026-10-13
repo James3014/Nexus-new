@@ -84,7 +84,7 @@ def test_trusted_external_runtime_package_pair_is_exact() -> None:
             "nexus-runtime",
             "nexus_runtime",
             "https://github.com/James3014/nexus-runtime.git",
-            "2766c154ae9fa129a5d8d6a38244276e77b453bc",
+            "6782e38a57360893285227f4d2a68d7c649d4319",
         ),
     )
 
@@ -869,6 +869,7 @@ def _manifest() -> dict[str, object]:
         git_bundle=b"git bundle",
         runtime_metadata=runtime_metadata,
         runtime_identity=runtime_identity,
+        merge_base_sha="b" * 40,
     )
 
 
@@ -909,6 +910,7 @@ def _evidence(manifest: dict[str, object]) -> dict[str, object]:
         "run_id": manifest["run_id"],
         "base_sha": manifest["base_sha"],
         "head_sha": manifest["head_sha"],
+        "merge_base_sha": manifest["merge_base_sha"],
         "base_tree": manifest["base_tree"],
         "head_tree": manifest["head_tree"],
         "test_tree": manifest["test_tree"],
@@ -1201,6 +1203,8 @@ def _acquisition_environment(
     }
     binding["binding_hash"] = lane_gate.canonical_hash(binding)
     event["pull_request"]["body"] = lane_gate.render_binding(binding)  # type: ignore[index]
+    # OWNER_INLINE is honoured only for an Owner-authored PR.
+    event["pull_request"]["user"] = {"login": "James3014", "type": "User"}  # type: ignore[index]
     path, argv_log = _git_logging_path(run_root)
     _synthetic_runtime(
         run_root,
@@ -1358,7 +1362,9 @@ def test_fork_identity_must_be_bound_to_the_event():
     event = _event()
     event["pull_request"]["head"]["sha"] = "not-a-sha"  # type: ignore[index]
     with pytest.raises(ValueError, match="exact SHA"):
-        build_manifest(event, raw_diff=b"", test_inventory=[], source_archive=b"")
+        build_manifest(
+            event, raw_diff=b"", test_inventory=[], source_archive=b"", merge_base_sha="b" * 40
+        )
 
 
 def test_workflow_substitution_fails_closed():
@@ -1372,6 +1378,7 @@ def test_workflow_substitution_fails_closed():
             raw_diff=b"",
             test_inventory=["tests/ops/test_pr_impact_gate.py"],
             source_archive=b"",
+            merge_base_sha="b" * 40,
         )
 
 
@@ -2119,6 +2126,7 @@ def _executor_archive_bundle(
         base_tree=base_tree,
         head_tree=head_tree,
         test_tree=test_tree,
+        merge_base_sha=event["pull_request"]["base"]["sha"],  # type: ignore[index]
     )
     (bundle / "git-objects.bundle").write_bytes(git_bundle)
     for name in trusted_anchor.RUNTIME_FILENAMES:
@@ -3078,3 +3086,1126 @@ def test_pr1908_dependency_snapshot_transition_allows_only_exact_binding(monkeyp
                 pull_request_number=other_pr,
                 head_product_init_is_regular=True,
             )
+
+
+# --- #1974 (#1895 rows 2-3): verifier surfaces the controller failure reason ---
+
+
+def _controller_failure_dir(tmp_path: Path, files: dict[str, object]) -> Path:
+    failure_dir = tmp_path / "trusted-anchor-failure"
+    failure_dir.mkdir()
+    for name, payload in files.items():
+        data = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
+        (failure_dir / name).write_bytes(data)
+    return failure_dir
+
+
+def _controller_args(tmp_path: Path, failure_reason: Path | None) -> argparse.Namespace:
+    return argparse.Namespace(
+        event_json=str(tmp_path / "missing-event.json"),
+        repo_root=str(tmp_path),
+        output_dir=str(tmp_path / "out"),
+        runtime_dir=str(tmp_path / "runtime"),
+        failure_reason_json=None if failure_reason is None else str(failure_reason),
+    )
+
+
+@pytest.mark.parametrize(
+    ("error", "code"),
+    [
+        (
+            ValueError("PR dependency contract drifts from trusted default"),
+            "DEPENDENCY_CONTRACT_DRIFT",
+        ),
+        (ValueError("controller repository remains shallow"), "CONTROLLER_ERROR"),
+        (subprocess.CalledProcessError(128, ["git", "fetch"]), "CONTROLLER_ERROR"),
+    ],
+)
+def test_controller_failure_records_reason_and_still_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, error: Exception, code: str
+):
+    def _boom(_args: argparse.Namespace) -> None:
+        raise error
+
+    monkeypatch.setattr(trusted_anchor, "_controller", _boom)
+    reason_path = tmp_path / "trusted-anchor-failure" / "controller-failure.json"
+    with pytest.raises(type(error)):
+        trusted_anchor._controller_recording_failure(_controller_args(tmp_path, reason_path))
+    record = json.loads(reason_path.read_text(encoding="utf-8"))
+    assert record["schema"] == trusted_anchor.CONTROLLER_FAILURE_SCHEMA
+    assert record["reason_code"] == code
+    assert "\n" not in record["detail"]
+    assert len(record["detail"]) <= trusted_anchor.CONTROLLER_FAILURE_DETAIL_LIMIT
+
+
+def test_controller_success_writes_no_failure_reason(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    monkeypatch.setattr(trusted_anchor, "_controller", lambda _args: None)
+    reason_path = tmp_path / "trusted-anchor-failure" / "controller-failure.json"
+    trusted_anchor._controller_recording_failure(_controller_args(tmp_path, reason_path))
+    assert not reason_path.exists()
+
+
+def test_controller_cli_accepts_failure_reason_path():
+    assert (
+        "--failure-reason-json"
+        in _named_step("trusted-controller", "Acquire and execute exact trusted controller source")[
+            "run"
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    ("lane_reason", "code"),
+    [
+        ("EXACTLY_ONE_MERGE_LANE_BINDING_REQUIRED", "MERGE_LANE_BINDING_MISSING"),
+        ("PR_BODY_REQUIRED", "MERGE_LANE_BINDING_MISSING"),
+        ("OWNER_INLINE_MUST_BE_DIRECT", "MERGE_LANE_BINDING_BLOCKED"),
+    ],
+)
+def test_lane_gate_block_is_surfaced_with_trusted_remedy(
+    tmp_path: Path, lane_reason: str, code: str
+):
+    failure_dir = _controller_failure_dir(
+        tmp_path,
+        {
+            "merge-lane-gate.json": {
+                "schema": "nexus.trusted_merge_lane_gate_result.v1",
+                "status": "BLOCK",
+                "reason": lane_reason,
+                "remedy": "forged remedy must never be shown",
+            }
+        },
+    )
+    result = trusted_anchor.resolve_controller_failure(failure_dir, controller_result="failure")
+    assert result["status"] == "BLOCK"
+    assert result["reason_code"] == code
+    assert result["remedy"] == trusted_anchor.CONTROLLER_FAILURE_REMEDIES[code]
+    assert result["detail"] == lane_reason
+
+
+def test_dependency_drift_reason_is_surfaced(tmp_path: Path):
+    failure_dir = _controller_failure_dir(
+        tmp_path,
+        {
+            "controller-failure.json": {
+                "schema": trusted_anchor.CONTROLLER_FAILURE_SCHEMA,
+                "reason_code": "DEPENDENCY_CONTRACT_DRIFT",
+                "detail": "ValueError: PR dependency contract drifts from trusted default",
+            }
+        },
+    )
+    result = trusted_anchor.resolve_controller_failure(failure_dir, controller_result="failure")
+    assert result["reason_code"] == "DEPENDENCY_CONTRACT_DRIFT"
+    assert "merge origin/main" in result["remedy"]
+
+
+@pytest.mark.parametrize(
+    "files",
+    [
+        {},
+        {"controller-failure.json": b"not json"},
+        {"controller-failure.json": {"schema": "other", "reason_code": "CONTROLLER_ERROR"}},
+        {
+            "controller-failure.json": {
+                "schema": trusted_anchor.CONTROLLER_FAILURE_SCHEMA,
+                "reason_code": "PASS",
+                "detail": "x",
+            }
+        },
+        {
+            "merge-lane-gate.json": {
+                "status": "PASS",
+                "reason": "EXACTLY_ONE_MERGE_LANE_BINDING_REQUIRED",
+            }
+        },
+        {"merge-lane-gate.json": {"status": "BLOCK", "reason": "lower case\n::error::forged"}},
+        {
+            "merge-lane-gate.json": b"{"
+            + b" " * (trusted_anchor.CONTROLLER_FAILURE_FILE_LIMIT + 1)
+            + b"}"
+        },
+    ],
+)
+def test_untrusted_or_unrecognized_reason_falls_back_to_unavailable(
+    tmp_path: Path, files: dict[str, object]
+):
+    failure_dir = _controller_failure_dir(tmp_path, files)
+    result = trusted_anchor.resolve_controller_failure(failure_dir, controller_result="failure")
+    assert result["status"] == "BLOCK"
+    assert result["reason_code"] == "CONTROLLER_REASON_UNAVAILABLE"
+
+
+def test_missing_failure_dir_falls_back_to_unavailable(tmp_path: Path):
+    result = trusted_anchor.resolve_controller_failure(
+        tmp_path / "absent", controller_result="cancelled"
+    )
+    assert result["reason_code"] == "CONTROLLER_REASON_UNAVAILABLE"
+    assert "cancelled" in result["detail"]
+
+
+def test_symlinked_reason_file_is_not_followed(tmp_path: Path):
+    target = tmp_path / "elsewhere.json"
+    target.write_text(
+        json.dumps({"status": "BLOCK", "reason": "EXACTLY_ONE_MERGE_LANE_BINDING_REQUIRED"})
+    )
+    failure_dir = _controller_failure_dir(tmp_path, {})
+    (failure_dir / "merge-lane-gate.json").symlink_to(target)
+    result = trusted_anchor.resolve_controller_failure(failure_dir, controller_result="failure")
+    assert result["reason_code"] == "CONTROLLER_REASON_UNAVAILABLE"
+
+
+def test_hostile_detail_is_single_bounded_printable_line(tmp_path: Path):
+    hostile = "line1\n::add-mask::x\r\n::set-output name=a::b\x1b[31m‮" + "A" * 10_000
+    failure_dir = _controller_failure_dir(
+        tmp_path,
+        {
+            "controller-failure.json": {
+                "schema": trusted_anchor.CONTROLLER_FAILURE_SCHEMA,
+                "reason_code": "CONTROLLER_ERROR",
+                "detail": hostile,
+            }
+        },
+    )
+    detail = trusted_anchor.resolve_controller_failure(failure_dir, controller_result="failure")[
+        "detail"
+    ]
+    assert len(detail) <= trusted_anchor.CONTROLLER_FAILURE_DETAIL_LIMIT
+    assert re.fullmatch(r"[\x20-\x7e]*", detail)
+
+
+@pytest.mark.parametrize("controller_result", ["failure", "success", "cancelled", "skipped"])
+def test_explain_controller_failure_always_fails_closed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], controller_result: str
+):
+    failure_dir = _controller_failure_dir(
+        tmp_path,
+        {
+            "merge-lane-gate.json": {"status": "PASS", "reason": "::error::forged"},
+            "controller-failure.json": {
+                "schema": trusted_anchor.CONTROLLER_FAILURE_SCHEMA,
+                "reason_code": "CONTROLLER_ERROR",
+                "detail": "\n::warning::forged\n",
+            },
+        },
+    )
+    args = argparse.Namespace(failure_dir=str(failure_dir), controller_result=controller_result)
+    with pytest.raises(SystemExit) as exit_info:
+        trusted_anchor._explain_controller_failure(args)
+    assert exit_info.value.code == 1
+    out = capsys.readouterr().out
+    command_lines = [line for line in out.splitlines() if line.lstrip().startswith("::")]
+    assert command_lines == [
+        "::error title=Trusted controller failed::CONTROLLER_ERROR: "
+        + trusted_anchor.CONTROLLER_FAILURE_REMEDIES["CONTROLLER_ERROR"]
+    ]
+    assert "forged" in out  # shown, but only as inert, prefixed data
+
+
+def test_controller_job_uploads_failure_reason_only_on_failure():
+    upload = _named_step("trusted-controller", "Upload controller failure reason")
+    assert upload["if"] == "failure()"
+    assert upload["uses"].startswith("actions/upload-artifact@")
+    assert upload["with"]["name"] == "trusted-anchor-controller-failure-${{ github.run_id }}"
+    assert upload["with"]["path"] == "${{ runner.temp }}/trusted-anchor-failure/"
+    collect = _named_step("trusted-controller", "Collect controller failure reason")
+    assert collect["if"] == "failure()"
+    steps = [step.get("name") for step in _workflow()["jobs"]["trusted-controller"]["steps"]]
+    assert steps.index("Collect controller failure reason") < steps.index(
+        "Upload controller failure reason"
+    )
+
+
+def test_collect_controller_failure_step_copies_lane_block_and_skips_symlink(tmp_path: Path):
+    run = _named_step("trusted-controller", "Collect controller failure reason")["run"]
+    anchor_dir = tmp_path / "trusted-anchor"
+    anchor_dir.mkdir()
+    (anchor_dir / "merge-lane-gate.json").write_text('{"status":"BLOCK"}\n')
+    completed = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", run],
+        env={**os.environ, "RUNNER_TEMP": str(tmp_path), "GITHUB_RUN_ID": "7"},
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    failure_dir = tmp_path / "trusted-anchor-failure"
+    assert (failure_dir / "merge-lane-gate.json").read_text() == '{"status":"BLOCK"}\n'
+    assert list(failure_dir.iterdir())  # never empty, so the upload cannot vanish
+    second = tmp_path / "second"
+    (second / "trusted-anchor").mkdir(parents=True)
+    (second / "trusted-anchor" / "merge-lane-gate.json").symlink_to(tmp_path / "x")
+    completed = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", run],
+        env={**os.environ, "RUNNER_TEMP": str(second), "GITHUB_RUN_ID": "7"},
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert not (second / "trusted-anchor-failure" / "merge-lane-gate.json").exists()
+
+
+def test_verifier_reports_controller_reason_before_bundle_download_and_fails_closed():
+    steps = _workflow()["jobs"]["trusted-verifier"]["steps"]
+    names = [step.get("name") for step in steps]
+    download = _named_step("trusted-verifier", "Download controller failure reason")
+    report = _named_step("trusted-verifier", "Report controller failure reason (fail closed)")
+    gate = "needs.trusted-controller.result != 'success'"
+    assert download["if"] == gate
+    assert download["continue-on-error"] is True
+    assert download["uses"].startswith("actions/download-artifact@")
+    assert download["with"]["name"] == "trusted-anchor-controller-failure-${{ github.run_id }}"
+    assert report["if"] == gate
+    assert "continue-on-error" not in report
+    assert "explain-controller-failure" in report["run"]
+    assert '"$RUNNER_TEMP/trusted-verifier-source/trusted_deletion_anchor.py"' in report["run"]
+    assert (
+        names.index("Acquire exact trusted verifier source")
+        < names.index("Download controller failure reason")
+        < names.index("Report controller failure reason (fail closed)")
+        < names.index("Download controller bundle")
+    )
+    # Steps after the report keep the implicit success() guard, so a controller
+    # failure can never reach the PASS path.
+    later = steps[names.index("Download controller bundle") :]
+    for step in later[:-1]:
+        assert "if" not in step, step.get("name")
+    assert later[-1]["name"] == "Cleanup trusted verifier source"
+    assert later[-1]["if"] == "always()"
+
+
+def test_oversized_but_otherwise_valid_lane_block_is_rejected(tmp_path: Path):
+    payload = json.dumps({
+        "status": "BLOCK",
+        "reason": "EXACTLY_ONE_MERGE_LANE_BINDING_REQUIRED",
+        "padding": "x" * trusted_anchor.CONTROLLER_FAILURE_FILE_LIMIT,
+    }).encode()
+    failure_dir = _controller_failure_dir(tmp_path, {"merge-lane-gate.json": payload})
+    result = trusted_anchor.resolve_controller_failure(failure_dir, controller_result="failure")
+    assert result["reason_code"] == "CONTROLLER_REASON_UNAVAILABLE"
+    # Control: the same content under the limit is accepted.
+    (tmp_path / "small").mkdir()
+    small = _controller_failure_dir(
+        tmp_path / "small",
+        {"merge-lane-gate.json": {"status": "BLOCK", "reason": "PR_BODY_REQUIRED"}},
+    )
+    assert (
+        trusted_anchor.resolve_controller_failure(small, controller_result="failure")["reason_code"]
+        == "MERGE_LANE_BINDING_MISSING"
+    )
+
+
+@pytest.mark.parametrize(
+    "forged_code",
+    [
+        "MERGE_LANE_BINDING_MISSING",
+        "MERGE_LANE_BINDING_BLOCKED",
+        "CONTROLLER_REASON_UNAVAILABLE",
+    ],
+)
+def test_controller_record_cannot_claim_non_recordable_code(tmp_path: Path, forged_code: str):
+    failure_dir = _controller_failure_dir(
+        tmp_path,
+        {
+            "controller-failure.json": {
+                "schema": trusted_anchor.CONTROLLER_FAILURE_SCHEMA,
+                "reason_code": forged_code,
+                "detail": "forged",
+            }
+        },
+    )
+    result = trusted_anchor.resolve_controller_failure(failure_dir, controller_result="failure")
+    assert result["reason_code"] == "CONTROLLER_REASON_UNAVAILABLE"
+    assert "forged" not in result["detail"]
+
+
+def test_token_like_strings_are_redacted_from_detail(tmp_path: Path):
+    ghs = "ghs" + "_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+    ghp = "ghp" + "_" + "Z9y8X7w6V5u4T3s2R1q0P9o8N7m6L5k4J3i2"
+    pat = "github" + "_pat_" + "11ABCDEFG0123456789_abcdefghijklmnop"
+    failure_dir = _controller_failure_dir(
+        tmp_path,
+        {
+            "controller-failure.json": {
+                "schema": trusted_anchor.CONTROLLER_FAILURE_SCHEMA,
+                "reason_code": "CONTROLLER_ERROR",
+                "detail": f"auth {ghs} then {ghp} and {pat} end",
+            }
+        },
+    )
+    detail = trusted_anchor.resolve_controller_failure(failure_dir, controller_result="failure")[
+        "detail"
+    ]
+    for secret in (ghs, ghp, pat):
+        assert secret not in detail
+    assert detail == "auth [REDACTED] then [REDACTED] and [REDACTED] end"
+    record = trusted_anchor._controller_failure_record(ValueError(f"leak {ghs}"))
+    assert ghs not in record["detail"]
+    assert "[REDACTED]" in record["detail"]
+
+
+def test_deeply_nested_reason_json_falls_back_to_unavailable(tmp_path: Path):
+    failure_dir = _controller_failure_dir(
+        tmp_path, {"controller-failure.json": b"[" * 30_000 + b"]" * 30_000}
+    )
+    result = trusted_anchor.resolve_controller_failure(failure_dir, controller_result="failure")
+    assert result["reason_code"] == "CONTROLLER_REASON_UNAVAILABLE"
+
+
+def test_explain_step_runs_isolated_default_branch_source():
+    run = _named_step("trusted-verifier", "Report controller failure reason (fail closed)")["run"]
+    commands = [line.strip() for line in run.splitlines() if "explain-controller-failure" in line]
+    assert commands == [
+        'python -I "$RUNNER_TEMP/trusted-verifier-source/trusted_deletion_anchor.py" '
+        "explain-controller-failure "
+        '--failure-dir "$RUNNER_TEMP/trusted-anchor-failure" '
+        '--controller-result "$CONTROLLER_RESULT"'
+    ]
+    assert "trusted-anchor-failure/" not in run.split("explain-controller-failure")[0]
+
+
+def test_collect_step_skips_symlink_to_existing_file(tmp_path: Path):
+    run = _named_step("trusted-controller", "Collect controller failure reason")["run"]
+    real = tmp_path / "real-lane.json"
+    real.write_text('{"status":"BLOCK","reason":"PR_BODY_REQUIRED"}\n')
+    (tmp_path / "trusted-anchor").mkdir()
+    (tmp_path / "trusted-anchor" / "merge-lane-gate.json").symlink_to(real)
+    completed = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", run],
+        env={**os.environ, "RUNNER_TEMP": str(tmp_path), "GITHUB_RUN_ID": "7"},
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    failure_dir = tmp_path / "trusted-anchor-failure"
+    assert not (failure_dir / "merge-lane-gate.json").exists()
+    assert (failure_dir / "controller-failed.marker").read_text() == "run_id=7\n"
+
+
+def test_pr2016_dependency_snapshot_transition_is_exact_and_separate() -> None:
+    assert trusted_anchor.TRUSTED_PR2016_DEPENDENCY_SNAPSHOT_TRANSITION == (
+        2016,
+        (
+            "634340008a5adc2a608dc19c6fc34fee38b1773b2de78661327412c609e3820f",
+            "09f17508d34972268d4c7cff6877c447cf8586eff8684bbbbc6170255ca368d4",
+            "fa6c8ebbfac872fc59715a035158ab05c3141fcd2df5363f35ac623d57decef1",
+            "c00226cb36776992cb706c0b3d8727de67b3cdc28e1b9b92f95c89aac1c6d808",
+        ),
+    )
+
+
+def test_pr2016_dependency_snapshot_transition_allows_only_exact_binding(monkeypatch) -> None:
+    values = [b"trusted pyproject\n", b"trusted lock\n", b"head pyproject\n", b"head lock\n"]
+    hashes = trusted_anchor.TRUSTED_PR2016_DEPENDENCY_SNAPSHOT_TRANSITION[1]
+    original_sha = trusted_anchor._sha
+    digest_by_value = dict(zip(values, hashes, strict=True))
+    monkeypatch.setattr(
+        trusted_anchor,
+        "_sha",
+        lambda value: digest_by_value.get(value, original_sha(value)),
+    )
+
+    trusted_anchor._validate_trusted_dependency_contract(
+        values[0],
+        values[2],
+        values[1],
+        values[3],
+        pull_request_number=2016,
+        head_product_init_is_regular=True,
+    )
+
+    for index in range(4):
+        tampered = list(values)
+        tampered[index] += b"tampered"
+        with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+            trusted_anchor._validate_trusted_dependency_contract(
+                tampered[0],
+                tampered[2],
+                tampered[1],
+                tampered[3],
+                pull_request_number=2016,
+                head_product_init_is_regular=True,
+            )
+
+    for other_pr in (2015, 2017):
+        with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+            trusted_anchor._validate_trusted_dependency_contract(
+                values[0],
+                values[2],
+                values[1],
+                values[3],
+                pull_request_number=other_pr,
+                head_product_init_is_regular=True,
+            )
+
+
+# --- controller bash steps record a bootstrap reason (failure before Python runs) ---
+
+_BOOTSTRAP_STEP = "Acquire and execute exact trusted controller source"
+
+
+def _run_bootstrap_step(tmp_path: Path, **env: str) -> subprocess.CompletedProcess[str]:
+    run = _named_step("trusted-controller", _BOOTSTRAP_STEP)["run"]
+    return subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", run],
+        env={**os.environ, "RUNNER_TEMP": str(tmp_path), **env},
+        capture_output=True,
+        text=True,
+    )
+
+
+def _bootstrap_env(**overrides: str) -> dict[str, str]:
+    return {
+        "EVENT_JSON": "{}",
+        "EVENT_NAME": "pull_request",  # not pull_request_target: first fail-closed test trips
+        "WORKFLOW_REF": "x",
+        "WORKFLOW_SHA": "0" * 40,
+        "RUN_ID": "1",
+        "REPOSITORY": "James3014/Nexus-new",
+        "DEFAULT_BRANCH": "main",
+        "TRUSTED_TOKEN": "ghs_" + "A" * 36,
+        **overrides,
+    }
+
+
+def test_bootstrap_bash_failure_records_allowlisted_reason_and_still_fails(tmp_path: Path):
+    completed = _run_bootstrap_step(tmp_path, **_bootstrap_env())
+    assert completed.returncode != 0
+    reason_path = tmp_path / "trusted-anchor-failure" / "controller-failure.json"
+    record = json.loads(reason_path.read_text(encoding="utf-8"))
+    assert record["schema"] == trusted_anchor.CONTROLLER_FAILURE_SCHEMA
+    assert record["reason_code"] == "CONTROLLER_BOOTSTRAP_FAILED"
+    assert _BOOTSTRAP_STEP in record["detail"]
+    assert "ghs_" not in reason_path.read_text(encoding="utf-8")
+    assert "ghs_" not in completed.stderr
+    result = trusted_anchor.resolve_controller_failure(
+        reason_path.parent, controller_result="failure"
+    )
+    assert result["status"] == "BLOCK"
+    assert result["reason_code"] == "CONTROLLER_BOOTSTRAP_FAILED"
+    assert (
+        result["remedy"]
+        == trusted_anchor.CONTROLLER_FAILURE_REMEDIES["CONTROLLER_BOOTSTRAP_FAILED"]
+    )
+    assert _BOOTSTRAP_STEP in result["detail"]
+
+
+def test_bootstrap_failure_never_overwrites_python_controller_record(tmp_path: Path):
+    reason_path = tmp_path / "trusted-anchor-failure" / "controller-failure.json"
+    reason_path.parent.mkdir()
+    original = json.dumps({
+        "schema": trusted_anchor.CONTROLLER_FAILURE_SCHEMA,
+        "reason_code": "DEPENDENCY_CONTRACT_DRIFT",
+        "detail": "drift",
+    })
+    reason_path.write_text(original, encoding="utf-8")
+    completed = _run_bootstrap_step(tmp_path, **_bootstrap_env())
+    assert completed.returncode != 0
+    assert reason_path.read_text(encoding="utf-8") == original
+
+
+def test_bootstrap_trap_keeps_failed_command_text_unexpanded():
+    run = _named_step("trusted-controller", _BOOTSTRAP_STEP)["run"]
+    trap_lines = [line for line in run.splitlines() if "trap '" in line and "ERR" in line]
+    assert len(trap_lines) == 1
+    assert "$BASH_COMMAND" in trap_lines[0]
+    assert trap_lines[0].strip().startswith("trap '")  # single-quoted: expands only on error
+    assert "set -x" not in run
+
+
+def test_bootstrap_failure_does_not_print_token_from_failed_command(tmp_path: Path):
+    completed = _run_bootstrap_step(
+        tmp_path, **_bootstrap_env(EVENT_NAME="pull_request_target", REPOSITORY="evil/x")
+    )
+    assert completed.returncode != 0
+    assert "ghs_" not in completed.stderr
+    assert "ghs_" not in completed.stdout
+
+
+def test_collect_step_falls_back_to_bootstrap_reason_when_nothing_recorded(tmp_path: Path):
+    run = _named_step("trusted-controller", "Collect controller failure reason")["run"]
+    completed = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", run],
+        env={
+            **os.environ,
+            "RUNNER_TEMP": str(tmp_path),
+            "GITHUB_RUN_ID": "7",
+            "RUNTIME_BUILDER_OUTCOME": "failure",
+            "TRUSTED_SOURCE_OUTCOME": "skipped",
+            "EXTERNAL_ANCHOR_OUTCOME": "skipped",
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    failure_dir = tmp_path / "trusted-anchor-failure"
+    result = trusted_anchor.resolve_controller_failure(failure_dir, controller_result="failure")
+    assert result["reason_code"] == "CONTROLLER_BOOTSTRAP_FAILED"
+    assert "runtime-builder=failure" in result["detail"]
+
+
+def test_collect_step_keeps_existing_reason_record(tmp_path: Path):
+    run = _named_step("trusted-controller", "Collect controller failure reason")["run"]
+    failure_dir = tmp_path / "trusted-anchor-failure"
+    failure_dir.mkdir()
+    existing = '{"schema":"x","reason_code":"CONTROLLER_ERROR","detail":"d"}\n'
+    (failure_dir / "controller-failure.json").write_text(existing)
+    completed = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", run],
+        env={**os.environ, "RUNNER_TEMP": str(tmp_path), "GITHUB_RUN_ID": "7"},
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert (failure_dir / "controller-failure.json").read_text() == existing
+
+
+def test_lane_gate_block_outranks_bootstrap_record(tmp_path: Path):
+    failure_dir = _controller_failure_dir(
+        tmp_path,
+        {
+            "controller-failure.json": {
+                "schema": trusted_anchor.CONTROLLER_FAILURE_SCHEMA,
+                "reason_code": "CONTROLLER_BOOTSTRAP_FAILED",
+                "detail": "step=x",
+            },
+            "merge-lane-gate.json": {
+                "status": "BLOCK",
+                "reason": "EXACTLY_ONE_MERGE_LANE_BINDING_REQUIRED",
+            },
+        },
+    )
+    result = trusted_anchor.resolve_controller_failure(failure_dir, controller_result="failure")
+    assert result["reason_code"] == "MERGE_LANE_BINDING_MISSING"
+
+
+def test_bootstrap_record_detail_is_sanitized_display_data(tmp_path: Path):
+    ghs = "ghs_" + "B" * 36
+    failure_dir = _controller_failure_dir(
+        tmp_path,
+        {
+            "controller-failure.json": {
+                "schema": trusted_anchor.CONTROLLER_FAILURE_SCHEMA,
+                "reason_code": "CONTROLLER_BOOTSTRAP_FAILED",
+                "detail": f"step=a\nline {ghs} " + "z" * 1000,
+            }
+        },
+    )
+    detail = trusted_anchor.resolve_controller_failure(failure_dir, controller_result="failure")[
+        "detail"
+    ]
+    assert ghs not in detail and "\n" not in detail
+    assert len(detail) <= trusted_anchor.CONTROLLER_FAILURE_DETAIL_LIMIT
+
+
+def test_failure_upload_runs_on_failure_regardless_of_failing_step():
+    controller = _workflow()["jobs"]["trusted-controller"]["steps"]
+    names = [step.get("name") for step in controller]
+    collect = _named_step("trusted-controller", "Collect controller failure reason")
+    upload = _named_step("trusted-controller", "Upload controller failure reason")
+    assert collect["if"] == "failure()" and upload["if"] == "failure()"
+    assert names.index("Acquire fixed trusted runtime builder") < names.index(collect["name"])
+
+
+def test_bootstrap_failure_preserves_distinct_exit_status(tmp_path: Path):
+    run = _named_step("trusted-controller", _BOOTSTRAP_STEP)["run"]
+    marker = 'test "$EVENT_NAME" = pull_request_target'
+    assert marker in run
+    run = run.replace(marker, "exit 7", 1)
+    completed = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", run],
+        env={**os.environ, "RUNNER_TEMP": str(tmp_path), **_bootstrap_env()},
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 7, completed.stderr
+    record = json.loads(
+        (tmp_path / "trusted-anchor-failure" / "controller-failure.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert "exit=7" in record["detail"]
+
+
+# ------------------------------------------------------------------------------
+# Merge-base rule (Owner-approved option (b), 2026-10-13).  The executor no
+# longer requires the base tip as an ancestor of the head.  It requires exactly
+# one merge-base, bound in the manifest, and the controller and verifier fail
+# closed when main moved over the gate-oracle surface or over the PR's own paths.
+
+_MB_PYPROJECT = b"[project]\nname='fixture'\nversion='0'\n"
+_MB_UV_LOCK = b"version = 1\nrevision = 3\n"
+
+
+def _mb_commit(repo: Path, message: str, files: dict[str, bytes | None]) -> str:
+    for relative, data in files.items():
+        target = repo / relative
+        if data is None:
+            target.unlink()
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+    _run_git(repo, "add", "-A")
+    _run_git(repo, "commit", "-q", "--no-verify", "-m", message)
+    return _run_git(repo, "rev-parse", "HEAD")
+
+
+def _mb_root_files() -> dict[str, bytes | None]:
+    return {
+        "pyproject.toml": _MB_PYPROJECT,
+        "uv.lock": _MB_UV_LOCK,
+        "tests/ops/test_pr_impact_gate.py": b"def test_gate():\n    assert True\n",
+        "tests/golden_behavior/corpus.py": (
+            b'CASES = ("tests/contracts/test_witness.py::test_witness",)\n'
+        ),
+        "tests/contracts/test_witness.py": b"def test_witness():\n    assert True\n",
+        "tests/golden_behavior/test_corpus.py": b"def test_corpus():\n    assert True\n",
+        trusted_anchor.GOLDEN_EVALUATOR_PATH: b"# trusted evaluator placeholder\n",
+        "docs/shared.md": b"shared\n",
+    }
+
+
+def _mb_history(root: Path, scenario: str) -> dict[str, object]:
+    """Build an origin with a PR head and a main tip for one history shape."""
+
+    source = root / "mb-source"
+    subprocess.run(["git", "init", "-q", "-b", "main", str(source)], check=True)
+    _run_git(source, "config", "user.email", "test@example.invalid")
+    _run_git(source, "config", "user.name", "merge-base-test")
+    fork = _mb_commit(source, "fork point", _mb_root_files())
+    main_files: dict[str, bytes | None] = {"docs/main-added.md": b"main added\n"}
+    pr_files: dict[str, bytes | None] = {"docs/pr.md": b"pr work\n"}
+    if scenario == "main_golden":
+        main_files["tests/golden_behavior/corpus.py"] = b"CASES = ()\n# main moved\n"
+    elif scenario.startswith("main_touch:"):
+        main_files[scenario.removeprefix("main_touch:")] = b"# main moved\n"
+    elif scenario == "main_selected_test":
+        main_files["tests/ops/test_pr_impact_gate.py"] = b"def test_gate():\n    assert 1\n"
+    elif scenario == "main_uv_lock":
+        main_files["uv.lock"] = _MB_UV_LOCK + b"# main lock bump\n"
+    elif scenario == "same_path":
+        main_files["docs/shared.md"] = b"shared, main edit\n"
+        pr_files["docs/shared.md"] = b"shared, pr edit\n"
+    if scenario == "up_to_date":
+        base = fork
+        head = _mb_commit(source, "pr", pr_files)
+    elif scenario == "criss_cross":
+        x = _mb_commit(source, "x", {"docs/x.md": b"x\n"})
+        _run_git(source, "checkout", "-q", "-b", "y", fork)
+        y = _mb_commit(source, "y", {"docs/y.md": b"y\n"})
+        _run_git(source, "checkout", "-q", "-b", "tip", x)
+        _run_git(source, "merge", "-q", "--no-ff", "--no-verify", "-m", "tip", y)
+        base = _run_git(source, "rev-parse", "HEAD")
+        _run_git(source, "checkout", "-q", "-b", "head", y)
+        _run_git(source, "merge", "-q", "--no-ff", "--no-verify", "-m", "head", x)
+        head = _run_git(source, "rev-parse", "HEAD")
+    elif scenario == "unrelated":
+        base = _mb_commit(source, "main moved", main_files)
+        _run_git(source, "checkout", "-q", "--orphan", "orphan")
+        head = _mb_commit(source, "orphan", {})
+    else:
+        _run_git(source, "checkout", "-q", "-b", "feature")
+        head = _mb_commit(source, "pr", pr_files)
+        _run_git(source, "checkout", "-q", "main")
+        base = _mb_commit(source, "main moved", main_files)
+    origin = root / "mb-origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+    _run_git(
+        source, "push", "-q", str(origin), f"{base}:refs/heads/main", f"{head}:refs/pull/1/head"
+    )
+    controller_repo = root / "mb-controller.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(controller_repo)], check=True)
+    _run_git(controller_repo, "remote", "add", "origin", str(origin))
+    _run_git(controller_repo, "fetch", "-q", "--no-tags", "--depth=1", "origin", base)
+    event = _event()
+    event["workflow_sha"] = base
+    event["pull_request"]["base"]["sha"] = base  # type: ignore[index]
+    event["pull_request"]["head"]["sha"] = head  # type: ignore[index]
+    event_path = root / "mb-event.json"
+    event_path.write_bytes(_json(event))
+
+    def _at_base(path: str) -> bytes:
+        return subprocess.run(
+            ["git", "-C", str(source), "show", f"{base}:{path}"], check=True, capture_output=True
+        ).stdout
+
+    runtime_dir = _synthetic_runtime(
+        root, pyproject=_at_base("pyproject.toml"), uv_lock=_at_base("uv.lock")
+    )
+    return {
+        "source": source,
+        "controller_repo": controller_repo,
+        "event": event,
+        "event_path": event_path,
+        "runtime_dir": runtime_dir,
+        "bundle": root / "mb-bundle",
+        "fork": fork,
+        "base": base,
+        "head": head,
+    }
+
+
+def _mb_run_controller(history: dict[str, object]) -> dict[str, object]:
+    trusted_anchor._controller(
+        argparse.Namespace(
+            event_json=str(history["event_path"]),
+            repo_root=str(history["controller_repo"]),
+            output_dir=str(history["bundle"]),
+            runtime_dir=str(history["runtime_dir"]),
+        )
+    )
+    return json.loads((Path(history["bundle"]) / "manifest.json").read_text(encoding="utf-8"))
+
+
+def _mb_raw_entries(raw: bytes) -> list[tuple[str, str]]:
+    fields = raw.split(b"\0")
+    entries = []
+    for index in range(0, len(fields) - 1, 2):
+        status = fields[index].split()[-1].decode()
+        entries.append((status, fields[index + 1].decode()))
+    return entries
+
+
+def _mb_executor_git_context(bundle: Path, manifest: dict[str, object]) -> None:
+    source = bundle / "source"
+    if source.exists():
+        shutil.rmtree(source)
+    source.mkdir()
+    with tarfile.open(bundle / "source.tar") as archive:
+        archive.extractall(source, filter=trusted_anchor._executor_archive_filter)
+    trusted_anchor._prepare_executor_git_context(bundle, source, manifest)
+
+
+def _mb_verifier_args(history: dict[str, object]) -> argparse.Namespace:
+    bundle = Path(history["bundle"])
+    event = history["event"]
+    assert isinstance(event, dict)
+    return argparse.Namespace(
+        bundle_dir=str(bundle),
+        expected_workflow_ref=event["workflow_ref"],
+        expected_workflow_sha=event["workflow_sha"],
+        expected_run_id=event["run_id"],
+        verify_evidence=str(bundle / "raw-evidence.json"),
+        expected_manifest_sha256=trusted_anchor._sha((bundle / "manifest.json").read_bytes()),
+        expected_external_anchor_sha256=trusted_anchor._sha(
+            (bundle / "external-anchor.json").read_bytes()
+        ),
+        expected_event_name=event["event_name"],
+        expected_repository=event["repository"]["full_name"],
+        expected_default_branch=event["repository"]["default_branch"],
+        expected_pull_request_number=event["pull_request"]["number"],
+        expected_base_sha=event["pull_request"]["base"]["sha"],
+        expected_head_sha=event["pull_request"]["head"]["sha"],
+    )
+
+
+def _mb_write_evidence(bundle: Path, manifest: dict[str, object]) -> None:
+    (bundle / "raw-evidence.json").write_bytes(_json(_evidence(manifest)) + b"\n")
+
+
+def _mb_rebind_manifest(bundle: Path, manifest: dict[str, object]) -> None:
+    """Rewrite a manifest as a compromised controller would: every digest consistent."""
+
+    unsigned = dict(manifest)
+    unsigned.pop("bundle_sha256", None)
+    manifest["bundle_sha256"] = trusted_anchor._sha(
+        trusted_anchor._json(unsigned)
+        + (bundle / "source.tar").read_bytes()
+        + (bundle / "raw-diff.bin").read_bytes()
+        + trusted_anchor._json(sorted(manifest["test_inventory"]))  # type: ignore[arg-type]
+        + (bundle / "git-objects.bundle").read_bytes()
+        + (bundle / "requirements.txt").read_bytes()
+        + (bundle / "runtime.tar").read_bytes()
+        + (bundle / "runtime-metadata.json").read_bytes()
+        + (bundle / "run_golden_behavior_eval.py").read_bytes()
+    )
+    (bundle / "manifest.json").write_bytes(_json(manifest) + b"\n")
+    anchor = json.loads((bundle / "external-anchor.json").read_text(encoding="utf-8"))
+    anchor["manifest_sha256"] = trusted_anchor._sha((bundle / "manifest.json").read_bytes())
+    anchor["merge_base_sha"] = manifest["merge_base_sha"]
+    (bundle / "external-anchor.json").write_bytes(_json(anchor) + b"\n")
+
+
+def test_schema_version_is_bumped_for_merge_base_binding():
+    assert trusted_anchor.SCHEMA_VERSION == "trusted-deletion-anchor.v4"
+    assert trusted_anchor.RUNTIME_SCHEMA_VERSION == "trusted-deletion-runtime.v2"
+    assert "merge_base_sha" in trusted_anchor.REQUIRED_EVIDENCE_KEYS
+
+
+def test_up_to_date_pr_behaviour_is_unchanged(tmp_path: Path):
+    history = _mb_history(tmp_path, "up_to_date")
+    manifest = _mb_run_controller(history)
+    bundle = Path(history["bundle"])
+    assert manifest["merge_base_sha"] == history["base"]
+    expected_diff = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(history["source"]),
+            "diff",
+            "--raw",
+            "-z",
+            "--no-renames",
+            "--no-abbrev",
+            str(history["base"]),
+            str(history["head"]),
+        ],
+        check=True,
+        capture_output=True,
+    ).stdout
+    assert (bundle / "raw-diff.bin").read_bytes() == expected_diff
+    anchor = json.loads((bundle / "external-anchor.json").read_text(encoding="utf-8"))
+    assert anchor["merge_base_sha"] == history["base"]
+    _mb_executor_git_context(bundle, manifest)
+    _mb_write_evidence(bundle, manifest)
+    trusted_anchor._verifier(_mb_verifier_args(history))
+
+
+def test_behind_but_disjoint_pr_passes_controller_executor_and_verifier(tmp_path: Path):
+    history = _mb_history(tmp_path, "behind_disjoint")
+    manifest = _mb_run_controller(history)
+    bundle = Path(history["bundle"])
+    assert manifest["base_sha"] == history["base"]
+    assert manifest["merge_base_sha"] == history["fork"]
+    _mb_executor_git_context(bundle, manifest)
+    _mb_write_evidence(bundle, manifest)
+    trusted_anchor._verifier(_mb_verifier_args(history))
+
+
+def test_behind_pr_raw_diff_has_no_false_deletions_for_files_main_added(tmp_path: Path):
+    history = _mb_history(tmp_path, "behind_disjoint")
+    _mb_run_controller(history)
+    entries = _mb_raw_entries((Path(history["bundle"]) / "raw-diff.bin").read_bytes())
+    assert entries == [("A", "docs/pr.md")]
+    assert all(status != "D" for status, _path in entries)
+
+
+@pytest.mark.parametrize("scenario", ["criss_cross", "unrelated"])
+def test_controller_requires_exactly_one_merge_base(tmp_path: Path, scenario: str):
+    history = _mb_history(tmp_path, scenario)
+    with pytest.raises(ValueError, match="MERGE_BASE_NOT_UNIQUE"):
+        _mb_run_controller(history)
+    assert not (Path(history["bundle"]) / "manifest.json").exists()
+
+
+@pytest.mark.parametrize("scenario", ["criss_cross", "unrelated"])
+def test_executor_rejects_non_unique_merge_base(tmp_path: Path, scenario: str):
+    history = _mb_history(tmp_path, scenario)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(trusted_anchor, "_unique_merge_base", lambda *_args: history["base"])
+        manifest = _mb_run_controller(history)
+    with pytest.raises(ValueError, match="executor Git identity mismatch"):
+        _mb_executor_git_context(Path(history["bundle"]), manifest)
+
+
+def test_tampered_merge_base_sha_fails_executor_and_verifier(tmp_path: Path):
+    history = _mb_history(tmp_path, "behind_disjoint")
+    manifest = _mb_run_controller(history)
+    bundle = Path(history["bundle"])
+    manifest["merge_base_sha"] = history["base"]
+    _mb_rebind_manifest(bundle, manifest)
+    with pytest.raises(ValueError, match="executor Git identity mismatch"):
+        _mb_executor_git_context(bundle, manifest)
+    _mb_write_evidence(bundle, manifest)
+    with pytest.raises(SystemExit):
+        trusted_anchor._verifier(_mb_verifier_args(history))
+
+
+def test_evidence_merge_base_sha_must_match_manifest():
+    manifest = _manifest()
+    evidence = _evidence(manifest)
+    assert _verify(manifest, evidence) == "PASS"
+    evidence["merge_base_sha"] = "f" * 40
+    assert _verify(manifest, evidence) == "IMPACT_UNKNOWN"
+
+
+@pytest.mark.parametrize("scenario", ["main_golden", "main_selected_test", "same_path"])
+def test_main_moved_over_gate_surface_or_pr_paths_fails_closed(tmp_path: Path, scenario: str):
+    history = _mb_history(tmp_path, scenario)
+    with pytest.raises(ValueError, match="MAIN_MOVED_OVER_GATE_SURFACE: merge origin/main"):
+        _mb_run_controller(history)
+    record = trusted_anchor._controller_failure_record(
+        ValueError("MAIN_MOVED_OVER_GATE_SURFACE: merge origin/main; x")
+    )
+    assert record["reason_code"] == "MAIN_MOVED_OVER_GATE_SURFACE"
+
+
+@pytest.mark.parametrize("scenario", ["main_golden", "same_path"])
+def test_verifier_recomputes_main_moved_check(
+    tmp_path: Path, scenario: str, capsys: pytest.CaptureFixture[str]
+):
+    history = _mb_history(tmp_path, scenario)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(trusted_anchor, "_require_main_not_moved_over_gate", lambda *_a: None)
+        manifest = _mb_run_controller(history)
+    bundle = Path(history["bundle"])
+    _mb_write_evidence(bundle, manifest)
+    with pytest.raises(SystemExit):
+        trusted_anchor._verifier(_mb_verifier_args(history))
+    assert "MAIN_MOVED_OVER_GATE_SURFACE: merge origin/main" in capsys.readouterr().err
+
+
+def test_main_changed_uv_lock_fails_with_dependency_drift(tmp_path: Path):
+    history = _mb_history(tmp_path, "main_uv_lock")
+    with pytest.raises(ValueError) as caught:
+        _mb_run_controller(history)
+    record = trusted_anchor._controller_failure_record(caught.value)
+    assert record["reason_code"] == "DEPENDENCY_CONTRACT_DRIFT"
+    assert (
+        "merge origin/main"
+        in trusted_anchor.CONTROLLER_FAILURE_REMEDIES["DEPENDENCY_CONTRACT_DRIFT"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "gated"),
+    [
+        ("tests/ops/test_pr_impact_gate.py", True),
+        ("tests/ops/test_select_tests.py", True),
+        ("tests/golden_behavior/corpus.py", True),
+        ("tests/golden_behavior/nested/data.json", True),
+        ("scripts/ops/run_golden_behavior_eval.py", True),
+        ("scripts/ops/pr_impact_gate.py", True),
+        ("scripts/ops/select_tests.py", True),
+        ("scripts/ops/trusted_deletion_anchor.py", True),
+        ("scripts/ops/trusted_impact_gate.py", True),
+        (".github/workflows/lint.yml", True),
+        (".nexus-core/config.json", True),
+        ("docs/testing/test_impact_map.md", True),
+        (".nexus/test_impact_index.json", True),
+        ("pyproject.toml", True),
+        ("uv.lock", True),
+        ("product/__init__.py", True),
+        ("scripts/ops/nested/trusted_x.py", False),
+        ("scripts/ops/untrusted_x.py", False),
+        ("tests/ops/test_other.py", False),
+        ("product/other.py", False),
+        ("docs/main-added.md", False),
+    ],
+)
+def test_gate_oracle_surface_membership(path: str, gated: bool):
+    assert trusted_anchor._is_gate_oracle_surface(path) is gated
+    assert bool(trusted_anchor._gate_surface_overlap([path], [])) is gated
+
+
+def test_gate_surface_overlap_includes_pr_paths_and_empty_main_delta_passes():
+    assert trusted_anchor._gate_surface_overlap([], ["uv.lock"]) == []
+    assert trusted_anchor._gate_surface_overlap(["docs/a.md"], ["docs/b.md"]) == []
+    assert trusted_anchor._gate_surface_overlap(["docs/a.md", "uv.lock"], ["docs/a.md"]) == [
+        "docs/a.md",
+        "uv.lock",
+    ]
+
+
+def test_main_moved_reason_is_allowlisted_with_trusted_remedy(tmp_path: Path):
+    code = "MAIN_MOVED_OVER_GATE_SURFACE"
+    assert "merge origin/main" in trusted_anchor.CONTROLLER_FAILURE_REMEDIES[code]
+    failure_dir = _controller_failure_dir(
+        tmp_path,
+        {
+            "controller-failure.json": {
+                "schema": trusted_anchor.CONTROLLER_FAILURE_SCHEMA,
+                "reason_code": code,
+                "detail": "ValueError: MAIN_MOVED_OVER_GATE_SURFACE: merge origin/main; uv.lock",
+            }
+        },
+    )
+    result = trusted_anchor.resolve_controller_failure(failure_dir, controller_result="failure")
+    assert result["reason_code"] == code
+    assert result["remedy"] == trusted_anchor.CONTROLLER_FAILURE_REMEDIES[code]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "tests/contracts/test_witness.py",
+        "pytest.ini",
+        "tests/conftest.py",
+        "tests/ops/conftest.py",
+        "tests/contracts/conftest.py",
+        "tests/__init__.py",
+        "scripts/__init__.py",
+        "scripts/ops/__init__.py",
+    ],
+)
+def test_main_moved_over_witness_pytest_ini_or_import_chain_fails_closed(tmp_path: Path, path: str):
+    history = _mb_history(tmp_path, f"main_touch:{path}")
+    with pytest.raises(ValueError, match="MAIN_MOVED_OVER_GATE_SURFACE: merge origin/main"):
+        _mb_run_controller(history)
+
+
+def test_verifier_recomputes_witness_surface(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    history = _mb_history(tmp_path, "main_touch:tests/contracts/test_witness.py")
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(trusted_anchor, "_require_main_not_moved_over_gate", lambda *_a: None)
+        manifest = _mb_run_controller(history)
+    _mb_write_evidence(Path(history["bundle"]), manifest)
+    with pytest.raises(SystemExit):
+        trusted_anchor._verifier(_mb_verifier_args(history))
+    assert "tests/contracts/test_witness.py" in capsys.readouterr().err
+
+
+def test_unrelated_main_test_change_stays_admitted(tmp_path: Path):
+    history = _mb_history(tmp_path, "main_touch:tests/contracts/test_unrelated.py")
+    manifest = _mb_run_controller(history)
+    assert manifest["merge_base_sha"] == history["fork"]
+
+
+def test_golden_witness_paths_are_read_statically_from_corpus_source():
+    source = (
+        b'X = ("tests/a/test_one.py::test_x", "tests/a/test_one.py::C::test_y")\n'
+        b'Y = ("tests/b/test_two.py" "::test_z", "nexus/not_a_test.py", "docs/x.md")\n'
+        b"import os; os.system('never executed')\n"
+    )
+    assert trusted_anchor._golden_witness_paths(source) == {
+        "tests/a/test_one.py",
+        "tests/b/test_two.py",
+    }
+    assert trusted_anchor._golden_witness_paths(b"") == set()
+    with pytest.raises(ValueError, match="Golden corpus"):
+        trusted_anchor._golden_witness_paths(b"def (")
+
+
+def test_witness_named_only_at_base_tip_or_only_at_merge_base_is_surface():
+    overlap = trusted_anchor._gate_surface_overlap
+    assert overlap(["tests/x/test_w.py"], [], {"tests/x/test_w.py"}) == ["tests/x/test_w.py"]
+    assert overlap(["tests/x/test_w.py"], [], set()) == []
+
+
+def test_build_manifest_requires_merge_base_sha():
+    with pytest.raises(TypeError):
+        build_manifest(  # type: ignore[call-arg]
+            _event(),
+            raw_diff=b"",
+            test_inventory=["tests/ops/test_pr_impact_gate.py"],
+            source_archive=b"",
+        )
+
+
+def test_verifier_rejects_anchor_merge_base_that_differs_from_manifest(tmp_path: Path):
+    """The external anchor names the merge-base it vouches for; it must equal the manifest."""
+
+    history = _mb_history(tmp_path, "behind_disjoint")
+    manifest = _mb_run_controller(history)
+    bundle = Path(history["bundle"])
+    _mb_write_evidence(bundle, manifest)
+    trusted_anchor._verifier(_mb_verifier_args(history))
+    anchor = json.loads((bundle / "external-anchor.json").read_text(encoding="utf-8"))
+    anchor["merge_base_sha"] = history["base"]
+    (bundle / "external-anchor.json").write_bytes(_json(anchor) + b"\n")
+    with pytest.raises(SystemExit):
+        trusted_anchor._verifier(_mb_verifier_args(history))
+
+
+def test_unparseable_main_corpus_fails_closed(tmp_path: Path):
+    history = _mb_history(tmp_path, "main_touch:tests/golden_behavior/corpus.py")
+    source = Path(history["source"])
+    (source / "tests/golden_behavior/corpus.py").write_text("def (\n")
+    _run_git(source, "commit", "-q", "--no-verify", "-am", "broken corpus")
+    with pytest.raises(ValueError, match="Golden corpus is not parseable"):
+        trusted_anchor._main_moved_overlap(
+            source,
+            str(history["fork"]),
+            _run_git(source, "rev-parse", "HEAD"),
+            str(history["head"]),
+        )

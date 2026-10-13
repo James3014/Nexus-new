@@ -88,7 +88,7 @@ def _request(*, local_enabled: bool = False, online_enabled: bool = True) -> Uni
 def _admit_gateway_request(
     request: UnifiedRuntimeRequest,
     *,
-    online_worker: str = "agy_flash",
+    online_worker: str = "agy_flash_38",
 ) -> UnifiedRuntimeRequest:
     """Attach the canonical Workforce bindings required by Gateway mainchain."""
     if online_worker == "codex_luna":
@@ -98,6 +98,8 @@ def _admit_gateway_request(
             "task_card",
             "allowed_files",
             "mandatory_commands",
+            "parser",
+            "verifier",
             "independent_verification",
         ]
     route = dict(request.route)
@@ -1195,14 +1197,14 @@ def test_gateway_unified_entry_forwards_provider_context(monkeypatch, tmp_path: 
     request = UnifiedRuntimeRequest(
         **{
             **_request().__dict__,
-            "online_model_name": "gemini-3.6-flash-high",
+            "online_model_name": "gemini-3.8-flash-medium",
             "online_output_schema": {"status": "APPROVED | FAIL"},
             "online_phase": "R",
         }
     )
     gateway.ask_unified(_admit_gateway_request(request), verifier=_verifier, learning=_learning, online_invoker=_structured_gateway_invoker(gateway))
 
-    assert calls[0]["model_name"] == "gemini-3.6-flash-high"
+    assert calls[0]["model_name"] == "gemini-3.8-flash-medium"
     assert calls[0]["output_schema"] == {"status": "APPROVED | FAIL"}
 
 
@@ -1291,7 +1293,7 @@ def test_gateway_selects_workforce_admitted_registered_provider_at_edge(
         }
     )
     receipt = gateway.ask_unified(
-        _admit_gateway_request(request, online_worker="codex_luna"),
+        _physical_edge_request(request),
         capability_invokers=_DETERMINISTIC_CAPABILITY_INVOKERS,
         verifier=_verifier,
         learning=_learning,
@@ -1326,7 +1328,7 @@ def test_gateway_uses_registered_edge_when_gateway_is_configured_for_codex(tmp_p
     )
 
     receipt = gateway.ask_unified(
-        _admit_gateway_request(request, online_worker="codex_luna"),
+        _physical_edge_request(request),
         capability_invokers=_DETERMINISTIC_CAPABILITY_INVOKERS,
         verifier=_verifier,
         learning=_learning,
@@ -1473,11 +1475,30 @@ def test_negative_control_authorized_missing_provider_binary(monkeypatch) -> Non
         _build_sentinel,
     )
 
+    from nexus_runtime.support.services.online_execution_policy import (
+        RESOLVED_DECISION_CONTEXT_KEY,
+        OnlineExecutionDecision,
+    )
+
+    # nexus-runtime#178: a bare ``online_execution_authorized`` field is no longer an
+    # authorization; the authorized case needs an in-process resolved decision.
+    decision = OnlineExecutionDecision(
+        online_policy="require",
+        online_execution_requested=True,
+        online_execution_authorized=True,
+        online_authorization_source="workspace_policy",
+        approved_online_providers=("gemini",),
+        preflight_status="ONLINE_READY",
+        requested_provider="gemini",
+        physical_invocation_allowed=True,
+        claim_boundary={"public_claim_allowed": False},
+    )
     invoker = build_registered_online_invoker("gemini")
     result = invoker({
         "task_id": "nc-3",
         "task_statement": "try to run",
         "online_execution_authorized": True,
+        RESOLVED_DECISION_CONTEXT_KEY: decision,
     })
 
     # shutil.which returning None → resolve fails before build_subprocess_online_invoker.
@@ -4979,3 +5000,17 @@ def test_process_evidence_oserror_records_not_invoked(tmp_path):
     assert evidence["process_started"] is False
     assert evidence["returncode"] is None
     assert res["error"] == "provider_not_invoked"
+
+
+def _physical_edge_request(request: UnifiedRuntimeRequest) -> UnifiedRuntimeRequest:
+    """Admitted Gateway request whose fake executable runs as a real subprocess.
+
+    ``_admit_gateway_request`` asks for the fixture (injected_test_transport) path; a fixture
+    decision never starts a provider process (nexus-runtime#190), so the edge tests that
+    really execute a fake CLI drop that request and run under the physical authorization the
+    runtime resolves for the physical Workforce edge invoker.
+    """
+    admitted = _admit_gateway_request(request, online_worker="codex_luna")
+    route = dict(admitted.route)
+    route.pop("injected_transport", None)
+    return UnifiedRuntimeRequest(**{**admitted.__dict__, "route": route})

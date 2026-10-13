@@ -212,3 +212,17 @@ def test_evaluate_report_requires_hitl_for_low_confidence():
     assert passed is False
     assert "hitl_attach_session_missing" in failures
     assert "hitl_strategic_guidance_missing" in failures
+
+
+def test_evaluate_report_accepts_passing_review_mode_and_rejects_failed_review():
+    payload = _valid_report()
+    payload["mode"] = "review"
+    payload["status"] = "PASS"
+    passed, failures = ultra_gate.evaluate_report(payload)
+    assert passed is True, failures
+
+    payload["status"] = "BLOCKED"
+    payload["gate_passed"] = False
+    passed, failures = ultra_gate.evaluate_report(payload)
+    assert passed is False
+    assert "review_status:BLOCKED" in failures

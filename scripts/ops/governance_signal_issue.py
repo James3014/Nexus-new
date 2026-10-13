@@ -112,7 +112,8 @@ def find_or_create_nightly_issue(repo: str, run: Runner) -> int:
         ],
         "The scheduled Tier 3 full regression (`.github/workflows/pytest.yml`) failed. "
         "Each red run adds one comment below. Triage each failure: fix it, or add it to "
-        "`tests/nightly_quarantine_entries.py` with a cause and an Issue. Refs #1897.\n",
+        "`tests/nightly_quarantine_items/<slug>.py` (one module per entry, with a cause and an Issue; "
+        "to retire one set `ENTRY = None`, never delete the file). Refs #1897.\n",
     )
     return int(url.strip().rstrip("/").rsplit("/", 1)[-1])
 

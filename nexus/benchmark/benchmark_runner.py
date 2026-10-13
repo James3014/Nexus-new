@@ -9,8 +9,8 @@ from nexus.benchmark.csv_reporter import BenchmarkCsvReporter
 import warnings
 
 warnings.warn(
-    "nexus.benchmark.benchmark_runner has no production caller and is kept as lab-only "
-    "(bench effort uses nexus.engine.benchmark_runner; see #1740).",
+    "ARCHIVED 2026-10-13 legacy-engine: nexus.benchmark.benchmark_runner has no production caller "
+    "and only drives the retired legacy NexusEngine (lab-only since #1740); see ARCHIVED_2026-10-13-legacy-engine.md.",
     DeprecationWarning,
     stacklevel=2,
 )

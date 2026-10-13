@@ -502,3 +502,25 @@ def test_default_provider_timeout_increased():
     """DEFAULT_PROVIDER_TIMEOUT must be 300 ( increased from 120 for C4C)."""
     from scripts.bench.m1_real_local_solve_benchmark import DEFAULT_PROVIDER_TIMEOUT
     assert DEFAULT_PROVIDER_TIMEOUT == 300
+
+
+def test_c15_benchmark_judge_default_is_policy_resolved_or_fails_closed(monkeypatch):
+    """No hard-coded judge tag: resolve via the Workforce policy or leave it empty."""
+    from nexus_runtime.planning.services import model_default_resolution as mdr
+
+    monkeypatch.delenv("NEXUS_C15_JUDGE_MODEL", raising=False)
+    assert DEFAULT_JUDGE_MODEL == ""
+
+    def _not_admitted(*_a, **_k):
+        raise mdr.ModelDefaultNotAdmittedError("committee_judge", "no_local_first_route")
+
+    monkeypatch.setattr(mdr, "resolve_judge_model", _not_admitted)
+    row = build_c15_benchmark_row(_make_spec(), Path("/tmp/verify.py"), "/usr/bin/python3")
+    snap = row["signal_snapshot"]
+    assert snap["judge_model"] == ""
+    assert snap["judge_model_resolution"].startswith("MODEL_DEFAULT_NOT_ADMITTED")
+
+    monkeypatch.setattr(mdr, "resolve_judge_model", lambda *_a, **_k: "admitted-judge:1b")
+    row = build_c15_benchmark_row(_make_spec(), Path("/tmp/verify.py"), "/usr/bin/python3")
+    assert row["signal_snapshot"]["judge_model"] == "admitted-judge:1b"
+    assert row["signal_snapshot"]["judge_model_resolution"] == "workforce_policy"

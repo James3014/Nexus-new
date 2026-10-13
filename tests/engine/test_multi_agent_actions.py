@@ -9,7 +9,6 @@ import scripts.engine.nexus_cli as cli_mod
 from scripts.engine.commands.exception_translation import NexusCliActionError
 from scripts.engine.commands.multi_agent_actions import (
     TaskAuditView,
-    TaskIntegrationView,
     TaskStartView,
     TaskStatusView,
     TaskSubmissionView,
@@ -19,7 +18,6 @@ from scripts.engine.commands.multi_agent_actions import (
     get_multi_agent_metrics,
     get_multi_agent_task_audit,
     get_multi_agent_task_status,
-    integrate_multi_agent_tasks,
     render_multi_agent_metrics,
     render_multi_agent_task_audit,
     render_multi_agent_task_start,
@@ -157,32 +155,13 @@ def test_start_multi_agent_task_returns_worktree_view_without_click():
 
 
 def test_integrate_multi_agent_tasks_parses_ids_and_uses_integration_manager_without_click():
-    # Preserve the historical pytest node id while changing the contract to fail closed.
-    calls = []
+    # Historical node id retained: the retired integrate action is removed by the
+    # 2026-10-13 archive batch (#1906); no integration helper is exposed any more.
+    from scripts.engine.commands import multi_agent_actions
 
-    def bomb_orchestrator():
-        calls.append("orchestrator")
-        raise AssertionError("retired integration must not construct the orchestrator")
-
-    def bomb_manager(_state_store, _evidence_collector):
-        calls.append("integration-manager")
-        raise AssertionError("retired integration must not construct the legacy manager")
-
-    try:
-        integrate_multi_agent_tasks(
-            "T-ok, T-bad",
-            target_branch="release",
-            orchestrator_factory=bomb_orchestrator,
-            integration_manager_factory=bomb_manager,
-        )
-    except NexusCliActionError as exc:
-        assert "LEGACY_INTEGRATION_PATH_RETIRED_USE_CONTROLLED_INTEGRATION" in str(exc)
-        assert "SelfHostedTaskService/ControlledIntegrationManager" in str(exc)
-    else:
-        raise AssertionError("retired legacy integration path must fail closed")
-
-    assert calls == []
-
+    assert not hasattr(multi_agent_actions, "integrate_multi_agent_tasks")
+    assert not hasattr(multi_agent_actions, "TaskIntegrationView")
+    assert not hasattr(cli_mod, "integrate_multi_agent_tasks")
 
 def test_submit_multi_agent_task_blocks_when_verification_fails_without_side_effects(tmp_path):
     class SubmitOrchestrator(FakeOrchestrator):
@@ -390,29 +369,15 @@ def test_multi_agent_start_cli_uses_action_result(monkeypatch):
 
 
 def test_multi_agent_integrate_cli_uses_action_result(monkeypatch):
-    calls = []
-
-    def fake_integrate_multi_agent_tasks(task_ids, *, target_branch):
-        calls.append((task_ids, target_branch))
-        return TaskIntegrationView(
-            task_ids=["T-ok"],
-            target_branch=target_branch,
-            success=["T-ok"],
-            failed=[],
-            text_lines=["integrated from action"],
-        )
-
-    monkeypatch.setattr(cli_mod, "integrate_multi_agent_tasks", fake_integrate_multi_agent_tasks)
-
+    # Historical node id retained: `nexus multi-agent integrate` is removed (#1906);
+    # `self-hosted integrate` (ControlledIntegrationManager) is the supported path.
     result = CliRunner().invoke(
         cli_mod.nexus,
         ["nexus", "multi-agent", "integrate", "--task-ids", "T-ok", "--target-branch", "release"],
     )
 
-    assert result.exit_code == 0
-    assert calls == [("T-ok", "release")]
-    assert "integrated from action" in result.output
-
+    assert result.exit_code == 2
+    assert "No such command" in result.output
 
 def test_get_multi_agent_metrics_wires_orchestrator_logger_to_aggregator():
     calls = []

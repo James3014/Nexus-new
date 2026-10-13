@@ -11,6 +11,18 @@ from nexus.services.local_heal.capability_adapter import (
     LocalHealCapabilityRequest,
 )
 from nexus.engine.capability_receipt_adapters import LocalHealReceiptAdapter
+from nexus.engine.capability_executor_controls import build_execution_plan
+from nexus.engine.capability_planner import CapabilityPlanner
+
+
+# #1924: controls come from a real CapabilityPlanner.plan() passed through build_execution_plan(),
+# whose planner-bound route_context must not be edited. Isolated solve is reachable only once the
+# planner itself grants it (quarantined until then).
+def _planned_controls(task_id: str, **fixture_controls: object) -> dict:
+    plan = CapabilityPlanner().plan(task_desc="fix code", task_type="repair", route={"local_enabled": True})
+    controls = dict(build_execution_plan(plan, task_id=task_id).executor_controls)
+    assert controls["route_context"]["signal_snapshot"]["planner_version"] == "capability_planner_v1"
+    return {**controls, **fixture_controls}
 
 
 def test_abc_local_heal_full_isolated_solve_seam() -> None:
@@ -41,15 +53,16 @@ def test_abc_local_heal_full_isolated_solve_seam() -> None:
                 task_id="t_abc",
                 problem_statement="fix code",
                 evidence_refs=("ref1",),
-                executor_controls={
-                    "source_root": src_root,
-                    "target_file": test_file,
-                    "target_symbol": "print",
-                    "locked_search": "print('hello')",
-                    "verifier_command": ["python3", "-c", "import os; assert os.path.exists('f.py')"],
-                    "work_dir": "",
-                    "candidate_generate_fn": mock_gen,
-                },
+                executor_controls=_planned_controls(
+                    "t_abc",
+                    source_root=src_root,
+                    target_file=test_file,
+                    target_symbol="print",
+                    locked_search="print('hello')",
+                    verifier_command=["python3", "-c", "import os; assert os.path.exists('f.py')"],
+                    work_dir="",
+                    candidate_generate_fn=mock_gen,
+                ),
                 dry_run=False,
             )
             
@@ -66,7 +79,9 @@ def test_abc_local_heal_full_isolated_solve_seam() -> None:
             assert receipt1.invoked is True
             assert receipt1.gate_passed is True
             assert receipt1.evidence_present is True
-            assert receipt1.outcome_contributed is True
+            # #453 closure (ADVISORY_ONLY_FAIL_CLOSED): adapter payloads cannot mint verifier
+            # authority, so even a verified claim does not contribute an outcome here.
+            assert receipt1.outcome_contributed is False
             
             receipt2 = receipt_adapter.build(claim_verified=False, payload=response.capability_payload)
             assert receipt2.gate_passed is True
@@ -106,15 +121,16 @@ def test_abc_local_heal_full_isolated_solve_with_fail_closed_guard_enabled() -> 
                 task_id="t_abc_guard",
                 problem_statement="fix code",
                 evidence_refs=("ref1",),
-                executor_controls={
-                    "source_root": src_root,
-                    "target_file": test_file,
-                    "target_symbol": "print",
-                    "locked_search": "print('hello')",
-                    "verifier_command": ["python3", "-c", "import os; assert os.path.exists('f.py')"],
-                    "work_dir": "",
-                    "candidate_generate_fn": mock_gen,
-                },
+                executor_controls=_planned_controls(
+                    "t_abc_guard",
+                    source_root=src_root,
+                    target_file=test_file,
+                    target_symbol="print",
+                    locked_search="print('hello')",
+                    verifier_command=["python3", "-c", "import os; assert os.path.exists('f.py')"],
+                    work_dir="",
+                    candidate_generate_fn=mock_gen,
+                ),
                 dry_run=False,
             )
             

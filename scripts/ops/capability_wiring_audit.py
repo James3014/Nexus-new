@@ -86,6 +86,30 @@ RETIRING_CAPABILITIES: dict[str, str] = {
     "ui_validator": "ui_explorer / ui-validator + _exec_ui_validator (archive PR)",
     "benchmark": "benchmark_service + _exec_benchmark (archive PR)",
     "learning_closure": "_exec_learning_closure (archive PR; executor only, not a planner node)",
+    # Second batch (ARCHIVED_2026-10-13.md, #1906): the invoker returns the archived skip reason.
+    "integration_manager": "archived_retired_integration_manager_2026-10-13 (second archive batch)",
+    "swarm_quiet_moment": "archived_echo_swarm_quiet_moment_2026-10-13 (second archive batch)",
+    "llm_judge_panel": "archived_alias_llm_judge_panel_2026-10-13 (second archive batch)",
+    # Legacy-engine batch (ARCHIVED_2026-10-13-legacy-engine.md): the AutonomicRouter body was
+    # the legacy NexusEngine router; no policy rule enabled the node and nothing read its output.
+    "autonomic_router": "archived_legacy_engine_autonomic_router_2026-10-13 (legacy-engine archive batch)",
+}
+
+# Executor-registry keys with no planner node, removed from EXECUTOR_REGISTRY by the second
+# archive batch (ARCHIVED_2026-10-13.md, #1906).  EXECUTOR_ONLY below keeps what each one did.
+RETIRED_EXECUTOR_ONLY_REASON = "archived_executor_only_no_planner_node_2026-10-13"
+RETIRED_EXECUTOR_ONLY_NOTES: dict[str, str] = {
+    "entropy_guard_v2": (
+        "registry key removed 2026-10-13; module nexus/services/entropy_v2.py kept, "
+        "planner node + fixture tracked in #1907"
+    ),
+    "policy_capability_gate": (
+        "executor removed 2026-10-13; nexus/services/policy_gate.py kept (legacy self_heal_selector)"
+    ),
+    "nightshift_runner_service": (
+        "alias key removed 2026-10-13; the function stays as the body of the nightshift node"
+    ),
+    "battle_swarm": "alias key removed 2026-10-13; swarm / multi_agent nodes keep the real executor",
 }
 
 POSTFLIGHT_CAPABILITIES = frozenset({
@@ -1549,28 +1573,101 @@ def neg_research(pos: Obs, neg: Obs) -> Check:
 
 
 def build_hyper(ws: Path, variant: str) -> Scenario:
-    def check(_ws: Path, obs: Obs) -> list[Check]:
+    # Local channel: every model candidate is a verified-subtask of the Workforce-admitted ollama
+    # worker (armored local lane, M5 endpoint); the sprint re-scores it with its own pytest run.
+    # The negative variant drops the test file, so the local channel has no verifier and must not
+    # call the model.
+    original_hash = sha256_file(ws / "pricing.py")
+    codeintel: dict[str, Any] = {
+        "hyper_candidate_count": 3,
+        "hyper_min_candidate_pool": 2,
+        "hyper_target_file": "pricing.py",
+        "hyper_llm_mode": True,
+        "hyper_llm_channel": "local",
+    }
+    if variant == "positive":
+        codeintel["hyper_test_file"] = "test_pricing.py"
+
+    def check(root: Path, obs: Obs) -> list[Check]:
         result = _result(obs)
-        text = f"SprintResult(status={result.get('status')!r}, attempt_count={result.get('attempt_count')})"
-        attempts = re.search(r"attempt_count=(\d+)", text)
+        candidates = [c for c in obs.outcome.get("candidates") or [] if isinstance(c, Mapping)]
+        model_ok = [
+            c
+            for c in candidates
+            if str(c.get("source") or "").startswith("llm") and float(c.get("score") or 0) >= 1.0
+        ]
+        local_runs = [
+            u
+            for u in obs.outcome.get("unified_runtime_receipts") or []
+            if isinstance(u, Mapping) and u.get("local_status") == "SUCCEEDED"
+        ]
         return [
             Check(
                 "sprint_status_success",
-                "status='SUCCESS'" in text or "status='SUCCEEDED'" in text,
-                text[:120],
+                str(result.get("status") or "").upper() in {"SUCCESS", "SUCCEEDED"},
+                f"status={result.get('status')} reason={result.get('reason')}",
             ),
             Check(
                 "sprint_produced_at_least_two_candidates",
-                bool(attempts) and int(attempts.group(1)) >= 2,
-                f"attempt_count={attempts.group(1) if attempts else 'n/a'}",
+                int(result.get("attempt_count") or 0) >= 2,
+                f"attempt_count={result.get('attempt_count')}",
+            ),
+            Check(
+                "llm_mode_effective_local_channel",
+                obs.outcome.get("llm_mode_effective") is True
+                and obs.outcome.get("llm_channel") == "local",
+                f"llm_mode_effective={obs.outcome.get('llm_mode_effective')} channel={obs.outcome.get('llm_channel')} guard={obs.outcome.get('learn_slo_guard')}",
+            ),
+            Check(
+                "model_candidate_verified_by_sprint_pytest",
+                bool(model_ok) and int(obs.outcome.get("model_calls") or 0) >= 1,
+                f"model_verified={len(model_ok)} model_calls={obs.outcome.get('model_calls')} sources={[c.get('source') for c in candidates]}",
+            ),
+            Check(
+                "local_lane_runs_succeeded",
+                bool(local_runs),
+                f"local unified runs={len(local_runs)}",
+            ),
+            Check(
+                "target_file_restored_after_scoring",
+                sha256_file(root / "pricing.py") == original_hash,
+                "pricing.py hash unchanged",
             ),
         ]
 
     return Scenario(
-        statement="Improve the README wording of the hyper fixture",
+        statement=(
+            "Fix apply_discount in pricing.py: the percent must be divided by 100, not 10, "
+            "so test_pricing.py passes"
+        ),
         task_type="research",
-        codeintel={"hyper_candidate_count": 3, "hyper_target_file": "README.md"},
+        codeintel=codeintel,
+        # Same armor-on local switches as the Local stage rows, plus the documented benchmark
+        # override of the learn-phase SLO guard (a fresh fixture has no learn-phase history; without
+        # it the sprint silently drops llm_mode, which the receipt now reports).
+        # NEXUS_LOCAL_MODEL_CALL_ALLOWED stays with the policy attempts, so the production default
+        # attempt still runs without it.
+        extra_env={
+            **{
+                key: value
+                for key, value in local_stage_env(ws).items()
+                if key != "NEXUS_LOCAL_MODEL_CALL_ALLOWED"
+            },
+            "NEXUS_FORCE_LLM_DESPITE_LEARN_SLO": "1",
+        },
         check=check,
+    )
+
+
+def neg_hyper(pos: Obs, neg: Obs) -> Check:
+    neg_calls = int(neg.outcome.get("model_calls") or 0)
+    neg_status = str(neg.outcome.get("sprint_status") or "")
+    neg_runs = len(neg.outcome.get("unified_runtime_receipts") or [])
+    ok = pos.gate_passed and not neg.gate_passed and neg_calls == 0 and neg_runs == 0
+    return Check(
+        "negative_control:no_test_file_no_model_call",
+        ok,
+        f"neg.sprint_status={neg_status} neg.model_calls={neg_calls} neg.local_runs={neg_runs} neg.block_reason={neg.block_reason()}",
     )
 
 
@@ -1600,23 +1697,122 @@ def build_nightshift(ws: Path, variant: str) -> Scenario:
     )
 
 
+def _commit_fixture_repo(ws: Path) -> None:
+    """Swarm worktrees need a git workspace: commit the copied fixture to a scratch repository."""
+    git = ["git", "-c", "user.name=wiring-audit", "-c", "user.email=wiring-audit@invalid"]
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=ws, check=True)  # nosec B603 B607
+    subprocess.run([*git, "add", "-A"], cwd=ws, check=True)  # nosec B603 B607
+    subprocess.run([*git, "commit", "-q", "-m", "fixture"], cwd=ws, check=True)  # nosec B603 B607
+
+
 def build_swarm(ws: Path, variant: str) -> Scenario:
-    def check(_ws: Path, obs: Obs) -> list[Check]:
+    _commit_fixture_repo(ws)
+    if variant != "positive":
+        # Another task already holds calc.py: the run must stop at the lock, before any worktree.
+        lock = ws / ".nexus" / "multi_agent" / "locks" / "file_locks.json"
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_text(json.dumps({"locks": {"calc.py": "other-task"}}), encoding="utf-8")
+    original_hash = sha256_file(ws / "calc.py")
+
+    def check(root: Path, obs: Obs) -> list[Check]:
+        report = (
+            obs.outcome.get("swarm_report")
+            if isinstance(obs.outcome.get("swarm_report"), Mapping)
+            else {}
+        )
+        workers = [w for w in report.get("workers") or [] if isinstance(w, Mapping)]
+        commits = [str(w.get("commit") or "") for w in workers if w.get("commit")]
+        commits_exist = bool(commits) and all(
+            subprocess.run(  # nosec B603 B607
+                ["git", "cat-file", "-e", f"{sha}^{{commit}}"], cwd=root, capture_output=True
+            ).returncode
+            == 0
+            for sha in commits
+        )
+        integration = (
+            report.get("integration") if isinstance(report.get("integration"), Mapping) else {}
+        )
+        lock = report.get("lock") if isinstance(report.get("lock"), Mapping) else {}
         return [
             Check(
                 "swarm_executed_workers",
-                obs.outcome.get("action") not in {"cleanup", "probe"},
-                f"action={obs.outcome.get('action')}",
+                obs.outcome.get("action") == "run_bounded_swarm"
+                and int(obs.outcome.get("workers_executed") or 0) >= 2
+                and int(obs.outcome.get("model_calls") or 0) >= 1,
+                f"action={obs.outcome.get('action')} executed={obs.outcome.get('workers_executed')} model_calls={obs.outcome.get('model_calls')}",
             ),
             Check(
                 "no_construct_only_rejection",
                 obs.outcome.get("error") != "import_construct_not_execution",
                 f"error={obs.outcome.get('error')}",
             ),
+            Check(
+                "file_lock_held_then_released",
+                lock.get("held_by_this_task") is True and lock.get("released") is True,
+                f"lock={dict(lock)}",
+            ),
+            Check(
+                "worker_commits_in_object_store",
+                commits_exist and len(commits) >= 2,
+                f"commits={commits}",
+            ),
+            Check(
+                "winner_verified_by_repro",
+                (report.get("winner") or {}).get("verify_result") == "pass",
+                f"winner={report.get('winner')} results={[w.get('verify_result') for w in workers]}",
+            ),
+            Check(
+                "integration_offered_to_controlled_manager",
+                integration.get("attempted") is True
+                and "SelfHostedTaskService.integrate_approved"
+                in str(integration.get("authority") or "")
+                and integration.get("merge_performed") is False
+                and bool(integration.get("refusal")),
+                f"integration={dict(integration)}",
+            ),
+            Check(
+                "worktrees_removed_and_workspace_untouched",
+                sorted(report.get("worktrees_removed") or [])
+                == sorted(report.get("worktrees") or [])
+                and sha256_file(root / "calc.py") == original_hash,
+                f"worktrees={report.get('worktrees')} removed={report.get('worktrees_removed')}",
+            ),
         ]
 
     return Scenario(
-        statement="Coordinate two agents on the swarm fixture", task_type="research", check=check
+        statement="Coordinate two agents on the swarm fixture: fix add in calc.py so repro.py passes",
+        task_type="research",
+        codeintel={
+            "swarm_target_file": "calc.py",
+            "swarm_verify_script": "repro.py",
+            "swarm_parallelism": 2,
+        },
+        # Armor-on local switches of the Local stage rows (M5 endpoint); the model-call switch
+        # itself stays with the policy attempts.
+        extra_env={
+            key: value
+            for key, value in local_stage_env(ws).items()
+            if key != "NEXUS_LOCAL_MODEL_CALL_ALLOWED"
+        },
+        check=check,
+    )
+
+
+def neg_swarm(pos: Obs, neg: Obs) -> Check:
+    report = (
+        neg.outcome.get("swarm_report")
+        if isinstance(neg.outcome.get("swarm_report"), Mapping)
+        else {}
+    )
+    ok = (
+        "FILE_LOCK_CONFLICT" in neg.block_reason()
+        and not report.get("worktrees")
+        and int(neg.outcome.get("model_calls") or 0) == 0
+    )
+    return Check(
+        "negative_control:foreign_lock_blocks_before_worktrees",
+        ok,
+        f"neg.block_reason={neg.block_reason()} worktrees={report.get('worktrees')} lock={report.get('lock')}",
     )
 
 
@@ -1657,14 +1853,20 @@ def neg_drone(pos: Obs, neg: Obs) -> Check:
 
 
 def build_ultra_review(ws: Path, variant: str) -> Scenario:
+    """Positive: a benign diff the review must pass with every lane executed.
+
+    Negative: the planted diff (``eval(input())`` plus a behaviour change that breaks
+    ``tests/test_app.py``) that the same path must fail with both findings.
+    """
     _git(ws, "init", "-q")
-    _git(ws, "add", "app.py")
+    _git(ws, "add", "app.py", "tests/test_app.py")
     _git(ws, "commit", "-q", "-m", "baseline")
-    if variant == "positive":
-        shutil.copyfile(ws / "planted_patch.txt", ws / "app.py")
+    patch = "benign_patch.txt" if variant == "positive" else "planted_patch.txt"
+    shutil.copyfile(ws / patch, ws / "app.py")
 
     def check(_ws: Path, obs: Obs) -> list[Check]:
         res = _result(obs)
+        executed = list(obs.outcome.get("executed_checks") or [])
         return [
             Check(
                 "diff_captured",
@@ -1672,29 +1874,46 @@ def build_ultra_review(ws: Path, variant: str) -> Scenario:
                 f"diff_bytes={res.get('diff_bytes')}",
             ),
             Check(
-                "changed_file_listed",
-                int(res.get("changed_files_count") or 0) >= 1,
-                f"changed_files_count={res.get('changed_files_count')}",
+                "every_lane_executed_real_checks",
+                {"bandit", "ruff-security", "py_compile", "ruff-correctness", "tests/test_app.py"}
+                <= set(executed),
+                f"executed_checks={executed}",
             ),
             Check(
-                "planted_eval_input_flagged",
-                "eval" in json.dumps(obs.outcome, default=str).lower()
-                and "finding" in json.dumps(obs.outcome, default=str).lower(),
-                "no review finding in the executor outcome",
+                "benign_diff_passes",
+                obs.gate_passed is True and res.get("review_status") == "PASS",
+                f"gate={obs.gate_passed} review_status={res.get('review_status')} findings={obs.outcome.get('findings')}",
             ),
         ]
 
+    # The forcing line names a review capability, so the planner demands Workforce role
+    # independent_review; the audit binds that route's worker (still the no-model stand-in).
     return Scenario(
-        statement="Review the working tree diff for unsafe calls", task_type="review", check=check
+        statement="Review the working tree diff for unsafe calls",
+        task_type="review",
+        check=check,
+        online_route="independent_review",
     )
 
 
 def neg_ultra_review(pos: Obs, neg: Obs) -> Check:
-    differs = _result(pos).get("diff_bytes") != _result(neg).get("diff_bytes")
+    findings = [f for f in neg.outcome.get("findings") or [] if isinstance(f, Mapping)]
+    rules = sorted({f"{f.get('lane')}:{f.get('rule_id')}" for f in findings})
+    eval_flagged = any(
+        r in rules for r in ("security_sentry:bandit:B307", "security_sentry:ruff:S307")
+    )
+    test_flagged = "ghost_regression:regression_test_failed" in rules
+    ok = (
+        pos.gate_passed is True
+        and neg.gate_passed is False
+        and _result(neg).get("review_status") == "FAIL"
+        and eval_flagged
+        and test_flagged
+    )
     return Check(
-        "negative_control:clean_tree_has_empty_diff",
-        differs and pos.gate_passed == neg.gate_passed,
-        f"diff_bytes pos={_result(pos).get('diff_bytes')} neg={_result(neg).get('diff_bytes')}; gate pos={pos.gate_passed} neg={neg.gate_passed}",
+        "negative_control:planted_eval_and_failing_test_fail_the_gate",
+        ok,
+        f"gate pos={pos.gate_passed} neg={neg.gate_passed}; neg status={_result(neg).get('review_status')} rules={rules}",
     )
 
 
@@ -1702,19 +1921,20 @@ def probe_ultra_review(ws: Path) -> dict[str, Any]:
     from nexus.engine.ultra_review_service import UltraReviewService
 
     _git(ws, "init", "-q")
-    _git(ws, "add", "app.py")
+    _git(ws, "add", "app.py", "tests/test_app.py")
     _git(ws, "commit", "-q", "-m", "baseline")
     shutil.copyfile(ws / "planted_patch.txt", ws / "app.py")
-    service = UltraReviewService(project_root=ws)
-    diff = service._capture_diff("HEAD")  # noqa: SLF001
-    findings = service._scan_security_observations(diff)  # noqa: SLF001
+    with chdir(ws):
+        payload = UltraReviewService(project_root=ws).run(
+            dry_run=False,
+            report_path=".nexus/reports/ultra_review/probe.json",
+            sandbox_root=".nexus/reports/ultra_review/probe_sandboxes",
+        )
     return {
-        "ok": any(
-            "eval" in str(f.get("rule_id")) or "eval" in str(f.get("matched_text"))
-            for f in findings
-        ),
-        "finding_rule_ids": [f.get("rule_id") for f in findings],
-        "note": "UltraReviewService._scan_security_observations flags the planted eval(input()) when called directly; the registry executor never calls it (it only captures the diff)",
+        "ok": payload.get("status") == "FAIL" and payload.get("gate_passed") is False,
+        "status": payload.get("status"),
+        "finding_rule_ids": [f.get("rule_id") for f in payload.get("findings") or []],
+        "note": "UltraReviewService.run(dry_run=False) called directly on the planted diff",
     }
 
 
@@ -2307,11 +2527,17 @@ def neg_harness_sensor(pos: Obs, neg: Obs) -> Check:
 
 
 def build_committee(ws: Path, variant: str) -> Scenario:
+    # Proposals name their proposer "proposer_id" (the canonical context seam rejects any
+    # "model" key). Each candidate patch is applied to its own workspace copy and judged by
+    # running repro.py there; only candidate-a (a + b) passes, so the committee must pick it.
     proposals = read_json(ws / "proposals.json")
     if variant != "positive":
         proposals = proposals[:1]
+    original_hash = sha256_file(ws / "calc.py")
 
-    def check(_ws: Path, obs: Obs) -> list[Check]:
+    def check(root: Path, obs: Obs) -> list[Check]:
+        results = [r for r in obs.outcome.get("execution_results") or [] if isinstance(r, Mapping)]
+        worlds = [Path(str(r.get("workspace") or "")) for r in results]
         return [
             Check(
                 "quorum_of_candidates",
@@ -2326,14 +2552,35 @@ def build_committee(ws: Path, variant: str) -> Scenario:
             Check(
                 "winner_or_abstain",
                 bool(obs.outcome.get("winner_id")) or obs.outcome.get("explicit_abstain") is True,
-                f"winner={obs.outcome.get('winner_id')}",
+                f"winner={obs.outcome.get('winner_id')} abstain={obs.outcome.get('explicit_abstain')}",
+            ),
+            Check(
+                "each_candidate_executed_in_own_copy",
+                len(results) >= 2
+                and all(r.get("apply_status") == "applied" for r in results)
+                and all(w.is_dir() and w.is_relative_to(root) for w in worlds),
+                f"apply={[r.get('apply_status') for r in results]} exit_codes={[r.get('exit_codes') for r in results]}",
+            ),
+            Check(
+                "winner_is_the_only_passing_candidate",
+                obs.outcome.get("winner_proposer_id") == "wiring-proposer-a"
+                and [r.get("verify_result") for r in results] == ["pass", "fail", "fail"],
+                f"winner_proposer={obs.outcome.get('winner_proposer_id')} results={[r.get('verify_result') for r in results]}",
+            ),
+            Check(
+                "workspace_untouched",
+                sha256_file(root / "calc.py") == original_hash,
+                "calc.py hash unchanged",
             ),
         ]
 
     return Scenario(
         statement="Pick between three independent candidate patches",
         task_type="repair",
-        codeintel={"committee_proposals": proposals},
+        codeintel={
+            "committee_proposals": proposals,
+            "committee_verify_commands": ["python3 repro.py"],
+        },
         check=check,
     )
 
@@ -2736,6 +2983,12 @@ def build_jit(ws: Path, variant: str) -> Scenario:
                 and obs.outcome.get("quota_passed") is True,
                 f"quota_passed={obs.outcome.get('quota_passed')} usage={res.get('token_usage')}",
             ),
+            Check(
+                "receipt_declares_simulated_mask",
+                obs.outcome.get("simulated") is True
+                and (obs.outcome.get("claim_boundary") or {}).get("claim") == "SIMULATED",
+                f"simulated={obs.outcome.get('simulated')} mask_kind={obs.outcome.get('mask_kind')}",
+            ),
         ]
 
     return Scenario(
@@ -2901,26 +3154,52 @@ def neg_asi(pos: Obs, neg: Obs) -> Check:
 
 
 def build_architecture_scout(ws: Path, variant: str) -> Scenario:
-    statement = (
-        "Plan a seam for the billing module plateau"
-        if variant == "positive"
-        else "Plan a seam for the logging helper"
-    )
+    records = read_json(ws / "records.json")[variant]
+    statement = "Plan a seam for the flaky retry timeout in the billing module"
 
     def check(_ws: Path, obs: Obs) -> list[Check]:
         res = _result(obs)
+        out = obs.outcome
         return [
+            Check(
+                "plateau_detected_from_seeded_ledger",
+                out.get("plateau_detected") is True,
+                f"plateau_detected={out.get('plateau_detected')} error={out.get('error')}",
+            ),
             Check(
                 "scout_plan_ready",
                 res.get("status") == "READY" and bool(res.get("recommended_family")),
-                f"status={res.get('status')} reason={res.get('reason')}",
-            )
+                f"status={res.get('status')} reason={res.get('reason')} family={res.get('recommended_family')}",
+            ),
+            Check(
+                "forbidden_family_is_plateau_family",
+                list(res.get("forbidden_families") or []) == ["flow:retry_wrapper"],
+                f"forbidden_families={res.get('forbidden_families')}",
+            ),
         ]
 
     # The forcing line contains the node name, and "architecture" is a complex-task keyword, so
     # the planner demands role main_engineering; the audit binds that route's worker.
     return Scenario(
-        statement=statement, task_type="research", check=check, online_route="main_engineering"
+        statement=statement,
+        task_type="research",
+        codeintel={"asi_failure_records": records},
+        check=check,
+        online_route="main_engineering",
+    )
+
+
+def neg_architecture_scout(pos: Obs, neg: Obs) -> Check:
+    ok = (
+        pos.gate_passed
+        and not neg.gate_passed
+        and neg.outcome.get("plateau_detected") is False
+        and str(neg.outcome.get("error") or "").startswith("PLATEAU_NOT_DETECTED")
+    )
+    return Check(
+        "negative_control:mixed_ledger_has_no_plateau",
+        ok,
+        f"pos.gate={pos.gate_passed} neg.gate={neg.gate_passed} neg.error={neg.outcome.get('error')}",
     )
 
 
@@ -3029,7 +3308,7 @@ def probe_learn_mode(ws: Path) -> dict[str, Any]:
     return {
         "project_root_report_claims_count": project.get("claims_count"),
         "per_task_run_root_claims_count": per_task.get("claims_count"),
-        "note": "same service; the executor passes run_root=<project>/.nexus/runtime/<task_id>, a fresh empty directory",
+        "note": "same service; before 2026-10-13 the executor passed run_root=<project>/.nexus/runtime/<task_id> (the per_task value), now it reads the project store",
     }
 
 
@@ -3085,9 +3364,15 @@ def build_file_lock(ws: Path, variant: str) -> Scenario:
         return [
             Check("lock_file_on_disk", lock_path.is_file(), str(lock_path)),
             Check(
-                "lock_records_target_file",
-                "target.py" in json.dumps(payload),
-                f"lock={json.dumps(payload)[:160]}",
+                "lock_recorded_target_file",
+                "target.py"
+                in json.dumps((obs.outcome.get("result") or {}).get("task_files") or []),
+                f"task_files={(obs.outcome.get('result') or {}).get('task_files')}",
+            ),
+            Check(
+                "lock_released_on_task_completion",
+                "target.py" not in dict(payload.get("locks") or {}),
+                f"lock_after_run={json.dumps(payload)[:160]}",
             ),
             Check(
                 "access_granted_and_files_match",
@@ -3137,119 +3422,110 @@ def probe_file_lock(ws: Path) -> dict[str, Any]:
             "lock_file": outcome.get("lock_file"),
         }
     out["second_task_refused"] = bool(out["lock-task-b"]["conflicts"])
+    out["holders"] = outcome.get("holders")
     out["note"] = (
-        "the executor keys the lock file by task id (.nexus/multi_agent/locks/<task_id>.json)"
+        "one registry per workspace (.nexus/multi_agent/locks/file_locks.json) keyed by file;"
+        " before 2026-10-13 the file was keyed by task id and the second task was not refused"
     )
     return out
 
 
-def build_control_plane(statement: str) -> Builder:
+def build_control_plane(
+    statement: str, expected_reason: str = "control_plane_reference"
+) -> Builder:
     def build(ws: Path, variant: str) -> Scenario:
-        return Scenario(statement=statement, task_type="code_change")
+        def check(_ws: Path, obs: Obs) -> list[Check]:
+            stage = obs.stage or obs.row
+            return [
+                Check(
+                    "receipt_states_not_executable",
+                    obs.skip_reason == f"{NOT_EXECUTABLE}:{expected_reason}"
+                    and not obs.invoked
+                    and not bool(stage.get("outcome_contributed")),
+                    f"skip_reason={obs.skip_reason!r} invoked={obs.invoked} outcome_contributed={stage.get('outcome_contributed')}",
+                )
+            ]
+
+        return Scenario(statement=statement, task_type="code_change", check=check)
 
     return build
 
 
-def build_swarm_quiet(ws: Path, variant: str) -> Scenario:
-    statement = (
-        "Pause writes while target.py is mutated"
-        if variant == "positive"
-        else "Pause writes while helper.py is renamed"
-    )
+def build_judge_panel(ws: Path, variant: str) -> Scenario:
+    fixture = read_json(ws / "candidates.json")
+    candidates = list(fixture[variant])
 
-    def check(root: Path, obs: Obs) -> list[Check]:
-        persisted = list(root.rglob("*quiet*"))
+    def check(_ws: Path, obs: Obs) -> list[Check]:
+        out = obs.outcome
+        ids = sorted(str(c["candidate_id"]) for c in candidates)
+        ranking = [str(item) for item in out.get("ranking") or []]
         return [
             Check(
-                "quiet_moment_event_built",
-                _result(obs).get("event_type") == "quiet_moment",
-                f"result={_result(obs)}",
+                "ranked_the_plan_candidates",
+                sorted(ranking) == ids and int(out.get("candidate_count") or 0) == len(ids),
+                f"ranking={ranking} candidate_count={out.get('candidate_count')}",
             ),
             Check(
-                "pause_persisted_or_enforced",
-                bool(persisted),
-                f"files matching *quiet* under the workspace: {[str(p) for p in persisted][:3]}",
+                "local_ollama_judge_called",
+                out.get("provider") == "ollama" and bool(out.get("judge_model")),
+                f"provider={out.get('provider')} model={out.get('judge_model')}",
+            ),
+            Check(
+                "winner_is_the_real_fix",
+                out.get("winner") == "cand-b",
+                f"winner={out.get('winner')}",
             ),
         ]
 
-    return Scenario(statement=statement, task_type="code_change", check=check)
-
-
-def neg_swarm_quiet(pos: Obs, neg: Obs) -> Check:
-    def shape(obs: Obs) -> dict[str, Any]:
-        res = dict(_result(obs))
-        res.pop("reason", None)
-        res.pop("affected_nodes", None)
-        return res
-
-    same = shape(pos) == shape(neg) and pos.gate_passed and neg.gate_passed
-    return Check(
-        "negative_control:event_differs_beyond_echoed_reason",
-        not same,
-        f"identical_apart_from_echo={same}",
-    )
-
-
-def build_integration_manager(ws: Path, variant: str) -> Scenario:
-    # The forcing line contains "integration", a complex-task keyword -> main_engineering role.
     return Scenario(
-        statement="Merge the approved change for target.py",
+        statement=str(fixture["task"]),
         task_type="code_change",
-        codeintel={"integration_task_ids": ["wiring-a", "wiring-b"]},
-        online_route="main_engineering",
+        codeintel={"judge_panel_candidates": candidates},
+        check=check,
     )
 
 
-def build_autonomic_router(ws: Path, variant: str) -> Scenario:
-    statement = (
-        "Do research on the refund window before editing target.py"
-        if variant == "positive"
-        else "Edit target.py to round totals"
+def neg_judge_panel(pos: Obs, neg: Obs) -> Check:
+    pw, nw = pos.outcome.get("winner"), neg.outcome.get("winner")
+    return Check(
+        "negative_control:swapped_content_moves_the_winner",
+        pw == "cand-b" and nw == "cand-a",
+        f"winner pos={pw!r} neg={nw!r} (negative swaps the summaries of the two ids)",
     )
 
-    def check(_ws: Path, obs: Obs) -> list[Check]:
-        route = str(_result(obs).get("route") or "")
-        return [Check("research_first_mode_suggested", "research_first" in route, route[:160])]
 
-    return Scenario(statement=statement, task_type="code_change", check=check)
-
-
-def neg_autonomic_router(pos: Obs, neg: Obs) -> Check:
-    pr, nr = str(_result(pos).get("route") or ""), str(_result(neg).get("route") or "")
-    ok = "research_first" in pr and "research_first" not in nr
-    return Check("negative_control:non_research_task_gets_other_mode", ok, f"neg={nr[:120]}")
-
-
-def build_judge_panel(ws: Path, variant: str) -> Scenario:
-    return Scenario(statement="Rank the candidate fixes for target.py", task_type="code_change")
-
-
-def probe_llm_judge_panel(ws: Path) -> dict[str, Any]:
-    """The node is never selected; record what its executor does when called directly."""
-    from nexus.core.belief_contracts import CapabilityExecutionPlan
-    from nexus.core.capability_executor_registry import EXECUTOR_REGISTRY
-
-    out: dict[str, Any] = {}
-    for policy in (POLICY_PRODUCTION, POLICY_EXTERNAL_FLAG):
-        with policy_env(policy), chdir(ws):
-            plan = CapabilityExecutionPlan(
-                plan_id="probe:llm_judge_panel", task_id="probe-llm-judge", phases=["R"]
-            )
-            receipt = EXECUTOR_REGISTRY["llm_judge_panel"](plan, "Rank the candidate fixes")
-        outcome = dict(receipt.outcome or {})
-        out[policy.name] = {
-            "gate_passed": receipt.gate_passed,
-            "error": outcome.get("error"),
-            "legacy_alias_of": outcome.get("legacy_alias_of"),
-        }
-    return out
-
-
-def build_external_doc_scout(ws: Path, variant: str) -> Scenario:
-    return Scenario(statement="Check the vendor docs for the refund API", task_type="research")
+def build_external_doc_scout(ws: Path, variant: str) -> Scenario | None:
+    return build_control_plane(
+        "Check the vendor docs for the refund API", expected_reason="no_live_connector"
+    )(ws, variant)
 
 
 def build_learn_scheduler(ws: Path, variant: str) -> Scenario:
+    # Positive: the workspace learn store has a passing phase SLO summary (real schema);
+    # negative: no summary.  The executor must read the workspace, not the checkout.
+    # The ledger is seeded too: learn_phase_slo (selected on the same route) rebuilds the
+    # summary from it before the scheduler reads it.
+    if variant == "positive":
+        from nexus.research.learn_mode import LearnModeService
+
+        learn = ws / ".nexus" / "reports" / "learn"
+        learn.mkdir(parents=True, exist_ok=True)
+        rows = [
+            {
+                "task_id": f"wiring-ok-{phase}-{i}",
+                "phase": phase,
+                "phase_status": "SUCCESS",
+                "writeback_policy": {"required": True},
+                "writeback_done": True,
+            }
+            for phase in ("X", "R")
+            for i in range(3)
+        ]
+        (learn / "phase_writeback.jsonl").write_text(
+            "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8"
+        )
+        LearnModeService(project_root=ws).build_phase_slo_report(window=300)
+
     def check(root: Path, obs: Obs) -> list[Check]:
         report = root / ".nexus" / "reports" / "learn" / "scheduler_last_run.json"
         return [
@@ -3262,6 +3538,15 @@ def build_learn_scheduler(ws: Path, variant: str) -> Scenario:
         ]
 
     return Scenario(statement="Run the learn scheduler", task_type="research", check=check)
+
+
+def neg_learn_scheduler(pos: Obs, neg: Obs) -> Check:
+    pe, ne = _result(pos).get("exit_code"), _result(neg).get("exit_code")
+    return Check(
+        "negative_control:no_workspace_slo_summary_exits_2",
+        pe == 0 and ne == 2 and not neg.gate_passed,
+        f"seeded_exit={pe} unseeded_exit={ne}",
+    )
 
 
 def _closed_loopback_port() -> int:
@@ -3286,9 +3571,10 @@ def build_registry_sync(ws: Path, variant: str) -> Scenario:
             reachable = False
         return [
             Check(
-                "peer_actually_reachable",
-                reachable,
-                f"127.0.0.1:{port} reachable={reachable}; receipt peer_contacted={obs.outcome.get('peer_contacted')} row_count={obs.outcome.get('row_count')}",
+                "receipt_matches_peer_reachability",
+                obs.gate_passed == reachable
+                and bool(obs.outcome.get("peer_contacted")) == reachable,
+                f"127.0.0.1:{port} reachable={reachable}; receipt gate={obs.gate_passed} peer_contacted={obs.outcome.get('peer_contacted')} row_count={obs.outcome.get('row_count')} error={obs.outcome.get('error')}",
             )
         ]
 
@@ -3484,7 +3770,9 @@ def verdict_bucket(verdict: Any) -> str:
 # ------------------------------------------------ executor-registry keys with no planner node
 
 # What each executor does, from reading its body (verified against the run: gate, outcome keys,
-# and the quoted literals below are re-scanned from source on every run).
+# and the quoted literals below are re-scanned from source on every run).  Keys the second
+# archive batch removed from EXECUTOR_REGISTRY (2026-10-13) keep their description here and
+# are reported RETIRING instead of being invoked.
 EXECUTOR_ONLY: dict[str, dict[str, Any]] = {
     "policy_capability_gate": {
         "kind": "REAL_CALL_FIXTURE_INPUTS",
@@ -3595,7 +3883,10 @@ def executor_only_keys() -> dict[str, Any]:
         "retiring_excluded": sorted(set(computed) & set(RETIRING_CAPABILITIES)),
         "audited": sorted(EXECUTOR_ONLY),
         "unlisted": sorted(set(computed) - set(EXECUTOR_ONLY) - set(RETIRING_CAPABILITIES)),
-        "listed_but_reachable": sorted(set(EXECUTOR_ONLY) - set(computed)),
+        "listed_but_reachable": sorted(
+            set(EXECUTOR_ONLY) - set(computed) - (set(EXECUTOR_ONLY) - set(EXECUTOR_REGISTRY))
+        ),
+        "retired_from_registry": sorted(set(EXECUTOR_ONLY) - set(EXECUTOR_REGISTRY)),
     }
 
 
@@ -3616,6 +3907,21 @@ def audit_executor_only(key: str, work_root: Path) -> dict[str, Any]:
     from nexus.core.capability_executor_registry import EXECUTOR_REGISTRY
 
     info = EXECUTOR_ONLY[key]
+    if key not in EXECUTOR_REGISTRY:
+        note = RETIRED_EXECUTOR_ONLY_NOTES.get(key, "executor and registry key removed 2026-10-13")
+        verdict, reason = classify_verdict({"retiring": f"{RETIRED_EXECUTOR_ONLY_REASON}: {note}"})
+        return {
+            "executor_key": key,
+            "verdict": verdict,
+            "verdict_reason": reason,
+            "kind": info["kind"],
+            "does": info["does"],
+            "executor": {},
+            "invoked": None,
+            "gate_passed": None,
+            "quoted_lines": [],
+            "literals_missing": [],
+        }
     fn = EXECUTOR_REGISTRY[key]
     loc = source_location(fn)
     ws = work_root / f"executor_only__{key}"
@@ -3718,9 +4024,11 @@ _SPEC_LIST: list[CapSpec] = [
         "hyper",
         build_hyper,
         policies=(POLICY_PRODUCTION, POLICY_LOCAL_MODEL),
+        needs_model=True,
         hard_coded=("candidate_count=1", 'target_file="README.md"', "llm_mode=False"),
+        negative_check=neg_hyper,
         gaps=(
-            "executor config fixes candidate_count=1, target_file=README.md, llm_mode=False; outcome carries no semantic_status/evidence_refs so the invoker contract check always rejects it",
+            "the learn-phase SLO guard drops llm_mode on any workspace without learn-phase history (audit sets NEXUS_FORCE_LLM_DESPITE_LEARN_SLO=1; the receipt reports llm_mode_effective)",
         ),
     ),
     CapSpec(
@@ -3729,7 +4037,7 @@ _SPEC_LIST: list[CapSpec] = [
         build_nightshift,
         policies=(POLICY_PRODUCTION, POLICY_LOCAL_MODEL),
         gaps=(
-            "AutoResearchNightShift runs one round with a bare task string; the phase policy denies research at PassRate=0% so no recovery report is written",
+            "AutoResearchNightShift runs one round with a bare task string; the phase policy reads <workspace_root>/.nexus/reports/learn/phase_slo_summary.json (right directory); until 2026-10-13 it read a never-written overall_pass_rate key, so every real summary was PassRate=0%; the fixture workspace has no summary, so it is still denied (SLO=phase_slo_summary_missing) before any model call and no recovery report is written",
         ),
     ),
     CapSpec(
@@ -3737,8 +4045,10 @@ _SPEC_LIST: list[CapSpec] = [
         "swarm",
         build_swarm,
         policies=(POLICY_PRODUCTION, POLICY_LOCAL_MODEL),
+        needs_model=True,
+        negative_check=neg_swarm,
         gaps=(
-            "executor only constructs BattleSwarm and calls cleanup() with empty lists; the P4 shallow-action guard then rejects it as import_construct_not_execution",
+            "integration goes through the single Candidate integration owner (SelfHostedTaskService.integrate_approved -> ControlledIntegrationManager, #947) and needs a persisted APPROVED lifecycle task (external acceptance bound to the candidate, consumed Owner approval grant, verified receipt); the executor never fabricates it, so a run stops BLOCKED at integration with the facade's refusal",
         ),
     ),
     CapSpec(
@@ -3746,6 +4056,8 @@ _SPEC_LIST: list[CapSpec] = [
         "swarm",
         build_swarm,
         policies=(POLICY_PRODUCTION, POLICY_LOCAL_MODEL),
+        needs_model=True,
+        negative_check=neg_swarm,
         gaps=("alias of swarm_multi_agent (same executor)",),
     ),
     CapSpec(
@@ -3764,7 +4076,7 @@ _SPEC_LIST: list[CapSpec] = [
         negative_check=neg_ultra_review,
         probe=probe_ultra_review,
         gaps=(
-            "executor captures git diff HEAD and counts changed files only; _scan_security_observations / the dry-run fleet are never called, so a planted eval(input()) is not flagged",
+            "fixed 2026-10-13 (group D): executor runs UltraReviewService.run(dry_run=False) in a sandbox git worktree; lanes run bandit + ruff S rules (added lines), py_compile + ruff correctness rules and pytest on mapped tests; untracked new files are overlaid but not part of the reviewed diff",
         ),
     ),
     CapSpec(
@@ -3855,7 +4167,7 @@ _SPEC_LIST: list[CapSpec] = [
         policies=(POLICY_PRODUCTION, POLICY_LOCAL_MODEL, POLICY_COMMITTEE_FLAG),
         negative_check=neg_committee,
         gaps=(
-            "each proposal needs a 'model' key but the canonical context seam forbids any key containing 'model' under codeintel, so proposals cannot reach the executor through UnifiedRuntime; the controller is also off unless NEXUS_USE_COMMITTEE=1",
+            "the controller is off unless NEXUS_USE_COMMITTEE=1; without committee_verify_commands the global VerifierRegistry is empty by default, so no verdict is recorded and the receipt fails",
         ),
     ),
     CapSpec(
@@ -3914,7 +4226,7 @@ _SPEC_LIST += [
         probe=probe_jit,
         callee_hard_coded=(("nexus.core.jit_tool_injector:JITToolInjector.apply_mask", "Mock"),),
         gaps=(
-            "JITToolInjector.apply_mask is a self-declared mock: it matches only the Chinese keywords 測試/核驗/具現/修復 and otherwise returns all_tools[:5]; the tool catalog (jit_all_tools) must be supplied by the request",
+            "JITToolInjector.apply_mask is a self-declared mock: it matches only the Chinese keywords 測試/核驗/具現/修復 and otherwise returns all_tools[:5]; the tool catalog (jit_all_tools) must be supplied by the request; since 2026-10-13 the receipt says so (simulated=True, mask_kind=keyword_mock, claim_boundary.claim=SIMULATED)",
         ),
     ),
     CapSpec(
@@ -3946,11 +4258,11 @@ _SPEC_LIST += [
     ),
     CapSpec(
         "architecture_scout",
-        None,
+        "architecture_scout",
         build_architecture_scout,
-        negative_check=neg_status_changes("status"),
+        negative_check=neg_architecture_scout,
         gaps=(
-            'executor passes plateau={"reason": "mainchain_bind", "task_id": ...} without "detected", so DistantScoutPlanner.plan always returns SKIPPED plateau_not_detected, and gate_passed=isinstance(result, Mapping) passes it',
+            "fixed 2026-10-13 (group D): plateau comes from nexus.research.flow.runtime_decision.detect_plateau over the request's asi_failure_records; nothing in nexus run feeds that ledger to the node yet (the research flow feeds its own HistorySignalStore ledger)",
         ),
     ),
     CapSpec(
@@ -3969,7 +4281,7 @@ _SPEC_LIST += [
         negative_check=neg_learn_counts("claims_count"),
         probe=probe_learn_mode,
         gaps=(
-            "executor builds LearnModeService(run_root=<cwd>/.nexus/runtime/<task_id>), a fresh empty directory per task, so the report never sees the project's learned claims; gate_passed = result is not None",
+            "fixed 2026-10-13: the executor reads the project learn store LearnModeService(<workspace_root>) like the learn:* CLI (was a fresh empty <cwd>/.nexus/runtime/<task_id>); gate_passed is still 'report built', the claim count is in the result",
         ),
     ),
     CapSpec(
@@ -3979,7 +4291,7 @@ _SPEC_LIST += [
         negative_check=neg_learn_counts("phase_slo_pass"),
         probe=probe_learn_phase_slo,
         gaps=(
-            "same per-task empty run_root as learn_mode, and window=1: the SLO is computed over zero writebacks and always passes",
+            "fixed 2026-10-13: reads the project phase ledger with the CLI window (300; was an empty per-task run_root with window=1); gate_passed means the report was built, phase_slo_pass is in the result",
         ),
     ),
     CapSpec(
@@ -3989,7 +4301,7 @@ _SPEC_LIST += [
         negative_check=neg_file_lock,
         probe=probe_file_lock,
         gaps=(
-            "lock file path is .nexus/multi_agent/locks/<task_id>.json, one file per task, so a second task locking the same file does not see the first lock (see component_probe)",
+            "fixed 2026-10-13: one registry per workspace (.nexus/multi_agent/locks/file_locks.json) keyed by file, holder = task id, flock-guarded; a second task is BLOCKED (FILE_LOCK_HELD_BY_OTHER_TASK), same-task re-lock is idempotent; since #2041 the mainchain entry releases the task's locks on completion (release_task_locks), the 1800 s TTL is only the backstop",
         ),
     ),
     CapSpec(
@@ -3998,7 +4310,7 @@ _SPEC_LIST += [
         build_control_plane("Update target.py to round totals"),
         not_executable="control_plane_reference",
         gaps=(
-            "execution contract physical_callable=None; executor key direct_master_loop is not in EXECUTOR_REGISTRY. nexus run uses nexus.engine.direct_mode.evaluate_direct_mode_completion outside the planner node",
+            "execution contract physical_callable=None; executor key direct_master_loop is not in EXECUTOR_REGISTRY. nexus run uses nexus.engine.direct_mode.evaluate_direct_mode_completion outside the planner node; since group D the receipt says NOT_EXECUTABLE:control_plane_reference",
         ),
     ),
     CapSpec(
@@ -4006,7 +4318,9 @@ _SPEC_LIST += [
         None,
         build_control_plane("Update target.py to round totals"),
         not_executable="control_plane_reference",
-        gaps=("execution contract physical_callable=None; no msa_router key in EXECUTOR_REGISTRY",),
+        gaps=(
+            "execution contract physical_callable=None; no msa_router key in EXECUTOR_REGISTRY; since group D the receipt says NOT_EXECUTABLE:control_plane_reference (an executor is an MSA design task, not a wiring fix)",
+        ),
     ),
     CapSpec(
         "research_control_plane",
@@ -4014,51 +4328,20 @@ _SPEC_LIST += [
         build_control_plane("Update target.py to round totals"),
         not_executable="control_plane_reference",
         gaps=(
-            "execution contract physical_callable=None; no research_control_plane key in EXECUTOR_REGISTRY (real code nexus/research/experiment_scheduler.py is reachable only via the research:run CLI)",
-        ),
-    ),
-    CapSpec(
-        "swarm_quiet_moment",
-        None,
-        build_swarm_quiet,
-        negative_check=neg_swarm_quiet,
-        gaps=(
-            "executor only builds the quiet-moment dict (build_quiet_moment_event) and returns it; nothing pauses writes, persists the event or consumes it (consumer_effect NONE)",
-        ),
-    ),
-    CapSpec(
-        "integration_manager",
-        None,
-        build_integration_manager,
-        gaps=(
-            "retired quarantine: executor always returns BLOCKED LEGACY_INTEGRATION_PATH_RETIRED_USE_CONTROLLED_INTEGRATION, mutation_performed=False",
-        ),
-    ),
-    CapSpec(
-        "autonomic_router",
-        None,
-        build_autonomic_router,
-        negative_check=neg_autonomic_router,
-        gaps=(
-            "control-plane suggestion (consumer_effect NONE, reason route_probe_not_production_execute); the ExecutionPlan it returns is stringified into the receipt and read by nothing",
+            "execution contract physical_callable=None; no research_control_plane key in EXECUTOR_REGISTRY (real code nexus/research/experiment_scheduler.py is reachable only via the research:run CLI); since group D the receipt says NOT_EXECUTABLE:control_plane_reference",
         ),
     ),
     CapSpec(
         "judge_panel",
-        None,
+        "judge_panel",
         build_judge_panel,
-        policies=(POLICY_PRODUCTION, POLICY_EXTERNAL_FLAG),
+        policies=(POLICY_PRODUCTION, POLICY_LOCAL_MODEL),
+        needs_model=True,
         hard_coded=('id="c0"',),
+        negative_check=neg_judge_panel,
         gaps=(
-            "providers come only from NEXUS_LLM_JUDGE_PROVIDERS (fake, or gemini/codex command CLIs); there is no Ollama/M5 provider, so the M5 tunnel cannot serve it; the executor ranks one hard-coded candidate c0 = the task text",
+            "fixed 2026-10-13 (group D): ranks the request's candidate_pool (codeintel.judge_panel_candidates) with OllamaJudgeProvider (Workforce local_first.classification worker, M5 tunnel) under NEXUS_LOCAL_MODEL_CALL_ALLOWED=1; no provider at production default; nexus run does not yet feed a candidate pool to the node",
         ),
-    ),
-    CapSpec(
-        "llm_judge_panel",
-        None,
-        build_judge_panel,
-        probe=probe_llm_judge_panel,
-        gaps=("legacy alias of judge_panel; not selected even when forced",),
     ),
     CapSpec(
         "external_doc_scout",
@@ -4067,16 +4350,16 @@ _SPEC_LIST += [
         policies=(POLICY_PRODUCTION, POLICY_EXTERNAL_FLAG),
         not_executable="no_live_connector",
         gaps=(
-            "execution contract physical_callable=None; the executor is an auth gate that, once authorized, returns BLOCKED_EXTERNAL_AUTH:no_live_connector without calling anything",
+            "execution contract physical_callable=None; the EXECUTOR_REGISTRY entry is an auth gate with nothing behind it; since group D the planner-node invoker never calls it and the receipt says NOT_EXECUTABLE:no_live_connector",
         ),
     ),
     CapSpec(
         "learn_scheduler",
         None,
         build_learn_scheduler,
-        hard_coded=("repo_root = Path(__file__).resolve().parents[2]",),
+        negative_check=neg_learn_scheduler,
         gaps=(
-            "runs nexus_cli.py learn:phase-policy as a subprocess in the code checkout (repo_root is the checkout, not the workspace), so readiness comes from the checkout's own .nexus learning data; PassRate 0% there gives exit 2 and a local alert file",
+            "fixed 2026-10-13: learn:phase-policy --project-root <workspace_root> (the checkout only supplies the CLI script), and the phase policy reads the real summary schema (phase_slo_pass_rate; it read a never-written overall_pass_rate key, so readiness was always 0%); alerts are still written under the cwd",
         ),
     ),
     CapSpec(
@@ -4085,7 +4368,7 @@ _SPEC_LIST += [
         build_registry_sync,
         policies=(POLICY_PRODUCTION, POLICY_EXTERNAL_FLAG),
         gaps=(
-            "SecureRegistrySync.pull_from_peer swallows every connection error and returns []; the executor then reports VERIFIED, peer_contacted=True, row_count=0 for a peer that never answered",
+            "fixed 2026-10-13: the executor uses pull_from_peer_checked; a connection error is BLOCKED (REGISTRY_PEER_UNAVAILABLE:<error class>) with peer_contacted=False (pull_from_peer still returns [] for legacy callers); no live mTLS peer in the fixture, so there is no positive run",
         ),
     ),
 ]
@@ -4182,15 +4465,38 @@ def git_head() -> str:
         return "unknown"
 
 
+def archived_skip_observation(cap: str) -> str:
+    """Skip reason the production invoker returns for an archived planner node ('' if none)."""
+    from nexus.services import capability_registry as registry
+
+    if cap not in registry.ARCHIVED_CAPABILITY_REASONS:
+        return ""
+    if cap not in set(registry.list_planner_capability_names()):
+        return ""
+    invoker = registry.build_default_mainchain_invokers().get(cap)
+    if invoker is None:
+        return ""
+    result = dict(invoker({"task_id": f"wiring-retiring-{cap}"}) or {})
+    return str(result.get("skip_reason") or "")
+
+
 def retiring_row(cap: str, note: str) -> dict[str, Any]:
     verdict, reason = classify_verdict({"retiring": note})
-    return {
+    row: dict[str, Any] = {
         "capability": cap,
         "verdict": verdict,
         "verdict_reason": reason,
         "executor": {},
         "gaps": ["owned by the archive PR; not executed by this audit"],
     }
+    try:
+        observed = archived_skip_observation(cap)
+    except Exception as exc:  # noqa: BLE001 - recorded, never hidden
+        observed = f"observation_error:{type(exc).__name__}"
+    if observed:
+        row["archived_skip_reason"] = observed
+        row["gaps"] = [f"archived: the production invoker returns an explicit skip ({observed})"]
+    return row
 
 
 def _short(text: Any, limit: int) -> str:
@@ -4306,10 +4612,15 @@ def run_audit(
                     "does": EXECUTOR_ONLY[key]["does"],
                     "audit_error": f"{type(exc).__name__}: {exc}"[:300],
                 })
+        eo_verdicts: dict[str, int] = {}
+        for eo_row in eo_rows:
+            eo_verdicts[str(eo_row.get("verdict"))] = (
+                eo_verdicts.get(str(eo_row.get("verdict")), 0) + 1
+            )
         executor_only = {
             "keys": keys,
             "rows": eo_rows,
-            "verdict_counts": {UNREACHABLE_NO_PLANNER_NODE: len(eo_rows)},
+            "verdict_counts": eo_verdicts,
             "kind_counts": {
                 kind: sum(1 for r in eo_rows if r.get("kind") == kind)
                 for kind in sorted({str(r.get("kind")) for r in eo_rows})

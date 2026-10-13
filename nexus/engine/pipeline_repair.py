@@ -1552,12 +1552,41 @@ class PipelineRepairMixin:
                 "phantom_reason": reason,
                 "terminal_rejection": normalized.status == "REJECTED",
             }
+        repair_block = self._composed_repair_block_reason(r_out)
+        if repair_block:
+            # An audit pass cannot turn a failed or self-reported unapplied
+            # repair into success (Refs #1923).
+            ctx.state.metadata["composition_audit_phase_rejection"] = repair_block
+            ctx.state.metadata["phantom_success_reason"] = repair_block
+            return {
+                "audit_success": False,
+                "status": "RECOVERABLE_BLOCK",
+                "phantom_reason": repair_block,
+                "terminal_rejection": False,
+            }
         return {
             "audit_success": True,
             "status": normalized.status or "APPROVED",
             "phantom_reason": "",
             "terminal_rejection": False,
         }
+
+    @classmethod
+    def _composed_repair_block_reason(cls, r_out: dict) -> str:
+        """Return why the composed R result must not be accepted by an audit pass."""
+        result_object = r_out.get("result")
+        result_object = result_object if isinstance(result_object, dict) else {}
+        if detect_inconclusive_success(
+            status="APPROVED",
+            patch_generated=result_object.get("patch_generated"),
+            patch_apply_success=result_object.get("patch_apply_success"),
+            no_change_reason="",
+        ) == "patch_apply_failed":
+            return "patch_apply_failed"
+        status = str(r_out.get("status") or "").strip().upper()
+        if cls._is_repair_failure_status(status):
+            return f"composition_repair_{status.lower()}"
+        return ""
 
     def _missing_composed_audit_result(self, ctx: PipelineContextProtocol, *, reason: str) -> dict:
         ctx.state.metadata["composition_audit_phase_status"] = "MISSING"
@@ -1948,3 +1977,13 @@ class PipelineRepairMixin:
             ctx.state.metadata["external_force_replan"] = True
             return True
         return False
+
+
+# ARCHIVED 2026-10-13 legacy-engine (ARCHIVED_2026-10-13-legacy-engine.md).
+__import__("warnings").warn(
+    "ARCHIVED 2026-10-13 legacy-engine: "
+    "nexus.engine.pipeline_repair is part of the retired legacy NexusEngine and has no production caller (nexus run uses execute_canonical_product_task); "
+    "see ARCHIVED_2026-10-13-legacy-engine.md. Scheduled for deletion; do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)

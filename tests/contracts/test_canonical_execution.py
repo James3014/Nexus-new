@@ -268,7 +268,7 @@ def test_canonical_workforce_consumer_resolves_legitimate_hybrid_channels():
     assert set(bindings) == {"local", "online"}
     assert set(providers) == {"local", "online"}
     assert bindings["local"]["worker_id"] == "local_coder_7b"
-    assert bindings["online"]["worker_id"] == "agy_flash_37_medium"
+    assert bindings["online"]["worker_id"] == "agy_flash_38"
     assert providers == {"local": "ollama", "online": "agy"}
 
 

@@ -150,3 +150,8 @@ def test_x_stage_skips_when_learn_guard_not_ready(mock_ki_cls, mock_ctx, mock_tr
 
     assert mock_ctx.state.metadata["research_skipped_by_learn_guard"] is True
     assert not mock_ctx.researcher.run.called
+
+
+# ARCHIVED 2026-10-13 legacy-engine: this file tests (in whole or in part) modules archived with
+# the legacy NexusEngine (nexus.engine.pipeline_stages); see ARCHIVED_2026-10-13-legacy-engine.md.
+# It keeps running with unchanged node ids until the deletion PR removes it with those modules.

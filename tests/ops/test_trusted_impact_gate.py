@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import subprocess
 import sysconfig
 from pathlib import Path
@@ -233,7 +234,8 @@ def test_verifier_runs_only_default_branch_sources():
     verifier = _workflow()["jobs"]["trusted-verifier"]
     scripts = "\n".join(step.get("run", "") for step in verifier["steps"])
     assert (
-        'test "$WORKFLOW_REF" = "$REPOSITORY/$workflow_path@refs/heads/$DEFAULT_BRANCH"' in scripts
+        '[ "$WORKFLOW_REF" = "$REPOSITORY/$workflow_path@refs/heads/$DEFAULT_BRANCH" ] || fail'
+        in scripts
     )
     assert 'fetch --no-tags --depth=1 origin "$WORKFLOW_SHA"' in scripts
     assert (
@@ -255,7 +257,10 @@ def test_executors_only_run_hash_bound_bundle_code():
         uses = [step["uses"].split("@")[0] for step in steps if "uses" in step]
         assert set(uses) <= {"actions/download-artifact", "actions/upload-artifact"}
         script = "\n".join(step.get("run", "") for step in steps)
-        assert '= "$EXPECTED_MANIFEST_SHA256"' in script
+        assert '= "$EXPECTED_MANIFEST_SHA256" ]' in script
+        # -B: importing the bundled code must not write __pycache__ into the
+        # hash-bound bundle (which load_manifest rejects as unexpected files).
+        assert 'python -I -B "$bundle/code/scripts/ops/trusted_impact_gate.py" executor' in script
         side = "base" if "base" in job else "head"
         assert f"--side {side} " in script
         assert "TRUSTED_TOKEN" not in json.dumps(jobs[job])
@@ -266,7 +271,7 @@ def test_workflow_extracts_every_bundled_code_file_by_blob():
     text = WORKFLOW.read_text(encoding="utf-8")
     loop = "for path in " + " ".join(tig.CODE_FILES) + "; do"
     assert text.count(loop) == 2
-    assert text.count('test "$(git hash-object "$trusted_dir/$path")" = "$blob_id"') == 2
+    assert text.count('[ "$(git hash-object "$trusted_dir/$path")" = "$blob_id" ]') == 2
 
 
 def test_legacy_impact_gate_job_is_untouched():
@@ -738,6 +743,191 @@ def test_ls_tree_check_uses_tab_separator():
     assert '"100644 blob $blob_id"$\'\\t\'"$path"' in text
 
 
+def test_ls_tree_check_uses_tab_separator_and_admits_executable_blobs():
+    text = WORKFLOW.read_text(encoding="utf-8")
+    assert text.count('"100644 blob $blob_id"$\'\\t\'"$path"') == 2
+    assert text.count('"100755 blob $blob_id"$\'\\t\'"$path"') == 2
+    assert "120000" not in text
+
+
+def test_every_fail_closed_exit_prints_a_reason():
+    for job in _workflow()["jobs"].values():
+        for step in job["steps"]:
+            script = step.get("run", "")
+            if not script:
+                continue
+            assert not any(line.strip().startswith("test ") for line in script.splitlines())
+            if "set -euo pipefail" in script:
+                assert 'fail() { echo "trusted impact gate: $*" >&2; exit 1; }' in script
+                assert "trap 'echo \"trusted impact gate: command failed" in script
+
+
+def _acquisition_script(job: str) -> str:
+    """The production trusted-source acquisition block, cut before Python runs."""
+
+    step = _workflow()["jobs"][job]["steps"][1 if job == "trusted-controller" else 0]
+    return step["run"].split("\npython -c", 1)[0]
+
+
+def _source_repo(
+    tmp_path: Path, *, executable: str | None, symlink: str | None = None
+) -> tuple[Path, str]:
+    repo = tmp_path / "trusted-origin"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.name", "Fixture")
+    _git(repo, "config", "user.email", "fixture@example.invalid")
+    for path in tig.CODE_FILES:
+        target = repo / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if path == symlink:
+            target.symlink_to("select_tests.py")
+        else:
+            target.write_bytes((ROOT / path).read_bytes())
+    _git(repo, "add", "-A")
+    if executable:
+        _git(repo, "update-index", "--chmod=+x", executable)
+    _git(repo, "commit", "-q", "-m", "trusted sources")
+    return repo, _git(repo, "rev-parse", "HEAD")
+
+
+def _run_acquisition(tmp_path: Path, job: str, repo: Path, sha: str) -> subprocess.CompletedProcess:
+    runner_temp = tmp_path / "runner-temp"
+    runner_temp.mkdir()
+    script = _acquisition_script(job).replace(
+        "https://github.com/$REPOSITORY.git", repo.resolve().as_uri()
+    )
+    env = {
+        **os.environ,
+        "EVENT_NAME": "pull_request_target",
+        "REPOSITORY": REPOSITORY,
+        "DEFAULT_BRANCH": "main",
+        "WORKFLOW_REF": f"{REPOSITORY}/{tig.WORKFLOW_PATH}@refs/heads/main",
+        "WORKFLOW_SHA": sha,
+        "TRUSTED_TOKEN": "fixture",
+        "RUNNER_TEMP": str(runner_temp),
+    }
+    return subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
+
+
+@pytest.mark.parametrize("job", ["trusted-controller", "trusted-verifier"])
+def test_production_acquisition_accepts_executable_trusted_source(tmp_path, job):
+    # Regression: on main scripts/ops/pr_impact_gate.py is mode 100755, and the
+    # first release required 100644, failing every real run silently.
+    repo, sha = _source_repo(tmp_path, executable="scripts/ops/pr_impact_gate.py")
+    completed = _run_acquisition(tmp_path, job, repo, sha)
+    assert completed.returncode == 0, completed.stderr
+    source = (
+        "trusted-impact-source" if job == "trusted-controller" else "trusted-impact-verifier-source"
+    )
+    for path in tig.CODE_FILES:
+        assert (tmp_path / "runner-temp" / source / path).read_bytes() == (ROOT / path).read_bytes()
+
+
+def test_production_acquisition_rejects_symlinked_source_with_reason(tmp_path):
+    repo, sha = _source_repo(tmp_path, executable=None, symlink="scripts/ops/pr_impact_gate.py")
+    completed = _run_acquisition(tmp_path, "trusted-controller", repo, sha)
+    assert completed.returncode != 0
+    assert (
+        "trusted impact gate: trusted source scripts/ops/pr_impact_gate.py is not a regular blob"
+        in (completed.stderr)
+    )
+
+
+def test_production_acquisition_rejects_untrusted_workflow_ref_with_reason(tmp_path):
+    repo, sha = _source_repo(tmp_path, executable=None)
+    runner_temp = tmp_path / "runner-temp"
+    runner_temp.mkdir()
+    completed = subprocess.run(
+        ["bash", "-c", _acquisition_script("trusted-controller")],
+        env={
+            **os.environ,
+            "EVENT_NAME": "pull_request_target",
+            "REPOSITORY": REPOSITORY,
+            "DEFAULT_BRANCH": "main",
+            "WORKFLOW_REF": f"{REPOSITORY}/{tig.WORKFLOW_PATH}@refs/heads/feature",
+            "WORKFLOW_SHA": sha,
+            "TRUSTED_TOKEN": "fixture",
+            "RUNNER_TEMP": str(runner_temp),
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    assert "is not the default-branch workflow" in completed.stderr
+
+
+def _shallow_bare(tmp_path: Path, name: str, origin: Path, sha: str) -> Path:
+    bare = tmp_path / name
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    _git(bare, "remote", "add", "origin", origin.resolve().as_uri())
+    _git(bare, "fetch", "-q", "--no-tags", "--depth=1", "origin", sha)
+    return bare
+
+
+@pytest.mark.parametrize("main_moved", [False, True])
+def test_production_controller_and_verifier_fetch_against_local_bare_repo(
+    pr_repo, monkeypatch, main_moved
+):
+    # Exercises the fetch=True paths (controller --unshallow, verifier --depth=1)
+    # that the other unit tests bypass, against a shallow bare repo like CI's.
+    # main_moved: the default branch advanced after the PR event, so the
+    # workflow SHA is a descendant of base and must also be unshallowed.
+    tmp = pr_repo["tmp"]
+    event = _event(pr_repo["base"], pr_repo["head"])
+    if main_moved:
+        repo = pr_repo["repo"]
+        _git(repo, "checkout", "-q", "-b", "moved-main", pr_repo["base"])
+        _write(repo, {"docs/notes.md": "main moved\n"})
+        event["workflow_sha"] = _commit(repo, "main moved")
+        _git(repo, "checkout", "-q", "main")
+    event_path = tmp / "event.json"
+    event_path.write_text(json.dumps(event), encoding="utf-8")
+    runtime = tmp / "runtime"
+    runtime.mkdir()
+    for name in tig.anchor.RUNTIME_FILENAMES:
+        (runtime / name).write_bytes(b"{}" if name.endswith(".json") else b"runtime")
+    monkeypatch.setattr(tig, "_check_runtime", lambda *_args: {"fixture": True})
+    controller_repo = _shallow_bare(tmp, "controller.git", pr_repo["repo"], event["workflow_sha"])
+    bundle = tmp / "bundle"
+    assert (
+        tig.main([
+            "controller",
+            "--event-json",
+            str(event_path),
+            "--repo-root",
+            str(controller_repo),
+            "--runtime-dir",
+            str(runtime),
+            "--output-dir",
+            str(bundle),
+        ])
+        == 0
+    )
+    manifest_sha = hashlib.sha256((bundle / "manifest.json").read_bytes()).hexdigest()
+    manifest = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
+    evidence = tmp / "evidence"
+    base_sha256 = _evidence(evidence, manifest, manifest_sha, "base", junit=_junit(HONEST))
+    _evidence(evidence, manifest, manifest_sha, "head", junit=_junit(HONEST))
+    verifier_repo = _shallow_bare(tmp, "verifier.git", pr_repo["repo"], event["workflow_sha"])
+    payload = _verify(
+        pr_repo,
+        bundle,
+        manifest_sha,
+        base_sha256,
+        event=event,
+        repo=verifier_repo,
+        fetch=True,
+        job_results={
+            "controller": "success",
+            "base executor": "success",
+            "head executor": "success",
+        },
+    )
+    assert payload["classification"] == "PASS"
+    assert _git(controller_repo, "rev-parse", "--is-shallow-repository") == "false"
+
+
 @pytest.mark.parametrize(
     "payload",
     [
@@ -757,3 +947,29 @@ def test_expat_pass_accepts_plain_junit_and_rejects_malformed():
     tig.reject_dtd_and_entities(_junit(HONEST), "head")
     with pytest.raises(tig.GateError, match="not well-formed"):
         tig.reject_dtd_and_entities(b"<testsuites><testsuite>", "head")
+
+
+def test_only_non_test_targets_with_empty_junit_is_rejected(tmp_path):
+    # A head that forces exit 0 with an empty junit must not pass when every
+    # planned target is a conftest/helper (#1952 review).
+    spec = {
+        "side": "head",
+        "executed_targets": ["tests/conftest.py"],
+        "pytest_args": ["tests/conftest.py"],
+    }
+    with pytest.raises(tig.GateError, match="no results for any planned target"):
+        tig.validate_junit(_junit([]), spec, {"tests/conftest.py"})
+
+
+def test_changed_conftest_target_without_results_is_allowed(tmp_path):
+    # Real PRs select a changed tests/conftest.py as a target; pytest collects
+    # no items from it, which must not fail the per-target coverage check.
+    spec = {
+        "side": "head",
+        "executed_targets": ["tests/conftest.py", "tests/test_mod.py"],
+        "pytest_args": ["tests/conftest.py", "tests/test_mod.py"],
+    }
+    files = {"tests/conftest.py", "tests/test_mod.py"}
+    tig.validate_junit(_junit(HONEST[:2]), spec, files)
+    with pytest.raises(tig.GateError, match="no results for planned targets"):
+        tig.validate_junit(_junit([]), spec, files)

@@ -9,9 +9,18 @@ from datetime import datetime, timezone
 from scripts.ops.learn_alert_dispatcher import dispatch_alert
 
 class LearnSchedulerService:
-    def __init__(self, repo_root: Path, *, report_root: Path | None = None):
+    def __init__(
+        self,
+        repo_root: Path,
+        *,
+        report_root: Path | None = None,
+        project_root: Path | None = None,
+    ):
+        # repo_root: the code checkout that holds scripts/engine/nexus_cli.py.
+        # project_root: whose learn store (.nexus/reports/learn) the phase policy reads.
         self.repo_root = repo_root
-        self.report_root = report_root or repo_root
+        self.project_root = project_root or repo_root
+        self.report_root = report_root or self.project_root
 
     def run_scheduler(self) -> int:
         report_path = self.report_root / ".nexus/reports/learn/scheduler_last_run.json"
@@ -21,6 +30,8 @@ class LearnSchedulerService:
             "scripts/engine/nexus_cli.py",
             "nexus",
             "learn:phase-policy",
+            "--project-root",
+            str(self.project_root),
             "--output-json",
         ]
         results = {"steps": {}, "policy_command": command}
@@ -40,17 +51,22 @@ class LearnSchedulerService:
                 results["slo_readiness"] = readiness
                 results["policy"] = policy_data.get("policy", {})
                 if readiness < 0.5:
-                    dispatch_alert("DEGRADED", f"Low SLO readiness: {readiness:.1%}", policy_data)
+                    dispatch_alert(
+                        "DEGRADED",
+                        f"Low SLO readiness: {readiness:.1%}",
+                        policy_data,
+                        root=self.project_root,
+                    )
                     results["alert_dispatched"] = True
                     exit_code = 2
                 else:
                     results["alert_dispatched"] = False
                     exit_code = 0
             else:
-                dispatch_alert("FAILED", "Policy check failed")
+                dispatch_alert("FAILED", "Policy check failed", root=self.project_root)
                 results["alert_dispatched"] = True
         except Exception as e:
-            dispatch_alert("FAILED", f"Error: {e}")
+            dispatch_alert("FAILED", f"Error: {e}", root=self.project_root)
             results["alert_dispatched"] = True
             results["error"] = str(e)[:1000]
         finally:

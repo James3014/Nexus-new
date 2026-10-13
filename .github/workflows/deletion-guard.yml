@@ -1,0 +1,33 @@
+name: Deletion guard
+
+# pull_request_target runs the default-branch copy of this workflow. It must
+# never check out or execute PR code: it only calls the GitHub REST API.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled, unlabeled, edited]
+    branches: [main]
+
+concurrency:
+  group: deletion-guard-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  deletion-guard:
+    name: Deletion guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout default branch (never PR code)
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Check deletions and renames
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: python3 -I scripts/ops/deletion_guard.py --repo "$REPO" --pr "$PR"

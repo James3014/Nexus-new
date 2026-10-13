@@ -11,8 +11,9 @@ def test_aos_service_standalone():
         pytest.fail("AosService module does not exist yet")
 
 def test_cli_facade_redirection():
-    # 驗證原本的 CliCommandsService 是否能透過 Facade 模式調用子服務
+    # ARCHIVED 2026-10-13 legacy-engine (ARCHIVED_2026-10-13-legacy-engine.md): the facade wrapped
+    # the retired legacy NexusEngine and now fails closed at construction.
+    from nexus.engine.canonical_task_seam import LegacyEngineArchivedError
     from nexus.services.cli_commands_service import CliCommandsService
-    facade = CliCommandsService(Path("."))
-    # 目前 get_status 是實作在 CliCommandsService 內的，我們要重構它
-    assert facade.status is not None
+    with pytest.raises(LegacyEngineArchivedError):
+        CliCommandsService(Path("."))

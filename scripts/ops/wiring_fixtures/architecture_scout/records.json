@@ -1,0 +1,14 @@
+{
+  "positive": [
+    {"run_id": "run-1", "family": "flow:retry_wrapper", "status": "discard", "metric": 0.0, "rollback_reason": "timeout retry still flaky", "schema_version": "nexus_asi_record_v1"},
+    {"run_id": "run-2", "family": "flow:retry_wrapper", "status": "discard", "metric": 0.0, "rollback_reason": "timeout retry still flaky", "schema_version": "nexus_asi_record_v1"},
+    {"run_id": "run-3", "family": "flow:retry_wrapper", "status": "discard", "metric": 0.0, "rollback_reason": "retry budget exhausted", "schema_version": "nexus_asi_record_v1"},
+    {"run_id": "run-4", "family": "flow:retry_wrapper", "status": "discard", "metric": 0.02, "rollback_reason": "timeout retry still flaky", "schema_version": "nexus_asi_record_v1"}
+  ],
+  "negative": [
+    {"run_id": "run-1", "family": "flow:retry_wrapper", "status": "discard", "metric": 0.0, "rollback_reason": "timeout retry still flaky", "schema_version": "nexus_asi_record_v1"},
+    {"run_id": "run-2", "family": "flow:cache_layer", "status": "discard", "metric": 0.0, "rollback_reason": "cache miss", "schema_version": "nexus_asi_record_v1"},
+    {"run_id": "run-3", "family": "flow:retry_wrapper", "status": "keep", "metric": 1.0, "rollback_reason": "", "schema_version": "nexus_asi_record_v1"},
+    {"run_id": "run-4", "family": "flow:schema_patch", "status": "discard", "metric": 0.0, "rollback_reason": "schema mismatch", "schema_version": "nexus_asi_record_v1"}
+  ]
+}

@@ -2,36 +2,44 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
 import shutil
 import subprocess
 import sys
-import time
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
 from types import SimpleNamespace
+from typing import Any
 
 # 設定專案 Path 載入
 repo_root = str(Path(__file__).resolve().parents[2])
 if repo_root not in sys.path:
     sys.path.insert(0, repo_root)
 
-from nexus.services.local_heal.context import HealContext
-from nexus.services.local_heal.orchestrator import HealOrchestrator
-from nexus.services.local_heal.governance_gate import GovernanceGate
-from nexus.services.local_heal.interface import IPhase, PhaseResult
-from nexus.services.local_heal.local_model_source_anchor import build_local_model_source_anchor
-from nexus.services.local_heal.interface import LocalizedFile, RepairPlan
+# The imports below need the sys.path insert above (hence noqa: E402).
+from nexus.services.local_heal.context import HealContext  # noqa: E402
+from nexus.services.local_heal.governance_gate import GovernanceGate  # noqa: E402
+from nexus.services.local_heal.interface import (  # noqa: E402
+    IPhase,
+    LocalizedFile,
+    PhaseResult,
+    RepairPlan,
+)
+from nexus.services.local_heal.local_model_source_anchor import (  # noqa: E402
+    build_local_model_source_anchor,
+)
+from nexus.services.local_heal.orchestrator import HealOrchestrator  # noqa: E402
 
 # 6 月回歸測試集定義 (Expanded to Phase 56F.1 with hardened repros)
 REGRESSION_PACK = [
     {
         "task_id": "astropy__astropy-13236",
         "june_group": "A_PASSED",
-        "workspace_path": "/Users/jameschen/Workspace/nexus/.nexus/workspaces/astropy",
-        "python_executable": "/Users/jameschen/Workspace/nexus/.nexus/workspaces/astropy/.venv_12907/bin/python",
+        "workspace_path": "{workspace_root}/.nexus/workspaces/astropy",
+        "python_executable": "{workspace_root}/.nexus/workspaces/astropy/.venv_12907/bin/python",
         "target_file": "astropy/table/table.py",
         "target_symbol": "__init__",
         "problem_statement": "Prevent auto-transformation of structured ndarray column into NdarrayMixin inside Table initialization.",
@@ -66,13 +74,13 @@ except Exception as e:
             "verifier_status": "pass",
             "receipt_coverage": 1.0,
             "failure_class": "none",
-        }
+        },
     },
     {
         "task_id": "astropy__astropy-12907",
         "june_group": "A_PASSED",
-        "workspace_path": "/Users/jameschen/Workspace/nexus/.nexus/workspaces/astropy",
-        "python_executable": "/Users/jameschen/Workspace/nexus/.nexus/workspaces/astropy/.venv_12907/bin/python",
+        "workspace_path": "{workspace_root}/.nexus/workspaces/astropy",
+        "python_executable": "{workspace_root}/.nexus/workspaces/astropy/.venv_12907/bin/python",
         "target_file": "astropy/modeling/separable.py",
         "target_symbol": "_cstack",
         "problem_statement": "Fix nested Pix2Sky_TAN model composition bug inside _cstack.",
@@ -104,13 +112,13 @@ except Exception as e:
             "verifier_status": "pass",
             "receipt_coverage": 1.0,
             "failure_class": "none",
-        }
+        },
     },
     {
         "task_id": "astropy__astropy-14182",
         "june_group": "B_UNSOLVED",
-        "workspace_path": "/Users/jameschen/Workspace/nexus/.nexus/workspaces/astropy",
-        "python_executable": "/Users/jameschen/Workspace/nexus/.nexus/workspaces/astropy/.venv_12907/bin/python",
+        "workspace_path": "{workspace_root}/.nexus/workspaces/astropy",
+        "python_executable": "{workspace_root}/.nexus/workspaces/astropy/.venv_12907/bin/python",
         "target_file": "astropy/io/ascii/rst.py",
         "target_symbol": "__init__",
         "problem_statement": "RST table format writer should support header_rows argument, consistent with fixed_width.",
@@ -143,12 +151,12 @@ except Exception as e:
             "verifier_status": "fail",
             "receipt_coverage": 0.0,
             "failure_class": "patch_mismatch",
-        }
+        },
     },
     {
         "task_id": "sympy__sympy-13852",
         "june_group": "B_UNSOLVED",
-        "workspace_path": "/Users/jameschen/Workspace/nexus/artifacts/external_sources/sympy_13852",
+        "workspace_path": "{workspace_root}/artifacts/external_sources/sympy_13852",
         "python_executable": "uv run --with mpmath python",
         "target_file": "sympy/functions/special/zeta_functions.py",
         "target_symbol": "_eval_expand_func",
@@ -179,13 +187,13 @@ except Exception as e:
             "verifier_status": "fail",
             "receipt_coverage": 0.0,
             "failure_class": "unverified_gap",
-        }
+        },
     },
     {
         "task_id": "astropy__astropy-13453",
         "june_group": "B_UNSOLVED",
-        "workspace_path": "/Users/jameschen/Workspace/nexus/.nexus/workspaces/astropy",
-        "python_executable": "/Users/jameschen/Workspace/nexus/.nexus/workspaces/astropy/.venv_12907/bin/python",
+        "workspace_path": "{workspace_root}/.nexus/workspaces/astropy",
+        "python_executable": "{workspace_root}/.nexus/workspaces/astropy/.venv_12907/bin/python",
         "target_file": "astropy/io/ascii/html.py",
         "target_symbol": "write",
         "problem_statement": "HTML output format should support supplied formats argument, consistent with core writers.",
@@ -216,13 +224,13 @@ except Exception as e:
             "verifier_status": "fail",
             "receipt_coverage": 0.0,
             "failure_class": "search_mismatch",
-        }
+        },
     },
     {
         "task_id": "astropy__astropy-13579",
         "june_group": "C_INFRA",
-        "workspace_path": "/Users/jameschen/Workspace/nexus/.nexus/workspaces/astropy",
-        "python_executable": "/Users/jameschen/Workspace/nexus/.nexus/workspaces/astropy/.venv_12907/bin/python",
+        "workspace_path": "{workspace_root}/.nexus/workspaces/astropy",
+        "python_executable": "{workspace_root}/.nexus/workspaces/astropy/.venv_12907/bin/python",
         "target_file": "astropy/wcs/wcsapi/wrappers/sliced_wcs.py",
         "target_symbol": "sanitize_slices",
         "problem_statement": "Ensure sanitize_slices raises appropriate errors for out of bounds.",
@@ -247,9 +255,10 @@ except Exception as e:
             "verifier_status": "fail",
             "receipt_coverage": 0.0,
             "failure_class": "environment_blocked",
-        }
-    }
+        },
+    },
 ]
+
 
 class FakePhase(IPhase):
     def __init__(self, name: str):
@@ -262,8 +271,11 @@ class FakePhase(IPhase):
             ctx.op.phase_trace[self.name]["receipt_present"] = True
         return PhaseResult(success=True)
 
+
 class RealVerifyPhase(IPhase):
-    def __init__(self, repro_code: str, target_file: str, replay_mode: str = "mock_oracle", task_id: str = ""):
+    def __init__(
+        self, repro_code: str, target_file: str, replay_mode: str = "mock_oracle", task_id: str = ""
+    ):
         self.repro_code = repro_code
         self.target_file = target_file
         self.replay_mode = replay_mode
@@ -309,7 +321,10 @@ class RealVerifyPhase(IPhase):
 
         if self.replay_mode == "mock_oracle":
             # 從 LocalPatchSynthesisBackend 取 oracle patch
-            from nexus.services.local_heal.backends.local_patch_synthesis_backend import LocalPatchSynthesisBackend
+            from nexus.services.local_heal.backends.local_patch_synthesis_backend import (
+                LocalPatchSynthesisBackend,
+            )
+
             backend = LocalPatchSynthesisBackend()
             result = backend.generate_patch(
                 task_id=self.task_id,
@@ -321,7 +336,11 @@ class RealVerifyPhase(IPhase):
                 attempt=1,
             )
             oracle_patch_text = result.get("candidate_text", "")
-            candidate_patch_hash = hashlib.sha256(oracle_patch_text.encode("utf-8")).hexdigest() if oracle_patch_text else ""
+            candidate_patch_hash = (
+                hashlib.sha256(oracle_patch_text.encode("utf-8")).hexdigest()
+                if oracle_patch_text
+                else ""
+            )
 
             if use_site_packages_verify and self.task_id != "astropy__astropy-13579":
                 # 注入到 site-packages
@@ -334,6 +353,7 @@ class RealVerifyPhase(IPhase):
                 # sympy 或其他非 astropy: 嘗試 git apply patch.diff
                 # 先從 oracle text 提取 diff block
                 import re
+
                 diff_match = re.search(r"```diff\n(.*?)```", oracle_patch_text, re.DOTALL)
                 if diff_match:
                     raw_diff = diff_match.group(1)
@@ -343,7 +363,7 @@ class RealVerifyPhase(IPhase):
                         ["git", "apply", "--reject", "patch.diff"],
                         cwd=str(workspace_path),
                         capture_output=True,
-                        text=True
+                        text=True,
                     )
                     if patch_diff_file.exists():
                         patch_diff_file.unlink()
@@ -353,9 +373,14 @@ class RealVerifyPhase(IPhase):
         else:
             # real_model: 直接使用 ctx.op.final_patch
             oracle_patch_text = ctx.op.final_patch or ""
-            candidate_patch_hash = hashlib.sha256(oracle_patch_text.encode("utf-8")).hexdigest() if oracle_patch_text else ""
+            candidate_patch_hash = (
+                hashlib.sha256(oracle_patch_text.encode("utf-8")).hexdigest()
+                if oracle_patch_text
+                else ""
+            )
             if oracle_patch_text:
                 import re
+
                 diff_match = re.search(r"```diff\n(.*?)```", oracle_patch_text, re.DOTALL)
                 raw_diff = diff_match.group(1) if diff_match else oracle_patch_text
                 patch_diff_file = workspace_path / "patch.diff"
@@ -364,7 +389,7 @@ class RealVerifyPhase(IPhase):
                     ["git", "apply", "patch.diff"],
                     cwd=str(workspace_path),
                     capture_output=True,
-                    text=True
+                    text=True,
                 )
                 if patch_diff_file.exists():
                     patch_diff_file.unlink()
@@ -395,12 +420,7 @@ class RealVerifyPhase(IPhase):
             cmd = py_args + [str(repro_script)]
 
             res = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                cwd=str(workspace_path),
-                env=env,
-                timeout=30
+                cmd, capture_output=True, text=True, cwd=str(workspace_path), env=env, timeout=30
             )
             stdout = res.stdout + res.stderr
             passed = (
@@ -419,9 +439,7 @@ class RealVerifyPhase(IPhase):
             )
 
             receipt = SimpleNamespace(
-                stdout_tail=stdout[-500:],
-                stderr_tail="",
-                return_code=res.returncode
+                stdout_tail=stdout[-500:], stderr_tail="", return_code=res.returncode
             )
             ctx.op.verifier_receipt = receipt
 
@@ -430,11 +448,13 @@ class RealVerifyPhase(IPhase):
                 "candidate_patch_hash": candidate_patch_hash,
                 "applied_patch_hash": applied_patch_hash,
                 "selected_candidate_hash_matches_applied": (
-                    apply_success and candidate_patch_hash == applied_patch_hash and bool(candidate_patch_hash)
+                    apply_success
+                    and candidate_patch_hash == applied_patch_hash
+                    and bool(candidate_patch_hash)
                 ),
-                "apply_receipt_status": "applied" if apply_success else (
-                    "mock_oracle_injected" if self.replay_mode == "mock_oracle" else "failed"
-                ),
+                "apply_receipt_status": "applied"
+                if apply_success
+                else ("mock_oracle_injected" if self.replay_mode == "mock_oracle" else "failed"),
                 "patched_file_hash_before": patched_file_hash_before,
                 "patched_file_hash_after": patched_file_hash_after,
                 "verifier_ran_after_apply": verifier_ran_after_apply,
@@ -457,26 +477,35 @@ class RealVerifyPhase(IPhase):
             return PhaseResult(success=False, failure_reason=f"VerifierException: {str(e)}")
 
 
-
 def install_package(python_exec: str, workspace_path: Path, package_spec: str) -> dict[str, Any]:
     """🛡️ Robust Dependency Resolver: Install package via uv, pip, or ensurepip fallback."""
     import shutil
+
     has_uv = bool(shutil.which("uv"))
     uv_available = has_uv
     pip_available = False
-    
+
     try:
-        res_pip = subprocess.run([python_exec, "-m", "pip", "--version"], capture_output=True, text=True, timeout=10)
+        res_pip = subprocess.run(
+            [python_exec, "-m", "pip", "--version"], capture_output=True, text=True, timeout=10
+        )
         if res_pip.returncode == 0:
             pip_available = True
     except Exception:
         pass
-        
+
     if not pip_available and not uv_available:
         try:
             print("    ⚠️ pip not found! Attempting ensurepip fallback...")
-            subprocess.run([python_exec, "-m", "ensurepip", "--default-pip"], capture_output=True, text=True, timeout=30)
-            res_pip = subprocess.run([python_exec, "-m", "pip", "--version"], capture_output=True, text=True, timeout=10)
+            subprocess.run(
+                [python_exec, "-m", "ensurepip", "--default-pip"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            res_pip = subprocess.run(
+                [python_exec, "-m", "pip", "--version"], capture_output=True, text=True, timeout=10
+            )
             if res_pip.returncode == 0:
                 pip_available = True
         except Exception:
@@ -507,7 +536,9 @@ def install_package(python_exec: str, workspace_path: Path, package_spec: str) -
         }
 
     try:
-        res = subprocess.run(cmd, cwd=str(workspace_path), capture_output=True, text=True, timeout=90)
+        res = subprocess.run(
+            cmd, cwd=str(workspace_path), capture_output=True, text=True, timeout=90
+        )
         if res.returncode == 0:
             success = True
         else:
@@ -528,54 +559,104 @@ def install_package(python_exec: str, workspace_path: Path, package_spec: str) -
         "target_python": python_exec,
     }
 
-def run_pack(replay_mode: str = "mock_oracle") -> dict[str, Any]:
-    # 設定指定模式的 Mock LLM 環境變數 (任務 A)
-    if replay_mode == "mock_oracle":
-        os.environ["NEXUS_REGRESSION_MOCK_LLM"] = "1"
-    else:
-        os.environ["NEXUS_REGRESSION_MOCK_LLM"] = "0"
-        
+
+WORKSPACE_ROOT_ENV = "NEXUS_JUNE_REGRESSION_WORKSPACE_ROOT"
+_PACK_ENV_KEYS = ("NEXUS_REGRESSION_MOCK_LLM", "NEXUS_LOCAL_QWEN_BACKEND")
+
+
+def _resolve_workspace_root(workspace_root: str | Path | None) -> Path:
+    """Explicit argument, then $NEXUS_JUNE_REGRESSION_WORKSPACE_ROOT, then the repo root."""
+    if workspace_root is not None:
+        return Path(workspace_root)
+    from_env = os.environ.get(WORKSPACE_ROOT_ENV, "").strip()
+    return Path(from_env) if from_env else Path(repo_root)
+
+
+def _resolve_item_path(value: str, root: Path) -> str:
+    return value.replace("{workspace_root}", str(root))
+
+
+@contextlib.contextmanager
+def _scoped_pack_env(replay_mode: str) -> Iterator[None]:
+    """Set the pack's env switches only for the run, then restore the caller's values.
+
+    run_pack used to leave NEXUS_REGRESSION_MOCK_LLM / NEXUS_LOCAL_QWEN_BACKEND set
+    for the rest of the process, which silently switched later tests onto the
+    mock-oracle backend and the Qwen backend seam (Refs #1924).
+    """
+    saved = {key: os.environ.get(key) for key in _PACK_ENV_KEYS}
+    os.environ["NEXUS_REGRESSION_MOCK_LLM"] = "1" if replay_mode == "mock_oracle" else "0"
     os.environ["NEXUS_LOCAL_QWEN_BACKEND"] = "1"
-    
+    try:
+        yield
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def run_pack(
+    replay_mode: str = "mock_oracle",
+    *,
+    workspace_root: str | Path | None = None,
+    results_dir: str | Path | None = None,
+) -> dict[str, Any]:
+    """Run the June regression pack; the process environment is restored on return."""
+    with _scoped_pack_env(replay_mode):
+        return _run_pack(
+            replay_mode,
+            workspace_root=_resolve_workspace_root(workspace_root),
+            results_dir=(
+                Path(results_dir)
+                if results_dir is not None
+                else Path(repo_root) / "artifacts" / "runtime" / "june_regression_pack_v0"
+            ),
+        )
+
+
+def _run_pack(replay_mode: str, *, workspace_root: Path, results_dir: Path) -> dict[str, Any]:
     results = []
-    results_dir = Path(repo_root) / "artifacts" / "runtime" / "june_regression_pack_v0"
     results_dir.mkdir(parents=True, exist_ok=True)
     jsonl_path = results_dir / "results.jsonl"
     if jsonl_path.exists():
         jsonl_path.unlink()
 
     # 確保 astropy baseline 安裝
-    astropy_workspace = Path("/Users/jameschen/Workspace/nexus/.nexus/workspaces/astropy")
+    astropy_workspace = workspace_root / ".nexus" / "workspaces" / "astropy"
     astropy_python = str(astropy_workspace / ".venv_12907" / "bin" / "python")
     print("🔄 Ensuring baseline astropy installation in workspace environment...")
     sync_res = install_package(astropy_python, astropy_workspace, "astropy==5.3.4")
-    
+
     for item in REGRESSION_PACK:
         task_id = item["task_id"]
         # Phase 56G: 在 real_model 模式下，僅限執行 astropy-13236 單題探針
         if replay_mode == "real_model" and task_id != "astropy__astropy-13236":
             continue
         june_group = item["june_group"]
-        workspace_path = Path(item["workspace_path"])
-        python_exec = item["python_executable"]
-        
+        workspace_path = Path(_resolve_item_path(item["workspace_path"], workspace_root))
+        python_exec = _resolve_item_path(item["python_executable"], workspace_root)
+
         print(f"\n🚀 Running Regression Task: {task_id} ({june_group})")
-        
+
         # Contamination Guard
         manual_source_edit_detected = False
         source_tree_clean_before_run = False
-        
+
         if (workspace_path / ".git").exists():
             res_diff = subprocess.run(
-                ["git", "diff", "--quiet"],
-                cwd=str(workspace_path),
-                capture_output=True
+                ["git", "diff", "--quiet"], cwd=str(workspace_path), capture_output=True
             )
             if res_diff.returncode != 0:
                 manual_source_edit_detected = True
-                print("    ⚠️ Contamination Guard: Manual source edit detected! Cleaning workspace...")
-                
-            subprocess.run(["git", "checkout", "--", "."], cwd=str(workspace_path), capture_output=True)
+                print(
+                    "    ⚠️ Contamination Guard: Manual source edit detected! Cleaning workspace..."
+                )
+
+            subprocess.run(
+                ["git", "checkout", "--", "."], cwd=str(workspace_path), capture_output=True
+            )
             subprocess.run(["git", "clean", "-fd"], cwd=str(workspace_path), capture_output=True)
             source_tree_clean_before_run = True
 
@@ -586,13 +667,15 @@ def run_pack(replay_mode: str = "mock_oracle") -> dict[str, Any]:
             target_symbol=item["target_symbol"],
             locked_search=item["locked_search"],
         )
-        
+
         localizer_telemetry = anchor.telemetry
         used_granular_localizer = localizer_telemetry.get("localizer_fallback_attempted", False)
-        
+
         # 對於 astropy 任務，檢查環境同步狀態
         if "astropy" in task_id and not sync_res["success"]:
-            print(f"  ❌ Environment sync failed! Method: {sync_res['method']}, Error: {sync_res['error']}")
+            print(
+                f"  ❌ Environment sync failed! Method: {sync_res['method']}, Error: {sync_res['error']}"
+            )
             res_item = {
                 "task_id": task_id,
                 "june_group": june_group,
@@ -631,10 +714,15 @@ def run_pack(replay_mode: str = "mock_oracle") -> dict[str, Any]:
                 "manual_source_edit_detected": manual_source_edit_detected,
                 "replay_mode": replay_mode,
                 "mock_oracle_used": replay_mode == "mock_oracle",
-                "real_model_called": replay_mode == "real_model",
+                # Blocked before any model call: do not claim one happened.
+                "real_model_called": False,
                 "provider_name": "none" if replay_mode == "mock_oracle" else "ollama",
-                "model_name": "mock_oracle_patch" if replay_mode == "mock_oracle" else "qwen2.5-coder:7b",
-                "candidate_source": "mock_oracle" if replay_mode == "mock_oracle" else "local_model",
+                "model_name": "mock_oracle_patch"
+                if replay_mode == "mock_oracle"
+                else "qwen2.5-coder:7b",
+                "candidate_source": "mock_oracle"
+                if replay_mode == "mock_oracle"
+                else "local_model",
                 "oracle_patch_used": replay_mode == "mock_oracle",
                 "final_verdict": "INFRA_BLOCKED",
                 "final_classification": "NOT_REPLAYABLE",
@@ -646,11 +734,11 @@ def run_pack(replay_mode: str = "mock_oracle") -> dict[str, Any]:
 
         # 還原工作區 git 乾淨狀態
         subprocess.run(["git", "checkout", "--", item["target_file"]], cwd=str(workspace_path))
-        
+
         # 寫入 repro 腳本
         repro_path = workspace_path / "reproduce_bug.py"
         repro_path.write_text(item["repro_code"], encoding="utf-8")
-        
+
         # 5. 呼叫 HealOrchestrator.run(ctx) (任務 D)
         op = SimpleNamespace(
             task_id=task_id,
@@ -677,12 +765,47 @@ def run_pack(replay_mode: str = "mock_oracle") -> dict[str, Any]:
             wall_time_sec=0.0,
             receipt_path="",
             phase_trace={
-                "reproduction": {"name": "reproduction", "class_name": "FakePhase", "is_fake": True, "ran": False, "success": False, "receipt_present": False},
-                "planning": {"name": "planning", "class_name": "FakePhase", "is_fake": True, "ran": False, "success": False, "receipt_present": False},
-                "localization": {"name": "localization", "class_name": "FakePhase", "is_fake": True, "ran": False, "success": False, "receipt_present": False},
-                "patch_synthesis": {"name": "patch_synthesis", "class_name": "FakePhase", "is_fake": True, "ran": False, "success": False, "receipt_present": False},
-                "verification": {"name": "verification", "class_name": "RealVerifyPhase", "is_fake": False, "ran": False, "success": False, "receipt_present": False},
-            }
+                "reproduction": {
+                    "name": "reproduction",
+                    "class_name": "FakePhase",
+                    "is_fake": True,
+                    "ran": False,
+                    "success": False,
+                    "receipt_present": False,
+                },
+                "planning": {
+                    "name": "planning",
+                    "class_name": "FakePhase",
+                    "is_fake": True,
+                    "ran": False,
+                    "success": False,
+                    "receipt_present": False,
+                },
+                "localization": {
+                    "name": "localization",
+                    "class_name": "FakePhase",
+                    "is_fake": True,
+                    "ran": False,
+                    "success": False,
+                    "receipt_present": False,
+                },
+                "patch_synthesis": {
+                    "name": "patch_synthesis",
+                    "class_name": "FakePhase",
+                    "is_fake": True,
+                    "ran": False,
+                    "success": False,
+                    "receipt_present": False,
+                },
+                "verification": {
+                    "name": "verification",
+                    "class_name": "RealVerifyPhase",
+                    "is_fake": False,
+                    "ran": False,
+                    "success": False,
+                    "receipt_present": False,
+                },
+            },
         )
         gov = SimpleNamespace(
             gate_exit="",
@@ -690,63 +813,80 @@ def run_pack(replay_mode: str = "mock_oracle") -> dict[str, Any]:
             expected_reason_family="unknown",
             actual_reason_family="unknown",
             stop_layer_matched=False,
-            family_matched=False
+            family_matched=False,
         )
         ctx = HealContext(op=op, gov=gov)
-        
+
         orchestrator = HealOrchestrator(
             phases=[
                 FakePhase("reproduction"),
                 FakePhase("planning"),
                 FakePhase("localization"),
                 FakePhase("patch_synthesis"),
-                RealVerifyPhase(item["repro_code"], item["target_file"], replay_mode=replay_mode, task_id=task_id)
+                RealVerifyPhase(
+                    item["repro_code"],
+                    item["target_file"],
+                    replay_mode=replay_mode,
+                    task_id=task_id,
+                ),
             ],
-            governance_gate=GovernanceGate()
+            governance_gate=GovernanceGate(),
         )
-        
+
         # 啟動完整 HealOrchestrator.run() 流程
         orchestrator.run(ctx)
-        
+
         # 6. 判定結果
         verifier_status = "fail"
         patch_applied_ev = getattr(ctx.op, "patch_applied_evidence", {})
-        
+
         # 嚴格的 PASS 條件：必需 apply 成功且 verifier 回報成功 (任務 C)
         apply_ok = patch_applied_ev.get("apply_receipt_status") == "applied"
         matches_ok = patch_applied_ev.get("selected_candidate_hash_matches_applied") is True
-        hash_differs = patch_applied_ev.get("patched_file_hash_before") != patch_applied_ev.get("patched_file_hash_after")
+        hash_differs = patch_applied_ev.get("patched_file_hash_before") != patch_applied_ev.get(
+            "patched_file_hash_after"
+        )
         verifier_ok = patch_applied_ev.get("verifier_ran_after_apply") is True
-        
-        if ctx.gov.gate_exit == "verification" and apply_ok and matches_ok and hash_differs and verifier_ok:
+
+        if (
+            ctx.gov.gate_exit == "verification"
+            and apply_ok
+            and matches_ok
+            and hash_differs
+            and verifier_ok
+        ):
             verifier_status = "pass"
-            
+
         # 還原工作區 git 乾淨狀態
         subprocess.run(["git", "checkout", "--", item["target_file"]], cwd=str(workspace_path))
         if "astropy" in task_id:
             install_package(astropy_python, astropy_workspace, "astropy==5.3.4")
-        
+
         print(f"  DEBUG OP Failure Reason: {repr(ctx.op.failure_reason)}")
         if hasattr(ctx.op, "verifier_receipt"):
             print(f"  DEBUG Verifier stdout: {repr(ctx.op.verifier_receipt.stdout_tail[:300])}")
-            
+
         # 動態計算 phase_trace 狀態 (任務 B)
         trace = getattr(ctx.op, "phase_trace", {})
-        
+
         def get_phase_ran_non_fake(name):
             p = trace.get(name, {})
             return p.get("ran", False) and not p.get("is_fake", True)
-            
+
         used_reproduction_phase = get_phase_ran_non_fake("reproduction")
         used_planning_phase = get_phase_ran_non_fake("planning")
         used_localization_phase = get_phase_ran_non_fake("localization")
         used_patch_synthesis_phase = get_phase_ran_non_fake("patch_synthesis")
         used_verification_phase = get_phase_ran_non_fake("verification")
-        
+
         used_full_phase_sequence = True
         for name in ["reproduction", "planning", "localization", "patch_synthesis", "verification"]:
             p = trace.get(name, {})
-            if not (p.get("ran", False) and not p.get("is_fake", True) and p.get("receipt_present", False)):
+            if not (
+                p.get("ran", False)
+                and not p.get("is_fake", True)
+                and p.get("receipt_present", False)
+            ):
                 used_full_phase_sequence = False
                 break
 
@@ -757,18 +897,29 @@ def run_pack(replay_mode: str = "mock_oracle") -> dict[str, Any]:
             final_verdict = "INFRA_BLOCKED"
         elif ctx.op.task_id == "astropy__astropy-13579":
             final_verdict = "INFRA_BLOCKED"
-        elif "VerifierException" in ctx.op.failure_reason or "ImportError" in ctx.op.failure_reason or (hasattr(ctx.op, "verifier_receipt") and "ImportError" in ctx.op.verifier_receipt.stdout_tail):
+        elif (
+            "VerifierException" in ctx.op.failure_reason
+            or "ImportError" in ctx.op.failure_reason
+            or (
+                hasattr(ctx.op, "verifier_receipt")
+                and "ImportError" in ctx.op.verifier_receipt.stdout_tail
+            )
+        ):
             final_verdict = "INFRA_BLOCKED"
         else:
             final_verdict = "CONTROLLED_BLOCKED"
 
         # 判定 final_classification (任務 A & D)
         if replay_mode == "mock_oracle":
-            final_classification = "MOCK_ORACLE_REPLAY_PASS" if final_verdict == "PASSED" else "MOCK_ORACLE_REPLAY_FAIL"
+            final_classification = (
+                "MOCK_ORACLE_REPLAY_PASS"
+                if final_verdict == "PASSED"
+                else "MOCK_ORACLE_REPLAY_FAIL"
+            )
         elif replay_mode == "real_model":
             # 任務 C: 嚴格 real_model 分類
             has_fake = any(p.get("is_fake", True) for p in trace.values())
-            
+
             if final_verdict == "INFRA_BLOCKED":
                 final_classification = "INFRA_BLOCKED"
             elif has_fake:
@@ -777,9 +928,11 @@ def run_pack(replay_mode: str = "mock_oracle") -> dict[str, Any]:
                 has_real_call = getattr(ctx.op, "local_model_called", False)
                 apply_ok = patch_applied_ev.get("apply_receipt_status") == "applied"
                 matches_ok = patch_applied_ev.get("selected_candidate_hash_matches_applied") is True
-                hash_diff = patch_applied_ev.get("patched_file_hash_before") != patch_applied_ev.get("patched_file_hash_after")
+                hash_diff = patch_applied_ev.get(
+                    "patched_file_hash_before"
+                ) != patch_applied_ev.get("patched_file_hash_after")
                 verifier_ran = patch_applied_ev.get("verifier_ran_after_apply") is True
-                
+
                 cond_pass = (
                     has_real_call
                     and apply_ok
@@ -795,7 +948,15 @@ def run_pack(replay_mode: str = "mock_oracle") -> dict[str, Any]:
                 else:
                     final_classification = "WIRING_GAP"
         else:
-            final_classification = "REPAIR_LOOP_SEAM_PASS" if final_verdict == "PASSED" else ("CONTROLLED_BLOCKED" if final_verdict == "CONTROLLED_BLOCKED" else "REGRESSION_OR_WIRING_GAP")
+            final_classification = (
+                "REPAIR_LOOP_SEAM_PASS"
+                if final_verdict == "PASSED"
+                else (
+                    "CONTROLLED_BLOCKED"
+                    if final_verdict == "CONTROLLED_BLOCKED"
+                    else "REGRESSION_OR_WIRING_GAP"
+                )
+            )
 
         # 獲取本題所用 sync_status
         if "astropy" in task_id:
@@ -809,6 +970,7 @@ def run_pack(replay_mode: str = "mock_oracle") -> dict[str, Any]:
             res_uv_available = sync_res["uv_available"]
         else:
             import shutil
+
             res_sync_attempted = False
             res_sync_method = "none"
             res_sync_success = True
@@ -818,15 +980,17 @@ def run_pack(replay_mode: str = "mock_oracle") -> dict[str, Any]:
             res_pip_available = True
             res_uv_available = bool(shutil.which("uv"))
 
-
-
         res_item = {
             "task_id": task_id,
             "june_group": june_group,
             "historical_status": item["historical"]["verifier_status"],
             "historical_failure_class": item["historical"]["failure_class"],
-            "current_status": "INFRA_BLOCKED" if final_verdict == "INFRA_BLOCKED" else verifier_status,
-            "current_failure_class": "none" if verifier_status == "pass" else ("environment_blocked" if final_verdict == "INFRA_BLOCKED" else "verifier_failed"),
+            "current_status": "INFRA_BLOCKED"
+            if final_verdict == "INFRA_BLOCKED"
+            else verifier_status,
+            "current_failure_class": "none"
+            if verifier_status == "pass"
+            else ("environment_blocked" if final_verdict == "INFRA_BLOCKED" else "verifier_failed"),
             "canonical_span_source": anchor.canonical_span_source,
             "source_anchor_status": "success" if not anchor.blockers else "blocked",
             "verifier_status": verifier_status,
@@ -844,7 +1008,9 @@ def run_pack(replay_mode: str = "mock_oracle") -> dict[str, Any]:
             "used_granular_localizer": used_granular_localizer,
             "used_isolated_solve_loop": False,
             "side_lane_only": False,
-            "final_blocker": "none" if verifier_status == "pass" else ("environment_blocked" if final_verdict == "INFRA_BLOCKED" else "verifier_failed"),
+            "final_blocker": "none"
+            if verifier_status == "pass"
+            else ("environment_blocked" if final_verdict == "INFRA_BLOCKED" else "verifier_failed"),
             "public_claim_allowed": False,
             "environment_sync_attempted": res_sync_attempted,
             "environment_sync_method": res_sync_method,
@@ -859,25 +1025,41 @@ def run_pack(replay_mode: str = "mock_oracle") -> dict[str, Any]:
             "manual_source_edit_detected": manual_source_edit_detected,
             "replay_mode": replay_mode,
             "mock_oracle_used": replay_mode == "mock_oracle",
-            "real_model_called": replay_mode == "real_model" and getattr(ctx.op, "local_model_called", False),
+            "real_model_called": replay_mode == "real_model"
+            and getattr(ctx.op, "local_model_called", False),
             "provider_name": "none" if replay_mode == "mock_oracle" else "ollama",
-            "model_name": "mock_oracle_patch" if replay_mode == "mock_oracle" else "qwen2.5-coder:7b",
+            "model_name": "mock_oracle_patch"
+            if replay_mode == "mock_oracle"
+            else "qwen2.5-coder:7b",
             "candidate_source": "mock_oracle" if replay_mode == "mock_oracle" else "local_model",
             "oracle_patch_used": replay_mode == "mock_oracle",
             "final_verdict": final_verdict,
             "final_classification": final_classification,
         }
         results.append(res_item)
-        
+
         with open(jsonl_path, "a", encoding="utf-8") as f_out:
             f_out.write(json.dumps(res_item) + "\n")
-            
-        print(f"  Result: {verifier_status.upper()} (Verdict: {final_verdict}, Classification: {final_classification})")
-        
+
+        print(
+            f"  Result: {verifier_status.upper()} (Verdict: {final_verdict}, Classification: {final_classification})"
+        )
+
     return {"status": "completed", "results": results}
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="June Regression Pack Runner")
-    parser.add_argument("--replay-mode", type=str, default="mock_oracle", choices=["mock_oracle", "real_model", "provider_injected"])
+    parser.add_argument(
+        "--replay-mode",
+        type=str,
+        default="mock_oracle",
+        choices=["mock_oracle", "real_model", "provider_injected"],
+    )
+    parser.add_argument(
+        "--workspace-root",
+        default=None,
+        help=f"root holding .nexus/workspaces/astropy and artifacts/external_sources (default: ${WORKSPACE_ROOT_ENV} or the repo root)",
+    )
     args = parser.parse_args()
-    run_pack(replay_mode=args.replay_mode)
+    run_pack(replay_mode=args.replay_mode, workspace_root=args.workspace_root)

@@ -1,5 +1,24 @@
 import importlib
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _restore_policy_module_after_reload():
+    """Undo the importlib.reload() these tests do (Refs #1924).
+
+    reload() rebinds LocalModelPolicy inside the shared module object, while
+    modules that imported the class at import time (local_heal phases) keep the
+    old one. Later tests then monkeypatch the new class and the pipeline never
+    sees it. Restore the module namespace so every holder sees one class again.
+    """
+    import nexus.engine.local_model_policy as policy_module
+
+    saved = dict(policy_module.__dict__)
+    yield
+    policy_module.__dict__.clear()
+    policy_module.__dict__.update(saved)
+
 
 def test_local_model_policy_routes_search_phase_to_ollama_by_default(monkeypatch):
     monkeypatch.setenv("NEXUS_SEARCH_TIMEOUT_SECONDS", "120")

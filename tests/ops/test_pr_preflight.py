@@ -7,6 +7,7 @@ scripts, so the checks exercise the same validators CI runs.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -247,6 +248,48 @@ def test_lane_block_with_bad_hash_is_rejected_by_trusted_gate(repo, tmp_path, ca
     assert check["data"] == {"present": True, "parses": True}
 
 
+def _inline_lane(contract_kind: str) -> str:
+    binding = {
+        "schema": "nexus.merge_lane_binding.v1",
+        "execution_lane": "DIRECT_CANONICAL",
+        "contract_kind": contract_kind,
+        "owner_id": "James3014",
+        "issue_number": None,
+        "task_id": None,
+        "attempt_id": None,
+        "task_card_path": None,
+        "task_card_sha256": None,
+        "owner_lane_rebind": None,
+    }
+    binding["binding_hash"] = hashlib.sha256(
+        json.dumps(binding, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return "<!-- NEXUS_MERGE_LANE_V1\n" + json.dumps(binding) + "\nNEXUS_MERGE_LANE_V1 -->\n"
+
+
+@pytest.mark.parametrize(
+    ("contract_kind", "author", "status", "code"),
+    [
+        ("OWNER_INLINE", None, "SKIP", "PULL_REQUEST_AUTHOR_REQUIRED"),
+        ("OWNER_INLINE", "James3014", "PASS", ""),
+        ("OWNER_INLINE", "app/james3014-nexus-agent", "FAIL", "OWNER_INLINE_AUTHOR_MISMATCH"),
+        ("AGENT_INLINE", "app/james3014-nexus-agent", "PASS", ""),
+        ("AGENT_INLINE", "James3014", "FAIL", "AGENT_INLINE_AUTHOR_NOT_ALLOWLISTED_APP"),
+    ],
+)
+def test_inline_lane_is_checked_against_pr_author(
+    repo, tmp_path, capsys, contract_kind, author, status, code
+):
+    extra = ["--author", author] if author else []
+    argv = _run(
+        repo, tmp_path, "--only", "merge_lane", *extra, body=_body(lane=_inline_lane(contract_kind))
+    )
+    _code, report = _report(capsys, argv)
+    check = _check(report, "merge_lane")
+    assert check["status"] == status
+    assert check["code"] == code
+
+
 # ------------------------------------------------------------------- issue
 
 
@@ -283,13 +326,191 @@ def test_issue_readiness(
         assert MARKER in check["fix"]
 
 
-def test_issue_marker_skips_without_nexus_certify(repo, tmp_path, capsys, monkeypatch):
-    monkeypatch.setattr(pf, "_resolve_nexus_certify", lambda explicit: None)
+def test_certify_unresolved_is_fail_not_skip(repo, tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(pf, "_resolve_nexus_certify", lambda ctx: (None, "", "uvx not found"))
     argv = _run(
         repo, tmp_path, "--only", "issue", body=_body(), issue={"state": "OPEN", "body": ""}
     )
+    code, report = _report(capsys, argv)
+    check = _check(report, "issue")
+    assert code == 1
+    assert (check["status"], check["code"]) == ("FAIL", pf.NEXUS_CERTIFY_UNAVAILABLE)
+    assert "uvx --from" in check["fix"]
+
+
+def test_certify_failure_is_fail_with_remedy(repo, tmp_path, capsys):
+    broken = tmp_path / "broken-certify"
+    broken.write_text(
+        "#!/bin/sh\necho 'INVALID_CONFIG: unexpected or missing config keys' >&2\nexit 2\n",
+        encoding="utf-8",
+    )
+    broken.chmod(broken.stat().st_mode | stat.S_IEXEC)
+    argv = _run(
+        repo,
+        tmp_path,
+        "--only",
+        "issue",
+        body=_body(),
+        issue={"state": "OPEN", "body": ""},
+        certify=broken,
+    )
+    code, report = _report(capsys, argv)
+    check = _check(report, "issue")
+    assert code == 1
+    assert (check["status"], check["code"]) == ("FAIL", pf.NEXUS_CERTIFY_UNAVAILABLE)
+    assert "INVALID_CONFIG" in check["detail"]
+    assert "markers --issue 1916 --check" in check["fix"]
+
+
+PIN = "b245430bbad465be634ceef00b53c5582a0d4fd9"
+
+
+def _pin_workflow(repo: Path, *refs: str) -> None:
+    lines = "".join(f'          nexus-certify-ref: "{ref}"\n' for ref in refs)
+    _write(repo, pf.CERTIFY_PIN_WORKFLOW, "steps:\n" + lines)
+    _commit(repo, "pin")
+
+
+def test_certify_resolved_at_pinned_ref_through_uvx(repo, tmp_path, monkeypatch):
+    _pin_workflow(repo, PIN, PIN)
+    monkeypatch.setattr(pf.shutil, "which", lambda name: "/bin/uvx" if name == "uvx" else None)
+    monkeypatch.delenv("NEXUS_CERTIFY", raising=False)
+    ctx = _ctx(repo)
+    tool, ref, error = pf._resolve_nexus_certify(ctx)
+    assert error == ""
+    assert ref == PIN
+    assert tool == ["/bin/uvx", "--from", f"{pf.CERTIFY_REPO_URL}@{PIN}", "nexus-certify"]
+
+
+def test_certify_pin_missing_or_ambiguous_is_unresolved(repo, tmp_path, monkeypatch):
+    monkeypatch.delenv("NEXUS_CERTIFY", raising=False)
+    tool, _ref, error = pf._resolve_nexus_certify(_ctx(repo))
+    assert tool is None and "no nexus-certify-ref" in error
+    _pin_workflow(repo, PIN, "a" * 40)
+    tool, _ref, error = pf._resolve_nexus_certify(_ctx(repo))
+    assert tool is None and "several" in error
+
+
+def test_certify_check_mode_maps_stale_marker_to_fail(repo, tmp_path, capsys):
+    stale = tmp_path / "check-certify"
+    payload = json.dumps({
+        "issue_marker": f"<!-- NEXUS_CORE_EVIDENCE_UNIVERSE: {MARKER} -->",
+        "issue_check": {"status": "STALE", "remediation": "REPLACE THE MARKER"},
+    })
+    stale.write_text(
+        "#!/bin/sh\n"
+        'if [ "$2" = "--help" ]; then echo "usage: markers [--check] [--json]"; exit 0; fi\n'
+        f"cat <<'EOF'\n{payload}\nEOF\nexit 1\n",
+        encoding="utf-8",
+    )
+    stale.chmod(stale.stat().st_mode | stat.S_IEXEC)
+    # No --issue-json, so preflight asks certify to read the live Issue via --check.
+    argv = ["--repo", str(repo), "--no-fetch", "--json", "--skip-static", "--only", "issue"]
+    argv += ["--issue", "1916", "--nexus-certify", str(stale)]
+    monkeypatch_issue = {"state": "OPEN", "body": ""}
+    original = pf._fetch_issue
+    pf._fetch_issue = lambda ctx, issue: monkeypatch_issue
+    try:
+        _code, report = _report(capsys, argv)
+    finally:
+        pf._fetch_issue = original
+    check = _check(report, "issue")
+    assert (check["status"], check["code"]) == ("FAIL", pf.ISSUE_EVIDENCE_UNIVERSE_STALE)
+    assert check["fix"] == "REPLACE THE MARKER"
+
+
+def _ctx(repo: Path):
+    return pf.Context(
+        repo=repo,
+        base_ref="origin/main",
+        base_sha=_git(repo, "rev-parse", "origin/main"),
+        head_sha=_git(repo, "rev-parse", "HEAD"),
+        repository="James3014/Nexus-new",
+        body=None,
+        title=None,
+        pr_number=None,
+        issue_number=None,
+        issue_json=None,
+        nexus_certify=None,
+        tools_venv=repo / ".venv",
+        lane_owner_pending=False,
+    )
+
+
+def _certify_script(tmp_path: Path, body: str) -> Path:
+    script = tmp_path / "nexus-certify-stub"
+    script.write_text("#!/bin/sh\n" + body, encoding="utf-8")
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+    return script
+
+
+_OPEN_ISSUE = {"state": "OPEN", "body": ""}
+
+
+def _assert_certify_unavailable(check: dict) -> None:
+    assert check["status"] == "FAIL"
+    assert check["code"] == pf.NEXUS_CERTIFY_UNAVAILABLE
+    assert "nexus-core-issue-completion.yml" in check["fix"]
+    assert "uvx --from git+https://github.com/James3014/nexus-core@" in check["fix"]
+    assert "sha256:" + "a" * 64 not in check["detail"]
+    assert "NEXUS_CORE_EVIDENCE_UNIVERSE: sha256" not in check["detail"]
+
+
+def test_certify_nonzero_exit_fails_unavailable(repo, tmp_path, capsys):
+    stub = _certify_script(tmp_path, 'echo "INVALID_CONFIG" >&2\nexit 2\n')
+    argv = _run(repo, tmp_path, "--only", "issue", body=_body(), issue=_OPEN_ISSUE, certify=stub)
     _code, report = _report(capsys, argv)
-    assert _check(report, "issue")["status"] == "SKIP"
+    check = _check(report, "issue")
+    _assert_certify_unavailable(check)
+    assert "INVALID_CONFIG" in check["detail"]
+
+
+def test_certify_empty_marker_fails_unavailable(repo, tmp_path, capsys):
+    stub = _certify_script(
+        tmp_path,
+        'if [ "$2" = "--help" ]; then exit 0; fi\n'
+        'echo \'{"issue_marker": "<!-- NEXUS_CORE_EVIDENCE_UNIVERSE:  -->"}\'\n',
+    )
+    argv = _run(repo, tmp_path, "--only", "issue", body=_body(), issue=_OPEN_ISSUE, certify=stub)
+    _code, report = _report(capsys, argv)
+    _assert_certify_unavailable(_check(report, "issue"))
+
+
+def test_certify_missing_issue_marker_fails_unavailable(repo, tmp_path, capsys):
+    stub = _certify_script(
+        tmp_path, 'if [ "$2" = "--help" ]; then exit 0; fi\necho \'{"issue_marker": ""}\'\n'
+    )
+    argv = _run(repo, tmp_path, "--only", "issue", body=_body(), issue=_OPEN_ISSUE, certify=stub)
+    _code, report = _report(capsys, argv)
+    _assert_certify_unavailable(_check(report, "issue"))
+
+
+def test_certify_live_check_stale_exit_one_is_stale_not_unavailable(
+    repo, tmp_path, capsys, monkeypatch
+):
+    payload = json.dumps({
+        "issue_marker": f"<!-- NEXUS_CORE_EVIDENCE_UNIVERSE: {MARKER} -->",
+        "issue_check": {"status": "STALE"},
+    })
+    stub = _certify_script(
+        tmp_path,
+        'if [ "$2" = "--help" ]; then echo "usage: markers [--json] [--check]"; exit 0; fi\n'
+        f"cat <<'EOF'\n{payload}\nEOF\nexit 1\n",
+    )
+    stale = {"state": "OPEN", "body": f"<!-- NEXUS_CORE_EVIDENCE_UNIVERSE: {OTHER_MARKER} -->"}
+    monkeypatch.setattr(pf, "_fetch_issue", lambda ctx, issue: stale)
+    argv = _run(repo, tmp_path, "--only", "issue", body=_body(), certify=stub)
+    _code, report = _report(capsys, argv)
+    check = _check(report, "issue")
+    assert (check["status"], check["code"]) == ("FAIL", pf.ISSUE_EVIDENCE_UNIVERSE_STALE)
+
+
+def test_certify_valid_marker_unchanged(repo, tmp_path, capsys, fake_certify):
+    issue = {"state": "OPEN", "body": f"<!-- NEXUS_CORE_EVIDENCE_UNIVERSE: {MARKER} -->\n"}
+    argv = _run(repo, tmp_path, "--only", "issue", body=_body(), issue=issue, certify=fake_certify)
+    _code, report = _report(capsys, argv)
+    check = _check(report, "issue")
+    assert (check["status"], check["code"]) == ("PASS", "")
 
 
 # --------------------------------------------- freshness and git identity
@@ -303,16 +524,163 @@ def _make_behind(repo: Path) -> None:
     _git(repo, "checkout", "-q", "feature")
 
 
-def test_branch_behind_main_fails_freshness_and_identity(repo, tmp_path, capsys):
+def test_single_merge_base_behind_tip_passes_core_and_fails_executor(repo, tmp_path, capsys):
+    """Behind but disjoint: Core and (since option (b), 2026-10-13) the executor accept it.
+
+    The id predates the executor's merge-base rule; the body now asserts that a
+    head behind the tip with one merge-base and no overlap is INFO + PASS.
+    """
     _make_behind(repo)
     argv = _run(repo, tmp_path, "--only", "freshness,git_identity")
     code, report = _report(capsys, argv)
     fresh = _check(report, "freshness")
-    assert code == 1
-    assert fresh["code"] == pf.BASE_REF_NOT_ANCESTOR
+    assert fresh["status"] == "INFO"
+    assert fresh["code"] == ""
+    assert "behind origin/main by 1" in fresh["detail"]
     assert fresh["data"]["behind"] == 1
-    assert "no force-push" in fresh["fix"]
-    assert _check(report, "git_identity")["code"] == pf.EXECUTOR_GIT_IDENTITY_MISMATCH
+    assert len(fresh["data"]["merge_bases"]) == 1
+    identity = _check(report, "git_identity")
+    assert (identity["status"], identity["code"]) == ("PASS", "")
+    assert identity["data"]["merge_base"] == fresh["data"]["merge_bases"][0]
+    assert identity["data"]["overlap"] == []
+    assert code == 0
+
+
+def _make_behind_touching(repo: Path, rel: str, *, pr_too: bool) -> None:
+    if pr_too:
+        _write(repo, rel, "# pr edit\n")
+        _commit(repo, "pr touches " + rel)
+    _git(repo, "checkout", "-q", "main")
+    _write(repo, rel, "# main edit\n")
+    moved = _commit(repo, "main touches " + rel)
+    _git(repo, "update-ref", "refs/remotes/origin/main", moved)
+    _git(repo, "checkout", "-q", "feature")
+
+
+@pytest.mark.parametrize(
+    ("rel", "pr_too"),
+    [
+        ("docs/shared.md", True),
+        ("tests/golden_behavior/corpus.py", False),
+        ("tests/ops/test_select_tests.py", False),
+        ("pytest.ini", False),
+        ("tests/conftest.py", False),
+        ("scripts/ops/__init__.py", False),
+        ("tests/contracts/test_witness.py", False),
+    ],
+)
+def test_behind_with_overlap_fails_executor_identity(repo, tmp_path, capsys, rel, pr_too):
+    _git(repo, "checkout", "-q", "main")
+    _write(repo, "tests/contracts/test_witness.py", "def test_witness():\n    pass\n")
+    _write(
+        repo,
+        "tests/golden_behavior/corpus.py",
+        'CASES = ("tests/contracts/test_witness.py::test_witness",)\n',
+    )
+    fork = _commit(repo, "witness corpus")
+    _git(repo, "update-ref", "refs/remotes/origin/main", fork)
+    _git(repo, "checkout", "-q", "feature")
+    _git(repo, "merge", "-q", "--no-edit", "--no-verify", "main")
+    _make_behind_touching(repo, rel, pr_too=pr_too)
+    code, report = _report(capsys, _run(repo, tmp_path, "--only", "freshness,git_identity"))
+    assert _check(report, "freshness")["status"] == "INFO"
+    identity = _check(report, "git_identity")
+    assert (identity["status"], identity["code"]) == ("FAIL", pf.MAIN_MOVED_OVER_GATE_SURFACE)
+    assert rel in identity["data"]["overlap"]
+    assert "git merge origin/main" in identity["fix"]
+    assert "no force-push" in identity["fix"]
+    assert code == 1
+
+
+def test_git_identity_fails_on_criss_cross_merge_bases(repo, tmp_path, capsys):
+    base = _git(repo, "rev-parse", "origin/main")
+    for name in ("x", "y"):
+        _git(repo, "checkout", "-q", "-b", name, base)
+        _write(repo, f"docs/{name}.md", name)
+        _commit(repo, name)
+    _git(repo, "checkout", "-q", "-b", "tip", "x")
+    _git(repo, "merge", "-q", "--no-ff", "--no-verify", "-m", "tip", "y")
+    _git(repo, "update-ref", "refs/remotes/origin/main", _git(repo, "rev-parse", "HEAD"))
+    _git(repo, "checkout", "-q", "-b", "head", "y")
+    _git(repo, "merge", "-q", "--no-ff", "--no-verify", "-m", "head", "x")
+    _code, report = _report(capsys, _run(repo, tmp_path, "--only", "git_identity"))
+    identity = _check(report, "git_identity")
+    assert (identity["status"], identity["code"]) == ("FAIL", pf.EXECUTOR_GIT_IDENTITY_MISMATCH)
+    assert "2 merge-bases" in identity["detail"]
+
+
+def test_git_identity_follows_an_older_base_anchor_without_merge_base_rule(
+    repo, tmp_path, capsys, monkeypatch
+):
+    """Before this rule lands on main, CI still runs main's tip-as-ancestor executor."""
+    real = pf._load_trusted_module
+
+    class _OldAnchor:
+        def __init__(self, module):
+            self._executor_archive_filter = module._executor_archive_filter
+            self._extracted_test_tree = module._extracted_test_tree
+
+    def _load(ctx, path):
+        module = real(ctx, path)
+        return _OldAnchor(module) if path == pf.TRUSTED_ANCHOR_PATH else module
+
+    monkeypatch.setattr(pf, "_load_trusted_module", _load)
+    _make_behind(repo)
+    _code, report = _report(capsys, _run(repo, tmp_path, "--only", "git_identity"))
+    identity = _check(report, "git_identity")
+    assert (identity["status"], identity["code"]) == ("FAIL", pf.EXECUTOR_GIT_IDENTITY_MISMATCH)
+    assert "not an ancestor" in identity["detail"]
+    assert "no force-push" in identity["fix"]
+
+
+def test_behind_alone_never_fails_when_only_core_runs(repo, tmp_path, capsys):
+    _make_behind(repo)
+    code, report = _report(capsys, _run(repo, tmp_path, "--only", "freshness"))
+    assert code == 0
+    assert report["status"] == "PASS"
+
+
+def test_criss_cross_multiple_merge_bases_fails_core(repo, tmp_path, capsys):
+    base = _git(repo, "rev-parse", "origin/main")
+    for name in ("x", "y"):
+        _git(repo, "checkout", "-q", "-b", name, base)
+        _write(repo, f"docs/{name}.md", name)
+        _commit(repo, name)
+    _git(repo, "checkout", "-q", "-b", "tip", "x")
+    _git(repo, "merge", "-q", "--no-ff", "--no-verify", "-m", "tip", "y")
+    _git(repo, "update-ref", "refs/remotes/origin/main", _git(repo, "rev-parse", "HEAD"))
+    _git(repo, "checkout", "-q", "-b", "head", "y")
+    _git(repo, "merge", "-q", "--no-ff", "--no-verify", "-m", "head", "x")
+    code, report = _report(capsys, _run(repo, tmp_path, "--only", "freshness"))
+    fresh = _check(report, "freshness")
+    assert code == 1
+    assert (fresh["status"], fresh["code"]) == ("FAIL", pf.BASE_REF_NOT_ANCESTOR)
+    assert "has 2 merge-bases with" in fresh["detail"]
+
+
+def test_unrelated_history_fails_core(repo, tmp_path, capsys):
+    _git(repo, "checkout", "-q", "--orphan", "orphan")
+    _write(repo, "other.md", "x")
+    _commit(repo, "orphan")
+    _code, report = _report(capsys, _run(repo, tmp_path, "--only", "freshness"))
+    fresh = _check(report, "freshness")
+    assert (fresh["status"], fresh["code"]) == ("FAIL", pf.BASE_REF_NOT_ANCESTOR)
+    assert "shares no history with" in fresh["detail"]
+
+
+def test_executor_still_requires_tip_ancestor_in_trusted_anchor():
+    """Guard: preflight mirrors the executor's rule; if it changes, preflight must follow.
+
+    The id predates option (b) (2026-10-13): the executor now requires exactly one
+    merge-base, bound as manifest["merge_base_sha"], plus the gate-surface check.
+    """
+    source = (ROOT / pf.TRUSTED_ANCHOR_PATH).read_text(encoding="utf-8")
+    assert '"merge-base", "--all", manifest["base_sha"], manifest["head_sha"]' in source
+    assert "merge_bases.stdout.split() != [expected_merge_base]" in source
+    assert "executor Git identity mismatch" in source
+    assert "def _gate_surface_overlap(" in source
+    assert "def _main_moved_overlap(" in source
+    assert '"merge-base", "--is-ancestor"' not in source
 
 
 def test_fresh_branch_passes_freshness_and_identity(repo, tmp_path, capsys):
@@ -379,15 +747,16 @@ def test_static_gate_without_python_change_passes_without_tools(repo, tmp_path, 
     assert _check(report, "static_pyright")["status"] == "PASS"
 
 
-def test_static_gate_with_change_but_no_tool_skips(repo, tmp_path, capsys):
+def test_static_gate_with_change_but_no_tool_fails(repo, tmp_path, capsys):
     _write(repo, "nexus/mod.py", "VALUE = 2\n")
     _commit(repo, "change python")
     argv = ["--repo", str(repo), "--no-fetch", "--json", "--only", "static_bandit"]
     argv += ["--tools-venv", str(tmp_path / "missing-venv")]
     _code, report = _report(capsys, argv)
     check = _check(report, "static_bandit")
-    assert check["status"] == "SKIP"
-    assert "uv sync" in check["fix"]
+    assert (check["status"], check["code"]) == ("FAIL", pf.STATIC_TOOL_MISSING)
+    assert "uv sync --frozen" in check["fix"]
+    assert _code == 1
 
 
 # ------------------------------------------------------- output and drift
@@ -446,3 +815,48 @@ def test_trusted_scripts_are_loaded_from_base_not_head(repo, tmp_path, capsys):
     _commit(repo, "tamper with gate")
     _code, report = _report(capsys, _run(repo, tmp_path, "--only", "bindings", body=_body()))
     assert _check(report, "bindings")["status"] == "PASS"
+
+
+# ------------------------------------------ trusted-config evidence universe
+
+
+def _universe_workflow(repo: Path, mode_line: str) -> None:
+    _write(
+        repo,
+        pf.CERTIFY_PIN_WORKFLOW,
+        f'steps:\n  with:\n    nexus-certify-ref: "{PIN}"\n{mode_line}',
+    )
+    _commit(repo, "universe mode")
+
+
+def test_trusted_config_universe_skips_marker_comparison(repo, tmp_path, capsys, monkeypatch):
+    _universe_workflow(repo, "    evidence-universe: trusted-config\n")
+    monkeypatch.delenv("NEXUS_CERTIFY", raising=False)
+    # Neither a certify tool nor an Issue marker is needed in this mode.
+    monkeypatch.setattr(pf.shutil, "which", lambda name: None)
+    argv = _run(repo, tmp_path, "--only", "issue", body=_body(), issue=_OPEN_ISSUE)
+    code, report = _report(capsys, argv)
+    check = _check(report, "issue")
+    assert code == 0
+    assert (check["status"], check["code"]) == ("PASS", "")
+    assert "derived from trusted base config" in check["detail"]
+
+
+def test_trusted_config_universe_still_requires_open_issue(repo, tmp_path, capsys):
+    _universe_workflow(repo, "    evidence-universe: trusted-config\n")
+    argv = _run(repo, tmp_path, "--only", "issue", body=_body(), issue={"state": "CLOSED"})
+    _code, report = _report(capsys, argv)
+    check = _check(report, "issue")
+    assert (check["status"], check["code"]) == ("FAIL", pf.ISSUE_NOT_OPEN)
+
+
+def test_issue_marker_universe_workflow_keeps_marker_comparison(
+    repo, tmp_path, capsys, fake_certify
+):
+    _universe_workflow(repo, "    evidence-universe: issue-marker\n")
+    argv = _run(
+        repo, tmp_path, "--only", "issue", body=_body(), issue=_OPEN_ISSUE, certify=fake_certify
+    )
+    _code, report = _report(capsys, argv)
+    check = _check(report, "issue")
+    assert (check["status"], check["code"]) == ("FAIL", pf.ISSUE_MISSING_EVIDENCE_UNIVERSE)

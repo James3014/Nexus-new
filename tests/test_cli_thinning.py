@@ -59,7 +59,7 @@ def test_command_service_feature_params(tmp_path):
 
     mock_engine.run_feature.assert_called_once_with(
         task="新增 SSO",
-        context={"delivery_mode": "standard"},
+        context={"delivery_mode": "standard", "benchmark_run": True},
         domain="auth",
         dry_run=True,
         skill="coding",
@@ -145,3 +145,8 @@ def test_command_service_high_delivery_uses_rust_suggestions(tmp_path):
 
         assert ok is False
         assert seen["commands"] == ["cargo test --manifest-path nexus-core/Cargo.toml"]
+
+
+# ARCHIVED 2026-10-13 legacy-engine: this file tests (in whole or in part) modules archived with
+# the legacy NexusEngine (nexus.app.command_service); see ARCHIVED_2026-10-13-legacy-engine.md.
+# It keeps running with unchanged node ids until the deletion PR removes it with those modules.

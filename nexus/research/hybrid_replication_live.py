@@ -11,6 +11,7 @@ import io
 import json
 import os
 import re
+import signal
 import subprocess  # nosec B404
 import sys
 import tarfile
@@ -40,6 +41,7 @@ CANONICAL_AGY_DISPATCH_SHA256 = "cd2b6a2bfdd4466434da529a5b6bb47914131c0fc4cb6c3
 CANONICAL_AGY_EXECUTION_GENERATION = "AGY_GEMINI_3_8_FLASH_MEDIUM_V11"
 AGY_EXECUTION_GENERATION_PATTERN = re.compile(r"^AGY_[A-Z0-9_]+_V\d+$")
 AGY_PROVIDER_TERMINAL_GRACE_SECONDS = 30.0
+AGY_TERMINATION_GRACE_SECONDS = 5.0
 MAX_AGY_PROVIDER_OUTPUT_BYTES = 5_000_000
 AGY_RAW_RECEIPT_SCHEMA = "nexus.hybrid_replication.agy_live_raw.v1"
 AGY_SHADOW_CANDIDATE_SCHEMA = "nexus.hybrid_replication.agy_shadow_candidate.v1"
@@ -1043,13 +1045,9 @@ def _run_codex_candidate(
     with tempfile.TemporaryDirectory(prefix="nexus-hybrid-replication-c-") as temp:
         root = Path(temp)
         source = root / "source"
-        added = _run(
-            ["git", "worktree", "add", "--detach", str(source), revision],
-            cwd=repo,
-            timeout=60,
-        )
-        if added.returncode != 0:
-            raise RuntimeError(f"shadow_worktree_add_failed:{added.stderr.strip()}")
+        # Isolated clone (not a worktree): a worktree shares the parent's refs and
+        # object store, so the agent could read branches that postdate the revision.
+        _prepare_shadow_checkout(repo=repo, revision=revision, source=source)
         try:
             schema_path = root / "schema.json"
             output_path = root / "last.json"
@@ -1165,12 +1163,7 @@ def _run_codex_candidate(
                 wall,
             )
         finally:
-            _run(
-                ["git", "worktree", "remove", "--force", str(source)],
-                cwd=repo,
-                timeout=60,
-            )
-            _run(["git", "worktree", "prune"], cwd=repo, timeout=30)
+            pass
 
 
 def _b_fallback_prompt(
@@ -1500,6 +1493,85 @@ def seal_shadow_candidate(
     }
 
 
+def _agy_operation_process_groups(*records: Mapping[str, Any] | None) -> tuple[int, ...]:
+    """Process groups owned by one dispatcher operation (supervisor and provider)."""
+    own = os.getpgrp()
+    groups: list[int] = []
+    for record in records:
+        if not isinstance(record, Mapping):
+            continue
+        pid = record.get("pid")
+        if isinstance(pid, int) and pid > 1:
+            try:
+                leads_group = os.getpgid(pid) == pid
+            except OSError:
+                leads_group = False
+            # The supervisor is spawned with start_new_session, so it leads its group.
+            if leads_group:
+                groups.append(pid)
+        provider_pgid = record.get("provider_pgid")
+        if isinstance(provider_pgid, int) and provider_pgid > 1:
+            groups.append(provider_pgid)
+    return tuple(dict.fromkeys(g for g in groups if g != own))
+
+
+def _signal_groups(groups: Sequence[int], sig: int) -> None:
+    for pgid in groups:
+        try:
+            os.killpg(pgid, sig)
+        except (ProcessLookupError, PermissionError):
+            continue
+
+
+def _groups_alive(groups: Sequence[int]) -> bool:
+    for pgid in groups:
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            continue
+        except PermissionError:
+            pass  # macOS reports EPERM for zombie-only groups; ps decides below
+        # A group holding only zombies is gone for our purposes.
+        rows = _run(["ps", "-A", "-o", "pgid=,stat="], timeout=15).stdout.splitlines()
+        for row in rows:
+            parts = row.split()
+            if len(parts) >= 2 and parts[0] == str(pgid) and not parts[1].startswith("Z"):
+                return True
+    return False
+
+
+def terminate_agy_operation(
+    operation_json: Path,
+    *,
+    initial: Mapping[str, Any] | None = None,
+    grace_seconds: float = AGY_TERMINATION_GRACE_SECONDS,
+) -> bool:
+    """SIGTERM then SIGKILL the dispatcher/provider process groups; True once all are gone.
+
+    Called when the harness deadline passes so nothing keeps writing to the source
+    tree after the candidate is sealed (#1216 V12: deadline must be total).
+    """
+    current: dict[str, Any] | None = None
+    try:
+        loaded = json.loads(operation_json.read_text(encoding="utf-8"))
+        current = loaded if isinstance(loaded, dict) else None
+    except (OSError, json.JSONDecodeError):
+        current = None
+    groups = _agy_operation_process_groups(current, initial)
+    if not groups:
+        return True
+    _signal_groups(groups, signal.SIGTERM)
+    end = time.monotonic() + max(0.0, grace_seconds)
+    while time.monotonic() < end and _groups_alive(groups):
+        time.sleep(0.05)
+    if _groups_alive(groups):
+        _signal_groups(groups, signal.SIGKILL)
+        end = time.monotonic() + 5.0
+        while time.monotonic() < end and _groups_alive(groups):
+            time.sleep(0.05)
+    return not _groups_alive(groups)
+
+
 def _run_agy_dispatch(
     *,
     cwd: Path,
@@ -1617,6 +1689,17 @@ def _run_agy_dispatch(
         timeout=effective_poll_timeout,
         poll_interval=poll_interval,
     )
+    if timed_out:
+        # Harness deadline passed: stop the dispatcher before anyone seals the source
+        # tree. Callers seal only after this function returns.
+        gone = terminate_agy_operation(operation_json, initial=initial)
+        if not gone:
+            err = "DISPATCH_PROCESS_GROUP_SURVIVED_KILL"
+        else:
+            try:
+                record = json.loads(operation_json.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                pass
     if prospective_guard is not None and record is not None:
         prospective_guard.observe_provider_start(slot=effect_slot, record=record)
     wall = time.perf_counter() - started
@@ -1630,37 +1713,40 @@ def _prepare_shadow_checkout(
     source: Path,
     default_branch: str = "main",
 ) -> None:
-    cloned = _run(
-        ["git", "clone", "--no-local", "--no-checkout", str(repo), str(source)],
-        cwd=repo.parent,
-        timeout=60,
-    )
-    if cloned.returncode != 0:
-        raise RuntimeError(f"shadow_clone_failed:{cloned.stderr.strip()}")
-    checked = _run(["git", "checkout", "--detach", revision], cwd=source, timeout=60)
-    if checked.returncode == 0:
-        return
+    """Materialize only ``revision`` and its ancestry for the agent (#1216 V12).
 
-    source_ref = f"refs/remotes/origin/{default_branch}"
-    hydrated_ref = f"refs/remotes/source-origin/{default_branch}"
+    A clone or worktree of ``repo`` carries every ref of the origin repo (V11: 335 refs,
+    including the human fix branch of the task). Instead fetch exactly the captured commit
+    into a fresh repository: no remote, no refs, no tags, and no later objects exist.
+    ``default_branch`` is kept for call compatibility; any commit present in ``repo``
+    (local or remote-tracking) can be fetched by id.
+    """
+    del default_branch
+    source.mkdir(parents=True, exist_ok=False)
+    initialized = _run(["git", "init", "-q"], cwd=source, timeout=60)
+    if initialized.returncode != 0:
+        raise RuntimeError(f"shadow_init_failed:{initialized.stderr.strip()}")
     fetched = _run(
-        [
-            "git",
-            "fetch",
-            "--no-tags",
-            str(repo),
-            f"+{source_ref}:{hydrated_ref}",
-        ],
+        ["git", "fetch", "-q", "--no-tags", "--update-shallow", str(repo), revision],
         cwd=source,
-        timeout=60,
+        timeout=300,
     )
     if fetched.returncode != 0:
-        raise RuntimeError(
-            f"shadow_revision_hydration_failed:{source_ref}:{fetched.stderr.strip()}"
-        )
-    checked = _run(["git", "checkout", "--detach", revision], cwd=source, timeout=60)
+        raise RuntimeError(f"shadow_revision_fetch_failed:{revision}:{fetched.stderr.strip()}")
+    checked = _run(
+        ["git", "-c", "advice.detachedHead=false", "checkout", "-q", "--detach", revision],
+        cwd=source,
+        timeout=120,
+    )
     if checked.returncode != 0:
         raise RuntimeError(f"shadow_checkout_failed:{checked.stderr.strip()}")
+    git_dir = Path(_git(source, "rev-parse", "--absolute-git-dir").strip())
+    (git_dir / "FETCH_HEAD").unlink(missing_ok=True)
+    head = _git(source, "rev-parse", "HEAD").strip()
+    if head != revision:
+        raise RuntimeError("shadow_isolation_head_mismatch")
+    if _git(source, "for-each-ref").strip() or _git(source, "remote").strip():
+        raise RuntimeError("shadow_isolation_refs_remain")
 
 
 @contextmanager

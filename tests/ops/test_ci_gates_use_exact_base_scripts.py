@@ -85,6 +85,20 @@ def test_secret_audit_scanner_comes_from_base_sha_with_pr_head_binding() -> None
     assert 'p["published_ref_snapshot_sha256"] == sys.argv[2]' in scan["run"]
 
 
+def test_secret_audit_pr_scope_is_main_plus_pr_head_but_full_scan_elsewhere() -> None:
+    steps = _steps("git-history-secret-audit.yml")
+    fetch = next(s for s in steps if s.get("name", "").startswith("Fetch every published"))
+    run = fetch["run"]
+    pr_branch, full_branch = run.split("head_refspec=", 2)[1:3]
+    # PR runs: only main and the PR head, so other branches cannot block a PR.
+    assert pr_branch.startswith("'+refs/heads/main:refs/remotes/origin/main'")
+    assert "tag_refspecs=()" in pr_branch and "scan_tags=false" in pr_branch
+    # push / nightly / manual runs: every published branch and tag.
+    assert full_branch.startswith("'+refs/heads/*:refs/remotes/origin/*'")
+    assert "'+refs/tags/*:refs/tags/*'" in full_branch and "scan_tags=true" in full_branch
+    assert run.index("head_refspec=") < run.index("gfetch fetch --force --prune")
+
+
 def test_exact_base_tool_gate_classifies_with_base_copy() -> None:
     for workflow in ("lint.yml", "security.yml", "typecheck.yml", "wiki-governance.yml"):
         runs = [step.get("run", "") for step in _steps(workflow)]

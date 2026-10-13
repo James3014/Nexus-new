@@ -454,7 +454,7 @@ except Exception:
 
 
 def pytest_collection_modifyitems(config, items):
-    # Nightly-only explicit quarantine list (tests/nightly_quarantine_entries.py, Refs #1897).
+    # Nightly-only explicit quarantine list (one module per entry in tests/nightly_quarantine_items/, Refs #1897).
     from tests import nightly_quarantine as quarantine
 
     if quarantine.quarantine_enabled():

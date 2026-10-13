@@ -219,3 +219,54 @@ def test_duplicate_provider_identity_is_rejected(tmp_path: Path) -> None:
     assert "DISPLAY_LABEL_DUPLICATE" in second.stderr
     state = json.loads((tmp_path / "pool" / "state.json").read_text())
     assert sorted(state["accounts"]) == ["grok-02"]
+
+
+def test_host_readback_reports_bound_owner_without_raw_machine_identity(tmp_path: Path) -> None:
+    onboard = _run(tmp_path, "onboard", "--alias", "grok-02")
+    assert onboard.returncode == 0
+
+    host = _run(tmp_path, "host", "--json")
+    assert host.returncode == 0, host.stderr + host.stdout
+    payload = json.loads(host.stdout)
+    assert payload["schema"] == "nexus.grok_pool_host_binding.v1"
+    assert payload["status"] == "BOUND"
+    assert payload["matches"] is True
+    assert len(payload["owner_host_id_hash"]) == 64
+    assert payload["owner_host_id_hash"] == payload["current_host_id_hash"]
+
+
+def test_wrong_host_binding_blocks_inventory_before_provider_probe(tmp_path: Path) -> None:
+    onboard = _run(tmp_path, "onboard", "--alias", "grok-02")
+    assert onboard.returncode == 0
+    state_path = tmp_path / "pool" / "state.json"
+    state = json.loads(state_path.read_text())
+    state["host_binding"]["host_id_hash"] = "0" * 64
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+
+    listed = _run(tmp_path, "list", "--json")
+    assert listed.returncode == 2
+    assert "GROK_ACCOUNT_POOL_HOST_MISMATCH" in listed.stderr
+
+
+def test_help_documents_software_sync_vs_credential_ownership(tmp_path: Path) -> None:
+    proc = _run(tmp_path, "--help")
+
+    assert proc.returncode == 0
+    assert "host-sync moves Nexus software/configuration only" in proc.stdout
+    assert "credential-owning host" in proc.stdout
+    assert "Cross-host shared-account leasing" in proc.stdout
+
+
+def test_wrong_host_onboard_fails_before_device_login(tmp_path: Path) -> None:
+    first = _run(tmp_path, "onboard", "--alias", "grok-02")
+    assert first.returncode == 0
+    state_path = tmp_path / "pool" / "state.json"
+    state = json.loads(state_path.read_text())
+    state["host_binding"]["host_id_hash"] = "0" * 64
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+
+    second = _run(tmp_path, "onboard", "--alias", "grok-03")
+
+    assert second.returncode == 2
+    assert "GROK_ACCOUNT_POOL_HOST_MISMATCH" in second.stderr
+    assert "TEST-CODE" not in second.stdout

@@ -1,0 +1,27 @@
+{
+  "archive": {
+    "commit": "3976f1d0fc3e81870132cca4b7c7399a3b2e8cd5",
+    "ref": "refs/heads/archive/2026-10-13-second-batch"
+  },
+  "companion_changes": [
+    {
+      "after_oid": "4cbf24df3699ab54b0cd97b0410e1de838320037",
+      "change_type": "MODIFY",
+      "path": ".github/workflows/nexus-core-issue-completion.yml"
+    },
+    {
+      "after_oid": "b2df61a3c03cc39634c1e7d6675d5d27b224dea6",
+      "change_type": "MODIFY",
+      "path": "nexus/orchestrator/canonical_core_transport.py"
+    },
+    {
+      "after_oid": "0c8c6490d3bdcc3cd0886ff876443dbe693205c4",
+      "change_type": "MODIFY",
+      "path": "tests/nexus/orchestrator/test_canonical_core_transport.py"
+    }
+  ],
+  "deletions": [],
+  "id": "2026-10-13-core-pin-b245430b-trusted-universe",
+  "reason": "Owner-authorized change of protected path .github/workflows/nexus-core-issue-completion.yml: move the nexus-core gate pins from a0d22e8 to b245430b (nexus-core #254) and set issue-gate evidence-universe: trusted-config so Issues no longer carry the NEXUS_CORE_EVIDENCE_UNIVERSE marker, with CANONICAL_CORE_REVISION and its test constant; no deletions",
+  "schema": "nexus.core.deletion-manifest.v1"
+}

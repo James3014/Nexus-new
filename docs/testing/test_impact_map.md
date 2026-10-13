@@ -35,6 +35,10 @@
 | .claude | tests/ops/test_claude_handoff_hooks.py | active | medium | claude_handoff_hook_contract |
 | HANDOFF.md | tests/ops/test_claude_handoff_hooks.py | active | medium | claude_handoff_hook_contract |
 | tests/ops/test_claude_handoff_hooks.py | tests/ops/test_claude_handoff_hooks.py | active | medium | test_contract |
+| .claude/hooks/core-precheck-on-stop.sh | tests/ops/test_nexus_core_precheck.py, tests/ops/test_claude_handoff_hooks.py | active | medium | core_precheck_stop_hook_contract |
+| .claude/settings.json | tests/ops/test_nexus_core_precheck.py, tests/ops/test_claude_handoff_hooks.py | active | medium | claude_stop_hook_registration_contract |
+| scripts/ops/nexus-core-precheck | tests/ops/test_nexus_core_precheck.py | active | medium | core_precheck_dispatch_status_contract |
+| tests/ops/test_nexus_core_precheck.py | tests/ops/test_nexus_core_precheck.py | active | medium | test_contract |
 | .gitignore | tests/ops/test_repository_secret_hygiene.py, tests/ops/test_select_tests.py | active | high | repository_secret_hygiene_contract |
 | .nexus-core/config.toml | tests/ops/test_select_tests.py, tests/ops/test_pr_impact_gate.py | active | high | nexus_core_completion_config_contract |
 | .agents/skills | tests/ops/test_skill_file_contract.py, tests/learning/test_skill_catalog.py, tests/learning/test_skill_schema.py, tests/ops/test_ci_gate_report_trust_audit.py | active | high | skill_artifact_contract_and_catalog_governance |
@@ -42,11 +46,20 @@
 | nexus/events | tests/events, tests/core/test_event_bus.py, tests/architecture/test_boundaries_v4.py | active | high | event_store_and_transport_contract |
 | nexus/feedback | tests/events, tests/unit/evaluation/test_policy_delta.py, tests/unit/committee/test_data_flow_v267.py, tests/architecture/test_boundaries_v3.py, tests/architecture/test_boundaries_v4.py | active | high | developer_feedback_contract |
 | nexus/committee/controller.py | tests/unit/committee/test_data_flow_v267.py, tests/research/test_candidate_evidence_committee_integration.py | active | high | candidate_evidence_committee_sidecar_contract |
+| nexus/committee/execution_verifier.py | tests/unit/committee/test_execution_verifier_sandbox.py, tests/services/test_capability_wiring_fixes_groupc.py, tests/unit/committee/test_data_flow_v267.py | active | high | committee_patch_execution_verifier_contract |
+| nexus/engine/sandboxed_lane.py | tests/unit/committee/test_execution_verifier_sandbox.py, tests/engine/test_swarm_run_sandbox.py, tests/engine/test_ultra_review_service.py, tests/services/test_capability_wiring_fixes_groupc.py | active | high | untrusted_code_sandbox_contract |
+| tests/unit/committee/test_execution_verifier_sandbox.py | tests/unit/committee/test_execution_verifier_sandbox.py | active | high | test_contract |
+| nexus/engine/swarm_run.py | tests/engine/test_swarm_run_sandbox.py, tests/services/test_capability_wiring_fixes_groupc.py | active | high | swarm_verify_sandbox_contract |
+| tests/engine/test_swarm_run_sandbox.py | tests/engine/test_swarm_run_sandbox.py | active | high | test_contract |
 | nexus/committee/diversity_sampler.py | tests/unit/committee/test_data_flow_v267.py, tests/architecture/test_boundaries_v4.py | active | high | issue51_proven_orphan_cleanup_contract |
 | nexus/env/diff_report.py | tests/architecture/test_boundaries_v3.py, tests/architecture/test_boundaries_v4.py | active | high | issue51_proven_orphan_cleanup_contract |
 | nexus/env/snapshot.py | tests/architecture/test_boundaries_v3.py, tests/architecture/test_boundaries_v4.py | active | high | issue51_proven_orphan_cleanup_contract |
 | nexus/policy/compatibility.py | tests/services/test_policy_gate.py, tests/architecture/test_boundaries_v3.py, tests/architecture/test_boundaries_v4.py | active | high | issue51_proven_orphan_cleanup_contract |
 | nexus/core | tests/core, tests/test_core_*.py | active | high | core_contract |
+| nexus/__init__.py | tests/core/test_layer_ports.py, tests/test_layer_boundaries.py | active | high | core_layer_port_binding_contract |
+| nexus/core/layer_ports.py | tests/core/test_layer_ports.py, tests/test_layer_boundaries.py | active | high | core_layer_port_binding_contract |
+| nexus/engine/core_ports.py | tests/core/test_layer_ports.py, tests/test_layer_boundaries.py | active | high | core_layer_port_binding_contract |
+| nexus/app/core_ports.py | tests/core/test_layer_ports.py, tests/test_layer_boundaries.py | active | high | core_layer_port_binding_contract |
 | nexus/core/belief_v02.py | tests/core/test_belief_v02.py | active | high | belief_v02_jsonl_contract |
 | nexus/memory | tests/unit/memory, tests/integration/test_v28_contract_sealing.py, tests/test_lab_only_deprecations.py | active | medium | lab_only_module_contract |
 | nexus/federation/fleet_manager.py | tests/federation, tests/test_lab_only_deprecations.py | active | medium | lab_only_module_contract |
@@ -75,8 +88,12 @@
 | nexus/orchestrator/worktree_manager.py | tests/nexus/orchestrator/test_worktree_manager.py, tests/nexus/orchestrator/test_self_hosted_task_service.py | active | high | target_ownership_release_contract |
 | nexus/services/external_intelligence_fanout.py | tests/services/test_external_intelligence_fanout.py, tests/services/test_open_swe_worker_transport.py | active | high | external_intelligence_fanout_contract |
 | nexus/services/open_swe_external_intelligence.py | tests/services/test_open_swe_external_intelligence.py, tests/services/test_open_swe_worker_transport.py | active | high | open_swe_external_intelligence_effect_projection_contract |
+| nexus/services/external_intelligence_core_binding.py | tests/services/test_external_intelligence_core_binding.py, tests/services/test_external_intelligence_fanout.py, tests/services/test_open_swe_worker_transport.py, tests/services/test_external_intelligence_closure.py | active | high | external_intelligence_core_mutation_binding_contract |
 | nexus/services | tests/services, tests/test_services_*.py | active | medium | service_contract |
+| nexus/cli | tests/services/test_archived_capabilities_2026_10_13.py | active | medium | archived_cli_commands_2026_10_13 |
+| nexus/evaluation/eval_harness.py | tests/services/test_archived_legacy_engine_2026_10_13.py | active | medium | archived_legacy_engine_2026_10_13 |
 | nexus/config/model_workforce.yaml | tests/contracts/test_model_workforce_policy.py, tests/services/test_model_workforce_policy_loader.py | active | medium | workforce_policy_contract |
+| nexus/config/model_three_arm_matrix.yaml | tests/contracts/test_model_workforce_policy.py, tests/calibration/provider_adoption/test_three_arm_wiring.py | active | medium | three_arm_benchmark_matrix |
 | nexus/calibration/provider_adoption | tests/calibration/provider_adoption/test_*.py, tests/bench/test_model_calibration_plan.py | active | high | provider_adoption_calibration_evidence_contract |
 | nexus/config/model_capability_lineage.yaml | tests/services/test_model_capability_lineage.py, tests/bench/test_model_calibration_plan.py, tests/nexus/orchestrator/test_unified_mcp_gateway.py | active | medium | model_capability_lineage_calibration_contract |
 | nexus/engine/capability_planner.py | tests/engine/test_capability_planner.py::test_capability_planner_emits_planned_skill_mount_contract_for_curated_skill | active | high | skill_mount_planner_contract |
@@ -92,6 +109,10 @@
 | nexus/engine/asi_constraints.py | tests/engine/test_asi_constraints.py::test_asi_constraint_extractor_orders_families_and_preserves_evidence_refs, tests/engine/test_asi_constraints.py | active | medium | asi_constraint_ordering_contract |
 | nexus/contracts/s2t_export.py | tests/contracts/test_s2t_contracts.py::test_s2t_agent_lightning_export_emits_preference_pairs, tests/contracts/test_s2t_contracts.py::test_s2t_export_selects_highest_scored_failed_rejected_candidate_stably | active | medium | s2t_export_ordering_contract |
 | nexus/contracts/hybrid_retrieval.py | tests/contracts/test_hybrid_retrieval.py | active | high | hybrid_retrieval_rrf_contract |
+| nexus/contracts/planner_snapshot_binding.py | tests/integration/test_local_heal_planner_snapshot_binding.py, tests/integration/test_abc_local_heal_shadow_seam.py, tests/integration/test_n31_fail_closed_local_heal_adapter.py | active | high | planner_snapshot_route_context_binding_contract |
+| nexus/engine/capability_executor_controls.py | tests/integration/test_local_heal_planner_snapshot_binding.py, tests/integration/test_abc_local_heal_shadow_seam.py, tests/engine/test_capability_routing_contracts.py | active | high | planner_snapshot_route_context_task_binding_contract |
+| nexus/engine/route_decision_adapter.py | tests/engine/test_capability_routing_contracts.py, tests/integration/test_local_heal_planner_snapshot_binding.py | active | high | route_decision_execution_plan_task_binding_contract |
+| nexus/services/local_heal/capability_adapter.py | tests/integration/test_local_heal_planner_snapshot_binding.py, tests/integration/test_n31_fail_closed_local_heal_adapter.py, tests/unit/local_heal/test_capability_adapter.py | active | high | local_heal_adapter_route_context_task_binding_contract |
 | tests/contracts/test_hybrid_retrieval.py | tests/contracts/test_hybrid_retrieval.py | active | medium | test_contract |
 | tests/nexus/executors/test_worker_effect_projection.py | tests/nexus/executors/test_worker_effect_projection.py | active | medium | test_contract |
 | tests/nexus/governance/test_capability_gate_authority_boundary.py | tests/nexus/governance/test_capability_gate_authority_boundary.py | active | medium | test_contract |
@@ -108,6 +129,7 @@
 | nexus/experiments/msa_routing/msa_indexer.py | tests/experiments/test_msa_routing.py | active | medium | msa_routing_contract |
 | nexus/research/flow/codeintel_context.py | tests/app/test_research_flow_service.py::test_codeintel_evidence_facade_delegates_to_leaf_module, tests/app/test_research_flow_service.py::test_codeintel_context_is_injected_into_task_text, tests/app/test_research_flow_service.py::test_codeintel_context_compact_mode_keeps_evidence_but_trims_payload, tests/app/test_research_flow_service.py::test_codeintel_dci_runs_only_for_evidence_heavy_lane, tests/app/test_research_flow_service.py::test_build_codeintel_evidence_reuses_run_cache_graph | active | high | research_codeintel_context_contract |
 | nexus/research/flow/auto_flow_executor.py | tests/research/test_auto_flow_executor.py, tests/app/test_research_flow_service.py::test_forced_hyper_skips_baseline_probe, tests/app/test_research_flow_service.py::test_hyper_guard_fallback_preserves_gateway_token_source, tests/app/test_research_flow_service.py::test_cross_module_hyper_failure_can_rescue_with_original_artifact_verification | active | high | auto_flow_executor_accounting_contract |
+| nexus/research/flow/unified_capability_projection.py | tests/research/test_unified_capability_projection.py, tests/research/test_auto_flow_executor.py, tests/research/test_auto_flow_baseline_report.py | active | high | unified_runtime_capability_receipt_binding_contract |
 | nexus/research/flow/auto_flow_payload.py | tests/research/test_auto_flow_payload.py, tests/app/test_research_flow_service.py::test_run_auto_flow_populates_autoreason_from_candidate_summaries | active | high | auto_flow_payload_contract |
 | nexus/research/flow/runtime_state.py | tests/research/test_flow_leaf_modules.py, tests/app/test_research_flow_service.py::test_run_auto_flow_populates_autoreason_from_candidate_summaries | active | medium | research_runtime_state_contract |
 | nexus/research/flow/runtime_decision.py | tests/research/test_flow_leaf_modules.py, tests/app/test_research_flow_service.py::test_run_auto_flow_populates_autoreason_from_candidate_summaries | active | high | research_runtime_decision_contract |
@@ -139,6 +161,7 @@
 | scripts/engine/commands/research_actions.py | tests/engine/test_research_actions.py | active | medium | research_cli_action_contract |
 | scripts/engine/commands/sandbox_actions.py | tests/engine/test_sandbox_actions.py | active | medium | sandbox_cli_action_and_physical_runner_contract |
 | scripts/engine/commands/stress_test.py | tests/engine/test_simulated_evaluation_honesty.py | active | medium | simulated_evaluation_honesty_contract |
+| scripts/local_heal/run_june_regression_pack.py | tests/unit/local_heal/test_june_regression_pack_env_scope.py, tests/integration/test_real_model_probe.py, tests/integration/test_june_regression_pack.py | active | medium | june_regression_pack_env_scope_contract |
 | scripts/engine/commands/swarm.py | tests/services/test_distill_swarm_honesty.py, tests/test_swarm_command_delivery.py | active | medium | swarm_tag_opt_in_contract |
 | tests/test_metabolism.py | tests/test_metabolism.py | active | medium | test_contract |
 | scripts/ui-validator.py | tests/engine/test_simulated_evaluation_honesty.py | active | medium | simulated_evaluation_honesty_contract |
@@ -170,10 +193,12 @@
 | scripts/ops/test_changed.sh | tests/ops/test_select_tests.py | active | medium | jit_entrypoint |
 | scripts/ops | tests/ops | active | medium | ops_tooling |
 | scripts/ci/nexus-core-verify.sh | tests/ops/test_select_tests.py, tests/ops/test_pr_impact_gate.py | active | high | nexus_core_completion_ci_entrypoint_contract |
+| scripts/ci/nexus_core_trusted_pin_policy.py | tests/ops/test_nexus_core_trusted_pin_policy.py, tests/ops/test_select_tests.py, tests/ops/test_pr_impact_gate.py | active | high | nexus_core_trusted_pin_maintenance_contract |
 | scripts/bench/capability_ab_runner.py | tests/benchmark/test_capability_ab_runner.py::test_run_with_nexus_subprocess_preserves_executor_receipts_without_llm, tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_accepts_causal_runtime_mount, tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_rejects_quarantined_mount | active | high | benchmark_contract |
 | scripts/bench/fixture_materialization.py | tests/benchmark/test_fixture_materialization.py | active | high | external_fixture_materialization_contract |
 | scripts/bench/public_lane_contract.py | tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_accepts_causal_runtime_mount, tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_rejects_quarantined_mount | active | high | benchmark_contract |
 | scripts/bench | tests/benchmark | active | medium | benchmark_contract |
+| scripts/local_heal/run_controlled_local_solve_fixture.py | tests/integration/test_controlled_local_solve_fixture_runner.py | active | high | local_heal_controlled_solve_fixture_contract |
 | nexus/learning/skill_catalog.py | tests/learning/test_skill_catalog.py, tests/ops/test_ci_gate_report_trust_audit.py | active | high | skill_catalog_governance |
 | nexus/learning/skill_fit_followup.py | tests/learning/test_skill_fit_ablation.py::test_skill_fit_row_index_groups_baselines_catalog_and_skill_rows_for_rca_and_cost, tests/learning/test_skill_fit_ablation.py::test_skill_fit_row_level_rca_recommends_targeted_replay_for_promising_governance_skill, tests/learning/test_skill_fit_ablation.py::test_skill_fit_cost_phase_contract_separates_cost_from_delivery_claims | active | high | skill_fit_row_index_contract |
 | tests/ops/test_ci_gate_report_trust_audit.py | tests/ops/test_ci_gate_report_trust_audit.py | active | medium | test_contract |
@@ -310,3 +335,8 @@
 | GEMINI.md | tests/ops/test_bootstrap_authority_files.py, tests/ops/test_bootstrap_context_budget.py, tests/ops/test_codex_task_context_index.py, tests/ops/test_fast_start_consumer_contract.py | active | medium | authority_text_context_budget_contract |
 | SOUL.md | tests/ops/test_bootstrap_authority_files.py, tests/ops/test_bootstrap_context_budget.py, tests/ops/test_codex_task_context_index.py, tests/ops/test_fast_start_consumer_contract.py | active | medium | authority_text_context_budget_contract |
 | docs/agents | tests/ops/test_bootstrap_authority_files.py, tests/ops/test_bootstrap_context_budget.py, tests/ops/test_codex_task_context_index.py, tests/ops/test_fast_start_consumer_contract.py | active | medium | authority_text_context_budget_contract |
+| scripts/ops/deletion_guard.py | tests/ops/test_deletion_guard.py | active | high | deletion_guard_owner_approval_contract |
+| tests/nightly_quarantine_items | tests/ops/test_nightly_quarantine.py, tests/ops/test_nightly_quarantine_items_layout.py | active | medium | nightly_quarantine_items_per_entry_package |
+| tests/ops/test_nightly_quarantine_items_layout.py | tests/ops/test_nightly_quarantine_items_layout.py | active | medium | test_contract |
+| tests/nightly_quarantine_entries.py | tests/ops/test_nightly_quarantine.py, tests/ops/test_nightly_quarantine_items_layout.py | active | medium | nightly_quarantine_entries_compat_shim |
+| nexus/core/policy_drift.py | tests/test_governance_telemetry_closure.py, tests/test_semantic_receipt_gate.py | active | medium | dual_gate_replay_artifact_location_contract |

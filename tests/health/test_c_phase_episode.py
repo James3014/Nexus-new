@@ -1,3 +1,4 @@
+from nexus.core.learning_steward import MIN_EVOLUTION_STEPS
 from nexus.core.policy_manager import PolicyManager
 from nexus.core.state_contracts import NexusState
 
@@ -9,6 +10,8 @@ def test_record_episode_prefers_pipeline_success_flag(tmp_path):
     state.metadata["pipeline_success"] = True
     state.metadata["last_review_status"] = "REJECTED"
     state.metadata["metabolizer_interval"] = 1
+    # Successful trajectories shorter than MIN_EVOLUTION_STEPS are frozen out of learning (low_step_trajectory).
+    state.metadata["trajectory_step_count"] = MIN_EVOLUTION_STEPS
 
     policy_path = tmp_path / ".nexus" / "knowledge" / "policy_memory.jsonl"
     policy_path.parent.mkdir(parents=True, exist_ok=True)
@@ -21,6 +24,7 @@ def test_record_episode_prefers_pipeline_success_flag(tmp_path):
     }
     with open(policy_path, "w", encoding="utf-8") as handle:
         import json
+
         handle.write(json.dumps(old_row) + "\n")
 
     pm.record_episode(state)
@@ -40,6 +44,8 @@ def test_record_episode_falls_back_to_review_status_when_flag_missing(tmp_path):
     state = NexusState(task_id="ep-success-2")
     state.health_score = 0.0
     state.metadata["last_review_status"] = "APPROVED"
+    # Successful trajectories shorter than MIN_EVOLUTION_STEPS are frozen out of learning (low_step_trajectory).
+    state.metadata["trajectory_step_count"] = MIN_EVOLUTION_STEPS
 
     pm.record_episode(state)
 

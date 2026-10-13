@@ -10,6 +10,7 @@ job allowed to run the packaged source.
 from __future__ import annotations
 
 import argparse
+import ast
 import copy
 import hashlib
 import json
@@ -25,7 +26,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = "trusted-deletion-anchor.v3"
+SCHEMA_VERSION = "trusted-deletion-anchor.v4"
 RUNTIME_SCHEMA_VERSION = "trusted-deletion-runtime.v2"
 WORKFLOW_PATH = ".github/workflows/trusted-deletion-anchor.yml"
 SHA_LENGTH = 40
@@ -47,7 +48,7 @@ TRUSTED_EXTERNAL_RUNTIME_PACKAGES: tuple[tuple[str, str, str, str], ...] = (
         "nexus-runtime",
         "nexus_runtime",
         "https://github.com/James3014/nexus-runtime.git",
-        "2766c154ae9fa129a5d8d6a38244276e77b453bc",
+        "6782e38a57360893285227f4d2a68d7c649d4319",
     ),
 )
 UV_VERSION = "uv 0.9.2"
@@ -256,6 +257,18 @@ TRUSTED_PR1908_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, s
         "09f17508d34972268d4c7cff6877c447cf8586eff8684bbbbc6170255ca368d4",
     ),
 )
+# Exact one-use, four-way binding for Owner-authorized PR #2016 (Issue #1932
+# agy_flash_38 Workforce default; nexus-runtime 2766c15 -> 6782e38, runtime #192).
+# Rebound after #1972 changed main pyproject.toml (adds the product package).
+TRUSTED_PR2016_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    2016,
+    (
+        "634340008a5adc2a608dc19c6fc34fee38b1773b2de78661327412c609e3820f",
+        "09f17508d34972268d4c7cff6877c447cf8586eff8684bbbbc6170255ca368d4",
+        "fa6c8ebbfac872fc59715a035158ab05c3141fcd2df5363f35ac623d57decef1",
+        "c00226cb36776992cb706c0b3d8727de67b3cdc28e1b9b92f95c89aac1c6d808",
+    ),
+)
 
 REQUIRED_EVIDENCE_KEYS = {
     "schema_version",
@@ -264,6 +277,7 @@ REQUIRED_EVIDENCE_KEYS = {
     "run_id",
     "base_sha",
     "head_sha",
+    "merge_base_sha",
     "base_tree",
     "head_tree",
     "test_tree",
@@ -287,6 +301,74 @@ REQUIRED_EVIDENCE_KEYS = {
     "golden_report",
     "executor",
 }
+
+
+# Gate-oracle surface (Owner-approved option (b), 2026-10-13).  The executor
+# runs the PR head, not the head merged with main, so a PR that is merely behind
+# main is admitted only when main has not moved, since the merge-base, over any
+# path that decides the gate's own verdict, nor over a path the PR changes.
+GATE_ORACLE_SURFACE_PATHS = frozenset({
+    "tests/ops/test_pr_impact_gate.py",
+    "tests/ops/test_select_tests.py",
+    "scripts/ops/run_golden_behavior_eval.py",
+    "scripts/ops/pr_impact_gate.py",
+    "scripts/ops/select_tests.py",
+    "docs/testing/test_impact_map.md",
+    ".nexus/test_impact_index.json",
+    "pyproject.toml",
+    "uv.lock",
+    "pytest.ini",
+    "conftest.py",
+    "product/__init__.py",
+})
+GATE_ORACLE_SURFACE_PREFIXES = ("tests/golden_behavior/", ".github/workflows/", ".nexus-core/")
+_GATE_ORACLE_TRUSTED_SCRIPT_RE = re.compile(r"scripts/ops/trusted_[^/]*\.py")
+# The pytest import chain: every conftest.py and package __init__.py under
+# tests/ or scripts/ can change what a witness or gate test observes.
+_GATE_ORACLE_IMPORT_CHAIN_RE = re.compile(r"(?:tests|scripts)/(?:.*/)?(?:conftest|__init__)\.py")
+GOLDEN_CORPUS_PATH = "tests/golden_behavior/corpus.py"
+_GOLDEN_WITNESS_RE = re.compile(r"(tests/[^\s:]+\.py)(?:::.*)?")
+MAIN_MOVED_OVER_GATE_SURFACE = "MAIN_MOVED_OVER_GATE_SURFACE"
+MERGE_BASE_NOT_UNIQUE = "MERGE_BASE_NOT_UNIQUE"
+
+
+def _is_gate_oracle_surface(path: str) -> bool:
+    return (
+        path in GATE_ORACLE_SURFACE_PATHS
+        or path.startswith(GATE_ORACLE_SURFACE_PREFIXES)
+        or _GATE_ORACLE_TRUSTED_SCRIPT_RE.fullmatch(path) is not None
+        or _GATE_ORACLE_IMPORT_CHAIN_RE.fullmatch(path) is not None
+    )
+
+
+def _golden_witness_paths(corpus_source: bytes) -> set[str]:
+    """Witness test files named by the Golden corpus, read as data (never imported)."""
+
+    if not corpus_source:
+        return set()
+    try:
+        tree = ast.parse(corpus_source)
+    except (SyntaxError, ValueError) as error:
+        raise ValueError(f"Golden corpus is not parseable: {error}") from None
+    paths = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            match = _GOLDEN_WITNESS_RE.fullmatch(node.value)
+            if match:
+                paths.add(match.group(1))
+    return paths
+
+
+def _gate_surface_overlap(main_delta: Any, pr_paths: Any, witness_paths: Any = ()) -> list[str]:
+    """Paths main changed since the merge-base that make a behind head unsafe."""
+
+    pr = set(pr_paths)
+    witnesses = set(witness_paths)
+    return sorted({
+        path
+        for path in main_delta
+        if _is_gate_oracle_surface(path) or path in pr or path in witnesses
+    })
 
 
 def _json(value: Any) -> bytes:
@@ -347,6 +429,7 @@ def _validate_trusted_dependency_contract(
         TRUSTED_PR1804_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR1857_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR1908_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR2016_DEPENDENCY_SNAPSHOT_TRANSITION,
     )
     for authorized_transition_record in authorized_transition_records:
         if authorized_transition_record is None:
@@ -779,12 +862,14 @@ def build_manifest(
     base_tree: str | None = None,
     head_tree: str | None = None,
     test_tree: str | None = None,
+    merge_base_sha: str,
 ) -> dict[str, Any]:
     """Create the controller's immutable, hash-bound manifest."""
 
     identity = _identity(event)
     base_sha = _exact_sha(_event_value(event, "pull_request", "base", "sha"), "base_sha")
     head_sha = _exact_sha(_event_value(event, "pull_request", "head", "sha"), "head_sha")
+    merge_base_sha = _exact_sha(merge_base_sha, "merge_base_sha")
     if not test_inventory or any(
         not isinstance(path, str) or not path.startswith("tests/") or ".." in Path(path).parts
         for path in test_inventory
@@ -801,6 +886,7 @@ def build_manifest(
         "run_id": identity["run_id"],
         "base_sha": base_sha,
         "head_sha": head_sha,
+        "merge_base_sha": merge_base_sha,
         "base_tree": base_tree,
         "head_tree": head_tree,
         "test_tree": test_tree,
@@ -874,7 +960,14 @@ def verify_evidence(
         )
         if any(marker in serialized for marker in credential_markers):
             raise ValueError("credential-bearing evidence")
-        for key in ("base_sha", "head_sha", "base_tree", "head_tree", "test_tree"):
+        for key in (
+            "base_sha",
+            "head_sha",
+            "merge_base_sha",
+            "base_tree",
+            "head_tree",
+            "test_tree",
+        ):
             if evidence[key] != manifest[key]:
                 raise ValueError(f"{key} mismatch")
         if (
@@ -1095,6 +1188,69 @@ def _canonical_raw_diff(repo: Path, base_sha: str, head_sha: str) -> bytes:
     return result
 
 
+def _unique_merge_base(repo: Path, base_sha: str, head_sha: str) -> str:
+    """Core's rule: the base tip and the head share exactly one merge-base."""
+
+    result = subprocess.run(
+        ["git", "-C", str(repo), "merge-base", "--all", base_sha, head_sha],
+        capture_output=True,
+        text=True,
+    )
+    bases = result.stdout.split() if result.returncode == 0 else []
+    if len(bases) != 1:
+        raise ValueError(
+            f"{MERGE_BASE_NOT_UNIQUE}: base and head share {len(bases)} merge-bases "
+            "(need exactly one)"
+        )
+    return _exact_sha(bases[0], "merge_base_sha")
+
+
+def _changed_paths(repo: Path, old: str, new: str) -> list[str]:
+    result = _git(repo, "diff", "--name-only", "-z", "--no-renames", old, new, binary=True)
+    assert isinstance(result, bytes)
+    return [path.decode() for path in result.split(b"\0") if path]
+
+
+def _blob_or_empty(repo: Path, revision: str, path: str) -> bytes:
+    result = subprocess.run(
+        ["git", "-C", str(repo), "show", f"{revision}:{path}"], capture_output=True
+    )
+    return result.stdout if result.returncode == 0 else b""
+
+
+def _main_moved_overlap(repo: Path, merge_base_sha: str, base_sha: str, head_sha: str) -> list[str]:
+    """Gate-relevant paths main changed between the merge-base and the base tip.
+
+    The Golden witnesses are read from the corpus at both the merge-base and the
+    base tip, so a witness main added, dropped or tightened is always covered.
+    """
+
+    if merge_base_sha == base_sha:
+        return []
+    witnesses = _golden_witness_paths(
+        _blob_or_empty(repo, merge_base_sha, GOLDEN_CORPUS_PATH)
+    ) | _golden_witness_paths(_blob_or_empty(repo, base_sha, GOLDEN_CORPUS_PATH))
+    return _gate_surface_overlap(
+        _changed_paths(repo, merge_base_sha, base_sha),
+        _changed_paths(repo, merge_base_sha, head_sha),
+        witnesses,
+    )
+
+
+def _require_main_not_moved_over_gate(
+    repo: Path, merge_base_sha: str, base_sha: str, head_sha: str
+) -> None:
+    """Fail closed when main moved over the gate-oracle surface or the PR's paths."""
+
+    overlap = _main_moved_overlap(repo, merge_base_sha, base_sha, head_sha)
+    if overlap:
+        shown = ", ".join(overlap[:5]) + (" ..." if len(overlap) > 5 else "")
+        raise ValueError(
+            f"{MAIN_MOVED_OVER_GATE_SURFACE}: merge origin/main; main changed "
+            f"{len(overlap)} gate-oracle or PR path(s) since the merge-base: {shown}"
+        )
+
+
 def _create_git_bundle(
     repo: Path, output: Path, base_sha: str, head_sha: str, workflow_sha: str
 ) -> bytes:
@@ -1145,7 +1301,10 @@ def _controller(args: argparse.Namespace) -> None:
         tree = _exact_sha(_git(repo, "rev-parse", f"{revision}^{{tree}}"), f"{label}_tree")
         _git(repo, "cat-file", "-e", f"{tree}^{{tree}}")
         trees[label] = tree
-    raw_diff = _canonical_raw_diff(repo, base_sha, head_sha)
+    merge_base_sha = _unique_merge_base(repo, base_sha, head_sha)
+    # Three-dot semantics: only what the PR changed since its merge-base, so a
+    # file main added after the fork is never reported as a PR deletion.
+    raw_diff = _canonical_raw_diff(repo, merge_base_sha, head_sha)
     inventory = _git(repo, "ls-tree", "-r", "--name-only", head_sha, "--", "tests", binary=False)
     assert isinstance(inventory, str)
     selected = [
@@ -1180,6 +1339,7 @@ def _controller(args: argparse.Namespace) -> None:
         pull_request_number=_event_value(event, "pull_request", "number"),
         head_product_init_is_regular=_tree_has_regular_file(repo, head_sha, "product/__init__.py"),
     )
+    _require_main_not_moved_over_gate(repo, merge_base_sha, base_sha, head_sha)
     requirements = (runtime_dir / "requirements.txt").read_bytes()
     runtime_archive = (runtime_dir / "runtime.tar").read_bytes()
     runtime_metadata = (runtime_dir / "runtime-metadata.json").read_bytes()
@@ -1234,6 +1394,7 @@ def _controller(args: argparse.Namespace) -> None:
         golden_corpus=golden_corpus,
         golden_test_corpus=golden_test_corpus,
         golden_topology=golden_topology,
+        merge_base_sha=merge_base_sha,
     )
     (output / "source.tar").write_bytes(source_archive)
     (output / "raw-diff.bin").write_bytes(raw_diff)
@@ -1248,6 +1409,7 @@ def _controller(args: argparse.Namespace) -> None:
         "workflow_identity": manifest["workflow_identity"],
         "base_sha": manifest["base_sha"],
         "head_sha": manifest["head_sha"],
+        "merge_base_sha": manifest["merge_base_sha"],
     }
     (output / "external-anchor.json").write_bytes(_json(external_anchor) + b"\n")
     (output / "trusted_deletion_anchor.py").write_bytes(Path(__file__).read_bytes())
@@ -1429,13 +1591,16 @@ def _prepare_executor_git_context(bundle: Path, source: Path, manifest: dict[str
         ):
             raise ValueError(f"executor Git ref mismatch: {ref}")
     _git(source, "update-ref", "--no-deref", "HEAD", manifest["head_sha"])
-    ancestry = subprocess.run(
-        ["git", "merge-base", "--is-ancestor", manifest["base_sha"], manifest["head_sha"]],
+    expected_merge_base = _exact_sha(manifest.get("merge_base_sha"), "merge_base_sha")
+    merge_bases = subprocess.run(
+        ["git", "merge-base", "--all", manifest["base_sha"], manifest["head_sha"]],
         cwd=source,
         capture_output=True,
+        text=True,
     )
     if (
-        ancestry.returncode != 0
+        merge_bases.returncode != 0
+        or merge_bases.stdout.split() != [expected_merge_base]
         or _git(source, "rev-parse", "HEAD") != manifest["head_sha"]
         or _git(source, "rev-parse", "HEAD^{tree}") != manifest["head_tree"]
         or _git(source, "rev-parse", f"{BASE_REF}^{{tree}}") != manifest["base_tree"]
@@ -1506,6 +1671,7 @@ def _verifier(args: argparse.Namespace) -> None:
         or anchor.get("workflow_identity") != expected_identity
         or anchor.get("base_sha") != args.expected_base_sha
         or anchor.get("head_sha") != args.expected_head_sha
+        or anchor.get("merge_base_sha") != manifest.get("merge_base_sha")
         or manifest.get("workflow_identity") != expected_identity
         or manifest.get("base_sha") != args.expected_base_sha
         or manifest.get("head_sha") != args.expected_head_sha
@@ -1548,9 +1714,18 @@ def _verifier(args: argparse.Namespace) -> None:
                 raise SystemExit(1)
             if _git(git_repo, "rev-parse", f"{ref}^{{commit}}") != revision:
                 raise SystemExit(1)
+        try:
+            recomputed_merge_base = _unique_merge_base(
+                git_repo, manifest["base_sha"], manifest["head_sha"]
+            )
+        except ValueError as error:
+            print(f"trusted verifier: {error}", file=sys.stderr)
+            raise SystemExit(1)
+        if recomputed_merge_base != manifest.get("merge_base_sha"):
+            raise SystemExit(1)
         recomputed_diff = _canonical_raw_diff(
             git_repo,
-            manifest["base_sha"],
+            recomputed_merge_base,
             manifest["head_sha"],
         )
         if recomputed_diff != (bundle / "raw-diff.bin").read_bytes():
@@ -1598,6 +1773,13 @@ def _verifier(args: argparse.Namespace) -> None:
             )
         except ValueError:
             raise SystemExit(1)
+        try:
+            _require_main_not_moved_over_gate(
+                git_repo, recomputed_merge_base, manifest["base_sha"], manifest["head_sha"]
+            )
+        except ValueError as error:
+            print(f"trusted verifier: {error}", file=sys.stderr)
+            raise SystemExit(1)
     status = verify_evidence(
         manifest,
         evidence,
@@ -1620,6 +1802,173 @@ def _verifier(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
+# Controller failure reason (#1974, #1895 rows 2-3).  The controller records a
+# fixed-schema reason when it fails; the default-branch verifier prints it and
+# still fails.  Everything read back is untrusted display data: only allowlisted
+# codes are honoured, the remedy always comes from this table, and the detail is
+# reduced to one bounded printable-ASCII line.  Nothing here can produce a pass.
+CONTROLLER_FAILURE_SCHEMA = "nexus.trusted_anchor_controller_failure.v1"
+CONTROLLER_FAILURE_DETAIL_LIMIT = 240
+CONTROLLER_FAILURE_FILE_LIMIT = 65536
+CONTROLLER_FAILURE_REMEDIES = {
+    "DEPENDENCY_CONTRACT_DRIFT": (
+        "merge origin/main into the PR branch; an intended pyproject.toml/uv.lock "
+        "change needs an authorized trusted dependency snapshot transition"
+    ),
+    MAIN_MOVED_OVER_GATE_SURFACE: (
+        "merge origin/main into the PR branch (no force-push) and push: main changed the "
+        "gate-oracle surface or this PR's own paths since the merge-base"
+    ),
+    MERGE_BASE_NOT_UNIQUE: (
+        "merge origin/main into the PR branch so it shares exactly one merge-base with "
+        "main (no criss-cross merges, no unrelated history)"
+    ),
+    "MERGE_LANE_BINDING_MISSING": (
+        "the PR body needs exactly one NEXUS_MERGE_LANE_V1 block from the Owner/authority "
+        "path (#1749/#1817); agents must not mint or copy one"
+    ),
+    "MERGE_LANE_BINDING_BLOCKED": (
+        "fix the NEXUS_MERGE_LANE_V1 binding problem named in the detail "
+        "(scripts/ops/trusted_merge_lane_gate.py)"
+    ),
+    "CONTROLLER_ERROR": (
+        "read the Trusted controller (default branch) job log; the controller failed "
+        "before publishing its bundle"
+    ),
+    "CONTROLLER_BOOTSTRAP_FAILED": (
+        "a bash step of the Trusted controller (default branch) job failed before the "
+        "Python controller could record a reason (fetch, runtime build, or self-test); "
+        "the detail names the step; read that step's log and re-run the job"
+    ),
+    "CONTROLLER_REASON_UNAVAILABLE": (
+        "read the Trusted controller (default branch) job log; it published no "
+        "machine-readable reason"
+    ),
+}
+_CONTROLLER_RECORDED_CODES = frozenset({
+    "DEPENDENCY_CONTRACT_DRIFT",
+    MAIN_MOVED_OVER_GATE_SURFACE,
+    MERGE_BASE_NOT_UNIQUE,
+    "CONTROLLER_ERROR",
+})
+# Written by the controller job's bash steps, which run before/around the Python
+# controller.  Lower priority than a lane-gate BLOCK, whose reason is more specific.
+_CONTROLLER_BOOTSTRAP_CODE = "CONTROLLER_BOOTSTRAP_FAILED"
+_LANE_BINDING_MISSING_REASONS = frozenset({
+    "PR_BODY_REQUIRED",
+    "EXACTLY_ONE_MERGE_LANE_BINDING_REQUIRED",
+})
+_LANE_REASON_RE = re.compile(r"[A-Z0-9_]{1,80}")
+_TOKEN_LIKE_RE = re.compile(r"\b(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]+")
+
+
+def _sanitize_failure_detail(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    value = _TOKEN_LIKE_RE.sub("[REDACTED]", value)
+    printable = "".join(char if " " <= char <= "~" else " " for char in value)
+    return " ".join(printable.split())[:CONTROLLER_FAILURE_DETAIL_LIMIT]
+
+
+def _controller_failure_record(error: BaseException) -> dict[str, str]:
+    message = str(error)
+    if message.startswith("PR dependency contract drifts from trusted default"):
+        code = "DEPENDENCY_CONTRACT_DRIFT"
+    elif message.startswith(f"{MAIN_MOVED_OVER_GATE_SURFACE}:"):
+        code = MAIN_MOVED_OVER_GATE_SURFACE
+    elif message.startswith(f"{MERGE_BASE_NOT_UNIQUE}:"):
+        code = MERGE_BASE_NOT_UNIQUE
+    else:
+        code = "CONTROLLER_ERROR"
+    return {
+        "schema": CONTROLLER_FAILURE_SCHEMA,
+        "reason_code": code,
+        "detail": _sanitize_failure_detail(f"{type(error).__name__}: {message}"),
+    }
+
+
+def _controller_recording_failure(args: argparse.Namespace) -> None:
+    try:
+        _controller(args)
+    except Exception as error:
+        record = _controller_failure_record(error)
+        path = getattr(args, "failure_reason_json", None)
+        if path:
+            target = Path(path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(json.dumps(record, sort_keys=True) + "\n", encoding="utf-8")
+        code = record["reason_code"]
+        print(
+            f"trusted controller: {code}: {CONTROLLER_FAILURE_REMEDIES[code]}",
+            file=sys.stderr,
+        )
+        raise
+
+
+def _read_untrusted_reason_json(path: Path) -> dict[str, Any] | None:
+    try:
+        if path.is_symlink() or not path.is_file():
+            return None
+        if path.stat().st_size > CONTROLLER_FAILURE_FILE_LIMIT:
+            return None
+        payload = json.loads(path.read_bytes().decode("utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError, RecursionError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def resolve_controller_failure(failure_dir: Path, *, controller_result: str) -> dict[str, str]:
+    """Map an untrusted controller failure artifact to a trusted reason; always BLOCK."""
+
+    code = "CONTROLLER_REASON_UNAVAILABLE"
+    detail = f"controller job result: {controller_result}"
+    recorded = _read_untrusted_reason_json(failure_dir / "controller-failure.json")
+    lane = _read_untrusted_reason_json(failure_dir / "merge-lane-gate.json")
+    if (
+        recorded is not None
+        and recorded.get("schema") == CONTROLLER_FAILURE_SCHEMA
+        and recorded.get("reason_code") in _CONTROLLER_RECORDED_CODES
+    ):
+        code = str(recorded["reason_code"])
+        detail = recorded.get("detail", "")
+    elif lane is not None and lane.get("status") == "BLOCK":
+        reason = lane.get("reason")
+        if isinstance(reason, str) and _LANE_REASON_RE.fullmatch(reason):
+            code = (
+                "MERGE_LANE_BINDING_MISSING"
+                if reason in _LANE_BINDING_MISSING_REASONS
+                else "MERGE_LANE_BINDING_BLOCKED"
+            )
+            detail = reason
+    elif (
+        recorded is not None
+        and recorded.get("schema") == CONTROLLER_FAILURE_SCHEMA
+        and recorded.get("reason_code") == _CONTROLLER_BOOTSTRAP_CODE
+    ):
+        code = _CONTROLLER_BOOTSTRAP_CODE
+        detail = recorded.get("detail", "")
+    return {
+        "schema": CONTROLLER_FAILURE_SCHEMA,
+        "status": "BLOCK",
+        "reason_code": code,
+        "remedy": CONTROLLER_FAILURE_REMEDIES[code],
+        "detail": _sanitize_failure_detail(detail),
+    }
+
+
+def _explain_controller_failure(args: argparse.Namespace) -> None:
+    result = resolve_controller_failure(
+        Path(args.failure_dir), controller_result=_sanitize_failure_detail(args.controller_result)
+    )
+    code, remedy = result["reason_code"], result["remedy"]
+    # Only the trusted code and remedy may form a workflow command; the untrusted
+    # detail is printed after a fixed prefix so it can never start one.
+    print(f"::error title=Trusted controller failed::{code}: {remedy}")
+    print(f"trusted controller: {code}: {remedy}")
+    print(f"trusted controller detail (untrusted, display only): {result['detail']}")
+    raise SystemExit(1)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -1628,7 +1977,8 @@ def main() -> None:
     controller.add_argument("--repo-root", required=True)
     controller.add_argument("--output-dir", required=True)
     controller.add_argument("--runtime-dir", required=True)
-    controller.set_defaults(function=_controller)
+    controller.add_argument("--failure-reason-json")
+    controller.set_defaults(function=_controller_recording_failure)
     runtime_builder = subparsers.add_parser("runtime-builder")
     runtime_builder.add_argument("--repo-root", required=True)
     runtime_builder.add_argument("--workflow-sha", required=True)
@@ -1653,6 +2003,10 @@ def main() -> None:
     verifier.add_argument("--expected-base-sha", required=True)
     verifier.add_argument("--expected-head-sha", required=True)
     verifier.set_defaults(function=_verifier)
+    explain = subparsers.add_parser("explain-controller-failure")
+    explain.add_argument("--failure-dir", required=True)
+    explain.add_argument("--controller-result", required=True)
+    explain.set_defaults(function=_explain_controller_failure)
     args = parser.parse_args()
     args.function(args)
 
