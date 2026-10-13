@@ -791,17 +791,20 @@ def _candidate_code_from_llm_output(source_code: str, out: dict[str, Any]) -> tu
 
 def _online_call_skipped_reason(unified_receipt: Mapping[str, Any] | None) -> str:
     """Reason the online stage made no provider call, or "" when a call happened/unknown."""
-    online = unified_receipt.get("online") if isinstance(unified_receipt, Mapping) else None
-    if not isinstance(online, Mapping) or online.get("invoked") is not False:
+    raw_online = unified_receipt.get("online") if isinstance(unified_receipt, Mapping) else None
+    if not isinstance(raw_online, Mapping) or raw_online.get("invoked") is not False:
         return ""
-    response = online.get("response") if isinstance(online.get("response"), Mapping) else {}
+    online: Mapping[str, Any] = raw_online
+    raw_response = online.get("response")
+    response: Mapping[str, Any] = raw_response if isinstance(raw_response, Mapping) else {}
     try:
         calls = int(online.get("provider_call_count", response.get("provider_call_count", 0)) or 0)
     except (TypeError, ValueError):
         return ""
     if calls:
         return ""
-    trace = online.get("context_trace") if isinstance(online.get("context_trace"), Mapping) else {}
+    raw_trace = online.get("context_trace")
+    trace: Mapping[str, Any] = raw_trace if isinstance(raw_trace, Mapping) else {}
     authority = trace.get("gateway_invocation_authority")
     if isinstance(authority, Mapping) and str(authority.get("admission_overall_decision") or "") == "ESCALATE":
         return "admission_escalated"
