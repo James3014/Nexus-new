@@ -1721,6 +1721,223 @@ def _commit_fixture_repo(ws: Path) -> None:
     subprocess.run([*git, "commit", "-q", "-m", "fixture"], cwd=ws, check=True)  # nosec B603 B607
 
 
+SWARM_OWNER_FIXTURE_APPROVER = "owner-authorized-wiring-audit-fixture"
+
+
+def _sha256_json(value: Any) -> str:
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    ).hexdigest()
+
+
+def owner_fixture_integrate_swarm_winner(
+    root: Path, pending: Mapping[str, Any], winner: Mapping[str, Any], state_dir: Path
+) -> dict[str, Any]:
+    """Owner step of the swarm fixture: approve the run's exact verified winner, then integrate.
+
+    A swarm run can never integrate by itself: an approval binds an exact candidate commit,
+    which only exists after the run.  This step plays the Owner on the audit's own fixture
+    (Owner-authorized, batch 3): it persists an APPROVED lifecycle task bound to the winner
+    commit/tree in a fixture-local state root, records external acceptance + a consumed
+    integrate approval through ``bind_candidate_integration_closure``, and offers the winner
+    again through the run's own facade call (``integrate_swarm_winner`` ->
+    ``SelfHostedTaskService.integrate_approved`` -> ``ControlledIntegrationManager``).
+    Labelled approver: ``SWARM_OWNER_FIXTURE_APPROVER``.  Never used outside the audit.
+    """
+    from datetime import timedelta
+
+    from nexus.contracts.target_integration_lifecycle import ExternalAcceptanceReceipt
+    from nexus.engine.swarm_run import integrate_swarm_winner
+    from nexus.executors.cli_worker import bounded_environment_receipt
+    from nexus.orchestrator.repository_contract_gate import RepositoryContractGate
+    from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
+    from nexus.orchestrator.worktree_manager import WorktreeManager
+
+    task_id = str(pending["task_id"])
+    candidate = str(pending["candidate_commit_sha"])
+    base = str(pending["target_base_revision"])
+    target_file = str(pending["target_file"])
+    integration_branch = str(pending["integration_branch"])
+    git = ["git", "-c", "user.name=wiring-audit", "-c", "user.email=wiring-audit@invalid"]
+    # The canonical root must sit on the integration branch at the approved base.
+    subprocess.run(  # nosec B603 B607
+        [*git, "checkout", "-q", "-B", integration_branch, base], cwd=root, check=True
+    )
+    now = datetime.now(timezone.utc)
+    verifier = str(Path(sys.executable).resolve())
+    # Fixture-local lifecycle root plus a fixture git identity for the integration merge
+    # commit (CI runners have no global git identity).
+    fixture_env = {
+        "NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR": str(state_dir),
+        "GIT_AUTHOR_NAME": "wiring-audit",
+        "GIT_AUTHOR_EMAIL": "wiring-audit@invalid",
+        "GIT_COMMITTER_NAME": "wiring-audit",
+        "GIT_COMMITTER_EMAIL": "wiring-audit@invalid",
+    }
+    previous_env = {key: os.environ.get(key) for key in fixture_env}
+    os.environ.update(fixture_env)
+    try:
+        service = SelfHostedTaskService(state_dir=state_dir, auto_reconcile=False)
+        request = {
+            "task_id": task_id,
+            "campaign_id": "wiring-audit-swarm",
+            "what": "integrate the verified swarm winner",
+            "why": "capability wiring audit swarm fixture",
+            "controller_revision": base,
+            "target_base_revision": base,
+            "controller_repo_root": str(root),
+            "target_repo_root": str(root.parent / f"{root.name}.target"),
+            "target_worktree_root": str(root.parent),
+            "allowed_files": [target_file],
+            "verifier_commands": [verifier],
+            "worker": "codex",
+        }
+        contract = service.build_contract(request)
+        card = state_dir / "task-cards" / f"{task_id}.md"
+        card.parent.mkdir(parents=True, exist_ok=True)
+        card.write_text(
+            f"# {task_id}\n\nOwner-authorized wiring-audit fixture: integrate swarm winner "
+            f"{candidate} ({target_file}); verifier {pending.get('verify_script')}.\n",
+            encoding="utf-8",
+        )
+        task_card_hash = hashlib.sha256(card.read_bytes()).hexdigest()
+        gate = RepositoryContractGate(WorktreeManager(root_dir=str(root), create_root=False))
+        policy_inputs = gate._policy_input_hashes(root.resolve(), base)
+        verified_receipt = {
+            "repository_contract_gate_passed": True,
+            "repository_contract_policy_revision_hash": gate._policy_revision_hash(
+                base, policy_inputs
+            ),
+            "verifier_evidence": [
+                {
+                    "command": verifier,
+                    "status": "COMPLETED",
+                    "exit_code": 0,
+                    "executable_identity": verifier,
+                    "executable_sha256": hashlib.sha256(Path(verifier).read_bytes()).hexdigest(),
+                    "argv": [],
+                    "env": bounded_environment_receipt({"PYTHONDONTWRITEBYTECODE": "1"}),
+                    "timed_out": False,
+                    "process_group_killed": False,
+                }
+            ],
+            "swarm_verify": {
+                "script": pending.get("verify_script"),
+                "result": winner.get("verify_result"),
+                "exit_codes": winner.get("verify_exit_codes"),
+            },
+        }
+        packet = {
+            "candidate_commit_sha": candidate,
+            "candidate_tree_sha": str(pending["candidate_tree_sha"]),
+            "candidate_state_hash": _sha256_json(dict(winner)),
+            "verified_receipt_hash": _sha256_json(verified_receipt),
+        }
+        service._write_state(
+            task_id,
+            {
+                "task_id": task_id,
+                "attempt_id": "attempt-1",
+                "status": "APPROVED",
+                "promotion_status": "APPROVED",
+                "request": request,
+                "contract": contract.model_dump(mode="json"),
+                "contract_kind": "TRACKED_TASK_CARD",
+                "contract_hash": contract.contract_hash,
+                "task_card_hash": task_card_hash,
+                "candidate_ref": f"refs/nexus-candidates/{task_id}/{candidate}",
+                "controller_revision": base,
+                "promotion_packet": packet,
+                "verified_receipt": verified_receipt,
+                "approved_binding": {
+                    **packet,
+                    "approval_grant": {
+                        "approval_scope": "ALLOW_ACTION_ONCE",
+                        "approved_by": SWARM_OWNER_FIXTURE_APPROVER,
+                        "consumed_at": now.isoformat(),
+                    },
+                },
+                "lease": {
+                    "lease_id": f"lease-{task_id}",
+                    "target_worktree": request["target_repo_root"],
+                    "target_branch": integration_branch,
+                },
+            },
+        )
+        artifact = state_dir / "acceptance-artifacts" / task_id / "swarm_verify.json"
+        artifact.parent.mkdir(parents=True, exist_ok=True)
+        artifact.write_text(json.dumps(verified_receipt["swarm_verify"]), encoding="utf-8")
+        acceptance = ExternalAcceptanceReceipt(
+            schema="nexus.external_acceptance_receipt.v1",
+            task_id=task_id,
+            attempt_id="attempt-1",
+            candidate_commit=candidate,
+            receipt_hash=hashlib.sha256(artifact.read_bytes()).hexdigest(),
+            reviewer_id=SWARM_OWNER_FIXTURE_APPROVER,
+            passed=True,
+            verifier_artifact=str(artifact),
+        )
+        runtime = {
+            "tool_manifest_hash": _sha256_json({"tool": "wiring-audit"}),
+            "full_tool_schema_hash": _sha256_json({"schema": "wiring-audit"}),
+            "permission_policy_hash": _sha256_json({"policy": "wiring-audit"}),
+            "lifecycle_revision": "wiring-audit",
+            "server_instance_id": "wiring-audit",
+        }
+        approval = {
+            "schema": "nexus.approval.v2",
+            "approval_id": f"wiring-audit-{task_id}",
+            "approved_by": SWARM_OWNER_FIXTURE_APPROVER,
+            "issued_at": now.isoformat(),
+            "expires_at": (now + timedelta(minutes=30)).isoformat(),
+            "bound_task_id": task_id,
+            "bound_attempt_id": "attempt-1",
+            "bound_action_type": "CANDIDATE_INTEGRATE",
+            "approval_scope": "ALLOW_ACTION_ONCE",
+            "contract_kind": "TRACKED_TASK_CARD",
+            "contract_hash": contract.contract_hash,
+            "task_card_hash": task_card_hash,
+            "expected_canonical_head": base,
+            "integration_branch": integration_branch,
+            **packet,
+            "acceptance_receipt_hash": acceptance.receipt_hash,
+            **runtime,
+        }
+        bound = service.bind_candidate_integration_closure(
+            task_id,
+            external_acceptance=acceptance,
+            approval=approval,
+            runtime_identity=runtime,
+            expected_canonical_head=base,
+            integration_branch=integration_branch,
+        )
+        integration = integrate_swarm_winner(root, task_id, dict(winner), "", base)
+        final = service.get_task(task_id) or {}
+    finally:
+        for key, value in previous_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+    raw_history = final.get("status_history")
+    history: list[Any] = list(raw_history) if isinstance(raw_history, list) else []
+    return {
+        "approver": SWARM_OWNER_FIXTURE_APPROVER,
+        "bound_status": bound.get("status"),
+        "integration": integration,
+        "lifecycle_status": final.get("status"),
+        "integration_branch": integration_branch,
+        # Why a non-INTEGRATED outcome happened (status trail + failure fields).
+        "status_trail": [dict(item) for item in history[-4:] if isinstance(item, dict)],
+        "failure_detail": {
+            key: str(value)[:300]
+            for key, value in final.items()
+            if any(token in key for token in ("error", "failure", "blocker", "reason"))
+            and value not in (None, "", [], {})
+        },
+    }
+
+
 def build_swarm(ws: Path, variant: str) -> Scenario:
     _commit_fixture_repo(ws)
     if variant != "positive":
@@ -1728,72 +1945,66 @@ def build_swarm(ws: Path, variant: str) -> Scenario:
         lock = ws / ".nexus" / "multi_agent" / "locks" / "file_locks.json"
         lock.parent.mkdir(parents=True, exist_ok=True)
         lock.write_text(json.dumps({"locks": {"calc.py": "other-task"}}), encoding="utf-8")
-    original_hash = sha256_file(ws / "calc.py")
+    # Fixture-local lifecycle state root: the run's facade lookup and the Owner step read and
+    # write here, never the production self-hosted state.
+    state_dir = ws.parent / f"{ws.name}.self-hosted-state"
 
     def check(root: Path, obs: Obs) -> list[Check]:
+        checks = _swarm_run_checks(root, obs)
+        if variant != "positive":
+            return checks
         report = (
             obs.outcome.get("swarm_report")
             if isinstance(obs.outcome.get("swarm_report"), Mapping)
             else {}
         )
-        workers = [w for w in report.get("workers") or [] if isinstance(w, Mapping)]
-        commits = [str(w.get("commit") or "") for w in workers if w.get("commit")]
-        commits_exist = bool(commits) and all(
+        pending = report.get("pending_owner_approval")
+        winner = report.get("winner") if isinstance(report.get("winner"), Mapping) else {}
+        checks.append(
+            Check(
+                "run_stops_at_owner_approval_for_its_winner",
+                obs.block_reason() == "INTEGRATION_OWNER_AUTHORITY_REQUIRED"
+                or "INTEGRATION_OWNER_AUTHORITY_REQUIRED" in obs.block_reason(),
+                f"block_reason={obs.block_reason()} pending={pending}",
+            )
+        )
+        if not isinstance(pending, Mapping) or pending.get("candidate_commit_sha") != winner.get(
+            "commit"
+        ):
+            checks.append(Check("owner_approved_winner_integrated", False, f"pending={pending}"))
+            return checks
+        owner = owner_fixture_integrate_swarm_winner(root, pending, winner, state_dir)
+        integration = owner.get("integration") or {}
+        branch = str(owner.get("integration_branch") or "")
+        head = subprocess.run(  # nosec B603 B607
+            ["git", "rev-parse", branch], cwd=root, capture_output=True, text=True
+        ).stdout.strip()
+        contains = (
             subprocess.run(  # nosec B603 B607
-                ["git", "cat-file", "-e", f"{sha}^{{commit}}"], cwd=root, capture_output=True
+                ["git", "merge-base", "--is-ancestor", str(winner.get("commit")), head],
+                cwd=root,
+                capture_output=True,
             ).returncode
             == 0
-            for sha in commits
         )
-        integration = (
-            report.get("integration") if isinstance(report.get("integration"), Mapping) else {}
+        repro = subprocess.run(  # nosec B603 B607
+            [sys.executable, "repro.py"], cwd=root, capture_output=True, text=True, timeout=60
         )
-        lock = report.get("lock") if isinstance(report.get("lock"), Mapping) else {}
-        return [
+        obs.outcome["owner_fixture_integration"] = owner
+        checks.append(
             Check(
-                "swarm_executed_workers",
-                obs.outcome.get("action") == "run_bounded_swarm"
-                and int(obs.outcome.get("workers_executed") or 0) >= 2
-                and int(obs.outcome.get("model_calls") or 0) >= 1,
-                f"action={obs.outcome.get('action')} executed={obs.outcome.get('workers_executed')} model_calls={obs.outcome.get('model_calls')}",
-            ),
-            Check(
-                "no_construct_only_rejection",
-                obs.outcome.get("error") != "import_construct_not_execution",
-                f"error={obs.outcome.get('error')}",
-            ),
-            Check(
-                "file_lock_held_then_released",
-                lock.get("held_by_this_task") is True and lock.get("released") is True,
-                f"lock={dict(lock)}",
-            ),
-            Check(
-                "worker_commits_in_object_store",
-                commits_exist and len(commits) >= 2,
-                f"commits={commits}",
-            ),
-            Check(
-                "winner_verified_by_repro",
-                (report.get("winner") or {}).get("verify_result") == "pass",
-                f"winner={report.get('winner')} results={[w.get('verify_result') for w in workers]}",
-            ),
-            Check(
-                "integration_offered_to_controlled_manager",
-                integration.get("attempted") is True
-                and "SelfHostedTaskService.integrate_approved"
-                in str(integration.get("authority") or "")
-                and integration.get("merge_performed") is False
-                and bool(integration.get("refusal")),
-                f"integration={dict(integration)}",
-            ),
-            Check(
-                "worktrees_removed_and_workspace_untouched",
-                sorted(report.get("worktrees_removed") or [])
-                == sorted(report.get("worktrees") or [])
-                and sha256_file(root / "calc.py") == original_hash,
-                f"worktrees={report.get('worktrees')} removed={report.get('worktrees_removed')}",
-            ),
-        ]
+                "owner_approved_winner_integrated",
+                integration.get("merge_performed") is True
+                and owner.get("lifecycle_status") == "INTEGRATED"
+                and contains
+                and repro.returncode == 0,
+                f"approver={owner.get('approver')} status={owner.get('lifecycle_status')} "
+                f"merge={integration.get('merge_performed')} head={head[:12]} "
+                f"contains_winner={contains} repro_exit={repro.returncode} "
+                f"refusal={integration.get('refusal')}",
+            )
+        )
+        return checks
 
     return Scenario(
         statement="Coordinate two agents on the swarm fixture: fix add in calc.py so repro.py passes",
@@ -1806,12 +2017,81 @@ def build_swarm(ws: Path, variant: str) -> Scenario:
         # Armor-on local switches of the Local stage rows (M5 endpoint); the model-call switch
         # itself stays with the policy attempts.
         extra_env={
-            key: value
-            for key, value in local_stage_env(ws).items()
-            if key != "NEXUS_LOCAL_MODEL_CALL_ALLOWED"
+            **{
+                key: value
+                for key, value in local_stage_env(ws).items()
+                if key != "NEXUS_LOCAL_MODEL_CALL_ALLOWED"
+            },
+            "NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR": str(state_dir),
         },
         check=check,
     )
+
+
+def _swarm_run_checks(root: Path, obs: Obs) -> list[Check]:
+    original_hash = sha256_file(FIXTURE_ROOT / "swarm" / "calc.py")
+    report = (
+        obs.outcome.get("swarm_report")
+        if isinstance(obs.outcome.get("swarm_report"), Mapping)
+        else {}
+    )
+    workers = [w for w in report.get("workers") or [] if isinstance(w, Mapping)]
+    commits = [str(w.get("commit") or "") for w in workers if w.get("commit")]
+    commits_exist = bool(commits) and all(
+        subprocess.run(  # nosec B603 B607
+            ["git", "cat-file", "-e", f"{sha}^{{commit}}"], cwd=root, capture_output=True
+        ).returncode
+        == 0
+        for sha in commits
+    )
+    integration = (
+        report.get("integration") if isinstance(report.get("integration"), Mapping) else {}
+    )
+    lock = report.get("lock") if isinstance(report.get("lock"), Mapping) else {}
+    return [
+        Check(
+            "swarm_executed_workers",
+            obs.outcome.get("action") == "run_bounded_swarm"
+            and int(obs.outcome.get("workers_executed") or 0) >= 2
+            and int(obs.outcome.get("model_calls") or 0) >= 1,
+            f"action={obs.outcome.get('action')} executed={obs.outcome.get('workers_executed')} model_calls={obs.outcome.get('model_calls')}",
+        ),
+        Check(
+            "no_construct_only_rejection",
+            obs.outcome.get("error") != "import_construct_not_execution",
+            f"error={obs.outcome.get('error')}",
+        ),
+        Check(
+            "file_lock_held_then_released",
+            lock.get("held_by_this_task") is True and lock.get("released") is True,
+            f"lock={dict(lock)}",
+        ),
+        Check(
+            "worker_commits_in_object_store",
+            commits_exist and len(commits) >= 2,
+            f"commits={commits}",
+        ),
+        Check(
+            "winner_verified_by_repro",
+            (report.get("winner") or {}).get("verify_result") == "pass",
+            f"winner={report.get('winner')} results={[w.get('verify_result') for w in workers]}",
+        ),
+        Check(
+            "integration_offered_to_controlled_manager",
+            integration.get("attempted") is True
+            and "SelfHostedTaskService.integrate_approved"
+            in str(integration.get("authority") or "")
+            and integration.get("merge_performed") is False
+            and bool(integration.get("refusal")),
+            f"integration={dict(integration)}",
+        ),
+        Check(
+            "worktrees_removed_and_workspace_untouched",
+            sorted(report.get("worktrees_removed") or []) == sorted(report.get("worktrees") or [])
+            and sha256_file(root / "calc.py") == original_hash,
+            f"worktrees={report.get('worktrees')} removed={report.get('worktrees_removed')}",
+        ),
+    ]
 
 
 def neg_swarm(pos: Obs, neg: Obs) -> Check:
@@ -4064,7 +4344,7 @@ _SPEC_LIST: list[CapSpec] = [
         needs_model=True,
         negative_check=neg_swarm,
         gaps=(
-            "integration goes through the single Candidate integration owner (SelfHostedTaskService.integrate_approved -> ControlledIntegrationManager, #947) and needs a persisted APPROVED lifecycle task (external acceptance bound to the candidate, consumed Owner approval grant, verified receipt); the executor never fabricates it, so a run stops BLOCKED at integration with the facade's refusal",
+            "integration goes through the single Candidate integration owner (SelfHostedTaskService.integrate_approved -> ControlledIntegrationManager, #947) and needs a persisted APPROVED lifecycle task bound to the exact winner commit, which only exists after the run; the run therefore stops BLOCKED (INTEGRATION_OWNER_AUTHORITY_REQUIRED) with pending_owner_approval, and the fixture's Owner step (owner_fixture_integrate_swarm_winner, labelled approver) then integrates that winner through the same facade; the lifecycle state root is fixture-local (NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR), never production",
         ),
     ),
     CapSpec(
