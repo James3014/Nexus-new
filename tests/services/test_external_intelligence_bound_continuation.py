@@ -32,6 +32,7 @@ from nexus.services.external_intelligence_core_binding import (
     binding_hash_for,
     binding_validity_seconds,
     parse_bound_execution_envelope_v2,
+    unit_verifier_cycle_seconds,
     validate_repository_mutation_binding,
 )
 from nexus.services.external_intelligence_fanout import (
@@ -46,7 +47,9 @@ from tests.services.test_external_intelligence_core_binding import (
     ORIGIN,
     REPOSITORY,
     TARGET,
+    authority_inputs,
     bound_unit_mapping,
+    bound_worker,
     make_bound_repo,
 )
 from tests.services.test_open_swe_worker_transport import _completed
@@ -502,6 +505,43 @@ def test_binding_validity_covers_initial_run_plus_repair_budget():
         binding_validity_seconds(0, 1)
 
 
+@pytest.mark.parametrize(
+    ("budget", "expected"),
+    [
+        # (worker 300 + unit verifiers 60+90 + whole verifiers 120+30) * (1 + budget) + margin
+        (0, 600 * 1 + FRESHNESS_MARGIN_SECONDS),
+        (1, 600 * 2 + FRESHNESS_MARGIN_SECONDS),
+        (3, 600 * 4 + FRESHNESS_MARGIN_SECONDS),
+    ],
+)
+def test_binding_validity_includes_unit_and_whole_verifier_time(budget, expected):
+    inputs = authority_inputs(
+        "a" * 40,
+        "b" * 64,
+        bound_worker(),
+        unit_verifiers={
+            "u1": (("u-a", ("python", "-V"), 60.0), ("u-b", ("python", "-V"), 90.0)),
+            "u2": (("u-c", ("python", "-V"), 999.0),),
+        },
+        whole_verifiers=(("w-a", ("python", "-V"), 120.0), ("w-b", ("python", "-V"), 30.0)),
+    )
+    cycle = unit_verifier_cycle_seconds(inputs, "u1")
+    assert cycle == 300.0  # only u1's verifiers, never u2's
+    assert binding_validity_seconds(300, budget, cycle) == expected
+    assert binding_validity_seconds(300, budget, cycle) == binding_validity_seconds(
+        300, budget, cycle
+    )
+
+
+def test_binding_validity_verifier_window_fails_closed():
+    inputs = authority_inputs("a" * 40, "b" * 64, bound_worker())
+    with pytest.raises(CoreBindingError, match="CORE_UNIT_VERIFIERS_MISSING"):
+        unit_verifier_cycle_seconds(inputs, "missing-unit")
+    for bad in (-1.0, float("inf"), float("nan"), True):
+        with pytest.raises(CoreBindingError, match="CORE_VERIFIER_WINDOW_INVALID"):
+            binding_validity_seconds(300, 1, bad)  # type: ignore[arg-type]
+
+
 @pytest.mark.parametrize("budget", [0, 1, 3])
 def test_minted_binding_lifetime_follows_fanout_repair_budget(tmp_path, monkeypatch, budget):
     ctx = _bound_open_swe(tmp_path, monkeypatch, max_repairs_per_unit=budget)
@@ -511,7 +551,9 @@ def test_minted_binding_lifetime_follows_fanout_repair_budget(tmp_path, monkeypa
     )
     created = datetime.fromisoformat(binding["freshness"]["created_at"].replace("Z", "+00:00"))
     deadline = datetime.fromisoformat(binding["freshness"]["valid_until"].replace("Z", "+00:00"))
-    expected = ctx.transport.timeout * (1 + budget) + FRESHNESS_MARGIN_SECONDS
+    # authority_inputs(): unit "u1" verifier 120s + whole verifier 300s per cycle.
+    verifier_cycle = 120.0 + 300.0
+    expected = (ctx.transport.timeout + verifier_cycle) * (1 + budget) + FRESHNESS_MARGIN_SECONDS
     assert (deadline - created).total_seconds() == expected
 
 

@@ -55,7 +55,14 @@ def test_clean_wheel_contains_and_runs_registered_cli_entrypoints(tmp_path):
     nexus_help = _run([str(venv_dir / "bin" / "nexus"), "--help"], cwd=tmp_path, env=clean_env)
     assert nexus_help.returncode == 0, nexus_help.stdout + nexus_help.stderr
 
-    cueline = _run([str(venv_dir / "bin" / "nexus-cueline-worker")], cwd=tmp_path, env=clean_env)
+    # The `nexus-cueline-worker` console script was dropped in #770 and is intentionally not
+    # restored (no CueLine consumer exists). The worker module itself must still ship and run
+    # from a clean wheel, so invoke it as a module.
+    cueline = _run(
+        [str(venv_python), "-m", "scripts.ops.nexus_cueline_worker"],
+        cwd=tmp_path,
+        env=clean_env,
+    )
     assert cueline.returncode == 1
     assert "Empty input provided" in cueline.stderr
     assert "ModuleNotFoundError" not in cueline.stderr

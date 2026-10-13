@@ -9,7 +9,7 @@ import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
 from nexus.engine.canonical_task_seam import (
     VerifiedTaskCardIdentity,
@@ -142,6 +142,67 @@ def _validate_relative_path(value: Any) -> str:
     return path.as_posix()
 
 
+# git global options that consume the following argv element.
+_GIT_GLOBAL_OPTIONS_WITH_VALUE = frozenset({
+    "-C",
+    "-c",
+    "--git-dir",
+    "--work-tree",
+    "--namespace",
+    "--exec-path",
+    "--config-env",
+})
+# Revisions that name the committed candidate itself inside closure.
+_CANDIDATE_HEAD_REVISIONS = frozenset({"HEAD", "@"})
+# ``git diff`` options whose value is a separate argv element.
+_GIT_DIFF_OPTIONS_WITH_VALUE = frozenset({
+    "-O",
+    "-S",
+    "-G",
+    "--output",
+    "--src-prefix",
+    "--dst-prefix",
+    "--line-prefix",
+    "--diff-algorithm",
+    "--anchored",
+    "--word-diff-regex",
+})
+
+
+def is_unscoped_git_diff(argv: Sequence[str]) -> bool:
+    """True for a ``git diff`` verifier with no revision operand.
+
+    Closure runs verifiers in a clean checkout whose HEAD is the committed
+    candidate, so a revision-less ``git diff`` (worktree vs index, or ``--cached``
+    index vs HEAD) always sees an empty diff and proves nothing.  Scope it with
+    ``$NEXUS_BASE_SHA``/``$NEXUS_CANDIDATE_SHA`` (see the contract docs) instead.
+    ``HEAD``/``@`` alone is the candidate itself and is treated the same way.
+    Only direct ``git`` argv is recognized; shell wrappers are not parsed.
+    """
+    if not argv or PurePosixPath(argv[0]).name != "git":
+        return False
+    index = 1
+    while index < len(argv) and argv[index].startswith("-"):
+        index += 2 if argv[index] in _GIT_GLOBAL_OPTIONS_WITH_VALUE else 1
+    if index >= len(argv) or argv[index] != "diff":
+        return False
+    skip = False
+    for part in argv[index + 1 :]:
+        if skip:
+            skip = False
+            continue
+        if part == "--":
+            break
+        if part == "--no-index":
+            return False
+        if part.startswith("-"):
+            skip = part in _GIT_DIFF_OPTIONS_WITH_VALUE
+            continue
+        if part not in _CANDIDATE_HEAD_REVISIONS:
+            return False
+    return True
+
+
 def _validate_verifier_specs(specs: Any, field: str) -> None:
     if not isinstance(specs, list) or not specs:
         raise AutomationError(f"ISSUE_CONTRACT_{field}_INVALID")
@@ -172,6 +233,8 @@ def _validate_verifier_specs(specs: Any, field: str) -> None:
             VerifierSpec.from_value(spec)
         except Exception as exc:
             raise AutomationError(f"ISSUE_CONTRACT_{field}_INVALID") from exc
+        if is_unscoped_git_diff(argv):
+            raise AutomationError(f"ISSUE_CONTRACT_{field}_UNSCOPED_GIT_DIFF")
 
 
 def parse_issue_contract(body: str) -> dict[str, Any]:

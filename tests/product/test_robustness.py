@@ -123,10 +123,12 @@ def test_verification_result_rejects_contradictory_states():
 def test_poetry_packages_include_product_without_version_change():
     root = Path(__file__).parents[2]
     poetry = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["tool"]["poetry"]
-    assert {"include": "product"} in poetry["packages"]
+    # #821 retirement (Owner decision on #1929, 2026-10-14): the legacy wheel must not
+    # ship the product namespace; canonical `product` is owned by nexus-core.
+    assert {"include": "product"} not in poetry["packages"]
     assert poetry["version"] == "28.3.0"
 
-    # `product` must actually resolve as a package from the repo root.
+    # In-tree use: `product` must still resolve as a package from the repo root.
     sys.path.insert(0, str(root))
     try:
         spec = importlib.util.find_spec("product")
