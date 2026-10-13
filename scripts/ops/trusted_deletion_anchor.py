@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import ast
-import copy
 import hashlib
 import json
 import os
@@ -507,7 +506,7 @@ def _validate_trusted_dependency_contract(
     pull_request_number: int,
     head_product_init_is_regular: bool,
 ) -> None:
-    """Allow an exact trusted snapshot transition or the Product metadata delta."""
+    """Allow only an exact trusted snapshot transition or an unchanged contract."""
 
     error = "PR dependency contract drifts from trusted default"
     transition = (
@@ -548,51 +547,10 @@ def _validate_trusted_dependency_contract(
             and head_product_init_is_regular
         ):
             return
-    if head_uv_lock != trusted_uv_lock:
-        raise ValueError(error)
-    if head_pyproject == trusted_pyproject:
-        return
-    if not head_product_init_is_regular:
-        raise ValueError(error)
-    try:
-        import tomllib
-
-        trusted = tomllib.loads(trusted_pyproject.decode("utf-8"))
-        head = tomllib.loads(head_pyproject.decode("utf-8"))
-    except (ImportError, UnicodeDecodeError, ValueError) as exc:
-        raise ValueError(error) from exc
-
-    trusted_tool = trusted.get("tool")
-    head_tool = head.get("tool")
-    if not isinstance(trusted_tool, dict) or not isinstance(head_tool, dict):
-        raise ValueError(error)
-    trusted_poetry = trusted_tool.get("poetry")
-    head_poetry = head_tool.get("poetry")
-    if not isinstance(trusted_poetry, dict) or not isinstance(head_poetry, dict):
-        raise ValueError(error)
-    trusted_packages = trusted_poetry.get("packages")
-    head_packages = head_poetry.get("packages")
-    product_package = {"include": "product"}
-    if (
-        not isinstance(trusted_packages, list)
-        or not isinstance(head_packages, list)
-        or any(not isinstance(item, dict) for item in trusted_packages + head_packages)
-        or product_package in trusted_packages
-        or head_packages.count(product_package) != 1
-    ):
-        raise ValueError(error)
-    product_index = head_packages.index(product_package)
-    if not _type_strict_equal(
-        [*head_packages[:product_index], *head_packages[product_index + 1 :]],
-        trusted_packages,
-    ):
-        raise ValueError(error)
-
-    trusted_without_packages = copy.deepcopy(trusted)
-    head_without_packages = copy.deepcopy(head)
-    trusted_without_packages["tool"]["poetry"].pop("packages")
-    head_without_packages["tool"]["poetry"].pop("packages")
-    if not _type_strict_equal(head_without_packages, trusted_without_packages):
+    # #1929 / #821: the Owner removed ``product`` from the wheel (#2114). There is
+    # no built-in "add product package" fallback any more; re-adding it needs an
+    # exact, PR-bound snapshot transition like any other dependency change.
+    if head_uv_lock != trusted_uv_lock or head_pyproject != trusted_pyproject:
         raise ValueError(error)
 
 

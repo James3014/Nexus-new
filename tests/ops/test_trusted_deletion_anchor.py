@@ -98,17 +98,52 @@ def test_trusted_external_runtime_package_pair_is_exact() -> None:
     ],
 )
 def test_trusted_package_contract_allows_exact_product_package_only_delta(packages: str) -> None:
+    # Historical test id kept (#1929/#821): the product-only delta used to be a
+    # built-in fallback; after #2114 retired product from the wheel it is rejected.
     trusted = _package_contract_pyproject(packages='{include = "nexus"}, {include = "scripts"}')
     head = _package_contract_pyproject(packages=packages)
 
-    trusted_anchor._validate_trusted_dependency_contract(
-        trusted,
-        head,
-        b"version = 1\n",
-        b"version = 1\n",
-        pull_request_number=1,
-        head_product_init_is_regular=True,
+    with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+        trusted_anchor._validate_trusted_dependency_contract(
+            trusted,
+            head,
+            b"version = 1\n",
+            b"version = 1\n",
+            pull_request_number=1,
+            head_product_init_is_regular=True,
+        )
+
+
+@pytest.mark.parametrize("pull_request_number", [1, 2114, 2127])
+def test_issue1929_pr821_product_package_readd_requires_exact_transition(
+    pull_request_number: int,
+) -> None:
+    """#1929 Owner decision / #821 retirement: re-adding product is not a free delta."""
+    trusted = _package_contract_pyproject(packages='{include = "nexus"}, {include = "scripts"}')
+    head = _package_contract_pyproject(
+        packages='{include = "nexus"}, {include = "scripts"}, {include = "product"}'
     )
+
+    with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+        trusted_anchor._validate_trusted_dependency_contract(
+            trusted,
+            head,
+            b"version = 1\n",
+            b"version = 1\n",
+            pull_request_number=pull_request_number,
+            head_product_init_is_regular=True,
+        )
+
+    # An unchanged contract still passes, with or without a regular product/__init__.py.
+    for product_init_is_regular in (True, False):
+        trusted_anchor._validate_trusted_dependency_contract(
+            trusted,
+            trusted,
+            b"version = 1\n",
+            b"version = 1\n",
+            pull_request_number=pull_request_number,
+            head_product_init_is_regular=product_init_is_regular,
+        )
 
 
 def test_trusted_dependency_snapshot_transition_is_four_hash_bound(monkeypatch) -> None:
