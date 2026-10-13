@@ -169,13 +169,12 @@ EDGES = (
 )
 
 
-# Performance only: the real repository tree is scanned and parsed many times
-# per run, so its file list and ASTs are cached in-process. Synthetic inputs
+# Performance only: the real repository tree is parsed many times
+# per run, so its ASTs are cached in-process (the file list is always rescanned). Synthetic inputs
 # (tmp_path roots / extra files outside the repository) are always rescanned and
 # parsed fresh. Parsed ASTs are keyed by (path, sha256 of content) and are only
 # ever read, never mutated, by this module.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_FILES_CACHE: dict[Path, tuple[Path, ...]] = {}
 _AST_CACHE: dict[tuple[Path, str], ast.Module] = {}
 
 
@@ -188,13 +187,8 @@ def _in_repo(path: Path) -> bool:
 
 
 def _files(root: Path) -> tuple[Path, ...]:
-    cacheable = root.resolve() == _REPO_ROOT
-    if cacheable and root in _FILES_CACHE:
-        return _FILES_CACHE[root]
-    result = _scan_files(root)
-    if cacheable:
-        _FILES_CACHE[root] = result
-    return result
+    # Never cached: rglob is cheap and a cached list goes stale in-process.
+    return _scan_files(root)
 
 
 def _scan_files(root: Path) -> tuple[Path, ...]:
@@ -553,3 +547,19 @@ def test_inventory_labels_are_strict_and_compatibility_is_explicit():
     labels = {entry["label"] for entry in report["entries"]}
     assert labels <= {"CANONICAL", "COMPATIBILITY_ONLY", "RETIRED"}
     assert "COMPATIBILITY_ONLY" in labels
+
+
+def test_rescan_sees_file_added_after_initial_scan():
+    verify(_REPO_ROOT)  # warm the AST cache
+    rogue = _REPO_ROOT / "nexus" / "_zz_effect_owner_rescan_probe.py"
+    try:
+        rogue.write_text("def rogue(pr):\n    pr.merge_pull_request()\n", encoding="utf-8")
+        try:
+            verify(_REPO_ROOT)
+        except AssertionError as exc:
+            assert "DUPLICATE_EFFECT_IMPLEMENTATION:protected_github_merge" in str(exc)
+        else:
+            raise AssertionError("file added after first scan was not detected")
+    finally:
+        rogue.unlink(missing_ok=True)
+    assert verify(_REPO_ROOT)["classification"] == "SINGLE_EFFECT_OWNER"
