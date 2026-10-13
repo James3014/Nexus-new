@@ -17,8 +17,10 @@ One call does, in the caller's git workspace:
    ``ControlledIntegrationManager``); this module never calls the Git-apply sink itself (#947).
 
 Integration needs a persisted, APPROVED lifecycle task (external acceptance bound to the
-candidate, a consumed Owner approval grant, a verified receipt). This module never fabricates
-those, so without them the facade refuses and the run reports that refusal verbatim. Worktrees and battle
+candidate, a consumed Owner approval grant, a verified receipt). An approval binds an exact
+candidate commit, which only exists after the run, so a run can never integrate by itself: it
+reports the facade's refusal verbatim plus ``pending_owner_approval``; once an Owner approved
+that winner, ``integrate_swarm_winner`` offers it to the same facade again. Worktrees and battle
 branches are removed afterwards (``git worktree remove``; never ``git worktree prune``); the
 candidate commits stay in the object store as evidence.
 """
@@ -270,11 +272,24 @@ def run_bounded_swarm(
             (b for b in report["branches"] if b.startswith(f"battle_{safe_task}_{winner_name}_")),
             "",
         )
-        report["integration"] = _integrate(root, safe_task, winner, branch, report["base_commit"])
+        report["integration"] = integrate_swarm_winner(
+            root, safe_task, winner, branch, report["base_commit"]
+        )
         if report["integration"].get("merge_performed"):
             report.update(status="SUCCEEDED", reason="")
         else:
             report.update(status="BLOCKED", reason="INTEGRATION_OWNER_AUTHORITY_REQUIRED")
+            # What an Owner approves to integrate this exact verified winner later (through
+            # the same facade, ``integrate_swarm_winner``); the run itself never approves.
+            report["pending_owner_approval"] = {
+                "task_id": safe_task,
+                "candidate_commit_sha": str(winner.get("commit") or ""),
+                "candidate_tree_sha": str(winner.get("tree") or ""),
+                "target_base_revision": report["base_commit"],
+                "target_file": target_file,
+                "verify_script": verify_script,
+                "integration_branch": f"nexus/integration/{safe_task}",
+            }
         return report
     finally:
         if battle:
@@ -286,7 +301,7 @@ def run_bounded_swarm(
         report["lock"]["released"] = not registry.check_access(safe_task, target_file)
 
 
-def _integrate(
+def integrate_swarm_winner(
     root: Path, task_id: str, winner: dict[str, Any], branch: str, base: str
 ) -> dict[str, Any]:
     """Offer the verified winner to the canonical Candidate integration facade.
@@ -294,9 +309,11 @@ def _integrate(
     Candidate integration has one effect owner: ``SelfHostedTaskService.integrate_approved``
     delegating to ``ControlledIntegrationManager.integrate_authorized_task_state`` (#947). This
     run never calls the physical sink itself. The facade integrates only a persisted, APPROVED
-    lifecycle task; a swarm run creates none, so the facade is expected to refuse and that
-    refusal is the recorded result. If a lifecycle task with this id exists, its persisted
-    candidate must be this run's winner commit, otherwise nothing is offered.
+    lifecycle task; a swarm run creates none, so during the run the facade refuses and that
+    refusal is the recorded result (``pending_owner_approval`` says what to approve). After an
+    Owner approved that exact winner (a lifecycle task whose persisted candidate is the winner
+    commit), calling this again integrates it. If a lifecycle task with this id exists, its
+    persisted candidate must be the winner commit, otherwise nothing is offered.
     """
     from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
 
@@ -333,5 +350,11 @@ def _integrate(
         record["refusal"] = str(exc)[:300]
         return record
     record["merge_performed"] = bool(result.get("merge_performed"))
-    record["integration_commit_sha"] = str(result.get("integration_commit_sha") or "")
+    record["integration_commit_sha"] = str(
+        result.get("integration_commit_sha") or result.get("integration_result_sha") or ""
+    )
+    record["integration_status"] = str(result.get("status") or "")
     return record
+
+
+_integrate = integrate_swarm_winner  # backward-compatible private name
