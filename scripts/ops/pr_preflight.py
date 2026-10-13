@@ -8,15 +8,20 @@ Runs the ceremony checks that most often fail a PR in CI, before the push:
 2. ``merge_lane``: whether a ``NEXUS_MERGE_LANE_V1`` block is present and passes
    the trusted lane gate. Preflight never mints a lane binding or hash.
 3. ``issue``: the bound Issue is open and carries the evidence-universe marker
-   that ``nexus-certify markers`` currently expects.
-4. ``freshness``: the head descends from the base ref tip (Core and the trusted
-   executor both require it).
+   that the pinned ``nexus-certify markers --check`` expects. ``nexus-certify``
+   is resolved at the ref Nexus-new pins (``nexus-certify-ref``), never from
+   whatever happens to be on PATH; a certify failure is a FAIL, not a SKIP.
+4. ``freshness``: Core's rule (nexus-core 9942db7 ``_resolve_base_and_head``):
+   the head has exactly one merge-base with the base tip, else
+   ``BASE_REF_NOT_ANCESTOR``. A head merely behind the tip is INFO here; the
+   trusted executor's stricter tip-as-ancestor rule is reported by
+   ``git_identity``.
 5. ``dependency_contract``: the trusted controller's dependency-contract check.
 6. ``git_identity``: the unprivileged executor's Git identity check.
 7. ``static_ruff`` / ``static_pyright`` / ``static_bandit``: the exact-base
    regression comparison on changed files, printing the new findings.
 
-Every check reports PASS, FAIL or SKIP with a one-line fix. Exit status is 1
+Every check reports PASS, FAIL, INFO or SKIP with a one-line fix. Exit status is 1
 when any check FAILs, otherwise 0. The gate code itself is never modified:
 validators are loaded from the base ref's copy of the trusted scripts (the
 same "default branch" copy CI runs) and the static comparison is classified
@@ -49,6 +54,7 @@ SCHEMA = "nexus.pr_preflight.v1"
 PASS = "PASS"
 FAIL = "FAIL"
 SKIP = "SKIP"
+INFO = "INFO"
 
 # Reason codes. The Core names mirror nexus-core PR #246
 # (product/clients/gate_diagnostics.py); keep them here so they are easy to
@@ -59,6 +65,8 @@ ISSUE_MISSING_EVIDENCE_UNIVERSE = "ISSUE_MISSING_EVIDENCE_UNIVERSE"
 ISSUE_EVIDENCE_UNIVERSE_STALE = "ISSUE_EVIDENCE_UNIVERSE_STALE"
 ISSUE_EVIDENCE_UNIVERSE_BINDING_MALFORMED = "ISSUE_EVIDENCE_UNIVERSE_BINDING_MALFORMED"
 BASE_REF_NOT_ANCESTOR = "BASE_REF_NOT_ANCESTOR"
+CERTIFY_UNRESOLVED = "CERTIFY_UNRESOLVED"
+CERTIFY_MARKERS_FAILED = "CERTIFY_MARKERS_FAILED"
 # Local codes for gates whose CI message has no stable reason code.
 DEPENDENCY_CONTRACT_DRIFT = "DEPENDENCY_CONTRACT_DRIFT"
 EXECUTOR_GIT_IDENTITY_MISMATCH = "EXECUTOR_GIT_IDENTITY_MISMATCH"
@@ -68,6 +76,11 @@ STATIC_NEW_REGRESSION = "NEW_REGRESSION"
 TRUSTED_LANE_GATE_PATH = "scripts/ops/trusted_merge_lane_gate.py"
 TRUSTED_ANCHOR_PATH = "scripts/ops/trusted_deletion_anchor.py"
 TOOL_GATE_PATH = "scripts/ops/exact_base_tool_gate.py"
+# Where Nexus-new pins nexus-core (the Core gates and the certify build).
+CERTIFY_PIN_WORKFLOW = ".github/workflows/nexus-core-issue-completion.yml"
+CERTIFY_PIN_RE = re.compile(r"nexus-certify-ref:\s*[\"']?([0-9a-f]{40})[\"']?\s*$", re.MULTILINE)
+CERTIFY_REPO_URL = "git+https://github.com/James3014/nexus-core"
+HEX40_RE = re.compile(r"^[0-9a-f]{40}$")
 
 # Source of truth: nexus-core .github/actions/issue-gate/action.yml ("resolve"
 # step). The gate requires exactly one match of this pattern in the PR body.
@@ -349,36 +362,72 @@ def check_merge_lane(ctx: Context) -> CheckResult:
     )
 
 
-def _resolve_nexus_certify(explicit: str | None) -> str | None:
-    candidates = [explicit, os.environ.get("NEXUS_CERTIFY"), shutil.which("nexus-certify")]
-    candidates.append(str(Path.home() / "workspace/nexus-core/.venv/bin/nexus-certify"))
-    for candidate in candidates:
-        if candidate and Path(candidate).is_file() and os.access(candidate, os.X_OK):
-            return candidate
-    return None
+def _certify_pin(ctx: Context) -> tuple[str | None, str]:
+    """The nexus-core commit Nexus-new pins as ``nexus-certify-ref`` (base ref copy)."""
+    refs: set[str] = set()
+    for rev in (ctx.base_sha, ctx.head_sha):
+        text = _git(ctx.repo, "show", f"{rev}:{CERTIFY_PIN_WORKFLOW}", check=False).stdout
+        refs = set(CERTIFY_PIN_RE.findall(text))
+        if refs:
+            break
+    if len(refs) == 1:
+        return next(iter(refs)), ""
+    if not refs:
+        return None, f"no nexus-certify-ref found in {CERTIFY_PIN_WORKFLOW}"
+    return None, f"{CERTIFY_PIN_WORKFLOW} pins several nexus-certify-ref values: {sorted(refs)}"
 
 
-def _expected_markers(ctx: Context, issue: int) -> tuple[dict[str, Any] | None, str]:
-    tool = _resolve_nexus_certify(ctx.nexus_certify)
+def _resolve_nexus_certify(ctx: Context) -> tuple[list[str] | None, str, str]:
+    """Return (argv prefix, pinned ref or 'override', error).
+
+    An explicit --nexus-certify / NEXUS_CERTIFY path is an override. Otherwise
+    certify is run at the pinned ref through ``uvx`` (uv caches the build), so
+    version skew with whatever is installed locally cannot change the verdict.
+    """
+    explicit = ctx.nexus_certify or os.environ.get("NEXUS_CERTIFY")
+    if explicit:
+        if Path(explicit).is_file() and os.access(explicit, os.X_OK):
+            return [explicit], "override", ""
+        return None, "override", f"nexus-certify override {explicit} is not an executable file"
+    ref, error = _certify_pin(ctx)
+    if ref is None:
+        return None, "", error
+    uvx = shutil.which("uvx")
+    if uvx is None:
+        return None, ref, "uvx not found on PATH"
+    return [uvx, "--from", f"{CERTIFY_REPO_URL}@{ref}", "nexus-certify"], ref, ""
+
+
+def _expected_markers(ctx: Context, issue: int) -> tuple[dict[str, Any] | None, str, str, bool]:
+    """Run ``nexus-certify markers``; return (payload, error, pinned ref, resolution_failed)."""
+    tool, ref, error = _resolve_nexus_certify(ctx)
     if tool is None:
-        return None, "nexus-certify not found"
-    help_text = subprocess.run(
-        [tool, "markers", "--help"], capture_output=True, text=True, check=False
-    ).stdout
-    command = [tool, "markers", "--repo", str(ctx.repo), "--issue", str(issue), "--json"]
-    # nexus-core #246 adds a read-only `markers --check`; use it when present and
-    # fall back to comparing against the plain marker output otherwise.
-    if "--check" in help_text and ctx.issue_json is None:
+        return None, error, ref, True
+    command = [*tool, "markers", "--repo", str(ctx.repo), "--issue", str(issue), "--json"]
+    # `markers --check` exists at the pinned ref (nexus-core 9942db7); it reads the live
+    # Issue itself, so it is skipped for offline --issue-json runs and, for an
+    # override build, when that build predates it.
+    use_check = ctx.issue_json is None
+    if use_check and ref == "override":
+        help_text = subprocess.run(
+            [*tool, "markers", "--help"], capture_output=True, text=True, check=False
+        ).stdout
+        use_check = "--check" in help_text
+    if use_check:
         command.append("--check")
-    proc = subprocess.run(command, capture_output=True, text=True, check=False)
+    try:
+        proc = subprocess.run(command, capture_output=True, text=True, check=False, timeout=300)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return None, f"nexus-certify could not run: {exc}", ref, False
     try:
         payload = json.loads(proc.stdout)
     except json.JSONDecodeError:
-        return None, f"nexus-certify markers failed: {(proc.stderr or proc.stdout).strip()[:300]}"
+        return None, (proc.stderr or proc.stdout).strip()[:300], ref, False
     if not isinstance(payload, dict):
-        return None, "nexus-certify markers returned non-object JSON"
-    payload["_tool"] = tool
-    return payload, ""
+        return None, "nexus-certify markers returned non-object JSON", ref, False
+    payload["_tool"] = " ".join(tool)
+    payload["_ref"] = ref
+    return payload, "", ref, False
 
 
 def _fetch_issue(ctx: Context, issue: int) -> dict[str, Any]:
@@ -420,21 +469,58 @@ def check_issue(ctx: Context) -> CheckResult:
             f"Issue #{issue} is {data.get('state')}",
             "reopen the Issue or bind the PR to an open Issue",
         )
-    expected, error = _expected_markers(ctx, issue)
+    expected, error, ref, unresolved = _expected_markers(ctx, issue)
     if expected is None:
+        pin_hint = f"@{ref[:12]}" if ref and ref != "override" else ""
+        if unresolved:
+            return CheckResult(
+                name,
+                FAIL,
+                CERTIFY_UNRESOLVED,
+                f"cannot resolve nexus-certify at the pinned ref: {error}",
+                f"install uv, then run `uvx --from {CERTIFY_REPO_URL}@<nexus-certify-ref> "
+                "nexus-certify --help` once to cache it (or pass --nexus-certify PATH to an "
+                "executable built at that ref)",
+            )
         return CheckResult(
             name,
-            SKIP,
-            detail=f"Issue #{issue} is open; marker not checked: {error}",
-            fix="install nexus-certify or pass --nexus-certify PATH",
+            FAIL,
+            CERTIFY_MARKERS_FAILED,
+            f"Issue #{issue} is open; nexus-certify{pin_hint} markers failed: {error}",
+            f"run `uvx --from {CERTIFY_REPO_URL}@{ref or '<nexus-certify-ref>'} nexus-certify "
+            f"markers --issue {issue} --check` and fix what it reports",
         )
     expected_line = str(expected.get("issue_marker") or "")
     if not expected_line:
         return CheckResult(
             name,
-            SKIP,
-            detail="nexus-certify markers returned no issue_marker",
-            fix="run `nexus-certify markers --issue N --json` and inspect",
+            FAIL,
+            CERTIFY_MARKERS_FAILED,
+            "nexus-certify markers returned no issue_marker",
+            f"run `nexus-certify markers --issue {issue} --json` at the pinned ref and inspect",
+        )
+    certify_check = expected.get("issue_check")
+    if isinstance(certify_check, dict) and certify_check.get("status") != "MATCH":
+        status = str(certify_check.get("status"))
+        codes = {
+            "MISSING": ISSUE_MISSING_EVIDENCE_UNIVERSE,
+            "STALE": ISSUE_EVIDENCE_UNIVERSE_STALE,
+            "MALFORMED": ISSUE_EVIDENCE_UNIVERSE_BINDING_MALFORMED,
+        }
+        return CheckResult(
+            name,
+            FAIL,
+            codes.get(status, CERTIFY_MARKERS_FAILED),
+            f"Issue #{issue} evidence-universe marker is {status} (nexus-certify markers --check)",
+            str(certify_check.get("remediation") or f"use exactly: {expected_line}"),
+            {"expected_marker": expected_line, "nexus_certify": expected.get("_tool")},
+        )
+    if isinstance(certify_check, dict):
+        return CheckResult(
+            name,
+            PASS,
+            detail=f"Issue #{issue} open; evidence marker current (certify @{str(ref)[:12]})",
+            data={"expected_marker": expected_line, "nexus_certify": expected.get("_tool")},
         )
     body = str(data.get("body") or "")
     value, malformed, _count = parse_evidence_marker(body)
@@ -472,21 +558,38 @@ def check_issue(ctx: Context) -> CheckResult:
 
 
 def check_freshness(ctx: Context) -> CheckResult:
+    """Core's rule: exactly one merge-base between the base tip and the head.
+
+    Source of truth: nexus-core 9942db7 product/clients/local_golden_path.py
+    ``_resolve_base_and_head`` (``git merge-base --all``; none or several fail
+    ``BASE_REF_NOT_ANCESTOR``). Merely being behind the tip satisfies Core. The
+    trusted executor still requires the tip as ancestor; ``git_identity`` owns that.
+    """
     name = "freshness"
     behind = int(_git(ctx.repo, "rev-list", "--count", f"{ctx.head_sha}..{ctx.base_sha}").stdout)
-    ancestor = _git(
-        ctx.repo, "merge-base", "--is-ancestor", ctx.base_sha, ctx.head_sha, check=False
-    )
-    data = {"behind": behind, "base_sha": ctx.base_sha}
-    if ancestor.returncode == 0:
+    proc = _git(ctx.repo, "merge-base", "--all", ctx.base_sha, ctx.head_sha, check=False)
+    bases = proc.stdout.split() if proc.returncode == 0 else []
+    data = {"behind": behind, "base_sha": ctx.base_sha, "merge_bases": bases}
+    if len(bases) != 1 or not HEX40_RE.fullmatch(bases[0]):
+        problem = "shares no history with" if not bases else f"has {len(bases)} merge-bases with"
+        return CheckResult(
+            name,
+            FAIL,
+            BASE_REF_NOT_ANCESTOR,
+            f"{ctx.base_ref} at {ctx.base_sha} {problem} HEAD {ctx.head_sha}",
+            f"rebase onto {ctx.base_sha} (no criss-cross merges: Core needs a single merge-base)",
+            data,
+        )
+    if behind == 0:
         return CheckResult(name, PASS, detail=f"head descends from {ctx.base_ref}", data=data)
     return CheckResult(
         name,
-        FAIL,
-        BASE_REF_NOT_ANCESTOR,
-        f"branch is {behind} commit(s) behind {ctx.base_ref}; Core and the trusted executor require the tip as ancestor",
-        f"git merge {ctx.base_ref} (no force-push), then push",
-        data,
+        INFO,
+        detail=(
+            f"behind {ctx.base_ref} by {behind} commit(s); Core accepts a single merge-base "
+            "(the trusted executor is stricter: see git_identity)"
+        ),
+        data=data,
     )
 
 
@@ -553,7 +656,8 @@ def check_git_identity(ctx: Context) -> CheckResult:
             name,
             FAIL,
             EXECUTOR_GIT_IDENTITY_MISMATCH,
-            f"base {ctx.base_sha[:12]} is not an ancestor of head (executor ancestry check)",
+            f"base {ctx.base_sha[:12]} is not an ancestor of head (executor ancestry check; "
+            "trusted_deletion_anchor requires the base tip as ancestor, unlike Core)",
             f"git merge {ctx.base_ref} (no force-push), then push",
         )
     expected = _git(ctx.repo, "rev-parse", f"{ctx.head_sha}:tests", check=False).stdout.strip()
@@ -893,7 +997,7 @@ def _render_text(report: dict[str, Any]) -> str:
         lines.append(f"{check['status']:<4}  {check['check']}{code}: {check['detail']}")
         for finding in check["data"].get("new_findings", [])[:50]:
             lines.append(f"        new: {finding}")
-        if check["status"] != PASS and check["fix"]:
+        if check["status"] not in (PASS, INFO) and check["fix"]:
             lines.append(f"      fix: {check['fix']}")
     if report.get("suggested_blocks"):
         lines.append("Paste-ready PR body bindings (no lane binding; that stays with the Owner):")
