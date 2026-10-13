@@ -363,6 +363,8 @@ def test_self_check_overrides(tmp_path, fx):
 
 
 GATE_SOURCE = """
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 
 

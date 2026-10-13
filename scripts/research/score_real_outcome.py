@@ -141,6 +141,10 @@ def main(argv: list[str] | None = None) -> int:
             log(f"{key}: REFUSED_SEAL {exc}")
             rc = 3
             continue
+        except Exception as exc:  # noqa: BLE001 - one task must not stop the batch
+            log(f"{key}: SCORER_ERROR {type(exc).__name__}: {exc}")
+            rc = 4
+            continue
         result["timing"]["memory_wait_seconds"] = waited
         ros.write_receipt(args.out, result)
     return rc

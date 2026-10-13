@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterable, Mapping, Protocol, Sequence
 
-SCORER_VERSION = "1.0.0"
+SCORER_VERSION = "1.0.1"
 RECEIPT_SCHEMA = "nexus.research.real_outcome.v1"
 RECEIPT_SEAL_SCHEMA = "nexus.research.real_outcome_seal.v1"
 SPEC_RELATIVE_PATH = "docs/research/REAL_OUTCOME_SCORER_SPEC.md"
@@ -619,6 +619,7 @@ sys.path.insert(0, str(root))
 spec = importlib.util.spec_from_file_location(
     "trusted_pr_impact_gate", root / "scripts" / "ops" / "pr_impact_gate.py")
 mod = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = mod
 spec.loader.exec_module(mod)
 plan = mod.build_impact_plan(json.loads(sys.stdin.read()), root=root)
 print(json.dumps(dataclasses.asdict(plan), sort_keys=True))
