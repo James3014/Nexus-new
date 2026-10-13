@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: GitHub Actions Workflows & Operational Lanes
-description: Current inventory and trigger classification of all 13 GitHub Actions workflows, including Fast Start v2 shadow/invalidation/reconciliation lanes, exact-base Pytest impact selection, G2 published-history audit, and trusted deletion-evidence bootstrap.
+description: Current inventory and trigger classification of all 22 GitHub Actions workflows, including Fast Start v2 shadow/invalidation/reconciliation lanes, exact-base Pytest impact selection, G2 published-history audit, and trusted deletion-evidence bootstrap.
 tags: [workflows, github-actions, ci-cd, operational-lanes]
 openwiki:
   roles: [architecture, operations, testing]
@@ -15,7 +15,7 @@ openwiki:
 
 # GitHub Actions Workflows & Operational Lanes
 
-The repository currently contains **all 13 GitHub Actions workflows** under `.github/workflows/`. Display names and trigger modes below are derived from the physical YAML at the synchronized GitHub revision; they are not inferred from filenames or historical workflow intent.
+The repository currently contains **all 22 GitHub Actions workflows** under `.github/workflows/`. Display names and trigger modes below are derived from the physical YAML at the synchronized GitHub revision; they are not inferred from filenames or historical workflow intent.
 
 ---
 
@@ -24,16 +24,25 @@ The repository currently contains **all 13 GitHub Actions workflows** under `.gi
 | Workflow File | Display Name | Trigger Keys (`on:`) | Operational Mode | Current Role |
 | :--- | :--- | :--- | :--- | :--- |
 | `benchmark-ci.yml` | 📊 Nexus Benchmark CI | `schedule` (`0 18 * * *`), `workflow_dispatch` | Scheduled & Manual | Scheduled/manual benchmark evaluation |
+| `deletion-guard.yml` | Deletion guard | `pull_request_target` (`main`; `opened`, `synchronize`, `reopened`, `labeled`, `unlabeled`, `edited`) | Event-driven | Default-branch deletion guard; calls the GitHub REST API only and never checks out or executes PR code |
 | `fast-start-v2-invalidator.yml` | Fast Start v2 Invalidator | `push` (`main`), `pull_request_target`, `issues`, `issue_comment`, `schedule` (`17 * * * *`), `workflow_dispatch` | Scheduled, Event-driven & Manual | Trusted-default-branch Fast Start wakeup hints plus fenced canonical advisory-cache reconciliation |
 | `fast-start-v2-shadow.yml` | Fast Start v2 Shadow | `pull_request`, `workflow_dispatch` | Event-driven & Manual | Read-only deterministic/live shadow proof for Fast Start v2 |
 | `git-history-secret-audit.yml` | Git History Secret Audit | `pull_request`, `workflow_dispatch` | Event-driven & Manual | G2 full published-ref secret-history evidence runner; least privilege and no merge/release authority |
+| `golden-finding-owners.yml` | Golden finding owner freshness | `schedule` (`41 4 * * *`), `workflow_dispatch` | Scheduled & Manual | Read-only observation of Golden finding owner Issues; never edits content, never blocks a PR |
+| `hybrid-replication-capture-reusable.yml` | Nexus Hybrid Replication Capture (reusable) | `workflow_call` | Reusable | Reusable hybrid-replication capture job called by `hybrid-replication-capture.yml` |
+| `hybrid-replication-capture.yml` | Nexus Hybrid Replication Capture | `issues` (`opened`, `edited`) | Event-driven | Issue-triggered hybrid-replication capture |
 | `lint.yml` | Nexus Exact-Base Ruff CI | `push`, `pull_request`, `workflow_dispatch` | Event-driven & Manual | Exact-base Ruff/static lint lane |
+| `nexus-core-effectiveness-g1.yml` | Nexus Core Effectiveness G1 | `pull_request` (`main`, path-filtered), `workflow_dispatch` | Event-driven & Manual | Controlled-mutation matrix for Nexus Core effectiveness G1 |
+| `nexus-core-issue-completion.yml` | Nexus Core issue completion | `pull_request_target` (`opened`, `synchronize`, `reopened`), `repository_dispatch` (`nexus-core-precheck`) | Event-driven | Nexus Core issue gate: signed receipt production and verification |
 | `nexus-smoke.yml` | Nexus Smoke Benchmark | `workflow_dispatch` | Manual (archived) | ARCHIVED 2026-10-13 legacy-engine: the legacy NexusEngine smoke benchmark reported a hard-coded PASS; push/nightly triggers removed, dispatch only fails with the archive notice (`ARCHIVED_2026-10-13-legacy-engine.md`) |
 | `openwiki-update.yml` | OpenWiki Manual Update | `workflow_dispatch` | Manual-Only | Pinned OpenWiki generation with containment checks and artifact upload |
 | `policy-lane-gate.yml` | Policy Lane Gate CI | `push`, `pull_request`, `workflow_dispatch` | Event-driven & Manual | Policy-contract validation lane |
 | `pytest.yml` | Nexus Pytest CI | `push`, `pull_request`, `workflow_dispatch`, `schedule` (`17 3 * * *`) | Scheduled, Event-driven & Manual | Exact-base impact gate followed by revision-bound Pytest verification |
+| `repository-intelligence-comment.yml` | Repository Intelligence comment | `pull_request_target` (`main`; `opened`, `synchronize`, `reopened`, `ready_for_review`) | Event-driven | Default-branch sticky Repository Intelligence PR comment |
+| `repository-intelligence.yml` | Repository Intelligence | `pull_request` (`opened`, `synchronize`, `reopened`, `ready_for_review`) | Event-driven | Repository Intelligence snapshot and guard-delta jobs |
 | `security.yml` | Nexus Exact-Base Bandit CI | `push`, `pull_request`, `workflow_dispatch` | Event-driven & Manual | Exact-base Bandit security scan |
 | `trusted-deletion-anchor.yml` | Trusted deletion-evidence bootstrap anchor | `pull_request_target` (`opened`, `synchronize`, `reopened`, `ready_for_review`) | Event-driven | Trusted controller → unprivileged executor → trusted verification path for deletion evidence |
+| `trusted-impact-gate.yml` | Trusted exact-base impact gate | `pull_request_target` (`main`; `opened`, `synchronize`, `reopened`, `ready_for_review`) | Event-driven | Default-branch trusted impact gate; head code runs only in an unprivileged executor |
 | `typecheck.yml` | Nexus Exact-Base Pyright CI | `push`, `pull_request`, `workflow_dispatch` | Event-driven & Manual | Exact-base Pyright type-check lane |
 | `wiki-governance.yml` | Wiki Exact-Base Governance CI | `push`, `pull_request`, `workflow_dispatch` | Event-driven & Manual | Governed-Wiki structure/boundary verification |
 

@@ -6,6 +6,6 @@ ENTRY: dict[str, object] = {
     "file": "tests/ops/test_stage_f_flow.py",
     "disposition": "quarantine",
     "issue": "#1928",
-    "cause": "passes in isolation on macOS at current main but fails in the Linux full-suite run (order-dependent state pollution or Linux-only environment difference); needs bisect",
+    "cause": "end-to-end delivery gate against the live checkout: needs a local main branch (CI checkout lacks it, git exit 128), runs the functional suite inside, and seals governance / writes .nexus state without restoring it",
     "tests": ("test_stage_f",),
 }

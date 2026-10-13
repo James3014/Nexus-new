@@ -36,7 +36,15 @@ def test_runtime_receipt_reconcile_prunes_skipped_and_restores_success():
     ]
 
 
-def test_quick_payload_skips_flash_style_repair_subset():
+def test_quick_payload_skips_flash_style_repair_subset(monkeypatch):
+    # The benchmark autodata gate reads gitignored .nexus/reports/autodata
+    # manifests that exist in no clean checkout (CI included); it is covered by
+    # its own tests. Here only the quick-payload composition is under test (#1928).
+    monkeypatch.setattr(
+        nexus_pre_flash_gate,
+        "validate_benchmark_autodata_manifest_gate",
+        lambda _repo_root: [nexus_pre_flash_gate._ok("benchmark_autodata_manifest_gate")],
+    )
     payload = nexus_pre_flash_gate.build_payload(Path(".").resolve(), run_repair=False, output_dir="unused")
 
     assert payload["passed"] is True

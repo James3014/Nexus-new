@@ -2,10 +2,5 @@
 
 from __future__ import annotations
 
-ENTRY: dict[str, object] = {
-    "file": "tests/ops/test_openwiki_source_contract.py",
-    "disposition": "quarantine",
-    "issue": "#1928",
-    "cause": "passes in isolation on macOS at current main but fails in the Linux full-suite run (order-dependent state pollution or Linux-only environment difference); needs bisect",
-    "tests": ("test_openwiki_issue10_claims_match_current_inventory",),
-}
+# Fixed in #1928: OpenWiki workflow inventory lists all workflows; the count is derived from the inventory.
+ENTRY = None

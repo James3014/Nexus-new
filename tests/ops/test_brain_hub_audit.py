@@ -173,3 +173,43 @@ def test_brain_hub_manifest_fails_missing_document_and_refs(tmp_path: Path):
 
     assert audit.passed is False
     assert audit.failures == [{"path": "wiki/missing.md", "reason": "manifest_document_missing"}]
+
+
+def _write_runtime_contract(root: Path, order: str) -> None:
+    members = "".join(f'    {phase} = "{phase}"\n' for phase in order)
+    (root / "nexus" / "engine" / "runtime_phase_contract.py").write_text(
+        "from enum import Enum\n\nclass RuntimePhase(str, Enum):\n" + members
+        + "\nRUNTIME_PHASE_FLOW = tuple(RuntimePhase)\n",
+        encoding="utf-8",
+    )
+
+
+def _write_derived_s_stage_pipeline(root: Path) -> None:
+    _write_valid_s_stage_pipeline(root)
+    pipeline = root / "nexus" / "engine" / "pipeline.py"
+    pipeline.write_text(
+        pipeline.read_text(encoding="utf-8").replace(
+            'CANONICAL_STAGE_FLOW = ["S", "P", "X", "D", "R", "A", "C"]\n',
+            "CANONICAL_STAGE_FLOW = [phase.value for phase in RUNTIME_PHASE_FLOW]\n",
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_s_stage_runtime_contract_resolves_derived_stage_flow_in_contract_order(tmp_path: Path):
+    _write_derived_s_stage_pipeline(tmp_path)
+    _write_runtime_contract(tmp_path, "SPDXRAC")
+
+    contract = validate_s_stage_runtime_contract(tmp_path)
+
+    assert contract["checks"]["canonical_stage_flow"] is True
+
+
+def test_s_stage_runtime_contract_rejects_reordered_runtime_phases(tmp_path: Path):
+    _write_derived_s_stage_pipeline(tmp_path)
+    _write_runtime_contract(tmp_path, "SPXDRAC")
+
+    contract = validate_s_stage_runtime_contract(tmp_path)
+
+    assert contract["checks"]["canonical_stage_flow"] is False
+    assert any(item["check"] == "canonical_stage_flow" for item in contract["failures"])

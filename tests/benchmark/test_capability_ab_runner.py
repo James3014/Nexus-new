@@ -5769,10 +5769,10 @@ def test_run_with_nexus_codex_provider_delivers_nexus_context(tmp_path: Path, mo
     assert "autoreason" not in receipts
     assert "ddtree" not in receipts
     assert "ultra_review" not in receipts
-    assert receipts["artifact_gate"]["gate_passed"] is True
-    assert receipts["claim_gate"]["gate_passed"] is True
-    assert receipts["delivery_gate"]["gate_passed"] is True
-    assert receipts["mempalace_gate"]["gate_passed"] is True
+    for gate in ("artifact_gate", "claim_gate", "delivery_gate", "mempalace_gate"):  # #453 fail-closed (#1928)
+        assert receipts[gate]["evidence_refs"], gate
+        assert receipts[gate]["gate_passed"] is False, gate
+        assert receipts[gate]["failure_reason"], gate
     assert out["research_preflight_present"] is True
     assert out["research_preflight_requires_evidence"] is True
     assert out["research_session_logged"] is True
@@ -33545,8 +33545,8 @@ def test_nexus_with_local_model_adapter_alone_no_call(tmp_path, monkeypatch):
     ad = fin.get("local_model_adapter")
     # Should not call local model or be invoked
     assert ad["adapter_invoked"] is False
-    # Route mode should be fallback/blocked (since local_heal_mode is "disabled")
-    assert ad["route_mode"] == "cloud_assisted_by_local_trace_only"
+    # Blocked: fails closed without a planner signal_snapshot since d9a3bb0e3 (#1928).
+    assert ad["route_mode"] == "local_only_blocked"
 
 
 

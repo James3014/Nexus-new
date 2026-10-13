@@ -156,6 +156,11 @@ def _install(monkeypatch: pytest.MonkeyPatch, *, advisor_only: bool) -> None:
     )
     # Only the admitted identity can be dispatched; the stale default chain is retired.
     monkeypatch.setenv("NEXUS_GEMINI_MODEL_NAME", ADMITTED_MODEL)
+    # BattlesuitGateway resolves NEXUS_OAUTH_PROVIDER=auto by probing localhost Ollama
+    # (/api/tags): "ollama" on a host with a local gateway, "gemini" on a clean CI runner.
+    # The route provider then differs by host and Admission blocks the online call on CI.
+    # Pin the admitted provider so the result no longer depends on the host's Ollama.
+    monkeypatch.setenv("NEXUS_OAUTH_PROVIDER", ADMITTED_PROVIDER)
 
     original_builder = unified_runtime.build_structured_online_invoker
 

@@ -6,6 +6,6 @@ ENTRY: dict[str, object] = {
     "file": "tests/ops/test_clean_wheel_entrypoints.py",
     "disposition": "quarantine",
     "issue": "#1928",
-    "cause": "passes in isolation on macOS at current main but fails in the Linux full-suite run (order-dependent state pollution or Linux-only environment difference); needs bisect",
+    "cause": "console script nexus-cueline-worker dropped in #770; restore needs a trusted dependency snapshot transition (pyproject change) — separate PR",
     "tests": ("test_clean_wheel_contains_and_runs_registered_cli_entrypoints",),
 }

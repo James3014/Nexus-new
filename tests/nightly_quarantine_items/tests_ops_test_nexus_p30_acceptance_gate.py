@@ -2,10 +2,5 @@
 
 from __future__ import annotations
 
-ENTRY: dict[str, object] = {
-    "file": "tests/ops/test_nexus_p30_acceptance_gate.py",
-    "disposition": "quarantine",
-    "issue": "#1928",
-    "cause": "passes in isolation on macOS at current main but fails in the Linux full-suite run (order-dependent state pollution or Linux-only environment difference); needs bisect",
-    "tests": ("test_p30_acceptance_gate_can_block_only_on_required_flash",),
-}
+# Fixed in #1928: brain_hub_audit now resolves the derived CANONICAL_STAGE_FLOW (6a4c3a9a0).
+ENTRY = None

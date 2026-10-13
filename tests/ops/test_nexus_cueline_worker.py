@@ -206,6 +206,8 @@ def test_nexus_cueline_worker_full_pipeline_subprocess(tmp_path: Path):
         "target_repo_root": str(target_root / "cueline-e2e-001"),
         "target_worktree_root": str(target_root),
         "allowed_files": "file1.py",
+        # Self-hosted contracts require an applicable verifier (#1928).
+        "verifier_commands": "python3 -c pass",
         "worker": "codex",
         "state_dir": state_dir,
     }
