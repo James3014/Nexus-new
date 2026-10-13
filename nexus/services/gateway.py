@@ -677,6 +677,10 @@ class BattlesuitGateway:
             return admitted_invoker(context)
 
         workforce_admitted_online_invoker.workforce_dispatcher = True  # type: ignore[attr-defined]
+        # It starts the admitted provider's registered CLI, so it is a physical transport:
+        # the runtime must resolve a physical Online authorization for it, never the
+        # fixture (injected_test_transport) path (nexus-runtime#190).
+        workforce_admitted_online_invoker.physical_provider_transport = True  # type: ignore[attr-defined]
 
         runtime_online_invoker = online_invoker
         # P4: World A mainchain — optional with_nexus Online armor (no new topology).
