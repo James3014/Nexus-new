@@ -4,6 +4,8 @@ import types
 import math
 from contextlib import contextmanager
 
+import pytest
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -451,6 +453,43 @@ try:
     import irys_sdk  # type: ignore # noqa: F401
 except Exception:
     _install_irys_stub()
+
+
+# Process-global NexusEventBus binding (#1928). Binding a non-ephemeral
+# SelfHostedTaskService latches _production_event_root for the whole process
+# (by design: one production event root per process), so a test that binds one
+# under its tmp_path made every later test that binds another root fail with
+# "conflicting production event root" in the full serial suite (nightly run
+# 38429695994: polluter tests/ops/test_swarm_owner_approved_integration.py).
+# Restore the binding after every test; never import the module just for this.
+_EVENT_BUS_MODULE = "nexus.events.transport"
+_EVENT_BUS_BINDING_ATTRS = (
+    "_production_event_root",
+    "_configured_event_root",
+    "_event_log_path",
+    "_event_bind_mode",
+)
+
+
+def _event_bus_class():
+    module = sys.modules.get(_EVENT_BUS_MODULE)
+    return getattr(module, "NexusEventBus", None) if module is not None else None
+
+
+@pytest.fixture(autouse=True)
+def _restore_event_bus_binding():
+    bus = _event_bus_class()
+    saved = (
+        {name: getattr(bus, name, None) for name in _EVENT_BUS_BINDING_ATTRS}
+        if bus is not None
+        else dict.fromkeys(_EVENT_BUS_BINDING_ATTRS)
+    )
+    yield
+    bus = _event_bus_class()
+    if bus is None:
+        return
+    for name, value in saved.items():
+        setattr(bus, name, value)
 
 
 def pytest_collection_modifyitems(config, items):

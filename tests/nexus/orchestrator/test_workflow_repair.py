@@ -1,9 +1,10 @@
 """Tests for Workflow repair, recovery API, Git isolation, preflight binding, and target retention."""
 
-from dataclasses import asdict
 import os
 import subprocess
+from dataclasses import asdict
 from pathlib import Path
+
 import pytest
 
 from nexus.orchestrator.candidate_commit import CandidateCommitter
@@ -791,6 +792,10 @@ def test_hook_permission_fail_closed(tmp_path, monkeypatch):
 
 def test_timeout_dirty_worker_auto_invokes_salvage_and_cleanup(tmp_path, monkeypatch):
     contract, lease, candidate, manager, controller_root, target_root = _scenario(tmp_path)
+    # Pin the target root: resolve_canonical_target_roots ignores requested roots
+    # containing "/tmp" (Linux tmp_path is /tmp/pytest-of-*), falling back to
+    # <cwd>/../nexus-runtime-targets, which cleanup then refuses (CLEANUP_BLOCKED).
+    monkeypatch.setenv("NEXUS_TARGET_ROOT_OVERRIDE", str(target_root))
     target_path = Path(lease.target_worktree)
     state_dir = tmp_path / "state"
     state_dir.mkdir()
@@ -845,6 +850,10 @@ def test_timeout_dirty_worker_auto_invokes_salvage_and_cleanup(tmp_path, monkeyp
 
 def test_failed_dirty_worker_auto_invokes_salvage_and_cleanup(tmp_path, monkeypatch):
     contract, lease, candidate, manager, controller_root, target_root = _scenario(tmp_path)
+    # Pin the target root: resolve_canonical_target_roots ignores requested roots
+    # containing "/tmp" (Linux tmp_path is /tmp/pytest-of-*), falling back to
+    # <cwd>/../nexus-runtime-targets, which cleanup then refuses (CLEANUP_BLOCKED).
+    monkeypatch.setenv("NEXUS_TARGET_ROOT_OVERRIDE", str(target_root))
     target_path = Path(lease.target_worktree)
     state_dir = tmp_path / "state"
     state_dir.mkdir()
@@ -898,6 +907,10 @@ def test_failed_dirty_worker_auto_invokes_salvage_and_cleanup(tmp_path, monkeypa
 
 def test_closeout_salvage_failure_preserves_retained_target_and_error(tmp_path, monkeypatch):
     contract, lease, candidate, manager, controller_root, target_root = _scenario(tmp_path)
+    # Pin the target root: resolve_canonical_target_roots ignores requested roots
+    # containing "/tmp" (Linux tmp_path is /tmp/pytest-of-*), falling back to
+    # <cwd>/../nexus-runtime-targets, which cleanup then refuses (CLEANUP_BLOCKED).
+    monkeypatch.setenv("NEXUS_TARGET_ROOT_OVERRIDE", str(target_root))
     target_path = Path(lease.target_worktree)
     state_dir = tmp_path / "state"
     state_dir.mkdir()
@@ -1110,7 +1123,10 @@ def test_integration_failure_records_failed_without_merge(tmp_path, monkeypatch)
 
 
 def test_recovery_surface_unknown_task_fails_closed(tmp_path):
-    from scripts.engine.commands.self_hosted_actions import run_self_hosted_recover_verified_uncommitted, NexusCliActionError
+    from scripts.engine.commands.self_hosted_actions import (
+        NexusCliActionError,
+        run_self_hosted_recover_verified_uncommitted,
+    )
     state_dir = tmp_path / "state"
     state_dir.mkdir()
 
@@ -1122,9 +1138,11 @@ def test_recovery_surface_unknown_task_fails_closed(tmp_path):
 
 def test_recovery_surface_zero_model_calls_and_maximum_returned_status(tmp_path, monkeypatch):
     monkeypatch.setenv("NEXUS_TARGET_ROOT_OVERRIDE", str(tmp_path / "targets"))
-    from scripts.engine.commands.self_hosted_actions import run_self_hosted_recover_verified_uncommitted
-    from nexus.orchestrator.worktree_manager import WorktreeManager
     from nexus.orchestrator.candidate_verifier import VerifiedCandidateReceipt
+    from nexus.orchestrator.worktree_manager import WorktreeManager
+    from scripts.engine.commands.self_hosted_actions import (
+        run_self_hosted_recover_verified_uncommitted,
+    )
 
     env = os.environ.copy()
     env["GIT_CONFIG_NOSYSTEM"] = "1"

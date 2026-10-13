@@ -105,6 +105,33 @@ def run_shadow() -> list[dict]:
     return results
 
 
+def _scoped_feature_flags(fn, keys):
+    """Restore the process environment after an in-process run (#1928).
+
+    The run toggles NEXUS_ENABLE_* feature flags on os.environ; left set, they
+    changed later behaviour in the same process (full-suite nightly: the P5
+    diversity selector stayed enabled for tests/unit/local_heal).
+    """
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        saved = {key: os.environ.get(key) for key in keys}
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    return wrapper
+
+
+run_shadow = _scoped_feature_flags(run_shadow, ("NEXUS_ENABLE_P5_DIVERSITY_SELECTION",))
+
+
 if __name__ == "__main__":
     results = run_shadow()
     with open("artifacts/effect_reports/p5_real_candidate_shadow_v0.jsonl", "w") as f:

@@ -7,11 +7,14 @@ from unittest.mock import patch, MagicMock
 from scripts.engine.nexus_cli import AsyncProcessExecutor
 
 @pytest.mark.anyio
-async def test_uv_cache_env_isolation():
+async def test_uv_cache_env_isolation(monkeypatch):
     """
     TDD Phase (RED): Verify that AsyncProcessExecutor injects the isolated
     UV_CACHE_DIR environment variable to safeguard against global permission blocks.
     """
+    # The executor only fills a missing UV_CACHE_DIR (setdefault); CI runners
+    # (astral-sh/setup-uv) export their own, so clear it to exercise the default.
+    monkeypatch.delenv("UV_CACHE_DIR", raising=False)
     executor = AsyncProcessExecutor()
     
     # We patch asyncio.create_subprocess_exec to inspect the injected env

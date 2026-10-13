@@ -340,3 +340,4 @@
 | tests/ops/test_nightly_quarantine_items_layout.py | tests/ops/test_nightly_quarantine_items_layout.py | active | medium | test_contract |
 | tests/nightly_quarantine_entries.py | tests/ops/test_nightly_quarantine.py, tests/ops/test_nightly_quarantine_items_layout.py | active | medium | nightly_quarantine_entries_compat_shim |
 | nexus/core/policy_drift.py | tests/test_governance_telemetry_closure.py, tests/test_semantic_receipt_gate.py | active | medium | dual_gate_replay_artifact_location_contract |
+| scripts/effects | tests/effects, tests/unit/local_heal/test_p4_committee_real_winner_path.py | active | low | effects_shadow_scripts_scope_feature_flags |
