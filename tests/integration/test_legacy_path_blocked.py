@@ -50,6 +50,9 @@ NON_MODEL_JSON_PARSE_ALLOWLIST = {
         "TargetedFallbackGate.should_fallback",
         "response.read().decode('utf-8')",
     ),
+    # HTTP envelope: Ollama /api/chat body (#1985); the model text in message.content
+    # is parsed separately by _parse_json_object.
+    ("nexus/engine/llm_judge_providers.py", "OllamaJudgeProvider._chat", "raw"),
     # HTTP envelope: JEV structured-answer API body (answers/usage), schema-checked field by field below.
     ("nexus/research/hybrid_replication_live.py", "_jev_request", "response.read()"),
     # File read: local_assist response.json receipt written by the executor, not raw model text.
