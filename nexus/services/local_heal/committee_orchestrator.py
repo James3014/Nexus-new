@@ -1,15 +1,15 @@
-from typing import Any, Callable, List, Dict
-from copy import deepcopy
 import hashlib
 import logging
 import os
-import time
-from nexus.services.local_heal.interface import IPhase, PhaseResult
+from copy import deepcopy
+from typing import Any, Dict
+
+from nexus.committee.controller import CommitteeControllerV263
+from nexus.contracts.model_output_json import parse_model_json_object
+from nexus.services.local_heal.committee_routed_tool import build_committee_member_demands
 from nexus.services.local_heal.context import HealContext
 from nexus.services.local_heal.orchestrator import HealOrchestrator
 from nexus.services.local_heal.output_understanding import build_output_understanding_result
-from nexus.committee.controller import CommitteeControllerV263
-from nexus.services.local_heal.committee_routed_tool import build_committee_member_demands
 
 COMMITTEE_ROUTE_SCHEMA = "nexus.local_heal.committee_trace.v1"
 COMMITTEE_ROUTE_POLICY = "qwen_3b_judge_plus_qwen_7b_plus_deepseek_6_7b"
@@ -27,11 +27,21 @@ def _compute_patch_hash(patch_text: str) -> str:
     return hashlib.sha256(patch_text.encode("utf-8")).hexdigest()[:16] if patch_text else ""
 
 
-def _direct_ollama_generate(system_prompt: str, user_prompt: str, *, model: str = "", timeout: int | None = None, options=None, api_type: str = "generate", **kwargs) -> str:
+def _direct_ollama_generate(
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    model: str = "",
+    timeout: int | None = None,
+    options=None,
+    api_type: str = "generate",
+    **kwargs,
+) -> str:
     """C6AX: Minimal direct Ollama API call via urllib for D/A committee model invocation.
     Used when no provider is available (local_committee_only bridge path)."""
     import json as _json
     import urllib.request as _urlreq
+
     if api_type == "chat":
         endpoint = "/api/chat"
         messages = []
@@ -81,17 +91,19 @@ class CommitteeOrchestrator(HealOrchestrator):
     實施 Verifier-backed Committee Search。
     在 Patch Synthesis 階段進行多樣本採樣與 Borda 選優。
     """
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.k = None
 
     def _invoke_diagnosis_model(self, model: str, ctx: HealContext) -> dict:
         """Invoke a single model for diagnosis. Returns diagnosis dict."""
-        from nexus.services.local_heal.llm_client import OllamaLLMClient
         from nexus.engine.local_model_policy import LocalModelPolicy
+        from nexus.services.local_heal.llm_client import OllamaLLMClient
 
         decision = LocalModelPolicy.select_model(
-            task_type="swe_repair", phase="diagnosis",
+            task_type="swe_repair",
+            phase="diagnosis",
             context={"reasoning_mode": getattr(ctx.op, "reasoning_mode", "INTUITIVE")},
         )
         timeout = decision.get("timeout_seconds", 120)
@@ -114,10 +126,11 @@ class CommitteeOrchestrator(HealOrchestrator):
                 timeout=timeout,
                 options=options,
             )
-            import json, re
+            import re
+
             match = re.search(r"\{.*\}", response or "", re.DOTALL)
             if match:
-                parsed = json.loads(match.group(0))
+                parsed = parse_model_json_object(match.group(0), mode="strict")
                 return {
                     "root_cause": str(parsed.get("root_cause", ""))[:500],
                     "confidence": float(parsed.get("confidence", 0.5)),
@@ -125,14 +138,28 @@ class CommitteeOrchestrator(HealOrchestrator):
                     "model": model,
                     "status": "success",
                 }
-            return {"root_cause": (response or "")[:500], "confidence": 0.3, "evidence": "", "model": model, "status": "parsed_failed"}
+            return {
+                "root_cause": (response or "")[:500],
+                "confidence": 0.3,
+                "evidence": "",
+                "model": model,
+                "status": "parsed_failed",
+            }
         except Exception as e:
-            return {"root_cause": "", "confidence": 0.0, "evidence": "", "model": model, "status": f"error:{type(e).__name__}"}
+            return {
+                "root_cause": "",
+                "confidence": 0.0,
+                "evidence": "",
+                "model": model,
+                "status": f"error:{type(e).__name__}",
+            }
 
     def diagnose_with_committee(self, ctx: HealContext) -> dict | None:
         """C6AD: Multi-model independent diagnosis → Borda selects best."""
         route_ctx = ctx.op.route_context if hasattr(ctx.op, "route_context") else {}
-        signal_snapshot = route_ctx.get("signal_snapshot", {}) if isinstance(route_ctx, dict) else {}
+        signal_snapshot = (
+            route_ctx.get("signal_snapshot", {}) if isinstance(route_ctx, dict) else {}
+        )
         gate_open = bool(signal_snapshot.get("diagnosis_committee_enabled", False))
         # C6AW: telemetry — record gate state regardless of outcome
         ctx.op._diagnosis_committee_enabled_runtime = gate_open
@@ -151,7 +178,9 @@ class CommitteeOrchestrator(HealOrchestrator):
         for model in diagnosis_models:
             result = self._invoke_diagnosis_model(model, ctx)
             diagnoses.append(result)
-            logger.info(f"  📋 Diagnosis from {model}: status={result.get('status', 'unknown')} conf={result.get('confidence', 0)}")
+            logger.info(
+                f"  📋 Diagnosis from {model}: status={result.get('status', 'unknown')} conf={result.get('confidence', 0)}"
+            )
 
         selected = _borda_select_diagnosis(diagnoses)
         if not selected or selected.get("status", "").startswith("error"):
@@ -171,16 +200,19 @@ class CommitteeOrchestrator(HealOrchestrator):
         # C6AW: telemetry — record successful invocation
         ctx.op._diagnosis_committee_invoked = True
         ctx.op._diagnosis_committee_selected_model = selected.get("model", "")
-        logger.info(f"  🏆 Diagnosis selected: model={selected['model']} conf={selected.get('confidence', 0)}")
+        logger.info(
+            f"  🏆 Diagnosis selected: model={selected['model']} conf={selected.get('confidence', 0)}"
+        )
         return selected
 
     def _invoke_audit_model(self, model: str, ctx: HealContext) -> dict:
         """Invoke a single model for audit/verification. Returns audit dict."""
-        from nexus.services.local_heal.llm_client import OllamaLLMClient
         from nexus.engine.local_model_policy import LocalModelPolicy
+        from nexus.services.local_heal.llm_client import OllamaLLMClient
 
         decision = LocalModelPolicy.select_model(
-            task_type="swe_repair", phase="audit",
+            task_type="swe_repair",
+            phase="audit",
             context={"reasoning_mode": getattr(ctx.op, "reasoning_mode", "INTUITIVE")},
         )
         timeout = decision.get("timeout_seconds", 120)
@@ -205,10 +237,11 @@ class CommitteeOrchestrator(HealOrchestrator):
                 timeout=timeout,
                 options=options,
             )
-            import json, re
+            import re
+
             match = re.search(r"\{.*\}", response or "", re.DOTALL)
             if match:
-                parsed = json.loads(match.group(0))
+                parsed = parse_model_json_object(match.group(0), mode="strict")
                 verdict = str(parsed.get("verdict", "fail")).lower()
                 return {
                     "verdict": "pass" if verdict == "pass" else "fail",
@@ -217,14 +250,28 @@ class CommitteeOrchestrator(HealOrchestrator):
                     "model": model,
                     "status": "success",
                 }
-            return {"verdict": "fail", "confidence": 0.3, "reason": (response or "")[:500], "model": model, "status": "parsed_failed"}
+            return {
+                "verdict": "fail",
+                "confidence": 0.3,
+                "reason": (response or "")[:500],
+                "model": model,
+                "status": "parsed_failed",
+            }
         except Exception as e:
-            return {"verdict": "fail", "confidence": 0.0, "reason": "", "model": model, "status": f"error:{type(e).__name__}"}
+            return {
+                "verdict": "fail",
+                "confidence": 0.0,
+                "reason": "",
+                "model": model,
+                "status": f"error:{type(e).__name__}",
+            }
 
     def audit_with_committee(self, ctx: HealContext) -> dict | None:
         """C6AE: Multi-model independent audit → Borda selects best."""
         route_ctx = ctx.op.route_context if hasattr(ctx.op, "route_context") else {}
-        signal_snapshot = route_ctx.get("signal_snapshot", {}) if isinstance(route_ctx, dict) else {}
+        signal_snapshot = (
+            route_ctx.get("signal_snapshot", {}) if isinstance(route_ctx, dict) else {}
+        )
         gate_open = bool(signal_snapshot.get("audit_committee_enabled", False))
         # C6AW: telemetry — record gate state regardless of outcome
         ctx.op._audit_committee_enabled_runtime = gate_open
@@ -243,7 +290,9 @@ class CommitteeOrchestrator(HealOrchestrator):
         for model in audit_models:
             result = self._invoke_audit_model(model, ctx)
             audits.append(result)
-            logger.info(f"  🔍 Audit from {model}: verdict={result.get('verdict', 'unknown')} conf={result.get('confidence', 0)}")
+            logger.info(
+                f"  🔍 Audit from {model}: verdict={result.get('verdict', 'unknown')} conf={result.get('confidence', 0)}"
+            )
 
         selected = _borda_select_diagnosis(audits)
         if not selected or selected.get("status", "").startswith("error"):
@@ -268,19 +317,28 @@ class CommitteeOrchestrator(HealOrchestrator):
         if selected.get("verdict") == "pass":
             ctx.op.solve_eligible = True
             ctx.op.failure_reason = ""
-            logger.info(f"  🏆 Audit PASSED: model={selected['model']} conf={selected.get('confidence', 0)}")
+            logger.info(
+                f"  🏆 Audit PASSED: model={selected['model']} conf={selected.get('confidence', 0)}"
+            )
         else:
             ctx.op.solve_eligible = False
             ctx.op.failure_reason = f"COMMITTEE_AUDIT_REJECTION: {selected.get('reason', '')}"
-            logger.info(f"  ❌ Audit FAILED: model={selected['model']} reason={selected.get('reason', '')}")
+            logger.info(
+                f"  ❌ Audit FAILED: model={selected['model']} reason={selected.get('reason', '')}"
+            )
 
         return selected
 
     def run(self, ctx: HealContext) -> HealContext:
         route_ctx = ctx.op.route_context if hasattr(ctx.op, "route_context") else {}
-        signal_snapshot = route_ctx.get("signal_snapshot", {}) if isinstance(route_ctx, dict) else {}
-        
-        use_committee = bool(signal_snapshot.get("local_committee_enabled", False) or signal_snapshot.get("use_committee", False))
+        signal_snapshot = (
+            route_ctx.get("signal_snapshot", {}) if isinstance(route_ctx, dict) else {}
+        )
+
+        use_committee = bool(
+            signal_snapshot.get("local_committee_enabled", False)
+            or signal_snapshot.get("use_committee", False)
+        )
         if not use_committee:
             return super().run(ctx)
 
@@ -298,9 +356,13 @@ class CommitteeOrchestrator(HealOrchestrator):
             model_name = spec.get("model")
             role_name = spec.get("role")
             if not model_name:
-                raise ValueError("Missing proposer spec model in signal_snapshot for local_committee_only")
+                raise ValueError(
+                    "Missing proposer spec model in signal_snapshot for local_committee_only"
+                )
             if not role_name:
-                raise ValueError("Missing proposer spec role in signal_snapshot for local_committee_only")
+                raise ValueError(
+                    "Missing proposer spec role in signal_snapshot for local_committee_only"
+                )
             if model_name == judge_model:
                 raise ValueError("judge_model must not also appear in proposer_specs")
             if model_name in seen_models:
@@ -316,19 +378,21 @@ class CommitteeOrchestrator(HealOrchestrator):
         )
         ctx.op._committee_member_demands = member_bundle.get("demands", [])
         ctx.op._committee_member_demand_failures = member_bundle.get("failure_reasons", [])
-        ctx.op._committee_member_demand_wiring_status = member_bundle.get("wiring_status", "FAIL_CLOSED")
+        ctx.op._committee_member_demand_wiring_status = member_bundle.get(
+            "wiring_status", "FAIL_CLOSED"
+        )
         if member_bundle.get("failure_reasons"):
             raise ValueError(
                 "committee member demand wiring failed: "
                 + ", ".join(member_bundle["failure_reasons"])
             )
-            
+
         self.k = len(proposer_specs)
         logger.info(f"--- [COMMITTEE MODE ACTIVE] k={self.k} ---")
-        
+
         # C6AD: D-phase committee diagnosis (before linear phases)
         self.diagnose_with_committee(ctx)
-        
+
         # Phase 1-3: Linear Execution
         for phase in [self.repro_phase, self.plan_phase, self.loc_phase]:
             res = phase.execute(ctx)
@@ -338,7 +402,7 @@ class CommitteeOrchestrator(HealOrchestrator):
 
         # Phase 4: Committee Patch Search
         committee = CommitteeControllerV263(ctx.op.instance_id)
-        committee.enabled = True # 強制啟用
+        committee.enabled = True  # 強制啟用
 
         proposals = []
         candidate_snapshots = []
@@ -351,7 +415,9 @@ class CommitteeOrchestrator(HealOrchestrator):
             res = self.patch_phase.execute(ctx)
             if res.success:
                 patch_text = str(getattr(ctx.op, "final_patch", "") or "")
-                patch_decisions = [d for d in getattr(ctx.op, "model_decisions", []) if d.get("phase") == "patch"]
+                patch_decisions = [
+                    d for d in getattr(ctx.op, "model_decisions", []) if d.get("phase") == "patch"
+                ]
                 model_decision = deepcopy(patch_decisions[-1]) if patch_decisions else {}
                 invoked_model = str(model_decision.get("model", "") or "")
                 if invoked_model != spec["model"]:
@@ -395,7 +461,9 @@ class CommitteeOrchestrator(HealOrchestrator):
                     "invoked_model": invoked_model,
                     "role": spec["role"],
                     "attempt": i + 1,
-                    "raw_label": str(model_decision.get("raw_label", "r:0,d:0,p:3,c:0") or "r:0,d:0,p:3,c:0"),
+                    "raw_label": str(
+                        model_decision.get("raw_label", "r:0,d:0,p:3,c:0") or "r:0,d:0,p:3,c:0"
+                    ),
                     "patch_sha256": patch_hash,
                     "patch_length": len(patch_text),
                     "output_class": str(model_decision.get("output_class", "") or ""),
@@ -464,7 +532,9 @@ class CommitteeOrchestrator(HealOrchestrator):
         receipt = committee.process_proposals(proposals)
 
         # --- Candidate ID mapping: resolve winner_id → candidate_id ---
-        winner_to_candidate_id = {p.get("candidate_id", ""): p.get("candidate_id", "") for p in proposals}
+        winner_to_candidate_id = {
+            p.get("candidate_id", ""): p.get("candidate_id", "") for p in proposals
+        }
         winner_to_attempt = {}
         for p in proposals:
             model_prefix = f"{ctx.op.instance_id}-{p['model']}-{p['attempt']}-"
@@ -541,18 +611,30 @@ class CommitteeOrchestrator(HealOrchestrator):
                 ctx.op.final_patch = ""
                 ctx.op.solve_eligible = False
                 ctx.op.failure_reason = "COMMITTEE_WINNER_CANDIDATE_MAPPING_MISSING"
-                ctx.op._committee_trace["judge_selection"]["failure_bucket"] = "candidate_mapping_missing"
-                ctx.op._committee_trace["committee_receipt"]["selected_candidate_apply_supported"] = False
+                ctx.op._committee_trace["judge_selection"]["failure_bucket"] = (
+                    "candidate_mapping_missing"
+                )
+                ctx.op._committee_trace["committee_receipt"][
+                    "selected_candidate_apply_supported"
+                ] = False
                 ctx.op._committee_trace["committee_receipt"]["selected_candidate_applied"] = False
                 ctx.op._committee_trace["committee_receipt"]["selected_candidate_patch_sha256"] = ""
                 ctx.op._committee_trace["committee_receipt"]["applied_patch_sha256"] = ""
-                ctx.op._committee_trace["committee_receipt"]["selected_candidate_apply_hash_match"] = False
-                ctx.op._committee_trace["committee_receipt"]["selected_candidate_reapply_mode"] = "missing_mapping"
+                ctx.op._committee_trace["committee_receipt"][
+                    "selected_candidate_apply_hash_match"
+                ] = False
+                ctx.op._committee_trace["committee_receipt"]["selected_candidate_reapply_mode"] = (
+                    "missing_mapping"
+                )
                 return ctx
 
             # --- U3-3C: Unified apply for last and non-last candidates ---
-            is_last_candidate = (attempt_idx == len(proposals) - 1)
-            reapply_mode = "last_candidate_existing_path" if is_last_candidate else "non_last_candidate_reapplied"
+            is_last_candidate = attempt_idx == len(proposals) - 1
+            reapply_mode = (
+                "last_candidate_existing_path"
+                if is_last_candidate
+                else "non_last_candidate_reapplied"
+            )
 
             selected_patch = proposals[attempt_idx]["artifacts"][0] if attempt_idx >= 0 else ""
 
@@ -560,18 +642,32 @@ class CommitteeOrchestrator(HealOrchestrator):
                 ctx.op.final_patch = ""
                 ctx.op.solve_eligible = False
                 ctx.op.failure_reason = "COMMITTEE_SELECTED_CANDIDATE_ARTIFACT_MISSING"
-                ctx.op._committee_trace["judge_selection"]["failure_bucket"] = "selected_candidate_artifact_missing"
-                ctx.op._committee_trace["committee_receipt"]["selected_candidate_apply_supported"] = False
+                ctx.op._committee_trace["judge_selection"]["failure_bucket"] = (
+                    "selected_candidate_artifact_missing"
+                )
+                ctx.op._committee_trace["committee_receipt"][
+                    "selected_candidate_apply_supported"
+                ] = False
                 ctx.op._committee_trace["committee_receipt"]["selected_candidate_applied"] = False
-                ctx.op._committee_trace["committee_receipt"]["selected_candidate_patch_sha256"] = selected_snapshot.get("isolated_patch_sha256", "")
+                ctx.op._committee_trace["committee_receipt"]["selected_candidate_patch_sha256"] = (
+                    selected_snapshot.get("isolated_patch_sha256", "")
+                )
                 ctx.op._committee_trace["committee_receipt"]["applied_patch_sha256"] = ""
-                ctx.op._committee_trace["committee_receipt"]["selected_candidate_apply_hash_match"] = False
-                ctx.op._committee_trace["committee_receipt"]["selected_candidate_reapply_mode"] = "missing_artifact"
+                ctx.op._committee_trace["committee_receipt"][
+                    "selected_candidate_apply_hash_match"
+                ] = False
+                ctx.op._committee_trace["committee_receipt"]["selected_candidate_reapply_mode"] = (
+                    "missing_artifact"
+                )
                 return ctx
 
-            ctx.op._committee_trace["committee_receipt"]["selected_candidate_apply_supported"] = True
+            ctx.op._committee_trace["committee_receipt"]["selected_candidate_apply_supported"] = (
+                True
+            )
             ctx.op._committee_trace["committee_receipt"]["selected_candidate_applied"] = True
-            ctx.op._committee_trace["committee_receipt"]["selected_candidate_reapply_mode"] = reapply_mode
+            ctx.op._committee_trace["committee_receipt"]["selected_candidate_reapply_mode"] = (
+                reapply_mode
+            )
 
             # Mark applied state on the selected candidate snapshot
             for snap in candidate_snapshots:
@@ -585,21 +681,39 @@ class CommitteeOrchestrator(HealOrchestrator):
             # --- Hash verification ---
             selected_patch_hash = selected_snapshot.get("isolated_patch_sha256", "")
             applied_patch_hash = _compute_patch_hash(str(ctx.op.final_patch or ""))
-            hash_match = bool(selected_patch_hash and applied_patch_hash and selected_patch_hash == applied_patch_hash)
-            ctx.op._committee_trace["committee_receipt"]["selected_candidate_patch_sha256"] = selected_patch_hash
-            ctx.op._committee_trace["committee_receipt"]["applied_patch_sha256"] = applied_patch_hash
-            ctx.op._committee_trace["committee_receipt"]["selected_candidate_apply_hash_match"] = hash_match
+            hash_match = bool(
+                selected_patch_hash
+                and applied_patch_hash
+                and selected_patch_hash == applied_patch_hash
+            )
+            ctx.op._committee_trace["committee_receipt"]["selected_candidate_patch_sha256"] = (
+                selected_patch_hash
+            )
+            ctx.op._committee_trace["committee_receipt"]["applied_patch_sha256"] = (
+                applied_patch_hash
+            )
+            ctx.op._committee_trace["committee_receipt"]["selected_candidate_apply_hash_match"] = (
+                hash_match
+            )
 
             if not hash_match:
                 ctx.op.final_patch = ""
                 ctx.op.solve_eligible = False
                 ctx.op.failure_reason = "COMMITTEE_SELECTED_CANDIDATE_APPLY_HASH_MISMATCH"
-                ctx.op._committee_trace["judge_selection"]["failure_bucket"] = "candidate_apply_hash_mismatch"
-                ctx.op._committee_trace["committee_receipt"]["selected_candidate_reapply_mode"] = "hash_mismatch"
-                logger.warning(f"  ❌ Hash mismatch: selected={selected_patch_hash} applied={applied_patch_hash}")
+                ctx.op._committee_trace["judge_selection"]["failure_bucket"] = (
+                    "candidate_apply_hash_mismatch"
+                )
+                ctx.op._committee_trace["committee_receipt"]["selected_candidate_reapply_mode"] = (
+                    "hash_mismatch"
+                )
+                logger.warning(
+                    f"  ❌ Hash mismatch: selected={selected_patch_hash} applied={applied_patch_hash}"
+                )
                 return ctx
 
-            logger.info(f"  🏆 Winner Selected: {receipt.winner_id} (candidate_id={selected_candidate_id}, mode={reapply_mode})")
+            logger.info(
+                f"  🏆 Winner Selected: {receipt.winner_id} (candidate_id={selected_candidate_id}, mode={reapply_mode})"
+            )
 
             # Phase 5: Final Verification
             verify_res = self.verify_phase.execute(ctx)
@@ -609,11 +723,21 @@ class CommitteeOrchestrator(HealOrchestrator):
                 ctx.op.failure_reason = f"VERIFIER_REJECTION:{verify_res.failure_reason}"
 
             # Project verifier evidence truth into committee receipt
-            verifier_evidence_passed = bool(getattr(ctx.op, "_orchestrator_verifier_evidence_passed", False))
-            verifier_evidence_fields = str(getattr(ctx.op, "_orchestrator_verifier_evidence_fields", "") or "")
-            ctx.op._committee_trace["committee_receipt"]["verifier_evidence_passed"] = verifier_evidence_passed
-            ctx.op._committee_trace["committee_receipt"]["verifier_evidence_fields"] = verifier_evidence_fields
-            ctx.op._committee_trace["committee_receipt"]["verifier_rejection_reason"] = str(verify_res.failure_reason if not verify_res.success else "")
+            verifier_evidence_passed = bool(
+                getattr(ctx.op, "_orchestrator_verifier_evidence_passed", False)
+            )
+            verifier_evidence_fields = str(
+                getattr(ctx.op, "_orchestrator_verifier_evidence_fields", "") or ""
+            )
+            ctx.op._committee_trace["committee_receipt"]["verifier_evidence_passed"] = (
+                verifier_evidence_passed
+            )
+            ctx.op._committee_trace["committee_receipt"]["verifier_evidence_fields"] = (
+                verifier_evidence_fields
+            )
+            ctx.op._committee_trace["committee_receipt"]["verifier_rejection_reason"] = str(
+                verify_res.failure_reason if not verify_res.success else ""
+            )
 
             # C6AE: A-phase committee audit (after verify)
             self.audit_with_committee(ctx)

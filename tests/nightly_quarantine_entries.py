@@ -399,13 +399,6 @@ QUARANTINE: tuple[dict[str, object], ...] = (
         "tests": ("test_june_regression_pack_governance_integrity",),
     },
     {
-        "file": "tests/integration/test_legacy_path_blocked.py",
-        "disposition": "quarantine-product-bug?",
-        "issue": "#1923",
-        "cause": "assertion encodes a safety/boundary invariant that the product currently violates; possible real product bug, file a new Issue before fixing",
-        "tests": ("TestLegacyPathBlocked::test_no_json_loads_on_model_response",),
-    },
-    {
         "file": "tests/integration/test_local_model_ollama_smoke_contract.py",
         "disposition": "quarantine",
         "issue": "#1924",
@@ -682,13 +675,6 @@ QUARANTINE: tuple[dict[str, object], ...] = (
         "tests": ("test_stage_f",),
     },
     {
-        "file": "tests/ops/test_strict_file_discovery.py",
-        "disposition": "quarantine-product-bug?",
-        "issue": "#1923",
-        "cause": "assertion encodes a safety/boundary invariant that the product currently violates; possible real product bug, file a new Issue before fixing",
-        "tests": ("test_strategic_map_audit_fails_fast_for_empty_boundary_glob",),
-    },
-    {
         "file": "tests/pilot_cli/test_gateway_integration.py",
         "disposition": "quarantine",
         "issue": "#1929",
@@ -856,9 +842,6 @@ QUARANTINE: tuple[dict[str, object], ...] = (
         "tests": (
             "test_pipeline_forces_x_phase_when_benchmark_force_research_enabled",
             "test_pipeline_records_c_before_commander_completion",
-            "test_reviewer_rejects_pass_without_patch_or_no_change_reason",
-            "test_reviewer_rejects_when_patch_apply_fails",
-            "test_reviewer_rejects_when_patch_apply_succeeds_but_missing_proof",
         ),
     },
     {
