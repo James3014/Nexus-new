@@ -1,2 +1,2 @@
 # Exact G2 canonical context package consumed at the Online transport boundary.
-nexus-runtime @ git+https://github.com/James3014/nexus-runtime.git@29a8dcfe31a1f2204ade501e7c6d04a26e08279a
+nexus-runtime @ git+https://github.com/James3014/nexus-runtime.git@2766c154ae9fa129a5d8d6a38244276e77b453bc
