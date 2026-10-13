@@ -16037,6 +16037,8 @@ def _run_without_nexus_impl(
             if isinstance(out, dict):
                 if str(out.get("error_category", "") or "") in {"binary_missing", "agy_missing"}:
                     model_calls = 0
+                if out.get("provider_call_attempted") is False:  # e.g. no leasable Agy account
+                    model_calls = 0
                 patch = str(out.get("patch") or "")
                 gateway_error_category = str(out.get("error_category", "") or "")
                 if gateway_error_category == "timeout":
