@@ -943,6 +943,7 @@ def test_inventory_has_no_unknown_by_default():
 def test_no_silent_github_write_sink_in_source(repo_root: Path, pattern_name: str):
     from nexus.security.owner_representation_transport_inventory import (
         FORBIDDEN_PROGRAMMATIC_GITHUB_WRITE_PATTERNS,
+        inventoried_internal_write_sink_patterns,
     )
 
     pattern = next(
@@ -960,6 +961,11 @@ def test_no_silent_github_write_sink_in_source(repo_root: Path, pattern_name: st
         # Morning-report guidance text predates this authority boundary; it is
         # inventoried as human-facing guidance, never an invocation.
         if py.name == "morning_report.py":
+            continue
+        # Explicitly inventoried internal-only routes (#1924), per pattern.
+        if pattern_name in inventoried_internal_write_sink_patterns(
+            py.relative_to(repo_root).as_posix()
+        ):
             continue
         for lineno, line in enumerate(
             py.read_text(encoding="utf-8", errors="replace").splitlines(), 1
@@ -1945,3 +1951,24 @@ def test_keyed_owner_representation_rejects_key_substitution_and_ignores_corrupt
         now=now + timedelta(minutes=1),
     )
     assert decision.publication_authorized is True
+
+
+def test_inventoried_internal_write_sinks_are_bound_to_internal_routes(repo_root: Path):
+    from nexus.security.owner_representation_transport_inventory import (
+        FORBIDDEN_PROGRAMMATIC_GITHUB_WRITE_PATTERNS,
+        INVENTORIED_INTERNAL_WRITE_SINKS,
+        inventoried_internal_write_sink_patterns,
+    )
+
+    pattern_names = {name for _pat, name, _why in FORBIDDEN_PROGRAMMATIC_GITHUB_WRITE_PATTERNS}
+    for path, (route_id, exempt) in INVENTORIED_INTERNAL_WRITE_SINKS.items():
+        assert (repo_root / path).is_file(), path
+        assert classify_transport_route(route_id) is PublicationRouteState.BOUNDED_INTERNAL_ONLY
+        assert path in physical_witnesses_for(route_id)
+        assert exempt and exempt <= pattern_names
+        assert inventoried_internal_write_sink_patterns(path) == exempt
+    # Exemptions are per file and per pattern, never global.
+    assert inventoried_internal_write_sink_patterns("scripts/ops/other.py") == frozenset()
+    assert "gh_cli_api_write" not in inventoried_internal_write_sink_patterns(
+        "scripts/ops/workforce_model_autoupdate.py"
+    )
