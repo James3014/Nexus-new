@@ -146,8 +146,8 @@ class Commander:
     def _orchestrate_a(self, state):
         """A 階段：審計 (對接 v22 Parity Audit)"""
         logger.info("🔬 [Commander] Triggering A-stage: Phase Parity Audit...")
-        import importlib
-        AuditPhaseHandler = importlib.import_module("nexus.engine.phases.audit").AuditPhaseHandler
+        from nexus.core.layer_ports import resolve_port
+        AuditPhaseHandler = resolve_port("audit.AuditPhaseHandler")
         handler = AuditPhaseHandler(self.project_root, self.project_root / ".nexus")
         res = handler.run(state)
         

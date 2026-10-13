@@ -611,13 +611,6 @@ QUARANTINE: tuple[dict[str, object], ...] = (
         "tests": ("test_evidence_replay_artifact_generation",),
     },
     {
-        "file": "tests/test_layer_boundaries.py",
-        "disposition": "quarantine-product-bug?",
-        "issue": "#1923",
-        "cause": "assertion encodes a safety/boundary invariant that the product currently violates; possible real product bug, file a new Issue before fixing",
-        "tests": ("test_forbidden_imports",),
-    },
-    {
         "file": "tests/test_nightshift_local_convergence.py",
         "disposition": "quarantine",
         "issue": "#1929",
