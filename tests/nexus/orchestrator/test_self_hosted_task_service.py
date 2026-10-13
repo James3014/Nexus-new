@@ -11061,21 +11061,100 @@ def test_wave20_second_repair_round_is_rejected_before_submit(
     assert decision["runtime_is_planner_authority"] is False
 
 
-def test_untracked_dispatch_without_admission_fails_closed(tmp_path):
+@pytest.mark.parametrize("lane", ["ISOLATED_TARGET", "DIRECT_CANONICAL"])
+def test_tracked_dispatch_without_admission_fails_closed_on_every_lane(tmp_path, lane):
+    """#1761: tracked dispatch needs a Workforce Admission binding whatever the lane."""
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
-    request = _request(tmp_path, task_id="untracked-no-admission")
+    request = _request(
+        tmp_path,
+        task_id="tracked-no-admission",
+        execution_lane=lane,
+        contract_kind=ContractKind.TRACKED_TASK_CARD.value,
+    )
     assert validate_workforce_dispatch_binding(request) is None
     contract = service.build_contract(request)
-    governed_request = {**request, "execution_lane": "GOVERNED"}
     with pytest.raises(RuntimeError, match="WORKFORCE_ADMISSION_BINDING_MISSING"):
         service._revalidate_provider_boundary(
-            contract, governed_request, "untracked-no-admission", None, active_provider="codex"
+            contract, request, "tracked-no-admission", None, active_provider="codex"
         )
+    # The persisted tracked kind alone is enough, even if the request omits it.
+    bare = {k: v for k, v in request.items() if k != "contract_kind"}
+    service._write_state(
+        "tracked-no-admission",
+        {"task_id": "tracked-no-admission", "status": "SUBMITTED", "contract_kind": ContractKind.TRACKED_TASK_CARD.value},
+    )
+    with pytest.raises(RuntimeError, match="WORKFORCE_ADMISSION_BINDING_MISSING"):
+        service._revalidate_provider_boundary(
+            contract, bare, "tracked-no-admission", None, active_provider="codex"
+        )
+
+
+def test_untracked_dispatch_without_admission_fails_closed(tmp_path):
+    """An untracked request cannot select the GOVERNED lane; that path stays closed."""
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    import nexus.orchestrator.self_hosted_task_service as shs_module
+
+    request = _request(tmp_path, task_id="untracked-governed", execution_lane="GOVERNED")
+    with pytest.raises(ValueError, match="DIRECT_CANONICAL or ISOLATED_TARGET"):
+        resolve_execution_lane(request)
+    with pytest.raises(ValueError, match="PROJECT_ENTRY_AUTHORITY_BINDING_REQUIRED"):
+        shs_module._reject_unbound_project_entry_authority_hints(request)
+    with pytest.raises(ValueError):
+        service.submit_task(request)
+
+
+def test_provider_boundary_fails_closed_on_invalid_persisted_state(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _request(tmp_path, task_id="invalid-state", execution_lane="ISOLATED_TARGET")
+    contract = service.build_contract(request)
+    # A state without a valid status reads back as BLOCKED_INVALID_STATE.
+    service._write_state("invalid-state", {"task_id": "invalid-state"})
+    with pytest.raises(RuntimeError, match="WORKFORCE_ADMISSION_BINDING_MISSING"):
+        service._revalidate_provider_boundary(
+            contract, request, "invalid-state", None, active_provider="codex"
+        )
+
+
+def test_tracked_isolated_submit_without_admission_never_calls_provider(tmp_path):
+    class RecordingRegistry:
+        calls: list = []
+
+        def __getattr__(self, name):
+            RecordingRegistry.calls.append(name)
+            raise AssertionError(f"provider-side registry used: {name}")
+
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", worker_registry=RecordingRegistry(),
+        auto_reconcile=False, ephemeral=True,
+    )
+    request = _request(
+        tmp_path,
+        task_id="tracked-submit-no-admission",
+        execution_lane="ISOLATED_TARGET",
+        contract_kind=ContractKind.TRACKED_TASK_CARD.value,
+    )
+    try:
+        service.submit_task(request)
+    except Exception:  # noqa: BLE001 - any fail-closed rejection is acceptable here
+        pass
+    assert RecordingRegistry.calls == []
+
+
+@pytest.mark.parametrize("lane", ["ISOLATED_TARGET", "DIRECT_CANONICAL"])
+@pytest.mark.parametrize("contract_kind", ["NONE", "OWNER_INLINE"])
+def test_untracked_dispatch_boundary_is_unchanged_without_admission(tmp_path, lane, contract_kind):
+    """Untracked lanes keep today's behaviour; the ISOLATED gap is tracked in #1886."""
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _request(tmp_path, task_id="untracked-no-admission", execution_lane=lane, contract_kind=contract_kind)
+    contract = service.build_contract(request)
+    service._revalidate_provider_boundary(
+        contract, request, "untracked-no-admission", None, active_provider="codex"
+    )
 
 
 def test_direct_untracked_dispatch_does_not_require_admission(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
-    request = _request(tmp_path, task_id="direct-no-admission")
+    request = _request(tmp_path, task_id="direct-no-admission", execution_lane="DIRECT_CANONICAL")
     contract = service.build_contract(request)
     service._revalidate_provider_boundary(
         contract, request, "direct-no-admission", None, active_provider="codex"
