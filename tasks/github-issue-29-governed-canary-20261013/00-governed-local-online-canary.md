@@ -182,3 +182,13 @@ One governed same-task canary receipt plus source/test artifacts. No Candidate
 approval, merge, release, runtime activation, model promotion, production or
 public claim. The durable marker requires independent review of the physical
 receipt by a reviewer distinct from the implementer.
+
+## Known limitations (disclosed)
+
+- Online model identity is bound to the admitted argv (`--model
+  gemini-3.8-flash-medium`, `--mode plan --sandbox`) and the runtime command
+  fingerprint only. The harness recomputes the fingerprint from that argv; the
+  provider-side served model is not observed (the runtime Agy adapter has no
+  log-level model attestation).
+- The runtime receipt does not bind the Task Card hash; only the harness
+  receipt does (card bytes must equal the HEAD blob).

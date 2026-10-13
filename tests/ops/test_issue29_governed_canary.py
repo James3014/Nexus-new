@@ -159,6 +159,7 @@ def happy(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
     with pytest.MonkeyPatch.context() as monkeypatch:
         receipt, ollama, log = _run(tmp_path, monkeypatch)
     runtime = json.loads(Path(receipt["runtime_receipt"]["path"]).read_text(encoding="utf-8"))
+    _AGY_EXECUTABLE["path"] = receipt["agy_executable"]
     return {
         "receipt": receipt,
         "ollama_calls": ollama.calls,
@@ -167,10 +168,14 @@ def happy(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
     }
 
 
+_AGY_EXECUTABLE: dict[str, str] = {}
+
+
 def _evaluate(runtime: dict[str, Any], **kwargs: Any) -> canary.Evaluation:
     return canary.evaluate_runtime_evidence(
         runtime,
         task_id=canary.TASK_ID,
+        agy_executable=kwargs.pop("agy_executable", _AGY_EXECUTABLE.get("path", "")),
         root_receipt_valid=kwargs.pop("root_receipt_valid", True),
         root_receipt_blockers=kwargs.pop("root_receipt_blockers", ()),
     )
@@ -388,6 +393,52 @@ def test_caller_route_override_is_rejected_before_any_provider(
     assert _agy_calls(log) == []
 
 
+def test_online_command_fingerprint_proves_admitted_argv(happy: dict[str, Any]) -> None:
+    evaluation = _evaluate(copy.deepcopy(happy["runtime"]))
+    assert "online_command_fingerprint_matches_admitted_argv" not in evaluation.failed
+
+
+def test_online_command_fingerprint_mismatch_fails_closed(happy: dict[str, Any]) -> None:
+    runtime = copy.deepcopy(happy["runtime"])
+    runtime["online"]["response"]["process_evidence"]["command_fingerprint"] = "0" * 64
+    assert "online_command_fingerprint_matches_admitted_argv" in _evaluate(runtime).failed
+
+
+def test_online_command_ran_other_model_fails_closed(happy: dict[str, Any]) -> None:
+    import hashlib
+
+    runtime = copy.deepcopy(happy["runtime"])
+    response = runtime["online"]["response"]
+    argv = [
+        _AGY_EXECUTABLE["path"],
+        "--mode",
+        "plan",
+        "--sandbox",
+        "--model",
+        "gemini-3.7-flash-medium",
+        "-p",
+        response["assembled_online_prompt"],
+    ]
+    response["process_evidence"]["command_fingerprint"] = hashlib.sha256(
+        json.dumps(argv, ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    assert "online_command_fingerprint_matches_admitted_argv" in _evaluate(runtime).failed
+
+
+def test_online_command_fingerprint_unknown_executable_fails_closed(
+    happy: dict[str, Any],
+) -> None:
+    runtime = copy.deepcopy(happy["runtime"])
+    evaluation = _evaluate(runtime, agy_executable="")
+    assert "online_command_fingerprint_matches_admitted_argv" in evaluation.failed
+
+
+def test_receipt_discloses_online_model_attestation_limits(happy: dict[str, Any]) -> None:
+    limits = " ".join(happy["receipt"]["limitations"])
+    assert "provider-side served model is not observed" in limits
+    assert "does not bind the Task Card hash" in limits
+
+
 def test_planner_authority_bypass_in_receipt_fails_closed(happy: dict[str, Any]) -> None:
     runtime = copy.deepcopy(happy["runtime"])
     runtime["canonical_execution"]["execution_decision_authority"] = "caller"
@@ -470,31 +521,102 @@ def test_task_card_drift_from_head_blocks(tmp_path: Path, monkeypatch: pytest.Mo
     assert ollama.calls == []
 
 
-def test_task_card_identity_is_required_for_online_admission(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Without the verified card, the canonical seam supplies no task_card control."""
+def _capture_route_and_admission(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, **seam_kwargs: Any
+) -> dict[str, Any]:
+    """Run the real seam up to the gateway; evaluate Workforce Admission on its bindings."""
     import nexus.services.gateway as gateway
+    from nexus.engine.canonical_task_seam import execute_canonical_product_task
+    from nexus.services.model_workforce_policy import WorkforcePolicyLoader
+    from nexus.services.runtime_workforce_admission import evaluate_runtime_workforce_admission
 
     captured: dict[str, Any] = {}
 
     def capture(self: Any, request: Any, **kwargs: Any) -> Any:
         captured["route"] = request.route
+        demands = request.canonical_planning_bundle.to_dict()["plan_payload"]["signal_snapshot"][
+            "workforce_demands"
+        ]
+        captured["admission"] = evaluate_runtime_workforce_admission(
+            demands, request.route["workforce_bindings"], WorkforcePolicyLoader()
+        ).to_dict()
         raise RuntimeError("stop_before_runtime")
 
     monkeypatch.setattr(gateway.BattlesuitGateway, "ask_unified", capture)
-    from nexus.engine.canonical_task_seam import execute_canonical_product_task
-
     (tmp_path / "calc.py").write_text(canary.FIXTURE_FILES["calc.py"], encoding="utf-8")
     with pytest.raises(RuntimeError, match="stop_before_runtime"):
         execute_canonical_product_task(
             canary.TASK_STATEMENT,
             tmp_path,
             execution_context=canary.build_execution_context(canary.TASK_ID, "rev"),
+            **seam_kwargs,
         )
+    return captured
+
+
+def _online_admission_decision(captured: dict[str, Any]) -> dict[str, Any]:
+    for record in captured["admission"]["records"]:
+        if record["demand"]["execution_channel"] == "online":
+            return dict(record["decision"])
+    raise AssertionError("no online admission record")
+
+
+def test_task_card_identity_is_required_for_online_admission(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Without the verified card, the canonical seam supplies no task_card control."""
+    captured = _capture_route_and_admission(monkeypatch, tmp_path)
     online = captured["route"]["workforce_bindings"]["online"]
     assert online["worker_id"] == "agy_flash_38"
     assert "task_card" not in online["controls"]
+    decision = _online_admission_decision(captured)
+    assert decision["decision"] == "BLOCK"
+    assert any("Missing required controls: task_card" in r for r in decision["decision_reasons"])
+
+
+def test_valid_task_card_identity_supplies_task_card_control(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import hashlib
+
+    from nexus.engine.canonical_task_seam import VerifiedTaskCardIdentity
+
+    card = REPO_ROOT / canary.TASK_CARD_PATH
+    identity = VerifiedTaskCardIdentity(
+        task_id=canary.TASK_ID,
+        task_card_path=canary.TASK_CARD_PATH,
+        canonical_task_card_path=str(card),
+        task_card_hash=hashlib.sha256(card.read_bytes()).hexdigest(),
+    )
+    captured = _capture_route_and_admission(monkeypatch, tmp_path, task_card_identity=identity)
+    online = captured["route"]["workforce_bindings"]["online"]
+    assert online["worker_id"] == "agy_flash_38"
+    assert "task_card" in online["controls"]
+    decision = _online_admission_decision(captured)
+    assert decision["decision"] == "ALLOW"
+    assert decision["resolved_model"] == "gemini-3.8-flash-medium"
+
+
+def test_task_card_identity_with_wrong_hash_is_refused_at_seam(tmp_path: Path) -> None:
+    from nexus.engine.canonical_task_seam import (
+        VerifiedTaskCardIdentity,
+        execute_canonical_product_task,
+    )
+
+    identity = VerifiedTaskCardIdentity(
+        task_id=canary.TASK_ID,
+        task_card_path=canary.TASK_CARD_PATH,
+        canonical_task_card_path=str(REPO_ROOT / canary.TASK_CARD_PATH),
+        task_card_hash="0" * 64,
+    )
+    (tmp_path / "calc.py").write_text(canary.FIXTURE_FILES["calc.py"], encoding="utf-8")
+    with pytest.raises(ValueError, match="verified_task_card_hash_mismatch"):
+        execute_canonical_product_task(
+            canary.TASK_STATEMENT,
+            tmp_path,
+            execution_context=canary.build_execution_context(canary.TASK_ID, "rev"),
+            task_card_identity=identity,
+        )
 
 
 def test_task_card_identity_for_other_task_is_rejected(tmp_path: Path) -> None:

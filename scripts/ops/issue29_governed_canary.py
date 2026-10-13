@@ -458,6 +458,7 @@ def evaluate_runtime_evidence(
     root_receipt_blockers: tuple[str, ...] | list[str] = (),
     expected_local: Mapping[str, str] = EXPECTED_LOCAL,
     expected_online: Mapping[str, str] = EXPECTED_ONLINE,
+    agy_executable: str = "",
 ) -> Evaluation:
     """Re-derive the same-task Local -> Online consumption chain from the receipt."""
     from nexus.services.local_heal.world_c_receipt import validate_world_c_receipt
@@ -657,6 +658,37 @@ def evaluate_runtime_evidence(
         and authority.get("resolved_model") == expected_online["model"]
         and authority.get("online_model_name") == expected_online["model"],
         authority.get("resolved_model"),
+    )
+    # The runtime receipt stores only hashes of the executed command.  Recompute
+    # the fingerprint from the argv the runtime transport builds for Agy
+    # (``[bin, --mode, plan, --sandbox, --model, <model>, -p, <assembled prompt>]``)
+    # so the Online model is proven from the argv that actually ran.  Fail closed
+    # when the executable is unknown or the fingerprint differs.
+    expected_argv = [
+        agy_executable,
+        "--mode",
+        "plan",
+        "--sandbox",
+        "--model",
+        expected_online["model"],
+        "-p",
+        assembled,
+    ]
+    expected_fingerprint = (
+        hashlib.sha256(json.dumps(expected_argv, ensure_ascii=False).encode("utf-8")).hexdigest()
+        if agy_executable and assembled
+        else ""
+    )
+    ev.evidence["online"]["expected_command_fingerprint"] = expected_fingerprint
+    ev.evidence["online"]["observed_command_fingerprint"] = process.get("command_fingerprint")
+    ev.add(
+        "online_command_fingerprint_matches_admitted_argv",
+        bool(expected_fingerprint) and process.get("command_fingerprint") == expected_fingerprint,
+        {
+            "expected": expected_fingerprint,
+            "observed": process.get("command_fingerprint"),
+            "agy_executable_known": bool(agy_executable),
+        },
     )
     ev.add(
         "online_agy_plan_sandbox_no_grants",
@@ -858,6 +890,13 @@ def run_canary(
             "release, model promotion, production or public claim; durable marker "
             "requires independent review of this receipt."
         ),
+        "limitations": [
+            "Online model identity is bound to the admitted argv (--model) and the "
+            "runtime command fingerprint only; the provider-side served model is "
+            "not observed (the runtime Agy adapter has no log-level model "
+            "attestation).",
+            "The runtime receipt does not bind the Task Card hash; only this harness receipt does.",
+        ],
         "durable_marker": DURABLE_MARKER,
         "durable_marker_eligible": False,
         "online_consumed": False,
@@ -963,9 +1002,19 @@ def run_canary(
         "sha256": _sha256_bytes(receipt_path.read_bytes()) if receipt_path.is_file() else "",
         "receipt_hash": runtime_receipt.get("receipt_hash"),
     }
+    try:
+        from nexus_runtime.kernel.transport import resolve_registered_provider_executable
+
+        agy_executable = resolve_registered_provider_executable(
+            "agy", environ={**os.environ, **env}
+        )
+    except Exception:  # noqa: BLE001 - unknown executable fails the fingerprint check closed
+        agy_executable = ""
+    receipt["agy_executable"] = agy_executable
     evaluation = evaluate_runtime_evidence(
         runtime_receipt,
         task_id=task_id,
+        agy_executable=agy_executable,
         root_receipt_valid=bool(result.root_receipt_valid),
         root_receipt_blockers=tuple(result.root_receipt_blockers),
     )
