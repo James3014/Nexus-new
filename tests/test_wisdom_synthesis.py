@@ -1,14 +1,14 @@
 import pytest
 import json
 import os
-from pathlib import Path
 from nexus.services.wisdom_synthesizer import WisdomSynthesizer
 from nexus.services.predictive_audit import PredictiveAuditor
 from nexus.services.construction_service import ConstructionService
 
 @pytest.fixture
-def project_root():
-    return Path("/Users/jameschen/Workspace/nexus")
+def project_root(tmp_path):
+    # Hermetic: a throwaway project root instead of a host-specific checkout.
+    return tmp_path
 
 @pytest.fixture
 def synthesizer(project_root):
@@ -50,7 +50,7 @@ def test_construction_gate_block(project_root):
     }
     
     # We create a physical file for the build service to read
-    pack_file = Path("/tmp/mock_block_pack.json")
+    pack_file = project_root / "mock_block_pack.json"
     with open(pack_file, "w") as f:
         json.dump(mock_pack, f)
         
