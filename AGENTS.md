@@ -45,53 +45,24 @@ inferred from G10, tests, an agent, a Task Card, CI, or runtime state.
 
 - Repository `James3014/Nexus-new`; collaboration branch `main`. Never merge runtime history into `main` to align SHAs.
 - G12 Fast Start advisory-cache gate: before any GitHub Issue implementation source/test body reads, consult #549 as `ADVISORY_CACHE_ONLY`. `BLOCKED`, `HOST_REBIND_REQUIRED`, `NEEDS_DECISION`, `EVIDENCE_BLOCKED` need fresh metadata-only rebind and must not read diff, patch, or implementation bodies; if still non-ready, stop. `READY_CANDIDATE` is not authority; fresh Issue/dependencies/main/host and normal gates remain required. Missing, stale, malformed, or contradictory cache fails closed to normal authoritative discovery. Fast Start consumers are read-only for #549/product Issues; see `docs/agents/TASK_EXECUTION_CONTRACT.md`. Cache/metadata never replaces source/test evidence or canonical authority.
-- **Project-entry invariant (#842):** on the first explicit Nexus/project-bound
-  action for a repository + Issue, the primary coordinator MUST call
-  `nexus_project_entry` before any Nexus-governed effectful action, regardless of
-  phrasing (`continue ... #N`, `處理 #N`, `幫我修 #N`). Result is pre-execution evidence only.
-- If Project Entry is not `READY_TO_EXECUTE`, surface its single canonical
-  blocker and STOP governed effects. Do not jump directly
-  to `nexus_task_card_create` or worker/Candidate mutation; recovery stays with #806 or #526.
+- **Project-entry invariant (#842):** on the first explicit Nexus/project-bound action for a repository + Issue, the primary coordinator MUST call `nexus_project_entry` before any Nexus-governed effectful action, regardless of phrasing (`continue ... #N`, `處理 #N`, `幫我修 #N`). Result is pre-execution evidence only.
+- If Project Entry is not `READY_TO_EXECUTE`, surface its single canonical blocker and STOP governed effects. Do not jump directly to `nexus_task_card_create` or worker/Candidate mutation; recovery stays with #806 or #526.
 - A Project Entry `READY_TO_EXECUTE` result is pre-execution evidence, not proof
   the next action exists on the bound surface. Before the first `GOVERNED` effect,
   prove it is present; `nexus_owner_standing_grant_issue` must be present
   before `nexus_task_card_create` is attempted. If absent, classify a host/action-surface binding gap and STOP before the
   effect (no `OWNER_AUTHORITY_REQUIRED:RECEIPT_MISSING` retries). Surface convergence is a transport precondition and grants no authority.
-- Switching repository or Issue invalidates the prior Project Entry binding for
-  governed effects and requires a fresh `nexus_project_entry` call. Direct lanes
-  remain governed by their existing lane rules.
-- A Ready GitHub Issue is a worker-neutral bounded collaboration contract; it
-  does not select local lifecycle. An eligible governed worker implements on an
-  issue branch, pushes only it, and opens a PR to `main`. Provider/model names
-  are not ownership identities.
+- Switching repository or Issue invalidates the prior Project Entry binding for governed effects and requires a fresh `nexus_project_entry` call. Direct lanes remain governed by their existing lane rules.
+- A Ready GitHub Issue is a worker-neutral bounded collaboration contract; it does not select local lifecycle. An eligible governed worker implements on an issue branch, pushes only it, and opens a PR to `main`. Provider/model names are not ownership identities.
 - Claim metadata: `claim_intent`, `claim_enforcement_state`,
   `claim_mode`; `PROJECTION_ONLY` or `UNKNOWN` resolves to `MANUAL_DISPATCH`. assignees, labels, comments, Project fields, branch names, and worker prose cannot authorize mutation.
-- No agent direct-pushes, force-pushes, or deletes `main`; delegated workers
-  never approve or merge their Candidate; only the primary coordinator merges. Merge follows lane, not repository.
-  DIRECT uses `git_merge_pull_request` after current Owner confirmation and all
-  exact gates; no Task Card, third-party approval, acceptance receipt/hash,
-  standing grant, or completion loop is required. GOVERNED retains independent
-  acceptance, machine provenance, `GITHUB_MERGE` grant, and completion loop.
+- No agent direct-pushes, force-pushes, or deletes `main`; delegated workers never approve or merge their Candidate; only the primary coordinator merges. Merge follows lane, not repository. DIRECT uses `git_merge_pull_request` after current Owner confirmation and all exact gates; no Task Card, third-party approval, acceptance receipt/hash, standing grant, or completion loop is required. GOVERNED retains independent acceptance, machine provenance, `GITHUB_MERGE` grant, and completion loop.
 - A non-transferable Owner standing grant for bounded Ready Issues in one durable scope grants no delegated-worker merge authority;
   it may create a missing Task Card only for a Ready Issue with frozen paths and `AUTO_CHAIN=false`.
-- Every coordinator merge requires fresh SHA-bound PR/head/base/diff, current
-  `main`, successful checks, branch protection, current Owner confirmation, and
-  expected-head/CAS; drift fails closed. Governed merge also requires
-  independent acceptance, machine provenance, and current grant;
-  `MERGE_INTENT` is evidence, not authority.
-- **Main-movement decision invariant:** exact-base movement invalidates the current
-  merge attempt by default; it does **not** by itself invalidate the Candidate,
-  PR, or verified evidence. Before rebasing or recreating a PR solely because
-  `main` moved, the coordinator MUST apply #441 requalification to exact changed-main paths.
-  If every dimension is `REUSE_UNAFFECTED`, keep the same Candidate and PR head.
-  `RECHECK_AFFECTED` reruns only affected dimensions; a new integration head needs
-  semantic overlap, authority drift, or `IMPACT_UNKNOWN`.
-  `base != current main` alone is never sufficient evidence. Without
-  requalification evidence, stop with a transport/evidence capability gap.
-- From PR #1061, protected-merge PRs carry `nexus.merge_lane_binding.v1`;
-  a `GOVERNED` card needs `nexus.owner_execution_lane_rebind.v1` to reach the
-  direct sink. `Trusted verifier (default branch)` runs
-  `scripts/ops/trusted_merge_lane_gate.py`.
+- Every coordinator merge requires fresh SHA-bound PR/head/base/diff, current `main`, successful checks, branch protection, current Owner confirmation, and expected-head/CAS; drift fails closed. Governed merge also requires independent acceptance, machine provenance, and current grant; `MERGE_INTENT` is evidence, not authority.
+- **Main-movement decision invariant:** exact-base movement invalidates the current merge attempt by default; it does **not** by itself invalidate the Candidate, PR, or verified evidence. Before rebasing or recreating a PR solely because `main` moved, the coordinator MUST apply #441 requalification to exact changed-main paths. If every dimension is `REUSE_UNAFFECTED`, keep the same Candidate and PR head. `RECHECK_AFFECTED` reruns only affected dimensions; a new integration head needs semantic overlap, authority drift, or `IMPACT_UNKNOWN`. `base != current main` alone is never sufficient evidence. Without requalification evidence, stop with a transport/evidence capability gap.
+- From PR #1061, protected-merge PRs carry `nexus.merge_lane_binding.v1`; a `GOVERNED` card needs `nexus.owner_execution_lane_rebind.v1` to reach the direct sink. `Trusted verifier (default branch)` runs `scripts/ops/trusted_merge_lane_gate.py`.
+- Before opening a PR, run `scripts/ops/nexus-pr-preflight`.
 - `github_complete_pull_request` mints no authority; it is not a second merge controller.
 - The coordinator asks the Owner again only for contract widening, weaker
   security, a new irreversible external effect, or release/production claims.
