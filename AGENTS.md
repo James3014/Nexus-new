@@ -141,7 +141,7 @@ replaces program correctness.
 - Nexus model/provider selection, delegation, or routing: compact machine Workforce
   Admission receipt first; full policy/YAML only for policy changes,
   onboarding, audit, or an authority dispute. See `docs/agents/WORKFORCE_EXECUTION_OVERLAY.md`.
-- Claim/release/benchmark/audit/verifier work, or Issue-bound `nexus-certify` completion evidence: `docs/agents/CLAIM_AND_RECEIPT_OVERLAY.md`.
+- Claim/release/benchmark/audit/verifier work, or Issue-bound Core completion evidence (push, then `nexus-core-precheck`): `docs/agents/CLAIM_AND_RECEIPT_OVERLAY.md`.
 - Novel repeatable failure with a prevention rule: `docs/agents/LEARNING_WRITEBACK_OVERLAY.md`.
 - Design options, no authority change: `docs/agents/OWNER_DESIGN_DEFAULTS.md` (advisory only).
 

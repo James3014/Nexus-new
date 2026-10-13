@@ -1,0 +1,406 @@
+#!/usr/bin/env python3
+"""Start or inspect a Nexus Core precheck for a pushed, Issue-bound HEAD.
+
+``dispatch`` sends a ``repository_dispatch`` (``nexus-core-precheck``) so the
+repository's Core gate workflow runs the signed Issue check for the exact pushed
+HEAD on a trusted runner. ``status`` finds that run by its receipt artifact name
+(``nexus-core-receipts-<head>-run<id>-attempt<n>``). This helper holds no
+completion authority: only the signed Core receipt is the verdict.
+
+Exit codes: 0 ok or skipped, 1 precheck FAILED, 2 usage or tool error.
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Sequence
+
+SCHEMA = "nexus.core_precheck.v1"
+EVENT_TYPE = "nexus-core-precheck"
+WORKFLOW_FILE = "nexus-core-issue-completion.yml"
+WORKFLOW_PATH = f".github/workflows/{WORKFLOW_FILE}"
+TRUSTED_OWNER = "James3014"
+DEDUPE_SECONDS = 6 * 3600
+PENDING_GRACE_SECONDS = 15 * 60
+COMMAND_TIMEOUT = 20
+RUN_SCAN_LIMIT = 30
+EXIT_OK = 0
+EXIT_FAILED = 1
+EXIT_ERROR = 2
+MARKER_RE = re.compile(r"<!--\s*NEXUS_CORE_ISSUE:\s*#?(\d+)\s*-->")
+BRANCH_ISSUE_RES = (
+    re.compile(r"(?:^|[/_-])issue[-_]?(\d+)(?=$|[^0-9])", re.IGNORECASE),
+    re.compile(r"^[A-Za-z0-9._-]+/(\d+)(?=$|[-_.])"),
+)
+GITHUB_REMOTE_RE = re.compile(
+    r"^(?:https://(?:[^@/]+@)?github\.com/|git@github\.com:|ssh://git@github\.com/)"
+    r"([A-Za-z0-9-]+)/([A-Za-z0-9._-]+?)(?:\.git)?/?$"
+)
+SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+class PrecheckError(RuntimeError):
+    pass
+
+
+class Outcome(Exception):
+    """Early, non-error result (skip) carrying a status and reason."""
+
+    def __init__(self, status: str, reason: str, **extra: Any) -> None:
+        super().__init__(reason)
+        self.status = status
+        self.reason = reason
+        self.extra = extra
+
+
+def _run(
+    cmd: Sequence[str], *, cwd: Path | None = None, stdin: str | None = None
+) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(
+            list(cmd),
+            cwd=cwd,
+            input=stdin,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=COMMAND_TIMEOUT,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise PrecheckError(f"cannot execute {cmd[0]}: {exc}") from exc
+
+
+def _git(repo: Path, *args: str) -> str:
+    result = _run(["git", "-C", str(repo), *args])
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()[-300:]
+        raise PrecheckError(f"git {' '.join(args[:2])} failed: {detail}")
+    return result.stdout.strip()
+
+
+def _gh(*args: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
+    return _run(["gh", *args], stdin=stdin)
+
+
+def _gh_json(*args: str) -> Any:
+    result = _gh(*args)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()[-300:]
+        raise PrecheckError(f"gh {' '.join(args[:2])} failed: {detail}")
+    try:
+        return json.loads(result.stdout or "null")
+    except json.JSONDecodeError as exc:
+        raise PrecheckError(f"gh {' '.join(args[:2])} returned non-JSON output") from exc
+
+
+def _repo_slug(repo_root: Path) -> tuple[str, str] | None:
+    # Read the raw configured URL (not insteadOf-rewritten) to identify the repo.
+    result = _run(["git", "-C", str(repo_root), "config", "--get", "remote.origin.url"])
+    match = GITHUB_REMOTE_RE.match(result.stdout.strip()) if result.returncode == 0 else None
+    return (match.group(1), match.group(2)) if match else None
+
+
+def _current_branch(repo_root: Path) -> str:
+    result = _run(["git", "-C", str(repo_root), "symbolic-ref", "--quiet", "--short", "HEAD"])
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _remote_branches_at(repo_root: Path, head: str) -> list[str]:
+    out = _git(repo_root, "ls-remote", "--heads", "origin")
+    branches = []
+    for line in out.splitlines():
+        sha, _, ref = line.partition("\t")
+        if sha.strip() == head and ref.startswith("refs/heads/"):
+            branches.append(ref[len("refs/heads/") :])
+    return branches
+
+
+def _issues_from_branch(branch: str) -> set[int]:
+    found: set[int] = set()
+    for pattern in BRANCH_ISSUE_RES:
+        found.update(int(m) for m in pattern.findall(branch))
+    return found
+
+
+def resolve_issue(
+    explicit: int | None, slug: str, branch: str, remote_branches: list[str]
+) -> tuple[int | None, str]:
+    """Return (issue, source); issue is None when absent or ambiguous."""
+    if explicit is not None:
+        return explicit, "argument"
+    pr_branch = branch or (remote_branches[0] if len(remote_branches) == 1 else "")
+    if pr_branch:
+        result = _gh("pr", "view", pr_branch, "-R", slug, "--json", "body,number,state")
+        if result.returncode == 0:
+            try:
+                pr = json.loads(result.stdout or "{}")
+            except json.JSONDecodeError:
+                pr = {}
+            if str(pr.get("state", "OPEN")).upper() == "OPEN":
+                markers = {int(m) for m in MARKER_RE.findall(pr.get("body") or "")}
+                if len(markers) == 1:
+                    return markers.pop(), f"pr#{pr.get('number')}"
+                if len(markers) > 1:
+                    return None, f"pr#{pr.get('number')} has several NEXUS_CORE_ISSUE markers"
+    env_issue = os.environ.get("NEXUS_CORE_ISSUE", "").strip().lstrip("#")
+    if env_issue.isdigit():
+        return int(env_issue), "env"
+    candidates: set[int] = set()
+    for name in [branch, *remote_branches] if branch else remote_branches:
+        candidates |= _issues_from_branch(name)
+    if len(candidates) == 1:
+        return candidates.pop(), "branch"
+    if candidates:
+        return None, f"branch names map to several issues: {sorted(candidates)}"
+    return None, "no issue binding found"
+
+
+def _dedupe_path(repo_root: Path, head: str, issue: int) -> Path:
+    common = Path(_git(repo_root, "rev-parse", "--git-common-dir"))
+    if not common.is_absolute():
+        common = (repo_root / common).resolve()
+    return common / "nexus-core-precheck" / f"{head}-{issue}.json"
+
+
+def _read_record(path: Path) -> dict[str, Any] | None:
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return record if isinstance(record, dict) else None
+
+
+def _workflow_enrolled(slug: str, ref: str) -> bool:
+    result = _gh("api", f"repos/{slug}/contents/{WORKFLOW_PATH}?ref={ref}")
+    if result.returncode != 0:
+        if "404" in (result.stderr + result.stdout):
+            return False
+        raise PrecheckError(f"cannot read {WORKFLOW_PATH}: {result.stderr.strip()[-300:]}")
+    try:
+        content = json.loads(result.stdout).get("content") or ""
+        text = base64.b64decode(content).decode("utf-8", "replace")
+    except (json.JSONDecodeError, ValueError, AttributeError) as exc:
+        raise PrecheckError(f"cannot decode {WORKFLOW_PATH}") from exc
+    return EVENT_TYPE in text
+
+
+def dispatch_payload(head: str, issue: int) -> dict[str, Any]:
+    return {
+        "event_type": EVENT_TYPE,
+        "client_payload": {"head_sha": head, "issue_number": int(issue)},
+    }
+
+
+def cmd_dispatch(args: argparse.Namespace, out: dict[str, Any]) -> int:
+    repo_root = Path(args.repo_root).resolve()
+    parsed = _repo_slug(repo_root)
+    if parsed is None:
+        if args.auto:
+            raise Outcome("SKIPPED_NOT_GITHUB", "origin is not a GitHub repository")
+        raise PrecheckError("origin is not a GitHub repository")
+    slug = f"{parsed[0]}/{parsed[1]}"
+    out["repo"] = slug
+    if args.auto and parsed[0].lower() != TRUSTED_OWNER.lower():
+        raise Outcome("SKIPPED_UNTRUSTED_REPO", f"origin owner is not {TRUSTED_OWNER}")
+    head = _git(repo_root, "rev-parse", "HEAD")
+    out["head"] = head
+    branch = _current_branch(repo_root)
+    out["branch"] = branch or None
+    meta = _gh_json("api", f"repos/{slug}")
+    default_branch = str((meta or {}).get("default_branch") or "main")
+    if branch == default_branch:
+        raise Outcome("SKIPPED_DEFAULT_BRANCH", f"on default branch {default_branch}")
+    remote_branches = _remote_branches_at(repo_root, head)
+    if not remote_branches:
+        raise Outcome("SKIPPED_NOT_PUSHED", "HEAD is not the tip of any branch on origin")
+    if branch and branch not in remote_branches and set(remote_branches) == {default_branch}:
+        raise Outcome("SKIPPED_DEFAULT_BRANCH", "HEAD equals the default branch tip")
+    if not branch and set(remote_branches) == {default_branch}:
+        raise Outcome("SKIPPED_DEFAULT_BRANCH", "HEAD equals the default branch tip")
+    feature_branches = [b for b in remote_branches if b != default_branch]
+    issue, source = resolve_issue(args.issue, slug, branch, feature_branches)
+    if issue is None:
+        raise Outcome("SKIPPED_NO_ISSUE", source)
+    out["issue"] = issue
+    out["issue_source"] = source
+    state = _gh_json("issue", "view", str(issue), "-R", slug, "--json", "state")
+    if str((state or {}).get("state", "")).upper() != "OPEN":
+        raise Outcome("SKIPPED_ISSUE_NOT_OPEN", f"Issue #{issue} is not open")
+    if not _workflow_enrolled(slug, default_branch):
+        raise Outcome(
+            "SKIPPED_REPO_NOT_ENROLLED",
+            f"{WORKFLOW_PATH} on {default_branch} does not accept {EVENT_TYPE}",
+        )
+    record_path = _dedupe_path(repo_root, head, issue)
+    record = _read_record(record_path)
+    if record and not args.force:
+        age = time.time() - float(record.get("dispatched_at_epoch", 0))
+        if 0 <= age < DEDUPE_SECONDS:
+            raise Outcome(
+                "SKIPPED_ALREADY_DISPATCHED",
+                f"dispatched {int(age // 60)} min ago; use --force to resend",
+                previous=record,
+            )
+    payload = dispatch_payload(head, issue)
+    result = _gh(
+        "api",
+        "--method",
+        "POST",
+        f"repos/{slug}/dispatches",
+        "--input",
+        "-",
+        stdin=json.dumps(payload),
+    )
+    if result.returncode != 0:
+        raise PrecheckError(f"dispatch failed: {(result.stderr or result.stdout).strip()[-300:]}")
+    now = time.time()
+    record = {
+        "schema": SCHEMA,
+        "repo": slug,
+        "head": head,
+        "issue": issue,
+        "branch": branch or None,
+        "dispatched_at_epoch": now,
+        "dispatched_at": datetime.fromtimestamp(now, timezone.utc).isoformat(),
+    }
+    record_path.parent.mkdir(parents=True, exist_ok=True)
+    record_path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    out.update(status="DISPATCHED", reason=f"{EVENT_TYPE} sent for Issue #{issue}")
+    return EXIT_OK
+
+
+def _artifact_matches(name: str, head: str, run_id: Any) -> bool:
+    return name.startswith(f"nexus-core-receipts-{head}-run{run_id}-attempt")
+
+
+def classify_run(run: dict[str, Any], has_artifact: bool) -> str:
+    if run.get("status") != "completed":
+        return "PENDING"
+    if has_artifact and run.get("conclusion") == "success":
+        return "VERIFIED"
+    return "FAILED"
+
+
+def cmd_status(args: argparse.Namespace, out: dict[str, Any]) -> int:
+    repo_root = Path(args.repo_root).resolve()
+    parsed = _repo_slug(repo_root)
+    if parsed is None:
+        raise PrecheckError("origin is not a GitHub repository")
+    slug = f"{parsed[0]}/{parsed[1]}"
+    out["repo"] = slug
+    head = args.head or _git(repo_root, "rev-parse", "HEAD")
+    if not SHA_RE.match(head):
+        raise PrecheckError("--head must be a full 40-hex commit sha")
+    out["head"] = head
+    out["issue"] = args.issue
+    meta = _gh_json("api", f"repos/{slug}")
+    default_branch = str((meta or {}).get("default_branch") or "main")
+    listing = _gh_json(
+        "api",
+        f"repos/{slug}/actions/workflows/{WORKFLOW_FILE}/runs"
+        f"?event=repository_dispatch&branch={default_branch}&per_page={RUN_SCAN_LIMIT}",
+    )
+    runs = [r for r in (listing or {}).get("workflow_runs") or [] if isinstance(r, dict)]
+    runs.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+    hint = f"Core precheck {head[:12]}"
+
+    def title_hit(run: dict[str, Any]) -> bool:
+        title = str(run.get("display_title") or run.get("name") or "")
+        if hint not in title:
+            return False
+        return args.issue is None or title.rstrip().endswith(f"#{args.issue}")
+
+    # Newest first; the artifact name is authoritative, the run title only a hint.
+    chosen: tuple[dict[str, Any], bool] | None = None
+    for run in runs:
+        run_id = run.get("id")
+        arts = _gh_json("api", f"repos/{slug}/actions/runs/{run_id}/artifacts?per_page=100")
+        names = [str(a.get("name") or "") for a in (arts or {}).get("artifacts") or []]
+        if any(_artifact_matches(n, head, run_id) for n in names):
+            chosen = (run, True)
+            break
+        if title_hit(run):
+            chosen = (run, False)
+            break
+    if chosen is None:
+        record = None
+        if args.issue is not None:
+            try:
+                record = _read_record(_dedupe_path(repo_root, head, args.issue))
+            except PrecheckError:
+                record = None
+        age = time.time() - float((record or {}).get("dispatched_at_epoch", 0))
+        if record and 0 <= age < PENDING_GRACE_SECONDS:
+            out.update(status="PENDING", reason="dispatched; run not visible yet")
+            return EXIT_OK
+        out.update(status="NOT_FOUND", reason="no precheck run found for this head")
+        return EXIT_OK
+    run, has_artifact = chosen
+    status = classify_run(run, has_artifact)
+    out.update(
+        status=status,
+        run_id=run.get("id"),
+        run_url=run.get("html_url"),
+        run_status=run.get("status"),
+        conclusion=run.get("conclusion"),
+        reason=(
+            "receipt artifact present"
+            if has_artifact
+            else "matched by run title; no receipt artifact yet"
+        ),
+    )
+    return EXIT_FAILED if status == "FAILED" else EXIT_OK
+
+
+def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(prog="nexus-core-precheck", description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+    dispatch = sub.add_parser("dispatch", help="send the Core precheck for the pushed HEAD")
+    dispatch.add_argument("--issue", type=int)
+    dispatch.add_argument("--repo-root", default=".")
+    dispatch.add_argument("--force", action="store_true")
+    dispatch.add_argument("--auto", action="store_true", help="hook mode: skip quietly")
+    status = sub.add_parser("status", help="report the precheck run for a head")
+    status.add_argument("--issue", type=int)
+    status.add_argument("--head")
+    status.add_argument("--repo-root", default=".")
+    return parser.parse_args(argv)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = parse_args(argv)
+    out: dict[str, Any] = {
+        "schema": SCHEMA,
+        "command": args.command,
+        "status": "ERROR",
+        "repo": None,
+        "head": args.head if args.command == "status" else None,
+        "issue": args.issue,
+        "reason": "",
+    }
+    try:
+        handler = cmd_dispatch if args.command == "dispatch" else cmd_status
+        code = handler(args, out)
+    except Outcome as outcome:
+        out.update(status=outcome.status, reason=outcome.reason, **outcome.extra)
+        code = EXIT_OK
+        if outcome.status == "SKIPPED_NO_ISSUE" and not getattr(args, "auto", False):
+            code = EXIT_ERROR
+    except PrecheckError as exc:
+        out.update(status="ERROR", reason=str(exc))
+        code = EXIT_ERROR
+    print(json.dumps(out, sort_keys=True))
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(main())

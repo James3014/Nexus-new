@@ -35,6 +35,10 @@
 | .claude | tests/ops/test_claude_handoff_hooks.py | active | medium | claude_handoff_hook_contract |
 | HANDOFF.md | tests/ops/test_claude_handoff_hooks.py | active | medium | claude_handoff_hook_contract |
 | tests/ops/test_claude_handoff_hooks.py | tests/ops/test_claude_handoff_hooks.py | active | medium | test_contract |
+| .claude/hooks/core-precheck-on-stop.sh | tests/ops/test_nexus_core_precheck.py, tests/ops/test_claude_handoff_hooks.py | active | medium | core_precheck_stop_hook_contract |
+| .claude/settings.json | tests/ops/test_nexus_core_precheck.py, tests/ops/test_claude_handoff_hooks.py | active | medium | claude_stop_hook_registration_contract |
+| scripts/ops/nexus-core-precheck | tests/ops/test_nexus_core_precheck.py | active | medium | core_precheck_dispatch_status_contract |
+| tests/ops/test_nexus_core_precheck.py | tests/ops/test_nexus_core_precheck.py | active | medium | test_contract |
 | .gitignore | tests/ops/test_repository_secret_hygiene.py, tests/ops/test_select_tests.py | active | high | repository_secret_hygiene_contract |
 | .nexus-core/config.toml | tests/ops/test_select_tests.py, tests/ops/test_pr_impact_gate.py | active | high | nexus_core_completion_config_contract |
 | .agents/skills | tests/ops/test_skill_file_contract.py, tests/learning/test_skill_catalog.py, tests/learning/test_skill_schema.py, tests/ops/test_ci_gate_report_trust_audit.py | active | high | skill_artifact_contract_and_catalog_governance |
