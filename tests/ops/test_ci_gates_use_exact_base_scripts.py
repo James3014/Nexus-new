@@ -40,9 +40,7 @@ def test_secret_audit_runs_from_default_branch_workflow() -> None:
     # PyYAML parses the bare key `on` as boolean True.
     triggers = data.get("on", data.get(True))
     assert "pull_request_target" in triggers
-    # TODO(#1754 A follow-up): bootstrap keeps `pull_request` so this PR itself
-    # gets the required context; the follow-up PR removes it and tightens this.
-    assert set(triggers) - {"pull_request"} >= {"pull_request_target"}
+    assert "pull_request" not in triggers
     assert triggers["pull_request_target"]["branches"] == ["main"]
     assert {"push", "schedule", "workflow_dispatch"} <= set(triggers)
     job = data["jobs"]["full-history-secret-audit"]
