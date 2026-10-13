@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+import hashlib
+import subprocess
+import sys
+import time
+from pathlib import Path
+
 from nexus.engine.capability_executor_controls import build_execution_plan, build_executor_controls
 from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.engine.capability_readiness import CORE_CAPABILITIES
@@ -8,6 +14,58 @@ from nexus.engine.capability_contracts import CapabilityReceipt
 from nexus.engine.capability_receipts import build_skill_receipts, build_trace_receipts, selected_receipts
 from nexus.engine.capability_signals import build_capability_signals
 from nexus.engine.route_decision_adapter import build_route_decision
+
+
+def _real_verifier_evidence(tmp_path: Path) -> dict:
+    """Verifier result, artifact hash, source hash and measured telemetry for a receipt payload.
+
+    Runs a small verifier over a source file and returns its result, the sha256 of the verifier
+    log, the source hash and the telemetry measured around the run. This evidence does not make a
+    receipt public_claim_safe, because #453 keeps outcome_contributed False whatever the payload
+    carries. It feeds only (a) the telemetry assertions (telemetry_source == "measured") and (b)
+    the #1757 claim/delivery binding reasons (unbound_verifier_proof instead of
+    missing_verifier_artifact;missing_source_hash). Tests that assert neither would pass with {}.
+    """
+    source = tmp_path / "target.py"
+    source.write_text("VALUE = 2\n", encoding="utf-8")
+    started = time.perf_counter()
+    proc = subprocess.run(
+        [sys.executable, "-c", "import ast, sys; ast.parse(open(sys.argv[1]).read())", str(source)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    wall_time_ms = max(1, int((time.perf_counter() - started) * 1000))
+    artifact = tmp_path / "verifier.log"
+    artifact.write_text(f"returncode={proc.returncode}\n{proc.stdout}{proc.stderr}", encoding="utf-8")
+    assert proc.returncode == 0, proc.stderr
+    return {
+        "verifier_status": "pass",
+        "verifier_artifact": "sha256:" + hashlib.sha256(artifact.read_bytes()).hexdigest(),
+        "source_hash": "sha256:" + hashlib.sha256(source.read_bytes()).hexdigest(),
+        "telemetries": {
+            "telemetry_source": "measured",
+            "wall_time_ms": wall_time_ms,
+            "token_usage": 0,
+            "provider_costs": 0.0,
+            "overhead_ms": 0,
+            "model_calls": 0,
+        },
+    }
+
+
+def _assert_gate_held_fail_closed(receipt: CapabilityReceipt) -> None:
+    """Contract (#453 ADVISORY_ONLY_FAIL_CLOSED): a generic adapter payload cannot mint verifier
+    authority. The receipt keeps its invocation, evidence and gate pass, but it never contributes
+    an outcome and is never public_claim_safe until an authenticated upstream verifier authority
+    is bound, whatever evidence the payload carries."""
+    assert receipt.selected is True
+    assert receipt.invoked is True
+    assert receipt.evidence_present is True
+    assert receipt.gate_passed is True
+    assert receipt.failure_reason == ""
+    assert receipt.outcome_contributed is False
+    assert receipt.public_claim_safe is False
 
 
 def test_capability_signals_normalize_five_pillar_and_skill_inputs():
@@ -423,10 +481,12 @@ def test_planner_covers_public_value_capability_matrix_without_model_calls():
         assert expected in set(plan.selected_capabilities)
 
 
-def test_trace_receipts_promote_only_invoked_evidence_and_gate_chain():
+def test_trace_receipts_promote_only_invoked_evidence_and_gate_chain(tmp_path):
+    """Contract: invoked, evidenced, gate-passed receipts hold the gate chain but stay fail-closed (#453)."""
     plan = {
         "selected_capabilities": ["autoreason", "ddtree", "hyper", "ultra_review", "swarm"],
     }
+    evidence = _real_verifier_evidence(tmp_path)
 
     receipts = {
         item.name: item
@@ -439,18 +499,34 @@ def test_trace_receipts_promote_only_invoked_evidence_and_gate_chain():
                 "attempt_count": 2,
                 "swarm_used": False,
                 "swarm_evidence_count": 0,
+                **evidence,
             },
-            autoreason={"enabled": True, "winner": "candidate-2", "judge_votes": [{"winner": "candidate-2"}]},
-            ddtree={"enabled": True, "eligible": True, "selected_candidate_ids": ["candidate-2"], "actual_saved_steps": 1},
-            ultra_review={"invoked": True, "gate_passed": True, "report_path": ".nexus/reports/ultra.json"},
+            autoreason={
+                "enabled": True,
+                "winner": "candidate-2",
+                "judge_votes": [{"winner": "candidate-2"}],
+                **evidence,
+            },
+            ddtree={
+                "enabled": True,
+                "eligible": True,
+                "selected_candidate_ids": ["candidate-2"],
+                "actual_saved_steps": 1,
+                **evidence,
+            },
+            ultra_review={
+                "invoked": True,
+                "gate_passed": True,
+                "report_path": ".nexus/reports/ultra.json",
+                **evidence,
+            },
         )
     }
 
-    assert receipts["autoreason"].public_claim_safe is True
-    assert receipts["ddtree"].public_claim_safe is True
-    assert receipts["hyper"].public_claim_safe is True
+    for name in ("autoreason", "ddtree", "hyper", "ultra_review"):
+        _assert_gate_held_fail_closed(receipts[name])
+    assert receipts["autoreason"].telemetries["telemetry_source"] == "measured"
     assert receipts["hyper"].executor_id == "hyper_sprint"
-    assert receipts["ultra_review"].public_claim_safe is True
     assert receipts["swarm"].selected is True
     assert receipts["swarm"].public_claim_safe is False
     assert receipts["swarm"].outcome_contributed is False
@@ -491,7 +567,13 @@ def test_capability_receipts_canonicalize_legacy_aliases():
     assert receipts["judge_panel"].failure_reason == "selected_without_invocation"
 
 
-def test_core_gate_receipts_require_specific_evidence_before_public_claim():
+def test_core_gate_receipts_require_specific_evidence_before_public_claim(tmp_path):
+    """Contract: core gates need specific evidence, and #1757 binds claim/delivery to verifier proof.
+
+    The verifier evidence in the proven case only moves the claim/delivery failure reason from
+    missing_verifier_artifact;missing_source_hash to unbound_verifier_proof. No gate passes while
+    no authenticated upstream verifier authority is bound (#453), so nothing is public_claim_safe.
+    """
     plan = {
         "selected_capabilities": ["mempalace_gate", "artifact_gate", "claim_gate", "delivery_gate"],
     }
@@ -518,6 +600,7 @@ def test_core_gate_receipts_require_specific_evidence_before_public_claim():
                 "claim_refs": ["claim:semantic_verified"],
                 "delivery_refs": [".nexus/reports/delivery/evidence_bundle.json"],
                 "delivery_gate_passed": True,
+                **_real_verifier_evidence(tmp_path),
             },
         )
     }
@@ -527,18 +610,33 @@ def test_core_gate_receipts_require_specific_evidence_before_public_claim():
     assert missing["artifact_gate"].public_claim_safe is False
     assert missing["artifact_gate"].failure_reason == "invoked_without_evidence"
     assert missing["claim_gate"].public_claim_safe is False
-    assert missing["claim_gate"].failure_reason == "invoked_without_evidence"
+    assert missing["claim_gate"].failure_reason == "missing_verifier_artifact;missing_source_hash"
     assert missing["delivery_gate"].public_claim_safe is False
-    assert missing["delivery_gate"].failure_reason == "invoked_without_evidence"
+    assert missing["delivery_gate"].failure_reason == "missing_verifier_artifact;missing_source_hash"
 
-    assert proven["mempalace_gate"].public_claim_safe is True
-    assert proven["artifact_gate"].public_claim_safe is True
-    assert proven["claim_gate"].public_claim_safe is True
-    assert proven["delivery_gate"].public_claim_safe is True
-    assert proven["delivery_gate"].outcome_contributed is True
+    for name in ("mempalace_gate", "artifact_gate", "claim_gate", "delivery_gate"):
+        assert proven[name].invoked is True
+        assert proven[name].evidence_present is True
+        assert proven[name].gate_passed is False
+        assert proven[name].outcome_contributed is False
+        assert proven[name].public_claim_safe is False
+    assert proven["mempalace_gate"].failure_reason == "evidence_without_gate_pass"
+    assert proven["artifact_gate"].failure_reason == "evidence_without_gate_pass"
+    # The verifier-artifact/source-hash binding is met; only the verifier authority is missing.
+    assert proven["claim_gate"].failure_reason == "unbound_verifier_proof"
+    assert proven["delivery_gate"].failure_reason == "unbound_verifier_proof"
 
 
 def test_core_gate_failed_receipts_count_as_fail_closed_outcomes_not_public_safe():
+    """Contract: failed gates are fail-closed, and a failed gate never counts as a contributed outcome.
+
+    The id predates #453, when a failed gate was itself counted as a fail-closed outcome
+    (outcome_contributed=True with gate_passed=False). Under #453, merge_capability_receipt enforces
+    outcome_contributed -> gate_passed -> evidence_present -> invoked, and the gate adapters need a
+    bound verifier authority to contribute. So a failed gate keeps its fail-closed evidence ref
+    (e.g. "claim:gate_failed") and stays invoked and evidenced, but outcome_contributed and
+    public_claim_safe are both False. The id is kept unchanged so that coverage stays traceable.
+    """
     plan = {
         "selected_capabilities": ["mempalace_gate", "artifact_gate", "claim_gate", "delivery_gate"],
     }
@@ -562,12 +660,17 @@ def test_core_gate_failed_receipts_count_as_fail_closed_outcomes_not_public_safe
         assert receipts[name].invoked is True
         assert receipts[name].evidence_present is True
         assert receipts[name].gate_passed is False
-        assert receipts[name].outcome_contributed is True
+        assert receipts[name].outcome_contributed is False
         assert receipts[name].public_claim_safe is False
-        assert receipts[name].failure_reason == "evidence_without_gate_pass"
+    assert receipts["mempalace_gate"].failure_reason == "evidence_without_gate_pass"
+    assert receipts["artifact_gate"].failure_reason == "evidence_without_gate_pass"
+    # #1757: claim/delivery name the missing verifier binding first.
+    assert receipts["claim_gate"].failure_reason == "missing_verifier_artifact;missing_source_hash"
+    assert receipts["delivery_gate"].failure_reason == "missing_verifier_artifact;missing_source_hash"
 
 
-def test_knowledge_receipts_keep_signals_separate_from_public_evidence():
+def test_knowledge_receipts_keep_signals_separate_from_public_evidence(tmp_path):
+    """Contract: signals alone are not evidence; evidenced gate passes stay fail-closed (#453)."""
     plan = {
         "selected_capabilities": ["memory", "belief", "research", "lancedb"],
     }
@@ -603,6 +706,7 @@ def test_knowledge_receipts_keep_signals_separate_from_public_evidence():
                 "lancedb_hits": 3,
                 "lancedb_refs": ["lancedb:claim-3"],
                 "lancedb_gate_passed": True,
+                **_real_verifier_evidence(tmp_path),
             },
         )
     }
@@ -611,8 +715,7 @@ def test_knowledge_receipts_keep_signals_separate_from_public_evidence():
         assert signals_only[name].invoked is True
         assert signals_only[name].public_claim_safe is False
         assert signals_only[name].failure_reason == "invoked_without_evidence"
-        assert proven[name].public_claim_safe is True
-        assert proven[name].outcome_contributed is True
+        _assert_gate_held_fail_closed(proven[name])
 
 
 def test_msa_receipts_explain_selected_but_unproven_capabilities():
@@ -692,7 +795,8 @@ def test_autoreason_disabled_status_is_not_invoked_or_evidenced():
     assert receipt.failure_reason == "selected_without_invocation"
 
 
-def test_autoreason_receipt_requires_winner_and_exposes_tournament_context():
+def test_autoreason_receipt_requires_winner_and_exposes_tournament_context(tmp_path):
+    """Contract: a winner is required for the gate; the gate pass stays fail-closed (#453)."""
     plan = {
         "selected_capabilities": ["autoreason"],
     }
@@ -716,19 +820,22 @@ def test_autoreason_receipt_requires_winner_and_exposes_tournament_context():
                 "incumbent_id": "candidate-a",
                 "judge_scores": [{"candidate": "candidate-b", "score": 0.8}],
                 "stop_reason": "a_streak_converged",
+                **_real_verifier_evidence(tmp_path),
             },
         )
     }
 
     assert no_winner["autoreason"].public_claim_safe is False
     assert no_winner["autoreason"].failure_reason == "evidence_without_gate_pass"
-    assert with_winner["autoreason"].public_claim_safe is True
+    _assert_gate_held_fail_closed(with_winner["autoreason"])
+    assert with_winner["autoreason"].telemetries["telemetry_source"] == "measured"
     assert "candidate-b" in with_winner["autoreason"].evidence_refs
     assert "incumbent_id:candidate-a" in with_winner["autoreason"].evidence_refs
     assert "stop_reason:a_streak_converged" in with_winner["autoreason"].evidence_refs
 
 
-def test_autoreason_success_status_counts_as_invoked_for_public_receipt():
+def test_autoreason_success_status_counts_as_invoked_for_public_receipt(tmp_path):
+    """Contract: SUCCESS status counts as invoked; the receipt stays fail-closed (#453)."""
     plan = {
         "selected_capabilities": ["autoreason"],
     }
@@ -743,16 +850,19 @@ def test_autoreason_success_status_counts_as_invoked_for_public_receipt():
                 "winner": "candidate-b",
                 "judge_votes": [{"ranking": ["candidate-b", "candidate-a"]}],
                 "stop_reason": "a_streak_met",
+                **_real_verifier_evidence(tmp_path),
             },
         )
     }
 
     receipt = receipts["autoreason"]
     assert receipt.invoked is True
-    assert receipt.public_claim_safe is True
+    _assert_gate_held_fail_closed(receipt)
+    assert receipt.telemetries["telemetry_source"] == "measured"
 
 
-def test_ddtree_receipt_requires_real_candidate_pruning():
+def test_ddtree_receipt_requires_real_candidate_pruning(tmp_path):
+    """Contract: only real pruning counts as invocation; the pruned receipt stays fail-closed (#453)."""
     plan = {
         "selected_capabilities": ["ddtree"],
     }
@@ -785,6 +895,7 @@ def test_ddtree_receipt_requires_real_candidate_pruning():
                 "selected_candidate_ids": ["candidate-a", "candidate-b"],
                 "actual_saved_steps": 2,
                 "tree_stats": {"max_depth": 1, "branch_count": 4, "pruned_count": 2},
+                **_real_verifier_evidence(tmp_path),
             },
         )
     }
@@ -795,8 +906,7 @@ def test_ddtree_receipt_requires_real_candidate_pruning():
     assert not_pruned["ddtree"].public_claim_safe is False
     assert not_pruned["ddtree"].failure_reason == "no_pruning_opportunity"
     assert pruned["ddtree"].invoked is True
-    assert pruned["ddtree"].public_claim_safe is True
-    assert pruned["ddtree"].failure_reason == ""
+    _assert_gate_held_fail_closed(pruned["ddtree"])
     assert "saved_steps:2" in pruned["ddtree"].evidence_refs
     assert "tree_depth:1" in pruned["ddtree"].evidence_refs
     assert "branch_count:4" in pruned["ddtree"].evidence_refs
@@ -826,7 +936,8 @@ def test_ultra_review_receipt_requires_report_evidence_for_outcome():
     assert receipt.failure_reason == "invoked_without_evidence"
 
 
-def test_msa_receipts_become_public_safe_with_executor_evidence():
+def test_msa_receipts_become_public_safe_with_executor_evidence(tmp_path):
+    """Contract: executor reports make MSA receipts evidenced and gate-passed, still fail-closed (#453)."""
     plan = {
         "selected_capabilities": ["swarm", "drone", "nightshift"],
     }
@@ -868,19 +979,20 @@ def test_msa_receipts_become_public_safe_with_executor_evidence():
                     "report_path": ".nexus/reports/nightshift/run.json",
                     "failure_reason": "",
                 },
+                **_real_verifier_evidence(tmp_path),
             },
         )
     }
 
-    assert receipts["swarm"].public_claim_safe is True
+    _assert_gate_held_fail_closed(receipts["swarm"])
     assert "report:.nexus/reports/swarm/x_receipt.json" in receipts["swarm"].evidence_refs
     assert "candidate_summary:0" in receipts["swarm"].evidence_refs
     assert "role_findings:2" in receipts["swarm"].evidence_refs
-    assert receipts["drone"].public_claim_safe is True
+    _assert_gate_held_fail_closed(receipts["drone"])
     assert "report:.nexus/reports/drone/x_receipt.json" in receipts["drone"].evidence_refs
     assert "artifact:.nexus/reports/drones/a.json" in receipts["drone"].evidence_refs
     assert "subtask_artifact:2" in receipts["drone"].evidence_refs
-    assert receipts["nightshift"].public_claim_safe is True
+    _assert_gate_held_fail_closed(receipts["nightshift"])
 
 
 def test_ddtree_receipt_distinguishes_no_pruning_opportunity_from_invocation():

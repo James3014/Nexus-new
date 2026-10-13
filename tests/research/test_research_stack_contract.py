@@ -78,7 +78,8 @@ def test_nexus_failure_analysis_requires_root_cause_after_flash_fail():
     }
 
 
-def test_hyper_runtime_usage_backfills_receipt_when_planner_omits_hyper():
+def test_hyper_runtime_usage_backfills_receipt_when_planner_omits_hyper(tmp_path):
+    """Contract: hyper usage is backfilled when the planner omits it, and stays fail-closed (#453)."""
     receipts = build_capability_receipt_payloads(
         {
             "selected_capabilities": ["research", "delivery_gate"],
@@ -94,11 +95,69 @@ def test_hyper_runtime_usage_backfills_receipt_when_planner_omits_hyper():
                 "hyper_used": True,
                 "winner_source": "llm",
                 "attempt_count": 1,
+                **_real_verifier_evidence(tmp_path),
             }
         },
     )
 
     hyper = next(item for item in receipts if item["name"] == "hyper")
     assert hyper["invoked"] is True
-    assert hyper["public_claim_safe"] is True
+    _assert_receipt_held_fail_closed(hyper)
     assert "llm" in hyper["evidence_refs"]
+
+
+def _real_verifier_evidence(tmp_path) -> dict:
+    """Verifier result, artifact hash, source hash and measured telemetry for a receipt payload.
+
+    Runs a small verifier over a source file and returns its result, the sha256 of the verifier
+    log, the source hash and the telemetry measured around the run. This evidence does not make a
+    receipt public_claim_safe, because #453 keeps outcome_contributed False whatever the payload
+    carries. It feeds only (a) the telemetry assertions (telemetry_source == "measured") and (b)
+    the #1757 claim/delivery binding reasons (unbound_verifier_proof instead of
+    missing_verifier_artifact;missing_source_hash). Tests that assert neither would pass with {}.
+    """
+    import hashlib
+    import subprocess
+    import sys
+    import time
+
+    source = tmp_path / "target_under_verifier.py"
+    source.write_text("VALUE = 2\n", encoding="utf-8")
+    started = time.perf_counter()
+    proc = subprocess.run(
+        [sys.executable, "-c", "import ast, sys; ast.parse(open(sys.argv[1]).read())", str(source)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    wall_time_ms = max(1, int((time.perf_counter() - started) * 1000))
+    artifact = tmp_path / "verifier.log"
+    artifact.write_text(f"returncode={proc.returncode}\n{proc.stdout}{proc.stderr}", encoding="utf-8")
+    assert proc.returncode == 0, proc.stderr
+    return {
+        "verifier_status": "pass",
+        "verifier_artifact": "sha256:" + hashlib.sha256(artifact.read_bytes()).hexdigest(),
+        "source_hash": "sha256:" + hashlib.sha256(source.read_bytes()).hexdigest(),
+        "telemetries": {
+            "telemetry_source": "measured",
+            "wall_time_ms": wall_time_ms,
+            "token_usage": 0,
+            "provider_costs": 0.0,
+            "overhead_ms": 0,
+            "model_calls": 0,
+        },
+    }
+
+
+def _assert_receipt_held_fail_closed(receipt: dict) -> None:
+    """Contract (#453 ADVISORY_ONLY_FAIL_CLOSED): a generic adapter payload cannot mint verifier
+    authority. The receipt keeps its invocation, evidence and gate pass, but it never contributes
+    an outcome and is never public_claim_safe until an authenticated upstream verifier authority
+    is bound."""
+    assert receipt["selected"] is True
+    assert receipt["invoked"] is True
+    assert receipt["evidence_present"] is True
+    assert receipt["gate_passed"] is True
+    assert receipt["failure_reason"] == ""
+    assert receipt["outcome_contributed"] is False
+    assert receipt["public_claim_safe"] is False
