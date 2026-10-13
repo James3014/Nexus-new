@@ -42,7 +42,9 @@ def _test_executor(name: str) -> None:
     assert r.invoked, f"{name}: invoked={r.invoked}"
     assert r.gate_passed, f"{name}: gate_passed={r.gate_passed}"
     tel = r.telemetries
-    assert tel["telemetry_source"] == "measured", f"{name}: telemetry_source={tel['telemetry_source']}"
+    assert tel["telemetry_source"] == "measured", (
+        f"{name}: telemetry_source={tel['telemetry_source']}"
+    )
     assert isinstance(tel["wall_time_ms"], int), f"{name}: wall_time_ms={tel['wall_time_ms']!r}"
     assert tel["wall_time_ms"] >= STEP_MS, f"{name}: wall_time_ms={tel['wall_time_ms']}"
 
