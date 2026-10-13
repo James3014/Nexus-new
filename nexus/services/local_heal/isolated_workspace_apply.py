@@ -20,6 +20,9 @@ class IsolatedApplyRequest:
     work_dir: str = ""
     mutation_allowed: bool = False
     search_text: str = ""
+    # Files the verifier command reads (e.g. ``repro.py``); copied untracked so the isolated
+    # verifier can run, never part of the applied diff.
+    verifier_files: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -139,6 +142,7 @@ def run_isolated_workspace_apply(request: IsolatedApplyRequest) -> IsolatedApply
                 pass
         else:
             shutil.copy2(src_path, dest_path)
+        _copy_verifier_files(request, tmpdir)
 
         subprocess.run(["git", "add", request.target_file], cwd=tmpdir, shell=False, capture_output=True, timeout=5.0, check=True)
 
@@ -239,3 +243,20 @@ def run_isolated_workspace_apply(request: IsolatedApplyRequest) -> IsolatedApply
             candidate_output_isolated=False,
             mutation_allowed=True,
         )
+
+
+def _copy_verifier_files(request: IsolatedApplyRequest, workspace: str) -> None:
+    """Copy verifier inputs next to the candidate. Only plain relative files under source_root."""
+    from nexus.services.local_heal.pipeline_isolation import verifier_input_files
+
+    if not request.verifier_files or not request.source_root:
+        return
+    allowed = set(verifier_input_files(request.source_root, ("", *request.verifier_files)))
+    for relative in request.verifier_files:
+        if relative not in allowed or os.path.normpath(relative) == os.path.normpath(
+            request.target_file
+        ):
+            continue
+        destination = os.path.join(workspace, relative)
+        os.makedirs(os.path.dirname(destination), exist_ok=True)
+        shutil.copy2(os.path.join(request.source_root, relative), destination)

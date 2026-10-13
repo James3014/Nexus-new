@@ -36,7 +36,7 @@ def test_localheal_pipeline_topology_invokes_modules(tmp_path, monkeypatch):
     """Pipeline topology enters World C but cannot claim completion without evidence."""
     (tmp_path / "a.py").write_text("def f():\n    return 1\n", encoding="utf-8")
 
-    def prepare_workspace(source_root, _task_id, *, target_file, repro_script):
+    def prepare_workspace(source_root, _task_id, *, target_file, repro_script, **_kwargs):
         source = Path(source_root)
         workspace = source / "world-c-workspace"
         workspace.mkdir()
