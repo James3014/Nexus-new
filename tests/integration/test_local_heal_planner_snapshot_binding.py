@@ -1,4 +1,4 @@
-"""#1924: LocalHeal accepts only route_context snapshots bound in-process by build_execution_plan."""
+"""#1924: LocalHeal accepts only route_context snapshots bound in-process, per task, by build_execution_plan."""
 
 from __future__ import annotations
 
@@ -42,18 +42,21 @@ def _solve_controls(src_root: str) -> dict:
     }
 
 
-def _planner_controls() -> dict:
+_TASK_ID = "t-binding"
+
+
+def _planner_controls(task_id: str | None = _TASK_ID) -> dict:
     with mock.patch.dict(os.environ, {"NEXUS_LOCAL_MODEL_CALL_ALLOWED": "1"}):
         plan = CapabilityPlanner().plan(
             task_desc="fix code", task_type="repair", route={"local_enabled": True}
         )
-    return dict(build_execution_plan(plan).executor_controls)
+    return dict(build_execution_plan(plan, task_id=task_id).executor_controls)
 
 
-def _run(controls: dict) -> tuple[object, object]:
+def _run(controls: dict, task_id: str = _TASK_ID) -> tuple[object, object]:
     response = LocalHealCapabilityAdapter.run(
         LocalHealCapabilityRequest(
-            task_id="t-binding",
+            task_id=task_id,
             problem_statement="fix code",
             evidence_refs=("ref1",),
             executor_controls=controls,
@@ -123,6 +126,43 @@ def test_genuine_build_execution_plan_snapshot_is_accepted() -> None:
         assert response.hybrid_route.local_model_called is True
         # The planner does not grant isolated_solve, so this stays a candidate-only, blocked route.
         assert response.hybrid_route.route_mode.value == "local_only_blocked"
+        assert receipt.gate_passed is False
+    finally:
+        shutil.rmtree(src_root, ignore_errors=True)
+
+
+def test_snapshot_bound_to_another_task_is_rejected() -> None:
+    """Replay: a genuine snapshot bound to task A is not accepted for task B."""
+    src_root = _source_root()
+    try:
+        controls = _planner_controls(task_id="t-binding-task-a")
+        response, receipt = _run(
+            {**controls, **_solve_controls(src_root)}, task_id="t-binding-task-b"
+        )
+        assert response.invoked is False
+        assert response.hybrid_route.fallback_block_reason == ROUTE_CONTEXT_NOT_PLANNER_BOUND
+        assert response.hybrid_route.local_model_called is False
+        assert receipt.gate_passed is False
+        # The same controls remain valid for the task they were bound to.
+        response, _ = _run({**controls, **_solve_controls(src_root)}, task_id="t-binding-task-a")
+        assert response.hybrid_route.fallback_block_reason != ROUTE_CONTEXT_NOT_PLANNER_BOUND
+        assert response.invoked is True
+    finally:
+        shutil.rmtree(src_root, ignore_errors=True)
+
+
+def test_execution_plan_without_task_id_binds_nothing() -> None:
+    src_root = _source_root()
+    try:
+        controls = _planner_controls(task_id=None)
+        assert (
+            controls["route_context"]["signal_snapshot"]["planner_version"]
+            == "capability_planner_v1"
+        )
+        response, receipt = _run(
+            {**controls, **_solve_controls(src_root)}, task_id="t-binding-never-bound"
+        )
+        assert response.hybrid_route.fallback_block_reason == ROUTE_CONTEXT_NOT_PLANNER_BOUND
         assert receipt.gate_passed is False
     finally:
         shutil.rmtree(src_root, ignore_errors=True)

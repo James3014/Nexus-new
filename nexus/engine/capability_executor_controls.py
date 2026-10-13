@@ -52,7 +52,7 @@ def build_executor_controls(plan: CapabilityPlan | dict[str, Any]) -> dict[str, 
 _ROUTE_CONTEXT_CONSUMERS = frozenset({"local_heal", "local_model_executor"})
 
 
-def _planner_route_context(plan: CapabilityPlan | dict[str, Any]) -> dict[str, Any] | None:
+def _planner_route_context(plan: CapabilityPlan | dict[str, Any], task_id: str | None) -> dict[str, Any] | None:
     """Pass CapabilityPlanner's signal_snapshot through unchanged (a copy, never augmented)."""
     if isinstance(plan, CapabilityPlan):
         selected, pending, snapshot = plan.selected_capabilities, plan.pending_capabilities, plan.signal_snapshot
@@ -65,15 +65,16 @@ def _planner_route_context(plan: CapabilityPlan | dict[str, Any]) -> dict[str, A
     if not isinstance(snapshot, dict) or not snapshot:
         return None
     passed_snapshot = dict(snapshot)
-    # In-process origin binding: consumers reject route_context snapshots not registered here.
-    register_planner_snapshot(passed_snapshot)
+    # In-process origin binding to task_id; without a task_id nothing is bound (consumers fail closed).
+    if task_id is not None:
+        register_planner_snapshot(passed_snapshot, task_id=task_id)
     return {"signal_snapshot": passed_snapshot}
 
 
-def build_execution_plan(plan: CapabilityPlan | dict[str, Any]) -> CapabilityExecutionPlan:
+def build_execution_plan(plan: CapabilityPlan | dict[str, Any], *, task_id: str | None = None) -> CapabilityExecutionPlan:
     selected = tuple(plan.selected_capabilities if isinstance(plan, CapabilityPlan) else plan.get("selected_capabilities", []) or [])
     controls = build_executor_controls(plan)
-    route_context = _planner_route_context(plan)
+    route_context = _planner_route_context(plan, task_id)
     if route_context is not None:
         controls["route_context"] = route_context
     return CapabilityExecutionPlan(
