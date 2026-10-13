@@ -67,7 +67,9 @@ class CapabilitySelector:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
-        from nexus.engine.capability_planner import CapabilityPlanner
+        from nexus.core.layer_ports import resolve_port
+
+        CapabilityPlanner = resolve_port("planner.CapabilityPlanner")
         from nexus.services.mainchain_route_freeze import resolve_alias
 
         risk_score = {
