@@ -348,7 +348,7 @@ def test_same_generation_replay_uses_same_live_request_for_manager_reconciliatio
     assert manager.live_calls == 2
 
 
-def test_different_generation_without_ledger_is_rejected_before_materialize_preflight_or_live(
+def test_different_generation_is_rejected_before_materialize_preflight_or_live(
     tmp_path,
 ):
     manager = FakeManager(tmp_path / "gateway-direct")
