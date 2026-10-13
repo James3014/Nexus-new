@@ -6398,120 +6398,13 @@
     },
     {
       "capability": "autonomic_router",
-      "fixture": null,
-      "executor": {
-        "registry_key": "autonomic_router",
-        "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
-        "function": "_exec_autonomic_router",
-        "file": "nexus/core/capability_executor_registry.py",
-        "line": 636
-      },
+      "verdict": "RETIRING",
+      "verdict_reason": "archived_legacy_engine_autonomic_router_2026-10-13 (legacy-engine archive batch)",
+      "executor": {},
       "gaps": [
-        "control-plane suggestion (consumer_effect NONE, reason route_probe_not_production_execute); the ExecutionPlan it returns is stringified into the receipt and read by nothing"
+        "archived: the production invoker returns an explicit skip (archived_legacy_engine_autonomic_router_2026-10-13)"
       ],
-      "untriggered_production_default": {
-        "status": "SKIPPED",
-        "skip_reason": "SKIPPED_POLICY_NOT_TRIGGERED",
-        "reached": true
-      },
-      "trigger_switch": "route.escalate_triggered=True (set by product_capability_canary_helper; not by nexus run)",
-      "planner": {
-        "selected": true,
-        "state": "required",
-        "reasons": [
-          "route_oracle_expected_capability",
-          "route_oracle_expected_receipt_required"
-        ],
-        "selected_capabilities": [
-          "harness_preflight_sensor",
-          "research_route",
-          "delivery_gate",
-          "autonomic_router",
-          "pregate",
-          "plan_quality_gate",
-          "mempalace_gate",
-          "artifact_gate",
-          "claim_gate"
-        ],
-        "plan_hash": "2b3e36209e197a6cada5652d00830eb4c9b3900d921277337679c03c467c66d8",
-        "forcing": "route-oracle line 'Expected capability receipts: autonomic_router' in task_statement"
-      },
-      "policy_attempts": [
-        {
-          "policy": "production_default",
-          "env": {},
-          "status": "SUCCEEDED",
-          "path": "e2e",
-          "block_reason": ""
-        }
-      ],
-      "production_default_selection": {
-        "rule": "none (no enable() call; capability_coverage_gap: reserved_until_planner_ssot_migration)",
-        "trigger_statement": "Route the refund change to the right mode",
-        "trigger_route_features": {},
-        "trigger_route_keys_dropped_by_seam": [],
-        "selected_without_forcing": false,
-        "state": "optional",
-        "reasons": [
-          "available_but_not_selected"
-        ]
-      },
-      "product_path_reachable": true,
-      "receipt_terminal_status": "INCOMPLETE",
-      "workforce_admission": {
-        "decision": "ALLOW",
-        "reasons": [
-          "demand_online: All constraints and required controls passed"
-        ]
-      },
-      "policy_switches_needed": {},
-      "policy_used": "production_default",
-      "path": "e2e",
-      "receipt_claims_simulated": false,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
-      "evidence_refs": [
-        "ev_cap_autonomic_router_876d343a"
-      ],
-      "physical_callable": "capability_executor_registry:autonomic_router",
-      "console_tail": [],
-      "negative_control": {
-        "name": "negative_control:non_research_task_gets_other_mode",
-        "passed": true,
-        "detail": "neg=ExecutionPlan(mode='standard', reason='Final-Perf: 0', confidence=1.0, skill_id=None, matched_policies=[], mode_hint='st",
-        "negative_status": "SUCCEEDED",
-        "negative_block_reason": ""
-      },
-      "hard_coded_inputs": [],
-      "checks": [
-        {
-          "name": "research_first_mode_suggested",
-          "passed": true,
-          "detail": "ExecutionPlan(mode='research_first', reason='Final-Perf: 0', confidence=1.0, skill_id=None, matched_policies=[], mode_hint='research_first')"
-        },
-        {
-          "name": "negative_control:non_research_task_gets_other_mode",
-          "passed": true,
-          "detail": "neg=ExecutionPlan(mode='standard', reason='Final-Perf: 0', confidence=1.0, skill_id=None, matched_policies=[], mode_hint='st"
-        }
-      ],
-      "verdict": "REAL",
-      "verdict_reason": "invoked_with_evidence_and_artifact_assertions_passed",
-      "outcome_excerpt": {
-        "action": "route_suggest",
-        "semantic_status": "SUCCEEDED",
-        "evidence_refs": [
-          "ev_autonomic_suggest_wiring-autonomic_router-pos_production_default"
-        ],
-        "result": {
-          "route": "ExecutionPlan(mode='research_first', reason='Final-Perf: 0', confidence=1.0, skill_id=None, matched_policies=[], mode_hint='research_first')"
-        },
-        "control_plane_reference": true,
-        "not_production_executor_f": true,
-        "physical_callable": "nexus.engine.autonomic_router.AutonomicRouter.route",
-        "execution_class": "CONTROL_PLANE_REFERENCE"
-      },
-      "receipt_path": "receipts/autonomic_router.json",
-      "audit_seconds": 0.62
+      "archived_skip_reason": "archived_legacy_engine_autonomic_router_2026-10-13"
     },
     {
       "capability": "judge_panel",
@@ -7109,9 +7002,9 @@
   "verdict_counts": {
     "BLOCKED": 7,
     "NOT_EXECUTABLE": 4,
-    "REAL": 32,
+    "REAL": 31,
     "REAL_UNATTESTED": 4,
-    "RETIRING": 9,
+    "RETIRING": 10,
     "SIMULATED": 1,
     "STUB": 1
   },
@@ -7538,6 +7431,39 @@
         "reason": ""
       },
       "reason": "group C rerun after routing swarm/multi_agent integration through SelfHostedTaskService.integrate_approved (effect-owner uniqueness, #947); rows replaced in place"
+    },
+    {
+      "generated_at": "2026-10-13T11:05:39.067374+00:00",
+      "git_head": "582822e103d9b8ccb2e68c59a7bb87c94b3aace6",
+      "tree": "origin/main 582822e10 + legacy-engine archive (#2047) working tree",
+      "only": [],
+      "scope": "full run, all 58 rows + executor_only; before-run on origin/main 582822e10 generated_at 2026-10-13T11:01:10.706976+00:00",
+      "model_probe": true,
+      "verdict_counts_before": {
+        "REAL": 32,
+        "BLOCKED": 5,
+        "STUB": 1,
+        "REAL_UNATTESTED": 6,
+        "SIMULATED": 1,
+        "NOT_EXECUTABLE": 4,
+        "RETIRING": 9
+      },
+      "verdict_counts_after": {
+        "REAL": 31,
+        "BLOCKED": 5,
+        "STUB": 1,
+        "REAL_UNATTESTED": 6,
+        "SIMULATED": 1,
+        "NOT_EXECUTABLE": 4,
+        "RETIRING": 10
+      },
+      "changed_rows": {
+        "autonomic_router": [
+          "REAL",
+          "RETIRING"
+        ]
+      },
+      "reason": "legacy-engine archive (ARCHIVED_2026-10-13-legacy-engine.md): planner node autonomic_router resolves to archived_legacy_engine_autonomic_router_2026-10-13; only that row replaced in place (registry_sync differs only by an ephemeral port)"
     }
   ]
 }

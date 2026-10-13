@@ -90,6 +90,9 @@ RETIRING_CAPABILITIES: dict[str, str] = {
     "integration_manager": "archived_retired_integration_manager_2026-10-13 (second archive batch)",
     "swarm_quiet_moment": "archived_echo_swarm_quiet_moment_2026-10-13 (second archive batch)",
     "llm_judge_panel": "archived_alias_llm_judge_panel_2026-10-13 (second archive batch)",
+    # Legacy-engine batch (ARCHIVED_2026-10-13-legacy-engine.md): the AutonomicRouter body was
+    # the legacy NexusEngine router; no policy rule enabled the node and nothing read its output.
+    "autonomic_router": "archived_legacy_engine_autonomic_router_2026-10-13 (legacy-engine archive batch)",
 }
 
 # Executor-registry keys with no planner node, removed from EXECUTOR_REGISTRY by the second
@@ -3442,26 +3445,6 @@ def build_control_plane(
     return build
 
 
-def build_autonomic_router(ws: Path, variant: str) -> Scenario:
-    statement = (
-        "Do research on the refund window before editing target.py"
-        if variant == "positive"
-        else "Edit target.py to round totals"
-    )
-
-    def check(_ws: Path, obs: Obs) -> list[Check]:
-        route = str(_result(obs).get("route") or "")
-        return [Check("research_first_mode_suggested", "research_first" in route, route[:160])]
-
-    return Scenario(statement=statement, task_type="code_change", check=check)
-
-
-def neg_autonomic_router(pos: Obs, neg: Obs) -> Check:
-    pr, nr = str(_result(pos).get("route") or ""), str(_result(neg).get("route") or "")
-    ok = "research_first" in pr and "research_first" not in nr
-    return Check("negative_control:non_research_task_gets_other_mode", ok, f"neg={nr[:120]}")
-
-
 def build_judge_panel(ws: Path, variant: str) -> Scenario:
     fixture = read_json(ws / "candidates.json")
     candidates = list(fixture[variant])
@@ -4340,15 +4323,6 @@ _SPEC_LIST += [
         not_executable="control_plane_reference",
         gaps=(
             "execution contract physical_callable=None; no research_control_plane key in EXECUTOR_REGISTRY (real code nexus/research/experiment_scheduler.py is reachable only via the research:run CLI); since group D the receipt says NOT_EXECUTABLE:control_plane_reference",
-        ),
-    ),
-    CapSpec(
-        "autonomic_router",
-        None,
-        build_autonomic_router,
-        negative_check=neg_autonomic_router,
-        gaps=(
-            "control-plane suggestion (consumer_effect NONE, reason route_probe_not_production_execute); the ExecutionPlan it returns is stringified into the receipt and read by nothing",
         ),
     ),
     CapSpec(

@@ -43,3 +43,8 @@ def test_nexus_metrics_tracking(project_root):
     metrics_file = run_dir / ".nexus_metrics"
     assert metrics_file.exists()
     assert "1500" in metrics_file.read_text()
+
+
+# ARCHIVED 2026-10-13 legacy-engine: this file tests (in whole or in part) modules archived with
+# the legacy NexusEngine (nexus.engine.coordinator); see ARCHIVED_2026-10-13-legacy-engine.md.
+# It keeps running with unchanged node ids until the deletion PR removes it with those modules.

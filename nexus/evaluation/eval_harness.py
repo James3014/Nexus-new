@@ -202,3 +202,12 @@ class EvalHarness:
 
 
 import os
+
+# ARCHIVED 2026-10-13 legacy-engine (ARCHIVED_2026-10-13-legacy-engine.md).
+__import__("warnings").warn(
+    "ARCHIVED 2026-10-13 legacy-engine: "
+    "nexus.evaluation.eval_harness (EvalHarness) only drives the retired legacy NexusEngine through CommandService and has no importer; "
+    "see ARCHIVED_2026-10-13-legacy-engine.md. Scheduled for deletion; do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)

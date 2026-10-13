@@ -14,7 +14,6 @@ from nexus.core.layer_ports import bind_lazy_ports
 # port name -> (engine module, attribute); an empty attribute binds the module itself
 CORE_ENGINE_PORTS: dict[str, tuple[str, str]] = {
     # nexus.core.capability_executor_registry
-    "autonomic_router.AutonomicRouter": ("nexus.engine.autonomic_router", "AutonomicRouter"),
     "research.ResearchPhaseHandler": ("nexus.engine.phases.research", "ResearchPhaseHandler"),
     "autoreason.AutoreasonService": ("nexus.engine.autoreason_service", "AutoreasonService"),
     "autoreason.AutoreasonCandidate": ("nexus.engine.autoreason_service", "AutoreasonCandidate"),

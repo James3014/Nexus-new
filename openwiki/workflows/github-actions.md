@@ -28,7 +28,7 @@ The repository currently contains **all 13 GitHub Actions workflows** under `.gi
 | `fast-start-v2-shadow.yml` | Fast Start v2 Shadow | `pull_request`, `workflow_dispatch` | Event-driven & Manual | Read-only deterministic/live shadow proof for Fast Start v2 |
 | `git-history-secret-audit.yml` | Git History Secret Audit | `pull_request`, `workflow_dispatch` | Event-driven & Manual | G2 full published-ref secret-history evidence runner; least privilege and no merge/release authority |
 | `lint.yml` | Nexus Exact-Base Ruff CI | `push`, `pull_request`, `workflow_dispatch` | Event-driven & Manual | Exact-base Ruff/static lint lane |
-| `nexus-smoke.yml` | Nexus Smoke Benchmark | `push` (`main`, `master`), `schedule` (`0 2 * * *`), `workflow_dispatch` | Scheduled, Event-driven & Manual | Protected-branch/nightly smoke benchmark |
+| `nexus-smoke.yml` | Nexus Smoke Benchmark | `workflow_dispatch` | Manual (archived) | ARCHIVED 2026-10-13 legacy-engine: the legacy NexusEngine smoke benchmark reported a hard-coded PASS; push/nightly triggers removed, dispatch only fails with the archive notice (`ARCHIVED_2026-10-13-legacy-engine.md`) |
 | `openwiki-update.yml` | OpenWiki Manual Update | `workflow_dispatch` | Manual-Only | Pinned OpenWiki generation with containment checks and artifact upload |
 | `policy-lane-gate.yml` | Policy Lane Gate CI | `push`, `pull_request`, `workflow_dispatch` | Event-driven & Manual | Policy-contract validation lane |
 | `pytest.yml` | Nexus Pytest CI | `push`, `pull_request`, `workflow_dispatch`, `schedule` (`17 3 * * *`) | Scheduled, Event-driven & Manual | Exact-base impact gate followed by revision-bound Pytest verification |

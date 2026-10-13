@@ -39,6 +39,9 @@ ARCHIVED_ORACLE_SHADOW = "archived_oracle_shadow_2026-10-12"
 ARCHIVED_INTEGRATION_MANAGER = "archived_retired_integration_manager_2026-10-13"
 ARCHIVED_SWARM_QUIET_MOMENT = "archived_echo_swarm_quiet_moment_2026-10-13"
 ARCHIVED_LLM_JUDGE_PANEL = "archived_alias_llm_judge_panel_2026-10-13"
+# Legacy-engine batch (ARCHIVED_2026-10-13-legacy-engine.md): the node's only body was the
+# legacy NexusEngine AutonomicRouter; no policy rule enables it and nothing consumes it.
+ARCHIVED_AUTONOMIC_ROUTER = "archived_legacy_engine_autonomic_router_2026-10-13"
 
 ARCHIVED_CAPABILITY_REASONS: dict[str, str] = {
     "benchmark": ARCHIVED_FAKE_BENCHMARK,
@@ -50,6 +53,7 @@ ARCHIVED_CAPABILITY_REASONS: dict[str, str] = {
     "integration_manager": ARCHIVED_INTEGRATION_MANAGER,
     "swarm_quiet_moment": ARCHIVED_SWARM_QUIET_MOMENT,
     "llm_judge_panel": ARCHIVED_LLM_JUDGE_PANEL,
+    "autonomic_router": ARCHIVED_AUTONOMIC_ROUTER,
 }
 
 # Planner nodes kept for selection whose execution contract has no physical callable

@@ -165,3 +165,8 @@ def test_p4_classifier_outlier_forces_swarm(router, monkeypatch):
     }
     plan = router.route(task, state, forecast)
     assert plan.mode == "swarm"
+
+
+# ARCHIVED 2026-10-13 legacy-engine: this file tests (in whole or in part) modules archived with
+# the legacy NexusEngine (nexus.engine.autonomic_router); see ARCHIVED_2026-10-13-legacy-engine.md.
+# It keeps running with unchanged node ids until the deletion PR removes it with those modules.

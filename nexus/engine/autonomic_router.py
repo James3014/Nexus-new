@@ -138,3 +138,13 @@ class AutonomicRouter:
         plan = ExecutionPlan(mode=mode, mode_hint=mode, reason=f"Final-Perf: {len(matched_list)}", confidence=1.0, matched_policies=matched_list)
         state.metadata["autonomic_reason"] = plan.reason
         return plan
+
+
+# ARCHIVED 2026-10-13 legacy-engine (ARCHIVED_2026-10-13-legacy-engine.md).
+__import__("warnings").warn(
+    "ARCHIVED 2026-10-13 legacy-engine: "
+    "nexus.engine.autonomic_router was reached only through the legacy NexusEngine and the planner node autonomic_router, which no policy rule enables and whose suggestion nothing consumes; "
+    "see ARCHIVED_2026-10-13-legacy-engine.md. Scheduled for deletion; do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)

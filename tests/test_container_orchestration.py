@@ -111,3 +111,8 @@ def test_container_service_hubs_consistent(tmp_path):
     assert intel_hub.context_hub.prompt_builder is container.prompt_builder()
     assert intel_hub.context_hub.knowledge_injector is container.knowledge_injector()
     assert intel_hub.context_hub.belief_engine is container.belief_engine()
+
+
+# ARCHIVED 2026-10-13 legacy-engine: this file tests (in whole or in part) modules archived with
+# the legacy NexusEngine (nexus.containers); see ARCHIVED_2026-10-13-legacy-engine.md.
+# It keeps running with unchanged node ids until the deletion PR removes it with those modules.

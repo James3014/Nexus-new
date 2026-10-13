@@ -214,3 +214,13 @@ class RecursiveRepairLoop:
                 stop_reason="budget_exhausted",
             )
         )
+
+
+# ARCHIVED 2026-10-13 legacy-engine (ARCHIVED_2026-10-13-legacy-engine.md).
+__import__("warnings").warn(
+    "ARCHIVED 2026-10-13 legacy-engine: "
+    "nexus.engine.recursive_repair_loop is part of the retired legacy NexusEngine and has no production caller (nexus run uses execute_canonical_product_task); "
+    "see ARCHIVED_2026-10-13-legacy-engine.md. Scheduled for deletion; do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)

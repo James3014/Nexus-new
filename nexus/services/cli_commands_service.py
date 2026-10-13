@@ -60,3 +60,13 @@ class CliCommandsService:
 
         reach_engine = UCCRouter(self.repo_root)
         return reach_engine.reach(url, tier=tier)
+
+
+# ARCHIVED 2026-10-13 legacy-engine (ARCHIVED_2026-10-13-legacy-engine.md).
+__import__("warnings").warn(
+    "ARCHIVED 2026-10-13 legacy-engine: "
+    "nexus.services.cli_commands_service only wraps the retired legacy NexusEngine for the archived nexus/cli/commands modules; "
+    "see ARCHIVED_2026-10-13-legacy-engine.md. Scheduled for deletion; do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)

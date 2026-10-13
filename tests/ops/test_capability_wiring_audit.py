@@ -350,6 +350,8 @@ ARCHIVED_2026_10_13_NODES = {
     "integration_manager": "archived_retired_integration_manager_2026-10-13",
     "swarm_quiet_moment": "archived_echo_swarm_quiet_moment_2026-10-13",
     "llm_judge_panel": "archived_alias_llm_judge_panel_2026-10-13",
+    # legacy-engine batch (ARCHIVED_2026-10-13-legacy-engine.md)
+    "autonomic_router": "archived_legacy_engine_autonomic_router_2026-10-13",
 }
 
 EXTENSION_NODES = {

@@ -73,3 +73,13 @@ async def campaign_master_loop(commander, task_nodes, repo_root):
 def execute_tactical_node(node, repo_root):
     """Route tactical work through the canonical command-service seam."""
     return execute_single_task_via_service(node.intent, Path(repo_root))
+
+
+# ARCHIVED 2026-10-13 legacy-engine (ARCHIVED_2026-10-13-legacy-engine.md).
+__import__("warnings").warn(
+    "ARCHIVED 2026-10-13 legacy-engine: "
+    "nexus.engine.cli_runner_async has no importer and only dispatches to the retired legacy NexusEngine; "
+    "see ARCHIVED_2026-10-13-legacy-engine.md. Scheduled for deletion; do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)

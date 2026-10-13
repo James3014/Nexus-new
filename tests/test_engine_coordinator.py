@@ -129,3 +129,6 @@ def test_context_hub_disables_external_research_for_benchmark_run(tmp_path):
     assert decision["mode"] == "benchmark"
 
 
+# ARCHIVED 2026-10-13 legacy-engine: this file tests (in whole or in part) modules archived with
+# the legacy NexusEngine (nexus.engine.coordinator); see ARCHIVED_2026-10-13-legacy-engine.md.
+# It keeps running with unchanged node ids until the deletion PR removes it with those modules.

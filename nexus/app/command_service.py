@@ -220,3 +220,13 @@ class NexusCommandService:
     def execute_health_explain(self):
         self.last_health_explain_result = run_health_explain(self.engine)
         return self.last_health_explain_result
+
+
+# ARCHIVED 2026-10-13 legacy-engine (ARCHIVED_2026-10-13-legacy-engine.md).
+__import__("warnings").warn(
+    "ARCHIVED 2026-10-13 legacy-engine: "
+    "nexus.app.command_service (NexusCommandService) only wraps the retired legacy NexusEngine; "
+    "see ARCHIVED_2026-10-13-legacy-engine.md. Scheduled for deletion; do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)

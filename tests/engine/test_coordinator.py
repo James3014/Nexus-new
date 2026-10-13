@@ -313,3 +313,8 @@ def test_engine_add_step_to_history():
         engine._add_step_to_history(state, "P", {"test_key": "test_val"})
     finally:
         stack.close()
+
+
+# ARCHIVED 2026-10-13 legacy-engine: this file tests (in whole or in part) modules archived with
+# the legacy NexusEngine (nexus.engine.coordinator); see ARCHIVED_2026-10-13-legacy-engine.md.
+# It keeps running with unchanged node ids until the deletion PR removes it with those modules.

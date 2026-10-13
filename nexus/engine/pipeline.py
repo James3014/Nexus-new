@@ -729,3 +729,13 @@ class _PhaseExecutorPlugin(PhasePlugin):
     def provided_artifacts(self) -> tuple[str, ...]:
         provider = getattr(self.executor, "provided_artifacts", None)
         return tuple(provider() or ()) if callable(provider) else ()
+
+
+# ARCHIVED 2026-10-13 legacy-engine (ARCHIVED_2026-10-13-legacy-engine.md).
+__import__("warnings").warn(
+    "ARCHIVED 2026-10-13 legacy-engine: "
+    "nexus.engine.pipeline is part of the retired legacy NexusEngine and has no production caller (nexus run uses execute_canonical_product_task); "
+    "see ARCHIVED_2026-10-13-legacy-engine.md. Scheduled for deletion; do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)

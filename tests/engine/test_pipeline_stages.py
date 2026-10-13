@@ -114,3 +114,8 @@ def test_stage_spec_bind_enables_direct_mode_and_binds_scope(mock_ctx):
     assert mock_ctx.state.metadata["verify_commands"] == [
         "uv run pytest tests/engine/test_pipeline_stages.py::test_stage_plan -q"
     ]
+
+
+# ARCHIVED 2026-10-13 legacy-engine: this file tests (in whole or in part) modules archived with
+# the legacy NexusEngine (nexus.engine.pipeline_stages); see ARCHIVED_2026-10-13-legacy-engine.md.
+# It keeps running with unchanged node ids until the deletion PR removes it with those modules.

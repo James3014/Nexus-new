@@ -1,65 +1,42 @@
+"""ARCHIVED 2026-10-13 legacy-engine (ARCHIVED_2026-10-13-legacy-engine.md).
+
+``nexus.engine.cli_runner_async`` had no importer and only dispatched to the retired legacy
+NexusEngine. Historical node ids are kept and now assert that tactical nodes fail closed
+instead of building the engine.
+"""
+
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+
+def _forbid_legacy_engine(monkeypatch):
+    def _boom(*_args, **_kwargs):  # pragma: no cover - must not be reached
+        raise AssertionError("archived legacy NexusEngine must not be constructed")
+
+    monkeypatch.setattr("nexus.engine.config.EngineConfig", _boom)
+
+
+def _run(node_id: str, intent: str, tmp_path: Path, monkeypatch):
+    from nexus.engine.canonical_task_seam import LegacyEngineArchivedError
+    from nexus.engine.cli_runner_async import execute_tactical_node
+
+    _forbid_legacy_engine(monkeypatch)
+
+    node = SimpleNamespace(node_id=node_id, intent=intent, envelope=None)
+    with pytest.raises(LegacyEngineArchivedError) as excinfo:
+        execute_tactical_node(node, Path(tmp_path))
+    return excinfo.value
 
 
 def test_execute_tactical_node_routes_bug_tasks_to_canonical_service(monkeypatch, tmp_path):
-    from nexus.engine.cli_runner_async import execute_tactical_node
-
-    captured = {}
-
-    class _FakeService:
-        def __init__(self, _engine):
-            pass
-
-        def execute_bug(self, request):
-            captured["kind"] = "bug"
-            captured["task"] = request.task
-            return True
-
-        def execute_feature(self, request):
-            captured["kind"] = "feature"
-            captured["task"] = request.task
-            return True
-
-    monkeypatch.setattr("nexus.app.command_service.NexusCommandService", _FakeService)
-    monkeypatch.setattr("nexus.engine.coordinator.NexusEngine", lambda _config: object())
-
-    class _Node:
-        node_id = "T1"
-        intent = "fix deadlock"
-        envelope = None
-
-    ok = execute_tactical_node(_Node(), Path(tmp_path))
-    assert ok is True
-    assert captured == {"kind": "bug", "task": "fix deadlock"}
+    error = _run("T1", "fix deadlock", tmp_path, monkeypatch)
+    assert error.entry == "execute_single_task_via_service"
+    assert error.reason == "archived_legacy_engine_2026-10-13"
 
 
 def test_execute_tactical_node_routes_feature_tasks_to_canonical_service(monkeypatch, tmp_path):
-    from nexus.engine.cli_runner_async import execute_tactical_node
-
-    captured = {}
-
-    class _FakeService:
-        def __init__(self, _engine):
-            pass
-
-        def execute_bug(self, request):
-            captured["kind"] = "bug"
-            captured["task"] = request.task
-            return True
-
-        def execute_feature(self, request):
-            captured["kind"] = "feature"
-            captured["task"] = request.task
-            return True
-
-    monkeypatch.setattr("nexus.app.command_service.NexusCommandService", _FakeService)
-    monkeypatch.setattr("nexus.engine.coordinator.NexusEngine", lambda _config: object())
-
-    class _Node:
-        node_id = "T2"
-        intent = "build a dashboard"
-        envelope = None
-
-    ok = execute_tactical_node(_Node(), Path(tmp_path))
-    assert ok is True
-    assert captured == {"kind": "feature", "task": "build a dashboard"}
+    error = _run("T2", "build a dashboard", tmp_path, monkeypatch)
+    assert error.entry == "execute_single_task_via_service"
+    assert "ARCHIVED 2026-10-13 legacy-engine" in str(error)
