@@ -490,6 +490,10 @@ class LLMCandidateGenerator:
                     attempt=idx + 1,
                     model=model,
                 )
+                skipped_reason = _online_call_skipped_reason(unified_receipt)
+                if skipped_reason:
+                    # No provider process started (e.g. Workforce admission ESCALATE): not a model call.
+                    model_calls -= 1
                 status = str(out.get("status", "")).upper() if isinstance(out, dict) else ""
                 code, edit_error = _candidate_code_from_llm_output(source_code, out if isinstance(out, dict) else {})
                 tokens_used = 0
@@ -503,6 +507,7 @@ class LLMCandidateGenerator:
                 metadata = {
                     "source": self.source,
                     "model_calls": model_calls,
+                    "model_call_skipped_reason": skipped_reason,
                     "quota_backoffs": quota_backoffs,
                     "tokens_used": tokens_used,
                     "token_capture_status": token_capture_status,
@@ -782,6 +787,25 @@ def _candidate_code_from_llm_output(source_code: str, out: dict[str, Any]) -> tu
     if source_code.count(target) != 1:
         return None, "llm_target_snippet_not_unique"
     return source_code.replace(target, replacement, 1), ""
+
+
+def _online_call_skipped_reason(unified_receipt: Mapping[str, Any] | None) -> str:
+    """Reason the online stage made no provider call, or "" when a call happened/unknown."""
+    online = unified_receipt.get("online") if isinstance(unified_receipt, Mapping) else None
+    if not isinstance(online, Mapping) or online.get("invoked") is not False:
+        return ""
+    response = online.get("response") if isinstance(online.get("response"), Mapping) else {}
+    try:
+        calls = int(online.get("provider_call_count", response.get("provider_call_count", 0)) or 0)
+    except (TypeError, ValueError):
+        return ""
+    if calls:
+        return ""
+    trace = online.get("context_trace") if isinstance(online.get("context_trace"), Mapping) else {}
+    authority = trace.get("gateway_invocation_authority")
+    if isinstance(authority, Mapping) and str(authority.get("admission_overall_decision") or "") == "ESCALATE":
+        return "admission_escalated"
+    return str(online.get("reason") or response.get("error") or "online_not_invoked")
 
 
 def _build_value_task_contract(*, source_code: str, task: str, test_source: str = "") -> str:
