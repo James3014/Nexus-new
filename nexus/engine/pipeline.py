@@ -379,6 +379,24 @@ class NexusPipeline(
         ctx.state.metadata["pipeline_terminal_state"] = "FAILED"
 
     @staticmethod
+    def _withhold_unverified_success(ctx: PipelineContext) -> None:
+        """Downgrade a claimed SUCCESS to FAILED, keeping HUMAN_REVIEW/ESCALATED handoffs."""
+        metadata = ctx.state.metadata
+        terminal = str(metadata.get("pipeline_terminal_state") or "")
+        if terminal not in ("HUMAN_REVIEW", "ESCALATED"):
+            terminal = "FAILED"
+            metadata["pipeline_terminal_state"] = terminal
+        for key in ("pipeline_outcome", "nexus_outcome_v2"):
+            outcome = metadata.get(key)
+            if not isinstance(outcome, dict):
+                continue
+            previous = outcome.get("terminal_state")
+            outcome["terminal_state"] = PipelineTerminalState[terminal] if isinstance(previous, PipelineTerminalState) else terminal
+            outcome["exit_code"] = PipelineTerminalState[terminal].value
+            if key == "nexus_outcome_v2":
+                outcome["trust_level"] = "untrusted"
+
+    @staticmethod
     def _crystallize_side_effects_present(ctx: PipelineContext) -> bool:
         metadata = ctx.state.metadata
         return bool(
@@ -464,7 +482,7 @@ class NexusPipeline(
         if success and ctx.state.metadata.get("composition_crystallize_side_effects_verified") is not True:
             # Success cannot be claimed without a verified C record (Refs #1923).
             logger.error("🛑 [Pipeline] Success withheld: crystallize record missing or unverified.")
-            ctx.state.metadata["pipeline_terminal_state"] = "FAILED"
+            self._withhold_unverified_success(ctx)
             success = False
         if ctx.event_store:
             try:
@@ -670,9 +688,8 @@ class NexusPipeline(
             self._run_crystallize_phase(ctx, success, tracer)
         except Exception as e:
             logger.error(f"Crystallize stage encountered an error (non-fatal): {e}")
-            # The verified-C flag is only set on a clean C run, so finalize
-            # will withhold success; keep the terminal state consistent.
-            ctx.state.metadata["pipeline_terminal_state"] = "FAILED"
+            # The verified-C flag is only set on a clean C run, so
+            # _finalize_and_report owns the downgrade of a claimed success.
             
         return self._finalize_and_report(ctx, success, tracer)
 

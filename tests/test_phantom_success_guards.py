@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, patch
 
 from nexus.engine.phase_plugin import PhaseResult
 from nexus.engine.pipeline import NexusPipeline
+from nexus.engine.pipeline_outcome import PipelineTerminalState
 from nexus.services.reviewer import CodexLoopV2
 
 
@@ -29,11 +30,25 @@ class _FakeExecutor:
 
 def _write_terminal_record(ctx):
     metadata = ctx.state.metadata
-    metadata["pipeline_terminal_state"] = (
-        "SUCCESS" if metadata.get("pipeline_success") else "FAILED"
-    )
-    metadata["pipeline_outcome"] = {"terminal_state": metadata["pipeline_terminal_state"]}
-    metadata["nexus_outcome_v2"] = {"terminal_state": metadata["pipeline_terminal_state"]}
+    if metadata.get("human_review_required"):
+        terminal = "HUMAN_REVIEW"
+    else:
+        terminal = "SUCCESS" if metadata.get("pipeline_success") else "FAILED"
+    metadata["pipeline_terminal_state"] = terminal
+    metadata["pipeline_outcome"] = {
+        "terminal_state": PipelineTerminalState[terminal],
+        "exit_code": PipelineTerminalState[terminal].value,
+    }
+    metadata["nexus_outcome_v2"] = {
+        "terminal_state": terminal,
+        "exit_code": PipelineTerminalState[terminal].value,
+        "trust_level": "production",
+    }
+
+
+def _write_terminal_record_then_raise(ctx):
+    _write_terminal_record(ctx)
+    raise RuntimeError("crystallize index write failed")
 
 
 def _composition_executors(*, events=None, c_writes_terminal_record=True):
@@ -294,3 +309,66 @@ def test_pipeline_records_c_before_commander_completion(mock_ki, tmp_path):
     assert ok is False
     assert seen["composition_crystallize_failure_reason"] == "missing_terminal_outcome_side_effects"
     assert seen["pipeline_terminal_state"] == "FAILED"
+
+
+@patch("nexus.learning.knowledge_index.KnowledgeIndex")
+def test_pipeline_blocks_audit_pass_when_repair_failed(mock_ki, tmp_path):
+    # R reports FAILED; a permissive composed A must not turn it into success.
+    executors = _composition_executors()
+    executors["R"] = _FakeExecutor("R", {"status": "FAILED"})
+    pipeline = NexusPipeline(_composition_engine(tmp_path, executors))
+    seen = _capture_final_metadata(pipeline)
+
+    ok = pipeline.run("repair failed", task_type="bug")
+
+    assert ok is False
+    assert executors["A"].calls == 1
+    assert seen["composition_audit_phase_rejection"] == "composition_repair_recoverable_block"
+    assert seen["pipeline_terminal_state"] == "FAILED"
+
+
+@patch("nexus.learning.knowledge_index.KnowledgeIndex")
+def test_pipeline_withholds_success_when_crystallize_raises(mock_ki, tmp_path):
+    # C writes a SUCCESS record and then raises: the run must end FAILED and
+    # no persisted outcome may still claim SUCCESS.
+    executors = _composition_executors()
+    executors["C"].side_effect = _write_terminal_record_then_raise
+    pipeline = NexusPipeline(_composition_engine(tmp_path, executors))
+    seen = _capture_final_metadata(pipeline)
+
+    ok = pipeline.run("crystallize raises", task_type="bug")
+
+    assert ok is False
+    assert executors["C"].calls == 1
+    assert seen.get("composition_crystallize_side_effects_verified") is not True
+    assert seen["pipeline_terminal_state"] == "FAILED"
+    assert seen["pipeline_outcome"]["terminal_state"] == PipelineTerminalState.FAILED
+    assert seen["pipeline_outcome"]["exit_code"] == PipelineTerminalState.FAILED.value
+    assert seen["nexus_outcome_v2"]["terminal_state"] == "FAILED"
+    assert seen["nexus_outcome_v2"]["exit_code"] == PipelineTerminalState.FAILED.value
+    assert seen["nexus_outcome_v2"]["trust_level"] == "untrusted"
+
+
+@patch("nexus.learning.knowledge_index.KnowledgeIndex")
+def test_pipeline_preserves_human_review_when_crystallize_raises(mock_ki, tmp_path):
+    # C writes HUMAN_REVIEW and then raises. Whether or not R/A succeeded, the
+    # HUMAN_REVIEW terminal state and its handoff bundle must survive.
+    for repair_status in ("APPROVED", "FAILED"):
+        executors = _composition_executors()
+        executors["R"] = _FakeExecutor("R", {"status": repair_status})
+        executors["C"].side_effect = _write_terminal_record_then_raise
+        pipeline = NexusPipeline(_composition_engine(tmp_path, executors))
+        seen = _capture_final_metadata(pipeline)
+
+        with patch("nexus.engine.pipeline.HandoffBundleWriter") as writer:
+            ok = pipeline.run(
+                "human review",
+                task_type="bug",
+                context={"human_review_required": True},
+            )
+
+        assert ok is False, repair_status
+        assert seen["pipeline_terminal_state"] == "HUMAN_REVIEW", repair_status
+        assert seen["pipeline_outcome"]["terminal_state"] == PipelineTerminalState.HUMAN_REVIEW
+        assert seen["nexus_outcome_v2"]["terminal_state"] == "HUMAN_REVIEW"
+        writer.return_value.create.assert_called_once()
