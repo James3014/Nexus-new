@@ -103,6 +103,7 @@
 | nexus/engine/asi_constraints.py | tests/engine/test_asi_constraints.py::test_asi_constraint_extractor_orders_families_and_preserves_evidence_refs, tests/engine/test_asi_constraints.py | active | medium | asi_constraint_ordering_contract |
 | nexus/contracts/s2t_export.py | tests/contracts/test_s2t_contracts.py::test_s2t_agent_lightning_export_emits_preference_pairs, tests/contracts/test_s2t_contracts.py::test_s2t_export_selects_highest_scored_failed_rejected_candidate_stably | active | medium | s2t_export_ordering_contract |
 | nexus/contracts/hybrid_retrieval.py | tests/contracts/test_hybrid_retrieval.py | active | high | hybrid_retrieval_rrf_contract |
+| nexus/contracts/planner_snapshot_binding.py | tests/integration/test_local_heal_planner_snapshot_binding.py, tests/integration/test_abc_local_heal_shadow_seam.py, tests/integration/test_n31_fail_closed_local_heal_adapter.py | active | high | planner_snapshot_route_context_binding_contract |
 | tests/contracts/test_hybrid_retrieval.py | tests/contracts/test_hybrid_retrieval.py | active | medium | test_contract |
 | tests/nexus/executors/test_worker_effect_projection.py | tests/nexus/executors/test_worker_effect_projection.py | active | medium | test_contract |
 | tests/nexus/governance/test_capability_gate_authority_boundary.py | tests/nexus/governance/test_capability_gate_authority_boundary.py | active | medium | test_contract |
@@ -187,6 +188,7 @@
 | scripts/bench/fixture_materialization.py | tests/benchmark/test_fixture_materialization.py | active | high | external_fixture_materialization_contract |
 | scripts/bench/public_lane_contract.py | tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_accepts_causal_runtime_mount, tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_rejects_quarantined_mount | active | high | benchmark_contract |
 | scripts/bench | tests/benchmark | active | medium | benchmark_contract |
+| scripts/local_heal/run_controlled_local_solve_fixture.py | tests/integration/test_controlled_local_solve_fixture_runner.py | active | high | local_heal_controlled_solve_fixture_contract |
 | nexus/learning/skill_catalog.py | tests/learning/test_skill_catalog.py, tests/ops/test_ci_gate_report_trust_audit.py | active | high | skill_catalog_governance |
 | nexus/learning/skill_fit_followup.py | tests/learning/test_skill_fit_ablation.py::test_skill_fit_row_index_groups_baselines_catalog_and_skill_rows_for_rca_and_cost, tests/learning/test_skill_fit_ablation.py::test_skill_fit_row_level_rca_recommends_targeted_replay_for_promising_governance_skill, tests/learning/test_skill_fit_ablation.py::test_skill_fit_cost_phase_contract_separates_cost_from_delivery_claims | active | high | skill_fit_row_index_contract |
 | tests/ops/test_ci_gate_report_trust_audit.py | tests/ops/test_ci_gate_report_trust_audit.py | active | medium | test_contract |
