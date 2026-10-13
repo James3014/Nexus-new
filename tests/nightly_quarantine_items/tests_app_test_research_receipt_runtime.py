@@ -2,14 +2,5 @@
 
 from __future__ import annotations
 
-ENTRY: dict[str, object] = {
-    "file": "tests/app/test_research_receipt_runtime.py",
-    "disposition": "quarantine",
-    "issue": "#1924",
-    "cause": "capability-phase e2e expectations (plan membership, invoked/gate_passed/wall_time) drifted from the current capability planner; stale expectations, needs owner fix-or-delete decision",
-    "tests": (
-        "test_build_capability_receipt_payloads_marks_runtime_autoreason_safe",
-        "test_build_capability_receipt_payloads_preserves_runtime_repair_loop_receipt",
-        "test_hyper_runtime_usage_backfill_is_marked_as_supporting_flow",
-    ),
-}
+# Tombstone (#1924): every listed id was converted to a contract test of current behaviour: with a real verifier result, source hash and measured telemetry the receipt keeps its gate pass but stays fail-closed (#453 ADVISORY_ONLY_FAIL_CLOSED, #1757).
+ENTRY = None

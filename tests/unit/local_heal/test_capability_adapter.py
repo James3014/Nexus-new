@@ -7,6 +7,9 @@ from unittest import mock
 import pytest
 
 from nexus.contracts.hybrid_route import RouteMode, Authority, VerifierResult
+from nexus.engine.capability_contracts import CapabilityPlan
+from nexus.engine.capability_executor_controls import build_execution_plan
+from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.services.local_heal.capability_adapter import (
     LocalHealCapabilityAdapter,
     LocalHealCapabilityRequest,
@@ -17,6 +20,52 @@ from nexus.services.local_heal.local_model_provider import (
     InjectedLocalModelProvider,
     OllamaLocalModelProvider,
 )
+
+# The snapshot keys LocalHealCapabilityAdapter reads as grants. They are cleared from the real
+# planner snapshot so that each scenario states its grants explicitly.
+_ADAPTER_GRANT_KEYS = frozenset({
+    "model_call_allowed",
+    "candidate_enabled",
+    "mutation_allowed",
+    "verifier_allowed",
+    "isolated_solve_enabled",
+    "advisory_enabled",
+    "fail_closed_enabled",
+    "enable_pipeline",
+    "executor_provider",
+    "executor_model",
+})
+
+
+def _bound_route_context(task_id: str, **grants: object) -> dict:
+    """Build a route_context the current contract accepts (#1924, #2032/#2050).
+
+    Start from a real CapabilityPlanner.plan() snapshot, project the scenario's grants onto it,
+    and pass it through build_execution_plan(plan, task_id=...) so it is bound to the task that
+    the request names.
+    """
+    planner_plan = CapabilityPlanner().plan(
+        task_desc="fix code", task_type="repair", route={"local_enabled": True}
+    )
+    snapshot = {k: v for k, v in planner_plan.signal_snapshot.items() if k not in _ADAPTER_GRANT_KEYS}
+    snapshot.update(grants)
+    plan = CapabilityPlan(
+        schema_version="nexus_capability_plan_v1",
+        selected_capabilities=["local_heal"],
+        required_capabilities=["local_heal"],
+        optional_capabilities=[],
+        conditional_capabilities=[],
+        pending_capabilities=[],
+        forbidden_capabilities=[],
+        constraints=[],
+        decision_trace=[],
+        replan_trace=[],
+        score=95.0,
+        signal_snapshot=snapshot,
+    )
+    return dict(build_execution_plan(plan, task_id=task_id).executor_controls["route_context"])
+
+
 @pytest.mark.legacy
 def test_build_local_model_provider() -> None:
     snap1 = {"model_call_allowed": False}
@@ -46,11 +95,7 @@ def test_capability_adapter_disabled() -> None:
         executor_controls={
             "enable_local_heal": False, 
             "local_heal_mode": "disabled",
-            "route_context": {
-                "signal_snapshot": {
-                    "enable_pipeline": False
-                }
-            }
+            "route_context": _bound_route_context("t1", enable_pipeline=False)
         },
     )
     response = LocalHealCapabilityAdapter.run(request)
@@ -74,12 +119,7 @@ def test_capability_adapter_shadow_only_with_evidence() -> None:
         executor_controls={
             "enable_local_heal": True, 
             "local_heal_mode": "shadow_only",
-            "route_context": {
-                "signal_snapshot": {
-                    "enable_pipeline": True,
-                    "model_call_allowed": True
-                }
-            }
+            "route_context": _bound_route_context("t2", enable_pipeline=True, model_call_allowed=True)
         },
         dry_run=False,
     )
@@ -105,12 +145,7 @@ def test_capability_adapter_shadow_only_missing_evidence() -> None:
         executor_controls={
             "enable_local_heal": True, 
             "local_heal_mode": "shadow_only",
-            "route_context": {
-                "signal_snapshot": {
-                    "enable_pipeline": True,
-                    "model_call_allowed": True
-                }
-            }
+            "route_context": _bound_route_context("t3", enable_pipeline=True, model_call_allowed=True)
         },
         dry_run=False,
     )
@@ -132,12 +167,7 @@ def test_capability_adapter_pipeline_enabled_by_env_but_mutation_blocked() -> No
         executor_controls={
             "enable_local_heal": True, 
             "local_heal_mode": "disabled",
-            "route_context": {
-                "signal_snapshot": {
-                    "enable_pipeline": True,
-                    "mutation_allowed": False
-                }
-            }
+            "route_context": _bound_route_context("t4", enable_pipeline=True, mutation_allowed=False)
         },
         dry_run=False,
     )
@@ -158,11 +188,7 @@ def test_capability_adapter_advisory_enabled_by_env() -> None:
         executor_controls={
             "enable_local_heal": False, 
             "local_heal_mode": "disabled",
-            "route_context": {
-                "signal_snapshot": {
-                    "advisory_enabled": True
-                }
-            }
+            "route_context": _bound_route_context("t5", advisory_enabled=True)
         },
         dry_run=False,
     )
@@ -186,11 +212,7 @@ def test_capability_adapter_fail_closed_guard_blocked() -> None:
             "enable_local_heal": True,
             "local_heal_mode": "shadow_only",
             "verifier_result": "fail",
-            "route_context": {
-                "signal_snapshot": {
-                    "fail_closed_enabled": True
-                }
-            }
+            "route_context": _bound_route_context("t6", fail_closed_enabled=True)
         },
         dry_run=False,
     )
@@ -221,12 +243,7 @@ def test_capability_adapter_candidate_enabled_with_call() -> None:
             "locked_search": "search",
             "verifier_command": ["cmd"],
             "work_dir": "work",
-            "route_context": {
-                "signal_snapshot": {
-                    "candidate_enabled": True,
-                    "model_call_allowed": True
-                }
-            }
+            "route_context": _bound_route_context("t7", candidate_enabled=True, model_call_allowed=True)
         },
         dry_run=False,
     )
@@ -247,13 +264,7 @@ def test_capability_adapter_isolated_solve_missing_control() -> None:
         problem_statement="fix code",
         evidence_refs=("ref1",),
         executor_controls={
-            "route_context": {
-                "signal_snapshot": {
-                    "candidate_enabled": True,
-                    "model_call_allowed": True,
-                    "isolated_solve_enabled": True
-                }
-            }
+            "route_context": _bound_route_context("t8", candidate_enabled=True, model_call_allowed=True, isolated_solve_enabled=True)
         },
         dry_run=False,
     )
@@ -294,15 +305,7 @@ def test_capability_adapter_isolated_solve_success() -> None:
                 "verifier_command": ["python3", "-c", "import os; assert os.path.exists('f.py')"],
                 "work_dir": "",
                 "candidate_generate_fn": mock_gen,
-                "route_context": {
-                    "signal_snapshot": {
-                        "candidate_enabled": True,
-                        "model_call_allowed": True,
-                        "isolated_solve_enabled": True,
-                        "mutation_allowed": True,
-                        "verifier_allowed": True
-                    }
-                }
+                "route_context": _bound_route_context("t9", candidate_enabled=True, model_call_allowed=True, isolated_solve_enabled=True, mutation_allowed=True, verifier_allowed=True)
             },
             dry_run=False,
         )
@@ -337,11 +340,7 @@ def test_capability_adapter_dry_run_default() -> None:
         executor_controls={
             "enable_local_heal": True,
             "local_heal_mode": "candidate",
-            "route_context": {
-                "signal_snapshot": {
-                    "enable_pipeline": True
-                }
-            }
+            "route_context": _bound_route_context("t_dry", enable_pipeline=True)
         },
     )
     response = LocalHealCapabilityAdapter.run(request)

@@ -2,13 +2,5 @@
 
 from __future__ import annotations
 
-ENTRY: dict[str, object] = {
-    "file": "tests/app/test_research_flow_service.py",
-    "disposition": "quarantine",
-    "issue": "#1924",
-    "cause": "capability-phase e2e expectations (plan membership, invoked/gate_passed/wall_time) drifted from the current capability planner; stale expectations, needs owner fix-or-delete decision",
-    "tests": (
-        "test_auto_flow_writes_semantic_research_runtime_receipts",
-        "test_run_auto_flow_populates_autoreason_from_candidate_summaries",
-    ),
-}
+# Tombstone (#1924): every listed id was converted to a contract test of current behaviour: with a real verifier result, source hash and measured telemetry the receipt keeps its gate pass but stays fail-closed (#453 ADVISORY_ONLY_FAIL_CLOSED, #1757).
+ENTRY = None
