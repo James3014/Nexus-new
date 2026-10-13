@@ -326,14 +326,115 @@ def test_issue_readiness(
         assert MARKER in check["fix"]
 
 
-def test_issue_marker_skips_without_nexus_certify(repo, tmp_path, capsys, monkeypatch):
-    monkeypatch.setattr(pf, "_resolve_nexus_certify", lambda explicit: None)
+def test_certify_unresolved_is_fail_not_skip(repo, tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(pf, "_resolve_nexus_certify", lambda ctx: (None, "", "uvx not found"))
     argv = _run(
         repo, tmp_path, "--only", "issue", body=_body(), issue={"state": "OPEN", "body": ""}
     )
-    _code, report = _report(capsys, argv)
+    code, report = _report(capsys, argv)
     check = _check(report, "issue")
+    assert code == 1
     assert (check["status"], check["code"]) == ("FAIL", pf.NEXUS_CERTIFY_UNAVAILABLE)
+    assert "uvx --from" in check["fix"]
+
+
+def test_certify_failure_is_fail_with_remedy(repo, tmp_path, capsys):
+    broken = tmp_path / "broken-certify"
+    broken.write_text(
+        "#!/bin/sh\necho 'INVALID_CONFIG: unexpected or missing config keys' >&2\nexit 2\n",
+        encoding="utf-8",
+    )
+    broken.chmod(broken.stat().st_mode | stat.S_IEXEC)
+    argv = _run(
+        repo,
+        tmp_path,
+        "--only",
+        "issue",
+        body=_body(),
+        issue={"state": "OPEN", "body": ""},
+        certify=broken,
+    )
+    code, report = _report(capsys, argv)
+    check = _check(report, "issue")
+    assert code == 1
+    assert (check["status"], check["code"]) == ("FAIL", pf.NEXUS_CERTIFY_UNAVAILABLE)
+    assert "INVALID_CONFIG" in check["detail"]
+    assert "markers --issue 1916 --check" in check["fix"]
+
+
+PIN = "9942db770e96ab88e3e1700aaec2e911bcec241b"
+
+
+def _pin_workflow(repo: Path, *refs: str) -> None:
+    lines = "".join(f'          nexus-certify-ref: "{ref}"\n' for ref in refs)
+    _write(repo, pf.CERTIFY_PIN_WORKFLOW, "steps:\n" + lines)
+    _commit(repo, "pin")
+
+
+def test_certify_resolved_at_pinned_ref_through_uvx(repo, tmp_path, monkeypatch):
+    _pin_workflow(repo, PIN, PIN)
+    monkeypatch.setattr(pf.shutil, "which", lambda name: "/bin/uvx" if name == "uvx" else None)
+    monkeypatch.delenv("NEXUS_CERTIFY", raising=False)
+    ctx = _ctx(repo)
+    tool, ref, error = pf._resolve_nexus_certify(ctx)
+    assert error == ""
+    assert ref == PIN
+    assert tool == ["/bin/uvx", "--from", f"{pf.CERTIFY_REPO_URL}@{PIN}", "nexus-certify"]
+
+
+def test_certify_pin_missing_or_ambiguous_is_unresolved(repo, tmp_path, monkeypatch):
+    monkeypatch.delenv("NEXUS_CERTIFY", raising=False)
+    tool, _ref, error = pf._resolve_nexus_certify(_ctx(repo))
+    assert tool is None and "no nexus-certify-ref" in error
+    _pin_workflow(repo, PIN, "a" * 40)
+    tool, _ref, error = pf._resolve_nexus_certify(_ctx(repo))
+    assert tool is None and "several" in error
+
+
+def test_certify_check_mode_maps_stale_marker_to_fail(repo, tmp_path, capsys):
+    stale = tmp_path / "check-certify"
+    payload = json.dumps({
+        "issue_marker": f"<!-- NEXUS_CORE_EVIDENCE_UNIVERSE: {MARKER} -->",
+        "issue_check": {"status": "STALE", "remediation": "REPLACE THE MARKER"},
+    })
+    stale.write_text(
+        "#!/bin/sh\n"
+        'if [ "$2" = "--help" ]; then echo "usage: markers [--check] [--json]"; exit 0; fi\n'
+        f"cat <<'EOF'\n{payload}\nEOF\nexit 1\n",
+        encoding="utf-8",
+    )
+    stale.chmod(stale.stat().st_mode | stat.S_IEXEC)
+    # No --issue-json, so preflight asks certify to read the live Issue via --check.
+    argv = ["--repo", str(repo), "--no-fetch", "--json", "--skip-static", "--only", "issue"]
+    argv += ["--issue", "1916", "--nexus-certify", str(stale)]
+    monkeypatch_issue = {"state": "OPEN", "body": ""}
+    original = pf._fetch_issue
+    pf._fetch_issue = lambda ctx, issue: monkeypatch_issue
+    try:
+        _code, report = _report(capsys, argv)
+    finally:
+        pf._fetch_issue = original
+    check = _check(report, "issue")
+    assert (check["status"], check["code"]) == ("FAIL", pf.ISSUE_EVIDENCE_UNIVERSE_STALE)
+    assert check["fix"] == "REPLACE THE MARKER"
+
+
+def _ctx(repo: Path):
+    return pf.Context(
+        repo=repo,
+        base_ref="origin/main",
+        base_sha=_git(repo, "rev-parse", "origin/main"),
+        head_sha=_git(repo, "rev-parse", "HEAD"),
+        repository="James3014/Nexus-new",
+        body=None,
+        title=None,
+        pr_number=None,
+        issue_number=None,
+        issue_json=None,
+        nexus_certify=None,
+        tools_venv=repo / ".venv",
+        lane_owner_pending=False,
+    )
 
 
 def _certify_script(tmp_path: Path, body: str) -> Path:
@@ -423,16 +524,64 @@ def _make_behind(repo: Path) -> None:
     _git(repo, "checkout", "-q", "feature")
 
 
-def test_branch_behind_main_fails_freshness_and_identity(repo, tmp_path, capsys):
+def test_single_merge_base_behind_tip_passes_core_and_fails_executor(repo, tmp_path, capsys):
+    """Core (9942db7) needs one merge-base; the executor still needs the tip as ancestor."""
     _make_behind(repo)
     argv = _run(repo, tmp_path, "--only", "freshness,git_identity")
     code, report = _report(capsys, argv)
     fresh = _check(report, "freshness")
-    assert code == 1
-    assert fresh["code"] == pf.BASE_REF_NOT_ANCESTOR
+    assert fresh["status"] == "INFO"
+    assert fresh["code"] == ""
+    assert "behind origin/main by 1" in fresh["detail"]
     assert fresh["data"]["behind"] == 1
-    assert "no force-push" in fresh["fix"]
-    assert _check(report, "git_identity")["code"] == pf.EXECUTOR_GIT_IDENTITY_MISMATCH
+    assert len(fresh["data"]["merge_bases"]) == 1
+    identity = _check(report, "git_identity")
+    assert (identity["status"], identity["code"]) == ("FAIL", pf.EXECUTOR_GIT_IDENTITY_MISMATCH)
+    assert "not an ancestor" in identity["detail"]
+    assert "no force-push" in identity["fix"]
+    assert code == 1
+
+
+def test_behind_alone_never_fails_when_only_core_runs(repo, tmp_path, capsys):
+    _make_behind(repo)
+    code, report = _report(capsys, _run(repo, tmp_path, "--only", "freshness"))
+    assert code == 0
+    assert report["status"] == "PASS"
+
+
+def test_criss_cross_multiple_merge_bases_fails_core(repo, tmp_path, capsys):
+    base = _git(repo, "rev-parse", "origin/main")
+    for name in ("x", "y"):
+        _git(repo, "checkout", "-q", "-b", name, base)
+        _write(repo, f"docs/{name}.md", name)
+        _commit(repo, name)
+    _git(repo, "checkout", "-q", "-b", "tip", "x")
+    _git(repo, "merge", "-q", "--no-ff", "--no-verify", "-m", "tip", "y")
+    _git(repo, "update-ref", "refs/remotes/origin/main", _git(repo, "rev-parse", "HEAD"))
+    _git(repo, "checkout", "-q", "-b", "head", "y")
+    _git(repo, "merge", "-q", "--no-ff", "--no-verify", "-m", "head", "x")
+    code, report = _report(capsys, _run(repo, tmp_path, "--only", "freshness"))
+    fresh = _check(report, "freshness")
+    assert code == 1
+    assert (fresh["status"], fresh["code"]) == ("FAIL", pf.BASE_REF_NOT_ANCESTOR)
+    assert "has 2 merge-bases with" in fresh["detail"]
+
+
+def test_unrelated_history_fails_core(repo, tmp_path, capsys):
+    _git(repo, "checkout", "-q", "--orphan", "orphan")
+    _write(repo, "other.md", "x")
+    _commit(repo, "orphan")
+    _code, report = _report(capsys, _run(repo, tmp_path, "--only", "freshness"))
+    fresh = _check(report, "freshness")
+    assert (fresh["status"], fresh["code"]) == ("FAIL", pf.BASE_REF_NOT_ANCESTOR)
+    assert "shares no history with" in fresh["detail"]
+
+
+def test_executor_still_requires_tip_ancestor_in_trusted_anchor():
+    """Guard: if the executor's rule is loosened upstream, preflight must follow."""
+    source = (ROOT / pf.TRUSTED_ANCHOR_PATH).read_text(encoding="utf-8")
+    assert '"merge-base", "--is-ancestor", manifest["base_sha"], manifest["head_sha"]' in source
+    assert "executor Git identity mismatch" in source
 
 
 def test_fresh_branch_passes_freshness_and_identity(repo, tmp_path, capsys):
@@ -499,15 +648,16 @@ def test_static_gate_without_python_change_passes_without_tools(repo, tmp_path, 
     assert _check(report, "static_pyright")["status"] == "PASS"
 
 
-def test_static_gate_with_change_but_no_tool_skips(repo, tmp_path, capsys):
+def test_static_gate_with_change_but_no_tool_fails(repo, tmp_path, capsys):
     _write(repo, "nexus/mod.py", "VALUE = 2\n")
     _commit(repo, "change python")
     argv = ["--repo", str(repo), "--no-fetch", "--json", "--only", "static_bandit"]
     argv += ["--tools-venv", str(tmp_path / "missing-venv")]
     _code, report = _report(capsys, argv)
     check = _check(report, "static_bandit")
-    assert check["status"] == "SKIP"
-    assert "uv sync" in check["fix"]
+    assert (check["status"], check["code"]) == ("FAIL", pf.STATIC_TOOL_MISSING)
+    assert "uv sync --frozen" in check["fix"]
+    assert _code == 1
 
 
 # ------------------------------------------------------- output and drift
