@@ -2,13 +2,25 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from nexus.engine.capability_receipt_adapters import ClaimGateReceiptAdapter, DeliveryGateReceiptAdapter
+from nexus.engine.capability_receipt_adapters import (
+    ClaimGateReceiptAdapter,
+    DeliveryGateReceiptAdapter,
+)
 from nexus.services.local_heal.claim_delivery_gate import ClaimDeliveryGate
-from nexus.services.local_heal.learning_closure_bridge import LearningClosureBridge, write_learning_closure
+from nexus.services.local_heal.learning_closure_bridge import (
+    LearningClosureBridge,
+    write_learning_closure,
+)
 from nexus.services.local_heal.memory_retrieval_adapter import MemoryRetrievalAdapter
-from nexus.services.local_heal.reasoning_advisory_bridge import apply_autoreason_advisory, apply_belief_update
+from nexus.services.local_heal.reasoning_advisory_bridge import (
+    apply_autoreason_advisory,
+    apply_belief_update,
+)
 from nexus.services.local_heal.receipt import build_repair_receipt
-from nexus.services.local_heal.semantic_anchor_selection import AnchorCandidate, SemanticAnchorScorer
+from nexus.services.local_heal.semantic_anchor_selection import (
+    AnchorCandidate,
+    SemanticAnchorScorer,
+)
 
 
 class FakeLessonStore:
@@ -32,9 +44,37 @@ def candidate(name: str) -> AnchorCandidate:
     )
 
 
+def _qualified_verifier_pass(lesson_id: str) -> dict:
+    """A verifier_pass lesson only becomes retrievable with terminal evidence and a full qualification."""
+    return {
+        "lesson_id": lesson_id,
+        "classification": "verifier_pass",
+        "provenance": f"receipt:{lesson_id}",
+        "relevance_score": 1.0,
+        "terminal_outcome": "SUCCEEDED",
+        "terminal_evidence": {"receipt": f"receipt:{lesson_id}"},
+        "qualification_status": "QUALIFIED",
+        "qualification": {
+            "repeatability": "2/2",
+            "prevention_rule": "keep formatting symmetric",
+            "authority_qualification": "verifier",
+        },
+    }
+
+
 def test_memory_retrieval_rejects_fake_lesson_without_provenance():
+    # A bare verifier_pass claim is dropped by the qualified-learning projection (no terminal evidence)...
+    qualified_gate = MemoryRetrievalAdapter(
+        FakeLessonStore([
+            {"lesson_id": "fake", "summary": "boost me", "classification": "verifier_pass"}
+        ])
+    )
+    assert qualified_gate.retrieve(query_text="format output") == []
+    assert qualified_gate.last_metadata["no_memory_match"] is True
+
+    # ...and a legacy success lesson that reaches the provenance check is counted as rejected.
     adapter = MemoryRetrievalAdapter(
-        FakeLessonStore([{"lesson_id": "fake", "summary": "boost me", "classification": "verifier_pass"}])
+        FakeLessonStore([{"lesson_id": "fake", "summary": "boost me", "classification": "success"}])
     )
     lessons = adapter.retrieve(query_text="format output")
     assert lessons == []
@@ -44,18 +84,19 @@ def test_memory_retrieval_rejects_fake_lesson_without_provenance():
 
 def test_memory_success_and_failure_lessons_change_anchor_score():
     success = SemanticAnchorScorer(
-        memory_adapter=MemoryRetrievalAdapter(
-            FakeLessonStore(
-                [{"lesson_id": "s1", "classification": "verifier_pass", "provenance": "receipt:s1", "relevance_score": 1.0}]
-            )
-        )
+        memory_adapter=MemoryRetrievalAdapter(FakeLessonStore([_qualified_verifier_pass("s1")]))
     ).score_candidate(candidate("format_output"), issue_keywords=["format"])
 
     failure = SemanticAnchorScorer(
         memory_adapter=MemoryRetrievalAdapter(
-            FakeLessonStore(
-                [{"lesson_id": "f1", "classification": "verifier_fail", "provenance": "receipt:f1", "relevance_score": 1.0}]
-            )
+            FakeLessonStore([
+                {
+                    "lesson_id": "f1",
+                    "classification": "verifier_fail",
+                    "provenance": "receipt:f1",
+                    "relevance_score": 1.0,
+                }
+            ])
         )
     ).score_candidate(candidate("format_output"), issue_keywords=["format"])
 
@@ -65,7 +106,9 @@ def test_memory_success_and_failure_lessons_change_anchor_score():
 
 
 def test_no_memory_match_and_disabling_memory_are_recorded():
-    enabled = SemanticAnchorScorer(memory_adapter=MemoryRetrievalAdapter(FakeLessonStore([]))).score_candidate(candidate("plain"))
+    enabled = SemanticAnchorScorer(
+        memory_adapter=MemoryRetrievalAdapter(FakeLessonStore([]))
+    ).score_candidate(candidate("plain"))
     disabled_scorer = SemanticAnchorScorer(memory_enabled=False)
     disabled = disabled_scorer.score_candidate(candidate("plain"))
     assert "no_memory_match" in enabled.score_reasons
@@ -101,8 +144,15 @@ class FakeBelief:
 
 
 def test_belief_trace_changes_after_verifier_pass_and_fail_without_override():
-    passed = SimpleNamespace(instance_id="ok", solve_eligible=True, failure_reason="", receipt_path="receipt:ok")
-    failed = SimpleNamespace(instance_id="bad", solve_eligible=False, failure_reason="VERIFICATION_FAILED", receipt_path="receipt:bad")
+    passed = SimpleNamespace(
+        instance_id="ok", solve_eligible=True, failure_reason="", receipt_path="receipt:ok"
+    )
+    failed = SimpleNamespace(
+        instance_id="bad",
+        solve_eligible=False,
+        failure_reason="VERIFICATION_FAILED",
+        receipt_path="receipt:bad",
+    )
     pass_trace = apply_belief_update(passed, engine=FakeBelief())
     fail_trace = apply_belief_update(failed, engine=FakeBelief())
     assert pass_trace["belief_after"] > pass_trace["belief_before"]
@@ -112,33 +162,33 @@ def test_belief_trace_changes_after_verifier_pass_and_fail_without_override():
 
 def test_strict_claim_delivery_gate_rejects_fake_and_receipt_only_payloads():
     gate = ClaimDeliveryGate()
-    fake = gate.validate(
-        {
-            "verifier_status": "pass",
-            "patch_applied": True,
-            "artifact_refs": ["claim:caller"],
-        }
-    )
+    fake = gate.validate({
+        "verifier_status": "pass",
+        "patch_applied": True,
+        "artifact_refs": ["claim:caller"],
+    })
     assert fake.claim_gate_passed is False
     assert "missing_verifier_artifact" in fake.reasons
     assert "missing_source_hash" in fake.reasons
 
-    real = gate.validate(
-        {
-            "verifier_status": "pass",
-            "verifier_artifact": "verification_report.txt",
-            "source_hash": "sha256:abc",
-            "candidate_target_file": "f.py",
-            "patch_applied": True,
-            "artifact_refs": ["patch.diff"],
-        }
-    )
+    real = gate.validate({
+        "verifier_status": "pass",
+        "verifier_artifact": "verification_report.txt",
+        "source_hash": "sha256:abc",
+        "candidate_target_file": "f.py",
+        "patch_applied": True,
+        "artifact_refs": ["patch.diff"],
+    })
     assert real.claim_gate_passed is True
     assert real.delivery_gate_passed is True
 
 
 def test_capability_receipt_adapters_cannot_turn_fake_payload_into_success():
-    payload = {"claim_refs": ["claim:caller"], "claim_gate_invoked": True, "claim_gate_passed": True}
+    payload = {
+        "claim_refs": ["claim:caller"],
+        "claim_gate_invoked": True,
+        "claim_gate_passed": True,
+    }
     claim = ClaimGateReceiptAdapter().build(claim_verified=True, payload=payload)
     delivery = DeliveryGateReceiptAdapter().build(
         claim_verified=True,
@@ -151,7 +201,12 @@ def test_capability_receipt_adapters_cannot_turn_fake_payload_into_success():
 
 
 def test_learning_closure_writeback_internal_only_and_non_blocking(tmp_path):
-    ctx = SimpleNamespace(instance_id="C_13453", solve_eligible=False, failure_reason="owner_gated", receipt_path="receipt:1")
+    ctx = SimpleNamespace(
+        instance_id="C_13453",
+        solve_eligible=False,
+        failure_reason="owner_gated",
+        receipt_path="receipt:1",
+    )
     result = write_learning_closure(ctx, bridge=LearningClosureBridge(tmp_path / "learning.jsonl"))
     assert result["writeback_status"] == "ok"
     assert result["lesson"]["classification"] == "owner_gated"
@@ -237,6 +292,7 @@ def test_repair_receipt_without_claim_delivery_gate_is_not_claim_eligible():
 
 def test_route_planner_diagnostics_confidence():
     from nexus.research.domain.route_planner import RoutePlanner
+
     r1 = RoutePlanner.plan_route("C_12481", "using migrations and db_table")
     assert r1.confidence_score == 0.99
     assert r1.diagnose_overcall is False
@@ -250,12 +306,12 @@ def test_route_planner_diagnostics_confidence():
 
 def test_context_guard_noise_filtering():
     from nexus.services.local_heal.context_guard import ContextGuard, LocalizedFile
+
     guard = ContextGuard()
     files = [
-        LocalizedFile(path="a.py", content="too_short"), # len < 15, should be filtered
-        LocalizedFile(path="b.py", content="class GoodFile:\n    pass\n"), # len >= 15, keep
+        LocalizedFile(path="a.py", content="too_short"),  # len < 15, should be filtered
+        LocalizedFile(path="b.py", content="class GoodFile:\n    pass\n"),  # len >= 15, keep
     ]
     res = guard.limit_localized_files(files, max_files=3, max_total_chars=1000)
     assert len(res) == 1
     assert res[0].path == "b.py"
-

@@ -1,8 +1,9 @@
 """P3-I1: Cloud-with-Local-Assist Shadow Routing Tests."""
+
 from __future__ import annotations
 
 import os
-import pytest
+
 from nexus.services.local_heal.local_model_executor import (
     LocalModelExecutor,
     LocalModelExecutorRequest,
@@ -23,7 +24,10 @@ def test_p3_shadow_planner_injects_signal_fields():
         plan = planner.plan(task_desc="test", task_type="bug", route={"pillar_signals": {}})
         ss = plan.signal_snapshot
         assert ss.get("p3_shadow_route") is True
-        assert ss.get("execution_topology") == "cloud_with_local_assist"
+        # The shadow only suggests cloud_with_local_assist; the executor keeps its configured topology.
+        assert ss.get("suggested_executor_topology") == "cloud_with_local_assist"
+        assert ss.get("executor_topology") == "single_local_model"
+        assert ss.get("execution_topology") == "ASSISTED_CANONICAL"
         assert ss.get("cloud_used") is False
         assert ss.get("cloud_candidate_generated") is False
         assert ss.get("local_assist_used") is False
@@ -37,6 +41,7 @@ def test_p3_shadow_planner_injects_signal_fields():
 
 def test_p3_shadow_executor_does_not_crash():
     """P3-I1: Executor handles cloud_with_local_assist topology without crash."""
+
     class FakeProvider:
         def generate(self, req):
             class R:
@@ -50,6 +55,7 @@ def test_p3_shadow_executor_does_not_crash():
                 provider_invoked = False
                 model_called = False
                 model_name = ""
+
             return R()
 
     req = LocalModelExecutorRequest(
@@ -88,6 +94,7 @@ def test_p3_shadow_executor_does_not_crash():
 
 def test_p3_shadow_receipt_contains_fields():
     """P3-I1: Receipt contains shadow routing fields."""
+
     class FakeCtx:
         instance_id = "p3-shadow-2"
         p3_shadow_route = True
@@ -114,11 +121,14 @@ def test_p3_shadow_flag_off_preserves_existing_topology():
     os.environ["NEXUS_LOCAL_MODEL_EXECUTOR_MODEL"] = "qwen2.5-coder:7b"
     try:
         from nexus.engine.capability_planner import CapabilityPlanner
+
         planner = CapabilityPlanner()
         plan = planner.plan(task_desc="test", task_type="bug", route={"pillar_signals": {}})
         ss = plan.signal_snapshot
         assert ss.get("p3_shadow_route") is None or ss.get("p3_shadow_route") is False
-        assert ss.get("execution_topology") == "single_local_model"
+        assert ss.get("executor_topology") == "single_local_model"
+        assert ss.get("suggested_executor_topology") is None
+        assert ss.get("execution_topology") == "ASSISTED_CANONICAL"
     finally:
         os.environ.pop("NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR", None)
         os.environ.pop("NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY", None)
@@ -127,6 +137,7 @@ def test_p3_shadow_flag_off_preserves_existing_topology():
 
 def test_p3_shadow_no_cloud_endpoint_fail_closed():
     """P3-I1: No cloud endpoint → fail-closed state."""
+
     class FakeProvider:
         def generate(self, req):
             class R:
@@ -140,6 +151,7 @@ def test_p3_shadow_no_cloud_endpoint_fail_closed():
                 provider_invoked = False
                 model_called = False
                 model_name = ""
+
             return R()
 
     req = LocalModelExecutorRequest(

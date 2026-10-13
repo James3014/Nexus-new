@@ -2,11 +2,13 @@
 
 Verify delegated_retry_candidate_models survives the pipeline path.
 """
+
 from __future__ import annotations
 
-import pytest
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
+
+import pytest
 
 rank_bm25 = pytest.importorskip("rank_bm25", reason="rank_bm25 not installed")
 
@@ -47,8 +49,9 @@ def test_delegated_retry_candidate_models_survives_shallow_copy():
 
 def test_delegated_retry_candidate_models_survives_pipeline_context():
     """delegated_retry_candidate_models must survive HealContext.to_v2() round-trip."""
-    from nexus.services.local_heal.pipeline import HealContext
     from pathlib import Path
+
+    from nexus.services.local_heal.pipeline import HealContext
 
     ctx = HealContext(
         instance_id="test-1",
@@ -72,6 +75,7 @@ def test_build_c15_benchmark_row_includes_delegated_retry():
     """build_c15_benchmark_row must include delegated_retry_candidate_models in signal_snapshot."""
     import sys
     from pathlib import Path
+
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
     from scripts.bench.m1_real_local_solve_benchmark import build_c15_benchmark_row
 
@@ -174,6 +178,7 @@ def test_delegated_retry_signal_in_raw_meta_telemetry():
 def test_capability_planner_injects_committee_model_specs():
     """CapabilityPlanner must inject proposer_specs and judge_model for local_committee_only topology."""
     import os
+
     from nexus.engine.capability_planner import CapabilityPlanner
 
     env_vars = {
@@ -193,7 +198,8 @@ def test_capability_planner_injects_committee_model_specs():
             route={"recommended_flow": "local_heal"},
         )
         ss = plan.signal_snapshot
-        assert ss["execution_topology"] == "local_committee_only"
+        assert ss["executor_topology"] == "local_committee_only"
+        assert ss["execution_topology"] == "ASSISTED_CANONICAL"
         assert ss["local_committee_enabled"] is True
         assert "proposer_specs" in ss
         assert len(ss["proposer_specs"]) == 2
@@ -207,6 +213,7 @@ def test_capability_planner_injects_committee_model_specs():
 def test_capability_planner_injects_delegated_retry_candidates():
     """CapabilityPlanner must inject delegated_retry_candidate_models for committee/pipeline topologies."""
     import os
+
     from nexus.engine.capability_planner import CapabilityPlanner
 
     env_vars = {
@@ -224,7 +231,8 @@ def test_capability_planner_injects_delegated_retry_candidates():
             route={"recommended_flow": "local_heal"},
         )
         ss = plan.signal_snapshot
-        assert ss["execution_topology"] == "localheal_pipeline"
+        assert ss["executor_topology"] == "localheal_pipeline"
+        assert ss["execution_topology"] == "ASSISTED_CANONICAL"
         assert "delegated_retry_candidate_models" in ss
         assert len(ss["delegated_retry_candidate_models"]) == 3
         assert "ornith:9b" in ss["delegated_retry_candidate_models"]
@@ -233,6 +241,7 @@ def test_capability_planner_injects_delegated_retry_candidates():
 def test_capability_planner_default_delegated_retry_candidates():
     """CapabilityPlanner must inject default delegated_retry_candidate_models when env not set."""
     import os
+
     from nexus.engine.capability_planner import CapabilityPlanner
 
     env_vars = {

@@ -1,5 +1,33 @@
-from nexus.core.capability_executor_registry import EXECUTOR_REGISTRY
+import itertools
+import time as _real_time
+
+import pytest
+
+from nexus.core import capability_executor_registry as _registry
 from nexus.core.belief_contracts import CapabilityExecutionPlan
+from nexus.core.capability_executor_registry import EXECUTOR_REGISTRY
+
+STEP_MS = 5
+
+
+class _SteppingTime:
+    """Proxy for the registry's `time` module whose monotonic() advances STEP_MS per call."""
+
+    def __init__(self) -> None:
+        self._ticks = itertools.count()
+
+    def monotonic(self) -> float:
+        return next(self._ticks) * STEP_MS / 1000.0
+
+    def __getattr__(self, name: str):
+        return getattr(_real_time, name)
+
+
+@pytest.fixture(autouse=True)
+def _deterministic_clock(monkeypatch):
+    # Make elapsed time deterministic so the test proves the executors report a real
+    # monotonic delta instead of depending on how fast the machine is.
+    monkeypatch.setattr(_registry, "time", _SteppingTime())
 
 
 def _plan() -> CapabilityExecutionPlan:
@@ -13,7 +41,14 @@ def _test_executor(name: str) -> None:
     r = fn(plan, "test task")
     assert r.invoked, f"{name}: invoked={r.invoked}"
     assert r.gate_passed, f"{name}: gate_passed={r.gate_passed}"
-    assert r.telemetries["wall_time_ms"] > 0, f"{name}: wall_time_ms=0"
+    # With the stepping clock every monotonic() call advances STEP_MS, so a genuine
+    # start/end measurement yields at least STEP_MS. An executor that hardcodes 0 fails here.
+    tel = r.telemetries
+    assert tel["telemetry_source"] == "measured", (
+        f"{name}: telemetry_source={tel['telemetry_source']}"
+    )
+    assert isinstance(tel["wall_time_ms"], int), f"{name}: wall_time_ms={tel['wall_time_ms']!r}"
+    assert tel["wall_time_ms"] >= STEP_MS, f"{name}: wall_time_ms={tel['wall_time_ms']}"
 
 
 def _assert_retired(name: str) -> None:

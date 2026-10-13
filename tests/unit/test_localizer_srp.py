@@ -1,6 +1,5 @@
-import pytest
-from pathlib import Path
 from nexus.services.local_heal.granular_localizer import GranularMethodLocalizer
+
 
 def test_localizer_granular_slicing_functional_purity():
     """
@@ -23,13 +22,13 @@ class LargeManager:
     def another_one(self):
         pass
 """
-    localizer = GranularMethodLocalizer(refine_threshold=10) # 強制觸發精煉
+    localizer = GranularMethodLocalizer(refine_threshold=10)  # 強制觸發精煉
     query = "Find target_method and the value NO"
-    
+
     bundle = localizer.localize("dummy.py", dummy_code, query)
-    refined = bundle.to_context_string()
-    
+    refined = bundle.build_context()
+
     assert "target_method" in refined
-    assert "class LargeManager" not in refined # 關注點分離：排除類別殼
+    assert "class LargeManager" not in refined  # 關注點分離：排除類別殼
     assert "## Primary Target:" in refined
-    assert "unrelated_method" not in refined # 模組化篩選
+    assert "unrelated_method" not in refined  # 模組化篩選

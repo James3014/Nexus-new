@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from nexus.contracts.hybrid_route import HybridRouteDecision, RouteMode, VerifierResult, Authority
+from nexus.contracts.hybrid_route import Authority, HybridRouteDecision, RouteMode
 from nexus.engine.capability_receipt_adapters import LocalHealReceiptAdapter
 
 
 def test_local_heal_receipt_adapter_legacy_payload() -> None:
     adapter = LocalHealReceiptAdapter()
-    
+
     payload = {
         "repro_log_path": "repro.log",
         "patch_diff_path": "patch.diff",
@@ -17,7 +17,7 @@ def test_local_heal_receipt_adapter_legacy_payload() -> None:
         "verifier_status": "pass",
         "source_hash": "sha256:" + "c" * 64,
     }
-    
+
     receipt = adapter.build(claim_verified=True, payload=payload)
     assert receipt.name == "local_heal"
     assert receipt.invoked is True
@@ -32,8 +32,10 @@ def test_local_heal_receipt_adapter_legacy_payload() -> None:
 
 def test_local_heal_receipt_adapter_hybrid_route_dict_success() -> None:
     adapter = LocalHealReceiptAdapter()
-    
+
     hybrid_route_dict = {
+        "execution_world": "product_runtime",
+        "execution_topology": "ASSISTED_CANONICAL",
         "route_mode": "local_only_executed",
         "public_claim_allowed": False,
         "production_ready": False,
@@ -48,12 +50,18 @@ def test_local_heal_receipt_adapter_hybrid_route_dict_success() -> None:
         "verifier_result": "pass",
         "evidence_refs": ["ref1"],
     }
-    payload = {"hybrid_route": hybrid_route_dict}
-    
+    # The executed-route gate needs verifier evidence and a bound source hash (#1757).
+    payload = {
+        "hybrid_route": hybrid_route_dict,
+        "verifier_status": "pass",
+        "source_hash": "sha256:" + "c" * 64,
+    }
+
     receipt1 = adapter.build(claim_verified=True, payload=payload)
     assert receipt1.invoked is True
     assert receipt1.gate_passed is True
-    assert receipt1.outcome_contributed is True
+    # Generic payloads cannot mint verifier authority: outcome stays fail-closed (#453).
+    assert receipt1.outcome_contributed is False
     assert receipt1.telemetries["hybrid_route_mode"] == "local_only_executed"
     assert receipt1.telemetries["hybrid_route_authority"] == "internal_only"
     assert receipt1.telemetries["hybrid_route_verifier_result"] == "pass"
@@ -62,11 +70,19 @@ def test_local_heal_receipt_adapter_hybrid_route_dict_success() -> None:
     assert receipt2.gate_passed is True
     assert receipt2.outcome_contributed is False
 
+    # Negative control: the same executed route without verifier/source-hash evidence is gated (#1757).
+    unbound = adapter.build(claim_verified=True, payload={"hybrid_route": hybrid_route_dict})
+    assert unbound.gate_passed is False
+    assert "missing_verifier_artifact" in unbound.failure_reason
+    assert "missing_source_hash" in unbound.failure_reason
+
 
 def test_local_heal_receipt_adapter_hybrid_route_blocked() -> None:
     adapter = LocalHealReceiptAdapter()
-    
+
     hybrid_route_dict = {
+        "execution_world": "product_runtime",
+        "execution_topology": "ASSISTED_CANONICAL",
         "route_mode": "local_only_blocked",
         "public_claim_allowed": False,
         "production_ready": False,
@@ -83,7 +99,7 @@ def test_local_heal_receipt_adapter_hybrid_route_blocked() -> None:
         "fallback_block_reason": "missing_applied_patch_hash",
     }
     payload = {"hybrid_route": hybrid_route_dict}
-    
+
     receipt = adapter.build(claim_verified=True, payload=payload)
     assert receipt.invoked is True
     assert receipt.gate_passed is False
@@ -93,7 +109,7 @@ def test_local_heal_receipt_adapter_hybrid_route_blocked() -> None:
 
 def test_local_heal_receipt_adapter_contract_blocker_fails() -> None:
     adapter = LocalHealReceiptAdapter()
-    
+
     hybrid_route_dict = {
         "route_mode": "cloud_assisted_by_local_trace_only",
         "public_claim_allowed": True,
@@ -103,7 +119,7 @@ def test_local_heal_receipt_adapter_contract_blocker_fails() -> None:
         "authority": "trace_only",
     }
     payload = {"hybrid_route": hybrid_route_dict}
-    
+
     receipt = adapter.build(claim_verified=True, payload=payload)
     assert receipt.gate_passed is False
     assert receipt.outcome_contributed is False
@@ -112,7 +128,7 @@ def test_local_heal_receipt_adapter_contract_blocker_fails() -> None:
 
 def test_local_heal_receipt_adapter_dataclass_payload() -> None:
     adapter = LocalHealReceiptAdapter()
-    
+
     decision = HybridRouteDecision(
         route_mode=RouteMode.CLOUD_ASSISTED_BY_LOCAL_TRACE_ONLY,
         public_claim_allowed=False,
@@ -120,7 +136,7 @@ def test_local_heal_receipt_adapter_dataclass_payload() -> None:
         authority=Authority.TRACE_ONLY,
     )
     payload = {"hybrid_route": decision}
-    
+
     receipt = adapter.build(claim_verified=True, payload=payload)
     assert receipt.gate_passed is False
     assert receipt.telemetries["hybrid_route_mode"] == "cloud_assisted_by_local_trace_only"

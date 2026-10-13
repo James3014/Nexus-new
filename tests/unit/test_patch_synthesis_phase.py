@@ -1,13 +1,12 @@
-from pathlib import Path
-
 from nexus.services.local_heal.context import (
     GovernanceContext,
     HealContext,
     OperationalContext,
 )
-from nexus.services.local_heal.parser import SearchReplaceParser
+from nexus.services.local_heal.interface import LocalizedFile, RepairPlan
 from nexus.services.local_heal.patcher import Patcher
 from nexus.services.local_heal.phases.patch_synthesis import PatchSynthesisPhase
+from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol
 
 
 def test_patch_synthesis_phase_applies_valid_search_replace(tmp_path):
@@ -32,15 +31,17 @@ def test_patch_synthesis_phase_applies_valid_search_replace(tmp_path):
             repo_dir=tmp_path,
             problem_statement="Change hello to return True",
             repro_evidence="AssertionError: hello returned False",
-            localized_files=[("hello.py", target.read_text(encoding="utf-8"))],
-            plan={"search_symbols": ["hello"], "repair_strategy": "rewrite hello"},
+            localized_files=[
+                LocalizedFile(path="hello.py", content=target.read_text(encoding="utf-8"))
+            ],
+            plan=RepairPlan(search_symbols=["hello"], repair_strategy="rewrite hello"),
             max_tries=1,
         ),
         gov=GovernanceContext(),
     )
 
     phase = PatchSynthesisPhase(
-        parser=SearchReplaceParser(),
+        parser=SolidSearchReplaceProtocol(),
         patcher=Patcher(),
         model_client=model_client,
     )
@@ -85,15 +86,17 @@ def test_patch_synthesis_phase_rejects_duplicate_top_level_redefinition(tmp_path
             repo_dir=tmp_path,
             problem_statement="Fix duplicate class issue",
             repro_evidence="AssertionError",
-            localized_files=[("counter_bug.py", original)],
-            plan={"search_symbols": ["InventoryCounter"]},
+            localized_files=[LocalizedFile(path="counter_bug.py", content=original)],
+            plan=RepairPlan(
+                search_symbols=["InventoryCounter"], repair_strategy="remove duplicate class"
+            ),
             max_tries=1,
         ),
         gov=GovernanceContext(),
     )
 
     phase = PatchSynthesisPhase(
-        parser=SearchReplaceParser(),
+        parser=SolidSearchReplaceProtocol(),
         patcher=Patcher(),
         model_client=model_client,
     )
