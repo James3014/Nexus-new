@@ -597,64 +597,9 @@ def _exec_nightshift_runner_service(plan: CapabilityExecutionPlan, task_desc: st
 
 
 def _exec_autonomic_router(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    """CONTROL_PLANE_REFERENCE — planner suggestion only, never production executor F."""
-    start = time.monotonic()
-    cls = _try_port("autonomic_router.AutonomicRouter")
-    if cls is None:
-        return _make_receipt(
-            "autonomic_router",
-            plan,
-            invoked=False,
-            gate_passed=False,
-            outcome=_structured_outcome(
-                action="route_suggest",
-                semantic_status="FAILED",
-                error=_port_error("autonomic_router.AutonomicRouter"),
-                control_plane=True,
-            ),
-        )
-    try:
-        from nexus.core.state_contracts import NexusState
-
-        inst = cls()
-        state = NexusState(
-            task_id=plan.task_id,
-            metadata={"impact_map": {}, "est_tokens": 0, "autonomic_reason": ""},
-        )
-        result = inst.route(task_desc=task_desc, state=state, forecast=plan.constraints)
-        elapsed = int((time.monotonic() - start) * 1000)
-        # Control-plane suggestion receipt — gate_passed True means suggestion emitted,
-        # not that a production capability executor F path ran.
-        return _make_receipt(
-            "autonomic_router",
-            plan,
-            wall_time_ms=elapsed,
-            gate_passed=True,
-            outcome=_structured_outcome(
-                action="route_suggest",
-                semantic_status="SUCCEEDED",
-                evidence_refs=[f"ev_autonomic_suggest_{plan.task_id}"],
-                result=result if isinstance(result, Mapping) else {"route": str(result)[:200]},
-                control_plane=True,
-                physical_callable="nexus.engine.autonomic_router.AutonomicRouter.route",
-                execution_class="CONTROL_PLANE_REFERENCE",
-            ),
-        )
-    except Exception as exc:
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt(
-            "autonomic_router",
-            plan,
-            invoked=True,
-            gate_passed=False,
-            wall_time_ms=elapsed,
-            outcome=_structured_outcome(
-                action="route_suggest",
-                semantic_status="FAILED",
-                error=str(exc)[:300],
-                control_plane=True,
-            ),
-        )
+    """ARCHIVED 2026-10-13 legacy-engine: the legacy AutonomicRouter suggestion (consumed by
+    nothing, enabled by no policy rule) is retired; fail closed."""
+    return _archived_receipt("autonomic_router", plan, task_desc)
 
 
 # ─── X-phase ──────────────────────────────────────────────────────────────────
@@ -3203,11 +3148,16 @@ def _exec_committee(plan: CapabilityExecutionPlan, task_desc: str) -> Capability
                     physical_callable="nexus.committee.controller.CommitteeControllerV263.process_proposals",
                 ),
             )
-        verify_commands = [
-            str(item)
-            for item in (constraints.get("committee_verify_commands") or [])
-            if str(item).strip()
-        ]
+        # argv lists pass through unchanged (the verifier's allowlist matches real argv);
+        # only a plain string is left for the verifier to split without a shell.
+        verify_commands: list[Any] = []
+        for item in constraints.get("committee_verify_commands") or []:
+            if isinstance(item, (list, tuple)):
+                argv = [str(part) for part in item]
+                if argv and all(part.strip() for part in argv):
+                    verify_commands.append(argv)
+            elif str(item).strip():
+                verify_commands.append(str(item))
         execution_verifier = None
         verifiers = None
         if verify_commands:
@@ -3259,7 +3209,16 @@ def _exec_committee(plan: CapabilityExecutionPlan, task_desc: str) -> Capability
             or failure_bucket.upper() in {"ABSTAIN", "NO_WINNER"}
         )
         winner = next((c for c in candidates if getattr(c, "candidate_id", "") == winner_id), None)
-        ok = len(candidates) >= 2 and bool(verdicts) and bool(winner_id or explicit_abstain)
+        # Fail closed: the committee passes only when a winner exists and that winner has at
+        # least one passing verdict.  No verified candidate (every verifier refused or failed,
+        # e.g. ``not_executed:no_os_barrier``, or an all-abstain round) is never a pass.
+        verified_ids = {
+            str(getattr(v, "candidate_id", "") or "")
+            for v in verdicts
+            if getattr(v, "passed", False)
+        }
+        winner_verified = bool(winner_id) and winner_id in verified_ids
+        ok = len(candidates) >= 2 and bool(verdicts) and winner_verified
         verdict_rows = [
             {
                 "verifier": str(getattr(v, "verifier_name", "") or getattr(v, "critic_name", "")),
@@ -3278,7 +3237,13 @@ def _exec_committee(plan: CapabilityExecutionPlan, task_desc: str) -> Capability
                 action="process_proposals",
                 semantic_status="SUCCEEDED" if ok else "FAILED",
                 evidence_refs=[f"ev_committee_{plan.task_id}"],
-                error="" if (ok or verdicts) else "NO_COMMITTEE_VERIFIER_VERDICTS",
+                error=""
+                if ok
+                else (
+                    "COMMITTEE_NO_VERIFIED_CANDIDATE"
+                    if verdicts
+                    else "NO_COMMITTEE_VERIFIER_VERDICTS"
+                ),
                 result={
                     "task_id": getattr(result, "task_id", ""),
                     "winner_id": winner_id,
@@ -3321,7 +3286,10 @@ _FILE_LOCK_DEFAULT_TTL_SEC = 1800.0
 def _exec_file_lock(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
     start = time.monotonic()
     try:
-        from nexus.orchestrator.file_lock_registry import FileLockRegistry
+        from nexus.orchestrator.file_lock_registry import (
+            FileLockRegistry,
+            register_task_lock_file,
+        )
 
         constraints = dict(plan.constraints or {})
         target_files = [
@@ -3353,6 +3321,9 @@ def _exec_file_lock(plan: CapabilityExecutionPlan, task_desc: str) -> Capability
         ttl_sec = float(constraints.get("file_lock_ttl_sec") or _FILE_LOCK_DEFAULT_TTL_SEC)
         reg = FileLockRegistry(lock_file=str(lock_file), ttl_sec=ttl_sec)
         acquired = reg.acquire_detailed(plan.task_id, target_files)
+        if not acquired["conflicts"]:
+            # Released by the mainchain entry when the task completes (TTL is the backstop).
+            register_task_lock_file(plan.task_id, str(lock_file))
         conflicts = list(acquired["conflicts"])
         holders = dict(acquired["holders"])
         if conflicts:

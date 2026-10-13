@@ -103,3 +103,13 @@ class AutonomicRoutingService:
                 logger.info("✅ [SkillEmbody] Injected %d bytes of tactical knowledge.", len(skill_md))
         except Exception as e:
             logger.warning("⚠️ [SkillEmbody] Failed to inject external skill: %s", e)
+
+
+# ARCHIVED 2026-10-13 legacy-engine (ARCHIVED_2026-10-13-legacy-engine.md).
+__import__("warnings").warn(
+    "ARCHIVED 2026-10-13 legacy-engine: "
+    "nexus.engine.autonomic_routing_service is part of the retired legacy NexusEngine and has no production caller (nexus run uses execute_canonical_product_task); "
+    "see ARCHIVED_2026-10-13-legacy-engine.md. Scheduled for deletion; do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)

@@ -103,7 +103,7 @@ def test_phase_slo_pass_rate_reads_real_summary_schema() -> None:
 
 
 def test_learn_scheduler_evaluates_request_workspace(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.chdir(tmp_path)  # learn_alert_dispatcher writes alerts under the cwd
+    monkeypatch.chdir(tmp_path)  # keep any stray write out of the checkout
     ready = tmp_path / "ready"
     _write_summary(ready, {"X": {"total": 3, "required_done_ratio": 1.0, "success_ratio": 1.0}})
     not_ready = tmp_path / "not_ready"

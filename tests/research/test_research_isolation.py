@@ -211,3 +211,8 @@ def test_research_receipt_l1_does_not_infer_success_from_legacy_pack():
 
     assert receipts["research"].gate_passed is False
     assert receipts["research"].failure_reason == "evidence_without_gate_pass"
+
+
+# ARCHIVED 2026-10-13 legacy-engine: this file tests (in whole or in part) modules archived with
+# the legacy NexusEngine (nexus.engine.pipeline_stages); see ARCHIVED_2026-10-13-legacy-engine.md.
+# It keeps running with unchanged node ids until the deletion PR removes it with those modules.

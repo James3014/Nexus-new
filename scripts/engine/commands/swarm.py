@@ -117,3 +117,13 @@ def register(nexus_group, REPO_ROOT):
                 print(f"❌ [Nexus:Swarm] Critical execution error: {e}")
                 print(f"Report: {written}")
             sys.exit(1)
+
+
+# ARCHIVED 2026-10-13 legacy-engine (ARCHIVED_2026-10-13-legacy-engine.md).
+__import__("warnings").warn(
+    "ARCHIVED 2026-10-13 legacy-engine: "
+    "scripts.engine.commands.swarm (nexus nexus swarm run) only dispatched to the retired legacy NexusEngine and is no longer registered; "
+    "see ARCHIVED_2026-10-13-legacy-engine.md. Scheduled for deletion; do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)

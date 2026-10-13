@@ -57,3 +57,8 @@ def test_observer_failure_is_fail_open_but_receipt_guard_is_not():
     ctx.event_store = BrokenStore()
     pipeline._emit_phase_observer(ctx, "P", "on_phase_start")
     assert ctx.state.metadata.get("phase_receipts", []) == []
+
+
+# ARCHIVED 2026-10-13 legacy-engine: this file tests (in whole or in part) modules archived with
+# the legacy NexusEngine (nexus.engine.pipeline); see ARCHIVED_2026-10-13-legacy-engine.md.
+# It keeps running with unchanged node ids until the deletion PR removes it with those modules.

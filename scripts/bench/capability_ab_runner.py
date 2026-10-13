@@ -3527,7 +3527,7 @@ def _hyper_admission_after_model_attempt(row: dict[str, Any]) -> HyperAdmissionD
     if int(row.get("total_tokens", 0) or 0) <= 0:
         return HyperAdmissionDecision(False, "model_call_without_tokens")
     infra_reason = str(row.get("infra_invalid_reason") or "")
-    if infra_reason and infra_reason != "nexus_delivery_invalid":
+    if infra_reason and infra_reason not in {"nexus_delivery_invalid", "receipt_data_contract_violation"}:
         return HyperAdmissionDecision(False, "infra_invalid")
     gap = str(row.get("nexus_failure_gap") or "")
     if gap not in {"", "bounded_self_heal_not_triggered", "self_heal_failed"}:

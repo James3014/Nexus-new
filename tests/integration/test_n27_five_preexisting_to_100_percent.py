@@ -46,7 +46,11 @@ def test_exec_aos_oracle_invoked_true() -> None:
 
 
 def test_exec_autonomic_router_invoked_true() -> None:
-    _test_executor("autonomic_router")
+    # ARCHIVED 2026-10-13 legacy-engine (ARCHIVED_2026-10-13-legacy-engine.md): planner node kept,
+    # executor returns the archived receipt without invoking the legacy AutonomicRouter.
+    _assert_fail_closed(
+        "autonomic_router", "archived_legacy_engine_autonomic_router_2026-10-13", invoked=False
+    )
 
 
 def test_exec_claim_gate_invoked_true() -> None:
@@ -72,6 +76,7 @@ def test_all_36_executors_real_execution_100_percent() -> None:
         if not r.invoked:
             not_invoked[name] = r.outcome.get("error")
     assert not_invoked == {
+        "autonomic_router": "archived_legacy_engine_autonomic_router_2026-10-13",
         "benchmark": "archived_fake_benchmark_2026-10-12",
         "claim_gate": "missing_real_claim_context",
         "federation": "archived_federation_2026-10-12",

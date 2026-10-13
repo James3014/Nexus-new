@@ -210,7 +210,19 @@ class S2T3BAdvisor:
         import urllib.request
 
         endpoint = os.getenv("NEXUS_OLLAMA_ENDPOINT", "http://localhost:11434").rstrip("/")
-        model_name = os.getenv("NEXUS_S2T_3B_OLLAMA_MODEL", "qwen2.5-s2t-advisor:3b")
+        model_name = os.getenv("NEXUS_S2T_3B_OLLAMA_MODEL", "").strip()
+        if not model_name:
+            # No hard-coded default (the 3b advisor tag is retired): use the
+            # worker the Workforce policy admits, or abstain fail-closed.
+            from nexus_runtime.planning.services.model_default_resolution import (
+                ModelDefaultNotAdmittedError,
+                resolve_default_model,
+            )
+
+            try:
+                model_name = resolve_default_model("compact_diagnosis")
+            except ModelDefaultNotAdmittedError as exc:
+                return {"abstain_reason": str(exc)}
 
         candidate_summaries = [
             {

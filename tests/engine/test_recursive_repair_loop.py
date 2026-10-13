@@ -245,3 +245,8 @@ def test_recursive_repair_policy_block_fails_closed_before_repair(tmp_path: Path
     assert events[0]["stop_reason"] == "policy_blocked"
     assert ctx.state.metadata["rlm_policy_blocked"] is True
     engine._execute_single_repair.assert_not_called()
+
+
+# ARCHIVED 2026-10-13 legacy-engine: this file tests (in whole or in part) modules archived with
+# the legacy NexusEngine (nexus.engine.pipeline_repair); see ARCHIVED_2026-10-13-legacy-engine.md.
+# It keeps running with unchanged node ids until the deletion PR removes it with those modules.

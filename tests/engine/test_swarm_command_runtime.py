@@ -76,3 +76,8 @@ def test_swarm_quiet_moment_cli_emits_non_mutating_packet(tmp_path):
     assert res.exit_code == 2
     assert "No such command" in res.output
     assert "nexus_quiet_moment.v1" not in res.output
+
+
+# ARCHIVED 2026-10-13 legacy-engine: this file tests (in whole or in part) modules archived with
+# the legacy NexusEngine (scripts.engine.commands.swarm); see ARCHIVED_2026-10-13-legacy-engine.md.
+# It keeps running with unchanged node ids until the deletion PR removes it with those modules.

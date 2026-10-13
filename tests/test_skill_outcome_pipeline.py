@@ -166,3 +166,8 @@ def test_pipeline_writes_skill_outcome_events(tmp_path: Path):
     ]
     assert rows
     assert all(str(row.get("decision_id", "")).startswith("dec_") for row in rows)
+
+
+# ARCHIVED 2026-10-13 legacy-engine: this file tests (in whole or in part) modules archived with
+# the legacy NexusEngine (nexus.engine.pipeline); see ARCHIVED_2026-10-13-legacy-engine.md.
+# It keeps running with unchanged node ids until the deletion PR removes it with those modules.

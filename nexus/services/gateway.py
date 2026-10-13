@@ -677,6 +677,10 @@ class BattlesuitGateway:
             return admitted_invoker(context)
 
         workforce_admitted_online_invoker.workforce_dispatcher = True  # type: ignore[attr-defined]
+        # It starts the admitted provider's registered CLI, so it is a physical transport:
+        # the runtime must resolve a physical Online authorization for it, never the
+        # fixture (injected_test_transport) path (nexus-runtime#190).
+        workforce_admitted_online_invoker.physical_provider_transport = True  # type: ignore[attr-defined]
 
         runtime_online_invoker = online_invoker
         # P4: World A mainchain — optional with_nexus Online armor (no new topology).
@@ -846,27 +850,24 @@ class BattlesuitGateway:
             timeout_sec=float(timeout_sec),
         )
         prompt = f"{sys_msg}\n\n{content}" if sys_msg else content
-        context = {
+        from nexus_runtime.support.services.online_execution_policy import (
+            RESOLVED_DECISION_CONTEXT_KEY,
+            OnlineExecutionDecision,
+        )
+
+        bound = getattr(self, "_online_execution_decision", None)
+        context: dict[str, Any] = {
             "task_id": str(os.getenv("NEXUS_TASK_ID") or "gateway-print"),
             "online_prompt": prompt,
             "online_payload": "",
             "online_model_name": model_name,
-            "online_execution_decision": (
-                self._online_execution_decision.to_dict()
-                if hasattr(self._online_execution_decision, "to_dict")
-                else getattr(self, "_online_execution_decision", None)
-            ),
-            "injected_transport": False,
         }
-        # Ensure decision is a dict for decision_from_context
-        if context["online_execution_decision"] is not None and not isinstance(
-            context["online_execution_decision"], Mapping
-        ):
-            d = self._online_execution_decision
-            if d is not None and hasattr(d, "to_dict"):
-                context["online_execution_decision"] = d.to_dict()
-            elif isinstance(d, Mapping):
-                context["online_execution_decision"] = dict(d)
+        # The single runtime-resolved decision is the only authority (nexus-runtime #178/#190):
+        # only a real runtime OnlineExecutionDecision object is forwarded; a mapping, a
+        # Nexus-side decision copy, a missing or an unknown decision is never rebuilt into an
+        # authorization, so the registered CLI fails closed.
+        if isinstance(bound, OnlineExecutionDecision):
+            context[RESOLVED_DECISION_CONTEXT_KEY] = bound
         payload = invoker(context)
         raw = str(payload.get("raw_response") or payload.get("response") or "")
         if not payload.get("output_delivered"):

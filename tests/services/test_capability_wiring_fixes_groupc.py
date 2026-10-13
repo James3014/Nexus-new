@@ -10,6 +10,8 @@ from typing import Any
 
 import pytest
 
+from nexus.committee.execution_verifier import NOT_EXECUTED_NO_BARRIER
+from nexus.engine.sandboxed_lane import os_sandbox_available
 from nexus.services.capability_registry import build_real_executor_invoker
 
 FIXTURES = Path(__file__).resolve().parents[2] / "scripts" / "ops" / "wiring_fixtures"
@@ -178,6 +180,16 @@ def test_committee_executes_candidates_and_picks_the_passing_one(
         _committee_context(ws, proposals, committee_verify_commands=["python3 repro.py"]),
     )
     outcome = _outcome(result)
+    if not os_sandbox_available():
+        # No OS barrier (Linux CI): candidate code never runs, nobody is verified, no winner.
+        assert outcome["winner_id"] == ""
+        assert outcome["winner_proposer_id"] == ""
+        assert [r["verify_result"] for r in outcome["execution_results"]] == [
+            NOT_EXECUTED_NO_BARRIER
+        ] * 3
+        assert all(r["exit_codes"] == [] for r in outcome["execution_results"])
+        assert (ws / "calc.py").read_bytes() == before
+        return
     assert result["gate_passed"] is True
     assert outcome["winner_proposer_id"] == "wiring-proposer-a"
     assert [r["verify_result"] for r in outcome["execution_results"]] == ["pass", "fail", "fail"]
@@ -314,6 +326,14 @@ def test_swarm_runs_workers_in_worktrees_and_integration_refuses_without_authori
     report = run_bounded_swarm(
         workspace_root=ws, task_id="t2", task="fix", target_file="calc.py", verify_script="repro.py"
     )
+    if not os_sandbox_available():
+        # No OS barrier (Linux CI): the model-written code is never executed, nobody wins.
+        assert (report["status"], report["reason"]) == ("FAILED", "NO_VERIFIED_WORKER")
+        assert [w["verify_result"] for w in report["workers"]] == [NOT_EXECUTED_NO_BARRIER] * 2
+        assert all(w["verify_exit_codes"] == [] for w in report["workers"])
+        assert sorted(report["worktrees_removed"]) == sorted(report["worktrees"])
+        assert "a - b" in (ws / "calc.py").read_text(encoding="utf-8")
+        return
     assert (report["status"], report["reason"]) == (
         "BLOCKED",
         "INTEGRATION_OWNER_AUTHORITY_REQUIRED",
