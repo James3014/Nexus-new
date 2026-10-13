@@ -3241,11 +3241,17 @@ else:
     @nexus_group.command(name="learn:phase-policy")
     @click.option("--task-type", default="bug")
     @click.option("--risk", default="standard")
+    @click.option(
+        "--project-root",
+        default=None,
+        type=click.Path(file_okay=False),
+        help="Project whose learn store is read (default: this checkout).",
+    )
     @click.option("--output-json", is_flag=True)
     @translate_action_exceptions
-    def learn_phase_policy_cmd(task_type, risk, output_json):
+    def learn_phase_policy_cmd(task_type, risk, project_root, output_json):
         """🧠 Show phase-policy decisions for a hypothetical task."""
-        out = get_learn_phase_policy(repo_root, task_type=task_type, risk=risk)
+        out = get_learn_phase_policy(project_root or repo_root, task_type=task_type, risk=risk)
         if output_json:
             click.echo(json.dumps(out, indent=2))
         else:

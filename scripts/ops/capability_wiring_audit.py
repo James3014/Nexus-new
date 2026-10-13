@@ -2757,6 +2757,12 @@ def build_jit(ws: Path, variant: str) -> Scenario:
                 and obs.outcome.get("quota_passed") is True,
                 f"quota_passed={obs.outcome.get('quota_passed')} usage={res.get('token_usage')}",
             ),
+            Check(
+                "receipt_declares_simulated_mask",
+                obs.outcome.get("simulated") is True
+                and (obs.outcome.get("claim_boundary") or {}).get("claim") == "SIMULATED",
+                f"simulated={obs.outcome.get('simulated')} mask_kind={obs.outcome.get('mask_kind')}",
+            ),
         ]
 
     return Scenario(
@@ -3050,7 +3056,7 @@ def probe_learn_mode(ws: Path) -> dict[str, Any]:
     return {
         "project_root_report_claims_count": project.get("claims_count"),
         "per_task_run_root_claims_count": per_task.get("claims_count"),
-        "note": "same service; the executor passes run_root=<project>/.nexus/runtime/<task_id>, a fresh empty directory",
+        "note": "same service; before 2026-10-13 the executor passed run_root=<project>/.nexus/runtime/<task_id> (the per_task value), now it reads the project store",
     }
 
 
@@ -3158,8 +3164,10 @@ def probe_file_lock(ws: Path) -> dict[str, Any]:
             "lock_file": outcome.get("lock_file"),
         }
     out["second_task_refused"] = bool(out["lock-task-b"]["conflicts"])
+    out["holders"] = outcome.get("holders")
     out["note"] = (
-        "the executor keys the lock file by task id (.nexus/multi_agent/locks/<task_id>.json)"
+        "one registry per workspace (.nexus/multi_agent/locks/file_locks.json) keyed by file;"
+        " before 2026-10-13 the file was keyed by task id and the second task was not refused"
     )
     return out
 
@@ -3200,6 +3208,31 @@ def build_external_doc_scout(ws: Path, variant: str) -> Scenario:
 
 
 def build_learn_scheduler(ws: Path, variant: str) -> Scenario:
+    # Positive: the workspace learn store has a passing phase SLO summary (real schema);
+    # negative: no summary.  The executor must read the workspace, not the checkout.
+    # The ledger is seeded too: learn_phase_slo (selected on the same route) rebuilds the
+    # summary from it before the scheduler reads it.
+    if variant == "positive":
+        from nexus.research.learn_mode import LearnModeService
+
+        learn = ws / ".nexus" / "reports" / "learn"
+        learn.mkdir(parents=True, exist_ok=True)
+        rows = [
+            {
+                "task_id": f"wiring-ok-{phase}-{i}",
+                "phase": phase,
+                "phase_status": "SUCCESS",
+                "writeback_policy": {"required": True},
+                "writeback_done": True,
+            }
+            for phase in ("X", "R")
+            for i in range(3)
+        ]
+        (learn / "phase_writeback.jsonl").write_text(
+            "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8"
+        )
+        LearnModeService(project_root=ws).build_phase_slo_report(window=300)
+
     def check(root: Path, obs: Obs) -> list[Check]:
         report = root / ".nexus" / "reports" / "learn" / "scheduler_last_run.json"
         return [
@@ -3212,6 +3245,15 @@ def build_learn_scheduler(ws: Path, variant: str) -> Scenario:
         ]
 
     return Scenario(statement="Run the learn scheduler", task_type="research", check=check)
+
+
+def neg_learn_scheduler(pos: Obs, neg: Obs) -> Check:
+    pe, ne = _result(pos).get("exit_code"), _result(neg).get("exit_code")
+    return Check(
+        "negative_control:no_workspace_slo_summary_exits_2",
+        pe == 0 and ne == 2 and not neg.gate_passed,
+        f"seeded_exit={pe} unseeded_exit={ne}",
+    )
 
 
 def _closed_loopback_port() -> int:
@@ -3236,9 +3278,10 @@ def build_registry_sync(ws: Path, variant: str) -> Scenario:
             reachable = False
         return [
             Check(
-                "peer_actually_reachable",
-                reachable,
-                f"127.0.0.1:{port} reachable={reachable}; receipt peer_contacted={obs.outcome.get('peer_contacted')} row_count={obs.outcome.get('row_count')}",
+                "receipt_matches_peer_reachability",
+                obs.gate_passed == reachable
+                and bool(obs.outcome.get("peer_contacted")) == reachable,
+                f"127.0.0.1:{port} reachable={reachable}; receipt gate={obs.gate_passed} peer_contacted={obs.outcome.get('peer_contacted')} row_count={obs.outcome.get('row_count')} error={obs.outcome.get('error')}",
             )
         ]
 
@@ -3699,7 +3742,7 @@ _SPEC_LIST: list[CapSpec] = [
         build_nightshift,
         policies=(POLICY_PRODUCTION, POLICY_LOCAL_MODEL),
         gaps=(
-            "AutoResearchNightShift runs one round with a bare task string; the phase policy denies research at PassRate=0% so no recovery report is written",
+            "AutoResearchNightShift runs one round with a bare task string; the phase policy reads <workspace_root>/.nexus/reports/learn/phase_slo_summary.json (right directory); until 2026-10-13 it read a never-written overall_pass_rate key, so every real summary was PassRate=0%; the fixture workspace has no summary, so it is still denied (SLO=phase_slo_summary_missing) before any model call and no recovery report is written",
         ),
     ),
     CapSpec(
@@ -3884,7 +3927,7 @@ _SPEC_LIST += [
         probe=probe_jit,
         callee_hard_coded=(("nexus.core.jit_tool_injector:JITToolInjector.apply_mask", "Mock"),),
         gaps=(
-            "JITToolInjector.apply_mask is a self-declared mock: it matches only the Chinese keywords 測試/核驗/具現/修復 and otherwise returns all_tools[:5]; the tool catalog (jit_all_tools) must be supplied by the request",
+            "JITToolInjector.apply_mask is a self-declared mock: it matches only the Chinese keywords 測試/核驗/具現/修復 and otherwise returns all_tools[:5]; the tool catalog (jit_all_tools) must be supplied by the request; since 2026-10-13 the receipt says so (simulated=True, mask_kind=keyword_mock, claim_boundary.claim=SIMULATED)",
         ),
     ),
     CapSpec(
@@ -3939,7 +3982,7 @@ _SPEC_LIST += [
         negative_check=neg_learn_counts("claims_count"),
         probe=probe_learn_mode,
         gaps=(
-            "executor builds LearnModeService(run_root=<cwd>/.nexus/runtime/<task_id>), a fresh empty directory per task, so the report never sees the project's learned claims; gate_passed = result is not None",
+            "fixed 2026-10-13: the executor reads the project learn store LearnModeService(<workspace_root>) like the learn:* CLI (was a fresh empty <cwd>/.nexus/runtime/<task_id>); gate_passed is still 'report built', the claim count is in the result",
         ),
     ),
     CapSpec(
@@ -3949,7 +3992,7 @@ _SPEC_LIST += [
         negative_check=neg_learn_counts("phase_slo_pass"),
         probe=probe_learn_phase_slo,
         gaps=(
-            "same per-task empty run_root as learn_mode, and window=1: the SLO is computed over zero writebacks and always passes",
+            "fixed 2026-10-13: reads the project phase ledger with the CLI window (300; was an empty per-task run_root with window=1); gate_passed means the report was built, phase_slo_pass is in the result",
         ),
     ),
     CapSpec(
@@ -3959,7 +4002,7 @@ _SPEC_LIST += [
         negative_check=neg_file_lock,
         probe=probe_file_lock,
         gaps=(
-            "lock file path is .nexus/multi_agent/locks/<task_id>.json, one file per task, so a second task locking the same file does not see the first lock (see component_probe)",
+            "fixed 2026-10-13: one registry per workspace (.nexus/multi_agent/locks/file_locks.json) keyed by file, holder = task id, flock-guarded; a second task is BLOCKED (FILE_LOCK_HELD_BY_OTHER_TASK), same-task re-lock is idempotent; locks are never released by the executor, a 1800 s TTL makes them stale",
         ),
     ),
     CapSpec(
@@ -4020,9 +4063,9 @@ _SPEC_LIST += [
         "learn_scheduler",
         None,
         build_learn_scheduler,
-        hard_coded=("repo_root = Path(__file__).resolve().parents[2]",),
+        negative_check=neg_learn_scheduler,
         gaps=(
-            "runs nexus_cli.py learn:phase-policy as a subprocess in the code checkout (repo_root is the checkout, not the workspace), so readiness comes from the checkout's own .nexus learning data; PassRate 0% there gives exit 2 and a local alert file",
+            "fixed 2026-10-13: learn:phase-policy --project-root <workspace_root> (the checkout only supplies the CLI script), and the phase policy reads the real summary schema (phase_slo_pass_rate; it read a never-written overall_pass_rate key, so readiness was always 0%); alerts are still written under the cwd",
         ),
     ),
     CapSpec(
@@ -4031,7 +4074,7 @@ _SPEC_LIST += [
         build_registry_sync,
         policies=(POLICY_PRODUCTION, POLICY_EXTERNAL_FLAG),
         gaps=(
-            "SecureRegistrySync.pull_from_peer swallows every connection error and returns []; the executor then reports VERIFIED, peer_contacted=True, row_count=0 for a peer that never answered",
+            "fixed 2026-10-13: the executor uses pull_from_peer_checked; a connection error is BLOCKED (REGISTRY_PEER_UNAVAILABLE:<error class>) with peer_contacted=False (pull_from_peer still returns [] for legacy callers); no live mTLS peer in the fixture, so there is no positive run",
         ),
     ),
 ]
