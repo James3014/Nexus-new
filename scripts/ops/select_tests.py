@@ -243,14 +243,69 @@ def _predictive_scores(
     return scores
 
 
-def _py_files(root: Path, rel_dirs: tuple[str, ...]) -> list[Path]:
-    out: list[Path] = []
-    for rel in rel_dirs:
-        base = root / rel
-        if base.is_dir():
-            out.extend(
-                p for p in sorted(base.rglob("*.py")) if not (set(p.parts) & _SKIP_DIR_PARTS)
-            )
+def _wanted_source(rel: str) -> bool:
+    head, _, leaf = rel.rpartition("/")
+    if leaf.endswith(".py"):
+        return True
+    # direct scripts/ops children may be shell or extensionless executables
+    return head == DERIVED_CATCHALL_PREFIX and ("." not in leaf or leaf.endswith(".sh"))
+
+
+class _TreeUnreadable(Exception):
+    """The base tree could not be read; derivation must fail closed."""
+
+
+def _tree_files(root: Path, rel_dirs: tuple[str, ...], base_sha: str) -> dict[str, str]:
+    """Map repo-relative path -> text for source files, from ``base_sha`` when given.
+
+    Reading the exact base tree keeps head-controlled files (new tests, new
+    importers) out of the derivation, so head data can never narrow a plan.
+    """
+    out: dict[str, str] = {}
+    if not base_sha:
+        for rel in rel_dirs:
+            base = root / rel
+            if base.is_dir():
+                for p in sorted(base.rglob("*")):
+                    if (
+                        p.is_file()
+                        and not (set(p.parts) & _SKIP_DIR_PARTS)
+                        and _wanted_source(str(p.relative_to(root)))
+                    ):
+                        out[str(p.relative_to(root))] = p.read_text(
+                            encoding="utf-8", errors="replace"
+                        )
+        return out
+    listing = subprocess.run(
+        ["git", "-C", str(root), "ls-tree", "-r", "-z", "--name-only", base_sha, "--", *rel_dirs],
+        capture_output=True,
+        check=False,
+    )
+    if listing.returncode != 0:
+        raise _TreeUnreadable(base_sha)
+    names = [
+        n
+        for n in listing.stdout.decode("utf-8", "replace").split("\0")
+        if n and not (set(n.split("/")) & _SKIP_DIR_PARTS) and _wanted_source(n)
+    ]
+    batch = subprocess.run(
+        ["git", "-C", str(root), "cat-file", "--batch"],
+        input="".join(f"{base_sha}:{n}\n" for n in names).encode(),
+        capture_output=True,
+        check=False,
+    )
+    if batch.returncode != 0:
+        raise _TreeUnreadable(base_sha)
+    data, pos = batch.stdout, 0
+    for name in names:
+        eol = data.index(b"\n", pos)
+        header = data[pos:eol].split()
+        if len(header) != 3 or header[1] != b"blob":
+            pos = eol + 1
+            continue  # submodule/symlink/missing: not source text
+        size = int(header[2])
+        out[name] = data[eol + 1 : eol + 1 + size].decode("utf-8", "replace")
+        pos = eol + 1 + size + 1
     return out
 
 
@@ -260,12 +315,15 @@ def _refs_module(text: str, name: str, stem: str, *, inside_ops: bool) -> bool:
         return True
     if not stem.isidentifier() and re.search(rf"(?<![\w-]){re.escape(stem)}(?![\w-])", text):
         return True  # hyphenated/extensionless executable referenced by bare name
-    if name != stem and re.search(rf"scripts[./]ops[./]{re.escape(name)}(?![\w.])", text):
-        return True
+    if name != stem and re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", text):
+        return True  # file name with extension, e.g. Path(...) / "alpha.py"
+    if name == stem and re.search(rf"[\"']{re.escape(stem)}[\"']", text):
+        return True  # extensionless executable named by a string literal
     try:
         tree = ast.parse(text)
     except (SyntaxError, ValueError):
-        # Unparseable file that mentions the stem: be conservative.
+        # Unparseable file (shell script, broken source) that mentions the stem:
+        # be conservative.
         return re.search(rf"\b{re.escape(stem)}\b", text) is not None
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
@@ -285,14 +343,22 @@ def _refs_module(text: str, name: str, stem: str, *, inside_ops: bool) -> bool:
     return False
 
 
+def _is_test_module(rel: str) -> bool:
+    name = rel.rsplit("/", 1)[-1]
+    return name.startswith("test_") or name.endswith("_test.py")
+
+
 def derive_ops_targets(changed_path: str, base_sha: str = "") -> list[str]:
     """Derive tests for one direct ``scripts/ops/<file>`` without a specific row.
 
     Selected: ``tests/ops/test_<stem>*.py`` plus every test file referencing the
-    module (import or ``scripts/ops/<file>`` path), closed transitively over
-    importers inside scripts/ops.  Returns ``[]`` (caller keeps the whole-directory
-    fallback) when nothing is found or when any importer outside scripts/ops and
-    tests exists, since its tests cannot be derived here.
+    module (import, ``scripts/ops/<file>`` path or bare file name), closed
+    transitively over importers that are direct children of scripts/ops (.py, .sh
+    and extensionless).  The derivation reads the exact ``base_sha`` tree when
+    given, so PR-controlled head files cannot narrow the selection.  Returns ``[]``
+    (caller keeps the whole-directory fallback) when nothing is found, the file is
+    not a pure modification, an importer lives outside scripts/ops and tests, or a
+    referencing file under tests/ is not a ``test_*.py`` module (helper/conftest).
     """
     path = _normalize_path(changed_path)
     parent, _, filename = path.rpartition("/")
@@ -309,51 +375,61 @@ def derive_ops_targets(changed_path: str, base_sha: str = "") -> list[str]:
     # is known, already existed at base (i.e. a pure modification).
     if not (ROOT / path).is_file():
         return []
-    if base_sha:
-        probe = subprocess.run(
-            ["git", "-C", str(ROOT), "cat-file", "-e", f"{base_sha}:{path}"],
-            capture_output=True,
-            check=False,
-        )
-        if probe.returncode != 0:
-            return []
+    try:
+        tree = _tree_files(ROOT, (*_SOURCE_SCAN_DIRS, "tests"), base_sha)
+    except (_TreeUnreadable, OSError, ValueError):
+        return []
+    if base_sha and path not in tree:
+        return []
 
     ops_files = {
-        p: p.read_text(encoding="utf-8", errors="replace")
-        for p in _py_files(ROOT, (DERIVED_CATCHALL_PREFIX,))
+        rel: text for rel, text in tree.items() if rel.rpartition("/")[0] == DERIVED_CATCHALL_PREFIX
     }
     outside = {
-        p: p.read_text(encoding="utf-8", errors="replace")
-        for p in _py_files(ROOT, _SOURCE_SCAN_DIRS)
-        if p not in ops_files
+        rel: text
+        for rel, text in tree.items()
+        if rel.endswith(".py")
+        and rel not in ops_files
+        and not rel.startswith("tests/")
+        and rel.split("/", 1)[0] in _SOURCE_SCAN_DIRS
     }
+    test_files = {
+        rel: text for rel, text in tree.items() if rel.startswith("tests/") and rel.endswith(".py")
+    }
+
     closure = {(stem, filename)}
     frontier = [(stem, filename)]
     while frontier:
         cur_stem, cur_name = frontier.pop()
-        for p, text in outside.items():
+        for text in outside.values():
             if cur_stem in text and _refs_module(text, cur_name, cur_stem, inside_ops=False):
                 return []  # non-ops production importer: fail closed
-        for p, text in ops_files.items():
-            if p.stem == cur_stem or cur_stem not in text:
+        for rel, text in ops_files.items():
+            leaf = rel.rsplit("/", 1)[-1]
+            if leaf == cur_name or cur_stem not in text:
                 continue
             if _refs_module(text, cur_name, cur_stem, inside_ops=True):
-                key = (p.stem, p.name)
+                key = (leaf.rpartition(".")[0] if "." in leaf else leaf, leaf)
                 if key not in closure:
                     closure.add(key)
                     frontier.append(key)
 
-    tests_root = ROOT / DERIVED_TESTS_DIR
     selected: set[str] = set()
     for cur_stem, cur_name in closure:
-        if tests_root.is_dir():
-            for match in tests_root.glob(f"test_{cur_stem.replace('-', '_')}*.py"):
-                selected.add(str(match.relative_to(ROOT)))
-    for p in _py_files(ROOT, ("tests",)):
-        text = p.read_text(encoding="utf-8", errors="replace")
+        prefix = f"{DERIVED_TESTS_DIR}/test_{cur_stem.replace('-', '_')}"
+        selected.update(
+            rel
+            for rel in test_files
+            if rel.startswith(prefix)
+            and rel.endswith(".py")
+            and "/" not in rel[len(DERIVED_TESTS_DIR) + 1 :]
+        )
+    for rel, text in test_files.items():
         for cur_stem, cur_name in closure:
             if cur_stem in text and _refs_module(text, cur_name, cur_stem, inside_ops=False):
-                selected.add(str(p.relative_to(ROOT)))
+                if not _is_test_module(rel):
+                    return []  # helper/conftest: its consumers are unknown
+                selected.add(rel)
                 break
     return sorted(selected)
 
