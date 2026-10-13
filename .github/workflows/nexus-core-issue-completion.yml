@@ -1,4 +1,5 @@
 name: Nexus Core issue completion
+run-name: "${{ github.event_name == 'repository_dispatch' && format('Core precheck {0} #{1}', github.event.client_payload.head_sha, github.event.client_payload.issue_number) || github.event.pull_request.title }}"
 
 # Two-job consumer workflow for the Nexus Core issue gate.
 # - 'run' produces and Sigstore-signs the receipt (needs id-token: write).
@@ -17,9 +18,18 @@ name: Nexus Core issue completion
 # A run that starts after its PR already merged or closed gets the neutral
 # PR_ALREADY_CLOSED_SKIPPED outcome from issue-gate; receipt-verify accepts it only
 # when the live PR is merged at exactly this head (never VERIFIED).
+#
+# Precheck (Nexus-new #2018, nexus-core #255): a repository_dispatch of type
+# 'nexus-core-precheck' (client_payload: head_sha, issue_number), sent by
+# scripts/ops/nexus-core-precheck when an agent reports completion, runs the same
+# signed check early on main. issue-gate refuses a head that is not the tip of a
+# branch of this repository. Pull requests are still checked in full, exactly as
+# before; no receipt is reused. Each precheck head gets its own concurrency group.
 on:
   pull_request_target:
     types: [opened, synchronize, reopened]
+  repository_dispatch:
+    types: [nexus-core-precheck]
 
 permissions:
   contents: read
@@ -27,16 +37,20 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: nexus-core-issue-completion-${{ github.event.pull_request.number }}
+  group: nexus-core-issue-completion-${{ github.event.pull_request.number || format('precheck-{0}', github.event.client_payload.head_sha) }}
   cancel-in-progress: true
 
 jobs:
   run:
     name: Nexus Core issue run
-    # Same-repository branches only; fork PRs are intentionally excluded.
+    # Pull requests: same-repository branches only; fork PRs are intentionally excluded.
+    # Precheck: repository_dispatch on the default branch only.
     if: >-
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.head.repo.fork == false
+      (github.event_name == 'pull_request_target' &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.head.repo.fork == false) ||
+      (github.event_name == 'repository_dispatch' &&
+       github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
@@ -49,20 +63,28 @@ jobs:
       artifact-id: ${{ steps.gate.outputs.artifact-id }}
       issue-number: ${{ steps.gate.outputs.issue-number }}
       outcome: ${{ steps.gate.outputs.outcome }}
+      head-sha: ${{ steps.gate.outputs.head-sha }}
     steps:
       - id: gate
         uses: James3014/nexus-core/.github/actions/issue-gate@b245430bbad465be634ceef00b53c5582a0d4fd9
         with:
           nexus-certify-ref: "b245430bbad465be634ceef00b53c5582a0d4fd9"
           evidence-universe: trusted-config
+          # Empty on pull requests (the action then uses the PR head and body marker).
+          head-sha: ${{ github.event.client_payload.head_sha }}
+          issue-number: ${{ github.event.client_payload.issue_number }}
 
   verify:
     name: Nexus Core issue completion
     needs: run
     if: >-
-      always() &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.head.repo.fork == false
+      always() && (
+        (github.event_name == 'pull_request_target' &&
+         github.event.pull_request.head.repo.full_name == github.repository &&
+         github.event.pull_request.head.repo.fork == false) ||
+        (github.event_name == 'repository_dispatch' &&
+         github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -77,8 +99,8 @@ jobs:
           artifact-id: ${{ needs.run.outputs.artifact-id }}
           expected-identity: https://github.com/James3014/Nexus-new/.github/workflows/nexus-core-issue-completion.yml@refs/heads/main
           github-repository: ${{ github.repository }}
-          head-sha: ${{ github.event.pull_request.head.sha }}
-          base-sha: ${{ github.event.pull_request.base.sha }}
+          head-sha: ${{ github.event.pull_request.head.sha || needs.run.outputs.head-sha }}
+          base-sha: ${{ github.event.pull_request.base.sha || github.sha }}
           issue-number: ${{ needs.run.outputs.issue-number }}
           gate-outcome: ${{ needs.run.outputs.outcome }}
           nexus-certify-ref: "b245430bbad465be634ceef00b53c5582a0d4fd9"
