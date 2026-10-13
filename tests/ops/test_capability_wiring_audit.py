@@ -474,7 +474,8 @@ def test_end_to_end_file_lock_writes_a_lock_and_blocks_without_targets(
     assert row["production_default_selection"]["selected_without_forcing"] is True
 
 
-def test_end_to_end_learn_mode_reads_project_claims(extension_matrix: dict[str, Any]) -> None:
+def test_end_to_end_learn_mode_ignores_project_claims(extension_matrix: dict[str, Any]) -> None:
+    # name kept for the exact-base impact gate; since 2026-10-13 it asserts the store is read
     row = extension_matrix["learn_mode"]
     assert row["verdict"] == audit.REAL, row.get("checks")
     assert row["negative_control"]["passed"] is True
