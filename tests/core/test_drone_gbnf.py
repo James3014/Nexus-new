@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 from nexus.core.drone_engine import DRONE_ADMITTED_MODEL, LocalBonsaiBrain
 
 
-def test_ollama_chat_payload_constrains_actions(monkeypatch):
+def test_gbnf_grammar_injection(monkeypatch):
     monkeypatch.delenv("NEXUS_OLLAMA_URL", raising=False)
     brain = LocalBonsaiBrain()
     assert brain.api_url == "http://127.0.0.1:11434"
