@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import re
 import time
@@ -8,7 +7,6 @@ import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass
 from typing import Any
-
 
 _HIGH_RISK_TERMS = {
     ".git",
@@ -129,7 +127,7 @@ def assess_local_reflex(
             repo_kind=repo_kind,
             fixture_kind=fixture_kind,
             start=start,
-            reasons=("ollama_unavailable",),
+            reasons=("ollama_unavailable", "ollama_reflex_deprecated"),
         )
         return base
     if provider_name == "bonsai":
@@ -235,29 +233,15 @@ def _assessment(
 
 
 def _try_ollama_reflex(*, task_desc: str, timeout_sec: float, start: float) -> ReflexAssessment | None:
-    from nexus.engine.semantic_adapter import SemanticAdapter
-    adapter = SemanticAdapter()
-    
-    # 模擬與 Ollama 通訊 (簡化為調用 adapter)
-    # 實際環境中此處會發送請求並獲取原始標籤
-    # 這裡我們先封鎖手動 json.loads 路徑
-    raw_response = "r:0,d:0,p:1,c:0" # 預設安全標籤
-    
-    route, decision, phase, confidence = adapter.process_model_output(raw_response)
-    
-    return ReflexAssessment(
-        schema_version="nexus_local_reflex.v1",
-        provider="ollama_hardened",
-        available=True,
-        risk_level="low" if decision == "ALLOW" else "high",
-        bare_sufficiency="high" if decision == "ALLOW" else "low",
-        needs_research=False,
-        needs_hyper=False,
-        needs_ultra_review=False,
-        confidence=0.9,
-        latency_ms=max(0, int((time.monotonic() - start) * 1000)),
-        reasons=("rust_validated",),
-    )
+    """[DEPRECATED] The Ollama reflex path was retired in 4039601d2; always returns None.
+
+    Refs #1924: the stub used to return a fixed label as provider="ollama_hardened",
+    available=True without contacting any endpoint, so a dead endpoint still looked
+    like a live local model. It makes no network call and reports nothing; the caller
+    falls back to the heuristic with available=False and "ollama_reflex_deprecated".
+    """
+    return None
+
 
 def _parse_reflex_jsonish(text: str) -> dict[str, str]:
     """[DEPRECATED] 移除舊有脆點。由 SemanticAdapter 統一處理。"""

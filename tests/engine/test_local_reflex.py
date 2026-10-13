@@ -163,3 +163,68 @@ def test_heuristic_marks_destructive_write_paths_high_risk():
     assert assessment.risk_level == "high"
     assert assessment.bare_sufficiency == "low"
     assert assessment.needs_ultra_review is True
+
+
+def _forbid_network(monkeypatch):
+    import socket
+    import urllib.request
+
+    calls: list[object] = []
+
+    def _no_urlopen(*args, **kwargs):
+        calls.append(args)
+        raise AssertionError("deprecated Ollama reflex must not call the network")
+
+    def _no_connect(*args, **kwargs):
+        calls.append(args)
+        raise AssertionError("deprecated Ollama reflex must not open a socket")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _no_urlopen)
+    monkeypatch.setattr(socket, "create_connection", _no_connect)
+    return calls
+
+
+def test_deprecated_ollama_reflex_reports_unavailable_without_network(monkeypatch):
+    """Refs #1924: the retired Ollama path must not claim provider="ollama"/available=True."""
+    calls = _forbid_network(monkeypatch)
+    monkeypatch.setenv("NEXUS_OLLAMA_URL", "http://127.0.0.1:11434")
+
+    assessment = assess_local_reflex(
+        task_desc="Fix a focused public fixture assertion.",
+        task_type="public_test_repair",
+        difficulty="hard",
+        category="test_repair",
+        repo_kind="neutral_fixture",
+        provider="ollama",
+        timeout_sec=5,
+    )
+
+    assert calls == []
+    assert assessment.provider == "heuristic_fallback"
+    assert assessment.available is False
+    assert "ollama_reflex_deprecated" in assessment.reasons
+    assert "ollama_unavailable" in assessment.reasons
+    assert "rust_validated" not in assessment.reasons
+    assert assessment.to_route_features()["local_reflex_available"] is False
+
+
+def test_deprecated_try_ollama_reflex_returns_no_assessment(monkeypatch):
+    from nexus.engine.local_reflex import _try_ollama_reflex
+
+    calls = _forbid_network(monkeypatch)
+
+    assert _try_ollama_reflex(task_desc="anything", timeout_sec=5, start=0) is None
+    assert calls == []
+
+
+def test_deprecated_ollama_reflex_keeps_heuristic_high_risk_veto(monkeypatch):
+    _forbid_network(monkeypatch)
+
+    assessment = assess_local_reflex(
+        task_desc="Refactor core orchestrator routing and remove old policy paths.",
+        provider="ollama",
+    )
+
+    assert assessment.available is False
+    assert assessment.risk_level == "high"
+    assert assessment.needs_ultra_review is True

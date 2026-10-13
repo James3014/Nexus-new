@@ -150,6 +150,7 @@
 | scripts/engine/commands/research_actions.py | tests/engine/test_research_actions.py | active | medium | research_cli_action_contract |
 | scripts/engine/commands/sandbox_actions.py | tests/engine/test_sandbox_actions.py | active | medium | sandbox_cli_action_and_physical_runner_contract |
 | scripts/engine/commands/stress_test.py | tests/engine/test_simulated_evaluation_honesty.py | active | medium | simulated_evaluation_honesty_contract |
+| scripts/local_heal/run_june_regression_pack.py | tests/unit/local_heal/test_june_regression_pack_env_scope.py, tests/integration/test_real_model_probe.py, tests/integration/test_june_regression_pack.py | active | medium | june_regression_pack_env_scope_contract |
 | scripts/engine/commands/swarm.py | tests/services/test_distill_swarm_honesty.py, tests/test_swarm_command_delivery.py | active | medium | swarm_tag_opt_in_contract |
 | tests/test_metabolism.py | tests/test_metabolism.py | active | medium | test_contract |
 | scripts/ui-validator.py | tests/engine/test_simulated_evaluation_honesty.py | active | medium | simulated_evaluation_honesty_contract |

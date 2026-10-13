@@ -169,7 +169,9 @@ class HealPipeline:
         self.budget_manager = ContextBudgetManager()
 
     # --- Trace / Telemetry Helpers ---
-    TRACE_LOG_PATH = Path("/Users/jameschen/Workspace/nexus/scratch/llm_trace.log")
+    # Repo-relative like the sibling local_heal artifacts (receipt.py, orchestrator.py);
+    # scratch/*.log is git-ignored. Tests monkeypatch this to a tmp path (Refs #1924).
+    TRACE_LOG_PATH = Path(__file__).resolve().parents[3] / "scratch" / "llm_trace.log"
 
     @classmethod
     def _write_trace(cls, message: str) -> None:
