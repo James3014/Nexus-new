@@ -60,7 +60,11 @@ def test_owner_approved_winner_integrates_through_controlled_manager(
         "integration_branch": "nexus/integration/swarm-t",
     }
     out = owner_fixture_integrate_swarm_winner(ws, pending, winner, tmp_path / "state")
-    assert out["lifecycle_status"] == "INTEGRATED", out
+    assert out["lifecycle_status"] == "INTEGRATED", (
+        out["integration"].get("refusal"),
+        out["status_trail"],
+        out["failure_detail"],
+    )
     assert out["integration"]["merge_performed"] is True
     head = subprocess.check_output(
         ["git", "rev-parse", "nexus/integration/swarm-t"], cwd=ws, text=True

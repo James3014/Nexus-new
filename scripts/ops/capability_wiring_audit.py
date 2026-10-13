@@ -1746,8 +1746,17 @@ def owner_fixture_integrate_swarm_winner(
     )
     now = datetime.now(timezone.utc)
     verifier = str(Path(sys.executable).resolve())
-    previous = os.environ.get("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR")
-    os.environ["NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR"] = str(state_dir)
+    # Fixture-local lifecycle root plus a fixture git identity for the integration merge
+    # commit (CI runners have no global git identity).
+    fixture_env = {
+        "NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR": str(state_dir),
+        "GIT_AUTHOR_NAME": "wiring-audit",
+        "GIT_AUTHOR_EMAIL": "wiring-audit@invalid",
+        "GIT_COMMITTER_NAME": "wiring-audit",
+        "GIT_COMMITTER_EMAIL": "wiring-audit@invalid",
+    }
+    previous_env = {key: os.environ.get(key) for key in fixture_env}
+    os.environ.update(fixture_env)
     try:
         service = SelfHostedTaskService(state_dir=state_dir, auto_reconcile=False)
         request = {
@@ -1886,16 +1895,26 @@ def owner_fixture_integrate_swarm_winner(
         integration = integrate_swarm_winner(root, task_id, dict(winner), "", base)
         final = service.get_task(task_id) or {}
     finally:
-        if previous is None:
-            os.environ.pop("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR", None)
-        else:
-            os.environ["NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR"] = previous
+        for key, value in previous_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+    history = final.get("status_history") if isinstance(final.get("status_history"), list) else []
     return {
         "approver": SWARM_OWNER_FIXTURE_APPROVER,
         "bound_status": bound.get("status"),
         "integration": integration,
         "lifecycle_status": final.get("status"),
         "integration_branch": integration_branch,
+        # Why a non-INTEGRATED outcome happened (status trail + failure fields).
+        "status_trail": [dict(item) for item in history[-4:] if isinstance(item, dict)],
+        "failure_detail": {
+            key: str(value)[:300]
+            for key, value in final.items()
+            if any(token in key for token in ("error", "failure", "blocker", "reason"))
+            and value not in (None, "", [], {})
+        },
     }
 
 
