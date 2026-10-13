@@ -452,12 +452,14 @@ class LLMCandidateGenerator:
         provider_response, raw_response, _payload = extract_online_stage_payload(online_stage)
         if isinstance(provider_response, dict):
             structured = dict(provider_response)
-            structured.setdefault("candidate_response_path", "structured")
+            structured["candidate_response_path"] = "structured"
             return structured, raw_response, unified
         stage_status = "APPROVED" if online_stage.get("status") == "SUCCEEDED" else "FAIL"
-        operation = _parse_operation_payload(str(provider_response or ""))
-        if operation is not None:
-            operation.setdefault("status", stage_status)
+        parsed = _parse_operation_payload(str(provider_response or ""))
+        if parsed is not None:
+            # Model text is untrusted: keep only the edit keys; status and path come from code.
+            operation = {key: parsed[key] for key in _OPERATION_EDIT_KEYS if key in parsed}
+            operation["status"] = stage_status
             operation["candidate_response_path"] = "operation_json"
             return operation, raw_response, unified
         # Not an edit-operation payload: keep the legacy whole-file fallback.
@@ -770,6 +772,7 @@ def _estimate_tokens(text: str) -> int:
 
 
 _OPERATION_PAYLOAD_KEYS = frozenset({"operation", "target_snippet", "replacement", "patch"})
+_OPERATION_EDIT_KEYS = ("operation", "target_snippet", "replacement", "patch", "explanation")
 _JSON_FENCE_RE = re.compile(r"^```[a-zA-Z0-9_-]*\s*\n(.*?)\n?```\s*$", re.DOTALL)
 
 
