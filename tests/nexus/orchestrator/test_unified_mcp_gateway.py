@@ -606,11 +606,11 @@ def test_canonical_planner_admission_uses_policy_routing_not_worker_iteration(
         ),
     )
 
-    assert reordered.routing["online"]["fast_bounded_implementation"] == "agy_flash_37_medium"
-    assert result["binding"]["worker_id"] == "agy_flash_37_medium"
+    assert reordered.routing["online"]["fast_bounded_implementation"] == "agy_flash_38"
+    assert result["binding"]["worker_id"] == "agy_flash_38"
     assert result["workforce_admission"]["records"][0]["request"][
         "requested_worker_id"
-    ] == "agy_flash_37_medium"
+    ] == "agy_flash_38"
 
 
 def test_campaign_identity_requires_canonical_bytes_and_hash(tmp_path):
@@ -648,7 +648,7 @@ def test_authenticated_campaign_identity_is_bound_and_conflicts_fail(tmp_path):
         allowed_files=("bounded.py",), verifier_command=("git diff --check",),
         task_card_identity=task_card, campaign_identity=exact,
     )
-    assert result["binding"]["worker_id"] == "agy_flash_37_medium"
+    assert result["binding"]["worker_id"] == "agy_flash_38"
     conflict = replace(exact, campaign_id="CAMPAIGN-PLANNER-WORKFORCE-SELECTION-REPAIR-01")
     with pytest.raises(ValueError, match="campaign_identity_conflict"):
         build_canonical_planner_admission(
@@ -831,7 +831,7 @@ def test_worker_candidate_forwards_tracked_task_run_once(monkeypatch):
         **_task_card_evidence("worker-candidate-1"),
     }
     monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight(
-        requested_model="gemini-3.7-flash-medium", resolved_model="gemini-3.7-flash-medium",
+        requested_model="gemini-3.8-flash-medium", resolved_model="gemini-3.8-flash-medium",
     ))
     response = gateway.handle({"jsonrpc": "2.0", "id": 44, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": arguments}})
     assert response is not None
@@ -846,9 +846,9 @@ def test_worker_candidate_forwards_tracked_task_run_once(monkeypatch):
     assert effective["task_card_path"] == arguments["task_card_path"]
     assert effective["task_card_hash"] == arguments["task_card_hash"]
     assert request["provider"] == "agy"
-    assert request["model"] == "gemini-3.7-flash-medium"
+    assert request["model"] == "gemini-3.8-flash-medium"
     assert request["worker"] == "agy"
-    assert request["worker_id"] == "agy_flash_37_medium"
+    assert request["worker_id"] == "agy_flash_38"
     readiness_fields = {
         "provider_probe_evidence_hash": "e" * 64,
         "provider_binary_path": "/usr/bin/true",
@@ -886,7 +886,7 @@ def test_worker_candidate_uses_planner_admission_identity_and_rejects_override(m
     internal = _actual_dispatch("governed-dispatch-1", "bounded change", "admitted dispatch")
     demands, admission = internal["workforce_demands"], internal["workforce_admission"]
     monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight(
-        provider="agy", requested_model="gemini-3.7-flash-medium", resolved_model="gemini-3.7-flash-medium",
+        provider="agy", requested_model="gemini-3.8-flash-medium", resolved_model="gemini-3.8-flash-medium",
     ))
     arguments = {
         "task_id": "governed-dispatch-1", "what": "bounded change", "why": "admitted dispatch",
@@ -922,7 +922,7 @@ def test_worker_candidate_auto_dispatches_admitted_online_agy_end_to_end(monkeyp
     internal = _actual_dispatch("governed-online-agy-1", "bounded online change", "prove agy admission seam")
     demands, admission = internal["workforce_demands"], internal["workforce_admission"]
     monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight(
-        provider="agy", requested_model="gemini-3.7-flash-medium", resolved_model="gemini-3.7-flash-medium",
+        provider="agy", requested_model="gemini-3.8-flash-medium", resolved_model="gemini-3.8-flash-medium",
     ))
     arguments = {
         "task_id": "governed-online-agy-1", "what": "bounded online change", "why": "prove agy admission seam",
@@ -990,8 +990,8 @@ def test_worker_candidate_rejects_preflight_identity_mismatch_before_submit(
     internal = _actual_dispatch(task_id, what, why)
     demands, admission = internal["workforce_demands"], internal["workforce_admission"]
     preflight = _ready_preflight(
-        provider="agy", requested_model="gemini-3.7-flash-medium",
-        resolved_model="gemini-3.7-flash-medium",
+        provider="agy", requested_model="gemini-3.8-flash-medium",
+        resolved_model="gemini-3.8-flash-medium",
     )
     preflight[field] = value
     monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: preflight)
@@ -1217,7 +1217,7 @@ def test_worker_candidate_preserves_service_status(monkeypatch):
     service = StatusService()
     gateway = UnifiedMCPGateway(service=service)
     monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight(
-        requested_model="gemini-3.7-flash-medium", resolved_model="gemini-3.7-flash-medium",
+        requested_model="gemini-3.8-flash-medium", resolved_model="gemini-3.8-flash-medium",
     ))
     args = _worker_args("preserve-service-status")
     response = gateway.handle({"jsonrpc": "2.0", "id": 49, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": args}})
@@ -1246,7 +1246,7 @@ def test_worker_candidate_semantic_replay_and_conflict_use_service_gate(monkeypa
     service = FakeService()
     gateway = UnifiedMCPGateway(service=service)
     monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight(
-        requested_model="gemini-3.7-flash-medium", resolved_model="gemini-3.7-flash-medium",
+        requested_model="gemini-3.8-flash-medium", resolved_model="gemini-3.8-flash-medium",
     ))
     args = _worker_args("semantic-replay")
     gateway.handle({"jsonrpc": "2.0", "id": 60, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": args}})
@@ -1278,7 +1278,7 @@ def test_worker_candidate_explicit_authority_confirmation_binds_marker(monkeypat
     service = FakeService()
     gateway = UnifiedMCPGateway(service=service)
     monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight(
-        requested_model="gemini-3.7-flash-medium", resolved_model="gemini-3.7-flash-medium",
+        requested_model="gemini-3.8-flash-medium", resolved_model="gemini-3.8-flash-medium",
     ))
     args = _worker_args(
         "authority-candidate", what="authority change", why="explicit owner review",
@@ -1321,7 +1321,7 @@ def test_worker_candidate_authority_confirmation_tamper_breaks_bound_hash(monkey
     service = FakeService()
     gateway = UnifiedMCPGateway(service=service)
     monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight(
-        requested_model="gemini-3.7-flash-medium", resolved_model="gemini-3.7-flash-medium",
+        requested_model="gemini-3.8-flash-medium", resolved_model="gemini-3.8-flash-medium",
     ))
     args = _worker_args(
         "authority-tamper", what="authority change", why="explicit owner review",
@@ -1342,7 +1342,7 @@ def test_worker_candidate_explicit_authority_binding_rejects_identity_tamper(mon
 
     gateway = UnifiedMCPGateway(service=FakeService())
     monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight(
-        requested_model="gemini-3.7-flash-medium", resolved_model="gemini-3.7-flash-medium",
+        requested_model="gemini-3.8-flash-medium", resolved_model="gemini-3.8-flash-medium",
     ))
     args = _worker_args(
         "authority-identity", what="authority change", why="explicit owner review",
@@ -1354,7 +1354,7 @@ def test_worker_candidate_explicit_authority_binding_rejects_identity_tamper(mon
     service = FakeService()
     gateway = UnifiedMCPGateway(service=service)
     monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight(
-        requested_model="gemini-3.7-flash-medium", resolved_model="gemini-3.7-flash-medium",
+        requested_model="gemini-3.8-flash-medium", resolved_model="gemini-3.8-flash-medium",
     ))
     gateway.handle({"jsonrpc": "2.0", "id": 75, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": args}})
     original = service.submitted[0]
@@ -1376,7 +1376,7 @@ def test_worker_candidate_ordinary_to_authority_same_task_remains_tracked(monkey
     service = FakeService()
     gateway = UnifiedMCPGateway(service=service)
     monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight(
-        requested_model="gemini-3.7-flash-medium", resolved_model="gemini-3.7-flash-medium",
+        requested_model="gemini-3.8-flash-medium", resolved_model="gemini-3.8-flash-medium",
     ))
     ordinary = _worker_args("authority-replay", what="bounded change", why="ordinary request")
     gateway.handle({"jsonrpc": "2.0", "id": 76, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": ordinary}})
@@ -2975,7 +2975,7 @@ def test_model_probe_feedback_loop_preflight_then_worker_candidate_once(monkeypa
         assert raw_field not in evidence
 
     monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight(
-        requested_model="gemini-3.7-flash-medium", resolved_model="gemini-3.7-flash-medium",
+        requested_model="gemini-3.8-flash-medium", resolved_model="gemini-3.8-flash-medium",
     ))
     args = _worker_args("feedback-worker")
     response = gateway._worker_candidate(args)

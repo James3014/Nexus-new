@@ -663,7 +663,7 @@ def test_b3_campaign_text_without_verified_identity_does_not_mint_route(tmp_path
     demand = result["workforce_demands"]["demands"][0]
     assert demand["requested_role"] == "fast_bounded_implementation"
     assert demand["mutation_intent"] is True
-    assert result["binding"]["worker_id"] == "agy_flash_37_medium"
+    assert result["binding"]["worker_id"] == "agy_flash_38"
 
 
 def test_b3_near_match_verified_campaign_does_not_select_mimo(tmp_path):
@@ -684,7 +684,7 @@ def test_b3_near_match_verified_campaign_does_not_select_mimo(tmp_path):
 
     demand = result["workforce_demands"]["demands"][0]
     assert demand["requested_role"] == "fast_bounded_implementation"
-    assert result["binding"]["worker_id"] == "agy_flash_37_medium"
+    assert result["binding"]["worker_id"] == "agy_flash_38"
 
 
 def test_external_intelligence_consumer_routes_to_chatgpt_web(tmp_path):

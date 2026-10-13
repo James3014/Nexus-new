@@ -88,7 +88,7 @@ def _request(*, local_enabled: bool = False, online_enabled: bool = True) -> Uni
 def _admit_gateway_request(
     request: UnifiedRuntimeRequest,
     *,
-    online_worker: str = "agy_flash",
+    online_worker: str = "agy_flash_38",
 ) -> UnifiedRuntimeRequest:
     """Attach the canonical Workforce bindings required by Gateway mainchain."""
     if online_worker == "codex_luna":
@@ -98,6 +98,8 @@ def _admit_gateway_request(
             "task_card",
             "allowed_files",
             "mandatory_commands",
+            "parser",
+            "verifier",
             "independent_verification",
         ]
     route = dict(request.route)
@@ -1195,14 +1197,14 @@ def test_gateway_unified_entry_forwards_provider_context(monkeypatch, tmp_path: 
     request = UnifiedRuntimeRequest(
         **{
             **_request().__dict__,
-            "online_model_name": "gemini-3.6-flash-high",
+            "online_model_name": "gemini-3.8-flash-medium",
             "online_output_schema": {"status": "APPROVED | FAIL"},
             "online_phase": "R",
         }
     )
     gateway.ask_unified(_admit_gateway_request(request), verifier=_verifier, learning=_learning, online_invoker=_structured_gateway_invoker(gateway))
 
-    assert calls[0]["model_name"] == "gemini-3.6-flash-high"
+    assert calls[0]["model_name"] == "gemini-3.8-flash-medium"
     assert calls[0]["output_schema"] == {"status": "APPROVED | FAIL"}
 
 
@@ -1473,11 +1475,30 @@ def test_negative_control_authorized_missing_provider_binary(monkeypatch) -> Non
         _build_sentinel,
     )
 
+    from nexus_runtime.support.services.online_execution_policy import (
+        RESOLVED_DECISION_CONTEXT_KEY,
+        OnlineExecutionDecision,
+    )
+
+    # nexus-runtime#178: a bare ``online_execution_authorized`` field is no longer an
+    # authorization; the authorized case needs an in-process resolved decision.
+    decision = OnlineExecutionDecision(
+        online_policy="require",
+        online_execution_requested=True,
+        online_execution_authorized=True,
+        online_authorization_source="workspace_policy",
+        approved_online_providers=("gemini",),
+        preflight_status="ONLINE_READY",
+        requested_provider="gemini",
+        physical_invocation_allowed=True,
+        claim_boundary={"public_claim_allowed": False},
+    )
     invoker = build_registered_online_invoker("gemini")
     result = invoker({
         "task_id": "nc-3",
         "task_statement": "try to run",
         "online_execution_authorized": True,
+        RESOLVED_DECISION_CONTEXT_KEY: decision,
     })
 
     # shutil.which returning None → resolve fails before build_subprocess_online_invoker.

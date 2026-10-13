@@ -91,7 +91,9 @@ def test_mainchain_capability_and_current_availability_are_separate() -> None:
 
     agy = workers["agy_flash"]
     assert agy["state"] == "PROVEN_MAINCHAIN"
-    assert agy["availability"] == "AVAILABLE"
+    # Agy 1.3.4 no longer serves Gemini 3.6 (Owner decision 2026-10-13, #1932).
+    assert agy["availability"] == "UNAVAILABLE"
+    assert agy["reason"] == "provider_no_longer_serves_model_agy_1.3.4_2026-10-13"
     assert agy["preferred_context"] == "nexus_bounded"
 
     medium_36 = workers["agy_flash_medium"]
@@ -99,14 +101,17 @@ def test_mainchain_capability_and_current_availability_are_separate() -> None:
     assert medium_36["autonomy"] == "L1"
     assert medium_36["default_route"] is False
     assert medium_36["calibration_evidence"]["inherits_high_evidence"] is False
+    assert medium_36["availability"] == "UNAVAILABLE"
 
     medium_37 = workers["agy_flash_37_medium"]
     assert medium_37["provider"] == "agy"
     assert medium_37["model"] == "gemini-3.7-flash-medium"
     assert medium_37["state"] == "REGISTERED_CONDITIONAL"
-    assert medium_37["availability"] == "AVAILABLE"
+    # Agy 1.3.4 rejects gemini-3.7-flash-medium; agy_flash_38 replaced it as default.
+    assert medium_37["availability"] == "UNAVAILABLE"
+    assert medium_37["reason"] == "provider_no_longer_serves_model_agy_1.3.4_2026-10-13"
     assert medium_37["autonomy"] == "L3"
-    assert medium_37["default_route"] is True
+    assert medium_37["default_route"] is False
     assert medium_37["calibration_evidence"] == {
         "status": "OWNER_APPROVED_CEILING",
         "lineage": "gemini-3.7-flash-medium",
@@ -192,9 +197,10 @@ def test_local_workers_have_evidence_specific_context_and_autonomy_boundaries() 
     workers = _manifest()["workers"]
 
     advisor = workers["local_advisor_3b"]
-    # Not present on the M5 Ollama host as of 2026-10-12; roles kept for history.
-    assert advisor["state"] == "INSTALLED_NOT_CONNECTED"
-    assert advisor["reason"] == "not_present_on_m5_ollama_2026-10-12"
+    # Retired 2026-10-13 (nexus-runtime #184): weights absent, no roles admitted.
+    assert advisor["state"] == "REGISTERED_BLOCKED"
+    assert advisor["availability"] == "UNAVAILABLE"
+    assert advisor["roles"] == []
     assert advisor["preferred_context"] == "nexus_bounded"
     assert {"code_mutation", "full_context_assignment", "claim_authority"} <= set(
         advisor["forbidden_actions"]
@@ -289,13 +295,13 @@ def test_routing_is_deterministic_first_bounded_first_and_fail_closed() -> None:
         "bounded_code_candidate": "local_coder_7b",
         "bounded_reasoning_shadow": "local_qwen35_9b",
     }
-    assert routing["online"]["fast_bounded_implementation"] == "agy_flash_37_medium"
-    assert routing["online"]["fast_bounded_implementation_fallback"] == "agy_flash"
+    assert routing["online"]["fast_bounded_implementation"] == "agy_flash_38"
+    assert routing["online"]["fast_bounded_implementation_fallback"] is None
     route_defaults = routing["online"]["route_defaults"]["fast_bounded_implementation"]
-    assert route_defaults["current_default"] == "agy_flash_37_medium"
-    assert route_defaults["fallback"] == "agy_flash"
+    assert route_defaults["current_default"] == "agy_flash_38"
+    assert route_defaults["fallback"] is None
     campaign = routing["online"]["campaign_routing"]["CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01"]
-    assert campaign["fast_bounded_implementation"] == "agy_flash_37_medium"
+    assert campaign["fast_bounded_implementation"] == "agy_flash_38"
     assert routing["online"]["independent_review"] == "grok_review"
     assert routing["online"]["complex_milestone"] == "codex_luna_when_available"
 
@@ -492,12 +498,21 @@ def test_three_layers_lineage_and_ceiling_constraints() -> None:
     assert gemini_36_medium["autonomy"] == "L1"
     assert gemini_36_medium["default_route"] is False
 
-    # Gemini 3.7 Flash Medium: ceiling L3, non-default, no L4.
+    # Gemini 3.7 Flash Medium: ceiling L3, no L4; no longer the default since
+    # 2026-10-13 (Agy 1.3.4 no longer serves it).
     gemini_medium = workers["agy_flash_37_medium"]
     assert gemini_medium["model"] == "gemini-3.7-flash-medium"
     assert gemini_medium["autonomy"] == "L3"
-    assert gemini_medium["default_route"] is True
+    assert gemini_medium["default_route"] is False
+    assert gemini_medium["availability"] == "UNAVAILABLE"
     assert gemini_medium["calibration_evidence"]["experimental_l4_admitted"] is False
+
+    # Gemini 3.8 Flash Medium: sole default at the registered L3, no L4.
+    gemini_38 = workers["agy_flash_38"]
+    assert gemini_38["model"] == "gemini-3.8-flash-medium"
+    assert gemini_38["autonomy"] == "L3"
+    assert gemini_38["default_route"] is True
+    assert "calibration_evidence" not in gemini_38
 
     # DeepSeek V4 Flash: ceiling L2, non-default, no L4
     deepseek_worker = workers["opencode_deepseek_v4_flash"]
@@ -526,14 +541,15 @@ def test_three_layers_lineage_and_ceiling_constraints() -> None:
 
 
 def test_combined_global_route_binds_to_37_medium() -> None:
-    """GLOBAL: fast_bounded_implementation routes to agy_flash_37_medium (CURRENT_DEFAULT)."""
+    """GLOBAL: since 2026-10-13 fast_bounded_implementation routes to agy_flash_38, not 3.7."""
     manifest = _manifest()
     routing = manifest["routing"]
-    assert routing["online"]["fast_bounded_implementation"] == "agy_flash_37_medium"
-    assert routing["online"]["fast_bounded_implementation_fallback"] == "agy_flash"
+    assert routing["online"]["fast_bounded_implementation"] == "agy_flash_38"
+    assert routing["online"]["fast_bounded_implementation_fallback"] is None
     defaults = routing["online"]["route_defaults"]["fast_bounded_implementation"]
-    assert defaults["current_default"] == "agy_flash_37_medium"
-    assert defaults["fallback"] == "agy_flash"
+    assert defaults["current_default"] == "agy_flash_38"
+    assert defaults["fallback"] is None
+    assert manifest["workers"]["agy_flash_37_medium"]["availability"] == "UNAVAILABLE"
 
 
 def test_campaign_exact_match_resolves_to_37_medium() -> None:
@@ -542,30 +558,39 @@ def test_campaign_exact_match_resolves_to_37_medium() -> None:
     campaign = manifest["routing"]["online"]["campaign_routing"][
         "CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01"
     ]
-    assert campaign["fast_bounded_implementation"] == "agy_flash_37_medium"
+    # The Learning campaign moved to 3.8 with the 2026-10-13 default switch.
+    assert campaign["fast_bounded_implementation"] == "agy_flash_38"
 
 
 def test_campaign_37_medium_worker_advertises_role() -> None:
-    """WORKER: agy_flash_37_medium advertises fast_bounded_implementation and is AVAILABLE."""
+    """WORKER: agy_flash_37_medium keeps the role on record but is UNAVAILABLE; agy_flash_38 serves it."""
     manifest = _manifest()
     w = manifest["workers"]["agy_flash_37_medium"]
     assert w["provider"] == "agy"
     assert w["model"] == "gemini-3.7-flash-medium"
     assert "fast_bounded_implementation" in w["roles"]
-    assert w["availability"] == "AVAILABLE"
+    assert w["availability"] == "UNAVAILABLE"
     assert w["state"] == "REGISTERED_CONDITIONAL"
     assert w["autonomy"] == "L3"
-    assert w["default_route"] is True
+    assert w["default_route"] is False
+    w38 = manifest["workers"]["agy_flash_38"]
+    assert "fast_bounded_implementation" in w38["roles"]
+    assert w38["availability"] == "AVAILABLE"
+    assert w38["state"] == "REGISTERED_CONDITIONAL"
+    assert w38["autonomy"] == "L3"
+    assert w38["default_route"] is True
 
 
 def test_36_high_is_fallback_not_default() -> None:
-    """FALLBACK: agy_flash (3.6-high) is fallback, not CURRENT_DEFAULT."""
+    """FALLBACK: agy_flash (3.6-high) is no longer the fallback; the fallback is null (fail closed)."""
     manifest = _manifest()
     defaults = manifest["routing"]["online"]["route_defaults"]["fast_bounded_implementation"]
-    assert defaults["fallback"] == "agy_flash"
+    assert "fallback" in defaults
+    assert defaults["fallback"] is None
     assert defaults["current_default"] != "agy_flash"
     w = manifest["workers"]["agy_flash"]
     assert w["default_route"] is False
+    assert w["availability"] == "UNAVAILABLE"
 
 
 def test_36_and_37_identity_separation_preserved() -> None:
@@ -601,14 +626,14 @@ def test_opencli_chatgpt_balanced_web_registration() -> None:
 
 
 def test_global_fast_bounded_implementation_remains_agy_flash_37_medium() -> None:
-    """Global fast_bounded_implementation remains agy_flash_37_medium."""
+    """Global fast_bounded_implementation is agy_flash_38 since 2026-10-13 (name kept for node-id stability)."""
     manifest = _manifest()
     routing = manifest["routing"]
-    assert routing["online"]["fast_bounded_implementation"] == "agy_flash_37_medium"
+    assert routing["online"]["fast_bounded_implementation"] == "agy_flash_38"
     defaults = routing["online"]["route_defaults"]["fast_bounded_implementation"]
-    assert defaults["current_default"] == "agy_flash_37_medium"
+    assert defaults["current_default"] == "agy_flash_38"
     loader = WorkforcePolicyLoader()
-    assert loader.resolve_route("fast_bounded_implementation") == "agy_flash_37_medium"
+    assert loader.resolve_route("fast_bounded_implementation") == "agy_flash_38"
 
 
 def test_campaign_route_resolution_open_swe_resident_canary() -> None:
@@ -631,29 +656,27 @@ def test_campaign_route_resolution_open_swe_resident_canary() -> None:
         )
         == "opencli_chatgpt_balanced_web"
     )
-    assert (
-        loader.resolve_route("fast_bounded_implementation", campaign_id="") == "agy_flash_37_medium"
-    )
+    assert loader.resolve_route("fast_bounded_implementation", campaign_id="") == "agy_flash_38"
     assert (
         loader.resolve_route(
             "fast_bounded_implementation",
             campaign_id="prefix-open-swe-resident-five-repo-canary-20260908",
         )
-        == "agy_flash_37_medium"
+        == "agy_flash_38"
     )
     assert (
         loader.resolve_route(
             "fast_bounded_implementation",
             campaign_id="unrelated-campaign",
         )
-        == "agy_flash_37_medium"
+        == "agy_flash_38"
     )
 
 
 def test_m5_host_alignment_2026_10_12_admission() -> None:
     manifest = _manifest()
     workers = manifest["workers"]
-    assert manifest["last_verified"] == "2026-10-12"
+    assert manifest["last_verified"] == "2026-10-13"
 
     for worker_id in ("local_deepseek67b", "local_qwythos9b"):
         assert workers[worker_id]["state"] == "INSTALLED_NOT_CONNECTED"
@@ -688,7 +711,8 @@ def test_m5_host_alignment_2026_10_12_admission() -> None:
     assert agy["state"] == "REGISTERED_CONDITIONAL"
     assert agy["roles"] == reference["roles"]
     assert agy["autonomy"] == reference["autonomy"]
-    assert agy["default_route"] is False
+    # Default since 2026-10-13 (section 15); the 2026-10-12 registration is unchanged otherwise.
+    assert agy["default_route"] is True
 
     policy = POLICY_PATH.read_text(encoding="utf-8")
     assert "Dated amendment — 2026-10-12 (M5 inference host alignment)" in policy
