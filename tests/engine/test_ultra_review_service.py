@@ -71,7 +71,7 @@ def test_ultra_review_dry_run_writes_report_and_sandbox(tmp_path, monkeypatch):
     else:
         assert ghost["executed_checks"] == []
         assert ghost["status"] == "FAIL"
-        assert payload["ghost_regression"]["blocked_reason"] == "os_sandbox_unavailable"
+        assert payload["ghost_regression"]["blocked_reason"] == "no_os_barrier"
     assert payload["ghost_regression"]["timeout_sec"] == 30
     assert payload["ghost_regression"]["dependency_mode"] == "active_venv"
     assert payload["ghost_regression"]["sanitized_env"] == ["NEXUS_LLM_CANDIDATE_CAP"]
@@ -87,6 +87,7 @@ def test_ultra_review_dry_run_writes_report_and_sandbox(tmp_path, monkeypatch):
     assert logic_lane["status"] == "PASS"
     assert logic_lane["executed_checks"] == [
         "ultra_logic_repro.py",
+        "path-containment",
         "test-harness-guard",
         "py_compile",
         "ruff-correctness",
@@ -270,7 +271,7 @@ def test_ultra_review_ghost_regression_failure_becomes_verified_finding(tmp_path
     assert payload["ghost_regression"]["passed"] is False
     if not OS_SANDBOX:
         # Without an OS barrier the failing test is never executed: fail closed, no finding.
-        assert payload["ghost_regression"]["blocked_reason"] == "os_sandbox_unavailable"
+        assert payload["ghost_regression"]["blocked_reason"] == "no_os_barrier"
         return
     finding = payload["findings"][0]
     assert finding["state"] == "VERIFIED_FINDING"
@@ -615,7 +616,7 @@ def test_ultra_review_review_mode_without_os_sandbox_refuses_to_run_pr_tests(tmp
     )
 
     assert payload["status"] == "BLOCKED"
-    assert payload["blocked_reason"] == "ghost_regression_not_executed:os_sandbox_unavailable"
+    assert payload["blocked_reason"] == "ghost_regression_not_executed:no_os_barrier"
     assert payload["gate_passed"] is False
     assert payload["ghost_regression"]["executed_tests"] == []
     assert payload["isolation"]["barrier"] == "none"
@@ -639,12 +640,14 @@ def test_ultra_review_contains_a_diff_that_escapes_the_sandbox(tmp_path, monkeyp
         "def test_escape_write():\n"
         f"    Path({str(marker)!r}).write_text('escaped')\n\n\n"
         "def test_escape_ssh_read():\n"
-        "    list((Path(os.path.expanduser('~')).parent / Path.home().name / '.ssh').iterdir())\n\n\n"
+        "    open(os.path.expanduser('~/.ssh/nexus-owner-deletion.pub')).read()\n\n\n"
+        "def test_escape_home_read():\n"
+        "    [p.read_bytes() for p in Path(os.path.expanduser('~')).glob('.*rc') if p.is_file()]\n"
+        "    assert list(Path(os.path.expanduser('~')).glob('.*rc'))\n\n\n"
         "def test_escape_network():\n"
         "    socket.create_connection(('1.1.1.1', 443), timeout=3)\n",
         encoding="utf-8",
     )
-    real_ssh = Path.home() / ".ssh"
     payload = UltraReviewService(tmp_path).run(
         dry_run=True, report_path="reports/ultra.json", sandbox_root="reports/sandboxes"
     )
@@ -657,8 +660,9 @@ def test_ultra_review_contains_a_diff_that_escapes_the_sandbox(tmp_path, monkeyp
     assert any(f["rule_id"] == "regression_test_failed" for f in payload["findings"])
     tail = ghost["pytest_stdout_tail"]
     assert "test_escape_write" in tail and "test_escape_network" in tail
-    if real_ssh.is_dir():
-        assert "test_escape_ssh_read" in tail
+    assert "test_escape_ssh_read" in tail  # denied (or absent) either way: never readable
+    assert "test_escape_home_read" in tail
+    assert "PermissionError" in tail or "Operation not permitted" in tail
     seen = json.loads((Path(payload["sandbox_path"]) / "worktree" / "env_seen.json").read_text())
     assert seen == {}
 
@@ -745,3 +749,122 @@ def test_ultra_review_flags_test_harness_changes(tmp_path):
 
     assert payload["gate_passed"] is False
     assert any(f["rule_id"] == "test_harness_modified" for f in payload["findings"])
+
+
+def _write_marker_shadows(root, marker):
+    # Files named like stdlib / tool modules: imported only if PR code reaches an interpreter.
+    body = f"open({str(marker)!r}, 'w').write('executed')\n"
+    for name in ("re.py", "json.py", "bandit.py", "ruff.py", "py_compile.py", "sitecustomize.py"):
+        (root / name).write_text(body, encoding="utf-8")
+
+
+def test_ultra_review_without_os_barrier_executes_no_pr_code(tmp_path, monkeypatch):
+    """Linux-CI shape: no barrier -> the PR's tests never run, static tools run isolated (-I)
+    so PR files shadowing stdlib/tool modules are never imported, and the gate fails closed."""
+    _init_app_repo(tmp_path)
+    marker = tmp_path.parent / f"{tmp_path.name}_pr_code_ran.txt"
+    _write_marker_shadows(tmp_path, marker)
+    for name in ("re.py", "json.py", "bandit.py", "ruff.py", "py_compile.py", "sitecustomize.py"):
+        subprocess.run(["git", "add", name], cwd=tmp_path, check=True)
+    (tmp_path / "tests" / "test_app.py").write_text(
+        f"from pathlib import Path\n\n\ndef test_x():\n    Path({str(marker)!r}).write_text('test ran')\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NEXUS_ULTRA_REVIEW_DISABLE_OS_SANDBOX", "1")
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_should_not_leak")
+
+    payload = UltraReviewService(tmp_path).run(
+        dry_run=False, report_path="reports/ultra.json", sandbox_root="reports/sandboxes"
+    )
+
+    assert not marker.exists()
+    assert payload["gate_passed"] is False
+    assert payload["blocked_reason"] == "ghost_regression_not_executed:no_os_barrier"
+    assert payload["ghost_regression"]["executed_tests"] == []
+    assert {"bandit", "ruff-security"} <= set(payload["security_sentry"]["executed_checks"])
+    assert payload["isolation"]["barrier"] == "none"
+
+
+def test_ultra_review_sandbox_env_is_scrubbed_and_cwd_is_the_sandbox(tmp_path, monkeypatch):
+    _init_app_repo(tmp_path)
+    (tmp_path / "app.py").write_text("def handler(value):\n    return value.strip()  # x\n", encoding="utf-8")
+    monkeypatch.setenv("NEXUS_ULTRA_REVIEW_DISABLE_OS_SANDBOX", "1")
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_should_not_leak")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-should-not-leak")
+    seen = []
+    original_run = subprocess.run
+
+    def spy(cmd, **kwargs):
+        if kwargs.get("env") is not None:
+            seen.append((list(cmd), dict(kwargs["env"]), str(kwargs.get("cwd")), kwargs.get("shell")))
+        return original_run(cmd, **kwargs)
+
+    monkeypatch.setattr("nexus.engine.ultra_review_service.subprocess.run", spy)
+    payload = UltraReviewService(tmp_path).run(
+        dry_run=False, report_path="reports/ultra.json", sandbox_root="reports/sandboxes"
+    )
+
+    assert seen, "lane subprocesses must run through the sandbox runner"
+    for cmd, env, cwd, shell in seen:
+        assert shell is None
+        assert "GITHUB_TOKEN" not in env and "ANTHROPIC_API_KEY" not in env
+        assert env["HOME"].startswith(payload["sandbox_path"])
+        assert cwd.startswith(payload["sandbox_path"])
+        assert "-I" in cmd  # static tools / repro scripts never import from the PR tree
+
+
+def test_disable_os_sandbox_env_never_grants_a_barrier(monkeypatch):
+    import nexus.engine.ultra_review_service as svc
+
+    monkeypatch.setitem(svc._OS_SANDBOX_PROBE, "sandbox-exec", True)
+    monkeypatch.setenv("NEXUS_ULTRA_REVIEW_DISABLE_OS_SANDBOX", "1")
+    assert svc.os_sandbox_available() is False
+    monkeypatch.setitem(svc._OS_SANDBOX_PROBE, "sandbox-exec", False)
+    for value in ("0", "", "false", "no"):
+        monkeypatch.setenv("NEXUS_ULTRA_REVIEW_DISABLE_OS_SANDBOX", value)
+        assert svc.os_sandbox_available() is False
+
+
+def test_ultra_review_symlink_in_diff_pointing_outside_is_not_scanned_and_fails(tmp_path):
+    _init_app_repo(tmp_path)
+    outside = tmp_path.parent / f"{tmp_path.name}_outside_secret.py"
+    outside.write_text("API" + "_KEY = 'outside-secret-123456'\n", encoding="utf-8")
+    (tmp_path / "evil.py").symlink_to(outside)
+    subprocess.run(["git", "add", "evil.py"], cwd=tmp_path, check=True)
+
+    payload = UltraReviewService(tmp_path).run(
+        dry_run=False, report_path="reports/ultra.json", sandbox_root="reports/sandboxes"
+    )
+
+    assert payload["gate_passed"] is False
+    assert any(
+        f["rule_id"] == "path_outside_worktree" and f["file"] == "evil.py" for f in payload["findings"]
+    )
+    assert "evil.py" not in payload["security_sentry"]["scanned_python_files"]
+    assert "outside-secret" not in json.dumps(payload)
+
+
+def test_ultra_review_untracked_symlink_is_not_copied_into_the_sandbox(tmp_path):
+    _init_app_repo(tmp_path)
+    outside = tmp_path.parent / f"{tmp_path.name}_outside_key.txt"
+    outside.write_text("secret", encoding="utf-8")
+    (tmp_path / "leak.txt").symlink_to(outside)
+    (tmp_path / "app.py").write_text("def handler(value):\n    return value.strip()  # x\n", encoding="utf-8")
+
+    payload = UltraReviewService(tmp_path).run(
+        dry_run=True, report_path="reports/ultra.json", sandbox_root="reports/sandboxes"
+    )
+
+    mirror = Path(payload["sandbox_path"]) / "worktree"
+    assert not (mirror / "leak.txt").exists()
+
+
+def test_ultra_review_dotdot_paths_are_never_inside_the_worktree(tmp_path):
+    service = UltraReviewService(tmp_path)
+    root = tmp_path / "wt"
+    (root / "pkg").mkdir(parents=True)
+    (tmp_path / "outside.py").write_text("x = 1\n", encoding="utf-8")
+    diff = "diff --git a/../outside.py b/../outside.py\n+++ b/../outside.py\n@@ -0,0 +1 @@\n+x = 1\n"
+    assert service._changed_python_files(diff, root) == []
+    assert service._uncontained_changed_files(diff, root) == ["../outside.py"]
+    assert service._contained_path("pkg/../../outside.py", root) is None

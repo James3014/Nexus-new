@@ -292,4 +292,4 @@ def test_ultra_review_executor_without_os_sandbox_fails_closed(tmp_path, monkeyp
     receipt = EXECUTOR_REGISTRY["ultra_review"](_plan(workspace_root=str(tmp_path)), "review")
     assert receipt.gate_passed is False
     assert receipt.outcome["semantic_status"] == "BLOCKED"
-    assert receipt.outcome["error"] == "ghost_regression_not_executed:os_sandbox_unavailable"
+    assert receipt.outcome["error"] == "ghost_regression_not_executed:no_os_barrier"

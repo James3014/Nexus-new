@@ -474,7 +474,14 @@ class UltraReviewService:
                     continue
             except OSError:
                 continue
-            if not source.is_file():
+            if source.is_symlink() or not source.is_file():
+                # Never follow an untracked symlink into the sandbox (it could point at a
+                # credential file outside the checkout).
+                continue
+            try:
+                if not source.resolve().is_relative_to(self.project_root):
+                    continue
+            except OSError:
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target)
@@ -553,6 +560,9 @@ class UltraReviewService:
         real_home = Path(os.path.expanduser("~")).resolve()
         denied = " ".join(f'(subpath "{real_home / rel}")' for rel in SANDBOX_DENIED_HOME_PATHS)
         writes = " ".join(f'(subpath "{path}")' for path in writable if path)
+        # $HOME is unreadable except the reviewer's interpreter/venv, its import path and the
+        # sandbox itself; credential stores stay denied even inside those roots.
+        readable = " ".join(f'(subpath "{path}")' for path in self._sandbox_read_roots())
         return "\n".join(
             [
                 "(version 1)",
@@ -560,6 +570,9 @@ class UltraReviewService:
                 "(allow process-fork)",
                 "(allow process-exec*)",
                 "(allow file-read*)",
+                f'(deny file-read* (subpath "{real_home}"))',
+                "(allow file-read-metadata)",
+                f"(allow file-read* {readable})",
                 "(allow sysctl-read)",
                 "(allow mach-lookup)",
                 "(allow ipc-posix-shm)",
@@ -569,6 +582,22 @@ class UltraReviewService:
                 f"(deny file-read* {denied})",
             ]
         )
+
+    def _sandbox_read_roots(self) -> list[str]:
+        ctx = getattr(self, "_sandbox_ctx", None) or {}
+        roots = {str(ctx.get("execution_root") or ""), str(ctx.get("sandbox_path") or "")}
+        roots.update({str(Path(sys.prefix).resolve()), str(Path(sys.base_prefix).resolve())})
+        project = self.project_root.resolve()
+        for entry in [*sys.path, *os.environ.get("PYTHONPATH", "").split(os.pathsep)]:
+            if not entry:
+                continue
+            candidate = Path(entry).resolve()
+            # The reviewed checkout itself is never on the sandbox import path.
+            if candidate == project or project in candidate.parents:
+                continue
+            if candidate.is_dir():
+                roots.add(str(candidate))
+        return sorted(root for root in roots if root)
 
     def sandbox_isolation(self) -> dict[str, Any]:
         contained = os_sandbox_available()
@@ -650,12 +679,34 @@ class UltraReviewService:
                 new_line += 1
         return added
 
-    def _changed_python_files(self, diff_text: str, execution_root: Path) -> list[str]:
+    def _contained_path(self, rel: str, execution_root: Path) -> Path | None:
+        """``execution_root/rel`` when it stays inside the worktree and is not a symlink."""
+        root = execution_root.resolve()
+        candidate = execution_root / rel
+        if candidate.is_symlink():
+            return None
+        resolved = candidate.resolve()
+        if resolved != root and root not in resolved.parents:
+            return None
+        return resolved
+
+    def _uncontained_changed_files(self, diff_text: str, execution_root: Path) -> list[str]:
         return [
             rel
             for rel in self._changed_files(diff_text)
-            if rel.endswith(".py") and (execution_root / rel).is_file()
+            if (execution_root / rel).exists() or (execution_root / rel).is_symlink() or ".." in Path(rel).parts
+            if self._contained_path(rel, execution_root) is None
         ]
+
+    def _changed_python_files(self, diff_text: str, execution_root: Path) -> list[str]:
+        out: list[str] = []
+        for rel in self._changed_files(diff_text):
+            if not rel.endswith(".py"):
+                continue
+            contained = self._contained_path(rel, execution_root)
+            if contained is not None and contained.is_file():
+                out.append(rel)
+        return out
 
     def _run_tool(self, cmd: list[str], *, cwd: Path) -> dict[str, Any]:
         try:
@@ -694,7 +745,7 @@ class UltraReviewService:
         # Absolute paths from the sandbox dir: a PR-supplied .bandit config is not read, and
         # --ignore-nosec stops the diff from silencing its own findings.
         targets = [str((execution_root / rel).resolve()) for rel in py_files]
-        cmd = [sys.executable, "-m", "bandit", "-f", "json", "-q", "--ignore-nosec", *targets]
+        cmd = [sys.executable, "-I", "-m", "bandit", "-f", "json", "-q", "--ignore-nosec", *targets]
         ctx = getattr(self, "_sandbox_ctx", None) or {}
         run = self._run_tool(cmd, cwd=Path(ctx.get("sandbox_path") or execution_root))
         if not run.get("available") or run.get("timeout"):
@@ -745,6 +796,7 @@ class UltraReviewService:
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         cmd = [
             sys.executable,
+            "-I",
             "-m",
             "ruff",
             "check",
@@ -1047,7 +1099,7 @@ class UltraReviewService:
                 encoding="utf-8",
             )
             shutil.copy2(self._resolve(sandbox_path / "changes.diff"), execution_root / "changes.diff")
-            cmd = [sys.executable, str(script_path)]
+            cmd = [sys.executable, "-I", str(script_path)]
             executed_checks.append(script_name)
             timeout = False
             try:
@@ -1182,7 +1234,7 @@ class UltraReviewService:
             ),
             encoding="utf-8",
         )
-        cmd = [sys.executable, str(repro_script)]
+        cmd = [sys.executable, "-I", str(repro_script)]
         timeout = False
         try:
             result = self._sandboxed_run(cmd, cwd=execution_root, timeout=LOGIC_BREAKER_TIMEOUT_SEC)
@@ -1221,6 +1273,25 @@ class UltraReviewService:
             )
 
         diff_text = diff_path.read_text(encoding="utf-8") if diff_path.exists() else ""
+        uncontained = self._uncontained_changed_files(diff_text, execution_root)
+        executed_checks.append("path-containment")
+        if uncontained:
+            findings.append(
+                {
+                    "id": f"logic-breaker-{len(findings) + 1}",
+                    "lane": "logic_breaker",
+                    "rule_id": "path_outside_worktree",
+                    "tool": "path-containment",
+                    "state": "VERIFIED_FINDING",
+                    "severity": "high",
+                    "file": uncontained[0],
+                    "line": 0,
+                    "repro_command": "",
+                    "summary": "Changed path is a symlink or resolves outside the sandbox worktree: "
+                    + ", ".join(uncontained[:5]),
+                    "execution_cwd": str(execution_root),
+                }
+            )
         harness = [rel for rel in self._changed_files(diff_text) if Path(rel).name in TEST_HARNESS_FILES]
         executed_checks.append("test-harness-guard")
         if harness:
@@ -1243,7 +1314,7 @@ class UltraReviewService:
             )
         py_files = self._changed_python_files(diff_text, execution_root)
         if py_files:
-            compile_cmd = [sys.executable, "-m", "py_compile", *py_files]
+            compile_cmd = [sys.executable, "-I", "-m", "py_compile", *py_files]
             compiled = self._run_tool(compile_cmd, cwd=execution_root)
             executed_checks.append("py_compile")
             if compiled.get("timeout") or compiled.get("returncode") not in (0, None):
@@ -1343,13 +1414,16 @@ class UltraReviewService:
             *test_candidates,
         ]
         sanitized_env = [key for key in BENCHMARK_ONLY_ENV_VARS if key in os.environ]
+        test_candidates = [
+            rel for rel in test_candidates if self._contained_path(rel, execution_root) is not None
+        ]
         if not os_sandbox_available():
             # The re-run imports and executes PR-controlled code: without an OS barrier it
             # does not run at all, and the lane fails closed.
             return {
                 "passed": False,
                 "blocked": True,
-                "blocked_reason": "os_sandbox_unavailable",
+                "blocked_reason": "no_os_barrier",
                 "executed_tests": [],
                 "failed_tests": [],
                 "skipped_tests": list(test_candidates),

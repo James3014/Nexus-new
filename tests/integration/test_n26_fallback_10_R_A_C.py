@@ -99,7 +99,7 @@ def test_exec_ultra_review_runs(tmp_path) -> None:
     else:
         # PR tests run only behind an OS barrier; elsewhere the review fails closed.
         assert r.gate_passed is False
-        assert r.outcome["error"] == "ghost_regression_not_executed:os_sandbox_unavailable"
+        assert r.outcome["error"] == "ghost_regression_not_executed:no_os_barrier"
 
 
 def test_exec_learning_closure_runs() -> None:
