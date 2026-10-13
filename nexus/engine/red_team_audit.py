@@ -1,6 +1,15 @@
 from typing import Any, Dict, List, Optional, Tuple
 import logging
 
+import warnings as _archived_warnings
+
+_archived_warnings.warn(
+    "ARCHIVED 2026-10-12 (#1850): boundary/concurrency/fault checks always PASS; see ARCHIVED_2026-10-12.md. "
+    "Scheduled for deletion; do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 logger = logging.getLogger(__name__)
 
 class RedTeamAudit:

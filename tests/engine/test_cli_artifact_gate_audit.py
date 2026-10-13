@@ -1,5 +1,6 @@
 from pathlib import Path
 
+_REPO_ROOT = str(Path(__file__).resolve().parents[2])
 
 def _command_block(source: str, command_name: str) -> str:
     for marker in (
@@ -46,27 +47,23 @@ MUTATING_COMMANDS_REQUIRING_ARTIFACTS = {
     "research:run": ("report_file", "semantic_status", "write_text("),
     "research:benchmark": ("report_file", "ResearchBenchmarkService"),
     "research:meta-opt": ("report_file", "write_text("),
-    "fed-init": ("report_file", "write_text("),
-    "fed-run": ("report_file", "write_text("),
-    "meta-run": ("report_file", "write_text("),
     "run-bug": ("report_file",),
     "learn:benchmark": ("output", "write_learn_precision_benchmark_output"),
-    "oracle:apply": ("report_file", "write_text("),
 }
 
 ACTION_CONTRACT_SOURCES = {
-    "learn:ingest": "/Users/jameschen/Workspace/nexus/scripts/engine/commands/learn_actions.py",
-    "learn:register-source": "/Users/jameschen/Workspace/nexus/scripts/engine/commands/learn_actions.py",
-    "learn:refresh": "/Users/jameschen/Workspace/nexus/scripts/engine/commands/learn_actions.py",
-    "learn:refresh-plan": "/Users/jameschen/Workspace/nexus/scripts/engine/commands/learn_actions.py",
-    "learn:converge": "/Users/jameschen/Workspace/nexus/scripts/engine/commands/learn_actions.py",
-    "learn:report": "/Users/jameschen/Workspace/nexus/scripts/engine/commands/learn_actions.py",
-    "learn:phase-slo": "/Users/jameschen/Workspace/nexus/scripts/engine/commands/learn_actions.py",
-    "learn:phase-kpi": "/Users/jameschen/Workspace/nexus/scripts/engine/commands/learn_actions.py",
-    "learn:gate": "/Users/jameschen/Workspace/nexus/scripts/engine/commands/learn_actions.py",
-    "learn:benchmark": "/Users/jameschen/Workspace/nexus/scripts/engine/commands/learn_actions.py",
-    "research:auto-flow": "/Users/jameschen/Workspace/nexus/scripts/engine/commands/research_actions.py",
-    "research:run": "/Users/jameschen/Workspace/nexus/scripts/engine/commands/research_actions.py",
+    "learn:ingest": f"{_REPO_ROOT}/scripts/engine/commands/learn_actions.py",
+    "learn:register-source": f"{_REPO_ROOT}/scripts/engine/commands/learn_actions.py",
+    "learn:refresh": f"{_REPO_ROOT}/scripts/engine/commands/learn_actions.py",
+    "learn:refresh-plan": f"{_REPO_ROOT}/scripts/engine/commands/learn_actions.py",
+    "learn:converge": f"{_REPO_ROOT}/scripts/engine/commands/learn_actions.py",
+    "learn:report": f"{_REPO_ROOT}/scripts/engine/commands/learn_actions.py",
+    "learn:phase-slo": f"{_REPO_ROOT}/scripts/engine/commands/learn_actions.py",
+    "learn:phase-kpi": f"{_REPO_ROOT}/scripts/engine/commands/learn_actions.py",
+    "learn:gate": f"{_REPO_ROOT}/scripts/engine/commands/learn_actions.py",
+    "learn:benchmark": f"{_REPO_ROOT}/scripts/engine/commands/learn_actions.py",
+    "research:auto-flow": f"{_REPO_ROOT}/scripts/engine/commands/research_actions.py",
+    "research:run": f"{_REPO_ROOT}/scripts/engine/commands/research_actions.py",
 }
 
 READ_ONLY_OR_ROUTING_COMMANDS = (
@@ -82,7 +79,7 @@ READ_ONLY_OR_ROUTING_COMMANDS = (
 
 
 def test_mutating_commands_expose_artifact_or_gate_contracts():
-    source = Path("/Users/jameschen/Workspace/nexus/scripts/engine/nexus_cli.py").read_text(encoding="utf-8")
+    source = Path(f"{_REPO_ROOT}/scripts/engine/nexus_cli.py").read_text(encoding="utf-8")
     for command_name, required_tokens in MUTATING_COMMANDS_REQUIRING_ARTIFACTS.items():
         block = _command_block(source, command_name)
         action_source = ""
@@ -95,7 +92,7 @@ def test_mutating_commands_expose_artifact_or_gate_contracts():
 
 
 def test_read_only_commands_do_not_require_write_contracts():
-    source = Path("/Users/jameschen/Workspace/nexus/scripts/engine/nexus_cli.py").read_text(encoding="utf-8")
+    source = Path(f"{_REPO_ROOT}/scripts/engine/nexus_cli.py").read_text(encoding="utf-8")
     for command_name in READ_ONLY_OR_ROUTING_COMMANDS:
         block = _command_block(source, command_name)
         assert "write_text(" not in block, f"{command_name} unexpectedly writes artifacts"

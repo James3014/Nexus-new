@@ -2,6 +2,15 @@ import json, random, yaml, os, numpy as np
 from pathlib import Path
 from datetime import datetime, timezone
 
+import warnings as _archived_warnings
+
+_archived_warnings.warn(
+    "ARCHIVED 2026-10-12 (#1850): stub engine, CLI meta-run removed; see ARCHIVED_2026-10-12.md. "
+    "Scheduled for deletion; do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 class MetaOptimizerV08:
     def __init__(self, dna_dim=128):
         self.mutation_rate = 0.05

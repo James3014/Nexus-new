@@ -693,7 +693,8 @@ class TestSecretRedaction:
     def test_private_key_pattern_is_redacted(self, tmp_path: Path):
         root = tmp_path / "evidence"
         sensitive_state = {
-            "key_material": "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----"
+            "key_material": "-----BEGIN "
+            + "RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----"
         }
         seal_trajectory_step(
             evidence_root=root,
@@ -2241,12 +2242,12 @@ _AWS_SECRET_SAMPLE = "wJalrXUtnFEMI/" + "K7MDENG/bPxRfiC" + "YEXAMPLEKEY"
         ("sk_live_" + "N" * 24, "N" * 12),
         ("rk_live_" + "N" * 24, "N" * 12),
         (
-            "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0B" + "T" * 40 + "\n"
+            "-----BEGIN " + "PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0B" + "T" * 40 + "\n"
             "-----END PRIVATE KEY-----",
             "T" * 12,
         ),
         (
-            "-----BEGIN RSA PRIVATE KEY-----\nMIIEow" + "T" * 40 + "\nZZZZ\n"
+            "-----BEGIN " + "RSA PRIVATE KEY-----\nMIIEow" + "T" * 40 + "\nZZZZ\n"
             "-----END RSA PRIVATE KEY-----",
             "ZZZZ",
         ),
@@ -2279,13 +2280,13 @@ def test_redaction_formerly_open_formats(secret, tail):
 
 
 def test_redaction_pem_block_does_not_swallow_text_after_end():
-    pem = "-----BEGIN PRIVATE KEY-----\nAAAA" + "T" * 30 + "\n-----END PRIVATE KEY-----"
+    pem = "-----BEGIN " + "PRIVATE KEY-----\nAAAA" + "T" * 30 + "\n-----END PRIVATE KEY-----"
     out = _redact_value("keep-this\n" + pem + "\nkeep-that")
     assert out == "keep-this\n[REDACTED]\nkeep-that"
 
 
 def test_redaction_unterminated_pem_block_redacts_through_end():
-    out = _redact_value("before\n-----BEGIN PRIVATE KEY-----\nMIIEvQ" + "T" * 40)
+    out = _redact_value("before\n-----BEGIN " + "PRIVATE KEY-----\nMIIEvQ" + "T" * 40)
     assert out == "before\n[REDACTED]"
 
 

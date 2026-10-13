@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from datetime import datetime, timezone
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
@@ -18,7 +19,7 @@ class FakeClaim:
         self.account_alias_hash = f"hash-{name}"
         self.lease_id_hash = f"lease-{name}"
         self.lease = SimpleNamespace(
-            execution_env={"ACCOUNT": name, "HOME": "/tmp"},
+            execution_env={"ACCOUNT": name, "HOME": tempfile.mkdtemp(prefix="agy-ff-home-")},
             consumer_id="consumer",
         )
         self.released = False

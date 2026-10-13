@@ -1,0 +1,245 @@
+name: Trusted exact-base impact gate
+
+# #1754 B: pull_request_target always runs this file from the default branch,
+# so a PR cannot edit the planner, the classifier or this YAML for its own run.
+# Head code runs only in the unprivileged head executor; the verdict is computed
+# by default-branch code that re-derives the plan and rebuilds every result.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  trusted-controller:
+    name: Trusted impact controller (default branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      manifest_sha256: ${{ steps.publish.outputs.manifest_sha256 }}
+    steps:
+      - name: Acquire fixed trusted runtime builder
+        uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          version: "0.9.2"
+          enable-cache: false
+      - name: Acquire exact trusted source and build the hash-bound bundle
+        env:
+          EVENT_JSON: ${{ toJSON(github.event) }}
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          RUN_ID: ${{ github.run_id }}
+          REPOSITORY: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          TRUSTED_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          bare_repo="$RUNNER_TEMP/trusted-impact-controller.git"
+          trusted_dir="$RUNNER_TEMP/trusted-impact-source"
+          runtime_dir="$RUNNER_TEMP/trusted-impact-runtime"
+          workflow_path='.github/workflows/trusted-impact-gate.yml'
+          test "$EVENT_NAME" = pull_request_target
+          test "$REPOSITORY" = James3014/Nexus-new
+          test "$DEFAULT_BRANCH" = main
+          test "$WORKFLOW_REF" = "$REPOSITORY/$workflow_path@refs/heads/$DEFAULT_BRANCH"
+          test "$WORKFLOW_SHA" = "$(printf '%s' "$WORKFLOW_SHA" | grep -E '^[0-9a-f]{40}$')"
+          basic_auth="$(printf 'x-access-token:%s' "$TRUSTED_TOKEN" | base64 | tr -d '\n')"
+          test -n "$basic_auth"
+          git init --bare "$bare_repo"
+          git -C "$bare_repo" remote add origin "https://github.com/$REPOSITORY.git"
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader GIT_CONFIG_VALUE_0="Authorization: basic $basic_auth" \
+            git -C "$bare_repo" fetch --no-tags --depth=1 origin "$WORKFLOW_SHA"
+          test "$(git -C "$bare_repo" rev-parse "$WORKFLOW_SHA^{commit}")" = "$WORKFLOW_SHA"
+          test "$(git -C "$bare_repo" cat-file -t "$WORKFLOW_SHA")" = commit
+          for path in scripts/__init__.py scripts/ops/__init__.py scripts/ops/pr_impact_gate.py scripts/ops/select_tests.py scripts/ops/trusted_deletion_anchor.py scripts/ops/trusted_impact_gate.py; do
+            blob_id="$(git -C "$bare_repo" rev-parse "$WORKFLOW_SHA:$path")"
+            test "$(git -C "$bare_repo" ls-tree "$WORKFLOW_SHA" -- "$path")" = "100644 blob $blob_id"$'\t'"$path"
+            test "$(git -C "$bare_repo" cat-file -t "$blob_id")" = blob
+            mkdir -p "$trusted_dir/$(dirname "$path")"
+            git -C "$bare_repo" cat-file blob "$blob_id" > "$trusted_dir/$path"
+            test "$(git hash-object "$trusted_dir/$path")" = "$blob_id"
+          done
+          python -c 'import json, os; event=json.loads(os.environ["EVENT_JSON"]); event.update(event_name=os.environ["EVENT_NAME"], workflow_ref=os.environ["WORKFLOW_REF"], workflow_sha=os.environ["WORKFLOW_SHA"], run_id=int(os.environ["RUN_ID"])); json.dump(event, open(os.environ["RUNNER_TEMP"] + "/impact-event.json", "w"))'
+          python -I "$trusted_dir/scripts/ops/trusted_deletion_anchor.py" runtime-builder --repo-root "$bare_repo" --workflow-sha "$WORKFLOW_SHA" --uv-executable "$(command -v uv)" --output-dir "$runtime_dir"
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader GIT_CONFIG_VALUE_0="Authorization: basic $basic_auth" \
+            python -I "$trusted_dir/scripts/ops/trusted_impact_gate.py" controller --event-json "$RUNNER_TEMP/impact-event.json" --repo-root "$bare_repo" --runtime-dir "$runtime_dir" --output-dir "$RUNNER_TEMP/trusted-impact-bundle"
+          rm -rf -- "$bare_repo" "$runtime_dir"
+      - name: Publish fixed manifest anchor
+        id: publish
+        run: |
+          set -euo pipefail
+          echo "manifest_sha256=$(sha256sum "$RUNNER_TEMP/trusted-impact-bundle/manifest.json" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Upload controller bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: trusted-impact-controller-${{ github.run_id }}
+          path: ${{ runner.temp }}/trusted-impact-bundle/
+          if-no-files-found: error
+          retention-days: 7
+
+  unprivileged-base-executor:
+    name: Unprivileged impact executor (exact base)
+    needs: trusted-controller
+    if: needs.trusted-controller.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions: {}
+    outputs:
+      evidence_sha256: ${{ steps.publish.outputs.evidence_sha256 }}
+    steps:
+      - name: Download controller bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: trusted-impact-controller-${{ github.run_id }}
+          path: ${{ runner.temp }}/trusted-impact-bundle
+      - name: Run planned targets on the exact base tree only
+        env:
+          EXPECTED_MANIFEST_SHA256: ${{ needs.trusted-controller.outputs.manifest_sha256 }}
+        run: |
+          set -euo pipefail
+          bundle="$RUNNER_TEMP/trusted-impact-bundle"
+          test "$(sha256sum "$bundle/manifest.json" | cut -d' ' -f1)" = "$EXPECTED_MANIFEST_SHA256"
+          python -I "$bundle/code/scripts/ops/trusted_impact_gate.py" executor --bundle-dir "$bundle" --side base --expected-manifest-sha256 "$EXPECTED_MANIFEST_SHA256" --output-dir "$RUNNER_TEMP/trusted-impact-evidence"
+      - name: Publish base evidence anchor
+        id: publish
+        run: |
+          set -euo pipefail
+          echo "evidence_sha256=$(sha256sum "$RUNNER_TEMP/trusted-impact-evidence/executor-evidence.json" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Upload base evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: trusted-impact-base-${{ github.run_id }}
+          path: ${{ runner.temp }}/trusted-impact-evidence/
+          if-no-files-found: error
+          retention-days: 7
+
+  unprivileged-head-executor:
+    name: Unprivileged impact executor (exact head)
+    needs: trusted-controller
+    if: needs.trusted-controller.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions: {}
+    steps:
+      - name: Download controller bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: trusted-impact-controller-${{ github.run_id }}
+          path: ${{ runner.temp }}/trusted-impact-bundle
+      - name: Run planned targets on the exact head tree only
+        env:
+          EXPECTED_MANIFEST_SHA256: ${{ needs.trusted-controller.outputs.manifest_sha256 }}
+        run: |
+          set -euo pipefail
+          bundle="$RUNNER_TEMP/trusted-impact-bundle"
+          test "$(sha256sum "$bundle/manifest.json" | cut -d' ' -f1)" = "$EXPECTED_MANIFEST_SHA256"
+          python -I "$bundle/code/scripts/ops/trusted_impact_gate.py" executor --bundle-dir "$bundle" --side head --expected-manifest-sha256 "$EXPECTED_MANIFEST_SHA256" --output-dir "$RUNNER_TEMP/trusted-impact-evidence"
+      - name: Upload head evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: trusted-impact-head-${{ github.run_id }}
+          path: ${{ runner.temp }}/trusted-impact-evidence/
+          if-no-files-found: error
+          retention-days: 7
+
+  trusted-verifier:
+    name: Trusted impact gate (default branch)
+    needs: [trusted-controller, unprivileged-base-executor, unprivileged-head-executor]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Acquire exact trusted verifier source
+        env:
+          EVENT_JSON: ${{ toJSON(github.event) }}
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          RUN_ID: ${{ github.run_id }}
+          REPOSITORY: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          TRUSTED_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          bare_repo="$RUNNER_TEMP/trusted-impact-verifier.git"
+          trusted_dir="$RUNNER_TEMP/trusted-impact-verifier-source"
+          workflow_path='.github/workflows/trusted-impact-gate.yml'
+          test "$EVENT_NAME" = pull_request_target
+          test "$REPOSITORY" = James3014/Nexus-new
+          test "$DEFAULT_BRANCH" = main
+          test "$WORKFLOW_REF" = "$REPOSITORY/$workflow_path@refs/heads/$DEFAULT_BRANCH"
+          test "$WORKFLOW_SHA" = "$(printf '%s' "$WORKFLOW_SHA" | grep -E '^[0-9a-f]{40}$')"
+          basic_auth="$(printf 'x-access-token:%s' "$TRUSTED_TOKEN" | base64 | tr -d '\n')"
+          test -n "$basic_auth"
+          git init --bare "$bare_repo"
+          git -C "$bare_repo" remote add origin "https://github.com/$REPOSITORY.git"
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader GIT_CONFIG_VALUE_0="Authorization: basic $basic_auth" \
+            git -C "$bare_repo" fetch --no-tags --depth=1 origin "$WORKFLOW_SHA"
+          test "$(git -C "$bare_repo" rev-parse "$WORKFLOW_SHA^{commit}")" = "$WORKFLOW_SHA"
+          test "$(git -C "$bare_repo" cat-file -t "$WORKFLOW_SHA")" = commit
+          for path in scripts/__init__.py scripts/ops/__init__.py scripts/ops/pr_impact_gate.py scripts/ops/select_tests.py scripts/ops/trusted_deletion_anchor.py scripts/ops/trusted_impact_gate.py; do
+            blob_id="$(git -C "$bare_repo" rev-parse "$WORKFLOW_SHA:$path")"
+            test "$(git -C "$bare_repo" ls-tree "$WORKFLOW_SHA" -- "$path")" = "100644 blob $blob_id"$'\t'"$path"
+            test "$(git -C "$bare_repo" cat-file -t "$blob_id")" = blob
+            mkdir -p "$trusted_dir/$(dirname "$path")"
+            git -C "$bare_repo" cat-file blob "$blob_id" > "$trusted_dir/$path"
+            test "$(git hash-object "$trusted_dir/$path")" = "$blob_id"
+          done
+          python -c 'import json, os; event=json.loads(os.environ["EVENT_JSON"]); event.update(event_name=os.environ["EVENT_NAME"], workflow_ref=os.environ["WORKFLOW_REF"], workflow_sha=os.environ["WORKFLOW_SHA"], run_id=int(os.environ["RUN_ID"])); json.dump(event, open(os.environ["RUNNER_TEMP"] + "/impact-event.json", "w"))'
+      - name: Download controller bundle
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: trusted-impact-controller-${{ github.run_id }}
+          path: ${{ runner.temp }}/trusted-impact-bundle
+      - name: Download base evidence
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: trusted-impact-base-${{ github.run_id }}
+          path: ${{ runner.temp }}/trusted-impact-evidence/base
+      - name: Download head evidence
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: trusted-impact-head-${{ github.run_id }}
+          path: ${{ runner.temp }}/trusted-impact-evidence/head
+      - name: Re-derive plan, validate evidence and classify with trusted code
+        env:
+          TRUSTED_TOKEN: ${{ github.token }}
+          EXPECTED_MANIFEST_SHA256: ${{ needs.trusted-controller.outputs.manifest_sha256 }}
+          EXPECTED_BASE_EVIDENCE_SHA256: ${{ needs.unprivileged-base-executor.outputs.evidence_sha256 }}
+          CONTROLLER_RESULT: ${{ needs.trusted-controller.result }}
+          BASE_EXECUTOR_RESULT: ${{ needs.unprivileged-base-executor.result }}
+          HEAD_EXECUTOR_RESULT: ${{ needs.unprivileged-head-executor.result }}
+        run: |
+          set -uo pipefail
+          basic_auth="$(printf 'x-access-token:%s' "$TRUSTED_TOKEN" | base64 | tr -d '\n')"
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader GIT_CONFIG_VALUE_0="Authorization: basic $basic_auth" \
+            python -I "$RUNNER_TEMP/trusted-impact-verifier-source/scripts/ops/trusted_impact_gate.py" verifier \
+              --event-json "$RUNNER_TEMP/impact-event.json" \
+              --repo-root "$RUNNER_TEMP/trusted-impact-verifier.git" \
+              --bundle-dir "$RUNNER_TEMP/trusted-impact-bundle" \
+              --evidence-dir "$RUNNER_TEMP/trusted-impact-evidence" \
+              --expected-manifest-sha256 "$EXPECTED_MANIFEST_SHA256" \
+              --expected-base-evidence-sha256 "$EXPECTED_BASE_EVIDENCE_SHA256" \
+              --controller-result "$CONTROLLER_RESULT" \
+              --base-executor-result "$BASE_EXECUTOR_RESULT" \
+              --head-executor-result "$HEAD_EXECUTOR_RESULT" \
+              --output "$RUNNER_TEMP/trusted-impact-classification.json"
+          status=$?
+          {
+            echo "## Trusted exact-base impact classification"
+            echo '```json'
+            cat "$RUNNER_TEMP/trusted-impact-classification.json" 2>/dev/null || echo '{"classification":"MISSING"}'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"

@@ -21,7 +21,6 @@ from nexus.engine.planner_graph import HierarchicalGraphPlanner
 from nexus.learning.sota_searcher import SOTASearcher
 from nexus.learning.vector_cache import VectorCache
 from nexus.core.neural_aggregator import NexusNeuralAggregator
-from nexus.engine.federation import FederationLayer
 from nexus.governance.hardened_validator import NexusHardenedValidator
 from nexus.learning.latent_predictor_v20 import get_latent_forecaster
 from nexus.engine.self_healing_selector import get_self_healing_selector
@@ -91,7 +90,6 @@ class NexusEngine:
         self.latent_forecaster = kwargs.get("latent_forecaster") or get_latent_forecaster(str(self.project_root))
         self.ash_selector = kwargs.get("ash_selector") or get_self_healing_selector(str(self.project_root), env="dev")
         self.memory = kwargs.get("memory") or MemoryService(self.project_root)
-        self.federation = kwargs.get("federation") or FederationLayer(self.project_root)
         self.vector_cache = kwargs.get("vector_cache") or VectorCache(resolve_lancedb_root(VECTOR_DB, self.project_root))
         self.sota_searcher = kwargs.get("sota_searcher") or SOTASearcher(self.vector_cache)
         self.neural_aggregator = kwargs.get("neural_aggregator") or NexusNeuralAggregator()
@@ -131,7 +129,6 @@ class NexusEngine:
             project_root=self.project_root,
             hardened_validator=self.hardened_validator,
             swarm_planner=self.swarm_planner,
-            federation=self.federation,
         )
         self.crystallization = kwargs.get("crystallization") or CrystallizationService(
             project_root=self.project_root,

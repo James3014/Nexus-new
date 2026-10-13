@@ -1221,7 +1221,7 @@ def test_pipeline_legacy_context_promotes_repair_specification_to_v2():
     )
 
 
-def test_localheal_pipeline_verifier_fail_delegates_existing_retry_with_seeded_evidence():
+def test_localheal_pipeline_verifier_fail_delegates_existing_retry_with_seeded_evidence(retry_wc):
     from unittest.mock import patch, MagicMock
     from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
     from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
@@ -8374,3 +8374,20 @@ def test_governed_reported_model_mismatch_is_sticky_and_fail_closed() -> None:
     assert second_response.raw_model_metadata["ledger_count"] == 1
     assert second_response.raw_model_metadata["llm_call_ledger"]["total_calls"] == 1
     assert len(second_response.raw_model_metadata["llm_call_ledger_records"]) == 1
+
+
+@pytest.fixture
+def retry_wc(monkeypatch, tmp_path):
+    """The delegated retry runs in an isolated World C copy; this test's repo_root is fictional."""
+    import nexus.services.local_heal.local_model_executor as executor_module
+
+    workspace = tmp_path / "world-c-retry"
+    workspace.mkdir()
+    monkeypatch.setattr(executor_module, "_delegated_retry_world_c", lambda _r, _c: workspace)
+    return workspace
+
+
+@pytest.fixture(autouse=True)
+def _world_c_copies_of_tmp_repos(monkeypatch):
+    """The delegated retry copies repo_root into World C; tests use tmp_path repos for that."""
+    monkeypatch.setenv("NEXUS_ARMOR_ALLOW_EPHEMERAL", "1")

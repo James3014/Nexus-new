@@ -1,0 +1,1 @@
+{"lesson_id": "wiring-lesson-001", "task_id": "wiring-seed-task", "root_cause": "zerodivisionerror compute_total empty_cart", "reusable_when": ["zerodivisionerror", "empty_cart"], "category": "runtime_error", "outcome": "success", "corrective_action": "return 0 for an empty cart before dividing", "confidence": 0.9}

@@ -115,3 +115,47 @@ CapabilityPlanner, `run_mainchain` and `LocalAssistService`; only the `LocalMode
 fake. It asserts `with_nexus_armor` is true only in armor-on mode, `capabilities_invoked` is
 non-empty and excludes advisory stubs, off rows keep the legacy key set, and an unadmitted model is
 refused. `tests/eval/test_memory_ab_v1.py` is unchanged.
+
+## Armor-on lane fix (#1915)
+
+The first full armor-on run, `armor-on-full-v1-7b-20261013T223335Z` (7B, FULL, `memory_ab_tasks_v1`),
+solved 0/12 in both arms. The bare-pipeline 4/12 it was compared with came from a different task set
+(`memory_ab_tasks_v2`) and model tag (`qwen2.5-coder:7b`). On the same tasks and model the bare lane
+solves 11/12 and 10/12 (`bare-v1-7b-instruct-20261012T233503Z`).
+
+The Ollama payloads were traced for the same task in both lanes. The armor lane's first patch was
+correct, and four defects threw it away:
+
+1. The World C workspace (`prepare_world_c_workspace`) and the isolated apply workspace
+   (`run_isolated_workspace_apply`) copied only the target file of a synthetic task. `python repro.py`
+   then failed with "can't open file" for every candidate. The parse failures in the 0/12 run
+   (fenced_output, SEARCH mismatch and so on) come from the later retries after these false failures.
+2. The delegated semantic retry ran `HealPipeline` with `repo_dir=request.repo_root`, so it patched the
+   caller's source tree. The later isolated apply of the same candidate then failed with "patch does
+   not apply".
+3. The repair_loop provider bridge put the system prompt into the user prompt and dropped the bare
+   lane's Ollama options (temperature 0, num_ctx 4096, num_predict 768).
+4. The runner planned in the default world `product_runtime`. The World C receipt validator requires
+   `local_armor`, so a verified candidate was never delivered (`canonical_execution_world_mismatch`).
+
+Fix: the verifier's input files (`verifier_input_files`) are copied into both workspaces. The delegated
+retry runs in its own World C copy. The bridge sends the system and user prompts separately
+(`LocalModelProviderRequest.system_prompt/user_prompt`) with `default_heal_generation_options()`.
+The runner declares `canonical_context={"execution_world": "local_armor", "transport_ingress": "bench"}`,
+as `scripts/bench/n30r_v1_full_armor_trace.py` already does. No gate was loosened. The validator still
+rejects every world other than `local_armor`. A product-runtime (World A) task therefore still cannot
+deliver a World C local candidate. That needs a World A to World C bridge, which is out of scope here.
+
+| Run | Lane | memory off | memory on | model calls | `with_nexus_armor_verified` | World C mismatch |
+| --- | --- | --- | --- | --- | --- | --- |
+| `armor-on-full-v1-7b-20261013T223335Z` | armor on (before) | 0/12 | 0/12 | 185 | true | 24/24 |
+| `bare-v1-7b-instruct-20261012T233503Z` | bare | 11/12 | 10/12 | 86 | false | n/a |
+| `armor-on-full-v2-7b-fix-20261012T235634Z` | armor on (after) | 10/12 | 11/12 | 84 | true | 0/24 |
+
+After the fix, all 21 armor-on solves have an isolated, hash-matched candidate
+(`candidate_materialized=applied`) that passes the local verifier, and the World C receipt is valid
+for each of them. The three failures are both `mutable_default_argument` variants
+(`SEARCH_REPLACE_SEARCH_MISMATCH`). The bare lane also fails on these tasks, and their World C
+receipts correctly show `patch_synthesis_not_completed`. Remaining difference between the lanes: the
+armor lane passes no repro script content, so its planner sees the problem statement as reproduction
+evidence where the bare lane sees the traceback.

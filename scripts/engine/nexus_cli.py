@@ -2992,9 +2992,16 @@ else:
     @click.option("--llm-baseline", is_flag=True, help="Enable LLM assistance for baseline generation in feature/refactor cases.")
     def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, max_wall_time_sec, mode, ab_trials, ab_llm_mode, llm_baseline):
         """📊 [Control Plane] Gladiator Benchmark: Real evaluation for multiple cases."""
-        from nexus.app.research_benchmark_service import ResearchBenchmarkService
+        from nexus.app.research_benchmark_service import (
+            ArchivedResearchBenchmarkError,
+            ResearchBenchmarkService,
+        )
         svc = ResearchBenchmarkService(repo_root)
-        svc.run_benchmark(mode, manifest_file, report_file, budget_limit, timeout_sec, max_wall_time_sec, ab_trials, ab_llm_mode, llm_baseline)
+        try:
+            svc.run_benchmark(mode, manifest_file, report_file, budget_limit, timeout_sec, max_wall_time_sec, ab_trials, ab_llm_mode, llm_baseline)
+        except ArchivedResearchBenchmarkError as exc:
+            click.echo(f"BLOCKED: {exc.reason} (simulated benchmark archived 2026-10-12)", err=True)
+            raise SystemExit(1)
 
     @nexus_group.command(name="research:meta-opt")
     @click.option("--manifest-file", required=True, type=click.Path(exists=True))
@@ -3164,76 +3171,10 @@ else:
 
     # --- External Command Registration ---
     try:
-        from scripts.engine.commands.ui_explorer import register as register_ui_explorer
-        register_ui_explorer(nexus_group, repo_root)
-
         from scripts.engine.commands.swarm import register as register_swarm
         register_swarm(nexus_group, repo_root)
-
-        from scripts.engine.commands.stress_test import register as register_stress_test
-        register_stress_test(nexus_group, repo_root)
     except ImportError as e:
         click.echo(f"⚠️  [Nexus:CLI] Could not load external command module: {e}")
-
-    # --- v0.9 聯邦指令 (RESTORED) ---
-
-    @nexus.command(name="fed-init")
-    @click.option("--tenants", default=10)
-    @click.option("--report-file", default=".nexus/reports/federation/fed_init_report.json", show_default=True, type=click.Path())
-    @click.option("--output-json", is_flag=True)
-    def fed_init(tenants, report_file, output_json):
-        """🌐 [v0.9] Federated Init"""
-        from scripts.ops.federated_engine_v09 import FederatedEngineV09
-        FederatedEngineV09(repo_root).fed_init(num_tenants=tenants)
-        payload = {"status": "SUCCESS", "tenants": tenants}
-        out_path = (repo_root / report_file).resolve()
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-        if output_json:
-            click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
-        else:
-            click.echo(f"📡 Fleet Initialized: {tenants} tenants.")
-            click.echo(f"Report: {out_path}")
-
-    @nexus.command(name="fed-run")
-    @click.option("--report-file", default=".nexus/reports/federation/fed_run_report.json", show_default=True, type=click.Path())
-    @click.option("--output-json", is_flag=True)
-    def fed_run(report_file, output_json):
-        """🚀 [v0.9] Fed-Run: Execute Federated NAS"""
-        from scripts.ops.federated_engine_v09 import FederatedEngineV09
-        res = FederatedEngineV09(repo_root).fed_sync()
-        payload = {"status": "SUCCESS", "result": res}
-        out_path = (repo_root / report_file).resolve()
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-        if output_json:
-            click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
-        else:
-            click.echo(f"🧬 [v0.9 Federated NAS] Synchronized {res['aggregation_ratio']} tenants.")
-            click.echo(f"Report: {out_path}")
-        lesson_script = repo_root / ("scripts/ops/crystal" + "lize_lessons.py")
-        subprocess.run([sys.executable, str(lesson_script)], check=False)
-
-    # --- v0.8 元進化 (RESTORED) ---
-    @nexus.command(name="meta-run")
-    @click.option("--count", default=128)
-    @click.option("--hybrid", default=0.6)
-    @click.option("--report-file", default=".nexus/reports/meta/meta_run_report.json", show_default=True, type=click.Path())
-    @click.option("--output-json", is_flag=True)
-    def meta_run(count, hybrid, report_file, output_json):
-        """🧬 [v0.8] Meta-Evolve"""
-        from scripts.ops.evolution_engine_v08 import EvolutionEngineV08
-        best = EvolutionEngineV08(repo_root).meta_evolve(count=count, hybrid_ratio=hybrid)
-        payload = {"status": "SUCCESS", "best": best}
-        out_path = (repo_root / report_file).resolve()
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-        if output_json:
-            click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
-        else:
-            click.echo(f"🧬 [NAS] Gen {best['gen']} Evolved. Fitness: {best['fitness']}")
-            click.echo(f"Report: {out_path}")
-
 
     @nexus.command(name="run-bug")
     @click.argument("task")
@@ -3378,30 +3319,6 @@ else:
         write_learn_precision_benchmark_output(summary, output)
         click.echo(render_learn_precision_benchmark_complete(summary))
 
-
-    @nexus_group.command(name="oracle:apply")
-    @click.argument("shadow_tid")
-    @click.option("--report-file", default=".nexus/reports/oracle/oracle_apply_report.json", show_default=True, type=click.Path())
-    @click.option("--output-json", is_flag=True)
-    def oracle_apply(shadow_tid, report_file, output_json):
-        """🚀 [Oracle] Promote a successful shadow patch to main workspace."""
-        from nexus.core.exit_codes import NexusExitCode
-        from nexus.oracle.promote import promote_shadow_patch
-        ok = promote_shadow_patch(repo_root, shadow_tid)
-        payload = {"status": "SUCCESS" if ok else "FAILED", "shadow_tid": shadow_tid}
-        out_path = (repo_root / report_file).resolve()
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-        if output_json:
-            click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
-        elif ok:
-            click.secho(f"✅ Successfully promoted future patch {shadow_tid} to the present.", fg="green")
-            click.echo(f"Report: {out_path}")
-        else:
-            click.secho("❌ Promotion failed.", fg="red")
-            click.echo(f"Report: {out_path}")
-        if not ok:
-            raise click.exceptions.Exit(NexusExitCode.FAILED)
 
     @nexus_group.group(name="multi-agent")
     def multi_agent_group():

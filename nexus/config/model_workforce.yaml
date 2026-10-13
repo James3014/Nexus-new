@@ -351,8 +351,32 @@ workers:
       global_promotion: false
       conditional_ceiling: L1
       claim_ceiling: CANDIDATE_ONLY
+  opencli_chatgpt_advanced_web:
+    provider: opencli_chatgpt
+    model: opencli_chatgpt/advanced
+    state: REGISTERED_CONDITIONAL
+    availability: AVAILABLE
+    autonomy: L1
+    roles: [bounded_candidate_generation]
+    preferred_context: nexus_bounded
+    default_route: false
+    requires: [task_card, isolated_directory, parser, focused_tests, verifier, independent_verification]
+    transport_contract:
+      opencli_version: '1.8.7'
+      browser_bridge_version: '1.0.24'
+      window: foreground
+      site_session: ephemeral
+      enforcement: external_intelligence_activation_and_runtime_identity
+    forbidden_actions: [route_authority, approval, integration, push, fallback_substitution, release, production_claim, public_claim]
+    calibration_evidence:
+      status: OWNER_APPROVED_CONSUMER_CONDITIONAL
+      model_revision: UNRESOLVED_MUTABLE_UI_ALIAS
+      account_tier: chatgpt_free_personal
+      global_promotion: false
+      conditional_ceiling: L1
+      claim_ceiling: CANDIDATE_ONLY
       owner_approved_consumers: [external_intelligence]
-      consumer_approval_ref: owner-decision-2026-10-12-eia-gpt-web
+      consumer_approval_ref: owner-decision-2026-10-13-eia-gpt-web-free-thinking
   grok_review:
     provider: grok
     model: grok-4.5
@@ -553,7 +577,9 @@ workers:
     roles: [bounded_reasoning_candidate, counterexample_search, classification, extraction, compression, compact_diagnosis]
     preferred_context: nexus_bounded
     benchmark_ref: local_qwen35_9b
-    note: interim_replacement_for_local_advisor_3b_2026-10-12; unvalidated_for_role
+    note: >-
+      interim_replacement_for_local_advisor_3b_2026-10-12; unvalidated_for_role;
+      bounded_reasoning_shadow_interim_2026-10-12; unvalidated_for_role
     evidence_refs:
       - docs/reports/qwen3b_s2t_adapter_manifest.json
       - docs/reports/3b_override_verified_rate_analysis.md
@@ -609,16 +635,29 @@ workers:
     model: incoai/Qwen3.8-27B-Splash
     state: EXPERIMENT_ONLY
     availability: AVAILABLE
-    autonomy: L0
-    roles: [bounded_experiment]
-    reason: installed_on_m5_not_served_gateway_unmapped
+    autonomy: L1
+    roles: [bounded_experiment, bounded_code_candidate]
+    requires: [small_scope, parser, compile, focused_tests, reversible_application]
+    forbidden_actions: [architecture_choice, cross_module_closure, self_verification]
+    reason: served_on_m5_8001_gateway_mapped_2026-10-13; calibration_only_not_promoted
+    transport_note: >-
+      Served by a second Splash process on the M5 host (:8001, max-memory 20G)
+      and mapped by the Ollama-compatible M5 gateway (tunnel 127.0.0.1:11434;
+      direct tunnel 127.0.0.1:18001/v1). Never executed on the M4.
+    experiment_note: >-
+      bounded_code_candidate at L1 exists only so an explicitly authorized
+      calibration (memory A/B --armor on) can pass Workforce Admission, whose
+      local demand for a mutating task is bounded_code_candidate at L1.
+      EXPERIMENT_ONLY is unchanged: every admission still needs
+      explicit_experiment_authorization in the binding, no routing entry or
+      default_route names this worker, and promotion to LOCAL_CONDITIONAL is a
+      separate owner decision.
     evidence_refs:
       - nexus/config/model_capability_lineage.yaml#lineages.qwen-3.8-27b
       - config_id:qwen3.8-27b-splash-q4-opencode-64k-wave3
     evidence_summary: >-
       Tool-loop smoke PASS; full-agent T01 STACK_UNQUALIFIED
-      (MODEL_NO_TERMINAL_TEXT). Installed on M5 (14 GB) but not served and not
-      reachable through the gateway.
+      (MODEL_NO_TERMINAL_TEXT). No bounded local-heal calibration recorded yet.
   opencode_deepseek_v4_flash:
     provider: opencode
     model: opencode/deepseek-v4-flash-free
@@ -684,7 +723,8 @@ workers:
   local_qwen15b:
     provider: ollama
     model: qwen2.5:1.5b
-    state: LOCAL_CONDITIONAL
+    state: INSTALLED_NOT_CONNECTED
+    reason: not_present_on_m5_ollama_2026-10-12
     availability: AVAILABLE
     autonomy: L0.25
     default_route: false
@@ -695,7 +735,8 @@ workers:
   local_qwen3_8b:
     provider: ollama
     model: qwen3:8b
-    state: LOCAL_CONDITIONAL
+    state: INSTALLED_NOT_CONNECTED
+    reason: not_present_on_m5_ollama_2026-10-12
     availability: AVAILABLE
     autonomy: L1
     default_route: false
@@ -707,7 +748,8 @@ workers:
   local_deepseek_coder_v2_lite:
     provider: ollama
     model: deepseek-coder-v2:lite
-    state: LOCAL_CONDITIONAL
+    state: INSTALLED_NOT_CONNECTED
+    reason: not_present_on_m5_ollama_2026-10-12
     availability: AVAILABLE
     autonomy: L0.5
     default_route: false
@@ -717,12 +759,14 @@ workers:
   local_deepseek14b:
     provider: ollama
     model: deepseek-r1-14b-q4km:latest
-    state: DISABLED_RESOURCE_RISK
+    state: INSTALLED_NOT_CONNECTED
     availability: AVAILABLE_EXPERIMENT_ONLY
     autonomy: L0
     roles: [high_latency_second_opinion_experiment]
     benchmark_ref: local_deepseek14b
-    reason: semantic_pass_but_three_arm_runtime_exceeds_300_seconds_on_16gb_host
+    reason: not_present_on_m5_ollama_2026-10-12
+    prior_state: DISABLED_RESOURCE_RISK
+    prior_reason: semantic_pass_but_three_arm_runtime_exceeds_300_seconds_on_16gb_host
 non_workers:
   claude_cli:
     state: INSTALLED_NOT_CONNECTED
@@ -746,7 +790,7 @@ routing:
     compression: local_qwen35_9b
     compact_diagnosis: local_qwen35_9b
     bounded_code_candidate: local_coder_7b
-    bounded_reasoning_shadow: local_qwen3_8b
+    bounded_reasoning_shadow: local_qwen35_9b
   online:
     fast_bounded_implementation: agy_flash_37_medium
     fast_bounded_implementation_fallback: agy_flash
@@ -763,7 +807,7 @@ routing:
         bounded_candidate_generation: opencode_mimo_free
     consumer_routing:
       external_intelligence:
-        bounded_candidate_generation: opencli_chatgpt_balanced_web
+        bounded_candidate_generation: opencli_chatgpt_advanced_web
     main_engineering: codex_luna
     independent_review: grok_review
     complex_milestone: codex_luna_when_available
