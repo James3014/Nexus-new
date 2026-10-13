@@ -107,20 +107,70 @@ def test_in_sync_is_ok(repo: Repo, capsys: pytest.CaptureFixture[str]) -> None:
     assert report["published_base"] == head and report["pr_head_lookup"] == "NOT_NEEDED"
 
 
-def test_task_only_unpublished_commits_still_alert(
+def test_task_only_unpublished_commits_are_bind_only_info(
     repo: Repo, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Owner decision 2026-10-12T23:47:51Z: no tasks/** exception."""
+    """Owner refinement 2026-10-13T02:09:54Z: tasks/**-only unpublished commits are INFO."""
     base = repo.git("rev-parse", "HEAD")
     head = deploy_branch(repo, base, "tasks/issue-1384/a.md", "tasks/issue-1384/b.json")
     code, report = run(repo, health(head), capsys)
-    assert code == 1 and report["verdict"] == "ALERT"
-    assert codes(report) == ["GATEWAY_SOURCE_UNPUBLISHED(2)"]
+    assert code == 0 and report["verdict"] == "INFO"
+    assert codes(report) == ["GATEWAY_BIND_ONLY_LOCAL_COMMITS(2)"]
     finding = report["findings"][0]
     assert finding["touched_paths"] == ["tasks/issue-1384/a.md", "tasks/issue-1384/b.json"]
     assert finding["touched_paths_outside_tasks"] == []
     assert report["published_base"] == base and report["pr_head_lookup"] == "NO_MATCH"
-    assert "#526" in report["summary"]
+    assert "#1939" in report["summary"]
+
+
+def test_bind_only_with_behind_main_warn_keeps_warn(
+    repo: Repo, capsys: pytest.CaptureFixture[str]
+) -> None:
+    base = repo.git("rev-parse", "HEAD")
+    head = deploy_branch(repo, base, "tasks/t.md")
+    advance_main(repo, 60)
+    code, report = run(repo, health(head), capsys)
+    assert code == 1 and report["verdict"] == "WARN"
+    assert codes(report) == ["GATEWAY_BIND_ONLY_LOCAL_COMMITS(1)", "GATEWAY_BEHIND_MAIN(60)"]
+
+
+def test_merge_commit_is_judged_by_first_parent_diff(
+    repo: Repo, capsys: pytest.CaptureFixture[str]
+) -> None:
+    base = repo.git("rev-parse", "HEAD")
+    # Side branch carries code, but it is merged from main's side: the merge's
+    # first-parent diff is what counts, and the side commit is itself unpublished.
+    repo.git("checkout", "-q", "-b", "deploy", base)
+    repo.commit("tasks/local.md")
+    repo.git("checkout", "-q", "main")
+    repo.commit("nexus/published.py", when=T0 + 10)  # published on main
+    repo.git("checkout", "-q", "deploy")
+    repo.git("merge", "-q", "--no-ff", "-m", "merge main", "main", when=T0 + 20)
+    head = repo.git("rev-parse", "HEAD")
+    repo.git("checkout", "-q", "main")
+    code, report = run(repo, health(head), capsys)
+    # The merge changes nexus/published.py relative to first parent, but that file
+    # is on main; only the merge commit and tasks commit are unpublished.
+    finding = report["findings"][0]
+    assert finding["touched_paths"] == ["nexus/published.py", "tasks/local.md"]
+    assert code == 1 and codes(report)[0] == "GATEWAY_SOURCE_UNPUBLISHED(2)"
+
+
+def test_merge_of_tasks_only_branches_is_bind_only(
+    repo: Repo, capsys: pytest.CaptureFixture[str]
+) -> None:
+    base = repo.git("rev-parse", "HEAD")
+    repo.git("checkout", "-q", "-b", "deploy", base)
+    repo.commit("tasks/a.md")
+    repo.git("checkout", "-q", "-b", "side", base)
+    repo.commit("tasks/b.md", when=T0 + 5)
+    repo.git("checkout", "-q", "deploy")
+    repo.git("merge", "-q", "--no-ff", "-m", "merge side", "side", when=T0 + 20)
+    head = repo.git("rev-parse", "HEAD")
+    repo.git("checkout", "-q", "main")
+    code, report = run(repo, health(head), capsys)
+    assert code == 0 and codes(report) == ["GATEWAY_BIND_ONLY_LOCAL_COMMITS(3)"]
+    assert report["findings"][0]["touched_paths"] == ["tasks/a.md", "tasks/b.md"]
 
 
 def test_code_in_unpublished_commits_alerts(repo: Repo, capsys: pytest.CaptureFixture[str]) -> None:
@@ -150,7 +200,7 @@ def test_pr_containing_head_but_other_tip_is_not_allowed(
 
 def test_offline_skips_pr_lookup_and_alerts(repo: Repo, capsys: pytest.CaptureFixture[str]) -> None:
     base = repo.git("rev-parse", "HEAD")
-    head = deploy_branch(repo, base, "tasks/t.md")
+    head = deploy_branch(repo, base, "nexus/t.py")
 
     def lookup(_sha: str) -> list[int]:
         raise AssertionError("lookup must not run with --offline")
@@ -200,7 +250,7 @@ def test_unpublished_and_behind_reports_both(
     repo: Repo, capsys: pytest.CaptureFixture[str]
 ) -> None:
     base = repo.git("rev-parse", "HEAD")
-    head = deploy_branch(repo, base, "tasks/t.md")
+    head = deploy_branch(repo, base, "nexus/t.py")
     advance_main(repo, 60)
     code, report = run(repo, health(head), capsys)
     assert code == 1 and report["verdict"] == "ALERT"
@@ -235,7 +285,7 @@ def test_head_is_fetched_from_deployment_source(
     deployment = Repo(tmp_path / "deployment")
     deployment.git("fetch", "-q", str(repo.path), "main")
     deployment.git("checkout", "-q", "FETCH_HEAD")
-    head = deployment.commit("tasks/local.md")
+    head = deployment.commit("nexus/local.py")
     code, report = run(repo, health(head, repo_root=str(deployment.path)), capsys)
     assert code == 1 and codes(report) == ["GATEWAY_SOURCE_UNPUBLISHED(1)"]
 
