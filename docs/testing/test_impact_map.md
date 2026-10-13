@@ -47,6 +47,10 @@
 | nexus/env/snapshot.py | tests/architecture/test_boundaries_v3.py, tests/architecture/test_boundaries_v4.py | active | high | issue51_proven_orphan_cleanup_contract |
 | nexus/policy/compatibility.py | tests/services/test_policy_gate.py, tests/architecture/test_boundaries_v3.py, tests/architecture/test_boundaries_v4.py | active | high | issue51_proven_orphan_cleanup_contract |
 | nexus/core | tests/core, tests/test_core_*.py | active | high | core_contract |
+| nexus/__init__.py | tests/core/test_layer_ports.py, tests/test_layer_boundaries.py | active | high | core_layer_port_binding_contract |
+| nexus/core/layer_ports.py | tests/core/test_layer_ports.py, tests/test_layer_boundaries.py | active | high | core_layer_port_binding_contract |
+| nexus/engine/core_ports.py | tests/core/test_layer_ports.py, tests/test_layer_boundaries.py | active | high | core_layer_port_binding_contract |
+| nexus/app/core_ports.py | tests/core/test_layer_ports.py, tests/test_layer_boundaries.py | active | high | core_layer_port_binding_contract |
 | nexus/core/belief_v02.py | tests/core/test_belief_v02.py | active | high | belief_v02_jsonl_contract |
 | nexus/memory | tests/unit/memory, tests/integration/test_v28_contract_sealing.py, tests/test_lab_only_deprecations.py | active | medium | lab_only_module_contract |
 | nexus/federation/fleet_manager.py | tests/federation, tests/test_lab_only_deprecations.py | active | medium | lab_only_module_contract |
