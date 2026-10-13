@@ -20,6 +20,7 @@ CORE_ENGINE_PORTS: dict[str, tuple[str, str]] = {
     "autoreason.AutoreasonCandidate": ("nexus.engine.autoreason_service", "AutoreasonCandidate"),
     "battle_swarm.BattleSwarm": ("nexus.engine.battle_swarm", "BattleSwarm"),
     "sandbox_runner.SandboxRunner": ("nexus.engine.sandbox_runner", "SandboxRunner"),
+    "swarm_run.run_bounded_swarm": ("nexus.engine.swarm_run", "run_bounded_swarm"),
     "ultra_review.UltraReviewService": ("nexus.engine.ultra_review_service", "UltraReviewService"),
     "pregate.detect_project_language": ("nexus.engine.cli_pregate", "detect_project_language"),
     "pregate.run_cli_pregate": ("nexus.engine.cli_pregate", "run_cli_pregate"),

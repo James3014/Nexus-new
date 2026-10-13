@@ -1347,8 +1347,7 @@ def _exec_swarm_multi_agent(plan: CapabilityExecutionPlan, task_desc: str) -> Ca
     except (TypeError, ValueError):
         workers = 2
     try:
-        from nexus.engine.swarm_run import run_bounded_swarm
-
+        run_bounded_swarm = resolve_port("swarm_run.run_bounded_swarm")
         report = run_bounded_swarm(
             workspace_root=swarm_root,
             task_id=str(plan.task_id),
