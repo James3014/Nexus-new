@@ -84,7 +84,7 @@ def test_trusted_external_runtime_package_pair_is_exact() -> None:
             "nexus-runtime",
             "nexus_runtime",
             "https://github.com/James3014/nexus-runtime.git",
-            "856bc838b0b6d421a8a9381c41114425d7fae92c",
+            "a72e22314d2f4a51c5c22f2a4dfff4b618769303",
         ),
     )
 
@@ -4524,6 +4524,63 @@ def test_pr2114_dependency_snapshot_transition_allows_only_exact_binding(monkeyp
             )
 
     for other_pr in (2108, 2115):
+        with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+            trusted_anchor._validate_trusted_dependency_contract(
+                values[0],
+                values[2],
+                values[1],
+                values[3],
+                pull_request_number=other_pr,
+                head_product_init_is_regular=True,
+            )
+
+
+def test_pr2122_dependency_snapshot_transition_is_exact_and_separate() -> None:
+    assert trusted_anchor.TRUSTED_PR2122_DEPENDENCY_SNAPSHOT_TRANSITION == (
+        2122,
+        (
+            "ee385dc73e3f1a522bb8492fbc951ee7a4bbb437e3b4eb4222b0c90df816c649",
+            "cde189df08f2b389041432ad12b514b993b34421f5a6b4d2afb3f8214a980602",
+            "0f697d7eb658da44a9fa185d28af905f774d259171b32b34128d8e1424a4c1e4",
+            "12f3261a4c5caf033b02e585cf972fe63e16dbc3221d04b0b26a14d41463c066",
+        ),
+    )
+
+
+def test_pr2122_dependency_snapshot_transition_allows_only_exact_binding(monkeypatch) -> None:
+    values = [b"trusted pyproject\n", b"trusted lock\n", b"head pyproject\n", b"head lock\n"]
+    hashes = trusted_anchor.TRUSTED_PR2122_DEPENDENCY_SNAPSHOT_TRANSITION[1]
+    original_sha = trusted_anchor._sha
+    digest_by_value = dict(zip(values, hashes, strict=True))
+    monkeypatch.setattr(
+        trusted_anchor,
+        "_sha",
+        lambda value: digest_by_value.get(value, original_sha(value)),
+    )
+
+    trusted_anchor._validate_trusted_dependency_contract(
+        values[0],
+        values[2],
+        values[1],
+        values[3],
+        pull_request_number=2122,
+        head_product_init_is_regular=True,
+    )
+
+    for index in range(4):
+        tampered = list(values)
+        tampered[index] += b"tampered"
+        with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+            trusted_anchor._validate_trusted_dependency_contract(
+                tampered[0],
+                tampered[2],
+                tampered[1],
+                tampered[3],
+                pull_request_number=2122,
+                head_product_init_is_regular=True,
+            )
+
+    for other_pr in (2121, 2123):
         with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
             trusted_anchor._validate_trusted_dependency_contract(
                 values[0],
