@@ -114,4 +114,4 @@ def test_real_corpus_findings_match_corpus_without_network() -> None:
     assert {row["finding_id"] for row in report["findings"]} == set(FINDINGS)
     rows = {row["case_id"]: row for row in report["findings"]}
     assert [issue["number"] for issue in rows["GB-077"]["owner_issues"]] == [12, 117]
-    assert [issue["number"] for issue in rows["GB-079"]["owner_issues"]] == [7, 31, 117]
+    assert "GB-079" not in rows

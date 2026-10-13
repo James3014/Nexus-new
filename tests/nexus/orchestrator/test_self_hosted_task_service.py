@@ -1851,6 +1851,8 @@ def _closure_context(
         "schema": "nexus.approval.v2", "approval_id": f"approval-{task_id}",
         "approval_scope": "ALLOW_ACTION_ONCE", "contract_kind": "TRACKED_TASK_CARD",
         "contract_hash": "c" * 64, "task_card_hash": "c" * 64,
+        "approved_by": "owner", "bound_task_id": task_id, "bound_attempt_id": attempt_id,
+        "bound_action_type": "CANDIDATE_APPROVE",
     }
     return {
         "approval_context": grant,
@@ -2782,10 +2784,23 @@ def test_submit_rejects_raw_prompt_and_unknown_worker(tmp_path):
         service.build_contract(_request(tmp_path, worker="unknown"))
 
 
+def _bound_approval(task_id, attempt_id="", **extra):
+    """Approval grant naming its approver and bound to the task and approve action."""
+    grant = {
+        "schema": "nexus.approval.v2", "approval_id": "p", "approved_by": "owner",
+        "approval_scope": "ALLOW_ACTION_ONCE", "bound_task_id": task_id,
+        "bound_action_type": "CANDIDATE_APPROVE",
+    }
+    if attempt_id:
+        grant["bound_attempt_id"] = attempt_id
+    grant.update(extra)
+    return grant
+
+
 def test_approval_is_hash_bound_and_does_not_merge(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", ephemeral=True)
     request = _request(tmp_path)
-    grant = {"schema": "nexus.approval.v2", "approval_id": "p", "approved_by": "owner", "approval_scope": "ALLOW_ACTION_ONCE"}
+    grant = _bound_approval(request["task_id"])
 
     service._write_state(
         request["task_id"],
@@ -2841,7 +2856,6 @@ def test_approval_is_hash_bound_and_does_not_merge(tmp_path):
 
 def test_approval_rejects_unverified_or_rehashed_receipt(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", ephemeral=True)
-    grant = {"schema": "nexus.approval.v2", "approval_id": "p", "approved_by": "owner", "approval_scope": "ALLOW_ACTION_ONCE"}
     cases = (
         ({"verified": False}, _verified_receipt_hash({"verified": False}), "APPROVAL_UNVERIFIED_CANDIDATE"),
         (dict(_VERIFIED_RECEIPT), "f" * 64, "APPROVAL_VERIFIED_RECEIPT_HASH_MISMATCH"),
@@ -2862,7 +2876,7 @@ def test_approval_rejects_unverified_or_rehashed_receipt(tmp_path):
             "verified_receipt": receipt,
         })
         with pytest.raises(RuntimeError, match=code):
-            service.approve_promotion(task_id, **packet, approval_context=dict(grant))
+            service.approve_promotion(task_id, **packet, approval_context=_bound_approval(task_id))
         assert service._read_state(task_id)["promotion_status"] == "PENDING_HUMAN_APPROVAL"
 
 
@@ -2873,10 +2887,10 @@ def test_marked_authority_approval_requires_exact_nested_ack_and_persists(tmp_pa
     packet = {"candidate_commit_sha": "c"*40, "candidate_tree_sha": "d"*40, "candidate_state_hash": "e"*64, "verified_receipt_hash": _verified_receipt_hash(receipt), "authority_change_required": True, "authority_findings_sha256": "a"*64}
     service._write_state(task_id, {"task_id": task_id, "attempt_id": "attempt-1", "status": "CANDIDATE_COMMITTED", "promotion_status": "PENDING_HUMAN_APPROVAL", "promotion_packet": packet, "verified_receipt": receipt})
     with pytest.raises(RuntimeError, match="OWNER_ARCHITECTURE_APPROVAL_REQUIRED"):
-        service.approve_promotion(task_id, **{k: packet[k] for k in ("candidate_commit_sha", "candidate_tree_sha", "candidate_state_hash", "verified_receipt_hash")}, approval_context={"schema":"nexus.approval.v2", "approval_id":"p", "approved_by":"owner", "approval_scope":"ALLOW_ACTION_ONCE"})
+        service.approve_promotion(task_id, **{k: packet[k] for k in ("candidate_commit_sha", "candidate_tree_sha", "candidate_state_hash", "verified_receipt_hash")}, approval_context=_bound_approval(task_id, "attempt-1"))
     now = datetime.now(timezone.utc)
     arch = {"schema":"nexus.architecture_approval.v1", "approval_id":"arch", "approved_by":"owner", "issued_at":now.isoformat(), "expires_at":(now+timedelta(minutes=5)).isoformat(), "approval_scope":"ALLOW_ACTION_ONCE", "bound_task_id":task_id, "bound_attempt_id":"attempt-1", "candidate_commit_sha":"c"*40, "candidate_tree_sha":"d"*40, "authority_findings_sha256":"a"*64}
-    approved = service.approve_promotion(task_id, **{k: packet[k] for k in ("candidate_commit_sha", "candidate_tree_sha", "candidate_state_hash", "verified_receipt_hash")}, approval_context={"schema":"nexus.approval.v2", "approval_id":"p", "approved_by":"owner", "approval_scope":"ALLOW_ACTION_ONCE", "architecture_approval":arch})
+    approved = service.approve_promotion(task_id, **{k: packet[k] for k in ("candidate_commit_sha", "candidate_tree_sha", "candidate_state_hash", "verified_receipt_hash")}, approval_context=_bound_approval(task_id, "attempt-1", architecture_approval=arch))
     assert approved["promotion_status"] == "APPROVED"
     assert approved["approved_binding"]["architecture_approval"]["authority_findings_sha256"] == "a"*64
     assert approved["approved_binding"]["architecture_approval"].get("consumed_at")
@@ -2907,7 +2921,7 @@ def test_marked_authority_approval_service_rejects_tamper_and_expiry(tmp_path, f
     architecture = {"schema": "nexus.architecture_approval.v1", "approval_id": "arch", "approved_by": "owner", "issued_at": now.isoformat(), "expires_at": (now + timedelta(minutes=5)).isoformat(), "approval_scope": "ALLOW_ACTION_ONCE", "bound_task_id": task_id, "bound_attempt_id": "attempt-1", "candidate_commit_sha": "c" * 40, "candidate_tree_sha": "d" * 40, "authority_findings_sha256": "a" * 64}
     architecture[field] = value
     with pytest.raises(RuntimeError, match=code):
-        service.approve_promotion(task_id, **{k: packet[k] for k in ("candidate_commit_sha", "candidate_tree_sha", "candidate_state_hash", "verified_receipt_hash")}, approval_context={"schema": "nexus.approval.v2", "approval_id": "p", "approved_by": "owner", "approval_scope": "ALLOW_ACTION_ONCE", "architecture_approval": architecture})
+        service.approve_promotion(task_id, **{k: packet[k] for k in ("candidate_commit_sha", "candidate_tree_sha", "candidate_state_hash", "verified_receipt_hash")}, approval_context=_bound_approval(task_id, "attempt-1", architecture_approval=architecture))
 
 
 def test_versioned_allow_action_once_is_consumed_atomically_and_replay_is_idempotent(tmp_path):
@@ -2936,6 +2950,9 @@ def test_versioned_allow_action_once_is_consumed_atomically_and_replay_is_idempo
         "issued_at": datetime.now(timezone.utc).isoformat(),
         "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
         "approval_scope": "ALLOW_ACTION_ONCE",
+        "bound_task_id": task_id,
+        "bound_attempt_id": "attempt-1",
+        "bound_action_type": "CANDIDATE_APPROVE",
     }
     first = service.approve_promotion(task_id, **packet, approval_context=grant)
     consumed_at = first["approved_binding"]["approval_grant"]["consumed_at"]
@@ -3119,7 +3136,7 @@ def test_approval_mismatch_returns_action_required_envelope(tmp_path):
         candidate_tree_sha="0" * 40,
         candidate_state_hash="e" * 64,
         verified_receipt_hash="f" * 64,
-        approval_context={"schema": "nexus.approval.v2", "approval_id": "p", "approved_by": "owner", "approval_scope": "ALLOW_ACTION_ONCE"},
+        approval_context=_bound_approval("approval-mismatch"),
     )
 
     assert result["status"] == "APPROVAL_INVALIDATED"
@@ -11065,6 +11082,111 @@ def test_direct_untracked_dispatch_does_not_require_admission(tmp_path):
     )
 
 
+_APPROVE_PACKET = {
+    "candidate_commit_sha": "c" * 40,
+    "candidate_tree_sha": "d" * 40,
+    "candidate_state_hash": "e" * 64,
+    "verified_receipt_hash": _VERIFIED_RECEIPT_HASH,
+}
+
+
+def _pending_approval_state(service, task_id, **extra):
+    service._write_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "attempt_id": "attempt-1",
+            "status": "CANDIDATE_COMMITTED",
+            "promotion_status": "PENDING_HUMAN_APPROVAL",
+            "promotion_packet": dict(_APPROVE_PACKET),
+            "verified_receipt": dict(_VERIFIED_RECEIPT),
+            "merge_performed": False,
+            "push_performed": False,
+            **extra,
+        },
+    )
+
+
+def test_service_approval_rejects_identityless_grant_for_untracked_task(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    _pending_approval_state(service, "identityless")
+    with pytest.raises(RuntimeError, match="APPROVAL_BINDING_INCOMPLETE"):
+        service.approve_promotion(
+            "identityless", **_APPROVE_PACKET, approval_context={"schema": "nexus.approval.v2"}
+        )
+    assert service._read_state("identityless")["promotion_status"] == "PENDING_HUMAN_APPROVAL"
+
+
+@pytest.mark.parametrize(
+    "missing", ["approved_by", "approval_id", "bound_task_id", "bound_action_type"]
+)
+def test_service_approval_rejects_grant_missing_identity_field(tmp_path, missing):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    _pending_approval_state(service, "missing-field")
+    grant = _bound_approval("missing-field", "attempt-1")
+    grant.pop(missing)
+    with pytest.raises(RuntimeError, match="APPROVAL_BINDING_INCOMPLETE"):
+        service.approve_promotion("missing-field", **_APPROVE_PACKET, approval_context=grant)
+    assert service._read_state("missing-field")["promotion_status"] == "PENDING_HUMAN_APPROVAL"
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"bound_task_id": "other-task"},
+        {"bound_action_type": "CANDIDATE_INTEGRATE"},
+        {"bound_attempt_id": "attempt-2"},
+    ],
+)
+def test_service_approval_rejects_grant_bound_to_another_task_action_or_attempt(tmp_path, override):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    _pending_approval_state(service, "wrong-binding")
+    grant = _bound_approval("wrong-binding", "attempt-1", **override)
+    with pytest.raises(RuntimeError, match="APPROVAL_BINDING_MISMATCH"):
+        service.approve_promotion("wrong-binding", **_APPROVE_PACKET, approval_context=grant)
+    assert service._read_state("wrong-binding")["promotion_status"] == "PENDING_HUMAN_APPROVAL"
+
+
+def test_service_approval_accepts_fully_bound_grant_for_untracked_task(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    _pending_approval_state(service, "bound-ok")
+    result = service.approve_promotion(
+        "bound-ok", **_APPROVE_PACKET, approval_context=_bound_approval("bound-ok", "attempt-1")
+    )
+    assert result["promotion_status"] == "APPROVED"
+    stored = result["approved_binding"]["approval_grant"]
+    assert stored["approved_by"] == "owner" and stored["bound_task_id"] == "bound-ok"
+
+
+def test_service_approval_tracked_task_requires_full_versioned_grant(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    _pending_approval_state(service, "tracked-grant", task_card_hash="c" * 64)
+    # Approver and task binding alone are not enough once the task has a card hash.
+    with pytest.raises(RuntimeError, match="APPROVAL_BINDING_INCOMPLETE"):
+        service.approve_promotion(
+            "tracked-grant",
+            **_APPROVE_PACKET,
+            approval_context=_bound_approval("tracked-grant", "attempt-1"),
+        )
+    now = datetime.now(timezone.utc)
+    full = _bound_approval(
+        "tracked-grant",
+        "attempt-1",
+        issued_at=now.isoformat(),
+        expires_at=(now + timedelta(minutes=5)).isoformat(),
+        contract_kind="TRACKED_TASK_CARD",
+        contract_hash="c" * 64,
+        task_card_hash="c" * 64,
+        tool_manifest_hash="1" * 64,
+        full_tool_schema_hash="2" * 64,
+        permission_policy_hash="3" * 64,
+        lifecycle_revision="rev",
+        server_instance_id="srv",
+    )
+    result = service.approve_promotion("tracked-grant", **_APPROVE_PACKET, approval_context=full)
+    assert result["promotion_status"] == "APPROVED"
+
+
 @pytest.mark.parametrize("verifiers", [None, [], ["   "]])
 def test_build_contract_rejects_missing_or_blank_verifier_manifest(tmp_path, verifiers):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
@@ -11103,34 +11225,49 @@ def test_legacy_mcp_approve_promotion_requires_grant(tmp_path):
     from nexus.orchestrator.self_hosted_mcp import NexusSelfHostedMCPServer
 
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
-    packet = {
-        "candidate_commit_sha": "c" * 40,
-        "candidate_tree_sha": "d" * 40,
-        "candidate_state_hash": "e" * 64,
-        "verified_receipt_hash": _VERIFIED_RECEIPT_HASH,
-    }
-    service._write_state(
-        "mcp-approve",
-        {
-            "task_id": "mcp-approve",
-            "status": "CANDIDATE_COMMITTED",
-            "promotion_status": "PENDING_HUMAN_APPROVAL",
-            "promotion_packet": dict(packet),
-            "verified_receipt": dict(_VERIFIED_RECEIPT),
-            "merge_performed": False,
-            "push_performed": False,
+    _pending_approval_state(service, "mcp-approve")
+    server = NexusSelfHostedMCPServer(service=service)
+    response = server.handle({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "nexus_self_hosted_approve_promotion",
+            "arguments": {"task_id": "mcp-approve", **_APPROVE_PACKET},
         },
-    )
-    response = NexusSelfHostedMCPServer(service=service).handle(
-        {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {
-                "name": "nexus_self_hosted_approve_promotion",
-                "arguments": {"task_id": "mcp-approve", **packet},
-            },
-        }
-    )
+    })
     assert "APPROVAL_GRANT_REQUIRED" in json.dumps(response)
     assert service._read_state("mcp-approve")["promotion_status"] == "PENDING_HUMAN_APPROVAL"
+
+
+def test_service_approval_rejects_grant_without_attempt_when_state_has_attempt(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    _pending_approval_state(service, "no-attempt")
+    with pytest.raises(RuntimeError, match="APPROVAL_BINDING_MISMATCH"):
+        service.approve_promotion(
+            "no-attempt", **_APPROVE_PACKET, approval_context=_bound_approval("no-attempt")
+        )
+    assert service._read_state("no-attempt")["promotion_status"] == "PENDING_HUMAN_APPROVAL"
+
+
+def test_service_approval_untracked_grant_may_omit_attempt_only_without_state_attempt(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    _pending_approval_state(service, "no-state-attempt", attempt_id=None)
+    result = service.approve_promotion(
+        "no-state-attempt", **_APPROVE_PACKET, approval_context=_bound_approval("no-state-attempt")
+    )
+    assert result["promotion_status"] == "APPROVED"
+
+
+def test_service_approval_rejects_expired_untracked_grant(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    _pending_approval_state(service, "expired")
+    grant = _bound_approval(
+        "expired",
+        "attempt-1",
+        issued_at="2020-01-01T00:00:00+00:00",
+        expires_at="2020-01-02T00:00:00+00:00",
+    )
+    with pytest.raises(RuntimeError, match="APPROVAL_EXPIRED"):
+        service.approve_promotion("expired", **_APPROVE_PACKET, approval_context=grant)
+    assert service._read_state("expired")["promotion_status"] == "PENDING_HUMAN_APPROVAL"

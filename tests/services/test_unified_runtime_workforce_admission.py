@@ -341,10 +341,10 @@ def test_local_authority_is_exactly_propagated_and_binds_mapping_request_identit
 
 def test_local_authority_binds_dataclass_request_and_preserves_admitted_qwen_tag() -> None:
     binding = {
-        "worker_id": "local_qwen3_8b",
+        "worker_id": "local_splash_qwen36",
         "provider": "ollama",
-        "model": "qwen3:8b",
-        "controls": ["bounded_context", "parser", "focused_tests", "external_verifier"],
+        "model": "incoai/Qwen3.6-35B-A3B-Splash",
+        "controls": ["focused_tests", "compile", "parser", "small_scope", "reversible_application"],
     }
     request = _DataclassLocalRequest(
         task_id="workforce-admission-runtime-test",
@@ -368,11 +368,11 @@ def test_local_authority_binds_dataclass_request_and_preserves_admitted_qwen_tag
     receipt, local = _local_case(binding=binding, local_request=request)
 
     authority = receipt["local_model_invocation_authority"]
-    assert authority["resolved_model"] == "qwen3:8b"
+    assert authority["resolved_model"] == "incoai/Qwen3.6-35B-A3B-Splash"
     assert isinstance(local.seen_request, _DataclassLocalRequest)
     snapshot = local.seen_request.planner_snapshot
     assert snapshot["executor_provider"] == "ollama"
-    assert snapshot["executor_model"] == "qwen3:8b"
+    assert snapshot["executor_model"] == "incoai/Qwen3.6-35B-A3B-Splash"
     assert snapshot["execution_topology"] == "legacy-topology"
     assert snapshot["protocol_mode"] == "legacy-protocol"
     assert snapshot["model_call_allowed"] is False
@@ -999,8 +999,8 @@ def test_escalate_stops_before_all_downstream_invocations(tmp_path: Path) -> Non
                 "workforce_admission_enabled": True,
                 "workforce_bindings": {
                     "local": {
-                        "worker_id": "local_qwen3_8b",
-                        "controls": ["bounded_context", "parser", "focused_tests", "external_verifier"],
+                        "worker_id": "local_splash_qwen36",
+                        "controls": ["focused_tests", "compile", "parser", "small_scope", "reversible_application"],
                     }
                 },
             },
@@ -1717,10 +1717,10 @@ def test_prior_admission_cannot_be_disabled_or_omitted_before_second_planner(
 def test_changed_binding_without_authorization_blocks_after_admission_with_zero_second_attempt_calls() -> None:
     first_binding = _bindings()["local"]
     changed_binding = {
-        "worker_id": "local_qwen3_8b",
+        "worker_id": "local_splash_qwen36",
         "provider": "ollama",
-        "model": "qwen3:8b",
-        "controls": ["bounded_context", "parser", "focused_tests", "external_verifier"],
+        "model": "incoai/Qwen3.6-35B-A3B-Splash",
+        "controls": ["focused_tests", "compile", "parser", "small_scope", "reversible_application"],
     }
     route = {
         "workforce_admission_enabled": True,
@@ -1805,14 +1805,15 @@ def test_authorized_changed_binding_continues_as_rebound_and_preserves_source_re
             "workforce_rebind_reason": "approved worker rotation",
             "workforce_bindings": {
                 "local": {
-                    "worker_id": "local_qwen3_8b",
+                    "worker_id": "local_splash_qwen36",
                     "provider": "ollama",
-                    "model": "qwen3:8b",
+                    "model": "incoai/Qwen3.6-35B-A3B-Splash",
                     "controls": [
-                        "bounded_context",
-                        "parser",
                         "focused_tests",
-                        "external_verifier",
+                        "compile",
+                        "parser",
+                        "small_scope",
+                        "reversible_application",
                     ],
                 },
                 "online": _bindings()["online"],
