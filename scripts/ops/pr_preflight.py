@@ -55,6 +55,7 @@ SKIP = "SKIP"
 # update when that PR lands or renames a code.
 PR_MISSING_CORE_ISSUE_BINDING = "PR_MISSING_CORE_ISSUE_BINDING"
 ISSUE_NOT_OPEN = "ISSUE_NOT_OPEN"
+NEXUS_CERTIFY_UNAVAILABLE = "NEXUS_CERTIFY_UNAVAILABLE"
 ISSUE_MISSING_EVIDENCE_UNIVERSE = "ISSUE_MISSING_EVIDENCE_UNIVERSE"
 ISSUE_EVIDENCE_UNIVERSE_STALE = "ISSUE_EVIDENCE_UNIVERSE_STALE"
 ISSUE_EVIDENCE_UNIVERSE_BINDING_MALFORMED = "ISSUE_EVIDENCE_UNIVERSE_BINDING_MALFORMED"
@@ -358,6 +359,25 @@ def _resolve_nexus_certify(explicit: str | None) -> str | None:
     return None
 
 
+_CORE_PIN_RE = re.compile(r"James3014/nexus-core/[^\s@]+@([0-9a-f]{40})")
+
+
+def _certify_hint(ctx: Context) -> str:
+    pin = "<pin>"
+    workflow = ctx.repo / ".github/workflows/nexus-core-issue-completion.yml"
+    try:
+        found = _CORE_PIN_RE.search(workflow.read_text(encoding="utf-8"))
+    except OSError:
+        found = None
+    if found:
+        pin = found.group(1)
+    return (
+        "use the nexus-certify version pinned in "
+        ".github/workflows/nexus-core-issue-completion.yml, e.g. "
+        f"`uvx --from git+https://github.com/James3014/nexus-core@{pin} nexus-certify`"
+    )
+
+
 def _expected_markers(ctx: Context, issue: int) -> tuple[dict[str, Any] | None, str]:
     tool = _resolve_nexus_certify(ctx.nexus_certify)
     if tool is None:
@@ -371,6 +391,9 @@ def _expected_markers(ctx: Context, issue: int) -> tuple[dict[str, Any] | None, 
     if "--check" in help_text and ctx.issue_json is None:
         command.append("--check")
     proc = subprocess.run(command, capture_output=True, text=True, check=False)
+    if proc.returncode != 0:
+        output = (proc.stderr or proc.stdout).strip()[:300]
+        return None, f"nexus-certify markers exited {proc.returncode}: {output}"
     try:
         payload = json.loads(proc.stdout)
     except json.JSONDecodeError:
@@ -421,20 +444,25 @@ def check_issue(ctx: Context) -> CheckResult:
             "reopen the Issue or bind the PR to an open Issue",
         )
     expected, error = _expected_markers(ctx, issue)
+    unavailable_fix = _certify_hint(ctx)
     if expected is None:
         return CheckResult(
             name,
-            SKIP,
-            detail=f"Issue #{issue} is open; marker not checked: {error}",
-            fix="install nexus-certify or pass --nexus-certify PATH",
+            FAIL,
+            NEXUS_CERTIFY_UNAVAILABLE,
+            f"Issue #{issue} is open; marker cannot be determined: {error}",
+            unavailable_fix,
         )
     expected_line = str(expected.get("issue_marker") or "")
-    if not expected_line:
+    marker_value = parse_evidence_marker(expected_line)[0]
+    if marker_value is None:
         return CheckResult(
             name,
-            SKIP,
-            detail="nexus-certify markers returned no issue_marker",
-            fix="run `nexus-certify markers --issue N --json` and inspect",
+            FAIL,
+            NEXUS_CERTIFY_UNAVAILABLE,
+            "nexus-certify markers returned an empty or invalid issue_marker "
+            "(expected sha256:<64 hex>)",
+            unavailable_fix,
         )
     body = str(data.get("body") or "")
     value, malformed, _count = parse_evidence_marker(body)
