@@ -194,8 +194,10 @@ def test_jit_validation_receipt_says_simulated() -> None:
 
 
 def test_entropy_guard_v2_ready_but_not_registered() -> None:
-    assert "entropy_guard_v2" not in EXECUTOR_REGISTRY
-    run = PENDING_PLANNER_NODE_EXECUTORS["entropy_guard_v2"]
+    # Node id kept; since the runtime 68e86ed pin (node: nexus-runtime #198) the executor
+    # is registered and nothing is pending.
+    assert "entropy_guard_v2" not in PENDING_PLANNER_NODE_EXECUTORS
+    run = EXECUTOR_REGISTRY["entropy_guard_v2"]
     low = run(_plan("ent-low", entropy_audit_text="the total is the sum of the line items"), "x")
     high = run(
         _plan("ent-high", entropy_audit_text="sk-Q7f!9zLp#2Xv@Kq8$wRt5^Ym3&Nb6*Hc1(Jd4)Ue0"), "x"
@@ -203,7 +205,8 @@ def test_entropy_guard_v2_ready_but_not_registered() -> None:
     missing = run(_plan("ent-none"), "task text is not the output")
     assert low.gate_passed and low.outcome["result"]["status"] == "PASSED"
     assert high.gate_passed is False and high.outcome["result"]["status"] == "VETOED"
-    assert high.outcome["result"]["text_entropy"] > low.outcome["result"]["text_entropy"]
+    assert high.outcome["result"]["max_segment_entropy"] > 4.1
+    assert high.outcome["result"]["high_entropy_segments"] == 1
     assert missing.gate_passed is False
     assert missing.outcome["error"] == "ENTROPY_AUDIT_TEXT_REQUIRED"
 

@@ -30,7 +30,8 @@ PLANNER_NODE_REASONS = {
     "llm_judge_panel": "archived_alias_llm_judge_panel_2026-10-13",
 }
 
-# Executor-registry keys with no planner node (entropy_guard_v2 included: key only, see #1907).
+# Executor-registry keys with no planner node.  entropy_guard_v2 left this list with the
+# runtime 68e86ed pin, which defines its planner node (nexus-runtime #198, #1907).
 RETIRED_EXECUTOR_KEYS = (
     "policy_capability_gate",
     "aos_oracle",
@@ -48,7 +49,6 @@ RETIRED_EXECUTOR_KEYS = (
     "battle_swarm",
     "nightshift_runner_service",
     "research_and_source_discipline",
-    "entropy_guard_v2",
 )
 
 ARCHIVED_MODULES = {
@@ -112,8 +112,18 @@ def test_planner_node_resolves_to_archived_skip(name):
     assert result["skip_reason"] == PLANNER_NODE_REASONS[name]
 
 
-@pytest.mark.parametrize("key", RETIRED_EXECUTOR_KEYS)
+# Keys that left the executor-only list keep their node id here and assert the new contract.
+PROMOTED_EXECUTOR_KEYS = ("entropy_guard_v2",)
+
+
+@pytest.mark.parametrize("key", RETIRED_EXECUTOR_KEYS + PROMOTED_EXECUTOR_KEYS)
 def test_executor_only_key_is_not_registered(key):
+    if key in PROMOTED_EXECUTOR_KEYS:
+        # entropy_guard_v2 is no longer an executor-only key: the 68e86ed runtime defines its
+        # planner node and Nexus-new registers the executor for it (#1907).
+        assert key in set(list_planner_capability_names())
+        assert get_executor(key) is EXECUTOR_REGISTRY[key]
+        return
     assert key not in EXECUTOR_REGISTRY
     assert get_executor(key) is None
 

@@ -416,11 +416,14 @@ def test_verdict_bucket_collapses_prefixed_verdicts() -> None:
 
 def test_executor_only_keys_are_the_seventeen_unreachable_executors() -> None:
     # Second archive batch (2026-10-13, #1906): all seventeen keys left EXECUTOR_REGISTRY.
+    # Node id kept: entropy_guard_v2 got its planner node with the runtime 68e86ed pin
+    # (nexus-runtime #198, #1907), so sixteen remain.
     keys = audit.executor_only_keys()
     assert keys["unlisted"] == [] and keys["listed_but_reachable"] == []
     assert set(keys["computed"]) - set(keys["retiring_excluded"]) == set()
     assert set(keys["retired_from_registry"]) == set(audit.EXECUTOR_ONLY)
-    assert len(audit.EXECUTOR_ONLY) == 17
+    assert len(audit.EXECUTOR_ONLY) == 16
+    assert "entropy_guard_v2" not in audit.EXECUTOR_ONLY
 
 
 def test_executor_only_quotes_hard_coded_tmp_lines() -> None:
@@ -435,11 +438,12 @@ def test_executor_only_quotes_hard_coded_tmp_lines() -> None:
 
 
 def test_executor_only_direct_invocation_records_outcome(tmp_path: Path) -> None:
-    # entropy_guard_v2: dead registry key removed 2026-10-13; module kept, planner node in #1907.
-    row = audit.audit_executor_only("entropy_guard_v2", tmp_path)
+    # policy_capability_gate: registry key removed 2026-10-13, module kept (entropy_guard_v2,
+    # used here before, got its planner node with the runtime 68e86ed pin, #1907).
+    row = audit.audit_executor_only("policy_capability_gate", tmp_path)
     assert row["verdict"] == audit.RETIRING
     assert row["verdict_reason"].startswith(audit.RETIRED_EXECUTOR_ONLY_REASON)
-    assert "#1907" in row["verdict_reason"]
+    assert "policy_gate.py" in row["verdict_reason"]
     assert row["invoked"] is None and row["gate_passed"] is None
 
 

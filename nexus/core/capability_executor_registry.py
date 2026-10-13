@@ -3990,6 +3990,9 @@ def _exec_entropy_guard_v2(plan: CapabilityExecutionPlan, task_desc: str) -> Cap
             result={
                 "text_entropy": round(float(audit.get("text_entropy") or 0.0), 4),
                 "token_entropy": round(float(audit.get("token_entropy") or 0.0), 4),
+                "max_segment_entropy": round(float(audit.get("max_segment_entropy") or 0.0), 4),
+                "high_entropy_segments": int(audit.get("high_entropy_segments") or 0),
+                "segment_threshold": float(audit.get("segment_threshold") or 0.0),
                 "status": str(audit.get("status")),
                 "text_sha256": digest,
                 "text_chars": len(text),
@@ -3999,16 +4002,15 @@ def _exec_entropy_guard_v2(plan: CapabilityExecutionPlan, task_desc: str) -> Cap
     )
 
 
-# Executors written and tested here but deliberately NOT in EXECUTOR_REGISTRY: the planner
-# node lives in nexus-runtime and does not exist yet.  Registering a key no node can reach
-# recreates the silent second catalogue archived in #1906.  Move the entry into
-# EXECUTOR_REGISTRY in the PR that bumps the runtime pin to a revision defining the node.
-PENDING_PLANNER_NODE_EXECUTORS: dict[str, CapabilityExecutor] = {
-    "entropy_guard_v2": _exec_entropy_guard_v2,  # runtime node: #1907
-}
+# Executors written and tested here but deliberately NOT in EXECUTOR_REGISTRY until the
+# pinned nexus-runtime defines their planner node (registering a key no node can reach
+# recreates the silent second catalogue archived in #1906).  entropy_guard_v2 moved into
+# EXECUTOR_REGISTRY with the runtime 68e86ed pin (node: nexus-runtime #198, Nexus-new #1907).
+PENDING_PLANNER_NODE_EXECUTORS: dict[str, CapabilityExecutor] = {}
 
 
 EXECUTOR_REGISTRY: dict[str, CapabilityExecutor] = {
+    "entropy_guard_v2": _exec_entropy_guard_v2,  # planner node: nexus-runtime #198 (#1907)
     "mempalace": _exec_mempalace,
     "autonomic_router": _exec_autonomic_router,
     "codeintel": _exec_codeintel,

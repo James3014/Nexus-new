@@ -343,7 +343,7 @@ def test_audit_product_receipt_coverage_5_of_5_contract_embed():
     assert audit["all_closure_complete"] is False
     assert audit["public_claim_allowed"] is False
     assert audit["physical_execution_coverage"]["missing_engine_count"] == 0
-    assert audit["physical_execution_coverage"]["node_count"] == 57
+    assert audit["physical_execution_coverage"]["node_count"] == 58
 
 
 def test_audit_missing_surface_does_not_fake_5_of_5():

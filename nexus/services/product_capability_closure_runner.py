@@ -1,4 +1,4 @@
-"""Production Closure Runner — Central production invoker for 68-cell matrix.
+"""Production Closure Runner — Central production invoker for 70-cell matrix.
 
 Pure production module — imports only nexus.* production code.
 Must not import test modules from this file.
@@ -171,7 +171,7 @@ def run_68_matrix_and_generate_receipt(repo_root: Path | None = None) -> dict[st
         "missing_evidence_reasons": summary.get("missing_evidence_reasons", []),
         "rows": rows_detail,
         "final_verdict": "INTERNAL_FULL_CAPABILITY_CLOSURE_VERIFIED"
-        if summary.get("matrix_pass") == 68 and real_agy_present and real_ollama_present
+        if summary.get("matrix_pass") == 70 and real_agy_present and real_ollama_present
         else "CLOSURE_IN_PROGRESS",
     }
 

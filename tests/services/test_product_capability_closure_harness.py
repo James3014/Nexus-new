@@ -66,7 +66,7 @@ def _fixture_runner(task):
 
 def test_catalog_freezes_exact_34_by_2_tasks_with_real_trigger_inputs(tmp_path: Path) -> None:
     tasks = build_product_task_catalog(tmp_path)
-    assert len(tasks) == 68
+    assert len(tasks) == 70
     assert validate_task_catalog(tasks) == []
     assert {(task.origin, task.capability) for task in tasks} == {
         (origin, capability)
@@ -147,8 +147,8 @@ def test_matrix_receipt_has_68_rows_but_no_fixture_false_green(tmp_path: Path) -
         output_dir=tmp_path / "matrix",
     )
     assert payload["schema"] == MATRIX_SCHEMA
-    assert payload["task_count"] == 68
-    assert len(payload["rows"]) == 68
+    assert payload["task_count"] == 70
+    assert len(payload["rows"]) == 70
     assert payload["summary"]["matrix_pass"] == 0
     assert payload["summary"]["complete"] is False
     assert payload["public_claim_allowed"] is False

@@ -33,8 +33,8 @@ def test_planner_contract_set_equals_57() -> None:
     planner = set(list_planner_capability_names())
     contracts = set(list_execution_contract_ids())
     nodes = set(default_capability_nodes().keys())
-    assert len(planner) == 57
-    assert len(contracts) == 57
+    assert len(planner) == 58
+    assert len(contracts) == 58
     assert planner == contracts == nodes
     assert set(PLANNER_EXECUTION_CONTRACTS.keys()) == planner
 
@@ -120,11 +120,11 @@ def test_probe_only_reason_codes_remain_e_not_f() -> None:
 
 def test_wiring_matrix_exposes_execution_contract_projection() -> None:
     matrix = build_wiring_matrix()
-    assert matrix["node_count"] == 57
-    assert matrix["contract_count"] == 57
+    assert matrix["node_count"] == 58
+    assert matrix["contract_count"] == 58
     assert matrix["routing_surface_changed"] is False
     assert "execution_class_counts" in matrix
-    assert sum(matrix["execution_class_counts"].values()) == 57
+    assert sum(matrix["execution_class_counts"].values()) == 58
     f_count = matrix["gap_class_counts"]["F_wired_ok"]
     assert matrix["physical_runtime_eligible"] == f_count
     # Honest floor: Phase 0 baseline 17; Phase 2+ may promote hardened nodes.
@@ -138,7 +138,7 @@ def test_wiring_matrix_exposes_execution_contract_projection() -> None:
 def test_catalog_denominators_91_77_14_unchanged() -> None:
     root = Path(__file__).resolve().parents[2]
     catalog = build_capability_catalog(repo_root=root)
-    assert catalog["planner_node_count"] == 57
+    assert catalog["planner_node_count"] == 58
     assert catalog["canonical_union_count"] == 91
     assert catalog["canonical_row_count"] == 77
     assert catalog["alias_row_count"] == 14
@@ -160,10 +160,10 @@ def test_local_online_projection_covers_all_57() -> None:
     )
 
     proj = build_local_online_contract_projection()
-    assert proj["planner_contract_count"] == 57
+    assert proj["planner_contract_count"] == 58
     assert proj["independent_local_truth"] is False
-    assert sum(proj["local_mode_counts"].values()) == 57
-    assert sum(proj["online_mode_counts"].values()) == 57
+    assert sum(proj["local_mode_counts"].values()) == 58
+    assert sum(proj["online_mode_counts"].values()) == 58
     for row in proj["rows"]:
         assert row["local_mode"] in LOCAL_EXECUTION_MODES
         assert row["online_mode"] in ONLINE_EXECUTION_MODES
