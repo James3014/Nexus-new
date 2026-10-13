@@ -784,6 +784,10 @@ def validate_junit(junit: bytes, spec: dict[str, Any], files: set[str]) -> None:
     )
     if uncovered:
         raise GateError(f"{spec['side']} junit has no results for planned targets {uncovered}")
+    # The relaxation above must not let a run with planned targets report an
+    # empty result: at least one planned target has to yield a testcase.
+    if targets and not covered:
+        raise GateError(f"{spec['side']} junit has no results for any planned target")
 
 
 def reconstruct_result(

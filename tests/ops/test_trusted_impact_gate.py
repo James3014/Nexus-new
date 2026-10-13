@@ -949,6 +949,18 @@ def test_expat_pass_accepts_plain_junit_and_rejects_malformed():
         tig.reject_dtd_and_entities(b"<testsuites><testsuite>", "head")
 
 
+def test_only_non_test_targets_with_empty_junit_is_rejected(tmp_path):
+    # A head that forces exit 0 with an empty junit must not pass when every
+    # planned target is a conftest/helper (#1952 review).
+    spec = {
+        "side": "head",
+        "executed_targets": ["tests/conftest.py"],
+        "pytest_args": ["tests/conftest.py"],
+    }
+    with pytest.raises(tig.GateError, match="no results for any planned target"):
+        tig.validate_junit(_junit([]), spec, {"tests/conftest.py"})
+
+
 def test_changed_conftest_target_without_results_is_allowed(tmp_path):
     # Real PRs select a changed tests/conftest.py as a target; pytest collects
     # no items from it, which must not fail the per-target coverage check.
