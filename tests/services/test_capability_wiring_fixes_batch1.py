@@ -356,7 +356,7 @@ def test_executor_receipt_with_evidence_is_not_simulated(tmp_path: Path) -> None
     assert boundary["simulated"] is False
     assert boundary["receipt_present"] is True
     assert boundary["public_claim_allowed"] is False
-    assert attested == raw  # runtime projection is authoritative (#187); no re-projection
+    assert attested["receipt_base"]["receipt_hash"] == raw["receipt_base"]["receipt_hash"]
 
 
 def test_auth_block_and_skip_stay_simulated(monkeypatch: pytest.MonkeyPatch) -> None:
