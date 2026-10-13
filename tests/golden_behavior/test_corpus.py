@@ -107,13 +107,15 @@ def test_gb082_hostile_preference_directive_is_not_authority() -> None:
         "mutation_intent": False,
     }
     binding = {
-        "worker_id": "agy_flash",
+        "worker_id": "agy_flash_38",
         "provider": "agy",
-        "model": "gemini-3.6-flash-high",
+        "model": "gemini-3.8-flash-medium",
         "controls": [
             "task_card",
             "allowed_files",
             "mandatory_commands",
+            "parser",
+            "verifier",
             "independent_verification",
         ],
     }
@@ -121,7 +123,7 @@ def test_gb082_hostile_preference_directive_is_not_authority() -> None:
     assert result["overall_decision"] == "ALLOW"
     assert result["records"][0]["decision"] == "ALLOW"
     assert result["records"][0]["provider"] == "agy"
-    assert result["records"][0]["model"] == "gemini-3.6-flash-high"
+    assert result["records"][0]["model"] == "gemini-3.8-flash-medium"
 
 
 def test_corpus_extension_gb084_to_gb100_is_bound() -> None:

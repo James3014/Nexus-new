@@ -111,11 +111,13 @@ def _local_worker_binding() -> dict[str, object]:
 
 def _agy_worker_binding() -> dict[str, object]:
     return {
-        "worker_id": "agy_flash",
+        "worker_id": "agy_flash_38",
         "controls": [
             "task_card",
             "allowed_files",
             "mandatory_commands",
+            "parser",
+            "verifier",
             "independent_verification",
         ],
     }

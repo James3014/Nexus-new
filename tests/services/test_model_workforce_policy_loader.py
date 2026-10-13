@@ -155,9 +155,9 @@ def test_admission_resolution_by_worker_id_and_provider_model() -> None:
     loader = WorkforcePolicyLoader(POLICY_PATH)
     snapshot = loader.load()
 
-    # Resolve by ID
+    # Resolve by ID (agy_flash_38 is the current default Agy worker since 2026-10-13)
     req1 = WorkforceAdmissionRequest(
-        requested_worker_id="agy_flash",
+        requested_worker_id="agy_flash_38",
         role="fast_bounded_implementation",
         autonomy="L2",
         context="nexus_bounded",
@@ -166,17 +166,19 @@ def test_admission_resolution_by_worker_id_and_provider_model() -> None:
             "task_card",
             "allowed_files",
             "mandatory_commands",
+            "parser",
+            "verifier",
             "independent_verification",
         ],  # type: ignore[arg-type]
     )
     dec1 = loader.admit(req1, snapshot)
     assert dec1.decision == AdmissionDecision.ALLOW
-    assert dec1.resolved_worker_id == "agy_flash"
+    assert dec1.resolved_worker_id == "agy_flash_38"
 
     # Resolve by provider + model
     req2 = WorkforceAdmissionRequest(
         provider="agy",
-        model="gemini-3.6-flash-high",
+        model="gemini-3.8-flash-medium",
         role="fast_bounded_implementation",
         autonomy="L2",
         context="nexus_bounded",
@@ -185,19 +187,42 @@ def test_admission_resolution_by_worker_id_and_provider_model() -> None:
             "task_card",
             "allowed_files",
             "mandatory_commands",
+            "parser",
+            "verifier",
             "independent_verification",
         ],  # type: ignore[arg-type]
     )
     dec2 = loader.admit(req2, snapshot)
     assert dec2.decision == AdmissionDecision.ALLOW
-    assert dec2.resolved_worker_id == "agy_flash"
+    assert dec2.resolved_worker_id == "agy_flash_38"
+
+    # The retired 3.6 High identity still resolves but is no longer admissible.
+    retired = loader.admit(
+        WorkforceAdmissionRequest(
+            provider="agy",
+            model="gemini-3.6-flash-high",
+            role="fast_bounded_implementation",
+            autonomy="L2",
+            context="nexus_bounded",
+            route_authorized=True,
+            provided_controls=[
+                "task_card",
+                "allowed_files",
+                "mandatory_commands",
+                "independent_verification",
+            ],  # type: ignore[arg-type]
+        ),
+        snapshot,
+    )
+    assert retired.decision == AdmissionDecision.BLOCK
+    assert any("UNAVAILABLE" in reason for reason in retired.decision_reasons)
 
 
 def _agy_medium_request(**overrides: object) -> WorkforceAdmissionRequest:
     values: dict[str, object] = {
-        "requested_worker_id": "agy_flash_37_medium",
+        "requested_worker_id": "agy_flash_38",
         "provider": "agy",
-        "model": "gemini-3.7-flash-medium",
+        "model": "gemini-3.8-flash-medium",
         "role": "fast_bounded_implementation",
         "autonomy": "L3",
         "context": "nexus_bounded",
@@ -220,13 +245,22 @@ def test_agy_medium_admission_is_exact_bounded_and_fail_closed() -> None:
 
     by_worker = loader.admit(_agy_medium_request())
     assert by_worker.decision == AdmissionDecision.ALLOW
-    assert by_worker.resolved_worker_id == "agy_flash_37_medium"
-    assert by_worker.resolved_model == "gemini-3.7-flash-medium"
+    assert by_worker.resolved_worker_id == "agy_flash_38"
+    assert by_worker.resolved_model == "gemini-3.8-flash-medium"
     assert by_worker.autonomy_ceiling == "L3"
 
     by_identity = loader.admit(_agy_medium_request(requested_worker_id=None))
     assert by_identity.decision == AdmissionDecision.ALLOW
-    assert by_identity.resolved_worker_id == "agy_flash_37_medium"
+    assert by_identity.resolved_worker_id == "agy_flash_38"
+
+    # The retired 3.7 Medium identity is exact but UNAVAILABLE since 2026-10-13.
+    medium_37 = loader.admit(
+        _agy_medium_request(
+            requested_worker_id="agy_flash_37_medium", model="gemini-3.7-flash-medium"
+        )
+    )
+    assert medium_37.decision == AdmissionDecision.BLOCK
+    assert any("UNAVAILABLE" in reason for reason in medium_37.decision_reasons)
 
     high_through_medium = loader.admit(_agy_medium_request(model="gemini-3.6-flash-high"))
     assert high_through_medium.decision == AdmissionDecision.BLOCK
@@ -259,10 +293,11 @@ def test_agy_medium_admission_is_exact_bounded_and_fail_closed() -> None:
             ],
         )
     )
-    assert medium_36.decision == AdmissionDecision.ALLOW
+    # Exact 3.6 Medium identity still resolves, but Agy 1.3.4 no longer serves it.
+    assert medium_36.decision == AdmissionDecision.BLOCK
     assert medium_36.resolved_worker_id == "agy_flash_medium"
     assert medium_36.resolved_model == "gemini-3.6-flash-medium"
-    assert medium_36.autonomy_ceiling == "L1"
+    assert any("UNAVAILABLE" in reason for reason in medium_36.decision_reasons)
 
     elevated = loader.admit(_agy_medium_request(autonomy="L4"))
     assert elevated.decision == AdmissionDecision.BLOCK
@@ -286,7 +321,7 @@ def test_agy_medium_admission_is_exact_bounded_and_fail_closed() -> None:
 def test_admission_blocks_missing_route_authorization() -> None:
     loader = WorkforcePolicyLoader(POLICY_PATH)
     req = WorkforceAdmissionRequest(
-        requested_worker_id="agy_flash",
+        requested_worker_id="agy_flash_38",
         role="fast_bounded_implementation",
         autonomy="L2",
         context="nexus_bounded",
@@ -369,7 +404,7 @@ def test_codex_luna_blocks_when_receipt_control_is_missing() -> None:
 def test_admission_blocks_missing_required_controls() -> None:
     loader = WorkforcePolicyLoader(POLICY_PATH)
     req = WorkforceAdmissionRequest(
-        requested_worker_id="agy_flash",
+        requested_worker_id="agy_flash_38",
         role="fast_bounded_implementation",
         autonomy="L2",
         context="nexus_bounded",
@@ -448,9 +483,10 @@ def test_owner_approved_deepseek_candidate_admission_is_generic_and_fail_closed(
 
 def test_admission_escalates_role_mismatch() -> None:
     loader = WorkforcePolicyLoader(POLICY_PATH)
-    # agy_flash roles are [fast_bounded_implementation, focused_verification]
+    # agy_flash_38 roles are [bounded_candidate_generation, fast_bounded_implementation,
+    # focused_verification]
     req = WorkforceAdmissionRequest(
-        requested_worker_id="agy_flash",
+        requested_worker_id="agy_flash_38",
         role="main_engineering",
         autonomy="L2",
         context="nexus_bounded",
@@ -459,6 +495,8 @@ def test_admission_escalates_role_mismatch() -> None:
             "task_card",
             "allowed_files",
             "mandatory_commands",
+            "parser",
+            "verifier",
             "independent_verification",
         ],  # type: ignore[arg-type]
     )
@@ -469,21 +507,9 @@ def test_admission_escalates_role_mismatch() -> None:
 
 def test_admission_escalates_autonomy_exceeding_ceiling() -> None:
     loader = WorkforcePolicyLoader(POLICY_PATH)
-    # agy_flash autonomy is L2, requesting L2+
-    req = WorkforceAdmissionRequest(
-        requested_worker_id="agy_flash",
-        role="fast_bounded_implementation",
-        autonomy="L2+",
-        context="nexus_bounded",
-        route_authorized=True,
-        provided_controls=[
-            "task_card",
-            "allowed_files",
-            "mandatory_commands",
-            "independent_verification",
-        ],  # type: ignore[arg-type]
-    )
-    dec = loader.admit(req)
+    # opencode_deepseek_v4_flash autonomy is L2, requesting L2+ (agy_flash, the former
+    # L2 fixture, is UNAVAILABLE since 2026-10-13)
+    dec = loader.admit(_deepseek_request(autonomy="L2+"))
     assert dec.decision == AdmissionDecision.ESCALATE
     assert any("exceeds worker autonomy ceiling" in r for r in dec.decision_reasons)
 
@@ -578,7 +604,7 @@ def test_admission_blocks_invalid_request_schema_without_resolving_worker() -> N
     loader = WorkforcePolicyLoader(POLICY_PATH)
     req = WorkforceAdmissionRequest(
         schema="nexus.invalid_request.v1",
-        requested_worker_id="agy_flash",
+        requested_worker_id="agy_flash_38",
         role="fast_bounded_implementation",
         autonomy="L2",
         context="nexus_bounded",
@@ -600,22 +626,22 @@ def test_admission_blocks_invalid_request_schema_without_resolving_worker() -> N
 
 
 def test_resolve_route_global_returns_37_medium() -> None:
-    """resolve_route returns agy_flash_37_medium for global fast_bounded_implementation."""
+    """resolve_route returns agy_flash_38 for global fast_bounded_implementation."""
     loader = WorkforcePolicyLoader(POLICY_PATH)
     loader.load()
     worker_id = loader.resolve_route("fast_bounded_implementation")
-    assert worker_id == "agy_flash_37_medium"
+    assert worker_id == "agy_flash_38"
 
 
 def test_resolve_route_exact_campaign_match() -> None:
-    """Exact campaign match resolves to agy_flash_37_medium."""
+    """Exact campaign match resolves to agy_flash_38."""
     loader = WorkforcePolicyLoader(POLICY_PATH)
     loader.load()
     worker_id = loader.resolve_route(
         "fast_bounded_implementation",
         campaign_id="CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01",
     )
-    assert worker_id == "agy_flash_37_medium"
+    assert worker_id == "agy_flash_38"
 
 
 def test_resolve_route_blank_campaign_uses_global() -> None:
@@ -623,7 +649,7 @@ def test_resolve_route_blank_campaign_uses_global() -> None:
     loader = WorkforcePolicyLoader(POLICY_PATH)
     loader.load()
     worker_id = loader.resolve_route("fast_bounded_implementation", campaign_id="")
-    assert worker_id == "agy_flash_37_medium"
+    assert worker_id == "agy_flash_38"
 
 
 def test_resolve_route_missing_campaign_uses_global() -> None:
@@ -634,7 +660,7 @@ def test_resolve_route_missing_campaign_uses_global() -> None:
         "fast_bounded_implementation",
         campaign_id="CAMPAIGN-UNRELATED-THING",
     )
-    assert worker_id == "agy_flash_37_medium"
+    assert worker_id == "agy_flash_38"
 
 
 def test_resolve_route_prefixed_campaign_uses_global() -> None:
@@ -645,31 +671,42 @@ def test_resolve_route_prefixed_campaign_uses_global() -> None:
         "fast_bounded_implementation",
         campaign_id="prefix_CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01",
     )
-    assert worker_id == "agy_flash_37_medium"
+    assert worker_id == "agy_flash_38"
 
 
 def test_resolve_route_whitespace_campaign_is_literal_and_uses_global(tmp_path) -> None:
     loader = _mutated_policy(
         tmp_path,
-        lambda data: data["routing"]["online"]["campaign_routing"].update({
-            "CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01": {
-                "fast_bounded_implementation": "agy_flash_medium"
-            }
-        }),
+        lambda data: (
+            # A distinct AVAILABLE campaign worker; every Gemini 3.6/3.7 tier is
+            # UNAVAILABLE since 2026-10-13, so a synthetic copy of the default is used.
+            data["workers"].update({
+                "campaign_only_worker": {
+                    **data["workers"]["agy_flash_38"],
+                    "model": "gemini-campaign-only",
+                    "default_route": False,
+                }
+            }),
+            data["routing"]["online"]["campaign_routing"].update({
+                "CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01": {
+                    "fast_bounded_implementation": "campaign_only_worker"
+                }
+            }),
+        ),
     )
     assert (
         loader.resolve_route(
             "fast_bounded_implementation",
             campaign_id="CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01",
         )
-        == "agy_flash_medium"
+        == "campaign_only_worker"
     )
     assert (
         loader.resolve_route(
             "fast_bounded_implementation",
             campaign_id=" CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01",
         )
-        == "agy_flash_37_medium"
+        == "agy_flash_38"
     )
 
 
@@ -678,14 +715,14 @@ def test_loader_reject_does_not_cache_invalid_snapshot(tmp_path) -> None:
     path = tmp_path / "policy.yaml"
     path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
     loader = WorkforcePolicyLoader(path)
-    assert loader.load().routing["online"]["fast_bounded_implementation"] == "agy_flash_37_medium"
+    assert loader.load().routing["online"]["fast_bounded_implementation"] == "agy_flash_38"
     data["routing"]["online"]["fast_bounded_implementation"] = "missing_worker"
     path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
     with pytest.raises(WorkforcePolicyValidationError):
         loader.load()
-    data["routing"]["online"]["fast_bounded_implementation"] = "agy_flash_37_medium"
+    data["routing"]["online"]["fast_bounded_implementation"] = "agy_flash_38"
     path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
-    assert loader.resolve_route("fast_bounded_implementation") == "agy_flash_37_medium"
+    assert loader.resolve_route("fast_bounded_implementation") == "agy_flash_38"
 
 
 def test_get_route_defaults_returns_current_default_and_fallback() -> None:
@@ -695,8 +732,9 @@ def test_get_route_defaults_returns_current_default_and_fallback() -> None:
     defaults = loader.get_route_defaults()
     assert "fast_bounded_implementation" in defaults
     fbi = defaults["fast_bounded_implementation"]
-    assert fbi["current_default"] == "agy_flash_37_medium"
-    assert fbi["fallback"] == "agy_flash"
+    assert fbi["current_default"] == "agy_flash_38"
+    assert "fallback" in fbi
+    assert fbi["fallback"] is None  # explicit null: fail closed since 2026-10-13
 
 
 def _mutated_policy(tmp_path, mutate):
@@ -723,7 +761,7 @@ def _mutated_policy(tmp_path, mutate):
         (
             lambda d: d["workers"].update(
                 extra_default={
-                    **d["workers"]["agy_flash_37_medium"],
+                    **d["workers"]["agy_flash_38"],
                     "model": "gemini-extra",
                     "default_route": True,
                 }
@@ -733,9 +771,9 @@ def _mutated_policy(tmp_path, mutate):
         (
             lambda d: d["workers"].update(
                 successor={
-                    **d["workers"]["agy_flash_37_medium"],
+                    **d["workers"]["agy_flash_38"],
                     "model": "gemini-successor",
-                    "successor_of": "agy_flash_37_medium",
+                    "successor_of": "agy_flash_38",
                     "default_route": False,
                 }
             ),
@@ -765,11 +803,11 @@ def test_b3_mimo_campaign_does_not_change_global_fast_route() -> None:
     loader = WorkforcePolicyLoader(POLICY_PATH)
     loader.load()
 
-    assert loader.resolve_route("fast_bounded_implementation") == "agy_flash_37_medium"
+    assert loader.resolve_route("fast_bounded_implementation") == "agy_flash_38"
     assert (
         loader.resolve_route(
             "fast_bounded_implementation",
             campaign_id="github-issue-982-wave-b-20260919",
         )
-        == "agy_flash_37_medium"
+        == "agy_flash_38"
     )

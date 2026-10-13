@@ -902,11 +902,13 @@ def _run_nexus(
     workforce_bindings: dict[str, Any] = {}
     if online_enabled:
         workforce_bindings["online"] = {
-            "worker_id": "agy_flash",
+            "worker_id": "agy_flash_38",
             "controls": [
                 "task_card",
                 "allowed_files",
                 "mandatory_commands",
+                "parser",
+                "verifier",
                 "independent_verification",
             ],
         }

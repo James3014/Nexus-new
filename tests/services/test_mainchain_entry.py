@@ -34,10 +34,17 @@ def _mainchain_workforce_binding(request: UnifiedRuntimeRequest) -> tuple[str, s
             ["governed_adapter", "independent_verification", "receipt"],
         )
     return (
-        "agy_flash",
+        "agy_flash_38",
         "agy",
-        "gemini-3.6-flash-high",
-        ["task_card", "allowed_files", "mandatory_commands", "independent_verification"],
+        "gemini-3.8-flash-medium",
+        [
+            "task_card",
+            "allowed_files",
+            "mandatory_commands",
+            "parser",
+            "verifier",
+            "independent_verification",
+        ],
     )
 
 

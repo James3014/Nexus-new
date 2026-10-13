@@ -49,11 +49,13 @@ COMPAT_LABELS: frozenset[str] = frozenset({
 def _agy_online_workforce_binding() -> dict[str, dict[str, object]]:
     return {
         "online": {
-            "worker_id": "agy_flash",
+            "worker_id": "agy_flash_38",
             "controls": [
                 "task_card",
                 "allowed_files",
                 "mandatory_commands",
+                "parser",
+                "verifier",
                 "independent_verification",
             ],
         }
@@ -277,11 +279,13 @@ def test_mainchain_entry_run_mainchain_contract() -> None:
                 "online_invoker_provider": "agy",
                 "workforce_bindings": {
                     "online": {
-                        "worker_id": "agy_flash",
+                        "worker_id": "agy_flash_38",
                         "controls": [
                             "task_card",
                             "allowed_files",
                             "mandatory_commands",
+                            "parser",
+                            "verifier",
                             "independent_verification",
                         ],
                     }
