@@ -11,6 +11,7 @@ import io
 import json
 import os
 import re
+import signal
 import subprocess  # nosec B404
 import sys
 import tarfile
@@ -40,6 +41,7 @@ CANONICAL_AGY_DISPATCH_SHA256 = "cd2b6a2bfdd4466434da529a5b6bb47914131c0fc4cb6c3
 CANONICAL_AGY_EXECUTION_GENERATION = "AGY_GEMINI_3_8_FLASH_MEDIUM_V11"
 AGY_EXECUTION_GENERATION_PATTERN = re.compile(r"^AGY_[A-Z0-9_]+_V\d+$")
 AGY_PROVIDER_TERMINAL_GRACE_SECONDS = 30.0
+AGY_TERMINATION_GRACE_SECONDS = 5.0
 MAX_AGY_PROVIDER_OUTPUT_BYTES = 5_000_000
 AGY_RAW_RECEIPT_SCHEMA = "nexus.hybrid_replication.agy_live_raw.v1"
 AGY_SHADOW_CANDIDATE_SCHEMA = "nexus.hybrid_replication.agy_shadow_candidate.v1"
@@ -1043,13 +1045,9 @@ def _run_codex_candidate(
     with tempfile.TemporaryDirectory(prefix="nexus-hybrid-replication-c-") as temp:
         root = Path(temp)
         source = root / "source"
-        added = _run(
-            ["git", "worktree", "add", "--detach", str(source), revision],
-            cwd=repo,
-            timeout=60,
-        )
-        if added.returncode != 0:
-            raise RuntimeError(f"shadow_worktree_add_failed:{added.stderr.strip()}")
+        # Isolated clone (not a worktree): a worktree shares the parent's refs and
+        # object store, so the agent could read branches that postdate the revision.
+        _prepare_shadow_checkout(repo=repo, revision=revision, source=source)
         try:
             schema_path = root / "schema.json"
             output_path = root / "last.json"
@@ -1165,12 +1163,7 @@ def _run_codex_candidate(
                 wall,
             )
         finally:
-            _run(
-                ["git", "worktree", "remove", "--force", str(source)],
-                cwd=repo,
-                timeout=60,
-            )
-            _run(["git", "worktree", "prune"], cwd=repo, timeout=30)
+            pass
 
 
 def _b_fallback_prompt(
@@ -1500,6 +1493,85 @@ def seal_shadow_candidate(
     }
 
 
+def _agy_operation_process_groups(*records: Mapping[str, Any] | None) -> tuple[int, ...]:
+    """Process groups owned by one dispatcher operation (supervisor and provider)."""
+    own = os.getpgrp()
+    groups: list[int] = []
+    for record in records:
+        if not isinstance(record, Mapping):
+            continue
+        pid = record.get("pid")
+        if isinstance(pid, int) and pid > 1:
+            try:
+                pgid = os.getpgid(pid)
+            except OSError:
+                pgid = None
+            # The supervisor is spawned with start_new_session, so it leads its group.
+            if pgid == pid:
+                groups.append(pgid)
+        provider_pgid = record.get("provider_pgid")
+        if isinstance(provider_pgid, int) and provider_pgid > 1:
+            groups.append(provider_pgid)
+    return tuple(dict.fromkeys(g for g in groups if g != own))
+
+
+def _signal_groups(groups: Sequence[int], sig: int) -> None:
+    for pgid in groups:
+        try:
+            os.killpg(pgid, sig)
+        except (ProcessLookupError, PermissionError):
+            continue
+
+
+def _groups_alive(groups: Sequence[int]) -> bool:
+    for pgid in groups:
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            continue
+        except PermissionError:
+            pass  # macOS reports EPERM for zombie-only groups; ps decides below
+        # A group holding only zombies is gone for our purposes.
+        rows = _run(["ps", "-A", "-o", "pgid=,stat="], timeout=15).stdout.splitlines()
+        for row in rows:
+            parts = row.split()
+            if len(parts) >= 2 and parts[0] == str(pgid) and not parts[1].startswith("Z"):
+                return True
+    return False
+
+
+def terminate_agy_operation(
+    operation_json: Path,
+    *,
+    initial: Mapping[str, Any] | None = None,
+    grace_seconds: float = AGY_TERMINATION_GRACE_SECONDS,
+) -> bool:
+    """SIGTERM then SIGKILL the dispatcher/provider process groups; True once all are gone.
+
+    Called when the harness deadline passes so nothing keeps writing to the source
+    tree after the candidate is sealed (#1216 V12: deadline must be total).
+    """
+    current: dict[str, Any] | None = None
+    try:
+        loaded = json.loads(operation_json.read_text(encoding="utf-8"))
+        current = loaded if isinstance(loaded, dict) else None
+    except (OSError, json.JSONDecodeError):
+        current = None
+    groups = _agy_operation_process_groups(current, initial)
+    if not groups:
+        return True
+    _signal_groups(groups, signal.SIGTERM)
+    end = time.monotonic() + max(0.0, grace_seconds)
+    while time.monotonic() < end and _groups_alive(groups):
+        time.sleep(0.05)
+    if _groups_alive(groups):
+        _signal_groups(groups, signal.SIGKILL)
+        end = time.monotonic() + 5.0
+        while time.monotonic() < end and _groups_alive(groups):
+            time.sleep(0.05)
+    return not _groups_alive(groups)
+
+
 def _run_agy_dispatch(
     *,
     cwd: Path,
@@ -1617,6 +1689,17 @@ def _run_agy_dispatch(
         timeout=effective_poll_timeout,
         poll_interval=poll_interval,
     )
+    if timed_out:
+        # Harness deadline passed: stop the dispatcher before anyone seals the source
+        # tree. Callers seal only after this function returns.
+        gone = terminate_agy_operation(operation_json, initial=initial)
+        if not gone:
+            err = "DISPATCH_PROCESS_GROUP_SURVIVED_KILL"
+        else:
+            try:
+                record = json.loads(operation_json.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                pass
     if prospective_guard is not None and record is not None:
         prospective_guard.observe_provider_start(slot=effect_slot, record=record)
     wall = time.perf_counter() - started
@@ -1639,6 +1722,7 @@ def _prepare_shadow_checkout(
         raise RuntimeError(f"shadow_clone_failed:{cloned.stderr.strip()}")
     checked = _run(["git", "checkout", "--detach", revision], cwd=source, timeout=60)
     if checked.returncode == 0:
+        _isolate_shadow_checkout(source=source, revision=revision)
         return
 
     source_ref = f"refs/remotes/origin/{default_branch}"
@@ -1661,6 +1745,40 @@ def _prepare_shadow_checkout(
     checked = _run(["git", "checkout", "--detach", revision], cwd=source, timeout=60)
     if checked.returncode != 0:
         raise RuntimeError(f"shadow_checkout_failed:{checked.stderr.strip()}")
+    _isolate_shadow_checkout(source=source, revision=revision)
+
+
+def _isolate_shadow_checkout(*, source: Path, revision: str) -> None:
+    """Leave only ``revision`` and its ancestry in the agent-visible checkout.
+
+    The clone starts with every ref of the origin repo (V11: 335 refs, including
+    the human fix branch of the task). Remove the remote, all refs, reflogs and
+    fetch leftovers, then prune every object not reachable from the detached HEAD
+    so later commits cannot be read with ``git cat-file`` either.
+    """
+
+    def git(*args: str) -> None:
+        cp = _run(["git", *args], cwd=source, timeout=300)
+        if cp.returncode != 0:
+            raise RuntimeError(f"shadow_isolation_failed:{args[0]}:{cp.stderr.strip()}")
+
+    head = _run(["git", "rev-parse", "HEAD"], cwd=source, timeout=30)
+    if head.returncode != 0 or head.stdout.strip() != revision:
+        raise RuntimeError("shadow_isolation_head_mismatch")
+    remotes = _run(["git", "remote"], cwd=source, timeout=30).stdout.split()
+    for remote in remotes:
+        git("remote", "remove", remote)
+    refs = _run(["git", "for-each-ref", "--format=%(refname)"], cwd=source, timeout=60)
+    for ref in refs.stdout.split():
+        git("update-ref", "-d", ref)
+    git_dir = Path(_git(source, "rev-parse", "--absolute-git-dir").strip())
+    for leftover in ("packed-refs", "FETCH_HEAD", "ORIG_HEAD", "MERGE_HEAD"):
+        (git_dir / leftover).unlink(missing_ok=True)
+    git("reflog", "expire", "--expire=now", "--expire-unreachable=now", "--all")
+    git("gc", "--prune=now", "--quiet")
+    leaked = _run(["git", "for-each-ref"], cwd=source, timeout=60).stdout.strip()
+    if leaked:
+        raise RuntimeError("shadow_isolation_refs_remain")
 
 
 @contextmanager
