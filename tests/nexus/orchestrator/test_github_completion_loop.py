@@ -382,15 +382,15 @@ def _impact_gate_run(
     conclusion: str | None = "success",
     status="completed",
     app_id: int = 15368,
-    workflow_path: str = ".github/workflows/pytest.yml",
+    workflow_path: str = ".github/workflows/trusted-impact-gate.yml",
 ):
     from nexus.orchestrator.github_completion_loop import (
-        EXACT_BASE_IMPACT_GATE_CHECK_NAME,
+        TRUSTED_IMPACT_GATE_CHECK_NAME,
         HeadCheckRunObservation,
     )
 
     return HeadCheckRunObservation(
-        name=EXACT_BASE_IMPACT_GATE_CHECK_NAME,
+        name=TRUSTED_IMPACT_GATE_CHECK_NAME,
         status=status,
         conclusion=conclusion,
         head_sha=head_sha,
@@ -883,7 +883,7 @@ def test_a_unrelated_docs_drift_reuses_unaffected_and_merges_without_owner(monke
     assert port.cas_merge_calls[0]["expected_head_sha"] == "01" * 20
 
 
-def test_b_test_only_drift_defers_test_impact_to_exact_head_ci(monkeypatch):
+def test_b_test_dependency_drift_calls_only_test_impact_hook(monkeypatch):
     """B. test-only drift -> host hook NOT called; TEST_IMPACT deferred to I_n impact gate (#1384 AC4)."""
     initial_ev = _base_evidence(base_sha="d" * 40, current_main_sha="d" * 40)
     new_main_sha = "e" * 40
@@ -3002,7 +3002,7 @@ def test_issue1384_criterion4_test_impact_revalidates_only_affected_tests(monkey
     assert deferral["disposition"] == "TEST_IMPACT deferred to exact-head required CI on I_n"
     assert deferral["deferred_generations"] == [1, 2]
     assert deferral["verified_head_sha"] == "02" * 20
-    assert deferral["check_name"] == "Exact-base impact gate"
+    assert deferral["check_name"] == "Trusted impact gate (default branch)"
     assert len(port.cas_merge_calls) == 1
     assert port.cas_merge_calls[0]["expected_base_sha"] == m2_sha
 
@@ -4248,7 +4248,10 @@ def test_issue1384_ac4_foreign_red_run_is_ignored_when_genuine_run_is_green(monk
 
     assert result.outcome is CompletionLoopOutcome.COMPLETED, result.reason
     assert result.details["test_impact_deferral"]["app_id"] == 15368
-    assert result.details["test_impact_deferral"]["workflow_path"] == ".github/workflows/pytest.yml"
+    assert (
+        result.details["test_impact_deferral"]["workflow_path"]
+        == ".github/workflows/trusted-impact-gate.yml"
+    )
 
 
 def test_issue1384_ac4_observation_requires_app_id_and_workflow_path():
@@ -4257,7 +4260,7 @@ def test_issue1384_ac4_observation_requires_app_id_and_workflow_path():
     from nexus.orchestrator.github_completion_loop import HeadCheckRunObservation
 
     base = {
-        "name": "Exact-base impact gate",
+        "name": "Trusted impact gate (default branch)",
         "status": "completed",
         "conclusion": "success",
         "head_sha": _I1,
@@ -4268,7 +4271,8 @@ def test_issue1384_ac4_observation_requires_app_id_and_workflow_path():
         {"workflow_path": ".github/workflows/pytest.yml"},
         {"app_id": 0, "workflow_path": ".github/workflows/pytest.yml"},
         {"app_id": "15368", "workflow_path": ".github/workflows/pytest.yml"},
-        {"app_id": 15368, "workflow_path": ""},
+        {"app_id": 15368, "workflow_path": " .github/workflows/x.yml"},
+        {"app_id": 15368, "workflow_path": ".github/workflows/../x.yml"},
         {"app_id": 15368, "workflow_path": "/.github/workflows/pytest.yml"},
     ):
         with pytest.raises(ValidationError):
@@ -4366,3 +4370,160 @@ def test_issue1384_ac4_main_state_read_failure_in_gate_branch_blocks_structured(
     assert "TEST_IMPACT_DEFERRED_IMPACT_GATE_NOT_GREEN:MAIN_STATE_READ_FAILED" in result.reason
     assert "github 502" in result.reason
     assert port.cas_merge_calls == []
+
+
+@pytest.mark.parametrize(
+    ("run_specs", "expect_completed"),
+    [
+        ([("success", "completed"), ("cancelled", "completed")], True),
+        ([("cancelled", "completed"), ("success", "completed")], True),
+        ([("skipped", "completed"), ("success", "completed")], True),
+        ([("cancelled", "completed")], False),
+        ([("skipped", "completed")], False),
+        ([("success", "completed"), ("timed_out", "completed")], False),
+        ([("success", "completed"), ("action_required", "completed")], False),
+        ([("success", "completed"), ("failure", "completed")], False),
+        ([("success", "completed"), ("neutral", "completed")], False),
+        ([("success", "completed"), (None, "in_progress")], False),
+        ([("success", "completed"), (None, "queued")], False),
+    ],
+    ids=[
+        "success+cancelled",
+        "cancelled+success",
+        "skipped+success",
+        "cancelled-only",
+        "skipped-only",
+        "success+timed_out",
+        "success+action_required",
+        "success+failure",
+        "success+neutral",
+        "success+pending",
+        "success+queued",
+    ],
+)
+def test_issue1384_ac4_gate_liveness_cancelled_is_ignored_beside_success(
+    monkeypatch, run_specs, expect_completed
+):
+    """F3: >=1 genuine success, no veto conclusion, nothing pending; cancelled/skipped ignored."""
+    runs = [_impact_gate_run(_I1, conclusion=c, status=st) for c, st in run_specs]
+    result, port, _ = _ac4_run(
+        monkeypatch,
+        changed_paths=("tests/unit/test_runner.py",),
+        main_states=[_M1, _M1, _M1, _M1],
+        head_check_runs={_I1: runs},
+    )
+
+    if expect_completed:
+        assert result.outcome is CompletionLoopOutcome.COMPLETED, result.reason
+        assert len(port.cas_merge_calls) == 1
+    else:
+        assert result.outcome is CompletionLoopOutcome.BLOCKED
+        assert "TEST_IMPACT_DEFERRED_IMPACT_GATE_NOT_GREEN" in result.reason
+        assert port.cas_merge_calls == []
+
+
+def test_issue1384_ac4_pytest_yml_exact_base_gate_is_not_the_trust_anchor(monkeypatch):
+    """F2: a green pull_request "Exact-base impact gate" (head-defined YAML) does not satisfy AC4."""
+    from nexus.orchestrator.github_completion_loop import HeadCheckRunObservation
+
+    head_defined = HeadCheckRunObservation(
+        name="Exact-base impact gate",
+        status="completed",
+        conclusion="success",
+        head_sha=_I1,
+        app_id=15368,
+        workflow_path=".github/workflows/pytest.yml",
+    )
+    # Same trusted name but from the head-defined pytest workflow: ignored too.
+    renamed_in_head = _impact_gate_run(_I1, workflow_path=".github/workflows/pytest.yml")
+    result, port, _ = _ac4_run(
+        monkeypatch,
+        changed_paths=("tests/unit/test_runner.py",),
+        main_states=[_M1, _M1, _M1, _M1],
+        head_check_runs={_I1: [head_defined, renamed_in_head]},
+    )
+
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert "TEST_IMPACT_DEFERRED_IMPACT_GATE_MISSING" in result.reason
+    assert port.cas_merge_calls == []
+
+
+def test_issue1384_ac4_dependency_files_import_failure_blocks(monkeypatch):
+    """F4: if pr_impact_gate.DEPENDENCY_FILES cannot be imported, the deferral fails closed."""
+    import scripts.ops.pr_impact_gate as pig
+
+    monkeypatch.delattr(pig, "DEPENDENCY_FILES")
+    result, port, _ = _ac4_run(
+        monkeypatch,
+        changed_paths=("tests/unit/test_runner.py",),
+        main_states=[_M1, _M1, _M1],
+    )
+
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert result.reason == "TEST_IMPACT_DEPENDENCY_FILES_UNAVAILABLE"
+    assert port.materialize_calls == []
+    assert port.cas_merge_calls == []
+
+
+# Real bridge wire format (devspace #513 github-completion-host.ts HeadCheckRunWire,
+# parsed by scripts/github_completion_bridge.py::parse_head_check_runs).  Runs from
+# trusted-impact-gate.yml share one pull_request_target check suite on the PR head.
+_BRIDGE_WIRE_CHECK_RUNS_JSON = """
+{"check_runs": [
+  {"name": "Trusted impact controller (default branch)", "status": "completed",
+   "conclusion": "success", "head_sha": "%(sha)s", "app_id": 15368,
+   "app_slug": "github-actions", "workflow_path": ".github/workflows/trusted-impact-gate.yml"},
+  {"name": "Trusted impact gate (default branch)", "status": "completed",
+   "conclusion": "success", "head_sha": "%(sha)s", "app_id": 15368,
+   "app_slug": "github-actions", "workflow_path": ".github/workflows/trusted-impact-gate.yml"},
+  {"name": "Exact-base impact gate", "status": "completed", "conclusion": "success",
+   "head_sha": "%(sha)s", "app_id": 15368, "app_slug": "github-actions",
+   "workflow_path": ".github/workflows/pytest.yml"},
+  {"name": "Trusted impact gate (default branch)", "status": "completed",
+   "conclusion": "failure", "head_sha": "%(sha)s", "app_id": 7,
+   "app_slug": "some-other-app", "workflow_path": ""},
+  {"name": "CodeQL", "status": "completed", "conclusion": "neutral",
+   "head_sha": "%(sha)s", "app_id": 57789, "app_slug": "github-advanced-security",
+   "workflow_path": ""}
+]}
+"""
+
+
+def _bridge_parse(payload_json: str, head_sha: str):
+    """Mirror of the bridge mapping: wire item -> real HeadCheckRunObservation."""
+    from nexus.orchestrator.github_completion_loop import HeadCheckRunObservation
+
+    payload = json.loads(payload_json)
+    return tuple(
+        HeadCheckRunObservation(
+            name=item.get("name"),
+            status=item.get("status"),
+            conclusion=item.get("conclusion"),
+            head_sha=item.get("head_sha"),
+            app_id=item["app_id"],
+            workflow_path=item["workflow_path"],
+        )
+        for item in payload["check_runs"]
+        if item.get("head_sha") == head_sha
+    )
+
+
+def test_issue1384_ac4_bridge_wire_non_actions_run_contract(monkeypatch):
+    """F1 end-to-end: bridge JSON with workflow_path "" (non-Actions app) parses through the
+    real model, cannot veto the gate, and the genuine trusted verdict satisfies it."""
+    observations = _bridge_parse(_BRIDGE_WIRE_CHECK_RUNS_JSON % {"sha": _I1}, _I1)
+    assert len(observations) == 5
+    assert [o.workflow_path for o in observations if o.app_id != 15368] == ["", ""]
+
+    result, port, _ = _ac4_run(
+        monkeypatch,
+        changed_paths=("tests/unit/test_runner.py",),
+        main_states=[_M1, _M1, _M1],
+        head_check_runs={_I1: list(observations)},
+    )
+
+    assert result.outcome is CompletionLoopOutcome.COMPLETED, result.reason
+    deferral = result.details["test_impact_deferral"]
+    assert deferral["check_name"] == "Trusted impact gate (default branch)"
+    assert deferral["workflow_path"] == ".github/workflows/trusted-impact-gate.yml"
+    assert deferral["exact_head_run_count"] == 1

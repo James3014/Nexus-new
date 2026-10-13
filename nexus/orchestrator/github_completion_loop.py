@@ -58,18 +58,27 @@ DEFAULT_MAX_INTEGRATION_GENERATIONS: int = 5
 MAX_COMPLETION_ELAPSED_SECONDS: float = 2700.0
 
 # #1384 AC4: a TEST_IMPACT-only main movement is not revalidated by the host.
-# It is satisfied by the required exact-head CI run of this check on I_n.
+# It is satisfied by the default-branch trusted impact gate's final verdict job on
+# the exact head I_n.  That workflow runs on ``pull_request_target`` (#1754 B), so
+# I_n cannot redefine the job, the planner or the classifier for its own run (the
+# ``pull_request`` "Exact-base impact gate" in pytest.yml runs I_n's own YAML and
+# head planner, so it is not used as the trust anchor here).
 #
 # Known coverage gap (accepted): the impact gate selects tests from the Candidate's
 # diff against the exact base M_n, at their I_n contents.  A main-side test change
 # for code the Candidate also changes may not be selected on I_n; such a regression
 # is caught post-merge by the nightly Tier 3 full regression, not by this gate.
-EXACT_BASE_IMPACT_GATE_CHECK_NAME: str = "Exact-base impact gate"
-# Only the genuine run counts: GitHub Actions app, from the pytest workflow.  A
-# same-named job in another workflow, or a check-run posted by any other app with
+#
+# Only the genuine run counts: the GitHub Actions app, from trusted-impact-gate.yml.
+# A same-named job in another workflow, or a check-run posted by any other app with
 # checks:write, is ignored (it can neither satisfy nor veto the gate).
+TRUSTED_IMPACT_GATE_CHECK_NAME: str = "Trusted impact gate (default branch)"
+TRUSTED_IMPACT_GATE_WORKFLOW_PATH: str = ".github/workflows/trusted-impact-gate.yml"
 GITHUB_ACTIONS_APP_ID: int = 15368
-EXACT_BASE_IMPACT_GATE_WORKFLOW_PATH: str = ".github/workflows/pytest.yml"
+# Conclusions of a genuine exact-head run that veto the gate even beside a success.
+# cancelled/skipped runs beside a genuine success are ignored (a superseded or
+# re-run attempt must not block forever); any other non-success conclusion vetoes.
+_IMPACT_GATE_IGNORABLE_CONCLUSIONS: frozenset[str] = frozenset({"cancelled", "skipped"})
 TEST_IMPACT_DEFERRAL_DISPOSITION: str = "TEST_IMPACT deferred to exact-head required CI on I_n"
 
 
@@ -226,7 +235,8 @@ class HeadCheckRunObservation(_FrozenModel):
     @field_validator("workflow_path")
     @classmethod
     def validate_workflow_path(cls, value: str) -> str:
-        if not value or value != value.strip() or value.startswith("/") or ".." in value:
+        # "" is the bridge's value for non-Actions apps; the pin filter ignores it.
+        if value != value.strip() or value.startswith("/") or ".." in value:
             raise ValueError(f"workflow_path_invalid: {value!r}")
         return value
 
@@ -236,38 +246,42 @@ def _evaluate_exact_head_impact_gate(
 ) -> tuple[str | None, dict[str, Any]]:
     """Return (error, record) for the exact-head impact gate among live check-runs.
 
-    Only genuine runs count: the GitHub Actions app and the pytest workflow
+    Only genuine runs count: the GitHub Actions app and trusted-impact-gate.yml
     (other same-named runs are ignored).  Of those, only runs whose own
     ``head_sha`` equals ``head_sha`` count; a run reported for any other commit
-    (e.g. I_(n-1)) is stale.  Every exact-head genuine run must be a completed
-    success, and at least one must exist.
+    (e.g. I_(n-1)) is stale.  The gate is green when at least one genuine
+    exact-head run is completed/success, no genuine exact-head run is pending,
+    and none has a conclusion other than success/cancelled/skipped (so failure,
+    timed_out, action_required, ... veto it).
     """
     if not isinstance(runs, (list, tuple)) or not all(
         isinstance(r, HeadCheckRunObservation) for r in runs
     ):
         return "IMPACT_GATE_OBSERVATION_INVALID", {}
-    same_name = [r for r in runs if r.name == EXACT_BASE_IMPACT_GATE_CHECK_NAME]
+    same_name = [r for r in runs if r.name == TRUSTED_IMPACT_GATE_CHECK_NAME]
     named = [
         r
         for r in same_name
         if r.app_id == GITHUB_ACTIONS_APP_ID
-        and r.workflow_path == EXACT_BASE_IMPACT_GATE_WORKFLOW_PATH
+        and r.workflow_path == TRUSTED_IMPACT_GATE_WORKFLOW_PATH
     ]
     if not named:
         return "IMPACT_GATE_MISSING", {"ignored_foreign_run_count": len(same_name)}
     exact = [r for r in named if r.head_sha == head_sha]
     if not exact:
         return "IMPACT_GATE_STALE", {"observed_head_shas": sorted({r.head_sha for r in named})}
-    if any(
-        r.status.lower() != "completed" or (r.conclusion or "").lower() != "success" for r in exact
-    ):
-        return "IMPACT_GATE_NOT_GREEN", {
-            "observed": [(r.status, r.conclusion) for r in exact],
-        }
+    observed = {"observed": [(r.status, r.conclusion) for r in exact]}
+    if any(r.status.lower() != "completed" for r in exact):
+        return "IMPACT_GATE_NOT_GREEN", observed  # pending
+    conclusions = [(r.conclusion or "").lower() for r in exact]
+    if any(c != "success" and c not in _IMPACT_GATE_IGNORABLE_CONCLUSIONS for c in conclusions):
+        return "IMPACT_GATE_NOT_GREEN", observed
+    if "success" not in conclusions:
+        return "IMPACT_GATE_NOT_GREEN", observed
     return None, {
-        "check_name": EXACT_BASE_IMPACT_GATE_CHECK_NAME,
+        "check_name": TRUSTED_IMPACT_GATE_CHECK_NAME,
         "app_id": GITHUB_ACTIONS_APP_ID,
-        "workflow_path": EXACT_BASE_IMPACT_GATE_WORKFLOW_PATH,
+        "workflow_path": TRUSTED_IMPACT_GATE_WORKFLOW_PATH,
         "verified_head_sha": head_sha,
         "exact_head_run_count": len(exact),
     }
@@ -832,7 +846,7 @@ def run_github_completion_loop(
             # #1384 AC4: a movement whose only affected dimension is TEST_IMPACT is not
             # revalidated by the host (which would run before materialize, without a test
             # selection, on a possibly stale venv).  It is deferred to the required
-            # exact-head "Exact-base impact gate" on I_n, checked live before CAS.
+            # exact-head "Trusted impact gate (default branch)" on I_n, checked live before CAS.
             affected_dimensions = [
                 d.dimension for d in requalification.dimensions if d.action == "RECHECK_AFFECTED"
             ]
@@ -1028,7 +1042,7 @@ def run_github_completion_loop(
                 test_impact_deferred_generations.append(current_generation)
                 combined_requal_data["test_impact_deferral"] = {
                     "disposition": TEST_IMPACT_DEFERRAL_DISPOSITION,
-                    "check_name": EXACT_BASE_IMPACT_GATE_CHECK_NAME,
+                    "check_name": TRUSTED_IMPACT_GATE_CHECK_NAME,
                     "integration_head_sha": mat_result.integration_head_sha,
                     "generation": current_generation,
                 }
@@ -1370,7 +1384,7 @@ def run_github_completion_loop(
             )
 
         # #1384 AC4: a deferred TEST_IMPACT is satisfied only by a successful
-        # "Exact-base impact gate" on the exact head being merged, read live.
+        # "Trusted impact gate (default branch)" on the exact head being merged, read live.
         deferral_details: dict[str, Any] = {}
         if test_impact_deferred_generations:
             gate_error, gate_record = _read_exact_head_impact_gate(
