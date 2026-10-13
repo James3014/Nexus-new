@@ -4,8 +4,8 @@ import time as _real_time
 import pytest
 
 from nexus.core import capability_executor_registry as _registry
-from nexus.core.capability_executor_registry import EXECUTOR_REGISTRY
 from nexus.core.belief_contracts import CapabilityExecutionPlan
+from nexus.core.capability_executor_registry import EXECUTOR_REGISTRY
 
 STEP_MS = 5
 
