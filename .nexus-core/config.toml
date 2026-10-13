@@ -38,3 +38,18 @@ evidence_kind = "test-result"
 requirement_mode = "REQUIRED"
 applicability = "APPLICABLE"
 required_material_ids = ["canonical-learning", "canonical-runtime"]
+
+# Owner-signed governed deletion exception (owner decision 2026-10-13).
+# deletion_policy stays FORBID; a change may delete only paths listed in an
+# owner-SSHSIG-signed .nexus-core/deletions/<id>.json, preserved in an archive
+# commit on main's history, in a PR touching nothing else. The same signature
+# is required to change any protected path (config.toml is always protected).
+[deletion_exception]
+mode = "OWNER_SIGNED_ARCHIVE"
+manifest_dir = ".nexus-core/deletions"
+signature_namespace = "nexus-core-deletion@v1"
+allowed_signers = ["james-owner ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMNfAGP7KssQm5t54EL3z4gOrDvTXQE1qmxZu6AOqBmm"]
+protected_paths = [
+  ".github/workflows/nexus-core-issue-completion.yml",
+  ".github/workflows/trusted-deletion-anchor.yml",
+]
