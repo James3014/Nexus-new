@@ -12,13 +12,15 @@ def test_crosswalk_alignment_regenerates_current_inputs() -> None:
 
     assert result["schema"] == "nexus.openwiki_wiki_crosswalk.v1"
     assert result["authority"] == "derived_non_authoritative"
-    assert result["record_count"] == 37
+    # 36 records since #1961 (fe29afcee) dropped scripts/engine/commands/stress_test.py
+    # (an EXACT_PREFIX_MATCH) from the OpenWiki source_paths ahead of its governed deletion.
+    assert result["record_count"] == 36
     assert result["status_counts"] == {
-        "EXACT_PREFIX_MATCH": 15,
+        "EXACT_PREFIX_MATCH": 14,
         "UNMAPPED": 22,
     }
     assert result["alignment_status"] == "PASS"
-    assert result["mapped_count"] == 15
+    assert result["mapped_count"] == 14
     assert result["unmapped_count"] == 22
     assert result["ambiguous_count"] == 0
 
@@ -181,10 +183,15 @@ def test_crosswalk_alignment_fails_closed_for_scoped_ambiguous(monkeypatch) -> N
     )
     tampered = deepcopy(source)
     record = tampered["records"][0]
+    status_counts = dict(source["status_counts"])
+    status_counts[record["mapping_status"]] -= 1
+    if not status_counts[record["mapping_status"]]:
+        del status_counts[record["mapping_status"]]
+    status_counts["AMBIGUOUS"] = 1
     record["mapping_status"] = "AMBIGUOUS"
     record["authority_page"] = None
     record["authority_classification"] = None
-    tampered["status_counts"] = {"AMBIGUOUS": 1, "EXACT_PREFIX_MATCH": 15, "UNMAPPED": 21}
+    tampered["status_counts"] = status_counts
     monkeypatch.setattr(audit, "compile_crosswalk", lambda *_args: tampered)
 
     result = audit.build_crosswalk_alignment(formal_scope={record["implementation_key"]})

@@ -103,26 +103,50 @@ def test_local_qwen35_9b_blocks():
     assert result.records[0].decision["decision"] == "BLOCK"
 
 
-def test_local_advisor_nexus_full_escalates():
+def test_local_advisor_nexus_full_escalates(tmp_path):
     # Node id kept stable for the exact-base impact gate. local_advisor_3b is now
     # INSTALLED_NOT_CONNECTED (BLOCK), so the local nexus_full ESCALATE case is
     # exercised with local_qwen3_8b, which has an observed full-context regression.
-    result = evaluate(
-        demands(
-            demand(
-                role="bounded_reasoning_candidate",
-                autonomy="L1",
-                context="nexus_full",
-                mutation=False,
-            )
-        ),
-        {
-            "local": {
-                "requested_worker_id": "local_qwen3_8b",
-                "controls": ["bounded_context", "parser", "focused_tests", "external_verifier"],
-            }
-        },
+    # Since #1908 (runtime f795dd4, #173) local_qwen3_8b is INSTALLED_NOT_CONNECTED
+    # on the M5 host too, which BLOCKs before the context rule is reached. The
+    # ESCALATE rule is about the observed nexus_full regression, not host
+    # presence, so evaluate it against the live policy with only that worker's
+    # connection state restored to LOCAL_CONDITIONAL.
+    disconnected = (
+        "  local_qwen3_8b:\n"
+        "    provider: ollama\n"
+        "    model: qwen3:8b\n"
+        "    state: INSTALLED_NOT_CONNECTED\n"
+        "    reason: not_present_on_m5_ollama_2026-10-12\n"
     )
+    connected = (
+        "  local_qwen3_8b:\n"
+        "    provider: ollama\n"
+        "    model: qwen3:8b\n"
+        "    state: LOCAL_CONDITIONAL\n"
+    )
+    live_policy = POLICY.read_text(encoding="utf-8")
+    assert live_policy.count(disconnected) == 1
+    policy = tmp_path / "model_workforce.yaml"
+    policy.write_text(live_policy.replace(disconnected, connected), encoding="utf-8")
+    raw = demands(
+        demand(
+            role="bounded_reasoning_candidate",
+            autonomy="L1",
+            context="nexus_full",
+            mutation=False,
+        )
+    )
+    bindings = {
+        "local": {
+            "requested_worker_id": "local_qwen3_8b",
+            "controls": ["bounded_context", "parser", "focused_tests", "external_verifier"],
+        }
+    }
+    # The live policy blocks the disconnected worker outright ...
+    assert evaluate(raw, bindings).overall_decision == AdmissionDecision.BLOCK
+    # ... and a connected worker with the nexus_full regression escalates.
+    result = evaluate_runtime_workforce_admission(raw, bindings, WorkforcePolicyLoader(policy))
     assert result.overall_decision == AdmissionDecision.ESCALATE
     assert result.records[0].decision["decision"] == "ESCALATE"
 

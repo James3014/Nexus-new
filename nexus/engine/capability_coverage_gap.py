@@ -29,6 +29,8 @@ RULED_CAPABILITIES = {
     "delivery_gate",
     "direct_mode",
     "drone",
+    # Planner node from nexus-runtime 68e86ed (#198); executor + contract registered in #2071.
+    "entropy_guard_v2",
     "external_doc_scout",
     "federation",
     "file_lock",

@@ -1033,7 +1033,11 @@ def test_self_hosted_recover_verified_uncommitted_cli_command(tmp_path: Path, mo
     req = _valid_request(tmp_path, task_id=task_id, allowed_files=["README"], target_repo_root=str(tmp_path / "targets" / task_id), target_worktree_root=str(tmp_path / "targets"))
     contract = svc.build_contract(req)
     from nexus.orchestrator.worktree_manager import WorktreeManager
-    from nexus.orchestrator.candidate_verifier import VerifiedCandidateReceipt, VerifierEvidence
+    from nexus.orchestrator.candidate_verifier import (
+        CandidateVerifier,
+        VerifiedCandidateReceipt,
+        VerifierEvidence,
+    )
 
     wm = WorktreeManager(root_dir=contract.target_worktree_root)
     lease = wm.create_lease(contract)
@@ -1056,11 +1060,16 @@ def test_self_hosted_recover_verified_uncommitted_cli_command(tmp_path: Path, mo
         public_claim_allowed=False,
         production_ready=False,
         failure_reasons=[],
+        # The commit sink binds the receipt's verifier manifest to the contract (#1871, 1ac221663).
+        verifier_manifest_sha256=CandidateVerifier.verifier_manifest_sha256(
+            contract.verifier_commands
+        ),
         # A verified receipt must carry evidence for the contract's verifiers (#1760).
         verifier_evidence=(
             VerifierEvidence(
                 command=contract.verifier_commands[0],
-                status="PASS",
+                # CLI worker success status, as CandidateVerifier records it (#1871).
+                status="COMPLETED",
                 exit_code=0,
                 stdout_sha256="0" * 64,
                 stderr_sha256="0" * 64,

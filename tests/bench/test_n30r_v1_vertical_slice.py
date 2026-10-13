@@ -493,11 +493,16 @@ class TestV1TracePipelineStages:
         assert "local_model_executor" in receipt["planner_capabilities"]
 
     def test_executor_capabilities_present(self, receipt):
+        # mempalace_gate is a controller-plane capability (17f63ea82 projection
+        # contract, re-enforced by #2031 / 3f86f1f84): the planner selects it, but
+        # it is never dispatched to the local executor.
         assert receipt["executor_capabilities"] == [
             "artifact_gate", "claim_gate", "delivery_gate",
-            "local_model_executor", "mempalace_gate", "repair_loop",
+            "local_model_executor", "repair_loop",
         ]
         assert "repair_loop" in receipt["executor_capabilities"]
+        assert "mempalace_gate" in receipt["planner_capabilities"]
+        assert "mempalace_gate" not in receipt["executor_capabilities"]
 
     def test_planner_to_projection_accounted(self, receipt):
         assert receipt["planner_to_projection_accounted"] is True
