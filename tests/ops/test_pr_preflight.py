@@ -105,12 +105,10 @@ def _body(issue: int = 1916, *, intent: str = "CLOSE", closes: bool = True, lane
 def fake_certify(tmp_path: Path) -> Path:
     """A stand-in for `nexus-certify markers` that prints a fixed marker."""
     script = tmp_path / "nexus-certify"
-    payload = json.dumps(
-        {
-            "issue_marker": f"<!-- NEXUS_CORE_EVIDENCE_UNIVERSE: {MARKER} -->",
-            "pr_marker": "<!-- NEXUS_CORE_ISSUE: 1916 -->",
-        }
-    )
+    payload = json.dumps({
+        "issue_marker": f"<!-- NEXUS_CORE_EVIDENCE_UNIVERSE: {MARKER} -->",
+        "pr_marker": "<!-- NEXUS_CORE_ISSUE: 1916 -->",
+    })
     script.write_text(
         "#!/bin/sh\n"
         'if [ "$2" = "--help" ]; then echo "usage: markers [--json]"; exit 0; fi\n'
@@ -352,12 +350,10 @@ def test_certify_pin_missing_or_ambiguous_is_unresolved(repo, tmp_path, monkeypa
 
 def test_certify_check_mode_maps_stale_marker_to_fail(repo, tmp_path, capsys):
     stale = tmp_path / "check-certify"
-    payload = json.dumps(
-        {
-            "issue_marker": f"<!-- NEXUS_CORE_EVIDENCE_UNIVERSE: {MARKER} -->",
-            "issue_check": {"status": "STALE", "remediation": "REPLACE THE MARKER"},
-        }
-    )
+    payload = json.dumps({
+        "issue_marker": f"<!-- NEXUS_CORE_EVIDENCE_UNIVERSE: {MARKER} -->",
+        "issue_check": {"status": "STALE", "remediation": "REPLACE THE MARKER"},
+    })
     stale.write_text(
         "#!/bin/sh\n"
         'if [ "$2" = "--help" ]; then echo "usage: markers [--check] [--json]"; exit 0; fi\n'
