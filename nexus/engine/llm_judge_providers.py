@@ -235,7 +235,8 @@ class OllamaJudgeProvider:
             raise RuntimeError("ollama endpoint returned a non-json envelope") from exc
         if not isinstance(envelope, dict):
             raise RuntimeError("ollama endpoint returned a non-object envelope")
-        message = envelope.get("message") if isinstance(envelope.get("message"), dict) else {}
+        raw_message = envelope.get("message")
+        message = raw_message if isinstance(raw_message, dict) else {}
         return envelope, str(message.get("content") or "")
 
 
@@ -278,5 +279,7 @@ def build_judge_providers_from_env(env: Mapping[str, str] | None = None) -> list
                 providers.append(CommandJudgeProvider(name=name, command=command))
             continue
         if name in {"ollama", "local", "m5"}:
-            providers.append(OllamaJudgeProvider.from_policy(source))
+            # Frozen dataclass: ``name`` is read-only, which the JudgeProvider protocol
+            # (a plain attribute) does not express; same as the fake/command providers.
+            providers.append(OllamaJudgeProvider.from_policy(source))  # pyright: ignore[reportArgumentType]
     return providers

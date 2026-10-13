@@ -2086,9 +2086,12 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
                 if key not in out and isinstance(listed, (list, tuple)):
                     out[key] = [str(item) for item in listed]
         if name == "ultra_review":
-            route = context.get("route") if isinstance(context.get("route"), Mapping) else {}
-            if "workspace_root" not in out and route.get("workspace_root") not in (None, ""):
-                out["workspace_root"] = route.get("workspace_root")
+            ultra_route = context.get("route")
+            workspace_root = (
+                ultra_route.get("workspace_root") if isinstance(ultra_route, Mapping) else None
+            )
+            if "workspace_root" not in out and workspace_root not in (None, ""):
+                out["workspace_root"] = workspace_root
         if name in {"autoreason", "ddtree", "hyper", "xray", "judge_panel"}:
             raw_route = context.get("route")
             route = raw_route if isinstance(raw_route, Mapping) else {}
@@ -2360,9 +2363,13 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
             if outcome.get("transactional_rollback_supported") is not True:
                 violations.append("integration_rollback_not_supported")
         if predicate == "ultra_review_lanes_executed":
-            lanes = outcome.get("lanes") if isinstance(outcome.get("lanes"), Mapping) else {}
+            raw_lanes = outcome.get("lanes")
+            lanes: Mapping[str, Any] = raw_lanes if isinstance(raw_lanes, Mapping) else {}
             for lane in ("security_sentry", "logic_breaker"):
-                lane_row = lanes.get(lane) if isinstance(lanes.get(lane), Mapping) else {}
+                raw_lane_row = lanes.get(lane)
+                lane_row: Mapping[str, Any] = (
+                    raw_lane_row if isinstance(raw_lane_row, Mapping) else {}
+                )
                 if not lane_row.get("executed_checks"):
                     violations.append(f"ultra_review_{lane}_no_executed_checks")
                 if lane_row.get("unavailable_checks"):
@@ -2370,7 +2377,8 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
         if predicate == "judge_ranked_real_candidates":
             if int(outcome.get("candidate_count") or 0) < 2:
                 violations.append("judge_insufficient_candidates")
-            ranking = outcome.get("ranking") if isinstance(outcome.get("ranking"), (list, tuple)) else []
+            raw_ranking = outcome.get("ranking")
+            ranking = raw_ranking if isinstance(raw_ranking, (list, tuple)) else []
             if len(ranking) != int(outcome.get("candidate_count") or 0):
                 violations.append("judge_ranking_not_a_permutation")
         if predicate == "architecture_plateau_detected_and_plan_ready":

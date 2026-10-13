@@ -3306,7 +3306,7 @@ def neg_judge_panel(pos: Obs, neg: Obs) -> Check:
     )
 
 
-def build_external_doc_scout(ws: Path, variant: str) -> Scenario:
+def build_external_doc_scout(ws: Path, variant: str) -> Scenario | None:
     return build_control_plane(
         "Check the vendor docs for the refund API", expected_reason="no_live_connector"
     )(ws, variant)

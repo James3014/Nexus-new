@@ -907,7 +907,8 @@ class UltraReviewService:
 
     def _candidate_tests_for_changed_file(self, path: Path) -> list[str]:
         candidates: list[str] = []
-        if path.parts[0] == "nexus" and path.suffix == ".py":
+        top = path.parts[0] if path.parts else ""
+        if top == "nexus" and path.suffix == ".py":
             stem = path.stem
             module_dir = path.parts[1] if len(path.parts) > 1 else ""
             test_dir = TEST_DIR_BY_SOURCE_DIR.get(module_dir, f"tests/{module_dir}" if module_dir else "tests")
@@ -917,11 +918,11 @@ class UltraReviewService:
                     f"tests/test_{stem}.py",
                 ]
             )
-        if path.parts[0] == "scripts" and path.suffix == ".py":
+        if top == "scripts" and path.suffix == ".py":
             script_area = path.parts[1] if len(path.parts) > 1 else ""
             test_dir = "tests/ops" if script_area == "ops" else "tests/engine"
             candidates.append(f"{test_dir}/test_{path.stem}.py")
-        if path.parts[0] not in {"nexus", "scripts"} and path.suffix == ".py":
+        if top not in {"nexus", "scripts"} and path.suffix == ".py":
             if path.name.startswith("test_"):
                 # A changed test file is its own regression candidate.
                 candidates.append(path.as_posix())
