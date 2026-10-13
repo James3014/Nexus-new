@@ -23,6 +23,16 @@ from nexus.services.unified_runtime import (
     normalize_online_invoker_payload,
 )
 
+# Headless CLI providers (agy print mode) auto-deny tool calls, so a model that tries one
+# returns empty stdout. The bare bench arm always told the model not to use tools
+# (scripts/bench/agy_provider.AGY_NO_TOOLS_PREFIX); the with_nexus prompt must too
+# (online A/B 20261013b finding 1: 34/34 with_nexus agy calls came back empty without it).
+ONLINE_NO_TOOLS_INSTRUCTION_ID = "online_no_tools_v1"
+ONLINE_NO_TOOLS_INSTRUCTION = (
+    "Do not use any tools (no commands, no file reads, no file writes). "
+    "Answer directly in this reply.\n\n"
+)
+
 ROUTE_SECTION = "route"
 CODEINTEL_SECTION = "codeintel"
 PROFILE_SECTION = "profile"
@@ -409,6 +419,7 @@ def build_online_nexus_context(
     prompt_parts = [
         "You are an agent wearing Nexus. Use the Nexus route, CodeIntel, "
         "governance, and artifact constraints below. Stay within the task scope.\n\n",
+        ONLINE_NO_TOOLS_INSTRUCTION,
         f"{reset_boundary}\n\n",
         f"[TASK]\n{task_body}\n\n",
         f"{NEXUS_ROUTE_MARKER}\n{route_prompt}\n\n",
@@ -527,6 +538,7 @@ def build_online_nexus_context(
         "capability_consumed": bool(consumed_evidence_ids),
         "public_claim_allowed": False,
         "builder": "nexus.services.online_nexus_context.build_online_nexus_context",
+        "no_tools_instruction": ONLINE_NO_TOOLS_INSTRUCTION_ID,
         "plan_hash": plan_hash,
         "planner_decision_id": planner_decision_id,
         "selected_capabilities": list(selected),
