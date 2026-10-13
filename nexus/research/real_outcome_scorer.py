@@ -1,6 +1,7 @@
 """Post-hoc real-outcome scorer for #1216 hybrid replication tasks.
 
-Implements docs/research/REAL_OUTCOME_SCORER_SPEC.md (v1). The scorer is
+Implements docs/research/REAL_OUTCOME_SCORER_SPEC.md (v1) together with the dated
+amendment notes in docs/research/REAL_OUTCOME_SCORER_SPEC.amendments.md. The scorer is
 read-only with respect to the experiment store: it verifies the sealed raw,
 builds scorer-owned git trees (BASE, CAND, GOLD, BASE+T, CAND+T), derives a
 FAIL_TO_PASS / PASS_TO_PASS oracle from the merged human fix, runs the tests in
@@ -10,6 +11,7 @@ a scrubbed environment and writes a create-only receipt to its own store.
 from __future__ import annotations
 
 import base64
+import binascii
 import gzip
 import hashlib
 import json
@@ -20,11 +22,12 @@ import shutil
 import subprocess
 import time
 import xml.etree.ElementTree as ET
+import zlib
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterable, Mapping, Protocol, Sequence
 
-SCORER_VERSION = "1.0.1"
+SCORER_VERSION = "1.1.0"
 RECEIPT_SCHEMA = "nexus.research.real_outcome.v1"
 RECEIPT_SEAL_SCHEMA = "nexus.research.real_outcome_seal.v1"
 SPEC_RELATIVE_PATH = "docs/research/REAL_OUTCOME_SCORER_SPEC.md"
@@ -56,6 +59,12 @@ VALID_ORACLE_LABELS = frozenset({
 })
 
 PASS, FAIL, SKIP = "pass", "fail", "skip"
+
+# pytest exit codes that still yield a trustworthy junit report: 0 all passed, 1 some
+# failed, 5 nothing collected (e.g. every module of the target is an ignored oracle file).
+CLEAN_P2P_EXIT_CODES = frozenset({0, 1, 5})
+
+_SHA_RE = re.compile(r"[0-9a-f]{40}")
 
 
 class SealRefused(Exception):
@@ -109,6 +118,19 @@ def parse_task_key(task_key: str) -> tuple[str, str, int]:
     return owner, repo, int(number)
 
 
+def is_full_sha(value: Any) -> bool:
+    """True only for a lowercase 40-hex commit/tree id (never an option or a ref)."""
+    return isinstance(value, str) and _SHA_RE.fullmatch(value) is not None
+
+
+def _require_rev(rev: str) -> str:
+    """Guard every revision handed to git: a full SHA, optionally with a ``^1`` suffix."""
+    sha = rev[:-2] if rev.endswith("^1") else rev
+    if not is_full_sha(sha):
+        raise ValueError(f"refusing non-SHA git revision: {rev!r}")
+    return rev
+
+
 def _safe_relpath(path: str) -> bool:
     p = PurePosixPath(path)
     return bool(path) and not p.is_absolute() and ".." not in p.parts and p.parts[0] != ".git"
@@ -153,6 +175,14 @@ class TaskInputs:
     cap_seconds: float | None
 
 
+def _decode_payload(value: Any, what: str) -> bytes:
+    """gzip(base64) payload from the sealed raw; any malformation is a seal refusal."""
+    try:
+        return gzip.decompress(base64.b64decode(value, validate=True))
+    except (binascii.Error, ValueError, TypeError, OSError, EOFError, zlib.error) as exc:
+        raise SealRefused(f"payload_malformed:{what}:{type(exc).__name__}") from exc
+
+
 def load_sealed_task(task_dir: Path) -> TaskInputs:
     """Spec §3.1, §3.2, §3.4 and §2. Raises SealRefused on any mismatch."""
     task_dir = Path(task_dir)
@@ -177,12 +207,14 @@ def load_sealed_task(task_dir: Path) -> TaskInputs:
         raise SealRefused("base_sha_invalid")
     diff = b""
     if so.get("diff_gzip_base64"):
-        diff = gzip.decompress(base64.b64decode(so["diff_gzip_base64"]))
+        diff = _decode_payload(so["diff_gzip_base64"], "diff")
         if so.get("diff_sha256") and sha256_bytes(diff) != so["diff_sha256"]:
             raise SealRefused("diff_sha256_mismatch")
     untracked = []
     for item in so.get("untracked_files") or []:
-        data = gzip.decompress(base64.b64decode(item["gzip_base64"]))
+        if not isinstance(item, dict) or not isinstance(item.get("path"), str):
+            raise SealRefused("untracked_entry_invalid")
+        data = _decode_payload(item.get("gzip_base64"), f"untracked:{item['path']}")
         if sha256_bytes(data) != item.get("sha256"):
             raise SealRefused(f"untracked_sha256_mismatch:{item.get('path')}")
         if item.get("size") is not None and len(data) != int(item["size"]):
@@ -217,7 +249,14 @@ def load_ground_truth(inputs: TaskInputs) -> dict[str, Any] | None:
     data = path.read_bytes()
     if sha256_bytes(data) != state_gt.get("sha256"):
         raise SealRefused("ground_truth_sha256_mismatch")
-    return json.loads(data)
+    gt = json.loads(data)
+    # Every SHA taken from ground truth is validated before any git call (it is passed to
+    # `git fetch`, where a value such as `--upload-pack=...` would be an option).
+    details = gt.get("details") if isinstance(gt, dict) else None
+    for pr in (details or {}).get("merged_prs") or []:
+        if not isinstance(pr, dict) or not is_full_sha(pr.get("merge_commit_sha")):
+            raise SealRefused("ground_truth_merge_commit_sha_invalid")
+    return gt
 
 
 # --------------------------------------------------------------------------- git
@@ -253,13 +292,14 @@ class GitRepo:
         return proc
 
     def has_commit(self, sha: str) -> bool:
+        _require_rev(sha)
         return self.git("cat-file", "-e", f"{sha}^{{commit}}", check=False).returncode == 0
 
     def ensure_commit(self, sha: str) -> bool:
         if self.has_commit(sha):
             return True
         for source in self.sources:
-            self.git("fetch", "-q", "--no-tags", source, sha, check=False)
+            self.git("fetch", "-q", "--no-tags", "--", source, sha, check=False)
             if self.has_commit(sha):
                 return True
         return False
@@ -271,7 +311,7 @@ class GitRepo:
             shutil.rmtree(dest, ignore_errors=True)
         self.git("worktree", "prune")
         dest.parent.mkdir(parents=True, exist_ok=True)
-        self.git("worktree", "add", "-q", "--detach", "--force", str(dest), sha)
+        self.git("worktree", "add", "-q", "--detach", "--force", "--", str(dest), _require_rev(sha))
         return dest
 
     def remove_worktree(self, dest: Path) -> None:
@@ -286,38 +326,110 @@ class GitRepo:
         return self.git("write-tree", cwd=wt).stdout.decode().strip()
 
     def changed_paths(self, a: str, b: str) -> list[str]:
-        out = self.git("diff", "--no-renames", "--name-only", a, b).stdout.decode()
+        out = self.git(
+            "diff", "--no-renames", "--name-only", _require_rev(a), _require_rev(b), "--"
+        ).stdout.decode()
         return sorted(p for p in out.splitlines() if p)
 
     def pr_patch(self, merge_sha: str) -> bytes:
-        return self.git("diff", "--binary", "--no-renames", f"{merge_sha}^1", merge_sha).stdout
+        return self.git(
+            "diff",
+            "--binary",
+            "--no-renames",
+            _require_rev(f"{merge_sha}^1"),
+            _require_rev(merge_sha),
+            "--",
+        ).stdout
+
+
+def _inside(root_real: Path, path: Path) -> bool:
+    try:
+        path.relative_to(root_real)
+    except ValueError:
+        return False
+    return True
+
+
+def _escaping_symlinks(repo: GitRepo, wt: Path) -> list[str]:
+    """Symlinks among the paths the candidate diff touched that resolve outside ``wt``."""
+    root_real = wt.resolve()
+    out = repo.git(
+        "status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames", cwd=wt
+    ).stdout.decode(errors="surrogateescape")
+    bad = []
+    for entry in out.split("\0"):
+        rel = entry[3:]
+        if not rel:
+            continue
+        p = wt / rel
+        if p.is_symlink() and not _inside(root_real, p.resolve()):
+            bad.append(rel)
+    return sorted(bad)
+
+
+def _write_target_error(wt: Path, rel: str) -> str | None:
+    """Spec §7 APPLY_FAILED: an untracked path that exists already or escapes the tree."""
+    root_real = wt.resolve()
+    target = wt / rel
+    cur = wt
+    for part in PurePosixPath(rel).parts[:-1]:
+        cur = cur / part
+        if cur.is_symlink() and not _inside(root_real, cur.resolve()):
+            return f"untracked_path_escapes:{rel}"
+    if os.path.lexists(target):
+        return f"untracked_path_exists:{rel}"
+    if not _inside(root_real, target.parent.resolve() / target.name):
+        return f"untracked_path_escapes:{rel}"
+    return None
 
 
 def apply_candidate(repo: GitRepo, wt: Path, cand: Candidate) -> str | None:
-    """Apply a candidate onto a BASE worktree. Returns an error string or None."""
+    """Apply a candidate onto a BASE worktree. Returns an error string or None.
+
+    Nothing is ever written outside ``wt``: a diff that creates a symlink resolving
+    outside the tree, and an untracked file whose resolved target escapes the tree, are
+    APPLY_FAILED (spec §7 row 6).
+    """
     if cand.diff.strip():
         proc = repo.git("apply", "--binary", "-", cwd=wt, input=cand.diff, check=False)
         if proc.returncode != 0:
             return "diff_apply_failed:" + proc.stderr.decode()[-300:]
+        escaping = _escaping_symlinks(repo, wt)
+        if escaping:
+            return "symlink_escapes_tree:" + ",".join(escaping)[:300]
     for item in cand.untracked:
         rel = item["path"]
         if not _safe_relpath(rel):
             return f"untracked_path_unsafe:{rel}"
+        err = _write_target_error(wt, rel)
+        if err:
+            return err
         target = wt / rel
-        if target.exists():
-            return f"untracked_path_exists:{rel}"
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(item["data"])
+        if not _inside(wt.resolve(), target.parent.resolve()):
+            return f"untracked_path_escapes:{rel}"
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            fd = os.open(target, flags, 0o644)
+        except OSError as exc:
+            return f"untracked_write_refused:{rel}:{exc.errno}"
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(item["data"])
     return None
 
 
 def overwrite_oracle_files(wt: Path, gold_wt: Path, oracle_files: Iterable[str]) -> None:
+    root_real = wt.resolve()
     for rel in oracle_files:
         src, dst = gold_wt / rel, wt / rel
+        if not _inside(root_real, dst.parent.resolve()):
+            raise ValueError(f"oracle file path escapes the tree: {rel}")
+        if dst.is_symlink():
+            dst.unlink()  # never write through a link the candidate may have placed
         if src.exists():
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
-        elif dst.exists() or dst.is_symlink():
+        elif dst.exists():
             dst.unlink()
 
 
@@ -333,6 +445,23 @@ class TestEnv:
     # Import roots appended after the scored tree, for an interpreter whose packages are not
     # in its own site-packages (e.g. a CI executor that supplies them via PYTHONPATH).
     extra_pythonpath: tuple[str, ...] = ()
+
+    @property
+    def cache_key(self) -> str:
+        """Key for cached test results: env identity plus everything else that can change
+        an outcome without changing ``key`` (interpreter, import roots, scorer version)."""
+        return sha256_bytes(
+            json.dumps(
+                [
+                    self.key,
+                    self.python,
+                    self.description.get("python", ""),
+                    list(self.extra_pythonpath),
+                    SCORER_VERSION,
+                ],
+                sort_keys=True,
+            ).encode()
+        )
 
 
 class EnvProvider(Protocol):
@@ -383,11 +512,55 @@ class UvEnvProvider:
             digests["learning_pin"] = _workflow_learning_pin(base_wt)
         return recipe, digests
 
-    def get(self, repo: str, base_wt: Path) -> TestEnv:
+    def _interpreter(self) -> dict[str, str]:
+        """The uv-managed interpreter ``--python 3.12`` resolves to (path and version)."""
+        try:
+            path = subprocess.run(
+                ["uv", "python", "find", self.PYTHON],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            ).stdout.strip()
+            version = (
+                subprocess.run(
+                    [path, "-c", "import sys;print(sys.version.split()[0])"],
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                ).stdout.strip()
+                if path
+                else ""
+            )
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            raise EnvBuildError(f"uv python find {self.PYTHON}: {exc}") from exc
+        if not path or not version:
+            raise EnvBuildError(f"uv python find {self.PYTHON}: no interpreter")
+        return {"path": path, "version": version}
+
+    def env_key(self, repo: str, base_wt: Path) -> tuple[str, str, dict[str, str], dict[str, str]]:
+        """(key, recipe, input digests, interpreter). The key covers the repo, recipe,
+        BASE lock inputs, the resolved interpreter path and version, the extra import roots
+        (none for this provider) and the scorer version."""
         recipe, digests = self._recipe(repo, base_wt)
+        interpreter = self._interpreter()
         key = sha256_bytes(
-            json.dumps([repo, recipe, self.PYTHON, digests], sort_keys=True).encode()
+            json.dumps(
+                [
+                    repo,
+                    recipe,
+                    self.PYTHON,
+                    digests,
+                    interpreter,
+                    [],  # extra_pythonpath: this provider supplies none
+                    SCORER_VERSION,
+                ],
+                sort_keys=True,
+            ).encode()
         )
+        return key, recipe, digests, interpreter
+
+    def get(self, repo: str, base_wt: Path) -> TestEnv:
+        key, recipe, digests, interpreter = self.env_key(repo, base_wt)
         env_dir = self.envs_dir / key[:16]
         marker = env_dir / ".real_outcome_env.json"
         if marker.exists():
@@ -452,6 +625,8 @@ class UvEnvProvider:
         ).stdout.strip()
         desc = {
             "python": version,
+            "python_path": interpreter["path"],
+            "scorer_version": SCORER_VERSION,
             "uv": uv_version,
             "recipe": recipe,
             "inputs": json.dumps(digests, sort_keys=True),
@@ -505,7 +680,14 @@ def parse_junit(path: Path) -> dict[str, str]:
 
 
 class PytestRunner:
-    """Spec §8 test run. Results are cached by (env, tree id, target, ignores, run index)."""
+    """Spec §8 test run.
+
+    Results are cached by (env cache key, tree id, target, ignores, run index, role). The
+    env cache key includes the scorer version, so a new scorer version never reuses an
+    older version's results. ``role`` separates candidate-tree runs from GOLD runs: with
+    candidate := GOLD the CAND+T tree id equals the GOLD tree id, and without the role
+    self-check (a) would only replay GOLD's cached run instead of executing the tests.
+    """
 
     def __init__(
         self,
@@ -548,9 +730,12 @@ class PytestRunner:
         target: str,
         ignores: Sequence[str],
         run_idx: int,
+        role: str = "",
     ) -> RunResult:
         ignores = sorted(set(ignores))
-        key = sha256_bytes(json.dumps([env.key, tree_id, target, ignores, run_idx]).encode())
+        key = sha256_bytes(
+            json.dumps([env.cache_key, tree_id, target, ignores, run_idx, role]).encode()
+        )
         cached = self.cache / f"{key}.json"
         if cached.exists():
             data = json.loads(cached.read_text())
@@ -587,7 +772,8 @@ class PytestRunner:
         outcomes = {} if timed_out else parse_junit(junit)
         junit.unlink(missing_ok=True)
         self.log(
-            f"  pytest {target} run={run_idx} exit={exit_code} nodes={len(outcomes)} {seconds:.0f}s"
+            f"  pytest {target} run={run_idx}{' role=' + role if role else ''} exit={exit_code}"
+            f"{' TIMEOUT' if timed_out else ''} nodes={len(outcomes)} {seconds:.0f}s"
         )
         cached.write_text(
             json.dumps(
@@ -722,10 +908,19 @@ class Oracle:
     gold_outcomes: list[dict[str, str]]
 
 
+CAND_ROLE = "CAND+T"
+
+
 def _run_modules(
-    ctx: ScoreContext, env: TestEnv, tree: Path, tree_id: str, modules: Sequence[str], run_idx: int
+    ctx: ScoreContext,
+    env: TestEnv,
+    tree: Path,
+    tree_id: str,
+    modules: Sequence[str],
+    run_idx: int,
+    role: str = "",
 ) -> list[RunResult]:
-    return [ctx.runner.run(env, tree, tree_id, m, (), run_idx) for m in modules]
+    return [ctx.runner.run(env, tree, tree_id, m, (), run_idx, role) for m in modules]
 
 
 def score_task(
@@ -924,12 +1119,16 @@ def score_task(
         )
         timing["candidate_seconds"] = round(time.monotonic() - tc, 1)
         receipt.update(evaluation)
+        evaluated = evaluation["evaluated_label"]
         if not_runnable:
             receipt["label"] = NOT_RUNNABLE
             receipt["sub_reason"] = not_runnable
-            receipt["shadow_label"] = evaluation["evaluated_label"]
+            # shadow_label is one of labels 7-10 only; an unknown P2P baseline leaves it unset.
+            receipt["shadow_label"] = evaluated if evaluated in VALID_ORACLE_LABELS else None
         else:
-            receipt["label"] = evaluation["evaluated_label"]
+            receipt["label"] = evaluated
+            if evaluated == NOT_SCORABLE_ORACLE_INVALID:
+                receipt["sub_reason"] = "P2P_BASELINE_FAILED"
         return _finish(receipt, timing, t0, ctx)
     finally:
         if not ctx.keep_trees:
@@ -981,11 +1180,13 @@ def _evaluate_candidate(
     out: dict[str, Any] = {}
     flaky_dropped = set(flaky)
     # 1. oracle modules on CAND+T with majority rerun.
-    runs = [_merge(_run_modules(ctx, env, wts["candt"], candt_tree, modules, 0))]
+    runs = [_merge(_run_modules(ctx, env, wts["candt"], candt_tree, modules, 0, CAND_ROLE))]
     watched = list(f2p) + list(p2p_a)
     if any(_get(runs[0], n) != PASS for n in watched):
         for i in (1, 2):
-            runs.append(_merge(_run_modules(ctx, env, wts["candt"], candt_tree, modules, i)))
+            runs.append(
+                _merge(_run_modules(ctx, env, wts["candt"], candt_tree, modules, i, CAND_ROLE))
+            )
 
     def majority_pass(node: str) -> bool:
         if len(runs) == 1:
@@ -1015,9 +1216,27 @@ def _evaluate_candidate(
     ignores = list(files)
     base_p2p: dict[str, dict[str, str]] = {}
     cand_p2p: dict[str, dict[str, str]] = {}
+    # Candidate-independent P2P runs (BASE+T, GOLD) that timed out or did not produce a
+    # trustworthy report: their node set is unknown, not empty (amendment A2).
+    baseline_failures: list[dict[str, Any]] = []
+
+    def baseline_run(tree_key: str, tree_id: str, t: str, i: int) -> dict[str, str]:
+        res = ctx.runner.run(env, wts[tree_key], tree_id, t, ignores, i)
+        if res.timed_out or res.exit_code not in CLEAN_P2P_EXIT_CODES:
+            baseline_failures.append({
+                "tree": {"baset": "BASE+T", "gold": "GOLD"}[tree_key],
+                "target": t,
+                "run": i,
+                "exit_code": res.exit_code,
+                "timed_out": res.timed_out,
+            })
+        return res.outcomes
+
     for t in targets:
-        base_p2p[t] = ctx.runner.run(env, wts["baset"], baset_tree, t, ignores, 0).outcomes
-        cand_p2p[t] = ctx.runner.run(env, wts["candt"], candt_tree, t, ignores, 0).outcomes
+        base_p2p[t] = baseline_run("baset", baset_tree, t, 0)
+        cand_p2p[t] = ctx.runner.run(
+            env, wts["candt"], candt_tree, t, ignores, 0, CAND_ROLE
+        ).outcomes
     oracle_nodes = set(f2p) | set(p2p_a) | set(flaky)
     p2p_bc_total = 0
     new_failures: set[str] = set(p2p_a_fail)
@@ -1029,12 +1248,11 @@ def _evaluate_candidate(
         if not suspects:
             continue
         c_runs = [cand_p2p[t]] + [
-            ctx.runner.run(env, wts["candt"], candt_tree, t, ignores, i).outcomes for i in (1, 2)
+            ctx.runner.run(env, wts["candt"], candt_tree, t, ignores, i, CAND_ROLE).outcomes
+            for i in (1, 2)
         ]
-        b_runs = [base_p2p[t]] + [
-            ctx.runner.run(env, wts["baset"], baset_tree, t, ignores, i).outcomes for i in (1, 2)
-        ]
-        g_run = ctx.runner.run(env, wts["gold"], gold_tree, t, ignores, 0).outcomes
+        b_runs = [base_p2p[t]] + [baseline_run("baset", baset_tree, t, i) for i in (1, 2)]
+        g_run = baseline_run("gold", gold_tree, t, 0)
         for n in suspects:
             if not all(_get(r, n) != PASS for r in c_runs) or not all(
                 _get(r, n) == PASS for r in b_runs
@@ -1046,7 +1264,11 @@ def _evaluate_candidate(
                 new_failures.add(n)
 
     if new_failures:
+        # A confirmed regression stands even if another target's baseline is unknown.
         label = BROKE_EXISTING
+    elif baseline_failures:
+        # The regression check is incomplete, so no "no regression" label can be claimed.
+        label = NOT_SCORABLE_ORACLE_INVALID
     elif len(f2p_pass) == len(f2p):
         label = RESOLVED
     elif f2p_pass:
@@ -1065,6 +1287,9 @@ def _evaluate_candidate(
         "gold_also_fails": sorted(gold_also_fails),
         "p2p_targets": targets,
         "p2p_selector_failed": selector_failed,
+        "p2p_baseline_failures": sorted(
+            baseline_failures, key=lambda d: (d["tree"], d["target"], d["run"])
+        ),
         "impact_plan_sha256": plan_sha,
         "candidate_changed_paths_digest": sha256_bytes("\n".join(changed).encode()),
     })
@@ -1156,7 +1381,7 @@ def summarize(receipts: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         for route in sorted({r["route"] for r in valid})
     }
     by_status = {
-        s: rate([r for r in valid if r["candidate_raw_status"] == s])
+        s: rate([r for r in valid if str(r["candidate_raw_status"]) == s])
         for s in sorted({str(r["candidate_raw_status"]) for r in valid})
     }
     by_capped = {str(c): rate([r for r in valid if r["capped"] == c]) for c in (True, False)}

@@ -47,7 +47,14 @@ def _write(root: Path, files: dict[str, str]) -> None:
 class Fixture:
     """Upstream repo: BASE, then main moves (README), then the human fix commit."""
 
-    def __init__(self, tmp: Path, repo_name: str = "fixture-repo", gate: str | None = None):
+    def __init__(
+        self,
+        tmp: Path,
+        repo_name: str = "fixture-repo",
+        gate: str | None = None,
+        mul_test: str = MUL_TEST,
+        extra_base: dict[str, str] | None = None,
+    ):
         self.tmp = tmp
         self.repo_name = repo_name
         self.upstream = tmp / "upstream"
@@ -58,6 +65,7 @@ class Fixture:
             "pkg/calc.py": BUGGY,
             "tests/test_add.py": ADD_TEST,
             "README.md": "base\n",
+            **(extra_base or {}),
         }
         if gate:
             files["scripts/ops/pr_impact_gate.py"] = gate
@@ -67,7 +75,7 @@ class Fixture:
         self.base = _git(self.upstream, "rev-parse", "HEAD").strip()
         _write(self.upstream, {"README.md": "main moved\n"})
         _git(self.upstream, "commit", "-qam", "drift")
-        _write(self.upstream, {"pkg/calc.py": FIXED, "tests/test_mul.py": MUL_TEST})
+        _write(self.upstream, {"pkg/calc.py": FIXED, "tests/test_mul.py": mul_test})
         _git(self.upstream, "add", "-A")
         _git(self.upstream, "commit", "-qm", "human fix")
         self.fix = _git(self.upstream, "rev-parse", "HEAD").strip()
@@ -434,3 +442,404 @@ def test_summary_denominator_counts_no_candidate_as_failure():
     s = ros.summarize(rows)
     assert s["valid_oracle_n"] == 3 and s["resolved"] == 1
     assert s["counts"][ros.PENDING_GROUND_TRUTH] == 1
+
+
+# ----------------------------------------------------------------------------
+# Post-merge review follow-ups (#1951 review). See the PR for the mutation table.
+
+
+def _reseal(task: Path, mutate) -> None:
+    """Rewrite raw.json through ``mutate(so)`` and re-seal it consistently."""
+    raw = json.loads((task / "raw.json").read_text())
+    mutate(raw["raw_response"]["strong_online_raw_response"])
+    raw_bytes = json.dumps(raw).encode()
+    (task / "raw.json").write_bytes(raw_bytes)
+    seal = {
+        "path": "raw.json",
+        "raw_sha256": hashlib.sha256(raw_bytes).hexdigest(),
+        "schema": "nexus.hybrid_replication.raw_seal.v1",
+    }
+    (task / "raw_seal.json").write_text(json.dumps(seal))
+    state = json.loads((task / "state.json").read_text())
+    state["raw_seal"] = seal
+    (task / "state.json").write_text(json.dumps(state))
+
+
+def _diff_with_symlink(fx: Fixture, link: str, target: str) -> bytes:
+    """A candidate diff (vs BASE) that adds symlink ``link`` -> ``target``."""
+    wt = fx.tmp / f"scratch{fx.n}"
+    fx.n += 1
+    _git(fx.upstream, "worktree", "add", "-q", "--detach", str(wt), fx.base)
+    (wt / link).symlink_to(target)
+    _git(wt, "add", "-A")
+    return _git(wt, "diff", "--cached", "--binary", "HEAD").encode()
+
+
+# Item 1: SHAs from ground truth / receipts never reach git unvalidated.
+
+
+def test_injected_merge_sha_is_refused_and_not_executed(tmp_path, fx):
+    marker = tmp_path / "PWNED"
+    evil = f"--upload-pack=touch {marker};git-upload-pack"
+    task = fx.task(fx.gold_diff, merge=evil)
+    with pytest.raises(ros.SealRefused, match="merge_commit_sha_invalid"):
+        _score(tmp_path, fx, task)
+    assert not marker.exists()
+
+
+def test_git_repo_refuses_non_sha_revisions(tmp_path, fx):
+    marker = tmp_path / "PWNED2"
+    repo = ros.GitRepo(tmp_path / "scorer-repo", [str(fx.upstream)])
+    for bad in (f"--upload-pack=touch {marker};git-upload-pack", "main", "HEAD", fx.fix.upper()):
+        with pytest.raises(ValueError, match="non-SHA"):
+            repo.ensure_commit(bad)
+        with pytest.raises(ValueError, match="non-SHA"):
+            repo.worktree(tmp_path / "wt-bad", bad)
+    assert not marker.exists()
+    assert repo.ensure_commit(fx.fix)
+    assert ros.is_full_sha(fx.fix) and not ros.is_full_sha("f" * 39)
+
+
+# Item 2: nothing is written outside the candidate worktree.
+
+
+def test_symlink_escape_with_untracked_write_is_apply_failed(tmp_path, fx):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    # CAND+T lives at <tmp>/work/trees/<task>/candt, so this resolves to <tmp>/outside.
+    diff = _diff_with_symlink(fx, "link", "../../../../outside")
+    task = fx.task(diff, untracked={"link/evil.py": "print('escaped')\n"})
+    r = _score(tmp_path, fx, task)
+    assert (r["label"], r["sub_reason"]) == (ros.NOT_RUNNABLE, "APPLY_FAILED")
+    assert r["detail"].startswith("symlink_escapes_tree:link")
+    assert list(outside.iterdir()) == []
+
+
+def test_escaping_symlink_alone_is_apply_failed(tmp_path, fx):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    diff = _diff_with_symlink(fx, "pkg/escape", str(outside))
+    r = _score(tmp_path, fx, fx.task(diff))
+    assert (r["label"], r["sub_reason"]) == (ros.NOT_RUNNABLE, "APPLY_FAILED")
+
+
+def test_apply_candidate_untracked_write_never_follows_links(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    wt = tmp_path / "wt"
+    repo = ros.GitRepo(wt, [])
+    (wt / "pkg").mkdir()
+    (wt / "link").symlink_to(outside)
+    (wt / "dangling").symlink_to(outside / "new.py")
+    (wt / "alias").symlink_to("pkg")
+
+    def cand(path: str) -> ros.Candidate:
+        data = b"x = 1\n"
+        return ros.Candidate(
+            b"", [{"path": path, "sha256": hashlib.sha256(data).hexdigest(), "data": data}]
+        )
+
+    assert ros.apply_candidate(repo, wt, cand("link/evil.py")).startswith("untracked_path_escapes:")
+    assert ros.apply_candidate(repo, wt, cand("dangling")).startswith("untracked_path_exists:")
+    assert ros.apply_candidate(repo, wt, cand("../evil.py")).startswith("untracked_path_unsafe:")
+    assert list(outside.iterdir()) == []
+    # A link that stays inside the tree is still allowed.
+    assert ros.apply_candidate(repo, wt, cand("alias/new.py")) is None
+    assert (wt / "pkg" / "new.py").read_bytes() == b"x = 1\n"
+
+
+def test_oracle_overwrite_replaces_candidate_symlink(tmp_path):
+    outside = tmp_path / "outside.py"
+    outside.write_text("keep\n")
+    gold, wt = tmp_path / "gold", tmp_path / "wt"
+    (gold / "tests").mkdir(parents=True)
+    (wt / "tests").mkdir(parents=True)
+    (gold / "tests" / "test_x.py").write_text("gold\n")
+    (wt / "tests" / "test_x.py").symlink_to(outside)
+    ros.overwrite_oracle_files(wt, gold, ["tests/test_x.py"])
+    assert outside.read_text() == "keep\n"
+    assert not (wt / "tests" / "test_x.py").is_symlink()
+    assert (wt / "tests" / "test_x.py").read_text() == "gold\n"
+
+
+# Item 3: summary by raw status keys and filters on the same string.
+
+
+def test_summary_by_raw_status_counts_none_status():
+    rows = [
+        {
+            "label": lab,
+            "route": "B",
+            "candidate_raw_status": status,
+            "capped": False,
+            "candidate_empty": False,
+            "failure_kind": None,
+            "task_key": str(i),
+        }
+        for i, (lab, status) in enumerate([
+            (ros.RESOLVED, None),
+            (ros.UNRESOLVED, None),
+            (ros.RESOLVED, "VALID"),
+        ])
+    ]
+    s = ros.summarize(rows)
+    assert s["by_raw_status"]["None"]["n"] == 2
+    assert s["by_raw_status"]["None"]["resolved"] == 1
+    assert s["by_raw_status"]["VALID"]["n"] == 1
+
+
+# Item 4: spec §6.2 / §6.4 behaviours (each kills a recorded mutation).
+
+FLAKY_ORACLE_TEST = (
+    MUL_TEST + "\n\nimport os\nfrom pathlib import Path\n\n\n"
+    "def test_flaky_counter():\n"
+    "    # Fails on the 2nd invocation per tree (cwd is the scorer tree: gold/baset/candt).\n"
+    '    p = Path(os.environ["TMPDIR"]) / ("flaky-" + Path.cwd().name)\n'
+    "    n = int(p.read_text()) if p.exists() else 0\n"
+    "    p.write_text(str(n + 1))\n"
+    "    assert n != 1\n"
+)
+FLAKY_NODE = "tests.test_mul::test_flaky_counter"
+
+
+def _counting_calc(mul_body: str, add_body: str = "return a + b") -> str:
+    """Candidate calc.py that counts its imports on the CAND+T tree (one per pytest run)."""
+    return (
+        "import os\nfrom pathlib import Path\n\n"
+        '_p = Path(os.environ["TMPDIR"]) / "cand-imports"\n'
+        "_n = int(_p.read_text()) if _p.exists() else 0\n"
+        "_p.write_text(str(_n + 1))\n\n\n"
+        f"def add(a, b):\n    {add_body}\n\n\n"
+        f"def mul(a, b):\n    {mul_body}\n"
+    )
+
+
+def test_oracle_flaky_node_is_dropped_not_p2p(tmp_path):
+    fx = Fixture(tmp_path, mul_test=FLAKY_ORACLE_TEST)
+    r = _score(tmp_path, fx, fx.task(fx.diff_from_base({"pkg/calc.py": FIXED})))
+    assert r["oracle_flaky"] == [FLAKY_NODE]
+    assert FLAKY_NODE not in r["p2p_a"] and FLAKY_NODE not in r["f2p"]
+    assert r["flaky_dropped"] == 1
+    assert r["f2p_total"] == 3
+    assert len(r["outcome_digests"]["GOLD"]) == 3
+    assert r["label"] == ros.RESOLVED
+
+
+def test_candidate_f2p_uses_majority_of_three_runs(tmp_path, fx):
+    # First CAND+T oracle run: mul is still buggy; reruns 2 and 3: fixed. Majority = pass.
+    calc = _counting_calc("return a + b if _n == 0 else a * b")
+    r = _score(tmp_path, fx, fx.task(fx.diff_from_base({"pkg/calc.py": calc})))
+    assert r["label"] == ros.RESOLVED
+    assert r["f2p_pass"] == 3
+    assert len(r["outcome_digests_cand"]) == 3
+
+
+def test_p2p_suspect_flaky_on_candidate_is_dropped(tmp_path, fx):
+    # Import 0 = oracle run (all pass, no rerun); import 1 = P2P run 0 where add() is
+    # broken; P2P reruns pass. Not 3/3 failing on CAND+T -> flaky, not a regression.
+    calc = _counting_calc("return a * b", add_body="return a - b if _n == 1 else a + b")
+    r = _score(tmp_path, fx, fx.task(fx.diff_from_base({"pkg/calc.py": calc})))
+    assert r["p2p_new_failures"] == []
+    assert r["flaky_dropped"] == 1
+    assert r["label"] == ros.RESOLVED
+
+
+def test_clean_candidate_has_no_p2p_suspects(tmp_path, fx):
+    r = _score(tmp_path, fx, fx.task(fx.diff_from_base({"pkg/calc.py": FIXED})))
+    assert r["label"] == ros.RESOLVED
+    assert r["flaky_dropped"] == 0
+    assert r["gold_also_fails"] == []
+    assert r["p2p_bc_total"] == 1
+
+
+LEGACY_TEST = "from pkg.calc import mul\n\n\ndef test_legacy_mul():\n    assert mul(2, 3) == 5\n"
+
+
+def test_p2p_node_broken_by_gold_is_gold_also_fails(tmp_path):
+    # tests/test_legacy.py is not touched by the human PR (so it is P2P(c), not oracle),
+    # passes on BASE+T and fails on GOLD: the intended change breaks it.
+    fx = Fixture(tmp_path, extra_base={"tests/test_legacy.py": LEGACY_TEST})
+    r = _score(tmp_path, fx, fx.task(fx.diff_from_base({"pkg/calc.py": FIXED})))
+    assert r["gold_also_fails"] == ["tests.test_legacy::test_legacy_mul"]
+    assert r["p2p_new_failures"] == []
+    assert r["label"] == ros.RESOLVED
+
+
+P2P_A_TEST = MUL_TEST + "\n\ndef test_mul_two_two():\n    assert mul(2, 2) == 4\n"
+
+
+def test_p2p_a_regression_is_broke_existing(tmp_path):
+    fx = Fixture(tmp_path, mul_test=P2P_A_TEST)
+    calc = FIXED.replace("return a * b", "return 5 if (a, b) == (2, 2) else a * b")
+    r = _score(tmp_path, fx, fx.task(fx.diff_from_base({"pkg/calc.py": calc})))
+    assert r["p2p_a"] == ["tests.test_mul::test_mul_two_two"]
+    assert r["f2p_pass"] == r["f2p_total"] == 3
+    assert r["p2p_new_failures"] == ["tests.test_mul::test_mul_two_two"]
+    assert r["label"] == ros.BROKE_EXISTING
+
+
+# Item 5: self-check (a) executes CAND+T instead of replaying GOLD's cached run.
+
+
+def test_self_check_gold_executes_candidate_runs(tmp_path, fx):
+    lines: list[str] = []
+    ctx = _ctx(tmp_path, fx)
+    ctx.runner.log = lines.append
+    r = ros.score_task(fx.task(b""), ctx, candidate_override="gold")["receipt"]
+    assert r["label"] == ros.RESOLVED
+    assert r["trees"]["CAND+T"] == r["trees"]["GOLD"]
+    assert any("tests/test_mul.py" in m and "role=CAND+T" in m for m in lines)
+
+
+# Item 6: an unknown P2P baseline is never a clean empty baseline.
+
+
+class _FaultyRunner(ros.PytestRunner):
+    """Times out the P2P(b/c) run on one tree (BASE+T or GOLD)."""
+
+    def __init__(self, *a, fail_tree: str, **kw):
+        super().__init__(*a, **kw)
+        self.fail_tree = fail_tree
+
+    def run(self, env, tree, tree_id, target, ignores, run_idx, role=""):
+        if target == "tests" and tree.name == self.fail_tree and not role:
+            return ros.RunResult({}, -1, True)
+        return super().run(env, tree, tree_id, target, ignores, run_idx, role)
+
+
+def _faulty_ctx(tmp: Path, fx: Fixture, fail_tree: str) -> ros.ScoreContext:
+    ctx = _ctx(tmp, fx)
+    ctx.runner = _FaultyRunner(
+        tmp / "work" / "scratch", timeout=300, log=lambda m: None, fail_tree=fail_tree
+    )
+    return ctx
+
+
+def test_p2p_baseline_timeout_is_not_scorable(tmp_path, fx):
+    task = fx.task(fx.diff_from_base({"pkg/calc.py": FIXED}))
+    r = ros.score_task(task, _faulty_ctx(tmp_path, fx, "baset"))["receipt"]
+    assert (r["label"], r["sub_reason"]) == (
+        ros.NOT_SCORABLE_ORACLE_INVALID,
+        "P2P_BASELINE_FAILED",
+    )
+    assert r["p2p_baseline_failures"] == [
+        {"exit_code": -1, "run": 0, "target": "tests", "timed_out": True, "tree": "BASE+T"}
+    ]
+    assert r["evaluated_label"] == ros.NOT_SCORABLE_ORACLE_INVALID
+    assert ros.summarize([r])["valid_oracle_n"] == 0
+
+
+def test_p2p_gold_timeout_does_not_drop_suspects_silently(tmp_path, fx):
+    # The candidate breaks add(); GOLD's P2P run times out, which used to turn the
+    # regression into a silent `gold_also_fails`.
+    calc = FIXED.replace("return a + b", "return a - b")
+    task = fx.task(fx.diff_from_base({"pkg/calc.py": calc}))
+    r = ros.score_task(task, _faulty_ctx(tmp_path, fx, "gold"))["receipt"]
+    assert (r["label"], r["sub_reason"]) == (
+        ros.NOT_SCORABLE_ORACLE_INVALID,
+        "P2P_BASELINE_FAILED",
+    )
+    assert r["p2p_baseline_failures"][0]["tree"] == "GOLD"
+
+
+def test_p2p_baseline_collection_error_is_not_scorable(tmp_path):
+    fx = Fixture(tmp_path, extra_base={"tests/test_import_error.py": "import no_such_mod_xyz\n"})
+    r = _score(tmp_path, fx, fx.task(fx.diff_from_base({"pkg/calc.py": FIXED})))
+    assert (r["label"], r["sub_reason"]) == (
+        ros.NOT_SCORABLE_ORACLE_INVALID,
+        "P2P_BASELINE_FAILED",
+    )
+    assert r["p2p_baseline_failures"][0]["exit_code"] == 2
+
+
+def test_p2p_baseline_failure_on_timeout_candidate_keeps_not_runnable(tmp_path, fx):
+    task = fx.task(fx.diff_from_base({"pkg/calc.py": FIXED}), status="TIMEOUT")
+    r = ros.score_task(task, _faulty_ctx(tmp_path, fx, "baset"))["receipt"]
+    assert (r["label"], r["sub_reason"]) == (ros.NOT_RUNNABLE, "SEALED_WHILE_PROVIDER_RUNNING")
+    assert r["shadow_label"] is None
+
+
+# Item 7: malformed payloads, memory wait, env cache key, version.
+
+
+@pytest.mark.parametrize(
+    "payload",
+    ["!!!not-base64!!!", base64.b64encode(b"not gzip").decode(), 12345],
+)
+def test_malformed_diff_payload_is_seal_refused(tmp_path, fx, payload):
+    task = fx.task(fx.gold_diff)
+    _reseal(task, lambda so: so.update({"diff_gzip_base64": payload}))
+    with pytest.raises(ros.SealRefused, match="payload_malformed:diff"):
+        ros.load_sealed_task(task)
+
+
+def test_malformed_untracked_payload_is_seal_refused(tmp_path, fx):
+    task = fx.task(b"", untracked={"pkg/fast.py": "x = 1\n"})
+    truncated = base64.b64encode(gzip.compress(b"x = 1\n")[:-6]).decode()
+    _reseal(task, lambda so: so["untracked_files"][0].update({"gzip_base64": truncated}))
+    with pytest.raises(ros.SealRefused, match="payload_malformed:untracked"):
+        ros.load_sealed_task(task)
+
+
+def _cli():
+    from nexus.research import score_real_outcome_cli as cli
+
+    return cli
+
+
+def test_memory_wait_treats_unknown_as_low_with_bounded_backoff():
+    cli = _cli()
+    sleeps: list[int] = []
+    readings = iter([None, None, 50])
+    waited = cli.wait_for_memory(
+        20, lambda m: None, probe=lambda: next(readings), sleep=sleeps.append
+    )
+    assert sleeps == [60, 120] and waited == 180
+    sleeps.clear()
+    logs: list[str] = []
+    with pytest.raises(cli.MemoryCheckUnavailable):
+        cli.wait_for_memory(20, logs.append, probe=lambda: None, sleep=sleeps.append)
+    assert sleeps == list(cli.UNKNOWN_BACKOFF_SECONDS)
+    assert any("unknown" in m for m in logs)
+    sleeps.clear()
+    readings = iter([10, 30])
+    assert (
+        cli.wait_for_memory(20, lambda m: None, probe=lambda: next(readings), sleep=sleeps.append)
+        == 60
+    )
+    called = []
+    cli.wait_for_memory(0, lambda m: None, probe=lambda: called.append(1), sleep=sleeps.append)
+    assert called == []
+
+
+def test_env_cache_keys_cover_interpreter_pythonpath_and_version(tmp_path, monkeypatch):
+    base = ros.TestEnv("k", "/py/a", "r", {"python": "3.12.1"}, ("/x",))
+    assert base.cache_key != ros.TestEnv("k", "/py/b", "r", {"python": "3.12.1"}, ("/x",)).cache_key
+    assert base.cache_key != ros.TestEnv("k", "/py/a", "r", {"python": "3.12.2"}, ("/x",)).cache_key
+    assert base.cache_key != ros.TestEnv("k", "/py/a", "r", {"python": "3.12.1"}, ("/y",)).cache_key
+    wt = tmp_path / "base"
+    wt.mkdir()
+    (wt / "uv.lock").write_text("lock\n")
+    provider = ros.UvEnvProvider(tmp_path / "envs", log=lambda m: None)
+    interp = {"path": "/uv/python3.12", "version": "3.12.7"}
+    monkeypatch.setattr(provider, "_interpreter", lambda: dict(interp))
+    k1 = provider.env_key("repo", wt)[0]
+    interp["path"] = "/other/python3.12"
+    k2 = provider.env_key("repo", wt)[0]
+    interp["version"] = "3.12.8"
+    k3 = provider.env_key("repo", wt)[0]
+    old_cache_key = base.cache_key
+    monkeypatch.setattr(ros, "SCORER_VERSION", "9.9.9")
+    k4 = provider.env_key("repo", wt)[0]
+    assert len({k1, k2, k3, k4}) == 4
+    assert base.cache_key != old_cache_key
+
+
+def test_scorer_version_is_recorded_in_spec_amendment():
+    root = Path(__file__).resolve().parents[2]
+    assert ros.SCORER_VERSION == "1.1.0"
+    amendments = (root / "docs/research/REAL_OUTCOME_SCORER_SPEC.amendments.md").read_text()
+    assert f'SCORER_VERSION = "{ros.SCORER_VERSION}"' in amendments
+    spec = (root / ros.SPEC_RELATIVE_PATH).read_bytes()
+    # The pre-registered spec itself is frozen (spec header); amendments live beside it.
+    assert hashlib.sha256(spec).hexdigest().startswith("315d95de21ea7ec8")

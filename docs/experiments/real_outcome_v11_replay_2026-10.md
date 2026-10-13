@@ -6,7 +6,9 @@ the pre-registered real-outcome scorer (Issue #1950, PR #1951).
 - **Spec:** `docs/research/REAL_OUTCOME_SCORER_SPEC.md` v1, sha256
   `315d95de21ea7ec82c97bf80165feaa052cb8a36fe99f3a1072d45ff74bb2bda`.
   It was pre-registered before any replay result existed and has not changed.
-- **Scorer:** `nexus/research/real_outcome_scorer.py` 1.0.1.
+- **Scorer:** `nexus/research/real_outcome_scorer.py` 1.0.1. All receipts below were
+  written by 1.0.1. Version 1.1.0 (post-merge review follow-ups, see the last section)
+  did not rescore them.
 - **Receipts:** `~/.local/state/nexus-real-outcome/v11-replay/receipts/tasks/<task>/`
   on the M5 host: `real_outcome.json`, `real_outcome_seal.json`, `real_outcome_timing.json`.
 - **Inputs:** read-only copies (`chmod a-w`) of `state.json`, `raw.json`,
@@ -144,7 +146,7 @@ non-code paths, would need a versioned v2 spec. It is not applied here.
 
 | # | Check | Scope | Result |
 |---|---|---|---|
-| a | candidate := GOLD | all 14 valid-oracle tasks | 14/14 RESOLVED (F2P all pass; 0 P2P new failures) |
+| a | candidate := GOLD | all 14 valid-oracle tasks | 14/14 RESOLVED (F2P all pass; 0 P2P new failures). This only shows that the gold diff round-trips; see "Self-check (a) detail" |
 | b | candidate := empty | all 14 valid-oracle tasks | 14/14 NO_CANDIDATE |
 | c | syntax error in a GOLD-changed non-test module | nexus-runtime#162 (`src/nexus_runtime/support/services/capability_registry.py`) | BROKE_EXISTING (691 P2P new failures) |
 | d | one byte of `raw.json` changed (copy) | nexus-runtime#176 | refused (`raw_sha256_mismatch`), exit 3, no receipt |
@@ -169,7 +171,20 @@ The self-check receipts are in sibling stores under
     (`p2p_selector_failed: true`, targets empty).
   - Version 1.0.1 fixes this; the fixture gate now uses postponed annotations,
     so the test catches the bug.
-  - All tasks were then rescored from scratch. No receipt from 1.0.0 is used.
+  - All tasks were then rescored with 1.0.1 into a fresh receipt store. No receipt
+    from 1.0.0 is used.
+  - The rescoring reused the same `work/` directory. Its pytest result cache was keyed by
+    (env key, tree id, target, ignores, run index), and the key did not include the
+    scorer version. So pytest runs that 1.0.0 had already done on identical trees were
+    replayed from the cache, not re-executed. These were the GOLD/BASE+T oracle runs of
+    the first six tasks, and the CAND+T oracle runs where 1.0.0 had reached them. For
+    example, Nexus-new#1821 took 3.6 s under 1.0.1.
+  - This does not change any outcome, because 1.0.1 changed only how the P2P(b)
+    selector is loaded, not how a pytest invocation is run or parsed. The P2P(b) targets
+    were empty under 1.0.0, so all P2P(b) runs were executed fresh under 1.0.1.
+    Self-check (e) used a fresh work directory, and its env and tests really were rebuilt
+    and rerun.
+  - Scorer 1.1.0 adds the scorer version and the run's role to the cache key.
   - The spec did not change.
 
 ## Limitations
@@ -188,8 +203,23 @@ The self-check receipts are in sibling stores under
 
 ## Self-check (a) detail
 
-Gold-as-candidate gave 14/14 RESOLVED, so all spec §11 checks pass and the
-headline is no longer provisional.
+Gold-as-candidate gave 14/14 RESOLVED. Under scorer 1.0.1 this check could not fail.
+
+- With candidate := GOLD, the CAND+T tree id equals the GOLD tree id.
+- The 1.0.1 result cache was keyed by tree id, so every CAND+T oracle run was a
+  cache hit of GOLD's run 0, which had passed all F2P nodes by construction.
+
+So (a) shows only that the gold diff survives the candidate path (export as a binary
+diff, `git apply` onto BASE, test-file overwrite) and reproduces the GOLD tree. It does
+not show that the oracle re-passes on a fresh run, or that the scorer's labelling is
+correct. The other checks hold: (b)–(e) pass, and (c) and (e) executed real runs.
+Still, "all §11 checks pass" is weaker evidence than the spec intended. The headline
+above should be read with that in mind.
+
+Scorer 1.1.0 keys CAND+T runs separately from GOLD runs, so self-check (a) now
+executes the oracle modules on CAND+T. A future (a) therefore also shows that F2P
+re-passes on an independent run. It still cannot catch a scorer error that affects
+GOLD and CAND+T alike. The V11 self-check (a) was not rerun.
 
 - In 3 tasks, a few P2P nodes that pass on BASE+T fail on GOLD itself. These
   tests are broken by the human change, so they are dropped as `gold_also_fails`:
@@ -198,3 +228,27 @@ headline is no longer provisional.
   - nexus-runtime#176: 1 node.
 - Nexus-new#1904 also has 22 flaky nodes dropped.
 - Receipts are in `selfcheck-a-gold/`.
+
+## Post-merge review follow-ups (scorer 1.1.0, 2026-10-14)
+
+An independent review of #1951 led to scorer 1.1.0, recorded in
+`docs/research/REAL_OUTCOME_SCORER_SPEC.amendments.md`. The V11 receipts were not
+rescored. Below is each change and what it means for V11, worked out from the code and
+from the read-only receipts and pytest cache:
+
+- **Merge-SHA validation and `--` before git positionals.** All V11 merge-commit SHAs
+  and base SHAs are 40-hex, so no label changes.
+- **Write containment (symlinks or untracked files that escape the tree → APPLY_FAILED).**
+  No V11 diff contains a symlink (mode `120000`), and no untracked path is absolute or
+  contains `..`. No label changes.
+- **`by_raw_status` with a `None` status.** Every V11 valid-oracle task has a string
+  raw status, so the breakdown above is unchanged.
+- **P2P baseline timeout or collect failure → `NOT_SCORABLE_ORACLE_INVALID/P2P_BASELINE_FAILED`.**
+  Every P2P(b/c) run in the cache for the 11 tasks with P2P targets exited with 0 or 1,
+  with no timeout. That covers BASE+T runs 0–2, the GOLD runs and the CAND+T runs, in
+  both `receipts/` and `selfcheck-a-gold/`. No label changes.
+- **Malformed payloads → seal refusal.** All V11 payloads decode under strict base64
+  and gzip, so no refusal changes.
+- **Memory-check unknown handling and the cache keys.** These have no label effect.
+
+**Net: no V11 label, count or headline number changes.**
