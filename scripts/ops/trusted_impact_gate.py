@@ -271,11 +271,16 @@ def combine_plans(base_only: dict[str, Any], merged: dict[str, Any]) -> dict[str
 
     * Targets are the union of both plans, so every base-only target (fallback,
       mandatory Tier-2, mapped tests) for any changed path stays selected.
+      The single exception: when head rows/keys map every path the base-only
+      plan left unmapped (base-only ``UNMAPPED_FULL_SUITE``, merged plan
+      neither unknown nor FULL_SUITE), only the ``tests`` FULL_SUITE target is
+      lifted; the base-only scoped and Tier 2 targets stay selected.
     * Impact class/tier/confidence come from the merged plan but never drop
       below the base-only plan, except when the base-only plan was
-      ``IMPACT_UNKNOWN`` and head rows/keys now map the paths (the merged plan
-      is no longer unknown); then the merged class/tier is used, still with
-      the union of targets.
+      ``IMPACT_UNKNOWN`` or the FULL_SUITE fallback and head rows/keys now map
+      the paths; then the merged class/tier is used, still with the union of
+      the remaining targets.
+    * A merged ``IMPACT_UNKNOWN`` is never replaced by the Tier 3 fallback.
     """
 
     combined = dict(merged)
@@ -324,7 +329,12 @@ def combine_plans(base_only: dict[str, Any], merged: dict[str, Any]) -> dict[str
     else:
         combined["fallback"] = ""
     reasons = list(merged["reasons"])
-    if targets != merged["pytest_targets"] or head_resolved_unknown:
+    if head_resolved_fallback:
+        reasons.append(
+            "trusted gate: head impact rows lifted only the tests/ FULL_SUITE fallback; "
+            "base-only scoped and Tier 2 targets stay selected"
+        )
+    elif targets != merged["pytest_targets"] or head_resolved_unknown:
         reasons.append("trusted gate: head impact data may add but never remove base-only targets")
     combined["reasons"] = reasons
     return combined

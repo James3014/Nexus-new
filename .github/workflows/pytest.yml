@@ -224,7 +224,12 @@ jobs:
 
           plan = json.loads(Path(".ci-impact/plan.json").read_text(encoding="utf-8"))
           if plan.get("fallback") == "FULL_SUITE":
-              paths = plan.get("unmatched_paths", [])
+              def clean(path):
+                  # Paths are PR-controlled: no CR/LF or workflow-command escapes.
+                  text = "".join(ch for ch in str(path) if ch.isprintable() and ch not in "%`")
+                  return text[:200] + ("..." if len(text) > 200 else "")
+
+              paths = [clean(path) for path in plan.get("unmatched_paths", [])][:50]
               lines = [
                   "## Impact gate: FULL_SUITE fallback",
                   "",
@@ -239,7 +244,8 @@ jobs:
               ]
               with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
                   summary.write("\n".join(lines) + "\n")
-              print(f"::notice title=Impact gate FULL_SUITE fallback::unmapped paths: {', '.join(paths)}")
+              notice = ", ".join(paths)[:1000]
+              print(f"::notice title=Impact gate FULL_SUITE fallback::unmapped paths: {notice}")
           PY
 
       - name: Validate workflow syntax when required

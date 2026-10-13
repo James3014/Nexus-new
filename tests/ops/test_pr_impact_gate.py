@@ -2574,3 +2574,125 @@ def test_full_suite_run_continues_past_collection_errors_only_for_the_fallback(
     assert continues is (impact_class == "UNMAPPED_FULL_SUITE")
     payload = json.loads((tmp_path / "run.json").read_text(encoding="utf-8"))
     assert payload["unmatched_paths"] == _UNMAPPED
+
+
+def test_unmatched_path_with_a_new_test_file_absent_at_base_passes_via_full_suite():
+    # Review follow-up (#2092): a PR adding tests/test_new.py AND touching an
+    # unmapped path. The new file is missing at base, exactly as the scoped path
+    # allows; it must not deadlock as IMPACT_UNKNOWN.
+    new_file = "tests/test_new.py"
+    existing = "tests.test_contract::test_existing"
+    added = "tests.test_new::test_added"
+    selected = [new_file, "tests"]
+    base = replace(
+        _run(
+            0,
+            [],
+            revision="base",
+            selected_targets=selected,
+            executed_targets=["tests"],
+            missing_targets=[new_file],
+            impact_class="UNMAPPED_FULL_SUITE",
+        ),
+        unmatched_paths=list(_UNMAPPED),
+    )
+    head = replace(
+        _run(0, [], revision="head", selected_targets=selected, impact_class="UNMAPPED_FULL_SUITE"),
+        unmatched_paths=list(_UNMAPPED),
+    )
+    base = _with_node_outcomes(base, passed=[existing])
+    head = _with_node_outcomes(head, passed=[existing, added], test_inventory_tree="f" * 40)
+
+    result = classify_regression(base, head)
+
+    assert result.classification == "PASS"
+    assert result.blocking is False
+    assert result.fallback == "FULL_SUITE"
+
+
+def test_full_suite_unexpected_base_missing_or_head_missing_target_fails_closed():
+    selected = ["tests/test_contract.py", "tests"]
+
+    def run(revision: str, **kwargs) -> PytestRunResult:
+        return replace(
+            _run(
+                0,
+                [],
+                revision=revision,
+                selected_targets=selected,
+                impact_class="UNMAPPED_FULL_SUITE",
+                **kwargs,
+            ),
+            unmatched_paths=list(_UNMAPPED),
+        )
+
+    unexpected = run(
+        "base",
+        executed_targets=["tests"],
+        missing_targets=["tests/test_contract.py"],
+        unexpected_missing_targets=["tests/test_contract.py"],
+    )
+    assert classify_regression(unexpected, run("head")).classification == "IMPACT_UNKNOWN"
+    head_missing = run(
+        "head", executed_targets=["tests"], missing_targets=["tests/test_contract.py"]
+    )
+    assert classify_regression(run("base"), head_missing).classification == "IMPACT_UNKNOWN"
+
+
+@pytest.mark.parametrize(
+    ("scoped_target", "error_node"),
+    [
+        ("tests/ops/test_scoped.py", "tests.ops.test_scoped"),
+        ("tests/ops", "tests.ops.test_scoped"),
+        ("tests/ops/test_scoped.py", "tests.ops"),
+    ],
+)
+def test_full_suite_base_collection_error_in_a_scoped_target_stays_red(scoped_target, error_node):
+    # Review follow-up (#2092): the mapped path gives CI_BOOTSTRAP_DEFECT for a
+    # base collection error in a selected target; FULL_SUITE must not be weaker.
+    existing = "tests.test_contract::test_existing"
+    selected = [scoped_target, "tests"]
+
+    def run(revision: str) -> PytestRunResult:
+        return replace(
+            _run(
+                0,
+                [],
+                revision=revision,
+                selected_targets=selected,
+                impact_class="UNMAPPED_FULL_SUITE",
+            ),
+            unmatched_paths=list(_UNMAPPED),
+        )
+
+    base = _with_node_outcomes(run("base"), passed=[existing], errors=[error_node])
+    head = _with_node_outcomes(run("head"), passed=[existing], errors=[error_node])
+
+    result = classify_regression(base, head)
+
+    assert result.classification == "CI_BOOTSTRAP_DEFECT"
+    assert result.blocking is True
+    assert scoped_target in result.reason
+
+
+def test_full_suite_base_collection_error_outside_scoped_targets_is_baseline_debt():
+    existing = "tests.test_contract::test_existing"
+    broken = "tests.unrelated.test_broken"
+    selected = ["tests/ops/test_scoped.py", "tests"]
+
+    def run(revision: str) -> PytestRunResult:
+        return replace(
+            _run(
+                0,
+                [],
+                revision=revision,
+                selected_targets=selected,
+                impact_class="UNMAPPED_FULL_SUITE",
+            ),
+            unmatched_paths=list(_UNMAPPED),
+        )
+
+    base = _with_node_outcomes(run("base"), passed=[existing], errors=[broken])
+    head = _with_node_outcomes(run("head"), passed=[existing], errors=[broken])
+
+    assert classify_regression(base, head).classification == "EXACT_BASELINE_DEBT"

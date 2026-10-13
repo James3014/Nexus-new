@@ -952,18 +952,50 @@ def _full_suite_untrusted(base: PytestRunResult, head: PytestRunResult) -> bool:
     """A FULL_SUITE comparison must prove it really ran the whole suite on both sides."""
     # Extra targets (e.g. head-mapped files the trusted gate unions in) are allowed:
     # they are subsumed by tests/, which must be selected AND executed on both sides.
+    # A base-missing target is allowed only as the scoped path allows it: a test
+    # file the PR adds (absent at base, so not in unexpected_missing_targets, which
+    # the shared evidence check already rejects). Head must miss nothing.
     return (
         base.impact_class != head.impact_class
         or not base.unmatched_paths
         or base.unmatched_paths != head.unmatched_paths
+        or bool(head.missing_targets)
+        or bool(base.unexpected_missing_targets)
         or any(
             any(target not in result.selected_targets for target in FULL_SUITE_TARGETS)
             or any(target not in result.executed_targets for target in FULL_SUITE_TARGETS)
-            or result.missing_targets
             or result.collection_count <= 0
             for result in (base, head)
         )
     )
+
+
+def _collection_error_path(node: str) -> str:
+    return node.replace(".", "/")
+
+
+def _scoped_targets_in_collection_errors(result: PytestRunResult) -> list[str]:
+    """Scoped (non-tests/) targets that a collection-error node of ``result`` covers.
+
+    On the mapped path such a target makes pytest exit 2 (CI_BOOTSTRAP_DEFECT);
+    under FULL_SUITE --continue-on-collection-errors would otherwise turn it into
+    ordinary baseline debt, i.e. weaker than the mapped check.
+    """
+    covered: list[str] = []
+    error_paths = [_collection_error_path(node) for node in _collection_error_nodes(result)]
+    for target in result.selected_targets:
+        if target in FULL_SUITE_TARGETS:
+            continue
+        target_path = target.split("::", 1)[0].removesuffix(".py")
+        for error_path in error_paths:
+            if (
+                target_path == error_path
+                or target_path.startswith(f"{error_path}/")
+                or error_path.startswith(f"{target_path}/")
+            ):
+                covered.append(target)
+                break
+    return sorted(covered)
 
 
 def parse_junit_failures(path: Path) -> list[str]:
@@ -1390,6 +1422,20 @@ def _classify_regression(
             new_failures,
             resolved,
             "test execution metadata did not prove a trustworthy exact-base comparison",
+        )
+    bootstrap_targets = _scoped_targets_in_collection_errors(base) if full_suite else []
+    if bootstrap_targets and not (head.exit_code == 0 and head.status == "COMPLETE"):
+        # Same verdict the mapped path gives a base collection error in a selected
+        # target: red unless the exact head is completely clean (a repair).
+        return RegressionClassification(
+            "CI_BOOTSTRAP_DEFECT",
+            True,
+            base_failures,
+            head_failures,
+            new_failures,
+            resolved,
+            "exact base has pytest collection errors in scoped targets "
+            + ", ".join(bootstrap_targets),
         )
     if head.exit_code == 0 and head.status == "COMPLETE":
         return RegressionClassification(

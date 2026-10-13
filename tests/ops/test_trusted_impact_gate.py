@@ -1057,3 +1057,84 @@ def test_changed_conftest_target_without_results_is_allowed(tmp_path):
     tig.validate_junit(_junit(HONEST[:2]), spec, files)
     with pytest.raises(tig.GateError, match="no results for planned targets"):
         tig.validate_junit(_junit([]), spec, files)
+
+
+# ----------------------------------------------------------------------------- #2092 FULL_SUITE
+
+
+def _unmapped_full_suite_repo(pr_repo: dict) -> dict:
+    _write(pr_repo["repo"], {"mystery/runtime.surface": "unmapped\n"})
+    pr_repo["head"] = _commit(pr_repo["repo"], "head touches an unmapped path")
+    return tig.derive_plan(pr_repo["repo"], pr_repo["base"], pr_repo["head"])
+
+
+FULL_SUITE_CASES = [
+    *HONEST,
+    ("tests.test_unplanned", "test_x", "pass"),
+    ("tests.core.test_core", "test_ok", "pass"),
+    ("tests.services.test_policy_gate", "test_ok", "pass"),
+]
+
+
+def test_side_spec_adds_continue_flag_only_for_the_full_suite_fallback(pr_repo):
+    mapped = tig.derive_plan(pr_repo["repo"], pr_repo["base"], pr_repo["head"])
+    assert mapped["impact_class"] != "UNMAPPED_FULL_SUITE"
+    for side in tig.SIDES:
+        spec = tig.side_spec(pr_repo["repo"], mapped, side)
+        assert "--continue-on-collection-errors" not in spec["pytest_args"]
+
+    plan = _unmapped_full_suite_repo(pr_repo)
+    assert plan["impact_class"] == "UNMAPPED_FULL_SUITE"
+    for side in tig.SIDES:
+        spec = tig.side_spec(pr_repo["repo"], plan, side)
+        assert spec["mode"] == "pytest"
+        assert "tests" in spec["executed_targets"]
+        assert spec["pytest_args"][-1] == "--continue-on-collection-errors"
+
+
+def test_trusted_full_suite_fallback_end_to_end(pr_repo):
+    plan = _unmapped_full_suite_repo(pr_repo)
+    assert plan["fallback"] == "FULL_SUITE"
+    assert plan["unmatched_paths"] == ["mystery/runtime.surface"]
+    bundle, manifest, manifest_sha = _bundle(pr_repo)
+    evidence = pr_repo["tmp"] / "evidence"
+    junit = _junit(FULL_SUITE_CASES)
+    base_sha256 = _evidence(evidence, manifest, manifest_sha, "base", junit=junit)
+    _evidence(evidence, manifest, manifest_sha, "head", junit=junit)
+
+    verdict = _verify(pr_repo, bundle, manifest_sha, base_sha256)
+    assert verdict["classification"] == "PASS"
+    assert verdict["fallback"] == "FULL_SUITE"
+    assert verdict["unmatched_paths"] == ["mystery/runtime.surface"]
+
+    spec = tig.side_spec(pr_repo["repo"], plan, "head")
+    rebuilt = tig.reconstruct_result(
+        spec,
+        plan,
+        json.loads((evidence / "head" / "executor-evidence.json").read_text(encoding="utf-8")),
+        junit,
+        tig._tree_files(pr_repo["repo"], spec["revision"]),
+        expected_manifest_sha256=manifest_sha,
+        verifier_digest="2" * 64,
+    )
+    assert rebuilt.unmatched_paths == ["mystery/runtime.surface"]
+    assert rebuilt.impact_class == "UNMAPPED_FULL_SUITE"
+
+
+def test_trusted_full_suite_fallback_new_head_failure_blocks(pr_repo):
+    _unmapped_full_suite_repo(pr_repo)
+    bundle, manifest, manifest_sha = _bundle(pr_repo)
+    evidence = pr_repo["tmp"] / "evidence"
+    base_sha256 = _evidence(
+        evidence, manifest, manifest_sha, "base", junit=_junit(FULL_SUITE_CASES)
+    )
+    failing = [
+        (cls, name, "fail" if name == "test_b" else outcome)
+        for cls, name, outcome in FULL_SUITE_CASES
+    ]
+    _evidence(evidence, manifest, manifest_sha, "head", junit=_junit(failing), exit_code=1)
+
+    verdict = _verify(pr_repo, bundle, manifest_sha, base_sha256)
+    assert verdict["classification"] == "NEW_REGRESSION"
+    assert verdict["blocking"] is True
+    assert verdict["fallback"] == "FULL_SUITE"
