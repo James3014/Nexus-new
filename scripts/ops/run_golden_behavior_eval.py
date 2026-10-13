@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Validate and execute the Nexus Golden Behavior Corpus."""
+"""Validate and execute the Nexus Golden Behavior Corpus.
+
+Two-stage change rule: the trusted Golden check evaluates the PR's
+``tests/golden_behavior/corpus.py`` with the *base-branch* copy of this
+evaluator.  A corpus using a probe id, field value or class this evaluator does
+not know is rejected with an ``EVALUATOR_GENERATION_MISMATCH`` hint.  Land
+evaluator changes first, then bind the corpus in a follow-up PR.  See
+docs/testing/test_runbook.md.
+"""
 
 from __future__ import annotations
 
@@ -686,7 +694,26 @@ PROBE_CLASSES: dict[str, str] = {
 }
 
 
+GENERATION_MISMATCH_HINT = (
+    "EVALUATOR_GENERATION_MISMATCH: land evaluator changes first; bind in a follow-up PR"
+)
+_GENERATION_MISMATCH_SUFFIXES = (
+    ":invalid_classification",
+    ":invalid_scenario",
+    ":invalid_status",
+    ":unknown_finding_probe",
+    ":unclassified_finding_probe",
+)
+
+
 def validate_corpus() -> list[str]:
+    errors = _validate_corpus_cases()
+    if any(error.endswith(_GENERATION_MISMATCH_SUFFIXES) for error in errors):
+        errors.append(GENERATION_MISMATCH_HINT)
+    return errors
+
+
+def _validate_corpus_cases() -> list[str]:
     errors: list[str] = []
     ids = [case.case_id for case in CASES]
     if len(CASES) < 50:

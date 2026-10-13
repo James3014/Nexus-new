@@ -76,3 +76,22 @@ def test_validate_only_report_binds_provenance_and_case_witness_map(tmp_path, mo
     witness = report["case_evidence"][0]["witnesses"][0]
     assert witness["collection_status"] == "collected"
     assert witness["execution_status"] == "not_executed_validate_only"
+
+
+def test_unknown_probe_adds_generation_mismatch_hint(monkeypatch):
+    import dataclasses
+
+    cases = list(evaluator.CASES)
+    cases[0] = dataclasses.replace(cases[0], finding_probe="probe_from_a_newer_corpus")
+    monkeypatch.setattr(evaluator, "CASES", tuple(cases))
+
+    errors = evaluator.validate_corpus()
+
+    assert f"{cases[0].case_id}:unknown_finding_probe" in errors
+    assert errors[-1] == (
+        "EVALUATOR_GENERATION_MISMATCH: land evaluator changes first; bind in a follow-up PR"
+    )
+
+
+def test_clean_corpus_has_no_generation_mismatch_hint():
+    assert not any("EVALUATOR_GENERATION_MISMATCH" in e for e in evaluator.validate_corpus())
