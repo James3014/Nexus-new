@@ -7,6 +7,10 @@ on:
     types: [opened, synchronize, reopened, labeled, unlabeled, edited]
     branches: [main]
 
+concurrency:
+  group: deletion-guard-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   pull-requests: read

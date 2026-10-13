@@ -15,4 +15,4 @@ A PR that deletes or renames tracked files must not merge until the Owner OKs it
 gh pr edit N --add-label owner-approved-deletion
 ```
 
-The label is created once with `gh label create owner-approved-deletion --color B60205 -R James3014/Nexus-new`. Removing the label re-arms the check.
+The label is created once with `gh label create owner-approved-deletion --color B60205 -R James3014/Nexus-new`. Removing the label re-arms the check. While the label is on, it also covers deletions added by later pushes, so remove it once the approved deletion has landed in the PR if more work follows.
