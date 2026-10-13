@@ -480,3 +480,13 @@ class NexusEngine:
     def receive_subagent_outcome(self, payload: Dict[str, Any], state: NexusState):
         """⚖️ AOS-P5.3: 收攏子代理執行期補丁與知識"""
         return self.subagent_outcome.handle(payload, state)
+
+
+# ARCHIVED 2026-10-13 legacy-engine (ARCHIVED_2026-10-13-legacy-engine.md).
+__import__("warnings").warn(
+    "ARCHIVED 2026-10-13 legacy-engine: "
+    "nexus.engine.coordinator (NexusEngine) is the retired legacy engine; no production caller (nexus run uses execute_canonical_product_task; the MCP gateway and self-hosted service never build it); "
+    "see ARCHIVED_2026-10-13-legacy-engine.md. Scheduled for deletion; do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)

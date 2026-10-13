@@ -78,3 +78,8 @@ def test_formulation_order_places_diagnose_before_optional_research_resume():
     research = SimpleNamespace(should_run=lambda _ctx: True)
     assert NexusPipeline._formulation_phase_order({"X": research}, ctx) == ["P", "D", "X"]
     assert NexusPipeline._formulation_phase_order({}, ctx) == ["P", "D"]
+
+
+# ARCHIVED 2026-10-13 legacy-engine: this file tests (in whole or in part) modules archived with
+# the legacy NexusEngine (nexus.engine.pipeline); see ARCHIVED_2026-10-13-legacy-engine.md.
+# It keeps running with unchanged node ids until the deletion PR removes it with those modules.

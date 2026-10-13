@@ -156,7 +156,7 @@ else:
     from nexus.app.oracle_advisor import OracleAdvisor
     from nexus.app import research_flow_service
     from nexus.engine.canonical_task_seam import (
-        build_legacy_cli_service,
+        LegacyEngineArchivedError,
         execute_canonical_product_task,
     )
     from nexus.engine.completion_contract import build_completion_envelope
@@ -320,7 +320,7 @@ else:
         """Compatibility shim for legacy callers that import NexusCLI from this module."""
 
         def __init__(self, silent: bool = True, project_root: Path | None = None):
-            self.service = build_legacy_cli_service(project_root or repo_root)
+            raise LegacyEngineArchivedError("NexusCLI")
 
     @click.group()
     def nexus():
@@ -3144,11 +3144,11 @@ else:
         click.echo(json.dumps(result, indent=2))
 
     # --- External Command Registration ---
-    try:
-        from scripts.engine.commands.swarm import register as register_swarm
-        register_swarm(nexus_group, repo_root)
-    except ImportError as e:
-        click.echo(f"⚠️  [Nexus:CLI] Could not load external command module: {e}")
+    # ARCHIVED 2026-10-13 legacy-engine: `nexus nexus swarm run` (scripts/engine/commands/swarm.py)
+    # only dispatched to the retired legacy NexusEngine and is no longer registered; see
+    # ARCHIVED_2026-10-13-legacy-engine.md (swarm quiet-moment was archived earlier, #1906).
+    # No other external command module is registered here.
+    #
 
     @nexus.command(name="run-bug")
     @click.argument("task")

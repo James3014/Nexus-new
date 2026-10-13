@@ -22,3 +22,8 @@ def test_command_service_bridges_engine(tmp_path):
     svc.execute_bug(TaskRequest(task="修復 DB 連線問題"))
 
     mock_engine.run_bug.assert_called_once()
+
+
+# ARCHIVED 2026-10-13 legacy-engine: this file tests (in whole or in part) modules archived with
+# the legacy NexusEngine (nexus.app.command_service); see ARCHIVED_2026-10-13-legacy-engine.md.
+# It keeps running with unchanged node ids until the deletion PR removes it with those modules.

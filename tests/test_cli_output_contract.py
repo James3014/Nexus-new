@@ -80,27 +80,25 @@ def _seed_delivery_receipt(repo: Path, task_id: str) -> None:
 
 
 def test_nexus_cli_compat_shim_uses_canonical_service_factory(monkeypatch, tmp_path):
-    captured = {}
+    # ARCHIVED 2026-10-13 legacy-engine (ARCHIVED_2026-10-13-legacy-engine.md): the NexusCLI
+    # compatibility shim no longer builds the legacy CommandService/NexusEngine; it fails closed.
+    import pytest
 
-    class _FakeLegacyService:
-        def execute_bug(self, request):
-            captured["bug_task"] = request
-            return True
+    from nexus.engine.canonical_task_seam import LegacyEngineArchivedError
 
-        def execute_feature(self, request):
-            captured["feature_task"] = request
-            return True
+    assert not hasattr(cli_mod, "build_legacy_cli_service")
 
-    def _fake_build_legacy_cli_service(project_root):
-        captured["project_root"] = project_root
-        return _FakeLegacyService()
+    def _boom(*_args, **_kwargs):  # pragma: no cover - must not be reached
+        raise AssertionError("archived legacy NexusEngine must not be constructed")
 
-    monkeypatch.setattr(cli_mod, "build_legacy_cli_service", _fake_build_legacy_cli_service)
-
-    cli = cli_mod.NexusCLI(project_root=tmp_path)
-    assert captured["project_root"] == tmp_path
-    assert cli.service.execute_bug("fix bug") is True
-    assert captured["bug_task"] == "fix bug"
+    monkeypatch.setattr("nexus.engine.config.EngineConfig", _boom)
+    with pytest.raises(LegacyEngineArchivedError) as excinfo:
+        cli_mod.NexusCLI(project_root=tmp_path)
+    assert excinfo.value.entry == "NexusCLI"
+    assert excinfo.value.reason == "archived_legacy_engine_2026-10-13"
+    assert "ARCHIVED 2026-10-13 legacy-engine" in str(excinfo.value)
+    assert callable(cli_mod.execute_canonical_product_task)
+    assert cli_mod.nexus is not None
 
 
 def test_run_fails_fast_when_task_requests_file_output_without_output_file():

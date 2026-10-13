@@ -137,3 +137,13 @@ def build_engine_components(config: Any, kwargs: Dict[str, Any]) -> Dict[str, An
     components["sota_searcher"] = SOTASearcher(components["vector_cache"])
     
     return components
+
+
+# ARCHIVED 2026-10-13 legacy-engine (ARCHIVED_2026-10-13-legacy-engine.md).
+__import__("warnings").warn(
+    "ARCHIVED 2026-10-13 legacy-engine: "
+    "nexus.engine.bootstrap is part of the retired legacy NexusEngine and has no production caller (nexus run uses execute_canonical_product_task); "
+    "see ARCHIVED_2026-10-13-legacy-engine.md. Scheduled for deletion; do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)

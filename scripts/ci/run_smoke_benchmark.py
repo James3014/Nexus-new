@@ -171,5 +171,20 @@ class SmokeBenchmarkRunner:
         }
 
 if __name__ == "__main__":
-    runner = SmokeBenchmarkRunner(Path.cwd())
-    runner.run()
+    # ARCHIVED 2026-10-13 legacy-engine (ARCHIVED_2026-10-13-legacy-engine.md): the report was a
+    # hard-coded PASS from NexusEngine.run_benchmark, which ignores the smoke cases.
+    sys.exit(
+        "ARCHIVED 2026-10-13 legacy-engine: scripts/ci/run_smoke_benchmark.py reported a "
+        "hard-coded PASS from the retired legacy NexusEngine; see "
+        "ARCHIVED_2026-10-13-legacy-engine.md."
+    )
+
+
+# ARCHIVED 2026-10-13 legacy-engine (ARCHIVED_2026-10-13-legacy-engine.md).
+__import__("warnings").warn(
+    "ARCHIVED 2026-10-13 legacy-engine: "
+    "scripts.ci.run_smoke_benchmark reported a hard-coded PASS from the retired legacy NexusEngine (NexusEngine.run_benchmark ignores its cases); the Nexus Smoke Benchmark workflow no longer runs it; "
+    "see ARCHIVED_2026-10-13-legacy-engine.md. Scheduled for deletion; do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)

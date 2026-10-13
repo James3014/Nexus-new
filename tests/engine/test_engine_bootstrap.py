@@ -61,3 +61,8 @@ def test_bootstrap_commander_r_stage_harness_contract(tmp_path: Path, monkeypatc
 
     result_denial = commander.next_step()
     assert result_denial == "HARNESS_BLOCKED"
+
+
+# ARCHIVED 2026-10-13 legacy-engine: this file tests (in whole or in part) modules archived with
+# the legacy NexusEngine (nexus.engine.bootstrap); see ARCHIVED_2026-10-13-legacy-engine.md.
+# It keeps running with unchanged node ids until the deletion PR removes it with those modules.

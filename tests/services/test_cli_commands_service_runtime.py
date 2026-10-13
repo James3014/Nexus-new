@@ -99,3 +99,8 @@ def test_cli_commands_service_heartbeat_non_test_preserves_monitor_dispatch(monk
 
     assert facade.heartbeat(test=False) == "monitor-result"
     assert captured["monitor"] == 1
+
+
+# ARCHIVED 2026-10-13 legacy-engine: this file tests (in whole or in part) modules archived with
+# the legacy NexusEngine (nexus.services.cli_commands_service); see ARCHIVED_2026-10-13-legacy-engine.md.
+# It keeps running with unchanged node ids until the deletion PR removes it with those modules.

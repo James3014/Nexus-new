@@ -104,3 +104,8 @@ def test_autonomic_routing_service_external_skill_injects_instructions(tmp_path:
     assert out["mode"] == "external_skill"
     assert state.metadata["active_external_skill"] == "external-skill"
     assert "[EXTERNAL SKILL INSTRUCTIONS: external-skill]" in state.metadata["task_description"]
+
+
+# ARCHIVED 2026-10-13 legacy-engine: this file tests (in whole or in part) modules archived with
+# the legacy NexusEngine (nexus.engine.autonomic_routing_service); see ARCHIVED_2026-10-13-legacy-engine.md.
+# It keeps running with unchanged node ids until the deletion PR removes it with those modules.

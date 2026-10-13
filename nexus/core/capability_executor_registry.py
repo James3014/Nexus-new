@@ -597,64 +597,9 @@ def _exec_nightshift_runner_service(plan: CapabilityExecutionPlan, task_desc: st
 
 
 def _exec_autonomic_router(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    """CONTROL_PLANE_REFERENCE — planner suggestion only, never production executor F."""
-    start = time.monotonic()
-    cls = _try_port("autonomic_router.AutonomicRouter")
-    if cls is None:
-        return _make_receipt(
-            "autonomic_router",
-            plan,
-            invoked=False,
-            gate_passed=False,
-            outcome=_structured_outcome(
-                action="route_suggest",
-                semantic_status="FAILED",
-                error=_port_error("autonomic_router.AutonomicRouter"),
-                control_plane=True,
-            ),
-        )
-    try:
-        from nexus.core.state_contracts import NexusState
-
-        inst = cls()
-        state = NexusState(
-            task_id=plan.task_id,
-            metadata={"impact_map": {}, "est_tokens": 0, "autonomic_reason": ""},
-        )
-        result = inst.route(task_desc=task_desc, state=state, forecast=plan.constraints)
-        elapsed = int((time.monotonic() - start) * 1000)
-        # Control-plane suggestion receipt — gate_passed True means suggestion emitted,
-        # not that a production capability executor F path ran.
-        return _make_receipt(
-            "autonomic_router",
-            plan,
-            wall_time_ms=elapsed,
-            gate_passed=True,
-            outcome=_structured_outcome(
-                action="route_suggest",
-                semantic_status="SUCCEEDED",
-                evidence_refs=[f"ev_autonomic_suggest_{plan.task_id}"],
-                result=result if isinstance(result, Mapping) else {"route": str(result)[:200]},
-                control_plane=True,
-                physical_callable="nexus.engine.autonomic_router.AutonomicRouter.route",
-                execution_class="CONTROL_PLANE_REFERENCE",
-            ),
-        )
-    except Exception as exc:
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt(
-            "autonomic_router",
-            plan,
-            invoked=True,
-            gate_passed=False,
-            wall_time_ms=elapsed,
-            outcome=_structured_outcome(
-                action="route_suggest",
-                semantic_status="FAILED",
-                error=str(exc)[:300],
-                control_plane=True,
-            ),
-        )
+    """ARCHIVED 2026-10-13 legacy-engine: the legacy AutonomicRouter suggestion (consumed by
+    nothing, enabled by no policy rule) is retired; fail closed."""
+    return _archived_receipt("autonomic_router", plan, task_desc)
 
 
 # ─── X-phase ──────────────────────────────────────────────────────────────────

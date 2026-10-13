@@ -64,3 +64,8 @@ def test_telemetry_propagation_in_e2e(workspace):
         # Verify trace ID is accessible
         assert tid != "00000000000000000000000000000000"
         assert tracer.current_trace_id() == tid
+
+
+# ARCHIVED 2026-10-13 legacy-engine: this file tests (in whole or in part) modules archived with
+# the legacy NexusEngine (nexus.engine.coordinator, nexus.engine.pipeline); see ARCHIVED_2026-10-13-legacy-engine.md.
+# It keeps running with unchanged node ids until the deletion PR removes it with those modules.

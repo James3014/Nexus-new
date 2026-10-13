@@ -515,3 +515,13 @@ class PipelineStagesMixin:
                     logger.info("🔄 歷史循環根因=insufficient_diag，強制深度診斷")
         except Exception as exc:
             logger.debug("r_phase_cycle_prevention_skip: %s", exc)
+
+
+# ARCHIVED 2026-10-13 legacy-engine (ARCHIVED_2026-10-13-legacy-engine.md).
+__import__("warnings").warn(
+    "ARCHIVED 2026-10-13 legacy-engine: "
+    "nexus.engine.pipeline_stages is part of the retired legacy NexusEngine and has no production caller (nexus run uses execute_canonical_product_task); "
+    "see ARCHIVED_2026-10-13-legacy-engine.md. Scheduled for deletion; do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)
