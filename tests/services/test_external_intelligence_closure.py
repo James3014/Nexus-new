@@ -21,10 +21,13 @@ from nexus.services.external_intelligence_closure import (
     ClosureStore,
     CompositionWorkspaceAllocator,
     ExternalIntelligenceClosureRuntime,
+    _unique_failed_owner,
+    build_acceptance_packet,
     build_composition_repair_delta,
     build_unit_repair_delta,
     compose_task_candidate,
     parse_task_card_authority,
+    run_integrity_checks,
     validate_worker_receipt,
     verify_unit_candidate,
     verify_whole_task_candidate,
@@ -1118,3 +1121,249 @@ def test_core_bound_receipt_with_partial_bound_fields_is_invalid(tmp_path, monke
     receipt.pop("acceptance_contract_hash")
     with pytest.raises(ClosureError, match="CORE_BINDING_RECEIPT_INVALID"):
         validate_worker_receipt(_reidentify(receipt))
+
+
+# --- Built-in scoped integrity checks, verifier env and EIA commit identity ---------
+
+INTEGRITY_IDS = [
+    "nexus.integrity.diff-check",
+    "nexus.integrity.deletions",
+    "nexus.integrity.scope",
+]
+
+
+def _integrity(verification: dict) -> dict:
+    return {row["check_id"]: row for row in verification["integrity_checks"]}
+
+
+def test_unit_integrity_checks_are_scoped_to_bound_base_and_recorded(tmp_path):
+    repo, base = make_repo(tmp_path)
+    receipt = make_receipt(repo, tmp_path, base, "ua", "a.py", "A = 1\n")
+    candidate = receipt["candidate_commit"]
+    env_probe = verifier(
+        "env",
+        "import os; assert os.environ['NEXUS_BASE_SHA'] == "
+        f"'{base}' and os.environ['NEXUS_CANDIDATE_SHA'] == '{candidate}'",
+    )
+    verification = verify_unit_candidate(receipt, [env_probe])
+    assert verification["status"] == "PASS"
+    assert verification["integrity_status"] == "PASS"
+    assert verification["integrity_base_sha"] == base
+    assert verification["failed_integrity_check_ids"] == []
+    assert [row["check_id"] for row in verification["integrity_checks"]] == INTEGRITY_IDS
+    for row in verification["integrity_checks"]:
+        assert row["passed"] is True and row["code"] == ""
+        # every built-in check names the bound base and the candidate explicitly
+        assert base in row["argv"] and candidate in row["argv"]
+    # integrity results are part of the hashed verification identity
+    material = dict(verification)
+    material.pop("verification_id")
+    assert verification["verification_id"] == _sha256(_canonical_json(material))
+
+
+def test_unscoped_diff_check_is_a_noop_but_builtin_integrity_fails_closed(tmp_path):
+    repo, base = make_repo(tmp_path)
+    receipt = make_receipt(repo, tmp_path, base, "ua", "a.py", "A = 1   \n")
+    unscoped = {"id": "diff-check", "argv": ["git", "diff", "--check"]}
+    verification = verify_unit_candidate(receipt, [unscoped])
+    # the contract verifier sees a clean committed checkout and proves nothing ...
+    assert verification["results"][0]["passed"] is True
+    assert verification["failed_verifier_ids"] == []
+    # ... while the built-in base-scoped check catches the whitespace error.
+    assert verification["status"] == "FAIL"
+    assert verification["integrity_status"] == "FAIL"
+    assert verification["failed_integrity_check_ids"] == ["nexus.integrity.diff-check"]
+    row = _integrity(verification)["nexus.integrity.diff-check"]
+    assert row["code"] == "INTEGRITY_WHITESPACE_ERRORS"
+    assert row["findings"] == ["a.py"]
+    delta = build_unit_repair_delta(receipt, verification, repair_index=1)
+    assert [finding["verifier_id"] for finding in delta["findings"]] == [
+        "nexus.integrity.diff-check"
+    ]
+    assert delta["findings"][0]["error"] == "INTEGRITY_WHITESPACE_ERRORS"
+    assert delta["findings"][0]["paths"] == ["a.py"]
+
+
+def test_scoped_contract_verifier_can_use_base_env(tmp_path):
+    repo, base = make_repo(tmp_path)
+    receipt = make_receipt(repo, tmp_path, base, "ua", "a.py", "A = 1   \n")
+    scoped = {
+        "id": "scoped-diff-check",
+        "argv": ["sh", "-c", 'git diff --check "$NEXUS_BASE_SHA" "$NEXUS_CANDIDATE_SHA"'],
+    }
+    verification = verify_unit_candidate(receipt, [scoped])
+    assert verification["failed_verifier_ids"] == ["scoped-diff-check"]
+
+
+def test_close_task_turns_unit_integrity_failure_into_bounded_repair(tmp_path):
+    repo, _base = make_repo(tmp_path)
+    card_ref, card_hash, head_sha = make_task_card(repo)
+    ua = make_receipt(repo, tmp_path, head_sha, "ua", "a.py", "A = 1 \n")
+    result = runtime(repo, tmp_path).close_task(
+        main_sha=head_sha,
+        unit_receipts=[ua],
+        unit_verifiers={"ua": [verifier("ok", "raise SystemExit(0)")]},
+        whole_verifiers=[verifier("ok", "raise SystemExit(0)")],
+        task_card_ref=card_ref,
+        task_card_hash=card_hash,
+    )
+    assert result["status"] == "UNIT_REPAIR_REQUIRED"
+    assert result["acceptance_packet"] == {}
+    (delta,) = result["repair_deltas"]
+    assert delta["findings"][0]["verifier_id"] == "nexus.integrity.diff-check"
+
+
+def _rename_receipt(repo: Path, tmp_path: Path, base: str, mutation_paths: list[str]) -> dict:
+    workspace = _worktree(repo, tmp_path / "units", "ur", base)
+    _git(workspace, "mv", "a.py", "a2.py")
+    return _advance_receipt(
+        repo=repo,
+        base=base,
+        workspace=workspace,
+        unit_id="ur",
+        target="a2.py",
+        content="A = 0\n",
+        mutation_paths=mutation_paths,
+    )
+
+
+def test_rename_cannot_hide_its_deleted_source_from_scope_or_deletion_checks(tmp_path):
+    repo, base = make_repo(tmp_path)
+    _git(repo, "config", "diff.renames", "true")
+    in_scope_target_only = _rename_receipt(repo, tmp_path, base, ["a2.py"])
+    with pytest.raises(ClosureError, match="UNIT_SCOPE_WIDENING:a.py"):
+        validate_worker_receipt(in_scope_target_only)
+
+
+def test_rename_counts_as_unauthorized_deletion(tmp_path):
+    repo, base = make_repo(tmp_path)
+    _git(repo, "config", "diff.renames", "true")
+    receipt = _rename_receipt(repo, tmp_path, base, ["a.py", "a2.py"])
+    with pytest.raises(ClosureError, match="UNIT_DELETION_NOT_AUTHORIZED"):
+        validate_worker_receipt(receipt)
+    rows = {
+        row["check_id"]: row
+        for row in run_integrity_checks(
+            Path(receipt["workspace_path"]),
+            base_sha=base,
+            candidate_commit=receipt["candidate_commit"],
+            authorized_paths=["a.py", "a2.py"],
+            deletable_paths=[],
+        )
+    }
+    assert rows["nexus.integrity.deletions"]["code"] == "INTEGRITY_DELETION_NOT_AUTHORIZED"
+    assert rows["nexus.integrity.deletions"]["findings"] == ["a.py"]
+    assert rows["nexus.integrity.scope"]["passed"] is True
+    scope = run_integrity_checks(
+        Path(receipt["workspace_path"]),
+        base_sha=base,
+        candidate_commit=receipt["candidate_commit"],
+        authorized_paths=["a2.py"],
+        deletable_paths=["a.py"],
+    )[2]
+    assert scope["code"] == "INTEGRITY_SCOPE_WIDENING" and scope["findings"] == ["a.py"]
+
+
+def test_integrity_check_git_error_fails_closed(tmp_path):
+    repo, base = make_repo(tmp_path)
+    rows = run_integrity_checks(
+        repo,
+        base_sha=base,
+        candidate_commit="f" * 40,  # well-formed but absent object
+        authorized_paths=["a.py"],
+        deletable_paths=[],
+    )
+    assert [row["code"] for row in rows] == ["INTEGRITY_CHECK_ERROR"] * 3
+    with pytest.raises(ClosureError, match="INTEGRITY_CHECK_IDENTITY_INVALID"):
+        run_integrity_checks(
+            repo, base_sha="HEAD", candidate_commit=base, authorized_paths=[], deletable_paths=[]
+        )
+
+
+def _composed(repo: Path, tmp_path: Path, base: str):
+    ua = make_receipt(repo, tmp_path, base, "ua", "a.py", "A = 1\n")
+    ub = make_receipt(repo, tmp_path, base, "ub", "b.py", "B = 1\n")
+    va = verify_unit_candidate(ua, [verifier("a", "raise SystemExit(0)")])
+    vb = verify_unit_candidate(ub, [verifier("b", "raise SystemExit(0)")])
+    candidate, lease = compose_task_candidate(
+        repository_root=repo,
+        allocator=CompositionWorkspaceAllocator(repo, tmp_path / "assembly"),
+        receipts=[ua, ub],
+        verifications=[va, vb],
+    )
+    return ua, ub, va, vb, candidate, lease
+
+
+def test_whole_task_integrity_scope_failure_has_no_owner_and_blocks_acceptance(tmp_path):
+    repo, base = make_repo(tmp_path)
+    ua, ub, va, vb, candidate, _lease = _composed(repo, tmp_path, base)
+    whole = verify_whole_task_candidate(
+        candidate,
+        [verifier("whole", "raise SystemExit(0)", owner_unit="ua")],
+        authorized_paths=["a.py"],
+    )
+    assert whole["status"] == "FAIL"
+    assert whole["base_sha"] == base
+    assert whole["failed_verifier_ids"] == []
+    assert whole["failed_integrity_check_ids"] == ["nexus.integrity.scope"]
+    assert _integrity(whole)["nexus.integrity.scope"]["findings"] == ["b.py"]
+    assert _unique_failed_owner(whole, {"ua", "ub"}) == ""
+
+
+def test_acceptance_packet_records_and_requires_integrity_checks(tmp_path):
+    repo, base = make_repo(tmp_path)
+    ua, ub, va, vb, candidate, _lease = _composed(repo, tmp_path, base)
+    whole = verify_whole_task_candidate(
+        candidate, [verifier("whole", "raise SystemExit(0)")], authorized_paths=["a.py", "b.py"]
+    )
+    assert whole["status"] == "PASS"
+    kwargs = dict(
+        task_candidate=candidate,
+        unit_receipts=[ua, ub],
+        unit_verifications=[va, vb],
+        task_card_ref="tasks/x.md",
+        task_card_hash="c" * 64,
+    )
+    packet = build_acceptance_packet(whole_verification=whole, **kwargs)
+    assert packet["integrity_checks"] == {
+        "base_sha": base,
+        "whole_task": INTEGRITY_IDS,
+        "units": {"ua": INTEGRITY_IDS, "ub": INTEGRITY_IDS},
+    }
+    stripped = {key: value for key, value in whole.items() if key != "integrity_checks"}
+    with pytest.raises(ClosureError, match="WHOLE_TASK_INTEGRITY_PASS_REQUIRED"):
+        build_acceptance_packet(whole_verification=stripped, **kwargs)
+    partial = dict(whole, integrity_checks=whole["integrity_checks"][:2])
+    with pytest.raises(ClosureError, match="WHOLE_TASK_INTEGRITY_PASS_REQUIRED"):
+        build_acceptance_packet(whole_verification=partial, **kwargs)
+    legacy_unit = {key: value for key, value in vb.items() if not key.startswith("integrity")}
+    with pytest.raises(ClosureError, match="ACCEPTANCE_REQUIRES_UNIT_INTEGRITY_PASS"):
+        build_acceptance_packet(
+            whole_verification=whole, **dict(kwargs, unit_verifications=[va, legacy_unit])
+        )
+
+
+def test_composed_candidate_commit_uses_explicit_eia_identity(tmp_path, monkeypatch):
+    bogus_global = tmp_path / "bogus-global.gitconfig"
+    bogus_global.write_text(
+        "[user]\n\tname = Antigravity\n\temail = antigravity@gemini.local\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(bogus_global))
+    for key in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
+        monkeypatch.delenv(key, raising=False)
+    repo, base = make_repo(tmp_path)
+    *_rest, candidate, lease = _composed(repo, tmp_path, base)
+    assembly = Path(lease.path)
+    fmt = "%an <%ae>%n%cn <%ce>"
+    assert _git(assembly, "log", "-1", f"--format={fmt}", candidate["candidate_commit"]) == (
+        "EIA closure composer <eia-closure@nexus.invalid>\n"
+        "EIA closure composer <eia-closure@nexus.invalid>"
+    )
+    trailers = _git(
+        assembly, "log", "-1", "--format=%(trailers:only,unfold)", candidate["candidate_commit"]
+    )
+    assert trailers.splitlines() == [
+        "Nexus-EIA-Worker: unbound",
+        f"Nexus-EIA-Model: {MODEL}",
+    ]
+    assert "antigravity" not in _git(assembly, "log", "-1", "--format=%B%an%ae%cn%ce").lower()

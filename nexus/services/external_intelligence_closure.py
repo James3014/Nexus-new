@@ -18,11 +18,17 @@ from nexus.services.external_intelligence import (
     validate_selected_worker,
 )
 from nexus.services.external_intelligence_fanout import (
+    EIA_COMPOSER_EMAIL,
+    EIA_COMPOSER_NAME,
+    EIA_TRAILER_MODEL,
+    EIA_TRAILER_WORKER,
     MODEL,
     MODEL_ID,
     PROVIDER,
     PROVIDER_ID,
     WORKER_RECEIPT_SCHEMA,
+    eia_git_commit,
+    eia_worker_identity,
 )
 
 UNIT_VERIFICATION_SCHEMA = "external_intelligence_unit_verification.v1"
@@ -42,6 +48,23 @@ _SESSION_PREFIX = "ses_"
 _HEX40 = frozenset("0123456789abcdef")
 _HEX64 = _HEX40
 _ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
+# Built-in scoped integrity checks closure always runs against the bound base,
+# independent of the contract verifiers (which may be unscoped no-ops).
+INTEGRITY_CHECK_WHITESPACE = "nexus.integrity.diff-check"
+INTEGRITY_CHECK_DELETIONS = "nexus.integrity.deletions"
+INTEGRITY_CHECK_SCOPE = "nexus.integrity.scope"
+INTEGRITY_CHECK_IDS = (INTEGRITY_CHECK_WHITESPACE, INTEGRITY_CHECK_DELETIONS, INTEGRITY_CHECK_SCOPE)
+INTEGRITY_CHECK_TIMEOUT_SECONDS = 30.0
+INTEGRITY_WHITESPACE_ERRORS = "INTEGRITY_WHITESPACE_ERRORS"
+INTEGRITY_DELETION_NOT_AUTHORIZED = "INTEGRITY_DELETION_NOT_AUTHORIZED"
+INTEGRITY_SCOPE_WIDENING = "INTEGRITY_SCOPE_WIDENING"
+INTEGRITY_CHECK_ERROR = "INTEGRITY_CHECK_ERROR"
+# Environment handed to contract verifiers so they can scope to the bound base
+# deterministically (e.g. ``git diff --check "$NEXUS_BASE_SHA" "$NEXUS_CANDIDATE_SHA"``).
+VERIFIER_ENV_BASE_SHA = "NEXUS_BASE_SHA"
+VERIFIER_ENV_CANDIDATE_SHA = "NEXUS_CANDIDATE_SHA"
+_INTEGRITY_FINDINGS_LIMIT = 50
+_DIFF_CHECK_LOCATION_RE = re.compile(r"^(?P<path>.+?):(?P<line>[0-9]+): ")
 
 
 @dataclass(frozen=True)
@@ -145,12 +168,14 @@ def _atomic_json(path: Path, value: Mapping[str, Any]) -> str:
 
 
 def _changed_paths(root: Path, base: str, head: str) -> list[str]:
-    output = _run_git(root, "diff", "--name-only", base, head, "--")
+    # ``--no-renames``: a rename must surface as delete + add so its source path is
+    # scope- and deletion-checked (rename detection would hide the deleted source).
+    output = _run_git(root, "diff", "--no-renames", "--name-only", base, head, "--")
     return sorted(line.strip() for line in output.splitlines() if line.strip())
 
 
 def _deleted_paths(root: Path, base: str, head: str) -> list[str]:
-    output = _run_git(root, "diff", "--name-status", base, head, "--")
+    output = _run_git(root, "diff", "--no-renames", "--name-status", base, head, "--")
     deleted: list[str] = []
     for line in output.splitlines():
         parts = line.split("\t")
@@ -174,6 +199,145 @@ def _raw_diff_patch(root: Path, base: str, head: str) -> str:
     if result.returncode != 0:
         raise ClosureError(f"GIT_DIFF_FAILED:{(result.stderr or result.stdout).strip()[:1200]}")
     return result.stdout
+
+
+def _integrity_git(root: Path, args: Sequence[str]) -> tuple[list[str], int | None, str, str]:
+    argv = ["git", *args]
+    try:
+        proc = subprocess.run(
+            argv,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=INTEGRITY_CHECK_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return argv, None, str(exc.stdout or ""), str(exc.stderr or "")
+    return argv, int(proc.returncode), proc.stdout or "", proc.stderr or ""
+
+
+def _integrity_row(
+    check_id: str,
+    argv: Sequence[str],
+    returncode: int | None,
+    stdout: str,
+    stderr: str,
+    *,
+    code: str,
+    findings: Sequence[str],
+) -> dict[str, Any]:
+    return {
+        "check_id": check_id,
+        "argv": list(argv),
+        "argv_sha256": _sha256(_canonical_json(list(argv))),
+        "returncode": returncode,
+        "stdout_sha256": _sha256(stdout),
+        "stderr_sha256": _sha256(stderr),
+        "findings": sorted(set(findings))[:_INTEGRITY_FINDINGS_LIMIT],
+        "code": code,
+        "passed": not code,
+    }
+
+
+def _nul_paths(output: str) -> list[str]:
+    return [part for part in output.split("\x00") if part]
+
+
+def run_integrity_checks(
+    root: Path,
+    *,
+    base_sha: str,
+    candidate_commit: str,
+    authorized_paths: Sequence[str],
+    deletable_paths: Sequence[str],
+) -> list[dict[str, Any]]:
+    """Closure-owned scoped integrity checks of ``base_sha..candidate_commit``.
+
+    Always scoped to the bound base (never the clean working tree), so they cannot
+    degenerate into no-ops.  Each check fails closed: a git error or timeout is a
+    failure with ``INTEGRITY_CHECK_ERROR``.
+
+    - whitespace: ``git diff --check <base> <candidate>`` must report nothing;
+    - deletions: every deleted path (renames count as deletions) must lie under
+      ``deletable_paths``;
+    - scope: every changed path must lie under ``authorized_paths``.
+    """
+    if not _is_hex(base_sha, 40) or not _is_hex(candidate_commit, 40):
+        raise ClosureError("INTEGRITY_CHECK_IDENTITY_INVALID")
+    rows: list[dict[str, Any]] = []
+
+    argv, rc, out, err = _integrity_git(
+        root, ["diff", "--no-ext-diff", "--no-renames", "--check", base_sha, candidate_commit, "--"]
+    )
+    findings: list[str] = []
+    for line in out.splitlines():
+        match = _DIFF_CHECK_LOCATION_RE.match(line)
+        if match and not line.startswith(("+", "-")):
+            findings.append(match.group("path"))
+    if rc == 0 and not out.strip():
+        code = ""
+    elif rc is not None and rc != 0 and findings:
+        code = INTEGRITY_WHITESPACE_ERRORS
+    else:
+        code = INTEGRITY_CHECK_ERROR
+    rows.append(
+        _integrity_row(INTEGRITY_CHECK_WHITESPACE, argv, rc, out, err, code=code, findings=findings)
+    )
+
+    argv, rc, out, err = _integrity_git(
+        root,
+        [
+            "diff",
+            "--no-ext-diff",
+            "--no-renames",
+            "--name-only",
+            "-z",
+            "--diff-filter=D",
+            base_sha,
+            candidate_commit,
+            "--",
+        ],
+    )
+    if rc != 0:
+        findings, code = [], INTEGRITY_CHECK_ERROR
+    else:
+        findings = [
+            path
+            for path in _nul_paths(out)
+            if not any(_path_matches(path, boundary) for boundary in deletable_paths)
+        ]
+        code = INTEGRITY_DELETION_NOT_AUTHORIZED if findings else ""
+    rows.append(
+        _integrity_row(INTEGRITY_CHECK_DELETIONS, argv, rc, out, err, code=code, findings=findings)
+    )
+
+    argv, rc, out, err = _integrity_git(
+        root,
+        [
+            "diff",
+            "--no-ext-diff",
+            "--no-renames",
+            "--name-only",
+            "-z",
+            base_sha,
+            candidate_commit,
+            "--",
+        ],
+    )
+    if rc != 0:
+        findings, code = [], INTEGRITY_CHECK_ERROR
+    else:
+        findings = [
+            path
+            for path in _nul_paths(out)
+            if not any(_path_matches(path, boundary) for boundary in authorized_paths)
+        ]
+        code = INTEGRITY_SCOPE_WIDENING if findings else ""
+    rows.append(
+        _integrity_row(INTEGRITY_CHECK_SCOPE, argv, rc, out, err, code=code, findings=findings)
+    )
+    return rows
 
 
 def _receipt_identity(receipt: Mapping[str, Any]) -> str:
@@ -728,6 +892,9 @@ def _run_verifier_specs(
     specs: Sequence[Mapping[str, Any] | VerifierSpec],
     schema: str,
     scope: str,
+    base_sha: str,
+    authorized_paths: Sequence[str],
+    deletable_paths: Sequence[str],
 ) -> dict[str, Any]:
     root = Path(workspace_path).expanduser().resolve()
     if _run_git(root, "rev-parse", "HEAD") != candidate_commit:
@@ -737,9 +904,18 @@ def _run_verifier_specs(
     parsed = [VerifierSpec.from_value(spec) for spec in specs]
     if not parsed:
         raise ClosureError("VERIFIER_SPECS_REQUIRED")
+    integrity_checks = run_integrity_checks(
+        root,
+        base_sha=base_sha,
+        candidate_commit=candidate_commit,
+        authorized_paths=authorized_paths,
+        deletable_paths=deletable_paths,
+    )
     results: list[dict[str, Any]] = []
     env = dict(os.environ)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env[VERIFIER_ENV_BASE_SHA] = base_sha
+    env[VERIFIER_ENV_CANDIDATE_SHA] = candidate_commit
     for spec in parsed:
         started = time.monotonic()
         try:
@@ -781,7 +957,8 @@ def _run_verifier_specs(
             root, "status", "--porcelain=v1"
         ):
             raise ClosureError("VERIFIER_MUTATED_WORKSPACE")
-    status = "PASS" if all(row["passed"] for row in results) else "FAIL"
+    integrity_passed = all(row["passed"] for row in integrity_checks)
+    status = "PASS" if integrity_passed and all(row["passed"] for row in results) else "FAIL"
     verification = {
         "schema": schema,
         "scope": scope,
@@ -792,6 +969,13 @@ def _run_verifier_specs(
         "status": status,
         "failed_verifier_ids": [row["verifier_id"] for row in results if not row["passed"]],
         "results": results,
+        # Additive: closure-owned scoped checks against the bound base.
+        "integrity_base_sha": base_sha,
+        "integrity_status": "PASS" if integrity_passed else "FAIL",
+        "failed_integrity_check_ids": [
+            row["check_id"] for row in integrity_checks if not row["passed"]
+        ],
+        "integrity_checks": integrity_checks,
     }
     verification["verification_id"] = _sha256(_canonical_json(verification))
     return verification
@@ -810,6 +994,9 @@ def verify_unit_candidate(
         specs=verifier_specs,
         schema=UNIT_VERIFICATION_SCHEMA,
         scope="UNIT",
+        base_sha=bound["base_sha"],
+        authorized_paths=bound["mutation_paths"],
+        deletable_paths=bound["mutation_paths"] if bound["allow_deletions"] else (),
     )
     result.update({
         "worker_receipt_id": bound["receipt_id"],
@@ -823,6 +1010,22 @@ def verify_unit_candidate(
     material.pop("verification_id", None)
     result["verification_id"] = _sha256(_canonical_json(material))
     return result
+
+
+def _integrity_findings(verification: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Repair findings for failed built-in integrity checks (same shape as verifier rows)."""
+    return [
+        {
+            "verifier_id": row["check_id"],
+            "returncode": row["returncode"],
+            "stdout_sha256": row["stdout_sha256"],
+            "stderr_sha256": row["stderr_sha256"],
+            "error": row["code"],
+            "paths": list(row.get("findings") or []),
+        }
+        for row in verification.get("integrity_checks", [])
+        if not row.get("passed")
+    ]
 
 
 def build_unit_repair_delta(
@@ -856,6 +1059,7 @@ def build_unit_repair_delta(
         for row in verification.get("results", [])
         if not row.get("passed")
     ]
+    findings.extend(_integrity_findings(verification))
     delta = {
         "schema": UNIT_REPAIR_DELTA_SCHEMA,
         "task_id": bound["task_id"],
@@ -1081,12 +1285,27 @@ def compose_task_candidate(
         raise ClosureError(
             f"COMPOSED_DIFF_CHECK_FAILED:{(check.stdout or check.stderr).strip()[:800]}"
         )
-    commit = subprocess.run(
-        ["git", "commit", "-m", f"candidate: {task_id}/composed"],
-        cwd=assembly,
-        capture_output=True,
-        text=True,
-        check=False,
+    trailers: list[tuple[str, str]] = []
+    for unit_id in order:
+        unit_bound = receipt_by_unit[unit_id][1]
+        identity = eia_worker_identity(
+            provider=unit_bound["provider"],
+            model=unit_bound["model"],
+            worker_id=str((unit_bound.get("selected_worker") or {}).get("worker_id") or ""),
+            worker_backend=unit_bound["worker_backend"],
+        )
+        for trailer in (
+            (EIA_TRAILER_WORKER, identity["worker_id"]),
+            (EIA_TRAILER_MODEL, identity["model"]),
+        ):
+            if trailer not in trailers:
+                trailers.append(trailer)
+    commit = eia_git_commit(
+        assembly,
+        subject=f"candidate: {task_id}/composed",
+        name=EIA_COMPOSER_NAME,
+        email=EIA_COMPOSER_EMAIL,
+        trailers=trailers,
     )
     if commit.returncode != 0:
         raise ClosureError(
@@ -1135,9 +1354,19 @@ def compose_task_candidate(
 def verify_whole_task_candidate(
     task_candidate: Mapping[str, Any],
     verifier_specs: Sequence[Mapping[str, Any] | VerifierSpec],
+    *,
+    authorized_paths: Sequence[str] | None = None,
 ) -> dict[str, Any]:
+    """Run whole-task verifiers plus closure-owned integrity checks.
+
+    ``authorized_paths`` is the union of the composed units' mutation boundaries;
+    without it the scope check falls back to the candidate's composed path set.
+    Deletions are only allowed for paths composition already authorized.
+    """
     if task_candidate.get("schema") != TASK_CANDIDATE_SCHEMA:
         raise ClosureError("INVALID_TASK_CANDIDATE")
+    changed = [str(path) for path in task_candidate.get("changed_paths") or []]
+    deleted = [str(path) for path in task_candidate.get("deleted_paths") or []]
     result = _run_verifier_specs(
         task_id=_safe_slug(task_candidate.get("task_id"), "task_id"),
         unit_id="",
@@ -1146,8 +1375,12 @@ def verify_whole_task_candidate(
         specs=verifier_specs,
         schema=WHOLE_VERIFICATION_SCHEMA,
         scope="WHOLE_TASK",
+        base_sha=str(task_candidate.get("base_sha") or ""),
+        authorized_paths=list(authorized_paths) if authorized_paths is not None else changed,
+        deletable_paths=deleted,
     )
     result.update({
+        "base_sha": task_candidate.get("base_sha"),
         "task_candidate_id": task_candidate.get("task_candidate_id"),
         "candidate_tree": task_candidate.get("candidate_tree"),
         "candidate_diff_sha256": task_candidate.get("candidate_diff_sha256"),
@@ -1159,6 +1392,9 @@ def verify_whole_task_candidate(
 
 
 def _unique_failed_owner(whole_verification: Mapping[str, Any], valid_units: set[str]) -> str:
+    if any(not row.get("passed") for row in whole_verification.get("integrity_checks", [])):
+        # Built-in integrity failures are task-level; no single unit owns them.
+        return ""
     failed = [row for row in whole_verification.get("results", []) if not row.get("passed")]
     if not failed:
         return ""
@@ -1170,6 +1406,16 @@ def _unique_failed_owner(whole_verification: Mapping[str, Any], valid_units: set
         return ""
     owner = next(iter(unique))
     return owner if owner in valid_units else ""
+
+
+def _integrity_passed(verification: Mapping[str, Any]) -> bool:
+    """True only when every built-in integrity check ran and passed (fail closed)."""
+    rows = verification.get("integrity_checks")
+    if verification.get("integrity_status") != "PASS" or not isinstance(rows, list):
+        return False
+    return sorted(str(row.get("check_id")) for row in rows) == sorted(INTEGRITY_CHECK_IDS) and all(
+        row.get("passed") is True for row in rows
+    )
 
 
 def build_acceptance_packet(
@@ -1191,6 +1437,8 @@ def build_acceptance_packet(
         raise ClosureError("WHOLE_TASK_PASS_REQUIRED")
     if whole_verification.get("task_candidate_id") != task_candidate.get("task_candidate_id"):
         raise ClosureError("WHOLE_VERIFICATION_CANDIDATE_MISMATCH")
+    if not _integrity_passed(whole_verification):
+        raise ClosureError("WHOLE_TASK_INTEGRITY_PASS_REQUIRED")
     if not task_card_ref or not _is_hex(task_card_hash, 64):
         raise ClosureError("TASK_CARD_BINDING_REQUIRED")
     receipt_by_unit = {
@@ -1207,6 +1455,8 @@ def build_acceptance_packet(
             raise ClosureError("ACCEPTANCE_REQUIRES_UNIT_PASS")
         if verification.get("worker_receipt_id") != receipt_by_unit[unit_id]["receipt_id"]:
             raise ClosureError("ACCEPTANCE_UNIT_BINDING_MISMATCH")
+        if not _integrity_passed(verification):
+            raise ClosureError("ACCEPTANCE_REQUIRES_UNIT_INTEGRITY_PASS")
     packet = {
         "schema": ACCEPTANCE_PACKET_SCHEMA,
         "task_id": task_candidate["task_id"],
@@ -1237,6 +1487,20 @@ def build_acceptance_packet(
         ],
         "whole_task_verification_id": whole_verification["verification_id"],
         "whole_task_status": "PASS",
+        # Additive: closure-owned integrity checks that passed at each level.
+        "integrity_checks": {
+            "base_sha": task_candidate["base_sha"],
+            "whole_task": [
+                str(row.get("check_id")) for row in whole_verification.get("integrity_checks", [])
+            ],
+            "units": {
+                unit_id: [
+                    str(row.get("check_id"))
+                    for row in verification_by_unit[unit_id].get("integrity_checks", [])
+                ]
+                for unit_id in sorted(verification_by_unit)
+            },
+        },
         "current_gate": "PENDING_INDEPENDENT_ACCEPTANCE",
         "claim_ceiling": CLAIM_CEILING,
     }
@@ -1440,8 +1704,15 @@ class ExternalIntelligenceClosureRuntime:
             task_candidate = dict(task_candidate)
             task_candidate["artifact_ref"] = task_candidate_ref
             task_candidate["artifact_sha256"] = task_candidate_sha
+            authorized_paths = sorted({
+                str(path)
+                for receipt in current.values()
+                for path in validate_worker_receipt(receipt)["mutation_paths"]
+            })
             whole = self._persist_verification(
-                verify_whole_task_candidate(task_candidate, whole_verifiers)
+                verify_whole_task_candidate(
+                    task_candidate, whole_verifiers, authorized_paths=authorized_paths
+                )
             )
             if whole["status"] == "FAIL":
                 owner = _unique_failed_owner(whole, set(current))
@@ -1607,6 +1878,16 @@ __all__ = [
     "UNIT_VERIFICATION_SCHEMA",
     "WHOLE_VERIFICATION_SCHEMA",
     "AssemblyLease",
+    "INTEGRITY_CHECK_DELETIONS",
+    "INTEGRITY_CHECK_ERROR",
+    "INTEGRITY_CHECK_IDS",
+    "INTEGRITY_CHECK_SCOPE",
+    "INTEGRITY_CHECK_WHITESPACE",
+    "INTEGRITY_DELETION_NOT_AUTHORIZED",
+    "INTEGRITY_SCOPE_WIDENING",
+    "INTEGRITY_WHITESPACE_ERRORS",
+    "VERIFIER_ENV_BASE_SHA",
+    "VERIFIER_ENV_CANDIDATE_SHA",
     "ClosureError",
     "ClosureStore",
     "CompositionWorkspaceAllocator",
@@ -1617,6 +1898,7 @@ __all__ = [
     "build_composition_repair_delta",
     "build_unit_repair_delta",
     "compose_task_candidate",
+    "run_integrity_checks",
     "validate_worker_receipt",
     "verify_unit_candidate",
     "verify_whole_task_candidate",

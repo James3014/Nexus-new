@@ -38,6 +38,15 @@ def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+# Scoped to the bound base via the env closure hands to every verifier.
+_SCOPED_DIFF_CHECK_ARGV = (
+    "sh",
+    "-c",
+    'git diff --check "$NEXUS_BASE_SHA" "$NEXUS_CANDIDATE_SHA"',
+)
+_SCOPED_DIFF_CHECK_LINE = 'sh -c \'git diff --check "$NEXUS_BASE_SHA" "$NEXUS_CANDIDATE_SHA"\''
+
+
 def _contract(task_card_ref: str, task_card_hash: str, **overrides):
     value = {
         "schema": ISSUE_SCHEMA,
@@ -55,7 +64,7 @@ def _contract(task_card_ref: str, task_card_hash: str, **overrides):
             "u1": [{"id": "u1", "argv": ["python3", "-m", "pytest", "-q", "tests/test_a.py"]}],
             "u2": [{"id": "u2", "argv": ["python3", "-m", "pytest", "-q", "tests/test_a.py"]}],
         },
-        "whole_verifiers": [{"id": "whole", "argv": ["git", "diff", "--check"]}],
+        "whole_verifiers": [{"id": "whole", "argv": list(_SCOPED_DIFF_CHECK_ARGV)}],
         "requested_concurrency": 2,
         "ready": True,
         "contract_ready": True,
@@ -94,6 +103,7 @@ def _setup(tmp_path: Path, remote_url: str = "https://github.com/o/r.git", **con
         "```bash\n"
         "python3 -m pytest -q tests/test_a.py\n"
         "git diff --check\n"
+        f"{_SCOPED_DIFF_CHECK_LINE}\n"
         "```\n",
         encoding="utf-8",
     )
@@ -226,6 +236,47 @@ def _install_completed_receipt(automation, item, card, store):
         "receipt_id": "receipt-1",
         "envelope_sha256": hashlib.sha256(envelope_bytes).hexdigest(),
     }
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["git", "diff", "--check"],
+        ["git", "diff", "--name-status", "--diff-filter=D"],
+        ["git", "diff", "--cached", "--check"],
+        ["git", "diff", "--check", "HEAD"],
+        ["git", "diff", "--check", "--", "nexus/a.py"],
+        ["git", "-C", "sub", "diff", "--stat"],
+        ["/usr/bin/git", "-c", "core.quotePath=false", "diff", "-S", "needle"],
+    ],
+)
+def test_contract_rejects_unscoped_git_diff_verifiers(tmp_path, argv):
+    _repo, _card, contract, _body_text, _ = _setup(tmp_path)
+    whole = dict(contract, whole_verifiers=[{"id": "whole", "argv": argv}])
+    with pytest.raises(AutomationError, match="^ISSUE_CONTRACT_WHOLE_VERIFIERS_UNSCOPED_GIT_DIFF$"):
+        parse_issue_contract(_body(whole))
+    unit = dict(
+        contract, unit_verifiers=dict(contract["unit_verifiers"], u2=[{"id": "u2", "argv": argv}])
+    )
+    with pytest.raises(AutomationError, match="^ISSUE_CONTRACT_UNIT_VERIFIERS_UNSCOPED_GIT_DIFF$"):
+        parse_issue_contract(_body(unit))
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["git", "diff", "--check", "a" * 40, "b" * 40],
+        ["git", "diff", "--check", "origin/main"],
+        ["git", "diff", "--name-status", "--diff-filter=D", "HEAD~1", "HEAD"],
+        ["git", "diff", "--no-index", "x", "y"],
+        ["git", "status"],
+        list(_SCOPED_DIFF_CHECK_ARGV),
+    ],
+)
+def test_contract_accepts_scoped_or_non_diff_git_verifiers(tmp_path, argv):
+    _repo, _card, contract, _body_text, _ = _setup(tmp_path)
+    whole = dict(contract, whole_verifiers=[{"id": "whole", "argv": argv}])
+    assert parse_issue_contract(_body(whole))["whole_verifiers"][0]["argv"] == argv
 
 
 def test_contract_parser_strict_and_unknown_rejected(tmp_path):
