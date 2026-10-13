@@ -48,7 +48,7 @@ TRUSTED_EXTERNAL_RUNTIME_PACKAGES: tuple[tuple[str, str, str, str], ...] = (
         "nexus-runtime",
         "nexus_runtime",
         "https://github.com/James3014/nexus-runtime.git",
-        "6782e38a57360893285227f4d2a68d7c649d4319",
+        "68e86ed591de8c4a555d3588e97e5e9cf6ff9692",
     ),
 )
 UV_VERSION = "uv 0.9.2"
@@ -267,6 +267,17 @@ TRUSTED_PR2016_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, s
         "09f17508d34972268d4c7cff6877c447cf8586eff8684bbbbc6170255ca368d4",
         "fa6c8ebbfac872fc59715a035158ab05c3141fcd2df5363f35ac623d57decef1",
         "c00226cb36776992cb706c0b3d8727de67b3cdc28e1b9b92f95c89aac1c6d808",
+    ),
+)
+# Exact one-use, four-way binding for Owner-authorized PR #2071 (Issue #2065: nexus-runtime
+# 6782e38 -> 68e86ed, runtime #197/#190 + #199/#198 entropy_guard_v2 node, Nexus-new #1907).
+TRUSTED_PR2071_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    2071,
+    (
+        "fa6c8ebbfac872fc59715a035158ab05c3141fcd2df5363f35ac623d57decef1",
+        "c00226cb36776992cb706c0b3d8727de67b3cdc28e1b9b92f95c89aac1c6d808",
+        "55364183a2047573e0f32a423768596c7219ace8304f42a542613419b206949b",
+        "12f4f793d1a0d5da8b337f879337fe8e4d2da0fe6876fd72339e416a8b9ebb20",
     ),
 )
 
@@ -501,6 +512,7 @@ def _validate_trusted_dependency_contract(
         TRUSTED_PR1857_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR1908_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR2016_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR2071_DEPENDENCY_SNAPSHOT_TRANSITION,
     )
     for authorized_transition_record in authorized_transition_records:
         if authorized_transition_record is None:
