@@ -738,6 +738,11 @@ def test_executor_rejects_bundle_not_bound_to_controller_output(pr_repo, tmp_pat
         )
 
 
+def test_ls_tree_check_uses_tab_separator():
+    text = WORKFLOW.read_text(encoding="utf-8")
+    assert '"100644 blob $blob_id"$\'\\t\'"$path"' in text
+
+
 def test_ls_tree_check_uses_tab_separator_and_admits_executable_blobs():
     text = WORKFLOW.read_text(encoding="utf-8")
     assert text.count('"100644 blob $blob_id"$\'\\t\'"$path"') == 2
