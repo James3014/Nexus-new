@@ -192,6 +192,40 @@ def _literal_assignment(tree: ast.AST, name: str) -> Any:
     return None
 
 
+_CANONICAL_STAGES = frozenset({"S", "P", "X", "D", "R", "A", "C"})
+
+
+def _runtime_phase_flow(root: Path, pipeline_tree: ast.AST) -> list[str] | None:
+    """Resolve ``CANONICAL_STAGE_FLOW = [phase.value for phase in RUNTIME_PHASE_FLOW]``.
+
+    Since 6a4c3a9a0 the pipeline derives its stage flow from the runtime phase
+    contract (``RUNTIME_PHASE_FLOW = tuple(RuntimePhase)``) instead of a list
+    literal, so read the enum member order from that contract (#1928).
+    """
+    derived = any(
+        isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "CANONICAL_STAGE_FLOW" for target in node.targets)
+        and "RUNTIME_PHASE_FLOW" in ast.dump(node.value)
+        for node in getattr(pipeline_tree, "body", [])
+    )
+    contract = root / "nexus/engine/runtime_phase_contract.py"
+    if not derived or not contract.exists():
+        return None
+    try:
+        contract_tree = ast.parse(contract.read_text(encoding="utf-8"))
+    except SyntaxError:
+        return None
+    for node in contract_tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == "RuntimePhase":
+            values: list[str] = []
+            for item in node.body:
+                if isinstance(item, ast.Assign) and isinstance(item.value, ast.Constant):
+                    if isinstance(item.value.value, str):
+                        values.append(item.value.value)
+            return values
+    return None
+
+
 def validate_s_stage_runtime_contract(root: Path) -> dict[str, Any]:
     rel_path = "nexus/engine/pipeline.py"
     path = root / rel_path
@@ -216,8 +250,15 @@ def validate_s_stage_runtime_contract(root: Path) -> dict[str, Any]:
             "failures": [{"path": rel_path, "reason": "s_stage_runtime_contract_parse_error", "error": str(exc)}],
         }
     stage_flow = _literal_assignment(tree, "CANONICAL_STAGE_FLOW")
+    if stage_flow is None:
+        stage_flow = _runtime_phase_flow(root, tree)
     stage_descriptions = _literal_assignment(tree, "STAGE_DESCRIPTIONS")
-    checks["canonical_stage_flow"] = stage_flow == ["S", "P", "X", "D", "R", "A", "C"]
+    checks["canonical_stage_flow"] = (
+        isinstance(stage_flow, list)
+        and len(stage_flow) == len(_CANONICAL_STAGES)
+        and set(stage_flow) == _CANONICAL_STAGES
+        and stage_flow[0] == "S"
+    )
     checks["s_stage_description"] = isinstance(stage_descriptions, dict) and stage_descriptions.get("S") == "cold_start_seed"
     checks["stage_status_initializes_s"] = "stage_status" in text and "CANONICAL_STAGE_FLOW" in text and '"pending"' in text
     checks["decision_journal_accepts_s_origin"] = "decision_journal" in text and "origin_phase" in text and "event_type" in text

@@ -62,10 +62,12 @@ def test_openwiki_issue10_claims_match_current_inventory() -> None:
         )
     }
 
-    assert len(workflow_files) == 13
+    # The page must track the physical inventory; the count is derived so that
+    # adding a workflow requires a docs update, not a test edit (#1928).
+    assert len(workflow_files) >= 13
     assert sorted(listed_files) == sorted(path.name for path in workflow_files)
     assert listed_workflow_names == expected_workflow_names
-    assert "all 13 GitHub Actions workflows" in workflows
+    assert f"all {len(workflow_files)} GitHub Actions workflows" in workflows
     assert "all 12 GitHub Actions workflows" not in workflows
     assert "all 10 GitHub Actions workflows" not in workflows
 

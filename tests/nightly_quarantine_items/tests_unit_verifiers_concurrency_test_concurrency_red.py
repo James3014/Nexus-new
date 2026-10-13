@@ -2,10 +2,5 @@
 
 from __future__ import annotations
 
-ENTRY: dict[str, object] = {
-    "file": "tests/unit/verifiers/concurrency/test_concurrency_red.py",
-    "disposition": "quarantine",
-    "issue": "#1928",
-    "cause": "timing-dependent RED demonstration (expects a deadlock within a fixed sleep); flaky on shared runners",
-    "tests": ("TestConcurrencyTargetsRed::test_target3_deadlock_happens",),
-}
+# Fixed in #1928: target3 RED demonstrates the AB/BA inversion deterministically (barrier + acquire timeout).
+ENTRY = None

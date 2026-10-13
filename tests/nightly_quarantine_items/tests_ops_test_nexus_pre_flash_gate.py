@@ -6,10 +6,6 @@ ENTRY: dict[str, object] = {
     "file": "tests/ops/test_nexus_pre_flash_gate.py",
     "disposition": "quarantine",
     "issue": "#1928",
-    "cause": "passes in isolation on macOS at current main but fails in the Linux full-suite run (order-dependent state pollution or Linux-only environment difference); needs bisect",
-    "tests": (
-        "test_benchmark_autodata_manifest_gate_accepts_real_flash_and_pro_manifests",
-        "test_quick_payload_includes_brain_hub_coverage_gate",
-        "test_quick_payload_skips_flash_style_repair_subset",
-    ),
+    "cause": "reads gitignored .nexus/reports/autodata flash/pro manifests that exist in no clean checkout (CI included); needs committed fixtures or an Owner decision on the real-manifest gate",
+    "tests": ("test_benchmark_autodata_manifest_gate_accepts_real_flash_and_pro_manifests",),
 }

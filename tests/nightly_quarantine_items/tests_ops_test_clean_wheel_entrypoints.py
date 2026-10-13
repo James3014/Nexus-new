@@ -2,10 +2,5 @@
 
 from __future__ import annotations
 
-ENTRY: dict[str, object] = {
-    "file": "tests/ops/test_clean_wheel_entrypoints.py",
-    "disposition": "quarantine",
-    "issue": "#1928",
-    "cause": "passes in isolation on macOS at current main but fails in the Linux full-suite run (order-dependent state pollution or Linux-only environment difference); needs bisect",
-    "tests": ("test_clean_wheel_contains_and_runs_registered_cli_entrypoints",),
-}
+# Fixed in #1928: nexus-cueline-worker console script restored (dropped by #770).
+ENTRY = None

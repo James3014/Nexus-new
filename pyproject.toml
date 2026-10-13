@@ -55,6 +55,7 @@ browser = [
 
 [project.scripts]
 nexus = "scripts.engine.nexus_cli:nexus"
+nexus-cueline-worker = "scripts.ops.nexus_cueline_worker:main"
 
 [tool.poetry]
 name = "nexus-legacy"
@@ -79,6 +80,7 @@ graph = ["langgraph"]
 
 [tool.poetry.scripts]
 nexus = "scripts.engine.nexus_cli:nexus"
+nexus-cueline-worker = "scripts.ops.nexus_cueline_worker:main"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
