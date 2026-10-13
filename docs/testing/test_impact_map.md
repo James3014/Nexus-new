@@ -312,3 +312,4 @@
 | GEMINI.md | tests/ops/test_bootstrap_authority_files.py, tests/ops/test_bootstrap_context_budget.py, tests/ops/test_codex_task_context_index.py, tests/ops/test_fast_start_consumer_contract.py | active | medium | authority_text_context_budget_contract |
 | SOUL.md | tests/ops/test_bootstrap_authority_files.py, tests/ops/test_bootstrap_context_budget.py, tests/ops/test_codex_task_context_index.py, tests/ops/test_fast_start_consumer_contract.py | active | medium | authority_text_context_budget_contract |
 | docs/agents | tests/ops/test_bootstrap_authority_files.py, tests/ops/test_bootstrap_context_budget.py, tests/ops/test_codex_task_context_index.py, tests/ops/test_fast_start_consumer_contract.py | active | medium | authority_text_context_budget_contract |
+| scripts/ops/deletion_guard.py | tests/ops/test_deletion_guard.py | active | high | deletion_guard_owner_approval_contract |
