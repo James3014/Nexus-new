@@ -32,7 +32,7 @@ Script: `scripts/ops/capability_wiring_audit.py` (fixtures `scripts/ops/wiring_f
 
 ## Result matrix (run 2026-10-12T22:57:52.380962+00:00, origin/main aa095b305 + #1892)
 
-Verdict counts, all 58 rows (57 planner nodes + the `learning_closure` executor): `{"BLOCKED": 9, "NOT_EXECUTABLE": 4, "REAL": 30, "REAL_UNATTESTED": 4, "RETIRING": 9, "SIMULATED": 1, "STUB": 1}`.
+Verdict counts, all 58 rows (57 planner nodes + the `learning_closure` executor): `{"BLOCKED": 7, "NOT_EXECUTABLE": 4, "REAL": 32, "REAL_UNATTESTED": 4, "RETIRING": 9, "SIMULATED": 1, "STUB": 1}`.
 
 - The 36 rows audited before: `{"BLOCKED": 9, "REAL": 17, "REAL_UNATTESTED": 3, "RETIRING": 6, "STUB": 1}`, identical to the post-batch-1 run (`{"BLOCKED": 9, "REAL": 17, "REAL_UNATTESTED": 3, "RETIRING": 6, "STUB": 1}`, run 2026-10-12T13:19:36 on origin/main 4dbac7875 + #1862). History: at 929a953d0 they were 14 REAL_UNATTESTED, 4 STUB, 3 SIMULATED, 9 BLOCKED, 6 RETIRING, 0 REAL.
 - The 22 new rows: `{"BLOCKED": 3, "NOT_EXECUTABLE": 4, "NOT_SELECTABLE": 1, "REAL": 7, "REAL_UNATTESTED": 1, "SIMULATED": 1, "STUB": 5}`.

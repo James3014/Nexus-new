@@ -288,7 +288,7 @@
         ],
         "result": {
           "findings": [
-            "{\"results\": [{\"id\": \"aws/mypy-boto3-athena\", \"name\": \"mypy-boto3-athena\", \"description\": \"mypy-boto3-athena type stubs for boto3 Athena clients, paginators, TypedDict request shapes, and editor/type-checker setup\", \"source\": \"maintainer\", \"tags\": [\"aws\", \"athena\", \"boto3\", \"type-stubs\", \"mypy\", \"pyright\", \"python\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"1.42.43\", \"path\": \"aws/docs/mypy-boto3-athena/python\", \"files\": [\"DOC.md\"], \"size\": 8953, \"lastUpdated\": \"2026-03-12\"}], \"recommendedVersion\": \"1.42.43\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 205}, {\"id\": \"spring-boot/spring-boot-actuator\", \"name\": \"spring-boot-actuator\", \"description\": \"Spring Boot Actuator 4.0.x \u2014 health checks, metrics, Prometheus, info endpoint, custom endpoints, and production monitoring\", \"source\": \"community\", \"tags\": [\"spring-boot-actuator\", \"monitoring\", \"health-check\", \"metrics\", \"prometheus\", \"production\", \"endpoints\"], \"languages\": [{\"language\": \"java\", \"versions\": [{\"version\": \"4.0.5\", \"path\": \"spring-boot/docs/actuator/java\", \"files\": [\"DOC.md\"], \"size\": 5877, \"lastUpdated\": \"2026-03-28\"}], \"recommendedVersion\": \"4.0.5\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 195}, {\"id\": \"babel/plugin-proposal-pipeline-operator\", \"name\": \"plugin-proposal-pipeline-operator\", \"description\": \"Configure Babel 7 to compile the pipeline operator proposal with minimal, F#, or Hack-style syntax\", \"source\": \"maintainer\", \"tags\": [\"babel\", \"build\", \"javascript\", \"pipeline-operator\", \"syntax\", \"proposal\"], \"languages\": [{\"language\": \"javascript\", \"versions\": [{\"version\": \"7.28.6\", \"path\": \"babel/docs/plugin-proposal-pipeline-operator/javascript\", \"files\": [\"DOC.md\"], \"size\": 5833, \"lastUpdated\": \"2026-03-13\"}], \"recommendedVersion\": \"7.28.6\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 170}, {\"id\": \"together/package\", \"name\": \"package\", \"description\": \"Together Python SDK for chat, completions, embeddings, images, rerank, and fine-tuning\", \"source\": \"maintainer\", \"tags\": [\"together\", \"python\", \"llm\", \"chat\", \"embeddings\", \"images\", \"rerank\", \"fine-tuning\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"2.16.0\", \"path\": \"together/docs/package/python\", \"files\": [\"DOC.md\"], \"size\": 7793, \"lastUpdated\": \"2026-05-29\"}], \"recommendedVersion\": \"2.16.0\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 170}, {\"id\": \"azure/mgmt-applicationinsights\", \"name\": \"mgmt-applicationinsights\", \"description\": \"Azure Application Insights management SDK for Python for ARM components, billing and quota settings, web tests, and workbooks\", \"source\": \"maintainer\", \"tags\": [\"azure\", \"application-insights\", \"monitoring\", \"arm\", \"workbooks\", \"synthetics\", \"python\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"4.1.0\", \"path\": \"azure/docs/mgmt-applicationinsights/python\", \"files\": [\"DOC.md\"], \"size\": 10982, \"lastUpdated\": \"2026-03-13\"}], \"recommendedVersion\": \"4.1.0\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 160}], \"total\": 5, \"query\": \"How does compute_total apply the discount in the fixture?\\n\\nNexus route oracle contract:\\n- Expected capability receipts: research. (provide a concise summary only, limit to 300 words)\"}"
+            "{\"results\": [{\"id\": \"aws/mypy-boto3-athena\", \"name\": \"mypy-boto3-athena\", \"description\": \"mypy-boto3-athena type stubs for boto3 Athena clients, paginators, TypedDict request shapes, and editor/type-checker setup\", \"source\": \"maintainer\", \"tags\": [\"aws\", \"athena\", \"boto3\", \"type-stubs\", \"mypy\", \"pyright\", \"python\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"1.42.43\", \"path\": \"aws/docs/mypy-boto3-athena/python\", \"files\": [\"DOC.md\"], \"size\": 8953, \"lastUpdated\": \"2026-03-12\"}], \"recommendedVersion\": \"1.42.43\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 205}, {\"id\": \"spring-boot/spring-boot-actuator\", \"name\": \"spring-boot-actuator\", \"description\": \"Spring Boot Actuator 4.0.x — health checks, metrics, Prometheus, info endpoint, custom endpoints, and production monitoring\", \"source\": \"community\", \"tags\": [\"spring-boot-actuator\", \"monitoring\", \"health-check\", \"metrics\", \"prometheus\", \"production\", \"endpoints\"], \"languages\": [{\"language\": \"java\", \"versions\": [{\"version\": \"4.0.5\", \"path\": \"spring-boot/docs/actuator/java\", \"files\": [\"DOC.md\"], \"size\": 5877, \"lastUpdated\": \"2026-03-28\"}], \"recommendedVersion\": \"4.0.5\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 195}, {\"id\": \"babel/plugin-proposal-pipeline-operator\", \"name\": \"plugin-proposal-pipeline-operator\", \"description\": \"Configure Babel 7 to compile the pipeline operator proposal with minimal, F#, or Hack-style syntax\", \"source\": \"maintainer\", \"tags\": [\"babel\", \"build\", \"javascript\", \"pipeline-operator\", \"syntax\", \"proposal\"], \"languages\": [{\"language\": \"javascript\", \"versions\": [{\"version\": \"7.28.6\", \"path\": \"babel/docs/plugin-proposal-pipeline-operator/javascript\", \"files\": [\"DOC.md\"], \"size\": 5833, \"lastUpdated\": \"2026-03-13\"}], \"recommendedVersion\": \"7.28.6\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 170}, {\"id\": \"together/package\", \"name\": \"package\", \"description\": \"Together Python SDK for chat, completions, embeddings, images, rerank, and fine-tuning\", \"source\": \"maintainer\", \"tags\": [\"together\", \"python\", \"llm\", \"chat\", \"embeddings\", \"images\", \"rerank\", \"fine-tuning\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"2.16.0\", \"path\": \"together/docs/package/python\", \"files\": [\"DOC.md\"], \"size\": 7793, \"lastUpdated\": \"2026-05-29\"}], \"recommendedVersion\": \"2.16.0\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 170}, {\"id\": \"azure/mgmt-applicationinsights\", \"name\": \"mgmt-applicationinsights\", \"description\": \"Azure Application Insights management SDK for Python for ARM components, billing and quota settings, web tests, and workbooks\", \"source\": \"maintainer\", \"tags\": [\"azure\", \"application-insights\", \"monitoring\", \"arm\", \"workbooks\", \"synthetics\", \"python\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"4.1.0\", \"path\": \"azure/docs/mgmt-applicationinsights/python\", \"files\": [\"DOC.md\"], \"size\": 10982, \"lastUpdated\": \"2026-03-13\"}], \"recommendedVersion\": \"4.1.0\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 160}], \"total\": 5, \"query\": \"How does compute_total apply the discount in the fixture?\\n\\nNexus route oracle contract:\\n- Expected capability receipts: research. (provide a concise summary only, limit to 300 words)\"}"
           ],
           "source": "chub",
           "status": "SUCCESS",
@@ -412,7 +412,7 @@
         ],
         "result": {
           "findings": [
-            "{\"results\": [{\"id\": \"aws/mypy-boto3-athena\", \"name\": \"mypy-boto3-athena\", \"description\": \"mypy-boto3-athena type stubs for boto3 Athena clients, paginators, TypedDict request shapes, and editor/type-checker setup\", \"source\": \"maintainer\", \"tags\": [\"aws\", \"athena\", \"boto3\", \"type-stubs\", \"mypy\", \"pyright\", \"python\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"1.42.43\", \"path\": \"aws/docs/mypy-boto3-athena/python\", \"files\": [\"DOC.md\"], \"size\": 8953, \"lastUpdated\": \"2026-03-12\"}], \"recommendedVersion\": \"1.42.43\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 205}, {\"id\": \"spring-boot/spring-boot-actuator\", \"name\": \"spring-boot-actuator\", \"description\": \"Spring Boot Actuator 4.0.x \u2014 health checks, metrics, Prometheus, info endpoint, custom endpoints, and production monitoring\", \"source\": \"community\", \"tags\": [\"spring-boot-actuator\", \"monitoring\", \"health-check\", \"metrics\", \"prometheus\", \"production\", \"endpoints\"], \"languages\": [{\"language\": \"java\", \"versions\": [{\"version\": \"4.0.5\", \"path\": \"spring-boot/docs/actuator/java\", \"files\": [\"DOC.md\"], \"size\": 5877, \"lastUpdated\": \"2026-03-28\"}], \"recommendedVersion\": \"4.0.5\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 195}, {\"id\": \"babel/plugin-proposal-pipeline-operator\", \"name\": \"plugin-proposal-pipeline-operator\", \"description\": \"Configure Babel 7 to compile the pipeline operator proposal with minimal, F#, or Hack-style syntax\", \"source\": \"maintainer\", \"tags\": [\"babel\", \"build\", \"javascript\", \"pipeline-operator\", \"syntax\", \"proposal\"], \"languages\": [{\"language\": \"javascript\", \"versions\": [{\"version\": \"7.28.6\", \"path\": \"babel/docs/plugin-proposal-pipeline-operator/javascript\", \"files\": [\"DOC.md\"], \"size\": 5833, \"lastUpdated\": \"2026-03-13\"}], \"recommendedVersion\": \"7.28.6\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 170}, {\"id\": \"together/package\", \"name\": \"package\", \"description\": \"Together Python SDK for chat, completions, embeddings, images, rerank, and fine-tuning\", \"source\": \"maintainer\", \"tags\": [\"together\", \"python\", \"llm\", \"chat\", \"embeddings\", \"images\", \"rerank\", \"fine-tuning\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"2.16.0\", \"path\": \"together/docs/package/python\", \"files\": [\"DOC.md\"], \"size\": 7793, \"lastUpdated\": \"2026-05-29\"}], \"recommendedVersion\": \"2.16.0\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 170}, {\"id\": \"azure/mgmt-applicationinsights\", \"name\": \"mgmt-applicationinsights\", \"description\": \"Azure Application Insights management SDK for Python for ARM components, billing and quota settings, web tests, and workbooks\", \"source\": \"maintainer\", \"tags\": [\"azure\", \"application-insights\", \"monitoring\", \"arm\", \"workbooks\", \"synthetics\", \"python\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"4.1.0\", \"path\": \"azure/docs/mgmt-applicationinsights/python\", \"files\": [\"DOC.md\"], \"size\": 10982, \"lastUpdated\": \"2026-03-13\"}], \"recommendedVersion\": \"4.1.0\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 160}], \"total\": 5, \"query\": \"How does compute_total apply the discount in the fixture?\\n\\nNexus route oracle contract:\\n- Expected capability receipts: research_route. (provide a concise summary only, limit to 300 words)\"}"
+            "{\"results\": [{\"id\": \"aws/mypy-boto3-athena\", \"name\": \"mypy-boto3-athena\", \"description\": \"mypy-boto3-athena type stubs for boto3 Athena clients, paginators, TypedDict request shapes, and editor/type-checker setup\", \"source\": \"maintainer\", \"tags\": [\"aws\", \"athena\", \"boto3\", \"type-stubs\", \"mypy\", \"pyright\", \"python\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"1.42.43\", \"path\": \"aws/docs/mypy-boto3-athena/python\", \"files\": [\"DOC.md\"], \"size\": 8953, \"lastUpdated\": \"2026-03-12\"}], \"recommendedVersion\": \"1.42.43\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 205}, {\"id\": \"spring-boot/spring-boot-actuator\", \"name\": \"spring-boot-actuator\", \"description\": \"Spring Boot Actuator 4.0.x — health checks, metrics, Prometheus, info endpoint, custom endpoints, and production monitoring\", \"source\": \"community\", \"tags\": [\"spring-boot-actuator\", \"monitoring\", \"health-check\", \"metrics\", \"prometheus\", \"production\", \"endpoints\"], \"languages\": [{\"language\": \"java\", \"versions\": [{\"version\": \"4.0.5\", \"path\": \"spring-boot/docs/actuator/java\", \"files\": [\"DOC.md\"], \"size\": 5877, \"lastUpdated\": \"2026-03-28\"}], \"recommendedVersion\": \"4.0.5\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 195}, {\"id\": \"babel/plugin-proposal-pipeline-operator\", \"name\": \"plugin-proposal-pipeline-operator\", \"description\": \"Configure Babel 7 to compile the pipeline operator proposal with minimal, F#, or Hack-style syntax\", \"source\": \"maintainer\", \"tags\": [\"babel\", \"build\", \"javascript\", \"pipeline-operator\", \"syntax\", \"proposal\"], \"languages\": [{\"language\": \"javascript\", \"versions\": [{\"version\": \"7.28.6\", \"path\": \"babel/docs/plugin-proposal-pipeline-operator/javascript\", \"files\": [\"DOC.md\"], \"size\": 5833, \"lastUpdated\": \"2026-03-13\"}], \"recommendedVersion\": \"7.28.6\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 170}, {\"id\": \"together/package\", \"name\": \"package\", \"description\": \"Together Python SDK for chat, completions, embeddings, images, rerank, and fine-tuning\", \"source\": \"maintainer\", \"tags\": [\"together\", \"python\", \"llm\", \"chat\", \"embeddings\", \"images\", \"rerank\", \"fine-tuning\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"2.16.0\", \"path\": \"together/docs/package/python\", \"files\": [\"DOC.md\"], \"size\": 7793, \"lastUpdated\": \"2026-05-29\"}], \"recommendedVersion\": \"2.16.0\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 170}, {\"id\": \"azure/mgmt-applicationinsights\", \"name\": \"mgmt-applicationinsights\", \"description\": \"Azure Application Insights management SDK for Python for ARM components, billing and quota settings, web tests, and workbooks\", \"source\": \"maintainer\", \"tags\": [\"azure\", \"application-insights\", \"monitoring\", \"arm\", \"workbooks\", \"synthetics\", \"python\"], \"languages\": [{\"language\": \"python\", \"versions\": [{\"version\": \"4.1.0\", \"path\": \"azure/docs/mgmt-applicationinsights/python\", \"files\": [\"DOC.md\"], \"size\": 10982, \"lastUpdated\": \"2026-03-13\"}], \"recommendedVersion\": \"4.1.0\"}], \"_source\": \"default\", \"_sourceObj\": {\"name\": \"default\", \"url\": \"https://cdn.aichub.org/v1\"}, \"_type\": \"doc\", \"_score\": 160}], \"total\": 5, \"query\": \"How does compute_total apply the discount in the fixture?\\n\\nNexus route oracle contract:\\n- Expected capability receipts: research_route. (provide a concise summary only, limit to 300 words)\"}"
           ],
           "source": "chub",
           "status": "SUCCESS",
@@ -502,7 +502,7 @@
       ],
       "physical_callable": "capability_executor_registry:hyper_sprint",
       "console_tail": [
-        "\u26a0\ufe0f [MemPalace] Ethical blacklist file missing: /Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/hyper__pos_local_model_call_allowed/nexus/config/ethical_blacklist.json"
+        "⚠️ [MemPalace] Ethical blacklist file missing: /Users/jameschen/Workspace/.scratch/20261013-wiring-groupC-rt/audit_rerun3/20261013T072920Z/workspaces/hyper__pos_local_model_call_allowed/nexus/config/ethical_blacklist.json"
       ],
       "negative_control": {
         "name": "negative_control:no_test_file_no_model_call",
@@ -685,7 +685,7 @@
           },
           "status": "BLOCKED",
           "path": "e2e",
-          "block_reason": "semantic_status=BLOCKED(terminal_status=FAILED):console:\u274c [NightShift] Blocked by Phase Policy: PassRate=0.0%, Task=bug, Risk=standard. DenyResearch. SLO=phase_slo_summary_missing."
+          "block_reason": "semantic_status=BLOCKED(terminal_status=FAILED):console:❌ [NightShift] Blocked by Phase Policy: PassRate=0.0%, Task=bug, Risk=standard. DenyResearch. SLO=phase_slo_summary_missing."
         }
       ],
       "product_path_reachable": true,
@@ -708,7 +708,7 @@
       ],
       "physical_callable": "capability_executor_registry:nightshift",
       "console_tail": [
-        "\u274c [NightShift] Blocked by Phase Policy: PassRate=0.0%, Task=bug, Risk=standard. DenyResearch. SLO=phase_slo_summary_missing."
+        "❌ [NightShift] Blocked by Phase Policy: PassRate=0.0%, Task=bug, Risk=standard. DenyResearch. SLO=phase_slo_summary_missing."
       ],
       "hard_coded_inputs": [],
       "checks": [
@@ -723,7 +723,7 @@
           "detail": "terminal_success=False"
         }
       ],
-      "verdict": "BLOCKED_semantic_status=BLOCKED(terminal_status=FAILED):console:\u274c [NightShift] Blocked by Phase Policy: PassRate=0.0%, Task=bug, Risk=standard. DenyResearch. SLO=phase_slo_summary_missing.",
+      "verdict": "BLOCKED_semantic_status=BLOCKED(terminal_status=FAILED):console:❌ [NightShift] Blocked by Phase Policy: PassRate=0.0%, Task=bug, Risk=standard. DenyResearch. SLO=phase_slo_summary_missing.",
       "verdict_reason": "executor_or_runtime_blocked",
       "verdict_production_default": "BLOCKED_EXTERNAL_AUTH:nightshift_model",
       "outcome_excerpt": {
@@ -3121,14 +3121,14 @@
       ],
       "physical_callable": "capability_executor_registry:forecast_pregate",
       "console_tail": [
-        "\u26a0\ufe0f [ASHLoader] Missing /Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/forecast_gate__pos_production_default/.nexus/ash_matrix.yaml, using defaults.",
-        "\u26a0\ufe0f [ASHTemplateLoader] Missing /Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/forecast_gate__pos_production_default/.nexus/ash_templates.yaml, using minimal built-",
-        "\ud83d\udea8 [Gate:Reject] POLICY_VIOLATION[D-ROI]: 0.01 below threshold 0.5. Strategy too expensive.! Triggering Adaptive Self-Healing...",
-        "\ud83d\udea8 [ASH:v24] Node [wiring-forecast_gate-pos_production_default] failed. Triggering adaptive repair...",
-        "\ud83d\udee1\ufe0f [ASHResolver] Mandatory regression_test missing, injecting default.",
-        "\ud83d\udee1\ufe0f [ASHResolver] Mandatory regression_test missing, injecting default.",
-        "\u274c [ASHResolver] Unknown command ref: replan",
-        "\u26a0\ufe0f [ASHSelector] Skipping strategy [replan_swarm] due to resolution error: Unknown command ref: replan"
+        "⚠️ [ASHLoader] Missing /Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/forecast_gate__pos_production_default/.nexus/ash_matrix.yaml, using defaults.",
+        "⚠️ [ASHTemplateLoader] Missing /Users/jameschen/Workspace/.scratch/20261013-wiring-audit-ext/nn/artifacts/runtime/wiring_audit/20261012T225617Z/workspaces/forecast_gate__pos_production_default/.nexus/ash_templates.yaml, using minimal built-",
+        "🚨 [Gate:Reject] POLICY_VIOLATION[D-ROI]: 0.01 below threshold 0.5. Strategy too expensive.! Triggering Adaptive Self-Healing...",
+        "🚨 [ASH:v24] Node [wiring-forecast_gate-pos_production_default] failed. Triggering adaptive repair...",
+        "🛡️ [ASHResolver] Mandatory regression_test missing, injecting default.",
+        "🛡️ [ASHResolver] Mandatory regression_test missing, injecting default.",
+        "❌ [ASHResolver] Unknown command ref: replan",
+        "⚠️ [ASHSelector] Skipping strategy [replan_swarm] due to resolution error: Unknown command ref: replan"
       ],
       "negative_control": {
         "name": "negative_control:low_risk_task_proceeds",
@@ -3686,8 +3686,8 @@
       ],
       "physical_callable": "capability_executor_registry:committee",
       "console_tail": [
-        "\u274c CLI Pre-Gate FAIL: python3 repro.py (rc=1)",
-        "\u274c CLI Pre-Gate FAIL: python3 repro.py (rc=1)"
+        "❌ CLI Pre-Gate FAIL: python3 repro.py (rc=1)",
+        "❌ CLI Pre-Gate FAIL: python3 repro.py (rc=1)"
       ],
       "negative_control": {
         "name": "negative_control:single_candidate_blocks",
@@ -4497,7 +4497,7 @@
       ],
       "physical_callable": "capability_executor_registry:semantic_failure_sensor",
       "console_tail": [
-        "\u26a0\ufe0f [Retrieval:Vector] LanceDB failed, falling back: Table 'memory_index' was not found"
+        "⚠️ [Retrieval:Vector] LanceDB failed, falling back: Table 'memory_index' was not found"
       ],
       "negative_control": {
         "name": "negative_control:unrelated_failure_has_no_similar_bug",
@@ -4674,7 +4674,7 @@
         "line": 2527
       },
       "gaps": [
-        "JITToolInjector.apply_mask is a self-declared mock: it matches only the Chinese keywords \u6e2c\u8a66/\u6838\u9a57/\u5177\u73fe/\u4fee\u5fa9 and otherwise returns all_tools[:5]; the tool catalog (jit_all_tools) must be supplied by the request; since 2026-10-13 the receipt says so (simulated=True, mask_kind=keyword_mock, claim_boundary.claim=SIMULATED)"
+        "JITToolInjector.apply_mask is a self-declared mock: it matches only the Chinese keywords 測試/核驗/具現/修復 and otherwise returns all_tools[:5]; the tool catalog (jit_all_tools) must be supplied by the request; since 2026-10-13 the receipt says so (simulated=True, mask_kind=keyword_mock, claim_boundary.claim=SIMULATED)"
       ],
       "trigger_switch": null,
       "planner": {
@@ -4748,7 +4748,7 @@
           "pattern": "Mock",
           "file": "nexus/core/jit_tool_injector.py",
           "line": 23,
-          "text": "# \u6a19\u7c64\u5316\u7be9\u9078 (Mock \u5be6\u4f5c\uff1a\u50c5\u793a\u7bc4\u9694\u96e2\u6548\u679c)"
+          "text": "# 標籤化篩選 (Mock 實作：僅示範隔離效果)"
         }
       ],
       "checks": [
@@ -4787,7 +4787,7 @@
           "read_file",
           "run_tests"
         ],
-        "note": "apply_mask matches only the Chinese keywords \u6e2c\u8a66/\u6838\u9a57/\u5177\u73fe/\u4fee\u5fa9; any other goal gets all_tools[:5]"
+        "note": "apply_mask matches only the Chinese keywords 測試/核驗/具現/修復; any other goal gets all_tools[:5]"
       },
       "outcome_excerpt": {
         "action": "apply_mask+check_token_quota",
@@ -7444,6 +7444,33 @@
       "reason": "second-batch wiring fixes: rows replaced in place; no model call (nightshift is denied by the phase policy before any model call)"
     },
     {
+      "generated_at": "2026-10-13T04:40:51.064283+00:00",
+      "git_head": "fe29afcee2cb4109046f93b4d3e5dcb3ba938bc2",
+      "tree": "origin/main fe29afcee + group C wiring fixes (#1978) working tree",
+      "only": [
+        "hyper",
+        "committee",
+        "swarm",
+        "multi_agent"
+      ],
+      "model_probe": {
+        "available": true,
+        "url": "http://127.0.0.1:11434",
+        "model": "qwen2.5-coder:7b-instruct",
+        "models": [
+          "incoai/Qwen3.6-35B-A3B-Splash",
+          "incoai/Qwen3.8-27B-Splash",
+          "nomic-embed-text:latest",
+          "qwen2.5-coder:14b-instruct-q3_K_M",
+          "qwen2.5-coder:7b",
+          "qwen2.5-coder:7b-instruct",
+          "qwen3.5:9b"
+        ],
+        "reason": ""
+      },
+      "reason": "group C wiring fixes (#1978): hyper local channel, committee proposer_id + execution verifier, swarm bounded run; rows replaced in place"
+    },
+    {
       "generated_at": "2026-10-13T04:52:33.902428+00:00",
       "git_head": "fe29afcee2cb4109046f93b4d3e5dcb3ba938bc2",
       "tree": "origin/main fe29afcee + group D wiring fixes (#1981) working tree",
@@ -7484,33 +7511,6 @@
         "reason": "--no-model"
       },
       "reason": "ultra_review row re-run after lane subprocesses moved behind the OS sandbox"
-    },
-    {
-      "generated_at": "2026-10-13T04:40:51.064283+00:00",
-      "git_head": "fe29afcee2cb4109046f93b4d3e5dcb3ba938bc2",
-      "tree": "origin/main fe29afcee + group C wiring fixes (#1978) working tree",
-      "only": [
-        "hyper",
-        "committee",
-        "swarm",
-        "multi_agent"
-      ],
-      "model_probe": {
-        "available": true,
-        "url": "http://127.0.0.1:11434",
-        "model": "qwen2.5-coder:7b-instruct",
-        "models": [
-          "incoai/Qwen3.6-35B-A3B-Splash",
-          "incoai/Qwen3.8-27B-Splash",
-          "nomic-embed-text:latest",
-          "qwen2.5-coder:14b-instruct-q3_K_M",
-          "qwen2.5-coder:7b",
-          "qwen2.5-coder:7b-instruct",
-          "qwen3.5:9b"
-        ],
-        "reason": ""
-      },
-      "reason": "group C wiring fixes (#1978): hyper local channel, committee proposer_id + execution verifier, swarm bounded run; rows replaced in place"
     },
     {
       "generated_at": "2026-10-13T07:31:05.599832+00:00",
