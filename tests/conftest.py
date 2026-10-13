@@ -451,3 +451,11 @@ try:
     import irys_sdk  # type: ignore # noqa: F401
 except Exception:
     _install_irys_stub()
+
+
+def pytest_collection_modifyitems(config, items):
+    # Nightly-only explicit quarantine list (tests/nightly_quarantine_entries.py, Refs #1897).
+    from tests import nightly_quarantine as quarantine
+
+    if quarantine.quarantine_enabled():
+        quarantine.apply_quarantine(items, quarantine.quarantine_reasons(quarantine.load_quarantine()))

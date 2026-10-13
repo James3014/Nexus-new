@@ -1,5 +1,6 @@
 from pathlib import Path
 
+_REPO_ROOT = str(Path(__file__).resolve().parents[2])
 
 def _command_block(source: str, command_name: str) -> str:
     for marker in (
@@ -25,11 +26,11 @@ def _command_block(source: str, command_name: str) -> str:
 
 
 def test_core_command_paths_emit_semantic_contract_fields():
-    source = Path("/Users/jameschen/Workspace/nexus/scripts/engine/nexus_cli.py").read_text(encoding="utf-8")
-    learn_actions = Path("/Users/jameschen/Workspace/nexus/scripts/engine/commands/learn_actions.py").read_text(
+    source = Path(f"{_REPO_ROOT}/scripts/engine/nexus_cli.py").read_text(encoding="utf-8")
+    learn_actions = Path(f"{_REPO_ROOT}/scripts/engine/commands/learn_actions.py").read_text(
         encoding="utf-8"
     )
-    research_actions = Path("/Users/jameschen/Workspace/nexus/scripts/engine/commands/research_actions.py").read_text(
+    research_actions = Path(f"{_REPO_ROOT}/scripts/engine/commands/research_actions.py").read_text(
         encoding="utf-8"
     )
     required_in_cli = {
@@ -79,7 +80,7 @@ def test_core_command_paths_emit_semantic_contract_fields():
 
 
 def test_swarm_command_path_emits_semantic_contract_fields():
-    source = Path("/Users/jameschen/Workspace/nexus/scripts/engine/commands/swarm.py").read_text(encoding="utf-8")
+    source = Path(f"{_REPO_ROOT}/scripts/engine/commands/swarm.py").read_text(encoding="utf-8")
     assert "build_completion_envelope(" in source
     assert "write_completion_envelope(" in source
     assert "ensure_verified_completion(" in source

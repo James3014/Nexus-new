@@ -321,3 +321,17 @@ def test_heal_receipt_stage_that_ran_counts_even_when_it_did_not_solve(tmp_path)
     assert runner.extract_heal_receipt_evidence(str(tmp_path / "nope.json"))["evidence_source"] == (
         "missing"
     )
+
+
+def test_armor_on_attempt_declares_world_c_local_armor(harness):
+    """The armor lane is World C: its receipt must carry local_armor, not product_runtime."""
+    use_fake_executor(harness)
+    run_main(harness, "world-c", ["--armor", "on"], arms="off")
+    receipt = json.loads(
+        (harness["root"] / "art" / "world-c" / "armor_receipts" / "off__toy-0.json").read_text()
+    )
+    assert receipt["canonical_execution"]["execution_world"] == "local_armor"
+    assert runner.ARMOR_CANONICAL_CONTEXT == {
+        "execution_world": "local_armor",
+        "transport_ingress": "bench",
+    }

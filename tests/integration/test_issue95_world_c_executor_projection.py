@@ -24,7 +24,7 @@ def _ctx(source_root: Path, *, run_group: str = "issue95-a") -> LocalModelCapabi
     )
 
 
-def _prepare_workspace(source_root, _task_id, *, target_file, repro_script):
+def _prepare_workspace(source_root, _task_id, *, target_file, repro_script, **_kwargs):
     source = Path(source_root)
     workspace = source / "world-c-workspace"
     if workspace.exists():

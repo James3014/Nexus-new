@@ -465,9 +465,16 @@ def test_direct_external_delegation_does_not_inherit_nexus_workforce_admission()
     assert "DIRECT_DELEGATED" in overlay
     assert "does NOT use Nexus Workforce Admission" in normalized
     assert (
-        "Nexus runtime model execution always requires fresh Nexus Workforce Admission"
+        "Tracked (Task Card) self-hosted model dispatch requires a fresh Nexus "
+        "Workforce Admission binding"
+    ) in normalized
+    assert (
+        "`DIRECT_CANONICAL` Owner-authorized work that does not dispatch a model worker is exempt"
         in normalized
     )
+    assert "untracked `ISOLATED_TARGET` dispatch" in normalized
+    assert "#1886" in normalized
+    assert "always requires fresh Nexus Workforce Admission" not in normalized
     assert "transport/execution evidence only" in normalized
     assert "grants no Nexus" in normalized
     assert "route, admission, approval, integration, merge, release" in normalized
