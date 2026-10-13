@@ -622,12 +622,21 @@ def execute_canonical_product_task(
     task_text: str,
     project_root: Path,
     execution_context: Mapping[str, Any] | None = None,
+    *,
+    task_card_identity: VerifiedTaskCardIdentity | None = None,
 ) -> CanonicalProductExecutionResult:
     """Execute daily product work through one Planner and one Mainchain entry.
 
     This path has no CommandService/NexusEngine/NexusPipeline fallback.  Route,
     provider, model, topology, and legacy/new runtime selectors are rejected as
     caller inputs.
+
+    ``task_card_identity`` is the only way the ``task_card`` Workforce control
+    is supplied on this path.  It must be a lifecycle-verified tracked Task
+    Card for this exact ``task_id`` whose canonical bytes still hash to the
+    bound value; it is re-verified here and mirrors
+    ``build_canonical_planner_admission``.  It never selects a route, worker,
+    provider, or model: those remain Planner/Workforce outputs.
     """
     from nexus.contracts.canonical_execution import CanonicalTaskContext
     from nexus.contracts.root_receipt import (
@@ -664,6 +673,13 @@ def execute_canonical_product_task(
         raise ValueError(f"canonical_product_caller_override_forbidden:{supplied_forbidden[0]}")
 
     task_id = _product_task_id(task_text, str(context.get("task_id") or ""))
+    if task_card_identity is not None:
+        if not isinstance(task_card_identity, VerifiedTaskCardIdentity):
+            raise ValueError("canonical_task_card_identity_unverified")
+        if task_card_identity.task_id != task_id:
+            raise ValueError("canonical_task_card_task_mismatch")
+        # Re-read the canonical card bytes; raises on hash drift.
+        _derive_campaign_id_from_task_card(task_card_identity)
     revision = str(context.get("workspace_revision") or "").strip()
     if not revision:
         raise ValueError("canonical_product_workspace_revision_missing")
@@ -790,6 +806,9 @@ def execute_canonical_product_task(
         allowed_files=allowed_files,
         verifier_command=verifier_command,
     )
+    if task_card_identity is not None:
+        for binding in bindings.values():
+            binding["controls"] = sorted({*binding["controls"], "task_card"})
 
     selected_online_provider = policy_providers.get("online", "")
     online_decision = resolve_online_execution_decision(
