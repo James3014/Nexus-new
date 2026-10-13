@@ -243,18 +243,69 @@ def test_benign_candidate_passes_only_with_a_barrier(tmp_path: Path) -> None:
     assert (ws / "calc.py").read_text(encoding="utf-8") == CALC
 
 
-@pytest.mark.parametrize(
-    "path",
-    ["conftest.py", "tests/conftest.py", "pyproject.toml", "pytest.ini", "setup.cfg", "evil.pth"],
-)
-def test_patch_touching_the_test_harness_is_rejected(tmp_path: Path, path: str) -> None:
-    ws = _workspace(tmp_path)
-    patch = f"--- /dev/null\n+++ b/{path}\n@@ -0,0 +1 @@\n+import os\n"
+HELPER = "x = 1\n"
+PYPROJECT = '[tool.pytest.ini_options]\naddopts = "-q"\n'
+HARNESS_PATCHES = {
+    "nested_upper_case_conftest": (
+        "--- /dev/null\n+++ b/tests/sub/CONFTEST.py\n@@ -0,0 +1 @@\n+import os\n",
+        ["test_harness:tests/sub/CONFTEST.py"],
+    ),
+    "two_hunk_rename_onto_conftest": (
+        "--- a/helper.py\n+++ /dev/null\n@@ -1 +0,0 @@\n-x = 1\n"
+        "--- /dev/null\n+++ b/conftest.py\n@@ -0,0 +1 @@\n+x = 1\n",
+        ["test_harness:conftest.py"],
+    ),
+    "pyproject_pytest_options": (
+        "--- a/pyproject.toml\n+++ b/pyproject.toml\n@@ -1,2 +1,2 @@\n"
+        ' [tool.pytest.ini_options]\n-addopts = "-q"\n+addopts = "-p evil"\n',
+        ["test_harness:pyproject.toml"],
+    ),
+    "pth_file": (
+        "--- /dev/null\n+++ b/pkg/evil.pth\n@@ -0,0 +1 @@\n+import os\n",
+        ["test_harness:pkg/evil.pth"],
+    ),
+    "env_file": (
+        "--- /dev/null\n+++ b/.env\n@@ -0,0 +1 @@\n+PYTHONPATH=/x\n",
+        ["test_harness:.env"],
+    ),
+    "requirements": (
+        "--- /dev/null\n+++ b/requirements-dev.txt\n@@ -0,0 +1 @@\n+evil\n",
+        ["test_harness:requirements-dev.txt"],
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(HARNESS_PATCHES))
+def test_patch_touching_the_test_harness_is_rejected(tmp_path: Path, case: str) -> None:
+    patch, reasons = HARNESS_PATCHES[case]
+    ws = _workspace(tmp_path, {"helper.py": HELPER, "pyproject.toml": PYPROJECT})
     verifier = ev.PatchExecutionVerifier(ws, ["python -m pytest -q"], "harness")
     verdict = verifier.evaluate("c0", patch)
-    assert _codes(verdict) == ["PATCH_REJECTED"]
-    assert verifier.results[0]["reject_reasons"] == [f"test_harness:{path}"]
-    assert verifier.results[0]["exit_codes"] == []
+    record = verifier.results[0]
+    assert _codes(verdict) == ["PATCH_REJECTED"], record
+    assert record["reject_reasons"] == reasons
+    assert record["exit_codes"] == []
+
+
+def test_pytest_runs_with_candidate_config_neutralised(tmp_path: Path) -> None:
+    # A pre-existing (workspace) conftest that would fail every run is not loaded either:
+    # --noconftest -c /dev/null -o addopts= leaves only the named test module.
+    ws = _workspace(
+        tmp_path,
+        {
+            "conftest.py": "raise SystemExit(9)\n",
+            "pytest.ini": "[pytest]\naddopts = -p no_such_plugin\n",
+            "test_calc.py": "from calc import add\n\ndef test_add():\n    assert add(2, 3) == 5\n",
+        },
+    )
+    verifier = ev.PatchExecutionVerifier(ws, ["python -m pytest -q test_calc.py"], "neutral")
+    verdict = verifier.evaluate("c0", GOOD_PATCH)
+    record = verifier.results[0]
+    if not lane.os_sandbox_available():
+        assert record["verify_result"] == ev.NOT_EXECUTED_NO_BARRIER
+        return
+    assert verdict.passed is True, record
+    assert record["exit_codes"] == [0]
 
 
 def test_confined_argv_uses_the_pinned_interpreter_and_neutralises_addopts(tmp_path: Path) -> None:
@@ -269,7 +320,8 @@ def test_confined_argv_uses_the_pinned_interpreter_and_neutralises_addopts(tmp_p
     )
     assert argv[:4] == [sys.executable, "-I", "-m", "pytest"]
     assert ["-o", "addopts="] == argv[argv.index("addopts=") - 1 : argv.index("addopts=") + 1]
-    assert ["-p", "no:cacheprovider"] == argv[4:6]
+    ini = str((tmp_path / ev.VERIFIER_INI).resolve())
+    assert ["-p", "no:cacheprovider", "--noconftest", "-c", ini] == argv[4:9]
     with pytest.raises(lane.SandboxError, match="python_lane_not_isolated"):
         lane.run_confined(
             [sys.executable, "x.py"],

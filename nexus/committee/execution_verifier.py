@@ -20,9 +20,11 @@ cannot win. The workspace itself is never modified.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import shlex
 import shutil
+import stat
 import subprocess  # nosec B404 - argv lists only, never a shell
 import sys
 from dataclasses import dataclass, field
@@ -33,6 +35,9 @@ from nexus.engine import sandboxed_lane as lane
 from nexus.verifiers.contracts import EvidenceRef, FailureTag, VerifierVerdict
 
 VERIFIER_NAME = "patch_execution"
+# The only pytest config a verify run reads: written by the verifier next to (not inside) the
+# candidate copy, so no candidate pytest.ini/pyproject.toml/setup.cfg/tox.ini is consulted.
+VERIFIER_INI = "verifier-pytest.ini"
 NOT_EXECUTED_NO_BARRIER = "not_executed:no_os_barrier"
 _COPY_IGNORE = (".git", ".nexus", ".armor", "__pycache__", ".venv", "node_modules")
 # Shell syntax in a command string means the caller expected a shell; there is none.
@@ -59,9 +64,11 @@ _PYTEST_VALUE_FLAGS = frozenset({"-k", "-m"})
 _RUFF_SUBCOMMANDS = frozenset({"check", "format"})
 _RUFF_FLAGS = frozenset({"--no-fix", "--diff", "--check", "--quiet", "-q", "--preview"})
 _RUFF_FLAG_PREFIXES = ("--select=", "--ignore=", "--output-format=", "--line-length=")
-# Files that change how a verify command itself runs (pytest/ruff config, conftest plugins,
-# interpreter start-up hooks). A candidate patch touching one is refused: it is code or config
-# that would run with the verifier's authority and could make the verdict report green.
+# Files that change how a verify command or its interpreter runs (pytest/ruff config, conftest
+# plugins, start-up hooks, environment files). Decided on the APPLIED copy, not the patch text:
+# a candidate that adds, modifies or deletes one (any directory, any letter case) is refused.
+# pytest additionally runs with --noconftest -c /dev/null -o addopts= and ruff with --isolated,
+# so such files would not be loaded even if present.
 _HARNESS_NAMES = frozenset({
     "conftest.py",
     "pytest.ini",
@@ -72,7 +79,38 @@ _HARNESS_NAMES = frozenset({
     ".ruff.toml",
     "sitecustomize.py",
     "usercustomize.py",
+    "pyvenv.cfg",
+    ".env",
 })
+
+
+def _is_harness(rel: str) -> bool:
+    name = Path(rel).name.lower()
+    return (
+        name in _HARNESS_NAMES
+        or name.endswith(".pth")
+        or name.startswith(".env.")
+        or (name.startswith("requirements") and name.endswith(".txt"))
+    )
+
+
+def _harness_snapshot(root: Path) -> dict[str, str]:
+    """``{relative path: sha256}`` of every harness/environment file under ``root``, found by
+    an lstat walk that never follows links (a non-regular entry is recorded as such)."""
+
+    snapshot: dict[str, str] = {}
+    for current, _dirs, files in os.walk(root, followlinks=False):
+        for name in files:
+            path = Path(current) / name
+            rel = path.relative_to(root).as_posix()
+            if not _is_harness(rel):
+                continue
+            info = os.lstat(path)
+            if not stat.S_ISREG(info.st_mode):
+                snapshot[rel] = f"non_regular:{stat.S_IFMT(info.st_mode)}"
+                continue
+            snapshot[rel] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return snapshot
 
 
 class CommandNotAllowed(ValueError):
@@ -201,6 +239,9 @@ def build_argv(command: list[str], *, mirror: Path, interpreter: str) -> list[st
             "pytest",
             "-p",
             "no:cacheprovider",
+            "--noconftest",
+            "-c",
+            lane.sbpl_path(mirror.parent / VERIFIER_INI),
             "--rootdir",
             root,
             "-o",
@@ -214,7 +255,7 @@ def build_argv(command: list[str], *, mirror: Path, interpreter: str) -> list[st
     ruff = Path(sys.prefix) / "bin" / "ruff"
     if not ruff.is_file():
         raise CommandNotAllowed("ruff_unavailable")
-    return [str(ruff), checked[0], "--no-cache", *checked[1:]]
+    return [str(ruff), checked[0], "--no-cache", "--isolated", *checked[1:]]
 
 
 @dataclass
@@ -278,14 +319,6 @@ class PatchExecutionVerifier:
             return self._reject(
                 candidate_id, mirror, record, [*policy["symlinks"], *policy["nested_git"]]
             )
-        harness = [
-            f"test_harness:{path}"
-            for path in lane.diff_target_paths(patch_text)
-            if Path(path).name.lower() in _HARNESS_NAMES or path.lower().endswith(".pth")
-        ]
-        if harness:
-            return self._reject(candidate_id, mirror, record, harness)
-
         self._prepare_sandbox(sandbox, mirror)
         home = sandbox / "home"
         patch_file = sandbox / "candidate.diff"
@@ -303,6 +336,7 @@ class PatchExecutionVerifier:
         unsafe = lane.unsafe_summary_lines(summary.stdout or "")
         if unsafe:
             return self._reject(candidate_id, mirror, record, [line.strip() for line in unsafe])
+        harness_before = _harness_snapshot(mirror)
         applied = self._git(git, ["apply", "--whitespace=nowarn", str(patch_file)], mirror, git_env)
         if applied.returncode != 0:
             record["apply_status"] = "apply_failed"
@@ -313,6 +347,14 @@ class PatchExecutionVerifier:
         offending = lane.lstat_walk_violations(mirror)
         if offending:
             return self._reject(candidate_id, mirror, record, offending)
+        harness_after = _harness_snapshot(mirror)
+        harness = sorted(
+            f"test_harness:{rel}"
+            for rel in set(harness_before) | set(harness_after)
+            if harness_before.get(rel) != harness_after.get(rel)
+        )
+        if harness:
+            return self._reject(candidate_id, mirror, record, harness)
         record["apply_status"] = "applied"
 
         if not lane.os_sandbox_available():
@@ -329,6 +371,7 @@ class PatchExecutionVerifier:
         interpreter = self._trusted_interpreter(sandbox)  # the pinned one, never PATH
         try:
             argvs = [build_argv(c, mirror=mirror, interpreter=interpreter) for c in commands]
+            lane.write_no_follow(sandbox / VERIFIER_INI, b"[pytest]\n")
         except CommandNotAllowed as exc:
             record["verify_result"] = "not_executed:command_not_allowed"
             return self._verdict(candidate_id, mirror, False, "COMMAND_NOT_ALLOWED", str(exc))

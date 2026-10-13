@@ -542,22 +542,3 @@ def confinement(
         home=sbpl_path(home), tmp=sbpl_path(tmp), untrusted_roots=(*untrusted_roots, *writable)
     )
     return Confinement(profile=profile, env=env, roots=writable)
-
-
-def diff_target_paths(diff_text: str) -> list[str]:
-    """Every path a diff names (``diff --git`` sides and ``---``/``+++`` lines, a/ b/ stripped)."""
-
-    paths: list[str] = []
-    for line in diff_text.splitlines():
-        names: list[str] = []
-        if line.startswith("diff --git "):
-            match = re.match(r"^diff --git a/(.*) b/(.*)$", line)
-            names = [match.group(1), match.group(2)] if match else []
-        elif line.startswith(("--- ", "+++ ")):
-            names = [line[4:].split("\t", 1)[0].strip()]
-        for name in names:
-            if name.startswith(("a/", "b/")):
-                name = name[2:]
-            if name and name != "/dev/null" and name not in paths:
-                paths.append(name)
-    return paths
