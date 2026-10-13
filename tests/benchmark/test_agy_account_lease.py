@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from scripts.bench import agy_account_lease as lease
-from scripts.bench.agy_provider import AGY_DEFAULT_MODEL, ask_direct_agy_patch
+from scripts.bench.agy_provider import AGY_DEFAULT_MODEL, AGY_NO_TOOLS_PREFIX, ask_direct_agy_patch
 
 MODEL = AGY_DEFAULT_MODEL  # gemini-3.8-flash-medium
 # Same window shape as ~/.nexus/agy-account-pool/quota-snapshot.json (see conftest.py).
@@ -43,7 +43,7 @@ def test_requested_model_is_passed_and_posture_is_plan_sandbox_without_bypass(ag
     assert _flag(argv, "--mode") == "plan"
     assert "--sandbox" in argv[: argv.index("--print")]
     assert not set(argv) & lease.AGY_BYPASS_FLAGS
-    assert _flag(argv, "--print") == "fix it"
+    assert _flag(argv, "--print") == AGY_NO_TOOLS_PREFIX + "fix it"
     assert out["requested_model"] == MODEL
     assert out["observed_model"] == MODEL
     assert out["observed_model_label"] == "Gemini 3.8 Flash (Medium)"

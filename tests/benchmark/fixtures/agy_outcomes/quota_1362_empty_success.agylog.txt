@@ -1,0 +1,4 @@
+I1013 10:35:57.951525       1 model_resolver.go:93] Resolving model gemini-3.8-flash-medium
+I1013 10:35:57.951562       1 model_config_manager.go:328] Propagating selected model override to backend: label="Gemini 3.8 Flash (Medium)"
+I1008 09:14:01.000000   4242 server.go:1263] Created conversation 11111111-2222-3333-4444-555555555555
+E1008 09:14:03.512204   4242 errorreport.go:224] agent executor error: pre-invocation hook: context summarization: RESOURCE_EXHAUSTED (code 429): Individual quota reached.
