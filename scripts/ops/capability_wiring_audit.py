@@ -86,6 +86,27 @@ RETIRING_CAPABILITIES: dict[str, str] = {
     "ui_validator": "ui_explorer / ui-validator + _exec_ui_validator (archive PR)",
     "benchmark": "benchmark_service + _exec_benchmark (archive PR)",
     "learning_closure": "_exec_learning_closure (archive PR; executor only, not a planner node)",
+    # Second batch (ARCHIVED_2026-10-13.md, #1906): the invoker returns the archived skip reason.
+    "integration_manager": "archived_retired_integration_manager_2026-10-13 (second archive batch)",
+    "swarm_quiet_moment": "archived_echo_swarm_quiet_moment_2026-10-13 (second archive batch)",
+    "llm_judge_panel": "archived_alias_llm_judge_panel_2026-10-13 (second archive batch)",
+}
+
+# Executor-registry keys with no planner node, removed from EXECUTOR_REGISTRY by the second
+# archive batch (ARCHIVED_2026-10-13.md, #1906).  EXECUTOR_ONLY below keeps what each one did.
+RETIRED_EXECUTOR_ONLY_REASON = "archived_executor_only_no_planner_node_2026-10-13"
+RETIRED_EXECUTOR_ONLY_NOTES: dict[str, str] = {
+    "entropy_guard_v2": (
+        "registry key removed 2026-10-13; module nexus/services/entropy_v2.py kept, "
+        "planner node + fixture tracked in #1907"
+    ),
+    "policy_capability_gate": (
+        "executor removed 2026-10-13; nexus/services/policy_gate.py kept (legacy self_heal_selector)"
+    ),
+    "nightshift_runner_service": (
+        "alias key removed 2026-10-13; the function stays as the body of the nightshift node"
+    ),
+    "battle_swarm": "alias key removed 2026-10-13; swarm / multi_agent nodes keep the real executor",
 }
 
 POSTFLIGHT_CAPABILITIES = frozenset({
@@ -3150,56 +3171,6 @@ def build_control_plane(statement: str) -> Builder:
     return build
 
 
-def build_swarm_quiet(ws: Path, variant: str) -> Scenario:
-    statement = (
-        "Pause writes while target.py is mutated"
-        if variant == "positive"
-        else "Pause writes while helper.py is renamed"
-    )
-
-    def check(root: Path, obs: Obs) -> list[Check]:
-        persisted = list(root.rglob("*quiet*"))
-        return [
-            Check(
-                "quiet_moment_event_built",
-                _result(obs).get("event_type") == "quiet_moment",
-                f"result={_result(obs)}",
-            ),
-            Check(
-                "pause_persisted_or_enforced",
-                bool(persisted),
-                f"files matching *quiet* under the workspace: {[str(p) for p in persisted][:3]}",
-            ),
-        ]
-
-    return Scenario(statement=statement, task_type="code_change", check=check)
-
-
-def neg_swarm_quiet(pos: Obs, neg: Obs) -> Check:
-    def shape(obs: Obs) -> dict[str, Any]:
-        res = dict(_result(obs))
-        res.pop("reason", None)
-        res.pop("affected_nodes", None)
-        return res
-
-    same = shape(pos) == shape(neg) and pos.gate_passed and neg.gate_passed
-    return Check(
-        "negative_control:event_differs_beyond_echoed_reason",
-        not same,
-        f"identical_apart_from_echo={same}",
-    )
-
-
-def build_integration_manager(ws: Path, variant: str) -> Scenario:
-    # The forcing line contains "integration", a complex-task keyword -> main_engineering role.
-    return Scenario(
-        statement="Merge the approved change for target.py",
-        task_type="code_change",
-        codeintel={"integration_task_ids": ["wiring-a", "wiring-b"]},
-        online_route="main_engineering",
-    )
-
-
 def build_autonomic_router(ws: Path, variant: str) -> Scenario:
     statement = (
         "Do research on the refund window before editing target.py"
@@ -3222,27 +3193,6 @@ def neg_autonomic_router(pos: Obs, neg: Obs) -> Check:
 
 def build_judge_panel(ws: Path, variant: str) -> Scenario:
     return Scenario(statement="Rank the candidate fixes for target.py", task_type="code_change")
-
-
-def probe_llm_judge_panel(ws: Path) -> dict[str, Any]:
-    """The node is never selected; record what its executor does when called directly."""
-    from nexus.core.belief_contracts import CapabilityExecutionPlan
-    from nexus.core.capability_executor_registry import EXECUTOR_REGISTRY
-
-    out: dict[str, Any] = {}
-    for policy in (POLICY_PRODUCTION, POLICY_EXTERNAL_FLAG):
-        with policy_env(policy), chdir(ws):
-            plan = CapabilityExecutionPlan(
-                plan_id="probe:llm_judge_panel", task_id="probe-llm-judge", phases=["R"]
-            )
-            receipt = EXECUTOR_REGISTRY["llm_judge_panel"](plan, "Rank the candidate fixes")
-        outcome = dict(receipt.outcome or {})
-        out[policy.name] = {
-            "gate_passed": receipt.gate_passed,
-            "error": outcome.get("error"),
-            "legacy_alias_of": outcome.get("legacy_alias_of"),
-        }
-    return out
 
 
 def build_external_doc_scout(ws: Path, variant: str) -> Scenario:
@@ -3484,7 +3434,9 @@ def verdict_bucket(verdict: Any) -> str:
 # ------------------------------------------------ executor-registry keys with no planner node
 
 # What each executor does, from reading its body (verified against the run: gate, outcome keys,
-# and the quoted literals below are re-scanned from source on every run).
+# and the quoted literals below are re-scanned from source on every run).  Keys the second
+# archive batch removed from EXECUTOR_REGISTRY (2026-10-13) keep their description here and
+# are reported RETIRING instead of being invoked.
 EXECUTOR_ONLY: dict[str, dict[str, Any]] = {
     "policy_capability_gate": {
         "kind": "REAL_CALL_FIXTURE_INPUTS",
@@ -3595,7 +3547,10 @@ def executor_only_keys() -> dict[str, Any]:
         "retiring_excluded": sorted(set(computed) & set(RETIRING_CAPABILITIES)),
         "audited": sorted(EXECUTOR_ONLY),
         "unlisted": sorted(set(computed) - set(EXECUTOR_ONLY) - set(RETIRING_CAPABILITIES)),
-        "listed_but_reachable": sorted(set(EXECUTOR_ONLY) - set(computed)),
+        "listed_but_reachable": sorted(
+            set(EXECUTOR_ONLY) - set(computed) - (set(EXECUTOR_ONLY) - set(EXECUTOR_REGISTRY))
+        ),
+        "retired_from_registry": sorted(set(EXECUTOR_ONLY) - set(EXECUTOR_REGISTRY)),
     }
 
 
@@ -3616,6 +3571,21 @@ def audit_executor_only(key: str, work_root: Path) -> dict[str, Any]:
     from nexus.core.capability_executor_registry import EXECUTOR_REGISTRY
 
     info = EXECUTOR_ONLY[key]
+    if key not in EXECUTOR_REGISTRY:
+        note = RETIRED_EXECUTOR_ONLY_NOTES.get(key, "executor and registry key removed 2026-10-13")
+        verdict, reason = classify_verdict({"retiring": f"{RETIRED_EXECUTOR_ONLY_REASON}: {note}"})
+        return {
+            "executor_key": key,
+            "verdict": verdict,
+            "verdict_reason": reason,
+            "kind": info["kind"],
+            "does": info["does"],
+            "executor": {},
+            "invoked": None,
+            "gate_passed": None,
+            "quoted_lines": [],
+            "literals_missing": [],
+        }
     fn = EXECUTOR_REGISTRY[key]
     loc = source_location(fn)
     ws = work_root / f"executor_only__{key}"
@@ -4018,23 +3988,6 @@ _SPEC_LIST += [
         ),
     ),
     CapSpec(
-        "swarm_quiet_moment",
-        None,
-        build_swarm_quiet,
-        negative_check=neg_swarm_quiet,
-        gaps=(
-            "executor only builds the quiet-moment dict (build_quiet_moment_event) and returns it; nothing pauses writes, persists the event or consumes it (consumer_effect NONE)",
-        ),
-    ),
-    CapSpec(
-        "integration_manager",
-        None,
-        build_integration_manager,
-        gaps=(
-            "retired quarantine: executor always returns BLOCKED LEGACY_INTEGRATION_PATH_RETIRED_USE_CONTROLLED_INTEGRATION, mutation_performed=False",
-        ),
-    ),
-    CapSpec(
         "autonomic_router",
         None,
         build_autonomic_router,
@@ -4052,13 +4005,6 @@ _SPEC_LIST += [
         gaps=(
             "providers come only from NEXUS_LLM_JUDGE_PROVIDERS (fake, or gemini/codex command CLIs); there is no Ollama/M5 provider, so the M5 tunnel cannot serve it; the executor ranks one hard-coded candidate c0 = the task text",
         ),
-    ),
-    CapSpec(
-        "llm_judge_panel",
-        None,
-        build_judge_panel,
-        probe=probe_llm_judge_panel,
-        gaps=("legacy alias of judge_panel; not selected even when forced",),
     ),
     CapSpec(
         "external_doc_scout",
@@ -4182,15 +4128,38 @@ def git_head() -> str:
         return "unknown"
 
 
+def archived_skip_observation(cap: str) -> str:
+    """Skip reason the production invoker returns for an archived planner node ('' if none)."""
+    from nexus.services import capability_registry as registry
+
+    if cap not in registry.ARCHIVED_CAPABILITY_REASONS:
+        return ""
+    if cap not in set(registry.list_planner_capability_names()):
+        return ""
+    invoker = registry.build_default_mainchain_invokers().get(cap)
+    if invoker is None:
+        return ""
+    result = dict(invoker({"task_id": f"wiring-retiring-{cap}"}) or {})
+    return str(result.get("skip_reason") or "")
+
+
 def retiring_row(cap: str, note: str) -> dict[str, Any]:
     verdict, reason = classify_verdict({"retiring": note})
-    return {
+    row: dict[str, Any] = {
         "capability": cap,
         "verdict": verdict,
         "verdict_reason": reason,
         "executor": {},
         "gaps": ["owned by the archive PR; not executed by this audit"],
     }
+    try:
+        observed = archived_skip_observation(cap)
+    except Exception as exc:  # noqa: BLE001 - recorded, never hidden
+        observed = f"observation_error:{type(exc).__name__}"
+    if observed:
+        row["archived_skip_reason"] = observed
+        row["gaps"] = [f"archived: the production invoker returns an explicit skip ({observed})"]
+    return row
 
 
 def _short(text: Any, limit: int) -> str:
@@ -4306,10 +4275,15 @@ def run_audit(
                     "does": EXECUTOR_ONLY[key]["does"],
                     "audit_error": f"{type(exc).__name__}: {exc}"[:300],
                 })
+        eo_verdicts: dict[str, int] = {}
+        for eo_row in eo_rows:
+            eo_verdicts[str(eo_row.get("verdict"))] = (
+                eo_verdicts.get(str(eo_row.get("verdict")), 0) + 1
+            )
         executor_only = {
             "keys": keys,
             "rows": eo_rows,
-            "verdict_counts": {UNREACHABLE_NO_PLANNER_NODE: len(eo_rows)},
+            "verdict_counts": eo_verdicts,
             "kind_counts": {
                 kind: sum(1 for r in eo_rows if r.get("kind") == kind)
                 for kind in sorted({str(r.get("kind")) for r in eo_rows})

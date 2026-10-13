@@ -21,6 +21,17 @@
 | tasks/trajectory-verifier-wave1-runtime-20260930/01-source-acceptance-evidence.json | tests/contracts/test_gateway_deployment_contract.py, tests/ops/test_mcp_gateway_durable.py | active | high | trajectory_verifier_wave1_source_acceptance_contract |
 | tasks/trajectory-verifier-wave1-runtime-20260930/02-derived-recovery-request.json | tests/contracts/test_gateway_deployment_contract.py, tests/ops/test_mcp_gateway_durable.py | active | high | trajectory_verifier_wave1_recovery_request_contract |
 | .gitmodules | tests/ops/test_gitmodules_declares_gitlinks.py | active | high | checkout_gitlink_metadata_contract |
+| SWE-bench | tests/ops/test_gitmodules_declares_gitlinks.py | active | low | governed_deletion_retired_path |
+| nexus-mempalace | tests/ops/test_gitmodules_declares_gitlinks.py | active | low | governed_deletion_retired_path |
+| nexus-rust-v16 | tests/ops/test_gitmodules_declares_gitlinks.py | active | low | governed_deletion_retired_path |
+| notebooklm-py-audit | tests/ops/test_gitmodules_declares_gitlinks.py | active | low | governed_deletion_retired_path |
+| nexus-evolve | tests/ops/test_gitmodules_declares_gitlinks.py | active | low | governed_deletion_retired_path |
+| scripts/Jaden_Storybook.html | tests/ops/test_gitmodules_declares_gitlinks.py | active | low | governed_deletion_retired_path |
+| scripts/Jaden_Storybook_v1.md | tests/ops/test_gitmodules_declares_gitlinks.py | active | low | governed_deletion_retired_path |
+| scripts/dashboard.html | tests/ops/test_gitmodules_declares_gitlinks.py | active | low | governed_deletion_retired_path |
+| configs/federated_dna.yaml | tests/ops/test_gitmodules_declares_gitlinks.py | active | low | governed_deletion_retired_path |
+| tenants | tests/ops/test_gitmodules_declares_gitlinks.py | active | low | governed_deletion_retired_path |
+| .nexus-core/deletions | tests/ops/test_gitmodules_declares_gitlinks.py | active | low | governed_deletion_retired_path |
 | .claude | tests/ops/test_claude_handoff_hooks.py | active | medium | claude_handoff_hook_contract |
 | HANDOFF.md | tests/ops/test_claude_handoff_hooks.py | active | medium | claude_handoff_hook_contract |
 | tests/ops/test_claude_handoff_hooks.py | tests/ops/test_claude_handoff_hooks.py | active | medium | test_contract |
@@ -65,6 +76,7 @@
 | nexus/services/external_intelligence_fanout.py | tests/services/test_external_intelligence_fanout.py, tests/services/test_open_swe_worker_transport.py | active | high | external_intelligence_fanout_contract |
 | nexus/services/open_swe_external_intelligence.py | tests/services/test_open_swe_external_intelligence.py, tests/services/test_open_swe_worker_transport.py | active | high | open_swe_external_intelligence_effect_projection_contract |
 | nexus/services | tests/services, tests/test_services_*.py | active | medium | service_contract |
+| nexus/cli | tests/services/test_archived_capabilities_2026_10_13.py | active | medium | archived_cli_commands_2026_10_13 |
 | nexus/config/model_workforce.yaml | tests/contracts/test_model_workforce_policy.py, tests/services/test_model_workforce_policy_loader.py | active | medium | workforce_policy_contract |
 | nexus/calibration/provider_adoption | tests/calibration/provider_adoption/test_*.py, tests/bench/test_model_calibration_plan.py | active | high | provider_adoption_calibration_evidence_contract |
 | nexus/config/model_capability_lineage.yaml | tests/services/test_model_capability_lineage.py, tests/bench/test_model_calibration_plan.py, tests/nexus/orchestrator/test_unified_mcp_gateway.py | active | medium | model_capability_lineage_calibration_contract |

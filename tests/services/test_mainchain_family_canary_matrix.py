@@ -1229,9 +1229,13 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
             final_status = "RETIRED_NOT_SELECTED"
         archived = name in ARCHIVED_CAPABILITY_REASONS
         if archived and final_status != "RETIRED_NOT_SELECTED":
-            # Archived 2026-10-12: the only acceptable result is an explicit skip.
+            # Archived 2026-10-12 / 2026-10-13: the only acceptable result is an explicit
+            # skip, or (llm_judge_panel, never selected even when forced) no selection at all.
+            honestly_unselected = not pos["planner_selected"] and not pos["invoked"]
             final_status = (
-                "ARCHIVED_FAIL_CLOSED" if pos.get("skipped") and not pos.get("invoked") else "FAIL"
+                "ARCHIVED_FAIL_CLOSED"
+                if (pos.get("skipped") or honestly_unselected) and not pos.get("invoked")
+                else "FAIL"
             )
         if pos.get("action") in _SHALLOW_ACTIONS and pos.get("gate_passed"):
             probe_only += 1
@@ -1573,13 +1577,13 @@ def test_retired_integration_manager_is_quarantine_reference_only() -> None:
     contract = PLANNER_EXECUTION_CONTRACTS["integration_manager"]
     assert contract["execution_class"] == EXECUTION_CLASS_CONTROL_PLANE_REFERENCE
     assert contract["provider_authorization_required"] is False
-    assert result["final_status"] == "OK"
-    assert result["action"] == "legacy_integration_quarantine"
-    assert result["semantic_status"] == "BLOCKED"
-    assert result["gate_passed"] is False
-    assert result["mutation_performed"] is False
-    assert result["retired_callable"].endswith("IntegrationManager.batch_integrate")
-    assert result["replacement_callable"].endswith("SelfHostedTaskService.integrate_approved")
+    # Archived 2026-10-13 (#1906): the node resolves to an explicit, receipt-visible skip.
+    assert ARCHIVED_CAPABILITY_REASONS["integration_manager"] == (
+        "archived_retired_integration_manager_2026-10-13"
+    )
+    assert result["invoked"] is False
+    assert result["skipped"] is True
+    assert result["public_claim_allowed"] is False
 
 
 def test_retired_integration_reference_proof_rejects_false_green() -> None:

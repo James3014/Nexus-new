@@ -4,8 +4,11 @@ import base64
 import gzip
 import hashlib
 import json
+import os
 import shlex
 import subprocess
+import threading
+import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
@@ -837,15 +840,23 @@ class AutomaticReplicationStore:
     def _write_json(path: Path, value: Mapping[str, Any], *, create_only: bool = False) -> str:
         path.parent.mkdir(parents=True, exist_ok=True)
         data = _canonical_bytes(value) + b"\n"
-        if create_only:
-            with path.open("xb") as handle:
-                handle.write(data)
-        else:
-            temp = path.with_suffix(path.suffix + ".tmp")
-            with temp.open("wb") as handle:
+        # Unique temp name per writer; publication is atomic (link for create-only, rename
+        # otherwise) so concurrent readers never observe a partial file and concurrent
+        # writers never share a temp file.
+        temp = path.with_name(
+            f".{path.name}.{os.getpid()}.{threading.get_ident()}.{time.time_ns()}.tmp"
+        )
+        try:
+            with temp.open("xb") as handle:
                 handle.write(data)
                 handle.flush()
-            temp.replace(path)
+                os.fsync(handle.fileno())
+            if create_only:
+                os.link(temp, path)  # raises FileExistsError like open("xb")
+            else:
+                temp.replace(path)
+        finally:
+            temp.unlink(missing_ok=True)
         return _sha256(data)
 
     @staticmethod

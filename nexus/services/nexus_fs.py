@@ -169,8 +169,12 @@ class NexusFS:
         palace = MemPalace(str(self.project_root))
         
         if node.name == "router_bias":
-            bias = palace.get_router_bias()
-            return json.dumps({"global_router_bias": bias}, indent=2)
+            # ARCHIVED 2026-10-13 (#1906): configs/federated_dna.yaml holds Laplace noise
+            # from the retired federation, so it is no longer read or shown as data.
+            return json.dumps(
+                {"global_router_bias": "n/a", "reason": "archived_federated_dna_2026-10-13"},
+                indent=2,
+            )
             
         if "/beliefs/current/" in path:
             belief = palace.get_belief(node.name)

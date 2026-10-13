@@ -16,8 +16,14 @@ def _test_executor(name: str) -> None:
     assert r.telemetries["wall_time_ms"] > 0, f"{name}: wall_time_ms=0"
 
 
+def _assert_retired(name: str) -> None:
+    # Executor-only key with no planner node, archived 2026-10-13 (ARCHIVED_2026-10-13.md, #1906):
+    # the historical node id is kept and now asserts the key is unreachable.
+    assert name not in EXECUTOR_REGISTRY, f"{name} must not be registered"
+
+
 def test_exec_aos_oracle_invoked_true() -> None:
-    _test_executor("aos_oracle")
+    _assert_retired("aos_oracle")
 
 
 def test_exec_autonomic_router_invoked_true() -> None:
@@ -29,11 +35,11 @@ def test_exec_claim_gate_invoked_true() -> None:
 
 
 def test_exec_reflex_loop_invoked_true() -> None:
-    _test_executor("reflex_loop")
+    _assert_retired("reflex_loop")
 
 
 def test_exec_zero_trust_v2_behavior_invoked_true() -> None:
-    _test_executor("zero_trust_v2_behavior")
+    _assert_retired("zero_trust_v2_behavior")
 
 
 def test_all_36_executors_real_execution_100_percent() -> None:
