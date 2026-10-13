@@ -1620,6 +1620,142 @@ def _verifier(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
+# Controller failure reason (#1974, #1895 rows 2-3).  The controller records a
+# fixed-schema reason when it fails; the default-branch verifier prints it and
+# still fails.  Everything read back is untrusted display data: only allowlisted
+# codes are honoured, the remedy always comes from this table, and the detail is
+# reduced to one bounded printable-ASCII line.  Nothing here can produce a pass.
+CONTROLLER_FAILURE_SCHEMA = "nexus.trusted_anchor_controller_failure.v1"
+CONTROLLER_FAILURE_DETAIL_LIMIT = 240
+CONTROLLER_FAILURE_FILE_LIMIT = 65536
+CONTROLLER_FAILURE_REMEDIES = {
+    "DEPENDENCY_CONTRACT_DRIFT": (
+        "merge origin/main into the PR branch; an intended pyproject.toml/uv.lock "
+        "change needs an authorized trusted dependency snapshot transition"
+    ),
+    "MERGE_LANE_BINDING_MISSING": (
+        "the PR body needs exactly one NEXUS_MERGE_LANE_V1 block from the Owner/authority "
+        "path (#1749/#1817); agents must not mint or copy one"
+    ),
+    "MERGE_LANE_BINDING_BLOCKED": (
+        "fix the NEXUS_MERGE_LANE_V1 binding problem named in the detail "
+        "(scripts/ops/trusted_merge_lane_gate.py)"
+    ),
+    "CONTROLLER_ERROR": (
+        "read the Trusted controller (default branch) job log; the controller failed "
+        "before publishing its bundle"
+    ),
+    "CONTROLLER_REASON_UNAVAILABLE": (
+        "read the Trusted controller (default branch) job log; it published no "
+        "machine-readable reason"
+    ),
+}
+_CONTROLLER_RECORDED_CODES = frozenset({"DEPENDENCY_CONTRACT_DRIFT", "CONTROLLER_ERROR"})
+_LANE_BINDING_MISSING_REASONS = frozenset({
+    "PR_BODY_REQUIRED",
+    "EXACTLY_ONE_MERGE_LANE_BINDING_REQUIRED",
+})
+_LANE_REASON_RE = re.compile(r"[A-Z0-9_]{1,80}")
+_TOKEN_LIKE_RE = re.compile(r"\b(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]+")
+
+
+def _sanitize_failure_detail(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    value = _TOKEN_LIKE_RE.sub("[REDACTED]", value)
+    printable = "".join(char if " " <= char <= "~" else " " for char in value)
+    return " ".join(printable.split())[:CONTROLLER_FAILURE_DETAIL_LIMIT]
+
+
+def _controller_failure_record(error: BaseException) -> dict[str, str]:
+    message = str(error)
+    code = (
+        "DEPENDENCY_CONTRACT_DRIFT"
+        if message.startswith("PR dependency contract drifts from trusted default")
+        else "CONTROLLER_ERROR"
+    )
+    return {
+        "schema": CONTROLLER_FAILURE_SCHEMA,
+        "reason_code": code,
+        "detail": _sanitize_failure_detail(f"{type(error).__name__}: {message}"),
+    }
+
+
+def _controller_recording_failure(args: argparse.Namespace) -> None:
+    try:
+        _controller(args)
+    except Exception as error:
+        record = _controller_failure_record(error)
+        path = getattr(args, "failure_reason_json", None)
+        if path:
+            target = Path(path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(json.dumps(record, sort_keys=True) + "\n", encoding="utf-8")
+        code = record["reason_code"]
+        print(
+            f"trusted controller: {code}: {CONTROLLER_FAILURE_REMEDIES[code]}",
+            file=sys.stderr,
+        )
+        raise
+
+
+def _read_untrusted_reason_json(path: Path) -> dict[str, Any] | None:
+    try:
+        if path.is_symlink() or not path.is_file():
+            return None
+        if path.stat().st_size > CONTROLLER_FAILURE_FILE_LIMIT:
+            return None
+        payload = json.loads(path.read_bytes().decode("utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def resolve_controller_failure(failure_dir: Path, *, controller_result: str) -> dict[str, str]:
+    """Map an untrusted controller failure artifact to a trusted reason; always BLOCK."""
+
+    code = "CONTROLLER_REASON_UNAVAILABLE"
+    detail = f"controller job result: {controller_result}"
+    recorded = _read_untrusted_reason_json(failure_dir / "controller-failure.json")
+    lane = _read_untrusted_reason_json(failure_dir / "merge-lane-gate.json")
+    if (
+        recorded is not None
+        and recorded.get("schema") == CONTROLLER_FAILURE_SCHEMA
+        and recorded.get("reason_code") in _CONTROLLER_RECORDED_CODES
+    ):
+        code = str(recorded["reason_code"])
+        detail = recorded.get("detail", "")
+    elif lane is not None and lane.get("status") == "BLOCK":
+        reason = lane.get("reason")
+        if isinstance(reason, str) and _LANE_REASON_RE.fullmatch(reason):
+            code = (
+                "MERGE_LANE_BINDING_MISSING"
+                if reason in _LANE_BINDING_MISSING_REASONS
+                else "MERGE_LANE_BINDING_BLOCKED"
+            )
+            detail = reason
+    return {
+        "schema": CONTROLLER_FAILURE_SCHEMA,
+        "status": "BLOCK",
+        "reason_code": code,
+        "remedy": CONTROLLER_FAILURE_REMEDIES[code],
+        "detail": _sanitize_failure_detail(detail),
+    }
+
+
+def _explain_controller_failure(args: argparse.Namespace) -> None:
+    result = resolve_controller_failure(
+        Path(args.failure_dir), controller_result=_sanitize_failure_detail(args.controller_result)
+    )
+    code, remedy = result["reason_code"], result["remedy"]
+    # Only the trusted code and remedy may form a workflow command; the untrusted
+    # detail is printed after a fixed prefix so it can never start one.
+    print(f"::error title=Trusted controller failed::{code}: {remedy}")
+    print(f"trusted controller: {code}: {remedy}")
+    print(f"trusted controller detail (untrusted, display only): {result['detail']}")
+    raise SystemExit(1)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -1628,7 +1764,8 @@ def main() -> None:
     controller.add_argument("--repo-root", required=True)
     controller.add_argument("--output-dir", required=True)
     controller.add_argument("--runtime-dir", required=True)
-    controller.set_defaults(function=_controller)
+    controller.add_argument("--failure-reason-json")
+    controller.set_defaults(function=_controller_recording_failure)
     runtime_builder = subparsers.add_parser("runtime-builder")
     runtime_builder.add_argument("--repo-root", required=True)
     runtime_builder.add_argument("--workflow-sha", required=True)
@@ -1653,6 +1790,10 @@ def main() -> None:
     verifier.add_argument("--expected-base-sha", required=True)
     verifier.add_argument("--expected-head-sha", required=True)
     verifier.set_defaults(function=_verifier)
+    explain = subparsers.add_parser("explain-controller-failure")
+    explain.add_argument("--failure-dir", required=True)
+    explain.add_argument("--controller-result", required=True)
+    explain.set_defaults(function=_explain_controller_failure)
     args = parser.parse_args()
     args.function(args)
 

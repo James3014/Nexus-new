@@ -3078,3 +3078,286 @@ def test_pr1908_dependency_snapshot_transition_allows_only_exact_binding(monkeyp
                 pull_request_number=other_pr,
                 head_product_init_is_regular=True,
             )
+
+
+# --- #1974 (#1895 rows 2-3): verifier surfaces the controller failure reason ---
+
+
+def _controller_failure_dir(tmp_path: Path, files: dict[str, object]) -> Path:
+    failure_dir = tmp_path / "trusted-anchor-failure"
+    failure_dir.mkdir()
+    for name, payload in files.items():
+        data = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
+        (failure_dir / name).write_bytes(data)
+    return failure_dir
+
+
+def _controller_args(tmp_path: Path, failure_reason: Path | None) -> argparse.Namespace:
+    return argparse.Namespace(
+        event_json=str(tmp_path / "missing-event.json"),
+        repo_root=str(tmp_path),
+        output_dir=str(tmp_path / "out"),
+        runtime_dir=str(tmp_path / "runtime"),
+        failure_reason_json=None if failure_reason is None else str(failure_reason),
+    )
+
+
+@pytest.mark.parametrize(
+    ("error", "code"),
+    [
+        (
+            ValueError("PR dependency contract drifts from trusted default"),
+            "DEPENDENCY_CONTRACT_DRIFT",
+        ),
+        (ValueError("controller repository remains shallow"), "CONTROLLER_ERROR"),
+        (subprocess.CalledProcessError(128, ["git", "fetch"]), "CONTROLLER_ERROR"),
+    ],
+)
+def test_controller_failure_records_reason_and_still_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, error: Exception, code: str
+):
+    def _boom(_args: argparse.Namespace) -> None:
+        raise error
+
+    monkeypatch.setattr(trusted_anchor, "_controller", _boom)
+    reason_path = tmp_path / "trusted-anchor-failure" / "controller-failure.json"
+    with pytest.raises(type(error)):
+        trusted_anchor._controller_recording_failure(_controller_args(tmp_path, reason_path))
+    record = json.loads(reason_path.read_text(encoding="utf-8"))
+    assert record["schema"] == trusted_anchor.CONTROLLER_FAILURE_SCHEMA
+    assert record["reason_code"] == code
+    assert "\n" not in record["detail"]
+    assert len(record["detail"]) <= trusted_anchor.CONTROLLER_FAILURE_DETAIL_LIMIT
+
+
+def test_controller_success_writes_no_failure_reason(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    monkeypatch.setattr(trusted_anchor, "_controller", lambda _args: None)
+    reason_path = tmp_path / "trusted-anchor-failure" / "controller-failure.json"
+    trusted_anchor._controller_recording_failure(_controller_args(tmp_path, reason_path))
+    assert not reason_path.exists()
+
+
+def test_controller_cli_accepts_failure_reason_path():
+    assert (
+        "--failure-reason-json"
+        in _named_step("trusted-controller", "Acquire and execute exact trusted controller source")[
+            "run"
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    ("lane_reason", "code"),
+    [
+        ("EXACTLY_ONE_MERGE_LANE_BINDING_REQUIRED", "MERGE_LANE_BINDING_MISSING"),
+        ("PR_BODY_REQUIRED", "MERGE_LANE_BINDING_MISSING"),
+        ("OWNER_INLINE_MUST_BE_DIRECT", "MERGE_LANE_BINDING_BLOCKED"),
+    ],
+)
+def test_lane_gate_block_is_surfaced_with_trusted_remedy(
+    tmp_path: Path, lane_reason: str, code: str
+):
+    failure_dir = _controller_failure_dir(
+        tmp_path,
+        {
+            "merge-lane-gate.json": {
+                "schema": "nexus.trusted_merge_lane_gate_result.v1",
+                "status": "BLOCK",
+                "reason": lane_reason,
+                "remedy": "forged remedy must never be shown",
+            }
+        },
+    )
+    result = trusted_anchor.resolve_controller_failure(failure_dir, controller_result="failure")
+    assert result["status"] == "BLOCK"
+    assert result["reason_code"] == code
+    assert result["remedy"] == trusted_anchor.CONTROLLER_FAILURE_REMEDIES[code]
+    assert result["detail"] == lane_reason
+
+
+def test_dependency_drift_reason_is_surfaced(tmp_path: Path):
+    failure_dir = _controller_failure_dir(
+        tmp_path,
+        {
+            "controller-failure.json": {
+                "schema": trusted_anchor.CONTROLLER_FAILURE_SCHEMA,
+                "reason_code": "DEPENDENCY_CONTRACT_DRIFT",
+                "detail": "ValueError: PR dependency contract drifts from trusted default",
+            }
+        },
+    )
+    result = trusted_anchor.resolve_controller_failure(failure_dir, controller_result="failure")
+    assert result["reason_code"] == "DEPENDENCY_CONTRACT_DRIFT"
+    assert "merge origin/main" in result["remedy"]
+
+
+@pytest.mark.parametrize(
+    "files",
+    [
+        {},
+        {"controller-failure.json": b"not json"},
+        {"controller-failure.json": {"schema": "other", "reason_code": "CONTROLLER_ERROR"}},
+        {
+            "controller-failure.json": {
+                "schema": trusted_anchor.CONTROLLER_FAILURE_SCHEMA,
+                "reason_code": "PASS",
+                "detail": "x",
+            }
+        },
+        {
+            "merge-lane-gate.json": {
+                "status": "PASS",
+                "reason": "EXACTLY_ONE_MERGE_LANE_BINDING_REQUIRED",
+            }
+        },
+        {"merge-lane-gate.json": {"status": "BLOCK", "reason": "lower case\n::error::forged"}},
+        {
+            "merge-lane-gate.json": b"{"
+            + b" " * (trusted_anchor.CONTROLLER_FAILURE_FILE_LIMIT + 1)
+            + b"}"
+        },
+    ],
+)
+def test_untrusted_or_unrecognized_reason_falls_back_to_unavailable(
+    tmp_path: Path, files: dict[str, object]
+):
+    failure_dir = _controller_failure_dir(tmp_path, files)
+    result = trusted_anchor.resolve_controller_failure(failure_dir, controller_result="failure")
+    assert result["status"] == "BLOCK"
+    assert result["reason_code"] == "CONTROLLER_REASON_UNAVAILABLE"
+
+
+def test_missing_failure_dir_falls_back_to_unavailable(tmp_path: Path):
+    result = trusted_anchor.resolve_controller_failure(
+        tmp_path / "absent", controller_result="cancelled"
+    )
+    assert result["reason_code"] == "CONTROLLER_REASON_UNAVAILABLE"
+    assert "cancelled" in result["detail"]
+
+
+def test_symlinked_reason_file_is_not_followed(tmp_path: Path):
+    target = tmp_path / "elsewhere.json"
+    target.write_text(
+        json.dumps({"status": "BLOCK", "reason": "EXACTLY_ONE_MERGE_LANE_BINDING_REQUIRED"})
+    )
+    failure_dir = _controller_failure_dir(tmp_path, {})
+    (failure_dir / "merge-lane-gate.json").symlink_to(target)
+    result = trusted_anchor.resolve_controller_failure(failure_dir, controller_result="failure")
+    assert result["reason_code"] == "CONTROLLER_REASON_UNAVAILABLE"
+
+
+def test_hostile_detail_is_single_bounded_printable_line(tmp_path: Path):
+    hostile = "line1\n::add-mask::x\r\n::set-output name=a::b\x1b[31m‮" + "A" * 10_000
+    failure_dir = _controller_failure_dir(
+        tmp_path,
+        {
+            "controller-failure.json": {
+                "schema": trusted_anchor.CONTROLLER_FAILURE_SCHEMA,
+                "reason_code": "CONTROLLER_ERROR",
+                "detail": hostile,
+            }
+        },
+    )
+    detail = trusted_anchor.resolve_controller_failure(failure_dir, controller_result="failure")[
+        "detail"
+    ]
+    assert len(detail) <= trusted_anchor.CONTROLLER_FAILURE_DETAIL_LIMIT
+    assert re.fullmatch(r"[\x20-\x7e]*", detail)
+
+
+@pytest.mark.parametrize("controller_result", ["failure", "success", "cancelled", "skipped"])
+def test_explain_controller_failure_always_fails_closed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], controller_result: str
+):
+    failure_dir = _controller_failure_dir(
+        tmp_path,
+        {
+            "merge-lane-gate.json": {"status": "PASS", "reason": "::error::forged"},
+            "controller-failure.json": {
+                "schema": trusted_anchor.CONTROLLER_FAILURE_SCHEMA,
+                "reason_code": "CONTROLLER_ERROR",
+                "detail": "\n::warning::forged\n",
+            },
+        },
+    )
+    args = argparse.Namespace(failure_dir=str(failure_dir), controller_result=controller_result)
+    with pytest.raises(SystemExit) as exit_info:
+        trusted_anchor._explain_controller_failure(args)
+    assert exit_info.value.code == 1
+    out = capsys.readouterr().out
+    command_lines = [line for line in out.splitlines() if line.lstrip().startswith("::")]
+    assert command_lines == [
+        "::error title=Trusted controller failed::CONTROLLER_ERROR: "
+        + trusted_anchor.CONTROLLER_FAILURE_REMEDIES["CONTROLLER_ERROR"]
+    ]
+    assert "forged" in out  # shown, but only as inert, prefixed data
+
+
+def test_controller_job_uploads_failure_reason_only_on_failure():
+    upload = _named_step("trusted-controller", "Upload controller failure reason")
+    assert upload["if"] == "failure()"
+    assert upload["uses"].startswith("actions/upload-artifact@")
+    assert upload["with"]["name"] == "trusted-anchor-controller-failure-${{ github.run_id }}"
+    assert upload["with"]["path"] == "${{ runner.temp }}/trusted-anchor-failure/"
+    collect = _named_step("trusted-controller", "Collect controller failure reason")
+    assert collect["if"] == "failure()"
+    steps = [step.get("name") for step in _workflow()["jobs"]["trusted-controller"]["steps"]]
+    assert steps.index("Collect controller failure reason") < steps.index(
+        "Upload controller failure reason"
+    )
+
+
+def test_collect_controller_failure_step_copies_lane_block_and_skips_symlink(tmp_path: Path):
+    run = _named_step("trusted-controller", "Collect controller failure reason")["run"]
+    anchor_dir = tmp_path / "trusted-anchor"
+    anchor_dir.mkdir()
+    (anchor_dir / "merge-lane-gate.json").write_text('{"status":"BLOCK"}\n')
+    completed = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", run],
+        env={**os.environ, "RUNNER_TEMP": str(tmp_path), "GITHUB_RUN_ID": "7"},
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    failure_dir = tmp_path / "trusted-anchor-failure"
+    assert (failure_dir / "merge-lane-gate.json").read_text() == '{"status":"BLOCK"}\n'
+    assert list(failure_dir.iterdir())  # never empty, so the upload cannot vanish
+    second = tmp_path / "second"
+    (second / "trusted-anchor").mkdir(parents=True)
+    (second / "trusted-anchor" / "merge-lane-gate.json").symlink_to(tmp_path / "x")
+    completed = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", run],
+        env={**os.environ, "RUNNER_TEMP": str(second), "GITHUB_RUN_ID": "7"},
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert not (second / "trusted-anchor-failure" / "merge-lane-gate.json").exists()
+
+
+def test_verifier_reports_controller_reason_before_bundle_download_and_fails_closed():
+    steps = _workflow()["jobs"]["trusted-verifier"]["steps"]
+    names = [step.get("name") for step in steps]
+    download = _named_step("trusted-verifier", "Download controller failure reason")
+    report = _named_step("trusted-verifier", "Report controller failure reason (fail closed)")
+    gate = "needs.trusted-controller.result != 'success'"
+    assert download["if"] == gate
+    assert download["continue-on-error"] is True
+    assert download["uses"].startswith("actions/download-artifact@")
+    assert download["with"]["name"] == "trusted-anchor-controller-failure-${{ github.run_id }}"
+    assert report["if"] == gate
+    assert "continue-on-error" not in report
+    assert "explain-controller-failure" in report["run"]
+    assert '"$RUNNER_TEMP/trusted-verifier-source/trusted_deletion_anchor.py"' in report["run"]
+    assert (
+        names.index("Acquire exact trusted verifier source")
+        < names.index("Download controller failure reason")
+        < names.index("Report controller failure reason (fail closed)")
+        < names.index("Download controller bundle")
+    )
+    # Steps after the report keep the implicit success() guard, so a controller
+    # failure can never reach the PASS path.
+    for step in steps[names.index("Download controller bundle") :]:
+        assert step.get("if") in (None, "always()")
