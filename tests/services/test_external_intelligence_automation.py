@@ -2379,10 +2379,10 @@ def _setup_no_campaign_integration_repo(tmp_path: Path):
 
 
 class _OpenSWEShapedChatGPTWebTransport:
-    """Mirrors OpenSWEWorkerTransport.bind_worker for provider opencli_chatgpt / model balanced."""
+    """Mirrors OpenSWEWorkerTransport.bind_worker for provider opencli_chatgpt / model advanced."""
 
     provider_id = "opencli_chatgpt"
-    model_id = "balanced"
+    model_id = "advanced"
 
     def __init__(self):
         self.bound_workers = []
@@ -2419,10 +2419,10 @@ def test_external_intelligence_consumer_binds_chatgpt_web_without_campaign(tmp_p
     result = automation.run_issue("o/r", 901, "eia consumer issue", body)
 
     assert result["state"] == "COMPLETE"
-    assert result["worker_binding"]["worker_id"] == "opencli_chatgpt_balanced_web"
+    assert result["worker_binding"]["worker_id"] == "opencli_chatgpt_advanced_web"
     assert result["worker_binding"]["provider"] == "opencli_chatgpt"
-    assert result["worker_binding"]["model"] == "opencli_chatgpt/balanced"
-    assert [w["worker_id"] for w in c.transport.bound_workers] == ["opencli_chatgpt_balanced_web"]
+    assert result["worker_binding"]["model"] == "opencli_chatgpt/advanced"
+    assert [w["worker_id"] for w in c.transport.bound_workers] == ["opencli_chatgpt_advanced_web"]
 
 
 def test_default_consumer_without_campaign_is_rejected_by_chatgpt_web_transport(

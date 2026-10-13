@@ -32,7 +32,9 @@ overlay does not install or activate that correction.
 
 With `worker_backend=open_swe` the service requests Workforce routing as consumer
 `external_intelligence`, which the runtime policy routes to
-`opencli_chatgpt_balanced_web` (owner decision 2026-10-12). The `opencode`
+`opencli_chatgpt_advanced_web` (owner decision 2026-10-12, moved from
+`balanced` to the free-plan Thinking level `advanced` on 2026-10-13; set
+`open_swe_model` to `advanced`). The `opencode`
 rollback backend sends no consumer and keeps the global route.
 
 `open_swe_runtime_artifact_sha256` is the independently supplied SHA256 of the
