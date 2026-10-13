@@ -1414,7 +1414,7 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
         and r["final_status"] not in {"OK", "ARCHIVED_FAIL_CLOSED"}
     ]
     structural = (
-        len(list_planner_capability_names()) == 57
+        len(list_planner_capability_names()) == 58
         and len(prom_missing) == 0
         and probe_only == 0
         and fixture_count == 0
@@ -1486,8 +1486,8 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
         wm = build_wiring_matrix()
     except Exception:
         wm = {
-            "node_count": 57,
-            "contract_count": 57,
+            "node_count": 58,
+            "contract_count": 58,
             "physical_runtime_eligible": 0,
             "execution_class_counts": dict(ec_counts),
             "routing_surface_changed": False,
@@ -1495,8 +1495,8 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
     if not isinstance(wm, dict):
         wm = {}
     wm = dict(wm)
-    wm.setdefault("node_count", 57)
-    wm.setdefault("contract_count", 57)
+    wm.setdefault("node_count", 58)
+    wm.setdefault("contract_count", 58)
     wm.setdefault("execution_class_counts", dict(ec_counts))
     wm["routing_surface_changed"] = False
     # Physical target = formal REAL execution classes (DEFAULT+STAGE+TRIGGERED = 34)
