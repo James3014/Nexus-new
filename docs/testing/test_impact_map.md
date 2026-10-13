@@ -187,6 +187,7 @@
 | scripts/bench/fixture_materialization.py | tests/benchmark/test_fixture_materialization.py | active | high | external_fixture_materialization_contract |
 | scripts/bench/public_lane_contract.py | tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_accepts_causal_runtime_mount, tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_rejects_quarantined_mount | active | high | benchmark_contract |
 | scripts/bench | tests/benchmark | active | medium | benchmark_contract |
+| scripts/local_heal/run_controlled_local_solve_fixture.py | tests/integration/test_controlled_local_solve_fixture_runner.py | active | high | local_heal_controlled_solve_fixture_contract |
 | nexus/learning/skill_catalog.py | tests/learning/test_skill_catalog.py, tests/ops/test_ci_gate_report_trust_audit.py | active | high | skill_catalog_governance |
 | nexus/learning/skill_fit_followup.py | tests/learning/test_skill_fit_ablation.py::test_skill_fit_row_index_groups_baselines_catalog_and_skill_rows_for_rca_and_cost, tests/learning/test_skill_fit_ablation.py::test_skill_fit_row_level_rca_recommends_targeted_replay_for_promising_governance_skill, tests/learning/test_skill_fit_ablation.py::test_skill_fit_cost_phase_contract_separates_cost_from_delivery_claims | active | high | skill_fit_row_index_contract |
 | tests/ops/test_ci_gate_report_trust_audit.py | tests/ops/test_ci_gate_report_trust_audit.py | active | medium | test_contract |
