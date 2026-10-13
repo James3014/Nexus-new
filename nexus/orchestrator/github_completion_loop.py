@@ -22,6 +22,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StrictBool,
+    StrictInt,
     StrictStr,
     field_validator,
     model_validator,
@@ -55,6 +56,51 @@ from nexus.services.issue_closure_guard import (
 MAX_INTEGRATION_GENERATIONS: int = 5
 DEFAULT_MAX_INTEGRATION_GENERATIONS: int = 5
 MAX_COMPLETION_ELAPSED_SECONDS: float = 2700.0
+
+# #1384 AC4: a TEST_IMPACT-only main movement is not revalidated by the host.
+# It is satisfied by the default-branch trusted impact gate's final verdict job on
+# the exact head I_n.  That workflow runs on ``pull_request_target`` (#1754 B), so
+# I_n cannot redefine the job, the planner or the classifier for its own run (the
+# ``pull_request`` "Exact-base impact gate" in pytest.yml runs I_n's own YAML and
+# head planner, so it is not used as the trust anchor here).
+#
+# Known coverage gap (accepted): the impact gate selects tests from the Candidate's
+# diff against the exact base M_n, at their I_n contents.  A main-side test change
+# for code the Candidate also changes may not be selected on I_n; such a regression
+# is caught post-merge by the nightly Tier 3 full regression, not by this gate.
+#
+# Only the genuine run counts: the GitHub Actions app, from trusted-impact-gate.yml.
+# A same-named job in another workflow, or a check-run posted by any other app with
+# checks:write, is ignored (it can neither satisfy nor veto the gate).
+TRUSTED_IMPACT_GATE_CHECK_NAME: str = "Trusted impact gate (default branch)"
+TRUSTED_IMPACT_GATE_WORKFLOW_PATH: str = ".github/workflows/trusted-impact-gate.yml"
+GITHUB_ACTIONS_APP_ID: int = 15368
+# Conclusions of a genuine exact-head run that veto the gate even beside a success.
+# cancelled/skipped runs beside a genuine success are ignored (a superseded or
+# re-run attempt must not block forever); any other non-success conclusion vetoes.
+_IMPACT_GATE_IGNORABLE_CONCLUSIONS: frozenset[str] = frozenset({"cancelled", "skipped"})
+TEST_IMPACT_DEFERRAL_DISPOSITION: str = "TEST_IMPACT deferred to exact-head required CI on I_n"
+# The trusted verdict job is not a ruleset-required check, so read_required_checks
+# does not wait for it, and GitHub creates its check-run only after the jobs it
+# needs finish.  Before CAS the loop polls for it while it is absent or pending,
+# at a fixed interval, for at most min(remaining time budget, this cap).
+AC4_IMPACT_GATE_POLL_INTERVAL_SECONDS: float = 30.0
+AC4_IMPACT_GATE_MAX_WAIT_SECONDS: float = 1800.0
+
+
+def _test_impact_dependency_files() -> frozenset[str] | None:
+    """Return the canonical impact-gate dependency file set (None if unavailable).
+
+    Dependency/config files change the test environment itself; a TEST_IMPACT
+    deferral cannot cover them.  Reuses ``pr_impact_gate.DEPENDENCY_FILES`` so
+    there is one authority for that list.
+    """
+    try:
+        from scripts.ops.pr_impact_gate import DEPENDENCY_FILES
+    except Exception:
+        return None
+    return frozenset(DEPENDENCY_FILES)
+
 
 _GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _RECEIPT_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -177,6 +223,102 @@ class IntegrationMaterializationResult(_FrozenModel):
         return None
 
 
+class HeadCheckRunObservation(_FrozenModel):
+    """One live GitHub check-run as reported for an exact commit SHA."""
+
+    name: StrictStr
+    status: StrictStr
+    conclusion: StrictStr | None = None
+    head_sha: StrictStr
+    app_id: StrictInt = Field(ge=1)
+    workflow_path: StrictStr
+
+    @field_validator("head_sha")
+    @classmethod
+    def validate_head_sha(cls, value: str, info) -> str:
+        return _git_sha(value, info.field_name)
+
+    @field_validator("workflow_path")
+    @classmethod
+    def validate_workflow_path(cls, value: str) -> str:
+        # "" is the bridge's value for non-Actions apps; the pin filter ignores it.
+        if value != value.strip() or value.startswith("/") or ".." in value:
+            raise ValueError(f"workflow_path_invalid: {value!r}")
+        return value
+
+
+def _evaluate_exact_head_impact_gate(
+    runs: Any, *, head_sha: str
+) -> tuple[str | None, dict[str, Any]]:
+    """Return (error, record) for the exact-head impact gate among live check-runs.
+
+    Only genuine runs count: the GitHub Actions app and trusted-impact-gate.yml
+    (other same-named runs are ignored).  Of those, only runs whose own
+    ``head_sha`` equals ``head_sha`` count; a run reported for any other commit
+    (e.g. I_(n-1)) is stale.  The gate is green when at least one genuine
+    exact-head run is completed/success, no genuine exact-head run is pending,
+    and none has a conclusion other than success/cancelled/skipped (so failure,
+    timed_out, action_required, ... veto it).
+    """
+    if not isinstance(runs, (list, tuple)) or not all(
+        isinstance(r, HeadCheckRunObservation) for r in runs
+    ):
+        return "IMPACT_GATE_OBSERVATION_INVALID", {}
+    same_name = [r for r in runs if r.name == TRUSTED_IMPACT_GATE_CHECK_NAME]
+    named = [
+        r
+        for r in same_name
+        if r.app_id == GITHUB_ACTIONS_APP_ID
+        and r.workflow_path == TRUSTED_IMPACT_GATE_WORKFLOW_PATH
+    ]
+    # "retryable" marks an absent or pending verdict, which may still appear/finish.
+    if not named:
+        return "IMPACT_GATE_MISSING", {
+            "ignored_foreign_run_count": len(same_name),
+            "retryable": True,
+        }
+    exact = [r for r in named if r.head_sha == head_sha]
+    if not exact:
+        return "IMPACT_GATE_STALE", {
+            "observed_head_shas": sorted({r.head_sha for r in named}),
+            "retryable": True,
+        }
+    observed: dict[str, Any] = {"observed": [(r.status, r.conclusion) for r in exact]}
+    conclusions = [(r.conclusion or "").lower() for r in exact]
+    vetoed = any(
+        r.status.lower() == "completed"
+        and c != "success"
+        and c not in _IMPACT_GATE_IGNORABLE_CONCLUSIONS
+        for r, c in zip(exact, conclusions)
+    )
+    if any(r.status.lower() != "completed" for r in exact):
+        # pending; a completed veto beside it fails immediately, without waiting
+        return "IMPACT_GATE_NOT_GREEN", {**observed, "retryable": not vetoed}
+    if vetoed:
+        return "IMPACT_GATE_NOT_GREEN", observed
+    if "success" not in conclusions:
+        return "IMPACT_GATE_NOT_GREEN", observed
+    return None, {
+        "check_name": TRUSTED_IMPACT_GATE_CHECK_NAME,
+        "app_id": GITHUB_ACTIONS_APP_ID,
+        "workflow_path": TRUSTED_IMPACT_GATE_WORKFLOW_PATH,
+        "verified_head_sha": head_sha,
+        "exact_head_run_count": len(exact),
+    }
+
+
+def _read_exact_head_impact_gate(port: Any, *, head_sha: str) -> tuple[str | None, dict[str, Any]]:
+    """Read live check-runs for ``head_sha`` from the port and evaluate the impact gate."""
+    reader = getattr(port, "read_head_check_runs", None)
+    if not callable(reader):
+        return "IMPACT_GATE_PORT_UNAVAILABLE", {}
+    try:
+        live_runs = reader(head_sha=head_sha)
+    except Exception as exc:
+        return f"IMPACT_GATE_READ_FAILED:{exc}", {}
+    return _evaluate_exact_head_impact_gate(live_runs, head_sha=head_sha)
+
+
 @dataclass(frozen=True)
 class CasMergeResult:
     status: CasMergeStatus
@@ -281,6 +423,14 @@ class GitHubCompletionPort(Protocol):
         timeout_seconds: float | None = None,
     ) -> Sequence[CheckResult]:
         """Wait/read required checks for exact head_sha and generation."""
+        ...
+
+    def read_head_check_runs(self, *, head_sha: str) -> Sequence[HeadCheckRunObservation]:
+        """Read the live check-runs GitHub currently reports for exact ``head_sha``.
+
+        Used before CAS when a TEST_IMPACT movement was deferred to exact-head CI:
+        the result must carry each run's own head SHA so stale runs are rejected.
+        """
         ...
 
     def read_reviews(self) -> Sequence[ReviewResult]:
@@ -513,6 +663,7 @@ def run_github_completion_loop(
     git_root: Path | None = None,
     now_provider: Callable[[], datetime] | None = None,
     monotonic_clock: Callable[[], float] | None = None,
+    sleep_fn: Callable[[float], None] | None = None,
 ) -> CompletionLoopResult:
     """Execute the bounded GitHub PR drift-completion loop.
 
@@ -537,6 +688,7 @@ def run_github_completion_loop(
 
     now_fn = now_provider or (lambda: datetime.now(timezone.utc))
     clock_fn = monotonic_clock or time.monotonic
+    sleep = sleep_fn or time.sleep
 
     start_monotonic = clock_fn()
     source_candidate = initial_evidence.candidate
@@ -565,6 +717,9 @@ def run_github_completion_loop(
     last_produced_head_sha = initial_evidence.head_sha
     # Base SHA rejected by the last CAS BASE_MOVED signal, pending corroboration.
     cas_base_moved_from: str | None = None
+    # #1384 AC4: generations whose TEST_IMPACT was deferred to exact-head CI on I_n.
+    # Sticky for this run: every later I_n contains those main changes too.
+    test_impact_deferred_generations: list[int] = []
 
     while True:
         # Check elapsed time budget
@@ -710,10 +865,39 @@ def run_github_completion_loop(
                     evidence=current_evidence,
                 )
 
+            # #1384 AC4: a movement whose only affected dimension is TEST_IMPACT is not
+            # revalidated by the host (which would run before materialize, without a test
+            # selection, on a possibly stale venv).  It is deferred to the required
+            # exact-head "Trusted impact gate (default branch)" on I_n, checked live before CAS.
+            affected_dimensions = [
+                d.dimension for d in requalification.dimensions if d.action == "RECHECK_AFFECTED"
+            ]
+            test_impact_deferred = affected_dimensions == ["TEST_IMPACT"]
+            if test_impact_deferred:
+                dependency_files = _test_impact_dependency_files()
+                if dependency_files is None:
+                    return CompletionLoopResult(
+                        outcome=CompletionLoopOutcome.BLOCKED,
+                        reason="TEST_IMPACT_DEPENDENCY_FILES_UNAVAILABLE",
+                        generation=current_generation,
+                        evidence=current_evidence,
+                    )
+                dependency_changes = sorted(set(changed_main_paths) & dependency_files)
+                if dependency_changes:
+                    return CompletionLoopResult(
+                        outcome=CompletionLoopOutcome.BLOCKED,
+                        reason=(
+                            "FRESH_CANDIDATE_ACCEPTANCE_REQUIRED:TEST_IMPACT:"
+                            f"dependency_manifest_changed:{','.join(dependency_changes)}"
+                        ),
+                        generation=current_generation,
+                        evidence=current_evidence,
+                    )
+
             # Execute affected dimensions through port revalidation hook
             revalidation_receipts: list[DimensionRevalidationReceipt] = []
             for dim in requalification.dimensions:
-                if dim.action == "RECHECK_AFFECTED":
+                if dim.action == "RECHECK_AFFECTED" and not test_impact_deferred:
                     receipt = port.revalidate_affected_dimension(
                         dim.dimension,
                         evidence=current_evidence,
@@ -870,10 +1054,20 @@ def run_github_completion_loop(
             current_generation = next_generation
 
             # Construct IntegrationBinding binding receipt hashes into requalification_hash
-            combined_requal_data = {
+            combined_requal_data: dict[str, Any] = {
                 "requalification_hash": canonical_hash(requalification.model_dump(mode="json")),
                 "revalidation_receipt_hashes": tuple(r.receipt_hash for r in revalidation_receipts),
             }
+            if test_impact_deferred:
+                # Candidate-owned blobs were proven byte-identical above; the deferral
+                # is bound into this generation's integration requalification hash.
+                test_impact_deferred_generations.append(current_generation)
+                combined_requal_data["test_impact_deferral"] = {
+                    "disposition": TEST_IMPACT_DEFERRAL_DISPOSITION,
+                    "check_name": TRUSTED_IMPACT_GATE_CHECK_NAME,
+                    "integration_head_sha": mat_result.integration_head_sha,
+                    "generation": current_generation,
+                }
             combined_requal_hash = canonical_hash(combined_requal_data)
 
             proof_hash = compute_candidate_equivalence_proof_hash(
@@ -1211,6 +1405,80 @@ def run_github_completion_loop(
                 intent=intent,
             )
 
+        # #1384 AC4: a deferred TEST_IMPACT is satisfied only by a successful
+        # "Trusted impact gate (default branch)" on the exact head being merged, read live.
+        deferral_details: dict[str, Any] = {}
+        if test_impact_deferred_generations:
+            # Bounded wait while the pinned verdict is absent or pending.  A veto
+            # conclusion stops immediately; main moving stops the wait and re-enters
+            # requalification; a timeout falls through to the structured BLOCKED below.
+            remaining_budget = max(0.0, max_elapsed_seconds - (clock_fn() - start_monotonic))
+            wait_cap = min(remaining_budget, AC4_IMPACT_GATE_MAX_WAIT_SECONDS)
+            wait_start = clock_fn()
+            gate_polls = 0
+            main_moved_during_wait = False
+            while True:
+                gate_error, gate_record = _read_exact_head_impact_gate(
+                    port, head_sha=current_evidence.head_sha
+                )
+                if gate_error is None or not gate_record.get("retryable"):
+                    break
+                if clock_fn() - wait_start + AC4_IMPACT_GATE_POLL_INTERVAL_SECONDS > wait_cap:
+                    break
+                sleep(AC4_IMPACT_GATE_POLL_INTERVAL_SECONDS)
+                gate_polls += 1
+                try:
+                    polled_main_sha, _ = port.read_main_state()
+                except Exception as exc:
+                    return CompletionLoopResult(
+                        outcome=CompletionLoopOutcome.BLOCKED,
+                        reason=f"TEST_IMPACT_DEFERRED_{gate_error}:MAIN_STATE_READ_FAILED:{exc}",
+                        generation=current_generation,
+                        integration_head_sha=last_produced_head_sha,
+                        evidence=current_evidence,
+                        intent=intent,
+                        details={"impact_gate": gate_record, "gate_polls": gate_polls},
+                    )
+                if polled_main_sha != current_evidence.base_sha:
+                    main_moved_during_wait = True
+                    break
+            if main_moved_during_wait:
+                continue
+            if gate_error is not None:
+                # Bounded requalification: if main moved meanwhile, re-enter the
+                # generation loop (MAX budget applies); otherwise fail closed.
+                try:
+                    observed_main_sha, _ = port.read_main_state()
+                except Exception as exc:
+                    return CompletionLoopResult(
+                        outcome=CompletionLoopOutcome.BLOCKED,
+                        reason=f"TEST_IMPACT_DEFERRED_{gate_error}:MAIN_STATE_READ_FAILED:{exc}",
+                        generation=current_generation,
+                        integration_head_sha=last_produced_head_sha,
+                        evidence=current_evidence,
+                        intent=intent,
+                        details={"impact_gate": gate_record},
+                    )
+                if observed_main_sha != current_evidence.base_sha:
+                    continue
+                return CompletionLoopResult(
+                    outcome=CompletionLoopOutcome.BLOCKED,
+                    reason=f"TEST_IMPACT_DEFERRED_{gate_error}",
+                    generation=current_generation,
+                    integration_head_sha=last_produced_head_sha,
+                    evidence=current_evidence,
+                    intent=intent,
+                    details={"impact_gate": gate_record, "gate_polls": gate_polls},
+                )
+            deferral_details = {
+                "test_impact_deferral": {
+                    "disposition": TEST_IMPACT_DEFERRAL_DISPOSITION,
+                    "deferred_generations": list(test_impact_deferred_generations),
+                    "gate_polls": gate_polls,
+                    **gate_record,
+                }
+            }
+
         # Perform CAS merge operation
         cas_result = port.cas_merge(
             repository=current_evidence.repository,
@@ -1297,7 +1565,7 @@ def run_github_completion_loop(
                 merged_commit_sha=recon.observed_main_commit_sha,
                 evidence=current_evidence,
                 intent=intent,
-                details={"post_merge_verification": post_merge_recon},
+                details={"post_merge_verification": post_merge_recon, **deferral_details},
             )
 
         if cas_result.status == CasMergeStatus.SUCCESS:
@@ -1371,7 +1639,7 @@ def run_github_completion_loop(
                 merged_commit_sha=recon.observed_main_commit_sha,
                 evidence=current_evidence,
                 intent=intent,
-                details={"post_merge_verification": post_merge_recon},
+                details={"post_merge_verification": post_merge_recon, **deferral_details},
             )
 
         # Any other CAS status is a rejection/conflict/failure
