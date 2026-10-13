@@ -729,7 +729,12 @@ class TestV1TraceFailClosedGuards:
         assert receipt["canonical_execution_world"] == "local_armor"
         assert receipt["canonical_execution_topology"] == "ISOLATED_TARGET"
         assert len(receipt["canonical_execution_hash"]) == 64
-        assert receipt["capability_evidence_source_hash"] == receipt["source_sha256"]
+        # source_hash is the typed workspace_revision_task_statement_v1 hash; the
+        # physical source is bound through workspace_revision (verified in-trace).
+        assert receipt["capability_evidence_source_hash_kind"] == "workspace_revision_task_statement_v1"
+        assert receipt["capability_evidence_workspace_revision"] == f"sha256:{receipt['source_sha256']}"
+        assert len(receipt["capability_evidence_source_hash"]) == 64
+        assert receipt["capability_evidence_source_hash"] != receipt["source_sha256"]
         assert len(receipt["capability_evidence_bundle_hash"]) == 64
         assert len(receipt["planner_decision_id"]) == 64
 
@@ -746,7 +751,6 @@ class TestV1TraceFailClosedGuards:
         snapshot = _invoke_planner(
             "repair bounded parity",
             task_id="n30r-v1-tamper-probe",
-            source_hash=source_hash,
             workspace_revision=f"sha256:{source_hash}",
         )
 
