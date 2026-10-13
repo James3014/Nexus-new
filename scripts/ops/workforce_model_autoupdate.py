@@ -1543,28 +1543,31 @@ class Proposer:
             raise RuntimeError(f"git_failed:{args[0]}:{res.rc}:{res.stderr.strip()[-200:]}")
         return res
 
-    def trusted_config_universe(self) -> bool:
-        """True when the Nexus-new issue gate derives the evidence universe from trusted config.
+    def trusted_config_universe(self, repo: Path) -> bool:
+        """True when ``repo``'s issue gate derives the evidence universe from trusted config.
 
-        Same logic as ``scripts/ops/pr_preflight.py::_trusted_config_universe``, read at the exact
-        ``origin/main`` SHA. In that mode Issues carry no NEXUS_CORE_EVIDENCE_UNIVERSE marker.
+        Same logic as ``scripts/ops/pr_preflight.py::_trusted_config_universe``, read per repo at
+        its exact ``origin/main`` SHA (nexus-runtime may still pin an issue-marker gate). In
+        trusted mode Issues carry no NEXUS_CORE_EVIDENCE_UNIVERSE marker. Any failure -> False.
         """
         try:
-            text = self.show(
-                self.nexus_repo, self.remote_main(self.nexus_repo), _ISSUE_GATE_WORKFLOW
-            )
+            text = self.show(repo, self.remote_main(repo), _ISSUE_GATE_WORKFLOW)
         except RuntimeError:
             return False
         return _TRUSTED_UNIVERSE_RE.search(text) is not None
 
     def markers(self, repo: Path, *extra: str) -> list[str]:
-        trusted = self.trusted_config_universe()
+        trusted = self.trusted_config_universe(repo)
         if trusted and not extra:
             return []  # the universe marker was the only output; nothing to ask certify for
         res = self.runner([*shlex.split(self.certify_cmd), "markers", "--repo", str(repo), *extra])
         found = re.findall(r"<!-- NEXUS_CORE_[A-Z_]+: [^\n]*? -->", res.stdout)
         has_universe = any("NEXUS_CORE_EVIDENCE_UNIVERSE" in m for m in found)
         if res.rc != 0 or not (trusted or has_universe):
+            raise RuntimeError("certify_markers_unavailable")
+        if "--material-transition" in extra and not any(
+            "NEXUS_CORE_MATERIAL_TRANSITION" in m for m in found
+        ):
             raise RuntimeError("certify_markers_unavailable")
         skip = (
             ("NEXUS_CORE_ISSUE:", "NEXUS_CORE_EVIDENCE_UNIVERSE:")

@@ -655,6 +655,9 @@ def test_notify_mentions_gateway_pending(tmp_path: Path) -> None:
 # ---------------------------------------------------------------- full live flow (all fakes)
 
 
+TRUSTED_WORKFLOW = "with:\n  evidence-universe: trusted-config\n"
+
+
 class FakeWorld:
     """Stateful git + gh + nexus-certify fake: remote branches, commits, PRs and main per repo."""
 
@@ -671,7 +674,8 @@ class FakeWorld:
         self.wt_files: dict[str, list[str]] = {}
         self.red_prs: set[int] = set()
         self.comments: list[str] = []
-        self.workflow_text: str | None = None  # override the Nexus issue-gate workflow
+        self.workflow_text: dict[str, str] = {}  # per-repo issue-gate workflow override
+        self.drop_transition = False
         self.counter = 0
         self.next_pr = 100
 
@@ -690,8 +694,8 @@ class FakeWorld:
     def content(self, repo: str, sha: str, rel: str) -> str:
         if rel in self.commits.get(sha, {}):
             return self.commits[sha][rel]
-        if repo == "nexus" and rel == wf._ISSUE_GATE_WORKFLOW and self.workflow_text is not None:
-            return self.workflow_text
+        if rel == wf._ISSUE_GATE_WORKFLOW and repo in self.workflow_text:
+            return self.workflow_text[repo]
         if repo == "runtime":
             return YAML_FIXTURE.read_text()
         return (REPO_ROOT / rel).read_text()
@@ -754,7 +758,7 @@ class FakeWorld:
                 return wf.CmdResult(0, self.content(self._repo_of_path(where), sha, rel))
         if a[0] == "nexus-certify":
             out = "Issue body: <!-- NEXUS_CORE_EVIDENCE_UNIVERSE: sha256:ab -->\n"
-            if "--material-transition" in a:
+            if "--material-transition" in a and not self.drop_transition:
                 out += "<!-- NEXUS_CORE_MATERIAL_TRANSITION: canonical-runtime sha256:cd -->\n"
             return wf.CmdResult(0, out)
         if a[:3] == ["gh", "issue", "list"]:
@@ -866,6 +870,10 @@ def test_full_flow_merges_runtime_then_anchor_then_pin(tmp_path: Path) -> None:
         reviewed.append(re.search(r"PR #(\d+) at head (\w+)", prompt).group(0))  # type: ignore[union-attr]
         return wf.ACCEPT, ("in scope",)
 
+    world.workflow_text = {
+        "runtime": "with:\n  evidence-universe: issue-marker\n",
+        "nexus": TRUSTED_WORKFLOW,
+    }
     cfg = _world_cfg(tmp_path)
     result = wf.run(cfg, _world_deps(world, reviewer))
     assert result.outcome == "MERGED", result.reason
@@ -890,23 +898,54 @@ def test_full_flow_merges_runtime_then_anchor_then_pin(tmp_path: Path) -> None:
     receipt = json.loads(Path(result.receipt_path).read_text())
     assert set(receipt["merges"]) == {"runtime", "anchor", "pin"}
     assert len(world.issues) == 2
-    # trusted-config (current main): no Issue carries the evidence-universe marker, the pin Issue
-    # keeps its material-transition marker, and certify is not asked for the runtime Issue at all.
-    assert all("NEXUS_CORE_EVIDENCE_UNIVERSE" not in i["body"] for i in world.issues)
+    # per-repo mode: the runtime gate is issue-marker (keeps the universe marker); the Nexus gate
+    # is trusted-config (no universe marker, material-transition marker kept).
+    assert "NEXUS_CORE_EVIDENCE_UNIVERSE" in world.issues[0]["body"]
+    assert "NEXUS_CORE_EVIDENCE_UNIVERSE" not in world.issues[1]["body"]
     assert "NEXUS_CORE_MATERIAL_TRANSITION" in world.issues[1]["body"]
-    assert sum(c[0] == "nexus-certify" for c in world.calls) == 1
+    assert sum(c[0] == "nexus-certify" for c in world.calls) == 2
     again = wf.run(cfg, _world_deps(world, reviewer))
     assert again.outcome == "SKIPPED_IDEMPOTENT"
 
 
 def test_issue_marker_mode_still_writes_and_requires_universe_marker(tmp_path: Path) -> None:
     world = FakeWorld(tmp_path)
-    world.workflow_text = "with:\n  evidence-universe: issue-marker\n"
+    world.workflow_text = {
+        "runtime": "with:\n  evidence-universe: issue-marker\n",
+        "nexus": "with:\n  evidence-universe: issue-marker\n",
+    }
     result = wf.run(_world_cfg(tmp_path), _world_deps(world))
     assert result.outcome == "MERGED", result.reason
     assert all("NEXUS_CORE_EVIDENCE_UNIVERSE" in i["body"] for i in world.issues)
     assert "NEXUS_CORE_MATERIAL_TRANSITION" in world.issues[1]["body"]
     assert sum(c[0] == "nexus-certify" for c in world.calls) == 2
+
+
+def test_trusted_config_mode_writes_no_universe_marker(tmp_path: Path) -> None:
+    world = FakeWorld(tmp_path)
+    world.workflow_text = {"runtime": TRUSTED_WORKFLOW, "nexus": TRUSTED_WORKFLOW}
+    result = wf.run(_world_cfg(tmp_path), _world_deps(world))
+    assert result.outcome == "MERGED", result.reason
+    assert all("NEXUS_CORE_EVIDENCE_UNIVERSE" not in i["body"] for i in world.issues)
+    assert "NEXUS_CORE_MATERIAL_TRANSITION" in world.issues[1]["body"]
+    assert sum(c[0] == "nexus-certify" for c in world.calls) == 1
+
+
+def test_material_transition_marker_missing_is_unavailable(tmp_path: Path) -> None:
+    world = FakeWorld(tmp_path)
+    world.workflow_text = {"nexus": TRUSTED_WORKFLOW}
+    prop = wf.Proposer(
+        gh=wf.GitHub(runner=world),
+        runner=world,
+        runtime_repo=tmp_path / "runtime-clone",
+        nexus_repo=tmp_path / "nexus-clone",
+        work_dir=tmp_path / "wt",
+    )
+    world.drop_transition = True
+    with pytest.raises(RuntimeError, match="certify_markers_unavailable"):
+        prop.markers(
+            prop.nexus_repo, "--material-transition", "canonical-runtime=git-commit:" + "a" * 40
+        )
 
 
 def test_inflight_switch_resumes_after_runtime_merge(tmp_path: Path) -> None:
