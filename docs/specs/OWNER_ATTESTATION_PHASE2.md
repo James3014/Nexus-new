@@ -174,9 +174,11 @@ The decision looks only at content, never at who sent the event. It approves:
     check then proves only that the Owner was present, not what was approved.
   - Run the signer only from the root-owned copy installed with
     `sudo install -o root`.
-- **The signer has not been built or run.** It needs macOS with a Secure Enclave
-  and was written without access to one. Test `init`, `pubkey` and `sign` on the
-  Mac before pinning the key.
+- **The signer was tested by the Owner on 2026-10-13.** It was built and installed
+  root-owned on the Owner's Mac mini. A 1-hour test grant was signed with the login
+  password and verified with `owner_attestation.py assemble`, and a tampered
+  payload was rejected. The key `addb4a45…` is pinned in
+  `governance/owner-signing-keys.json`.
 - **The approver workflow has not run on GitHub yet.** Local checks:
   - YAML and shell syntax;
   - JWT construction;
