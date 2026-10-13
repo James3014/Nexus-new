@@ -46,9 +46,14 @@ RESOLVED = "RESOLVED"
 PARTIAL = "PARTIAL"
 UNRESOLVED = "UNRESOLVED"
 
-VALID_ORACLE_LABELS = frozenset(
-    {NO_CANDIDATE, NOT_RUNNABLE, BROKE_EXISTING, RESOLVED, PARTIAL, UNRESOLVED}
-)
+VALID_ORACLE_LABELS = frozenset({
+    NO_CANDIDATE,
+    NOT_RUNNABLE,
+    BROKE_EXISTING,
+    RESOLVED,
+    PARTIAL,
+    UNRESOLVED,
+})
 
 PASS, FAIL, SKIP = "pass", "fail", "skip"
 
@@ -233,15 +238,13 @@ class GitRepo:
         self, *args: str, cwd: Path | None = None, input: bytes | None = None, check: bool = True
     ) -> subprocess.CompletedProcess[bytes]:
         env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-        env.update(
-            {
-                "GIT_TERMINAL_PROMPT": "0",
-                "GIT_AUTHOR_NAME": "scorer",
-                "GIT_AUTHOR_EMAIL": "scorer@invalid",
-                "GIT_COMMITTER_NAME": "scorer",
-                "GIT_COMMITTER_EMAIL": "scorer@invalid",
-            }
-        )
+        env.update({
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_AUTHOR_NAME": "scorer",
+            "GIT_AUTHOR_EMAIL": "scorer@invalid",
+            "GIT_COMMITTER_NAME": "scorer",
+            "GIT_COMMITTER_EMAIL": "scorer@invalid",
+        })
         proc = subprocess.run(
             ["git", *args], cwd=str(cwd or self.path), input=input, capture_output=True, env=env
         )
@@ -427,17 +430,15 @@ class UvEnvProvider:
                 if not pin:
                     raise EnvBuildError("nexus-learning pin not found in tests.yml")
                 run(["uv", "venv", "-q", "--python", self.PYTHON, str(env_dir)])
-                run(
-                    [
-                        "uv",
-                        "pip",
-                        "install",
-                        "--python",
-                        py,
-                        *self.RUNTIME_PINS,
-                        f"nexus-learning @ git+https://github.com/James3014/nexus-learning.git@{pin}",
-                    ]
-                )
+                run([
+                    "uv",
+                    "pip",
+                    "install",
+                    "--python",
+                    py,
+                    *self.RUNTIME_PINS,
+                    f"nexus-learning @ git+https://github.com/James3014/nexus-learning.git@{pin}",
+                ])
         except (subprocess.TimeoutExpired, OSError) as exc:
             raise EnvBuildError(str(exc)) from exc
         version = subprocess.run(
@@ -852,18 +853,16 @@ def score_task(
         ]
         p2p_a = [n for n in stable if all(_get(r, n) == PASS for r in gold_runs + base_runs)]
         timing["oracle_seconds"] = round(time.monotonic() - tq, 1)
-        receipt.update(
-            {
-                "f2p": f2p,
-                "p2p_a": p2p_a,
-                "f2p_total": len(f2p),
-                "oracle_flaky": flaky,
-                "outcome_digests": {
-                    "GOLD": [_digest_outcomes(r) for r in gold_runs],
-                    "BASE+T": [_digest_outcomes(r) for r in base_runs],
-                },
-            }
-        )
+        receipt.update({
+            "f2p": f2p,
+            "p2p_a": p2p_a,
+            "f2p_total": len(f2p),
+            "oracle_flaky": flaky,
+            "outcome_digests": {
+                "GOLD": [_digest_outcomes(r) for r in gold_runs],
+                "BASE+T": [_digest_outcomes(r) for r in base_runs],
+            },
+        })
         if not f2p:
             receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
             receipt["sub_reason"] = "EMPTY_F2P"
@@ -1049,23 +1048,21 @@ def _evaluate_candidate(
         label = PARTIAL
     else:
         label = UNRESOLVED
-    out.update(
-        {
-            "evaluated_label": label,
-            "f2p_pass": len(f2p_pass),
-            "f2p_passed_nodes": f2p_pass,
-            "p2p_total": len(p2p_a) + p2p_bc_total,
-            "p2p_a_total": len(p2p_a),
-            "p2p_bc_total": p2p_bc_total,
-            "p2p_new_failures": sorted(new_failures),
-            "flaky_dropped": len(flaky_dropped),
-            "gold_also_fails": sorted(gold_also_fails),
-            "p2p_targets": targets,
-            "p2p_selector_failed": selector_failed,
-            "impact_plan_sha256": plan_sha,
-            "candidate_changed_paths_digest": sha256_bytes("\n".join(changed).encode()),
-        }
-    )
+    out.update({
+        "evaluated_label": label,
+        "f2p_pass": len(f2p_pass),
+        "f2p_passed_nodes": f2p_pass,
+        "p2p_total": len(p2p_a) + p2p_bc_total,
+        "p2p_a_total": len(p2p_a),
+        "p2p_bc_total": p2p_bc_total,
+        "p2p_new_failures": sorted(new_failures),
+        "flaky_dropped": len(flaky_dropped),
+        "gold_also_fails": sorted(gold_also_fails),
+        "p2p_targets": targets,
+        "p2p_selector_failed": selector_failed,
+        "impact_plan_sha256": plan_sha,
+        "candidate_changed_paths_digest": sha256_bytes("\n".join(changed).encode()),
+    })
     out.setdefault("outcome_digests_cand", [_digest_outcomes(r) for r in runs])
     return out
 
