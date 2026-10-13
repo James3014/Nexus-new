@@ -267,3 +267,50 @@ uv run python scripts/ops/hybrid_replication_daemon.py \
   exit 5. A loss first recorded during the run appears with `"newly_recorded": true`, also
   non-failing (it is a recorded D2 exclusion). Exit codes 0/3/4/5/6 are unchanged; 5 now means
   a real, non-excluded advance failure.
+
+### 8.1 Fence-only pass (`--fence-only`)
+
+The early fence in 8 runs only at the start of an invocation, and one invocation with a backlog
+can last hours. Issues admitted meanwhile would wait. `--fence-only` closes that gap: it
+ingests, takes `execution_start.json` for every ADMITTED primary task, prints a report
+(`nexus.hybrid_replication.daemon_fence.v1`: `fenced`, `already_executing`, `failures`,
+`excluded_protocol_loss`) and exits. It never advances a task and never calls the stack or
+ground-truth commands, so neither command is required. Exit codes: 5 on a real fence failure,
+else 3/4 for missing capture/admission (as `--ingest-only`), else 0.
+
+Safety beside a running main daemon:
+
+- The per-task fence uses a non-blocking flock on `execution.lock`. A task whose stack call is
+  running holds that lock and is reported in `already_executing`.
+- Ingest takes a short blocking flock on `<STORE_ROOT>/ingest.lock` (held only while ingesting,
+  never across advance), so a fence-only ingest and the main daemon's start-of-run ingest
+  serialize. `state.json` is published atomically (unique temp file, then link/rename), so a
+  concurrent scan never sees a partial file and two writers never share a temp file.
+
+Suggested `run.sh` (the real script lives outside the repo; adjust paths):
+
+```
+#!/bin/bash
+# launchd StartInterval=60. Two independent locks.
+COMMON=(--root "$STORE_ROOT" --since "$T_AUTO")
+
+# 1. Fence pass: short, own lock, never waits behind the main daemon.
+if shlock -f /tmp/hybrid-replication-fence.lock -p $$; then
+  uv run python scripts/ops/hybrid_replication_daemon.py "${COMMON[@]}" --fence-only
+  rm -f /tmp/hybrid-replication-fence.lock
+fi
+
+# 2. Main daemon: long-running, its own lock (as before).
+if shlock -f /tmp/hybrid-replication.lock -p $$; then
+  uv run python scripts/ops/hybrid_replication_daemon.py "${COMMON[@]}" \
+    --frozen-policy-sha256 "$POLICY_SHA" \
+    --stack-command "$STACK_COMMAND" --ground-truth-command "$GT_COMMAND" \
+    --max-concurrent-tasks 4
+  rm -f /tmp/hybrid-replication.lock
+fi
+```
+
+Step 1 must run before step 2 in each tick and must not be gated by the main daemon's lock.
+Because each launchd tick runs `run.sh` to completion, a long main daemon blocks the next tick;
+to keep the fence pass running every minute, start the main daemon in the background
+(`... &`) or run the fence pass from a second launchd job.

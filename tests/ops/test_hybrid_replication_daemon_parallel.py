@@ -362,3 +362,160 @@ def test_max_concurrent_tasks_must_be_positive(tmp_path: Path) -> None:
             ground_truth_command="gt",
             max_concurrent_tasks=0,
         )
+
+
+def test_fence_only_fences_new_tasks_while_another_task_runs_a_long_advance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, controller_factory: Any
+) -> None:
+    world = _World(tmp_path, [2601])
+    _patch_github(monkeypatch, world)
+    original_init = _FakeController.__init__
+
+    def blocking_init(self: _FakeController, **kw: Any) -> None:
+        original_init(self, **kw)
+        self.block = True
+
+    monkeypatch.setattr(_FakeController, "__init__", blocking_init)
+    box: dict[str, Any] = {}
+    thread = threading.Thread(target=lambda: box.update(r=_advance(world, max_concurrent_tasks=2)))
+    thread.start()
+    controller = None
+    try:
+        while not _FakeController.instances:
+            threading.Event().wait(0.01)
+        controller = _FakeController.instances[-1]
+        assert controller.entered.acquire(timeout=20)  # 2601 is inside its long advance
+        # A task admitted while the main daemon is busy, plus the running one (lock held
+        # by a real stack subprocess in production; simulate with the guard lock).
+        snap = _snapshot(2602)
+        receipt = _receipt(snap)
+        world.snapshots[2602], world.receipts[2602] = snap, receipt
+        world.store.capture(snap, admission_disposition="PRE_AUTOMATION_PROVISIONAL_CAPTURE")
+        world.store.apply_admission(receipt)
+        guard = ProspectiveExecutionGuard(
+            store_root=world.store.root, snapshot=world.snapshots[2601]
+        )
+        with guard.task_lock():
+            report = daemon.fence_all(store=world.store)
+        assert world.start_path(2602).is_file()
+        assert report["fenced"] == [snap.task_key]
+        assert report["already_executing"] == [world.snapshots[2601].task_key]
+        assert report["failures"] == []
+        assert controller.running == 1  # main advance still in flight, untouched
+    finally:
+        if controller is not None:
+            controller.release.set()
+        thread.join(timeout=30)
+
+
+def test_fence_only_cli_never_calls_stack_and_needs_no_commands(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    world = _World(tmp_path, [2701, 2702])
+    _patch_github(monkeypatch, world)
+
+    def boom(*_: Any, **__: Any) -> None:
+        raise AssertionError("stack/ground-truth/advance must not run in fence-only")
+
+    monkeypatch.setattr(daemon, "ExternalFrozenStackRunner", boom)
+    monkeypatch.setattr(daemon, "ExternalGroundTruthResolver", boom)
+    monkeypatch.setattr(daemon, "AutomaticReplicationController", boom)
+    monkeypatch.setattr(daemon, "advance_all", boom)
+    monkeypatch.setattr(
+        daemon,
+        "ingest",
+        lambda **_: {
+            "schema": "nexus.hybrid_replication.daemon_ingest.v1",
+            "expected_count": 2,
+            "mirrored_count": 2,
+            "missing_capture": [],
+            "missing_admission": [],
+            "watchdog": {"status": "COMPLETE"},
+        },
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["daemon", "--root", str(tmp_path), "--since", "2026-10-01T00:00:00Z", "--fence-only"],
+    )
+    assert daemon.main() == 0
+    assert world.start_path(2701).is_file() and world.start_path(2702).is_file()
+
+
+def test_concurrent_ingest_from_two_invocations_is_safe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = AutomaticReplicationStore(tmp_path)
+    snaps = [_snapshot(n) for n in range(2801, 2809)]
+    receipts = {s.task_key: _receipt(s) for s in snaps}
+    stop = threading.Event()
+    partial_reads: list[str] = []
+
+    def reader() -> None:
+        # Mimics the main daemon scanning tasks while another ingest creates them.
+        while not stop.is_set():
+            for path in store.tasks_root.glob("*/state.json"):
+                try:
+                    json.loads(path.read_text(encoding="utf-8"))
+                except ValueError as exc:
+                    partial_reads.append(f"{path}:{exc}")
+
+    def one_ingest() -> None:
+        with daemon.ingest_lock(store):
+            for snap in snaps:  # same check-then-write sequence as daemon.ingest
+                if store.load_task(snap.task_key) is None:
+                    store.capture(snap, admission_disposition="PRE_AUTOMATION_PROVISIONAL_CAPTURE")
+                current = store.load_task(snap.task_key)
+                if current is not None and not current.get("admission_receipt_sha256"):
+                    store.apply_admission(receipts[snap.task_key])
+
+    watcher = threading.Thread(target=reader)
+    watcher.start()
+    errors: list[BaseException] = []
+
+    def guarded() -> None:
+        try:
+            one_ingest()
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    workers = [threading.Thread(target=guarded) for _ in range(2)]
+    for w in workers:
+        w.start()
+    for w in workers:
+        w.join(timeout=30)
+    stop.set()
+    watcher.join(timeout=10)
+    assert errors == [] and partial_reads == []
+    for snap in snaps:
+        state = store.load_task(snap.task_key)
+        assert state is not None and state["phase"] == "ADMITTED"
+        assert state["admission_receipt_sha256"] == receipts[snap.task_key].receipt_sha256
+    assert not list(tmp_path.rglob("*.tmp"))
+
+
+def test_store_create_only_write_is_atomic_and_idempotent_without_the_lock(
+    tmp_path: Path,
+) -> None:
+    """Even unlocked, racing capture() calls neither crash on tmp names nor expose partials."""
+    store = AutomaticReplicationStore(tmp_path)
+    snap = _snapshot(2901)
+    outcomes: list[Any] = []
+
+    def go() -> None:
+        try:
+            outcomes.append(
+                store.capture(snap, admission_disposition="PRE_AUTOMATION_PROVISIONAL_CAPTURE")
+            )
+        except FileExistsError:
+            outcomes.append("exists")  # loser of the race; state.json is complete
+        except BaseException as exc:  # noqa: BLE001
+            outcomes.append(exc)
+
+    threads = [threading.Thread(target=go) for _ in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=20)
+    assert all(not isinstance(o, BaseException) for o in outcomes)
+    assert store.load_task(snap.task_key)["capture_sha256"] == snap.capture_sha256

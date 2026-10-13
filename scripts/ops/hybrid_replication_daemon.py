@@ -6,9 +6,10 @@ import fcntl
 import json
 import subprocess  # nosec B404
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from nexus.research.hybrid_replication_pipeline import (
     ADMISSION_MARKER,
@@ -250,6 +251,83 @@ def _take_execution_start_fence(store: AutomaticReplicationStore, task_key: str)
         finally:
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
     return True
+
+
+@contextmanager
+def ingest_lock(store: AutomaticReplicationStore) -> Iterator[None]:
+    """Serialize ingest between overlapping invocations (fence-only and main daemon).
+
+    Blocking flock on ``<root>/ingest.lock`` (per open file, exclusive across threads and
+    processes). It is held only for ingest, never across advance or stack calls.
+    """
+    store.root.mkdir(parents=True, exist_ok=True)
+    with (store.root / "ingest.lock").open("a+", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def fence_all(
+    *,
+    store: AutomaticReplicationStore,
+    max_workers: int = 8,
+) -> dict[str, Any]:
+    """Take execution_start for every ADMITTED primary task; never advance or call a stack.
+
+    Safe beside a running main daemon: the per-task flock is non-blocking, so a task that is
+    currently executing is reported in ``already_executing`` and left alone.
+    """
+    fenced: list[str] = []
+    already_executing: list[str] = []
+    failures: list[dict[str, Any]] = []
+    excluded: list[dict[str, Any]] = []
+    keys: list[str] = []
+    for state_path in sorted(store.tasks_root.glob("*/state.json")):
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        task_key = str(state["task_key"])
+        if state.get("admission_disposition") != "ADMITTED_PRIMARY_FRESH_TASK":
+            continue
+        if state.get("phase") != "ADMITTED":
+            continue
+        if _protocol_loss_path(store, task_key).is_file():
+            excluded.append(_loss_entry(store, task_key, newly_recorded=False))
+            continue
+        keys.append(task_key)
+
+    def fence(task_key: str) -> tuple[str, bool | Exception]:
+        try:
+            return task_key, _take_execution_start_fence(store, task_key)
+        except Exception as exc:  # noqa: BLE001 - per-task fail-closed isolation
+            return task_key, exc
+
+    if keys:
+        with ThreadPoolExecutor(max_workers=max(1, min(len(keys), max_workers))) as pool:
+            results = list(pool.map(fence, keys))
+        for task_key, outcome in results:
+            if outcome is True:
+                fenced.append(task_key)
+            elif outcome is False:
+                already_executing.append(task_key)
+            elif _protocol_loss_path(store, task_key).is_file():
+                excluded.append(_loss_entry(store, task_key, newly_recorded=True))
+            else:
+                failures.append(
+                    {
+                        "task_key": task_key,
+                        "phase": "ADMITTED",
+                        "error_type": type(outcome).__name__,
+                        "error": str(outcome)[:500],
+                    }
+                )
+    return {
+        "schema": "nexus.hybrid_replication.daemon_fence.v1",
+        "fenced": fenced,
+        "already_executing": already_executing,
+        "failures": failures,
+        "excluded_protocol_loss": sorted(excluded, key=lambda e: e["task_key"]),
+    }
 
 
 def advance_all(
@@ -540,6 +618,12 @@ def main() -> int:
     parser.add_argument("--ground-truth-command")
     parser.add_argument("--ingest-only", action="store_true")
     parser.add_argument(
+        "--fence-only",
+        action="store_true",
+        help="Ingest, take execution_start for ADMITTED primary tasks, print and exit. "
+        "No advance, no stack or ground-truth calls.",
+    )
+    parser.add_argument(
         "--max-concurrent-tasks",
         type=int,
         default=1,
@@ -565,8 +649,20 @@ def main() -> int:
         raise SystemExit("readiness and deferred-admission control task keys must match")
 
     store = AutomaticReplicationStore(Path(args.root))
-    ingest_report = ingest(store=store, since=args.since)
+    with ingest_lock(store):
+        ingest_report = ingest(store=store, since=args.since)
     print(json.dumps(ingest_report, ensure_ascii=False, sort_keys=True, indent=2))
+
+    if args.fence_only:
+        fence_report = fence_all(store=store)
+        print(json.dumps(fence_report, ensure_ascii=False, sort_keys=True, indent=2))
+        if fence_report["failures"]:
+            return 5
+        if ingest_report["missing_capture"]:
+            return 3
+        if ingest_report["missing_admission"]:
+            return 4
+        return 0
 
     if args.ingest_only:
         if ingest_report["missing_capture"]:
