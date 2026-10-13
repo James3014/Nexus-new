@@ -10,6 +10,7 @@ job allowed to run the packaged source.
 from __future__ import annotations
 
 import argparse
+import ast
 import copy
 import hashlib
 import json
@@ -25,7 +26,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = "trusted-deletion-anchor.v3"
+SCHEMA_VERSION = "trusted-deletion-anchor.v4"
 RUNTIME_SCHEMA_VERSION = "trusted-deletion-runtime.v2"
 WORKFLOW_PATH = ".github/workflows/trusted-deletion-anchor.yml"
 SHA_LENGTH = 40
@@ -276,6 +277,7 @@ REQUIRED_EVIDENCE_KEYS = {
     "run_id",
     "base_sha",
     "head_sha",
+    "merge_base_sha",
     "base_tree",
     "head_tree",
     "test_tree",
@@ -299,6 +301,74 @@ REQUIRED_EVIDENCE_KEYS = {
     "golden_report",
     "executor",
 }
+
+
+# Gate-oracle surface (Owner-approved option (b), 2026-10-13).  The executor
+# runs the PR head, not the head merged with main, so a PR that is merely behind
+# main is admitted only when main has not moved, since the merge-base, over any
+# path that decides the gate's own verdict, nor over a path the PR changes.
+GATE_ORACLE_SURFACE_PATHS = frozenset({
+    "tests/ops/test_pr_impact_gate.py",
+    "tests/ops/test_select_tests.py",
+    "scripts/ops/run_golden_behavior_eval.py",
+    "scripts/ops/pr_impact_gate.py",
+    "scripts/ops/select_tests.py",
+    "docs/testing/test_impact_map.md",
+    ".nexus/test_impact_index.json",
+    "pyproject.toml",
+    "uv.lock",
+    "pytest.ini",
+    "conftest.py",
+    "product/__init__.py",
+})
+GATE_ORACLE_SURFACE_PREFIXES = ("tests/golden_behavior/", ".github/workflows/", ".nexus-core/")
+_GATE_ORACLE_TRUSTED_SCRIPT_RE = re.compile(r"scripts/ops/trusted_[^/]*\.py")
+# The pytest import chain: every conftest.py and package __init__.py under
+# tests/ or scripts/ can change what a witness or gate test observes.
+_GATE_ORACLE_IMPORT_CHAIN_RE = re.compile(r"(?:tests|scripts)/(?:.*/)?(?:conftest|__init__)\.py")
+GOLDEN_CORPUS_PATH = "tests/golden_behavior/corpus.py"
+_GOLDEN_WITNESS_RE = re.compile(r"(tests/[^\s:]+\.py)(?:::.*)?")
+MAIN_MOVED_OVER_GATE_SURFACE = "MAIN_MOVED_OVER_GATE_SURFACE"
+MERGE_BASE_NOT_UNIQUE = "MERGE_BASE_NOT_UNIQUE"
+
+
+def _is_gate_oracle_surface(path: str) -> bool:
+    return (
+        path in GATE_ORACLE_SURFACE_PATHS
+        or path.startswith(GATE_ORACLE_SURFACE_PREFIXES)
+        or _GATE_ORACLE_TRUSTED_SCRIPT_RE.fullmatch(path) is not None
+        or _GATE_ORACLE_IMPORT_CHAIN_RE.fullmatch(path) is not None
+    )
+
+
+def _golden_witness_paths(corpus_source: bytes) -> set[str]:
+    """Witness test files named by the Golden corpus, read as data (never imported)."""
+
+    if not corpus_source:
+        return set()
+    try:
+        tree = ast.parse(corpus_source)
+    except (SyntaxError, ValueError) as error:
+        raise ValueError(f"Golden corpus is not parseable: {error}") from None
+    paths = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            match = _GOLDEN_WITNESS_RE.fullmatch(node.value)
+            if match:
+                paths.add(match.group(1))
+    return paths
+
+
+def _gate_surface_overlap(main_delta: Any, pr_paths: Any, witness_paths: Any = ()) -> list[str]:
+    """Paths main changed since the merge-base that make a behind head unsafe."""
+
+    pr = set(pr_paths)
+    witnesses = set(witness_paths)
+    return sorted({
+        path
+        for path in main_delta
+        if _is_gate_oracle_surface(path) or path in pr or path in witnesses
+    })
 
 
 def _json(value: Any) -> bytes:
@@ -792,12 +862,14 @@ def build_manifest(
     base_tree: str | None = None,
     head_tree: str | None = None,
     test_tree: str | None = None,
+    merge_base_sha: str,
 ) -> dict[str, Any]:
     """Create the controller's immutable, hash-bound manifest."""
 
     identity = _identity(event)
     base_sha = _exact_sha(_event_value(event, "pull_request", "base", "sha"), "base_sha")
     head_sha = _exact_sha(_event_value(event, "pull_request", "head", "sha"), "head_sha")
+    merge_base_sha = _exact_sha(merge_base_sha, "merge_base_sha")
     if not test_inventory or any(
         not isinstance(path, str) or not path.startswith("tests/") or ".." in Path(path).parts
         for path in test_inventory
@@ -814,6 +886,7 @@ def build_manifest(
         "run_id": identity["run_id"],
         "base_sha": base_sha,
         "head_sha": head_sha,
+        "merge_base_sha": merge_base_sha,
         "base_tree": base_tree,
         "head_tree": head_tree,
         "test_tree": test_tree,
@@ -887,7 +960,14 @@ def verify_evidence(
         )
         if any(marker in serialized for marker in credential_markers):
             raise ValueError("credential-bearing evidence")
-        for key in ("base_sha", "head_sha", "base_tree", "head_tree", "test_tree"):
+        for key in (
+            "base_sha",
+            "head_sha",
+            "merge_base_sha",
+            "base_tree",
+            "head_tree",
+            "test_tree",
+        ):
             if evidence[key] != manifest[key]:
                 raise ValueError(f"{key} mismatch")
         if (
@@ -1108,6 +1188,69 @@ def _canonical_raw_diff(repo: Path, base_sha: str, head_sha: str) -> bytes:
     return result
 
 
+def _unique_merge_base(repo: Path, base_sha: str, head_sha: str) -> str:
+    """Core's rule: the base tip and the head share exactly one merge-base."""
+
+    result = subprocess.run(
+        ["git", "-C", str(repo), "merge-base", "--all", base_sha, head_sha],
+        capture_output=True,
+        text=True,
+    )
+    bases = result.stdout.split() if result.returncode == 0 else []
+    if len(bases) != 1:
+        raise ValueError(
+            f"{MERGE_BASE_NOT_UNIQUE}: base and head share {len(bases)} merge-bases "
+            "(need exactly one)"
+        )
+    return _exact_sha(bases[0], "merge_base_sha")
+
+
+def _changed_paths(repo: Path, old: str, new: str) -> list[str]:
+    result = _git(repo, "diff", "--name-only", "-z", "--no-renames", old, new, binary=True)
+    assert isinstance(result, bytes)
+    return [path.decode() for path in result.split(b"\0") if path]
+
+
+def _blob_or_empty(repo: Path, revision: str, path: str) -> bytes:
+    result = subprocess.run(
+        ["git", "-C", str(repo), "show", f"{revision}:{path}"], capture_output=True
+    )
+    return result.stdout if result.returncode == 0 else b""
+
+
+def _main_moved_overlap(repo: Path, merge_base_sha: str, base_sha: str, head_sha: str) -> list[str]:
+    """Gate-relevant paths main changed between the merge-base and the base tip.
+
+    The Golden witnesses are read from the corpus at both the merge-base and the
+    base tip, so a witness main added, dropped or tightened is always covered.
+    """
+
+    if merge_base_sha == base_sha:
+        return []
+    witnesses = _golden_witness_paths(
+        _blob_or_empty(repo, merge_base_sha, GOLDEN_CORPUS_PATH)
+    ) | _golden_witness_paths(_blob_or_empty(repo, base_sha, GOLDEN_CORPUS_PATH))
+    return _gate_surface_overlap(
+        _changed_paths(repo, merge_base_sha, base_sha),
+        _changed_paths(repo, merge_base_sha, head_sha),
+        witnesses,
+    )
+
+
+def _require_main_not_moved_over_gate(
+    repo: Path, merge_base_sha: str, base_sha: str, head_sha: str
+) -> None:
+    """Fail closed when main moved over the gate-oracle surface or the PR's paths."""
+
+    overlap = _main_moved_overlap(repo, merge_base_sha, base_sha, head_sha)
+    if overlap:
+        shown = ", ".join(overlap[:5]) + (" ..." if len(overlap) > 5 else "")
+        raise ValueError(
+            f"{MAIN_MOVED_OVER_GATE_SURFACE}: merge origin/main; main changed "
+            f"{len(overlap)} gate-oracle or PR path(s) since the merge-base: {shown}"
+        )
+
+
 def _create_git_bundle(
     repo: Path, output: Path, base_sha: str, head_sha: str, workflow_sha: str
 ) -> bytes:
@@ -1158,7 +1301,10 @@ def _controller(args: argparse.Namespace) -> None:
         tree = _exact_sha(_git(repo, "rev-parse", f"{revision}^{{tree}}"), f"{label}_tree")
         _git(repo, "cat-file", "-e", f"{tree}^{{tree}}")
         trees[label] = tree
-    raw_diff = _canonical_raw_diff(repo, base_sha, head_sha)
+    merge_base_sha = _unique_merge_base(repo, base_sha, head_sha)
+    # Three-dot semantics: only what the PR changed since its merge-base, so a
+    # file main added after the fork is never reported as a PR deletion.
+    raw_diff = _canonical_raw_diff(repo, merge_base_sha, head_sha)
     inventory = _git(repo, "ls-tree", "-r", "--name-only", head_sha, "--", "tests", binary=False)
     assert isinstance(inventory, str)
     selected = [
@@ -1193,6 +1339,7 @@ def _controller(args: argparse.Namespace) -> None:
         pull_request_number=_event_value(event, "pull_request", "number"),
         head_product_init_is_regular=_tree_has_regular_file(repo, head_sha, "product/__init__.py"),
     )
+    _require_main_not_moved_over_gate(repo, merge_base_sha, base_sha, head_sha)
     requirements = (runtime_dir / "requirements.txt").read_bytes()
     runtime_archive = (runtime_dir / "runtime.tar").read_bytes()
     runtime_metadata = (runtime_dir / "runtime-metadata.json").read_bytes()
@@ -1247,6 +1394,7 @@ def _controller(args: argparse.Namespace) -> None:
         golden_corpus=golden_corpus,
         golden_test_corpus=golden_test_corpus,
         golden_topology=golden_topology,
+        merge_base_sha=merge_base_sha,
     )
     (output / "source.tar").write_bytes(source_archive)
     (output / "raw-diff.bin").write_bytes(raw_diff)
@@ -1261,6 +1409,7 @@ def _controller(args: argparse.Namespace) -> None:
         "workflow_identity": manifest["workflow_identity"],
         "base_sha": manifest["base_sha"],
         "head_sha": manifest["head_sha"],
+        "merge_base_sha": manifest["merge_base_sha"],
     }
     (output / "external-anchor.json").write_bytes(_json(external_anchor) + b"\n")
     (output / "trusted_deletion_anchor.py").write_bytes(Path(__file__).read_bytes())
@@ -1442,13 +1591,16 @@ def _prepare_executor_git_context(bundle: Path, source: Path, manifest: dict[str
         ):
             raise ValueError(f"executor Git ref mismatch: {ref}")
     _git(source, "update-ref", "--no-deref", "HEAD", manifest["head_sha"])
-    ancestry = subprocess.run(
-        ["git", "merge-base", "--is-ancestor", manifest["base_sha"], manifest["head_sha"]],
+    expected_merge_base = _exact_sha(manifest.get("merge_base_sha"), "merge_base_sha")
+    merge_bases = subprocess.run(
+        ["git", "merge-base", "--all", manifest["base_sha"], manifest["head_sha"]],
         cwd=source,
         capture_output=True,
+        text=True,
     )
     if (
-        ancestry.returncode != 0
+        merge_bases.returncode != 0
+        or merge_bases.stdout.split() != [expected_merge_base]
         or _git(source, "rev-parse", "HEAD") != manifest["head_sha"]
         or _git(source, "rev-parse", "HEAD^{tree}") != manifest["head_tree"]
         or _git(source, "rev-parse", f"{BASE_REF}^{{tree}}") != manifest["base_tree"]
@@ -1519,6 +1671,7 @@ def _verifier(args: argparse.Namespace) -> None:
         or anchor.get("workflow_identity") != expected_identity
         or anchor.get("base_sha") != args.expected_base_sha
         or anchor.get("head_sha") != args.expected_head_sha
+        or anchor.get("merge_base_sha") != manifest.get("merge_base_sha")
         or manifest.get("workflow_identity") != expected_identity
         or manifest.get("base_sha") != args.expected_base_sha
         or manifest.get("head_sha") != args.expected_head_sha
@@ -1561,9 +1714,18 @@ def _verifier(args: argparse.Namespace) -> None:
                 raise SystemExit(1)
             if _git(git_repo, "rev-parse", f"{ref}^{{commit}}") != revision:
                 raise SystemExit(1)
+        try:
+            recomputed_merge_base = _unique_merge_base(
+                git_repo, manifest["base_sha"], manifest["head_sha"]
+            )
+        except ValueError as error:
+            print(f"trusted verifier: {error}", file=sys.stderr)
+            raise SystemExit(1)
+        if recomputed_merge_base != manifest.get("merge_base_sha"):
+            raise SystemExit(1)
         recomputed_diff = _canonical_raw_diff(
             git_repo,
-            manifest["base_sha"],
+            recomputed_merge_base,
             manifest["head_sha"],
         )
         if recomputed_diff != (bundle / "raw-diff.bin").read_bytes():
@@ -1611,6 +1773,13 @@ def _verifier(args: argparse.Namespace) -> None:
             )
         except ValueError:
             raise SystemExit(1)
+        try:
+            _require_main_not_moved_over_gate(
+                git_repo, recomputed_merge_base, manifest["base_sha"], manifest["head_sha"]
+            )
+        except ValueError as error:
+            print(f"trusted verifier: {error}", file=sys.stderr)
+            raise SystemExit(1)
     status = verify_evidence(
         manifest,
         evidence,
@@ -1646,6 +1815,14 @@ CONTROLLER_FAILURE_REMEDIES = {
         "merge origin/main into the PR branch; an intended pyproject.toml/uv.lock "
         "change needs an authorized trusted dependency snapshot transition"
     ),
+    MAIN_MOVED_OVER_GATE_SURFACE: (
+        "merge origin/main into the PR branch (no force-push) and push: main changed the "
+        "gate-oracle surface or this PR's own paths since the merge-base"
+    ),
+    MERGE_BASE_NOT_UNIQUE: (
+        "merge origin/main into the PR branch so it shares exactly one merge-base with "
+        "main (no criss-cross merges, no unrelated history)"
+    ),
     "MERGE_LANE_BINDING_MISSING": (
         "the PR body needs exactly one NEXUS_MERGE_LANE_V1 block from the Owner/authority "
         "path (#1749/#1817); agents must not mint or copy one"
@@ -1668,7 +1845,12 @@ CONTROLLER_FAILURE_REMEDIES = {
         "machine-readable reason"
     ),
 }
-_CONTROLLER_RECORDED_CODES = frozenset({"DEPENDENCY_CONTRACT_DRIFT", "CONTROLLER_ERROR"})
+_CONTROLLER_RECORDED_CODES = frozenset({
+    "DEPENDENCY_CONTRACT_DRIFT",
+    MAIN_MOVED_OVER_GATE_SURFACE,
+    MERGE_BASE_NOT_UNIQUE,
+    "CONTROLLER_ERROR",
+})
 # Written by the controller job's bash steps, which run before/around the Python
 # controller.  Lower priority than a lane-gate BLOCK, whose reason is more specific.
 _CONTROLLER_BOOTSTRAP_CODE = "CONTROLLER_BOOTSTRAP_FAILED"
@@ -1690,11 +1872,14 @@ def _sanitize_failure_detail(value: object) -> str:
 
 def _controller_failure_record(error: BaseException) -> dict[str, str]:
     message = str(error)
-    code = (
-        "DEPENDENCY_CONTRACT_DRIFT"
-        if message.startswith("PR dependency contract drifts from trusted default")
-        else "CONTROLLER_ERROR"
-    )
+    if message.startswith("PR dependency contract drifts from trusted default"):
+        code = "DEPENDENCY_CONTRACT_DRIFT"
+    elif message.startswith(f"{MAIN_MOVED_OVER_GATE_SURFACE}:"):
+        code = MAIN_MOVED_OVER_GATE_SURFACE
+    elif message.startswith(f"{MERGE_BASE_NOT_UNIQUE}:"):
+        code = MERGE_BASE_NOT_UNIQUE
+    else:
+        code = "CONTROLLER_ERROR"
     return {
         "schema": CONTROLLER_FAILURE_SCHEMA,
         "reason_code": code,

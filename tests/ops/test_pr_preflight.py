@@ -525,7 +525,11 @@ def _make_behind(repo: Path) -> None:
 
 
 def test_single_merge_base_behind_tip_passes_core_and_fails_executor(repo, tmp_path, capsys):
-    """Core (9942db7) needs one merge-base; the executor still needs the tip as ancestor."""
+    """Behind but disjoint: Core and (since option (b), 2026-10-13) the executor accept it.
+
+    The id predates the executor's merge-base rule; the body now asserts that a
+    head behind the tip with one merge-base and no overlap is INFO + PASS.
+    """
     _make_behind(repo)
     argv = _run(repo, tmp_path, "--only", "freshness,git_identity")
     code, report = _report(capsys, argv)
@@ -536,10 +540,97 @@ def test_single_merge_base_behind_tip_passes_core_and_fails_executor(repo, tmp_p
     assert fresh["data"]["behind"] == 1
     assert len(fresh["data"]["merge_bases"]) == 1
     identity = _check(report, "git_identity")
+    assert (identity["status"], identity["code"]) == ("PASS", "")
+    assert identity["data"]["merge_base"] == fresh["data"]["merge_bases"][0]
+    assert identity["data"]["overlap"] == []
+    assert code == 0
+
+
+def _make_behind_touching(repo: Path, rel: str, *, pr_too: bool) -> None:
+    if pr_too:
+        _write(repo, rel, "# pr edit\n")
+        _commit(repo, "pr touches " + rel)
+    _git(repo, "checkout", "-q", "main")
+    _write(repo, rel, "# main edit\n")
+    moved = _commit(repo, "main touches " + rel)
+    _git(repo, "update-ref", "refs/remotes/origin/main", moved)
+    _git(repo, "checkout", "-q", "feature")
+
+
+@pytest.mark.parametrize(
+    ("rel", "pr_too"),
+    [
+        ("docs/shared.md", True),
+        ("tests/golden_behavior/corpus.py", False),
+        ("tests/ops/test_select_tests.py", False),
+        ("pytest.ini", False),
+        ("tests/conftest.py", False),
+        ("scripts/ops/__init__.py", False),
+        ("tests/contracts/test_witness.py", False),
+    ],
+)
+def test_behind_with_overlap_fails_executor_identity(repo, tmp_path, capsys, rel, pr_too):
+    _git(repo, "checkout", "-q", "main")
+    _write(repo, "tests/contracts/test_witness.py", "def test_witness():\n    pass\n")
+    _write(
+        repo,
+        "tests/golden_behavior/corpus.py",
+        'CASES = ("tests/contracts/test_witness.py::test_witness",)\n',
+    )
+    fork = _commit(repo, "witness corpus")
+    _git(repo, "update-ref", "refs/remotes/origin/main", fork)
+    _git(repo, "checkout", "-q", "feature")
+    _git(repo, "merge", "-q", "--no-edit", "--no-verify", "main")
+    _make_behind_touching(repo, rel, pr_too=pr_too)
+    code, report = _report(capsys, _run(repo, tmp_path, "--only", "freshness,git_identity"))
+    assert _check(report, "freshness")["status"] == "INFO"
+    identity = _check(report, "git_identity")
+    assert (identity["status"], identity["code"]) == ("FAIL", pf.MAIN_MOVED_OVER_GATE_SURFACE)
+    assert rel in identity["data"]["overlap"]
+    assert "git merge origin/main" in identity["fix"]
+    assert "no force-push" in identity["fix"]
+    assert code == 1
+
+
+def test_git_identity_fails_on_criss_cross_merge_bases(repo, tmp_path, capsys):
+    base = _git(repo, "rev-parse", "origin/main")
+    for name in ("x", "y"):
+        _git(repo, "checkout", "-q", "-b", name, base)
+        _write(repo, f"docs/{name}.md", name)
+        _commit(repo, name)
+    _git(repo, "checkout", "-q", "-b", "tip", "x")
+    _git(repo, "merge", "-q", "--no-ff", "--no-verify", "-m", "tip", "y")
+    _git(repo, "update-ref", "refs/remotes/origin/main", _git(repo, "rev-parse", "HEAD"))
+    _git(repo, "checkout", "-q", "-b", "head", "y")
+    _git(repo, "merge", "-q", "--no-ff", "--no-verify", "-m", "head", "x")
+    _code, report = _report(capsys, _run(repo, tmp_path, "--only", "git_identity"))
+    identity = _check(report, "git_identity")
+    assert (identity["status"], identity["code"]) == ("FAIL", pf.EXECUTOR_GIT_IDENTITY_MISMATCH)
+    assert "2 merge-bases" in identity["detail"]
+
+
+def test_git_identity_follows_an_older_base_anchor_without_merge_base_rule(
+    repo, tmp_path, capsys, monkeypatch
+):
+    """Before this rule lands on main, CI still runs main's tip-as-ancestor executor."""
+    real = pf._load_trusted_module
+
+    class _OldAnchor:
+        def __init__(self, module):
+            self._executor_archive_filter = module._executor_archive_filter
+            self._extracted_test_tree = module._extracted_test_tree
+
+    def _load(ctx, path):
+        module = real(ctx, path)
+        return _OldAnchor(module) if path == pf.TRUSTED_ANCHOR_PATH else module
+
+    monkeypatch.setattr(pf, "_load_trusted_module", _load)
+    _make_behind(repo)
+    _code, report = _report(capsys, _run(repo, tmp_path, "--only", "git_identity"))
+    identity = _check(report, "git_identity")
     assert (identity["status"], identity["code"]) == ("FAIL", pf.EXECUTOR_GIT_IDENTITY_MISMATCH)
     assert "not an ancestor" in identity["detail"]
     assert "no force-push" in identity["fix"]
-    assert code == 1
 
 
 def test_behind_alone_never_fails_when_only_core_runs(repo, tmp_path, capsys):
@@ -578,10 +669,18 @@ def test_unrelated_history_fails_core(repo, tmp_path, capsys):
 
 
 def test_executor_still_requires_tip_ancestor_in_trusted_anchor():
-    """Guard: if the executor's rule is loosened upstream, preflight must follow."""
+    """Guard: preflight mirrors the executor's rule; if it changes, preflight must follow.
+
+    The id predates option (b) (2026-10-13): the executor now requires exactly one
+    merge-base, bound as manifest["merge_base_sha"], plus the gate-surface check.
+    """
     source = (ROOT / pf.TRUSTED_ANCHOR_PATH).read_text(encoding="utf-8")
-    assert '"merge-base", "--is-ancestor", manifest["base_sha"], manifest["head_sha"]' in source
+    assert '"merge-base", "--all", manifest["base_sha"], manifest["head_sha"]' in source
+    assert "merge_bases.stdout.split() != [expected_merge_base]" in source
     assert "executor Git identity mismatch" in source
+    assert "def _gate_surface_overlap(" in source
+    assert "def _main_moved_overlap(" in source
+    assert '"merge-base", "--is-ancestor"' not in source
 
 
 def test_fresh_branch_passes_freshness_and_identity(repo, tmp_path, capsys):
