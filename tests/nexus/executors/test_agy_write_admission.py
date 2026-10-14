@@ -907,23 +907,60 @@ def _seatbelt_usable() -> bool:
     return probe.returncode == 0
 
 
+def _profile_rules(profile: str) -> list[tuple[str, set[str]]]:
+    """``(action, entries)`` for each file-write rule, in profile order."""
+    rules: list[tuple[str, set[str]]] = []
+    current: list[str] | None = None
+    action = ""
+    for line in profile.splitlines():
+        stripped = line.strip()
+        if stripped in ("(deny file-write*)", "(allow default)", "(version 1)"):
+            continue
+        if stripped in ("(deny file-write*", "(allow file-write*"):
+            action, current = stripped[1:].split()[0], []
+            continue
+        if current is None:
+            continue
+        entry = stripped[:-1] if stripped.endswith("))") else stripped
+        if entry != ")":
+            current.append(entry)
+        if stripped.endswith(")") and (stripped == ")" or stripped.endswith("))")):
+            rules.append((action, set(current)))
+            current = None
+    return rules
+
+
+def _effective_write(profile: str, path: Path) -> str:
+    """Last matching rule wins, as in Seatbelt; default is deny."""
+    sbpl = admission._sbpl_path(path)
+    verdict = "deny"
+    for action, entries in _profile_rules(profile):
+        for entry in entries:
+            kind, _, quoted = entry.partition(" ")
+            target = quoted.strip().removesuffix(")").strip('"')
+            if kind == "(literal" and target == sbpl:
+                verdict = action
+            elif kind == "(subpath" and (sbpl == target or sbpl.startswith(target + "/")):
+                verdict = action
+    return verdict
+
+
 def _assert_profile_text_or_skip_run(
     profile: str, *, denied: list[Path], writable: list[Path]
 ) -> bool:
-    """Off macOS, check the profile text instead of running sandbox-exec.
+    """Off macOS, evaluate the profile rules instead of running sandbox-exec.
 
     Returns True when the caller should also run the real Seatbelt probe.
     """
     if _seatbelt_usable():
         return True
-    deny_block = profile.split("(deny file-write*\n", 1)[1]
+    assert profile.splitlines()[:3] == ["(version 1)", "(allow default)", "(deny file-write*)"]
     for path in denied:
-        assert f'(subpath "{admission._sbpl_path(path)}")' in deny_block or (
-            f'(literal "{admission._sbpl_path(path)}")' in deny_block
-        ), path
+        assert _effective_write(profile, path) == "deny", path
+        if not path.suffix:  # directory: everything under it is denied too
+            assert _effective_write(profile, path / "child.json") == "deny", path
     for path in writable:
-        assert f'(subpath "{admission._sbpl_path(path)}")' in profile, path
-    assert "(deny file-write*)" in profile
+        assert _effective_write(profile, path / "child.txt") == "allow", path
     return False
 
 
@@ -939,7 +976,7 @@ def test_seatbelt_profile_blocks_absolute_path_write_outside_target(tmp_path):
     if not _assert_profile_text_or_skip_run(
         profile, denied=[target / ".git"], writable=[target, run_tmp]
     ):
-        assert f'(subpath "{admission._sbpl_path(outside)}")' not in profile
+        assert _effective_write(profile, outside / "escape.txt") == "deny"
         return
     code = (
         "import sys\n"
@@ -1370,3 +1407,57 @@ def test_cwd_sweep_spares_processes_that_predate_the_worker(tmp_path):
     finally:
         bystander.kill()
         bystander.wait(timeout=5)
+
+
+def test_cwd_scan_without_baseline_is_unknown_not_empty():
+    assert cli_worker._pids_with_cwd_under(("/tmp",), None) is None
+    assert cli_worker._pids_with_cwd_under((), None) == set()
+
+
+def test_start_time_filter_fails_closed_on_unreadable_ps(monkeypatch):
+    me = os.getpid()
+
+    def fake_run(*args, **kwargs):
+        return SimpleNamespace(stdout="garbage line\n", returncode=0)
+
+    monkeypatch.setattr(cli_worker.subprocess, "run", fake_run)
+    assert cli_worker._started_after_by_us({me}, 0.0) is None
+
+
+def test_start_time_filter_fails_closed_when_live_pid_missing_from_ps(monkeypatch):
+    me = os.getpid()
+    monkeypatch.setattr(
+        cli_worker.subprocess,
+        "run",
+        lambda *a, **k: SimpleNamespace(stdout="", returncode=1),
+    )
+    assert cli_worker._started_after_by_us({me}, 0.0) is None
+
+
+def test_sweep_without_baseline_is_not_reported_clean(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli_worker, "_sweep_baseline", lambda: None)
+    result = run_cli_worker(
+        CliWorkerRequest(
+            executable=sys.executable,
+            argv=("-c", "print('ok')"),
+            cwd=str(tmp_path),
+            sweep_descendants_on_exit=True,
+            sweep_roots=(str(tmp_path),),
+        )
+    )
+    assert result.status is CliWorkerStatus.COMPLETED
+    assert result.descendants_swept is False
+
+
+def test_sweep_with_failed_cwd_scan_is_not_reported_clean(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli_worker, "_pids_with_cwd_under", lambda roots, baseline: None)
+    result = run_cli_worker(
+        CliWorkerRequest(
+            executable=sys.executable,
+            argv=("-c", "print('ok')"),
+            cwd=str(tmp_path),
+            sweep_descendants_on_exit=True,
+            sweep_roots=(str(tmp_path),),
+        )
+    )
+    assert result.descendants_swept is False

@@ -377,11 +377,13 @@ def _sweep_baseline() -> Optional[_SweepBaseline]:
 _START_MARGIN_SECONDS = 1.0
 
 
-def _started_after_by_us(pids: set[int], since: float) -> set[int]:
+def _started_after_by_us(pids: set[int], since: float) -> Optional[set[int]]:
     """Subset of ``pids`` owned by our uid and started at/after ``since``.
 
     ``ps -o lstart`` has one-second resolution, so a margin is allowed; the
-    pre-start pid snapshot excludes anything that already existed.
+    pre-start pid snapshot excludes anything that already existed.  Returns
+    None when ``ps`` cannot vouch for a pid that is still alive, so callers
+    fail closed instead of treating an unreadable process as absent.
     """
     if not pids:
         return set()
@@ -395,33 +397,54 @@ def _started_after_by_us(pids: set[int], since: float) -> set[int]:
             env={**os.environ, "LC_ALL": "C", "LANG": "C"},
         ).stdout
     except (OSError, subprocess.SubprocessError):
-        return set()
+        return None
     uid = os.getuid()
     found: set[int] = set()
+    seen: set[int] = set()
     for line in out.splitlines():
         parts = line.split()
-        if len(parts) < 7 or not parts[0].isdigit() or not parts[1].isdigit():
+        if not parts:
             continue
+        if len(parts) < 7 or not parts[0].isdigit() or not parts[1].isdigit():
+            return None
         try:
             started = time.mktime(time.strptime(" ".join(parts[2:7]), "%a %b %d %H:%M:%S %Y"))
         except ValueError:
-            continue
+            return None
+        seen.add(int(parts[0]))
         if int(parts[1]) == uid and started >= since - _START_MARGIN_SECONDS:
             found.add(int(parts[0]))
+    # A pid ps did not report is fine only if it has already exited.
+    if any(_pid_alive(pid) for pid in pids - seen):
+        return None
     return found
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 def _pids_with_cwd_under(
     roots: Tuple[str, ...], baseline: Optional[_SweepBaseline] = None
-) -> set[int]:
+) -> Optional[set[int]]:
     """Worker-era PIDs whose current directory is inside one of ``roots``.
 
     Only processes owned by our uid, started at or after the worker, absent
     from the pre-start snapshot, and not this process or its ancestors.
-    Without a baseline nothing is returned (never kill unknown processes).
+    Without a baseline nothing is killed (never kill unknown processes), and
+    None is returned when roots were requested so the sweep is not reported
+    clean; None also means ``lsof``/``ps`` could not be read.
     """
-    if not roots or baseline is None:
+    if not roots:
         return set()
+    if baseline is None:
+        return None
     real_roots = [os.path.realpath(root).rstrip(os.sep) for root in roots]
     try:
         out = subprocess.run(
@@ -432,7 +455,10 @@ def _pids_with_cwd_under(
             check=False,
         ).stdout
     except (OSError, subprocess.SubprocessError):
-        return set()
+        return None
+    if not out.strip():
+        # lsof always lists at least this process; empty output is a failure.
+        return None
     found: set[int] = set()
     pid: Optional[int] = None
     for line in out.splitlines():
@@ -444,6 +470,12 @@ def _pids_with_cwd_under(
                 found.add(pid)
     found -= baseline.preexisting | baseline.protected | {os.getpid()}
     return _started_after_by_us(found, baseline.started_at)
+
+
+def _sweep_clean(tracked: set[int], cwd_pids: Optional[set[int]]) -> bool:
+    """Kill tracked and cwd-matched pids; unknown cwd scan never counts as clean."""
+    killed = _kill_and_confirm(tracked | (cwd_pids or set()))
+    return killed and cwd_pids is not None
 
 
 def _kill_and_confirm(pids: set[int]) -> bool:
@@ -708,15 +740,17 @@ def run_cli_worker(
                 _kill_process_group(process)
                 tagged_clean = _sweep_tagged_processes(run_tag)
                 descendants_swept = (
-                    _kill_and_confirm(tracked | _pids_with_cwd_under(request.sweep_roots, baseline))
+                    _sweep_clean(tracked, _pids_with_cwd_under(request.sweep_roots, baseline))
                     and tagged_clean
+                    and baseline is not None
                 )
         except subprocess.TimeoutExpired as exc:
             group_killed = _kill_process_group(process)
             if tracker is not None:
                 tracked = tracker.stop() - (baseline.preexisting if baseline else frozenset())
-                if not _kill_and_confirm(
-                    tracked | _pids_with_cwd_under(request.sweep_roots, baseline)
+                if (
+                    not _sweep_clean(tracked, _pids_with_cwd_under(request.sweep_roots, baseline))
+                    or baseline is None
                 ):
                     group_killed = False
             # Descendants that called setsid() left the group; find them by the

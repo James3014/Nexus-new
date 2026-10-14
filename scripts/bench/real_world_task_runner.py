@@ -423,6 +423,18 @@ def _run_gemini_patch(
                 "gemini_returncode": None,
                 "error": "gemini_timeout: agy execution timed out",
             }
+        if result.status is CliWorkerStatus.COMPLETED and result.descendants_swept is not True:
+            return {
+                "regression_test_added": False,
+                "unrelated_change": False,
+                "root_cause": "",
+                "written_files": [],
+                "model_calls": 1,
+                "total_tokens": 0,
+                "token_capture_status": "sweep_failed",
+                "gemini_returncode": result.exit_code,
+                "error": "agy_descendant_sweep_failed: worker descendants may survive",
+            }
         res = subprocess.CompletedProcess(
             args=cmd,
             returncode=result.exit_code if result.exit_code is not None else 1,
