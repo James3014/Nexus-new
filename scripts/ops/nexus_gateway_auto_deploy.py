@@ -148,6 +148,21 @@ PIN_BUMP_MAX_AGE_SECONDS = 3 * 24 * 60 * 60
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _DEPLOYMENT_NAME = re.compile(r"(?:^|/)[ar]1-([0-9a-f]{40})$")
 _SHELL_UNSAFE = ('"', "$", "`", "\\", "\n", "\r", "\x00")
+# Each deployment runs the nexus-core revision its own tree pins (#2181).  The pin
+# is read as text from the candidate tree (never imported) and materialized as a
+# clean detached checkout ``core/<sha>`` of a bare ``core.git`` next to the
+# Gateway repository; the wrapper exports it as NEXUS_CORE_REPO_ROOT.
+CORE_REPOSITORY_URL = "https://github.com/James3014/nexus-core.git"
+CORE_ORIGIN_URLS = (
+    CORE_REPOSITORY_URL,
+    "https://github.com/James3014/nexus-core",
+    "git@github.com:James3014/nexus-core.git",
+)
+CORE_PIN_FILE = "nexus/orchestrator/canonical_core_transport.py"
+_CORE_PIN_LINE = re.compile(
+    r"^CANONICAL_CORE_REVISION\s*(?::\s*str\s*)?=\s*[\"']([^\"'\n]*)[\"']\s*(?:#.*)?$",
+    re.MULTILINE,
+)
 
 # GB-077 per-request timeout and tries: a freshly started candidate can take
 # longer than _fetch_gateway_health's 2 s default to answer /health.  Only
@@ -186,6 +201,16 @@ except (ValueError, AttributeError):
     pass
 print(detail)
 sys.exit(0 if ok else 1)
+"""
+
+# Runs with the candidate's interpreter and the wrapper's NEXUS_CORE_REPO_ROOT in a
+# fresh process: the transport resolves Core exactly as the Gateway would (#2181).
+CORE_PROVENANCE_PROBE_CODE = """
+import json, sys
+root = sys.argv[1]
+sys.path.insert(0, root)
+from nexus.orchestrator.canonical_core_transport import core_provenance_status
+print(json.dumps(core_provenance_status(), sort_keys=True, default=str))
 """
 
 
@@ -243,6 +268,14 @@ class Config:
     def tool_link(self) -> Path:
         """Tree the auto-deploy LaunchAgent runs this script from (moves to each new deployment)."""
         return self.gateway_root / "auto-deploy-current"
+
+    @property
+    def core_bare_repo(self) -> Path:
+        return self.gateway_root / "core.git"
+
+    @property
+    def core_checkouts(self) -> Path:
+        return self.gateway_root / "core"
 
     @property
     def receipts(self) -> Path:
@@ -781,9 +814,52 @@ class Prober:
         with opener.open(request, timeout=30) as response:
             return json.loads(response.read(8 * 1024 * 1024).decode("utf-8"))
 
+    def core_provenance(self, *, root: Path, python: Path, core: Any) -> Dict[str, Any]:
+        """The candidate's transport must resolve Core as CORE_REVISION_PINNED at ``core``."""
+        if not isinstance(core, dict) or not _SHA.match(str(core.get("revision") or "")):
+            return {"ok": False, "error": "CORE_PIN_UNKNOWN"}
+        result = self.host.run(
+            [str(python), "-c", CORE_PROVENANCE_PROBE_CODE, str(root)],
+            cwd=root,
+            env={"PYTHONDONTWRITEBYTECODE": "1", "NEXUS_CORE_REPO_ROOT": str(core["root"])},
+            timeout=120,
+        )
+        lines = (result.stdout or "").strip().splitlines()
+        try:
+            observed = json.loads(lines[-1]) if lines else None
+        except ValueError:
+            observed = None
+        if result.returncode != 0 or not isinstance(observed, dict):
+            detail = (result.stderr or result.stdout or "").strip()[-500:]
+            return {"ok": False, "error": f"CORE_PROVENANCE_UNREADABLE:{detail}"}
+        try:
+            same_root = (
+                Path(str(observed.get("source_root"))).resolve()
+                == Path(str(core["root"])).resolve()
+            )
+        except (OSError, RuntimeError):
+            same_root = False
+        ok = (
+            observed.get("status") == "CORE_REVISION_PINNED"
+            and observed.get("observed_commit") == core["revision"]
+            and observed.get("expected_revision") == core["revision"]
+            and same_root
+        )
+        keys = ("status", "reason", "expected_revision", "observed_commit", "source_root")
+        return {"ok": ok, **{k: observed.get(k) for k in keys if k in observed}}
+
     def probe(
-        self, *, port: int, token: str, commit: str, root: Path, python: Path, timeout: float
+        self,
+        *,
+        port: int,
+        token: str,
+        commit: str,
+        root: Path,
+        python: Path,
+        timeout: float,
+        core: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        """Smoke-probe one Gateway; ``core`` (candidate probes) also requires the pinned Core."""
         base = f"http://127.0.0.1:{port}"
         checks: Dict[str, Any] = {}
         deadline = self.host.now() + timeout
@@ -833,6 +909,8 @@ class Prober:
             checks["gateway_status"] = {"ok": status.get("result", {}).get("isError") is False}
         except Exception as exc:  # noqa: BLE001
             checks["gateway_status"] = {"ok": False, "error": f"{type(exc).__name__}:{exc}"[:300]}
+        if core is not None:
+            checks["core_provenance"] = self.core_provenance(root=root, python=python, core=core)
         return {"ok": all(c["ok"] for c in checks.values()), "checks": checks}
 
 
@@ -845,22 +923,28 @@ def wrapper_command(
     python: Path,
     port: Optional[int] = None,
     state_dir: Optional[Path] = None,
+    core_root: Optional[Path] = None,
 ) -> str:
     """The same fixed zsh wrapper as the #526 deployments, with a per-deployment venv.
 
     ``port``/``state_dir`` are only used for the spare-port probe, which must never
-    see the live self-hosted state.
+    see the live self-hosted state.  ``core_root`` (exported after the env file, so
+    the env file cannot override it) is the deployment's pinned Core checkout.
     """
     state = cfg.canonical_state_dir if state_dir is None else state_dir
-    for value in (str(root), str(python), str(cfg.env_file), str(state)):
+    values = [str(root), str(python), str(cfg.env_file), str(state)]
+    if core_root is not None:
+        values.append(str(core_root))
+    for value in values:
         if any(token in value for token in _SHELL_UNSAFE):
             raise DeployError("WRAPPER_PATH_UNSAFE")
     port_export = "" if port is None else f"export NEXUS_MCP_GATEWAY_PORT={int(port)} ; "
+    core_export = "" if core_root is None else f'export NEXUS_CORE_REPO_ROOT="{core_root}" ; '
     return (
         f'cd "{root}" ; source "{cfg.env_file}" ; export PYTHONDONTWRITEBYTECODE=1 ; '
         f'export NEXUS_CANONICAL_SOURCE_ROOT="{root}" ; '
         f'export NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR="{state}" ; '
-        f'{port_export}exec "{python}" "{root / ENTRYPOINT}"'
+        f'{core_export}{port_export}exec "{python}" "{root / ENTRYPOINT}"'
     )
 
 
@@ -961,6 +1045,154 @@ def _uv_extra_args(extras: str) -> List[str]:
     return args
 
 
+def read_core_pin(root: Path) -> str:
+    """``CANONICAL_CORE_REVISION`` of a deployment tree, by text parse (never imported)."""
+    try:
+        text = (root / CORE_PIN_FILE).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise DeployError(f"CORE_PIN_INVALID:unreadable:{type(exc).__name__}") from exc
+    found = _CORE_PIN_LINE.findall(text)
+    if len(found) != 1 or not _SHA.match(found[0]):
+        raise DeployError(f"CORE_PIN_INVALID:{found[:2]!r}"[:300])
+    return found[0]
+
+
+def _core_git(cfg: Config, *args: str) -> List[str]:
+    return ["git", "--git-dir", str(cfg.core_bare_repo), *args]
+
+
+def materialize_core(cfg: Config, host: Host, revision: str) -> Dict[str, Any]:
+    """A clean detached nexus-core checkout ``core/<revision>``; any doubt raises.
+
+    The bare ``core.git`` is created on first use with the James3014/nexus-core
+    origin and fetched with the same ambient git credentials as the Gateway
+    repository.  A commit already present is not fetched again; the checkout's
+    own HEAD keeps it reachable.  There is no fallback: without a verified
+    checkout the candidate is not deployed.
+    """
+    if not _SHA.match(revision):
+        raise DeployError(f"CORE_PIN_INVALID:{revision!r}"[:300])
+    if cfg.core_checkouts.is_symlink() or cfg.core_bare_repo.is_symlink():
+        raise DeployError("CORE_PATH_SYMLINKED")
+    if not cfg.core_bare_repo.exists():
+        _must(
+            host, ["git", "init", "--bare", "--quiet", str(cfg.core_bare_repo)], "CORE_INIT_FAILED"
+        )
+        _must(
+            host, _core_git(cfg, "remote", "add", "origin", CORE_REPOSITORY_URL), "CORE_INIT_FAILED"
+        )
+    origin = _must(
+        host, _core_git(cfg, "config", "--get", "remote.origin.url"), "CORE_ORIGIN_FAILED"
+    ).strip()
+    if origin not in CORE_ORIGIN_URLS:
+        raise DeployError(f"CORE_ORIGIN_MISMATCH:{origin}"[:300])
+    present = _core_git(cfg, "cat-file", "-e", f"{revision}^{{commit}}")
+    if host.run(present, timeout=60).returncode != 0:
+        refspec = "+refs/heads/*:refs/nexus-core/heads/*"
+        fetch = _core_git(cfg, "fetch", "--quiet", "--no-tags", "origin", refspec)
+        _must(host, fetch, "CORE_FETCH_FAILED", timeout=300)
+        _must(host, present, "CORE_COMMIT_NOT_FOUND", timeout=60)
+    checkout = cfg.core_checkouts / revision
+    if checkout.is_symlink():
+        raise DeployError("CORE_PATH_SYMLINKED")
+    if not checkout.exists():
+        _add_core_checkout(cfg, host, checkout, revision)
+    problem = core_checkout_problem(host, checkout, revision)
+    result = {"revision": revision, "root": str(checkout), "repository": CORE_REPOSITORY_URL}
+    if problem is None:
+        return result
+    # A dirty or half-created checkout must not block every later candidate with
+    # this pin.  Rebuild it once, but only if no running deployment uses it.
+    if revision in core_pins_in_use(cfg):
+        raise DeployError(f"CORE_IN_USE_UNHEALTHY:{problem}"[:300])
+    _remove_core_checkout(cfg, host, checkout)
+    _must(host, _core_git(cfg, "worktree", "prune"), "CORE_WORKTREE_PRUNE_FAILED")
+    _add_core_checkout(cfg, host, checkout, revision)
+    again = core_checkout_problem(host, checkout, revision)
+    if again is not None:
+        raise DeployError(again[:300])
+    return {**result, "rebuilt": problem[:300]}
+
+
+def _add_core_checkout(cfg: Config, host: Host, checkout: Path, revision: str) -> None:
+    cfg.core_checkouts.mkdir(parents=True, exist_ok=True)
+    _must(
+        host,
+        _core_git(cfg, "worktree", "add", "--detach", str(checkout), revision),
+        "CORE_WORKTREE_ADD_FAILED",
+    )
+
+
+def _remove_core_checkout(cfg: Config, host: Host, checkout: Path) -> None:
+    """Remove a checkout strictly inside a real ``core/`` (never through a symlink)."""
+    parent = cfg.core_checkouts
+    if (
+        parent.is_symlink()
+        or checkout.is_symlink()
+        or checkout.resolve().parent != parent.resolve()
+    ):
+        raise DeployError("CORE_PATH_SYMLINKED")
+    host.run(_core_git(cfg, "worktree", "remove", "--force", str(checkout)), timeout=300)
+    if checkout.exists() and not checkout.is_symlink():
+        shutil.rmtree(checkout, ignore_errors=True)
+
+
+def core_checkout_problem(host: Host, checkout: Path, revision: str) -> Optional[str]:
+    """None when ``checkout`` is a clean worktree at exactly ``revision``."""
+    if not (checkout / ".git").is_file():
+        # Half-created (e.g. a killed `worktree add`); never let git walk upwards.
+        return "CORE_CHECKOUT_INCOMPLETE"
+    head = host.run(["git", "-C", str(checkout), "rev-parse", "HEAD"])
+    if head.returncode != 0:
+        return f"CORE_HEAD_FAILED:{(head.stderr or '').strip()[:200]}"
+    if head.stdout.strip() != revision:
+        return f"CORE_HEAD_MISMATCH:{head.stdout.strip()}"
+    # --ignored: an ignored file (say a stray .pyc) can still be imported.
+    status = host.run([
+        "git",
+        "-C",
+        str(checkout),
+        "status",
+        "--porcelain",
+        "--untracked-files=all",
+        "--ignored",
+    ])
+    if status.returncode != 0:
+        return "CORE_STATUS_FAILED"
+    if status.stdout.strip():
+        return "CORE_TREE_DIRTY"
+    return None
+
+
+def core_pins_in_use(cfg: Config) -> set:
+    """Core revisions the live Gateway or the deployer tree may be running.
+
+    Same protected set as retention: the live (and, before a switch, previous)
+    plist root and ``auto-deploy-current``, plus the NEXUS_CORE_REPO_ROOT the
+    live wrapper exports.  Anything unreadable raises (treated as in use).
+    """
+    try:
+        plist = cfg.plist.read_bytes()
+        roots = [live_root(plist)]
+        tokens = _wrapper_tokens(plist)
+    except (OSError, DeployError) as exc:
+        raise DeployError(f"CORE_IN_USE_UNKNOWN:{exc}"[:300]) from exc
+    pins = set()
+    for token in tokens:
+        if token.startswith("NEXUS_CORE_REPO_ROOT="):
+            pins.add(Path(token.split("=", 1)[1]).name)
+    if cfg.tool_link.is_symlink():
+        roots.append(Path(os.path.realpath(cfg.tool_link)))
+    for root in roots:
+        if root is None or not (root / CORE_PIN_FILE).exists():
+            continue
+        try:
+            pins.add(read_core_pin(root))
+        except DeployError as exc:
+            raise DeployError(f"CORE_IN_USE_UNKNOWN:{exc}"[:300]) from exc
+    return pins
+
+
 def build(cfg: Config, host: Host, commit: str) -> Dict[str, Any]:
     """Materialize the immutable deployment and its dedicated venv."""
     root = cfg.deployments / f"{DEPLOYMENT_PREFIX}{commit}"
@@ -974,6 +1206,7 @@ def build(cfg: Config, host: Host, commit: str) -> Dict[str, Any]:
     ).strip()
     if head != commit:
         raise DeployError(f"WORKTREE_HEAD_MISMATCH:{head}")
+    core = materialize_core(cfg, host, read_core_pin(root))
     cfg.venvs.mkdir(parents=True, exist_ok=True)
     _must(
         host,
@@ -1004,6 +1237,7 @@ def build(cfg: Config, host: Host, commit: str) -> Dict[str, Any]:
         "venv": str(venv),
         "venv_python": str(python),
         "uv_lock_sha256": _sha256(lock.read_bytes()) if lock.exists() else None,
+        "core": core,
     }
 
 
@@ -1026,7 +1260,7 @@ def prune_refusal(cfg: Config) -> Optional[str]:
     root = cfg.gateway_root
     if not root.is_absolute() or os.path.realpath(root) != str(root):
         return f"GATEWAY_ROOT_NOT_CANONICAL:{root}"
-    for path in (cfg.deployments, cfg.venvs):
+    for path in (cfg.deployments, cfg.venvs, cfg.core_checkouts):
         if path.is_symlink():
             return f"SYMLINKED_DIRECTORY:{path}"
     return None
@@ -1056,6 +1290,49 @@ def prune(cfg: Config, host: Host, protected: List[Optional[Path]]) -> List[str]
     for venv in _contained_dirs(cfg.venvs):
         if venv.name not in present:
             shutil.rmtree(venv, ignore_errors=True)
+    prune_core(cfg, host, protected)
+    return removed
+
+
+def prune_core(cfg: Config, host: Host, protected: List[Optional[Path]]) -> List[str]:
+    """Remove ``core/<sha>`` checkouts no remaining or protected deployment pins.
+
+    Nothing is removed if an ``a1-*`` deployment has a pin file that cannot be
+    read, or if a protected ``a1-*`` deployment has none.  An unprotected ``a1-*``
+    directory without a pin file pins nothing; r1 deployments never use these
+    checkouts.
+    """
+    parent = cfg.core_checkouts
+    if prune_refusal(cfg) or parent.is_symlink() or not parent.is_dir():
+        return []
+    guarded = [p for p in protected if p is not None]
+    guarded_names = {p.name for p in guarded}
+    roots = list(guarded)
+    if cfg.deployments.is_dir():
+        roots += [p for p in cfg.deployments.iterdir() if p.is_dir() and not p.is_symlink()]
+    pinned = set()
+    for root in roots:
+        if not root.name.startswith(DEPLOYMENT_PREFIX):
+            with contextlib.suppress(DeployError):
+                pinned.add(read_core_pin(root))
+            continue
+        if not (root / CORE_PIN_FILE).exists() and root.name not in guarded_names:
+            continue
+        try:
+            pinned.add(read_core_pin(root))
+        except DeployError:
+            return []
+    real_parent = parent.resolve()
+    removed: List[str] = []
+    for child in sorted(parent.iterdir()):
+        if child.is_symlink() or not child.is_dir() or not _SHA.match(child.name):
+            continue
+        if child.resolve().parent != real_parent or child.name in pinned:
+            continue
+        host.run(_core_git(cfg, "worktree", "remove", "--force", str(child)), timeout=300)
+        if child.exists() and not child.is_symlink():
+            shutil.rmtree(child, ignore_errors=True)
+        removed.append(child.name)
     return removed
 
 
@@ -1299,6 +1576,8 @@ class _Cycle:
                     "venv_python": str(venv_python),
                     "steps": [
                         "build worktree + venv (uv sync --frozen)",
+                        "materialize clean nexus-core checkout at the tree's "
+                        "CANONICAL_CORE_REVISION (NEXUS_CORE_REPO_ROOT)",
                         "probe on spare port with throwaway state",
                         "re-check HOLD and pin bumps",
                         f"journal + rewrite {cfg.plist} under the manager lock",
@@ -1404,19 +1683,24 @@ class _Cycle:
         receipt = self.new_receipt(candidate, previous_plist)
         receipt["required_checks"] = checks
         receipt["warnings"] = list(warnings)
+        hold: Optional[str] = None
         try:
             receipt.update(self.attempt_effects(candidate, previous_plist, receipt))
         except Exception as exc:  # noqa: BLE001 - every failure must still leave a receipt
             receipt["reason"] = f"{type(exc).__name__}:{exc}"[:500]
             if receipt["switched"] and not receipt["rolled_back"]:
                 receipt.update(self.rollback(previous_plist, receipt))
-            elif str(exc).startswith("SOURCE_TREE_WRITTEN"):
+            elif str(exc).startswith(("SOURCE_TREE_WRITTEN", "CORE_PIN_INVALID")):
                 receipt["outcome"] = "REJECTED_BUILD"
             elif str(exc).startswith("MANAGER_LOCK_UNAVAILABLE"):
                 receipt["outcome"] = "BLOCKED_MANAGER_BUSY"
             else:
                 receipt["outcome"] = "BUILD_FAILED"
-        return self.close_receipt(receipt)
+                if str(exc).startswith(("CORE_IN_USE_UNHEALTHY", "CORE_IN_USE_UNKNOWN")):
+                    # A running deployment's Core is never touched; stop retrying
+                    # until the Owner repairs it and runs `release`.
+                    hold = f"auto-hold: {str(exc)[:200]} (core checkout in use)"
+        return self.close_receipt(receipt, hold=hold)
 
     def spare_probe(
         self, root: Path, python: Path, commit: str, receipt: Dict[str, Any]
@@ -1426,7 +1710,11 @@ class _Cycle:
         shutil.rmtree(probe_state, ignore_errors=True)
         probe_state.mkdir(parents=True)
         port = host.free_port()
-        command = wrapper_command(cfg, root, python, port, state_dir=probe_state)
+        core = receipt.get("core")
+        core_root = Path(core["root"]) if isinstance(core, dict) else None
+        command = wrapper_command(
+            cfg, root, python, port, state_dir=probe_state, core_root=core_root
+        )
         stop = host.start(command, cfg.state_dir / "logs" / f"{receipt['attempt_id']}.probe.log")
         try:
             result = self.prober.probe(
@@ -1436,6 +1724,7 @@ class _Cycle:
                 root=root,
                 python=python,
                 timeout=cfg.probe_timeout_seconds,
+                core=core if isinstance(core, dict) else {},
             )
         finally:
             stop()
@@ -1485,7 +1774,8 @@ class _Cycle:
             if block is not None:
                 return {"outcome": "BLOCKED_MANAGER_BUSY", "reason": block}
 
-            new_plist = render_plist(previous_plist, wrapper_command(cfg, root, python), root)
+            command = wrapper_command(cfg, root, python, core_root=Path(receipt["core"]["root"]))
+            new_plist = render_plist(previous_plist, command, root)
             self.write_journal(receipt, previous_plist, new_plist, python)
             _atomic_write(cfg.plist, new_plist)
             receipt["switched"] = True
@@ -1496,7 +1786,9 @@ class _Cycle:
     ) -> Dict[str, Any]:
         try:
             self.host.reload_service(self.cfg.plist, GATEWAY_LABEL)
-            live = self.live_probe(receipt["candidate_commit"], root, python)
+            # A receipt without a Core pin (e.g. an older journal) fails closed.
+            core = receipt.get("core") if isinstance(receipt.get("core"), dict) else {}
+            live = self.live_probe(receipt["candidate_commit"], root, python, core=core)
         except DeployError as exc:
             live = {"ok": False, "error": str(exc)[:300]}
         receipt["probes"]["live"] = live
@@ -1506,7 +1798,10 @@ class _Cycle:
         receipt["reason"] = "candidate failed the live probe"
         return self.rollback(previous_plist, receipt)
 
-    def live_probe(self, commit: str, root: Path, python: Path) -> Dict[str, Any]:
+    def live_probe(
+        self, commit: str, root: Path, python: Path, *, core: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """``core`` is set for a candidate; the rollback probe of the predecessor omits it."""
         return self.prober.probe(
             port=LIVE_PORT,
             token=read_env_token(self.cfg.env_file),
@@ -1514,6 +1809,7 @@ class _Cycle:
             root=root,
             python=python,
             timeout=self.cfg.probe_timeout_seconds,
+            core=core,
         )
 
     def write_journal(
@@ -1570,7 +1866,8 @@ class _Cycle:
                 # path proceeds; everything else keeps the journal for later.
                 block = self.host.r1_recovery_block(cfg)
                 if _sha256(live_plist) == new_plist_sha and block is not None:
-                    live = self.live_probe(receipt["candidate_commit"], root, python)
+                    core = receipt.get("core") if isinstance(receipt.get("core"), dict) else {}
+                    live = self.live_probe(receipt["candidate_commit"], root, python, core=core)
                     receipt["probes"]["live"] = live
                     receipt["r1_block_observed"] = block
                     if not live["ok"]:
