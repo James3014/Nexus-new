@@ -430,7 +430,7 @@ def _from_origin(run: dict, workflow_run: dict, sha: str, origin: Dict[str, Any]
     merged = _parse_time(origin["merged_at"])
     created = _parse_time(workflow_run.get("created_at"))
     started = _parse_time(run.get("started_at"))
-    if None in (opened, merged, created, started):
+    if opened is None or merged is None or created is None or started is None:
         return False
     if not opened <= created <= merged or not opened <= started <= merged:
         return False
