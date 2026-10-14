@@ -20,6 +20,14 @@ DETERMINISTIC_RESCUE = "deterministic_rescue"
 # A with-Nexus SUCCESS that a model call preceded but Nexus's local path delivered
 # (``local_preflight`` / ``local_hidden_shadow`` / ...): not a model solve.
 LOCAL_RESCUE = "rescued_by_local"
+# A with-Nexus SUCCESS reached only after the bench showed the arm the hidden verifier's
+# failure (deterministic hidden pre-retry or a model retry quoting the hidden test, R1).
+# The bare arm never gets that feedback, so it is never a model solve.
+HIDDEN_FEEDBACK_RESCUE = "rescued_by_hidden_feedback"
+HIDDEN_FEEDBACK_RETRY_REASONS = frozenset({
+    "hidden_verifier_failure_deterministic_pre_retry",
+    "hidden_verifier_failure_bounded_nexus_retry",
+})
 MODEL_SOLVE = "model_solve"
 NOT_SOLVED = "not_solved"
 RECEIPT_DATA_CONTRACT_VIOLATION = "receipt_data_contract_violation"
@@ -41,6 +49,15 @@ def local_delivery(row: dict[str, Any]) -> bool:
     ).startswith("local")
 
 
+def hidden_feedback_used(row: dict[str, Any]) -> bool:
+    """True when the delivered result came after hidden-verifier feedback (R1)."""
+
+    return (
+        row.get("hidden_retry_used") is True
+        or str(row.get("hidden_retry_reason") or "") in HIDDEN_FEEDBACK_RETRY_REASONS
+    )
+
+
 def receipt_contract_violation(row: dict[str, Any]) -> bool:
     return (
         str(row.get("infra_invalid_reason") or "") == RECEIPT_DATA_CONTRACT_VIOLATION
@@ -54,6 +71,8 @@ def apply_strict_llm_baseline_classification(
     """Tag finished rows in place; only a model-delivered SUCCESS is a model solve.
 
     * SUCCESS with no model call -> ``deterministic_rescue`` (#1820).
+    * SUCCESS only after hidden-verifier feedback (``hidden_retry_used`` / a feedback
+      ``hidden_retry_reason``) -> with-Nexus: ``rescued_by_hidden_feedback``; bare: ``not_solved``.
     * SUCCESS after a model call but delivered by Nexus's local path -> with-Nexus:
       ``rescued_by_local``; bare arm: ``not_solved`` (the bare arm has no Nexus path, so a
       local delivery there is never credited).
@@ -72,6 +91,13 @@ def apply_strict_llm_baseline_classification(
             row["deterministic_rescue"] = is_rescue
             if is_rescue:
                 row["solve_classification"] = DETERMINISTIC_RESCUE
+            elif hidden_feedback_used(row):
+                row["hidden_feedback_rescue"] = True
+                if mode == WITH_NEXUS_MODE:
+                    row["solve_classification"] = HIDDEN_FEEDBACK_RESCUE
+                    row["rescued_by_local"] = True
+                else:
+                    row["solve_classification"] = NOT_SOLVED
             elif local_delivery(row):
                 if mode == WITH_NEXUS_MODE:
                     row["solve_classification"] = LOCAL_RESCUE
@@ -101,7 +127,10 @@ def honest_scorecard(rows: Iterable[dict[str, Any]], mode: str) -> dict[str, Any
     solved = [r for r in arm if r.get("solve_classification") == MODEL_SOLVE]
     if mode == WITH_NEXUS_MODE:
         rescued = [
-            r for r in arm if r.get("solve_classification") in {LOCAL_RESCUE, DETERMINISTIC_RESCUE}
+            r
+            for r in arm
+            if r.get("solve_classification")
+            in {LOCAL_RESCUE, DETERMINISTIC_RESCUE, HIDDEN_FEEDBACK_RESCUE}
         ]
     else:
         rescued = []

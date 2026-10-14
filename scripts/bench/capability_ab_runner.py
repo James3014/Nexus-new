@@ -3164,6 +3164,18 @@ def _hidden_retry_disabled() -> bool:
     return os.environ.get("NEXUS_BENCH_DISABLE_HIDDEN_RETRY", "").strip().lower() in {"1", "true", "yes"}
 
 
+def _hidden_feedback_disabled() -> bool:
+    """True when the with-Nexus arm must not see hidden-verifier feedback (R1).
+
+    The bare arm never gets the hidden test's failure text or a fixture patch derived
+    from it, so in a counted like-for-like run the with-Nexus arm must not either.
+    ``main`` sets this from ``--no-hidden-feedback`` (default ON under
+    ``--strict-llm-baseline`` / ``--require-same-model-baseline``).
+    """
+
+    return os.environ.get("NEXUS_BENCH_NO_HIDDEN_FEEDBACK", "").strip().lower() in {"1", "true", "yes"}
+
+
 @dataclass(frozen=True)
 class HiddenRetryDecision:
     classifier: str
@@ -15497,7 +15509,10 @@ def run_with_nexus(
                     "bounded_self_heal_not_triggered",
                     "self_heal_failed",
                 }
-                if hidden_retry_decision.lane == "minimal_patch":
+                hidden_feedback_disabled = _hidden_feedback_disabled()
+                if hidden_feedback_disabled:
+                    row["hidden_feedback_disabled"] = True
+                if hidden_retry_decision.lane == "minimal_patch" and not hidden_feedback_disabled:
                     pre_retry = _deterministic_hidden_pre_retry(
                         task=task,
                         repo_root=repo_root,
@@ -15538,10 +15553,14 @@ def run_with_nexus(
                         row["hidden_retry_tokens"] = 0
                         row["hidden_retry_payload_status"] = "SUCCESS"
                         row["hidden_retry_payload_semantic_status"] = "VERIFIED"
+                        # The local fixture mutator, not the model, produced the delivered file.
+                        row["nexus_model_winner_source"] = str(row.get("nexus_winner_source") or "")
+                        row["nexus_winner_source"] = "local_hidden_pre_retry"
                         recovered_on_retry = True
                 should_retry_hidden = bool(
                     llm_enabled
                     and not recovered_on_retry
+                    and not hidden_feedback_disabled
                     and not _hidden_retry_disabled()
                     and (
                         effective_llm_self_heal
@@ -15552,7 +15571,11 @@ def run_with_nexus(
                     and hidden_retry_decision.retry
                     and int(row.get("model_calls", 0) or 0) > 0
                 )
-                if _hidden_retry_disabled():
+                if hidden_feedback_disabled:
+                    row["hidden_retry_used"] = False
+                    row["hidden_retry_reason"] = "disabled_no_hidden_feedback"
+                    row["hidden_retry_lane"] = "skipped_policy"
+                elif _hidden_retry_disabled():
                     row["hidden_retry_used"] = False
                     row["hidden_retry_reason"] = "disabled_by_benchmark_policy"
                     row["hidden_retry_lane"] = "skipped_policy"
@@ -19496,6 +19519,23 @@ def main() -> int:
         help="When Nexus LLM baseline is enabled, require the baseline patch to come from the model and forbid local fallback.",
     )
     parser.add_argument(
+        "--no-hidden-feedback",
+        dest="no_hidden_feedback",
+        action="store_true",
+        default=None,
+        help=(
+            "Never give the with-Nexus arm hidden-verifier feedback (no deterministic hidden pre-retry, "
+            "no model retry quoting the hidden test). Default ON under --strict-llm-baseline or "
+            "--require-same-model-baseline, because the bare arm never gets it."
+        ),
+    )
+    parser.add_argument(
+        "--allow-hidden-feedback",
+        dest="no_hidden_feedback",
+        action="store_false",
+        help="Re-enable hidden-verifier feedback retries for the with-Nexus arm (diagnostic runs only; not like-for-like).",
+    )
+    parser.add_argument(
         "--disable-promoted-route-cost-policy",
         action="store_true",
         help="Ignore the repo-level promoted route-cost policy for clean cost diagnosis runs.",
@@ -19693,6 +19733,9 @@ def main() -> int:
         os.environ["NEXUS_OUTBOUND_PROMPT_STRICT"] = "1"
     if args.disable_promoted_route_cost_policy:
         os.environ["NEXUS_DISABLE_PROMOTED_ROUTE_COST_POLICY"] = "1"
+    if args.no_hidden_feedback is None:
+        args.no_hidden_feedback = bool(args.strict_llm_baseline or getattr(args, "require_same_model_baseline", False))
+    os.environ["NEXUS_BENCH_NO_HIDDEN_FEEDBACK"] = "1" if args.no_hidden_feedback else "0"
     if args.skip_llm_baseline and args.strict_llm_baseline:
         parser.error("--strict-llm-baseline cannot be combined with --skip-llm-baseline")
     if args.nexus_only and args.without_only:
@@ -20319,6 +20362,7 @@ def main() -> int:
                     "enable_llm_self_heal": bool(args.enable_llm_self_heal),
                     "skip_llm_baseline": bool(args.skip_llm_baseline),
                     "strict_llm_baseline": bool(args.strict_llm_baseline),
+                    "no_hidden_feedback": bool(args.no_hidden_feedback),
                     "disable_promoted_route_cost_policy": bool(args.disable_promoted_route_cost_policy),
                     "force_flow": args.force_flow,
                     "parallel_arms": args.parallel_arms,
