@@ -1700,6 +1700,18 @@ def test_bind_contract_evidence_refs_does_not_duplicate_model_cited_refs():
     assert len(refs) == 3
 
 
+def test_bind_contract_evidence_refs_collapses_model_duplicates_before_the_cap():
+    from nexus.services.external_intelligence import MAX_LIST, bind_contract_evidence_refs
+
+    pack = build_context_pack(contract_sources())
+    req = build_request(normalize_intake(record()), pack, selected_worker=sample_selected_worker())
+    file_ref = _pack_ref(pack, "source_file")
+    envelope = envelope_v2_for(req, context_pack=pack, evidence_refs=[file_ref])
+    flooded = {**envelope, "evidence_refs": [file_ref] * (MAX_LIST + 1)}
+    refs = bind_contract_evidence_refs(flooded, pack)["evidence_refs"]
+    assert refs == bind_contract_evidence_refs(envelope, pack)["evidence_refs"]
+
+
 def test_bind_contract_evidence_refs_rejects_tampered_pack_and_leaves_v1_alone():
     from nexus.services.external_intelligence import bind_contract_evidence_refs
 

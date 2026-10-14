@@ -791,13 +791,14 @@ def bind_contract_evidence_refs(
     ``source_absence:<path>@<anchor>`` (path absent), plus the ``task_card:`` ref.
     Nexus already minted exactly those refs from ``main_sha`` when it built the
     context pack, so they are copied from the validated pack instead of trusting
-    the model to repeat them.  The model's own refs keep their order and are never
-    removed; refs absent from the pack are never invented.
+    the model to repeat them.  The model's own refs keep their first-occurrence order
+    (exact duplicates are collapsed so they cannot exhaust the ref cap); refs absent
+    from the pack are never invented.
     """
     if envelope.get("schema") != ENVELOPE_SCHEMA_V2:
         return dict(envelope)
     validated = validate_context_pack(context_pack)
-    refs = list(envelope.get("evidence_refs") or [])
+    refs = list(dict.fromkeys(envelope.get("evidence_refs") or []))
     present = set(refs)
     for entry in validated.get("entries") or []:
         if entry.get("kind") not in CONTRACT_EVIDENCE_KINDS:
