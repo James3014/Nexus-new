@@ -205,6 +205,9 @@ class WorkerExecutionReceipt:
     failure_reason: Optional[str] = None
     account_alias_hash: Optional[str] = None
     provider_attempt_count: Optional[int] = None
+    # Agy permission posture actually executed (#1912), e.g.
+    # ``accept_edits_no_autoapprove`` or ``plan_no_autoapprove``.
+    provider_permission_mode: Optional[str] = None
 
 
 def classify_worker_failure(receipt: WorkerExecutionReceipt) -> str:

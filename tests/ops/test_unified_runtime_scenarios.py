@@ -100,7 +100,9 @@ def test_agy_invoker_passes_dynamic_prompt_as_print_argument(monkeypatch, tmp_pa
 
     assert calls[0][0] == [
         str(agy),
-        "--dangerously-skip-permissions",
+        "--mode",
+        "plan",
+        "--sandbox",
         "--print",
         "Reply with exactly: NEXUS_V3_ONLINE_OK",
     ]

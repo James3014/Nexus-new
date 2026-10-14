@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import shutil
 import subprocess
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Optional
 
@@ -30,6 +33,159 @@ from nexus.services.external_account_pool import (
     is_rotation_eligible,
 )
 from nexus.services.unified_runtime import resolve_registered_provider_executable
+
+# Agy write-admission (Owner decision on #1912). Production executors never
+# auto-approve Agy tool calls: implementation workers run ``--mode
+# accept-edits`` (file edits only, commands are denied in headless print mode)
+# and read-only roles run ``--mode plan --sandbox``. The flags below are
+# refused anywhere in the option part of the argv as defense in depth.
+AGY_PERMISSION_BYPASS_FLAGS: frozenset[str] = frozenset({
+    "--dangerously-skip-permissions",
+    "--yolo",
+    "--auto-approve",
+})
+AGY_PERMISSION_MODE_ACCEPT_EDITS = "accept_edits_no_autoapprove"
+AGY_PERMISSION_MODE_PLAN = "plan_no_autoapprove"
+AGY_IMPLEMENTATION_ROLES: frozenset[str] = frozenset({
+    "implementation",
+    "implementer",
+    "bounded_code_candidate",
+})
+AGY_READ_ONLY_ROLES: frozenset[str] = frozenset({
+    "review",
+    "reviewer",
+    "plan",
+    "planner",
+    "planning",
+    "read_only",
+})
+_AGY_ADMITTED_MODES = frozenset({"accept-edits", "plan"})
+# Agy reports a headless auto-denial on stderr ("jetski: no output produced —
+# a tool required the "command" permission that headless mode cannot prompt
+# for, so it was auto-denied") and, with ``--output-format json``, as a
+# non-empty ``denied_actions`` list while still exiting 0 / status SUCCESS.
+_AGY_HEADLESS_PERMISSION_DENIAL_MARKERS = (
+    "jetski: no output produced",
+    "permission that headless mode cannot prompt",
+    "headless mode cannot prompt for, so it was auto-denied",
+)
+
+
+def agy_permission_bypass_flags(argv: tuple[str, ...] | list[str]) -> list[str]:
+    """Deny-listed permission flags in ``argv``, ignoring the ``--print`` prompt value."""
+    tokens = [str(token) for token in argv]
+    if "--print" in tokens:
+        index = tokens.index("--print")
+        tokens = tokens[: index + 1] + tokens[index + 2 :]
+    found: list[str] = []
+    for index, token in enumerate(tokens):
+        name, has_value, value = token.partition("=")
+        if name in AGY_PERMISSION_BYPASS_FLAGS:
+            found.append(token)
+        elif name == "--mode":
+            mode = value if has_value else (tokens[index + 1] if index + 1 < len(tokens) else "")
+            if mode not in _AGY_ADMITTED_MODES:
+                found.append(token if has_value else f"--mode {mode}".rstrip())
+    return found
+
+
+def agy_delivery_failure(stdout: bytes, stderr: bytes) -> Optional[str]:
+    """Typed non-delivery reason for an Agy run that exited 0, else ``None``.
+
+    A permission-blocked run, an empty answer, or a non-SUCCESS JSON status is
+    never a delivered result.
+    """
+    out = stdout.decode("utf-8", errors="replace")
+    err = stderr.decode("utf-8", errors="replace")
+    if any(marker in out or marker in err for marker in _AGY_HEADLESS_PERMISSION_DENIAL_MARKERS):
+        return "agy_permission_denied"
+    text = out.strip()
+    if not text:
+        return "agy_no_output"
+    payload: Any = None
+    try:
+        payload = json.loads(text)
+    except ValueError:
+        last_line = text.splitlines()[-1].strip()
+        try:
+            payload = json.loads(last_line)
+        except ValueError:
+            payload = None
+    if isinstance(payload, dict):
+        if payload.get("denied_actions"):
+            return "agy_permission_denied"
+        if "status" in payload and str(payload.get("status") or "") != "SUCCESS":
+            return "agy_status_not_success"
+        if "response" in payload and not str(payload.get("response") or "").strip():
+            return "agy_no_output"
+    return None
+
+
+def _agy_model_shape_ok(model: str) -> bool:
+    return (
+        bool(model)
+        and not model.startswith("-")
+        and not any(char.isspace() or char == "=" for char in model)
+    )
+
+
+def _git_output(root: Path, *args: str) -> Optional[bytes]:
+    try:
+        completed = subprocess.run(
+            ["git", "--no-optional-locks", *args],
+            cwd=root,
+            capture_output=True,
+            timeout=120,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return completed.stdout if completed.returncode == 0 else None
+
+
+def canonical_checkout_fingerprint(root: Path | str) -> Optional[str]:
+    """Hash HEAD, porcelain status, tracked diff and untracked file bytes.
+
+    Returns ``None`` when ``root`` is not the top level of a readable Git
+    checkout, so callers can fail closed.
+    """
+    path = Path(root).resolve()
+    toplevel = _git_output(path, "rev-parse", "--show-toplevel")
+    if (
+        toplevel is None
+        or Path(toplevel.decode("utf-8", errors="replace").strip()).resolve() != path
+    ):
+        return None
+    head = _git_output(path, "rev-parse", "--verify", "HEAD")
+    status = _git_output(path, "status", "--porcelain=v1", "-uall", "-z")
+    diff = _git_output(path, "diff", "--binary", "HEAD")
+    if head is None or status is None or diff is None:
+        return None
+    digest = hashlib.sha256()
+    for part in (head, status, hashlib.sha256(diff).digest()):
+        digest.update(len(part).to_bytes(8, "big"))
+        digest.update(part)
+    for entry in status.split(b"\0"):
+        if not entry.startswith(b"?? "):
+            continue
+        relative = entry[3:].decode("utf-8", errors="surrogateescape")
+        try:
+            content_hash = hashlib.sha256((path / relative).read_bytes()).digest()
+        except OSError:
+            content_hash = b"unreadable"
+        digest.update(entry)
+        digest.update(content_hash)
+    return digest.hexdigest()
+
+
+def _default_canonical_checkout_root() -> Path:
+    from nexus.orchestrator.canonical_source_root import CANONICAL_SOURCE_ROOT
+
+    return Path(CANONICAL_SOURCE_ROOT)
+
+
+def _paths_overlap(left: Path, right: Path) -> bool:
+    return left == right or left.is_relative_to(right) or right.is_relative_to(left)
 
 
 class CodexWorkerAdapter:
@@ -233,12 +389,22 @@ class AgyWorkerAdapter:
         model_env: str = "NEXUS_AGY_WORKER_MODEL",
         default_model: str = "gemini-3.8-flash-medium",
         account_pool: Optional[Any] = None,
+        canonical_root: Optional[Path | str] = None,
     ):
         self.executable_env = executable_env
         self.project_id_env = project_id_env
         self.model_env = model_env
         self.default_model = default_model
         self._injected_account_pool = account_pool
+        self._canonical_root = Path(canonical_root) if canonical_root is not None else None
+
+    def _canonical_checkout_root(self) -> Path:
+        root = (
+            self._canonical_root
+            if self._canonical_root is not None
+            else _default_canonical_checkout_root()
+        )
+        return root.resolve()
 
     def _configured_executable(self) -> str:
         try:
@@ -341,33 +507,128 @@ class AgyWorkerAdapter:
         timeout_seconds: Optional[float] = None,
         on_process_group: Any = None,
         model: Optional[str] = None,
+        worker_role: Optional[str] = None,
     ) -> WorkerExecutionReceipt:
+        """Run Agy under the #1912 write-admission model.
+
+        The target must be a runtime-owned worktree outside the canonical
+        checkout; the canonical checkout is fingerprinted before and after the
+        run and any change fails the run closed (it is reported, never
+        reverted). The candidate diff stays in the target worktree for the
+        existing governed collect/verify/apply path.
+        """
         started_at = time.monotonic()
         preflight = self.preflight()
         if not preflight.ready:
             raise WorkerProviderUnavailable(f"{self.provider}: {preflight.reason}")
-        target = str(Path(lease.target_worktree).resolve())
-        timeout = 900.0 if timeout_seconds is None else max(0.0, float(timeout_seconds))
+        target_path = Path(lease.target_worktree).resolve()
+        target = str(target_path)
         executable = preflight.executable or self._configured_executable()
-        raw_budget = getattr(contract, "maximum_provider_calls", 1)
-        provider_call_budget = max(0, int(1 if raw_budget is None else raw_budget))
+
+        def refuse(
+            reason: str, permission_mode: Optional[str], argv: tuple[str, ...] = ()
+        ) -> WorkerExecutionReceipt:
+            return WorkerExecutionReceipt(
+                provider=self.provider,
+                task_id=contract.task_id,
+                target_worktree=target,
+                worker_status=CliWorkerStatus.START_FAILED.value,
+                outcome=WorkerOutcome.FAILED.value,
+                exit_code=1,
+                executable_identity=executable,
+                argv=argv,
+                stdout_sha256=CliWorkerResult.hash_bytes(b""),
+                stderr_sha256=CliWorkerResult.hash_bytes(b""),
+                wall_time_ms=int((time.monotonic() - started_at) * 1000),
+                process_group_id=None,
+                process_group_killed=False,
+                timed_out=False,
+                provider_calls=0,
+                evidence_complete=False,
+                commit_created=False,
+                merge_performed=False,
+                push_performed=False,
+                failure_reason=reason,
+                account_alias_hash=None,
+                provider_attempt_count=0,
+                provider_permission_mode=permission_mode,
+            )
+
+        role = str(worker_role or "implementation").strip().lower()
+        if role in AGY_READ_ONLY_ROLES:
+            read_only, permission_mode = True, AGY_PERMISSION_MODE_PLAN
+        elif role in AGY_IMPLEMENTATION_ROLES:
+            read_only, permission_mode = False, AGY_PERMISSION_MODE_ACCEPT_EDITS
+        else:
+            return refuse("agy_worker_role_unsupported", None)
+
+        selected_model = str(model or self._model())
+        timeout = 900.0 if timeout_seconds is None else max(0.0, float(timeout_seconds))
+        mode_flags = ("--mode", "plan", "--sandbox") if read_only else ("--mode", "accept-edits")
 
         def build_argv(call_timeout: float, current_prompt: str) -> tuple[str, ...]:
             return (
                 "--new-project",
                 "--add-dir",
                 target,
-                "--dangerously-skip-permissions",
-                "--mode",
-                "accept-edits",
+                *mode_flags,
                 "--model",
-                model or self._model(),
+                selected_model,
+                "--output-format",
+                "json",
                 "--print-timeout",
                 self._timeout_arg(call_timeout),
                 "--print",
                 current_prompt,
             )
 
+        argv = build_argv(timeout, prompt)
+        if not _agy_model_shape_ok(selected_model) or agy_permission_bypass_flags(argv):
+            return refuse("agy_command_shape_unsupported", permission_mode)
+
+        canonical_root = self._canonical_checkout_root()
+        if _paths_overlap(target_path, canonical_root):
+            return refuse("agy_target_overlaps_canonical_checkout", permission_mode, argv)
+        before = canonical_checkout_fingerprint(canonical_root)
+        if before is None:
+            return refuse("canonical_checkout_snapshot_unavailable", permission_mode, argv)
+
+        # The shared provider wall-time budget starts after the integrity
+        # snapshot so Git bookkeeping never eats into the provider deadline.
+        receipt = self._invoke_admitted(
+            contract,
+            prompt=prompt,
+            started_at=time.monotonic(),
+            target=target,
+            timeout=timeout,
+            executable=executable,
+            build_argv=build_argv,
+            on_process_group=on_process_group,
+        )
+        receipt = replace(receipt, provider_permission_mode=permission_mode)
+        if canonical_checkout_fingerprint(canonical_root) != before:
+            receipt = replace(
+                receipt,
+                outcome=WorkerOutcome.FAILED.value,
+                evidence_complete=False,
+                failure_reason="canonical_checkout_integrity_violation",
+            )
+        return receipt
+
+    def _invoke_admitted(
+        self,
+        contract: Any,
+        *,
+        prompt: str,
+        started_at: float,
+        target: str,
+        timeout: float,
+        executable: str,
+        build_argv: Any,
+        on_process_group: Any,
+    ) -> WorkerExecutionReceipt:
+        raw_budget = getattr(contract, "maximum_provider_calls", 1)
+        provider_call_budget = max(0, int(1 if raw_budget is None else raw_budget))
         argv = build_argv(timeout, prompt)
 
         if provider_call_budget == 0:
@@ -442,12 +703,16 @@ class AgyWorkerAdapter:
                 timeout_seconds=remaining_seconds,
             )
             result = run_cli_worker(request, on_process_group=on_process_group)
+            delivery_failure: Optional[str] = None
             if result.status is CliWorkerStatus.TIMED_OUT:
                 outcome = WorkerOutcome.INCOMPLETE
             elif result.status is not CliWorkerStatus.COMPLETED or result.exit_code != 0:
                 outcome = WorkerOutcome.FAILED
             else:
-                outcome = WorkerOutcome.EXECUTION_COMPLETED
+                delivery_failure = agy_delivery_failure(result.stdout, result.stderr)
+                outcome = (
+                    WorkerOutcome.FAILED if delivery_failure else WorkerOutcome.EXECUTION_COMPLETED
+                )
             return WorkerExecutionReceipt(
                 provider=self.provider,
                 task_id=contract.task_id,
@@ -468,7 +733,11 @@ class AgyWorkerAdapter:
                 commit_created=False,
                 merge_performed=False,
                 push_performed=False,
-                failure_reason=None if outcome == WorkerOutcome.EXECUTION_COMPLETED else f"{self.provider} execution did not complete successfully",
+                failure_reason=None
+                if outcome == WorkerOutcome.EXECUTION_COMPLETED
+                else (
+                    delivery_failure or f"{self.provider} execution did not complete successfully"
+                ),
                 account_alias_hash=None,
                 provider_attempt_count=1,
             )
@@ -652,7 +921,12 @@ class AgyWorkerAdapter:
         if last_result.status is CliWorkerStatus.TIMED_OUT:
             outcome_val = WorkerOutcome.INCOMPLETE.value
         elif last_result.status is CliWorkerStatus.COMPLETED and last_result.exit_code == 0:
-            outcome_val = WorkerOutcome.EXECUTION_COMPLETED.value
+            delivery_failure = agy_delivery_failure(last_result.stdout, last_result.stderr)
+            if delivery_failure:
+                outcome_val = WorkerOutcome.FAILED.value
+                failure_reason = delivery_failure
+            else:
+                outcome_val = WorkerOutcome.EXECUTION_COMPLETED.value
         else:
             outcome_val = WorkerOutcome.FAILED.value
 
