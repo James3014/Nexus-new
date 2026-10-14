@@ -1972,6 +1972,25 @@ def _no_nexus_task_hints() -> bool:
     return os.environ.get("NEXUS_BENCH_NO_TASK_HINTS", "").strip().lower() in {"1", "true", "yes"}
 
 
+def _strict_symmetric_with_nexus_env() -> dict[str, str]:
+    """Env for every with-Nexus subprocess in the counted like-for-like configuration.
+
+    S14: fixture-aware local paths may not pre-empt or replace the model; the final delivery must
+    be the model's. S9: no self-heal re-ask. S3-S6: the product prompt carries no hidden-verifier
+    guidance, no CodeIntel/prior-art injection, includes the visible test, and the with-Nexus
+    learning stores do not carry state between trials (``NEXUS_SYMMETRIC_PROMPT``).
+    """
+
+    return {
+        "NEXUS_DISABLE_LOCAL_PREFLIGHT_BEFORE_LLM": "1",
+        "NEXUS_DISABLE_HIDDEN_CONTRACT_FAST_PATH": "1",
+        "NEXUS_DISABLE_HIDDEN_INVARIANT_SHADOW": "1",
+        "NEXUS_MODEL_REQUIRED_EXECUTION_MODE": "model_participation_only",
+        "NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL": "0",
+        "NEXUS_SYMMETRIC_PROMPT": "1",
+    }
+
+
 def _nexus_task_desc(task: CapabilityTask) -> str:
     desc = task.task_desc
     if _no_nexus_task_hints():
@@ -14445,6 +14464,10 @@ def run_with_nexus(
         or expected_executor_capability_required
         or _task_default_llm_self_heal(task)
     )
+    if _no_nexus_task_hints():
+        # S9: the counted metric is one model call; the product's self-heal re-asks the model with
+        # visible-test failure output the bare arm never gets.
+        effective_llm_self_heal = False
     local_reflex = assess_local_reflex(
         task_desc=task.task_desc,
         task_type=task.task_type,
@@ -14987,6 +15010,11 @@ def run_with_nexus(
     target_file_arg = _repo_relative_path(repo_root, target_file) if enable_swarm_bench_executor else target_file
     test_file_arg = _repo_relative_path(repo_root, test_file) if enable_swarm_bench_executor else test_file
     verification_test_file = _verification_test_for_task(task, test_file)
+    strict_target_before = (
+        Path(target_file).read_text(encoding="utf-8")
+        if _no_nexus_task_hints() and Path(target_file).is_file()
+        else None
+    )
     args = [
         "nexus",
         "research:auto-flow",
@@ -15086,10 +15114,7 @@ def run_with_nexus(
         bench_env_updates["NEXUS_DISABLE_HIDDEN_INVARIANT_SHADOW"] = "1"
         bench_env_updates["NEXUS_MODEL_REQUIRED_EXECUTION_MODE"] = execution_policy.mode
     if _no_nexus_task_hints():
-        # Fixture-aware local paths must not pre-empt or replace the model in the counted arm.
-        bench_env_updates["NEXUS_DISABLE_LOCAL_PREFLIGHT_BEFORE_LLM"] = "1"
-        bench_env_updates["NEXUS_DISABLE_HIDDEN_CONTRACT_FAST_PATH"] = "1"
-        bench_env_updates["NEXUS_DISABLE_HIDDEN_INVARIANT_SHADOW"] = "1"
+        bench_env_updates.update(_strict_symmetric_with_nexus_env())
     if effective_enable_ultra_review_dry_gate:
         bench_env_updates["NEXUS_ULTRA_REVIEW_DRY_GATE"] = "1"
     if effective_enable_autoreason_executor:
@@ -15476,7 +15501,17 @@ def run_with_nexus(
             row = rescue_row
             payload = rescue_payload
             wall = wall + rescue_wall
-    if payload.get("status") == "SUCCESS" and verification_test_file != test_file:
+    # S20: in the like-for-like A/B both arms are judged by the hidden test on the delivered file
+    # only. The product gates SUCCESS on the visible test; the bare arm has no such gate, so a model
+    # file the product left delivered is verified here as well.
+    symmetric_model_delivery = bool(
+        strict_target_before is not None
+        and payload.get("status") != "SUCCESS"
+        and int(row.get("model_calls", 0) or 0) > 0
+        and Path(target_file).is_file()
+        and Path(target_file).read_text(encoding="utf-8") != strict_target_before
+    )
+    if (payload.get("status") == "SUCCESS" or symmetric_model_delivery) and verification_test_file != test_file:
         verify_start = time.monotonic()
         verify = _run_process_group(
             _pytest_verifier_cmd(verification_test_file),
@@ -15491,7 +15526,20 @@ def run_with_nexus(
         row["hidden_verifier_wall_sec"] = round(hidden_verifier_wall_sec, 4)
         row["hidden_verifier_stdout_tail"] = _tail_text(verify.stdout, max_chars=1000)
         row["hidden_verifier_stderr_tail"] = _tail_text(verify.stderr, max_chars=1000)
-        if not hidden_passed:
+        if symmetric_model_delivery:
+            row["symmetric_hidden_only_gate"] = True
+            if hidden_passed:
+                row["status"] = "SUCCESS"
+                row["semantic_status"] = "VERIFIED"
+                row["semantic_completed"] = True
+                row["report_trust_mismatch"] = False
+            else:
+                # The product already reported FAILED; no retry of any kind for this row.
+                row["hidden_retry_used"] = False
+                row["status"] = "FAILED"
+                row["semantic_status"] = "UNVERIFIED"
+                row["semantic_completed"] = False
+        if not hidden_passed and not symmetric_model_delivery:
             recovered_on_retry = False
             hidden_infra_reason = _hidden_verifier_infra_reason(row)
             if hidden_infra_reason:

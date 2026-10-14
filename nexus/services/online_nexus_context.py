@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
@@ -65,21 +66,15 @@ _CAPABILITY_GUIDANCE: dict[str, str] = {
     "swarm": "Swarm conclusions require distinct-role evidence and may not infer consensus from role labels alone.",
 }
 
-_FIXTURE_GUIDANCE: dict[str, str] = {
-    "rlm_harder_v2_governance_guard": "Allow read-only tools; block destructive or task-forbidden path operations with reason governance_block.",
-    "rlm_harder_v2_governance_scope": "Approved mutations use reason approved, read-only inspection uses read_only, and unapproved mutations use scope_block.",
-    "rlm_harder_v2_evidence_replay": "Accept replay receipts only when claim is verified, replay_command is non-empty, and exit_code is zero.",
-    "rlm_harder_v2_nightshift_recovery": "Accept Nightshift recovery only when recommended, invoked, recovered, and report_path are all present.",
-    "rlm_harder_v2_belief_budget": "Require evidence for low or uncertain confidence and elevated risk; reserve one round for high-confidence low-risk work.",
-    "rlm_harder_v2_autoreason_judge": "Ignore candidates with empty evidence_refs or non-pass status, then choose the highest-scoring remaining candidate.",
-    "rlm_harder_v2_ddtree_pruning": "Include the highest-risk boundary candidate first, then fill remaining slots with highest-score unselected candidates.",
-    "rlm_harder_v2_research_citation": "Select a research claim only when topic matches, supported is exactly true, and citation is non-empty.",
-    "rlm_harder_v2_lancedb_retrieval": "Select hits only when topic matches, score meets the threshold, and source_id is non-empty.",
-    "rlm_harder_v2_semantic_searcher_refs": "Select refs only when topic matches, relevance meets the threshold, gate_passed is true, and source_id is non-empty.",
-    "rlm_harder_v2_swarm_quiet_moment": "Require the exact quiet-moment schema, production writes disabled, observe/report/rollback actions, and status evidence.",
-    "nexus_value_mempalace_secret_redaction": "Preserve non-secret fields and redact token, password, secret, api_key, and credential-like values.",
-    "nexus_value_trust_incident_classifier": "A smoke pass without semantic verification remains needs_evidence; only verified semantic evidence resolves the incident.",
-}
+# Fixture-specific guidance (``_FIXTURE_GUIDANCE``) was removed: it restated hidden-verifier
+# contracts of benchmark fixtures (e.g. trust-002 ``needs_evidence``) that the bare arm never
+# sees (online A/B symmetry inventory S3, 2026-10-14).
+
+
+def symmetric_prompt_mode() -> bool:
+    """True in the like-for-like A/B configuration: no hidden-verifier hints in the prompt."""
+
+    return os.environ.get("NEXUS_SYMMETRIC_PROMPT", "").strip().lower() in {"1", "true", "yes"}
 
 
 def _mapping(value: Any) -> dict[str, Any]:
@@ -136,12 +131,13 @@ def build_guidance_pack(
         rule = _CAPABILITY_GUIDANCE.get(capability)
         if rule and rule not in rules:
             rules.append(rule)
-    fixture_rule = _FIXTURE_GUIDANCE.get(fixture_kind)
-    if fixture_rule and fixture_rule not in rules:
-        rules.append(fixture_rule)
     explicit = str(explicit_guidance or "").strip()
     if explicit and explicit not in rules:
         rules.append(explicit)
+    if symmetric_prompt_mode():
+        # Like-for-like A/B: the bare arm gets no statement about hidden tests, unseen edge cases,
+        # or verifier contracts, so the with-Nexus prompt carries no hidden-verifier guidance.
+        rules = []
     payload = {
         "schema": "nexus.online_guidance_pack.v1",
         "fixture_kind": fixture_kind,

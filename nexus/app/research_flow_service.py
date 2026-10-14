@@ -288,7 +288,16 @@ def _build_codeintel_evidence(repo_root: Path, *, target_file: str, task_desc: s
     return _codeintel_context.build_codeintel_evidence(repo_root, target_file=target_file, task_desc=task_desc)
 
 
+def _symmetric_prompt_mode() -> bool:
+    """Like-for-like A/B mode (``NEXUS_SYMMETRIC_PROMPT``); see sprint_service._symmetric_prompt_mode."""
+
+    return os.environ.get("NEXUS_SYMMETRIC_PROMPT", "").strip().lower() in {"1", "true", "yes"}
+
+
 def _task_with_codeintel_context(task_desc: str, codeintel: dict[str, Any]) -> str:
+    if _symmetric_prompt_mode():
+        # S6: no repository context in the model prompt; the bare arm never reads the repo.
+        return task_desc
     res = _codeintel_context.task_with_codeintel_context(task_desc, codeintel)
     if "[Nexus CodeIntel Compact]" in res and "[Nexus CodeIntel]" not in res:
         res = res.replace("[Nexus CodeIntel Compact]", "[Nexus CodeIntel]\n[Nexus CodeIntel Compact]")
@@ -790,6 +799,7 @@ def _build_baseline_patch(
     task_desc_with_codeintel: str,
     repo_root: Path,
     task_type: str,
+    test_source: str = "",
 ) -> tuple[str, str, dict[str, Any]]:
     source_label = "local"
     fallback_reason = None
@@ -805,8 +815,12 @@ def _build_baseline_patch(
     if local_first is not None:
         return local_first
     
+    symmetric_prompt = _symmetric_prompt_mode()
     # [NEW: X-2] Prior-Art from Claims
     try:
+        if symmetric_prompt:
+            # S5: nothing learned in a previous task/trial reaches the model in the like-for-like A/B.
+            raise RuntimeError("prior_art_skipped_symmetric_prompt")
         from nexus.research.learn_mode import LearnModeService
         svc = LearnModeService(repo_root)
         prior_fixes = svc.ask(topic="bug-fixes", question=task_desc, top_k=5)
@@ -822,7 +836,14 @@ def _build_baseline_patch(
         try:
             # Use a very short timeout for baseline assistance to avoid blocking
             gen = LLMCandidateGenerator(repo_root, safe_mode=True, route_signals=route)
-            patched, meta = gen.generate(source_code=original_code, task=task_desc_for_llm, mutation_hint="baseline", seed=trial)
+            patched, meta = gen.generate(
+                source_code=original_code,
+                task=task_desc_for_llm,
+                mutation_hint="baseline",
+                seed=trial,
+                # S4: the bare arm always sees the visible test; so does the model here in the A/B.
+                test_source=test_source if symmetric_prompt else "",
+            )
             if patched and patched != original_code:
                 meta = dict(meta)
                 if llm_baseline_required:
@@ -1039,6 +1060,13 @@ def run_auto_flow(
     timing_breakdown_sec["codeintel_sec"] = round(time.monotonic() - codeintel_started_at, 4)
     context_started_at = time.monotonic()
     task_desc_with_codeintel = _task_with_codeintel_context(task_desc, codeintel_evidence)
+    symmetric_prompt = _symmetric_prompt_mode()
+    test_path_for_prompt = Path(test_file) if Path(test_file).is_absolute() else repo_root / test_file
+    visible_test_source = (
+        test_path_for_prompt.read_text(encoding="utf-8")
+        if symmetric_prompt and test_path_for_prompt.is_file()
+        else ""
+    )
     timing_breakdown_sec["context_pack_sec"] = round(time.monotonic() - context_started_at, 4)
 
     def _restore_baseline_files(restored_files: dict[Path, str | None], *, keep_target: bool) -> None:
@@ -1069,11 +1097,16 @@ def run_auto_flow(
                 task_desc_with_codeintel=task_desc_with_codeintel,
                 repo_root=repo_root,
                 task_type=task_type,
+                test_source=visible_test_source,
             )
             if patched == original_code:
                 err = "no_mutation_generated"
             else:
-                companion_edits = generate_local_companion_edits(repo_root, target_path, task_desc, "baseline", 0)
+                companion_edits = (
+                    {}
+                    if symmetric_prompt
+                    else generate_local_companion_edits(repo_root, target_path, task_desc, "baseline", 0)
+                )
                 restored_files[target_path] = original_code
                 _write_source_text(target_path, patched)
                 for extra_path, extra_code in companion_edits.items():
@@ -1089,7 +1122,10 @@ def run_auto_flow(
         except subprocess.TimeoutExpired:
             err = "test_timeout"
         finally:
-            _restore_baseline_files(restored_files, keep_target=ok)
+            # S20: in the like-for-like A/B the model's file stays delivered even when the visible
+            # test fails, so the bench verifies it with the hidden test exactly like the bare arm.
+            keep_model_delivery = symmetric_prompt and str(source).startswith(("nexus_llm", "llm"))
+            _restore_baseline_files(restored_files, keep_target=ok or keep_model_delivery)
         return {
             "flow": "baseline",
             "status": "SUCCESS" if ok else "FAILED",
@@ -1118,11 +1154,16 @@ def run_auto_flow(
                 task_desc_with_codeintel=task_desc_with_codeintel,
                 repo_root=repo_root,
                 task_type=task_type,
+                test_source=visible_test_source,
             )
             if patched == original_code:
                 err = "no_mutation_generated"
             else:
-                companion_edits = generate_local_companion_edits(repo_root, target_path, task_desc, "baseline_probe", 0)
+                companion_edits = (
+                    {}
+                    if symmetric_prompt
+                    else generate_local_companion_edits(repo_root, target_path, task_desc, "baseline_probe", 0)
+                )
                 restored_files[target_path] = original_code
                 _write_source_text(target_path, patched)
                 for extra_path, extra_code in companion_edits.items():

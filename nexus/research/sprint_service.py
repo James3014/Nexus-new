@@ -881,7 +881,11 @@ def _build_llm_candidate_prompt(
     *, source_code: str, task: str, mutation_hint: str, test_source: str = "", codeintel_block: str = ""
 ) -> str:
     compact = os.environ.get("NEXUS_GATEWAY_COMPACT_PROMPT", "").strip().lower() in {"1", "true", "yes"}
-    contract_block = _build_value_task_contract(source_code=source_code, task=task, test_source=test_source)
+    contract_block = (
+        ""
+        if _symmetric_prompt_mode()
+        else _build_value_task_contract(source_code=source_code, task=task, test_source=test_source)
+    )
     contract_block += codeintel_block
     test_block = f"\nTests:\n{test_source}" if test_source else ""
     if compact:
@@ -1290,6 +1294,16 @@ def write_sprint_report(*, repo_root: Path, result: SprintResult, report_file: s
     return report_path
 
 
+def _symmetric_prompt_mode() -> bool:
+    """Like-for-like A/B mode (``NEXUS_SYMMETRIC_PROMPT``): the model sees what the bare arm sees.
+
+    Visible tests are included, no CodeIntel/historical hints are injected, and learning stores are
+    neither read nor written, so nothing carries over between trials (symmetry inventory S4-S6).
+    """
+
+    return os.environ.get("NEXUS_SYMMETRIC_PROMPT", "").strip().lower() in {"1", "true", "yes"}
+
+
 def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     start = time.time()
     policy = ResearchPolicy()
@@ -1307,7 +1321,10 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         model_required_execution_mode.startswith("model_participation")
         or os.environ.get("NEXUS_REQUIRE_MODEL_PARTICIPATION", "").strip().lower() in {"1", "true", "yes"}
     )
-    initial_test_source = "" if hidden_verifier_mode and not model_required_final_delivery else test_source
+    symmetric_prompt = _symmetric_prompt_mode()
+    initial_test_source = (
+        test_source if symmetric_prompt else ("" if hidden_verifier_mode and not model_required_final_delivery else test_source)
+    )
     if initial_test_source:
         initial_test_source = _truncate_redundant_tests(initial_test_source, config.task)
     llm_mode_effective = bool(config.llm_mode)
@@ -1338,7 +1355,9 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
 
     codeintel_block = ""
     codeintel_status: dict[str, Any] = {"status": "skipped_local_only"}
-    if llm_mode_effective:
+    if llm_mode_effective and symmetric_prompt:
+        codeintel_status = {"status": "skipped_symmetric_prompt"}
+    elif llm_mode_effective:
         from nexus.research.flow.codeintel_context import sprint_codeintel_block
 
         codeintel_block, codeintel_status = sprint_codeintel_block(repo_root, target_file=config.target_file)
@@ -1483,6 +1502,8 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         from nexus.research.findings_memory import FindingsMemoryStore
 
         store = FindingsMemoryStore(repo_root)
+        if symmetric_prompt:
+            raise RuntimeError("retrieval_skipped_symmetric_prompt")
         hits = store.search(config.task, scope="both")
         learning_trace["retrieval_hits"] = len(hits)
         for h in hits:
@@ -1645,6 +1666,10 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         codes: list[str],
     ) -> None:
         # Learning loop (govern + write): MemPalace verify -> Findings write (LanceDB sync via repository).
+        if symmetric_prompt:
+            # No state may carry over to the next trial in the like-for-like A/B (S5).
+            learning_trace["learning_write_skipped"] = "symmetric_prompt"
+            return
         try:
             from nexus.research.findings_memory import FindingsCard, FindingsMemoryStore
             from nexus.services.mem_palace import MemPalace
