@@ -207,12 +207,65 @@ class TaskAudit:
         }
 
 
-def normalize(text: str) -> str:
-    """NFKC, zero-width characters removed, whitespace collapsed, case-folded."""
+# Cyrillic/Greek look-alikes mapped to their ASCII skeleton before any matching.
+_CONFUSABLES = str.maketrans({
+    "\u0430": "a",
+    "\u0435": "e",
+    "\u043e": "o",
+    "\u0440": "p",
+    "\u0441": "c",
+    "\u0443": "y",
+    "\u0445": "x",
+    "\u0455": "s",
+    "\u0456": "i",
+    "\u0458": "j",
+    "\u04bb": "h",
+    "\u0501": "d",
+    "\u0410": "A",
+    "\u0412": "B",
+    "\u0415": "E",
+    "\u041a": "K",
+    "\u041c": "M",
+    "\u041d": "H",
+    "\u041e": "O",
+    "\u0420": "P",
+    "\u0421": "C",
+    "\u0422": "T",
+    "\u0425": "X",
+    "\u0405": "S",
+    "\u0406": "I",
+    "\u0408": "J",
+    "\u03b1": "a",
+    "\u03bf": "o",
+    "\u03c1": "p",
+    "\u03b5": "e",
+    "\u03ba": "k",
+    "\u03bd": "v",
+    "\u03c4": "t",
+    "\u03c5": "u",
+    "\u03c7": "x",
+    "\u0391": "A",
+    "\u0392": "B",
+    "\u0395": "E",
+    "\u0396": "Z",
+    "\u0397": "H",
+    "\u0399": "I",
+    "\u039a": "K",
+    "\u039c": "M",
+    "\u039d": "N",
+    "\u039f": "O",
+    "\u03a1": "P",
+    "\u03a4": "T",
+    "\u03a5": "Y",
+    "\u03a7": "X",
+})
 
-    return " ".join(
-        unicodedata.normalize("NFKC", str(text)).translate(_ZERO_WIDTH).split()
-    ).casefold()
+
+def normalize(text: str) -> str:
+    """NFKC, confusables to ASCII skeleton, zero-width removed, whitespace collapsed, case-folded."""
+
+    folded = unicodedata.normalize("NFKC", str(text)).translate(_ZERO_WIDTH).translate(_CONFUSABLES)
+    return " ".join(folded.split()).casefold()
 
 
 def _string_literals(source: str) -> set[str]:
@@ -354,25 +407,41 @@ def _codeintel_findings(body: str) -> list[str]:
     return findings
 
 
-def load_block_schema() -> dict[str, dict[str, str]]:
+def load_block_schema() -> dict[str, dict[str, dict[str, Any]]]:
     return json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))["blocks"]
 
 
-def _decoded_variants(text: str) -> list[str]:
-    """Text hidden behind HTML entities, %NN, \\xNN/\\uNNNN escapes, base64 or hex."""
+class DuplicateKeyError(ValueError):
+    """A JSON object repeats a key (after normalisation); earlier values would be hidden."""
 
-    variants: list[str] = []
+
+def _no_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    seen: dict[str, Any] = {}
+    for key, value in pairs:
+        normalized = normalize(key)
+        if normalized in {normalize(existing) for existing in seen}:
+            raise DuplicateKeyError(f"duplicate key {key!r}")
+        seen[key] = value
+    return seen
+
+
+def parse_block_json(line: str) -> Any:
+    return json.loads(line, object_pairs_hook=_no_duplicate_keys)
+
+
+def _decode_once(text: str) -> list[str]:
+    out: list[str] = []
     for decoder in (html.unescape, urllib.parse.unquote):
         decoded = decoder(text)
         if decoded != text:
-            variants.append(decoded)
+            out.append(decoded)
     if "\\" in text:
         try:
             decoded = codecs.decode(text, "unicode_escape")
         except (UnicodeDecodeError, ValueError):
             decoded = text
         if decoded != text:
-            variants.append(decoded)
+            out.append(decoded)
     token = text.strip()
     if _ENCODED_TOKEN_RE.match(token):
         candidates: list[bytes] = []
@@ -394,22 +463,40 @@ def _decoded_variants(text: str) -> list[str]:
                 continue
             printable = sum(1 for ch in decoded if ch.isprintable() or ch in "\n\t")
             if len(decoded) >= 4 and printable / len(decoded) >= 0.9:
-                variants.append(decoded)
-    return variants
+                out.append(decoded)
+    return out
+
+
+def _decoded_variants(text: str, *, max_layers: int = 5) -> list[str]:
+    """All layers of HTML / %NN / escape / base64 / hex decoding, iterated to a fixed point (<= 5)."""
+
+    layers: list[str] = []
+    frontier = [text]
+    seen = {text}
+    for _ in range(max_layers):
+        next_frontier: list[str] = []
+        for item in frontier:
+            for decoded in _decode_once(item):
+                if decoded not in seen:
+                    seen.add(decoded)
+                    layers.append(decoded)
+                    next_frontier.append(decoded)
+        if not next_frontier:
+            break
+        frontier = next_frontier
+    return layers
 
 
 def _walk_json(value: Any, path: str = "") -> Iterator[tuple[str, Any]]:
-    """(schema path, scalar value) for every leaf; list elements use ``path[]``."""
+    """(schema path, value) for EVERY node (objects, lists, leaves); list elements use ``path[]``."""
 
+    yield path, value
     if isinstance(value, Mapping):
         for key, item in value.items():
             yield from _walk_json(item, f"{path}.{key}" if path else str(key))
     elif isinstance(value, list):
-        yield f"{path}[]", value
         for item in value:
             yield from _walk_json(item, f"{path}[]")
-    else:
-        yield path, value
 
 
 def _type_name(value: Any) -> str:
@@ -426,29 +513,76 @@ def _type_name(value: Any) -> str:
     return type(value).__name__
 
 
-def _schema_findings(header: str, payload: Any, schema: Mapping[str, str]) -> list[str]:
-    """Known key paths only, fixed value types; lists of scalars only where declared."""
+_MARKER_RE = re.compile(r"^[a-z_]+:(result|payload|finding)$")
+_ISO8601_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?([+-]\d{2}:\d{2}|Z)?$")
+_ABS_PATH_RE = re.compile(r"^/[A-Za-z0-9_./-]+$")
+
+
+def _format_ok(fmt: str, value: str, material: TaskMaterial) -> bool:
+    if fmt == "task_desc":
+        return value == material.task_desc
+    if fmt == "task_desc_prefix":
+        return bool(value) and material.task_desc.startswith(value)
+    if fmt == "template":
+        return value in TEMPLATE_STRINGS
+    if fmt == "marker":
+        return bool(_MARKER_RE.match(value))
+    if fmt == "iso8601":
+        return bool(_ISO8601_RE.match(value))
+    if fmt == "abs_path":
+        return bool(_ABS_PATH_RE.match(value))
+    return False
+
+
+def _schema_findings(
+    header: str, payload: Any, schema: Mapping[str, Mapping[str, Any]], material: TaskMaterial
+) -> list[str]:
+    """Known paths only; kind, type, enum/range/pattern/format per path (schema v2)."""
 
     findings: list[str] = []
     if not isinstance(payload, Mapping):
         return [f"{header}: block body is not a JSON object"]
     for path, value in _walk_json(payload):
-        if path.endswith("[]") and isinstance(value, list):
-            if path not in schema:
-                findings.append(f"{header}: unknown list {path}")
-            elif schema[path] == "list" and any(not isinstance(item, Mapping) for item in value):
-                findings.append(f"{header}: {path} must hold objects or be empty")
+        spec = schema.get(path)
+        if spec is None:
+            findings.append(f"{header}: unknown path {path or '<root>'}")
             continue
-        declared = schema.get(path)
-        if declared is None:
-            findings.append(f"{header}: unknown key {path}")
+        kind = spec.get("kind")
+        if isinstance(value, Mapping):
+            if kind != "object":
+                findings.append(f"{header}: {path} must not be an object")
             continue
-        allowed = set(declared.split("|"))
+        if isinstance(value, list):
+            if kind != "list":
+                findings.append(f"{header}: {path} must not be a list")
+            elif spec.get("items") == "empty" and value:
+                findings.append(f"{header}: {path} must be empty")
+            continue
+        if kind != "leaf":
+            findings.append(f"{header}: {path} must be a {kind}")
+            continue
         actual = _type_name(value)
-        if actual == "int" and "number" in allowed:
+        types = set(spec.get("types") or [])
+        if actual not in types and not (actual == "int" and "number" in types):
+            findings.append(f"{header}: {path} must be {'|'.join(sorted(types))}, got {actual}")
             continue
-        if actual not in allowed:
-            findings.append(f"{header}: {path} must be {declared}, got {actual}")
+        if isinstance(value, bool) or value is None:
+            continue
+        if isinstance(value, (int, float)):
+            if "enum" in spec and value not in spec["enum"]:
+                findings.append(f"{header}: {path} value {value} not in {spec['enum']}")
+            if "range" in spec and not (spec["range"][0] <= value <= spec["range"][1]):
+                findings.append(f"{header}: {path} value {value} outside {spec['range']}")
+            continue
+        if any(not ch.isascii() for ch in value if ch.isalpha()):
+            findings.append(f"{header}: {path} has non-ASCII letters")
+        if "format" in spec:
+            if not _format_ok(str(spec["format"]), value, material):
+                findings.append(f"{header}: {path} does not match bound format {spec['format']}")
+        elif not any(re.match(pattern, value) for pattern in spec.get("patterns") or []):
+            findings.append(
+                f"{header}: {path} value not in its declared enum/pattern: {value[:60]!r}"
+            )
     return findings
 
 
@@ -481,6 +615,7 @@ def classify_extra_lines(
     if material.task_desc.strip():
         exempt.add(normalize(material.task_desc))
     bare_corpus = _decoded_corpus(bare_prompt)
+    hidden_lines = hidden_only_lines(material)
     for header, line in _blocks(with_nexus_prompt):
         is_header = bool(SECTION_HEADER_RE.match(line))
         if header == HIDDEN_GUIDANCE_HEADER and not is_header:
@@ -502,13 +637,27 @@ def classify_extra_lines(
             out["disallowed"].append(line)
             continue
         try:
-            payload = json.loads(line)
+            payload = parse_block_json(line)
+        except DuplicateKeyError as exc:
+            out["json"].append(f"{header}: {exc}")
+            continue
         except ValueError:
             out["disallowed"].append(line)  # allowed blocks carry JSON only
             continue
-        out["json"].extend(_schema_findings(header, payload, schema.get(header, {})))
-        for path, value in _walk_json(payload):
-            if isinstance(value, list):
+        out["json"].extend(_schema_findings(header, payload, schema.get(header, {}), material))
+        nodes = list(_walk_json(payload))
+        # Literal/code/vocabulary checks also run on the JOINED text of every string list, so a
+        # literal or code line split across items is still caught.
+        joined = [
+            (f"{path}<joined>", " ".join(item for item in value if isinstance(item, str)))
+            for path, value in nodes
+            if isinstance(value, list)
+            and sum(isinstance(item, str) for item in value) > 1
+            # a list made only of exempt items (template sentences, task text) carries nothing new
+            and not all(normalize(item) in exempt for item in value if isinstance(item, str))
+        ]
+        for path, value in [*nodes, *joined]:
+            if isinstance(value, (list, Mapping)):
                 continue
             if header == CODEINTEL_HEADER and ("file" in path or "symbol" in path):
                 if isinstance(value, str) and value:
@@ -522,13 +671,18 @@ def classify_extra_lines(
                 normalized = normalize(text)
                 if normalized in exempt:
                     continue
-                if len(text) > MAX_JSON_STRING_CHARS:
+                if len(text) > MAX_JSON_STRING_CHARS and not path.endswith("<joined>"):
                     out["json"].append(
                         f"{header}: {path} longer than {MAX_JSON_STRING_CHARS} chars: {text[:60]}"
                     )
                 words = set(_WORD_RE.findall(normalized)) & hidden_words
                 if words:
                     out["json"].append(f"{header}: {path} hidden-only words {sorted(words)}")
+                for hidden_line in hidden_lines:
+                    if hidden_line in normalized and hidden_line not in bare_corpus:
+                        out["json"].append(
+                            f"{header}: {path} hidden test line {hidden_line[:60]!r}"
+                        )
                 for literal in hidden_only_literals(material):
                     if normalize(literal) in normalized and normalize(literal) not in bare_corpus:
                         out["json"].append(f"{header}: {path} hidden literal {literal!r}")

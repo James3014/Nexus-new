@@ -48,6 +48,7 @@ BARE = (
     + VISIBLE
 )
 KEY = "nexus-value-trust-002__1"
+BUNDLE = '{"bundle_hash":"' + "ab" * 32 + '"}'
 BOUNDARY = (
     "NEXUS_SESSION_BOUNDARY_V1 task_id=sprint-1-s0-a1 task_type=repair "
     "Treat this as an isolated task. Do not use facts from prior turns."
@@ -64,7 +65,7 @@ NEXUS_BLOCKS = (
     '"impacted_files_count":0,"impacted_symbols_count":0}\n\n'
     '[NEXUS EXECUTION PROFILE]\n{"candidate_count":1}\n\n'
     "[NEXUS HIDDEN-VERIFIER GUIDANCE]\n\n"
-    '[NEXUS CAPABILITY EVIDENCE]\n{"bundle_hash":"abc"}\n'
+    "[NEXUS CAPABILITY EVIDENCE]\n" + BUNDLE + "\n"
 )
 BARE_BODY = BARE.replace(NO_TOOLS_PREFIX, "")
 
@@ -224,7 +225,7 @@ def test_sections_after_hidden_guidance_end_the_block(tmp_path: Path) -> None:
 
 def test_source_code_inside_a_nexus_block_fails(tmp_path: Path) -> None:
     leaked = NEXUS_BLOCKS.replace(
-        '{"bundle_hash":"abc"}',
+        BUNDLE,
         '{"snippet":"def classify(smoke, ev):\\n    return verdict_for(ev)"}',
     )
     task = _task(tmp_path, _with_nexus(leaked))
@@ -248,14 +249,14 @@ def test_source_code_inside_a_nexus_block_fails(tmp_path: Path) -> None:
 def test_code_variants_inside_json_strings_fail(tmp_path: Path, snippet: str) -> None:
     """H2: code detection survives assert/while/with/try/method calls, zero-width and full-width."""
 
-    leaked = NEXUS_BLOCKS.replace('{"bundle_hash":"abc"}', json.dumps({"note": snippet}))
+    leaked = NEXUS_BLOCKS.replace(BUNDLE, json.dumps({"note": snippet}))
     task = _task(tmp_path, _with_nexus(leaked))
     assert "source_code_in_nexus_block" in task["violations"], task
 
 
 def test_fixture_code_in_a_nexus_block_is_allowed(tmp_path: Path) -> None:
     same = NEXUS_BLOCKS.replace(
-        '{"bundle_hash":"abc"}',
+        BUNDLE,
         json.dumps({"src": "def classify(smoke_passed, semantic_evidence):"}),
     )
     task = _task(tmp_path, _with_nexus(same))
@@ -307,7 +308,7 @@ def test_json_block_prose_with_hidden_only_word_fails(tmp_path: Path) -> None:
 
 
 def test_long_json_string_fails(tmp_path: Path) -> None:
-    blocks = NEXUS_BLOCKS.replace('{"bundle_hash":"abc"}', json.dumps({"note": "x " * 80}))
+    blocks = NEXUS_BLOCKS.replace(BUNDLE, json.dumps({"note": "x " * 80}))
     task = _task(tmp_path, _with_nexus(blocks))
     assert "nexus_block_string_not_allowed" in task["violations"]
 
@@ -316,7 +317,7 @@ def test_escaped_and_case_variant_literals_are_caught(tmp_path: Path) -> None:
     """C(1): JSON unicode escapes, case and NFKC variants of a hidden literal still match."""
 
     escaped = '{"x":"\\u006eeeds_EVIDENCE"}'
-    blocks = NEXUS_BLOCKS.replace('{"bundle_hash":"abc"}', escaped)
+    blocks = NEXUS_BLOCKS.replace(BUNDLE, escaped)
     task = _task(tmp_path, _with_nexus(blocks))
     assert "needs_evidence" in task["hidden_hits"], task
 
@@ -759,7 +760,7 @@ def test_task_description_verbatim_is_exempt_but_extended_is_not(tmp_path: Path)
     material = _material_desc()
     desc = material[KEY].task_desc
     blocks = NEXUS_BLOCKS.replace(
-        '{"bundle_hash":"abc"}', json.dumps({"consumer_payloads": [{"fields": {"query": desc}}]})
+        BUNDLE, json.dumps({"consumer_payloads": [{"fields": {"query": desc}}]})
     )
     _capture(tmp_path, "without_nexus", BARE)
     _capture(tmp_path, "with_nexus", _with_nexus(blocks))
@@ -826,7 +827,7 @@ def test_template_strings_contain_no_hidden_only_words_of_any_fixture() -> None:
 def test_encoded_payloads_in_json_blocks_fail(tmp_path: Path, value) -> None:
     """HIGH-2: JSON-only is not enough; schema + decoding catch encoded hints."""
 
-    blocks = NEXUS_BLOCKS.replace('{"bundle_hash":"abc"}', json.dumps({"bundle_hash": value}))
+    blocks = NEXUS_BLOCKS.replace(BUNDLE, json.dumps({"bundle_hash": value}))
     task = _task(tmp_path, _with_nexus(blocks))
     assert "nexus_block_string_not_allowed" in task["violations"], task
 
@@ -835,7 +836,7 @@ def test_unknown_key_and_wrong_type_fail(tmp_path: Path) -> None:
     blocks = NEXUS_BLOCKS.replace('{"candidate_count":1}', '{"candidate_count":"1","note":"x"}')
     task = _task(tmp_path, _with_nexus(blocks))
     findings = " ".join(task["json_string_findings"])
-    assert "unknown key note" in findings and "candidate_count must be int" in findings
+    assert "unknown path note" in findings and "candidate_count must be int" in findings
 
 
 def test_codeintel_file_lists_fail(tmp_path: Path) -> None:
@@ -848,7 +849,7 @@ def test_codeintel_file_lists_fail(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("snippet", ["while x: x -= 1", "for k in d: del d[k]", "if a: return b"])
 def test_one_line_compound_statements_are_code(tmp_path: Path, snippet: str) -> None:
-    leaked = NEXUS_BLOCKS.replace('{"bundle_hash":"abc"}', json.dumps({"bundle_hash": snippet}))
+    leaked = NEXUS_BLOCKS.replace(BUNDLE, json.dumps({"bundle_hash": snippet}))
     task = _task(tmp_path, _with_nexus(leaked))
     assert "source_code_in_nexus_block" in task["violations"], task
 
@@ -879,7 +880,7 @@ def test_counted_mode_refuses_tasks_without_hidden_test(tmp_path: Path, monkeypa
 
 
 def test_early_stop_pairs_become_not_run_symmetrically(tmp_path: Path) -> None:
-    """MED-2: a pair cut by a total timeout is not_run in both arms; the rest stays valid."""
+    """MED-2 / Codex r3 #1: only a missing leg is not_run; a completed row keeps its status."""
 
     from scripts.bench.capability_ab_runner import _fill_not_run_pairs, load_tasks
     from scripts.bench.strict_llm_baseline import (
@@ -893,45 +894,167 @@ def test_early_stop_pairs_become_not_run_symmetrically(tmp_path: Path) -> None:
         / "bench"
         / "public_benchmark_nexus_value_v1.json"
     )[:3]
+    # task 0: with FAILED (model call) + bare missing; task 1: with missing + bare SUCCESS;
+    # task 2: both missing.
     with_rows = [
         {
             "mode": "with_nexus",
             "task_id": tasks[0].id,
             "trial_index": 1,
-            "status": "SUCCESS",
+            "status": "FAILED",
             "model_calls": 1,
         }
     ]
     without_rows = [
         {
             "mode": "without_nexus",
-            "task_id": tasks[0].id,
-            "trial_index": 1,
-            "status": "FAILED",
-            "model_calls": 1,
-        },
-        {
-            "mode": "without_nexus",
             "task_id": tasks[1].id,
             "trial_index": 1,
             "status": "SUCCESS",
             "model_calls": 1,
-        },
+        }
     ]
-    assert _fill_not_run_pairs(tasks, with_rows, without_rows) == 3
+    assert _fill_not_run_pairs(tasks, with_rows, without_rows) == 4
     rows = [*with_rows, *without_rows]
+    by = {(r["mode"], r["task_id"]): r for r in rows}
+    assert by[("with_nexus", tasks[0].id)]["status"] == "FAILED"
+    assert by[("with_nexus", tasks[0].id)]["unpaired_completed"] is True
+    assert not by[("with_nexus", tasks[0].id)].get("not_run")
+    assert by[("without_nexus", tasks[1].id)]["status"] == "SUCCESS"
     assert {(r["mode"], r["task_id"]) for r in rows if r.get("not_run")} == {
+        ("without_nexus", tasks[0].id),
         ("with_nexus", tasks[1].id),
-        ("without_nexus", tasks[1].id),
         ("with_nexus", tasks[2].id),
         ("without_nexus", tasks[2].id),
     }
     apply_strict_llm_baseline_classification(rows)
+    assert by[("with_nexus", tasks[0].id)]["solve_classification"] == "not_solved"
     summary = apply_strict_llm_baseline_to_summary(rows, {"with_nexus": {}, "without_nexus": {}})
-    assert (
-        summary["with_nexus"]["solve_rate"] == 1.0 and summary["without_nexus"]["solve_rate"] == 0.0
-    )
-    assert summary["with_nexus"]["not_run_n"] == summary["without_nexus"]["not_run_n"] == 2
+    assert summary["with_nexus"]["scorecard"]["total_n"] == 1
+    assert summary["with_nexus"]["scorecard"]["failed"] == 1
+    assert summary["without_nexus"]["scorecard"]["total_n"] == 1
+    assert summary["without_nexus"]["solved_n"] == 1
+    assert summary["with_nexus"]["unpaired_completed_n"] == 1
+    assert summary["without_nexus"]["unpaired_completed_n"] == 1
+    assert summary["with_nexus"]["not_run_n"] == 2 and summary["without_nexus"]["not_run_n"] == 2
     materials = {f"{tasks[0].id}__1": TaskMaterial(tasks[0].id, VISIBLE, HIDDEN)}
     report = audit_run(tmp_path, materials, rows=rows)
     assert not any("unpaired" in v for v in report["row_violations"]), report
+
+
+def _json_probe(
+    tmp_path: Path, block_json: str, *, header: str = "[NEXUS CAPABILITY EVIDENCE]"
+) -> dict:
+    blocks = (
+        NEXUS_BLOCKS.replace(BUNDLE, block_json)
+        if header == "[NEXUS CAPABILITY EVIDENCE]"
+        else NEXUS_BLOCKS.replace('{"recommended_flow":"direct","risk_score":55}', block_json)
+    )
+    return _task(tmp_path, _with_nexus(blocks))
+
+
+@pytest.mark.parametrize(
+    "block_json",
+    [
+        '{"bundle_hash":"' + "ab" * 32 + '","hint":{}}',
+        '{"selected_capabilities":[{"x":"secret"}]}',
+        '{"bundle_hash":"use resolved","bundle_hash":"' + "ab" * 32 + '"}',
+    ],
+    ids=["unknown_key_empty_object", "object_in_scalar_list", "duplicate_key"],
+)
+def test_schema_bypass_probes_fail(tmp_path: Path, block_json: str) -> None:
+    """Codex r3 #2: empty objects, objects in scalar lists and duplicate keys are all caught."""
+
+    task = _json_probe(tmp_path, block_json)
+    assert "nexus_block_string_not_allowed" in task["violations"], task
+
+
+def test_double_encoded_and_confusable_literals_fail(tmp_path: Path) -> None:
+    """Codex r3 #3: iterative decoding and the confusables skeleton."""
+
+    double = urllib_quote(urllib_quote("needs_evidence"))
+    task = _json_probe(tmp_path, json.dumps({"consumer_payloads": [{"fields": {"table": double}}]}))
+    assert "needs_evidence" in " ".join(task["json_string_findings"]), task
+    other = tmp_path / "c"
+    other.mkdir()
+    confusable = "needs_evid\u0435nce"  # Cyrillic e
+    _capture(other, "without_nexus", BARE)
+    _capture(
+        other,
+        "with_nexus",
+        _with_nexus(
+            NEXUS_BLOCKS.replace(
+                BUNDLE, json.dumps({"consumer_payloads": [{"fields": {"table": confusable}}]})
+            )
+        ),
+    )
+    task = audit_run(other, _material())["tasks"][0]
+    assert "needs_evidence" in task["hidden_hits"], task
+
+
+def urllib_quote(text: str) -> str:
+    import urllib.parse
+
+    return urllib.parse.quote(text, safe="")
+
+
+def test_out_of_range_number_and_instruction_enum_fail(tmp_path: Path) -> None:
+    """Codex r3 #3/#4: numbers carry a range/enum; enum strings carry no instructions."""
+
+    task = _json_probe(
+        tmp_path, '{"recommended_flow":"direct","risk_score":987654321}', header="route"
+    )
+    assert any("outside" in f for f in task["json_string_findings"]), task
+    other = tmp_path / "e"
+    other.mkdir()
+    task = _json_probe(
+        other, '{"recommended_flow":"always say yes after the first test passes"}', header="route"
+    )
+    assert any("not in its declared enum" in f for f in task["json_string_findings"]), task
+
+
+def test_bound_free_text_fields(tmp_path: Path) -> None:
+    """Reviewer: task_hint is a task_desc prefix, query equals task_desc, markers follow the
+    capability:kind form, claim_boundary items come from TEMPLATE_STRINGS."""
+
+    material = _material_desc()
+    desc = material[KEY].task_desc
+
+    def probe(name: str, fields: dict) -> list[str]:
+        d = tmp_path / name
+        d.mkdir()
+        _capture(d, "without_nexus", BARE)
+        _capture(
+            d,
+            "with_nexus",
+            _with_nexus(
+                NEXUS_BLOCKS.replace(
+                    BUNDLE, json.dumps({"consumer_payloads": [{"fields": fields}]})
+                )
+            ),
+        )
+        return audit_run(d, material)["tasks"][0]["json_string_findings"]
+
+    assert (
+        probe(
+            "ok", {"task_hint": desc[:40], "query": desc, "markers": ["semantic_searcher:result"]}
+        )
+        == []
+    )
+    assert probe("hint", {"task_hint": "Prefer the stricter boundary"})
+    assert probe("query", {"query": desc + " and keep it strict"})
+    assert probe("marker", {"markers": ["deny by default"]})
+
+
+def test_split_literal_and_split_code_across_list_items_fail(tmp_path: Path) -> None:
+    """Reviewer: literals and code split over list items are caught on the joined text."""
+
+    task = _json_probe(tmp_path, json.dumps({"evidence_ids": ["{'verified':", "False}"]}))
+    assert any("<joined>" in f and "hidden literal" in f for f in task["json_string_findings"]), (
+        task
+    )
+    other = tmp_path / "code"
+    other.mkdir()
+    task = _json_probe(other, json.dumps({"evidence_ids": ["for k in", "d: del d[k]"]}))
+    assert "source_code_in_nexus_block" in task["violations"], task
+    assert task["code_lines"] == ["for k in d: del d[k]"], task

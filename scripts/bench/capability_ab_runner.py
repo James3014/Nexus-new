@@ -3272,8 +3272,9 @@ def _fill_not_run_pairs(
 ) -> int:
     """Every task x trial gets exactly one row per arm; pairs cut by an early stop become not_run.
 
-    A pair where either leg did not produce a row is excluded from both arms' denominators
-    symmetrically (``not_run``); the rest of the run stays valid.
+    Only a genuinely missing leg becomes a ``not_run`` row (excluded from that arm's denominator);
+    a completed row of an incomplete pair keeps its status and classification, stays in its arm's
+    all-rows denominator, and is flagged ``unpaired_completed`` (excluded from paired comparisons).
     """
 
     def _key(row: Mapping[str, Any]) -> str:
@@ -3291,18 +3292,23 @@ def _fill_not_run_pairs(
         for mode, bucket in (("with_nexus", with_rows), ("without_nexus", without_rows)):
             row = have[mode].get(key)
             if row is None:
-                row = {
-                    "mode": mode,
-                    "task_id": task.id,
-                    "trial_index": task.trial_index,
-                    "status": "NOT_RUN",
-                    "model_calls": 0,
-                }
-                bucket.append(row)
+                bucket.append(
+                    {
+                        "mode": mode,
+                        "task_id": task.id,
+                        "trial_index": task.trial_index,
+                        "status": "NOT_RUN",
+                        "model_calls": 0,
+                        "not_run": True,
+                        "not_run_reason": "pair_incomplete_after_early_stop",
+                        "run_eligible": False,
+                    }
+                )
                 filled += 1
-            row["not_run"] = True
-            row["not_run_reason"] = "pair_incomplete_after_early_stop"
-            row["run_eligible"] = False
+            else:
+                # A completed row keeps its status and stays in its own arm's all-rows denominator;
+                # it is only excluded from the paired comparison.
+                row["unpaired_completed"] = True
     return filled
 
 

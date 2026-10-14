@@ -307,6 +307,9 @@ def apply_strict_llm_baseline_to_summary(
             row for row in rows if str(row.get("mode", "")) == mode and not row.get("not_run")
         ]
         arm["run_eligible_n"] = sum(1 for row in eligible if bool(row.get("run_eligible", True)))
+        arm["unpaired_completed_n"] = sum(
+            1 for row in rows if str(row.get("mode", "")) == mode and row.get("unpaired_completed")
+        )
         arm["not_run_n"] = sum(
             1 for row in rows if str(row.get("mode", "")) == mode and row.get("not_run")
         )
