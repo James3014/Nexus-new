@@ -11,6 +11,62 @@ from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.engine.learning_policy_loader import merge_runtime_learning_policy
 from nexus.engine.route_decision_adapter import build_route_decision
 from nexus.research.flow.rlm_trace import safe_trace_slug
+from nexus.services.capability_registry import ARCHIVED_CAPABILITY_REASONS
+
+# Plan lists an archived node must never appear in; it is moved to ``forbidden_capabilities``.
+_ARCHIVED_SELECTION_LISTS = (
+    "selected_capabilities",
+    "required_capabilities",
+    "conditional_capabilities",
+    "optional_capabilities",
+    "pending_capabilities",
+)
+
+
+def drop_archived_capabilities(plan_payload: dict[str, Any]) -> dict[str, Any]:
+    """Copy of a CapabilityPlan payload where archived nodes are never selectable.
+
+    The pinned nexus-runtime planner still enables some archived nodes (e.g.
+    ``integration_manager`` on an "integrate"/"merge" task) until its maturity flip lands.
+    Nexus-side, every archived node (``ARCHIVED_CAPABILITY_REASONS``) is removed from the
+    selection lists, moved to ``forbidden_capabilities`` and named in
+    ``signal_snapshot.archived_capabilities_dropped`` with its archive reason.
+    """
+
+    if not isinstance(plan_payload, dict):
+        return plan_payload
+    plan = dict(plan_payload)
+    dropped: dict[str, str] = {}
+    for key in _ARCHIVED_SELECTION_LISTS:
+        items = plan.get(key)
+        if not isinstance(items, list):
+            continue
+        kept = []
+        for item in items:
+            name = str(item)
+            if name in ARCHIVED_CAPABILITY_REASONS:
+                if key != "optional_capabilities":
+                    dropped[name] = ARCHIVED_CAPABILITY_REASONS[name]
+                continue
+            kept.append(item)
+        plan[key] = kept
+    if not dropped:
+        return plan
+    forbidden = [str(item) for item in plan.get("forbidden_capabilities") or []]
+    plan["forbidden_capabilities"] = forbidden + [name for name in dropped if name not in forbidden]
+    trace = plan.get("decision_trace")
+    if isinstance(trace, list):
+        plan["decision_trace"] = [
+            {**item, "state": "forbidden", "reasons": [*(item.get("reasons") or []), dropped[name]]}
+            if isinstance(item, dict) and (name := str(item.get("capability") or "")) in dropped
+            else item
+            for item in trace
+        ]
+    snapshot = plan.get("signal_snapshot")
+    snapshot = dict(snapshot) if isinstance(snapshot, dict) else {}
+    snapshot["archived_capabilities_dropped"] = dict(dropped)
+    plan["signal_snapshot"] = snapshot
+    return plan
 
 
 def compose_capability_plan(

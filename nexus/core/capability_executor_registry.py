@@ -96,6 +96,11 @@ _SEMANTIC_FAIL_STATUSES = frozenset(
     }
 )
 
+# Executors whose body is a self-declared mock on every path (the mask in
+# jit_tool_injector.py is a keyword mock; the blocked path never masks anything).
+# Their receipts stay simulated even when a runtime boundary says otherwise.
+SIMULATED_BY_DESIGN_EXECUTORS = frozenset({"jit_validation"})
+
 
 def _structured_fail_in_value(value: Any, *, depth: int = 0, max_depth: int = 4) -> bool:
     """Bounded recursive inspection of Mapping/list for structured fail fields.

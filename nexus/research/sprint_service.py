@@ -8,10 +8,10 @@ import subprocess
 import sys
 import time
 import warnings
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional
 
 from nexus.core.outcome_schema import SprintOutcome
 from nexus.engine.autoreason_service import AutoreasonService
@@ -316,6 +316,11 @@ class LLMCandidateGenerator:
         self.model_chain = self._model_chain()
         self.last_unified_runtime_receipt: dict[str, Any] = {}
         self.route_signals = planner_route_signals(route_signals)
+        # Visible-test evaluator bound by run_hyper_sprint (the sprint's own candidate executor,
+        # whose pytest command names only the visible test file).  When set, the runtime
+        # verifier stage applies the online candidate, runs the visible test and reports the
+        # outcome plus the candidate sha256; the hidden test is never run here.
+        self.visible_verifier: Callable[[str, int], CandidateEval] | None = None
 
     def _workspace_revision(self) -> str:
         try:
@@ -337,6 +342,7 @@ class LLMCandidateGenerator:
         seed: int,
         attempt: int,
         model: str,
+        source_code: str = "",
     ) -> tuple[dict[str, Any], str, dict[str, Any]]:
         from nexus.services.unified_runtime import UnifiedRuntimeRequest
 
@@ -378,16 +384,25 @@ class LLMCandidateGenerator:
 
         def response_contract(context: Mapping[str, Any]) -> dict[str, Any]:
             online = context.get("online", {})
-            provider_response, _raw, _payload = extract_online_stage_payload(
-                online if isinstance(online, dict) else {}
-            )
+            online_map = online if isinstance(online, dict) else {}
+            provider_response, _raw, _payload = extract_online_stage_payload(online_map)
             delivered = bool(provider_response)
-            return {
+            verdict: dict[str, Any] = {
                 "task_id": task_id,
                 "status": "pass" if delivered else "fail",
                 "evidence": "online_candidate_payload_present" if delivered else "online_candidate_payload_missing",
                 "evidence_refs": [f"verifier:{task_id}:candidate_response"],
             }
+            if not delivered or self.visible_verifier is None:
+                return verdict
+            return _visible_test_verdict(
+                verdict,
+                context=context,
+                candidate_out=_candidate_out_from_online_stage(online_map),
+                source_code=source_code,
+                visible_verifier=self.visible_verifier,
+                seed=seed,
+            )
 
         gateway_provider = str(getattr(self.gateway, "oauth_provider", "") or "").strip().lower()
         route = build_online_route(
@@ -449,25 +464,8 @@ class LLMCandidateGenerator:
         self.last_unified_runtime_receipt = unified
         raw_online = unified.get("online")
         online_stage: dict[str, Any] = dict(raw_online) if isinstance(raw_online, Mapping) else {}
-        provider_response, raw_response, _payload = extract_online_stage_payload(online_stage)
-        if isinstance(provider_response, dict):
-            structured = dict(provider_response)
-            structured["candidate_response_path"] = "structured"
-            return structured, raw_response, unified
-        stage_status = "APPROVED" if online_stage.get("status") == "SUCCEEDED" else "FAIL"
-        parsed = _parse_operation_payload(str(provider_response or ""))
-        if parsed is not None:
-            # Model text is untrusted: keep only the edit keys; status and path come from code.
-            operation = {key: parsed[key] for key in _OPERATION_EDIT_KEYS if key in parsed}
-            operation["status"] = stage_status
-            operation["candidate_response_path"] = "operation_json"
-            return operation, raw_response, unified
-        # Not an edit-operation payload: keep the legacy whole-file fallback.
-        return (
-            {"status": stage_status, "patch": str(provider_response or ""), "candidate_response_path": "whole_file_text"},
-            raw_response,
-            unified,
-        )
+        _provider_response, raw_response, _payload = extract_online_stage_payload(online_stage)
+        return _candidate_out_from_online_stage(online_stage), raw_response, unified
 
     def _model_chain(self) -> list[str]:
         override = str(os.environ.get("NEXUS_GEMINI_MODEL_NAME", "") or "").strip()
@@ -505,6 +503,7 @@ class LLMCandidateGenerator:
                     seed=seed,
                     attempt=idx + 1,
                     model=model,
+                    source_code=source_code,
                 )
                 skipped_reason = _online_call_skipped_reason(unified_receipt)
                 if skipped_reason:
@@ -832,6 +831,91 @@ def _candidate_code_from_llm_output(source_code: str, out: dict[str, Any]) -> tu
     if source_code.count(target) != 1:
         return None, "llm_target_snippet_not_unique"
     return source_code.replace(target, replacement, 1), ""
+
+
+def _candidate_out_from_online_stage(online_stage: Mapping[str, Any]) -> dict[str, Any]:
+    """The candidate edit payload carried by a UnifiedRuntime online stage."""
+    from nexus.services.unified_runtime import extract_online_stage_payload
+
+    provider_response, _raw, _payload = extract_online_stage_payload(dict(online_stage))
+    if isinstance(provider_response, dict):
+        structured = dict(provider_response)
+        structured["candidate_response_path"] = "structured"
+        return structured
+    stage_status = "APPROVED" if online_stage.get("status") == "SUCCEEDED" else "FAIL"
+    parsed = _parse_operation_payload(str(provider_response or ""))
+    if parsed is not None:
+        # Model text is untrusted: keep only the edit keys; status and path come from code.
+        operation = {key: parsed[key] for key in _OPERATION_EDIT_KEYS if key in parsed}
+        operation["status"] = stage_status
+        operation["candidate_response_path"] = "operation_json"
+        return operation
+    # Not an edit-operation payload: keep the legacy whole-file fallback.
+    return {"status": stage_status, "patch": str(provider_response or ""), "candidate_response_path": "whole_file_text"}
+
+
+def _visible_test_verdict(
+    verdict: dict[str, Any],
+    *,
+    context: Mapping[str, Any],
+    candidate_out: Mapping[str, Any],
+    source_code: str,
+    visible_verifier: Callable[[str, int], CandidateEval],
+    seed: int,
+) -> dict[str, Any]:
+    """Runtime verifier proof: the visible-test outcome of the online candidate and its sha256.
+
+    The postflight artifact/claim/delivery gates (online_nexus_context.evaluate_postflight_gate)
+    bind ``verifier_status``, ``verifier_artifact`` (``sha256:<candidate>``), the verifier
+    ``source_hash`` (the runtime's sealed evidence-bundle hash this candidate was produced
+    against), ``task_id`` and ``attempt_id``.  Only the visible test runs; a failing visible test,
+    an unappliable edit or an evaluator error is ``verifier_status=fail``.
+    """
+    out = dict(verdict)
+    task_id = str(out.get("task_id") or "")
+    attempt = context.get("execution_attempt")
+    attempt_id = str(attempt.get("attempt_id") or "") if isinstance(attempt, Mapping) else ""
+    source_hash = str(context.get("source_hash") or "")
+    if source_hash:
+        out["source_hash"] = source_hash
+    if attempt_id:
+        out["attempt_id"] = attempt_id
+    out["invoked"] = True
+    code, edit_error = _candidate_code_from_llm_output(source_code, dict(candidate_out))
+    if not code:
+        out.update({
+            "status": "fail",
+            "gate_passed": False,
+            "verifier_status": "fail",
+            "evidence": f"visible_test_not_run:{edit_error or 'no_candidate_code'}",
+            "visible_test_passed": False,
+        })
+        return out
+    candidate_sha = hashlib.sha256(code.encode("utf-8")).hexdigest()
+    try:
+        evaluation = visible_verifier(code, seed)
+        passed = float(evaluation.score) >= 1.0 and not str(evaluation.error or "")
+        error = str(evaluation.error or "")[:200]
+    except Exception as exc:  # noqa: BLE001 - verifier failure is a failed verdict, never a pass
+        passed = False
+        error = f"visible_verifier_error:{type(exc).__name__}"
+    out.update({
+        "status": "pass" if passed else "fail",
+        "gate_passed": passed,
+        "verifier_status": "pass" if passed else "fail",
+        "verifier_artifact": f"sha256:{candidate_sha}",
+        "candidate_hash": candidate_sha,
+        "visible_test_passed": passed,
+        "evidence": "visible_test_passed" if passed else "visible_test_failed",
+        "evidence_refs": [
+            *list(out.get("evidence_refs") or []),
+            f"verifier:{task_id}:visible_test",
+            f"candidate:sha256:{candidate_sha}",
+        ],
+    })
+    if error:
+        out["visible_test_error"] = error
+    return out
 
 
 def _online_call_skipped_reason(unified_receipt: Mapping[str, Any] | None) -> str:
@@ -1423,6 +1507,30 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             task=config.task,
         )
     executor_init_sec = round(time.monotonic() - executor_init_start, 4)
+    # Runtime verifier proof (wiring plan PR-1): the online candidate's verifier stage runs the
+    # sprint's own visible-test evaluation (pytest_cmd names only config.test_file) and binds the
+    # candidate sha256, so the runtime postflight gates evaluate real evidence.  The evaluation
+    # is memoized per (candidate sha256, hint, seed) and reused by the sprint, so the visible
+    # test still runs once per candidate.
+    visible_verifier_binding: dict[str, Any] = {"hint": "", "seed": 0}
+    visible_eval_memo: dict[tuple[str, str, int], CandidateEval] = {}
+
+    def _runtime_visible_verifier(code: str, _seed: int) -> CandidateEval:
+        hint_now = str(visible_verifier_binding["hint"])
+        seed_now = int(visible_verifier_binding["seed"])
+        evaluation = executor.evaluate_candidate(seed=seed_now, hint=hint_now, code=code, source="llm")
+        visible_eval_memo[(hashlib.sha256(code.encode("utf-8")).hexdigest(), hint_now, seed_now)] = evaluation
+        return evaluation
+
+    def _evaluate_candidate(*, seed: int, hint: str, code: str, source: str) -> CandidateEval:
+        cached = visible_eval_memo.pop((hashlib.sha256(code.encode("utf-8")).hexdigest(), hint, seed), None)
+        visible_eval_memo.clear()
+        if cached is not None:
+            return replace(cached, source=source)
+        return executor.evaluate_candidate(seed=seed, hint=hint, code=code, source=source)
+
+    if llm_generator is not None and hasattr(llm_generator, "visible_verifier"):
+        llm_generator.visible_verifier = _runtime_visible_verifier
 
     candidates: list[CandidateEval] = []
     routing_autoreason_enabled = _resolve_executor_flag(config.enable_autoreason_executor, "NEXUS_AUTOREASON_EXECUTOR")
@@ -1929,6 +2037,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                 error_codes.append("local_preflight_before_llm_miss")
             if llm_generator is not None:
                 try:
+                    visible_verifier_binding.update({"hint": hint, "seed": idx})
                     candidate_code, meta = llm_generator.generate(
                         source_code=source_code,
                         task=config.task,
@@ -2041,7 +2150,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                 ev = CandidateEval(seed=idx, score=0.0, hint=hint, error=guard_reason, candidate_code=candidate_code, source=used_source)
                 error_codes.append("semantic_guard")
             else:
-                ev = executor.evaluate_candidate(seed=idx, hint=hint, code=candidate_code, source=used_source)
+                ev = _evaluate_candidate(seed=idx, hint=hint, code=candidate_code, source=used_source)
             if (
                 candidate_pool_policy.enabled
                 and idx == 0
@@ -2173,6 +2282,9 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                     f"{local_support_block}"
                 )
                 try:
+                    visible_verifier_binding.update(
+                        {"hint": f"{hint} | self_heal_after_pytest_failed", "seed": idx + 10000}
+                    )
                     repair_code, repair_meta = llm_generator.generate(
                         source_code=candidate_code,
                         task=repair_task,
@@ -2184,7 +2296,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                     _record_llm_meta(repair_meta)
                     repair_guard_ok, repair_guard_reason = _semantic_guard(candidate_code, repair_code, config.task, "llm_self_heal")
                     if repair_guard_ok:
-                        repair_ev = executor.evaluate_candidate(
+                        repair_ev = _evaluate_candidate(
                             seed=idx + 10000,
                             hint=f"{hint} | self_heal_after_pytest_failed",
                             code=repair_code,

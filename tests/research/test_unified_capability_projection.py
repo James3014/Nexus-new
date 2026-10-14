@@ -135,10 +135,13 @@ def test_overlay_names_runtime_skip_reason_and_never_invents_invocation() -> Non
     out = {row["name"]: row for row in overlay_unified_capability_receipts(receipts, stages)}
 
     assert out["research_route"]["invoked"] is False
+    # research_route is a routing node: the runtime skip reason is kept, the receipt says
+    # NOT_EXECUTABLE (wiring plan PR-1).
     assert (
-        out["research_route"]["failure_reason"]
+        out["research_route"]["unified_runtime_reason"]
         == "unified_runtime:SKIPPED:SKIPPED_POLICY_NOT_TRIGGERED"
     )
+    assert out["research_route"]["failure_reason"] == "NOT_EXECUTABLE:control_plane_routing_node"
     assert out["repair_loop"]["failure_reason"] == (
         "unified_runtime:SELECTED_NOT_EXECUTED:planner_selected_no_runtime_executor"
     )
@@ -192,3 +195,156 @@ def test_flow_reports_carry_unified_runtime_stages() -> None:
         _Result(), effective_stage1_timeout_sec=20, r_phase_breakdown_sec={}, candidate_summaries=[]
     )
     assert hyper["unified_runtime_capability_stages"][0]["status"] == "INVOKED"
+
+
+# --- Wiring plan PR-1: reporting truth ------------------------------------------------------
+
+
+def _stale_flow_receipt(name: str) -> dict:
+    """A flow receipt as the bench rows carry it: not invoked, stale simulated receipt_base."""
+
+    from nexus_runtime.planning.evidence.claim_boundary import evaluate_claim_boundary
+    from nexus_runtime.planning.evidence.receipt_base import project_child_receipt_base
+
+    stale = evaluate_claim_boundary(
+        simulated=True, claim_eligible=False, receipt_present=False, model_calls=0
+    ).to_dict()
+    return {
+        "name": name,
+        "selected": True,
+        "invoked": False,
+        "evidence_refs": [],
+        "failure_reason": "selected_without_invocation",
+        "receipt_base": project_child_receipt_base(
+            source_world="B",
+            source_component="capability_receipt_engine",
+            stage_name=name,
+            stage_payload={"name": name, "selected": True, "invoked": False},
+            claim_boundary=stale,
+        ),
+    }
+
+
+def _overlay_one(name: str, stage: dict, *, capability_results: dict | None = None) -> dict:
+    receipt = {"task_id": "sprint-z-s0-a1", "capabilities": [stage]}
+    if capability_results is not None:
+        receipt["capability_results"] = capability_results
+    stages = project_unified_capability_stages([receipt])
+    return overlay_unified_capability_receipts([_stale_flow_receipt(name)], stages)[0]
+
+
+def test_overlay_reprojects_stale_receipt_base_when_runtime_attests_real() -> None:
+    from scripts.bench.strict_llm_baseline import classify_receipt
+
+    out = _overlay_one("acceptance_check", _stage("acceptance_check", "INVOKED"))
+
+    assert out["invoked"] is True
+    boundary = out["receipt_base"]["claim_boundary"]
+    assert boundary["simulated"] is False
+    assert boundary["receipt_present"] is True
+    assert out["receipt_base"]["receipt_hash"]
+    assert classify_receipt(out) == "real"
+
+
+def test_overlay_keeps_simulated_when_runtime_says_simulated() -> None:
+    from scripts.bench.strict_llm_baseline import classify_receipt
+
+    stage = _stage("plan_quality_gate", "INVOKED")
+    stage["claim_boundary"] = {"simulated": True, "claim_eligible": False}
+    out = _overlay_one("plan_quality_gate", stage)
+
+    assert out["invoked"] is True
+    assert out["claim_boundary"]["simulated"] is True
+    assert out["receipt_base"]["claim_boundary"]["simulated"] is True
+    assert classify_receipt(out) == "simulated"
+
+
+def test_jit_validation_and_simulated_outcomes_stay_simulated_regardless() -> None:
+    from scripts.bench.strict_llm_baseline import classify_receipt
+
+    # Runtime boundary says simulated=false, but jit_validation is a mock by design.
+    jit = _overlay_one("jit_validation", _stage("jit_validation", "INVOKED"))
+    assert jit["claim_boundary"]["simulated"] is True
+    assert jit["receipt_base"]["claim_boundary"]["simulated"] is True
+    assert jit["simulated_reason"] == "executor_simulated_by_design"
+    assert classify_receipt(jit) == "simulated"
+
+    # Any executor whose outcome declares simulated=True stays simulated as well.
+    outcome = {"response": {"response": {"outcome": {"simulated": True}}}}
+    other = _overlay_one(
+        "pregate", _stage("pregate", "INVOKED"), capability_results={"pregate": outcome}
+    )
+    assert other["outcome_simulated"] is True
+    assert other["receipt_base"]["claim_boundary"]["simulated"] is True
+    assert classify_receipt(other) == "simulated"
+
+
+def test_control_plane_and_routing_nodes_get_not_executable_receipts() -> None:
+    from scripts.bench.strict_llm_baseline import classify_receipt
+
+    stages = project_unified_capability_stages([
+        _receipt(
+            "t",
+            # research_route invoked, runtime attests simulated (auth-blocked research body)
+            {**_stage("research_route", "INVOKED"), "claim_boundary": {"simulated": True}},
+            _stage("pregate", "INVOKED"),
+        )
+    ])
+    receipts = [_stale_flow_receipt("direct_mode"), _stale_flow_receipt("research_route")]
+    out = {row["name"]: row for row in overlay_unified_capability_receipts(receipts, stages)}
+
+    direct = out["direct_mode"]
+    assert direct["invoked"] is False
+    assert direct["failure_reason"] == "NOT_EXECUTABLE:control_plane_reference"
+    assert direct["execution_state"] == "NOT_EXECUTABLE"
+    assert direct["unified_runtime_reason"] == "unified_runtime:NOT_SELECTED"
+    assert classify_receipt(direct) == "not_executable"
+
+    route = out["research_route"]
+    assert route["invoked"] is False
+    assert route["evidence_refs"] == []
+    assert route["failure_reason"] == "NOT_EXECUTABLE:control_plane_routing_node"
+    assert classify_receipt(route) == "not_executable"
+
+
+def test_research_route_attested_real_invocation_is_not_relabelled() -> None:
+    out = _overlay_one("research_route", _stage("research_route", "INVOKED"))
+    assert out["invoked"] is True
+    assert out["receipt_base"]["claim_boundary"]["simulated"] is False
+    assert "execution_state" not in out
+
+
+def test_integration_manager_is_never_selected_by_the_flow_plan() -> None:
+    from nexus.app.research_receipt_runtime import runtime_receipt_plan_payload
+    from nexus.core.repo_root import REPO_ROOT
+    from nexus.engine.capability_planner import CapabilityPlanner
+    from nexus.research.flow.capability_planning import drop_archived_capabilities
+
+    raw = (
+        CapabilityPlanner(shared_playbook_root=REPO_ROOT)
+        .plan(
+            task_desc="integrate the drift check and merge the module",
+            task_type="bugfix",
+            route={"recommended_flow": "hybrid"},
+        )
+        .to_dict()
+    )
+    plan = drop_archived_capabilities(raw)
+    for key in ("selected_capabilities", "required_capabilities", "conditional_capabilities"):
+        assert "integration_manager" not in plan[key]
+    if "integration_manager" in raw["selected_capabilities"]:
+        assert "integration_manager" in plan["forbidden_capabilities"]
+        assert plan["signal_snapshot"]["archived_capabilities_dropped"] == {
+            "integration_manager": "archived_retired_integration_manager_2026-10-13"
+        }
+
+    forced = {
+        **raw,
+        "selected_capabilities": [*raw["selected_capabilities"], "integration_manager"],
+    }
+    assert (
+        "integration_manager"
+        not in runtime_receipt_plan_payload(forced, {})["selected_capabilities"]
+    )
+    receipts = build_capability_receipt_payloads(forced, {"capabilities": {}})
+    assert "integration_manager" not in {item["name"] for item in receipts}

@@ -162,3 +162,36 @@ def test_unattested_real_receipt_is_reported_separately() -> None:
     assert rows[0]["capabilities_real_unattested"] == ["hyper"]
     assert arm["real_capability_rows_n"] == 1
     assert arm["attested_real_capability_rows_n"] == 0
+
+
+def test_claim_boundary_takes_the_stricter_of_receipt_base_and_runtime() -> None:
+    def receipt(rb: bool | None, top: bool | None) -> dict[str, Any]:
+        item = _receipt("acceptance_check", simulated=rb)
+        if top is not None:
+            item["claim_boundary"] = {"simulated": top}
+        return item
+
+    assert classify_receipt(receipt(False, False)) == "real"
+    # Stale receipt_base true + runtime false: still simulated (tighten-only).
+    assert classify_receipt(receipt(True, False)) == "simulated"
+    assert classify_receipt(receipt(False, True)) == "simulated"
+    assert classify_receipt(receipt(True, True)) == "simulated"
+    assert classify_receipt(receipt(None, False)) == "real"
+    assert classify_receipt(receipt(None, True)) == "simulated"
+
+
+def test_not_executable_receipts_are_reported_apart() -> None:
+    direct = _receipt("direct_mode", simulated=True, invoked=False, refs=())
+    direct["failure_reason"] = "NOT_EXECUTABLE:control_plane_reference"
+    route = _receipt("research_route", simulated=True, invoked=False, refs=())
+    route["execution_state"] = "NOT_EXECUTABLE"
+    assert classify_receipt(direct) == "not_executable"
+    assert classify_receipt(route) == "not_executable"
+
+    rows = [_row("with_nexus", "ne", [direct, route, _receipt("hyper", simulated=False)])]
+    arm = _summarize_with_strict_baseline(rows, strict=True)["with_nexus"]
+    assert rows[0]["capabilities_not_executable"] == ["direct_mode", "research_route"]
+    assert rows[0]["capabilities_selected_not_invoked"] == []
+    assert rows[0]["capabilities_simulated"] == []
+    assert arm["capability_not_executable_tally"] == {"direct_mode": 1, "research_route": 1}
+    assert "direct_mode" not in arm["capability_tally"]

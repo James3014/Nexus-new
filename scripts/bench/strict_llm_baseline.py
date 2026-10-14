@@ -29,6 +29,10 @@ HIDDEN_FEEDBACK_RETRY_REASONS = frozenset({
     "hidden_verifier_failure_bounded_nexus_retry",
 })
 MODEL_SOLVE = "model_solve"
+# Receipt class for a selected planner node with no executable body (control-plane reference,
+# routing node): reported apart from ``selected_not_invoked``; never real, never simulated.
+NOT_EXECUTABLE = "NOT_EXECUTABLE"
+NOT_EXECUTABLE_CLASS = "not_executable"
 # A SUCCESS reached by a bounded Hyper re-run after the first attempt failed (Nexus treatment).
 NEXUS_TREATMENT_RESCUE = "rescued_by_nexus_treatment"
 # The run's captured-prompt symmetry audit failed or errored: no row of it is a solve of any kind.
@@ -191,18 +195,46 @@ def honest_scorecard(rows: Iterable[dict[str, Any]], mode: str) -> dict[str, Any
 
 
 def _claim_boundary(receipt: dict[str, Any]) -> dict[str, Any] | None:
-    """Return the receipt's claim_boundary mapping, or None when it carries none."""
+    """Return the receipt's effective claim_boundary mapping, or None when it carries none.
+
+    A receipt can carry two boundaries: ``receipt_base.claim_boundary`` and the top-level
+    ``claim_boundary`` (the runtime stage's, set by the unified-capability overlay).  When
+    both exist the stricter one wins: the result is ``simulated=False`` only when both say
+    exactly ``False`` (tighten-only, wiring plan PR-1).
+    """
 
     base = receipt.get("receipt_base")
-    if isinstance(base, dict) and isinstance(base.get("claim_boundary"), dict):
-        return base["claim_boundary"]
-    if isinstance(receipt.get("claim_boundary"), dict):
-        return receipt["claim_boundary"]
-    return None
+    rb_cb = (
+        base["claim_boundary"]
+        if isinstance(base, dict) and isinstance(base.get("claim_boundary"), dict)
+        else None
+    )
+    top_cb = receipt["claim_boundary"] if isinstance(receipt.get("claim_boundary"), dict) else None
+    if rb_cb is None or top_cb is None:
+        return rb_cb if rb_cb is not None else top_cb
+    simulated = not (
+        rb_cb.get("simulated", True) is False and top_cb.get("simulated", True) is False
+    )
+    merged = {**top_cb, **rb_cb, "simulated": simulated}
+    if simulated:
+        merged["claim_eligible"] = False
+    return merged
+
+
+def is_not_executable(receipt: dict[str, Any]) -> bool:
+    """True for an explicit ``NOT_EXECUTABLE:<class>`` receipt (planner node with no body)."""
+
+    if bool(receipt.get("invoked")):
+        return False
+    return (
+        receipt.get("not_executable") is True
+        or str(receipt.get("execution_state") or "") == NOT_EXECUTABLE
+        or str(receipt.get("failure_reason") or "").startswith(f"{NOT_EXECUTABLE}:")
+    )
 
 
 def classify_receipt(receipt: dict[str, Any]) -> str:
-    """Return ``real``, ``simulated`` or ``selected_not_invoked`` for one receipt.
+    """Return ``real``, ``simulated``, ``selected_not_invoked`` or ``not_executable``.
 
     ``real``: invoked, ``claim_boundary.simulated`` is not true, and ``evidence_refs`` is non-empty.
     A receipt that carries no claim_boundary at all (runner-synthesized telemetry backfill or
@@ -210,8 +242,11 @@ def classify_receipt(receipt: dict[str, Any]) -> str:
     has evidence refs and is reported under ``capabilities_real_unattested`` so it stays visible.
     ``selected_not_invoked``: selected by the planner but never invoked.
     Everything else invoked (simulated=true, or no evidence) is ``simulated``.
+    ``not_executable``: an explicit ``NOT_EXECUTABLE:<class>`` receipt (nothing could run).
     """
 
+    if is_not_executable(receipt):
+        return NOT_EXECUTABLE_CLASS
     if not bool(receipt.get("invoked")):
         return "selected_not_invoked"
     boundary = _claim_boundary(receipt)
@@ -227,6 +262,7 @@ def classify_row_capabilities(row: dict[str, Any]) -> dict[str, Any]:
     unattested: list[str] = []
     simulated: list[str] = []
     not_invoked: list[str] = []
+    not_executable: list[str] = []
     for receipt in row.get("capability_receipts") or []:
         if not isinstance(receipt, dict) or not receipt.get("selected", True):
             continue
@@ -238,12 +274,17 @@ def classify_row_capabilities(row: dict[str, Any]) -> dict[str, Any]:
                 unattested.append(name)
         elif kind == "simulated":
             simulated.append(name)
+        elif kind == NOT_EXECUTABLE_CLASS:
+            not_executable.append(name)
         else:
             not_invoked.append(name)
     row["capabilities_real"] = sorted(set(real))
     row["capabilities_real_unattested"] = sorted(set(unattested))
     row["capabilities_simulated"] = sorted(set(simulated) - set(real))
     row["capabilities_selected_not_invoked"] = sorted(set(not_invoked) - set(real) - set(simulated))
+    row["capabilities_not_executable"] = sorted(
+        set(not_executable) - set(real) - set(simulated) - set(not_invoked)
+    )
     row["capability_not_exercised"] = not row["capabilities_real"]
     row["solve_without_capability"] = bool(
         row.get("solve_classification") == MODEL_SOLVE and row["capability_not_exercised"]
@@ -266,6 +307,16 @@ def capability_tally(rows: Iterable[dict[str, Any]]) -> dict[str, dict[str, int]
                     name, {"real": 0, "simulated": 0, "selected_not_invoked": 0}
                 )
                 entry[key] += 1
+    return dict(sorted(tally.items()))
+
+
+def not_executable_tally(rows: Iterable[dict[str, Any]]) -> dict[str, int]:
+    """Per-capability count of explicit ``NOT_EXECUTABLE`` receipts over classified rows."""
+
+    tally: dict[str, int] = {}
+    for row in rows:
+        for name in row.get("capabilities_not_executable") or []:
+            tally[name] = tally.get(name, 0) + 1
     return dict(sorted(tally.items()))
 
 
@@ -294,6 +345,7 @@ def capability_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
             1 for r in classified if r["capability_not_exercised"]
         ),
         "capability_tally": capability_tally(classified),
+        "capability_not_executable_tally": not_executable_tally(classified),
         "solves_with_real_capability_n": len(uplift),
         "solve_without_capability_n": len(solves) - len(uplift),
         "nexus_uplift_solved_n": len(uplift),
@@ -365,6 +417,7 @@ def reclassify_report_dir(report_dir: str | Path) -> dict[str, Any]:
             "capabilities_real": r.get("capabilities_real"),
             "capabilities_real_unattested": r.get("capabilities_real_unattested"),
             "capabilities_simulated": r.get("capabilities_simulated"),
+            "capabilities_not_executable": r.get("capabilities_not_executable"),
             "capability_not_exercised": r.get("capability_not_exercised"),
         }
         for r in rows

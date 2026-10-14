@@ -13,6 +13,17 @@ as ``selected_without_invocation`` and a capability that was skipped carried no 
 ``overlay_unified_capability_receipts`` applies it to the flow receipts.  The overlay never
 invents an invocation: a receipt only becomes ``invoked`` when the runtime stage itself says
 ``invoked`` with evidence refs, and it carries that stage's ``claim_boundary``.
+
+Reporting truth (wiring plan PR-1):
+
+* the flow receipt's ``receipt_base.claim_boundary`` was built for the not-invoked flow view
+  (``simulated=true, receipt_present=false``).  When the overlay applies a runtime invocation it
+  re-projects ``receipt_base`` from the runtime boundary, but only to ``simulated=false`` when the
+  runtime attests ``simulated=false`` *and* the executor outcome does not declare a simulation
+  (``SIMULATED_BY_DESIGN_EXECUTORS`` such as ``jit_validation`` always stay simulated);
+* planner nodes with no executable body (control-plane references such as ``direct_mode`` and
+  the ``research_route`` routing node) get an explicit ``NOT_EXECUTABLE:<class>`` receipt instead
+  of ``selected_not_invoked`` / ``simulated``.
 """
 
 from __future__ import annotations
@@ -20,11 +31,50 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from nexus.core.capability_executor_registry import SIMULATED_BY_DESIGN_EXECUTORS
+from nexus.services.capability_registry import (
+    NOT_EXECUTABLE_CAPABILITY_REASONS,
+    NOT_EXECUTABLE_PREFIX,
+)
+
 UNIFIED_RUNTIME_SELECTION_SOURCE = "unified_runtime"
 UNIFIED_RUNTIME_NOT_SELECTED = "NOT_SELECTED"
 PROJECTION_SCHEMA = "nexus_unified_capability_projection_v1"
 _MAX_REFS = 6
 _STATUS_RANK = {"INVOKED": 3, "SKIPPED": 2, "SELECTED_NOT_EXECUTED": 1}
+# Routing nodes: the planner satisfies the route itself; the body (a research lookup) runs only
+# on a task signal.  Unless the runtime attests a real (simulated=false) invocation, the receipt
+# says the node is not an executable capability.
+NOT_EXECUTABLE_ROUTING_NODE = f"{NOT_EXECUTABLE_PREFIX}:control_plane_routing_node"
+NOT_EXECUTABLE_ROUTING_NODES: dict[str, str] = {"research_route": NOT_EXECUTABLE_ROUTING_NODE}
+_MAX_OUTCOME_DEPTH = 5
+
+
+def not_executable_reason(name: str) -> str:
+    """``NOT_EXECUTABLE:<class>`` for a planner node with no executable body, else ""."""
+
+    key = str(name or "")
+    return NOT_EXECUTABLE_CAPABILITY_REASONS.get(key) or NOT_EXECUTABLE_ROUTING_NODES.get(key, "")
+
+
+def _declares_simulated(value: Any, depth: int = 0) -> bool:
+    """True when an executor outcome (or a nested response/claim_boundary) says simulated."""
+
+    if depth > _MAX_OUTCOME_DEPTH or not isinstance(value, Mapping):
+        return False
+    if value.get("simulated") is True or str(value.get("claim") or "").upper() == "SIMULATED":
+        return True
+    return any(
+        _declares_simulated(value.get(key), depth + 1)
+        for key in ("response", "outcome", "claim_boundary")
+    )
+
+
+def _outcome_simulated(receipt: Mapping[str, Any], name: str) -> bool:
+    results = receipt.get("capability_results")
+    if not isinstance(results, Mapping):
+        return False
+    return _declares_simulated(results.get(name))
 
 
 def _stage_rows(receipt: Mapping[str, Any]) -> list[Mapping[str, Any]]:
@@ -36,7 +86,9 @@ def _stage_rows(receipt: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     ]
 
 
-def _compact_stage(stage: Mapping[str, Any], *, task_id: str) -> dict[str, Any]:
+def _compact_stage(
+    stage: Mapping[str, Any], *, task_id: str, outcome_simulated: bool = False
+) -> dict[str, Any]:
     boundary = (
         stage.get("claim_boundary") if isinstance(stage.get("claim_boundary"), Mapping) else {}
     )
@@ -59,6 +111,10 @@ def _compact_stage(stage: Mapping[str, Any], *, task_id: str) -> dict[str, Any]:
         else {},
         "trigger_source": str(stage.get("trigger_source") or ""),
         "runtime_task_id": task_id,
+        "outcome_simulated": bool(
+            outcome_simulated
+            or any(_declares_simulated(stage.get(key)) for key in ("response", "outcome"))
+        ),
     }
 
 
@@ -75,7 +131,10 @@ def project_unified_capability_stages(receipts: Iterable[Any] | None) -> list[di
             continue
         task_id = str(receipt.get("task_id") or "")
         for stage in _stage_rows(receipt):
-            row = _compact_stage(stage, task_id=task_id)
+            name = str(stage.get("name"))
+            row = _compact_stage(
+                stage, task_id=task_id, outcome_simulated=_outcome_simulated(receipt, name)
+            )
             prev = merged.get(row["name"])
             if prev is None or _STATUS_RANK.get(row["status"], 0) >= _STATUS_RANK.get(
                 prev["status"], 0
@@ -96,19 +155,185 @@ def unified_receipts_from_meta(meta: Mapping[str, Any] | None) -> list[Mapping[s
     return [receipt] if isinstance(receipt, Mapping) and receipt else []
 
 
+def runtime_attests_real(
+    receipt: Mapping[str, Any], stage: Mapping[str, Any] | None = None
+) -> bool:
+    """True only when the runtime boundary says ``simulated is False`` and nothing says simulated.
+
+    Fail-closed: a missing boundary, a runtime ``simulated`` that is not exactly ``False``, an
+    executor outcome declaring a simulation, or a ``SIMULATED_BY_DESIGN_EXECUTORS`` name all
+    keep the receipt simulated.
+    """
+
+    name = str(receipt.get("name") or "")
+    if name in SIMULATED_BY_DESIGN_EXECUTORS:
+        return False
+    source = stage if isinstance(stage, Mapping) else receipt
+    boundary = source.get("claim_boundary")
+    if not isinstance(boundary, Mapping) or boundary.get("simulated") is not False:
+        return False
+    if bool(receipt.get("outcome_simulated")) or (
+        isinstance(stage, Mapping) and bool(stage.get("outcome_simulated"))
+    ):
+        return False
+    return True
+
+
+def reproject_receipt_base_claim_boundary(
+    receipt: dict[str, Any], stage: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
+    """Make ``receipt_base.claim_boundary`` agree with the runtime boundary (tighten-only).
+
+    Applies to receipts the overlay marked invoked from a UnifiedRuntime stage.  When the
+    runtime attests a real execution (``runtime_attests_real``) the stale flow-view
+    ``receipt_base`` (``simulated=true, receipt_present=false``) is re-projected from the
+    runtime boundary.  Otherwise both the top-level and the ``receipt_base`` boundary are set
+    to ``simulated=true, claim_eligible=false`` so no reader can see a real claim.
+    """
+
+    if not bool(receipt.get("invoked")):
+        return receipt
+    updated = dict(receipt)
+    refs = [str(ref) for ref in (updated.get("evidence_refs") or []) if str(ref).strip()]
+    raw_rb = updated.get("receipt_base")
+    old_rb: dict[str, Any] = dict(raw_rb) if isinstance(raw_rb, Mapping) else {}
+    raw_cb = old_rb.get("claim_boundary")
+    old_cb: dict[str, Any] = dict(raw_cb) if isinstance(raw_cb, Mapping) else {}
+    top = updated.get("claim_boundary")
+    top_cb: dict[str, Any] = dict(top) if isinstance(top, Mapping) else {}
+    real = runtime_attests_real(updated, stage) and bool(refs)
+    if not real:
+        updated["claim_boundary"] = {
+            **top_cb,
+            "simulated": True,
+            "claim_eligible": False,
+            "evidence_complete": False,
+        }
+        if str(updated.get("name") or "") in SIMULATED_BY_DESIGN_EXECUTORS:
+            updated["simulated_reason"] = "executor_simulated_by_design"
+        elif bool(updated.get("outcome_simulated")) or (
+            isinstance(stage, Mapping) and bool(stage.get("outcome_simulated"))
+        ):
+            updated["simulated_reason"] = "executor_outcome_simulated"
+        if old_rb:
+            updated["receipt_base"] = {
+                **old_rb,
+                "claim_boundary": {
+                    **old_cb,
+                    "simulated": True,
+                    "claim_eligible": False,
+                    "public_claim_allowed": False,
+                    "evidence_complete": False,
+                },
+            }
+        return updated
+    if not old_rb:
+        return updated
+    try:
+        from nexus_runtime.planning.evidence.claim_boundary import evaluate_claim_boundary
+        from nexus_runtime.planning.evidence.receipt_base import project_child_receipt_base
+
+        boundary = evaluate_claim_boundary(
+            simulated=False,
+            claim_eligible=bool(top_cb.get("claim_eligible", False)),
+            receipt_present=True,
+            model_calls=int(old_cb.get("model_calls") or 0),
+        ).to_dict()
+        name = str(updated.get("name") or "capability")
+        gate_passed = bool(updated.get("gate_passed"))
+        contributed = bool(updated.get("outcome_contributed"))
+        chain = old_rb.get("consumption_chain")
+        consumer = "engine"
+        if isinstance(chain, list) and chain and isinstance(chain[0], Mapping):
+            consumer = str(chain[0].get("consumer") or "engine")
+        updated["receipt_base"] = project_child_receipt_base(
+            source_world=str(old_rb.get("source_world") or "B"),
+            source_component=str(old_rb.get("source_component") or "capability_receipt_engine"),
+            task_id=str(old_rb.get("task_id") or ""),
+            stage_payload={
+                "name": name,
+                "selected": True,
+                "invoked": True,
+                "gate_passed": gate_passed,
+                "outcome_contributed": contributed,
+                "executor_id": str(updated.get("executor_id") or ""),
+                "selection_source": UNIFIED_RUNTIME_SELECTION_SOURCE,
+            },
+            stage_name=name,
+            evidence_refs=refs,
+            consumer=consumer,
+            selected=True,
+            injected=True,
+            used=contributed,
+            evidence_present=True,
+            gate_passed=gate_passed,
+            outcome_contributed=contributed,
+            claim_boundary=boundary,
+        )
+    except Exception as exc:  # noqa: BLE001 - fail closed, record why
+        updated["receipt_base_reprojection_error"] = str(exc)[:200]
+        updated["claim_boundary"] = {**top_cb, "simulated": True, "claim_eligible": False}
+        updated["receipt_base"] = {
+            **old_rb,
+            "claim_boundary": {**old_cb, "simulated": True, "claim_eligible": False},
+        }
+    return updated
+
+
+def not_executable_receipt(
+    receipt: Mapping[str, Any], reason: str, *, runtime_reason: str = ""
+) -> dict[str, Any]:
+    """Explicit ``NOT_EXECUTABLE:<class>`` receipt: nothing ran, nothing is claimed."""
+
+    updated = dict(receipt)
+    updated.update({
+        "invoked": False,
+        "evidence_present": False,
+        "evidence_refs": [],
+        "gate_passed": False,
+        "outcome_contributed": False,
+        "execution_state": NOT_EXECUTABLE_PREFIX,
+        "not_executable": True,
+        "not_executable_reason": reason,
+        "failure_reason": reason,
+    })
+    if runtime_reason:
+        updated["unified_runtime_reason"] = runtime_reason
+    if isinstance(updated.get("claim_boundary"), Mapping):
+        updated["claim_boundary"] = {
+            **dict(updated["claim_boundary"]),
+            "simulated": True,
+            "claim_eligible": False,
+            "evidence_complete": False,
+        }
+    return updated
+
+
+def _runtime_reason(stage: Mapping[str, Any] | None) -> str:
+    if stage is None:
+        return f"unified_runtime:{UNIFIED_RUNTIME_NOT_SELECTED}"
+    reason = str(stage.get("skip_reason") or "")
+    return f"unified_runtime:{stage.get('status') or 'UNKNOWN'}" + (f":{reason}" if reason else "")
+
+
 def overlay_unified_capability_receipts(
     receipts: list[dict[str, Any]],
     stages: Iterable[Mapping[str, Any]] | None,
 ) -> list[dict[str, Any]]:
     """Apply executed-runtime truth to flow receipts that were never marked invoked.
 
-    * runtime stage invoked with evidence -> receipt invoked, refs/claim_boundary from the stage;
+    * runtime stage invoked with evidence -> receipt invoked, refs/claim_boundary from the stage,
+      ``receipt_base.claim_boundary`` re-projected tighten-only
+      (``reproject_receipt_base_claim_boundary``);
     * runtime stage skipped / not executed -> receipt keeps invoked=False and names the runtime
       reason (``unified_runtime:<STATUS>:<reason>``) instead of a bare
       ``selected_without_invocation``.
     * no runtime stage -> ``unified_runtime:NOT_SELECTED`` (the executing planner did not
       select it).
-    Receipts that are already invoked are returned unchanged.
+    * planner node with no executable body (``not_executable_reason``) and no runtime-attested
+      real invocation -> explicit ``NOT_EXECUTABLE:<class>`` receipt.
+    Receipts that are already invoked keep their verdict; they only gain the runtime stage's
+    status and gate result as ``unified_runtime_status`` / ``unified_runtime_gate_passed``.
     """
 
     by_name = {
@@ -121,9 +346,37 @@ def overlay_unified_capability_receipts(
         if not isinstance(receipt, dict):
             out.append(receipt)
             continue
-        stage = by_name.get(str(receipt.get("name") or ""))
-        if bool(receipt.get("invoked")) or not bool(receipt.get("selected", True)):
+        name = str(receipt.get("name") or "")
+        stage = by_name.get(name)
+        if not bool(receipt.get("selected", True)):
             out.append(receipt)
+            continue
+        if bool(receipt.get("invoked")):
+            if stage is not None and bool(stage.get("invoked")):
+                annotated = dict(receipt)
+                annotated["unified_runtime_status"] = str(stage.get("status") or "")
+                annotated["unified_runtime_gate_passed"] = bool(stage.get("gate_passed"))
+                out.append(annotated)
+            else:
+                out.append(receipt)
+            continue
+        refs = (
+            [str(ref) for ref in (stage.get("evidence_refs") or []) if str(ref).strip()]
+            if stage is not None
+            else []
+        )
+        runtime_invoked = stage is not None and bool(stage.get("invoked")) and bool(refs)
+        ne_reason = not_executable_reason(name)
+        if ne_reason and not (runtime_invoked and runtime_attests_real(receipt, stage)):
+            updated = not_executable_receipt(
+                receipt, ne_reason, runtime_reason=_runtime_reason(stage)
+            )
+            updated["unified_runtime_status"] = (
+                str(stage.get("status") or "")
+                if stage is not None
+                else UNIFIED_RUNTIME_NOT_SELECTED
+            )
+            out.append(updated)
             continue
         if stage is None:
             # Selected by the flow plan, but the executing runtime's planner never selected
@@ -135,8 +388,7 @@ def overlay_unified_capability_receipts(
             continue
         updated = dict(receipt)
         updated["unified_runtime_status"] = str(stage.get("status") or "")
-        refs = [str(ref) for ref in (stage.get("evidence_refs") or []) if str(ref).strip()]
-        if bool(stage.get("invoked")) and refs:
+        if runtime_invoked:
             gate_passed = bool(stage.get("gate_passed"))
             updated.update({
                 "invoked": True,
@@ -151,10 +403,10 @@ def overlay_unified_capability_receipts(
                 updated["claim_boundary"] = dict(stage["claim_boundary"])
             if stage.get("trigger_source"):
                 updated["trigger_source"] = str(stage["trigger_source"])
+            if bool(stage.get("outcome_simulated")):
+                updated["outcome_simulated"] = True
+            updated = reproject_receipt_base_claim_boundary(updated, stage)
         else:
-            reason = str(stage.get("skip_reason") or "")
-            updated["failure_reason"] = f"unified_runtime:{stage.get('status') or 'UNKNOWN'}" + (
-                f":{reason}" if reason else ""
-            )
+            updated["failure_reason"] = _runtime_reason(stage)
         out.append(updated)
     return out

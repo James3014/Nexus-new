@@ -5,6 +5,7 @@ from typing import Any
 from nexus.core.repo_root import REPO_ROOT
 from nexus.engine.capability_receipts import build_trace_receipts
 from nexus.learning.shared_playbook import bind_shared_playbook_runtime_receipts
+from nexus.research.flow.capability_planning import drop_archived_capabilities
 from nexus.research.flow.unified_capability_projection import overlay_unified_capability_receipts
 
 
@@ -12,7 +13,8 @@ def runtime_receipt_plan_payload(
     capability_plan_payload: dict[str, Any],
     nexus_usage_trace: dict[str, Any],
 ) -> dict[str, Any]:
-    plan = dict(capability_plan_payload)
+    # Archived nodes are never receipt-bearing selections (integration_manager, 2026-10-13).
+    plan = drop_archived_capabilities(dict(capability_plan_payload))
     selected = [str(item).strip() for item in (plan.get("selected_capabilities", []) or []) if str(item).strip()]
     if not selected:
         return plan
