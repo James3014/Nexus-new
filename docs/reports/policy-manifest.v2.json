@@ -471,8 +471,7 @@
       "commit_sha": "1c9dce65",
       "status_tag": "code-backed",
       "test_entrypoints": [
-        "nexus-core-rs/src/receipt_verifier.rs::tests (11 tests)",
-        "tests/integration/test_rust_kernel_smoke.py::test_rust_kernel_receipt_verification"
+        "nexus-core-rs/src/receipt_verifier.rs::tests (11 tests)"
       ],
       "receipt_type": "ReceiptVerificationResult",
       "rollback_drill_status": "drilled-2026-06-15",
@@ -978,17 +977,17 @@
     },
     {
       "policy_id": "P-CONTAM-01",
-      "phase": "Rust-Kernel",
+      "phase": "Pre-Execution",
       "owner_module": "contamination_guard",
-      "source_file": "nexus-core-rs/src/contamination.rs",
+      "source_file": "nexus/research/contamination_guard.py",
       "schema_version": "v0.1",
-      "commit_sha": "1c9dce65",
+      "commit_sha": "e3b0ba5eb",
       "status_tag": "code-backed",
       "test_entrypoints": [
-        "tests/integration/test_rust_kernel_smoke.py::test_rust_kernel_contamination_check"
+        "tests/research/test_research_isolation.py::test_contamination_guard_blocks_design_language_and_fields"
       ],
-      "receipt_type": "ContaminationCheckResult",
-      "rollback_drill_status": "drilled-2026-06-15",
+      "receipt_type": "ContaminationGuardResult",
+      "rollback_drill_status": "drilled-2026-10-14",
       "promotion_allowed": false,
       "lane": "hard",
       "risk_tier": "high",
@@ -1002,6 +1001,18 @@
           "version": "P-CONTAM-01.0.1.0",
           "timestamp": "2026-06-15T00:00:00Z",
           "diff_summary": "Baseline freeze — moved to hard lane (research contamination is fail-closed core gate)",
+          "lane": "hard"
+        },
+        {
+          "version": "P-CONTAM-01.0.2.0",
+          "timestamp": "2026-10-14T00:00:00Z",
+          "diff_summary": "Rebound from the retired Rust nexus-core-rs CheckContamination (#1927) to nexus/research/contamination_guard.py. KNOWN ENFORCEMENT GAP (#2199): the guard's only production caller is the retired legacy engine (nexus/engine/pipeline_stages.py); the canonical research executor (capability_executor_registry) does not call it. This policy is not enforced on the canonical path; the test entrypoint (tests/research/test_research_isolation.py::test_contamination_guard_blocks_design_language_and_fields) is a unit test of the guard only, not canonical-path enforcement.",
+          "lane": "hard"
+        },
+        {
+          "version": "P-CONTAM-01.0.2.1",
+          "timestamp": "2026-10-14T15:06:34Z",
+          "diff_summary": "rollback_drill_status drilled-2026-10-14: real rollback drill of nexus/research/contamination_guard.py (e3b0ba5eb -> e3b0ba5eb~1 -> restore), see docs/reports/contamination-guard-rollback-drill-2026-10-14.md. The 2026-06-15 Rust kernel drill (rust-kernel-rollback-drill-2026-06-15.md) does not apply to this guard. Canonical-path enforcement gap remains (#2199).",
           "lane": "hard"
         }
       ]

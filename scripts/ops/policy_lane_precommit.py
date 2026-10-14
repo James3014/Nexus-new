@@ -13,6 +13,7 @@ Usage (as pre-commit hook):
 Usage (manual):
     python scripts/ops/policy_lane_precommit.py --staged-files file1.py file2.py
 """
+
 import argparse
 import json
 import subprocess
@@ -20,7 +21,9 @@ import sys
 from pathlib import Path
 
 MANIFEST_PATH = Path(__file__).resolve().parents[2] / "docs" / "reports" / "policy-manifest.v2.json"
-LANE_GATE_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "ops" / "check_policy_lane_gate.py"
+LANE_GATE_SCRIPT = (
+    Path(__file__).resolve().parents[2] / "scripts" / "ops" / "check_policy_lane_gate.py"
+)
 
 # Map file paths to policy IDs
 FILE_TO_POLICY = {
@@ -44,7 +47,7 @@ FILE_TO_POLICY = {
     "nexus/core/context_hub.py": ["P-CTX-01"],
     "nexus/engine/attempt_settlement_service.py": ["P-SETTLE-01"],
     "nexus-core-rs/src/flow_machine.rs": ["P-FLOW-01"],
-    "nexus-core-rs/src/contamination.rs": ["P-CONTAM-01"],
+    "nexus/research/contamination_guard.py": ["P-CONTAM-01"],
 }
 
 
