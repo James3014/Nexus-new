@@ -369,9 +369,9 @@ def test_subprocess_killed_at_the_shared_deadline_marks_the_row(tmp_path, monkey
 def test_receipt_first_probe_cannot_outlive_the_remaining_budget(tmp_path, monkeypatch) -> None:
     """Reviewer C(3)."""
 
-    from scripts.bench.capability_ab_runner import _run_receipt_first_probe_payload
-
     import dataclasses
+
+    from scripts.bench.capability_ab_runner import _run_receipt_first_probe_payload
 
     task = dataclasses.replace(_governance_task(), expected_capabilities=["claim_gate"])
     target_file, visible_test_file = _materialize_fixture(tmp_path, task)
