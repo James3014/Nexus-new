@@ -13,8 +13,7 @@ def runtime_receipt_plan_payload(
     capability_plan_payload: dict[str, Any],
     nexus_usage_trace: dict[str, Any],
 ) -> dict[str, Any]:
-    # Archived nodes are never receipt-bearing selections (integration_manager, 2026-10-13).
-    plan = drop_archived_capabilities(dict(capability_plan_payload))
+    plan = dict(capability_plan_payload)
     selected = [str(item).strip() for item in (plan.get("selected_capabilities", []) or []) if str(item).strip()]
     if not selected:
         return plan
@@ -68,7 +67,9 @@ def runtime_receipt_plan_payload(
         plan["selected_capabilities"] = selected
         capabilities["runtime_pruned_capabilities"] = pruned
         capabilities["runtime_pruned_capability_count"] = len(pruned)
-    return plan
+    # Archived nodes are never receipt-bearing selections (integration_manager, 2026-10-13);
+    # applied after the runtime pruning above so its reasons are kept.
+    return drop_archived_capabilities(plan)
 
 
 def _apply_planner_playbook_violations(
