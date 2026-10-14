@@ -4625,3 +4625,10 @@ def test_pr2122_dependency_snapshot_transition_allows_only_exact_binding(monkeyp
                 pull_request_number=other_pr,
                 head_product_init_is_regular=True,
             )
+
+
+def test_lane_binding_missing_hint_names_the_agent_lane() -> None:
+    hint = trusted_anchor.CONTROLLER_FAILURE_REMEDIES["MERGE_LANE_BINDING_MISSING"]
+    assert "AGENT_INLINE" in hint
+    assert "OWNER_INLINE" in hint
+    assert "must not mint" not in hint

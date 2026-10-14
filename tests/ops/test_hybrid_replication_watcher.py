@@ -173,3 +173,22 @@ def test_fast_ingest_rechecks_pending_missing_capture_each_poll(
 
     assert report["rows"][0]["capture"] == "PRESENT"
     assert store.load_task(snapshot.task_key)["phase"] == "ADMITTED"
+
+
+def test_full_watchdog_excludes_uncaptured_github_token_issue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(daemon, "CANDIDATE_REPOSITORIES", ("James3014/Nexus-new",))
+    monkeypatch.setattr(
+        daemon,
+        "_issues_since",
+        lambda repository, since: [
+            {"number": 2055, "user": {"login": "github-actions[bot]"}},
+            {"number": 2056, "user": {"login": "James3014"}},
+        ],
+    )
+    monkeypatch.setattr(daemon, "_comments", lambda repository, number: [])
+    report = watcher.full_watchdog(
+        store=AutomaticReplicationStore(tmp_path), boundary="2026-10-07T11:59:59Z"
+    )
+    assert report["expected_count"] == 1

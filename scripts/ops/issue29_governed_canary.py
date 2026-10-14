@@ -72,6 +72,8 @@ EXPECTED_AGY_PERMISSION_MODE = "plan_no_autoapprove"
 WORLD_C_VERIFIER_SOURCE = "HealOrchestrator.VerificationPhase"
 
 MIN_UNUSED_MEMORY_BYTES = 6 * 1024**3
+# kern.memorystatus_vm_pressure_level: 1 normal, 2 warning, 4 critical.
+MEMORY_PRESSURE_NORMAL = 1
 OLLAMA_SERVICE_LABEL = "com.james.local-models-ollama"
 OLLAMA_SERVICE_PS_URL = "http://127.0.0.1:11435/api/ps"
 OLLAMA_GATEWAY_TAGS_URL = "http://127.0.0.1:11434/api/tags"
@@ -129,6 +131,8 @@ class HostProbes:
     http_get: Callable[[str], tuple[int, str]]
     unused_memory_bytes: Callable[[], int]
     agy_path: Callable[[], str]
+    # Defaults to "unknown" so a caller that omits the probe fails closed.
+    memory_pressure_level: Callable[[], int] = lambda: 0
 
 
 @dataclass
@@ -293,22 +297,47 @@ def _real_http_get(url: str) -> tuple[int, str]:
 
 
 def _real_unused_memory_bytes() -> int:
-    """Free + speculative pages from vm_stat (memory not used by anything)."""
+    """Free + speculative + inactive + purgeable pages from vm_stat.
+
+    Splash keeps ~41 GiB wired on M5, so free + speculative alone stays near
+    zero even when the kernel can hand out inactive/purgeable pages without
+    swapping. Compressed pages are not counted. The separate pressure check
+    keeps this from admitting a run while the host is already under strain.
+    """
     result = subprocess.run(["vm_stat"], capture_output=True, text=True, check=False)
     page_size = 16384
     free_pages = 0
     for line in result.stdout.splitlines():
         if "page size of" in line:
             page_size = int(line.split("page size of", 1)[1].split()[0])
-        elif line.startswith("Pages free:") or line.startswith("Pages speculative:"):
+        elif line.startswith((
+            "Pages free:",
+            "Pages speculative:",
+            "Pages inactive:",
+            "Pages purgeable:",
+        )):
             free_pages += int(line.split(":", 1)[1].strip().rstrip("."))
     return free_pages * page_size
+
+
+def _real_memory_pressure_level() -> int:
+    try:
+        result = subprocess.run(
+            ["sysctl", "-n", "kern.memorystatus_vm_pressure_level"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return int(result.stdout.strip())
+    except (OSError, ValueError):
+        return 0
 
 
 def real_host_probes() -> HostProbes:
     return HostProbes(
         http_get=_real_http_get,
         unused_memory_bytes=_real_unused_memory_bytes,
+        memory_pressure_level=_real_memory_pressure_level,
         agy_path=lambda: shutil.which(os.environ.get("NEXUS_AGY_BIN") or "agy") or "",
     )
 
@@ -357,7 +386,17 @@ def host_preflight(
     evaluation.add(
         "unused_memory_at_least_threshold",
         unused >= min_unused_bytes,
-        {"unused_bytes": unused, "threshold_bytes": min_unused_bytes},
+        {
+            "reclaimable_bytes": unused,
+            "threshold_bytes": min_unused_bytes,
+            "counted_pages": "free+speculative+inactive+purgeable",
+        },
+    )
+    pressure = int(probes.memory_pressure_level())
+    evaluation.add(
+        "memory_pressure_normal",
+        pressure == MEMORY_PRESSURE_NORMAL,
+        {"kern.memorystatus_vm_pressure_level": pressure},
     )
 
     agy_path = probes.agy_path()

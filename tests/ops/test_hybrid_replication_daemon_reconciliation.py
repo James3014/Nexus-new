@@ -67,3 +67,80 @@ def test_issues_since_keeps_post_boundary_open_without_graphql(monkeypatch) -> N
     monkeypatch.setattr(daemon, "_gh_json", fake_gh_json)
 
     assert daemon._issues_since("James3014/Nexus-new", BOUNDARY) == [issue]
+
+
+def _run_ingest_only(monkeypatch, tmp_path, issues, comments_by_number) -> tuple[int, dict]:
+    import io
+    import json
+    import sys
+    from contextlib import redirect_stdout
+
+    monkeypatch.setattr(daemon, "CANDIDATE_REPOSITORIES", ("James3014/Nexus-new",))
+    monkeypatch.setattr(daemon, "_issues_since", lambda repository, since: issues)
+    monkeypatch.setattr(
+        daemon, "_comments", lambda repository, number: comments_by_number.get(number, [])
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["d", "--root", str(tmp_path), "--since", BOUNDARY, "--ingest-only"],
+    )
+    out = io.StringIO()
+    with redirect_stdout(out):
+        code = daemon.main()
+    report = json.loads(out.getvalue().split("\n}\n")[0] + "\n}")
+    return code, report
+
+
+def _authored(number: int, login: str) -> dict[str, Any]:
+    return {
+        **_issue(
+            number=number, created_at="2026-10-13T11:28:26Z", updated_at="2026-10-13T11:28:26Z"
+        ),
+        "user": {"login": login},
+    }
+
+
+def test_github_token_bot_issue_without_capture_is_not_missing(monkeypatch, tmp_path) -> None:
+    for login in ("github-actions[bot]", "app/github-actions"):
+        code, report = _run_ingest_only(
+            monkeypatch, tmp_path / login.replace("/", "_"), [_authored(2055, login)], {}
+        )
+        assert code == 0
+        assert report["missing_capture"] == []
+        assert report["not_captured_github_token_issue"] == ["James3014/Nexus-new#2055"]
+        assert report["expected_count"] == 0
+
+
+def test_owner_issue_without_capture_is_still_missing(monkeypatch, tmp_path) -> None:
+    code, report = _run_ingest_only(monkeypatch, tmp_path, [_authored(2056, "James3014")], {})
+    assert code == 3
+    assert report["missing_capture"] == ["James3014/Nexus-new#2056"]
+    assert report["not_captured_github_token_issue"] == []
+
+
+def test_github_token_bot_issue_with_capture_is_mirrored(monkeypatch, tmp_path) -> None:
+    from nexus.research.hybrid_replication_pipeline import TaskSnapshot, build_capture_comment
+
+    snapshot = TaskSnapshot.create(
+        repository="James3014/Nexus-new",
+        issue_number=2057,
+        created_at="2026-10-13T11:28:26Z",
+        captured_at="2026-10-13T11:28:30Z",
+        issue_updated_at="2026-10-13T11:28:26Z",
+        title="bot issue",
+        body="body",
+        pre_implementation_revision="a" * 40,
+        default_branch="main",
+        source_event_id="actions:1:1",
+    )
+    code, report = _run_ingest_only(
+        monkeypatch,
+        tmp_path,
+        [_authored(2057, "github-actions[bot]")],
+        {2057: [{"body": build_capture_comment(snapshot)}]},
+    )
+    assert report["missing_capture"] == []
+    assert report["not_captured_github_token_issue"] == []
+    assert report["expected_count"] == 1
+    assert report["mirrored_count"] == 1
