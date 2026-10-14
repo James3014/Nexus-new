@@ -1961,8 +1961,23 @@ def _task_uses_materialized_fixture(task: CapabilityTask, *, materialize_missing
     return materialize_missing
 
 
+def _no_nexus_task_hints() -> bool:
+    """True in the counted like-for-like configuration (R2).
+
+    Both arms then receive the identical task text (``task.task_desc``) and the fixture-aware
+    local paths may not pre-empt the model.  ``main`` sets this from ``--no-nexus-task-hints``
+    (default ON under ``--strict-llm-baseline`` / ``--require-same-model-baseline``).
+    """
+
+    return os.environ.get("NEXUS_BENCH_NO_TASK_HINTS", "").strip().lower() in {"1", "true", "yes"}
+
+
 def _nexus_task_desc(task: CapabilityTask) -> str:
     desc = task.task_desc
+    if _no_nexus_task_hints():
+        # The bare arm gets only task.task_desc; any appended contract/decision table would be an
+        # answer hint only the with-Nexus arm sees.
+        return desc
     expected = set(normalize_capability_names(task.expected_capabilities))
     desc += (
         "\n\nNexus wearing contract:"
@@ -4741,6 +4756,9 @@ def _nexus_codex_hidden_verifier_guidance(task: CapabilityTask, source: str) -> 
     guidance = [
         "Visible tests are acceptance hints, not the full contract; infer hidden invariants from the source and task category.",
     ]
+    if _no_nexus_task_hints():
+        # Everything below restates fixture contracts the bare arm never sees (R2).
+        return "\n".join(f"- {item}" for item in guidance)
     task_type = str(task.task_type).lower()
     combined = f"{task.task_desc}\n{source}".lower()
     if "test_repair" in task_type or "repair" in combined:
@@ -15067,6 +15085,11 @@ def run_with_nexus(
         bench_env_updates["NEXUS_DISABLE_HIDDEN_CONTRACT_FAST_PATH"] = "1"
         bench_env_updates["NEXUS_DISABLE_HIDDEN_INVARIANT_SHADOW"] = "1"
         bench_env_updates["NEXUS_MODEL_REQUIRED_EXECUTION_MODE"] = execution_policy.mode
+    if _no_nexus_task_hints():
+        # Fixture-aware local paths must not pre-empt or replace the model in the counted arm.
+        bench_env_updates["NEXUS_DISABLE_LOCAL_PREFLIGHT_BEFORE_LLM"] = "1"
+        bench_env_updates["NEXUS_DISABLE_HIDDEN_CONTRACT_FAST_PATH"] = "1"
+        bench_env_updates["NEXUS_DISABLE_HIDDEN_INVARIANT_SHADOW"] = "1"
     if effective_enable_ultra_review_dry_gate:
         bench_env_updates["NEXUS_ULTRA_REVIEW_DRY_GATE"] = "1"
     if effective_enable_autoreason_executor:
@@ -19531,6 +19554,23 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--no-nexus-task-hints",
+        dest="no_nexus_task_hints",
+        action="store_true",
+        default=None,
+        help=(
+            "Give the with-Nexus arm exactly task.task_desc (no appended contracts or decision tables) "
+            "and keep fixture-aware local paths from pre-empting the model. Default ON under "
+            "--strict-llm-baseline or --require-same-model-baseline."
+        ),
+    )
+    parser.add_argument(
+        "--allow-nexus-task-hints",
+        dest="no_nexus_task_hints",
+        action="store_false",
+        help="Re-enable with-Nexus task hints and fixture-aware local paths (diagnostic runs only; not like-for-like).",
+    )
+    parser.add_argument(
         "--neutralize-history",
         dest="neutralize_history",
         action="store_true",
@@ -19681,6 +19721,11 @@ def main() -> int:
     # All downstream calls to _hidden_verifier_mode_enabled() will read from this env.
     if getattr(args, "enable_hidden_verifier", False):
         os.environ["NEXUS_VALUE_HIDDEN_VERIFIER"] = "1"
+    if args.no_nexus_task_hints is None:
+        args.no_nexus_task_hints = bool(
+            args.strict_llm_baseline or getattr(args, "require_same_model_baseline", False)
+        )
+    os.environ["NEXUS_BENCH_NO_TASK_HINTS"] = "1" if args.no_nexus_task_hints else "0"
     if args.session_worker:
         os.environ["NEXUS_GEMINI_SESSION_WORKER"] = "1"
         os.environ["NEXUS_CODEX_SESSION_WORKER"] = "1"
@@ -20309,6 +20354,7 @@ def main() -> int:
                     "external_model_export_policy": str(args.external_model_export_policy),
                     "outbound_prompt_ledger": str(args.outbound_prompt_ledger or os.environ.get("NEXUS_OUTBOUND_PROMPT_LEDGER") or ""),
                     "hidden_verifier_mode": hidden_verifier_mode,
+                    "no_nexus_task_hints": bool(args.no_nexus_task_hints),
                     "without_mode": args.without_mode,
                     "with_llm_mode": args.with_llm_mode,
                     "with_model_provider": args.with_model_provider,

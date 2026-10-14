@@ -859,28 +859,18 @@ def _online_call_skipped_reason(unified_receipt: Mapping[str, Any] | None) -> st
 def _build_value_task_contract(*, source_code: str, task: str, test_source: str = "") -> str:
     combined = f"{task}\n{source_code}\n{test_source}".lower()
     rules: list[str] = []
-    if "none" in combined and ("override" in combined or "defaults" in combined):
-        rules.append("If an override value is None, preserve the existing default instead of writing None.")
+    # Only generic engineering rules belong here. Fixture-specific rules (exact return values,
+    # defaults, or field semantics a hidden verifier checks) are answer hints the bare arm never
+    # gets, so they were removed (online A/B R2, 2026-10-14).
     if "artifact" in combined or "claim" in combined:
         rules.append("Preserve exact canonical field names from source/tests; do not invent plural or renamed fields.")
         if "'artifact'" in combined or '"artifact"' in combined:
             rules.append("Use singular field 'artifact'; do not rename it to 'artifacts'.")
-        rules.append("Verified claim helpers should return the claim ids that satisfy the artifact-backed contract.")
     if "phase" in combined or "evidence" in combined or "reason" in combined:
         rules.append("Use the canonical phase fields 'status', 'evidence', and 'reason' exactly when they appear in source/tests.")
-        rules.append("Passing phases require evidence; failing phases require a non-empty reason.")
-    if "nightshift" in combined or "report_path" in combined:
-        rules.append(
-            "Nightshift recovery is auditable only when recommended, invoked, recovered, and a non-empty report_path are all present."
-        )
-        rules.append("Reject boolean-only Nightshift recovery when report_path is missing or empty.")
     if "deny" in combined or "authorization" in combined or "redact" in combined:
         rules.append("MemPalace rule: fail closed for unknown or missing authorization data and never weaken redaction.")
-    if "strict parser defaults" in combined or "parse_config" in combined:
-        rules.append(
-            "LanceDB/context rule: for parse_config, omitted values use canonical defaults strict=True and retries=3; explicit inputs are preserved."
-        )
-    elif "strict" in combined or "canonical" in combined or "config" in combined:
+    if "strict" in combined or "canonical" in combined or "config" in combined:
         rules.append("LanceDB/context rule: follow the canonical config/doc contract over older examples.")
     if not rules:
         return ""
@@ -1026,6 +1016,19 @@ def _select_candidate_with_routing_layers(
                     autoreason["score_guard_winner"] = _candidate_id(score_winner)
                     autoreason["score_guard_reason"] = "verified_candidate_must_not_be_overridden_by_lower_score"
                     return score_winner, active
+                if item.score >= 1.0 and not _is_model_owned_source(item.source):
+                    # A verified model answer is the delivery; a local candidate with the same
+                    # score must not replace it (online A/B R2, gov-002 local_hidden_shadow).
+                    model_best = max(
+                        (c for c in active if _is_model_owned_source(c.source)),
+                        key=lambda c: c.score,
+                        default=None,
+                    )
+                    if model_best is not None and model_best.score >= item.score:
+                        autoreason["winner_overridden_by_model_delivery_guard"] = True
+                        autoreason["score_guard_winner"] = _candidate_id(model_best)
+                        autoreason["score_guard_reason"] = "verified_model_candidate_preferred_over_equal_local"
+                        return model_best, active
                 return item, active
     else:
         learning_trace["autoreason"] = {"enabled": False, "status": "DISABLED", "reason": "feature_flag_disabled"}
