@@ -1091,11 +1091,13 @@ def _sha256(data: bytes) -> str:
 
 
 def _atomic_write(path: Path, data: bytes, mode: int = 0o644) -> None:
-    # Unique per write and created exclusively: cleanup can only ever remove
-    # this write's own temp file, never a concurrent writer's (#2169 review).
+    # Unique per write and created exclusively (O_EXCL, so never through an
+    # existing file or symlink).  Cleanup runs only once this write has created
+    # its own temp file, so it never removes anything it does not own (#2169 review).
     tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}.{os.urandom(6).hex()}")
+    handle = open(tmp, "xb")
     try:
-        with open(tmp, "xb") as handle:
+        with handle:
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())

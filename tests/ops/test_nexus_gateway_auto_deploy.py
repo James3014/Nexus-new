@@ -4069,3 +4069,19 @@ def test_hold_is_written_atomically(cfg: ad.Config, monkeypatch: pytest.MonkeyPa
     ad._set_hold(cfg, "owner: paused")
     assert cfg.hold_file.read_text() == "owner: paused\n"
     assert cfg.hold_file.stat().st_mode & 0o777 == 0o600
+
+
+def test_atomic_write_never_removes_a_temp_path_it_did_not_create(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Codex round 4: a pre-existing file or symlink at the temp name is left alone."""
+    monkeypatch.setattr(ad.os, "urandom", lambda n: b"\x00" * n)
+    dest = tmp_path / "status.json"
+    taken = tmp_path / f".status.json.tmp.{os.getpid()}.{'00' * 6}"
+    victim = tmp_path / "victim"
+    victim.write_text("keep")
+    taken.symlink_to(victim)
+    with pytest.raises(FileExistsError):
+        ad._atomic_write(dest, b"new")
+    assert taken.is_symlink() and victim.read_text() == "keep"
+    assert not dest.exists()
