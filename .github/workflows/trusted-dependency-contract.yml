@@ -50,6 +50,8 @@ jobs:
           [[ "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]] || fail "workflow sha is not a full lowercase SHA"
           basic_auth="$(printf 'x-access-token:%s' "$TRUSTED_TOKEN" | base64 | tr -d '\n')"
           [ -n "$basic_auth" ] || fail "empty token header"
+          [ "$(printf '%s' "$basic_auth" | tr -cd '\n' | wc -c)" -eq 0 ] || fail "token header contains a newline"
+          echo "::add-mask::$basic_auth"
           git init --bare "$bare_repo"
           git -C "$bare_repo" remote add origin "https://github.com/$REPOSITORY.git"
           GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader GIT_CONFIG_VALUE_0="Authorization: basic $basic_auth" \

@@ -235,6 +235,96 @@ def test_deleted_or_symlinked_dependency_file_is_drift(fx: Fixture, change: str)
     assert (record["status"], record["reason_code"]) == ("FAIL", tdc.DRIFT)
 
 
+def test_anchor_is_not_honoured_when_main_moved_the_file_since_the_fork(
+    fx: Fixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Codex review: main and the PR edit different parts of pyproject.toml, so a
+    # three-way merge would yield bytes that match neither anchored snapshot.
+    base = b"[project]\nname = 'fixture'\n\n\n\n\nversion = '0'\n"
+    fx.write("pyproject.toml", base)
+    fork = fx.commit("main: base layout")
+    main_bytes = base.replace(b"version = '0'", b"version = '1'")
+    fx.write("pyproject.toml", main_bytes)
+    main = fx.commit("main: moved pyproject after the fork")
+    fx.branch("pr", fork)
+    head_bytes = base.replace(b"name = 'fixture'", b"name = 'fixture'\ndependencies = ['x']")
+    fx.write("pyproject.toml", head_bytes)
+    head = fx.commit("pr: dependency change")
+    _authorize(monkeypatch, PR, _hashes((main_bytes, UV_LOCK), (head_bytes, UV_LOCK)))
+    record = _run(fx, main, head)
+    assert (record["status"], record["reason_code"]) == ("FAIL", tdc.DRIFT)
+    # Same anchor shape, main unmoved since the fork: honoured.
+    _authorize(monkeypatch, PR, _hashes((base, UV_LOCK), (head_bytes, UV_LOCK)))
+    assert _run(fx, fork, head)["reason_code"] == tdc.AUTHORIZED
+
+
+def test_untouched_requires_every_pr_commit_untouched_not_just_head(fx: Fixture) -> None:
+    # Opus review: PR1 = M->C sets main's new bytes; PR2 = C->D reverts them. Head D
+    # equals the merge-base M, but once PR1 lands as a merge commit the effective
+    # merge-base becomes C and merging D would downgrade the file on main.
+    new_bytes = PYPROJECT + b"# legitimate bump\n"
+    fx.write("pyproject.toml", new_bytes)
+    main = fx.commit("main: legitimate bump W")
+    fx.branch("pr1", fx.fork_point)
+    fx.write("pyproject.toml", new_bytes)
+    c = fx.commit("pr1: C adopts main's bytes")
+    fx.branch("pr2", c)
+    fx.write("pyproject.toml", PYPROJECT)
+    d = fx.commit("pr2: D reverts to the old bytes")
+    assert _run(fx, main, c)["reason_code"] == tdc.UNCHANGED
+    record = _run(fx, main, d)
+    assert record["merge_base_sha"] == fx.fork_point
+    assert (record["status"], record["reason_code"]) == ("FAIL", tdc.DRIFT)
+    # Prove the attack the rule closes: after PR1 merges with --no-ff, merging D
+    # really would put the old bytes on main.
+    fx.branch("main-after", main)
+    _git(fx.work, "merge", "-q", "--no-ff", "-m", "merge pr1", c)
+    landed = _git(fx.work, "rev-parse", "HEAD")
+    tree = _git(fx.work, "merge-tree", "--write-tree", landed, d)
+    assert _git(fx.work, "cat-file", "blob", f"{tree}:pyproject.toml") == PYPROJECT.decode().strip()
+
+
+def test_edit_and_revert_while_main_moved_is_drift(fx: Fixture) -> None:
+    fx.write("pyproject.toml", PYPROJECT + b"# main moved\n")
+    main = fx.commit("main: bump")
+    fx.branch("pr", fx.fork_point)
+    fx.write("pyproject.toml", PYPROJECT + b"# temporary\n")
+    fx.commit("pr: edit")
+    fx.write("pyproject.toml", PYPROJECT)
+    head = fx.commit("pr: revert")
+    assert _run(fx, main, head)["reason_code"] == tdc.DRIFT
+
+
+def test_catching_up_to_an_older_main_fails_closed_until_latest_main_is_merged(
+    fx: Fixture,
+) -> None:
+    # The every-commit rule is deliberately conservative: a PR commit that predates
+    # the catch-up merge carries different entries, so the check fails closed and
+    # the remedy ("merge origin/main") makes the bytes identical to main.
+    fx.write("uv.lock", UV_LOCK + b"# w1\n")
+    w1 = fx.commit("main: w1")
+    fx.write("uv.lock", UV_LOCK + b"# w2\n")
+    main = fx.commit("main: w2")
+    fx.branch("pr", fx.fork_point)
+    fx.write("README.md", b"changed\n")
+    fx.commit("pr: docs")
+    _git(fx.work, "merge", "-q", "--no-ff", "-m", "pr: catch up to w1", w1)
+    head = _git(fx.work, "rev-parse", "HEAD")
+    record = _run(fx, main, head)
+    assert (record["merge_base_sha"], record["reason_code"]) == (w1, tdc.DRIFT)
+    _git(fx.work, "merge", "-q", "--no-ff", "-m", "pr: merge latest main", main)
+    head = _git(fx.work, "rev-parse", "HEAD")
+    assert _run(fx, main, head)["reason_code"] == tdc.UNCHANGED
+
+
+def test_mode_change_with_identical_bytes_is_drift(fx: Fixture) -> None:
+    fx.branch("pr", fx.fork_point)
+    (fx.work / "uv.lock").chmod(0o755)
+    head = fx.commit("pr: make uv.lock executable")
+    assert "100755" in _git(fx.work, "ls-tree", head, "--", "uv.lock")
+    assert _run(fx, fx.fork_point, head)["reason_code"] == tdc.DRIFT
+
+
 def test_anchor_for_another_pr_number_is_drift(
     fx: Fixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -483,6 +573,22 @@ def test_workflow_shell_passes_untouched_pr(fx: Fixture, tmp_path: Path) -> None
     completed = _shell(fx, main, head, tmp_path / "run")
     assert completed.returncode == 0, completed.stderr
     assert f'"reason_code":"{tdc.UNCHANGED}"' in completed.stdout
+
+
+def test_workflow_shell_runs_the_merge_base_path_when_main_moved(
+    fx: Fixture, tmp_path: Path
+) -> None:
+    main = _trusted_main(fx)
+    fx.write("pyproject.toml", PYPROJECT + b"# main moved\n")
+    moved = fx.commit("main: bump after the fork")
+    fx.branch("pr", main)
+    fx.write("README.md", b"changed\n")
+    head = fx.commit("pr: docs only")
+    completed = _shell(fx, moved, head, tmp_path / "run")
+    assert completed.returncode == 0, completed.stderr
+    assert f'"reason_code":"{tdc.UNTOUCHED}"' in completed.stdout
+    assert f'"merge_base_sha":"{main}"' in completed.stdout
+    assert "::add-mask::" in completed.stdout
 
 
 def test_workflow_shell_rejects_non_default_branch_workflow_ref(

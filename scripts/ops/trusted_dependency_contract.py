@@ -19,12 +19,13 @@ Trust model:
 
 Verdicts (anything else fails closed):
 
-* PASS ``DEPENDENCY_FILES_UNTOUCHED``: the PR changes neither file since its
-  unique merge-base with the trusted default-branch commit, so a merge keeps
-  main's exact bytes.
+* PASS ``DEPENDENCY_FILES_UNTOUCHED``: no commit of the PR changes either file
+  since its unique merge-base with the trusted default-branch commit, so a
+  merge keeps main's exact bytes.
 * PASS ``DEPENDENCY_CONTRACT_UNCHANGED``: head bytes equal main's bytes.
 * PASS ``AUTHORIZED_SNAPSHOT_TRANSITION``: an exact one-use anchor for this PR
-  number and these four hashes is already on main.
+  number and these four hashes is already on main, and main has not moved
+  either file since the merge-base, so the merge result is exactly the head bytes.
 * FAIL ``DEPENDENCY_CONTRACT_DRIFT``: everything else.
 """
 
@@ -130,10 +131,35 @@ def _regular_blob(repo: Path, revision: str, path: str) -> bytes | None:
     return content
 
 
-def _untouched_since_merge_base(repo: Path, merge_base_sha: str, head_sha: str) -> bool:
+def _same_entries(repo: Path, merge_base_sha: str, revision: str) -> bool:
+    """Both dependency files have the same non-empty tree entry at both revisions."""
+
     for path in DEPENDENCY_PATHS:
         base_entry = _tree_entry(repo, merge_base_sha, path)
-        if not base_entry or base_entry != _tree_entry(repo, head_sha, path):
+        if not base_entry or base_entry != _tree_entry(repo, revision, path):
+            return False
+    return True
+
+
+def _no_commit_touched_since(repo: Path, merge_base_sha: str, head_sha: str) -> bool:
+    """Every PR-side commit carries the merge-base's exact dependency entries.
+
+    Comparing only head with the merge-base is not enough: a merge-commit merge of
+    a sibling PR can move the merge-base GitHub uses to a commit inside this PR's
+    own history, so an intermediate commit that changed a file would become the
+    effective base and the file change would land.  Any later merge-base is an
+    ancestor of head that is not an ancestor of the current one, i.e. one of
+    these commits, so requiring all of them to be untouched is sound.
+    """
+
+    expected = {path: _tree_entry(repo, merge_base_sha, path) for path in DEPENDENCY_PATHS}
+    if not all(expected.values()):
+        return False
+    commits = anchor._git(repo, "rev-list", f"{merge_base_sha}..{head_sha}")
+    assert isinstance(commits, str)
+    for commit in commits.split():
+        anchor._exact_sha(commit, "commit")
+        if any(_tree_entry(repo, commit, path) != expected[path] for path in DEPENDENCY_PATHS):
             return False
     return True
 
@@ -149,9 +175,12 @@ def evaluate(repo: Path, ident: dict[str, Any], *, fetch: bool = True) -> dict[s
     for label, revision in (("trusted", workflow_sha), ("head", head_sha)):
         if anchor._git(repo, "cat-file", "-t", revision) != "commit":
             raise ContractError(f"{label} revision is not a commit")
-    trusted = {path: _regular_blob(repo, workflow_sha, path) for path in DEPENDENCY_PATHS}
-    if any(content is None for content in trusted.values()):
-        raise ContractError("trusted default branch lacks a regular pyproject.toml/uv.lock")
+    trusted: dict[str, bytes] = {}
+    for path in DEPENDENCY_PATHS:
+        content = _regular_blob(repo, workflow_sha, path)
+        if content is None:
+            raise ContractError("trusted default branch lacks a regular pyproject.toml/uv.lock")
+        trusted[path] = content
     head = {path: _regular_blob(repo, head_sha, path) for path in DEPENDENCY_PATHS}
     record: dict[str, Any] = {
         "schema": SCHEMA_VERSION,
@@ -165,27 +194,9 @@ def evaluate(repo: Path, ident: dict[str, Any], *, fetch: bool = True) -> dict[s
         else anchor._sha(head["pyproject.toml"]),
         "head_uv_lock_sha256": None if head["uv.lock"] is None else anchor._sha(head["uv.lock"]),
     }
-    if all(content is not None for content in head.values()):
-        if head == trusted:
-            return {**record, "status": "PASS", "reason_code": UNCHANGED}
-        try:
-            anchor._validate_trusted_dependency_contract(
-                trusted["pyproject.toml"],
-                head["pyproject.toml"],
-                trusted["uv.lock"],
-                head["uv.lock"],
-                pull_request_number=number,
-                head_product_init_is_regular=anchor._tree_has_regular_file(
-                    repo, head_sha, PRODUCT_INIT_PATH
-                ),
-            )
-        except ValueError:
-            pass
-        else:
-            return {**record, "status": "PASS", "reason_code": AUTHORIZED}
-    # Bytes differ (usually a branch cut before main moved a dependency file).
-    # Pass only if the PR itself never changed either file since its unique
-    # merge-base with the trusted commit; then any merge keeps main's bytes.
+    if head == trusted:
+        # Both sides hold the same regular-file bytes, so every merge keeps them.
+        return {**record, "status": "PASS", "reason_code": UNCHANGED}
     if fetch:
         anchor._git(repo, "fetch", "--no-tags", "--unshallow", "origin", workflow_sha, head_sha)
     if anchor._git(repo, "rev-parse", "--is-shallow-repository") != "false":
@@ -195,8 +206,36 @@ def evaluate(repo: Path, ident: dict[str, Any], *, fetch: bool = True) -> dict[s
     except ValueError as exc:
         raise ContractError(str(exc)) from None
     record["merge_base_sha"] = merge_base_sha
-    if _untouched_since_merge_base(repo, merge_base_sha, head_sha):
+    # Bytes differ, usually because the branch was cut before main moved a file.
+    # Pass when no commit of the PR changed either file since its unique
+    # merge-base with the trusted commit: then any merge keeps main's bytes.
+    if _no_commit_touched_since(repo, merge_base_sha, head_sha):
         return {**record, "status": "PASS", "reason_code": UNTOUCHED}
+    # An anchor binds (main bytes, head bytes). It is honoured only when main did
+    # not move either file since the merge-base. Otherwise a three-way merge could
+    # produce bytes that match neither snapshot. The controller enforces the same
+    # thing through MAIN_MOVED_OVER_GATE_SURFACE.
+    head_pyproject, head_uv_lock = head["pyproject.toml"], head["uv.lock"]
+    if (
+        head_pyproject is not None
+        and head_uv_lock is not None
+        and _same_entries(repo, merge_base_sha, workflow_sha)
+    ):
+        try:
+            anchor._validate_trusted_dependency_contract(
+                trusted["pyproject.toml"],
+                head_pyproject,
+                trusted["uv.lock"],
+                head_uv_lock,
+                pull_request_number=number,
+                head_product_init_is_regular=anchor._tree_has_regular_file(
+                    repo, head_sha, PRODUCT_INIT_PATH
+                ),
+            )
+        except ValueError:
+            pass
+        else:
+            return {**record, "status": "PASS", "reason_code": AUTHORIZED}
     return {**record, "status": "FAIL", "reason_code": DRIFT, "remedy": DRIFT_REMEDY}
 
 
