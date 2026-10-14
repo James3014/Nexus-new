@@ -3697,6 +3697,7 @@ class UnifiedMCPGateway:
 
         index_rel = str(index_path.relative_to(CANONICAL_SOURCE_ROOT))
         card_rel = str(card_path.relative_to(CANONICAL_SOURCE_ROOT))
+        bindings_root = self._task_card_bindings_root()
         status = subprocess.run(
             ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
             cwd=CANONICAL_SOURCE_ROOT,
@@ -3709,76 +3710,113 @@ class UnifiedMCPGateway:
             raise RuntimeError(status.stderr.decode("utf-8", errors="replace").strip() or "git status failed")
         entries = {os.fsdecode(raw) for raw in status.stdout.split(b"\0") if raw}
         expected_entries = {f"?? {index_rel}", f"?? {card_rel}"}
-        if entries != expected_entries:
+        if not expected_entries.issubset(entries) or any(
+            not self._is_previously_bound_task_card_entry(entry, bindings_root)
+            for entry in entries - expected_entries
+        ):
             raise GatewayInputError("TASK_CARD_COMMIT_CONTROLLER_NOT_EXACTLY_PENDING_CARD")
 
-        _git("add", "--", index_rel, card_rel)
-        staged = {line for line in _git("diff", "--cached", "--name-only", "--", index_rel, card_rel).splitlines() if line}
-        if staged != {index_rel, card_rel}:
-            _git("reset", "--", index_rel, card_rel)
-            raise RuntimeError("TASK_CARD_COMMIT_STAGE_MISMATCH")
-
-        def staged_sha256(relative: str) -> str:
-            result = subprocess.run(
-                ["git", "show", f":{relative}"],
-                cwd=CANONICAL_SOURCE_ROOT,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=3.0,
-                check=False,
-            )
-            if result.returncode != 0:
-                raise RuntimeError(result.stderr.decode("utf-8", errors="replace").strip() or "failed to read staged task-card content")
-            return hashlib.sha256(result.stdout).hexdigest()
-
-        try:
-            if staged_sha256(card_rel) != expected_card_hash or staged_sha256(index_rel) != expected_index_hash:
-                raise RuntimeError("TASK_CARD_COMMIT_STAGED_HASH_MISMATCH")
-            _git("commit", "-m", f"chore(tasks): bind {task_id}", timeout=30.0)
-        except Exception:
-            _git("reset", "--", index_rel, card_rel)
-            raise
-
-        commit_sha = _git("rev-parse", "HEAD").strip()
-        parent_sha = _git("rev-parse", "HEAD^").strip()
-        tree_sha = _git("rev-parse", "HEAD^{tree}").strip()
-        if parent_sha != expected_head or not _SHA_RE.fullmatch(commit_sha) or not _SHA_RE.fullmatch(tree_sha):
-            raise RuntimeError("TASK_CARD_COMMIT_IDENTITY_MISMATCH")
-        remaining = subprocess.run(
-            ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
-            cwd=CANONICAL_SOURCE_ROOT,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=3.0,
-            check=False,
-        )
-        if remaining.returncode != 0:
-            raise RuntimeError(remaining.stderr.decode("utf-8", errors="replace").strip() or "git status failed")
-        if remaining.stdout:
-            raise RuntimeError("TASK_CARD_COMMIT_CONTROLLER_NOT_CLEAN_AFTER_COMMIT")
-        committed_paths = {
-            line for line in _git("diff-tree", "--no-commit-id", "--name-only", "-r", commit_sha).splitlines() if line
-        }
-        if committed_paths != {index_rel, card_rel}:
-            raise RuntimeError("TASK_CARD_COMMIT_SCOPE_MISMATCH")
-        return {
-            "schema": "nexus.task_card_commit.v1",
-            "status": "COMMITTED",
+        # #1939: the Gateway never creates commits in its source checkout. Under
+        # auto-deploy that checkout is an immutable deployment of a published
+        # main commit; a local commit would move /health git_head off the
+        # deployed commit and be lost on the next deploy. The binding is
+        # recorded in the self-hosted state directory instead, and the card
+        # stays where governed start reads it (path + SHA-256 identity).
+        receipt = {
+            "schema": "nexus.task_card_binding.v1",
             "campaign_id": campaign,
             "task_id": task_id,
-            "previous_head": expected_head,
-            "commit_sha": commit_sha,
-            "tree_sha": tree_sha,
+            "source_root": str(CANONICAL_SOURCE_ROOT),
+            "source_head": expected_head,
             "index_path": index_rel,
             "card_path": card_rel,
             "card_hash": expected_card_hash,
             "index_hash": expected_index_hash,
-            "committed_paths": sorted(committed_paths),
-            "controller_clean": True,
+            "card_text": card_text,
+            "index_text": index_text,
+            "bound_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "owner_authority": owner_authority,
+        }
+        receipt_bytes = (json.dumps(receipt, sort_keys=True, indent=2, default=str) + "\n").encode(
+            "utf-8"
+        )
+        receipt_path = bindings_root / campaign / f"{task_id}.json"
+        self._write_task_card_binding_receipt(bindings_root, receipt_path, receipt_bytes)
+
+        head_after = _git("rev-parse", "HEAD").strip()
+        staged = _git("diff", "--cached", "--name-only").strip()
+        if head_after != expected_head or staged:
+            raise RuntimeError("TASK_CARD_BIND_SOURCE_ROOT_MUTATED")
+        return {
+            "schema": "nexus.task_card_commit.v2",
+            "status": "BOUND",
+            "campaign_id": campaign,
+            "task_id": task_id,
+            "previous_head": expected_head,
+            "head_after": head_after,
+            "commit_sha": None,
+            "source_root_commit_created": False,
+            "binding_receipt_path": str(receipt_path),
+            "binding_receipt_sha256": hashlib.sha256(receipt_bytes).hexdigest(),
+            "index_path": index_rel,
+            "card_path": card_rel,
+            "card_hash": expected_card_hash,
+            "index_hash": expected_index_hash,
+            "bound_paths": sorted({index_rel, card_rel}),
             "successor_execution": "READY_FOR_GOVERNED_START",
             "owner_confirmation": True,
             "owner_authority": owner_authority,
         }
+
+    def _task_card_bindings_root(self) -> Path:
+        state_root = (
+            getattr(self.service, "state_dir", None) or SelfHostedTaskService.canonical_state_dir()
+        )
+        return Path(state_root) / "task-card-bindings"
+
+    @staticmethod
+    def _is_previously_bound_task_card_entry(entry: str, bindings_root: Path) -> bool:
+        """An untracked card or INDEX of a campaign already bound in state (#1939)."""
+        if not entry.startswith("?? tasks/"):
+            return False
+        parts = entry[3:].split("/")
+        if len(parts) != 3 or not parts[2].endswith(".md") or parts[1] in {"", ".", ".."}:
+            return False
+        campaign_dir = bindings_root / parts[1]
+        return (
+            campaign_dir.is_dir()
+            and not campaign_dir.is_symlink()
+            and any(campaign_dir.glob("*.json"))
+        )
+
+    @staticmethod
+    def _write_task_card_binding_receipt(
+        bindings_root: Path, receipt_path: Path, payload: bytes
+    ) -> None:
+        receipt_path.parent.mkdir(parents=True, exist_ok=True)
+        for directory in (bindings_root, receipt_path.parent):
+            if directory.is_symlink():
+                raise RuntimeError("TASK_CARD_BIND_STATE_SYMLINK_FORBIDDEN")
+        try:
+            receipt_path.resolve().relative_to(bindings_root.resolve())
+        except ValueError as exc:
+            raise RuntimeError("TASK_CARD_BIND_STATE_PATH_ESCAPE") from exc
+        try:
+            descriptor = os.open(
+                receipt_path,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+            )
+        except FileExistsError as exc:
+            raise GatewayInputError("TASK_CARD_BIND_ALREADY_RECORDED") from exc
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+        except Exception:
+            receipt_path.unlink(missing_ok=True)
+            raise
 
     def _owner_standing_grant_issue(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         """Materialize one explicit Owner-issued keyed standing grant via canonical CAS.
@@ -5480,7 +5518,7 @@ class UnifiedMCPGateway:
             },
             {
                 "name": "nexus_task_card_commit",
-                "description": "Commit exactly one pending Task Card and INDEX on a detached clean Controller after explicit owner confirmation.",
+                "description": "Bind exactly one pending Task Card and INDEX after explicit owner confirmation. Records the binding in the self-hosted state directory; never commits into the Gateway source checkout.",
                 "inputSchema": {
                     "type": "object",
                     "required": ["owner_confirmation", "campaign_id", "task_id", "expected_head", "card_hash", "index_hash", "authority_goal_id", "authority_coordination_scope_id"],

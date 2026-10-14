@@ -2580,6 +2580,13 @@ def test_task_card_create_hash_failure_leaves_no_campaign(monkeypatch, tmp_path)
     assert not list((tmp_path / "tasks").glob(".atomic-failure.create-*"))
 
 
+def _isolated_task_card_state_dir(monkeypatch, repo_root: Path) -> Path:
+    """Self-hosted state outside the fake source checkout (#1939 binding receipts)."""
+    state_dir = repo_root.parent / f"{repo_root.name}-self-hosted-state"
+    monkeypatch.setenv("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR", str(state_dir))
+    return state_dir
+
+
 def _init_detached_git_repo(root: Path) -> str:
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
     subprocess.run(["git", "config", "user.name", "Nexus Test"], cwd=root, check=True)
@@ -2599,6 +2606,7 @@ def test_task_card_commit_closes_pending_card_bootstrap_and_leaves_controller_cl
 
     head = _init_detached_git_repo(tmp_path)
     monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", tmp_path)
+    state_dir = _isolated_task_card_state_dir(monkeypatch, tmp_path)
     gateway = UnifiedMCPGateway(service=FakeService())
     create = gateway.handle({"jsonrpc": "2.0", "id": 7052, "method": "tools/call", "params": {"name": "nexus_task_card_create", "arguments": {**AUTHORITY_ARGS, "owner_confirmation": True, "campaign_id": "bootstrap-close", "task_id": "first-card", "objective": "Close the task-card bootstrap loop.", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"]}}})
     created = create["result"]["structuredContent"]
@@ -2607,17 +2615,39 @@ def test_task_card_commit_closes_pending_card_bootstrap_and_leaves_controller_cl
     commit = gateway.handle({"jsonrpc": "2.0", "id": 7053, "method": "tools/call", "params": {"name": "nexus_task_card_commit", "arguments": {**AUTHORITY_ARGS, "owner_confirmation": True, "campaign_id": "bootstrap-close", "task_id": "first-card", "expected_head": head, "card_hash": created["card_hash"], "index_hash": created["index_hash"]}}})
     payload = commit["result"]["structuredContent"]
 
-    assert payload["status"] == "COMMITTED"
+    # #1939: the bootstrap loop closes by binding in state, not by committing
+    # into the Gateway source checkout; the controller HEAD and index stay clean.
+    assert payload["status"] == "BOUND"
     assert payload["previous_head"] == head
-    assert payload["commit_sha"] != head
-    assert payload["controller_clean"] is True
-    assert payload["committed_paths"] == [
+    assert payload["head_after"] == head
+    assert payload["commit_sha"] is None
+    assert payload["source_root_commit_created"] is False
+    assert payload["bound_paths"] == [
         "tasks/bootstrap-close/00-first-card.md",
         "tasks/bootstrap-close/INDEX.md",
     ]
-    assert subprocess.run(["git", "status", "--porcelain=v1"], cwd=tmp_path, capture_output=True, text=True, check=True).stdout == ""
-    changed = subprocess.run(["git", "diff-tree", "--no-commit-id", "--name-only", "-r", payload["commit_sha"]], cwd=tmp_path, capture_output=True, text=True, check=True).stdout.splitlines()
-    assert set(changed) == set(payload["committed_paths"])
+    assert payload["successor_execution"] == "READY_FOR_GOVERNED_START"
+    assert (
+        subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True, check=True
+        ).stdout.strip()
+        == head
+    )
+    assert (
+        subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        == ""
+    )
+    receipt_path = Path(payload["binding_receipt_path"])
+    assert receipt_path == state_dir / "task-card-bindings/bootstrap-close/first-card.json"
+    assert (
+        hashlib.sha256(receipt_path.read_bytes()).hexdigest() == payload["binding_receipt_sha256"]
+    )
 
 
 def test_task_card_commit_fails_closed_on_unrelated_dirty_state(monkeypatch, tmp_path):
@@ -2627,6 +2657,7 @@ def test_task_card_commit_fails_closed_on_unrelated_dirty_state(monkeypatch, tmp
 
     head = _init_detached_git_repo(tmp_path)
     monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", tmp_path)
+    _isolated_task_card_state_dir(monkeypatch, tmp_path)
     gateway = UnifiedMCPGateway(service=FakeService())
     create = gateway.handle({"jsonrpc": "2.0", "id": 7054, "method": "tools/call", "params": {"name": "nexus_task_card_create", "arguments": {**AUTHORITY_ARGS, "owner_confirmation": True, "campaign_id": "bootstrap-dirty", "task_id": "first-card", "objective": "Close the task-card bootstrap loop.", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"]}}})
     created = create["result"]["structuredContent"]
@@ -2647,6 +2678,7 @@ def test_task_card_commit_rejects_index_content_drift(monkeypatch, tmp_path):
 
     head = _init_detached_git_repo(tmp_path)
     monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", tmp_path)
+    _isolated_task_card_state_dir(monkeypatch, tmp_path)
     gateway = UnifiedMCPGateway(service=FakeService())
     create = gateway.handle({"jsonrpc": "2.0", "id": 7056, "method": "tools/call", "params": {"name": "nexus_task_card_create", "arguments": {**AUTHORITY_ARGS, "owner_confirmation": True, "campaign_id": "bootstrap-index-drift", "task_id": "first-card", "objective": "Close the task-card bootstrap loop.", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"]}}})
     created = create["result"]["structuredContent"]
@@ -2659,6 +2691,116 @@ def test_task_card_commit_rejects_index_content_drift(monkeypatch, tmp_path):
     assert "TASK_CARD_COMMIT_INDEX_HASH_MISMATCH" in commit["result"]["structuredContent"]["error"]
     assert subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True, check=True).stdout.strip() == head
     assert subprocess.run(["git", "diff", "--cached", "--name-only"], cwd=tmp_path, capture_output=True, text=True, check=True).stdout == ""
+
+
+def _git_lines(root: Path, *args: str) -> list[str]:
+    return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=True).stdout.splitlines()
+
+
+def _create_and_bind_task_card(gateway, campaign: str, task_id: str, head: str, request_id: int) -> dict:
+    create = gateway.handle({"jsonrpc": "2.0", "id": request_id, "method": "tools/call", "params": {"name": "nexus_task_card_create", "arguments": {**AUTHORITY_ARGS, "owner_confirmation": True, "campaign_id": campaign, "task_id": task_id, "objective": "Bind without committing.", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"]}}})
+    created = create["result"]["structuredContent"]
+    assert created["status"] == "CREATED_PENDING_COMMIT"
+    bind = gateway.handle({"jsonrpc": "2.0", "id": request_id + 1, "method": "tools/call", "params": {"name": "nexus_task_card_commit", "arguments": {**AUTHORITY_ARGS, "owner_confirmation": True, "campaign_id": campaign, "task_id": task_id, "expected_head": head, "card_hash": created["card_hash"], "index_hash": created["index_hash"]}}})
+    return {"created": created, "bind": bind["result"]}
+
+
+def test_task_card_commit_never_creates_commits_in_gateway_source_root(monkeypatch, tmp_path):
+    """#1939: binding a Task Card leaves the Gateway source checkout's history untouched."""
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    _allow_owner_effect_authority(monkeypatch)
+    head = _init_detached_git_repo(tmp_path)
+    monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", tmp_path)
+    state_dir = _isolated_task_card_state_dir(monkeypatch, tmp_path)
+    refs_before = _git_lines(tmp_path, "for-each-ref", "--format=%(refname) %(objectname)")
+    reflog_before = _git_lines(tmp_path, "reflog", "--format=%H")
+    objects_before = set(_git_lines(tmp_path, "rev-list", "--all"))
+    gateway = UnifiedMCPGateway(service=FakeService())
+
+    result = _create_and_bind_task_card(gateway, "no-commit", "card", head, 7100)
+    payload = result["bind"]["structuredContent"]
+
+    assert result["bind"]["isError"] is False
+    assert payload["status"] == "BOUND"
+    assert _git_lines(tmp_path, "rev-parse", "HEAD") == [head]
+    assert _git_lines(tmp_path, "for-each-ref", "--format=%(refname) %(objectname)") == refs_before
+    assert _git_lines(tmp_path, "reflog", "--format=%H") == reflog_before
+    assert set(_git_lines(tmp_path, "rev-list", "--all")) == objects_before
+    assert _git_lines(tmp_path, "diff", "--cached", "--name-only") == []
+    receipt = json.loads(
+        (state_dir / "task-card-bindings/no-commit/card.json").read_text(encoding="utf-8")
+    )
+    assert receipt["schema"] == "nexus.task_card_binding.v1"
+    assert receipt["source_head"] == head
+    assert receipt["card_hash"] == result["created"]["card_hash"]
+    assert receipt["index_hash"] == result["created"]["index_hash"]
+    assert hashlib.sha256(receipt["card_text"].encode("utf-8")).hexdigest() == receipt["card_hash"]
+    # The card stays where governed start reads it, with the bound identity.
+    card = tmp_path / "tasks/no-commit/00-card.md"
+    assert hashlib.sha256(card.read_bytes()).hexdigest() == receipt["card_hash"]
+
+
+def test_task_card_commit_second_bind_of_same_card_is_refused(monkeypatch, tmp_path):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    _allow_owner_effect_authority(monkeypatch)
+    head = _init_detached_git_repo(tmp_path)
+    monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", tmp_path)
+    state_dir = _isolated_task_card_state_dir(monkeypatch, tmp_path)
+    gateway = UnifiedMCPGateway(service=FakeService())
+    result = _create_and_bind_task_card(gateway, "twice", "card", head, 7110)
+    receipt_path = state_dir / "task-card-bindings/twice/card.json"
+    original = receipt_path.read_bytes()
+
+    again = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 7112,
+        "method": "tools/call",
+        "params": {
+            "name": "nexus_task_card_commit",
+            "arguments": {
+                **AUTHORITY_ARGS,
+                "owner_confirmation": True,
+                "campaign_id": "twice",
+                "task_id": "card",
+                "expected_head": head,
+                "card_hash": result["created"]["card_hash"],
+                "index_hash": result["created"]["index_hash"],
+            },
+        },
+    })
+
+    assert again["result"]["isError"] is True
+    assert "TASK_CARD_BIND_ALREADY_RECORDED" in again["result"]["structuredContent"]["error"]
+    assert receipt_path.read_bytes() == original
+    assert _git_lines(tmp_path, "rev-parse", "HEAD") == [head]
+
+
+def test_task_card_commit_tolerates_cards_of_already_bound_campaigns_only(monkeypatch, tmp_path):
+    """Earlier bound cards stay untracked; anything else untracked still fails closed."""
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    _allow_owner_effect_authority(monkeypatch)
+    head = _init_detached_git_repo(tmp_path)
+    monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", tmp_path)
+    _isolated_task_card_state_dir(monkeypatch, tmp_path)
+    gateway = UnifiedMCPGateway(service=FakeService())
+
+    first = _create_and_bind_task_card(gateway, "campaign-a", "card-a", head, 7120)
+    assert first["bind"]["structuredContent"]["status"] == "BOUND"
+    second = _create_and_bind_task_card(gateway, "campaign-b", "card-b", head, 7122)
+    assert second["bind"]["structuredContent"]["status"] == "BOUND"
+
+    (tmp_path / "tasks/stray").mkdir()
+    (tmp_path / "tasks/stray/INDEX.md").write_text("unbound\n", encoding="utf-8")
+    third = _create_and_bind_task_card(gateway, "campaign-c", "card-c", head, 7124)
+    assert third["bind"]["isError"] is True
+    assert (
+        "TASK_CARD_COMMIT_CONTROLLER_NOT_EXACTLY_PENDING_CARD"
+        in third["bind"]["structuredContent"]["error"]
+    )
+    assert _git_lines(tmp_path, "rev-parse", "HEAD") == [head]
 
 
 def test_model_probe_isolated_receipt_validates_schema_and_cleans_workspace(monkeypatch, tmp_path):
