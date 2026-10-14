@@ -38,15 +38,52 @@ def free_memory_percent() -> int | None:
     return int(m.group(1)) if m else None
 
 
-def wait_for_memory(min_free: int, log) -> float:
+class MemoryCheckUnavailable(RuntimeError):
+    """memory_pressure kept returning nothing usable; the batch stops instead of scoring
+    without the spec §8 free-memory check."""
+
+
+UNKNOWN_BACKOFF_SECONDS = (60, 120, 240, 300, 300)
+
+
+def wait_for_memory(
+    min_free: int,
+    log,
+    *,
+    probe=None,
+    sleep=time.sleep,
+    backoff: tuple[int, ...] = UNKNOWN_BACKOFF_SECONDS,
+) -> float:
+    """Spec §8: wait while free memory < ``min_free`` %, re-checking every 60 s.
+
+    An empty or unparseable ``memory_pressure`` result is treated as low memory, never as
+    "enough": the runner waits with a bounded backoff and raises MemoryCheckUnavailable
+    after ``len(backoff)`` consecutive unknown readings. ``min_free <= 0`` disables the check.
+    """
+    if min_free <= 0:
+        log("memory_pressure check disabled (--min-free-percent <= 0)")
+        return 0.0
+    probe = probe or free_memory_percent
     waited = 0.0
+    unknown = 0
     while True:
-        free = free_memory_percent()
-        if free is None or free >= min_free:
+        free = probe()
+        if free is None:
+            if unknown >= len(backoff):
+                log(f"memory_pressure unknown {unknown}x: giving up")
+                raise MemoryCheckUnavailable(f"memory_pressure unknown after {waited:.0f}s")
+            delay = backoff[unknown]
+            unknown += 1
+            log(f"memory_pressure free=unknown, treated as low: pausing {delay}s ({unknown})")
+            sleep(delay)
+            waited += delay
+            continue
+        unknown = 0
+        if free >= min_free:
             log(f"memory_pressure free={free}%")
             return waited
         log(f"memory_pressure free={free}% < {min_free}%: pausing 60s")
-        time.sleep(60)
+        sleep(60)
         waited += 60
 
 
@@ -132,7 +169,11 @@ def main(argv: list[str] | None = None) -> int:
         if (args.out / "tasks" / key / "real_outcome.json").exists():
             log(f"{key}: receipt exists, skipped")
             continue
-        waited = wait_for_memory(args.min_free_percent, log)
+        try:
+            waited = wait_for_memory(args.min_free_percent, log)
+        except MemoryCheckUnavailable as exc:
+            log(f"{key}: MEMORY_CHECK_UNAVAILABLE {exc}; stopping before scoring")
+            return 5
         try:
             result = ros.score_task(
                 tasks_dir / key, ctx, candidate_override=args.candidate_override
