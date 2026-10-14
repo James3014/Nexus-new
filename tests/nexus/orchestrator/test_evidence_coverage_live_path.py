@@ -174,7 +174,10 @@ def _run_driver(
     spec = {"work": str(work / "run"), "out": str(work / "out.json"), "scenarios": scenarios}
     (work / "spec.json").write_text(json.dumps(spec), encoding="utf-8")
     env = {k: v for k, v in os.environ.items() if k != "NEXUS_CORE_REPO_ROOT"}
-    env["PYTHONPATH"] = str(REPO_ROOT)
+    # Same import environment as this test process (CI executors provide
+    # dependencies such as nexus_runtime through sys.path), repo first.
+    inherited = [entry for entry in sys.path if entry and Path(entry).exists()]
+    env["PYTHONPATH"] = os.pathsep.join(dict.fromkeys([str(REPO_ROOT), *inherited]))
     if core_root is not None:
         env["NEXUS_CORE_REPO_ROOT"] = str(core_root)
     proc = subprocess.run(
