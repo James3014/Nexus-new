@@ -425,7 +425,7 @@ def _run_gemini_patch(
                 "gemini_returncode": None,
                 "error": "gemini_timeout: agy execution timed out",
             }
-        if result.status is CliWorkerStatus.COMPLETED and result.descendants_swept is not True:
+        if result.descendants_swept is not True:
             return {
                 "regression_test_added": False,
                 "unrelated_change": False,

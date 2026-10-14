@@ -1613,3 +1613,49 @@ def test_tag_sweep_fails_closed_on_unattributable_tagged_row(monkeypatch):
         ),
     )
     assert cli_worker._sweep_tagged_processes("exampletag") is False
+
+
+def test_error_after_launch_kills_worker_and_is_not_clean(monkeypatch, tmp_path):
+    launched: list[subprocess.Popen] = []
+    real_popen = subprocess.Popen
+
+    class FailingPopen(real_popen):  # type: ignore[misc, valid-type]
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            launched.append(self)
+
+        def communicate(self, *args, **kwargs):
+            raise OSError("injected pipe failure")
+
+    monkeypatch.setattr(cli_worker.subprocess, "Popen", FailingPopen)
+    result = run_cli_worker(
+        CliWorkerRequest(
+            executable=sys.executable,
+            argv=("-c", "import time; time.sleep(60)"),
+            cwd=str(tmp_path),
+            sweep_descendants_on_exit=True,
+        )
+    )
+    assert result.status is CliWorkerStatus.START_FAILED
+    assert result.descendants_swept is False
+    assert launched and launched[0].wait(timeout=10) is not None
+
+
+def test_proc_tag_scan_fails_closed_on_unreadable_own_process(monkeypatch, tmp_path):
+    proc = tmp_path / "proc"
+    (proc / "self").mkdir(parents=True)
+    (proc / "self" / "environ").write_bytes(b"")
+    (proc / "4242").mkdir()
+    real_path = cli_worker.Path
+    monkeypatch.setattr(
+        cli_worker, "Path", lambda p, *a: proc if p == "/proc" else real_path(p, *a)
+    )
+    real_read = real_path.read_bytes
+
+    def read_bytes(self):
+        if self.parent.name == "4242":
+            raise PermissionError("denied")
+        return real_read(self)
+
+    monkeypatch.setattr(real_path, "read_bytes", read_bytes)
+    assert cli_worker._sweep_tagged_processes("exampletag") is False

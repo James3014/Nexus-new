@@ -271,7 +271,16 @@ def _tagged_pids(tag: str) -> set[int]:
             try:
                 if needle_bytes in (entry / "environ").read_bytes():
                     found.add(int(entry.name))
+            except (FileNotFoundError, ProcessLookupError):
+                continue  # exited meanwhile
             except OSError:
+                try:
+                    same_uid = entry.stat().st_uid == os.getuid()
+                except OSError:
+                    continue  # exited meanwhile
+                if same_uid:
+                    # One of ours we cannot inspect: unknown, not clean.
+                    raise
                 continue
         return found
     out = subprocess.run(
@@ -749,6 +758,7 @@ def run_cli_worker(
         command = (_SANDBOX_EXEC, "-f", str(profile_path), *request.command)
 
     process: Optional[subprocess.Popen[bytes]] = None
+    tracker: Optional[_DescendantTracker] = None
     try:
         baseline = _sweep_baseline() if request.sweep_descendants_on_exit else None
         process = subprocess.Popen(
@@ -822,6 +832,13 @@ def run_cli_worker(
         exit_code = process.returncode
         process_group_id = process.pid
     except OSError as exc:
+        if tracker is not None:
+            tracker.stop()
+        if process is not None:
+            # Failed after launch: never leave the worker or its group running.
+            _kill_process_group(process)
+            if request.sweep_descendants_on_exit:
+                descendants_swept = False
         stdout = b""
         stderr = str(exc).encode("utf-8", errors="replace")
         exit_code = None
