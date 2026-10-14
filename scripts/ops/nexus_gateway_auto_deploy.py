@@ -96,12 +96,17 @@ ORIGIN_URLS = (
     "https://github.com/James3014/Nexus-new",
     "git@github.com:James3014/Nexus-new.git",
 )
-# Each required check is accepted only from its own GitHub Actions workflow, so a
-# stray workflow cannot post a success under the same name.
+# Every check name the deployer knows how to bind: each is accepted only from its
+# own GitHub Actions workflow, so a stray workflow cannot post a success under the
+# same name.  Which of these are required is read live from main's branch rules
+# each cycle (#2173); a required name missing here blocks the deploy.
 REQUIRED_CHECKS = {
     "Full published Git history secret audit": ".github/workflows/git-history-secret-audit.yml",
     "Deletion guard": ".github/workflows/deletion-guard.yml",
     "Exact-base impact gate": ".github/workflows/pytest.yml",
+    "Trusted dependency contract (default branch)": (
+        ".github/workflows/trusted-dependency-contract.yml"
+    ),
 }
 CHECK_APP = "github-actions"
 DEPLOYMENT_PREFIX = "a1-"
@@ -159,15 +164,41 @@ _CORE_PIN_LINE = re.compile(
     re.MULTILINE,
 )
 
+# GB-077 per-request timeout and tries: a freshly started candidate can take
+# longer than _fetch_gateway_health's 2 s default to answer /health.  Only
+# transport failures are retried; an identity failure is final.
+GB077_TIMEOUT_SECONDS = 30.0
+GB077_ATTEMPTS = 3
 GB077_PROBE_CODE = """
-import json, sys
-root, url, commit = sys.argv[1:4]
+import json, sys, time
+root, url, commit, timeout, attempts = sys.argv[1:6]
 sys.path.insert(0, root)
 from scripts.ops.run_golden_behavior_eval import _fetch_gateway_health, probe_gb077_live_gateway_identity
-ok, detail = probe_gb077_live_gateway_identity(
-    fetch_health=lambda: _fetch_gateway_health(url),
-    evaluated_identity=lambda: (commit, False),
-)
+history = []
+for attempt in range(int(attempts)):
+    ok, detail = probe_gb077_live_gateway_identity(
+        fetch_health=lambda: _fetch_gateway_health(url, timeout=float(timeout)),
+        evaluated_identity=lambda: (commit, False),
+    )
+    try:
+        reasons = json.loads(detail).get("reasons") or []
+    except (ValueError, AttributeError):
+        reasons = ["unparseable_probe_detail"]
+    history.append({"attempt": attempt + 1, "ok": ok, "reasons": reasons})
+    # Retry only transport failures (the health read itself timed out or failed).
+    # A health answer that fails identity (wrong git_head, dirty, not ok) is final.
+    transport_only = bool(reasons) and all(r.startswith("gateway_unreachable:") for r in reasons)
+    if ok or not transport_only:
+        break
+    time.sleep(2)
+try:
+    # The probe reports its fixed live endpoint; record the URL actually probed.
+    parsed = json.loads(detail)
+    parsed.setdefault("observed", {})["endpoint"] = url
+    parsed["attempts"] = history
+    detail = json.dumps(parsed, sort_keys=True, separators=(",", ":"))
+except (ValueError, AttributeError):
+    pass
 print(detail)
 sys.exit(0 if ok else 1)
 """
@@ -391,22 +422,87 @@ def gh_api_getter(host: Host, gh: str = "gh") -> Callable[[str], Any]:
     return get
 
 
-def _bound_runs(api_get: Callable[[str], Any], repo: str, sha: str, name: str) -> List[dict]:
-    """Check runs for ``name`` on ``sha`` that come from the bound Actions workflow."""
+def _bound_runs(
+    api_get: Callable[[str], Any],
+    repo: str,
+    sha: str,
+    name: str,
+    *,
+    origin: Dict[str, Any],
+    integration_id: Optional[int] = None,
+) -> List[dict]:
+    """Check runs for ``name`` on ``sha`` that provably belong to ``origin``.
+
+    A run counts only if it comes from the bound Actions workflow (path), from
+    the required issuer (``app.id == integration_id`` when the rules name one,
+    and app ``github-actions``), and from the expected trigger: a ``push`` to
+    the tracked branch for the candidate commit itself, or the merged PR for a
+    PR-head run (event, head branch, head repository, created before the
+    merge, and the PR number whenever GitHub lists one).  GitHub empties
+    ``pull_requests`` once a PR is merged, so head branch + repository + the
+    PR's lifetime (created_at .. merged_at, per attempt) are the binding there;
+    anything that cannot be bound does not count.
+    """
     query = urllib.parse.urlencode({"check_name": name, "per_page": 100})
     runs = api_get(f"repos/{repo}/commits/{sha}/check-runs?{query}").get("check_runs") or []
     bound = []
     for run in runs:
-        if run.get("name") != name or (run.get("app") or {}).get("slug") != CHECK_APP:
+        app = run.get("app") or {}
+        if run.get("name") != name or app.get("slug") != CHECK_APP:
+            continue
+        if integration_id is not None and app.get("id") != integration_id:
             continue
         suite = (run.get("check_suite") or {}).get("id")
         if not suite:
             continue
         workflow_runs = api_get(f"repos/{repo}/actions/runs?check_suite_id={int(suite)}")
-        paths = {w.get("path") for w in (workflow_runs.get("workflow_runs") or [])}
-        if REQUIRED_CHECKS[name] in paths:
+        candidates = workflow_runs.get("workflow_runs") or []
+        if any(
+            w.get("path") == REQUIRED_CHECKS[name] and _from_origin(run, w, sha, origin)
+            for w in candidates
+        ):
             bound.append(run)
     return bound
+
+
+def _from_origin(run: dict, workflow_run: dict, sha: str, origin: Dict[str, Any]) -> bool:
+    if workflow_run.get("head_sha") != sha:
+        return False
+    if (workflow_run.get("head_repository") or {}).get("full_name") != origin["head_repo"]:
+        return False
+    if origin["kind"] == "push":
+        return (
+            workflow_run.get("event") == "push"
+            and workflow_run.get("head_branch") == (origin["branch"])
+        )
+    if workflow_run.get("event") not in ("pull_request_target", "pull_request"):
+        return False
+    if workflow_run.get("head_branch") != origin["head_ref"]:
+        return False
+    # Lifetime of the merged PR: an earlier PR with the same branch and head sha
+    # created its runs before this PR existed; a re-run after the merge is a new
+    # attempt.  The workflow run's created_at is its first attempt; each check
+    # run is one attempt with its own started_at/completed_at, so the attempt
+    # times decide (run_started_at would follow a post-merge re-run and wrongly
+    # discard the original pre-merge attempt).
+    opened = _parse_time(origin["created_at"])
+    merged = _parse_time(origin["merged_at"])
+    created = _parse_time(workflow_run.get("created_at"))
+    started = _parse_time(run.get("started_at"))
+    if opened is None or merged is None or created is None or started is None:
+        return False
+    if not opened <= created <= merged or not opened <= started <= merged:
+        return False
+    # Only a provably finished attempt binds: a missing/null completed_at could
+    # have finished after the merge.
+    completed = _parse_time(run.get("completed_at"))
+    if completed is None or not started <= completed <= merged:
+        return False
+    for listed in (run.get("pull_requests"), workflow_run.get("pull_requests")):
+        numbers = {p.get("number") for p in listed or []}
+        if numbers and origin["number"] not in numbers:
+            return False
+    return True
 
 
 def _check_state(runs: List[dict], source: str) -> Dict[str, Any]:
@@ -419,29 +515,102 @@ def _check_state(runs: List[dict], source: str) -> Dict[str, Any]:
     return {"state": state, "conclusion": latest.get("conclusion"), "sha": source}
 
 
+# The deployer's bar never drops below these, whatever the live rules say.
+FLOOR_CHECKS = (
+    "Full published Git history secret audit",
+    "Deletion guard",
+    "Exact-base impact gate",
+)
+
+
+def live_required_checks(
+    api_get: Callable[[str], Any], *, repo: str = REPOSITORY, branch: str = "main"
+) -> Dict[str, Optional[int]]:
+    """Required status checks on ``branch`` as {name: integration_id or None}.
+
+    Every ``required_status_checks`` rule must be well-formed; one malformed rule
+    makes the whole answer unusable (fail closed), even if another rule parses.
+    """
+    required: Dict[str, Optional[int]] = {}
+    for rule in _paged(api_get, f"repos/{repo}/rules/branches/{branch}"):
+        if not isinstance(rule, dict):
+            raise DeployError("BRANCH_RULES_MALFORMED:rule")
+        if rule.get("type") != "required_status_checks":
+            continue
+        checks = (rule.get("parameters") or {}).get("required_status_checks")
+        if not isinstance(checks, list) or not checks:
+            raise DeployError("BRANCH_RULES_MALFORMED:required_status_checks")
+        for check in checks:
+            context = check.get("context") if isinstance(check, dict) else None
+            issuer = check.get("integration_id") if isinstance(check, dict) else None
+            if not isinstance(context, str) or not context:
+                raise DeployError("BRANCH_RULES_MALFORMED:context")
+            if issuer is not None and (isinstance(issuer, bool) or not isinstance(issuer, int)):
+                raise DeployError("BRANCH_RULES_MALFORMED:integration_id")
+            if context in required and required[context] != issuer:
+                raise DeployError(f"BRANCH_RULES_CONFLICTING_ISSUER:{context}")
+            required[context] = issuer
+    if not required:
+        # No required checks at all would make every commit "green": fail closed.
+        raise DeployError("BRANCH_RULES_REQUIRE_NO_CHECKS")
+    return required
+
+
+def live_required_check_names(
+    api_get: Callable[[str], Any], *, repo: str = REPOSITORY, branch: str = "main"
+) -> List[str]:
+    """Status-check names the branch rules (ruleset) currently require on ``branch``."""
+    return list(live_required_checks(api_get, repo=repo, branch=branch))
+
+
 def required_checks(
     api_get: Callable[[str], Any], sha: str, *, repo: str = REPOSITORY, branch: str = "main"
 ) -> Dict[str, Any]:
-    """GREEN only when every required check is success; PENDING, RED or UNKNOWN otherwise."""
+    """GREEN only when every check in (live required set + FLOOR_CHECKS) is success.
+
+    Otherwise PENDING, RED, UNKNOWN (including an unreadable ruleset or a
+    floor check with no bound run) or UNKNOWN_REQUIRED_CHECK (main requires a
+    check this deployer cannot bind).
+    """
     detail: Dict[str, Any] = {}
     try:
-        pr_heads: Optional[List[str]] = None
-        for name in REQUIRED_CHECKS:
-            runs, source = _bound_runs(api_get, repo, sha, name), sha
+        live = live_required_checks(api_get, repo=repo, branch=branch)
+    except Exception as exc:  # noqa: BLE001 - an unreadable ruleset fails closed
+        return {"verdict": "UNKNOWN", "error": f"RULESET:{type(exc).__name__}:{exc}"[:300]}
+    unknown = [name for name in live if name not in REQUIRED_CHECKS]
+    if unknown:
+        return {"verdict": "UNKNOWN_REQUIRED_CHECK", "unknown_required": unknown, "checks": {}}
+    required = {**live, **{name: live.get(name) for name in FLOOR_CHECKS}}
+    floor_added = [name for name in FLOOR_CHECKS if name not in live]
+    push_origin = {"kind": "push", "branch": branch, "head_repo": repo}
+    try:
+        merged_prs: Optional[List[Dict[str, Any]]] = None
+        for name, issuer in required.items():
+            runs = _bound_runs(api_get, repo, sha, name, origin=push_origin, integration_id=issuer)
+            source = sha
             if not runs:
-                if pr_heads is None:
-                    pulls = api_get(f"repos/{repo}/commits/{sha}/pulls") or []
-                    pr_heads = [
-                        p["head"]["sha"]
-                        for p in pulls
+                if merged_prs is None:
+                    merged_prs = [
+                        {
+                            "kind": "pr",
+                            "number": p["number"],
+                            "head_sha": p["head"]["sha"],
+                            "head_ref": p["head"]["ref"],
+                            "head_repo": ((p["head"].get("repo") or {}).get("full_name")),
+                            "merged_at": p["merged_at"],
+                            "created_at": p.get("created_at"),
+                        }
+                        for p in api_get(f"repos/{repo}/commits/{sha}/pulls") or []
                         if p.get("merged_at")
                         and p.get("merge_commit_sha") == sha
                         and (p.get("base") or {}).get("ref") == branch
                     ]
-                for head in pr_heads:
-                    runs = _bound_runs(api_get, repo, head, name)
+                for pr in merged_prs:
+                    runs = _bound_runs(
+                        api_get, repo, pr["head_sha"], name, origin=pr, integration_id=issuer
+                    )
                     if runs:
-                        source = head
+                        source = pr["head_sha"]
                         break
             detail[name] = _check_state(runs, source) if runs else {"state": "MISSING"}
     except Exception as exc:  # noqa: BLE001 - any transport/shape error fails closed
@@ -459,7 +628,13 @@ def required_checks(
         verdict = "UNKNOWN"
     else:
         verdict = "PENDING"
-    return {"verdict": verdict, "checks": detail}
+    return {
+        "verdict": verdict,
+        "required": list(required),
+        "floor_added": floor_added,
+        "missing": [n for n, d in detail.items() if d["state"] == "MISSING"],
+        "checks": detail,
+    }
 
 
 def on_github_main(
@@ -494,6 +669,8 @@ def _paged(api_get: Callable[[str], Any], path: str) -> Iterator[dict]:
     page = 1
     while True:
         items = api_get(f"{path}{sep}per_page=100&page={page}") or []
+        if not isinstance(items, list):
+            raise DeployError(f"PAGINATION_NOT_A_LIST:{path}")
         yield from items
         if len(items) < 100:
             return
@@ -675,9 +852,18 @@ class Prober:
             self.host.sleep(2)
         checks["health"] = {"ok": observed.get("status") == "ok", "status": observed.get("status")}
         gb077 = self.host.run(
-            [str(python), "-c", GB077_PROBE_CODE, str(root), f"{base}/health", commit],
+            [
+                str(python),
+                "-c",
+                GB077_PROBE_CODE,
+                str(root),
+                f"{base}/health",
+                commit,
+                str(GB077_TIMEOUT_SECONDS),
+                str(GB077_ATTEMPTS),
+            ],
             env={"PYTHONDONTWRITEBYTECODE": "1"},
-            timeout=60,
+            timeout=GB077_ATTEMPTS * (GB077_TIMEOUT_SECONDS + 2) + 30,
         )
         checks["gb077"] = {"ok": gb077.returncode == 0, "detail": gb077.stdout.strip()[-2000:]}
         try:
@@ -1328,6 +1514,9 @@ class _Cycle:
             self.api_get, candidate, repo=cfg.repository, branch=cfg.track_branch
         )
         status["required_checks"] = checks
+        if checks["verdict"] == "UNKNOWN_REQUIRED_CHECK":
+            # No deploy and no HOLD: retried next cycle once this file knows the check.
+            return finish("UNKNOWN_REQUIRED_CHECK:" + ",".join(checks["unknown_required"]))
         if checks["verdict"] != "GREEN":
             return finish(f"CHECKS_{checks['verdict']}")
         pins = pin_bumps_in_flight(self.api_get, repo=cfg.repository, now=host.now())

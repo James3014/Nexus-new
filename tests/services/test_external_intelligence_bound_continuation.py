@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -27,11 +28,13 @@ from nexus.services.external_intelligence_closure import (
     validate_worker_receipt,
 )
 from nexus.services.external_intelligence_core_binding import (
+    CLOSURE_INTEGRITY_CYCLE_SECONDS,
     FRESHNESS_MARGIN_SECONDS,
     CoreBindingError,
     binding_hash_for,
     binding_validity_seconds,
     parse_bound_execution_envelope_v2,
+    unit_closure_cycle_seconds,
     unit_verifier_cycle_seconds,
     validate_repository_mutation_binding,
 )
@@ -542,6 +545,74 @@ def test_binding_validity_verifier_window_fails_closed():
             binding_validity_seconds(300, 1, bad)  # type: ignore[arg-type]
 
 
+def test_binding_validity_counts_closure_integrity_checks():
+    inputs = authority_inputs(
+        "a" * 40,
+        "b" * 64,
+        bound_worker(),
+        unit_verifiers={"u1": (("u-a", ("python", "-V"), 60.0),)},
+        whole_verifiers=(("w-a", ("python", "-V"), 30.0),),
+    )
+    # 3 integrity git diffs x 30 s git timeout x (unit + whole-task) scope.
+    assert CLOSURE_INTEGRITY_CYCLE_SECONDS == 180.0
+    cycle = unit_closure_cycle_seconds(inputs, "u1")
+    assert cycle == unit_verifier_cycle_seconds(inputs, "u1") + 180.0 == 270.0
+    for budget in (0, 1, 3):
+        window = binding_validity_seconds(300, budget, cycle)
+        assert window == (300 + 270.0) * (1 + budget) + FRESHNESS_MARGIN_SECONDS
+        # Strictly larger than the pre-fix sizing that ignored the integrity checks.
+        assert window > binding_validity_seconds(
+            300, budget, unit_verifier_cycle_seconds(inputs, "u1")
+        )
+    with pytest.raises(CoreBindingError, match="CORE_UNIT_VERIFIERS_MISSING"):
+        unit_closure_cycle_seconds(inputs, "missing-unit")
+
+
+def test_closure_integrity_checks_stay_within_binding_sizing(tmp_path, monkeypatch):
+    import nexus.services.external_intelligence_closure as closure
+    import nexus.services.external_intelligence_core_binding as core_binding
+
+    assert closure.INTEGRITY_CHECK_TIMEOUT_SECONDS == (
+        core_binding.CLOSURE_INTEGRITY_GIT_TIMEOUT_SECONDS
+    )
+    assert len(closure.INTEGRITY_CHECK_IDS) == core_binding.CLOSURE_INTEGRITY_CHECK_COUNT
+    git_calls: list[float] = []
+    real_run = closure.subprocess.run
+
+    def _counting_run(argv, *args, **kwargs):
+        if list(argv[:2]) == ["git", "diff"] and "--no-renames" in argv:
+            git_calls.append(float(kwargs.get("timeout") or 0.0))
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(closure.subprocess, "run", _counting_run)
+    root = tmp_path / "repo"
+    root.mkdir()
+    for args in (
+        ["init", "-q"],
+        ["config", "user.email", "t@example.invalid"],
+        ["config", "user.name", "t"],
+    ):
+        subprocess.run(["git", *args], cwd=root, check=True)
+    (root / "a.py").write_text("A = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "a.py"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "base"], cwd=root, check=True)
+    base = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    (root / "a.py").write_text("A = 2\n", encoding="utf-8")
+    subprocess.run(["git", "commit", "-qam", "change"], cwd=root, check=True)
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    rows = closure.run_integrity_checks(
+        root, base_sha=base, candidate_commit=head, authorized_paths=["a.py"], deletable_paths=()
+    )
+    assert all(row["passed"] for row in rows)
+    # Every git diff closure runs per scope is one the binding window accounts for.
+    assert len(git_calls) == core_binding.CLOSURE_INTEGRITY_CHECK_COUNT
+    assert all(t == core_binding.CLOSURE_INTEGRITY_GIT_TIMEOUT_SECONDS for t in git_calls)
+
+
 @pytest.mark.parametrize("budget", [0, 1, 3])
 def test_minted_binding_lifetime_follows_fanout_repair_budget(tmp_path, monkeypatch, budget):
     ctx = _bound_open_swe(tmp_path, monkeypatch, max_repairs_per_unit=budget)
@@ -551,8 +622,9 @@ def test_minted_binding_lifetime_follows_fanout_repair_budget(tmp_path, monkeypa
     )
     created = datetime.fromisoformat(binding["freshness"]["created_at"].replace("Z", "+00:00"))
     deadline = datetime.fromisoformat(binding["freshness"]["valid_until"].replace("Z", "+00:00"))
-    # authority_inputs(): unit "u1" verifier 120s + whole verifier 300s per cycle.
-    verifier_cycle = 120.0 + 300.0
+    # authority_inputs(): unit "u1" verifier 120s + whole verifier 300s per cycle,
+    # plus closure's built-in integrity checks at unit and whole-task scope.
+    verifier_cycle = 120.0 + 300.0 + CLOSURE_INTEGRITY_CYCLE_SECONDS
     expected = (ctx.transport.timeout + verifier_cycle) * (1 + budget) + FRESHNESS_MARGIN_SECONDS
     assert (deadline - created).total_seconds() == expected
 
@@ -609,3 +681,202 @@ def test_repair_budgets_must_agree_between_closure_and_worker_runtime(tmp_path):
     assert closure(2).max_repairs_per_unit == 2
     with pytest.raises(ClosureError, match="REPAIR_BUDGET_EXCEEDS_WORKER_BUDGET"):
         closure(3)
+
+
+def _bound_unknown_continuation(tmp_path, monkeypatch, *, reconcile_status="BOUND", hashes=None):
+    """Bound continuation whose reply is lost; worker_reconcile reports ``reconcile_status``."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    ctx = _bound_open_swe(tmp_path, monkeypatch)
+    module = ctx.module
+    inner = module._runtime_call
+
+    def runtime_call(executable, payload, **kwargs):
+        if payload["operation"] == "worker_reconcile":
+            ctx.calls.append(json.loads(json.dumps(payload)))
+            result = _completed(module, payload)
+            supplied = (payload.get("core_binding_hash"), payload.get("acceptance_contract_hash"))
+            returned = hashes or ctx.receipt_hashes
+            result.update(
+                core_binding_status=reconcile_status,
+                core_binding_hash=returned[0],
+                acceptance_contract_hash=returned[1],
+                supplied_core=list(supplied),
+            )
+            return result, "", True, ""
+        result, out, started, err = inner(executable, payload, **kwargs)
+        if payload["operation"] == "worker_continue":
+            result = dict(result, status="OPEN_SWE_OUTCOME_UNKNOWN", outcome_unknown=True)
+        return result, out, started, err
+
+    monkeypatch.setattr(module, "_runtime_call", runtime_call)
+    ctx.receipt_hashes = (
+        ctx.receipt["core_binding_hash"],
+        ctx.receipt["acceptance_contract_hash"],
+    )
+    with pytest.raises(FanoutError, match="FANOUT_RECONCILIATION_REQUIRED"):
+        _continue(ctx)
+    assert _repair_attempt(ctx)["state"] == "OUTCOME_UNKNOWN"
+    return ctx
+
+
+def _reconcile_calls(ctx) -> list[dict[str, Any]]:
+    return [call for call in ctx.calls if call["operation"] == "worker_reconcile"]
+
+
+def test_bound_repair_reconcile_happy_path_stays_bound(tmp_path, monkeypatch):
+    ctx = _bound_unknown_continuation(tmp_path, monkeypatch)
+    child = ctx.runtime.reconcile_repair(ctx.receipt, repair_id="d001")
+    calls = _reconcile_calls(ctx)
+    assert len(calls) == 1
+    assert calls[0]["operation_id"] == _repair_attempt(ctx)["operation_id"]
+    assert (calls[0]["core_binding_hash"], calls[0]["acceptance_contract_hash"]) == (
+        ctx.receipt_hashes
+    )
+    assert child["core_binding_status"] == "BOUND"
+    assert child["core_binding_hash"] == ctx.receipt["core_binding_hash"]
+    assert _repair_attempt(ctx)["state"] == "COMPLETED"
+
+
+def test_bound_repair_reconcile_rejects_attempt_stripped_of_core_fields(tmp_path, monkeypatch):
+    ctx = _bound_unknown_continuation(tmp_path, monkeypatch, reconcile_status="")
+    path = ctx.store.attempts / "task-1--u1--repair-d001.json"
+    attempt = _repair_attempt(ctx)
+    for key in (
+        "bound_envelope_ref",
+        "bound_envelope_sha256",
+        "core_binding_hash",
+        "acceptance_contract_hash",
+        "core_binding_operation_id",
+        "core_binding_attempt_id",
+    ):
+        attempt.pop(key, None)
+    path.write_text(json.dumps(attempt), encoding="utf-8")
+    with pytest.raises(FanoutError, match="REPAIR_RECONCILE_CORE_BINDING_MISMATCH"):
+        ctx.runtime.reconcile_repair(ctx.receipt, repair_id="d001")
+    assert _reconcile_calls(ctx) == []
+    # A parent receipt stripped of its binding is caught by the unit's initial attempt.
+    stripped_parent = {
+        key: value
+        for key, value in ctx.receipt.items()
+        if key
+        not in {
+            "bound_envelope_ref",
+            "bound_envelope_sha256",
+            "core_binding_status",
+            "core_binding_hash",
+            "acceptance_contract_hash",
+        }
+    }
+    with pytest.raises(FanoutError, match="CORE_BINDING_PARENT_RECEIPT_INVALID"):
+        ctx.runtime.reconcile_repair(stripped_parent, repair_id="d001")
+    assert _reconcile_calls(ctx) == []
+
+
+def _completed_reconcile_with(ctx, monkeypatch, **fields):
+    """Bypass the transport's own Core check: a COMPLETED reconcile with altered fields."""
+    real = ctx.transport.reconcile_workspace
+
+    def altered(**kwargs):
+        result = real(**kwargs)
+        assert result.status == "COMPLETED"
+        return replace(result, **fields)
+
+    monkeypatch.setattr(ctx.transport, "reconcile_workspace", altered)
+
+
+def test_bound_repair_reconcile_rejects_hash_mismatch(tmp_path, monkeypatch):
+    other = ("sha256:" + "e" * 64, "sha256:" + "f" * 64)
+    # Transport layer: the runtime attests other hashes -> not COMPLETED, stays unknown.
+    ctx = _bound_unknown_continuation(tmp_path / "t", monkeypatch, hashes=other)
+    with pytest.raises(FanoutError, match="FANOUT_RECONCILIATION_REQUIRED"):
+        ctx.runtime.reconcile_repair(ctx.receipt, repair_id="d001")
+    assert _repair_attempt(ctx)["state"] == "OUTCOME_UNKNOWN"
+    # Fanout layer: even a COMPLETED result with other hashes is refused.
+    ctx = _bound_unknown_continuation(tmp_path / "f", monkeypatch)
+    _completed_reconcile_with(
+        ctx, monkeypatch, core_binding_hash=other[0], acceptance_contract_hash=other[1]
+    )
+    with pytest.raises(FanoutError, match="CORE_BINDING_ATTESTATION_MISMATCH"):
+        ctx.runtime.reconcile_repair(ctx.receipt, repair_id="d001")
+    assert _repair_attempt(ctx)["state"] == "OUTCOME_UNKNOWN"
+
+
+def test_bound_repair_reconcile_rejects_non_bound_attestation(tmp_path, monkeypatch):
+    ctx = _bound_unknown_continuation(tmp_path / "t", monkeypatch, reconcile_status="UNBOUND")
+    with pytest.raises(FanoutError, match="FANOUT_RECONCILIATION_REQUIRED"):
+        ctx.runtime.reconcile_repair(ctx.receipt, repair_id="d001")
+    assert _repair_attempt(ctx)["state"] == "OUTCOME_UNKNOWN"
+    ctx = _bound_unknown_continuation(tmp_path / "f", monkeypatch)
+    _completed_reconcile_with(ctx, monkeypatch, core_binding_status="UNBOUND")
+    with pytest.raises(FanoutError, match="CORE_BINDING_ATTESTATION_MISMATCH"):
+        ctx.runtime.reconcile_repair(ctx.receipt, repair_id="d001")
+    assert _repair_attempt(ctx)["state"] == "OUTCOME_UNKNOWN"
+
+
+def test_bound_unit_continue_with_stripped_parent_receipt_is_blocked(tmp_path, monkeypatch):
+    ctx = _bound_open_swe(tmp_path, monkeypatch)
+    stripped = {
+        key: value
+        for key, value in ctx.receipt.items()
+        if key
+        not in {
+            "bound_envelope_ref",
+            "bound_envelope_sha256",
+            "core_binding_status",
+            "core_binding_hash",
+            "acceptance_contract_hash",
+        }
+    }
+    with pytest.raises(FanoutError, match="CORE_BINDING_PARENT_RECEIPT_INVALID"):
+        _continue(ctx, stripped)
+    assert [call for call in ctx.calls if call["operation"] == "worker_continue"] == []
+    assert not (ctx.store.attempts / "task-1--u1--repair-d001.json").exists()
+
+
+@pytest.mark.parametrize(
+    "initial_evidence", ["missing", "garbage", "foreign", "nulls", "malformed"]
+)
+def test_missing_initial_attempt_evidence_blocks_repair_paths(
+    tmp_path, monkeypatch, initial_evidence
+):
+    ctx = _bound_open_swe(tmp_path, monkeypatch)
+    initial_path = ctx.store.attempts / "task-1--u1--initial.json"
+    if initial_evidence == "missing":
+        initial_path.unlink()
+    elif initial_evidence == "garbage":
+        initial_path.write_text("{not json", encoding="utf-8")
+    elif initial_evidence in {"nulls", "malformed"}:
+        bad = None if initial_evidence == "nulls" else "sha256:not-a-hash"
+        value = json.loads(initial_path.read_text("utf-8"))
+        value.update({
+            key: bad
+            for key in (
+                "bound_envelope_ref",
+                "bound_envelope_sha256",
+                "core_binding_hash",
+                "acceptance_contract_hash",
+            )
+        })
+        initial_path.write_text(json.dumps(value), encoding="utf-8")
+    else:
+        value = dict(json.loads(initial_path.read_text("utf-8")), unit_id="u9")
+        initial_path.write_text(json.dumps(value), encoding="utf-8")
+    stripped = {
+        key: value
+        for key, value in ctx.receipt.items()
+        if key
+        not in {
+            "bound_envelope_ref",
+            "bound_envelope_sha256",
+            "core_binding_status",
+            "core_binding_hash",
+            "acceptance_contract_hash",
+        }
+    }
+    for parent in (stripped, ctx.receipt):
+        with pytest.raises(FanoutError, match="INITIAL_ATTEMPT_EVIDENCE_MISSING"):
+            _continue(ctx, parent)
+        with pytest.raises(FanoutError):
+            ctx.runtime.reconcile_repair(parent, repair_id="d001")
+    assert [c for c in ctx.calls if c["operation"] in {"worker_continue", "worker_reconcile"}] == []
+    assert not (ctx.store.attempts / "task-1--u1--repair-d001.json").exists()

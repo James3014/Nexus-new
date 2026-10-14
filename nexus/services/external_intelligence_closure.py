@@ -17,6 +17,9 @@ from nexus.services.external_intelligence import (
     ExternalIntelligenceError,
     validate_selected_worker,
 )
+from nexus.services.external_intelligence_core_binding import (
+    CLOSURE_INTEGRITY_GIT_TIMEOUT_SECONDS,
+)
 from nexus.services.external_intelligence_fanout import (
     EIA_COMPOSER_EMAIL,
     EIA_COMPOSER_NAME,
@@ -54,7 +57,8 @@ INTEGRITY_CHECK_WHITESPACE = "nexus.integrity.diff-check"
 INTEGRITY_CHECK_DELETIONS = "nexus.integrity.deletions"
 INTEGRITY_CHECK_SCOPE = "nexus.integrity.scope"
 INTEGRITY_CHECK_IDS = (INTEGRITY_CHECK_WHITESPACE, INTEGRITY_CHECK_DELETIONS, INTEGRITY_CHECK_SCOPE)
-INTEGRITY_CHECK_TIMEOUT_SECONDS = 30.0
+# Shared with the Core binding window sizing (binding_validity_seconds).
+INTEGRITY_CHECK_TIMEOUT_SECONDS = CLOSURE_INTEGRITY_GIT_TIMEOUT_SECONDS
 INTEGRITY_WHITESPACE_ERRORS = "INTEGRITY_WHITESPACE_ERRORS"
 INTEGRITY_DELETION_NOT_AUTHORIZED = "INTEGRITY_DELETION_NOT_AUTHORIZED"
 INTEGRITY_SCOPE_WIDENING = "INTEGRITY_SCOPE_WIDENING"
