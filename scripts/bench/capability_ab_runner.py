@@ -3360,6 +3360,31 @@ def _apply_prompt_symmetry_audit(
     return report
 
 
+def _early_prompt_symmetry_audit(
+    capture: tuple[Path, str],
+    materials: dict[str, Any],
+    rows: list[dict[str, Any]],
+    *,
+    expect_model_calls: bool,
+) -> dict[str, Any]:
+    """Audit the pairs finished so far (cheap); any error counts as a failure."""
+
+    from scripts.bench.prompt_symmetry_audit import audit_run
+
+    capture_dir, run_id = capture
+    done = {f"{row.get('task_id')}__{row.get('trial_index')}" for row in rows}
+    try:
+        return audit_run(
+            capture_dir,
+            {key: value for key, value in materials.items() if key in done},
+            rows=rows,
+            run_id=run_id,
+            expect_model_calls=expect_model_calls,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "ERROR", "error": f"{type(exc).__name__}: {exc}"}
+
+
 def _counted_mode_expects_model_calls(args: Any) -> bool:
     return str(getattr(args, "with_llm_mode", "off")) != "off" or str(getattr(args, "without_mode", "")) in {
         "agy",
@@ -20290,6 +20315,8 @@ def main() -> int:
         else None
     )
     prompt_audit_materials: dict[str, Any] = {}
+    early_audit_checked_pairs = 0
+    early_audit_failed = False
 
     def _with_nexus_leg(task: CapabilityTask) -> str:
         nonlocal timed_out, with_timeout_streak, with_infra_streak
@@ -20635,6 +20662,24 @@ def main() -> int:
             legs = (_with_nexus_leg, _without_nexus_leg) if pair_index % 2 == 0 else (_without_nexus_leg, _with_nexus_leg)
             # Both legs always run, so an abort never leaves an unpaired row in one arm.
             outcomes = [leg(task) for leg in legs]
+            if prompt_audit_capture is not None:
+                # Protect quota: audit every finished pair at once and stop the whole run on the
+                # first violation instead of discovering it after hours of paid calls.
+                early_audit_checked_pairs += 1
+                early_audit_report = _early_prompt_symmetry_audit(
+                    prompt_audit_capture,
+                    prompt_audit_materials,
+                    [*with_rows, *without_rows],
+                    expect_model_calls=_counted_mode_expects_model_calls(args),
+                )
+                if early_audit_report.get("status") != "PASS":
+                    early_audit_failed = True
+                    (out_dir / "prompt_symmetry_early_audit.json").parent.mkdir(parents=True, exist_ok=True)
+                    (out_dir / "prompt_symmetry_early_audit.json").write_text(
+                        json.dumps(early_audit_report, indent=2, ensure_ascii=False), encoding="utf-8"
+                    )
+                    timed_out = True
+                    break
             if "break" in outcomes:
                 timed_out = True
                 break
@@ -20782,6 +20827,8 @@ def main() -> int:
         json.dumps(
             {
                 "status": "PARTIAL_TIMEOUT" if timed_out else "SUCCESS",
+                "early_audit_checked_pairs": early_audit_checked_pairs,
+                "early_audit_aborted": early_audit_failed,
                 "tasks_requested": len(tasks),
                 "unique_tasks_requested": len(selected_tasks),
                 "repeat_trials": max(1, int(args.repeat_trials)),

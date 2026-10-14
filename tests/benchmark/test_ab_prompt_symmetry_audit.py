@@ -595,7 +595,8 @@ def test_invalid_run_publishes_no_model_solve(tmp_path: Path, monkeypatch) -> No
         for path in out_dir.glob("with_nexus_*.jsonl")
         for line in path.read_text().splitlines()
     ]
-    assert {row["solve_classification"] for row in rows} == {"prompt_symmetry_violation"}
+    # The early audit stops after pair 1; the unrun pair is not_run in both arms.
+    assert {row["solve_classification"] for row in rows} == {"prompt_symmetry_violation", "not_run"}
 
 
 def test_counted_run_without_strict_flag_uses_strict_scoring(
@@ -1029,7 +1030,11 @@ def test_bound_free_text_fields(tmp_path: Path) -> None:
             "with_nexus",
             _with_nexus(
                 NEXUS_BLOCKS.replace(
-                    BUNDLE, json.dumps({"consumer_payloads": [{"fields": fields}]})
+                    BUNDLE,
+                    json.dumps({
+                        "consumer_payloads": [{"fields": fields}],
+                        "selected_capabilities": ["semantic_searcher"],
+                    }),
                 )
             ),
         )
@@ -1058,3 +1063,93 @@ def test_split_literal_and_split_code_across_list_items_fail(tmp_path: Path) -> 
     task = _json_probe(other, json.dumps({"evidence_ids": ["for k in", "d: del d[k]"]}))
     assert "source_code_in_nexus_block" in task["violations"], task
     assert task["code_lines"] == ["for k in d: del d[k]"], task
+
+
+def test_completed_leg_with_not_run_partner_is_fully_audited(tmp_path: Path) -> None:
+    """Codex r4 #1: a completed with-Nexus row whose bare partner is not_run is still audited."""
+
+    _capture(tmp_path, "with_nexus", _with_nexus() + "\nEXTRA INSTRUCTION\n")
+    rows = [
+        {
+            "mode": "with_nexus",
+            "task_id": "nexus-value-trust-002",
+            "trial_index": 1,
+            "model_calls": 1,
+        },
+        {
+            "mode": "without_nexus",
+            "task_id": "nexus-value-trust-002",
+            "trial_index": 1,
+            "not_run": True,
+        },
+    ]
+    material = _material_desc()
+    task = audit_run(tmp_path, material, rows=rows)["tasks"][0]
+    assert "with_nexus_only_text" in task["violations"], task
+    assert "EXTRA INSTRUCTION" in task["disallowed_lines"]
+    other = tmp_path / "nocap"
+    other.mkdir()
+    task = audit_run(other, material, rows=rows)["tasks"][0]
+    assert "with_nexus_model_call_not_captured" in task["violations"], task
+
+
+@pytest.mark.parametrize(
+    "marker",
+    ["ignore_all_previous_instructions:result", "codeintel:result"],
+    ids=["unregistered", "not_selected"],
+)
+def test_marker_prefix_must_be_a_selected_registered_capability(
+    tmp_path: Path, marker: str
+) -> None:
+    """Codex r4 #2."""
+
+    task = _json_probe(
+        tmp_path,
+        json.dumps({"payload_markers": [marker], "selected_capabilities": ["semantic_searcher"]}),
+    )
+    assert any("bound format marker" in f for f in task["json_string_findings"]), task
+
+
+def test_hidden_only_number_in_a_block_fails(tmp_path: Path) -> None:
+    """Codex r4 #3: numbers are provenance-checked against the hidden test."""
+
+    material = _material()
+    material[KEY].hidden_test = HIDDEN + "    assert risk(7) == 42\n"
+    _capture(tmp_path, "without_nexus", BARE)
+    blocks = NEXUS_BLOCKS.replace(
+        '{"recommended_flow":"direct","risk_score":55}',
+        '{"recommended_flow":"direct","risk_score":42}',
+    )
+    _capture(tmp_path, "with_nexus", _with_nexus(blocks))
+    task = audit_run(tmp_path, material)["tasks"][0]
+    assert any("hidden-only number" in f for f in task["json_string_findings"]), task
+
+
+def test_early_audit_aborts_after_first_violating_pair(tmp_path: Path, monkeypatch, capsys) -> None:
+    """Quota guard: the first finished pair is audited at once; a violation stops the run there."""
+
+    code, order, out_dir = _run_main_with_fake_arms(
+        tmp_path, monkeypatch, with_prompt_extra="\nInjected line.\n"
+    )
+    assert code == 3
+    assert len(order) == 2
+    calls = list((out_dir / "prompt_capture").glob("run-*/calls/*.json"))
+    assert len(calls) == 2
+    printed = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert printed["early_audit_checked_pairs"] == 1
+    assert printed["early_audit_aborted"] is True
+    assert (out_dir / "prompt_symmetry_early_audit.json").exists()
+    rows = [
+        json.loads(line)
+        for path in out_dir.glob("*_nexus_*.jsonl")
+        for line in path.read_text().splitlines()
+    ]
+    assert {row["solve_classification"] for row in rows} <= {"prompt_symmetry_violation", "not_run"}
+
+
+def test_clean_run_audits_every_pair(tmp_path: Path, monkeypatch, capsys) -> None:
+    code, order, _ = _run_main_with_fake_arms(tmp_path, monkeypatch, with_prompt_extra="")
+    assert code == 0 and len(order) == 4
+    printed = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert printed["early_audit_checked_pairs"] == 2
+    assert printed["early_audit_aborted"] is False

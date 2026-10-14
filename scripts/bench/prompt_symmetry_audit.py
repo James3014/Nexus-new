@@ -518,7 +518,50 @@ _ISO8601_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?([+-]\d{2
 _ABS_PATH_RE = re.compile(r"^/[A-Za-z0-9_./-]+$")
 
 
-def _format_ok(fmt: str, value: str, material: TaskMaterial) -> bool:
+_REGISTERED_CAPABILITIES: frozenset[str] | None = None
+
+
+def registered_capability_ids() -> frozenset[str]:
+    """Capability ids of the executor registry (fail closed to empty if it cannot be imported)."""
+
+    global _REGISTERED_CAPABILITIES
+    if _REGISTERED_CAPABILITIES is None:
+        try:
+            from nexus.core.capability_executor_registry import EXECUTOR_REGISTRY
+        except Exception:  # noqa: BLE001
+            _REGISTERED_CAPABILITIES = frozenset()
+        else:
+            _REGISTERED_CAPABILITIES = frozenset(str(key) for key in EXECUTOR_REGISTRY)
+    return _REGISTERED_CAPABILITIES
+
+
+def _numeric_literals(source: str) -> set[float]:
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return set()
+    return {
+        float(node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, (int, float))
+        and not isinstance(node.value, bool)
+    }
+
+
+def hidden_only_numbers(material: TaskMaterial, bare_prompt: str) -> set[float]:
+    """Numbers in the hidden test that the bare arm never saw (0 and 1 excluded)."""
+
+    seen = _numeric_literals(material.visible_test) | _numeric_literals(material.source)
+    seen |= {float(match) for match in re.findall(r"(?<![\w.])\d+(?:\.\d+)?(?![\w.])", bare_prompt)}
+    return {
+        value for value in _numeric_literals(material.hidden_test) - seen if value not in (0.0, 1.0)
+    }
+
+
+def _format_ok(
+    fmt: str, value: str, material: TaskMaterial, selected: frozenset[str] = frozenset()
+) -> bool:
     if fmt == "task_desc":
         return value == material.task_desc
     if fmt == "task_desc_prefix":
@@ -526,7 +569,10 @@ def _format_ok(fmt: str, value: str, material: TaskMaterial) -> bool:
     if fmt == "template":
         return value in TEMPLATE_STRINGS
     if fmt == "marker":
-        return bool(_MARKER_RE.match(value))
+        # capability:(result|payload|finding), capability registered AND selected in this prompt.
+        match = _MARKER_RE.match(value)
+        capability = value.split(":", 1)[0]
+        return bool(match) and capability in registered_capability_ids() and capability in selected
     if fmt == "iso8601":
         return bool(_ISO8601_RE.match(value))
     if fmt == "abs_path":
@@ -535,7 +581,13 @@ def _format_ok(fmt: str, value: str, material: TaskMaterial) -> bool:
 
 
 def _schema_findings(
-    header: str, payload: Any, schema: Mapping[str, Mapping[str, Any]], material: TaskMaterial
+    header: str,
+    payload: Any,
+    schema: Mapping[str, Mapping[str, Any]],
+    material: TaskMaterial,
+    *,
+    selected: frozenset[str] = frozenset(),
+    hidden_numbers: frozenset[float] = frozenset(),
 ) -> list[str]:
     """Known paths only; kind, type, enum/range/pattern/format per path (schema v2)."""
 
@@ -573,17 +625,38 @@ def _schema_findings(
                 findings.append(f"{header}: {path} value {value} not in {spec['enum']}")
             if "range" in spec and not (spec["range"][0] <= value <= spec["range"][1]):
                 findings.append(f"{header}: {path} value {value} outside {spec['range']}")
+            if float(value) in hidden_numbers and value not in (spec.get("enum") or []):
+                findings.append(f"{header}: {path} value {value} is a hidden-only number")
             continue
         if any(not ch.isascii() for ch in value if ch.isalpha()):
             findings.append(f"{header}: {path} has non-ASCII letters")
         if "format" in spec:
-            if not _format_ok(str(spec["format"]), value, material):
+            if not _format_ok(str(spec["format"]), value, material, selected):
                 findings.append(f"{header}: {path} does not match bound format {spec['format']}")
         elif not any(re.match(pattern, value) for pattern in spec.get("patterns") or []):
             findings.append(
                 f"{header}: {path} value not in its declared enum/pattern: {value[:60]!r}"
             )
     return findings
+
+
+def _selected_capabilities(prompt: str) -> set[str]:
+    """Capability ids this prompt's own route/evidence/model-context blocks say were selected."""
+
+    out: set[str] = set()
+    for header, line in _blocks(prompt):
+        if header not in JSON_BLOCK_HEADERS or not line.startswith("{"):
+            continue
+        try:
+            payload = json.loads(line)
+        except ValueError:
+            continue
+        for path, value in _walk_json(payload):
+            if path in {"selected_capabilities[]", "selected_capability_ids[]"} and isinstance(
+                value, str
+            ):
+                out.add(value)
+    return out
 
 
 def classify_extra_lines(
@@ -616,6 +689,8 @@ def classify_extra_lines(
         exempt.add(normalize(material.task_desc))
     bare_corpus = _decoded_corpus(bare_prompt)
     hidden_lines = hidden_only_lines(material)
+    hidden_numbers = frozenset(hidden_only_numbers(material, bare_prompt))
+    selected = frozenset(_selected_capabilities(with_nexus_prompt))
     for header, line in _blocks(with_nexus_prompt):
         is_header = bool(SECTION_HEADER_RE.match(line))
         if header == HIDDEN_GUIDANCE_HEADER and not is_header:
@@ -644,7 +719,16 @@ def classify_extra_lines(
         except ValueError:
             out["disallowed"].append(line)  # allowed blocks carry JSON only
             continue
-        out["json"].extend(_schema_findings(header, payload, schema.get(header, {}), material))
+        out["json"].extend(
+            _schema_findings(
+                header,
+                payload,
+                schema.get(header, {}),
+                material,
+                selected=selected,
+                hidden_numbers=hidden_numbers,
+            )
+        )
         nodes = list(_walk_json(payload))
         # Literal/code/vocabulary checks also run on the JOINED text of every string list, so a
         # literal or code line split across items is still caught.
@@ -747,21 +831,24 @@ def audit_task(
         and (len(bare_rows) != 1 or len(with_rows) != 1)
     ):
         result.violations.append(f"unpaired_rows:bare={len(bare_rows)},with_nexus={len(with_rows)}")
-    # A not_run pair (run stopped early) is excluded symmetrically: the call-count and
-    # prompt-shape checks do not apply, the leak checks below still do.
-    if not not_run:
-        for arm, rows, calls in (
-            ("bare", bare_rows, result.bare_calls),
-            ("with_nexus", with_rows, result.with_nexus_calls),
+    # Every COMPLETED row is audited on its own; only the pairwise checks are skipped when its
+    # partner is not_run (run stopped early).
+    completed = {
+        "bare": [row for row in bare_rows or [] if not row.get("not_run")],
+        "with_nexus": [row for row in with_rows or [] if not row.get("not_run")],
+    }
+    for arm, calls in (("bare", result.bare_calls), ("with_nexus", result.with_nexus_calls)):
+        arm_rows = completed[arm]
+        if (
+            arm_rows
+            and calls == 0
+            and any(int(row.get("model_calls") or 0) > 0 for row in arm_rows)
         ):
-            if rows and calls == 0 and any(int(row.get("model_calls") or 0) > 0 for row in rows):
-                result.violations.append(f"{arm}_model_call_not_captured")
-        if result.bare_calls > 1:
-            result.violations.append(f"bare_calls={result.bare_calls}")
-        if result.bare_calls == 0 and result.with_nexus_calls > 0:
-            result.violations.append("bare_calls=0")
-        if result.with_nexus_calls > 1:
-            result.violations.append(f"with_nexus_calls={result.with_nexus_calls}")
+            result.violations.append(f"{arm}_model_call_not_captured")
+        if calls > 1:
+            result.violations.append(f"{arm}_calls={calls}")
+    if not not_run and result.bare_calls == 0 and result.with_nexus_calls > 0:
+        result.violations.append("bare_calls=0")
     bare_prompt = str(bare_records[0].get("prompt") or "") if bare_records else ""
     bare_corpus = _decoded_corpus(bare_prompt)
     literals = hidden_only_literals(material)
@@ -789,8 +876,6 @@ def audit_task(
         result.violations.append("hidden_test_line_in_with_nexus_prompt")
     if result.prior_art_present:
         result.violations.append("prior_art_in_with_nexus_prompt")
-    if not_run:
-        return result
     if bare_records and not _no_tools_position_ok(bare_prompt, bare=True):
         result.violations.append("bare_no_tools_prefix_not_once_at_top")
     if with_records:
@@ -806,9 +891,12 @@ def audit_task(
             result.violations.append("visible_test_missing_from_with_nexus_prompt")
         result.with_nexus_prompt_chars = len(first)
         result.bare_prompt_chars = len(bare_prompt)
-        if bare_records:
-            result.extra_lines = extra_lines(first, bare_prompt)
-            checks = classify_extra_lines(first, bare_prompt, material)
+        # Without a bare capture (partner not_run) compare against what the bare arm is given:
+        # the task text, the source and the visible test from the fixture material.
+        reference = bare_prompt if bare_records else synthetic_bare_reference(material)
+        if bare_records or not_run:
+            result.extra_lines = extra_lines(first, reference)
+            checks = classify_extra_lines(first, reference, material)
             result.disallowed_lines = checks["disallowed"]
             result.code_lines = checks["code"]
             result.codeintel_findings = checks["codeintel"]
@@ -825,6 +913,18 @@ def audit_task(
             if result.json_string_findings:
                 result.violations.append("nexus_block_string_not_allowed")
     return result
+
+
+def synthetic_bare_reference(material: TaskMaterial) -> str:
+    """The bare arm's informational content, rebuilt from the fixture (no instructions)."""
+
+    return "\n".join([
+        NO_TOOLS_PREFIX,
+        f"Task: {material.task_desc}",
+        material.task_desc,
+        material.source,
+        material.visible_test,
+    ])
 
 
 def load_captures(
