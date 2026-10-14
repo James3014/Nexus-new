@@ -1,7 +1,6 @@
 from pathlib import Path
 
-from nexus.delivery.suggestions import detect_verification_language
-from nexus.delivery.suggestions import suggest_verification_commands
+from nexus.delivery.suggestions import detect_verification_language, suggest_verification_commands
 
 
 def test_detect_verification_language_prefers_rust_task_hints(tmp_path: Path) -> None:
@@ -23,12 +22,12 @@ def test_suggest_verification_commands_for_python_repo(tmp_path: Path) -> None:
 
 
 def test_suggest_verification_commands_for_rust_subrepo(tmp_path: Path) -> None:
-    rust_dir = tmp_path / "nexus-core"
+    rust_dir = tmp_path / "nexus-core-rs"
     rust_dir.mkdir()
-    (rust_dir / "Cargo.toml").write_text("[package]\nname='nexus-core'\n", encoding="utf-8")
+    (rust_dir / "Cargo.toml").write_text("[package]\nname='nexus-core-rs'\n", encoding="utf-8")
 
     assert suggest_verification_commands(tmp_path, "fix rust leak in nexus-core") == [
-        "cargo test --manifest-path nexus-core/Cargo.toml"
+        "cargo test --manifest-path nexus-core-rs/Cargo.toml"
     ]
 
 
@@ -39,4 +38,23 @@ def test_suggest_verification_commands_for_go_subrepo(tmp_path: Path) -> None:
 
     assert suggest_verification_commands(tmp_path, "patch go scheduler in nexus-swarm") == [
         "cd nexus-swarm && go test ./..."
+    ]
+
+
+def test_suggest_verification_commands_for_retained_rust_crate(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    rust_dir = tmp_path / "nexus-core-rs"
+    rust_dir.mkdir()
+    (rust_dir / "Cargo.toml").write_text("[package]\nname='nexus-core-rs'\n", encoding="utf-8")
+
+    assert suggest_verification_commands(tmp_path, "fix rust receipt verifier") == [
+        "cargo test --manifest-path nexus-core-rs/Cargo.toml"
+    ]
+
+
+def test_suggest_verification_commands_for_this_repo_targets_retained_crate() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+
+    assert suggest_verification_commands(repo_root, "fix rust flow machine") == [
+        "cargo test --manifest-path nexus-core-rs/Cargo.toml"
     ]

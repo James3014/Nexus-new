@@ -23,7 +23,7 @@ scenario_diagnosis: Implementing Hybrid Governance 2.4 with Rust-based physical 
 # 🛡️ Nexus System Architecture & Lifecycle Blueprint (v24.0)
 
 > [!abstract] 核心意圖
-> 本文件定義 Nexus v24.0 (Hybrid Governance 2.4) 的工業級架構。系統已全面轉向以 **Rust Governance Kernel** 為核心的物理硬治理模式。模型不再負責生成治理產物，僅作為語義建議者（Semantic Suggester），確保系統在任何模型失效或幻覺下均能維持 Fail-Closed。
+> 本文件定義 Nexus v24.0 (Hybrid Governance 2.4) 的工業級架構。系統已全面轉向以 **Rust Governance Kernel** 為核心的物理硬治理模式。（2026-10-14 更正：Rust `nexus_core` 擴充從未在正式路徑使用，已退役並刪除，見 #1927；現行相位轉移權威是 `nexus/engine/runtime_phase_contract.py`。）模型不再負責生成治理產物，僅作為語義建議者（Semantic Suggester），確保系統在任何模型失效或幻覺下均能維持 Fail-Closed。
 
 ---
 
