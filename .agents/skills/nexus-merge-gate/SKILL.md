@@ -42,7 +42,7 @@ bootstrap a Task Card or manufacture GitHub merge authority.
    `REVISE`, card clarification, or reviewer `HARD_BLOCK` stops approval but is
    not automatically terminal `REJECTED`. Repair within existing Owner scope
    when possible; only an authorized decision-maker may reject the Candidate.
-3. With the recorded hashes, call `nexus_self_hosted_approve_promotion` (or `nexus.bash` running `python3 -m scripts.engine.nexus_cli self-hosted approve`). Approval must bind the exact candidate; do not substitute a newer commit or recompute a receipt after approval.
+3. With the recorded hashes, approve through the gateway approve path (`candidate_approve`) with a bound approval grant. The CLI `self-hosted approve` command is retired (#1928) and the legacy `nexus_self_hosted_approve_promotion` tool fails closed with `APPROVAL_GRANT_REQUIRED`. Approval must bind the exact candidate; do not substitute a newer commit or recompute a receipt after approval.
 4. Call `nexus_self_hosted_integrate_approved` (or `nexus.bash` running `python3 -m scripts.engine.nexus_cli self-hosted integrate`) targeting exactly `nexus/integration/self-hosted-lifecycle-closure`. The operation must create a normal merge preserving candidate and integration ancestry. Verify the implementation, live-canary, and docs commits are ancestors afterward.
 5. Run the focused and full repository gates, `git diff --check`, and both
    staged/unstaged deletion audits. Record the post-integration HEAD, protected
@@ -53,7 +53,7 @@ bootstrap a Task Card or manufacture GitHub merge authority.
 
 ## Safety boundaries
 
-`REPO_READY_CONNECTOR_BLOCKED` is the terminal result only when neither native connector tools nor `nexus.bash` with the repo-owned self-hosted CLI is available. When `nexus.bash` plus the repo-owned wrapper or official self-hosted CLI is available, `nexus.bash` must be used for governed lifecycle operations instead of blocking. Do not use direct worktree delivery, manual branch creation, a protected-main merge, remote publication, history rewrite, or ref/branch/tag deletion as a workaround. Never delete candidate or salvage
+`REPO_READY_CONNECTOR_BLOCKED` is the terminal result only when neither native connector tools nor `nexus.bash` with the repo-owned self-hosted CLI is available. When `nexus.bash` plus the repo-owned wrapper or official self-hosted CLI is available, `nexus.bash` must be used for governed lifecycle operations instead of blocking, **except approval**: approval has no shell route (the CLI `self-hosted approve` is retired, #1928) and requires the gateway `candidate_approve` tool with a bound approval grant; without the gateway, approval stops at `ACTION_REQUIRED`. Do not use direct worktree delivery, manual branch creation, a protected-main merge, remote publication, history rewrite, or ref/branch/tag deletion as a workaround. Never delete candidate or salvage
 refs. Rollback, if explicitly required, must restore the recorded integration
 SHA without rewriting existing commits.
 

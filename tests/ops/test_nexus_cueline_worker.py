@@ -134,7 +134,7 @@ def test_shell_metacharacters_remain_data_not_execution(tmp_path: Path):
 
 
 def test_approve_bindings_forwarded_exactly():
-    """Prove approve operation forwards exact commit, tree, state, and receipt hashes."""
+    """CLI approve is retired (#1928): the approve op fails closed and builds no argv."""
     approve_payload = {
         "op": "approve",
         "task_id": "sh-task-999",
@@ -144,18 +144,85 @@ def test_approve_bindings_forwarded_exactly():
         "verified_receipt_hash": "d" * 64,
         "state_dir": "/tmp/custom_state",
     }
-    validated = parse_and_validate_input(json.dumps(approve_payload))
-    argv = build_cli_argv(validated)
+    with pytest.raises(ValueError, match="retired.*nexus_candidate_approve"):
+        parse_and_validate_input(json.dumps(approve_payload))
+    with pytest.raises(ValueError, match="retired"):
+        build_cli_argv(approve_payload)
 
-    assert argv == [
-        sys.executable, "-m", "scripts.engine.nexus_cli", "self-hosted", "approve",
-        "--task-id", "sh-task-999",
-        "--candidate-commit-sha", "a" * 40,
-        "--candidate-tree-sha", "b" * 40,
-        "--candidate-state-hash", "c" * 64,
-        "--verified-receipt-hash", "d" * 64,
-        "--state-dir", "/tmp/custom_state",
-    ]
+
+def test_approve_op_exits_nonzero_without_calling_cli(tmp_path: Path):
+    """The worker process returns 1 for approve, even with an option-like task_id."""
+    script_path = Path(__file__).resolve().parents[2] / "scripts" / "ops" / "nexus_cueline_worker.py"
+    for task_id in ("sh-task-999", "--help"):
+        payload = {
+            "op": "approve",
+            "task_id": task_id,
+            "candidate_commit_sha": "a" * 40,
+            "candidate_tree_sha": "b" * 40,
+            "candidate_state_hash": "c" * 64,
+            "verified_receipt_hash": "d" * 64,
+            "state_dir": str(tmp_path / "state"),
+        }
+        res = subprocess.run(
+            [sys.executable, str(script_path)],
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert res.returncode == 1
+        assert "retired" in res.stderr
+        assert res.stdout == ""
+    assert not (tmp_path / "state").exists()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"op": "status", "task_id": "--help"},
+        {"op": "status", "task_id": "-h"},
+        {"op": "status", "task_id": "ok", "state_dir": "--help"},
+        {"op": "status", "task_id": " "},
+        {"op": "wait", "task_id": "--version"},
+        {"op": "cancel", "task_id": "--help"},
+        {"op": "integrate", "task_id": "ok", "integration_branch": "--help"},
+        {"op": "dispose", "task_id": "ok", "disposition": "REJECTED", "superseded_by": "--help"},
+        {"op": "submit", "task_id": "ok", "what": "--help"},
+        {"op": "submit", "task_id": "ok", "allowed_files": ["--help", "a.py"]},
+        {"op": "submit", "task_id": "ok", "verifier_commands": "--help"},
+        {"op": "list-actionable", "state_dir": "-x"},
+        {"op": "submit", "task_id": "ok", "allowed_files": ["safe.py", "--help", ""]},
+        {"op": "submit", "task_id": "ok", "allowed_files": ["safe.py", ""]},
+        {"op": "submit", "task_id": "ok", "verifier_commands": ["pytest -q", "-x"]},
+    ],
+)
+def test_option_like_values_rejected_for_every_op(payload):
+    """No free-text value may reach the CLI argv starting with '-' (Click would parse it as an option)."""
+    with pytest.raises(ValueError, match="must not be empty or start with '-'"):
+        parse_and_validate_input(json.dumps(payload))
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("timeout", "-inf"),
+        ("timeout", "15"),
+        ("timeout", float("inf")),
+        ("timeout", float("nan")),
+        ("timeout", -1),
+        ("timeout", 0),
+        ("timeout", 10**9),
+        ("timeout", True),
+        ("poll_interval", "-1"),
+        ("poll_interval", -0.5),
+        ("timeout_seconds", "--help"),
+        ("poll_interval_seconds", [1]),
+    ],
+)
+def test_numeric_fields_must_be_finite_positive_numbers(field, value):
+    payload = {"op": "wait", "task_id": "cueline-task-001", field: value}
+    with pytest.raises((TypeError, ValueError)):
+        parse_and_validate_input(json.dumps(payload, allow_nan=True))
 
 
 def test_cli_failure_codes_propagate(tmp_path: Path):
@@ -312,3 +379,9 @@ def test_repo_root_env_var_validation(tmp_path: Path):
         finally:
             del os.environ["NEXUS_CUELINE_REPO_ROOT"]
 
+
+
+def test_conflicting_op_and_operation_fields_are_rejected():
+    payload = {"op": "list-actionable", "operation": "approve"}
+    with pytest.raises(ValueError, match="Conflicting"):
+        parse_and_validate_input(json.dumps(payload))

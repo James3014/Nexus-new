@@ -143,10 +143,12 @@ def action_command_for_task(
 
     base = [sys.executable, "-m", "scripts.engine.nexus_cli", "self-hosted"]
     missing: list[str] = []
-    if recommended_tool == "nexus_self_hosted_approve_promotion":
-        # Legacy approve surface: this CLI command carries no approval grant and
-        # fails closed with APPROVAL_GRANT_REQUIRED. Approval must go through the
-        # gateway approve path (candidate_approve) with a bound grant.
+    gateway_tool = None
+    if recommended_tool in {"nexus_candidate_approve", "nexus_self_hosted_approve_promotion"}:
+        # CLI `self-hosted approve` is retired (#1928): it cannot carry an approval
+        # grant. There is no shell command; approve through the gateway tool with a
+        # bound approval grant.
+        gateway_tool = "nexus_candidate_approve"
         candidate = action.get("candidate") or {}
         required = [
             "candidate_commit_sha",
@@ -155,24 +157,7 @@ def action_command_for_task(
             "verified_receipt_hash",
         ]
         missing = [key for key in required if not candidate.get(key)]
-        if missing:
-            command = None
-        else:
-            command = [
-                *base,
-                "approve",
-                "--task-id",
-                str(task_id),
-                "--candidate-commit-sha",
-                str(candidate["candidate_commit_sha"]),
-                "--candidate-tree-sha",
-                str(candidate["candidate_tree_sha"]),
-                "--candidate-state-hash",
-                str(candidate["candidate_state_hash"]),
-                "--verified-receipt-hash",
-                str(candidate["verified_receipt_hash"]),
-                *_state_dir_args(state_dir),
-            ]
+        command = None
     elif recommended_tool == "nexus_self_hosted_integrate_approved":
         command = [
             *base,
@@ -197,11 +182,25 @@ def action_command_for_task(
     return {
         "task_id": task_id,
         "connector_tool": CONNECTOR_BASH_TOOL,
-        "recommended_tool": recommended_tool,
+        "recommended_tool": gateway_tool or recommended_tool,
         "next_action": action.get("next_action"),
         "command": " ".join(_quote_arg(part) for part in command) if command else None,
         "missing": missing,
+        **({"gateway_tool": gateway_tool} if gateway_tool else {}),
     }
+
+
+_RETIRED_APPROVE_TOOLS = {"nexus_self_hosted_approve_promotion"}
+
+
+def _without_retired_approve_tool(task: Any) -> Any:
+    """Point any legacy approve recommendation at the gateway tool (#1928)."""
+    if not isinstance(task, Mapping):
+        return task
+    action = task.get("task_action")
+    if isinstance(action, Mapping) and action.get("recommended_tool") in _RETIRED_APPROVE_TOOLS:
+        return {**task, "task_action": {**action, "recommended_tool": "nexus_candidate_approve"}}
+    return task
 
 
 def summarize_actionable(
@@ -210,7 +209,7 @@ def summarize_actionable(
     state_dir: str | Path | None = None,
     integration_branch: str = DEFAULT_INTEGRATION_BRANCH,
 ) -> dict[str, Any]:
-    tasks = list(actionable.get("tasks") or [])
+    tasks = [_without_retired_approve_tool(task) for task in actionable.get("tasks") or []]
     return {
         "schema": "nexus.chatgpt_delivery_actionable.v1",
         "actionable_count": int(actionable.get("actionable_count") or len(tasks)),

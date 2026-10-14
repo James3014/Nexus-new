@@ -545,75 +545,91 @@ def test_self_hosted_wait_and_list_actionable_subprocess(tmp_path: Path):
 
 
 def test_self_hosted_approve_exact_binding_and_mismatch(tmp_path: Path):
+    """CLI approve is retired (#1928): it exits non-zero and never approves.
+
+    Every approve path needs a bound approval grant since 6fa83c25c, which the CLI
+    cannot pass. Both a mismatched and an exactly bound packet must fail closed with
+    the retirement message and leave the task pending.
+    """
     runner = CliRunner()
-    state_dir = str(tmp_path / "state")
-    req = _valid_request(tmp_path, task_id="test-sh-approve-001")
+    state_dir = tmp_path / "state"
+    packet = {
+        "candidate_commit_sha": "a" * 40,
+        "candidate_tree_sha": "b" * 40,
+        "candidate_state_hash": "c" * 64,
+        "verified_receipt_hash": "d" * 64,
+    }
+    service = SelfHostedTaskService(state_dir=state_dir, auto_reconcile=False)
+    service._write_state(
+        "test-sh-approve-001",
+        {
+            "task_id": "test-sh-approve-001",
+            "status": "CANDIDATE_COMMITTED",
+            "promotion_status": "PENDING_HUMAN_APPROVAL",
+            "promotion_packet": dict(packet),
+            "merge_performed": False,
+            "push_performed": False,
+        },
+    )
 
-    submit_cmd = [
-        "nexus", "self-hosted", "submit",
-        "--task-id", req["task_id"],
-        "--what", req["what"],
-        "--why", req["why"],
-        "--controller-revision", req["controller_revision"],
-        "--target-base-revision", req["target_base_revision"],
-        "--controller-repo-root", req["controller_repo_root"],
-        "--target-repo-root", req["target_repo_root"],
-        "--target-worktree-root", req["target_worktree_root"],
-        "--allowed-files", req["allowed_files"],
-        "--verifier-commands", "python -c pass",
-        "--worker", req["worker"],
-        "--state-dir", state_dir,
-    ]
-    runner.invoke(nexus, submit_cmd)
-
-    wait_cmd = [
-        "nexus", "self-hosted", "wait",
-        "--task-id", req["task_id"],
-        "--timeout", "2.0",
-        "--state-dir", state_dir,
-    ]
-    runner.invoke(nexus, wait_cmd)
-
-    service = SelfHostedTaskService(state_dir=state_dir, auto_reconcile=False, ephemeral=True)
-    def _mutate_approve(s):
-        s["promotion_status"] = "PENDING_HUMAN_APPROVAL"
-        s["promotion_packet"] = {
-            "candidate_commit_sha": "a" * 40,
-            "candidate_tree_sha": "b" * 40,
-            "candidate_state_hash": "c" * 64,
-            "verified_receipt_hash": "d" * 64,
+    def _snapshot() -> dict[str, bytes]:
+        return {
+            str(path.relative_to(tmp_path)): path.read_bytes()
+            for path in sorted(tmp_path.rglob("*"))
+            if path.is_file()
         }
-    service._mutate_state(req["task_id"], _mutate_approve)
 
-    approve_mismatch_cmd = [
-        "nexus", "self-hosted", "approve",
-        "--task-id", "test-sh-approve-001",
-        "--candidate-commit-sha", "x" * 40,
-        "--candidate-tree-sha", "b" * 40,
-        "--candidate-state-hash", "c" * 64,
-        "--verified-receipt-hash", "d" * 64,
-        "--state-dir", state_dir,
-    ]
-    res_mismatch = runner.invoke(nexus, approve_mismatch_cmd)
-    assert res_mismatch.exit_code == 0
-    mismatch_data = json.loads(res_mismatch.output)
-    assert mismatch_data["promotion_status"] == "APPROVAL_INVALIDATED"
-    assert mismatch_data["approved_binding"] is None
+    before = _snapshot()
+    assert before
+    for commit_sha in ("x" * 40, packet["candidate_commit_sha"]):
+        res = runner.invoke(
+            nexus,
+            [
+                "nexus", "self-hosted", "approve",
+                "--task-id", "test-sh-approve-001",
+                "--candidate-commit-sha", commit_sha,
+                "--candidate-tree-sha", packet["candidate_tree_sha"],
+                "--candidate-state-hash", packet["candidate_state_hash"],
+                "--verified-receipt-hash", packet["verified_receipt_hash"],
+                "--state-dir", str(state_dir),
+            ],
+        )
+        assert res.exit_code == 1
+        assert "self-hosted approve is retired" in res.output
+        assert "APPROVAL_GRANT_REQUIRED" in res.output
+        assert "candidate_approve" in res.output
 
-    approve_cmd = [
-        "nexus", "self-hosted", "approve",
-        "--task-id", "test-sh-approve-001",
-        "--candidate-commit-sha", "a" * 40,
-        "--candidate-tree-sha", "b" * 40,
-        "--candidate-state-hash", "c" * 64,
-        "--verified-receipt-hash", "d" * 64,
-        "--state-dir", state_dir,
-    ]
-    res = runner.invoke(nexus, approve_cmd)
-    assert res.exit_code == 0
-    out_data = json.loads(res.output)
-    assert out_data["promotion_status"] == "APPROVED"
-    assert out_data["approved_binding"]["candidate_commit_sha"] == "a" * 40
+        assert _snapshot() == before
+
+    state = service._read_state("test-sh-approve-001")
+    assert state["promotion_status"] == "PENDING_HUMAN_APPROVAL"
+    assert not state.get("approved_binding")
+
+
+@pytest.mark.parametrize(
+    "extra_args",
+    [["--help"], ["--task-id", "--help"], ["-h"], []],
+)
+def test_retired_self_hosted_approve_never_succeeds(tmp_path: Path, extra_args):
+    """No input, including --help, lets the retired approve command exit 0."""
+    state_dir = tmp_path / "state"
+    service = SelfHostedTaskService(state_dir=state_dir, auto_reconcile=False)
+    service._write_state(
+        "test-sh-approve-help",
+        {
+            "task_id": "test-sh-approve-help",
+            "status": "CANDIDATE_COMMITTED",
+            "promotion_status": "PENDING_HUMAN_APPROVAL",
+        },
+    )
+    before = {p: p.read_bytes() for p in sorted(tmp_path.rglob("*")) if p.is_file()}
+    res = CliRunner().invoke(
+        nexus,
+        ["nexus", "self-hosted", "approve", *extra_args, "--state-dir", str(state_dir)],
+    )
+    assert res.exit_code == 1
+    assert "self-hosted approve is retired" in res.output
+    assert {p: p.read_bytes() for p in sorted(tmp_path.rglob("*")) if p.is_file()} == before
 
 
 def test_self_hosted_integrate_requires_approved(tmp_path: Path):
@@ -1044,12 +1060,12 @@ def test_self_hosted_recover_verified_uncommitted_cli_command(tmp_path: Path, mo
     task_id = "recover-cli-001"
     req = _valid_request(tmp_path, task_id=task_id, allowed_files=["README"], target_repo_root=str(tmp_path / "targets" / task_id), target_worktree_root=str(tmp_path / "targets"))
     contract = svc.build_contract(req)
-    from nexus.orchestrator.worktree_manager import WorktreeManager
     from nexus.orchestrator.candidate_verifier import (
         CandidateVerifier,
         VerifiedCandidateReceipt,
         VerifierEvidence,
     )
+    from nexus.orchestrator.worktree_manager import WorktreeManager
 
     wm = WorktreeManager(root_dir=contract.target_worktree_root)
     lease = wm.create_lease(contract)
@@ -1173,3 +1189,25 @@ def test_cli_approve_requires_grant(tmp_path):
     with pytest.raises(NexusCliActionError, match="APPROVAL_GRANT_REQUIRED"):
         run_self_hosted_approve("cli-approve", service=service, **packet)
     assert service._read_state("cli-approve")["promotion_status"] == "PENDING_HUMAN_APPROVAL"
+
+
+@pytest.mark.parametrize("extra", [["--help"], ["-h"], ["--task-id", "--help"]])
+def test_retired_approve_fails_in_no_legacy_fallback(extra):
+    import subprocess
+
+    repo_root = Path(__file__).resolve().parents[2]
+    code = (
+        "import sys, runpy\n"
+        "sys.modules['click'] = None\n"  # force the no-legacy-deps fallback
+        f"sys.argv = ['nexus', 'self-hosted', 'approve', *{extra!r}]\n"
+        "runpy.run_module('scripts.engine.nexus_cli', run_name='__main__')\n"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 1, completed.stdout + completed.stderr
+    assert "retired" in completed.stderr

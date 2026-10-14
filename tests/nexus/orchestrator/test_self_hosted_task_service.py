@@ -3143,7 +3143,7 @@ def test_approval_mismatch_returns_action_required_envelope(tmp_path):
     assert result["task_action"]["action_state"] == "ACTION_REQUIRED"
     assert result["task_action"]["attention_required"] is True
     assert result["task_action"]["next_action"] == "resubmit_exact_approval_binding"
-    assert result["task_action"]["recommended_tool"] == "nexus_self_hosted_approve_promotion"
+    assert result["task_action"]["recommended_tool"] == "nexus_candidate_approve"
 
 
 def test_terminal_retry_keeps_task_identity_and_increments_attempt(tmp_path):
@@ -4905,7 +4905,7 @@ def test_wait_task_polls_until_action_required(tmp_path):
     assert waited["status"] == "PENDING_HUMAN_APPROVAL"
     assert waited["wait"]["timed_out"] is False
     assert waited["task_action"]["action_state"] == "ACTION_REQUIRED"
-    assert waited["task_action"]["recommended_tool"] == "nexus_self_hosted_approve_promotion"
+    assert waited["task_action"]["recommended_tool"] == "nexus_candidate_approve"
 
 
 def test_wait_task_timeout_returns_in_progress_envelope(tmp_path):

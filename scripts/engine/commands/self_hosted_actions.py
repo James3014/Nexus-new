@@ -301,30 +301,32 @@ def run_self_hosted_cleanup(
         raise NexusCliActionError(str(exc), exit_code=1) from exc
 
 
+SELF_HOSTED_APPROVE_RETIRED_MESSAGE = (
+    "nexus self-hosted approve is retired (APPROVAL_GRANT_REQUIRED): every approve path "
+    "requires a bound approval grant and the CLI cannot carry one. Approve the candidate "
+    "through the governed gateway approve path (candidate_approve) with a bound approval "
+    "grant; see docs/governance/rollback_runbook.md."
+)
+
+
 def run_self_hosted_approve(
     task_id: str,
-    candidate_commit_sha: str,
-    candidate_tree_sha: str,
-    candidate_state_hash: str,
-    verified_receipt_hash: str,
+    candidate_commit_sha: str = "",
+    candidate_tree_sha: str = "",
+    candidate_state_hash: str = "",
+    verified_receipt_hash: str = "",
     state_dir: str | Path | None = None,
     service: SelfHostedTaskService | None = None,
 ) -> dict[str, Any]:
-    if not task_id or not str(task_id).strip():
-        raise NexusCliActionError("task_id is required", exit_code=1)
-    svc = get_self_hosted_service(state_dir=state_dir, service=service)
-    try:
-        return svc.approve_promotion(
-            task_id,
-            candidate_commit_sha=candidate_commit_sha,
-            candidate_tree_sha=candidate_tree_sha,
-            candidate_state_hash=candidate_state_hash,
-            verified_receipt_hash=verified_receipt_hash,
-        )
-    except (ValueError, KeyError, RuntimeError, TypeError) as exc:
-        if isinstance(exc, NexusCliActionError):
-            raise
-        raise NexusCliActionError(str(exc), exit_code=1) from exc
+    """Retired (#1928): always fails closed without touching task state.
+
+    Since 6fa83c25c every approve surface requires an approval grant, which this
+    CLI path has no way to pass, so it could only ever fail. It never calls
+    ``approve_promotion``; the grant requirement itself is unchanged.
+    """
+    del task_id, candidate_commit_sha, candidate_tree_sha, candidate_state_hash
+    del verified_receipt_hash, state_dir, service
+    raise NexusCliActionError(SELF_HOSTED_APPROVE_RETIRED_MESSAGE, exit_code=1)
 
 
 def run_self_hosted_integrate(
