@@ -1,16 +1,13 @@
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from nexus.delivery.gate import evaluate_completion
-from nexus.delivery.models import CompletionRequest
-from nexus.delivery.models import CompletionResult
-from nexus.delivery.models import TaskLevel
+from nexus.delivery.models import CompletionRequest, CompletionResult, TaskLevel
 from nexus.delivery.report import write_report_bundle
 from nexus.delivery.suggestions import suggest_verification_commands
-from nexus.health.ops import run_self_check
-from nexus.health.ops import run_health_explain
-from nexus.health.ops import run_self_heal
+from nexus.health.ops import run_health_explain, run_self_check, run_self_heal
+
 
 @dataclass
 class TaskRequest:
@@ -64,11 +61,7 @@ class NexusCommandService:
 
         commands = list(verify_commands or [])
         if not commands:
-            rust_manifest = self.engine.project_root / "nexus-core" / "Cargo.toml"
-            if rust_manifest.exists() and ("rust" in task_name.lower() or "nexus-core" in task_name.lower()):
-                commands = ["cargo test --manifest-path nexus-core/Cargo.toml"]
-            else:
-                commands = suggest_verification_commands(self.engine.project_root, task_name)
+            commands = suggest_verification_commands(self.engine.project_root, task_name)
         if not commands:
             self.last_completion_error = "high_delivery_requires_verify_commands"
             return False
@@ -122,7 +115,6 @@ class NexusCommandService:
 
     def execute_feature(self, request: TaskRequest):
         """Execute a feature task through the sole delivery-aware service boundary."""
-        import time
         context = {"delivery_mode": request.delivery_mode, "benchmark_run": True}
         if request.swarm_mode:
             context["swarm_mode"] = True
@@ -149,8 +141,9 @@ class NexusCommandService:
 
     def execute_refactor(self, request: TaskRequest):
         """🛰️ v22-Linus Phase 2: 執行漸進式重構指令"""
-        from nexus.services.refactor_engine import RefactorEngine
         import time
+
+        from nexus.services.refactor_engine import RefactorEngine
         refactor = RefactorEngine(self.engine.project_root)
         
         # 1. 物理生成重構 DAG 計畫
@@ -197,7 +190,7 @@ class NexusCommandService:
                 
             score = main_res.get("score_pct", 0.0)
             conclusion = main_res.get("conclusion", "N/A")
-            print(f"\n📊 [Benchmark] ARC-AGI Vision Stress Test Result")
+            print("\n📊 [Benchmark] ARC-AGI Vision Stress Test Result")
             print("-" * 50)
             print(f"Score: {score:.2f}% (Human: 85%)")
             print(f"Conclusion: {conclusion}")

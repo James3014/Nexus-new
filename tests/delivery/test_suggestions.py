@@ -22,12 +22,12 @@ def test_suggest_verification_commands_for_python_repo(tmp_path: Path) -> None:
 
 
 def test_suggest_verification_commands_for_rust_subrepo(tmp_path: Path) -> None:
-    rust_dir = tmp_path / "nexus-core"
+    rust_dir = tmp_path / "nexus-core-rs"
     rust_dir.mkdir()
-    (rust_dir / "Cargo.toml").write_text("[package]\nname='nexus-core'\n", encoding="utf-8")
+    (rust_dir / "Cargo.toml").write_text("[package]\nname='nexus-core-rs'\n", encoding="utf-8")
 
     assert suggest_verification_commands(tmp_path, "fix rust leak in nexus-core") == [
-        "cargo test --manifest-path nexus-core/Cargo.toml"
+        "cargo test --manifest-path nexus-core-rs/Cargo.toml"
     ]
 
 
