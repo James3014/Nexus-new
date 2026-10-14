@@ -25,7 +25,7 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
 from nexus.contracts.gateway_deployment import (
     CURRENT_PROFILE,
@@ -3060,7 +3060,7 @@ def _r1_state(row: Mapping[str, Any]) -> DeploymentState:
     return DeploymentState(row["state"])
 
 
-def _r1_effect_started(request_rows: list[Mapping[str, Any]]) -> bool:
+def _r1_effect_started(request_rows: Sequence[Mapping[str, Any]]) -> bool:
     return any(_r1_state(row) is DeploymentState.EFFECT_STARTED for row in request_rows)
 
 
@@ -3072,7 +3072,7 @@ def _r1_owner_reconcile_path(request_id: str) -> Path:
     return Path(GATEWAY_STATE_ROOT) / R1_OWNER_RECONCILE_DIRNAME / f"{request_id}.json"
 
 
-def _r1_owner_reconcile_binding(request_rows: list[Mapping[str, Any]]) -> dict[str, Any]:
+def _r1_owner_reconcile_binding(request_rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     blocked = request_rows[-1]
     return {
         "blocked_request_id": blocked["request_id"],
@@ -3084,7 +3084,7 @@ def _r1_owner_reconcile_binding(request_rows: list[Mapping[str, Any]]) -> dict[s
     }
 
 
-def _r1_owner_reconcile_matches(request_rows: list[Mapping[str, Any]]) -> bool:
+def _r1_owner_reconcile_matches(request_rows: Sequence[Mapping[str, Any]]) -> bool:
     """True iff a valid Owner reconcile record binds this request's BLOCKED row.
 
     A present but malformed or mis-bound record fails closed (typed error).
@@ -3127,7 +3127,7 @@ def _r1_owner_reconcile_matches(request_rows: list[Mapping[str, Any]]) -> bool:
     return True
 
 
-def _r1_blocked_predecessor_acceptable(request_rows: list[Mapping[str, Any]]) -> bool:
+def _r1_blocked_predecessor_acceptable(request_rows: Sequence[Mapping[str, Any]]) -> bool:
     """BLOCKED predecessor a successor may follow (#1995 item 2a, Owner decision).
 
     Pre-effect BLOCKED: no physical effect happened, accepted as is.
