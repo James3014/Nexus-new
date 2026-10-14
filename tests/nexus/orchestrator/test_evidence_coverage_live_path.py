@@ -1062,3 +1062,70 @@ def test_gateway_startup_binds_product_to_core_before_eia(pinned_core, tmp_path)
     shadowed = probe("eia-first")
     assert shadowed["fail_closed"] is True
     assert "CORE_PRODUCT_SHADOWED" in str(shadowed.get("reason"))
+
+
+# --- Codex re-review (#2201 at d9fb707a3): witnesses -------------------------
+
+
+def _path_only(tmp_path: Path, universe: dict[str, Any] | None) -> dict[str, str]:
+    return {"task_card_path": _card(tmp_path, universe)["task_card_path"]}
+
+
+def test_direct_lane_reads_a_card_supplied_without_hash(tmp_path):
+    from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
+
+    claims = SelfHostedTaskService._direct_lane_claims_evidence
+    universe = {"universe_generation": 1, "subjects": [DIFF_CHECK]}
+    assert claims(_path_only(tmp_path, universe)) is True
+    assert claims(_path_only(tmp_path, None)) is False
+    # Unreadable or malformed cards fail closed for the direct lane.
+    assert claims({"task_card_path": str(tmp_path / "missing.md")}) is True
+    bad = tmp_path / "bad.md"
+    bad.write_text(
+        "```" + TASK_CARD_EXPECTED_EVIDENCE_FENCE + "\n{not json\n```\n", encoding="utf-8"
+    )
+    assert claims({"task_card_path": str(bad)}) is True
+
+
+@pytest.mark.parametrize(
+    "contract_kind, request_extra, code",
+    [
+        # A universe card supplied without its hash cannot be skipped.
+        ("legacy", {}, "EXPECTED_EVIDENCE_UNIVERSE_CARD_MISMATCH"),
+        # A universe is honoured only from a hash-bound card.
+        ("universe", {"core_envelope_required": True}, "EXPECTED_EVIDENCE_TASK_CARD_HASH_MISSING"),
+    ],
+)
+def test_card_binding_reads_a_card_supplied_without_hash(
+    tmp_path, contract_kind, request_extra, code
+):
+    from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
+
+    universe = {"universe_generation": 1, "subjects": [DIFF_CHECK]}
+    contract = (
+        _universe_contract(tmp_path) if contract_kind == "universe" else _legacy_contract(tmp_path)
+    )
+    request = {**request_extra, **_path_only(tmp_path, universe)}
+    assert SelfHostedTaskService._card_evidence_binding_error(contract, request) == code
+
+
+def test_verdict_names_both_universe_identities(tmp_path):
+    contract = _universe_contract(tmp_path)
+    verdict = build_core_verdict(contract=contract, projection=_verified_projection(1))
+    assert "universe_identity" not in verdict
+    assert verdict["contract_universe_identity"] == contract.universe_identity
+    declared = {"universe_generation": 1, "subjects": [DIFF_CHECK]}
+    assert verdict["core_universe_identity"] == core_universe_identity(declared)
+    assert verdict["core_universe_identity"] == verdict["coverage"]["universe_identity"]
+    assert verdict["contract_universe_identity"] != verdict["core_universe_identity"]
+    legacy = build_core_verdict(
+        contract=SimpleNamespace(task_id="legacy"), projection=_verified_projection(1)
+    )
+    assert legacy["contract_universe_identity"] is None
+    assert legacy["core_universe_identity"] is None
+
+
+def test_live_verdict_core_identity_matches_real_core(live):
+    verdict = _verdict(live["complete"])
+    assert verdict["core_universe_identity"] == verdict["coverage"]["universe_identity"]
+    assert verdict["contract_universe_identity"].startswith("sha256:")

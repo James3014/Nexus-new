@@ -4232,19 +4232,22 @@ class SelfHostedTaskService:
         core_required = ambient_core_required(request)
         claims_evidence = declared_by_contract is not None or core_required
         card_path = request.get("task_card_path")
-        card_hash = request.get("task_card_hash")
-        if not isinstance(card_path, str) or not card_path or not isinstance(card_hash, str):
+        raw_hash = request.get("task_card_hash")
+        card_hash = raw_hash if isinstance(raw_hash, str) and raw_hash else None
+        if not isinstance(card_path, str) or not card_path:
             return (
                 "EXPECTED_EVIDENCE_UNIVERSE_NOT_CARD_BOUND"
                 if declared_by_contract is not None
                 else None
             )
+        # The card is read whenever a path is supplied, with or without a hash,
+        # so omitting the hash cannot hide a universe card.
         try:
             card_bytes = _resolve_task_card_path(card_path).read_bytes()
         except OSError:
             # Legacy binding errors stay with the existing card-binding gates.
             return "EXPECTED_EVIDENCE_TASK_CARD_UNREADABLE" if claims_evidence else None
-        if hashlib.sha256(card_bytes).hexdigest() != card_hash:
+        if card_hash is not None and hashlib.sha256(card_bytes).hexdigest() != card_hash:
             return "EXPECTED_EVIDENCE_TASK_CARD_HASH_MISMATCH" if claims_evidence else None
         try:
             declared_by_card = parse_task_card_expected_evidence(card_bytes.decode("utf-8"))
@@ -4254,6 +4257,9 @@ class SelfHostedTaskService:
             return "EXPECTED_EVIDENCE_UNIVERSE_CARD_MISMATCH"
         if core_required != (declared_by_card is not None):
             return "CORE_ENVELOPE_REQUIRED_CARD_MISMATCH"
+        if declared_by_card is not None and card_hash is None:
+            # A universe is honoured only from a hash-bound card.
+            return "EXPECTED_EVIDENCE_TASK_CARD_HASH_MISSING"
         return None
 
     @staticmethod
@@ -4261,18 +4267,15 @@ class SelfHostedTaskService:
         if request.get("expected_evidence") is not None or request.get("core_envelope_required"):
             return True
         card_path = request.get("task_card_path")
-        card_hash = request.get("task_card_hash")
-        if not isinstance(card_path, str) or not card_path or not isinstance(card_hash, str):
+        if not isinstance(card_path, str) or not card_path:
             return False
+        # Any supplied card is read, hash or no hash: the direct lane must not
+        # be reachable by omitting the hash of a universe card. A card that
+        # cannot be read or parsed fails closed for this lane.
         try:
             card_bytes = _resolve_task_card_path(card_path).read_bytes()
-        except OSError:
-            return False
-        if hashlib.sha256(card_bytes).hexdigest() != card_hash:
-            return False
-        try:
             return parse_task_card_expected_evidence(card_bytes.decode("utf-8")) is not None
-        except (UnicodeDecodeError, ValueError):
+        except (OSError, UnicodeDecodeError, ValueError):
             return True
 
     @staticmethod

@@ -268,7 +268,12 @@ def build_core_verdict(
         "blocking": blocking,
         "universe_declared": declared,
         "universe_generation": universe.get("universe_generation") if declared else None,
-        "universe_identity": getattr(contract, "universe_identity", None) if declared else None,
+        # Two identities, named for their formula: the Nexus contract hash of
+        # the card universe, and the Core identity that coverage must carry.
+        "contract_universe_identity": (
+            getattr(contract, "universe_identity", None) if declared else None
+        ),
+        "core_universe_identity": core_universe_identity(universe) if declared else None,
         # Coverage is claimed only for a declared universe, never for legacy.
         "coverage": coverage if declared else None,
         "coverage_complete": bool(declared and not blocking),
