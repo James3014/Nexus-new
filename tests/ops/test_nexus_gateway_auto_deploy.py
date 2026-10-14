@@ -2486,3 +2486,82 @@ def test_gb077_probe_passes_timeout_and_attempts() -> None:
             port=port, token="tok", commit=NEW, root=REPO_ROOT, python=Path("/py"), timeout=5
         )
     assert calls[0][-2:] == [str(ad.GB077_TIMEOUT_SECONDS), str(ad.GB077_ATTEMPTS)]
+
+
+@contextlib.contextmanager
+def scripted_health(responses: list[Any]) -> Iterator[int]:
+    """/health answers from ``responses`` in order: a dict, or a float = sleep (timeout)."""
+    queue = list(responses)
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *_a: Any) -> None:
+            return
+
+        def do_GET(self) -> None:
+            item = queue.pop(0) if queue else responses[-1]
+            if isinstance(item, float):
+                import time
+
+                time.sleep(item)
+                item = _health(NEW)
+            body = json.dumps(item).encode()
+            try:
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            except OSError:
+                pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield int(server.server_address[1])
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def _run_gb077(port: int, timeout: float = 1.0, attempts: int = 3) -> tuple[int, dict]:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            ad.GB077_PROBE_CODE,
+            str(REPO_ROOT),
+            f"http://127.0.0.1:{port}/health",
+            NEW,
+            str(timeout),
+            str(attempts),
+        ],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        timeout=120,
+    )
+    return result.returncode, json.loads(result.stdout.strip().splitlines()[-1])
+
+
+def test_gb077_identity_failure_is_not_retried_away() -> None:
+    """Codex: wrong head then right head must FAIL, and attempt 1 stays recorded."""
+    with scripted_health([_health(OLD), _health(NEW)]) as port:
+        code, detail = _run_gb077(port)
+    assert code == 1 and detail["result"] == "FAIL"
+    assert [a["ok"] for a in detail["attempts"]] == [False]
+    assert "gateway_loaded_revision_not_evaluated_revision" in detail["attempts"][0]["reasons"]
+
+
+def test_gb077_retries_a_timeout_then_passes() -> None:
+    with scripted_health([3.0, _health(NEW)]) as port:
+        code, detail = _run_gb077(port, timeout=1.0)
+    assert code == 0 and detail["result"] == "PASS"
+    assert [a["ok"] for a in detail["attempts"]] == [False, True]
+    assert detail["attempts"][0]["reasons"][0].startswith("gateway_unreachable:")
+
+
+def test_gb077_three_timeouts_fail() -> None:
+    with scripted_health([3.0, 3.0, 3.0, 3.0]) as port:
+        code, detail = _run_gb077(port, timeout=1.0, attempts=3)
+    assert code == 1 and len(detail["attempts"]) == 3
+    assert all(not a["ok"] for a in detail["attempts"])
