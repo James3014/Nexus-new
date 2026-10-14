@@ -11,6 +11,7 @@ receipt or refuse before any provider edge.
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import shutil
 import subprocess
@@ -26,11 +27,37 @@ from scripts.ops import issue29_governed_canary as canary
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GOOD_DIFF = "--- a/calc.py\n+++ b/calc.py\n@@ -1,2 +1,2 @@\n def add_one(x):\n-    return x\n+    return x + 1\n"
+# The fake Agy mirrors the real print-mode contract the runtime enforces (runtime
+# #205): it writes glog-format identity lines (the exact prefix of a real
+# ``agy --log-file`` log) into the ``--log-file`` path it is given and prints the
+# ``--output-format json`` envelope on stdout.  ``FAKE_AGY_SERVED_MODEL`` /
+# ``FAKE_AGY_LABEL`` / ``FAKE_AGY_ENVELOPE`` let negative controls make it serve
+# another model or drop the envelope.
 FAKE_AGY = """#!{python}
 import json, os, sys
+argv = sys.argv[1:]
 with open(os.environ["FAKE_AGY_LOG"], "a", encoding="utf-8") as fh:
-    fh.write(json.dumps({{"argv": sys.argv[1:], "cwd": os.getcwd()}}) + "\\n")
-print(json.dumps({{"status": "APPROVED", "summary": "consumed inline local evidence", "patch": ""}}))
+    fh.write(json.dumps({{"argv": argv, "executable": sys.argv[0], "cwd": os.getcwd()}}) + "\\n")
+model = argv[argv.index("--model") + 1] if "--model" in argv else ""
+served = os.environ.get("FAKE_AGY_SERVED_MODEL") or model
+label = os.environ.get("FAKE_AGY_LABEL") or "Gemini 3.8 Flash (Medium)"
+if "--log-file" in argv:
+    with open(argv[argv.index("--log-file") + 1], "a", encoding="utf-8") as log:
+        log.write("I1014 10:36:21.492269       1 model_resolver.go:93] Resolving model " + served + "\\n")
+        log.write(
+            "I1014 10:36:21.492301       1 model_config_manager.go:328] "
+            'Propagating selected model override to backend: label="' + label + '"\\n'
+        )
+answer = json.dumps({{"status": "APPROVED", "summary": "consumed inline local evidence", "patch": ""}})
+if os.environ.get("FAKE_AGY_ENVELOPE", "1") == "1":
+    print(json.dumps({{
+        "status": "SUCCESS",
+        "response": answer,
+        "conversation_id": "fake-conversation",
+        "usage": {{"input_tokens": 11, "output_tokens": 7}},
+    }}))
+else:
+    print(answer)
 """
 
 
@@ -125,6 +152,7 @@ def _run(
     *,
     ollama_content: str = GOOD_DIFF,
     physical: bool = True,
+    fake_agy_env: dict[str, str] | None = None,
     **kwargs: Any,
 ) -> tuple[dict[str, Any], _FakeOllama, Path]:
     import nexus.services.local_heal.armor_artifact_storage as storage
@@ -148,6 +176,7 @@ def _run(
                 "NEXUS_AGY_BIN": str(binary),
                 "FAKE_AGY_LOG": str(log),
                 "NEXUS_ARMOR_ALLOW_EPHEMERAL": "1",
+                **(fake_agy_env or {}),
             },
             **kwargs,
         )
@@ -256,9 +285,38 @@ def test_happy_path_physical_edges_are_admitted_identities(happy: dict[str, Any]
     assert happy["ollama_calls"]
     assert {call["model"] for call in happy["ollama_calls"]} == {"qwen2.5-coder:7b-instruct"}
     assert len(happy["agy_calls"]) == 1
-    argv = happy["agy_calls"][0]["argv"]
-    assert argv[:6] == ["--mode", "plan", "--sandbox", "--model", "gemini-3.8-flash-medium", "-p"]
+    call = happy["agy_calls"][0]
+    argv = call["argv"]
+    response = happy["runtime"]["online"]["response"]
+    timeout = response["provider_print_timeout_sec"]
+    assert argv[:6] == [
+        "--new-project",
+        "--mode",
+        "plan",
+        "--sandbox",
+        "--model",
+        "gemini-3.8-flash-medium",
+    ]
+    assert argv[6] == "--log-file" and argv[7].endswith("/agy.log")
+    assert argv[8:13] == ["--output-format", "json", "--print-timeout", f"{timeout}s", "-p"]
+    assert len(argv) == 14
     assert not any("dangerously" in token for token in argv)
+    # The fake saw the real argv, so here (unlike from the receipt alone) the
+    # runtime fingerprint is provably the hash of exactly the executed argv.
+    executed = [call["executable"], *argv]
+    assert (
+        response["process_evidence"]["command_fingerprint"]
+        == hashlib.sha256(json.dumps(executed, ensure_ascii=False).encode("utf-8")).hexdigest()
+    )
+    # Same attestation the canary requires.
+    assert response["model_identity_status"] == "MODEL_IDENTITY_OK"
+    assert response["provider_observed_model_ids"] == ["gemini-3.8-flash-medium"]
+    assert response["provider_output_format"] == "agy_json_envelope"
+    assert response["provider_envelope_status"] == "SUCCESS"
+    checks = {check["name"]: check["ok"] for check in happy["receipt"]["checks"]}
+    assert checks["online_model_identity_attested"] is True
+    assert checks["online_agy_json_envelope"] is True
+    assert checks["online_command_fingerprint_bound_to_invocation"] is True
     fragment = happy["runtime"]["verified_assist"]["injection_fragment"]
     assert fragment.startswith("[VAP]")
     assert fragment in argv[-1]
@@ -439,19 +497,19 @@ def test_caller_route_override_is_rejected_before_any_provider(
 
 
 def test_online_command_fingerprint_proves_admitted_argv(happy: dict[str, Any]) -> None:
+    # Id kept from before runtime #205: the fingerprint is now bound to the process
+    # invocation (not re-derived from the argv); see online_model_identity_attested.
     evaluation = _evaluate(copy.deepcopy(happy["runtime"]))
-    assert "online_command_fingerprint_matches_admitted_argv" not in evaluation.failed
+    assert "online_command_fingerprint_bound_to_invocation" not in evaluation.failed
 
 
 def test_online_command_fingerprint_mismatch_fails_closed(happy: dict[str, Any]) -> None:
     runtime = copy.deepcopy(happy["runtime"])
     runtime["online"]["response"]["process_evidence"]["command_fingerprint"] = "0" * 64
-    assert "online_command_fingerprint_matches_admitted_argv" in _evaluate(runtime).failed
+    assert "online_command_fingerprint_bound_to_invocation" in _evaluate(runtime).failed
 
 
 def test_online_command_ran_other_model_fails_closed(happy: dict[str, Any]) -> None:
-    import hashlib
-
     runtime = copy.deepcopy(happy["runtime"])
     response = runtime["online"]["response"]
     argv = [
@@ -467,7 +525,30 @@ def test_online_command_ran_other_model_fails_closed(happy: dict[str, Any]) -> N
     response["process_evidence"]["command_fingerprint"] = hashlib.sha256(
         json.dumps(argv, ensure_ascii=False).encode("utf-8")
     ).hexdigest()
-    assert "online_command_fingerprint_matches_admitted_argv" in _evaluate(runtime).failed
+    # A fingerprint swapped in alone breaks the invocation binding.
+    assert "online_command_fingerprint_bound_to_invocation" in _evaluate(runtime).failed
+
+    # Since runtime #205 the argv fingerprint cannot be re-derived (random --log-file),
+    # so a coherent receipt for another model (fingerprint and invocation id rebound,
+    # as the runtime would record them) passes the binding check; the served model is
+    # caught by the runtime's log attestation instead.
+    process = response["process_evidence"]
+    process["process_invocation_id"] = hashlib.sha256(
+        json.dumps([
+            response["task_id"],
+            process["attempt_id"],
+            process["provider"],
+            process["command_fingerprint"],
+            process["provider_input_sha256"],
+            process["working_directory_hash"],
+        ]).encode("utf-8")
+    ).hexdigest()
+    response["model_identity_status"] = "MODEL_IDENTITY_MISMATCH"
+    response["model_identity_reason"] = "resolved_model_differs"
+    response["provider_observed_model_ids"] = ["gemini-3.7-flash-medium"]
+    failed = _evaluate(runtime).failed
+    assert "online_command_fingerprint_bound_to_invocation" not in failed
+    assert "online_model_identity_attested" in failed
 
 
 def test_online_command_fingerprint_unknown_executable_fails_closed(
@@ -475,12 +556,111 @@ def test_online_command_fingerprint_unknown_executable_fails_closed(
 ) -> None:
     runtime = copy.deepcopy(happy["runtime"])
     evaluation = _evaluate(runtime, agy_executable="")
-    assert "online_command_fingerprint_matches_admitted_argv" in evaluation.failed
+    assert "online_command_fingerprint_bound_to_invocation" in evaluation.failed
+
+
+def test_online_invocation_id_mismatch_fails_closed(happy: dict[str, Any]) -> None:
+    runtime = copy.deepcopy(happy["runtime"])
+    runtime["online"]["response"]["process_evidence"]["working_directory_hash"] = "1" * 64
+    assert "online_command_fingerprint_bound_to_invocation" in _evaluate(runtime).failed
+
+
+def test_online_invocation_bound_to_canary_task_id(happy: dict[str, Any]) -> None:
+    runtime = copy.deepcopy(happy["runtime"])
+    runtime["online"]["response"]["task_id"] = "issue29-other-task"
+    assert "online_command_fingerprint_bound_to_invocation" in _evaluate(runtime).failed
+
+
+def test_online_wrong_executable_hash_fails_closed(happy: dict[str, Any]) -> None:
+    runtime = copy.deepcopy(happy["runtime"])
+    evaluation = _evaluate(runtime, agy_executable="/usr/local/bin/other-agy")
+    assert "online_command_fingerprint_bound_to_invocation" in evaluation.failed
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("model_identity_status", "MODEL_IDENTITY_MISMATCH"),
+        ("model_identity_status", None),
+        ("provider_observed_model_ids", ["gemini-3.7-flash-medium"]),
+        ("provider_observed_model_ids", ["gemini-3.8-flash-medium", "gemini-3.7-flash-medium"]),
+        ("provider_observed_model_labels", ["Gemini 3.7 Flash (Medium)"]),
+        ("provider_observed_model_labels", []),
+        ("model_identity_reason", "backend_label_differs"),
+    ],
+)
+def test_online_wrong_attested_model_in_receipt_fails_closed(
+    happy: dict[str, Any], field: str, value: Any
+) -> None:
+    runtime = copy.deepcopy(happy["runtime"])
+    response = runtime["online"]["response"]
+    if value is None:
+        response.pop(field)
+    else:
+        response[field] = value
+    assert "online_model_identity_attested" in _evaluate(runtime).failed
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("provider_output_format", "text"),
+        ("provider_output_format", None),
+        ("provider_envelope_status", "FAIL"),
+        ("provider_envelope_status", None),
+        ("provider_print_timeout_sec", None),
+        ("provider_print_timeout_sec", 0),
+    ],
+)
+def test_online_missing_envelope_in_receipt_fails_closed(
+    happy: dict[str, Any], field: str, value: Any
+) -> None:
+    runtime = copy.deepcopy(happy["runtime"])
+    response = runtime["online"]["response"]
+    if value is None:
+        response.pop(field)
+    else:
+        response[field] = value
+    assert "online_agy_json_envelope" in _evaluate(runtime).failed
+
+
+def test_physical_agy_serving_other_model_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    receipt, _ollama, log = _run(
+        tmp_path,
+        monkeypatch,
+        fake_agy_env={
+            "FAKE_AGY_SERVED_MODEL": "gemini-3.7-flash-medium",
+            "FAKE_AGY_LABEL": "Gemini 3.7 Flash (Medium)",
+        },
+    )
+    assert len(_agy_calls(log)) == 1
+    assert receipt["status"] == canary.STATUS_FAILED
+    assert receipt["final_outcome_contributed"] is False
+    assert receipt["durable_marker_eligible"] is False
+    checks = {check["name"]: check["ok"] for check in receipt["checks"]}
+    assert checks["online_model_identity_attested"] is False
+    assert checks["online_physical_call"] is False
+
+
+def test_physical_agy_without_json_envelope_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    receipt, _ollama, log = _run(tmp_path, monkeypatch, fake_agy_env={"FAKE_AGY_ENVELOPE": "0"})
+    assert len(_agy_calls(log)) == 1
+    assert receipt["status"] == canary.STATUS_FAILED
+    assert receipt["final_outcome_contributed"] is False
+    assert receipt["durable_marker_eligible"] is False
+    checks = {check["name"]: check["ok"] for check in receipt["checks"]}
+    assert checks["online_agy_json_envelope"] is False
+    assert checks["online_physical_call"] is False
 
 
 def test_receipt_discloses_online_model_attestation_limits(happy: dict[str, Any]) -> None:
     limits = " ".join(happy["receipt"]["limitations"])
-    assert "provider-side served model is not observed" in limits
+    assert "Agy log attestation" in limits
+    assert "command fingerprint cannot be recomputed" in limits
     assert "does not bind the Task Card hash" in limits
 
 
