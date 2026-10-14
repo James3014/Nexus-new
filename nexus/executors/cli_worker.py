@@ -272,6 +272,8 @@ def _tagged_pids(tag: str) -> set[int]:
                 if needle_bytes in (entry / "environ").read_bytes():
                     found.add(int(entry.name))
             except (FileNotFoundError, ProcessLookupError):
+                if _pid_alive(int(entry.name)):
+                    raise  # environ vanished but the process lives: unknown
                 continue  # exited meanwhile
             except OSError:
                 try:
@@ -290,6 +292,9 @@ def _tagged_pids(tag: str) -> set[int]:
         timeout=10,
         check=True,
     ).stdout
+    if not any(line.split(None, 1)[:1] == [str(own)] for line in out.splitlines()):
+        # A complete listing always includes this process.
+        raise ValueError("ps -E listing does not include this process")
     for line in out.splitlines():
         if needle not in line:
             continue

@@ -1736,3 +1736,11 @@ def test_tracker_marks_snapshot_without_self_as_probe_failure(monkeypatch):
     monkeypatch.setattr(cli_worker, "_process_table", lambda: {1: 0})
     tracker._snapshot()
     assert tracker.probe_failed is True
+
+
+def test_tag_scan_rejects_listing_without_self(monkeypatch):
+    monkeypatch.setattr(cli_worker, "Path", lambda *a: Path("/nonexistent-proc"))
+    monkeypatch.setattr(
+        cli_worker.subprocess, "run", lambda *a, **k: SimpleNamespace(stdout="", returncode=0)
+    )
+    assert cli_worker._sweep_tagged_processes("exampletag") is False
