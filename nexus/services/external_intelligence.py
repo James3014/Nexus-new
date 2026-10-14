@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import signal
 import subprocess
 import tempfile
@@ -1196,6 +1197,108 @@ class TransportResult:
     started_at: str = ""
     finished_at: str = ""
     safe_argv: tuple[str, ...] = ()
+    model_invocation_receipts: tuple[dict[str, Any], ...] = ()
+
+
+# Providers whose physical model is chosen outside Nexus (a ChatGPT web session):
+# the configured provider/model echo proves nothing about which model answered,
+# so every invocation must report the expected observed model revision.
+OBSERVED_MODEL_REQUIRED_PROVIDERS = frozenset({"opencli_chatgpt"})
+OBSERVED_MODEL_ATTESTATION_MISMATCH = "OBSERVED_MODEL_ATTESTATION_MISMATCH"
+_NOT_MEASURED = "NOT_MEASURED"
+# A concrete ASCII model revision such as ``gpt-5-6-thinking``.  Rejects
+# deployment placeholders (``<...>``), whitespace and invisible characters.
+OBSERVED_MODEL_REVISION_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+
+
+def is_unmeasured_model_revision(value: str) -> bool:
+    """True for the runtime's NOT_MEASURED sentinel, in any letter case."""
+
+    return value.casefold() == _NOT_MEASURED.casefold()
+
+
+def normalize_expected_observed_model(provider_id: str, value: Any) -> str:
+    """Validate the configured observed-model pin for ``provider_id`` (fail closed)."""
+
+    if value is None:
+        value = ""
+    if not isinstance(value, str) or (
+        value and OBSERVED_MODEL_REVISION_RE.fullmatch(value) is None
+    ):
+        raise ExternalIntelligenceError("EXPECTED_OBSERVED_MODEL_INVALID")
+    if provider_id in OBSERVED_MODEL_REQUIRED_PROVIDERS:
+        if not value or is_unmeasured_model_revision(value):
+            raise ExternalIntelligenceError("EXPECTED_OBSERVED_MODEL_REQUIRED")
+        return value
+    if value:
+        raise ExternalIntelligenceError("EXPECTED_OBSERVED_MODEL_PROVIDER_MISMATCH")
+    return ""
+
+
+def model_invocation_receipts_from(value: Any) -> tuple[dict[str, Any], ...] | None:
+    """Copy runtime ``model_invocation_receipts``; ``None`` when malformed."""
+
+    if value is None:
+        return ()
+    if not isinstance(value, list) or any(not isinstance(item, Mapping) for item in value):
+        return None
+    return tuple(json.loads(json.dumps(dict(item))) for item in value)
+
+
+def _observed_values(receipt: Mapping[str, Any]) -> tuple[Any, Any, Any]:
+    backend = receipt.get("backend_identity")
+    observed = backend.get("observed_execution_identity") if isinstance(backend, Mapping) else None
+    if not isinstance(observed, Mapping):
+        observed = {}
+    return (
+        observed.get("model_revision"),
+        receipt.get("provider_model_revision"),
+        observed.get("model_id", _NOT_MEASURED),
+    )
+
+
+def observed_model_violation(
+    receipts: Sequence[Mapping[str, Any]],
+    *,
+    expected: str,
+    provider_id: str,
+    model_id: str,
+    operation_id: str,
+    strict: bool,
+) -> bool:
+    """Return True when the receipts do not prove the expected observed model.
+
+    ``strict`` is used for a result that claims success: it must carry at least
+    one receipt, and every receipt must be for this operation and the configured
+    provider/model and must report exactly ``expected`` as the observed model
+    revision.  A non-success result only fails when a receipt positively
+    reports a different model.  Empty ``expected`` disables the check.
+    """
+
+    if not expected:
+        return False
+    if strict and not receipts:
+        return True
+    for receipt in receipts:
+        revision, provider_revision, observed_model = _observed_values(receipt)
+        reported = [
+            item
+            for item in (revision, provider_revision, observed_model)
+            if isinstance(item, str) and item and item != _NOT_MEASURED
+        ]
+        if any(item != expected for item in reported):
+            return True
+        if not strict:
+            continue
+        if (
+            revision != expected
+            or provider_revision != expected
+            or receipt.get("provider_id") != provider_id
+            or receipt.get("model_id") != model_id
+            or (operation_id and receipt.get("operation_id") != operation_id)
+        ):
+            return True
+    return False
 
 
 class OpenCLIExternalIntelligenceTransport:
@@ -1910,6 +2013,9 @@ __all__ = [
     "INTAKE_SCHEMA",
     "IntakeDisposition",
     "MODEL_ADAPTATION_KEYS",
+    "OBSERVED_MODEL_ATTESTATION_MISMATCH",
+    "OBSERVED_MODEL_REQUIRED_PROVIDERS",
+    "OBSERVED_MODEL_REVISION_RE",
     "OpenCLIExternalIntelligenceTransport",
     "RECEIPT_SCHEMA",
     "RECEIPT_SCHEMA_V1",
@@ -1931,7 +2037,11 @@ __all__ = [
     "external_execution_envelope_contract",
     "external_execution_envelope_v1_contract",
     "external_execution_envelope_v2_contract",
+    "is_unmeasured_model_revision",
+    "model_invocation_receipts_from",
+    "normalize_expected_observed_model",
     "normalize_intake",
+    "observed_model_violation",
     "parse_external_execution_envelope",
     "parse_external_execution_envelope_v2",
     "project_refresh",

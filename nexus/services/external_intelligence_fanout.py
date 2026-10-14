@@ -18,7 +18,9 @@ from typing import Any, Iterable, Iterator, Mapping, Sequence
 
 from nexus.services.external_intelligence import (
     ENVELOPE_SCHEMA,
+    OBSERVED_MODEL_ATTESTATION_MISMATCH,
     ExternalIntelligenceError,
+    observed_model_violation,
     parse_external_execution_envelope,
     validate_selected_worker,
 )
@@ -428,6 +430,23 @@ class OpenCodeRunResult:
     core_binding_status: str = ""
     core_binding_hash: str = ""
     acceptance_contract_hash: str = ""
+    model_invocation_receipts: tuple[dict[str, Any], ...] = ()
+
+
+def _observed_model_unproven(transport: Any, result: OpenCodeRunResult) -> bool:
+    """Defense in depth: a COMPLETED result must prove the pinned observed model."""
+
+    expected = getattr(transport, "expected_observed_model", "")
+    if not isinstance(expected, str) or not expected:
+        return False
+    return observed_model_violation(
+        result.model_invocation_receipts,
+        expected=expected,
+        provider_id=result.provider_id,
+        model_id=result.model_id,
+        operation_id=result.operation_id,
+        strict=True,
+    )
 
 
 def plan_fanout(
@@ -2590,6 +2609,13 @@ class AdaptiveWorkerFanoutRuntime:
                 transport_status="MODEL_ATTESTATION_MISMATCH",
             )
             raise FanoutError("MODEL_ATTESTATION_MISMATCH")
+        if _observed_model_unproven(active_transport, result):
+            self.store.finish_attempt(
+                attempt,
+                state="OUTCOME_UNKNOWN",
+                transport_status=OBSERVED_MODEL_ATTESTATION_MISMATCH,
+            )
+            raise FanoutError(OBSERVED_MODEL_ATTESTATION_MISMATCH)
         if str(Path(result.directory).resolve()) != str(Path(workspace.path).resolve()):
             self.store.finish_attempt(
                 attempt,
@@ -2971,6 +2997,14 @@ class AdaptiveWorkerFanoutRuntime:
                 suffix=suffix,
             )
             raise FanoutError("MODEL_ATTESTATION_MISMATCH")
+        if _observed_model_unproven(transport, result):
+            self.store.finish_attempt(
+                attempt,
+                state="OUTCOME_UNKNOWN",
+                transport_status=OBSERVED_MODEL_ATTESTATION_MISMATCH,
+                suffix=suffix,
+            )
+            raise FanoutError(OBSERVED_MODEL_ATTESTATION_MISMATCH)
         if str(Path(result.directory).resolve()) != str(Path(workspace.path).resolve()):
             self.store.finish_attempt(
                 attempt,
