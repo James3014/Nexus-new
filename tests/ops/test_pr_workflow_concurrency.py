@@ -22,6 +22,7 @@ CHANGED = (
     "pytest.yml",
     "security.yml",
     "trusted-deletion-anchor.yml",
+    "trusted-dependency-contract.yml",
     "trusted-impact-gate.yml",
     "typecheck.yml",
     "wiki-governance.yml",
