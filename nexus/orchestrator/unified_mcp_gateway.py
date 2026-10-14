@@ -131,7 +131,13 @@ from nexus.orchestrator.standing_grant_store import (
     switch_task_card_authority,
     write_keyed_standing_grant_receipt,
 )
-from nexus.orchestrator.task_contract import parse_task_card_expected_evidence
+from nexus.orchestrator.task_contract import (
+    TASK_CARD_EXPECTED_EVIDENCE_FENCE,
+    EvidenceRequirementMode,
+    EvidenceSubjectApplicability,
+    ExpectedEvidenceUniverse,
+    parse_task_card_expected_evidence,
+)
 from nexus.services.agy_account_pool import (
     AgyAccountPoolBusyError,
     AgyAccountPoolExhaustedError,
@@ -3551,17 +3557,22 @@ class UnifiedMCPGateway:
         verifiers = [str(command).strip() for command in arguments.get("verifier_commands") or [] if str(command).strip()]
         if not verifiers:
             raise GatewayInputError("verifier_commands is required")
+        universe = self._task_card_expected_evidence(arguments)
         head = self._exact_hash(_git("rev-parse", "HEAD").strip(), "expected_head", 40)
+        effect: dict[str, Any] = {
+            "campaign_id": campaign,
+            "task_id": task_id,
+            "expected_head": head,
+            "allowed_files": allowed,
+            "verifier_commands": verifiers,
+            "objective_sha256": hashlib.sha256(objective.encode("utf-8")).hexdigest(),
+        }
+        if universe is not None:
+            # Bind the Owner authorization to the exact declared universe.
+            effect["expected_evidence_identity"] = universe.universe_identity
         owner_authority = self._require_owner_effect_authority(
             AutonomyActionClass.TASK_CARD_CREATE,
-            {
-                "campaign_id": campaign,
-                "task_id": task_id,
-                "expected_head": head,
-                "allowed_files": allowed,
-                "verifier_commands": verifiers,
-                "objective_sha256": hashlib.sha256(objective.encode("utf-8")).hexdigest(),
-            },
+            effect,
             key=owner_key,
         )
         campaign_root = CANONICAL_SOURCE_ROOT / "tasks" / campaign
@@ -3576,9 +3587,27 @@ class UnifiedMCPGateway:
             "worker_may_approve: false", "worker_may_integrate: false",
             "worker_may_push: false", "AUTO_CHAIN: false", "", "## Objective", "", objective, "",
             "## Allowed files", "", *[f"- `{path}`" for path in allowed], "", "## Verification commands", "",
-            "```bash", *verifiers, "```", "", "## Exit criteria", "", "Owner review of the exact scoped commit.",
+            "```bash", *verifiers, "```", "",
+            *(
+                []
+                if universe is None
+                else [
+                    "## Expected evidence", "",
+                    "```" + TASK_CARD_EXPECTED_EVIDENCE_FENCE, universe.canonical_json(), "```", "",
+                ]
+            ),
+            "## Exit criteria", "", "Owner review of the exact scoped commit.",
             "", "## Block classification", "", "Unverifiable or out-of-scope mutation is a HARD_BLOCK.", "",
         ])
+        # The hashed card is the only universe source (#2181): the rendered card
+        # must read back as exactly the validated universe, or as none at all.
+        # This also stops objective or verifier text from smuggling in a block.
+        try:
+            declared = parse_task_card_expected_evidence(card)
+        except ValueError as exc:
+            raise GatewayInputError("TASK_CARD_CREATE_EXPECTED_EVIDENCE_INVALID:card text declares a malformed block") from exc
+        if declared != (None if universe is None else universe.model_dump(mode="json")):
+            raise GatewayInputError("TASK_CARD_CREATE_EXPECTED_EVIDENCE_INVALID:card text does not round-trip")
         index = "\n".join([
             f"# Campaign Index: {campaign}", "", "artifact_authority: current", "owner: James Chen",
             "status: active, governed and sequential", "AUTO_CHAIN: false", "", "## Objective", "", objective,
@@ -3625,6 +3654,20 @@ class UnifiedMCPGateway:
             "owner_confirmation": True,
             "owner_authority": owner_authority,
         }
+
+    @staticmethod
+    def _task_card_expected_evidence(arguments: Mapping[str, Any]) -> Optional[ExpectedEvidenceUniverse]:
+        """Validate the optional card-declared universe with the card reader's model."""
+        raw = arguments.get("expected_evidence")
+        if raw is None:
+            return None
+        if not isinstance(raw, Mapping):
+            raise GatewayInputError("TASK_CARD_CREATE_EXPECTED_EVIDENCE_INVALID:expected_evidence must be an object")
+        try:
+            return ExpectedEvidenceUniverse.model_validate(dict(raw))
+        except ValueError as exc:
+            reason = " ".join(str(exc).split())[:500]
+            raise GatewayInputError(f"TASK_CARD_CREATE_EXPECTED_EVIDENCE_INVALID:{reason}") from exc
 
     def _task_card_commit(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         if arguments.get("owner_confirmation") is not True:
@@ -5477,6 +5520,31 @@ class UnifiedMCPGateway:
                         "verifier_commands": {"type": "array", "items": {"type": "string"}, "minItems": 1},
                         "authority_goal_id": {"type": "string", "maxLength": 128},
                         "authority_coordination_scope_id": {"type": "string", "maxLength": 128},
+                        "expected_evidence": {
+                            "type": "object",
+                            "description": "Optional expected evidence universe, written into the hashed card as one nexus-expected-evidence block.",
+                            "additionalProperties": False,
+                            "required": ["universe_generation", "subjects"],
+                            "properties": {
+                                "universe_generation": {"type": "integer", "minimum": 0},
+                                "subjects": {
+                                    "type": "array",
+                                    "minItems": 1,
+                                    "maxItems": 256,
+                                    "items": {
+                                        "type": "object",
+                                        "additionalProperties": False,
+                                        "required": ["logical_subject_id", "evidence_kind", "requirement_mode", "applicability"],
+                                        "properties": {
+                                            "logical_subject_id": {"type": "string", "minLength": 1},
+                                            "evidence_kind": {"type": "string", "minLength": 1},
+                                            "requirement_mode": {"type": "string", "enum": [mode.value for mode in EvidenceRequirementMode]},
+                                            "applicability": {"type": "string", "enum": [value.value for value in EvidenceSubjectApplicability]},
+                                        },
+                                    },
+                                },
+                            },
+                        },
                     },
                 },
             },
