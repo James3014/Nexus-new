@@ -166,6 +166,7 @@ class RegressionClassification:
     reason: str
     fallback: str = ""
     unmatched_paths: list[str] = field(default_factory=list)
+    mismatch_reasons: list[str] = field(default_factory=list)
 
 
 def _exact_sha(value: str, label: str) -> None:
@@ -1188,6 +1189,17 @@ def _replaced_parameterized_node_keys(
 
 
 def _metadata_mismatch(base: PytestRunResult, head: PytestRunResult) -> bool:
+    return bool(_metadata_mismatch_detail(base, head))
+
+
+def _node_examples(raw_nodes: Iterable[str], keys: set[LogicalNodeKey]) -> str:
+    matching = sorted({raw for raw in raw_nodes if _logical_node_key(raw) in keys})
+    examples = matching[:3]
+    return ", ".join(examples) + (", ..." if len(matching) > len(examples) else "")
+
+
+def _metadata_mismatch_detail(base: PytestRunResult, head: PytestRunResult) -> str:
+    """Return why base/head node metadata is not comparable; empty when it is."""
     base_index = _logical_node_index(base.node_ids)
     head_index = _logical_node_index(head.node_ids)
     base_passed = _logical_node_set(base.passed_node_ids)
@@ -1207,7 +1219,7 @@ def _metadata_mismatch(base: PytestRunResult, head: PytestRunResult) -> bool:
         head_errors,
     )
     if any(index is None for index in indexes):
-        return True
+        return "test node ids collide after logical normalization"
 
     assert base_index is not None and head_index is not None
     assert base_passed is not None and head_passed is not None
@@ -1216,7 +1228,7 @@ def _metadata_mismatch(base: PytestRunResult, head: PytestRunResult) -> bool:
     base_nodes = set(base_index)
     head_nodes = set(head_index)
     if not base_nodes and not head_nodes:
-        return False
+        return ""
     expanded_base, expanded_head, expansion_ambiguous = _expanded_node_keys(
         base, head, base_index, head_index
     )
@@ -1224,27 +1236,51 @@ def _metadata_mismatch(base: PytestRunResult, head: PytestRunResult) -> bool:
         base, head, base_index, head_index
     )
     if expansion_ambiguous or replacement_ambiguous:
-        return True
+        return "parameterized test ids changed ambiguously between base and head"
     evolved_base = expanded_base | replaced_base
     evolved_head = expanded_head | replacement_head
-    if not base_nodes or not head_nodes or not (base_nodes - evolved_base) <= head_nodes:
-        return True
+    if not base_nodes:
+        return "base collected no test ids"
+    if not head_nodes:
+        return "head collected no test ids"
+    absent_on_head = (base_nodes - evolved_base) - head_nodes
+    if absent_on_head:
+        return (
+            f"base collected {len(absent_on_head)} test ids absent on head"
+            f" (e.g. {_node_examples(base.node_ids, absent_on_head)}); this usually means"
+            " main gained tests after the branch was cut (merge origin/main into the PR"
+            " branch) or the PR renamed/deleted a test (add a new test instead)"
+        )
 
     head_only = head_nodes - base_nodes
     if head_only and base.test_inventory_tree == head.test_inventory_tree:
-        return True
+        return "head has extra test ids but the same test inventory tree as base"
     ordinary_head_only = head_only - evolved_head
     if not ordinary_head_only <= head_passed:
-        return True
+        not_passing = ordinary_head_only - head_passed
+        return (
+            f"{len(not_passing)} test ids added on head did not pass"
+            f" (e.g. {_node_examples(head.node_ids, not_passing)})"
+        )
     evolved_nonpassing = evolved_head - head_passed
     if evolved_nonpassing - (head_failed | head_errors):
-        return True
+        return "evolved (parameterized/expanded) head tests neither passed nor failed"
     if not head_skipped <= base_skipped:
-        return True
+        newly_skipped = head_skipped - base_skipped
+        return (
+            f"head skipped {len(newly_skipped)} test ids not skipped on base"
+            f" (e.g. {_node_examples(head.skipped_node_ids, newly_skipped)})"
+        )
 
     downgraded = (base_passed - evolved_base) - head_passed
     classified_failures = head_failed | head_errors
-    return bool(downgraded - classified_failures)
+    unexplained = downgraded - classified_failures
+    if unexplained:
+        return (
+            f"{len(unexplained)} test ids passed on base but neither passed nor"
+            f" failed on head (e.g. {_node_examples(base.passed_node_ids, unexplained)})"
+        )
+    return ""
 
 
 def _valid_test_provenance(result: PytestRunResult) -> bool:
@@ -1341,6 +1377,93 @@ def classify_regression(base: PytestRunResult, head: PytestRunResult) -> Regress
     )
 
 
+def _complete_exit_inconsistent(result: PytestRunResult, failures: list[str]) -> bool:
+    return result.status == "COMPLETE" and (
+        result.exit_code not in {0, 1}
+        or (result.exit_code == 0 and bool(failures))
+        or (result.exit_code == 1 and not failures)
+    )
+
+
+def _evidence_mismatch_reasons(
+    base: PytestRunResult,
+    head: PytestRunResult,
+    *,
+    full_suite: bool,
+    logical_failure_collision: bool,
+    base_failures: list[str],
+    head_failures: list[str],
+) -> list[str]:
+    """Explain an IMPACT_UNKNOWN verdict; display only, never changes the verdict."""
+    statuses = {"COMPLETE", "CI_BOOTSTRAP_DEFECT", "IMPACT_UNKNOWN"}
+    checks: list[tuple[bool, str]] = [
+        (base.status == "IMPACT_UNKNOWN", "base pytest run reported IMPACT_UNKNOWN"),
+        (head.status == "IMPACT_UNKNOWN", "head pytest run reported IMPACT_UNKNOWN"),
+        (logical_failure_collision, "failure node ids collide after logical normalization"),
+        (not base.plan_digest, "base plan digest is missing"),
+        (
+            bool(base.plan_digest) and base.plan_digest != head.plan_digest,
+            "base and head ran different impact plans (plan digest differs)",
+        ),
+        (
+            base.selected_targets != head.selected_targets,
+            "base and head selected different pytest targets",
+        ),
+        (not base.revision, "base revision is missing"),
+        (not head.revision, "head revision is missing"),
+        (
+            bool(head.missing_targets),
+            "selected targets missing on head: " + ", ".join(head.missing_targets[:5]),
+        ),
+        (
+            bool(base.unexpected_missing_targets),
+            "unexpected targets missing on base: " + ", ".join(base.unexpected_missing_targets[:5]),
+        ),
+        (not base.verifier_digest, "base verifier digest is missing"),
+        (
+            bool(base.verifier_digest) and base.verifier_digest != head.verifier_digest,
+            "base and head used different verifier digests",
+        ),
+        (not _valid_test_provenance(base), "base test provenance is invalid or incomplete"),
+        (not _valid_test_provenance(head), "head test provenance is invalid or incomplete"),
+        (
+            bool(base.revision) and base.revision == head.revision,
+            "base and head are the same revision",
+        ),
+        (base.status not in statuses, f"base status {base.status!r} is not recognised"),
+        (head.status not in statuses, f"head status {head.status!r} is not recognised"),
+        (
+            _complete_exit_inconsistent(base, base_failures),
+            f"base exit code {base.exit_code} disagrees with its failures",
+        ),
+        (
+            _complete_exit_inconsistent(head, head_failures),
+            f"head exit code {head.exit_code} disagrees with its failures",
+        ),
+        (
+            sorted(set(base.executed_targets + base.missing_targets))
+            != sorted(set(base.selected_targets)),
+            "base executed+missing targets do not equal its selected targets",
+        ),
+        (
+            sorted(set(head.executed_targets + head.missing_targets))
+            != sorted(set(head.selected_targets)),
+            "head executed+missing targets do not equal its selected targets",
+        ),
+        (base.impact_class == "IMPACT_UNKNOWN", "base impact class is IMPACT_UNKNOWN"),
+        (head.impact_class == "IMPACT_UNKNOWN", "head impact class is IMPACT_UNKNOWN"),
+        (
+            full_suite and _full_suite_untrusted(base, head),
+            "FULL_SUITE fallback did not prove the whole suite ran on both sides",
+        ),
+    ]
+    reasons = [message for fired, message in checks if fired]
+    metadata = _metadata_mismatch_detail(base, head)
+    if metadata:
+        reasons.append(metadata)
+    return reasons
+
+
 def _classify_regression(
     base: PytestRunResult, head: PytestRunResult, *, full_suite: bool
 ) -> RegressionClassification:
@@ -1414,6 +1537,20 @@ def _classify_regression(
             "exact head introduced pytest collection errors absent from exact base",
         )
     if evidence_mismatch or base.status == "IMPACT_UNKNOWN" or head.status == "IMPACT_UNKNOWN":
+        try:
+            mismatch_reasons = _evidence_mismatch_reasons(
+                base,
+                head,
+                full_suite=full_suite,
+                logical_failure_collision=logical_failure_collision,
+                base_failures=base_failures,
+                head_failures=head_failures,
+            )
+        except Exception as exc:  # noqa: BLE001 - diagnostics must never change the verdict
+            mismatch_reasons = [f"could not explain mismatch: {type(exc).__name__}: {exc}"]
+        reason = "test execution metadata did not prove a trustworthy exact-base comparison"
+        if mismatch_reasons:
+            reason += ": " + "; ".join(mismatch_reasons)
         return RegressionClassification(
             "IMPACT_UNKNOWN",
             True,
@@ -1421,7 +1558,8 @@ def _classify_regression(
             head_failures,
             new_failures,
             resolved,
-            "test execution metadata did not prove a trustworthy exact-base comparison",
+            reason,
+            mismatch_reasons=mismatch_reasons,
         )
     bootstrap_targets = _scoped_targets_in_collection_errors(base) if full_suite else []
     if bootstrap_targets and not (head.exit_code == 0 and head.status == "COMPLETE"):
@@ -1885,6 +2023,10 @@ def main(argv: list[str] | None = None) -> int:
     payload = asdict(classification)
     args.output.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(payload, indent=2))
+    if classification.blocking:
+        print(f"Exact-base impact gate BLOCKED: {classification.classification}")
+        for mismatch in classification.mismatch_reasons or [classification.reason]:
+            print(f"  - {mismatch}")
     return 1 if classification.blocking else 0
 
 

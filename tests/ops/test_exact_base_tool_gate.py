@@ -35,19 +35,17 @@ def test_ruff_json_is_normalized_to_repo_relative_path(tmp_path):
 
 
 def test_pyright_json_is_normalized():
-    findings = parse_pyright_json(
-        {
-            "generalDiagnostics": [
-                {
-                    "file": "nexus/app.py",
-                    "severity": "error",
-                    "message": "Unknown import",
-                    "rule": "reportMissingImports",
-                    "range": {"start": {"line": 2, "character": 1}},
-                }
-            ]
-        }
-    )
+    findings = parse_pyright_json({
+        "generalDiagnostics": [
+            {
+                "file": "nexus/app.py",
+                "severity": "error",
+                "message": "Unknown import",
+                "rule": "reportMissingImports",
+                "range": {"start": {"line": 2, "character": 1}},
+            }
+        ]
+    })
 
     assert findings == [
         Finding("pyright", "reportMissingImports", "nexus/app.py", 3, 2, "error", "Unknown import")
@@ -55,19 +53,17 @@ def test_pyright_json_is_normalized():
 
 
 def test_bandit_json_is_normalized():
-    findings = parse_bandit_json(
-        {
-            "results": [
-                {
-                    "filename": "scripts/run.py",
-                    "line_number": 11,
-                    "test_id": "B101",
-                    "issue_severity": "LOW",
-                    "issue_text": "Use of assert detected.",
-                }
-            ]
-        }
-    )
+    findings = parse_bandit_json({
+        "results": [
+            {
+                "filename": "scripts/run.py",
+                "line_number": 11,
+                "test_id": "B101",
+                "issue_severity": "LOW",
+                "issue_text": "Use of assert detected.",
+            }
+        ]
+    })
 
     assert findings == [
         Finding("bandit", "B101", "scripts/run.py", 11, 0, "low", "Use of assert detected.")
@@ -75,21 +71,19 @@ def test_bandit_json_is_normalized():
 
 
 def test_wiki_receipt_findings_are_normalized():
-    findings = parse_wiki_governance_receipt(
-        {
-            "status": "BLOCK",
-            "critical_gates": [],
-            "findings": [
-                {
-                    "path": "openwiki/index.md",
-                    "line": 4,
-                    "rule_id": "WIKI001",
-                    "severity": "warning",
-                    "message": "Unresolved link",
-                }
-            ],
-        }
-    )
+    findings = parse_wiki_governance_receipt({
+        "status": "BLOCK",
+        "critical_gates": [],
+        "findings": [
+            {
+                "path": "openwiki/index.md",
+                "line": 4,
+                "rule_id": "WIKI001",
+                "severity": "warning",
+                "message": "Unresolved link",
+            }
+        ],
+    })
 
     assert findings == [
         Finding(
@@ -99,13 +93,11 @@ def test_wiki_receipt_findings_are_normalized():
 
 
 def test_wiki_release_receipt_failed_gate_and_missing_evidence_are_findings():
-    findings = parse_wiki_governance_receipt(
-        {
-            "status": "BLOCK",
-            "critical_gates": [{"name": "wiki_links", "status": "BLOCK", "reason": "unresolved"}],
-            "missing_evidence_reasons": ["receipt missing"],
-        }
-    )
+    findings = parse_wiki_governance_receipt({
+        "status": "BLOCK",
+        "critical_gates": [{"name": "wiki_links", "status": "BLOCK", "reason": "unresolved"}],
+        "missing_evidence_reasons": ["receipt missing"],
+    })
 
     assert findings == [
         Finding(
@@ -205,51 +197,45 @@ def test_absolute_finding_path_must_stay_inside_root(tmp_path):
 
 
 def test_relative_path_spelling_is_normalized():
-    base = parse_ruff_json(
-        [
-            {
-                "filename": "./nexus/app.py",
-                "code": "F401",
-                "location": {"row": 1, "column": 1},
-                "message": "unused",
-            }
-        ]
-    )
-    head = parse_ruff_json(
-        [
-            {
-                "filename": "nexus/app.py",
-                "code": "F401",
-                "location": {"row": 2, "column": 1},
-                "message": "unused",
-            }
-        ]
-    )
+    base = parse_ruff_json([
+        {
+            "filename": "./nexus/app.py",
+            "code": "F401",
+            "location": {"row": 1, "column": 1},
+            "message": "unused",
+        }
+    ])
+    head = parse_ruff_json([
+        {
+            "filename": "nexus/app.py",
+            "code": "F401",
+            "location": {"row": 2, "column": 1},
+            "message": "unused",
+        }
+    ])
 
     assert classify_findings(base, head).classification == "EXACT_BASELINE_DEBT"
 
 
 def test_malformed_pyright_range_is_rejected():
     with pytest.raises(ValueError, match="integer start coordinates"):
-        parse_pyright_json(
-            {"generalDiagnostics": [{"file": "app.py", "severity": "error", "range": {}}]}
-        )
+        parse_pyright_json({
+            "generalDiagnostics": [{"file": "app.py", "severity": "error", "range": {}}]
+        })
 
 
 def test_malformed_bandit_coordinates_are_rejected():
     with pytest.raises(ValueError, match="integer line"):
-        parse_bandit_json(
-            {
-                "results": [
-                    {
-                        "filename": "app.py",
-                        "test_id": "B101",
-                        "line_number": "1",
-                        "issue_severity": 3,
-                    }
-                ]
-            }
-        )
+        parse_bandit_json({
+            "results": [
+                {
+                    "filename": "app.py",
+                    "test_id": "B101",
+                    "line_number": "1",
+                    "issue_severity": 3,
+                }
+            ]
+        })
 
 
 @pytest.mark.parametrize(
@@ -299,17 +285,15 @@ def test_boolean_coordinates_are_rejected(parser, payload):
 
 def test_boolean_pyright_severity_is_rejected():
     with pytest.raises(ValueError, match="file or severity"):
-        parse_pyright_json(
-            {
-                "generalDiagnostics": [
-                    {
-                        "file": "app.py",
-                        "severity": True,
-                        "range": {"start": {"line": 1, "character": 1}},
-                    }
-                ]
-            }
-        )
+        parse_pyright_json({
+            "generalDiagnostics": [
+                {
+                    "file": "app.py",
+                    "severity": True,
+                    "range": {"start": {"line": 1, "character": 1}},
+                }
+            ]
+        })
 
 
 @pytest.mark.parametrize("field", ["findings", "critical_gates"])
@@ -359,16 +343,14 @@ def test_cli_writes_classification_and_blocks_new_finding(tmp_path):
     output = tmp_path / "classification.json"
     base.write_text(json.dumps([]), encoding="utf-8")
     head.write_text(
-        json.dumps(
-            [
-                {
-                    "filename": "nexus/app.py",
-                    "code": "F401",
-                    "location": {"row": 1, "column": 1},
-                    "message": "unused",
-                }
-            ]
-        ),
+        json.dumps([
+            {
+                "filename": "nexus/app.py",
+                "code": "F401",
+                "location": {"row": 1, "column": 1},
+                "message": "unused",
+            }
+        ]),
         encoding="utf-8",
     )
 
@@ -459,3 +441,114 @@ def test_unknown_input_is_fail_closed():
 
 def test_json_text_is_accepted_by_parsers():
     assert parse_ruff_json(json.dumps([])) == []
+
+
+def test_cli_prints_new_findings_with_fix_hints_to_job_log(tmp_path):
+    base = tmp_path / "base.json"
+    head = tmp_path / "head.json"
+    output = tmp_path / "classification.json"
+    base.write_text(json.dumps([]), encoding="utf-8")
+    head.write_text(
+        json.dumps([
+            {
+                "filename": "nexus/app.py",
+                "code": "F401",
+                "location": {"row": 3, "column": 1},
+                "message": "`os` imported but unused",
+            },
+            {
+                "filename": "nexus/fmt.py",
+                "code": "unformatted",
+                "location": {"row": 1, "column": 1},
+                "message": "File would be reformatted",
+            },
+        ]),
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "scripts/ops/exact_base_tool_gate.py",
+            "--tool",
+            "ruff",
+            "--base",
+            str(base),
+            "--head",
+            str(head),
+            "--output",
+            str(output),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 1
+    log = completed.stdout
+    assert "Exact-base gate BLOCKED: NEW_REGRESSION" in log
+    assert "nexus/app.py:3 F401 `os` imported but unused" in log
+    assert "nexus/fmt.py:1 unformatted File would be reformatted" in log
+    assert "run `ruff format --preview nexus/fmt.py`" in log
+    assert "run `ruff check --fix nexus/app.py`" in log
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["classification"] == "NEW_REGRESSION"
+
+
+def test_cli_is_silent_when_not_blocking(tmp_path):
+    base = tmp_path / "base.json"
+    head = tmp_path / "head.json"
+    output = tmp_path / "classification.json"
+    base.write_text("[]", encoding="utf-8")
+    head.write_text("[]", encoding="utf-8")
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "scripts/ops/exact_base_tool_gate.py",
+            "--tool",
+            "ruff",
+            "--base",
+            str(base),
+            "--head",
+            str(head),
+            "--output",
+            str(output),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0
+    assert completed.stdout == ""
+
+
+def test_cli_bootstrap_defect_prints_error_to_job_log(tmp_path):
+    base = tmp_path / "base.json"
+    head = tmp_path / "head.json"
+    output = tmp_path / "classification.json"
+    base.write_text("not-json", encoding="utf-8")
+    head.write_text("[]", encoding="utf-8")
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "scripts/ops/exact_base_tool_gate.py",
+            "--tool",
+            "ruff",
+            "--base",
+            str(base),
+            "--head",
+            str(head),
+            "--output",
+            str(output),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 2
+    assert "Exact-base gate BLOCKED: CI_BOOTSTRAP_DEFECT" in completed.stdout
+    assert "error: JSONDecodeError" in completed.stdout
