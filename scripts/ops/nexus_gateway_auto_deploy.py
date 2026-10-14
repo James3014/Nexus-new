@@ -5,49 +5,60 @@ Owner decision (#2153, 2026-10-14): routine Gateway updates no longer go through
 the #526 governed rebind.  One cycle (run every few minutes by the LaunchAgent
 ``com.nexus.gateway-auto-deploy``, see ``install_nexus_gateway_auto_deploy.sh``):
 
+0. Reconcile: if a previous cycle crashed mid-switch, the durable
+   ``pending-switch.json`` journal is resolved first (finalize or roll back).
+   A live plist that this deployer neither wrote nor adopted (a manual #526
+   rebind) sets HOLD and records ``FOREIGN_PLIST``.
 1. Trigger: fetch ``main`` into the existing Gateway bare repository
-   (``gateway-direct/repository.git``, private ref ``refs/nexus-auto-deploy/main``).
-   Deploy the tip only when the required checks (secret audit, Deletion guard,
-   Exact-base impact gate) are green for it, either on the commit itself or on
-   the head of the merged PR that produced it.  Anything else, including a
-   GitHub error, means no deploy (fail closed).  Main movement that touches only
+   (``gateway-direct/repository.git``, origin must be James3014/Nexus-new,
+   private ref ``refs/nexus-auto-deploy/main``).  The candidate must be GitHub's
+   ``main`` tip or an ancestor of it, and every required check (secret audit,
+   Deletion guard, Exact-base impact gate) must be ``success`` from its bound
+   GitHub Actions workflow, on the commit itself or on the head of the merged PR
+   that produced it.  Any pending run, any GitHub error or any open runtime pin
+   bump PR means no deploy (fail closed).  Main movement that touches only
    docs/tasks/tests/workflow paths is skipped until the Gateway lags by
-   ``--max-irrelevant-lag`` commits (#1445).  At most one attempt per
-   ``--min-interval`` seconds; a candidate that was already rejected is not retried.
+   ``--max-irrelevant-lag`` commits (#1445).  Attempts back off exponentially; a
+   candidate is given up after ``MAX_CANDIDATE_ATTEMPTS`` probe/rollback failures.
 2. Build: ``deployments/a1-<sha>`` is a detached worktree of that bare repository
    (same layout as the #526 ``r1-<sha>`` deployments).  Each deployment gets its
    own venv ``venvs/a1-<sha>`` built by ``uv sync --frozen`` from the deployment's
    ``uv.lock``, so the shared clone's ``.venv`` is never used.  The venv lives
    outside the tree and the tree must still be clean after the build (#1939);
    durable state stays in ``~/.local/state`` (#1539).
-3. Probe: start the candidate on a spare loopback port and require ``/health``
-   for the exact commit, the candidate's own GB-077 live identity probe, MCP
-   ``tools/list`` and ``nexus_gateway_status``.  On failure the live Gateway is
-   left untouched.
-4. Switch: rewrite the ``com.nexus.mcp.gateway.direct`` plist to the candidate,
-   reload it, and probe the real port.  If that fails, restore the exact previous
-   plist bytes and reload (automatic rollback).
+3. Probe: start the candidate on a spare loopback port with a throwaway state
+   dir (never the live self-hosted state) and require ``/health`` for the exact
+   commit, the candidate's own GB-077 live identity probe, MCP ``tools/list``
+   and ``nexus_gateway_status``.  On failure the live Gateway is left untouched.
+4. Switch: under the #526 manager's ledger lock, journal the previous plist,
+   rewrite the ``com.nexus.mcp.gateway.direct`` plist, reload it, and probe the
+   real port.  If that fails, restore the exact previous plist bytes and reload
+   (automatic rollback).  HOLD and the pin-bump gate are re-checked right before
+   the plist write.
 5. Receipt: one JSON line per attempt in ``<state>/receipts.jsonl``; the last
    poll outcome is in ``<state>/status.json``.  ``check_gateway_source_drift.py``
    reports the last receipt.
-6. Retention: keep the newest ``--keep`` ``a1-*`` deployments plus the live and
-   previous one; ``r1-*`` deployments are never touched.
+6. Retention: keep the newest ``--keep`` ``a1-*`` deployments plus the live,
+   previous and deployer-tool ones; ``r1-*`` deployments and anything reached
+   through a symlink are never removed.
 7. Kill switch: ``<state>/HOLD`` (``hold``/``release`` subcommands) or
    ``NEXUS_GATEWAY_AUTO_DEPLOY_HOLD=1`` pauses everything.  A failed rollback
-   writes HOLD itself.
+   writes HOLD itself.  Run ``hold`` before any manual #526 rebind; afterwards
+   ``adopt`` the new plist and ``release``.
 
 The LaunchAgent runs this file from ``gateway-direct/auto-deploy-current``, a
-symlink the installer points at a bootstrap worktree of main and that every
-successful deploy moves to the new deployment, so the deployer updates with the
-Gateway.  It needs only the stdlib plus the tree's
-``scripts/ops/mcp_gateway_durable.py``, which stays the single owner of the
-Gateway launchd effect.  The #526 governed rebind stays available as a manual
-fallback.
+symlink the installer points at a verified bootstrap worktree of main and that
+every successful deploy moves to the new deployment once that tree's deployer
+passes ``selftest`` with the LaunchAgent's own interpreter.  It needs only the
+stdlib plus the tree's ``scripts/ops/mcp_gateway_durable.py``, which stays the
+single owner of the Gateway launchd effect.  The #526 governed rebind stays
+available as a manual fallback.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
 import contextlib
 import hashlib
 import json
@@ -77,30 +88,56 @@ if __name__ == "__main__":
 # (asserted by tests; not imported so this file stays standalone).
 GATEWAY_LABEL = "com.nexus.mcp.gateway.direct"
 ENTRYPOINT = "scripts/ops/nexus_mcp_gateway_http.py"
+DEPLOYER = "scripts/ops/nexus_gateway_auto_deploy.py"
 LIVE_PORT = 8766
 REPOSITORY = "James3014/Nexus-new"
-REQUIRED_CHECKS = (
-    "Full published Git history secret audit",
-    "Deletion guard",
-    "Exact-base impact gate",
+ORIGIN_URLS = (
+    "https://github.com/James3014/Nexus-new.git",
+    "https://github.com/James3014/Nexus-new",
+    "git@github.com:James3014/Nexus-new.git",
 )
+# Each required check is accepted only from its own GitHub Actions workflow, so a
+# stray workflow cannot post a success under the same name.
+REQUIRED_CHECKS = {
+    "Full published Git history secret audit": ".github/workflows/git-history-secret-audit.yml",
+    "Deletion guard": ".github/workflows/deletion-guard.yml",
+    "Exact-base impact gate": ".github/workflows/pytest.yml",
+}
+CHECK_APP = "github-actions"
 DEPLOYMENT_PREFIX = "a1-"
 TRACK_REF = "refs/nexus-auto-deploy/main"
 RECEIPT_SCHEMA = "nexus.gateway.auto_deploy_receipt.v1"
 STATUS_SCHEMA = "nexus.gateway.auto_deploy_status.v1"
+JOURNAL_SCHEMA = "nexus.gateway.auto_deploy_pending_switch.v1"
 HOLD_ENV = "NEXUS_GATEWAY_AUTO_DEPLOY_HOLD"
 TOKEN_ENV = "NEXUS_MCP_GATEWAY_TOKEN"
 # Paths that cannot change Gateway behaviour; anything else counts as relevant.
 IRRELEVANT_PREFIXES = ("tasks/", "docs/", "tests/", ".github/", "archives/", "artifacts/")
 IRRELEVANT_SUFFIXES = (".md",)
-REJECTED_OUTCOMES = ("REJECTED_PROBE", "REJECTED_BUILD", "ROLLED_BACK", "ROLLBACK_FAILED")
-FAILED_OUTCOMES = REJECTED_OUTCOMES + ("BUILD_FAILED", "BLOCKED_NO_ROLLBACK")
+# A candidate that keeps failing the probe or the live switch is given up after
+# this many attempts; a build that writes into its own tree is given up at once.
+MAX_CANDIDATE_ATTEMPTS = 3
+RETRYABLE_REJECTIONS = ("REJECTED_PROBE", "ROLLED_BACK")
+FAILED_OUTCOMES = (
+    "REJECTED_PROBE",
+    "REJECTED_BUILD",
+    "ROLLED_BACK",
+    "ROLLBACK_FAILED",
+    "BUILD_FAILED",
+    "BLOCKED_NO_ROLLBACK",
+    "BLOCKED_MANAGER_BUSY",
+    "FOREIGN_PLIST",
+)
+MAX_BACKOFF_SECONDS = 6 * 60 * 60
 # Open PRs that bump the runtime/dependency pin (or anchor such a bump).  While
 # one is in flight no deploy starts, so deploys and pin bumps never interleave.
 PIN_BUMP_PR = re.compile(
-    r"pin nexus-runtime|pin-runtime|trusted-anchor|dependency.{0,20}transition|autoupdate",
+    r"auto/workforce-|pin nexus-runtime|pin-runtime|trusted-anchor|trusted runtime identity"
+    r"|dependency.{0,20}transition",
     re.IGNORECASE,
 )
+PIN_FILES = ("uv.lock", "pyproject.toml", "requirements/canonical-runtime.txt")
+PIN_BUMP_MAX_AGE_SECONDS = 3 * 24 * 60 * 60
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _DEPLOYMENT_NAME = re.compile(r"(?:^|/)[ar]1-([0-9a-f]{40})$")
 _SHELL_UNSAFE = ('"', "$", "`", "\\", "\n", "\r", "\x00")
@@ -133,6 +170,7 @@ class Config:
     repository: str = REPOSITORY
     track_branch: str = "main"
     python_version: str = "3.12"
+    uv_extras: str = "all"
     keep: int = 3
     min_interval_seconds: int = 600
     max_irrelevant_lag: int = 25
@@ -176,6 +214,18 @@ class Config:
     @property
     def hold_file(self) -> Path:
         return self.state_dir / "HOLD"
+
+    @property
+    def journal(self) -> Path:
+        return self.state_dir / "pending-switch.json"
+
+    @property
+    def known_plists(self) -> Path:
+        return self.state_dir / "known-plists.json"
+
+    @property
+    def probe_state_root(self) -> Path:
+        return self.state_dir / "probe-state"
 
 
 # --------------------------------------------------------------------------- host
@@ -239,6 +289,22 @@ class Host:
         except Exception as exc:  # noqa: BLE001
             raise DeployError(f"GATEWAY_RELOAD_FAILED:{exc}") from exc
 
+    @contextlib.contextmanager
+    def manager_lock(self, cfg: Config) -> Iterator[None]:
+        """Hold the #526 manager's ledger lock so a manual rebind cannot interleave."""
+        from scripts.ops import mcp_gateway_durable as durable
+
+        lock_path = cfg.gateway_root / Path(durable.GATEWAY_LOCK).name
+        try:
+            lock = durable.InterProcessLock(lock_path, timeout=30.0)
+            lock.__enter__()
+        except Exception as exc:  # noqa: BLE001
+            raise DeployError(f"MANAGER_LOCK_UNAVAILABLE:{exc}") from exc
+        try:
+            yield
+        finally:
+            lock.__exit__(None, None, None)
+
     def free_port(self) -> int:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.bind(("127.0.0.1", 0))
@@ -263,7 +329,7 @@ def _git(cfg: Config, *args: str) -> List[str]:
     return ["git", "--git-dir", str(cfg.bare_repo), *args]
 
 
-# ------------------------------------------------------------------ required checks
+# ------------------------------------------------------------------ GitHub gates
 
 
 def gh_api_getter(host: Host, gh: str = "gh") -> Callable[[str], Any]:
@@ -273,13 +339,32 @@ def gh_api_getter(host: Host, gh: str = "gh") -> Callable[[str], Any]:
     return get
 
 
-def _latest_run(api_get: Callable[[str], Any], repo: str, sha: str, name: str) -> Optional[dict]:
+def _bound_runs(api_get: Callable[[str], Any], repo: str, sha: str, name: str) -> List[dict]:
+    """Check runs for ``name`` on ``sha`` that come from the bound Actions workflow."""
     query = urllib.parse.urlencode({"check_name": name, "per_page": 100})
     runs = api_get(f"repos/{repo}/commits/{sha}/check-runs?{query}").get("check_runs") or []
-    runs = [r for r in runs if r.get("name") == name]
-    if not runs:
-        return None
-    return max(runs, key=lambda r: (r.get("started_at") or "", r.get("id") or 0))
+    bound = []
+    for run in runs:
+        if run.get("name") != name or (run.get("app") or {}).get("slug") != CHECK_APP:
+            continue
+        suite = (run.get("check_suite") or {}).get("id")
+        if not suite:
+            continue
+        workflow_runs = api_get(f"repos/{repo}/actions/runs?check_suite_id={int(suite)}")
+        paths = {w.get("path") for w in (workflow_runs.get("workflow_runs") or [])}
+        if REQUIRED_CHECKS[name] in paths:
+            bound.append(run)
+    return bound
+
+
+def _check_state(runs: List[dict], source: str) -> Dict[str, Any]:
+    # Any run that is not completed (queued runs have started_at=null) keeps the
+    # check PENDING; otherwise the newest run (largest id) decides.
+    if any(r.get("status") != "completed" for r in runs):
+        return {"state": "PENDING", "sha": source}
+    latest = max(runs, key=lambda r: int(r.get("id") or 0))
+    state = "SUCCESS" if latest.get("conclusion") == "success" else "FAILURE"
+    return {"state": state, "conclusion": latest.get("conclusion"), "sha": source}
 
 
 def required_checks(
@@ -290,9 +375,8 @@ def required_checks(
     try:
         pr_heads: Optional[List[str]] = None
         for name in REQUIRED_CHECKS:
-            run = _latest_run(api_get, repo, sha, name)
-            source = sha
-            if run is None:
+            runs, source = _bound_runs(api_get, repo, sha, name), sha
+            if not runs:
                 if pr_heads is None:
                     pulls = api_get(f"repos/{repo}/commits/{sha}/pulls") or []
                     pr_heads = [
@@ -303,17 +387,11 @@ def required_checks(
                         and (p.get("base") or {}).get("ref") == branch
                     ]
                 for head in pr_heads:
-                    run = _latest_run(api_get, repo, head, name)
-                    if run is not None:
+                    runs = _bound_runs(api_get, repo, head, name)
+                    if runs:
                         source = head
                         break
-            if run is None:
-                detail[name] = {"state": "MISSING"}
-            elif run.get("status") != "completed":
-                detail[name] = {"state": "PENDING", "sha": source}
-            else:
-                state = "SUCCESS" if run.get("conclusion") == "success" else "FAILURE"
-                detail[name] = {"state": state, "conclusion": run.get("conclusion"), "sha": source}
+            detail[name] = _check_state(runs, source) if runs else {"state": "MISSING"}
     except Exception as exc:  # noqa: BLE001 - any transport/shape error fails closed
         return {
             "verdict": "UNKNOWN",
@@ -332,20 +410,65 @@ def required_checks(
     return {"verdict": verdict, "checks": detail}
 
 
-def pin_bumps_in_flight(api_get: Callable[[str], Any], *, repo: str = REPOSITORY) -> Dict[str, Any]:
-    """Open pin-bump PRs; ``verdict`` is CLEAR, IN_FLIGHT or UNKNOWN (fail closed)."""
+def on_github_main(
+    api_get: Callable[[str], Any], sha: str, *, repo: str = REPOSITORY, branch: str = "main"
+) -> Dict[str, Any]:
+    """The candidate must be GitHub's branch tip or an ancestor of it (fail closed)."""
     try:
-        pulls = api_get(f"repos/{repo}/pulls?state=open&per_page=100") or []
-        hits = [
-            p["number"]
-            for p in pulls
-            if PIN_BUMP_PR.search(
-                f"{p.get('title') or ''} {(p.get('head') or {}).get('ref') or ''}"
-            )
-        ]
+        tip = api_get(f"repos/{repo}/branches/{branch}")["commit"]["sha"]
+        if tip == sha:
+            return {"ok": True, "tip": tip, "relation": "tip"}
+        relation = api_get(f"repos/{repo}/compare/{sha}...{tip}").get("status")
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": f"{type(exc).__name__}:{exc}"[:300]}
+    return {"ok": relation in ("ahead", "identical"), "tip": tip, "relation": relation}
+
+
+def _parse_time(value: Any) -> Optional[float]:
+    try:
+        return (
+            datetime
+            .strptime(str(value), "%Y-%m-%dT%H:%M:%SZ")
+            .replace(tzinfo=timezone.utc)
+            .timestamp()
+        )
+    except ValueError:
+        return None
+
+
+def pin_bumps_in_flight(
+    api_get: Callable[[str], Any], *, repo: str = REPOSITORY, now: Optional[float] = None
+) -> Dict[str, Any]:
+    """Open pin-bump PRs updated within the age cap; CLEAR, IN_FLIGHT or UNKNOWN."""
+    now = time.time() if now is None else now
+    hits: List[int] = []
+    stale: List[int] = []
+    try:
+        page = 1
+        while True:
+            pulls = api_get(f"repos/{repo}/pulls?state=open&per_page=100&page={page}") or []
+            for pr in pulls:
+                updated = _parse_time(pr.get("updated_at"))
+                if updated is not None and now - updated > PIN_BUMP_MAX_AGE_SECONDS:
+                    stale.append(pr["number"])
+                    continue
+                label = f"{pr.get('title') or ''} {(pr.get('head') or {}).get('ref') or ''}"
+                if PIN_BUMP_PR.search(label):
+                    hits.append(pr["number"])
+                    continue
+                files = api_get(f"repos/{repo}/pulls/{pr['number']}/files?per_page=100") or []
+                if any(f.get("filename") in PIN_FILES for f in files):
+                    hits.append(pr["number"])
+            if len(pulls) < 100:
+                break
+            page += 1
     except Exception as exc:  # noqa: BLE001
         return {"verdict": "UNKNOWN", "error": f"{type(exc).__name__}:{exc}"[:300]}
-    return {"verdict": "IN_FLIGHT" if hits else "CLEAR", "pull_requests": sorted(hits)}
+    return {
+        "verdict": "IN_FLIGHT" if hits else "CLEAR",
+        "pull_requests": sorted(hits),
+        "ignored_stale": sorted(stale),
+    }
 
 
 # ------------------------------------------------------------------------- probes
@@ -429,18 +552,39 @@ class Prober:
 # --------------------------------------------------------------------- deployment
 
 
-def wrapper_command(cfg: Config, root: Path, python: Path, port: Optional[int] = None) -> str:
-    """The same fixed zsh wrapper as the #526 deployments, with a per-deployment venv."""
-    for value in (str(root), str(python), str(cfg.env_file), str(cfg.canonical_state_dir)):
+def wrapper_command(
+    cfg: Config,
+    root: Path,
+    python: Path,
+    port: Optional[int] = None,
+    state_dir: Optional[Path] = None,
+) -> str:
+    """The same fixed zsh wrapper as the #526 deployments, with a per-deployment venv.
+
+    ``port``/``state_dir`` are only used for the spare-port probe, which must never
+    see the live self-hosted state.
+    """
+    state = cfg.canonical_state_dir if state_dir is None else state_dir
+    for value in (str(root), str(python), str(cfg.env_file), str(state)):
         if any(token in value for token in _SHELL_UNSAFE):
             raise DeployError("WRAPPER_PATH_UNSAFE")
     port_export = "" if port is None else f"export NEXUS_MCP_GATEWAY_PORT={int(port)} ; "
     return (
         f'cd "{root}" ; source "{cfg.env_file}" ; export PYTHONDONTWRITEBYTECODE=1 ; '
         f'export NEXUS_CANONICAL_SOURCE_ROOT="{root}" ; '
-        f'export NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR="{cfg.canonical_state_dir}" ; '
+        f'export NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR="{state}" ; '
         f'{port_export}exec "{python}" "{root / ENTRYPOINT}"'
     )
+
+
+def _wrapper_tokens(plist_bytes: bytes) -> List[str]:
+    data = plistlib.loads(plist_bytes)
+    if data.get("Label") != GATEWAY_LABEL:
+        raise DeployError("GATEWAY_PLIST_LABEL_MISMATCH")
+    args = data.get("ProgramArguments") or []
+    if len(args) >= 3 and args[1] == "-c":
+        return shlex.split(args[2])
+    return list(args)
 
 
 def live_root(plist_bytes: bytes) -> Optional[Path]:
@@ -450,14 +594,19 @@ def live_root(plist_bytes: bytes) -> Optional[Path]:
     root = data.get("WorkingDirectory")
     if isinstance(root, str) and root:
         return Path(root)
-    match = re.search(r'NEXUS_CANONICAL_SOURCE_ROOT="([^"]+)"', " ".join(data["ProgramArguments"]))
-    return Path(match.group(1)) if match else None
+    for token in _wrapper_tokens(plist_bytes):
+        if token.startswith("NEXUS_CANONICAL_SOURCE_ROOT="):
+            return Path(token.split("=", 1)[1])
+    return None
 
 
 def live_python(plist_bytes: bytes) -> Optional[Path]:
-    command = " ".join(plistlib.loads(plist_bytes).get("ProgramArguments") or [])
-    match = re.search(r'exec "?([^" ]+)"? ', command)
-    return Path(match.group(1)) if match else None
+    """Interpreter after ``exec`` in the wrapper, parsed with shell quoting rules."""
+    tokens = _wrapper_tokens(plist_bytes)
+    for index, token in enumerate(tokens[:-1]):
+        if token == "exec":
+            return Path(tokens[index + 1])
+    return None
 
 
 def commit_of(root: Optional[Path]) -> Optional[str]:
@@ -474,9 +623,16 @@ def render_plist(previous: bytes, command: str, root: Path) -> bytes:
     return plistlib.dumps(data, sort_keys=True)
 
 
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
 def _atomic_write(path: Path, data: bytes, mode: int = 0o644) -> None:
     tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}")
-    tmp.write_bytes(data)
+    with open(tmp, "wb") as handle:
+        handle.write(data)
+        handle.flush()
+        os.fsync(handle.fileno())
     os.chmod(tmp, mode)
     os.replace(tmp, path)
 
@@ -493,6 +649,15 @@ def is_irrelevant(path: str) -> bool:
     return path.startswith(IRRELEVANT_PREFIXES) or (
         "/" not in path and path.endswith(IRRELEVANT_SUFFIXES)
     )
+
+
+def _uv_extra_args(extras: str) -> List[str]:
+    if extras == "all":
+        return ["--all-extras"]
+    args: List[str] = []
+    for extra in filter(None, (e.strip() for e in extras.split(","))):
+        args += ["--extra", extra]
+    return args
 
 
 def build(cfg: Config, host: Host, commit: str) -> Dict[str, Any]:
@@ -515,7 +680,7 @@ def build(cfg: Config, host: Host, commit: str) -> Dict[str, Any]:
             "uv",
             "sync",
             "--frozen",
-            "--all-extras",
+            *_uv_extra_args(cfg.uv_extras),
             "--no-install-project",
             "--python",
             cfg.python_version,
@@ -537,37 +702,48 @@ def build(cfg: Config, host: Host, commit: str) -> Dict[str, Any]:
         "deployment_root": str(root),
         "venv": str(venv),
         "venv_python": str(python),
-        "uv_lock_sha256": hashlib.sha256(lock.read_bytes()).hexdigest() if lock.exists() else None,
+        "uv_lock_sha256": _sha256(lock.read_bytes()) if lock.exists() else None,
     }
 
 
+def _contained_dirs(parent: Path) -> List[Path]:
+    """Real (non-symlink) ``a1-*`` directories strictly inside a real ``parent``."""
+    if parent.is_symlink() or not parent.is_dir():
+        return []
+    real_parent = parent.resolve()
+    found = []
+    for child in parent.iterdir():
+        if not child.name.startswith(DEPLOYMENT_PREFIX) or child.is_symlink():
+            continue
+        if child.is_dir() and child.resolve().parent == real_parent:
+            found.append(child)
+    return found
+
+
 def prune(cfg: Config, host: Host, protected: List[Optional[Path]]) -> List[str]:
-    """Keep the newest ``cfg.keep`` a1-* deployments plus every protected one."""
-    if not cfg.deployments.is_dir():
+    """Keep the newest ``cfg.keep`` a1-* deployments plus every protected one.
+
+    Refuses outright when ``deployments/`` or ``venvs/`` is a symlink and never
+    follows symlinked children, so nothing outside those two directories is removed.
+    """
+    if cfg.deployments.is_symlink() or cfg.venvs.is_symlink():
         return []
     keep_names = {p.name for p in protected if p is not None}
     candidates = sorted(
-        (
-            p
-            for p in cfg.deployments.iterdir()
-            if p.name.startswith(DEPLOYMENT_PREFIX) and p.is_dir()
-        ),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
+        _contained_dirs(cfg.deployments), key=lambda p: p.stat().st_mtime, reverse=True
     )
     removed: List[str] = []
     for index, path in enumerate(candidates):
         if index < cfg.keep or path.name in keep_names:
             continue
         host.run(_git(cfg, "worktree", "remove", "--force", str(path)), timeout=300)
-        shutil.rmtree(path, ignore_errors=True)
-        shutil.rmtree(cfg.venvs / path.name, ignore_errors=True)
+        if path.exists() and not path.is_symlink():
+            shutil.rmtree(path, ignore_errors=True)
         removed.append(path.name)
-    if cfg.venvs.is_dir():
-        live = {p.name for p in cfg.deployments.iterdir()}
-        for venv in cfg.venvs.iterdir():
-            if venv.name.startswith(DEPLOYMENT_PREFIX) and venv.name not in live:
-                shutil.rmtree(venv, ignore_errors=True)
+    present = {p.name for p in cfg.deployments.iterdir()} if cfg.deployments.is_dir() else set()
+    for venv in _contained_dirs(cfg.venvs):
+        if venv.name not in present:
+            shutil.rmtree(venv, ignore_errors=True)
     return removed
 
 
@@ -605,6 +781,13 @@ def _append_receipt(cfg: Config, receipt: Dict[str, Any]) -> None:
         os.fsync(handle.fileno())
 
 
+def _write_status(cfg: Config, payload: Dict[str, Any]) -> None:
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    _atomic_write(
+        cfg.state_dir / "status.json", json.dumps(payload, sort_keys=True).encode(), 0o600
+    )
+
+
 def hold_reason(cfg: Config, environ: Optional[Dict[str, str]] = None) -> Optional[str]:
     env = os.environ if environ is None else environ
     if env.get(HOLD_ENV, "") not in ("", "0"):
@@ -612,6 +795,27 @@ def hold_reason(cfg: Config, environ: Optional[Dict[str, str]] = None) -> Option
     if cfg.hold_file.exists():
         return f"file:{cfg.hold_file}"
     return None
+
+
+def _set_hold(cfg: Config, reason: str) -> None:
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    cfg.hold_file.write_text(reason + "\n", encoding="utf-8")
+
+
+def known_plist_hashes(cfg: Config) -> List[str]:
+    try:
+        data = json.loads(cfg.known_plists.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [h for h in data.get("sha256", []) if isinstance(h, str)]
+
+
+def remember_plist(cfg: Config, data: bytes) -> None:
+    """Record plist bytes this deployer wrote or the Owner adopted (bounded history)."""
+    digest = _sha256(data)
+    hashes = [h for h in known_plist_hashes(cfg) if h != digest][-49:] + [digest]
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    _atomic_write(cfg.known_plists, json.dumps({"sha256": hashes}).encode(), 0o600)
 
 
 @contextlib.contextmanager
@@ -640,6 +844,7 @@ def run_cycle(
     dry_run: bool = False,
     force: bool = False,
     environ: Optional[Dict[str, str]] = None,
+    tool_python: Optional[Path] = None,
 ) -> Dict[str, Any]:
     started = host.now()
     status: Dict[str, Any] = {
@@ -653,221 +858,398 @@ def run_cycle(
     with _cycle_lock(cfg) as acquired:
         if not acquired:
             return {**status, "status": "BUSY"}
-        result = _cycle(cfg, host, prober, api_get, status, dry_run=dry_run, force=force)
+        # HOLD may have been set while this cycle waited for the lock.
+        held = hold_reason(cfg, environ)
+        if held:
+            return {**status, "status": "HELD", "hold": held}
+        ctx = _Cycle(cfg, host, prober, api_get, environ, tool_python or Path(sys.executable))
+        result = ctx.run(status, dry_run=dry_run, force=force)
     if not dry_run:
-        _atomic_write(
-            cfg.state_dir / "status.json", json.dumps(result, sort_keys=True).encode(), 0o600
-        )
+        _write_status(cfg, result)
     return result
 
 
-def _cycle(
-    cfg: Config,
-    host: Host,
-    prober: Prober,
-    api_get: Callable[[str], Any],
-    status: Dict[str, Any],
-    *,
-    dry_run: bool,
-    force: bool,
-) -> Dict[str, Any]:
-    _must(
-        host,
-        _git(
-            cfg,
-            "fetch",
-            "--quiet",
-            "--no-tags",
-            "origin",
-            f"+refs/heads/{cfg.track_branch}:{TRACK_REF}",
-        ),
-        "FETCH_FAILED",
-        timeout=300,
-    )
-    candidate = _must(
-        host, _git(cfg, "rev-parse", f"{TRACK_REF}^{{commit}}"), "TRACK_REF_FAILED"
-    ).strip()
-    if not _SHA.match(candidate):
-        raise DeployError("TRACK_REF_NOT_A_COMMIT")
-    previous_plist = cfg.plist.read_bytes()
-    previous_root = live_root(previous_plist)
-    previous_commit = commit_of(previous_root)
-    status.update(
-        candidate_commit=candidate, live_commit=previous_commit, live_root=str(previous_root)
-    )
+class _Cycle:
+    def __init__(
+        self,
+        cfg: Config,
+        host: Host,
+        prober: Prober,
+        api_get: Callable[[str], Any],
+        environ: Optional[Dict[str, str]],
+        tool_python: Path,
+    ) -> None:
+        self.cfg, self.host, self.prober, self.api_get = cfg, host, prober, api_get
+        self.environ = environ
+        self.tool_python = tool_python
 
-    def finish(state: str, **extra: Any) -> Dict[str, Any]:
-        if not dry_run and state not in ("PLAN",):
-            tool = Path(os.path.realpath(cfg.tool_link)) if cfg.tool_link.is_symlink() else None
-            removed = prune(cfg, host, [previous_root, _current_root(cfg), tool])
-            if removed:
-                extra["pruned"] = removed
-        return {**status, "status": state, **extra}
+    # -- entry -------------------------------------------------------------
 
-    if candidate == previous_commit:
-        return finish("IN_SYNC")
-    receipts = read_receipts(cfg.state_dir)
-    if not force and any(
-        r.get("candidate_commit") == candidate and r.get("outcome") in REJECTED_OUTCOMES
-        for r in receipts
-    ):
-        return finish("CANDIDATE_REJECTED_BEFORE")
-    checks = required_checks(api_get, candidate, repo=cfg.repository, branch=cfg.track_branch)
-    status["required_checks"] = checks
-    if checks["verdict"] != "GREEN":
-        return finish(f"CHECKS_{checks['verdict']}")
-    pins = pin_bumps_in_flight(api_get, repo=cfg.repository)
-    status["pin_bumps"] = pins
-    if pins["verdict"] != "CLEAR":
-        return finish(f"PIN_BUMP_{pins['verdict']}")
-    if previous_commit and not force:
-        diff = host.run(_git(cfg, "diff", "--name-only", previous_commit, candidate))
-        count = host.run(_git(cfg, "rev-list", "--count", f"{previous_commit}..{candidate}"))
-        if diff.returncode == 0 and count.returncode == 0:
-            changed = [p for p in diff.stdout.splitlines() if p]
-            behind = int(count.stdout.strip() or 0)
-            status.update(changed_path_count=len(changed), behind=behind)
-            if all(is_irrelevant(p) for p in changed) and behind < cfg.max_irrelevant_lag:
-                return finish("SKIPPED_IRRELEVANT")
-    if receipts and not force:
-        last_started = receipts[-1].get("started_epoch", 0)
-        if host.now() - float(last_started) < cfg.min_interval_seconds:
-            return finish("DEBOUNCED")
-    root = cfg.deployments / f"{DEPLOYMENT_PREFIX}{candidate}"
-    venv_python = cfg.venvs / f"{DEPLOYMENT_PREFIX}{candidate}" / "bin" / "python"
-    if dry_run:
-        return finish(
-            "PLAN",
-            plan={
-                "deployment_root": str(root),
-                "venv_python": str(venv_python),
-                "steps": [
-                    "build worktree + venv (uv sync --frozen)",
-                    "probe on spare port",
-                    f"rewrite {cfg.plist}",
-                    f"reload {GATEWAY_LABEL}",
-                    f"probe port {LIVE_PORT}",
-                    "rollback to previous plist on failure",
-                ],
-                "live_command": wrapper_command(cfg, root, venv_python),
-            },
+    def run(self, status: Dict[str, Any], *, dry_run: bool, force: bool) -> Dict[str, Any]:
+        cfg, host = self.cfg, self.host
+        if cfg.journal.exists():
+            if dry_run:
+                return {**status, "status": "PENDING_SWITCH_JOURNAL", "journal": str(cfg.journal)}
+            receipt = self.reconcile_journal()
+            return {**status, "status": f"RECONCILED_{receipt['outcome']}", "receipt": receipt}
+        previous_plist = cfg.plist.read_bytes()
+        if _sha256(previous_plist) not in known_plist_hashes(cfg):
+            if dry_run:
+                return {**status, "status": "FOREIGN_PLIST"}
+            return {**status, "status": "FOREIGN_PLIST", "receipt": self.foreign_plist()}
+        origin = _must(host, _git(cfg, "remote", "get-url", "origin"), "ORIGIN_URL_FAILED").strip()
+        if origin not in ORIGIN_URLS:
+            return {**status, "status": "ORIGIN_MISMATCH", "origin": origin}
+        _must(
+            host,
+            _git(
+                cfg,
+                "fetch",
+                "--quiet",
+                "--no-tags",
+                "origin",
+                f"+refs/heads/{cfg.track_branch}:{TRACK_REF}",
+            ),
+            "FETCH_FAILED",
+            timeout=300,
         )
-    receipt = _attempt(cfg, host, prober, candidate, previous_plist, previous_root, checks)
-    status["receipt"] = receipt
-    return finish(receipt["outcome"])
+        candidate = _must(
+            host, _git(cfg, "rev-parse", f"{TRACK_REF}^{{commit}}"), "TRACK_REF_FAILED"
+        ).strip()
+        if not _SHA.match(candidate):
+            raise DeployError("TRACK_REF_NOT_A_COMMIT")
+        previous_root = live_root(previous_plist)
+        previous_commit = commit_of(previous_root)
+        status.update(
+            candidate_commit=candidate, live_commit=previous_commit, live_root=str(previous_root)
+        )
 
+        def finish(state: str, **extra: Any) -> Dict[str, Any]:
+            if not dry_run and state != "PLAN":
+                removed = self.prune([previous_root])
+                if removed:
+                    extra["pruned"] = removed
+            return {**status, "status": state, **extra}
 
-def _current_root(cfg: Config) -> Optional[Path]:
-    with contextlib.suppress(Exception):
-        return live_root(cfg.plist.read_bytes())
-    return None
+        if candidate == previous_commit:
+            return finish("IN_SYNC")
+        receipts = [
+            r for r in read_receipts(cfg.state_dir) if r.get("candidate_commit") == candidate
+        ]
+        failures = [r for r in receipts if r.get("outcome") in FAILED_OUTCOMES]
+        if not force and (
+            any(r.get("outcome") == "REJECTED_BUILD" for r in failures)
+            or sum(r.get("outcome") in RETRYABLE_REJECTIONS for r in failures)
+            >= MAX_CANDIDATE_ATTEMPTS
+        ):
+            return finish("CANDIDATE_REJECTED_BEFORE", attempts=len(failures))
+        main_check = on_github_main(
+            self.api_get, candidate, repo=cfg.repository, branch=cfg.track_branch
+        )
+        status["github_main"] = main_check
+        if not main_check["ok"]:
+            return finish("CANDIDATE_NOT_ON_MAIN")
+        checks = required_checks(
+            self.api_get, candidate, repo=cfg.repository, branch=cfg.track_branch
+        )
+        status["required_checks"] = checks
+        if checks["verdict"] != "GREEN":
+            return finish(f"CHECKS_{checks['verdict']}")
+        pins = pin_bumps_in_flight(self.api_get, repo=cfg.repository, now=host.now())
+        status["pin_bumps"] = pins
+        if pins["verdict"] != "CLEAR":
+            return finish(f"PIN_BUMP_{pins['verdict']}")
+        if previous_commit and not force:
+            diff = host.run(_git(cfg, "diff", "--name-only", previous_commit, candidate))
+            count = host.run(_git(cfg, "rev-list", "--count", f"{previous_commit}..{candidate}"))
+            if diff.returncode == 0 and count.returncode == 0:
+                changed = [p for p in diff.stdout.splitlines() if p]
+                behind = int(count.stdout.strip() or 0)
+                status.update(changed_path_count=len(changed), behind=behind)
+                if all(is_irrelevant(p) for p in changed) and behind < cfg.max_irrelevant_lag:
+                    return finish("SKIPPED_IRRELEVANT")
+        if not force:
+            wait = self.backoff_remaining(failures)
+            if wait > 0:
+                return finish("BACKOFF" if failures else "DEBOUNCED", retry_in_seconds=int(wait))
+        root = cfg.deployments / f"{DEPLOYMENT_PREFIX}{candidate}"
+        venv_python = cfg.venvs / f"{DEPLOYMENT_PREFIX}{candidate}" / "bin" / "python"
+        if dry_run:
+            return finish(
+                "PLAN",
+                plan={
+                    "deployment_root": str(root),
+                    "venv_python": str(venv_python),
+                    "steps": [
+                        "build worktree + venv (uv sync --frozen)",
+                        "probe on spare port with throwaway state",
+                        "re-check HOLD and pin bumps",
+                        f"journal + rewrite {cfg.plist} under the manager lock",
+                        f"reload {GATEWAY_LABEL}",
+                        f"probe port {LIVE_PORT}",
+                        "rollback to previous plist on failure",
+                    ],
+                    "live_command": wrapper_command(cfg, root, venv_python),
+                },
+            )
+        receipt = self.attempt(candidate, previous_plist, checks)
+        status["receipt"] = receipt
+        return finish(receipt["outcome"])
 
+    def backoff_remaining(self, failures: List[Dict[str, Any]]) -> float:
+        receipts = read_receipts(self.cfg.state_dir)
+        if not receipts:
+            return 0.0
+        interval = self.cfg.min_interval_seconds * (2 ** max(0, len(failures) - 1))
+        interval = min(float(interval), float(MAX_BACKOFF_SECONDS))
+        last_started = float(receipts[-1].get("started_epoch", 0))
+        return interval - (self.host.now() - last_started)
 
-def _attempt(
-    cfg: Config,
-    host: Host,
-    prober: Prober,
-    candidate: str,
-    previous_plist: bytes,
-    previous_root: Optional[Path],
-    checks: Dict[str, Any],
-) -> Dict[str, Any]:
-    started = host.now()
-    receipt: Dict[str, Any] = {
-        "schema": RECEIPT_SCHEMA,
-        "attempt_id": f"{candidate[:12]}-{int(started)}",
-        "candidate_commit": candidate,
-        "previous_commit": commit_of(previous_root),
-        "previous_root": str(previous_root),
-        "required_checks": checks,
-        "started_at": _iso(started),
-        "started_epoch": started,
-        "switched": False,
-        "rolled_back": False,
-        "probes": {},
-    }
-    try:
+    def prune(self, extra: List[Optional[Path]]) -> List[str]:
+        cfg = self.cfg
+        if cfg.journal.exists():
+            return []
+        tool = Path(os.path.realpath(cfg.tool_link)) if cfg.tool_link.is_symlink() else None
+        current = None
+        with contextlib.suppress(Exception):
+            current = live_root(cfg.plist.read_bytes())
+        return prune(cfg, self.host, [*extra, current, tool])
+
+    # -- receipts ------------------------------------------------------------
+
+    def new_receipt(self, candidate: str, previous_plist: bytes) -> Dict[str, Any]:
+        started = self.host.now()
+        previous_root = live_root(previous_plist)
+        return {
+            "schema": RECEIPT_SCHEMA,
+            "attempt_id": f"{candidate[:12]}-{int(started)}",
+            "candidate_commit": candidate,
+            "previous_commit": commit_of(previous_root),
+            "previous_root": str(previous_root),
+            "started_at": _iso(started),
+            "started_epoch": started,
+            "switched": False,
+            "rolled_back": False,
+            "probes": {},
+        }
+
+    def close_receipt(self, receipt: Dict[str, Any]) -> Dict[str, Any]:
+        finished = self.host.now()
         receipt.update(
-            _attempt_effects(cfg, host, prober, candidate, previous_plist, previous_root, receipt)
+            finished_at=_iso(finished),
+            duration_seconds=round(finished - float(receipt["started_epoch"]), 3),
         )
-    except Exception as exc:  # noqa: BLE001 - every failure must still leave a receipt
-        receipt["reason"] = f"{type(exc).__name__}:{exc}"[:500]
-        if receipt["switched"] and not receipt["rolled_back"]:
-            receipt.update(_rollback(cfg, host, prober, previous_plist, receipt))
-        elif str(exc).startswith("SOURCE_TREE_WRITTEN"):
-            receipt["outcome"] = "REJECTED_BUILD"
-        else:
-            receipt["outcome"] = "BUILD_FAILED"
-    finished = host.now()
-    receipt.update(finished_at=_iso(finished), duration_seconds=round(finished - started, 3))
-    _append_receipt(cfg, receipt)
-    if receipt["outcome"] == "ROLLBACK_FAILED":
-        cfg.hold_file.write_text(
-            f"auto-hold after ROLLBACK_FAILED {receipt['attempt_id']}\n", encoding="utf-8"
+        _append_receipt(self.cfg, receipt)
+        with contextlib.suppress(FileNotFoundError):
+            self.cfg.journal.unlink()
+        if receipt["outcome"] == "ROLLBACK_FAILED":
+            _set_hold(self.cfg, f"auto-hold after ROLLBACK_FAILED {receipt['attempt_id']}")
+        return receipt
+
+    def foreign_plist(self) -> Dict[str, Any]:
+        receipt = self.new_receipt("0" * 40, self.cfg.plist.read_bytes())
+        receipt.pop("candidate_commit")
+        receipt.update(
+            outcome="FOREIGN_PLIST",
+            reason="live plist was not written or adopted by the auto-deployer (manual rebind?)",
+            live_plist_sha256=_sha256(self.cfg.plist.read_bytes()),
         )
-    return receipt
+        _set_hold(self.cfg, "auto-hold: FOREIGN_PLIST; run `adopt` then `release` to resume")
+        return self.close_receipt(receipt)
 
+    # -- one attempt ------------------------------------------------------------
 
-def _attempt_effects(
-    cfg: Config,
-    host: Host,
-    prober: Prober,
-    candidate: str,
-    previous_plist: bytes,
-    previous_root: Optional[Path],
-    receipt: Dict[str, Any],
-) -> Dict[str, Any]:
-    built = build(cfg, host, candidate)
-    receipt.update(built)
-    root, python = Path(built["deployment_root"]), Path(built["venv_python"])
-    token = read_env_token(cfg.env_file)
-    logs = cfg.state_dir / "logs"
+    def attempt(
+        self, candidate: str, previous_plist: bytes, checks: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        receipt = self.new_receipt(candidate, previous_plist)
+        receipt["required_checks"] = checks
+        try:
+            receipt.update(self.attempt_effects(candidate, previous_plist, receipt))
+        except Exception as exc:  # noqa: BLE001 - every failure must still leave a receipt
+            receipt["reason"] = f"{type(exc).__name__}:{exc}"[:500]
+            if receipt["switched"] and not receipt["rolled_back"]:
+                receipt.update(self.rollback(previous_plist, receipt))
+            elif str(exc).startswith("SOURCE_TREE_WRITTEN"):
+                receipt["outcome"] = "REJECTED_BUILD"
+            elif str(exc).startswith("MANAGER_LOCK_UNAVAILABLE"):
+                receipt["outcome"] = "BLOCKED_MANAGER_BUSY"
+            else:
+                receipt["outcome"] = "BUILD_FAILED"
+        return self.close_receipt(receipt)
 
-    port = host.free_port()
-    stop = host.start(
-        wrapper_command(cfg, root, python, port), logs / f"{receipt['attempt_id']}.probe.log"
-    )
-    try:
-        spare = prober.probe(
-            port=port,
-            token=token,
-            commit=candidate,
-            root=root,
-            python=python,
-            timeout=cfg.probe_timeout_seconds,
-        )
-    finally:
-        stop()
-    receipt["probes"]["spare"] = {"port": port, **spare}
-    if not spare["ok"]:
-        return {"outcome": "REJECTED_PROBE", "reason": "candidate failed the spare-port probe"}
+    def spare_probe(
+        self, root: Path, python: Path, commit: str, receipt: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        cfg, host = self.cfg, self.host
+        probe_state = cfg.probe_state_root / receipt["attempt_id"]
+        shutil.rmtree(probe_state, ignore_errors=True)
+        probe_state.mkdir(parents=True)
+        port = host.free_port()
+        command = wrapper_command(cfg, root, python, port, state_dir=probe_state)
+        stop = host.start(command, cfg.state_dir / "logs" / f"{receipt['attempt_id']}.probe.log")
+        try:
+            result = self.prober.probe(
+                port=port,
+                token=read_env_token(cfg.env_file),
+                commit=commit,
+                root=root,
+                python=python,
+                timeout=cfg.probe_timeout_seconds,
+            )
+        finally:
+            stop()
+            shutil.rmtree(probe_state, ignore_errors=True)
+        return {"port": port, "state_dir": str(probe_state), **result}
 
-    readiness = rollback_readiness(host, previous_plist)
-    receipt["rollback_readiness"] = readiness
-    if not readiness["ok"]:
-        return {"outcome": "BLOCKED_NO_ROLLBACK", "reason": readiness["reason"]}
+    def attempt_effects(
+        self, candidate: str, previous_plist: bytes, receipt: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        cfg, host = self.cfg, self.host
+        built = build(cfg, host, candidate)
+        receipt.update(built)
+        root, python = Path(built["deployment_root"]), Path(built["venv_python"])
 
-    _atomic_write(cfg.plist, render_plist(previous_plist, wrapper_command(cfg, root, python), root))
-    receipt["switched"] = True
-    try:
-        host.reload_service(cfg.plist, GATEWAY_LABEL)
-        live = prober.probe(
+        spare = self.spare_probe(root, python, candidate, receipt)
+        receipt["probes"]["spare"] = spare
+        if not spare["ok"]:
+            return {"outcome": "REJECTED_PROBE", "reason": "candidate failed the spare-port probe"}
+
+        readiness = rollback_readiness(host, previous_plist)
+        receipt["rollback_readiness"] = readiness
+        if not readiness["ok"]:
+            return {"outcome": "BLOCKED_NO_ROLLBACK", "reason": readiness["reason"]}
+
+        with host.manager_lock(cfg):
+            # Last gates before the only live effect.
+            held = hold_reason(cfg, self.environ)
+            if held:
+                return {"outcome": "HELD", "reason": f"hold set during the cycle ({held})"}
+            pins = pin_bumps_in_flight(self.api_get, repo=cfg.repository, now=host.now())
+            receipt["pin_bumps_before_switch"] = pins
+            if pins["verdict"] != "CLEAR":
+                return {
+                    "outcome": f"PIN_BUMP_{pins['verdict']}",
+                    "reason": "pin bump before switch",
+                }
+            if cfg.plist.read_bytes() != previous_plist:
+                _set_hold(cfg, "auto-hold: FOREIGN_PLIST; live plist changed during the cycle")
+                return {"outcome": "FOREIGN_PLIST", "reason": "live plist changed during the cycle"}
+
+            new_plist = render_plist(previous_plist, wrapper_command(cfg, root, python), root)
+            self.write_journal(receipt, previous_plist, new_plist, python)
+            _atomic_write(cfg.plist, new_plist)
+            receipt["switched"] = True
+            return self.finish_switch(receipt, previous_plist, root, python)
+
+    def finish_switch(
+        self, receipt: Dict[str, Any], previous_plist: bytes, root: Path, python: Path
+    ) -> Dict[str, Any]:
+        try:
+            self.host.reload_service(self.cfg.plist, GATEWAY_LABEL)
+            live = self.live_probe(receipt["candidate_commit"], root, python)
+        except DeployError as exc:
+            live = {"ok": False, "error": str(exc)[:300]}
+        receipt["probes"]["live"] = live
+        if live["ok"]:
+            receipt["deployer_link"] = self.move_tool_link(root)
+            return {"outcome": "DEPLOYED"}
+        receipt["reason"] = "candidate failed the live probe"
+        return self.rollback(previous_plist, receipt)
+
+    def live_probe(self, commit: str, root: Path, python: Path) -> Dict[str, Any]:
+        return self.prober.probe(
             port=LIVE_PORT,
-            token=token,
-            commit=candidate,
+            token=read_env_token(self.cfg.env_file),
+            commit=commit,
             root=root,
             python=python,
-            timeout=cfg.probe_timeout_seconds,
+            timeout=self.cfg.probe_timeout_seconds,
         )
-    except DeployError as exc:
-        live = {"ok": False, "error": str(exc)[:300]}
-    receipt["probes"]["live"] = live
-    if live["ok"]:
-        _atomic_symlink(root, cfg.tool_link)
-        return {"outcome": "DEPLOYED"}
 
-    receipt["reason"] = "candidate failed the live probe"
-    return _rollback(cfg, host, prober, previous_plist, receipt)
+    def write_journal(
+        self, receipt: Dict[str, Any], previous_plist: bytes, new_plist: bytes, python: Path
+    ) -> None:
+        remember_plist(self.cfg, new_plist)
+        journal = {
+            "schema": JOURNAL_SCHEMA,
+            "receipt": receipt,
+            "previous_plist_b64": base64.b64encode(previous_plist).decode("ascii"),
+            "new_plist_sha256": _sha256(new_plist),
+            "candidate_python": str(python),
+        }
+        _atomic_write(self.cfg.journal, json.dumps(journal, sort_keys=True).encode(), 0o600)
+
+    def rollback(self, previous_plist: bytes, receipt: Dict[str, Any]) -> Dict[str, Any]:
+        """Restore the exact previous plist bytes, reload, and re-probe the previous deployment."""
+        receipt["rolled_back"] = True
+        previous_root = live_root(previous_plist)
+        previous_commit = commit_of(previous_root)
+        previous_python = live_python(previous_plist)
+        try:
+            remember_plist(self.cfg, previous_plist)
+            _atomic_write(self.cfg.plist, previous_plist)
+            self.host.reload_service(self.cfg.plist, GATEWAY_LABEL)
+            if previous_commit and previous_root and previous_python:
+                restored = self.live_probe(previous_commit, previous_root, previous_python)
+            else:
+                restored = {
+                    "ok": False,
+                    "error": "previous identity unknown; restored plist bytes only",
+                }
+        except Exception as exc:  # noqa: BLE001
+            restored = {"ok": False, "error": f"{type(exc).__name__}:{exc}"[:300]}
+        receipt["probes"]["rollback"] = restored
+        return {"outcome": "ROLLED_BACK" if restored["ok"] else "ROLLBACK_FAILED"}
+
+    def reconcile_journal(self) -> Dict[str, Any]:
+        """Resolve a switch that a previous cycle did not finish (crash or kill)."""
+        cfg = self.cfg
+        journal = json.loads(cfg.journal.read_text(encoding="utf-8"))
+        if journal.get("schema") != JOURNAL_SCHEMA:
+            raise DeployError("PENDING_SWITCH_JOURNAL_INVALID")
+        receipt = dict(journal["receipt"])
+        receipt["reconciled"] = True
+        receipt["switched"] = True
+        previous_plist = base64.b64decode(journal["previous_plist_b64"])
+        root = Path(receipt["deployment_root"])
+        python = Path(journal["candidate_python"])
+        with self.host.manager_lock(cfg):
+            try:
+                live_plist = cfg.plist.read_bytes()
+                if _sha256(live_plist) == journal["new_plist_sha256"]:
+                    # The switch got as far as the plist write; make sure launchd
+                    # runs it, then decide like a normal switch would.
+                    receipt.update(self.finish_switch(receipt, previous_plist, root, python))
+                elif live_plist == previous_plist:
+                    receipt.update(outcome="INTERRUPTED", switched=False)
+                    receipt["reason"] = "crashed before the plist write; previous plist still live"
+                else:
+                    _set_hold(cfg, "auto-hold: FOREIGN_PLIST while reconciling a pending switch")
+                    receipt.update(outcome="FOREIGN_PLIST", reason="unexpected live plist")
+            except Exception as exc:  # noqa: BLE001
+                receipt["reason"] = f"{type(exc).__name__}:{exc}"[:500]
+                receipt.update(self.rollback(previous_plist, receipt))
+        return self.close_receipt(receipt)
+
+    def move_tool_link(self, root: Path) -> Dict[str, Any]:
+        """Self-update: point the LaunchAgent at the new tree only if its deployer works."""
+        cfg = self.cfg
+        deployer = root / DEPLOYER
+        env = {
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "NEXUS_GATEWAY_PLIST": str(cfg.plist),
+        }
+        for argv in (
+            [str(self.tool_python), str(deployer), "selftest", "--state-dir", str(cfg.state_dir)],
+            [str(self.tool_python), str(deployer), "status", "--state-dir", str(cfg.state_dir)],
+        ):
+            result = self.host.run(argv, env=env, timeout=120)
+            if result.returncode != 0:
+                detail = (result.stderr or result.stdout or "").strip()[-300:]
+                return {"moved": False, "reason": f"{argv[2]} failed: {detail}"}
+        _atomic_symlink(root, cfg.tool_link)
+        return {"moved": True, "target": str(root)}
 
 
 def rollback_readiness(host: Host, previous_plist: bytes) -> Dict[str, Any]:
@@ -886,35 +1268,14 @@ def rollback_readiness(host: Host, previous_plist: bytes) -> Dict[str, Any]:
     return {"ok": True, "root": str(root), "python": str(python)}
 
 
-def _rollback(
-    cfg: Config, host: Host, prober: Prober, previous_plist: bytes, receipt: Dict[str, Any]
+def verify_commit(
+    api_get: Callable[[str], Any], sha: str, *, repo: str = REPOSITORY
 ) -> Dict[str, Any]:
-    """Restore the exact previous plist bytes, reload, and re-probe the previous deployment."""
-    receipt["rolled_back"] = True
-    previous_root = live_root(previous_plist)
-    previous_commit = commit_of(previous_root)
-    previous_python = live_python(previous_plist)
-    try:
-        _atomic_write(cfg.plist, previous_plist)
-        host.reload_service(cfg.plist, GATEWAY_LABEL)
-        if previous_commit and previous_root and previous_python:
-            restored = prober.probe(
-                port=LIVE_PORT,
-                token=read_env_token(cfg.env_file),
-                commit=previous_commit,
-                root=previous_root,
-                python=previous_python,
-                timeout=cfg.probe_timeout_seconds,
-            )
-        else:
-            restored = {
-                "ok": False,
-                "error": "previous identity unknown; restored plist bytes only",
-            }
-    except Exception as exc:  # noqa: BLE001
-        restored = {"ok": False, "error": f"{type(exc).__name__}:{exc}"[:300]}
-    receipt["probes"]["rollback"] = restored
-    return {"outcome": "ROLLED_BACK" if restored["ok"] else "ROLLBACK_FAILED"}
+    """Installer gate: the bootstrap commit must be on GitHub main with green checks."""
+    main_check = on_github_main(api_get, sha, repo=repo)
+    checks = required_checks(api_get, sha, repo=repo) if main_check["ok"] else None
+    ok = bool(main_check["ok"] and checks and checks["verdict"] == "GREEN")
+    return {"ok": ok, "commit": sha, "github_main": main_check, "required_checks": checks}
 
 
 # ---------------------------------------------------------------------------- cli
@@ -928,7 +1289,11 @@ def main(
     api_get: Optional[Callable[[str], Any]] = None,
 ) -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
-    parser.add_argument("command", choices=("run", "status", "hold", "release"))
+    parser.add_argument(
+        "command",
+        choices=("run", "status", "hold", "release", "adopt", "selftest", "verify-commit"),
+    )
+    parser.add_argument("commit", nargs="?", help="verify-commit: the commit to verify")
     parser.add_argument(
         "--dry-run", action="store_true", help="print the plan; no build, launchd or prune"
     )
@@ -942,11 +1307,14 @@ def main(
     parser.add_argument("--state-dir", type=Path, default=None)
     parser.add_argument("--gateway-root", type=Path, default=None)
     parser.add_argument("--plist", type=Path, default=None)
-    parser.add_argument("--gh", default="gh", help="gh executable used for the check-runs API")
+    parser.add_argument("--gh", default="gh", help="gh executable used for the GitHub API")
     parser.add_argument("--keep", type=int, default=None)
     parser.add_argument("--min-interval", type=int, default=None, dest="min_interval_seconds")
     parser.add_argument("--max-irrelevant-lag", type=int, default=None)
     parser.add_argument("--python-version", default=None)
+    parser.add_argument(
+        "--uv-extras", default=None, help='"all" (default) or a comma list such as "legacy"'
+    )
     args = parser.parse_args(argv)
     cfg = Config.default(
         args.home,
@@ -957,10 +1325,10 @@ def main(
         min_interval_seconds=args.min_interval_seconds,
         max_irrelevant_lag=args.max_irrelevant_lag,
         python_version=args.python_version,
+        uv_extras=args.uv_extras,
     )
     if args.command == "hold":
-        cfg.state_dir.mkdir(parents=True, exist_ok=True)
-        cfg.hold_file.write_text(args.reason + "\n", encoding="utf-8")
+        _set_hold(cfg, args.reason)
         print(json.dumps({"status": "HELD", "hold": str(cfg.hold_file)}))
         return 0
     if args.command == "release":
@@ -968,12 +1336,25 @@ def main(
             cfg.hold_file.unlink()
         print(json.dumps({"status": "RELEASED"}))
         return 0
+    if args.command == "adopt":
+        data = cfg.plist.read_bytes()
+        live_root(data)  # label check
+        remember_plist(cfg, data)
+        print(json.dumps({"status": "ADOPTED", "plist_sha256": _sha256(data)}))
+        return 0
+    if args.command == "selftest":
+        # Proves this tree's deployer can reach the single launchd effect owner.
+        from scripts.ops.mcp_gateway_durable import reload_gateway_launch_agent
+
+        print(json.dumps({"status": "OK", "reload": reload_gateway_launch_agent.__name__}))
+        return 0
     if args.command == "status":
         state = cfg.state_dir / "status.json"
         print(
             json.dumps(
                 {
                     "hold": hold_reason(cfg),
+                    "pending_switch": cfg.journal.exists(),
                     "status": json.loads(state.read_text(encoding="utf-8"))
                     if state.is_file()
                     else None,
@@ -984,6 +1365,14 @@ def main(
             )
         )
         return 0
+    host = host or Host()
+    if args.command == "verify-commit":
+        if not args.commit or not _SHA.match(args.commit):
+            print(json.dumps({"ok": False, "error": "commit must be a 40-hex sha"}))
+            return 2
+        verdict = verify_commit(api_get or gh_api_getter(host, args.gh), args.commit)
+        print(json.dumps(verdict, sort_keys=True))
+        return 0 if verdict["ok"] else 1
     if not args.dry_run and os.environ.get(TOKEN_ENV):
         # The Gateway wrapper sources the token; a deploy started from inside the
         # Gateway would kill itself mid-switch.  Run it out of process only.
@@ -991,7 +1380,6 @@ def main(
             json.dumps({"schema": STATUS_SCHEMA, "status": "ERROR", "error": "IN_GATEWAY_PROCESS"})
         )
         return 2
-    host = host or Host()
     try:
         result = run_cycle(
             cfg,
@@ -1002,7 +1390,16 @@ def main(
             force=args.force,
         )
     except (DeployError, OSError, ValueError) as exc:
-        print(json.dumps({"schema": STATUS_SCHEMA, "status": "ERROR", "error": str(exc)[:500]}))
+        error = {
+            "schema": STATUS_SCHEMA,
+            "status": "ERROR",
+            "error": str(exc)[:500],
+            "polled_at": _iso(time.time()),
+        }
+        if not args.dry_run:
+            with contextlib.suppress(OSError):
+                _write_status(cfg, error)
+        print(json.dumps(error))
         return 2
     print(json.dumps(result, indent=2 if args.dry_run else None, sort_keys=True))
     return 1 if result["status"] in FAILED_OUTCOMES else 0

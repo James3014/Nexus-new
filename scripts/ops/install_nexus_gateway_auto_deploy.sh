@@ -7,10 +7,18 @@
 #
 # 1. Fetch main into the existing Gateway bare repository and check it out as a
 #    bootstrap worktree (gateway-direct/auto-deploy-bootstrap).
-# 2. Point gateway-direct/auto-deploy-current at it.  Every successful deploy
-#    moves that link to the new deployment, so the deployer updates itself.
-# 3. Write and load the LaunchAgent com.nexus.gateway-auto-deploy, which runs
+# 2. Verify that commit with the deployer's own `verify-commit` (GitHub main tip
+#    or ancestor, all required checks green); stop on any failure.
+# 3. Point gateway-direct/auto-deploy-current at it (atomic rename).  Every
+#    successful deploy moves that link to the new deployment once the new
+#    tree's deployer passes `selftest`, so the deployer updates itself.
+# 4. `adopt` the current live Gateway plist: the deployer refuses to switch away
+#    from a plist it did not write or adopt (FOREIGN_PLIST -> HOLD).
+# 5. Write and load the LaunchAgent com.nexus.gateway-auto-deploy, which runs
 #    one deploy cycle every INTERVAL seconds.
+# Re-running the installer is safe and idempotent.
+#
+# Before any manual #526 rebind: `hold`; afterwards `adopt` and `release`.
 # It does not touch com.nexus.mcp.gateway.direct; the deployer does that itself,
 # only after a candidate passes the spare-port probe.
 #
@@ -28,6 +36,7 @@ LINK="$GATEWAY_ROOT/auto-deploy-current"
 # Test/override hook: use this tree instead of a bootstrap worktree.
 TOOL_ROOT="${NEXUS_GATEWAY_AUTO_DEPLOY_TOOL_ROOT:-}"
 PLIST="${NEXUS_GATEWAY_AUTO_DEPLOY_PLIST:-$HOME/Library/LaunchAgents/$LABEL.plist}"
+GATEWAY_PLIST="${NEXUS_GATEWAY_AUTO_DEPLOY_GATEWAY_PLIST:-$HOME/Library/LaunchAgents/com.nexus.mcp.gateway.direct.plist}"
 STATE_DIR="${NEXUS_GATEWAY_AUTO_DEPLOY_STATE_DIR:-$HOME/.local/state/nexus-gateway-auto-deploy}"
 PYTHON="${NEXUS_GATEWAY_AUTO_DEPLOY_PYTHON:-$(cd / && uv python find --no-project 3.12)}"
 INTERVAL="${NEXUS_GATEWAY_AUTO_DEPLOY_INTERVAL:-300}"
@@ -42,6 +51,7 @@ fi
 
 if [[ "$DRY_RUN" == "1" ]]; then
   echo "would check out main from $BARE at $BOOTSTRAP (unless NEXUS_GATEWAY_AUTO_DEPLOY_TOOL_ROOT is set)"
+  echo "would verify that commit (GitHub main + required checks) and adopt $GATEWAY_PLIST"
   echo "would point $LINK at it"
   echo "would write $PLIST (python=$PYTHON interval=${INTERVAL}s gh=$GH_BIN state=$STATE_DIR)"
   echo "would load gui/$(id -u)/$LABEL"
@@ -62,14 +72,39 @@ if [[ ! -f "$DEPLOYER" ]]; then
   echo "NEXUS_GATEWAY_AUTO_DEPLOY_SOURCE_MISSING:$DEPLOYER" >&2
   exit 1
 fi
-PYTHONDONTWRITEBYTECODE=1 "$PYTHON" -c 'import ast, sys; ast.parse(open(sys.argv[1]).read())' "$DEPLOYER"
+if [[ -n "$(git -C "$TOOL_ROOT" status --porcelain)" ]]; then
+  echo "NEXUS_GATEWAY_AUTO_DEPLOY_TOOL_TREE_DIRTY:$TOOL_ROOT" >&2
+  exit 1
+fi
+TOOL_COMMIT="$(git -C "$TOOL_ROOT" rev-parse HEAD)"
+export PYTHONDONTWRITEBYTECODE=1
+if ! "$PYTHON" "$DEPLOYER" verify-commit "$TOOL_COMMIT" --gh "$GH_BIN"; then
+  echo "NEXUS_GATEWAY_AUTO_DEPLOY_TOOL_COMMIT_NOT_VERIFIED:$TOOL_COMMIT" >&2
+  exit 1
+fi
+"$PYTHON" "$DEPLOYER" selftest --state-dir "$STATE_DIR"
 
 mkdir -p "$GATEWAY_ROOT" "$(dirname "$PLIST")" "$STATE_DIR"
-ln -sfn "$TOOL_ROOT" "$LINK.tmp.$$"
-mv -f "$LINK.tmp.$$" "$LINK"
+# Atomic, idempotent link replacement (`ln -sfn tmp; mv -f tmp LINK` would move
+# the temporary link *into* an existing directory link).
+"$PYTHON" - "$TOOL_ROOT" "$LINK" <<'PY'
+import os, sys
+target, link = sys.argv[1:]
+tmp = f"{link}.tmp.{os.getpid()}"
+if os.path.lexists(tmp):
+    os.unlink(tmp)
+os.symlink(target, tmp)
+os.replace(tmp, link)
+PY
+
+if [[ -f "$GATEWAY_PLIST" ]]; then
+  "$PYTHON" "$DEPLOYER" adopt --plist "$GATEWAY_PLIST" --state-dir "$STATE_DIR"
+else
+  echo "NEXUS_GATEWAY_AUTO_DEPLOY_GATEWAY_PLIST_MISSING:$GATEWAY_PLIST (nothing adopted)" >&2
+fi
 
 PLIST_TMP="$PLIST.tmp.$$"
-"$PYTHON" - "$PLIST_TMP" "$LABEL" "$PYTHON" "$LINK" "$GH_BIN" "$STATE_DIR" "$INTERVAL" <<'PY'
+GATEWAY_PLIST="$GATEWAY_PLIST" "$PYTHON" - "$PLIST_TMP" "$LABEL" "$PYTHON" "$LINK" "$GH_BIN" "$STATE_DIR" "$INTERVAL" <<'PY'
 import os, plistlib, sys
 out, label, python, link, gh, state_dir, interval = sys.argv[1:]
 payload = {
@@ -86,9 +121,7 @@ payload = {
         "HOME": os.path.expanduser("~"),
         "PYTHONDONTWRITEBYTECODE": "1",
         # The durable manager derives the Gateway plist from this (out-of-process switch).
-        "NEXUS_GATEWAY_PLIST": os.path.expanduser(
-            "~/Library/LaunchAgents/com.nexus.mcp.gateway.direct.plist"
-        ),
+        "NEXUS_GATEWAY_PLIST": os.environ["GATEWAY_PLIST"],
     },
     "StandardOutPath": f"{state_dir}/stdout.log",
     "StandardErrorPath": f"{state_dir}/stderr.log",
