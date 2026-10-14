@@ -671,6 +671,27 @@ def _direct_provider_infra_row(row: dict[str, Any]) -> bool:
     return not bool(row.get("run_eligible", True)) and bool(str(row.get("infra_invalid_reason") or ""))
 
 
+_PROVIDER_INFRA_MARKERS = ("agy_", "quota", "model_identity", "cli_missing", "model_gateway_error", "account_pool")
+
+
+def _with_nexus_provider_timeout_row(row: dict[str, Any]) -> bool:
+    """Provider-side timeout on a with-Nexus row (same markers the bare abort rule uses)."""
+
+    markers = {
+        str(row.get("gateway_error_category") or ""),
+        str(row.get("baseline_gateway_error_category") or ""),
+        str(row.get("infra_invalid_reason") or ""),
+    }
+    return bool(markers & {"timeout", "timeout_before_model_call"})
+
+
+def _with_nexus_provider_infra_row(row: dict[str, Any]) -> bool:
+    """Provider/account infra failure on a with-Nexus row (not a Nexus routing/delivery failure)."""
+
+    reason = str(row.get("infra_invalid_reason") or "").lower()
+    return bool(reason) and any(marker in reason for marker in _PROVIDER_INFRA_MARKERS)
+
+
 def _direct_timeout_abort_reason(consecutive_timeouts: int, threshold: int) -> str:
     if int(threshold) <= 0:
         return ""
@@ -3162,6 +3183,96 @@ def _receipt_first_required(task: CapabilityTask) -> bool:
 
 def _hidden_retry_disabled() -> bool:
     return os.environ.get("NEXUS_BENCH_DISABLE_HIDDEN_RETRY", "").strip().lower() in {"1", "true", "yes"}
+
+
+def _install_prompt_capture(out_dir: Path) -> Path:
+    """Route both arms' ``agy`` calls through scripts/bench/agy_prompt_capture.py (S21)."""
+
+    from scripts.bench.agy_provider import resolve_agy_bin
+
+    capture_dir = out_dir / "prompt_capture"
+    bin_dir = out_dir / "prompt_capture_bin"
+    capture_dir.mkdir(parents=True, exist_ok=True)
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    real = resolve_agy_bin(os.environ) or ""
+    wrapper = bin_dir / "agy"
+    script = Path(__file__).resolve().parent / "agy_prompt_capture.py"
+    wrapper.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n', encoding="utf-8")
+    wrapper.chmod(0o755)
+    os.environ["NEXUS_BENCH_PROMPT_CAPTURE_REAL"] = real
+    os.environ["NEXUS_BENCH_PROMPT_CAPTURE_DIR"] = str(capture_dir)
+    os.environ["NEXUS_AGY_BIN"] = str(wrapper)
+    os.environ["PATH"] = f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"
+    return capture_dir
+
+
+def _prompt_capture_key(task: CapabilityTask) -> str:
+    return f"{task.id}__{task.trial_index}"
+
+
+def _begin_prompt_capture_leg(
+    arm: str, task: CapabilityTask, target_file: str, test_file: str, materials: dict[str, Any]
+) -> None:
+    """Tag the next ``agy`` calls with arm/task and keep the fixture material for the audit."""
+
+    from scripts.bench.prompt_symmetry_audit import TaskMaterial
+
+    key = _prompt_capture_key(task)
+    os.environ["NEXUS_BENCH_ARM"] = arm
+    os.environ["NEXUS_BENCH_CAPTURE_KEY"] = key
+    if key in materials:
+        return
+
+    def _read(path: str) -> str:
+        try:
+            return Path(path).read_text(encoding="utf-8")
+        except OSError:
+            return ""
+
+    hidden_path = _hidden_test_for_visible_test(test_file)
+    materials[key] = TaskMaterial(
+        task_id=task.id,
+        visible_test=_read(test_file),
+        hidden_test=_read(hidden_path) if hidden_path != test_file else "",
+        source=_read(target_file),
+    )
+
+
+def _apply_prompt_symmetry_audit(
+    capture_dir: Path, materials: dict[str, Any], rows: list[dict[str, Any]], *, out_dir: Path
+) -> dict[str, Any]:
+    """S21: fail the counted metric on any hidden literal or with-Nexus-only prompt text."""
+
+    from scripts.bench.prompt_symmetry_audit import audit_run
+
+    report = audit_run(capture_dir, materials, rows=rows)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "prompt_symmetry_audit.json").write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+    for row in rows:
+        row["prompt_symmetry_status"] = report["status"]
+        if report["status"] != "PASS":
+            row["prompt_symmetry_violation"] = True
+            row.setdefault("infra_invalid_reason", None)
+            row["infra_invalid_reason"] = row["infra_invalid_reason"] or "prompt_symmetry_violation"
+            row["run_eligible"] = False
+    return report
+
+
+def _counted_first_attempt_only() -> bool:
+    """True in the counted like-for-like configuration: score the first attempt only.
+
+    ``main`` sets this from ``--counted-first-attempt`` (default ON under ``--strict-llm-baseline``
+    / ``--require-same-model-baseline``): no bounded Hyper rescue (S10), no deterministic rescues
+    (S12/S13), no promoted route-cost policy, and the arms run interleaved ABBA (S22).
+    """
+
+    return os.environ.get("NEXUS_BENCH_COUNTED_FIRST_ATTEMPT", "").strip().lower() in {"1", "true", "yes"}
+
+
+def _interleave_arms_enabled(args: Any) -> bool:
+    if bool(getattr(args, "nexus_only", False)) or bool(getattr(args, "without_only", False)):
+        return False
+    return bool(getattr(args, "counted_first_attempt", False))
 
 
 def _hidden_feedback_disabled() -> bool:
@@ -14824,6 +14935,8 @@ def run_with_nexus(
                 supervised["semantic_completed"] = True
                 supervised["runtime_classification"] = "nexus_supervised_bare_first_deterministic_pre_rescue"
                 supervised["nexus_winner_source"] = "nexus_llm_deterministic_pre_rescue"
+                # S12: the local fixture mutator delivered this file, not the model.
+                supervised["local_success_source"] = True
                 supervised["nexus_rescued"] = True
                 supervised["gemini_uses_nexus"] = True
                 supervised["model_uses_nexus"] = True
@@ -15361,6 +15474,8 @@ def run_with_nexus(
             row["semantic_completed"] = True
             row["runtime_classification"] = "nexus_deterministic_pre_rescue"
             row["nexus_winner_source"] = "nexus_llm_deterministic_pre_rescue"
+            # S12: the local fixture mutator delivered this file, not the model.
+            row["local_success_source"] = True
             row["model_uses_nexus"] = True
             row["gemini_uses_nexus"] = True
             row["nexus_context_delivered"] = True
@@ -15390,7 +15505,11 @@ def run_with_nexus(
     hyper_admission = _hyper_admission_after_model_attempt(row)
     row["hyper_admission_decision"] = "run_hyper" if hyper_admission.run_hyper else "skip_hyper"
     row["hyper_admission_reason"] = hyper_admission.reason
-    if llm_enabled and effective_strict_llm_baseline and hyper_admission.run_hyper:
+    if hyper_admission.run_hyper and _counted_first_attempt_only():
+        # S10: the counted metric is the first attempt; a fresh Hyper re-run is Nexus treatment.
+        row["bounded_nexus_rescue_used"] = False
+        row["bounded_nexus_rescue_reason"] = "disabled_counted_first_attempt"
+    elif llm_enabled and effective_strict_llm_baseline and hyper_admission.run_hyper:
         rescue_args = [item for item in args if item not in {"--llm-baseline", "--llm-baseline-required"}]
         if "--force-flow" in rescue_args:
             idx = rescue_args.index("--force-flow")
@@ -19519,6 +19638,24 @@ def main() -> int:
         help="When Nexus LLM baseline is enabled, require the baseline patch to come from the model and forbid local fallback.",
     )
     parser.add_argument(
+        "--counted-first-attempt",
+        dest="counted_first_attempt",
+        action="store_true",
+        default=None,
+        help=(
+            "Counted like-for-like metric: first attempt only (no bounded Hyper rescue, no deterministic "
+            "rescues, promoted route-cost policy off), arms interleaved ABBA with one abort rule, and the "
+            "captured-prompt symmetry audit enforced. Default ON under --strict-llm-baseline or "
+            "--require-same-model-baseline."
+        ),
+    )
+    parser.add_argument(
+        "--allow-nexus-treatment",
+        dest="counted_first_attempt",
+        action="store_false",
+        help="Allow rescues/re-runs in the with-Nexus arm (a separate 'Nexus treatment' number, never like-for-like).",
+    )
+    parser.add_argument(
         "--no-hidden-feedback",
         dest="no_hidden_feedback",
         action="store_true",
@@ -19736,6 +19873,19 @@ def main() -> int:
     if args.no_hidden_feedback is None:
         args.no_hidden_feedback = bool(args.strict_llm_baseline or getattr(args, "require_same_model_baseline", False))
     os.environ["NEXUS_BENCH_NO_HIDDEN_FEEDBACK"] = "1" if args.no_hidden_feedback else "0"
+    if args.counted_first_attempt is None:
+        args.counted_first_attempt = bool(
+            args.strict_llm_baseline or getattr(args, "require_same_model_baseline", False)
+        )
+    os.environ["NEXUS_BENCH_COUNTED_FIRST_ATTEMPT"] = "1" if args.counted_first_attempt else "0"
+    if args.counted_first_attempt:
+        if getattr(args, "enable_background_offload", False):
+            parser.error("--counted-first-attempt cannot be combined with --enable-background-offload")
+        # S13: no promoted route-cost policy and no deterministic rescue in the counted arm.
+        args.disable_promoted_route_cost_policy = True
+        os.environ["NEXUS_DISABLE_PROMOTED_ROUTE_COST_POLICY"] = "1"
+        os.environ["NEXUS_BENCH_DISABLE_DETERMINISTIC_RESCUE"] = "1"
+        os.environ["NEXUS_BENCH_DISABLE_HIDDEN_RETRY"] = "1"
     if args.skip_llm_baseline and args.strict_llm_baseline:
         parser.error("--strict-llm-baseline cannot be combined with --skip-llm-baseline")
     if args.nexus_only and args.without_only:
@@ -19979,7 +20129,16 @@ def main() -> int:
             persistent_worker_proc = None
 
     with_tasks = [] if bool(args.without_only) else tasks
-    for task in with_tasks:
+    direct_timeout_streak = 0
+    direct_infra_streak = 0
+    with_timeout_streak = 0
+    with_infra_streak = 0
+    interleave_arms = _interleave_arms_enabled(args)
+    prompt_audit_dir = _install_prompt_capture(out_dir) if bool(args.counted_first_attempt) else None
+    prompt_audit_materials: dict[str, Any] = {}
+
+    def _with_nexus_leg(task: CapabilityTask) -> str:
+        nonlocal timed_out, with_timeout_streak, with_infra_streak
         if _budget_exceeded(run_start, effective_total_timeout_sec):
             timed_out = True
             _emit_progress(
@@ -19990,8 +20149,9 @@ def main() -> int:
                 elapsed_sec=time.monotonic() - run_start,
                 status="SKIPPED",
             )
-            break
+            return "break"
         target_file, test_file = _resolve_task_files(repo_root, task, materialize_missing=bool(args.materialize_missing))
+        _begin_prompt_capture_leg("with_nexus", task, target_file, test_file, prompt_audit_materials)
         flow = None if args.force_flow == "auto" else args.force_flow
         if args.neutralize_history and not args.allow_learning_loop:
             _reset_auto_flow_history(repo_root)
@@ -20059,7 +20219,7 @@ def main() -> int:
                 task=task,
                 status="OFFLOADED",
             )
-            continue
+            return "continue"
 
         try:
             leg_start = time.monotonic()
@@ -20130,6 +20290,18 @@ def main() -> int:
                     elapsed_sec=float(row.get("wall_duration_sec", 0.0) or 0.0),
                     status="INFRA_INVALID",
                 )
+            if interleave_arms:
+                # S22: the bare arm's consecutive provider timeout/infra abort applies to this arm too.
+                with_timeout_streak = with_timeout_streak + 1 if _with_nexus_provider_timeout_row(row) else 0
+                with_infra_streak = with_infra_streak + 1 if _with_nexus_provider_infra_row(row) else 0
+                arm_abort_reason = _direct_timeout_abort_reason(
+                    with_timeout_streak, int(args.direct_timeout_abort_threshold)
+                ) or _direct_infra_abort_reason(with_infra_streak, int(args.direct_infra_abort_threshold))
+                if arm_abort_reason:
+                    row["provider_abort_triggered"] = True
+                    row["provider_abort_reason"] = arm_abort_reason
+                    timed_out = True
+                    return "break"
             fail_fast_reason = (
                 _with_nexus_row_fail_fast_reason(row, task=task)
                 if _truthy_env("NEXUS_BENCH_FAIL_FAST_ON_ROW_FAILURE")
@@ -20149,7 +20321,7 @@ def main() -> int:
                     elapsed_sec=time.monotonic() - run_start,
                     status=f"PARTIAL_WITH_NEXUS_ABORT:{fail_fast_reason}",
                 )
-                break
+                return "break"
         except BenchmarkTotalTimeout:
             timed_out = True
             _emit_progress(
@@ -20162,20 +20334,13 @@ def main() -> int:
                 elapsed_sec=time.monotonic() - run_start,
                 status="INTERRUPTED",
             )
-            break
+            return "break"
         finally:
             _restore_preserved_target(target_file, original_target)
-    if args.neutralize_history:
-        _reset_auto_flow_history(repo_root)
-    without_tasks = _without_tasks_for_run(
-        tasks,
-        timed_out=timed_out,
-        nexus_only=bool(args.nexus_only),
-        without_only=bool(args.without_only),
-    )
-    direct_timeout_streak = 0
-    direct_infra_streak = 0
-    for task in without_tasks:
+        return ""
+
+    def _without_nexus_leg(task: CapabilityTask) -> str:
+        nonlocal timed_out, direct_timeout_streak, direct_infra_streak
         if _budget_exceeded(run_start, effective_total_timeout_sec):
             timed_out = True
             _emit_progress(
@@ -20186,8 +20351,9 @@ def main() -> int:
                 elapsed_sec=time.monotonic() - run_start,
                 status="SKIPPED",
             )
-            break
+            return "break"
         target_file, test_file = _resolve_task_files(repo_root, task, materialize_missing=bool(args.materialize_missing))
+        _begin_prompt_capture_leg("without_nexus", task, target_file, test_file, prompt_audit_materials)
         flow = None if args.force_flow == "auto" else args.force_flow
         if args.neutralize_history and not args.allow_learning_loop:
             _reset_auto_flow_history(repo_root)
@@ -20287,7 +20453,7 @@ def main() -> int:
                     elapsed_sec=time.monotonic() - run_start,
                     status=f"PARTIAL_PROVIDER_ABORT:{direct_abort_reason}",
                 )
-                break
+                return "break"
         except BenchmarkTotalTimeout:
             timed_out = True
             _emit_progress(
@@ -20300,11 +20466,43 @@ def main() -> int:
                 elapsed_sec=time.monotonic() - run_start,
                 status="INTERRUPTED",
             )
-            break
+            return "break"
         finally:
             _restore_preserved_target(target_file, original_target)
 
+        return ""
+
+    without_tasks: list[CapabilityTask] = list(tasks)
+    if interleave_arms:
+        # S22: ABBA per task x trial so both arms see the same provider/quota conditions, and
+        # one abort rule stops both arms at the same task.
+        for pair_index, task in enumerate(tasks):
+            legs = (_with_nexus_leg, _without_nexus_leg) if pair_index % 2 == 0 else (_without_nexus_leg, _with_nexus_leg)
+            if any(leg(task) == "break" for leg in legs):
+                timed_out = True
+                break
+    else:
+        for task in with_tasks:
+            if _with_nexus_leg(task) == "break":
+                break
+        if args.neutralize_history:
+            _reset_auto_flow_history(repo_root)
+        without_tasks = _without_tasks_for_run(
+            tasks,
+            timed_out=timed_out,
+            nexus_only=bool(args.nexus_only),
+            without_only=bool(args.without_only),
+        )
+        for task in without_tasks:
+            if _without_nexus_leg(task) == "break":
+                break
+
     _clear_total_timeout(previous_timeout_handler)
+    prompt_symmetry_report = None
+    if prompt_audit_dir is not None:
+        prompt_symmetry_report = _apply_prompt_symmetry_audit(
+            prompt_audit_dir, prompt_audit_materials, [*with_rows, *without_rows], out_dir=out_dir
+        )
 
     hidden_verifier_mode = _hidden_verifier_mode_enabled()
     for row in [*with_rows, *without_rows]:
@@ -20363,6 +20561,8 @@ def main() -> int:
                     "skip_llm_baseline": bool(args.skip_llm_baseline),
                     "strict_llm_baseline": bool(args.strict_llm_baseline),
                     "no_hidden_feedback": bool(args.no_hidden_feedback),
+                    "counted_first_attempt": bool(args.counted_first_attempt),
+                    "interleave_arms": _interleave_arms_enabled(args),
                     "disable_promoted_route_cost_policy": bool(args.disable_promoted_route_cost_policy),
                     "force_flow": args.force_flow,
                     "parallel_arms": args.parallel_arms,
@@ -20459,6 +20659,14 @@ def main() -> int:
         except Exception:
             persistent_worker_proc.kill()
 
+    if prompt_symmetry_report is not None and prompt_symmetry_report.get("status") != "PASS":
+        print(
+            f"prompt symmetry audit FAILED ({len(prompt_symmetry_report.get('failed_keys') or [])} task(s)); "
+            "counted metric is invalid for this run",
+            file=sys.stderr,
+            flush=True,
+        )
+        return 3
     return 0
 
 

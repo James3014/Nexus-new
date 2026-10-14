@@ -195,6 +195,8 @@
 | scripts/ci/nexus-core-verify.sh | tests/ops/test_select_tests.py, tests/ops/test_pr_impact_gate.py | active | high | nexus_core_completion_ci_entrypoint_contract |
 | scripts/ci/nexus_core_trusted_pin_policy.py | tests/ops/test_nexus_core_trusted_pin_policy.py, tests/ops/test_select_tests.py, tests/ops/test_pr_impact_gate.py | active | high | nexus_core_trusted_pin_maintenance_contract |
 | scripts/bench/capability_ab_runner.py | tests/benchmark/test_capability_ab_runner.py::test_run_with_nexus_subprocess_preserves_executor_receipts_without_llm, tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_accepts_causal_runtime_mount, tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_rejects_quarantined_mount | active | high | benchmark_contract |
+| scripts/bench/agy_prompt_capture.py | tests/benchmark/test_ab_prompt_symmetry_audit.py | active | high | ab_prompt_symmetry_contract |
+| scripts/bench/prompt_symmetry_audit.py | tests/benchmark/test_ab_prompt_symmetry_audit.py | active | high | ab_prompt_symmetry_contract |
 | scripts/bench/fixture_materialization.py | tests/benchmark/test_fixture_materialization.py | active | high | external_fixture_materialization_contract |
 | scripts/bench/public_lane_contract.py | tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_accepts_causal_runtime_mount, tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_rejects_quarantined_mount | active | high | benchmark_contract |
 | scripts/bench | tests/benchmark | active | medium | benchmark_contract |

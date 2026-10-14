@@ -83,7 +83,11 @@ def apply_strict_llm_baseline_classification(
         row["strict_llm_baseline_applied"] = True
         mode = str(row.get("mode", ""))
         row["rescued_by_local"] = False
-        if row.get("status") != "SUCCESS":
+        if (
+            row.get("status") != "SUCCESS"
+            or str(row.get("infra_invalid_reason") or "") == "task_stop_loss_exceeded"
+        ):
+            # S16: a stop-loss overrun is a failure that stays in the denominator, both arms.
             row["solve_classification"] = NOT_SOLVED
             row["deterministic_rescue"] = False
         else:
@@ -267,14 +271,15 @@ def apply_strict_llm_baseline_to_summary(
     rows: list[dict[str, Any]],
     summary: dict[str, dict[str, Any]],
 ) -> dict[str, dict[str, Any]]:
-    """Recompute solve counts per arm so deterministic rescues are not solves."""
+    """Recompute solve counts per arm so deterministic rescues are not solves.
+
+    S16: the denominator is every row of the arm. ESCALATE (no model call) and stop-loss rows are
+    failures, never removed as ineligible; ``run_eligible_n`` is reported alongside.
+    """
 
     for mode, arm in summary.items():
-        eligible = [
-            row
-            for row in rows
-            if str(row.get("mode", "")) == mode and bool(row.get("run_eligible", True))
-        ]
+        eligible = [row for row in rows if str(row.get("mode", "")) == mode]
+        arm["run_eligible_n"] = sum(1 for row in eligible if bool(row.get("run_eligible", True)))
         solved = [row for row in eligible if row.get("solve_classification") == MODEL_SOLVE]
         first_pass = [row for row in solved if int(row.get("attempt_count", 0) or 0) <= 1]
         arm["strict_llm_baseline_applied"] = True
