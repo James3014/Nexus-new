@@ -864,12 +864,8 @@ def _build_value_task_contract(*, source_code: str, task: str, test_source: str 
     # gets, so they were removed (online A/B R2, 2026-10-14).
     if "artifact" in combined or "claim" in combined:
         rules.append("Preserve exact canonical field names from source/tests; do not invent plural or renamed fields.")
-        if "'artifact'" in combined or '"artifact"' in combined:
-            rules.append("Use singular field 'artifact'; do not rename it to 'artifacts'.")
     if "phase" in combined or "evidence" in combined or "reason" in combined:
         rules.append("Use the canonical phase fields 'status', 'evidence', and 'reason' exactly when they appear in source/tests.")
-    if "deny" in combined or "authorization" in combined or "redact" in combined:
-        rules.append("MemPalace rule: fail closed for unknown or missing authorization data and never weaken redaction.")
     if "strict" in combined or "canonical" in combined or "config" in combined:
         rules.append("LanceDB/context rule: follow the canonical config/doc contract over older examples.")
     if not rules:
@@ -1346,7 +1342,8 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     initial_test_source = (
         test_source if symmetric_prompt else ("" if hidden_verifier_mode and not model_required_final_delivery else test_source)
     )
-    if initial_test_source:
+    if initial_test_source and not symmetric_prompt:
+        # P2-1: the bare arm gets the whole visible test, so symmetric mode never truncates it.
         initial_test_source = _truncate_redundant_tests(initial_test_source, config.task)
     llm_mode_effective = bool(config.llm_mode)
     learn_slo_guard = {

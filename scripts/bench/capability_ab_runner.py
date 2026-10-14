@@ -1996,7 +1996,44 @@ def _strict_symmetric_with_nexus_env() -> dict[str, str]:
         "NEXUS_MODEL_REQUIRED_EXECUTION_MODE": "model_participation_only",
         "NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL": "0",
         "NEXUS_SYMMETRIC_PROMPT": "1",
+        # L3: one candidate, no Nightshift re-run after a failed hyper attempt.
+        "NEXUS_LLM_CANDIDATE_CAP": "1",
+        "NEXUS_AUTO_NIGHTSHIFT_ON_HYPER_FAILURE": "0",
     }
+
+
+def _delivered_file_is_model_candidate(payload: dict[str, Any], row: dict[str, Any], target_file: str) -> bool:
+    from scripts.bench.strict_llm_baseline import local_delivery
+
+    result = payload.get("result") if isinstance(payload.get("result"), dict) else {}
+    report = result.get("report") if isinstance(result.get("report"), dict) else {}
+    expected = str(report.get("model_candidate_sha256") or "")
+    winner = str(row.get("nexus_winner_source") or report.get("winner_source") or "")
+    try:
+        delivered = hashlib.sha256(Path(target_file).read_bytes()).hexdigest()
+    except OSError:
+        return False
+    row["model_candidate_sha256"] = expected
+    row["delivered_target_sha256"] = delivered
+    return bool(expected) and delivered == expected and bool(winner) and not local_delivery({"nexus_winner_source": winner})
+
+
+def _counted_mode_unsupported_row(task: CapabilityTask, *, reason: str) -> dict[str, Any]:
+    row = _extract_record(
+        mode="with_nexus",
+        task=task,
+        payload={
+            "status": "FAILED",
+            "semantic_status": "UNVERIFIED",
+            "result": {"elapsed_sec": 0.0, "report": {"model_calls": 0, "attempt_count": 0}},
+        },
+        wall_time_sec=0.0,
+    )
+    row["status"] = "FAILED"
+    row["infra_invalid_reason"] = reason
+    row["run_eligible"] = False
+    row["model_calls"] = 0
+    return row
 
 
 def _nexus_task_desc(task: CapabilityTask) -> str:
@@ -14737,10 +14774,15 @@ def run_with_nexus(
         or expected_executor_capability_required
         or _task_default_llm_self_heal(task)
     )
-    if _no_nexus_task_hints():
+    no_hints = _no_nexus_task_hints()
+    if no_hints:
         # S9: the counted metric is one model call; the product's self-heal re-asks the model with
         # visible-test failure output the bare arm never gets.
         effective_llm_self_heal = False
+    if no_hints and llm_enabled and with_model_provider == "codex":
+        # The codex with-Nexus path builds its own CodeIntel/full-file prompt and re-asks with test
+        # output; it is not symmetric with the bare arm, so the counted lane refuses it outright.
+        return _counted_mode_unsupported_row(task, reason="provider_not_supported_in_counted_mode")
     local_reflex = assess_local_reflex(
         task_desc=task.task_desc,
         task_type=task.task_type,
@@ -14762,6 +14804,10 @@ def run_with_nexus(
         task.id,
         route_features=route_features,
     )
+    if no_hints and llm_enabled:
+        # S13 / P2-3: no promoted route-cost policy (and so no local pre-model / supervised path)
+        # in the counted arm, whatever the CLI flags say.
+        route_cost_controls = {}
     route_cost_controls, route_cost_policy_overrides = protect_expected_capability_controls(
         route_cost_controls,
         task.expected_capabilities,
@@ -14771,7 +14817,7 @@ def run_with_nexus(
         route_cost_policy_overrides,
         llm_enabled=llm_enabled,
         require_model_participation_env=_truthy_env("NEXUS_REQUIRE_MODEL_PARTICIPATION"),
-        disable_deterministic_rescue_env=_truthy_env("NEXUS_BENCH_DISABLE_DETERMINISTIC_RESCUE"),
+        disable_deterministic_rescue_env=_truthy_env("NEXUS_BENCH_DISABLE_DETERMINISTIC_RESCUE") or no_hints,
         allow_cost_efficiency_pre_model_rescue_env=_truthy_env("NEXUS_ALLOW_COST_EFFICIENCY_PRE_MODEL_RESCUE"),
     )
     route_cost_controls = model_participation_policy.route_cost_controls
@@ -14810,7 +14856,7 @@ def run_with_nexus(
         local_reflex_bare_sufficiency=local_reflex.bare_sufficiency,
     )
     supervised_bare_first_reason = route_execution_policy.supervised_bare_first_reason
-    supervised_bare_allowed = route_execution_policy.supervised_bare_first_allowed
+    supervised_bare_allowed = route_execution_policy.supervised_bare_first_allowed and not no_hints
     cost_capped_pre_model_rescue_allowed = (
         "cost_capped_capability_allows_verified_pre_model_rescue" in route_execution_policy.reason_codes
     )
@@ -14837,6 +14883,7 @@ def run_with_nexus(
         )
         and (not strict_llm_baseline or allow_cost_efficiency_pre_model_rescue)
         and route_execution_policy.pre_model_deterministic_rescue_allowed
+        and not no_hints
     ):
         pre_model_start = time.monotonic()
         pre_rescue = _deterministic_failed_tests_pre_rescue(
@@ -15274,6 +15321,9 @@ def run_with_nexus(
     ):
         effective_force_flow = "baseline"
         baseline_fast_path_reason = "route_cost_hidden_lite_baseline_fast_path"
+    if no_hints:
+        # L3: one model call per row in the counted arm.
+        effective_llm_candidate_cap = 1
     if route_cost_controls.get("lite_route") is True:
         effective_llm_candidate_cap = 1
         if task.eligibility_class != "model_required":
@@ -15287,7 +15337,7 @@ def run_with_nexus(
     verification_test_file = _verification_test_for_task(task, test_file)
     strict_target_before = (
         Path(target_file).read_text(encoding="utf-8")
-        if _no_nexus_task_hints() and Path(target_file).is_file()
+        if _no_nexus_task_hints() and llm_enabled and Path(target_file).is_file()
         else None
     )
     args = [
@@ -15785,13 +15835,28 @@ def run_with_nexus(
     # S20: in the like-for-like A/B both arms are judged by the hidden test on the delivered file
     # only. The product gates SUCCESS on the visible test; the bare arm has no such gate, so a model
     # file the product left delivered is verified here as well.
+    model_bound_delivery = True
+    if strict_target_before is not None:
+        # P1-2: the delivered file must be byte-identical to the model candidate the product
+        # generated (sha256 recorded at generation time) and the winner must be a model source;
+        # a file changed by any later local path is never judged as the model's.
+        model_bound_delivery = _delivered_file_is_model_candidate(payload, row, target_file)
+        row["model_bound_delivery"] = model_bound_delivery
     symmetric_model_delivery = bool(
         strict_target_before is not None
         and payload.get("status") != "SUCCESS"
         and int(row.get("model_calls", 0) or 0) > 0
         and Path(target_file).is_file()
         and Path(target_file).read_text(encoding="utf-8") != strict_target_before
+        and model_bound_delivery
     )
+    if strict_target_before is not None and payload.get("status") == "SUCCESS" and not model_bound_delivery:
+        # A product SUCCESS whose delivered file is not the model candidate is not counted.
+        payload = {**payload, "status": "FAILED"}
+        row["status"] = "FAILED"
+        row["semantic_status"] = "UNVERIFIED"
+        row["semantic_completed"] = False
+        row["symmetric_delivery_not_model"] = True
     if (payload.get("status") == "SUCCESS" or symmetric_model_delivery) and verification_test_file != test_file:
         verify_start = time.monotonic()
         verify = _run_process_group(
@@ -20134,6 +20199,8 @@ def main() -> int:
             args.strict_llm_baseline or getattr(args, "require_same_model_baseline", False)
         )
     os.environ["NEXUS_BENCH_NO_TASK_HINTS"] = "1" if args.no_nexus_task_hints else "0"
+    if args.no_nexus_task_hints and args.with_llm_mode != "off" and args.with_model_provider == "codex":
+        parser.error("--no-nexus-task-hints does not support --with-model-provider codex (prompt not symmetric)")
     if args.session_worker:
         os.environ["NEXUS_GEMINI_SESSION_WORKER"] = "1"
         os.environ["NEXUS_CODEX_SESSION_WORKER"] = "1"

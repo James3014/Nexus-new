@@ -838,7 +838,8 @@ def test_value_task_contract_includes_artifact_and_override_rules():
         test_source="assert merge_limits({'timeout': 10}, {'timeout': None}) == {'timeout': 10}",
     )
 
-    assert "Use singular field 'artifact'" in artifact_contract
+    # evidence-001 / gov-002 derived rules were removed from the product prompt (online A/B L1).
+    assert "Use singular field 'artifact'" not in artifact_contract
     # Fixture-specific answer rules were removed from the product prompt (online A/B R2).
     assert "return the claim ids" not in artifact_contract
     assert "preserve the existing default" not in override_contract

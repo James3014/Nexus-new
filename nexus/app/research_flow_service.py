@@ -8,6 +8,7 @@ import subprocess
 import sys
 import re
 import difflib
+import hashlib
 import os
 from pathlib import Path
 from datetime import datetime, timezone
@@ -286,6 +287,22 @@ def _load_codeintel_graph(path: Path) -> dict[str, Any] | None:
 
 def _build_codeintel_evidence(repo_root: Path, *, target_file: str, task_desc: str) -> dict[str, Any]:
     return _codeintel_context.build_codeintel_evidence(repo_root, target_file=target_file, task_desc=task_desc)
+
+
+_NON_MODEL_SOURCES = frozenset({"nexus_llm_deterministic_pre_rescue"})
+
+
+def _is_symmetric_model_source(source: str) -> bool:
+    """Exact model-source allowlist (mirrors scripts/bench/strict_llm_baseline.local_delivery):
+    llm*/model*/nexus_llm*/direct_* sources, minus deterministic rescues and *_failed labels."""
+
+    value = str(source or "").strip().lower()
+    return (
+        bool(value)
+        and value.startswith(("llm", "model", "nexus_llm", "direct_"))
+        and value not in _NON_MODEL_SOURCES
+        and not value.endswith("_failed")
+    )
 
 
 def _symmetric_prompt_mode() -> bool:
@@ -1083,6 +1100,7 @@ def run_auto_flow(
         ok = False
         err = ""
         source = "local"
+        patched = original_code
         generation_meta = local_baseline_meta()
         companion_edits: dict[Path, str] = {}
         restored_files: dict[Path, str | None] = {}
@@ -1124,14 +1142,19 @@ def run_auto_flow(
         finally:
             # S20: in the like-for-like A/B the model's file stays delivered even when the visible
             # test fails, so the bench verifies it with the hidden test exactly like the bare arm.
-            keep_model_delivery = symmetric_prompt and str(source).startswith(("nexus_llm", "llm"))
+            keep_model_delivery = symmetric_prompt and _is_symmetric_model_source(str(source))
             _restore_baseline_files(restored_files, keep_target=ok or keep_model_delivery)
+        report = baseline_report_from_meta(source, generation_meta)
+        if symmetric_prompt and _is_symmetric_model_source(str(source)) and patched != original_code:
+            # P1-2: identity of the model candidate, checked by the bench against the delivered file.
+            report["model_candidate_sha256"] = hashlib.sha256(patched.encode("utf-8")).hexdigest()
+            report["symmetric_model_delivery"] = True
         return {
             "flow": "baseline",
             "status": "SUCCESS" if ok else "FAILED",
             "elapsed_sec": round(time.monotonic() - start, 4),
             "error": err,
-            "report": baseline_report_from_meta(source, generation_meta),
+            "report": report,
         }
 
     def _run_baseline_probe() -> dict:
@@ -1230,6 +1253,11 @@ def run_auto_flow(
                 effective_candidate_count = min(effective_candidate_count, max(1, int(llm_candidate_cap_raw)))
             except ValueError:
                 pass
+        effective_max_rounds = execution_profile["effective_max_rounds"]
+        if symmetric_prompt and llm_mode:
+            # L3: exactly one model candidate, one round, in the counted A/B.
+            effective_candidate_count = 1
+            effective_max_rounds = 1
         sprint_executor_flags = {
             "enable_autoreason_executor": executor_flags["enable_autoreason_executor"],
             "enable_ddtree_executor": executor_flags["enable_ddtree_executor"],
@@ -1241,7 +1269,7 @@ def run_auto_flow(
             target_file=target_file,
             test_file=test_file,
             candidate_count=effective_candidate_count,
-            max_rounds=execution_profile["effective_max_rounds"],
+            max_rounds=effective_max_rounds,
             timeout_sec=timeout_sec,
             safe_mode=True,
             stage1_max_parallel=execution_profile["effective_stage1_max_parallel"],
@@ -1258,23 +1286,34 @@ def run_auto_flow(
         ok = res.status == "SUCCESS" and bool(res.patch)
         err = ""
         apply_started_at = time.monotonic()
-        if ok:
+        # H1 / P1-1: in the symmetric A/B the model candidate's file is delivered even when the
+        # visible test fails (status stays FAILED); the bench's hidden-only gate decides.
+        symmetric_delivery = bool(
+            symmetric_prompt
+            and res.patch
+            and _is_symmetric_model_source(str(getattr(res, "winner_source", "") or ""))
+        )
+        if ok or symmetric_delivery:
             _write_source_text(target_path, res.patch)
-        else:
+        if not ok:
             err = res.reason
         breakdown["patch_apply_sec"] = round(time.monotonic() - apply_started_at, 4)
         breakdown["total_sec"] = round(time.monotonic() - start, 4)
+        report = build_hyper_sprint_report(
+            res,
+            effective_stage1_timeout_sec=effective_stage1_timeout,
+            candidate_summaries=_candidate_summaries(list(getattr(res, "candidates", []) or [])),
+            r_phase_breakdown_sec=breakdown,
+        )
+        if symmetric_delivery:
+            report["model_candidate_sha256"] = hashlib.sha256(str(res.patch).encode("utf-8")).hexdigest()
+            report["symmetric_model_delivery"] = True
         return {
             "flow": "hyper_sprint",
             "status": "SUCCESS" if ok else "FAILED",
             "elapsed_sec": round(time.monotonic() - start, 4),
             "error": err,
-            "report": build_hyper_sprint_report(
-                res,
-                effective_stage1_timeout_sec=effective_stage1_timeout,
-                candidate_summaries=_candidate_summaries(list(getattr(res, "candidates", []) or [])),
-                r_phase_breakdown_sec=breakdown,
-            ),
+            "report": report,
         }
 
     baseline_probe = None
@@ -1291,6 +1330,7 @@ def run_auto_flow(
             and llm_baseline
             and baseline_model_attempted
             and result.get("status") != "SUCCESS"
+            and not symmetric_prompt
         ):
             failed_baseline = result
             result = _run_hyper_apply()
@@ -1320,7 +1360,7 @@ def run_auto_flow(
                 and dynamic_timeout_multiplier > 0
                 and min_dynamic_stage1_timeout < stage1_timeout_sec
             )
-            if forced_hyper_needs_probe:
+            if forced_hyper_needs_probe and not (symmetric_prompt and llm_mode):
                 baseline_probe = _run_baseline_probe()
             else:
                 baseline_probe_skipped = True
@@ -1329,6 +1369,7 @@ def run_auto_flow(
                 result.get("status") != "SUCCESS"
                 and str(task_type).startswith("cross_module_refactor")
                 and verification_only_allowed
+                and not symmetric_prompt
             ):
                 result = _run_original_verification_rescue(result)
             if forced_hyper:
@@ -1337,6 +1378,11 @@ def run_auto_flow(
                 strategy_path = "hyper_direct_plateau_distant_scout"
             else:
                 strategy_path = "hyper_direct_hard_skip_probe" if skip_baseline_probe_for_hard else "hyper_direct_cross_module"
+        elif symmetric_prompt and llm_mode:
+            # L3: no probe + hyper (two model calls) in the counted A/B; one direct hyper attempt.
+            baseline_probe_skipped = True
+            result = _run_hyper_apply()
+            strategy_path = "hyper_direct_symmetric"
         else:
         # Probe first to avoid unnecessary Hyper run for obvious quick fixes.
             baseline_probe = _run_baseline_probe()

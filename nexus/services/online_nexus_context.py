@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
@@ -181,6 +182,24 @@ def compact_route_for_prompt(
         "governance_layers": governance_layers[:8],
         "acceleration_layers": acceleration_layers[:8],
     }
+
+
+_TOKEN_STRING_RE = re.compile(r"^[A-Za-z0-9_.:/+=-]{0,200}$")
+
+
+def strip_free_text(value: Any) -> Any:
+    """Keep ids, hashes, statuses, numbers and booleans; drop any string with free text (spaces)."""
+
+    if isinstance(value, Mapping):
+        out: dict[str, Any] = {}
+        for key, item in value.items():
+            if isinstance(item, str) and not _TOKEN_STRING_RE.match(item):
+                continue
+            out[str(key)] = strip_free_text(item)
+        return out
+    if isinstance(value, list):
+        return [strip_free_text(item) for item in value if not (isinstance(item, str) and not _TOKEN_STRING_RE.match(item))]
+    return value
 
 
 def compact_codeintel_for_prompt(codeintel: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -370,7 +389,9 @@ def build_online_nexus_context(
     }
 
     route_compact = compact_route_for_prompt(route, selected_capabilities=selected)
-    codeintel_compact = compact_codeintel_for_prompt(codeintel)
+    # Symmetric A/B: no repository context (fixed 0/0 CodeIntel summary) and capability evidence
+    # reduced to ids/hashes/statuses; free text never reaches the counted with-Nexus prompt.
+    codeintel_compact = compact_codeintel_for_prompt(None if symmetric_prompt_mode() else codeintel)
     profile_compact = compact_profile_for_prompt(profile)
     flags_compact = compact_executor_flags_for_prompt(executor_flags)
     # Prefer explicit arg; fall back to plan payload sealed bundle.
@@ -384,6 +405,8 @@ def build_online_nexus_context(
     evidence_compact = compact_capability_evidence_for_prompt(
         evidence_bundle if isinstance(evidence_bundle, Mapping) else None
     )
+    if symmetric_prompt_mode():
+        evidence_compact = strip_free_text(evidence_compact)
 
     route_prompt = _json_prompt_block(route_compact)
     codeintel_prompt = _json_prompt_block(codeintel_compact)
