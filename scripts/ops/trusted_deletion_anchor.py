@@ -1922,8 +1922,10 @@ CONTROLLER_FAILURE_REMEDIES = {
         "main (no criss-cross merges, no unrelated history)"
     ),
     "MERGE_LANE_BINDING_MISSING": (
-        "the PR body needs exactly one NEXUS_MERGE_LANE_V1 block from the Owner/authority "
-        "path (#1749/#1817); agents must not mint or copy one"
+        "the PR body needs exactly one NEXUS_MERGE_LANE_V1 block: OWNER_INLINE for a "
+        "PR authored by the Owner, AGENT_INLINE for a PR opened by the agent GitHub App "
+        "(AGENT_APP_LOGINS in scripts/ops/trusted_merge_lane_gate.py), or "
+        "TRACKED_TASK_CARD for governed work (#1749/#1817)"
     ),
     "MERGE_LANE_BINDING_BLOCKED": (
         "fix the NEXUS_MERGE_LANE_V1 binding problem named in the detail "
