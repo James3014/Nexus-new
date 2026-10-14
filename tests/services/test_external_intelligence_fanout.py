@@ -2235,3 +2235,174 @@ def test_repair_reconcile_fails_closed_on_binding_or_transport_mismatch(tmp_path
     assert runtime.store.existing_repair_attempt("task-1", "ua", "r1")["state"] == (
         "OUTCOME_UNKNOWN"
     )
+
+
+def _repair_fixture(tmp_path: Path):
+    """Initial candidate for unit ua plus a repair artifact (EditingTransport)."""
+    repo, base = make_repo(tmp_path)
+    envelope = tmp_path / "envelope.json"
+    envelope_sha = make_envelope(envelope, base, allowed=["a.py"])
+    transport = EditingTransport()
+    runtime = AdaptiveDeepSeekFanoutRuntime(
+        allocator=GitWorktreeAllocator(repo, tmp_path / "workspaces"),
+        store=FanoutStore(tmp_path / "state"),
+        transport=transport,
+    )
+    initial = runtime.run(
+        [unit(base, envelope, envelope_sha, "ua", ["a.py"])], CapacityLease(1, 1, 1, 1)
+    )["receipts"]["ua"]
+    repair = tmp_path / "repair.json"
+    repair.write_text('{"schema":"repair_delta.v2"}\n')
+    repair_sha = hashlib.sha256(repair.read_bytes()).hexdigest()
+    return runtime, transport, initial, repair, repair_sha
+
+
+def test_unresolved_repair_ids_fail_closed_on_malformed_records(tmp_path):
+    store = FanoutStore(tmp_path / "state")
+    store.attempts.mkdir(parents=True)
+
+    def record(repair_id: str, **overrides):
+        value = {
+            "schema": "external_intelligence_dispatch_attempt.v1",
+            "task_id": "task-1",
+            "unit_id": "ua",
+            "mode": "REPAIR_CONTINUE",
+            "repair_id": repair_id,
+            "state": "COMPLETED",
+        }
+        value.update(overrides)
+        return value
+
+    def write(repair_id: str, value) -> None:
+        path = store.attempts / f"task-1--ua--repair-{repair_id}.json"
+        path.write_text(value if isinstance(value, str) else json.dumps(value), "utf-8")
+
+    write("ok", record("ok"))
+    write("blocked", record("blocked", state="TERMINAL_BLOCKED"))
+    write("garbage", "{not json")
+    write("nostate", {k: v for k, v in record("nostate").items() if k != "state"})
+    write("weird", record("weird", state="SOMETHING_ELSE"))
+    write("schema", record("schema", schema="other.v1"))
+    write("identity", record("other-id"))
+    write("listy", "[1, 2]")
+    assert sorted(store.unresolved_repair_ids("task-1", "ua")) == [
+        "garbage",
+        "identity",
+        "listy",
+        "nostate",
+        "schema",
+        "weird",
+    ]
+
+
+def test_concurrent_repair_prepares_dispatch_at_most_one_continuation(tmp_path, monkeypatch):
+    runtime, transport, initial, repair, repair_sha = _repair_fixture(tmp_path)
+    real_owner = runtime.store.assert_session_owner
+    arrived: list[str] = []
+    second = threading.Event()
+
+    def interleaving_owner(*args, **kwargs):
+        # Hold the first prepare between its sibling check and its attempt write
+        # until the second prepare arrives (or 0.5 s pass when it is locked out).
+        with transport.lock:
+            arrived.append("x")
+            first = len(arrived) == 1
+        if first:
+            second.wait(0.5)
+        else:
+            second.set()
+        return real_owner(*args, **kwargs)
+
+    monkeypatch.setattr(runtime.store, "assert_session_owner", interleaving_owner)
+    outcomes: dict[str, object] = {}
+
+    def attempt(repair_id: str) -> None:
+        try:
+            outcomes[repair_id] = runtime.continue_repair(
+                initial, repair_id=repair_id, repair_ref=str(repair), repair_sha256=repair_sha
+            )
+        except FanoutError as exc:
+            outcomes[repair_id] = exc
+
+    threads = [threading.Thread(target=attempt, args=(rid,)) for rid in ("r1", "r2")]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(10)
+    assert len(transport.continued) == 1
+    assert sum(isinstance(value, dict) for value in outcomes.values()) == 1
+
+
+def test_prepared_repair_never_dispatched_is_abandoned_not_blocking(tmp_path):
+    runtime, transport, initial, repair, repair_sha = _repair_fixture(tmp_path)
+    # Crash right after prepare_repair: PREPARED, transport never called.
+    stale = runtime.store.prepare_repair(
+        initial, repair_id="r1", repair_ref=str(repair), repair_sha256=repair_sha
+    )
+    child = runtime.continue_repair(
+        initial, repair_id="r2", repair_ref=str(repair), repair_sha256=repair_sha
+    )
+    assert child["status"] == "CANDIDATE_READY_FOR_VERIFICATION"
+    assert transport.continued == [("ua", initial["session_id"])]
+    abandoned = runtime.store.existing_repair_attempt("task-1", "ua", "r1")
+    assert abandoned["state"] == "FAILED"
+    assert abandoned["transport_status"] == "ABANDONED_BEFORE_DISPATCH"
+    # The superseded process can never move its stale attempt to DISPATCHING.
+    with pytest.raises(FanoutError, match="FANOUT_REPAIR_ATTEMPT_SUPERSEDED"):
+        runtime.store.mark_repair_dispatching(stale)
+    assert runtime.store.unresolved_repair_ids("task-1", "ua") == []
+
+
+def test_repair_finalize_rejects_foreign_workspace_directory(tmp_path):
+    runtime, transport, initial, repair, repair_sha = _repair_fixture(tmp_path)
+    foreign = tmp_path / "elsewhere"
+    foreign.mkdir()
+    real_continue = transport.continue_session
+
+    def misattested(**kwargs):
+        return replace(real_continue(**kwargs), directory=str(foreign))
+
+    transport.continue_session = misattested
+    with pytest.raises(FanoutError, match="WORKSPACE_ATTESTATION_MISMATCH"):
+        runtime.continue_repair(
+            initial, repair_id="r1", repair_ref=str(repair), repair_sha256=repair_sha
+        )
+    attempt = runtime.store.existing_repair_attempt("task-1", "ua", "r1")
+    assert attempt["state"] == "OUTCOME_UNKNOWN"
+    assert attempt["transport_status"] == "WORKSPACE_ATTESTATION_MISMATCH"
+
+
+def test_repair_reconcile_rechecks_session_owner_before_transport(tmp_path):
+    transport = _RepairReconcileTransport()
+    runtime, initial, _repair, _sha = _repair_outcome_unknown(tmp_path, transport)
+    session_path = runtime.store._session_path(initial["session_id"])
+    original = session_path.read_text(encoding="utf-8")
+    tampered = dict(json.loads(original), unit_id="ub")
+    session_path.write_text(json.dumps(tampered), encoding="utf-8")
+    with pytest.raises(FanoutError, match="SESSION_BINDING_CONFLICT"):
+        runtime.reconcile_repair(initial, repair_id="r1")
+    session_path.unlink()
+    with pytest.raises(FanoutError, match="SESSION_BINDING_MISSING"):
+        runtime.reconcile_repair(initial, repair_id="r1")
+    assert transport.reconciled == []
+    session_path.write_text(original, encoding="utf-8")
+    assert runtime.reconcile_repair(initial, repair_id="r1")["status"] == (
+        "CANDIDATE_READY_FOR_VERIFICATION"
+    )
+
+
+def test_repair_reconcile_after_post_commit_crash_is_stuck_but_safe(tmp_path):
+    """Known limitation: capture committed, then the process died before the receipt.
+
+    Reconcile cannot prove the commit is this repair's candidate, so it refuses and
+    the unit stays blocked; it never re-sends the continuation.
+    """
+    transport = _RepairReconcileTransport()
+    runtime, initial, _repair, _sha = _repair_outcome_unknown(tmp_path, transport)
+    workspace = Path(initial["workspace_path"])
+    _git(workspace, "add", "a.py")
+    _git(workspace, "commit", "-m", "candidate committed before crash")
+    with pytest.raises(FanoutError, match="WORKER_COMMIT_FORBIDDEN"):
+        runtime.reconcile_repair(initial, repair_id="r1")
+    assert transport.continued == [("ua", initial["session_id"])]
+    assert runtime.store.unresolved_repair_ids("task-1", "ua") == ["r1"]

@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -680,3 +681,133 @@ def test_repair_budgets_must_agree_between_closure_and_worker_runtime(tmp_path):
     assert closure(2).max_repairs_per_unit == 2
     with pytest.raises(ClosureError, match="REPAIR_BUDGET_EXCEEDS_WORKER_BUDGET"):
         closure(3)
+
+
+def _bound_unknown_continuation(tmp_path, monkeypatch, *, reconcile_status="BOUND", hashes=None):
+    """Bound continuation whose reply is lost; worker_reconcile reports ``reconcile_status``."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    ctx = _bound_open_swe(tmp_path, monkeypatch)
+    module = ctx.module
+    inner = module._runtime_call
+
+    def runtime_call(executable, payload, **kwargs):
+        if payload["operation"] == "worker_reconcile":
+            ctx.calls.append(json.loads(json.dumps(payload)))
+            result = _completed(module, payload)
+            supplied = (payload.get("core_binding_hash"), payload.get("acceptance_contract_hash"))
+            returned = hashes or ctx.receipt_hashes
+            result.update(
+                core_binding_status=reconcile_status,
+                core_binding_hash=returned[0],
+                acceptance_contract_hash=returned[1],
+                supplied_core=list(supplied),
+            )
+            return result, "", True, ""
+        result, out, started, err = inner(executable, payload, **kwargs)
+        if payload["operation"] == "worker_continue":
+            result = dict(result, status="OPEN_SWE_OUTCOME_UNKNOWN", outcome_unknown=True)
+        return result, out, started, err
+
+    monkeypatch.setattr(module, "_runtime_call", runtime_call)
+    ctx.receipt_hashes = (
+        ctx.receipt["core_binding_hash"],
+        ctx.receipt["acceptance_contract_hash"],
+    )
+    with pytest.raises(FanoutError, match="FANOUT_RECONCILIATION_REQUIRED"):
+        _continue(ctx)
+    assert _repair_attempt(ctx)["state"] == "OUTCOME_UNKNOWN"
+    return ctx
+
+
+def _reconcile_calls(ctx) -> list[dict[str, Any]]:
+    return [call for call in ctx.calls if call["operation"] == "worker_reconcile"]
+
+
+def test_bound_repair_reconcile_happy_path_stays_bound(tmp_path, monkeypatch):
+    ctx = _bound_unknown_continuation(tmp_path, monkeypatch)
+    child = ctx.runtime.reconcile_repair(ctx.receipt, repair_id="d001")
+    calls = _reconcile_calls(ctx)
+    assert len(calls) == 1
+    assert calls[0]["operation_id"] == _repair_attempt(ctx)["operation_id"]
+    assert (calls[0]["core_binding_hash"], calls[0]["acceptance_contract_hash"]) == (
+        ctx.receipt_hashes
+    )
+    assert child["core_binding_status"] == "BOUND"
+    assert child["core_binding_hash"] == ctx.receipt["core_binding_hash"]
+    assert _repair_attempt(ctx)["state"] == "COMPLETED"
+
+
+def test_bound_repair_reconcile_rejects_attempt_stripped_of_core_fields(tmp_path, monkeypatch):
+    ctx = _bound_unknown_continuation(tmp_path, monkeypatch, reconcile_status="")
+    path = ctx.store.attempts / "task-1--u1--repair-d001.json"
+    attempt = _repair_attempt(ctx)
+    for key in (
+        "bound_envelope_ref",
+        "bound_envelope_sha256",
+        "core_binding_hash",
+        "acceptance_contract_hash",
+        "core_binding_operation_id",
+        "core_binding_attempt_id",
+    ):
+        attempt.pop(key, None)
+    path.write_text(json.dumps(attempt), encoding="utf-8")
+    with pytest.raises(FanoutError, match="REPAIR_RECONCILE_CORE_BINDING_MISMATCH"):
+        ctx.runtime.reconcile_repair(ctx.receipt, repair_id="d001")
+    assert _reconcile_calls(ctx) == []
+    # A parent receipt stripped of its binding is caught by the unit's initial attempt.
+    stripped_parent = {
+        key: value
+        for key, value in ctx.receipt.items()
+        if key
+        not in {
+            "bound_envelope_ref",
+            "bound_envelope_sha256",
+            "core_binding_status",
+            "core_binding_hash",
+            "acceptance_contract_hash",
+        }
+    }
+    with pytest.raises(FanoutError, match="CORE_BINDING_PARENT_RECEIPT_INVALID"):
+        ctx.runtime.reconcile_repair(stripped_parent, repair_id="d001")
+    assert _reconcile_calls(ctx) == []
+
+
+def _completed_reconcile_with(ctx, monkeypatch, **fields):
+    """Bypass the transport's own Core check: a COMPLETED reconcile with altered fields."""
+    real = ctx.transport.reconcile_workspace
+
+    def altered(**kwargs):
+        result = real(**kwargs)
+        assert result.status == "COMPLETED"
+        return replace(result, **fields)
+
+    monkeypatch.setattr(ctx.transport, "reconcile_workspace", altered)
+
+
+def test_bound_repair_reconcile_rejects_hash_mismatch(tmp_path, monkeypatch):
+    other = ("sha256:" + "e" * 64, "sha256:" + "f" * 64)
+    # Transport layer: the runtime attests other hashes -> not COMPLETED, stays unknown.
+    ctx = _bound_unknown_continuation(tmp_path / "t", monkeypatch, hashes=other)
+    with pytest.raises(FanoutError, match="FANOUT_RECONCILIATION_REQUIRED"):
+        ctx.runtime.reconcile_repair(ctx.receipt, repair_id="d001")
+    assert _repair_attempt(ctx)["state"] == "OUTCOME_UNKNOWN"
+    # Fanout layer: even a COMPLETED result with other hashes is refused.
+    ctx = _bound_unknown_continuation(tmp_path / "f", monkeypatch)
+    _completed_reconcile_with(
+        ctx, monkeypatch, core_binding_hash=other[0], acceptance_contract_hash=other[1]
+    )
+    with pytest.raises(FanoutError, match="CORE_BINDING_ATTESTATION_MISMATCH"):
+        ctx.runtime.reconcile_repair(ctx.receipt, repair_id="d001")
+    assert _repair_attempt(ctx)["state"] == "OUTCOME_UNKNOWN"
+
+
+def test_bound_repair_reconcile_rejects_non_bound_attestation(tmp_path, monkeypatch):
+    ctx = _bound_unknown_continuation(tmp_path / "t", monkeypatch, reconcile_status="UNBOUND")
+    with pytest.raises(FanoutError, match="FANOUT_RECONCILIATION_REQUIRED"):
+        ctx.runtime.reconcile_repair(ctx.receipt, repair_id="d001")
+    assert _repair_attempt(ctx)["state"] == "OUTCOME_UNKNOWN"
+    ctx = _bound_unknown_continuation(tmp_path / "f", monkeypatch)
+    _completed_reconcile_with(ctx, monkeypatch, core_binding_status="UNBOUND")
+    with pytest.raises(FanoutError, match="CORE_BINDING_ATTESTATION_MISMATCH"):
+        ctx.runtime.reconcile_repair(ctx.receipt, repair_id="d001")
+    assert _repair_attempt(ctx)["state"] == "OUTCOME_UNKNOWN"

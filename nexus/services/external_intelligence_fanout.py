@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import hashlib
 import json
 import os
@@ -12,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Iterable, Iterator, Mapping, Sequence
 
 from nexus.services.external_intelligence import (
     ENVELOPE_SCHEMA,
@@ -541,6 +543,9 @@ class GitWorktreeAllocator:
         return WorkspaceLease(workspace_id=workspace_id, path=str(path), expected_base_sha=observed)
 
 
+_REPAIR_TERMINAL_STATES = frozenset({"COMPLETED", "TERMINAL_BLOCKED", "FAILED"})
+
+
 class FanoutStore:
     def __init__(self, root: str | os.PathLike[str]):
         self.root = Path(root).expanduser().resolve()
@@ -635,10 +640,52 @@ class FanoutStore:
         repair_ref: str,
         repair_sha256: str,
         core_binding: Mapping[str, str] | None = None,
+        operation_id: str | None = None,
     ) -> dict[str, Any]:
         task_id = _safe_slug(previous_receipt.get("task_id"), "task_id")
         unit_id = _safe_slug(previous_receipt.get("unit_id"), "unit_id")
         repair_id = _safe_slug(repair_id, "repair_id")
+        if operation_id is not None and (
+            not isinstance(operation_id, str) or _SHA256_RE.fullmatch(operation_id) is None
+        ):
+            raise FanoutError("OPERATION_ID_REQUIRED")
+        with self._repair_lock(task_id, unit_id):
+            return self._prepare_repair_locked(
+                previous_receipt,
+                task_id=task_id,
+                unit_id=unit_id,
+                repair_id=repair_id,
+                repair_ref=repair_ref,
+                repair_sha256=repair_sha256,
+                core_binding=core_binding,
+                operation_id=operation_id,
+            )
+
+    @contextlib.contextmanager
+    def _repair_lock(self, task_id: str, unit_id: str) -> Iterator[None]:
+        """Per-unit exclusive lock serializing repair attempt check-then-write."""
+        lock_dir = self.root / "locks"
+        lock_dir.mkdir(parents=True, exist_ok=True)
+        lock_path = lock_dir / f"{self._unit_key(task_id, unit_id)}--repair.lock"
+        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            yield
+        finally:
+            os.close(fd)
+
+    def _prepare_repair_locked(
+        self,
+        previous_receipt: Mapping[str, Any],
+        *,
+        task_id: str,
+        unit_id: str,
+        repair_id: str,
+        repair_ref: str,
+        repair_sha256: str,
+        core_binding: Mapping[str, str] | None,
+        operation_id: str | None,
+    ) -> dict[str, Any]:
         suffix = f"repair-{repair_id}"
         path = self._attempt_path(task_id, unit_id, suffix)
         if path.exists():
@@ -646,7 +693,8 @@ class FanoutStore:
             if value.get("state") in {"PREPARED", "DISPATCHING", "OUTCOME_UNKNOWN"}:
                 raise FanoutError("FANOUT_RECONCILIATION_REQUIRED")
             raise FanoutError("FANOUT_REPLAY_FORBIDDEN")
-        if self.unresolved_repair_ids(task_id, unit_id):
+        unresolved = self._unresolved_repair_records(task_id, unit_id)
+        if any(value is None or value.get("state") != "PREPARED" for value in unresolved.values()):
             # Another continuation of this unit's session has no known outcome: a new
             # one would race it on the same session/workspace.  Reconcile it first.
             raise FanoutError("FANOUT_RECONCILIATION_REQUIRED")
@@ -681,8 +729,54 @@ class FanoutStore:
             # A bound continuation reuses the parent's binding; the root bound
             # operation/attempt it was minted for are recorded alongside.
             attempt.update({key: str(core_binding[key]) for key in _CORE_CONTINUATION_FIELDS})
+        if operation_id is not None:
+            attempt["operation_id"] = operation_id
+        # A well-formed PREPARED sibling was never sent: a repair only leaves PREPARED
+        # through mark_repair_dispatching, under this same lock, before the transport
+        # is called.  Abandon it so a crashed prepare cannot block the unit forever.
+        for sibling_path, sibling in unresolved.items():
+            assert sibling is not None
+            abandoned = dict(sibling)
+            abandoned.update({
+                "state": "FAILED",
+                "retry_safe": False,
+                "transport_status": "ABANDONED_BEFORE_DISPATCH",
+                "superseded_by_attempt_id": attempt["attempt_id"],
+            })
+            _atomic_json(sibling_path, abandoned)
         _atomic_json(path, attempt)
         return attempt
+
+    def mark_repair_dispatching(self, attempt: Mapping[str, Any]) -> dict[str, Any]:
+        """PREPARED -> DISPATCHING for a repair, refusing an abandoned/changed record."""
+        task_id = str(attempt["task_id"])
+        unit_id = str(attempt["unit_id"])
+        suffix = f"repair-{_safe_slug(attempt.get('repair_id'), 'repair_id')}"
+        path = self._attempt_path(task_id, unit_id, suffix)
+        with self._repair_lock(task_id, unit_id):
+            try:
+                on_disk = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                raise FanoutError("FANOUT_REPAIR_ATTEMPT_SUPERSEDED") from exc
+            if on_disk != dict(attempt) or on_disk.get("state") != "PREPARED":
+                raise FanoutError("FANOUT_REPAIR_ATTEMPT_SUPERSEDED")
+            value = dict(attempt)
+            value.update({"state": "DISPATCHING", "retry_safe": False})
+            _atomic_json(path, value)
+            return value
+
+    def initial_attempt_is_bound(self, task_id: str, unit_id: str) -> bool:
+        """True when the unit's initial attempt record carries any Core binding field."""
+        path = self._attempt_path(task_id, unit_id)
+        if not path.exists():
+            return False
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise FanoutError("FANOUT_ATTEMPT_IDENTITY_MISMATCH") from exc
+        return not isinstance(value, dict) or any(
+            key in value for key in _CORE_BOUND_ATTEMPT_FIELDS
+        )
 
     def existing_repair_attempt(
         self, task_id: str, unit_id: str, repair_id: str
@@ -705,15 +799,45 @@ class FanoutStore:
         return value
 
     def unresolved_repair_ids(self, task_id: str, unit_id: str) -> list[str]:
-        """Repair ids of this unit whose continuation outcome is not yet known."""
+        """Repair ids of this unit whose continuation is not proven terminal."""
+        prefix = f"{self._unit_key(task_id, unit_id)}--repair-"
+        return [
+            path.name[len(prefix) : -len(".json")]
+            for path in self._unresolved_repair_records(task_id, unit_id)
+        ]
+
+    def _unresolved_repair_records(
+        self, task_id: str, unit_id: str
+    ) -> dict[Path, dict[str, Any] | None]:
+        """Repair attempt records of this unit that are not proven terminal.
+
+        Fails closed: an unreadable record, or one with a wrong schema/identity or a
+        missing/unknown state, is unresolved (mapped to None).  Only a well-formed
+        record in a terminal state counts as resolved.
+        """
         prefix = f"{self._unit_key(task_id, unit_id)}--repair-"
         if not self.attempts.is_dir():
-            return []
-        unresolved: list[str] = []
+            return {}
+        unresolved: dict[Path, dict[str, Any] | None] = {}
         for path in sorted(self.attempts.glob(f"{prefix}*.json")):
-            value = json.loads(path.read_text(encoding="utf-8"))
-            if value.get("state") in {"PREPARED", "DISPATCHING", "OUTCOME_UNKNOWN"}:
-                unresolved.append(str(value.get("repair_id") or ""))
+            repair_id = path.name[len(prefix) : -len(".json")]
+            try:
+                value = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                unresolved[path] = None
+                continue
+            well_formed = (
+                isinstance(value, dict)
+                and value.get("schema") == DISPATCH_ATTEMPT_SCHEMA
+                and value.get("mode") == "REPAIR_CONTINUE"
+                and value.get("task_id") == task_id
+                and value.get("unit_id") == unit_id
+                and value.get("repair_id") == repair_id
+            )
+            if not well_formed:
+                unresolved[path] = None
+            elif value.get("state") not in _REPAIR_TERMINAL_STATES:
+                unresolved[path] = value
         return unresolved
 
     def bound_envelope_path(self, task_id: str, unit_id: str, attempt_id: str) -> Path:
@@ -2453,21 +2577,16 @@ class AdaptiveWorkerFanoutRuntime:
             except CoreBindingError as exc:
                 # No repair attempt exists yet and the worker was never invoked.
                 raise FanoutError(f"CORE_BINDING_REVALIDATION_FAILED:{exc}") from exc
-        suffix = f"repair-{_safe_slug(repair_id, 'repair_id')}"
-        attempt = self.store.prepare_repair(
-            previous_receipt,
-            repair_id=repair_id,
-            repair_ref=str(repair_path),
-            repair_sha256=repair_sha256,
-            core_binding=core_binding,
-        )
         prompt = build_repair_bootstrap(
             previous_receipt,
             repair_id=repair_id,
             repair_ref=str(repair_path),
             repair_sha256=repair_sha256,
         )
+        operation_id: str | None = None
         if hasattr(transport, "prepare_operation_id"):
+            # Pure derivation (no effect); recorded atomically with the attempt so the
+            # attempt is never rewritten between PREPARED and DISPATCHING.
             operation_id = transport.prepare_operation_id(
                 "worker_continue",
                 prompt=prompt,
@@ -2475,9 +2594,20 @@ class AdaptiveWorkerFanoutRuntime:
                 workspace_path=workspace.path,
                 session_id=str(previous_receipt["session_id"]),
             )
-            attempt = self.store.bind_operation_id(attempt, operation_id, suffix=suffix)
-        attempt = self.store.mark_dispatching(attempt, suffix=suffix)
-        expected_core = _attempt_core_hashes(attempt)
+        attempt = self.store.prepare_repair(
+            previous_receipt,
+            repair_id=repair_id,
+            repair_ref=str(repair_path),
+            repair_sha256=repair_sha256,
+            core_binding=core_binding,
+            operation_id=operation_id,
+        )
+        attempt = self.store.mark_repair_dispatching(attempt)
+        expected_core = (
+            (core_binding["core_binding_hash"], core_binding["acceptance_contract_hash"])
+            if core_binding is not None
+            else None
+        )
         if expected_core is not None:
             result: OpenCodeRunResult = transport.continue_session(
                 session_id=str(previous_receipt["session_id"]),
@@ -2512,6 +2642,7 @@ class AdaptiveWorkerFanoutRuntime:
             transport=transport,
             workspace=workspace,
             repair_id=repair_id,
+            expected_core=expected_core,
         )
 
     def reconcile_repair(
@@ -2570,7 +2701,23 @@ class AdaptiveWorkerFanoutRuntime:
             provider=str(previous_receipt.get("provider") or PROVIDER),
             model=str(previous_receipt.get("model") or MODEL),
         )
-        core_hashes = _attempt_core_hashes(attempt)
+        # Bound-ness comes from the parent receipt (and the unit's initial attempt),
+        # never from the repair attempt record alone: a record stripped of its Core
+        # fields must not downgrade a bound continuation to an unbound reconcile.
+        parent_core = _receipt_core_binding(previous_receipt)
+        if parent_core is None and self.store.initial_attempt_is_bound(task_id, unit_id):
+            raise FanoutError("CORE_BINDING_PARENT_RECEIPT_INVALID")
+        if parent_core is None:
+            if any(key in attempt for key in _CORE_CONTINUATION_FIELDS):
+                raise FanoutError("REPAIR_RECONCILE_CORE_BINDING_MISMATCH")
+            core_hashes = None
+        else:
+            if any(attempt.get(key) != parent_core[key] for key in _CORE_CONTINUATION_FIELDS):
+                raise FanoutError("REPAIR_RECONCILE_CORE_BINDING_MISMATCH")
+            core_hashes = (
+                parent_core["core_binding_hash"],
+                parent_core["acceptance_contract_hash"],
+            )
         if core_hashes is not None:
             if not getattr(transport, "supports_core_mutation_binding", False):
                 raise FanoutError("CORE_BINDING_TRANSPORT_UNSUPPORTED")
@@ -2593,6 +2740,7 @@ class AdaptiveWorkerFanoutRuntime:
             transport=transport,
             workspace=workspace,
             repair_id=repair_id,
+            expected_core=core_hashes,
         )
 
     def _finalize_repair(
@@ -2604,13 +2752,13 @@ class AdaptiveWorkerFanoutRuntime:
         transport: Any,
         workspace: WorkspaceLease,
         repair_id: str,
+        expected_core: tuple[str, str] | None,
     ) -> dict[str, Any]:
         task_id = _safe_slug(previous_receipt.get("task_id"), "task_id")
         unit_id = _safe_slug(previous_receipt.get("unit_id"), "unit_id")
         suffix = f"repair-{_safe_slug(repair_id, 'repair_id')}"
         transport_provider_id = getattr(transport, "provider_id", PROVIDER_ID)
         transport_model_id = getattr(transport, "model_id", MODEL_ID)
-        expected_core = _attempt_core_hashes(attempt)
         if result.status != "COMPLETED" or result.session_id != previous_receipt["session_id"]:
             self.store.finish_attempt(
                 attempt,
@@ -2659,6 +2807,14 @@ class AdaptiveWorkerFanoutRuntime:
                 suffix=suffix,
             )
             raise FanoutError("MODEL_ATTESTATION_MISMATCH")
+        if str(Path(result.directory).resolve()) != str(Path(workspace.path).resolve()):
+            self.store.finish_attempt(
+                attempt,
+                state="OUTCOME_UNKNOWN",
+                transport_status="WORKSPACE_ATTESTATION_MISMATCH",
+                suffix=suffix,
+            )
+            raise FanoutError("WORKSPACE_ATTESTATION_MISMATCH")
         try:
             worker = parse_worker_result(result.response_text, task_id=task_id, unit_id=unit_id)
         except FanoutError:
