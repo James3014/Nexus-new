@@ -21,13 +21,14 @@ from nexus.executors.agy_write_admission import (
     agy_delivery_failure,
     agy_model_shape_ok,
     agy_permission_bypass_flags,
-    agy_permission_profile,
     build_seatbelt_profile,
     checkout_fingerprint,
     escaping_symlinks,
     fingerprint_roots,
+    materialize_run_home,
     paths_overlap,
-    protected_checkout_roots,
+    protected_checkout_plan,
+    target_git_entry_state,
     worker_home,
 )
 from nexus.executors.cli_worker import (
@@ -490,17 +491,18 @@ class AgyWorkerAdapter:
         if not agy_model_shape_ok(selected_model) or agy_permission_bypass_flags(argv):
             return refuse("agy_command_shape_unsupported", permission_mode)
 
-        roots = protected_checkout_roots(
+        plan = protected_checkout_plan(
             target=target_path,
             controller_repo_root=getattr(contract, "controller_repo_root", None),
             canonical_source_root=self._canonical_checkout_root(),
         )
-        if any(paths_overlap(target_path, root) for root in roots):
+        if any(paths_overlap(target_path, root) for root, _ in plan):
             return refuse("agy_target_overlaps_canonical_checkout", permission_mode, argv)
-        before = fingerprint_roots(roots)
+        before = fingerprint_roots(plan)
         if before is None:
             return refuse("canonical_checkout_snapshot_unavailable", permission_mode, argv)
         symlinks_before = escaping_symlinks(target_path)
+        git_entry_before = target_git_entry_state(target_path)
 
         run_tmp = Path(os.path.realpath(tempfile.mkdtemp(prefix="nexus-agy-run-")))
         facts: dict[str, str] = {}
@@ -508,16 +510,24 @@ class AgyWorkerAdapter:
         def admit_request(
             env: Optional[Mapping[str, str]],
         ) -> tuple[Optional[str], dict[str, str], str]:
-            """Per-attempt permission profile check and Seatbelt profile."""
+            """Per-attempt disposable HOME, explicit settings and Seatbelt profile."""
             run_env = {str(key): str(value) for key, value in (env or {}).items()}
-            run_env["TMPDIR"] = str(run_tmp)
-            home = worker_home(run_env)
-            refusal, profile_sha256 = agy_permission_profile(home, read_only=read_only)
+            source_home = worker_home(run_env)
+            attempt_root = Path(tempfile.mkdtemp(prefix="attempt-", dir=run_tmp))
+            run_home = attempt_root / "home"
+            run_tmpdir = attempt_root / "tmp"
+            run_tmpdir.mkdir(parents=True)
+            run_env["HOME"] = str(run_home)
+            run_env["TMPDIR"] = str(run_tmpdir)
+            refusal, profile_sha256 = materialize_run_home(
+                source_home, run_home, read_only=read_only
+            )
             facts["profile_sha256"] = profile_sha256
+            if refusal is not None:
+                return refusal, run_env, ""
             try:
                 seatbelt = build_seatbelt_profile(
-                    home=home,
-                    run_tmp=run_tmp,
+                    run_root=run_tmp,
                     writable_target=None if read_only else target_path,
                 )
             except ValueError:
@@ -544,17 +554,19 @@ class AgyWorkerAdapter:
         receipt = replace(
             receipt,
             provider_permission_mode=permission_mode,
-            provider_permission_profile_sha256=facts.get("profile_sha256"),
+            provider_permission_profile_sha256=facts.get("profile_sha256") or None,
             provider_write_sandbox=(
                 f"seatbelt:{facts['seatbelt_sha256']}" if facts.get("seatbelt_sha256") else None
             ),
         )
-        after = fingerprint_roots(roots)
+        after = fingerprint_roots(plan)
         post_failure: Optional[str] = None
         if after is None:
             post_failure = "canonical_snapshot_failed"
         elif after != before:
             post_failure = "canonical_checkout_integrity_violation"
+        elif target_git_entry_state(target_path) != git_entry_before:
+            post_failure = "agy_target_gitdir_tampered"
         elif escaping_symlinks(target_path) != symlinks_before:
             post_failure = "agy_target_symlink_escape"
         if post_failure is not None:

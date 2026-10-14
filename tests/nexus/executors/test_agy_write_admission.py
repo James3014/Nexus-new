@@ -174,7 +174,16 @@ def _repo(tmp_path: Path, name: str = "canonical") -> Path:
 @pytest.fixture
 def agy_home(tmp_path, monkeypatch) -> Path:
     home = tmp_path / "home"
-    (home / ".gemini" / "antigravity-cli").mkdir(parents=True)
+    cli = home / ".gemini" / "antigravity-cli"
+    cli.mkdir(parents=True)
+    (cli / "antigravity-oauth-token").write_text("token", encoding="utf-8")
+    (cli / "installation_id").write_text("install", encoding="utf-8")
+    # A source profile that grants commands and hooks must never reach the run.
+    (cli / "settings.json").write_text(
+        json.dumps({"permissions": {"allow": ["command(*)"]}}), encoding="utf-8"
+    )
+    (home / ".gemini" / "config").mkdir()
+    (home / ".gemini" / "config" / "hooks.json").write_text("{}", encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))
     return home.resolve()
 
@@ -254,6 +263,13 @@ def test_implementation_run_uses_accept_edits_seatbelt_and_records_posture(
 
     def fake_worker(request, on_process_group=None):
         captured["request"] = request
+        home = Path(request.env["HOME"])
+        captured["home_files"] = {
+            path.relative_to(home).as_posix() for path in home.rglob("*") if path.is_file()
+        }
+        captured["settings"] = json.loads(
+            (home / ".gemini" / "antigravity-cli" / "settings.json").read_text()
+        )
         return _result(request, stdout=_OK)
 
     monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", fake_worker)
@@ -281,12 +297,22 @@ def test_implementation_run_uses_accept_edits_seatbelt_and_records_posture(
     profile = request.seatbelt_profile
     assert "(deny file-write*)" in profile
     assert f'(subpath "{target}")' in profile
-    assert f'(subpath "{agy_home / ".gemini"}")' in profile
-    assert f'(literal "{agy_home / ".gemini" / "config" / "hooks.json"}")' in profile
+    assert f'(subpath "{target / ".git"}")' in profile  # .git entry stays read-only
+    assert str(agy_home) not in profile  # real HOME is never writable
+    assert "Keychains" not in profile
     assert str(canonical) not in profile
-    run_tmp = request.env["TMPDIR"]
-    assert f'(subpath "{run_tmp}")' in profile
-    assert not Path(run_tmp).exists()  # per-run temp dir is removed afterwards
+    run_home = Path(request.env["HOME"])
+    run_tmp = Path(request.env["TMPDIR"])
+    run_root = run_home.parent.parent
+    assert f'(subpath "{run_root}")' in profile
+    assert run_tmp.is_relative_to(run_root)
+    assert captured["home_files"] == {
+        ".gemini/antigravity-cli/antigravity-oauth-token",
+        ".gemini/antigravity-cli/installation_id",
+        ".gemini/antigravity-cli/settings.json",
+    }
+    assert captured["settings"] == {"permissions": {"allow": [], "deny": ["command(*)"]}}
+    assert not run_root.exists()  # per-run root is removed afterwards
     assert receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
     assert receipt.provider_permission_mode == AGY_PERMISSION_MODE_ACCEPT_EDITS
     assert str(receipt.provider_write_sandbox).startswith("seatbelt:")
@@ -416,43 +442,20 @@ def test_bypass_flag_detection_ignores_prompt_value_only():
     assert agy_permission_bypass_flags(("--mode", "auto", "--print", "x")) == ["--mode auto"]
 
 
-@pytest.mark.parametrize(
-    ("allow", "role", "reason"),
-    [
-        (["command(*)"], "implementation", "agy_permission_profile_grants_commands"),
-        (["command(git status)"], "review", "agy_permission_profile_grants_commands"),
-        (
-            ["write_file(/tmp/**)"],
-            "review",
-            "agy_permission_profile_grants_writes_for_read_only_role",
-        ),
-    ],
-)
-def test_effective_profile_granting_commands_is_refused(
-    monkeypatch, tmp_path, agy_home, allow, role, reason
-):
-    _ready(monkeypatch)
-    _no_spawn(monkeypatch)
-    (agy_home / ".gemini" / "antigravity-cli" / "settings.json").write_text(
-        json.dumps({"permissions": {"allow": allow, "deny": []}}), encoding="utf-8"
+def test_read_only_run_home_denies_commands_and_writes(tmp_path):
+    source = tmp_path / "src"
+    (source / ".gemini" / "antigravity-cli").mkdir(parents=True)
+    refusal, implementation = admission.materialize_run_home(
+        source, tmp_path / "impl", read_only=False
     )
-    receipt = _invoke(
-        AgyWorkerAdapter(canonical_root=_repo(tmp_path)), _target(tmp_path), worker_role=role
+    assert refusal is None
+    refusal, plan = admission.materialize_run_home(source, tmp_path / "plan", read_only=True)
+    assert refusal is None
+    settings = json.loads(
+        (tmp_path / "plan" / ".gemini" / "antigravity-cli" / "settings.json").read_text()
     )
-
-    assert receipt.outcome == WorkerOutcome.FAILED.value
-    assert receipt.provider_calls == 0
-    assert receipt.failure_reason == reason
-
-
-def test_profile_hash_binds_hooks_and_rules(tmp_path):
-    home = tmp_path / "h"
-    (home / ".gemini" / "config").mkdir(parents=True)
-    _, first = admission.agy_permission_profile(home, read_only=False)
-    (home / ".gemini" / "config" / "hooks.json").write_text("{}", encoding="utf-8")
-    _, second = admission.agy_permission_profile(home, read_only=False)
-    _, plan = admission.agy_permission_profile(home, read_only=True)
-    assert len({first, second, plan}) == 3
+    assert settings["permissions"]["deny"] == ["command(*)", "write_file(*)"]
+    assert len({implementation, plan}) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -576,6 +579,85 @@ def test_protected_roots_deduplicate_case_insensitively_on_darwin(tmp_path):
         target=_target(tmp_path), controller_repo_root=str(variant), canonical_source_root=root
     )
     assert len(roots) == 1
+
+
+def test_bare_repository_deployment_layout_is_admitted(monkeypatch, tmp_path, agy_home):
+    """Gateway layout: bare repo + deployment worktree + target worktree."""
+    _ready(monkeypatch)
+    seed = _repo(tmp_path, "seed")
+    bare = (tmp_path / "repository.git").resolve()
+    subprocess.run(["git", "clone", "-q", "--bare", str(seed), str(bare)], check=True)
+    deploy = (tmp_path / "deployments" / "r1").resolve()
+    deploy.parent.mkdir()
+    _git(bare, "worktree", "add", "-q", "--detach", str(deploy))
+    target = (tmp_path / "targets" / "task").resolve()
+    target.parent.mkdir()
+    _git(bare, "worktree", "add", "-q", "--detach", str(target))
+
+    assert admission.main_worktree_of(target) is None  # bare entry skipped
+    assert admission.protected_checkout_roots(
+        target=target, controller_repo_root=None, canonical_source_root=deploy
+    ) == [deploy]
+    assert admission.checkout_fingerprint(deploy) is not None
+
+    def fake_worker(request, on_process_group=None):
+        return _result(request, stdout=_OK)
+
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", fake_worker)
+    receipt = _invoke(AgyWorkerAdapter(canonical_root=deploy), target)
+    assert receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
+
+    def hook_writer(request, on_process_group=None):
+        (bare / "hooks" / "post-checkout").write_text("#!/bin/sh\n", encoding="utf-8")
+        return _result(request, stdout=_OK)
+
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", hook_writer)
+    receipt = _invoke(AgyWorkerAdapter(canonical_root=deploy), target)
+    assert receipt.failure_reason == "canonical_checkout_integrity_violation"
+
+
+def test_ignored_files_in_target_main_worktree_do_not_fail_runs(monkeypatch, tmp_path, agy_home):
+    """Seatbelt guards the Owner checkout; concurrent log/cache churn is not a violation."""
+    _ready(monkeypatch)
+    main = _repo(tmp_path, "main")
+    target = (tmp_path / "targets" / "task").resolve()
+    target.parent.mkdir()
+    _git(main, "worktree", "add", "-q", "--detach", str(target))
+    plan = admission.protected_checkout_plan(
+        target=target, controller_repo_root=None, canonical_source_root=REPO_ROOT
+    )
+    assert (main, False) in plan
+
+    def fake_worker(request, on_process_group=None):
+        _escape("ignored_file", main)
+        return _result(request, stdout=_OK)
+
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", fake_worker)
+    receipt = _invoke(AgyWorkerAdapter(), target)
+    assert receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
+
+
+@pytest.mark.parametrize("layout", ["gitfile", "gitdir"])
+def test_tampered_target_git_entry_fails_closed(monkeypatch, tmp_path, agy_home, layout):
+    _ready(monkeypatch)
+    canonical = _repo(tmp_path)
+    if layout == "gitfile":
+        target = (tmp_path / "targets" / "task").resolve()
+        target.parent.mkdir()
+        _git(canonical, "worktree", "add", "-q", "--detach", str(target))
+    else:
+        target = _repo(tmp_path, "standalone-target")
+
+    def fake_worker(request, on_process_group=None):
+        if layout == "gitfile":
+            (target / ".git").write_text("gitdir: /tmp/attacker\n", encoding="utf-8")
+        else:
+            _git(target, "config", "core.fsmonitor", "evil")
+        return _result(request, stdout=_OK)
+
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", fake_worker)
+    receipt = _invoke(AgyWorkerAdapter(canonical_root=canonical), target)
+    assert receipt.failure_reason == "agy_target_gitdir_tampered"
 
 
 def test_target_main_worktree_is_not_protected_when_target_is_itself_main(tmp_path):
@@ -830,18 +912,21 @@ def test_seatbelt_profile_blocks_absolute_path_write_outside_target(tmp_path):
     outside = (tmp_path / "canonical").resolve()
     outside.mkdir()
     run_tmp = (tmp_path / "run-tmp").resolve()
-    run_tmp.mkdir()
-    home = (tmp_path / "home").resolve()
-    (home / ".gemini").mkdir(parents=True)
-    profile = admission.build_seatbelt_profile(home=home, run_tmp=run_tmp, writable_target=target)
+    (run_tmp / "home").mkdir(parents=True)
+    home = run_tmp / "home"
+    (target / ".git").write_text("gitdir: /expected\n", encoding="utf-8")
+    profile = admission.build_seatbelt_profile(run_root=run_tmp, writable_target=target)
     code = (
         "import sys\n"
         "open(sys.argv[1] + '/inside.txt', 'w').write('ok')\n"
-        "try:\n"
-        "    open(sys.argv[2] + '/escape.txt', 'w').write('x')\n"
-        "    print('ESCAPED')\n"
-        "except OSError:\n"
-        "    print('BLOCKED')\n"
+        "results = []\n"
+        "for path in (sys.argv[2] + '/escape.txt', sys.argv[1] + '/.git'):\n"
+        "    try:\n"
+        "        open(path, 'w').write('x')\n"
+        "        results.append('ESCAPED')\n"
+        "    except OSError:\n"
+        "        results.append('BLOCKED')\n"
+        "print(','.join(results))\n"
     )
     result = run_cli_worker(
         CliWorkerRequest(
@@ -853,7 +938,8 @@ def test_seatbelt_profile_blocks_absolute_path_write_outside_target(tmp_path):
         )
     )
     assert result.exit_code == 0, result.stderr
-    assert result.stdout.strip() == b"BLOCKED"
+    assert result.stdout.strip() == b"BLOCKED,BLOCKED"
+    assert (target / ".git").read_text() == "gitdir: /expected\n"
     assert (target / "inside.txt").read_text() == "ok"
     assert not (outside / "escape.txt").exists()
     assert len(result.seatbelt_profile_sha256) == 64

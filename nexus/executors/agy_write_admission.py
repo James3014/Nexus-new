@@ -5,16 +5,20 @@ Layers, from preventive to detective:
 1. Permission posture: no auto-approve flag ever reaches the argv.
    Implementation runs use ``--mode accept-edits`` (edits only; commands are
    auto-denied in headless print mode) and read-only roles ``--mode plan
-   --sandbox``.  The effective Agy settings profile is read before each run
-   and refused when it grants commands (or edits, for read-only roles).
+   --sandbox``.  Each run gets a disposable HOME holding only the copied
+   OAuth token and an explicit settings profile that denies ``command(*)``
+   (and ``write_file(*)`` for read-only roles); the real HOME's settings,
+   hooks, MCP config and memory are never loaded.
 2. Seatbelt: every run is wrapped in a macOS ``sandbox-exec`` profile that
    denies file writes everywhere except the runtime-owned target worktree
-   (implementation only), Agy's own state directory and a per-run temp dir.
-   This is what stops absolute-path, symlink and Git-internal writes; it is
-   mandatory and fails closed when ``sandbox-exec`` is unavailable.
+   (implementation only, minus its ``.git`` entry) and the per-run root
+   (disposable HOME + TMPDIR).  This stops absolute-path, symlink and
+   Git-internal writes; it is mandatory and fails closed when
+   ``sandbox-exec`` is unavailable.
 3. Integrity fingerprint of every protected checkout (secondary check): the
-   contract's controller checkout, the main worktree behind the target's Git
-   common dir, and the loaded canonical source root.
+   contract's controller checkout, the non-bare main worktree behind the
+   target's Git common dir, and the loaded canonical source root; plus the
+   target's ``.git`` entry.
 4. Output classification: only a parseable JSON result with status SUCCESS,
    no denied actions and a non-empty response is delivery.
 """
@@ -24,6 +28,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -142,67 +147,58 @@ def agy_delivery_failure(stdout: bytes, stderr: bytes) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
-# effective Agy settings profile
+# per-run Agy state home
 # ---------------------------------------------------------------------------
 
+# Files copied from the source HOME into the disposable per-run HOME.  Probed
+# with agy (#1912): the OAuth token and installation id are all a headless
+# print run needs; agy then writes its conversations, brain, implicit memory,
+# project registry and logs into the disposable HOME, never into the real one.
+AGY_RUN_HOME_COPIED_FILES = (
+    Path(".gemini") / "antigravity-cli" / "antigravity-oauth-token",
+    Path(".gemini") / "antigravity-cli" / "installation_id",
+)
+AGY_RUN_HOME_SETTINGS = Path(".gemini") / "antigravity-cli" / "settings.json"
 
-def agy_settings_paths(home: Path) -> dict[str, Path]:
-    gemini = home / ".gemini"
-    return {
-        "settings": gemini / "antigravity-cli" / "settings.json",
-        "hooks": gemini / "config" / "hooks.json",
-        "mcp": gemini / "config" / "mcp_config.json",
-    }
+
+def agy_run_settings(*, read_only: bool) -> dict[str, Any]:
+    """Explicit per-run permission profile: never commands; no writes for plan."""
+    deny = ["command(*)", "write_file(*)"] if read_only else ["command(*)"]
+    return {"permissions": {"allow": [], "deny": deny}}
 
 
-def agy_permission_profile(home: Path, *, read_only: bool) -> tuple[Optional[str], str]:
-    """Return ``(refusal_reason, profile_sha256)`` for the worker HOME.
+def materialize_run_home(
+    source_home: Path, run_home: Path, *, read_only: bool
+) -> tuple[Optional[str], str]:
+    """Create the disposable HOME; return ``(refusal_reason, profile_sha256)``.
 
-    The profile hash binds the effective allow/deny lists, the mode, and the
-    bytes of the hooks and MCP config files that Agy loads from that HOME.
+    The worker never sees the source HOME's settings, hooks, MCP config,
+    projects or memory: only the copied auth files and the explicit settings
+    written here.  The profile hash binds those settings and the mode.
     """
-    paths = agy_settings_paths(home)
-    allow: list[str] = []
-    deny: list[str] = []
-    reason: Optional[str] = None
-    try:
-        raw = paths["settings"].read_bytes() if paths["settings"].exists() else b""
-        data = json.loads(raw.decode("utf-8")) if raw.strip() else {}
-        perms = data.get("permissions") if isinstance(data, dict) else None
-        if perms is not None and not isinstance(perms, dict):
-            raise ValueError("permissions must be an object")
-        perms = perms or {}
-        allow = [str(rule) for rule in (perms.get("allow") or [])]
-        deny = [str(rule) for rule in (perms.get("deny") or [])]
-    except (OSError, ValueError) as exc:
-        reason = f"agy_permission_profile_unreadable:{type(exc).__name__}"
-    if reason is None and any(rule.strip().startswith("command") for rule in allow):
-        reason = "agy_permission_profile_grants_commands"
-    if (
-        reason is None
-        and read_only
-        and any(rule.strip().startswith("write_file") for rule in allow)
-    ):
-        reason = "agy_permission_profile_grants_writes_for_read_only_role"
-    extra: dict[str, str] = {}
-    for name in ("hooks", "mcp"):
+    for relative in AGY_RUN_HOME_COPIED_FILES:
+        source = source_home / relative
+        destination = run_home / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
         try:
-            extra[name] = hashlib.sha256(paths[name].read_bytes()).hexdigest()
+            shutil.copyfile(source, destination)
+            os.chmod(destination, 0o600)
         except FileNotFoundError:
-            extra[name] = ""
+            # No token: agy itself fails authentication, which is a typed
+            # non-delivery on the normal result path.
+            continue
         except OSError:
-            extra[name] = "unreadable"
-    canonical = json.dumps(
-        {
-            "allow": sorted(set(allow)),
-            "deny": sorted(set(deny)),
-            "mode": "plan" if read_only else "accept-edits",
-            **extra,
-        },
+            return "agy_run_home_unavailable", ""
+    settings = json.dumps(agy_run_settings(read_only=read_only), sort_keys=True, indent=2) + "\n"
+    settings_path = run_home / AGY_RUN_HOME_SETTINGS
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(settings, encoding="utf-8")
+    profile = json.dumps(
+        {"mode": "plan" if read_only else "accept-edits", "settings": settings},
         sort_keys=True,
         separators=(",", ":"),
     )
-    return reason, hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return None, hashlib.sha256(profile.encode("utf-8")).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -217,28 +213,22 @@ def _sbpl_path(path: Path) -> str:
     return text
 
 
-def build_seatbelt_profile(
-    *,
-    home: Path,
-    run_tmp: Path,
-    writable_target: Optional[Path],
-) -> str:
-    """Deny file writes except to the target, Agy state under HOME and run tmp.
+def build_seatbelt_profile(*, run_root: Path, writable_target: Optional[Path]) -> str:
+    """Deny every file write except the target and the per-run root.
 
-    Paths must already be real paths (Seatbelt matches resolved vnodes).  Agy
-    configuration that changes what runs (settings, hooks, MCP config, its own
-    binaries) stays read-only even inside the state directory.
+    ``run_root`` holds the disposable HOME and TMPDIR, so the real HOME
+    (``~/.gemini`` config, projects, OAuth token, memory) and
+    ``~/Library/Keychains`` stay read-only; probes showed agy needs neither.
+    The target's ``.git`` entry stays read-only too, so a worker cannot
+    repoint the worktree at an attacker-controlled gitdir.  Paths must be
+    real paths (Seatbelt matches resolved vnodes).
     """
-    gemini = home / ".gemini"
-    allow = [gemini, home / "Library" / "Keychains", run_tmp]
+    allow = [run_root]
+    deny: list[str] = []
     if writable_target is not None:
         allow.insert(0, writable_target)
-    deny_subpaths = [
-        gemini / "antigravity-cli" / "bin",
-        gemini / "antigravity-cli" / "builtin",
-        gemini / "antigravity-cli" / "updater",
-    ]
-    deny_literals = list(agy_settings_paths(home).values())
+        git_entry = _sbpl_path(writable_target / ".git")
+        deny = [f'  (literal "{git_entry}")', f'  (subpath "{git_entry}")']
     lines = [
         "(version 1)",
         "(allow default)",
@@ -249,11 +239,9 @@ def build_seatbelt_profile(
         '  (literal "/dev/tty")',
         '  (regex #"^/dev/fd/")',
         '  (regex #"^/dev/ttys"))',
-        "(deny file-write*",
-        *[f'  (subpath "{_sbpl_path(path)}")' for path in deny_subpaths],
-        *[f'  (literal "{_sbpl_path(path)}")' for path in deny_literals],
-        ")",
     ]
+    if deny:
+        lines += ["(deny file-write*", *deny, ")"]
     return "\n".join(lines) + "\n"
 
 
@@ -273,7 +261,15 @@ def seatbelt_available() -> bool:
 def _git_output(root: Path, *args: str) -> Optional[bytes]:
     try:
         completed = subprocess.run(
-            ["git", "--no-optional-locks", *args],
+            [
+                "git",
+                "--no-optional-locks",
+                "-c",
+                "core.fsmonitor=false",
+                "-c",
+                "core.hooksPath=/dev/null",
+                *args,
+            ],
             cwd=root,
             capture_output=True,
             timeout=120,
@@ -299,16 +295,56 @@ def path_inside(path: Path, root: Path) -> bool:
 
 
 def main_worktree_of(target: Path) -> Optional[Path]:
-    """Main worktree behind ``target``'s Git common dir, if ``target`` is in Git."""
+    """Non-bare main worktree behind ``target``'s Git common dir, if any.
+
+    A bare repository (the gateway deployment layout) has no checkout to
+    protect; its first ``worktree list`` entry is marked ``bare`` and skipped.
+    """
     if _git_output(target, "rev-parse", "--git-common-dir") is None:
         return None
     listing = _git_output(target, "worktree", "list", "--porcelain")
     if not listing:
         return None
-    first = listing.decode("utf-8", errors="surrogateescape").splitlines()[0]
-    if not first.startswith("worktree "):
+    first_block = listing.decode("utf-8", errors="surrogateescape").split("\n\n")[0]
+    lines = first_block.splitlines()
+    if not lines or not lines[0].startswith("worktree ") or "bare" in lines[1:]:
         return None
-    return Path(first[len("worktree ") :])
+    return Path(lines[0][len("worktree ") :])
+
+
+def protected_checkout_plan(
+    *,
+    target: Path,
+    controller_repo_root: Optional[str],
+    canonical_source_root: Path,
+) -> list[tuple[Path, bool]]:
+    """``(root, include_ignored)`` for each deduplicated protected checkout.
+
+    Union of the contract's controller checkout, the non-bare main worktree
+    of the target's Git common dir (unless that is the target itself) and the
+    loaded canonical source root; realpath, case-insensitive on darwin.
+
+    Ignored-file stats are fingerprinted only for the controller and
+    canonical source roots.  The target's main worktree is often the Owner's
+    working checkout where concurrent sessions touch logs and caches; there
+    Seatbelt already denies every worker write, so only the overlap refusal
+    and the tracked/untracked fingerprint are kept to avoid false failures.
+    """
+    candidates: list[tuple[Path, bool]] = []
+    if controller_repo_root and str(controller_repo_root).strip():
+        candidates.append((Path(str(controller_repo_root)).expanduser(), True))
+    main = main_worktree_of(target)
+    if main is not None and _path_key(main) != _path_key(target):
+        candidates.append((main, False))
+    candidates.append((canonical_source_root, True))
+    plan: dict[str, tuple[Path, bool]] = {}
+    for candidate, include_ignored in candidates:
+        key = _path_key(candidate)
+        if key in plan:
+            plan[key] = (plan[key][0], plan[key][1] or include_ignored)
+        else:
+            plan[key] = (Path(os.path.realpath(candidate)), include_ignored)
+    return list(plan.values())
 
 
 def protected_checkout_roots(
@@ -317,27 +353,14 @@ def protected_checkout_roots(
     controller_repo_root: Optional[str],
     canonical_source_root: Path,
 ) -> list[Path]:
-    """Deduplicated (realpath, case-insensitive on darwin) protected checkouts.
-
-    Union of the contract's controller checkout, the main worktree of the
-    target's Git common dir (unless that is the target itself) and the
-    loaded canonical source root.
-    """
-    candidates: list[Path] = []
-    if controller_repo_root and str(controller_repo_root).strip():
-        candidates.append(Path(str(controller_repo_root)).expanduser())
-    main = main_worktree_of(target)
-    if main is not None and _path_key(main) != _path_key(target):
-        candidates.append(main)
-    candidates.append(canonical_source_root)
-    roots: list[Path] = []
-    seen: set[str] = set()
-    for candidate in candidates:
-        key = _path_key(candidate)
-        if key not in seen:
-            seen.add(key)
-            roots.append(Path(os.path.realpath(candidate)))
-    return roots
+    return [
+        root
+        for root, _ in protected_checkout_plan(
+            target=target,
+            controller_repo_root=controller_repo_root,
+            canonical_source_root=canonical_source_root,
+        )
+    ]
 
 
 def _update(digest: Any, label: bytes, part: bytes) -> None:
@@ -363,7 +386,7 @@ def _tree_files(root: Path) -> Iterable[tuple[str, bytes]]:
                 yield relative, b"unreadable"
 
 
-def checkout_fingerprint(root: Path | str) -> Optional[str]:
+def checkout_fingerprint(root: Path | str, *, include_ignored: bool = True) -> Optional[str]:
     """Fingerprint one protected checkout; ``None`` when it cannot be read.
 
     Covers HEAD, porcelain status, the tracked diff, untracked file bytes, a
@@ -383,8 +406,12 @@ def checkout_fingerprint(root: Path | str) -> Optional[str]:
     head = _git_output(path, "rev-parse", "--verify", "HEAD")
     status = _git_output(path, "status", "--porcelain=v1", "-uall", "-z")
     diff = _git_output(path, "diff", "--binary", "HEAD")
-    ignored = _git_output(
-        path, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"
+    ignored = (
+        _git_output(
+            path, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"
+        )
+        if include_ignored
+        else b""
     )
     common = _git_output(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
     if None in (head, status, diff, ignored, common):
@@ -425,10 +452,10 @@ def checkout_fingerprint(root: Path | str) -> Optional[str]:
     return digest.hexdigest()
 
 
-def fingerprint_roots(roots: Iterable[Path]) -> Optional[dict[str, str]]:
+def fingerprint_roots(plan: Iterable[tuple[Path, bool]]) -> Optional[dict[str, str]]:
     result: dict[str, str] = {}
-    for root in roots:
-        value = checkout_fingerprint(root)
+    for root, include_ignored in plan:
+        value = checkout_fingerprint(root, include_ignored=include_ignored)
         if value is None:
             return None
         result[str(root)] = value
@@ -452,6 +479,33 @@ def escaping_symlinks(target: Path) -> dict[str, str]:
                 except OSError:
                     found[path.relative_to(real_target).as_posix()] = "unreadable"
     return found
+
+
+def target_git_entry_state(target: Path) -> str:
+    """Hash of the target's ``.git`` entry: the gitdir pointer file, or the
+    code-bearing parts (config, hooks, info) of an embedded ``.git`` dir."""
+    entry = Path(os.path.realpath(target)) / ".git"
+    digest = hashlib.sha256()
+    try:
+        if entry.is_symlink():
+            _update(digest, b"symlink", os.readlink(entry).encode("utf-8", "surrogateescape"))
+        elif entry.is_file():
+            _update(digest, b"file", entry.read_bytes())
+        elif entry.is_dir():
+            try:
+                _update(digest, b"config", (entry / "config").read_bytes())
+            except OSError:
+                _update(digest, b"config", b"missing")
+            for name in ("hooks", "info"):
+                for relative, content in _tree_files(entry / name):
+                    _update(
+                        digest, f"{name}/{relative}".encode("utf-8", "surrogateescape"), content
+                    )
+        else:
+            _update(digest, b"absent", b"")
+    except OSError:
+        _update(digest, b"unreadable", b"")
+    return digest.hexdigest()
 
 
 def worker_home(env: Optional[Mapping[str, str]]) -> Path:
