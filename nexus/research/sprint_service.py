@@ -906,7 +906,9 @@ def _build_llm_candidate_prompt(
     if _symmetric_prompt_mode():
         # The output instruction travels once, as the payload (SYMMETRIC_EDIT_INSTRUCTION); a second,
         # conflicting "prefer patch" instruction here would differ from the bare arm.
-        return f"Task: {task}\nHint: {mutation_hint}\n{contract_block}Source:\n{source_code}{test_block}"
+        # Candidate strategy hints ("Pivot: assume a race condition…") are keyword-picked guidance the
+        # bare arm never gets; in symmetric mode every candidate is the plain baseline attempt.
+        return f"Task: {task}\nHint: baseline\n{contract_block}Source:\n{source_code}{test_block}"
     if compact:
         return (
             "Return JSON. Prefer patch=<full updated target file>. "

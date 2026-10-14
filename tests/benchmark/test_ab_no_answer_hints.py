@@ -374,6 +374,12 @@ def test_symmetric_mode_has_one_output_instruction_shared_with_the_bare_arm(
         test_source="def test_f(): pass\n",
     )
     assert "Prefer patch" not in nexus_prompt
+    pivot = _build_llm_candidate_prompt(
+        source_code="def f():\n    return 1\n",
+        task="Fix f",
+        mutation_hint="Pivot: Assume this is a race condition.",
+    )
+    assert "race condition" not in pivot and "Hint: baseline" in pivot
     assert "Return JSON" not in nexus_prompt
     assert _candidate_payload_instruction() == SYMMETRIC_EDIT_INSTRUCTION
 
