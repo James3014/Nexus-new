@@ -110,8 +110,37 @@ class FakeHost(ad.Host):
         self.lock_events: list[str] = []
         self.lock_fails = False
         self.on_reload: Callable[[int], None] | None = None
+        self.r1_block: str | None = None
+        self.r1_checks = 0
+        self.r1_guard_depth = 0
+        self.r1_guard_events: list[str] = []
+        self.r1_append_attempts: list[bool] = []
+        self.after_r1_check: Callable[[], None] | None = None
         self.core_pin: str = CORE.pin
         self.core_fetch_fails = False
+
+    def r1_recovery_block(self, cfg: ad.Config) -> str | None:  # type: ignore[override]
+        self.r1_checks += 1
+        block = self.r1_block
+        if self.after_r1_check is not None:
+            self.after_r1_check()
+        return block
+
+    @contextlib.contextmanager
+    def r1_guard(self, cfg: ad.Config) -> Iterator[None]:  # type: ignore[override]
+        self.r1_guard_depth += 1
+        self.r1_guard_events.append("acquire")
+        try:
+            yield
+        finally:
+            self.r1_guard_depth -= 1
+            self.r1_guard_events.append("release")
+
+    def r1_try_append(self) -> bool:
+        """What R1's REQUESTED append would get: refused while the guard is held."""
+        accepted = self.r1_guard_depth == 0
+        self.r1_append_attempts.append(accepted)
+        return accepted
 
     def core_git(self, argv, cwd, timeout):
         """Core git effects run for real against the local fixture origin."""
@@ -1506,6 +1535,7 @@ def test_autoupdater_branches_count_as_pin_bumps(branch: str) -> None:
         "verdict": "IN_FLIGHT",
         "pull_requests": [7],
         "ignored_stale": [],
+        "ignored_draft": [],
         "warnings": [],
     }
 
@@ -2082,10 +2112,15 @@ def test_unexpected_reconcile_error_quarantines_with_hold(
 
     monkeypatch.setattr(ad._Cycle, "finish_switch", explode)
     result = cycle(cfg, FakeHost(), FakeProber())
-    assert result["status"] == "RECONCILED_JOURNAL_CORRUPT"
+    # #2198 review: a journal that passed validation is never quarantined; it is
+    # kept with HOLD so the failure does not repeat every cycle.
+    assert result["status"] == "RECONCILED_RECONCILE_FAILED"
     assert "RECONCILE_FAILED:RuntimeError" in result["receipt"]["reason"]
-    assert cfg.hold_file.exists() and not cfg.journal.exists()
-    assert cycle(cfg, FakeHost(), FakeProber())["status"] == "HELD"
+    assert cfg.hold_file.exists() and cfg.journal.exists()
+    assert not list(cfg.state_dir.glob("pending-switch.corrupt.*.json"))
+    host = FakeHost()
+    assert cycle(cfg, host, FakeProber())["status"] == "HELD"
+    assert cfg.journal.exists() and host.reloads == []
 
 
 def test_busy_manager_during_reconcile_keeps_the_journal(cfg: ad.Config) -> None:
@@ -2959,6 +2994,177 @@ def test_gb077_probe_passes_timeout_and_attempts() -> None:
     assert calls[0][-2:] == [str(ad.GB077_TIMEOUT_SECONDS), str(ad.GB077_ATTEMPTS)]
 
 
+# ---------------------------------------- draft pin PRs and #526 R1 recovery
+
+
+def _pin_pr(number: int, *, draft: bool) -> dict[str, Any]:
+    return {
+        "number": number,
+        "title": "ci: trusted runtime identity abc1234 and transition for #2171",
+        "head": {"ref": f"auto/workforce-anchor-m-{number:012d}", "sha": "f" * 40},
+        "created_at": NOW_ISO,
+        "draft": draft,
+    }
+
+
+def test_draft_pin_pr_does_not_block_and_is_reported(cfg: ad.Config) -> None:
+    api = green_api(open_pulls=[_pin_pr(2172, draft=True)])
+    pins = ad.pin_bumps_in_flight(api, now=NOW)
+    assert pins["verdict"] == "CLEAR" and pins["ignored_draft"] == [2172]
+    assert pins["warnings"] == ["DRAFT_PIN_PR_IGNORED #2172"]
+    result = cycle(cfg, FakeHost(), FakeProber(), api)
+    assert result["status"] == "DEPLOYED"
+    assert "DRAFT_PIN_PR_IGNORED #2172" in result["warnings"]
+    assert "DRAFT_PIN_PR_IGNORED #2172" in result["receipt"]["warnings"]
+    status = json.loads((cfg.state_dir / "status.json").read_text())
+    assert "DRAFT_PIN_PR_IGNORED #2172" in status["warnings"]
+
+
+def test_same_pin_pr_once_ready_blocks() -> None:
+    api = green_api(open_pulls=[_pin_pr(2172, draft=False)])
+    pins = ad.pin_bumps_in_flight(api, now=NOW)
+    assert pins["verdict"] == "IN_FLIGHT" and pins["pull_requests"] == [2172]
+
+
+def test_draft_marked_ready_mid_cycle_blocks_the_switch(cfg: ad.Config) -> None:
+    pr = _pin_pr(2172, draft=True)
+
+    def ready_during_spare_probe(call: dict[str, Any]) -> None:
+        if call["port"] == 50123:
+            pr["draft"] = False
+
+    host = FakeHost()
+    before = cfg.plist.read_bytes()
+    result = cycle(cfg, host, FakeProber(hook=ready_during_spare_probe), green_api(open_pulls=[pr]))
+    assert result["status"] == "PIN_BUMP_IN_FLIGHT"
+    assert cfg.plist.read_bytes() == before and host.reloads == []
+
+
+def test_open_r1_recovery_blocks_before_build(cfg: ad.Config) -> None:
+    host = FakeHost()
+    host.r1_block = "R1_OPEN_RECOVERY_BLOCKS_V1_EFFECT:gen1-request:REQUESTED"
+    result = cycle(cfg, host, FakeProber())
+    assert result["status"] == "BLOCKED_MANAGER_BUSY"
+    assert result["reason"].startswith("R1_OPEN_RECOVERY_BLOCKS_V1_EFFECT")
+    assert not any(c[:1] == ["uv"] for c in host.calls) and host.reloads == []
+    assert not cfg.hold_file.exists() and ad.read_receipts(cfg.state_dir) == []
+
+
+def test_r1_opened_during_the_cycle_blocks_the_switch_and_retries(cfg: ad.Config) -> None:
+    host = FakeHost()
+
+    def r1_opens(call: dict[str, Any]) -> None:
+        if call["port"] == 50123:
+            host.r1_block = "R1_OPEN_RECOVERY_BLOCKS_V1_EFFECT:gen2:PREFLIGHTED"
+
+    before = cfg.plist.read_bytes()
+    result = cycle(cfg, host, FakeProber(hook=r1_opens))
+    assert result["status"] == "BLOCKED_MANAGER_BUSY"
+    receipt = result["receipt"]
+    assert receipt["switched"] is False and receipt["reason"].startswith("R1_OPEN_RECOVERY")
+    assert cfg.plist.read_bytes() == before and host.reloads == []
+    assert not cfg.journal.exists() and not cfg.hold_file.exists()
+    assert host.lock_events == ["acquire", "release"]
+    # R1 finished: the next cycle after the plain debounce (no backoff growth) deploys.
+    host.r1_block = None
+    host.clock += cfg.min_interval_seconds
+    assert cycle(cfg, host, FakeProber())["status"] == "DEPLOYED"
+
+
+def _real_r1_host(cfg: ad.Config, monkeypatch: pytest.MonkeyPatch) -> FakeHost:
+    from scripts.ops import mcp_gateway_durable as durable
+
+    cfg.gateway_root.chmod(0o700)
+    monkeypatch.setattr(durable, "GATEWAY_STATE_ROOT", cfg.gateway_root)
+    monkeypatch.setattr(durable, "GATEWAY_LEDGER", cfg.gateway_root / "ledger.jsonl")
+
+    class RealR1(FakeHost):
+        def r1_recovery_block(self, c: ad.Config) -> str | None:  # type: ignore[override]
+            return ad.Host.r1_recovery_block(self, c)
+
+    return RealR1()
+
+
+def test_real_r1_check_without_requests_lets_the_switch_proceed(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    host = _real_r1_host(cfg, monkeypatch)
+    assert ad.Host.r1_recovery_block(host, cfg) is None
+    assert cycle(cfg, host, FakeProber())["status"] == "DEPLOYED"
+
+
+def test_corrupt_r1_ledger_blocks_the_switch(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    host = _real_r1_host(cfg, monkeypatch)
+    ledger = cfg.gateway_root / "ledger.jsonl"
+    ledger.write_bytes(b"not-json\n")
+    ledger.chmod(0o600)
+    reason = ad.Host.r1_recovery_block(host, cfg)
+    assert reason is not None and reason.startswith("R1_LEDGER_CORRUPT_FAIL_CLOSED")
+    before = cfg.plist.read_bytes()
+    result = cycle(cfg, host, FakeProber())
+    assert result["status"] == "BLOCKED_MANAGER_BUSY" and host.reloads == []
+    assert cfg.plist.read_bytes() == before and not cfg.hold_file.exists()
+
+
+def test_r1_check_fails_closed_for_another_state_root(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.ops import mcp_gateway_durable as durable
+
+    monkeypatch.setattr(durable, "GATEWAY_STATE_ROOT", cfg.gateway_root.parent / "elsewhere")
+    reason = ad.Host().r1_recovery_block(cfg)
+    assert reason is not None and reason.startswith("R1_CHECK_FAILED")
+
+
+def _crash_after_candidate_plist(cfg: ad.Config) -> bytes:
+    before = cfg.plist.read_bytes()
+    host = FakeHost()
+    probe = FakeProber(
+        hook=lambda c: (_ for _ in ()).throw(Crash()) if c["port"] == ad.LIVE_PORT else None
+    )
+    with pytest.raises(Crash):
+        cycle(cfg, host, probe)
+    assert cfg.journal.exists()
+    return before
+
+
+def test_reconcile_under_r1_finalizes_a_healthy_live_candidate_without_effects(
+    cfg: ad.Config,
+) -> None:
+    _crash_after_candidate_plist(cfg)
+    host = FakeHost()
+    host.r1_block = "R1_OPEN_RECOVERY_BLOCKS_V1_EFFECT:gen3:REQUESTED"
+    result = cycle(cfg, host, FakeProber())
+    assert result["status"] == "RECONCILED_DEPLOYED"
+    assert host.reloads == [] and not cfg.journal.exists()
+    assert result["receipt"]["r1_block_observed"].startswith("R1_OPEN_RECOVERY")
+
+
+def test_reconcile_under_r1_keeps_the_journal_instead_of_rolling_back(cfg: ad.Config) -> None:
+    _crash_after_candidate_plist(cfg)
+    live_before = cfg.plist.read_bytes()
+    host = FakeHost()
+    host.r1_block = "R1_OPEN_RECOVERY_BLOCKS_V1_EFFECT:gen3:REQUESTED"
+    result = cycle(cfg, host, FakeProber({(ad.LIVE_PORT, NEW): False}))
+    assert result["status"] == "RECONCILED_BLOCKED_MANAGER_BUSY"
+    assert cfg.journal.exists() and cfg.plist.read_bytes() == live_before
+    assert host.reloads == [] and not cfg.hold_file.exists()
+    # R1 done: the next cycle rolls back normally.
+    result = cycle(cfg, FakeHost(), FakeProber({(ad.LIVE_PORT, NEW): False}))
+    assert result["status"] == "RECONCILED_ROLLED_BACK" and not cfg.journal.exists()
+
+
+def test_reconcile_under_r1_does_not_reload_the_previous_plist(cfg: ad.Config) -> None:
+    _crash_on_rollback_reload(cfg)
+    host = FakeHost()
+    host.r1_block = "R1_LEDGER_CORRUPT_FAIL_CLOSED:x"
+    result = cycle(cfg, host, FakeProber())
+    assert result["status"] == "RECONCILED_BLOCKED_MANAGER_BUSY"
+    assert host.reloads == [] and cfg.journal.exists()
+
+
 @contextlib.contextmanager
 def scripted_health(responses: list[Any]) -> Iterator[int]:
     """/health answers from ``responses`` in order: a dict, or a float = sleep (timeout)."""
@@ -3036,3 +3242,316 @@ def test_gb077_three_timeouts_fail() -> None:
         code, detail = _run_gb077(port, timeout=1.0, attempts=3)
     assert code == 1 and len(detail["attempts"]) == 3
     assert all(not a["ok"] for a in detail["attempts"])
+
+
+def test_r1_blocked_attempt_leaves_no_orphaned_core_checkout(cfg: ad.Config) -> None:
+    """BLOCKED_MANAGER_BUSY after the build: the a1 deployment pins its Core, so
+    retention removes both together once the deployment ages out."""
+    host = FakeHost()
+
+    def r1_opens(call: dict[str, Any]) -> None:
+        if call["port"] == 50123:
+            host.r1_block = "R1_OPEN_RECOVERY_BLOCKS_V1_EFFECT:gen4:REQUESTED"
+
+    result = cycle(cfg, host, FakeProber(hook=r1_opens))
+    assert result["status"] == "BLOCKED_MANAGER_BUSY"
+    core_root = Path(result["receipt"]["core"]["root"])
+    assert core_root.is_dir() and (cfg.deployments / f"a1-{NEW}").is_dir()
+    # While the deployment exists (it is retried next cycle) its Core is kept.
+    assert ad.prune_core(cfg, host, []) == []
+    # Once retention drops the deployment, its Core checkout goes with it.
+    gone = ad.Config.default(cfg.state_dir.parents[2], keep=0)
+    assert ad.prune(gone, host, []) == [f"a1-{NEW}"]
+    assert not core_root.exists()
+
+
+# ------------------------------- #2198 review: R1 ledger lock across the effect
+
+
+def test_r1_cannot_open_anywhere_between_check_and_end_of_switch(cfg: ad.Config) -> None:
+    """A racing R1 appender tries right after the check, during the reload, during
+    the live probe and during the rollback: every attempt is refused."""
+    host = FakeHost()
+    host.on_reload = lambda _count: host.r1_try_append()
+
+    def during_probe(call: dict[str, Any]) -> None:
+        if call["port"] == 50123:
+            # From here on (the advisory pre-build check is done) R1 races every
+            # authoritative check the moment it returns.
+            host.after_r1_check = host.r1_try_append
+        if call["port"] == ad.LIVE_PORT:
+            host.r1_try_append()
+
+    result = cycle(cfg, host, FakeProber({(ad.LIVE_PORT, NEW): False}, hook=during_probe))
+    assert result["status"] == "ROLLED_BACK"
+    # check (+ rollback check), 2 reloads, 2 live probes: none could append.
+    assert len(host.r1_append_attempts) >= 6 and not any(host.r1_append_attempts)
+    assert host.r1_guard_depth == 0 and host.r1_guard_events[-1] == "release"
+    assert host.r1_try_append() is True  # free again after the switch
+
+
+def test_real_r1_ledger_lock_is_held_through_the_live_probe(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.ops import mcp_gateway_durable as durable
+
+    cfg.gateway_root.chmod(0o700)
+    monkeypatch.setattr(durable, "GATEWAY_STATE_ROOT", cfg.gateway_root)
+    monkeypatch.setattr(durable, "GATEWAY_LEDGER", cfg.gateway_root / "ledger.jsonl")
+    lock_path = durable.GatewayLedger(cfg.gateway_root / "ledger.jsonl").lock_path
+
+    class RealGuard(FakeHost):
+        def r1_recovery_block(self, c: ad.Config) -> str | None:  # type: ignore[override]
+            return ad.Host.r1_recovery_block(self, c)
+
+        def r1_guard(self, c: ad.Config):  # type: ignore[override]
+            return ad.Host.r1_guard(self, c)
+
+    outcomes: list[str] = []
+
+    def r1_appender() -> None:  # another thread = no re-entrancy, like R1's process
+        try:
+            with durable.InterProcessLock(lock_path, timeout=0.3):
+                outcomes.append("appended")
+        except Exception as exc:  # noqa: BLE001
+            outcomes.append(type(exc).__name__)
+
+    def during_probe(call: dict[str, Any]) -> None:
+        if call["port"] == ad.LIVE_PORT:
+            thread = threading.Thread(target=r1_appender)
+            thread.start()
+            thread.join(timeout=10)
+
+    result = cycle(cfg, RealGuard(), FakeProber(hook=during_probe))
+    assert result["status"] == "DEPLOYED"
+    assert outcomes and "appended" not in outcomes
+    r1_appender()
+    assert outcomes[-1] == "appended"  # released after the effect
+
+
+def test_r1_guard_unavailable_blocks_the_switch(cfg: ad.Config) -> None:
+    class Busy(FakeHost):
+        @contextlib.contextmanager
+        def r1_guard(self, c: ad.Config) -> Iterator[None]:  # type: ignore[override]
+            raise ad.DeployError("MANAGER_LOCK_UNAVAILABLE:r1-ledger:timeout")
+            yield
+
+    host = Busy()
+    before = cfg.plist.read_bytes()
+    result = cycle(cfg, host, FakeProber())
+    assert result["status"] == "BLOCKED_MANAGER_BUSY"
+    assert cfg.plist.read_bytes() == before and not cfg.journal.exists()
+
+
+def _foreign_live_plist(cfg: ad.Config) -> None:
+    cfg.plist.write_bytes(live_plist(cfg.deployments / f"r1-{PR_HEAD}"))
+
+
+def test_reconcile_with_foreign_plist_waits_while_r1_is_open(cfg: ad.Config) -> None:
+    _crash_after_candidate_plist(cfg)
+    _foreign_live_plist(cfg)  # e.g. R1 rewrote the plist
+    host = FakeHost()
+    host.r1_block = "R1_OPEN_RECOVERY_BLOCKS_V1_EFFECT:gen5:EFFECT_STARTED"
+    result = cycle(cfg, host, FakeProber())
+    assert result["status"] == "RECONCILED_BLOCKED_MANAGER_BUSY"
+    assert cfg.journal.exists() and not cfg.hold_file.exists() and host.reloads == []
+    last = ad.last_receipt(cfg.state_dir)
+    assert last["outcome"] == "BLOCKED_MANAGER_BUSY" and last["reconciled"] is True
+    # R1 terminal and the plist still foreign: now it is FOREIGN_PLIST + HOLD.
+    result = cycle(cfg, FakeHost(), FakeProber())
+    assert result["status"] == "RECONCILED_FOREIGN_PLIST"
+    assert cfg.hold_file.exists() and not cfg.journal.exists()
+
+
+def test_cycle_start_foreign_plist_waits_while_r1_is_open(cfg: ad.Config) -> None:
+    _foreign_live_plist(cfg)
+    host = FakeHost()
+    host.r1_block = "R1_OPEN_RECOVERY_BLOCKS_V1_EFFECT:gen6:REQUESTED"
+    assert cycle(cfg, host, FakeProber())["status"] == "BLOCKED_MANAGER_BUSY"
+    assert not cfg.hold_file.exists()
+    assert cycle(cfg, FakeHost(), FakeProber())["status"] == "FOREIGN_PLIST"
+    assert cfg.hold_file.exists()
+
+
+def test_plist_changed_mid_cycle_by_r1_is_not_foreign(cfg: ad.Config) -> None:
+    host = FakeHost()
+
+    def r1_rebinds(call: dict[str, Any]) -> None:
+        if call["port"] == 50123:
+            _foreign_live_plist(cfg)
+            host.r1_block = "R1_OPEN_RECOVERY_BLOCKS_V1_EFFECT:gen7:EFFECT_STARTED"
+
+    result = cycle(cfg, host, FakeProber(hook=r1_rebinds))
+    assert result["status"] == "BLOCKED_MANAGER_BUSY" and not cfg.hold_file.exists()
+
+
+class _RaisingProber:
+    def __init__(self, exc: BaseException) -> None:
+        self.exc = exc
+
+    def probe(self, **_kw: Any) -> dict[str, Any]:
+        raise self.exc
+
+
+class _CoreUnhealthyProber:
+    def probe(self, **_kw: Any) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "checks": {"core_provenance": {"ok": False, "status": "CORE_UNAVAILABLE"}},
+        }
+
+
+@pytest.mark.parametrize(
+    "prober",
+    [
+        _RaisingProber(TimeoutError("timed out")),
+        _RaisingProber(ad.DeployError("GATEWAY_TOKEN_UNAVAILABLE")),
+        _CoreUnhealthyProber(),
+    ],
+    ids=["timeout", "token", "core-unhealthy"],
+)
+def test_probe_trouble_under_r1_postpones_and_keeps_the_journal(
+    cfg: ad.Config, prober: Any
+) -> None:
+    _crash_after_candidate_plist(cfg)
+    live_before = cfg.plist.read_bytes()
+    host = FakeHost()
+    host.r1_block = "R1_OPEN_RECOVERY_BLOCKS_V1_EFFECT:gen8:PREFLIGHTED"
+    result = ad.run_cycle(cfg, host, prober, green_api(), environ={}, tool_python=Path("/p"))
+    assert result["status"] == "RECONCILED_BLOCKED_MANAGER_BUSY"
+    assert cfg.journal.exists() and not cfg.hold_file.exists()
+    assert cfg.plist.read_bytes() == live_before and host.reloads == []
+    assert not list(cfg.state_dir.glob("pending-switch.corrupt.*.json"))
+
+
+def test_missing_token_under_r1_postpones(cfg: ad.Config) -> None:
+    _crash_after_candidate_plist(cfg)
+    cfg.env_file.unlink()  # live_probe -> read_env_token raises
+    host = FakeHost()
+    host.r1_block = "R1_OPEN_RECOVERY_BLOCKS_V1_EFFECT:gen9:REQUESTED"
+    result = cycle(cfg, host, FakeProber())
+    assert result["status"] == "RECONCILED_BLOCKED_MANAGER_BUSY"
+    assert cfg.journal.exists() and not cfg.hold_file.exists()
+
+
+def test_rollback_postponed_when_r1_lock_is_unavailable_keeps_the_journal(cfg: ad.Config) -> None:
+    class GuardFailsOnRollback(FakeHost):
+        uses = 0
+
+        @contextlib.contextmanager
+        def r1_guard(self, c: ad.Config) -> Iterator[None]:  # type: ignore[override]
+            self.uses += 1
+            if self.uses > 1:  # the switch got the lock; the rollback cannot
+                raise ad.DeployError("MANAGER_LOCK_UNAVAILABLE:r1-ledger:timeout")
+            yield
+
+    host = GuardFailsOnRollback()
+    result = cycle(cfg, host, FakeProber({(ad.LIVE_PORT, NEW): False}))
+    assert result["status"] == "BLOCKED_MANAGER_BUSY"
+    assert result["receipt"]["switched"] is True and cfg.journal.exists()
+    assert not cfg.hold_file.exists()
+
+
+# --------------------------------------------------- #2198 review round 2
+
+
+def test_cycle_start_foreign_verdict_is_taken_under_both_locks(cfg: ad.Config) -> None:
+    """R1 races the HOLD write: the decision runs under GATEWAY_LOCK + ledger lock."""
+    _foreign_live_plist(cfg)
+    host = FakeHost()
+    held_during_hold_write: list[tuple[int, int]] = []
+    real_set_hold = ad._set_hold
+
+    def recording_set_hold(c: ad.Config, reason: str) -> None:
+        held_during_hold_write.append((
+            host.lock_events.count("acquire") - host.lock_events.count("release"),
+            host.r1_guard_depth,
+        ))
+        held_during_hold_write.append((0, int(host.r1_try_append())))
+        real_set_hold(c, reason)
+
+    host.after_r1_check = host.r1_try_append
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(ad, "_set_hold", recording_set_hold)
+        result = cycle(cfg, host, FakeProber())
+    assert result["status"] == "FOREIGN_PLIST" and cfg.hold_file.exists()
+    (manager_depth, guard_depth), (_, append_ok) = held_during_hold_write
+    assert manager_depth == 1 and guard_depth == 1 and append_ok == 0
+    # Every racing append between the R1 check and the HOLD write was refused.
+    assert host.r1_append_attempts and not any(host.r1_append_attempts)
+
+
+def test_cycle_start_r1_opening_before_the_guarded_decision_blocks(cfg: ad.Config) -> None:
+    """R1 opens after the plist looked unknown but before the guarded decision."""
+    _foreign_live_plist(cfg)
+
+    class OpensWhenGuarded(FakeHost):
+        @contextlib.contextmanager
+        def r1_guard(self, c: ad.Config) -> Iterator[None]:  # type: ignore[override]
+            self.r1_block = "R1_OPEN_RECOVERY_BLOCKS_V1_EFFECT:gen10:REQUESTED"
+            with FakeHost.r1_guard(self, c):
+                yield
+
+    result = cycle(cfg, OpensWhenGuarded(), FakeProber())
+    assert result["status"] == "BLOCKED_MANAGER_BUSY" and not cfg.hold_file.exists()
+
+
+def test_cycle_start_plist_adopted_meanwhile_proceeds(cfg: ad.Config) -> None:
+    _foreign_live_plist(cfg)
+
+    class AdoptedWhenGuarded(FakeHost):
+        @contextlib.contextmanager
+        def r1_guard(self, c: ad.Config) -> Iterator[None]:  # type: ignore[override]
+            ad.remember_plist(c, c.plist.read_bytes())  # Owner ran `adopt` meanwhile
+            with FakeHost.r1_guard(self, c):
+                yield
+
+    result = cycle(cfg, AdoptedWhenGuarded(), FakeProber())
+    assert result["status"] != "FOREIGN_PLIST" and not cfg.hold_file.exists()
+
+
+@pytest.mark.parametrize("raised", [TimeoutError("timed out"), OSError("reset"), ValueError("x")])
+def test_probe_exception_on_valid_journal_rolls_back_not_quarantined(
+    cfg: ad.Config, raised: Exception
+) -> None:
+    """R1 terminal, the live probe of the candidate raises: normal rollback path."""
+    before = _crash_after_candidate_plist(cfg)
+
+    class RaisesForCandidate(FakeProber):
+        def probe(self, **kw: Any) -> dict[str, Any]:
+            if kw["commit"] == NEW:
+                raise raised
+            return super().probe(**kw)
+
+    host = FakeHost()
+    result = cycle(cfg, host, RaisesForCandidate())
+    assert result["status"] == "RECONCILED_ROLLED_BACK"
+    assert type(raised).__name__ in result["receipt"]["probes"]["live"]["error"]
+    assert cfg.plist.read_bytes() == before and not cfg.journal.exists()
+    assert not list(cfg.state_dir.glob("pending-switch.corrupt.*.json"))
+
+
+def test_reload_exception_on_valid_journal_rolls_back(cfg: ad.Config) -> None:
+    before = _crash_after_candidate_plist(cfg)
+    host = FakeHost()
+
+    def first_reload_breaks(count: int) -> None:
+        if count == 1:
+            raise RuntimeError("launchctl exploded")
+
+    host.on_reload = first_reload_breaks
+    result = cycle(cfg, host, FakeProber())
+    assert result["status"] == "RECONCILED_ROLLED_BACK"
+    assert cfg.plist.read_bytes() == before and not cfg.journal.exists()
+
+
+def test_tool_link_error_does_not_fail_a_deploy(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def boom(*_a: Any, **_k: Any) -> Any:
+        raise OSError("read-only")
+
+    monkeypatch.setattr(ad._Cycle, "_move_tool_link", boom)
+    result = cycle(cfg, FakeHost(), FakeProber())
+    assert result["status"] == "DEPLOYED"
+    assert result["receipt"]["deployer_link"]["moved"] is False

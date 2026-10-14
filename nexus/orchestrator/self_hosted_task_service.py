@@ -94,7 +94,9 @@ from nexus.orchestrator.acceptance_loop import (
 )
 from nexus.orchestrator.ambient_core import (
     AmbientCoreControlPort,
+    AmbientCoreVerdictBlocked,
     ambient_core_required,
+    build_core_verdict,
     normalize_preparation,
     normalize_verification_projection,
     projection_hash,
@@ -133,6 +135,7 @@ from nexus.orchestrator.task_contract import (
     DevelopmentGoal,
     HumanApprovalPolicy,
     MutationMode,
+    parse_task_card_expected_evidence,
 )
 from nexus.orchestrator.worker_escalation import WorkerEscalationPolicy
 from nexus.orchestrator.worktree_manager import (
@@ -4214,6 +4217,88 @@ class SelfHostedTaskService:
             active_provider=active_provider,
         )
 
+    @staticmethod
+    def _card_evidence_binding_error(contract, request: Mapping[str, Any]) -> Optional[str]:
+        """Bind the declared universe and the Core requirement to the hashed card (#2181).
+
+        Runs for every task, before the Core short-circuit, at intake and at
+        finalize. A card that declares a universe cannot be satisfied by a
+        request that drops it, and a universe never comes from anywhere but
+        the card. For a card-less legacy request nothing is read.
+        """
+        universe = getattr(contract, "expected_evidence", None)
+        dump = getattr(universe, "model_dump", None)
+        declared_by_contract = dump(mode="json") if callable(dump) else universe
+        core_required = ambient_core_required(request)
+        claims_evidence = declared_by_contract is not None or core_required
+        card_path = request.get("task_card_path")
+        raw_hash = request.get("task_card_hash")
+        card_hash = raw_hash if isinstance(raw_hash, str) and raw_hash else None
+        if not isinstance(card_path, str) or not card_path:
+            return (
+                "EXPECTED_EVIDENCE_UNIVERSE_NOT_CARD_BOUND"
+                if declared_by_contract is not None
+                else None
+            )
+        # The card is read whenever a path is supplied, with or without a hash,
+        # so omitting the hash cannot hide a universe card.
+        try:
+            card_bytes = _resolve_task_card_path(card_path).read_bytes()
+        except OSError:
+            # Legacy binding errors stay with the existing card-binding gates.
+            return "EXPECTED_EVIDENCE_TASK_CARD_UNREADABLE" if claims_evidence else None
+        if card_hash is not None and hashlib.sha256(card_bytes).hexdigest() != card_hash:
+            return "EXPECTED_EVIDENCE_TASK_CARD_HASH_MISMATCH" if claims_evidence else None
+        try:
+            declared_by_card = parse_task_card_expected_evidence(card_bytes.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            return "EXPECTED_EVIDENCE_TASK_CARD_INVALID"
+        if declared_by_card != declared_by_contract:
+            return "EXPECTED_EVIDENCE_UNIVERSE_CARD_MISMATCH"
+        if core_required != (declared_by_card is not None):
+            return "CORE_ENVELOPE_REQUIRED_CARD_MISMATCH"
+        if declared_by_card is not None and card_hash is None:
+            # A universe is honoured only from a hash-bound card.
+            return "EXPECTED_EVIDENCE_TASK_CARD_HASH_MISSING"
+        return None
+
+    @staticmethod
+    def _direct_lane_claims_evidence(request: Mapping[str, Any]) -> bool:
+        if request.get("expected_evidence") is not None or request.get("core_envelope_required"):
+            return True
+        card_path = request.get("task_card_path")
+        if not isinstance(card_path, str) or not card_path:
+            return False
+        # Any supplied card is read, hash or no hash: the direct lane must not
+        # be reachable by omitting the hash of a universe card. A card that
+        # cannot be read or parsed fails closed for this lane.
+        try:
+            card_bytes = _resolve_task_card_path(card_path).read_bytes()
+            return parse_task_card_expected_evidence(card_bytes.decode("utf-8")) is not None
+        except (OSError, UnicodeDecodeError, ValueError):
+            return True
+
+    @staticmethod
+    def _core_blocked_receipt(
+        verified: VerifiedCandidateReceipt, verdict: Mapping[str, Any]
+    ) -> VerifiedCandidateReceipt:
+        reasons = [
+            f"AMBIENT_CORE:{code}"
+            for code in (*verdict.get("host_reason_codes", ()), *verdict.get("reason_codes", ()))
+        ]
+        return replace(
+            verified,
+            verified=False,
+            candidate_commit_allowed=False,
+            core_provenance_required=True,
+            # Never "VERIFIED" on a blocked receipt, even when Core said so;
+            # Core's own status stays in ``core_verdict``.
+            core_verification_status=f"HOST_BLOCKED:{verdict.get('core_status') or 'UNAVAILABLE'}",
+            core_verification_result_hash=str(verdict.get("projection_hash") or ""),
+            core_verdict=dict(verdict),
+            failure_reasons=[*verified.failure_reasons, *reasons],
+        )
+
     def _verify_ambient_core_candidate(
         self,
         *,
@@ -4224,16 +4309,38 @@ class SelfHostedTaskService:
         candidate,
         verified: VerifiedCandidateReceipt,
     ) -> VerifiedCandidateReceipt:
+        """Obtain and record Core's verdict; raise ``AmbientCoreVerdictBlocked`` when blocked.
+
+        The blocked exception carries the durable blocked receipt so the
+        caller can persist the verdict before failing the attempt.
+        """
+
+        def blocked(message: str, verdict: Mapping[str, Any]) -> AmbientCoreVerdictBlocked:
+            receipt = self._core_blocked_receipt(verified, verdict)
+            return AmbientCoreVerdictBlocked(message, receipt=receipt, verdict=verdict)
+
+        def fail_closed(code: str) -> AmbientCoreVerdictBlocked:
+            verdict = build_core_verdict(contract=contract, projection=None, transport_error=code)
+            return blocked(code, verdict)
+
+        # Card binding first: dropping the universe must not reach the
+        # legacy short-circuit below.
+        card_error = self._card_evidence_binding_error(contract, request)
+        if card_error is not None:
+            raise fail_closed(card_error)
         if not self._ambient_core_required(contract, request):
             return verified
         if self.ambient_core_port is None:
-            raise RuntimeError("AMBIENT_CORE_CONTROL_PORT_REQUIRED")
+            raise fail_closed("AMBIENT_CORE_CONTROL_PORT_REQUIRED")
         attempt_id = str(state.get("attempt_id") or "")
-        preparation = normalize_preparation(
-            state.get("host_preparation") or {}, attempt_id=attempt_id
-        )
-        projection = normalize_verification_projection(
-            self.ambient_core_port.verify_candidate(
+        try:
+            preparation = normalize_preparation(
+                state.get("host_preparation") or {}, attempt_id=attempt_id
+            )
+        except RuntimeError as exc:
+            raise fail_closed(str(exc)) from exc
+        try:
+            raw_projection = self.ambient_core_port.verify_candidate(
                 preparation=preparation,
                 contract=contract,
                 request=request,
@@ -4241,10 +4348,27 @@ class SelfHostedTaskService:
                 state=state,
                 candidate=candidate,
                 verifier_evidence=verified.verifier_evidence,
-            ),
-            preparation=preparation,
-            candidate_state_hash=verified.candidate_state_hash,
-        )
+            )
+        except Exception as exc:
+            code = str(exc).split(":", 1)[0].strip() or type(exc).__name__
+            raise fail_closed(f"CORE_TRANSPORT_FAILED:{code}") from exc
+        verdict = build_core_verdict(contract=contract, projection=raw_projection)
+        if verdict["blocking"]:
+            raise blocked(verdict["host_reason_codes"][0], verdict)
+        try:
+            projection = normalize_verification_projection(
+                raw_projection,
+                preparation=preparation,
+                candidate_state_hash=verified.candidate_state_hash,
+            )
+        except RuntimeError as exc:
+            verdict = {
+                **verdict,
+                "blocking": True,
+                "coverage_complete": False,
+                "host_reason_codes": [*verdict["host_reason_codes"], str(exc)],
+            }
+            raise blocked(str(exc), verdict) from exc
         hashes = projection["core_response"]["hashes"]
         return replace(
             verified,
@@ -4255,6 +4379,9 @@ class SelfHostedTaskService:
             core_change_set_hash=hashes["change_set_hash"],
             core_evidence_bundle_hash=hashes["evidence_bundle_hash"],
             core_verification_result_hash=projection_hash(projection),
+            core_verdict=verdict,
+            # Coverage never grants authority: commit stays tied to the
+            # verified result alone.
             candidate_commit_allowed=verified.verified,
         )
 
@@ -4463,14 +4590,19 @@ class SelfHostedTaskService:
                 core_provenance_required=True,
                 candidate_commit_allowed=False,
             )
-        verified = self._verify_ambient_core_candidate(
-            contract=contract,
-            request=request,
-            lease=lease,
-            state=self._read_state(task_id) or state,
-            candidate=candidate,
-            verified=verified,
-        )
+        try:
+            verified = self._verify_ambient_core_candidate(
+                contract=contract,
+                request=request,
+                lease=lease,
+                state=self._read_state(task_id) or state,
+                candidate=candidate,
+                verified=verified,
+            )
+        except AmbientCoreVerdictBlocked as core_blocked:
+            # The blocked verdict is persisted with the receipt below; the
+            # unverified receipt then fails the attempt (#2181).
+            verified = core_blocked.receipt
         latest_execution = attempts[-1] if attempts else self._receipt_from_state(execution)
         if latest_execution is None:
             raise RuntimeError("worker execution receipt is missing for attempt resolution")
@@ -6583,6 +6715,10 @@ class SelfHostedTaskService:
         lane = resolve_execution_lane(request, active_mutation_tasks=active_mutations)
         requested_lane = str(request.get("execution_lane") or "").strip().upper()
         if requested_lane in {"", "DIRECT_CANONICAL"}:
+            if lane["eligible"] and self._direct_lane_claims_evidence(request):
+                # The direct lane has no Core seam; an evidence task must not
+                # use it to skip coverage (#2181).
+                raise ValueError("EXPECTED_EVIDENCE_REQUIRES_ISOLATED_TARGET")
             if lane["eligible"]:
                 if request.get("collaboration_realm") is not None:
                     raise ValueError("COLLABORATION_REALM_DIRECT_CANONICAL_UNSUPPORTED")
@@ -6608,6 +6744,9 @@ class SelfHostedTaskService:
                 "worker_order": [dispatch_binding["provider"]],
             })
         validate_task_card_binding(contract, request, is_ephemeral=self.ephemeral)
+        evidence_error = self._card_evidence_binding_error(contract, request)
+        if evidence_error is not None:
+            raise ValueError(f"TASK_CARD_EVIDENCE_BINDING_INVALID:{evidence_error}")
         identity = resolve_lifecycle_identity(contract, request, is_ephemeral=self.ephemeral)
         if (
             request.get("worker_candidate_ingress")
