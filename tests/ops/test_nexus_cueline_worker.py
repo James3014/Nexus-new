@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import subprocess
+import time
 from pathlib import Path
 import pytest
 
@@ -185,10 +186,14 @@ _FAKE_CODEX = """#!/bin/sh
 # Hermetic stand-in for the codex CLI (#1926): CI runners have no codex, and
 # the owned worker starts at once. Hold the worker in WORKER_RUNNING until the
 # test releases it, so the status probe sees a live attempt deterministically.
+# The worker passes codex only an env allowlist, so the release and exit
+# markers sit next to this script's directory instead of in env vars.
 if [ "${1:-}" = "--version" ]; then echo "codex-cli 0.0.0-fake"; exit 0; fi
-release="$NEXUS_TEST_FAKE_CODEX_RELEASE"
+root="$(cd "$(dirname "$0")/.." && pwd)"
+: > "$root/fake-codex.started"
+trap ': > "$root/fake-codex.exited"' EXIT
 i=0
-while [ ! -e "$release" ] && [ "$i" -lt 600 ]; do sleep 0.1; i=$((i + 1)); done
+while [ ! -e "$root/fake-codex.release" ] && [ "$i" -lt 150 ]; do sleep 0.1; i=$((i + 1)); done
 exit 0
 """
 
@@ -199,12 +204,20 @@ def _fake_codex_env(tmp_path: Path) -> tuple[dict[str, str], Path]:
     codex = bin_dir / "codex"
     codex.write_text(_FAKE_CODEX, encoding="utf-8")
     codex.chmod(0o755)
-    release = tmp_path / "fake-codex.release"
     env = dict(os.environ)
+    # PATH is on the worker's env allowlist, so the fake shadows any real codex.
     env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
-    env["NEXUS_CODEX_BIN"] = str(codex)
-    env["NEXUS_TEST_FAKE_CODEX_RELEASE"] = str(release)
-    return env, release
+    return env, tmp_path
+
+
+def _release_fake_codex(root: Path) -> None:
+    """Let the fake codex finish and wait for it, so no process outlives the test."""
+    (root / "fake-codex.release").write_text("release\n", encoding="utf-8")
+    if not (root / "fake-codex.started").exists():
+        return
+    deadline = time.monotonic() + 20
+    while not (root / "fake-codex.exited").exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
 
 
 def test_nexus_cueline_worker_full_pipeline_subprocess(tmp_path: Path):
@@ -220,7 +233,11 @@ def test_nexus_cueline_worker_full_pipeline_subprocess(tmp_path: Path):
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=controller, check=True, capture_output=True, text=True).stdout.strip()
     target_root = tmp_path / "targets"
     state_dir = str(tmp_path / "state")
-    env, release = _fake_codex_env(tmp_path)
+    env, fake_codex_root = _fake_codex_env(tmp_path)
+    # The service ignores a requested target root containing "/tmp" (Linux
+    # tmp_path) and falls back to <cwd>/../nexus-runtime-targets, outside
+    # tmp_path; pin it so reruns do not collide with a stale target (#1926).
+    env["NEXUS_TARGET_ROOT_OVERRIDE"] = str(target_root)
 
     submit_req = {
         "op": "submit",
@@ -266,7 +283,7 @@ def test_nexus_cueline_worker_full_pipeline_subprocess(tmp_path: Path):
     out_status = json.loads(res_status.stdout)
     assert out_status["task_id"] == "cueline-e2e-001"
     assert out_status["status"] in {"SUBMITTED", "WORKER_RUNNING", "CANDIDATE_COMMITTED", "CANDIDATE_CAPTURED", "PENDING_HUMAN_APPROVAL"}
-    release.write_text("release\n", encoding="utf-8")
+    _release_fake_codex(fake_codex_root)
 
 
 def test_extra_positional_cli_text_rejected():
