@@ -131,6 +131,15 @@ def hidden_only_literals(material: TaskMaterial) -> list[str]:
     return sorted({*HIDDEN_LITERALS.get(material.task_id, ()), *auto})
 
 
+def _needles(literal: str, inventory: set[str]) -> tuple[str, ...]:
+    """Inventory literals match as substrings; auto-extracted hidden-test constants match only in
+    their quoted form, so a common word (e.g. ``token``) in Nexus text is not a false hit."""
+
+    if literal in inventory:
+        return (literal,)
+    return (f"'{literal}'", f'"{literal}"')
+
+
 def _lines(prompt: str) -> list[str]:
     return [" ".join(line.split()) for line in prompt.splitlines() if line.strip()]
 
@@ -179,13 +188,15 @@ def audit_task(
         result.violations.append(f"with_nexus_calls={result.with_nexus_calls}")
     bare_prompt = str(bare_records[0].get("prompt") or "") if bare_records else ""
     literals = hidden_only_literals(material)
+    inventory = set(HIDDEN_LITERALS.get(material.task_id, ()))
     for record in with_records:
         prompt = str(record.get("prompt") or "")
         for literal in literals:
-            if (
-                literal in prompt
-                and literal not in bare_prompt
-                and literal not in result.hidden_hits
+            if literal in result.hidden_hits:
+                continue
+            if any(
+                needle in prompt and needle not in bare_prompt
+                for needle in _needles(literal, inventory)
             ):
                 result.hidden_hits.append(literal)
         if PRIOR_ART_MARKER in prompt:

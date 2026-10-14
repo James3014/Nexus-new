@@ -232,3 +232,13 @@ def test_counted_run_fails_on_with_nexus_only_prompt_text(tmp_path: Path, monkey
 def test_no_calls_in_either_arm_is_not_a_violation(tmp_path: Path) -> None:
     report = audit_run(tmp_path, _material())
     assert report["status"] == "PASS"
+
+
+def test_auto_literals_match_only_quoted(tmp_path: Path) -> None:
+    _capture(tmp_path, "without_nexus", BARE)
+    _capture(tmp_path, "with_nexus", BARE + "\nthe classifier resolved nothing\n")
+    task = audit_run(tmp_path, _material())["tasks"][0]
+    assert "resolved" not in task["hidden_hits"]
+    _capture(tmp_path, "with_nexus", BARE + "\nreturn 'resolved'\n")
+    task = audit_run(tmp_path, _material())["tasks"][0]
+    assert "resolved" in task["hidden_hits"]
