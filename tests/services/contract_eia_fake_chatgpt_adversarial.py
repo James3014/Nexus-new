@@ -366,6 +366,7 @@ class World:
             runtime_state_root=self.runtime_state,
             timeout=180.0,
             require_worker_binding=True,
+            expected_observed_model=EXPECTED_MODEL,
             transport_config={
                 "executable": str(self.fake),
                 "profile": "fake-profile",
@@ -811,7 +812,10 @@ def test_sent_without_reply_receipt_records_unknown_outcome(tmp_path, monkeypatc
     assert invocation["transport_outcome"] == "OUTCOME_UNKNOWN"
 
 
-def test_timeout_with_late_reply_is_recovered_by_readback_not_resend(tmp_path, monkeypatch):
+def test_timeout_with_late_reply_is_read_back_not_resent_but_unattested(tmp_path, monkeypatch):
+    # The late reply is recovered by readback (history/detail), never by a resend.
+    # A readback cannot observe which model answered (NOT_MEASURED), so with the
+    # observed-model pin (#2188) it is not accepted: the unit stays outcome-unknown.
     step = {
         "exit": 75,
         "stderr": "Error: ChatGPT response timed out; it may still complete\n",
@@ -819,10 +823,15 @@ def test_timeout_with_late_reply_is_recovered_by_readback_not_resend(tmp_path, m
         "late_reply": composite(),
     }
     world = World(tmp_path, monkeypatch, [step, ok(composite(path="nexus/evil.py"))])
-    receipt = world.run()["receipts"]["u1"]
-    assert receipt["changed_paths"] == [TARGET]
+    assert "u1" not in world.run()["receipts"]
     assert len(world.calls("ask")) == 1
     assert {"history", "detail"} <= {row["sub"] for row in world.calls()}
+    (invocation,) = world.invocations()
+    observed = invocation["backend_identity"]["observed_execution_identity"]
+    assert observed["model_revision"] == "NOT_MEASURED"
+    attempt = world.attempt()
+    assert attempt["state"] == "OUTCOME_UNKNOWN"
+    assert attempt["retry_safe"] is False
 
 
 def test_observed_model_identity_is_recorded_by_runtime(tmp_path, monkeypatch):
@@ -833,18 +842,6 @@ def test_observed_model_identity_is_recorded_by_runtime(tmp_path, monkeypatch):
     assert observed["model_id"] == "gpt-6-thinking"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "FINDING: an ask reply from a different (gpt-6-thinking) or unreported model is "
-        "accepted. The runtime only records observed_execution_identity.model_id "
-        "(opencli_web_model.py _ask_telemetry) and Nexus OpenSWEWorkerTransport._request "
-        "(open_swe_external_intelligence.py:958) compares only the configured "
-        "provider_id/model_id echo ('opencli_chatgpt'/'advanced') and drops "
-        "model_invocation_receipts; the exact-model gate lives only in the opencli "
-        "launcher/adapter."
-    ),
-)
 @pytest.mark.parametrize("model", ["gpt-6-thinking", None], ids=["wrong-model", "no-model"])
 def test_unexpected_or_missing_observed_model_is_blocked(tmp_path, monkeypatch, model):
     world = World(tmp_path, monkeypatch, [ok(composite(), model=model)])

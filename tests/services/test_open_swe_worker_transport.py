@@ -1378,3 +1378,189 @@ def test_bound_dispatch_without_execution_lane_fails_before_attempt(tmp_path, mo
     result = ctx.runtime.run([unit_without_authority], CapacityLease(1, 1, 1, 1))
     assert result["errors"] == {"u1": "CORE_BINDING_AUTHORITY_REQUIRED"}
     assert ctx.calls == []
+
+
+# --- #2188: observed-model pin for opencli_chatgpt ---------------------------
+
+_OBSERVED = "gpt-5-6-thinking"
+_OPENCLI_BINDING = {
+    "executable": "/opt/opencli",
+    "profile": "profile-a",
+    "site_session": "persistent",
+    "timeout_seconds": 240,
+}
+
+
+def _opencli_worker():
+    return {
+        **_worker(),
+        "worker_id": "opencli/chatgpt-worker-a",
+        "provider": "opencli_chatgpt",
+        "model": "opencli_chatgpt/very-high",
+    }
+
+
+def _invocation_receipt(operation_id, *, revision=_OBSERVED, provider_revision=_OBSERVED):
+    return {
+        "operation_id": operation_id,
+        "provider_id": "opencli_chatgpt",
+        "model_id": "very-high",
+        "provider_model_revision": provider_revision,
+        "backend_identity": {
+            "configured_identity": {"provider_id": "opencli_chatgpt", "model_id": "very-high"},
+            "observed_execution_identity": {
+                "provider_id": "opencli_chatgpt",
+                "model_id": revision,
+                "model_revision": revision,
+                "observation_source": "opencli_ask_reply",
+            },
+        },
+    }
+
+
+def _opencli_transport(module):
+    return module.OpenSWEWorkerTransport(
+        model_provider="opencli_chatgpt",
+        model_id="very-high",
+        expected_observed_model=_OBSERVED,
+        executable="/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime",
+        expected_artifact_sha256="a" * 64,
+        require_worker_binding=True,
+        transport_config=_OPENCLI_BINDING,
+    ).bind_worker(_opencli_worker())
+
+
+def _run_opencli_worker(tmp_path, monkeypatch, receipts):
+    import nexus.services.open_swe_external_intelligence as module
+
+    workspace, artifact = _artifact_and_workspace(tmp_path)
+
+    def runtime_call(_executable, payload, **_kwargs):
+        result = _completed(module, payload)
+        if payload["operation"] != "identity":
+            result.update(provider_id="opencli_chatgpt", model_id="very-high")
+            made = receipts(payload["operation_id"])
+            if made is not None:
+                result["model_invocation_receipts"] = made
+        return result, "", payload["operation"] != "identity", ""
+
+    monkeypatch.setattr(module, "_runtime_call", runtime_call)
+    return _opencli_transport(module).run_new(
+        prompt=_prompt(), artifact_path=str(artifact), workspace_path=str(workspace)
+    )
+
+
+def test_opencli_worker_with_expected_observed_model_completes(tmp_path, monkeypatch):
+    result = _run_opencli_worker(tmp_path, monkeypatch, lambda op: [_invocation_receipt(op)])
+    assert result.status == "COMPLETED"
+    assert len(result.model_invocation_receipts) == 1
+    assert result.model_invocation_receipts[0]["provider_model_revision"] == _OBSERVED
+
+
+@pytest.mark.parametrize(
+    "receipts",
+    [
+        pytest.param(lambda op: [_invocation_receipt(op, revision="gpt-6-thinking")], id="wrong"),
+        pytest.param(
+            lambda op: [_invocation_receipt(op), _invocation_receipt(op, revision="gpt-6")],
+            id="one-of-many-wrong",
+        ),
+        pytest.param(lambda op: None, id="no-receipts"),
+        pytest.param(lambda op: [], id="empty-receipts"),
+        pytest.param(
+            lambda op: [
+                _invocation_receipt(op, revision="NOT_MEASURED", provider_revision="NOT_MEASURED")
+            ],
+            id="not-measured",
+        ),
+        pytest.param(lambda op: [_invocation_receipt("f" * 64)], id="other-operation"),
+        pytest.param(lambda op: ["not-a-mapping"], id="malformed"),
+    ],
+)
+def test_opencli_worker_unproven_observed_model_is_outcome_unknown(tmp_path, monkeypatch, receipts):
+    result = _run_opencli_worker(tmp_path, monkeypatch, receipts)
+    assert result.status == "OPEN_SWE_OUTCOME_UNKNOWN"
+    assert result.outcome_unknown is True
+    assert result.retry_safe is False
+    assert result.error == "OBSERVED_MODEL_ATTESTATION_MISMATCH"
+
+
+def test_opencli_worker_requires_expected_observed_model():
+    import nexus.services.open_swe_external_intelligence as module
+
+    with pytest.raises(
+        module.OpenSWEExternalIntelligenceError,
+        match="OPEN_SWE_EXPECTED_OBSERVED_MODEL_REQUIRED",
+    ):
+        module.OpenSWEWorkerTransport(
+            model_provider="opencli_chatgpt",
+            model_id="very-high",
+            executable="/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime",
+            expected_artifact_sha256="a" * 64,
+            transport_config=_OPENCLI_BINDING,
+        )
+    with pytest.raises(
+        module.OpenSWEExternalIntelligenceError,
+        match="OPEN_SWE_EXPECTED_OBSERVED_MODEL_PROVIDER_MISMATCH",
+    ):
+        module.OpenSWEWorkerTransport(
+            model_provider="google_genai",
+            model_id="gemini-test",
+            expected_observed_model=_OBSERVED,
+            executable="/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime",
+            expected_artifact_sha256="a" * 64,
+        )
+
+
+def test_fanout_rejects_completed_result_without_observed_model_proof(tmp_path, monkeypatch):
+    # Defense in depth: even if a transport returns COMPLETED, fanout re-checks
+    # the pinned observed model against the result's invocation receipts.
+    import nexus.services.open_swe_external_intelligence as module
+
+    repo, base, envelope, envelope_sha = _repo_and_envelope(tmp_path)
+
+    def runtime_call(_executable, payload, **_kwargs):
+        if payload["operation"] == "identity":
+            return _completed(module, payload), "", False, ""
+        (Path(payload["workspace_path"]) / "a.py").write_text("VALUE = 2\n", encoding="utf-8")
+        return _completed(module, payload), "", True, ""
+
+    monkeypatch.setattr(module, "_runtime_call", runtime_call)
+    transport = module.OpenSWEWorkerTransport(
+        model_provider="google_genai",
+        model_id="gemini-test",
+        executable="/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime",
+        expected_artifact_sha256="a" * 64,
+    )
+    transport.expected_observed_model = _OBSERVED
+    # Simulate a transport whose own check is broken; only fanout's re-check remains.
+    monkeypatch.setattr(module, "observed_model_violation", lambda *_a, **_k: False)
+    store = FanoutStore(tmp_path / "state")
+    runtime = AdaptiveWorkerFanoutRuntime(
+        allocator=GitWorktreeAllocator(repo, tmp_path / "workspaces"),
+        store=store,
+        transport=transport,
+    )
+    result = runtime.run(
+        [
+            {
+                "task_id": "task-1",
+                "unit_id": "u1",
+                "envelope_ref": str(envelope),
+                "envelope_sha256": envelope_sha,
+                "expected_base_sha": base,
+                "mutation_paths": ["a.py"],
+                "provider": "google_genai",
+                "model": "google_genai/gemini-test",
+                "selected_worker": _worker(),
+            }
+        ],
+        CapacityLease(1, 1, 1, 1),
+    )
+
+    assert "u1" not in result["receipts"]
+    assert result["errors"] == {"u1": "OBSERVED_MODEL_ATTESTATION_MISMATCH"}
+    (attempt_file,) = sorted((tmp_path / "state" / "attempts").rglob("*.json"))
+    attempt = json.loads(attempt_file.read_text(encoding="utf-8"))
+    assert attempt["state"] == "OUTCOME_UNKNOWN"
+    assert attempt["transport_status"] == "OBSERVED_MODEL_ATTESTATION_MISMATCH"

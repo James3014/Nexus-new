@@ -16,6 +16,7 @@ def _module():
 
 _RUNTIME_EXECUTABLE = "/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime"
 _RUNTIME_HASH = "a" * 64
+_OBSERVED_MODEL = "gpt-5-6-thinking"
 _MISSING = object()
 
 
@@ -419,6 +420,7 @@ def test_opencli_semantic_transport_sends_explicit_binding(tmp_path, monkeypatch
         repository_root=tmp_path,
         model_provider="opencli_chatgpt",
         model_id="very-high",
+        expected_observed_model=_OBSERVED_MODEL,
         executable=_RUNTIME_EXECUTABLE,
         expected_artifact_sha256=_RUNTIME_HASH,
         transport_config=binding,
@@ -453,6 +455,7 @@ def test_opencli_worker_transport_sends_explicit_binding(tmp_path, monkeypatch):
     transport = module.OpenSWEWorkerTransport(
         model_provider="opencli_chatgpt",
         model_id="very-high",
+        expected_observed_model=_OBSERVED_MODEL,
         executable=_RUNTIME_EXECUTABLE,
         expected_artifact_sha256=_RUNTIME_HASH,
         transport_config=binding,
@@ -481,6 +484,7 @@ def test_opencli_transport_binding_validation_is_fail_closed(tmp_path):
         repository_root=tmp_path,
         model_provider="opencli_chatgpt",
         model_id="very-high",
+        expected_observed_model=_OBSERVED_MODEL,
         executable=_RUNTIME_EXECUTABLE,
         expected_artifact_sha256=_RUNTIME_HASH,
         transport_config=valid,
@@ -489,6 +493,7 @@ def test_opencli_transport_binding_validation_is_fail_closed(tmp_path):
         repository_root=tmp_path,
         model_provider="opencli_chatgpt",
         model_id="very-high",
+        expected_observed_model=_OBSERVED_MODEL,
         executable=_RUNTIME_EXECUTABLE,
         expected_artifact_sha256=_RUNTIME_HASH,
         transport_config={**valid, "timeout_seconds": 900},
@@ -510,6 +515,7 @@ def test_opencli_transport_binding_validation_is_fail_closed(tmp_path):
                 repository_root=tmp_path,
                 model_provider="opencli_chatgpt",
                 model_id="very-high",
+                expected_observed_model=_OBSERVED_MODEL,
                 executable=_RUNTIME_EXECUTABLE,
                 expected_artifact_sha256=_RUNTIME_HASH,
                 transport_config=invalid,
@@ -960,3 +966,126 @@ def test_real_deepagents_toolnode_is_physically_read_only_when_optional_extra_in
         "read_file",
         "record_finding",
     })
+
+
+# --- #2188: observed-model pin for opencli_chatgpt ---------------------------
+
+
+def _observed_receipt(operation_id, revision=_OBSERVED_MODEL):
+    return {
+        "operation_id": operation_id,
+        "provider_id": "opencli_chatgpt",
+        "model_id": "very-high",
+        "provider_model_revision": revision,
+        "backend_identity": {
+            "observed_execution_identity": {"model_id": revision, "model_revision": revision},
+        },
+    }
+
+
+def _invoke_opencli_semantic(tmp_path, monkeypatch, receipts, *, status="INTELLIGENCE_COMPLETED"):
+    module = _module()
+
+    def runtime_call(_executable, payload, **_kwargs):
+        if payload["operation"] == "identity":
+            return _identity(module, payload), "", False, ""
+        result = {
+            "schema": module.PROTOCOL_RESULT_SCHEMA,
+            "kind": "semantic",
+            "status": status,
+            "provider_id": "opencli_chatgpt",
+            "model_id": "very-high",
+            "raw": "{}",
+            "process_started": True,
+            "outcome_unknown": False,
+            "retry_safe": False,
+        }
+        made = receipts(payload["operation_id"])
+        if made is not None:
+            result["model_invocation_receipts"] = made
+        return result, "", True, ""
+
+    monkeypatch.setattr(module, "_runtime_call", runtime_call)
+    return module.OpenSWEExternalIntelligenceTransport(
+        repository_root=tmp_path,
+        model_provider="opencli_chatgpt",
+        model_id="very-high",
+        expected_observed_model=_OBSERVED_MODEL,
+        executable=_RUNTIME_EXECUTABLE,
+        expected_artifact_sha256=_RUNTIME_HASH,
+        transport_config={
+            "executable": "/opt/opencli",
+            "profile": "profile-a",
+            "site_session": "persistent",
+            "timeout_seconds": 240,
+        },
+    ).invoke("prompt")
+
+
+def test_opencli_semantic_with_expected_observed_model_completes(tmp_path, monkeypatch):
+    result = _invoke_opencli_semantic(tmp_path, monkeypatch, lambda op: [_observed_receipt(op)])
+    assert result.status == "INTELLIGENCE_COMPLETED"
+    assert result.model_invocation_receipts[0]["operation_id"]
+
+
+@pytest.mark.parametrize(
+    "receipts",
+    [
+        pytest.param(lambda op: [_observed_receipt(op, "gpt-6-thinking")], id="wrong"),
+        pytest.param(lambda op: None, id="no-receipts"),
+        pytest.param(lambda op: [_observed_receipt(op, "NOT_MEASURED")], id="not-measured"),
+        pytest.param(lambda op: {"not": "a list"}, id="malformed"),
+    ],
+)
+def test_opencli_semantic_unproven_observed_model_fails_closed(tmp_path, monkeypatch, receipts):
+    result = _invoke_opencli_semantic(tmp_path, monkeypatch, receipts)
+    assert result.status == "OPEN_SWE_OBSERVED_MODEL_ATTESTATION_MISMATCH"
+    assert result.outcome_unknown is True
+    assert result.retry_safe is False
+
+
+def test_opencli_semantic_failure_is_only_overridden_by_a_positively_wrong_model(
+    tmp_path, monkeypatch
+):
+    unmeasured = _invoke_opencli_semantic(
+        tmp_path, monkeypatch, lambda op: None, status="OPEN_SWE_PROVIDER_FAILED"
+    )
+    assert unmeasured.status == "OPEN_SWE_PROVIDER_FAILED"
+    wrong = _invoke_opencli_semantic(
+        tmp_path,
+        monkeypatch,
+        lambda op: [_observed_receipt(op, "gpt-6-thinking")],
+        status="OPEN_SWE_PROVIDER_FAILED",
+    )
+    assert wrong.status == "OPEN_SWE_OBSERVED_MODEL_ATTESTATION_MISMATCH"
+
+
+@pytest.mark.parametrize(
+    ("provider", "value", "error"),
+    [
+        ("opencli_chatgpt", "", "OPEN_SWE_EXPECTED_OBSERVED_MODEL_REQUIRED"),
+        ("opencli_chatgpt", "NOT_MEASURED", "OPEN_SWE_EXPECTED_OBSERVED_MODEL_REQUIRED"),
+        ("opencli_chatgpt", " gpt-5-6-thinking", "OPEN_SWE_EXPECTED_OBSERVED_MODEL_INVALID"),
+        ("google_genai", _OBSERVED_MODEL, "OPEN_SWE_EXPECTED_OBSERVED_MODEL_PROVIDER_MISMATCH"),
+    ],
+)
+def test_semantic_expected_observed_model_pin_is_validated(tmp_path, provider, value, error):
+    module = _module()
+    kwargs = {}
+    if provider == "opencli_chatgpt":
+        kwargs["transport_config"] = {
+            "executable": "/opt/opencli",
+            "profile": "profile-a",
+            "site_session": "persistent",
+            "timeout_seconds": 240,
+        }
+    with pytest.raises(module.OpenSWEExternalIntelligenceError, match=error):
+        module.OpenSWEExternalIntelligenceTransport(
+            repository_root=tmp_path,
+            model_provider=provider,
+            model_id="very-high",
+            expected_observed_model=value,
+            executable=_RUNTIME_EXECUTABLE,
+            expected_artifact_sha256=_RUNTIME_HASH,
+            **kwargs,
+        )
