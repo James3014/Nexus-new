@@ -8,7 +8,7 @@ import signal
 import subprocess
 import sys
 import time
-import shutil
+from nexus.services.nightshift_queue_consumer import NIGHTSHIFT_JUDGE_ROLE, NIGHTSHIFT_ONLINE_ROLE
 import tempfile
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
@@ -43,6 +43,12 @@ except ImportError:
 
 
 DEFAULT_TARGET_FILE = ""
+TASK_CARD_SCHEMA = "nexus.nightshift_task_card.v1"
+TASK_CARD_SUCCESS_CRITERIA = (
+    "tier1_commands_pass",
+    "judge_or_audit_score_improves_best_score",
+    "tier2_validation_pass_before_queue",
+)
 PYTHON_SUFFIXES = {".py"}
 
 
@@ -85,8 +91,8 @@ class AutoResearchNightShift:
         test_file: Optional[str] = None,
         convergence_patience: int = 5,
         gateway: Any = None,
-        model_name: Optional[str] = "gemini-3.1-pro-preview",
-        fallback_model_name: Optional[str] = "gemini-3-flash-preview",
+        model_name: Optional[str] = None,
+        fallback_model_name: Optional[str] = None,
         keep_worktree: Optional[bool] = None,
         project_root: Optional[Path] = None,
         context_hub: Any = None,
@@ -141,7 +147,23 @@ class AutoResearchNightShift:
         self.gateway = gateway or (
             BattlesuitGateway(project_root=self.project_root) if self.git_enabled else None
         )
-        self.model_name = model_name
+        # Online identity comes from the tracked Workforce policy: each online
+        # call carries the binding for the policy route of its role, and the
+        # default model is the generation worker's model.  An explicit model
+        # override is passed through as-is so the runtime rejects a mismatch
+        # instead of silently substituting.  The policy route has no fallback,
+        # so none is defaulted here.
+        from nexus.services.model_workforce_policy import WorkforcePolicyError
+        from nexus.services.nightshift_queue_consumer import resolve_nightshift_online_worker
+
+        try:
+            policy_model: Optional[str] = resolve_nightshift_online_worker().model
+        except WorkforcePolicyError as exc:
+            print(f"⚠️ [NightShift] Workforce policy unavailable; online calls fail closed: {exc}")
+            policy_model = None
+        self.task_card_path: Optional[Path] = None
+        self.task_card_sha256: str = ""
+        self.model_name = model_name or policy_model
         self.fallback_model_name = fallback_model_name
         self.model_exhausted: Dict[str, str] = {}
         env_keep = os.getenv("NIGHTSHIFT_KEEP_WORKTREE", "").strip().lower() in {
@@ -263,21 +285,38 @@ class AutoResearchNightShift:
             }
 
         gateway_provider = str(getattr(self.gateway, "oauth_provider", "") or "").strip().lower()
+        role = NIGHTSHIFT_JUDGE_ROLE if task_kind == "evaluation" else NIGHTSHIFT_ONLINE_ROLE
+        bindings, admitted_provider = self._online_workforce_binding(role)
+        # The Online provider is the admitted worker's provider, never the
+        # gateway's auto-detected default (which may be a local provider).
+        route = build_online_route(
+            recommended_flow="direct",
+            gateway_provider=gateway_provider,
+            explicit_provider=admitted_provider,
+        )
+        route["workforce_admission_enabled"] = True
+        route["workforce_bindings"] = bindings
+        if self.task_card_sha256:
+            route["nightshift_task_card_sha256"] = self.task_card_sha256
         request = UnifiedRuntimeRequest(
             task_id=task_id,
             workspace_revision=revision,
             task_statement=self.task,
             task_type="repair" if task_kind == "generation" else "evaluation",
-            route=build_online_route(
-                recommended_flow="direct",
-                gateway_provider=gateway_provider,
-            ),
+            route=route,
             online_prompt=prompt,
             online_payload=payload,
             online_phase="R",
             online_model_name=model,
             online_output_schema=output_schema,
-            evidence_refs=(f"nightshift:{task_id}:request",),
+            evidence_refs=(
+                f"nightshift:{task_id}:request",
+                *(
+                    (f"nightshift:task_card:sha256:{self.task_card_sha256}",)
+                    if self.task_card_sha256
+                    else ()
+                ),
+            ),
         )
         receipt_path = workpath / ".nexus" / "reports" / "unified_runtime" / f"{task_id}.json"
         if callable(ask_unified):
@@ -365,48 +404,118 @@ class AutoResearchNightShift:
             receipt_path=receipt.get("receipt_path"),
         )
 
-    def _probe_model_capacity(self, model_name: str, timeout_sec: int = 20) -> bool:
-        """Fast preflight: returns False when model is clearly quota/capacity exhausted."""
-        gemini_bin = (
-            os.getenv("NEXUS_GEMINI_BIN")
-            or shutil.which("gemini")
-            or "/Users/jameschen/.npm-global/bin/gemini"
+    def _online_workforce_binding(self, role: str) -> tuple[dict[str, Any], str]:
+        """Return (workforce_bindings, admitted provider) for one online call.
+
+        Controls are only those this runner physically supplies; an empty
+        mapping (policy unavailable or no admissible route) fails closed in
+        Workforce Admission.
+        """
+        from nexus.services.model_workforce_policy import WorkforcePolicyError
+        from nexus.services.nightshift_queue_consumer import (
+            build_nightshift_workforce_bindings,
+            resolve_nightshift_online_worker,
         )
-        if not gemini_bin or not Path(gemini_bin).exists():
-            return True
+
         try:
-            res = subprocess.run(
-                [
-                    gemini_bin,
-                    "-m",
-                    model_name,
-                    "-p",
-                    "Reply with exactly OK",
-                    "--output-format",
-                    "json",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=timeout_sec,
+            worker = resolve_nightshift_online_worker(role)
+            bindings = build_nightshift_workforce_bindings(
+                controls=self._supplied_online_controls(), role=role
             )
-            output = f"{res.stdout}\n{res.stderr}".lower()
-            if res.returncode != 0 and self._is_quota_or_capacity_error(output):
-                return False
-            return True
-        except subprocess.TimeoutExpired:
-            return True
-        except Exception:
-            return True
+        except WorkforcePolicyError as exc:
+            print(f"⚠️ [NightShift] No admissible Workforce route for '{role}': {exc}")
+            return {}, ""
+        return bindings, str(worker.provider)
+
+    def _judge_model_name(self) -> Optional[str]:
+        """Model of the policy route for the judge role (generation model if unrouted)."""
+        from nexus.services.model_workforce_policy import WorkforcePolicyError
+        from nexus.services.nightshift_queue_consumer import resolve_nightshift_online_worker
+
+        try:
+            return str(resolve_nightshift_online_worker(NIGHTSHIFT_JUDGE_ROLE).model)
+        except WorkforcePolicyError:
+            return self.model_name
+
+    def _tier1_commands(self) -> list[list[str]]:
+        """Exact tier-1 commands ``_run_tier1_validation`` executes, in order."""
+        target = self.resolved_target_file
+        commands: list[list[str]] = []
+        if self.git_enabled:
+            commands.append(["uv", "run", "ruff", "check", target])
+        elif target.endswith(".py"):
+            commands.append(["python3", "-m", "py_compile", target])
+        targeted = self._discover_targeted_tests()
+        if targeted:
+            pytest_command = (
+                ["uv", "run", "pytest"] if self.git_enabled else [sys.executable, "-m", "pytest"]
+            )
+            commands.append([*pytest_command, "-q", "--maxfail=1", *targeted])
+        return commands
+
+    def _task_card_payload(self) -> Optional[dict[str, Any]]:
+        """Run metadata card (not a governed Task Card), or None when incomplete."""
+        target = (self.resolved_target_file or "").strip()
+        if not self.task or not target:
+            return None
+        target_path = (self.project_root / target).resolve()
+        try:
+            target_path.relative_to(self.project_root)
+        except ValueError:
+            return None
+        if not target_path.is_file():
+            return None
+        commands = self._tier1_commands()
+        if not any("pytest" in command for command in commands):
+            return None
+        return {
+            "schema": TASK_CARD_SCHEMA,
+            "task": self.task,
+            "target_file": target,
+            "tier1_commands": commands,
+            "success_criteria": list(TASK_CARD_SUCCESS_CRITERIA),
+        }
+
+    def _record_task_card(self) -> str:
+        """Write the run's task card as non-authoritative metadata and record its hash.
+
+        Returns the hash, or "" when no complete card can be built.  The card
+        never feeds the declared Workforce controls (see
+        ``_supplied_online_controls``).
+        """
+        self.task_card_path = None
+        self.task_card_sha256 = ""
+        payload = self._task_card_payload()
+        if payload is None:
+            return ""
+        content = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        digest = hashlib.sha256(content).hexdigest()
+        card_path = self.project_root / ".nexus/nightshift/task_cards" / f"{digest}.json"
+        card_path.parent.mkdir(parents=True, exist_ok=True)
+        card_path.write_bytes(content)
+        self.task_card_path = card_path
+        self.task_card_sha256 = digest
+        return digest
+
+    def _supplied_online_controls(self) -> tuple[str, ...]:
+        """Controls physically supplied around an online call by this runner.
+
+        The runner-built task card is non-authoritative run metadata: it is
+        self-issued from caller input, so it never declares ``task_card``,
+        ``allowed_files``, ``mandatory_commands`` or
+        ``independent_verification``.  Until NightShift consumes governed,
+        git-tracked Task Cards, workers that require them are BLOCKed by
+        admission.
+        """
+        return ("parser", "verifier")
 
     def _preflight_models(self) -> None:
-        candidates = [m for m in (self.model_name, self.fallback_model_name) if m]
-        for model in candidates:
-            if model in self.model_exhausted:
-                continue
-            ok = self._probe_model_capacity(model)
-            if not ok:
-                self.model_exhausted[model] = "preflight_quota_or_capacity_exhausted"
-                print(f"⚠️ [Preflight] Model unavailable by quota/capacity: {model}")
+        """No-op: model availability is only ever tested through admitted calls.
+
+        The former preflight ran ``gemini -m <model>`` outside Workforce
+        Admission (#2189); a quota failure now surfaces from the admitted call.
+        """
+        return None
 
     def _read_learn_phase_slo_guard(self) -> dict[str, Any]:
         summary_path = self.project_root / ".nexus" / "reports" / "learn" / "phase_slo_summary.json"
@@ -689,7 +798,7 @@ class AutoResearchNightShift:
             workpath=workpath,
             round_id=round_id,
             attempt=200,
-            model=self.model_name,
+            model=self._judge_model_name(),
             prompt=f"Validate candidate patch for {self.resolved_target_file}",
             payload=f"Task: {self.task}\nReturn status/score/issues.",
             output_schema={
@@ -772,37 +881,21 @@ class AutoResearchNightShift:
         return [t for t in self.tier1_smoke_pack if (self.project_root / t).exists()]
 
     def _run_tier1_validation(self, workpath: Path) -> tuple[bool, str]:
-        target = self.resolved_target_file
-        if self.git_enabled:
-            ok, msg = self._run_cmd(
-                ["uv", "run", "ruff", "check", target],
-                cwd=workpath,
-                timeout_sec=self.tier1_timeout_sec,
-            )
+        commands = self._tier1_commands()
+        tests = [command for command in commands if "pytest" in command]
+        for command in commands:
+            if command in tests:
+                continue
+            ok, msg = self._run_cmd(command, cwd=workpath, timeout_sec=self.tier1_timeout_sec)
             if not ok:
-                return False, f"tier1_ruff_failed: {msg}"
-        elif target.endswith(".py"):
-            ok, msg = self._run_cmd(
-                ["python3", "-m", "py_compile", target],
-                cwd=workpath,
-                timeout_sec=self.tier1_timeout_sec,
-            )
-            if not ok:
-                return False, f"tier1_py_compile_failed: {msg}"
-
-        targeted = self._discover_targeted_tests()
-        if not targeted:
+                label = "tier1_ruff_failed" if "ruff" in command else "tier1_py_compile_failed"
+                return False, f"{label}: {msg}"
+        if not tests:
             return False, "tier1_no_targeted_tests: no matching tests or smoke pack available."
-        pytest_command = (
-            ["uv", "run", "pytest"] if self.git_enabled else [sys.executable, "-m", "pytest"]
-        )
-        ok, msg = self._run_cmd(
-            [*pytest_command, "-q", "--maxfail=1", *targeted],
-            cwd=workpath,
-            timeout_sec=self.tier1_timeout_sec,
-        )
-        if not ok:
-            return False, f"test_failed: {msg}"
+        for command in tests:
+            ok, msg = self._run_cmd(command, cwd=workpath, timeout_sec=self.tier1_timeout_sec)
+            if not ok:
+                return False, f"test_failed: {msg}"
         return True, "tier1_pass"
 
     def _run_tier2_validation(self, workpath: Path) -> tuple[bool, str]:
@@ -1107,7 +1200,7 @@ class AutoResearchNightShift:
         self._warm_start_optimizer()
 
         self.resolved_target_file = self._resolve_target_file()
-        self._preflight_models()
+        self._record_task_card()
         bypass_learn_slo = os.getenv("NIGHTSHIFT_BYPASS_LEARN_SLO", "").strip().lower() in {
             "1",
             "true",
@@ -1322,18 +1415,16 @@ class AutoResearchNightShift:
         )
 
         payload = dict(outcome.__dict__)
-        payload.update(
-            {
-                "target_file": self.resolved_target_file,
-                "best_score": self.best_score,
-                "rounds_attempted": len(self.trace_log),
-                "no_improve_streak": self.no_improve_streak,
-                "model_exhausted": dict(self.model_exhausted),
-                "artifact_paths": [str(self.tracelog_path), str(self.lesson_writeback_path)],
-                "learning_closure": self.last_learning_closure,
-                "unified_runtime_receipt": self.last_unified_runtime_receipt,
-            }
-        )
+        payload.update({
+            "target_file": self.resolved_target_file,
+            "best_score": self.best_score,
+            "rounds_attempted": len(self.trace_log),
+            "no_improve_streak": self.no_improve_streak,
+            "model_exhausted": dict(self.model_exhausted),
+            "artifact_paths": [str(self.tracelog_path), str(self.lesson_writeback_path)],
+            "learning_closure": self.last_learning_closure,
+            "unified_runtime_receipt": self.last_unified_runtime_receipt,
+        })
         with open(report_path, "w") as f:
             json.dump(payload, f, indent=2)
         print(f"📊 [Orchestrator] Machine-readable report saved to: {report_path}")

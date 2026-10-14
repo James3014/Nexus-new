@@ -5,7 +5,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from nexus.app.nightshift_runner_service import AutoResearchNightShift, RoundOutcome, _cleanup_stale_swarm_locks
+from nexus.app.nightshift_runner_service import (
+    AutoResearchNightShift,
+    RoundOutcome,
+    _cleanup_stale_swarm_locks,
+)
 
 
 class FakeGateway:
@@ -14,13 +18,11 @@ class FakeGateway:
         self.calls = []
 
     def ask_structured(self, prompt, payload, **kwargs):
-        self.calls.append(
-            {
-                "prompt": prompt,
-                "payload": payload,
-                "kwargs": kwargs,
-            }
-        )
+        self.calls.append({
+            "prompt": prompt,
+            "payload": payload,
+            "kwargs": kwargs,
+        })
         return self.responses.pop(0)
 
 
@@ -54,6 +56,17 @@ def governed_admission(monkeypatch):
     return ADMITTED_MODEL
 
 
+def _simulate_governed_task_card(shift) -> None:
+    """Stand in for a future governed, git-tracked Task Card (#2189).
+
+    The runner itself never declares these controls; this test-only patch
+    supplies what such a card would, so the round logic stays covered.
+    """
+    from tests.research.conftest import ONLINE_CONTROLS
+
+    shift._supplied_online_controls = lambda: tuple(ONLINE_CONTROLS)
+
+
 def _program_rules_hub():
     # e6e3dcded: AutoResearchNightShift.hub is None unless a context_hub is injected.
     return SimpleNamespace(load_program_rules=lambda _: "keep the file correct")
@@ -69,29 +82,27 @@ def test_run_round_generates_validated_scored_candidate(tmp_path, governed_admis
     target = tmp_path / "sample.py"
     target.write_text("def add(a, b):\n    return a - b\n", encoding="utf-8")
 
-    gateway = FakeGateway(
-        [
-            (
-                {
-                    "status": "PASS",
-                    "summary": "fix math bug",
-                    "target_file": "sample.py",
-                    "content": "def add(a, b):\n    return a + b\n",
-                    "changed_regions": ["body"],
-                },
-                '{"output":"generation"}',
-            ),
-            (
-                {
-                    "status": "PASS",
-                    "summary": "validated and improved",
-                    "score": 8.5,
-                    "issues": [],
-                },
-                '{"output":"judge"}',
-            ),
-        ]
-    )
+    gateway = FakeGateway([
+        (
+            {
+                "status": "PASS",
+                "summary": "fix math bug",
+                "target_file": "sample.py",
+                "content": "def add(a, b):\n    return a + b\n",
+                "changed_regions": ["body"],
+            },
+            '{"output":"generation"}',
+        ),
+        (
+            {
+                "status": "PASS",
+                "summary": "validated and improved",
+                "score": 8.5,
+                "issues": [],
+            },
+            '{"output":"judge"}',
+        ),
+    ])
     shift = AutoResearchNightShift(
         "sample.py",
         max_rounds=1,
@@ -99,8 +110,10 @@ def test_run_round_generates_validated_scored_candidate(tmp_path, governed_admis
         model_name=governed_admission,
         fallback_model_name=governed_admission,
         context_hub=_program_rules_hub(),
+        project_root=tmp_path,
     )
     shift.resolved_target_file = "sample.py"
+    _simulate_governed_task_card(shift)
     shift.feynman_auditor.run_advisory_audit = lambda **_: {
         "status": "PASS",
         "warnings": [],
@@ -141,14 +154,12 @@ def test_run_stops_after_convergence_patience(tmp_path, monkeypatch):
     shift.worktree_mgr.lease = lambda task_id, branch_prefix: (task_id, branch_prefix, tmp_path)
     shift._resolve_target_file = lambda: "target.py"
 
-    outcomes = iter(
-        [
-            RoundOutcome(7.0, "value = 2\n", "SCORED", "improved"),
-            RoundOutcome(0.0, "", "NO_CHANGE", "same file"),
-            RoundOutcome(0.0, "", "NO_CHANGE", "same file"),
-            RoundOutcome(9.0, "value = 3\n", "SCORED", "should not run"),
-        ]
-    )
+    outcomes = iter([
+        RoundOutcome(7.0, "value = 2\n", "SCORED", "improved"),
+        RoundOutcome(0.0, "", "NO_CHANGE", "same file"),
+        RoundOutcome(0.0, "", "NO_CHANGE", "same file"),
+        RoundOutcome(9.0, "value = 3\n", "SCORED", "should not run"),
+    ])
     call_counter = {"count": 0}
 
     def fake_run_round(round_id, workpath):
@@ -172,18 +183,16 @@ def test_run_round_rejects_ast_no_change(tmp_path, governed_admission):
     target = tmp_path / "sample.py"
     target.write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
 
-    gateway = FakeGateway(
-        [
-            (
-                {
-                    "status": "PASS",
-                    "summary": "whitespace tidy",
-                    "patch": "def add(a, b):\n    return a + b\n\n",
-                },
-                '{"output":"generation"}',
-            ),
-        ]
-    )
+    gateway = FakeGateway([
+        (
+            {
+                "status": "PASS",
+                "summary": "whitespace tidy",
+                "patch": "def add(a, b):\n    return a + b\n\n",
+            },
+            '{"output":"generation"}',
+        ),
+    ])
 
     shift = AutoResearchNightShift(
         "sample.py",
@@ -192,8 +201,10 @@ def test_run_round_rejects_ast_no_change(tmp_path, governed_admission):
         model_name=governed_admission,
         fallback_model_name=governed_admission,
         context_hub=_program_rules_hub(),
+        project_root=tmp_path,
     )
     shift.resolved_target_file = "sample.py"
+    _simulate_governed_task_card(shift)
     outcome = shift._run_round(1, tmp_path)
 
     assert outcome.status == "REJECTED_AST_NO_CHANGE"
@@ -206,16 +217,22 @@ def test_run_does_not_promote_when_tier2_fails(tmp_path, monkeypatch):
     target = tmp_path / "target.py"
     target.write_text("value = 1\n", encoding="utf-8")
     subprocess.run(["git", "add", "target.py"], cwd=tmp_path, check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "initial"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "initial"], cwd=tmp_path, check=True, capture_output=True
+    )
 
-    shift = AutoResearchNightShift("target.py", max_rounds=1, convergence_patience=1, keep_worktree=True)
+    shift = AutoResearchNightShift(
+        "target.py", max_rounds=1, convergence_patience=1, keep_worktree=True
+    )
     shift.project_root = tmp_path
     shift.tracelog_path = tmp_path / "tracelog.jsonl"
     shift.lesson_writeback_path = tmp_path / ".nexus/reports/lesson_writeback.json"
     shift.resolved_target_file = "target.py"
     shift.worktree_mgr.lease = lambda task_id, branch_prefix: (task_id, branch_prefix, tmp_path)
     shift._resolve_target_file = lambda: "target.py"
-    shift._run_round = lambda *_args, **_kwargs: RoundOutcome(9.0, "value = 2\n", "SCORED", "improved")
+    shift._run_round = lambda *_args, **_kwargs: RoundOutcome(
+        9.0, "value = 2\n", "SCORED", "improved"
+    )
     shift._run_tier2_validation = lambda _workpath: (False, "pytest exploded")
 
     called = {"queued": False}
@@ -232,7 +249,9 @@ def test_run_does_not_promote_when_tier2_fails(tmp_path, monkeypatch):
 
 
 def test_run_blocked_when_learn_phase_slo_not_ready(tmp_path):
-    shift = AutoResearchNightShift("target.py", max_rounds=1, convergence_patience=1, keep_worktree=True)
+    shift = AutoResearchNightShift(
+        "target.py", max_rounds=1, convergence_patience=1, keep_worktree=True
+    )
     shift.project_root = tmp_path
     shift.resolved_target_file = "target.py"
 
@@ -242,7 +261,9 @@ def test_run_blocked_when_learn_phase_slo_not_ready(tmp_path):
 
 
 def test_persist_learning_closure_runs_verify_write_sync(monkeypatch, tmp_path):
-    shift = AutoResearchNightShift("target.py", max_rounds=1, convergence_patience=1, keep_worktree=True)
+    shift = AutoResearchNightShift(
+        "target.py", max_rounds=1, convergence_patience=1, keep_worktree=True
+    )
     shift.project_root = tmp_path
     shift.resolved_target_file = "target.py"
     shift.best_score = 0.92
@@ -339,6 +360,7 @@ def test_cleanup_stale_swarm_locks(tmp_path):
     fresh.touch()
     # set stale lock old enough for ttl=180 min; fresh stays recent
     import os
+
     os.utime(stale, (old, old))
     os.utime(fresh, (now, now))
 
