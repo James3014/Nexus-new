@@ -1578,7 +1578,9 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     # The sprint's own executor: with a valid target its command is exactly
     # visible_test_pytest_cmd(test_file) (one explicit file, same flags), so a memo hit and a
     # miss produce the same evaluation.
-    if not visible_target_error and executor.pytest_cmd != visible_test_pytest_cmd(config.test_file or ""):
+    if not visible_target_error and getattr(executor, "pytest_cmd", None) != visible_test_pytest_cmd(
+        config.test_file or ""
+    ):
         visible_target_error = "sprint_pytest_cmd_mismatch"
     verifier_executor = executor
 
