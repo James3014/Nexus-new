@@ -28,12 +28,33 @@ def _stage(
             "simulated": not invoked,
             "claim_eligible": False,
             "evidence_complete": invoked,
+            "receipt_present": invoked,
         },
     }
 
 
+def _bundle(*stages: dict) -> dict:
+    """Evidence bundle holding a record for every ref an invoked stage carries."""
+
+    return {
+        "entries": [
+            {
+                "name": stage["name"],
+                "physical_callable": f"capability_executor_registry:{stage['name']}",
+                "evidence_ids": list(stage.get("evidence_refs") or []),
+            }
+            for stage in stages
+            if stage.get("status") == "INVOKED"
+        ]
+    }
+
+
 def _receipt(task_id: str, *stages: dict) -> dict:
-    return {"task_id": task_id, "capabilities": list(stages)}
+    return {
+        "task_id": task_id,
+        "capabilities": list(stages),
+        "capability_evidence_bundle": _bundle(*stages),
+    }
 
 
 def test_projection_merges_attempts_and_prefers_invoked() -> None:
@@ -226,7 +247,7 @@ def _stale_flow_receipt(name: str) -> dict:
 
 
 def _overlay_one(name: str, stage: dict, *, capability_results: dict | None = None) -> dict:
-    receipt = {"task_id": "sprint-z-s0-a1", "capabilities": [stage]}
+    receipt = _receipt("sprint-z-s0-a1", stage)
     if capability_results is not None:
         receipt["capability_results"] = capability_results
     stages = project_unified_capability_stages([receipt])
@@ -371,7 +392,11 @@ def test_stage_simulated_flag_disagreeing_with_boundary_stays_simulated() -> Non
     # And a stage without the simulated flag at all is not attested.
     from nexus.research.flow.unified_capability_projection import runtime_attests_real
 
-    bare = {"claim_boundary": {"simulated": False}, "evidence_refs": ["ev"]}
+    bare = {
+        "claim_boundary": {"simulated": False, "receipt_present": True},
+        "evidence_refs": ["ev"],
+        "refs_resolved": True,
+    }
     assert runtime_attests_real({"name": "pregate"}, bare) is False
     assert runtime_attests_real({"name": "pregate"}, {**bare, "simulated": False}) is True
     assert (
@@ -430,3 +455,102 @@ def test_archived_capabilities_are_dropped_from_the_route_decision_and_empty_pla
     out = runtime_receipt_plan_payload(empty, {})
     assert out["conditional_capabilities"] == []
     assert "integration_manager" in out["forbidden_capabilities"]
+
+
+def test_unresolved_refs_or_missing_receipt_present_stay_simulated() -> None:
+    """Codex round-2 probe: a made-up ref, or no receipt_present, is never real."""
+
+    from scripts.bench.strict_llm_baseline import classify_receipt
+
+    stage = {**_stage("pregate", "INVOKED"), "evidence_refs": ["made-up-ref"]}
+    stage["claim_boundary"] = {"simulated": False, "claim_eligible": False}  # no receipt_present
+    forged = {"task_id": "t", "capabilities": [stage]}  # no evidence record anywhere
+    stages = project_unified_capability_stages([forged])
+    out = overlay_unified_capability_receipts([_stale_flow_receipt("pregate")], stages)[0]
+    assert stages[0]["refs_resolved"] is False
+    assert classify_receipt(out) == "simulated"
+
+    # receipt_present=True but the ref resolves nowhere -> still simulated.
+    stage["claim_boundary"] = {"simulated": False, "receipt_present": True}
+    stages = project_unified_capability_stages([forged])
+    out = overlay_unified_capability_receipts([_stale_flow_receipt("pregate")], stages)[0]
+    assert classify_receipt(out) == "simulated"
+
+    # The same ref held by the bundle -> real.
+    held = {**forged, "capability_evidence_bundle": _bundle(stage)}
+    stages = project_unified_capability_stages([held])
+    out = overlay_unified_capability_receipts([_stale_flow_receipt("pregate")], stages)[0]
+    assert stages[0]["refs_resolved"] is True
+    assert classify_receipt(out) == "real"
+
+    # A bundle entry without a physical callable is not an evidence record.
+    hollow = {
+        **forged,
+        "capability_evidence_bundle": {"entries": [{"evidence_ids": ["made-up-ref"]}]},
+    }
+    assert project_unified_capability_stages([hollow])[0]["refs_resolved"] is False
+
+    # Resolved through the capability's own stage record (postflight stages are not in the bundle).
+    record = {
+        "capability_results": {
+            "pregate": {
+                "physical_callable": "capability_executor_registry:pregate",
+                "evidence_refs": ["made-up-ref"],
+                "response": {"status": "FAILED"},
+            }
+        }
+    }
+    stages = project_unified_capability_stages([{**forged, **record}])
+    assert stages[0]["refs_resolved"] is True
+
+    # receipt_present missing with a resolved ref -> simulated.
+    stage["claim_boundary"] = {"simulated": False}
+    stages = project_unified_capability_stages([held])
+    out = overlay_unified_capability_receipts([_stale_flow_receipt("pregate")], stages)[0]
+    assert classify_receipt(out) == "simulated"
+
+
+def test_archived_walker_leaves_no_archived_name_outside_the_audit_places() -> None:
+    import json
+
+    from nexus.research.flow.capability_planning import drop_archived_capabilities
+
+    plan = {
+        "selected_capabilities": ["pregate", "integration_manager"],
+        "forbidden_capabilities": [],
+        "decision_trace": [{"capability": "integration_manager", "state": "conditional"}],
+        "signal_snapshot": {"reasons": {"integration_manager": ["x"], "pregate": ["y"]}},
+        "stop_policy": {
+            "tactical_sequence": ["pregate", "integration_manager", "claim_gate"],
+            "tactical_tool_map": [
+                {"capability": "integration_manager", "after": "pregate"},
+                {
+                    "capability": "claim_gate",
+                    "after": "integration_manager",
+                    "plan": {"selected_capabilities": ["integration_manager", "pregate"]},
+                },
+                {"capability": "delivery_gate", "after": "swarm_quiet_moment"},
+            ],
+        },
+        "replan_trace": [{"active_capabilities": ["integration_manager"], "note": {"x": 1}}],
+    }
+    cleaned = drop_archived_capabilities(plan)
+    rest = {
+        k: v for k, v in cleaned.items() if k not in {"forbidden_capabilities", "decision_trace"}
+    }
+    rest["signal_snapshot"] = {
+        k: v for k, v in rest["signal_snapshot"].items() if k != "archived_capabilities_dropped"
+    }
+    text = json.dumps(rest)
+    assert "integration_manager" not in text
+    assert "swarm_quiet_moment" not in text
+    steps = cleaned["stop_policy"]["tactical_tool_map"]
+    assert steps[0] == {
+        "capability": "claim_gate",
+        "after": "pregate",
+        "plan": {"selected_capabilities": ["pregate"]},
+    }
+    assert steps[1]["after"] is None
+    assert "integration_manager" in cleaned["forbidden_capabilities"]
+    assert cleaned["decision_trace"][0]["state"] == "forbidden"
+    assert "integration_manager" in cleaned["signal_snapshot"]["archived_capabilities_dropped"]

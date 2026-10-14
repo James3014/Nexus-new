@@ -21,62 +21,71 @@ _ARCHIVED_SELECTION_LISTS = (
     "optional_capabilities",
     "pending_capabilities",
 )
-# Name lists (at any depth: signal_snapshot sub-reports, stop_policy, replan_trace) that must
-# not name an archived node either.
-_ARCHIVED_NAME_LIST_KEYS = frozenset({
-    *_ARCHIVED_SELECTION_LISTS,
-    "active_capabilities",
-    "tactical_sequence",
-    "acceleration_layers",
-    "governance_layers",
+# Keys left untouched by the walker: the audit-visible places where an archived name must
+# stay (forbidden list, the planner's decision trace, the drop record itself).
+_ARCHIVED_KEEP_KEYS = frozenset({
+    "forbidden_capabilities",
+    "decision_trace",
+    "archived_capabilities_dropped",
+    "retired_capabilities",
 })
-_ARCHIVED_MAX_DEPTH = 8
+_ARCHIVED_MAX_DEPTH = 12
 
 
-def _strip_archived(value: Any, dropped: dict[str, str], depth: int = 0) -> Any:
+def _archived_name(value: Any) -> str:
+    return value if isinstance(value, str) and value in ARCHIVED_CAPABILITY_REASONS else ""
+
+
+def _strip_archived(value: Any, dropped: dict[str, str], depth: int = 0, key: str = "") -> Any:
+    """Remove every archived capability name from a plan-shaped tree (generic walker).
+
+    At any depth: archived strings are dropped from lists, list entries that are steps of an
+    archived capability (``{"capability": <archived>}``) are dropped, dict keys naming an
+    archived capability are dropped, and ``after`` links to a dropped step are re-pointed at
+    that step's predecessor.  Keys in ``_ARCHIVED_KEEP_KEYS`` are kept verbatim.
+    """
     if depth > _ARCHIVED_MAX_DEPTH:
         return value
     if isinstance(value, list):
-        return [_strip_archived(item, dropped, depth + 1) for item in value]
+        removed_after: dict[str, Any] = {}
+        kept: list[Any] = []
+        for entry in value:
+            name = _archived_name(entry)
+            if not name and isinstance(entry, dict):
+                name = _archived_name(entry.get("capability"))
+                if name:
+                    removed_after[name] = entry.get("after")
+            if name:
+                if key != "optional_capabilities":
+                    dropped[name] = ARCHIVED_CAPABILITY_REASONS[name]
+                continue
+            kept.append(_strip_archived(entry, dropped, depth + 1))
+        for index, entry in enumerate(kept):
+            if not isinstance(entry, dict) or not _archived_name(entry.get("after")):
+                continue
+            after = entry.get("after")
+            seen: set[str] = set()
+            while isinstance(after, str) and after in removed_after and after not in seen:
+                seen.add(after)
+                after = removed_after[after]
+            # A link to an archived step outside this list has no predecessor to point at.
+            kept[index] = {**entry, "after": None if _archived_name(after) else after}
+        return kept
     if not isinstance(value, dict):
         return value
     out: dict[str, Any] = {}
-    for key, item in value.items():
-        if key in ARCHIVED_CAPABILITY_REASONS and depth > 0:
-            # Per-capability maps nested in sub-reports (reasons, dependencies, ...).
+    for child_key, item in value.items():
+        if child_key in _ARCHIVED_KEEP_KEYS:
+            out[child_key] = item
             continue
-        if key in _ARCHIVED_NAME_LIST_KEYS and isinstance(item, list):
-            kept = []
-            for entry in item:
-                name = entry if isinstance(entry, str) else ""
-                if name in ARCHIVED_CAPABILITY_REASONS:
-                    if key != "optional_capabilities":
-                        dropped[name] = ARCHIVED_CAPABILITY_REASONS[name]
-                    continue
-                kept.append(_strip_archived(entry, dropped, depth + 1))
-            out[key] = kept
-        elif key == "tactical_tool_map" and isinstance(item, list):
-            # Drop archived steps and re-link the step that ran after one to its predecessor.
-            removed: dict[str, Any] = {}
-            steps = []
-            for step in item:
-                cap = str(step.get("capability") or "") if isinstance(step, dict) else ""
-                if cap in ARCHIVED_CAPABILITY_REASONS:
-                    dropped[cap] = ARCHIVED_CAPABILITY_REASONS[cap]
-                    removed[cap] = step.get("after")
-                    continue
-                steps.append(step)
-            for index, step in enumerate(steps):
-                after = step.get("after") if isinstance(step, dict) else None
-                seen: set[str] = set()
-                while isinstance(after, str) and after in removed and after not in seen:
-                    seen.add(after)
-                    after = removed[after]
-                if isinstance(step, dict) and after != step.get("after"):
-                    steps[index] = {**step, "after": after}
-            out[key] = steps
-        else:
-            out[key] = _strip_archived(item, dropped, depth + 1)
+        name = _archived_name(child_key)
+        if name:
+            # Per-capability maps (reasons, dependencies, sub-reports keyed by capability).
+            continue
+        if child_key == "after" and _archived_name(item):
+            out[child_key] = item  # re-pointed by the enclosing list
+            continue
+        out[child_key] = _strip_archived(item, dropped, depth + 1, str(child_key))
     return out
 
 
@@ -86,9 +95,10 @@ def drop_archived_capabilities(plan_payload: dict[str, Any]) -> dict[str, Any]:
     The pinned nexus-runtime planner still enables some archived nodes (e.g.
     ``integration_manager`` on an "integrate"/"merge" task) until its maturity flip lands.
     Nexus-side, every archived node (``ARCHIVED_CAPABILITY_REASONS``) is removed from the
-    selection lists at any depth (``signal_snapshot`` sub-reports, ``stop_policy`` tactical
-    sequence / tool map, ``replan_trace``), marked ``forbidden`` in ``decision_trace``, moved to
-    ``forbidden_capabilities`` and named in ``signal_snapshot.archived_capabilities_dropped``.
+    whole payload by a generic walker (``_strip_archived``), marked ``forbidden`` in
+    ``decision_trace``, moved to ``forbidden_capabilities`` and named in
+    ``signal_snapshot.archived_capabilities_dropped``.  Those three are the only places an
+    archived name remains.
     """
 
     if not isinstance(plan_payload, dict):

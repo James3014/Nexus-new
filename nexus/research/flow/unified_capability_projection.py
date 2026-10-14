@@ -77,6 +77,28 @@ def _outcome_simulated(receipt: Mapping[str, Any], name: str) -> bool:
     return _declares_simulated(results.get(name))
 
 
+def _evidence_index(receipt: Mapping[str, Any], name: str) -> set[str]:
+    """Evidence ids the runtime receipt itself holds a record for (bundle entry or stage)."""
+
+    index: set[str] = set()
+    bundle = receipt.get("capability_evidence_bundle")
+    entries = bundle.get("entries") if isinstance(bundle, Mapping) else None
+    for entry in entries if isinstance(entries, list) else []:
+        if isinstance(entry, Mapping) and entry.get("physical_callable"):
+            index.update(str(ref) for ref in (entry.get("evidence_ids") or []) if str(ref).strip())
+    results = receipt.get("capability_results")
+    record = results.get(name) if isinstance(results, Mapping) else None
+    if (
+        isinstance(record, Mapping)
+        and record.get("physical_callable")
+        and isinstance(record.get("response"), Mapping)
+        and record["response"]
+    ):
+        for key in ("evidence_refs", "evidence_ids"):
+            index.update(str(ref) for ref in (record.get(key) or []) if str(ref).strip())
+    return index
+
+
 def _stage_rows(receipt: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     caps = receipt.get("capabilities")
     if not isinstance(caps, list):
@@ -87,7 +109,11 @@ def _stage_rows(receipt: Mapping[str, Any]) -> list[Mapping[str, Any]]:
 
 
 def _compact_stage(
-    stage: Mapping[str, Any], *, task_id: str, outcome_simulated: bool = False
+    stage: Mapping[str, Any],
+    *,
+    task_id: str,
+    outcome_simulated: bool = False,
+    evidence_index: set[str] | None = None,
 ) -> dict[str, Any]:
     boundary = (
         stage.get("claim_boundary") if isinstance(stage.get("claim_boundary"), Mapping) else {}
@@ -116,6 +142,8 @@ def _compact_stage(
         else {},
         "trigger_source": str(stage.get("trigger_source") or ""),
         "runtime_task_id": task_id,
+        # Every ref must name an evidence record the runtime receipt holds (tighten-only).
+        "refs_resolved": bool(refs) and all(ref in (evidence_index or set()) for ref in refs),
         "outcome_simulated": bool(
             outcome_simulated
             or any(_declares_simulated(stage.get(key)) for key in ("response", "outcome"))
@@ -138,7 +166,10 @@ def project_unified_capability_stages(receipts: Iterable[Any] | None) -> list[di
         for stage in _stage_rows(receipt):
             name = str(stage.get("name"))
             row = _compact_stage(
-                stage, task_id=task_id, outcome_simulated=_outcome_simulated(receipt, name)
+                stage,
+                task_id=task_id,
+                outcome_simulated=_outcome_simulated(receipt, name),
+                evidence_index=_evidence_index(receipt, name),
             )
             prev = merged.get(row["name"])
             if prev is None or _STATUS_RANK.get(row["status"], 0) >= _STATUS_RANK.get(
@@ -169,9 +200,15 @@ def runtime_attests_real(
 
     * the name is not in ``SIMULATED_BY_DESIGN_EXECUTORS``;
     * the stage's own ``simulated`` flag is exactly ``False`` (and the receipt's, if present);
-    * the stage ``claim_boundary.simulated`` is exactly ``False`` and the boundary does not
-      say ``receipt_present`` is false;
-    * the stage carries non-empty evidence refs;
+    * the stage ``claim_boundary.simulated`` is exactly ``False`` and
+      ``claim_boundary.receipt_present`` is exactly ``True`` (missing is not real);
+    * the stage carries non-empty evidence refs and every ref resolves to an evidence record
+      in the runtime receipt (``refs_resolved``: a bundle entry's ``evidence_ids`` or the
+      capability's own stage record); a dangling or made-up ref is not real.
+
+    ``claim_eligible`` is deliberately not required: it is false whenever the gate did not
+    pass, which says nothing about whether the capability ran; the re-projected boundary
+    keeps ``claim_eligible`` from the runtime, so no claim is made.
     * no executor outcome declares a simulation (``outcome_simulated``).
     """
 
@@ -186,10 +223,10 @@ def runtime_attests_real(
     boundary = source.get("claim_boundary")
     if not isinstance(boundary, Mapping) or boundary.get("simulated") is not False:
         return False
-    if "receipt_present" in boundary and boundary.get("receipt_present") is not True:
+    if boundary.get("receipt_present") is not True:
         return False
     refs = [str(ref) for ref in (source.get("evidence_refs") or []) if str(ref).strip()]
-    if not refs:
+    if not refs or source.get("refs_resolved") is not True:
         return False
     if bool(receipt.get("outcome_simulated")) or bool(source.get("outcome_simulated")):
         return False
