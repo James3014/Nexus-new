@@ -135,14 +135,25 @@ def _receipts(op: dict[str, Any]) -> list[dict[str, Any]]:
     return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
 
 
+def _list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
+def _int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _verification_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     unit = [r for r in rows if r.get("scope") == "UNIT"]
     whole = [r for r in rows if r.get("scope") == "WHOLE_TASK"]
     failed_verifiers: list[str] = []
     failed_checks: list[str] = []
     for row in rows:
-        failed_verifiers += [str(x) for x in row.get("failed_verifier_ids") or []]
-        failed_checks += [str(x) for x in row.get("failed_integrity_check_ids") or []]
+        failed_verifiers += [str(x) for x in _list(row.get("failed_verifier_ids"))]
+        failed_checks += [str(x) for x in _list(row.get("failed_integrity_check_ids"))]
     return {
         "unit": [str(r.get("status")) for r in unit],
         "whole": [str(r.get("status")) for r in whole],
@@ -181,7 +192,7 @@ def collect(
         state_rows = []
         for path, value in loader.load_dir(repo_dir):
             m = re.fullmatch(r"issue-(\d+)-([0-9a-f]+)", path.stem)
-            if m and value.get("schema", "").startswith(
+            if m and str(value.get("schema") or "").startswith(
                 "nexus.external_intelligence_automation_state"
             ):
                 state_rows.append((path, value, int(m.group(1)), m.group(2)))
@@ -325,7 +336,7 @@ def collect(
 
             receipts = [r for op in sem_ops + worker_ops for r in _receipts(op)]
             revisions, unmeasured = _models(receipts)
-            repairs = sum(int(op.get("repair_phase_count") or 0) for op in worker_ops)
+            repairs = sum(_int(op.get("repair_phase_count")) for op in worker_ops)
             core = sorted({
                 str(op["core_binding_status"]) for op in worker_ops if op.get("core_binding_status")
             })

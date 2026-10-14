@@ -336,3 +336,21 @@ def test_empty_or_missing_dir(tmp_path: Path, sub: str, capsys: pytest.CaptureFi
     assert sb.main(["--state-root", str(root), "--failure-log", ""]) == 0
     out = capsys.readouterr().out
     assert "- runs: 0" in out and "success rate: n/a" in out
+
+
+def test_wrong_field_types_do_not_crash(tmp_path: Path) -> None:
+    root = tmp_path / "state"
+    _w(root / "automation" / REPO / "issue-7-aa.json", {"schema": None})
+    _state(root, 8, "bb", state="BLOCKED")
+    _op(
+        root,
+        "op1",
+        "worker",
+        "2026-10-14T00:00:00Z",
+        "2026-10-14T00:01:00Z",
+        "COMPLETED",
+        repair_phase_count="many",
+    )
+    _verification(root, "t", "UNIT", "FAIL", failed_verifier_ids="not-a-list")
+    runs, _meta = sb.collect(root, None)
+    assert [r["issue"] for r in runs] == [8]
