@@ -5,6 +5,7 @@ import inspect
 import json
 import subprocess
 import threading
+import time
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -2285,35 +2286,47 @@ def test_unresolved_repair_ids_fail_closed_on_malformed_records(tmp_path):
     write("schema", record("schema", schema="other.v1"))
     write("identity", record("other-id"))
     write("listy", "[1, 2]")
+    # Terminal-shaped records without the evidence their state leaves behind
+    # (full record + matching receipt) are not proof of a finished continuation.
     assert sorted(store.unresolved_repair_ids("task-1", "ua")) == [
+        "blocked",
         "garbage",
         "identity",
         "listy",
         "nostate",
+        "ok",
         "schema",
         "weird",
     ]
 
 
 def test_concurrent_repair_prepares_dispatch_at_most_one_continuation(tmp_path, monkeypatch):
+    import nexus.services.external_intelligence_fanout as fanout_module
+
     runtime, transport, initial, repair, repair_sha = _repair_fixture(tmp_path)
-    real_owner = runtime.store.assert_session_owner
-    arrived: list[str] = []
-    second = threading.Event()
+    store = runtime.store
+    a_checked = threading.Event()
+    b_trying = threading.Event()
+    real_records = store._unresolved_repair_records
+    real_flock = fanout_module.fcntl.flock
 
-    def interleaving_owner(*args, **kwargs):
-        # Hold the first prepare between its sibling check and its attempt write
-        # until the second prepare arrives (or 0.5 s pass when it is locked out).
-        with transport.lock:
-            arrived.append("x")
-            first = len(arrived) == 1
-        if first:
-            second.wait(0.5)
-        else:
-            second.set()
-        return real_owner(*args, **kwargs)
+    def records_then_hold(task_id, unit_id):
+        # Thread A: sibling check done, attempt not yet written.  Hold here until B
+        # has provably tried to take the per-unit lock.
+        value = real_records(task_id, unit_id)
+        if threading.current_thread().name == "A" and not a_checked.is_set():
+            a_checked.set()
+            assert b_trying.wait(5)
+            time.sleep(0.2)  # give an unserialized B time to race past the check
+        return value
 
-    monkeypatch.setattr(runtime.store, "assert_session_owner", interleaving_owner)
+    def signalling_flock(fd, operation):
+        if threading.current_thread().name == "B":
+            b_trying.set()
+        return real_flock(fd, operation)
+
+    monkeypatch.setattr(store, "_unresolved_repair_records", records_then_hold)
+    monkeypatch.setattr(fanout_module.fcntl, "flock", signalling_flock)
     outcomes: dict[str, object] = {}
 
     def attempt(repair_id: str) -> None:
@@ -2324,13 +2337,64 @@ def test_concurrent_repair_prepares_dispatch_at_most_one_continuation(tmp_path, 
         except FanoutError as exc:
             outcomes[repair_id] = exc
 
-    threads = [threading.Thread(target=attempt, args=(rid,)) for rid in ("r1", "r2")]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join(10)
+    thread_a = threading.Thread(target=attempt, args=("r1",), name="A")
+    thread_b = threading.Thread(target=attempt, args=("r2",), name="B")
+    thread_a.start()
+    assert a_checked.wait(5)
+    thread_b.start()
+    thread_a.join(10)
+    thread_b.join(10)
+    assert b_trying.is_set()
     assert len(transport.continued) == 1
     assert sum(isinstance(value, dict) for value in outcomes.values()) == 1
+
+
+def test_terminal_repair_counts_as_resolved_only_with_matching_receipt(tmp_path):
+    runtime, transport, initial, repair, repair_sha = _repair_fixture(tmp_path)
+    child = runtime.continue_repair(
+        initial, repair_id="r1", repair_ref=str(repair), repair_sha256=repair_sha
+    )
+    store = runtime.store
+    assert store.unresolved_repair_ids("task-1", "ua") == []
+    receipt_path = store._receipt_path("task-1", "ua", "repair-r1")
+    original = receipt_path.read_text(encoding="utf-8")
+    for tamper in (
+        {"attempt_id": "other"},
+        {"operation_id": "c" * 64},
+        {"status": "WORKER_BLOCKED"},
+    ):
+        receipt_path.write_text(json.dumps(dict(child, **tamper)), encoding="utf-8")
+        assert store.unresolved_repair_ids("task-1", "ua") == ["r1"]
+    receipt_path.unlink()
+    assert store.unresolved_repair_ids("task-1", "ua") == ["r1"]
+    receipt_path.write_text(original, encoding="utf-8")
+    assert store.unresolved_repair_ids("task-1", "ua") == []
+
+
+def test_sent_repair_rewritten_to_look_terminal_still_blocks_new_repair(tmp_path):
+    transport = _RepairReconcileTransport()
+    runtime, initial, repair, repair_sha = _repair_outcome_unknown(tmp_path, transport)
+    _git(Path(initial["workspace_path"]), "checkout", "--", "a.py")
+    path = runtime.store.attempts / "task-1--ua--repair-r1.json"
+    for forged in (
+        {"state": "COMPLETED", "transport_status": "COMPLETED"},
+        {"state": "TERMINAL_BLOCKED", "transport_status": "COMPLETED"},
+        {"state": "FAILED", "transport_status": "ABANDONED_BEFORE_DISPATCH"},
+        {
+            "state": "FAILED",
+            "retry_safe": False,
+            "transport_status": "ABANDONED_BEFORE_DISPATCH",
+            "superseded_by_attempt_id": "no-such-attempt",
+        },
+    ):
+        value = dict(json.loads(path.read_text(encoding="utf-8")), **forged)
+        path.write_text(json.dumps(value), encoding="utf-8")
+        assert runtime.store.unresolved_repair_ids("task-1", "ua") == ["r1"]
+        with pytest.raises(FanoutError, match="FANOUT_RECONCILIATION_REQUIRED"):
+            runtime.continue_repair(
+                initial, repair_id="r2", repair_ref=str(repair), repair_sha256=repair_sha
+            )
+    assert transport.continued == [("ua", initial["session_id"])]
 
 
 def test_prepared_repair_never_dispatched_is_abandoned_not_blocking(tmp_path):

@@ -544,6 +544,23 @@ class GitWorktreeAllocator:
 
 
 _REPAIR_TERMINAL_STATES = frozenset({"COMPLETED", "TERMINAL_BLOCKED", "FAILED"})
+_REPAIR_ATTEMPT_REQUIRED_FIELDS = (
+    "schema",
+    "task_id",
+    "unit_id",
+    "attempt_id",
+    "mode",
+    "repair_id",
+    "state",
+    "session_id",
+    "workspace_id",
+    "workspace_path",
+    "expected_head",
+    "repair_ref",
+    "repair_sha256",
+    "parent_receipt_id",
+    "transport_status",
+)
 
 
 class FanoutStore:
@@ -734,6 +751,10 @@ class FanoutStore:
         # A well-formed PREPARED sibling was never sent: a repair only leaves PREPARED
         # through mark_repair_dispatching, under this same lock, before the transport
         # is called.  Abandon it so a crashed prepare cannot block the unit forever.
+        # The new attempt is written first so every abandoned record points at an
+        # attempt that exists (a crash in between leaves two PREPARED records, which
+        # the next prepare abandons together).
+        _atomic_json(path, attempt)
         for sibling_path, sibling in unresolved.items():
             assert sibling is not None
             abandoned = dict(sibling)
@@ -744,7 +765,6 @@ class FanoutStore:
                 "superseded_by_attempt_id": attempt["attempt_id"],
             })
             _atomic_json(sibling_path, abandoned)
-        _atomic_json(path, attempt)
         return attempt
 
     def mark_repair_dispatching(self, attempt: Mapping[str, Any]) -> dict[str, Any]:
@@ -811,9 +831,10 @@ class FanoutStore:
     ) -> dict[Path, dict[str, Any] | None]:
         """Repair attempt records of this unit that are not proven terminal.
 
-        Fails closed: an unreadable record, or one with a wrong schema/identity or a
-        missing/unknown state, is unresolved (mapped to None).  Only a well-formed
-        record in a terminal state counts as resolved.
+        Fails closed: an unreadable record, one with a wrong schema/identity or a
+        missing/unknown state, or a terminal-looking record whose outcome is not
+        proven (``_repair_terminal_proven``) is unresolved and mapped to None.  A
+        well-formed non-terminal record is mapped to itself.
         """
         prefix = f"{self._unit_key(task_id, unit_id)}--repair-"
         if not self.attempts.is_dir():
@@ -836,9 +857,72 @@ class FanoutStore:
             )
             if not well_formed:
                 unresolved[path] = None
-            elif value.get("state") not in _REPAIR_TERMINAL_STATES:
+            elif value.get("state") in _REPAIR_TERMINAL_STATES:
+                if not self._repair_terminal_proven(value, repair_id):
+                    unresolved[path] = None
+            else:
                 unresolved[path] = value
         return unresolved
+
+    def _repair_terminal_proven(self, attempt: Mapping[str, Any], repair_id: str) -> bool:
+        """A terminal repair state counts only with the evidence that state leaves.
+
+        - COMPLETED / TERMINAL_BLOCKED: the full attempt record plus the matching,
+          self-consistent repair receipt (ids, session, parent, operation id).
+        - FAILED: only an abandoned never-dispatched attempt, whose superseding
+          attempt of the same unit exists.
+        """
+        if any(not attempt.get(key) for key in _REPAIR_ATTEMPT_REQUIRED_FIELDS):
+            return False
+        state = attempt.get("state")
+        task_id = str(attempt["task_id"])
+        unit_id = str(attempt["unit_id"])
+        if state == "FAILED":
+            superseded_by = attempt.get("superseded_by_attempt_id")
+            if (
+                attempt.get("transport_status") != "ABANDONED_BEFORE_DISPATCH"
+                or attempt.get("retry_safe") is not False
+                or not isinstance(superseded_by, str)
+                or not superseded_by
+            ):
+                return False
+            prefix = f"{self._unit_key(task_id, unit_id)}--repair-"
+            for path in self.attempts.glob(f"{prefix}*.json"):
+                try:
+                    other = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    continue
+                if isinstance(other, dict) and other.get("attempt_id") == superseded_by:
+                    return True
+            return False
+        receipt_status = {
+            "COMPLETED": "CANDIDATE_READY_FOR_VERIFICATION",
+            "TERMINAL_BLOCKED": "WORKER_BLOCKED",
+        }.get(str(state))
+        if receipt_status is None:
+            return False
+        path = self._receipt_path(task_id, unit_id, f"repair-{repair_id}")
+        try:
+            receipt = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        if not isinstance(receipt, dict):
+            return False
+        material = {key: value for key, value in receipt.items() if key != "receipt_id"}
+        return (
+            receipt.get("schema") == WORKER_RECEIPT_SCHEMA
+            and receipt.get("receipt_id") == _sha256(_canonical_json(material))
+            and receipt.get("status") == receipt_status
+            and receipt.get("mode") == "REPAIR_CONTINUE"
+            and receipt.get("task_id") == task_id
+            and receipt.get("unit_id") == unit_id
+            and receipt.get("repair_id") == repair_id
+            and receipt.get("attempt_id") == attempt.get("attempt_id")
+            and receipt.get("session_id") == attempt.get("session_id")
+            and receipt.get("workspace_id") == attempt.get("workspace_id")
+            and receipt.get("parent_receipt_id") == attempt.get("parent_receipt_id")
+            and receipt.get("operation_id", "") == attempt.get("operation_id", "")
+        )
 
     def bound_envelope_path(self, task_id: str, unit_id: str, attempt_id: str) -> Path:
         attempt_key = _safe_slug(attempt_id, "attempt_id")
@@ -2565,6 +2649,10 @@ class AdaptiveWorkerFanoutRuntime:
             model=str(previous_receipt.get("model") or MODEL),
         )
         core_binding = _receipt_core_binding(previous_receipt)
+        if core_binding is None and self.store.initial_attempt_is_bound(task_id, unit_id):
+            # The parent receipt lost Core fields its unit's initial attempt recorded:
+            # never continue a bound unit through the unbound path.
+            raise FanoutError("CORE_BINDING_PARENT_RECEIPT_INVALID")
         if core_binding is not None:
             if not getattr(transport, "supports_core_mutation_binding", False) or not hasattr(
                 transport, "prepare_operation_id"

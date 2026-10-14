@@ -811,3 +811,23 @@ def test_bound_repair_reconcile_rejects_non_bound_attestation(tmp_path, monkeypa
     with pytest.raises(FanoutError, match="CORE_BINDING_ATTESTATION_MISMATCH"):
         ctx.runtime.reconcile_repair(ctx.receipt, repair_id="d001")
     assert _repair_attempt(ctx)["state"] == "OUTCOME_UNKNOWN"
+
+
+def test_bound_unit_continue_with_stripped_parent_receipt_is_blocked(tmp_path, monkeypatch):
+    ctx = _bound_open_swe(tmp_path, monkeypatch)
+    stripped = {
+        key: value
+        for key, value in ctx.receipt.items()
+        if key
+        not in {
+            "bound_envelope_ref",
+            "bound_envelope_sha256",
+            "core_binding_status",
+            "core_binding_hash",
+            "acceptance_contract_hash",
+        }
+    }
+    with pytest.raises(FanoutError, match="CORE_BINDING_PARENT_RECEIPT_INVALID"):
+        _continue(ctx, stripped)
+    assert [call for call in ctx.calls if call["operation"] == "worker_continue"] == []
+    assert not (ctx.store.attempts / "task-1--u1--repair-d001.json").exists()
