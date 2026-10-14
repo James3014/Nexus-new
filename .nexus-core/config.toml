@@ -44,6 +44,12 @@ required_material_ids = ["canonical-learning", "canonical-runtime"]
 # owner-SSHSIG-signed .nexus-core/deletions/<id>.json, preserved in an archive
 # commit on main's history, in a PR touching nothing else. The same signature
 # is required to change any protected path (config.toml is always protected).
+# enforcement = "ADVISORY" (owner decision 2026-10-14, #2006: owner signatures
+# retired, Core advisory): for a change that deletes nothing, a missing or
+# invalid owner signature is reported as a warning and receipt record naming
+# every protected path touched, not a failure. Deletions stay FORBID (the
+# required Deletion guard + owner-approved-deletion label is the real gate), and
+# edits to deletion_policy or [deletion_exception] itself still fail.
 [deletion_exception]
 mode = "OWNER_SIGNED_ARCHIVE"
 manifest_dir = ".nexus-core/deletions"
@@ -53,3 +59,4 @@ protected_paths = [
   ".github/workflows/nexus-core-issue-completion.yml",
   ".github/workflows/trusted-deletion-anchor.yml",
 ]
+enforcement = "ADVISORY"
