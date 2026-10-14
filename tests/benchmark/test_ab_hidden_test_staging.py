@@ -50,6 +50,7 @@ def _isolated_staging(tmp_path, monkeypatch):
     monkeypatch.setattr(staging_mod, "_QUARANTINED", set())
     monkeypatch.setattr(staging_mod, "_RUN_ABORT", [])
     monkeypatch.setattr(staging_mod, "_RUN_RECORD_PATH", [])
+    monkeypatch.setattr(staging_mod, "_IN_MEMORY_SHAS", {})
     yield parent
     _unlock_tree(tmp_path / "cache")
     os.environ.clear()
@@ -485,11 +486,24 @@ def _new_process(monkeypatch) -> None:
         monkeypatch.setattr(staging_mod, name, {})
     monkeypatch.setattr(staging_mod, "_QUARANTINED", set())
     monkeypatch.setattr(staging_mod, "_RUN_ABORT", [])
+    monkeypatch.setattr(staging_mod, "_IN_MEMORY_SHAS", {})
+
+
+def _commit_fixture(workspace: Path) -> None:
+    env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+    for args in (
+        ["init", "-q"],
+        ["add", "-A"],
+        ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "fixtures"],
+    ):
+        subprocess.run(["git", *args], cwd=workspace, check=True, env=env, capture_output=True)
 
 
 def _killed_run(
     tmp_path: Path, workspace: Path, hidden: Path
 ) -> tuple[staging_mod.HiddenTestStaging, Path]:
+    if not (workspace / ".git").exists():
+        _commit_fixture(workspace)
     record = tmp_path / "out" / "run_manifest.json"
     staging_mod.configure_run_record(record)
     killed = staging_mod.HiddenTestStaging(
@@ -526,7 +540,9 @@ def test_killed_run_is_recovered_and_nothing_outside_the_run_dir_names_a_path(
     # A new run never starts over an unrecovered one.
     with pytest.raises(staging_mod.HiddenTestStagingError, match="unrecovered_previous_run"):
         staging_mod.staging_root(workspace)
-    assert staging_mod.recover_last_run(_expected_sha(record)) == [str(hidden.resolve())]
+    assert staging_mod.recover_last_run(_expected_sha(record), workspace_root=workspace) == [
+        str(hidden.resolve())
+    ]
     assert hidden.read_text(encoding="utf-8") == HIDDEN_TEXT
     assert staging_mod.run_abort_reason() == ""
     staging_mod.staging_root(workspace)  # now allowed
@@ -539,7 +555,7 @@ def test_tampered_leftover_from_a_killed_run_is_never_restored(tmp_path, monkeyp
 
     _new_process(monkeypatch)
     with pytest.raises(staging_mod.HiddenTestStagingError, match="hidden_test_tampered"):
-        staging_mod.recover_last_run(_expected_sha(record))
+        staging_mod.recover_last_run(_expected_sha(record), workspace_root=workspace)
     assert not hidden.exists()
     assert "recovery" in staging_mod.run_abort_reason()
 
@@ -550,7 +566,7 @@ def test_recovery_refuses_a_run_dir_whose_sha_disagrees(tmp_path, monkeypatch) -
 
     _new_process(monkeypatch)
     with pytest.raises(staging_mod.HiddenTestStagingError, match="recovery_run_root"):
-        staging_mod.recover_last_run("0" * 64)
+        staging_mod.recover_last_run("0" * 64, workspace_root=workspace)
     assert not hidden.exists()
     assert staging_mod.run_abort_reason()
 
@@ -575,7 +591,7 @@ def test_recovery_treats_on_disk_state_as_untrusted(
 
     _new_process(monkeypatch)
     with pytest.raises(staging_mod.HiddenTestStagingError, match="hidden_test_tampered"):
-        staging_mod.recover_last_run(_expected_sha(record))
+        staging_mod.recover_last_run(_expected_sha(record), workspace_root=workspace)
     assert not hidden.exists()
     assert staging_mod.run_abort_reason()
 
@@ -660,3 +676,56 @@ def test_any_error_in_the_verifier_window_fails_closed_and_never_runs_the_verifi
     with pytest.raises(staging_mod.HiddenTestStagingError):
         with staging.verify_window():
             pass
+
+
+def _edit_record(run_root: Path, hidden: Path, **changes: str) -> None:
+    rec = run_root / staging_mod.RUN_RECORD_NAME
+    data = json.loads(rec.read_text())
+    entry = data["entries"].pop(str(hidden.resolve()))
+    origin = changes.pop("origin", str(hidden.resolve()))
+    entry.update(changes)
+    data["entries"][origin] = entry
+    rec.write_text(json.dumps(data))
+
+
+@pytest.mark.parametrize(
+    "attack", ["outside_fixture_roots", "wrong_basename", "sha_mismatch", "symlinked_origin"]
+)
+def test_recovery_never_writes_outside_a_validated_fixture(tmp_path, monkeypatch, attack) -> None:
+    """A tampered record is only a hint: no write to an arbitrary path, ever."""
+    workspace, visible, hidden = _case(tmp_path)
+    killed, record = _killed_run(tmp_path, workspace, hidden)
+    run_root = killed.staged_path.parent.parent
+    victim = tmp_path / "victim" / "test_hidden.py"
+    victim.parent.mkdir()
+    if attack == "outside_fixture_roots":
+        _edit_record(run_root, hidden, origin=str(victim))
+    elif attack == "wrong_basename":
+        _edit_record(run_root, hidden, origin=str(hidden.resolve().with_name("conftest.py")))
+    elif attack == "sha_mismatch":
+        _edit_record(run_root, hidden, sha256="0" * 64)
+    else:
+        hidden.symlink_to(victim)  # origin now exists as a symlink pointing elsewhere
+
+    _new_process(monkeypatch)
+    with pytest.raises(staging_mod.HiddenTestStagingError, match="hidden_test_tampered"):
+        staging_mod.recover_last_run(_expected_sha(record), workspace_root=workspace)
+    assert "hidden_recovery_refused" in staging_mod.run_abort_reason()
+    assert not victim.exists()
+    assert not (hidden.resolve().with_name("conftest.py")).exists()
+    if attack == "symlinked_origin":
+        assert hidden.is_symlink()  # untouched, never followed or replaced
+    else:
+        assert not os.path.lexists(hidden)
+    assert _mode(killed.staged_path) == 0o000  # bytes stay locked in the run dir
+
+
+def test_recovery_without_a_trusted_hash_is_refused(tmp_path, monkeypatch) -> None:
+    """No in-memory sha and no committed fixture: the record alone never authorizes a write."""
+    workspace, visible, hidden = _case(tmp_path)
+    (workspace / ".git").mkdir()  # skip the commit: the fixture is not in git
+    killed, record = _killed_run(tmp_path, workspace, hidden)
+    _new_process(monkeypatch)
+    with pytest.raises(staging_mod.HiddenTestStagingError):
+        staging_mod.recover_last_run(_expected_sha(record), workspace_root=workspace)
+    assert not os.path.lexists(hidden)

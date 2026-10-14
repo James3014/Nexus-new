@@ -20612,7 +20612,7 @@ def main() -> int:
                     staged_info = {}
                 expected_sha = expected_sha or str(staged_info.get("run_root_sha256") or "")
         try:
-            _hidden_staging.recover_last_run(expected_sha)
+            _hidden_staging.recover_last_run(expected_sha, workspace_root=repo_root)
         except _hidden_staging.HiddenTestStagingError as exc:
             print(f"hidden test staging recovery failed closed ({exc}); run is invalid", file=sys.stderr, flush=True)
             return 3

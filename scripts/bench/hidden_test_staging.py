@@ -229,7 +229,9 @@ def _pending_entries(run_root: Path) -> dict:
     return {k: v for k, v in entries.items() if isinstance(v, dict)}
 
 
-def recover_last_run(expected_run_root_sha256: str = "") -> list[str]:
+def recover_last_run(
+    expected_run_root_sha256: str = "", *, workspace_root: Path | None = None
+) -> list[str]:
     """Restore hidden tests a killed run left staged. Everything on disk is untrusted: the run
     dir named by ``.last-run`` must match ``expected_run_root_sha256`` when the runner has one
     (from that run's output-dir manifest), be ours and closed to others; each staged file must
@@ -254,28 +256,102 @@ def recover_last_run(expected_run_root_sha256: str = "") -> list[str]:
         raise HiddenTestStagingError(f"{TAMPERED}:recovery_run_root") from exc
     restored: list[str] = []
     for origin, entry in sorted(entries.items()):
-        staged = Path(str(entry.get("staged") or ""))
-        expected = str(entry.get("sha256") or "")
-        leftover = HiddenTestStaging(
-            hidden_path=Path(origin), staged_path=staged, staged=True, sha256=expected
-        )
-        if run_root not in staged.parents or not expected:
-            leftover._fail_closed("recovery:staged_outside_run_root")
-            continue
         try:
-            os.chmod(staged.parent, 0o700)
-            leftover._move_back()
+            _recover_entry(run_root, origin, entry, workspace_root=workspace_root)
             restored.append(origin)
-        except (HiddenTestStagingError, OSError) as exc:
-            leftover._fail_closed(f"recovery:{_safe_detail(exc)}")
-        finally:
-            try:
-                os.chmod(staged.parent, _DIR_MODE)
-            except OSError:
-                pass
+        except HiddenTestStagingError as exc:
+            _RUN_ABORT.append(f"hidden_recovery_refused:{_safe_detail(exc)}"[:200])
+        except OSError as exc:
+            _RUN_ABORT.append(f"hidden_recovery_refused:{_safe_detail(exc)}"[:200])
     if _RUN_ABORT:
         raise HiddenTestStagingError(f"{TAMPERED}:recovery_failed")
     return restored
+
+
+FIXTURE_ROOTS: tuple[tuple[str, ...], ...] = (
+    (".nexus", "bench_cases"),
+    ("bench_fixtures", "online_ab_hard_v1"),
+)
+_IN_MEMORY_SHAS: dict[str, str] = {}
+
+
+def _committed_sha(workspace_root: Path, origin: Path) -> str:
+    """sha256 of the fixture's committed content (``git show HEAD:<origin>``), or ""."""
+    import subprocess  # noqa: PLC0415 - only on the rare recovery path
+
+    try:
+        rel = origin.relative_to(workspace_root).as_posix()
+        proc = subprocess.run(  # noqa: S603 - fixed argv
+            ["git", "-C", str(workspace_root), "show", f"HEAD:{rel}"],
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+    except (ValueError, OSError, subprocess.SubprocessError):
+        return ""
+    return hashlib.sha256(proc.stdout).hexdigest() if proc.returncode == 0 else ""
+
+
+def _lock_if_inside(run_root: Path, staged: Path) -> None:
+    try:
+        if run_root in staged.parents:
+            info = os.lstat(staged)
+            if stat.S_ISREG(info.st_mode):
+                os.chmod(staged, _STAGED_MODE)
+    except OSError:
+        pass
+
+
+def _recover_entry(
+    run_root: Path, origin_text: str, entry: dict, *, workspace_root: Path | None
+) -> None:
+    """Restore ONE recorded entry, treating the record as an untrusted hint. Never writes or
+    moves anything at a path that fails validation (no quarantine of an attacker-chosen path)."""
+    staged = Path(str(entry.get("staged") or ""))
+    expected = str(entry.get("sha256") or "")
+    task_key = str(entry.get("task") or "")
+    origin = Path(origin_text)
+    try:
+        if workspace_root is None:
+            raise HiddenTestStagingError("no_workspace_root")
+        ws = Path(os.path.abspath(workspace_root))
+        # (a) origin inside a known fixture root, one task dir deep, no symlinked component.
+        if not origin.is_absolute() or origin.name != HIDDEN_TEST_NAME:  # (b)
+            raise HiddenTestStagingError("origin_not_a_hidden_test")
+        if not any(origin.parent.parent == ws.joinpath(*parts) for parts in FIXTURE_ROOTS):
+            raise HiddenTestStagingError("origin_outside_fixture_roots")
+        _no_symlink_components(origin.parent)
+        if os.path.lexists(origin):
+            raise HiddenTestStagingError("origin_exists")  # incl. a symlink: never overwritten
+        # (c) staged path is exactly <run_root>/<task key>/test_hidden.py for the recorded task.
+        if staged != run_root / task_key / HIDDEN_TEST_NAME or not task_key:
+            raise HiddenTestStagingError("staged_path_task_mismatch")
+        # (d) the bytes must match a trusted hash: this run's in-memory sha, else the committed
+        # fixture; the record's own sha is only a hint and must agree too.
+        trusted = _IN_MEMORY_SHAS.get(str(origin)) or _committed_sha(ws, origin)
+        if not trusted or not expected or trusted != expected:
+            raise HiddenTestStagingError("untrusted_sha")
+        leftover = HiddenTestStaging(
+            hidden_path=origin, staged_path=staged, staged=True, sha256=expected
+        )
+        digest = leftover._verified_staged_digest()  # lstat, sidecar, O_NOFOLLOW read, sha
+        if digest != trusted:
+            raise HiddenTestStagingError("untrusted_sha")
+        os.chmod(staged, 0o400)
+        data = _read_nofollow(staged)
+        os.chmod(staged, _STAGED_MODE)
+        if hashlib.sha256(data).hexdigest() != trusted:
+            raise HiddenTestStagingError("untrusted_sha")
+        _write_new(origin, data)  # O_CREAT|O_EXCL|O_NOFOLLOW
+        os.chmod(origin, 0o644)
+        os.chmod(staged, 0o600)
+        os.unlink(staged)
+        os.chmod(leftover.sidecar_path, 0o600)
+        os.unlink(leftover.sidecar_path)
+        _record_update(run_root, origin, None)
+    except BaseException:
+        _lock_if_inside(run_root, staged)
+        raise
 
 
 def _path_digest(path: Path) -> str:
@@ -384,10 +460,15 @@ class HiddenTestStaging:
         os.chmod(self.sidecar_path, 0o400)
         self.sha256 = digest
         self.staged = True
+        _IN_MEMORY_SHAS[str(self.hidden_path)] = digest
         _record_update(
             self.staged_path.parent.parent,
             self.hidden_path,
-            {"staged": str(self.staged_path), "sha256": digest},
+            {
+                "staged": str(self.staged_path),
+                "sha256": digest,
+                "task": self.staged_path.parent.name,
+            },
         )
 
     def _verified_staged_digest(self) -> str:
