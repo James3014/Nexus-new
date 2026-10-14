@@ -135,6 +135,74 @@ composition). Only the fixed 120 s margin covers them, so a worst-case cycle can
 still outlive the window.
 
 Step 3 changes an explicit fail-closed rule of the automation state machine, so it
-needs an owner decision. The strict xfail test
-`tests/services/test_external_intelligence_closure.py::test_closure_resume_reconciles_unknown_repair_continuation_without_redispatch`
-pins the intended behaviour.
+needs an owner decision. The intended behaviour is pinned by the acceptance test
+below (`test_closure_resume_reconciles_unknown_repair_continuation_without_redispatch`).
+
+## Acceptance test for the deferred closure wiring
+
+The PR impact gate rejects newly added test ids that do not pass (a strict
+`xfail` counts as not passing), so the expected closure behaviour is kept here
+instead of in `tests/services/test_external_intelligence_closure.py`. Add it to
+that file, without the `xfail`, together with the closure/automation wiring:
+
+```python
+class _UnknownThenReconcilableCRuntime(RepairingCRuntime):
+    """First continuation ends OUTCOME_UNKNOWN; only reconcile_repair may resolve it."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.reconciled: list[str] = []
+        self._pending: tuple[dict, str, str, str] | None = None
+
+    def continue_repair(self, receipt, *, repair_id, repair_ref, repair_sha256):
+        if self._pending is None:
+            self._pending = (dict(receipt), repair_id, repair_ref, repair_sha256)
+            from nexus.services.external_intelligence_fanout import FanoutError
+
+            raise FanoutError("FANOUT_RECONCILIATION_REQUIRED")
+        raise AssertionError("blind redispatch of a repair with unknown outcome")
+
+    def reconcile_repair(self, receipt, *, repair_id):
+        assert self._pending is not None
+        parent, pending_id, ref, sha = self._pending
+        assert repair_id == pending_id and receipt["receipt_id"] == parent["receipt_id"]
+        self.reconciled.append(repair_id)
+        return super().continue_repair(
+            receipt, repair_id=repair_id, repair_ref=ref, repair_sha256=sha
+        )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "EIA phase 0 gap 2: closure/automation have no resume path for a repair "
+        "continuation that ended OUTCOME_UNKNOWN (fanout reconcile_repair exists; "
+        "closure wiring is a design decision, see "
+        "docs/architecture/EIA_REPAIR_CONTINUATION_RECONCILE.md)"
+    ),
+)
+def test_closure_resume_reconciles_unknown_repair_continuation_without_redispatch(tmp_path):
+    repo, _base = make_repo(tmp_path)
+    card_ref, card_hash, head_sha = make_task_card(repo)
+    receipt = make_receipt(repo, tmp_path, head_sha, "ua", "a.py", "A = 1\n")
+    c_runtime = _UnknownThenReconcilableCRuntime(repo, head_sha, {"ua": ("a.py", "A = 2\n")})
+    kwargs = dict(
+        main_sha=head_sha,
+        unit_receipts=[receipt],
+        unit_verifiers={
+            "ua": [
+                verifier(
+                    "a-two", "from pathlib import Path; assert 'A = 2' in Path('a.py').read_text()"
+                )
+            ]
+        },
+        whole_verifiers=[verifier("whole", "raise SystemExit(0)")],
+        task_card_ref=card_ref,
+        task_card_hash=card_hash,
+    )
+    with pytest.raises(Exception, match="FANOUT_RECONCILIATION_REQUIRED"):
+        runtime(repo, tmp_path, c_runtime=c_runtime, max_repairs=1).close_task(**kwargs)
+    resumed = runtime(repo, tmp_path, c_runtime=c_runtime, max_repairs=1).close_task(**kwargs)
+    assert c_runtime.reconciled == ["d001"]
+    assert resumed["status"] == CLAIM_CEILING
+```
