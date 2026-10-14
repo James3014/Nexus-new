@@ -191,12 +191,38 @@ def test_approve_op_exits_nonzero_without_calling_cli(tmp_path: Path):
         {"op": "submit", "task_id": "ok", "allowed_files": ["--help", "a.py"]},
         {"op": "submit", "task_id": "ok", "verifier_commands": "--help"},
         {"op": "list-actionable", "state_dir": "-x"},
+        {"op": "submit", "task_id": "ok", "allowed_files": ["safe.py", "--help", ""]},
+        {"op": "submit", "task_id": "ok", "allowed_files": ["safe.py", ""]},
+        {"op": "submit", "task_id": "ok", "verifier_commands": ["pytest -q", "-x"]},
     ],
 )
 def test_option_like_values_rejected_for_every_op(payload):
     """No free-text value may reach the CLI argv starting with '-' (Click would parse it as an option)."""
     with pytest.raises(ValueError, match="must not be empty or start with '-'"):
         parse_and_validate_input(json.dumps(payload))
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("timeout", "-inf"),
+        ("timeout", "15"),
+        ("timeout", float("inf")),
+        ("timeout", float("nan")),
+        ("timeout", -1),
+        ("timeout", 0),
+        ("timeout", 10**9),
+        ("timeout", True),
+        ("poll_interval", "-1"),
+        ("poll_interval", -0.5),
+        ("timeout_seconds", "--help"),
+        ("poll_interval_seconds", [1]),
+    ],
+)
+def test_numeric_fields_must_be_finite_positive_numbers(field, value):
+    payload = {"op": "wait", "task_id": "cueline-task-001", field: value}
+    with pytest.raises((TypeError, ValueError)):
+        parse_and_validate_input(json.dumps(payload, allow_nan=True))
 
 
 def test_cli_failure_codes_propagate(tmp_path: Path):

@@ -7,11 +7,12 @@ and executes the canonical Nexus self-hosted CLI command (`nexus self-hosted ...
 """
 
 import json
+import math
 import os
 import sys
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List
 
 APPROVE_RETIRED_MESSAGE = (
     "Operation 'approve' is retired (#1928, APPROVAL_GRANT_REQUIRED): the CLI cannot carry "
@@ -103,6 +104,9 @@ def resolve_repo_root() -> Path:
     return default_root
 
 
+_MAX_SECONDS = 86400
+
+
 def _reject_option_like(key: str, val: str) -> None:
     """Every string value becomes a CLI option value; a leading '-' (or blank) would
     be parsed by Click as an option such as --help, so it is rejected."""
@@ -128,20 +132,17 @@ def _validate_field_type(key: str, val: Any) -> None:
         elif isinstance(val, list):
             if not all(isinstance(item, str) for item in val):
                 raise TypeError(f"List items in '{key}' must all be strings.")
-            if val:
-                _reject_option_like(key, val[0])
+            for item in val:
+                _reject_option_like(key, item)
         else:
             raise TypeError(f"Field '{key}' must be a string or list of strings, got {type(val).__name__}.")
     elif key in {"timeout", "timeout_seconds", "poll_interval", "poll_interval_seconds"}:
-        if isinstance(val, (int, float)):
-            pass
-        elif isinstance(val, str):
-            try:
-                float(val)
-            except ValueError:
-                raise TypeError(f"Field '{key}' must be numeric, got string '{val}'.")
-        else:
+        # Real numbers only (no strings such as "-inf", no bools), finite and in a
+        # sane positive range, so nothing option-like can reach the CLI argv.
+        if isinstance(val, bool) or not isinstance(val, (int, float)):
             raise TypeError(f"Field '{key}' must be numeric (int/float), got {type(val).__name__}.")
+        if not math.isfinite(val) or not 0 < val <= _MAX_SECONDS:
+            raise ValueError(f"Field '{key}' must be a finite number in (0, {_MAX_SECONDS}].")
 
 
 def parse_and_validate_input(raw_input: str) -> Dict[str, Any]:

@@ -4104,6 +4104,7 @@ else:
     @self_hosted_group.command(
         name="approve",
         context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
+        add_help_option=False,
     )
     @translate_action_exceptions
     def self_hosted_approve() -> None:

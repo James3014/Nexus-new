@@ -606,6 +606,32 @@ def test_self_hosted_approve_exact_binding_and_mismatch(tmp_path: Path):
     assert not state.get("approved_binding")
 
 
+@pytest.mark.parametrize(
+    "extra_args",
+    [["--help"], ["--task-id", "--help"], ["-h"], []],
+)
+def test_retired_self_hosted_approve_never_succeeds(tmp_path: Path, extra_args):
+    """No input, including --help, lets the retired approve command exit 0."""
+    state_dir = tmp_path / "state"
+    service = SelfHostedTaskService(state_dir=state_dir, auto_reconcile=False)
+    service._write_state(
+        "test-sh-approve-help",
+        {
+            "task_id": "test-sh-approve-help",
+            "status": "CANDIDATE_COMMITTED",
+            "promotion_status": "PENDING_HUMAN_APPROVAL",
+        },
+    )
+    before = {p: p.read_bytes() for p in sorted(tmp_path.rglob("*")) if p.is_file()}
+    res = CliRunner().invoke(
+        nexus,
+        ["nexus", "self-hosted", "approve", *extra_args, "--state-dir", str(state_dir)],
+    )
+    assert res.exit_code == 1
+    assert "self-hosted approve is retired" in res.output
+    assert {p: p.read_bytes() for p in sorted(tmp_path.rglob("*")) if p.is_file()} == before
+
+
 def test_self_hosted_integrate_requires_approved(tmp_path: Path):
     runner = CliRunner()
     state_dir = str(tmp_path / "state")
