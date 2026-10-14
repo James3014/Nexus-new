@@ -153,9 +153,52 @@ def _remint_dropped_universe(request: dict[str, Any]) -> dict[str, Any]:
     return _remint(request, drop)
 
 
+def _allow_owner_effect(action, effect, *, key):
+    return {
+        "schema": "nexus.standing_grant_effect_authorization.v1",
+        "action": action.value,
+        "effect": dict(effect),
+        "mutation_authorized": True,
+        "authorization_hash": "f" * 64,
+    }
+
+
+def _create_card_via_gateway(
+    ctl: Path, seed_head: str, create: dict[str, Any]
+) -> tuple[str, str, dict[str, Any]]:
+    """Write the card with the real ``nexus_task_card_create`` handler (#2218).
+
+    Only the Owner standing-grant lookup is replaced; the card bytes, the
+    universe validation and the rendering are the Gateway's own.
+    """
+    gateway_module.CANONICAL_SOURCE_ROOT = ctl
+    gateway_module._git = lambda *args, **kwargs: seed_head
+    original = UnifiedMCPGateway._require_owner_effect_authority
+    UnifiedMCPGateway._require_owner_effect_authority = staticmethod(_allow_owner_effect)  # type: ignore[method-assign]
+    try:
+        response = UnifiedMCPGateway(service=MagicMock()).handle({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": "nexus_task_card_create", "arguments": create},
+        })
+    finally:
+        UnifiedMCPGateway._require_owner_effect_authority = original  # type: ignore[method-assign]
+    created = response["result"]["structuredContent"]
+    if response["result"]["isError"]:
+        raise RuntimeError(f"nexus_task_card_create failed: {created}")
+    _git(ctl, "add", "-A")
+    _git(ctl, "commit", "-qm", "card")
+    return _git(ctl, "rev-parse", "HEAD"), created["card_path"], created
+
+
 def _run(root: Path, scenario: dict[str, Any]) -> dict[str, Any]:
     task_id = scenario["task_id"]
-    ctl, head, card_rel = _controller(root, task_id, scenario.get("universe"))
+    create = scenario.get("create_card")
+    ctl, head, card_rel = _controller(root, task_id, None if create else scenario.get("universe"))
+    created: dict[str, Any] | None = None
+    if create:
+        head, card_rel, created = _create_card_via_gateway(ctl, head, create)
     # Same target namespace the Gateway derives from its source root, on any
     # temp-path layout.
     os.environ["NEXUS_TARGET_ROOT_OVERRIDE"] = str(ctl.parent / "nexus-runtime-targets")
@@ -191,6 +234,12 @@ def _run(root: Path, scenario: dict[str, Any]) -> dict[str, Any]:
         "params": {"name": "nexus_worker_candidate", "arguments": arguments},
     })
     result: dict[str, Any] = {"gateway_is_error": bool(response["result"]["isError"])}
+    if created is not None:
+        result["created_card"] = {
+            "card_path": card_rel,
+            "card_hash": created["card_hash"],
+            "card_text": (ctl / card_rel).read_text(encoding="utf-8"),
+        }
     if result["gateway_is_error"]:
         result["gateway_error"] = response["result"]["structuredContent"]
         return result
