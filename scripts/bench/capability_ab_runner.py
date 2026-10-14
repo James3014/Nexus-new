@@ -2314,6 +2314,16 @@ def _remaining_leg_timeout(default_timeout_sec: int, start_time: float, total_ti
     return max(1, min(default_timeout_sec, remaining))
 
 
+def _mark_task_deadline_exceeded(row: dict[str, Any], *, stage: str) -> None:
+    """Record that the per-task deadline ran out at ``stage`` (the row fails, the run continues)."""
+
+    row["task_deadline_exceeded"] = True
+    row["task_deadline_stage"] = stage
+    row["task_deadline_failure"] = (
+        "timeout_before_model_call" if int(row.get("model_calls", 0) or 0) <= 0 else "task_deadline_exceeded"
+    )
+
+
 def _remaining_task_timeout(deadline_monotonic: float, fallback_timeout_sec: int) -> int:
     remaining = int(deadline_monotonic - time.monotonic())
     if remaining <= 0:
@@ -4319,6 +4329,7 @@ def _run_receipt_first_probe_payload(
     enable_ddtree_executor: bool,
     enable_ultra_review_dry_gate: bool,
     required: bool = False,
+    hard_cap_sec: int | None = None,
 ) -> dict[str, Any] | None:
     if not (_receipt_first_enabled() or required) or not task.expected_capabilities:
         return None
@@ -4332,6 +4343,9 @@ def _run_receipt_first_probe_payload(
         except ValueError:
             pass
     effective_timeout = max(10, min(upper_cap, timeout_sec))
+    if hard_cap_sec is not None:
+        # Under the shared task deadline the probe may not outlive the remaining budget.
+        effective_timeout = max(1, min(effective_timeout, int(hard_cap_sec)))
 
     args = [
         "nexus",
@@ -15402,6 +15416,29 @@ def run_with_nexus(
     requested_skill_mounts = benchmark_skill_mount_requests(task)
     start_wall = time.time()
     start = time.monotonic()
+    # S17/S11: under strict every with-Nexus subprocess (first pass, model_required fallback,
+    # bounded rescue, hidden retry, receipt-first probe) and every local/verifier step draws from ONE
+    # task deadline (start + effective_timeout_sec) instead of a fresh budget each. Outside strict,
+    # legs keep their previous independent budgets.
+    shared_task_deadline = start + max(1, int(effective_timeout_sec)) if effective_strict_llm_baseline else None
+    shared_deadline_hits: list[str] = []
+
+    def _note_shared_deadline_timeout(stage: str) -> None:
+        # A subprocess killed AT the shared deadline (its timeout was the remaining budget) is a
+        # task-deadline overrun too, not only a launch after the budget ran out.
+        if shared_task_deadline is not None and time.monotonic() >= shared_task_deadline - 1.0:
+            if stage not in shared_deadline_hits:
+                shared_deadline_hits.append(stage)
+
+    def _shared_subprocess_timeout(requested_sec: int, *, stage: str) -> int:
+        if shared_task_deadline is None:
+            return int(requested_sec)
+        try:
+            return _remaining_task_timeout(shared_task_deadline, int(requested_sec))
+        except subprocess.TimeoutExpired:
+            shared_deadline_hits.append(stage)
+            raise
+
     env_prev = os.environ.get("NEXUS_CAPABILITY_TUNING_FILE")
     if tuning_profile:
         os.environ["NEXUS_CAPABILITY_TUNING_FILE"] = str(
@@ -15420,12 +15457,16 @@ def run_with_nexus(
                 "NEXUS_GEMINI_MODEL_NAME": model_env_name,
                 "NEXUS_FORCE_LLM_DESPITE_LEARN_SLO": "1",
                 "NEXUS_GATEWAY_MAX_RETRIES": "1",
-                "NEXUS_GATEWAY_TIMEOUT_SEC": _benchmark_gateway_timeout_sec(
-                    _benchmark_gateway_timeout_for_execution(
-                        task=task,
-                        timeout_sec=effective_timeout_sec,
-                        base_timeout_sec=_benchmark_gateway_timeout_for_task(effective_timeout_sec),
-                        require_model_participation=require_model_participation_for_run,
+                "NEXUS_GATEWAY_TIMEOUT_SEC": (
+                    str(_symmetric_per_call_cap_sec())
+                    if _symmetric_per_call_cap_sec() is not None
+                    else _benchmark_gateway_timeout_sec(
+                        _benchmark_gateway_timeout_for_execution(
+                            task=task,
+                            timeout_sec=effective_timeout_sec,
+                            base_timeout_sec=_benchmark_gateway_timeout_for_task(effective_timeout_sec),
+                            require_model_participation=require_model_participation_for_run,
+                        )
                     )
                 ),
                 "NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL": "1" if effective_llm_self_heal else "0",
@@ -15490,8 +15531,15 @@ def run_with_nexus(
             env["NEXUS_ENABLE_LOCAL_SWARM_EXECUTOR"] = "1"
         else:
             env["NEXUS_FORCE_INPLACE_EXECUTOR"] = "1"
-        if llm_enabled and not force_flow_defer_reason:
+        probe_cap: int | None = None
+        if shared_task_deadline is not None:
+            try:
+                probe_cap = _shared_subprocess_timeout(effective_timeout_sec, stage="receipt_first_probe")
+            except subprocess.TimeoutExpired:
+                probe_cap = 0
+        if llm_enabled and not force_flow_defer_reason and probe_cap != 0:
             receipt_first_payload = _run_receipt_first_probe_payload(
+                hard_cap_sec=probe_cap,
                 repo_root=repo_root,
                 task=task,
                 target_file=target_file,
@@ -15505,13 +15553,19 @@ def run_with_nexus(
                 required=_receipt_first_required(task),
             )
         try:
-            res = _run_process_group(cmd, cwd=repo_root, env=env, timeout_sec=effective_timeout_sec)
+            res = _run_process_group(
+                cmd,
+                cwd=repo_root,
+                env=env,
+                timeout_sec=_shared_subprocess_timeout(effective_timeout_sec, stage="first_pass"),
+            )
             output = res.stdout or ""
             warning_records = [
                 *_warning_records_from_text(res.stdout or "", source="with_nexus_subprocess_stdout"),
                 *_warning_records_from_text(res.stderr or "", source="with_nexus_subprocess_stderr"),
             ]
         except subprocess.TimeoutExpired as exc:
+            _note_shared_deadline_timeout("first_pass")
             warning_records = [
                 *_warning_records_from_text(str(getattr(exc, "stdout", "") or ""), source="with_nexus_subprocess_stdout"),
                 *_warning_records_from_text(str(getattr(exc, "stderr", "") or ""), source="with_nexus_subprocess_stderr"),
@@ -15575,7 +15629,7 @@ def run_with_nexus(
                     _nexus_cli_subprocess_cmd(fallback_args, repo_root),
                     cwd=repo_root,
                     env=env,
-                    timeout_sec=effective_timeout_sec,
+                    timeout_sec=_shared_subprocess_timeout(effective_timeout_sec, stage="model_required_fallback"),
                 )
                 fallback_warning_records = [
                     *_warning_records_from_text(fallback_res.stdout or "", source="with_nexus_fallback_stdout"),
@@ -15586,6 +15640,7 @@ def run_with_nexus(
                     "semantic_status": "UNVERIFIED",
                 }
             except subprocess.TimeoutExpired as exc:
+                _note_shared_deadline_timeout("model_required_fallback")
                 fallback_warning_records = [
                     *_warning_records_from_text(str(getattr(exc, "stdout", "") or ""), source="with_nexus_fallback_stdout"),
                     *_warning_records_from_text(str(getattr(exc, "stderr", "") or ""), source="with_nexus_fallback_stderr"),
@@ -15706,13 +15761,21 @@ def run_with_nexus(
         and int(row.get("model_calls", 0) or 0) > 0
         and _post_model_deterministic_rescue_infra_allowed(row)
     ):
-        pre_rescue = _deterministic_failed_tests_pre_rescue(
-            task=task,
-            repo_root=repo_root,
-            target_file=target_file,
-            test_file=test_file,
-            timeout_sec=_remaining_task_timeout(start + max(1, int(effective_timeout_sec)), effective_timeout_sec),
-        )
+        try:
+            pre_rescue_timeout_sec = _remaining_task_timeout(
+                (shared_task_deadline or start + max(1, int(effective_timeout_sec))), effective_timeout_sec
+            )
+        except subprocess.TimeoutExpired:
+            _mark_task_deadline_exceeded(row, stage="deterministic_pre_rescue")
+            pre_rescue = {"used": False, "reason": "task_deadline_exceeded"}
+        else:
+            pre_rescue = _deterministic_failed_tests_pre_rescue(
+                task=task,
+                repo_root=repo_root,
+                target_file=target_file,
+                test_file=test_file,
+                timeout_sec=pre_rescue_timeout_sec,
+            )
         row["deterministic_pre_rescue_used"] = bool(pre_rescue.get("used", False))
         row["deterministic_pre_rescue_reason"] = str(pre_rescue.get("reason") or "")
         if pre_rescue.get("used"):
@@ -15731,7 +15794,7 @@ def run_with_nexus(
                     _pytest_verifier_cmd(verification_test_file),
                     cwd=repo_root,
                     env=os.environ.copy(),
-                    timeout_sec=_remaining_task_timeout(start + max(1, int(effective_timeout_sec)), effective_timeout_sec),
+                    timeout_sec=_remaining_task_timeout((shared_task_deadline or start + max(1, int(effective_timeout_sec))), effective_timeout_sec),
                 )
                 hidden_passed = hidden_verify.returncode == 0
                 hidden_stdout_tail = _tail_text(hidden_verify.stdout, max_chars=1000)
@@ -15791,7 +15854,12 @@ def run_with_nexus(
         try:
             if runner_mode == "subprocess":
                 rescue_cmd = _nexus_cli_subprocess_cmd(rescue_args, repo_root)
-                rescue_res = _run_process_group(rescue_cmd, cwd=repo_root, env=env, timeout_sec=timeout_sec)
+                rescue_res = _run_process_group(
+                    rescue_cmd,
+                    cwd=repo_root,
+                    env=env,
+                    timeout_sec=_shared_subprocess_timeout(timeout_sec, stage="bounded_hyper_rescue"),
+                )
                 rescue_output = rescue_res.stdout or ""
             else:
                 rescue_runner = runner or cli_runner or CliRunner()
@@ -15799,6 +15867,7 @@ def run_with_nexus(
                 rescue_output = rescue_res.output or ""
             rescue_payload = _extract_json_payload(rescue_output) or {}
         except subprocess.TimeoutExpired:
+            _note_shared_deadline_timeout("bounded_hyper_rescue")
             rescue_payload = {"status": "FAILED", "semantic_status": "UNVERIFIED"}
         rescue_wall = time.monotonic() - rescue_start
         if rescue_payload.get("status") == "SUCCESS":
@@ -15856,6 +15925,8 @@ def run_with_nexus(
             row = rescue_row
             payload = rescue_payload
             wall = wall + rescue_wall
+    for deadline_stage in shared_deadline_hits:
+        _mark_task_deadline_exceeded(row, stage=deadline_stage)
     # S20: in the like-for-like A/B both arms are judged by the hidden test on the delivered file
     # only. The product gates SUCCESS on the visible test; the bare arm has no such gate, so a model
     # file the product left delivered is verified here as well.
@@ -15883,19 +15954,29 @@ def run_with_nexus(
         row["symmetric_delivery_not_model"] = True
     if (payload.get("status") == "SUCCESS" or symmetric_model_delivery) and verification_test_file != test_file:
         verify_start = time.monotonic()
-        verify = _run_process_group(
-            _pytest_verifier_cmd(verification_test_file),
-            cwd=repo_root,
-            env=os.environ.copy(),
-            timeout_sec=_remaining_task_timeout(start + max(1, int(timeout_sec)), timeout_sec),
-        )
+        task_deadline_hit = False
+        try:
+            # R4: first pass + bounded rescue can exhaust the per-task deadline; that fails
+            # this row instead of raising out of run_with_nexus and killing the runner.
+            verify = _run_process_group(
+                _pytest_verifier_cmd(verification_test_file),
+                cwd=repo_root,
+                env=os.environ.copy(),
+                timeout_sec=_remaining_task_timeout((shared_task_deadline or start + max(1, int(timeout_sec))), timeout_sec),
+            )
+            verify_stdout, verify_stderr = verify.stdout, verify.stderr
+            hidden_passed = verify.returncode == 0
+        except subprocess.TimeoutExpired:
+            task_deadline_hit = True
+            verify_stdout, verify_stderr = "", "benchmark_task_deadline"
+            hidden_passed = False
+            _mark_task_deadline_exceeded(row, stage="hidden_verifier")
         hidden_verifier_wall_sec = time.monotonic() - verify_start
-        hidden_passed = verify.returncode == 0
         row["hidden_verifier_file"] = verification_test_file
         row["hidden_verifier_passed"] = hidden_passed
         row["hidden_verifier_wall_sec"] = round(hidden_verifier_wall_sec, 4)
-        row["hidden_verifier_stdout_tail"] = _tail_text(verify.stdout, max_chars=1000)
-        row["hidden_verifier_stderr_tail"] = _tail_text(verify.stderr, max_chars=1000)
+        row["hidden_verifier_stdout_tail"] = _tail_text(verify_stdout, max_chars=1000)
+        row["hidden_verifier_stderr_tail"] = _tail_text(verify_stderr, max_chars=1000)
         if symmetric_model_delivery:
             row["symmetric_hidden_only_gate"] = True
             if hidden_passed:
@@ -15912,7 +15993,12 @@ def run_with_nexus(
         if not hidden_passed and not symmetric_model_delivery:
             recovered_on_retry = False
             hidden_infra_reason = _hidden_verifier_infra_reason(row)
-            if hidden_infra_reason:
+            if task_deadline_hit:
+                row["hidden_retry_used"] = False
+                row["hidden_retry_reason"] = "task_deadline_exceeded"
+                row["hidden_retry_lane"] = "skipped_deadline"
+                row["hidden_retry_classifier"] = "task_deadline_exceeded"
+            elif hidden_infra_reason:
                 row["hidden_verifier_infra_invalid_reason"] = hidden_infra_reason
                 row["infra_invalid_reason"] = hidden_infra_reason
                 row["report_trust_mismatch"] = False
@@ -15942,18 +16028,24 @@ def run_with_nexus(
                 if hidden_feedback_disabled:
                     row["hidden_feedback_disabled"] = True
                 if hidden_retry_decision.lane == "minimal_patch" and not hidden_feedback_disabled:
-                    pre_retry = _deterministic_hidden_pre_retry(
-                        task=task,
-                        repo_root=repo_root,
-                        target_file=target_file,
-                        verification_test_file=verification_test_file,
-                        failure_tail=failure_tail,
-                        decision=hidden_retry_decision,
-                        timeout_sec=_remaining_task_timeout(
-                            start + max(1, int(effective_timeout_sec)),
+                    try:
+                        pre_retry_timeout_sec = _remaining_task_timeout(
+                            (shared_task_deadline or start + max(1, int(effective_timeout_sec))),
                             effective_timeout_sec,
-                        ),
-                    )
+                        )
+                    except subprocess.TimeoutExpired:
+                        _mark_task_deadline_exceeded(row, stage="hidden_pre_retry")
+                        pre_retry = {"used": False, "reason": "task_deadline_exceeded"}
+                    else:
+                        pre_retry = _deterministic_hidden_pre_retry(
+                            task=task,
+                            repo_root=repo_root,
+                            target_file=target_file,
+                            verification_test_file=verification_test_file,
+                            failure_tail=failure_tail,
+                            decision=hidden_retry_decision,
+                            timeout_sec=pre_retry_timeout_sec,
+                        )
                     row["hidden_pre_retry_used"] = bool(pre_retry.get("used", False))
                     row["hidden_pre_retry_reason"] = str(pre_retry.get("reason") or "")
                     if pre_retry.get("used"):
@@ -16056,7 +16148,7 @@ def run_with_nexus(
                                 retry_cmd,
                                 cwd=repo_root,
                                 env=env,
-                                timeout_sec=effective_timeout_sec,
+                                timeout_sec=_shared_subprocess_timeout(effective_timeout_sec, stage="hidden_retry"),
                             )
                             retry_output = retry_res.stdout or ""
                         else:
@@ -16065,6 +16157,7 @@ def run_with_nexus(
                             retry_output = retry_res.output or ""
                         retry_payload = _extract_json_payload(retry_output)
                     except subprocess.TimeoutExpired:
+                        _note_shared_deadline_timeout("hidden_retry")
                         retry_output = ""
                         retry_payload = {"status": "FAILED", "semantic_status": "UNVERIFIED"}
                     hidden_retry_wall_sec = time.monotonic() - retry_start
@@ -16168,7 +16261,7 @@ def run_with_nexus(
                                 _pytest_verifier_cmd(verification_test_file),
                                 cwd=repo_root,
                                 env=os.environ.copy(),
-                                timeout_sec=_remaining_task_timeout(start + max(1, int(effective_timeout_sec)), effective_timeout_sec),
+                                timeout_sec=_remaining_task_timeout((shared_task_deadline or start + max(1, int(effective_timeout_sec))), effective_timeout_sec),
                             )
                             retry_hidden_verifier_wall_sec = time.monotonic() - retry_verify_start
                             retry_hidden_passed = retry_verify.returncode == 0
@@ -16209,6 +16302,8 @@ def run_with_nexus(
                 row["status"] = "FAILED"
                 row["semantic_status"] = "UNVERIFIED"
                 row["semantic_completed"] = False
+    for deadline_stage in shared_deadline_hits:
+        _mark_task_deadline_exceeded(row, stage=deadline_stage)
     if route_cost_controls:
         row["route_cost_policy_controls"] = route_cost_controls
         row["route_cost_policy_candidate_cap"] = route_cost_controls.get("candidate_cap")
@@ -16530,7 +16625,10 @@ def _run_without_nexus_impl(
                 )
             prompt_sha256 = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
             direct_attempt_start = time.monotonic()
-            out, raw = direct_ask(prompt=prompt, timeout_sec=_remaining_task_timeout(task_deadline, timeout_sec))
+            out, raw = direct_ask(
+                prompt=prompt,
+                timeout_sec=_bench_per_model_call_timeout_sec(_remaining_task_timeout(task_deadline, timeout_sec)),
+            )
             direct_attempt_wall_sec = round(time.monotonic() - direct_attempt_start, 4)
             retry_limit = _direct_model_infra_retry_limit(direct_provider)
             retryable, retry_reason = _direct_model_retryable_infra_failure(out if isinstance(out, dict) else {}, raw)
@@ -16542,7 +16640,10 @@ def _run_without_nexus_impl(
                 if retry_reason == "gemini_invalid_session_identifier" and isinstance(out, dict):
                     _reset_gemini_benchmark_session(str(out.get("gemini_session_id") or ""))
                 direct_attempt_start = time.monotonic()
-                out, raw = direct_ask(prompt=prompt, timeout_sec=_remaining_task_timeout(task_deadline, timeout_sec))
+                out, raw = direct_ask(
+                    prompt=prompt,
+                    timeout_sec=_bench_per_model_call_timeout_sec(_remaining_task_timeout(task_deadline, timeout_sec)),
+                )
                 direct_attempt_wall_sec = round(time.monotonic() - direct_attempt_start, 4)
                 retryable, retry_reason = _direct_model_retryable_infra_failure(out if isinstance(out, dict) else {}, raw)
             model_calls = 1
@@ -19266,6 +19367,70 @@ def _benchmark_gateway_timeout_sec(default_sec: int = 30) -> str:
     return str(max(5, int(default_sec)))
 
 
+PER_CALL_TIMEOUT_MARGIN_SEC = 30
+
+
+def _resolve_symmetric_per_call_cap_sec(args: argparse.Namespace) -> int | None:
+    """One per-model-call cap for BOTH arms (R4), or None outside the like-for-like config.
+
+    Source, in order: ``--per-call-timeout-sec``; ``NEXUS_BENCH_GATEWAY_TIMEOUT_SEC``; the per-task
+    budget minus a fixed margin.  Applied under ``--strict-llm-baseline`` /
+    ``--require-same-model-baseline`` or whenever ``--per-call-timeout-sec`` is given.
+    """
+
+    explicit = int(getattr(args, "per_call_timeout_sec", 0) or 0)
+    strict = bool(getattr(args, "strict_llm_baseline", False) or getattr(args, "require_same_model_baseline", False))
+    if explicit <= 0 and not strict:
+        return None
+    budget_cap = int(getattr(args, "timeout_sec", 0) or 0) - PER_CALL_TIMEOUT_MARGIN_SEC
+    if explicit > 0:
+        cap = explicit
+    else:
+        env_value = str(os.environ.get("NEXUS_BENCH_GATEWAY_TIMEOUT_SEC", "") or "").strip()
+        if env_value:
+            try:
+                cap = int(env_value)
+            except ValueError as exc:
+                # No silent fallback: a typo here would silently desynchronise the two arms.
+                raise ValueError(f"NEXUS_BENCH_GATEWAY_TIMEOUT_SEC must be an integer, got {env_value!r}") from exc
+        else:
+            cap = budget_cap
+    # Both arms get the same cap; it can never exceed what the task budget leaves for one call.
+    cap = min(cap, budget_cap)
+    if cap <= 5:
+        raise ValueError(
+            f"per-call cap {cap}s is too small (task budget --timeout-sec minus {PER_CALL_TIMEOUT_MARGIN_SEC}s)"
+        )
+    return cap
+
+
+def _symmetric_per_call_cap_sec() -> int | None:
+    raw = str(os.environ.get("NEXUS_BENCH_PER_CALL_CAP_SEC", "") or "").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
+def _bench_per_model_call_timeout_sec(remaining_task_sec: int) -> int:
+    """Per-model-call budget for the bare arm, from the same setting as the with-Nexus arm (R4).
+
+    With a symmetric cap (``NEXUS_BENCH_PER_CALL_CAP_SEC``, set by ``main`` in the like-for-like
+    config) both arms use that value. Otherwise the with-Nexus gateway timeout follows
+    ``NEXUS_BENCH_GATEWAY_TIMEOUT_SEC`` when set, and the bare arm's agy ``--print-timeout`` is
+    capped by the same value.
+    """
+
+    remaining = max(1, int(remaining_task_sec))
+    cap = _symmetric_per_call_cap_sec()
+    if cap is not None:
+        return min(remaining, cap)
+    if not str(os.environ.get("NEXUS_BENCH_GATEWAY_TIMEOUT_SEC", "") or "").strip():
+        return remaining
+    return min(remaining, int(_benchmark_gateway_timeout_sec(remaining)))
+
+
 def _benchmark_gateway_timeout_for_task(timeout_sec: int) -> int:
     # Give Gemini enough room to answer while preserving subprocess budget for Nexus verification.
     flash_model = "flash" in _report_model_label().lower()
@@ -19879,6 +20044,16 @@ def main() -> int:
     parser.add_argument("--max-tasks", type=int, default=6)
     parser.add_argument("--timeout-sec", type=int, default=30)
     parser.add_argument(
+        "--per-call-timeout-sec",
+        type=int,
+        default=0,
+        help=(
+            "One per-model-call timeout for both arms (bare agy --print-timeout and the with-Nexus "
+            "gateway). Under --strict-llm-baseline/--require-same-model-baseline it defaults to "
+            "NEXUS_BENCH_GATEWAY_TIMEOUT_SEC, else --timeout-sec minus 30 s."
+        ),
+    )
+    parser.add_argument(
         "--total-timeout-sec",
         type=int,
         default=0,
@@ -20264,6 +20439,17 @@ def main() -> int:
             parser.error("--counted-first-attempt needs the with-Nexus arm on agy (prompt capture observes only agy)")
         if _counted_mode_expects_model_calls(args) and not _hidden_verifier_mode_enabled():
             parser.error("--counted-first-attempt needs the hidden verifier (--enable-hidden-verifier or NEXUS_VALUE_HIDDEN_VERIFIER=1)")
+    symmetric_per_call_cap = None
+    if _counted_mode_expects_model_calls(args) or int(getattr(args, "per_call_timeout_sec", 0) or 0) > 0:
+        # Only runs that make model calls need (and validate) the shared per-call cap.
+        try:
+            symmetric_per_call_cap = _resolve_symmetric_per_call_cap_sec(args)
+        except ValueError as exc:
+            parser.error(str(exc))
+    if symmetric_per_call_cap is None:
+        os.environ.pop("NEXUS_BENCH_PER_CALL_CAP_SEC", None)
+    else:
+        os.environ["NEXUS_BENCH_PER_CALL_CAP_SEC"] = str(symmetric_per_call_cap)
     if args.skip_llm_baseline and args.strict_llm_baseline:
         parser.error("--strict-llm-baseline cannot be combined with --skip-llm-baseline")
     if args.nexus_only and args.without_only:
@@ -20644,6 +20830,7 @@ def main() -> int:
                     strict_llm_baseline=bool(args.strict_llm_baseline),
                 )
             _annotate_warning_ledger(row, runtime_warning_records, append=True)
+            row["per_call_timeout_cap_sec"] = _symmetric_per_call_cap_sec()
             row["isolation_mode"] = args.isolation_mode
             row["clean_checkout_required"] = args.isolation_mode == "worktree"
             task_stop_loss_exceeded = _apply_per_task_stop_loss(row, int(args.per_task_stop_loss_sec))
@@ -20772,6 +20959,7 @@ def main() -> int:
                     mode=args.without_mode,
                 )
             _annotate_warning_ledger(row, runtime_warning_records, append=True)
+            row["per_call_timeout_cap_sec"] = _symmetric_per_call_cap_sec()
             row["isolation_mode"] = args.isolation_mode
             row["clean_checkout_required"] = args.isolation_mode == "worktree"
             task_stop_loss_exceeded = _apply_per_task_stop_loss(row, int(args.per_task_stop_loss_sec))
@@ -20981,6 +21169,7 @@ def main() -> int:
                     "no_hidden_feedback": bool(args.no_hidden_feedback),
                     "counted_first_attempt": bool(args.counted_first_attempt),
                     "interleave_arms": _interleave_arms_enabled(args),
+                    "per_call_timeout_cap_sec": _symmetric_per_call_cap_sec(),
                     "disable_promoted_route_cost_policy": bool(args.disable_promoted_route_cost_policy),
                     "force_flow": args.force_flow,
                     "parallel_arms": args.parallel_arms,

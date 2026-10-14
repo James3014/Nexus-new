@@ -114,6 +114,9 @@ def _run_bare_arm(tmp_path: Path, agy_bin: str, pool_env: dict[str, str]) -> dic
             "agy",
             "--require-same-model-baseline",
             "--strict-llm-baseline",
+            # The counted lane validates one per-call cap for both arms (task budget - 30 s > 5 s).
+            "--timeout-sec",
+            "120",
             "--difficulty",
             "all",
             "--repo-kind-filter",
