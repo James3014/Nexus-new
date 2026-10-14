@@ -3248,7 +3248,15 @@ def _apply_prompt_symmetry_audit(
     report = audit_run(capture_dir, materials, rows=rows)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "prompt_symmetry_audit.json").write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+    by_key = {str(task["key"]): task for task in report.get("tasks") or []}
     for row in rows:
+        task_audit = by_key.get(f"{row.get('task_id')}__{row.get('trial_index')}")
+        if task_audit is not None:
+            # Prompt bloat is a real Nexus cost: report it per row (both arms carry the pair's numbers).
+            row["nexus_prompt_extra_lines"] = task_audit.get("nexus_prompt_extra_lines")
+            row["nexus_prompt_extra_chars"] = task_audit.get("nexus_prompt_extra_chars")
+            row["with_nexus_prompt_chars"] = task_audit.get("with_nexus_prompt_chars")
+            row["bare_prompt_chars"] = task_audit.get("bare_prompt_chars")
         row["prompt_symmetry_status"] = report["status"]
         if report["status"] != "PASS":
             row["prompt_symmetry_violation"] = True

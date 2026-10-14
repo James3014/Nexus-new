@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -27,6 +28,40 @@ from typing import Any
 SCHEMA = "nexus_bench_prompt_symmetry_audit_v1"
 NO_TOOLS_PREFIX = "Do not use any tools (no commands, no file reads, no file writes). Answer directly in this reply."
 PRIOR_ART_MARKER = "[Prior Art]"
+
+# Allowed with-Nexus-only content (coordinator decision 2026-10-14): the Nexus wrapper blocks ARE
+# the treatment under test, so they stay, but only these. Any other with-Nexus-only line fails.
+NEXUS_PREAMBLE = (
+    "You are an agent wearing Nexus. Use the Nexus route, CodeIntel, governance, and artifact "
+    "constraints below. Stay within the task scope."
+)
+SESSION_BOUNDARY_PREFIX = "NEXUS_SESSION_BOUNDARY_V1 "
+TASK_HEADER = "[TASK]"
+TASK_SCAFFOLDING = frozenset({
+    "Return JSON. Prefer patch=<full updated target file>. If patch is not used, use "
+    "operation=replace with exact target_snippet and replacement.",
+    "Hint: baseline",
+    "Source:",
+    "Tests:",
+})
+HIDDEN_GUIDANCE_HEADER = "[NEXUS HIDDEN-VERIFIER GUIDANCE]"
+CODEINTEL_HEADER = "[NEXUS CODEINTEL SUMMARY]"
+NEXUS_BLOCK_HEADERS = frozenset({
+    "[NEXUS ROUTE SUMMARY]",
+    CODEINTEL_HEADER,
+    "[NEXUS EXECUTION PROFILE]",
+    "[NEXUS EXECUTOR FLAGS]",
+    HIDDEN_GUIDANCE_HEADER,
+    "[NEXUS CAPABILITY EVIDENCE]",
+    "[PAYLOAD]",
+    "[NEXUS MODEL CONTEXT]",
+})
+# A line in a Nexus block body that looks like source code must appear verbatim in the fixture's
+# target or visible test (S6: no CodeIntel / upstream code leaking in).
+_CODE_LINE_RE = re.compile(
+    r"^\s*(?:def |class |async def |import |from \S+ import |return\b|raise\b|if .*:$|for .*:$|"
+    r"[A-Za-z_][\w.\[\]'\"]*\s*(?:[+\-*/]?=)(?!=))"
+)
 
 # Hidden-only literal list from the 2026-10-14 symmetry inventory (hidden minus visible test;
 # hard_v1 strings also exist in the post-fix upstream code, so a hit there means repo exposure).
@@ -91,7 +126,17 @@ class TaskAudit:
     extra_lines: list[str] = field(default_factory=list)
     visible_test_present: bool = False
     prior_art_present: bool = False
+    disallowed_lines: list[str] = field(default_factory=list)
+    code_lines: list[str] = field(default_factory=list)
+    codeintel_findings: list[str] = field(default_factory=list)
+    hidden_guidance_lines: list[str] = field(default_factory=list)
+    with_nexus_prompt_chars: int = 0
+    bare_prompt_chars: int = 0
     violations: list[str] = field(default_factory=list)
+
+    @property
+    def extra_chars(self) -> int:
+        return sum(len(line) for line in self.extra_lines)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -103,6 +148,14 @@ class TaskAudit:
             "extra_lines": self.extra_lines,
             "visible_test_present": self.visible_test_present,
             "prior_art_present": self.prior_art_present,
+            "disallowed_lines": self.disallowed_lines,
+            "code_lines": self.code_lines,
+            "codeintel_findings": self.codeintel_findings,
+            "hidden_guidance_lines": self.hidden_guidance_lines,
+            "with_nexus_prompt_chars": self.with_nexus_prompt_chars,
+            "bare_prompt_chars": self.bare_prompt_chars,
+            "nexus_prompt_extra_lines": len(self.extra_lines),
+            "nexus_prompt_extra_chars": self.extra_chars,
             "violations": self.violations,
         }
 
@@ -151,6 +204,82 @@ def strip_no_tools(prompt: str) -> str:
 def extra_lines(with_nexus_prompt: str, bare_prompt: str) -> list[str]:
     bare = set(_lines(strip_no_tools(bare_prompt)))
     return [line for line in _lines(strip_no_tools(with_nexus_prompt)) if line not in bare]
+
+
+def _blocks(prompt: str) -> list[tuple[str, str]]:
+    """(block header or "", normalized line) for every non-empty line of a with-Nexus prompt."""
+
+    header = ""
+    out: list[tuple[str, str]] = []
+    for line in _lines(strip_no_tools(prompt)):
+        if line == TASK_HEADER or line in NEXUS_BLOCK_HEADERS:
+            header = line
+        out.append((header, line))
+    return out
+
+
+def _code_like(fragment: str) -> bool:
+    return bool(_CODE_LINE_RE.match(fragment))
+
+
+def classify_extra_lines(
+    with_nexus_prompt: str, bare_prompt: str, material: TaskMaterial
+) -> dict[str, list[str]]:
+    """Split the with-Nexus-only lines into allowed / disallowed and run the block-body checks."""
+
+    bare = set(_lines(strip_no_tools(bare_prompt)))
+    fixture_lines = set(_lines(material.source)) | set(_lines(material.visible_test))
+    disallowed: list[str] = []
+    code: list[str] = []
+    codeintel: list[str] = []
+    guidance: list[str] = []
+    for header, line in _blocks(with_nexus_prompt):
+        is_header = line == TASK_HEADER or line in NEXUS_BLOCK_HEADERS
+        if header == HIDDEN_GUIDANCE_HEADER and not is_header:
+            guidance.append(line)  # must be empty under strict, even if bare had the line
+        if line in bare:
+            continue
+        if (
+            is_header
+            or line == " ".join(NEXUS_PREAMBLE.split())
+            or line.startswith(SESSION_BOUNDARY_PREFIX)
+        ):
+            continue
+        if header == TASK_HEADER:
+            if line not in TASK_SCAFFOLDING:
+                disallowed.append(line)  # task text/source/tests must match the bare prompt
+            continue
+        if header not in NEXUS_BLOCK_HEADERS:
+            disallowed.append(line)
+            continue
+        # Body of an allowed Nexus block: code-looking fragments (also inside JSON strings) must
+        # come verbatim from the fixture the bare arm sees too.
+        for fragment in line.replace("\\n", "\n").splitlines():
+            fragment = " ".join(fragment.split())
+            if fragment and _code_like(fragment) and fragment not in fixture_lines:
+                code.append(fragment)
+        if header == CODEINTEL_HEADER:
+            codeintel.extend(_codeintel_findings(line))
+    return {"disallowed": disallowed, "code": code, "codeintel": codeintel, "guidance": guidance}
+
+
+def _codeintel_findings(body: str) -> list[str]:
+    try:
+        payload = json.loads(body)
+    except ValueError:
+        return [f"unparsable:{body[:80]}"]
+    if not isinstance(payload, dict):
+        return [f"not_object:{body[:80]}"]
+    findings: list[str] = []
+    for key in ("impacted_files_count", "impacted_symbols_count"):
+        if int(payload.get(key) or 0) != 0:
+            findings.append(f"{key}={payload.get(key)}")
+    for key, value in payload.items():
+        if (key.endswith("_path") or key.endswith("_paths")) and value:
+            findings.append(f"{key}={value}")
+        if key.endswith("_report_present") and value:
+            findings.append(f"{key}=true")
+    return findings
 
 
 def load_captures(capture_dir: str | Path) -> dict[tuple[str, str], list[dict[str, Any]]]:
@@ -213,10 +342,23 @@ def audit_task(
         )
         if not result.visible_test_present:
             result.violations.append("visible_test_missing_from_with_nexus_prompt")
+        result.with_nexus_prompt_chars = len(first)
+        result.bare_prompt_chars = len(bare_prompt)
         if bare_records:
             result.extra_lines = extra_lines(first, bare_prompt)
-            if result.extra_lines:
+            checks = classify_extra_lines(first, bare_prompt, material)
+            result.disallowed_lines = checks["disallowed"]
+            result.code_lines = checks["code"]
+            result.codeintel_findings = checks["codeintel"]
+            result.hidden_guidance_lines = checks["guidance"]
+            if result.disallowed_lines:
                 result.violations.append("with_nexus_only_text")
+            if result.code_lines:
+                result.violations.append("source_code_in_nexus_block")
+            if result.codeintel_findings:
+                result.violations.append("codeintel_reports_repo_context")
+            if result.hidden_guidance_lines:
+                result.violations.append("hidden_verifier_guidance_not_empty")
     return result
 
 

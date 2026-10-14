@@ -222,7 +222,9 @@ def test_counted_run_interleaves_abba_and_passes_symmetric_prompts(
 
 def test_counted_run_fails_on_with_nexus_only_prompt_text(tmp_path: Path, monkeypatch) -> None:
     code, _, out_dir = _run_main_with_fake_arms(
-        tmp_path, monkeypatch, with_prompt_extra="\n[NEXUS ROUTE SUMMARY]\n{}\n"
+        tmp_path,
+        monkeypatch,
+        with_prompt_extra="\nNexus decision table: keep the stricter boundary.\n",
     )
     report = json.loads((out_dir / "prompt_symmetry_audit.json").read_text())
     assert report["status"] == "FAIL"
@@ -242,3 +244,85 @@ def test_auto_literals_match_only_quoted(tmp_path: Path) -> None:
     _capture(tmp_path, "with_nexus", BARE + "\nreturn 'resolved'\n")
     task = audit_run(tmp_path, _material())["tasks"][0]
     assert "resolved" in task["hidden_hits"]
+
+
+NEXUS_BLOCKS = (
+    "You are an agent wearing Nexus. Use the Nexus route, CodeIntel, governance, and artifact "
+    "constraints below. Stay within the task scope.\n\n"
+    "NEXUS_SESSION_BOUNDARY_V1 task_id=x task_type=repair Treat this as an isolated task.\n\n"
+    '[NEXUS ROUTE SUMMARY]\n{"recommended_flow":"direct","risk_score":55}\n\n'
+    '[NEXUS CODEINTEL SUMMARY]\n{"dci_locator_report_path":"","impact_report_present":false,'
+    '"impacted_files_count":0,"impacted_symbols_count":0}\n\n'
+    '[NEXUS EXECUTION PROFILE]\n{"candidate_count":1}\n\n'
+    "[NEXUS HIDDEN-VERIFIER GUIDANCE]\n\n"
+    '[NEXUS CAPABILITY EVIDENCE]\n{"bundle_hash":"abc"}\n'
+)
+
+
+def _with_nexus(extra_blocks: str = NEXUS_BLOCKS) -> str:
+    return extra_blocks + "\n[TASK]\n" + BARE.replace(NO_TOOLS_PREFIX, "")
+
+
+def test_allowed_nexus_blocks_pass_and_bloat_is_measured(tmp_path: Path) -> None:
+    _capture(tmp_path, "without_nexus", BARE)
+    _capture(tmp_path, "with_nexus", _with_nexus())
+    report = audit_run(tmp_path, _material())
+    task = report["tasks"][0]
+    assert report["status"] == "PASS", task
+    assert task["nexus_prompt_extra_lines"] == len(task["extra_lines"]) > 0
+    assert task["nexus_prompt_extra_chars"] > 0
+    assert task["with_nexus_prompt_chars"] > task["bare_prompt_chars"]
+
+
+def test_source_code_inside_a_nexus_block_fails(tmp_path: Path) -> None:
+    _capture(tmp_path, "without_nexus", BARE)
+    leaked = NEXUS_BLOCKS.replace(
+        '{"bundle_hash":"abc"}',
+        '{"snippet":"def classify(smoke, ev):\\n    return verdict_for(ev)"}',
+    )
+    _capture(tmp_path, "with_nexus", _with_nexus(leaked))
+    task = audit_run(tmp_path, _material())["tasks"][0]
+    assert "source_code_in_nexus_block" in task["violations"]
+    assert 'return verdict_for(ev)"}' in task["code_lines"] or any(
+        "verdict_for" in c for c in task["code_lines"]
+    )
+
+
+def test_fixture_code_in_a_nexus_block_is_allowed(tmp_path: Path) -> None:
+    _capture(tmp_path, "without_nexus", BARE)
+    same = NEXUS_BLOCKS.replace(
+        '{"bundle_hash":"abc"}', "def classify(smoke_passed, semantic_evidence):"
+    )
+    _capture(tmp_path, "with_nexus", _with_nexus(same))
+    task = audit_run(tmp_path, _material())["tasks"][0]
+    assert "source_code_in_nexus_block" not in task["violations"], task
+
+
+def test_codeintel_with_repo_context_fails(tmp_path: Path) -> None:
+    _capture(tmp_path, "without_nexus", BARE)
+    blocks = NEXUS_BLOCKS.replace('"impacted_files_count":0', '"impacted_files_count":3').replace(
+        '"dci_locator_report_path":""', '"dci_locator_report_path":"reports/x.json"'
+    )
+    _capture(tmp_path, "with_nexus", _with_nexus(blocks))
+    task = audit_run(tmp_path, _material())["tasks"][0]
+    assert "codeintel_reports_repo_context" in task["violations"]
+    assert "impacted_files_count=3" in task["codeintel_findings"]
+
+
+def test_non_empty_hidden_verifier_guidance_fails(tmp_path: Path) -> None:
+    _capture(tmp_path, "without_nexus", BARE)
+    blocks = NEXUS_BLOCKS.replace(
+        "[NEXUS HIDDEN-VERIFIER GUIDANCE]\n",
+        "[NEXUS HIDDEN-VERIFIER GUIDANCE]\n- infer hidden invariants\n",
+    )
+    _capture(tmp_path, "with_nexus", _with_nexus(blocks))
+    task = audit_run(tmp_path, _material())["tasks"][0]
+    assert "hidden_verifier_guidance_not_empty" in task["violations"]
+
+
+def test_extra_text_inside_task_block_fails(tmp_path: Path) -> None:
+    _capture(tmp_path, "without_nexus", BARE)
+    _capture(tmp_path, "with_nexus", _with_nexus() + "\nAlso keep the stricter boundary.\n")
+    task = audit_run(tmp_path, _material())["tasks"][0]
+    assert task["disallowed_lines"] == ["Also keep the stricter boundary."]
+    assert "with_nexus_only_text" in task["violations"]
