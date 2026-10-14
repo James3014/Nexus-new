@@ -1000,7 +1000,7 @@ CASES: tuple[GoldenCase, ...] = (
     ),
     _c(
         "GB-080",
-        "World A final claims bind evidence",
+        "World A delivers no ungated final text",
         "security",
         "authority_conflict",
         "No World A task surface (root receipt, MCP task_run, nexus run) delivers ungated final-answer text; any future text delivery path must consume the existing claim/delivery verdict and bind or downgrade claims (reopen #49).",
