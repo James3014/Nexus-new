@@ -12,6 +12,8 @@ from nexus.feedback.router import FeedbackRouter
 from nexus.retry_policy.policy import RetryPolicy
 from nexus.search.sampler import AdaptiveResampler, directive_to_dict
 from nexus.committee.models import CommitteeReceipt
+from nexus.committee.oracle_touch_guard import patch_violations, rejection_verdict
+from nexus.selection.contracts import SelectionVerdict
 
 class CommitteeControllerV263:
     """
@@ -50,9 +52,21 @@ class CommitteeControllerV263:
         
         candidates = self.registry.get_all()
         all_verdicts = []
-        
+
+        # 1b. Test/oracle guard (fail closed, before verification and selection): a candidate
+        # whose patch modifies a test or oracle file is never verified, scored or selected.
+        guard_verdicts = []
+        guarded_ids = set()
+        for c in candidates:
+            reasons = patch_violations(c.artifact_refs[0] if c.artifact_refs else "")
+            if reasons:
+                guarded_ids.add(c.candidate_id)
+                guard_verdicts.append(rejection_verdict(c.candidate_id, reasons))
+
         # 2. Verification
         for c in candidates:
+            if c.candidate_id in guarded_ids:
+                continue
             patch = c.artifact_refs[0] if c.artifact_refs else ''
             # Pack 驗證
             if self.packs_enabled:
@@ -66,10 +80,32 @@ class CommitteeControllerV263:
                 for v in VerifierRegistry.get_all_verifiers():
                     all_verdicts.append(v.evaluate(c.candidate_id, patch))
             
-        # 3. Calibration & Decision
-        calibrated_data = self.calibrator.calibrate(all_verdicts, 0.7)
-        selection_res = self.decision_policy.evaluate_and_decide(calibrated_data, calibrated_data["calibrated_confidence"])
-        
+        # 3. Calibration & Decision over the eligible candidates only: a guarded candidate is not
+        # scored, so it neither wins nor hands another candidate an artificial gap (with one
+        # eligible candidate left the abstention policy abstains, as for a single proposal).
+        if guarded_ids and len(guarded_ids) == len(candidates):
+            selection_res = SelectionVerdict(
+                winner_id=None,
+                confidence=0.0,
+                gap=0.0,
+                abstained=True,
+                reason="ALL_CANDIDATES_MODIFY_TEST_OR_ORACLE",
+                failure_bucket="test_or_oracle_modified",
+            )
+        else:
+            calibrated_data = self.calibrator.calibrate(all_verdicts, 0.7)
+            selection_res = self.decision_policy.evaluate_and_decide(calibrated_data, calibrated_data["calibrated_confidence"])
+            if selection_res.winner_id in guarded_ids:  # defensive: never select a guarded one
+                selection_res = SelectionVerdict(
+                    winner_id=None,
+                    confidence=0.0,
+                    gap=0.0,
+                    abstained=True,
+                    reason="GUARDED_CANDIDATE_SELECTED",
+                    failure_bucket="test_or_oracle_modified",
+                )
+        all_verdicts = guard_verdicts + all_verdicts
+
         # 4. Feedback & Retry (Decoupled Data-Flow)
         self.last_retry_directive = {}
         if selection_res.abstained:
@@ -97,6 +133,11 @@ class CommitteeControllerV263:
             verdicts=all_verdicts,
             winner_id=selection_res.winner_id,
             failure_bucket=selection_res.failure_bucket,
+            abstain_reason=(
+                selection_res.reason
+                if selection_res.failure_bucket == "test_or_oracle_modified"
+                else None
+            ),
             confidence=selection_res.confidence,
             verifier_gap=selection_res.gap,
             total_cost=len(candidates) * 0.05

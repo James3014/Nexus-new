@@ -46,6 +46,8 @@
 | nexus/events | tests/events, tests/core/test_event_bus.py, tests/architecture/test_boundaries_v4.py | active | high | event_store_and_transport_contract |
 | nexus/feedback | tests/events, tests/unit/evaluation/test_policy_delta.py, tests/unit/committee/test_data_flow_v267.py, tests/architecture/test_boundaries_v3.py, tests/architecture/test_boundaries_v4.py | active | high | developer_feedback_contract |
 | nexus/committee/controller.py | tests/unit/committee/test_data_flow_v267.py, tests/research/test_candidate_evidence_committee_integration.py | active | high | candidate_evidence_committee_sidecar_contract |
+| nexus/committee/oracle_touch_guard.py | tests/unit/committee/test_oracle_touch_guard.py, tests/unit/committee/test_data_flow_v267.py | active | high | committee_test_oracle_touch_guard_contract |
+| tests/unit/committee/test_oracle_touch_guard.py | tests/unit/committee/test_oracle_touch_guard.py | active | high | test_contract |
 | nexus/committee/execution_verifier.py | tests/unit/committee/test_execution_verifier_sandbox.py, tests/services/test_capability_wiring_fixes_groupc.py, tests/unit/committee/test_data_flow_v267.py | active | high | committee_patch_execution_verifier_contract |
 | nexus/engine/sandboxed_lane.py | tests/unit/committee/test_execution_verifier_sandbox.py, tests/engine/test_swarm_run_sandbox.py, tests/engine/test_ultra_review_service.py, tests/services/test_capability_wiring_fixes_groupc.py | active | high | untrusted_code_sandbox_contract |
 | tests/unit/committee/test_execution_verifier_sandbox.py | tests/unit/committee/test_execution_verifier_sandbox.py | active | high | test_contract |
@@ -195,6 +197,9 @@
 | scripts/ci/nexus-core-verify.sh | tests/ops/test_select_tests.py, tests/ops/test_pr_impact_gate.py | active | high | nexus_core_completion_ci_entrypoint_contract |
 | scripts/ci/nexus_core_trusted_pin_policy.py | tests/ops/test_nexus_core_trusted_pin_policy.py, tests/ops/test_select_tests.py, tests/ops/test_pr_impact_gate.py | active | high | nexus_core_trusted_pin_maintenance_contract |
 | scripts/bench/capability_ab_runner.py | tests/benchmark/test_capability_ab_runner.py::test_run_with_nexus_subprocess_preserves_executor_receipts_without_llm, tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_accepts_causal_runtime_mount, tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_rejects_quarantined_mount | active | high | benchmark_contract |
+| scripts/bench/agy_prompt_capture.py | tests/benchmark/test_ab_prompt_symmetry_audit.py | active | high | ab_prompt_symmetry_contract |
+| scripts/bench/prompt_symmetry_schema.json | tests/benchmark/test_ab_prompt_symmetry_audit.py | active | high | ab_prompt_symmetry_contract |
+| scripts/bench/prompt_symmetry_audit.py | tests/benchmark/test_ab_prompt_symmetry_audit.py | active | high | ab_prompt_symmetry_contract |
 | scripts/bench/fixture_materialization.py | tests/benchmark/test_fixture_materialization.py | active | high | external_fixture_materialization_contract |
 | scripts/bench/public_lane_contract.py | tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_accepts_causal_runtime_mount, tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_rejects_quarantined_mount | active | high | benchmark_contract |
 | scripts/bench | tests/benchmark | active | medium | benchmark_contract |
