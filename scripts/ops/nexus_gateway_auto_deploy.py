@@ -388,6 +388,34 @@ class Host:
             return f"R1_CHECK_FAILED:{type(exc).__name__}:{exc}"[:300]
 
     @contextlib.contextmanager
+    def r1_guard(self, cfg: Config) -> Iterator[None]:
+        """Hold the R1 ledger lock (``ledger.jsonl.lock``) across a Gateway effect.
+
+        Taken after ``GATEWAY_LOCK`` (order GATEWAY_LOCK -> ledger, as the
+        manager's own ``gateway_reload`` does) and held from the R1 check through
+        journal, plist write, reload, live probe and any rollback.  R1 appends
+        REQUESTED under this lock only, so it cannot open mid-effect; an R1
+        request arriving meanwhile times out and fails closed on R1's side
+        (intended).  The lock is re-entrant per process and thread, so
+        ``open_r1_recovery_blocks_effect`` still reads under it.
+        """
+        from scripts.ops import mcp_gateway_durable as durable
+
+        try:
+            self.manager_lock_path(cfg)
+            path = durable.GatewayLedger(Path(durable.GATEWAY_LEDGER)).lock_path
+            lock = durable.InterProcessLock(path, timeout=30.0)
+            lock.__enter__()
+        except DeployError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise DeployError(f"MANAGER_LOCK_UNAVAILABLE:r1-ledger:{exc}") from exc
+        try:
+            yield
+        finally:
+            lock.__exit__(None, None, None)
+
+    @contextlib.contextmanager
     def manager_lock(self, cfg: Config) -> Iterator[None]:
         """Hold the #526 manager's ledger lock so a manual rebind cannot interleave."""
         from scripts.ops import mcp_gateway_durable as durable
@@ -1486,6 +1514,11 @@ class _Cycle:
             return {**status, "status": "PENDING_SWITCH_JOURNAL", "journal": str(cfg.journal)}
         previous_plist = cfg.plist.read_bytes()
         if _sha256(previous_plist) not in known_plist_hashes(cfg):
+            # An open R1 recovery may have written this plist: wait for it to
+            # finish before calling the plist foreign (FOREIGN_PLIST + HOLD).
+            block = host.r1_recovery_block(cfg)
+            if block is not None:
+                return {**status, "status": "BLOCKED_MANAGER_BUSY", "reason": block}
             if dry_run:
                 return {**status, "status": "FOREIGN_PLIST"}
             return {**status, "status": "FOREIGN_PLIST", "receipt": self.foreign_plist()}
@@ -1656,6 +1689,8 @@ class _Cycle:
         if hold is not None:
             _set_hold(self.cfg, hold)
         _append_receipt(self.cfg, receipt)
+        if receipt.get("journal_kept"):
+            return receipt
         if journal_to is not None:
             os.replace(self.cfg.journal, journal_to)
         else:
@@ -1689,7 +1724,7 @@ class _Cycle:
         except Exception as exc:  # noqa: BLE001 - every failure must still leave a receipt
             receipt["reason"] = f"{type(exc).__name__}:{exc}"[:500]
             if receipt["switched"] and not receipt["rolled_back"]:
-                receipt.update(self.rollback(previous_plist, receipt))
+                receipt.update(self.guarded_rollback(previous_plist, receipt))
             elif str(exc).startswith(("SOURCE_TREE_WRITTEN", "CORE_PIN_INVALID")):
                 receipt["outcome"] = "REJECTED_BUILD"
             elif str(exc).startswith("MANAGER_LOCK_UNAVAILABLE"):
@@ -1764,22 +1799,29 @@ class _Cycle:
                     "outcome": f"PIN_BUMP_{pins['verdict']}",
                     "reason": "pin bump before switch",
                 }
-            if cfg.plist.read_bytes() != previous_plist:
-                _set_hold(cfg, "auto-hold: FOREIGN_PLIST; live plist changed during the cycle")
-                return {"outcome": "FOREIGN_PLIST", "reason": "live plist changed during the cycle"}
+            # The R1 ledger lock is held from the R1 check through journal, plist
+            # write, reload, live probe and any rollback: R1 cannot open mid-effect.
+            with host.r1_guard(cfg):
+                block = host.r1_recovery_block(cfg)
+                if block is not None:
+                    # Checked before the plist comparison: a plist an open R1
+                    # recovery wrote is R1's, not a foreign rebind.
+                    return {"outcome": "BLOCKED_MANAGER_BUSY", "reason": block}
+                if cfg.plist.read_bytes() != previous_plist:
+                    _set_hold(cfg, "auto-hold: FOREIGN_PLIST; live plist changed during the cycle")
+                    return {
+                        "outcome": "FOREIGN_PLIST",
+                        "reason": "live plist changed during the cycle",
+                    }
 
-            # Checked under GATEWAY_LOCK (then the ledger lock), so no R1 request
-            # can open between here and the plist write / rollback below.
-            block = host.r1_recovery_block(cfg)
-            if block is not None:
-                return {"outcome": "BLOCKED_MANAGER_BUSY", "reason": block}
-
-            command = wrapper_command(cfg, root, python, core_root=Path(receipt["core"]["root"]))
-            new_plist = render_plist(previous_plist, command, root)
-            self.write_journal(receipt, previous_plist, new_plist, python)
-            _atomic_write(cfg.plist, new_plist)
-            receipt["switched"] = True
-            return self.finish_switch(receipt, previous_plist, root, python)
+                command = wrapper_command(
+                    cfg, root, python, core_root=Path(receipt["core"]["root"])
+                )
+                new_plist = render_plist(previous_plist, command, root)
+                self.write_journal(receipt, previous_plist, new_plist, python)
+                _atomic_write(cfg.plist, new_plist)
+                receipt["switched"] = True
+                return self.finish_switch(receipt, previous_plist, root, python)
 
     def finish_switch(
         self, receipt: Dict[str, Any], previous_plist: bytes, root: Path, python: Path
@@ -1796,7 +1838,7 @@ class _Cycle:
             receipt["deployer_link"] = self.move_tool_link(root)
             return {"outcome": "DEPLOYED"}
         receipt["reason"] = "candidate failed the live probe"
-        return self.rollback(previous_plist, receipt)
+        return self.guarded_rollback(previous_plist, receipt)
 
     def live_probe(
         self, commit: str, root: Path, python: Path, *, core: Optional[Dict[str, Any]] = None
@@ -1824,6 +1866,27 @@ class _Cycle:
             "candidate_python": str(python),
         }
         _atomic_write(self.cfg.journal, json.dumps(journal, sort_keys=True).encode(), 0o600)
+
+    def guarded_rollback(self, previous_plist: bytes, receipt: Dict[str, Any]) -> Dict[str, Any]:
+        """Roll back only while holding the R1 ledger lock with no open R1 request.
+
+        Otherwise the rollback is postponed: the journal is kept (no HOLD) and the
+        next cycle reconciles it once R1 is done.
+        """
+        try:
+            with self.host.r1_guard(self.cfg):
+                block = self.host.r1_recovery_block(self.cfg)
+                if block is None:
+                    return self.rollback(previous_plist, receipt)
+        except DeployError as exc:
+            block = str(exc)
+        receipt["journal_kept"] = True
+        return {"outcome": "BLOCKED_MANAGER_BUSY", "reason": f"rollback postponed: {block}"[:300]}
+
+    def postpone(self, receipt: Dict[str, Any], reason: str) -> Dict[str, Any]:
+        """Record a postponed reconciliation; the journal stays for the next cycle."""
+        receipt.update(outcome="BLOCKED_MANAGER_BUSY", reason=str(reason)[:300], journal_kept=True)
+        return self.close_receipt(receipt)
 
     def rollback(self, previous_plist: bytes, receipt: Dict[str, Any]) -> Dict[str, Any]:
         """Restore the exact previous plist bytes, reload, and re-probe the previous deployment."""
@@ -1858,41 +1921,46 @@ class _Cycle:
         receipt.update(reconciled=True, switched=True)
         hold: Optional[str] = None
         try:
-            with self.host.manager_lock(cfg):
-                live_plist = cfg.plist.read_bytes()
-                # An open #526 R1 recovery owns the Gateway: no reload and no
-                # plist write while it lasts.  Finalizing a candidate that is
-                # already live and healthy needs neither, so only that read-only
-                # path proceeds; everything else keeps the journal for later.
+            with self.host.manager_lock(cfg), self.host.r1_guard(cfg):
+                # R1 first: while a #526 R1 recovery is open it owns the Gateway,
+                # so no reload, no plist write and no FOREIGN verdict (R1 may have
+                # written that plist).  Only a read-only finalize of an already
+                # healthy live candidate proceeds; everything else is postponed
+                # with the journal kept and no HOLD.
                 block = self.host.r1_recovery_block(cfg)
-                if _sha256(live_plist) == new_plist_sha and block is not None:
-                    core = receipt.get("core") if isinstance(receipt.get("core"), dict) else {}
-                    live = self.live_probe(receipt["candidate_commit"], root, python, core=core)
-                    receipt["probes"]["live"] = live
+                live_plist = cfg.plist.read_bytes()
+                is_candidate = _sha256(live_plist) == new_plist_sha
+                if block is not None:
                     receipt["r1_block_observed"] = block
-                    if not live["ok"]:
-                        return {"outcome": "BLOCKED_MANAGER_BUSY", "reason": block}
+                    if not is_candidate:
+                        return self.postpone(receipt, block)
+                    core = receipt.get("core") if isinstance(receipt.get("core"), dict) else {}
+                    try:
+                        live = self.live_probe(receipt["candidate_commit"], root, python, core=core)
+                    except Exception as exc:  # noqa: BLE001 - probe trouble is not corruption
+                        live = {"ok": False, "error": f"{type(exc).__name__}:{exc}"[:300]}
+                    receipt["probes"]["live"] = live
+                    if not live.get("ok"):
+                        return self.postpone(receipt, block)
                     receipt["deployer_link"] = self.move_tool_link(root)
                     receipt["outcome"] = "DEPLOYED"
-                elif _sha256(live_plist) == new_plist_sha:
+                elif is_candidate:
                     # The switch got as far as the plist write; make sure launchd
                     # runs it, keep it if it passes, otherwise roll back.
                     receipt.update(self.finish_switch(receipt, previous_plist, root, python))
                 elif live_plist == previous_plist:
-                    if block is not None:
-                        return {"outcome": "BLOCKED_MANAGER_BUSY", "reason": block}
                     # Equal bytes do not prove launchd runs them (the crash may
                     # have hit the rollback reload): reload and probe them.
                     receipt["reason"] = "interrupted switch; previous plist re-verified"
-                    receipt.update(self.rollback(previous_plist, receipt))
+                    receipt.update(self.guarded_rollback(previous_plist, receipt))
                 else:
                     hold = "auto-hold: FOREIGN_PLIST while reconciling a pending switch"
                     receipt.update(outcome="FOREIGN_PLIST", reason="unexpected live plist")
         except DeployError as exc:
             if not str(exc).startswith("MANAGER_LOCK_UNAVAILABLE"):
                 return self.quarantine_journal(f"RECONCILE_FAILED:DeployError:{exc}"[:300])
-            # The #526 manager is busy: keep the journal and retry next cycle.
-            return {"outcome": "BLOCKED_MANAGER_BUSY", "reason": str(exc)[:300]}
+            # The #526 manager or its ledger is busy: keep the journal, retry.
+            return self.postpone(receipt, str(exc))
         except Exception as exc:  # noqa: BLE001 - never crash every cycle on one journal
             return self.quarantine_journal(f"RECONCILE_FAILED:{type(exc).__name__}:{exc}"[:300])
         return self.close_receipt(receipt, hold=hold)
