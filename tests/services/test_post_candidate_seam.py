@@ -208,7 +208,7 @@ def test_sandbox_runs_visible_test_confined_with_real_receipt(
         assert outcome["exit_code"] != 0 and "pytest" in outcome["output_tail"]
     assert outcome["simulated"] is False and outcome["sandbox_executed"] is True
     assert outcome["network_allowed"] is False and outcome["confined"] is True
-    assert outcome["forbidden_paths_count"] == 1
+    assert outcome["forbidden_paths_count"] == 2  # hidden test + bench staging parent
     assert len(outcome["stdout_sha256"]) == 64
     pytest_argv = [argv for argv in barrier if "pytest" in argv]
     assert pytest_argv and all(argv[-1] == "test_visible.py" for argv in pytest_argv)
@@ -565,12 +565,52 @@ def _probing_case(tmp_path: Path) -> tuple[Path, Path]:
     return case, parent
 
 
-def test_confined_visible_test_cannot_read_the_staging_parent(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def _probe_test(secret: Path) -> str:
+    return (
+        "import sys\nfrom pathlib import Path\n"
+        "sys.path.insert(0, str(Path(__file__).parent))\n"
+        "from target import add\n\n"
+        "def test_add_and_probe():\n"
+        "    assert add(1, 2) == 3\n"
+        f"    assert Path({str(secret)!r}).read_text() == 'never readable'\n"
+    )
+
+
+@pytest.mark.parametrize("where", ["staging_parent", "artifacts", "other_task_fixture"])
+def test_confined_visible_test_cannot_read_bench_secrets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, where: str
 ) -> None:
-    """Even a readable file under the staging parent is out of reach of the visible test."""
-    case, parent = _probing_case(tmp_path)
+    """Even world-readable files in the staging parent, the bench output tree or another task's
+    fixture dir are out of reach of the visible test (default-deny + explicit forbidden roots)."""
+    workspace = tmp_path / "ws"
+    case = workspace / "bench_fixtures" / "online_ab_hard_v1" / "this-task"
+    case.mkdir(parents=True)
+    (case / "target.py").write_text(ORIGINAL, encoding="utf-8")
+    parent = tmp_path / "cache" / "nexus-bench-hidden"
+    secret = {
+        "staging_parent": parent / "run-x" / "test_hidden.py",
+        "artifacts": workspace
+        / "artifacts"
+        / "runtime"
+        / "online_ab_v1"
+        / "run"
+        / "run_manifest.json",
+        "other_task_fixture": workspace
+        / "bench_fixtures"
+        / "online_ab_hard_v1"
+        / "other-task"
+        / "test_hidden.py",
+    }[where]
+    secret.parent.mkdir(parents=True, exist_ok=True)
+    secret.write_text("never readable", encoding="utf-8")  # 0644 on purpose
+    (case / "test_visible.py").write_text(_probe_test(secret), encoding="utf-8")
     monkeypatch.setattr(seam, "BENCH_HIDDEN_STAGING_PARENT", parent)
+    assert {
+        workspace / ".nexus",
+        workspace / "bench_fixtures",
+        workspace / "artifacts",
+        parent,
+    } <= set(seam.bench_forbidden_roots(workspace))
 
     completed, executed = seam.run_visible_test_confined(
         target_path=case / "target.py",
@@ -578,19 +618,28 @@ def test_confined_visible_test_cannot_read_the_staging_parent(
         original_code=ORIGINAL,
         candidate_code=CANDIDATE,
         timeout_sec=60,
+        workspace_root=workspace,
     )
 
     if REAL_BARRIER and PYTEST_UNDER_ISOLATION:
         assert executed is True
         assert completed.returncode != 0  # read denied -> the probe assertion fails
-        assert "never readable" not in completed.stdout
     elif not REAL_BARRIER:
         # No OS barrier (Linux CI): nothing runs, reported as not executed.
         assert executed is False and completed.returncode == 1
         assert completed.stderr.startswith(seam.CONFINEMENT_UNAVAILABLE)
     else:
         assert completed.returncode != 0
-    assert not (case / HIDDEN_MARKER).exists()
+    # Control: the same probe unconfined does read the file (the check is meaningful).
+    (case / "target.py").write_text(CANDIDATE, encoding="utf-8")
+    control = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "test_visible.py"],
+        cwd=case,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert control.returncode == 0, control.stdout[-400:]
 
 
 def test_unconfined_run_of_the_same_probe_would_read_it(tmp_path: Path) -> None:

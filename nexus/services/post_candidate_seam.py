@@ -421,6 +421,7 @@ def run_seam_for_candidate(
     original_code: str,
     candidate_code: str,
     invoker_factory: InvokerFactory | None = None,
+    workspace_root: Path | str | None = None,
 ) -> dict[str, Any] | None:
     """Post-candidate half of the seam: build the scratch copy and run sandbox/ultra_review.
 
@@ -437,7 +438,7 @@ def run_seam_for_candidate(
     ]
     if not names:
         return None
-    forbidden = hidden_test_paths(visible_test_path)
+    forbidden = [*hidden_test_paths(visible_test_path), *bench_forbidden_roots(workspace_root)]
     try:
         scratch = prepare_candidate_scratch(
             target_path=target_path,
@@ -552,6 +553,18 @@ CONFINEMENT_UNAVAILABLE = "confinement_unavailable"
 BENCH_HIDDEN_STAGING_PARENT = Path.home() / ".cache" / "nexus-bench-hidden"
 
 
+def bench_forbidden_roots(workspace_root: Path | str | None) -> list[Path]:
+    """Explicitly forbidden read roots on top of the confinement's default-deny allowlist
+    (scratch copy + interpreter prefixes + system paths): the hidden-test staging parent and,
+    for the workspace, every task's fixtures (``bench_fixtures/``, ``.nexus/`` incl.
+    ``bench_cases/``) and the bench output tree (``artifacts/``)."""
+    roots = [BENCH_HIDDEN_STAGING_PARENT]
+    if workspace_root:
+        base = Path(workspace_root)
+        roots += [base / ".nexus", base / "bench_fixtures", base / "artifacts"]
+    return roots
+
+
 def confine_visible_test_enabled() -> bool:
     return os.environ.get(CONFINE_VISIBLE_TEST_ENV, "").strip().lower() in {
         "1",
@@ -568,6 +581,7 @@ def run_visible_test_confined(
     original_code: str,
     candidate_code: str,
     timeout_sec: float,
+    workspace_root: Path | str | None = None,
 ) -> tuple[subprocess.CompletedProcess, bool]:
     """Visible pytest on a scratch copy holding ``candidate_code``, inside the confinement.
 
@@ -576,7 +590,7 @@ def run_visible_test_confined(
     raises ``subprocess.TimeoutExpired`` like ``subprocess.run`` would."""
     from nexus.engine.confined_test_runner import run_confined_test
 
-    forbidden = [*hidden_test_paths(visible_test_path), BENCH_HIDDEN_STAGING_PARENT]
+    forbidden = [*hidden_test_paths(visible_test_path), *bench_forbidden_roots(workspace_root)]
     argv = [sys.executable, "-I", "-m", "pytest", "-q", "--maxfail=1", "-p", "no:cacheprovider"]
     try:
         scratch = prepare_candidate_scratch(

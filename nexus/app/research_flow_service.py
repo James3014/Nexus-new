@@ -167,6 +167,7 @@ def _apply_post_candidate_seam(
     candidate_code: str,
     pre_stages: list[dict[str, Any]],
     released: Mapping[str, list[str]],
+    workspace_root: Path | None = None,
 ) -> None:
     """Run sandbox/ultra_review on the candidate (scratch copy) and project every seam stage.
 
@@ -176,6 +177,7 @@ def _apply_post_candidate_seam(
     unified = _unified_receipt_from_meta(generation_meta)
     try:
         post = _post_candidate_seam.run_seam_for_candidate(
+            workspace_root=workspace_root,
             task_id=task_id,
             unified_receipt=unified,
             target_path=target_path,
@@ -218,6 +220,7 @@ def _run_visible_pytest(
             original_code=original_code,
             candidate_code=candidate_code,
             timeout_sec=timeout_sec,
+            workspace_root=repo_root,
         )
         return completed
     return subprocess.run(pytest_cmd, cwd=repo_root, capture_output=True, text=True, timeout=timeout_sec)
@@ -1269,6 +1272,7 @@ def run_auto_flow(
             candidate_code=original_code if lock_denied else patched,
             pre_stages=seam_pre_stages,
             released=seam_released,
+            workspace_root=repo_root,
         )
         if symmetric_prompt and _is_symmetric_model_source(str(source)) and patched != original_code:
             # P1-2: identity of the model candidate, checked by the bench against the delivered file.

@@ -20200,8 +20200,9 @@ def main() -> int:
         dest="recover_hidden_staging",
         default="",
         help=(
-            "run_manifest.json of a killed counted run: restore its staged hidden tests (each "
-            "verified against the recorded sha256 and its sidecar) before this run starts."
+            "run_manifest.json of a killed counted run (holds only sha256(run dir)): the run named by "
+            "~/.cache/nexus-bench-hidden/.last-run must match it; its staged hidden tests are restored "
+            "(each verified against the in-run-dir record and its sidecar) before this run starts."
         ),
     )
     parser.add_argument(
@@ -20602,13 +20603,19 @@ def main() -> int:
         # run into the same output dir, or an explicit --recover-hidden-staging, is recovered
         # (sha-verified) before any row runs. Unverifiable leftovers abort the run (exit 3).
         run_record = out_dir / "run_manifest.json"
-        explicit = Path(args.recover_hidden_staging) if args.recover_hidden_staging else None
-        for record in dict.fromkeys(item for item in (explicit, run_record) if item is not None):
-            try:
-                _hidden_staging.recover_from_run_record(record)
-            except _hidden_staging.HiddenTestStagingError as exc:
-                print(f"hidden test staging recovery failed closed ({exc}); run is invalid", file=sys.stderr, flush=True)
-                return 3
+        expected_sha = ""
+        for record in (Path(args.recover_hidden_staging) if args.recover_hidden_staging else None, run_record):
+            if record is not None and record.is_file():
+                try:
+                    staged_info = json.loads(record.read_text(encoding="utf-8")).get("hidden_staging") or {}
+                except ValueError:
+                    staged_info = {}
+                expected_sha = expected_sha or str(staged_info.get("run_root_sha256") or "")
+        try:
+            _hidden_staging.recover_last_run(expected_sha)
+        except _hidden_staging.HiddenTestStagingError as exc:
+            print(f"hidden test staging recovery failed closed ({exc}); run is invalid", file=sys.stderr, flush=True)
+            return 3
         if _hidden_staging.run_abort_reason():
             print(
                 f"hidden test staging recovery failed closed ({_hidden_staging.run_abort_reason()})",

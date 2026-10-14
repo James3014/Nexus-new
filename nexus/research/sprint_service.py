@@ -1319,6 +1319,7 @@ def _inplace_evaluate_confined(
             original_code=original,
             candidate_code=code,
             timeout_sec=executor.timeout_sec,
+            workspace_root=executor.repo_root,
         )
     except subprocess.TimeoutExpired as exc:
         return CandidateEval(
@@ -1427,6 +1428,7 @@ def _apply_sprint_post_candidate_seam(
             and not seam.lock_denied(pre)
         ):
             post = seam.run_seam_for_candidate(
+                workspace_root=repo_root,
                 task_id=task_id,
                 unified_receipt=unified,
                 target_path=Path(repo_root) / config.target_file,

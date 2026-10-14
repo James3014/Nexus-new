@@ -501,28 +501,35 @@ def _killed_run(
     return killed, record
 
 
-def test_killed_run_is_recovered_from_the_output_dir_record(
+def _expected_sha(record: Path) -> str:
+    return json.loads(record.read_text())[staging_mod.RUN_RECORD_KEY]["run_root_sha256"]
+
+
+def test_killed_run_is_recovered_and_nothing_outside_the_run_dir_names_a_path(
     tmp_path, monkeypatch, _isolated_staging
 ) -> None:
     workspace, visible, hidden = _case(tmp_path)
     killed, record = _killed_run(tmp_path, workspace, hidden)
-    entry = json.loads(record.read_text())[staging_mod.RUN_RECORD_KEY]
-    assert (
-        entry["entries"][str(hidden.resolve())]["sha256"]
-        == hashlib.sha256(HIDDEN_TEXT.encode()).hexdigest()
-    )
-    # No fixed-name manifest outside the random run dir.
-    os.chmod(_isolated_staging, 0o700)
-    assert sorted(p.name for p in _isolated_staging.iterdir()) == [
-        killed.staged_path.parent.parent.name
-    ]
-    os.chmod(_isolated_staging, 0o300)
+    run_root = killed.staged_path.parent.parent
+    # Output dir: only sha256(run_root). .last-run: only the basename.
+    out = json.loads(record.read_text())
+    assert out == {
+        staging_mod.RUN_RECORD_KEY: {
+            "run_root_sha256": hashlib.sha256(str(run_root).encode()).hexdigest()
+        }
+    }
+    assert str(run_root) not in record.read_text() and "test_hidden" not in record.read_text()
+    marker = _isolated_staging / staging_mod.LAST_RUN_NAME
+    assert marker.read_text() == run_root.name and _mode(marker) == 0o600
 
     _new_process(monkeypatch)
-    staging_mod.configure_run_record(None)
-    assert staging_mod.recover_from_run_record(record) == [str(hidden.resolve())]
+    # A new run never starts over an unrecovered one.
+    with pytest.raises(staging_mod.HiddenTestStagingError, match="unrecovered_previous_run"):
+        staging_mod.staging_root(workspace)
+    assert staging_mod.recover_last_run(_expected_sha(record)) == [str(hidden.resolve())]
     assert hidden.read_text(encoding="utf-8") == HIDDEN_TEXT
     assert staging_mod.run_abort_reason() == ""
+    staging_mod.staging_root(workspace)  # now allowed
 
 
 def test_tampered_leftover_from_a_killed_run_is_never_restored(tmp_path, monkeypatch) -> None:
@@ -531,47 +538,56 @@ def test_tampered_leftover_from_a_killed_run_is_never_restored(tmp_path, monkeyp
     _plant(killed.staged_path, "def test_planted():\n    assert True\n")
 
     _new_process(monkeypatch)
-    assert staging_mod.recover_from_run_record(record) == []
+    with pytest.raises(staging_mod.HiddenTestStagingError, match="hidden_test_tampered"):
+        staging_mod.recover_last_run(_expected_sha(record))
     assert not hidden.exists()
     assert "recovery" in staging_mod.run_abort_reason()
 
 
-def test_recovery_refuses_a_record_whose_sha_disagrees(tmp_path, monkeypatch) -> None:
-    """The output-dir record is the authority: a matching sidecar is not enough."""
+def test_recovery_refuses_a_run_dir_whose_sha_disagrees(tmp_path, monkeypatch) -> None:
     workspace, visible, hidden = _case(tmp_path)
-    _killed, record = _killed_run(tmp_path, workspace, hidden)
-    data = json.loads(record.read_text())
-    data[staging_mod.RUN_RECORD_KEY]["entries"][str(hidden.resolve())]["sha256"] = "0" * 64
-    record.write_text(json.dumps(data))
+    _killed_run(tmp_path, workspace, hidden)
 
     _new_process(monkeypatch)
-    assert staging_mod.recover_from_run_record(record) == []
+    with pytest.raises(staging_mod.HiddenTestStagingError, match="recovery_run_root"):
+        staging_mod.recover_last_run("0" * 64)
     assert not hidden.exists()
     assert staging_mod.run_abort_reason()
 
 
-@pytest.mark.parametrize("attack", ["open_run_dir", "staged_outside_run_dir"])
-def test_recovery_treats_on_disk_state_as_untrusted(tmp_path, monkeypatch, attack) -> None:
+@pytest.mark.parametrize("attack", ["open_run_dir", "staged_outside_run_dir", "bad_marker"])
+def test_recovery_treats_on_disk_state_as_untrusted(
+    tmp_path, monkeypatch, _isolated_staging, attack
+) -> None:
     workspace, visible, hidden = _case(tmp_path)
     killed, record = _killed_run(tmp_path, workspace, hidden)
     run_root = killed.staged_path.parent.parent
     if attack == "open_run_dir":
         os.chmod(run_root, 0o777)
+    elif attack == "staged_outside_run_dir":
+        rec = run_root / staging_mod.RUN_RECORD_NAME
+        data = json.loads(rec.read_text())
+        data["entries"][str(hidden.resolve())]["staged"] = str(tmp_path / "elsewhere.py")
+        rec.write_text(json.dumps(data))
     else:
-        data = json.loads(record.read_text())
-        data[staging_mod.RUN_RECORD_KEY]["entries"][str(hidden.resolve())]["staged"] = str(
-            tmp_path / "elsewhere.py"
-        )
-        record.write_text(json.dumps(data))
+        marker = _isolated_staging / staging_mod.LAST_RUN_NAME
+        marker.write_text("../../etc")
 
     _new_process(monkeypatch)
-    if attack == "open_run_dir":
-        with pytest.raises(staging_mod.HiddenTestStagingError, match="recovery_run_root"):
-            staging_mod.recover_from_run_record(record)
-    else:
-        assert staging_mod.recover_from_run_record(record) == []
+    with pytest.raises(staging_mod.HiddenTestStagingError, match="hidden_test_tampered"):
+        staging_mod.recover_last_run(_expected_sha(record))
     assert not hidden.exists()
     assert staging_mod.run_abort_reason()
+
+
+def test_staging_errors_never_disclose_a_path(tmp_path, monkeypatch) -> None:
+    workspace, visible, hidden = _case(tmp_path)
+    with _staged(workspace, visible) as staging:
+        os.chmod(staging.staged_path, 0o600)
+        staging.staged_path.unlink()  # restore will fail with an OSError carrying the path
+    reason = staging_mod.run_abort_reason()
+    assert reason and "/" not in reason
+    assert all("/" not in v for v in staging.row_fields()["hidden_staging_violations"])
 
 
 def test_staged_bytes_are_mode_0000_between_verifier_windows(tmp_path, monkeypatch) -> None:

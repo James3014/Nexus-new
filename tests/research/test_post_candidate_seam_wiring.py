@@ -156,7 +156,7 @@ def test_bench_like_refactor_task_sandbox_and_ultra_review_now_invoked(
         assert stages[name]["simulated"] is False
         assert stages[name]["trigger_source"] == "post_candidate_seam:post_candidate"
     assert report["post_candidate_seam"]["capabilities"] == ["sandbox", "ultra_review"]
-    assert report["post_candidate_seam"]["hidden_paths_forbidden"] == 1
+    assert report["post_candidate_seam"]["hidden_paths_forbidden"] == 2
 
     flow = overlay_unified_capability_receipts(
         [

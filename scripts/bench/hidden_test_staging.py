@@ -11,11 +11,12 @@ The bare arm is unchanged: it runs after the restore, in an empty cwd.
 Where it goes and how it is protected (every failure is fail closed):
 
 * a per-run ``mkdtemp`` (random name) under ``~/.cache/nexus-bench-hidden``; the path lives only
-  in the runner's memory and in its own output-dir record (``run_manifest.json``), never in a
-  subprocess env (``BENCH_ROOT`` and any variable pointing into the staging tree are scrubbed
-  from the with-Nexus subprocess env). The parent and the run directory are ``0300`` (no
-  listing); symlinked components are refused. There is no fixed-name manifest outside the
-  random run dir;
+  in the runner's memory. The recovery record (origin -> staged path + sha256) lives INSIDE that
+  run dir (``record.json``, 0600); the runner's output dir only receives ``sha256(run dir)``;
+  ``~/.cache/nexus-bench-hidden/.last-run`` (0600) holds only the run-dir basename so a killed
+  run can be recovered by the next one. No subprocess env names any of it (``BENCH_ROOT`` and
+  any variable pointing into the staging tree are scrubbed). The parent and the run directory
+  are ``0300`` (no listing); symlinked components are refused;
 * the staged file is mode ``0000`` while staged (``0400`` only inside the verifier window);
 * a ``<staged>.sha256`` sidecar is written at stage time; every move back first ``lstat``s the
   staged file (regular, one link, no symlink), reads it with ``O_NOFOLLOW`` and checks its
@@ -23,18 +24,24 @@ Where it goes and how it is protected (every failure is fail closed):
   any OS error or interrupt, or a failure to re-stage after the verifier is
   ``hidden_test_tampered``: the workspace copy is quarantined (``.tampered``, mode ``0000``), the
   row is flagged, and the run is aborted (the runner stops and exits 3);
-* recovery after a killed run uses the output-dir record as the authority: the run dir must be
-  ours and closed to group/other, each staged file must lie inside it and match both the
-  recorded sha256 and its sidecar; anything else is quarantined and the run aborts;
+* recovery after a killed run treats disk as untrusted: ``.last-run`` must name a ``run-*``
+  basename whose sha256 matches the killed run's output-dir manifest (when given), the run dir
+  must be ours and closed to group/other, each staged file must lie inside it and match both
+  the in-run-dir record and its sidecar; anything else is quarantined and the run aborts. A
+  new run refuses to start while a previous run still has staged entries;
 * the row records only ``sha256(staged path)``, never the path.
 
 Residual risk (honest): the with-Nexus subprocess runs as the same user, and same-user code can
-defeat file permissions (chmod a ``0000`` file, guess a path). Staging, mode ``0000``, the
-unguessable unlistable directory and the env scrub raise the bar; the boundary is that the
+defeat file permissions (chmod a ``0000`` file or a ``0300`` directory, read ``.last-run``,
+then enumerate ``~/.cache/nexus-bench-hidden/*`` once it guesses the fixed parent). Staging,
+mode ``0000``, the unguessable unlistable directory and the env scrub only raise the bar; the boundary is that the
 product never executes candidate or visible-test code unconfined under the counted lane: it runs
-the visible test on a scratch copy inside ``sandboxed_lane.confinement`` (default-deny reads under
-``$HOME``, the staging parent and the hidden test as forbidden roots), and refuses to run it at
-all without an OS barrier (``confinement_unavailable``).
+the visible test on a scratch copy inside ``sandboxed_lane.confinement`` (default-deny reads:
+only the scratch copy, the interpreter prefixes and fixed system paths are readable; the
+staging parent, the hidden tests, the workspace ``.nexus/``, ``bench_fixtures/`` and
+``artifacts/`` are additionally forbidden roots), and refuses to run it at all without an OS
+barrier (``confinement_unavailable``). Two bench runs at once share ``.last-run``: run them in
+separate homes.
 """
 
 from __future__ import annotations
@@ -126,11 +133,12 @@ def _no_symlink_components(path: Path) -> None:
             raise HiddenTestStagingError("staging_root_symlink_refused")
 
 
-RUN_DIR_MANIFEST_NAME = "MANIFEST.json"
+RUN_RECORD_NAME = "record.json"
+LAST_RUN_NAME = ".last-run"
 RUN_RECORD_KEY = "hidden_staging"
-# The runner's own record of this run's staging (in the bench OUTPUT dir, never in any
-# subprocess env): the run-dir path and every staged file's sha256. It is the recovery
-# authority; set by the runner via configure_run_record().
+_RUN_BASENAME_RE = re.compile(r"^run-[A-Za-z0-9_]{6,64}$")
+# Output-dir manifest of the runner (set by configure_run_record): receives ONLY
+# sha256(run_root), never a path. The recovery record itself lives inside the private run dir.
 _RUN_RECORD_PATH: list[Path] = []
 
 
@@ -138,6 +146,14 @@ def configure_run_record(path: Path | None) -> None:
     _RUN_RECORD_PATH.clear()
     if path is not None:
         _RUN_RECORD_PATH.append(Path(os.path.abspath(path)))
+
+
+def _safe_detail(exc: BaseException) -> str:
+    """Error detail for rows/logs without any filesystem path (no staged-path disclosure)."""
+    if isinstance(exc, HiddenTestStagingError):
+        return re.sub(r"/[^\s:'\"]+", "<path>", str(exc))[:160]
+    code = getattr(exc, "errno", None)
+    return f"{type(exc).__name__}" + (f":errno{code}" if code is not None else "")
 
 
 def _read_json_nofollow(path: Path) -> dict:
@@ -165,21 +181,21 @@ def _write_json_atomic(path: Path, data: dict, *, mode: int) -> None:
 
 
 def _record_update(run_root: Path, origin: Path, entry: dict[str, str] | None) -> None:
-    """Keep the run-dir manifest (mode 0000, inside the random run dir) and the runner's
-    output-dir record in step: origin -> staged path + sha256."""
-    manifest = run_root / RUN_DIR_MANIFEST_NAME
-    entries = dict(_read_json_nofollow(manifest).get("entries") or {})
+    """The recovery record (origin -> staged path + sha256) lives INSIDE the private run dir
+    (``record.json``, 0600 in a 0300 dir); the output dir only learns sha256(run_root)."""
+    record_file = run_root / RUN_RECORD_NAME
+    entries = dict(_read_json_nofollow(record_file).get("entries") or {})
     if entry is None:
         entries.pop(str(origin), None)
     else:
         entries[str(origin)] = entry
-    _write_json_atomic(manifest, {"run_root": str(run_root), "entries": entries}, mode=_STAGED_MODE)
+    _write_json_atomic(record_file, {"entries": entries}, mode=0o600)
     if _RUN_RECORD_PATH:
-        record_path = _RUN_RECORD_PATH[0]
-        record = _read_json_nofollow(record_path)
-        record[RUN_RECORD_KEY] = {"run_root": str(run_root), "entries": entries}
-        record_path.parent.mkdir(parents=True, exist_ok=True)
-        _write_json_atomic(record_path, record, mode=0o600)
+        out_record = _RUN_RECORD_PATH[0]
+        data = _read_json_nofollow(out_record)
+        data[RUN_RECORD_KEY] = {"run_root_sha256": _path_digest(run_root)}
+        out_record.parent.mkdir(parents=True, exist_ok=True)
+        _write_json_atomic(out_record, data, mode=0o600)
 
 
 def _trusted_run_root(run_root: Path) -> None:
@@ -195,47 +211,68 @@ def _trusted_run_root(run_root: Path) -> None:
         raise HiddenTestStagingError("run_root_open_to_others")
 
 
-def recover_from_run_record(record_path: Path) -> list[str]:
-    """Restore hidden tests a killed run left staged, using the runner's output-dir record as
-    the authority. Each staged file must sit inside the recorded run dir and match BOTH its
-    sidecar and the recorded sha256; anything else is quarantined and aborts this run."""
-    record = _read_json_nofollow(Path(record_path)).get(RUN_RECORD_KEY)
-    if not isinstance(record, dict):
-        return []
-    run_root = Path(str(record.get("run_root") or ""))
+def _last_run_root() -> Path | None:
+    """The previous run's root from ``.last-run`` (0600, holds only the run-dir basename)."""
+    marker = _staging_parent() / LAST_RUN_NAME
+    if not os.path.lexists(marker):
+        return None
+    _regular_single_link(marker, label="last_run_marker")
+    basename = _read_nofollow(marker).decode("utf-8", "replace").strip()
+    if not _RUN_BASENAME_RE.fullmatch(basename):
+        raise HiddenTestStagingError("last_run_marker_invalid")
+    return _staging_parent() / basename
+
+
+def _pending_entries(run_root: Path) -> dict:
+    record = _read_json_nofollow(run_root / RUN_RECORD_NAME)
     entries = record.get("entries") if isinstance(record.get("entries"), dict) else {}
-    if not entries:
-        return []
-    restored: list[str] = []
+    return {k: v for k, v in entries.items() if isinstance(v, dict)}
+
+
+def recover_last_run(expected_run_root_sha256: str = "") -> list[str]:
+    """Restore hidden tests a killed run left staged. Everything on disk is untrusted: the run
+    dir named by ``.last-run`` must match ``expected_run_root_sha256`` when the runner has one
+    (from that run's output-dir manifest), be ours and closed to others; each staged file must
+    lie inside it and match both the in-run-dir record and its sidecar. Anything else is
+    quarantined, the run is aborted (HiddenTestStagingError)."""
     try:
+        run_root = _last_run_root()
+        if run_root is None or not os.path.lexists(run_root):
+            if expected_run_root_sha256:
+                raise HiddenTestStagingError("recorded_run_root_missing")
+            return []
+        if expected_run_root_sha256 and _path_digest(run_root) != expected_run_root_sha256:
+            raise HiddenTestStagingError("run_root_sha_mismatch")
         _trusted_run_root(run_root)
-    except (HiddenTestStagingError, OSError) as exc:
-        _RUN_ABORT.append(f"{TAMPERED}:recovery_run_root:{exc}"[:200])
+        os.chmod(run_root, 0o700)
+        try:
+            entries = _pending_entries(run_root)
+        finally:
+            os.chmod(run_root, _DIR_MODE)
+    except (HiddenTestStagingError, OSError, ValueError) as exc:
+        _RUN_ABORT.append(f"{TAMPERED}:recovery_run_root:{_safe_detail(exc)}"[:200])
         raise HiddenTestStagingError(f"{TAMPERED}:recovery_run_root") from exc
+    restored: list[str] = []
     for origin, entry in sorted(entries.items()):
-        if not isinstance(entry, dict):
-            continue
         staged = Path(str(entry.get("staged") or ""))
         expected = str(entry.get("sha256") or "")
-        origin_path = Path(origin)
-        leftover = HiddenTestStaging(hidden_path=origin_path, staged_path=staged, staged=True, sha256=expected)
+        leftover = HiddenTestStaging(hidden_path=Path(origin), staged_path=staged, staged=True, sha256=expected)
         if run_root not in staged.parents or not expected:
             leftover._fail_closed("recovery:staged_outside_run_root")
-            continue
-        if os.path.lexists(origin_path) and not os.path.lexists(staged):
-            restored.append(origin)  # already restored before the kill
             continue
         try:
             os.chmod(staged.parent, 0o700)
             leftover._move_back()
             restored.append(origin)
         except (HiddenTestStagingError, OSError) as exc:
-            leftover._fail_closed(f"recovery:{type(exc).__name__}:{exc}")
+            leftover._fail_closed(f"recovery:{_safe_detail(exc)}")
         finally:
             try:
                 os.chmod(staged.parent, _DIR_MODE)
             except OSError:
                 pass
+    if _RUN_ABORT:
+        raise HiddenTestStagingError(f"{TAMPERED}:recovery_failed")
     return restored
 
 
@@ -314,7 +351,7 @@ class HiddenTestStaging:
         try:
             yield
         except BaseException as exc:
-            self._fail_closed(f"{where}:{type(exc).__name__}:{exc}")
+            self._fail_closed(f"{where}:{_safe_detail(exc)}")
             if isinstance(exc, HiddenTestStagingError) or not isinstance(exc, Exception):
                 raise
             raise HiddenTestStagingError(f"{TAMPERED}:{where}:{type(exc).__name__}") from exc
@@ -526,8 +563,25 @@ def staging_root(repo_root: Path) -> Path:
     parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     _no_symlink_components(parent)
     os.chmod(parent, _DIR_MODE)
+    previous = _last_run_root()
+    if previous is not None and os.path.lexists(previous):
+        os.chmod(previous, 0o700)
+        try:
+            pending = _pending_entries(previous)
+        finally:
+            os.chmod(previous, _DIR_MODE)
+        if pending:
+            # A killed run left hidden tests staged: never start over it (recover first).
+            raise HiddenTestStagingError(f"{TAMPERED}:unrecovered_previous_run")
     root = Path(tempfile.mkdtemp(prefix="run-", dir=parent))  # 0700, random name
+    _write_json_atomic(root / RUN_RECORD_NAME, {"entries": {}}, mode=0o600)
     os.chmod(root, _DIR_MODE)
+    marker = parent / LAST_RUN_NAME
+    tmp = parent / f".last-run.{os.getpid()}.tmp"
+    if os.path.lexists(tmp):
+        os.unlink(tmp)
+    _write_new(tmp, root.name.encode("utf-8"))
+    os.replace(tmp, marker)
     _RUN_ROOTS[str(parent)] = root
     return root
 
@@ -549,7 +603,7 @@ def staged_hidden_test(
     try:
         root = staging_root(repo_root)
     except BaseException as exc:
-        _RUN_ABORT.append(f"{TAMPERED}:staging_root:{type(exc).__name__}:{exc}"[:200])
+        _RUN_ABORT.append(f"{TAMPERED}:staging_root:{_safe_detail(exc)}"[:200])
         raise
     staging = HiddenTestStaging(
         hidden_path=Path(os.path.abspath(hidden)),
