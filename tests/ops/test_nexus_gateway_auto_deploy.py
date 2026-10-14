@@ -159,6 +159,32 @@ class FakeProber:
 
 
 SUITES = {name: 1000 + i for i, name in enumerate(ad.REQUIRED_CHECKS)}
+PR_SUITE_OFFSET = 50_000  # suites >= this belong to the merged PR's head
+ACTIONS_APP_ID = 15368
+MERGED_PR = {"number": 2140, "ref": "feat/x", "merged_at": "2026-10-14T00:00:00Z"}
+
+
+def _workflow_run(suite: int, path: str) -> dict[str, Any]:
+    """A workflow run shaped like real data (pull_requests is empty after merge)."""
+    if suite >= PR_SUITE_OFFSET:
+        return {
+            "path": path,
+            "event": "pull_request_target",
+            "head_branch": MERGED_PR["ref"],
+            "head_sha": PR_HEAD,
+            "head_repository": {"full_name": ad.REPOSITORY},
+            "created_at": "2026-10-13T23:00:00Z",
+            "pull_requests": [],
+        }
+    return {
+        "path": path,
+        "event": "push",
+        "head_branch": "main",
+        "head_sha": NEW,
+        "head_repository": {"full_name": ad.REPOSITORY},
+        "created_at": "2026-10-14T00:05:00Z",
+        "pull_requests": [],
+    }
 
 
 def green_api(
@@ -180,7 +206,9 @@ def green_api(
 
     def get(path: str) -> Any:
         calls.append(path)
-        if path.endswith("/rules/branches/main"):
+        if "/rules/branches/main" in path:
+            if "page=" in path and not path.endswith("page=1"):
+                return []
             return _branch_rules(list(ad.REQUIRED_CHECKS) if required is None else required)
         if path.endswith("/branches/main"):
             return {"commit": {"sha": main_tip}}
@@ -206,16 +234,21 @@ def green_api(
                 {
                     "merged_at": "2026-10-14T00:00:00Z",
                     "merge_commit_sha": NEW,
+                    "number": MERGED_PR["number"],
                     "base": {"ref": "main"},
-                    "head": {"sha": PR_HEAD},
+                    "head": {
+                        "sha": PR_HEAD,
+                        "ref": MERGED_PR["ref"],
+                        "repo": {"full_name": ad.REPOSITORY},
+                    },
                 }
             ]
         if "/actions/runs?check_suite_id=" in path:
             suite = int(path.rsplit("=", 1)[1])
             if workflow_path is not None:
-                return {"workflow_runs": [{"path": workflow_path(suite)}]}
+                return {"workflow_runs": [_workflow_run(suite, workflow_path(suite))]}
             name = next(n for n, s in SUITES.items() if s == suite % 10_000)
-            return {"workflow_runs": [{"path": ad.REQUIRED_CHECKS[name]}]}
+            return {"workflow_runs": [_workflow_run(suite, ad.REQUIRED_CHECKS[name])]}
         name = urllib.parse.unquote_plus(path.split("check_name=")[1].split("&")[0])
         sha = path.split("/commits/")[1].split("/")[0]
         if sha == NEW and not on_commit and name == "Deletion guard":
@@ -227,8 +260,9 @@ def green_api(
                 "status": status,
                 "conclusion": conclusion,
                 "started_at": "2026-10-14T00:00:00Z",
-                "app": {"slug": "github-actions"},
-                "check_suite": {"id": SUITES[name]},
+                "app": {"slug": "github-actions", "id": ACTIONS_APP_ID},
+                "check_suite": {"id": SUITES[name] + (0 if sha == NEW else PR_SUITE_OFFSET)},
+                "pull_requests": [],
             }
         ]
         return {"check_runs": runs + (extra_runs or {}).get(name, [])}
@@ -425,7 +459,7 @@ def test_newer_queued_run_keeps_check_pending() -> None:
         "status": "queued",
         "conclusion": None,
         "started_at": None,
-        "app": {"slug": "github-actions"},
+        "app": {"slug": "github-actions", "id": ACTIONS_APP_ID},
         "check_suite": {"id": SUITES["Deletion guard"] + 10_000},
     }
     api = green_api(extra_runs={"Deletion guard": [queued]})
@@ -441,7 +475,7 @@ def test_newest_completed_run_decides_by_id() -> None:
         "status": "completed",
         "conclusion": "failure",
         "started_at": "2026-10-13T00:00:00Z",  # older timestamp, newer run
-        "app": {"slug": "github-actions"},
+        "app": {"slug": "github-actions", "id": ACTIONS_APP_ID},
         "check_suite": {"id": SUITES["Deletion guard"] + 10_000},
     }
     api = green_api(extra_runs={"Deletion guard": [newer_failure]})
@@ -884,10 +918,13 @@ elif "/check-runs" in url.path:
     suite = 1 + list(REQUIRED).index(name)
     out = {"check_runs": [{"id": 1, "name": name, "status": "completed",
                            "conclusion": os.environ["FAKE_CONCLUSION"],
-                           "app": {"slug": "github-actions"}, "check_suite": {"id": suite}}]}
+                           "app": {"slug": "github-actions", "id": 15368},
+                           "check_suite": {"id": suite}}]}
 elif url.path.endswith("/actions/runs"):
     suite = int(parse_qs(url.query)["check_suite_id"][0])
-    out = {"workflow_runs": [{"path": list(REQUIRED.values())[suite - 1]}]}
+    out = {"workflow_runs": [{"path": list(REQUIRED.values())[suite - 1], "event": "push",
+                              "head_branch": "main", "head_sha": os.environ["FAKE_MAIN"],
+                              "head_repository": {"full_name": "James3014/Nexus-new"}}]}
 else:
     out = []
 print(json.dumps(out))
@@ -2129,7 +2166,7 @@ def test_unknown_required_check_blocks_without_hold(cfg: ad.Config) -> None:
 )
 def test_ruleset_read_failure_blocks(cfg: ad.Config, rules: Any) -> None:
     def api(path: str) -> Any:
-        if path.endswith("/rules/branches/main"):
+        if "/rules/branches/main" in path:
             if isinstance(rules, Exception):
                 raise rules
             return rules
@@ -2143,11 +2180,11 @@ def test_ruleset_read_failure_blocks(cfg: ad.Config, rules: Any) -> None:
 
 
 def test_check_no_longer_required_is_dropped() -> None:
-    required = [n for n in ad.REQUIRED_CHECKS if n != "Deletion guard"]
+    required = [n for n in ad.REQUIRED_CHECKS if n != TRUSTED_DEPENDENCY]
 
     def api(path: str) -> Any:
-        if "check-runs" in path and "Deletion+guard" in path:
-            raise AssertionError("a dropped check must not be queried")
+        if "check-runs" in path and "Trusted" in path:
+            raise AssertionError("a dropped (non-floor) check must not be queried")
         return green_api(required=required)(path)
 
     result = ad.required_checks(api, NEW)
@@ -2158,3 +2195,165 @@ def test_verify_commit_uses_the_live_required_set(capsys: pytest.CaptureFixture[
     assert ad.main(["verify-commit", NEW], api_get=green_api(required=["Mystery"])) == 1
     out = json.loads(capsys.readouterr().out)
     assert out["required_checks"]["verdict"] == "UNKNOWN_REQUIRED_CHECK"
+
+
+# ------------------------------------------ #2175 review: binding, issuer, floor
+
+
+def _patched_workflow_runs(**changes: Any) -> Callable[[str], Any]:
+    """green_api, but the merged PR head's workflow runs carry ``changes``."""
+    base = green_api(on_commit=False)
+
+    def api(path: str) -> Any:
+        payload = base(path)
+        if "/actions/runs?check_suite_id=" in path and int(path.rsplit("=", 1)[1]) >= (
+            PR_SUITE_OFFSET
+        ):
+            for run in payload["workflow_runs"]:
+                run.update(changes)
+        return payload
+
+    return api
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"head_branch": "someone-elses-branch"},  # another PR sharing the head sha
+        {"head_repository": {"full_name": "fork/Nexus-new"}},
+        {"event": "push"},
+        {"created_at": "2026-10-14T01:00:00Z"},  # after the merge
+        {"pull_requests": [{"number": 9999}]},  # explicitly another PR
+        {"head_branch": None},  # binding cannot be established
+    ],
+    ids=["other-branch", "fork", "wrong-event", "after-merge", "other-pr", "no-branch"],
+)
+def test_pr_head_run_from_another_pr_does_not_count(changes: dict[str, Any]) -> None:
+    result = ad.required_checks(_patched_workflow_runs(**changes), NEW)
+    assert result["verdict"] == "UNKNOWN"
+    assert "Deletion guard" in result["missing"]
+
+
+def test_pr_head_run_bound_to_the_merged_pr_counts() -> None:
+    listed = _patched_workflow_runs(pull_requests=[{"number": MERGED_PR["number"]}])
+    assert ad.required_checks(listed, NEW)["verdict"] == "GREEN"
+    assert ad.required_checks(_patched_workflow_runs(), NEW)["verdict"] == "GREEN"
+
+
+def test_commit_run_must_be_a_push_to_main() -> None:
+    def api(path: str) -> Any:
+        payload = green_api()(path)
+        if "/actions/runs?check_suite_id=" in path:
+            for run in payload["workflow_runs"]:
+                if run["event"] == "push":
+                    run["event"] = "pull_request_target"
+        return payload
+
+    result = ad.required_checks(api, NEW)
+    # The relabelled runs on the main commit do not count; only the merged PR's
+    # head runs (bound to that PR) can satisfy the checks.
+    assert {c["sha"] for c in result["checks"].values()} == {PR_HEAD}
+
+
+@pytest.mark.parametrize(
+    "bad_rule",
+    [
+        {"type": "required_status_checks"},
+        {"type": "required_status_checks", "parameters": None},
+        {"type": "required_status_checks", "parameters": {"required_status_checks": None}},
+        {"type": "required_status_checks", "parameters": {"required_status_checks": "x"}},
+        {"type": "required_status_checks", "parameters": {"required_status_checks": [7]}},
+        {
+            "type": "required_status_checks",
+            "parameters": {
+                "required_status_checks": [{"context": "Deletion guard", "integration_id": "x"}]
+            },
+        },
+    ],
+    ids=["no-params", "null-params", "null-list", "str-list", "int-entry", "bad-issuer"],
+)
+def test_mixed_valid_and_malformed_rules_fail_closed(
+    cfg: ad.Config, bad_rule: dict[str, Any]
+) -> None:
+    def api(path: str) -> Any:
+        if "/rules/branches/main" in path:
+            return (
+                [*_branch_rules(list(ad.REQUIRED_CHECKS)), bad_rule]
+                if path.endswith("page=1")
+                else []
+            )
+        return green_api()(path)
+
+    host, prober = FakeHost(), FakeProber()
+    result = cycle(cfg, host, prober, api)
+    assert result["status"] == "CHECKS_UNKNOWN"
+    assert "BRANCH_RULES_MALFORMED" in result["required_checks"]["error"]
+    assert prober.calls == [] and host.reloads == []
+
+
+def test_run_from_a_different_issuer_does_not_count() -> None:
+    def api(path: str) -> Any:
+        if "/rules/branches/main" in path:
+            if "page=" in path and not path.endswith("page=1"):
+                return []
+            rules = _branch_rules(list(ad.REQUIRED_CHECKS))
+            for check in rules[1]["parameters"]["required_status_checks"]:
+                if check["context"] == "Deletion guard":
+                    check["integration_id"] = 99999
+            return rules
+        return green_api()(path)
+
+    result = ad.required_checks(api, NEW)
+    assert result["verdict"] == "UNKNOWN" and result["missing"] == ["Deletion guard"]
+
+
+def test_required_check_issuer_is_actions_app_id() -> None:
+    """The live rules name integration 15368; real runs report app.id 15368."""
+    rules = _branch_rules(["Deletion guard"])
+    issuer = rules[1]["parameters"]["required_status_checks"][0]["integration_id"]
+    assert issuer == ACTIONS_APP_ID
+
+
+def test_branch_rules_are_paged() -> None:
+    def api(path: str) -> Any:
+        if "/rules/branches/main" in path:
+            if path.endswith("page=1"):
+                return [{"type": "deletion"} for _ in range(100)]
+            if path.endswith("page=2"):
+                return _branch_rules([*ad.REQUIRED_CHECKS, "Page two gate"])
+            return []
+        return green_api()(path)
+
+    result = ad.required_checks(api, NEW)
+    assert result["verdict"] == "UNKNOWN_REQUIRED_CHECK"
+    assert result["unknown_required"] == ["Page two gate"]
+
+
+def test_floor_checks_stay_required_when_the_ruleset_weakens(cfg: ad.Config) -> None:
+    only_secret = green_api(required=["Full published Git history secret audit"])
+    result = ad.required_checks(only_secret, NEW)
+    assert result["verdict"] == "GREEN"
+    assert set(result["checks"]) == set(ad.FLOOR_CHECKS)
+    assert result["floor_added"] == ["Deletion guard", "Exact-base impact gate"]
+
+    def floor_red(path: str) -> Any:
+        payload = only_secret(path)
+        if "check-runs" in path and "Deletion+guard" in path:
+            for run in payload["check_runs"]:
+                run["conclusion"] = "failure"
+        return payload
+
+    assert ad.required_checks(floor_red, NEW)["verdict"] == "RED"
+
+
+def test_floor_check_without_runs_is_unknown_and_recorded(cfg: ad.Config) -> None:
+    def api(path: str) -> Any:
+        if "check-runs" in path and "Exact-base" in path:
+            return {"check_runs": []}
+        return green_api(required=["Full published Git history secret audit"])(path)
+
+    host, prober = FakeHost(), FakeProber()
+    result = cycle(cfg, host, prober, api)
+    assert result["status"] == "CHECKS_UNKNOWN"
+    assert result["required_checks"]["missing"] == ["Exact-base impact gate"]
+    assert prober.calls == []
