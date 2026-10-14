@@ -5,7 +5,8 @@ enums, and never looked at the prompts actually sent).  Input: the per-call reco
 ``scripts/bench/agy_prompt_capture.py`` for both arms, plus each task's fixture material.
 
 Per task x trial the audit requires:
-  (b) exactly one bare capture and at most one with-Nexus capture (first attempt, one call);
+  (b) at most one capture per arm (first attempt, one call), and a bare capture whenever the
+      with-Nexus arm sent a prompt;
   (d) no hidden-only literal in any with-Nexus prompt (literal absent from the bare prompt);
   (e) the with-Nexus prompt contains the visible test text and no ``[Prior Art]``;
   (f) every non-empty with-Nexus prompt line, after removing the no-tools prefix, also appears
@@ -170,7 +171,9 @@ def audit_task(
     result = TaskAudit(key=key, task_id=material.task_id)
     result.bare_calls = len(bare_records)
     result.with_nexus_calls = len(with_records)
-    if result.bare_calls != 1:
+    # No call in either arm (dry lane, no leasable account) leaves nothing to compare; a
+    # with-Nexus prompt without its bare counterpart cannot be proven symmetric.
+    if result.bare_calls > 1 or (result.bare_calls == 0 and result.with_nexus_calls > 0):
         result.violations.append(f"bare_calls={result.bare_calls}")
     if result.with_nexus_calls > 1:
         result.violations.append(f"with_nexus_calls={result.with_nexus_calls}")

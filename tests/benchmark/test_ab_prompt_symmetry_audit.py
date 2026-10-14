@@ -227,3 +227,8 @@ def test_counted_run_fails_on_with_nexus_only_prompt_text(tmp_path: Path, monkey
     report = json.loads((out_dir / "prompt_symmetry_audit.json").read_text())
     assert report["status"] == "FAIL"
     assert code == 3
+
+
+def test_no_calls_in_either_arm_is_not_a_violation(tmp_path: Path) -> None:
+    report = audit_run(tmp_path, _material())
+    assert report["status"] == "PASS"

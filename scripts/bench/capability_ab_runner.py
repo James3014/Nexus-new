@@ -20134,7 +20134,11 @@ def main() -> int:
     with_timeout_streak = 0
     with_infra_streak = 0
     interleave_arms = _interleave_arms_enabled(args)
-    prompt_audit_dir = _install_prompt_capture(out_dir) if bool(args.counted_first_attempt) else None
+    prompt_audit_dir = (
+        _install_prompt_capture(out_dir)
+        if bool(args.counted_first_attempt) and not bool(args.nexus_only) and not bool(args.without_only)
+        else None
+    )
     prompt_audit_materials: dict[str, Any] = {}
 
     def _with_nexus_leg(task: CapabilityTask) -> str:
