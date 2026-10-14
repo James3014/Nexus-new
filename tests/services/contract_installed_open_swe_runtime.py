@@ -15,11 +15,22 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from nexus.services.external_intelligence import bind_contract_evidence_refs, build_context_pack
 from nexus.services.external_intelligence_core_binding import envelope_sha256
 from tests.services.test_external_intelligence_core_binding import (
+    CARD_REF,
+    TARGET,
+    _git,
+    authority_inputs,
     bound_unit_mapping,
+    bound_worker,
+    card_text,
     make_bound_repo,
+    semantic_envelope,
+    write_semantic_envelope,
 )
+
+EXISTING = "nexus/core_bound_existing.py"
 
 RUNTIME_PYTHON = Path(
     os.environ.get(
@@ -79,7 +90,9 @@ def _runtime_available() -> bool:
     return probe.returncode == 0
 
 
-def _bound_fanout_requests(tmp_path: Path, monkeypatch) -> tuple[dict[str, Any], Any]:
+def _bound_fanout_requests(
+    tmp_path: Path, monkeypatch, build_unit: Any = None
+) -> tuple[dict[str, Any], Any]:
     """Drive the real fanout + Open SWE transport and capture the worker_run request."""
     import nexus.services.open_swe_external_intelligence as module
     from nexus.services.external_intelligence_fanout import (
@@ -89,8 +102,11 @@ def _bound_fanout_requests(tmp_path: Path, monkeypatch) -> tuple[dict[str, Any],
         GitWorktreeAllocator,
     )
 
-    scenario = make_bound_repo(tmp_path)
-    unit = bound_unit_mapping(tmp_path, scenario)
+    if build_unit is None:
+        scenario = make_bound_repo(tmp_path)
+        unit = bound_unit_mapping(tmp_path, scenario)
+    else:
+        scenario, unit = build_unit(tmp_path)
     captured: list[dict[str, Any]] = []
 
     def runtime_call(_executable, payload, **_kwargs):
@@ -148,3 +164,104 @@ def test_installed_runtime_admits_nexus_minted_binding_and_rejects_variants(tmp_
         "DIRECT_CANONICAL"
     )
     assert runtime_admission(variant(tampered), scratch)["reason"] == "core_binding_hash"
+
+
+def _existing_file_unit(*, evidence_kinds: tuple[str, ...] | None = None) -> Any:
+    """Build a Core-bound unit whose Task Card lists one file that exists at base.
+
+    The semantic envelope's refs come from Nexus's context pack read at ``main_sha``
+    (``bind_contract_evidence_refs``), exactly as the live sidecar stores them; the
+    model is modelled as citing nothing.  ``evidence_kinds`` filters the injected refs
+    to build negative fixtures.
+    """
+
+    def build(tmp_path: Path) -> tuple[Any, dict[str, Any]]:
+        scenario = make_bound_repo(tmp_path, card=card_text().replace(TARGET, EXISTING))
+        target = scenario.repo / EXISTING
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("def value():\n    return 1\n", encoding="utf-8")
+        _git(scenario.repo, "add", EXISTING)
+        _git(scenario.repo, "commit", "-m", "existing target")
+        scenario.base = _git(scenario.repo, "rev-parse", "HEAD")
+        card_bytes = (scenario.repo / CARD_REF).read_text(encoding="utf-8")
+        pack = build_context_pack([
+            {
+                "kind": "task_card",
+                "ref": CARD_REF,
+                "revision": scenario.card_hash,
+                "provenance": "git",
+                "content": card_bytes,
+            },
+            {
+                "kind": "source_file",
+                "ref": EXISTING,
+                "revision": scenario.base,
+                "provenance": f"git:{scenario.base}",
+                "content": target.read_text(encoding="utf-8"),
+            },
+        ])
+        worker = bound_worker()
+        envelope = semantic_envelope(scenario.base, scenario.card_hash, worker)
+        envelope["binding"]["context_pack_sha256"] = pack["context_pack_sha256"]
+        envelope["evidence_refs"] = []
+        envelope["inspect_first"] = []
+        envelope["scope_signal"] = {
+            **envelope["scope_signal"],
+            "production_edit_paths": [EXISTING],
+            "required_test_edit_paths": [],
+            "verification_only_paths": [],
+        }
+        envelope = bind_contract_evidence_refs(envelope, pack)
+        if evidence_kinds is not None:
+            envelope["evidence_refs"] = [
+                ref for ref in envelope["evidence_refs"] if ref.split(":", 1)[0] in evidence_kinds
+            ]
+        envelope_path = tmp_path / "intelligence" / "envelopes" / "semantic.json"
+        sha = write_semantic_envelope(envelope_path, envelope)
+        inputs = authority_inputs(
+            scenario.base,
+            scenario.card_hash,
+            worker,
+            unit_verifiers={"u1": (("unit-pytest", ("python", "-m", "pytest", EXISTING), 120.0),)},
+        )
+        unit = {
+            "task_id": "task-1",
+            "unit_id": "u1",
+            "envelope_ref": str(envelope_path),
+            "envelope_sha256": sha,
+            "expected_base_sha": scenario.base,
+            "mutation_paths": [EXISTING],
+            "provider": "google_genai",
+            "model": "google_genai/gemini-test",
+            "selected_worker": worker,
+            "core_authority": inputs.to_mapping(),
+        }
+        return scenario, unit
+
+    return build
+
+
+def test_installed_runtime_admits_existing_file_edit_with_nexus_source_file_ref(
+    tmp_path, monkeypatch
+):
+    """Requires a runtime with James3014/nexus-open-swe-runtime#131 installed."""
+    assert _runtime_available(), f"installed nexus-open-swe-runtime not usable at {RUNTIME_PYTHON}"
+    scratch = tmp_path / "admission"
+    scratch.mkdir()
+
+    admitted_root = tmp_path / "admitted"
+    admitted_root.mkdir()
+    request, _scenario = _bound_fanout_requests(admitted_root, monkeypatch, _existing_file_unit())
+    bound = json.loads(Path(request["artifact_path"]).read_text(encoding="utf-8"))
+    assert any(ref.startswith(f"source_file:{EXISTING}@") for ref in bound["evidence_refs"])
+    assert runtime_admission(request, scratch) == {"decision": "ADMIT", "reason": None}
+
+    missing_root = tmp_path / "missing"
+    missing_root.mkdir()
+    missing, _ = _bound_fanout_requests(
+        missing_root, monkeypatch, _existing_file_unit(evidence_kinds=("task_card",))
+    )
+    assert runtime_admission(missing, scratch) == {
+        "decision": "REJECT",
+        "reason": "source_evidence",
+    }

@@ -56,6 +56,8 @@ SELECTED_WORKER_KEYS = (
 )
 DIAGNOSIS_STATUSES = ("PROVEN", "LIKELY", "UNKNOWN")
 SOURCE_EVIDENCE_KINDS = frozenset({"source", "source_file", "verifier_source", "source_absence"})
+# Context-pack entry kinds whose refs the Core-bound runtime requires per allowed path.
+CONTRACT_EVIDENCE_KINDS = frozenset({"task_card", "source_file", "source_absence"})
 V2_ENVELOPE_TOP_KEYS = {
     "schema",
     "binding",
@@ -777,6 +779,37 @@ def parse_external_execution_envelope_v2(
         _validate_string_list(value.get(list_field), list_field)
 
     return value
+
+
+def bind_contract_evidence_refs(
+    envelope: Mapping[str, Any], context_pack: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Append the Nexus-minted contract evidence refs the bound runtime admits on.
+
+    The Core-bound runtime admits a Task-Card-listed path only when the envelope
+    cites ``source_file:<path>@<anchor>`` (path exists at ``main_sha``) or
+    ``source_absence:<path>@<anchor>`` (path absent), plus the ``task_card:`` ref.
+    Nexus already minted exactly those refs from ``main_sha`` when it built the
+    context pack, so they are copied from the validated pack instead of trusting
+    the model to repeat them.  The model's own refs keep their first-occurrence order
+    (exact duplicates are collapsed so they cannot exhaust the ref cap); refs absent
+    from the pack are never invented.
+    """
+    if envelope.get("schema") != ENVELOPE_SCHEMA_V2:
+        return dict(envelope)
+    validated = validate_context_pack(context_pack)
+    refs = list(dict.fromkeys(envelope.get("evidence_refs") or []))
+    present = set(refs)
+    for entry in validated.get("entries") or []:
+        if entry.get("kind") not in CONTRACT_EVIDENCE_KINDS:
+            continue
+        ref = entry["evidence_ref"]
+        if ref not in present:
+            refs.append(ref)
+            present.add(ref)
+    if len(refs) > MAX_LIST:
+        raise ExternalIntelligenceError("CONTRACT_EVIDENCE_REFS_LIMIT_EXCEEDED")
+    return {**envelope, "evidence_refs": refs}
 
 
 def parse_external_execution_envelope(
@@ -1931,6 +1964,11 @@ class ExternalIntelligenceSidecar:
                     transport_status="INTELLIGENCE_WORKER_BOUNDARY_VIOLATION",
                 )
                 raise ExternalIntelligenceError("INTELLIGENCE_WORKER_BOUNDARY_VIOLATION")
+            try:
+                envelope = bind_contract_evidence_refs(envelope, context_pack)
+            except ExternalIntelligenceError as exc:
+                self.store.finish_attempt(attempt, state="FAILED", transport_status=str(exc))
+                raise
         else:
             if envelope.get("worker_binding") != {
                 "assigned_thread": "UNASSIGNED",
@@ -2000,6 +2038,7 @@ __all__ = [
     "ATTEMPT_SCHEMA_V2",
     "CLAIM_CEILING",
     "CONTEXT_SCHEMA",
+    "CONTRACT_EVIDENCE_KINDS",
     "CONTROL_CAPSULE_SCHEMA",
     "CONTROL_CAPSULE_SCHEMA_V1",
     "CONTROL_CAPSULE_SCHEMA_V2",
@@ -2027,6 +2066,7 @@ __all__ = [
     "SOURCE_EVIDENCE_KINDS",
     "TransportResult",
     "V2_ENVELOPE_TOP_KEYS",
+    "bind_contract_evidence_refs",
     "build_context_pack",
     "build_control_capsule",
     "build_prompt",

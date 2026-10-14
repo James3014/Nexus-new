@@ -290,7 +290,6 @@ scripts/test_distillation_privacy.py
 scripts/test_economic_fairness.py
 scripts/test_federation_scale.py
 scripts/test_hybrid_patch.py
-scripts/test_l6_mechanical_gate.py
 scripts/test_multi_region_swarm_v19.py
 scripts/test_os_kernel.py
 scripts/test_pilot_live.py
