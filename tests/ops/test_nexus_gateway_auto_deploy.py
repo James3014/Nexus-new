@@ -266,6 +266,7 @@ def green_api(
                 "status": status,
                 "conclusion": conclusion,
                 "started_at": "2026-10-14T00:00:00Z",
+                "completed_at": "2026-10-14T00:00:00Z",
                 "app": {"slug": "github-actions", "id": ACTIONS_APP_ID},
                 "check_suite": {"id": SUITES[name] + (0 if sha == NEW else PR_SUITE_OFFSET)},
                 "pull_requests": [],
@@ -1742,7 +1743,9 @@ def _health(commit: str, *, status: str = "ok") -> dict[str, Any]:
 
 
 @contextlib.contextmanager
-def fake_gateway(health: dict[str, Any], tools: int, is_error: bool) -> Iterator[int]:
+def fake_gateway(
+    health: dict[str, Any], tools: int, is_error: bool, health_delay: float = 0.0
+) -> Iterator[int]:
     class Handler(http.server.BaseHTTPRequestHandler):
         def log_message(self, *_a: Any) -> None:
             return
@@ -1755,6 +1758,10 @@ def fake_gateway(health: dict[str, Any], tools: int, is_error: bool) -> Iterator
             self.wfile.write(body)
 
         def do_GET(self) -> None:
+            if health_delay:
+                import time
+
+                time.sleep(health_delay)
             self._send(health)
 
         def do_POST(self) -> None:
@@ -2435,3 +2442,47 @@ def test_attempt_completed_after_merge_does_not_count() -> None:
 def test_only_post_merge_rerun_leaves_the_check_missing() -> None:
     api = _pr_head_runs(attempts=[_attempt(2, "2026-10-14T01:00:00Z")])
     assert ad.required_checks(api, NEW)["missing"] == ["Deletion guard"]
+
+
+@pytest.mark.parametrize("completed_at", [None, "", "garbage"], ids=["null", "empty", "bad"])
+def test_completed_pr_head_run_without_completed_at_is_not_bound(completed_at: Any) -> None:
+    run = _attempt(1, "2026-10-13T23:00:00Z", completed_at=completed_at)
+    result = ad.required_checks(_pr_head_runs(attempts=[run]), NEW)
+    assert result["verdict"] == "UNKNOWN" and "Deletion guard" in result["missing"]
+    missing_key = {k: v for k, v in run.items() if k != "completed_at"}
+    result = ad.required_checks(_pr_head_runs(attempts=[missing_key]), NEW)
+    assert result["verdict"] == "UNKNOWN" and "Deletion guard" in result["missing"]
+
+
+def test_gb077_waits_for_a_slow_health_endpoint() -> None:
+    """Live bug 2026-10-14T13:45:50Z: a fresh candidate's /health took > 2 s and
+    GB-077 failed with gateway_unreachable:TimeoutError."""
+    with fake_gateway(_health(NEW), 3, False, health_delay=3.0) as port:
+        result = ad.Prober(ad.Host()).probe(
+            port=port,
+            token="tok",
+            commit=NEW,
+            root=REPO_ROOT,
+            python=Path(sys.executable),
+            timeout=60,
+        )
+    gb077 = result["checks"]["gb077"]
+    assert gb077["ok"] is True, gb077["detail"]
+    detail = json.loads(gb077["detail"])
+    assert detail["observed"]["endpoint"] == f"http://127.0.0.1:{port}/health"
+    assert result["ok"] is True
+
+
+def test_gb077_probe_passes_timeout_and_attempts() -> None:
+    calls: list[list[str]] = []
+
+    class Recording(ad.Host):
+        def run(self, argv, **kw):  # type: ignore[override]
+            calls.append(list(argv))
+            return SimpleNamespace(returncode=0, stdout="{}", stderr="")
+
+    with fake_gateway(_health(NEW), 3, False) as port:
+        ad.Prober(Recording()).probe(
+            port=port, token="tok", commit=NEW, root=REPO_ROOT, python=Path("/py"), timeout=5
+        )
+    assert calls[0][-2:] == [str(ad.GB077_TIMEOUT_SECONDS), str(ad.GB077_ATTEMPTS)]
