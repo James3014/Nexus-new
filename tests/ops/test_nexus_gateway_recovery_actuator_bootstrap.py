@@ -438,7 +438,8 @@ def test_next_generation_succeeds_after_verified_and_appends_marker_history(tmp_
         _VERIFIED_PATH[:8],  # CLIENT_BOUND: in flight, not yet VERIFIED
         [*_VERIFIED_PATH[:5], "UNCERTAIN_EFFECT"],
         [*_VERIFIED_PATH[:5], "BLOCKED"],
-        ["REQUESTED", "BLOCKED"],
+        # #1995: pre-effect ["REQUESTED", "BLOCKED"] is now accepted; see
+        # test_1995_owner_reconciled_blocked_predecessor_allows_succession.
         [*_VERIFIED_PATH[:5], "UNCERTAIN_EFFECT", "ROLLED_BACK"],
     ],
     ids=[
@@ -448,7 +449,6 @@ def test_next_generation_succeeds_after_verified_and_appends_marker_history(tmp_
         "client-bound",
         "uncertain-effect",
         "blocked-after-effect",
-        "blocked-pre-effect",
         "rolled-back",
     ],
 )
@@ -849,5 +849,45 @@ def test_1995_invalid_owner_reconcile_blocks_succession(tmp_path):
     manager._r1_owner_reconcile_matches = invalid
     manager.advance_generation("2")
     with pytest.raises(b.BootstrapError, match="PREDECESSOR_OWNER_RECONCILE_INVALID$"):
+        b._run_bootstrap(manager)
+    assert _marker_bytes(manager) == marker_before
+
+
+def test_1995_pre_effect_blocked_predecessor_needs_no_reconcile_record(tmp_path):
+    manager = FakeManager(tmp_path / "gateway-direct")
+    b._run_bootstrap(manager)
+    _append_ledger(manager, _current_marker_entry(manager), ["REQUESTED", "BLOCKED"])
+    assert not getattr(manager, "owner_reconciled", set())
+    manager.advance_generation("2")
+
+    result = b._run_bootstrap(manager)
+
+    assert result["request_id"] == "request-v2"
+    second = json.loads(_marker_bytes(manager))["generations"][-1]
+    assert second["predecessor_request_id"] == "request-v1"
+
+
+@pytest.mark.parametrize(
+    "other_states",
+    [["REQUESTED", "PREFLIGHTED"], _VERIFIED_PATH],
+    ids=["other-started", "other-verified"],
+)
+def test_1995_reconcile_record_is_not_reused_after_another_r1_request(tmp_path, other_states):
+    manager = FakeManager(tmp_path / "gateway-direct")
+    b._run_bootstrap(manager)
+    marker_a = _current_marker_entry(manager)
+    _append_ledger(manager, marker_a, [*_VERIFIED_PATH[:5], "BLOCKED"])
+    manager.owner_reconciled = {"request-v1"}
+    marker_b = {
+        **marker_a,
+        "request_id": "request-other",
+        "request_hash": hashlib.sha256(b"request-other").hexdigest(),
+        "idempotency_fence": "fence-other",
+    }
+    _append_ledger(manager, marker_b, other_states)
+    marker_before = _marker_bytes(manager)
+    manager.advance_generation("3")
+
+    with pytest.raises(b.BootstrapError, match="PREDECESSOR_NOT_LATEST_R1_REQUEST$"):
         b._run_bootstrap(manager)
     assert _marker_bytes(manager) == marker_before

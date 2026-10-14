@@ -996,44 +996,19 @@ def test_r1b1_materialize_rejects_successor_from_nonterminal_generation(
     )
 
 
-def test_r1b1_materialize_rejects_successor_from_blocked_terminal_generation(
-    tmp_path, monkeypatch
-):
+def test_r1b1_materialize_rejects_successor_from_blocked_terminal_generation(tmp_path, monkeypatch):
+    # #1995 (Owner decision): only a BLOCKED *after the effect started* still
+    # blocks a successor here (until an Owner reconcile record exists); a
+    # pre-effect BLOCKED is accepted, see test_1995_pre_effect_blocked_*.
     fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
-    _r1m_clear_materialized_stores(fixture, monkeypatch)
-    g.gateway_recovery_materialize(
-        _r1m_materialization_request(fixture["receipt"])
-    )
-    ledger = g.GatewayLedger(
-        fixture["ledger_path"],
-        lock_path=fixture["lock_path"],
-    )
-    materialize = g._r1_materialize_worktree
-
-    def missing_predecessor(manifest):
-        if manifest.role == "predecessor":
-            raise g.GatewayContractError("missing predecessor")
-        return materialize(manifest)
-
-    monkeypatch.setattr(g, "_r1_materialize_worktree", missing_predecessor)
-    terminal = g._gateway_recover_with_adapters(
-        fixture["request"],
-        adapters=_r1b2_adapters(fixture, ledger),
-        ledger=ledger,
-    )
-    assert terminal.result == "BLOCKED"
-    monkeypatch.setattr(g, "_r1_materialize_worktree", materialize)
-    successor, _successor_request, _successor_authority = (
-        _r1m_commit_successor_generation(fixture)
-    )
+    _i1995_post_effect_blocked_generation(fixture, monkeypatch)
+    successor, _successor_request, _successor_authority = _r1m_commit_successor_generation(fixture)
 
     with pytest.raises(
         g.GatewayContractError,
         match="requires prior terminal VERIFIED",
     ):
-        g.gateway_recovery_materialize(
-            _r1m_materialization_request(successor)
-        )
+        g.gateway_recovery_materialize(_r1m_materialization_request(successor))
 
 
 def test_r1b1_materialize_successor_replays_request_first_crash(
@@ -8142,21 +8117,31 @@ def test_1995_owner_reconcile_unblocks_exactly_one_successor(tmp_path, monkeypat
     blocked_row = ledger.read()[-1]
 
     record = g.record_r1_owner_reconcile(
-        "gen1-request", "Owner approved in chat 2026-10-14", ledger=ledger.path
+        "gen1-request",
+        "Owner approved in chat 2026-10-14",
+        owner_approval_ref="session-x: owner said ok",
+        ledger=ledger.path,
     )
     assert record["blocked_request_id"] == "gen1-request"
     assert record["blocked_row_record_hash"] == blocked_row["record_hash"]
     assert record["blocked_after_effect"] is True
     assert record["owner_authorization"] == "OWNER_CHAT_APPROVAL"
     # Idempotent for the same blocked row: the durable record is returned as is.
-    assert g.record_r1_owner_reconcile("gen1-request", "again", ledger=ledger.path) == record
+    assert (
+        g.record_r1_owner_reconcile(
+            "gen1-request", "again", owner_approval_ref="chat-ref", ledger=ledger.path
+        )
+        == record
+    )
 
     _i1995_seed_r1(ledger, "gen2-request", ("REQUESTED",))
     # The record is spent: gen1 is no longer the latest R1 request.
     with pytest.raises(
         g.GatewayContractError, match="^R1_OWNER_RECONCILE_REFUSED: .*not the latest"
     ):
-        g.record_r1_owner_reconcile("gen1-request", "reuse", ledger=ledger.path)
+        g.record_r1_owner_reconcile(
+            "gen1-request", "reuse", owner_approval_ref="chat-ref", ledger=ledger.path
+        )
     _i1995_seed_r1(ledger, "gen2-request", _I1995_POST_EFFECT_BLOCKED[1:])
     before = ledger.path.read_bytes()
     with pytest.raises(
@@ -8174,9 +8159,13 @@ def test_1995_owner_reconcile_for_wrong_request_does_not_unblock(tmp_path, monke
 
     for wrong in ("gen0-request", "gen9-request"):
         with pytest.raises(g.GatewayContractError, match="^R1_OWNER_RECONCILE_REFUSED: "):
-            g.record_r1_owner_reconcile(wrong, "Owner approved", ledger=ledger.path)
+            g.record_r1_owner_reconcile(
+                wrong, "Owner approved", owner_approval_ref="chat-ref", ledger=ledger.path
+            )
     with pytest.raises(g.GatewayContractError, match="^R1_OWNER_RECONCILE_REFUSED: "):
-        g.record_r1_owner_reconcile("gen1-request", "   ", ledger=ledger.path)
+        g.record_r1_owner_reconcile(
+            "gen1-request", "   ", owner_approval_ref="chat-ref", ledger=ledger.path
+        )
 
     # A hand-written record naming another request does not unblock gen1.
     other = g.record_r1_owner_reconcile  # keep the real writer for the real record below
@@ -8189,7 +8178,9 @@ def test_1995_owner_reconcile_for_wrong_request_does_not_unblock(tmp_path, monke
         _i1995_seed_r1(ledger, "gen2-request", ("REQUESTED",))
 
     # A record for gen1 that binds a different row fails closed, never unblocks.
-    forged = other("gen1-request", "Owner approved", ledger=ledger.path)
+    forged = other(
+        "gen1-request", "Owner approved", owner_approval_ref="chat-ref", ledger=ledger.path
+    )
     path = reconcile_root / "gen1-request.json"
     tampered = {**forged, "blocked_row_record_hash": "0" * 64}
     tampered["record_hash"] = g.canonical_hash({
@@ -8228,6 +8219,8 @@ def test_1995_owner_reconcile_cli_records_the_chat_approval(tmp_path, monkeypatc
             "gen1-request",
             "--note",
             "Owner approved in chat",
+            "--owner-approval-ref",
+            "session-1995: Owner said reconcile gen1",
         ],
     )
     assert g.main() == 0
@@ -8235,6 +8228,23 @@ def test_1995_owner_reconcile_cli_records_the_chat_approval(tmp_path, monkeypatc
     assert printed["blocked_request_id"] == "gen1-request"
     assert printed["note"] == "Owner approved in chat"
     _i1995_seed_r1(ledger, "gen2-request", ("REQUESTED",))
+
+
+def _i1995_post_effect_blocked_generation(fixture, monkeypatch):
+    """Materialize generation 1 and record it BLOCKED after EFFECT_STARTED."""
+    _r1m_clear_materialized_stores(fixture, monkeypatch)
+    g.gateway_recovery_materialize(_r1m_materialization_request(fixture["receipt"]))
+    ledger = g.GatewayLedger(fixture["ledger_path"])
+    evidence: Any = SimpleNamespace(evidence_hash="e" * 64)
+    with g.InterProcessLock(ledger.lock_path):
+        rows = ledger._scan_unlocked()
+        for state in _I1995_POST_EFFECT_BLOCKED:
+            record = g._recovery_record(
+                rows, fixture["request"], fixture["receipt"], evidence, g.DeploymentState(state)
+            )
+            ledger._append_recovery_unlocked(rows, record)
+            rows.append(record.model_dump())
+    return ledger
 
 
 def _i1995_blocked_generation(fixture, monkeypatch):
@@ -8260,13 +8270,16 @@ def _i1995_blocked_generation(fixture, monkeypatch):
 
 def test_1995_owner_reconciled_blocked_generation_may_be_materialized_over(tmp_path, monkeypatch):
     fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
-    _i1995_blocked_generation(fixture, monkeypatch)
+    _i1995_post_effect_blocked_generation(fixture, monkeypatch)
     successor, _request, successor_authority = _r1m_commit_successor_generation(fixture)
     with pytest.raises(g.GatewayContractError, match="requires prior terminal VERIFIED"):
         g.gateway_recovery_materialize(_r1m_materialization_request(successor))
 
     g.record_r1_owner_reconcile(
-        fixture["request"].request_id, "Owner approved in chat", ledger=fixture["ledger_path"]
+        fixture["request"].request_id,
+        "Owner approved in chat",
+        owner_approval_ref="chat-ref",
+        ledger=fixture["ledger_path"],
     )
     outcome = g.gateway_recovery_materialize(_r1m_materialization_request(successor))
     assert outcome["effect_started"] is False
@@ -8278,13 +8291,16 @@ def test_1995_absent_authority_store_no_longer_skips_the_verified_gate(
     tmp_path, monkeypatch, reconciled
 ):
     fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
-    _i1995_blocked_generation(fixture, monkeypatch)
+    _i1995_post_effect_blocked_generation(fixture, monkeypatch)
     successor, _request, successor_authority = _r1m_commit_successor_generation(fixture)
     g.GATEWAY_RECOVERY_AUTHORITY_STORE.unlink()
     g.GATEWAY_REQUEST_STORE.unlink()
     if reconciled:
         g.record_r1_owner_reconcile(
-            fixture["request"].request_id, "Owner approved", ledger=fixture["ledger_path"]
+            fixture["request"].request_id,
+            "Owner approved",
+            owner_approval_ref="chat-ref",
+            ledger=fixture["ledger_path"],
         )
         outcome = g.gateway_recovery_materialize(_r1m_materialization_request(successor))
         assert outcome["effect_started"] is False
@@ -8411,3 +8427,198 @@ def test_1995_create_if_absent_without_hard_links_raises_typed_error(tmp_path, m
         g._r1_materialize_value_store(store, b"ours")
     assert not store.exists()
     assert sorted(p.name for p in store.parent.glob(f".{store.name}.*")) == []
+
+
+# --- #1995 review round 2: missing ledger, pre-effect BLOCKED, CLI ref,
+# link errnos, symlink / traversal reconcile paths ---------------------------
+
+
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        "recovery-authority.json",
+        "recovery-actuator-bootstrap-consumed.json",
+        "recovery-materializations",
+        "r1-owner-reconciles",
+    ],
+)
+def test_1995_missing_ledger_with_prior_r1_state_fails_closed_in_guard(tmp_path, evidence):
+    ledger = _i1995_ledger(tmp_path)
+    assert g.open_r1_recovery_blocks_effect(ledger=ledger.path) is None  # clean first run
+    target = ledger.path.parent / evidence
+    if evidence.endswith(".json"):
+        target.write_text("{}")
+    else:
+        target.mkdir(mode=0o700)
+        if evidence == "recovery-materializations":
+            assert g.open_r1_recovery_blocks_effect(ledger=ledger.path) is None
+            (target / ("a" * 64 + ".json")).write_text("{}")
+    reason = g.open_r1_recovery_blocks_effect(ledger=ledger.path)
+    assert reason == f"R1_LEDGER_MISSING_WITH_PRIOR_STATE_FAIL_CLOSED:{evidence}"
+
+
+def test_1995_missing_ledger_blocks_v1_rollback(tmp_path, monkeypatch):
+    request, observer = _i1995_unloaded_rollback(monkeypatch, tmp_path)
+    ledger = _i1995_ledger(tmp_path)
+    (ledger.path.parent / "recovery-authority.json").write_text("{}")
+    with pytest.raises(
+        g.GatewayContractError, match="^R1_LEDGER_MISSING_WITH_PRIOR_STATE_FAIL_CLOSED:"
+    ):
+        g.rollback_gateway(
+            request,
+            plist_path=g.GATEWAY_PLIST,
+            predecessor_observer=observer,
+            runner=lambda *_a: pytest.fail("rollback effect must not run"),
+            observation_time="2026-08-23T00:00:00Z",
+            ledger=ledger,
+        )
+    assert not Path(g.GATEWAY_PLIST).exists()
+
+
+def test_1995_missing_ledger_after_r1_request_fails_closed_in_materialization_gate(
+    tmp_path, monkeypatch
+):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    _r1m_make_prior_generation_verified(fixture, monkeypatch)
+    successor, _request, _authority = _r1m_commit_successor_generation(fixture)
+    fixture["ledger_path"].unlink()
+    g.GATEWAY_RECOVERY_AUTHORITY_STORE.unlink()
+    g.GATEWAY_REQUEST_STORE.unlink()
+    assert (
+        g.open_r1_recovery_blocks_effect(ledger=fixture["ledger_path"])
+        == "R1_LEDGER_MISSING_WITH_PRIOR_STATE_FAIL_CLOSED:recovery-materializations"
+    )
+
+    with pytest.raises(
+        g.GatewayContractError,
+        match="R1_LEDGER_MISSING_WITH_PRIOR_STATE_FAIL_CLOSED:recovery-materializations",
+    ):
+        g.gateway_recovery_materialize(_r1m_materialization_request(successor))
+    assert not g.GATEWAY_RECOVERY_AUTHORITY_STORE.exists()
+    assert not g.GATEWAY_REQUEST_STORE.exists()
+
+
+def test_1995_clean_first_run_materializes_with_no_ledger(tmp_path, monkeypatch):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    _r1m_clear_materialized_stores(fixture, monkeypatch)
+    assert not fixture["ledger_path"].exists()
+    outcome = g.gateway_recovery_materialize(_r1m_materialization_request(fixture["receipt"]))
+    assert outcome["effect_started"] is False
+    assert g.GATEWAY_RECOVERY_AUTHORITY_STORE.is_file()
+
+
+@pytest.mark.parametrize("store_present", [True, False], ids=["store-occupied", "store-absent"])
+def test_1995_pre_effect_blocked_generation_is_succeeded_without_reconcile(
+    tmp_path, monkeypatch, store_present
+):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    _i1995_blocked_generation(fixture, monkeypatch)
+    successor, _request, successor_authority = _r1m_commit_successor_generation(fixture)
+    if not store_present:
+        g.GATEWAY_RECOVERY_AUTHORITY_STORE.unlink()
+        g.GATEWAY_REQUEST_STORE.unlink()
+    with pytest.raises(g.GatewayContractError, match="^R1_OWNER_RECONCILE_REFUSED: .*before its"):
+        g.record_r1_owner_reconcile(
+            fixture["request"].request_id,
+            "not needed",
+            owner_approval_ref="chat-ref",
+            ledger=fixture["ledger_path"],
+        )
+    outcome = g.gateway_recovery_materialize(_r1m_materialization_request(successor))
+    assert outcome["effect_started"] is False
+    assert g.GATEWAY_RECOVERY_AUTHORITY_STORE.read_bytes() == successor_authority
+    assert not (fixture["state"] / g.R1_OWNER_RECONCILE_DIRNAME).exists()
+
+
+def test_1995_owner_reconcile_requires_owner_approval_ref(tmp_path, monkeypatch, capsys):
+    ledger = _i1995_owner_state(tmp_path, monkeypatch)
+    _i1995_seed_r1(ledger, "gen1-request", _I1995_POST_EFFECT_BLOCKED)
+    for ref in ("", "   "):
+        with pytest.raises(g.GatewayContractError, match="owner_approval_ref required"):
+            g.record_r1_owner_reconcile(
+                "gen1-request", "Owner approved", owner_approval_ref=ref, ledger=ledger.path
+            )
+    monkeypatch.setattr(g, "GATEWAY_LEDGER", ledger.path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "mcp_gateway_durable.py",
+            "gateway-r1-owner-reconcile",
+            "--request-id",
+            "gen1-request",
+            "--note",
+            "Owner approved",
+        ],
+    )
+    with pytest.raises(SystemExit):
+        g.main()
+    assert "--owner-approval-ref" in capsys.readouterr().err
+    assert not (ledger.path.parent / g.R1_OWNER_RECONCILE_DIRNAME).exists()
+    record = g.record_r1_owner_reconcile(
+        "gen1-request",
+        "Owner approved",
+        owner_approval_ref="https://github.com/James3014/Nexus-new/issues/1995#issuecomment-1",
+        ledger=ledger.path,
+    )
+    assert record["owner_approval_ref"].endswith("issuecomment-1")
+
+
+@pytest.mark.parametrize(
+    ("code", "message"),
+    [
+        (errno.EPERM, "requires hard-link support"),
+        (errno.EXDEV, "requires hard-link support"),
+        (errno.ENOTSUP, "requires hard-link support"),
+        (errno.ENOSPC, "link failed: No space left on device"),
+        (errno.EIO, "link failed: Input/output error"),
+    ],
+)
+def test_1995_link_errors_map_only_unsupported_errnos_to_hard_link_message(
+    tmp_path, monkeypatch, code, message
+):
+    store = _i1995_store_dir(tmp_path) / "request.json"
+
+    def failing_link(*_args, **_kwargs):
+        raise OSError(code, os.strerror(code))
+
+    monkeypatch.setattr(g.os, "link", failing_link)
+    with pytest.raises(g.GatewayContractError, match=message) as excinfo:
+        g._r1_materialize_value_store(store, b"ours")
+    if "link failed" in message:
+        assert "hard-link support" not in str(excinfo.value)
+    assert not store.exists()
+
+
+def test_1995_symlinked_reconcile_record_fails_closed(tmp_path, monkeypatch):
+    ledger = _i1995_owner_state(tmp_path, monkeypatch)
+    _i1995_seed_r1(ledger, "gen1-request", _I1995_POST_EFFECT_BLOCKED)
+    elsewhere = tmp_path / "elsewhere.json"
+    record = g.record_r1_owner_reconcile(
+        "gen1-request", "Owner approved", owner_approval_ref="chat-ref", ledger=ledger.path
+    )
+    elsewhere.write_text(json.dumps(record, sort_keys=True, separators=(",", ":")))
+    path = ledger.path.parent / g.R1_OWNER_RECONCILE_DIRNAME / "gen1-request.json"
+    path.unlink()
+    path.symlink_to(elsewhere)
+    before = ledger.path.read_bytes()
+
+    with pytest.raises(g.GatewayContractError, match="not a regular file"):
+        _i1995_seed_r1(ledger, "gen2-request", ("REQUESTED",))
+    assert ledger.path.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "request_id", ["../escape", "gen1/../../escape", "/abs", ".hidden", "", "a" * 129]
+)
+def test_1995_reconcile_rejects_path_traversal_request_ids(tmp_path, monkeypatch, request_id):
+    ledger = _i1995_owner_state(tmp_path, monkeypatch)
+    _i1995_seed_r1(ledger, "gen1-request", _I1995_POST_EFFECT_BLOCKED)
+    with pytest.raises(
+        g.GatewayContractError, match="^R1_OWNER_RECONCILE_REFUSED: request id malformed"
+    ):
+        g.record_r1_owner_reconcile(
+            request_id, "Owner approved", owner_approval_ref="chat-ref", ledger=ledger.path
+        )
+    assert not (ledger.path.parent / g.R1_OWNER_RECONCILE_DIRNAME).exists()
+    assert sorted(p.name for p in tmp_path.rglob("escape*")) == []
