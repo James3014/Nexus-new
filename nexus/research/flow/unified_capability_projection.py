@@ -106,6 +106,11 @@ def _compact_stage(
             "simulated": bool(boundary.get("simulated", True)),
             "claim_eligible": bool(boundary.get("claim_eligible", False)),
             "evidence_complete": bool(boundary.get("evidence_complete", False)),
+            **(
+                {"receipt_present": bool(boundary.get("receipt_present"))}
+                if "receipt_present" in boundary
+                else {}
+            ),
         }
         if boundary
         else {},
@@ -158,23 +163,35 @@ def unified_receipts_from_meta(meta: Mapping[str, Any] | None) -> list[Mapping[s
 def runtime_attests_real(
     receipt: Mapping[str, Any], stage: Mapping[str, Any] | None = None
 ) -> bool:
-    """True only when the runtime boundary says ``simulated is False`` and nothing says simulated.
+    """True only when every runtime signal agrees the execution was real (tighten-only).
 
-    Fail-closed: a missing boundary, a runtime ``simulated`` that is not exactly ``False``, an
-    executor outcome declaring a simulation, or a ``SIMULATED_BY_DESIGN_EXECUTORS`` name all
-    keep the receipt simulated.
+    All of these must hold, otherwise the receipt stays simulated:
+
+    * the name is not in ``SIMULATED_BY_DESIGN_EXECUTORS``;
+    * the stage's own ``simulated`` flag is exactly ``False`` (and the receipt's, if present);
+    * the stage ``claim_boundary.simulated`` is exactly ``False`` and the boundary does not
+      say ``receipt_present`` is false;
+    * the stage carries non-empty evidence refs;
+    * no executor outcome declares a simulation (``outcome_simulated``).
     """
 
     name = str(receipt.get("name") or "")
     if name in SIMULATED_BY_DESIGN_EXECUTORS:
         return False
     source = stage if isinstance(stage, Mapping) else receipt
+    if source.get("simulated") is not False:
+        return False
+    if "simulated" in receipt and receipt.get("simulated") is not False:
+        return False
     boundary = source.get("claim_boundary")
     if not isinstance(boundary, Mapping) or boundary.get("simulated") is not False:
         return False
-    if bool(receipt.get("outcome_simulated")) or (
-        isinstance(stage, Mapping) and bool(stage.get("outcome_simulated"))
-    ):
+    if "receipt_present" in boundary and boundary.get("receipt_present") is not True:
+        return False
+    refs = [str(ref) for ref in (source.get("evidence_refs") or []) if str(ref).strip()]
+    if not refs:
+        return False
+    if bool(receipt.get("outcome_simulated")) or bool(source.get("outcome_simulated")):
         return False
     return True
 

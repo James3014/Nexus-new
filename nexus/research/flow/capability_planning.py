@@ -21,35 +21,80 @@ _ARCHIVED_SELECTION_LISTS = (
     "optional_capabilities",
     "pending_capabilities",
 )
+# Name lists (at any depth: signal_snapshot sub-reports, stop_policy, replan_trace) that must
+# not name an archived node either.
+_ARCHIVED_NAME_LIST_KEYS = frozenset({
+    *_ARCHIVED_SELECTION_LISTS,
+    "active_capabilities",
+    "tactical_sequence",
+    "acceleration_layers",
+    "governance_layers",
+})
+_ARCHIVED_MAX_DEPTH = 8
+
+
+def _strip_archived(value: Any, dropped: dict[str, str], depth: int = 0) -> Any:
+    if depth > _ARCHIVED_MAX_DEPTH:
+        return value
+    if isinstance(value, list):
+        return [_strip_archived(item, dropped, depth + 1) for item in value]
+    if not isinstance(value, dict):
+        return value
+    out: dict[str, Any] = {}
+    for key, item in value.items():
+        if key in ARCHIVED_CAPABILITY_REASONS and depth > 0:
+            # Per-capability maps nested in sub-reports (reasons, dependencies, ...).
+            continue
+        if key in _ARCHIVED_NAME_LIST_KEYS and isinstance(item, list):
+            kept = []
+            for entry in item:
+                name = entry if isinstance(entry, str) else ""
+                if name in ARCHIVED_CAPABILITY_REASONS:
+                    if key != "optional_capabilities":
+                        dropped[name] = ARCHIVED_CAPABILITY_REASONS[name]
+                    continue
+                kept.append(_strip_archived(entry, dropped, depth + 1))
+            out[key] = kept
+        elif key == "tactical_tool_map" and isinstance(item, list):
+            # Drop archived steps and re-link the step that ran after one to its predecessor.
+            removed: dict[str, Any] = {}
+            steps = []
+            for step in item:
+                cap = str(step.get("capability") or "") if isinstance(step, dict) else ""
+                if cap in ARCHIVED_CAPABILITY_REASONS:
+                    dropped[cap] = ARCHIVED_CAPABILITY_REASONS[cap]
+                    removed[cap] = step.get("after")
+                    continue
+                steps.append(step)
+            for index, step in enumerate(steps):
+                after = step.get("after") if isinstance(step, dict) else None
+                seen: set[str] = set()
+                while isinstance(after, str) and after in removed and after not in seen:
+                    seen.add(after)
+                    after = removed[after]
+                if isinstance(step, dict) and after != step.get("after"):
+                    steps[index] = {**step, "after": after}
+            out[key] = steps
+        else:
+            out[key] = _strip_archived(item, dropped, depth + 1)
+    return out
 
 
 def drop_archived_capabilities(plan_payload: dict[str, Any]) -> dict[str, Any]:
-    """Copy of a CapabilityPlan payload where archived nodes are never selectable.
+    """Copy of a CapabilityPlan / route-decision payload where archived nodes are never selected.
 
     The pinned nexus-runtime planner still enables some archived nodes (e.g.
     ``integration_manager`` on an "integrate"/"merge" task) until its maturity flip lands.
     Nexus-side, every archived node (``ARCHIVED_CAPABILITY_REASONS``) is removed from the
-    selection lists, moved to ``forbidden_capabilities`` and named in
-    ``signal_snapshot.archived_capabilities_dropped`` with its archive reason.
+    selection lists at any depth (``signal_snapshot`` sub-reports, ``stop_policy`` tactical
+    sequence / tool map, ``replan_trace``), marked ``forbidden`` in ``decision_trace``, moved to
+    ``forbidden_capabilities`` and named in ``signal_snapshot.archived_capabilities_dropped``.
     """
 
     if not isinstance(plan_payload, dict):
         return plan_payload
-    plan = dict(plan_payload)
     dropped: dict[str, str] = {}
-    for key in _ARCHIVED_SELECTION_LISTS:
-        items = plan.get(key)
-        if not isinstance(items, list):
-            continue
-        kept = []
-        for item in items:
-            name = str(item)
-            if name in ARCHIVED_CAPABILITY_REASONS:
-                if key != "optional_capabilities":
-                    dropped[name] = ARCHIVED_CAPABILITY_REASONS[name]
-                continue
-            kept.append(item)
-        plan[key] = kept
+    plan: dict[str, Any] = _strip_archived(dict(plan_payload), dropped)
     if not dropped:
         return plan
     forbidden = [str(item) for item in plan.get("forbidden_capabilities") or []]

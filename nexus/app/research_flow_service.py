@@ -1751,7 +1751,7 @@ def run_auto_flow(
     # Archived nodes are never selectable (integration_manager, archived 2026-10-13).
     capability_plan_payload = drop_archived_capabilities(capability_plan_payload)
     nexus_usage_trace["capability_plan"] = capability_plan_payload
-    nexus_usage_trace["route_decision"] = route_decision_payload or build_route_decision(
+    nexus_usage_trace["route_decision"] = drop_archived_capabilities(route_decision_payload or build_route_decision(
         task_id=task_id or _safe_trace_slug(task_desc),
         task_desc=task_desc,
         task_type=task_type,
@@ -1766,7 +1766,7 @@ def run_auto_flow(
             budget=runtime_budget,
             skills=benchmark_skill_mount_requests,
         ),
-    ).to_dict()
+    ).to_dict())
     selected_for_runtime_receipts = {
         str(item)
         for item in (capability_plan_payload.get("selected_capabilities", []) or [])

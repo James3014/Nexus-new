@@ -16,7 +16,7 @@ def runtime_receipt_plan_payload(
     plan = dict(capability_plan_payload)
     selected = [str(item).strip() for item in (plan.get("selected_capabilities", []) or []) if str(item).strip()]
     if not selected:
-        return plan
+        return drop_archived_capabilities(plan)
 
     capabilities = nexus_usage_trace.get("capabilities", {}) if isinstance(nexus_usage_trace.get("capabilities"), dict) else {}
     autoreason = nexus_usage_trace.get("autoreason", {}) if isinstance(nexus_usage_trace.get("autoreason"), dict) else {}

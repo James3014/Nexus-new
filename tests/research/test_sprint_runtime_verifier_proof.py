@@ -138,3 +138,100 @@ def test_without_visible_evaluator_the_verifier_claims_no_test_proof(tmp_path: P
     assert "verifier_artifact" not in response
     for verdict in _gates(context).values():
         assert verdict["gate_passed"] is False
+
+
+def test_visible_test_target_must_be_one_regular_non_hidden_file(tmp_path: Path) -> None:
+    from nexus.research.sprint_service import visible_test_pytest_cmd, visible_test_target_error
+
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_visible.py").write_text("def test_ok():\n    pass\n")
+    (tmp_path / "tests" / "test_hidden.py").write_text("def test_secret():\n    pass\n")
+
+    assert visible_test_target_error(tmp_path, "tests/test_visible.py") == ""
+    assert visible_test_target_error(tmp_path, "") == "missing_test_file"
+    assert visible_test_target_error(tmp_path, "tests") == "test_file_not_python"
+    (tmp_path / "suite.py").mkdir()
+    assert visible_test_target_error(tmp_path, "suite.py") == "test_file_not_regular_file"
+    assert visible_test_target_error(tmp_path, "tests/test_hidden.py") == "hidden_test_target"
+    assert visible_test_target_error(tmp_path, "../x/test_a.py") == "test_file_not_repo_relative"
+    assert visible_test_target_error(tmp_path, str(tmp_path / "tests" / "test_visible.py")) == (
+        "test_file_not_repo_relative"
+    )
+    cmd = visible_test_pytest_cmd("tests/test_visible.py")
+    assert cmd[1:] == ["-m", "pytest", "-q", "-p", "no:cacheprovider", "tests/test_visible.py"]
+
+
+def test_invalid_visible_target_fails_closed_without_running(tmp_path: Path) -> None:
+    generator = LLMCandidateGenerator(tmp_path, safe_mode=True, target_file="demo.py")
+    generator._workspace_revision = lambda: "revision-verifier-003"
+    generator.visible_test_target_invalid = "hidden_test_target"
+    captured: dict[str, Any] = {}
+
+    def ask_unified(request: Any, *, verifier: Any = None, **_kwargs: Any) -> dict[str, Any]:
+        online = {
+            "status": "SUCCEEDED",
+            "invoked": True,
+            "response": {"response": json.dumps(EDIT), "raw_response": ""},
+        }
+        captured["payload"] = dict(
+            verifier({"task_id": request.task_id, "online": online, "source_hash": SEALED_SOURCE})
+        )
+        return {"task_id": request.task_id, "online": online}
+
+    generator.gateway.ask_unified = ask_unified  # type: ignore[method-assign]
+    generator._ask_unified_candidate(
+        prompt="p", payload="x", task="t", seed=1, attempt=1, model="m", source_code=SOURCE
+    )
+    payload = captured["payload"]
+    assert payload["verifier_status"] == "visible_test_target_invalid"
+    assert payload["gate_passed"] is False
+    assert "verifier_artifact" not in payload
+    context = {
+        "task_id": payload["task_id"],
+        "source_hash": SEALED_SOURCE,
+        "verifier": {"invoked": True, "gate_passed": False, "response": payload},
+    }
+    assert all(not verdict["gate_passed"] for verdict in _gates(context).values())
+
+
+def test_sprint_binds_no_visible_verifier_without_a_valid_test_file(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    import nexus.research.sprint_service as sprint
+
+    bound: dict[str, Any] = {}
+
+    class _Generator:
+        visible_verifier = None
+        visible_test_target_invalid = ""
+        model_chain = ["m"]
+
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            bound["generator"] = self
+
+        def generate(self, **_kwargs: Any) -> tuple[str, dict[str, Any]]:
+            raise sprint.LLMCandidateError("llm_no_patch", {"model_calls": 0})
+
+    monkeypatch.setattr(sprint, "LLMCandidateGenerator", _Generator)
+    monkeypatch.setenv("NEXUS_FORCE_LLM_DESPITE_LEARN_SLO", "1")
+    monkeypatch.setenv("NEXUS_FORCE_INPLACE_EXECUTOR", "1")
+    (tmp_path / "demo.py").write_text(SOURCE)
+    (tmp_path / "test_hidden.py").write_text("def test_secret():\n    assert False\n")
+    for test_file, reason in (("", "missing_test_file"), ("test_hidden.py", "hidden_test_target")):
+        bound.clear()
+        try:
+            sprint.run_hyper_sprint(
+                repo_root=tmp_path,
+                config=sprint.SprintConfig(
+                    task="fix normalize",
+                    target_file="demo.py",
+                    test_file=test_file,
+                    candidate_count=1,
+                    llm_mode=True,
+                ),
+            )
+        except Exception:  # noqa: BLE001 - only the binding matters here
+            pass
+        generator = bound["generator"]
+        assert generator.visible_verifier is None
+        assert generator.visible_test_target_invalid == reason

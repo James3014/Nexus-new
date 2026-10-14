@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -321,6 +322,9 @@ class LLMCandidateGenerator:
         # verifier stage applies the online candidate, runs the visible test and reports the
         # outcome plus the candidate sha256; the hidden test is never run here.
         self.visible_verifier: Callable[[str, int], CandidateEval] | None = None
+        # Set instead of visible_verifier when the sprint's visible-test target is not a single
+        # regular, non-hidden test file: the verifier then fails closed without running anything.
+        self.visible_test_target_invalid: str = ""
 
     def _workspace_revision(self) -> str:
         try:
@@ -393,6 +397,16 @@ class LLMCandidateGenerator:
                 "evidence": "online_candidate_payload_present" if delivered else "online_candidate_payload_missing",
                 "evidence_refs": [f"verifier:{task_id}:candidate_response"],
             }
+            if delivered and self.visible_verifier is None and self.visible_test_target_invalid:
+                verdict.update({
+                    "status": "fail",
+                    "gate_passed": False,
+                    "invoked": True,
+                    "verifier_status": VISIBLE_TEST_TARGET_INVALID,
+                    "evidence": f"{VISIBLE_TEST_TARGET_INVALID}:{self.visible_test_target_invalid}",
+                    "visible_test_passed": False,
+                })
+                return verdict
             if not delivered or self.visible_verifier is None:
                 return verdict
             return _visible_test_verdict(
@@ -852,6 +866,43 @@ def _candidate_out_from_online_stage(online_stage: Mapping[str, Any]) -> dict[st
         return operation
     # Not an edit-operation payload: keep the legacy whole-file fallback.
     return {"status": stage_status, "patch": str(provider_response or ""), "candidate_response_path": "whole_file_text"}
+
+
+VISIBLE_TEST_TARGET_INVALID = "visible_test_target_invalid"
+
+
+def visible_test_target_error(repo_root: Path, test_file: str) -> str:
+    """Why ``test_file`` cannot be the runtime verifier's only test target ("" when it can).
+
+    The verifier runs exactly one explicit, visible test file: never an empty target (pytest
+    would collect the current directory), a directory, a symlink, a path outside the repo or a
+    hidden test (``test_hidden*``).
+    """
+    raw = str(test_file or "").strip()
+    if not raw:
+        return "missing_test_file"
+    candidate = Path(raw)
+    if candidate.is_absolute() or ".." in candidate.parts:
+        return "test_file_not_repo_relative"
+    if candidate.name.lower().startswith("test_hidden"):
+        return "hidden_test_target"
+    if candidate.suffix != ".py":
+        return "test_file_not_python"
+    path = Path(repo_root) / candidate
+    if path.is_symlink():
+        return "test_file_is_symlink"
+    if not path.is_file():
+        return "test_file_not_regular_file"
+    try:
+        path.resolve().relative_to(Path(repo_root).resolve())
+    except ValueError:
+        return "test_file_outside_repo"
+    return ""
+
+
+def visible_test_pytest_cmd(test_file: str) -> list[str]:
+    """The runtime verifier's pytest command: the one visible test file, nothing else."""
+    return [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", str(test_file)]
 
 
 def _visible_test_verdict(
@@ -1515,10 +1566,15 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     visible_verifier_binding: dict[str, Any] = {"hint": "", "seed": 0}
     visible_eval_memo: dict[tuple[str, str, int], CandidateEval] = {}
 
+    visible_target_error = visible_test_target_error(repo_root, config.test_file or "")
+    # Same executor (in place / swarm), but the command names only the visible test file.
+    verifier_executor = copy.copy(executor)
+    verifier_executor.pytest_cmd = visible_test_pytest_cmd(config.test_file or "")
+
     def _runtime_visible_verifier(code: str, _seed: int) -> CandidateEval:
         hint_now = str(visible_verifier_binding["hint"])
         seed_now = int(visible_verifier_binding["seed"])
-        evaluation = executor.evaluate_candidate(seed=seed_now, hint=hint_now, code=code, source="llm")
+        evaluation = verifier_executor.evaluate_candidate(seed=seed_now, hint=hint_now, code=code, source="llm")
         visible_eval_memo[(hashlib.sha256(code.encode("utf-8")).hexdigest(), hint_now, seed_now)] = evaluation
         return evaluation
 
@@ -1531,7 +1587,10 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
 
     if llm_generator is not None and hasattr(llm_generator, "visible_verifier"):
         # Only the online generator has the seam (tests may substitute the generator class).
-        setattr(llm_generator, "visible_verifier", _runtime_visible_verifier)
+        if visible_target_error:
+            setattr(llm_generator, "visible_test_target_invalid", visible_target_error)
+        else:
+            setattr(llm_generator, "visible_verifier", _runtime_visible_verifier)
 
     candidates: list[CandidateEval] = []
     routing_autoreason_enabled = _resolve_executor_flag(config.enable_autoreason_executor, "NEXUS_AUTOREASON_EXECUTOR")

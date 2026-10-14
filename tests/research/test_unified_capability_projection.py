@@ -348,3 +348,85 @@ def test_integration_manager_is_never_selected_by_the_flow_plan() -> None:
     )
     receipts = build_capability_receipt_payloads(forced, {"capabilities": {}})
     assert "integration_manager" not in {item["name"] for item in receipts}
+
+
+def test_stage_simulated_flag_disagreeing_with_boundary_stays_simulated() -> None:
+    """Codex probe: INVOKED, stage.simulated=True, claim_boundary.simulated=False, refs present."""
+
+    from scripts.bench.strict_llm_baseline import classify_receipt
+
+    forged = {**_stage("acceptance_check", "INVOKED"), "simulated": True}
+    forged["claim_boundary"] = {"simulated": False, "claim_eligible": True}
+    out = _overlay_one("acceptance_check", forged)
+    assert out["invoked"] is True
+    assert out["claim_boundary"]["simulated"] is True
+    assert out["receipt_base"]["claim_boundary"]["simulated"] is True
+    assert classify_receipt(out) == "simulated"
+
+    # A boundary that says no receipt is present is not real either.
+    absent = _stage("pregate", "INVOKED")
+    absent["claim_boundary"] = {"simulated": False, "receipt_present": False}
+    assert classify_receipt(_overlay_one("pregate", absent)) == "simulated"
+
+    # And a stage without the simulated flag at all is not attested.
+    from nexus.research.flow.unified_capability_projection import runtime_attests_real
+
+    bare = {"claim_boundary": {"simulated": False}, "evidence_refs": ["ev"]}
+    assert runtime_attests_real({"name": "pregate"}, bare) is False
+    assert runtime_attests_real({"name": "pregate"}, {**bare, "simulated": False}) is True
+    assert (
+        runtime_attests_real({"name": "pregate"}, {**bare, "simulated": False, "evidence_refs": []})
+        is False
+    )
+
+
+def test_archived_capabilities_are_dropped_from_the_route_decision_and_empty_plans() -> None:
+    from nexus.app.research_receipt_runtime import runtime_receipt_plan_payload
+    from nexus.core.repo_root import REPO_ROOT
+    from nexus.engine.capability_planner import CapabilityPlanner
+    from nexus.engine.route_decision_adapter import build_route_decision
+    from nexus.research.flow.capability_planning import drop_archived_capabilities
+
+    plan = CapabilityPlanner(shared_playbook_root=REPO_ROOT).plan(
+        task_desc="integrate the drift check and merge the module",
+        task_type="bugfix",
+        route={"recommended_flow": "hybrid"},
+    )
+    decision = build_route_decision(
+        task_id="t", task_desc="integrate", task_type="bugfix", recommended_flow="hybrid", plan=plan
+    ).to_dict()
+    cleaned = drop_archived_capabilities(decision)
+    for key in ("selected_capabilities", "required_capabilities", "conditional_capabilities"):
+        assert "integration_manager" not in cleaned[key]
+    stop = cleaned.get("stop_policy") or {}
+    assert "integration_manager" not in (stop.get("tactical_sequence") or [])
+    steps = stop.get("tactical_tool_map") or []
+    assert all(step.get("capability") != "integration_manager" for step in steps)
+    assert all(step.get("after") != "integration_manager" for step in steps)
+
+    def _nested(value: object) -> list[object]:
+        found: list[object] = []
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key == "archived_capabilities_dropped":
+                    continue
+                if key == "integration_manager":
+                    found.append(key)
+                if key == "selected_capabilities" and "integration_manager" in (item or []):
+                    found.append(item)
+                found.extend(_nested(item))
+        elif isinstance(value, list):
+            for item in value:
+                found.extend(_nested(item))
+        return found
+
+    assert _nested(cleaned["signal_snapshot"]) == []
+    if "integration_manager" in decision["selected_capabilities"]:
+        assert "integration_manager" in cleaned["forbidden_capabilities"]
+        assert _nested(decision["signal_snapshot"]) != []  # the raw decision did carry it
+
+    # No selected capability at all: the archive filter still applies to the other lists.
+    empty = {"selected_capabilities": [], "conditional_capabilities": ["integration_manager"]}
+    out = runtime_receipt_plan_payload(empty, {})
+    assert out["conditional_capabilities"] == []
+    assert "integration_manager" in out["forbidden_capabilities"]
