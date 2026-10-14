@@ -360,6 +360,8 @@ def _build_agy_online_invoker(
             "--mode",
             "plan",
             "--sandbox",
+            "--output-format",
+            "json",
             "--print",
             prompt,
         ]
@@ -402,14 +404,18 @@ def _build_agy_online_invoker(
         stdout = str(getattr(result, "stdout", "") or "")
         stderr = str(getattr(result, "stderr", "") or "")
         returncode = int(getattr(result, "returncode", 1))
-        permission_denied = any(
-            marker in stdout or marker in stderr
-            for marker in (
-                "jetski: no output produced",
-                "permission that headless mode cannot prompt",
-            )
+        from nexus.executors.agy_write_admission import agy_delivery_failure, last_json_object
+
+        # Strict #1912 classification: parseable JSON, status SUCCESS, no
+        # denied_actions, non-empty response; the denial marker only on stderr.
+        delivery_failure = (
+            agy_delivery_failure(stdout.encode("utf-8"), stderr.encode("utf-8"))
+            if returncode == 0
+            else "provider_subprocess_failed"
         )
-        delivered = returncode == 0 and bool(stdout.strip()) and not permission_denied
+        delivered = delivery_failure is None
+        payload = last_json_object(stdout) if delivered else None
+        answer = str((payload or {}).get("response") or "")
         refs = [f"online:agy:{task_id}:subprocess"]
         if local_context_forwarded:
             refs.append(f"online:agy:{task_id}:local_context_forwarded")
@@ -422,11 +428,9 @@ def _build_agy_online_invoker(
             output_delivered=delivered,
             gate_passed=delivered,
             provider_call_count=1,
-            response=stdout,
+            response=answer,
             raw_response=stdout,
-            error=""
-            if delivered
-            else ("agy_permission_denied" if permission_denied else "provider_subprocess_failed"),
+            error="" if delivered else str(delivery_failure),
             evidence_refs=refs,
             transport="registered_cli",
             selection_source="explicit_request",

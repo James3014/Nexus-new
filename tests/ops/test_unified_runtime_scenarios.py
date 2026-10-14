@@ -84,7 +84,11 @@ def test_agy_invoker_passes_dynamic_prompt_as_print_argument(monkeypatch, tmp_pa
 
     def runner(argv, **kwargs):
         calls.append((argv, kwargs))
-        return SimpleNamespace(returncode=0, stdout="NEXUS_V3_ONLINE_OK\n", stderr="")
+        return SimpleNamespace(
+            returncode=0,
+            stdout='{"status": "SUCCESS", "response": "NEXUS_V3_ONLINE_OK"}\n',
+            stderr="",
+        )
 
     invoker = scenarios._build_agy_online_invoker(
         timeout_sec=5,
@@ -103,6 +107,8 @@ def test_agy_invoker_passes_dynamic_prompt_as_print_argument(monkeypatch, tmp_pa
         "--mode",
         "plan",
         "--sandbox",
+        "--output-format",
+        "json",
         "--print",
         "Reply with exactly: NEXUS_V3_ONLINE_OK",
     ]
@@ -134,7 +140,11 @@ def test_agy_negative_controls_fail_closed(
     def runner(_argv, **_kwargs):
         if case == "timeout":
             raise subprocess.TimeoutExpired(cmd="agy", timeout=1)
-        return SimpleNamespace(returncode=0, stdout="WRONG_ANSWER\n", stderr="")
+        return SimpleNamespace(
+            returncode=0,
+            stdout='{"status": "SUCCESS", "response": "WRONG_ANSWER"}\n',
+            stderr="",
+        )
 
     invoker = scenarios._build_agy_online_invoker(
         timeout_sec=1,

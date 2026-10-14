@@ -208,6 +208,10 @@ class WorkerExecutionReceipt:
     # Agy permission posture actually executed (#1912), e.g.
     # ``accept_edits_no_autoapprove`` or ``plan_no_autoapprove``.
     provider_permission_mode: Optional[str] = None
+    # sha256 of the effective Agy settings profile (allow/deny, mode, hooks,
+    # MCP config) and the write sandbox actually applied, e.g. ``seatbelt:<sha256>``.
+    provider_permission_profile_sha256: Optional[str] = None
+    provider_write_sandbox: Optional[str] = None
 
 
 def classify_worker_failure(receipt: WorkerExecutionReceipt) -> str:

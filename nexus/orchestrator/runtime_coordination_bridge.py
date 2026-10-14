@@ -260,6 +260,9 @@ class _Worker:
                 trajectory_ref = None
 
         try:
+            # The self-hosted worker invoke is always an implementation run;
+            # role-aware adapters (Agy, #1912) refuse to run without a role.
+            kwargs["worker_role"] = "implementation"
             receipt = self.service.worker_registry.invoke(provider, contract, lease, **kwargs)
         except Exception as exc:
             if trajectory_root is not None and trajectory_ref is not None:

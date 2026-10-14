@@ -177,6 +177,13 @@ class CliWorkerRequest:
     env: Optional[Mapping[str, str]] = None
     # Optional passive trajectory telemetry context; None preserves legacy behaviour exactly.
     trajectory_context: Optional[CliWorkerTrajectoryContext] = None
+    # Optional runtime-owned macOS Seatbelt profile (SBPL text).  When set,
+    # the validated command runs under ``/usr/bin/sandbox-exec -f <profile>``;
+    # a missing ``sandbox-exec`` fails the start closed (#1912).
+    seatbelt_profile: Optional[str] = None
+    # Kill the process group and run-tagged descendants after a normal exit
+    # too, not only on timeout, so nothing outlives the receipt (#1912).
+    sweep_descendants_on_exit: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "executable", _resolve_executable(self.executable))
@@ -211,6 +218,10 @@ class CliWorkerResult:
     executable_sha256: str = ""
     env: Tuple[Tuple[str, str], ...] = ()
     telemetry: dict[str, int] = field(default_factory=dict)
+    # None when no post-exit sweep was requested; False when a tagged
+    # descendant survived the sweep.
+    descendants_swept: Optional[bool] = None
+    seatbelt_profile_sha256: str = ""
 
     @staticmethod
     def hash_bytes(value: bytes) -> str:
@@ -234,6 +245,7 @@ def _kill_process_group(process: subprocess.Popen[bytes]) -> bool:
 
 
 _RUN_TAG_ENV = "NEXUS_CLI_WORKER_RUN_TAG"
+_SANDBOX_EXEC = "/usr/bin/sandbox-exec"
 _SWEEP_DEADLINE_SECONDS = 2.0
 
 
@@ -435,10 +447,35 @@ def run_cli_worker(
         except Exception as exc:  # noqa: BLE001
             _logger.debug("trajectory seam seal failure (swallowed): %s", exc)
 
+    command: Tuple[str, ...] = request.command
+    seatbelt_sha256 = ""
+    descendants_swept: Optional[bool] = None
+    if request.seatbelt_profile is not None:
+        seatbelt_sha256 = hashlib.sha256(request.seatbelt_profile.encode("utf-8")).hexdigest()
+        if not (os.path.isfile(_SANDBOX_EXEC) and os.access(_SANDBOX_EXEC, os.X_OK)):
+            shutil.rmtree(isolated_home, ignore_errors=True)
+            return CliWorkerResult(
+                status=CliWorkerStatus.START_FAILED,
+                executable_identity=request.executable,
+                executable_sha256=executable_sha256,
+                argv=request.argv,
+                cwd=request.cwd,
+                exit_code=None,
+                stdout=b"",
+                stderr=b"seatbelt_unavailable",
+                wall_time_ms=max(0, int((time.monotonic() - started) * 1000)),
+                process_group_id=None,
+                env=bounded_environment_receipt(request.env),
+                seatbelt_profile_sha256=seatbelt_sha256,
+            )
+        profile_path = Path(isolated_home) / "worker.sb"
+        profile_path.write_text(request.seatbelt_profile, encoding="utf-8")
+        command = (_SANDBOX_EXEC, "-f", str(profile_path), *request.command)
+
     process: Optional[subprocess.Popen[bytes]] = None
     try:
         process = subprocess.Popen(
-            request.command,
+            command,
             cwd=request.cwd,
             env=environment,
             stdin=subprocess.DEVNULL,
@@ -454,6 +491,9 @@ def run_cli_worker(
             timed_out = False
             group_killed = False
             status = CliWorkerStatus.COMPLETED
+            if request.sweep_descendants_on_exit:
+                _kill_process_group(process)
+                descendants_swept = _sweep_tagged_processes(run_tag)
         except subprocess.TimeoutExpired as exc:
             group_killed = _kill_process_group(process)
             # Descendants that called setsid() left the group; find them by the
@@ -522,6 +562,8 @@ def run_cli_worker(
             "wall_time_ms": wall_time_ms,
             "process_group_id": process_group_id or 0,
         },
+        descendants_swept=descendants_swept,
+        seatbelt_profile_sha256=seatbelt_sha256,
     )
 
     # ------------------------------------------------------------------

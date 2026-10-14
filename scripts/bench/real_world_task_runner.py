@@ -345,7 +345,16 @@ def _run_gemini_patch(
     prompt = _build_gemini_prompt(task, case_dir, mode=mode, nexus_profile=nexus_profile)
     bin_path = _resolve_gemini_bin()
     if "agy" in str(bin_path):
-        cmd = [bin_path, "--dangerously-skip-permissions", "--print", prompt]
+        # #1912: no permission bypass; file edits inside the case dir only.
+        cmd = [
+            bin_path,
+            "--mode",
+            "accept-edits",
+            "--add-dir",
+            str(case_dir),
+            "--print",
+            prompt,
+        ]
     else:
         cmd = [bin_path, "-m", model, "-p", prompt, "--output-format", "json"]
         if os.getenv("NEXUS_GEMINI_YOLO", "").strip().lower() in {"1", "true", "yes", "on", "yolo"}:
