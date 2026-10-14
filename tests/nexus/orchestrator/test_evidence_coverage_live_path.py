@@ -38,6 +38,7 @@ from nexus.orchestrator.ambient_core import (
     CORE_VERDICT_SCHEMA,
     LazyCanonicalCoreControlPort,
     build_core_verdict,
+    core_universe_identity,
     live_core_db_path,
 )
 from nexus.orchestrator.task_contract import (
@@ -127,6 +128,13 @@ SCENARIOS: list[dict[str, Any]] = [
         "universe": {"universe_generation": 2, "subjects": [DIFF_CHECK]},
     },
     {
+        "name": "drop_universe",
+        "task_id": "cov-drop",
+        "verifiers": ["git diff --check"],
+        "drop_universe": True,
+        "universe": {"universe_generation": 1, "subjects": [DIFF_CHECK, SECURITY_REVIEW]},
+    },
+    {
         "name": "legacy",
         "task_id": "cov-legacy",
         "verifiers": ["git diff --check"],
@@ -202,13 +210,20 @@ def _run_driver(
     return results
 
 
+def _core_unobtainable(message: str) -> None:
+    """Skip locally, but never let CI pass these enforcement witnesses by skipping."""
+    if os.environ.get("CI", "").strip():
+        pytest.fail(f"{message} (CI forbids skipping the Evidence Coverage witnesses)")
+    pytest.skip(message)
+
+
 @pytest.fixture(scope="module")
 def pinned_core(tmp_path_factory) -> Path:
     revision = _pinned_core_revision()
     dest = tmp_path_factory.mktemp("core") / "nexus-core"
     reason = _materialize_core(dest, revision)
     if reason is not None:
-        pytest.skip(f"pinned nexus-core {revision} not obtainable: {reason}")
+        _core_unobtainable(f"pinned nexus-core {revision} not obtainable: {reason}")
     head = _git(dest, "rev-parse", "HEAD").stdout.strip()
     assert head == revision
     return dest
@@ -238,6 +253,8 @@ def _assert_blocked(result: dict[str, Any]) -> None:
     assert result["candidate_commit_sha"] is None
     assert _verdict(result)["blocking"] is True
     assert _verdict(result)["coverage_complete"] is False
+    # A blocked receipt never reads as Core-verified downstream.
+    assert result["core_verification_status"].startswith("HOST_BLOCKED:")
 
 
 # --- live chain witnesses (real Core) ---------------------------------------
@@ -304,14 +321,22 @@ def test_live_duplicate_evidence_gives_no_coverage_gain(live):
     assert categories["review:security"] == "NOT_COVERED"
 
 
+def _assert_rejected_at_intake(result: dict[str, Any], code: str) -> None:
+    assert f"TASK_CARD_EVIDENCE_BINDING_INVALID:{code}" in result["submit_error"]
+    # Nothing ran: no state, no candidate, no Core session.
+    assert result["status"] is None
+    assert result["candidate_commit_sha"] is None
+    assert result["core_session_id"] is None
+
+
 def test_live_wrong_generation_is_rejected(live):
-    result = live["wrong_generation"]
-    _assert_blocked(result)
-    verdict = _verdict(result)
-    assert verdict["host_reason_codes"] == ["EXPECTED_EVIDENCE_UNIVERSE_CARD_MISMATCH"]
-    # Rejected before Core: no coverage is claimed for a forged generation.
-    assert verdict["core_status"] is None
-    assert verdict["universe_generation"] == 3
+    _assert_rejected_at_intake(live["wrong_generation"], "EXPECTED_EVIDENCE_UNIVERSE_CARD_MISMATCH")
+
+
+def test_live_dropped_universe_is_rejected(live):
+    result = live["drop_universe"]
+    assert result["request_has_evidence_keys"] == ["core_envelope_required", "expected_evidence"]
+    _assert_rejected_at_intake(result, "EXPECTED_EVIDENCE_UNIVERSE_CARD_MISMATCH")
 
 
 def test_live_legacy_task_unchanged_and_claims_no_coverage(live):
@@ -354,7 +379,7 @@ def test_live_gateway_process_reports_pinned_core_provenance(live):
 
 
 def test_live_receipt_survives_reload_from_state_dir(live):
-    for name in ("complete", "missing", "fail", "cond_missing", "duplicate", "wrong_generation"):
+    for name in ("complete", "missing", "fail", "cond_missing", "duplicate"):
         result = live[name]
         assert result["reloaded_core_verdict"] == result["core_verdict"], name
     assert live["complete"]["db_verification_row"]["core_status"] == "VERIFIED"
@@ -384,6 +409,9 @@ def test_live_core_revision_mismatch_fails_closed(pinned_core, tmp_path):
     assert verdict["core_provenance"]["status"] == "CORE_REVISION_MISMATCH"
     assert "CORE_PROVENANCE_NOT_PINNED:CORE_REVISION_MISMATCH" in verdict["host_reason_codes"]
     assert results["gateway_core_provenance"]["status"] == "CORE_REVISION_MISMATCH"
+    # Core itself VERIFIED this candidate; only the host refused it.
+    assert verdict["core_status"] == "VERIFIED"
+    assert result["core_verification_status"] == "HOST_BLOCKED:VERIFIED"
     assert results["gateway_core_provenance"]["fail_closed"] is True
 
 
@@ -445,7 +473,15 @@ def _universe_contract(tmp_path: Path, generation: int = 1) -> SelfHostedTaskCon
     )
 
 
-def _verified_projection(generation: int, provenance: str = "CORE_REVISION_PINNED"):
+def _verified_projection(
+    generation: int,
+    provenance: str = "CORE_REVISION_PINNED",
+    *,
+    identity: str | None = None,
+    entries: list[dict[str, Any]] | None = None,
+    unexpected: list[dict[str, Any]] | None = None,
+):
+    declared = {"universe_generation": generation, "subjects": [DIFF_CHECK]}
     return {
         "core_response": {
             "verification": {
@@ -454,9 +490,11 @@ def _verified_projection(generation: int, provenance: str = "CORE_REVISION_PINNE
                 "integrity": "VALID",
                 "coverage": {
                     "universe_generation": generation,
-                    "universe_identity": "sha256:" + "1" * 64,
-                    "entries": [{**DIFF_CHECK, "category": "COVERED", "observed_status": "PASS"}],
-                    "unexpected_subjects": [],
+                    "universe_identity": identity or core_universe_identity(declared),
+                    "entries": entries
+                    if entries is not None
+                    else [{**DIFF_CHECK, "category": "COVERED", "observed_status": "PASS"}],
+                    "unexpected_subjects": unexpected or [],
                 },
             }
         },
@@ -644,7 +682,12 @@ def test_gateway_status_and_health_report_in_process_core_provenance(monkeypatch
     assert isinstance(status["fail_closed"], bool)
     assert status["fail_closed"] is (status["status"] != "CORE_REVISION_PINNED")
     health = nexus_mcp_gateway_http.runtime_identity()
-    assert health["core_provenance"]["observed_in_pid"] == os.getpid()
+    assert set(health["core_provenance"]) == {
+        "status",
+        "expected_revision",
+        "observed_commit",
+        "fail_closed",
+    }
 
     import nexus.orchestrator.canonical_core_transport as transport
 
@@ -652,9 +695,11 @@ def test_gateway_status_and_health_report_in_process_core_provenance(monkeypatch
         raise RuntimeError("probe broke")
 
     monkeypatch.setattr(transport, "core_provenance_status", explode)
-    failed = gateway_module.gateway_core_provenance()
+    failed = gateway_module.gateway_core_provenance(refresh=True)
     assert failed["status"] == "CORE_PROVENANCE_PROBE_FAILED"
     assert failed["fail_closed"] is True
+    monkeypatch.undo()
+    gateway_module.gateway_core_provenance(refresh=True)
 
 
 def test_gateway_status_tool_carries_core_provenance(monkeypatch, tmp_path):
@@ -666,3 +711,354 @@ def test_gateway_status_tool_carries_core_provenance(monkeypatch, tmp_path):
     status = gateway._gateway_status()
     assert status["core_provenance"]["observed_in_pid"] == os.getpid()
     assert "status" in status["core_provenance"]
+
+
+# --- review fixes (#2201): witnesses ----------------------------------------
+
+
+def test_live_coverage_identity_is_the_host_computed_card_identity(live):
+    verdict = _verdict(live["complete"])
+    assert verdict["coverage"]["universe_identity"] == core_universe_identity(
+        SCENARIOS[0]["universe"]
+    )
+
+
+@pytest.mark.parametrize(
+    "overrides, code",
+    [
+        ({"identity": "sha256:" + "1" * 64}, "CORE_COVERAGE_IDENTITY_MISMATCH"),
+        (
+            {
+                "entries": [
+                    {
+                        **DIFF_CHECK,
+                        "evidence_kind": "other-kind",
+                        "category": "COVERED",
+                        "observed_status": "PASS",
+                    }
+                ]
+            },
+            "CORE_COVERAGE_UNIVERSE_MISMATCH",
+        ),
+        (
+            {
+                "entries": [
+                    {
+                        **DIFF_CHECK,
+                        "requirement_mode": "CONDITIONALLY_REQUIRED",
+                        "category": "COVERED",
+                        "observed_status": "PASS",
+                    }
+                ]
+            },
+            "CORE_COVERAGE_UNIVERSE_MISMATCH",
+        ),
+        (
+            {"unexpected": [{"logical_subject_id": "x:y", "evidence_kind": "k"}]},
+            "CORE_COVERAGE_UNEXPECTED_SUBJECTS",
+        ),
+        (
+            {
+                "entries": [
+                    {**DIFF_CHECK, "category": "COVERED", "observed_status": "PASS"},
+                    {**DIFF_CHECK, "category": "COVERED", "observed_status": "PASS"},
+                ]
+            },
+            "CORE_COVERAGE_UNIVERSE_MISMATCH",
+        ),
+    ],
+)
+def test_verdict_binds_coverage_exactly_to_the_card(tmp_path, overrides, code):
+    verdict = build_core_verdict(
+        contract=_universe_contract(tmp_path), projection=_verified_projection(1, **overrides)
+    )
+    assert verdict["blocking"] is True
+    assert verdict["coverage_complete"] is False
+    assert code in verdict["host_reason_codes"]
+
+
+def test_card_parser_rejects_duplicate_subjects():
+    block = "```" + TASK_CARD_EXPECTED_EVIDENCE_FENCE + "\n{}\n```\n"
+    universe = {"universe_generation": 1, "subjects": [DIFF_CHECK, DIFF_CHECK]}
+    with pytest.raises(ValueError, match="TASK_CARD_EXPECTED_EVIDENCE_INVALID"):
+        parse_task_card_expected_evidence(block.replace("{}", json.dumps(universe)))
+
+
+def _card(tmp_path: Path, universe: dict[str, Any] | None) -> dict[str, str]:
+    text = "task_id: `verdict-unit`\nAUTO_CHAIN: false\n"
+    if universe is not None:
+        text += "```" + TASK_CARD_EXPECTED_EVIDENCE_FENCE + "\n" + json.dumps(universe) + "\n```\n"
+    card = tmp_path / "card.md"
+    card.write_text(text, encoding="utf-8")
+    return {
+        "task_card_path": str(card),
+        "task_card_hash": hashlib.sha256(card.read_bytes()).hexdigest(),
+    }
+
+
+def _legacy_contract(tmp_path: Path) -> SelfHostedTaskContract:
+    return _universe_contract(tmp_path).model_copy(update={"expected_evidence": None})
+
+
+def _host_service(tmp_path: Path, port: Any = None):
+    from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
+
+    return SelfHostedTaskService(
+        state_dir=tmp_path / "state", ephemeral=True, auto_reconcile=False, ambient_core_port=port
+    )
+
+
+def _local_receipt():
+    from nexus.orchestrator.candidate_verifier import VerifiedCandidateReceipt
+
+    return VerifiedCandidateReceipt(
+        schema="nexus.verified_candidate_receipt.v1",
+        task_id="verdict-unit",
+        contract_hash="c" * 64,
+        lease_id="lease",
+        candidate_state_hash="candidate-state",
+        scope_gate_passed=True,
+        deletion_gate_passed=True,
+        controller_gate_passed=True,
+        protected_contract_gate_passed=True,
+        verifier_gate_passed=True,
+        verified=True,
+        candidate_commit_allowed=True,
+        public_claim_allowed=False,
+        production_ready=False,
+        failure_reasons=[],
+        verifier_evidence=(),
+        candidate_commit_created=False,
+        merge_performed=False,
+    )
+
+
+@pytest.mark.parametrize(
+    "contract_kind, card_universe, request_extra, code",
+    [
+        # The universe and the Core flag were dropped from a universe card's task.
+        ("legacy", "card", {}, "EXPECTED_EVIDENCE_UNIVERSE_CARD_MISMATCH"),
+        # A universe that no card declares.
+        (
+            "universe",
+            None,
+            {"core_envelope_required": True},
+            "EXPECTED_EVIDENCE_UNIVERSE_CARD_MISMATCH",
+        ),
+        # A universe task with no card binding at all.
+        (
+            "universe",
+            "none",
+            {"core_envelope_required": True},
+            "EXPECTED_EVIDENCE_UNIVERSE_NOT_CARD_BOUND",
+        ),
+        # The universe kept but the Core requirement dropped.
+        ("universe", "card", {}, "CORE_ENVELOPE_REQUIRED_CARD_MISMATCH"),
+    ],
+)
+def test_finalize_binds_universe_and_core_flag_to_the_card(
+    tmp_path, contract_kind, card_universe, request_extra, code
+):
+    from nexus.orchestrator.ambient_core import AmbientCoreVerdictBlocked
+
+    universe = {"universe_generation": 1, "subjects": [DIFF_CHECK]}
+    contract = (
+        _universe_contract(tmp_path) if contract_kind == "universe" else _legacy_contract(tmp_path)
+    )
+    request: dict[str, Any] = dict(request_extra)
+    if card_universe != "none":
+        request.update(_card(tmp_path, universe if card_universe == "card" else None))
+
+    class NeverCalled:
+        def verify_candidate(self, **kwargs):
+            raise AssertionError("Core must not be reached")
+
+    service = _host_service(tmp_path, NeverCalled())
+    with pytest.raises(AmbientCoreVerdictBlocked) as blocked:
+        service._verify_ambient_core_candidate(
+            contract=contract,
+            request=request,
+            lease=SimpleNamespace(target_worktree=str(tmp_path)),
+            state={"attempt_id": "attempt"},
+            candidate=SimpleNamespace(candidate_state_hash="candidate-state"),
+            verified=_local_receipt(),
+        )
+    receipt = blocked.value.receipt
+    assert receipt.verified is False and receipt.candidate_commit_allowed is False
+    assert receipt.core_verdict["host_reason_codes"] == [code]
+
+
+def test_finalize_card_edited_after_intake_blocks(tmp_path):
+    from nexus.orchestrator.ambient_core import AmbientCoreVerdictBlocked
+
+    universe = {"universe_generation": 1, "subjects": [DIFF_CHECK]}
+    request = {"core_envelope_required": True, **_card(tmp_path, universe)}
+    (tmp_path / "card.md").write_text("edited", encoding="utf-8")
+    with pytest.raises(AmbientCoreVerdictBlocked) as blocked:
+        _host_service(tmp_path, object())._verify_ambient_core_candidate(
+            contract=_universe_contract(tmp_path),
+            request=request,
+            lease=None,
+            state={},
+            candidate=None,
+            verified=_local_receipt(),
+        )
+    assert blocked.value.verdict["host_reason_codes"] == [
+        "EXPECTED_EVIDENCE_TASK_CARD_HASH_MISMATCH"
+    ]
+
+
+def test_legacy_card_task_without_universe_is_unchanged(tmp_path):
+    request = _card(tmp_path, None)
+    receipt = _local_receipt()
+    out = _host_service(tmp_path)._verify_ambient_core_candidate(
+        contract=_legacy_contract(tmp_path),
+        request=request,
+        lease=None,
+        state={},
+        candidate=None,
+        verified=receipt,
+    )
+    assert out is receipt
+
+
+def test_core_verified_but_host_blocked_never_reads_as_verified(tmp_path):
+    from nexus.orchestrator.ambient_core import AmbientCoreVerdictBlocked
+
+    universe = {"universe_generation": 1, "subjects": [DIFF_CHECK]}
+    projection = {
+        **_verified_projection(1, "CORE_REVISION_MISMATCH"),
+        "session_id": "cms_" + "1" * 32,
+        "binding_hash": "sha256:" + "2" * 64,
+        "candidate_state_hash": "candidate-state",
+    }
+
+    class VerifiedCore:
+        def verify_candidate(self, **kwargs):
+            return projection
+
+    state = {
+        "attempt_id": "attempt",
+        "host_preparation": {
+            "schema": "nexus.ambient-core-preparation.v1",
+            "session_id": "cms_" + "1" * 32,
+            "binding_id": "binding-1",
+            "binding_hash": "sha256:" + "2" * 64,
+            "operation_id": "operation-1",
+            "attempt_id": "attempt",
+            "acceptance_contract_hash": "sha256:" + "3" * 64,
+            "source_revision": "git-commit:" + "8" * 40,
+            "source_tree": "git-tree:" + "9" * 40,
+        },
+    }
+    with pytest.raises(AmbientCoreVerdictBlocked) as blocked:
+        _host_service(tmp_path, VerifiedCore())._verify_ambient_core_candidate(
+            contract=_universe_contract(tmp_path),
+            request={"core_envelope_required": True, **_card(tmp_path, universe)},
+            lease=None,
+            state=state,
+            candidate=SimpleNamespace(candidate_state_hash="candidate-state"),
+            verified=_local_receipt(),
+        )
+    receipt = blocked.value.receipt
+    assert receipt.core_verdict["core_status"] == "VERIFIED"
+    assert receipt.core_verification_status == "HOST_BLOCKED:VERIFIED"
+    assert receipt.candidate_commit_allowed is False
+
+
+def test_direct_lane_refuses_evidence_tasks(tmp_path):
+    from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
+
+    universe = {"universe_generation": 1, "subjects": [DIFF_CHECK]}
+    claims = SelfHostedTaskService._direct_lane_claims_evidence
+    assert claims(_card(tmp_path, universe)) is True
+    assert claims({"core_envelope_required": True}) is True
+    assert claims({"expected_evidence": universe}) is True
+    assert claims(_card(tmp_path, None)) is False
+    assert claims({}) is False
+
+
+def test_core_provenance_is_cached_per_process(monkeypatch):
+    import nexus.orchestrator.canonical_core_transport as transport
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    calls = []
+
+    def counted():
+        calls.append(1)
+        return {"status": "CORE_UNAVAILABLE", "fail_closed": True}
+
+    monkeypatch.setattr(transport, "core_provenance_status", counted)
+    gateway_module.gateway_core_provenance(refresh=True)
+    for _ in range(5):
+        gateway_module.gateway_core_provenance()
+        gateway_module.public_core_provenance()
+    assert len(calls) == 1
+    monkeypatch.undo()
+    gateway_module.gateway_core_provenance(refresh=True)
+
+
+def test_core_identity_git_probes_are_time_bounded(monkeypatch, tmp_path):
+    import nexus.orchestrator.canonical_core_transport as transport
+
+    seen = []
+
+    def fake_check_output(args, **kwargs):
+        seen.append(kwargs.get("timeout"))
+        return "" if args[1] == "status" else "a" * 40
+
+    monkeypatch.setattr(transport.subprocess, "check_output", fake_check_output)
+    transport.read_observed_core_identity(tmp_path)
+    assert seen and all(isinstance(value, (int, float)) and value > 0 for value in seen)
+
+
+def test_core_unobtainable_fails_in_ci_and_skips_locally(monkeypatch):
+    monkeypatch.setenv("CI", "true")
+    with pytest.raises(pytest.fail.Exception):
+        _core_unobtainable("no core")
+    monkeypatch.delenv("CI")
+    with pytest.raises(pytest.skip.Exception):
+        _core_unobtainable("no core")
+
+
+_PRELOAD_PROBE = """
+import json, sys
+from pathlib import Path
+from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
+from nexus.orchestrator.unified_mcp_gateway import UnifiedMCPGateway, gateway_core_provenance
+if sys.argv[1] == "gateway-first":
+    UnifiedMCPGateway(service=SelfHostedTaskService(
+        state_dir=Path(sys.argv[2]), ephemeral=True, auto_reconcile=False))
+from nexus.services.external_intelligence_core_binding import acceptance_contract_hash
+contract = {"contract_id": "c", "requirements_hash": "sha256:" + "0" * 64,
+            "required_verifier_ids": ["v"], "allowed_paths": ["a"], "deletion_policy": "FORBID"}
+acceptance_contract_hash(contract)  # an EIA call that imports ``product``
+print(json.dumps(gateway_core_provenance(refresh=True)))
+"""
+
+
+def test_gateway_startup_binds_product_to_core_before_eia(pinned_core, tmp_path):
+    def probe(mode: str) -> dict[str, Any]:
+        env = {k: v for k, v in os.environ.items() if k != "NEXUS_CORE_REPO_ROOT"}
+        inherited = [entry for entry in sys.path if entry and Path(entry).exists()]
+        env["PYTHONPATH"] = os.pathsep.join(dict.fromkeys([str(REPO_ROOT), *inherited]))
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        env["NEXUS_CORE_REPO_ROOT"] = str(pinned_core)
+        proc = subprocess.run(
+            [sys.executable, "-W", "ignore", "-c", _PRELOAD_PROBE, mode, str(tmp_path / mode)],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
+        )
+        assert proc.returncode == 0, proc.stderr[-3000:]
+        return json.loads(proc.stdout.strip().splitlines()[-1])
+
+    # Gateway startup first: Core owns ``product`` for the whole process.
+    assert probe("gateway-first")["status"] == "CORE_REVISION_PINNED"
+    # The hazard the preload removes: an EIA import first shadows Core.
+    shadowed = probe("eia-first")
+    assert shadowed["fail_closed"] is True
+    assert "CORE_PRODUCT_SHADOWED" in str(shadowed.get("reason"))

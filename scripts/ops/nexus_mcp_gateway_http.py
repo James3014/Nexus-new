@@ -32,8 +32,8 @@ from nexus.orchestrator.unified_mcp_gateway import (  # noqa: E402
     TASK_CONTRACT_REVISION,
     TOOL_MANIFEST_REVISION,
     UnifiedMCPGateway,
-    gateway_core_provenance,
     github_observer_runtime_identity,
+    public_core_provenance,
 )
 
 TOKEN_ENV = "NEXUS_MCP_GATEWAY_TOKEN"
@@ -98,7 +98,9 @@ def runtime_identity(gateway: UnifiedMCPGateway | None = None) -> dict[str, Any]
         "tool_manifest_revision": TOOL_MANIFEST_REVISION,
         "tool_count": len(UnifiedMCPGateway.tool_specs()),
         "github_observer": github_observer,
-        "core_provenance": gateway_core_provenance(),
+        # Unauthenticated: status and revisions only; paths and error text
+        # stay in the authenticated nexus_gateway_status.
+        "core_provenance": public_core_provenance(),
     }
 
 

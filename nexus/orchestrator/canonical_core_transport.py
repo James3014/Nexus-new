@@ -236,12 +236,14 @@ def read_observed_core_identity(core_root: Path | None = None) -> dict[str, Any]
             cwd=str(root),
             text=True,
             stderr=subprocess.DEVNULL,
+            timeout=10,
         ).strip()
         tree = subprocess.check_output(
             ["git", "rev-parse", "HEAD^{tree}"],
             cwd=str(root),
             text=True,
             stderr=subprocess.DEVNULL,
+            timeout=10,
         ).strip()
     except Exception:
         return {**base, "reason": "CORE_IDENTITY_UNREADABLE", "source_root": str(root)}
@@ -256,6 +258,7 @@ def read_observed_core_identity(core_root: Path | None = None) -> dict[str, Any]
             cwd=str(root),
             text=True,
             stderr=subprocess.DEVNULL,
+            timeout=10,
         ).strip()
     except Exception:
         return {**base, "reason": "CORE_IDENTITY_UNREADABLE", "source_root": str(root)}
@@ -698,12 +701,13 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
                             cwd=str(repo_root),
                             text=True,
                             stderr=subprocess.DEVNULL,
+                            timeout=10,
                         ).strip()
                     )
                     if repo_root
                     else None
                 )
-            except (OSError, subprocess.CalledProcessError):
+            except (OSError, subprocess.SubprocessError):
                 base_tree = None
         if base_tree is None:
             raise RuntimeError("CANONICAL_CORE_SOURCE_TREE_UNRESOLVED")

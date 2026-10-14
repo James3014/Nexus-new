@@ -4218,29 +4218,83 @@ class SelfHostedTaskService:
         )
 
     @staticmethod
-    def _card_bound_universe_error(contract, request: Mapping[str, Any]) -> Optional[str]:
-        """The declared universe must be the one in the hashed task card (#2181)."""
+    def _card_evidence_binding_error(contract, request: Mapping[str, Any]) -> Optional[str]:
+        """Bind the declared universe and the Core requirement to the hashed card (#2181).
+
+        Runs for every task, before the Core short-circuit, at intake and at
+        finalize. A card that declares a universe cannot be satisfied by a
+        request that drops it, and a universe never comes from anywhere but
+        the card. For a card-less legacy request nothing is read.
+        """
         universe = getattr(contract, "expected_evidence", None)
-        if universe is None:
-            return None
+        dump = getattr(universe, "model_dump", None)
+        declared_by_contract = dump(mode="json") if callable(dump) else universe
+        core_required = ambient_core_required(request)
+        claims_evidence = declared_by_contract is not None or core_required
         card_path = request.get("task_card_path")
         card_hash = request.get("task_card_hash")
         if not isinstance(card_path, str) or not card_path or not isinstance(card_hash, str):
-            return "EXPECTED_EVIDENCE_UNIVERSE_NOT_CARD_BOUND"
+            return (
+                "EXPECTED_EVIDENCE_UNIVERSE_NOT_CARD_BOUND"
+                if declared_by_contract is not None
+                else None
+            )
         try:
             card_bytes = _resolve_task_card_path(card_path).read_bytes()
         except OSError:
-            return "EXPECTED_EVIDENCE_TASK_CARD_UNREADABLE"
+            # Legacy binding errors stay with the existing card-binding gates.
+            return "EXPECTED_EVIDENCE_TASK_CARD_UNREADABLE" if claims_evidence else None
         if hashlib.sha256(card_bytes).hexdigest() != card_hash:
-            return "EXPECTED_EVIDENCE_TASK_CARD_HASH_MISMATCH"
+            return "EXPECTED_EVIDENCE_TASK_CARD_HASH_MISMATCH" if claims_evidence else None
         try:
-            declared = parse_task_card_expected_evidence(card_bytes.decode("utf-8"))
+            declared_by_card = parse_task_card_expected_evidence(card_bytes.decode("utf-8"))
         except (UnicodeDecodeError, ValueError):
             return "EXPECTED_EVIDENCE_TASK_CARD_INVALID"
-        dump = getattr(universe, "model_dump", None)
-        if declared != (dump(mode="json") if callable(dump) else universe):
+        if declared_by_card != declared_by_contract:
             return "EXPECTED_EVIDENCE_UNIVERSE_CARD_MISMATCH"
+        if core_required != (declared_by_card is not None):
+            return "CORE_ENVELOPE_REQUIRED_CARD_MISMATCH"
         return None
+
+    @staticmethod
+    def _direct_lane_claims_evidence(request: Mapping[str, Any]) -> bool:
+        if request.get("expected_evidence") is not None or request.get("core_envelope_required"):
+            return True
+        card_path = request.get("task_card_path")
+        card_hash = request.get("task_card_hash")
+        if not isinstance(card_path, str) or not card_path or not isinstance(card_hash, str):
+            return False
+        try:
+            card_bytes = _resolve_task_card_path(card_path).read_bytes()
+        except OSError:
+            return False
+        if hashlib.sha256(card_bytes).hexdigest() != card_hash:
+            return False
+        try:
+            return parse_task_card_expected_evidence(card_bytes.decode("utf-8")) is not None
+        except (UnicodeDecodeError, ValueError):
+            return True
+
+    @staticmethod
+    def _core_blocked_receipt(
+        verified: VerifiedCandidateReceipt, verdict: Mapping[str, Any]
+    ) -> VerifiedCandidateReceipt:
+        reasons = [
+            f"AMBIENT_CORE:{code}"
+            for code in (*verdict.get("host_reason_codes", ()), *verdict.get("reason_codes", ()))
+        ]
+        return replace(
+            verified,
+            verified=False,
+            candidate_commit_allowed=False,
+            core_provenance_required=True,
+            # Never "VERIFIED" on a blocked receipt, even when Core said so;
+            # Core's own status stays in ``core_verdict``.
+            core_verification_status=f"HOST_BLOCKED:{verdict.get('core_status') or 'UNAVAILABLE'}",
+            core_verification_result_hash=str(verdict.get("projection_hash") or ""),
+            core_verdict=dict(verdict),
+            failure_reasons=[*verified.failure_reasons, *reasons],
+        )
 
     def _verify_ambient_core_candidate(
         self,
@@ -4257,35 +4311,24 @@ class SelfHostedTaskService:
         The blocked exception carries the durable blocked receipt so the
         caller can persist the verdict before failing the attempt.
         """
-        if not self._ambient_core_required(contract, request):
-            return verified
 
         def blocked(message: str, verdict: Mapping[str, Any]) -> AmbientCoreVerdictBlocked:
-            reasons = [
-                f"AMBIENT_CORE:{code}"
-                for code in (*verdict.get("host_reason_codes", ()), *verdict.get("reason_codes", ()))
-            ]
-            receipt = replace(
-                verified,
-                verified=False,
-                candidate_commit_allowed=False,
-                core_provenance_required=True,
-                core_verification_status=str(verdict.get("core_status") or "UNAVAILABLE"),
-                core_verification_result_hash=str(verdict.get("projection_hash") or ""),
-                core_verdict=dict(verdict),
-                failure_reasons=[*verified.failure_reasons, *reasons],
-            )
+            receipt = self._core_blocked_receipt(verified, verdict)
             return AmbientCoreVerdictBlocked(message, receipt=receipt, verdict=verdict)
 
         def fail_closed(code: str) -> AmbientCoreVerdictBlocked:
             verdict = build_core_verdict(contract=contract, projection=None, transport_error=code)
             return blocked(code, verdict)
 
-        if self.ambient_core_port is None:
-            raise fail_closed("AMBIENT_CORE_CONTROL_PORT_REQUIRED")
-        card_error = self._card_bound_universe_error(contract, request)
+        # Card binding first: dropping the universe must not reach the
+        # legacy short-circuit below.
+        card_error = self._card_evidence_binding_error(contract, request)
         if card_error is not None:
             raise fail_closed(card_error)
+        if not self._ambient_core_required(contract, request):
+            return verified
+        if self.ambient_core_port is None:
+            raise fail_closed("AMBIENT_CORE_CONTROL_PORT_REQUIRED")
         attempt_id = str(state.get("attempt_id") or "")
         try:
             preparation = normalize_preparation(
@@ -6669,6 +6712,10 @@ class SelfHostedTaskService:
         lane = resolve_execution_lane(request, active_mutation_tasks=active_mutations)
         requested_lane = str(request.get("execution_lane") or "").strip().upper()
         if requested_lane in {"", "DIRECT_CANONICAL"}:
+            if lane["eligible"] and self._direct_lane_claims_evidence(request):
+                # The direct lane has no Core seam; an evidence task must not
+                # use it to skip coverage (#2181).
+                raise ValueError("EXPECTED_EVIDENCE_REQUIRES_ISOLATED_TARGET")
             if lane["eligible"]:
                 if request.get("collaboration_realm") is not None:
                     raise ValueError("COLLABORATION_REALM_DIRECT_CANONICAL_UNSUPPORTED")
@@ -6694,6 +6741,9 @@ class SelfHostedTaskService:
                 "worker_order": [dispatch_binding["provider"]],
             })
         validate_task_card_binding(contract, request, is_ephemeral=self.ephemeral)
+        evidence_error = self._card_evidence_binding_error(contract, request)
+        if evidence_error is not None:
+            raise ValueError(f"TASK_CARD_EVIDENCE_BINDING_INVALID:{evidence_error}")
         identity = resolve_lifecycle_identity(contract, request, is_ephemeral=self.ephemeral)
         if (
             request.get("worker_candidate_ingress")

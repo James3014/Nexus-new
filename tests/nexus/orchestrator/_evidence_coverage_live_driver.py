@@ -111,22 +111,46 @@ def _ready_preflight(arguments: Any) -> dict[str, Any]:
     }
 
 
-def _remint_generation(request: dict[str, Any], generation: int) -> dict[str, Any]:
-    """Re-mint a self-consistent action whose universe generation differs from the card."""
+def _remint(request: dict[str, Any], mutate) -> dict[str, Any]:
+    """Re-mint a self-consistent action around a mutated bound request.
+
+    This is the strongest forgery available to a caller that can rebuild the
+    action envelope: every hash in the request agrees with itself.
+    """
     bound = json.loads(json.dumps(request["bound_action_request"]))
-    bound["expected_evidence"]["universe_generation"] = generation
+    mutate(bound)
     action = dict(request["action"])
     action["request_hash"] = canonical_request_hash(bound)
     action = LifecycleActionEnvelope.model_validate(action).model_dump(mode="json")
     forged = dict(request)
+    for field in ("expected_evidence", "core_envelope_required"):
+        forged.pop(field, None)
+        if field in bound:
+            forged[field] = bound[field]
     forged.update(
         bound_action_request=bound,
         action=action,
         request_hash=action["request_hash"],
         action_request_hash=action["request_hash"],
-        expected_evidence=bound["expected_evidence"],
     )
     return forged
+
+
+def _remint_generation(request: dict[str, Any], generation: int) -> dict[str, Any]:
+    """A universe generation that differs from the hashed card."""
+    return _remint(
+        request, lambda bound: bound["expected_evidence"].update(universe_generation=generation)
+    )
+
+
+def _remint_dropped_universe(request: dict[str, Any]) -> dict[str, Any]:
+    """The universe and the Core requirement removed from a universe card's task."""
+
+    def drop(bound: dict[str, Any]) -> None:
+        bound.pop("expected_evidence", None)
+        bound.pop("core_envelope_required", None)
+
+    return _remint(request, drop)
 
 
 def _run(root: Path, scenario: dict[str, Any]) -> dict[str, Any]:
@@ -179,6 +203,8 @@ def _run(root: Path, scenario: dict[str, Any]) -> dict[str, Any]:
     )
     if scenario.get("remint_generation") is not None:
         request = _remint_generation(request, scenario["remint_generation"])
+    if scenario.get("drop_universe"):
+        request = _remint_dropped_universe(request)
 
     state_dir = root / "state"
     service = SelfHostedTaskService(

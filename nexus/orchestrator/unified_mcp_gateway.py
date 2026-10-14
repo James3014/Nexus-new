@@ -622,25 +622,65 @@ def _resolve_github_cli() -> tuple[str | None, str | None]:
     return str(resolved), None
 
 
-def gateway_core_provenance() -> dict[str, Any]:
+CORE_PROVENANCE_RECHECK_SECONDS = 300.0
+_CORE_PROVENANCE_PUBLIC_FIELDS = ("status", "expected_revision", "observed_commit", "fail_closed")
+_core_provenance_cache: dict[str, Any] = {}
+_core_provenance_lock = threading.Lock()
+
+
+def preload_core_transport() -> bool:
+    """Bind ``product`` to the configured Core checkout before anything else can.
+
+    With ``NEXUS_CORE_REPO_ROOT`` set, the Core transport is imported at
+    Gateway startup, so the in-tree ``product`` package can never be imported
+    first (for example by an EIA call) and shadow Core for the rest of this
+    long-lived process (#2181). From then on every ``product.*`` import in
+    this process resolves to Core. Without the variable nothing is imported.
+    """
+    if not os.environ.get("NEXUS_CORE_REPO_ROOT", "").strip():
+        return False
+    import nexus.orchestrator.canonical_core_transport  # noqa: F401
+
+    return True
+
+
+def gateway_core_provenance(*, refresh: bool = False) -> dict[str, Any]:
     """Core provenance observed inside this running Gateway process (#2181).
 
-    A deploy probe reads this from the live process instead of a fresh
-    subprocess. Any failure to evaluate it is reported fail-closed.
+    Evaluated once per process and cached; the checkout identity is re-read
+    at most every ``CORE_PROVENANCE_RECHECK_SECONDS``. A deploy probe reads it
+    from the live process instead of a fresh subprocess. Any failure to
+    evaluate it is reported fail-closed, never raised.
     """
-    try:
-        from nexus.orchestrator.canonical_core_transport import core_provenance_status
+    with _core_provenance_lock:
+        cached = _core_provenance_cache.get("value")
+        checked_at = float(_core_provenance_cache.get("checked_at", 0.0))
+        if (
+            not refresh
+            and cached is not None
+            and time.monotonic() - checked_at < CORE_PROVENANCE_RECHECK_SECONDS
+        ):
+            return dict(cached)
+        try:
+            from nexus.orchestrator.canonical_core_transport import core_provenance_status
 
-        result = json.loads(json.dumps(dict(core_provenance_status()), default=str))
-    except Exception as exc:  # reported, never raised: status must stay readable
-        result = {
-            "status": "CORE_PROVENANCE_PROBE_FAILED",
-            "fail_closed": True,
-            "reason": f"{type(exc).__name__}: {exc}",
-        }
-    result["observed_in_pid"] = os.getpid()
-    result["server_instance_id"] = SERVER_INSTANCE_ID
-    return result
+            result = json.loads(json.dumps(dict(core_provenance_status()), default=str))
+        except Exception as exc:  # reported, never raised: status must stay readable
+            result = {
+                "status": "CORE_PROVENANCE_PROBE_FAILED",
+                "fail_closed": True,
+                "reason": f"{type(exc).__name__}: {exc}",
+            }
+        result["observed_in_pid"] = os.getpid()
+        result["server_instance_id"] = SERVER_INSTANCE_ID
+        _core_provenance_cache.update(value=result, checked_at=time.monotonic())
+        return dict(result)
+
+
+def public_core_provenance() -> dict[str, Any]:
+    """The unauthenticated projection: no paths and no error text."""
+    full = gateway_core_provenance()
+    return {field: full.get(field) for field in _CORE_PROVENANCE_PUBLIC_FIELDS}
 
 
 def github_observer_runtime_identity() -> dict[str, Any]:
@@ -1749,6 +1789,9 @@ class UnifiedMCPGateway:
         upstream_cache_ttl_seconds: float = 30.0,
         owner_confirmation_channel: Any = None,
     ):
+        # Startup: with a configured Core checkout, Core owns ``product`` in
+        # this process before any tool call can import the in-tree package.
+        preload_core_transport()
         if service is None:
             # The live service gets the canonical Core seam. It is lazy: only
             # tasks whose hashed card declares an expected-evidence universe

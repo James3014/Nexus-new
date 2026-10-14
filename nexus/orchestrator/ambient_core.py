@@ -163,6 +163,55 @@ def _declared_universe(contract: Any) -> dict[str, Any] | None:
     return dict(value)
 
 
+_SUBJECT_FIELDS = ("logical_subject_id", "evidence_kind", "requirement_mode", "applicability")
+
+
+def _subject_tuple(value: Mapping[str, Any]) -> tuple[str, ...]:
+    return tuple(
+        str(getattr(value.get(field), "value", value.get(field))) for field in _SUBJECT_FIELDS
+    )
+
+
+def core_universe_identity(universe: Mapping[str, Any]) -> str:
+    """The identity Core assigns to this declared universe.
+
+    Mirrors Core's ``AcceptanceContract.universe_identity``: the sha256 of the
+    canonical JSON of ``(generation, sorted subject tuples)``. Computed on the
+    host from the card declaration, so a Core response cannot redefine it.
+    """
+    value = [
+        universe.get("universe_generation"),
+        sorted(list(_subject_tuple(subject)) for subject in universe.get("subjects") or ()),
+    ]
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return "sha256:" + hashlib.sha256(encoded.encode()).hexdigest()
+
+
+def _coverage_binding_errors(coverage: Mapping[str, Any], universe: Mapping[str, Any]) -> list[str]:
+    """Every way Core coverage can fail to be exactly the declared universe."""
+    errors: list[str] = []
+    if coverage.get("universe_generation") != universe.get("universe_generation"):
+        errors.append("CORE_COVERAGE_GENERATION_MISMATCH")
+    if coverage.get("universe_identity") != core_universe_identity(universe):
+        errors.append("CORE_COVERAGE_IDENTITY_MISMATCH")
+    if coverage.get("unexpected_subjects"):
+        errors.append("CORE_COVERAGE_UNEXPECTED_SUBJECTS")
+    raw_entries = coverage.get("entries")
+    entries = raw_entries if isinstance(raw_entries, list) else []
+    if not all(isinstance(entry, Mapping) for entry in entries):
+        errors.append("CORE_COVERAGE_MALFORMED")
+        entries = [entry for entry in entries if isinstance(entry, Mapping)]
+    declared = sorted(_subject_tuple(subject) for subject in universe.get("subjects") or ())
+    observed = sorted(_subject_tuple(entry) for entry in entries)
+    # Exact multiset equality: a missing, extra, duplicated or re-kinded
+    # subject is never coverage of the declaration.
+    if observed != declared or len(set(declared)) != len(declared):
+        errors.append("CORE_COVERAGE_UNIVERSE_MISMATCH")
+    if any(entry.get("category") not in _COVERAGE_SATISFIED for entry in entries):
+        errors.append("CORE_COVERAGE_INCOMPLETE")
+    return errors
+
+
 def build_core_verdict(
     *,
     contract: Any,
@@ -208,25 +257,7 @@ def build_core_verdict(
         if not isinstance(coverage, Mapping):
             host_reasons.append("CORE_COVERAGE_MISSING")
         else:
-            if coverage.get("universe_generation") != universe.get("universe_generation"):
-                host_reasons.append("CORE_COVERAGE_GENERATION_MISMATCH")
-            entries = coverage.get("entries")
-            entries = entries if isinstance(entries, list) else []
-            observed_ids = sorted(
-                str(entry.get("logical_subject_id"))
-                for entry in entries
-                if isinstance(entry, Mapping)
-            )
-            declared_ids = sorted(
-                str(subject.get("logical_subject_id")) for subject in universe.get("subjects") or ()
-            )
-            if observed_ids != declared_ids:
-                host_reasons.append("CORE_COVERAGE_UNIVERSE_MISMATCH")
-            if any(
-                not isinstance(entry, Mapping) or entry.get("category") not in _COVERAGE_SATISFIED
-                for entry in entries
-            ):
-                host_reasons.append("CORE_COVERAGE_INCOMPLETE")
+            host_reasons.extend(_coverage_binding_errors(coverage, universe))
     blocking = bool(host_reasons)
     return {
         "schema": CORE_VERDICT_SCHEMA,
