@@ -272,10 +272,12 @@ def _tagged_pids(tag: str) -> set[int]:
                 if needle_bytes in (entry / "environ").read_bytes():
                     found.add(int(entry.name))
             except (FileNotFoundError, ProcessLookupError):
-                if _pid_alive(int(entry.name)):
+                if _pid_alive(int(entry.name)) and not _proc_is_zombie(entry):
                     raise  # environ vanished but the process lives: unknown
                 continue  # exited meanwhile
             except OSError:
+                if _proc_is_zombie(entry):
+                    continue  # a zombie's environ is unreadable; it runs nothing
                 try:
                     same_uid = entry.stat().st_uid == os.getuid()
                 except (FileNotFoundError, ProcessLookupError):
@@ -306,6 +308,15 @@ def _tagged_pids(tag: str) -> set[int]:
         if int(parts[0]) != own:
             found.add(int(parts[0]))
     return found
+
+
+def _proc_is_zombie(entry: Path) -> bool:
+    """True when ``/proc/<pid>/stat`` reports a zombie or dead task."""
+    try:
+        state = (entry / "stat").read_text().rsplit(")", 1)[1].split()[0]
+    except (OSError, IndexError):
+        return False
+    return state in ("Z", "X")
 
 
 def _process_table() -> dict[int, int]:
@@ -404,14 +415,47 @@ def _sweep_baseline() -> Optional[_SweepBaseline]:
     # A real snapshot always contains this process and its parent.
     if os.getpid() not in table or os.getppid() not in table:
         return None
+    started_at = _ps_clock_now()
+    if started_at is None:
+        return None
     return _SweepBaseline(
-        started_at=time.time(),
+        started_at=started_at,
         preexisting=frozenset(table),
         protected=frozenset(_ancestors(os.getpid(), table)),
     )
 
 
 _START_MARGIN_SECONDS = 1.0
+_LSTART_FORMAT = "%a %b %d %H:%M:%S %Y"
+
+
+def _ps_clock_now() -> Optional[float]:
+    """ "Now" on the clock ``ps -o lstart`` reports, as epoch seconds.
+
+    ``lstart`` is derived from boot time plus process start ticks, which in
+    VMs can drift seconds away from ``time.time()``; comparing a worker's
+    ``lstart`` against the wall clock would then mistake a fresh process for
+    a pre-existing one.  The start time of a ``ps`` launched now is on the
+    same clock as every later ``lstart`` reading.
+    """
+    try:
+        completed = subprocess.run(
+            ["/bin/sh", "-c", "exec ps -o lstart= -p $$"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+            env={**os.environ, "LC_ALL": "C", "LANG": "C"},
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    parts = completed.stdout.split()
+    if completed.returncode != 0 or len(parts) != 5:
+        return None
+    try:
+        return time.mktime(time.strptime(" ".join(parts), _LSTART_FORMAT))
+    except ValueError:
+        return None
 
 
 def _started_after_by_us(pids: set[int], since: float) -> Optional[set[int]]:
@@ -451,7 +495,7 @@ def _started_after_by_us(pids: set[int], since: float) -> Optional[set[int]]:
         if int(parts[0]) in seen:
             return None
         try:
-            started = time.mktime(time.strptime(" ".join(parts[2:7]), "%a %b %d %H:%M:%S %Y"))
+            started = time.mktime(time.strptime(" ".join(parts[2:7]), _LSTART_FORMAT))
         except ValueError:
             return None
         seen.add(int(parts[0]))
@@ -507,7 +551,9 @@ def _pids_with_cwd_under(
     found: set[int] = set()
     seen: set[int] = set()
     pid: Optional[int] = None
-    expect = "p"  # each record is exactly: p<pid>, fcwd, n<path>
+    # Each record is p<pid>, then fcwd (macOS lsof; Linux lsof omits it),
+    # then n<path>.
+    expect = "p"
     for line in out.splitlines():
         field = line[:1]
         if expect == "p" and field == "p" and line[1:].isdigit():
@@ -518,7 +564,7 @@ def _pids_with_cwd_under(
             expect = "f"
         elif expect == "f" and line == "fcwd":
             expect = "n"
-        elif expect == "n" and field == "n" and line[1:]:
+        elif expect in ("f", "n") and field == "n" and line[1:]:
             assert pid is not None
             cwd = os.path.realpath(line[1:])
             if any(cwd == root or cwd.startswith(root + os.sep) for root in real_roots):

@@ -1679,7 +1679,7 @@ def test_cwd_scan_fails_closed_on_name_before_pid(monkeypatch):
 @pytest.mark.parametrize(
     "listing",
     [
-        "p{me}\nn/\n",  # missing fcwd
+        "p{me}\nfcwd\nfcwd\nn/\n",  # repeated fd field
         "p{me}\nftxt\nn/\n",  # wrong fd
         "p{me}\nn/\nfcwd\n",  # name before fd
         "p{me}\nfcwd\nn/\np{me}\nfcwd\nn/\n",  # duplicate record
@@ -1744,3 +1744,31 @@ def test_tag_scan_rejects_listing_without_self(monkeypatch):
         cli_worker.subprocess, "run", lambda *a, **k: SimpleNamespace(stdout="", returncode=0)
     )
     assert cli_worker._sweep_tagged_processes("exampletag") is False
+
+
+def test_cwd_scan_accepts_linux_lsof_records_without_fd_field(monkeypatch, tmp_path):
+    """Linux lsof -Fpn prints p<pid> and n<path> only; that is a complete record."""
+    root = (tmp_path / "root").resolve()
+    root.mkdir()
+    baseline = cli_worker._SweepBaseline(
+        started_at=0.0, preexisting=frozenset(), protected=frozenset()
+    )
+    me = os.getpid()
+    out = f"p{me}\nn/\np424242\nn{root}\np1\nn/proc/1/cwd (readlink: Permission denied)\n"
+    monkeypatch.setattr(
+        cli_worker.subprocess, "run", lambda *a, **k: SimpleNamespace(stdout=out, returncode=0)
+    )
+    monkeypatch.setattr(cli_worker, "_started_after_by_us", lambda pids, since: set(pids))
+    assert cli_worker._pids_with_cwd_under((str(root),), baseline) == {424242}
+
+
+def test_baseline_uses_the_ps_clock_not_the_wall_clock(monkeypatch):
+    monkeypatch.setattr(cli_worker.time, "time", lambda: 0.0)  # wildly skewed wall clock
+    baseline = cli_worker._sweep_baseline()
+    assert baseline is not None
+    assert baseline.started_at > 1_000_000_000
+
+
+def test_baseline_fails_closed_when_ps_clock_is_unreadable(monkeypatch):
+    monkeypatch.setattr(cli_worker, "_ps_clock_now", lambda: None)
+    assert cli_worker._sweep_baseline() is None
