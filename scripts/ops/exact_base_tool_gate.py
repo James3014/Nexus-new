@@ -351,6 +351,26 @@ def fix_hint(finding: Finding) -> str:
     return "fix the failed governance check or supply the missing evidence"
 
 
+def _log_safe(line: str) -> str:
+    """One physical log line that can never be read as a GitHub workflow command.
+
+    Candidate-controlled text (paths, test ids, messages) may contain newlines or other
+    control characters; collapse them so no line can start with ``::`` (after the
+    runner trims leading whitespace) and no legacy ``##[`` command survives anywhere.
+    """
+    text = str(line)
+    indent = len(text) - len(text.lstrip(" "))
+    body = " ".join("".join(ch if ch.isprintable() else " " for ch in text).split())
+    # The runner also honours the legacy `##[command]` form anywhere in a line.
+    while "##[" in body:
+        body = body.replace("##[", "# #[")
+    # `::command::` is parsed after leading whitespace is trimmed, so pad with a
+    # non-whitespace marker rather than spaces.
+    if body.startswith("::"):
+        body = "> " + body
+    return " " * indent + body
+
+
 def render_blocking_log(report: dict[str, Any]) -> list[str]:
     """Human-readable job-log lines for a blocking report; empty when not blocking."""
     if not report.get("blocking"):
@@ -375,7 +395,7 @@ def render_blocking_log(report: dict[str, Any]) -> list[str]:
             f" (base exit {report.get('base_exit_code')}, head exit"
             f" {report.get('head_exit_code')}); see the tool step log"
         )
-    return lines
+    return [_log_safe(line) for line in lines]
 
 
 def _cli() -> int:

@@ -20,7 +20,22 @@ DETERMINISTIC_RESCUE = "deterministic_rescue"
 # A with-Nexus SUCCESS that a model call preceded but Nexus's local path delivered
 # (``local_preflight`` / ``local_hidden_shadow`` / ...): not a model solve.
 LOCAL_RESCUE = "rescued_by_local"
+# A with-Nexus SUCCESS reached only after the bench showed the arm the hidden verifier's
+# failure (deterministic hidden pre-retry or a model retry quoting the hidden test, R1).
+# The bare arm never gets that feedback, so it is never a model solve.
+HIDDEN_FEEDBACK_RESCUE = "rescued_by_hidden_feedback"
+HIDDEN_FEEDBACK_RETRY_REASONS = frozenset({
+    "hidden_verifier_failure_deterministic_pre_retry",
+    "hidden_verifier_failure_bounded_nexus_retry",
+})
 MODEL_SOLVE = "model_solve"
+# The run's captured-prompt symmetry audit failed or errored: no row of it is a solve of any kind.
+PROMPT_SYMMETRY_VIOLATION = "prompt_symmetry_violation"
+# A task x trial pair cut by an early stop: excluded from both arms' denominators symmetrically.
+NOT_RUN = "not_run"
+# Winner sources that name the model; any other non-empty source is a local/deterministic delivery.
+MODEL_WINNER_PREFIXES = ("llm", "model", "nexus_llm", "direct_")
+NON_MODEL_WINNER_SOURCES = frozenset({"nexus_llm_deterministic_pre_rescue"})
 NOT_SOLVED = "not_solved"
 RECEIPT_DATA_CONTRACT_VIOLATION = "receipt_data_contract_violation"
 SCORECARD_SCHEMA = "strict_v2_honest_scorecard_v1"
@@ -34,11 +49,32 @@ def _model_calls(row: dict[str, Any]) -> int:
 
 
 def local_delivery(row: dict[str, Any]) -> bool:
-    """True when Nexus's local/deterministic path, not the model, delivered the result."""
+    """True when Nexus's local/deterministic path, not the model, delivered the result.
 
-    return row.get("local_success_source") is True or str(
-        row.get("nexus_winner_source") or ""
-    ).startswith("local")
+    Allowlist, not denylist: only ``llm*`` / ``model*`` / ``nexus_llm*`` / ``direct_*`` (the bare
+    provider path) winner sources (minus
+    ``nexus_llm_deterministic_pre_rescue``) are model deliveries; ``deterministic_local``,
+    ``verification_only`` or any other named source is local.  An empty source (the bare arm,
+    legacy rows) is not treated as local.
+    """
+
+    if row.get("local_success_source") is True:
+        return True
+    source = str(row.get("nexus_winner_source") or "").strip().lower()
+    if not source:
+        return False
+    if source in NON_MODEL_WINNER_SOURCES:
+        return True
+    return not source.startswith(MODEL_WINNER_PREFIXES)
+
+
+def hidden_feedback_used(row: dict[str, Any]) -> bool:
+    """True when the delivered result came after hidden-verifier feedback (R1)."""
+
+    return (
+        row.get("hidden_retry_used") is True
+        or str(row.get("hidden_retry_reason") or "") in HIDDEN_FEEDBACK_RETRY_REASONS
+    )
 
 
 def receipt_contract_violation(row: dict[str, Any]) -> bool:
@@ -54,6 +90,8 @@ def apply_strict_llm_baseline_classification(
     """Tag finished rows in place; only a model-delivered SUCCESS is a model solve.
 
     * SUCCESS with no model call -> ``deterministic_rescue`` (#1820).
+    * SUCCESS only after hidden-verifier feedback (``hidden_retry_used`` / a feedback
+      ``hidden_retry_reason``) -> with-Nexus: ``rescued_by_hidden_feedback``; bare: ``not_solved``.
     * SUCCESS after a model call but delivered by Nexus's local path -> with-Nexus:
       ``rescued_by_local``; bare arm: ``not_solved`` (the bare arm has no Nexus path, so a
       local delivery there is never credited).
@@ -64,7 +102,17 @@ def apply_strict_llm_baseline_classification(
         row["strict_llm_baseline_applied"] = True
         mode = str(row.get("mode", ""))
         row["rescued_by_local"] = False
-        if row.get("status") != "SUCCESS":
+        if row.get("not_run"):
+            row["solve_classification"] = NOT_RUN
+            row["deterministic_rescue"] = False
+        elif row.get("prompt_symmetry_violation"):
+            row["solve_classification"] = PROMPT_SYMMETRY_VIOLATION
+            row["deterministic_rescue"] = False
+        elif (
+            row.get("status") != "SUCCESS"
+            or str(row.get("infra_invalid_reason") or "") == "task_stop_loss_exceeded"
+        ):
+            # S16: a stop-loss overrun is a failure that stays in the denominator, both arms.
             row["solve_classification"] = NOT_SOLVED
             row["deterministic_rescue"] = False
         else:
@@ -72,6 +120,13 @@ def apply_strict_llm_baseline_classification(
             row["deterministic_rescue"] = is_rescue
             if is_rescue:
                 row["solve_classification"] = DETERMINISTIC_RESCUE
+            elif hidden_feedback_used(row):
+                row["hidden_feedback_rescue"] = True
+                if mode == WITH_NEXUS_MODE:
+                    row["solve_classification"] = HIDDEN_FEEDBACK_RESCUE
+                    row["rescued_by_local"] = True
+                else:
+                    row["solve_classification"] = NOT_SOLVED
             elif local_delivery(row):
                 if mode == WITH_NEXUS_MODE:
                     row["solve_classification"] = LOCAL_RESCUE
@@ -97,11 +152,14 @@ def honest_scorecard(rows: Iterable[dict[str, Any]], mode: str) -> dict[str, Any
     defect) and ``infra_invalid`` are reported alongside, not removed.
     """
 
-    arm = [r for r in rows if str(r.get("mode", "")) == mode]
+    arm = [r for r in rows if str(r.get("mode", "")) == mode and not r.get("not_run")]
     solved = [r for r in arm if r.get("solve_classification") == MODEL_SOLVE]
     if mode == WITH_NEXUS_MODE:
         rescued = [
-            r for r in arm if r.get("solve_classification") in {LOCAL_RESCUE, DETERMINISTIC_RESCUE}
+            r
+            for r in arm
+            if r.get("solve_classification")
+            in {LOCAL_RESCUE, DETERMINISTIC_RESCUE, HIDDEN_FEEDBACK_RESCUE}
         ]
     else:
         rescued = []
@@ -238,14 +296,23 @@ def apply_strict_llm_baseline_to_summary(
     rows: list[dict[str, Any]],
     summary: dict[str, dict[str, Any]],
 ) -> dict[str, dict[str, Any]]:
-    """Recompute solve counts per arm so deterministic rescues are not solves."""
+    """Recompute solve counts per arm so deterministic rescues are not solves.
+
+    S16: the denominator is every row of the arm. ESCALATE (no model call) and stop-loss rows are
+    failures, never removed as ineligible; ``run_eligible_n`` is reported alongside.
+    """
 
     for mode, arm in summary.items():
         eligible = [
-            row
-            for row in rows
-            if str(row.get("mode", "")) == mode and bool(row.get("run_eligible", True))
+            row for row in rows if str(row.get("mode", "")) == mode and not row.get("not_run")
         ]
+        arm["run_eligible_n"] = sum(1 for row in eligible if bool(row.get("run_eligible", True)))
+        arm["unpaired_completed_n"] = sum(
+            1 for row in rows if str(row.get("mode", "")) == mode and row.get("unpaired_completed")
+        )
+        arm["not_run_n"] = sum(
+            1 for row in rows if str(row.get("mode", "")) == mode and row.get("not_run")
+        )
         solved = [row for row in eligible if row.get("solve_classification") == MODEL_SOLVE]
         first_pass = [row for row in solved if int(row.get("attempt_count", 0) or 0) <= 1]
         arm["strict_llm_baseline_applied"] = True

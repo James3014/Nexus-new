@@ -2778,3 +2778,48 @@ def test_classify_cli_prints_mismatch_reasons_when_blocking(tmp_path, capsys):
     payload = json.loads(output.read_text(encoding="utf-8"))
     assert payload["classification"] == "IMPACT_UNKNOWN"
     assert any("absent on head" in item for item in payload["mismatch_reasons"])
+
+
+def test_classify_cli_log_cannot_emit_workflow_commands_from_test_ids(tmp_path, capsys):
+    from dataclasses import asdict
+
+    from scripts.ops import pr_impact_gate
+
+    existing = "tests.test_contract::test_existing"
+    hostile = "tests.test_contract::test_x[\n::warning::injected\r::add-mask::y ##[error]z]"
+    base = _with_node_outcomes(_run(0, [], revision="base"), passed=[existing, hostile])
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"), passed=[existing], test_inventory_tree="f" * 40
+    )
+    base_path = tmp_path / "base-result.json"
+    head_path = tmp_path / "head-result.json"
+    base_path.write_text(json.dumps(asdict(base)), encoding="utf-8")
+    head_path.write_text(json.dumps(asdict(head)), encoding="utf-8")
+
+    status = pr_impact_gate.main([
+        "classify",
+        "--base-result",
+        str(base_path),
+        "--head-result",
+        str(head_path),
+        "--output",
+        str(tmp_path / "classification.json"),
+    ])
+
+    assert status == 1
+    log = capsys.readouterr().out
+    assert "Exact-base impact gate BLOCKED: IMPACT_UNKNOWN" in log
+    assert not any(line.lstrip().startswith("::") for line in log.splitlines())
+    assert "\r" not in log
+    assert "##[" not in log
+    payload = json.loads((tmp_path / "classification.json").read_text(encoding="utf-8"))
+    assert any("##[error]z" in item for item in payload["mismatch_reasons"])
+
+
+def test_json_log_safe_round_trips_and_defuses_legacy_commands():
+    from scripts.ops.pr_impact_gate import _json_log_safe
+
+    payload = {"reason": "x ##[error]y ###[z", "paths": ["a/##[warning]b.py"]}
+    text = _json_log_safe(json.dumps(payload, indent=2))
+    assert "##[" not in text
+    assert json.loads(text) == payload
