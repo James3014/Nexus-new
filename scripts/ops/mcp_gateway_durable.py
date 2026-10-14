@@ -2278,6 +2278,13 @@ def _r1_materialize_recovery_store_pair(
     target_request: GatewayRecoveryRequest,
     target_request_bytes: bytes,
 ) -> tuple[bytes, bytes]:
+    # #1995 (Codex P1): refuse every materialization branch, authority store
+    # present or not, when the ledger was lost after R1 rows existed.
+    ledger = GatewayLedger(Path(GATEWAY_STATE_ROOT) / "ledger.jsonl")
+    with InterProcessLock(ledger.lock_path):
+        lost = _r1_ledger_lost_reason(ledger.path)
+    if lost is not None:
+        raise _gateway_error(lost)
     authority_path = _safe_store_path(
         GATEWAY_RECOVERY_AUTHORITY_STORE,
         leaf_mode=0o600,
@@ -2899,6 +2906,7 @@ def _r1_last_states(rows: list[dict[str, Any]]) -> dict[str, str]:
 # (also the v1 CLI request store); deployment worktrees are excluded (derived,
 # rebuildable caches, not evidence of a ledger-recorded request).
 _R1_PRIOR_STATE_FILES = (
+    "r1-ledger-genesis.json",
     "recovery-authority.json",
     "recovery-actuator-bootstrap-consumed.json",
 )
@@ -2924,6 +2932,40 @@ def _r1_prior_state_evidence(state_root: Path, *, exclude: Path | None = None) -
     if reconciles.exists() or reconciles.is_symlink():
         evidence.append(R1_OWNER_RECONCILE_DIRNAME)
     return evidence
+
+
+# #1995 (Codex P1 at c38881d11): written next to the ledger right after the
+# first R1 row is appended (and backfilled by any read that sees R1 rows). It
+# is the one signal that cannot predate the ledger: recovery-authority.json,
+# the materialization receipt and the bootstrap marker all legitimately exist
+# before the first REQUESTED row of a first-ever run.
+R1_LEDGER_GENESIS_FILENAME = "r1-ledger-genesis.json"
+_R1_LEDGER_GENESIS_BYTES = b'{"schema":"nexus.gateway.r1_ledger_genesis.v1"}'
+
+
+def _r1_ensure_ledger_genesis(ledger_path: Path) -> None:
+    _r1_materialize_value_store(
+        Path(ledger_path).parent / R1_LEDGER_GENESIS_FILENAME, _R1_LEDGER_GENESIS_BYTES
+    )
+
+
+def _r1_ledger_lost_reason(ledger_path: Path) -> str | None:
+    """Central check: the ledger is absent although R1 rows provably existed.
+
+    Used by every ledger read (so the REQUESTED append, live recovery and
+    materialization all fail closed). Pure v1 hosts never have these signals.
+    """
+    ledger_path = Path(ledger_path)
+    if ledger_path.exists() or ledger_path.is_symlink():
+        return None
+    evidence = [
+        name
+        for name in (R1_LEDGER_GENESIS_FILENAME, R1_OWNER_RECONCILE_DIRNAME)
+        if (ledger_path.parent / name).exists() or (ledger_path.parent / name).is_symlink()
+    ]
+    if not evidence:
+        return None
+    return f"{R1_LEDGER_MISSING_WITH_PRIOR_STATE_FAIL_CLOSED}:{','.join(evidence)}"
 
 
 def _r1_missing_ledger_reason(store: "GatewayLedger", *, exclude: Path | None = None) -> str | None:
@@ -3262,6 +3304,9 @@ class GatewayLedger:
         if self.path.is_symlink():
             raise LedgerCorruption("ledger symlink rejected")
         if not self.path.exists():
+            lost = _r1_ledger_lost_reason(self.path)
+            if lost is not None:
+                raise LedgerCorruption(lost)
             return []
         self.path = _safe_store_path(self.path, size_bound=MAX_GATEWAY_LEDGER_BYTES)
         info = os.stat(self.path)
@@ -3417,6 +3462,11 @@ class GatewayLedger:
             last_schema[row["request_id"]] = row["schema"]
             if len(rows) > MAX_GATEWAY_LEDGER_RECORDS:
                 raise LedgerCorruption("ledger record limit exceeded")
+        if _r1_last_states(rows) and not (self.path.parent / R1_LEDGER_GENESIS_FILENAME).exists():
+            # Backfill for ledgers written before the genesis marker existed.
+            # Best effort: a read must never fail because of it.
+            with contextlib.suppress(OSError, GatewayContractError):
+                _r1_ensure_ledger_genesis(self.path)
         return rows
 
     def read(self) -> list[dict[str, Any]]:
@@ -3565,6 +3615,9 @@ class GatewayLedger:
             _fsync_dir(self.path.parent)
         else:
             _atomic_gateway_write(self.path, encoded)
+        # After the row is durable, so a crash in between never strands a
+        # genesis marker without a ledger (a later read backfills it).
+        _r1_ensure_ledger_genesis(self.path)
         return record
 
     @staticmethod

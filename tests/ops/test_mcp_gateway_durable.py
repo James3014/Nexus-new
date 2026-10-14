@@ -8486,12 +8486,13 @@ def test_1995_missing_ledger_after_r1_request_fails_closed_in_materialization_ga
     g.GATEWAY_REQUEST_STORE.unlink()
     assert (
         g.open_r1_recovery_blocks_effect(ledger=fixture["ledger_path"])
-        == "R1_LEDGER_MISSING_WITH_PRIOR_STATE_FAIL_CLOSED:recovery-materializations"
+        == "R1_LEDGER_MISSING_WITH_PRIOR_STATE_FAIL_CLOSED:"
+        "r1-ledger-genesis.json,recovery-materializations"
     )
 
     with pytest.raises(
         g.GatewayContractError,
-        match="R1_LEDGER_MISSING_WITH_PRIOR_STATE_FAIL_CLOSED:recovery-materializations",
+        match="R1_LEDGER_MISSING_WITH_PRIOR_STATE_FAIL_CLOSED:r1-ledger-genesis.json",
     ):
         g.gateway_recovery_materialize(_r1m_materialization_request(successor))
     assert not g.GATEWAY_RECOVERY_AUTHORITY_STORE.exists()
@@ -8622,3 +8623,90 @@ def test_1995_reconcile_rejects_path_traversal_request_ids(tmp_path, monkeypatch
         )
     assert not (ledger.path.parent / g.R1_OWNER_RECONCILE_DIRNAME).exists()
     assert sorted(p.name for p in tmp_path.rglob("escape*")) == []
+
+
+# --- #1995 Codex P1 at c38881d11: lost ledger with intact R1 stores ----------
+
+
+def _i1995_lost_ledger_after_effect(fixture, monkeypatch):
+    _r1m_clear_materialized_stores(fixture, monkeypatch)
+    materialization = _r1m_materialization_request(fixture["receipt"])
+    g.gateway_recovery_materialize(materialization)
+    ledger = g.GatewayLedger(fixture["ledger_path"], lock_path=fixture["lock_path"])
+    effect_calls = []
+    first = g._gateway_recover_with_adapters(
+        fixture["request"],
+        adapters=_r1b2_adapters(fixture, ledger, lost_ack=True, effect_calls=effect_calls),
+        ledger=ledger,
+    )
+    assert first.result == "UNCERTAIN_EFFECT" and len(effect_calls) == 1
+    assert (fixture["state"] / g.R1_LEDGER_GENESIS_FILENAME).is_file()
+    marker = fixture["state"] / "recovery-actuator-bootstrap-consumed.json"
+    marker.write_text("{}")
+    marker.chmod(0o600)
+    fixture["ledger_path"].unlink()
+    assert g.GATEWAY_RECOVERY_AUTHORITY_STORE.is_file()
+    return ledger, materialization
+
+
+def test_1995_lost_ledger_live_recovery_refuses_before_any_effect(tmp_path, monkeypatch):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    ledger, _materialization = _i1995_lost_ledger_after_effect(fixture, monkeypatch)
+    adapters = _r1b2_adapters(fixture, ledger)
+    adapters = adapters.__class__(
+        observe=adapters.observe,
+        effect=lambda _plan: pytest.fail("lost ledger must never re-invoke the effect"),
+        postflight=adapters.postflight,
+        clock=adapters.clock,
+        crash_hook=adapters.crash_hook,
+    )
+
+    with pytest.raises(
+        g.LedgerCorruption, match="^R1_LEDGER_MISSING_WITH_PRIOR_STATE_FAIL_CLOSED:"
+    ):
+        g._gateway_recover_with_adapters(fixture["request"], adapters=adapters, ledger=ledger)
+
+    assert not fixture["ledger_path"].exists()
+    assert (g.open_r1_recovery_blocks_effect(ledger=fixture["ledger_path"]) or "").startswith(
+        "R1_LEDGER_MISSING_WITH_PRIOR_STATE_FAIL_CLOSED:"
+    )
+
+
+def test_1995_lost_ledger_materialization_with_authority_present_refuses(tmp_path, monkeypatch):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    _ledger, materialization = _i1995_lost_ledger_after_effect(fixture, monkeypatch)
+    authority_before = g.GATEWAY_RECOVERY_AUTHORITY_STORE.read_bytes()
+
+    with pytest.raises(
+        g.GatewayContractError,
+        match="^R1_LEDGER_MISSING_WITH_PRIOR_STATE_FAIL_CLOSED:r1-ledger-genesis.json",
+    ):
+        g.gateway_recovery_materialize(materialization)
+
+    successor, _request, _authority = _r1m_commit_successor_generation(fixture)
+    with pytest.raises(
+        g.GatewayContractError, match="^R1_LEDGER_MISSING_WITH_PRIOR_STATE_FAIL_CLOSED:"
+    ):
+        g.gateway_recovery_materialize(_r1m_materialization_request(successor))
+    assert g.GATEWAY_RECOVERY_AUTHORITY_STORE.read_bytes() == authority_before
+    assert not fixture["ledger_path"].exists()
+
+
+def test_1995_pure_v1_ledger_absent_without_r1_state_reads_empty(tmp_path):
+    ledger = _i1995_ledger(tmp_path)
+    (ledger.path.parent / "recovery-authority.json").write_text("{}")  # predates any row
+    assert ledger.read() == []
+    assert not (ledger.path.parent / g.R1_LEDGER_GENESIS_FILENAME).exists()
+
+
+def test_1995_ledger_genesis_is_backfilled_by_reads(tmp_path):
+    ledger = _i1995_ledger(tmp_path)
+    _i1995_seed_r1(ledger, "gen1-request", ("REQUESTED",))
+    genesis = ledger.path.parent / g.R1_LEDGER_GENESIS_FILENAME
+    assert genesis.is_file()
+    genesis.unlink()
+    ledger.read()
+    assert genesis.is_file()
+    ledger.path.unlink()
+    with pytest.raises(g.LedgerCorruption, match="r1-ledger-genesis.json"):
+        ledger.read()
