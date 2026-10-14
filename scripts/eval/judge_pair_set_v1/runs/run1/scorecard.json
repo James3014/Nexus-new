@@ -1,0 +1,63 @@
+{
+  "bar": {
+    "d_consistent_correct_min": 0.8,
+    "d_margin_over_incumbent_min": 0.15,
+    "flip_rate_max": 0.1,
+    "memory_free_floor_pct": 10,
+    "p95_latency_s_max": 30.0,
+    "valid_json_min": 0.98,
+    "weakening_ranked_last_min": 0.9
+  },
+  "criteria": {
+    "c1_d_consistent_correct": false,
+    "c2_flip_rate": false,
+    "c3_valid_json": false,
+    "c4_weakening_last": true,
+    "c5_p95_latency": false,
+    "c6_host_memory": true
+  },
+  "events": [],
+  "finished_at": "2026-10-14T00:37:20.901535+00:00",
+  "loaded_models_after": [
+    {
+      "digest": "6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7",
+      "name": "qwen3.5:9b"
+    }
+  ],
+  "metrics": {
+    "b_pair_position_first_wins": 10,
+    "d_consistent_correct": 0.4,
+    "d_pairs": 40,
+    "d_per_judgment_accuracy": 0.575,
+    "errors": 14,
+    "first_judgment_latency_s": 10.389,
+    "flip_rate": 0.38333333333333336,
+    "incumbent_primary_wins_consistent_correct": 0.0,
+    "incumbent_primary_wins_per_judgment_accuracy": 0.5,
+    "judgments": 120,
+    "max_latency_s": 323.548,
+    "min_memory_free_pct": 12,
+    "p50_latency_s": 13.899,
+    "p95_latency_s": 112.623,
+    "pairs": 60,
+    "valid_json_rate": 0.8,
+    "w_judgments": 20,
+    "weakening_ranked_last": 0.95
+  },
+  "pass": false,
+  "preflight": {
+    "loaded_models_before": [],
+    "memory_free_pct": 48,
+    "pairs_jsonl_sha256": "ab2a84565b86f059c2b940386175b10b4ebc22edc6627a099ad7c81d0e1c4334",
+    "provider": {
+      "base_url": "http://127.0.0.1:11434",
+      "model": "qwen3.5:9b",
+      "timeout_sec": 180.0,
+      "worker_id": "local_qwen35_9b"
+    },
+    "started_at": "2026-10-13T23:38:39.784907+00:00",
+    "system_prompt_sha256": "8212297a58b39360ed45ad8316e05d549d1bd25bc5d38ab323067e39e225d633"
+  },
+  "receipts_jsonl_sha256": "91c6cd00a451e2be9e8d48816c1685271f76f6004ba6a81aec42c469256fc53b",
+  "run_label": "run1"
+}
