@@ -52,7 +52,10 @@ MAX_REPAIRS_PER_UNIT_LIMIT = 20
 # Closure's built-in integrity checks (whitespace, deletions, scope): one git diff
 # each, each bounded by this timeout, run once for the unit verification and once
 # for the whole-task verification of every closure cycle.  The closure module reads
-# its git timeout from here so the binding window cannot silently undercount it.
+# its integrity git timeout from here so these checks stay counted if it changes.
+# Not counted: closure's other git calls (``_run_git``, 30 s timeout each: HEAD,
+# status, diff and composition probes), which FRESHNESS_MARGIN_SECONDS only
+# partly absorbs, so the window can still under-count a worst-case cycle.
 CLOSURE_INTEGRITY_CHECK_COUNT = 3
 CLOSURE_INTEGRITY_GIT_TIMEOUT_SECONDS = 30.0
 CLOSURE_INTEGRITY_SCOPES_PER_CYCLE = 2
