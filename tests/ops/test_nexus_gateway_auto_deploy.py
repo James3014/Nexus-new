@@ -4054,12 +4054,17 @@ def test_hold_is_written_atomically(cfg: ad.Config, monkeypatch: pytest.MonkeyPa
     def full_disk(fd: int) -> None:
         raise OSError("disk full")
 
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    other = cfg.state_dir / f".HOLD.tmp.{os.getpid()}"  # a concurrent writer's file
+    other.write_text("theirs")
     with monkeypatch.context() as patch:
         patch.setattr(ad.os, "fsync", full_disk)
         with pytest.raises(OSError, match="disk full"):
             ad._set_hold(cfg, f"{ad.RECONCILE_FAILED_HOLD} x; journal kept")
     assert not cfg.hold_file.exists()
-    assert not list(cfg.state_dir.glob(".HOLD*.tmp.*"))  # no stray temp file
+    # Its own temp file is gone; another writer's is untouched.
+    assert list(cfg.state_dir.glob(".HOLD*.tmp.*")) == [other]
+    assert other.read_text() == "theirs"
     assert ad.os.fsync is real_fsync
     ad._set_hold(cfg, "owner: paused")
     assert cfg.hold_file.read_text() == "owner: paused\n"

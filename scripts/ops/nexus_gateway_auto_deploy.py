@@ -1091,9 +1091,11 @@ def _sha256(data: bytes) -> str:
 
 
 def _atomic_write(path: Path, data: bytes, mode: int = 0o644) -> None:
-    tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}")
+    # Unique per write and created exclusively: cleanup can only ever remove
+    # this write's own temp file, never a concurrent writer's (#2169 review).
+    tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}.{os.urandom(6).hex()}")
     try:
-        with open(tmp, "wb") as handle:
+        with open(tmp, "xb") as handle:
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
