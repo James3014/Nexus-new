@@ -2,5 +2,5 @@
 
 from __future__ import annotations
 
-# Tombstone (#1926): stale test (the gateway now fails closed with online_execution_not_authorized and emits no compaction telemetry); Owner approved deleting the file.
+# Tombstone (#1926): test_context_compaction_is_observation_only now asserts the current contract (unbound gateway refuses with online_execution_not_authorized, no provider call, no shadow telemetry); the file is kept because its other tests are the only coverage for live code.
 ENTRY = None
