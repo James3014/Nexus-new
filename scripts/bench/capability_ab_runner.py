@@ -16122,16 +16122,31 @@ def _run_without_nexus_impl(
             )
             reset_boundary_hash = hashlib.sha256(reset_boundary.encode("utf-8")).hexdigest()
             prompt_tests = test_source
-            prompt = (
-                f"You are {prompt_actor}. "
-                "Return ONLY valid JSON with keys status and patch. No markdown. No tool use. "
-                "The patch value must be the full updated target file content.\n"
-                f"{reset_boundary}\n\n"
-                f"Task: {task.task_desc}\n\n"
-                f"[CURRENT SOURCE]\n{original}\n\n"
-                f"[CURRENT TESTS]\n{prompt_tests}\n\n"
-                "Return the full updated file content in the patch field."
-            )
+            symmetric_edit_form = _no_nexus_task_hints()
+            if symmetric_edit_form:
+                # Like-for-like: the same output instruction (operation=replace) the with-Nexus arm
+                # gets, so the arms differ only in the Nexus blocks.
+                from nexus.research.sprint_service import SYMMETRIC_EDIT_INSTRUCTION
+
+                prompt = (
+                    f"You are {prompt_actor}. No markdown. No tool use.\n"
+                    f"{reset_boundary}\n\n"
+                    f"Task: {task.task_desc}\n\n"
+                    f"[CURRENT SOURCE]\n{original}\n\n"
+                    f"[CURRENT TESTS]\n{prompt_tests}\n\n"
+                    f"{SYMMETRIC_EDIT_INSTRUCTION}"
+                )
+            else:
+                prompt = (
+                    f"You are {prompt_actor}. "
+                    "Return ONLY valid JSON with keys status and patch. No markdown. No tool use. "
+                    "The patch value must be the full updated target file content.\n"
+                    f"{reset_boundary}\n\n"
+                    f"Task: {task.task_desc}\n\n"
+                    f"[CURRENT SOURCE]\n{original}\n\n"
+                    f"[CURRENT TESTS]\n{prompt_tests}\n\n"
+                    "Return the full updated file content in the patch field."
+                )
             prompt_sha256 = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
             direct_attempt_start = time.monotonic()
             out, raw = direct_ask(prompt=prompt, timeout_sec=_remaining_task_timeout(task_deadline, timeout_sec))
@@ -16159,6 +16174,14 @@ def _run_without_nexus_impl(
                 if out.get("provider_call_attempted") is False:  # e.g. no leasable Agy account
                     model_calls = 0
                 patch = str(out.get("patch") or "")
+                if symmetric_edit_form and not patch:
+                    # Same edit applier as the with-Nexus arm (#2101 operation JSON).
+                    from nexus.research.sprint_service import _candidate_code_from_llm_output
+
+                    applied, _edit_error = _candidate_code_from_llm_output(original, out)
+                    patch = applied or ""
+                    if patch:
+                        out["model_patch_generated"] = True
                 gateway_error_category = str(out.get("error_category", "") or "")
                 if gateway_error_category == "timeout":
                     model_calls = 0

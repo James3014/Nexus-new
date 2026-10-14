@@ -500,7 +500,7 @@ class LLMCandidateGenerator:
                 model_calls += 1
                 out, raw, unified_receipt = self._ask_unified_candidate(
                     prompt=prompt_text,
-                    payload="Return one small edit. Prefer operation=replace with exact target_snippet and replacement.",
+                    payload=_candidate_payload_instruction(),
                     task=task,
                     seed=seed,
                     attempt=idx + 1,
@@ -877,6 +877,21 @@ def _build_value_task_contract(*, source_code: str, task: str, test_source: str 
     return "[NEXUS VALUE CONTRACT]\n" + "\n".join(f"- {rule}" for rule in rules) + "\n"
 
 
+# One output instruction for both A/B arms in symmetric mode (the operation form #2101 parses):
+# the with-Nexus arm gets it as the gateway payload, the bare arm at the end of its prompt.
+SYMMETRIC_EDIT_INSTRUCTION = (
+    "Return ONLY JSON for one edit with keys status, operation, target_snippet, replacement. "
+    "Use operation=replace; target_snippet must be copied exactly from the current source and occur "
+    "there once; replacement is the new text for it."
+)
+
+
+def _candidate_payload_instruction() -> str:
+    if _symmetric_prompt_mode():
+        return SYMMETRIC_EDIT_INSTRUCTION
+    return "Return one small edit. Prefer operation=replace with exact target_snippet and replacement."
+
+
 def _build_llm_candidate_prompt(
     *, source_code: str, task: str, mutation_hint: str, test_source: str = "", codeintel_block: str = ""
 ) -> str:
@@ -888,6 +903,10 @@ def _build_llm_candidate_prompt(
     )
     contract_block += codeintel_block
     test_block = f"\nTests:\n{test_source}" if test_source else ""
+    if _symmetric_prompt_mode():
+        # The output instruction travels once, as the payload (SYMMETRIC_EDIT_INSTRUCTION); a second,
+        # conflicting "prefer patch" instruction here would differ from the bare arm.
+        return f"Task: {task}\nHint: {mutation_hint}\n{contract_block}Source:\n{source_code}{test_block}"
     if compact:
         return (
             "Return JSON. Prefer patch=<full updated target file>. "

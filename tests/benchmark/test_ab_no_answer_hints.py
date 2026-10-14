@@ -346,3 +346,73 @@ def test_strict_with_nexus_subprocess_env_disables_local_paths_and_self_heal(
     assert out["symmetric_hidden_only_gate"] is True
     assert out["hidden_verifier_passed"] is True
     assert out["status"] == "SUCCESS"
+
+
+def test_symmetric_mode_has_one_output_instruction_shared_with_the_bare_arm(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Coordinator item 4: the with-Nexus prompt carried "prefer patch" and "[PAYLOAD] prefer
+    operation=replace"; the bare arm asked for a full-file patch. Now both get one operation form."""
+
+    import json
+
+    from nexus.research.sprint_service import (
+        SYMMETRIC_EDIT_INSTRUCTION,
+        _candidate_payload_instruction,
+    )
+    from scripts.bench.capability_ab_runner import CapabilityTask, run_without_nexus
+
+    monkeypatch.setenv("NEXUS_SYMMETRIC_PROMPT", "1")
+    monkeypatch.setenv("NEXUS_BENCH_NO_TASK_HINTS", "1")
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    monkeypatch.setenv("NEXUS_GATEWAY_COMPACT_PROMPT", "1")
+
+    nexus_prompt = _build_llm_candidate_prompt(
+        source_code="def f():\n    return 1\n",
+        task="Fix f",
+        mutation_hint="baseline",
+        test_source="def test_f(): pass\n",
+    )
+    assert "Prefer patch" not in nexus_prompt
+    assert "Return JSON" not in nexus_prompt
+    assert _candidate_payload_instruction() == SYMMETRIC_EDIT_INSTRUCTION
+
+    task = CapabilityTask(
+        id="nexus-value-trust-002",
+        difficulty="hard",
+        task_type="public_bugfix",
+        task_desc="Fix an incident classifier.",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        repo_kind="neutral_fixture",
+        fixture_kind="nexus_value_trust_incident_classifier",
+    )
+    target_file, visible_test_file = _materialize_fixture(tmp_path, task)
+    seen: list[str] = []
+
+    def fake_agy(*, prompt: str, timeout_sec: int):
+        seen.append(prompt)
+        answer = {
+            "status": "ok",
+            "operation": "replace",
+            "target_snippet": "return 'resolved' if smoke_passed else 'open'",
+            "replacement": "return 'open' if not smoke_passed else ('resolved' if (semantic_evidence or {}).get('verified') else 'needs_evidence')",
+        }
+        return {**answer, "tokens_used": 5, "token_capture_status": "measured"}, json.dumps(answer)
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._ask_direct_agy_patch", fake_agy)
+    row = run_without_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=visible_test_file,
+        timeout_sec=60,
+        force_flow=None,
+        mode="agy",
+    )
+
+    assert seen and seen[0].rstrip().endswith(SYMMETRIC_EDIT_INSTRUCTION)
+    assert "full updated target file" not in seen[0]
+    # The bare arm applies the operation answer with the same applier as the with-Nexus arm.
+    assert row["status"] == "SUCCESS", row
