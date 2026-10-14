@@ -34,12 +34,14 @@ def _stage(
 
 
 def _bundle(*stages: dict) -> dict:
-    """Evidence bundle holding a record for every ref an invoked stage carries."""
+    """Evidence bundle with a REAL_INVOKED entry for every invoked stage's refs."""
 
     return {
         "entries": [
             {
                 "name": stage["name"],
+                "status": "REAL_INVOKED",
+                "invoked_real": True,
                 "physical_callable": f"capability_executor_registry:{stage['name']}",
                 "evidence_ids": list(stage.get("evidence_refs") or []),
             }
@@ -49,11 +51,26 @@ def _bundle(*stages: dict) -> dict:
     }
 
 
+def _results(*stages: dict) -> dict:
+    """Executor records with physical output for every invoked stage."""
+
+    return {
+        stage["name"]: {
+            "physical_callable": f"capability_executor_registry:{stage['name']}",
+            "evidence_refs": list(stage.get("evidence_refs") or []),
+            "response": {"response": {"outcome": {"action": "run", "output_paths": ["out.json"]}}},
+        }
+        for stage in stages
+        if stage.get("status") == "INVOKED"
+    }
+
+
 def _receipt(task_id: str, *stages: dict) -> dict:
     return {
         "task_id": task_id,
         "capabilities": list(stages),
         "capability_evidence_bundle": _bundle(*stages),
+        "capability_results": _results(*stages),
     }
 
 
@@ -477,7 +494,11 @@ def test_unresolved_refs_or_missing_receipt_present_stay_simulated() -> None:
     assert classify_receipt(out) == "simulated"
 
     # The same ref held by the bundle -> real.
-    held = {**forged, "capability_evidence_bundle": _bundle(stage)}
+    held = {
+        **forged,
+        "capability_evidence_bundle": _bundle(stage),
+        "capability_results": _results(stage),
+    }
     stages = project_unified_capability_stages([held])
     out = overlay_unified_capability_receipts([_stale_flow_receipt("pregate")], stages)[0]
     assert stages[0]["refs_resolved"] is True
@@ -490,7 +511,7 @@ def test_unresolved_refs_or_missing_receipt_present_stay_simulated() -> None:
     }
     assert project_unified_capability_stages([hollow])[0]["refs_resolved"] is False
 
-    # Resolved through the capability's own stage record (postflight stages are not in the bundle).
+    # The capability's self-reported stage record alone never resolves a ref (circular).
     record = {
         "capability_results": {
             "pregate": {
@@ -501,7 +522,7 @@ def test_unresolved_refs_or_missing_receipt_present_stay_simulated() -> None:
         }
     }
     stages = project_unified_capability_stages([{**forged, **record}])
-    assert stages[0]["refs_resolved"] is True
+    assert stages[0]["refs_resolved"] is False
 
     # receipt_present missing with a resolved ref -> simulated.
     stage["claim_boundary"] = {"simulated": False}
@@ -519,7 +540,7 @@ def test_archived_walker_leaves_no_archived_name_outside_the_audit_places() -> N
         "selected_capabilities": ["pregate", "integration_manager"],
         "forbidden_capabilities": [],
         "decision_trace": [{"capability": "integration_manager", "state": "conditional"}],
-        "signal_snapshot": {"reasons": {"integration_manager": ["x"], "pregate": ["y"]}},
+        "signal_snapshot": {"capability_reasons": {"integration_manager": ["x"], "pregate": ["y"]}},
         "stop_policy": {
             "tactical_sequence": ["pregate", "integration_manager", "claim_gate"],
             "tactical_tool_map": [
@@ -609,7 +630,7 @@ def test_archived_names_match_after_normalising_and_in_nested_lists() -> None:
         "selected_capabilities": [" integration_manager", "Integration_Manager", "pregate"],
         "conditional_capabilities": [["integration_manager"], ["pregate"]],
         "forbidden_capabilities": [],
-        "signal_snapshot": {" Integration_Manager ": {"x": 1}},
+        "signal_snapshot": {"capability_dependencies": {" Integration_Manager ": ["x"]}},
     }
     cleaned = drop_archived_capabilities(plan)
     assert cleaned["selected_capabilities"] == ["pregate"]
@@ -620,3 +641,259 @@ def test_archived_names_match_after_normalising_and_in_nested_lists() -> None:
         k: v for k, v in rest["signal_snapshot"].items() if k != "archived_capabilities_dropped"
     }
     assert "integration_manager" not in json.dumps(rest).lower()
+
+
+def test_archived_walker_only_strips_capability_contexts_and_normalises_forms() -> None:
+    from nexus.research.flow.capability_planning import drop_archived_capabilities
+
+    plan = {
+        "selected_capabilities": [
+            "IntegrationManager",
+            "integration-manager",
+            "integration\u200b_manager",
+            "capability:integration_manager",
+            "flow.integration_manager.run",
+            "integration_manager:run",
+            ("integration_manager",),
+            "pregate",
+        ],
+        "tags": ["benchmark", "integration_manager"],
+        "budget": {"benchmark": 3, "integration_manager": 1},
+        "forbidden_capabilities": [],
+        "signal_snapshot": {"ssd_route_map": {"leverage_roles": {"integration_manager": "x"}}},
+    }
+    cleaned = drop_archived_capabilities(plan)
+    assert cleaned["selected_capabilities"] == [[], "pregate"]
+    # Generic tags and budget keys are not capability contexts: untouched.
+    assert cleaned["tags"] == ["benchmark", "integration_manager"]
+    assert cleaned["budget"] == {"benchmark": 3, "integration_manager": 1}
+    assert cleaned["signal_snapshot"]["ssd_route_map"]["leverage_roles"] == {}
+    assert cleaned["forbidden_capabilities"] == ["integration_manager"]
+    assert "benchmark" not in cleaned["forbidden_capabilities"]
+
+
+def test_archived_walker_records_malformed_forbidden_list_instead_of_raising() -> None:
+    from nexus.research.flow.capability_planning import drop_archived_capabilities
+
+    cleaned = drop_archived_capabilities({
+        "selected_capabilities": ["integration_manager"],
+        "forbidden_capabilities": 7,
+    })
+    assert cleaned["selected_capabilities"] == []
+    assert cleaned["forbidden_capabilities"] == ["integration_manager"]
+    assert cleaned["archived_filter_error"] == "forbidden_capabilities_not_a_list"
+
+
+def _probe(name: str, refs: list[str], *, entries: list[dict], record: dict | None) -> dict:
+    stage = {**_stage(name, "INVOKED"), "evidence_refs": refs}
+    receipt: dict = {
+        "task_id": "t",
+        "capabilities": [stage],
+        "capability_evidence_bundle": {"entries": entries},
+    }
+    if record is not None:
+        receipt["capability_results"] = {name: record}
+    return project_unified_capability_stages([receipt])[0]
+
+
+def test_noop_executor_self_report_is_not_real_but_a_real_record_is() -> None:
+    """M1: a no-op executor's refs resolving against its own record do not make it real."""
+
+    from nexus.research.flow.unified_capability_projection import runtime_attests_real
+
+    callable_ = "capability_executor_registry:codeintel"
+    noop_record = {
+        "physical_callable": callable_,
+        "evidence_refs": ["noop:1"],
+        "response": {"status": "SUCCEEDED", "response": {"status": "SUCCEEDED"}},
+    }
+    noop_entry = {
+        "name": "codeintel",
+        "status": "REAL_INVOKED",
+        "invoked_real": True,
+        "physical_callable": callable_,
+        "evidence_ids": ["noop:1"],
+    }
+    noop = _probe("codeintel", ["noop:1"], entries=[noop_entry], record=noop_record)
+    assert noop["refs_resolved"] is False
+    assert runtime_attests_real({"name": "codeintel"}, noop) is False
+    # Self-reported record without any bundle entry: not real either.
+    alone = _probe("codeintel", ["noop:1"], entries=[], record=noop_record)
+    assert alone["refs_resolved"] is False
+
+    real_record = {
+        "physical_callable": callable_,
+        "evidence_refs": ["ev_cap_codeintel_1"],
+        "response": {
+            "response": {
+                "outcome": {
+                    "action": "lookup_implementation",
+                    "lookup_symbol": "normalize",
+                    "result": {"impacted_files": ["demo.py"]},
+                }
+            }
+        },
+    }
+    real = _probe(
+        "codeintel",
+        ["ev_cap_codeintel_1"],
+        entries=[{**noop_entry, "evidence_ids": ["ev_cap_codeintel_1"]}],
+        record=real_record,
+    )
+    assert real["refs_resolved"] is True
+    assert runtime_attests_real({"name": "codeintel"}, real) is True
+    out = overlay_unified_capability_receipts([_stale_flow_receipt("codeintel")], [real])[0]
+    assert out["claim_boundary"]["attestation_kind"] == "runtime_sealed_consistent"
+    assert out["receipt_base"]["claim_boundary"]["simulated"] is False
+
+
+def test_refs_resolve_only_through_this_capabilitys_real_invoked_entry() -> None:
+    """M2: another capability's entry, or this capability's failed entry, never resolve."""
+
+    record = {
+        "physical_callable": "capability_executor_registry:pregate",
+        "response": {"response": {"outcome": {"result": {"commands_run": 2}}}},
+    }
+    other = {
+        "name": "codeintel",
+        "status": "STUB_INVOKED",
+        "invoked_real": False,
+        "evidence_ids": ["ev_x"],
+    }
+    assert _probe("pregate", ["ev_x"], entries=[other], record=record)["refs_resolved"] is False
+    other_real = {**other, "status": "REAL_INVOKED", "invoked_real": True}
+    assert (
+        _probe("pregate", ["ev_x"], entries=[other_real], record=record)["refs_resolved"] is False
+    )
+    own_failed = {
+        "name": "pregate",
+        "status": "INVOKED_NOT_SUCCESS",
+        "invoked_real": False,
+        "physical_callable": "capability_executor_registry:pregate",
+        "evidence_ids": ["ev_x"],
+    }
+    assert (
+        _probe("pregate", ["ev_x"], entries=[own_failed], record=record)["refs_resolved"] is False
+    )
+    own_real = {**own_failed, "status": "REAL_INVOKED", "invoked_real": True}
+    assert _probe("pregate", ["ev_x"], entries=[own_real], record=record)["refs_resolved"] is True
+
+
+def test_simulation_markers_deep_truthy_and_token_forms() -> None:
+    """L1: truthy marker keys of any type, word tokens, and depth-5 nesting under response."""
+
+    from nexus.research.flow.unified_capability_projection import _declares_simulated
+
+    deep = {"response": {"a": {"b": {"c": {"d": {"e": {"simulated": True}}}}}}}
+    assert _declares_simulated(deep) is True
+    for marker in ({"stub": "true"}, {"mock": 1}, {"Simulated": "yes"}):
+        assert _declares_simulated({"response": marker}) is True, marker
+    assert _declares_simulated({"note": "ran against a MOCK provider"}) is True
+    assert _declares_simulated({"note": "Stub-backed lookup"}) is True
+    # Falsy markers and identifiers that only embed the word are not markers.
+    assert _declares_simulated({"stub": False, "mock": "false", "simulated": 0}) is False
+    assert _declares_simulated({"mask_kind": "keyword_mock", "kind": "structural_stubber"}) is False
+
+
+def test_malformed_evidence_lists_fail_closed_without_raising() -> None:
+    """L4: non-list evidence ids / refs classify simulated with a recorded reason."""
+
+    from nexus.research.flow.unified_capability_projection import runtime_attests_real
+
+    record = {
+        "physical_callable": "capability_executor_registry:pregate",
+        "response": {"response": {"outcome": {"result": {"commands_run": 2}}}},
+    }
+    bad_ids = {"name": "pregate", "status": "REAL_INVOKED", "invoked_real": True, "evidence_ids": 7}
+    stage = _probe("pregate", ["ev_x"], entries=[bad_ids], record=record)
+    assert stage["refs_resolved"] is False
+    bad_refs = {**_stage("pregate", "INVOKED"), "evidence_refs": 42}
+    row = project_unified_capability_stages([{"task_id": "t", "capabilities": [bad_refs]}])[0]
+    assert row["refs_resolved"] is False
+    assert row["projection_error"] == "evidence_refs_not_a_list"
+    assert runtime_attests_real({"name": "pregate"}, row) is False
+
+
+def test_attestation_class_transitions_real_self_reported_simulated() -> None:
+    """real (runtime-sealed) / real_self_reported (own record only) / simulated."""
+
+    from nexus.research.flow.unified_capability_projection import runtime_attestation
+    from scripts.bench.strict_llm_baseline import classify_receipt
+
+    stage = _stage("acceptance_check", "INVOKED")
+    record = {
+        "acceptance_check": {
+            "physical_callable": "capability_executor_registry:acceptance_check",
+            "evidence_refs": list(stage["evidence_refs"]),
+            "response": {"response": {"outcome": {"result": "decide_completion: UNVERIFIED"}}},
+        }
+    }
+
+    def run(receipt: dict) -> tuple[str, dict]:
+        stages = project_unified_capability_stages([receipt])
+        out = overlay_unified_capability_receipts(
+            [_stale_flow_receipt("acceptance_check")], stages
+        )[0]
+        return runtime_attestation({"name": "acceptance_check"}, stages[0]), out
+
+    # Own record only (postflight stage, no sealed bundle entry) -> real_self_reported.
+    kind, out = run({"task_id": "t", "capabilities": [stage], "capability_results": record})
+    assert kind == "real_self_reported"
+    assert out["attestation"] == "real_self_reported"
+    assert out["claim_boundary"]["simulated"] is True
+    assert out["receipt_base"]["claim_boundary"]["simulated"] is True
+    assert classify_receipt(out) == "real_self_reported"
+    rows = [{"mode": "with_nexus", "task_id": "x", "capability_receipts": [out]}]
+    from scripts.bench.strict_llm_baseline import capability_summary, classify_row_capabilities
+
+    classify_row_capabilities(rows[0])
+    assert rows[0]["capabilities_real_self_reported"] == ["acceptance_check"]
+    assert rows[0]["capabilities_real"] == []
+    assert capability_summary(rows)["capability_real_self_reported_tally"] == {
+        "acceptance_check": 1
+    }
+
+    # Sealed by the runtime in its own REAL_INVOKED bundle entry -> real.
+    sealed = {
+        "task_id": "t",
+        "capabilities": [stage],
+        "capability_results": record,
+        "capability_evidence_bundle": _bundle(stage),
+    }
+    kind, out = run(sealed)
+    assert kind == "real"
+    assert classify_receipt(out) == "real"
+
+    # Any common signal failing -> simulated, even with sealed evidence.
+    for broken in (
+        {**stage, "simulated": True},
+        {**stage, "claim_boundary": {"simulated": False}},
+        {**stage, "claim_boundary": {"simulated": True, "receipt_present": True}},
+    ):
+        kind, out = run({**sealed, "capabilities": [broken]})
+        assert kind == "simulated", broken
+        assert classify_receipt(out) == "simulated"
+    marked = {
+        "acceptance_check": {
+            **record["acceptance_check"],
+            "response": {"response": {"outcome": {"result": "simulated-run of decide"}}},
+        }
+    }
+    kind, _out = run({**sealed, "capability_results": marked})
+    assert kind == "simulated"
+
+    # A resolver crash resolves nothing.
+    kind, _out = run({**sealed, "capability_evidence_bundle": {"entries": 5}})
+    assert kind == "real_self_reported"
+
+
+def test_routing_node_upgrades_only_with_runtime_sealed_evidence() -> None:
+    from scripts.bench.strict_llm_baseline import classify_receipt
+
+    stage = _stage("research_route", "INVOKED")
+    record = _results(stage)
+    stages = project_unified_capability_stages([
+        {"task_id": "t", "capabilities": [stage], "capability_results": record}
+    ])
+    out = overlay_unified_capability_receipts([_stale_flow_receipt("research_route")], stages)[0]
+    assert classify_receipt(out) == "not_executable"  # self-reported is not enough

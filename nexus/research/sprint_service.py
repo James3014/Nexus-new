@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import copy
 import hashlib
 import json
 import os
@@ -900,9 +899,18 @@ def visible_test_target_error(repo_root: Path, test_file: str) -> str:
     return ""
 
 
+def sprint_pytest_cmd(test_file: str | None) -> list[str]:
+    """The sprint's candidate pytest command (one test file target when given)."""
+    return [sys.executable, "-m", "pytest", "-q", "--maxfail=1"] + ([test_file] if test_file else [])
+
+
 def visible_test_pytest_cmd(test_file: str) -> list[str]:
-    """The runtime verifier's pytest command: the one visible test file, nothing else."""
-    return [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", str(test_file)]
+    """The runtime verifier's pytest command: exactly the sprint's command for that one file.
+
+    Identical flags (``--maxfail=1``) keep a memoized verifier evaluation byte-identical to the
+    sprint's own run, so the self-heal ``[FAILURE]`` tail does not depend on a memo hit.
+    """
+    return sprint_pytest_cmd(str(test_file))
 
 
 def _visible_test_verdict(
@@ -1461,7 +1469,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     policy = ResearchPolicy()
     scope_files = [config.target_file] + ([config.test_file] if config.test_file else [])
     _effective_timeout = compute_time_budget(config.timeout_sec)
-    pytest_cmd = [sys.executable, "-m", "pytest", "-q", "--maxfail=1"] + ([config.test_file] if config.test_file else [])
+    pytest_cmd = sprint_pytest_cmd(config.test_file)
 
     target_path = repo_root / config.target_file
     source_code = target_path.read_text(encoding="utf-8") if target_path.exists() else ""
@@ -1567,9 +1575,12 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     visible_eval_memo: dict[tuple[str, str, int], CandidateEval] = {}
 
     visible_target_error = visible_test_target_error(repo_root, config.test_file or "")
-    # Same executor (in place / swarm), but the command names only the visible test file.
-    verifier_executor = copy.copy(executor)
-    verifier_executor.pytest_cmd = visible_test_pytest_cmd(config.test_file or "")
+    # The sprint's own executor: with a valid target its command is exactly
+    # visible_test_pytest_cmd(test_file) (one explicit file, same flags), so a memo hit and a
+    # miss produce the same evaluation.
+    if not visible_target_error and executor.pytest_cmd != visible_test_pytest_cmd(config.test_file or ""):
+        visible_target_error = "sprint_pytest_cmd_mismatch"
+    verifier_executor = executor
 
     def _runtime_visible_verifier(code: str, _seed: int) -> CandidateEval:
         hint_now = str(visible_verifier_binding["hint"])

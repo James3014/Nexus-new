@@ -158,7 +158,7 @@ def test_visible_test_target_must_be_one_regular_non_hidden_file(tmp_path: Path)
         "test_file_not_repo_relative"
     )
     cmd = visible_test_pytest_cmd("tests/test_visible.py")
-    assert cmd[1:] == ["-m", "pytest", "-q", "-p", "no:cacheprovider", "tests/test_visible.py"]
+    assert cmd[1:] == ["-m", "pytest", "-q", "--maxfail=1", "tests/test_visible.py"]
 
 
 def test_invalid_visible_target_fails_closed_without_running(tmp_path: Path) -> None:
@@ -235,3 +235,66 @@ def test_sprint_binds_no_visible_verifier_without_a_valid_test_file(
         generator = bound["generator"]
         assert generator.visible_verifier is None
         assert generator.visible_test_target_invalid == reason
+
+
+def test_memo_hit_and_miss_give_the_sprint_the_same_visible_evaluation(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """M3: the verifier runs the sprint's exact pytest command, so the self-heal input
+    (candidate stdout) is the same whether the sprint reuses the verifier's run or not."""
+
+    import re
+
+    import nexus.research.sprint_service as sprint
+
+    (tmp_path / "demo.py").write_text(SOURCE)
+    (tmp_path / "test_demo.py").write_text(
+        "from demo import normalize\n\n"
+        "def test_a():\n    assert normalize(' x ') == 'X'\n\n"
+        "def test_b():\n    assert normalize('y') == 'Y'\n"
+    )
+    seen: dict[str, Any] = {}
+
+    def make_generator(call_verifier: bool) -> type:
+        class _Generator:
+            visible_verifier = None
+            visible_test_target_invalid = ""
+            model_chain = ["m"]
+
+            def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+                pass
+
+            def generate(self, **_kwargs: Any) -> tuple[str, dict[str, Any]]:
+                if call_verifier:
+                    assert self.visible_verifier is not None
+                    seen["verifier_stdout"] = self.visible_verifier(CANDIDATE, 0).stdout
+                return CANDIDATE, {"source": "llm", "model_calls": 1, "model_name": "m"}
+
+        return _Generator
+
+    monkeypatch.setenv("NEXUS_FORCE_LLM_DESPITE_LEARN_SLO", "1")
+    monkeypatch.setenv("NEXUS_FORCE_INPLACE_EXECUTOR", "1")
+    outputs = {}
+    for call_verifier in (True, False):
+        monkeypatch.setattr(sprint, "LLMCandidateGenerator", make_generator(call_verifier))
+        result = sprint.run_hyper_sprint(
+            repo_root=tmp_path,
+            config=sprint.SprintConfig(
+                task="fix normalize",
+                target_file="demo.py",
+                test_file="test_demo.py",
+                candidate_count=1,
+                max_rounds=1,
+                llm_mode=True,
+            ),
+        )
+        llm = [c for c in result.candidates if c.candidate_code == CANDIDATE]
+        assert llm, result.candidates
+        outputs[call_verifier] = llm[0].stdout
+
+    def normalise(text: str) -> str:
+        return re.sub(r"in [0-9.]+s", "in Ns", text)
+
+    assert normalise(outputs[True]) == normalise(outputs[False])
+    assert normalise(seen["verifier_stdout"]) == normalise(outputs[True])
+    assert "1 failed" in outputs[True]  # --maxfail=1, same as the sprint's own command

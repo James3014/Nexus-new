@@ -8,8 +8,9 @@ from a deterministic/local rescue path. Under strict mode such rows are tagged
 Replay note (wiring plan PR-1): a capability receipt is real only if its boundaries say so.
 The unified-capability overlay (``nexus/research/flow/unified_capability_projection.py``)
 re-projects ``receipt_base.claim_boundary`` to real only when the runtime stage carries
-``simulated=False``, ``receipt_present=True`` and evidence refs that resolve to records in the
-runtime receipt.  Bench rows recorded before that rule (e.g. ``runs_20261014b``) carry none of
+``simulated=False``, ``receipt_present=True`` and evidence refs sealed in the capability's own
+``REAL_INVOKED`` evidence-bundle entry; refs resolving only through the executor's own record
+are reported as ``real_self_reported``.  Bench rows recorded before that rule (e.g. ``runs_20261014b``) carry none of
 these, so replaying them through the overlay classifies those capabilities simulated by design;
 regenerate the numbers from a fresh run instead of loosening the rule.
 """
@@ -41,6 +42,9 @@ MODEL_SOLVE = "model_solve"
 # routing node): reported apart from ``selected_not_invoked``; never real, never simulated.
 NOT_EXECUTABLE = "NOT_EXECUTABLE"
 NOT_EXECUTABLE_CLASS = "not_executable"
+# Receipt class for an invocation whose executor reports it ran but whose evidence the runtime
+# did not seal (set by the unified-capability overlay): never real, never simulated.
+REAL_SELF_REPORTED_CLASS = "real_self_reported"
 # A SUCCESS reached by a bounded Hyper re-run after the first attempt failed (Nexus treatment).
 NEXUS_TREATMENT_RESCUE = "rescued_by_nexus_treatment"
 # The run's captured-prompt symmetry audit failed or errored: no row of it is a solve of any kind.
@@ -251,12 +255,17 @@ def classify_receipt(receipt: dict[str, Any]) -> str:
     ``selected_not_invoked``: selected by the planner but never invoked.
     Everything else invoked (simulated=true, or no evidence) is ``simulated``.
     ``not_executable``: an explicit ``NOT_EXECUTABLE:<class>`` receipt (nothing could run).
+    ``real_self_reported``: the overlay found every runtime signal consistent but the evidence
+    refs resolve only through the executor's own record (no runtime-sealed evidence).
     """
 
     if is_not_executable(receipt):
         return NOT_EXECUTABLE_CLASS
     if not bool(receipt.get("invoked")):
         return "selected_not_invoked"
+    if str(receipt.get("attestation") or "") == REAL_SELF_REPORTED_CLASS:
+        has_refs = bool([ref for ref in (receipt.get("evidence_refs") or []) if str(ref).strip()])
+        return REAL_SELF_REPORTED_CLASS if has_refs else "simulated"
     boundary = _claim_boundary(receipt)
     simulated = False if boundary is None else boundary.get("simulated", True) is not False
     has_refs = bool([ref for ref in (receipt.get("evidence_refs") or []) if str(ref).strip()])
@@ -271,6 +280,7 @@ def classify_row_capabilities(row: dict[str, Any]) -> dict[str, Any]:
     simulated: list[str] = []
     not_invoked: list[str] = []
     not_executable: list[str] = []
+    self_reported: list[str] = []
     for receipt in row.get("capability_receipts") or []:
         if not isinstance(receipt, dict) or not receipt.get("selected", True):
             continue
@@ -284,12 +294,15 @@ def classify_row_capabilities(row: dict[str, Any]) -> dict[str, Any]:
             simulated.append(name)
         elif kind == NOT_EXECUTABLE_CLASS:
             not_executable.append(name)
+        elif kind == REAL_SELF_REPORTED_CLASS:
+            self_reported.append(name)
         else:
             not_invoked.append(name)
     row["capabilities_real"] = sorted(set(real))
     row["capabilities_real_unattested"] = sorted(set(unattested))
     row["capabilities_simulated"] = sorted(set(simulated) - set(real))
     row["capabilities_selected_not_invoked"] = sorted(set(not_invoked) - set(real) - set(simulated))
+    row["capabilities_real_self_reported"] = sorted(set(self_reported) - set(real))
     row["capabilities_not_executable"] = sorted(
         set(not_executable) - set(real) - set(simulated) - set(not_invoked)
     )
@@ -318,12 +331,14 @@ def capability_tally(rows: Iterable[dict[str, Any]]) -> dict[str, dict[str, int]
     return dict(sorted(tally.items()))
 
 
-def not_executable_tally(rows: Iterable[dict[str, Any]]) -> dict[str, int]:
-    """Per-capability count of explicit ``NOT_EXECUTABLE`` receipts over classified rows."""
+def not_executable_tally(
+    rows: Iterable[dict[str, Any]], *, field: str = "capabilities_not_executable"
+) -> dict[str, int]:
+    """Per-capability count of a separately reported receipt class (default NOT_EXECUTABLE)."""
 
     tally: dict[str, int] = {}
     for row in rows:
-        for name in row.get("capabilities_not_executable") or []:
+        for name in row.get(field) or []:
             tally[name] = tally.get(name, 0) + 1
     return dict(sorted(tally.items()))
 
@@ -354,6 +369,9 @@ def capability_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         ),
         "capability_tally": capability_tally(classified),
         "capability_not_executable_tally": not_executable_tally(classified),
+        "capability_real_self_reported_tally": not_executable_tally(
+            classified, field="capabilities_real_self_reported"
+        ),
         "solves_with_real_capability_n": len(uplift),
         "solve_without_capability_n": len(solves) - len(uplift),
         "nexus_uplift_solved_n": len(uplift),
@@ -426,6 +444,7 @@ def reclassify_report_dir(report_dir: str | Path) -> dict[str, Any]:
             "capabilities_real_unattested": r.get("capabilities_real_unattested"),
             "capabilities_simulated": r.get("capabilities_simulated"),
             "capabilities_not_executable": r.get("capabilities_not_executable"),
+            "capabilities_real_self_reported": r.get("capabilities_real_self_reported"),
             "capability_not_exercised": r.get("capability_not_exercised"),
         }
         for r in rows
