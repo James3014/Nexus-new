@@ -279,6 +279,16 @@ def _predecessor_verified_row(
             raise _succession_refusal("PREDECESSOR_LEDGER_BINDING_MISMATCH")
     terminal = selected[-1]
     state = terminal.get("state")
+    if state == "BLOCKED":
+        # #1995 item 2a: an Owner reconcile record (the Owner's chat approval,
+        # recorded by the manager) bound to this exact BLOCKED row lets exactly
+        # the next generation succeed it.
+        try:
+            reconciled = manager._r1_owner_reconcile_matches(selected)
+        except Exception as exc:
+            raise _succession_refusal("PREDECESSOR_OWNER_RECONCILE_INVALID") from exc
+        if reconciled:
+            return dict(terminal)
     if state != "VERIFIED":
         raise _succession_refusal(f"PREDECESSOR_NOT_VERIFIED:{state}")
     observed = terminal.get("observed_identity")

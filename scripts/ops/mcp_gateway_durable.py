@@ -386,20 +386,35 @@ def serve(kind: str, *, root: Path = CANONICAL_ROOT, launch_floor_head: str | No
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("action", choices=("preflight", "render", "install", "status", "reload", "uninstall", "serve-gateway", "serve-devspace",
-                                       "gateway-status", "gateway-preflight", "gateway-reload", "gateway-install-artifact", "gateway-rollback", "gateway-recover"))
+                                       "gateway-status", "gateway-preflight", "gateway-reload", "gateway-install-artifact", "gateway-rollback", "gateway-recover",
+                                       "gateway-r1-owner-reconcile"))
     p.add_argument("--launch-floor-head", dest="launch_floor_head")
     p.add_argument("--expected-head", dest="launch_floor_head", help="backward-compat alias for --launch-floor-head")
     p.add_argument("--devspace-hash"); p.add_argument("--env-file")
     p.add_argument("--devspace-root", type=Path, default=DEVSPACE_ROOT); p.add_argument("--node-path", type=Path, default=NODE_PATH)
     p.add_argument("--gateway-request", type=Path)
     p.add_argument("--gateway-evidence", type=Path)
+    # #1995 item 2a: record the Owner's chat approval for a BLOCKED R1 request.
+    p.add_argument("--request-id")
+    p.add_argument("--note")
     a = p.parse_args()
+    if (a.request_id or a.note) and a.action != "gateway-r1-owner-reconcile":
+        p.error("--request-id/--note are only accepted by gateway-r1-owner-reconcile")
     try:
         if a.action.startswith("gateway-") and (a.env_file or a.devspace_hash or a.launch_floor_head or a.devspace_root != DEVSPACE_ROOT or a.node_path != NODE_PATH):
             p.error("Gateway-only CLI accepts only fixed request/evidence stores")
         if a.env_file: globals()["ENV_PATH"] = Path(a.env_file)
         if a.action == "serve-gateway": serve("gateway", launch_floor_head=a.launch_floor_head)
         elif a.action == "serve-devspace": serve("devspace", launch_floor_head=a.launch_floor_head, devspace_hash=a.devspace_hash, devspace_root=a.devspace_root, node_path=a.node_path)
+        elif a.action == "gateway-r1-owner-reconcile":
+            if (
+                not a.request_id
+                or not a.note
+                or a.gateway_request is not None
+                or a.gateway_evidence is not None
+            ):
+                p.error("gateway-r1-owner-reconcile requires only --request-id and --note")
+            print(json.dumps(record_r1_owner_reconcile(a.request_id, a.note), sort_keys=True))
         elif a.action.startswith("gateway-"):
             if a.gateway_request is None:
                 p.error("--gateway-request is required for Gateway-only operations")
@@ -2018,6 +2033,10 @@ def _r1_materialize_value_store(path: Path, data: bytes) -> bytes:
             os.link(tmp, path)
         except FileExistsError:
             pass
+        except OSError as exc:
+            raise _gateway_error(
+                "R1 materialization store requires hard-link support", exc
+            ) from exc
         else:
             _fsync_dir(path.parent)
     finally:
@@ -2120,7 +2139,12 @@ def _r1_historical_materialized_generation(
         receipt=receipt,
         source_bundle_evidence=None,
     )
-    if rows and rows[-1].state is not DeploymentState.VERIFIED:
+    if (
+        rows
+        and rows[-1].state is not DeploymentState.VERIFIED
+        # #1995 item 2a: an Owner-reconciled BLOCKED generation may be succeeded.
+        and not _r1_owner_reconcile_matches([row.model_dump() for row in rows])
+    ):
         raise _gateway_error(
             "R1 successor requires prior terminal VERIFIED recovery"
         )
@@ -2175,6 +2199,31 @@ def _r1_replace_value_store_cas(
         return written
 
 
+def _r1_require_ledger_predecessor_gate(target_request_id: str) -> None:
+    """#1995 item 2b: the successor VERIFIED gate when recovery-authority.json is absent.
+
+    Without a historical authority store the gate runs against the ledger
+    itself: the latest other R1 request must be VERIFIED or an Owner-reconciled
+    BLOCKED. The explicit first-generation path is a ledger with no other R1
+    request at all; anything else fails closed instead of being skipped.
+    """
+    store = GatewayLedger(Path(GATEWAY_STATE_ROOT) / "ledger.jsonl")
+    with InterProcessLock(store.lock_path):
+        rows = store._scan_unlocked()
+    latest = _r1_latest_prior_request(rows, target_request_id)
+    if latest is None:
+        return
+    prior_id, prior_rows = latest
+    state = _r1_state(prior_rows[-1])
+    if state is DeploymentState.VERIFIED or _r1_owner_reconcile_matches(prior_rows):
+        return
+    raise _gateway_error(
+        "R1 materialization authority store absent and prior R1 request "
+        f"{prior_id} is {state.value}; successor requires prior terminal VERIFIED "
+        "recovery or an Owner reconcile record"
+    )
+
+
 def _r1_materialize_recovery_store_pair(
     *,
     target_receipt: RecoveryAuthorityReceipt,
@@ -2202,6 +2251,7 @@ def _r1_materialize_recovery_store_pair(
         request_bytes = None
 
     if authority_bytes is None:
+        _r1_require_ledger_predecessor_gate(target_request.request_id)
         if request_bytes not in {None, target_request_bytes}:
             raise _gateway_error(
                 "R1 successor materialization request store is foreign"
@@ -2743,6 +2793,15 @@ def _reserve_post_effect_reconcile_attempt(
 R1_CONCURRENT_RECOVERY_FORBIDDEN = "R1_CONCURRENT_RECOVERY_FORBIDDEN"
 # #1995 item 5: a legacy v1 effect may not start while any R1 request is open.
 R1_OPEN_RECOVERY_BLOCKS_V1_EFFECT = "R1_OPEN_RECOVERY_BLOCKS_V1_EFFECT"
+R1_LEDGER_CORRUPT_FAIL_CLOSED = "R1_LEDGER_CORRUPT_FAIL_CLOSED"
+R1_LEDGER_UNAVAILABLE_FAIL_CLOSED = "R1_LEDGER_UNAVAILABLE_FAIL_CLOSED"
+# #1995 item 2a: Owner reconcile after a post-effect BLOCKED R1 request.
+R1_POST_EFFECT_BLOCKED_REQUIRES_OWNER_RECONCILE = "R1_POST_EFFECT_BLOCKED_REQUIRES_OWNER_RECONCILE"
+R1_OWNER_RECONCILE_REFUSED = "R1_OWNER_RECONCILE_REFUSED"
+R1_OWNER_RECONCILE_SCHEMA = "nexus.gateway.r1_owner_reconcile.v1"
+R1_OWNER_RECONCILE_AUTHORIZATION = "OWNER_CHAT_APPROVAL"
+R1_OWNER_RECONCILE_DIRNAME = "r1-owner-reconciles"
+MAX_R1_OWNER_RECONCILE_NOTE = 1000
 
 
 def _derive_terminal_recovery_states() -> frozenset[DeploymentState]:
@@ -2780,26 +2839,221 @@ def _r1_last_states(rows: list[dict[str, Any]]) -> dict[str, str]:
     return last_state
 
 
-def _refuse_v1_effect_while_r1_open_unlocked(rows: list[dict[str, Any]], operation: str) -> None:
-    """#1995 item 5: refuse a legacy v1 Gateway effect while R1 is open.
-
-    ``rows`` must come from ``GatewayLedger._scan_unlocked`` and the ledger
-    lock must stay held across the v1 effect, so a new R1 REQUESTED cannot be
-    appended between this check and the effect.
-    """
+def _r1_open_recovery_reason(rows: list[dict[str, Any]]) -> str | None:
+    """``R1_OPEN_RECOVERY_BLOCKS_V1_EFFECT:<request_id>:<state>`` or None."""
     last_state = _r1_last_states(rows)
     open_requests = sorted(
         request_id
         for request_id, state in last_state.items()
         if DeploymentState(state) not in R1_TERMINAL_RECOVERY_STATES
     )
-    if open_requests:
-        raise GatewayContractError(
-            f"{R1_OPEN_RECOVERY_BLOCKS_V1_EFFECT}: legacy v1 {operation} refused "
-            "while R1 request(s) "
-            + ", ".join(f"{other}={last_state[other]}" for other in open_requests)
-            + " are non-terminal"
-        )
+    if not open_requests:
+        return None
+    first = open_requests[0]
+    return f"{R1_OPEN_RECOVERY_BLOCKS_V1_EFFECT}:{first}:{last_state[first]}"
+
+
+def _r1_open_recovery_blocks_effect_for(store: "GatewayLedger") -> str | None:
+    """Single implementation behind ``open_r1_recovery_blocks_effect``.
+
+    Reads under ``store.lock_path`` (reentrant, so a v1 effect that already
+    holds the ledger lock keeps holding it across its effect).
+    """
+    try:
+        with InterProcessLock(store.lock_path):
+            rows = store._scan_unlocked()
+    except LedgerCorruption as exc:
+        return f"{R1_LEDGER_CORRUPT_FAIL_CLOSED}:{exc}"
+    except (GatewayContractError, OSError) as exc:
+        return f"{R1_LEDGER_UNAVAILABLE_FAIL_CLOSED}:{exc}"
+    return _r1_open_recovery_reason(rows)
+
+
+def open_r1_recovery_blocks_effect(*, ledger: Path | None = None) -> str | None:
+    """Return why a Gateway effect must not start because of R1, else None.
+
+    ``R1_OPEN_RECOVERY_BLOCKS_V1_EFFECT:<request_id>:<state>`` for a
+    non-terminal R1 request; ``R1_LEDGER_CORRUPT_FAIL_CLOSED:...`` or
+    ``R1_LEDGER_UNAVAILABLE_FAIL_CLOSED:...`` when the ledger cannot be read
+    under its lock. Used by the legacy v1 effects and the #2153 auto-deployer.
+    """
+    store = GatewayLedger(ledger) if ledger is not None else GatewayLedger()
+    return _r1_open_recovery_blocks_effect_for(store)
+
+
+def _refuse_v1_effect_while_r1_open(store: "GatewayLedger", operation: str) -> None:
+    """#1995 item 5: refuse a legacy v1 Gateway effect while R1 is open.
+
+    The caller must hold ``store.lock_path`` across the v1 effect, so a new R1
+    REQUESTED cannot be appended between this check and the effect.
+    """
+    reason = _r1_open_recovery_blocks_effect_for(store)
+    if reason is not None:
+        raise GatewayContractError(f"{reason} (legacy v1 {operation} refused)")
+
+
+def _r1_requests_in_order(
+    rows: list[dict[str, Any]],
+) -> list[tuple[str, list[dict[str, Any]]]]:
+    """R1 requests in first-appearance order with their rows."""
+    by_request: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        if (
+            row["schema"] == "nexus.gateway.ledger.v2"
+            or row["effect_class"] == EffectClass.GATEWAY_DURABLE_RECOVERY.value
+        ):
+            by_request.setdefault(row["request_id"], []).append(row)
+    return list(by_request.items())
+
+
+def _r1_latest_prior_request(
+    rows: list[dict[str, Any]], exclude_request_id: str | None
+) -> tuple[str, list[dict[str, Any]]] | None:
+    candidates = [item for item in _r1_requests_in_order(rows) if item[0] != exclude_request_id]
+    return candidates[-1] if candidates else None
+
+
+def _r1_state(row: Mapping[str, Any]) -> DeploymentState:
+    return DeploymentState(row["state"])
+
+
+def _r1_effect_started(request_rows: list[Mapping[str, Any]]) -> bool:
+    return any(_r1_state(row) is DeploymentState.EFFECT_STARTED for row in request_rows)
+
+
+def _r1_owner_reconcile_path(request_id: str) -> Path:
+    if not isinstance(request_id, str) or not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", request_id
+    ):
+        raise GatewayContractError(f"{R1_OWNER_RECONCILE_REFUSED}: request id malformed")
+    return Path(GATEWAY_STATE_ROOT) / R1_OWNER_RECONCILE_DIRNAME / f"{request_id}.json"
+
+
+def _r1_owner_reconcile_binding(request_rows: list[Mapping[str, Any]]) -> dict[str, Any]:
+    blocked = request_rows[-1]
+    return {
+        "blocked_request_id": blocked["request_id"],
+        "blocked_request_hash": blocked["request_hash"],
+        "blocked_idempotency_fence": blocked["idempotency_fence"],
+        "blocked_row_sequence": blocked["sequence"],
+        "blocked_row_record_hash": blocked["record_hash"],
+        "blocked_after_effect": _r1_effect_started(request_rows),
+    }
+
+
+def _r1_owner_reconcile_matches(request_rows: list[Mapping[str, Any]]) -> bool:
+    """True iff a valid Owner reconcile record binds this request's BLOCKED row.
+
+    A present but malformed or mis-bound record fails closed (typed error).
+    """
+    if not request_rows or _r1_state(request_rows[-1]) is not DeploymentState.BLOCKED:
+        return False
+    path = _r1_owner_reconcile_path(request_rows[-1]["request_id"])
+    if not path.exists() and not path.is_symlink():
+        return False
+    checked = _safe_store_path(path)
+    try:
+        payload = json.loads(checked.read_text(encoding="utf-8"), object_pairs_hook=_unique_pairs)
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise _gateway_error("R1 Owner reconcile record malformed", exc) from exc
+    expected_keys = {
+        "schema",
+        "owner_authorization",
+        "note",
+        "recorded_at",
+        "record_hash",
+        *_r1_owner_reconcile_binding(request_rows),
+    }
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != expected_keys
+        or payload["schema"] != R1_OWNER_RECONCILE_SCHEMA
+        or payload["owner_authorization"] != R1_OWNER_RECONCILE_AUTHORIZATION
+        or not isinstance(payload["note"], str)
+        or not payload["note"].strip()
+        or payload["record_hash"]
+        != canonical_hash({k: v for k, v in payload.items() if k != "record_hash"})
+    ):
+        raise _gateway_error("R1 Owner reconcile record malformed")
+    binding = _r1_owner_reconcile_binding(request_rows)
+    if any(payload[key] != value for key, value in binding.items()):
+        raise _gateway_error("R1 Owner reconcile record does not bind the blocked row")
+    return True
+
+
+def _refuse_unreconciled_post_effect_blocked_unlocked(
+    rows: list[dict[str, Any]], request_id: str
+) -> None:
+    """#1995 item 2a: a new R1 request may not follow a post-effect BLOCKED.
+
+    Only the latest prior R1 request is consulted, so historical ledgers are
+    never retroactively invalid; the record is spent once a successor starts.
+    Pre-effect BLOCKED keeps the pre-#1995 behaviour (no reconcile needed).
+    """
+    if request_id in _r1_last_states(rows):
+        return
+    latest = _r1_latest_prior_request(rows, request_id)
+    if latest is None:
+        return
+    prior_id, prior_rows = latest
+    if (
+        _r1_state(prior_rows[-1]) is not DeploymentState.BLOCKED
+        or not _r1_effect_started(prior_rows)
+        or _r1_owner_reconcile_matches(prior_rows)
+    ):
+        return
+    raise GatewayContractError(
+        f"{R1_POST_EFFECT_BLOCKED_REQUIRES_OWNER_RECONCILE}: new R1 request {request_id} "
+        f"refused; R1 request {prior_id} ended BLOCKED after EFFECT_STARTED and has no "
+        "Owner reconcile record (record_r1_owner_reconcile)"
+    )
+
+
+def record_r1_owner_reconcile(
+    request_id: str,
+    note: str,
+    *,
+    ledger: Path | None = None,
+) -> dict[str, Any]:
+    """Durably record the Owner's chat approval to move past a BLOCKED R1 request.
+
+    The record names the exact latest R1 request, binds its BLOCKED ledger row
+    (sequence + record hash), is created once (atomic create-if-absent) and is
+    spent as soon as a successor R1 request starts. No signature is involved:
+    Owner authorization in this project is the Owner's approval in chat.
+    """
+    if not isinstance(note, str) or not note.strip() or len(note) > MAX_R1_OWNER_RECONCILE_NOTE:
+        raise GatewayContractError(f"{R1_OWNER_RECONCILE_REFUSED}: note required (<= 1000 chars)")
+    path = _r1_owner_reconcile_path(request_id)
+    store = GatewayLedger(ledger) if ledger is not None else GatewayLedger()
+    with InterProcessLock(store.lock_path):
+        rows = store._scan_unlocked()
+        latest = _r1_latest_prior_request(rows, None)
+        if latest is None or latest[0] != request_id:
+            raise GatewayContractError(
+                f"{R1_OWNER_RECONCILE_REFUSED}: {request_id} is not the latest R1 request"
+            )
+        request_rows = latest[1]
+        if _r1_state(request_rows[-1]) is not DeploymentState.BLOCKED:
+            raise GatewayContractError(
+                f"{R1_OWNER_RECONCILE_REFUSED}: {request_id} is "
+                f"{request_rows[-1]['state']}, not BLOCKED"
+            )
+        if _r1_owner_reconcile_matches(request_rows):
+            return json.loads(_safe_store_path(path).read_text(encoding="utf-8"))
+        values: dict[str, Any] = {
+            "schema": R1_OWNER_RECONCILE_SCHEMA,
+            **_r1_owner_reconcile_binding(request_rows),
+            "owner_authorization": R1_OWNER_RECONCILE_AUTHORIZATION,
+            "note": note,
+            "recorded_at": _current_observation_time(),
+        }
+        values["record_hash"] = canonical_hash(values)
+        raw = json.dumps(values, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        _r1_materialize_value_store(path, raw)
+        if not _r1_owner_reconcile_matches(request_rows):
+            raise _gateway_error("R1 Owner reconcile record readback mismatch")
+        return values
 
 
 def _refuse_illegal_recovery_sink_row(
@@ -3143,6 +3397,7 @@ class GatewayLedger:
                 ):
                     raise GatewayContractError("recovery ledger compare-and-swap conflict")
                 _refuse_concurrent_r1_recovery_unlocked(current, record.request_id)
+                _refuse_unreconciled_post_effect_blocked_unlocked(current, record.request_id)
                 return self._write_recovery_unlocked(rows, record)
         return self._write_recovery_unlocked(rows, record)
 
@@ -5265,7 +5520,7 @@ def install_stable_artifact(request: GatewayDeploymentRequest, *, source_root: P
     store = ledger or GatewayLedger()
     # The ledger lock stays held across the install so R1 cannot open meanwhile.
     with InterProcessLock(store.lock_path):
-        _refuse_v1_effect_while_r1_open_unlocked(store._scan_unlocked(), request.operation)
+        _refuse_v1_effect_while_r1_open(store, request.operation)
         if artifact.predecessor_sha256 and Path(artifact_path or GATEWAY_ARTIFACT).exists():
             predecessor = hashlib.sha256(
                 Path(artifact_path or GATEWAY_ARTIFACT).read_bytes()
@@ -5657,7 +5912,7 @@ def rollback_gateway(request: GatewayDeploymentRequest, *, plist_path: Path | No
     # Lock order GATEWAY_LOCK -> ledger lock (same as R1 materialization); the
     # ledger lock stays held across the effect so R1 cannot open meanwhile.
     with InterProcessLock(GATEWAY_LOCK), InterProcessLock(store.lock_path):
-        _refuse_v1_effect_while_r1_open_unlocked(store._scan_unlocked(), request.operation)
+        _refuse_v1_effect_while_r1_open(store, request.operation)
         if capture.loaded:
             result = run("launchctl", "bootout", f"{UID_TARGET}/{GATEWAY_LABEL}")
             if getattr(result, "returncode", 0) not in (0, None) and not _legacy_absent_service(result, ("launchctl", "bootout", f"{UID_TARGET}/{GATEWAY_LABEL}")):
@@ -5728,7 +5983,7 @@ def gateway_reload(request: GatewayDeploymentRequest, *, observed: Mapping[str, 
                 raise _gateway_error("duplicate or uncertain request requires physical reconciliation")
             if existing["state"] == DeploymentState.VERIFIED.value:
                 return {"state": existing["state"], "replayed": True, "request_id": request.request_id}
-        _refuse_v1_effect_while_r1_open_unlocked(rows, request.operation)
+        _refuse_v1_effect_while_r1_open(store, request.operation)
 
         # Persist the legal lifecycle chain while this same lock remains held.
         def append_state(state: DeploymentState, observed_identity: Mapping[str, Any] | None = None) -> dict[str, Any]:

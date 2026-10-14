@@ -102,6 +102,10 @@ class FakeManager:
     def _safe_store_path(self, path, **_kwargs):
         return Path(path)
 
+    def _r1_owner_reconcile_matches(self, rows):
+        # #1995 item 2a double: tests opt in by naming reconciled request ids.
+        return rows[-1]["request_id"] in getattr(self, "owner_reconciled", set())
+
     def _r1_materialize_value_store(self, path, data):
         path = Path(path)
         if path.exists():
@@ -808,3 +812,42 @@ def test_1995_persist_consumption_two_writers_exactly_one_wins(tmp_path, monkeyp
     assert "store drift" in str(losers[0])
     assert b._load_consumption(real_manager) == stored
     assert sorted(p.name for p in root.glob(f".{marker.name}.*")) == []
+
+
+# --- #1995 item 2a: Owner reconcile lets exactly the next generation succeed --
+
+
+@pytest.mark.parametrize(
+    "states",
+    [[*_VERIFIED_PATH[:5], "BLOCKED"], ["REQUESTED", "BLOCKED"]],
+    ids=["blocked-after-effect", "blocked-pre-effect"],
+)
+def test_1995_owner_reconciled_blocked_predecessor_allows_succession(tmp_path, states):
+    manager = FakeManager(tmp_path / "gateway-direct")
+    b._run_bootstrap(manager)
+    _append_ledger(manager, _current_marker_entry(manager), states)
+    manager.owner_reconciled = {"request-v1"}
+    manager.advance_generation("2")
+
+    result = b._run_bootstrap(manager)
+
+    assert result["request_id"] == "request-v2"
+    second = json.loads(_marker_bytes(manager))["generations"][-1]
+    assert second["predecessor_request_id"] == "request-v1"
+    assert second["predecessor_verified_ledger_sequence"] == len(states)
+
+
+def test_1995_invalid_owner_reconcile_blocks_succession(tmp_path):
+    manager = FakeManager(tmp_path / "gateway-direct")
+    b._run_bootstrap(manager)
+    _append_ledger(manager, _current_marker_entry(manager), [*_VERIFIED_PATH[:5], "BLOCKED"])
+    marker_before = _marker_bytes(manager)
+
+    def invalid(_rows):
+        raise real_manager.GatewayContractError("R1 Owner reconcile record malformed")
+
+    manager._r1_owner_reconcile_matches = invalid
+    manager.advance_generation("2")
+    with pytest.raises(b.BootstrapError, match="PREDECESSOR_OWNER_RECONCILE_INVALID$"):
+        b._run_bootstrap(manager)
+    assert _marker_bytes(manager) == marker_before
