@@ -945,6 +945,43 @@ def test_seatbelt_profile_blocks_absolute_path_write_outside_target(tmp_path):
     assert len(result.seatbelt_profile_sha256) == 64
 
 
+@pytest.mark.skipif(not _seatbelt_usable(), reason="macOS sandbox-exec not usable here")
+def test_seatbelt_profile_blocks_planting_agy_workspace_customizations(tmp_path):
+    target = _target(tmp_path)
+    (target / ".agents" / "skills").mkdir(parents=True)
+    run_tmp = (tmp_path / "run-tmp").resolve()
+    (run_tmp / "home").mkdir(parents=True)
+    profile = admission.build_seatbelt_profile(run_root=run_tmp, writable_target=target)
+    code = (
+        "import os, sys\n"
+        "t = sys.argv[1]\n"
+        "results = []\n"
+        "for rel in ('.agents/hooks.json', '.agents/mcp_config.json',\n"
+        "            '.agents/plugins/p.json', '.antigravitycli/x.json',\n"
+        "            '.agents/skills/ok.md'):\n"
+        "    path = os.path.join(t, rel)\n"
+        "    try:\n"
+        "        os.makedirs(os.path.dirname(path), exist_ok=True)\n"
+        "        open(path, 'w').write('x')\n"
+        "        results.append('WROTE')\n"
+        "    except OSError:\n"
+        "        results.append('BLOCKED')\n"
+        "print(','.join(results))\n"
+    )
+    result = run_cli_worker(
+        CliWorkerRequest(
+            executable=sys.executable,
+            argv=("-c", code, str(target)),
+            cwd=str(target),
+            env={"HOME": str(run_tmp / "home"), "TMPDIR": str(run_tmp)},
+            seatbelt_profile=profile,
+        )
+    )
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout.strip() == b"BLOCKED,BLOCKED,BLOCKED,BLOCKED,WROTE"
+    assert not (target / ".agents" / "hooks.json").exists()
+
+
 def test_post_exit_sweep_kills_detached_descendants(tmp_path):
     code = (
         "import subprocess, sys\n"

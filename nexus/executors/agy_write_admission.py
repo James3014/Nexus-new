@@ -213,6 +213,14 @@ def _sbpl_path(path: Path) -> str:
     return text
 
 
+TARGET_AGY_CUSTOMIZATION_PATHS = (
+    ".agents/hooks.json",
+    ".agents/plugins",
+    ".agents/mcp_config.json",
+    ".antigravitycli",
+)
+
+
 def build_seatbelt_profile(*, run_root: Path, writable_target: Optional[Path]) -> str:
     """Deny every file write except the target and the per-run root.
 
@@ -229,6 +237,11 @@ def build_seatbelt_profile(*, run_root: Path, writable_target: Optional[Path]) -
         allow.insert(0, writable_target)
         git_entry = _sbpl_path(writable_target / ".git")
         deny = [f'  (literal "{git_entry}")', f'  (subpath "{git_entry}")']
+        # Workspace customizations agy loads on a later run in this target
+        # (hooks, plugins, MCP servers) must not be plantable by a worker.
+        for name in TARGET_AGY_CUSTOMIZATION_PATHS:
+            entry = _sbpl_path(writable_target / name)
+            deny += [f'  (literal "{entry}")', f'  (subpath "{entry}")']
     lines = [
         "(version 1)",
         "(allow default)",
