@@ -97,6 +97,10 @@ class VerifiedCandidateReceipt:
     core_change_set_hash: str = ""
     core_evidence_bundle_hash: str = ""
     core_verification_result_hash: str = ""
+    # Durable Core verdict for Core-required tasks (#2181): status, reason
+    # codes, coverage and Core provenance. None for tasks that never needed
+    # Core. It grants no approval, merge or release authority.
+    core_verdict: Optional[dict[str, object]] = None
 
 
 _VERIFIER_PYTHON_EXECUTABLE_RE = re.compile(r"python[0-9.]*(\.exe)?")

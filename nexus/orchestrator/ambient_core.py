@@ -128,3 +128,156 @@ def projection_hash(value: Mapping[str, Any]) -> str:
         value, ensure_ascii=True, sort_keys=True, separators=(",", ":"), allow_nan=False
     ).encode("utf-8")
     return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
+# --- Evidence Coverage verdict (#2181) -------------------------------------
+#
+# The host records Core's verdict durably for both outcomes. It never decides
+# coverage itself: entries, categories and status come from Core. The host
+# only checks that the verdict is bound to the declared universe and to a
+# pinned Core revision, and refuses commit otherwise. A verdict carries no
+# approval, merge or release field.
+
+CORE_VERDICT_SCHEMA = "nexus.ambient-core-verdict.v1"
+CORE_REVISION_PINNED = "CORE_REVISION_PINNED"
+_COVERAGE_SATISFIED = frozenset({"COVERED", "CONDITIONALLY_NOT_APPLICABLE"})
+
+
+class AmbientCoreVerdictBlocked(RuntimeError):
+    """Core-required verification blocked; ``receipt`` is the durable blocked receipt."""
+
+    def __init__(self, message: str, *, receipt: Any = None, verdict: Mapping[str, Any]):
+        super().__init__(message)
+        self.receipt = receipt
+        self.verdict = dict(verdict)
+
+
+def _declared_universe(contract: Any) -> dict[str, Any] | None:
+    universe = getattr(contract, "expected_evidence", None)
+    if universe is None:
+        return None
+    dump = getattr(universe, "model_dump", None)
+    value = dump(mode="json") if callable(dump) else universe
+    if not isinstance(value, Mapping):
+        raise RuntimeError("AMBIENT_CORE_UNIVERSE_INVALID")
+    return dict(value)
+
+
+def build_core_verdict(
+    *,
+    contract: Any,
+    projection: Mapping[str, Any] | None,
+    transport_error: str | None = None,
+) -> dict[str, Any]:
+    """Project one Core result (or its absence) into a durable host verdict.
+
+    ``blocking`` is True unless Core VERIFIED the candidate and, for a task
+    with a declared universe, the coverage is bound to that universe and to
+    a pinned Core revision.
+    """
+    universe = _declared_universe(contract)
+    declared = universe is not None
+    host_reasons: list[str] = []
+    core_status = None
+    reason_codes: list[str] = []
+    integrity = None
+    coverage = None
+    provenance = None
+    if transport_error is not None:
+        host_reasons.append(transport_error)
+    elif not isinstance(projection, Mapping):
+        host_reasons.append("AMBIENT_CORE_VERIFICATION_INVALID")
+    else:
+        response = projection.get("core_response")
+        verification = response.get("verification") if isinstance(response, Mapping) else None
+        if isinstance(verification, Mapping):
+            core_status = verification.get("status")
+            reason_codes = [str(item) for item in verification.get("reason_codes") or ()]
+            integrity = verification.get("integrity")
+            raw_coverage = verification.get("coverage")
+            coverage = json.loads(json.dumps(raw_coverage)) if raw_coverage is not None else None
+        raw_provenance = projection.get("core_provenance")
+        if isinstance(raw_provenance, Mapping):
+            provenance = json.loads(json.dumps(dict(raw_provenance), default=str))
+        if core_status != "VERIFIED":
+            host_reasons.append(f"AMBIENT_CORE_FAILED_VERIFICATION:{core_status or 'MISSING'}")
+    if declared and transport_error is None and isinstance(projection, Mapping):
+        if not isinstance(provenance, Mapping) or provenance.get("status") != CORE_REVISION_PINNED:
+            status = provenance.get("status") if isinstance(provenance, Mapping) else None
+            host_reasons.append(f"CORE_PROVENANCE_NOT_PINNED:{status or 'MISSING'}")
+        if not isinstance(coverage, Mapping):
+            host_reasons.append("CORE_COVERAGE_MISSING")
+        else:
+            if coverage.get("universe_generation") != universe.get("universe_generation"):
+                host_reasons.append("CORE_COVERAGE_GENERATION_MISMATCH")
+            entries = coverage.get("entries")
+            entries = entries if isinstance(entries, list) else []
+            observed_ids = sorted(
+                str(entry.get("logical_subject_id"))
+                for entry in entries
+                if isinstance(entry, Mapping)
+            )
+            declared_ids = sorted(
+                str(subject.get("logical_subject_id")) for subject in universe.get("subjects") or ()
+            )
+            if observed_ids != declared_ids:
+                host_reasons.append("CORE_COVERAGE_UNIVERSE_MISMATCH")
+            if any(
+                not isinstance(entry, Mapping) or entry.get("category") not in _COVERAGE_SATISFIED
+                for entry in entries
+            ):
+                host_reasons.append("CORE_COVERAGE_INCOMPLETE")
+    blocking = bool(host_reasons)
+    return {
+        "schema": CORE_VERDICT_SCHEMA,
+        "core_status": core_status,
+        "reason_codes": sorted(set(reason_codes)),
+        "integrity": integrity,
+        "host_reason_codes": host_reasons,
+        "blocking": blocking,
+        "universe_declared": declared,
+        "universe_generation": universe.get("universe_generation") if declared else None,
+        "universe_identity": getattr(contract, "universe_identity", None) if declared else None,
+        # Coverage is claimed only for a declared universe, never for legacy.
+        "coverage": coverage if declared else None,
+        "coverage_complete": bool(declared and not blocking),
+        "core_provenance": provenance,
+        "projection_hash": projection_hash(projection) if isinstance(projection, Mapping) else None,
+    }
+
+
+def live_core_db_path(state_dir: Any) -> str:
+    """Core session DB for one self-hosted state root (never a shared /tmp path)."""
+    from pathlib import Path
+
+    return str(Path(state_dir).expanduser().resolve() / "canonical_core" / "core_provenance.sqlite")
+
+
+class LazyCanonicalCoreControlPort:
+    """Live-path port that loads the Core transport only when a task needs it.
+
+    Legacy tasks never call this port, so they never import Core, never put a
+    Core checkout on ``sys.path`` and never create the session DB.
+    """
+
+    def __init__(self, state_dir: Any):
+        self.db_path = live_core_db_path(state_dir)
+        self._port: Any = None
+
+    def _delegate(self) -> Any:
+        if self._port is None:
+            from nexus.orchestrator.canonical_core_transport import (
+                CanonicalNexusCoreTransportPort,
+            )
+
+            self._port = CanonicalNexusCoreTransportPort(db_path=self.db_path)
+        return self._port
+
+    def open_or_reuse_mutation_binding(self, **kwargs: Any) -> Mapping[str, Any]:
+        return self._delegate().open_or_reuse_mutation_binding(**kwargs)
+
+    def revalidate_mutation_binding(self, preparation: Mapping[str, Any], **kwargs: Any) -> None:
+        return self._delegate().revalidate_mutation_binding(preparation, **kwargs)
+
+    def verify_candidate(self, **kwargs: Any) -> Mapping[str, Any]:
+        return self._delegate().verify_candidate(**kwargs)

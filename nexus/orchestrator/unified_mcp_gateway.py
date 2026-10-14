@@ -72,6 +72,7 @@ from nexus.engine.learning_policy_loader import (
     DEFAULT_GOVERNED_ADOPTION_PATH,
     DEFAULT_GOVERNED_ROLLBACK_PATH,
 )
+from nexus.orchestrator.ambient_core import LazyCanonicalCoreControlPort
 from nexus.orchestrator.canonical_mcp_ingress import (
     build_mcp_execution_context,
     reject_caller_route_overrides,
@@ -130,6 +131,7 @@ from nexus.orchestrator.standing_grant_store import (
     switch_task_card_authority,
     write_keyed_standing_grant_receipt,
 )
+from nexus.orchestrator.task_contract import parse_task_card_expected_evidence
 from nexus.services.agy_account_pool import (
     AgyAccountPoolBusyError,
     AgyAccountPoolExhaustedError,
@@ -618,6 +620,27 @@ def _resolve_github_cli() -> tuple[str | None, str | None]:
     if not resolved.is_file() or not os.access(resolved, os.X_OK):
         return None, "GitHub CLI resolved path is not an executable file"
     return str(resolved), None
+
+
+def gateway_core_provenance() -> dict[str, Any]:
+    """Core provenance observed inside this running Gateway process (#2181).
+
+    A deploy probe reads this from the live process instead of a fresh
+    subprocess. Any failure to evaluate it is reported fail-closed.
+    """
+    try:
+        from nexus.orchestrator.canonical_core_transport import core_provenance_status
+
+        result = json.loads(json.dumps(dict(core_provenance_status()), default=str))
+    except Exception as exc:  # reported, never raised: status must stay readable
+        result = {
+            "status": "CORE_PROVENANCE_PROBE_FAILED",
+            "fail_closed": True,
+            "reason": f"{type(exc).__name__}: {exc}",
+        }
+    result["observed_in_pid"] = os.getpid()
+    result["server_instance_id"] = SERVER_INSTANCE_ID
+    return result
 
 
 def github_observer_runtime_identity() -> dict[str, Any]:
@@ -1726,7 +1749,16 @@ class UnifiedMCPGateway:
         upstream_cache_ttl_seconds: float = 30.0,
         owner_confirmation_channel: Any = None,
     ):
-        self.service = service or SelfHostedTaskService()
+        if service is None:
+            # The live service gets the canonical Core seam. It is lazy: only
+            # tasks whose hashed card declares an expected-evidence universe
+            # ever load Core or open its session DB (#2181).
+            service = SelfHostedTaskService(
+                ambient_core_port=LazyCanonicalCoreControlPort(
+                    SelfHostedTaskService.canonical_state_dir()
+                )
+            )
+        self.service = service
         # Owner confirmation is never a tool argument (#1750). Without a host
         # channel that can ask the human, authority issuance fails closed.
         self._owner_confirmation_injected = owner_confirmation_channel is not None
@@ -4564,6 +4596,23 @@ class UnifiedMCPGateway:
             canonical_task_card_path=str(canonical_card_path),
             task_card_hash=task_card_hash,
         )
+        # The expected-evidence universe comes only from the hashed card,
+        # never from a tool argument (#2181).
+        try:
+            card_bytes = canonical_card_path.read_bytes()
+        except OSError as exc:
+            raise GatewayInputError(f"TASK_CARD_BINDING_INVALID:{exc}") from exc
+        if hashlib.sha256(card_bytes).hexdigest() != task_card_hash:
+            raise GatewayInputError("TASK_CARD_BINDING_MISMATCH")
+        try:
+            card_universe = parse_task_card_expected_evidence(card_bytes.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise GatewayInputError(f"TASK_CARD_BINDING_INVALID:{exc}") from exc
+        evidence_binding: dict[str, Any] = (
+            {"expected_evidence": card_universe, "core_envelope_required": True}
+            if card_universe is not None
+            else {}
+        )
         try:
             internal = build_canonical_planner_admission(
                 task_id=task_id,
@@ -4672,6 +4721,7 @@ class UnifiedMCPGateway:
         bound["task_card_required"] = True
         bound["lifecycle_identity_required"] = True
         bound.update(readiness_binding)
+        bound.update(evidence_binding)
         if authority_confirmation:
             bound["authority_change_candidate_confirmation"] = True
         action = build_action_envelope(
@@ -4726,6 +4776,7 @@ class UnifiedMCPGateway:
         request["planner_output"] = planner_output
         request["canonical_dispatch_envelope"] = canonical_dispatch_envelope
         request.update(readiness_binding)
+        request.update(evidence_binding)
         if authority_confirmation:
             request["authority_change_candidate_confirmation"] = True
         request["protected_contracts"] = protected_contracts
@@ -5873,6 +5924,7 @@ class UnifiedMCPGateway:
             "execution_lanes": ["DIRECT_CANONICAL", "ASSISTED_CANONICAL", "ISOLATED_TARGET"],
             "canonical_repo_root": str(CANONICAL_SOURCE_ROOT),
             "github_observer": github_observer_runtime_identity(),
+            "core_provenance": gateway_core_provenance(),
             "lifecycle": lifecycle,
         }
 
