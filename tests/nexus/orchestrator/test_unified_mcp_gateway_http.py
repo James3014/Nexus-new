@@ -7,6 +7,8 @@ from datetime import datetime, timedelta, timezone
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
+import pytest
+
 repo_root = str(Path(__file__).resolve().parents[3])
 if repo_root in sys.path:
     sys.path.remove(repo_root)
@@ -140,6 +142,26 @@ def test_authenticated_health_keeps_full_path_detail():
         assert payload["repo_root"].startswith("/")
         assert "repo_root_sha256" not in payload
         assert "executable_path" in payload["github_observer"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+
+
+@pytest.mark.parametrize(
+    "authorization",
+    ["Bearer wrong", "bearer secret", "Bearer ", "Bearer secret ", "Bearer s\u00e9cret"],
+)
+def test_health_with_bad_bearer_gets_only_redacted_detail(authorization):
+    """Only the exact bearer token unlocks paths; anything else gets the redacted view."""
+    server, thread = _server()
+    try:
+        request = urllib.request.Request(f"http://127.0.0.1:{server.server_port}/health")
+        request.add_header("Authorization", authorization)
+        payload = json.loads(urllib.request.urlopen(request, timeout=3).read())
+        assert "repo_root" not in payload
+        assert "repo_root_sha256" in payload
+        assert "executable_path" not in payload["github_observer"]
     finally:
         server.shutdown()
         server.server_close()

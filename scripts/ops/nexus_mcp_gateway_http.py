@@ -161,7 +161,11 @@ def build_handler(
             self.wfile.write(body)
 
         def _authorized(self) -> bool:
-            return hmac.compare_digest(self.headers.get("Authorization", ""), f"Bearer {token}")
+            # Compare bytes: a non-ASCII header must be "unauthorized", not a TypeError.
+            supplied = self.headers.get("Authorization", "").encode("utf-8", "surrogateescape")
+            return hmac.compare_digest(
+                supplied, f"Bearer {token}".encode("utf-8", "surrogateescape")
+            )
 
         def do_GET(self) -> None:
             if urlsplit(self.path).path == "/health":

@@ -1824,6 +1824,9 @@ def test_verify_commit_subcommand(capsys: pytest.CaptureFixture[str]) -> None:
 # ------------------------------------------------------- real Prober over HTTP
 
 
+REPO_ROOT_FOR_GB077 = Path(__file__).resolve().parents[2]
+
+
 def _health(commit: str, *, status: str = "ok") -> dict[str, Any]:
     return {
         "status": status,
@@ -1832,7 +1835,8 @@ def _health(commit: str, *, status: str = "ok") -> dict[str, Any]:
         "git_head": commit,
         "repo_head_at_start": commit,
         "repo_head_current": commit,
-        "repo_root_sha256": "a" * 64,
+        # GB-077 requires the hash of the evaluated root, i.e. this tree.
+        "repo_root_sha256": hashlib.sha256(str(REPO_ROOT_FOR_GB077).encode("utf-8")).hexdigest(),
         "server_instance_id": "i",
         "tool_manifest_revision": "r",
         "permission_policy_hash": "p",
