@@ -34,6 +34,55 @@ NOW = 1_760_000_000.0
 NOW_ISO = "2025-10-09T08:53:20Z"  # == NOW
 
 
+GIT_ENV = {
+    "GIT_CONFIG_GLOBAL": os.devnull,
+    "GIT_CONFIG_SYSTEM": os.devnull,
+    "GIT_TERMINAL_PROMPT": "0",
+}
+
+
+def _fixture_git(cwd: Path, *args: str) -> str:
+    env = {**os.environ, **GIT_ENV}
+    return subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+        cwd=cwd,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+class CoreOrigin:
+    """A local stand-in for James3014/nexus-core (no network in these tests)."""
+
+    path: Path
+    pin: str
+    other: str
+
+
+CORE = CoreOrigin()
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _core_origin(tmp_path_factory: pytest.TempPathFactory) -> None:
+    repo = tmp_path_factory.mktemp("nexus-core-origin")
+    _fixture_git(repo, "init", "-q", "-b", "main")
+    (repo / "product").mkdir()
+    (repo / "product" / "__init__.py").write_text("")
+    _fixture_git(repo, "add", ".")
+    _fixture_git(repo, "commit", "-q", "-m", "core one")
+    CORE.other = _fixture_git(repo, "rev-parse", "HEAD")
+    (repo / "product" / "two.py").write_text("")
+    _fixture_git(repo, "add", ".")
+    _fixture_git(repo, "commit", "-q", "-m", "core two")
+    CORE.path, CORE.pin = repo, _fixture_git(repo, "rev-parse", "HEAD")
+
+
+def _pin_source(revision: str) -> str:
+    return f'"""transport"""\n\nCANONICAL_CORE_REVISION = "{revision}"\nOTHER = 1\n'
+
+
 class Crash(BaseException):
     """Simulates the deployer process dying (not an ordinary Exception)."""
 
@@ -59,10 +108,26 @@ class FakeHost(ad.Host):
         self.lock_events: list[str] = []
         self.lock_fails = False
         self.on_reload: Callable[[int], None] | None = None
+        self.core_pin: str = CORE.pin
+        self.core_fetch_fails = False
+
+    def core_git(self, argv, cwd, timeout):
+        """Core git effects run for real against the local fixture origin."""
+        if "fetch" in argv and self.core_fetch_fails:
+            return _done(code=128, stderr="fatal: unable to access github.com")
+        env = {
+            **GIT_ENV,
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": f"url.{CORE.path}.insteadOf",
+            "GIT_CONFIG_VALUE_0": ad.CORE_REPOSITORY_URL,
+        }
+        return ad.Host.run(self, argv, cwd=cwd, env=env, timeout=timeout)
 
     def run(self, argv, *, cwd=None, env=None, timeout=1800):  # type: ignore[override]
         self.calls.append(list(argv))
         self.envs.append(env)
+        if argv[:1] == ["git"] and any("gateway-direct/core" in str(a) for a in argv):
+            return self.core_git(argv, cwd, timeout)
         if argv[:1] == ["uv"]:
             if self.sync_fails:
                 return _done(code=1, stderr="network down")
@@ -95,6 +160,8 @@ class FakeHost(ad.Host):
             (root / "scripts/ops").mkdir(parents=True)
             (root / "uv.lock").write_text("lock-bytes")
             (root / ad.ENTRYPOINT).write_text("")
+            (root / ad.CORE_PIN_FILE).parent.mkdir(parents=True)
+            (root / ad.CORE_PIN_FILE).write_text(_pin_source(self.core_pin))
             return _done()
         if "worktree" in argv and "remove" in argv:
             return _done()
@@ -148,8 +215,8 @@ class FakeProber:
         self.hook = hook
         self.calls: list[dict[str, Any]] = []
 
-    def probe(self, *, port, token, commit, root, python, timeout):
-        call = {"port": port, "commit": commit, "root": root, "python": python}
+    def probe(self, *, port, token, commit, root, python, timeout, core=None):
+        call = {"port": port, "commit": commit, "root": root, "python": python, "core": core}
         self.calls.append(call)
         if self.hook is not None:
             self.hook(call)
@@ -2039,3 +2106,268 @@ def test_journal_with_malformed_embedded_plist_is_quarantined(
 def test_live_root_rejects_non_dict_plist() -> None:
     with pytest.raises(ad.DeployError, match="NOT_A_DICT"):
         ad.live_root(plistlib.dumps(["x"]))
+
+
+# ------------------------------------------------- pinned nexus-core (#2181)
+
+
+def _core_head(checkout: Path) -> str:
+    return _fixture_git(checkout, "rev-parse", "HEAD")
+
+
+def test_candidate_runs_the_core_revision_its_tree_pins(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    result = cycle(cfg, host, prober)
+    assert result["status"] == "DEPLOYED"
+    checkout = cfg.core_checkouts / CORE.pin
+    receipt = ad.last_receipt(cfg.state_dir)
+    assert receipt["core"] == {
+        "revision": CORE.pin,
+        "root": str(checkout),
+        "repository": ad.CORE_REPOSITORY_URL,
+    }
+    # A clean, detached checkout at exactly the pinned commit.
+    assert _core_head(checkout) == CORE.pin
+    assert _fixture_git(checkout, "status", "--porcelain", "--untracked-files=all") == ""
+    assert _fixture_git(checkout, "rev-parse", "--abbrev-ref", "HEAD") == "HEAD"  # detached
+    # Both the spare-port probe and the live wrapper export it after the env file.
+    export = f'export NEXUS_CORE_REPO_ROOT="{checkout}" ; '
+    live_command = plistlib.loads(cfg.plist.read_bytes())["ProgramArguments"][2]
+    for command in (host.started[0], live_command):
+        assert export in command
+        assert command.index(export) > command.index(f'source "{cfg.env_file}"')
+    # Every candidate probe demands that exact Core.
+    assert [c["core"] for c in prober.calls] == [receipt["core"], receipt["core"]]
+
+
+def test_core_commit_already_present_is_not_fetched_again(cfg: ad.Config) -> None:
+    ad.materialize_core(cfg, FakeHost(), CORE.pin)
+    host = FakeHost()
+    host.core_fetch_fails = True  # would reject if a fetch were attempted
+    assert cycle(cfg, host, FakeProber())["status"] == "DEPLOYED"
+    assert not any("fetch" in c and str(cfg.core_bare_repo) in c for c in host.calls)
+
+
+@pytest.mark.parametrize("pin", ["not-a-sha", "abc123", "A" * 40, "g" * 40, None], ids=str)
+def test_bad_core_pin_rejects_the_candidate(cfg: ad.Config, pin: str | None) -> None:
+    before = cfg.plist.read_bytes()
+    host = FakeHost()
+    host.core_pin = pin  # type: ignore[assignment]
+    if pin is None:
+        host.core_pin = CORE.pin + '"\nCANONICAL_CORE_REVISION = "' + CORE.other  # two pins
+    result = cycle(cfg, host, FakeProber())
+    assert result["status"] == "REJECTED_BUILD"
+    assert result["receipt"]["reason"].startswith("DeployError:CORE_PIN_INVALID")
+    assert not host.started and cfg.plist.read_bytes() == before
+    assert not any(c[:1] == ["uv"] for c in host.calls)
+    assert not cfg.core_checkouts.exists()
+    # Deterministic: the same candidate is not rebuilt.
+    assert cycle(cfg, host, FakeProber(), force=False)["status"] == "CANDIDATE_REJECTED_BEFORE"
+
+
+def test_read_core_pin_parses_text_only(tmp_path: Path) -> None:
+    (tmp_path / ad.CORE_PIN_FILE).parent.mkdir(parents=True)
+    (tmp_path / ad.CORE_PIN_FILE).write_text("import sys\nsys.exit(3)\n" + _pin_source(CORE.pin))
+    assert ad.read_core_pin(tmp_path) == CORE.pin  # parsed, never executed
+    assert ad.read_core_pin(REPO_ROOT) == ad.read_core_pin(REPO_ROOT)
+    from nexus.orchestrator import canonical_core_transport as transport
+
+    assert ad.read_core_pin(REPO_ROOT) == transport.CANONICAL_CORE_REVISION
+    with pytest.raises(ad.DeployError, match="CORE_PIN_INVALID"):
+        ad.read_core_pin(tmp_path / "missing")
+
+
+@pytest.mark.parametrize("failure", ["fetch", "unknown_commit"])
+def test_core_fetch_failure_rejects_and_never_deploys_without_core(
+    cfg: ad.Config, failure: str
+) -> None:
+    before = cfg.plist.read_bytes()
+    host = FakeHost()
+    if failure == "fetch":
+        host.core_fetch_fails = True
+        expected = "CORE_FETCH_FAILED"
+    else:
+        host.core_pin = "d" * 40  # not on any nexus-core branch
+        expected = "CORE_COMMIT_NOT_FOUND"
+    result = cycle(cfg, host, FakeProber())
+    assert result["status"] == "BUILD_FAILED"
+    assert expected in result["receipt"]["reason"]
+    assert not host.started and not host.reloads and cfg.plist.read_bytes() == before
+    assert "core" not in result["receipt"]
+
+
+@pytest.mark.parametrize("dirt", ["untracked", "modified"])
+def test_dirty_core_checkout_rejects_the_candidate(cfg: ad.Config, dirt: str) -> None:
+    core = ad.materialize_core(cfg, FakeHost(), CORE.pin)
+    checkout = Path(core["root"])
+    if dirt == "untracked":
+        (checkout / "product" / "shadow.py").write_text("x = 1\n")
+    else:
+        (checkout / "product" / "__init__.py").write_text("patched = True\n")
+    before = cfg.plist.read_bytes()
+    host = FakeHost()
+    result = cycle(cfg, host, FakeProber())
+    assert result["status"] == "BUILD_FAILED"
+    assert "CORE_TREE_DIRTY" in result["receipt"]["reason"]
+    assert not host.started and cfg.plist.read_bytes() == before
+
+
+def test_core_checkout_at_wrong_head_rejects(cfg: ad.Config) -> None:
+    core = ad.materialize_core(cfg, FakeHost(), CORE.pin)
+    _fixture_git(Path(core["root"]), "checkout", "-q", "--detach", CORE.other)
+    with pytest.raises(ad.DeployError, match="CORE_HEAD_MISMATCH"):
+        ad.materialize_core(cfg, FakeHost(), CORE.pin)
+
+
+def test_core_bare_repo_origin_must_be_nexus_core(cfg: ad.Config) -> None:
+    ad.materialize_core(cfg, FakeHost(), CORE.pin)
+    _fixture_git(cfg.core_bare_repo, "remote", "set-url", "origin", "https://evil.example/c.git")
+    with pytest.raises(ad.DeployError, match="CORE_ORIGIN_MISMATCH"):
+        ad.materialize_core(cfg, FakeHost(), CORE.pin)
+
+
+def test_wrapper_exports_core_root_and_rejects_unsafe_core_path(cfg: ad.Config) -> None:
+    root, python = Path("/d/a1-x"), Path("/v/bin/python")
+    assert "NEXUS_CORE_REPO_ROOT" not in ad.wrapper_command(cfg, root, python)
+    command = ad.wrapper_command(cfg, root, python, core_root=Path("/g/core/abc"))
+    assert 'export NEXUS_CORE_REPO_ROOT="/g/core/abc" ; exec ' in command
+    with pytest.raises(ad.DeployError, match="WRAPPER_PATH_UNSAFE"):
+        ad.wrapper_command(cfg, root, python, core_root=Path('/g/core/"; rm -rf ~'))
+
+
+def test_rollback_probe_of_the_predecessor_does_not_demand_core(cfg: ad.Config) -> None:
+    prober = FakeProber({(ad.LIVE_PORT, NEW): False})
+    assert cycle(cfg, FakeHost(), prober)["status"] == "ROLLED_BACK"
+    pin = ad.last_receipt(cfg.state_dir)["core"]
+    assert [(c["commit"], c["core"]) for c in prober.calls] == [
+        (NEW, pin),
+        (NEW, pin),
+        (OLD, None),
+    ]
+
+
+def test_retention_prunes_core_checkouts_with_their_deployments(cfg: ad.Config) -> None:
+    host = FakeHost()
+    pins = {"1": CORE.other, "2": CORE.other, "3": CORE.pin}
+    for index, (char, pin) in enumerate(pins.items()):
+        deployment = cfg.deployments / f"a1-{char * 40}"
+        (deployment / ad.CORE_PIN_FILE).parent.mkdir(parents=True)
+        (deployment / ad.CORE_PIN_FILE).write_text(_pin_source(pin))
+        os.utime(deployment, (1000 + index, 1000 + index))
+    for pin in (CORE.other, CORE.pin):
+        ad.materialize_core(cfg, host, pin)
+    stray = cfg.core_checkouts / ("e" * 40)  # pinned by nothing
+    stray.mkdir()
+    keep_one = ad.Config.default(cfg.state_dir.parents[2], keep=1)
+    # a1-1 is protected (live): its Core survives while a1-2 is pruned.
+    removed = ad.prune(keep_one, host, [cfg.deployments / f"a1-{'1' * 40}"])
+    assert removed == [f"a1-{'2' * 40}"]
+    assert sorted(p.name for p in cfg.core_checkouts.iterdir()) == sorted([CORE.other, CORE.pin])
+    # Once no deployment pins CORE.other, its checkout and git worktree go with it.
+    removed = ad.prune(keep_one, host, [])
+    assert removed == [f"a1-{'1' * 40}"]
+    assert [p.name for p in cfg.core_checkouts.iterdir()] == [CORE.pin]
+    worktrees = _fixture_git(cfg.core_bare_repo, "worktree", "list", "--porcelain")
+    assert str(cfg.core_checkouts / CORE.other) not in worktrees
+
+
+def test_retention_never_follows_a_symlinked_core_dir(cfg: ad.Config, tmp_path: Path) -> None:
+    precious = tmp_path / "precious-core"
+    (precious / ("e" * 40)).mkdir(parents=True)
+    cfg.core_checkouts.symlink_to(precious)
+    assert ad.prune_refusal(cfg) == f"SYMLINKED_DIRECTORY:{cfg.core_checkouts}"
+    assert ad.prune_core(cfg, FakeHost(), []) == []
+    assert (precious / ("e" * 40)).is_dir()
+    with pytest.raises(ad.DeployError, match="CORE_PATH_SYMLINKED"):
+        ad.materialize_core(cfg, FakeHost(), CORE.pin)
+
+
+class _CoreStatusHost(ad.Host):
+    """Real host, except the Core provenance subprocess returns a canned status."""
+
+    def __init__(self, status: dict[str, Any] | None, code: int = 0) -> None:
+        self.status, self.code = status, code
+        self.core_envs: list[dict[str, str] | None] = []
+
+    def run(self, argv, *, cwd=None, env=None, timeout=1800):  # type: ignore[override]
+        if len(argv) > 2 and argv[2] == ad.CORE_PROVENANCE_PROBE_CODE:
+            self.core_envs.append(env)
+            out = json.dumps(self.status) if self.status is not None else "Traceback"
+            return _done(out + "\n", code=self.code)
+        return super().run(argv, cwd=cwd, env=env, timeout=timeout)
+
+
+def _pinned_status(core_root: Path, observed: str = NEW, expected: str = NEW) -> dict[str, Any]:
+    return {
+        "status": "CORE_REVISION_PINNED",
+        "fail_closed": False,
+        "expected_revision": expected,
+        "observed_commit": observed,
+        "source_root": str(core_root),
+    }
+
+
+@pytest.mark.parametrize(
+    ("case", "ok"),
+    [
+        ("pinned", True),
+        ("mismatch", False),
+        ("unavailable", False),
+        ("pinned_other_commit", False),
+        ("pinned_other_expectation", False),
+        ("pinned_other_root", False),
+        ("crashed", False),
+        ("no_pin", False),
+    ],
+)
+def test_real_prober_requires_core_revision_pinned(tmp_path: Path, case: str, ok: bool) -> None:
+    core_root = tmp_path / "core" / NEW
+    core_root.mkdir(parents=True)
+    status: dict[str, Any] | None = _pinned_status(core_root)
+    code = 0
+    core: dict[str, Any] = {"revision": NEW, "root": str(core_root)}
+    if case == "mismatch":
+        status = {**_pinned_status(core_root, observed=OLD), "status": "CORE_REVISION_MISMATCH"}
+    elif case == "unavailable":
+        status = {"status": "CORE_UNAVAILABLE", "reason": "CORE_PRODUCT_SHADOWED"}
+    elif case == "pinned_other_commit":
+        status = _pinned_status(core_root, observed=OLD, expected=OLD)
+    elif case == "pinned_other_expectation":
+        status = _pinned_status(core_root, expected=OLD)
+    elif case == "pinned_other_root":
+        status = _pinned_status(tmp_path / "elsewhere")
+    elif case == "crashed":
+        status, code = None, 1
+    elif case == "no_pin":
+        core = {}
+    host = _CoreStatusHost(status, code)
+    with fake_gateway(_health(NEW), 3, False) as port:
+        result = ad.Prober(host).probe(
+            port=port,
+            token="tok",
+            commit=NEW,
+            root=REPO_ROOT,
+            python=Path(sys.executable),
+            timeout=10,
+            core=core,
+        )
+    assert result["checks"]["core_provenance"]["ok"] is ok
+    assert result["ok"] is ok
+    if case != "no_pin":
+        assert host.core_envs[0]["NEXUS_CORE_REPO_ROOT"] == str(core_root)
+
+
+def test_real_core_provenance_check_rejects_a_checkout_that_is_not_core(
+    tmp_path: Path,
+) -> None:
+    """End to end with the real transport: a checkout without Core's verification
+    surface is CORE_UNAVAILABLE, so the candidate cannot pass."""
+    checkout = tmp_path / "core"
+    _fixture_git(tmp_path, "clone", "-q", str(CORE.path), str(checkout))
+    check = ad.Prober(ad.Host()).core_provenance(
+        root=REPO_ROOT,
+        python=Path(sys.executable),
+        core={"revision": CORE.pin, "root": str(checkout)},
+    )
+    assert check["ok"] is False
+    assert check.get("status") == "CORE_UNAVAILABLE"

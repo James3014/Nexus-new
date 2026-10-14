@@ -42,12 +42,39 @@ _EXACT_GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 # developer-machine path is hardcoded. The ACTUAL executed identity is always
 # derived from the imported product module (see _resolve_core_source_root).
 _configured_core_root = os.environ.get("NEXUS_CORE_REPO_ROOT", "").strip()
+_core_repo_root: Path | None = None
 if _configured_core_root:
     _core_repo_root = Path(_configured_core_root).expanduser().resolve()
     if str(_core_repo_root) not in sys.path:
         sys.path.insert(0, str(_core_repo_root))
 
+
+def _core_shadow_reason(core_root: Path | None, module: Any) -> str | None:
+    """Why ``module`` (a ``product`` package) is not the configured Core, or None.
+
+    This repository ships its own top-level ``product/`` package. Once that one
+    is in ``sys.modules``, ``import product...`` never reaches the configured
+    Core checkout, so a configured root must own the imported package (#2181).
+    """
+    if core_root is None or module is None:
+        return None
+    module_file = getattr(module, "__file__", None)
+    try:
+        resolved = Path(str(module_file)).resolve() if module_file else None
+    except Exception:
+        resolved = None
+    if resolved is not None and core_root in resolved.parents:
+        return None
+    return (
+        f"CORE_PRODUCT_SHADOWED: product is imported from {module_file!r}, "
+        f"outside NEXUS_CORE_REPO_ROOT {str(core_root)!r}"
+    )
+
+
 try:
+    _shadowed = _core_shadow_reason(_core_repo_root, sys.modules.get("product"))
+    if _shadowed:
+        raise ImportError(_shadowed)
     from product.adapters.generic_verification import verify_generic_changeset
     from product.protocol.generic_verification import (  # noqa: E402
         GENERIC_VERIFICATION_REQUEST_SCHEMA_ID,
@@ -62,6 +89,9 @@ try:
     import product as _IMPORTED_CORE_PACKAGE  # noqa: E402
     from product.protocol import PUBLIC_PROTOCOL_VERSION  # noqa: E402
 
+    _shadowed = _core_shadow_reason(_core_repo_root, _IMPORTED_CORE_PACKAGE)
+    if _shadowed:
+        raise ImportError(_shadowed)
     CORE_AVAILABLE = True
     CORE_IMPORT_ERROR = None
 except ImportError as exc:
@@ -204,6 +234,25 @@ def read_observed_core_identity(core_root: Path | None = None) -> dict[str, Any]
         return {**base, "reason": "CORE_IDENTITY_UNREADABLE", "source_root": str(root)}
     if not _EXACT_GIT_SHA_RE.fullmatch(commit) or not _EXACT_GIT_SHA_RE.fullmatch(tree):
         return {**base, "reason": "CORE_IDENTITY_MALFORMED", "source_root": str(root)}
+    # HEAD names a commit, but a modified or untracked file means the code that
+    # runs is not that commit: a dirty checkout is never pinned (#2181).
+    try:
+        dirty = subprocess.check_output(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            cwd=str(root),
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except Exception:
+        return {**base, "reason": "CORE_IDENTITY_UNREADABLE", "source_root": str(root)}
+    if dirty:
+        return {
+            **base,
+            "reason": "CORE_CHECKOUT_DIRTY",
+            "source_root": str(root),
+            "observed_commit": commit,
+            "observed_tree": tree,
+        }
     return {
         "available": True,
         "source_root": str(root),

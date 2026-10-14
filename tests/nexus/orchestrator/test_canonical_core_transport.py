@@ -436,3 +436,126 @@ def test_explicit_core_root_still_uses_git_identity(tmp_path: Path):
     identity = read_observed_core_identity(core_root=repo)
     assert identity["available"] is True
     assert identity["observed_commit"] == head
+
+
+# --- #2181: the in-tree `product/` package must never stand in for Core ---
+
+_STUB_CORE_FILES = {
+    "product/__init__.py": "",
+    "product/adapters/__init__.py": "",
+    "product/adapters/generic_verification.py": (
+        "def verify_generic_changeset(payload):\n    return 0, {}\n"
+    ),
+    "product/protocol/__init__.py": 'PUBLIC_PROTOCOL_VERSION = "stub"\n',
+    "product/protocol/generic_verification.py": (
+        'GENERIC_VERIFICATION_REQUEST_SCHEMA_ID = "req"\n'
+        'GENERIC_VERIFICATION_RESPONSE_SCHEMA_ID = "resp"\n'
+        "def _h(value):\n    return 'sha256:0'\n"
+        "acceptance_contract_hash = change_manifest_hash = change_set_hash = _h\n"
+        "evidence_bundle_hash = verification_plan_hash = _h\n"
+    ),
+}
+
+
+def _stub_core(root: Path) -> Path:
+    for rel, text in _STUB_CORE_FILES.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(text)
+    return root
+
+
+def _import_transport(core_root: Path, preamble: str = "") -> dict:
+    env = {k: v for k, v in os.environ.items() if k != "NEXUS_CORE_REPO_ROOT"}
+    env["NEXUS_CORE_REPO_ROOT"] = str(core_root)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    code = (
+        "import json, sys\n"
+        f"{preamble}"
+        "from nexus.orchestrator import canonical_core_transport as t\n"
+        "pkg = t._IMPORTED_CORE_PACKAGE\n"
+        "print(json.dumps({'available': t.CORE_AVAILABLE, 'error': t.CORE_IMPORT_ERROR,\n"
+        "  'package': getattr(pkg, '__file__', None),\n"
+        "  'product': getattr(sys.modules.get('product'), '__file__', None),\n"
+        "  'status': t.core_provenance_status()['status']}))\n"
+    )
+    out = subprocess.check_output(
+        [sys.executable, "-c", code], cwd=str(REPO_ROOT), env=env, text=True
+    )
+    return json.loads(out.strip().splitlines()[-1])
+
+
+def test_configured_core_root_is_imported_when_nothing_shadows_it(tmp_path: Path):
+    """Positive control: a fresh import resolves `product` from NEXUS_CORE_REPO_ROOT."""
+    core = _stub_core(tmp_path / "core")
+    result = _import_transport(core)
+    assert result["available"] is True, result
+    assert Path(result["package"]).resolve() == (core / "product" / "__init__.py").resolve()
+
+
+def test_in_tree_product_already_imported_fails_closed(tmp_path: Path):
+    """The repository's own `product/` imported first must not be used as Core."""
+    core = _stub_core(tmp_path / "core")
+    # The real Gateway imports in-tree `product` via nexus/contracts/changeset_certification.
+    result = _import_transport(core, preamble="sys.path.insert(0, '.')\nimport product\n")
+    assert Path(result["product"]).resolve() == (REPO_ROOT / "product" / "__init__.py").resolve()
+    assert result["available"] is False
+    assert "CORE_PRODUCT_SHADOWED" in result["error"]
+    assert result["status"] == "CORE_UNAVAILABLE"
+
+
+def test_core_shadow_reason_is_pure_and_fail_closed(tmp_path: Path):
+    from types import SimpleNamespace
+
+    from nexus.orchestrator.canonical_core_transport import _core_shadow_reason
+
+    core = tmp_path / "core"
+    inside = SimpleNamespace(__file__=str(core / "product" / "__init__.py"))
+    outside = SimpleNamespace(__file__=str(REPO_ROOT / "product" / "__init__.py"))
+    namespace = SimpleNamespace(__file__=None)
+    assert _core_shadow_reason(core, inside) is None
+    assert _core_shadow_reason(None, outside) is None  # no configured root: unchanged
+    assert _core_shadow_reason(core, None) is None  # not imported yet
+    assert "CORE_PRODUCT_SHADOWED" in _core_shadow_reason(core, outside)
+    assert "CORE_PRODUCT_SHADOWED" in _core_shadow_reason(core, namespace)
+
+
+def _git_core_checkout(repo: Path) -> str:
+    (repo / "product").mkdir(parents=True)
+    (repo / "product" / "__init__.py").write_text("")
+    env = {
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_SYSTEM": os.devnull,
+        "PATH": os.environ["PATH"],
+    }
+    for args in (
+        ["init", "-q"],
+        ["add", "."],
+        ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "c"],
+    ):
+        subprocess.run(["git", *args], cwd=repo, check=True, env=env)
+    return subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=repo, text=True, env=env
+    ).strip()
+
+
+@pytest.mark.parametrize("dirt", ["untracked", "modified"])
+def test_dirty_core_checkout_is_not_pinned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dirt: str
+):
+    from nexus.orchestrator import canonical_core_transport as transport
+
+    repo = tmp_path / "core"
+    head = _git_core_checkout(repo)
+    monkeypatch.setattr(transport, "CANONICAL_CORE_REVISION", head)
+    clean = transport.read_observed_core_identity(core_root=repo)
+    assert clean["available"] is True
+    assert transport.core_provenance_status(clean)["status"] == "CORE_REVISION_PINNED"
+    if dirt == "untracked":
+        (repo / "product" / "shadow.py").write_text("x = 1\n")
+    else:
+        (repo / "product" / "__init__.py").write_text("patched = True\n")
+    identity = transport.read_observed_core_identity(core_root=repo)
+    assert identity["available"] is False
+    assert identity["reason"] == "CORE_CHECKOUT_DIRTY"
+    status = transport.core_provenance_status(identity)
+    assert status["status"] == "CORE_IDENTITY_UNAVAILABLE" and status["fail_closed"] is True
