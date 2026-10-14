@@ -9,6 +9,7 @@ import secrets
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -289,6 +290,7 @@ def _tagged_pids(tag: str) -> set[int]:
         return found
     out = subprocess.run(
         ["ps", "-axww", "-E", "-o", "pid=,command="],
+        env=_probe_env(),
         capture_output=True,
         text=True,
         timeout=10,
@@ -310,6 +312,18 @@ def _tagged_pids(tag: str) -> set[int]:
     return found
 
 
+_PROBE_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
+
+
+def _probe_env() -> dict[str, str]:
+    """Environment for ps/lsof probes: system PATH only, C locale.
+
+    The sweep's verdict rests on these tools, so they must not resolve
+    through a PATH entry a worker could have written to.
+    """
+    return {**os.environ, "PATH": _PROBE_PATH, "LC_ALL": "C", "LANG": "C"}
+
+
 def _proc_is_zombie(entry: Path) -> bool:
     """True when ``/proc/<pid>/stat`` reports a zombie or dead task."""
     try:
@@ -322,7 +336,12 @@ def _proc_is_zombie(entry: Path) -> bool:
 def _process_table() -> dict[int, int]:
     """``pid -> ppid`` for every visible process."""
     out = subprocess.run(
-        ["ps", "-axo", "pid=,ppid="], capture_output=True, text=True, timeout=10, check=True
+        ["ps", "-axo", "pid=,ppid="],
+        env=_probe_env(),
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=True,
     ).stdout
     table: dict[int, int] = {}
     for line in out.splitlines():
@@ -445,7 +464,7 @@ def _ps_clock_now() -> Optional[float]:
             text=True,
             timeout=10,
             check=False,
-            env={**os.environ, "LC_ALL": "C", "LANG": "C"},
+            env=_probe_env(),
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -475,7 +494,7 @@ def _started_after_by_us(pids: set[int], since: float) -> Optional[set[int]]:
             text=True,
             timeout=10,
             check=False,
-            env={**os.environ, "LC_ALL": "C", "LANG": "C"},
+            env=_probe_env(),
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -536,6 +555,7 @@ def _pids_with_cwd_under(
     try:
         completed = subprocess.run(
             ["lsof", "-nP", "-a", "-d", "cwd", "-Fpn"],
+            env=_probe_env(),
             capture_output=True,
             text=True,
             timeout=20,
@@ -564,7 +584,9 @@ def _pids_with_cwd_under(
             expect = "f"
         elif expect == "f" and line == "fcwd":
             expect = "n"
-        elif expect in ("f", "n") and field == "n" and line[1:]:
+        elif (expect == "n" or (expect == "f" and sys.platform != "darwin")) and (
+            field == "n" and line[1:]
+        ):
             assert pid is not None
             cwd = os.path.realpath(line[1:])
             if any(cwd == root or cwd.startswith(root + os.sep) for root in real_roots):
@@ -608,6 +630,7 @@ def _kill_and_confirm(pids: set[int]) -> bool:
             try:
                 completed = subprocess.run(
                     ["ps", "-o", "pid=,stat=", "-p", ",".join(str(pid) for pid in alive)],
+                    env=_probe_env(),
                     capture_output=True,
                     text=True,
                     timeout=10,

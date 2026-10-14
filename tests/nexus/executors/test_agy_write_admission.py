@@ -1759,7 +1759,11 @@ def test_cwd_scan_accepts_linux_lsof_records_without_fd_field(monkeypatch, tmp_p
         cli_worker.subprocess, "run", lambda *a, **k: SimpleNamespace(stdout=out, returncode=0)
     )
     monkeypatch.setattr(cli_worker, "_started_after_by_us", lambda pids, since: set(pids))
+    monkeypatch.setattr(cli_worker.sys, "platform", "linux")
     assert cli_worker._pids_with_cwd_under((str(root),), baseline) == {424242}
+    # macOS lsof always prints fcwd; a record without it is malformed there.
+    monkeypatch.setattr(cli_worker.sys, "platform", "darwin")
+    assert cli_worker._pids_with_cwd_under((str(root),), baseline) is None
 
 
 def test_baseline_uses_the_ps_clock_not_the_wall_clock(monkeypatch):
@@ -1772,3 +1776,19 @@ def test_baseline_uses_the_ps_clock_not_the_wall_clock(monkeypatch):
 def test_baseline_fails_closed_when_ps_clock_is_unreadable(monkeypatch):
     monkeypatch.setattr(cli_worker, "_ps_clock_now", lambda: None)
     assert cli_worker._sweep_baseline() is None
+
+
+def test_sweep_probes_resolve_tools_through_system_path_only(monkeypatch):
+    monkeypatch.setenv("PATH", "/tmp/worker-writable:/usr/bin")
+    env = cli_worker._probe_env()
+    assert env["PATH"] == "/usr/bin:/bin:/usr/sbin:/sbin"
+    assert env["LC_ALL"] == "C"
+    seen: list[dict] = []
+
+    def capture(*args, **kwargs):
+        seen.append(kwargs.get("env") or {})
+        return SimpleNamespace(stdout="", returncode=0)
+
+    monkeypatch.setattr(cli_worker.subprocess, "run", capture)
+    cli_worker._ps_clock_now()
+    assert seen and seen[-1].get("PATH") == "/usr/bin:/bin:/usr/sbin:/sbin"
