@@ -127,10 +127,17 @@ the frozen `<RUNTIME>` (nothing in the frozen runtime imports it).
 
 ## 4. Readiness control Issue (D5)
 
+Note: the capture workflow has no general author filter. Issues created with the workflow
+`GITHUB_TOKEN` (for example the nightly regression bot, login `github-actions[bot]`) do not
+trigger workflows, so they are never captured. Ingest and the full watchdog therefore exclude
+a GITHUB_TOKEN-authored issue that has no capture comment from the expected set and list it in
+the non-failing `not_captured_github_token_issue` field; if such an issue does carry a capture
+comment it is mirrored normally.
+
 1. Choose a random token. Set `readiness_control_token` to it in the manifest and push and
    read back as in step 3 (state stays `NOT_READY`). Expected: both exit 0.
-2. As the repository owner (`James3014`; the capture workflow checks the issue author equals
-   the repository owner), create the control Issue in `James3014/Nexus-new`. Its body is a
+2. As the repository owner (`James3014`; the readiness-control marker is honored only when the
+   issue author equals the repository owner), create the control Issue in `James3014/Nexus-new`. Its body is a
    natural-shaped engineering task and contains this line:
 
    ```

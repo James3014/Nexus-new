@@ -122,6 +122,23 @@ def _comments(repository: str, issue_number: int) -> list[dict[str, Any]]:
     return rows
 
 
+# Issues created with the workflow GITHUB_TOKEN never trigger workflows (GitHub platform
+# rule), so the capture workflow never runs for them (e.g. the nightly regression bot's
+# issues). The capture workflow itself has no author filter: a bot-authored issue that does
+# carry a capture comment is mirrored like any other. REST reports the login as
+# "github-actions[bot]"; `gh issue view` shows "app/github-actions".
+GITHUB_TOKEN_BOT_LOGINS = frozenset({"github-actions[bot]", "app/github-actions"})
+
+
+def is_uncaptured_github_token_issue(issue: dict[str, Any], comments: list[dict[str, Any]]) -> bool:
+    """True when a GITHUB_TOKEN-authored issue has no capture comment (never expected)."""
+
+    login = str((issue.get("user") or {}).get("login") or "")
+    if login not in GITHUB_TOKEN_BOT_LOGINS:
+        return False
+    return not any(CAPTURE_MARKER in str(item.get("body") or "") for item in comments)
+
+
 def _single_marker_comment(comments: list[dict[str, Any]], marker: str) -> str | None:
     matches = [
         str(item.get("body") or "") for item in comments if marker in str(item.get("body") or "")
@@ -140,6 +157,7 @@ def ingest(
 ) -> dict[str, Any]:
     expected: list[tuple[str, int]] = []
     missing_capture: list[str] = []
+    not_captured_github_token_issue: list[str] = []
     missing_admission: list[str] = []
     mirrored: list[str] = []
 
@@ -147,8 +165,11 @@ def ingest(
         for issue in _issues_since(repository, since):
             number = int(issue["number"])
             task_key = f"{repository}#{number}"
-            expected.append((repository, number))
             comments = _comments(repository, number)
+            if is_uncaptured_github_token_issue(issue, comments):
+                not_captured_github_token_issue.append(task_key)
+                continue
+            expected.append((repository, number))
             capture_body = _single_marker_comment(comments, CAPTURE_MARKER)
             if capture_body is None:
                 missing_capture.append(task_key)
@@ -178,6 +199,7 @@ def ingest(
         "expected_count": len(expected),
         "mirrored_count": len(mirrored),
         "missing_capture": sorted(missing_capture),
+        "not_captured_github_token_issue": sorted(not_captured_github_token_issue),
         "missing_admission": sorted(missing_admission),
         "watchdog": watchdog,
     }
