@@ -1196,13 +1196,28 @@ def _log_safe(line: str) -> str:
     """One physical log line that can never be read as a GitHub workflow command.
 
     Candidate-controlled text (paths, test ids, messages) may contain newlines or other
-    control characters; collapse them so no line can start with ``::``.
+    control characters; collapse them so no line can start with ``::`` (after the
+    runner trims leading whitespace) and no legacy ``##[`` command survives anywhere.
     """
     text = str(line)
     indent = len(text) - len(text.lstrip(" "))
     body = " ".join("".join(ch if ch.isprintable() else " " for ch in text).split())
-    safe = " " * indent + body
-    return "  " + safe if safe.startswith("::") else safe
+    # The runner also honours the legacy `##[command]` form anywhere in a line.
+    while "##[" in body:
+        body = body.replace("##[", "# #[")
+    # `::command::` is parsed after leading whitespace is trimmed, so pad with a
+    # non-whitespace marker rather than spaces.
+    if body.startswith("::"):
+        body = "> " + body
+    return " " * indent + body
+
+
+def _json_log_safe(text: str) -> str:
+    """JSON text for the job log: `json.dumps` already escapes newlines; also escape
+    `[` after `##` (as \\u005b, which decodes identically) to defuse legacy commands."""
+    while "##[" in text:
+        text = text.replace("##[", "##\\u005b")
+    return text
 
 
 def _node_examples(raw_nodes: Iterable[str], keys: set[LogicalNodeKey]) -> str:
@@ -2018,7 +2033,7 @@ def main(argv: list[str] | None = None) -> int:
         changed = _git_changed_paths(args.base_sha, args.head_sha, root=ROOT)
         payload = asdict(build_impact_plan(changed, base_sha=args.base_sha, head_sha=args.head_sha))
         args.output.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-        print(json.dumps(payload, indent=2))
+        print(_json_log_safe(json.dumps(payload, indent=2)))
         return 0
     if args.command == "run":
         return run_pytest_plan(
@@ -2035,7 +2050,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     payload = asdict(classification)
     args.output.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps(payload, indent=2))
+    print(_json_log_safe(json.dumps(payload, indent=2)))
     if classification.blocking:
         print(_log_safe(f"Exact-base impact gate BLOCKED: {classification.classification}"))
         for mismatch in classification.mismatch_reasons or [classification.reason]:

@@ -596,4 +596,21 @@ def test_blocking_log_flattens_multiline_paths_and_errors():
     assert lines
     for line in lines:
         assert "\n" not in line and "\r" not in line
-        assert not line.startswith("::")
+        assert not line.lstrip().startswith("::")
+        assert "##[" not in line
+
+
+def test_log_safe_defuses_legacy_and_trimmed_workflow_commands():
+    from scripts.ops.exact_base_tool_gate import _log_safe
+
+    for raw in (
+        "\r::notice::x",
+        "  ::notice::x",
+        "src/##[error]injected.py",
+        "###[x",
+        "a\u2028::y",
+    ):
+        safe = _log_safe(raw)
+        assert "\n" not in safe and "\r" not in safe and "\u2028" not in safe
+        assert not safe.lstrip().startswith("::")
+        assert "##[" not in safe

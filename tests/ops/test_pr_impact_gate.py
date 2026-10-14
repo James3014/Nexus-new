@@ -2786,7 +2786,7 @@ def test_classify_cli_log_cannot_emit_workflow_commands_from_test_ids(tmp_path, 
     from scripts.ops import pr_impact_gate
 
     existing = "tests.test_contract::test_existing"
-    hostile = "tests.test_contract::test_x[\n::warning::injected\r::add-mask::y]"
+    hostile = "tests.test_contract::test_x[\n::warning::injected\r::add-mask::y ##[error]z]"
     base = _with_node_outcomes(_run(0, [], revision="base"), passed=[existing, hostile])
     head = _with_node_outcomes(
         _run(0, [], revision="head"), passed=[existing], test_inventory_tree="f" * 40
@@ -2809,5 +2809,17 @@ def test_classify_cli_log_cannot_emit_workflow_commands_from_test_ids(tmp_path, 
     assert status == 1
     log = capsys.readouterr().out
     assert "Exact-base impact gate BLOCKED: IMPACT_UNKNOWN" in log
-    assert not any(line.lstrip("\r").startswith("::") for line in log.splitlines())
+    assert not any(line.lstrip().startswith("::") for line in log.splitlines())
     assert "\r" not in log
+    assert "##[" not in log
+    payload = json.loads((tmp_path / "classification.json").read_text(encoding="utf-8"))
+    assert any("##[error]z" in item for item in payload["mismatch_reasons"])
+
+
+def test_json_log_safe_round_trips_and_defuses_legacy_commands():
+    from scripts.ops.pr_impact_gate import _json_log_safe
+
+    payload = {"reason": "x ##[error]y ###[z", "paths": ["a/##[warning]b.py"]}
+    text = _json_log_safe(json.dumps(payload, indent=2))
+    assert "##[" not in text
+    assert json.loads(text) == payload
