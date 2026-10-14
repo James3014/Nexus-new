@@ -31,6 +31,8 @@ HIDDEN_FEEDBACK_RETRY_REASONS = frozenset({
 MODEL_SOLVE = "model_solve"
 # The run's captured-prompt symmetry audit failed or errored: no row of it is a solve of any kind.
 PROMPT_SYMMETRY_VIOLATION = "prompt_symmetry_violation"
+# A task x trial pair cut by an early stop: excluded from both arms' denominators symmetrically.
+NOT_RUN = "not_run"
 # Winner sources that name the model; any other non-empty source is a local/deterministic delivery.
 MODEL_WINNER_PREFIXES = ("llm", "model", "nexus_llm", "direct_")
 NON_MODEL_WINNER_SOURCES = frozenset({"nexus_llm_deterministic_pre_rescue"})
@@ -100,7 +102,10 @@ def apply_strict_llm_baseline_classification(
         row["strict_llm_baseline_applied"] = True
         mode = str(row.get("mode", ""))
         row["rescued_by_local"] = False
-        if row.get("prompt_symmetry_violation"):
+        if row.get("not_run"):
+            row["solve_classification"] = NOT_RUN
+            row["deterministic_rescue"] = False
+        elif row.get("prompt_symmetry_violation"):
             row["solve_classification"] = PROMPT_SYMMETRY_VIOLATION
             row["deterministic_rescue"] = False
         elif (
@@ -147,7 +152,7 @@ def honest_scorecard(rows: Iterable[dict[str, Any]], mode: str) -> dict[str, Any
     defect) and ``infra_invalid`` are reported alongside, not removed.
     """
 
-    arm = [r for r in rows if str(r.get("mode", "")) == mode]
+    arm = [r for r in rows if str(r.get("mode", "")) == mode and not r.get("not_run")]
     solved = [r for r in arm if r.get("solve_classification") == MODEL_SOLVE]
     if mode == WITH_NEXUS_MODE:
         rescued = [
@@ -298,8 +303,13 @@ def apply_strict_llm_baseline_to_summary(
     """
 
     for mode, arm in summary.items():
-        eligible = [row for row in rows if str(row.get("mode", "")) == mode]
+        eligible = [
+            row for row in rows if str(row.get("mode", "")) == mode and not row.get("not_run")
+        ]
         arm["run_eligible_n"] = sum(1 for row in eligible if bool(row.get("run_eligible", True)))
+        arm["not_run_n"] = sum(
+            1 for row in rows if str(row.get("mode", "")) == mode and row.get("not_run")
+        )
         solved = [row for row in eligible if row.get("solve_classification") == MODEL_SOLVE]
         first_pass = [row for row in solved if int(row.get("attempt_count", 0) or 0) <= 1]
         arm["strict_llm_baseline_applied"] = True

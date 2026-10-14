@@ -348,10 +348,23 @@ def test_identical_prompt_resent_after_quota_rotation_counts_once(tmp_path: Path
     _capture(tmp_path, "without_nexus", BARE)
     _capture(tmp_path, "without_nexus", BARE)
     _capture(tmp_path, "with_nexus", BARE)
-    task = audit_run(tmp_path, _material())["tasks"][0]
+    rows = [
+        {
+            "mode": "without_nexus",
+            "task_id": "nexus-value-trust-002",
+            "trial_index": 1,
+            "pre_effect_quota_resends": 1,
+        },
+        {"mode": "with_nexus", "task_id": "nexus-value-trust-002", "trial_index": 1},
+    ]
+    task = audit_run(tmp_path, _material(), rows=rows)["tasks"][0]
     assert task["bare_calls"] == 1
     assert task["bare_account_rotations"] == 1
     assert task["violations"] == []
+    # Without a recorded pre-effect quota failure the repeat is a genuine second attempt.
+    rows[0]["pre_effect_quota_resends"] = 0
+    task = audit_run(tmp_path, _material(), rows=rows)["tasks"][0]
+    assert "bare_calls=2" in task["violations"]
 
 
 def test_row_with_model_call_but_no_capture_fails(tmp_path: Path) -> None:
@@ -713,25 +726,21 @@ def test_local_delivery_is_an_allowlist_of_model_sources() -> None:
     assert not local_delivery({"nexus_winner_source": ""})
 
 
-def test_task_independent_template_strings_and_bare_text_are_not_flagged(tmp_path: Path) -> None:
-    """A long/generic JSON string identical across tasks, or verbatim bare text, carries no hidden info."""
+def _material_desc() -> dict[str, TaskMaterial]:
+    material = _material()[KEY]
+    material.task_desc = "Fix an incident classifier that over-trusts a passing smoke test; " * 3
+    return {KEY: material}
 
-    generic = "Context assembly materializes already-selected context under budget only; claim " * 3
-    second_key = "nexus-value-evidence-002__1"
-    materials = {
-        **_material(),
-        second_key: TaskMaterial(
-            task_id="nexus-value-evidence-002",
-            visible_test=VISIBLE,
-            hidden_test=HIDDEN + "# resolved claim\n",
-            source=SOURCE,
-        ),
-    }
+
+def test_same_hint_in_two_trials_is_not_exempt(tmp_path: Path) -> None:
+    """HIGH-1: nothing is inferred to be template text; a repeated per-task hint still fails."""
+
     blocks = NEXUS_BLOCKS.replace(
-        '{"bundle_hash":"abc"}',
-        json.dumps({"claim_boundary": [generic], "query": "Fix an incident classifier."}),
+        '{"recommended_flow":"direct","risk_score":55}', '{"recommended_flow":"use resolved"}'
     )
-    for key in (KEY, second_key):
+    second = "nexus-value-trust-002__2"
+    materials = {**_material(), second: _material()[KEY]}
+    for key in (KEY, second):
         for arm, prompt in (("without_nexus", BARE), ("with_nexus", _with_nexus(blocks))):
             write_record(
                 capture_record(
@@ -742,4 +751,187 @@ def test_task_independent_template_strings_and_bare_text_are_not_flagged(tmp_pat
                 str(tmp_path),
             )
     report = audit_run(tmp_path, materials)
-    assert report["status"] == "PASS", [t["json_string_findings"] for t in report["tasks"]]
+    assert report["status"] == "FAIL"
+    assert all("nexus_block_string_not_allowed" in task["violations"] for task in report["tasks"])
+
+
+def test_task_description_verbatim_is_exempt_but_extended_is_not(tmp_path: Path) -> None:
+    material = _material_desc()
+    desc = material[KEY].task_desc
+    blocks = NEXUS_BLOCKS.replace(
+        '{"bundle_hash":"abc"}', json.dumps({"consumer_payloads": [{"fields": {"query": desc}}]})
+    )
+    _capture(tmp_path, "without_nexus", BARE)
+    _capture(tmp_path, "with_nexus", _with_nexus(blocks))
+    assert audit_run(tmp_path, material)["tasks"][0]["violations"] == []
+    other = tmp_path / "x"
+    other.mkdir()
+    longer = blocks.replace(json.dumps(desc)[1:-1], json.dumps(desc + " plus more text")[1:-1])
+    _capture(other, "without_nexus", BARE)
+    _capture(other, "with_nexus", _with_nexus(longer))
+    assert "nexus_block_string_not_allowed" in audit_run(other, material)["tasks"][0]["violations"]
+
+
+def test_template_strings_contain_no_hidden_only_words_of_any_fixture() -> None:
+    """Every checked-in template sentence is free of every fixture's hidden-only vocabulary.
+
+    Documented exception: "claim" (claim_boundary sentence 4) is hidden-only for evidence-002 only
+    because its hidden test says "missing claim"; that hidden literal itself is still checked.
+    """
+
+    import re as _re
+
+    from scripts.bench.capability_ab_runner import _materialize_fixture, load_tasks
+    from scripts.bench.prompt_symmetry_audit import (
+        TEMPLATE_STRINGS,
+        hidden_only_literals,
+        normalize,
+    )
+
+    repo = Path(__file__).resolve().parents[2]
+    allowed_exceptions = {("nexus-value-evidence-002", "claim")}
+    word_re = _re.compile(r"[a-z_][a-z0-9_]{2,}")
+    for task in load_tasks(repo / "scripts" / "bench" / "public_benchmark_nexus_value_v1.json"):
+        root = Path(__import__("tempfile").mkdtemp())
+        os.environ["NEXUS_VALUE_HIDDEN_VERIFIER"] = "1"
+        _target, visible = _materialize_fixture(root, task)
+        hidden = Path(visible).with_name("test_hidden.py").read_text(encoding="utf-8")
+        visible_text = Path(visible).read_text(encoding="utf-8")
+        hidden_words = set(word_re.findall(normalize(hidden))) - set(
+            word_re.findall(normalize(visible_text + task.task_desc))
+        )
+        material = TaskMaterial(task.id, visible_text, hidden)
+        for sentence in TEMPLATE_STRINGS:
+            words = set(word_re.findall(normalize(sentence))) & hidden_words
+            assert {(task.id, word) for word in words} <= allowed_exceptions, (
+                task.id,
+                sentence,
+                words,
+            )
+            for literal in hidden_only_literals(material):
+                assert normalize(literal) not in normalize(sentence), (task.id, literal)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        [115, 101, 99, 114, 101, 116],
+        "cmVzb2x2ZWQ=",
+        "7265736f6c766564",
+        "%72%65%73%6f%6c%76%65%64",
+        "&#114;&#101;&#115;olved",
+    ],
+    ids=["int_array", "base64", "hex", "percent", "html_entity"],
+)
+def test_encoded_payloads_in_json_blocks_fail(tmp_path: Path, value) -> None:
+    """HIGH-2: JSON-only is not enough; schema + decoding catch encoded hints."""
+
+    blocks = NEXUS_BLOCKS.replace('{"bundle_hash":"abc"}', json.dumps({"bundle_hash": value}))
+    task = _task(tmp_path, _with_nexus(blocks))
+    assert "nexus_block_string_not_allowed" in task["violations"], task
+
+
+def test_unknown_key_and_wrong_type_fail(tmp_path: Path) -> None:
+    blocks = NEXUS_BLOCKS.replace('{"candidate_count":1}', '{"candidate_count":"1","note":"x"}')
+    task = _task(tmp_path, _with_nexus(blocks))
+    findings = " ".join(task["json_string_findings"])
+    assert "unknown key note" in findings and "candidate_count must be int" in findings
+
+
+def test_codeintel_file_lists_fail(tmp_path: Path) -> None:
+    blocks = NEXUS_BLOCKS.replace(
+        '"impacted_files_count":0', '"impacted_files":["nexus/x.py"],"impacted_files_count":0'
+    )
+    task = _task(tmp_path, _with_nexus(blocks))
+    assert "codeintel_reports_repo_context" in task["violations"], task
+
+
+@pytest.mark.parametrize("snippet", ["while x: x -= 1", "for k in d: del d[k]", "if a: return b"])
+def test_one_line_compound_statements_are_code(tmp_path: Path, snippet: str) -> None:
+    leaked = NEXUS_BLOCKS.replace('{"bundle_hash":"abc"}', json.dumps({"bundle_hash": snippet}))
+    task = _task(tmp_path, _with_nexus(leaked))
+    assert "source_code_in_nexus_block" in task["violations"], task
+
+
+def test_unreadable_fixture_is_an_audit_error_for_that_task(tmp_path: Path) -> None:
+    material = _material()
+    material[KEY].error = "hidden_test:FileNotFoundError"
+    _capture(tmp_path, "without_nexus", BARE)
+    _capture(tmp_path, "with_nexus", BARE)
+    task = audit_run(tmp_path, material)["tasks"][0]
+    assert "fixture_unreadable:hidden_test:FileNotFoundError" in task["violations"]
+
+
+def test_counted_mode_refuses_tasks_without_hidden_test(tmp_path: Path, monkeypatch) -> None:
+    import scripts.bench.capability_ab_runner as runner
+
+    visible = tmp_path / "test_visible.py"
+    visible.write_text("def test_v(): pass\n", encoding="utf-8")
+    monkeypatch.setattr(
+        runner, "_resolve_task_files", lambda *_a, **_k: (str(tmp_path / "t.py"), str(visible))
+    )
+    task = runner.load_tasks(
+        Path(runner.__file__).with_name("public_benchmark_nexus_value_v1.json")
+    )[0]
+    assert runner._missing_hidden_tests([task], tmp_path, materialize_missing=False)
+    (tmp_path / "test_hidden.py").write_text("def test_h(): pass\n", encoding="utf-8")
+    assert runner._missing_hidden_tests([task], tmp_path, materialize_missing=False) == []
+
+
+def test_early_stop_pairs_become_not_run_symmetrically(tmp_path: Path) -> None:
+    """MED-2: a pair cut by a total timeout is not_run in both arms; the rest stays valid."""
+
+    from scripts.bench.capability_ab_runner import _fill_not_run_pairs, load_tasks
+    from scripts.bench.strict_llm_baseline import (
+        apply_strict_llm_baseline_classification,
+        apply_strict_llm_baseline_to_summary,
+    )
+
+    tasks = load_tasks(
+        Path(__file__).resolve().parents[2]
+        / "scripts"
+        / "bench"
+        / "public_benchmark_nexus_value_v1.json"
+    )[:3]
+    with_rows = [
+        {
+            "mode": "with_nexus",
+            "task_id": tasks[0].id,
+            "trial_index": 1,
+            "status": "SUCCESS",
+            "model_calls": 1,
+        }
+    ]
+    without_rows = [
+        {
+            "mode": "without_nexus",
+            "task_id": tasks[0].id,
+            "trial_index": 1,
+            "status": "FAILED",
+            "model_calls": 1,
+        },
+        {
+            "mode": "without_nexus",
+            "task_id": tasks[1].id,
+            "trial_index": 1,
+            "status": "SUCCESS",
+            "model_calls": 1,
+        },
+    ]
+    assert _fill_not_run_pairs(tasks, with_rows, without_rows) == 3
+    rows = [*with_rows, *without_rows]
+    assert {(r["mode"], r["task_id"]) for r in rows if r.get("not_run")} == {
+        ("with_nexus", tasks[1].id),
+        ("without_nexus", tasks[1].id),
+        ("with_nexus", tasks[2].id),
+        ("without_nexus", tasks[2].id),
+    }
+    apply_strict_llm_baseline_classification(rows)
+    summary = apply_strict_llm_baseline_to_summary(rows, {"with_nexus": {}, "without_nexus": {}})
+    assert (
+        summary["with_nexus"]["solve_rate"] == 1.0 and summary["without_nexus"]["solve_rate"] == 0.0
+    )
+    assert summary["with_nexus"]["not_run_n"] == summary["without_nexus"]["not_run_n"] == 2
+    materials = {f"{tasks[0].id}__1": TaskMaterial(tasks[0].id, VISIBLE, HIDDEN)}
+    report = audit_run(tmp_path, materials, rows=rows)
+    assert not any("unpaired" in v for v in report["row_violations"]), report

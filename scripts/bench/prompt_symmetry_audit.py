@@ -21,11 +21,16 @@ Per task x trial the audit requires (any miss -> the counted metric is invalid):
 from __future__ import annotations
 
 import ast
+import base64
+import binascii
+import codecs
+import html
 import json
 import os
 import re
 import stat
 import unicodedata
+import urllib.parse
 from collections import defaultdict
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
@@ -68,14 +73,28 @@ NEXUS_BLOCK_HEADERS = JSON_BLOCK_HEADERS | {HIDDEN_GUIDANCE_HEADER, PAYLOAD_HEAD
 # Any bracketed all-caps line starts a new section (also the bare template's [CURRENT SOURCE] etc.).
 SECTION_HEADER_RE = re.compile(r"^\[[A-Z0-9][A-Z0-9 _/-]*\]$")
 MAX_JSON_STRING_CHARS = 120
-_ZERO_WIDTH = dict.fromkeys(map(ord, "​‌‍⁠﻿­"), None)
+_ZERO_WIDTH = dict.fromkeys(map(ord, "\u200b\u200c\u200d\u2060\ufeff\u00ad"), None)
 _WORD_RE = re.compile(r"[a-z_][a-z0-9_]{2,}")
 # A line that looks like Python source/test code (after normalisation).
 _CODE_LINE_RE = re.compile(
     r"^(?:async def |def |class |import |from \S+ import |return\b|raise\b|assert\b|yield\b|"
-    r"while\b.*:$|with\b.*:$|try:$|except\b.*:$|finally:$|elif\b.*:$|else:$|if\b.*:$|for\b.*:$|"
+    r"while\b.*:|with\b.*:|try:|except\b.*:|finally:|elif\b.*:|else:|if\b.*:|for\b.*:|"
     r"lambda\b|@[a-z_][\w.]*|[a-z_][\w.\[\]'\"]*\s*(?:[+\-*/%|&^]?=)(?!=)|[a-z_][\w.]*\(.*\)$)"
 )
+# A token that may hide text in base64/hex (decoded and re-checked when it decodes to text).
+_ENCODED_TOKEN_RE = re.compile(r"^[A-Za-z0-9+/=_-]{8,}$")
+_SCHEMA_PATH = Path(__file__).with_name("prompt_symmetry_schema.json")
+# Exact fixed Nexus sentences allowed in JSON blocks regardless of length/vocabulary checks. Each
+# one is checked by a test to contain no hidden-only word of ANY fixture; nothing is inferred.
+TEMPLATE_STRINGS: frozenset[str] = frozenset({
+    # [NEXUS MODEL CONTEXT] claim_boundary (nexus-runtime context assembly, fixed text).
+    "CapabilityPlanner remains the selection authority; source reduction is a subordinate projection.",
+    "Context assembly materializes already-selected context under budget only.",
+    "Serialization does not prove physical provider consumption or outcome contribution.",
+    "Source identities and claim ceilings are preserved, not strengthened by this package.",
+    "The semantic package hash is consumer-neutral; consumer and worker binding use a separate "
+    "deterministic projection.",
+})
 
 # Hidden-only literal list from the 2026-10-14 symmetry inventory (hidden minus visible test;
 # hard_v1 strings also exist in the post-fix upstream code, so a hit there means repo exposure).
@@ -132,6 +151,8 @@ class TaskMaterial:
     visible_test: str
     hidden_test: str
     source: str = ""
+    task_desc: str = ""
+    error: str = ""
 
 
 @dataclass
@@ -324,6 +345,8 @@ def _codeintel_findings(body: str) -> list[str]:
         if count != 0:
             findings.append(f"{key}={value}")
     for key, value in payload.items():
+        if ("file" in key or "symbol" in key) and isinstance(value, (list, str)) and value:
+            findings.append(f"{key}={str(value)[:60]}")
         if (key.endswith("_path") or key.endswith("_paths")) and value:
             findings.append(f"{key}={value}")
         if key.endswith("_report_present") and value:
@@ -331,27 +354,108 @@ def _codeintel_findings(body: str) -> list[str]:
     return findings
 
 
-def nexus_json_strings(prompt: str) -> set[str]:
-    """Normalised JSON strings inside the allowlisted JSON blocks of a with-Nexus prompt."""
+def load_block_schema() -> dict[str, dict[str, str]]:
+    return json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))["blocks"]
 
-    out: set[str] = set()
-    for header, line in _blocks(prompt):
-        if header not in JSON_BLOCK_HEADERS or SECTION_HEADER_RE.match(line):
-            continue
+
+def _decoded_variants(text: str) -> list[str]:
+    """Text hidden behind HTML entities, %NN, \\xNN/\\uNNNN escapes, base64 or hex."""
+
+    variants: list[str] = []
+    for decoder in (html.unescape, urllib.parse.unquote):
+        decoded = decoder(text)
+        if decoded != text:
+            variants.append(decoded)
+    if "\\" in text:
         try:
-            payload = json.loads(line)
-        except ValueError:
+            decoded = codecs.decode(text, "unicode_escape")
+        except (UnicodeDecodeError, ValueError):
+            decoded = text
+        if decoded != text:
+            variants.append(decoded)
+    token = text.strip()
+    if _ENCODED_TOKEN_RE.match(token):
+        candidates: list[bytes] = []
+        if re.fullmatch(r"[0-9a-fA-F]+", token) and len(token) % 2 == 0:
+            try:
+                candidates.append(binascii.unhexlify(token))
+            except binascii.Error:
+                pass
+        for altchars in (None, b"-_"):
+            try:
+                padded = token + "=" * (-len(token) % 4)
+                candidates.append(base64.b64decode(padded, altchars=altchars, validate=True))
+            except (binascii.Error, ValueError):
+                pass
+        for raw in candidates:
+            try:
+                decoded = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+            printable = sum(1 for ch in decoded if ch.isprintable() or ch in "\n\t")
+            if len(decoded) >= 4 and printable / len(decoded) >= 0.9:
+                variants.append(decoded)
+    return variants
+
+
+def _walk_json(value: Any, path: str = "") -> Iterator[tuple[str, Any]]:
+    """(schema path, scalar value) for every leaf; list elements use ``path[]``."""
+
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            yield from _walk_json(item, f"{path}.{key}" if path else str(key))
+    elif isinstance(value, list):
+        yield f"{path}[]", value
+        for item in value:
+            yield from _walk_json(item, f"{path}[]")
+    else:
+        yield path, value
+
+
+def _type_name(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, int):
+        return "int"
+    if isinstance(value, float):
+        return "number"
+    if isinstance(value, str):
+        return "str"
+    return type(value).__name__
+
+
+def _schema_findings(header: str, payload: Any, schema: Mapping[str, str]) -> list[str]:
+    """Known key paths only, fixed value types; lists of scalars only where declared."""
+
+    findings: list[str] = []
+    if not isinstance(payload, Mapping):
+        return [f"{header}: block body is not a JSON object"]
+    for path, value in _walk_json(payload):
+        if path.endswith("[]") and isinstance(value, list):
+            if path not in schema:
+                findings.append(f"{header}: unknown list {path}")
+            elif schema[path] == "list" and any(not isinstance(item, Mapping) for item in value):
+                findings.append(f"{header}: {path} must hold objects or be empty")
             continue
-        out.update(normalize(text) for text in _json_strings(payload))
-    return out
+        declared = schema.get(path)
+        if declared is None:
+            findings.append(f"{header}: unknown key {path}")
+            continue
+        allowed = set(declared.split("|"))
+        actual = _type_name(value)
+        if actual == "int" and "number" in allowed:
+            continue
+        if actual not in allowed:
+            findings.append(f"{header}: {path} must be {declared}, got {actual}")
+    return findings
 
 
 def classify_extra_lines(
     with_nexus_prompt: str,
     bare_prompt: str,
     material: TaskMaterial,
-    *,
-    template_strings: frozenset[str] = frozenset(),
 ) -> dict[str, list[str]]:
     """Split the with-Nexus-only lines into allowed / disallowed and run the block-body checks."""
 
@@ -369,7 +473,14 @@ def classify_extra_lines(
         "json": [],
     }
     preamble = " ".join(NEXUS_PREAMBLE.split())
-    bare_normalized = normalize(bare_prompt)
+    schema = load_block_schema()
+    # Only exact, checked-in Nexus sentences, the task description verbatim, or a whole line of
+    # the bare prompt are exempt from the length/vocabulary checks. Nothing is inferred.
+    exempt = {normalize(text) for text in TEMPLATE_STRINGS}
+    exempt |= {normalize(line) for line in bare_prompt.splitlines() if line.strip()}
+    if material.task_desc.strip():
+        exempt.add(normalize(material.task_desc))
+    bare_corpus = _decoded_corpus(bare_prompt)
     for header, line in _blocks(with_nexus_prompt):
         is_header = bool(SECTION_HEADER_RE.match(line))
         if header == HIDDEN_GUIDANCE_HEADER and not is_header:
@@ -395,39 +506,59 @@ def classify_extra_lines(
         except ValueError:
             out["disallowed"].append(line)  # allowed blocks carry JSON only
             continue
-        for text in _json_strings(payload):
-            normalized = normalize(text)
-            # A string the bare arm saw verbatim, or one that is identical across tasks of this run
-            # (task-independent Nexus template text), cannot carry task-specific hidden information.
-            if normalized in template_strings or (normalized and normalized in bare_normalized):
+        out["json"].extend(_schema_findings(header, payload, schema.get(header, {})))
+        for path, value in _walk_json(payload):
+            if isinstance(value, list):
                 continue
-            if len(text) > MAX_JSON_STRING_CHARS:
-                out["json"].append(
-                    f"{header}: string longer than {MAX_JSON_STRING_CHARS} chars: {text[:60]}"
-                )
-            words = set(_WORD_RE.findall(normalize(text))) & hidden_words
-            if words:
-                out["json"].append(f"{header}: hidden-only words {sorted(words)}")
-            for fragment in text.splitlines():
-                if (
-                    fragment.strip()
-                    and _code_like(fragment)
-                    and normalize(fragment) not in fixture_lines
-                ):
-                    out["code"].append(" ".join(fragment.split()))
+            if header == CODEINTEL_HEADER and ("file" in path or "symbol" in path):
+                if isinstance(value, str) and value:
+                    out["codeintel"].append(f"{path}={value[:60]}")
+            if not isinstance(value, str):
+                continue
+            texts = [value, *_decoded_variants(value)]
+            if value.strip() and _ENCODED_TOKEN_RE.match(value.strip()) and len(texts) > 1:
+                out["json"].append(f"{header}: {path} encodes text: {texts[1][:40]!r}")
+            for text in texts:
+                normalized = normalize(text)
+                if normalized in exempt:
+                    continue
+                if len(text) > MAX_JSON_STRING_CHARS:
+                    out["json"].append(
+                        f"{header}: {path} longer than {MAX_JSON_STRING_CHARS} chars: {text[:60]}"
+                    )
+                words = set(_WORD_RE.findall(normalized)) & hidden_words
+                if words:
+                    out["json"].append(f"{header}: {path} hidden-only words {sorted(words)}")
+                for literal in hidden_only_literals(material):
+                    if normalize(literal) in normalized and normalize(literal) not in bare_corpus:
+                        out["json"].append(f"{header}: {path} hidden literal {literal!r}")
+                for fragment in text.splitlines():
+                    if (
+                        fragment.strip()
+                        and _code_like(fragment)
+                        and normalize(fragment) not in fixture_lines
+                    ):
+                        out["code"].append(" ".join(fragment.split()))
         if header == CODEINTEL_HEADER:
             out["codeintel"].extend(_codeintel_findings(line))
     return out
 
 
-def _distinct(records: list[dict[str, Any]]) -> tuple[int, int]:
-    """(distinct prompts, re-sends of an identical prompt, i.e. pre-effect account rotations)."""
+def _distinct(records: list[dict[str, Any]], allowed_folds: int = 0) -> tuple[int, int]:
+    """(calls, folded re-sends).
+
+    An identical prompt re-sent is folded into one call only up to ``allowed_folds``: the number of
+    pre-effect quota failures the row's lease records report (the bare arm's account rotation).
+    Any other repeat is a genuine second attempt and counts.
+    """
 
     shas = [
         str(item.get("prompt_sha256") or normalize(str(item.get("prompt") or "")))
         for item in records
     ]
-    return len(set(shas)), len(shas) - len(set(shas))
+    repeats = len(shas) - len(set(shas))
+    folds = min(repeats, max(0, int(allowed_folds)))
+    return len(shas) - folds, folds
 
 
 def _no_tools_position_ok(prompt: str, *, bare: bool) -> bool:
@@ -448,25 +579,35 @@ def audit_task(
     *,
     bare_rows: list[Mapping[str, Any]] | None = None,
     with_rows: list[Mapping[str, Any]] | None = None,
-    template_strings: frozenset[str] = frozenset(),
 ) -> TaskAudit:
     result = TaskAudit(key=key, task_id=material.task_id)
-    result.bare_calls, result.bare_resends = _distinct(bare_records)
-    result.with_nexus_calls, result.with_nexus_resends = _distinct(with_records)
-    if bare_rows is not None and with_rows is not None and len(bare_rows) != len(with_rows):
-        result.violations.append(f"unpaired_rows:bare={len(bare_rows)},with_nexus={len(with_rows)}")
-    for arm, rows, calls in (
-        ("bare", bare_rows, result.bare_calls),
-        ("with_nexus", with_rows, result.with_nexus_calls),
+    if material.error:
+        result.violations.append(f"fixture_unreadable:{material.error}")
+    bare_folds = sum(int(row.get("pre_effect_quota_resends") or 0) for row in bare_rows or [])
+    result.bare_calls, result.bare_resends = _distinct(bare_records, bare_folds)
+    result.with_nexus_calls, result.with_nexus_resends = _distinct(with_records, 0)
+    not_run = any(row.get("not_run") for row in [*(bare_rows or []), *(with_rows or [])])
+    if (
+        bare_rows is not None
+        and with_rows is not None
+        and (len(bare_rows) != 1 or len(with_rows) != 1)
     ):
-        if rows and calls == 0 and any(int(row.get("model_calls") or 0) > 0 for row in rows):
-            result.violations.append(f"{arm}_model_call_not_captured")
-    if result.bare_calls > 1:
-        result.violations.append(f"bare_calls={result.bare_calls}")
-    if result.bare_calls == 0 and result.with_nexus_calls > 0:
-        result.violations.append("bare_calls=0")
-    if result.with_nexus_calls > 1:
-        result.violations.append(f"with_nexus_calls={result.with_nexus_calls}")
+        result.violations.append(f"unpaired_rows:bare={len(bare_rows)},with_nexus={len(with_rows)}")
+    # A not_run pair (run stopped early) is excluded symmetrically: the call-count and
+    # prompt-shape checks do not apply, the leak checks below still do.
+    if not not_run:
+        for arm, rows, calls in (
+            ("bare", bare_rows, result.bare_calls),
+            ("with_nexus", with_rows, result.with_nexus_calls),
+        ):
+            if rows and calls == 0 and any(int(row.get("model_calls") or 0) > 0 for row in rows):
+                result.violations.append(f"{arm}_model_call_not_captured")
+        if result.bare_calls > 1:
+            result.violations.append(f"bare_calls={result.bare_calls}")
+        if result.bare_calls == 0 and result.with_nexus_calls > 0:
+            result.violations.append("bare_calls=0")
+        if result.with_nexus_calls > 1:
+            result.violations.append(f"with_nexus_calls={result.with_nexus_calls}")
     bare_prompt = str(bare_records[0].get("prompt") or "") if bare_records else ""
     bare_corpus = _decoded_corpus(bare_prompt)
     literals = hidden_only_literals(material)
@@ -494,6 +635,8 @@ def audit_task(
         result.violations.append("hidden_test_line_in_with_nexus_prompt")
     if result.prior_art_present:
         result.violations.append("prior_art_in_with_nexus_prompt")
+    if not_run:
+        return result
     if bare_records and not _no_tools_position_ok(bare_prompt, bare=True):
         result.violations.append("bare_no_tools_prefix_not_once_at_top")
     if with_records:
@@ -511,9 +654,7 @@ def audit_task(
         result.bare_prompt_chars = len(bare_prompt)
         if bare_records:
             result.extra_lines = extra_lines(first, bare_prompt)
-            checks = classify_extra_lines(
-                first, bare_prompt, material, template_strings=template_strings
-            )
+            checks = classify_extra_lines(first, bare_prompt, material)
             result.disallowed_lines = checks["disallowed"]
             result.code_lines = checks["code"]
             result.codeintel_findings = checks["codeintel"]
@@ -581,14 +722,6 @@ def audit_run(
     by_arm: dict[tuple[str, str], list[Mapping[str, Any]]] = defaultdict(list)
     for row in rows:
         by_arm[(str(row.get("mode")), _row_key(row))].append(row)
-    # JSON strings identical in the with-Nexus prompts of at least two different tasks are template text.
-    string_counts: dict[str, int] = defaultdict(int)
-    for key in materials:
-        records = captures.get(("with_nexus", key), [])
-        if records:
-            for text in nexus_json_strings(str(records[0].get("prompt") or "")):
-                string_counts[text] += 1
-    template_strings = frozenset(text for text, count in string_counts.items() if count >= 2)
     tasks = []
     for key, material in sorted(materials.items()):
         tasks.append(
@@ -599,7 +732,6 @@ def audit_run(
                 captures.get(("with_nexus", key), []),
                 bare_rows=by_arm.get(("without_nexus", key), []) if rows else None,
                 with_rows=by_arm.get(("with_nexus", key), []) if rows else None,
-                template_strings=template_strings,
             )
         )
     unknown = sorted(
@@ -608,9 +740,18 @@ def audit_run(
         if arm not in {"with_nexus", "without_nexus"} or key not in materials
     )
     row_violations: list[str] = []
+    for row_key in sorted({_row_key(row) for row in rows} - set(materials)):
+        counts = (
+            len(by_arm.get(("without_nexus", row_key), [])),
+            len(by_arm.get(("with_nexus", row_key), [])),
+        )
+        if counts != (1, 1):
+            row_violations.append(
+                f"{row_key}:unpaired_rows:bare={counts[0]},with_nexus={counts[1]}"
+            )
     for row in rows:
         ident = f"{row.get('mode')}:{row.get('task_id')}#{row.get('trial_index')}"
-        if _row_key(row) not in materials:
+        if _row_key(row) not in materials and not row.get("not_run"):
             row_violations.append(f"{ident}:no_fixture_material")
         if str(row.get("route_cost_policy_source") or ""):
             row_violations.append(f"{ident}:promoted_route_cost_policy")

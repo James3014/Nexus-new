@@ -3225,19 +3225,85 @@ def _begin_prompt_capture_leg(
     if key in materials:
         return
 
-    def _read(path: str) -> str:
+    errors: list[str] = []
+
+    def _read(path: str, label: str) -> str:
         try:
             return Path(path).read_text(encoding="utf-8")
-        except OSError:
+        except OSError as exc:
+            errors.append(f"{label}:{type(exc).__name__}")
             return ""
 
     hidden_path = _hidden_test_for_visible_test(test_file)
+    if hidden_path == test_file:
+        errors.append("hidden_test:missing")
+    visible = _read(test_file, "visible_test")
+    hidden = _read(hidden_path, "hidden_test") if hidden_path != test_file else ""
+    source = _read(target_file, "target")
     materials[key] = TaskMaterial(
         task_id=task.id,
-        visible_test=_read(test_file),
-        hidden_test=_read(hidden_path) if hidden_path != test_file else "",
-        source=_read(target_file),
+        visible_test=visible,
+        hidden_test=hidden,
+        source=source,
+        task_desc=task.task_desc,
+        error=",".join(errors),
     )
+
+
+def _missing_hidden_tests(tasks: list[CapabilityTask], repo_root: Path, *, materialize_missing: bool) -> list[str]:
+    """Counted mode refuses to start when any task's hidden or visible test is unreadable."""
+
+    missing: list[str] = []
+    for task in tasks:
+        try:
+            _target, test_file = _resolve_task_files(repo_root, task, materialize_missing=materialize_missing)
+            hidden = _hidden_test_for_visible_test(test_file)
+            if hidden == test_file:
+                raise FileNotFoundError("test_hidden.py")
+            Path(test_file).read_text(encoding="utf-8")
+            Path(hidden).read_text(encoding="utf-8")
+        except (OSError, NotImplementedError, ValueError) as exc:
+            missing.append(f"{task.id}:{type(exc).__name__}")
+    return missing
+
+
+def _fill_not_run_pairs(
+    tasks: list[CapabilityTask], with_rows: list[dict[str, Any]], without_rows: list[dict[str, Any]]
+) -> int:
+    """Every task x trial gets exactly one row per arm; pairs cut by an early stop become not_run.
+
+    A pair where either leg did not produce a row is excluded from both arms' denominators
+    symmetrically (``not_run``); the rest of the run stays valid.
+    """
+
+    def _key(row: Mapping[str, Any]) -> str:
+        return f"{row.get('task_id')}__{row.get('trial_index')}"
+
+    have = {
+        "with_nexus": {_key(row): row for row in with_rows},
+        "without_nexus": {_key(row): row for row in without_rows},
+    }
+    filled = 0
+    for task in tasks:
+        key = _prompt_capture_key(task)
+        if key in have["with_nexus"] and key in have["without_nexus"]:
+            continue
+        for mode, bucket in (("with_nexus", with_rows), ("without_nexus", without_rows)):
+            row = have[mode].get(key)
+            if row is None:
+                row = {
+                    "mode": mode,
+                    "task_id": task.id,
+                    "trial_index": task.trial_index,
+                    "status": "NOT_RUN",
+                    "model_calls": 0,
+                }
+                bucket.append(row)
+                filled += 1
+            row["not_run"] = True
+            row["not_run_reason"] = "pair_incomplete_after_early_stop"
+            row["run_eligible"] = False
+    return filled
 
 
 def _apply_prompt_symmetry_audit(
@@ -3303,7 +3369,7 @@ def _enforce_hidden_verifier_on_success_rows(rows: list[dict[str, Any]]) -> None
         if str(row.get("status") or "") != "SUCCESS":
             continue
         hidden = str(row.get("hidden_verifier_file") or "")
-        if Path(hidden).name == "test_hidden.py" and row.get("hidden_verifier_passed") is not False:
+        if Path(hidden).name == "test_hidden.py" and row.get("hidden_verifier_passed") is True:
             continue
         row["status"] = "FAILED"
         row["semantic_status"] = "UNVERIFIED"
@@ -16349,7 +16415,7 @@ def _run_without_nexus_impl(
                 "elapsed_sec": wall,
                 "error": err,
                 "report": {
-                    "attempt_count": 1,
+                    "attempt_count": 1 + direct_infra_retry_count if model_calls > 0 else 1,
                     "model_calls": model_calls,
                     "total_tokens": total_tokens,
                     "token_capture_status": token_capture_status,
@@ -16431,6 +16497,15 @@ def _run_without_nexus_impl(
         }
         row = _extract_record(mode="without_nexus", task=task, payload=payload, wall_time_sec=wall)
         row["hidden_verifier_file"] = verification_test_file
+        if verification_test_file != test_file:
+            row["hidden_verifier_passed"] = status == "SUCCESS"
+        lease_records = out.get("account_lease_records") if isinstance(out, dict) else None
+        # Identical prompt re-sent by the lease after a pre-effect quota failure (wrapper sees both).
+        row["pre_effect_quota_resends"] = sum(
+            1
+            for item in lease_records or []
+            if isinstance(item, dict) and str(item.get("outcome") or "") == "PROVIDER_QUOTA_EXHAUSTED_PRE_EFFECT"
+        )
         _annotate_warning_ledger(row, warning_records)
         return _annotate_with_contract(
             row,
@@ -20199,6 +20274,10 @@ def main() -> int:
     with_timeout_streak = 0
     with_infra_streak = 0
     interleave_arms = _interleave_arms_enabled(args)
+    if bool(args.counted_first_attempt) and _counted_mode_expects_model_calls(args):
+        missing_hidden = _missing_hidden_tests(tasks, repo_root, materialize_missing=bool(args.materialize_missing))
+        if missing_hidden:
+            parser.error(f"--counted-first-attempt needs every task's hidden and visible test: {missing_hidden[:5]}")
     prompt_audit_capture = (
         _install_prompt_capture(out_dir)
         if bool(args.counted_first_attempt) and not bool(args.nexus_only) and not bool(args.without_only)
@@ -20571,6 +20650,8 @@ def main() -> int:
 
     _clear_total_timeout(previous_timeout_handler)
     prompt_symmetry_report = None
+    if interleave_arms:
+        _fill_not_run_pairs(tasks, with_rows, without_rows)
     if bool(args.counted_first_attempt) and _counted_mode_expects_model_calls(args):
         _enforce_hidden_verifier_on_success_rows([*with_rows, *without_rows])
     if prompt_audit_capture is not None:
