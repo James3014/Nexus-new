@@ -15033,6 +15033,20 @@ def run_with_nexus(
     requested_skill_mounts = benchmark_skill_mount_requests(task)
     start_wall = time.time()
     start = time.monotonic()
+    # S17/S11: under strict every with-Nexus subprocess (first pass, model_required fallback,
+    # bounded rescue, hidden retry) draws from ONE task deadline instead of a fresh budget each.
+    shared_task_deadline = start + max(1, int(timeout_sec)) if effective_strict_llm_baseline else None
+    shared_deadline_hits: list[str] = []
+
+    def _shared_subprocess_timeout(requested_sec: int, *, stage: str) -> int:
+        if shared_task_deadline is None:
+            return int(requested_sec)
+        try:
+            return _remaining_task_timeout(shared_task_deadline, int(requested_sec))
+        except subprocess.TimeoutExpired:
+            shared_deadline_hits.append(stage)
+            raise
+
     env_prev = os.environ.get("NEXUS_CAPABILITY_TUNING_FILE")
     if tuning_profile:
         os.environ["NEXUS_CAPABILITY_TUNING_FILE"] = str(
@@ -15051,12 +15065,16 @@ def run_with_nexus(
                 "NEXUS_GEMINI_MODEL_NAME": model_env_name,
                 "NEXUS_FORCE_LLM_DESPITE_LEARN_SLO": "1",
                 "NEXUS_GATEWAY_MAX_RETRIES": "1",
-                "NEXUS_GATEWAY_TIMEOUT_SEC": _benchmark_gateway_timeout_sec(
-                    _benchmark_gateway_timeout_for_execution(
-                        task=task,
-                        timeout_sec=effective_timeout_sec,
-                        base_timeout_sec=_benchmark_gateway_timeout_for_task(effective_timeout_sec),
-                        require_model_participation=require_model_participation_for_run,
+                "NEXUS_GATEWAY_TIMEOUT_SEC": (
+                    str(_symmetric_per_call_cap_sec())
+                    if _symmetric_per_call_cap_sec() is not None
+                    else _benchmark_gateway_timeout_sec(
+                        _benchmark_gateway_timeout_for_execution(
+                            task=task,
+                            timeout_sec=effective_timeout_sec,
+                            base_timeout_sec=_benchmark_gateway_timeout_for_task(effective_timeout_sec),
+                            require_model_participation=require_model_participation_for_run,
+                        )
                     )
                 ),
                 "NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL": "1" if effective_llm_self_heal else "0",
@@ -15133,7 +15151,12 @@ def run_with_nexus(
                 required=_receipt_first_required(task),
             )
         try:
-            res = _run_process_group(cmd, cwd=repo_root, env=env, timeout_sec=effective_timeout_sec)
+            res = _run_process_group(
+                cmd,
+                cwd=repo_root,
+                env=env,
+                timeout_sec=_shared_subprocess_timeout(effective_timeout_sec, stage="first_pass"),
+            )
             output = res.stdout or ""
             warning_records = [
                 *_warning_records_from_text(res.stdout or "", source="with_nexus_subprocess_stdout"),
@@ -15188,7 +15211,7 @@ def run_with_nexus(
                     _nexus_cli_subprocess_cmd(fallback_args, repo_root),
                     cwd=repo_root,
                     env=env,
-                    timeout_sec=effective_timeout_sec,
+                    timeout_sec=_shared_subprocess_timeout(effective_timeout_sec, stage="model_required_fallback"),
                 )
                 fallback_warning_records = [
                     *_warning_records_from_text(fallback_res.stdout or "", source="with_nexus_fallback_stdout"),
@@ -15406,7 +15429,12 @@ def run_with_nexus(
         try:
             if runner_mode == "subprocess":
                 rescue_cmd = _nexus_cli_subprocess_cmd(rescue_args, repo_root)
-                rescue_res = _run_process_group(rescue_cmd, cwd=repo_root, env=env, timeout_sec=timeout_sec)
+                rescue_res = _run_process_group(
+                    rescue_cmd,
+                    cwd=repo_root,
+                    env=env,
+                    timeout_sec=_shared_subprocess_timeout(timeout_sec, stage="bounded_hyper_rescue"),
+                )
                 rescue_output = rescue_res.stdout or ""
             else:
                 rescue_runner = runner or cli_runner or CliRunner()
@@ -15471,6 +15499,8 @@ def run_with_nexus(
             row = rescue_row
             payload = rescue_payload
             wall = wall + rescue_wall
+    for deadline_stage in shared_deadline_hits:
+        _mark_task_deadline_exceeded(row, stage=deadline_stage)
     if payload.get("status") == "SUCCESS" and verification_test_file != test_file:
         verify_start = time.monotonic()
         task_deadline_hit = False
@@ -15643,7 +15673,7 @@ def run_with_nexus(
                                 retry_cmd,
                                 cwd=repo_root,
                                 env=env,
-                                timeout_sec=effective_timeout_sec,
+                                timeout_sec=_shared_subprocess_timeout(effective_timeout_sec, stage="hidden_retry"),
                             )
                             retry_output = retry_res.stdout or ""
                         else:
@@ -15796,6 +15826,8 @@ def run_with_nexus(
                 row["status"] = "FAILED"
                 row["semantic_status"] = "UNVERIFIED"
                 row["semantic_completed"] = False
+    for deadline_stage in shared_deadline_hits:
+        _mark_task_deadline_exceeded(row, stage=deadline_stage)
     if route_cost_controls:
         row["route_cost_policy_controls"] = route_cost_controls
         row["route_cost_policy_candidate_cap"] = route_cost_controls.get("candidate_cap")
@@ -18826,15 +18858,54 @@ def _benchmark_gateway_timeout_sec(default_sec: int = 30) -> str:
     return str(max(5, int(default_sec)))
 
 
+PER_CALL_TIMEOUT_MARGIN_SEC = 30
+
+
+def _resolve_symmetric_per_call_cap_sec(args: argparse.Namespace) -> int | None:
+    """One per-model-call cap for BOTH arms (R4), or None outside the like-for-like config.
+
+    Source, in order: ``--per-call-timeout-sec``; ``NEXUS_BENCH_GATEWAY_TIMEOUT_SEC``; the per-task
+    budget minus a fixed margin.  Applied under ``--strict-llm-baseline`` /
+    ``--require-same-model-baseline`` or whenever ``--per-call-timeout-sec`` is given.
+    """
+
+    explicit = int(getattr(args, "per_call_timeout_sec", 0) or 0)
+    strict = bool(getattr(args, "strict_llm_baseline", False) or getattr(args, "require_same_model_baseline", False))
+    if explicit <= 0 and not strict:
+        return None
+    if explicit > 0:
+        return max(5, explicit)
+    env_value = str(os.environ.get("NEXUS_BENCH_GATEWAY_TIMEOUT_SEC", "") or "").strip()
+    if env_value:
+        try:
+            return max(5, int(env_value))
+        except ValueError:
+            pass
+    return max(5, int(getattr(args, "timeout_sec", 0) or 0) - PER_CALL_TIMEOUT_MARGIN_SEC)
+
+
+def _symmetric_per_call_cap_sec() -> int | None:
+    raw = str(os.environ.get("NEXUS_BENCH_PER_CALL_CAP_SEC", "") or "").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
 def _bench_per_model_call_timeout_sec(remaining_task_sec: int) -> int:
     """Per-model-call budget for the bare arm, from the same setting as the with-Nexus arm (R4).
 
-    The with-Nexus arm's per-call gateway timeout is ``NEXUS_BENCH_GATEWAY_TIMEOUT_SEC`` when set
-    (``_benchmark_gateway_timeout_sec``); the bare arm's agy ``--print-timeout`` must be capped by
-    the same value so neither arm gets a longer single model call than the other.
+    With a symmetric cap (``NEXUS_BENCH_PER_CALL_CAP_SEC``, set by ``main`` in the like-for-like
+    config) both arms use that value. Otherwise the with-Nexus gateway timeout follows
+    ``NEXUS_BENCH_GATEWAY_TIMEOUT_SEC`` when set, and the bare arm's agy ``--print-timeout`` is
+    capped by the same value.
     """
 
     remaining = max(1, int(remaining_task_sec))
+    cap = _symmetric_per_call_cap_sec()
+    if cap is not None:
+        return min(remaining, cap)
     if not str(os.environ.get("NEXUS_BENCH_GATEWAY_TIMEOUT_SEC", "") or "").strip():
         return remaining
     return min(remaining, int(_benchmark_gateway_timeout_sec(remaining)))
@@ -19453,6 +19524,16 @@ def main() -> int:
     parser.add_argument("--max-tasks", type=int, default=6)
     parser.add_argument("--timeout-sec", type=int, default=30)
     parser.add_argument(
+        "--per-call-timeout-sec",
+        type=int,
+        default=0,
+        help=(
+            "One per-model-call timeout for both arms (bare agy --print-timeout and the with-Nexus "
+            "gateway). Under --strict-llm-baseline/--require-same-model-baseline it defaults to "
+            "NEXUS_BENCH_GATEWAY_TIMEOUT_SEC, else --timeout-sec minus 30 s."
+        ),
+    )
+    parser.add_argument(
         "--total-timeout-sec",
         type=int,
         default=0,
@@ -19752,6 +19833,11 @@ def main() -> int:
         os.environ["NEXUS_OUTBOUND_PROMPT_STRICT"] = "1"
     if args.disable_promoted_route_cost_policy:
         os.environ["NEXUS_DISABLE_PROMOTED_ROUTE_COST_POLICY"] = "1"
+    symmetric_per_call_cap = _resolve_symmetric_per_call_cap_sec(args)
+    if symmetric_per_call_cap is None:
+        os.environ.pop("NEXUS_BENCH_PER_CALL_CAP_SEC", None)
+    else:
+        os.environ["NEXUS_BENCH_PER_CALL_CAP_SEC"] = str(symmetric_per_call_cap)
     if args.skip_llm_baseline and args.strict_llm_baseline:
         parser.error("--strict-llm-baseline cannot be combined with --skip-llm-baseline")
     if args.nexus_only and args.without_only:
@@ -20112,6 +20198,7 @@ def main() -> int:
                     strict_llm_baseline=bool(args.strict_llm_baseline),
                 )
             _annotate_warning_ledger(row, runtime_warning_records, append=True)
+            row["per_call_timeout_cap_sec"] = _symmetric_per_call_cap_sec()
             row["isolation_mode"] = args.isolation_mode
             row["clean_checkout_required"] = args.isolation_mode == "worktree"
             task_stop_loss_exceeded = _apply_per_task_stop_loss(row, int(args.per_task_stop_loss_sec))
@@ -20233,6 +20320,7 @@ def main() -> int:
                     mode=args.without_mode,
                 )
             _annotate_warning_ledger(row, runtime_warning_records, append=True)
+            row["per_call_timeout_cap_sec"] = _symmetric_per_call_cap_sec()
             row["isolation_mode"] = args.isolation_mode
             row["clean_checkout_required"] = args.isolation_mode == "worktree"
             task_stop_loss_exceeded = _apply_per_task_stop_loss(row, int(args.per_task_stop_loss_sec))
@@ -20378,6 +20466,7 @@ def main() -> int:
                     "enable_llm_self_heal": bool(args.enable_llm_self_heal),
                     "skip_llm_baseline": bool(args.skip_llm_baseline),
                     "strict_llm_baseline": bool(args.strict_llm_baseline),
+                    "per_call_timeout_cap_sec": _symmetric_per_call_cap_sec(),
                     "disable_promoted_route_cost_policy": bool(args.disable_promoted_route_cost_policy),
                     "force_flow": args.force_flow,
                     "parallel_arms": args.parallel_arms,
