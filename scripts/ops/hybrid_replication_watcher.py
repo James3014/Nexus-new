@@ -188,6 +188,12 @@ def full_watchdog(
     expected: list[tuple[str, int]] = []
     for repository in daemon.CANDIDATE_REPOSITORIES:
         for issue in daemon._issues_since(repository, boundary):
+            if str((issue.get("user") or {}).get("login") or "") in (
+                daemon.GITHUB_TOKEN_BOT_LOGINS
+            ) and daemon.is_uncaptured_github_token_issue(
+                issue, daemon._comments(repository, int(issue["number"]))
+            ):
+                continue
             expected.append((repository, int(issue["number"])))
     report = store.reconcile_expected_work_items(expected)
     return {
