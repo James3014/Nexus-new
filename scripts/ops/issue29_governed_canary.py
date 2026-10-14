@@ -131,7 +131,8 @@ class HostProbes:
     http_get: Callable[[str], tuple[int, str]]
     unused_memory_bytes: Callable[[], int]
     agy_path: Callable[[], str]
-    memory_pressure_level: Callable[[], int] = lambda: MEMORY_PRESSURE_NORMAL
+    # Defaults to "unknown" so a caller that omits the probe fails closed.
+    memory_pressure_level: Callable[[], int] = lambda: 0
 
 
 @dataclass
@@ -320,15 +321,15 @@ def _real_unused_memory_bytes() -> int:
 
 
 def _real_memory_pressure_level() -> int:
-    result = subprocess.run(
-        ["sysctl", "-n", "kern.memorystatus_vm_pressure_level"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
     try:
+        result = subprocess.run(
+            ["sysctl", "-n", "kern.memorystatus_vm_pressure_level"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
         return int(result.stdout.strip())
-    except ValueError:
+    except (OSError, ValueError):
         return 0
 
 
