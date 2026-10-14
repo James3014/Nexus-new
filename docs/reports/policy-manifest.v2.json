@@ -977,16 +977,16 @@
     },
     {
       "policy_id": "P-CONTAM-01",
-      "phase": "Rust-Kernel",
+      "phase": "Pre-Execution",
       "owner_module": "contamination_guard",
-      "source_file": "nexus-core-rs/src/contamination.rs",
+      "source_file": "nexus/research/contamination_guard.py",
       "schema_version": "v0.1",
-      "commit_sha": "1c9dce65",
+      "commit_sha": "e3b0ba5eb",
       "status_tag": "code-backed",
       "test_entrypoints": [
         "tests/research/test_research_isolation.py::test_contamination_guard_blocks_design_language_and_fields"
       ],
-      "receipt_type": "ContaminationCheckResult",
+      "receipt_type": "ContaminationGuardResult",
       "rollback_drill_status": "drilled-2026-06-15",
       "promotion_allowed": false,
       "lane": "hard",
@@ -1001,6 +1001,12 @@
           "version": "P-CONTAM-01.0.1.0",
           "timestamp": "2026-06-15T00:00:00Z",
           "diff_summary": "Baseline freeze — moved to hard lane (research contamination is fail-closed core gate)",
+          "lane": "hard"
+        },
+        {
+          "version": "P-CONTAM-01.0.2.0",
+          "timestamp": "2026-10-14T00:00:00Z",
+          "diff_summary": "Rebound to the enforcement point that runs in production: nexus/research/contamination_guard.py (called from nexus/engine/pipeline_stages.py). The Rust nexus-core-rs CheckContamination has no production caller and lost its only test with #1927.",
           "lane": "hard"
         }
       ]

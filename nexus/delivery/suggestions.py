@@ -1,6 +1,6 @@
 from __future__ import annotations
-from pathlib import Path
 
+from pathlib import Path
 
 
 def _has(path: Path, name: str) -> bool:
@@ -39,6 +39,8 @@ def suggest_verification_commands(project_root: Path, task_name: str) -> list[st
             return ["cargo test --manifest-path Cargo.toml"]
         if (project_root / "nexus-core" / "Cargo.toml").exists():
             return ["cargo test --manifest-path nexus-core/Cargo.toml"]
+        if (project_root / "nexus-core-rs" / "Cargo.toml").exists():
+            return ["cargo test --manifest-path nexus-core-rs/Cargo.toml"]
         return ["cargo test"]
 
     if language == "go":
