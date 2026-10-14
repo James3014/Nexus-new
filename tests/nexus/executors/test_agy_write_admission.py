@@ -1659,3 +1659,18 @@ def test_proc_tag_scan_fails_closed_on_unreadable_own_process(monkeypatch, tmp_p
 
     monkeypatch.setattr(real_path, "read_bytes", read_bytes)
     assert cli_worker._sweep_tagged_processes("exampletag") is False
+
+
+def test_cwd_scan_fails_closed_on_name_before_pid(monkeypatch):
+    baseline = cli_worker._SweepBaseline(
+        started_at=0.0, preexisting=frozenset(), protected=frozenset()
+    )
+    me = os.getpid()
+    monkeypatch.setattr(
+        cli_worker.subprocess,
+        "run",
+        lambda *a, **k: SimpleNamespace(
+            stdout=f"n/tmp/worker-root\np{me}\nfcwd\nn/\n", returncode=0
+        ),
+    )
+    assert cli_worker._pids_with_cwd_under(("/tmp/worker-root",), baseline) is None

@@ -276,7 +276,7 @@ def _tagged_pids(tag: str) -> set[int]:
             except OSError:
                 try:
                     same_uid = entry.stat().st_uid == os.getuid()
-                except OSError:
+                except (FileNotFoundError, ProcessLookupError):
                     continue  # exited meanwhile
                 if same_uid:
                     # One of ours we cannot inspect: unknown, not clean.
@@ -502,8 +502,8 @@ def _pids_with_cwd_under(
             if not pid_has_cwd:
                 return None  # a process record without its cwd: incomplete scan
             pid, pid_has_cwd = int(line[1:]), False
-        elif line.startswith("n") and pid is not None:
-            if not line[1:]:
+        elif line.startswith("n"):
+            if pid is None or not line[1:]:
                 return None  # empty cwd name: malformed record
             pid_has_cwd = True
             cwd = os.path.realpath(line[1:])
