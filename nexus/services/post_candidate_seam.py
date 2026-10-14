@@ -221,19 +221,26 @@ def ultra_review_context(task_id: str, scratch: CandidateScratch) -> dict[str, A
     }
 
 
+def _as_mapping(value: Any) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
 def _claim_boundary(out: Mapping[str, Any]) -> dict[str, Any]:
     """Execution-derived boundary (``simulated`` from evidence, never a constant)."""
 
     from nexus.evidence.claim_boundary import attested_claim_boundary
 
-    response = out.get("response") if isinstance(out.get("response"), Mapping) else {}
-    outcome = response.get("outcome") if isinstance(response.get("outcome"), Mapping) else {}
+    response = _as_mapping(out.get("response"))
+    outcome = _as_mapping(response.get("outcome"))
     boundary = attested_claim_boundary(
         invoked=bool(out.get("invoked")),
         evidence_refs=list(out.get("evidence_refs") or []),
         gate_passed=bool(out.get("gate_passed")),
         physical_callable=str(out.get("physical_callable") or ""),
-        outcome={**dict(outcome), "status": str(response.get("status") or "")},
+        outcome={
+            **{str(k): v for k, v in outcome.items()},
+            "status": str(response.get("status") or ""),
+        },
         skipped=bool(out.get("skipped")),
         stub=bool(out.get("stub")),
         failure_reason=str(out.get("reason") or ""),
@@ -259,8 +266,8 @@ def stage_from_invocation(name: str, out: Mapping[str, Any], *, phase: str) -> d
             "evidence_complete": False,
         }
     )
-    response = out.get("response") if isinstance(out.get("response"), Mapping) else {}
-    outcome = response.get("outcome") if isinstance(response.get("outcome"), Mapping) else {}
+    response = _as_mapping(out.get("response"))
+    outcome = _as_mapping(response.get("outcome"))
     return {
         "name": name,
         "status": "INVOKED" if invoked else "SKIPPED",
@@ -282,6 +289,7 @@ def _bounded_outcome(name: str, outcome: Mapping[str, Any]) -> dict[str, Any]:
             "semantic_status",
             "exit_code",
             "stdout_sha256",
+            "output_tail",
             "simulated",
             "sandbox_executed",
             "workspace_isolated",

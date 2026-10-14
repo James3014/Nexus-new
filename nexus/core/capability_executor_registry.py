@@ -1481,6 +1481,7 @@ def _exec_sandbox_confined(plan: CapabilityExecutionPlan, constraints: Mapping[s
             workspace_isolated=str(result.get("workspace_source") or "") == "local_project_copy",
             exit_code=result.get("exit_code"),
             stdout_sha256=str(result.get("stdout_sha256") or ""),
+            output_tail=(str(result.get("stdout_tail") or "") + str(result.get("stderr_tail") or ""))[-600:],
             network_allowed=False,
             timed_out=bool(result.get("timed_out")),
             confined=True,

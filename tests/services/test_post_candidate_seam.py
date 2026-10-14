@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,15 @@ from nexus.services.capability_registry import (
 )
 
 REAL_BARRIER = lane.os_sandbox_available()
+# The confined lane runs ``python -I``: pytest must be importable without PYTHONPATH. Trusted CI
+# executors put dependencies on PYTHONPATH only, so there the confined run is a real execution
+# that fails with "No module named pytest" (still never simulated, never the hidden test).
+PYTEST_UNDER_ISOLATION = (
+    subprocess.run(
+        [sys.executable, "-I", "-c", "import pytest"], capture_output=True, check=False
+    ).returncode
+    == 0
+)
 HIDDEN_MARKER = "HIDDEN_TEST_EXECUTED"
 ORIGINAL = "def add(a, b):\n    return a - b\n"
 CANDIDATE = "def add(a, b):\n    return a + b\n"
@@ -188,11 +198,14 @@ def test_sandbox_runs_visible_test_confined_with_real_receipt(
     assert receipt is not None and receipt["receipt_kind"] == seam.POST_CANDIDATE_RECEIPT_KIND
     (stage,) = receipt["capabilities"]
     assert stage["name"] == "sandbox" and stage["status"] == "INVOKED" and stage["invoked"] is True
-    assert stage["gate_passed"] is True
+    assert stage["gate_passed"] is PYTEST_UNDER_ISOLATION, stage["outcome"]
     assert stage["simulated"] is False and stage["claim_boundary"]["simulated"] is False
     assert stage["trigger_source"] == "post_candidate_seam:post_candidate"
     outcome = stage["outcome"]
-    assert outcome["exit_code"] == 0
+    if PYTEST_UNDER_ISOLATION:
+        assert outcome["exit_code"] == 0
+    else:
+        assert outcome["exit_code"] != 0 and "pytest" in outcome["output_tail"]
     assert outcome["simulated"] is False and outcome["sandbox_executed"] is True
     assert outcome["network_allowed"] is False and outcome["confined"] is True
     assert outcome["forbidden_paths_count"] == 1
@@ -327,8 +340,9 @@ def test_real_barrier_or_refusal_on_this_host(tmp_path: Path) -> None:
     finally:
         scratch.cleanup()
     if REAL_BARRIER:
-        assert stage["gate_passed"] is True and stage["simulated"] is False
-        assert stage["outcome"]["exit_code"] == 0
+        assert stage["simulated"] is False
+        assert stage["gate_passed"] is PYTEST_UNDER_ISOLATION, stage["outcome"]
+        assert (stage["outcome"]["exit_code"] == 0) is PYTEST_UNDER_ISOLATION
     else:
         assert stage["gate_passed"] is False and stage["simulated"] is True
     assert not (case / HIDDEN_MARKER).exists()
