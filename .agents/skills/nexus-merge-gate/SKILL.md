@@ -42,7 +42,7 @@ bootstrap a Task Card or manufacture GitHub merge authority.
    `REVISE`, card clarification, or reviewer `HARD_BLOCK` stops approval but is
    not automatically terminal `REJECTED`. Repair within existing Owner scope
    when possible; only an authorized decision-maker may reject the Candidate.
-3. With the recorded hashes, call `nexus_self_hosted_approve_promotion` (or `nexus.bash` running `python3 -m scripts.engine.nexus_cli self-hosted approve`). Approval must bind the exact candidate; do not substitute a newer commit or recompute a receipt after approval.
+3. With the recorded hashes, approve through the gateway approve path (`candidate_approve`) with a bound approval grant. The CLI `self-hosted approve` command is retired (#1928) and the legacy `nexus_self_hosted_approve_promotion` tool fails closed with `APPROVAL_GRANT_REQUIRED`. Approval must bind the exact candidate; do not substitute a newer commit or recompute a receipt after approval.
 4. Call `nexus_self_hosted_integrate_approved` (or `nexus.bash` running `python3 -m scripts.engine.nexus_cli self-hosted integrate`) targeting exactly `nexus/integration/self-hosted-lifecycle-closure`. The operation must create a normal merge preserving candidate and integration ancestry. Verify the implementation, live-canary, and docs commits are ancestors afterward.
 5. Run the focused and full repository gates, `git diff --check`, and both
    staged/unstaged deletion audits. Record the post-integration HEAD, protected

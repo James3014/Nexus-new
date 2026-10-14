@@ -4101,32 +4101,16 @@ else:
         click.echo(json.dumps(res, indent=2, ensure_ascii=False))
 
 
-    @self_hosted_group.command(name="approve")
-    @click.option("--task-id", required=True, help="Task ID to approve.")
-    @click.option("--candidate-commit-sha", required=True, help="Candidate commit SHA.")
-    @click.option("--candidate-tree-sha", required=True, help="Candidate tree SHA.")
-    @click.option("--candidate-state-hash", required=True, help="Candidate state hash.")
-    @click.option("--verified-receipt-hash", required=True, help="Verified receipt hash.")
-    @click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
+    @self_hosted_group.command(
+        name="approve",
+        context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
+    )
     @translate_action_exceptions
-    def self_hosted_approve(
-        task_id: str,
-        candidate_commit_sha: str,
-        candidate_tree_sha: str,
-        candidate_state_hash: str,
-        verified_receipt_hash: str,
-        state_dir: str | None,
-    ) -> None:
-        """Approve candidate promotion for a self-hosted task with exact binding."""
-        res = run_self_hosted_approve(
-            task_id=task_id,
-            candidate_commit_sha=candidate_commit_sha,
-            candidate_tree_sha=candidate_tree_sha,
-            candidate_state_hash=candidate_state_hash,
-            verified_receipt_hash=verified_receipt_hash,
-            state_dir=state_dir,
-        )
-        click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+    def self_hosted_approve() -> None:
+        """Retired: CLI approve cannot carry an approval grant (use candidate_approve)."""
+        # Retired (#1928): legacy options are accepted and ignored so old callers
+        # get the retirement message instead of a usage error; it exits 1.
+        run_self_hosted_approve(task_id="")
 
 
     @self_hosted_group.command(name="integrate")
