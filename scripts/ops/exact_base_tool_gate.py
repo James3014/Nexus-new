@@ -262,14 +262,12 @@ def parse_wiki_governance_receipt(value: Any, *, root: Path | None = None) -> li
         if reason.strip()
     )
     if status not in {"", "PASS", "PASSED", "OK"} and not raw_findings:
-        raw_findings.append(
-            {
-                "rule_id": "receipt_status",
-                "path": "<receipt>",
-                "severity": "error",
-                "message": status,
-            }
-        )
+        raw_findings.append({
+            "rule_id": "receipt_status",
+            "path": "<receipt>",
+            "severity": "error",
+            "message": status,
+        })
     return _sorted(
         _finding(
             "wiki-governance",
@@ -337,6 +335,49 @@ def parse_tool_json(tool: str, value: Any, *, root: Path | None = None) -> list[
     return parser(value, root=root)
 
 
+def fix_hint(finding: Finding) -> str:
+    """One-line, actionable fix hint for a blocking finding."""
+    if finding.tool == "ruff":
+        if finding.rule_id == "unformatted":
+            return f"run `ruff format --preview {finding.path}`"
+        return (
+            f"run `ruff check --fix {finding.path}` or fix by hand"
+            f" (`ruff rule {finding.rule_id}` explains the rule)"
+        )
+    if finding.tool == "pyright":
+        return f"fix the type error in {finding.path} (run `pyright {finding.path}` locally)"
+    if finding.tool == "bandit":
+        return f"fix the flagged code in {finding.path} (run `bandit {finding.path}` locally)"
+    return "fix the failed governance check or supply the missing evidence"
+
+
+def render_blocking_log(report: dict[str, Any]) -> list[str]:
+    """Human-readable job-log lines for a blocking report; empty when not blocking."""
+    if not report.get("blocking"):
+        return []
+    classification = report.get("classification", "UNKNOWN")
+    lines = [f"Exact-base gate BLOCKED: {classification}"]
+    if report.get("error"):
+        lines.append(f"  error: {report['error']}")
+    new_findings = report.get("new_findings") or []
+    if new_findings:
+        lines.append(f"  {len(new_findings)} new finding(s) not present on the exact base:")
+    for raw in new_findings:
+        finding = Finding(**raw)
+        # Indented and single-line so a candidate-chosen path/message can never start a
+        # log line with `::` (GitHub workflow command).
+        detail = f"{finding.path}:{finding.line} {finding.rule_id} {finding.message}"
+        lines.append(f"  - {' '.join(detail.split())}")
+        lines.append(f"  hint: {fix_hint(finding)}")
+    if classification == "IMPACT_UNKNOWN":
+        lines.append(
+            "  hint: the tool did not produce comparable output on base or head"
+            f" (base exit {report.get('base_exit_code')}, head exit"
+            f" {report.get('head_exit_code')}); see the tool step log"
+        )
+    return lines
+
+
 def _cli() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -392,6 +433,8 @@ def _cli() -> int:
         }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    for line in render_blocking_log(report):
+        print(line, flush=True)
     return 1 if report["classification"] == "NEW_REGRESSION" else 2 if report["blocking"] else 0
 
 
@@ -403,8 +446,10 @@ __all__ = [
     "Finding",
     "FindingClassification",
     "classify_findings",
+    "fix_hint",
     "parse_bandit_json",
     "parse_pyright_json",
     "parse_ruff_json",
     "parse_wiki_governance_receipt",
+    "render_blocking_log",
 ]

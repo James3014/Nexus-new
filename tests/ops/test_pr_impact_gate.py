@@ -2696,3 +2696,85 @@ def test_full_suite_base_collection_error_outside_scoped_targets_is_baseline_deb
     head = _with_node_outcomes(run("head"), passed=[existing], errors=[broken])
 
     assert classify_regression(base, head).classification == "EXACT_BASELINE_DEBT"
+
+
+def test_impact_unknown_names_base_test_ids_absent_on_head():
+    existing = "tests.test_contract::test_existing"
+    from_main = "tests.test_contract::test_added_on_main"
+    base = _with_node_outcomes(_run(0, [], revision="base"), passed=[existing, from_main])
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=[existing],
+        test_inventory_tree="f" * 40,
+    )
+
+    result = classify_regression(base, head)
+
+    assert result.classification == "IMPACT_UNKNOWN"
+    assert result.blocking is True
+    assert result.reason.startswith(
+        "test execution metadata did not prove a trustworthy exact-base comparison: "
+    )
+    [absent] = [item for item in result.mismatch_reasons if "absent on head" in item]
+    assert absent.startswith(f"base collected 1 test ids absent on head (e.g. {from_main}); ")
+    assert "merge origin/main into the PR branch" in absent
+    assert absent in result.reason
+
+
+def test_impact_unknown_lists_each_fired_evidence_condition():
+    result = classify_regression(
+        _run(2, [], status="IMPACT_UNKNOWN", revision="base"),
+        _run(1, ["tests.test_contract::test_failure"], revision="head"),
+    )
+
+    assert result.classification == "IMPACT_UNKNOWN"
+    assert result.blocking is True
+    assert "base pytest run reported IMPACT_UNKNOWN" in result.mismatch_reasons
+
+
+def test_trustworthy_comparison_has_no_mismatch_reasons():
+    existing = "tests.test_contract::test_existing"
+    base = _with_node_outcomes(_run(0, [], revision="base"), passed=[existing])
+    head = _with_node_outcomes(_run(0, [], revision="head"), passed=[existing])
+
+    result = classify_regression(base, head)
+
+    assert result.classification == "PASS"
+    assert result.mismatch_reasons == []
+    assert result.reason == "exact head verification passed"
+
+
+def test_classify_cli_prints_mismatch_reasons_when_blocking(tmp_path, capsys):
+    from dataclasses import asdict
+
+    from scripts.ops import pr_impact_gate
+
+    existing = "tests.test_contract::test_existing"
+    from_main = "tests.test_contract::test_added_on_main"
+    base = _with_node_outcomes(_run(0, [], revision="base"), passed=[existing, from_main])
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"), passed=[existing], test_inventory_tree="f" * 40
+    )
+    base_path = tmp_path / "base-result.json"
+    head_path = tmp_path / "head-result.json"
+    base_path.write_text(json.dumps(asdict(base)), encoding="utf-8")
+    head_path.write_text(json.dumps(asdict(head)), encoding="utf-8")
+    output = tmp_path / "classification.json"
+
+    status = pr_impact_gate.main([
+        "classify",
+        "--base-result",
+        str(base_path),
+        "--head-result",
+        str(head_path),
+        "--output",
+        str(output),
+    ])
+
+    assert status == 1
+    log = capsys.readouterr().out
+    assert "Exact-base impact gate BLOCKED: IMPACT_UNKNOWN" in log
+    assert f"  - base collected 1 test ids absent on head (e.g. {from_main})" in log
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["classification"] == "IMPACT_UNKNOWN"
+    assert any("absent on head" in item for item in payload["mismatch_reasons"])
