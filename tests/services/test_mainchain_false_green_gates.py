@@ -2329,7 +2329,9 @@ def test_runtime_guidance_pack_ports_world_b_fixture_and_capability_rules() -> N
     assert pack["public_claim_allowed"] is False
     assert pack["fixture_kind"] == "rlm_harder_v2_autoreason_judge"
     assert pack["guidance_hash"]
-    assert "empty evidence_refs" in ctx.hidden_guidance
+    # Fixture rules restated hidden-verifier contracts and were removed (A/B symmetry S3);
+    # capability rules are still ported.
+    assert "empty evidence_refs" not in ctx.hidden_guidance
     assert "verifier status" in ctx.hidden_guidance
     assert ctx.lineage["guidance_pack"]["guidance_hash"] == pack["guidance_hash"]
 

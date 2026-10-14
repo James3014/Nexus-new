@@ -1969,8 +1969,86 @@ def _task_uses_materialized_fixture(task: CapabilityTask, *, materialize_missing
     return materialize_missing
 
 
-def _nexus_task_desc(task: CapabilityTask) -> str:
+def _no_nexus_task_hints() -> bool:
+    """True in the counted like-for-like configuration (R2).
+
+    Both arms then receive the identical task text (``task.task_desc``) and the fixture-aware
+    local paths may not pre-empt the model.  ``main`` sets this from ``--no-nexus-task-hints``
+    (default ON under ``--strict-llm-baseline`` / ``--require-same-model-baseline``).
+    """
+
+    return os.environ.get("NEXUS_BENCH_NO_TASK_HINTS", "").strip().lower() in {"1", "true", "yes"}
+
+
+def _strict_symmetric_with_nexus_env() -> dict[str, str]:
+    """Env for every with-Nexus subprocess in the counted like-for-like configuration.
+
+    S14: fixture-aware local paths may not pre-empt or replace the model; the final delivery must
+    be the model's. S9: no self-heal re-ask. S3-S6: the product prompt carries no hidden-verifier
+    guidance, no CodeIntel/prior-art injection, includes the visible test, and the with-Nexus
+    learning stores do not carry state between trials (``NEXUS_SYMMETRIC_PROMPT``).
+    """
+
+    return {
+        "NEXUS_DISABLE_LOCAL_PREFLIGHT_BEFORE_LLM": "1",
+        "NEXUS_DISABLE_HIDDEN_CONTRACT_FAST_PATH": "1",
+        "NEXUS_DISABLE_HIDDEN_INVARIANT_SHADOW": "1",
+        "NEXUS_MODEL_REQUIRED_EXECUTION_MODE": "model_participation_only",
+        "NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL": "0",
+        "NEXUS_SYMMETRIC_PROMPT": "1",
+        # L3: one candidate, no Nightshift re-run after a failed hyper attempt.
+        "NEXUS_LLM_CANDIDATE_CAP": "1",
+        "NEXUS_AUTO_NIGHTSHIFT_ON_HYPER_FAILURE": "0",
+        "NEXUS_ONLINE_LOCAL_ASSIST": "0",
+    }
+
+
+SYMMETRIC_MODEL_WINNER_SOURCES = frozenset({"llm", "nexus_llm_baseline", "llm_assisted"})
+
+
+def _delivered_file_is_model_candidate(payload: dict[str, Any], row: dict[str, Any], target_file: str) -> bool:
+    from scripts.bench.strict_llm_baseline import local_delivery
+
+    result = payload.get("result") if isinstance(payload.get("result"), dict) else {}
+    report = result.get("report") if isinstance(result.get("report"), dict) else {}
+    expected = str(report.get("model_candidate_sha256") or "")
+    winner = str(row.get("nexus_winner_source") or report.get("winner_source") or "")
+    try:
+        delivered = hashlib.sha256(Path(target_file).read_bytes()).hexdigest()
+    except OSError:
+        return False
+    row["model_candidate_sha256"] = expected
+    row["delivered_target_sha256"] = delivered
+    if row.get("local_success_source") is True or local_delivery(row):
+        return False
+    # L3: exact model winner sources only (product labels for a model-generated candidate).
+    return bool(expected) and delivered == expected and winner in SYMMETRIC_MODEL_WINNER_SOURCES
+
+
+def _counted_mode_unsupported_row(task: CapabilityTask, *, reason: str) -> dict[str, Any]:
+    row = _extract_record(
+        mode="with_nexus",
+        task=task,
+        payload={
+            "status": "FAILED",
+            "semantic_status": "UNVERIFIED",
+            "result": {"elapsed_sec": 0.0, "report": {"model_calls": 0, "attempt_count": 0}},
+        },
+        wall_time_sec=0.0,
+    )
+    row["status"] = "FAILED"
+    row["infra_invalid_reason"] = reason
+    row["run_eligible"] = False
+    row["model_calls"] = 0
+    return row
+
+
+def _nexus_task_desc(task: CapabilityTask, *, llm_enabled: bool = True) -> str:
     desc = task.task_desc
+    if _no_nexus_task_hints() and llm_enabled:
+        # The bare arm gets only task.task_desc; any appended contract/decision table would be an
+        # answer hint only the with-Nexus arm sees.
+        return desc
     expected = set(normalize_capability_names(task.expected_capabilities))
     desc += (
         "\n\nNexus wearing contract:"
@@ -5014,6 +5092,9 @@ def _nexus_codex_hidden_verifier_guidance(task: CapabilityTask, source: str) -> 
     guidance = [
         "Visible tests are acceptance hints, not the full contract; infer hidden invariants from the source and task category.",
     ]
+    if _no_nexus_task_hints():
+        # Everything below restates fixture contracts the bare arm never sees (R2).
+        return "\n".join(f"- {item}" for item in guidance)
     task_type = str(task.task_type).lower()
     combined = f"{task.task_desc}\n{source}".lower()
     if "test_repair" in task_type or "repair" in combined:
@@ -14700,6 +14781,16 @@ def run_with_nexus(
         or expected_executor_capability_required
         or _task_default_llm_self_heal(task)
     )
+    # M2: every counted-lane rule applies to model runs only; the LLM-off lane is unchanged.
+    no_hints = _no_nexus_task_hints() and llm_enabled
+    if no_hints:
+        # S9: the counted metric is one model call; the product's self-heal re-asks the model with
+        # visible-test failure output the bare arm never gets.
+        effective_llm_self_heal = False
+    if no_hints and llm_enabled and with_model_provider == "codex":
+        # The codex with-Nexus path builds its own CodeIntel/full-file prompt and re-asks with test
+        # output; it is not symmetric with the bare arm, so the counted lane refuses it outright.
+        return _counted_mode_unsupported_row(task, reason="provider_not_supported_in_counted_mode")
     local_reflex = assess_local_reflex(
         task_desc=task.task_desc,
         task_type=task.task_type,
@@ -14721,6 +14812,10 @@ def run_with_nexus(
         task.id,
         route_features=route_features,
     )
+    if no_hints and llm_enabled:
+        # S13 / P2-3: no promoted route-cost policy (and so no local pre-model / supervised path)
+        # in the counted arm, whatever the CLI flags say.
+        route_cost_controls = {}
     route_cost_controls, route_cost_policy_overrides = protect_expected_capability_controls(
         route_cost_controls,
         task.expected_capabilities,
@@ -14730,7 +14825,7 @@ def run_with_nexus(
         route_cost_policy_overrides,
         llm_enabled=llm_enabled,
         require_model_participation_env=_truthy_env("NEXUS_REQUIRE_MODEL_PARTICIPATION"),
-        disable_deterministic_rescue_env=_truthy_env("NEXUS_BENCH_DISABLE_DETERMINISTIC_RESCUE"),
+        disable_deterministic_rescue_env=_truthy_env("NEXUS_BENCH_DISABLE_DETERMINISTIC_RESCUE") or no_hints,
         allow_cost_efficiency_pre_model_rescue_env=_truthy_env("NEXUS_ALLOW_COST_EFFICIENCY_PRE_MODEL_RESCUE"),
     )
     route_cost_controls = model_participation_policy.route_cost_controls
@@ -14769,7 +14864,7 @@ def run_with_nexus(
         local_reflex_bare_sufficiency=local_reflex.bare_sufficiency,
     )
     supervised_bare_first_reason = route_execution_policy.supervised_bare_first_reason
-    supervised_bare_allowed = route_execution_policy.supervised_bare_first_allowed
+    supervised_bare_allowed = route_execution_policy.supervised_bare_first_allowed and not no_hints
     cost_capped_pre_model_rescue_allowed = (
         "cost_capped_capability_allows_verified_pre_model_rescue" in route_execution_policy.reason_codes
     )
@@ -14796,6 +14891,7 @@ def run_with_nexus(
         )
         and (not strict_llm_baseline or allow_cost_efficiency_pre_model_rescue)
         and route_execution_policy.pre_model_deterministic_rescue_allowed
+        and not no_hints
     ):
         pre_model_start = time.monotonic()
         pre_rescue = _deterministic_failed_tests_pre_rescue(
@@ -15233,6 +15329,9 @@ def run_with_nexus(
     ):
         effective_force_flow = "baseline"
         baseline_fast_path_reason = "route_cost_hidden_lite_baseline_fast_path"
+    if no_hints:
+        # L3: one model call per row in the counted arm.
+        effective_llm_candidate_cap = 1
     if route_cost_controls.get("lite_route") is True:
         effective_llm_candidate_cap = 1
         if task.eligibility_class != "model_required":
@@ -15244,11 +15343,16 @@ def run_with_nexus(
     target_file_arg = _repo_relative_path(repo_root, target_file) if enable_swarm_bench_executor else target_file
     test_file_arg = _repo_relative_path(repo_root, test_file) if enable_swarm_bench_executor else test_file
     verification_test_file = _verification_test_for_task(task, test_file)
+    strict_target_before = (
+        Path(target_file).read_text(encoding="utf-8")
+        if _no_nexus_task_hints() and llm_enabled and Path(target_file).is_file()
+        else None
+    )
     args = [
         "nexus",
         "research:auto-flow",
         "--task-desc",
-        _nexus_task_desc(task),
+        _nexus_task_desc(task, llm_enabled=llm_enabled),
         "--target-file",
         target_file_arg,
         "--test-file",
@@ -15342,6 +15446,9 @@ def run_with_nexus(
         bench_env_updates["NEXUS_DISABLE_HIDDEN_CONTRACT_FAST_PATH"] = "1"
         bench_env_updates["NEXUS_DISABLE_HIDDEN_INVARIANT_SHADOW"] = "1"
         bench_env_updates["NEXUS_MODEL_REQUIRED_EXECUTION_MODE"] = execution_policy.mode
+    if _no_nexus_task_hints() and llm_enabled:
+        # M2: the symmetric env applies to model runs only; the LLM-off lane is unchanged.
+        bench_env_updates.update(_strict_symmetric_with_nexus_env())
     if effective_enable_ultra_review_dry_gate:
         bench_env_updates["NEXUS_ULTRA_REVIEW_DRY_GATE"] = "1"
     if effective_enable_autoreason_executor:
@@ -15431,12 +15538,27 @@ def run_with_nexus(
     row = _extract_record(mode="with_nexus", task=task, payload=payload, wall_time_sec=wall)
     row["route_execution_policy"] = route_execution_policy.to_dict()
     _annotate_warning_ledger(row, warning_records)
-    if (
+    fallback_needed = bool(
         llm_enabled
         and (task.eligibility_class == "model_required" or require_model_participation_for_run)
         and effective_skip_llm_baseline
         and int(row.get("model_calls", 0) or 0) <= 0
-    ):
+    )
+    if fallback_needed and no_hints:
+        # M3: the counted lane never re-runs (a second attempt is Nexus treatment, and a local
+        # mutation from the first run would still be on disk). Restore the target and refuse.
+        if strict_target_before is not None:
+            Path(target_file).write_text(strict_target_before, encoding="utf-8")
+        row["status"] = "FAILED"
+        row["semantic_status"] = "UNVERIFIED"
+        row["semantic_completed"] = False
+        row["infra_invalid_reason"] = "counted_lane_fallback_refused"
+        row["counted_lane_fallback_refused"] = True
+        row["run_eligible"] = False
+        fallback_needed = False
+    if fallback_needed:
+        if strict_target_before is not None:
+            Path(target_file).write_text(strict_target_before, encoding="utf-8")
         fallback_args = list(args)
         if "--force-flow" in fallback_args:
             idx = fallback_args.index("--force-flow")
@@ -15734,7 +15856,32 @@ def run_with_nexus(
             row = rescue_row
             payload = rescue_payload
             wall = wall + rescue_wall
-    if payload.get("status") == "SUCCESS" and verification_test_file != test_file:
+    # S20: in the like-for-like A/B both arms are judged by the hidden test on the delivered file
+    # only. The product gates SUCCESS on the visible test; the bare arm has no such gate, so a model
+    # file the product left delivered is verified here as well.
+    model_bound_delivery = True
+    if strict_target_before is not None:
+        # P1-2: the delivered file must be byte-identical to the model candidate the product
+        # generated (sha256 recorded at generation time) and the winner must be a model source;
+        # a file changed by any later local path is never judged as the model's.
+        model_bound_delivery = _delivered_file_is_model_candidate(payload, row, target_file)
+        row["model_bound_delivery"] = model_bound_delivery
+    symmetric_model_delivery = bool(
+        strict_target_before is not None
+        and payload.get("status") != "SUCCESS"
+        and int(row.get("model_calls", 0) or 0) > 0
+        and Path(target_file).is_file()
+        and Path(target_file).read_text(encoding="utf-8") != strict_target_before
+        and model_bound_delivery
+    )
+    if strict_target_before is not None and payload.get("status") == "SUCCESS" and not model_bound_delivery:
+        # A product SUCCESS whose delivered file is not the model candidate is not counted.
+        payload = {**payload, "status": "FAILED"}
+        row["status"] = "FAILED"
+        row["semantic_status"] = "UNVERIFIED"
+        row["semantic_completed"] = False
+        row["symmetric_delivery_not_model"] = True
+    if (payload.get("status") == "SUCCESS" or symmetric_model_delivery) and verification_test_file != test_file:
         verify_start = time.monotonic()
         verify = _run_process_group(
             _pytest_verifier_cmd(verification_test_file),
@@ -15749,7 +15896,20 @@ def run_with_nexus(
         row["hidden_verifier_wall_sec"] = round(hidden_verifier_wall_sec, 4)
         row["hidden_verifier_stdout_tail"] = _tail_text(verify.stdout, max_chars=1000)
         row["hidden_verifier_stderr_tail"] = _tail_text(verify.stderr, max_chars=1000)
-        if not hidden_passed:
+        if symmetric_model_delivery:
+            row["symmetric_hidden_only_gate"] = True
+            if hidden_passed:
+                row["status"] = "SUCCESS"
+                row["semantic_status"] = "VERIFIED"
+                row["semantic_completed"] = True
+                row["report_trust_mismatch"] = False
+            else:
+                # The product already reported FAILED; no retry of any kind for this row.
+                row["hidden_retry_used"] = False
+                row["status"] = "FAILED"
+                row["semantic_status"] = "UNVERIFIED"
+                row["semantic_completed"] = False
+        if not hidden_passed and not symmetric_model_delivery:
             recovered_on_retry = False
             hidden_infra_reason = _hidden_verifier_infra_reason(row)
             if hidden_infra_reason:
@@ -16343,16 +16503,31 @@ def _run_without_nexus_impl(
             )
             reset_boundary_hash = hashlib.sha256(reset_boundary.encode("utf-8")).hexdigest()
             prompt_tests = test_source
-            prompt = (
-                f"You are {prompt_actor}. "
-                "Return ONLY valid JSON with keys status and patch. No markdown. No tool use. "
-                "The patch value must be the full updated target file content.\n"
-                f"{reset_boundary}\n\n"
-                f"Task: {task.task_desc}\n\n"
-                f"[CURRENT SOURCE]\n{original}\n\n"
-                f"[CURRENT TESTS]\n{prompt_tests}\n\n"
-                "Return the full updated file content in the patch field."
-            )
+            symmetric_edit_form = _no_nexus_task_hints()
+            if symmetric_edit_form:
+                # Like-for-like: the same output instruction (operation=replace) the with-Nexus arm
+                # gets, so the arms differ only in the Nexus blocks.
+                from nexus.research.sprint_service import SYMMETRIC_EDIT_INSTRUCTION
+
+                prompt = (
+                    f"You are {prompt_actor}. No markdown. No tool use.\n"
+                    f"{reset_boundary}\n\n"
+                    f"Task: {task.task_desc}\n\n"
+                    f"[CURRENT SOURCE]\n{original}\n\n"
+                    f"[CURRENT TESTS]\n{prompt_tests}\n\n"
+                    f"{SYMMETRIC_EDIT_INSTRUCTION}"
+                )
+            else:
+                prompt = (
+                    f"You are {prompt_actor}. "
+                    "Return ONLY valid JSON with keys status and patch. No markdown. No tool use. "
+                    "The patch value must be the full updated target file content.\n"
+                    f"{reset_boundary}\n\n"
+                    f"Task: {task.task_desc}\n\n"
+                    f"[CURRENT SOURCE]\n{original}\n\n"
+                    f"[CURRENT TESTS]\n{prompt_tests}\n\n"
+                    "Return the full updated file content in the patch field."
+                )
             prompt_sha256 = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
             direct_attempt_start = time.monotonic()
             out, raw = direct_ask(prompt=prompt, timeout_sec=_remaining_task_timeout(task_deadline, timeout_sec))
@@ -16380,6 +16555,14 @@ def _run_without_nexus_impl(
                 if out.get("provider_call_attempted") is False:  # e.g. no leasable Agy account
                     model_calls = 0
                 patch = str(out.get("patch") or "")
+                if symmetric_edit_form and not patch:
+                    # Same edit applier as the with-Nexus arm (#2101 operation JSON).
+                    from nexus.research.sprint_service import _candidate_code_from_llm_output
+
+                    applied, _edit_error = _candidate_code_from_llm_output(original, out)
+                    patch = applied or ""
+                    if patch:
+                        out["model_patch_generated"] = True
                 gateway_error_category = str(out.get("error_category", "") or "")
                 if gateway_error_category == "timeout":
                     model_calls = 0
@@ -19868,6 +20051,23 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--no-nexus-task-hints",
+        dest="no_nexus_task_hints",
+        action="store_true",
+        default=None,
+        help=(
+            "Give the with-Nexus arm exactly task.task_desc (no appended contracts or decision tables) "
+            "and keep fixture-aware local paths from pre-empting the model. Default ON under "
+            "--strict-llm-baseline or --require-same-model-baseline."
+        ),
+    )
+    parser.add_argument(
+        "--allow-nexus-task-hints",
+        dest="no_nexus_task_hints",
+        action="store_false",
+        help="Re-enable with-Nexus task hints and fixture-aware local paths (diagnostic runs only; not like-for-like).",
+    )
+    parser.add_argument(
         "--neutralize-history",
         dest="neutralize_history",
         action="store_true",
@@ -20018,6 +20218,13 @@ def main() -> int:
     # All downstream calls to _hidden_verifier_mode_enabled() will read from this env.
     if getattr(args, "enable_hidden_verifier", False):
         os.environ["NEXUS_VALUE_HIDDEN_VERIFIER"] = "1"
+    if args.no_nexus_task_hints is None:
+        args.no_nexus_task_hints = bool(
+            args.strict_llm_baseline or getattr(args, "require_same_model_baseline", False)
+        )
+    os.environ["NEXUS_BENCH_NO_TASK_HINTS"] = "1" if args.no_nexus_task_hints else "0"
+    if args.no_nexus_task_hints and args.with_llm_mode != "off" and args.with_model_provider == "codex":
+        parser.error("--no-nexus-task-hints does not support --with-model-provider codex (prompt not symmetric)")
     if args.session_worker:
         os.environ["NEXUS_GEMINI_SESSION_WORKER"] = "1"
         os.environ["NEXUS_CODEX_SESSION_WORKER"] = "1"
@@ -20760,6 +20967,7 @@ def main() -> int:
                     "external_model_export_policy": str(args.external_model_export_policy),
                     "outbound_prompt_ledger": str(args.outbound_prompt_ledger or os.environ.get("NEXUS_OUTBOUND_PROMPT_LEDGER") or ""),
                     "hidden_verifier_mode": hidden_verifier_mode,
+                    "no_nexus_task_hints": bool(args.no_nexus_task_hints),
                     "without_mode": args.without_mode,
                     "with_llm_mode": args.with_llm_mode,
                     "with_model_provider": args.with_model_provider,

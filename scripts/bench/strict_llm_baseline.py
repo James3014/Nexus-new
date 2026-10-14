@@ -29,6 +29,8 @@ HIDDEN_FEEDBACK_RETRY_REASONS = frozenset({
     "hidden_verifier_failure_bounded_nexus_retry",
 })
 MODEL_SOLVE = "model_solve"
+# A SUCCESS reached by a bounded Hyper re-run after the first attempt failed (Nexus treatment).
+NEXUS_TREATMENT_RESCUE = "rescued_by_nexus_treatment"
 # The run's captured-prompt symmetry audit failed or errored: no row of it is a solve of any kind.
 PROMPT_SYMMETRY_VIOLATION = "prompt_symmetry_violation"
 # A task x trial pair cut by an early stop: excluded from both arms' denominators symmetrically.
@@ -127,6 +129,13 @@ def apply_strict_llm_baseline_classification(
                     row["rescued_by_local"] = True
                 else:
                     row["solve_classification"] = NOT_SOLVED
+            elif row.get("bounded_nexus_rescue_used") is True:
+                # L4: a bounded Hyper re-run is Nexus treatment, never the first attempt's solve.
+                if mode == WITH_NEXUS_MODE:
+                    row["solve_classification"] = NEXUS_TREATMENT_RESCUE
+                    row["rescued_by_local"] = True
+                else:
+                    row["solve_classification"] = NOT_SOLVED
             elif local_delivery(row):
                 if mode == WITH_NEXUS_MODE:
                     row["solve_classification"] = LOCAL_RESCUE
@@ -159,7 +168,7 @@ def honest_scorecard(rows: Iterable[dict[str, Any]], mode: str) -> dict[str, Any
             r
             for r in arm
             if r.get("solve_classification")
-            in {LOCAL_RESCUE, DETERMINISTIC_RESCUE, HIDDEN_FEEDBACK_RESCUE}
+            in {LOCAL_RESCUE, DETERMINISTIC_RESCUE, HIDDEN_FEEDBACK_RESCUE, NEXUS_TREATMENT_RESCUE}
         ]
     else:
         rescued = []

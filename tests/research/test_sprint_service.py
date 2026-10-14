@@ -838,9 +838,11 @@ def test_value_task_contract_includes_artifact_and_override_rules():
         test_source="assert merge_limits({'timeout': 10}, {'timeout': None}) == {'timeout': 10}",
     )
 
-    assert "Use singular field 'artifact'" in artifact_contract
-    assert "return the claim ids" in artifact_contract
-    assert "preserve the existing default" in override_contract
+    # evidence-001 / gov-002 derived rules were removed from the product prompt (online A/B L1).
+    assert "Use singular field 'artifact'" not in artifact_contract
+    # Fixture-specific answer rules were removed from the product prompt (online A/B R2).
+    assert "return the claim ids" not in artifact_contract
+    assert "preserve the existing default" not in override_contract
 
 
 def test_value_task_contract_includes_nightshift_report_path_rule():
@@ -853,8 +855,9 @@ def test_value_task_contract_includes_nightshift_report_path_rule():
         ),
     )
 
-    assert "non-empty report_path" in contract
-    assert "Reject boolean-only Nightshift recovery" in contract
+    # Fixture-specific answer rules were removed from the product prompt (online A/B R2).
+    assert "non-empty report_path" not in contract
+    assert "Reject boolean-only Nightshift recovery" not in contract
 
 
 def test_value_task_contract_names_parse_config_defaults():
@@ -864,8 +867,10 @@ def test_value_task_contract_names_parse_config_defaults():
         test_source="assert parse_config({}) == {'strict': True, 'retries': 3}",
     )
 
-    assert "strict=True and retries=3" in contract
-    assert "explicit inputs are preserved" in contract
+    # context-002's hidden assertion must not be stated by the product prompt (online A/B R2).
+    assert "strict=True and retries=3" not in contract
+    assert "explicit inputs are preserved" not in contract
+    assert "follow the canonical config/doc contract" in contract
 
 
 def test_hidden_verifier_mode_omits_initial_test_source(monkeypatch, tmp_path: Path):
