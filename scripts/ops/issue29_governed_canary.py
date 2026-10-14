@@ -69,6 +69,13 @@ EXPECTED_ONLINE = {
     "model": "gemini-3.8-flash-medium",
 }
 EXPECTED_AGY_PERMISSION_MODE = "plan_no_autoapprove"
+# Runtime #205 Agy print-mode attestation (nexus_runtime.kernel.transport):
+# the turn is only delivered from the ``--output-format json`` envelope, and the
+# served model is read back from the line-anchored glog identity lines of the
+# private ``--log-file``.  The canary re-checks the recorded verdict itself.
+EXPECTED_AGY_OUTPUT_FORMAT = "agy_json_envelope"
+EXPECTED_AGY_ENVELOPE_STATUS = "SUCCESS"
+EXPECTED_AGY_MODEL_IDENTITY_STATUS = "MODEL_IDENTITY_OK"
 WORLD_C_VERIFIER_SOURCE = "HealOrchestrator.VerificationPhase"
 
 MIN_UNUSED_MEMORY_BYTES = 6 * 1024**3
@@ -160,6 +167,11 @@ class Evaluation:
 
 def _sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def _identity_token(value: str) -> str:
+    """Same normalisation as the runtime's Agy backend-label comparison."""
+    return "".join(char for char in str(value or "").lower() if char.isascii() and char.isalnum())
 
 
 def _sha256_text(text: str) -> str:
@@ -739,36 +751,88 @@ def evaluate_runtime_evidence(
         and authority.get("online_model_name") == expected_online["model"],
         authority.get("resolved_model"),
     )
-    # The runtime receipt stores only hashes of the executed command.  Recompute
-    # the fingerprint from the argv the runtime transport builds for Agy
-    # (``[bin, --mode, plan, --sandbox, --model, <model>, -p, <assembled prompt>]``)
-    # so the Online model is proven from the argv that actually ran.  Fail closed
-    # when the executable is unknown or the fingerprint differs.
-    expected_argv = [
-        agy_executable,
-        "--mode",
-        "plan",
-        "--sandbox",
-        "--model",
-        expected_online["model"],
-        "-p",
-        assembled,
-    ]
-    expected_fingerprint = (
-        hashlib.sha256(json.dumps(expected_argv, ensure_ascii=False).encode("utf-8")).hexdigest()
-        if agy_executable and assembled
+    # The runtime receipt stores only hashes of the executed command.  Since
+    # runtime #205 the Agy argv is ``[bin, --new-project, --mode, plan, --sandbox,
+    # --model, <model>, --log-file, <private mkdtemp>/agy.log, --output-format,
+    # json, --print-timeout, <N>s, -p, <prompt>]``; the per-call log path is
+    # random, deleted after the turn and never recorded, so the fingerprint can
+    # no longer be recomputed from the receipt.  The strongest proof the receipt
+    # supports is: (a) the fingerprint is bound to this exact process invocation
+    # (task, attempt, provider, provider input, working directory) and the
+    # executable hash is the resolved Agy binary, and (b) the served model is the
+    # admitted model per the runtime's log attestation, delivered from the JSON
+    # envelope.  Fail closed when any of it is missing or differs.
+    command_fingerprint = str(process.get("command_fingerprint") or "")
+    expected_invocation_id = (
+        hashlib.sha256(
+            json.dumps([
+                task_id,
+                process.get("attempt_id"),
+                process.get("provider"),
+                command_fingerprint,
+                provider_input_sha,
+                process.get("working_directory_hash"),
+            ]).encode("utf-8")
+        ).hexdigest()
+        if command_fingerprint
         else ""
     )
-    ev.evidence["online"]["expected_command_fingerprint"] = expected_fingerprint
-    ev.evidence["online"]["observed_command_fingerprint"] = process.get("command_fingerprint")
+    expected_executable_hash = (
+        _sha256_text(str(shutil.which(agy_executable) or agy_executable)) if agy_executable else ""
+    )
+    ev.evidence["online"]["observed_command_fingerprint"] = command_fingerprint
+    ev.evidence["online"]["command_fingerprint_recomputable"] = False
     ev.add(
-        "online_command_fingerprint_matches_admitted_argv",
-        bool(expected_fingerprint) and process.get("command_fingerprint") == expected_fingerprint,
+        "online_command_fingerprint_bound_to_invocation",
+        bool(expected_executable_hash)
+        and process.get("executable_path_hash") == expected_executable_hash
+        and len(command_fingerprint) == 64
+        and all(char in "0123456789abcdef" for char in command_fingerprint)
+        and process.get("provider") == expected_online["provider"]
+        and online_response.get("task_id") == task_id
+        and process.get("process_invocation_id") == expected_invocation_id,
         {
-            "expected": expected_fingerprint,
-            "observed": process.get("command_fingerprint"),
             "agy_executable_known": bool(agy_executable),
+            "executable_hash_matches": bool(expected_executable_hash)
+            and process.get("executable_path_hash") == expected_executable_hash,
+            "expected_invocation_id": expected_invocation_id,
+            "observed_invocation_id": process.get("process_invocation_id"),
+            "limitation": "argv carries an unrecorded private --log-file path",
         },
+    )
+    observed_ids = online_response.get("provider_observed_model_ids")
+    observed_labels = online_response.get("provider_observed_model_labels")
+    model_token = _identity_token(expected_online["model"])
+    ev.evidence["online"]["model_identity"] = {
+        "status": online_response.get("model_identity_status"),
+        "reason": online_response.get("model_identity_reason"),
+        "observed_model_ids": observed_ids,
+        "observed_model_labels": observed_labels,
+    }
+    ev.add(
+        "online_model_identity_attested",
+        online_response.get("model_identity_status") == EXPECTED_AGY_MODEL_IDENTITY_STATUS
+        and online_response.get("model_identity_reason") == ""
+        and observed_ids == [expected_online["model"]]
+        and isinstance(observed_labels, list)
+        and bool(observed_labels)
+        and all(_identity_token(str(label)) == model_token for label in observed_labels),
+        ev.evidence["online"]["model_identity"],
+    )
+    print_timeout = online_response.get("provider_print_timeout_sec")
+    ev.evidence["online"]["agy_output"] = {
+        "output_format": online_response.get("provider_output_format"),
+        "envelope_status": online_response.get("provider_envelope_status"),
+        "print_timeout_sec": print_timeout,
+    }
+    ev.add(
+        "online_agy_json_envelope",
+        online_response.get("provider_output_format") == EXPECTED_AGY_OUTPUT_FORMAT
+        and online_response.get("provider_envelope_status") == EXPECTED_AGY_ENVELOPE_STATUS
+        and isinstance(print_timeout, int)
+        and not isinstance(print_timeout, bool)
+        and print_timeout > 0,
+        ev.evidence["online"]["agy_output"],
     )
     ev.add(
         "online_agy_plan_sandbox_no_grants",
@@ -971,10 +1035,19 @@ def run_canary(
             "requires independent review of this receipt."
         ),
         "limitations": [
-            "Online model identity is bound to the admitted argv (--model) and the "
-            "runtime command fingerprint only; the provider-side served model is "
-            "not observed (the runtime Agy adapter has no log-level model "
-            "attestation).",
+            "Online model identity is the runtime's Agy log attestation "
+            "(resolved model and backend label read from the private --log-file, "
+            "MODEL_IDENTITY_OK) re-checked against the admitted model, with the turn "
+            "delivered from the --output-format json envelope; the attestation is "
+            "recorded by the runtime and is not independently re-read by this harness.",
+            "The command fingerprint cannot be recomputed from the receipt: the Agy "
+            "argv carries a random private --log-file path the receipt does not "
+            "record. The harness binds it to the process invocation id and the "
+            "resolved Agy executable hash only. Like the runtime, that hash covers the "
+            "resolved executable path string, not the binary's bytes, so a substituted "
+            "binary at the admitted path is not detected; the same-task fingerprint and "
+            "invocation id are self-consistent receipt values, not an independent "
+            "re-derivation of the argv.",
             "The runtime receipt does not bind the Task Card hash; only this harness receipt does.",
         ],
         "durable_marker": DURABLE_MARKER,

@@ -1601,3 +1601,208 @@ def test_project_refresh_detects_selected_worker_change():
     proj = project_refresh(receipt1, req2)
     assert proj["status"] == "STALE"
     assert "selected_worker" in proj["changed_fields"]
+
+
+# ---------------------------------------------------------------------------
+# Contract evidence refs for the Core-bound runtime (existing-file edits)
+# ---------------------------------------------------------------------------
+
+_RUNTIME_REF_ANCHOR = r"(?:[0-9a-f]{16}|[0-9a-f]{64})"
+
+
+def contract_sources():
+    main_sha = "a" * 40
+    return [
+        {
+            "kind": "github_issue",
+            "ref": "github://James3014/Nexus-new/issues/321",
+            "revision": "issue-rev-7",
+            "provenance": "github",
+            "content": "Fix value()",
+        },
+        {
+            "kind": "task_card",
+            "ref": "tasks/campaign/00-task.md",
+            "revision": "b" * 64,
+            "provenance": "git",
+            "content": "Task contract\n",
+        },
+        {
+            "kind": "source_file",
+            "ref": "nexus/example.py",
+            "revision": main_sha,
+            "provenance": f"git:{main_sha}",
+            "content": "def value():\n    return 1\n",
+        },
+        {
+            "kind": "source_absence",
+            "ref": "tests/test_example.py",
+            "revision": main_sha,
+            "provenance": f"git:{main_sha}",
+            "content": f"SOURCE_ABSENT_AT_MAIN:{main_sha}:tests/test_example.py",
+        },
+        {
+            "kind": "verifier_source",
+            "ref": "tests/conftest.py",
+            "revision": main_sha,
+            "provenance": f"git:{main_sha}",
+            "content": "",
+        },
+    ]
+
+
+def _pack_ref(pack, kind):
+    return next(e["evidence_ref"] for e in pack["entries"] if e["kind"] == kind)
+
+
+def test_bind_contract_evidence_refs_appends_nexus_minted_refs_only():
+    import re
+
+    from nexus.services.external_intelligence import bind_contract_evidence_refs
+
+    worker = sample_selected_worker()
+    pack = build_context_pack(contract_sources())
+    req = build_request(normalize_intake(record()), pack, selected_worker=worker)
+    verifier_ref = _pack_ref(pack, "verifier_source")
+    envelope = envelope_v2_for(req, context_pack=pack, evidence_refs=[verifier_ref])
+
+    bound = bind_contract_evidence_refs(envelope, pack)
+
+    task_ref = _pack_ref(pack, "task_card")
+    file_ref = _pack_ref(pack, "source_file")
+    absence_ref = _pack_ref(pack, "source_absence")
+    # The model's refs keep their position; Nexus-minted refs follow, no duplicates.
+    assert bound["evidence_refs"][0] == verifier_ref
+    assert sorted(bound["evidence_refs"][1:]) == sorted([task_ref, file_ref, absence_ref])
+    assert _pack_ref(pack, "github_issue") not in bound["evidence_refs"]
+    # Exactly the formats the runtime admission checks for each allowed path.
+    assert re.fullmatch(rf"source_file:nexus/example\.py@{_RUNTIME_REF_ANCHOR}", file_ref)
+    assert re.fullmatch(
+        rf"source_absence:tests/test_example\.py@{_RUNTIME_REF_ANCHOR}", absence_ref
+    )
+    assert re.fullmatch(rf"task_card:tasks/campaign/00-task\.md@{_RUNTIME_REF_ANCHOR}", task_ref)
+    # Input is not mutated, the result is idempotent and still parses against the pack.
+    assert envelope["evidence_refs"] == [verifier_ref]
+    assert bind_contract_evidence_refs(bound, pack) == bound
+    parse_external_execution_envelope(json.dumps(bound), context_pack=pack)
+
+
+def test_bind_contract_evidence_refs_does_not_duplicate_model_cited_refs():
+    from nexus.services.external_intelligence import bind_contract_evidence_refs
+
+    pack = build_context_pack(contract_sources())
+    req = build_request(normalize_intake(record()), pack, selected_worker=sample_selected_worker())
+    file_ref = _pack_ref(pack, "source_file")
+    envelope = envelope_v2_for(req, context_pack=pack, evidence_refs=[file_ref])
+    refs = bind_contract_evidence_refs(envelope, pack)["evidence_refs"]
+    assert refs.count(file_ref) == 1
+    assert refs[0] == file_ref
+    assert len(refs) == 3
+
+
+def test_bind_contract_evidence_refs_collapses_model_duplicates_before_the_cap():
+    from nexus.services.external_intelligence import MAX_LIST, bind_contract_evidence_refs
+
+    pack = build_context_pack(contract_sources())
+    req = build_request(normalize_intake(record()), pack, selected_worker=sample_selected_worker())
+    file_ref = _pack_ref(pack, "source_file")
+    envelope = envelope_v2_for(req, context_pack=pack, evidence_refs=[file_ref])
+    flooded = {**envelope, "evidence_refs": [file_ref] * (MAX_LIST + 1)}
+    refs = bind_contract_evidence_refs(flooded, pack)["evidence_refs"]
+    assert refs == bind_contract_evidence_refs(envelope, pack)["evidence_refs"]
+
+
+def test_bind_contract_evidence_refs_rejects_tampered_pack_and_leaves_v1_alone():
+    from nexus.services.external_intelligence import bind_contract_evidence_refs
+
+    pack = build_context_pack(contract_sources())
+    req = build_request(normalize_intake(record()), pack, selected_worker=sample_selected_worker())
+    envelope = envelope_v2_for(req, context_pack=pack)
+    forged = json.loads(json.dumps(pack))
+    for entry in forged["entries"]:
+        if entry["kind"] == "source_file":
+            entry["evidence_ref"] = "source_file:nexus/example.py@" + "0" * 16
+    with pytest.raises(ExternalIntelligenceError, match="INVALID_CONTEXT_PACK"):
+        bind_contract_evidence_refs(envelope, forged)
+
+    v1 = {"schema": ENVELOPE_SCHEMA, "evidence_refs": []}
+    assert bind_contract_evidence_refs(v1, pack) == v1
+
+
+def test_bind_contract_evidence_refs_fails_closed_over_list_limit():
+    from nexus.services.external_intelligence import MAX_LIST, bind_contract_evidence_refs
+
+    many = contract_sources() + [
+        {
+            "kind": "source_absence",
+            "ref": f"tests/test_extra_{index}.py",
+            "revision": "a" * 40,
+            "provenance": "git:" + "a" * 40,
+            "content": "absent",
+        }
+        for index in range(MAX_LIST)
+    ]
+    pack = build_context_pack(many)
+    req = build_request(normalize_intake(record()), pack, selected_worker=sample_selected_worker())
+    envelope = envelope_v2_for(req, context_pack=pack, evidence_refs=[])
+    with pytest.raises(ExternalIntelligenceError, match="CONTRACT_EVIDENCE_REFS_LIMIT_EXCEEDED"):
+        bind_contract_evidence_refs(envelope, pack)
+
+
+def _contract_sidecar(tmp_path, raw):
+    class FakeTransport:
+        def __init__(self):
+            self.calls = []
+
+        def invoke(self, prompt):
+            self.calls.append(prompt)
+            return TransportResult(
+                "INTELLIGENCE_COMPLETED",
+                raw=raw,
+                conversation_id="conv-contract-1",
+                safe_argv=("opencli", "chatgpt", "ask", "<prompt>"),
+            )
+
+    store = ExternalIntelligenceStore(tmp_path)
+    return ExternalIntelligenceSidecar(transport=FakeTransport(), store=store), store
+
+
+def test_sidecar_v2_injects_source_file_and_absence_refs_into_stored_envelope(tmp_path):
+    import hashlib
+
+    worker = sample_selected_worker()
+    pack = build_context_pack(contract_sources())
+    req = build_request(normalize_intake(record()), pack, selected_worker=worker)
+    # The model cites only the verifier source and forgets the per-path refs.
+    model_envelope = envelope_v2_for(
+        req, context_pack=pack, evidence_refs=[_pack_ref(pack, "verifier_source")]
+    )
+    sidecar, store = _contract_sidecar(tmp_path, json.dumps(model_envelope))
+
+    receipt = sidecar.analyze(record(), contract_sources(), selected_worker=worker)
+
+    refs = receipt["envelope"]["evidence_refs"]
+    for kind in ("task_card", "source_file", "source_absence"):
+        assert _pack_ref(pack, kind) in refs
+    stored = json.loads(store._envelope_path(req["request_sha256"]).read_text(encoding="utf-8"))
+    assert stored == receipt["envelope"]
+    canonical = json.dumps(stored, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    assert hashlib.sha256(canonical.encode("utf-8")).hexdigest() == receipt["envelope_sha256"]
+    # The raw model response stays the provenance anchor.
+    raw = json.dumps(model_envelope).encode("utf-8")
+    assert receipt["raw_response_sha256"] == hashlib.sha256(raw).hexdigest()
+
+
+def test_sidecar_v2_still_rejects_model_forged_source_file_ref(tmp_path):
+    worker = sample_selected_worker()
+    pack = build_context_pack(contract_sources())
+    req = build_request(normalize_intake(record()), pack, selected_worker=worker)
+    forged = envelope_v2_for(
+        req,
+        context_pack=pack,
+        evidence_refs=["source_file:nexus/example.py@" + "0" * 16],
+    )
+    sidecar, store = _contract_sidecar(tmp_path, json.dumps(forged))
+    with pytest.raises(ExternalIntelligenceError, match="UNKNOWN_EVIDENCE_REF"):
+        sidecar.analyze(record(), contract_sources(), selected_worker=worker)
+    assert not store._envelope_path(req["request_sha256"]).exists()

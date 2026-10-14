@@ -2,7 +2,7 @@
   "schema": "nexus.wiki.agent-index.v1",
   "authority": "derived_non_authoritative",
   "authority_manifest": "99_Schema/WIKI_AUTHORITY_MANIFEST.yaml",
-  "source_fingerprint": "2d7fa59f64deb649d97293d81121d053ccdc2ac51df2738fc3ebfb221109a963",
+  "source_fingerprint": "d81a85de8b8b1f066f849c71de54237d65ac7a2bf3908c37a57e450f5b954c2b",
   "included_page_count": 253,
   "excluded_page_count": 38,
   "canonical_page_count": 12,
@@ -303,7 +303,7 @@
       "is_canonical": true,
       "canonical_key": "architecture",
       "one_sentence_summary": "> [!abstract] 核心意圖",
-      "content_sha256": "aa84e31d959e343dae8cd949db0e427832bd53b5f12a1c5491b1fe0b8946ce00",
+      "content_sha256": "f5b8b0afe2375825dd3581e330e2a3a0d96ca140b28865564a6b34664567e13b",
       "outgoing_links": [],
       "unresolved_links": [],
       "content_verified_against_commit": "",
@@ -4950,7 +4950,7 @@
       "authority": "",
       "owner": "agent",
       "confidence": "high",
-      "source_of_truth": "src/governance/mod.rs",
+      "source_of_truth": "nexus/engine/runtime_phase_contract.py",
       "aliases": [
         "Gate Control",
         "Nexus Guard",
@@ -4966,8 +4966,8 @@
       ],
       "is_canonical": false,
       "canonical_key": "",
-      "one_sentence_summary": "本頁解析 Nexus v24.0 的物理安全閘門實作，核心決策已全面下沉至 Rust Kernel，實現語義建議與物理裁決的絕對隔離。 [Source: src/governance/mod.rs]",
-      "content_sha256": "87b7e652d3adec2dceb1928e57cf98dd69b839999ece7056cc3c8c1576b12f06",
+      "one_sentence_summary": "本頁解析 Nexus v24.0 的物理安全閘門實作，核心決策已全面下沉至 Rust Kernel，實現語義建議與物理裁決的絕對隔離。（2026-10-14：Rust 擴充已退役並刪除，見 #1927；現行權威見 nexus/engine/runtime_phase_contract.py）",
+      "content_sha256": "b65e10f82dc8c1978f873a6e89392d4fc00e55de167f0c580399fca7c37801c0",
       "outgoing_links": [
         [
           "canonical:system_overview",
@@ -6669,7 +6669,7 @@
       "authority": "",
       "owner": "agent",
       "confidence": "high",
-      "source_of_truth": "src/governance/transition_engine.rs",
+      "source_of_truth": "nexus/engine/runtime_phase_contract.py",
       "aliases": [
         "Runtime Flow",
         "Orchestration Sequence"
@@ -6683,8 +6683,8 @@
       ],
       "is_canonical": false,
       "canonical_key": "",
-      "one_sentence_summary": "本頁描述 Nexus v24.0 的實體調度序列，所有相位轉移均由 Rust Kernel 進行物理級裁決與 Fail-Closed 保障。 [Source: src/governance/transition_engine.rs]",
-      "content_sha256": "295ff6e9e50d746bf3d84cd66af072f0932ed7a9a6035d2fd77062684a215bb2",
+      "one_sentence_summary": "本頁描述 Nexus 的 PXDRAC 調度序列；相位轉移由 Python `validate_transition` 以 Fail-Closed 方式裁決。 [Source: nexus/engine/runtime_phase_contract.py]",
+      "content_sha256": "464b5891ad37c2e6f81ac85ecc42937b4106cace8c766d301884476d563560b2",
       "outgoing_links": [
         [
           "canonical:system_overview",

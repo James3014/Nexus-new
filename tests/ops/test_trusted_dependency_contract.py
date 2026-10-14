@@ -618,3 +618,91 @@ def test_workflow_shell_rejects_non_default_branch_workflow_ref(
     assert completed.returncode != 0
     assert "default-branch workflow" in completed.stderr
     assert not (run_root / "trusted-dependency-contract-source").exists()
+
+
+# ------------------------------------------- fetch strategy (#2213, shallow race)
+
+
+def _shallow_state(repo: Path) -> tuple[bytes, str]:
+    shallow = repo / "shallow"
+    return (shallow.read_bytes() if shallow.exists() else b"", _git(repo, "count-objects", "-v"))
+
+
+@pytest.mark.parametrize("case", ["drift", "anchored", "unchanged"])
+def test_fetching_evaluate_never_deepens_the_shallow_controller_repo(
+    fx: Fixture, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    """``evaluate(fetch=True)`` must not update shallow state in the workflow's repo.
+
+    Deepening the depth-1 controller repo in place (``--depth=1`` head fetch, then
+    ``--unshallow``) failed on GitHub with "shallow file has changed since we read
+    it": a detached commit-graph/gc write from the previous fetch raced the shallow
+    update.  A small file:// fixture does not hit that timing, so the test pins the
+    fetch strategy instead: one full fetch of both commits into a fresh repository
+    with background maintenance off, the controller repo left byte-for-byte alone.
+    """
+
+    new_pyproject = PYPROJECT + b"dependencies = ['x==1']\n"
+    new_lock = UV_LOCK + b"# x 1\n"
+    fx.branch("pr", fx.fork_point)
+    if case == "unchanged":
+        fx.write("README.md", b"changed\n")
+    else:
+        fx.write("pyproject.toml", new_pyproject)
+        fx.write("uv.lock", new_lock)
+    head = fx.commit(f"pr: {case}")
+    if case == "anchored":
+        _authorize(monkeypatch, PR, _hashes((PYPROJECT, UV_LOCK), (new_pyproject, new_lock)))
+    fx.publish(fx.fork_point, head)
+    controller = fx.controller_repo(fx.fork_point)
+    assert _git(controller, "rev-parse", "--is-shallow-repository") == "true"
+    before = _shallow_state(controller)
+
+    fetches: list[tuple[Path, tuple[str, ...], dict[str, str]]] = []
+    remotes: list[str] = []
+    original_git = anchor._git
+
+    def recording_git(repo: Path, *args: str, binary: bool = False) -> bytes | str:
+        if args[:2] == ("remote", "add"):
+            remotes.append(args[3])
+        if args and args[0] == "fetch":
+            config = {
+                key: original_git(repo, "config", "--default", "", "--get", key)
+                for key in ("gc.auto", "maintenance.auto", "fetch.writeCommitGraph")
+            }
+            fetches.append((Path(repo), args, config))
+        return original_git(repo, *args, binary=binary)
+
+    monkeypatch.setattr(anchor, "_git", recording_git)
+    record = tdc.evaluate(controller, tdc.identity(_event(fx.fork_point, head)))
+
+    expected = {
+        "drift": ("FAIL", tdc.DRIFT),
+        "anchored": ("PASS", tdc.AUTHORIZED),
+        "unchanged": ("PASS", tdc.UNCHANGED),
+    }[case]
+    assert (record["status"], record["reason_code"]) == expected
+    assert _shallow_state(controller) == before
+    assert len(fetches) == 1
+    fetch_repo, args, config = fetches[0]
+    assert fetch_repo != controller
+    assert not any(arg.startswith(("--depth", "--unshallow", "--deepen")) for arg in args)
+    assert {fx.fork_point, head} <= set(args)
+    assert config == {
+        "gc.auto": "0",
+        "maintenance.auto": "false",
+        "fetch.writeCommitGraph": "false",
+    }
+    assert not fetch_repo.exists()
+    assert remotes == [fx.origin.as_uri()]
+
+
+def test_fetching_evaluate_fails_closed_without_origin(fx: Fixture) -> None:
+    fx.branch("pr", fx.fork_point)
+    fx.write("pyproject.toml", PYPROJECT + b"# drift\n")
+    head = fx.commit("pr: drift")
+    fx.publish(fx.fork_point, head)
+    controller = fx.controller_repo(fx.fork_point)
+    _git(controller, "remote", "remove", "origin")
+    with pytest.raises(subprocess.CalledProcessError):
+        tdc.evaluate(controller, tdc.identity(_event(fx.fork_point, head)))
