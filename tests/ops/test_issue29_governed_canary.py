@@ -208,6 +208,25 @@ def test_happy_path_records_consumption_and_contribution(happy: dict[str, Any]) 
     assert receipt["transport_overrides"]
 
 
+def test_happy_path_records_local_endpoint(happy: dict[str, Any]) -> None:
+    endpoint = happy["receipt"]["local_endpoint"]
+    assert endpoint["source"] == "NEXUS_OLLAMA_URL"
+    assert endpoint["resolved"].startswith("http://127.0.0.1:")
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["NEXUS_OLLAMA_ENDPOINT", "OLLAMA_HOST", "NEXUS_OLLAMA_MODEL", "NEXUS_OLLAMA_SMALL_MODEL"],
+)
+def test_ollama_endpoint_or_model_env_is_recorded_as_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    monkeypatch.setenv(name, "http://127.0.0.1:9/elsewhere")
+    receipt, _ollama, _log = _run(tmp_path, monkeypatch)
+    assert receipt["transport_overrides"][name] == "http://127.0.0.1:9/elsewhere"
+    assert receipt["durable_marker_eligible"] is False
+
+
 def test_happy_path_physical_edges_are_admitted_identities(happy: dict[str, Any]) -> None:
     assert happy["ollama_calls"]
     assert {call["model"] for call in happy["ollama_calls"]} == {"qwen2.5-coder:7b-instruct"}

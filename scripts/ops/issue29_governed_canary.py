@@ -77,6 +77,9 @@ MEMORY_PRESSURE_NORMAL = 1
 OLLAMA_SERVICE_LABEL = "com.james.local-models-ollama"
 OLLAMA_SERVICE_PS_URL = "http://127.0.0.1:11435/api/ps"
 OLLAMA_GATEWAY_TAGS_URL = "http://127.0.0.1:11434/api/tags"
+# Default the local provider uses when NEXUS_OLLAMA_URL is unset; the
+# compatibility gateway on :11434 forwards to the Ollama service on :11435.
+DEFAULT_LOCAL_OLLAMA_BASE = "http://127.0.0.1:11434"
 SPLASH_MODELS_URL = "http://127.0.0.1:8000/v1/models"
 DEFAULT_STATE_ROOT = Path.home() / ".local" / "state" / "nexus-issue29-governed-canary"
 
@@ -98,6 +101,14 @@ VERIFIER_COMMAND = (
 
 TRANSPORT_OVERRIDE_ENV = (
     "NEXUS_OLLAMA_URL",
+    # Other Ollama endpoint/model selectors read by host or runtime code (#2160).
+    "NEXUS_OLLAMA_ENDPOINT",
+    "OLLAMA_HOST",
+    "NEXUS_OLLAMA_API_TYPE",
+    "NEXUS_OLLAMA_MODEL",
+    "NEXUS_OLLAMA_SMALL_MODEL",
+    "NEXUS_OLLAMA_LARGE_MODEL",
+    "NEXUS_OLLAMA_WORKER_MODEL",
     "NEXUS_AGY_BIN",
     "NEXUS_AGY_EXECUTABLE",
     "NEXUS_AGY_COMMAND",
@@ -1013,6 +1024,11 @@ def run_canary(
         key: (env.get(key) or os.environ.get(key))
         for key in TRANSPORT_OVERRIDE_ENV
         if env.get(key) or os.environ.get(key)
+    }
+    override_url = env.get("NEXUS_OLLAMA_URL") or os.environ.get("NEXUS_OLLAMA_URL")
+    receipt["local_endpoint"] = {
+        "resolved": override_url or DEFAULT_LOCAL_OLLAMA_BASE,
+        "source": "NEXUS_OLLAMA_URL" if override_url else "default",
     }
     if executor is None:
         from nexus.engine.canonical_task_seam import execute_canonical_product_task
