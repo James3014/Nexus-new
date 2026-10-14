@@ -89,6 +89,7 @@ def _ok_probes(**overrides: Any) -> canary.HostProbes:
         http_get=lambda url: responses[url],
         unused_memory_bytes=overrides.pop("unused_memory_bytes", lambda: 20 * 1024**3),
         agy_path=overrides.pop("agy_path", lambda: "/fake/bin/agy"),
+        memory_pressure_level=overrides.pop("memory_pressure_level", lambda: 1),
     )
 
 
@@ -455,6 +456,39 @@ def test_preflight_memory_below_threshold_aborts(
     assert "fixture" not in receipt
     assert ollama.calls == []
     assert _agy_calls(log) == []
+
+
+@pytest.mark.parametrize("level", [2, 4, 0])
+def test_preflight_memory_pressure_not_normal_aborts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, level: int
+) -> None:
+    probes = _ok_probes(memory_pressure_level=lambda: level)
+    receipt, ollama, log = _run(tmp_path, monkeypatch, host_probes=probes)
+    assert receipt["status"] == canary.STATUS_ABORTED
+    assert receipt["reasons"] == ["host_preflight_failed:memory_pressure_normal"]
+    assert ollama.calls == []
+    assert _agy_calls(log) == []
+
+
+def test_reclaimable_memory_counts_inactive_and_purgeable_not_compressed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vm_stat = (
+        "Mach Virtual Memory Statistics: (page size of 16384 bytes)\n"
+        "Pages free:                                   10.\n"
+        "Pages active:                              99999.\n"
+        "Pages inactive:                              200.\n"
+        "Pages speculative:                            30.\n"
+        "Pages wired down:                          88888.\n"
+        "Pages purgeable:                               4.\n"
+        "Pages occupied by compressor:              77777.\n"
+    )
+
+    def fake_run(*args: Any, **kwargs: Any) -> Any:
+        return subprocess.CompletedProcess(args[0], 0, stdout=vm_stat, stderr="")
+
+    monkeypatch.setattr(canary.subprocess, "run", fake_run)
+    assert canary._real_unused_memory_bytes() == (10 + 30 + 200 + 4) * 16384
 
 
 def test_preflight_other_model_loaded_or_splash_down_aborts(
