@@ -1,12 +1,17 @@
-"""Issue #49: no World A surface delivers ungated model text.
+"""Issue #49: no World A task surface delivers ungated final-answer text.
 
 Re-localized after #29 (see #49): the canonical runtime keeps the model's
 natural-language answer only inside the runtime receipt
 (``receipt["online"]["response"]``). Neither MCP ``nexus_task_run``, ``nexus
-run`` (stdout and report) nor the root receipt forwards that text, so there is
-no final-response claim to gate. These tests lock that in: adding a text
-delivery path makes them fail, and that path must then consume the existing
-claim/delivery verdict before returning text (reopen #49).
+run`` (stdout and report) nor the root receipt forwards that text; they only
+return a pointer to the receipt file. So there is no final-answer/claim text to
+gate. These tests lock that in: adding a text delivery path makes them fail,
+and that path must then consume the existing claim/delivery verdict before
+returning text (reopen #49).
+
+Known exception, out of scope: ``nexus content:rewrite --llm-mode`` writes the
+model's rewritten document (``online.response.patch``) to the user's output
+file. That is a requested artifact, not a completion/verification claim.
 """
 
 from __future__ import annotations
@@ -53,6 +58,7 @@ def _runtime_receipt(task_id: str) -> dict[str, Any]:
                 "raw_response": SENTINEL,
                 "message": SENTINEL,
                 "output": SENTINEL,
+                "patch": SENTINEL,
             },
         },
         "claim_boundary": {"public_claim_allowed": False},
@@ -121,6 +127,7 @@ def test_nexus_run_does_not_print_or_report_online_model_text(
         cli_mod.nexus, ["nexus", "run", "issue49-cli", "--report-file", str(report)]
     )
     assert SENTINEL not in result.output
+    assert report.exists(), result.output
     written = [path for path in tmp_path.rglob("*.json") if path.is_file()]
     assert written, result.output
     for path in written:
