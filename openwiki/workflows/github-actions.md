@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: GitHub Actions Workflows & Operational Lanes
-description: Current inventory and trigger classification of all 22 GitHub Actions workflows, including Fast Start v2 shadow/invalidation/reconciliation lanes, exact-base Pytest impact selection, G2 published-history audit, and trusted deletion-evidence bootstrap.
+description: Current inventory and trigger classification of all 23 GitHub Actions workflows, including Fast Start v2 shadow/invalidation/reconciliation lanes, exact-base Pytest impact selection, G2 published-history audit, and trusted deletion-evidence bootstrap.
 tags: [workflows, github-actions, ci-cd, operational-lanes]
 openwiki:
   roles: [architecture, operations, testing]
@@ -15,7 +15,7 @@ openwiki:
 
 # GitHub Actions Workflows & Operational Lanes
 
-The repository currently contains **all 22 GitHub Actions workflows** under `.github/workflows/`. Display names and trigger modes below are derived from the physical YAML at the synchronized GitHub revision; they are not inferred from filenames or historical workflow intent.
+The repository currently contains **all 23 GitHub Actions workflows** under `.github/workflows/`. Display names and trigger modes below are derived from the physical YAML at the synchronized GitHub revision; they are not inferred from filenames or historical workflow intent.
 
 ---
 
@@ -42,6 +42,7 @@ The repository currently contains **all 22 GitHub Actions workflows** under `.gi
 | `repository-intelligence.yml` | Repository Intelligence | `pull_request` (`opened`, `synchronize`, `reopened`, `ready_for_review`) | Event-driven | Repository Intelligence snapshot and guard-delta jobs |
 | `security.yml` | Nexus Exact-Base Bandit CI | `push`, `pull_request`, `workflow_dispatch` | Event-driven & Manual | Exact-base Bandit security scan |
 | `trusted-deletion-anchor.yml` | Trusted deletion-evidence bootstrap anchor | `pull_request_target` (`opened`, `synchronize`, `reopened`, `ready_for_review`) | Event-driven | Trusted controller → unprivileged executor → trusted verification path for deletion evidence |
+| `trusted-dependency-contract.yml` | Trusted dependency contract | `pull_request_target` (`main`; `opened`, `synchronize`, `reopened`, `ready_for_review`, `edited`) | Event-driven | Default-branch check of the pyproject.toml/uv.lock anchor rule (`DEPENDENCY_CONTRACT_DRIFT`), independent of the merge-lane binding (#2156) |
 | `trusted-impact-gate.yml` | Trusted exact-base impact gate | `pull_request_target` (`main`; `opened`, `synchronize`, `reopened`, `ready_for_review`) | Event-driven | Default-branch trusted impact gate; head code runs only in an unprivileged executor |
 | `typecheck.yml` | Nexus Exact-Base Pyright CI | `push`, `pull_request`, `workflow_dispatch` | Event-driven & Manual | Exact-base Pyright type-check lane |
 | `wiki-governance.yml` | Wiki Exact-Base Governance CI | `push`, `pull_request`, `workflow_dispatch` | Event-driven & Manual | Governed-Wiki structure/boundary verification |
@@ -79,6 +80,8 @@ This makes the CI claim revision-bound. A green run on another base/head pair is
 `trusted-deletion-anchor.yml` uses `pull_request_target` and an explicit trust split. Current source includes a trusted controller running from the default-branch workflow revision, an unprivileged executor, and trusted verification.
 
 The trusted controller checks the repository/default branch/workflow identity, fetches the exact trusted workflow SHA into a bare repository, validates source/blob identity, builds a fixed runtime bundle, and publishes hashed controller artifacts. This lane is specialized evidence/bootstrap infrastructure; it should not be generalized into arbitrary privileged PR code execution.
+
+`trusted-dependency-contract.yml` (#2156) runs only the dependency-contract rule from the same module, as its own check "Trusted dependency contract (default branch)". It reads PR-head Git objects in a bare repository and never executes them. It passes when the head bytes equal main's, when an exact one-use anchor on main matches (and main has not moved either file since the merge-base), or when no PR commit touched either file since the merge-base. Otherwise it reports `DEPENDENCY_CONTRACT_DRIFT`.
 
 ---
 
@@ -206,12 +209,14 @@ Consult this page when changing workflow triggers, Fast Start invalidation/shado
 - `.github/workflows/openwiki-update.yml`
 - `.github/workflows/pytest.yml`
 - `.github/workflows/trusted-deletion-anchor.yml`
+- `.github/workflows/trusted-dependency-contract.yml`
 - `.github/workflows/benchmark-ci.yml`
 
 ### Focused Tests
 - `tests/ops/test_fast_start_v2.py`
 - `tests/ops/test_openwiki_source_contract.py`
 - `tests/ops/test_trusted_deletion_anchor.py`
+- `tests/ops/test_trusted_dependency_contract.py`
 - `tests/ops/test_pr_impact_gate.py`
 
 ### Minimal Validation Command
