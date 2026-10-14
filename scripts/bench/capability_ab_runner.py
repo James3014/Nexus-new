@@ -4491,10 +4491,15 @@ def _run_process_group(
         return _run_process_group_unstaged(cmd, cwd=cwd, env=env, timeout_sec=timeout_sec)
     from contextlib import ExitStack
 
-    with ExitStack() as stack:
-        for staging in windows:
-            stack.enter_context(staging.verify_window())
-        return _run_process_group_unstaged(cmd, cwd=cwd, env=env, timeout_sec=timeout_sec)
+    try:
+        with ExitStack() as stack:
+            for staging in windows:
+                stack.enter_context(staging.verify_window())
+            return _run_process_group_unstaged(cmd, cwd=cwd, env=env, timeout_sec=timeout_sec)
+    except _hidden_staging.HiddenTestStagingError as exc:
+        # Fail closed: a staged hidden test that fails verification is never run; the row's
+        # hidden verifier fails and the row carries hidden_test_tampered.
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr=f"{exc}")
 
 
 def _run_process_group_unstaged(
@@ -20735,6 +20740,10 @@ def main() -> int:
         else None
     )
     prompt_audit_materials: dict[str, Any] = {}
+    if _hidden_staging_enabled(args) and not os.environ.get("BENCH_ROOT", "").strip():
+        # The staging root is never a shared temp path: without BENCH_ROOT this run gets a
+        # private 0700 directory of its own.
+        os.environ["BENCH_ROOT"] = os.path.realpath(tempfile.mkdtemp(prefix="nexus-bench-root-"))
     early_audit_checked_pairs = 0
     early_audit_failed = False
 
@@ -20866,6 +20875,8 @@ def main() -> int:
                 )
             _annotate_warning_ledger(row, runtime_warning_records, append=True)
             row.update(hidden_staging.row_fields() if hidden_staging is not None else {"hidden_staged": False})
+            if row.get("hidden_test_tampered"):
+                row["hidden_verifier_passed"] = False
             row["per_call_timeout_cap_sec"] = _symmetric_per_call_cap_sec()
             row["isolation_mode"] = args.isolation_mode
             row["clean_checkout_required"] = args.isolation_mode == "worktree"

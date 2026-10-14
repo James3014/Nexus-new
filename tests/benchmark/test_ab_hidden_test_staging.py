@@ -59,8 +59,12 @@ def test_hidden_test_is_outside_the_workspace_for_the_row_and_restored(
     with _staged(workspace, visible) as staging:
         assert staging is not None
         assert not hidden.exists()
-        staged = tmp_path / "hidden" / "oabh-demo__t1" / "test_hidden.py"
+        staged = staging.staged_path
+        assert staged.parent.parent.parent == (tmp_path / "hidden")
+        assert staged.parent.parent.name.startswith("hidden-")
+        assert oct(staged.parent.parent.stat().st_mode & 0o777) == "0o700"
         assert staged.read_text(encoding="utf-8") == HIDDEN_TEXT
+        assert staging.sidecar_path.is_file()
         assert not staged.resolve().is_relative_to(workspace.resolve())
         # The runner still names the hidden verifier while it is staged.
         assert runner._hidden_test_for_visible_test(str(visible)) == str(hidden)
@@ -85,15 +89,103 @@ def test_hidden_restored_when_the_row_crashes(tmp_path, monkeypatch) -> None:
     assert staging_mod.active_staging_for(hidden) is None
 
 
-def test_stale_staging_from_a_killed_run_is_recovered(tmp_path, monkeypatch) -> None:
+def _crashed_staging(workspace: Path, visible: Path, hidden: Path) -> staging_mod.HiddenTestStaging:
+    """A row that crashed after staging: verified file + sidecar left in this run's root."""
+    leftover = staging_mod.HiddenTestStaging(
+        hidden_path=hidden.resolve(),
+        staged_path=staging_mod.staging_root(workspace) / "oabh-demo__t1" / "test_hidden.py",
+    )
+    leftover.staged_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    leftover._move_out()
+    assert not hidden.exists()
+    return leftover
+
+
+def test_stale_staging_from_a_crashed_row_is_recovered(tmp_path, monkeypatch) -> None:
     workspace, visible, hidden = _case(tmp_path)
     monkeypatch.setenv("BENCH_ROOT", str(tmp_path))
-    stale = tmp_path / "hidden" / "oabh-demo__t1" / "test_hidden.py"
-    stale.parent.mkdir(parents=True)
-    hidden.replace(stale)  # a SIGKILLed runner left it staged
+    _crashed_staging(workspace, visible, hidden)
 
     with _staged(workspace, visible):
         assert not hidden.exists()
+    assert hidden.read_text(encoding="utf-8") == HIDDEN_TEXT
+
+
+def test_planted_staged_file_without_sidecar_is_tampered(tmp_path, monkeypatch) -> None:
+    workspace, visible, hidden = _case(tmp_path)
+    monkeypatch.setenv("BENCH_ROOT", str(tmp_path))
+    leftover = _crashed_staging(workspace, visible, hidden)
+    leftover.sidecar_path.unlink()
+    leftover.staged_path.write_text("def test_planted():\n    assert True\n", encoding="utf-8")
+
+    with pytest.raises(staging_mod.HiddenTestStagingError, match="hidden_test_tampered"):
+        with _staged(workspace, visible):
+            pass
+    assert not hidden.exists()  # the planted file is never moved into the workspace
+
+
+def test_staged_file_swapped_during_the_row_never_reaches_the_verifier(
+    tmp_path, monkeypatch
+) -> None:
+    workspace, visible, hidden = _case(tmp_path)
+    monkeypatch.setenv("BENCH_ROOT", str(tmp_path))
+    ran: list[list[str]] = []
+    monkeypatch.setattr(
+        runner,
+        "_run_process_group_unstaged",
+        lambda cmd, **kw: ran.append(list(cmd)) or subprocess.CompletedProcess(cmd, 0, "", ""),
+    )
+
+    with pytest.raises(staging_mod.HiddenTestStagingError, match="hidden_test_tampered"):
+        with _staged(workspace, visible) as staging:
+            staging.staged_path.write_text(
+                "def test_planted():\n    assert True\n", encoding="utf-8"
+            )
+            out = runner._run_process_group(
+                runner._pytest_verifier_cmd(str(hidden)), cwd=workspace, env={}, timeout_sec=5
+            )
+            assert out.returncode == 1 and "hidden_test_tampered" in out.stderr
+            assert ran == []
+            assert not hidden.exists()
+    assert staging.row_fields()["hidden_test_tampered"] is True
+
+
+def test_symlinks_at_hidden_or_staged_paths_are_refused(tmp_path, monkeypatch) -> None:
+    workspace, visible, hidden = _case(tmp_path)
+    monkeypatch.setenv("BENCH_ROOT", str(tmp_path))
+    real = tmp_path / "elsewhere.py"
+    hidden.replace(real)
+    hidden.symlink_to(real)
+    with pytest.raises(staging_mod.HiddenTestStagingError, match="symlink_refused"):
+        with _staged(workspace, visible):
+            pass
+    assert hidden.is_symlink() and real.read_text(encoding="utf-8") == HIDDEN_TEXT
+    hidden.unlink()
+    real.replace(hidden)
+
+    leftover = _crashed_staging(workspace, visible, hidden)
+    target = tmp_path / "planted.py"
+    target.write_text("x\n", encoding="utf-8")
+    leftover.staged_path.unlink()
+    leftover.staged_path.symlink_to(target)
+    with pytest.raises(staging_mod.HiddenTestStagingError, match="hidden_test_tampered"):
+        with _staged(workspace, visible):
+            pass
+    assert not hidden.exists()
+
+
+def test_bench_root_unset_or_symlinked_is_refused(tmp_path, monkeypatch) -> None:
+    workspace, visible, hidden = _case(tmp_path)
+    monkeypatch.delenv("BENCH_ROOT", raising=False)
+    with pytest.raises(staging_mod.HiddenTestStagingError, match="staging_root_unset"):
+        with _staged(workspace, visible):
+            pass
+    (tmp_path / "real_root").mkdir()
+    (tmp_path / "link_root").symlink_to(tmp_path / "real_root")
+    monkeypatch.setenv("BENCH_ROOT", str(tmp_path / "link_root"))
+    with pytest.raises(staging_mod.HiddenTestStagingError, match="symlink_refused"):
+        with _staged(workspace, visible):
+            pass
     assert hidden.read_text(encoding="utf-8") == HIDDEN_TEXT
 
 
