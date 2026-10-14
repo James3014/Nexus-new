@@ -8561,6 +8561,8 @@ def test_hidden_lite_failed_model_attempt_uses_deterministic_pre_rescue(tmp_path
     assert out["deterministic_pre_rescue_reason"] == "deterministic_pre_rescue_passed"
     assert out["runtime_classification"] == "nexus_supervised_bare_first_deterministic_pre_rescue"
     assert out["nexus_winner_source"] == "nexus_llm_deterministic_pre_rescue"
+    # S12 (online A/B 2026-10-14): the mutator delivered it, so the row is a local delivery.
+    assert out["local_success_source"] is True
     assert out["route_cost_policy_supervised_bare_first"] is True
     assert out["route_cost_policy_supervised_bare_first_reason"] == "hidden_lite_ghost_governance"
     assert out["nexus_first_call_prompt_mode"] == "bare_equivalent"
