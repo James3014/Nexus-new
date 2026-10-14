@@ -96,12 +96,17 @@ ORIGIN_URLS = (
     "https://github.com/James3014/Nexus-new",
     "git@github.com:James3014/Nexus-new.git",
 )
-# Each required check is accepted only from its own GitHub Actions workflow, so a
-# stray workflow cannot post a success under the same name.
+# Every check name the deployer knows how to bind: each is accepted only from its
+# own GitHub Actions workflow, so a stray workflow cannot post a success under the
+# same name.  Which of these are required is read live from main's branch rules
+# each cycle (#2173); a required name missing here blocks the deploy.
 REQUIRED_CHECKS = {
     "Full published Git history secret audit": ".github/workflows/git-history-secret-audit.yml",
     "Deletion guard": ".github/workflows/deletion-guard.yml",
     "Exact-base impact gate": ".github/workflows/pytest.yml",
+    "Trusted dependency contract (default branch)": (
+        ".github/workflows/trusted-dependency-contract.yml"
+    ),
 }
 CHECK_APP = "github-actions"
 DEPLOYMENT_PREFIX = "a1-"
@@ -143,18 +148,69 @@ PIN_BUMP_MAX_AGE_SECONDS = 3 * 24 * 60 * 60
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _DEPLOYMENT_NAME = re.compile(r"(?:^|/)[ar]1-([0-9a-f]{40})$")
 _SHELL_UNSAFE = ('"', "$", "`", "\\", "\n", "\r", "\x00")
+# Each deployment runs the nexus-core revision its own tree pins (#2181).  The pin
+# is read as text from the candidate tree (never imported) and materialized as a
+# clean detached checkout ``core/<sha>`` of a bare ``core.git`` next to the
+# Gateway repository; the wrapper exports it as NEXUS_CORE_REPO_ROOT.
+CORE_REPOSITORY_URL = "https://github.com/James3014/nexus-core.git"
+CORE_ORIGIN_URLS = (
+    CORE_REPOSITORY_URL,
+    "https://github.com/James3014/nexus-core",
+    "git@github.com:James3014/nexus-core.git",
+)
+CORE_PIN_FILE = "nexus/orchestrator/canonical_core_transport.py"
+_CORE_PIN_LINE = re.compile(
+    r"^CANONICAL_CORE_REVISION\s*(?::\s*str\s*)?=\s*[\"']([^\"'\n]*)[\"']\s*(?:#.*)?$",
+    re.MULTILINE,
+)
 
+# GB-077 per-request timeout and tries: a freshly started candidate can take
+# longer than _fetch_gateway_health's 2 s default to answer /health.  Only
+# transport failures are retried; an identity failure is final.
+GB077_TIMEOUT_SECONDS = 30.0
+GB077_ATTEMPTS = 3
 GB077_PROBE_CODE = """
-import json, sys
-root, url, commit = sys.argv[1:4]
+import json, sys, time
+root, url, commit, timeout, attempts = sys.argv[1:6]
 sys.path.insert(0, root)
 from scripts.ops.run_golden_behavior_eval import _fetch_gateway_health, probe_gb077_live_gateway_identity
-ok, detail = probe_gb077_live_gateway_identity(
-    fetch_health=lambda: _fetch_gateway_health(url),
-    evaluated_identity=lambda: (commit, False),
-)
+history = []
+for attempt in range(int(attempts)):
+    ok, detail = probe_gb077_live_gateway_identity(
+        fetch_health=lambda: _fetch_gateway_health(url, timeout=float(timeout)),
+        evaluated_identity=lambda: (commit, False),
+    )
+    try:
+        reasons = json.loads(detail).get("reasons") or []
+    except (ValueError, AttributeError):
+        reasons = ["unparseable_probe_detail"]
+    history.append({"attempt": attempt + 1, "ok": ok, "reasons": reasons})
+    # Retry only transport failures (the health read itself timed out or failed).
+    # A health answer that fails identity (wrong git_head, dirty, not ok) is final.
+    transport_only = bool(reasons) and all(r.startswith("gateway_unreachable:") for r in reasons)
+    if ok or not transport_only:
+        break
+    time.sleep(2)
+try:
+    # The probe reports its fixed live endpoint; record the URL actually probed.
+    parsed = json.loads(detail)
+    parsed.setdefault("observed", {})["endpoint"] = url
+    parsed["attempts"] = history
+    detail = json.dumps(parsed, sort_keys=True, separators=(",", ":"))
+except (ValueError, AttributeError):
+    pass
 print(detail)
 sys.exit(0 if ok else 1)
+"""
+
+# Runs with the candidate's interpreter and the wrapper's NEXUS_CORE_REPO_ROOT in a
+# fresh process: the transport resolves Core exactly as the Gateway would (#2181).
+CORE_PROVENANCE_PROBE_CODE = """
+import json, sys
+root = sys.argv[1]
+sys.path.insert(0, root)
+from nexus.orchestrator.canonical_core_transport import core_provenance_status
+print(json.dumps(core_provenance_status(), sort_keys=True, default=str))
 """
 
 
@@ -212,6 +268,14 @@ class Config:
     def tool_link(self) -> Path:
         """Tree the auto-deploy LaunchAgent runs this script from (moves to each new deployment)."""
         return self.gateway_root / "auto-deploy-current"
+
+    @property
+    def core_bare_repo(self) -> Path:
+        return self.gateway_root / "core.git"
+
+    @property
+    def core_checkouts(self) -> Path:
+        return self.gateway_root / "core"
 
     @property
     def receipts(self) -> Path:
@@ -358,22 +422,87 @@ def gh_api_getter(host: Host, gh: str = "gh") -> Callable[[str], Any]:
     return get
 
 
-def _bound_runs(api_get: Callable[[str], Any], repo: str, sha: str, name: str) -> List[dict]:
-    """Check runs for ``name`` on ``sha`` that come from the bound Actions workflow."""
+def _bound_runs(
+    api_get: Callable[[str], Any],
+    repo: str,
+    sha: str,
+    name: str,
+    *,
+    origin: Dict[str, Any],
+    integration_id: Optional[int] = None,
+) -> List[dict]:
+    """Check runs for ``name`` on ``sha`` that provably belong to ``origin``.
+
+    A run counts only if it comes from the bound Actions workflow (path), from
+    the required issuer (``app.id == integration_id`` when the rules name one,
+    and app ``github-actions``), and from the expected trigger: a ``push`` to
+    the tracked branch for the candidate commit itself, or the merged PR for a
+    PR-head run (event, head branch, head repository, created before the
+    merge, and the PR number whenever GitHub lists one).  GitHub empties
+    ``pull_requests`` once a PR is merged, so head branch + repository + the
+    PR's lifetime (created_at .. merged_at, per attempt) are the binding there;
+    anything that cannot be bound does not count.
+    """
     query = urllib.parse.urlencode({"check_name": name, "per_page": 100})
     runs = api_get(f"repos/{repo}/commits/{sha}/check-runs?{query}").get("check_runs") or []
     bound = []
     for run in runs:
-        if run.get("name") != name or (run.get("app") or {}).get("slug") != CHECK_APP:
+        app = run.get("app") or {}
+        if run.get("name") != name or app.get("slug") != CHECK_APP:
+            continue
+        if integration_id is not None and app.get("id") != integration_id:
             continue
         suite = (run.get("check_suite") or {}).get("id")
         if not suite:
             continue
         workflow_runs = api_get(f"repos/{repo}/actions/runs?check_suite_id={int(suite)}")
-        paths = {w.get("path") for w in (workflow_runs.get("workflow_runs") or [])}
-        if REQUIRED_CHECKS[name] in paths:
+        candidates = workflow_runs.get("workflow_runs") or []
+        if any(
+            w.get("path") == REQUIRED_CHECKS[name] and _from_origin(run, w, sha, origin)
+            for w in candidates
+        ):
             bound.append(run)
     return bound
+
+
+def _from_origin(run: dict, workflow_run: dict, sha: str, origin: Dict[str, Any]) -> bool:
+    if workflow_run.get("head_sha") != sha:
+        return False
+    if (workflow_run.get("head_repository") or {}).get("full_name") != origin["head_repo"]:
+        return False
+    if origin["kind"] == "push":
+        return (
+            workflow_run.get("event") == "push"
+            and workflow_run.get("head_branch") == (origin["branch"])
+        )
+    if workflow_run.get("event") not in ("pull_request_target", "pull_request"):
+        return False
+    if workflow_run.get("head_branch") != origin["head_ref"]:
+        return False
+    # Lifetime of the merged PR: an earlier PR with the same branch and head sha
+    # created its runs before this PR existed; a re-run after the merge is a new
+    # attempt.  The workflow run's created_at is its first attempt; each check
+    # run is one attempt with its own started_at/completed_at, so the attempt
+    # times decide (run_started_at would follow a post-merge re-run and wrongly
+    # discard the original pre-merge attempt).
+    opened = _parse_time(origin["created_at"])
+    merged = _parse_time(origin["merged_at"])
+    created = _parse_time(workflow_run.get("created_at"))
+    started = _parse_time(run.get("started_at"))
+    if opened is None or merged is None or created is None or started is None:
+        return False
+    if not opened <= created <= merged or not opened <= started <= merged:
+        return False
+    # Only a provably finished attempt binds: a missing/null completed_at could
+    # have finished after the merge.
+    completed = _parse_time(run.get("completed_at"))
+    if completed is None or not started <= completed <= merged:
+        return False
+    for listed in (run.get("pull_requests"), workflow_run.get("pull_requests")):
+        numbers = {p.get("number") for p in listed or []}
+        if numbers and origin["number"] not in numbers:
+            return False
+    return True
 
 
 def _check_state(runs: List[dict], source: str) -> Dict[str, Any]:
@@ -386,29 +515,102 @@ def _check_state(runs: List[dict], source: str) -> Dict[str, Any]:
     return {"state": state, "conclusion": latest.get("conclusion"), "sha": source}
 
 
+# The deployer's bar never drops below these, whatever the live rules say.
+FLOOR_CHECKS = (
+    "Full published Git history secret audit",
+    "Deletion guard",
+    "Exact-base impact gate",
+)
+
+
+def live_required_checks(
+    api_get: Callable[[str], Any], *, repo: str = REPOSITORY, branch: str = "main"
+) -> Dict[str, Optional[int]]:
+    """Required status checks on ``branch`` as {name: integration_id or None}.
+
+    Every ``required_status_checks`` rule must be well-formed; one malformed rule
+    makes the whole answer unusable (fail closed), even if another rule parses.
+    """
+    required: Dict[str, Optional[int]] = {}
+    for rule in _paged(api_get, f"repos/{repo}/rules/branches/{branch}"):
+        if not isinstance(rule, dict):
+            raise DeployError("BRANCH_RULES_MALFORMED:rule")
+        if rule.get("type") != "required_status_checks":
+            continue
+        checks = (rule.get("parameters") or {}).get("required_status_checks")
+        if not isinstance(checks, list) or not checks:
+            raise DeployError("BRANCH_RULES_MALFORMED:required_status_checks")
+        for check in checks:
+            context = check.get("context") if isinstance(check, dict) else None
+            issuer = check.get("integration_id") if isinstance(check, dict) else None
+            if not isinstance(context, str) or not context:
+                raise DeployError("BRANCH_RULES_MALFORMED:context")
+            if issuer is not None and (isinstance(issuer, bool) or not isinstance(issuer, int)):
+                raise DeployError("BRANCH_RULES_MALFORMED:integration_id")
+            if context in required and required[context] != issuer:
+                raise DeployError(f"BRANCH_RULES_CONFLICTING_ISSUER:{context}")
+            required[context] = issuer
+    if not required:
+        # No required checks at all would make every commit "green": fail closed.
+        raise DeployError("BRANCH_RULES_REQUIRE_NO_CHECKS")
+    return required
+
+
+def live_required_check_names(
+    api_get: Callable[[str], Any], *, repo: str = REPOSITORY, branch: str = "main"
+) -> List[str]:
+    """Status-check names the branch rules (ruleset) currently require on ``branch``."""
+    return list(live_required_checks(api_get, repo=repo, branch=branch))
+
+
 def required_checks(
     api_get: Callable[[str], Any], sha: str, *, repo: str = REPOSITORY, branch: str = "main"
 ) -> Dict[str, Any]:
-    """GREEN only when every required check is success; PENDING, RED or UNKNOWN otherwise."""
+    """GREEN only when every check in (live required set + FLOOR_CHECKS) is success.
+
+    Otherwise PENDING, RED, UNKNOWN (including an unreadable ruleset or a
+    floor check with no bound run) or UNKNOWN_REQUIRED_CHECK (main requires a
+    check this deployer cannot bind).
+    """
     detail: Dict[str, Any] = {}
     try:
-        pr_heads: Optional[List[str]] = None
-        for name in REQUIRED_CHECKS:
-            runs, source = _bound_runs(api_get, repo, sha, name), sha
+        live = live_required_checks(api_get, repo=repo, branch=branch)
+    except Exception as exc:  # noqa: BLE001 - an unreadable ruleset fails closed
+        return {"verdict": "UNKNOWN", "error": f"RULESET:{type(exc).__name__}:{exc}"[:300]}
+    unknown = [name for name in live if name not in REQUIRED_CHECKS]
+    if unknown:
+        return {"verdict": "UNKNOWN_REQUIRED_CHECK", "unknown_required": unknown, "checks": {}}
+    required = {**live, **{name: live.get(name) for name in FLOOR_CHECKS}}
+    floor_added = [name for name in FLOOR_CHECKS if name not in live]
+    push_origin = {"kind": "push", "branch": branch, "head_repo": repo}
+    try:
+        merged_prs: Optional[List[Dict[str, Any]]] = None
+        for name, issuer in required.items():
+            runs = _bound_runs(api_get, repo, sha, name, origin=push_origin, integration_id=issuer)
+            source = sha
             if not runs:
-                if pr_heads is None:
-                    pulls = api_get(f"repos/{repo}/commits/{sha}/pulls") or []
-                    pr_heads = [
-                        p["head"]["sha"]
-                        for p in pulls
+                if merged_prs is None:
+                    merged_prs = [
+                        {
+                            "kind": "pr",
+                            "number": p["number"],
+                            "head_sha": p["head"]["sha"],
+                            "head_ref": p["head"]["ref"],
+                            "head_repo": ((p["head"].get("repo") or {}).get("full_name")),
+                            "merged_at": p["merged_at"],
+                            "created_at": p.get("created_at"),
+                        }
+                        for p in api_get(f"repos/{repo}/commits/{sha}/pulls") or []
                         if p.get("merged_at")
                         and p.get("merge_commit_sha") == sha
                         and (p.get("base") or {}).get("ref") == branch
                     ]
-                for head in pr_heads:
-                    runs = _bound_runs(api_get, repo, head, name)
+                for pr in merged_prs:
+                    runs = _bound_runs(
+                        api_get, repo, pr["head_sha"], name, origin=pr, integration_id=issuer
+                    )
                     if runs:
-                        source = head
+                        source = pr["head_sha"]
                         break
             detail[name] = _check_state(runs, source) if runs else {"state": "MISSING"}
     except Exception as exc:  # noqa: BLE001 - any transport/shape error fails closed
@@ -426,7 +628,13 @@ def required_checks(
         verdict = "UNKNOWN"
     else:
         verdict = "PENDING"
-    return {"verdict": verdict, "checks": detail}
+    return {
+        "verdict": verdict,
+        "required": list(required),
+        "floor_added": floor_added,
+        "missing": [n for n, d in detail.items() if d["state"] == "MISSING"],
+        "checks": detail,
+    }
 
 
 def on_github_main(
@@ -461,6 +669,8 @@ def _paged(api_get: Callable[[str], Any], path: str) -> Iterator[dict]:
     page = 1
     while True:
         items = api_get(f"{path}{sep}per_page=100&page={page}") or []
+        if not isinstance(items, list):
+            raise DeployError(f"PAGINATION_NOT_A_LIST:{path}")
         yield from items
         if len(items) < 100:
             return
@@ -579,9 +789,52 @@ class Prober:
         with opener.open(request, timeout=30) as response:
             return json.loads(response.read(8 * 1024 * 1024).decode("utf-8"))
 
+    def core_provenance(self, *, root: Path, python: Path, core: Any) -> Dict[str, Any]:
+        """The candidate's transport must resolve Core as CORE_REVISION_PINNED at ``core``."""
+        if not isinstance(core, dict) or not _SHA.match(str(core.get("revision") or "")):
+            return {"ok": False, "error": "CORE_PIN_UNKNOWN"}
+        result = self.host.run(
+            [str(python), "-c", CORE_PROVENANCE_PROBE_CODE, str(root)],
+            cwd=root,
+            env={"PYTHONDONTWRITEBYTECODE": "1", "NEXUS_CORE_REPO_ROOT": str(core["root"])},
+            timeout=120,
+        )
+        lines = (result.stdout or "").strip().splitlines()
+        try:
+            observed = json.loads(lines[-1]) if lines else None
+        except ValueError:
+            observed = None
+        if result.returncode != 0 or not isinstance(observed, dict):
+            detail = (result.stderr or result.stdout or "").strip()[-500:]
+            return {"ok": False, "error": f"CORE_PROVENANCE_UNREADABLE:{detail}"}
+        try:
+            same_root = (
+                Path(str(observed.get("source_root"))).resolve()
+                == Path(str(core["root"])).resolve()
+            )
+        except (OSError, RuntimeError):
+            same_root = False
+        ok = (
+            observed.get("status") == "CORE_REVISION_PINNED"
+            and observed.get("observed_commit") == core["revision"]
+            and observed.get("expected_revision") == core["revision"]
+            and same_root
+        )
+        keys = ("status", "reason", "expected_revision", "observed_commit", "source_root")
+        return {"ok": ok, **{k: observed.get(k) for k in keys if k in observed}}
+
     def probe(
-        self, *, port: int, token: str, commit: str, root: Path, python: Path, timeout: float
+        self,
+        *,
+        port: int,
+        token: str,
+        commit: str,
+        root: Path,
+        python: Path,
+        timeout: float,
+        core: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        """Smoke-probe one Gateway; ``core`` (candidate probes) also requires the pinned Core."""
         base = f"http://127.0.0.1:{port}"
         checks: Dict[str, Any] = {}
         deadline = self.host.now() + timeout
@@ -599,9 +852,18 @@ class Prober:
             self.host.sleep(2)
         checks["health"] = {"ok": observed.get("status") == "ok", "status": observed.get("status")}
         gb077 = self.host.run(
-            [str(python), "-c", GB077_PROBE_CODE, str(root), f"{base}/health", commit],
+            [
+                str(python),
+                "-c",
+                GB077_PROBE_CODE,
+                str(root),
+                f"{base}/health",
+                commit,
+                str(GB077_TIMEOUT_SECONDS),
+                str(GB077_ATTEMPTS),
+            ],
             env={"PYTHONDONTWRITEBYTECODE": "1"},
-            timeout=60,
+            timeout=GB077_ATTEMPTS * (GB077_TIMEOUT_SECONDS + 2) + 30,
         )
         checks["gb077"] = {"ok": gb077.returncode == 0, "detail": gb077.stdout.strip()[-2000:]}
         try:
@@ -622,6 +884,8 @@ class Prober:
             checks["gateway_status"] = {"ok": status.get("result", {}).get("isError") is False}
         except Exception as exc:  # noqa: BLE001
             checks["gateway_status"] = {"ok": False, "error": f"{type(exc).__name__}:{exc}"[:300]}
+        if core is not None:
+            checks["core_provenance"] = self.core_provenance(root=root, python=python, core=core)
         return {"ok": all(c["ok"] for c in checks.values()), "checks": checks}
 
 
@@ -634,22 +898,28 @@ def wrapper_command(
     python: Path,
     port: Optional[int] = None,
     state_dir: Optional[Path] = None,
+    core_root: Optional[Path] = None,
 ) -> str:
     """The same fixed zsh wrapper as the #526 deployments, with a per-deployment venv.
 
     ``port``/``state_dir`` are only used for the spare-port probe, which must never
-    see the live self-hosted state.
+    see the live self-hosted state.  ``core_root`` (exported after the env file, so
+    the env file cannot override it) is the deployment's pinned Core checkout.
     """
     state = cfg.canonical_state_dir if state_dir is None else state_dir
-    for value in (str(root), str(python), str(cfg.env_file), str(state)):
+    values = [str(root), str(python), str(cfg.env_file), str(state)]
+    if core_root is not None:
+        values.append(str(core_root))
+    for value in values:
         if any(token in value for token in _SHELL_UNSAFE):
             raise DeployError("WRAPPER_PATH_UNSAFE")
     port_export = "" if port is None else f"export NEXUS_MCP_GATEWAY_PORT={int(port)} ; "
+    core_export = "" if core_root is None else f'export NEXUS_CORE_REPO_ROOT="{core_root}" ; '
     return (
         f'cd "{root}" ; source "{cfg.env_file}" ; export PYTHONDONTWRITEBYTECODE=1 ; '
         f'export NEXUS_CANONICAL_SOURCE_ROOT="{root}" ; '
         f'export NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR="{state}" ; '
-        f'{port_export}exec "{python}" "{root / ENTRYPOINT}"'
+        f'{core_export}{port_export}exec "{python}" "{root / ENTRYPOINT}"'
     )
 
 
@@ -750,6 +1020,154 @@ def _uv_extra_args(extras: str) -> List[str]:
     return args
 
 
+def read_core_pin(root: Path) -> str:
+    """``CANONICAL_CORE_REVISION`` of a deployment tree, by text parse (never imported)."""
+    try:
+        text = (root / CORE_PIN_FILE).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise DeployError(f"CORE_PIN_INVALID:unreadable:{type(exc).__name__}") from exc
+    found = _CORE_PIN_LINE.findall(text)
+    if len(found) != 1 or not _SHA.match(found[0]):
+        raise DeployError(f"CORE_PIN_INVALID:{found[:2]!r}"[:300])
+    return found[0]
+
+
+def _core_git(cfg: Config, *args: str) -> List[str]:
+    return ["git", "--git-dir", str(cfg.core_bare_repo), *args]
+
+
+def materialize_core(cfg: Config, host: Host, revision: str) -> Dict[str, Any]:
+    """A clean detached nexus-core checkout ``core/<revision>``; any doubt raises.
+
+    The bare ``core.git`` is created on first use with the James3014/nexus-core
+    origin and fetched with the same ambient git credentials as the Gateway
+    repository.  A commit already present is not fetched again; the checkout's
+    own HEAD keeps it reachable.  There is no fallback: without a verified
+    checkout the candidate is not deployed.
+    """
+    if not _SHA.match(revision):
+        raise DeployError(f"CORE_PIN_INVALID:{revision!r}"[:300])
+    if cfg.core_checkouts.is_symlink() or cfg.core_bare_repo.is_symlink():
+        raise DeployError("CORE_PATH_SYMLINKED")
+    if not cfg.core_bare_repo.exists():
+        _must(
+            host, ["git", "init", "--bare", "--quiet", str(cfg.core_bare_repo)], "CORE_INIT_FAILED"
+        )
+        _must(
+            host, _core_git(cfg, "remote", "add", "origin", CORE_REPOSITORY_URL), "CORE_INIT_FAILED"
+        )
+    origin = _must(
+        host, _core_git(cfg, "config", "--get", "remote.origin.url"), "CORE_ORIGIN_FAILED"
+    ).strip()
+    if origin not in CORE_ORIGIN_URLS:
+        raise DeployError(f"CORE_ORIGIN_MISMATCH:{origin}"[:300])
+    present = _core_git(cfg, "cat-file", "-e", f"{revision}^{{commit}}")
+    if host.run(present, timeout=60).returncode != 0:
+        refspec = "+refs/heads/*:refs/nexus-core/heads/*"
+        fetch = _core_git(cfg, "fetch", "--quiet", "--no-tags", "origin", refspec)
+        _must(host, fetch, "CORE_FETCH_FAILED", timeout=300)
+        _must(host, present, "CORE_COMMIT_NOT_FOUND", timeout=60)
+    checkout = cfg.core_checkouts / revision
+    if checkout.is_symlink():
+        raise DeployError("CORE_PATH_SYMLINKED")
+    if not checkout.exists():
+        _add_core_checkout(cfg, host, checkout, revision)
+    problem = core_checkout_problem(host, checkout, revision)
+    result = {"revision": revision, "root": str(checkout), "repository": CORE_REPOSITORY_URL}
+    if problem is None:
+        return result
+    # A dirty or half-created checkout must not block every later candidate with
+    # this pin.  Rebuild it once, but only if no running deployment uses it.
+    if revision in core_pins_in_use(cfg):
+        raise DeployError(f"CORE_IN_USE_UNHEALTHY:{problem}"[:300])
+    _remove_core_checkout(cfg, host, checkout)
+    _must(host, _core_git(cfg, "worktree", "prune"), "CORE_WORKTREE_PRUNE_FAILED")
+    _add_core_checkout(cfg, host, checkout, revision)
+    again = core_checkout_problem(host, checkout, revision)
+    if again is not None:
+        raise DeployError(again[:300])
+    return {**result, "rebuilt": problem[:300]}
+
+
+def _add_core_checkout(cfg: Config, host: Host, checkout: Path, revision: str) -> None:
+    cfg.core_checkouts.mkdir(parents=True, exist_ok=True)
+    _must(
+        host,
+        _core_git(cfg, "worktree", "add", "--detach", str(checkout), revision),
+        "CORE_WORKTREE_ADD_FAILED",
+    )
+
+
+def _remove_core_checkout(cfg: Config, host: Host, checkout: Path) -> None:
+    """Remove a checkout strictly inside a real ``core/`` (never through a symlink)."""
+    parent = cfg.core_checkouts
+    if (
+        parent.is_symlink()
+        or checkout.is_symlink()
+        or checkout.resolve().parent != parent.resolve()
+    ):
+        raise DeployError("CORE_PATH_SYMLINKED")
+    host.run(_core_git(cfg, "worktree", "remove", "--force", str(checkout)), timeout=300)
+    if checkout.exists() and not checkout.is_symlink():
+        shutil.rmtree(checkout, ignore_errors=True)
+
+
+def core_checkout_problem(host: Host, checkout: Path, revision: str) -> Optional[str]:
+    """None when ``checkout`` is a clean worktree at exactly ``revision``."""
+    if not (checkout / ".git").is_file():
+        # Half-created (e.g. a killed `worktree add`); never let git walk upwards.
+        return "CORE_CHECKOUT_INCOMPLETE"
+    head = host.run(["git", "-C", str(checkout), "rev-parse", "HEAD"])
+    if head.returncode != 0:
+        return f"CORE_HEAD_FAILED:{(head.stderr or '').strip()[:200]}"
+    if head.stdout.strip() != revision:
+        return f"CORE_HEAD_MISMATCH:{head.stdout.strip()}"
+    # --ignored: an ignored file (say a stray .pyc) can still be imported.
+    status = host.run([
+        "git",
+        "-C",
+        str(checkout),
+        "status",
+        "--porcelain",
+        "--untracked-files=all",
+        "--ignored",
+    ])
+    if status.returncode != 0:
+        return "CORE_STATUS_FAILED"
+    if status.stdout.strip():
+        return "CORE_TREE_DIRTY"
+    return None
+
+
+def core_pins_in_use(cfg: Config) -> set:
+    """Core revisions the live Gateway or the deployer tree may be running.
+
+    Same protected set as retention: the live (and, before a switch, previous)
+    plist root and ``auto-deploy-current``, plus the NEXUS_CORE_REPO_ROOT the
+    live wrapper exports.  Anything unreadable raises (treated as in use).
+    """
+    try:
+        plist = cfg.plist.read_bytes()
+        roots = [live_root(plist)]
+        tokens = _wrapper_tokens(plist)
+    except (OSError, DeployError) as exc:
+        raise DeployError(f"CORE_IN_USE_UNKNOWN:{exc}"[:300]) from exc
+    pins = set()
+    for token in tokens:
+        if token.startswith("NEXUS_CORE_REPO_ROOT="):
+            pins.add(Path(token.split("=", 1)[1]).name)
+    if cfg.tool_link.is_symlink():
+        roots.append(Path(os.path.realpath(cfg.tool_link)))
+    for root in roots:
+        if root is None or not (root / CORE_PIN_FILE).exists():
+            continue
+        try:
+            pins.add(read_core_pin(root))
+        except DeployError as exc:
+            raise DeployError(f"CORE_IN_USE_UNKNOWN:{exc}"[:300]) from exc
+    return pins
+
+
 def build(cfg: Config, host: Host, commit: str) -> Dict[str, Any]:
     """Materialize the immutable deployment and its dedicated venv."""
     root = cfg.deployments / f"{DEPLOYMENT_PREFIX}{commit}"
@@ -763,6 +1181,7 @@ def build(cfg: Config, host: Host, commit: str) -> Dict[str, Any]:
     ).strip()
     if head != commit:
         raise DeployError(f"WORKTREE_HEAD_MISMATCH:{head}")
+    core = materialize_core(cfg, host, read_core_pin(root))
     cfg.venvs.mkdir(parents=True, exist_ok=True)
     _must(
         host,
@@ -793,6 +1212,7 @@ def build(cfg: Config, host: Host, commit: str) -> Dict[str, Any]:
         "venv": str(venv),
         "venv_python": str(python),
         "uv_lock_sha256": _sha256(lock.read_bytes()) if lock.exists() else None,
+        "core": core,
     }
 
 
@@ -815,7 +1235,7 @@ def prune_refusal(cfg: Config) -> Optional[str]:
     root = cfg.gateway_root
     if not root.is_absolute() or os.path.realpath(root) != str(root):
         return f"GATEWAY_ROOT_NOT_CANONICAL:{root}"
-    for path in (cfg.deployments, cfg.venvs):
+    for path in (cfg.deployments, cfg.venvs, cfg.core_checkouts):
         if path.is_symlink():
             return f"SYMLINKED_DIRECTORY:{path}"
     return None
@@ -845,6 +1265,49 @@ def prune(cfg: Config, host: Host, protected: List[Optional[Path]]) -> List[str]
     for venv in _contained_dirs(cfg.venvs):
         if venv.name not in present:
             shutil.rmtree(venv, ignore_errors=True)
+    prune_core(cfg, host, protected)
+    return removed
+
+
+def prune_core(cfg: Config, host: Host, protected: List[Optional[Path]]) -> List[str]:
+    """Remove ``core/<sha>`` checkouts no remaining or protected deployment pins.
+
+    Nothing is removed if an ``a1-*`` deployment has a pin file that cannot be
+    read, or if a protected ``a1-*`` deployment has none.  An unprotected ``a1-*``
+    directory without a pin file pins nothing; r1 deployments never use these
+    checkouts.
+    """
+    parent = cfg.core_checkouts
+    if prune_refusal(cfg) or parent.is_symlink() or not parent.is_dir():
+        return []
+    guarded = [p for p in protected if p is not None]
+    guarded_names = {p.name for p in guarded}
+    roots = list(guarded)
+    if cfg.deployments.is_dir():
+        roots += [p for p in cfg.deployments.iterdir() if p.is_dir() and not p.is_symlink()]
+    pinned = set()
+    for root in roots:
+        if not root.name.startswith(DEPLOYMENT_PREFIX):
+            with contextlib.suppress(DeployError):
+                pinned.add(read_core_pin(root))
+            continue
+        if not (root / CORE_PIN_FILE).exists() and root.name not in guarded_names:
+            continue
+        try:
+            pinned.add(read_core_pin(root))
+        except DeployError:
+            return []
+    real_parent = parent.resolve()
+    removed: List[str] = []
+    for child in sorted(parent.iterdir()):
+        if child.is_symlink() or not child.is_dir() or not _SHA.match(child.name):
+            continue
+        if child.resolve().parent != real_parent or child.name in pinned:
+            continue
+        host.run(_core_git(cfg, "worktree", "remove", "--force", str(child)), timeout=300)
+        if child.exists() and not child.is_symlink():
+            shutil.rmtree(child, ignore_errors=True)
+        removed.append(child.name)
     return removed
 
 
@@ -1051,6 +1514,9 @@ class _Cycle:
             self.api_get, candidate, repo=cfg.repository, branch=cfg.track_branch
         )
         status["required_checks"] = checks
+        if checks["verdict"] == "UNKNOWN_REQUIRED_CHECK":
+            # No deploy and no HOLD: retried next cycle once this file knows the check.
+            return finish("UNKNOWN_REQUIRED_CHECK:" + ",".join(checks["unknown_required"]))
         if checks["verdict"] != "GREEN":
             return finish(f"CHECKS_{checks['verdict']}")
         pins = pin_bumps_in_flight(self.api_get, repo=cfg.repository, now=host.now())
@@ -1082,6 +1548,8 @@ class _Cycle:
                     "venv_python": str(venv_python),
                     "steps": [
                         "build worktree + venv (uv sync --frozen)",
+                        "materialize clean nexus-core checkout at the tree's "
+                        "CANONICAL_CORE_REVISION (NEXUS_CORE_REPO_ROOT)",
                         "probe on spare port with throwaway state",
                         "re-check HOLD and pin bumps",
                         f"journal + rewrite {cfg.plist} under the manager lock",
@@ -1182,19 +1650,24 @@ class _Cycle:
         receipt = self.new_receipt(candidate, previous_plist)
         receipt["required_checks"] = checks
         receipt["warnings"] = list(warnings)
+        hold: Optional[str] = None
         try:
             receipt.update(self.attempt_effects(candidate, previous_plist, receipt))
         except Exception as exc:  # noqa: BLE001 - every failure must still leave a receipt
             receipt["reason"] = f"{type(exc).__name__}:{exc}"[:500]
             if receipt["switched"] and not receipt["rolled_back"]:
                 receipt.update(self.rollback(previous_plist, receipt))
-            elif str(exc).startswith("SOURCE_TREE_WRITTEN"):
+            elif str(exc).startswith(("SOURCE_TREE_WRITTEN", "CORE_PIN_INVALID")):
                 receipt["outcome"] = "REJECTED_BUILD"
             elif str(exc).startswith("MANAGER_LOCK_UNAVAILABLE"):
                 receipt["outcome"] = "BLOCKED_MANAGER_BUSY"
             else:
                 receipt["outcome"] = "BUILD_FAILED"
-        return self.close_receipt(receipt)
+                if str(exc).startswith(("CORE_IN_USE_UNHEALTHY", "CORE_IN_USE_UNKNOWN")):
+                    # A running deployment's Core is never touched; stop retrying
+                    # until the Owner repairs it and runs `release`.
+                    hold = f"auto-hold: {str(exc)[:200]} (core checkout in use)"
+        return self.close_receipt(receipt, hold=hold)
 
     def spare_probe(
         self, root: Path, python: Path, commit: str, receipt: Dict[str, Any]
@@ -1204,7 +1677,11 @@ class _Cycle:
         shutil.rmtree(probe_state, ignore_errors=True)
         probe_state.mkdir(parents=True)
         port = host.free_port()
-        command = wrapper_command(cfg, root, python, port, state_dir=probe_state)
+        core = receipt.get("core")
+        core_root = Path(core["root"]) if isinstance(core, dict) else None
+        command = wrapper_command(
+            cfg, root, python, port, state_dir=probe_state, core_root=core_root
+        )
         stop = host.start(command, cfg.state_dir / "logs" / f"{receipt['attempt_id']}.probe.log")
         try:
             result = self.prober.probe(
@@ -1214,6 +1691,7 @@ class _Cycle:
                 root=root,
                 python=python,
                 timeout=cfg.probe_timeout_seconds,
+                core=core if isinstance(core, dict) else {},
             )
         finally:
             stop()
@@ -1257,7 +1735,8 @@ class _Cycle:
                 _set_hold(cfg, "auto-hold: FOREIGN_PLIST; live plist changed during the cycle")
                 return {"outcome": "FOREIGN_PLIST", "reason": "live plist changed during the cycle"}
 
-            new_plist = render_plist(previous_plist, wrapper_command(cfg, root, python), root)
+            command = wrapper_command(cfg, root, python, core_root=Path(receipt["core"]["root"]))
+            new_plist = render_plist(previous_plist, command, root)
             self.write_journal(receipt, previous_plist, new_plist, python)
             _atomic_write(cfg.plist, new_plist)
             receipt["switched"] = True
@@ -1268,7 +1747,9 @@ class _Cycle:
     ) -> Dict[str, Any]:
         try:
             self.host.reload_service(self.cfg.plist, GATEWAY_LABEL)
-            live = self.live_probe(receipt["candidate_commit"], root, python)
+            # A receipt without a Core pin (e.g. an older journal) fails closed.
+            core = receipt.get("core") if isinstance(receipt.get("core"), dict) else {}
+            live = self.live_probe(receipt["candidate_commit"], root, python, core=core)
         except DeployError as exc:
             live = {"ok": False, "error": str(exc)[:300]}
         receipt["probes"]["live"] = live
@@ -1278,7 +1759,10 @@ class _Cycle:
         receipt["reason"] = "candidate failed the live probe"
         return self.rollback(previous_plist, receipt)
 
-    def live_probe(self, commit: str, root: Path, python: Path) -> Dict[str, Any]:
+    def live_probe(
+        self, commit: str, root: Path, python: Path, *, core: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """``core`` is set for a candidate; the rollback probe of the predecessor omits it."""
         return self.prober.probe(
             port=LIVE_PORT,
             token=read_env_token(self.cfg.env_file),
@@ -1286,6 +1770,7 @@ class _Cycle:
             root=root,
             python=python,
             timeout=self.cfg.probe_timeout_seconds,
+            core=core,
         )
 
     def write_journal(

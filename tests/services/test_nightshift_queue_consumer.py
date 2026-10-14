@@ -122,3 +122,79 @@ def test_nightshift_producer_emits_option_b_contract(tmp_path: Path):
     assert item["demand_role"] == "bounded_candidate_generation"
     assert item["mutation_intent"] is False
     assert all(value is False for value in item["worker_permissions"].values())
+
+
+def test_nightshift_bindings_follow_policy_route_not_hardcoded_model():
+    from types import SimpleNamespace
+
+    import pytest
+
+    from nexus.services.model_workforce_policy import WorkforcePolicyError
+    from nexus.services.nightshift_queue_consumer import (
+        NIGHTSHIFT_ONLINE_ROLE,
+        build_nightshift_workforce_bindings,
+    )
+
+    class _Loader:
+        def __init__(self, route, workers):
+            self.route, self.workers = route, workers
+
+        def load(self):
+            return SimpleNamespace(workers=self.workers)
+
+        def resolve_route(self, role):
+            assert role == NIGHTSHIFT_ONLINE_ROLE
+            return self.route
+
+    worker = SimpleNamespace(worker_id="policy_worker_x", model="model-x", provider="p")
+    bindings = build_nightshift_workforce_bindings(
+        controls=("verifier", "parser"),
+        policy_loader=_Loader("policy_worker_x", {"policy_worker_x": worker}),
+    )
+    assert bindings == {
+        "online": {"worker_id": "policy_worker_x", "controls": ["parser", "verifier"]}
+    }
+
+    with pytest.raises(WorkforcePolicyError):
+        build_nightshift_workforce_bindings(policy_loader=_Loader("absent_worker", {}))
+
+
+def test_consumer_ignores_tampered_manifest_bindings_and_controls(tmp_path: Path):
+    from nexus.services.nightshift_queue_consumer import (
+        build_nightshift_workforce_bindings,
+        resolve_nightshift_online_worker,
+    )
+
+    seen = []
+
+    def _runner(request):
+        seen.append(request)
+        return {"workforce_admission": {"overall_decision": "BLOCK"}}
+
+    honest = _item(task="honest")
+    tampered = _item(
+        task="tampered",
+        workforce_bindings={
+            "online": {
+                "worker_id": "codex_luna",
+                "provider": "codex",
+                "model": "other-model",
+                "controls": ["task_card", "allowed_files", "mandatory_commands", "verifier"],
+                "explicit_experiment_authorization": True,
+            }
+        },
+        provided_controls=["task_card"],
+        required_controls=sorted(REQUIRED_CONTROLS) + ["task_card"],
+    )
+    path = tmp_path / "pending.json"
+    path.write_text(json.dumps([honest, tampered]), encoding="utf-8")
+
+    NightshiftQueueConsumer(_runner, lambda _item: None).consume_file(path)
+
+    assert len(seen) == 2
+    expected = build_nightshift_workforce_bindings()
+    for request in seen:
+        assert request.route["workforce_bindings"] == expected
+        assert request.route["provider"] == resolve_nightshift_online_worker().provider
+    assert seen[0].route == {**seen[1].route}
+    assert "task_card" not in expected["online"]["controls"]

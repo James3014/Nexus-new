@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import urllib.parse
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Iterator
@@ -32,6 +33,56 @@ PR_HEAD = "c" * 40
 REPO_ROOT = Path(__file__).resolve().parents[2]
 NOW = 1_760_000_000.0
 NOW_ISO = "2025-10-09T08:53:20Z"  # == NOW
+
+
+GIT_ENV = {
+    "GIT_CONFIG_GLOBAL": os.devnull,
+    "GIT_CONFIG_SYSTEM": os.devnull,
+    "GIT_TERMINAL_PROMPT": "0",
+}
+
+
+def _fixture_git(cwd: Path, *args: str) -> str:
+    env = {**os.environ, **GIT_ENV}
+    return subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+        cwd=cwd,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+class CoreOrigin:
+    """A local stand-in for James3014/nexus-core (no network in these tests)."""
+
+    path: Path
+    pin: str
+    other: str
+
+
+CORE = CoreOrigin()
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _core_origin(tmp_path_factory: pytest.TempPathFactory) -> None:
+    repo = tmp_path_factory.mktemp("nexus-core-origin")
+    _fixture_git(repo, "init", "-q", "-b", "main")
+    (repo / "product").mkdir()
+    (repo / "product" / "__init__.py").write_text("")
+    (repo / ".gitignore").write_text("__pycache__/\n*.pyc\n")
+    _fixture_git(repo, "add", ".")
+    _fixture_git(repo, "commit", "-q", "-m", "core one")
+    CORE.other = _fixture_git(repo, "rev-parse", "HEAD")
+    (repo / "product" / "two.py").write_text("")
+    _fixture_git(repo, "add", ".")
+    _fixture_git(repo, "commit", "-q", "-m", "core two")
+    CORE.path, CORE.pin = repo, _fixture_git(repo, "rev-parse", "HEAD")
+
+
+def _pin_source(revision: str) -> str:
+    return f'"""transport"""\n\nCANONICAL_CORE_REVISION = "{revision}"\nOTHER = 1\n'
 
 
 class Crash(BaseException):
@@ -59,10 +110,26 @@ class FakeHost(ad.Host):
         self.lock_events: list[str] = []
         self.lock_fails = False
         self.on_reload: Callable[[int], None] | None = None
+        self.core_pin: str = CORE.pin
+        self.core_fetch_fails = False
+
+    def core_git(self, argv, cwd, timeout):
+        """Core git effects run for real against the local fixture origin."""
+        if "fetch" in argv and self.core_fetch_fails:
+            return _done(code=128, stderr="fatal: unable to access github.com")
+        env = {
+            **GIT_ENV,
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": f"url.{CORE.path}.insteadOf",
+            "GIT_CONFIG_VALUE_0": ad.CORE_REPOSITORY_URL,
+        }
+        return ad.Host.run(self, argv, cwd=cwd, env=env, timeout=timeout)
 
     def run(self, argv, *, cwd=None, env=None, timeout=1800):  # type: ignore[override]
         self.calls.append(list(argv))
         self.envs.append(env)
+        if argv[:1] == ["git"] and any("gateway-direct/core" in str(a) for a in argv):
+            return self.core_git(argv, cwd, timeout)
         if argv[:1] == ["uv"]:
             if self.sync_fails:
                 return _done(code=1, stderr="network down")
@@ -95,6 +162,8 @@ class FakeHost(ad.Host):
             (root / "scripts/ops").mkdir(parents=True)
             (root / "uv.lock").write_text("lock-bytes")
             (root / ad.ENTRYPOINT).write_text("")
+            (root / ad.CORE_PIN_FILE).parent.mkdir(parents=True)
+            (root / ad.CORE_PIN_FILE).write_text(_pin_source(self.core_pin))
             return _done()
         if "worktree" in argv and "remove" in argv:
             return _done()
@@ -148,8 +217,8 @@ class FakeProber:
         self.hook = hook
         self.calls: list[dict[str, Any]] = []
 
-    def probe(self, *, port, token, commit, root, python, timeout):
-        call = {"port": port, "commit": commit, "root": root, "python": python}
+    def probe(self, *, port, token, commit, root, python, timeout, core=None):
+        call = {"port": port, "commit": commit, "root": root, "python": python, "core": core}
         self.calls.append(call)
         if self.hook is not None:
             self.hook(call)
@@ -158,6 +227,37 @@ class FakeProber:
 
 
 SUITES = {name: 1000 + i for i, name in enumerate(ad.REQUIRED_CHECKS)}
+PR_SUITE_OFFSET = 50_000  # suites >= this belong to the merged PR's head
+ACTIONS_APP_ID = 15368
+MERGED_PR = {
+    "number": 2140,
+    "ref": "feat/x",
+    "created_at": "2026-10-13T20:00:00Z",
+    "merged_at": "2026-10-14T00:00:00Z",
+}
+
+
+def _workflow_run(suite: int, path: str) -> dict[str, Any]:
+    """A workflow run shaped like real data (pull_requests is empty after merge)."""
+    if suite >= PR_SUITE_OFFSET:
+        return {
+            "path": path,
+            "event": "pull_request_target",
+            "head_branch": MERGED_PR["ref"],
+            "head_sha": PR_HEAD,
+            "head_repository": {"full_name": ad.REPOSITORY},
+            "created_at": "2026-10-13T23:00:00Z",
+            "pull_requests": [],
+        }
+    return {
+        "path": path,
+        "event": "push",
+        "head_branch": "main",
+        "head_sha": NEW,
+        "head_repository": {"full_name": ad.REPOSITORY},
+        "created_at": "2026-10-14T00:05:00Z",
+        "pull_requests": [],
+    }
 
 
 def green_api(
@@ -173,11 +273,16 @@ def green_api(
     workflow_path: Callable[[int], str] | None = None,
     pushed_at: dict[str, str] | None = None,
     timeline: dict[int, list[dict[str, Any]]] | None = None,
+    required: list[str] | None = None,
 ):
     calls: list[str] = []
 
     def get(path: str) -> Any:
         calls.append(path)
+        if "/rules/branches/main" in path:
+            if "page=" in path and not path.endswith("page=1"):
+                return []
+            return _branch_rules(list(ad.REQUIRED_CHECKS) if required is None else required)
         if path.endswith("/branches/main"):
             return {"commit": {"sha": main_tip}}
         if "/compare/" in path:
@@ -202,17 +307,23 @@ def green_api(
                 {
                     "merged_at": "2026-10-14T00:00:00Z",
                     "merge_commit_sha": NEW,
+                    "number": MERGED_PR["number"],
+                    "created_at": MERGED_PR["created_at"],
                     "base": {"ref": "main"},
-                    "head": {"sha": PR_HEAD},
+                    "head": {
+                        "sha": PR_HEAD,
+                        "ref": MERGED_PR["ref"],
+                        "repo": {"full_name": ad.REPOSITORY},
+                    },
                 }
             ]
         if "/actions/runs?check_suite_id=" in path:
             suite = int(path.rsplit("=", 1)[1])
             if workflow_path is not None:
-                return {"workflow_runs": [{"path": workflow_path(suite)}]}
+                return {"workflow_runs": [_workflow_run(suite, workflow_path(suite))]}
             name = next(n for n, s in SUITES.items() if s == suite % 10_000)
-            return {"workflow_runs": [{"path": ad.REQUIRED_CHECKS[name]}]}
-        name = path.split("check_name=")[1].split("&")[0].replace("+", " ")
+            return {"workflow_runs": [_workflow_run(suite, ad.REQUIRED_CHECKS[name])]}
+        name = urllib.parse.unquote_plus(path.split("check_name=")[1].split("&")[0])
         sha = path.split("/commits/")[1].split("/")[0]
         if sha == NEW and not on_commit and name == "Deletion guard":
             return {"check_runs": []}
@@ -223,14 +334,33 @@ def green_api(
                 "status": status,
                 "conclusion": conclusion,
                 "started_at": "2026-10-14T00:00:00Z",
-                "app": {"slug": "github-actions"},
-                "check_suite": {"id": SUITES[name]},
+                "completed_at": "2026-10-14T00:00:00Z",
+                "app": {"slug": "github-actions", "id": ACTIONS_APP_ID},
+                "check_suite": {"id": SUITES[name] + (0 if sha == NEW else PR_SUITE_OFFSET)},
+                "pull_requests": [],
             }
         ]
         return {"check_runs": runs + (extra_runs or {}).get(name, [])}
 
     get.calls = calls  # type: ignore[attr-defined]
     return get
+
+
+def _branch_rules(names: list[str]) -> list[dict[str, Any]]:
+    """Shape of GET repos/{repo}/rules/branches/main (integration 15368 = Actions)."""
+    return [
+        {"type": "deletion", "ruleset_id": 20697077},
+        {
+            "type": "required_status_checks",
+            "ruleset_id": 20697077,
+            "parameters": {
+                "required_status_checks": [
+                    {"context": name, "integration_id": 15368} for name in names
+                ],
+                "strict_required_status_checks_policy": False,
+            },
+        },
+    ]
 
 
 def live_plist(root: Path, python: str = "/shared/clone/.venv/bin/python") -> bytes:
@@ -404,7 +534,7 @@ def test_newer_queued_run_keeps_check_pending() -> None:
         "status": "queued",
         "conclusion": None,
         "started_at": None,
-        "app": {"slug": "github-actions"},
+        "app": {"slug": "github-actions", "id": ACTIONS_APP_ID},
         "check_suite": {"id": SUITES["Deletion guard"] + 10_000},
     }
     api = green_api(extra_runs={"Deletion guard": [queued]})
@@ -420,7 +550,7 @@ def test_newest_completed_run_decides_by_id() -> None:
         "status": "completed",
         "conclusion": "failure",
         "started_at": "2026-10-13T00:00:00Z",  # older timestamp, newer run
-        "app": {"slug": "github-actions"},
+        "app": {"slug": "github-actions", "id": ACTIONS_APP_ID},
         "check_suite": {"id": SUITES["Deletion guard"] + 10_000},
     }
     api = green_api(extra_runs={"Deletion guard": [newer_failure]})
@@ -853,17 +983,23 @@ path = sys.argv[2]
 if sys.argv[1] != "api":
     sys.exit(2)
 url = urlsplit(path)
-if url.path.endswith("/branches/main"):
+if url.path.endswith("/rules/branches/main"):
+    out = [{"type": "required_status_checks", "parameters": {"required_status_checks": [
+        {"context": name, "integration_id": 15368} for name in REQUIRED]}}]
+elif url.path.endswith("/branches/main"):
     out = {"commit": {"sha": os.environ["FAKE_MAIN"]}}
 elif "/check-runs" in url.path:
     name = parse_qs(url.query)["check_name"][0]
     suite = 1 + list(REQUIRED).index(name)
     out = {"check_runs": [{"id": 1, "name": name, "status": "completed",
                            "conclusion": os.environ["FAKE_CONCLUSION"],
-                           "app": {"slug": "github-actions"}, "check_suite": {"id": suite}}]}
+                           "app": {"slug": "github-actions", "id": 15368},
+                           "check_suite": {"id": suite}}]}
 elif url.path.endswith("/actions/runs"):
     suite = int(parse_qs(url.query)["check_suite_id"][0])
-    out = {"workflow_runs": [{"path": list(REQUIRED.values())[suite - 1]}]}
+    out = {"workflow_runs": [{"path": list(REQUIRED.values())[suite - 1], "event": "push",
+                              "head_branch": "main", "head_sha": os.environ["FAKE_MAIN"],
+                              "head_repository": {"full_name": "James3014/Nexus-new"}}]}
 else:
     out = []
 print(json.dumps(out))
@@ -1675,7 +1811,9 @@ def _health(commit: str, *, status: str = "ok") -> dict[str, Any]:
 
 
 @contextlib.contextmanager
-def fake_gateway(health: dict[str, Any], tools: int, is_error: bool) -> Iterator[int]:
+def fake_gateway(
+    health: dict[str, Any], tools: int, is_error: bool, health_delay: float = 0.0
+) -> Iterator[int]:
     class Handler(http.server.BaseHTTPRequestHandler):
         def log_message(self, *_a: Any) -> None:
             return
@@ -1688,6 +1826,10 @@ def fake_gateway(health: dict[str, Any], tools: int, is_error: bool) -> Iterator
             self.wfile.write(body)
 
         def do_GET(self) -> None:
+            if health_delay:
+                import time
+
+                time.sleep(health_delay)
             self._send(health)
 
         def do_POST(self) -> None:
@@ -2039,3 +2181,858 @@ def test_journal_with_malformed_embedded_plist_is_quarantined(
 def test_live_root_rejects_non_dict_plist() -> None:
     with pytest.raises(ad.DeployError, match="NOT_A_DICT"):
         ad.live_root(plistlib.dumps(["x"]))
+
+
+# ------------------------------------------------- pinned nexus-core (#2181)
+
+
+def _core_head(checkout: Path) -> str:
+    return _fixture_git(checkout, "rev-parse", "HEAD")
+
+
+def test_candidate_runs_the_core_revision_its_tree_pins(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    result = cycle(cfg, host, prober)
+    assert result["status"] == "DEPLOYED"
+    checkout = cfg.core_checkouts / CORE.pin
+    receipt = ad.last_receipt(cfg.state_dir)
+    assert receipt["core"] == {
+        "revision": CORE.pin,
+        "root": str(checkout),
+        "repository": ad.CORE_REPOSITORY_URL,
+    }
+    # A clean, detached checkout at exactly the pinned commit.
+    assert _core_head(checkout) == CORE.pin
+    assert _fixture_git(checkout, "status", "--porcelain", "--untracked-files=all") == ""
+    assert _fixture_git(checkout, "rev-parse", "--abbrev-ref", "HEAD") == "HEAD"  # detached
+    # Both the spare-port probe and the live wrapper export it after the env file.
+    export = f'export NEXUS_CORE_REPO_ROOT="{checkout}" ; '
+    live_command = plistlib.loads(cfg.plist.read_bytes())["ProgramArguments"][2]
+    for command in (host.started[0], live_command):
+        assert export in command
+        assert command.index(export) > command.index(f'source "{cfg.env_file}"')
+    # Every candidate probe demands that exact Core.
+    assert [c["core"] for c in prober.calls] == [receipt["core"], receipt["core"]]
+
+
+def test_core_commit_already_present_is_not_fetched_again(cfg: ad.Config) -> None:
+    ad.materialize_core(cfg, FakeHost(), CORE.pin)
+    host = FakeHost()
+    host.core_fetch_fails = True  # would reject if a fetch were attempted
+    assert cycle(cfg, host, FakeProber())["status"] == "DEPLOYED"
+    assert not any("fetch" in c and str(cfg.core_bare_repo) in c for c in host.calls)
+
+
+@pytest.mark.parametrize("pin", ["not-a-sha", "abc123", "A" * 40, "g" * 40, None], ids=str)
+def test_bad_core_pin_rejects_the_candidate(cfg: ad.Config, pin: str | None) -> None:
+    before = cfg.plist.read_bytes()
+    host = FakeHost()
+    host.core_pin = pin  # type: ignore[assignment]
+    if pin is None:
+        host.core_pin = CORE.pin + '"\nCANONICAL_CORE_REVISION = "' + CORE.other  # two pins
+    result = cycle(cfg, host, FakeProber())
+    assert result["status"] == "REJECTED_BUILD"
+    assert result["receipt"]["reason"].startswith("DeployError:CORE_PIN_INVALID")
+    assert not host.started and cfg.plist.read_bytes() == before
+    assert not any(c[:1] == ["uv"] for c in host.calls)
+    assert not cfg.core_checkouts.exists()
+    # Deterministic: the same candidate is not rebuilt.
+    assert cycle(cfg, host, FakeProber(), force=False)["status"] == "CANDIDATE_REJECTED_BEFORE"
+
+
+def test_read_core_pin_parses_text_only(tmp_path: Path) -> None:
+    (tmp_path / ad.CORE_PIN_FILE).parent.mkdir(parents=True)
+    (tmp_path / ad.CORE_PIN_FILE).write_text("import sys\nsys.exit(3)\n" + _pin_source(CORE.pin))
+    assert ad.read_core_pin(tmp_path) == CORE.pin  # parsed, never executed
+    assert ad.read_core_pin(REPO_ROOT) == ad.read_core_pin(REPO_ROOT)
+    from nexus.orchestrator import canonical_core_transport as transport
+
+    assert ad.read_core_pin(REPO_ROOT) == transport.CANONICAL_CORE_REVISION
+    with pytest.raises(ad.DeployError, match="CORE_PIN_INVALID"):
+        ad.read_core_pin(tmp_path / "missing")
+
+
+@pytest.mark.parametrize("failure", ["fetch", "unknown_commit"])
+def test_core_fetch_failure_rejects_and_never_deploys_without_core(
+    cfg: ad.Config, failure: str
+) -> None:
+    before = cfg.plist.read_bytes()
+    host = FakeHost()
+    if failure == "fetch":
+        host.core_fetch_fails = True
+        expected = "CORE_FETCH_FAILED"
+    else:
+        host.core_pin = "d" * 40  # not on any nexus-core branch
+        expected = "CORE_COMMIT_NOT_FOUND"
+    result = cycle(cfg, host, FakeProber())
+    assert result["status"] == "BUILD_FAILED"
+    assert expected in result["receipt"]["reason"]
+    assert not host.started and not host.reloads and cfg.plist.read_bytes() == before
+    assert "core" not in result["receipt"]
+
+
+def _soil(checkout: Path, dirt: str) -> None:
+    if dirt == "untracked":
+        (checkout / "product" / "shadow.py").write_text("x = 1\n")
+    elif dirt == "ignored":
+        (checkout / "product" / "__pycache__").mkdir()
+        (checkout / "product" / "__pycache__" / "two.cpython-312.pyc").write_bytes(b"x")
+    elif dirt == "modified":
+        (checkout / "product" / "__init__.py").write_text("patched = True\n")
+    elif dirt == "wrong_head":
+        _fixture_git(checkout, "checkout", "-q", "--detach", CORE.other)
+    elif dirt == "half_created":  # a `git worktree add` killed before writing .git
+        shutil.rmtree(checkout)
+        (checkout / "product").mkdir(parents=True)
+    else:
+        raise AssertionError(dirt)
+
+
+@pytest.mark.parametrize("dirt", ["untracked", "modified", "ignored", "wrong_head", "half_created"])
+def test_unhealthy_unused_core_checkout_is_rebuilt(cfg: ad.Config, dirt: str) -> None:
+    checkout = Path(ad.materialize_core(cfg, FakeHost(), CORE.pin)["root"])
+    _soil(checkout, dirt)
+    host = FakeHost()
+    result = cycle(cfg, host, FakeProber())
+    assert result["status"] == "DEPLOYED"
+    core = result["receipt"]["core"]
+    assert core["root"] == str(checkout) and core["rebuilt"]
+    assert ad.core_checkout_problem(ad.Host(), checkout, CORE.pin) is None
+    assert any(c[-2:] == ["worktree", "prune"] for c in host.calls)
+    assert not ad.hold_reason(cfg, {})
+
+
+def _live_on_core(cfg: ad.Config, checkout: Path, *, export: bool, pin_file: bool) -> None:
+    """Make the live plist run deployment a1-OLD on ``checkout``."""
+    live = cfg.deployments / f"a1-{OLD}"
+    (live / "scripts/ops").mkdir(parents=True)
+    (live / ad.ENTRYPOINT).write_text("")
+    if pin_file:
+        (live / ad.CORE_PIN_FILE).parent.mkdir(parents=True)
+        (live / ad.CORE_PIN_FILE).write_text(_pin_source(checkout.name))
+    python = cfg.venvs / f"a1-{OLD}" / "bin" / "python"
+    command = ad.wrapper_command(cfg, live, python, core_root=checkout if export else None)
+    cfg.plist.write_bytes(ad.render_plist(cfg.plist.read_bytes(), command, live))
+    ad.remember_plist(cfg, cfg.plist.read_bytes())
+
+
+@pytest.mark.parametrize(("export", "pin_file"), [(True, False), (False, True), (True, True)])
+@pytest.mark.parametrize("dirt", ["untracked", "half_created"])
+def test_unhealthy_core_checkout_in_use_is_held_not_modified(
+    cfg: ad.Config, dirt: str, export: bool, pin_file: bool
+) -> None:
+    checkout = Path(ad.materialize_core(cfg, FakeHost(), CORE.pin)["root"])
+    _live_on_core(cfg, checkout, export=export, pin_file=pin_file)
+    _soil(checkout, dirt)
+    snapshot = sorted(str(p.relative_to(checkout)) for p in checkout.rglob("*"))
+    before = cfg.plist.read_bytes()
+    host = FakeHost()
+    result = cycle(cfg, host, FakeProber())
+    assert result["status"] == "BUILD_FAILED"
+    assert "CORE_IN_USE_UNHEALTHY" in result["receipt"]["reason"]
+    assert sorted(str(p.relative_to(checkout)) for p in checkout.rglob("*")) == snapshot
+    assert not any("remove" in c or "prune" in c for c in host.calls if "core.git" in str(c))
+    assert not host.started and cfg.plist.read_bytes() == before
+    # No endless retries: the deployer holds until the Owner repairs and releases.
+    assert "CORE_IN_USE_UNHEALTHY" in (ad.hold_reason(cfg, {}) or "") or cfg.hold_file.exists()
+    assert cycle(cfg, FakeHost(), FakeProber())["status"] == "HELD"
+
+
+def test_core_in_use_unknown_when_live_pin_file_is_malformed(cfg: ad.Config) -> None:
+    checkout = Path(ad.materialize_core(cfg, FakeHost(), CORE.pin)["root"])
+    _live_on_core(cfg, checkout, export=False, pin_file=True)
+    (cfg.deployments / f"a1-{OLD}" / ad.CORE_PIN_FILE).write_text("CANONICAL_CORE_REVISION = 1\n")
+    _soil(checkout, "untracked")
+    with pytest.raises(ad.DeployError, match="CORE_IN_USE_UNKNOWN"):
+        ad.materialize_core(cfg, FakeHost(), CORE.pin)
+    assert (checkout / "product" / "shadow.py").exists()
+
+
+def test_core_bare_repo_origin_must_be_nexus_core(cfg: ad.Config) -> None:
+    ad.materialize_core(cfg, FakeHost(), CORE.pin)
+    _fixture_git(cfg.core_bare_repo, "remote", "set-url", "origin", "https://evil.example/c.git")
+    with pytest.raises(ad.DeployError, match="CORE_ORIGIN_MISMATCH"):
+        ad.materialize_core(cfg, FakeHost(), CORE.pin)
+
+
+def test_wrapper_exports_core_root_and_rejects_unsafe_core_path(cfg: ad.Config) -> None:
+    root, python = Path("/d/a1-x"), Path("/v/bin/python")
+    assert "NEXUS_CORE_REPO_ROOT" not in ad.wrapper_command(cfg, root, python)
+    command = ad.wrapper_command(cfg, root, python, core_root=Path("/g/core/abc"))
+    assert 'export NEXUS_CORE_REPO_ROOT="/g/core/abc" ; exec ' in command
+    with pytest.raises(ad.DeployError, match="WRAPPER_PATH_UNSAFE"):
+        ad.wrapper_command(cfg, root, python, core_root=Path('/g/core/"; rm -rf ~'))
+
+
+def test_rollback_probe_of_the_predecessor_does_not_demand_core(cfg: ad.Config) -> None:
+    prober = FakeProber({(ad.LIVE_PORT, NEW): False})
+    assert cycle(cfg, FakeHost(), prober)["status"] == "ROLLED_BACK"
+    pin = ad.last_receipt(cfg.state_dir)["core"]
+    assert [(c["commit"], c["core"]) for c in prober.calls] == [
+        (NEW, pin),
+        (NEW, pin),
+        (OLD, None),
+    ]
+
+
+def test_retention_prunes_core_checkouts_with_their_deployments(cfg: ad.Config) -> None:
+    host = FakeHost()
+    pins = {"1": CORE.other, "2": CORE.other, "3": CORE.pin}
+    for index, (char, pin) in enumerate(pins.items()):
+        deployment = cfg.deployments / f"a1-{char * 40}"
+        (deployment / ad.CORE_PIN_FILE).parent.mkdir(parents=True)
+        (deployment / ad.CORE_PIN_FILE).write_text(_pin_source(pin))
+        os.utime(deployment, (1000 + index, 1000 + index))
+    for pin in (CORE.other, CORE.pin):
+        ad.materialize_core(cfg, host, pin)
+    stray = cfg.core_checkouts / ("e" * 40)  # pinned by nothing
+    stray.mkdir()
+    keep_one = ad.Config.default(cfg.state_dir.parents[2], keep=1)
+    # a1-1 is protected (live): its Core survives while a1-2 is pruned.
+    removed = ad.prune(keep_one, host, [cfg.deployments / f"a1-{'1' * 40}"])
+    assert removed == [f"a1-{'2' * 40}"]
+    assert sorted(p.name for p in cfg.core_checkouts.iterdir()) == sorted([CORE.other, CORE.pin])
+    # Once no deployment pins CORE.other, its checkout and git worktree go with it.
+    removed = ad.prune(keep_one, host, [])
+    assert removed == [f"a1-{'1' * 40}"]
+    assert [p.name for p in cfg.core_checkouts.iterdir()] == [CORE.pin]
+    worktrees = _fixture_git(cfg.core_bare_repo, "worktree", "list", "--porcelain")
+    assert str(cfg.core_checkouts / CORE.other) not in worktrees
+
+
+def test_core_retention_keeps_everything_when_an_a1_pin_is_unreadable(cfg: ad.Config) -> None:
+    host = FakeHost()
+    ad.materialize_core(cfg, host, CORE.pin)
+    unreadable = cfg.deployments / f"a1-{'7' * 40}"
+    unreadable.mkdir()  # no pin file: we cannot tell which Core it runs
+    assert ad.prune_core(cfg, host, [unreadable]) == []
+    assert (cfg.core_checkouts / CORE.pin).is_dir()
+    # An r1 deployment without a pin does not block (r1 never uses these checkouts).
+    unreadable.rmdir()
+    assert ad.prune_core(cfg, host, []) == [CORE.pin]
+
+
+def test_core_retention_unprotected_a1_without_pin_pins_nothing(cfg: ad.Config) -> None:
+    host = FakeHost()
+    ad.materialize_core(cfg, host, CORE.pin)
+    (cfg.deployments / f"a1-{'7' * 40}").mkdir()  # no pin file, not protected
+    assert ad.prune_core(cfg, host, []) == [CORE.pin]
+
+
+def test_core_retention_aborts_on_a_malformed_a1_pin(cfg: ad.Config) -> None:
+    host = FakeHost()
+    ad.materialize_core(cfg, host, CORE.pin)
+    broken = cfg.deployments / f"a1-{'7' * 40}"
+    (broken / ad.CORE_PIN_FILE).parent.mkdir(parents=True)
+    (broken / ad.CORE_PIN_FILE).write_text('CANONICAL_CORE_REVISION = "nope"\n')
+    assert ad.prune_core(cfg, host, []) == []
+    assert (cfg.core_checkouts / CORE.pin).is_dir()
+
+
+def test_retention_never_follows_a_symlinked_core_dir(cfg: ad.Config, tmp_path: Path) -> None:
+    precious = tmp_path / "precious-core"
+    (precious / ("e" * 40)).mkdir(parents=True)
+    cfg.core_checkouts.symlink_to(precious)
+    assert ad.prune_refusal(cfg) == f"SYMLINKED_DIRECTORY:{cfg.core_checkouts}"
+    assert ad.prune_core(cfg, FakeHost(), []) == []
+    assert (precious / ("e" * 40)).is_dir()
+    with pytest.raises(ad.DeployError, match="CORE_PATH_SYMLINKED"):
+        ad.materialize_core(cfg, FakeHost(), CORE.pin)
+
+
+class _CoreStatusHost(ad.Host):
+    """Real host, except the Core provenance subprocess returns a canned status."""
+
+    def __init__(self, status: dict[str, Any] | None, code: int = 0) -> None:
+        self.status, self.code = status, code
+        self.core_envs: list[dict[str, str] | None] = []
+
+    def run(self, argv, *, cwd=None, env=None, timeout=1800):  # type: ignore[override]
+        if len(argv) > 2 and argv[2] == ad.CORE_PROVENANCE_PROBE_CODE:
+            self.core_envs.append(env)
+            out = json.dumps(self.status) if self.status is not None else "Traceback"
+            return _done(out + "\n", code=self.code)
+        return super().run(argv, cwd=cwd, env=env, timeout=timeout)
+
+
+def _pinned_status(core_root: Path, observed: str = NEW, expected: str = NEW) -> dict[str, Any]:
+    return {
+        "status": "CORE_REVISION_PINNED",
+        "fail_closed": False,
+        "expected_revision": expected,
+        "observed_commit": observed,
+        "source_root": str(core_root),
+    }
+
+
+@pytest.mark.parametrize(
+    ("case", "ok"),
+    [
+        ("pinned", True),
+        ("mismatch", False),
+        ("unavailable", False),
+        ("pinned_other_commit", False),
+        ("pinned_other_expectation", False),
+        ("pinned_other_root", False),
+        ("crashed", False),
+        ("no_pin", False),
+    ],
+)
+def test_real_prober_requires_core_revision_pinned(tmp_path: Path, case: str, ok: bool) -> None:
+    core_root = tmp_path / "core" / NEW
+    core_root.mkdir(parents=True)
+    status: dict[str, Any] | None = _pinned_status(core_root)
+    code = 0
+    core: dict[str, Any] = {"revision": NEW, "root": str(core_root)}
+    if case == "mismatch":
+        status = {**_pinned_status(core_root, observed=OLD), "status": "CORE_REVISION_MISMATCH"}
+    elif case == "unavailable":
+        status = {"status": "CORE_UNAVAILABLE", "reason": "CORE_PRODUCT_SHADOWED"}
+    elif case == "pinned_other_commit":
+        status = _pinned_status(core_root, observed=OLD, expected=OLD)
+    elif case == "pinned_other_expectation":
+        status = _pinned_status(core_root, expected=OLD)
+    elif case == "pinned_other_root":
+        status = _pinned_status(tmp_path / "elsewhere")
+    elif case == "crashed":
+        status, code = None, 1
+    elif case == "no_pin":
+        core = {}
+    host = _CoreStatusHost(status, code)
+    with fake_gateway(_health(NEW), 3, False) as port:
+        result = ad.Prober(host).probe(
+            port=port,
+            token="tok",
+            commit=NEW,
+            root=REPO_ROOT,
+            python=Path(sys.executable),
+            timeout=10,
+            core=core,
+        )
+    assert result["checks"]["core_provenance"]["ok"] is ok
+    assert result["ok"] is ok
+    if case != "no_pin":
+        assert host.core_envs[0]["NEXUS_CORE_REPO_ROOT"] == str(core_root)
+
+
+def test_real_core_provenance_check_rejects_a_checkout_that_is_not_core(
+    tmp_path: Path,
+) -> None:
+    """End to end with the real transport: a checkout without Core's verification
+    surface is CORE_UNAVAILABLE, so the candidate cannot pass."""
+    checkout = tmp_path / "core"
+    _fixture_git(tmp_path, "clone", "-q", str(CORE.path), str(checkout))
+    check = ad.Prober(ad.Host()).core_provenance(
+        root=REPO_ROOT,
+        python=Path(sys.executable),
+        core={"revision": CORE.pin, "root": str(checkout)},
+    )
+    assert check["ok"] is False
+    assert check.get("status") == "CORE_UNAVAILABLE"
+
+
+def _offline_git(cwd: Path | str, *args: str) -> subprocess.CompletedProcess:
+    env = {**os.environ, **GIT_ENV, "GIT_NO_LAZY_FETCH": "1"}
+    return subprocess.run(
+        ["git", "-C", str(cwd), *args], env=env, capture_output=True, text=True, check=False
+    )
+
+
+def _real_core_checkout(tmp_path: Path, pin: str) -> Path | None:
+    """A real nexus-core checkout at ``pin`` without any network, or None.
+
+    NEXUS_CORE_REPO_ROOT is used as is when it is a clean checkout at the pin;
+    otherwise a ``--shared`` clone of a local nexus-core repository is checked
+    out at the pin (the source repository is never modified).
+    """
+    configured = os.environ.get("NEXUS_CORE_REPO_ROOT", "")
+    if configured and (Path(configured) / ".git").exists():
+        head = _offline_git(configured, "rev-parse", "HEAD").stdout.strip()
+        dirty = _offline_git(configured, "status", "--porcelain", "--ignored").stdout.strip()
+        if head == pin and not dirty:
+            return Path(configured)
+    for source in (configured, str(Path.home() / "workspace/nexus-core")):
+        if not source or not (Path(source) / ".git").exists():
+            continue
+        checkout = tmp_path / "core" / pin
+        shutil.rmtree(checkout, ignore_errors=True)
+        cloned = _offline_git(
+            tmp_path, "clone", "-q", "--shared", "--no-checkout", source, str(checkout)
+        )
+        if (
+            cloned.returncode == 0
+            and _offline_git(checkout, "checkout", "-q", "--detach", pin).returncode == 0
+        ):
+            return checkout
+    return None
+
+
+# Opt-in: collected only when NEXUS_CORE_REPO_ROOT names a real nexus-core, so the
+# exact-base impact gate never sees a newly added test id that merely skips.
+if os.environ.get("NEXUS_CORE_REPO_ROOT"):
+
+    def test_real_transport_reports_pinned_for_a_real_core_checkout(tmp_path: Path) -> None:
+        """Positive control with real nexus-core; skipped where none is available offline."""
+        pin = ad.read_core_pin(REPO_ROOT)
+        checkout = _real_core_checkout(tmp_path, pin)
+        if checkout is None:
+            pytest.skip("no local nexus-core with the pinned tree (set NEXUS_CORE_REPO_ROOT)")
+        check = ad.Prober(ad.Host()).core_provenance(
+            root=REPO_ROOT,
+            python=Path(sys.executable),
+            core={"revision": pin, "root": str(checkout)},
+        )
+        assert check["status"] == "CORE_REVISION_PINNED", check
+        assert check["ok"] is True and check["observed_commit"] == pin
+
+
+# ------------------------------------------------- live required-check set (#2173)
+
+
+TRUSTED_DEPENDENCY = "Trusted dependency contract (default branch)"
+
+
+def test_trusted_dependency_contract_is_known_and_bound() -> None:
+    workflow = ad.REQUIRED_CHECKS[TRUSTED_DEPENDENCY]
+    assert workflow == ".github/workflows/trusted-dependency-contract.yml"
+    text = (REPO_ROOT / workflow).read_text(encoding="utf-8")
+    assert f"name: {TRUSTED_DEPENDENCY}" in text and "pull_request_target" in text
+
+
+def test_all_live_required_checks_are_evaluated_including_on_the_pr_head() -> None:
+    """The 4th check runs on pull_request_target, so it is found on the merged PR head."""
+
+    def api(path: str) -> Any:
+        if "check-runs" in path and "/commits/" + NEW in path and "Trusted" in path:
+            return {"check_runs": []}
+        return green_api()(path)
+
+    result = ad.required_checks(api, NEW)
+    assert result["verdict"] == "GREEN"
+    assert result["required"] == list(ad.REQUIRED_CHECKS)
+    assert result["checks"][TRUSTED_DEPENDENCY]["sha"] == PR_HEAD
+
+
+def test_red_trusted_dependency_contract_blocks(cfg: ad.Config) -> None:
+    def api(path: str) -> Any:
+        payload = green_api()(path)
+        if "check-runs" in path and "Trusted" in path:
+            for run in payload["check_runs"]:
+                run["conclusion"] = "failure"
+        return payload
+
+    host, prober = FakeHost(), FakeProber()
+    assert cycle(cfg, host, prober, api)["status"] == "CHECKS_RED"
+    assert prober.calls == [] and host.reloads == []
+
+
+def test_unknown_required_check_blocks_without_hold(cfg: ad.Config) -> None:
+    api = green_api(required=[*ad.REQUIRED_CHECKS, "Brand new gate"])
+    host, prober = FakeHost(), FakeProber()
+    result = cycle(cfg, host, prober, api)
+    assert result["status"] == "UNKNOWN_REQUIRED_CHECK:Brand new gate"
+    assert result["required_checks"]["unknown_required"] == ["Brand new gate"]
+    assert prober.calls == [] and host.reloads == [] and not cfg.hold_file.exists()
+    assert ad.read_receipts(cfg.state_dir) == []
+    # Retried next cycle: once main stops requiring it, the deploy proceeds.
+    assert cycle(cfg, host, prober, green_api())["status"] == "DEPLOYED"
+
+
+@pytest.mark.parametrize(
+    "rules",
+    [
+        ad.DeployError("GH_API_FAILED:403"),
+        {"message": "Not Found"},
+        [],  # no required checks at all must never mean "green"
+        [{"type": "required_status_checks", "parameters": {"required_status_checks": [{}]}}],
+    ],
+    ids=["api-error", "not-a-list", "no-checks", "malformed-entry"],
+)
+def test_ruleset_read_failure_blocks(cfg: ad.Config, rules: Any) -> None:
+    def api(path: str) -> Any:
+        if "/rules/branches/main" in path:
+            if isinstance(rules, Exception):
+                raise rules
+            return rules
+        return green_api()(path)
+
+    host, prober = FakeHost(), FakeProber()
+    result = cycle(cfg, host, prober, api)
+    assert result["status"] == "CHECKS_UNKNOWN"
+    assert result["required_checks"]["error"].startswith("RULESET:")
+    assert prober.calls == [] and host.reloads == []
+
+
+def test_check_no_longer_required_is_dropped() -> None:
+    required = [n for n in ad.REQUIRED_CHECKS if n != TRUSTED_DEPENDENCY]
+
+    def api(path: str) -> Any:
+        if "check-runs" in path and "Trusted" in path:
+            raise AssertionError("a dropped (non-floor) check must not be queried")
+        return green_api(required=required)(path)
+
+    result = ad.required_checks(api, NEW)
+    assert result["verdict"] == "GREEN" and set(result["checks"]) == set(required)
+
+
+def test_verify_commit_uses_the_live_required_set(capsys: pytest.CaptureFixture[str]) -> None:
+    assert ad.main(["verify-commit", NEW], api_get=green_api(required=["Mystery"])) == 1
+    out = json.loads(capsys.readouterr().out)
+    assert out["required_checks"]["verdict"] == "UNKNOWN_REQUIRED_CHECK"
+
+
+# ------------------------------------------ #2175 review: binding, issuer, floor
+
+
+def _patched_workflow_runs(**changes: Any) -> Callable[[str], Any]:
+    """green_api, but the merged PR head's workflow runs carry ``changes``."""
+    base = green_api(on_commit=False)
+
+    def api(path: str) -> Any:
+        payload = base(path)
+        if "/actions/runs?check_suite_id=" in path and int(path.rsplit("=", 1)[1]) >= (
+            PR_SUITE_OFFSET
+        ):
+            for run in payload["workflow_runs"]:
+                run.update(changes)
+        return payload
+
+    return api
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"head_branch": "someone-elses-branch"},  # another PR sharing the head sha
+        {"head_repository": {"full_name": "fork/Nexus-new"}},
+        {"event": "push"},
+        {"created_at": "2026-10-14T01:00:00Z"},  # after the merge
+        {"pull_requests": [{"number": 9999}]},  # explicitly another PR
+        {"head_branch": None},  # binding cannot be established
+    ],
+    ids=["other-branch", "fork", "wrong-event", "after-merge", "other-pr", "no-branch"],
+)
+def test_pr_head_run_from_another_pr_does_not_count(changes: dict[str, Any]) -> None:
+    result = ad.required_checks(_patched_workflow_runs(**changes), NEW)
+    assert result["verdict"] == "UNKNOWN"
+    assert "Deletion guard" in result["missing"]
+
+
+def test_pr_head_run_bound_to_the_merged_pr_counts() -> None:
+    listed = _patched_workflow_runs(pull_requests=[{"number": MERGED_PR["number"]}])
+    assert ad.required_checks(listed, NEW)["verdict"] == "GREEN"
+    assert ad.required_checks(_patched_workflow_runs(), NEW)["verdict"] == "GREEN"
+
+
+def test_commit_run_must_be_a_push_to_main() -> None:
+    def api(path: str) -> Any:
+        payload = green_api()(path)
+        if "/actions/runs?check_suite_id=" in path:
+            for run in payload["workflow_runs"]:
+                if run["event"] == "push":
+                    run["event"] = "pull_request_target"
+        return payload
+
+    result = ad.required_checks(api, NEW)
+    # The relabelled runs on the main commit do not count; only the merged PR's
+    # head runs (bound to that PR) can satisfy the checks.
+    assert {c["sha"] for c in result["checks"].values()} == {PR_HEAD}
+
+
+@pytest.mark.parametrize(
+    "bad_rule",
+    [
+        {"type": "required_status_checks"},
+        {"type": "required_status_checks", "parameters": None},
+        {"type": "required_status_checks", "parameters": {"required_status_checks": None}},
+        {"type": "required_status_checks", "parameters": {"required_status_checks": "x"}},
+        {"type": "required_status_checks", "parameters": {"required_status_checks": [7]}},
+        {
+            "type": "required_status_checks",
+            "parameters": {
+                "required_status_checks": [{"context": "Deletion guard", "integration_id": "x"}]
+            },
+        },
+    ],
+    ids=["no-params", "null-params", "null-list", "str-list", "int-entry", "bad-issuer"],
+)
+def test_mixed_valid_and_malformed_rules_fail_closed(
+    cfg: ad.Config, bad_rule: dict[str, Any]
+) -> None:
+    def api(path: str) -> Any:
+        if "/rules/branches/main" in path:
+            return (
+                [*_branch_rules(list(ad.REQUIRED_CHECKS)), bad_rule]
+                if path.endswith("page=1")
+                else []
+            )
+        return green_api()(path)
+
+    host, prober = FakeHost(), FakeProber()
+    result = cycle(cfg, host, prober, api)
+    assert result["status"] == "CHECKS_UNKNOWN"
+    assert "BRANCH_RULES_MALFORMED" in result["required_checks"]["error"]
+    assert prober.calls == [] and host.reloads == []
+
+
+def test_run_from_a_different_issuer_does_not_count() -> None:
+    def api(path: str) -> Any:
+        if "/rules/branches/main" in path:
+            if "page=" in path and not path.endswith("page=1"):
+                return []
+            rules = _branch_rules(list(ad.REQUIRED_CHECKS))
+            for check in rules[1]["parameters"]["required_status_checks"]:
+                if check["context"] == "Deletion guard":
+                    check["integration_id"] = 99999
+            return rules
+        return green_api()(path)
+
+    result = ad.required_checks(api, NEW)
+    assert result["verdict"] == "UNKNOWN" and result["missing"] == ["Deletion guard"]
+
+
+def test_required_check_issuer_is_actions_app_id() -> None:
+    """The live rules name integration 15368; real runs report app.id 15368."""
+    rules = _branch_rules(["Deletion guard"])
+    issuer = rules[1]["parameters"]["required_status_checks"][0]["integration_id"]
+    assert issuer == ACTIONS_APP_ID
+
+
+def test_branch_rules_are_paged() -> None:
+    def api(path: str) -> Any:
+        if "/rules/branches/main" in path:
+            if path.endswith("page=1"):
+                return [{"type": "deletion"} for _ in range(100)]
+            if path.endswith("page=2"):
+                return _branch_rules([*ad.REQUIRED_CHECKS, "Page two gate"])
+            return []
+        return green_api()(path)
+
+    result = ad.required_checks(api, NEW)
+    assert result["verdict"] == "UNKNOWN_REQUIRED_CHECK"
+    assert result["unknown_required"] == ["Page two gate"]
+
+
+def test_floor_checks_stay_required_when_the_ruleset_weakens(cfg: ad.Config) -> None:
+    only_secret = green_api(required=["Full published Git history secret audit"])
+    result = ad.required_checks(only_secret, NEW)
+    assert result["verdict"] == "GREEN"
+    assert set(result["checks"]) == set(ad.FLOOR_CHECKS)
+    assert result["floor_added"] == ["Deletion guard", "Exact-base impact gate"]
+
+    def floor_red(path: str) -> Any:
+        payload = only_secret(path)
+        if "check-runs" in path and "Deletion+guard" in path:
+            for run in payload["check_runs"]:
+                run["conclusion"] = "failure"
+        return payload
+
+    assert ad.required_checks(floor_red, NEW)["verdict"] == "RED"
+
+
+def test_floor_check_without_runs_is_unknown_and_recorded(cfg: ad.Config) -> None:
+    def api(path: str) -> Any:
+        if "check-runs" in path and "Exact-base" in path:
+            return {"check_runs": []}
+        return green_api(required=["Full published Git history secret audit"])(path)
+
+    host, prober = FakeHost(), FakeProber()
+    result = cycle(cfg, host, prober, api)
+    assert result["status"] == "CHECKS_UNKNOWN"
+    assert result["required_checks"]["missing"] == ["Exact-base impact gate"]
+    assert prober.calls == []
+
+
+def _pr_head_runs(*, workflow: dict[str, Any] | None = None, attempts: list[dict[str, Any]]):
+    """green_api where Deletion guard exists only on the merged PR head, as ``attempts``."""
+    base = green_api(on_commit=False)
+
+    def api(path: str) -> Any:
+        if "check-runs" in path and "Deletion+guard" in path and "/commits/" + PR_HEAD in path:
+            return {"check_runs": attempts}
+        payload = base(path)
+        if workflow and "/actions/runs?check_suite_id=" in path:
+            if int(path.rsplit("=", 1)[1]) >= PR_SUITE_OFFSET:
+                for run in payload["workflow_runs"]:
+                    run.update(workflow)
+        return payload
+
+    return api
+
+
+def _attempt(run_id: int, started: str, conclusion: str = "success", **extra: Any) -> dict:
+    return {
+        "id": run_id,
+        "name": "Deletion guard",
+        "status": "completed",
+        "conclusion": conclusion,
+        "started_at": started,
+        "completed_at": extra.pop("completed_at", started),
+        "app": {"slug": "github-actions", "id": ACTIONS_APP_ID},
+        "check_suite": {"id": SUITES["Deletion guard"] + PR_SUITE_OFFSET},
+        "pull_requests": [],
+        **extra,
+    }
+
+
+def test_run_from_an_earlier_pr_on_the_same_branch_and_sha_is_rejected() -> None:
+    """#2100 (closed) and #2140 (merged) share branch and head sha: #2100's run is
+    older than #2140 itself and must not count."""
+    earlier = _attempt(1, "2026-10-12T10:00:00Z")
+    api = _pr_head_runs(workflow={"created_at": "2026-10-12T09:59:00Z"}, attempts=[earlier])
+    result = ad.required_checks(api, NEW)
+    assert result["verdict"] == "UNKNOWN" and "Deletion guard" in result["missing"]
+
+
+def test_rerun_after_merge_is_ignored_and_pre_merge_attempt_counts() -> None:
+    pre_merge = _attempt(1, "2026-10-13T23:00:00Z")
+    post_merge_rerun = _attempt(2, "2026-10-14T01:00:00Z", conclusion="failure")
+    # The workflow run's run_started_at follows the latest (post-merge) attempt.
+    api = _pr_head_runs(
+        workflow={"run_started_at": "2026-10-14T01:00:00Z", "run_attempt": 2},
+        attempts=[pre_merge, post_merge_rerun],
+    )
+    result = ad.required_checks(api, NEW)
+    assert result["verdict"] == "GREEN"
+    assert result["checks"]["Deletion guard"]["sha"] == PR_HEAD
+
+
+def test_successful_rerun_after_merge_does_not_rescue_a_red_check() -> None:
+    pre_merge_red = _attempt(1, "2026-10-13T23:00:00Z", conclusion="failure")
+    post_merge_green = _attempt(2, "2026-10-14T01:00:00Z")
+    api = _pr_head_runs(attempts=[pre_merge_red, post_merge_green])
+    assert ad.required_checks(api, NEW)["verdict"] == "RED"
+
+
+def test_attempt_completed_after_merge_does_not_count() -> None:
+    straddling = _attempt(1, "2026-10-13T23:59:00Z", completed_at="2026-10-14T00:30:00Z")
+    result = ad.required_checks(_pr_head_runs(attempts=[straddling]), NEW)
+    assert result["verdict"] == "UNKNOWN" and "Deletion guard" in result["missing"]
+
+
+def test_only_post_merge_rerun_leaves_the_check_missing() -> None:
+    api = _pr_head_runs(attempts=[_attempt(2, "2026-10-14T01:00:00Z")])
+    assert ad.required_checks(api, NEW)["missing"] == ["Deletion guard"]
+
+
+@pytest.mark.parametrize("completed_at", [None, "", "garbage"], ids=["null", "empty", "bad"])
+def test_completed_pr_head_run_without_completed_at_is_not_bound(completed_at: Any) -> None:
+    run = _attempt(1, "2026-10-13T23:00:00Z", completed_at=completed_at)
+    result = ad.required_checks(_pr_head_runs(attempts=[run]), NEW)
+    assert result["verdict"] == "UNKNOWN" and "Deletion guard" in result["missing"]
+    missing_key = {k: v for k, v in run.items() if k != "completed_at"}
+    result = ad.required_checks(_pr_head_runs(attempts=[missing_key]), NEW)
+    assert result["verdict"] == "UNKNOWN" and "Deletion guard" in result["missing"]
+
+
+def test_gb077_waits_for_a_slow_health_endpoint() -> None:
+    """Live bug 2026-10-14T13:45:50Z: a fresh candidate's /health took > 2 s and
+    GB-077 failed with gateway_unreachable:TimeoutError."""
+    with fake_gateway(_health(NEW), 3, False, health_delay=3.0) as port:
+        result = ad.Prober(ad.Host()).probe(
+            port=port,
+            token="tok",
+            commit=NEW,
+            root=REPO_ROOT,
+            python=Path(sys.executable),
+            timeout=60,
+        )
+    gb077 = result["checks"]["gb077"]
+    assert gb077["ok"] is True, gb077["detail"]
+    detail = json.loads(gb077["detail"])
+    assert detail["observed"]["endpoint"] == f"http://127.0.0.1:{port}/health"
+    assert result["ok"] is True
+
+
+def test_gb077_probe_passes_timeout_and_attempts() -> None:
+    calls: list[list[str]] = []
+
+    class Recording(ad.Host):
+        def run(self, argv, **kw):  # type: ignore[override]
+            calls.append(list(argv))
+            return SimpleNamespace(returncode=0, stdout="{}", stderr="")
+
+    with fake_gateway(_health(NEW), 3, False) as port:
+        ad.Prober(Recording()).probe(
+            port=port, token="tok", commit=NEW, root=REPO_ROOT, python=Path("/py"), timeout=5
+        )
+    assert calls[0][-2:] == [str(ad.GB077_TIMEOUT_SECONDS), str(ad.GB077_ATTEMPTS)]
+
+
+@contextlib.contextmanager
+def scripted_health(responses: list[Any]) -> Iterator[int]:
+    """/health answers from ``responses`` in order: a dict, or a float = sleep (timeout)."""
+    queue = list(responses)
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *_a: Any) -> None:
+            return
+
+        def do_GET(self) -> None:
+            item = queue.pop(0) if queue else responses[-1]
+            if isinstance(item, float):
+                import time
+
+                time.sleep(item)
+                item = _health(NEW)
+            body = json.dumps(item).encode()
+            try:
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            except OSError:
+                pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield int(server.server_address[1])
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def _run_gb077(port: int, timeout: float = 1.0, attempts: int = 3) -> tuple[int, dict]:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            ad.GB077_PROBE_CODE,
+            str(REPO_ROOT),
+            f"http://127.0.0.1:{port}/health",
+            NEW,
+            str(timeout),
+            str(attempts),
+        ],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        timeout=120,
+    )
+    return result.returncode, json.loads(result.stdout.strip().splitlines()[-1])
+
+
+def test_gb077_identity_failure_is_not_retried_away() -> None:
+    """Codex: wrong head then right head must FAIL, and attempt 1 stays recorded."""
+    with scripted_health([_health(OLD), _health(NEW)]) as port:
+        code, detail = _run_gb077(port)
+    assert code == 1 and detail["result"] == "FAIL"
+    assert [a["ok"] for a in detail["attempts"]] == [False]
+    assert "gateway_loaded_revision_not_evaluated_revision" in detail["attempts"][0]["reasons"]
+
+
+def test_gb077_retries_a_timeout_then_passes() -> None:
+    with scripted_health([3.0, _health(NEW)]) as port:
+        code, detail = _run_gb077(port, timeout=1.0)
+    assert code == 0 and detail["result"] == "PASS"
+    assert [a["ok"] for a in detail["attempts"]] == [False, True]
+    assert detail["attempts"][0]["reasons"][0].startswith("gateway_unreachable:")
+
+
+def test_gb077_three_timeouts_fail() -> None:
+    with scripted_health([3.0, 3.0, 3.0, 3.0]) as port:
+        code, detail = _run_gb077(port, timeout=1.0, attempts=3)
+    assert code == 1 and len(detail["attempts"]) == 3
+    assert all(not a["ok"] for a in detail["attempts"])
