@@ -24,6 +24,13 @@ from scripts.ops import check_gateway_source_drift as drift
 from scripts.ops import mcp_gateway_durable as durable
 from scripts.ops import nexus_gateway_auto_deploy as deploy
 from scripts.ops import workforce_model_autoupdate as autoupdate
+from tests.ops.test_nexus_gateway_auto_deploy import (  # noqa: F401 - pytest fixtures
+    FakeHost,
+    FakeProber,
+    _core_origin,
+    cfg,
+    cycle,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 RECEIPT_VALIDATORS = {
@@ -51,6 +58,9 @@ def _names_used(path: Path) -> set[str]:
 
 
 def test_auto_deployer_routine_path_consults_no_owner_activation_receipt():
+    """Static guard; the full DEPLOYED cycle with no receipt anywhere is
+    tests/ops/test_nexus_gateway_auto_deploy.py::test_green_candidate_is_built_probed_switched_and_receipted.
+    """
     source = ROOT / "scripts/ops/nexus_gateway_auto_deploy.py"
     assert not (_names_used(source) & RECEIPT_VALIDATORS)
     text = source.read_text(encoding="utf-8")
@@ -83,17 +93,17 @@ def test_routine_reload_succeeds_without_any_authority_receipt(tmp_path, monkeyp
 
 
 def test_crash_restart_is_launchd_keepalive_with_no_receipt_in_the_wrapper(tmp_path):
-    cfg = deploy.Config.default(home=tmp_path)
+    config = deploy.Config.default(home=tmp_path)
     previous = plistlib.dumps({
         "Label": deploy.GATEWAY_LABEL,
         "ProgramArguments": ["/bin/zsh", "-c", "true"],
         "KeepAlive": True,
         "RunAtLoad": True,
     })
-    root = cfg.deployments / ("a1-" + "a" * 40)
-    python = cfg.venvs / ("a1-" + "a" * 40) / "bin/python"
+    root = config.deployments / ("a1-" + "a" * 40)
+    python = config.venvs / ("a1-" + "a" * 40) / "bin/python"
     rendered = plistlib.loads(
-        deploy.render_plist(previous, deploy.wrapper_command(cfg, root, python), root)
+        deploy.render_plist(previous, deploy.wrapper_command(config, root, python), root)
     )
     assert rendered["KeepAlive"] is True
     assert rendered["RunAtLoad"] is True
@@ -103,7 +113,12 @@ def test_crash_restart_is_launchd_keepalive_with_no_receipt_in_the_wrapper(tmp_p
 
 
 def test_expired_owner_activation_receipt_still_fails_closed_for_the_manual_path():
-    """Expiry is explicit and keeps guarding the manual #526 fallback only."""
+    """Expiry is explicit and keeps guarding the manual #526 fallback only.
+
+    Timestamp rule only; the full manual paths with real receipts are covered by
+    tests/ops/test_mcp_gateway_durable.py::test_rollback_missing_observer_and_stale_authority_have_zero_effects
+    and tests/contracts/test_gateway_deployment_contract.py (R1 stale authority).
+    """
     receipt = object.__new__(gateway_deployment.RecoveryAuthorityReceipt)
     object.__setattr__(receipt, "issued_at", "2026-10-13T09:40:00Z")
     object.__setattr__(receipt, "expires_at", "2026-10-14T09:40:00Z")
@@ -122,7 +137,7 @@ def test_operator_text_no_longer_requires_owner_activation_for_routine_deploys()
         "verdict": drift.WARN,
         "findings": [{"code": "GATEWAY_BEHIND_MAIN(60)", "severity": drift.WARN}],
     })
-    assert "Owner decision" not in summary
+    assert drift.REMEDY in summary
     assert "BREAK_GLASS" not in autoupdate.SCOPE_NOTE
     assert "#526" not in autoupdate.SCOPE_NOTE
     from nexus.orchestrator import execution_readiness
@@ -139,3 +154,19 @@ def test_release_gates_doc_names_the_manual_emergency_sequence():
     for step in ("hold", "adopt", "release", "#526"):
         assert step in section
     assert "no Owner activation" in section
+
+
+def test_full_deploy_cycle_succeeds_with_expired_owner_activation_receipts(cfg):  # noqa: F811
+    """#2155 done-when: expired #526 receipts next to the Gateway never block a routine deploy."""
+    cfg.gateway_root.mkdir(parents=True, exist_ok=True)
+    (cfg.gateway_root / "host-authority.json").write_text(
+        '{"schema": "host_effect_authority_bundle.v1", "expires_at": "2026-08-24T00:00:00Z"}\n',
+        encoding="utf-8",
+    )
+    (cfg.gateway_root / "recovery-authority.json").write_text(
+        '{"schema": "nexus.gateway.durable_recovery_authority.v2",'
+        ' "expires_at": "2026-10-14T09:40:00Z"}\n',
+        encoding="utf-8",
+    )
+    result = cycle(cfg, FakeHost(), FakeProber())
+    assert result["status"] == "DEPLOYED"

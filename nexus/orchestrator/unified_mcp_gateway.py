@@ -5143,7 +5143,9 @@ class UnifiedMCPGateway:
                 "description": (
                     "Classify one policy-driven desired-vs-loaded Gateway convergence generation. "
                     "Decision-only: never reloads, restarts, grants recovery authority, or retries "
-                    "an ambiguous effect; issue #526 remains the sole replacement-effect owner."
+                    "an ambiguous effect. Routine deploys are the #2153 auto-deployer's (no Owner "
+                    "activation, #2155); its recovery next actions name the manual issue #526 "
+                    "emergency path."
                 ),
                 "inputSchema": {
                     "type": "object",
