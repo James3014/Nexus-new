@@ -1192,6 +1192,19 @@ def _metadata_mismatch(base: PytestRunResult, head: PytestRunResult) -> bool:
     return bool(_metadata_mismatch_detail(base, head))
 
 
+def _log_safe(line: str) -> str:
+    """One physical log line that can never be read as a GitHub workflow command.
+
+    Candidate-controlled text (paths, test ids, messages) may contain newlines or other
+    control characters; collapse them so no line can start with ``::``.
+    """
+    text = str(line)
+    indent = len(text) - len(text.lstrip(" "))
+    body = " ".join("".join(ch if ch.isprintable() else " " for ch in text).split())
+    safe = " " * indent + body
+    return "  " + safe if safe.startswith("::") else safe
+
+
 def _node_examples(raw_nodes: Iterable[str], keys: set[LogicalNodeKey]) -> str:
     matching = sorted({raw for raw in raw_nodes if _logical_node_key(raw) in keys})
     examples = matching[:3]
@@ -2024,9 +2037,9 @@ def main(argv: list[str] | None = None) -> int:
     args.output.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(payload, indent=2))
     if classification.blocking:
-        print(f"Exact-base impact gate BLOCKED: {classification.classification}")
+        print(_log_safe(f"Exact-base impact gate BLOCKED: {classification.classification}"))
         for mismatch in classification.mismatch_reasons or [classification.reason]:
-            print(f"  - {mismatch}")
+            print(_log_safe(f"  - {mismatch}"))
     return 1 if classification.blocking else 0
 
 
