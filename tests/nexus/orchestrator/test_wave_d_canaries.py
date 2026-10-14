@@ -327,6 +327,7 @@ def test_canonical_core_transport_binds_executing_checkout_revision(tmp_path: Pa
     )
     port.open_or_reuse_mutation_binding(
         task_id="canary-current-checkout-provenance",
+        attempt_id="attempt-current-checkout-provenance",
         base_sha=expected_head,
         base_tree=expected_tree,
         request={

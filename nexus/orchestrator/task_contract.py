@@ -203,6 +203,50 @@ class ExpectedEvidenceUniverse(BaseModel):
         return expected_evidence_universe_identity(self.model_dump(mode="json"))
 
 
+# A tracked task card declares its expected-evidence universe in exactly one
+# fenced block with this info string. The card file is hashed as a whole
+# (``task_card_hash``), so the declaration is bound by that hash; no worker or
+# tool argument can supply or widen it (#2181).
+TASK_CARD_EXPECTED_EVIDENCE_FENCE = "nexus-expected-evidence"
+
+
+def parse_task_card_expected_evidence(text: str) -> Optional[Dict[str, Any]]:
+    """Return the card-declared universe in canonical form, or None for legacy cards.
+
+    Fails closed (ValueError) on a duplicated, unterminated or malformed block.
+    """
+    if not isinstance(text, str):
+        raise ValueError("TASK_CARD_EXPECTED_EVIDENCE_INVALID: card text must be a string")
+    lines = text.splitlines()
+    opener = "```" + TASK_CARD_EXPECTED_EVIDENCE_FENCE
+    fences = [
+        index
+        for index, line in enumerate(lines)
+        if line.strip().startswith("```") and TASK_CARD_EXPECTED_EVIDENCE_FENCE in line
+    ]
+    starts = [index for index in fences if lines[index].strip() == opener]
+    if fences != starts:
+        # A near-miss fence must not silently drop a declared universe.
+        raise ValueError("TASK_CARD_EXPECTED_EVIDENCE_INVALID: malformed fence")
+    if not starts:
+        return None
+    if len(starts) != 1:
+        raise ValueError("TASK_CARD_EXPECTED_EVIDENCE_INVALID: duplicate declaration")
+    start = starts[0]
+    end = next(
+        (index for index in range(start + 1, len(lines)) if lines[index].strip() == "```"),
+        None,
+    )
+    if end is None:
+        raise ValueError("TASK_CARD_EXPECTED_EVIDENCE_INVALID: unterminated declaration")
+    try:
+        raw = json.loads("\n".join(lines[start + 1 : end]))
+        universe = ExpectedEvidenceUniverse.model_validate(raw)
+    except Exception as exc:
+        raise ValueError(f"TASK_CARD_EXPECTED_EVIDENCE_INVALID: {exc}") from exc
+    return universe.model_dump(mode="json")
+
+
 class SelfHostedTaskContract(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
 

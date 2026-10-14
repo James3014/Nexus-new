@@ -236,12 +236,14 @@ def read_observed_core_identity(core_root: Path | None = None) -> dict[str, Any]
             cwd=str(root),
             text=True,
             stderr=subprocess.DEVNULL,
+            timeout=10,
         ).strip()
         tree = subprocess.check_output(
             ["git", "rev-parse", "HEAD^{tree}"],
             cwd=str(root),
             text=True,
             stderr=subprocess.DEVNULL,
+            timeout=10,
         ).strip()
     except Exception:
         return {**base, "reason": "CORE_IDENTITY_UNREADABLE", "source_root": str(root)}
@@ -256,6 +258,7 @@ def read_observed_core_identity(core_root: Path | None = None) -> dict[str, Any]
             cwd=str(root),
             text=True,
             stderr=subprocess.DEVNULL,
+            timeout=10,
         ).strip()
     except Exception:
         return {**base, "reason": "CORE_IDENTITY_UNREADABLE", "source_root": str(root)}
@@ -524,23 +527,108 @@ def extract_git_manifest(
     }
 
 
+def _exact_sha(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text if _EXACT_GIT_SHA_RE.fullmatch(text) and text != "0" * 40 else None
+
+
+def _acceptance_contract_payload(
+    contract: Any, request: Mapping[str, Any], *, fallback_contract_id: str | None = None
+) -> dict[str, Any]:
+    """One Core acceptance contract for both binding and verification.
+
+    Every field comes from the bound task contract (or, for a contract-less
+    caller, its request). Missing identity, scope or verifier set fails
+    closed; nothing is defaulted (#2181).
+    """
+    contract_id = (
+        getattr(contract, "contract_id", None)
+        or getattr(contract, "task_id", None)
+        or request.get("contract_id")
+        or request.get("task_id")
+        or fallback_contract_id
+    )
+    if not contract_id:
+        raise RuntimeError("CANONICAL_CORE_CONTRACT_IDENTITY_MISSING")
+    allowed_paths = sorted(
+        set(
+            getattr(contract, "allowed_paths", None)
+            or getattr(contract, "allowed_files", None)
+            or request.get("allowed_files")
+            or ()
+        )
+    )
+    if not allowed_paths:
+        raise RuntimeError("CANONICAL_CORE_ALLOWED_PATHS_MISSING")
+    required_verifier_ids = sorted(
+        set(
+            getattr(contract, "required_verifier_ids", None)
+            or getattr(contract, "verifier_commands", None)
+            or request.get("verifier_commands")
+            or ()
+        )
+    )
+    if not required_verifier_ids:
+        raise RuntimeError("CANONICAL_CORE_VERIFIERS_MISSING")
+    deletion_policy = _normalize_deletion_policy(
+        getattr(contract, "deletion_policy", None) or request.get("deletion_policy") or "FORBID"
+    )
+    requirements_hash = _sha256(
+        json.dumps(
+            {
+                "contract_id": str(contract_id),
+                "allowed_paths": allowed_paths,
+                "required_verifier_ids": required_verifier_ids,
+            },
+            sort_keys=True,
+        )
+    )
+    payload: dict[str, Any] = {
+        "contract_id": str(contract_id),
+        "requirements_hash": requirements_hash,
+        "required_verifier_ids": required_verifier_ids,
+        "allowed_paths": allowed_paths,
+        "deletion_policy": deletion_policy,
+    }
+    universe = (
+        project_expected_evidence_universe(contract)
+        if contract is not None
+        else project_expected_evidence_universe(request)
+    )
+    if universe is not None:
+        # Verbatim projection of the producer declaration: sorted, no drops,
+        # no rewrites.
+        payload["expected_subjects"] = universe["expected_subjects"]
+        payload["universe_generation"] = universe["universe_generation"]
+    return payload
+
+
 class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
     """
     Host transport boundary that delegates Candidate verification
     directly to canonical product.adapters.generic_verification.verify_generic_changeset
-    in James3014/nexus-core@fde015797672b0aac5dca7b41c7e5a0b901698d4.
-    It does NOT evaluate verifiers or manufacture VERIFIED.
+    at the pinned CANONICAL_CORE_REVISION.
+    It does NOT evaluate verifiers or manufacture VERIFIED: missing evidence is
+    sent to Core as missing, never as a synthetic PASS.
     """
 
     def __init__(
         self,
-        db_path: str = "/tmp/nexus_canary_fixture_repo/canonical_core_state/core_provenance.sqlite",
+        db_path: str | Path,
         simulate_core_unavailable: bool = False,
     ):
+        # The session DB lives under the caller's state root. There is no
+        # shared /tmp default (#2181); it is created on first use.
         self.db_path = Path(db_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.simulate_core_unavailable = simulate_core_unavailable
+        self._db_ready = False
+
+    def _ensure_db(self) -> None:
+        if self._db_ready:
+            return
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
+        self._db_ready = True
 
     def _init_db(self):
         with sqlite3.connect(self.db_path) as conn:
@@ -578,88 +666,63 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
             conn.commit()
 
     def open_or_reuse_mutation_binding(self, **kwargs: Any) -> Mapping[str, Any]:
-        task_id = kwargs.get("task_id") or "canary-task"
-        attempt_id = kwargs.get("attempt_id") or f"attempt-{task_id}-1"
         request = kwargs.get("request") or {}
         contract_arg = kwargs.get("contract")
+        task_id = (
+            kwargs.get("task_id")
+            or getattr(contract_arg, "task_id", None)
+            or request.get("task_id")
+        )
+        attempt_id = kwargs.get("attempt_id") or request.get("attempt_id")
+        if not task_id or not attempt_id:
+            raise RuntimeError("CANONICAL_CORE_ATTEMPT_IDENTITY_MISSING")
 
         lane = request.get("execution_lane") or "GOVERNED"
 
-        base_sha = (
+        base_sha = _exact_sha(
             kwargs.get("base_sha")
             or request.get("controller_revision")
             or getattr(contract_arg, "controller_revision", None)
-            or "0" * 40
         )
-        base_tree = (
-            kwargs.get("base_tree")
-            or request.get("target_base_revision")
-            or getattr(contract_arg, "target_base_revision", None)
-            or "0" * 40
-        )
-
-        repo_root = request.get("controller_repo_root") or kwargs.get("repo_root")
-        if repo_root and (base_sha == "0" * 40 or not base_sha):
+        if base_sha is None:
+            raise RuntimeError("CANONICAL_CORE_SOURCE_REVISION_MISSING")
+        base_tree = _exact_sha(kwargs.get("base_tree"))
+        if base_tree is None:
+            repo_root = (
+                request.get("controller_repo_root")
+                or getattr(contract_arg, "controller_repo_root", None)
+                or kwargs.get("repo_root")
+            )
             try:
-                base_sha = subprocess.check_output(
-                    ["git", "rev-parse", "HEAD"], cwd=repo_root, text=True
-                ).strip()
-                base_tree = subprocess.check_output(
-                    ["git", "rev-parse", "HEAD^{tree}"], cwd=repo_root, text=True
-                ).strip()
-            except Exception:
-                pass
+                base_tree = (
+                    _exact_sha(
+                        subprocess.check_output(
+                            ["git", "rev-parse", f"{base_sha}^{{tree}}"],
+                            cwd=str(repo_root),
+                            text=True,
+                            stderr=subprocess.DEVNULL,
+                            timeout=10,
+                        ).strip()
+                    )
+                    if repo_root
+                    else None
+                )
+            except (OSError, subprocess.SubprocessError):
+                base_tree = None
+        if base_tree is None:
+            raise RuntimeError("CANONICAL_CORE_SOURCE_TREE_UNRESOLVED")
 
-        session_id = kwargs.get("session_id") or f"cms_{uuid.uuid4().hex}"
+        session_id = f"cms_{uuid.uuid4().hex}"
         operation_id = kwargs.get("operation_id") or f"op-{uuid.uuid4().hex[:12]}"
         binding_id = f"binding-{uuid.uuid4().hex[:12]}"
 
-        # Compute contract hash
-        contract_id = (
-            getattr(contract_arg, "contract_id", None)
-            or request.get("contract_id")
-            or "canary-contract"
+        contract_payload = _acceptance_contract_payload(
+            contract_arg, request, fallback_contract_id=str(task_id)
         )
-        allowed_paths = (
-            getattr(contract_arg, "allowed_paths", None) or request.get("allowed_files") or []
-        )
-        required_verifier_ids = (
-            getattr(contract_arg, "required_verifier_ids", None)
-            or request.get("verifier_commands")
-            or ["git diff --check"]
-        )
-        deletion_policy_val = (
-            getattr(contract_arg, "deletion_policy", None)
-            or request.get("deletion_policy")
-            or "FORBID"
-        )
-        deletion_policy = _normalize_deletion_policy(deletion_policy_val)
-
-        req_hash = _sha256(
-            json.dumps(
-                {
-                    "contract_id": str(contract_id),
-                    "allowed_paths": sorted(list(allowed_paths)),
-                    "required_verifier_ids": sorted(list(required_verifier_ids)),
-                },
-                sort_keys=True,
-            )
-        )
-
-        contract_payload = {
-            "contract_id": str(contract_id),
-            "requirements_hash": req_hash,
-            "required_verifier_ids": sorted(list(required_verifier_ids)),
-            "allowed_paths": sorted(list(allowed_paths)),
-            "deletion_policy": deletion_policy,
-        }
         if CORE_AVAILABLE:
             contract_hash = acceptance_contract_hash(contract_payload)
         else:
             contract_hash = _sha256(json.dumps(contract_payload, sort_keys=True))
-
-        if "contract_hash" in kwargs:
-            contract_hash = kwargs["contract_hash"]
 
         # Bind provenance to the exact Nexus-new checkout executing this adapter.
         # A historical hard-coded revision would make an otherwise current G7
@@ -710,10 +773,9 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
             },
         }
         binding_hash = _sha256(json.dumps(binding_payload, sort_keys=True, separators=(",", ":")))
-        if "binding_hash" in kwargs:
-            binding_hash = kwargs["binding_hash"]
 
         # Record session in SQLite
+        self._ensure_db()
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -750,6 +812,7 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
 
     def revalidate_mutation_binding(self, preparation: Mapping[str, Any], **kwargs: Any) -> None:
         session_id = preparation.get("session_id")
+        self._ensure_db()
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT status FROM core_mutation_sessions WHERE id = ?", (session_id,))
@@ -761,7 +824,7 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
         """
         Pure transport: passes candidate evidence directly to canonical
         product.adapters.generic_verification.verify_generic_changeset.
-        Never fabricates VERIFIED.
+        Never fabricates VERIFIED and never invents evidence or a change set.
         """
         if self.simulate_core_unavailable or not CORE_AVAILABLE:
             raise RuntimeError("CANONICAL_NEXUS_CORE_UNAVAILABLE: Cannot perform verification")
@@ -769,35 +832,22 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
         prep = kwargs.get("preparation") or {}
         candidate = kwargs.get("candidate")
         request = kwargs.get("request") or {}
-        session_id = prep.get("session_id") or f"cms_{uuid.uuid4().hex}"
-        binding_hash = prep.get("binding_hash") or "sha256:" + "0" * 64
+        session_id = prep.get("session_id")
+        binding_hash = prep.get("binding_hash")
+        if not session_id or not binding_hash:
+            raise RuntimeError("CANONICAL_CORE_PREPARATION_MISSING")
 
-        # Accurately derive candidate_state_hash
         candidate_state_hash = None
         if candidate is not None:
             candidate_state_hash = getattr(candidate, "candidate_state_hash", None)
             if candidate_state_hash is None and isinstance(candidate, Mapping):
                 candidate_state_hash = candidate.get("candidate_state_hash")
-        if candidate_state_hash is None and "verified" in kwargs:
-            candidate_state_hash = getattr(kwargs["verified"], "candidate_state_hash", None)
         if candidate_state_hash is None:
             candidate_state_hash = kwargs.get("candidate_state_hash")
+        if not candidate_state_hash:
+            raise RuntimeError("CANONICAL_CORE_CANDIDATE_STATE_MISSING")
 
-        # Resolve repo directory for real git inspection
-        repo_dir = None
-        if candidate is not None and hasattr(candidate, "target_worktree"):
-            repo_dir = candidate.target_worktree
-        if not repo_dir:
-            repo_dir = (
-                request.get("target_repo_root")
-                or request.get("controller_repo_root")
-                or kwargs.get("repo_dir")
-            )
-
-        base_commit = prep.get("source_revision", "").replace("git-commit:", "")
-        if not base_commit or base_commit == "0" * 40:
-            base_commit = "HEAD~1"
-
+        base_commit = _exact_sha(str(prep.get("source_revision") or "").replace("git-commit:", ""))
         target_commit = "HEAD"
         if (
             candidate is not None
@@ -806,54 +856,25 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
         ):
             target_commit = candidate.candidate_commit_sha
 
-        # Extract real git change manifest.
-        # Priority: explicit kwarg > repo+base_commit derivation.
-        # This avoids empty-diff when prep.source_revision is zero-padded or
-        # when the caller has already resolved the manifest independently.
+        # The change manifest is derived from the candidate's own worktree.
+        # An explicit manifest is accepted only from an in-process caller; a
+        # missing worktree or base revision fails closed (#2181).
         if "change_manifest" in kwargs:
             manifest = kwargs["change_manifest"]
-        elif repo_dir and Path(repo_dir).exists():
-            manifest = extract_git_manifest(repo_dir, base_commit, target_commit)
         else:
-            manifest = {
-                "source_tree": prep.get("source_tree") or "git-tree:" + "0" * 40,
-                "target_tree": "git-tree:" + "0" * 40,
-                "entries": [
-                    {
-                        "path": "fixtures/canary/file.txt",
-                        "change_type": "ADD",
-                        "before_oid": None,
-                        "after_oid": "1" * 40,
-                        "before_mode": None,
-                        "after_mode": "100644",
-                    }
-                ],
-            }
-
-        # Force failure simulation if requested for hostile witness
-        force_fail = kwargs.get("force_fail", False)
-        force_scope_escape = kwargs.get("force_scope_escape", False)
-        force_forbidden_deletion = kwargs.get("force_forbidden_deletion", False)
-
-        if force_scope_escape:
-            manifest["entries"].append({
-                "path": "unauthorized_scope_escape.txt",
-                "change_type": "ADD",
-                "before_oid": None,
-                "after_oid": "e" * 40,
-                "before_mode": None,
-                "after_mode": "100644",
-            })
-
-        if force_forbidden_deletion:
-            manifest["entries"].append({
-                "path": "forbidden_deleted_file.txt",
-                "change_type": "DELETE",
-                "before_oid": "d" * 40,
-                "after_oid": None,
-                "before_mode": "100644",
-                "after_mode": None,
-            })
+            lease = kwargs.get("lease")
+            repo_dir = (
+                getattr(lease, "target_worktree", None)
+                or request.get("target_repo_root")
+                or kwargs.get("repo_dir")
+            )
+            if not repo_dir or not Path(str(repo_dir)).is_dir():
+                raise RuntimeError("CANONICAL_CORE_CANDIDATE_WORKTREE_MISSING")
+            if base_commit is None:
+                raise RuntimeError("CANONICAL_CORE_SOURCE_REVISION_MISSING")
+            manifest = extract_git_manifest(str(repo_dir), base_commit, target_commit)
+        if base_commit is None:
+            base_commit = ""
 
         manifest_entries = manifest["entries"]
         changed_paths = sorted(list(set(row["path"] for row in manifest_entries)))
@@ -862,52 +883,22 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
         )
 
         manifest_hash = change_manifest_hash(manifest)
-        if candidate_state_hash is None:
-            candidate_state_hash = manifest_hash[7:]
 
-        # Build AcceptanceContract — project the producer-declared universe
-        # WITHOUT semantic mutation (sorted, no drops, no rewrites). Legacy
-        # contracts (no expected_evidence) project to a no-universe request.
-        contract_id = request.get("contract_id") or "canary-contract"
-        allowed_paths = request.get("allowed_files") or changed_paths
-        required_verifier_ids = request.get("verifier_commands") or ["git diff --check"]
-        deletion_policy_val = request.get("deletion_policy") or "FORBID"
-        deletion_policy = _normalize_deletion_policy(deletion_policy_val)
         contract_arg = kwargs.get("contract")
+        contract_payload = _acceptance_contract_payload(contract_arg, request)
+        required_verifier_ids = contract_payload["required_verifier_ids"]
         universe_projection = (
-            project_expected_evidence_universe(contract_arg)
-            if contract_arg is not None
-            else project_expected_evidence_universe(request)
+            {
+                "expected_subjects": contract_payload["expected_subjects"],
+                "universe_generation": contract_payload["universe_generation"],
+            }
+            if "expected_subjects" in contract_payload
+            else None
         )
         # Fail closed on observed Core source identity: bind ACTUAL executed
         # commit+tree; unreadable -> marked unavailable; mismatch -> flagged.
         # INT-8: never report the configured expectation as executed truth.
         core_source = read_observed_core_identity()
-
-        req_hash = _sha256(
-            json.dumps(
-                {
-                    "contract_id": str(contract_id),
-                    "allowed_paths": sorted(list(allowed_paths)),
-                    "required_verifier_ids": sorted(list(required_verifier_ids)),
-                },
-                sort_keys=True,
-            )
-        )
-
-        contract_payload = {
-            "contract_id": str(contract_id),
-            "requirements_hash": req_hash,
-            "required_verifier_ids": sorted(list(required_verifier_ids)),
-            "allowed_paths": sorted(list(allowed_paths)),
-            "deletion_policy": deletion_policy,
-        }
-        if universe_projection is not None:
-            # Verbatim projection of the producer declaration — sorted, no
-            # drops, no rewrites. Core (evidence-reuse branch) accepts these
-            # optional acceptance_contract fields.
-            contract_payload["expected_subjects"] = universe_projection["expected_subjects"]
-            contract_payload["universe_generation"] = universe_projection["universe_generation"]
         computed_contract_hash = acceptance_contract_hash(contract_payload)
 
         # Build ChangeSet
@@ -932,14 +923,13 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
             "plan_id": f"vp-{session_id[:12]}",
             "acceptance_contract_hash": computed_contract_hash,
             "change_set_hash": computed_change_set_hash,
-            "required_verifier_ids": sorted(list(required_verifier_ids)),
+            "required_verifier_ids": list(required_verifier_ids),
         }
         computed_plan_hash = verification_plan_hash(plan_payload)
 
-        # Build EvidenceBundle
-        raw_evidence = kwargs.get("verifier_evidence") or {
-            "git diff --check": {"exit_code": 0, "status": "CLEAN"}
-        }
+        # Build EvidenceBundle from the evidence actually produced. Absent
+        # evidence stays absent, so Core reports it as MISSING.
+        raw_evidence = kwargs.get("verifier_evidence") or ()
         evidence_by_id = {}
         if isinstance(raw_evidence, Mapping):
             evidence_by_id = dict(raw_evidence)
@@ -998,29 +988,29 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
                 "reason": exposure_obs.get("reason"),
             }
 
+        # A verifier observation carries a logical subject only when the
+        # declared universe names that exact verifier id (the contract's
+        # verifier coupling rule). Namespaced subjects need their own producer.
+        subject_kinds = {
+            str(subject.get("logical_subject_id")): str(subject.get("evidence_kind"))
+            for subject in (universe_projection or {}).get("expected_subjects") or ()
+        }
+
         observations = []
-        for vid in sorted(list(required_verifier_ids)):
+        for vid in required_verifier_ids:
             v_res = evidence_by_id.get(vid)
             if v_res is None:
-                for k, v in evidence_by_id.items():
-                    if k == vid or vid in k:
-                        v_res = v
-                        break
-            exit_code = 0
-            status_str = "PASS"
-            if v_res is not None:
-                if hasattr(v_res, "exit_code"):
-                    exit_code = getattr(v_res, "exit_code", 0)
-                    status_str = str(getattr(v_res, "status", "PASS")).upper()
-                elif isinstance(v_res, Mapping):
-                    exit_code = v_res.get("exit_code", 0)
-                    status_str = str(v_res.get("status", "PASS")).upper()
+                continue
+            exit_code = None
+            status_str = ""
+            if hasattr(v_res, "exit_code"):
+                exit_code = getattr(v_res, "exit_code", None)
+                status_str = str(getattr(v_res, "status", "")).upper()
+            elif isinstance(v_res, Mapping):
+                exit_code = v_res.get("exit_code")
+                status_str = str(v_res.get("status", "")).upper()
 
-            is_pass = (
-                exit_code == 0
-                and status_str in {"COMPLETED", "PASSED", "PASS", "CLEAN"}
-                and not force_fail
-            )
+            is_pass = exit_code == 0 and status_str in {"COMPLETED", "PASSED", "PASS", "CLEAN"}
             obs_status = "PASS" if is_pass else "FAIL"
 
             if vid == "tool_exposure" and isinstance(v_res, Mapping) and "artifact_hash" in v_res:
@@ -1036,16 +1026,17 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
                 }
                 if v_res.get("reason") is not None:
                     observation["reason"] = v_res["reason"]
-                observations.append(observation)
             else:
-                observations.append({
+                observation = {
                     "verifier_id": vid,
                     "artifact_id": f"art-{vid}",
-                    "artifact_hash": _sha256(
-                        json.dumps(_to_serializable(v_res or {"exit_code": 0}), sort_keys=True)
-                    ),
+                    "artifact_hash": _sha256(json.dumps(_to_serializable(v_res), sort_keys=True)),
                     "status": obs_status,
-                })
+                }
+            if vid in subject_kinds:
+                observation["logical_subject_id"] = vid
+                observation["evidence_kind"] = subject_kinds[vid]
+            observations.append(observation)
 
         evidence_payload = {
             "bundle_id": f"eb-{session_id[:12]}",
@@ -1130,6 +1121,7 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
         proj_hash = projection_hash(projection_payload)
 
         # Record verification in SQLite
+        self._ensure_db()
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -1162,6 +1154,7 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
         return projection_payload
 
     def readback_session(self, session_id: str) -> dict[str, Any]:
+        self._ensure_db()
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -1209,7 +1202,7 @@ def cli_main():
         change_set_data = data["change_set"]
         evidence_data = data["evidence_bundle"]
 
-        repo_dir = data.get("repo_dir") or "/tmp/nexus_canary_fixture_repo/d2_devspace"
+        repo_dir = data.get("repo_dir") or ""
         base_commit = (
             change_set_data.get("source_revision", "").replace("git-commit:", "") or "HEAD~1"
         )
@@ -1218,7 +1211,7 @@ def cli_main():
         )
 
         manifest = data.get("change_manifest")
-        if not manifest and Path(repo_dir).exists():
+        if not manifest and repo_dir and Path(repo_dir).exists():
             manifest = extract_git_manifest(repo_dir, base_commit, target_commit)
         elif not manifest:
             manifest = {
