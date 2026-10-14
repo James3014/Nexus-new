@@ -178,6 +178,9 @@ def _run_driver(
     # dependencies such as nexus_runtime through sys.path), repo first.
     inherited = [entry for entry in sys.path if entry and Path(entry).exists()]
     env["PYTHONPATH"] = os.pathsep.join(dict.fromkeys([str(REPO_ROOT), *inherited]))
+    # Like the deployed Gateway: no bytecode lands in the Core checkout, which
+    # would make it dirty and therefore not pinned.
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     if core_root is not None:
         env["NEXUS_CORE_REPO_ROOT"] = str(core_root)
     proc = subprocess.run(
