@@ -64,13 +64,18 @@ def test_loopback_default_and_remote_opt_in():
         pass
     else:
         raise AssertionError("remote bind must fail closed")
-    assert resolve_bind_address({"NEXUS_MCP_GATEWAY_HOST": "0.0.0.0", ALLOW_REMOTE_ENV: "1"}) == ("0.0.0.0", 8766)
+    assert resolve_bind_address({"NEXUS_MCP_GATEWAY_HOST": "0.0.0.0", ALLOW_REMOTE_ENV: "1"}) == (
+        "0.0.0.0",
+        8766,
+    )
 
 
 def test_health_exposes_one_gateway_identity():
     server, thread = _server()
     try:
-        response = urllib.request.urlopen(f"http://127.0.0.1:{server.server_port}/health", timeout=3)
+        response = urllib.request.urlopen(
+            f"http://127.0.0.1:{server.server_port}/health", timeout=3
+        )
         payload = json.loads(response.read())
         assert payload["server"] == "nexus-mcp-gateway"
         assert payload["tool_count"] == len(UnifiedMCPGateway.tool_specs())
@@ -79,6 +84,62 @@ def test_health_exposes_one_gateway_identity():
         assert payload["full_tool_schema_hash"]
         assert payload["permission_policy_hash"]
         assert "pending_actions" in payload
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+
+
+def _walk_strings(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _walk_strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _walk_strings(item)
+
+
+def test_unauthenticated_health_has_no_absolute_paths():
+    """#2217: /health is unauthenticated, so it must not leak host paths."""
+    server, thread = _server()
+    try:
+        response = urllib.request.urlopen(
+            f"http://127.0.0.1:{server.server_port}/health", timeout=3
+        )
+        payload = json.loads(response.read())
+        assert "repo_root" not in payload
+        assert "executable_path" not in payload["github_observer"]
+        assert [v for v in _walk_strings(payload) if v.startswith("/")] == []
+        # Non-path identity fields the deployer and drift check rely on stay.
+        assert len(payload["repo_root_sha256"]) == 64
+        assert "executable_sha256" in payload["github_observer"]
+        assert payload["git_head"] and payload["status"] in {"ok", "degraded"}
+        assert set(payload["core_provenance"]) == {
+            "status",
+            "expected_revision",
+            "observed_commit",
+            "fail_closed",
+        }
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+
+
+def test_authenticated_health_keeps_full_path_detail():
+    """Durable postflight sends the bearer token and compares root/observer path."""
+    server, thread = _server()
+    try:
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{server.server_port}/health",
+            headers={"Authorization": "Bearer secret"},
+        )
+        payload = json.loads(urllib.request.urlopen(request, timeout=3).read())
+        assert payload["repo_root"].startswith("/")
+        assert "repo_root_sha256" not in payload
+        assert "executable_path" in payload["github_observer"]
     finally:
         server.shutdown()
         server.server_close()
@@ -94,7 +155,11 @@ def test_mcp_requires_bearer_and_forwards_jsonrpc():
             assert exc.code == 401
         else:
             raise AssertionError("missing bearer token must fail")
-        response = _request(server, {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}, token="secret")
+        response = _request(
+            server,
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+            token="secret",
+        )
         payload = json.loads(response.read())
         assert len(payload["result"]["tools"]) == len(UnifiedMCPGateway.tool_specs())
     finally:
@@ -106,21 +171,49 @@ def test_mcp_requires_bearer_and_forwards_jsonrpc():
 def test_tools_list_exposes_exact_canonical_task_schema_and_rejects_route_override():
     server, thread = _server()
     try:
-        listed = json.loads(_request(server, {"jsonrpc": "2.0", "id": 3, "method": "tools/list", "params": {}}, token="secret").read())
+        listed = json.loads(
+            _request(
+                server,
+                {"jsonrpc": "2.0", "id": 3, "method": "tools/list", "params": {}},
+                token="secret",
+            ).read()
+        )
         spec = next(tool for tool in listed["result"]["tools"] if tool["name"] == "nexus_task_run")
         schema = spec["inputSchema"]
-        assert set(schema["properties"]) == {"task_id", "what", "why", "allowed_files", "verifier_commands"}
+        assert set(schema["properties"]) == {
+            "task_id",
+            "what",
+            "why",
+            "allowed_files",
+            "verifier_commands",
+        }
         assert set(schema["required"]) == {"what", "why", "allowed_files"}
         assert schema["additionalProperties"] is False
 
         response = _request(
             server,
-            {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {"what": "bad", "why": "route override", "allowed_files": ["README.md"], "execution_lane": "DIRECT_CANONICAL"}}},
+            {
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "tools/call",
+                "params": {
+                    "name": "nexus_task_run",
+                    "arguments": {
+                        "what": "bad",
+                        "why": "route override",
+                        "allowed_files": ["README.md"],
+                        "execution_lane": "DIRECT_CANONICAL",
+                    },
+                },
+            },
             token="secret",
         )
         payload = json.loads(response.read())
         assert payload["result"]["isError"] is True
-        assert payload["result"]["structuredContent"]["error"] == "CALLER_ROUTE_OVERRIDE_FORBIDDEN:execution_lane"
+        assert (
+            payload["result"]["structuredContent"]["error"]
+            == "CALLER_ROUTE_OVERRIDE_FORBIDDEN:execution_lane"
+        )
     finally:
         server.shutdown()
         server.server_close()
@@ -150,7 +243,8 @@ def test_runtime_identity_function_is_deterministic():
 
 
 def test_http_owner_standing_grant_issue_is_exposed_idempotent_and_fail_closed(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     """The loopback HTTP transport cannot ask the Owner, so it never issues (#1750)."""
     receipt_path = tmp_path / "standing-grant" / "standing-grant.json"
@@ -229,7 +323,8 @@ def test_http_owner_standing_grant_issue_is_exposed_idempotent_and_fail_closed(
 
 
 def test_http_external_candidate_adoption_canary_is_pending_physical_idempotent_and_fail_closed(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     """Exercise the public adoption action through the real loopback HTTP seam."""
     import nexus.orchestrator.self_hosted_task_service as service_module
@@ -355,8 +450,12 @@ def test_http_external_candidate_adoption_canary_is_pending_physical_idempotent_
         assert receipt_payload["production_ready"] is False
         assert adopted["claim_ceiling"] == [
             "CANDIDATE_ADOPTED_PENDING_HUMAN_APPROVAL_ONLY",
-            "NO_APPROVAL", "NO_INTEGRATION", "NO_MERGE", "NO_PUSH",
-            "NO_RELEASE", "NO_PRODUCTION",
+            "NO_APPROVAL",
+            "NO_INTEGRATION",
+            "NO_MERGE",
+            "NO_PUSH",
+            "NO_RELEASE",
+            "NO_PRODUCTION",
         ]
         state_before = service._read_state(request.task_id)
         assert state_before["status"] == "PENDING_HUMAN_APPROVAL"

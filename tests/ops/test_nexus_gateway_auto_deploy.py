@@ -1832,7 +1832,7 @@ def _health(commit: str, *, status: str = "ok") -> dict[str, Any]:
         "git_head": commit,
         "repo_head_at_start": commit,
         "repo_head_current": commit,
-        "repo_root": "/srv/a1",
+        "repo_root_sha256": "a" * 64,
         "server_instance_id": "i",
         "tool_manifest_revision": "r",
         "permission_policy_hash": "p",

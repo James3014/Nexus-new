@@ -21,7 +21,7 @@ def _health(**overrides: Any) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "status": "ok",
         "server": "nexus-mcp-gateway",
-        "repo_root": "/srv/nexus/deployments/r1",
+        "repo_root_sha256": "a" * 64,
         "git_head": EVALUATED,
         "repo_head_at_start": EVALUATED,
         "repo_head_current": EVALUATED,
@@ -96,7 +96,7 @@ def test_gb077_stale_tampered_or_substituted_identity_fails_closed(
         "git_head",
         "repo_head_at_start",
         "repo_head_current",
-        "repo_root",
+        "repo_root_sha256",
         "server_instance_id",
         "tool_manifest_revision",
         "permission_policy_hash",
@@ -299,3 +299,11 @@ def test_include_findings_stays_nonzero_even_when_probe_passes(monkeypatch, caps
         "finding_unresolved": True,
     }
     assert report["case_evidence"][0]["status"] == "finding"
+
+
+def test_gb077_accepts_legacy_repo_root_from_pre_2217_gateway() -> None:
+    payload = _health()
+    del payload["repo_root_sha256"]
+    payload["repo_root"] = "/srv/nexus/deployments/r1"
+    passed, _detail = _gb077(payload)
+    assert passed is True
