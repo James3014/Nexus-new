@@ -71,6 +71,32 @@ def portable_core_boundary(monkeypatch: pytest.MonkeyPatch):
     )
 
 
+# The transport no longer defaults a contract id, scope or change set
+# (#2181), so these wiring tests bind them explicitly.
+_TOOL_REQUEST = {
+    "task_id": "tool-exposure-wiring",
+    "allowed_files": ["fixtures/tool_exposure/file.txt"],
+    "verifier_commands": ["git diff --check", "tool_exposure"],
+}
+
+
+def _tool_manifest() -> dict[str, Any]:
+    return {
+        "source_tree": "git-tree:" + "0" * 40,
+        "target_tree": "git-tree:" + "1" * 40,
+        "entries": [
+            {
+                "path": "fixtures/tool_exposure/file.txt",
+                "change_type": "ADD",
+                "before_oid": None,
+                "after_oid": "1" * 40,
+                "before_mode": None,
+                "after_mode": "100644",
+            }
+        ],
+    }
+
+
 def _create_receipt(
     enforcement_mode: str = "ENFORCED_NATIVE_PROVIDER",
     op_id: str = "op-test-1",
@@ -106,7 +132,8 @@ def test_transport_binds_enforced_tool_exposure_receipt_success():
                 "attempt_id": "att-1",
                 "binding_hash": "0" * 64,
             },
-            request={"verifier_commands": ["git diff --check", "tool_exposure"]},
+            request=dict(_TOOL_REQUEST),
+            change_manifest=_tool_manifest(),
             candidate_state_hash="1" * 64,
             tool_exposure_receipt=receipt,
             attempt_id="att-1",
@@ -141,7 +168,8 @@ def test_transport_fails_closed_on_unenforced_mode():
                 "attempt_id": "att-1",
                 "binding_hash": "0" * 64,
             },
-            request={"verifier_commands": ["git diff --check", "tool_exposure"]},
+            request=dict(_TOOL_REQUEST),
+            change_manifest=_tool_manifest(),
             candidate_state_hash="1" * 64,
             tool_exposure_receipt=receipt,
             attempt_id="att-1",
@@ -172,7 +200,8 @@ def test_transport_fails_closed_on_missing_receipt_when_required():
                 "attempt_id": "att-1",
                 "binding_hash": "0" * 64,
             },
-            request={"verifier_commands": ["git diff --check", "tool_exposure"]},
+            request=dict(_TOOL_REQUEST),
+            change_manifest=_tool_manifest(),
             candidate_state_hash="1" * 64,
             tool_exposure_receipt=None,
             attempt_id="att-1",
@@ -205,7 +234,8 @@ def test_transport_rejects_session_id_substituted_for_operation_id():
                 "attempt_id": "att-1",
                 "binding_hash": "0" * 64,
             },
-            request={"verifier_commands": ["git diff --check", "tool_exposure"]},
+            request=dict(_TOOL_REQUEST),
+            change_manifest=_tool_manifest(),
             candidate_state_hash="1" * 64,
             tool_exposure_receipt=receipt,
             planner_decision_hash="a" * 64,
@@ -256,7 +286,8 @@ def test_matching_remote_identity_still_fails_without_canonical_physical_produce
                 "attempt_id": "att-1",
                 "binding_hash": "0" * 64,
             },
-            request={"verifier_commands": ["git diff --check", "tool_exposure"]},
+            request=dict(_TOOL_REQUEST),
+            change_manifest=_tool_manifest(),
             candidate_state_hash="1" * 64,
             tool_exposure_receipt=receipt,
             expected_remote_tool_identities=[tool],
@@ -314,7 +345,8 @@ def test_hostile_control_9_receipt_tool_server_a_cannot_satisfy_tool_server_b_co
                 "attempt_id": "att-1",
                 "binding_hash": "0" * 64,
             },
-            request={"verifier_commands": ["git diff --check", "tool_exposure"]},
+            request=dict(_TOOL_REQUEST),
+            change_manifest=_tool_manifest(),
             candidate_state_hash="1" * 64,
             tool_exposure_receipt=receipt,
             expected_remote_tool_identities=[tool_b],
@@ -360,7 +392,8 @@ def test_hostile_control_10_missing_required_remote_tool_identity_fails_closed()
                 "attempt_id": "att-1",
                 "binding_hash": "0" * 64,
             },
-            request={"verifier_commands": ["git diff --check", "tool_exposure"]},
+            request=dict(_TOOL_REQUEST),
+            change_manifest=_tool_manifest(),
             candidate_state_hash="1" * 64,
             tool_exposure_receipt=receipt,
             requires_remote_tool_identity=True,
@@ -403,7 +436,8 @@ def test_hostile_control_11_local_native_paths_no_fabricated_fake_identities():
                 "attempt_id": "att-1",
                 "binding_hash": "0" * 64,
             },
-            request={"verifier_commands": ["git diff --check", "tool_exposure"]},
+            request=dict(_TOOL_REQUEST),
+            change_manifest=_tool_manifest(),
             candidate_state_hash="1" * 64,
             tool_exposure_receipt=receipt,
             # requires_remote_tool_identity is False (default)
