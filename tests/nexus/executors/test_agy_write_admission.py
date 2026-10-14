@@ -1586,3 +1586,30 @@ def test_tracker_stop_with_blocked_poll_marks_probe_failed(monkeypatch):
     tracker.stop()
     release.set()
     assert tracker.probe_failed is True
+
+
+def test_cwd_scan_fails_closed_on_empty_cwd_name(monkeypatch):
+    baseline = cli_worker._SweepBaseline(
+        started_at=0.0, preexisting=frozenset(), protected=frozenset()
+    )
+    me = os.getpid()
+    monkeypatch.setattr(
+        cli_worker.subprocess,
+        "run",
+        lambda *a, **k: SimpleNamespace(
+            stdout=f"p{me}\nfcwd\nn/\np424242\nfcwd\nn\n", returncode=0
+        ),
+    )
+    assert cli_worker._pids_with_cwd_under(("/nonexistent-root",), baseline) is None
+
+
+def test_tag_sweep_fails_closed_on_unattributable_tagged_row(monkeypatch):
+    monkeypatch.setattr(cli_worker, "Path", lambda *a: Path("/nonexistent-proc"))
+    monkeypatch.setattr(
+        cli_worker.subprocess,
+        "run",
+        lambda *a, **k: SimpleNamespace(
+            stdout=f"NOT_A_PID command {cli_worker._RUN_TAG_ENV}=exampletag\n", returncode=0
+        ),
+    )
+    assert cli_worker._sweep_tagged_processes("exampletag") is False

@@ -282,8 +282,14 @@ def _tagged_pids(tag: str) -> set[int]:
         check=True,
     ).stdout
     for line in out.splitlines():
+        if needle not in line:
+            continue
         parts = line.split(None, 1)
-        if len(parts) == 2 and parts[0].isdigit() and int(parts[0]) != own and needle in parts[1]:
+        if len(parts) != 2 or not parts[0].isdigit():
+            # A tagged row we cannot attribute to a pid: unknown, not clean.
+            # (Untagged rows may be environment continuation lines; skip them.)
+            raise ValueError(f"unparseable tagged ps row: {line[:80]!r}")
+        if int(parts[0]) != own:
             found.add(int(parts[0]))
     return found
 
@@ -488,6 +494,8 @@ def _pids_with_cwd_under(
                 return None  # a process record without its cwd: incomplete scan
             pid, pid_has_cwd = int(line[1:]), False
         elif line.startswith("n") and pid is not None:
+            if not line[1:]:
+                return None  # empty cwd name: malformed record
             pid_has_cwd = True
             cwd = os.path.realpath(line[1:])
             if any(cwd == root or cwd.startswith(root + os.sep) for root in real_roots):
