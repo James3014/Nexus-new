@@ -42,6 +42,7 @@ import argparse
 import json
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -172,13 +173,37 @@ def _no_commit_touched_since(repo: Path, merge_base_sha: str, head_sha: str) -> 
 
 
 def evaluate(repo: Path, ident: dict[str, Any], *, fetch: bool = True) -> dict[str, Any]:
-    """Return the verdict record; ``status`` is PASS or FAIL.  Raises ContractError."""
+    """Return the verdict record; ``status`` is PASS or FAIL.  Raises ContractError.
 
+    With ``fetch`` (the workflow path), ``repo`` is the workflow's depth-1 bare
+    repository and is only read for its ``origin`` URL.  Both commits are fetched,
+    once and with full history, into a fresh bare repository with background
+    maintenance off (#2213).  The earlier code deepened ``repo`` in place:
+    a depth-1 head fetch, then ``fetch --unshallow`` of both commits.  On GitHub
+    that failed with "shallow file has changed since we read it", because a
+    detached commit-graph/gc write left behind by the previous fetch raced the
+    shallow update.  Without ``fetch``, ``repo`` must already hold both commits
+    with full history.
+    """
+
+    if not fetch:
+        return _evaluate(repo, ident)
+    origin = anchor._git(repo, "config", "--get", "remote.origin.url")
+    assert isinstance(origin, str)
+    if not origin:
+        raise ContractError("controller repository has no origin remote")
+    with tempfile.TemporaryDirectory(prefix="trusted-dependency-contract-") as scratch:
+        full = Path(scratch) / "full.git"
+        anchor._init_ephemeral_bare_repo(full)
+        anchor._git(full, "remote", "add", "origin", origin)
+        anchor._git(full, "fetch", "--no-tags", "origin", ident["workflow_sha"], ident["head_sha"])
+        return _evaluate(full, ident)
+
+
+def _evaluate(repo: Path, ident: dict[str, Any]) -> dict[str, Any]:
     workflow_sha = ident["workflow_sha"]
     head_sha = ident["head_sha"]
     number = ident["pull_request_number"]
-    if fetch:
-        anchor._git(repo, "fetch", "--no-tags", "--depth=1", "origin", head_sha)
     for label, revision in (("trusted", workflow_sha), ("head", head_sha)):
         if anchor._git(repo, "cat-file", "-t", revision) != "commit":
             raise ContractError(f"{label} revision is not a commit")
@@ -204,8 +229,6 @@ def evaluate(repo: Path, ident: dict[str, Any], *, fetch: bool = True) -> dict[s
     if head == trusted:
         # Both sides hold the same regular-file bytes, so every merge keeps them.
         return {**record, "status": "PASS", "reason_code": UNCHANGED}
-    if fetch:
-        anchor._git(repo, "fetch", "--no-tags", "--unshallow", "origin", workflow_sha, head_sha)
     if anchor._git(repo, "rev-parse", "--is-shallow-repository") != "false":
         raise ContractError("dependency contract repository remains shallow")
     try:
