@@ -503,6 +503,22 @@ def test_in_tree_product_already_imported_fails_closed(tmp_path: Path):
     assert result["status"] == "CORE_UNAVAILABLE"
 
 
+def test_preloaded_core_submodule_from_elsewhere_fails_closed(tmp_path: Path):
+    """A verifier submodule loaded from another tree must not pass as Core."""
+    core = _stub_core(tmp_path / "core")
+    other = _stub_core(tmp_path / "other")
+    preamble = (
+        f"sys.path.insert(0, {str(other)!r})\n"
+        "import product.adapters.generic_verification\n"
+        "del sys.modules['product']\n"
+        "sys.path.remove(sys.path[0])\n"
+    )
+    result = _import_transport(core, preamble=preamble)
+    assert result["available"] is False
+    assert "CORE_PRODUCT_SHADOWED" in result["error"]
+    assert "(module product.adapters" in result["error"]
+
+
 def test_core_shadow_reason_is_pure_and_fail_closed(tmp_path: Path):
     from types import SimpleNamespace
 
@@ -522,6 +538,7 @@ def test_core_shadow_reason_is_pure_and_fail_closed(tmp_path: Path):
 def _git_core_checkout(repo: Path) -> str:
     (repo / "product").mkdir(parents=True)
     (repo / "product" / "__init__.py").write_text("")
+    (repo / ".gitignore").write_text("__pycache__/\n")
     env = {
         "GIT_CONFIG_GLOBAL": os.devnull,
         "GIT_CONFIG_SYSTEM": os.devnull,
@@ -538,7 +555,7 @@ def _git_core_checkout(repo: Path) -> str:
     ).strip()
 
 
-@pytest.mark.parametrize("dirt", ["untracked", "modified"])
+@pytest.mark.parametrize("dirt", ["untracked", "modified", "ignored"])
 def test_dirty_core_checkout_is_not_pinned(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dirt: str
 ):
@@ -552,6 +569,9 @@ def test_dirty_core_checkout_is_not_pinned(
     assert transport.core_provenance_status(clean)["status"] == "CORE_REVISION_PINNED"
     if dirt == "untracked":
         (repo / "product" / "shadow.py").write_text("x = 1\n")
+    elif dirt == "ignored":
+        (repo / "product" / "__pycache__").mkdir()
+        (repo / "product" / "__pycache__" / "x.cpython-312.pyc").write_bytes(b"x")
     else:
         (repo / "product" / "__init__.py").write_text("patched = True\n")
     identity = transport.read_observed_core_identity(core_root=repo)

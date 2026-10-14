@@ -71,8 +71,18 @@ def _core_shadow_reason(core_root: Path | None, module: Any) -> str | None:
     )
 
 
+def _loaded_core_shadow_reason(core_root: Path | None) -> str | None:
+    """First loaded ``product`` / ``product.*`` module that is not the configured Core."""
+    for name, module in list(sys.modules.items()):
+        if name == "product" or name.startswith("product."):
+            reason = _core_shadow_reason(core_root, module)
+            if reason:
+                return f"{reason} (module {name})"
+    return None
+
+
 try:
-    _shadowed = _core_shadow_reason(_core_repo_root, sys.modules.get("product"))
+    _shadowed = _loaded_core_shadow_reason(_core_repo_root)
     if _shadowed:
         raise ImportError(_shadowed)
     from product.adapters.generic_verification import verify_generic_changeset
@@ -89,7 +99,7 @@ try:
     import product as _IMPORTED_CORE_PACKAGE  # noqa: E402
     from product.protocol import PUBLIC_PROTOCOL_VERSION  # noqa: E402
 
-    _shadowed = _core_shadow_reason(_core_repo_root, _IMPORTED_CORE_PACKAGE)
+    _shadowed = _loaded_core_shadow_reason(_core_repo_root)
     if _shadowed:
         raise ImportError(_shadowed)
     CORE_AVAILABLE = True
@@ -234,11 +244,12 @@ def read_observed_core_identity(core_root: Path | None = None) -> dict[str, Any]
         return {**base, "reason": "CORE_IDENTITY_UNREADABLE", "source_root": str(root)}
     if not _EXACT_GIT_SHA_RE.fullmatch(commit) or not _EXACT_GIT_SHA_RE.fullmatch(tree):
         return {**base, "reason": "CORE_IDENTITY_MALFORMED", "source_root": str(root)}
-    # HEAD names a commit, but a modified or untracked file means the code that
-    # runs is not that commit: a dirty checkout is never pinned (#2181).
+    # HEAD names a commit, but a modified, untracked or ignored file (e.g. a
+    # stray .pyc) means the code that runs may not be that commit: a dirty
+    # checkout is never pinned (#2181).
     try:
         dirty = subprocess.check_output(
-            ["git", "status", "--porcelain", "--untracked-files=all"],
+            ["git", "status", "--porcelain", "--untracked-files=all", "--ignored"],
             cwd=str(root),
             text=True,
             stderr=subprocess.DEVNULL,

@@ -70,6 +70,7 @@ def _core_origin(tmp_path_factory: pytest.TempPathFactory) -> None:
     _fixture_git(repo, "init", "-q", "-b", "main")
     (repo / "product").mkdir()
     (repo / "product" / "__init__.py").write_text("")
+    (repo / ".gitignore").write_text("__pycache__/\n*.pyc\n")
     _fixture_git(repo, "add", ".")
     _fixture_git(repo, "commit", "-q", "-m", "core one")
     CORE.other = _fixture_git(repo, "rev-parse", "HEAD")
@@ -2196,12 +2197,15 @@ def test_core_fetch_failure_rejects_and_never_deploys_without_core(
     assert "core" not in result["receipt"]
 
 
-@pytest.mark.parametrize("dirt", ["untracked", "modified"])
+@pytest.mark.parametrize("dirt", ["untracked", "modified", "ignored"])
 def test_dirty_core_checkout_rejects_the_candidate(cfg: ad.Config, dirt: str) -> None:
     core = ad.materialize_core(cfg, FakeHost(), CORE.pin)
     checkout = Path(core["root"])
     if dirt == "untracked":
         (checkout / "product" / "shadow.py").write_text("x = 1\n")
+    elif dirt == "ignored":
+        (checkout / "product" / "__pycache__").mkdir()
+        (checkout / "product" / "__pycache__" / "two.cpython-312.pyc").write_bytes(b"x")
     else:
         (checkout / "product" / "__init__.py").write_text("patched = True\n")
     before = cfg.plist.read_bytes()
@@ -2269,6 +2273,18 @@ def test_retention_prunes_core_checkouts_with_their_deployments(cfg: ad.Config) 
     assert [p.name for p in cfg.core_checkouts.iterdir()] == [CORE.pin]
     worktrees = _fixture_git(cfg.core_bare_repo, "worktree", "list", "--porcelain")
     assert str(cfg.core_checkouts / CORE.other) not in worktrees
+
+
+def test_core_retention_keeps_everything_when_an_a1_pin_is_unreadable(cfg: ad.Config) -> None:
+    host = FakeHost()
+    ad.materialize_core(cfg, host, CORE.pin)
+    unreadable = cfg.deployments / f"a1-{'7' * 40}"
+    unreadable.mkdir()  # no pin file: we cannot tell which Core it runs
+    assert ad.prune_core(cfg, host, [unreadable]) == []
+    assert (cfg.core_checkouts / CORE.pin).is_dir()
+    # An r1 deployment without a pin does not block (r1 never uses these checkouts).
+    unreadable.rmdir()
+    assert ad.prune_core(cfg, host, []) == [CORE.pin]
 
 
 def test_retention_never_follows_a_symlinked_core_dir(cfg: ad.Config, tmp_path: Path) -> None:

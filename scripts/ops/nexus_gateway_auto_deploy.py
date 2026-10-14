@@ -896,8 +896,9 @@ def materialize_core(cfg: Config, host: Host, revision: str) -> Dict[str, Any]:
     ).strip()
     if head != revision:
         raise DeployError(f"CORE_HEAD_MISMATCH:{head}"[:300])
+    # --ignored: an ignored file (say a stray .pyc) can still be imported.
     status = ["git", "-C", str(checkout), "status", "--porcelain", "--untracked-files=all"]
-    if _must(host, status, "CORE_STATUS_FAILED").strip():
+    if _must(host, [*status, "--ignored"], "CORE_STATUS_FAILED").strip():
         raise DeployError("CORE_TREE_DIRTY")
     return {"revision": revision, "root": str(checkout), "repository": CORE_REPOSITORY_URL}
 
@@ -1004,7 +1005,11 @@ def prune(cfg: Config, host: Host, protected: List[Optional[Path]]) -> List[str]
 
 
 def prune_core(cfg: Config, host: Host, protected: List[Optional[Path]]) -> List[str]:
-    """Remove ``core/<sha>`` checkouts no remaining or protected deployment pins."""
+    """Remove ``core/<sha>`` checkouts no remaining or protected deployment pins.
+
+    If the pin of any remaining or protected ``a1-*`` deployment cannot be read,
+    nothing is removed (r1 deployments never use these checkouts).
+    """
     parent = cfg.core_checkouts
     if prune_refusal(cfg) or parent.is_symlink() or not parent.is_dir():
         return []
@@ -1013,8 +1018,11 @@ def prune_core(cfg: Config, host: Host, protected: List[Optional[Path]]) -> List
         roots += [p for p in cfg.deployments.iterdir() if p.is_dir() and not p.is_symlink()]
     pinned = set()
     for root in roots:
-        with contextlib.suppress(DeployError):
+        try:
             pinned.add(read_core_pin(root))
+        except DeployError:
+            if root.name.startswith(DEPLOYMENT_PREFIX):
+                return []
     real_parent = parent.resolve()
     removed: List[str] = []
     for child in sorted(parent.iterdir()):
