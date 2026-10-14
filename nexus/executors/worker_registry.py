@@ -1092,7 +1092,7 @@ class WorkerRegistry:
         adapters = dict(adapters)
         missing = set(SUPPORTED_WORKER_PROVIDERS) - set(adapters)
         if missing <= {"agy", "grok", "cline"}:
-            adapters.setdefault("agy", AgyWorkerAdapter())
+            adapters.setdefault("agy", AgyWorkerAdapter())  # pyright: ignore[reportArgumentType]  # pre-existing WorkerAdapter protocol mismatch, line-shifted by #1912
             adapters.setdefault(
                 "grok",
                 DirectCliWorkerAdapter("grok", "grok", "NEXUS_GROK_WORKER_MODEL", "grok-4.5", _grok_args),
