@@ -150,7 +150,8 @@ _DEPLOYMENT_NAME = re.compile(r"(?:^|/)[ar]1-([0-9a-f]{40})$")
 _SHELL_UNSAFE = ('"', "$", "`", "\\", "\n", "\r", "\x00")
 
 # GB-077 per-request timeout and tries: a freshly started candidate can take
-# longer than _fetch_gateway_health's 2 s default to answer /health.
+# longer than _fetch_gateway_health's 2 s default to answer /health.  Only
+# transport failures are retried; an identity failure is final.
 GB077_TIMEOUT_SECONDS = 30.0
 GB077_ATTEMPTS = 3
 GB077_PROBE_CODE = """
@@ -158,19 +159,28 @@ import json, sys, time
 root, url, commit, timeout, attempts = sys.argv[1:6]
 sys.path.insert(0, root)
 from scripts.ops.run_golden_behavior_eval import _fetch_gateway_health, probe_gb077_live_gateway_identity
+history = []
 for attempt in range(int(attempts)):
     ok, detail = probe_gb077_live_gateway_identity(
         fetch_health=lambda: _fetch_gateway_health(url, timeout=float(timeout)),
         evaluated_identity=lambda: (commit, False),
     )
-    if ok:
+    try:
+        reasons = json.loads(detail).get("reasons") or []
+    except (ValueError, AttributeError):
+        reasons = ["unparseable_probe_detail"]
+    history.append({"attempt": attempt + 1, "ok": ok, "reasons": reasons})
+    # Retry only transport failures (the health read itself timed out or failed).
+    # A health answer that fails identity (wrong git_head, dirty, not ok) is final.
+    transport_only = bool(reasons) and all(r.startswith("gateway_unreachable:") for r in reasons)
+    if ok or not transport_only:
         break
     time.sleep(2)
 try:
     # The probe reports its fixed live endpoint; record the URL actually probed.
     parsed = json.loads(detail)
     parsed.setdefault("observed", {})["endpoint"] = url
-    parsed["attempts"] = attempt + 1
+    parsed["attempts"] = history
     detail = json.dumps(parsed, sort_keys=True, separators=(",", ":"))
 except (ValueError, AttributeError):
     pass
