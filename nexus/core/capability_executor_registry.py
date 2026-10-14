@@ -721,6 +721,60 @@ def _exec_lancedb(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRe
                              outcome={"error": str(exc)[:300]})
 
 
+def _research_contamination_block(
+    plan: CapabilityExecutionPlan, result: Mapping[str, Any], start: float
+) -> CapabilityReceipt | None:
+    """Run the P-CONTAM-01 guard on accepted research output; None means clean.
+
+    The guard sees the research_facts.v1 payload it was designed for (built from the
+    handler's research pack), plus any design fields the pack carries, which the facts
+    schema would otherwise drop.  Contamination or any guard error is a BLOCK.
+    """
+    evidence_refs = [f"ev_research_contamination_{plan.task_id}"]
+    try:
+        from nexus.research import contamination_guard
+        from nexus.research.research_facts import DESIGN_FIELD_NAMES, build_research_facts
+
+        pack = dict(result)
+        payload = build_research_facts(
+            research_pack=pack,
+            visibility_receipt={
+                "research_masked": False,
+                "goal_visibility": "full",
+                "research_agent_saw_user_goal": True,
+            },
+        ).to_dict()
+        raw = pack.get("raw") if isinstance(pack.get("raw"), Mapping) else {}
+        for source in (raw, pack):
+            for name in sorted(DESIGN_FIELD_NAMES & set(source)):
+                payload.setdefault(name, source[name])
+        guard = contamination_guard.evaluate_research_contamination(payload)
+        if guard.passed is True:
+            return None
+        error = "RESEARCH_CONTAMINATION_DETECTED"
+        detected_terms = [str(term) for term in guard.detected_terms]
+    except Exception as exc:  # fail closed: a broken guard never lets research through
+        error = "RESEARCH_CONTAMINATION_GUARD_ERROR"
+        detected_terms = []
+        logger.warning("research contamination guard error: %s", str(exc)[:200])
+    return _make_receipt(
+        "research",
+        plan,
+        invoked=True,
+        gate_passed=False,
+        wall_time_ms=int((time.monotonic() - start) * 1000),
+        outcome=_structured_outcome(
+            action="contamination_gate",
+            semantic_status="BLOCKED",
+            error=error,
+            evidence_refs=evidence_refs,
+            policy_id="P-CONTAM-01",
+            detected_terms=detected_terms,
+            physical_callable="nexus.research.contamination_guard.evaluate_research_contamination",
+        ),
+    )
+
+
 def _exec_research(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
     start = time.monotonic()
     cls = _try_port("research.ResearchPhaseHandler")
@@ -811,6 +865,12 @@ def _exec_research(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityR
             and bool(research_task)
             and list(result.get("findings") or []) != ["Empty research task."]
         )
+        if ok:
+            # P-CONTAM-01 (#2199): research output is accepted only after the
+            # contamination guard passes; contamination or a guard error fails closed.
+            blocked = _research_contamination_block(plan, result, start)
+            if blocked is not None:
+                return blocked
         return _make_receipt(
             "research",
             plan,
