@@ -101,3 +101,28 @@ python -m pytest -q -p no:cacheprovider $T
 
 - This drill shows that the guard can be rolled back and restored, and that its tests catch the rollback. It does not show production enforcement on the canonical path (#2199).
 - The drill script and full log were kept locally by the drill operator. The results above are copied verbatim from that log.
+
+---
+
+## Addendum: canonical-path enforcement point drill (#2199)
+
+**Date**: 2026-10-14 (drill run 15:59:16Z–15:59:32Z)
+**Worktree HEAD**: `1f0e0cb5ebc401bc857d603406a3b8a7774be066` (#2199 branch commit before rebase/push)
+**Enforcement point under test**: `nexus/core/capability_executor_registry.py` (`_research_contamination_block`, called from `_exec_research`)
+**Rollback target**: `HEAD~1` = `7b4f680ce94d453deba9f9bb69d7f24c5cd1dd70` (main without the enforcement point)
+
+#2199 moved P-CONTAM-01 enforcement onto the canonical research executor. That is new code, so this drill covers it separately from the guard drill above.
+
+`T="tests/research/test_research_contamination_canonical_path.py tests/research/test_research_isolation.py tests/services/test_capability_wiring_fixes_batch1.py"`, run with the worktree's own `uv sync --frozen --all-extras` venv and `PYTHONPATH=$PWD`.
+
+| Step | Command | Result |
+|------|---------|--------|
+| 1 Baseline | `python -m pytest -q -p no:cacheprovider $T` | `65 passed`, exit 0. File sha256 `0aee13506ada83ced3cde7c8fc97415b801d43aa2620928333f1cce2018dcae2` |
+| 2 Roll back | `git checkout HEAD~1 -- nexus/core/capability_executor_registry.py` | sha256 `8b25293cd2d93038ac26cf4be6b8e1eda1ee4802737cc4468d20a0318e23d667`, 60 lines removed (the whole enforcement point) |
+| 3 Detect | `python -m pytest -q -p no:cacheprovider -rf $T` | `4 failed, 61 passed`, exit 1: `test_canonical_research_blocks_design_language`, `test_canonical_research_blocks_design_field`, `test_canonical_research_blocks_nested_design_field`, `test_canonical_research_guard_error_fails_closed` (each `assert result["gate_passed"] is False`) |
+| 4 Restore | `git checkout HEAD -- nexus/core/capability_executor_registry.py` | sha256 `0aee1350…dcae2`, identical to pre-drill; `git status` clean for the file |
+| 5 Verify | `python -m pytest -q -p no:cacheprovider $T` | `65 passed`, exit 0 |
+
+Behaviour under rollback: the canonical executor again returns PASS for contaminated research output and for a broken guard. The clean-output test keeps passing, so the rollback leaves clean research unchanged. Rollback time was about 16 seconds, with no state or data involved.
+
+Limits: the line numbers in the PR may differ after rebase, but the drilled function is unchanged. The drill script and log were kept locally by the drill operator; the results above are copied from that log.

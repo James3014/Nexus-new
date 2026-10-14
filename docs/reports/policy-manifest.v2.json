@@ -984,7 +984,8 @@
       "commit_sha": "e3b0ba5eb",
       "status_tag": "code-backed",
       "test_entrypoints": [
-        "tests/research/test_research_isolation.py::test_contamination_guard_blocks_design_language_and_fields"
+        "tests/research/test_research_isolation.py::test_contamination_guard_blocks_design_language_and_fields",
+        "tests/research/test_research_contamination_canonical_path.py::test_canonical_research_blocks_design_language"
       ],
       "receipt_type": "ContaminationGuardResult",
       "rollback_drill_status": "drilled-2026-10-14",
@@ -1013,6 +1014,12 @@
           "version": "P-CONTAM-01.0.2.1",
           "timestamp": "2026-10-14T15:06:34Z",
           "diff_summary": "rollback_drill_status drilled-2026-10-14: real rollback drill of nexus/research/contamination_guard.py (e3b0ba5eb -> e3b0ba5eb~1 -> restore), see docs/reports/contamination-guard-rollback-drill-2026-10-14.md. The 2026-06-15 Rust kernel drill (rust-kernel-rollback-drill-2026-06-15.md) does not apply to this guard. Canonical-path enforcement gap remains (#2199).",
+          "lane": "hard"
+        },
+        {
+          "version": "P-CONTAM-01.0.3.0",
+          "timestamp": "2026-10-14T15:59:32Z",
+          "diff_summary": "#2199 enforcement gap CLOSED: the canonical research executor (nexus/core/capability_executor_registry.py _exec_research via _research_contamination_block) now runs evaluate_research_contamination on the research_facts.v1 payload built from the research pack, plus any design fields the pack carries, before accepting research output. Contamination BLOCKs with RESEARCH_CONTAMINATION_DETECTED, a guard error BLOCKs with RESEARCH_CONTAMINATION_GUARD_ERROR, no bypass. Canonical-path behavioural tests: tests/research/test_research_contamination_canonical_path.py. Real rollback drill of the new enforcement point (enforcement removed -> 4 canonical-path tests fail -> restore -> pass), see the 2026-10-14 addendum in docs/reports/contamination-guard-rollback-drill-2026-10-14.md.",
           "lane": "hard"
         }
       ]
