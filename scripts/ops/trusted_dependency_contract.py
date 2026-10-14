@@ -27,6 +27,13 @@ Verdicts (anything else fails closed):
   number and these four hashes is already on main, and main has not moved
   either file since the merge-base, so the merge result is exactly the head bytes.
 * FAIL ``DEPENDENCY_CONTRACT_DRIFT``: everything else.
+
+Limits, shared with the controller: every verdict is computed against main at
+event time and is not re-run when main later moves.  UNCHANGED and AUTHORIZED
+bind only the final head bytes, so a rebase-merge can still replay intermediate
+edits into main's history (never into its final tree).  Closing the
+moved-main window takes a ruleset change, which only the Owner can make: make
+this check required with "require branches to be up to date".
 """
 
 from __future__ import annotations
