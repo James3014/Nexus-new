@@ -8,6 +8,7 @@ import subprocess
 import sys
 import re
 import difflib
+import hashlib
 import os
 from pathlib import Path
 from datetime import datetime, timezone
@@ -288,7 +289,29 @@ def _build_codeintel_evidence(repo_root: Path, *, target_file: str, task_desc: s
     return _codeintel_context.build_codeintel_evidence(repo_root, target_file=target_file, task_desc=task_desc)
 
 
+def _mapping_get(value: object, key: str) -> object:
+    return value.get(key, "") if isinstance(value, dict) else ""
+
+
+_SYMMETRIC_MODEL_SOURCES = frozenset({"llm", "nexus_llm_baseline", "llm_assisted"})
+
+
+def _is_symmetric_model_source(source: str) -> bool:
+    """Exact model-source allowlist: the product labels of a model-generated candidate only."""
+
+    return str(source or "").strip().lower() in _SYMMETRIC_MODEL_SOURCES
+
+
+def _symmetric_prompt_mode() -> bool:
+    """Like-for-like A/B mode (``NEXUS_SYMMETRIC_PROMPT``); see sprint_service._symmetric_prompt_mode."""
+
+    return os.environ.get("NEXUS_SYMMETRIC_PROMPT", "").strip().lower() in {"1", "true", "yes"}
+
+
 def _task_with_codeintel_context(task_desc: str, codeintel: dict[str, Any]) -> str:
+    if _symmetric_prompt_mode():
+        # S6: no repository context in the model prompt; the bare arm never reads the repo.
+        return task_desc
     res = _codeintel_context.task_with_codeintel_context(task_desc, codeintel)
     if "[Nexus CodeIntel Compact]" in res and "[Nexus CodeIntel]" not in res:
         res = res.replace("[Nexus CodeIntel Compact]", "[Nexus CodeIntel]\n[Nexus CodeIntel Compact]")
@@ -790,6 +813,7 @@ def _build_baseline_patch(
     task_desc_with_codeintel: str,
     repo_root: Path,
     task_type: str,
+    test_source: str = "",
 ) -> tuple[str, str, dict[str, Any]]:
     source_label = "local"
     fallback_reason = None
@@ -805,8 +829,12 @@ def _build_baseline_patch(
     if local_first is not None:
         return local_first
     
+    symmetric_prompt = _symmetric_prompt_mode()
     # [NEW: X-2] Prior-Art from Claims
     try:
+        if symmetric_prompt:
+            # S5: nothing learned in a previous task/trial reaches the model in the like-for-like A/B.
+            raise RuntimeError("prior_art_skipped_symmetric_prompt")
         from nexus.research.learn_mode import LearnModeService
         svc = LearnModeService(repo_root)
         prior_fixes = svc.ask(topic="bug-fixes", question=task_desc, top_k=5)
@@ -822,7 +850,14 @@ def _build_baseline_patch(
         try:
             # Use a very short timeout for baseline assistance to avoid blocking
             gen = LLMCandidateGenerator(repo_root, safe_mode=True, route_signals=route)
-            patched, meta = gen.generate(source_code=original_code, task=task_desc_for_llm, mutation_hint="baseline", seed=trial)
+            patched, meta = gen.generate(
+                source_code=original_code,
+                task=task_desc_for_llm,
+                mutation_hint="baseline",
+                seed=trial,
+                # S4: the bare arm always sees the visible test; so does the model here in the A/B.
+                test_source=test_source if symmetric_prompt else "",
+            )
             if patched and patched != original_code:
                 meta = dict(meta)
                 if llm_baseline_required:
@@ -1039,6 +1074,14 @@ def run_auto_flow(
     timing_breakdown_sec["codeintel_sec"] = round(time.monotonic() - codeintel_started_at, 4)
     context_started_at = time.monotonic()
     task_desc_with_codeintel = _task_with_codeintel_context(task_desc, codeintel_evidence)
+    # M2: symmetric behaviour applies only to model runs; the LLM-off lane is unchanged.
+    symmetric_prompt = _symmetric_prompt_mode() and bool(llm_mode)
+    test_path_for_prompt = Path(test_file) if Path(test_file).is_absolute() else repo_root / test_file
+    visible_test_source = (
+        test_path_for_prompt.read_text(encoding="utf-8")
+        if symmetric_prompt and test_path_for_prompt.is_file()
+        else ""
+    )
     timing_breakdown_sec["context_pack_sec"] = round(time.monotonic() - context_started_at, 4)
 
     def _restore_baseline_files(restored_files: dict[Path, str | None], *, keep_target: bool) -> None:
@@ -1055,6 +1098,7 @@ def run_auto_flow(
         ok = False
         err = ""
         source = "local"
+        patched = original_code
         generation_meta = local_baseline_meta()
         companion_edits: dict[Path, str] = {}
         restored_files: dict[Path, str | None] = {}
@@ -1069,11 +1113,16 @@ def run_auto_flow(
                 task_desc_with_codeintel=task_desc_with_codeintel,
                 repo_root=repo_root,
                 task_type=task_type,
+                test_source=visible_test_source,
             )
             if patched == original_code:
                 err = "no_mutation_generated"
             else:
-                companion_edits = generate_local_companion_edits(repo_root, target_path, task_desc, "baseline", 0)
+                companion_edits = (
+                    {}
+                    if symmetric_prompt
+                    else generate_local_companion_edits(repo_root, target_path, task_desc, "baseline", 0)
+                )
                 restored_files[target_path] = original_code
                 _write_source_text(target_path, patched)
                 for extra_path, extra_code in companion_edits.items():
@@ -1089,13 +1138,21 @@ def run_auto_flow(
         except subprocess.TimeoutExpired:
             err = "test_timeout"
         finally:
-            _restore_baseline_files(restored_files, keep_target=ok)
+            # S20: in the like-for-like A/B the model's file stays delivered even when the visible
+            # test fails, so the bench verifies it with the hidden test exactly like the bare arm.
+            keep_model_delivery = symmetric_prompt and _is_symmetric_model_source(str(source))
+            _restore_baseline_files(restored_files, keep_target=ok or keep_model_delivery)
+        report = baseline_report_from_meta(source, generation_meta)
+        if symmetric_prompt and _is_symmetric_model_source(str(source)) and patched != original_code:
+            # P1-2: identity of the model candidate, checked by the bench against the delivered file.
+            report["model_candidate_sha256"] = hashlib.sha256(patched.encode("utf-8")).hexdigest()
+            report["symmetric_model_delivery"] = True
         return {
             "flow": "baseline",
             "status": "SUCCESS" if ok else "FAILED",
             "elapsed_sec": round(time.monotonic() - start, 4),
             "error": err,
-            "report": baseline_report_from_meta(source, generation_meta),
+            "report": report,
         }
 
     def _run_baseline_probe() -> dict:
@@ -1118,11 +1175,16 @@ def run_auto_flow(
                 task_desc_with_codeintel=task_desc_with_codeintel,
                 repo_root=repo_root,
                 task_type=task_type,
+                test_source=visible_test_source,
             )
             if patched == original_code:
                 err = "no_mutation_generated"
             else:
-                companion_edits = generate_local_companion_edits(repo_root, target_path, task_desc, "baseline_probe", 0)
+                companion_edits = (
+                    {}
+                    if symmetric_prompt
+                    else generate_local_companion_edits(repo_root, target_path, task_desc, "baseline_probe", 0)
+                )
                 restored_files[target_path] = original_code
                 _write_source_text(target_path, patched)
                 for extra_path, extra_code in companion_edits.items():
@@ -1189,6 +1251,11 @@ def run_auto_flow(
                 effective_candidate_count = min(effective_candidate_count, max(1, int(llm_candidate_cap_raw)))
             except ValueError:
                 pass
+        effective_max_rounds = execution_profile["effective_max_rounds"]
+        if symmetric_prompt and llm_mode:
+            # L3: exactly one model candidate, one round, in the counted A/B.
+            effective_candidate_count = 1
+            effective_max_rounds = 1
         sprint_executor_flags = {
             "enable_autoreason_executor": executor_flags["enable_autoreason_executor"],
             "enable_ddtree_executor": executor_flags["enable_ddtree_executor"],
@@ -1200,7 +1267,7 @@ def run_auto_flow(
             target_file=target_file,
             test_file=test_file,
             candidate_count=effective_candidate_count,
-            max_rounds=execution_profile["effective_max_rounds"],
+            max_rounds=effective_max_rounds,
             timeout_sec=timeout_sec,
             safe_mode=True,
             stage1_max_parallel=execution_profile["effective_stage1_max_parallel"],
@@ -1217,23 +1284,38 @@ def run_auto_flow(
         ok = res.status == "SUCCESS" and bool(res.patch)
         err = ""
         apply_started_at = time.monotonic()
-        if ok:
+        # H1 / P1-1: in the symmetric A/B the model candidate's file is delivered even when the
+        # visible test fails (status stays FAILED); the bench's hidden-only gate decides.
+        raw_model_sha = str(_mapping_get(getattr(res, "learning_trace", None), "model_candidate_sha256"))
+        symmetric_delivery = bool(
+            symmetric_prompt
+            and res.patch
+            and _is_symmetric_model_source(str(getattr(res, "winner_source", "") or ""))
+            # L2: the delivered patch must be the raw model candidate, byte for byte.
+            and raw_model_sha
+            and hashlib.sha256(str(res.patch).encode("utf-8")).hexdigest() == raw_model_sha
+        )
+        if ok or symmetric_delivery:
             _write_source_text(target_path, res.patch)
-        else:
+        if not ok:
             err = res.reason
         breakdown["patch_apply_sec"] = round(time.monotonic() - apply_started_at, 4)
         breakdown["total_sec"] = round(time.monotonic() - start, 4)
+        report = build_hyper_sprint_report(
+            res,
+            effective_stage1_timeout_sec=effective_stage1_timeout,
+            candidate_summaries=_candidate_summaries(list(getattr(res, "candidates", []) or [])),
+            r_phase_breakdown_sec=breakdown,
+        )
+        if symmetric_delivery:
+            report["model_candidate_sha256"] = raw_model_sha
+            report["symmetric_model_delivery"] = True
         return {
             "flow": "hyper_sprint",
             "status": "SUCCESS" if ok else "FAILED",
             "elapsed_sec": round(time.monotonic() - start, 4),
             "error": err,
-            "report": build_hyper_sprint_report(
-                res,
-                effective_stage1_timeout_sec=effective_stage1_timeout,
-                candidate_summaries=_candidate_summaries(list(getattr(res, "candidates", []) or [])),
-                r_phase_breakdown_sec=breakdown,
-            ),
+            "report": report,
         }
 
     baseline_probe = None
@@ -1250,6 +1332,7 @@ def run_auto_flow(
             and llm_baseline
             and baseline_model_attempted
             and result.get("status") != "SUCCESS"
+            and not symmetric_prompt
         ):
             failed_baseline = result
             result = _run_hyper_apply()
@@ -1279,7 +1362,7 @@ def run_auto_flow(
                 and dynamic_timeout_multiplier > 0
                 and min_dynamic_stage1_timeout < stage1_timeout_sec
             )
-            if forced_hyper_needs_probe:
+            if forced_hyper_needs_probe and not (symmetric_prompt and llm_mode):
                 baseline_probe = _run_baseline_probe()
             else:
                 baseline_probe_skipped = True
@@ -1288,6 +1371,7 @@ def run_auto_flow(
                 result.get("status") != "SUCCESS"
                 and str(task_type).startswith("cross_module_refactor")
                 and verification_only_allowed
+                and not symmetric_prompt
             ):
                 result = _run_original_verification_rescue(result)
             if forced_hyper:
@@ -1296,6 +1380,11 @@ def run_auto_flow(
                 strategy_path = "hyper_direct_plateau_distant_scout"
             else:
                 strategy_path = "hyper_direct_hard_skip_probe" if skip_baseline_probe_for_hard else "hyper_direct_cross_module"
+        elif symmetric_prompt and llm_mode:
+            # L3: no probe + hyper (two model calls) in the counted A/B; one direct hyper attempt.
+            baseline_probe_skipped = True
+            result = _run_hyper_apply()
+            strategy_path = "hyper_direct_symmetric"
         else:
         # Probe first to avoid unnecessary Hyper run for obvious quick fixes.
             baseline_probe = _run_baseline_probe()
@@ -1377,7 +1466,8 @@ def run_auto_flow(
     nightshift_auto_run = maybe_run_nightshift_after_hyper_failure(
         repo_root=repo_root,
         result=result,
-        nightshift_recommended=nightshift_recommended,
+        # L2: symmetric mode never re-runs the task through Nightshift.
+        nightshift_recommended=nightshift_recommended and not (symmetric_prompt and llm_mode),
         task_desc=task_desc,
         target_file=target_file,
         test_file=test_file,

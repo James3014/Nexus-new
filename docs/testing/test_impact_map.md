@@ -178,8 +178,10 @@
 | scripts/ops/capability_invocation_matrix.py | tests/ops/test_capability_invocation_matrix.py::test_capability_invocation_arm_index_preserves_jsonl_diagnostics, tests/ops/test_capability_invocation_matrix.py::test_invocation_matrix_fails_closed_on_missing_model_receipt, tests/ops/test_capability_invocation_matrix.py::test_invocation_matrix_marks_invoked_without_evidence_as_heatmap_red, tests/ops/test_capability_invocation_matrix.py::test_invocation_matrix_exposes_runtime_backed_executor_claim_scope | active | medium | capability_invocation_matrix_contract |
 | scripts/ops/capability_invocation_index.py | tests/ops/test_capability_invocation_matrix.py::test_capability_invocation_arm_index_preserves_jsonl_diagnostics, tests/ops/test_capability_invocation_matrix.py::test_invocation_matrix_fails_closed_on_missing_model_receipt | active | medium | capability_invocation_matrix_contract |
 | scripts/ops/ultra_gate.py | tests/ops/test_ultra_gate.py | active | high | governance |
-| scripts/ops/trusted_deletion_anchor.py | tests/ops/test_trusted_deletion_anchor.py, tests/ops/test_trusted_deletion_anchor_pr960.py, tests/ops/test_trusted_deletion_anchor_tempdir_cleanup.py | active | high | trusted_deletion_anchor_verifier_contract |
+| scripts/ops/trusted_deletion_anchor.py | tests/ops/test_trusted_deletion_anchor.py, tests/ops/test_trusted_deletion_anchor_pr960.py, tests/ops/test_trusted_deletion_anchor_tempdir_cleanup.py, tests/ops/test_trusted_dependency_contract.py | active | high | trusted_deletion_anchor_verifier_contract |
 | scripts/ops/trusted_impact_gate.py | tests/ops/test_trusted_impact_gate.py, tests/ops/test_pr_impact_gate.py | active | high | trusted_impact_gate_verifier_contract |
+| scripts/ops/trusted_dependency_contract.py | tests/ops/test_trusted_dependency_contract.py, tests/ops/test_trusted_deletion_anchor.py | active | high | trusted_dependency_contract_check |
+| tests/ops/test_trusted_dependency_contract.py | tests/ops/test_trusted_dependency_contract.py | active | high | test_contract |
 | tests/ops/test_trusted_deletion_anchor_tempdir_cleanup.py | tests/ops/test_trusted_deletion_anchor_tempdir_cleanup.py | active | high | test_contract |
 | nexus/config/governance_manifest.json | tests/governance/test_audit_gate_honesty.py, tests/test_iron_gate_governance.py | active | high | governance_seal_manifest |
 | nexus/delivery/replay_runner.py | tests/governance/test_audit_gate_honesty.py, tests/governance/test_replay_runner_allowlist.py, tests/test_iron_gate_governance.py | active | high | replay_runner_allowlist |
@@ -197,6 +199,7 @@
 | scripts/ci/nexus-core-verify.sh | tests/ops/test_select_tests.py, tests/ops/test_pr_impact_gate.py | active | high | nexus_core_completion_ci_entrypoint_contract |
 | scripts/ci/nexus_core_trusted_pin_policy.py | tests/ops/test_nexus_core_trusted_pin_policy.py, tests/ops/test_select_tests.py, tests/ops/test_pr_impact_gate.py | active | high | nexus_core_trusted_pin_maintenance_contract |
 | scripts/bench/capability_ab_runner.py | tests/benchmark/test_capability_ab_runner.py::test_run_with_nexus_subprocess_preserves_executor_receipts_without_llm, tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_accepts_causal_runtime_mount, tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_rejects_quarantined_mount | active | high | benchmark_contract |
+| tests/benchmark/data/online_ab_hard_v1_prompt_data.json | tests/benchmark/test_ab_no_answer_hints.py | active | medium | ab_prompt_symmetry_contract |
 | scripts/bench/agy_prompt_capture.py | tests/benchmark/test_ab_prompt_symmetry_audit.py | active | high | ab_prompt_symmetry_contract |
 | scripts/bench/prompt_symmetry_schema.json | tests/benchmark/test_ab_prompt_symmetry_audit.py | active | high | ab_prompt_symmetry_contract |
 | scripts/bench/prompt_symmetry_audit.py | tests/benchmark/test_ab_prompt_symmetry_audit.py | active | high | ab_prompt_symmetry_contract |
@@ -346,3 +349,7 @@
 | tests/nightly_quarantine_entries.py | tests/ops/test_nightly_quarantine.py, tests/ops/test_nightly_quarantine_items_layout.py | active | medium | nightly_quarantine_entries_compat_shim |
 | nexus/core/policy_drift.py | tests/test_governance_telemetry_closure.py, tests/test_semantic_receipt_gate.py | active | medium | dual_gate_replay_artifact_location_contract |
 | scripts/effects | tests/effects, tests/unit/local_heal/test_p4_committee_real_winner_path.py | active | low | effects_shadow_scripts_scope_feature_flags |
+| scripts/ops/nexus_gateway_auto_deploy.py | tests/ops/test_nexus_gateway_auto_deploy.py, tests/ops/test_check_gateway_source_drift.py | active | high | gateway_auto_deploy_health_gated_switch_contract |
+| scripts/ops/install_nexus_gateway_auto_deploy.sh | tests/ops/test_nexus_gateway_auto_deploy.py | active | medium | gateway_auto_deploy_launchagent_installer |
+| scripts/ops/check_gateway_source_drift.py | tests/ops/test_check_gateway_source_drift.py, tests/ops/test_nexus_gateway_auto_deploy.py | active | medium | gateway_source_drift_reads_auto_deploy_receipt |
+| tests/ops/test_nexus_gateway_auto_deploy.py | tests/ops/test_nexus_gateway_auto_deploy.py | active | medium | test_contract |

@@ -309,7 +309,7 @@ class LLMCandidateGenerator:
         self.safe_mode = safe_mode
         self.target_file = str(target_file or "").strip()
         self.local_service = None
-        if os.environ.get("NEXUS_ONLINE_LOCAL_ASSIST", "").strip().lower() in {"1", "true", "yes"}:
+        if os.environ.get("NEXUS_ONLINE_LOCAL_ASSIST", "").strip().lower() in {"1", "true", "yes"} and not _symmetric_prompt_mode():
             from nexus.services.local_assist_service import LocalAssistService
 
             self.local_service = LocalAssistService()
@@ -500,7 +500,7 @@ class LLMCandidateGenerator:
                 model_calls += 1
                 out, raw, unified_receipt = self._ask_unified_candidate(
                     prompt=prompt_text,
-                    payload="Return one small edit. Prefer operation=replace with exact target_snippet and replacement.",
+                    payload=_candidate_payload_instruction(),
                     task=task,
                     seed=seed,
                     attempt=idx + 1,
@@ -859,41 +859,52 @@ def _online_call_skipped_reason(unified_receipt: Mapping[str, Any] | None) -> st
 def _build_value_task_contract(*, source_code: str, task: str, test_source: str = "") -> str:
     combined = f"{task}\n{source_code}\n{test_source}".lower()
     rules: list[str] = []
-    if "none" in combined and ("override" in combined or "defaults" in combined):
-        rules.append("If an override value is None, preserve the existing default instead of writing None.")
+    # Only generic engineering rules belong here. Fixture-specific rules (exact return values,
+    # defaults, or field semantics a hidden verifier checks) are answer hints the bare arm never
+    # gets, so they were removed (online A/B R2, 2026-10-14).
     if "artifact" in combined or "claim" in combined:
         rules.append("Preserve exact canonical field names from source/tests; do not invent plural or renamed fields.")
-        if "'artifact'" in combined or '"artifact"' in combined:
-            rules.append("Use singular field 'artifact'; do not rename it to 'artifacts'.")
-        rules.append("Verified claim helpers should return the claim ids that satisfy the artifact-backed contract.")
     if "phase" in combined or "evidence" in combined or "reason" in combined:
         rules.append("Use the canonical phase fields 'status', 'evidence', and 'reason' exactly when they appear in source/tests.")
-        rules.append("Passing phases require evidence; failing phases require a non-empty reason.")
-    if "nightshift" in combined or "report_path" in combined:
-        rules.append(
-            "Nightshift recovery is auditable only when recommended, invoked, recovered, and a non-empty report_path are all present."
-        )
-        rules.append("Reject boolean-only Nightshift recovery when report_path is missing or empty.")
-    if "deny" in combined or "authorization" in combined or "redact" in combined:
-        rules.append("MemPalace rule: fail closed for unknown or missing authorization data and never weaken redaction.")
-    if "strict parser defaults" in combined or "parse_config" in combined:
-        rules.append(
-            "LanceDB/context rule: for parse_config, omitted values use canonical defaults strict=True and retries=3; explicit inputs are preserved."
-        )
-    elif "strict" in combined or "canonical" in combined or "config" in combined:
+    if "strict" in combined or "canonical" in combined or "config" in combined:
         rules.append("LanceDB/context rule: follow the canonical config/doc contract over older examples.")
     if not rules:
         return ""
     return "[NEXUS VALUE CONTRACT]\n" + "\n".join(f"- {rule}" for rule in rules) + "\n"
 
 
+# One output instruction for both A/B arms in symmetric mode (the operation form #2101 parses):
+# the with-Nexus arm gets it as the gateway payload, the bare arm at the end of its prompt.
+SYMMETRIC_EDIT_INSTRUCTION = (
+    "Return ONLY JSON for one edit with keys status, operation, target_snippet, replacement. "
+    "Use operation=replace; target_snippet must be copied exactly from the current source and occur "
+    "there once; replacement is the new text for it."
+)
+
+
+def _candidate_payload_instruction() -> str:
+    if _symmetric_prompt_mode():
+        return SYMMETRIC_EDIT_INSTRUCTION
+    return "Return one small edit. Prefer operation=replace with exact target_snippet and replacement."
+
+
 def _build_llm_candidate_prompt(
     *, source_code: str, task: str, mutation_hint: str, test_source: str = "", codeintel_block: str = ""
 ) -> str:
     compact = os.environ.get("NEXUS_GATEWAY_COMPACT_PROMPT", "").strip().lower() in {"1", "true", "yes"}
-    contract_block = _build_value_task_contract(source_code=source_code, task=task, test_source=test_source)
+    contract_block = (
+        ""
+        if _symmetric_prompt_mode()
+        else _build_value_task_contract(source_code=source_code, task=task, test_source=test_source)
+    )
     contract_block += codeintel_block
     test_block = f"\nTests:\n{test_source}" if test_source else ""
+    if _symmetric_prompt_mode():
+        # The output instruction travels once, as the payload (SYMMETRIC_EDIT_INSTRUCTION); a second,
+        # conflicting "prefer patch" instruction here would differ from the bare arm.
+        # Candidate strategy hints ("Pivot: assume a race condition…") are keyword-picked guidance the
+        # bare arm never gets; in symmetric mode every candidate is the plain baseline attempt.
+        return f"Task: {task}\nHint: baseline\n{contract_block}Source:\n{source_code}{test_block}"
     if compact:
         return (
             "Return JSON. Prefer patch=<full updated target file>. "
@@ -1026,6 +1037,19 @@ def _select_candidate_with_routing_layers(
                     autoreason["score_guard_winner"] = _candidate_id(score_winner)
                     autoreason["score_guard_reason"] = "verified_candidate_must_not_be_overridden_by_lower_score"
                     return score_winner, active
+                if item.score >= 1.0 and not _is_model_owned_source(item.source):
+                    # A verified model answer is the delivery; a local candidate with the same
+                    # score must not replace it (online A/B R2, gov-002 local_hidden_shadow).
+                    model_best = max(
+                        (c for c in active if _is_model_owned_source(c.source)),
+                        key=lambda c: c.score,
+                        default=None,
+                    )
+                    if model_best is not None and model_best.score >= item.score:
+                        autoreason["winner_overridden_by_model_delivery_guard"] = True
+                        autoreason["score_guard_winner"] = _candidate_id(model_best)
+                        autoreason["score_guard_reason"] = "verified_model_candidate_preferred_over_equal_local"
+                        return model_best, active
                 return item, active
     else:
         learning_trace["autoreason"] = {"enabled": False, "status": "DISABLED", "reason": "feature_flag_disabled"}
@@ -1287,6 +1311,16 @@ def write_sprint_report(*, repo_root: Path, result: SprintResult, report_file: s
     return report_path
 
 
+def _symmetric_prompt_mode() -> bool:
+    """Like-for-like A/B mode (``NEXUS_SYMMETRIC_PROMPT``): the model sees what the bare arm sees.
+
+    Visible tests are included, no CodeIntel/historical hints are injected, and learning stores are
+    neither read nor written, so nothing carries over between trials (symmetry inventory S4-S6).
+    """
+
+    return os.environ.get("NEXUS_SYMMETRIC_PROMPT", "").strip().lower() in {"1", "true", "yes"}
+
+
 def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     start = time.time()
     policy = ResearchPolicy()
@@ -1304,8 +1338,12 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         model_required_execution_mode.startswith("model_participation")
         or os.environ.get("NEXUS_REQUIRE_MODEL_PARTICIPATION", "").strip().lower() in {"1", "true", "yes"}
     )
-    initial_test_source = "" if hidden_verifier_mode and not model_required_final_delivery else test_source
-    if initial_test_source:
+    symmetric_prompt = _symmetric_prompt_mode()
+    initial_test_source = (
+        test_source if symmetric_prompt else ("" if hidden_verifier_mode and not model_required_final_delivery else test_source)
+    )
+    if initial_test_source and not symmetric_prompt:
+        # P2-1: the bare arm gets the whole visible test, so symmetric mode never truncates it.
         initial_test_source = _truncate_redundant_tests(initial_test_source, config.task)
     llm_mode_effective = bool(config.llm_mode)
     learn_slo_guard = {
@@ -1335,7 +1373,9 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
 
     codeintel_block = ""
     codeintel_status: dict[str, Any] = {"status": "skipped_local_only"}
-    if llm_mode_effective:
+    if llm_mode_effective and symmetric_prompt:
+        codeintel_status = {"status": "skipped_symmetric_prompt"}
+    elif llm_mode_effective:
         from nexus.research.flow.codeintel_context import sprint_codeintel_block
 
         codeintel_block, codeintel_status = sprint_codeintel_block(repo_root, target_file=config.target_file)
@@ -1480,6 +1520,8 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         from nexus.research.findings_memory import FindingsMemoryStore
 
         store = FindingsMemoryStore(repo_root)
+        if symmetric_prompt:
+            raise RuntimeError("retrieval_skipped_symmetric_prompt")
         hits = store.search(config.task, scope="both")
         learning_trace["retrieval_hits"] = len(hits)
         for h in hits:
@@ -1642,6 +1684,10 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         codes: list[str],
     ) -> None:
         # Learning loop (govern + write): MemPalace verify -> Findings write (LanceDB sync via repository).
+        if symmetric_prompt:
+            # No state may carry over to the next trial in the like-for-like A/B (S5).
+            learning_trace["learning_write_skipped"] = "symmetric_prompt"
+            return
         try:
             from nexus.research.findings_memory import FindingsCard, FindingsMemoryStore
             from nexus.services.mem_palace import MemPalace
@@ -1892,6 +1938,13 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                         codeintel_block=codeintel_block,
                     )
                     used_source = str(meta.get("source", "llm"))
+                    if _symmetric_prompt_mode() and isinstance(candidate_code, str) and candidate_code:
+                        # L2: identity of the raw model candidate, before any post-processing; the
+                        # flow delivers it only if the final patch is byte-identical.
+                        learning_trace.setdefault(
+                            "model_candidate_sha256",
+                            hashlib.sha256(candidate_code.encode("utf-8")).hexdigest(),
+                        )
                 except Exception as llm_exc:  # noqa: BLE001
                     fallback_used = True
                     failure_meta = getattr(llm_exc, "metadata", {})
@@ -2034,7 +2087,10 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                             source=support_source,
                         )
                     candidates.append(support_ev)
-            self_heal_enabled = os.environ.get("NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL", "1").strip().lower() not in {"0", "false", "no"}
+            self_heal_enabled = (
+                os.environ.get("NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL", "1").strip().lower() not in {"0", "false", "no"}
+                and not _symmetric_prompt_mode()  # L2: symmetric mode itself means one model call
+            )
             if (
                 hidden_verifier_mode
                 and llm_generator is not None
@@ -2414,7 +2470,10 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     final_score = best.score
     final_patch = best.candidate_code or source_code
     final_reason = "stage1_pass"
-    disable_dayshift = os.environ.get("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "").strip().lower() in {"1", "true", "yes"}
+    disable_dayshift = (
+        os.environ.get("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "").strip().lower() in {"1", "true", "yes"}
+        or _symmetric_prompt_mode()  # L2: no stage-2 rewrite of the model candidate in the A/B
+    )
     # Stage 2 is optional enhancement only. Core success must not depend on external quota.
     if llm_mode_effective and llm_channel == "local":
         # DayShiftOptimizer scores with online gateway models; the local channel stops at stage 1.

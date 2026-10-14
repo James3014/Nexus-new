@@ -18,6 +18,10 @@ only commits published on GitHub ``main``, or an exact published PR head
   main: warning ``GATEWAY_BEHIND_MAIN(n)`` when n > 50 commits or main's tip is
   more than 7 days newer than the base; below that, OK.
 
+Auto-deploy (#2153): when the deployer's receipt log exists, the report also
+carries ``auto_deploy`` (the last receipt from
+``scripts/ops/nexus_gateway_auto_deploy.py``) and the summary names it.
+
 It never starts, stops, reloads or rebinds anything.  The only write paths are
 ``git fetch`` into the analysis clone (objects and remote-tracking refs) and,
 only when ``--report-issue`` is passed explicitly, one deduplicated Issue
@@ -38,6 +42,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from scripts.ops.nexus_gateway_auto_deploy import last_receipt  # noqa: E402
 from scripts.ops.run_golden_behavior_eval import (  # noqa: E402
     GATEWAY_HEALTH_URL,
     _fetch_gateway_health,
@@ -51,7 +56,8 @@ DEFAULT_MAIN_REF = "origin/main"
 TASK_BINDING_PREFIX = "tasks/"
 BEHIND_MAX_COMMITS = 50
 BEHIND_MAX_SECONDS = 7 * 24 * 60 * 60
-REMEDY = "rebind via #526 governed path; Owner decision"
+REMEDY = "let the #2153 auto-deployer catch up, or rebind via the #526 governed fallback"
+DEFAULT_AUTO_DEPLOY_STATE = Path.home() / ".local/state/nexus-gateway-auto-deploy"
 BIND_ONLY_NOTE = "bind-only local task commits; root cause tracked in #1939"
 
 OK, INFO, WARN, ALERT, PROBE_FAILURE = "OK", "INFO", "WARN", "ALERT", "PROBE_FAILURE"
@@ -221,6 +227,19 @@ def analyze(
     }
 
 
+def _auto_deploy_source(state_dir: Path, head: str) -> str | None:
+    """Deployment tree of the #2153 auto-deployer that holds ``head``, if any."""
+    try:
+        receipt = last_receipt(state_dir)
+    except OSError:
+        return None
+    for key in ("deployment_root", "previous_root"):
+        root = (receipt or {}).get(key)
+        if isinstance(root, str) and root.endswith(head) and Path(root).is_dir():
+            return root
+    return None
+
+
 def failure_report(error: ProbeError) -> dict[str, Any]:
     return {
         "schema": SCHEMA,
@@ -238,6 +257,12 @@ def summarize(report: dict[str, Any]) -> str:
         line += " -- drift unknown (fail closed)"
     if any(f["code"].startswith("GATEWAY_BIND_ONLY_LOCAL_COMMITS") for f in report["findings"]):
         line += f" -- {BIND_ONLY_NOTE}"
+    receipt = report.get("auto_deploy")
+    if isinstance(receipt, dict):
+        line += (
+            f" -- last auto-deploy {receipt.get('outcome')} "
+            f"{str(receipt.get('candidate_commit'))[:12]} at {receipt.get('finished_at')}"
+        )
     return line
 
 
@@ -348,6 +373,12 @@ def main(
     parser.add_argument(
         "--json", action="store_true", help="print the JSON report instead of the summary line"
     )
+    parser.add_argument(
+        "--auto-deploy-state",
+        type=Path,
+        default=DEFAULT_AUTO_DEPLOY_STATE,
+        help="state dir of the #2153 auto-deployer whose last receipt is reported",
+    )
     parser.add_argument("--report-issue", type=int, default=None)
     parser.add_argument(
         "--report-repo", default=DEFAULT_REPORT_REPO, help="GitHub repo for PR lookup and reports"
@@ -375,6 +406,9 @@ def main(
             and Path(health["repo_root"]).is_dir()
         ):
             source_repo = health["repo_root"]
+        if source_repo is None:
+            # #2153 layout: deployments/a1-<sha> worktrees named by the receipt.
+            source_repo = _auto_deploy_source(args.auto_deploy_state, health["git_head"])
         lookup = (
             None if args.offline else (pr_head_lookup or gh_pr_head_lookup(args.report_repo, gh))
         )
@@ -383,6 +417,10 @@ def main(
         )
     except ProbeError as error:
         report = failure_report(error)
+    try:
+        report["auto_deploy"] = last_receipt(args.auto_deploy_state)
+    except OSError:
+        report["auto_deploy"] = None
     report["summary"] = summarize(report)
 
     print(json.dumps(report, sort_keys=True) if args.json else report["summary"])

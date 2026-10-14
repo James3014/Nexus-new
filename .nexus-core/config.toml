@@ -44,6 +44,18 @@ required_material_ids = ["canonical-learning", "canonical-runtime"]
 # owner-SSHSIG-signed .nexus-core/deletions/<id>.json, preserved in an archive
 # commit on main's history, in a PR touching nothing else. The same signature
 # is required to change any protected path (config.toml is always protected).
+# enforcement = "ADVISORY" (owner decision 2026-10-14, #2006: owner signatures
+# retired; Core is advisory and not a required check). The signature sentence
+# above now holds only for deletions and trust-root edits: for a change that
+# deletes nothing, a missing or invalid owner signature
+# (PROTECTED_PATH_REQUIRES_OWNER_SIGNATURE, DELETION_MANIFEST_SIGNATURE_MISSING /
+# _INVALID) becomes a ::warning plus a receipt record naming every protected
+# path and manifest touched. In Core, these still fail: deletions (FORBID; the
+# required Deletion guard + owner-approved-deletion label is the real gate),
+# edits to deletion_policy or [deletion_exception], and malformed or misnamed
+# manifests. Other config keys (verifiers, isolation, materials,
+# allowed_patterns, base_ref) and the protected workflows change with only the
+# advisory warning.
 [deletion_exception]
 mode = "OWNER_SIGNED_ARCHIVE"
 manifest_dir = ".nexus-core/deletions"
@@ -53,3 +65,4 @@ protected_paths = [
   ".github/workflows/nexus-core-issue-completion.yml",
   ".github/workflows/trusted-deletion-anchor.yml",
 ]
+enforcement = "ADVISORY"
