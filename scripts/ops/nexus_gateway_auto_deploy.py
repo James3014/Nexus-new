@@ -885,22 +885,101 @@ def materialize_core(cfg: Config, host: Host, revision: str) -> Dict[str, Any]:
     if checkout.is_symlink():
         raise DeployError("CORE_PATH_SYMLINKED")
     if not checkout.exists():
-        cfg.core_checkouts.mkdir(parents=True, exist_ok=True)
-        _must(
-            host,
-            _core_git(cfg, "worktree", "add", "--detach", str(checkout), revision),
-            "CORE_WORKTREE_ADD_FAILED",
-        )
-    head = _must(
-        host, ["git", "-C", str(checkout), "rev-parse", "HEAD"], "CORE_HEAD_FAILED"
-    ).strip()
-    if head != revision:
-        raise DeployError(f"CORE_HEAD_MISMATCH:{head}"[:300])
+        _add_core_checkout(cfg, host, checkout, revision)
+    problem = core_checkout_problem(host, checkout, revision)
+    result = {"revision": revision, "root": str(checkout), "repository": CORE_REPOSITORY_URL}
+    if problem is None:
+        return result
+    # A dirty or half-created checkout must not block every later candidate with
+    # this pin.  Rebuild it once, but only if no running deployment uses it.
+    if revision in core_pins_in_use(cfg):
+        raise DeployError(f"CORE_IN_USE_UNHEALTHY:{problem}"[:300])
+    _remove_core_checkout(cfg, host, checkout)
+    _must(host, _core_git(cfg, "worktree", "prune"), "CORE_WORKTREE_PRUNE_FAILED")
+    _add_core_checkout(cfg, host, checkout, revision)
+    again = core_checkout_problem(host, checkout, revision)
+    if again is not None:
+        raise DeployError(again[:300])
+    return {**result, "rebuilt": problem[:300]}
+
+
+def _add_core_checkout(cfg: Config, host: Host, checkout: Path, revision: str) -> None:
+    cfg.core_checkouts.mkdir(parents=True, exist_ok=True)
+    _must(
+        host,
+        _core_git(cfg, "worktree", "add", "--detach", str(checkout), revision),
+        "CORE_WORKTREE_ADD_FAILED",
+    )
+
+
+def _remove_core_checkout(cfg: Config, host: Host, checkout: Path) -> None:
+    """Remove a checkout strictly inside a real ``core/`` (never through a symlink)."""
+    parent = cfg.core_checkouts
+    if (
+        parent.is_symlink()
+        or checkout.is_symlink()
+        or checkout.resolve().parent != parent.resolve()
+    ):
+        raise DeployError("CORE_PATH_SYMLINKED")
+    host.run(_core_git(cfg, "worktree", "remove", "--force", str(checkout)), timeout=300)
+    if checkout.exists() and not checkout.is_symlink():
+        shutil.rmtree(checkout, ignore_errors=True)
+
+
+def core_checkout_problem(host: Host, checkout: Path, revision: str) -> Optional[str]:
+    """None when ``checkout`` is a clean worktree at exactly ``revision``."""
+    if not (checkout / ".git").is_file():
+        # Half-created (e.g. a killed `worktree add`); never let git walk upwards.
+        return "CORE_CHECKOUT_INCOMPLETE"
+    head = host.run(["git", "-C", str(checkout), "rev-parse", "HEAD"])
+    if head.returncode != 0:
+        return f"CORE_HEAD_FAILED:{(head.stderr or '').strip()[:200]}"
+    if head.stdout.strip() != revision:
+        return f"CORE_HEAD_MISMATCH:{head.stdout.strip()}"
     # --ignored: an ignored file (say a stray .pyc) can still be imported.
-    status = ["git", "-C", str(checkout), "status", "--porcelain", "--untracked-files=all"]
-    if _must(host, [*status, "--ignored"], "CORE_STATUS_FAILED").strip():
-        raise DeployError("CORE_TREE_DIRTY")
-    return {"revision": revision, "root": str(checkout), "repository": CORE_REPOSITORY_URL}
+    status = host.run([
+        "git",
+        "-C",
+        str(checkout),
+        "status",
+        "--porcelain",
+        "--untracked-files=all",
+        "--ignored",
+    ])
+    if status.returncode != 0:
+        return "CORE_STATUS_FAILED"
+    if status.stdout.strip():
+        return "CORE_TREE_DIRTY"
+    return None
+
+
+def core_pins_in_use(cfg: Config) -> set:
+    """Core revisions the live Gateway or the deployer tree may be running.
+
+    Same protected set as retention: the live (and, before a switch, previous)
+    plist root and ``auto-deploy-current``, plus the NEXUS_CORE_REPO_ROOT the
+    live wrapper exports.  Anything unreadable raises (treated as in use).
+    """
+    try:
+        plist = cfg.plist.read_bytes()
+        roots = [live_root(plist)]
+        tokens = _wrapper_tokens(plist)
+    except (OSError, DeployError) as exc:
+        raise DeployError(f"CORE_IN_USE_UNKNOWN:{exc}"[:300]) from exc
+    pins = set()
+    for token in tokens:
+        if token.startswith("NEXUS_CORE_REPO_ROOT="):
+            pins.add(Path(token.split("=", 1)[1]).name)
+    if cfg.tool_link.is_symlink():
+        roots.append(Path(os.path.realpath(cfg.tool_link)))
+    for root in roots:
+        if root is None or not (root / CORE_PIN_FILE).exists():
+            continue
+        try:
+            pins.add(read_core_pin(root))
+        except DeployError as exc:
+            raise DeployError(f"CORE_IN_USE_UNKNOWN:{exc}"[:300]) from exc
+    return pins
 
 
 def build(cfg: Config, host: Host, commit: str) -> Dict[str, Any]:
@@ -1007,22 +1086,31 @@ def prune(cfg: Config, host: Host, protected: List[Optional[Path]]) -> List[str]
 def prune_core(cfg: Config, host: Host, protected: List[Optional[Path]]) -> List[str]:
     """Remove ``core/<sha>`` checkouts no remaining or protected deployment pins.
 
-    If the pin of any remaining or protected ``a1-*`` deployment cannot be read,
-    nothing is removed (r1 deployments never use these checkouts).
+    Nothing is removed if an ``a1-*`` deployment has a pin file that cannot be
+    read, or if a protected ``a1-*`` deployment has none.  An unprotected ``a1-*``
+    directory without a pin file pins nothing; r1 deployments never use these
+    checkouts.
     """
     parent = cfg.core_checkouts
     if prune_refusal(cfg) or parent.is_symlink() or not parent.is_dir():
         return []
-    roots = [p for p in protected if p is not None]
+    guarded = [p for p in protected if p is not None]
+    guarded_names = {p.name for p in guarded}
+    roots = list(guarded)
     if cfg.deployments.is_dir():
         roots += [p for p in cfg.deployments.iterdir() if p.is_dir() and not p.is_symlink()]
     pinned = set()
     for root in roots:
+        if not root.name.startswith(DEPLOYMENT_PREFIX):
+            with contextlib.suppress(DeployError):
+                pinned.add(read_core_pin(root))
+            continue
+        if not (root / CORE_PIN_FILE).exists() and root.name not in guarded_names:
+            continue
         try:
             pinned.add(read_core_pin(root))
         except DeployError:
-            if root.name.startswith(DEPLOYMENT_PREFIX):
-                return []
+            return []
     real_parent = parent.resolve()
     removed: List[str] = []
     for child in sorted(parent.iterdir()):
@@ -1373,6 +1461,7 @@ class _Cycle:
         receipt = self.new_receipt(candidate, previous_plist)
         receipt["required_checks"] = checks
         receipt["warnings"] = list(warnings)
+        hold: Optional[str] = None
         try:
             receipt.update(self.attempt_effects(candidate, previous_plist, receipt))
         except Exception as exc:  # noqa: BLE001 - every failure must still leave a receipt
@@ -1385,7 +1474,11 @@ class _Cycle:
                 receipt["outcome"] = "BLOCKED_MANAGER_BUSY"
             else:
                 receipt["outcome"] = "BUILD_FAILED"
-        return self.close_receipt(receipt)
+                if str(exc).startswith(("CORE_IN_USE_UNHEALTHY", "CORE_IN_USE_UNKNOWN")):
+                    # A running deployment's Core is never touched; stop retrying
+                    # until the Owner repairs it and runs `release`.
+                    hold = f"auto-hold: {str(exc)[:200]} (core checkout in use)"
+        return self.close_receipt(receipt, hold=hold)
 
     def spare_probe(
         self, root: Path, python: Path, commit: str, receipt: Dict[str, Any]

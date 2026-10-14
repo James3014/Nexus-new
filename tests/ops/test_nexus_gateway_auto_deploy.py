@@ -2197,30 +2197,81 @@ def test_core_fetch_failure_rejects_and_never_deploys_without_core(
     assert "core" not in result["receipt"]
 
 
-@pytest.mark.parametrize("dirt", ["untracked", "modified", "ignored"])
-def test_dirty_core_checkout_rejects_the_candidate(cfg: ad.Config, dirt: str) -> None:
-    core = ad.materialize_core(cfg, FakeHost(), CORE.pin)
-    checkout = Path(core["root"])
+def _soil(checkout: Path, dirt: str) -> None:
     if dirt == "untracked":
         (checkout / "product" / "shadow.py").write_text("x = 1\n")
     elif dirt == "ignored":
         (checkout / "product" / "__pycache__").mkdir()
         (checkout / "product" / "__pycache__" / "two.cpython-312.pyc").write_bytes(b"x")
-    else:
+    elif dirt == "modified":
         (checkout / "product" / "__init__.py").write_text("patched = True\n")
+    elif dirt == "wrong_head":
+        _fixture_git(checkout, "checkout", "-q", "--detach", CORE.other)
+    elif dirt == "half_created":  # a `git worktree add` killed before writing .git
+        shutil.rmtree(checkout)
+        (checkout / "product").mkdir(parents=True)
+    else:
+        raise AssertionError(dirt)
+
+
+@pytest.mark.parametrize("dirt", ["untracked", "modified", "ignored", "wrong_head", "half_created"])
+def test_unhealthy_unused_core_checkout_is_rebuilt(cfg: ad.Config, dirt: str) -> None:
+    checkout = Path(ad.materialize_core(cfg, FakeHost(), CORE.pin)["root"])
+    _soil(checkout, dirt)
+    host = FakeHost()
+    result = cycle(cfg, host, FakeProber())
+    assert result["status"] == "DEPLOYED"
+    core = result["receipt"]["core"]
+    assert core["root"] == str(checkout) and core["rebuilt"]
+    assert ad.core_checkout_problem(ad.Host(), checkout, CORE.pin) is None
+    assert any(c[-2:] == ["worktree", "prune"] for c in host.calls)
+    assert not ad.hold_reason(cfg, {})
+
+
+def _live_on_core(cfg: ad.Config, checkout: Path, *, export: bool, pin_file: bool) -> None:
+    """Make the live plist run deployment a1-OLD on ``checkout``."""
+    live = cfg.deployments / f"a1-{OLD}"
+    (live / "scripts/ops").mkdir(parents=True)
+    (live / ad.ENTRYPOINT).write_text("")
+    if pin_file:
+        (live / ad.CORE_PIN_FILE).parent.mkdir(parents=True)
+        (live / ad.CORE_PIN_FILE).write_text(_pin_source(checkout.name))
+    python = cfg.venvs / f"a1-{OLD}" / "bin" / "python"
+    command = ad.wrapper_command(cfg, live, python, core_root=checkout if export else None)
+    cfg.plist.write_bytes(ad.render_plist(cfg.plist.read_bytes(), command, live))
+    ad.remember_plist(cfg, cfg.plist.read_bytes())
+
+
+@pytest.mark.parametrize(("export", "pin_file"), [(True, False), (False, True), (True, True)])
+@pytest.mark.parametrize("dirt", ["untracked", "half_created"])
+def test_unhealthy_core_checkout_in_use_is_held_not_modified(
+    cfg: ad.Config, dirt: str, export: bool, pin_file: bool
+) -> None:
+    checkout = Path(ad.materialize_core(cfg, FakeHost(), CORE.pin)["root"])
+    _live_on_core(cfg, checkout, export=export, pin_file=pin_file)
+    _soil(checkout, dirt)
+    snapshot = sorted(str(p.relative_to(checkout)) for p in checkout.rglob("*"))
     before = cfg.plist.read_bytes()
     host = FakeHost()
     result = cycle(cfg, host, FakeProber())
     assert result["status"] == "BUILD_FAILED"
-    assert "CORE_TREE_DIRTY" in result["receipt"]["reason"]
+    assert "CORE_IN_USE_UNHEALTHY" in result["receipt"]["reason"]
+    assert sorted(str(p.relative_to(checkout)) for p in checkout.rglob("*")) == snapshot
+    assert not any("remove" in c or "prune" in c for c in host.calls if "core.git" in str(c))
     assert not host.started and cfg.plist.read_bytes() == before
+    # No endless retries: the deployer holds until the Owner repairs and releases.
+    assert "CORE_IN_USE_UNHEALTHY" in (ad.hold_reason(cfg, {}) or "") or cfg.hold_file.exists()
+    assert cycle(cfg, FakeHost(), FakeProber())["status"] == "HELD"
 
 
-def test_core_checkout_at_wrong_head_rejects(cfg: ad.Config) -> None:
-    core = ad.materialize_core(cfg, FakeHost(), CORE.pin)
-    _fixture_git(Path(core["root"]), "checkout", "-q", "--detach", CORE.other)
-    with pytest.raises(ad.DeployError, match="CORE_HEAD_MISMATCH"):
+def test_core_in_use_unknown_when_live_pin_file_is_malformed(cfg: ad.Config) -> None:
+    checkout = Path(ad.materialize_core(cfg, FakeHost(), CORE.pin)["root"])
+    _live_on_core(cfg, checkout, export=False, pin_file=True)
+    (cfg.deployments / f"a1-{OLD}" / ad.CORE_PIN_FILE).write_text("CANONICAL_CORE_REVISION = 1\n")
+    _soil(checkout, "untracked")
+    with pytest.raises(ad.DeployError, match="CORE_IN_USE_UNKNOWN"):
         ad.materialize_core(cfg, FakeHost(), CORE.pin)
+    assert (checkout / "product" / "shadow.py").exists()
 
 
 def test_core_bare_repo_origin_must_be_nexus_core(cfg: ad.Config) -> None:
@@ -2285,6 +2336,23 @@ def test_core_retention_keeps_everything_when_an_a1_pin_is_unreadable(cfg: ad.Co
     # An r1 deployment without a pin does not block (r1 never uses these checkouts).
     unreadable.rmdir()
     assert ad.prune_core(cfg, host, []) == [CORE.pin]
+
+
+def test_core_retention_unprotected_a1_without_pin_pins_nothing(cfg: ad.Config) -> None:
+    host = FakeHost()
+    ad.materialize_core(cfg, host, CORE.pin)
+    (cfg.deployments / f"a1-{'7' * 40}").mkdir()  # no pin file, not protected
+    assert ad.prune_core(cfg, host, []) == [CORE.pin]
+
+
+def test_core_retention_aborts_on_a_malformed_a1_pin(cfg: ad.Config) -> None:
+    host = FakeHost()
+    ad.materialize_core(cfg, host, CORE.pin)
+    broken = cfg.deployments / f"a1-{'7' * 40}"
+    (broken / ad.CORE_PIN_FILE).parent.mkdir(parents=True)
+    (broken / ad.CORE_PIN_FILE).write_text('CANONICAL_CORE_REVISION = "nope"\n')
+    assert ad.prune_core(cfg, host, []) == []
+    assert (cfg.core_checkouts / CORE.pin).is_dir()
 
 
 def test_retention_never_follows_a_symlinked_core_dir(cfg: ad.Config, tmp_path: Path) -> None:
@@ -2387,3 +2455,52 @@ def test_real_core_provenance_check_rejects_a_checkout_that_is_not_core(
     )
     assert check["ok"] is False
     assert check.get("status") == "CORE_UNAVAILABLE"
+
+
+def _offline_git(cwd: Path | str, *args: str) -> subprocess.CompletedProcess:
+    env = {**os.environ, **GIT_ENV, "GIT_NO_LAZY_FETCH": "1"}
+    return subprocess.run(
+        ["git", "-C", str(cwd), *args], env=env, capture_output=True, text=True, check=False
+    )
+
+
+def _real_core_checkout(tmp_path: Path, pin: str) -> Path | None:
+    """A real nexus-core checkout at ``pin`` without any network, or None.
+
+    NEXUS_CORE_REPO_ROOT is used as is when it is a clean checkout at the pin;
+    otherwise a ``--shared`` clone of a local nexus-core repository is checked
+    out at the pin (the source repository is never modified).
+    """
+    configured = os.environ.get("NEXUS_CORE_REPO_ROOT", "")
+    if configured and (Path(configured) / ".git").exists():
+        head = _offline_git(configured, "rev-parse", "HEAD").stdout.strip()
+        dirty = _offline_git(configured, "status", "--porcelain", "--ignored").stdout.strip()
+        if head == pin and not dirty:
+            return Path(configured)
+    for source in (configured, str(Path.home() / "workspace/nexus-core")):
+        if not source or not (Path(source) / ".git").exists():
+            continue
+        checkout = tmp_path / "core" / pin
+        shutil.rmtree(checkout, ignore_errors=True)
+        cloned = _offline_git(
+            tmp_path, "clone", "-q", "--shared", "--no-checkout", source, str(checkout)
+        )
+        if (
+            cloned.returncode == 0
+            and _offline_git(checkout, "checkout", "-q", "--detach", pin).returncode == 0
+        ):
+            return checkout
+    return None
+
+
+def test_real_transport_reports_pinned_for_a_real_core_checkout(tmp_path: Path) -> None:
+    """Positive control with real nexus-core; skipped where none is available offline."""
+    pin = ad.read_core_pin(REPO_ROOT)
+    checkout = _real_core_checkout(tmp_path, pin)
+    if checkout is None:
+        pytest.skip("no local nexus-core with the pinned tree (set NEXUS_CORE_REPO_ROOT)")
+    check = ad.Prober(ad.Host()).core_provenance(
+        root=REPO_ROOT, python=Path(sys.executable), core={"revision": pin, "root": str(checkout)}
+    )
+    assert check["status"] == "CORE_REVISION_PINNED", check
+    assert check["ok"] is True and check["observed_commit"] == pin

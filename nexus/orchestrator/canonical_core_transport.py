@@ -134,6 +134,9 @@ except ImportError as exc:
 # truth for the runtime check; it must equal the nexus-certify SHA pinned in
 # .github/workflows/nexus-core-issue-completion.yml (a test asserts the two
 # agree).
+# scripts/ops/nexus_gateway_auto_deploy.py text-parses this exact one-line
+# `CANONICAL_CORE_REVISION = "<40-hex sha>"` form (it never imports this file);
+# keep that shape when bumping the pin.
 CANONICAL_CORE_REVISION = "f05cbc53f3eb104e6379283ed8275285c75ae6a8"
 CANONICAL_CORE_DISTRIBUTION = "nexus-certify"
 CANONICAL_CORE_INTERFACE = "product.adapters.generic_verification.verify_generic_changeset"
