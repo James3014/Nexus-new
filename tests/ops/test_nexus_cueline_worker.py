@@ -181,6 +181,32 @@ def test_cli_failure_codes_propagate(tmp_path: Path):
     assert "Task not found" in res.stderr or "Error" in res.stderr or "error" in res.stderr.lower() or res.returncode == 1
 
 
+_FAKE_CODEX = """#!/bin/sh
+# Hermetic stand-in for the codex CLI (#1926): CI runners have no codex, and
+# the owned worker starts at once. Hold the worker in WORKER_RUNNING until the
+# test releases it, so the status probe sees a live attempt deterministically.
+if [ "${1:-}" = "--version" ]; then echo "codex-cli 0.0.0-fake"; exit 0; fi
+release="$NEXUS_TEST_FAKE_CODEX_RELEASE"
+i=0
+while [ ! -e "$release" ] && [ "$i" -lt 600 ]; do sleep 0.1; i=$((i + 1)); done
+exit 0
+"""
+
+
+def _fake_codex_env(tmp_path: Path) -> tuple[dict[str, str], Path]:
+    bin_dir = tmp_path / "fake-bin"
+    bin_dir.mkdir()
+    codex = bin_dir / "codex"
+    codex.write_text(_FAKE_CODEX, encoding="utf-8")
+    codex.chmod(0o755)
+    release = tmp_path / "fake-codex.release"
+    env = dict(os.environ)
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
+    env["NEXUS_CODEX_BIN"] = str(codex)
+    env["NEXUS_TEST_FAKE_CODEX_RELEASE"] = str(release)
+    return env, release
+
+
 def test_nexus_cueline_worker_full_pipeline_subprocess(tmp_path: Path):
     """End-to-end integration test of CueLine worker handling task submit & status."""
     controller = tmp_path / "controller"
@@ -194,6 +220,7 @@ def test_nexus_cueline_worker_full_pipeline_subprocess(tmp_path: Path):
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=controller, check=True, capture_output=True, text=True).stdout.strip()
     target_root = tmp_path / "targets"
     state_dir = str(tmp_path / "state")
+    env, release = _fake_codex_env(tmp_path)
 
     submit_req = {
         "op": "submit",
@@ -217,7 +244,7 @@ def test_nexus_cueline_worker_full_pipeline_subprocess(tmp_path: Path):
         [sys.executable, str(script_path)],
         input=json.dumps(submit_req),
         text=True,
-        capture_output=True,
+        capture_output=True,    env=env,
     )
     assert res_submit.returncode == 0, f"Worker submit failed: {res_submit.stderr}"
     out_submit = json.loads(res_submit.stdout)
@@ -233,12 +260,13 @@ def test_nexus_cueline_worker_full_pipeline_subprocess(tmp_path: Path):
         [sys.executable, str(script_path)],
         input=json.dumps(status_req),
         text=True,
-        capture_output=True,
+        capture_output=True,    env=env,
     )
     assert res_status.returncode == 0, f"Worker status failed: {res_status.stderr}"
     out_status = json.loads(res_status.stdout)
     assert out_status["task_id"] == "cueline-e2e-001"
     assert out_status["status"] in {"SUBMITTED", "WORKER_RUNNING", "CANDIDATE_COMMITTED", "CANDIDATE_CAPTURED", "PENDING_HUMAN_APPROVAL"}
+    release.write_text("release\n", encoding="utf-8")
 
 
 def test_extra_positional_cli_text_rejected():
