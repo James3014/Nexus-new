@@ -122,3 +122,38 @@ def test_nightshift_producer_emits_option_b_contract(tmp_path: Path):
     assert item["demand_role"] == "bounded_candidate_generation"
     assert item["mutation_intent"] is False
     assert all(value is False for value in item["worker_permissions"].values())
+
+
+def test_nightshift_bindings_follow_policy_route_not_hardcoded_model():
+    from types import SimpleNamespace
+
+    import pytest
+
+    from nexus.services.model_workforce_policy import WorkforcePolicyError
+    from nexus.services.nightshift_queue_consumer import (
+        NIGHTSHIFT_ONLINE_CONTROLS,
+        NIGHTSHIFT_ONLINE_ROLE,
+        build_nightshift_workforce_bindings,
+    )
+
+    class _Loader:
+        def __init__(self, route, workers):
+            self.route, self.workers = route, workers
+
+        def load(self):
+            return SimpleNamespace(workers=self.workers)
+
+        def resolve_route(self, role):
+            assert role == NIGHTSHIFT_ONLINE_ROLE
+            return self.route
+
+    worker = SimpleNamespace(worker_id="policy_worker_x", model="model-x")
+    bindings = build_nightshift_workforce_bindings(
+        _Loader("policy_worker_x", {"policy_worker_x": worker})
+    )
+    assert bindings == {
+        "online": {"worker_id": "policy_worker_x", "controls": list(NIGHTSHIFT_ONLINE_CONTROLS)}
+    }
+
+    with pytest.raises(WorkforcePolicyError):
+        build_nightshift_workforce_bindings(_Loader("absent_worker", {}))

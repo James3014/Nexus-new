@@ -11,6 +11,24 @@ from typing import Any, Callable, Mapping
 from nexus.services.unified_runtime import UnifiedRuntimeRequest
 
 SCHEMA = "nexus.nightshift_candidate_demand.v1"
+# The Planner demands this role for NightShift's online repair/candidate calls.
+NIGHTSHIFT_ONLINE_ROLE = "fast_bounded_implementation"
+# Controls the NightShift runner physically supplies around an online call: the
+# task statement and single resolved target file (task card / allowed files),
+# the mandatory tier-1 smoke commands, the patch parser, the response-contract
+# verifier and the tier-2 validation run after the model call.  Admission still
+# decides whether these satisfy the routed worker's requirements.
+NIGHTSHIFT_ONLINE_CONTROLS = (
+    "task_card",
+    "allowed_files",
+    "mandatory_commands",
+    "parser",
+    "verifier",
+    "independent_verification",
+)
+_HOST_WORKFORCE_POLICY_PATH = (
+    Path(__file__).resolve().parents[1] / "config" / "model_workforce.yaml"
+)
 REQUIRED_CONTROLS = frozenset({
     "isolated_directory",
     "bounded_context",
@@ -20,6 +38,44 @@ REQUIRED_CONTROLS = frozenset({
     "verifier",
 })
 FORBIDDEN_WORKER_ACTIONS = frozenset({"commit", "push", "approve", "integrate"})
+
+
+def resolve_nightshift_online_worker(policy_loader: Any = None) -> Any:
+    """Return the Workforce worker the tracked policy routes NightShift online calls to.
+
+    The identity comes only from the policy's global route for
+    ``NIGHTSHIFT_ONLINE_ROLE``; no model string is hardcoded here.  Raises
+    ``WorkforcePolicyError`` when the policy cannot be loaded or routes nowhere.
+    """
+    from nexus.services.model_workforce_policy import (
+        WorkforcePolicyError,
+        WorkforcePolicyLoader,
+    )
+
+    loader = policy_loader or WorkforcePolicyLoader(policy_path=_HOST_WORKFORCE_POLICY_PATH)
+    snapshot = loader.load()
+    worker_id = loader.resolve_route(NIGHTSHIFT_ONLINE_ROLE)
+    worker = snapshot.workers.get(worker_id)
+    if worker is None:
+        raise WorkforcePolicyError(f"NightShift online route worker missing: {worker_id!r}")
+    return worker
+
+
+def build_nightshift_workforce_bindings(policy_loader: Any = None) -> dict[str, Any]:
+    """Channel -> binding mapping for NightShift online calls (worker id + supplied controls).
+
+    Shared by the runner's direct online calls and the bounded-candidate
+    manifest items this consumer replays.  Only Workforce Admission decides
+    whether the binding is admitted; a caller-chosen model that differs from
+    the bound worker's model is rejected by the runtime, never substituted.
+    """
+    worker = resolve_nightshift_online_worker(policy_loader)
+    return {
+        "online": {
+            "worker_id": worker.worker_id,
+            "controls": list(NIGHTSHIFT_ONLINE_CONTROLS),
+        }
+    }
 
 
 class NightshiftQueueConsumer:

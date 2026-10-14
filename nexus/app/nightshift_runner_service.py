@@ -85,8 +85,8 @@ class AutoResearchNightShift:
         test_file: Optional[str] = None,
         convergence_patience: int = 5,
         gateway: Any = None,
-        model_name: Optional[str] = "gemini-3.1-pro-preview",
-        fallback_model_name: Optional[str] = "gemini-3-flash-preview",
+        model_name: Optional[str] = None,
+        fallback_model_name: Optional[str] = None,
         keep_worktree: Optional[bool] = None,
         project_root: Optional[Path] = None,
         context_hub: Any = None,
@@ -141,7 +141,26 @@ class AutoResearchNightShift:
         self.gateway = gateway or (
             BattlesuitGateway(project_root=self.project_root) if self.git_enabled else None
         )
-        self.model_name = model_name
+        # Online identity comes from the tracked Workforce policy: every online
+        # call carries the policy-routed binding, and the default model is that
+        # worker's model.  An explicit model override is passed through as-is
+        # so admission rejects a mismatch instead of silently substituting.
+        # The policy route has no fallback, so none is defaulted here.
+        from nexus.services.model_workforce_policy import WorkforcePolicyError
+        from nexus.services.nightshift_queue_consumer import (
+            build_nightshift_workforce_bindings,
+            resolve_nightshift_online_worker,
+        )
+
+        try:
+            online_worker = resolve_nightshift_online_worker()
+            self.workforce_bindings: dict[str, Any] = build_nightshift_workforce_bindings()
+            policy_model: Optional[str] = online_worker.model
+        except WorkforcePolicyError as exc:
+            print(f"⚠️ [NightShift] Workforce policy unavailable; online calls fail closed: {exc}")
+            self.workforce_bindings = {}
+            policy_model = None
+        self.model_name = model_name or policy_model
         self.fallback_model_name = fallback_model_name
         self.model_exhausted: Dict[str, str] = {}
         env_keep = os.getenv("NIGHTSHIFT_KEEP_WORKTREE", "").strip().lower() in {
@@ -263,15 +282,18 @@ class AutoResearchNightShift:
             }
 
         gateway_provider = str(getattr(self.gateway, "oauth_provider", "") or "").strip().lower()
+        route = build_online_route(
+            recommended_flow="direct",
+            gateway_provider=gateway_provider,
+        )
+        route["workforce_admission_enabled"] = True
+        route["workforce_bindings"] = json.loads(json.dumps(self.workforce_bindings))
         request = UnifiedRuntimeRequest(
             task_id=task_id,
             workspace_revision=revision,
             task_statement=self.task,
             task_type="repair" if task_kind == "generation" else "evaluation",
-            route=build_online_route(
-                recommended_flow="direct",
-                gateway_provider=gateway_provider,
-            ),
+            route=route,
             online_prompt=prompt,
             online_payload=payload,
             online_phase="R",
@@ -1322,18 +1344,16 @@ class AutoResearchNightShift:
         )
 
         payload = dict(outcome.__dict__)
-        payload.update(
-            {
-                "target_file": self.resolved_target_file,
-                "best_score": self.best_score,
-                "rounds_attempted": len(self.trace_log),
-                "no_improve_streak": self.no_improve_streak,
-                "model_exhausted": dict(self.model_exhausted),
-                "artifact_paths": [str(self.tracelog_path), str(self.lesson_writeback_path)],
-                "learning_closure": self.last_learning_closure,
-                "unified_runtime_receipt": self.last_unified_runtime_receipt,
-            }
-        )
+        payload.update({
+            "target_file": self.resolved_target_file,
+            "best_score": self.best_score,
+            "rounds_attempted": len(self.trace_log),
+            "no_improve_streak": self.no_improve_streak,
+            "model_exhausted": dict(self.model_exhausted),
+            "artifact_paths": [str(self.tracelog_path), str(self.lesson_writeback_path)],
+            "learning_closure": self.last_learning_closure,
+            "unified_runtime_receipt": self.last_unified_runtime_receipt,
+        })
         with open(report_path, "w") as f:
             json.dump(payload, f, indent=2)
         print(f"📊 [Orchestrator] Machine-readable report saved to: {report_path}")
@@ -1403,6 +1423,7 @@ class AutoResearchNightShift:
                 "approve": False,
                 "integrate": False,
             },
+            "workforce_bindings": json.loads(json.dumps(self.workforce_bindings)),
             "task": task_name,
             "target_file": target_file,
             "commit_sha": commit_sha,
