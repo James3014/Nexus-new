@@ -467,13 +467,36 @@ def _paged(api_get: Callable[[str], Any], path: str) -> Iterator[dict]:
         page += 1
 
 
-def _last_push(api_get: Callable[[str], Any], repo: str, pr: dict) -> Optional[float]:
-    """Committer time of the PR head (bot comments do not move it, unlike updated_at)."""
+_PUSH_EVENTS = ("head_ref_force_pushed", "head_ref_restored", "committed")
+
+
+def _is_stale_pin_pr(api_get: Callable[[str], Any], repo: str, pr: dict, now: float) -> bool:
+    """Stale only if PR creation, head commit time AND last head push are all old.
+
+    Each signal is checked in turn and the first recent (or unknown) one stops
+    the search, so a fresh PR - even one carrying an old commit - always blocks.
+    """
+    cutoff = now - PIN_BUMP_MAX_AGE_SECONDS
+
+    def recent(value: Optional[float]) -> bool:
+        return value is None or value > cutoff
+
+    if recent(_parse_time(pr.get("created_at"))):
+        return False
     head = (pr.get("head") or {}).get("sha")
     if not head:
-        return None
+        return False
     commit = api_get(f"repos/{repo}/commits/{head}").get("commit") or {}
-    return _parse_time((commit.get("committer") or {}).get("date"))
+    if recent(_parse_time((commit.get("committer") or {}).get("date"))):
+        return False
+    pushes: List[Optional[float]] = []
+    for event in _paged(api_get, f"repos/{repo}/issues/{pr['number']}/timeline"):
+        kind = event.get("event")
+        if kind == "committed":
+            pushes.append(_parse_time((event.get("committer") or {}).get("date")))
+        elif kind in _PUSH_EVENTS:
+            pushes.append(_parse_time(event.get("created_at")))
+    return not any(recent(t) for t in pushes)
 
 
 def pin_bumps_in_flight(
@@ -481,8 +504,8 @@ def pin_bumps_in_flight(
 ) -> Dict[str, Any]:
     """Open pin-bump PRs; CLEAR, IN_FLIGHT or UNKNOWN (fail closed).
 
-    A pin-bump PR whose head was last pushed more than ``PIN_BUMP_MAX_AGE_SECONDS``
-    ago is treated as abandoned and does not block, but it is never silent: it is
+    A pin-bump PR that was created, last committed and last pushed more than
+    ``PIN_BUMP_MAX_AGE_SECONDS`` ago is treated as abandoned and does not block, but it is never silent: it is
     listed in ``ignored_stale`` and as a ``STALE_PIN_PR_IGNORED #N`` warning.
     """
     now = time.time() if now is None else now
@@ -497,8 +520,7 @@ def pin_bumps_in_flight(
             )
             if not is_pin:
                 continue
-            pushed = _last_push(api_get, repo, pr)
-            if pushed is not None and now - pushed > PIN_BUMP_MAX_AGE_SECONDS:
+            if _is_stale_pin_pr(api_get, repo, pr, now):
                 stale.append(pr["number"])
             else:
                 hits.append(pr["number"])
@@ -1084,17 +1106,33 @@ class _Cycle:
             "probes": {},
         }
 
-    def close_receipt(self, receipt: Dict[str, Any]) -> Dict[str, Any]:
+    def close_receipt(
+        self,
+        receipt: Dict[str, Any],
+        *,
+        hold: Optional[str] = None,
+        journal_to: Optional[Path] = None,
+    ) -> Dict[str, Any]:
+        """HOLD first, then the receipt, and only then the journal goes away.
+
+        If writing HOLD or the receipt fails, the exception propagates and the
+        pending-switch journal stays, so the next cycle reconciles again.
+        """
         finished = self.host.now()
         receipt.update(
             finished_at=_iso(finished),
             duration_seconds=round(finished - float(receipt["started_epoch"]), 3),
         )
+        if hold is None and receipt["outcome"] == "ROLLBACK_FAILED":
+            hold = f"auto-hold after ROLLBACK_FAILED {receipt['attempt_id']}"
+        if hold is not None:
+            _set_hold(self.cfg, hold)
         _append_receipt(self.cfg, receipt)
-        with contextlib.suppress(FileNotFoundError):
-            self.cfg.journal.unlink()
-        if receipt["outcome"] == "ROLLBACK_FAILED":
-            _set_hold(self.cfg, f"auto-hold after ROLLBACK_FAILED {receipt['attempt_id']}")
+        if journal_to is not None:
+            os.replace(self.cfg.journal, journal_to)
+        else:
+            with contextlib.suppress(FileNotFoundError):
+                self.cfg.journal.unlink()
         return receipt
 
     def foreign_plist(self) -> Dict[str, Any]:
@@ -1105,8 +1143,9 @@ class _Cycle:
             reason="live plist was not written or adopted by the auto-deployer (manual rebind?)",
             live_plist_sha256=_sha256(self.cfg.plist.read_bytes()),
         )
-        _set_hold(self.cfg, "auto-hold: FOREIGN_PLIST; run `adopt` then `release` to resume")
-        return self.close_receipt(receipt)
+        return self.close_receipt(
+            receipt, hold="auto-hold: FOREIGN_PLIST; run `adopt` then `release` to resume"
+        )
 
     # -- one attempt ------------------------------------------------------------
 
@@ -1261,20 +1300,14 @@ class _Cycle:
         """Resolve a switch that a previous cycle did not finish (crash or kill)."""
         cfg = self.cfg
         try:
-            journal = json.loads(cfg.journal.read_text(encoding="utf-8"))
-            if journal.get("schema") != JOURNAL_SCHEMA:
-                raise ValueError("schema")
-            receipt = dict(journal["receipt"])
-            previous_plist = base64.b64decode(journal["previous_plist_b64"], validate=True)
-            root = Path(receipt["deployment_root"])
-            python = Path(journal["candidate_python"])
-            new_plist_sha = str(journal["new_plist_sha256"])
-            live_root(previous_plist)  # label check
+            loaded = _load_journal(cfg.journal)
         except (OSError, ValueError, KeyError, TypeError, DeployError) as exc:
             return self.quarantine_journal(f"{type(exc).__name__}:{exc}"[:300])
+        receipt, previous_plist, root, python, new_plist_sha = loaded
         receipt.update(reconciled=True, switched=True)
-        with self.host.manager_lock(cfg):
-            try:
+        hold: Optional[str] = None
+        try:
+            with self.host.manager_lock(cfg):
                 live_plist = cfg.plist.read_bytes()
                 if _sha256(live_plist) == new_plist_sha:
                     # The switch got as far as the plist write; make sure launchd
@@ -1286,20 +1319,22 @@ class _Cycle:
                     receipt["reason"] = "interrupted switch; previous plist re-verified"
                     receipt.update(self.rollback(previous_plist, receipt))
                 else:
-                    _set_hold(cfg, "auto-hold: FOREIGN_PLIST while reconciling a pending switch")
+                    hold = "auto-hold: FOREIGN_PLIST while reconciling a pending switch"
                     receipt.update(outcome="FOREIGN_PLIST", reason="unexpected live plist")
-            except Exception as exc:  # noqa: BLE001
-                receipt["reason"] = f"{type(exc).__name__}:{exc}"[:500]
-                receipt.update(self.rollback(previous_plist, receipt))
-        return self.close_receipt(receipt)
+        except DeployError as exc:
+            if not str(exc).startswith("MANAGER_LOCK_UNAVAILABLE"):
+                return self.quarantine_journal(f"RECONCILE_FAILED:DeployError:{exc}"[:300])
+            # The #526 manager is busy: keep the journal and retry next cycle.
+            return {"outcome": "BLOCKED_MANAGER_BUSY", "reason": str(exc)[:300]}
+        except Exception as exc:  # noqa: BLE001 - never crash every cycle on one journal
+            return self.quarantine_journal(f"RECONCILE_FAILED:{type(exc).__name__}:{exc}"[:300])
+        return self.close_receipt(receipt, hold=hold)
 
     def quarantine_journal(self, reason: str) -> Dict[str, Any]:
-        """An unreadable journal is moved aside once, with HOLD and a receipt."""
+        """An unusable journal: HOLD, then a receipt, then move it aside."""
         cfg = self.cfg
         started = self.host.now()
         aside = cfg.journal.with_name(f"pending-switch.corrupt.{int(started)}.json")
-        os.replace(cfg.journal, aside)
-        _set_hold(cfg, f"auto-hold: JOURNAL_CORRUPT (moved to {aside.name}); inspect the Gateway")
         receipt = {
             "schema": RECEIPT_SCHEMA,
             "attempt_id": f"journal-{int(started)}",
@@ -1312,7 +1347,11 @@ class _Cycle:
             "rolled_back": False,
             "probes": {},
         }
-        return self.close_receipt(receipt)
+        return self.close_receipt(
+            receipt,
+            hold=f"auto-hold: JOURNAL_CORRUPT (moved to {aside.name}); inspect the Gateway",
+            journal_to=aside,
+        )
 
     def move_tool_link(self, root: Path) -> Dict[str, Any]:
         """Self-update: point the LaunchAgent at the new tree only if its deployer works."""
@@ -1371,6 +1410,48 @@ class _Cycle:
             shutil.rmtree(scratch, ignore_errors=True)
         _atomic_symlink(root, cfg.tool_link)
         return {"moved": True, "target": str(root)}
+
+
+_JOURNAL_RECEIPT_FIELDS = {
+    "schema": str,
+    "attempt_id": str,
+    "candidate_commit": str,
+    "deployment_root": str,
+    "started_epoch": (int, float),
+    "started_at": str,
+    "switched": bool,
+    "rolled_back": bool,
+    "probes": dict,
+}
+
+
+def _load_journal(path: Path) -> tuple:
+    """Parse and fully validate a pending-switch journal (every field reconcile reads)."""
+    journal = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(journal, dict) or journal.get("schema") != JOURNAL_SCHEMA:
+        raise ValueError("journal schema")
+    receipt = journal.get("receipt")
+    if not isinstance(receipt, dict):
+        raise ValueError("journal receipt")
+    for name, kind in _JOURNAL_RECEIPT_FIELDS.items():
+        if not isinstance(receipt.get(name), kind):
+            raise ValueError(f"journal receipt.{name}")
+    if receipt["schema"] != RECEIPT_SCHEMA or not _SHA.match(receipt["candidate_commit"]):
+        raise ValueError("journal receipt identity")
+    for name in ("previous_plist_b64", "candidate_python", "new_plist_sha256"):
+        if not isinstance(journal.get(name), str) or not journal[name]:
+            raise ValueError(f"journal {name}")
+    if not re.fullmatch(r"[0-9a-f]{64}", journal["new_plist_sha256"]):
+        raise ValueError("journal new_plist_sha256")
+    previous_plist = base64.b64decode(journal["previous_plist_b64"], validate=True)
+    live_root(previous_plist)  # parses and checks the label
+    return (
+        dict(receipt),
+        previous_plist,
+        Path(receipt["deployment_root"]),
+        Path(journal["candidate_python"]),
+        journal["new_plist_sha256"],
+    )
 
 
 def rollback_readiness(host: Host, previous_plist: bytes) -> Dict[str, Any]:

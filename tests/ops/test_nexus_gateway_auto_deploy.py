@@ -172,6 +172,7 @@ def green_api(
     extra_runs: dict[str, list[dict[str, Any]]] | None = None,
     workflow_path: Callable[[int], str] | None = None,
     pushed_at: dict[str, str] | None = None,
+    timeline: dict[int, list[dict[str, Any]]] | None = None,
 ):
     calls: list[str] = []
 
@@ -183,6 +184,11 @@ def green_api(
             return {"status": relation}
         if "/pulls?state=open" in path:
             return (open_pulls or []) if path.endswith("page=1") else []
+        if "/timeline?" in path:
+            if not path.endswith("page=1"):
+                return []
+            number = int(path.split("/issues/")[1].split("/")[0])
+            return (timeline or {}).get(number, [])
         if "/pulls/" in path and "/files?" in path:
             if not path.endswith("page=1"):
                 return []
@@ -1382,6 +1388,7 @@ def test_stale_pin_bump_pr_does_not_block_forever() -> None:
             "number": 9,
             "title": "pin nexus-runtime old",
             "head": {"ref": "x", "sha": "9" * 40},
+            "created_at": "2025-01-01T00:00:00Z",
             # A bot comment yesterday must not make an abandoned PR look fresh.
             "updated_at": NOW_ISO,
         }
@@ -1395,7 +1402,14 @@ def test_stale_pin_bump_pr_does_not_block_forever() -> None:
 
 
 def test_stale_pin_pr_is_reported_in_status_and_receipt(cfg: ad.Config) -> None:
-    pulls = [{"number": 9, "title": "pin nexus-runtime", "head": {"ref": "x", "sha": "9" * 40}}]
+    pulls = [
+        {
+            "number": 9,
+            "title": "pin nexus-runtime",
+            "head": {"ref": "x", "sha": "9" * 40},
+            "created_at": "2025-01-01T00:00:00Z",
+        }
+    ]
     api = green_api(open_pulls=pulls, pushed_at={"9" * 40: "2025-01-01T00:00:00Z"})
     result = cycle(cfg, FakeHost(), FakeProber(), api)
     assert result["status"] == "DEPLOYED"
@@ -1791,3 +1805,151 @@ def test_spare_wrapper_really_isolates_gateway_startup_state(tmp_path: Path) -> 
         proc.wait(timeout=30)
     assert sorted(p.name for p in cfg.canonical_state_dir.iterdir()) == ["sentinel"]
     assert (cfg.canonical_state_dir / "sentinel").read_text() == "live"
+
+
+OLD_ISO = "2025-01-01T00:00:00Z"
+
+
+def test_fresh_pin_pr_with_an_old_head_commit_blocks() -> None:
+    """Round 3 P1: a PR opened minutes ago carrying a 4-day-old commit is in flight."""
+    pulls = [
+        {
+            "number": 11,
+            "title": "pin nexus-runtime",
+            "head": {"ref": "x", "sha": "e" * 40},
+            "created_at": NOW_ISO,
+        }
+    ]
+    api = green_api(open_pulls=pulls, pushed_at={"e" * 40: OLD_ISO})
+    result = ad.pin_bumps_in_flight(api, now=NOW)
+    assert result["verdict"] == "IN_FLIGHT" and result["warnings"] == []
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        {"event": "head_ref_force_pushed", "created_at": NOW_ISO},
+        {"event": "committed", "committer": {"date": NOW_ISO}},
+    ],
+)
+def test_old_pin_pr_with_a_recent_push_blocks(event: dict[str, Any]) -> None:
+    pulls = [
+        {
+            "number": 12,
+            "title": "pin nexus-runtime",
+            "head": {"ref": "x", "sha": "e" * 40},
+            "created_at": OLD_ISO,
+        }
+    ]
+    api = green_api(
+        open_pulls=pulls,
+        pushed_at={"e" * 40: OLD_ISO},
+        timeline={12: [{"event": "commented", "created_at": NOW_ISO}, event]},
+    )
+    assert ad.pin_bumps_in_flight(api, now=NOW)["verdict"] == "IN_FLIGHT"
+    quiet = green_api(
+        open_pulls=pulls,
+        pushed_at={"e" * 40: OLD_ISO},
+        timeline={12: [{"event": "commented", "created_at": NOW_ISO}]},
+    )
+    assert ad.pin_bumps_in_flight(quiet, now=NOW)["verdict"] == "CLEAR"
+
+
+def _fail_hold(monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(cfg: ad.Config, reason: str) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(ad, "_set_hold", boom)
+
+
+def _crash_on_rollback_reload(cfg: ad.Config) -> None:
+    host = FakeHost()
+    host.on_reload = lambda count: (_ for _ in ()).throw(Crash()) if count == 2 else None
+    with pytest.raises(Crash):
+        cycle(cfg, host, FakeProber({(ad.LIVE_PORT, NEW): False}))
+
+
+def test_hold_write_failure_keeps_the_journal_on_rollback_failed(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _crash_on_rollback_reload(cfg)
+    _fail_hold(monkeypatch)
+    with pytest.raises(OSError, match="disk full"):
+        cycle(cfg, FakeHost(), FakeProber({(ad.LIVE_PORT, OLD): False}))
+    assert cfg.journal.exists()  # still guarded: the next cycle reconciles again
+    assert ad.read_receipts(cfg.state_dir) == []
+    monkeypatch.undo()
+    result = cycle(cfg, FakeHost(), FakeProber({(ad.LIVE_PORT, OLD): False}))
+    assert result["status"] == "RECONCILED_ROLLBACK_FAILED"
+    assert cfg.hold_file.exists() and not cfg.journal.exists()
+
+
+def test_hold_write_failure_keeps_a_corrupt_journal_in_place(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    cfg.journal.write_text("{not json")
+    _fail_hold(monkeypatch)
+    with pytest.raises(OSError, match="disk full"):
+        cycle(cfg, FakeHost(), FakeProber())
+    assert cfg.journal.read_text() == "{not json"
+    assert not list(cfg.state_dir.glob("pending-switch.corrupt.*.json"))
+    assert ad.read_receipts(cfg.state_dir) == []
+
+
+def _crash_journal(cfg: ad.Config) -> dict[str, Any]:
+    host = FakeHost()
+    host.on_reload = lambda _count: (_ for _ in ()).throw(Crash())
+    with pytest.raises(Crash):
+        cycle(cfg, host, FakeProber())
+    return json.loads(cfg.journal.read_text())
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda j: j["receipt"].pop("probes"),
+        lambda j: j["receipt"].pop("deployment_root"),
+        lambda j: j["receipt"].update(started_epoch="soon"),
+        lambda j: j.update(new_plist_sha256="nope"),
+        lambda j: j.pop("candidate_python"),
+        lambda j: j.update(receipt=[]),
+    ],
+    ids=["no-probes", "no-root", "bad-epoch", "bad-sha", "no-python", "receipt-list"],
+)
+def test_parseable_but_incomplete_journal_is_quarantined(
+    cfg: ad.Config, mutate: Callable[[dict[str, Any]], Any]
+) -> None:
+    journal = _crash_journal(cfg)
+    mutate(journal)
+    cfg.journal.write_text(json.dumps(journal))
+    host = FakeHost()
+    result = cycle(cfg, host, FakeProber())
+    assert result["status"] == "RECONCILED_JOURNAL_CORRUPT"
+    assert cfg.hold_file.exists() and not cfg.journal.exists()
+    assert host.reloads == []
+
+
+def test_unexpected_reconcile_error_quarantines_with_hold(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _crash_journal(cfg)
+
+    def explode(*_a: Any, **_k: Any) -> Any:
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr(ad._Cycle, "finish_switch", explode)
+    result = cycle(cfg, FakeHost(), FakeProber())
+    assert result["status"] == "RECONCILED_JOURNAL_CORRUPT"
+    assert "RECONCILE_FAILED:RuntimeError" in result["receipt"]["reason"]
+    assert cfg.hold_file.exists() and not cfg.journal.exists()
+    assert cycle(cfg, FakeHost(), FakeProber())["status"] == "HELD"
+
+
+def test_busy_manager_during_reconcile_keeps_the_journal(cfg: ad.Config) -> None:
+    _crash_journal(cfg)
+    host = FakeHost()
+    host.lock_fails = True
+    result = cycle(cfg, host, FakeProber())
+    assert result["status"] == "RECONCILED_BLOCKED_MANAGER_BUSY"
+    assert cfg.journal.exists() and not cfg.hold_file.exists()
