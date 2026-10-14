@@ -55,8 +55,10 @@ def evaluate_gateway_convergence(
     """Classify one desired-vs-observed generation without performing effects.
 
     The returned action is level-triggered.  It never grants recovery
-    authority: every Gateway replacement remains owned by issue #526 and an
-    ambiguous/started effect always reconciles the exact existing operation.
+    authority: routine Gateway replacements are made by the #2153 auto-deployer
+    (no Owner activation, #2155), the manual issue #526 path is the emergency
+    fallback, and an ambiguous/started effect always reconciles the exact
+    existing operation.
     """
 
     moment = now or datetime.now(timezone.utc)

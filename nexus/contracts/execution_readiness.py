@@ -13,7 +13,8 @@ Frozen blocker precedence (issue #807 G0 freeze, comment 5558229416):
 1. GOVERNANCE_PLANE_RECOVERY_REQUIRED -> issue #806 (owner-authorized only)
 2. SOURCE_BINDING_REQUIRED / SOURCE_REALM_MISMATCH -> bind exact desired source;
    EXTERNAL_REPOSITORY_SUBJECT -> route the external Git subject to Nexus Core
-3. GATEWAY_REBIND_REQUIRED -> issue #526 canonical rebind/reload primitive
+3. GATEWAY_REBIND_REQUIRED -> routine: the #2153 auto-deployer (no Owner
+   activation, #2155); emergency fallback: issue #526 rebind/reload primitive
 4. HOST_ACTION_BINDING_GAP -> exact connector/host reconnect-rebind
 5. ACTION_SCHEMA_OR_REVIEW_STALE / PERMISSION_SURFACE_STALE /
    COMPLETION_CONTRACT_BINDING_REQUIRED -> desired-derived surface comparison
