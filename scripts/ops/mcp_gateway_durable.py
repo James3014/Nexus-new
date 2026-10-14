@@ -2002,6 +2002,11 @@ def _r1_materialize_value_store(path: Path, data: bytes) -> bytes:
         if existing != data:
             raise _gateway_error("R1 materialization store drift; refusing to overwrite")
         return existing
+    # #1995 item 3: create-if-absent is a single atomic link(2) of a fully
+    # written temp file. link never replaces an existing entry, so of two
+    # racing writers exactly one creates the store; the other observes the
+    # winner's bytes and fails closed on drift. No lock is taken, so this adds
+    # no lock-ordering edge for callers that already hold GATEWAY_LOCK.
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     try:
         os.chmod(tmp, 0o600)
@@ -2009,13 +2014,19 @@ def _r1_materialize_value_store(path: Path, data: bytes) -> bytes:
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(tmp, path)
+        try:
+            os.link(tmp, path)
+        except FileExistsError:
+            pass
+        else:
+            _fsync_dir(path.parent)
     finally:
         if os.path.exists(tmp):
             os.unlink(tmp)
+    path = _safe_store_path(path, leaf_mode=0o600)
     written = path.read_bytes()
     if written != data:
-        raise _gateway_error("R1 materialization write identity mismatch")
+        raise _gateway_error("R1 materialization store drift; refusing to overwrite")
     return written
 
 
@@ -2098,9 +2109,11 @@ def _r1_historical_materialized_generation(
             "R1 successor historical materialization identity mismatch"
         )
 
+    # #1995 item 4: read under the ledger writer's own lock (ledger.jsonl.lock),
+    # not GATEWAY_LOCK. Callers hold GATEWAY_LOCK, so the order is always
+    # GATEWAY_LOCK -> ledger lock; no ledger-lock holder takes GATEWAY_LOCK.
     rows = GatewayLedger(
         Path(GATEWAY_STATE_ROOT) / "ledger.jsonl",
-        lock_path=GATEWAY_LOCK,
     ).recovery_rows(
         request.request_id,
         request=request,
@@ -2728,6 +2741,8 @@ def _reserve_post_effect_reconcile_attempt(
 
 
 R1_CONCURRENT_RECOVERY_FORBIDDEN = "R1_CONCURRENT_RECOVERY_FORBIDDEN"
+# #1995 item 5: a legacy v1 effect may not start while any R1 request is open.
+R1_OPEN_RECOVERY_BLOCKS_V1_EFFECT = "R1_OPEN_RECOVERY_BLOCKS_V1_EFFECT"
 
 
 def _derive_terminal_recovery_states() -> frozenset[DeploymentState]:
@@ -2753,12 +2768,8 @@ def _derive_terminal_recovery_states() -> frozenset[DeploymentState]:
 R1_TERMINAL_RECOVERY_STATES = _derive_terminal_recovery_states()
 
 
-def _refuse_concurrent_r1_recovery_unlocked(rows: list[dict[str, Any]], request_id: str) -> None:
-    """Refuse a NEW R1 request while any other R1 request is non-terminal.
-
-    ``rows`` must come from ``GatewayLedger._scan_unlocked`` under the ledger
-    lock. Continuing or reconciling ``request_id`` itself is always allowed.
-    """
+def _r1_last_states(rows: list[dict[str, Any]]) -> dict[str, str]:
+    """Last ledger state of every R1 (v2 / durable-recovery) request."""
     last_state: dict[str, str] = {}
     for row in rows:
         if (
@@ -2766,6 +2777,77 @@ def _refuse_concurrent_r1_recovery_unlocked(rows: list[dict[str, Any]], request_
             or row["effect_class"] == EffectClass.GATEWAY_DURABLE_RECOVERY.value
         ):
             last_state[row["request_id"]] = row["state"]
+    return last_state
+
+
+def _refuse_v1_effect_while_r1_open_unlocked(rows: list[dict[str, Any]], operation: str) -> None:
+    """#1995 item 5: refuse a legacy v1 Gateway effect while R1 is open.
+
+    ``rows`` must come from ``GatewayLedger._scan_unlocked`` and the ledger
+    lock must stay held across the v1 effect, so a new R1 REQUESTED cannot be
+    appended between this check and the effect.
+    """
+    last_state = _r1_last_states(rows)
+    open_requests = sorted(
+        request_id
+        for request_id, state in last_state.items()
+        if DeploymentState(state) not in R1_TERMINAL_RECOVERY_STATES
+    )
+    if open_requests:
+        raise GatewayContractError(
+            f"{R1_OPEN_RECOVERY_BLOCKS_V1_EFFECT}: legacy v1 {operation} refused "
+            "while R1 request(s) "
+            + ", ".join(f"{other}={last_state[other]}" for other in open_requests)
+            + " are non-terminal"
+        )
+
+
+def _refuse_illegal_recovery_sink_row(
+    rows: list[dict[str, Any]], record: RecoveryLedgerRecord
+) -> None:
+    """#1995 item 1: never write a row that ``_scan_unlocked`` would reject.
+
+    Mirrors the reader's fence, binding and transition rules so a bad append
+    fails as a typed refusal instead of bricking every later ledger read.
+    """
+    prior: dict[str, Any] | None = None
+    for row in rows:
+        if (
+            row["idempotency_fence"] == record.idempotency_fence
+            and row["request_id"] != record.request_id
+        ):
+            raise GatewayContractError("recovery idempotency fence conflict")
+        if row["request_id"] == record.request_id:
+            if (row["request_hash"], row["idempotency_fence"]) != (
+                record.request_hash,
+                record.idempotency_fence,
+            ):
+                raise GatewayContractError("recovery request binding conflict")
+            prior = row
+    if prior is None:
+        if record.state is not DeploymentState.REQUESTED:
+            raise GatewayContractError("request must begin in REQUESTED")
+        return
+    if record.state is DeploymentState.REQUESTED:
+        raise GatewayContractError(
+            "invalid ledger state transition: REQUESTED for existing request "
+            f"{record.request_id} (last state {prior['state']})"
+        )
+    from nexus.contracts.gateway_deployment import transition
+
+    try:
+        transition(prior["state"], record.state)
+    except Exception as exc:
+        raise GatewayContractError("invalid ledger state transition") from exc
+
+
+def _refuse_concurrent_r1_recovery_unlocked(rows: list[dict[str, Any]], request_id: str) -> None:
+    """Refuse a NEW R1 request while any other R1 request is non-terminal.
+
+    ``rows`` must come from ``GatewayLedger._scan_unlocked`` under the ledger
+    lock. Continuing or reconciling ``request_id`` itself is always allowed.
+    """
+    last_state = _r1_last_states(rows)
     if request_id in last_state:
         return
     open_requests = sorted(
@@ -3069,6 +3151,7 @@ class GatewayLedger:
         rows: list[dict[str, Any]],
         record: RecoveryLedgerRecord,
     ) -> RecoveryLedgerRecord:
+        _refuse_illegal_recovery_sink_row(rows, record)
         encoded = (
             json.dumps(
                 record.model_dump(),
@@ -5134,7 +5217,8 @@ def install_stable_artifact(request: GatewayDeploymentRequest, *, source_root: P
                             source_path: Path, artifact_path: Path | None = None,
                             command_runner: Callable[..., Any] | None = None,
                             observation_time: str | None = None,
-                            authority_command_runner: Callable[..., Any] | None = None) -> dict[str, Any]:
+                            authority_command_runner: Callable[..., Any] | None = None,
+                            ledger: GatewayLedger | None = None) -> dict[str, Any]:
     """Publish one exact manager artifact; this is never part of reload."""
     request = _require_host_authority(
         request, observation_time=observation_time,
@@ -5178,25 +5262,31 @@ def install_stable_artifact(request: GatewayDeploymentRequest, *, source_root: P
     info = source_path.stat()
     if info.st_uid != artifact.uid or stat.S_IMODE(info.st_mode) != artifact.mode:
         raise _gateway_error("stable artifact source ownership/mode mismatch")
-    if artifact.predecessor_sha256 and Path(artifact_path or GATEWAY_ARTIFACT).exists():
-        predecessor = hashlib.sha256(Path(artifact_path or GATEWAY_ARTIFACT).read_bytes()).hexdigest()
-        if predecessor != artifact.predecessor_sha256:
-            raise _gateway_error("stable artifact predecessor mismatch")
-    destination = _safe_store_path(Path(artifact_path), leaf_mode=artifact.mode, create=True)
-    if destination.exists():
-        if hashlib.sha256(destination.read_bytes()).hexdigest() != artifact.predecessor_sha256:
-            raise _gateway_error("stable artifact predecessor conflict")
-        _atomic_gateway_write(destination, data, mode=artifact.mode)
-    else:
-        fd, tmp_name = tempfile.mkstemp(dir=destination.parent, prefix=f".{destination.name}.")
-        try:
-            os.fchmod(fd, artifact.mode)
-            with os.fdopen(fd, "wb") as handle:
-                handle.write(data); handle.flush(); os.fsync(handle.fileno())
-            os.link(tmp_name, destination)
-            _fsync_dir(destination.parent)
-        finally:
-            with contextlib.suppress(OSError): os.unlink(tmp_name)
+    store = ledger or GatewayLedger()
+    # The ledger lock stays held across the install so R1 cannot open meanwhile.
+    with InterProcessLock(store.lock_path):
+        _refuse_v1_effect_while_r1_open_unlocked(store._scan_unlocked(), request.operation)
+        if artifact.predecessor_sha256 and Path(artifact_path or GATEWAY_ARTIFACT).exists():
+            predecessor = hashlib.sha256(
+                Path(artifact_path or GATEWAY_ARTIFACT).read_bytes()
+            ).hexdigest()
+            if predecessor != artifact.predecessor_sha256:
+                raise _gateway_error("stable artifact predecessor mismatch")
+        destination = _safe_store_path(Path(artifact_path), leaf_mode=artifact.mode, create=True)
+        if destination.exists():
+            if hashlib.sha256(destination.read_bytes()).hexdigest() != artifact.predecessor_sha256:
+                raise _gateway_error("stable artifact predecessor conflict")
+            _atomic_gateway_write(destination, data, mode=artifact.mode)
+        else:
+            fd, tmp_name = tempfile.mkstemp(dir=destination.parent, prefix=f".{destination.name}.")
+            try:
+                os.fchmod(fd, artifact.mode)
+                with os.fdopen(fd, "wb") as handle:
+                    handle.write(data); handle.flush(); os.fsync(handle.fileno())
+                os.link(tmp_name, destination)
+                _fsync_dir(destination.parent)
+            finally:
+                with contextlib.suppress(OSError): os.unlink(tmp_name)
     return {"state": DeploymentState.VERIFIED.value, "artifact_sha256": artifact.artifact_sha256,
             "source_root": str(source_root), "request_id": request.request_id}
 
@@ -5485,7 +5575,8 @@ def rollback_gateway(request: GatewayDeploymentRequest, *, plist_path: Path | No
                      token_loader: Callable[[], str] | None = None,
                      sleeper: Callable[[float], None] = time.sleep,
                      observation_time: str | None = None,
-                     authority_command_runner: Callable[..., Any] | None = None) -> dict[str, Any]:
+                     authority_command_runner: Callable[..., Any] | None = None,
+                     ledger: GatewayLedger | None = None) -> dict[str, Any]:
     """Restore one request-bound predecessor after mandatory physical proof."""
     plist_path = Path(plist_path or GATEWAY_PLIST)
     if plist_path != Path(GATEWAY_PLIST):
@@ -5562,7 +5653,11 @@ def rollback_gateway(request: GatewayDeploymentRequest, *, plist_path: Path | No
             raise _gateway_error("rollback authenticated postflight unavailable", exc) from exc
         if not rollback_token:
             raise _gateway_error("rollback authenticated postflight token missing")
-    with InterProcessLock(GATEWAY_LOCK):
+    store = ledger or GatewayLedger()
+    # Lock order GATEWAY_LOCK -> ledger lock (same as R1 materialization); the
+    # ledger lock stays held across the effect so R1 cannot open meanwhile.
+    with InterProcessLock(GATEWAY_LOCK), InterProcessLock(store.lock_path):
+        _refuse_v1_effect_while_r1_open_unlocked(store._scan_unlocked(), request.operation)
         if capture.loaded:
             result = run("launchctl", "bootout", f"{UID_TARGET}/{GATEWAY_LABEL}")
             if getattr(result, "returncode", 0) not in (0, None) and not _legacy_absent_service(result, ("launchctl", "bootout", f"{UID_TARGET}/{GATEWAY_LABEL}")):
@@ -5633,6 +5728,8 @@ def gateway_reload(request: GatewayDeploymentRequest, *, observed: Mapping[str, 
                 raise _gateway_error("duplicate or uncertain request requires physical reconciliation")
             if existing["state"] == DeploymentState.VERIFIED.value:
                 return {"state": existing["state"], "replayed": True, "request_id": request.request_id}
+        _refuse_v1_effect_while_r1_open_unlocked(rows, request.operation)
+
         # Persist the legal lifecycle chain while this same lock remains held.
         def append_state(state: DeploymentState, observed_identity: Mapping[str, Any] | None = None) -> dict[str, Any]:
             current_rows = store._scan_unlocked()

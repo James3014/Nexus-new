@@ -753,3 +753,58 @@ def test_1958_successor_runs_when_all_prior_requests_are_terminal(tmp_path):
     assert b._run_bootstrap(manager)["status"] == "VERIFIED"
     assert manager.effects == ["request-v1", "request-v2"]
     assert _request_rows(manager, "request-v2")[-1]["state"] == "VERIFIED"
+
+
+# --- #1995 item 3: bootstrap first consumption is atomic create-if-absent ----
+
+
+def _i1995_consumption(manager, tag: str) -> dict[str, object]:
+    values: dict[str, object] = {key: f"{key}-{tag}" for key in b._GENERATION_KEYS}
+    values["schema"] = b.CONSUMPTION_SCHEMA
+    values["effect_started_at_marker"] = False
+    values["consumption_hash"] = manager.canonical_hash(values)
+    return values
+
+
+def test_1995_persist_consumption_two_writers_exactly_one_wins(tmp_path, monkeypatch):
+    import threading
+
+    root = tmp_path / "state"
+    root.mkdir(mode=0o700)
+    root.chmod(0o700)
+    monkeypatch.setattr(real_manager, "GATEWAY_STATE_ROOT", root)
+    monkeypatch.setattr(real_manager, "HOST_UID", __import__("os").getuid())
+    real_mkstemp = real_manager.tempfile.mkstemp
+    barrier = threading.Barrier(2)
+
+    def racing_mkstemp(*args, **kwargs):
+        # Both writers already observed the marker absent; release together.
+        barrier.wait(timeout=5)
+        return real_mkstemp(*args, **kwargs)
+
+    monkeypatch.setattr(real_manager, "tempfile", SimpleNamespace(mkstemp=racing_mkstemp))
+    payloads = [_i1995_consumption(real_manager, tag) for tag in ("a", "b")]
+    outcomes: list[tuple[str, object]] = []
+
+    def writer(payload):
+        try:
+            outcomes.append(("ok", b._persist_consumption(real_manager, payload)))
+        except Exception as exc:  # noqa: BLE001 - classified below
+            outcomes.append(("error", exc))
+
+    threads = [threading.Thread(target=writer, args=(payload,)) for payload in payloads]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    marker = root / b.CONSUMPTION_FILENAME
+    stored = json.loads(marker.read_bytes())
+    winners = [value for kind, value in outcomes if kind == "ok"]
+    losers = [value for kind, value in outcomes if kind == "error"]
+    assert len(winners) == 1 and len(losers) == 1, outcomes
+    assert winners[0] == stored and stored in payloads
+    assert isinstance(losers[0], real_manager.GatewayContractError)
+    assert "store drift" in str(losers[0])
+    assert b._load_consumption(real_manager) == stored
+    assert sorted(p.name for p in root.glob(f".{marker.name}.*")) == []
