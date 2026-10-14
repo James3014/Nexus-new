@@ -10,7 +10,8 @@ on:
       - 'nexus/services/**'
       - 'nexus/delivery/**'
       - 'nexus-core-rs/src/**'
-      - 'nexus/research/contamination_guard.py'
+      - 'nexus/research/**'
+      - 'nexus/app/research_flow_service.py'
       - 'docs/reports/policy-manifest.v2.json'
   pull_request:
     branches: [main, master]
@@ -21,7 +22,8 @@ on:
       - 'nexus/services/**'
       - 'nexus/delivery/**'
       - 'nexus-core-rs/src/**'
-      - 'nexus/research/contamination_guard.py'
+      - 'nexus/research/**'
+      - 'nexus/app/research_flow_service.py'
       - 'docs/reports/policy-manifest.v2.json'
   workflow_dispatch:
 
@@ -92,7 +94,7 @@ jobs:
 
           while IFS= read -r -d '' path; do
             case "$path" in
-              nexus/engine/*|nexus/core/*|nexus/governance/*|nexus/services/*|nexus/delivery/*|nexus/research/contamination_guard.py|nexus-core-rs/src/*|docs/reports/policy-manifest.v2.json)
+              nexus/engine/*|nexus/core/*|nexus/governance/*|nexus/services/*|nexus/delivery/*|nexus/research/*|nexus/app/research_flow_service.py|nexus-core-rs/src/*|docs/reports/policy-manifest.v2.json)
                 printf '%s\0' "$path" >> "$out"
                 ;;
             esac

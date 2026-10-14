@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import Any, Sequence
 
 from nexus.research.isolation_contracts import ContaminationGuardResult, ResearchReceipt, ResearchIsolationLevel
 from nexus.research.research_facts import has_design_fields
@@ -27,10 +27,26 @@ DESIGN_TERMS = (
 )
 
 
-def evaluate_research_contamination(payload: dict[str, Any]) -> ContaminationGuardResult:
-    """檢查研究產物是否包含設計意圖、實作建議或最終需求外推 (Contamination Check)"""
+def _phrase_pattern(term: str) -> str:
+    """Word-boundary only on ASCII word edges, so CJK phrases also match inside CJK text."""
+    head = r"(?<![A-Za-z0-9_])" if re.match(r"[A-Za-z0-9_]", term[:1]) else ""
+    tail = r"(?![A-Za-z0-9_])" if re.match(r"[A-Za-z0-9_]", term[-1:]) else ""
+    return head + re.escape(term) + tail
+
+
+def evaluate_research_contamination(
+    payload: dict[str, Any], *, terms: Sequence[str] | None = None
+) -> ContaminationGuardResult:
+    """檢查研究產物是否包含設計意圖、實作建議或最終需求外推 (Contamination Check)
+
+    ``terms`` replaces DESIGN_TERMS for one call site (P-CONTAM-01 canonical path, #2199);
+    the default keeps the original single-word matching unchanged.
+    """
     blob = json.dumps(payload, ensure_ascii=False, sort_keys=True)
-    detected = [term for term in DESIGN_TERMS if re.search(r'\b' + re.escape(term) + r'\b', blob, re.IGNORECASE)]
+    if terms is None:
+        detected = [term for term in DESIGN_TERMS if re.search(r'\b' + re.escape(term) + r'\b', blob, re.IGNORECASE)]
+    else:
+        detected = [term for term in terms if term and re.search(_phrase_pattern(term), blob, re.IGNORECASE)]
     if has_design_fields(payload):
         detected.append("design_field")
     detected = list(dict.fromkeys(detected))

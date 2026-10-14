@@ -1577,6 +1577,12 @@ def run_auto_flow(
         capability_evidence["research_used"] = True
         capability_evidence["research_refs"] = retrieval_refs[:3] or [f"research:{receipt_slug}:route_selected"]
         capability_evidence["research_gate_passed"] = bool(artifact_verified)
+    # P-CONTAM-01 (#2199): contaminated research output never counts as a research PASS.
+    from nexus.research.contamination_enforcement import enforce_on_flow_evidence
+
+    capability_evidence = enforce_on_flow_evidence(
+        capability_evidence, research_context=route.get("research_context"), task_desc=task_desc
+    )
     capability_evidence["research_source_projects"] = list(RESEARCH_SOURCE_PROJECTS)
     autoreason_payload = build_autoreason_payload(
         result=result,

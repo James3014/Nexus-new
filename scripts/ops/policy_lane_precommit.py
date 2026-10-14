@@ -48,6 +48,9 @@ FILE_TO_POLICY = {
     "nexus/engine/attempt_settlement_service.py": ["P-SETTLE-01"],
     "nexus-core-rs/src/flow_machine.rs": ["P-FLOW-01"],
     "nexus/research/contamination_guard.py": ["P-CONTAM-01"],
+    "nexus/research/contamination_enforcement.py": ["P-CONTAM-01"],
+    "nexus/core/capability_executor_registry.py": ["P-CONTAM-01"],
+    "nexus/app/research_flow_service.py": ["P-CONTAM-01"],
 }
 
 
