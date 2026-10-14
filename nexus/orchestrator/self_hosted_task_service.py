@@ -1809,10 +1809,10 @@ class SelfHostedTaskService:
                 recommended_tool = "nexus_self_hosted_integrate_approved"
             elif promotion_status == "APPROVAL_INVALIDATED" or status == "APPROVAL_INVALIDATED":
                 next_action = "resubmit_exact_approval_binding"
-                recommended_tool = "nexus_self_hosted_approve_promotion"
+                recommended_tool = "nexus_candidate_approve"
             else:
                 next_action = "approve_candidate"
-                recommended_tool = "nexus_self_hosted_approve_promotion"
+                recommended_tool = "nexus_candidate_approve"
         elif status in TERMINAL_STATUSES:
             action_state = "TERMINAL"
             attention_required = False

@@ -13,6 +13,12 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Set
 
+APPROVE_RETIRED_MESSAGE = (
+    "Operation 'approve' is retired (#1928, APPROVAL_GRANT_REQUIRED): the CLI cannot carry "
+    "an approval grant. Approve through the governed gateway tool nexus_candidate_approve "
+    "with a bound approval grant."
+)
+
 
 ALLOWED_OPERATIONS = {
     "submit",
@@ -97,6 +103,13 @@ def resolve_repo_root() -> Path:
     return default_root
 
 
+def _reject_option_like(key: str, val: str) -> None:
+    """Every string value becomes a CLI option value; a leading '-' (or blank) would
+    be parsed by Click as an option such as --help, so it is rejected."""
+    if not val.strip() or val.lstrip().startswith("-"):
+        raise ValueError(f"Field '{key}' must not be empty or start with '-'.")
+
+
 def _validate_field_type(key: str, val: Any) -> None:
     if key in {
         "task_id", "what", "why", "controller_revision", "target_base_revision",
@@ -107,12 +120,16 @@ def _validate_field_type(key: str, val: Any) -> None:
     }:
         if not isinstance(val, str):
             raise TypeError(f"Field '{key}' must be a string, got {type(val).__name__}.")
+        if key not in {"op", "operation"}:
+            _reject_option_like(key, val)
     elif key in {"allowed_files", "forbidden_files", "verifier_commands", "protected_contracts"}:
         if isinstance(val, str):
-            pass
+            _reject_option_like(key, val)
         elif isinstance(val, list):
             if not all(isinstance(item, str) for item in val):
                 raise TypeError(f"List items in '{key}' must all be strings.")
+            if val:
+                _reject_option_like(key, val[0])
         else:
             raise TypeError(f"Field '{key}' must be a string or list of strings, got {type(val).__name__}.")
     elif key in {"timeout", "timeout_seconds", "poll_interval", "poll_interval_seconds"}:
@@ -146,6 +163,9 @@ def parse_and_validate_input(raw_input: str) -> Dict[str, Any]:
     op_norm = op.lower()
     if op_norm not in ALLOWED_OPERATIONS:
         raise ValueError(f"Unknown operation '{op}'. Allowed operations: {sorted(list(ALLOWED_OPERATIONS))}")
+
+    if op_norm == "approve":
+        raise ValueError(APPROVE_RETIRED_MESSAGE)
 
     schema_op = "list-actionable" if op_norm in {"list-actionable", "list_actionable"} else op_norm
     schema = OPERATION_SCHEMAS[schema_op]
@@ -226,12 +246,7 @@ def build_cli_argv(data: Dict[str, Any], repo_root: Path | None = None) -> List[
         _add_str_opt("--state-dir", "state_dir")
 
     elif cli_op == "approve":
-        _add_str_opt("--task-id", "task_id")
-        _add_str_opt("--candidate-commit-sha", "candidate_commit_sha")
-        _add_str_opt("--candidate-tree-sha", "candidate_tree_sha")
-        _add_str_opt("--candidate-state-hash", "candidate_state_hash")
-        _add_str_opt("--verified-receipt-hash", "verified_receipt_hash")
-        _add_str_opt("--state-dir", "state_dir")
+        raise ValueError(APPROVE_RETIRED_MESSAGE)
 
     elif cli_op == "integrate":
         _add_str_opt("--task-id", "task_id")

@@ -572,6 +572,15 @@ def test_self_hosted_approve_exact_binding_and_mismatch(tmp_path: Path):
         },
     )
 
+    def _snapshot() -> dict[str, bytes]:
+        return {
+            str(path.relative_to(tmp_path)): path.read_bytes()
+            for path in sorted(tmp_path.rglob("*"))
+            if path.is_file()
+        }
+
+    before = _snapshot()
+    assert before
     for commit_sha in ("x" * 40, packet["candidate_commit_sha"]):
         res = runner.invoke(
             nexus,
@@ -589,6 +598,8 @@ def test_self_hosted_approve_exact_binding_and_mismatch(tmp_path: Path):
         assert "self-hosted approve is retired" in res.output
         assert "APPROVAL_GRANT_REQUIRED" in res.output
         assert "candidate_approve" in res.output
+
+        assert _snapshot() == before
 
     state = service._read_state("test-sh-approve-001")
     assert state["promotion_status"] == "PENDING_HUMAN_APPROVAL"
