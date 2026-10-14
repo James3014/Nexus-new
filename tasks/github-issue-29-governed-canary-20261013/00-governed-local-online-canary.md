@@ -185,10 +185,15 @@ receipt by a reviewer distinct from the implementer.
 
 ## Known limitations (disclosed)
 
-- Online model identity is bound to the admitted argv (`--model
-  gemini-3.8-flash-medium`, `--mode plan --sandbox`) and the runtime command
-  fingerprint only. The harness recomputes the fingerprint from that argv; the
-  provider-side served model is not observed (the runtime Agy adapter has no
-  log-level model attestation).
+- Online model identity is the runtime's Agy log attestation (runtime #205:
+  resolved model and backend label read from the private `--log-file`,
+  `MODEL_IDENTITY_OK`), re-checked by the harness against the admitted
+  `gemini-3.8-flash-medium`, with the turn delivered from the
+  `--output-format json` envelope (`status=SUCCESS`). The harness does not
+  re-read the Agy log itself.
+- The command fingerprint cannot be recomputed from the receipt: the Agy argv
+  carries a random private `--log-file` path the receipt does not record. The
+  harness binds the fingerprint to the process invocation id and the resolved
+  Agy executable hash only.
 - The runtime receipt does not bind the Task Card hash; only the harness
   receipt does (card bytes must equal the HEAD blob).
