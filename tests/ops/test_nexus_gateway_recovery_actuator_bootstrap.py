@@ -438,8 +438,9 @@ def test_next_generation_succeeds_after_verified_and_appends_marker_history(tmp_
         _VERIFIED_PATH[:8],  # CLIENT_BOUND: in flight, not yet VERIFIED
         [*_VERIFIED_PATH[:5], "UNCERTAIN_EFFECT"],
         [*_VERIFIED_PATH[:5], "BLOCKED"],
-        # #1995: pre-effect ["REQUESTED", "BLOCKED"] is now accepted; see
-        # test_1995_owner_reconciled_blocked_predecessor_allows_succession.
+        # #1995: a pre-effect BLOCKED predecessor no longer blocks succession
+        # (no physical effect happened); this case now asserts acceptance.
+        ["REQUESTED", "BLOCKED"],
         [*_VERIFIED_PATH[:5], "UNCERTAIN_EFFECT", "ROLLED_BACK"],
     ],
     ids=[
@@ -449,6 +450,7 @@ def test_next_generation_succeeds_after_verified_and_appends_marker_history(tmp_
         "client-bound",
         "uncertain-effect",
         "blocked-after-effect",
+        "blocked-pre-effect",
         "rolled-back",
     ],
 )
@@ -459,6 +461,14 @@ def test_non_verified_predecessor_blocks_succession_before_any_effect(tmp_path, 
     marker_before = _marker_bytes(manager)
     manager.advance_generation()
     before = len(manager.calls)
+
+    if states == ["REQUESTED", "BLOCKED"]:
+        # #1995 Owner decision: only a post-effect BLOCKED needs an Owner
+        # reconcile record; a pre-effect BLOCKED predecessor is accepted.
+        result = b._run_bootstrap(manager)
+        assert result["request_id"] == "request-v2"
+        assert _marker_bytes(manager) != marker_before
+        return
 
     with pytest.raises(
         b.BootstrapError,
