@@ -380,8 +380,9 @@ def _bound_runs(
     the tracked branch for the candidate commit itself, or the merged PR for a
     PR-head run (event, head branch, head repository, created before the
     merge, and the PR number whenever GitHub lists one).  GitHub empties
-    ``pull_requests`` once a PR is merged, so head branch + repository + time
-    are the binding there; anything that cannot be bound does not count.
+    ``pull_requests`` once a PR is merged, so head branch + repository + the
+    PR's lifetime (created_at .. merged_at, per attempt) are the binding there;
+    anything that cannot be bound does not count.
     """
     query = urllib.parse.urlencode({"check_name": name, "per_page": 100})
     runs = api_get(f"repos/{repo}/commits/{sha}/check-runs?{query}").get("check_runs") or []
@@ -419,10 +420,24 @@ def _from_origin(run: dict, workflow_run: dict, sha: str, origin: Dict[str, Any]
         return False
     if workflow_run.get("head_branch") != origin["head_ref"]:
         return False
-    created = _parse_time(workflow_run.get("created_at"))
+    # Lifetime of the merged PR: an earlier PR with the same branch and head sha
+    # created its runs before this PR existed; a re-run after the merge is a new
+    # attempt.  The workflow run's created_at is its first attempt; each check
+    # run is one attempt with its own started_at/completed_at, so the attempt
+    # times decide (run_started_at would follow a post-merge re-run and wrongly
+    # discard the original pre-merge attempt).
+    opened = _parse_time(origin["created_at"])
     merged = _parse_time(origin["merged_at"])
-    if created is None or merged is None or created > merged:
+    created = _parse_time(workflow_run.get("created_at"))
+    started = _parse_time(run.get("started_at"))
+    if None in (opened, merged, created, started):
         return False
+    if not opened <= created <= merged or not opened <= started <= merged:
+        return False
+    if run.get("completed_at") is not None:
+        completed = _parse_time(run.get("completed_at"))
+        if completed is None or completed > merged:
+            return False
     for listed in (run.get("pull_requests"), workflow_run.get("pull_requests")):
         numbers = {p.get("number") for p in listed or []}
         if numbers and origin["number"] not in numbers:
@@ -523,6 +538,7 @@ def required_checks(
                             "head_ref": p["head"]["ref"],
                             "head_repo": ((p["head"].get("repo") or {}).get("full_name")),
                             "merged_at": p["merged_at"],
+                            "created_at": p.get("created_at"),
                         }
                         for p in api_get(f"repos/{repo}/commits/{sha}/pulls") or []
                         if p.get("merged_at")

@@ -161,7 +161,12 @@ class FakeProber:
 SUITES = {name: 1000 + i for i, name in enumerate(ad.REQUIRED_CHECKS)}
 PR_SUITE_OFFSET = 50_000  # suites >= this belong to the merged PR's head
 ACTIONS_APP_ID = 15368
-MERGED_PR = {"number": 2140, "ref": "feat/x", "merged_at": "2026-10-14T00:00:00Z"}
+MERGED_PR = {
+    "number": 2140,
+    "ref": "feat/x",
+    "created_at": "2026-10-13T20:00:00Z",
+    "merged_at": "2026-10-14T00:00:00Z",
+}
 
 
 def _workflow_run(suite: int, path: str) -> dict[str, Any]:
@@ -235,6 +240,7 @@ def green_api(
                     "merged_at": "2026-10-14T00:00:00Z",
                     "merge_commit_sha": NEW,
                     "number": MERGED_PR["number"],
+                    "created_at": MERGED_PR["created_at"],
                     "base": {"ref": "main"},
                     "head": {
                         "sha": PR_HEAD,
@@ -2357,3 +2363,75 @@ def test_floor_check_without_runs_is_unknown_and_recorded(cfg: ad.Config) -> Non
     assert result["status"] == "CHECKS_UNKNOWN"
     assert result["required_checks"]["missing"] == ["Exact-base impact gate"]
     assert prober.calls == []
+
+
+def _pr_head_runs(*, workflow: dict[str, Any] | None = None, attempts: list[dict[str, Any]]):
+    """green_api where Deletion guard exists only on the merged PR head, as ``attempts``."""
+    base = green_api(on_commit=False)
+
+    def api(path: str) -> Any:
+        if "check-runs" in path and "Deletion+guard" in path and "/commits/" + PR_HEAD in path:
+            return {"check_runs": attempts}
+        payload = base(path)
+        if workflow and "/actions/runs?check_suite_id=" in path:
+            if int(path.rsplit("=", 1)[1]) >= PR_SUITE_OFFSET:
+                for run in payload["workflow_runs"]:
+                    run.update(workflow)
+        return payload
+
+    return api
+
+
+def _attempt(run_id: int, started: str, conclusion: str = "success", **extra: Any) -> dict:
+    return {
+        "id": run_id,
+        "name": "Deletion guard",
+        "status": "completed",
+        "conclusion": conclusion,
+        "started_at": started,
+        "completed_at": extra.pop("completed_at", started),
+        "app": {"slug": "github-actions", "id": ACTIONS_APP_ID},
+        "check_suite": {"id": SUITES["Deletion guard"] + PR_SUITE_OFFSET},
+        "pull_requests": [],
+        **extra,
+    }
+
+
+def test_run_from_an_earlier_pr_on_the_same_branch_and_sha_is_rejected() -> None:
+    """#2100 (closed) and #2140 (merged) share branch and head sha: #2100's run is
+    older than #2140 itself and must not count."""
+    earlier = _attempt(1, "2026-10-12T10:00:00Z")
+    api = _pr_head_runs(workflow={"created_at": "2026-10-12T09:59:00Z"}, attempts=[earlier])
+    result = ad.required_checks(api, NEW)
+    assert result["verdict"] == "UNKNOWN" and "Deletion guard" in result["missing"]
+
+
+def test_rerun_after_merge_is_ignored_and_pre_merge_attempt_counts() -> None:
+    pre_merge = _attempt(1, "2026-10-13T23:00:00Z")
+    post_merge_rerun = _attempt(2, "2026-10-14T01:00:00Z", conclusion="failure")
+    # The workflow run's run_started_at follows the latest (post-merge) attempt.
+    api = _pr_head_runs(
+        workflow={"run_started_at": "2026-10-14T01:00:00Z", "run_attempt": 2},
+        attempts=[pre_merge, post_merge_rerun],
+    )
+    result = ad.required_checks(api, NEW)
+    assert result["verdict"] == "GREEN"
+    assert result["checks"]["Deletion guard"]["sha"] == PR_HEAD
+
+
+def test_successful_rerun_after_merge_does_not_rescue_a_red_check() -> None:
+    pre_merge_red = _attempt(1, "2026-10-13T23:00:00Z", conclusion="failure")
+    post_merge_green = _attempt(2, "2026-10-14T01:00:00Z")
+    api = _pr_head_runs(attempts=[pre_merge_red, post_merge_green])
+    assert ad.required_checks(api, NEW)["verdict"] == "RED"
+
+
+def test_attempt_completed_after_merge_does_not_count() -> None:
+    straddling = _attempt(1, "2026-10-13T23:59:00Z", completed_at="2026-10-14T00:30:00Z")
+    result = ad.required_checks(_pr_head_runs(attempts=[straddling]), NEW)
+    assert result["verdict"] == "UNKNOWN" and "Deletion guard" in result["missing"]
+
+
+def test_only_post_merge_rerun_leaves_the_check_missing() -> None:
+    api = _pr_head_runs(attempts=[_attempt(2, "2026-10-14T01:00:00Z")])
+    assert ad.required_checks(api, NEW)["missing"] == ["Deletion guard"]
