@@ -1196,6 +1196,9 @@ class InPlaceSprintExecutor:
         self.timeout_sec = timeout_sec
         self.task = task
 
+    def _evaluate_confined(self, **kwargs: Any) -> CandidateEval | None:
+        return _inplace_evaluate_confined(self, **kwargs)
+
     def evaluate_candidate(self, *, seed: int, hint: str, code: str, source: str) -> CandidateEval:
         start = time.time()
         target_path = self.repo_root / self.target_file
@@ -1236,6 +1239,9 @@ class InPlaceSprintExecutor:
                         source=source,
                         elapsed_sec=round(time.time() - start, 4),
                     )
+            confined = self._evaluate_confined(seed=seed, hint=hint, code=code, source=source, original=original, start=start)
+            if confined is not None:
+                return confined
             target_path.parent.mkdir(parents=True, exist_ok=True)
             target_path.write_text(code, encoding="utf-8")
             restored_files[target_path] = original
@@ -1288,6 +1294,46 @@ class InPlaceSprintExecutor:
                         path.unlink()
                 else:
                     path.write_text(original_text, encoding="utf-8")
+
+
+def _inplace_evaluate_confined(
+    executor: "InPlaceSprintExecutor", *, seed: int, hint: str, code: str, source: str, original: str, start: float
+) -> CandidateEval | None:
+    """Strict/counted lane: the visible test runs on a scratch copy inside the OS confinement,
+    never in the workspace (None when confinement is not requested)."""
+    from nexus.services import post_candidate_seam as seam
+
+    if not seam.confine_visible_test_enabled():
+        return None
+    test_arg = str(executor.pytest_cmd[-1]) if executor.pytest_cmd else ""
+    if not test_arg.endswith(".py"):
+        return CandidateEval(
+            seed=seed, score=0.0, hint=hint, error=seam.CONFINEMENT_UNAVAILABLE + ":no_visible_test",
+            candidate_code=code, source=source, elapsed_sec=round(time.time() - start, 4),
+        )
+    test_path = Path(test_arg) if Path(test_arg).is_absolute() else executor.repo_root / test_arg
+    try:
+        completed, executed = seam.run_visible_test_confined(
+            target_path=executor.repo_root / executor.target_file,
+            visible_test_path=test_path,
+            original_code=original,
+            candidate_code=code,
+            timeout_sec=executor.timeout_sec,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return CandidateEval(
+            seed=seed, score=0.0, hint=hint, error=str(exc), candidate_code=code, source=source,
+            elapsed_sec=round(time.time() - start, 4),
+        )
+    if not executed:
+        return CandidateEval(
+            seed=seed, score=0.0, hint=hint, error=str(completed.stderr)[:300], candidate_code=code, source=source,
+            elapsed_sec=round(time.time() - start, 4),
+        )
+    return CandidateEval(
+        seed=seed, score=1.0 if completed.returncode == 0 else 0.4, hint=hint, stdout=completed.stdout,
+        candidate_code=code, source=source, elapsed_sec=round(time.time() - start, 4),
+    )
 
 
 def promote_patch_to_branch(*, repo_root: Path, target_file: str, patch_code: str, score: float, run_id: str) -> str:

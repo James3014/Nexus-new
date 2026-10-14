@@ -199,6 +199,35 @@ def _apply_post_candidate_seam(
         report["unified_runtime_capability_stages"] = stages
 
 
+def _run_visible_pytest(
+    pytest_cmd: list[str],
+    *,
+    repo_root: Path,
+    target_path: Path,
+    test_path: Path,
+    original_code: str,
+    candidate_code: str,
+    timeout_sec: int,
+) -> subprocess.CompletedProcess:
+    """Visible test for the candidate; confined on a scratch copy under the strict/counted lane
+    (no OS barrier -> not executed, stderr ``confinement_unavailable``)."""
+    if _post_candidate_seam.confine_visible_test_enabled():
+        completed, _executed = _post_candidate_seam.run_visible_test_confined(
+            target_path=target_path,
+            visible_test_path=test_path,
+            original_code=original_code,
+            candidate_code=candidate_code,
+            timeout_sec=timeout_sec,
+        )
+        return completed
+    return subprocess.run(pytest_cmd, cwd=repo_root, capture_output=True, text=True, timeout=timeout_sec)
+
+
+def _visible_error(res: subprocess.CompletedProcess, default: str) -> str:
+    stderr = str(getattr(res, "stderr", "") or "")
+    return _post_candidate_seam.CONFINEMENT_UNAVAILABLE if stderr.startswith(_post_candidate_seam.CONFINEMENT_UNAVAILABLE) else default
+
+
 def _write_source_text(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
     if path.suffix != ".py":
@@ -1203,10 +1232,18 @@ def run_auto_flow(
                     restored_files[extra_path] = extra_path.read_text(encoding="utf-8") if extra_path.exists() else None
                     extra_path.parent.mkdir(parents=True, exist_ok=True)
                     _write_source_text(extra_path, extra_code)
-                res = subprocess.run(pytest_cmd, cwd=repo_root, capture_output=True, text=True, timeout=timeout_sec)
+                res = _run_visible_pytest(
+                    pytest_cmd,
+                    repo_root=repo_root,
+                    target_path=target_path,
+                    test_path=test_path_for_prompt,
+                    original_code=original_code,
+                    candidate_code=patched,
+                    timeout_sec=timeout_sec,
+                )
                 ok = res.returncode == 0
                 if not ok:
-                    err = "pytest_failed"
+                    err = _visible_error(res, "pytest_failed")
         except subprocess.TimeoutExpired:
             err = "test_timeout"
         finally:
@@ -1283,10 +1320,18 @@ def run_auto_flow(
                     restored_files[extra_path] = extra_path.read_text(encoding="utf-8") if extra_path.exists() else None
                     extra_path.parent.mkdir(parents=True, exist_ok=True)
                     _write_source_text(extra_path, extra_code)
-                res = subprocess.run(pytest_cmd, cwd=repo_root, capture_output=True, text=True, timeout=timeout_sec)
+                res = _run_visible_pytest(
+                    pytest_cmd,
+                    repo_root=repo_root,
+                    target_path=target_path,
+                    test_path=test_path_for_prompt,
+                    original_code=original_code,
+                    candidate_code=patched,
+                    timeout_sec=timeout_sec,
+                )
                 ok = res.returncode == 0
                 if not ok:
-                    err = "pytest_failed"
+                    err = _visible_error(res, "pytest_failed")
         except subprocess.TimeoutExpired:
             err = "test_timeout"
         finally:
@@ -1304,9 +1349,17 @@ def run_auto_flow(
         start = time.monotonic()
         _write_source_text(target_path, original_code)
         try:
-            res = subprocess.run(pytest_cmd, cwd=repo_root, capture_output=True, text=True, timeout=timeout_sec)
+            res = _run_visible_pytest(
+                pytest_cmd,
+                repo_root=repo_root,
+                target_path=target_path,
+                test_path=test_path_for_prompt,
+                original_code=original_code,
+                candidate_code=original_code,
+                timeout_sec=timeout_sec,
+            )
             ok = res.returncode == 0
-            err = "" if ok else "original_pytest_failed"
+            err = "" if ok else _visible_error(res, "original_pytest_failed")
         except subprocess.TimeoutExpired:
             ok = False
             err = "original_test_timeout"

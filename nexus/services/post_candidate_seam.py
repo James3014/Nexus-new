@@ -504,7 +504,10 @@ def lock_denied(pre_stages: list[dict[str, Any]]) -> bool:
     for stage in pre_stages:
         if stage.get("name") != FILE_LOCK_CAPABILITY:
             continue
-        if not stage.get("gate_passed") or stage.get("outcome", {}).get("access_granted") is not True:
+        if (
+            not stage.get("gate_passed")
+            or stage.get("outcome", {}).get("access_granted") is not True
+        ):
             return True
     return False
 
@@ -533,4 +536,81 @@ def merge_seam_receipts(
         stages=stages,
         candidate_sha256=str((post_receipt or {}).get("candidate_sha256") or ""),
         extra=extra,
+    )
+
+
+# --- Confined visible test (strict/counted lane) ---------------------------------------------
+#
+# Same-user code defeats file permissions, so the real boundary for the bench is that the
+# candidate and the visible test never run unconfined: under the strict/counted lane
+# (``NEXUS_CONFINE_VISIBLE_TEST=1``, set by the bench runner) the product runs the visible test
+# on a scratch copy inside ``sandboxed_lane.confinement`` (default-deny reads under ``$HOME``,
+# no network, the hidden test and the bench staging parent as forbidden read roots). Without
+# an OS barrier nothing runs: the result is ``confinement_unavailable`` (not executed).
+CONFINE_VISIBLE_TEST_ENV = "NEXUS_CONFINE_VISIBLE_TEST"
+CONFINEMENT_UNAVAILABLE = "confinement_unavailable"
+BENCH_HIDDEN_STAGING_PARENT = Path.home() / ".cache" / "nexus-bench-hidden"
+
+
+def confine_visible_test_enabled() -> bool:
+    return os.environ.get(CONFINE_VISIBLE_TEST_ENV, "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def run_visible_test_confined(
+    *,
+    target_path: Path | str,
+    visible_test_path: Path | str,
+    original_code: str,
+    candidate_code: str,
+    timeout_sec: float,
+) -> tuple[subprocess.CompletedProcess, bool]:
+    """Visible pytest on a scratch copy holding ``candidate_code``, inside the confinement.
+
+    Returns ``(completed, executed)``; ``executed`` is False (returncode 1, stderr names
+    ``confinement_unavailable``) when the scratch copy or the confinement refused. A timeout
+    raises ``subprocess.TimeoutExpired`` like ``subprocess.run`` would."""
+    from nexus.engine.confined_test_runner import run_confined_test
+
+    forbidden = [*hidden_test_paths(visible_test_path), BENCH_HIDDEN_STAGING_PARENT]
+    argv = [sys.executable, "-I", "-m", "pytest", "-q", "--maxfail=1", "-p", "no:cacheprovider"]
+    try:
+        scratch = prepare_candidate_scratch(
+            target_path=target_path,
+            visible_test_path=visible_test_path,
+            original_code=original_code,
+            candidate_code=candidate_code,
+            forbidden_paths=forbidden,
+        )
+    except (PostCandidateSeamError, OSError, subprocess.SubprocessError) as exc:
+        return subprocess.CompletedProcess(
+            argv, 1, "", f"{CONFINEMENT_UNAVAILABLE}:scratch:{exc}"[:300]
+        ), False
+    try:
+        result = run_confined_test(
+            scratch.root,
+            command=[*argv, scratch.visible_rel],
+            forbidden_paths=forbidden,
+            timeout_sec=timeout_sec,
+        )
+    finally:
+        scratch.cleanup()
+    if not result.get("executed"):
+        return subprocess.CompletedProcess(
+            argv, 1, "", f"{CONFINEMENT_UNAVAILABLE}:{result.get('error')}"[:300]
+        ), False
+    if result.get("timed_out"):
+        raise subprocess.TimeoutExpired(argv, timeout_sec)
+    return (
+        subprocess.CompletedProcess(
+            argv,
+            int(result.get("exit_code") or 0),
+            str(result.get("stdout_tail") or ""),
+            str(result.get("stderr_tail") or ""),
+        ),
+        True,
     )

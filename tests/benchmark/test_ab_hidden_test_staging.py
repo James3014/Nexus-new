@@ -49,6 +49,7 @@ def _isolated_staging(tmp_path, monkeypatch):
         monkeypatch.setattr(staging_mod, name, {})
     monkeypatch.setattr(staging_mod, "_QUARANTINED", set())
     monkeypatch.setattr(staging_mod, "_RUN_ABORT", [])
+    monkeypatch.setattr(staging_mod, "_RUN_RECORD_PATH", [])
     yield parent
     _unlock_tree(tmp_path / "cache")
     os.environ.clear()
@@ -486,42 +487,91 @@ def _new_process(monkeypatch) -> None:
     monkeypatch.setattr(staging_mod, "_RUN_ABORT", [])
 
 
-def test_killed_run_is_recovered_by_the_next_run_from_the_manifest(
-    tmp_path, monkeypatch, _isolated_staging
-) -> None:
-    workspace, visible, hidden = _case(tmp_path)
+def _killed_run(
+    tmp_path: Path, workspace: Path, hidden: Path
+) -> tuple[staging_mod.HiddenTestStaging, Path]:
+    record = tmp_path / "out" / "run_manifest.json"
+    staging_mod.configure_run_record(record)
     killed = staging_mod.HiddenTestStaging(
         hidden_path=hidden.resolve(),
         staged_path=staging_mod.staging_root(workspace) / "oabh-demo__t1" / "test_hidden.py",
     )
     killed.stage()  # SIGKILL here: never restored
     assert not hidden.exists()
-    manifest = _isolated_staging / staging_mod.RECOVERY_MANIFEST_NAME
-    assert _mode(manifest) == 0o000
+    return killed, record
+
+
+def test_killed_run_is_recovered_from_the_output_dir_record(
+    tmp_path, monkeypatch, _isolated_staging
+) -> None:
+    workspace, visible, hidden = _case(tmp_path)
+    killed, record = _killed_run(tmp_path, workspace, hidden)
+    entry = json.loads(record.read_text())[staging_mod.RUN_RECORD_KEY]
+    assert (
+        entry["entries"][str(hidden.resolve())]["sha256"]
+        == hashlib.sha256(HIDDEN_TEXT.encode()).hexdigest()
+    )
+    # No fixed-name manifest outside the random run dir.
+    os.chmod(_isolated_staging, 0o700)
+    assert sorted(p.name for p in _isolated_staging.iterdir()) == [
+        killed.staged_path.parent.parent.name
+    ]
+    os.chmod(_isolated_staging, 0o300)
 
     _new_process(monkeypatch)
-    with _staged(workspace, visible) as staging:
-        assert not hidden.exists() and staging.staged
+    staging_mod.configure_run_record(None)
+    assert staging_mod.recover_from_run_record(record) == [str(hidden.resolve())]
     assert hidden.read_text(encoding="utf-8") == HIDDEN_TEXT
     assert staging_mod.run_abort_reason() == ""
-    assert staging_mod._read_manifest() == {}
 
 
-def test_tampered_leftover_from_a_killed_run_aborts_the_next_run(tmp_path, monkeypatch) -> None:
+def test_tampered_leftover_from_a_killed_run_is_never_restored(tmp_path, monkeypatch) -> None:
     workspace, visible, hidden = _case(tmp_path)
-    killed = staging_mod.HiddenTestStaging(
-        hidden_path=hidden.resolve(),
-        staged_path=staging_mod.staging_root(workspace) / "oabh-demo__t1" / "test_hidden.py",
-    )
-    killed.stage()
+    killed, record = _killed_run(tmp_path, workspace, hidden)
     _plant(killed.staged_path, "def test_planted():\n    assert True\n")
 
     _new_process(monkeypatch)
-    with pytest.raises(staging_mod.HiddenTestStagingError, match="hidden_test_tampered"):
-        with _staged(workspace, visible):
-            pass
+    assert staging_mod.recover_from_run_record(record) == []
     assert not hidden.exists()
     assert "recovery" in staging_mod.run_abort_reason()
+
+
+def test_recovery_refuses_a_record_whose_sha_disagrees(tmp_path, monkeypatch) -> None:
+    """The output-dir record is the authority: a matching sidecar is not enough."""
+    workspace, visible, hidden = _case(tmp_path)
+    _killed, record = _killed_run(tmp_path, workspace, hidden)
+    data = json.loads(record.read_text())
+    data[staging_mod.RUN_RECORD_KEY]["entries"][str(hidden.resolve())]["sha256"] = "0" * 64
+    record.write_text(json.dumps(data))
+
+    _new_process(monkeypatch)
+    assert staging_mod.recover_from_run_record(record) == []
+    assert not hidden.exists()
+    assert staging_mod.run_abort_reason()
+
+
+@pytest.mark.parametrize("attack", ["open_run_dir", "staged_outside_run_dir"])
+def test_recovery_treats_on_disk_state_as_untrusted(tmp_path, monkeypatch, attack) -> None:
+    workspace, visible, hidden = _case(tmp_path)
+    killed, record = _killed_run(tmp_path, workspace, hidden)
+    run_root = killed.staged_path.parent.parent
+    if attack == "open_run_dir":
+        os.chmod(run_root, 0o777)
+    else:
+        data = json.loads(record.read_text())
+        data[staging_mod.RUN_RECORD_KEY]["entries"][str(hidden.resolve())]["staged"] = str(
+            tmp_path / "elsewhere.py"
+        )
+        record.write_text(json.dumps(data))
+
+    _new_process(monkeypatch)
+    if attack == "open_run_dir":
+        with pytest.raises(staging_mod.HiddenTestStagingError, match="recovery_run_root"):
+            staging_mod.recover_from_run_record(record)
+    else:
+        assert staging_mod.recover_from_run_record(record) == []
+    assert not hidden.exists()
+    assert staging_mod.run_abort_reason()
 
 
 def test_staged_bytes_are_mode_0000_between_verifier_windows(tmp_path, monkeypatch) -> None:

@@ -536,3 +536,142 @@ def test_no_candidate_or_nothing_selected_runs_nothing(tmp_path: Path) -> None:
         )
         is None
     )
+
+
+# --- strict/counted lane: the visible test itself runs confined -------------------------------
+
+PROBING_VISIBLE_TEST = (
+    "import os, sys\n"
+    "from pathlib import Path\n"
+    "sys.path.insert(0, str(Path(__file__).parent))\n"
+    "from target import add\n\n"
+    "def test_add_and_probe():\n"
+    "    assert add(1, 2) == 3\n"
+    "    secret = Path(os.environ.get('PROBE_PARENT', '{parent}')) / 'run-x' / 'test_hidden.py'\n"
+    "    assert secret.read_text() == 'never readable'\n"
+)
+
+
+def _probing_case(tmp_path: Path) -> tuple[Path, Path]:
+    case = _case(tmp_path)
+    parent = tmp_path / "cache" / "nexus-bench-hidden"
+    (parent / "run-x").mkdir(parents=True)
+    (parent / "run-x" / "test_hidden.py").write_text(
+        "never readable", encoding="utf-8"
+    )  # 0644 on purpose
+    (case / "test_visible.py").write_text(
+        PROBING_VISIBLE_TEST.replace("{parent}", str(parent)), encoding="utf-8"
+    )
+    return case, parent
+
+
+def test_confined_visible_test_cannot_read_the_staging_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Even a readable file under the staging parent is out of reach of the visible test."""
+    case, parent = _probing_case(tmp_path)
+    monkeypatch.setattr(seam, "BENCH_HIDDEN_STAGING_PARENT", parent)
+
+    completed, executed = seam.run_visible_test_confined(
+        target_path=case / "target.py",
+        visible_test_path=case / "test_visible.py",
+        original_code=ORIGINAL,
+        candidate_code=CANDIDATE,
+        timeout_sec=60,
+    )
+
+    if REAL_BARRIER and PYTEST_UNDER_ISOLATION:
+        assert executed is True
+        assert completed.returncode != 0  # read denied -> the probe assertion fails
+        assert "never readable" not in completed.stdout
+    elif not REAL_BARRIER:
+        # No OS barrier (Linux CI): nothing runs, reported as not executed.
+        assert executed is False and completed.returncode == 1
+        assert completed.stderr.startswith(seam.CONFINEMENT_UNAVAILABLE)
+    else:
+        assert completed.returncode != 0
+    assert not (case / HIDDEN_MARKER).exists()
+
+
+def test_unconfined_run_of_the_same_probe_would_read_it(tmp_path: Path) -> None:
+    """Control: outside the confinement the same probe does read the file (the test is meaningful)."""
+    case, parent = _probing_case(tmp_path)
+    (case / "target.py").write_text(CANDIDATE, encoding="utf-8")
+    out = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            "test_visible.py",
+            "-k",
+            "probe",
+        ],
+        cwd=case,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert out.returncode == 0, out.stdout[-500:]
+
+
+def test_rfs_visible_pytest_is_confined_under_the_counted_lane(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nexus.app import research_flow_service as rfs
+
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setenv(seam.CONFINE_VISIBLE_TEST_ENV, "1")
+    monkeypatch.setattr(
+        seam,
+        "run_visible_test_confined",
+        lambda **kw: (
+            calls.append(kw)
+            or (
+                subprocess.CompletedProcess([], 1, "", "confinement_unavailable:no_os_barrier"),
+                False,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        rfs.subprocess, "run", lambda *a, **k: pytest.fail("visible test ran unconfined")
+    )
+    res = rfs._run_visible_pytest(
+        ["python", "-m", "pytest", "t.py"],
+        repo_root=tmp_path,
+        target_path=tmp_path / "target.py",
+        test_path=tmp_path / "t.py",
+        original_code=ORIGINAL,
+        candidate_code=CANDIDATE,
+        timeout_sec=5,
+    )
+    assert calls and calls[0]["candidate_code"] == CANDIDATE
+    assert rfs._visible_error(res, "pytest_failed") == seam.CONFINEMENT_UNAVAILABLE
+
+
+def test_sprint_inplace_executor_is_confined_under_the_counted_lane(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nexus.research.sprint_service import InPlaceSprintExecutor
+
+    case = _case(tmp_path)
+    monkeypatch.setenv(seam.CONFINE_VISIBLE_TEST_ENV, "1")
+    monkeypatch.setattr(
+        seam,
+        "run_visible_test_confined",
+        lambda **kw: (
+            subprocess.CompletedProcess([], 1, "", "confinement_unavailable:no_os_barrier"),
+            False,
+        ),
+    )
+    executor = InPlaceSprintExecutor(
+        case, "target.py", [sys.executable, "-m", "pytest", "-q", "test_visible.py"], 30, task="t"
+    )
+    ev = executor.evaluate_candidate(seed=0, hint="h", code=CANDIDATE, source="llm")
+
+    assert ev.score == 0.0 and ev.error.startswith(seam.CONFINEMENT_UNAVAILABLE)
+    assert (case / "target.py").read_text(
+        encoding="utf-8"
+    ) == ORIGINAL  # never written in the workspace

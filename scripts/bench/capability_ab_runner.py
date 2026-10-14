@@ -20196,6 +20196,15 @@ def main() -> int:
         help="When Nexus LLM baseline is enabled, require the baseline patch to come from the model and forbid local fallback.",
     )
     parser.add_argument(
+        "--recover-hidden-staging",
+        dest="recover_hidden_staging",
+        default="",
+        help=(
+            "run_manifest.json of a killed counted run: restore its staged hidden tests (each "
+            "verified against the recorded sha256 and its sidecar) before this run starts."
+        ),
+    )
+    parser.add_argument(
         "--counted-first-attempt",
         dest="counted_first_attempt",
         action="store_true",
@@ -20460,6 +20469,9 @@ def main() -> int:
             args.strict_llm_baseline or getattr(args, "require_same_model_baseline", False)
         )
     os.environ["NEXUS_BENCH_COUNTED_FIRST_ATTEMPT"] = "1" if args.counted_first_attempt else "0"
+    # PR-2: under the strict/counted lane the product runs the visible test inside the OS
+    # confinement (same-user code cannot reach the staged hidden test or the output dir).
+    os.environ["NEXUS_CONFINE_VISIBLE_TEST"] = "1" if _hidden_staging_enabled(args) else "0"
     if args.counted_first_attempt:
         if getattr(args, "enable_background_offload", False):
             parser.error("--counted-first-attempt cannot be combined with --enable-background-offload")
@@ -20585,6 +20597,26 @@ def main() -> int:
     with_rows: list[dict[str, Any]] = []
     without_rows: list[dict[str, Any]] = []
     out_dir = (repo_root / args.output_dir).resolve()
+    if _hidden_staging_enabled(args):
+        # The staging record lives only in the output dir (never in a subprocess env); a killed
+        # run into the same output dir, or an explicit --recover-hidden-staging, is recovered
+        # (sha-verified) before any row runs. Unverifiable leftovers abort the run (exit 3).
+        run_record = out_dir / "run_manifest.json"
+        explicit = Path(args.recover_hidden_staging) if args.recover_hidden_staging else None
+        for record in dict.fromkeys(item for item in (explicit, run_record) if item is not None):
+            try:
+                _hidden_staging.recover_from_run_record(record)
+            except _hidden_staging.HiddenTestStagingError as exc:
+                print(f"hidden test staging recovery failed closed ({exc}); run is invalid", file=sys.stderr, flush=True)
+                return 3
+        if _hidden_staging.run_abort_reason():
+            print(
+                f"hidden test staging recovery failed closed ({_hidden_staging.run_abort_reason()})",
+                file=sys.stderr,
+                flush=True,
+            )
+            return 3
+        _hidden_staging.configure_run_record(run_record)
     ts = int(time.time())
     evidence_root = out_dir / f"evidence_{ts}"
     shared_cli_runner = CliRunner() if args.with_nexus_runner == "inprocess" else None
