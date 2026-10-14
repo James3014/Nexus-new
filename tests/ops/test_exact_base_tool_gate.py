@@ -571,3 +571,46 @@ def test_blocking_log_cannot_emit_workflow_commands_from_candidate_paths():
     assert lines
     assert not any(line.startswith("::") for line in lines)
     assert all("\n" not in line for line in lines)
+
+
+def test_blocking_log_flattens_multiline_paths_and_errors():
+    from dataclasses import asdict
+
+    from scripts.ops.exact_base_tool_gate import render_blocking_log
+
+    hostile = Finding(
+        "ruff",
+        "unformatted",
+        "a.py\n::warning::injected",
+        1,
+        1,
+        "error",
+        "File would be reformatted",
+    )
+    lines = render_blocking_log({
+        "blocking": True,
+        "classification": "NEW_REGRESSION",
+        "error": "ValueError: bad path x\n::error::injected",
+        "new_findings": [asdict(hostile)],
+    })
+    assert lines
+    for line in lines:
+        assert "\n" not in line and "\r" not in line
+        assert not line.lstrip().startswith("::")
+        assert "##[" not in line
+
+
+def test_log_safe_defuses_legacy_and_trimmed_workflow_commands():
+    from scripts.ops.exact_base_tool_gate import _log_safe
+
+    for raw in (
+        "\r::notice::x",
+        "  ::notice::x",
+        "src/##[error]injected.py",
+        "###[x",
+        "a\u2028::y",
+    ):
+        safe = _log_safe(raw)
+        assert "\n" not in safe and "\r" not in safe and "\u2028" not in safe
+        assert not safe.lstrip().startswith("::")
+        assert "##[" not in safe
