@@ -331,8 +331,27 @@ def _codeintel_findings(body: str) -> list[str]:
     return findings
 
 
+def nexus_json_strings(prompt: str) -> set[str]:
+    """Normalised JSON strings inside the allowlisted JSON blocks of a with-Nexus prompt."""
+
+    out: set[str] = set()
+    for header, line in _blocks(prompt):
+        if header not in JSON_BLOCK_HEADERS or SECTION_HEADER_RE.match(line):
+            continue
+        try:
+            payload = json.loads(line)
+        except ValueError:
+            continue
+        out.update(normalize(text) for text in _json_strings(payload))
+    return out
+
+
 def classify_extra_lines(
-    with_nexus_prompt: str, bare_prompt: str, material: TaskMaterial
+    with_nexus_prompt: str,
+    bare_prompt: str,
+    material: TaskMaterial,
+    *,
+    template_strings: frozenset[str] = frozenset(),
 ) -> dict[str, list[str]]:
     """Split the with-Nexus-only lines into allowed / disallowed and run the block-body checks."""
 
@@ -350,6 +369,7 @@ def classify_extra_lines(
         "json": [],
     }
     preamble = " ".join(NEXUS_PREAMBLE.split())
+    bare_normalized = normalize(bare_prompt)
     for header, line in _blocks(with_nexus_prompt):
         is_header = bool(SECTION_HEADER_RE.match(line))
         if header == HIDDEN_GUIDANCE_HEADER and not is_header:
@@ -376,6 +396,11 @@ def classify_extra_lines(
             out["disallowed"].append(line)  # allowed blocks carry JSON only
             continue
         for text in _json_strings(payload):
+            normalized = normalize(text)
+            # A string the bare arm saw verbatim, or one that is identical across tasks of this run
+            # (task-independent Nexus template text), cannot carry task-specific hidden information.
+            if normalized in template_strings or (normalized and normalized in bare_normalized):
+                continue
             if len(text) > MAX_JSON_STRING_CHARS:
                 out["json"].append(
                     f"{header}: string longer than {MAX_JSON_STRING_CHARS} chars: {text[:60]}"
@@ -423,6 +448,7 @@ def audit_task(
     *,
     bare_rows: list[Mapping[str, Any]] | None = None,
     with_rows: list[Mapping[str, Any]] | None = None,
+    template_strings: frozenset[str] = frozenset(),
 ) -> TaskAudit:
     result = TaskAudit(key=key, task_id=material.task_id)
     result.bare_calls, result.bare_resends = _distinct(bare_records)
@@ -485,7 +511,9 @@ def audit_task(
         result.bare_prompt_chars = len(bare_prompt)
         if bare_records:
             result.extra_lines = extra_lines(first, bare_prompt)
-            checks = classify_extra_lines(first, bare_prompt, material)
+            checks = classify_extra_lines(
+                first, bare_prompt, material, template_strings=template_strings
+            )
             result.disallowed_lines = checks["disallowed"]
             result.code_lines = checks["code"]
             result.codeintel_findings = checks["codeintel"]
@@ -553,6 +581,14 @@ def audit_run(
     by_arm: dict[tuple[str, str], list[Mapping[str, Any]]] = defaultdict(list)
     for row in rows:
         by_arm[(str(row.get("mode")), _row_key(row))].append(row)
+    # JSON strings identical in the with-Nexus prompts of at least two different tasks are template text.
+    string_counts: dict[str, int] = defaultdict(int)
+    for key in materials:
+        records = captures.get(("with_nexus", key), [])
+        if records:
+            for text in nexus_json_strings(str(records[0].get("prompt") or "")):
+                string_counts[text] += 1
+    template_strings = frozenset(text for text, count in string_counts.items() if count >= 2)
     tasks = []
     for key, material in sorted(materials.items()):
         tasks.append(
@@ -563,6 +599,7 @@ def audit_run(
                 captures.get(("with_nexus", key), []),
                 bare_rows=by_arm.get(("without_nexus", key), []) if rows else None,
                 with_rows=by_arm.get(("with_nexus", key), []) if rows else None,
+                template_strings=template_strings,
             )
         )
     unknown = sorted(

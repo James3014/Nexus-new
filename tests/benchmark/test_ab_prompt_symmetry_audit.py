@@ -711,3 +711,35 @@ def test_local_delivery_is_an_allowlist_of_model_sources() -> None:
     assert not local_delivery({"nexus_winner_source": "llm_self_heal"})
     assert not local_delivery({"nexus_winner_source": "direct_agy"})
     assert not local_delivery({"nexus_winner_source": ""})
+
+
+def test_task_independent_template_strings_and_bare_text_are_not_flagged(tmp_path: Path) -> None:
+    """A long/generic JSON string identical across tasks, or verbatim bare text, carries no hidden info."""
+
+    generic = "Context assembly materializes already-selected context under budget only; claim " * 3
+    second_key = "nexus-value-evidence-002__1"
+    materials = {
+        **_material(),
+        second_key: TaskMaterial(
+            task_id="nexus-value-evidence-002",
+            visible_test=VISIBLE,
+            hidden_test=HIDDEN + "# resolved claim\n",
+            source=SOURCE,
+        ),
+    }
+    blocks = NEXUS_BLOCKS.replace(
+        '{"bundle_hash":"abc"}',
+        json.dumps({"claim_boundary": [generic], "query": "Fix an incident classifier."}),
+    )
+    for key in (KEY, second_key):
+        for arm, prompt in (("without_nexus", BARE), ("with_nexus", _with_nexus(blocks))):
+            write_record(
+                capture_record(
+                    ["--print", prompt],
+                    "",
+                    {"NEXUS_BENCH_ARM": arm, "NEXUS_BENCH_CAPTURE_KEY": key},
+                ),
+                str(tmp_path),
+            )
+    report = audit_run(tmp_path, materials)
+    assert report["status"] == "PASS", [t["json_string_findings"] for t in report["tasks"]]
