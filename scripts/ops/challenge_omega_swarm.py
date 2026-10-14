@@ -36,7 +36,6 @@ class HeterogeneousSwarm:
         print("  🛡️ Rust Contract Engine Intervention:")
         # 呼叫 Rust 實體驗證
         try:
-            import nexus_core
             # 這裡我們模擬 Python 端呼叫 Rust 的 Contract 校驗
             # 在真實系統中，這會透過 Bridge 進行。為了 demo，我們顯示邏輯攔截。
             if "target_modules" not in simulated_payload:

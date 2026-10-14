@@ -83,7 +83,6 @@ confidence: medium
 ## 測試要求
 
 - `cargo test` — changed Rust modules unit test count > 0
-- `uv run pytest -q tests/integration/test_rust_kernel_smoke.py`
 - `uv run pytest -q tests/integration/test_rust_wave3_cutover.py`
 - 現有 S2T selector/contracts tests, gate tests, manifest coverage check, shadow report tests
 - Shadow evaluation tests must verify: same path, same success criterion, same evidence contract

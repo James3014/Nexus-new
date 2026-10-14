@@ -361,7 +361,7 @@ content_freshness:
     01_System/SYSTEM_ARCHITECTURE_BLUEPRINT.md:
       classification: current_needs_review
       owner: nexus-architecture
-      source_paths: [MUSE-NEXUS-Engine-Specification-v22-Eternal.md, src/governance/transition_engine.rs, nexus/core/, nexus/engine/, nexus/services/]
+      source_paths: [MUSE-NEXUS-Engine-Specification-v22-Eternal.md, nexus/engine/runtime_phase_contract.py, nexus/core/, nexus/engine/, nexus/services/]
       required_markers: ["Rust Governance Kernel", "P → X → D → R → A → C", "Fail-Closed"]
     00_Home/AGENT_BOOTSTRAP.md:
       classification: current_needs_review
@@ -389,7 +389,7 @@ content_freshness:
       source_paths: [nexus/core/, nexus/services/, scripts/engine/nexus_cli.py]
     03_Flows/Flow - PXDRAC Runtime.md:
       classification: current_verified
-      source_paths: [src/governance/transition_engine.rs, scripts/engine/nexus_cli.py, MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
+      source_paths: [nexus/engine/runtime_phase_contract.py, scripts/engine/nexus_cli.py, MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
       required_markers: ["TransitionEngine", "P -> X -> D -> R -> A -> C", "Fail-Closed"]
     06_Ops/Ops - Acceptance and Release.md:
       classification: current_verified
@@ -416,7 +416,7 @@ content_freshness:
       source_paths: [scripts/ops/ci_gate.py, scripts/ops/wiki_linter.py, scripts/ops/wiki_drift_audit.py, scripts/ops/wiki_coverage_audit.py, scripts/ops/check_wiki_governance_closure.py]
       required_markers: ["scripts/ops/ci_gate.py", "TRU-101", "Promotion"]
   symbol_contracts:
-    src/governance/transition_engine.rs: [TransitionEngine::can_transition]
+    nexus/engine/runtime_phase_contract.py: [validate_transition, legal_next]
     scripts/engine/nexus_cli.py: [nexus, top_status, top_run]
     scripts/ops/ci_gate.py: [main, run_dry_run, run_wiki_sync_check]
     scripts/ops/wiki_truth_claims_check.py: [run_checks]
