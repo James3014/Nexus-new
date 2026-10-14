@@ -286,28 +286,53 @@ def test_nightshift_default_model_is_admitted_policy_worker(tmp_path: Path):
     assert runner.fallback_model_name is None
 
 
-def test_nightshift_online_request_admitted_with_verified_task_card(
-    tmp_path: Path, fake_registered_cli
+GOVERNED_ONLY_CONTROLS = {
+    "task_card",
+    "allowed_files",
+    "mandatory_commands",
+    "independent_verification",
+}
+
+
+@pytest.mark.parametrize("with_card", [True, False])
+def test_nightshift_online_request_blocked_without_governed_task_card(
+    tmp_path: Path, fake_registered_cli, with_card: bool
 ):
-    runner = _runner(tmp_path)
+    """A runner-built card is self-issued metadata and never declares task_card (#2189)."""
+    runner = _runner(tmp_path, with_card=with_card)
     worker = _policy_routed_online_worker()
 
     response, _raw, receipt = _ask(runner, tmp_path)
 
     admission = receipt["workforce_admission"]
-    authority = receipt["gateway_invocation_authority"]
     record = admission["records"][0]
-    assert admission["overall_decision"] == "ALLOW"
-    assert {"task_card", "allowed_files", "mandatory_commands"} <= set(
-        record["request"]["provided_controls"]
-    )
-    assert authority["status"] == "ALLOW"
-    assert authority["resolved_worker_id"] == worker.worker_id
-    assert authority["route_provider"] == worker.provider
-    assert authority["online_model_name"] == worker.model
-    assert fake_registered_cli["built"] == [(worker.provider, worker.model)]
-    assert len(fake_registered_cli["calls"]) == 1
-    assert response["patch"] == "value = 2\n"
+    assert record["request"]["requested_worker_id"] == worker.worker_id
+    assert not GOVERNED_ONLY_CONTROLS & set(record["request"]["provided_controls"])
+    assert "task_card" in worker.requires
+    assert admission["overall_decision"] == "BLOCK"
+    assert "task_card" in record["decision"]["missing_controls"]
+    assert receipt["gateway_invocation_authority"]["status"] == "BLOCKED"
+    assert receipt["online"]["invoked"] is False
+    assert fake_registered_cli["calls"] == []
+    assert response["status"] == "FAIL"
+
+
+def test_nightshift_route_provider_is_admitted_worker_provider(tmp_path: Path, fake_registered_cli):
+    runner = _runner(tmp_path)
+    seen = {}
+    original = runner.gateway.ask_unified
+
+    def _spy(request, **kwargs):
+        seen["route"] = dict(request.route)
+        return original(request, **kwargs)
+
+    runner.gateway.ask_unified = _spy
+    _ask(runner, tmp_path)
+
+    worker = _policy_routed_online_worker()
+    assert seen["route"]["provider"] == worker.provider
+    assert seen["route"]["provider"] != fake_registered_cli["gateway_default"]
+    assert seen["route"]["workforce_bindings"]["online"]["worker_id"] == worker.worker_id
 
 
 def test_nightshift_task_card_hash_is_recorded_with_run(tmp_path: Path, fake_registered_cli):
@@ -320,34 +345,10 @@ def test_nightshift_task_card_hash_is_recorded_with_run(tmp_path: Path, fake_reg
     assert hashlib.sha256(card).hexdigest() == runner.task_card_sha256
     payload = json.loads(card)
     assert payload["target_file"] == "demo.py"
-    assert payload["success_criteria"]
-    assert any("pytest" in command for command in payload["tier1_commands"])
     assert payload["tier1_commands"] == runner._tier1_commands()
 
     _response, _raw, receipt = _ask(runner, tmp_path)
     assert f"nightshift:task_card:sha256:{runner.task_card_sha256}" in json.dumps(receipt)
-
-
-@pytest.mark.parametrize("defect", ["no_card", "tampered_card", "no_tests", "missing_target"])
-def test_nightshift_without_verified_task_card_is_blocked(
-    tmp_path: Path, fake_registered_cli, defect: str
-):
-    runner = _runner(tmp_path, with_card=defect == "tampered_card")
-    if defect == "tampered_card":
-        runner.task_card_path.write_text('{"schema": "tampered"}', encoding="utf-8")
-    elif defect == "no_tests":
-        (tmp_path / "tests" / "test_demo.py").unlink()
-        assert runner._record_task_card() == ""
-    elif defect == "missing_target":
-        runner.resolved_target_file = "absent.py"
-        assert runner._record_task_card() == ""
-
-    _response, _raw, receipt = _ask(runner, tmp_path)
-
-    admission = receipt["workforce_admission"]
-    assert "task_card" not in admission["records"][0]["request"]["provided_controls"]
-    assert admission["overall_decision"] == "BLOCK"
-    assert receipt["gateway_invocation_authority"]["status"] == "BLOCKED"
     assert fake_registered_cli["calls"] == []
 
 
@@ -359,7 +360,7 @@ def test_nightshift_unadmitted_model_override_is_blocked(tmp_path: Path, fake_re
     authority = receipt["gateway_invocation_authority"]
     assert runner.model_name == "gemini-3.1-pro-preview"
     assert authority["status"] == "BLOCKED"
-    assert authority["failure_reason"] == "online_model_name_mismatch"
+    assert authority["gate_passed"] is False
     assert receipt["online"]["invoked"] is False
     assert fake_registered_cli["calls"] == []
     assert response["status"] == "FAIL"

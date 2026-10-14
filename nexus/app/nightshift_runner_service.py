@@ -454,7 +454,7 @@ class AutoResearchNightShift:
         return commands
 
     def _task_card_payload(self) -> Optional[dict[str, Any]]:
-        """Bounded task card for this run, or None when any part is missing."""
+        """Run metadata card (not a governed Task Card), or None when incomplete."""
         target = (self.resolved_target_file or "").strip()
         if not self.task or not target:
             return None
@@ -477,10 +477,11 @@ class AutoResearchNightShift:
         }
 
     def _record_task_card(self) -> str:
-        """Write the run's bounded task card and record its content hash.
+        """Write the run's task card as non-authoritative metadata and record its hash.
 
-        Returns the hash, or "" when no complete card can be built (the
-        ``task_card`` control is then not declared and admission blocks).
+        Returns the hash, or "" when no complete card can be built.  The card
+        never feeds the declared Workforce controls (see
+        ``_supplied_online_controls``).
         """
         self.task_card_path = None
         self.task_card_sha256 = ""
@@ -496,37 +497,17 @@ class AutoResearchNightShift:
         self.task_card_sha256 = digest
         return digest
 
-    def _verified_task_card(self) -> bool:
-        """Hash-check the recorded card and require it to match this run."""
-        if not self.task_card_sha256 or self.task_card_path is None:
-            return False
-        try:
-            content = self.task_card_path.read_bytes()
-        except OSError:
-            return False
-        if hashlib.sha256(content).hexdigest() != self.task_card_sha256:
-            return False
-        expected = self._task_card_payload()
-        if expected is None:
-            return False
-        try:
-            return json.loads(content.decode("utf-8")) == expected
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            return False
-
     def _supplied_online_controls(self) -> tuple[str, ...]:
-        """Controls physically supplied around an online call by this runner."""
-        controls = ["parser", "verifier"]
-        if self._verified_task_card():
-            # The verified card names the single target file and the tier-1
-            # commands that run on every candidate before it can score.
-            controls.extend([
-                "task_card",
-                "allowed_files",
-                "mandatory_commands",
-                "independent_verification",
-            ])
-        return tuple(controls)
+        """Controls physically supplied around an online call by this runner.
+
+        The runner-built task card is non-authoritative run metadata: it is
+        self-issued from caller input, so it never declares ``task_card``,
+        ``allowed_files``, ``mandatory_commands`` or
+        ``independent_verification``.  Until NightShift consumes governed,
+        git-tracked Task Cards, workers that require them are BLOCKed by
+        admission.
+        """
+        return ("parser", "verifier")
 
     def _preflight_models(self) -> None:
         """No-op: model availability is only ever tested through admitted calls.

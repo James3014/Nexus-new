@@ -56,13 +56,15 @@ def governed_admission(monkeypatch):
     return ADMITTED_MODEL
 
 
-def _write_task_card_inputs(root: Path) -> None:
-    """A targeted test so the runner can record a verified bounded task card (#2189)."""
-    tests_dir = root / "tests"
-    tests_dir.mkdir(exist_ok=True)
-    (tests_dir / "test_sample.py").write_text(
-        "def test_sample():\n    assert True\n", encoding="utf-8"
-    )
+def _simulate_governed_task_card(shift) -> None:
+    """Stand in for a future governed, git-tracked Task Card (#2189).
+
+    The runner itself never declares these controls; this test-only patch
+    supplies what such a card would, so the round logic stays covered.
+    """
+    from tests.research.conftest import ONLINE_CONTROLS
+
+    shift._supplied_online_controls = lambda: tuple(ONLINE_CONTROLS)
 
 
 def _program_rules_hub():
@@ -111,8 +113,7 @@ def test_run_round_generates_validated_scored_candidate(tmp_path, governed_admis
         project_root=tmp_path,
     )
     shift.resolved_target_file = "sample.py"
-    _write_task_card_inputs(tmp_path)
-    assert shift._record_task_card()
+    _simulate_governed_task_card(shift)
     shift.feynman_auditor.run_advisory_audit = lambda **_: {
         "status": "PASS",
         "warnings": [],
@@ -203,8 +204,7 @@ def test_run_round_rejects_ast_no_change(tmp_path, governed_admission):
         project_root=tmp_path,
     )
     shift.resolved_target_file = "sample.py"
-    _write_task_card_inputs(tmp_path)
-    assert shift._record_task_card()
+    _simulate_governed_task_card(shift)
     outcome = shift._run_round(1, tmp_path)
 
     assert outcome.status == "REJECTED_AST_NO_CHANGE"
