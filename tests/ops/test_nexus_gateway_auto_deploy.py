@@ -12,6 +12,7 @@ import http.server
 import json
 import os
 import plistlib
+import shutil
 import subprocess
 import sys
 import threading
@@ -54,7 +55,7 @@ class FakeHost(ad.Host):
         self.clock = NOW
         self.dirty_after_sync = False
         self.sync_fails = False
-        self.tool_fails = False
+        self.tool_fails: bool | str = False
         self.lock_events: list[str] = []
         self.lock_fails = False
         self.on_reload: Callable[[int], None] | None = None
@@ -74,7 +75,9 @@ class FakeHost(ad.Host):
         if argv[1:] == ["-c", "import sys"]:
             return _done(code=0 if Path(argv[0]).exists() else 1)
         if len(argv) > 2 and argv[1].endswith(ad.DEPLOYER):
-            return _done(code=1, stderr="boom") if self.tool_fails else _done("{}")
+            if self.tool_fails and (self.tool_fails is True or self.tool_fails == argv[2]):
+                return _done(code=1, stderr="boom")
+            return _done(json.dumps({"status": "IN_SYNC"}))
         if argv[0] != "git":
             return _done(code=1, stderr=f"unexpected {argv}")
         if argv[-3:] == ["remote", "get-url", "origin"]:
@@ -168,6 +171,7 @@ def green_api(
     relation: str = "ahead",
     extra_runs: dict[str, list[dict[str, Any]]] | None = None,
     workflow_path: Callable[[int], str] | None = None,
+    pushed_at: dict[str, str] | None = None,
 ):
     calls: list[str] = []
 
@@ -179,9 +183,14 @@ def green_api(
             return {"status": relation}
         if "/pulls?state=open" in path:
             return (open_pulls or []) if path.endswith("page=1") else []
-        if "/pulls/" in path and path.endswith("/files?per_page=100"):
+        if "/pulls/" in path and "/files?" in path:
+            if not path.endswith("page=1"):
+                return []
             number = int(path.split("/pulls/")[1].split("/")[0])
             return [{"filename": f} for f in (pull_files or {}).get(number, [])]
+        if "/commits/" in path and "/" not in path.split("/commits/")[1]:
+            sha = path.split("/commits/")[1]
+            return {"commit": {"committer": {"date": (pushed_at or {}).get(sha, NOW_ISO)}}}
         if path.endswith("/pulls"):
             return [
                 {
@@ -691,6 +700,29 @@ def test_retention_refuses_symlinked_parent_dirs(cfg: ad.Config, tmp_path: Path)
     assert len(list(elsewhere.iterdir())) == 2 and host.calls == []
 
 
+def test_retention_refuses_symlinked_gateway_root(cfg: ad.Config, tmp_path: Path) -> None:
+    real = cfg.gateway_root
+    for index in range(5):
+        (real / "deployments" / f"a1-{str(index) * 40}").mkdir()
+    alias = tmp_path / "alias-gateway-direct"
+    alias.symlink_to(real)
+    aliased = ad.Config.default(cfg.state_dir.parents[2], gateway_root=alias, keep=0)
+    host = FakeHost()
+    assert ad.prune_refusal(aliased) == f"GATEWAY_ROOT_NOT_CANONICAL:{alias}"
+    assert ad.prune(aliased, host, []) == [] and host.calls == []
+    assert len(list((real / "deployments").glob("a1-*"))) == 5
+
+
+def test_prune_refusal_is_recorded_in_status(cfg: ad.Config, tmp_path: Path) -> None:
+    alias = tmp_path / "alias-gateway-direct"
+    alias.symlink_to(cfg.gateway_root)
+    aliased = ad.Config.default(cfg.state_dir.parents[2], gateway_root=alias)
+    host = FakeHost(candidate=OLD)  # IN_SYNC path still runs retention
+    result = cycle(aliased, host, FakeProber())
+    assert result["status"] == "IN_SYNC"
+    assert result["prune_refused"].startswith("GATEWAY_ROOT_NOT_CANONICAL")
+
+
 def test_wrapper_rejects_shell_metacharacters(cfg: ad.Config) -> None:
     with pytest.raises(ad.DeployError, match="WRAPPER_PATH_UNSAFE"):
         ad.wrapper_command(cfg, Path('/tmp/x"; rm -rf ~'), Path("/py"))
@@ -930,6 +962,40 @@ def test_installer_refuses_unverified_commit(tmp_path: Path, tool_tree: Path) ->
         assert not (tmp_path / "Library/LaunchAgents/com.nexus.gateway-auto-deploy.plist").exists()
 
 
+def test_installer_rerun_refuses_unknown_live_plist_without_adopt(
+    tmp_path: Path, tool_tree: Path
+) -> None:
+    if not _clean(tool_tree):
+        pytest.skip("working tree differs from HEAD for the deployer; commit first")
+    script = REPO_ROOT / "scripts/ops/install_nexus_gateway_auto_deploy.sh"
+    env = _installer_env(tmp_path, tool_tree)
+    gateway_plist = tmp_path / "Library/LaunchAgents/com.nexus.mcp.gateway.direct.plist"
+    gateway_plist.parent.mkdir(parents=True)
+    gateway_plist.write_bytes(live_plist(Path("/srv/r1-" + OLD)))
+    subprocess.run(["bash", str(script)], env=env, capture_output=True, text=True, check=True)
+    gateway_plist.write_bytes(live_plist(Path("/srv/r1-" + PR_HEAD)))  # manual rebind
+    refused = subprocess.run(["bash", str(script)], env=env, capture_output=True, text=True)
+    assert refused.returncode != 0 and "--adopt" in refused.stderr
+    known = tmp_path / ".local/state/nexus-gateway-auto-deploy/known-plists.json"
+    assert len(json.loads(known.read_text())["sha256"]) == 1
+    subprocess.run(
+        ["bash", str(script), "--adopt"], env=env, capture_output=True, text=True, check=True
+    )
+    assert (
+        hashlib.sha256(gateway_plist.read_bytes()).hexdigest()
+        in json.loads(known.read_text())["sha256"]
+    )
+
+
+def test_adopt_if_unrecorded_cli(cfg: ad.Config, capsys: pytest.CaptureFixture[str]) -> None:
+    home = str(cfg.state_dir.parents[2])
+    assert ad.main(["adopt", "--adopt-if-unrecorded", "--home", home]) == 0  # already known
+    cfg.plist.write_bytes(live_plist(cfg.deployments / f"r1-{PR_HEAD}"))
+    assert ad.main(["adopt", "--adopt-if-unrecorded", "--home", home]) == 3
+    assert ad.main(["adopt", "--home", home]) == 0
+    capsys.readouterr()
+
+
 # ------------------------------------------------------------- self-update
 
 
@@ -939,8 +1005,13 @@ def test_successful_deploy_moves_the_deployer_link(cfg: ad.Config) -> None:
     assert cfg.tool_link.is_symlink()
     assert Path(os.readlink(cfg.tool_link)) == cfg.deployments / f"a1-{NEW}"
     tool_runs = [c for c in host.calls if len(c) > 2 and c[1].endswith(ad.DEPLOYER)]
-    assert [c[2] for c in tool_runs] == ["selftest", "status"]
+    assert [c[2] for c in tool_runs] == ["selftest", "status", "run"]
     assert all(c[0] == "/agent/python3.12" for c in tool_runs)
+    dry = tool_runs[2]
+    assert dry[3:5] == ["--dry-run", "--no-fetch"]
+    assert dry[dry.index("--gh") + 1].endswith("gh-offline")
+    scratch = Path(dry[dry.index("--state-dir") + 1])
+    assert scratch != cfg.state_dir and not scratch.exists()  # scratch removed afterwards
     assert str(cfg.deployments / f"a1-{NEW}" / ad.DEPLOYER) == tool_runs[0][1]
     assert result["receipt"]["deployer_link"]["moved"] is True
 
@@ -961,6 +1032,41 @@ def test_broken_candidate_deployer_does_not_move_the_link(cfg: ad.Config, tmp_pa
     assert Path(os.readlink(cfg.tool_link)) == old_tool
     link = result["receipt"]["deployer_link"]
     assert link["moved"] is False and "selftest failed" in link["reason"]
+
+
+def test_candidate_run_dry_run_failure_does_not_move_the_link(cfg: ad.Config) -> None:
+    host = FakeHost()
+    host.tool_fails = "run"
+    result = cycle(cfg, host, FakeProber())
+    assert result["status"] == "DEPLOYED" and not cfg.tool_link.exists()
+    assert "run --dry-run failed" in result["receipt"]["deployer_link"]["reason"]
+
+
+def test_candidate_dry_run_cli_really_parses(
+    cfg: ad.Config, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The exact self-update argv parses and reaches the planning path offline."""
+    host = FakeHost(candidate=OLD)
+    code = ad.main(
+        [
+            "run",
+            "--dry-run",
+            "--no-fetch",
+            "--gh",
+            "/nonexistent/gh-offline",
+            "--state-dir",
+            str(cfg.state_dir),
+            "--gateway-root",
+            str(cfg.gateway_root),
+            "--plist",
+            str(cfg.plist),
+        ],
+        host=host,
+        prober=FakeProber(),
+        api_get=green_api(),
+    )
+    assert code == 0 and json.loads(capsys.readouterr().out)["status"] == "IN_SYNC"
+    assert not any("fetch" in c for c in host.calls)
 
 
 def test_selftest_subcommand_reaches_the_durable_manager(
@@ -1034,9 +1140,75 @@ def test_crash_before_plist_write_is_reconciled_as_interrupted(cfg: ad.Config) -
         with pytest.raises(Crash):
             cycle(cfg, host, FakeProber())
     assert cfg.journal.exists() and cfg.plist.read_bytes() == before
-    result = cycle(cfg, FakeHost(), FakeProber())
-    assert result["status"] == "RECONCILED_INTERRUPTED"
+    host2, prober2 = FakeHost(), FakeProber()
+    result = cycle(cfg, host2, prober2)
+    # Equal bytes are not trusted: the previous plist is reloaded and probed.
+    assert result["status"] == "RECONCILED_ROLLED_BACK"
+    assert host2.reloads == [before]
+    assert [(c["port"], c["commit"]) for c in prober2.calls] == [(ad.LIVE_PORT, OLD)]
     assert cfg.plist.read_bytes() == before and not cfg.journal.exists()
+
+
+def test_crash_on_rollback_reload_is_reloaded_and_probed_next_cycle(cfg: ad.Config) -> None:
+    before = cfg.plist.read_bytes()
+    host = FakeHost()
+
+    def crash_on_second_reload(count: int) -> None:
+        if count == 2:
+            raise Crash()
+
+    host.on_reload = crash_on_second_reload
+    with pytest.raises(Crash):
+        cycle(cfg, host, FakeProber({(ad.LIVE_PORT, NEW): False}))
+    assert cfg.journal.exists() and cfg.plist.read_bytes() == before
+
+    host2, prober2 = FakeHost(), FakeProber()
+    result = cycle(cfg, host2, prober2)
+    assert result["status"] == "RECONCILED_ROLLED_BACK"
+    assert host2.reloads == [before]
+    assert prober2.calls[-1]["commit"] == OLD and prober2.calls[-1]["port"] == ad.LIVE_PORT
+
+
+def test_reconciled_rollback_that_fails_probe_holds(cfg: ad.Config) -> None:
+    host = FakeHost()
+    host.on_reload = lambda count: (_ for _ in ()).throw(Crash()) if count == 2 else None
+    with pytest.raises(Crash):
+        cycle(cfg, host, FakeProber({(ad.LIVE_PORT, NEW): False}))
+    result = cycle(cfg, FakeHost(), FakeProber({(ad.LIVE_PORT, OLD): False}))
+    assert result["status"] == "RECONCILED_ROLLBACK_FAILED"
+    assert cfg.hold_file.exists() and not cfg.journal.exists()
+    assert ad.last_receipt(cfg.state_dir)["outcome"] == "ROLLBACK_FAILED"
+
+
+def test_pending_journal_is_reconciled_even_under_hold(cfg: ad.Config) -> None:
+    host = FakeHost()
+    probe = FakeProber(
+        hook=lambda c: (_ for _ in ()).throw(Crash()) if c["port"] == ad.LIVE_PORT else None
+    )
+    with pytest.raises(Crash):
+        cycle(cfg, host, probe)  # crash after reload, during the live probe
+    ad._set_hold(cfg, "owner pressed hold after the crash")
+    host2, prober2 = FakeHost(), FakeProber()
+    result = cycle(cfg, host2, prober2)
+    assert result["status"] == "RECONCILED_DEPLOYED"  # live candidate passes: keep it
+    assert not cfg.journal.exists() and cfg.hold_file.exists()
+    assert not any(c[:1] == ["uv"] or "fetch" in c for c in host2.calls)
+    # HOLD still blocks any new switch afterwards.
+    assert cycle(cfg, FakeHost(), FakeProber())["status"] == "HELD"
+
+
+@pytest.mark.parametrize("content", ["{not json", '{"schema": "other"}', '{"schema": "%s"}'])
+def test_corrupt_journal_is_quarantined_with_hold(cfg: ad.Config, content: str) -> None:
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    cfg.journal.write_text(content.replace("%s", ad.JOURNAL_SCHEMA))
+    host = FakeHost()
+    result = cycle(cfg, host, FakeProber())
+    assert result["status"] == "RECONCILED_JOURNAL_CORRUPT"
+    assert not cfg.journal.exists() and cfg.hold_file.exists()
+    assert list(cfg.state_dir.glob("pending-switch.corrupt.*.json"))
+    assert ad.last_receipt(cfg.state_dir)["outcome"] == "JOURNAL_CORRUPT"
+    assert host.reloads == []
+    assert cycle(cfg, host, FakeProber())["status"] == "HELD"  # no crash loop
 
 
 # ---------------------------------------------- coordination with #526 manager
@@ -1099,9 +1271,52 @@ def test_real_manager_lock_uses_the_durable_ledger_lock(
             entered.append(Path("released"))
 
     monkeypatch.setattr(durable, "InterProcessLock", Lock)
+    monkeypatch.setattr(durable, "GATEWAY_STATE_ROOT", cfg.gateway_root)
+    monkeypatch.setattr(durable, "GATEWAY_LOCK", cfg.gateway_root / "ledger.lock")
     with ad.Host().manager_lock(cfg):
         pass
-    assert entered == [cfg.gateway_root / Path(durable.GATEWAY_LOCK).name, Path("released")]
+    assert entered == [durable.GATEWAY_LOCK, Path("released")]
+
+
+def test_manager_lock_path_is_the_managers_own_under_a_non_default_root(tmp_path: Path) -> None:
+    root = tmp_path / "custom-gateway-root"
+    code = (
+        "import json, sys; from pathlib import Path\n"
+        "from scripts.ops import mcp_gateway_durable as d\n"
+        "from scripts.ops import nexus_gateway_auto_deploy as ad\n"
+        f"cfg = ad.Config.default(Path({str(tmp_path)!r}), gateway_root=Path({str(root)!r}))\n"
+        "print(json.dumps([str(ad.Host().manager_lock_path(cfg)), str(d.GATEWAY_LOCK)]))\n"
+    )
+    env = {**os.environ, "NEXUS_GATEWAY_STATE_ROOT": str(root), "PYTHONDONTWRITEBYTECODE": "1"}
+    out = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    deployer_path, manager_path = json.loads(out.strip().splitlines()[-1])
+    assert deployer_path == manager_path == str(root / "ledger.lock")
+
+
+def test_manager_lock_refuses_a_different_manager_root(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.ops import mcp_gateway_durable as durable
+
+    monkeypatch.setattr(durable, "GATEWAY_STATE_ROOT", cfg.gateway_root.parent / "elsewhere")
+    with pytest.raises(ad.DeployError, match="MANAGER_LOCK_UNAVAILABLE"):
+        ad.Host().manager_lock_path(cfg)
+
+
+def test_config_honours_nexus_gateway_plist(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NEXUS_GATEWAY_PLIST", str(tmp_path / "custom.plist"))
+    assert ad.Config.default(tmp_path).plist == tmp_path / "custom.plist"
+    monkeypatch.delenv("NEXUS_GATEWAY_PLIST")
+    assert ad.Config.default(tmp_path).plist.name == f"{ad.GATEWAY_LABEL}.plist"
 
 
 # ---------------------------------------------------------------- pin bumps
@@ -1145,7 +1360,12 @@ def test_no_deploy_while_a_pin_bump_pr_is_in_flight(cfg: ad.Config) -> None:
 def test_autoupdater_branches_count_as_pin_bumps(branch: str) -> None:
     pulls = [{"number": 7, "title": "chore", "head": {"ref": branch}, "updated_at": NOW_ISO}]
     result = ad.pin_bumps_in_flight(green_api(open_pulls=pulls), now=NOW)
-    assert result == {"verdict": "IN_FLIGHT", "pull_requests": [7], "ignored_stale": []}
+    assert result == {
+        "verdict": "IN_FLIGHT",
+        "pull_requests": [7],
+        "ignored_stale": [],
+        "warnings": [],
+    }
 
 
 def test_pin_bump_detected_from_changed_files() -> None:
@@ -1161,12 +1381,48 @@ def test_stale_pin_bump_pr_does_not_block_forever() -> None:
         {
             "number": 9,
             "title": "pin nexus-runtime old",
-            "head": {"ref": "x"},
-            "updated_at": "2025-01-01T00:00:00Z",
+            "head": {"ref": "x", "sha": "9" * 40},
+            # A bot comment yesterday must not make an abandoned PR look fresh.
+            "updated_at": NOW_ISO,
         }
     ]
-    result = ad.pin_bumps_in_flight(green_api(open_pulls=pulls), now=NOW)
+    api = green_api(open_pulls=pulls, pushed_at={"9" * 40: "2025-01-01T00:00:00Z"})
+    result = ad.pin_bumps_in_flight(api, now=NOW)
     assert result["verdict"] == "CLEAR" and result["ignored_stale"] == [9]
+    assert result["warnings"] == ["STALE_PIN_PR_IGNORED #9"]
+    fresh = green_api(open_pulls=pulls, pushed_at={"9" * 40: NOW_ISO})
+    assert ad.pin_bumps_in_flight(fresh, now=NOW)["verdict"] == "IN_FLIGHT"
+
+
+def test_stale_pin_pr_is_reported_in_status_and_receipt(cfg: ad.Config) -> None:
+    pulls = [{"number": 9, "title": "pin nexus-runtime", "head": {"ref": "x", "sha": "9" * 40}}]
+    api = green_api(open_pulls=pulls, pushed_at={"9" * 40: "2025-01-01T00:00:00Z"})
+    result = cycle(cfg, FakeHost(), FakeProber(), api)
+    assert result["status"] == "DEPLOYED"
+    assert result["warnings"] == ["STALE_PIN_PR_IGNORED #9"]
+    assert result["receipt"]["warnings"] == ["STALE_PIN_PR_IGNORED #9"]
+    assert json.loads((cfg.state_dir / "status.json").read_text())["warnings"] == [
+        "STALE_PIN_PR_IGNORED #9"
+    ]
+
+
+def test_pin_bump_files_beyond_first_page(cfg: ad.Config) -> None:
+    def api(path: str) -> Any:
+        if "/pulls?state=open" in path:
+            return (
+                [{"number": 5, "title": "big", "head": {"ref": "feat/big"}}]
+                if path.endswith("page=1")
+                else []
+            )
+        if "/pulls/5/files?" in path:
+            if path.endswith("page=1"):
+                return [{"filename": f"f{i}.py"} for i in range(100)]
+            if path.endswith("page=2"):
+                return [{"filename": "uv.lock"}]
+            return []
+        return green_api()(path)
+
+    assert ad.pin_bumps_in_flight(api, now=NOW)["pull_requests"] == [5]
 
 
 def test_pin_bump_pages_are_all_read() -> None:
@@ -1475,3 +1731,63 @@ def test_real_prober_times_out_on_wrong_commit() -> None:
             timeout=0,
         )
     assert result["ok"] is False and set(result["checks"]) == {"health"}
+
+
+def test_spare_wrapper_really_isolates_gateway_startup_state(tmp_path: Path) -> None:
+    """Start the real Gateway entrypoint through the spare-probe wrapper for a few
+    seconds: startup writes land in the probe dir, a sentinel live dir is untouched."""
+    import socket
+    import time
+
+    if shutil.which("bash") is None:
+        pytest.skip("bash unavailable")
+    home = tmp_path / "home"
+    cfg = ad.Config.default(home, canonical_state_dir=tmp_path / "live-state")
+    cfg.canonical_state_dir.mkdir(parents=True)
+    (cfg.canonical_state_dir / "sentinel").write_text("live")
+    probe_state = tmp_path / "probe-state"
+    probe_state.mkdir()
+    cfg.env_file.parent.mkdir(parents=True)
+    cfg.env_file.write_text("export NEXUS_MCP_GATEWAY_TOKEN=probe-token\n")
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = int(sock.getsockname()[1])
+    command = ad.wrapper_command(cfg, REPO_ROOT, Path(sys.executable), port, state_dir=probe_state)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("NEXUS_")}
+    env.update(HOME=str(home), PYTHONDONTWRITEBYTECODE="1")
+    proc = subprocess.Popen(
+        ["bash", "-c", command],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    try:
+        deadline = time.monotonic() + 120
+        up = False
+        while not up and time.monotonic() < deadline and proc.poll() is None:
+            try:
+                socket.create_connection(("127.0.0.1", port), timeout=1).close()
+                up = True
+            except OSError:
+                time.sleep(0.5)
+        assert up, proc.stderr.read().decode()[-2000:] if proc.stderr else "gateway did not start"
+        # The same read-only status call the smoke probe makes; it touches state.
+        status = ad.Prober(ad.Host())._http(
+            f"http://127.0.0.1:{port}/mcp",
+            body={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "nexus_gateway_status", "arguments": {}},
+            },
+            token="probe-token",
+        )
+        assert "result" in status
+        assert any(probe_state.iterdir()), "the probe instance wrote nothing into its state dir"
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(proc.pid, 15)
+        proc.wait(timeout=30)
+    assert sorted(p.name for p in cfg.canonical_state_dir.iterdir()) == ["sentinel"]
+    assert (cfg.canonical_state_dir / "sentinel").read_text() == "live"

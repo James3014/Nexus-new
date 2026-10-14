@@ -110,6 +110,7 @@ RECEIPT_SCHEMA = "nexus.gateway.auto_deploy_receipt.v1"
 STATUS_SCHEMA = "nexus.gateway.auto_deploy_status.v1"
 JOURNAL_SCHEMA = "nexus.gateway.auto_deploy_pending_switch.v1"
 HOLD_ENV = "NEXUS_GATEWAY_AUTO_DEPLOY_HOLD"
+GATEWAY_PLIST_ENV = "NEXUS_GATEWAY_PLIST"
 TOKEN_ENV = "NEXUS_MCP_GATEWAY_TOKEN"
 # Paths that cannot change Gateway behaviour; anything else counts as relevant.
 IRRELEVANT_PREFIXES = ("tasks/", "docs/", "tests/", ".github/", "archives/", "artifacts/")
@@ -127,6 +128,7 @@ FAILED_OUTCOMES = (
     "BLOCKED_NO_ROLLBACK",
     "BLOCKED_MANAGER_BUSY",
     "FOREIGN_PLIST",
+    "JOURNAL_CORRUPT",
 )
 MAX_BACKOFF_SECONDS = 6 * 60 * 60
 # Open PRs that bump the runtime/dependency pin (or anchor such a bump).  While
@@ -180,10 +182,14 @@ class Config:
     def default(cls, home: Optional[Path] = None, **overrides: Any) -> "Config":
         home = Path.home() if home is None else home
         support = home / "Library/Application Support/Nexus"
+        # Same override the durable manager honours (scripts/ops/mcp_gateway_durable.py).
+        plist_override = os.environ.get(GATEWAY_PLIST_ENV, "")
         values: Dict[str, Any] = {
             "gateway_root": support / "gateway-direct",
             "state_dir": home / ".local/state/nexus-gateway-auto-deploy",
-            "plist": home / "Library/LaunchAgents" / f"{GATEWAY_LABEL}.plist",
+            "plist": Path(plist_override)
+            if plist_override
+            else home / "Library/LaunchAgents" / f"{GATEWAY_LABEL}.plist",
             "env_file": support / "mcp-gateway.env",
             "canonical_state_dir": home / ".local/state/Nexus-new-self-hosted-state",
         }
@@ -289,15 +295,28 @@ class Host:
         except Exception as exc:  # noqa: BLE001
             raise DeployError(f"GATEWAY_RELOAD_FAILED:{exc}") from exc
 
+    def manager_lock_path(self, cfg: Config) -> Path:
+        """The #526 manager's own ``GATEWAY_LOCK``; it must manage this gateway root."""
+        from scripts.ops import mcp_gateway_durable as durable
+
+        lock = Path(durable.GATEWAY_LOCK)
+        if Path(durable.GATEWAY_STATE_ROOT).resolve() != cfg.gateway_root.resolve():
+            raise DeployError(
+                f"MANAGER_LOCK_UNAVAILABLE:manager state root {durable.GATEWAY_STATE_ROOT} "
+                f"is not {cfg.gateway_root}"
+            )
+        return lock
+
     @contextlib.contextmanager
     def manager_lock(self, cfg: Config) -> Iterator[None]:
         """Hold the #526 manager's ledger lock so a manual rebind cannot interleave."""
         from scripts.ops import mcp_gateway_durable as durable
 
-        lock_path = cfg.gateway_root / Path(durable.GATEWAY_LOCK).name
         try:
-            lock = durable.InterProcessLock(lock_path, timeout=30.0)
+            lock = durable.InterProcessLock(self.manager_lock_path(cfg), timeout=30.0)
             lock.__enter__()
+        except DeployError:
+            raise
         except Exception as exc:  # noqa: BLE001
             raise DeployError(f"MANAGER_LOCK_UNAVAILABLE:{exc}") from exc
         try:
@@ -436,38 +455,60 @@ def _parse_time(value: Any) -> Optional[float]:
         return None
 
 
+def _paged(api_get: Callable[[str], Any], path: str) -> Iterator[dict]:
+    """Every item of a paginated list endpoint (100 per page)."""
+    sep = "&" if "?" in path else "?"
+    page = 1
+    while True:
+        items = api_get(f"{path}{sep}per_page=100&page={page}") or []
+        yield from items
+        if len(items) < 100:
+            return
+        page += 1
+
+
+def _last_push(api_get: Callable[[str], Any], repo: str, pr: dict) -> Optional[float]:
+    """Committer time of the PR head (bot comments do not move it, unlike updated_at)."""
+    head = (pr.get("head") or {}).get("sha")
+    if not head:
+        return None
+    commit = api_get(f"repos/{repo}/commits/{head}").get("commit") or {}
+    return _parse_time((commit.get("committer") or {}).get("date"))
+
+
 def pin_bumps_in_flight(
     api_get: Callable[[str], Any], *, repo: str = REPOSITORY, now: Optional[float] = None
 ) -> Dict[str, Any]:
-    """Open pin-bump PRs updated within the age cap; CLEAR, IN_FLIGHT or UNKNOWN."""
+    """Open pin-bump PRs; CLEAR, IN_FLIGHT or UNKNOWN (fail closed).
+
+    A pin-bump PR whose head was last pushed more than ``PIN_BUMP_MAX_AGE_SECONDS``
+    ago is treated as abandoned and does not block, but it is never silent: it is
+    listed in ``ignored_stale`` and as a ``STALE_PIN_PR_IGNORED #N`` warning.
+    """
     now = time.time() if now is None else now
     hits: List[int] = []
     stale: List[int] = []
     try:
-        page = 1
-        while True:
-            pulls = api_get(f"repos/{repo}/pulls?state=open&per_page=100&page={page}") or []
-            for pr in pulls:
-                updated = _parse_time(pr.get("updated_at"))
-                if updated is not None and now - updated > PIN_BUMP_MAX_AGE_SECONDS:
-                    stale.append(pr["number"])
-                    continue
-                label = f"{pr.get('title') or ''} {(pr.get('head') or {}).get('ref') or ''}"
-                if PIN_BUMP_PR.search(label):
-                    hits.append(pr["number"])
-                    continue
-                files = api_get(f"repos/{repo}/pulls/{pr['number']}/files?per_page=100") or []
-                if any(f.get("filename") in PIN_FILES for f in files):
-                    hits.append(pr["number"])
-            if len(pulls) < 100:
-                break
-            page += 1
+        for pr in _paged(api_get, f"repos/{repo}/pulls?state=open"):
+            label = f"{pr.get('title') or ''} {(pr.get('head') or {}).get('ref') or ''}"
+            is_pin = bool(PIN_BUMP_PR.search(label)) or any(
+                f.get("filename") in PIN_FILES
+                for f in _paged(api_get, f"repos/{repo}/pulls/{pr['number']}/files")
+            )
+            if not is_pin:
+                continue
+            pushed = _last_push(api_get, repo, pr)
+            if pushed is not None and now - pushed > PIN_BUMP_MAX_AGE_SECONDS:
+                stale.append(pr["number"])
+            else:
+                hits.append(pr["number"])
     except Exception as exc:  # noqa: BLE001
         return {"verdict": "UNKNOWN", "error": f"{type(exc).__name__}:{exc}"[:300]}
     return {
         "verdict": "IN_FLIGHT" if hits else "CLEAR",
         "pull_requests": sorted(hits),
         "ignored_stale": sorted(stale),
+        "warnings": [f"STALE_PIN_PR_IGNORED #{n}" for n in sorted(stale)],
     }
 
 
@@ -720,13 +761,24 @@ def _contained_dirs(parent: Path) -> List[Path]:
     return found
 
 
+def prune_refusal(cfg: Config) -> Optional[str]:
+    """Why pruning is unsafe here, or None.  Nothing may be reached through a symlink."""
+    root = cfg.gateway_root
+    if not root.is_absolute() or os.path.realpath(root) != str(root):
+        return f"GATEWAY_ROOT_NOT_CANONICAL:{root}"
+    for path in (cfg.deployments, cfg.venvs):
+        if path.is_symlink():
+            return f"SYMLINKED_DIRECTORY:{path}"
+    return None
+
+
 def prune(cfg: Config, host: Host, protected: List[Optional[Path]]) -> List[str]:
     """Keep the newest ``cfg.keep`` a1-* deployments plus every protected one.
 
     Refuses outright when ``deployments/`` or ``venvs/`` is a symlink and never
     follows symlinked children, so nothing outside those two directories is removed.
     """
-    if cfg.deployments.is_symlink() or cfg.venvs.is_symlink():
+    if prune_refusal(cfg):
         return []
     keep_names = {p.name for p in protected if p is not None}
     candidates = sorted(
@@ -845,6 +897,7 @@ def run_cycle(
     force: bool = False,
     environ: Optional[Dict[str, str]] = None,
     tool_python: Optional[Path] = None,
+    fetch: bool = True,
 ) -> Dict[str, Any]:
     started = host.now()
     status: Dict[str, Any] = {
@@ -852,18 +905,22 @@ def run_cycle(
         "polled_at": _iso(started),
         "dry_run": dry_run,
     }
-    held = hold_reason(cfg, environ)
-    if held:
-        return {**status, "status": "HELD", "hold": held}
     with _cycle_lock(cfg) as acquired:
         if not acquired:
             return {**status, "status": "BUSY"}
-        # HOLD may have been set while this cycle waited for the lock.
-        held = hold_reason(cfg, environ)
-        if held:
-            return {**status, "status": "HELD", "hold": held}
         ctx = _Cycle(cfg, host, prober, api_get, environ, tool_python or Path(sys.executable))
-        result = ctx.run(status, dry_run=dry_run, force=force)
+        ctx.fetch = fetch
+        if cfg.journal.exists() and not dry_run:
+            # A half-finished switch is safety work, not a new deploy: it is
+            # resolved even under HOLD (HOLD still blocks every new switch).
+            receipt = ctx.reconcile_journal()
+            result = {**status, "status": f"RECONCILED_{receipt['outcome']}", "receipt": receipt}
+        else:
+            # Checked under the lock, so a HOLD set while waiting is honoured.
+            held = hold_reason(cfg, environ)
+            if held:
+                return {**status, "status": "HELD", "hold": held}
+            result = ctx.run(status, dry_run=dry_run, force=force)
     if not dry_run:
         _write_status(cfg, result)
     return result
@@ -882,16 +939,14 @@ class _Cycle:
         self.cfg, self.host, self.prober, self.api_get = cfg, host, prober, api_get
         self.environ = environ
         self.tool_python = tool_python
+        self.fetch = True
 
     # -- entry -------------------------------------------------------------
 
     def run(self, status: Dict[str, Any], *, dry_run: bool, force: bool) -> Dict[str, Any]:
         cfg, host = self.cfg, self.host
         if cfg.journal.exists():
-            if dry_run:
-                return {**status, "status": "PENDING_SWITCH_JOURNAL", "journal": str(cfg.journal)}
-            receipt = self.reconcile_journal()
-            return {**status, "status": f"RECONCILED_{receipt['outcome']}", "receipt": receipt}
+            return {**status, "status": "PENDING_SWITCH_JOURNAL", "journal": str(cfg.journal)}
         previous_plist = cfg.plist.read_bytes()
         if _sha256(previous_plist) not in known_plist_hashes(cfg):
             if dry_run:
@@ -900,19 +955,10 @@ class _Cycle:
         origin = _must(host, _git(cfg, "remote", "get-url", "origin"), "ORIGIN_URL_FAILED").strip()
         if origin not in ORIGIN_URLS:
             return {**status, "status": "ORIGIN_MISMATCH", "origin": origin}
-        _must(
-            host,
-            _git(
-                cfg,
-                "fetch",
-                "--quiet",
-                "--no-tags",
-                "origin",
-                f"+refs/heads/{cfg.track_branch}:{TRACK_REF}",
-            ),
-            "FETCH_FAILED",
-            timeout=300,
-        )
+        if self.fetch:
+            refspec = f"+refs/heads/{cfg.track_branch}:{TRACK_REF}"
+            fetch = _git(cfg, "fetch", "--quiet", "--no-tags", "origin", refspec)
+            _must(host, fetch, "FETCH_FAILED", timeout=300)
         candidate = _must(
             host, _git(cfg, "rev-parse", f"{TRACK_REF}^{{commit}}"), "TRACK_REF_FAILED"
         ).strip()
@@ -926,6 +972,9 @@ class _Cycle:
 
         def finish(state: str, **extra: Any) -> Dict[str, Any]:
             if not dry_run and state != "PLAN":
+                refusal = prune_refusal(cfg)
+                if refusal:
+                    extra["prune_refused"] = refusal
                 removed = self.prune([previous_root])
                 if removed:
                     extra["pruned"] = removed
@@ -957,6 +1006,8 @@ class _Cycle:
             return finish(f"CHECKS_{checks['verdict']}")
         pins = pin_bumps_in_flight(self.api_get, repo=cfg.repository, now=host.now())
         status["pin_bumps"] = pins
+        if pins.get("warnings"):
+            status["warnings"] = list(pins["warnings"])
         if pins["verdict"] != "CLEAR":
             return finish(f"PIN_BUMP_{pins['verdict']}")
         if previous_commit and not force:
@@ -992,7 +1043,7 @@ class _Cycle:
                     "live_command": wrapper_command(cfg, root, venv_python),
                 },
             )
-        receipt = self.attempt(candidate, previous_plist, checks)
+        receipt = self.attempt(candidate, previous_plist, checks, status.get("warnings", []))
         status["receipt"] = receipt
         return finish(receipt["outcome"])
 
@@ -1060,10 +1111,11 @@ class _Cycle:
     # -- one attempt ------------------------------------------------------------
 
     def attempt(
-        self, candidate: str, previous_plist: bytes, checks: Dict[str, Any]
+        self, candidate: str, previous_plist: bytes, checks: Dict[str, Any], warnings: List[str]
     ) -> Dict[str, Any]:
         receipt = self.new_receipt(candidate, previous_plist)
         receipt["required_checks"] = checks
+        receipt["warnings"] = list(warnings)
         try:
             receipt.update(self.attempt_effects(candidate, previous_plist, receipt))
         except Exception as exc:  # noqa: BLE001 - every failure must still leave a receipt
@@ -1127,6 +1179,9 @@ class _Cycle:
                 return {"outcome": "HELD", "reason": f"hold set during the cycle ({held})"}
             pins = pin_bumps_in_flight(self.api_get, repo=cfg.repository, now=host.now())
             receipt["pin_bumps_before_switch"] = pins
+            for warning in pins.get("warnings", []):
+                if warning not in receipt["warnings"]:
+                    receipt["warnings"].append(warning)
             if pins["verdict"] != "CLEAR":
                 return {
                     "outcome": f"PIN_BUMP_{pins['verdict']}",
@@ -1205,31 +1260,58 @@ class _Cycle:
     def reconcile_journal(self) -> Dict[str, Any]:
         """Resolve a switch that a previous cycle did not finish (crash or kill)."""
         cfg = self.cfg
-        journal = json.loads(cfg.journal.read_text(encoding="utf-8"))
-        if journal.get("schema") != JOURNAL_SCHEMA:
-            raise DeployError("PENDING_SWITCH_JOURNAL_INVALID")
-        receipt = dict(journal["receipt"])
-        receipt["reconciled"] = True
-        receipt["switched"] = True
-        previous_plist = base64.b64decode(journal["previous_plist_b64"])
-        root = Path(receipt["deployment_root"])
-        python = Path(journal["candidate_python"])
+        try:
+            journal = json.loads(cfg.journal.read_text(encoding="utf-8"))
+            if journal.get("schema") != JOURNAL_SCHEMA:
+                raise ValueError("schema")
+            receipt = dict(journal["receipt"])
+            previous_plist = base64.b64decode(journal["previous_plist_b64"], validate=True)
+            root = Path(receipt["deployment_root"])
+            python = Path(journal["candidate_python"])
+            new_plist_sha = str(journal["new_plist_sha256"])
+            live_root(previous_plist)  # label check
+        except (OSError, ValueError, KeyError, TypeError, DeployError) as exc:
+            return self.quarantine_journal(f"{type(exc).__name__}:{exc}"[:300])
+        receipt.update(reconciled=True, switched=True)
         with self.host.manager_lock(cfg):
             try:
                 live_plist = cfg.plist.read_bytes()
-                if _sha256(live_plist) == journal["new_plist_sha256"]:
+                if _sha256(live_plist) == new_plist_sha:
                     # The switch got as far as the plist write; make sure launchd
-                    # runs it, then decide like a normal switch would.
+                    # runs it, keep it if it passes, otherwise roll back.
                     receipt.update(self.finish_switch(receipt, previous_plist, root, python))
                 elif live_plist == previous_plist:
-                    receipt.update(outcome="INTERRUPTED", switched=False)
-                    receipt["reason"] = "crashed before the plist write; previous plist still live"
+                    # Equal bytes do not prove launchd runs them (the crash may
+                    # have hit the rollback reload): reload and probe them.
+                    receipt["reason"] = "interrupted switch; previous plist re-verified"
+                    receipt.update(self.rollback(previous_plist, receipt))
                 else:
                     _set_hold(cfg, "auto-hold: FOREIGN_PLIST while reconciling a pending switch")
                     receipt.update(outcome="FOREIGN_PLIST", reason="unexpected live plist")
             except Exception as exc:  # noqa: BLE001
                 receipt["reason"] = f"{type(exc).__name__}:{exc}"[:500]
                 receipt.update(self.rollback(previous_plist, receipt))
+        return self.close_receipt(receipt)
+
+    def quarantine_journal(self, reason: str) -> Dict[str, Any]:
+        """An unreadable journal is moved aside once, with HOLD and a receipt."""
+        cfg = self.cfg
+        started = self.host.now()
+        aside = cfg.journal.with_name(f"pending-switch.corrupt.{int(started)}.json")
+        os.replace(cfg.journal, aside)
+        _set_hold(cfg, f"auto-hold: JOURNAL_CORRUPT (moved to {aside.name}); inspect the Gateway")
+        receipt = {
+            "schema": RECEIPT_SCHEMA,
+            "attempt_id": f"journal-{int(started)}",
+            "outcome": "JOURNAL_CORRUPT",
+            "reason": reason,
+            "journal_moved_to": str(aside),
+            "started_at": _iso(started),
+            "started_epoch": started,
+            "switched": False,
+            "rolled_back": False,
+            "probes": {},
+        }
         return self.close_receipt(receipt)
 
     def move_tool_link(self, root: Path) -> Dict[str, Any]:
@@ -1240,14 +1322,53 @@ class _Cycle:
             "PYTHONDONTWRITEBYTECODE": "1",
             "NEXUS_GATEWAY_PLIST": str(cfg.plist),
         }
-        for argv in (
-            [str(self.tool_python), str(deployer), "selftest", "--state-dir", str(cfg.state_dir)],
-            [str(self.tool_python), str(deployer), "status", "--state-dir", str(cfg.state_dir)],
-        ):
-            result = self.host.run(argv, env=env, timeout=120)
-            if result.returncode != 0:
+        # The planning path runs against a scratch state dir with an offline gh
+        # stub and no fetch, so it parses the LaunchAgent's `run` CLI and reads
+        # the live plist/bare repo without any effect.
+        scratch = cfg.state_dir / "selftest-state"
+        shutil.rmtree(scratch, ignore_errors=True)
+        scratch.mkdir(parents=True)
+        if cfg.known_plists.exists():
+            shutil.copy2(cfg.known_plists, scratch / cfg.known_plists.name)
+        offline_gh = scratch / "gh-offline"
+        offline_gh.write_text("#!/bin/sh\necho 'offline gh stub' >&2\nexit 1\n", encoding="utf-8")
+        offline_gh.chmod(0o755)
+        base = [str(self.tool_python), str(deployer)]
+        checks = (
+            ("selftest", [*base, "selftest", "--state-dir", str(cfg.state_dir)]),
+            ("status", [*base, "status", "--state-dir", str(cfg.state_dir)]),
+            (
+                "run --dry-run",
+                [
+                    *base,
+                    "run",
+                    "--dry-run",
+                    "--no-fetch",
+                    "--gh",
+                    str(offline_gh),
+                    "--state-dir",
+                    str(scratch),
+                    "--gateway-root",
+                    str(cfg.gateway_root),
+                    "--plist",
+                    str(cfg.plist),
+                ],
+            ),
+        )
+        try:
+            for name, argv in checks:
+                result = self.host.run(argv, env=env, timeout=120)
                 detail = (result.stderr or result.stdout or "").strip()[-300:]
-                return {"moved": False, "reason": f"{argv[2]} failed: {detail}"}
+                if result.returncode != 0:
+                    return {"moved": False, "reason": f"{name} failed: {detail}"}
+                if name == "run --dry-run":
+                    planned = json.loads(result.stdout or "{}").get("status")
+                    if planned in (None, "ERROR"):
+                        return {"moved": False, "reason": f"{name} failed: {detail}"}
+        except ValueError as exc:
+            return {"moved": False, "reason": f"run --dry-run output unreadable: {exc}"}
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
         _atomic_symlink(root, cfg.tool_link)
         return {"moved": True, "target": str(root)}
 
@@ -1313,6 +1434,16 @@ def main(
     parser.add_argument("--max-irrelevant-lag", type=int, default=None)
     parser.add_argument("--python-version", default=None)
     parser.add_argument(
+        "--no-fetch",
+        action="store_true",
+        help="run --dry-run only: use the already fetched main (self-update check)",
+    )
+    parser.add_argument(
+        "--adopt-if-unrecorded",
+        action="store_true",
+        help="adopt: only when nothing is recorded yet (first install); refuse an unknown plist",
+    )
+    parser.add_argument(
         "--uv-extras", default=None, help='"all" (default) or a comma list such as "legacy"'
     )
     args = parser.parse_args(argv)
@@ -1339,6 +1470,17 @@ def main(
     if args.command == "adopt":
         data = cfg.plist.read_bytes()
         live_root(data)  # label check
+        known = known_plist_hashes(cfg)
+        if args.adopt_if_unrecorded and known and _sha256(data) not in known:
+            print(
+                json.dumps({
+                    "status": "REFUSED",
+                    "reason": "live Gateway plist differs from every plist the deployer wrote "
+                    "or adopted (manual rebind?); re-run the installer with --adopt to accept it",
+                    "plist_sha256": _sha256(data),
+                })
+            )
+            return 3
         remember_plist(cfg, data)
         print(json.dumps({"status": "ADOPTED", "plist_sha256": _sha256(data)}))
         return 0
@@ -1355,6 +1497,11 @@ def main(
                 {
                     "hold": hold_reason(cfg),
                     "pending_switch": cfg.journal.exists(),
+                    "warnings": (
+                        json.loads(state.read_text(encoding="utf-8")).get("warnings", [])
+                        if state.is_file()
+                        else []
+                    ),
                     "status": json.loads(state.read_text(encoding="utf-8"))
                     if state.is_file()
                     else None,
@@ -1388,6 +1535,7 @@ def main(
             api_get or gh_api_getter(host, args.gh),
             dry_run=args.dry_run,
             force=args.force,
+            fetch=not (args.dry_run and args.no_fetch),
         )
     except (DeployError, OSError, ValueError) as exc:
         error = {
