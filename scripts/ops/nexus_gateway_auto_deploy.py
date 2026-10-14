@@ -1273,7 +1273,10 @@ class _Cycle:
                 if all(is_irrelevant(p) for p in changed) and behind < cfg.max_irrelevant_lag:
                     return finish("SKIPPED_IRRELEVANT")
         if not force:
-            wait = self.backoff_remaining(failures)
+            # A manager/R1 block is not the candidate's fault: plain debounce only.
+            wait = self.backoff_remaining([
+                r for r in failures if r.get("outcome") != "BLOCKED_MANAGER_BUSY"
+            ])
             if wait > 0:
                 return finish("BACKOFF" if failures else "DEBOUNCED", retry_in_seconds=int(wait))
         root = cfg.deployments / f"{DEPLOYMENT_PREFIX}{candidate}"
@@ -1296,6 +1299,11 @@ class _Cycle:
                     "live_command": wrapper_command(cfg, root, venv_python),
                 },
             )
+        # Advisory early check (the authoritative one is under the lock right
+        # before the plist write): no build or probe churn while R1 is open.
+        block = host.r1_recovery_block(cfg)
+        if block is not None:
+            return finish("BLOCKED_MANAGER_BUSY", reason=block)
         receipt = self.attempt(candidate, previous_plist, checks, status.get("warnings", []))
         status["receipt"] = receipt
         return finish(receipt["outcome"])
@@ -1461,6 +1469,12 @@ class _Cycle:
                 _set_hold(cfg, "auto-hold: FOREIGN_PLIST; live plist changed during the cycle")
                 return {"outcome": "FOREIGN_PLIST", "reason": "live plist changed during the cycle"}
 
+            # Checked under GATEWAY_LOCK (then the ledger lock), so no R1 request
+            # can open between here and the plist write / rollback below.
+            block = host.r1_recovery_block(cfg)
+            if block is not None:
+                return {"outcome": "BLOCKED_MANAGER_BUSY", "reason": block}
+
             new_plist = render_plist(previous_plist, wrapper_command(cfg, root, python), root)
             self.write_journal(receipt, previous_plist, new_plist, python)
             _atomic_write(cfg.plist, new_plist)
@@ -1540,11 +1554,26 @@ class _Cycle:
         try:
             with self.host.manager_lock(cfg):
                 live_plist = cfg.plist.read_bytes()
-                if _sha256(live_plist) == new_plist_sha:
+                # An open #526 R1 recovery owns the Gateway: no reload and no
+                # plist write while it lasts.  Finalizing a candidate that is
+                # already live and healthy needs neither, so only that read-only
+                # path proceeds; everything else keeps the journal for later.
+                block = self.host.r1_recovery_block(cfg)
+                if _sha256(live_plist) == new_plist_sha and block is not None:
+                    live = self.live_probe(receipt["candidate_commit"], root, python)
+                    receipt["probes"]["live"] = live
+                    receipt["r1_block_observed"] = block
+                    if not live["ok"]:
+                        return {"outcome": "BLOCKED_MANAGER_BUSY", "reason": block}
+                    receipt["deployer_link"] = self.move_tool_link(root)
+                    receipt["outcome"] = "DEPLOYED"
+                elif _sha256(live_plist) == new_plist_sha:
                     # The switch got as far as the plist write; make sure launchd
                     # runs it, keep it if it passes, otherwise roll back.
                     receipt.update(self.finish_switch(receipt, previous_plist, root, python))
                 elif live_plist == previous_plist:
+                    if block is not None:
+                        return {"outcome": "BLOCKED_MANAGER_BUSY", "reason": block}
                     # Equal bytes do not prove launchd runs them (the crash may
                     # have hit the rollback reload): reload and probe them.
                     receipt["reason"] = "interrupted switch; previous plist re-verified"
