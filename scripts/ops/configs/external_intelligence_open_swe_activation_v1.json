@@ -3,6 +3,7 @@
   "worker_backend": "open_swe",
   "open_swe_model_provider": "opencli_chatgpt",
   "open_swe_model": "balanced",
+  "open_swe_expected_observed_model": "<DEPLOYMENT_SUPPLIED_OBSERVED_MODEL_REVISION>",
   "open_swe_executable": "<DEPLOYMENT_SUPPLIED_ABSOLUTE_RUNTIME_PATH>",
   "open_swe_runtime_artifact_sha256": "<DEPLOYMENT_SUPPLIED_MODULE_SHA256>",
   "open_swe_opencli_executable": "<DEPLOYMENT_SUPPLIED_ABSOLUTE_OPENCLI_PATH>",

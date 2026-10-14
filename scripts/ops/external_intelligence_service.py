@@ -21,9 +21,11 @@ from typing import Any, Callable, Mapping
 
 from nexus.core.exit_codes import NexusExitCode
 from nexus.services.external_intelligence import (
+    OBSERVED_MODEL_REVISION_RE,
     ExternalIntelligenceSidecar,
     ExternalIntelligenceStore,
     OpenCLIExternalIntelligenceTransport,
+    is_unmeasured_model_revision,
 )
 from nexus.services.external_intelligence_automation import (
     TERMINAL_DISPOSITIONS,
@@ -85,6 +87,7 @@ class ServiceConfig:
     semantic_backend: str = "opencli"
     open_swe_model_provider: str = ""
     open_swe_model: str = ""
+    open_swe_expected_observed_model: str = ""
     open_swe_executable: str = ""
     open_swe_runtime_artifact_sha256: str = ""
     open_swe_opencli_executable: str = "opencli"
@@ -447,6 +450,7 @@ def load_config(path: str | os.PathLike[str]) -> ServiceConfig:
         "semantic_backend",
         "open_swe_model_provider",
         "open_swe_model",
+        "open_swe_expected_observed_model",
         "open_swe_executable",
         "open_swe_runtime_artifact_sha256",
         "open_swe_opencli_executable",
@@ -522,6 +526,23 @@ def load_config(path: str | os.PathLike[str]) -> ServiceConfig:
             or not 30 <= opencli_timeout_seconds <= 900
         ):
             raise ServiceError("CONFIG_OPEN_SWE_TRANSPORT_INVALID")
+    # The opencli ChatGPT web provider picks its physical model outside Nexus, so
+    # the observed model revision every invocation must report is pinned here.
+    expected_observed_model = raw.get("open_swe_expected_observed_model")
+    if expected_observed_model is not None and (
+        not isinstance(expected_observed_model, str)
+        or "\x00" in expected_observed_model
+        or (
+            expected_observed_model
+            and OBSERVED_MODEL_REVISION_RE.fullmatch(expected_observed_model) is None
+        )
+    ):
+        raise ServiceError("CONFIG_OPEN_SWE_EXPECTED_OBSERVED_MODEL_INVALID")
+    if open_swe_provider == "opencli_chatgpt":
+        if not expected_observed_model or is_unmeasured_model_revision(expected_observed_model):
+            raise ServiceError("CONFIG_OPEN_SWE_EXPECTED_OBSERVED_MODEL_REQUIRED")
+    elif expected_observed_model is not None:
+        raise ServiceError("CONFIG_OPEN_SWE_EXPECTED_OBSERVED_MODEL_PROVIDER_MISMATCH")
     if semantic_backend == "open_swe" or worker_backend == "open_swe":
         if not isinstance(open_swe_executable, str) or not open_swe_executable.strip():
             raise ServiceError("CONFIG_OPEN_SWE_EXECUTABLE_REQUIRED")
@@ -645,6 +666,12 @@ def _open_swe_transport_config(config: ServiceConfig) -> dict[str, Any]:
     }
 
 
+def _open_swe_observed_model_kwargs(config: ServiceConfig) -> dict[str, str]:
+    if not config.open_swe_expected_observed_model:
+        return {}
+    return {"expected_observed_model": config.open_swe_expected_observed_model}
+
+
 def build_automation(config: ServiceConfig, repository: str) -> ExternalIntelligenceAutomation:
     if config.semantic_backend not in {"opencli", "open_swe"}:
         raise ServiceError("CONFIG_SEMANTIC_BACKEND_INVALID")
@@ -656,6 +683,9 @@ def build_automation(config: ServiceConfig, repository: str) -> ExternalIntellig
     ):
         raise ServiceError("CONFIG_OPEN_SWE_MODEL_BINDING_REQUIRED")
     if config.semantic_backend == "opencli":
+        # Legacy direct opencli semantic transport: NOT covered by the
+        # open_swe_expected_observed_model pin (#2188), which only binds the
+        # Open SWE transports.  Live EIA uses semantic_backend "open_swe".
         semantic_transport: Any = OpenCLIExternalIntelligenceTransport(
             executable=config.opencli_executable,
             profile=config.opencli_profile,
@@ -671,6 +701,7 @@ def build_automation(config: ServiceConfig, repository: str) -> ExternalIntellig
                 runtime_state_root=config.state_root / "open_swe_runtime",
                 timeout=config.open_swe_semantic_timeout_seconds,
                 transport_config=_open_swe_transport_config(config),
+                **_open_swe_observed_model_kwargs(config),
             )
         except OpenSWEExternalIntelligenceError as exc:
             raise ServiceError(str(exc)) from exc
@@ -691,6 +722,7 @@ def build_automation(config: ServiceConfig, repository: str) -> ExternalIntellig
                 timeout=config.open_swe_worker_timeout_seconds,
                 require_worker_binding=True,
                 transport_config=_open_swe_transport_config(config),
+                **_open_swe_observed_model_kwargs(config),
             )
         except OpenSWEExternalIntelligenceError as exc:
             raise ServiceError(str(exc)) from exc

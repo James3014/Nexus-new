@@ -9,7 +9,7 @@ owner: agent
 related_pages:
 - '[Module - Security and Tool Guard Registry](Module - Security and Tool Guard Registry.md)'
 - '[Module - Implementation Responsibility Matrix](Module - Implementation Responsibility Matrix.md)'
-source_of_truth: src/governance/mod.rs
+source_of_truth: nexus/engine/runtime_phase_contract.py
 status: active
 tags:
 - core
@@ -28,7 +28,7 @@ version_scope:
 # Module - Guard and Gate Control (Hybrid v24.0)
 
 ## One-sentence summary
-本頁解析 Nexus v24.0 的物理安全閘門實作，核心決策已全面下沉至 Rust Kernel，實現語義建議與物理裁決的絕對隔離。 [Source: src/governance/mod.rs]
+本頁解析 Nexus v24.0 的物理安全閘門實作，核心決策已全面下沉至 Rust Kernel，實現語義建議與物理裁決的絕對隔離。（2026-10-14：Rust 擴充已退役並刪除，見 #1927；現行權威見 nexus/engine/runtime_phase_contract.py）
 
 ## Role / responsibility
 - **物理裁決 (Physical Enforcement)**: 透過 Rust `TransitionGuard` 強制執行合法狀態轉移，模型無權直接修改狀態。
@@ -39,10 +39,10 @@ version_scope:
 
 | Logic Component | Responsibility (職責) | Source (Path) |
 |---|---|---|
-| **TransitionEngine** | 執行 P-X-D-R-A-C 狀態機計算，攔截非法跳步。 | [Source: src/governance/transition_engine.rs] |
-| **BlockerEngine** | 判定政策性阻斷 (如 Horizontal Slice, design-in-research)。 | [Source: src/governance/blocker_engine.rs] |
-| **ContractEngine** | 驗證各 Phase 輸出 Payload 的強型別完整性。 | [Source: src/governance/contract_engine.rs] |
-| **IntentNormalizer** | **[LangSec]** 標籤識別與正規化，阻斷非正規文法。 | [Source: src/governance/normalizer.rs] |
+| **TransitionEngine** | 執行 P-X-D-R-A-C 狀態機計算，攔截非法跳步。 | Rust 版已退役（#1927）；現行為 [Source: nexus/engine/runtime_phase_contract.py] |
+| **BlockerEngine** | 判定政策性阻斷 (如 Horizontal Slice, design-in-research)。 | 已退役（原 `src/governance/blocker_engine.rs`，#1927 刪除） |
+| **ContractEngine** | 驗證各 Phase 輸出 Payload 的強型別完整性。 | 已退役（原 `src/governance/contract_engine.rs`，#1927 刪除） |
+| **IntentNormalizer** | **[LangSec]** 標籤識別與正規化，阻斷非正規文法。 | 已退役（原 `src/governance/normalizer.rs`，#1927 刪除） |
 | **SemanticAdapter** | 語義接口封裝，實施自動 Escalation 降級策略。 | [Source: nexus/engine/semantic_adapter.py] |
 
 ## Physical Enforcement Gate (物理強制執行 - Protocol v2.9)
