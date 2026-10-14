@@ -49,6 +49,18 @@ DELETION_POLICY = "FORBID"
 FRESHNESS_MARGIN_SECONDS = 120
 # Upper bound of ExternalIntelligenceClosureRuntime.max_repairs_per_unit.
 MAX_REPAIRS_PER_UNIT_LIMIT = 20
+# Closure's built-in integrity checks (whitespace, deletions, scope): one git diff
+# each, each bounded by this timeout, run once for the unit verification and once
+# for the whole-task verification of every closure cycle.  The closure module reads
+# its git timeout from here so the binding window cannot silently undercount it.
+CLOSURE_INTEGRITY_CHECK_COUNT = 3
+CLOSURE_INTEGRITY_GIT_TIMEOUT_SECONDS = 30.0
+CLOSURE_INTEGRITY_SCOPES_PER_CYCLE = 2
+CLOSURE_INTEGRITY_CYCLE_SECONDS = (
+    CLOSURE_INTEGRITY_CHECK_COUNT
+    * CLOSURE_INTEGRITY_GIT_TIMEOUT_SECONDS
+    * CLOSURE_INTEGRITY_SCOPES_PER_CYCLE
+)
 EXECUTION_LANES = frozenset({"DIRECT_CANONICAL", "DIRECT_DELEGATED", "GOVERNED"})
 CAPABILITY_DISPOSITIONS = frozenset({
     "REUSE_EXISTING",
@@ -611,6 +623,16 @@ def unit_verifier_cycle_seconds(inputs: CoreAuthorityInputs, unit_id: str) -> fl
     return float(sum(float(row[2]) for row in rows))
 
 
+def unit_closure_cycle_seconds(inputs: CoreAuthorityInputs, unit_id: str) -> float:
+    """Upper bound of one full closure cycle for ``unit_id``.
+
+    The contract verifier timeouts (``unit_verifier_cycle_seconds``) plus closure's
+    built-in integrity checks, which run with their own git timeout at unit and
+    whole-task scope and are not part of the acceptance contract.
+    """
+    return unit_verifier_cycle_seconds(inputs, unit_id) + CLOSURE_INTEGRITY_CYCLE_SECONDS
+
+
 def binding_validity_seconds(
     worker_timeout_seconds: float,
     max_repairs_per_unit: int,
@@ -922,6 +944,10 @@ __all__ = [
     "CAPABILITY_DISCOVERY_INDEX_PATH",
     "CAPABILITY_DISCOVERY_RECEIPT_SCHEMA",
     "CAPABILITY_DISPOSITIONS",
+    "CLOSURE_INTEGRITY_CHECK_COUNT",
+    "CLOSURE_INTEGRITY_CYCLE_SECONDS",
+    "CLOSURE_INTEGRITY_GIT_TIMEOUT_SECONDS",
+    "CLOSURE_INTEGRITY_SCOPES_PER_CYCLE",
     "CORE_MUTATION_BINDING_SCHEMA",
     "CORE_PROTOCOL_VERSION",
     "EXECUTION_LANES",
@@ -934,6 +960,7 @@ __all__ = [
     "acceptance_contract_hash",
     "binding_hash_for",
     "binding_validity_seconds",
+    "unit_closure_cycle_seconds",
     "unit_verifier_cycle_seconds",
     "binding_id_for",
     "bound_operation_material",

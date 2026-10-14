@@ -27,11 +27,13 @@ from nexus.services.external_intelligence_closure import (
     validate_worker_receipt,
 )
 from nexus.services.external_intelligence_core_binding import (
+    CLOSURE_INTEGRITY_CYCLE_SECONDS,
     FRESHNESS_MARGIN_SECONDS,
     CoreBindingError,
     binding_hash_for,
     binding_validity_seconds,
     parse_bound_execution_envelope_v2,
+    unit_closure_cycle_seconds,
     unit_verifier_cycle_seconds,
     validate_repository_mutation_binding,
 )
@@ -542,6 +544,74 @@ def test_binding_validity_verifier_window_fails_closed():
             binding_validity_seconds(300, 1, bad)  # type: ignore[arg-type]
 
 
+def test_binding_validity_counts_closure_integrity_checks():
+    inputs = authority_inputs(
+        "a" * 40,
+        "b" * 64,
+        bound_worker(),
+        unit_verifiers={"u1": (("u-a", ("python", "-V"), 60.0),)},
+        whole_verifiers=(("w-a", ("python", "-V"), 30.0),),
+    )
+    # 3 integrity git diffs x 30 s git timeout x (unit + whole-task) scope.
+    assert CLOSURE_INTEGRITY_CYCLE_SECONDS == 180.0
+    cycle = unit_closure_cycle_seconds(inputs, "u1")
+    assert cycle == unit_verifier_cycle_seconds(inputs, "u1") + 180.0 == 270.0
+    for budget in (0, 1, 3):
+        window = binding_validity_seconds(300, budget, cycle)
+        assert window == (300 + 270.0) * (1 + budget) + FRESHNESS_MARGIN_SECONDS
+        # Strictly larger than the pre-fix sizing that ignored the integrity checks.
+        assert window > binding_validity_seconds(
+            300, budget, unit_verifier_cycle_seconds(inputs, "u1")
+        )
+    with pytest.raises(CoreBindingError, match="CORE_UNIT_VERIFIERS_MISSING"):
+        unit_closure_cycle_seconds(inputs, "missing-unit")
+
+
+def test_closure_integrity_checks_stay_within_binding_sizing(tmp_path, monkeypatch):
+    import nexus.services.external_intelligence_closure as closure
+    import nexus.services.external_intelligence_core_binding as core_binding
+
+    assert closure.INTEGRITY_CHECK_TIMEOUT_SECONDS == (
+        core_binding.CLOSURE_INTEGRITY_GIT_TIMEOUT_SECONDS
+    )
+    assert len(closure.INTEGRITY_CHECK_IDS) == core_binding.CLOSURE_INTEGRITY_CHECK_COUNT
+    git_calls: list[float] = []
+    real_run = closure.subprocess.run
+
+    def _counting_run(argv, *args, **kwargs):
+        if list(argv[:2]) == ["git", "diff"] and "--no-renames" in argv:
+            git_calls.append(float(kwargs.get("timeout") or 0.0))
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(closure.subprocess, "run", _counting_run)
+    root = tmp_path / "repo"
+    root.mkdir()
+    for args in (
+        ["init", "-q"],
+        ["config", "user.email", "t@example.invalid"],
+        ["config", "user.name", "t"],
+    ):
+        subprocess.run(["git", *args], cwd=root, check=True)
+    (root / "a.py").write_text("A = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "a.py"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "base"], cwd=root, check=True)
+    base = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    (root / "a.py").write_text("A = 2\n", encoding="utf-8")
+    subprocess.run(["git", "commit", "-qam", "change"], cwd=root, check=True)
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    rows = closure.run_integrity_checks(
+        root, base_sha=base, candidate_commit=head, authorized_paths=["a.py"], deletable_paths=()
+    )
+    assert all(row["passed"] for row in rows)
+    # Every git diff closure runs per scope is one the binding window accounts for.
+    assert len(git_calls) == core_binding.CLOSURE_INTEGRITY_CHECK_COUNT
+    assert all(t == core_binding.CLOSURE_INTEGRITY_GIT_TIMEOUT_SECONDS for t in git_calls)
+
+
 @pytest.mark.parametrize("budget", [0, 1, 3])
 def test_minted_binding_lifetime_follows_fanout_repair_budget(tmp_path, monkeypatch, budget):
     ctx = _bound_open_swe(tmp_path, monkeypatch, max_repairs_per_unit=budget)
@@ -551,8 +621,9 @@ def test_minted_binding_lifetime_follows_fanout_repair_budget(tmp_path, monkeypa
     )
     created = datetime.fromisoformat(binding["freshness"]["created_at"].replace("Z", "+00:00"))
     deadline = datetime.fromisoformat(binding["freshness"]["valid_until"].replace("Z", "+00:00"))
-    # authority_inputs(): unit "u1" verifier 120s + whole verifier 300s per cycle.
-    verifier_cycle = 120.0 + 300.0
+    # authority_inputs(): unit "u1" verifier 120s + whole verifier 300s per cycle,
+    # plus closure's built-in integrity checks at unit and whole-task scope.
+    verifier_cycle = 120.0 + 300.0 + CLOSURE_INTEGRITY_CYCLE_SECONDS
     expected = (ctx.transport.timeout + verifier_cycle) * (1 + budget) + FRESHNESS_MARGIN_SECONDS
     assert (deadline - created).total_seconds() == expected
 

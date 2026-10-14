@@ -37,7 +37,7 @@ from nexus.services.external_intelligence_core_binding import (
     derive_bound_envelope,
     envelope_sha256,
     parse_bound_execution_envelope_v2,
-    unit_verifier_cycle_seconds,
+    unit_closure_cycle_seconds,
     validate_repository_mutation_binding,
 )
 
@@ -1968,7 +1968,7 @@ class AdaptiveWorkerFanoutRuntime:
                 valid_for_seconds=binding_validity_seconds(
                     float(getattr(transport, "timeout", 300.0)),
                     self.max_repairs_per_unit,
-                    unit_verifier_cycle_seconds(preflight.inputs, unit.unit_id),
+                    unit_closure_cycle_seconds(preflight.inputs, unit.unit_id),
                 ),
             )
             bound = derive_bound_envelope(preflight.semantic_envelope, binding)
