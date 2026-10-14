@@ -4059,6 +4059,8 @@ def test_hold_is_written_atomically(cfg: ad.Config, monkeypatch: pytest.MonkeyPa
         with pytest.raises(OSError, match="disk full"):
             ad._set_hold(cfg, f"{ad.RECONCILE_FAILED_HOLD} x; journal kept")
     assert not cfg.hold_file.exists()
+    assert not list(cfg.state_dir.glob(".HOLD*.tmp.*"))  # no stray temp file
     assert ad.os.fsync is real_fsync
     ad._set_hold(cfg, "owner: paused")
     assert cfg.hold_file.read_text() == "owner: paused\n"
+    assert cfg.hold_file.stat().st_mode & 0o777 == 0o600

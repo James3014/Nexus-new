@@ -1092,12 +1092,18 @@ def _sha256(data: bytes) -> str:
 
 def _atomic_write(path: Path, data: bytes, mode: int = 0o644) -> None:
     tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}")
-    with open(tmp, "wb") as handle:
-        handle.write(data)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.chmod(tmp, mode)
-    os.replace(tmp, path)
+    try:
+        with open(tmp, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except BaseException:
+        # Never leave a half-written temp file behind (#2169 review).
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        raise
 
 
 def _atomic_symlink(target: Path, link: Path) -> None:
@@ -1475,7 +1481,7 @@ def _hold_text(cfg: Config) -> str:
 def _set_hold(cfg: Config, reason: str) -> None:
     """Write HOLD atomically: a crash or full disk leaves the whole text or none (#2169)."""
     cfg.state_dir.mkdir(parents=True, exist_ok=True)
-    _atomic_write(cfg.hold_file, (reason + "\n").encode("utf-8"))
+    _atomic_write(cfg.hold_file, (reason + "\n").encode("utf-8"), 0o600)
 
 
 def known_plist_hashes(cfg: Config) -> List[str]:
