@@ -1780,9 +1780,10 @@ def test_baseline_fails_closed_when_ps_clock_is_unreadable(monkeypatch):
 
 def test_sweep_probes_resolve_tools_through_system_path_only(monkeypatch):
     monkeypatch.setenv("PATH", "/tmp/worker-writable:/usr/bin")
+    monkeypatch.setenv("LD_PRELOAD", "/tmp/worker-writable/evil.so")
+    monkeypatch.setenv("DYLD_INSERT_LIBRARIES", "/tmp/worker-writable/evil.dylib")
     env = cli_worker._probe_env()
-    assert env["PATH"] == "/usr/bin:/bin:/usr/sbin:/sbin"
-    assert env["LC_ALL"] == "C"
+    assert env == {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LC_ALL": "C", "LANG": "C"}
     seen: list[dict] = []
 
     def capture(*args, **kwargs):

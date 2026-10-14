@@ -316,12 +316,13 @@ _PROBE_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 
 
 def _probe_env() -> dict[str, str]:
-    """Environment for ps/lsof probes: system PATH only, C locale.
+    """Minimal environment for ps/lsof probes: system PATH, C locale.
 
-    The sweep's verdict rests on these tools, so they must not resolve
-    through a PATH entry a worker could have written to.
+    The sweep's verdict rests on these tools, so nothing inherited (a PATH
+    entry, LD_PRELOAD/DYLD_* or other loader variables pointing at
+    worker-writable files) may influence which code they run.
     """
-    return {**os.environ, "PATH": _PROBE_PATH, "LC_ALL": "C", "LANG": "C"}
+    return {"PATH": _PROBE_PATH, "LC_ALL": "C", "LANG": "C"}
 
 
 def _proc_is_zombie(entry: Path) -> bool:
