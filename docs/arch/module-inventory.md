@@ -82,7 +82,7 @@
 ## 🦀 Rust Crate Boundary Audit
 
 ### Current Split
-1. **Root Crate (`/Cargo.toml`)**: PyO3 extensions for Python (High performance path).
+1. **Root Crate (`/Cargo.toml`)**: retired and deleted 2026-10-14 (#1927); the PyO3 `nexus_core` extension was never on a production path.
 2. **`nexus-core-rs` (`/nexus-core-rs/`)**: Independent binary/library.
 
 ### Redundancy Detected

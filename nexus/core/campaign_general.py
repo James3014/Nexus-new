@@ -142,7 +142,7 @@ class CampaignGeneral:
         """
         # 🧪 [Shadow Mode] 執行感知掃描並進行 Rust 對位
         perception_patterns = ["*.py", "Cargo.toml", "Dockerfile*"]
-        self.matcher.scan(perception_patterns, use_shadow=True)
+        self.matcher.scan(perception_patterns)
 
         if seed is not None:
             import random

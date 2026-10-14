@@ -84,7 +84,7 @@ def test_trusted_external_runtime_package_pair_is_exact() -> None:
             "nexus-runtime",
             "nexus_runtime",
             "https://github.com/James3014/nexus-runtime.git",
-            "a72e22314d2f4a51c5c22f2a4dfff4b618769303",
+            "d8f828a75e54d0cf231c96af2c1588e5c04659dd",
         ),
     )
 
@@ -4632,3 +4632,60 @@ def test_lane_binding_missing_hint_names_the_agent_lane() -> None:
     assert "AGENT_INLINE" in hint
     assert "OWNER_INLINE" in hint
     assert "must not mint" not in hint
+
+
+def test_pr2205_dependency_snapshot_transition_is_exact_and_separate() -> None:
+    assert trusted_anchor.TRUSTED_PR2205_DEPENDENCY_SNAPSHOT_TRANSITION == (
+        2205,
+        (
+            "0f697d7eb658da44a9fa185d28af905f774d259171b32b34128d8e1424a4c1e4",
+            "12f3261a4c5caf033b02e585cf972fe63e16dbc3221d04b0b26a14d41463c066",
+            "90732f0ae715bb157fc028c5f6693588d63221abe94fbf2753e90574c863955f",
+            "93d7a13d0b0e932d4a30612d6941d1940509e571cfeba2b33186a96bcdab1379",
+        ),
+    )
+
+
+def test_pr2205_dependency_snapshot_transition_allows_only_exact_binding(monkeypatch) -> None:
+    values = [b"trusted pyproject\n", b"trusted lock\n", b"head pyproject\n", b"head lock\n"]
+    hashes = trusted_anchor.TRUSTED_PR2205_DEPENDENCY_SNAPSHOT_TRANSITION[1]
+    original_sha = trusted_anchor._sha
+    digest_by_value = dict(zip(values, hashes, strict=True))
+    monkeypatch.setattr(
+        trusted_anchor,
+        "_sha",
+        lambda value: digest_by_value.get(value, original_sha(value)),
+    )
+
+    trusted_anchor._validate_trusted_dependency_contract(
+        values[0],
+        values[2],
+        values[1],
+        values[3],
+        pull_request_number=2205,
+        head_product_init_is_regular=True,
+    )
+
+    for index in range(4):
+        tampered = list(values)
+        tampered[index] += b"tampered"
+        with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+            trusted_anchor._validate_trusted_dependency_contract(
+                tampered[0],
+                tampered[2],
+                tampered[1],
+                tampered[3],
+                pull_request_number=2205,
+                head_product_init_is_regular=True,
+            )
+
+    for other_pr in (2204, 2206):
+        with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+            trusted_anchor._validate_trusted_dependency_contract(
+                values[0],
+                values[2],
+                values[1],
+                values[3],
+                pull_request_number=other_pr,
+                head_product_init_is_regular=True,
+            )

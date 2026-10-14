@@ -24,8 +24,16 @@ def main():
     parser.add_argument(
         "--convergence-patience", type=int, default=5, help="Stop if no improvement for N rounds"
     )
-    parser.add_argument("--model", default="gemini-3.1-pro-preview")
-    parser.add_argument("--fallback-model", default="gemini-3-flash-preview")
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="Online model override; defaults to the Workforce policy's routed worker model",
+    )
+    parser.add_argument(
+        "--fallback-model",
+        default=None,
+        help="Optional fallback model; the policy route has none by default",
+    )
     parser.add_argument(
         "--keep-worktree", action="store_true", help="Keep the leased worktree for review"
     )

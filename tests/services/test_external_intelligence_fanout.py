@@ -5,6 +5,7 @@ import inspect
 import json
 import subprocess
 import threading
+import time
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -2100,3 +2101,485 @@ def test_eia_worker_identity_is_deterministic_and_sanitized():
     assert first["worker_id"] == "w 1"
     for value in first.values():
         assert "\n" not in value and "<" not in value and ">" not in value
+
+
+class _RepairReconcileTransport(EditingTransport):
+    """Operation-id transport whose first continuation ends OUTCOME_UNKNOWN."""
+
+    PARENT_OP, CHILD_OP = "a" * 64, "b" * 64
+
+    def __init__(self, reconcile_status: str = "COMPLETED"):
+        super().__init__()
+        self.reconcile_status = reconcile_status
+        self.reconciled: list[str] = []
+
+    def prepare_operation_id(self, *args, **kwargs):
+        return self.PARENT_OP if args[0] == "worker_run" else self.CHILD_OP
+
+    def continue_session(self, **kwargs):
+        operation_id = kwargs.pop("operation_id", None)
+        assert operation_id == self.CHILD_OP
+        completed = super().continue_session(**kwargs)
+        # The effect happened (a.py edited) but the reply was lost.
+        self.last_completed = completed
+        return replace(
+            completed,
+            status="OPEN_SWE_OUTCOME_UNKNOWN",
+            operation_id=operation_id,
+            worker_backend="open_swe",
+            outcome_unknown=True,
+        )
+
+    def reconcile_workspace(self, *, workspace_path, operation_id=""):
+        self.reconciled.append(operation_id)
+        if self.reconcile_status != "COMPLETED":
+            return replace(
+                self.last_completed,
+                status=self.reconcile_status,
+                operation_id=operation_id,
+                outcome_unknown=True,
+            )
+        return replace(self.last_completed, operation_id=operation_id, worker_backend="open_swe")
+
+
+def _repair_outcome_unknown(tmp_path: Path, transport: _RepairReconcileTransport):
+    repo, base = make_repo(tmp_path)
+    envelope = tmp_path / "envelope.json"
+    envelope_sha = make_envelope(envelope, base, allowed=["a.py"])
+    initial_runtime = AdaptiveDeepSeekFanoutRuntime(
+        allocator=GitWorktreeAllocator(repo, tmp_path / "workspaces"),
+        store=FanoutStore(tmp_path / "state"),
+        transport=EditingTransport(),
+    )
+    initial = initial_runtime.run(
+        [unit(base, envelope, envelope_sha, "ua", ["a.py"])], CapacityLease(1, 1, 1, 1)
+    )["receipts"]["ua"]
+    initial = dict(initial, operation_id=transport.PARENT_OP)
+    initial["receipt_id"] = _receipt_identity(initial)
+    runtime = AdaptiveWorkerFanoutRuntime(
+        allocator=initial_runtime.allocator, store=initial_runtime.store, transport=transport
+    )
+    repair = tmp_path / "repair.json"
+    repair.write_text('{"schema":"repair_delta.v2"}\n')
+    repair_sha = hashlib.sha256(repair.read_bytes()).hexdigest()
+    with pytest.raises(FanoutError, match="FANOUT_RECONCILIATION_REQUIRED"):
+        runtime.continue_repair(
+            initial, repair_id="r1", repair_ref=str(repair), repair_sha256=repair_sha
+        )
+    attempt = runtime.store.existing_repair_attempt("task-1", "ua", "r1")
+    assert attempt["state"] == "OUTCOME_UNKNOWN"
+    assert attempt["operation_id"] == transport.CHILD_OP
+    return runtime, initial, repair, repair_sha
+
+
+def test_repair_outcome_unknown_reconciles_same_operation_without_redispatch(tmp_path):
+    transport = _RepairReconcileTransport()
+    runtime, initial, _repair, _sha = _repair_outcome_unknown(tmp_path, transport)
+    child = runtime.reconcile_repair(initial, repair_id="r1")
+    assert transport.reconciled == [transport.CHILD_OP]
+    assert transport.continued == [("ua", initial["session_id"])]  # never re-sent
+    assert child["status"] == "CANDIDATE_READY_FOR_VERIFICATION"
+    assert child["operation_id"] == transport.CHILD_OP
+    assert child["parent_receipt_id"] == initial["receipt_id"]
+    assert child["parent_commit"] == initial["candidate_commit"]
+    assert runtime.store.existing_repair_attempt("task-1", "ua", "r1")["state"] == "COMPLETED"
+    # A finished repair is never reconciled (or replayed) again.
+    with pytest.raises(FanoutError, match="FANOUT_RECONCILIATION_REQUIRED"):
+        runtime.reconcile_repair(initial, repair_id="r1")
+    assert transport.reconciled == [transport.CHILD_OP]
+
+
+def test_repair_reconcile_unproven_outcome_stays_unknown(tmp_path):
+    transport = _RepairReconcileTransport(reconcile_status="OPEN_SWE_OUTCOME_UNKNOWN")
+    runtime, initial, _repair, _sha = _repair_outcome_unknown(tmp_path, transport)
+    for _ in range(2):
+        with pytest.raises(FanoutError, match="FANOUT_RECONCILIATION_REQUIRED"):
+            runtime.reconcile_repair(initial, repair_id="r1")
+    assert transport.reconciled == [transport.CHILD_OP, transport.CHILD_OP]
+    assert transport.continued == [("ua", initial["session_id"])]
+    assert runtime.store.existing_repair_attempt("task-1", "ua", "r1")["state"] == (
+        "OUTCOME_UNKNOWN"
+    )
+    assert runtime.store.unresolved_repair_ids("task-1", "ua") == ["r1"]
+
+
+def test_new_repair_is_blocked_while_sibling_repair_outcome_unknown(tmp_path):
+    transport = _RepairReconcileTransport()
+    runtime, initial, repair, repair_sha = _repair_outcome_unknown(tmp_path, transport)
+    # The unknown continuation may not have touched the tree yet (or may still be
+    # running): a clean workspace must not let a second continuation start.
+    _git(Path(initial["workspace_path"]), "checkout", "--", "a.py")
+    for repair_id in ("r1", "r2"):
+        with pytest.raises(FanoutError, match="FANOUT_RECONCILIATION_REQUIRED"):
+            runtime.continue_repair(
+                initial, repair_id=repair_id, repair_ref=str(repair), repair_sha256=repair_sha
+            )
+    assert transport.continued == [("ua", initial["session_id"])]
+    assert runtime.store.existing_repair_attempt("task-1", "ua", "r2") is None
+
+
+def test_repair_reconcile_fails_closed_on_binding_or_transport_mismatch(tmp_path):
+    transport = _RepairReconcileTransport()
+    runtime, initial, _repair, _sha = _repair_outcome_unknown(tmp_path, transport)
+    other_parent = dict(initial, receipt_id="f" * 64)
+    with pytest.raises(FanoutError, match="REPAIR_RECONCILE_BINDING_MISMATCH"):
+        runtime.reconcile_repair(other_parent, repair_id="r1")
+    with pytest.raises(FanoutError, match="FANOUT_RECONCILIATION_REQUIRED"):
+        runtime.reconcile_repair(initial, repair_id="r9")
+    # A transport without operation ids cannot tell the repair turn from the parent's.
+    legacy = AdaptiveDeepSeekFanoutRuntime(
+        allocator=runtime.allocator, store=runtime.store, transport=EditingTransport()
+    )
+    with pytest.raises(FanoutError, match="OPERATION_ID_REQUIRED"):
+        legacy.reconcile_repair(initial, repair_id="r1")
+    assert transport.reconciled == []
+    assert runtime.store.existing_repair_attempt("task-1", "ua", "r1")["state"] == (
+        "OUTCOME_UNKNOWN"
+    )
+
+
+def _repair_fixture(tmp_path: Path):
+    """Initial candidate for unit ua plus a repair artifact (EditingTransport)."""
+    repo, base = make_repo(tmp_path)
+    envelope = tmp_path / "envelope.json"
+    envelope_sha = make_envelope(envelope, base, allowed=["a.py"])
+    transport = EditingTransport()
+    runtime = AdaptiveDeepSeekFanoutRuntime(
+        allocator=GitWorktreeAllocator(repo, tmp_path / "workspaces"),
+        store=FanoutStore(tmp_path / "state"),
+        transport=transport,
+    )
+    initial = runtime.run(
+        [unit(base, envelope, envelope_sha, "ua", ["a.py"])], CapacityLease(1, 1, 1, 1)
+    )["receipts"]["ua"]
+    repair = tmp_path / "repair.json"
+    repair.write_text('{"schema":"repair_delta.v2"}\n')
+    repair_sha = hashlib.sha256(repair.read_bytes()).hexdigest()
+    return runtime, transport, initial, repair, repair_sha
+
+
+def test_unresolved_repair_ids_fail_closed_on_malformed_records(tmp_path):
+    store = FanoutStore(tmp_path / "state")
+    store.attempts.mkdir(parents=True)
+
+    def record(repair_id: str, **overrides):
+        value = {
+            "schema": "external_intelligence_dispatch_attempt.v1",
+            "task_id": "task-1",
+            "unit_id": "ua",
+            "mode": "REPAIR_CONTINUE",
+            "repair_id": repair_id,
+            "state": "COMPLETED",
+        }
+        value.update(overrides)
+        return value
+
+    def write(repair_id: str, value) -> None:
+        path = store.attempts / f"task-1--ua--repair-{repair_id}.json"
+        path.write_text(value if isinstance(value, str) else json.dumps(value), "utf-8")
+
+    write("ok", record("ok"))
+    write("blocked", record("blocked", state="TERMINAL_BLOCKED"))
+    write("garbage", "{not json")
+    write("nostate", {k: v for k, v in record("nostate").items() if k != "state"})
+    write("weird", record("weird", state="SOMETHING_ELSE"))
+    write("schema", record("schema", schema="other.v1"))
+    write("identity", record("other-id"))
+    write("listy", "[1, 2]")
+    # Terminal-shaped records without the evidence their state leaves behind
+    # (full record + matching receipt) are not proof of a finished continuation.
+    assert sorted(store.unresolved_repair_ids("task-1", "ua")) == [
+        "blocked",
+        "garbage",
+        "identity",
+        "listy",
+        "nostate",
+        "ok",
+        "schema",
+        "weird",
+    ]
+
+
+def test_concurrent_repair_prepares_dispatch_at_most_one_continuation(tmp_path, monkeypatch):
+    import nexus.services.external_intelligence_fanout as fanout_module
+
+    runtime, transport, initial, repair, repair_sha = _repair_fixture(tmp_path)
+    store = runtime.store
+    a_checked = threading.Event()
+    b_trying = threading.Event()
+    real_records = store._unresolved_repair_records
+    real_flock = fanout_module.fcntl.flock
+
+    def records_then_hold(task_id, unit_id):
+        # Thread A: sibling check done, attempt not yet written.  Hold here until B
+        # has provably tried to take the per-unit lock.
+        value = real_records(task_id, unit_id)
+        if threading.current_thread().name == "A" and not a_checked.is_set():
+            a_checked.set()
+            assert b_trying.wait(5)
+            time.sleep(0.2)  # give an unserialized B time to race past the check
+        return value
+
+    def signalling_flock(fd, operation):
+        if threading.current_thread().name == "B":
+            b_trying.set()
+        return real_flock(fd, operation)
+
+    monkeypatch.setattr(store, "_unresolved_repair_records", records_then_hold)
+    monkeypatch.setattr(fanout_module.fcntl, "flock", signalling_flock)
+    outcomes: dict[str, object] = {}
+
+    def attempt(repair_id: str) -> None:
+        try:
+            outcomes[repair_id] = runtime.continue_repair(
+                initial, repair_id=repair_id, repair_ref=str(repair), repair_sha256=repair_sha
+            )
+        except FanoutError as exc:
+            outcomes[repair_id] = exc
+
+    thread_a = threading.Thread(target=attempt, args=("r1",), name="A")
+    thread_b = threading.Thread(target=attempt, args=("r2",), name="B")
+    thread_a.start()
+    assert a_checked.wait(5)
+    thread_b.start()
+    thread_a.join(10)
+    thread_b.join(10)
+    assert b_trying.is_set()
+    assert len(transport.continued) == 1
+    assert sum(isinstance(value, dict) for value in outcomes.values()) == 1
+
+
+def test_terminal_repair_counts_as_resolved_only_with_matching_receipt(tmp_path):
+    runtime, transport, initial, repair, repair_sha = _repair_fixture(tmp_path)
+    child = runtime.continue_repair(
+        initial, repair_id="r1", repair_ref=str(repair), repair_sha256=repair_sha
+    )
+    store = runtime.store
+    assert store.unresolved_repair_ids("task-1", "ua") == []
+    receipt_path = store._receipt_path("task-1", "ua", "repair-r1")
+    original = receipt_path.read_text(encoding="utf-8")
+    for tamper in (
+        {"attempt_id": "other"},
+        {"operation_id": "c" * 64},
+        {"status": "WORKER_BLOCKED"},
+    ):
+        receipt_path.write_text(json.dumps(dict(child, **tamper)), encoding="utf-8")
+        assert store.unresolved_repair_ids("task-1", "ua") == ["r1"]
+    receipt_path.unlink()
+    assert store.unresolved_repair_ids("task-1", "ua") == ["r1"]
+    receipt_path.write_text(original, encoding="utf-8")
+    assert store.unresolved_repair_ids("task-1", "ua") == []
+
+
+def test_sent_repair_rewritten_to_look_terminal_still_blocks_new_repair(tmp_path):
+    transport = _RepairReconcileTransport()
+    runtime, initial, repair, repair_sha = _repair_outcome_unknown(tmp_path, transport)
+    _git(Path(initial["workspace_path"]), "checkout", "--", "a.py")
+    path = runtime.store.attempts / "task-1--ua--repair-r1.json"
+    for forged in (
+        {"state": "COMPLETED", "transport_status": "COMPLETED"},
+        {"state": "TERMINAL_BLOCKED", "transport_status": "COMPLETED"},
+        {"state": "FAILED", "transport_status": "ABANDONED_BEFORE_DISPATCH"},
+        {
+            "state": "FAILED",
+            "retry_safe": False,
+            "transport_status": "ABANDONED_BEFORE_DISPATCH",
+            "superseded_by_attempt_id": "no-such-attempt",
+        },
+    ):
+        value = dict(json.loads(path.read_text(encoding="utf-8")), **forged)
+        path.write_text(json.dumps(value), encoding="utf-8")
+        assert runtime.store.unresolved_repair_ids("task-1", "ua") == ["r1"]
+        with pytest.raises(FanoutError, match="FANOUT_RECONCILIATION_REQUIRED"):
+            runtime.continue_repair(
+                initial, repair_id="r2", repair_ref=str(repair), repair_sha256=repair_sha
+            )
+    assert transport.continued == [("ua", initial["session_id"])]
+
+
+def test_prepared_repair_never_dispatched_is_abandoned_not_blocking(tmp_path):
+    runtime, transport, initial, repair, repair_sha = _repair_fixture(tmp_path)
+    # Crash right after prepare_repair: PREPARED, transport never called.
+    stale = runtime.store.prepare_repair(
+        initial, repair_id="r1", repair_ref=str(repair), repair_sha256=repair_sha
+    )
+    child = runtime.continue_repair(
+        initial, repair_id="r2", repair_ref=str(repair), repair_sha256=repair_sha
+    )
+    assert child["status"] == "CANDIDATE_READY_FOR_VERIFICATION"
+    assert transport.continued == [("ua", initial["session_id"])]
+    abandoned = runtime.store.existing_repair_attempt("task-1", "ua", "r1")
+    assert abandoned["state"] == "FAILED"
+    assert abandoned["transport_status"] == "ABANDONED_BEFORE_DISPATCH"
+    # The superseded process can never move its stale attempt to DISPATCHING.
+    with pytest.raises(FanoutError, match="FANOUT_REPAIR_ATTEMPT_SUPERSEDED"):
+        runtime.store.mark_repair_dispatching(stale)
+    assert runtime.store.unresolved_repair_ids("task-1", "ua") == []
+
+
+def test_repair_finalize_rejects_foreign_workspace_directory(tmp_path):
+    runtime, transport, initial, repair, repair_sha = _repair_fixture(tmp_path)
+    foreign = tmp_path / "elsewhere"
+    foreign.mkdir()
+    real_continue = transport.continue_session
+
+    def misattested(**kwargs):
+        return replace(real_continue(**kwargs), directory=str(foreign))
+
+    transport.continue_session = misattested
+    with pytest.raises(FanoutError, match="WORKSPACE_ATTESTATION_MISMATCH"):
+        runtime.continue_repair(
+            initial, repair_id="r1", repair_ref=str(repair), repair_sha256=repair_sha
+        )
+    attempt = runtime.store.existing_repair_attempt("task-1", "ua", "r1")
+    assert attempt["state"] == "OUTCOME_UNKNOWN"
+    assert attempt["transport_status"] == "WORKSPACE_ATTESTATION_MISMATCH"
+
+
+def test_repair_reconcile_rechecks_session_owner_before_transport(tmp_path):
+    transport = _RepairReconcileTransport()
+    runtime, initial, _repair, _sha = _repair_outcome_unknown(tmp_path, transport)
+    session_path = runtime.store._session_path(initial["session_id"])
+    original = session_path.read_text(encoding="utf-8")
+    tampered = dict(json.loads(original), unit_id="ub")
+    session_path.write_text(json.dumps(tampered), encoding="utf-8")
+    with pytest.raises(FanoutError, match="SESSION_BINDING_CONFLICT"):
+        runtime.reconcile_repair(initial, repair_id="r1")
+    session_path.unlink()
+    with pytest.raises(FanoutError, match="SESSION_BINDING_MISSING"):
+        runtime.reconcile_repair(initial, repair_id="r1")
+    assert transport.reconciled == []
+    session_path.write_text(original, encoding="utf-8")
+    assert runtime.reconcile_repair(initial, repair_id="r1")["status"] == (
+        "CANDIDATE_READY_FOR_VERIFICATION"
+    )
+
+
+def test_repair_reconcile_after_post_commit_crash_is_stuck_but_safe(tmp_path):
+    """Known limitation: capture committed, then the process died before the receipt.
+
+    Reconcile cannot prove the commit is this repair's candidate, so it refuses and
+    the unit stays blocked; it never re-sends the continuation.
+    """
+    transport = _RepairReconcileTransport()
+    runtime, initial, _repair, _sha = _repair_outcome_unknown(tmp_path, transport)
+    workspace = Path(initial["workspace_path"])
+    _git(workspace, "add", "a.py")
+    _git(workspace, "commit", "-m", "candidate committed before crash")
+    with pytest.raises(FanoutError, match="WORKER_COMMIT_FORBIDDEN"):
+        runtime.reconcile_repair(initial, repair_id="r1")
+    assert transport.continued == [("ua", initial["session_id"])]
+    assert runtime.store.unresolved_repair_ids("task-1", "ua") == ["r1"]
+
+
+def _abandoned_pair(tmp_path: Path):
+    """r1 PREPARED (never sent) then superseded by a completed r2."""
+    runtime, transport, initial, repair, repair_sha = _repair_fixture(tmp_path)
+    runtime.store.prepare_repair(
+        initial, repair_id="r1", repair_ref=str(repair), repair_sha256=repair_sha
+    )
+    runtime.continue_repair(
+        initial, repair_id="r2", repair_ref=str(repair), repair_sha256=repair_sha
+    )
+    store = runtime.store
+    assert store.unresolved_repair_ids("task-1", "ua") == []
+    return store, store.attempts / "task-1--ua--repair-r1.json"
+
+
+def _rewrite(path: Path, **fields) -> None:
+    value = dict(json.loads(path.read_text(encoding="utf-8")), **fields)
+    path.write_text(json.dumps(value), encoding="utf-8")
+
+
+def test_abandoned_repair_self_superseding_is_unresolved(tmp_path):
+    store, r1 = _abandoned_pair(tmp_path)
+    own_id = json.loads(r1.read_text(encoding="utf-8"))["attempt_id"]
+    _rewrite(r1, superseded_by_attempt_id=own_id)
+    assert store.unresolved_repair_ids("task-1", "ua") == ["r1"]
+
+
+def test_abandoned_repair_needs_existing_later_superseding_attempt(tmp_path):
+    store, r1 = _abandoned_pair(tmp_path)
+    original = r1.read_text(encoding="utf-8")
+    _rewrite(r1, superseded_by_attempt_id="no-such-attempt")
+    assert store.unresolved_repair_ids("task-1", "ua") == ["r1"]
+    # Superseding attempt prepared earlier than (or with no order relative to) r1.
+    r1.write_text(original, encoding="utf-8")
+    _rewrite(r1, prepare_seq=99)
+    assert store.unresolved_repair_ids("task-1", "ua") == ["r1"]
+    r1.write_text(original, encoding="utf-8")
+    _rewrite(r1, prepare_seq="1")
+    assert store.unresolved_repair_ids("task-1", "ua") == ["r1"]
+    r1.write_text(original, encoding="utf-8")
+    assert store.unresolved_repair_ids("task-1", "ua") == []
+
+
+def test_abandoned_repair_with_sent_marker_is_unresolved(tmp_path):
+    store, r1 = _abandoned_pair(tmp_path)
+    own_id = json.loads(r1.read_text(encoding="utf-8"))["attempt_id"]
+    marker = store._repair_sent_marker(own_id)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("", encoding="utf-8")
+    assert store.unresolved_repair_ids("task-1", "ua") == ["r1"]
+
+
+@pytest.mark.parametrize(
+    "receipts",
+    [
+        pytest.param((), id="missing"),
+        pytest.param(
+            (
+                {
+                    "provider_model_revision": "gpt-6-thinking",
+                    "backend_identity": {
+                        "observed_execution_identity": {"model_revision": "gpt-6-thinking"}
+                    },
+                },
+            ),
+            id="wrong",
+        ),
+    ],
+)
+def test_repair_continuation_without_pinned_observed_model_is_outcome_unknown(tmp_path, receipts):
+    # #2188: the repair path re-checks the observed-model pin even when the
+    # transport itself reports COMPLETED.
+    repo, base = make_repo(tmp_path)
+    envelope = tmp_path / "envelope.json"
+    envelope_sha = make_envelope(envelope, base, allowed=["a.py"])
+    initial_runtime = AdaptiveDeepSeekFanoutRuntime(
+        allocator=GitWorktreeAllocator(repo, tmp_path / "workspaces"),
+        store=FanoutStore(tmp_path / "state"),
+        transport=EditingTransport(),
+    )
+    initial = initial_runtime.run(
+        [unit(base, envelope, envelope_sha, "ua", ["a.py"])], CapacityLease(1, 1, 1, 1)
+    )["receipts"]["ua"]
+
+    class PinnedEditingTransport(EditingTransport):
+        expected_observed_model = "gpt-5-6-thinking"
+
+        def continue_session(self, **kwargs):
+            result = super().continue_session(**kwargs)
+            assert result.status == "COMPLETED"
+            return replace(result, model_invocation_receipts=receipts)
+
+    runtime = AdaptiveDeepSeekFanoutRuntime(
+        allocator=initial_runtime.allocator,
+        store=initial_runtime.store,
+        transport=PinnedEditingTransport(),
+    )
+    repair = tmp_path / "repair.json"
+    repair.write_text('{"schema":"repair_delta.v2","instruction":"repair a.py"}', encoding="utf-8")
+    repair_sha = hashlib.sha256(repair.read_bytes()).hexdigest()
+    with pytest.raises(FanoutError, match="OBSERVED_MODEL_ATTESTATION_MISMATCH"):
+        runtime.continue_repair(
+            initial, repair_id="r1", repair_ref=str(repair), repair_sha256=repair_sha
+        )
+    (attempt_file,) = [
+        path
+        for path in (tmp_path / "state" / "attempts").rglob("*.json")
+        if "repair-r1" in path.name
+    ]
+    attempt = json.loads(attempt_file.read_text(encoding="utf-8"))
+    assert attempt["state"] == "OUTCOME_UNKNOWN"
+    assert attempt["transport_status"] == "OBSERVED_MODEL_ATTESTATION_MISMATCH"

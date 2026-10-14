@@ -9,7 +9,7 @@ related_pages:
 - '[State - Lifecycle](../04_State/State - Lifecycle.md)'
 - '[Evidence Map](../05_Protocols/Protocol - Evidence Map.md)'
 - '[System Overview](../00_Home/System Overview.md)'
-source_of_truth: src/governance/transition_engine.rs
+source_of_truth: nexus/engine/runtime_phase_contract.py
 status: active
 tags:
 - flow
@@ -27,10 +27,12 @@ version_scope:
 # Flow - PXDRAC Runtime (Hybrid v24.0)
 
 ## One-sentence summary
-本頁描述 Nexus v24.0 的實體調度序列，所有相位轉移均由 Rust Kernel 進行物理級裁決與 Fail-Closed 保障。 [Source: src/governance/transition_engine.rs]
+本頁描述 Nexus 的 PXDRAC 調度序列；相位轉移由 Python `validate_transition` 以 Fail-Closed 方式裁決。 [Source: nexus/engine/runtime_phase_contract.py]
+
+> 2026-10-14：Rust `nexus_core` 擴充（`src/governance/*.rs`）已退役並刪除（#1927）。下方提到 Rust 的段落是歷史設計，現行權威是 `nexus/engine/runtime_phase_contract.py`。
 
 ## Role / responsibility
-- **物理連續性 (Physical Continuity)**: 由 Rust `TransitionEngine` 確保 P -> X -> D -> R -> A -> C 相位的絕對順序，禁止任何未經授權的跳步。
+- **物理連續性 (Physical Continuity)**: 由 `validate_transition`（歷史名稱 `TransitionEngine`）確保 P -> X -> D -> R -> A -> C 相位的絕對順序，禁止任何未經授權的跳步。
 - **標籤導向調度 (Tag-Driven Orchestration)**: 模型僅提供語義標籤 (r:x, d:x, p:x)，不控制最終的 JSON 結構。
 - **自動化 Receipt 補全**: 當 Rust Kernel 許可轉移後，由 Python 層依據 `TypedContract` 自動補全標準治理證據。
 
@@ -54,7 +56,7 @@ version_scope:
 - **[Protocol - Evidence Map](../05_Protocols/Protocol - Evidence Map.md)**: 儲存經 Rust 驗證後的物理工件鏈。
 
 ## Related modules / files
-- `src/governance/transition_engine.rs`: 核心轉移引擎。
+- `nexus/engine/runtime_phase_contract.py`: 核心轉移契約（`validate_transition`）。
 - `nexus/engine/semantic_adapter.py`: 語義標籤適配器。
 - `nexus/engine/governance_bridge.py`: Python ↔ Rust 橋接層。
 

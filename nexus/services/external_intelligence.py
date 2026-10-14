@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import signal
 import subprocess
 import tempfile
@@ -55,6 +56,8 @@ SELECTED_WORKER_KEYS = (
 )
 DIAGNOSIS_STATUSES = ("PROVEN", "LIKELY", "UNKNOWN")
 SOURCE_EVIDENCE_KINDS = frozenset({"source", "source_file", "verifier_source", "source_absence"})
+# Context-pack entry kinds whose refs the Core-bound runtime requires per allowed path.
+CONTRACT_EVIDENCE_KINDS = frozenset({"task_card", "source_file", "source_absence"})
 V2_ENVELOPE_TOP_KEYS = {
     "schema",
     "binding",
@@ -778,6 +781,37 @@ def parse_external_execution_envelope_v2(
     return value
 
 
+def bind_contract_evidence_refs(
+    envelope: Mapping[str, Any], context_pack: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Append the Nexus-minted contract evidence refs the bound runtime admits on.
+
+    The Core-bound runtime admits a Task-Card-listed path only when the envelope
+    cites ``source_file:<path>@<anchor>`` (path exists at ``main_sha``) or
+    ``source_absence:<path>@<anchor>`` (path absent), plus the ``task_card:`` ref.
+    Nexus already minted exactly those refs from ``main_sha`` when it built the
+    context pack, so they are copied from the validated pack instead of trusting
+    the model to repeat them.  The model's own refs keep their first-occurrence order
+    (exact duplicates are collapsed so they cannot exhaust the ref cap); refs absent
+    from the pack are never invented.
+    """
+    if envelope.get("schema") != ENVELOPE_SCHEMA_V2:
+        return dict(envelope)
+    validated = validate_context_pack(context_pack)
+    refs = list(dict.fromkeys(envelope.get("evidence_refs") or []))
+    present = set(refs)
+    for entry in validated.get("entries") or []:
+        if entry.get("kind") not in CONTRACT_EVIDENCE_KINDS:
+            continue
+        ref = entry["evidence_ref"]
+        if ref not in present:
+            refs.append(ref)
+            present.add(ref)
+    if len(refs) > MAX_LIST:
+        raise ExternalIntelligenceError("CONTRACT_EVIDENCE_REFS_LIMIT_EXCEEDED")
+    return {**envelope, "evidence_refs": refs}
+
+
 def parse_external_execution_envelope(
     text: str,
     *,
@@ -1196,6 +1230,108 @@ class TransportResult:
     started_at: str = ""
     finished_at: str = ""
     safe_argv: tuple[str, ...] = ()
+    model_invocation_receipts: tuple[dict[str, Any], ...] = ()
+
+
+# Providers whose physical model is chosen outside Nexus (a ChatGPT web session):
+# the configured provider/model echo proves nothing about which model answered,
+# so every invocation must report the expected observed model revision.
+OBSERVED_MODEL_REQUIRED_PROVIDERS = frozenset({"opencli_chatgpt"})
+OBSERVED_MODEL_ATTESTATION_MISMATCH = "OBSERVED_MODEL_ATTESTATION_MISMATCH"
+_NOT_MEASURED = "NOT_MEASURED"
+# A concrete ASCII model revision such as ``gpt-5-6-thinking``.  Rejects
+# deployment placeholders (``<...>``), whitespace and invisible characters.
+OBSERVED_MODEL_REVISION_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+
+
+def is_unmeasured_model_revision(value: str) -> bool:
+    """True for the runtime's NOT_MEASURED sentinel, in any letter case."""
+
+    return value.casefold() == _NOT_MEASURED.casefold()
+
+
+def normalize_expected_observed_model(provider_id: str, value: Any) -> str:
+    """Validate the configured observed-model pin for ``provider_id`` (fail closed)."""
+
+    if value is None:
+        value = ""
+    if not isinstance(value, str) or (
+        value and OBSERVED_MODEL_REVISION_RE.fullmatch(value) is None
+    ):
+        raise ExternalIntelligenceError("EXPECTED_OBSERVED_MODEL_INVALID")
+    if provider_id in OBSERVED_MODEL_REQUIRED_PROVIDERS:
+        if not value or is_unmeasured_model_revision(value):
+            raise ExternalIntelligenceError("EXPECTED_OBSERVED_MODEL_REQUIRED")
+        return value
+    if value:
+        raise ExternalIntelligenceError("EXPECTED_OBSERVED_MODEL_PROVIDER_MISMATCH")
+    return ""
+
+
+def model_invocation_receipts_from(value: Any) -> tuple[dict[str, Any], ...] | None:
+    """Copy runtime ``model_invocation_receipts``; ``None`` when malformed."""
+
+    if value is None:
+        return ()
+    if not isinstance(value, list) or any(not isinstance(item, Mapping) for item in value):
+        return None
+    return tuple(json.loads(json.dumps(dict(item))) for item in value)
+
+
+def _observed_values(receipt: Mapping[str, Any]) -> tuple[Any, Any, Any]:
+    backend = receipt.get("backend_identity")
+    observed = backend.get("observed_execution_identity") if isinstance(backend, Mapping) else None
+    if not isinstance(observed, Mapping):
+        observed = {}
+    return (
+        observed.get("model_revision"),
+        receipt.get("provider_model_revision"),
+        observed.get("model_id", _NOT_MEASURED),
+    )
+
+
+def observed_model_violation(
+    receipts: Sequence[Mapping[str, Any]],
+    *,
+    expected: str,
+    provider_id: str,
+    model_id: str,
+    operation_id: str,
+    strict: bool,
+) -> bool:
+    """Return True when the receipts do not prove the expected observed model.
+
+    ``strict`` is used for a result that claims success: it must carry at least
+    one receipt, and every receipt must be for this operation and the configured
+    provider/model and must report exactly ``expected`` as the observed model
+    revision.  A non-success result only fails when a receipt positively
+    reports a different model.  Empty ``expected`` disables the check.
+    """
+
+    if not expected:
+        return False
+    if strict and not receipts:
+        return True
+    for receipt in receipts:
+        revision, provider_revision, observed_model = _observed_values(receipt)
+        reported = [
+            item
+            for item in (revision, provider_revision, observed_model)
+            if isinstance(item, str) and item and item != _NOT_MEASURED
+        ]
+        if any(item != expected for item in reported):
+            return True
+        if not strict:
+            continue
+        if (
+            revision != expected
+            or provider_revision != expected
+            or receipt.get("provider_id") != provider_id
+            or receipt.get("model_id") != model_id
+            or (operation_id and receipt.get("operation_id") != operation_id)
+        ):
+            return True
+    return False
 
 
 class OpenCLIExternalIntelligenceTransport:
@@ -1828,6 +1964,11 @@ class ExternalIntelligenceSidecar:
                     transport_status="INTELLIGENCE_WORKER_BOUNDARY_VIOLATION",
                 )
                 raise ExternalIntelligenceError("INTELLIGENCE_WORKER_BOUNDARY_VIOLATION")
+            try:
+                envelope = bind_contract_evidence_refs(envelope, context_pack)
+            except ExternalIntelligenceError as exc:
+                self.store.finish_attempt(attempt, state="FAILED", transport_status=str(exc))
+                raise
         else:
             if envelope.get("worker_binding") != {
                 "assigned_thread": "UNASSIGNED",
@@ -1897,6 +2038,7 @@ __all__ = [
     "ATTEMPT_SCHEMA_V2",
     "CLAIM_CEILING",
     "CONTEXT_SCHEMA",
+    "CONTRACT_EVIDENCE_KINDS",
     "CONTROL_CAPSULE_SCHEMA",
     "CONTROL_CAPSULE_SCHEMA_V1",
     "CONTROL_CAPSULE_SCHEMA_V2",
@@ -1910,6 +2052,9 @@ __all__ = [
     "INTAKE_SCHEMA",
     "IntakeDisposition",
     "MODEL_ADAPTATION_KEYS",
+    "OBSERVED_MODEL_ATTESTATION_MISMATCH",
+    "OBSERVED_MODEL_REQUIRED_PROVIDERS",
+    "OBSERVED_MODEL_REVISION_RE",
     "OpenCLIExternalIntelligenceTransport",
     "RECEIPT_SCHEMA",
     "RECEIPT_SCHEMA_V1",
@@ -1921,6 +2066,7 @@ __all__ = [
     "SOURCE_EVIDENCE_KINDS",
     "TransportResult",
     "V2_ENVELOPE_TOP_KEYS",
+    "bind_contract_evidence_refs",
     "build_context_pack",
     "build_control_capsule",
     "build_prompt",
@@ -1931,7 +2077,11 @@ __all__ = [
     "external_execution_envelope_contract",
     "external_execution_envelope_v1_contract",
     "external_execution_envelope_v2_contract",
+    "is_unmeasured_model_revision",
+    "model_invocation_receipts_from",
+    "normalize_expected_observed_model",
     "normalize_intake",
+    "observed_model_violation",
     "parse_external_execution_envelope",
     "parse_external_execution_envelope_v2",
     "project_refresh",
