@@ -6003,4 +6003,37 @@ def dispatch_gateway_cli(action: str, *, request: GatewayDeploymentRequest,
     return manage_gateway(action, request=parsed, observed=observed, **kwargs)
 
 
+
+def reload_gateway_launch_agent(
+    plist: Path,
+    *,
+    run: Callable[..., Any] = subprocess.run,
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
+    """Reload the fixed direct Gateway LaunchAgent for the #2153 auto-deployer.
+
+    The auto-deployer (``scripts/ops/nexus_gateway_auto_deploy.py``) owns
+    candidate selection, probes and rollback; this module stays the only place
+    that issues ``launchctl`` for the Gateway (single effect owner).  Only the
+    fixed ``com.nexus.mcp.gateway.direct`` label/plist name is accepted.
+    """
+    plist = Path(plist)
+    if plist.name != GATEWAY_PLIST_FILENAME or not plist.is_absolute():
+        raise _gateway_error("auto-deploy Gateway plist identity invalid")
+    run(
+        ["launchctl", "bootout", f"{UID_TARGET}/{GATEWAY_LABEL}"],
+        capture_output=True, text=True, check=False,
+    )
+    detail = ""
+    for attempt in range(3):
+        result = run(
+            ["launchctl", "bootstrap", UID_TARGET, str(plist)],
+            capture_output=True, text=True, check=False,
+        )
+        if result.returncode == 0:
+            return
+        detail = str(getattr(result, "stderr", "") or "").strip()[:200]
+        sleep(2 + 3 * attempt)
+    raise _gateway_error(f"auto-deploy Gateway bootstrap failed: {detail}")
+
 if __name__ == "__main__": raise SystemExit(main())
