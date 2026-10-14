@@ -6,7 +6,7 @@ ENTRY: dict[str, object] = {
     "file": "tests/unit/local_heal/test_memory_eval_11_c13453_real_model_ab.py",
     "disposition": "delete-candidate",
     "issue": "#1926",
-    "cause": "host-only probe: audits generated, gitignored artifacts/runtime evidence (real model call receipts, selected candidates, evidence bundles) that a clean runner lacks; faking them would defeat the audit",
+    "cause": "host-only probe: audits cwd-relative, gitignored artifacts/runtime/memory_eval_11_c13453_real_model_ab_v0/ (validation.json, model_call_receipt.json, memory_impact_comparison.json, raw_model_output_memory_{on,off}.txt, runs/C_13453/nexus_memory_{on,off}/) from a real local-model A/B run; a clean runner lacks them and faking them would defeat the audit",
     "tests": (
         "test_both_arm_artifact_directories_exist",
         "test_comparison_file_aligns_with_artifacts",
