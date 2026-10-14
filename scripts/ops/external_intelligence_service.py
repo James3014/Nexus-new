@@ -21,9 +21,11 @@ from typing import Any, Callable, Mapping
 
 from nexus.core.exit_codes import NexusExitCode
 from nexus.services.external_intelligence import (
+    OBSERVED_MODEL_REVISION_RE,
     ExternalIntelligenceSidecar,
     ExternalIntelligenceStore,
     OpenCLIExternalIntelligenceTransport,
+    is_unmeasured_model_revision,
 )
 from nexus.services.external_intelligence_automation import (
     TERMINAL_DISPOSITIONS,
@@ -434,11 +436,6 @@ def service_status(
     return result
 
 
-# A concrete model revision such as ``gpt-5-6-thinking``; rejects deployment
-# placeholders like ``<DEPLOYMENT_SUPPLIED_...>`` and stray whitespace.
-_OBSERVED_MODEL_REVISION_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
-
-
 def load_config(path: str | os.PathLike[str]) -> ServiceConfig:
     raw = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
     allowed = {
@@ -537,12 +534,12 @@ def load_config(path: str | os.PathLike[str]) -> ServiceConfig:
         or "\x00" in expected_observed_model
         or (
             expected_observed_model
-            and _OBSERVED_MODEL_REVISION_RE.fullmatch(expected_observed_model) is None
+            and OBSERVED_MODEL_REVISION_RE.fullmatch(expected_observed_model) is None
         )
     ):
         raise ServiceError("CONFIG_OPEN_SWE_EXPECTED_OBSERVED_MODEL_INVALID")
     if open_swe_provider == "opencli_chatgpt":
-        if not expected_observed_model or expected_observed_model == "NOT_MEASURED":
+        if not expected_observed_model or is_unmeasured_model_revision(expected_observed_model):
             raise ServiceError("CONFIG_OPEN_SWE_EXPECTED_OBSERVED_MODEL_REQUIRED")
     elif expected_observed_model is not None:
         raise ServiceError("CONFIG_OPEN_SWE_EXPECTED_OBSERVED_MODEL_PROVIDER_MISMATCH")
@@ -686,6 +683,9 @@ def build_automation(config: ServiceConfig, repository: str) -> ExternalIntellig
     ):
         raise ServiceError("CONFIG_OPEN_SWE_MODEL_BINDING_REQUIRED")
     if config.semantic_backend == "opencli":
+        # Legacy direct opencli semantic transport: NOT covered by the
+        # open_swe_expected_observed_model pin (#2188), which only binds the
+        # Open SWE transports.  Live EIA uses semantic_backend "open_swe".
         semantic_transport: Any = OpenCLIExternalIntelligenceTransport(
             executable=config.opencli_executable,
             profile=config.opencli_profile,

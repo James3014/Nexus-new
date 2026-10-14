@@ -1066,6 +1066,10 @@ def test_opencli_semantic_failure_is_only_overridden_by_a_positively_wrong_model
         ("opencli_chatgpt", "", "OPEN_SWE_EXPECTED_OBSERVED_MODEL_REQUIRED"),
         ("opencli_chatgpt", "NOT_MEASURED", "OPEN_SWE_EXPECTED_OBSERVED_MODEL_REQUIRED"),
         ("opencli_chatgpt", " gpt-5-6-thinking", "OPEN_SWE_EXPECTED_OBSERVED_MODEL_INVALID"),
+        ("opencli_chatgpt", "not_measured", "OPEN_SWE_EXPECTED_OBSERVED_MODEL_REQUIRED"),
+        ("opencli_chatgpt", "gpt-5-6\u200b-thinking", "OPEN_SWE_EXPECTED_OBSERVED_MODEL_INVALID"),
+        ("opencli_chatgpt", "gpt-5-6-thinking\n", "OPEN_SWE_EXPECTED_OBSERVED_MODEL_INVALID"),
+        ("opencli_chatgpt", "<placeholder>", "OPEN_SWE_EXPECTED_OBSERVED_MODEL_INVALID"),
         ("google_genai", _OBSERVED_MODEL, "OPEN_SWE_EXPECTED_OBSERVED_MODEL_PROVIDER_MISMATCH"),
     ],
 )

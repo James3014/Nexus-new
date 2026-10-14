@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import signal
 import subprocess
 import tempfile
@@ -1205,6 +1206,15 @@ class TransportResult:
 OBSERVED_MODEL_REQUIRED_PROVIDERS = frozenset({"opencli_chatgpt"})
 OBSERVED_MODEL_ATTESTATION_MISMATCH = "OBSERVED_MODEL_ATTESTATION_MISMATCH"
 _NOT_MEASURED = "NOT_MEASURED"
+# A concrete ASCII model revision such as ``gpt-5-6-thinking``.  Rejects
+# deployment placeholders (``<...>``), whitespace and invisible characters.
+OBSERVED_MODEL_REVISION_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+
+
+def is_unmeasured_model_revision(value: str) -> bool:
+    """True for the runtime's NOT_MEASURED sentinel, in any letter case."""
+
+    return value.casefold() == _NOT_MEASURED.casefold()
 
 
 def normalize_expected_observed_model(provider_id: str, value: Any) -> str:
@@ -1212,10 +1222,12 @@ def normalize_expected_observed_model(provider_id: str, value: Any) -> str:
 
     if value is None:
         value = ""
-    if not isinstance(value, str) or "\x00" in value or value != value.strip():
+    if not isinstance(value, str) or (
+        value and OBSERVED_MODEL_REVISION_RE.fullmatch(value) is None
+    ):
         raise ExternalIntelligenceError("EXPECTED_OBSERVED_MODEL_INVALID")
     if provider_id in OBSERVED_MODEL_REQUIRED_PROVIDERS:
-        if not value or value == _NOT_MEASURED:
+        if not value or is_unmeasured_model_revision(value):
             raise ExternalIntelligenceError("EXPECTED_OBSERVED_MODEL_REQUIRED")
         return value
     if value:
@@ -2003,6 +2015,7 @@ __all__ = [
     "MODEL_ADAPTATION_KEYS",
     "OBSERVED_MODEL_ATTESTATION_MISMATCH",
     "OBSERVED_MODEL_REQUIRED_PROVIDERS",
+    "OBSERVED_MODEL_REVISION_RE",
     "OpenCLIExternalIntelligenceTransport",
     "RECEIPT_SCHEMA",
     "RECEIPT_SCHEMA_V1",
@@ -2024,6 +2037,7 @@ __all__ = [
     "external_execution_envelope_contract",
     "external_execution_envelope_v1_contract",
     "external_execution_envelope_v2_contract",
+    "is_unmeasured_model_revision",
     "model_invocation_receipts_from",
     "normalize_expected_observed_model",
     "normalize_intake",

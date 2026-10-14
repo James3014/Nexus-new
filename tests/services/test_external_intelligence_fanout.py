@@ -2521,3 +2521,65 @@ def test_abandoned_repair_with_sent_marker_is_unresolved(tmp_path):
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text("", encoding="utf-8")
     assert store.unresolved_repair_ids("task-1", "ua") == ["r1"]
+
+
+@pytest.mark.parametrize(
+    "receipts",
+    [
+        pytest.param((), id="missing"),
+        pytest.param(
+            (
+                {
+                    "provider_model_revision": "gpt-6-thinking",
+                    "backend_identity": {
+                        "observed_execution_identity": {"model_revision": "gpt-6-thinking"}
+                    },
+                },
+            ),
+            id="wrong",
+        ),
+    ],
+)
+def test_repair_continuation_without_pinned_observed_model_is_outcome_unknown(tmp_path, receipts):
+    # #2188: the repair path re-checks the observed-model pin even when the
+    # transport itself reports COMPLETED.
+    repo, base = make_repo(tmp_path)
+    envelope = tmp_path / "envelope.json"
+    envelope_sha = make_envelope(envelope, base, allowed=["a.py"])
+    initial_runtime = AdaptiveDeepSeekFanoutRuntime(
+        allocator=GitWorktreeAllocator(repo, tmp_path / "workspaces"),
+        store=FanoutStore(tmp_path / "state"),
+        transport=EditingTransport(),
+    )
+    initial = initial_runtime.run(
+        [unit(base, envelope, envelope_sha, "ua", ["a.py"])], CapacityLease(1, 1, 1, 1)
+    )["receipts"]["ua"]
+
+    class PinnedEditingTransport(EditingTransport):
+        expected_observed_model = "gpt-5-6-thinking"
+
+        def continue_session(self, **kwargs):
+            result = super().continue_session(**kwargs)
+            assert result.status == "COMPLETED"
+            return replace(result, model_invocation_receipts=receipts)
+
+    runtime = AdaptiveDeepSeekFanoutRuntime(
+        allocator=initial_runtime.allocator,
+        store=initial_runtime.store,
+        transport=PinnedEditingTransport(),
+    )
+    repair = tmp_path / "repair.json"
+    repair.write_text('{"schema":"repair_delta.v2","instruction":"repair a.py"}', encoding="utf-8")
+    repair_sha = hashlib.sha256(repair.read_bytes()).hexdigest()
+    with pytest.raises(FanoutError, match="OBSERVED_MODEL_ATTESTATION_MISMATCH"):
+        runtime.continue_repair(
+            initial, repair_id="r1", repair_ref=str(repair), repair_sha256=repair_sha
+        )
+    (attempt_file,) = [
+        path
+        for path in (tmp_path / "state" / "attempts").rglob("*.json")
+        if "repair-r1" in path.name
+    ]
+    attempt = json.loads(attempt_file.read_text(encoding="utf-8"))
+    assert attempt["state"] == "OUTCOME_UNKNOWN"
+    assert attempt["transport_status"] == "OBSERVED_MODEL_ATTESTATION_MISMATCH"

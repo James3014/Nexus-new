@@ -822,8 +822,23 @@ def test_timeout_with_late_reply_is_read_back_not_resent_but_unattested(tmp_path
         "history_visible": True,
         "late_reply": composite(),
     }
+    from nexus.services.open_swe_external_intelligence import OpenSWEWorkerTransport
+
+    results: list[Any] = []
+    original_request = OpenSWEWorkerTransport._request
+
+    def recording_request(self: Any, *args: Any, **kwargs: Any) -> Any:
+        result = original_request(self, *args, **kwargs)
+        results.append(result)
+        return result
+
+    monkeypatch.setattr(OpenSWEWorkerTransport, "_request", recording_request)
     world = World(tmp_path, monkeypatch, [step, ok(composite(path="nexus/evil.py"))])
     assert "u1" not in world.run()["receipts"]
+    # The block is the observed-model attestation, not some other unknown outcome.
+    assert [(r.status, r.error) for r in results] == [
+        ("OPEN_SWE_OUTCOME_UNKNOWN", "OBSERVED_MODEL_ATTESTATION_MISMATCH")
+    ]
     assert len(world.calls("ask")) == 1
     assert {"history", "detail"} <= {row["sub"] for row in world.calls()}
     (invocation,) = world.invocations()
