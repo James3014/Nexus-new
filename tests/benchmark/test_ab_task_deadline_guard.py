@@ -249,3 +249,153 @@ def test_strict_later_with_nexus_subprocesses_share_one_task_deadline(
     assert len(nexus_timeouts) >= 2, nexus_timeouts
     assert nexus_timeouts[0] <= 10
     assert all(later <= 7 for later in nexus_timeouts[1:]), nexus_timeouts
+
+
+def test_per_call_cap_is_clamped_to_the_task_budget_and_validated(monkeypatch) -> None:
+    """Reviewer C(1): the cap never exceeds the task budget; bad or too-small settings fail loudly."""
+
+    import argparse
+
+    import pytest
+
+    from scripts.bench.capability_ab_runner import _resolve_symmetric_per_call_cap_sec
+
+    monkeypatch.delenv("NEXUS_BENCH_GATEWAY_TIMEOUT_SEC", raising=False)
+    explicit = argparse.Namespace(
+        strict_llm_baseline=True, per_call_timeout_sec=600, timeout_sec=420
+    )
+    assert _resolve_symmetric_per_call_cap_sec(explicit) == 390
+    monkeypatch.setenv("NEXUS_BENCH_GATEWAY_TIMEOUT_SEC", "900")
+    assert (
+        _resolve_symmetric_per_call_cap_sec(
+            argparse.Namespace(strict_llm_baseline=True, timeout_sec=420)
+        )
+        == 390
+    )
+    monkeypatch.setenv("NEXUS_BENCH_GATEWAY_TIMEOUT_SEC", "3OO")
+    with pytest.raises(ValueError, match="must be an integer"):
+        _resolve_symmetric_per_call_cap_sec(
+            argparse.Namespace(strict_llm_baseline=True, timeout_sec=420)
+        )
+    monkeypatch.delenv("NEXUS_BENCH_GATEWAY_TIMEOUT_SEC")
+    with pytest.raises(ValueError, match="too small"):
+        _resolve_symmetric_per_call_cap_sec(
+            argparse.Namespace(strict_llm_baseline=True, timeout_sec=30)
+        )
+
+
+def test_main_rejects_an_invalid_per_call_cap(tmp_path, monkeypatch, capsys) -> None:
+    import sys
+
+    import pytest
+
+    import scripts.bench.capability_ab_runner as runner
+
+    saved = dict(__import__("os").environ)
+    try:
+        monkeypatch.setenv("NEXUS_BENCH_GATEWAY_TIMEOUT_SEC", "abc")
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "capability_ab_runner.py",
+                "--tasks-file",
+                "scripts/bench/public_benchmark_nexus_value_v1.json",
+                "--output-dir",
+                str(tmp_path / "o"),
+                "--preflight-only",
+                "--strict-llm-baseline",
+                "--with-llm-mode",
+                "all",
+                "--without-mode",
+                "agy",
+                "--timeout-sec",
+                "420",
+            ],
+        )
+        monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+        with pytest.raises(SystemExit) as exc:
+            runner.main()
+        assert exc.value.code == 2
+        assert "must be an integer" in capsys.readouterr().err
+        # A task budget of 35 s leaves a 5 s per-call cap: refused too.
+        monkeypatch.delenv("NEXUS_BENCH_GATEWAY_TIMEOUT_SEC")
+        monkeypatch.setattr(sys, "argv", [*sys.argv, "--timeout-sec", "35"])
+        with pytest.raises(SystemExit) as exc:
+            runner.main()
+        assert exc.value.code == 2
+        assert "too small" in capsys.readouterr().err
+    finally:
+        import os
+
+        os.environ.clear()
+        os.environ.update(saved)
+
+
+def test_subprocess_killed_at_the_shared_deadline_marks_the_row(tmp_path, monkeypatch) -> None:
+    """Reviewer C(2): a kill AT the shared cap is a task-deadline overrun too."""
+
+    task = _governance_task()
+    target_file, visible_test_file = _materialize_fixture(tmp_path, task)
+    granted: list[int] = []
+
+    def fake_run_process_group(cmd, *, cwd, env, timeout_sec):
+        if cmd[:3] == NEXUS_CLI_PREFIX:
+            granted.append(int(timeout_sec))
+            time.sleep(min(float(timeout_sec), 2.2))
+            raise subprocess.TimeoutExpired(cmd, timeout_sec)
+        return subprocess.CompletedProcess(cmd, 0, stdout="hidden passed", stderr="")
+
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    monkeypatch.setattr(
+        "scripts.bench.capability_ab_runner._run_process_group", fake_run_process_group
+    )
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=visible_test_file,
+        timeout_sec=2,
+        force_flow="hyper_sprint",
+        runner_mode="subprocess",
+        with_llm_mode="all",
+        strict_llm_baseline=True,
+    )
+    assert granted and granted[0] <= 2
+    assert out["task_deadline_exceeded"] is True
+    assert out["status"] == "FAILED"
+
+
+def test_receipt_first_probe_cannot_outlive_the_remaining_budget(tmp_path, monkeypatch) -> None:
+    """Reviewer C(3)."""
+
+    from scripts.bench.capability_ab_runner import _run_receipt_first_probe_payload
+
+    import dataclasses
+
+    task = dataclasses.replace(_governance_task(), expected_capabilities=["claim_gate"])
+    target_file, visible_test_file = _materialize_fixture(tmp_path, task)
+    seen: list[int] = []
+
+    def fake_run_process_group(cmd, *, cwd, env, timeout_sec):
+        seen.append(int(timeout_sec))
+        return subprocess.CompletedProcess(cmd, 0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(
+        "scripts.bench.capability_ab_runner._run_process_group", fake_run_process_group
+    )
+    _run_receipt_first_probe_payload(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=visible_test_file,
+        timeout_sec=300,
+        force_flow=None,
+        candidate_cap=1,
+        enable_autoreason_executor=False,
+        enable_ddtree_executor=False,
+        enable_ultra_review_dry_gate=False,
+        required=True,
+        hard_cap_sec=3,
+    )
+    assert seen == [3]
