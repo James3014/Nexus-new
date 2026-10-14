@@ -1999,7 +1999,11 @@ def _strict_symmetric_with_nexus_env() -> dict[str, str]:
         # L3: one candidate, no Nightshift re-run after a failed hyper attempt.
         "NEXUS_LLM_CANDIDATE_CAP": "1",
         "NEXUS_AUTO_NIGHTSHIFT_ON_HYPER_FAILURE": "0",
+        "NEXUS_ONLINE_LOCAL_ASSIST": "0",
     }
+
+
+SYMMETRIC_MODEL_WINNER_SOURCES = frozenset({"llm", "nexus_llm_baseline", "llm_assisted"})
 
 
 def _delivered_file_is_model_candidate(payload: dict[str, Any], row: dict[str, Any], target_file: str) -> bool:
@@ -2015,7 +2019,10 @@ def _delivered_file_is_model_candidate(payload: dict[str, Any], row: dict[str, A
         return False
     row["model_candidate_sha256"] = expected
     row["delivered_target_sha256"] = delivered
-    return bool(expected) and delivered == expected and bool(winner) and not local_delivery({"nexus_winner_source": winner})
+    if row.get("local_success_source") is True or local_delivery(row):
+        return False
+    # L3: exact model winner sources only (product labels for a model-generated candidate).
+    return bool(expected) and delivered == expected and winner in SYMMETRIC_MODEL_WINNER_SOURCES
 
 
 def _counted_mode_unsupported_row(task: CapabilityTask, *, reason: str) -> dict[str, Any]:
@@ -2036,9 +2043,9 @@ def _counted_mode_unsupported_row(task: CapabilityTask, *, reason: str) -> dict[
     return row
 
 
-def _nexus_task_desc(task: CapabilityTask) -> str:
+def _nexus_task_desc(task: CapabilityTask, *, llm_enabled: bool = True) -> str:
     desc = task.task_desc
-    if _no_nexus_task_hints():
+    if _no_nexus_task_hints() and llm_enabled:
         # The bare arm gets only task.task_desc; any appended contract/decision table would be an
         # answer hint only the with-Nexus arm sees.
         return desc
@@ -14774,7 +14781,8 @@ def run_with_nexus(
         or expected_executor_capability_required
         or _task_default_llm_self_heal(task)
     )
-    no_hints = _no_nexus_task_hints()
+    # M2: every counted-lane rule applies to model runs only; the LLM-off lane is unchanged.
+    no_hints = _no_nexus_task_hints() and llm_enabled
     if no_hints:
         # S9: the counted metric is one model call; the product's self-heal re-asks the model with
         # visible-test failure output the bare arm never gets.
@@ -15344,7 +15352,7 @@ def run_with_nexus(
         "nexus",
         "research:auto-flow",
         "--task-desc",
-        _nexus_task_desc(task),
+        _nexus_task_desc(task, llm_enabled=llm_enabled),
         "--target-file",
         target_file_arg,
         "--test-file",
@@ -15438,7 +15446,8 @@ def run_with_nexus(
         bench_env_updates["NEXUS_DISABLE_HIDDEN_CONTRACT_FAST_PATH"] = "1"
         bench_env_updates["NEXUS_DISABLE_HIDDEN_INVARIANT_SHADOW"] = "1"
         bench_env_updates["NEXUS_MODEL_REQUIRED_EXECUTION_MODE"] = execution_policy.mode
-    if _no_nexus_task_hints():
+    if _no_nexus_task_hints() and llm_enabled:
+        # M2: the symmetric env applies to model runs only; the LLM-off lane is unchanged.
         bench_env_updates.update(_strict_symmetric_with_nexus_env())
     if effective_enable_ultra_review_dry_gate:
         bench_env_updates["NEXUS_ULTRA_REVIEW_DRY_GATE"] = "1"
@@ -15529,12 +15538,27 @@ def run_with_nexus(
     row = _extract_record(mode="with_nexus", task=task, payload=payload, wall_time_sec=wall)
     row["route_execution_policy"] = route_execution_policy.to_dict()
     _annotate_warning_ledger(row, warning_records)
-    if (
+    fallback_needed = bool(
         llm_enabled
         and (task.eligibility_class == "model_required" or require_model_participation_for_run)
         and effective_skip_llm_baseline
         and int(row.get("model_calls", 0) or 0) <= 0
-    ):
+    )
+    if fallback_needed and no_hints:
+        # M3: the counted lane never re-runs (a second attempt is Nexus treatment, and a local
+        # mutation from the first run would still be on disk). Restore the target and refuse.
+        if strict_target_before is not None:
+            Path(target_file).write_text(strict_target_before, encoding="utf-8")
+        row["status"] = "FAILED"
+        row["semantic_status"] = "UNVERIFIED"
+        row["semantic_completed"] = False
+        row["infra_invalid_reason"] = "counted_lane_fallback_refused"
+        row["counted_lane_fallback_refused"] = True
+        row["run_eligible"] = False
+        fallback_needed = False
+    if fallback_needed:
+        if strict_target_before is not None:
+            Path(target_file).write_text(strict_target_before, encoding="utf-8")
         fallback_args = list(args)
         if "--force-flow" in fallback_args:
             idx = fallback_args.index("--force-flow")

@@ -309,7 +309,7 @@ class LLMCandidateGenerator:
         self.safe_mode = safe_mode
         self.target_file = str(target_file or "").strip()
         self.local_service = None
-        if os.environ.get("NEXUS_ONLINE_LOCAL_ASSIST", "").strip().lower() in {"1", "true", "yes"}:
+        if os.environ.get("NEXUS_ONLINE_LOCAL_ASSIST", "").strip().lower() in {"1", "true", "yes"} and not _symmetric_prompt_mode():
             from nexus.services.local_assist_service import LocalAssistService
 
             self.local_service = LocalAssistService()
@@ -1938,6 +1938,13 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                         codeintel_block=codeintel_block,
                     )
                     used_source = str(meta.get("source", "llm"))
+                    if _symmetric_prompt_mode() and isinstance(candidate_code, str) and candidate_code:
+                        # L2: identity of the raw model candidate, before any post-processing; the
+                        # flow delivers it only if the final patch is byte-identical.
+                        learning_trace.setdefault(
+                            "model_candidate_sha256",
+                            hashlib.sha256(candidate_code.encode("utf-8")).hexdigest(),
+                        )
                 except Exception as llm_exc:  # noqa: BLE001
                     fallback_used = True
                     failure_meta = getattr(llm_exc, "metadata", {})
@@ -2080,7 +2087,10 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                             source=support_source,
                         )
                     candidates.append(support_ev)
-            self_heal_enabled = os.environ.get("NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL", "1").strip().lower() not in {"0", "false", "no"}
+            self_heal_enabled = (
+                os.environ.get("NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL", "1").strip().lower() not in {"0", "false", "no"}
+                and not _symmetric_prompt_mode()  # L2: symmetric mode itself means one model call
+            )
             if (
                 hidden_verifier_mode
                 and llm_generator is not None
@@ -2460,7 +2470,10 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     final_score = best.score
     final_patch = best.candidate_code or source_code
     final_reason = "stage1_pass"
-    disable_dayshift = os.environ.get("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "").strip().lower() in {"1", "true", "yes"}
+    disable_dayshift = (
+        os.environ.get("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "").strip().lower() in {"1", "true", "yes"}
+        or _symmetric_prompt_mode()  # L2: no stage-2 rewrite of the model candidate in the A/B
+    )
     # Stage 2 is optional enhancement only. Core success must not depend on external quota.
     if llm_mode_effective and llm_channel == "local":
         # DayShiftOptimizer scores with online gateway models; the local channel stops at stage 1.

@@ -7,6 +7,7 @@ model's file is discarded when the visible test fails, so the hidden verifier ne
 
 from __future__ import annotations
 
+import hashlib
 import subprocess
 from pathlib import Path
 
@@ -32,6 +33,7 @@ def _run(
     symmetric: bool,
     force_flow: str = "baseline",
     sprint_calls: list | None = None,
+    sprint_patch: str = MODEL_PATCH,
 ) -> tuple[dict, list[dict]]:
     (tmp_path / "demo.py").write_text(ORIGINAL, encoding="utf-8")
     (tmp_path / "test_demo.py").write_text(VISIBLE_TEST, encoding="utf-8")
@@ -90,7 +92,10 @@ def _run(
                 model_calls=1,
                 quota_backoffs=0,
                 test_timeouts=0,
-                patch=MODEL_PATCH,
+                patch=sprint_patch,
+                learning_trace={
+                    "model_candidate_sha256": hashlib.sha256(MODEL_PATCH.encode()).hexdigest()
+                },
             )
 
         monkeypatch.setattr(research_flow_service, "run_hyper_sprint", fake_run_hyper_sprint)
@@ -181,5 +186,21 @@ def test_non_symmetric_hyper_sprint_does_not_write_a_failed_patch(tmp_path: Path
         tmp_path, monkeypatch, symmetric=False, force_flow="hyper_sprint", sprint_calls=sprint_calls
     )
     assert payload["result"]["status"] == "FAILED"
+    assert (tmp_path / "demo.py").read_text(encoding="utf-8") == ORIGINAL
+    assert "model_candidate_sha256" not in payload["result"]["report"]
+
+
+def test_symmetric_hyper_patch_must_be_the_raw_model_candidate(tmp_path: Path, monkeypatch):
+    """L2: a post-processed patch (sha differs from the raw model candidate) is not delivered."""
+
+    sprint_calls: list = []
+    payload, _ = _run(
+        tmp_path,
+        monkeypatch,
+        symmetric=True,
+        force_flow="hyper_sprint",
+        sprint_calls=sprint_calls,
+        sprint_patch=MODEL_PATCH + "# post-processed\n",
+    )
     assert (tmp_path / "demo.py").read_text(encoding="utf-8") == ORIGINAL
     assert "model_candidate_sha256" not in payload["result"]["report"]

@@ -289,20 +289,17 @@ def _build_codeintel_evidence(repo_root: Path, *, target_file: str, task_desc: s
     return _codeintel_context.build_codeintel_evidence(repo_root, target_file=target_file, task_desc=task_desc)
 
 
-_NON_MODEL_SOURCES = frozenset({"nexus_llm_deterministic_pre_rescue"})
+def _mapping_get(value: object, key: str) -> object:
+    return value.get(key, "") if isinstance(value, dict) else ""
+
+
+_SYMMETRIC_MODEL_SOURCES = frozenset({"llm", "nexus_llm_baseline", "llm_assisted"})
 
 
 def _is_symmetric_model_source(source: str) -> bool:
-    """Exact model-source allowlist (mirrors scripts/bench/strict_llm_baseline.local_delivery):
-    llm*/model*/nexus_llm*/direct_* sources, minus deterministic rescues and *_failed labels."""
+    """Exact model-source allowlist: the product labels of a model-generated candidate only."""
 
-    value = str(source or "").strip().lower()
-    return (
-        bool(value)
-        and value.startswith(("llm", "model", "nexus_llm", "direct_"))
-        and value not in _NON_MODEL_SOURCES
-        and not value.endswith("_failed")
-    )
+    return str(source or "").strip().lower() in _SYMMETRIC_MODEL_SOURCES
 
 
 def _symmetric_prompt_mode() -> bool:
@@ -1077,7 +1074,8 @@ def run_auto_flow(
     timing_breakdown_sec["codeintel_sec"] = round(time.monotonic() - codeintel_started_at, 4)
     context_started_at = time.monotonic()
     task_desc_with_codeintel = _task_with_codeintel_context(task_desc, codeintel_evidence)
-    symmetric_prompt = _symmetric_prompt_mode()
+    # M2: symmetric behaviour applies only to model runs; the LLM-off lane is unchanged.
+    symmetric_prompt = _symmetric_prompt_mode() and bool(llm_mode)
     test_path_for_prompt = Path(test_file) if Path(test_file).is_absolute() else repo_root / test_file
     visible_test_source = (
         test_path_for_prompt.read_text(encoding="utf-8")
@@ -1288,10 +1286,14 @@ def run_auto_flow(
         apply_started_at = time.monotonic()
         # H1 / P1-1: in the symmetric A/B the model candidate's file is delivered even when the
         # visible test fails (status stays FAILED); the bench's hidden-only gate decides.
+        raw_model_sha = str(_mapping_get(getattr(res, "learning_trace", None), "model_candidate_sha256"))
         symmetric_delivery = bool(
             symmetric_prompt
             and res.patch
             and _is_symmetric_model_source(str(getattr(res, "winner_source", "") or ""))
+            # L2: the delivered patch must be the raw model candidate, byte for byte.
+            and raw_model_sha
+            and hashlib.sha256(str(res.patch).encode("utf-8")).hexdigest() == raw_model_sha
         )
         if ok or symmetric_delivery:
             _write_source_text(target_path, res.patch)
@@ -1306,7 +1308,7 @@ def run_auto_flow(
             r_phase_breakdown_sec=breakdown,
         )
         if symmetric_delivery:
-            report["model_candidate_sha256"] = hashlib.sha256(str(res.patch).encode("utf-8")).hexdigest()
+            report["model_candidate_sha256"] = raw_model_sha
             report["symmetric_model_delivery"] = True
         return {
             "flow": "hyper_sprint",
@@ -1464,7 +1466,8 @@ def run_auto_flow(
     nightshift_auto_run = maybe_run_nightshift_after_hyper_failure(
         repo_root=repo_root,
         result=result,
-        nightshift_recommended=nightshift_recommended,
+        # L2: symmetric mode never re-runs the task through Nightshift.
+        nightshift_recommended=nightshift_recommended and not (symmetric_prompt and llm_mode),
         task_desc=task_desc,
         target_file=target_file,
         test_file=test_file,

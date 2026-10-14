@@ -184,22 +184,158 @@ def compact_route_for_prompt(
     }
 
 
-_TOKEN_STRING_RE = re.compile(r"^[A-Za-z0-9_.:/+=-]{0,200}$")
+# Symmetric A/B (M1): Nexus blocks are rebuilt from an explicit field whitelist. Every key has a
+# declared kind; unknown keys and values outside their kind are dropped. Nothing is regex-filtered
+# as "free text": only ids, sha256 hashes, booleans, ints and declared enums survive.
+_HEX64_RE = re.compile(r"\A(?:sha256:)?[0-9a-f]{64}\Z")
+_ID_RE = re.compile(r"\A[A-Za-z0-9_.:-]{1,160}\Z")
+_STATUS_RE = re.compile(r"\A[A-Z][A-Z_]{0,63}\Z")
+_MARKER_KIND_RE = re.compile(r"\A([a-z_]+):(result|payload|finding)\Z")
+_ROUTE_FLOWS = frozenset({"direct", "baseline", "hyper_sprint"})
+_ROUTING_EVIDENCE = frozenset({"route_decision_present", "missing_route_decision"})
 
 
-def strip_free_text(value: Any) -> Any:
-    """Keep ids, hashes, statuses, numbers and booleans; drop any string with free text (spaces)."""
+def _registered_capabilities() -> frozenset[str]:
+    try:
+        from nexus.core.capability_executor_registry import EXECUTOR_REGISTRY
+    except Exception:  # noqa: BLE001
+        return frozenset()
+    return frozenset(str(key) for key in EXECUTOR_REGISTRY)
 
-    if isinstance(value, Mapping):
-        out: dict[str, Any] = {}
-        for key, item in value.items():
-            if isinstance(item, str) and not _TOKEN_STRING_RE.match(item):
-                continue
-            out[str(key)] = strip_free_text(item)
+
+def _kind_ok(kind: str, value: Any) -> bool:
+    if kind == "bool":
+        return isinstance(value, bool)
+    if kind == "int":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if kind == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if not isinstance(value, str):
+        return False
+    if kind == "hash":
+        return value == "" or bool(_HEX64_RE.match(value))
+    if kind == "id":
+        return bool(_ID_RE.match(value))
+    if kind == "status":
+        return bool(_STATUS_RE.match(value))
+    if kind == "capability":
+        return value in _registered_capabilities()
+    if kind == "marker":
+        match = _MARKER_KIND_RE.match(value)
+        return bool(match) and match.group(1) in _registered_capabilities()
+    if kind.startswith("enum:"):
+        return value in kind[5:].split("|")
+    return False
+
+
+def whitelist_block(value: Any, spec: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep only whitelisted keys whose values match their declared kind (recursively)."""
+
+    out: dict[str, Any] = {}
+    if not isinstance(value, Mapping):
         return out
-    if isinstance(value, list):
-        return [strip_free_text(item) for item in value if not (isinstance(item, str) and not _TOKEN_STRING_RE.match(item))]
-    return value
+    for key, kind in spec.items():
+        if key not in value:
+            continue
+        item = value[key]
+        if isinstance(kind, Mapping):
+            if isinstance(item, Mapping):
+                out[key] = whitelist_block(item, kind)
+        elif isinstance(kind, tuple) and kind[0] == "list":
+            if isinstance(item, list):
+                element = kind[1]
+                if isinstance(element, Mapping):
+                    out[key] = [whitelist_block(entry, element) for entry in item if isinstance(entry, Mapping)]
+                else:
+                    out[key] = [entry for entry in item if _kind_ok(element, entry)]
+        elif _kind_ok(str(kind), item):
+            out[key] = item
+    return out
+
+
+_SYMMETRIC_ROUTE_SPEC: dict[str, Any] = {
+    "recommended_flow": "enum:" + "|".join(sorted(_ROUTE_FLOWS)),
+    "routing_evidence_status": "enum:" + "|".join(sorted(_ROUTING_EVIDENCE)),
+    "risk_score": "int",
+    "hard_signal": "bool",
+    "commercial_signal": "bool",
+    "memory_hits": "int",
+    "findings_hits": "int",
+    "selected_capabilities": ("list", "capability"),
+}
+_SYMMETRIC_PROFILE_SPEC: dict[str, Any] = {
+    "is_hard_task": "bool",
+    "commercial_public_task": "bool",
+    "candidate_count": "int",
+    "max_rounds": "int",
+    "stage1_parallel": "int",
+}
+_SYMMETRIC_RESULT_SPEC: dict[str, Any] = {
+    "status": "status",
+    "converged": "bool",
+    "phase_slo_pass": "bool",
+    "claims_count": "int",
+    "claims_with_valid_citation": "int",
+    "conflict_candidate_count": "int",
+    "high_strength_claims": "int",
+    "sources_count": "int",
+    "stale_claims_count": "int",
+    "window": "int",
+    "citation_valid_ratio": "number",
+    "coverage": "number",
+    "self_question_pass_rate": "number",
+}
+_SYMMETRIC_PAYLOAD_SPEC: dict[str, Any] = {
+    "capability": "capability",
+    "schema": "enum:nexus.consumer_payload.v1",
+    "payload_hash": "hash",
+    "payload_chars": "int",
+    "public_claim_allowed": "bool",
+    "markers": ("list", "marker"),
+    "fields": {
+        "action": "id",
+        "capability": "capability",
+        "evidence_id": "id",
+        "markers": ("list", "marker"),
+        "physical_callable": "id",
+        "semantic_status": "status",
+        "hit_count": "int",
+        "search_performed": "bool",
+        "run_id": "id",
+        "result": _SYMMETRIC_RESULT_SPEC,
+    },
+}
+_SYMMETRIC_EVIDENCE_SPEC: dict[str, Any] = {
+    "schema": "enum:nexus.capability_evidence_bundle.v1",
+    "bundle_hash": "hash",
+    "baseline_hash": "hash",
+    "consumer_payload_hash": "hash",
+    "plan_hash": "hash",
+    "planner_decision_id": "hash",
+    "source_hash": "hash",
+    "task_id": "id",
+    "public_claim_allowed": "bool",
+    "selection_authority": "enum:CapabilityPlanner",
+    "selected_capabilities": ("list", "capability"),
+    "evidence_ids": ("list", "id"),
+    "payload_markers": ("list", "marker"),
+    "consumer_payloads": ("list", _SYMMETRIC_PAYLOAD_SPEC),
+    "entries": (
+        "list",
+        {
+            "name": "capability",
+            "status": "status",
+            "success": "bool",
+            "invoked_real": "bool",
+            "invoked_stub": "bool",
+            "skipped": "bool",
+            "has_consumer_payload": "bool",
+            "physical_callable": "id",
+            "evidence_ids": ("list", "id"),
+            "consumer_payload": _SYMMETRIC_PAYLOAD_SPEC,
+        },
+    ),
+}
 
 
 def compact_codeintel_for_prompt(codeintel: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -388,11 +524,15 @@ def build_online_nexus_context(
         name: project_online_execution_mode(name) for name in selected
     }
 
+    symmetric = symmetric_prompt_mode()
     route_compact = compact_route_for_prompt(route, selected_capabilities=selected)
-    # Symmetric A/B: no repository context (fixed 0/0 CodeIntel summary) and capability evidence
-    # reduced to ids/hashes/statuses; free text never reaches the counted with-Nexus prompt.
-    codeintel_compact = compact_codeintel_for_prompt(None if symmetric_prompt_mode() else codeintel)
+    # Symmetric A/B: no repository context (fixed 0/0 CodeIntel summary); route, profile and
+    # capability evidence rebuilt from explicit whitelists (M1).
+    codeintel_compact = compact_codeintel_for_prompt(None if symmetric else codeintel)
     profile_compact = compact_profile_for_prompt(profile)
+    if symmetric:
+        route_compact = whitelist_block(route_compact, _SYMMETRIC_ROUTE_SPEC)
+        profile_compact = whitelist_block(profile_compact, _SYMMETRIC_PROFILE_SPEC)
     flags_compact = compact_executor_flags_for_prompt(executor_flags)
     # Prefer explicit arg; fall back to plan payload sealed bundle.
     evidence_bundle = capability_evidence_bundle
@@ -405,8 +545,8 @@ def build_online_nexus_context(
     evidence_compact = compact_capability_evidence_for_prompt(
         evidence_bundle if isinstance(evidence_bundle, Mapping) else None
     )
-    if symmetric_prompt_mode():
-        evidence_compact = strip_free_text(evidence_compact)
+    if symmetric and evidence_compact:
+        evidence_compact = whitelist_block(evidence_compact, _SYMMETRIC_EVIDENCE_SPEC)
 
     route_prompt = _json_prompt_block(route_compact)
     codeintel_prompt = _json_prompt_block(codeintel_compact)
@@ -445,9 +585,12 @@ def build_online_nexus_context(
         f"{NEXUS_CODEINTEL_MARKER}\n{codeintel_prompt}\n\n",
         f"{NEXUS_PROFILE_MARKER}\n{profile_prompt}\n\n",
         f"{NEXUS_FLAGS_MARKER}\n{flags_prompt}\n\n",
-        f"{NEXUS_HIDDEN_MARKER}\n{hidden}\n",
     ]
-    sections.extend([PROFILE_SECTION, FLAGS_SECTION, HIDDEN_SECTION])
+    sections.extend([PROFILE_SECTION, FLAGS_SECTION])
+    if not symmetric:
+        # Symmetric A/B: no hidden-verifier guidance block at all (not even an empty marker).
+        prompt_parts.append(f"{NEXUS_HIDDEN_MARKER}\n{hidden}\n")
+        sections.append(HIDDEN_SECTION)
 
     consumed_evidence_ids: list[str] = []
     consumed_capability_payloads: list[dict[str, Any]] = []
@@ -488,7 +631,7 @@ def build_online_nexus_context(
     if visible_tests:
         prompt_parts.append(f"\n[VISIBLE TESTS]\n{visible_tests}\n")
 
-    local_map = _mapping(local_forward)
+    local_map = {} if symmetric else _mapping(local_forward)
     if local_map:
         prompt_parts.append(
             f"\n{NEXUS_LOCAL_MARKER}\n{_json_prompt_block(local_map)}\n"
@@ -631,7 +774,8 @@ def build_online_nexus_context_from_runtime(
     local_forward: dict[str, Any] = {}
     vap_injection = ""
     local_stage = ctx.get("local")
-    if isinstance(local_stage, Mapping) and local_stage.get("invoked"):
+    if isinstance(local_stage, Mapping) and local_stage.get("invoked") and not symmetric_prompt_mode():
+        # (Symmetric A/B: no local-assist forward and no VAP fragment reach the prompt.)
         declared = False
         expected_packet_hash = ""
         packet: dict[str, Any] | None = None

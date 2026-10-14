@@ -734,3 +734,329 @@ def _string_literals_of(source: str) -> set[str]:
         for n in _ast.walk(tree)
         if isinstance(n, _ast.Constant) and isinstance(n.value, str)
     }
+
+
+def _symmetric_ctx(**kwargs):
+    from nexus.services.online_nexus_context import build_online_nexus_context
+
+    return build_online_nexus_context(
+        task_statement="Fix value", task_id="t", base_prompt="Task: Fix value", **kwargs
+    )
+
+
+def test_symmetric_evidence_whitelist_drops_single_tokens_keys_and_newlines(symmetric) -> None:
+    """Round-2 M1: whitelist by field, not by value shape."""
+
+    bundle = {
+        "schema": "nexus.capability_evidence_bundle.v1",
+        "task_id": "sprint-abc\n",
+        "Use strict=True when omitted": 1,
+        "entries": [
+            {
+                "name": "semantic_searcher",
+                "status": "REAL_INVOKED",
+                "success": True,
+                "invoked_real": True,
+                "consumer_payload": {
+                    "capability": "semantic_searcher",
+                    "fields": {
+                        "verdict": "needs_evidence",
+                        "markers": ["semantic_searcher:result"],
+                    },
+                },
+            }
+        ],
+    }
+    prompt = _symmetric_ctx(capability_evidence_bundle=bundle).prompt
+    assert "needs_evidence" not in prompt
+    assert "verdict" not in prompt
+    assert "Use strict=True" not in prompt
+    assert "sprint-abc" not in prompt
+    assert "semantic_searcher:result" in prompt
+
+
+def test_symmetric_prompt_has_no_hidden_marker_local_assist_or_free_text_route(symmetric) -> None:
+    ctx = _symmetric_ctx(
+        route={
+            "recommended_flow": "direct",
+            "recommended_reason": "return needs_evidence when unverified",
+            "route_decision": {"governance_layers": ["deny by default"]},
+        },
+        profile={"candidate_count": 1, "tuning_reasons": ["prefer the stricter boundary"]},
+        local_forward={"hint": "LOCAL-ASSIST-HINT"},
+        hidden_guidance="infer hidden invariants",
+    )
+    prompt = ctx.prompt
+    for text in (
+        "[NEXUS HIDDEN-VERIFIER GUIDANCE]",
+        "[LOCAL_ASSIST_CONTEXT]",
+        "LOCAL-ASSIST-HINT",
+        "needs_evidence",
+        "deny by default",
+        "stricter boundary",
+    ):
+        assert text not in prompt, text
+    assert '"recommended_flow":"direct"' in prompt
+
+
+def test_runtime_context_skips_local_assist_and_vap_in_symmetric_mode(symmetric) -> None:
+    from nexus.services.online_nexus_context import build_online_nexus_context_from_runtime
+
+    ctx = build_online_nexus_context_from_runtime({
+        "task_statement": "Fix value",
+        "task_id": "t",
+        "online_prompt": "Task: Fix value",
+        "local": {
+            "invoked": True,
+            "response": {"verified_assist_packet": {"packet_hash": "x"}},
+            "consume_verified_assist": True,
+        },
+    })
+    assert "[LOCAL_ASSIST_CONTEXT]" not in ctx.prompt
+    assert "verified_assist" not in ctx.prompt
+
+
+def test_llm_off_lane_is_unchanged_by_no_task_hints(tmp_path, monkeypatch) -> None:
+    """Round-2 M2: with the LLM off, no-hints changes neither the CLI args nor the subprocess env."""
+
+    import json
+    import subprocess
+
+    from scripts.bench import capability_ab_runner as runner
+
+    task = next(t for t in P16_TASKS if t.id == "nexus-value-trust-002")
+    seen: list[tuple[list[str], dict]] = []
+
+    def fake_run_process_group(cmd, *, cwd, env, timeout_sec):
+        if cmd[:3] == ["uv", "run", "scripts/engine/nexus_cli.py"]:
+            seen.append((
+                list(cmd),
+                {k: v for k, v in env.items() if k != "NEXUS_BENCH_NO_TASK_HINTS"},
+            ))
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout=json.dumps({"status": "FAILED"}), stderr=""
+            )
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+
+    monkeypatch.setattr(runner, "_run_process_group", fake_run_process_group)
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    for flag in ("0", "1"):
+        monkeypatch.setenv("NEXUS_BENCH_NO_TASK_HINTS", flag)
+        root = tmp_path / flag
+        root.mkdir()
+        target_file, visible_test_file = _materialize_fixture(root, task)
+        runner.run_with_nexus(
+            repo_root=root,
+            task=task,
+            target_file=target_file,
+            test_file=visible_test_file,
+            timeout_sec=30,
+            force_flow="hyper_sprint",
+            runner_mode="subprocess",
+            with_llm_mode="off",
+        )
+    (cmd_off, env_off), (cmd_on, env_on) = seen
+
+    def normalise(cmd: list[str]) -> list[str]:
+        return ["<root>" if tmp_path.name in part else part for part in cmd]
+
+    assert normalise(cmd_off) == normalise(cmd_on)
+    assert "NEXUS_SYMMETRIC_PROMPT" not in env_on
+    assert {k: v for k, v in env_on.items() if tmp_path.name not in v} == {
+        k: v for k, v in env_off.items() if tmp_path.name not in v
+    }
+
+
+def test_counted_lane_refuses_the_direct_fallback_rerun(symmetric, tmp_path, monkeypatch) -> None:
+    """Round-2 M3: no re-run in the counted lane; a local first-run mutation is rolled back."""
+
+    import json
+    import subprocess
+
+    from scripts.bench import capability_ab_runner as runner
+    from scripts.bench.capability_ab_runner import CapabilityTask
+
+    task = CapabilityTask(
+        id="model-required-repair-001",
+        difficulty="hard",
+        task_type="public_test_repair",
+        category="test_repair",
+        repo_kind="neutral_fixture",
+        task_desc="Repair async timeout tests without hiding the timeout contract.",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        fixture_kind="pytest_async_repair",
+        eligibility_class="model_required",
+    )
+    target_file, visible_test_file = _materialize_fixture(tmp_path, task)
+    original = Path(target_file).read_text(encoding="utf-8")
+    calls: list[list[str]] = []
+
+    def fake_run_process_group(cmd, *, cwd, env, timeout_sec):
+        if cmd[:3] == ["uv", "run", "scripts/engine/nexus_cli.py"]:
+            calls.append(list(cmd))
+            Path(target_file).write_text(original + "\n# local mutation\n", encoding="utf-8")
+            payload = {
+                "status": "SUCCESS",
+                "semantic_status": "VERIFIED",
+                "result": {"elapsed_sec": 0.1, "report": {"model_calls": 0, "attempt_count": 1}},
+            }
+            return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(payload), stderr="")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(runner, "_run_process_group", fake_run_process_group)
+    out = runner.run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=visible_test_file,
+        timeout_sec=30,
+        force_flow="baseline",
+        runner_mode="subprocess",
+        with_llm_mode="all",
+        skip_llm_baseline=True,
+    )
+    assert len(calls) == 1
+    assert out["counted_lane_fallback_refused"] is True
+    assert out["status"] == "FAILED"
+    assert Path(target_file).read_text(encoding="utf-8") == original
+
+
+def test_delivered_file_check_rejects_local_flag_and_unknown_direct_winner(tmp_path) -> None:
+    """Round-2 L3."""
+
+    import hashlib
+
+    from scripts.bench.capability_ab_runner import _delivered_file_is_model_candidate
+
+    target = tmp_path / "t.py"
+    target.write_text("x = 1\n", encoding="utf-8")
+    sha = hashlib.sha256(b"x = 1\n").hexdigest()
+    payload = {"result": {"report": {"model_candidate_sha256": sha}}}
+    assert (
+        _delivered_file_is_model_candidate(payload, {"nexus_winner_source": "llm"}, str(target))
+        is True
+    )
+    assert (
+        _delivered_file_is_model_candidate(
+            payload, {"nexus_winner_source": "llm", "local_success_source": True}, str(target)
+        )
+        is False
+    )
+    assert (
+        _delivered_file_is_model_candidate(
+            payload, {"nexus_winner_source": "direct_whatever"}, str(target)
+        )
+        is False
+    )
+
+
+def test_bounded_rescue_success_is_never_a_model_solve() -> None:
+    """Round-2 L4: even under --allow-nexus-treatment."""
+
+    from scripts.bench.strict_llm_baseline import apply_strict_llm_baseline_classification
+
+    rows = [
+        {
+            "mode": "with_nexus",
+            "status": "SUCCESS",
+            "model_calls": 2,
+            "nexus_winner_source": "nexus_llm_baseline",
+            "bounded_nexus_rescue_used": True,
+        }
+    ]
+    apply_strict_llm_baseline_classification(rows)
+    assert rows[0]["solve_classification"] == "rescued_by_nexus_treatment"
+
+
+def test_symmetric_mode_alone_disables_self_heal_dayshift_and_local_assist(
+    monkeypatch, tmp_path
+) -> None:
+    """Round-2 L2: NEXUS_SYMMETRIC_PROMPT=1 is self-sufficient (no bench env needed)."""
+
+    from nexus.research import sprint_service
+
+    for name in (
+        "NEXUS_DISABLE_DAYSHIFT_OPTIMIZER",
+        "NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL",
+        "NEXUS_DISABLE_HIDDEN_INVARIANT_SHADOW",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("NEXUS_SYMMETRIC_PROMPT", "1")
+    monkeypatch.setenv("NEXUS_ONLINE_LOCAL_ASSIST", "1")
+    monkeypatch.setenv("NEXUS_DISABLE_HIDDEN_INVARIANT_SHADOW", "1")
+    phase_slo = tmp_path / ".nexus" / "reports" / "learn" / "phase_slo_summary.json"
+    phase_slo.parent.mkdir(parents=True, exist_ok=True)
+    phase_slo.write_text(
+        '{"phase_slo_pass": true, "global": {"required_done_ratio": 1.0}}', encoding="utf-8"
+    )
+    (tmp_path / "demo.py").write_text("def value():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "test_demo.py").write_text(
+        "from demo import value\n\ndef test_value():\n    assert value() == 2\n", encoding="utf-8"
+    )
+    calls: list[dict] = []
+
+    class FakeLLM:
+        def __init__(self, *_a, **_k):
+            pass
+
+        def generate(self, **kwargs):
+            calls.append(kwargs)
+            return "def value():\n    return 3\n", {
+                "source": "llm",
+                "model_calls": 1,
+                "tokens_used": 1,
+            }
+
+    class FakeExecutor:
+        def __init__(self, *_a, **_k):
+            pass
+
+        def evaluate_candidate(self, **kwargs):
+            return sprint_service.CandidateEval(
+                seed=kwargs["seed"],
+                score=0.0,
+                candidate_code=kwargs["code"],
+                source=kwargs["source"],
+            )
+
+    monkeypatch.setattr(sprint_service, "LLMCandidateGenerator", FakeLLM)
+    monkeypatch.setattr(sprint_service, "SprintExecutor", FakeExecutor)
+    cfg = sprint_service.SprintConfig(
+        task="Fix value",
+        target_file="demo.py",
+        test_file="test_demo.py",
+        candidate_count=1,
+        llm_mode=True,
+        safe_mode=True,
+    )
+    res = sprint_service.run_hyper_sprint(repo_root=tmp_path, config=cfg)
+    assert len(calls) == 1  # no self-heal re-ask
+    assert res.learning_trace.get("model_candidate_sha256")
+
+
+def test_hard_v1_prompts_from_committed_data_carry_no_hidden_literals(symmetric) -> None:
+    """Round-2 L5: runs on CI from committed data (task text, source, visible test, literal list)."""
+
+    import json
+
+    data = json.loads(
+        (Path(__file__).parent / "data" / "online_ab_hard_v1_prompt_data.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert len(data["tasks"]) == 10
+    for item in data["tasks"]:
+        prompt = _build_llm_candidate_prompt(
+            source_code=item["source"],
+            task=item["task_desc"],
+            mutation_hint="baseline",
+            test_source=item["visible_test"],
+        )
+        bare = "\n".join([item["task_desc"], item["source"], item["visible_test"]])
+        assert item["visible_test"] in prompt
+        for literal in item["hidden_only_literals"]:
+            if literal in bare:
+                continue
+            assert literal not in prompt, (item["id"], literal)
