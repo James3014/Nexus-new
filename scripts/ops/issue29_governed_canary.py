@@ -766,7 +766,7 @@ def evaluate_runtime_evidence(
     expected_invocation_id = (
         hashlib.sha256(
             json.dumps([
-                online_response.get("task_id"),
+                task_id,
                 process.get("attempt_id"),
                 process.get("provider"),
                 command_fingerprint,
@@ -789,6 +789,7 @@ def evaluate_runtime_evidence(
         and len(command_fingerprint) == 64
         and all(char in "0123456789abcdef" for char in command_fingerprint)
         and process.get("provider") == expected_online["provider"]
+        and online_response.get("task_id") == task_id
         and process.get("process_invocation_id") == expected_invocation_id,
         {
             "agy_executable_known": bool(agy_executable),
@@ -811,6 +812,7 @@ def evaluate_runtime_evidence(
     ev.add(
         "online_model_identity_attested",
         online_response.get("model_identity_status") == EXPECTED_AGY_MODEL_IDENTITY_STATUS
+        and online_response.get("model_identity_reason") == ""
         and observed_ids == [expected_online["model"]]
         and isinstance(observed_labels, list)
         and bool(observed_labels)
@@ -1041,7 +1043,11 @@ def run_canary(
             "The command fingerprint cannot be recomputed from the receipt: the Agy "
             "argv carries a random private --log-file path the receipt does not "
             "record. The harness binds it to the process invocation id and the "
-            "resolved Agy executable hash only.",
+            "resolved Agy executable hash only. Like the runtime, that hash covers the "
+            "resolved executable path string, not the binary's bytes, so a substituted "
+            "binary at the admitted path is not detected; the same-task fingerprint and "
+            "invocation id are self-consistent receipt values, not an independent "
+            "re-derivation of the argv.",
             "The runtime receipt does not bind the Task Card hash; only this harness receipt does.",
         ],
         "durable_marker": DURABLE_MARKER,

@@ -497,6 +497,8 @@ def test_caller_route_override_is_rejected_before_any_provider(
 
 
 def test_online_command_fingerprint_proves_admitted_argv(happy: dict[str, Any]) -> None:
+    # Id kept from before runtime #205: the fingerprint is now bound to the process
+    # invocation (not re-derived from the argv); see online_model_identity_attested.
     evaluation = _evaluate(copy.deepcopy(happy["runtime"]))
     assert "online_command_fingerprint_bound_to_invocation" not in evaluation.failed
 
@@ -523,7 +525,30 @@ def test_online_command_ran_other_model_fails_closed(happy: dict[str, Any]) -> N
     response["process_evidence"]["command_fingerprint"] = hashlib.sha256(
         json.dumps(argv, ensure_ascii=False).encode("utf-8")
     ).hexdigest()
+    # A fingerprint swapped in alone breaks the invocation binding.
     assert "online_command_fingerprint_bound_to_invocation" in _evaluate(runtime).failed
+
+    # Since runtime #205 the argv fingerprint cannot be re-derived (random --log-file),
+    # so a coherent receipt for another model (fingerprint and invocation id rebound,
+    # as the runtime would record them) passes the binding check; the served model is
+    # caught by the runtime's log attestation instead.
+    process = response["process_evidence"]
+    process["process_invocation_id"] = hashlib.sha256(
+        json.dumps([
+            response["task_id"],
+            process["attempt_id"],
+            process["provider"],
+            process["command_fingerprint"],
+            process["provider_input_sha256"],
+            process["working_directory_hash"],
+        ]).encode("utf-8")
+    ).hexdigest()
+    response["model_identity_status"] = "MODEL_IDENTITY_MISMATCH"
+    response["model_identity_reason"] = "resolved_model_differs"
+    response["provider_observed_model_ids"] = ["gemini-3.7-flash-medium"]
+    failed = _evaluate(runtime).failed
+    assert "online_command_fingerprint_bound_to_invocation" not in failed
+    assert "online_model_identity_attested" in failed
 
 
 def test_online_command_fingerprint_unknown_executable_fails_closed(
@@ -537,6 +562,12 @@ def test_online_command_fingerprint_unknown_executable_fails_closed(
 def test_online_invocation_id_mismatch_fails_closed(happy: dict[str, Any]) -> None:
     runtime = copy.deepcopy(happy["runtime"])
     runtime["online"]["response"]["process_evidence"]["working_directory_hash"] = "1" * 64
+    assert "online_command_fingerprint_bound_to_invocation" in _evaluate(runtime).failed
+
+
+def test_online_invocation_bound_to_canary_task_id(happy: dict[str, Any]) -> None:
+    runtime = copy.deepcopy(happy["runtime"])
+    runtime["online"]["response"]["task_id"] = "issue29-other-task"
     assert "online_command_fingerprint_bound_to_invocation" in _evaluate(runtime).failed
 
 
@@ -555,6 +586,7 @@ def test_online_wrong_executable_hash_fails_closed(happy: dict[str, Any]) -> Non
         ("provider_observed_model_ids", ["gemini-3.8-flash-medium", "gemini-3.7-flash-medium"]),
         ("provider_observed_model_labels", ["Gemini 3.7 Flash (Medium)"]),
         ("provider_observed_model_labels", []),
+        ("model_identity_reason", "backend_label_differs"),
     ],
 )
 def test_online_wrong_attested_model_in_receipt_fails_closed(
