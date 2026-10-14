@@ -1,6 +1,9 @@
 import subprocess
 import time
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 from nexus.app.nightshift_runner_service import AutoResearchNightShift, RoundOutcome, _cleanup_stale_swarm_locks
 
@@ -37,13 +40,32 @@ def init_git_repo(path: Path) -> None:
     )
 
 
+@pytest.fixture
+def governed_admission(monkeypatch):
+    """Admit the fixture Online call like tests/research/conftest.py does (#1929).
+
+    The unified runtime treats a fixture ``ask_structured`` as a physical transport, so
+    Workforce Admission needs canonical bindings, and the Gateway invocation authority
+    then requires the admitted model name (``online_model_name_mismatch`` otherwise).
+    """
+    from tests.research.conftest import ADMITTED_MODEL, _install
+
+    _install(monkeypatch, advisor_only=False)
+    return ADMITTED_MODEL
+
+
+def _program_rules_hub():
+    # e6e3dcded: AutoResearchNightShift.hub is None unless a context_hub is injected.
+    return SimpleNamespace(load_program_rules=lambda _: "keep the file correct")
+
+
 def test_resolve_target_file_from_path_task():
     shift = AutoResearchNightShift("scripts/test_repair_dummy.py", max_rounds=1)
     resolved = shift._resolve_target_file()
     assert resolved == "scripts/test_repair_dummy.py"
 
 
-def test_run_round_generates_validated_scored_candidate(tmp_path):
+def test_run_round_generates_validated_scored_candidate(tmp_path, governed_admission):
     target = tmp_path / "sample.py"
     target.write_text("def add(a, b):\n    return a - b\n", encoding="utf-8")
 
@@ -70,9 +92,15 @@ def test_run_round_generates_validated_scored_candidate(tmp_path):
             ),
         ]
     )
-    shift = AutoResearchNightShift("sample.py", max_rounds=1, gateway=gateway)
+    shift = AutoResearchNightShift(
+        "sample.py",
+        max_rounds=1,
+        gateway=gateway,
+        model_name=governed_admission,
+        fallback_model_name=governed_admission,
+        context_hub=_program_rules_hub(),
+    )
     shift.resolved_target_file = "sample.py"
-    shift.hub.load_program_rules = lambda _: "keep the file correct"
     shift.feynman_auditor.run_advisory_audit = lambda **_: {
         "status": "PASS",
         "warnings": [],
@@ -140,7 +168,7 @@ def test_run_stops_after_convergence_patience(tmp_path, monkeypatch):
     assert records == ["IMPROVED", "NO_CHANGE", "NO_CHANGE", "CONVERGED"]
 
 
-def test_run_round_rejects_ast_no_change(tmp_path):
+def test_run_round_rejects_ast_no_change(tmp_path, governed_admission):
     target = tmp_path / "sample.py"
     target.write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
 
@@ -157,7 +185,14 @@ def test_run_round_rejects_ast_no_change(tmp_path):
         ]
     )
 
-    shift = AutoResearchNightShift("sample.py", max_rounds=1, gateway=gateway)
+    shift = AutoResearchNightShift(
+        "sample.py",
+        max_rounds=1,
+        gateway=gateway,
+        model_name=governed_admission,
+        fallback_model_name=governed_admission,
+        context_hub=_program_rules_hub(),
+    )
     shift.resolved_target_file = "sample.py"
     outcome = shift._run_round(1, tmp_path)
 
