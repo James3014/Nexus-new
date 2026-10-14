@@ -711,7 +711,12 @@ class FanoutStore:
                 raise FanoutError("FANOUT_RECONCILIATION_REQUIRED")
             raise FanoutError("FANOUT_REPLAY_FORBIDDEN")
         unresolved = self._unresolved_repair_records(task_id, unit_id)
-        if any(value is None or value.get("state") != "PREPARED" for value in unresolved.values()):
+        if any(
+            value is None
+            or value.get("state") != "PREPARED"
+            or self._repair_sent_marker(str(value.get("attempt_id") or "")).exists()
+            for value in unresolved.values()
+        ):
             # Another continuation of this unit's session has no known outcome: a new
             # one would race it on the same session/workspace.  Reconcile it first.
             raise FanoutError("FANOUT_RECONCILIATION_REQUIRED")
@@ -741,6 +746,7 @@ class FanoutStore:
             "repair_ref": repair_ref,
             "repair_sha256": repair_sha256,
             "parent_receipt_id": previous_receipt.get("receipt_id"),
+            "prepare_seq": self._next_repair_seq(task_id, unit_id),
         }
         if core_binding is not None:
             # A bound continuation reuses the parent's binding; the root bound
@@ -780,23 +786,62 @@ class FanoutStore:
                 raise FanoutError("FANOUT_REPAIR_ATTEMPT_SUPERSEDED") from exc
             if on_disk != dict(attempt) or on_disk.get("state") != "PREPARED":
                 raise FanoutError("FANOUT_REPAIR_ATTEMPT_SUPERSEDED")
+            # Durable sent-marker first: once it exists the attempt may have reached
+            # the transport and can never be abandoned as "never sent".
+            marker = self._repair_sent_marker(str(attempt["attempt_id"]))
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            except FileExistsError as exc:
+                raise FanoutError("FANOUT_REPAIR_ATTEMPT_SUPERSEDED") from exc
+            os.close(fd)
             value = dict(attempt)
             value.update({"state": "DISPATCHING", "retry_safe": False})
             _atomic_json(path, value)
             return value
 
+    def _repair_sent_marker(self, attempt_id: str) -> Path:
+        return self.root / "repair-sent" / _safe_slug(attempt_id or "missing", "attempt_id")
+
+    def _next_repair_seq(self, task_id: str, unit_id: str) -> int:
+        """Monotonic per-unit prepare sequence (caller holds the per-unit lock)."""
+        path = self.root / "locks" / f"{self._unit_key(task_id, unit_id)}--repair.seq"
+        try:
+            current = int(path.read_text(encoding="utf-8").strip() or "0")
+        except FileNotFoundError:
+            current = 0
+        except (OSError, ValueError) as exc:
+            raise FanoutError("FANOUT_REPAIR_SEQUENCE_INVALID") from exc
+        nxt = current + 1
+        tmp = path.with_suffix(".seq.tmp")
+        tmp.write_text(str(nxt), encoding="utf-8")
+        os.replace(tmp, path)
+        return nxt
+
     def initial_attempt_is_bound(self, task_id: str, unit_id: str) -> bool:
-        """True when the unit's initial attempt record carries any Core binding field."""
+        """Whether the unit's initial attempt was Core-bound; fails closed.
+
+        Only an initial attempt record that exists, parses, carries this unit's
+        identity and has none of the Core fields is positively unbound.  A missing,
+        unreadable or malformed record, or a partial Core record, raises.
+        """
         path = self._attempt_path(task_id, unit_id)
-        if not path.exists():
-            return False
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
-            raise FanoutError("FANOUT_ATTEMPT_IDENTITY_MISMATCH") from exc
-        return not isinstance(value, dict) or any(
-            key in value for key in _CORE_BOUND_ATTEMPT_FIELDS
-        )
+            raise FanoutError("INITIAL_ATTEMPT_EVIDENCE_MISSING") from exc
+        if (
+            not isinstance(value, dict)
+            or value.get("schema") != DISPATCH_ATTEMPT_SCHEMA
+            or value.get("mode") != "INITIAL"
+            or value.get("task_id") != task_id
+            or value.get("unit_id") != unit_id
+        ):
+            raise FanoutError("INITIAL_ATTEMPT_EVIDENCE_MISSING")
+        present = [key for key in _CORE_BOUND_ATTEMPT_FIELDS if key in value]
+        if present and len(present) != len(_CORE_BOUND_ATTEMPT_FIELDS):
+            raise FanoutError("CORE_BINDING_ATTEMPT_RECORD_INCOMPLETE")
+        return bool(present)
 
     def existing_repair_attempt(
         self, task_id: str, unit_id: str, repair_id: str
@@ -879,11 +924,16 @@ class FanoutStore:
         unit_id = str(attempt["unit_id"])
         if state == "FAILED":
             superseded_by = attempt.get("superseded_by_attempt_id")
+            own_seq = attempt.get("prepare_seq")
             if (
                 attempt.get("transport_status") != "ABANDONED_BEFORE_DISPATCH"
                 or attempt.get("retry_safe") is not False
                 or not isinstance(superseded_by, str)
                 or not superseded_by
+                or superseded_by == attempt.get("attempt_id")
+                or type(own_seq) is not int
+                # Never sent: mark_repair_dispatching never created its marker.
+                or self._repair_sent_marker(str(attempt["attempt_id"])).exists()
             ):
                 return False
             prefix = f"{self._unit_key(task_id, unit_id)}--repair-"
@@ -892,8 +942,21 @@ class FanoutStore:
                     other = json.loads(path.read_text(encoding="utf-8"))
                 except (OSError, ValueError):
                     continue
-                if isinstance(other, dict) and other.get("attempt_id") == superseded_by:
-                    return True
+                if not isinstance(other, dict) or other.get("attempt_id") != superseded_by:
+                    continue
+                other_seq = other.get("prepare_seq")
+                return (
+                    other.get("schema") == DISPATCH_ATTEMPT_SCHEMA
+                    and other.get("mode") == "REPAIR_CONTINUE"
+                    and other.get("task_id") == task_id
+                    and other.get("unit_id") == unit_id
+                    and other.get("repair_id") == path.name[len(prefix) : -len(".json")]
+                    and other.get("repair_id") != attempt.get("repair_id")
+                    and other.get("session_id") == attempt.get("session_id")
+                    and other.get("workspace_id") == attempt.get("workspace_id")
+                    and type(other_seq) is int
+                    and other_seq > own_seq
+                )
             return False
         receipt_status = {
             "COMPLETED": "CANDIDATE_READY_FOR_VERIFICATION",
@@ -2649,7 +2712,7 @@ class AdaptiveWorkerFanoutRuntime:
             model=str(previous_receipt.get("model") or MODEL),
         )
         core_binding = _receipt_core_binding(previous_receipt)
-        if core_binding is None and self.store.initial_attempt_is_bound(task_id, unit_id):
+        if (core_binding is not None) != self.store.initial_attempt_is_bound(task_id, unit_id):
             # The parent receipt lost Core fields its unit's initial attempt recorded:
             # never continue a bound unit through the unbound path.
             raise FanoutError("CORE_BINDING_PARENT_RECEIPT_INVALID")
@@ -2793,7 +2856,7 @@ class AdaptiveWorkerFanoutRuntime:
         # never from the repair attempt record alone: a record stripped of its Core
         # fields must not downgrade a bound continuation to an unbound reconcile.
         parent_core = _receipt_core_binding(previous_receipt)
-        if parent_core is None and self.store.initial_attempt_is_bound(task_id, unit_id):
+        if (parent_core is not None) != self.store.initial_attempt_is_bound(task_id, unit_id):
             raise FanoutError("CORE_BINDING_PARENT_RECEIPT_INVALID")
         if parent_core is None:
             if any(key in attempt for key in _CORE_CONTINUATION_FIELDS):

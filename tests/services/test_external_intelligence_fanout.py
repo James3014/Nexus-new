@@ -2470,3 +2470,54 @@ def test_repair_reconcile_after_post_commit_crash_is_stuck_but_safe(tmp_path):
         runtime.reconcile_repair(initial, repair_id="r1")
     assert transport.continued == [("ua", initial["session_id"])]
     assert runtime.store.unresolved_repair_ids("task-1", "ua") == ["r1"]
+
+
+def _abandoned_pair(tmp_path: Path):
+    """r1 PREPARED (never sent) then superseded by a completed r2."""
+    runtime, transport, initial, repair, repair_sha = _repair_fixture(tmp_path)
+    runtime.store.prepare_repair(
+        initial, repair_id="r1", repair_ref=str(repair), repair_sha256=repair_sha
+    )
+    runtime.continue_repair(
+        initial, repair_id="r2", repair_ref=str(repair), repair_sha256=repair_sha
+    )
+    store = runtime.store
+    assert store.unresolved_repair_ids("task-1", "ua") == []
+    return store, store.attempts / "task-1--ua--repair-r1.json"
+
+
+def _rewrite(path: Path, **fields) -> None:
+    value = dict(json.loads(path.read_text(encoding="utf-8")), **fields)
+    path.write_text(json.dumps(value), encoding="utf-8")
+
+
+def test_abandoned_repair_self_superseding_is_unresolved(tmp_path):
+    store, r1 = _abandoned_pair(tmp_path)
+    own_id = json.loads(r1.read_text(encoding="utf-8"))["attempt_id"]
+    _rewrite(r1, superseded_by_attempt_id=own_id)
+    assert store.unresolved_repair_ids("task-1", "ua") == ["r1"]
+
+
+def test_abandoned_repair_needs_existing_later_superseding_attempt(tmp_path):
+    store, r1 = _abandoned_pair(tmp_path)
+    original = r1.read_text(encoding="utf-8")
+    _rewrite(r1, superseded_by_attempt_id="no-such-attempt")
+    assert store.unresolved_repair_ids("task-1", "ua") == ["r1"]
+    # Superseding attempt prepared earlier than (or with no order relative to) r1.
+    r1.write_text(original, encoding="utf-8")
+    _rewrite(r1, prepare_seq=99)
+    assert store.unresolved_repair_ids("task-1", "ua") == ["r1"]
+    r1.write_text(original, encoding="utf-8")
+    _rewrite(r1, prepare_seq="1")
+    assert store.unresolved_repair_ids("task-1", "ua") == ["r1"]
+    r1.write_text(original, encoding="utf-8")
+    assert store.unresolved_repair_ids("task-1", "ua") == []
+
+
+def test_abandoned_repair_with_sent_marker_is_unresolved(tmp_path):
+    store, r1 = _abandoned_pair(tmp_path)
+    own_id = json.loads(r1.read_text(encoding="utf-8"))["attempt_id"]
+    marker = store._repair_sent_marker(own_id)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("", encoding="utf-8")
+    assert store.unresolved_repair_ids("task-1", "ua") == ["r1"]

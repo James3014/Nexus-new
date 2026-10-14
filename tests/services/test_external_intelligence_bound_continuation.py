@@ -831,3 +831,37 @@ def test_bound_unit_continue_with_stripped_parent_receipt_is_blocked(tmp_path, m
         _continue(ctx, stripped)
     assert [call for call in ctx.calls if call["operation"] == "worker_continue"] == []
     assert not (ctx.store.attempts / "task-1--u1--repair-d001.json").exists()
+
+
+@pytest.mark.parametrize("initial_evidence", ["missing", "garbage", "foreign"])
+def test_missing_initial_attempt_evidence_blocks_repair_paths(
+    tmp_path, monkeypatch, initial_evidence
+):
+    ctx = _bound_open_swe(tmp_path, monkeypatch)
+    initial_path = ctx.store.attempts / "task-1--u1--initial.json"
+    if initial_evidence == "missing":
+        initial_path.unlink()
+    elif initial_evidence == "garbage":
+        initial_path.write_text("{not json", encoding="utf-8")
+    else:
+        value = dict(json.loads(initial_path.read_text("utf-8")), unit_id="u9")
+        initial_path.write_text(json.dumps(value), encoding="utf-8")
+    stripped = {
+        key: value
+        for key, value in ctx.receipt.items()
+        if key
+        not in {
+            "bound_envelope_ref",
+            "bound_envelope_sha256",
+            "core_binding_status",
+            "core_binding_hash",
+            "acceptance_contract_hash",
+        }
+    }
+    for parent in (stripped, ctx.receipt):
+        with pytest.raises(FanoutError, match="INITIAL_ATTEMPT_EVIDENCE_MISSING"):
+            _continue(ctx, parent)
+        with pytest.raises(FanoutError):
+            ctx.runtime.reconcile_repair(parent, repair_id="d001")
+    assert [c for c in ctx.calls if c["operation"] in {"worker_continue", "worker_reconcile"}] == []
+    assert not (ctx.store.attempts / "task-1--u1--repair-d001.json").exists()
