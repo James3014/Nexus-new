@@ -951,9 +951,10 @@ CASES: tuple[GoldenCase, ...] = (
         "Same-task Online consumes exact Local evidence",
         "invariant",
         "partial_state",
-        "Online execution must consume the exact identity-bound Local result; adjacent executions are insufficient.",
+        "The #29 governed canary credits Online consumption only when the runtime receipt binds the exact task/attempt/source Local result; adjacent, stale or missing Local evidence fails closed. Physical proof (receipt sha256 5eaf89fdd25bbce78d5ea0876277899592ad094e1c8ce53cafe46e5a33aab667, independently reviewed with limits) is recorded on #29, not re-run in CI.",
         (
             "https://github.com/James3014/Nexus-new/issues/29",
+            "https://github.com/James3014/Nexus-new/issues/29#issuecomment-6161996492",
             "scripts/ops/issue29_governed_canary.py",
         ),
         (
@@ -1002,7 +1003,7 @@ CASES: tuple[GoldenCase, ...] = (
         "World A final claims bind evidence",
         "security",
         "authority_conflict",
-        "Final natural-language verification and absence claims must be bound to evidence or downgraded to not verified.",
+        "No World A task surface (root receipt, MCP task_run, nexus run) delivers ungated final-answer text; any future text delivery path must consume the existing claim/delivery verdict and bind or downgrade claims (reopen #49).",
         (
             "https://github.com/James3014/Nexus-new/issues/40",
             "https://github.com/James3014/Nexus-new/issues/49",
