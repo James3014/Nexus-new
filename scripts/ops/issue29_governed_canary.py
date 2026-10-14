@@ -101,18 +101,16 @@ VERIFIER_COMMAND = (
 
 TRANSPORT_OVERRIDE_ENV = (
     "NEXUS_OLLAMA_URL",
-    # Other Ollama endpoint/model selectors read by host or runtime code (#2160).
-    "NEXUS_OLLAMA_ENDPOINT",
-    "OLLAMA_HOST",
-    "NEXUS_OLLAMA_API_TYPE",
-    "NEXUS_OLLAMA_MODEL",
-    "NEXUS_OLLAMA_SMALL_MODEL",
-    "NEXUS_OLLAMA_LARGE_MODEL",
-    "NEXUS_OLLAMA_WORKER_MODEL",
     "NEXUS_AGY_BIN",
     "NEXUS_AGY_EXECUTABLE",
     "NEXUS_AGY_COMMAND",
 )
+
+# Any variable with these prefixes can redirect the local call or swap the
+# local model/provider (NEXUS_LOCAL_MODEL_EXECUTOR_MODEL, NEXUS_LOCAL_MODEL_NAME,
+# NEXUS_OLLAMA_ENDPOINT, OLLAMA_HOST, ...). Matching by prefix keeps new
+# selectors covered without maintaining a list (#2160).
+TRANSPORT_OVERRIDE_ENV_PREFIXES = ("NEXUS_OLLAMA_", "NEXUS_LOCAL_MODEL", "OLLAMA_")
 
 STATUS_PASS = "PASS"
 STATUS_FAILED = "FAILED"
@@ -342,6 +340,38 @@ def _real_memory_pressure_level() -> int:
         return int(result.stdout.strip())
     except (OSError, ValueError):
         return 0
+
+
+def transport_overrides(
+    runtime_env: Mapping[str, str], shell_env: Mapping[str, str]
+) -> dict[str, str]:
+    """Provider/endpoint/model selectors set in the runtime env or the shell."""
+    keys = {
+        key
+        for key in (*runtime_env, *shell_env)
+        if key in TRANSPORT_OVERRIDE_ENV or key.startswith(TRANSPORT_OVERRIDE_ENV_PREFIXES)
+    }
+    return {
+        key: str(runtime_env.get(key) or shell_env.get(key))
+        for key in sorted(keys)
+        if runtime_env.get(key) or shell_env.get(key)
+    }
+
+
+def local_endpoint(runtime_env: Mapping[str, str], shell_env: Mapping[str, str]) -> dict[str, Any]:
+    """Record the local Ollama URL override, if any, next to the default.
+
+    Without an override the local provider calls DEFAULT_LOCAL_OLLAMA_BASE
+    (/api/generate or /api/chat). With one, call sites differ (some ignore a
+    URL lacking "/api/"), so the raw value is recorded rather than a guessed
+    resolution; any override already makes the receipt marker-ineligible.
+    """
+    override = runtime_env.get("NEXUS_OLLAMA_URL") or shell_env.get("NEXUS_OLLAMA_URL")
+    return {
+        "default_base": DEFAULT_LOCAL_OLLAMA_BASE,
+        "override": str(override) if override else None,
+        "uses_default": not override,
+    }
 
 
 def real_host_probes() -> HostProbes:
@@ -1020,16 +1050,8 @@ def run_canary(
     receipt["runtime_env"] = {key: env[key] for key in sorted(env)}
     # Any provider-endpoint override (fake transports in tests, or an operator
     # shell variable) makes the receipt ineligible for the durable marker.
-    receipt["transport_overrides"] = {
-        key: (env.get(key) or os.environ.get(key))
-        for key in TRANSPORT_OVERRIDE_ENV
-        if env.get(key) or os.environ.get(key)
-    }
-    override_url = env.get("NEXUS_OLLAMA_URL") or os.environ.get("NEXUS_OLLAMA_URL")
-    receipt["local_endpoint"] = {
-        "resolved": override_url or DEFAULT_LOCAL_OLLAMA_BASE,
-        "source": "NEXUS_OLLAMA_URL" if override_url else "default",
-    }
+    receipt["transport_overrides"] = transport_overrides(env, os.environ)
+    receipt["local_endpoint"] = local_endpoint(env, os.environ)
     if executor is None:
         from nexus.engine.canonical_task_seam import execute_canonical_product_task
 

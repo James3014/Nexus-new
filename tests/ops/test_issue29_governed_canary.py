@@ -210,20 +210,45 @@ def test_happy_path_records_consumption_and_contribution(happy: dict[str, Any]) 
 
 def test_happy_path_records_local_endpoint(happy: dict[str, Any]) -> None:
     endpoint = happy["receipt"]["local_endpoint"]
-    assert endpoint["source"] == "NEXUS_OLLAMA_URL"
-    assert endpoint["resolved"].startswith("http://127.0.0.1:")
+    assert endpoint["uses_default"] is False
+    assert endpoint["override"].startswith("http://127.0.0.1:")
+    assert endpoint["default_base"] == canary.DEFAULT_LOCAL_OLLAMA_BASE
+
+
+def test_local_endpoint_without_override_uses_default() -> None:
+    assert canary.local_endpoint({}, {}) == {
+        "default_base": "http://127.0.0.1:11434",
+        "override": None,
+        "uses_default": True,
+    }
 
 
 @pytest.mark.parametrize(
     "name",
-    ["NEXUS_OLLAMA_ENDPOINT", "OLLAMA_HOST", "NEXUS_OLLAMA_MODEL", "NEXUS_OLLAMA_SMALL_MODEL"],
+    [
+        "NEXUS_LOCAL_MODEL_EXECUTOR_MODEL",
+        "NEXUS_LOCAL_MODEL_NAME",
+        "NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER",
+        "NEXUS_OLLAMA_ENDPOINT",
+        "NEXUS_OLLAMA_ACTIVE_MODEL",
+        "OLLAMA_HOST",
+    ],
 )
-def test_ollama_endpoint_or_model_env_is_recorded_as_override(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+def test_local_model_or_endpoint_selector_is_an_override(name: str) -> None:
+    assert canary.transport_overrides({}, {name: "elsewhere"}) == {name: "elsewhere"}
+    assert canary.transport_overrides({name: "elsewhere"}, {}) == {name: "elsewhere"}
+
+
+def test_unrelated_env_is_not_an_override() -> None:
+    assert canary.transport_overrides({"NEXUS_ARMOR_ARTIFACT_ROOT": "/x"}, {"HOME": "/h"}) == {}
+
+
+def test_shell_selector_makes_physical_receipt_marker_ineligible(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv(name, "http://127.0.0.1:9/elsewhere")
+    monkeypatch.setenv("NEXUS_LOCAL_MODEL_EXECUTOR_MODEL", "qwen3.5:9b")
     receipt, _ollama, _log = _run(tmp_path, monkeypatch)
-    assert receipt["transport_overrides"][name] == "http://127.0.0.1:9/elsewhere"
+    assert receipt["transport_overrides"]["NEXUS_LOCAL_MODEL_EXECUTOR_MODEL"] == "qwen3.5:9b"
     assert receipt["durable_marker_eligible"] is False
 
 
