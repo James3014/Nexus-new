@@ -21,7 +21,7 @@ def test_planner_does_not_inject_diagnosis_committee_enabled():
         "NEXUS_LOCAL_MODEL_EXECUTOR_MODEL": "qwen2.5-coder:7b-instruct",
         "NEXUS_C15_PRIMARY_PROPOSER_MODEL": "qwen2.5-coder:7b-instruct",
         "NEXUS_C15_SECONDARY_PROPOSER_MODEL": "deepseek-coder:6.7b-instruct",
-        "NEXUS_C15_JUDGE_MODEL": "qwen2.5-s2t-advisor:3b",
+        "NEXUS_C15_JUDGE_MODEL": "qwen3.5:9b",
     }
     with patch.dict(os.environ, env_vars, clear=False):
         planner = CapabilityPlanner()

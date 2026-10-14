@@ -188,7 +188,7 @@ def test_capability_planner_injects_committee_model_specs():
         "NEXUS_LOCAL_MODEL_EXECUTOR_MODEL": "qwen2.5-coder:7b-instruct",
         "NEXUS_C15_PRIMARY_PROPOSER_MODEL": "qwen2.5-coder:7b-instruct",
         "NEXUS_C15_SECONDARY_PROPOSER_MODEL": "deepseek-coder:6.7b-instruct",
-        "NEXUS_C15_JUDGE_MODEL": "qwen2.5-s2t-advisor:3b",
+        "NEXUS_C15_JUDGE_MODEL": "qwen3.5:9b",
     }
     with patch.dict(os.environ, env_vars, clear=False):
         planner = CapabilityPlanner()
@@ -207,7 +207,7 @@ def test_capability_planner_injects_committee_model_specs():
         assert ss["proposer_specs"][0]["role"] == "primary"
         assert ss["proposer_specs"][1]["model"] == "deepseek-coder:6.7b-instruct"
         assert ss["proposer_specs"][1]["role"] == "secondary"
-        assert ss["judge_model"] == "qwen2.5-s2t-advisor:3b"
+        assert ss["judge_model"] == "qwen3.5:9b"
 
 
 def test_capability_planner_injects_delegated_retry_candidates():

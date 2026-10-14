@@ -2803,10 +2803,12 @@ def test_capability_planner_local_committee_topology_metadata(monkeypatch):
     assert snapshot.get("execution_topology") == "ASSISTED_CANONICAL"
     assert snapshot.get("executor_topology") == "local_committee_only"
     assert snapshot.get("committee_profile") == "qwen_3b_judge_plus_qwen_7b_plus_deepseek_6_7b"
-    # nexus-runtime #188/#184: the committee judge default comes from Workforce policy;
-    # the 3B judge is retired, so the committee fails closed instead of running.
-    assert snapshot.get("local_committee_enabled") is False
-    assert snapshot.get("committee_judge_error_code") == "MODEL_DEFAULT_NOT_ADMITTED"
+    # nexus-runtime #188/#184: the committee judge default comes from Workforce policy.
+    # nexus-runtime #202 admits qwen3.5:9b (routing.local_first.committee_judge), so the
+    # committee is enabled again with that judge; the retired 3B is never selected.
+    assert snapshot.get("local_committee_enabled") is True
+    assert snapshot.get("judge_model") == "qwen3.5:9b"
+    assert "committee_judge_error_code" not in snapshot
 
 
 # ── P0-T1: execution_depth contract tests ──────────────────────────────────
