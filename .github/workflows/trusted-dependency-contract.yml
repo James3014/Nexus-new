@@ -1,0 +1,89 @@
+name: Trusted dependency contract
+
+# #2156: the pyproject.toml/uv.lock anchor rule, split out of "Trusted controller
+# (default branch)" so it is not hidden behind the retired merge-lane gate (#2006).
+# pull_request_target always runs this file and the scripts it names from the
+# default branch. PR-head content is only read as Git objects in a bare repo:
+# never checked out, imported or executed. The PR body is never read.
+# 'edited' is kept so a base-branch retarget re-evaluates the merge-base.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  trusted-dependency-contract:
+    name: Trusted dependency contract (default branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Acquire exact trusted source and check the dependency contract
+        env:
+          EVENT_JSON: ${{ toJSON(github.event) }}
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          RUN_ID: ${{ github.run_id }}
+          REPOSITORY: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          TRUSTED_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          fail() { echo "trusted dependency contract: $*" >&2; exit 1; }
+          trap 'echo "trusted dependency contract: command failed with exit $? at line $LINENO" >&2' ERR
+          bare_repo="$RUNNER_TEMP/trusted-dependency-contract.git"
+          trusted_dir="$RUNNER_TEMP/trusted-dependency-contract-source"
+          workflow_path='.github/workflows/trusted-dependency-contract.yml'
+          [ "$EVENT_NAME" = pull_request_target ] || fail "event is not pull_request_target"
+          [ "$REPOSITORY" = James3014/Nexus-new ] || fail "unexpected repository"
+          [ "$DEFAULT_BRANCH" = main ] || fail "default branch is not main"
+          [ "$WORKFLOW_REF" = "$REPOSITORY/$workflow_path@refs/heads/$DEFAULT_BRANCH" ] || fail "workflow ref is not the default-branch workflow"
+          [[ "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]] || fail "workflow sha is not a full lowercase SHA"
+          basic_auth="$(printf 'x-access-token:%s' "$TRUSTED_TOKEN" | base64 | tr -d '\n')"
+          [ -n "$basic_auth" ] || fail "empty token header"
+          git init --bare "$bare_repo"
+          git -C "$bare_repo" remote add origin "https://github.com/$REPOSITORY.git"
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader GIT_CONFIG_VALUE_0="Authorization: basic $basic_auth" \
+            git -C "$bare_repo" fetch --no-tags --depth=1 origin "$WORKFLOW_SHA"
+          [ "$(git -C "$bare_repo" rev-parse "$WORKFLOW_SHA^{commit}")" = "$WORKFLOW_SHA" ] || fail "fetched workflow commit does not match the workflow sha"
+          [ "$(git -C "$bare_repo" cat-file -t "$WORKFLOW_SHA")" = commit ] || fail "workflow sha is not a commit object"
+          for path in scripts/__init__.py scripts/ops/__init__.py scripts/ops/trusted_deletion_anchor.py scripts/ops/trusted_dependency_contract.py; do
+            blob_id="$(git -C "$bare_repo" rev-parse "$WORKFLOW_SHA:$path")"
+            # Regular files only; never symlinks or gitlinks.
+            entry="$(git -C "$bare_repo" ls-tree "$WORKFLOW_SHA" -- "$path")"
+            [ "$entry" = "100644 blob $blob_id"$'\t'"$path" ] || fail "trusted source $path is not a regular 100644 blob"
+            [ "$(git -C "$bare_repo" cat-file -t "$blob_id")" = blob ] || fail "trusted source $path is not a blob object"
+            mkdir -p "$trusted_dir/$(dirname "$path")"
+            git -C "$bare_repo" cat-file blob "$blob_id" > "$trusted_dir/$path"
+            [ "$(git hash-object "$trusted_dir/$path")" = "$blob_id" ] || fail "extracted $path does not hash to its blob"
+          done
+          python -I -c 'import json, os; event=json.loads(os.environ["EVENT_JSON"]); event.update(event_name=os.environ["EVENT_NAME"], workflow_ref=os.environ["WORKFLOW_REF"], workflow_sha=os.environ["WORKFLOW_SHA"], run_id=int(os.environ["RUN_ID"])); json.dump(event, open(os.environ["RUNNER_TEMP"] + "/dependency-contract-event.json", "w"))'
+          status=0
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader GIT_CONFIG_VALUE_0="Authorization: basic $basic_auth" \
+            python -I -B "$trusted_dir/scripts/ops/trusted_dependency_contract.py" check \
+              --event-json "$RUNNER_TEMP/dependency-contract-event.json" \
+              --repo-root "$bare_repo" \
+              --output "$RUNNER_TEMP/dependency-contract-result.json" || status=$?
+          {
+            echo "## Trusted dependency contract"
+            echo '```json'
+            cat "$RUNNER_TEMP/dependency-contract-result.json" 2>/dev/null || echo '{"status":"FAIL","reason_code":"NO_VERDICT"}'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+      - name: Cleanup trusted dependency contract source
+        if: always()
+        run: |
+          set -euo pipefail
+          rm -rf -- "$RUNNER_TEMP/trusted-dependency-contract.git" "$RUNNER_TEMP/trusted-dependency-contract-source"
+          test ! -e "$RUNNER_TEMP/trusted-dependency-contract.git"
+          test ! -e "$RUNNER_TEMP/trusted-dependency-contract-source"

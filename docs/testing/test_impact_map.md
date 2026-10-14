@@ -180,6 +180,8 @@
 | scripts/ops/ultra_gate.py | tests/ops/test_ultra_gate.py | active | high | governance |
 | scripts/ops/trusted_deletion_anchor.py | tests/ops/test_trusted_deletion_anchor.py, tests/ops/test_trusted_deletion_anchor_pr960.py, tests/ops/test_trusted_deletion_anchor_tempdir_cleanup.py | active | high | trusted_deletion_anchor_verifier_contract |
 | scripts/ops/trusted_impact_gate.py | tests/ops/test_trusted_impact_gate.py, tests/ops/test_pr_impact_gate.py | active | high | trusted_impact_gate_verifier_contract |
+| scripts/ops/trusted_dependency_contract.py | tests/ops/test_trusted_dependency_contract.py, tests/ops/test_trusted_deletion_anchor.py | active | high | trusted_dependency_contract_check |
+| tests/ops/test_trusted_dependency_contract.py | tests/ops/test_trusted_dependency_contract.py | active | high | test_contract |
 | tests/ops/test_trusted_deletion_anchor_tempdir_cleanup.py | tests/ops/test_trusted_deletion_anchor_tempdir_cleanup.py | active | high | test_contract |
 | nexus/config/governance_manifest.json | tests/governance/test_audit_gate_honesty.py, tests/test_iron_gate_governance.py | active | high | governance_seal_manifest |
 | nexus/delivery/replay_runner.py | tests/governance/test_audit_gate_honesty.py, tests/governance/test_replay_runner_allowlist.py, tests/test_iron_gate_governance.py | active | high | replay_runner_allowlist |
