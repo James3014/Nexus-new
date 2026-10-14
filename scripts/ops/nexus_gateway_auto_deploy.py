@@ -312,6 +312,22 @@ class Host:
             )
         return lock
 
+    def r1_recovery_block(self, cfg: Config) -> Optional[str]:
+        """Why an open #526 R1 recovery forbids a Gateway effect now, else None.
+
+        Delegates to the manager's own ``open_r1_recovery_blocks_effect`` on its
+        own ledger (fail closed on a corrupt, locked or missing-with-history
+        ledger).  Callers hold ``GATEWAY_LOCK`` first (lock order GATEWAY_LOCK
+        then ledger), so no R1 request can start between check and effect.
+        """
+        from scripts.ops import mcp_gateway_durable as durable
+
+        try:
+            self.manager_lock_path(cfg)  # same state root as this gateway
+            return durable.open_r1_recovery_blocks_effect(ledger=Path(durable.GATEWAY_LEDGER))
+        except Exception as exc:  # noqa: BLE001 - an unknown R1 state blocks
+            return f"R1_CHECK_FAILED:{type(exc).__name__}:{exc}"[:300]
+
     @contextlib.contextmanager
     def manager_lock(self, cfg: Config) -> Iterator[None]:
         """Hold the #526 manager's ledger lock so a manual rebind cannot interleave."""
@@ -670,10 +686,15 @@ def pin_bumps_in_flight(
     A pin-bump PR that was created, last committed and last pushed more than
     ``PIN_BUMP_MAX_AGE_SECONDS`` ago is treated as abandoned and does not block, but it is never silent: it is
     listed in ``ignored_stale`` and as a ``STALE_PIN_PR_IGNORED #N`` warning.
+    A draft pin-bump PR cannot merge, so it cannot race a deploy: it is listed in
+    ``ignored_draft`` / ``DRAFT_PIN_PR_IGNORED #N`` instead of blocking.  The
+    re-check right before the switch applies the same rule, so a draft marked
+    ready mid-cycle blocks the switch.
     """
     now = time.time() if now is None else now
     hits: List[int] = []
     stale: List[int] = []
+    drafts: List[int] = []
     try:
         for pr in _paged(api_get, f"repos/{repo}/pulls?state=open"):
             label = f"{pr.get('title') or ''} {(pr.get('head') or {}).get('ref') or ''}"
@@ -683,7 +704,9 @@ def pin_bumps_in_flight(
             )
             if not is_pin:
                 continue
-            if _is_stale_pin_pr(api_get, repo, pr, now):
+            if pr.get("draft") is True:
+                drafts.append(pr["number"])
+            elif _is_stale_pin_pr(api_get, repo, pr, now):
                 stale.append(pr["number"])
             else:
                 hits.append(pr["number"])
@@ -693,7 +716,9 @@ def pin_bumps_in_flight(
         "verdict": "IN_FLIGHT" if hits else "CLEAR",
         "pull_requests": sorted(hits),
         "ignored_stale": sorted(stale),
-        "warnings": [f"STALE_PIN_PR_IGNORED #{n}" for n in sorted(stale)],
+        "ignored_draft": sorted(drafts),
+        "warnings": [f"STALE_PIN_PR_IGNORED #{n}" for n in sorted(stale)]
+        + [f"DRAFT_PIN_PR_IGNORED #{n}" for n in sorted(drafts)],
     }
 
 
