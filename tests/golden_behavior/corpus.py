@@ -952,9 +952,16 @@ CASES: tuple[GoldenCase, ...] = (
         "invariant",
         "partial_state",
         "Online execution must consume the exact identity-bound Local result; adjacent executions are insufficient.",
-        ("https://github.com/James3014/Nexus-new/issues/29",),
-        status="finding",
-        finding_id="GBF-003",
+        (
+            "https://github.com/James3014/Nexus-new/issues/29",
+            "scripts/ops/issue29_governed_canary.py",
+        ),
+        (
+            "tests/ops/test_issue29_governed_canary.py::test_happy_path_records_consumption_and_contribution",
+            "tests/ops/test_issue29_governed_canary.py::test_stale_local_evidence_wrong_attempt_fails_closed",
+            "tests/ops/test_issue29_governed_canary.py::test_stale_local_evidence_wrong_task_fails_closed",
+            "tests/ops/test_issue29_governed_canary.py::test_missing_local_evidence_fails_closed",
+        ),
     ),
     _c(
         "GB-079",
@@ -1000,8 +1007,11 @@ CASES: tuple[GoldenCase, ...] = (
             "https://github.com/James3014/Nexus-new/issues/40",
             "https://github.com/James3014/Nexus-new/issues/49",
         ),
-        status="finding",
-        finding_id="GBF-005",
+        (
+            "tests/engine/test_world_a_no_ungated_final_text.py::test_root_receipt_does_not_carry_online_model_text",
+            "tests/engine/test_world_a_no_ungated_final_text.py::test_mcp_task_run_does_not_return_online_model_text",
+            "tests/engine/test_world_a_no_ungated_final_text.py::test_nexus_run_does_not_print_or_report_online_model_text",
+        ),
     ),
     _c(
         "GB-081",
@@ -1321,7 +1331,5 @@ CASES: tuple[GoldenCase, ...] = (
 
 FINDINGS = {
     "GBF-002": "Owner Issue #12 was closed as completed on 2026-08-17, but live Gateway identity cannot be witnessed in CI, so this case stays a finding under #117. RUNTIME_IDENTITY_PROBE gb077_live_gateway_identity (read-only GET of the loopback Gateway /health) now compares the loaded repo_head_at_start/repo_head_current/git_head to the exact clean evaluated source revision and fails closed on unreachable, missing, malformed, drifted or mismatched identity. Latest host observation 2026-10-13: FAIL, the loaded Gateway reported 10d6dcea78989939479a42e16e1e44b9c59b91af (reload_required=false) against evaluated main 25d68178cc53079822d0002673f752c536ab56ef. The probe does not witness action manifest, permission policy, worker identity or negative controls, so even a PASS cannot promote this finding.",
-    "GBF-003": "Issue #29 states same-task Online consumption of exact Local evidence remains unproven.",
-    "GBF-005": "Issue #40 proved the World A final-response enforcement gap; READY Issue #49 remains blocked on #29 before bounded implementation.",
     "GBF-007": "As of 2026-10-12, nexus_task_card_create and nexus_owner_standing_grant_issue in nexus/orchestrator/unified_mcp_gateway.py neither require nor check a prior nexus_project_entry result and project_binding_hash has no consumer, so the #842 Project Entry precondition is agent instruction only (owner #1750 defers project-entry binding to Phase 2).",
 }
