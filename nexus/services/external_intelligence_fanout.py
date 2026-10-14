@@ -646,6 +646,10 @@ class FanoutStore:
             if value.get("state") in {"PREPARED", "DISPATCHING", "OUTCOME_UNKNOWN"}:
                 raise FanoutError("FANOUT_RECONCILIATION_REQUIRED")
             raise FanoutError("FANOUT_REPLAY_FORBIDDEN")
+        if self.unresolved_repair_ids(task_id, unit_id):
+            # Another continuation of this unit's session has no known outcome: a new
+            # one would race it on the same session/workspace.  Reconcile it first.
+            raise FanoutError("FANOUT_RECONCILIATION_REQUIRED")
         session_id = str(previous_receipt.get("session_id") or "")
         self.assert_session_owner(
             session_id,
@@ -679,6 +683,38 @@ class FanoutStore:
             attempt.update({key: str(core_binding[key]) for key in _CORE_CONTINUATION_FIELDS})
         _atomic_json(path, attempt)
         return attempt
+
+    def existing_repair_attempt(
+        self, task_id: str, unit_id: str, repair_id: str
+    ) -> dict[str, Any] | None:
+        suffix = f"repair-{_safe_slug(repair_id, 'repair_id')}"
+        path = self._attempt_path(
+            _safe_slug(task_id, "task_id"), _safe_slug(unit_id, "unit_id"), suffix
+        )
+        if not path.exists():
+            return None
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if (
+            value.get("schema") != DISPATCH_ATTEMPT_SCHEMA
+            or value.get("mode") != "REPAIR_CONTINUE"
+            or value.get("task_id") != task_id
+            or value.get("unit_id") != unit_id
+            or value.get("repair_id") != repair_id
+        ):
+            raise FanoutError("FANOUT_ATTEMPT_IDENTITY_MISMATCH")
+        return value
+
+    def unresolved_repair_ids(self, task_id: str, unit_id: str) -> list[str]:
+        """Repair ids of this unit whose continuation outcome is not yet known."""
+        prefix = f"{self._unit_key(task_id, unit_id)}--repair-"
+        if not self.attempts.is_dir():
+            return []
+        unresolved: list[str] = []
+        for path in sorted(self.attempts.glob(f"{prefix}*.json")):
+            value = json.loads(path.read_text(encoding="utf-8"))
+            if value.get("state") in {"PREPARED", "DISPATCHING", "OUTCOME_UNKNOWN"}:
+                unresolved.append(str(value.get("repair_id") or ""))
+        return unresolved
 
     def bound_envelope_path(self, task_id: str, unit_id: str, attempt_id: str) -> Path:
         attempt_key = _safe_slug(attempt_id, "attempt_id")
@@ -2469,6 +2505,112 @@ class AdaptiveWorkerFanoutRuntime:
                 artifact_path=str(repair_path),
                 workspace_path=workspace.path,
             )
+        return self._finalize_repair(
+            previous_receipt,
+            attempt,
+            result,
+            transport=transport,
+            workspace=workspace,
+            repair_id=repair_id,
+        )
+
+    def reconcile_repair(
+        self, previous_receipt: Mapping[str, Any], *, repair_id: str
+    ) -> dict[str, Any]:
+        """Reconcile-only recovery of a repair continuation with no known outcome.
+
+        Mirrors the initial-dispatch reconcile: it never starts a new continuation,
+        asks the transport only about the attempt's recorded operation id, and leaves
+        the attempt OUTCOME_UNKNOWN (raising) whenever the outcome cannot be proven.
+        A transport without operation ids cannot tell the repair turn from the
+        parent's turn in the same session, so it is refused.
+        """
+        if previous_receipt.get("schema") != WORKER_RECEIPT_SCHEMA:
+            raise FanoutError("INVALID_PARENT_RECEIPT")
+        task_id = _safe_slug(previous_receipt.get("task_id"), "task_id")
+        unit_id = _safe_slug(previous_receipt.get("unit_id"), "unit_id")
+        repair_id = _safe_slug(repair_id, "repair_id")
+        attempt = self.store.existing_repair_attempt(task_id, unit_id, repair_id)
+        if attempt is None or attempt.get("state") not in {"DISPATCHING", "OUTCOME_UNKNOWN"}:
+            raise FanoutError("FANOUT_RECONCILIATION_REQUIRED")
+        for attempt_field, receipt_field in (
+            ("parent_receipt_id", "receipt_id"),
+            ("session_id", "session_id"),
+            ("workspace_id", "workspace_id"),
+            ("workspace_path", "workspace_path"),
+            ("expected_head", "candidate_commit"),
+        ):
+            if not attempt.get(attempt_field) or attempt.get(attempt_field) != previous_receipt.get(
+                receipt_field
+            ):
+                raise FanoutError("REPAIR_RECONCILE_BINDING_MISMATCH")
+        transport = self._transport_for_unit(previous_receipt)
+        if (
+            previous_receipt.get("model") != getattr(transport, "model", MODEL)
+            or previous_receipt.get("provider_id") != getattr(transport, "provider_id", PROVIDER_ID)
+            or previous_receipt.get("model_id") != getattr(transport, "model_id", MODEL_ID)
+        ):
+            raise FanoutError("MODEL_SUBSTITUTION_FORBIDDEN")
+        if not hasattr(transport, "prepare_operation_id"):
+            raise FanoutError("OPERATION_ID_REQUIRED")
+        operation_id = attempt.get("operation_id")
+        if not isinstance(operation_id, str) or _SHA256_RE.fullmatch(operation_id) is None:
+            raise FanoutError("OPERATION_ID_REQUIRED")
+        workspace = WorkspaceLease(
+            workspace_id=str(attempt["workspace_id"]),
+            path=str(attempt["workspace_path"]),
+            expected_base_sha=str(attempt["expected_head"]),
+        )
+        self.store.assert_session_owner(
+            str(attempt["session_id"]),
+            task_id=task_id,
+            unit_id=unit_id,
+            workspace_id=workspace.workspace_id,
+            selected_worker=previous_receipt.get("selected_worker"),
+            provider=str(previous_receipt.get("provider") or PROVIDER),
+            model=str(previous_receipt.get("model") or MODEL),
+        )
+        core_hashes = _attempt_core_hashes(attempt)
+        if core_hashes is not None:
+            if not getattr(transport, "supports_core_mutation_binding", False):
+                raise FanoutError("CORE_BINDING_TRANSPORT_UNSUPPORTED")
+            result: OpenCodeRunResult = transport.reconcile_workspace(
+                workspace_path=workspace.path,
+                operation_id=operation_id,
+                core_binding={
+                    "core_binding_hash": core_hashes[0],
+                    "acceptance_contract_hash": core_hashes[1],
+                },
+            )
+        else:
+            result = transport.reconcile_workspace(
+                workspace_path=workspace.path, operation_id=operation_id
+            )
+        return self._finalize_repair(
+            previous_receipt,
+            attempt,
+            result,
+            transport=transport,
+            workspace=workspace,
+            repair_id=repair_id,
+        )
+
+    def _finalize_repair(
+        self,
+        previous_receipt: Mapping[str, Any],
+        attempt: Mapping[str, Any],
+        result: OpenCodeRunResult,
+        *,
+        transport: Any,
+        workspace: WorkspaceLease,
+        repair_id: str,
+    ) -> dict[str, Any]:
+        task_id = _safe_slug(previous_receipt.get("task_id"), "task_id")
+        unit_id = _safe_slug(previous_receipt.get("unit_id"), "unit_id")
+        suffix = f"repair-{_safe_slug(repair_id, 'repair_id')}"
+        transport_provider_id = getattr(transport, "provider_id", PROVIDER_ID)
+        transport_model_id = getattr(transport, "model_id", MODEL_ID)
+        expected_core = _attempt_core_hashes(attempt)
         if result.status != "COMPLETED" or result.session_id != previous_receipt["session_id"]:
             self.store.finish_attempt(
                 attempt,

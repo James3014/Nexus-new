@@ -2100,3 +2100,138 @@ def test_eia_worker_identity_is_deterministic_and_sanitized():
     assert first["worker_id"] == "w 1"
     for value in first.values():
         assert "\n" not in value and "<" not in value and ">" not in value
+
+
+class _RepairReconcileTransport(EditingTransport):
+    """Operation-id transport whose first continuation ends OUTCOME_UNKNOWN."""
+
+    PARENT_OP, CHILD_OP = "a" * 64, "b" * 64
+
+    def __init__(self, reconcile_status: str = "COMPLETED"):
+        super().__init__()
+        self.reconcile_status = reconcile_status
+        self.reconciled: list[str] = []
+
+    def prepare_operation_id(self, *args, **kwargs):
+        return self.PARENT_OP if args[0] == "worker_run" else self.CHILD_OP
+
+    def continue_session(self, **kwargs):
+        operation_id = kwargs.pop("operation_id", None)
+        assert operation_id == self.CHILD_OP
+        completed = super().continue_session(**kwargs)
+        # The effect happened (a.py edited) but the reply was lost.
+        self.last_completed = completed
+        return replace(
+            completed,
+            status="OPEN_SWE_OUTCOME_UNKNOWN",
+            operation_id=operation_id,
+            worker_backend="open_swe",
+            outcome_unknown=True,
+        )
+
+    def reconcile_workspace(self, *, workspace_path, operation_id=""):
+        self.reconciled.append(operation_id)
+        if self.reconcile_status != "COMPLETED":
+            return replace(
+                self.last_completed,
+                status=self.reconcile_status,
+                operation_id=operation_id,
+                outcome_unknown=True,
+            )
+        return replace(self.last_completed, operation_id=operation_id, worker_backend="open_swe")
+
+
+def _repair_outcome_unknown(tmp_path: Path, transport: _RepairReconcileTransport):
+    repo, base = make_repo(tmp_path)
+    envelope = tmp_path / "envelope.json"
+    envelope_sha = make_envelope(envelope, base, allowed=["a.py"])
+    initial_runtime = AdaptiveDeepSeekFanoutRuntime(
+        allocator=GitWorktreeAllocator(repo, tmp_path / "workspaces"),
+        store=FanoutStore(tmp_path / "state"),
+        transport=EditingTransport(),
+    )
+    initial = initial_runtime.run(
+        [unit(base, envelope, envelope_sha, "ua", ["a.py"])], CapacityLease(1, 1, 1, 1)
+    )["receipts"]["ua"]
+    initial = dict(initial, operation_id=transport.PARENT_OP)
+    initial["receipt_id"] = _receipt_identity(initial)
+    runtime = AdaptiveWorkerFanoutRuntime(
+        allocator=initial_runtime.allocator, store=initial_runtime.store, transport=transport
+    )
+    repair = tmp_path / "repair.json"
+    repair.write_text('{"schema":"repair_delta.v2"}\n')
+    repair_sha = hashlib.sha256(repair.read_bytes()).hexdigest()
+    with pytest.raises(FanoutError, match="FANOUT_RECONCILIATION_REQUIRED"):
+        runtime.continue_repair(
+            initial, repair_id="r1", repair_ref=str(repair), repair_sha256=repair_sha
+        )
+    attempt = runtime.store.existing_repair_attempt("task-1", "ua", "r1")
+    assert attempt["state"] == "OUTCOME_UNKNOWN"
+    assert attempt["operation_id"] == transport.CHILD_OP
+    return runtime, initial, repair, repair_sha
+
+
+def test_repair_outcome_unknown_reconciles_same_operation_without_redispatch(tmp_path):
+    transport = _RepairReconcileTransport()
+    runtime, initial, _repair, _sha = _repair_outcome_unknown(tmp_path, transport)
+    child = runtime.reconcile_repair(initial, repair_id="r1")
+    assert transport.reconciled == [transport.CHILD_OP]
+    assert transport.continued == [("ua", initial["session_id"])]  # never re-sent
+    assert child["status"] == "CANDIDATE_READY_FOR_VERIFICATION"
+    assert child["operation_id"] == transport.CHILD_OP
+    assert child["parent_receipt_id"] == initial["receipt_id"]
+    assert child["parent_commit"] == initial["candidate_commit"]
+    assert runtime.store.existing_repair_attempt("task-1", "ua", "r1")["state"] == "COMPLETED"
+    # A finished repair is never reconciled (or replayed) again.
+    with pytest.raises(FanoutError, match="FANOUT_RECONCILIATION_REQUIRED"):
+        runtime.reconcile_repair(initial, repair_id="r1")
+    assert transport.reconciled == [transport.CHILD_OP]
+
+
+def test_repair_reconcile_unproven_outcome_stays_unknown(tmp_path):
+    transport = _RepairReconcileTransport(reconcile_status="OPEN_SWE_OUTCOME_UNKNOWN")
+    runtime, initial, _repair, _sha = _repair_outcome_unknown(tmp_path, transport)
+    for _ in range(2):
+        with pytest.raises(FanoutError, match="FANOUT_RECONCILIATION_REQUIRED"):
+            runtime.reconcile_repair(initial, repair_id="r1")
+    assert transport.reconciled == [transport.CHILD_OP, transport.CHILD_OP]
+    assert transport.continued == [("ua", initial["session_id"])]
+    assert runtime.store.existing_repair_attempt("task-1", "ua", "r1")["state"] == (
+        "OUTCOME_UNKNOWN"
+    )
+    assert runtime.store.unresolved_repair_ids("task-1", "ua") == ["r1"]
+
+
+def test_new_repair_is_blocked_while_sibling_repair_outcome_unknown(tmp_path):
+    transport = _RepairReconcileTransport()
+    runtime, initial, repair, repair_sha = _repair_outcome_unknown(tmp_path, transport)
+    # The unknown continuation may not have touched the tree yet (or may still be
+    # running): a clean workspace must not let a second continuation start.
+    _git(Path(initial["workspace_path"]), "checkout", "--", "a.py")
+    for repair_id in ("r1", "r2"):
+        with pytest.raises(FanoutError, match="FANOUT_RECONCILIATION_REQUIRED"):
+            runtime.continue_repair(
+                initial, repair_id=repair_id, repair_ref=str(repair), repair_sha256=repair_sha
+            )
+    assert transport.continued == [("ua", initial["session_id"])]
+    assert runtime.store.existing_repair_attempt("task-1", "ua", "r2") is None
+
+
+def test_repair_reconcile_fails_closed_on_binding_or_transport_mismatch(tmp_path):
+    transport = _RepairReconcileTransport()
+    runtime, initial, _repair, _sha = _repair_outcome_unknown(tmp_path, transport)
+    other_parent = dict(initial, receipt_id="f" * 64)
+    with pytest.raises(FanoutError, match="REPAIR_RECONCILE_BINDING_MISMATCH"):
+        runtime.reconcile_repair(other_parent, repair_id="r1")
+    with pytest.raises(FanoutError, match="FANOUT_RECONCILIATION_REQUIRED"):
+        runtime.reconcile_repair(initial, repair_id="r9")
+    # A transport without operation ids cannot tell the repair turn from the parent's.
+    legacy = AdaptiveDeepSeekFanoutRuntime(
+        allocator=runtime.allocator, store=runtime.store, transport=EditingTransport()
+    )
+    with pytest.raises(FanoutError, match="OPERATION_ID_REQUIRED"):
+        legacy.reconcile_repair(initial, repair_id="r1")
+    assert transport.reconciled == []
+    assert runtime.store.existing_repair_attempt("task-1", "ua", "r1")["state"] == (
+        "OUTCOME_UNKNOWN"
+    )
