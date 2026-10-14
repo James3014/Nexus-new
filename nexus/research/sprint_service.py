@@ -1321,7 +1321,102 @@ def _symmetric_prompt_mode() -> bool:
     return os.environ.get("NEXUS_SYMMETRIC_PROMPT", "").strip().lower() in {"1", "true", "yes"}
 
 
+def _sprint_seam_task_id(repo_root: Path, config: SprintConfig) -> str:
+    key = f"{Path(repo_root).resolve()}|{config.target_file}|{config.task}"
+    return "auto-flow-sprint:" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+
+
+def _sprint_lock_denied(
+    meta: Mapping[str, Any] | None, *, repo_root: Path, config: SprintConfig, learning_trace: dict[str, Any]
+) -> bool:
+    """PR-2 seam: lock the target before the first model candidate is written (runtime-selected
+    only); True when the lock was not granted (the candidate must not be written)."""
+    from nexus.services import post_candidate_seam as seam
+
+    stages = learning_trace.setdefault("post_candidate_seam_pre_stages", [])
+    if not stages:
+        unified = meta.get("unified_runtime_receipt") if isinstance(meta, Mapping) else None
+        _lock_task, new_stages = seam.lock_target_if_selected(
+            unified_receipt=unified if isinstance(unified, Mapping) else None,
+            task_id=_sprint_seam_task_id(repo_root, config),
+            workspace_root=repo_root,
+            target_file=config.target_file,
+        )
+        stages.extend(new_stages)
+    return seam.lock_denied(stages)
+
+
+def _apply_sprint_post_candidate_seam(
+    result: SprintResult,
+    *,
+    repo_root: Path,
+    config: SprintConfig,
+    original_code: str | None,
+    released: Mapping[str, list[str]],
+) -> None:
+    """PR-2 seam after the sprint chose its candidate: sandbox/ultra_review on a scratch copy of
+    the model candidate; stages are appended as a UnifiedRuntime-shaped receipt (never changes
+    the outcome)."""
+    from nexus.services import post_candidate_seam as seam
+
+    pre = list(result.learning_trace.pop("post_candidate_seam_pre_stages", []) or [])
+    unified = next(
+        (
+            item
+            for item in reversed(result.unified_runtime_receipts)
+            if isinstance(item, dict)
+            and isinstance(item.get("capabilities"), list)
+            and item.get("receipt_kind") != seam.POST_CANDIDATE_RECEIPT_KIND
+        ),
+        None,
+    )
+    task_id = _sprint_seam_task_id(repo_root, config)
+    post = None
+    try:
+        if (
+            original_code is not None
+            and config.test_file
+            and result.patch
+            and _is_model_owned_source(result.winner_source)
+            and not seam.lock_denied(pre)
+        ):
+            post = seam.run_seam_for_candidate(
+                task_id=task_id,
+                unified_receipt=unified,
+                target_path=Path(repo_root) / config.target_file,
+                visible_test_path=Path(repo_root) / config.test_file,
+                original_code=original_code,
+                candidate_code=result.patch,
+            )
+    except Exception as exc:  # noqa: BLE001 - the seam never breaks the row
+        result.learning_trace["post_candidate_seam_error"] = f"{type(exc).__name__}: {exc}"[:300]
+    merged = seam.merge_seam_receipts(task_id=task_id, pre_stages=pre, post_receipt=post, released=released)
+    if merged is not None:
+        result.unified_runtime_receipts.append(merged)
+        result.learning_trace["post_candidate_seam"] = [str(stage.get("name")) for stage in merged["capabilities"]]
+        if seam.lock_denied(pre):
+            result.learning_trace["file_lock_denied"] = True
+
+
 def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
+    """Hyper sprint with the PR-2 post-candidate seam around it (file_lock released after the row)."""
+    target = Path(repo_root) / config.target_file
+    original_code = target.read_text(encoding="utf-8") if target.is_file() else None
+    lock_task = _sprint_seam_task_id(repo_root, config)
+    released: dict[str, list[str]] = {}
+    try:
+        result = _run_hyper_sprint_core(repo_root=repo_root, config=config)
+    finally:
+        from nexus.services.post_candidate_seam import release_target_lock
+
+        released = release_target_lock(lock_task)
+    _apply_sprint_post_candidate_seam(
+        result, repo_root=repo_root, config=config, original_code=original_code, released=released
+    )
+    return result
+
+
+def _run_hyper_sprint_core(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     start = time.time()
     policy = ResearchPolicy()
     scope_files = [config.target_file] + ([config.test_file] if config.test_file else [])
@@ -2041,7 +2136,16 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                 ev = CandidateEval(seed=idx, score=0.0, hint=hint, error=guard_reason, candidate_code=candidate_code, source=used_source)
                 error_codes.append("semantic_guard")
             else:
-                ev = executor.evaluate_candidate(seed=idx, hint=hint, code=candidate_code, source=used_source)
+                if used_source.startswith("llm") and _sprint_lock_denied(
+                    meta, repo_root=repo_root, config=config, learning_trace=learning_trace
+                ):
+                    # Another task holds the target: the candidate is never written (no delivery).
+                    ev = CandidateEval(
+                        seed=idx, score=0.0, hint=hint, error="file_lock_denied", candidate_code=source_code, source=used_source
+                    )
+                    error_codes.append("file_lock_denied")
+                else:
+                    ev = executor.evaluate_candidate(seed=idx, hint=hint, code=candidate_code, source=used_source)
             if (
                 candidate_pool_policy.enabled
                 and idx == 0

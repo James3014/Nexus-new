@@ -20955,6 +20955,21 @@ def main() -> int:
                     status=f"PARTIAL_WITH_NEXUS_ABORT:{fail_fast_reason}",
                 )
                 return "break"
+        except _hidden_staging.HiddenTestStagingError as exc:
+            # Fail closed: the row is invalid, its hidden verifier never ran, the run stops (exit 3).
+            with_rows.append({
+                "mode": "with_nexus",
+                "task_id": task.id,
+                "trial_index": task.trial_index,
+                "status": "FAILED",
+                "hidden_verifier_passed": False,
+                "hidden_test_tampered": True,
+                "hidden_staging_error": str(exc)[:300],
+                "hidden_staging_run_abort": _hidden_staging.run_abort_reason() or str(exc)[:200],
+                "run_eligible": False,
+            })
+            timed_out = True
+            return "break"
         except BenchmarkTotalTimeout:
             timed_out = True
             _emit_progress(

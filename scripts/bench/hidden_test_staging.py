@@ -115,6 +115,79 @@ def _no_symlink_components(path: Path) -> None:
             raise HiddenTestStagingError("staging_root_symlink_refused")
 
 
+RECOVERY_MANIFEST_NAME = "RECOVERY.json"
+
+
+def _manifest_path() -> Path:
+    return _staging_parent() / RECOVERY_MANIFEST_NAME
+
+
+def _read_manifest() -> dict[str, dict[str, str]]:
+    path = _manifest_path()
+    if not os.path.lexists(path):
+        return {}
+    _regular_single_link(path, label="recovery_manifest")
+    os.chmod(path, 0o600)
+    try:
+        data = json.loads(_read_nofollow(path).decode("utf-8") or "{}")
+    finally:
+        os.chmod(path, _STAGED_MODE)
+    return {str(k): dict(v) for k, v in data.items() if isinstance(v, dict)} if isinstance(data, dict) else {}
+
+
+def _write_manifest(entries: dict[str, dict[str, str]]) -> None:
+    """Fixed-name manifest (origin -> staged path + sha256) so a killed run can be recovered by
+    the next one; mode 0000 between updates, atomic replace."""
+    path = _manifest_path()
+    tmp = path.with_name(f".{RECOVERY_MANIFEST_NAME}.{os.getpid()}.tmp")
+    if os.path.lexists(tmp):
+        os.unlink(tmp)
+    _write_new(tmp, json.dumps(entries, sort_keys=True).encode("utf-8"))
+    os.chmod(tmp, _STAGED_MODE)
+    os.replace(tmp, path)
+
+
+def _manifest_update(origin: Path, entry: dict[str, str] | None) -> None:
+    entries = _read_manifest()
+    if entry is None:
+        if str(origin) not in entries:
+            return
+        entries.pop(str(origin), None)
+    else:
+        entries[str(origin)] = entry
+    _write_manifest(entries)
+
+
+def recover_from_manifest() -> list[str]:
+    """Restore hidden tests a killed run left staged (sidecar + sha verified first). Any entry
+    that cannot be verified aborts this run (fail closed). Returns the restored origins."""
+    restored: list[str] = []
+    entries = _read_manifest()
+    for origin, entry in sorted(entries.items()):
+        staged = Path(str(entry.get("staged") or ""))
+        origin_path = Path(origin)
+        if os.path.lexists(origin_path) or not str(staged) or not os.path.lexists(staged):
+            continue
+        leftover = HiddenTestStaging(
+            hidden_path=origin_path, staged_path=staged, staged=True, sha256=str(entry.get("sha256") or "")
+        )
+        try:
+            os.chmod(staged.parent, 0o700)
+            leftover._move_back()
+            restored.append(origin)
+        except (HiddenTestStagingError, OSError) as exc:
+            leftover._fail_closed(f"recovery:{type(exc).__name__}:{exc}")
+        finally:
+            try:
+                os.chmod(staged.parent, _DIR_MODE)
+            except OSError:
+                pass
+    remaining = {k: v for k, v in entries.items() if k not in restored and not os.path.lexists(k)}
+    if remaining != entries:
+        _write_manifest(remaining)
+    return restored
+
+
 def _path_digest(path: Path) -> str:
     return hashlib.sha256(str(path).encode("utf-8")).hexdigest()
 
@@ -135,6 +208,7 @@ class HiddenTestStaging:
     absent_checks: int = 0
     verify_windows: int = 0
     quarantined: bool = False
+    failed: bool = False
     violations: list[str] = field(default_factory=list)
 
     @property
@@ -146,26 +220,53 @@ class HiddenTestStaging:
             self.violations.append(TAMPERED)
         return HiddenTestStagingError(f"{TAMPERED}:{detail}")
 
+    def _lock_staged_bytes(self) -> None:
+        """Best effort: a staged regular file goes back to mode 0000 (never raises)."""
+        try:
+            info = os.lstat(self.staged_path)
+            if stat.S_ISREG(info.st_mode) and stat.S_IMODE(info.st_mode) != _STAGED_MODE:
+                os.chmod(self.staged_path, _STAGED_MODE)
+        except OSError:
+            pass
+
     def _fail_closed(self, detail: str) -> None:
-        """Quarantine whatever sits at the hidden path, flag the row and abort the run."""
+        """Never raises: flag the row, abort the run, lock the staged bytes and quarantine
+        whatever sits at the hidden path (so no verifier can run on it)."""
+        self.failed = True
         if TAMPERED not in self.violations:
             self.violations.append(TAMPERED)
         self.violations.append(f"fail_closed:{detail}"[:200])
-        if os.path.lexists(self.hidden_path):
-            index = 0
-            while True:
-                target = self.staged_path.with_name(
-                    f"{HIDDEN_TEST_NAME}{QUARANTINE_SUFFIX}.{index}"
-                )
-                if not os.path.lexists(target):
-                    break
-                index += 1
-            os.replace(self.hidden_path, target)  # moves a link itself, never its target
-            if not os.path.islink(target):
-                os.chmod(target, _STAGED_MODE)
-        self.quarantined = True
-        _QUARANTINED.add(str(self.hidden_path))
         _RUN_ABORT.append(f"{TAMPERED}:{detail}"[:200])
+        _QUARANTINED.add(str(self.hidden_path))
+        self._lock_staged_bytes()
+        try:
+            if os.path.lexists(self.hidden_path):
+                index = 0
+                while True:
+                    target = self.staged_path.with_name(f"{HIDDEN_TEST_NAME}{QUARANTINE_SUFFIX}.{index}")
+                    if not os.path.lexists(target):
+                        break
+                    index += 1
+                os.replace(self.hidden_path, target)  # moves a link itself, never its target
+                if not os.path.islink(target):
+                    os.chmod(target, _STAGED_MODE)
+                self.quarantined = True
+        except OSError as exc:
+            # The workspace copy could not be moved: the run is already aborted and the path
+            # stays registered as quarantined, so the verifier is refused for it.
+            self.violations.append(f"quarantine_failed:{type(exc).__name__}")
+
+    @contextmanager
+    def _fail_closed_on_error(self, where: str) -> Iterator[None]:
+        """Any exception -> fail closed. Ordinary errors surface as HiddenTestStagingError;
+        KeyboardInterrupt/SystemExit are re-raised after the row/run are marked."""
+        try:
+            yield
+        except BaseException as exc:
+            self._fail_closed(f"{where}:{type(exc).__name__}:{exc}")
+            if isinstance(exc, HiddenTestStagingError) or not isinstance(exc, Exception):
+                raise
+            raise HiddenTestStagingError(f"{TAMPERED}:{where}:{type(exc).__name__}") from exc
 
     def _move_out(self) -> None:
         """Hidden test (workspace) -> staged path (mode 0000), sidecar records its hash."""
@@ -178,9 +279,12 @@ class HiddenTestStaging:
         if not self.sha256:
             self.original_mode = stat.S_IMODE(info.st_mode)
         _move_file(self.hidden_path, self.staged_path)
-        if _sha256_nofollow(self.staged_path) != digest:
+        try:
+            staged_digest = _sha256_nofollow(self.staged_path)
+        finally:
+            os.chmod(self.staged_path, _STAGED_MODE)
+        if staged_digest != digest:
             raise self._tampered("staged_copy_mismatch")
-        os.chmod(self.staged_path, _STAGED_MODE)
         _write_new(
             self.sidecar_path,
             json.dumps({"sha256": digest, "origin": str(self.hidden_path)}).encode("utf-8"),
@@ -188,6 +292,7 @@ class HiddenTestStaging:
         os.chmod(self.sidecar_path, 0o400)
         self.sha256 = digest
         self.staged = True
+        _manifest_update(self.hidden_path, {"staged": str(self.staged_path), "sha256": digest})
 
     def _verified_staged_digest(self) -> str:
         try:
@@ -202,12 +307,13 @@ class HiddenTestStaging:
         expected = str(sidecar.get("sha256") or "") if isinstance(sidecar, dict) else ""
         origin = str(sidecar.get("origin") or "") if isinstance(sidecar, dict) else ""
         os.chmod(self.staged_path, 0o400)  # lstat-checked regular file just above
-        digest = _sha256_nofollow(self.staged_path)
-        if not expected or digest != expected or origin != str(self.hidden_path):
+        try:
+            digest = _sha256_nofollow(self.staged_path)
+        finally:
             os.chmod(self.staged_path, _STAGED_MODE)
+        if not expected or digest != expected or origin != str(self.hidden_path):
             raise self._tampered("sidecar_mismatch")
         if self.sha256 and digest != self.sha256:
-            os.chmod(self.staged_path, _STAGED_MODE)
             raise self._tampered("hash_changed_since_staging")
         return digest
 
@@ -218,27 +324,30 @@ class HiddenTestStaging:
             # Whatever reappeared during the run (file or link) is replaced by the original;
             # unlink never follows a link.
             os.unlink(self.hidden_path)
-        _move_file(self.staged_path, self.hidden_path)
+        _move_file(self.staged_path, self.hidden_path)  # still 0000 while moving
+        os.chmod(self.hidden_path, 0o400)
+        if _sha256_nofollow(self.hidden_path) != digest:
+            raise self._tampered("restored_copy_mismatch")
         os.chmod(self.hidden_path, self.original_mode or 0o644)
         os.chmod(self.sidecar_path, 0o600)
         os.unlink(self.sidecar_path)
-        if _sha256_nofollow(self.hidden_path) != digest:
-            raise self._tampered("restored_copy_mismatch")
         self.sha256 = digest
         self.staged = False
+        _manifest_update(self.hidden_path, None)
 
     def stage(self) -> None:
-        self.staged_path.parent.mkdir(mode=0o700, exist_ok=True)
-        os.chmod(self.staged_path.parent, _DIR_MODE)
-        if os.path.lexists(self.hidden_path):
-            if os.path.islink(self.hidden_path):
-                raise HiddenTestStagingError("hidden_test_symlink_refused")
-        elif os.path.lexists(self.staged_path):
-            # Left staged by an earlier crash in this run: recover only a verified file.
-            self._move_back()
-        self._move_out()
-        if os.path.lexists(self.hidden_path):
-            raise HiddenTestStagingError("hidden_test_still_present")
+        with self._fail_closed_on_error("stage"):
+            self.staged_path.parent.mkdir(mode=0o700, exist_ok=True)
+            os.chmod(self.staged_path.parent, _DIR_MODE)
+            if os.path.lexists(self.hidden_path):
+                if os.path.islink(self.hidden_path):
+                    raise HiddenTestStagingError("hidden_test_symlink_refused")
+            elif os.path.lexists(self.staged_path):
+                # Left staged by an earlier crash in this run: recover only a verified file.
+                self._move_back()
+            self._move_out()
+            if os.path.lexists(self.hidden_path):
+                raise HiddenTestStagingError("hidden_test_still_present")
         self.check_absent("staged")
 
     def check_absent(self, where: str) -> bool:
@@ -253,37 +362,32 @@ class HiddenTestStaging:
     def verify_window(self) -> Iterator[None]:
         """Put the verified hidden test back for the runner's own verifier, then stage again.
 
-        Raises ``HiddenTestStagingError`` before yielding when the staged file fails
-        verification (the verifier never runs on it), and after the verifier when it cannot be
-        staged again (the workspace copy is quarantined and the run aborted)."""
-        if not self.staged:
-            yield
-            return
+        Raises ``HiddenTestStagingError`` before yielding unless the staged file verifies (the
+        verifier never runs otherwise, including when this staging already failed), and after
+        the verifier when it cannot be staged again (quarantine + run abort)."""
+        if self.failed or not self.staged:
+            raise HiddenTestStagingError(f"{TAMPERED}:verify_window_not_staged")
         self.check_absent("verify_window")
-        try:
+        with self._fail_closed_on_error("verify_window_move_back"):
             self._move_back()
-        except HiddenTestStagingError as exc:
-            self._fail_closed(f"verify_window_move_back:{exc}")
-            raise
         self.verify_windows += 1
         try:
             yield
         finally:
-            try:
+            with self._fail_closed_on_error("restage_failed"):
                 self._move_out()
-            except (HiddenTestStagingError, OSError) as exc:
-                self._fail_closed(f"restage_failed:{exc}")
-                raise HiddenTestStagingError(f"{TAMPERED}:restage_failed") from exc
 
     def restore(self) -> None:
-        """Idempotent: puts a verified staged file back; never raises (fails closed instead)."""
-        if not self.staged:
+        """Idempotent; puts a verified staged file back. Ordinary errors fail closed without
+        raising; KeyboardInterrupt/SystemExit are re-raised after failing closed."""
+        if not self.staged or self.failed:
             return
         self.check_absent("row_end")
         try:
-            self._move_back()
-        except (HiddenTestStagingError, OSError) as exc:
-            self._fail_closed(f"row_end:{exc}")
+            with self._fail_closed_on_error("row_end"):
+                self._move_back()
+        except HiddenTestStagingError:
+            pass
 
     def row_fields(self) -> dict[str, object]:
         return {
@@ -371,6 +475,11 @@ def staging_root(repo_root: Path) -> Path:
     parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     _no_symlink_components(parent)
     os.chmod(parent, _DIR_MODE)
+    try:
+        recover_from_manifest()
+    except (HiddenTestStagingError, OSError) as exc:
+        _RUN_ABORT.append(f"{TAMPERED}:recovery_manifest:{type(exc).__name__}"[:200])
+        raise HiddenTestStagingError(f"{TAMPERED}:recovery_manifest") from exc
     root = Path(tempfile.mkdtemp(prefix="run-", dir=parent))
     os.chmod(root, _DIR_MODE)
     _RUN_ROOTS[str(parent)] = root
@@ -391,14 +500,20 @@ def staged_hidden_test(
     if not enabled:
         yield None
         return
+    try:
+        root = staging_root(repo_root)
+    except BaseException as exc:
+        _RUN_ABORT.append(f"{TAMPERED}:staging_root:{type(exc).__name__}:{exc}"[:200])
+        raise
     staging = HiddenTestStaging(
         hidden_path=Path(os.path.abspath(hidden)),
-        staged_path=staging_root(repo_root) / _task_key(task_id, trial_index) / HIDDEN_TEST_NAME,
+        staged_path=root / _task_key(task_id, trial_index) / HIDDEN_TEST_NAME,
     )
     if not os.path.lexists(staging.hidden_path) and not os.path.lexists(staging.staged_path):
-        # No hidden test for this task (and nothing left staged earlier in this run).
-        yield None
-        return
+        # The counted lane requires a hidden test for every task: a missing one is never
+        # "not staged" (the verifier would fall back to the visible test) - fail closed.
+        staging._fail_closed("hidden_test_missing")
+        raise HiddenTestStagingError(f"{TAMPERED}:hidden_test_missing")
     key = str(staging.hidden_path.resolve())
     _ACTIVE[key] = staging
     try:

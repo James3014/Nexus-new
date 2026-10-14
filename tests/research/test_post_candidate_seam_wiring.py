@@ -314,3 +314,134 @@ def test_lock_held_by_another_task_blocks_candidate_delivery(tmp_path: Path, mon
     text = _json.dumps(payload, default=str)
     assert "file_lock_denied" in text
     assert payload.get("status") != "SUCCESS"
+
+
+def _sprint(tmp_path: Path, monkeypatch, *, task: str = GOV_TASK, executed: list | None = None):
+    from nexus.research.sprint_service import CandidateEval, SprintConfig, run_hyper_sprint
+
+    case = _case(tmp_path)
+    workspace = tmp_path / "ws"
+    target_rel = str((case / "target.py").relative_to(workspace))
+    visible_rel = str((case / "test_visible.py").relative_to(workspace))
+    phase_slo = workspace / ".nexus" / "reports" / "learn" / "phase_slo_summary.json"
+    phase_slo.parent.mkdir(parents=True, exist_ok=True)
+    phase_slo.write_text(
+        '{"phase_slo_pass": true, "global": {"required_done_ratio": 1.0}}', encoding="utf-8"
+    )
+    runtime = _runtime_receipt(task, tmp_path)  # real executing-planner receipt
+
+    class FakeLLMGenerator:
+        model_chain = ["gemini-3.8-flash-medium"]
+
+        def __init__(self, *_a: Any, **_k: Any) -> None:
+            pass
+
+        def generate(self, *_a: Any, **_k: Any):
+            return CANDIDATE, {
+                "source": "llm",
+                "model_calls": 1,
+                "model_name": "gemini-3.8-flash-medium",
+                "tokens_used": 10,
+                "token_capture_status": "measured",
+                "unified_runtime_receipt": runtime,
+            }
+
+    class FakeExecutor:
+        def __init__(self, *_a: Any, **_k: Any) -> None:
+            pass
+
+        def evaluate_candidate(self, **kwargs: Any):
+            if executed is not None:
+                executed.append(kwargs["code"])
+            return CandidateEval(
+                seed=kwargs["seed"],
+                score=1.0,
+                candidate_code=kwargs["code"],
+                source=kwargs["source"],
+                stdout="1 passed",
+            )
+
+    monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", FakeLLMGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.InPlaceSprintExecutor", FakeExecutor)
+    monkeypatch.setenv("NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL", "0")
+    monkeypatch.setenv("NEXUS_DISABLE_HIDDEN_INVARIANT_SHADOW", "1")
+    monkeypatch.setenv("NEXUS_DISABLE_HIDDEN_CONTRACT_FAST_PATH", "1")
+    monkeypatch.setenv("NEXUS_DISABLE_LOCAL_PREFLIGHT_BEFORE_LLM", "1")
+    monkeypatch.setenv("NEXUS_FORCE_INPLACE_EXECUTOR", "1")
+    monkeypatch.setenv("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "1")
+    cfg = SprintConfig(
+        task=task,
+        target_file=target_rel,
+        test_file=visible_rel,
+        candidate_count=1,
+        llm_mode=True,
+        safe_mode=True,
+    )
+    return case, workspace, target_rel, cfg, run_hyper_sprint
+
+
+def test_hyper_sprint_path_invokes_sandbox_and_ultra_review(
+    governed_admission: None, barrier: list[list[str]], tmp_path: Path, monkeypatch
+) -> None:
+    """CRITICAL-2: the counted lane's hyper_sprint path runs the seam too (shared helper)."""
+    from nexus.research.flow.unified_capability_projection import project_unified_capability_stages
+
+    case, workspace, _target, cfg, run_hyper_sprint = _sprint(tmp_path, monkeypatch)
+    result = run_hyper_sprint(repo_root=workspace, config=cfg)
+
+    stages = {
+        row["name"]: row
+        for row in project_unified_capability_stages(result.unified_runtime_receipts)
+    }
+    for name in ("sandbox", "ultra_review"):
+        assert stages[name]["status"] == "INVOKED", (name, stages.get(name))
+        assert stages[name]["simulated"] is False
+        assert stages[name]["trigger_source"].startswith("post_candidate_seam:")
+    assert result.learning_trace["post_candidate_seam"] == ["sandbox", "ultra_review"]
+    assert seam.release_target_lock("anything") == {}
+    assert not any(part.endswith("test_hidden.py") for argv in barrier for part in argv)
+    assert not (case / "HIDDEN_RAN").exists()
+
+
+def test_hyper_sprint_file_lock_invoked_and_released(
+    governed_admission: None, tmp_path: Path, monkeypatch
+) -> None:
+    from nexus.research.flow.unified_capability_projection import project_unified_capability_stages
+
+    _case_dir, workspace, _target, cfg, run_hyper_sprint = _sprint(
+        tmp_path, monkeypatch, task=LEDGER_TASK
+    )
+    result = run_hyper_sprint(repo_root=workspace, config=cfg)
+
+    stages = {
+        row["name"]: row
+        for row in project_unified_capability_stages(result.unified_runtime_receipts)
+    }
+    assert stages["file_lock"]["status"] == "INVOKED" and stages["file_lock"]["simulated"] is False
+    assert stages["file_lock"]["trigger_source"] == "post_candidate_seam:pre_attempt"
+    merged = result.unified_runtime_receipts[-1]
+    assert list(merged["file_lock_released"].values()) == [[cfg.target_file]]
+
+
+def test_hyper_sprint_lock_held_by_another_task_never_writes_the_candidate(
+    governed_admission: None, tmp_path: Path, monkeypatch
+) -> None:
+    executed: list[str] = []
+    case, workspace, target_rel, cfg, run_hyper_sprint = _sprint(
+        tmp_path, monkeypatch, task=LEDGER_TASK, executed=executed
+    )
+    holder = seam.acquire_target_lock(
+        task_id="other-task", workspace_root=workspace, target_file=target_rel
+    )
+    assert holder["gate_passed"] is True
+    try:
+        result = run_hyper_sprint(repo_root=workspace, config=cfg)
+    finally:
+        seam.release_target_lock("other-task")
+
+    assert CANDIDATE not in executed  # the model candidate was never applied to the target
+    assert "file_lock_denied" in result.error_codes
+    # Only a non-model (local) fallback can win; the model candidate is never delivered.
+    assert result.patch != CANDIDATE and not result.winner_source.startswith("llm")
+    assert result.learning_trace.get("file_lock_denied") is True
+    assert (case / "target.py").read_text(encoding="utf-8") == ORIGINAL

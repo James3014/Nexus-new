@@ -202,7 +202,7 @@ def test_restage_failure_after_verifier_quarantines_and_aborts(tmp_path, monkeyp
         out = runner._run_process_group(
             runner._pytest_verifier_cmd(str(hidden)), cwd=workspace, env={}, timeout_sec=5
         )
-        assert out.returncode == 1 and "restage_failed" in out.stderr
+        assert out.returncode == 1 and "hidden_test_tampered" in out.stderr
         assert not os.path.lexists(hidden)  # quarantined, not left in the workspace
     staging.restore()  # idempotent, never raises
     assert not os.path.lexists(hidden)
@@ -212,7 +212,7 @@ def test_restage_failure_after_verifier_quarantines_and_aborts(tmp_path, monkeyp
     assert staging_mod.is_quarantined(hidden)
 
 
-def test_symlinks_at_hidden_or_staged_paths_are_refused(tmp_path) -> None:
+def test_symlink_at_hidden_path_is_refused_and_quarantined(tmp_path) -> None:
     workspace, visible, hidden = _case(tmp_path)
     real = tmp_path / "elsewhere.py"
     hidden.replace(real)
@@ -220,10 +220,14 @@ def test_symlinks_at_hidden_or_staged_paths_are_refused(tmp_path) -> None:
     with pytest.raises(staging_mod.HiddenTestStagingError, match="symlink_refused"):
         with _staged(workspace, visible):
             pass
-    assert hidden.is_symlink() and real.read_text(encoding="utf-8") == HIDDEN_TEXT
-    hidden.unlink()
-    real.replace(hidden)
+    assert not os.path.lexists(hidden)  # the link itself is quarantined, its target untouched
+    assert real.read_text(encoding="utf-8") == HIDDEN_TEXT
+    assert "symlink_refused" in staging_mod.run_abort_reason()
+    assert runner._hidden_test_for_visible_test(str(visible)) == str(hidden)
 
+
+def test_symlink_at_staged_path_is_tampered(tmp_path) -> None:
+    workspace, visible, hidden = _case(tmp_path)
     leftover = _crashed_staging(workspace, hidden)
     target = tmp_path / "planted.py"
     target.write_text("x\n", encoding="utf-8")
@@ -234,6 +238,7 @@ def test_symlinks_at_hidden_or_staged_paths_are_refused(tmp_path) -> None:
         with _staged(workspace, visible):
             pass
     assert not hidden.exists()
+    assert staging_mod.run_abort_reason()
 
 
 def test_symlinked_staging_parent_is_refused(tmp_path, monkeypatch) -> None:
@@ -258,14 +263,18 @@ def test_hidden_file_reappearing_during_the_row_is_flagged_and_replaced(tmp_path
     assert hidden.read_text(encoding="utf-8") == HIDDEN_TEXT
 
 
-def test_staging_disabled_or_missing_hidden_is_a_no_op(tmp_path) -> None:
+def test_staging_disabled_is_a_no_op_and_missing_hidden_fails_closed(tmp_path) -> None:
     workspace, visible, hidden = _case(tmp_path)
 
     with _staged(workspace, visible, enabled=False) as staging:
         assert staging is None and hidden.exists()
     hidden.unlink()
-    with _staged(workspace, visible) as staging:
-        assert staging is None
+    with pytest.raises(staging_mod.HiddenTestStagingError, match="hidden_test_missing"):
+        with _staged(workspace, visible):
+            pass
+    assert "hidden_test_missing" in staging_mod.run_abort_reason()
+    # Never "not staged": the verifier keeps naming the (missing) hidden file.
+    assert runner._hidden_test_for_visible_test(str(visible)) == str(hidden)
 
 
 def test_staging_root_inside_the_workspace_is_refused(tmp_path, monkeypatch) -> None:
@@ -467,3 +476,121 @@ def test_hidden_staging_lane_switch() -> None:
     assert runner._hidden_staging_enabled(ns(strict_llm_baseline=True)) is True
     assert runner._hidden_staging_enabled(ns(counted_first_attempt=True)) is True
     assert runner._hidden_staging_enabled(ns()) is False
+
+
+def _new_process(monkeypatch) -> None:
+    """Forget in-memory staging state, as a fresh runner process would."""
+    for name in ("_ACTIVE", "_RUN_ROOTS"):
+        monkeypatch.setattr(staging_mod, name, {})
+    monkeypatch.setattr(staging_mod, "_QUARANTINED", set())
+    monkeypatch.setattr(staging_mod, "_RUN_ABORT", [])
+
+
+def test_killed_run_is_recovered_by_the_next_run_from_the_manifest(
+    tmp_path, monkeypatch, _isolated_staging
+) -> None:
+    workspace, visible, hidden = _case(tmp_path)
+    killed = staging_mod.HiddenTestStaging(
+        hidden_path=hidden.resolve(),
+        staged_path=staging_mod.staging_root(workspace) / "oabh-demo__t1" / "test_hidden.py",
+    )
+    killed.stage()  # SIGKILL here: never restored
+    assert not hidden.exists()
+    manifest = _isolated_staging / staging_mod.RECOVERY_MANIFEST_NAME
+    assert _mode(manifest) == 0o000
+
+    _new_process(monkeypatch)
+    with _staged(workspace, visible) as staging:
+        assert not hidden.exists() and staging.staged
+    assert hidden.read_text(encoding="utf-8") == HIDDEN_TEXT
+    assert staging_mod.run_abort_reason() == ""
+    assert staging_mod._read_manifest() == {}
+
+
+def test_tampered_leftover_from_a_killed_run_aborts_the_next_run(tmp_path, monkeypatch) -> None:
+    workspace, visible, hidden = _case(tmp_path)
+    killed = staging_mod.HiddenTestStaging(
+        hidden_path=hidden.resolve(),
+        staged_path=staging_mod.staging_root(workspace) / "oabh-demo__t1" / "test_hidden.py",
+    )
+    killed.stage()
+    _plant(killed.staged_path, "def test_planted():\n    assert True\n")
+
+    _new_process(monkeypatch)
+    with pytest.raises(staging_mod.HiddenTestStagingError, match="hidden_test_tampered"):
+        with _staged(workspace, visible):
+            pass
+    assert not hidden.exists()
+    assert "recovery" in staging_mod.run_abort_reason()
+
+
+def test_staged_bytes_are_mode_0000_between_verifier_windows(tmp_path, monkeypatch) -> None:
+    workspace, visible, hidden = _case(tmp_path)
+    modes: list[int] = []
+
+    def verifier(cmd, **kw):
+        modes.append(_mode(hidden))
+        return subprocess.CompletedProcess(cmd, 0, "1 passed", "")
+
+    monkeypatch.setattr(runner, "_run_process_group_unstaged", verifier)
+    with _staged(workspace, visible) as staging:
+        assert _mode(staging.staged_path) == 0o000
+        runner._run_process_group(
+            runner._pytest_verifier_cmd(str(hidden)), cwd=workspace, env={}, timeout_sec=5
+        )
+        assert _mode(staging.staged_path) == 0o000
+    assert modes and modes[0] & 0o400  # readable only inside the verifier window
+    assert staging_mod.run_abort_reason() == ""
+
+
+@pytest.mark.parametrize("failure", ["lstat", "chmod", "keyboard_interrupt"])
+def test_any_error_in_the_verifier_window_fails_closed_and_never_runs_the_verifier(
+    tmp_path, monkeypatch, failure
+) -> None:
+    workspace, visible, hidden = _case(tmp_path)
+    ran: list[list[str]] = []
+    monkeypatch.setattr(
+        runner,
+        "_run_process_group_unstaged",
+        lambda cmd, **kw: ran.append(list(cmd)) or subprocess.CompletedProcess(cmd, 0, "", ""),
+    )
+    with _staged(workspace, visible) as staging, pytest.MonkeyPatch.context() as mp:
+        if failure == "lstat":
+            real_lstat = os.lstat
+
+            def bad_lstat(path, *a, **k):
+                if str(path).endswith("test_hidden.py") and staging.staged_path == Path(path):
+                    raise PermissionError("lstat denied")
+                return real_lstat(path, *a, **k)
+
+            mp.setattr(staging_mod.os, "lstat", bad_lstat)
+        elif failure == "chmod":
+            mp.setattr(
+                staging_mod.os,
+                "chmod",
+                lambda *a, **k: (_ for _ in ()).throw(OSError("chmod failed")),
+            )
+        else:
+            mp.setattr(
+                staging_mod,
+                "_move_file",
+                lambda *a, **k: (_ for _ in ()).throw(KeyboardInterrupt()),
+            )
+        if failure == "keyboard_interrupt":
+            with pytest.raises(KeyboardInterrupt):
+                runner._run_process_group(
+                    runner._pytest_verifier_cmd(str(hidden)), cwd=workspace, env={}, timeout_sec=5
+                )
+        else:
+            out = runner._run_process_group(
+                runner._pytest_verifier_cmd(str(hidden)), cwd=workspace, env={}, timeout_sec=5
+            )
+            assert out.returncode == 1 and "hidden_test_tampered" in out.stderr
+        mp.undo()
+    assert ran == []
+    assert staging.failed is True and staging.row_fields()["hidden_test_tampered"] is True
+    assert staging_mod.run_abort_reason()
+    # A failed staging is never "not staged": later windows refuse to run the verifier.
+    with pytest.raises(staging_mod.HiddenTestStagingError):
+        with staging.verify_window():
+            pass
