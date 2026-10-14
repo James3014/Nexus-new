@@ -364,7 +364,10 @@ def render_blocking_log(report: dict[str, Any]) -> list[str]:
         lines.append(f"  {len(new_findings)} new finding(s) not present on the exact base:")
     for raw in new_findings:
         finding = Finding(**raw)
-        lines.append(f"{finding.path}:{finding.line} {finding.rule_id} {finding.message}".rstrip())
+        # Indented and single-line so a candidate-chosen path/message can never start a
+        # log line with `::` (GitHub workflow command).
+        detail = f"{finding.path}:{finding.line} {finding.rule_id} {finding.message}"
+        lines.append(f"  - {' '.join(detail.split())}")
         lines.append(f"  hint: {fix_hint(finding)}")
     if classification == "IMPACT_UNKNOWN":
         lines.append(

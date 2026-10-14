@@ -491,6 +491,7 @@ def test_cli_prints_new_findings_with_fix_hints_to_job_log(tmp_path):
     assert "nexus/fmt.py:1 unformatted File would be reformatted" in log
     assert "run `ruff format --preview nexus/fmt.py`" in log
     assert "run `ruff check --fix nexus/app.py`" in log
+    assert not any(line.startswith("::") for line in log.splitlines())
     report = json.loads(output.read_text(encoding="utf-8"))
     assert report["classification"] == "NEW_REGRESSION"
 
@@ -552,3 +553,21 @@ def test_cli_bootstrap_defect_prints_error_to_job_log(tmp_path):
     assert completed.returncode == 2
     assert "Exact-base gate BLOCKED: CI_BOOTSTRAP_DEFECT" in completed.stdout
     assert "error: JSONDecodeError" in completed.stdout
+
+
+def test_blocking_log_cannot_emit_workflow_commands_from_candidate_paths():
+    from dataclasses import asdict
+
+    from scripts.ops.exact_base_tool_gate import render_blocking_log
+
+    hostile = Finding(
+        "ruff", "F401", "::set-env name=X::1", 1, 1, "error", "msg\n::add-mask::secret"
+    )
+    lines = render_blocking_log({
+        "blocking": True,
+        "classification": "NEW_REGRESSION",
+        "new_findings": [asdict(hostile)],
+    })
+    assert lines
+    assert not any(line.startswith("::") for line in lines)
+    assert all("\n" not in line for line in lines)
