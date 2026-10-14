@@ -571,10 +571,11 @@ def test_production_roots_are_protected_without_injected_root(
     assert receipt.failure_reason == "canonical_checkout_integrity_violation"
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="case-insensitive comparison is darwin-only")
-def test_protected_roots_deduplicate_case_insensitively_on_darwin(tmp_path):
+def test_protected_roots_deduplicate_case_insensitively_on_darwin(monkeypatch, tmp_path):
+    # Runs on every platform: the darwin branch is selected explicitly.
+    monkeypatch.setattr(admission.sys, "platform", "darwin")
     root = _repo(tmp_path)
-    variant = Path(str(root).upper()) if Path(str(root).upper()).exists() else root
+    variant = Path(str(root).upper())
     roots = admission.protected_checkout_roots(
         target=_target(tmp_path), controller_repo_root=str(variant), canonical_source_root=root
     )
@@ -906,7 +907,26 @@ def _seatbelt_usable() -> bool:
     return probe.returncode == 0
 
 
-@pytest.mark.skipif(not _seatbelt_usable(), reason="macOS sandbox-exec not usable here")
+def _assert_profile_text_or_skip_run(
+    profile: str, *, denied: list[Path], writable: list[Path]
+) -> bool:
+    """Off macOS, check the profile text instead of running sandbox-exec.
+
+    Returns True when the caller should also run the real Seatbelt probe.
+    """
+    if _seatbelt_usable():
+        return True
+    deny_block = profile.split("(deny file-write*\n", 1)[1]
+    for path in denied:
+        assert f'(subpath "{admission._sbpl_path(path)}")' in deny_block or (
+            f'(literal "{admission._sbpl_path(path)}")' in deny_block
+        ), path
+    for path in writable:
+        assert f'(subpath "{admission._sbpl_path(path)}")' in profile, path
+    assert "(deny file-write*)" in profile
+    return False
+
+
 def test_seatbelt_profile_blocks_absolute_path_write_outside_target(tmp_path):
     target = _target(tmp_path)
     outside = (tmp_path / "canonical").resolve()
@@ -916,6 +936,11 @@ def test_seatbelt_profile_blocks_absolute_path_write_outside_target(tmp_path):
     home = run_tmp / "home"
     (target / ".git").write_text("gitdir: /expected\n", encoding="utf-8")
     profile = admission.build_seatbelt_profile(run_root=run_tmp, writable_target=target)
+    if not _assert_profile_text_or_skip_run(
+        profile, denied=[target / ".git"], writable=[target, run_tmp]
+    ):
+        assert f'(subpath "{admission._sbpl_path(outside)}")' not in profile
+        return
     code = (
         "import sys\n"
         "open(sys.argv[1] + '/inside.txt', 'w').write('ok')\n"
@@ -945,13 +970,18 @@ def test_seatbelt_profile_blocks_absolute_path_write_outside_target(tmp_path):
     assert len(result.seatbelt_profile_sha256) == 64
 
 
-@pytest.mark.skipif(not _seatbelt_usable(), reason="macOS sandbox-exec not usable here")
 def test_seatbelt_profile_blocks_planting_agy_workspace_customizations(tmp_path):
     target = _target(tmp_path)
     (target / ".agents" / "skills").mkdir(parents=True)
     run_tmp = (tmp_path / "run-tmp").resolve()
     (run_tmp / "home").mkdir(parents=True)
     profile = admission.build_seatbelt_profile(run_root=run_tmp, writable_target=target)
+    if not _assert_profile_text_or_skip_run(
+        profile,
+        denied=[target / ".agents", target / ".antigravitycli"],
+        writable=[target, run_tmp],
+    ):
+        return
     code = (
         "import os, sys\n"
         "t = sys.argv[1]\n"
@@ -1153,7 +1183,6 @@ def test_worker_rewriting_its_permission_profile_fails_closed(monkeypatch, tmp_p
     assert receipt.failure_reason == "agy_permission_profile_tampered"
 
 
-@pytest.mark.skipif(not _seatbelt_usable(), reason="macOS sandbox-exec not usable here")
 def test_seatbelt_locks_run_home_profile_but_not_agy_state(tmp_path):
     run_root = (tmp_path / "run").resolve()
     run_home = run_root / "attempt" / "home"
@@ -1161,6 +1190,12 @@ def test_seatbelt_locks_run_home_profile_but_not_agy_state(tmp_path):
     profile = admission.build_seatbelt_profile(
         run_root=run_root, writable_target=None, run_home=run_home
     )
+    if not _assert_profile_text_or_skip_run(
+        profile,
+        denied=[run_home / admission.AGY_RUN_HOME_SETTINGS, run_home / ".gemini" / "config"],
+        writable=[run_root, run_home / admission.AGY_RUN_HOME_PROJECTS],
+    ):
+        return
     code = (
         "import os, sys\n"
         "h = sys.argv[1]\n"
