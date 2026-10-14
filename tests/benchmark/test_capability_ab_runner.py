@@ -13173,8 +13173,28 @@ def test_force_learn_slo_ready_writes_pass_summary(tmp_path: Path):
     assert payload["evidence_class"] == "synthetic_readiness_shortcut"
 
 
+_SANCTIONED_RUNNER_GLOB = "/private/tmp/nexus-live-clean-runner-*)"
+
+
+def _sanctioned_runner_parent() -> str:
+    """Return /private/tmp on the macOS host, else the platform temp dir (#1926).
+
+    Linux CI has no /private/tmp, so the runner is created under the platform
+    temp dir and the hook's sanctioned-root guard is re-pointed at that parent.
+    """
+    if os.path.isdir("/private/tmp") and os.access("/private/tmp", os.W_OK):
+        return "/private/tmp"
+    return tempfile.gettempdir()
+
+
+def _hermetic_learn_metadata_commit_hook(*, runner_root: Path) -> str:
+    script = _learn_metadata_commit_hook(runner_root=runner_root)
+    assert script.count(_SANCTIONED_RUNNER_GLOB) == 1
+    return script.replace(_SANCTIONED_RUNNER_GLOB, f"{runner_root.parent}/nexus-live-clean-runner-*)")
+
+
 def test_sanitized_runner_learn_metadata_hook_commits_only_allowed_files(tmp_path: Path):
-    with tempfile.TemporaryDirectory(prefix="nexus-live-clean-runner-hook-", dir="/private/tmp") as root_str:
+    with tempfile.TemporaryDirectory(prefix="nexus-live-clean-runner-hook-", dir=_sanctioned_runner_parent()) as root_str:
         root = Path(root_str)
         subprocess.run(["git", "-C", str(root), "init"], check=True, capture_output=True, text=True)
         subprocess.run(["git", "-C", str(root), "config", "user.email", "nexus-temp@example.test"], check=True)
@@ -13188,7 +13208,7 @@ def test_sanitized_runner_learn_metadata_hook_commits_only_allowed_files(tmp_pat
         (learn_dir / "phase_writeback.jsonl").write_text('{"event":"run"}\n', encoding="utf-8")
         (learn_dir / "x1_readiness_history.json").write_text('[{"x1_readiness_pass":true}]\n', encoding="utf-8")
         hook = tmp_path / "commit_learn_metadata.sh"
-        hook.write_text(_learn_metadata_commit_hook(runner_root=root), encoding="utf-8")
+        hook.write_text(_hermetic_learn_metadata_commit_hook(runner_root=root), encoding="utf-8")
 
         subprocess.run(["sh", str(hook)], check=True, capture_output=True, text=True)
 
@@ -13204,7 +13224,7 @@ def test_sanitized_runner_learn_metadata_hook_commits_only_allowed_files(tmp_pat
 
 
 def test_sanitized_runner_learn_metadata_hook_does_not_hide_other_dirty_entries(tmp_path: Path):
-    with tempfile.TemporaryDirectory(prefix="nexus-live-clean-runner-hook-", dir="/private/tmp") as root_str:
+    with tempfile.TemporaryDirectory(prefix="nexus-live-clean-runner-hook-", dir=_sanctioned_runner_parent()) as root_str:
         root = Path(root_str)
         subprocess.run(["git", "-C", str(root), "init"], check=True, capture_output=True, text=True)
         subprocess.run(["git", "-C", str(root), "config", "user.email", "nexus-temp@example.test"], check=True)
@@ -13218,7 +13238,7 @@ def test_sanitized_runner_learn_metadata_hook_does_not_hide_other_dirty_entries(
         (learn_dir / "x1_readiness_history.json").write_text('[{"x1_readiness_pass":true}]\n', encoding="utf-8")
         (root / "unexpected.txt").write_text("dirty\n", encoding="utf-8")
         hook = tmp_path / "commit_learn_metadata.sh"
-        hook.write_text(_learn_metadata_commit_hook(runner_root=root), encoding="utf-8")
+        hook.write_text(_hermetic_learn_metadata_commit_hook(runner_root=root), encoding="utf-8")
 
         subprocess.run(["sh", str(hook)], check=True, capture_output=True, text=True)
 
