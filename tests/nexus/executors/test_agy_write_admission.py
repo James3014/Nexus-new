@@ -1512,3 +1512,40 @@ def test_process_table_with_blank_row_is_not_a_baseline(monkeypatch):
         lambda *a, **k: SimpleNamespace(stdout=f"{me} {parent}\n   \n{parent} 1\n", returncode=0),
     )
     assert cli_worker._sweep_baseline() is None
+
+
+def test_cwd_scan_fails_closed_on_record_without_cwd(monkeypatch):
+    baseline = cli_worker._SweepBaseline(
+        started_at=0.0, preexisting=frozenset(), protected=frozenset()
+    )
+    me = os.getpid()
+    for out in (f"p{me}\nn/\np424242\n", f"p424242\np{me}\nn/\n"):
+        monkeypatch.setattr(
+            cli_worker.subprocess,
+            "run",
+            lambda *a, _out=out, **k: SimpleNamespace(stdout=_out, returncode=0),
+        )
+        assert cli_worker._pids_with_cwd_under(("/nonexistent-root",), baseline) is None
+
+
+def test_tracker_probe_failure_is_not_reported_clean(monkeypatch, tmp_path):
+    real_table = cli_worker._process_table
+    calls = {"n": 0}
+
+    def flaky_table():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return real_table()  # baseline succeeds
+        raise subprocess.CalledProcessError(1, "ps")
+
+    monkeypatch.setattr(cli_worker, "_process_table", flaky_table)
+    result = run_cli_worker(
+        CliWorkerRequest(
+            executable=sys.executable,
+            argv=("-c", "import time; time.sleep(0.3); print('ok')"),
+            cwd=str(tmp_path),
+            sweep_descendants_on_exit=True,
+        )
+    )
+    assert result.status is CliWorkerStatus.COMPLETED
+    assert result.descendants_swept is False

@@ -315,6 +315,9 @@ class _DescendantTracker:
         self._root = root_pid
         self._pids: set[int] = {root_pid}
         self._interval = interval
+        # Set when any poll could not read the process table: descendants
+        # spawned in that gap are unknown, so the sweep cannot claim clean.
+        self.probe_failed = False
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -324,6 +327,7 @@ class _DescendantTracker:
         try:
             table = _process_table()
         except Exception:  # noqa: BLE001
+            self.probe_failed = True
             return
         with self._lock:
             changed = True
@@ -472,13 +476,19 @@ def _pids_with_cwd_under(
         return None
     found: set[int] = set()
     pid: Optional[int] = None
+    pid_has_cwd = True
     for line in out.splitlines():
         if line.startswith("p") and line[1:].isdigit():
-            pid = int(line[1:])
+            if not pid_has_cwd:
+                return None  # a process record without its cwd: incomplete scan
+            pid, pid_has_cwd = int(line[1:]), False
         elif line.startswith("n") and pid is not None:
+            pid_has_cwd = True
             cwd = os.path.realpath(line[1:])
             if any(cwd == root or cwd.startswith(root + os.sep) for root in real_roots):
                 found.add(pid)
+    if not pid_has_cwd:
+        return None
     found -= baseline.preexisting | baseline.protected | {os.getpid()}
     return _started_after_by_us(found, baseline.started_at)
 
@@ -754,6 +764,7 @@ def run_cli_worker(
                     _sweep_clean(tracked, _pids_with_cwd_under(request.sweep_roots, baseline))
                     and tagged_clean
                     and baseline is not None
+                    and not tracker.probe_failed
                 )
         except subprocess.TimeoutExpired as exc:
             group_killed = _kill_process_group(process)
@@ -762,6 +773,7 @@ def run_cli_worker(
                 if (
                     not _sweep_clean(tracked, _pids_with_cwd_under(request.sweep_roots, baseline))
                     or baseline is None
+                    or tracker.probe_failed
                 ):
                     group_killed = False
             # Descendants that called setsid() left the group; find them by the
