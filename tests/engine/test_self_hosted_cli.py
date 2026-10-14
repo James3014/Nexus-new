@@ -1189,3 +1189,25 @@ def test_cli_approve_requires_grant(tmp_path):
     with pytest.raises(NexusCliActionError, match="APPROVAL_GRANT_REQUIRED"):
         run_self_hosted_approve("cli-approve", service=service, **packet)
     assert service._read_state("cli-approve")["promotion_status"] == "PENDING_HUMAN_APPROVAL"
+
+
+@pytest.mark.parametrize("extra", [["--help"], ["-h"], ["--task-id", "--help"]])
+def test_retired_approve_fails_in_no_legacy_fallback(extra):
+    import subprocess
+
+    repo_root = Path(__file__).resolve().parents[2]
+    code = (
+        "import sys, runpy\n"
+        "sys.modules['click'] = None\n"  # force the no-legacy-deps fallback
+        f"sys.argv = ['nexus', 'self-hosted', 'approve', *{extra!r}]\n"
+        "runpy.run_module('scripts.engine.nexus_cli', run_name='__main__')\n"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 1, completed.stdout + completed.stderr
+    assert "retired" in completed.stderr

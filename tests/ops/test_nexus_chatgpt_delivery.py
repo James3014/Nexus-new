@@ -165,6 +165,7 @@ def test_launch_surfaces_existing_approval_before_new_submission(tmp_path: Path)
     # CLI approve is retired (#1928): no shell command; approve via the gateway tool.
     assert command["command"] is None
     assert command["gateway_tool"] == "nexus_candidate_approve"
+    assert command["recommended_tool"] == "nexus_candidate_approve"
 
 
 def test_launch_submits_once_then_surfaces_integration_command(tmp_path: Path):
@@ -304,6 +305,7 @@ def test_action_command_points_approval_to_gateway_not_retired_cli():
         cmd_info = action_command_for_task(task)
         assert cmd_info["command"] is None
         assert cmd_info["gateway_tool"] == "nexus_candidate_approve"
+        assert cmd_info["recommended_tool"] == "nexus_candidate_approve"
         assert cmd_info["missing"] == []
 
 

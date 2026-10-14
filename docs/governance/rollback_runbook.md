@@ -19,14 +19,13 @@ nexus_self_hosted_status
 nexus_self_hosted_reconcile_tasks
 nexus_self_hosted_cleanup
 nexus_self_hosted_archive_state
-nexus_self_hosted_approve_promotion
 nexus_self_hosted_integrate_approved
 nexus_self_hosted_dispose_candidate
 nexus_self_hosted_cancel_task
 ```
 
-The legacy `nexus_self_hosted_approve_promotion` MCP tool carries no approval grant,
-so it fails closed with `APPROVAL_GRANT_REQUIRED`. The CLI `self-hosted approve`
+The legacy `nexus_self_hosted_approve_promotion` MCP tool is retired and is not part of the
+governed surface: it returns a retirement error naming `nexus_candidate_approve`. The CLI `self-hosted approve`
 command is retired (#1928): it always exits 1 with a retirement message and never
 approves. Approve a candidate through the gateway approve path
 (`candidate_approve`) with a bound approval grant.

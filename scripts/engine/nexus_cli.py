@@ -133,6 +133,13 @@ if not _LEGACY_AVAILABLE:
             from nexus.services.workflow_doctor import main as workflow_doctor_main
 
             raise SystemExit(workflow_doctor_main(sys.argv[3:]))
+        if sys.argv[1:3] == ["self-hosted", "approve"]:
+            # Retired (#1928) on every path, including the fallback's --help handling.
+            sys.stderr.write(
+                "self-hosted approve is retired (#1928): approve through the gateway tool "
+                "nexus_candidate_approve with a bound approval grant\n"
+            )
+            sys.exit(1)
         if any(arg in sys.argv[1:] for arg in ("--help", "-h")):
             print("Usage: nexus [OPTIONS] COMMAND [ARGS]...")
             print("")

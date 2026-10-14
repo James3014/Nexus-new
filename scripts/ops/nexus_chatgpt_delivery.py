@@ -182,7 +182,7 @@ def action_command_for_task(
     return {
         "task_id": task_id,
         "connector_tool": CONNECTOR_BASH_TOOL,
-        "recommended_tool": recommended_tool,
+        "recommended_tool": gateway_tool or recommended_tool,
         "next_action": action.get("next_action"),
         "command": " ".join(_quote_arg(part) for part in command) if command else None,
         "missing": missing,
