@@ -256,7 +256,9 @@ def recover_last_run(expected_run_root_sha256: str = "") -> list[str]:
     for origin, entry in sorted(entries.items()):
         staged = Path(str(entry.get("staged") or ""))
         expected = str(entry.get("sha256") or "")
-        leftover = HiddenTestStaging(hidden_path=Path(origin), staged_path=staged, staged=True, sha256=expected)
+        leftover = HiddenTestStaging(
+            hidden_path=Path(origin), staged_path=staged, staged=True, sha256=expected
+        )
         if run_root not in staged.parents or not expected:
             leftover._fail_closed("recovery:staged_outside_run_root")
             continue
@@ -331,7 +333,9 @@ class HiddenTestStaging:
             if os.path.lexists(self.hidden_path):
                 index = 0
                 while True:
-                    target = self.staged_path.with_name(f"{HIDDEN_TEST_NAME}{QUARANTINE_SUFFIX}.{index}")
+                    target = self.staged_path.with_name(
+                        f"{HIDDEN_TEST_NAME}{QUARANTINE_SUFFIX}.{index}"
+                    )
                     if not os.path.lexists(target):
                         break
                     index += 1
@@ -380,7 +384,11 @@ class HiddenTestStaging:
         os.chmod(self.sidecar_path, 0o400)
         self.sha256 = digest
         self.staged = True
-        _record_update(self.staged_path.parent.parent, self.hidden_path, {"staged": str(self.staged_path), "sha256": digest})
+        _record_update(
+            self.staged_path.parent.parent,
+            self.hidden_path,
+            {"staged": str(self.staged_path), "sha256": digest},
+        )
 
     def _verified_staged_digest(self) -> str:
         try:
