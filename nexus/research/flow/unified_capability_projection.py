@@ -203,6 +203,61 @@ def _self_index(receipt: Mapping[str, Any], name: str) -> set[str]:
     return index
 
 
+_REQUIRED_INPUT_ERROR = re.compile(r"^[A-Z][A-Z0-9_]*_REQUIRED$")
+_MISSING_INPUT_FIELDS = ("missing_inputs", "missing_evidence", "blockers")
+
+
+def _executor_outcome(value: Any, depth: int = 0) -> Mapping[str, Any] | None:
+    """The innermost executor outcome mapping (the one carrying ``semantic_status``)."""
+
+    if depth > _MAX_OUTCOME_DEPTH or not isinstance(value, Mapping):
+        return None
+    for key in ("response", "outcome"):
+        inner = _executor_outcome(value.get(key), depth + 1)
+        if inner is not None:
+            return inner
+    return value if "semantic_status" in value else None
+
+
+def _blocked_missing_inputs(record: Any) -> dict[str, Any]:
+    """Reason an executor started but refused for missing inputs ({} when it did not).
+
+    * ``semantic_status=BLOCKED`` with an ``*_REQUIRED`` error code (e.g.
+      ``EXPLICIT_VERIFY_COMMANDS_REQUIRED``, ``PLAN_QUALITY_CONTEXT_REQUIRED``);
+    * ``semantic_status=BLOCKED`` whose blockers name missing proof (``missing_*``), as the
+      postflight artifact/claim/delivery gates report;
+    * ``semantic_status=UNVERIFIED`` with ``missing_evidence`` (acceptance_check deciding with
+      no evidence).
+    Authorization blocks (``BLOCKED_EXTERNAL_AUTH``) are not missing inputs.
+    """
+
+    outcome = _executor_outcome(record)
+    if outcome is None:
+        return {}
+    status = str(outcome.get("semantic_status") or "").upper()
+    error = str(outcome.get("error") or "")
+    missing: list[str] = []
+    for key in _MISSING_INPUT_FIELDS:
+        items = outcome.get(key)
+        if isinstance(items, (list, tuple)):
+            missing.extend(str(item) for item in items if isinstance(item, str) and item)
+    if status == "BLOCKED" and _REQUIRED_INPUT_ERROR.match(error):
+        return {"reason": error, "missing_inputs": missing}
+    if status == "BLOCKED" and any(item.startswith("missing_") for item in missing):
+        return {"reason": "VERIFIER_PROOF_REQUIRED", "missing_inputs": missing}
+    if status == "UNVERIFIED" and missing:
+        return {"reason": "ACCEPTANCE_EVIDENCE_REQUIRED", "missing_inputs": missing}
+    return {}
+
+
+def _safe_blocked(receipt: Mapping[str, Any], name: str) -> dict[str, Any]:
+    try:
+        results = receipt.get("capability_results")
+        return _blocked_missing_inputs(results.get(name) if isinstance(results, Mapping) else None)
+    except Exception:  # noqa: BLE001 - unreadable outcome: not classified as blocked
+        return {}
+
+
 def _safe_index(fn: Any, receipt: Mapping[str, Any], name: str) -> set[str]:
     try:
         return set(fn(receipt, name))
@@ -226,6 +281,7 @@ def _compact_stage(
     outcome_simulated: bool = False,
     evidence_index: set[str] | None = None,
     self_index: set[str] | None = None,
+    blocked: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     boundary = (
         stage.get("claim_boundary") if isinstance(stage.get("claim_boundary"), Mapping) else {}
@@ -258,6 +314,7 @@ def _compact_stage(
         "refs_resolved": refs_well_formed
         and bool(refs)
         and all(ref in (evidence_index or set()) for ref in refs),
+        **({"blocked_missing_inputs": dict(blocked)} if blocked else {}),
         "refs_self_reported": refs_well_formed
         and bool(refs)
         and all(ref in (self_index or set()) for ref in refs),
@@ -289,6 +346,7 @@ def project_unified_capability_stages(receipts: Iterable[Any] | None) -> list[di
                 outcome_simulated=_outcome_simulated(receipt, name),
                 evidence_index=_safe_index(_bundle_index, receipt, name),
                 self_index=_safe_index(_self_index, receipt, name),
+                blocked=_safe_blocked(receipt, name),
             )
             prev = merged.get(row["name"])
             if prev is None or _STATUS_RANK.get(row["status"], 0) >= _STATUS_RANK.get(
@@ -313,6 +371,7 @@ def unified_receipts_from_meta(meta: Mapping[str, Any] | None) -> list[Mapping[s
 ATTESTATION_REAL = "real"
 ATTESTATION_REAL_SELF_REPORTED = "real_self_reported"
 ATTESTATION_SIMULATED = "simulated"
+ATTESTATION_BLOCKED_MISSING_INPUTS = "blocked_missing_inputs"
 
 
 def runtime_attestation(receipt: Mapping[str, Any], stage: Mapping[str, Any] | None = None) -> str:
@@ -327,6 +386,10 @@ def runtime_attestation(receipt: Mapping[str, Any], stage: Mapping[str, Any] | N
       is exactly ``True`` (missing is not real);
     * well-formed, non-empty evidence refs;
     * no simulation marker in the executor outcome (``outcome_simulated``).
+
+    Before those signals: a simulation marker makes it ``simulated``; an executor that started
+    and refused for missing inputs (``_blocked_missing_inputs``) is ``blocked_missing_inputs``:
+    the capability did not run.
 
     Then ``real`` when every ref is sealed by the runtime in this capability's own
     ``REAL_INVOKED`` evidence-bundle entry (``refs_resolved``, see ``_bundle_index``);
@@ -345,6 +408,13 @@ def runtime_attestation(receipt: Mapping[str, Any], stage: Mapping[str, Any] | N
         if name in SIMULATED_BY_DESIGN_EXECUTORS:
             return ATTESTATION_SIMULATED
         source = stage if isinstance(stage, Mapping) else receipt
+        if bool(receipt.get("outcome_simulated")) or bool(source.get("outcome_simulated")):
+            return ATTESTATION_SIMULATED
+        if isinstance(source.get("blocked_missing_inputs"), Mapping) and source.get(
+            "blocked_missing_inputs"
+        ):
+            # Started and refused for missing inputs: the capability did not run.
+            return ATTESTATION_BLOCKED_MISSING_INPUTS
         if source.get("simulated") is not False:
             return ATTESTATION_SIMULATED
         if "simulated" in receipt and receipt.get("simulated") is not False:
@@ -400,6 +470,12 @@ def reproject_receipt_base_claim_boundary(
     top_cb: dict[str, Any] = dict(top) if isinstance(top, Mapping) else {}
     attestation = runtime_attestation(updated, stage) if refs else ATTESTATION_SIMULATED
     real = attestation == ATTESTATION_REAL
+    if attestation == ATTESTATION_BLOCKED_MISSING_INPUTS:
+        updated["attestation"] = ATTESTATION_BLOCKED_MISSING_INPUTS
+        blocked = stage.get("blocked_missing_inputs") if isinstance(stage, Mapping) else None
+        if isinstance(blocked, Mapping):
+            updated["blocked_reason"] = str(blocked.get("reason") or "")
+            updated["blocked_missing_inputs"] = list(blocked.get("missing_inputs") or [])
     if attestation == ATTESTATION_REAL_SELF_REPORTED:
         # The executor says it ran but the runtime sealed no evidence: its own class, never
         # real; both boundaries stay simulated so no claim reader can see a real claim.

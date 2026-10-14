@@ -897,3 +897,101 @@ def test_routing_node_upgrades_only_with_runtime_sealed_evidence() -> None:
     ])
     out = overlay_unified_capability_receipts([_stale_flow_receipt("research_route")], stages)[0]
     assert classify_receipt(out) == "not_executable"  # self-reported is not enough
+
+
+def _blocked_case(name: str, outcome: dict, *, sealed: bool = False) -> tuple[str, dict, dict]:
+    from nexus.research.flow.unified_capability_projection import runtime_attestation
+
+    stage = _stage(name, "INVOKED")
+    record = {
+        name: {
+            "physical_callable": f"capability_executor_registry:{name}",
+            "evidence_refs": list(stage["evidence_refs"]),
+            "response": {"response": {"outcome": outcome}},
+        }
+    }
+    receipt = {"task_id": "t", "capabilities": [stage], "capability_results": record}
+    if sealed:
+        receipt["capability_evidence_bundle"] = _bundle(stage)
+    stages = project_unified_capability_stages([receipt])
+    out = overlay_unified_capability_receipts([_stale_flow_receipt(name)], stages)[0]
+    return runtime_attestation({"name": name}, stages[0]), out, stages[0]
+
+
+def test_executors_refusing_for_missing_inputs_are_blocked_not_run() -> None:
+    from scripts.bench.strict_llm_baseline import (
+        capability_summary,
+        classify_receipt,
+        classify_row_capabilities,
+    )
+
+    cases = {
+        "pregate": (
+            {
+                "action": "run_pregate",
+                "semantic_status": "BLOCKED",
+                "error": "EXPLICIT_VERIFY_COMMANDS_REQUIRED",
+                "command_count": 0,
+            },
+            "EXPLICIT_VERIFY_COMMANDS_REQUIRED",
+        ),
+        "plan_quality_gate": (
+            {
+                "semantic_status": "BLOCKED",
+                "error": "PLAN_QUALITY_CONTEXT_REQUIRED",
+                "missing_inputs": ["target_files", "impact_map"],
+            },
+            "PLAN_QUALITY_CONTEXT_REQUIRED",
+        ),
+        "acceptance_check": (
+            {
+                "action": "decide_completion",
+                "semantic_status": "UNVERIFIED",
+                "missing_evidence": ["verifier_status_not_pass", "missing_verifier_artifact"],
+            },
+            "ACCEPTANCE_EVIDENCE_REQUIRED",
+        ),
+        "claim_gate": (
+            {
+                "semantic_status": "BLOCKED",
+                "blockers": ["missing_verifier_status", "missing_verifier_artifact"],
+            },
+            "VERIFIER_PROOF_REQUIRED",
+        ),
+    }
+    receipts = []
+    for name, (outcome, reason) in cases.items():
+        # Even a sealed REAL_INVOKED bundle entry cannot make a refusal real.
+        kind, out, stage = _blocked_case(name, outcome, sealed=True)
+        assert kind == "blocked_missing_inputs", name
+        assert stage["blocked_missing_inputs"]["reason"] == reason
+        assert out["blocked_reason"] == reason
+        assert out["claim_boundary"]["simulated"] is True
+        assert out["receipt_base"]["claim_boundary"]["simulated"] is True
+        assert classify_receipt(out) == "blocked_missing_inputs"
+        receipts.append(out)
+    assert receipts[1]["blocked_missing_inputs"] == ["target_files", "impact_map"]
+
+    rows = [{"mode": "with_nexus", "task_id": "x", "capability_receipts": receipts}]
+    classify_row_capabilities(rows[0])
+    assert rows[0]["capabilities_real"] == []
+    assert rows[0]["capabilities_real_self_reported"] == []
+    assert rows[0]["capability_blocked_reasons"]["pregate"] == "EXPLICIT_VERIFY_COMMANDS_REQUIRED"
+    assert capability_summary(rows)["capability_blocked_missing_inputs"] == {
+        name: {reason: 1} for name, (_outcome, reason) in sorted(cases.items())
+    }
+
+
+def test_auth_blocks_and_real_input_output_are_not_missing_inputs() -> None:
+    # An authorization block is not a missing input: stays simulated (stage says so).
+    kind, _out, stage = _blocked_case(
+        "research", {"semantic_status": "BLOCKED", "error": "BLOCKED_EXTERNAL_AUTH"}
+    )
+    assert "blocked_missing_inputs" not in stage
+    # Physical output on real inputs, own record only -> real_self_reported.
+    kind, out, _stage_row = _blocked_case(
+        "memory",
+        {"semantic_status": "SUCCEEDED", "search_performed": True, "hits": ["note-1"]},
+    )
+    assert kind == "real_self_reported"
+    assert out["attestation"] == "real_self_reported"
