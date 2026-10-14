@@ -126,3 +126,28 @@ python -m pytest -q -p no:cacheprovider $T
 Behaviour under rollback: the canonical executor again returns PASS for contaminated research output and for a broken guard. The clean-output test keeps passing, so the rollback leaves clean research unchanged. Rollback time was about 16 seconds, with no state or data involved.
 
 Limits: the line numbers in the PR may differ after rebase, but the drilled function is unchanged. The drill script and log were kept locally by the drill operator; the results above are copied from that log.
+
+---
+
+## Addendum 2: phrase-level check, auto-flow wiring and guard `terms` parameter (#2216, Owner option A)
+
+**Date**: 2026-10-14 (drill run 23:20:24Z–23:22:16Z)
+**Worktree HEAD**: `36240678fe99dd3c0358c59c111d6d60b3debdb7` (#2216 branch)
+**Rolled back**: `nexus/core/capability_executor_registry.py`, `nexus/app/research_flow_service.py`, `nexus/research/contamination_guard.py`
+**Rollback target**: the branch's merge-base with main, `0d03612850e86a57ea05af42b211949572d984ff` (no enforcement anywhere)
+
+Addendum 1 drilled the first version of the enforcement point (`1f0e0cb5e`). That version has since been replaced. The wiring now calls `nexus/research/contamination_enforcement.py` from both the canonical executor and the research auto-flow, and the guard has a new `terms` parameter, so the drill was repeated. The enforcement module stays in place during the drill, but nothing calls it after the rollback.
+
+`T="tests/research/test_research_contamination_canonical_path.py tests/research/test_research_isolation.py tests/services/test_capability_wiring_fixes_batch1.py"`, run with the worktree's own `uv sync --frozen --all-extras` venv and `PYTHONPATH=$PWD`.
+
+| Step | Command | Result |
+|------|---------|--------|
+| 1 Baseline | `python -m pytest -q -p no:cacheprovider $T` | `79 passed`, exit 0 |
+| 2 Roll back | `git checkout 0d0361285 -- <3 files>` | 3 files changed, 4 insertions, 71 deletions. The sha256 prefixes are `8b25293cd2d93038` (registry), `7c6f254af7b99c9c` (flow service) and `d859a968285ee43f` (guard), matching the main versions |
+| 3 Detect | `python -m pytest -q -p no:cacheprovider -rf $T` | `14 failed, 65 passed`, exit 1. Failures: all 10 canonical-executor BLOCK tests (design language, design field, nested field, guard error, echo plus contamination, blocked_assumptions ×2, summary, raw.answer, non-schema key), `test_guard_terms_parameter_keeps_legacy_default`, and all 3 auto-flow BLOCK tests |
+| 4 Restore | `git checkout HEAD -- <3 files>` | sha256 prefixes are identical to pre-drill (`e2b260600ce69262`, `a0e30e3775feeb44`, `ebda28d136869c54`), and `git status` is clean |
+| 5 Verify | `python -m pytest -q -p no:cacheprovider $T` | `79 passed`, exit 0 |
+
+Under rollback, the canonical executor and the auto-flow again accept contaminated research. The clean-output, echo and normal-software-text tests keep passing, so rolling back changes only the blocking. Rollback took about 2 minutes, including three test runs, and involves no state.
+
+Limits: the drill script and its log were kept locally by the drill operator, and the results above are copied from that log. Commit SHAs refer to the PR branch before squash-merge.
