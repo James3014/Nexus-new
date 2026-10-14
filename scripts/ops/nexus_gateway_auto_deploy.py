@@ -134,6 +134,7 @@ FAILED_OUTCOMES = (
     "BLOCKED_MANAGER_BUSY",
     "FOREIGN_PLIST",
     "JOURNAL_CORRUPT",
+    "RECONCILE_FAILED",
 )
 MAX_BACKOFF_SECONDS = 6 * 60 * 60
 # Open PRs that bump the runtime/dependency pin (or anchor such a bump).  While
@@ -1475,6 +1476,14 @@ def run_cycle(
             return {**status, "status": "BUSY"}
         ctx = _Cycle(cfg, host, prober, api_get, environ, tool_python or Path(sys.executable))
         ctx.fetch = fetch
+        stuck = (
+            hold_reason(cfg, environ)
+            and (last_receipt(cfg.state_dir) or {}).get("outcome") == "RECONCILE_FAILED"
+        )
+        if cfg.journal.exists() and not dry_run and stuck:
+            # A valid journal whose reconciliation failed unexpectedly: kept and
+            # held for the Owner instead of failing again every cycle.
+            return {**status, "status": "HELD", "hold": hold_reason(cfg, environ)}
         if cfg.journal.exists() and not dry_run:
             # A half-finished switch is safety work, not a new deploy: it is
             # resolved even under HOLD (HOLD still blocks every new switch).
@@ -1514,14 +1523,14 @@ class _Cycle:
             return {**status, "status": "PENDING_SWITCH_JOURNAL", "journal": str(cfg.journal)}
         previous_plist = cfg.plist.read_bytes()
         if _sha256(previous_plist) not in known_plist_hashes(cfg):
-            # An open R1 recovery may have written this plist: wait for it to
-            # finish before calling the plist foreign (FOREIGN_PLIST + HOLD).
-            block = host.r1_recovery_block(cfg)
-            if block is not None:
-                return {**status, "status": "BLOCKED_MANAGER_BUSY", "reason": block}
             if dry_run:
-                return {**status, "status": "FOREIGN_PLIST"}
-            return {**status, "status": "FOREIGN_PLIST", "receipt": self.foreign_plist()}
+                block = host.r1_recovery_block(cfg)
+                state = "BLOCKED_MANAGER_BUSY" if block is not None else "FOREIGN_PLIST"
+                return {**status, "status": state}
+            verdict = self.foreign_verdict()
+            if verdict is not None:
+                return {**status, **verdict}
+            previous_plist = cfg.plist.read_bytes()
         origin = _must(host, _git(cfg, "remote", "get-url", "origin"), "ORIGIN_URL_FAILED").strip()
         if origin not in ORIGIN_URLS:
             return {**status, "status": "ORIGIN_MISMATCH", "origin": origin}
@@ -1698,6 +1707,28 @@ class _Cycle:
                 self.cfg.journal.unlink()
         return receipt
 
+    def foreign_verdict(self) -> Optional[Dict[str, Any]]:
+        """Decide an unknown live plist under GATEWAY_LOCK -> R1 ledger lock.
+
+        An open R1 recovery may have written it, and R1 appends REQUESTED under
+        the ledger lock, so the R1 check, the re-read and the FOREIGN_PLIST +
+        HOLD write all happen while both locks are held.  Returns None when the
+        plist turned out to be known after all.
+        """
+        cfg = self.cfg
+        try:
+            with self.host.manager_lock(cfg), self.host.r1_guard(cfg):
+                block = self.host.r1_recovery_block(cfg)
+                if block is not None:
+                    return {"status": "BLOCKED_MANAGER_BUSY", "reason": block}
+                if _sha256(cfg.plist.read_bytes()) in known_plist_hashes(cfg):
+                    return None
+                return {"status": "FOREIGN_PLIST", "receipt": self.foreign_plist()}
+        except DeployError as exc:
+            if str(exc).startswith("MANAGER_LOCK_UNAVAILABLE"):
+                return {"status": "BLOCKED_MANAGER_BUSY", "reason": str(exc)[:300]}
+            raise
+
     def foreign_plist(self) -> Dict[str, Any]:
         receipt = self.new_receipt("0" * 40, self.cfg.plist.read_bytes())
         receipt.pop("candidate_commit")
@@ -1831,10 +1862,10 @@ class _Cycle:
             # A receipt without a Core pin (e.g. an older journal) fails closed.
             core = receipt.get("core") if isinstance(receipt.get("core"), dict) else {}
             live = self.live_probe(receipt["candidate_commit"], root, python, core=core)
-        except DeployError as exc:
-            live = {"ok": False, "error": str(exc)[:300]}
+        except Exception as exc:  # noqa: BLE001 - reload/probe trouble is a failed probe
+            live = {"ok": False, "error": f"{type(exc).__name__}:{exc}"[:300]}
         receipt["probes"]["live"] = live
-        if live["ok"]:
+        if live.get("ok"):
             receipt["deployer_link"] = self.move_tool_link(root)
             return {"outcome": "DEPLOYED"}
         receipt["reason"] = "candidate failed the live probe"
@@ -1962,7 +1993,17 @@ class _Cycle:
             # The #526 manager or its ledger is busy: keep the journal, retry.
             return self.postpone(receipt, str(exc))
         except Exception as exc:  # noqa: BLE001 - never crash every cycle on one journal
-            return self.quarantine_journal(f"RECONCILE_FAILED:{type(exc).__name__}:{exc}"[:300])
+            # The journal passed validation, so it is kept (never quarantined):
+            # HOLD stops the retry loop until the Owner has looked at it.
+            receipt.update(
+                outcome="RECONCILE_FAILED",
+                reason=f"RECONCILE_FAILED:{type(exc).__name__}:{exc}"[:300],
+                journal_kept=True,
+            )
+            return self.close_receipt(
+                receipt,
+                hold=f"auto-hold: RECONCILE_FAILED {receipt.get('attempt_id')}; journal kept",
+            )
         return self.close_receipt(receipt, hold=hold)
 
     def quarantine_journal(self, reason: str) -> Dict[str, Any]:
@@ -1989,6 +2030,13 @@ class _Cycle:
         )
 
     def move_tool_link(self, root: Path) -> Dict[str, Any]:
+        """Self-update; never fails the deploy (an error just keeps the old link)."""
+        try:
+            return self._move_tool_link(root)
+        except Exception as exc:  # noqa: BLE001
+            return {"moved": False, "reason": f"{type(exc).__name__}:{exc}"[:300]}
+
+    def _move_tool_link(self, root: Path) -> Dict[str, Any]:
         """Self-update: point the LaunchAgent at the new tree only if its deployer works."""
         cfg = self.cfg
         deployer = root / DEPLOYER

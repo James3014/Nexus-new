@@ -2112,10 +2112,15 @@ def test_unexpected_reconcile_error_quarantines_with_hold(
 
     monkeypatch.setattr(ad._Cycle, "finish_switch", explode)
     result = cycle(cfg, FakeHost(), FakeProber())
-    assert result["status"] == "RECONCILED_JOURNAL_CORRUPT"
+    # #2198 review: a journal that passed validation is never quarantined; it is
+    # kept with HOLD so the failure does not repeat every cycle.
+    assert result["status"] == "RECONCILED_RECONCILE_FAILED"
     assert "RECONCILE_FAILED:RuntimeError" in result["receipt"]["reason"]
-    assert cfg.hold_file.exists() and not cfg.journal.exists()
-    assert cycle(cfg, FakeHost(), FakeProber())["status"] == "HELD"
+    assert cfg.hold_file.exists() and cfg.journal.exists()
+    assert not list(cfg.state_dir.glob("pending-switch.corrupt.*.json"))
+    host = FakeHost()
+    assert cycle(cfg, host, FakeProber())["status"] == "HELD"
+    assert cfg.journal.exists() and host.reloads == []
 
 
 def test_busy_manager_during_reconcile_keeps_the_journal(cfg: ad.Config) -> None:
@@ -3445,3 +3450,108 @@ def test_rollback_postponed_when_r1_lock_is_unavailable_keeps_the_journal(cfg: a
     assert result["status"] == "BLOCKED_MANAGER_BUSY"
     assert result["receipt"]["switched"] is True and cfg.journal.exists()
     assert not cfg.hold_file.exists()
+
+
+# --------------------------------------------------- #2198 review round 2
+
+
+def test_cycle_start_foreign_verdict_is_taken_under_both_locks(cfg: ad.Config) -> None:
+    """R1 races the HOLD write: the decision runs under GATEWAY_LOCK + ledger lock."""
+    _foreign_live_plist(cfg)
+    host = FakeHost()
+    held_during_hold_write: list[tuple[int, int]] = []
+    real_set_hold = ad._set_hold
+
+    def recording_set_hold(c: ad.Config, reason: str) -> None:
+        held_during_hold_write.append((
+            host.lock_events.count("acquire") - host.lock_events.count("release"),
+            host.r1_guard_depth,
+        ))
+        held_during_hold_write.append((0, int(host.r1_try_append())))
+        real_set_hold(c, reason)
+
+    host.after_r1_check = host.r1_try_append
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(ad, "_set_hold", recording_set_hold)
+        result = cycle(cfg, host, FakeProber())
+    assert result["status"] == "FOREIGN_PLIST" and cfg.hold_file.exists()
+    (manager_depth, guard_depth), (_, append_ok) = held_during_hold_write
+    assert manager_depth == 1 and guard_depth == 1 and append_ok == 0
+    # Every racing append between the R1 check and the HOLD write was refused.
+    assert host.r1_append_attempts and not any(host.r1_append_attempts)
+
+
+def test_cycle_start_r1_opening_before_the_guarded_decision_blocks(cfg: ad.Config) -> None:
+    """R1 opens after the plist looked unknown but before the guarded decision."""
+    _foreign_live_plist(cfg)
+
+    class OpensWhenGuarded(FakeHost):
+        @contextlib.contextmanager
+        def r1_guard(self, c: ad.Config) -> Iterator[None]:  # type: ignore[override]
+            self.r1_block = "R1_OPEN_RECOVERY_BLOCKS_V1_EFFECT:gen10:REQUESTED"
+            with FakeHost.r1_guard(self, c):
+                yield
+
+    result = cycle(cfg, OpensWhenGuarded(), FakeProber())
+    assert result["status"] == "BLOCKED_MANAGER_BUSY" and not cfg.hold_file.exists()
+
+
+def test_cycle_start_plist_adopted_meanwhile_proceeds(cfg: ad.Config) -> None:
+    _foreign_live_plist(cfg)
+
+    class AdoptedWhenGuarded(FakeHost):
+        @contextlib.contextmanager
+        def r1_guard(self, c: ad.Config) -> Iterator[None]:  # type: ignore[override]
+            ad.remember_plist(c, c.plist.read_bytes())  # Owner ran `adopt` meanwhile
+            with FakeHost.r1_guard(self, c):
+                yield
+
+    result = cycle(cfg, AdoptedWhenGuarded(), FakeProber())
+    assert result["status"] != "FOREIGN_PLIST" and not cfg.hold_file.exists()
+
+
+@pytest.mark.parametrize("raised", [TimeoutError("timed out"), OSError("reset"), ValueError("x")])
+def test_probe_exception_on_valid_journal_rolls_back_not_quarantined(
+    cfg: ad.Config, raised: Exception
+) -> None:
+    """R1 terminal, the live probe of the candidate raises: normal rollback path."""
+    before = _crash_after_candidate_plist(cfg)
+
+    class RaisesForCandidate(FakeProber):
+        def probe(self, **kw: Any) -> dict[str, Any]:
+            if kw["commit"] == NEW:
+                raise raised
+            return super().probe(**kw)
+
+    host = FakeHost()
+    result = cycle(cfg, host, RaisesForCandidate())
+    assert result["status"] == "RECONCILED_ROLLED_BACK"
+    assert type(raised).__name__ in result["receipt"]["probes"]["live"]["error"]
+    assert cfg.plist.read_bytes() == before and not cfg.journal.exists()
+    assert not list(cfg.state_dir.glob("pending-switch.corrupt.*.json"))
+
+
+def test_reload_exception_on_valid_journal_rolls_back(cfg: ad.Config) -> None:
+    before = _crash_after_candidate_plist(cfg)
+    host = FakeHost()
+
+    def first_reload_breaks(count: int) -> None:
+        if count == 1:
+            raise RuntimeError("launchctl exploded")
+
+    host.on_reload = first_reload_breaks
+    result = cycle(cfg, host, FakeProber())
+    assert result["status"] == "RECONCILED_ROLLED_BACK"
+    assert cfg.plist.read_bytes() == before and not cfg.journal.exists()
+
+
+def test_tool_link_error_does_not_fail_a_deploy(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def boom(*_a: Any, **_k: Any) -> Any:
+        raise OSError("read-only")
+
+    monkeypatch.setattr(ad._Cycle, "_move_tool_link", boom)
+    result = cycle(cfg, FakeHost(), FakeProber())
+    assert result["status"] == "DEPLOYED"
+    assert result["receipt"]["deployer_link"]["moved"] is False
