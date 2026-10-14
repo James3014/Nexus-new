@@ -231,9 +231,8 @@ def collect(
         for path, value, issue, identity, effect, atts in prepared:
             notes: list[str] = []
             request = requests.get(effect or "", {})
-            req_identity = (
-                request.get("identity") if isinstance(request.get("identity"), dict) else {}
-            )
+            raw_identity = request.get("identity")
+            req_identity: dict[str, Any] = raw_identity if isinstance(raw_identity, dict) else {}
             intel = attempts_i.get(effect or "")
             task_id = task_of(value, atts)
             state = str(value.get("state") or "UNKNOWN")
@@ -529,7 +528,7 @@ def render_markdown(runs: list[dict[str, Any]], meta: dict[str, Any]) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
     parser.add_argument("--state-root", default=DEFAULT_STATE_ROOT)
     parser.add_argument("--failure-log", default=DEFAULT_FAILURE_LOG)
     parser.add_argument("--format", choices=("jsonl", "markdown"), default="markdown")
