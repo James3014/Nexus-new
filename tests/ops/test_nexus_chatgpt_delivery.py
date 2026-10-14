@@ -352,3 +352,14 @@ def test_task_launch_skill_exits_for_owner_authorized_direct_canonical_work():
     assert "Use only after work is classified as governed" in normalized
     assert "DIRECT_CANONICAL does not require a Task Card or lifecycle state" in normalized
     assert "Code mutation must use the self-hosted lifecycle tools" not in normalized
+
+
+def test_summarize_actionable_rewrites_retired_approve_tool_in_tasks():
+    from scripts.ops.nexus_chatgpt_delivery import summarize_actionable
+
+    task = _actionable_task()
+    task["task_action"]["recommended_tool"] = "nexus_self_hosted_approve_promotion"
+    summary = summarize_actionable({"tasks": [task], "actionable_count": 1})
+    assert summary["tasks"][0]["task_action"]["recommended_tool"] == "nexus_candidate_approve"
+    assert summary["next_commands"][0]["recommended_tool"] == "nexus_candidate_approve"
+    assert "nexus_self_hosted_approve_promotion" not in json.dumps(summary)

@@ -158,6 +158,8 @@ def parse_and_validate_input(raw_input: str) -> Dict[str, Any]:
         raise TypeError(f"Input payload must be a JSON object, got {type(data).__name__}.")
 
     op = data.get("op") or data.get("operation")
+    if "op" in data and "operation" in data and data.get("op") != data.get("operation"):
+        raise ValueError("Conflicting 'op' and 'operation' fields; send exactly one.")
     if not op or not isinstance(op, str):
         raise ValueError("JSON payload missing valid 'op' or 'operation' string field.")
 

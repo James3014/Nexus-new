@@ -379,3 +379,9 @@ def test_repo_root_env_var_validation(tmp_path: Path):
         finally:
             del os.environ["NEXUS_CUELINE_REPO_ROOT"]
 
+
+
+def test_conflicting_op_and_operation_fields_are_rejected():
+    payload = {"op": "list-actionable", "operation": "approve"}
+    with pytest.raises(ValueError, match="Conflicting"):
+        parse_and_validate_input(json.dumps(payload))

@@ -190,13 +190,26 @@ def action_command_for_task(
     }
 
 
+_RETIRED_APPROVE_TOOLS = {"nexus_self_hosted_approve_promotion"}
+
+
+def _without_retired_approve_tool(task: Any) -> Any:
+    """Point any legacy approve recommendation at the gateway tool (#1928)."""
+    if not isinstance(task, Mapping):
+        return task
+    action = task.get("task_action")
+    if isinstance(action, Mapping) and action.get("recommended_tool") in _RETIRED_APPROVE_TOOLS:
+        return {**task, "task_action": {**action, "recommended_tool": "nexus_candidate_approve"}}
+    return task
+
+
 def summarize_actionable(
     actionable: Mapping[str, Any],
     *,
     state_dir: str | Path | None = None,
     integration_branch: str = DEFAULT_INTEGRATION_BRANCH,
 ) -> dict[str, Any]:
-    tasks = list(actionable.get("tasks") or [])
+    tasks = [_without_retired_approve_tool(task) for task in actionable.get("tasks") or []]
     return {
         "schema": "nexus.chatgpt_delivery_actionable.v1",
         "actionable_count": int(actionable.get("actionable_count") or len(tasks)),

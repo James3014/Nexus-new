@@ -53,7 +53,7 @@ bootstrap a Task Card or manufacture GitHub merge authority.
 
 ## Safety boundaries
 
-`REPO_READY_CONNECTOR_BLOCKED` is the terminal result only when neither native connector tools nor `nexus.bash` with the repo-owned self-hosted CLI is available. When `nexus.bash` plus the repo-owned wrapper or official self-hosted CLI is available, `nexus.bash` must be used for governed lifecycle operations instead of blocking. Do not use direct worktree delivery, manual branch creation, a protected-main merge, remote publication, history rewrite, or ref/branch/tag deletion as a workaround. Never delete candidate or salvage
+`REPO_READY_CONNECTOR_BLOCKED` is the terminal result only when neither native connector tools nor `nexus.bash` with the repo-owned self-hosted CLI is available. When `nexus.bash` plus the repo-owned wrapper or official self-hosted CLI is available, `nexus.bash` must be used for governed lifecycle operations instead of blocking, **except approval**: approval has no shell route (the CLI `self-hosted approve` is retired, #1928) and requires the gateway `candidate_approve` tool with a bound approval grant; without the gateway, approval stops at `ACTION_REQUIRED`. Do not use direct worktree delivery, manual branch creation, a protected-main merge, remote publication, history rewrite, or ref/branch/tag deletion as a workaround. Never delete candidate or salvage
 refs. Rollback, if explicitly required, must restore the recorded integration
 SHA without rewriting existing commits.
 
