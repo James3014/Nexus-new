@@ -1,6 +1,6 @@
 # HANDOFF
 
-更新：2026-10-13 · by Claude · HEAD `be680cefd`
+更新：2026-10-14 · by Claude（workspace-fb）· base `4d6035ee2`
 <!-- 規則見 docs/agents/HANDOFF_PROTOCOL.md。上限 150 行；過期內容移到 docs/archive/HANDOFF-YYYY-MM.md。 -->
 
 ## ▶ 下一步（只放一件，必須帶 #Issue）
@@ -12,13 +12,13 @@
 - #1757、#1758、#1760：invariant gap，仍 OPEN（PR #1768 已合併）。
 
 ## 待確認（沒有 Issue 號）
-- #29／#49（GBF-003／GBF-005）實機 canary 前要 Owner 決定：Online 用 agy gemini-3.7 還是 3.8；Agy 唯讀的合法方式（plan＋sandbox，或新開 runtime Issue）；nexus-runtime#64 沒有獨立審查就合併，要追認還是補審；PR #1408 的 canary 腳本繞過治理路徑，不能當結案證據。
+- （已解決 10/14）#29 實機 canary PASS 並經獨立審查，durable marker 成立、Issue 已關；#49 前提過時（World A 沒有任何出口回傳模型文字），依 Owner 決定以鎖定測試結案（PR #2161）。GB-078／GB-080 已轉為 covered。
 - #1447（#526 relevance-aware convergence）是否保留，待 Owner。
 - forecast_gate、LanceDB、MemPalace 接線已完成；MemPalace 的「禁止」belief 只顯示在 plan trace，selector 不會實際移除 skill。
 
 ## 卡住 / 注意
-- Golden Behavior Corpus：100 個案例，96 個已覆蓋。剩下的 finding 是 GBF-002（live Gateway，只能實機驗）、GBF-003（#29）、GBF-005（#49）、GBF-007（#1750）。執行方式：`.venv/bin/python scripts/ops/run_golden_behavior_eval.py`。用 `scripts/ops/check_golden_finding_owners.py --strict` 檢查 finding 的 owner Issue 是否已經過期。
-- live MCP Gateway 跑的是 `10d6dcea`：沒有推上 GitHub，而且落後 main 171 個 commit（#1900）。它的 `reload_required=false` 只拿 deployment 跟自己比，看不出這種落後。
+- Golden Behavior Corpus：100 個案例，98 個已覆蓋。剩下的 finding 是 GBF-002（live Gateway，只能實機驗）、GBF-007（#1750）。執行方式：`.venv/bin/python scripts/ops/run_golden_behavior_eval.py`。用 `scripts/ops/check_golden_finding_owners.py --strict` 檢查 finding 的 owner Issue 是否已經過期。
+- live MCP Gateway：10/14 已 rebind 到 `f239b657`（#2036／#2037，GB-077 PASS）；現行授權 2026-10-14T09:40Z 到期。之後改為「從 main 自動部署＋冒煙測試＋自動退回＋獨立 venv」（#2153，workspace-64），期間不要手動 rebind。
 - Issue 不再需要手寫 `NEXUS_CORE_EVIDENCE_UNIVERSE` marker：issue-gate 用 `evidence-universe: trusted-config`，證據範圍由 base ref 的 `.nexus-core/config.toml` 推導（nexus-core b245430b）。`NEXUS_CORE_MATERIAL_TRANSITION` 不變，改 material 身分時仍要。main 在開 PR 前後若有前進，Core gate 會回 `BASE_REF_NOT_ANCESTOR`，要 rebase（nexus-core#243）。
 - 機密掃描涵蓋所有已發佈的 ref。測試 fixture 裡的權杖必須拆開寫（例如 `"xo" + "xb-"`），否則會擋住全 repo（#1898）。
 - 工作模式檔有 fail-closed 驗證器 `scripts/ops/check_operating_mode.py`。YAML 新增欄位時要在同一個 PR 更新驗證器。
