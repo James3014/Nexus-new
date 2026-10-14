@@ -1530,7 +1530,8 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         return executor.evaluate_candidate(seed=seed, hint=hint, code=code, source=source)
 
     if llm_generator is not None and hasattr(llm_generator, "visible_verifier"):
-        llm_generator.visible_verifier = _runtime_visible_verifier
+        # Only the online generator has the seam (tests may substitute the generator class).
+        setattr(llm_generator, "visible_verifier", _runtime_visible_verifier)
 
     candidates: list[CandidateEval] = []
     routing_autoreason_enabled = _resolve_executor_flag(config.enable_autoreason_executor, "NEXUS_AUTOREASON_EXECUTOR")
