@@ -8,9 +8,12 @@ with the hidden test quoted.  Both rows were counted as model solves.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 from scripts.bench.capability_ab_runner import (
     CapabilityTask,
@@ -235,41 +238,39 @@ def test_hidden_feedback_success_rows_are_rescues_not_model_solves() -> None:
     assert card["failed"] == 0
 
 
-def test_strict_cli_defaults_to_no_hidden_feedback(tmp_path: Path) -> None:
+def test_strict_cli_defaults_to_no_hidden_feedback(tmp_path: Path, monkeypatch) -> None:
     """``--strict-llm-baseline`` alone turns hidden feedback off; ``--allow-hidden-feedback`` restores it."""
 
-    import os
+    import scripts.bench.capability_ab_runner as runner
 
-    repo_root = Path(__file__).resolve().parents[2]
-    probe = (
-        "import os, sys\n"
-        "import scripts.bench.capability_ab_runner as r\n"
-        "def stop(*a, **k):\n"
-        "    print('NHF=' + os.environ.get('NEXUS_BENCH_NO_HIDDEN_FEEDBACK', ''))\n"
-        "    raise SystemExit(0)\n"
-        "r.build_public_benchmark_preflight = stop\n"
-        "sys.argv = ['capability_ab_runner.py', '--tasks-file', 'scripts/bench/public_benchmark_nexus_value_v1.json',\n"
-        "            '--output-dir', sys.argv[1], '--preflight-only'] + sys.argv[2:]\n"
-        "r.main()\n"
-    )
-    env = {**os.environ, "PYTHONPATH": str(repo_root)}
-    env.pop("NEXUS_BENCH_NO_HIDDEN_FEEDBACK", None)
+    class _Stop(Exception):
+        pass
+
+    def stop(*_args, **_kwargs):
+        raise _Stop(os.environ.get("NEXUS_BENCH_NO_HIDDEN_FEEDBACK", ""))
+
+    monkeypatch.setattr(runner, "build_public_benchmark_preflight", stop)
 
     def run(*flags: str) -> str:
-        proc = subprocess.run(
-            [sys.executable, "-c", probe, str(tmp_path / "out"), *flags],
-            cwd=repo_root,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=120,
-            check=False,
+        monkeypatch.delenv("NEXUS_BENCH_NO_HIDDEN_FEEDBACK", raising=False)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "capability_ab_runner.py",
+                "--tasks-file",
+                "scripts/bench/public_benchmark_nexus_value_v1.json",
+                "--output-dir",
+                str(tmp_path / "out"),
+                "--preflight-only",
+                *flags,
+            ],
         )
-        lines = [line for line in proc.stdout.splitlines() if line.startswith("NHF=")]
-        assert lines, proc.stderr[-2000:]
-        return lines[-1]
+        with pytest.raises(_Stop) as exc:
+            runner.main()
+        return str(exc.value)
 
-    assert run("--strict-llm-baseline") == "NHF=1"
-    assert run("--strict-llm-baseline", "--allow-hidden-feedback") == "NHF=0"
-    assert run() == "NHF=0"
-    assert run("--no-hidden-feedback") == "NHF=1"
+    assert run("--strict-llm-baseline") == "1"
+    assert run("--strict-llm-baseline", "--allow-hidden-feedback") == "0"
+    assert run() == "0"
+    assert run("--no-hidden-feedback") == "1"
