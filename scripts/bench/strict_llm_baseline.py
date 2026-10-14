@@ -4,6 +4,14 @@ Legacy ADRs (teacher-student sweep plan, route-cost measurement lessons) require
 that a success with ``model_calls == 0`` is not counted as a model solve: it came
 from a deterministic/local rescue path. Under strict mode such rows are tagged
 ``solve_classification="deterministic_rescue"`` and reported separately.
+
+Replay note (wiring plan PR-1): a capability receipt is real only if its boundaries say so.
+The unified-capability overlay (``nexus/research/flow/unified_capability_projection.py``)
+re-projects ``receipt_base.claim_boundary`` to real only when the runtime stage carries
+``simulated=False``, ``receipt_present=True`` and evidence refs that resolve to records in the
+runtime receipt.  Bench rows recorded before that rule (e.g. ``runs_20261014b``) carry none of
+these, so replaying them through the overlay classifies those capabilities simulated by design;
+regenerate the numbers from a fresh run instead of loosening the rule.
 """
 
 from __future__ import annotations

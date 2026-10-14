@@ -33,7 +33,11 @@ _ARCHIVED_MAX_DEPTH = 12
 
 
 def _archived_name(value: Any) -> str:
-    return value if isinstance(value, str) and value in ARCHIVED_CAPABILITY_REASONS else ""
+    """Canonical archived name for ``value`` (whitespace/case-insensitive), else ""."""
+    if not isinstance(value, str):
+        return ""
+    name = value.strip().lower()
+    return name if name in ARCHIVED_CAPABILITY_REASONS else ""
 
 
 def _strip_archived(value: Any, dropped: dict[str, str], depth: int = 0, key: str = "") -> Any:

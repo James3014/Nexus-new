@@ -47,7 +47,7 @@ _STATUS_RANK = {"INVOKED": 3, "SKIPPED": 2, "SELECTED_NOT_EXECUTED": 1}
 # says the node is not an executable capability.
 NOT_EXECUTABLE_ROUTING_NODE = f"{NOT_EXECUTABLE_PREFIX}:control_plane_routing_node"
 NOT_EXECUTABLE_ROUTING_NODES: dict[str, str] = {"research_route": NOT_EXECUTABLE_ROUTING_NODE}
-_MAX_OUTCOME_DEPTH = 5
+_MAX_OUTCOME_DEPTH = 6
 
 
 def not_executable_reason(name: str) -> str:
@@ -57,17 +57,27 @@ def not_executable_reason(name: str) -> str:
     return NOT_EXECUTABLE_CAPABILITY_REASONS.get(key) or NOT_EXECUTABLE_ROUTING_NODES.get(key, "")
 
 
-def _declares_simulated(value: Any, depth: int = 0) -> bool:
-    """True when an executor outcome (or a nested response/claim_boundary) says simulated."""
+_SIMULATION_MARKERS = frozenset({"SIMULATED", "STUB", "MOCK"})
 
-    if depth > _MAX_OUTCOME_DEPTH or not isinstance(value, Mapping):
+
+def _declares_simulated(value: Any, depth: int = 0) -> bool:
+    """True when an executor outcome declares a simulation anywhere (bounded, all keys).
+
+    Any ``simulated: true`` or any string value equal to SIMULATED / STUB / MOCK
+    (case-insensitive) at depth <= ``_MAX_OUTCOME_DEPTH`` counts.
+    """
+
+    if depth > _MAX_OUTCOME_DEPTH:
         return False
-    if value.get("simulated") is True or str(value.get("claim") or "").upper() == "SIMULATED":
-        return True
-    return any(
-        _declares_simulated(value.get(key), depth + 1)
-        for key in ("response", "outcome", "claim_boundary")
-    )
+    if isinstance(value, str):
+        return value.strip().upper() in _SIMULATION_MARKERS
+    if isinstance(value, Mapping):
+        if value.get("simulated") is True:
+            return True
+        return any(_declares_simulated(item, depth + 1) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_declares_simulated(item, depth + 1) for item in value)
+    return False
 
 
 def _outcome_simulated(receipt: Mapping[str, Any], name: str) -> bool:
@@ -421,7 +431,14 @@ def overlay_unified_capability_receipts(
         )
         runtime_invoked = stage is not None and bool(stage.get("invoked")) and bool(refs)
         ne_reason = not_executable_reason(name)
-        if ne_reason and not (runtime_invoked and runtime_attests_real(receipt, stage)):
+        # Control-plane references never become real; a routing node only when the runtime
+        # attests a real invocation with resolved evidence.
+        upgradable = name in NOT_EXECUTABLE_ROUTING_NODES and name not in (
+            NOT_EXECUTABLE_CAPABILITY_REASONS
+        )
+        if ne_reason and not (
+            upgradable and runtime_invoked and runtime_attests_real(receipt, stage)
+        ):
             updated = not_executable_receipt(
                 receipt, ne_reason, runtime_reason=_runtime_reason(stage)
             )

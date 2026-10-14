@@ -554,3 +554,69 @@ def test_archived_walker_leaves_no_archived_name_outside_the_audit_places() -> N
     assert "integration_manager" in cleaned["forbidden_capabilities"]
     assert cleaned["decision_trace"][0]["state"] == "forbidden"
     assert "integration_manager" in cleaned["signal_snapshot"]["archived_capabilities_dropped"]
+
+
+def test_simulation_markers_anywhere_in_the_outcome_stay_simulated() -> None:
+    """Reviewer probes: markers under any key (bounded depth) keep the receipt simulated."""
+
+    from scripts.bench.strict_llm_baseline import classify_receipt
+
+    for outcome in (
+        {"response": {"result": {"simulated": True}}},
+        {"response": {"data": {"claim": "SIMULATED"}}},
+        {"response": {"items": [{"kind": " stub "}]}},
+        {"response": {"provider": "Mock"}},
+    ):
+        out = _overlay_one(
+            "pregate",
+            _stage("pregate", "INVOKED"),
+            capability_results={
+                "pregate": {
+                    **outcome,
+                    "physical_callable": "capability_executor_registry:pregate",
+                    "evidence_refs": ["ev_cap_pregate"],
+                }
+            },
+        )
+        assert out["outcome_simulated"] is True, outcome
+        assert classify_receipt(out) == "simulated", outcome
+
+
+def test_control_plane_reference_never_upgrades_even_with_all_real_signals() -> None:
+    from scripts.bench.strict_llm_baseline import classify_receipt
+
+    out = _overlay_one("direct_mode", _stage("direct_mode", "INVOKED"))
+    assert out["invoked"] is False
+    assert out["failure_reason"] == "NOT_EXECUTABLE:control_plane_reference"
+    assert classify_receipt(out) == "not_executable"
+    # research_route (routing node) with the same all-real signals may be upgraded.
+    assert classify_receipt(
+        _overlay_one("research_route", _stage("research_route", "INVOKED"))
+    ) == ("real")
+    # ... but not when its refs do not resolve.
+    forged = {**_stage("research_route", "INVOKED"), "evidence_refs": ["made-up"]}
+    stages = project_unified_capability_stages([{"task_id": "t", "capabilities": [forged]}])
+    route = overlay_unified_capability_receipts([_stale_flow_receipt("research_route")], stages)[0]
+    assert classify_receipt(route) == "not_executable"
+
+
+def test_archived_names_match_after_normalising_and_in_nested_lists() -> None:
+    import json
+
+    from nexus.research.flow.capability_planning import drop_archived_capabilities
+
+    plan = {
+        "selected_capabilities": [" integration_manager", "Integration_Manager", "pregate"],
+        "conditional_capabilities": [["integration_manager"], ["pregate"]],
+        "forbidden_capabilities": [],
+        "signal_snapshot": {" Integration_Manager ": {"x": 1}},
+    }
+    cleaned = drop_archived_capabilities(plan)
+    assert cleaned["selected_capabilities"] == ["pregate"]
+    assert cleaned["conditional_capabilities"] == [[], ["pregate"]]
+    assert cleaned["forbidden_capabilities"] == ["integration_manager"]
+    rest = {k: v for k, v in cleaned.items() if k != "forbidden_capabilities"}
+    rest["signal_snapshot"] = {
+        k: v for k, v in rest["signal_snapshot"].items() if k != "archived_capabilities_dropped"
+    }
+    assert "integration_manager" not in json.dumps(rest).lower()
