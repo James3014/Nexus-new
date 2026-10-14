@@ -6,9 +6,13 @@ ENTRY: dict[str, object] = {
     "file": "tests/engine/test_self_hosted_cli.py",
     "disposition": "quarantine",
     "issue": "#1928",
-    "cause": "fails in isolation too: approve now requires a lifecycle-authorized contract kind (bare CLI submit records NONE) and a one-shot approval grant; needs a grant-issuing fixture in the lifecycle_guards area (#1884). list_actionable (host-only, #1926): the submitted task uses worker=codex and the owned worker starts at once; without a codex CLI (ubuntu-latest) it ends FINAL_BLOCK/WORKER_EXECUTION_FAILED before list-actionable runs, so actionable_count is 0 (reproduced in a python:3.12 Linux container; same error_sha256 e59255bf as the cueline worker test)",
-    "tests": (
-        "test_self_hosted_approve_exact_binding_and_mismatch",
-        "test_self_hosted_list_actionable_empty_and_populated",
+    "cause": (
+        "approve: 6fa83c25c (#1758) requires an approval grant on every approve surface, but "
+        "run_self_hosted_approve (scripts/engine/commands/self_hosted_actions.py) has no grant input "
+        "and never passes approval_context, so the CLI always fails (APPROVAL_GRANT_REQUIRED); with "
+        "the autouse set_test_runner fixture CUSTOM_RUNNER_PRODUCTION_CLAIM_FORBIDDEN (5e47e0820) "
+        "fires first. Owner decision: add a grant-bearing CLI approve option or retire CLI approve"
     ),
+    # list_actionable fixed (#1928): it now waits for the worker thread before listing.
+    "tests": ("test_self_hosted_approve_exact_binding_and_mismatch",),
 }

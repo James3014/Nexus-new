@@ -6,7 +6,15 @@ ENTRY: dict[str, object] = {
     "file": "tests/engine/test_cli_local_assist_advisor_gate2.py",
     "disposition": "quarantine",
     "issue": "#1929",
-    "cause": "fixture Gateway/Online callables are classified physical by the unified runtime, so Workforce Admission (ALLOW) is now mandatory and the fixtures are BLOCKed; needs governed admission fixtures or an owner decision on non-physical fixture transports",
+    "cause": (
+        "archived code: nexus/engine/pipeline_repair.py is unreachable from production "
+        "(ARCHIVED_2026-10-13-legacy-engine.md row 2, #2047, deletion pending). Its UnifiedRuntime "
+        "requests carry no route workforce_bindings, so Workforce Admission BLOCKs "
+        "('demand_online: workforce_bindings must be an object mapping') and the result has no "
+        "status (KeyError); admitting the request afterwards (tests/research/conftest.py pattern) "
+        "fails canonical_planning_bundle_request_binding_mismatch. A fix needs product changes in "
+        "archived code; Owner decision: drop these ids with the module deletion or revive the module"
+    ),
     "tests": (
         "test_advisor_degrades_when_local_provider_fails",
         "test_advisor_empty_local_outputs_does_not_force_forward",

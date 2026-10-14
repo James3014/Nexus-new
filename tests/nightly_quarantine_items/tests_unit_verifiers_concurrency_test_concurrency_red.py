@@ -6,6 +6,10 @@ ENTRY: dict[str, object] = {
     "file": "tests/unit/verifiers/concurrency/test_concurrency_red.py",
     "disposition": "delete-candidate",
     "issue": "#1928",
-    "cause": "target fixed in ac87243dc; deadlock no longer reproducible; fixed behaviour pinned by test_deadlock.py",
+    "cause": (
+        "red-phase test that asserts the AB/BA deadlock still happens; the target was fixed in "
+        "ac87243dc and test_deadlock.py pins the fixed behaviour, so the assertion can never pass "
+        "again. Removing a test id needs an Owner-approved deletion (Core deletion_policy=FORBID)"
+    ),
     "tests": ("TestConcurrencyTargetsRed::test_target3_deadlock_happens",),
 }

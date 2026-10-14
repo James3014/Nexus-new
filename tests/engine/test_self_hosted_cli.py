@@ -481,6 +481,18 @@ def test_self_hosted_list_actionable_empty_and_populated(tmp_path: Path):
     ]
     runner.invoke(nexus, submit_cmd)
 
+    # The owned worker thread advances SUBMITTED -> PENDING_HUMAN_APPROVAL asynchronously and
+    # list-actionable skips IN_PROGRESS tasks; on Linux it ran before the thread (#1928).
+    wait_cmd = [
+        "nexus", "self-hosted", "wait",
+        "--task-id", req["task_id"],
+        "--timeout", "10.0",
+        "--state-dir", state_dir,
+    ]
+    res_wait = runner.invoke(nexus, wait_cmd)
+    assert res_wait.exit_code == 0, f"wait failed: {res_wait.output}"
+    assert json.loads(res_wait.output)["wait"]["timed_out"] is False
+
     res_pop = runner.invoke(nexus, list_cmd)
     assert res_pop.exit_code == 0
     pop_data = json.loads(res_pop.output)
