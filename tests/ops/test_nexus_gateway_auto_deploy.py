@@ -3595,6 +3595,24 @@ def _health_core_block(
         (None, None),
         (1_760_000_000, None),
     ],
+    # No timestamps in ids: the impact gate normalizes datetimes in node ids.
+    ids=[
+        "z-upper",
+        "z-lower",
+        "offset-zero",
+        "offset-plus2",
+        "millis",
+        "half-second",
+        "micros",
+        "naive",
+        "date-only",
+        "seven-digit-fraction",
+        "bad-month",
+        "word",
+        "empty",
+        "none",
+        "number",
+    ],
 )
 def test_parse_time_accepts_rfc3339_variants_only(value: Any, expected: float | None) -> None:
     parsed = ad._parse_time(value)
@@ -3634,6 +3652,7 @@ def test_head_push_event_without_a_parseable_time_counts_as_recent(
         ("2025-10-09T08:53:20.000Z", "IN_FLIGHT"),
         ("2025-10-09T10:53:20+02:00", "IN_FLIGHT"),
     ],
+    ids=["old-offset-zero", "old-millis", "recent-millis", "recent-offset-plus2"],
 )
 def test_head_push_event_with_an_rfc3339_variant_time_is_dated(
     created_at: str, verdict: str
@@ -3781,7 +3800,12 @@ def test_receipt_failure_under_open_r1_never_writes_hold(
 def test_unexpected_reconcile_error_under_open_r1_postpones_without_hold(
     cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """#2169 F1: any reconcile failure seen while R1 is open keeps the journal, no HOLD."""
+    """#2169 F1: any reconcile failure seen while R1 is open keeps the journal, no HOLD.
+
+    Defence in depth: ``move_tool_link`` swallows its own errors today, so this
+    stands in for any future raising step (the reachable ones are the plist read
+    and the receipt write, tested separately).
+    """
     _crash_after_candidate_plist(cfg)
 
     def explode(*_a: Any, **_k: Any) -> Any:
@@ -3997,3 +4021,44 @@ def test_real_locks_reconcile_journal_under_both_locks(
     result = cycle(cfg, host, FakeProber(hook=hook))
     assert result["status"] == "RECONCILED_DEPLOYED" and not cfg.journal.exists()
     assert seen and all(not gw and not lg for gw, lg in seen)
+    # Positive control: the same helper gets both locks once the cycle is over.
+    assert _other_process_gets(gateway_lock) and _other_process_gets(ledger_lock)
+
+
+def test_plist_read_error_under_open_r1_postpones_without_hold(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Codex round 1: the R1 block is recorded before the live plist is read."""
+    _crash_after_candidate_plist(cfg)
+    real_read = Path.read_bytes
+
+    def flaky(self: Path) -> bytes:
+        if self == cfg.plist:
+            raise OSError("EIO on plist")
+        return real_read(self)
+
+    host = FakeHost()
+    host.r1_block = "R1_OPEN_RECOVERY_BLOCKS_V1_EFFECT:gen12:REQUESTED"
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "read_bytes", flaky)
+        result = cycle(cfg, host, FakeProber())
+    assert result["status"] == "RECONCILED_BLOCKED_MANAGER_BUSY"
+    assert "EIO on plist" in result["receipt"]["reason"]
+    assert not cfg.hold_file.exists() and cfg.journal.exists() and host.reloads == []
+
+
+def test_hold_is_written_atomically(cfg: ad.Config, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Codex round 1: a failed HOLD write leaves no truncated HOLD text behind."""
+    real_fsync = os.fsync
+
+    def full_disk(fd: int) -> None:
+        raise OSError("disk full")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(ad.os, "fsync", full_disk)
+        with pytest.raises(OSError, match="disk full"):
+            ad._set_hold(cfg, f"{ad.RECONCILE_FAILED_HOLD} x; journal kept")
+    assert not cfg.hold_file.exists()
+    assert ad.os.fsync is real_fsync
+    ad._set_hold(cfg, "owner: paused")
+    assert cfg.hold_file.read_text() == "owner: paused\n"

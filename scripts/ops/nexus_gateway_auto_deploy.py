@@ -1473,8 +1473,9 @@ def _hold_text(cfg: Config) -> str:
 
 
 def _set_hold(cfg: Config, reason: str) -> None:
+    """Write HOLD atomically: a crash or full disk leaves the whole text or none (#2169)."""
     cfg.state_dir.mkdir(parents=True, exist_ok=True)
-    cfg.hold_file.write_text(reason + "\n", encoding="utf-8")
+    _atomic_write(cfg.hold_file, (reason + "\n").encode("utf-8"))
 
 
 def known_plist_hashes(cfg: Config) -> List[str]:
@@ -2018,10 +2019,13 @@ class _Cycle:
                 # healthy live candidate proceeds; everything else is postponed
                 # with the journal kept and no HOLD.
                 block = self.host.r1_recovery_block(cfg)
+                if block is not None:
+                    # Recorded before anything else can fail, so a later error
+                    # still postpones instead of writing HOLD (#2169 F1).
+                    receipt["r1_block_observed"] = block
                 live_plist = cfg.plist.read_bytes()
                 is_candidate = _sha256(live_plist) == new_plist_sha
                 if block is not None:
-                    receipt["r1_block_observed"] = block
                     if not is_candidate:
                         return self.postpone(receipt, block)
                     core = receipt.get("core") if isinstance(receipt.get("core"), dict) else {}
