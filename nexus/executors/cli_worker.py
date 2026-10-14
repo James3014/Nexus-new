@@ -347,6 +347,9 @@ class _DescendantTracker:
         self._snapshot()
         self._stop.set()
         self._thread.join(timeout=5)
+        if self._thread.is_alive():
+            # A poll is still blocked; its outcome would arrive too late.
+            self.probe_failed = True
         with self._lock:
             return set(self._pids) - {self._root}
 
@@ -478,7 +481,9 @@ def _pids_with_cwd_under(
     pid: Optional[int] = None
     pid_has_cwd = True
     for line in out.splitlines():
-        if line.startswith("p") and line[1:].isdigit():
+        if not line or line[0] not in "pfn" or (line[0] == "p" and not line[1:].isdigit()):
+            return None  # unexpected field or malformed row: incomplete scan
+        if line.startswith("p"):
             if not pid_has_cwd:
                 return None  # a process record without its cwd: incomplete scan
             pid, pid_has_cwd = int(line[1:]), False
@@ -517,7 +522,7 @@ def _kill_and_confirm(pids: set[int]) -> bool:
             except ProcessLookupError:
                 pass
             except PermissionError:
-                pass
+                alive.add(pid)  # exists but cannot be signalled: not confirmed dead
         if alive:
             # A killed process may linger as an unreaped zombie; it runs nothing.
             try:

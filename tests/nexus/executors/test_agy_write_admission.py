@@ -1549,3 +1549,40 @@ def test_tracker_probe_failure_is_not_reported_clean(monkeypatch, tmp_path):
     )
     assert result.status is CliWorkerStatus.COMPLETED
     assert result.descendants_swept is False
+
+
+def test_cwd_scan_fails_closed_on_malformed_lsof_row(monkeypatch):
+    baseline = cli_worker._SweepBaseline(
+        started_at=0.0, preexisting=frozenset(), protected=frozenset()
+    )
+    me = os.getpid()
+    for out in (f"p{me}\nfcwd\nn/\nBAD ROW\n", f"p{me}\nfcwd\nn/\n\n"):
+        monkeypatch.setattr(
+            cli_worker.subprocess,
+            "run",
+            lambda *a, _out=out, **k: SimpleNamespace(stdout=_out, returncode=0),
+        )
+        assert cli_worker._pids_with_cwd_under(("/nonexistent-root",), baseline) is None
+
+
+def test_unsignalable_pid_is_not_confirmed_dead(monkeypatch):
+    def deny(pid, sig):
+        raise PermissionError
+
+    monkeypatch.setattr(cli_worker, "_SWEEP_DEADLINE_SECONDS", 0.1)
+    monkeypatch.setattr(cli_worker.os, "kill", deny)
+    assert cli_worker._kill_and_confirm({424242}) is False
+
+
+def test_tracker_stop_with_blocked_poll_marks_probe_failed(monkeypatch):
+    import threading
+
+    release = threading.Event()
+    tracker = cli_worker._DescendantTracker(os.getpid(), interval=0.01)
+    monkeypatch.setattr(cli_worker, "_process_table", lambda: (release.wait(30), {})[1])
+    monkeypatch.setattr(tracker._thread, "join", lambda timeout=None: None)
+    monkeypatch.setattr(tracker._thread, "is_alive", lambda: True)
+    monkeypatch.setattr(tracker, "_snapshot", lambda: None)
+    tracker.stop()
+    release.set()
+    assert tracker.probe_failed is True
