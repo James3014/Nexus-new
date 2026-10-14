@@ -17,7 +17,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-from nexus.services.external_intelligence import TransportResult
+from nexus.services.external_intelligence import (
+    OBSERVED_MODEL_ATTESTATION_MISMATCH,
+    ExternalIntelligenceError,
+    TransportResult,
+    model_invocation_receipts_from,
+    normalize_expected_observed_model,
+    observed_model_violation,
+)
 from nexus.services.external_intelligence_core_binding import (
     BOUND_OPERATION_SCHEMA,
     CoreBindingError,
@@ -216,6 +223,13 @@ def _normalize_transport_config(
     }
 
 
+def _normalize_observed_model_pin(provider_id: str, expected_observed_model: Any) -> str:
+    try:
+        return normalize_expected_observed_model(provider_id, expected_observed_model)
+    except ExternalIntelligenceError as exc:
+        raise OpenSWEExternalIntelligenceError(f"OPEN_SWE_{exc}") from exc
+
+
 def _safe_request_hash(payload: Mapping[str, Any]) -> str:
     effect_authorization = payload.get("effect_authorization")
     tool_projection = payload.get("tool_projection_manifest")
@@ -393,6 +407,7 @@ def _semantic_failure(
     retry_safe: bool,
     started: str,
     safe_argv: tuple[str, ...],
+    model_invocation_receipts: tuple[dict[str, Any], ...] = (),
 ) -> TransportResult:
     return TransportResult(
         status,
@@ -401,6 +416,7 @@ def _semantic_failure(
         started_at=started,
         finished_at=_now(),
         safe_argv=safe_argv,
+        model_invocation_receipts=model_invocation_receipts,
     )
 
 
@@ -418,6 +434,7 @@ class OpenSWEExternalIntelligenceTransport:
         runtime_state_root: str | Path | None = None,
         timeout: float = 180.0,
         transport_config: Mapping[str, Any] | None = None,
+        expected_observed_model: str = "",
     ) -> None:
         root = Path(repository_root).expanduser().resolve()
         if not root.is_dir():
@@ -445,6 +462,9 @@ class OpenSWEExternalIntelligenceTransport:
         )
         self.timeout = float(timeout)
         self.transport_config = _normalize_transport_config(provider, transport_config)
+        self.expected_observed_model = _normalize_observed_model_pin(
+            provider, expected_observed_model
+        )
 
     def safe_argv(self) -> tuple[str, ...]:
         return (self.executable, "<json-stdin>")
@@ -524,6 +544,25 @@ class OpenSWEExternalIntelligenceTransport:
                 safe_argv=safe,
             )
         status = str(value.get("status") or "OPEN_SWE_RESULT_INVALID")
+        receipts = model_invocation_receipts_from(value.get("model_invocation_receipts"))
+        if receipts is None and not self.expected_observed_model:
+            receipts = ()
+        if receipts is None or observed_model_violation(
+            receipts,
+            expected=self.expected_observed_model,
+            provider_id=self.model_provider,
+            model_id=self.model_id,
+            operation_id=str(payload["operation_id"]),
+            strict=status == "INTELLIGENCE_COMPLETED",
+        ):
+            return _semantic_failure(
+                f"OPEN_SWE_{OBSERVED_MODEL_ATTESTATION_MISMATCH}",
+                outcome_unknown=True,
+                retry_safe=False,
+                started=started,
+                safe_argv=safe,
+                model_invocation_receipts=receipts or (),
+            )
         return TransportResult(
             status,
             raw=str(value.get("raw") or ""),
@@ -533,6 +572,7 @@ class OpenSWEExternalIntelligenceTransport:
             started_at=str(value.get("started_at") or started),
             finished_at=str(value.get("finished_at") or _now()),
             safe_argv=safe,
+            model_invocation_receipts=receipts,
         )
 
     def _ensure_runtime_identity(self) -> bool:
@@ -580,6 +620,7 @@ class OpenSWEWorkerTransport:
         timeout: float = 300.0,
         require_worker_binding: bool = False,
         transport_config: Mapping[str, Any] | None = None,
+        expected_observed_model: str = "",
     ) -> None:
         provider = str(model_provider or "").strip()
         selected_model = str(model_id or "").strip()
@@ -604,6 +645,9 @@ class OpenSWEWorkerTransport:
         )
         self.timeout = float(timeout)
         self.transport_config = _normalize_transport_config(provider, transport_config)
+        self.expected_observed_model = _normalize_observed_model_pin(
+            provider, expected_observed_model
+        )
         self._require_worker_binding = bool(require_worker_binding)
         self._bound_worker: dict[str, Any] | None = None
         self._bound_worker_sha256 = ""
@@ -719,6 +763,7 @@ class OpenSWEWorkerTransport:
         tool_projection_hash: str = "",
         core_binding_hash: str = "",
         acceptance_contract_hash: str = "",
+        model_invocation_receipts: tuple[dict[str, Any], ...] = (),
     ) -> OpenCodeRunResult:
         return OpenCodeRunResult(
             status=status,
@@ -736,6 +781,7 @@ class OpenSWEWorkerTransport:
             tool_projection_hash=tool_projection_hash,
             core_binding_hash=core_binding_hash,
             acceptance_contract_hash=acceptance_contract_hash,
+            model_invocation_receipts=model_invocation_receipts,
         )
 
     def _request(
@@ -964,6 +1010,27 @@ class OpenSWEWorkerTransport:
                 error="MODEL_ATTESTATION_MISMATCH",
                 argv_sha256=argv_sha256,
             )
+        receipts = model_invocation_receipts_from(value.get("model_invocation_receipts"))
+        if receipts is None and not self.expected_observed_model:
+            receipts = ()
+        if receipts is None or observed_model_violation(
+            receipts,
+            expected=self.expected_observed_model,
+            provider_id=self.provider_id,
+            model_id=self.model_id,
+            operation_id=operation_id,
+            strict=str(value.get("status") or "") == "COMPLETED",
+        ):
+            return self._local_failure(
+                "OPEN_SWE_OUTCOME_UNKNOWN",
+                workspace_path=str(workspace),
+                process_started=bool(value.get("process_started", process_started)),
+                outcome_unknown=True,
+                retry_safe=False,
+                error=OBSERVED_MODEL_ATTESTATION_MISMATCH,
+                argv_sha256=argv_sha256,
+                model_invocation_receipts=receipts or (),
+            )
         worker_hash = str(value.get("worker_identity_sha256") or "")
         if self._bound_worker_sha256 and worker_hash != self._bound_worker_sha256:
             return self._local_failure(
@@ -1083,6 +1150,7 @@ class OpenSWEWorkerTransport:
             core_binding_status=returned_core_status,
             core_binding_hash=returned_core[0],
             acceptance_contract_hash=returned_core[1],
+            model_invocation_receipts=receipts,
         )
 
     def _ensure_runtime_identity(self) -> bool:

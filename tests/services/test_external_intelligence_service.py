@@ -253,6 +253,7 @@ def test_open_swe_activation_overlay_merges_with_host_and_binds_both_consumers(
     )
     overlay["open_swe_executable"] = str(tmp_path / "runtime" / "bin" / "nexus-open-swe-runtime")
     overlay["open_swe_runtime_artifact_sha256"] = "b" * 64
+    overlay["open_swe_expected_observed_model"] = "gpt-5-6-thinking"
     host = {
         "repositories": ["o/r"],
         "repository_roots": {"o/r": str(tmp_path / "repo")},
@@ -289,6 +290,11 @@ def test_open_swe_activation_overlay_merges_with_host_and_binds_both_consumers(
         "timeout_seconds": 180,
     }
     assert calls[0][1]["transport_config"] == calls[1][1]["transport_config"] == expected_transport
+    assert (
+        calls[0][1]["expected_observed_model"]
+        == calls[1][1]["expected_observed_model"]
+        == "gpt-5-6-thinking"
+    )
     assert calls[0][1]["timeout"] == 1200.0
     assert calls[1][1]["timeout"] == 2400.0
     assert (
@@ -309,6 +315,10 @@ def test_open_swe_activation_overlay_placeholders_fail_closed(tmp_path):
         "workspace_root": str(tmp_path / "workspaces"),
     }
     config_path = tmp_path / "merged.json"
+    config_path.write_text(json.dumps({**host, **overlay}), encoding="utf-8")
+    with pytest.raises(ServiceError, match="CONFIG_OPEN_SWE_EXPECTED_OBSERVED_MODEL_INVALID"):
+        load_config(config_path)
+    overlay["open_swe_expected_observed_model"] = "gpt-5-6-thinking"
     config_path.write_text(json.dumps({**host, **overlay}), encoding="utf-8")
     with pytest.raises(ServiceError, match="CONFIG_OPEN_SWE_EXECUTABLE_ABSOLUTE_REQUIRED"):
         load_config(config_path)
@@ -2670,3 +2680,79 @@ def test_main_restart_failure(tmp_path, monkeypatch):
 
     exit_code = service_module.main(["restart", "--config", str(config_path)])
     assert exit_code == NexusExitCode.FAILED
+
+
+# --- #2188: observed-model pin for opencli_chatgpt ---------------------------
+
+
+def _opencli_config_file(tmp_path, **extra):
+    config_path = _config_file(tmp_path)
+    raw = json.loads(config_path.read_text(encoding="utf-8"))
+    raw.update(
+        semantic_backend="open_swe",
+        worker_backend="open_swe",
+        open_swe_model_provider="opencli_chatgpt",
+        open_swe_model="very-high",
+        open_swe_executable="/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime",
+        open_swe_runtime_artifact_sha256="a" * 64,
+        open_swe_opencli_executable="/opt/opencli",
+        open_swe_opencli_profile="profile-a",
+        **extra,
+    )
+    config_path.write_text(json.dumps(raw), encoding="utf-8")
+    return config_path
+
+
+@pytest.mark.parametrize(
+    ("value", "error"),
+    [
+        (None, "CONFIG_OPEN_SWE_EXPECTED_OBSERVED_MODEL_REQUIRED"),
+        ("", "CONFIG_OPEN_SWE_EXPECTED_OBSERVED_MODEL_REQUIRED"),
+        ("NOT_MEASURED", "CONFIG_OPEN_SWE_EXPECTED_OBSERVED_MODEL_REQUIRED"),
+        (" gpt-5-6-thinking", "CONFIG_OPEN_SWE_EXPECTED_OBSERVED_MODEL_INVALID"),
+        ("<DEPLOYMENT_SUPPLIED_X>", "CONFIG_OPEN_SWE_EXPECTED_OBSERVED_MODEL_INVALID"),
+        ("not_measured", "CONFIG_OPEN_SWE_EXPECTED_OBSERVED_MODEL_REQUIRED"),
+        ("Not_Measured", "CONFIG_OPEN_SWE_EXPECTED_OBSERVED_MODEL_REQUIRED"),
+        ("gpt-5-6\u200b-thinking", "CONFIG_OPEN_SWE_EXPECTED_OBSERVED_MODEL_INVALID"),
+        ("gpt-5-6-thinking\n", "CONFIG_OPEN_SWE_EXPECTED_OBSERVED_MODEL_INVALID"),
+        ("gpt:5", "CONFIG_OPEN_SWE_EXPECTED_OBSERVED_MODEL_INVALID"),
+        ("gpt/5", "CONFIG_OPEN_SWE_EXPECTED_OBSERVED_MODEL_INVALID"),
+        (5, "CONFIG_OPEN_SWE_EXPECTED_OBSERVED_MODEL_INVALID"),
+    ],
+)
+def test_opencli_config_requires_concrete_expected_observed_model(tmp_path, value, error):
+    extra = {} if value is None else {"open_swe_expected_observed_model": value}
+    with pytest.raises(ServiceError, match=error):
+        load_config(_opencli_config_file(tmp_path, **extra))
+
+
+def test_expected_observed_model_is_rejected_for_other_providers(tmp_path):
+    config_path = _config_file(tmp_path)
+    raw = json.loads(config_path.read_text(encoding="utf-8"))
+    raw.update(
+        semantic_backend="open_swe",
+        open_swe_model_provider="google_genai",
+        open_swe_model="gemini-test",
+        open_swe_expected_observed_model="gpt-5-6-thinking",
+    )
+    config_path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(
+        ServiceError, match="CONFIG_OPEN_SWE_EXPECTED_OBSERVED_MODEL_PROVIDER_MISMATCH"
+    ):
+        load_config(config_path)
+
+
+def test_expected_observed_model_is_passed_to_both_open_swe_transports(tmp_path, monkeypatch):
+    calls = []
+
+    class FakeTransport:
+        def __init__(self, **kwargs):
+            calls.append(kwargs)
+
+    monkeypatch.setattr(service_module, "OpenSWEExternalIntelligenceTransport", FakeTransport)
+    monkeypatch.setattr(service_module, "OpenSWEWorkerTransport", FakeTransport)
+    loaded = load_config(
+        _opencli_config_file(tmp_path, open_swe_expected_observed_model="gpt-5-6-thinking")
+    )
+    build_automation(loaded, "o/r")
+    assert [call["expected_observed_model"] for call in calls] == ["gpt-5-6-thinking"] * 2
