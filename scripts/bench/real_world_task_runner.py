@@ -1124,7 +1124,7 @@ def run_task(
         )
     coverage, phase_trace, _ = _nexus_strategy_pack(task, profile=nexus_profile if mode == "with_nexus" else "core")
     verified = _run_tests(case_dir, timeout_sec)
-    if patch_info.get("agy_sweep_failed"):
+    if patch_info.get("agy_sweep_failed") or patch_info.get("token_capture_status") == "sweep_failed":
         # #1912: descendants may still be editing the case dir; never a solve.
         verified = False
     if executor in {"gemini", "full_nexus"}:

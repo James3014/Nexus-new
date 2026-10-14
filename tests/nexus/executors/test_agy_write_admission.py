@@ -1502,3 +1502,13 @@ def test_partial_process_table_is_not_a_baseline(monkeypatch):
         ),
     )
     assert cli_worker._sweep_baseline() is None
+
+
+def test_process_table_with_blank_row_is_not_a_baseline(monkeypatch):
+    me, parent = os.getpid(), os.getppid()
+    monkeypatch.setattr(
+        cli_worker.subprocess,
+        "run",
+        lambda *a, **k: SimpleNamespace(stdout=f"{me} {parent}\n   \n{parent} 1\n", returncode=0),
+    )
+    assert cli_worker._sweep_baseline() is None

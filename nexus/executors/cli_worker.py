@@ -296,8 +296,6 @@ def _process_table() -> dict[int, int]:
     table: dict[int, int] = {}
     for line in out.splitlines():
         parts = line.split()
-        if not parts:
-            continue
         if len(parts) != 2 or not parts[0].isdigit() or not parts[1].isdigit():
             # A partial table would let a pre-existing process pass as new.
             raise ValueError(f"unparseable ps row: {line!r}")
