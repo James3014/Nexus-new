@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import urllib.parse
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Iterator
@@ -173,11 +174,14 @@ def green_api(
     workflow_path: Callable[[int], str] | None = None,
     pushed_at: dict[str, str] | None = None,
     timeline: dict[int, list[dict[str, Any]]] | None = None,
+    required: list[str] | None = None,
 ):
     calls: list[str] = []
 
     def get(path: str) -> Any:
         calls.append(path)
+        if path.endswith("/rules/branches/main"):
+            return _branch_rules(list(ad.REQUIRED_CHECKS) if required is None else required)
         if path.endswith("/branches/main"):
             return {"commit": {"sha": main_tip}}
         if "/compare/" in path:
@@ -212,7 +216,7 @@ def green_api(
                 return {"workflow_runs": [{"path": workflow_path(suite)}]}
             name = next(n for n, s in SUITES.items() if s == suite % 10_000)
             return {"workflow_runs": [{"path": ad.REQUIRED_CHECKS[name]}]}
-        name = path.split("check_name=")[1].split("&")[0].replace("+", " ")
+        name = urllib.parse.unquote_plus(path.split("check_name=")[1].split("&")[0])
         sha = path.split("/commits/")[1].split("/")[0]
         if sha == NEW and not on_commit and name == "Deletion guard":
             return {"check_runs": []}
@@ -231,6 +235,23 @@ def green_api(
 
     get.calls = calls  # type: ignore[attr-defined]
     return get
+
+
+def _branch_rules(names: list[str]) -> list[dict[str, Any]]:
+    """Shape of GET repos/{repo}/rules/branches/main (integration 15368 = Actions)."""
+    return [
+        {"type": "deletion", "ruleset_id": 20697077},
+        {
+            "type": "required_status_checks",
+            "ruleset_id": 20697077,
+            "parameters": {
+                "required_status_checks": [
+                    {"context": name, "integration_id": 15368} for name in names
+                ],
+                "strict_required_status_checks_policy": False,
+            },
+        },
+    ]
 
 
 def live_plist(root: Path, python: str = "/shared/clone/.venv/bin/python") -> bytes:
@@ -853,7 +874,10 @@ path = sys.argv[2]
 if sys.argv[1] != "api":
     sys.exit(2)
 url = urlsplit(path)
-if url.path.endswith("/branches/main"):
+if url.path.endswith("/rules/branches/main"):
+    out = [{"type": "required_status_checks", "parameters": {"required_status_checks": [
+        {"context": name, "integration_id": 15368} for name in REQUIRED]}}]
+elif url.path.endswith("/branches/main"):
     out = {"commit": {"sha": os.environ["FAKE_MAIN"]}}
 elif "/check-runs" in url.path:
     name = parse_qs(url.query)["check_name"][0]
@@ -2039,3 +2063,98 @@ def test_journal_with_malformed_embedded_plist_is_quarantined(
 def test_live_root_rejects_non_dict_plist() -> None:
     with pytest.raises(ad.DeployError, match="NOT_A_DICT"):
         ad.live_root(plistlib.dumps(["x"]))
+
+
+# ------------------------------------------------- live required-check set (#2173)
+
+
+TRUSTED_DEPENDENCY = "Trusted dependency contract (default branch)"
+
+
+def test_trusted_dependency_contract_is_known_and_bound() -> None:
+    workflow = ad.REQUIRED_CHECKS[TRUSTED_DEPENDENCY]
+    assert workflow == ".github/workflows/trusted-dependency-contract.yml"
+    text = (REPO_ROOT / workflow).read_text(encoding="utf-8")
+    assert f"name: {TRUSTED_DEPENDENCY}" in text and "pull_request_target" in text
+
+
+def test_all_live_required_checks_are_evaluated_including_on_the_pr_head() -> None:
+    """The 4th check runs on pull_request_target, so it is found on the merged PR head."""
+
+    def api(path: str) -> Any:
+        if "check-runs" in path and "/commits/" + NEW in path and "Trusted" in path:
+            return {"check_runs": []}
+        return green_api()(path)
+
+    result = ad.required_checks(api, NEW)
+    assert result["verdict"] == "GREEN"
+    assert result["required"] == list(ad.REQUIRED_CHECKS)
+    assert result["checks"][TRUSTED_DEPENDENCY]["sha"] == PR_HEAD
+
+
+def test_red_trusted_dependency_contract_blocks(cfg: ad.Config) -> None:
+    def api(path: str) -> Any:
+        payload = green_api()(path)
+        if "check-runs" in path and "Trusted" in path:
+            for run in payload["check_runs"]:
+                run["conclusion"] = "failure"
+        return payload
+
+    host, prober = FakeHost(), FakeProber()
+    assert cycle(cfg, host, prober, api)["status"] == "CHECKS_RED"
+    assert prober.calls == [] and host.reloads == []
+
+
+def test_unknown_required_check_blocks_without_hold(cfg: ad.Config) -> None:
+    api = green_api(required=[*ad.REQUIRED_CHECKS, "Brand new gate"])
+    host, prober = FakeHost(), FakeProber()
+    result = cycle(cfg, host, prober, api)
+    assert result["status"] == "UNKNOWN_REQUIRED_CHECK:Brand new gate"
+    assert result["required_checks"]["unknown_required"] == ["Brand new gate"]
+    assert prober.calls == [] and host.reloads == [] and not cfg.hold_file.exists()
+    assert ad.read_receipts(cfg.state_dir) == []
+    # Retried next cycle: once main stops requiring it, the deploy proceeds.
+    assert cycle(cfg, host, prober, green_api())["status"] == "DEPLOYED"
+
+
+@pytest.mark.parametrize(
+    "rules",
+    [
+        ad.DeployError("GH_API_FAILED:403"),
+        {"message": "Not Found"},
+        [],  # no required checks at all must never mean "green"
+        [{"type": "required_status_checks", "parameters": {"required_status_checks": [{}]}}],
+    ],
+    ids=["api-error", "not-a-list", "no-checks", "malformed-entry"],
+)
+def test_ruleset_read_failure_blocks(cfg: ad.Config, rules: Any) -> None:
+    def api(path: str) -> Any:
+        if path.endswith("/rules/branches/main"):
+            if isinstance(rules, Exception):
+                raise rules
+            return rules
+        return green_api()(path)
+
+    host, prober = FakeHost(), FakeProber()
+    result = cycle(cfg, host, prober, api)
+    assert result["status"] == "CHECKS_UNKNOWN"
+    assert result["required_checks"]["error"].startswith("RULESET:")
+    assert prober.calls == [] and host.reloads == []
+
+
+def test_check_no_longer_required_is_dropped() -> None:
+    required = [n for n in ad.REQUIRED_CHECKS if n != "Deletion guard"]
+
+    def api(path: str) -> Any:
+        if "check-runs" in path and "Deletion+guard" in path:
+            raise AssertionError("a dropped check must not be queried")
+        return green_api(required=required)(path)
+
+    result = ad.required_checks(api, NEW)
+    assert result["verdict"] == "GREEN" and set(result["checks"]) == set(required)
+
+
+def test_verify_commit_uses_the_live_required_set(capsys: pytest.CaptureFixture[str]) -> None:
+    assert ad.main(["verify-commit", NEW], api_get=green_api(required=["Mystery"])) == 1
+    out = json.loads(capsys.readouterr().out)
+    assert out["required_checks"]["verdict"] == "UNKNOWN_REQUIRED_CHECK"

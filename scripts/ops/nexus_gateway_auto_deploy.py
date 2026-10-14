@@ -96,12 +96,17 @@ ORIGIN_URLS = (
     "https://github.com/James3014/Nexus-new",
     "git@github.com:James3014/Nexus-new.git",
 )
-# Each required check is accepted only from its own GitHub Actions workflow, so a
-# stray workflow cannot post a success under the same name.
+# Every check name the deployer knows how to bind: each is accepted only from its
+# own GitHub Actions workflow, so a stray workflow cannot post a success under the
+# same name.  Which of these are required is read live from main's branch rules
+# each cycle (#2173); a required name missing here blocks the deploy.
 REQUIRED_CHECKS = {
     "Full published Git history secret audit": ".github/workflows/git-history-secret-audit.yml",
     "Deletion guard": ".github/workflows/deletion-guard.yml",
     "Exact-base impact gate": ".github/workflows/pytest.yml",
+    "Trusted dependency contract (default branch)": (
+        ".github/workflows/trusted-dependency-contract.yml"
+    ),
 }
 CHECK_APP = "github-actions"
 DEPLOYMENT_PREFIX = "a1-"
@@ -386,14 +391,48 @@ def _check_state(runs: List[dict], source: str) -> Dict[str, Any]:
     return {"state": state, "conclusion": latest.get("conclusion"), "sha": source}
 
 
+def live_required_check_names(
+    api_get: Callable[[str], Any], *, repo: str = REPOSITORY, branch: str = "main"
+) -> List[str]:
+    """Status-check names the branch rules (ruleset) currently require on ``branch``."""
+    rules = api_get(f"repos/{repo}/rules/branches/{branch}")
+    if not isinstance(rules, list):
+        raise DeployError("BRANCH_RULES_MALFORMED")
+    names: List[str] = []
+    for rule in rules:
+        if rule.get("type") != "required_status_checks":
+            continue
+        for check in (rule.get("parameters") or {}).get("required_status_checks") or []:
+            context = check.get("context")
+            if not isinstance(context, str) or not context:
+                raise DeployError("BRANCH_RULES_MALFORMED")
+            if context not in names:
+                names.append(context)
+    if not names:
+        # No required checks at all would make every commit "green": fail closed.
+        raise DeployError("BRANCH_RULES_REQUIRE_NO_CHECKS")
+    return names
+
+
 def required_checks(
     api_get: Callable[[str], Any], sha: str, *, repo: str = REPOSITORY, branch: str = "main"
 ) -> Dict[str, Any]:
-    """GREEN only when every required check is success; PENDING, RED or UNKNOWN otherwise."""
+    """GREEN only when every currently required check is success.
+
+    Otherwise PENDING, RED, UNKNOWN (including an unreadable ruleset) or
+    UNKNOWN_REQUIRED_CHECK (main requires a check this deployer cannot bind).
+    """
     detail: Dict[str, Any] = {}
     try:
+        required = live_required_check_names(api_get, repo=repo, branch=branch)
+    except Exception as exc:  # noqa: BLE001 - an unreadable ruleset fails closed
+        return {"verdict": "UNKNOWN", "error": f"RULESET:{type(exc).__name__}:{exc}"[:300]}
+    unknown = [name for name in required if name not in REQUIRED_CHECKS]
+    if unknown:
+        return {"verdict": "UNKNOWN_REQUIRED_CHECK", "unknown_required": unknown, "checks": {}}
+    try:
         pr_heads: Optional[List[str]] = None
-        for name in REQUIRED_CHECKS:
+        for name in required:
             runs, source = _bound_runs(api_get, repo, sha, name), sha
             if not runs:
                 if pr_heads is None:
@@ -426,7 +465,7 @@ def required_checks(
         verdict = "UNKNOWN"
     else:
         verdict = "PENDING"
-    return {"verdict": verdict, "checks": detail}
+    return {"verdict": verdict, "required": required, "checks": detail}
 
 
 def on_github_main(
@@ -1051,6 +1090,9 @@ class _Cycle:
             self.api_get, candidate, repo=cfg.repository, branch=cfg.track_branch
         )
         status["required_checks"] = checks
+        if checks["verdict"] == "UNKNOWN_REQUIRED_CHECK":
+            # No deploy and no HOLD: retried next cycle once this file knows the check.
+            return finish("UNKNOWN_REQUIRED_CHECK:" + ",".join(checks["unknown_required"]))
         if checks["verdict"] != "GREEN":
             return finish(f"CHECKS_{checks['verdict']}")
         pins = pin_bumps_in_flight(self.api_get, repo=cfg.repository, now=host.now())
