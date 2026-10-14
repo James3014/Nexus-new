@@ -367,6 +367,9 @@ def _sweep_baseline() -> Optional[_SweepBaseline]:
         table = _process_table()
     except Exception:  # noqa: BLE001
         return None
+    # A real snapshot always contains this process and its parent.
+    if os.getpid() not in table or os.getppid() not in table:
+        return None
     return _SweepBaseline(
         started_at=time.time(),
         preexisting=frozenset(table),
@@ -388,16 +391,20 @@ def _started_after_by_us(pids: set[int], since: float) -> Optional[set[int]]:
     if not pids:
         return set()
     try:
-        out = subprocess.run(
+        completed = subprocess.run(
             ["ps", "-o", "pid=,uid=,lstart=", "-p", ",".join(str(pid) for pid in sorted(pids))],
             capture_output=True,
             text=True,
             timeout=10,
             check=False,
             env={**os.environ, "LC_ALL": "C", "LANG": "C"},
-        ).stdout
+        )
     except (OSError, subprocess.SubprocessError):
         return None
+    # ps exits 1 when some requested pid is gone; that is checked below.
+    if completed.returncode not in (0, 1):
+        return None
+    out = completed.stdout
     uid = os.getuid()
     found: set[int] = set()
     seen: set[int] = set()
@@ -447,17 +454,19 @@ def _pids_with_cwd_under(
         return None
     real_roots = [os.path.realpath(root).rstrip(os.sep) for root in roots]
     try:
-        out = subprocess.run(
+        completed = subprocess.run(
             ["lsof", "-nP", "-a", "-d", "cwd", "-Fpn"],
             capture_output=True,
             text=True,
             timeout=20,
             check=False,
-        ).stdout
+        )
     except (OSError, subprocess.SubprocessError):
         return None
-    if not out.strip():
-        # lsof always lists at least this process; empty output is a failure.
+    out = completed.stdout
+    # A complete listing always includes this process; partial or failed
+    # output (non-zero exit) is not proof that no worker process remains.
+    if completed.returncode != 0 or f"p{os.getpid()}" not in out.splitlines():
         return None
     found: set[int] = set()
     pid: Optional[int] = None

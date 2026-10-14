@@ -1461,3 +1461,32 @@ def test_sweep_with_failed_cwd_scan_is_not_reported_clean(monkeypatch, tmp_path)
         )
     )
     assert result.descendants_swept is False
+
+
+def test_cwd_scan_fails_closed_on_lsof_error_or_partial_listing(monkeypatch):
+    baseline = cli_worker._SweepBaseline(
+        started_at=0.0, preexisting=frozenset(), protected=frozenset()
+    )
+    me = os.getpid()
+    for rc, out in ((1, f"p{me}\nn/\n"), (0, "p1\nn/\n")):
+        monkeypatch.setattr(
+            cli_worker.subprocess,
+            "run",
+            lambda *a, _rc=rc, _out=out, **k: SimpleNamespace(stdout=_out, returncode=_rc),
+        )
+        assert cli_worker._pids_with_cwd_under(("/nonexistent-root",), baseline) is None
+
+
+def test_start_time_filter_fails_closed_on_ps_error(monkeypatch):
+    me = os.getpid()
+    monkeypatch.setattr(
+        cli_worker.subprocess,
+        "run",
+        lambda *a, **k: SimpleNamespace(stdout="", returncode=2),
+    )
+    assert cli_worker._started_after_by_us({me}, 0.0) is None
+
+
+def test_empty_process_snapshot_is_not_a_baseline(monkeypatch):
+    monkeypatch.setattr(cli_worker, "_process_table", lambda: {})
+    assert cli_worker._sweep_baseline() is None
