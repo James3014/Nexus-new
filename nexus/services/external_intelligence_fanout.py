@@ -56,6 +56,7 @@ CLAIM_CEILING = "CANDIDATE_READY_FOR_VERIFICATION"
 _SESSION_RE = re.compile(r"^ses_[A-Za-z0-9_-]{8,}$")
 _SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_PREFIXED_SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SLUG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,119}$")
 
 
@@ -841,6 +842,18 @@ class FanoutStore:
         present = [key for key in _CORE_BOUND_ATTEMPT_FIELDS if key in value]
         if present and len(present) != len(_CORE_BOUND_ATTEMPT_FIELDS):
             raise FanoutError("CORE_BINDING_ATTEMPT_RECORD_INCOMPLETE")
+        if present and not (
+            isinstance(value.get("bound_envelope_ref"), str)
+            and value["bound_envelope_ref"].strip()
+            and isinstance(value.get("bound_envelope_sha256"), str)
+            and _SHA256_RE.fullmatch(value["bound_envelope_sha256"]) is not None
+            and all(
+                isinstance(value.get(key), str)
+                and _PREFIXED_SHA256_RE.fullmatch(value[key]) is not None
+                for key in ("core_binding_hash", "acceptance_contract_hash")
+            )
+        ):
+            raise FanoutError("INITIAL_ATTEMPT_EVIDENCE_MISSING")
         return bool(present)
 
     def existing_repair_attempt(

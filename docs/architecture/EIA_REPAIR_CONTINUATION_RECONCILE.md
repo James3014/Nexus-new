@@ -80,6 +80,31 @@ the commit). Making it recoverable would need the intended candidate to be
 persisted before committing; this is not done here.
 Pinned by `test_repair_reconcile_after_post_commit_crash_is_stuck_but_safe`.
 
+## Threat model and known stuck-but-safe states
+
+The repair guards are designed for crash safety and to prevent a double
+dispatch: a continuation is never sent twice, and two continuations never run
+on one session. The fanout store is local state that only the daemon writes.
+Resisting tampering with it is best-effort and out of scope. For example,
+rewriting `prepare_seq` or the per-unit counter
+(`<state>/locks/<task>--<unit>--repair.seq`) can mis-order supersession; in
+review, no duplicate send was reproduced this way. Initial-attempt Core
+evidence is value-checked (well-formed hashes), not authenticated.
+
+Known stuck-but-safe states that need operator action:
+
+- **Crash between the sent-marker and the DISPATCHING write.** The attempt is
+  still `PREPARED`, but `<state>/repair-sent/<attempt_id>` exists. It is never
+  abandoned or reconciled, so the unit stays blocked.
+- **Pre-change `PREPARED` repair records without `prepare_seq`.** They can be
+  abandoned, but an abandoned record without `prepare_seq` is never proven
+  resolved, so the unit stays blocked.
+- **Crash after the candidate commit** (see the earlier section on this crash).
+
+The sent-marker is created with `O_EXCL` but is not fsynced, and neither is its
+directory. Whether it survives a power loss is not guaranteed; a process crash
+alone does not lose it.
+
 ## Open: closure and automation wiring (not implemented)
 
 Closure restarts from the initial unit receipts and the durable repair-delta

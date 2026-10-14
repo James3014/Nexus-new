@@ -833,7 +833,9 @@ def test_bound_unit_continue_with_stripped_parent_receipt_is_blocked(tmp_path, m
     assert not (ctx.store.attempts / "task-1--u1--repair-d001.json").exists()
 
 
-@pytest.mark.parametrize("initial_evidence", ["missing", "garbage", "foreign"])
+@pytest.mark.parametrize(
+    "initial_evidence", ["missing", "garbage", "foreign", "nulls", "malformed"]
+)
 def test_missing_initial_attempt_evidence_blocks_repair_paths(
     tmp_path, monkeypatch, initial_evidence
 ):
@@ -843,6 +845,19 @@ def test_missing_initial_attempt_evidence_blocks_repair_paths(
         initial_path.unlink()
     elif initial_evidence == "garbage":
         initial_path.write_text("{not json", encoding="utf-8")
+    elif initial_evidence in {"nulls", "malformed"}:
+        bad = None if initial_evidence == "nulls" else "sha256:not-a-hash"
+        value = json.loads(initial_path.read_text("utf-8"))
+        value.update({
+            key: bad
+            for key in (
+                "bound_envelope_ref",
+                "bound_envelope_sha256",
+                "core_binding_hash",
+                "acceptance_contract_hash",
+            )
+        })
+        initial_path.write_text(json.dumps(value), encoding="utf-8")
     else:
         value = dict(json.loads(initial_path.read_text("utf-8")), unit_id="u9")
         initial_path.write_text(json.dumps(value), encoding="utf-8")
