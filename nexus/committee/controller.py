@@ -54,7 +54,7 @@ class CommitteeControllerV263:
         all_verdicts = []
 
         # 1b. Test/oracle guard (fail closed, before verification and selection): a candidate
-        # whose patch modifies a test or oracle file is never verified and never selected.
+        # whose patch modifies a test or oracle file is never verified, scored or selected.
         guard_verdicts = []
         guarded_ids = set()
         for c in candidates:
@@ -80,9 +80,9 @@ class CommitteeControllerV263:
                 for v in VerifierRegistry.get_all_verifiers():
                     all_verdicts.append(v.evaluate(c.candidate_id, patch))
             
-        # 3. Calibration & Decision. A guarded candidate carries only its failing guard verdict
-        # (a losing score); it can never be the winner, checked again below.
-        all_verdicts = guard_verdicts + all_verdicts
+        # 3. Calibration & Decision over the eligible candidates only: a guarded candidate is not
+        # scored, so it neither wins nor hands another candidate an artificial gap (with one
+        # eligible candidate left the abstention policy abstains, as for a single proposal).
         if guarded_ids and len(guarded_ids) == len(candidates):
             selection_res = SelectionVerdict(
                 winner_id=None,
@@ -104,6 +104,7 @@ class CommitteeControllerV263:
                     reason="GUARDED_CANDIDATE_SELECTED",
                     failure_bucket="test_or_oracle_modified",
                 )
+        all_verdicts = guard_verdicts + all_verdicts
 
         # 4. Feedback & Retry (Decoupled Data-Flow)
         self.last_retry_directive = {}
@@ -132,6 +133,11 @@ class CommitteeControllerV263:
             verdicts=all_verdicts,
             winner_id=selection_res.winner_id,
             failure_bucket=selection_res.failure_bucket,
+            abstain_reason=(
+                selection_res.reason
+                if selection_res.failure_bucket == "test_or_oracle_modified"
+                else None
+            ),
             confidence=selection_res.confidence,
             verifier_gap=selection_res.gap,
             total_cost=len(candidates) * 0.05

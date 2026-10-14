@@ -10,11 +10,14 @@ Paths come from the unified-diff headers in the patch: ``diff --git``, ``---``/`
 when, case-insensitively:
 
 - its basename is an oracle/repro script (``ORACLE_NAMES``);
-- its basename is a pytest module or plugin: ``test_*.py``, ``*_test.py``, ``conftest.py``;
+- its basename is a test module or plugin: ``test_*.py``, ``*_test.py``, ``*_tests.py``,
+  ``tests.py``, ``conftest.py``;
 - any directory component is ``tests``, ``test`` or ``testing``.
 
 Fail closed: a header line that is present but cannot be parsed into a path rejects the
-candidate. An artifact with no diff header at all (a bare code snippet) names no file, so this
+candidate, and so does a C-quoted path with an escape sequence (git would decode it to a path this
+parser cannot see). Lines are split on ``\n`` only, as git does, so form feeds or other Unicode
+line separators cannot hide a header. An artifact with no diff header at all (a bare code snippet) names no file, so this
 rule has nothing to check and leaves it to the verifiers.
 
 Evidence: judge pair set v1 addendum (``eval/judge-pair-qualification-v1``). The rule rejected
@@ -36,6 +39,8 @@ ORACLE_NAMES = frozenset({
     "test_repro.py",
     "debug_repro.py",
     "nexus_repro_contract.py",
+    "reproduction.py",
+    "tests.py",
 })
 TEST_DIRS = frozenset({"tests", "test", "testing"})
 
@@ -44,8 +49,16 @@ _BINARY = re.compile(r"^Binary files (.+) and (.+) differ$")
 _RENAME_COPY = ("rename from ", "rename to ", "copy from ", "copy to ")
 
 
+class _QuotedEscape(ValueError):
+    pass
+
+
 def _strip_side(target: str) -> str:
-    target = target.split("\t", 1)[0].strip().strip('"')
+    target = target.split("\t", 1)[0].strip()
+    if target.startswith('"'):
+        if "\\" in target:
+            raise _QuotedEscape(target)
+        target = target.strip('"')
     if target.startswith(("a/", "b/")):
         target = target[2:]
     return target
@@ -60,7 +73,7 @@ def is_test_or_oracle_path(path: str) -> bool:
         name in ORACLE_NAMES
         or name == "conftest.py"
         or (name.startswith("test_") and name.endswith(".py"))
-        or name.endswith("_test.py")
+        or name.endswith(("_test.py", "_tests.py"))
         or any(part in TEST_DIRS for part in parts[:-1])
     )
 
@@ -70,8 +83,18 @@ def patch_paths(patch: str) -> tuple[list[str], list[str]]:
 
     paths: list[str] = []
     malformed: list[str] = []
-    lines = str(patch or "").splitlines()
+    lines = [line.removesuffix("\r") for line in str(patch or "").split("\n")]
     for index, line in enumerate(lines):
+        if line.startswith((
+            "diff --git ",
+            "--- ",
+            "+++ ",
+            "rename ",
+            "copy ",
+            "Binary files ",
+        )) and ('"' in line and "\\" in line):
+            malformed.append(line[:200])
+            continue
         # ``---``/``+++`` count as file headers only as an adjacent pair, so a removed line
         # that starts with ``-- `` (or an added ``++ ``) inside a hunk is not read as a path.
         is_old_header = (
