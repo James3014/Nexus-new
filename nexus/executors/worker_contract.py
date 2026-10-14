@@ -212,6 +212,8 @@ class WorkerExecutionReceipt:
     # MCP config) and the write sandbox actually applied, e.g. ``seatbelt:<sha256>``.
     provider_permission_profile_sha256: Optional[str] = None
     provider_write_sandbox: Optional[str] = None
+    # sha256 of the sorted key names of the worker's child environment.
+    provider_env_keys_sha256: Optional[str] = None
 
 
 def classify_worker_failure(receipt: WorkerExecutionReceipt) -> str:

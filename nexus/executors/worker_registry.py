@@ -18,6 +18,7 @@ from nexus.executors.agy_write_admission import (
     AGY_PERMISSION_MODE_ACCEPT_EDITS,
     AGY_PERMISSION_MODE_PLAN,
     AGY_READ_ONLY_ROLES,
+    agy_child_env,
     agy_delivery_failure,
     agy_model_shape_ok,
     agy_permission_bypass_flags,
@@ -25,9 +26,11 @@ from nexus.executors.agy_write_admission import (
     checkout_fingerprint,
     escaping_symlinks,
     fingerprint_roots,
+    leased_target_failure,
     materialize_run_home,
     paths_overlap,
     protected_checkout_plan,
+    run_home_settings_sha256,
     target_git_entry_state,
     worker_home,
 )
@@ -411,6 +414,7 @@ class AgyWorkerAdapter:
         on_process_group: Any = None,
         model: Optional[str] = None,
         worker_role: Optional[str] = None,
+        require_leased_target: bool = False,
     ) -> WorkerExecutionReceipt:
         """Run Agy under the #1912 write-admission model.
 
@@ -459,6 +463,12 @@ class AgyWorkerAdapter:
 
         if worker_role is None or not str(worker_role).strip():
             return refuse("agy_worker_role_required", None)
+        # The registry (production path) always requires a leased target; a
+        # contract that carries a target root is always bound as well.
+        if require_leased_target or hasattr(contract, "target_worktree_root"):
+            lease_failure = leased_target_failure(contract, lease)
+            if lease_failure is not None:
+                return refuse(lease_failure, None)
         role = str(worker_role).strip().lower()
         if role in AGY_READ_ONLY_ROLES:
             read_only, permission_mode = True, AGY_PERMISSION_MODE_PLAN
@@ -506,29 +516,31 @@ class AgyWorkerAdapter:
 
         run_tmp = Path(os.path.realpath(tempfile.mkdtemp(prefix="nexus-agy-run-")))
         facts: dict[str, str] = {}
+        run_homes: list[tuple[Path, str]] = []
 
         def admit_request(
             env: Optional[Mapping[str, str]],
         ) -> tuple[Optional[str], dict[str, str], str]:
             """Per-attempt disposable HOME, explicit settings and Seatbelt profile."""
-            run_env = {str(key): str(value) for key, value in (env or {}).items()}
-            source_home = worker_home(run_env)
+            source_home = worker_home(env)
             attempt_root = Path(tempfile.mkdtemp(prefix="attempt-", dir=run_tmp))
             run_home = attempt_root / "home"
             run_tmpdir = attempt_root / "tmp"
             run_tmpdir.mkdir(parents=True)
-            run_env["HOME"] = str(run_home)
-            run_env["TMPDIR"] = str(run_tmpdir)
+            # Explicit allowlist: the pool/ambient env is never forwarded.
+            run_env = agy_child_env(env, home=run_home, tmpdir=run_tmpdir)
             refusal, profile_sha256 = materialize_run_home(
                 source_home, run_home, read_only=read_only
             )
             facts["profile_sha256"] = profile_sha256
             if refusal is not None:
                 return refusal, run_env, ""
+            run_homes.append((run_home, run_home_settings_sha256(run_home)))
             try:
                 seatbelt = build_seatbelt_profile(
                     run_root=run_tmp,
                     writable_target=None if read_only else target_path,
+                    run_home=run_home,
                 )
             except ValueError:
                 return "agy_seatbelt_profile_unrepresentable", run_env, ""
@@ -548,6 +560,10 @@ class AgyWorkerAdapter:
                 build_argv=build_argv,
                 on_process_group=on_process_group,
                 admit_request=admit_request,
+                sweep_roots=(str(run_tmp),) if read_only else (str(target_path), str(run_tmp)),
+            )
+            profile_tampered = any(
+                run_home_settings_sha256(home) != digest for home, digest in run_homes
             )
         finally:
             shutil.rmtree(run_tmp, ignore_errors=True)
@@ -565,6 +581,8 @@ class AgyWorkerAdapter:
             post_failure = "canonical_snapshot_failed"
         elif after != before:
             post_failure = "canonical_checkout_integrity_violation"
+        elif profile_tampered:
+            post_failure = "agy_permission_profile_tampered"
         elif target_git_entry_state(target_path) != git_entry_before:
             post_failure = "agy_target_gitdir_tampered"
         elif escaping_symlinks(target_path) != symlinks_before:
@@ -590,6 +608,7 @@ class AgyWorkerAdapter:
         build_argv: Any,
         on_process_group: Any,
         admit_request: Any,
+        sweep_roots: tuple[str, ...] = (),
     ) -> WorkerExecutionReceipt:
         raw_budget = getattr(contract, "maximum_provider_calls", 1)
         provider_call_budget = max(0, int(1 if raw_budget is None else raw_budget))
@@ -694,6 +713,8 @@ class AgyWorkerAdapter:
                 timeout_seconds=remaining_seconds,
                 seatbelt_profile=seatbelt,
                 sweep_descendants_on_exit=True,
+                sweep_roots=sweep_roots,
+                exact_env=True,
             )
             result = run_cli_worker(request, on_process_group=on_process_group)
             delivery_failure: Optional[str] = None
@@ -735,6 +756,7 @@ class AgyWorkerAdapter:
                 ),
                 account_alias_hash=None,
                 provider_attempt_count=1,
+                provider_env_keys_sha256=result.env_keys_sha256 or None,
             )
 
         max_subprocesses = min(3, provider_call_budget)
@@ -830,6 +852,8 @@ class AgyWorkerAdapter:
                         timeout_seconds=remaining_seconds,
                         seatbelt_profile=seatbelt,
                         sweep_descendants_on_exit=True,
+                        sweep_roots=sweep_roots,
+                        exact_env=True,
                     )
 
                     keys_to_restore = {}
@@ -955,6 +979,7 @@ class AgyWorkerAdapter:
             failure_reason=None if outcome_val == WorkerOutcome.EXECUTION_COMPLETED.value else (failure_reason or f"{self.provider} execution did not complete successfully"),
             account_alias_hash=last_account_hash,
             provider_attempt_count=actual_calls,
+            provider_env_keys_sha256=last_result.env_keys_sha256 or None,
         )
 
 
@@ -1153,8 +1178,11 @@ class WorkerRegistry:
 
         adapter = self.adapter(provider)
         worker_role = options.pop("worker_role", None)
+        options.pop("require_leased_target", None)
         if bool(getattr(adapter, "accepts_worker_role", False)):
             options["worker_role"] = worker_role
+            # Production entry: the target must be the contract's leased worktree.
+            options["require_leased_target"] = True
         effect_authorization = options.pop("effect_authorization", None)
         tool_projection_manifest = options.pop("tool_projection_manifest", None)
         if (effect_authorization is None) != (tool_projection_manifest is None):

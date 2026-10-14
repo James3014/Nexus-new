@@ -10,6 +10,7 @@ import shutil
 import signal
 import subprocess
 import tempfile
+import threading
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -184,6 +185,11 @@ class CliWorkerRequest:
     # Kill the process group and run-tagged descendants after a normal exit
     # too, not only on timeout, so nothing outlives the receipt (#1912).
     sweep_descendants_on_exit: bool = False
+    # Directories whose resident processes (by cwd) are swept after exit, and
+    # a strict environment mode that inherits nothing ambient: only
+    # ``request.env`` plus the worker's own bookkeeping keys (#1912).
+    sweep_roots: Tuple[str, ...] = ()
+    exact_env: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "executable", _resolve_executable(self.executable))
@@ -222,6 +228,8 @@ class CliWorkerResult:
     # descendant survived the sweep.
     descendants_swept: Optional[bool] = None
     seatbelt_profile_sha256: str = ""
+    # sha256 of the sorted key names of the child environment.
+    env_keys_sha256: str = ""
 
     @staticmethod
     def hash_bytes(value: bytes) -> str:
@@ -278,6 +286,132 @@ def _tagged_pids(tag: str) -> set[int]:
         if len(parts) == 2 and parts[0].isdigit() and int(parts[0]) != own and needle in parts[1]:
             found.add(int(parts[0]))
     return found
+
+
+def _process_table() -> dict[int, int]:
+    """``pid -> ppid`` for every visible process."""
+    out = subprocess.run(
+        ["ps", "-axo", "pid=,ppid="], capture_output=True, text=True, timeout=10, check=True
+    ).stdout
+    table: dict[int, int] = {}
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+            table[int(parts[0])] = int(parts[1])
+    return table
+
+
+class _DescendantTracker:
+    """Record every descendant of ``root_pid`` by polling the process table.
+
+    Catches children that clear their environment (so the run tag is lost)
+    and call ``setsid`` (so the process group kill misses them), as long as
+    they are observed while their parent is still alive.
+    """
+
+    def __init__(self, root_pid: int, interval: float = 0.1) -> None:
+        self._root = root_pid
+        self._pids: set[int] = {root_pid}
+        self._interval = interval
+        self._stop = threading.Event()
+        self._lock = threading.Lock()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _snapshot(self) -> None:
+        try:
+            table = _process_table()
+        except Exception:  # noqa: BLE001
+            return
+        with self._lock:
+            changed = True
+            while changed:
+                changed = False
+                for pid, ppid in table.items():
+                    if ppid in self._pids and pid not in self._pids:
+                        self._pids.add(pid)
+                        changed = True
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            self._snapshot()
+            self._stop.wait(self._interval)
+
+    def stop(self) -> set[int]:
+        self._snapshot()
+        self._stop.set()
+        self._thread.join(timeout=5)
+        with self._lock:
+            return set(self._pids) - {self._root}
+
+
+def _pids_with_cwd_under(roots: Tuple[str, ...]) -> set[int]:
+    """PIDs whose current directory is inside one of ``roots``."""
+    if not roots:
+        return set()
+    real_roots = [os.path.realpath(root).rstrip(os.sep) for root in roots]
+    try:
+        out = subprocess.run(
+            ["lsof", "-nP", "-a", "-d", "cwd", "-Fpn"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    found: set[int] = set()
+    pid: Optional[int] = None
+    for line in out.splitlines():
+        if line.startswith("p") and line[1:].isdigit():
+            pid = int(line[1:])
+        elif line.startswith("n") and pid is not None:
+            cwd = os.path.realpath(line[1:])
+            if any(cwd == root or cwd.startswith(root + os.sep) for root in real_roots):
+                found.add(pid)
+    return found
+
+
+def _kill_and_confirm(pids: set[int]) -> bool:
+    """SIGKILL ``pids`` (never ourselves or our parent); True when none survive."""
+    targets = {pid for pid in pids if pid > 1} - {os.getpid(), os.getppid()}
+    for pid in targets:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+    deadline = time.monotonic() + _SWEEP_DEADLINE_SECONDS
+    while True:
+        alive = set()
+        for pid in targets:
+            try:
+                os.kill(pid, 0)
+                alive.add(pid)
+            except ProcessLookupError:
+                pass
+            except PermissionError:
+                pass
+        if alive:
+            # A killed process may linger as an unreaped zombie; it runs nothing.
+            try:
+                stats = subprocess.run(
+                    ["ps", "-o", "pid=,stat=", "-p", ",".join(str(pid) for pid in alive)],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=False,
+                ).stdout
+                for line in stats.splitlines():
+                    parts = line.split()
+                    if len(parts) == 2 and parts[1].startswith("Z"):
+                        alive.discard(int(parts[0]))
+            except (OSError, subprocess.SubprocessError, ValueError):
+                pass
+        if not alive:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
 
 
 def _sweep_tagged_processes(tag: str) -> bool:
@@ -406,9 +540,11 @@ def run_cli_worker(
     # Verifiers must not inherit ambient lifecycle controls, provider tokens,
     # or target-root overrides.  Callers can still pass task-scoped values
     # explicitly through ``request.env``.
-    environment = {
-        key: value for key, value in os.environ.items() if key in _INHERITED_ENV_ALLOWLIST
-    }
+    environment = (
+        {}
+        if request.exact_env
+        else {key: value for key, value in os.environ.items() if key in _INHERITED_ENV_ALLOWLIST}
+    )
     # Defensive second check: the request constructor already rejects GitHub
     # credential keys, but the send path must also fail closed so a future
     # env-supplying caller can never reintroduce a broad Owner credential.
@@ -486,16 +622,26 @@ def run_cli_worker(
         )
         if on_process_group is not None:
             on_process_group(process.pid)
+        tracker = _DescendantTracker(process.pid) if request.sweep_descendants_on_exit else None
         try:
             stdout, stderr = process.communicate(timeout=request.timeout_seconds)
             timed_out = False
             group_killed = False
             status = CliWorkerStatus.COMPLETED
-            if request.sweep_descendants_on_exit:
+            if tracker is not None:
+                tracked = tracker.stop()
                 _kill_process_group(process)
-                descendants_swept = _sweep_tagged_processes(run_tag)
+                tagged_clean = _sweep_tagged_processes(run_tag)
+                descendants_swept = (
+                    _kill_and_confirm(tracked | _pids_with_cwd_under(request.sweep_roots))
+                    and tagged_clean
+                )
         except subprocess.TimeoutExpired as exc:
             group_killed = _kill_process_group(process)
+            if tracker is not None:
+                tracked = tracker.stop()
+                if not _kill_and_confirm(tracked | _pids_with_cwd_under(request.sweep_roots)):
+                    group_killed = False
             # Descendants that called setsid() left the group; find them by the
             # per-run tag in their environment and kill them too.  A receipt may
             # only claim a clean kill when no tagged process survives.
@@ -564,6 +710,7 @@ def run_cli_worker(
         },
         descendants_swept=descendants_swept,
         seatbelt_profile_sha256=seatbelt_sha256,
+        env_keys_sha256=hashlib.sha256("\n".join(sorted(environment)).encode("utf-8")).hexdigest(),
     )
 
     # ------------------------------------------------------------------

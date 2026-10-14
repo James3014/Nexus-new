@@ -120,12 +120,35 @@ def last_json_object(text: str) -> Optional[dict[str, Any]]:
     return found
 
 
+_RESULT_ENVELOPE_KEYS = frozenset({"status", "response", "denied_actions", "conversation_id"})
+
+
+def top_level_json_objects(text: str) -> list[dict[str, Any]]:
+    """Every top-level JSON object in ``text``; non-JSON log lines are skipped."""
+    decoder = json.JSONDecoder()
+    found: list[dict[str, Any]] = []
+    index = text.find("{")
+    while index != -1:
+        try:
+            value, end = decoder.raw_decode(text, index)
+        except ValueError:
+            index = text.find("{", index + 1)
+            continue
+        if isinstance(value, dict):
+            found.append(value)
+        index = text.find("{", end)
+    return found
+
+
 def agy_delivery_failure(stdout: bytes, stderr: bytes) -> Optional[str]:
     """Typed non-delivery reason for an Agy run that exited 0, else ``None``.
 
-    Delivery requires a parseable JSON object with ``status == "SUCCESS"``,
-    no ``denied_actions`` and a non-empty ``response``.  The headless denial
-    marker is only trusted on stderr, never in the model-controlled stdout.
+    Delivery requires exactly one result envelope (a JSON object carrying any
+    of status/response/denied_actions/conversation_id; repeated identical
+    copies are tolerated) with ``status == "SUCCESS"``, no ``denied_actions``
+    and a non-empty ``response``.  Any envelope reporting a failure or a
+    denial, or envelopes that disagree, make the run non-delivery.  The
+    headless denial marker is only trusted on stderr, never in stdout.
     """
     err = stderr.decode("utf-8", errors="replace")
     if any(marker in err for marker in _AGY_HEADLESS_PERMISSION_DENIAL_MARKERS):
@@ -133,13 +156,16 @@ def agy_delivery_failure(stdout: bytes, stderr: bytes) -> Optional[str]:
     text = stdout.decode("utf-8", errors="replace")
     if not text.strip():
         return "agy_no_output"
-    payload = last_json_object(text)
-    if payload is None:
+    envelopes = [obj for obj in top_level_json_objects(text) if _RESULT_ENVELOPE_KEYS & set(obj)]
+    if not envelopes:
         return "agy_output_unparseable"
-    if payload.get("denied_actions"):
+    if any(envelope.get("denied_actions") for envelope in envelopes):
         return "agy_permission_denied"
-    if payload.get("status") != "SUCCESS":
+    if any(envelope.get("status") != "SUCCESS" for envelope in envelopes):
         return "agy_status_not_success"
+    if any(envelope != envelopes[0] for envelope in envelopes[1:]):
+        return "agy_output_ambiguous"
+    payload = envelopes[0]
     response = payload.get("response")
     if not isinstance(response, str) or not response.strip():
         return "agy_no_output"
@@ -159,6 +185,39 @@ AGY_RUN_HOME_COPIED_FILES = (
     Path(".gemini") / "antigravity-cli" / "installation_id",
 )
 AGY_RUN_HOME_SETTINGS = Path(".gemini") / "antigravity-cli" / "settings.json"
+AGY_RUN_HOME_PROJECTS = Path(".gemini") / "config" / "projects"
+
+# Child environment allowlist (#1912).  Probed: agy authenticates and edits
+# with only PATH, LANG, HOME, TMPDIR, USER, LOGNAME, SHELL and TERM.  Proxy
+# variables pass through only when present.  Everything else (NEXUS_*,
+# tokens, API keys, GH_*/GITHUB_*, OPENAI_*/ANTHROPIC_*, Google ADC, ...) is
+# dropped.
+AGY_ENV_ALLOWLIST = frozenset({"PATH", "LANG", "TERM", "USER", "LOGNAME", "SHELL"})
+AGY_ENV_PROXY_KEYS = frozenset({
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
+    "all_proxy",
+})
+
+
+def agy_child_env(
+    source: Optional[Mapping[str, str]], *, home: Path, tmpdir: Path
+) -> dict[str, str]:
+    """Allowlisted environment for an agy child process."""
+    base = os.environ if source is None else source
+    env = {
+        str(key): str(value)
+        for key, value in base.items()
+        if key in AGY_ENV_ALLOWLIST or key in AGY_ENV_PROXY_KEYS or str(key).startswith("LC_")
+    }
+    env["HOME"] = str(home)
+    env["TMPDIR"] = str(tmpdir)
+    return env
 
 
 def agy_run_settings(*, read_only: bool) -> dict[str, Any]:
@@ -193,6 +252,8 @@ def materialize_run_home(
     settings_path = run_home / AGY_RUN_HOME_SETTINGS
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     settings_path.write_text(settings, encoding="utf-8")
+    # agy must create its project record; the rest of config/ stays locked.
+    (run_home / AGY_RUN_HOME_PROJECTS).mkdir(parents=True, exist_ok=True)
     profile = json.dumps(
         {"mode": "plan" if read_only else "accept-edits", "settings": settings},
         sort_keys=True,
@@ -213,15 +274,24 @@ def _sbpl_path(path: Path) -> str:
     return text
 
 
+# Workspace customizations agy may load on a later run in the target (hooks,
+# plugins, MCP servers, skills, rules): the whole ``.agents`` subtree.
 TARGET_AGY_CUSTOMIZATION_PATHS = (
-    ".agents/hooks.json",
-    ".agents/plugins",
-    ".agents/mcp_config.json",
+    ".agents",
     ".antigravitycli",
 )
 
 
-def build_seatbelt_profile(*, run_root: Path, writable_target: Optional[Path]) -> str:
+def run_home_settings_sha256(run_home: Path) -> str:
+    try:
+        return hashlib.sha256((run_home / AGY_RUN_HOME_SETTINGS).read_bytes()).hexdigest()
+    except OSError:
+        return "unreadable"
+
+
+def build_seatbelt_profile(
+    *, run_root: Path, writable_target: Optional[Path], run_home: Optional[Path] = None
+) -> str:
     """Deny every file write except the target and the per-run root.
 
     ``run_root`` holds the disposable HOME and TMPDIR, so the real HOME
@@ -242,6 +312,15 @@ def build_seatbelt_profile(*, run_root: Path, writable_target: Optional[Path]) -
         for name in TARGET_AGY_CUSTOMIZATION_PATHS:
             entry = _sbpl_path(writable_target / name)
             deny += [f'  (literal "{entry}")', f'  (subpath "{entry}")']
+    reallow: list[str] = []
+    if run_home is not None:
+        # The worker may not rewrite its own permission profile or the agy
+        # config (hooks, MCP, plugins); only the project registry stays
+        # writable because agy creates its project record there.
+        settings = _sbpl_path(run_home / AGY_RUN_HOME_SETTINGS)
+        config = _sbpl_path(run_home / ".gemini" / "config")
+        deny += [f'  (literal "{settings}")', f'  (literal "{config}")', f'  (subpath "{config}")']
+        reallow = [f'  (subpath "{_sbpl_path(run_home / AGY_RUN_HOME_PROJECTS)}")']
     lines = [
         "(version 1)",
         "(allow default)",
@@ -255,6 +334,8 @@ def build_seatbelt_profile(*, run_root: Path, writable_target: Optional[Path]) -
     ]
     if deny:
         lines += ["(deny file-write*", *deny, ")"]
+    if reallow:
+        lines += ["(allow file-write*", *reallow, ")"]
     return "\n".join(lines) + "\n"
 
 
@@ -519,6 +600,31 @@ def target_git_entry_state(target: Path) -> str:
     except OSError:
         _update(digest, b"unreadable", b"")
     return digest.hexdigest()
+
+
+def leased_target_failure(contract: Any, lease: Any) -> Optional[str]:
+    """``agy_target_not_leased_worktree`` unless the target is the contract's leased worktree.
+
+    The target must equal the contract's ``target_repo_root``, sit strictly
+    inside its ``target_worktree_root``, and the lease must carry the
+    contract's task id.
+    """
+    reason = "agy_target_not_leased_worktree"
+    task_id = str(getattr(contract, "task_id", "") or "")
+    root = str(getattr(contract, "target_worktree_root", "") or "").strip()
+    repo_root = str(getattr(contract, "target_repo_root", "") or "").strip()
+    target = str(getattr(lease, "target_worktree", "") or "").strip()
+    if not (task_id and root and repo_root and target):
+        return reason
+    if str(getattr(lease, "task_id", "") or "") != task_id:
+        return reason
+    target_path = Path(os.path.realpath(Path(target).expanduser()))
+    root_path = Path(os.path.realpath(Path(root).expanduser()))
+    if _path_key(target_path) != _path_key(Path(repo_root).expanduser()):
+        return reason
+    if _path_key(target_path) == _path_key(root_path) or not path_inside(target_path, root_path):
+        return reason
+    return None
 
 
 def worker_home(env: Optional[Mapping[str, str]]) -> Path:

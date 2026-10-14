@@ -361,8 +361,48 @@ def _run_gemini_patch(
             cmd.insert(1, "-y")
     env = os.environ.copy()
     env["HOME"] = "/Users/jameschen"
-    env["PATH"] = f"/opt/homebrew/bin:/Users/jameschen/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{env.get('PATH', '')}"
-    
+    env["PATH"] = (
+        f"/opt/homebrew/bin:/Users/jameschen/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{env.get('PATH', '')}"
+    )
+
+    agy_run_root: Path | None = None
+    if "agy" in str(bin_path):
+        # #1912: same confinement as the production adapter: disposable HOME,
+        # allowlisted env and a Seatbelt profile that only lets agy write the
+        # case dir (minus .git/.agents) and its per-run root.
+        import tempfile
+
+        from nexus.executors import agy_write_admission as admission
+
+        if not admission.seatbelt_available():
+            return {
+                "regression_test_added": False,
+                "unrelated_change": False,
+                "root_cause": "",
+                "written_files": [],
+                "model_calls": 0,
+                "total_tokens": 0,
+                "token_capture_status": "not_run",
+                "gemini_returncode": None,
+                "error": "agy_seatbelt_unavailable",
+            }
+        agy_run_root = Path(os.path.realpath(tempfile.mkdtemp(prefix="nexus-bench-agy-")))
+        run_home = agy_run_root / "home"
+        run_tmp = agy_run_root / "tmp"
+        run_tmp.mkdir(parents=True)
+        admission.materialize_run_home(Path(env["HOME"]), run_home, read_only=False)
+        env = admission.agy_child_env(env, home=run_home, tmpdir=run_tmp)
+        profile_path = agy_run_root / "agy.sb"
+        profile_path.write_text(
+            admission.build_seatbelt_profile(
+                run_root=agy_run_root,
+                writable_target=Path(os.path.realpath(case_dir)),
+                run_home=run_home,
+            ),
+            encoding="utf-8",
+        )
+        cmd = [admission.SANDBOX_EXEC_PATH, "-f", str(profile_path), *cmd]
+
     if "agy" in str(bin_path):
         import pty
         import select
@@ -421,6 +461,8 @@ def _run_gemini_patch(
                 os.close(master)
             except:
                 pass
+            if agy_run_root is not None:
+                shutil.rmtree(agy_run_root, ignore_errors=True)
     else:
         try:
             res = subprocess.run(cmd, cwd=case_dir, env=env, text=True, capture_output=True, timeout=timeout_sec, check=False)

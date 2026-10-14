@@ -978,8 +978,10 @@ def test_seatbelt_profile_blocks_planting_agy_workspace_customizations(tmp_path)
         )
     )
     assert result.exit_code == 0, result.stderr
-    assert result.stdout.strip() == b"BLOCKED,BLOCKED,BLOCKED,BLOCKED,WROTE"
+    # Skills are agy workspace customization too: the whole .agents subtree is locked.
+    assert result.stdout.strip() == b"BLOCKED,BLOCKED,BLOCKED,BLOCKED,BLOCKED"
     assert not (target / ".agents" / "hooks.json").exists()
+    assert not (target / ".agents" / "skills" / "ok.md").exists()
 
 
 def test_post_exit_sweep_kills_detached_descendants(tmp_path):
@@ -1009,3 +1011,279 @@ def test_post_exit_sweep_kills_detached_descendants(tmp_path):
             break
         time.sleep(0.05)
     assert alive is False
+
+
+# ---------------------------------------------------------------------------
+# environment allowlist, leased target, profile tamper, envelopes, sweep
+# ---------------------------------------------------------------------------
+
+_AMBIENT_SECRETS = {
+    "NEXUS_AGY_RUNTIME_AUTHORIZED": "1",
+    "SOME_SERVICE_TOKEN": "t",
+    "OPENAI_API_KEY": "k",
+    "ANTHROPIC_API_KEY": "k",
+    "GOOGLE_APPLICATION_CREDENTIALS": "/x.json",
+    "GITHUB_ACTIONS": "true",
+    "AWS_SECRET_ACCESS_KEY": "k",
+}
+
+
+@pytest.mark.parametrize("pooled", [False, True])
+def test_agy_child_env_is_an_explicit_allowlist(monkeypatch, tmp_path, agy_home, pooled):
+    _ready(monkeypatch)
+    for key, value in _AMBIENT_SECRETS.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("LC_CTYPE", "UTF-8")
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy:3128")
+    captured = {}
+
+    def fake_worker(request, on_process_group=None):
+        captured["request"] = request
+        return _result(request, stdout=_OK)
+
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", fake_worker)
+    pool = None
+    if pooled:
+        from nexus.services.agy_account_pool import AgyAccount, AgyAccountPoolManager
+
+        pool = AgyAccountPoolManager([AgyAccount(alias="acc1", home_dir=str(agy_home))])
+    _invoke(AgyWorkerAdapter(account_pool=pool, canonical_root=_repo(tmp_path)), _target(tmp_path))
+
+    request = captured["request"]
+    assert request.exact_env is True
+    keys = set(request.env)
+    assert keys <= {
+        "PATH",
+        "LANG",
+        "TERM",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "HOME",
+        "TMPDIR",
+        "LC_CTYPE",
+        "LC_ALL",
+        "HTTPS_PROXY",
+    }
+    assert {"HOME", "TMPDIR", "LC_CTYPE", "HTTPS_PROXY"} <= keys
+    assert not keys & set(_AMBIENT_SECRETS)
+    assert Path(request.env["HOME"]) != agy_home
+
+
+def test_exact_env_child_sees_only_request_env_and_receipt_hash(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "leak")
+    code = "import json, os; print(json.dumps(sorted(os.environ)))"
+    result = run_cli_worker(
+        CliWorkerRequest(
+            executable=sys.executable,
+            argv=("-c", code),
+            cwd=str(tmp_path),
+            env={"PATH": os.environ["PATH"], "HOME": str(tmp_path)},
+            exact_env=True,
+        )
+    )
+    keys = set(json.loads(result.stdout))
+    assert "OPENAI_API_KEY" not in keys
+    assert "PYTHONPATH" not in keys and "VIRTUAL_ENV" not in keys
+    assert {"PATH", "HOME"} <= keys
+    assert len(result.env_keys_sha256) == 64
+
+
+def _leased(tmp_path: Path, task_id: str = "agy-admission"):
+    root = (tmp_path / "nexus-runtime-targets").resolve()
+    target = root / task_id
+    target.mkdir(parents=True)
+    contract = SimpleNamespace(
+        task_id=task_id,
+        maximum_provider_calls=1,
+        target_worktree_root=str(root),
+        target_repo_root=str(target),
+    )
+    lease = SimpleNamespace(task_id=task_id, target_worktree=str(target))
+    return contract, lease, root, target
+
+
+@pytest.mark.parametrize(
+    "case", ["ok", "no_root", "outside_root", "is_root", "other_task", "other_repo_root"]
+)
+def test_registry_requires_the_contracts_leased_worktree(monkeypatch, tmp_path, agy_home, case):
+    _ready(monkeypatch)
+    contract, lease, root, target = _leased(tmp_path)
+    if case == "no_root":
+        contract = SimpleNamespace(task_id=contract.task_id, maximum_provider_calls=1)
+    elif case == "outside_root":
+        elsewhere = _target(tmp_path)
+        lease = SimpleNamespace(task_id=contract.task_id, target_worktree=str(elsewhere))
+        contract.target_repo_root = str(elsewhere)
+    elif case == "is_root":
+        lease = SimpleNamespace(task_id=contract.task_id, target_worktree=str(root))
+        contract.target_repo_root = str(root)
+    elif case == "other_task":
+        lease = SimpleNamespace(task_id="someone-else", target_worktree=str(target))
+    elif case == "other_repo_root":
+        sibling = root / "sibling"
+        sibling.mkdir()
+        lease = SimpleNamespace(task_id=contract.task_id, target_worktree=str(sibling))
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry.run_cli_worker",
+        lambda request, on_process_group=None: _result(request, stdout=_OK),
+    )
+    registry = WorkerRegistry.default()
+    monkeypatch.setitem(registry._adapters, "agy", AgyWorkerAdapter(canonical_root=_repo(tmp_path)))
+    receipt = registry.invoke(
+        "agy", contract, lease, prompt="bounded task", worker_role="implementation"
+    )
+    if case == "ok":
+        assert receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
+    else:
+        assert receipt.failure_reason == "agy_target_not_leased_worktree"
+        assert receipt.provider_calls == 0
+
+
+def test_worker_rewriting_its_permission_profile_fails_closed(monkeypatch, tmp_path, agy_home):
+    _ready(monkeypatch)
+
+    def fake_worker(request, on_process_group=None):
+        settings = Path(request.env["HOME"]) / ".gemini" / "antigravity-cli" / "settings.json"
+        settings.write_text('{"permissions": {"allow": ["command(*)"]}}', encoding="utf-8")
+        return _result(request, stdout=_OK)
+
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", fake_worker)
+    receipt = _invoke(AgyWorkerAdapter(canonical_root=_repo(tmp_path)), _target(tmp_path))
+    assert receipt.failure_reason == "agy_permission_profile_tampered"
+
+
+@pytest.mark.skipif(not _seatbelt_usable(), reason="macOS sandbox-exec not usable here")
+def test_seatbelt_locks_run_home_profile_but_not_agy_state(tmp_path):
+    run_root = (tmp_path / "run").resolve()
+    run_home = run_root / "attempt" / "home"
+    admission.materialize_run_home(tmp_path, run_home, read_only=False)
+    profile = admission.build_seatbelt_profile(
+        run_root=run_root, writable_target=None, run_home=run_home
+    )
+    code = (
+        "import os, sys\n"
+        "h = sys.argv[1]\n"
+        "out = []\n"
+        "for rel in ('.gemini/antigravity-cli/settings.json', '.gemini/config/hooks.json',\n"
+        "            '.gemini/config/projects/p.json', '.gemini/antigravity-cli/brain/b.txt'):\n"
+        "    path = os.path.join(h, rel)\n"
+        "    try:\n"
+        "        os.makedirs(os.path.dirname(path), exist_ok=True)\n"
+        "        open(path, 'w').write('x')\n"
+        "        out.append('WROTE')\n"
+        "    except OSError:\n"
+        "        out.append('BLOCKED')\n"
+        "print(','.join(out))\n"
+    )
+    result = run_cli_worker(
+        CliWorkerRequest(
+            executable=sys.executable,
+            argv=("-c", code, str(run_home)),
+            cwd=str(run_root),
+            env={"HOME": str(run_home), "TMPDIR": str(run_root)},
+            seatbelt_profile=profile,
+        )
+    )
+    assert result.stdout.strip() == b"BLOCKED,BLOCKED,WROTE,WROTE", result.stderr
+
+
+_FAIL = json.dumps({"status": "ERROR", "response": "boom"}).encode()
+
+
+@pytest.mark.parametrize(
+    ("stdout", "reason"),
+    [
+        (_FAIL + b"\n" + _OK, "agy_status_not_success"),
+        (_OK + b"\n" + _FAIL, "agy_status_not_success"),
+        (
+            json.dumps({"status": "SUCCESS", "response": "a"}).encode()
+            + b"\n"
+            + json.dumps({"status": "SUCCESS", "response": "b"}).encode(),
+            "agy_output_ambiguous",
+        ),
+        (
+            _OK
+            + b"\n"
+            + json.dumps({"status": "SUCCESS", "response": "x", "denied_actions": [1]}).encode(),
+            "agy_permission_denied",
+        ),
+        (b'log: starting {"level": "info"}\n' + _OK + b"\nlog: done\n", None),
+        (_OK + b"\n" + _OK, None),
+    ],
+)
+def test_every_result_envelope_must_agree(stdout, reason):
+    assert agy_delivery_failure(stdout, b"") == reason
+
+
+def _wait_dead(pid: int, seconds: float = 5) -> bool:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        stat = subprocess.run(
+            ["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, check=False
+        ).stdout.strip()
+        if not stat or stat.startswith("Z"):
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def test_sweep_kills_env_cleared_setsid_child(tmp_path):
+    """A child that drops the run tag and leaves the process group is still tracked."""
+    code = (
+        "import subprocess, sys, time\n"
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'],\n"
+        "    env={}, cwd='/', start_new_session=True,\n"
+        "    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+        "print(child.pid, flush=True)\n"
+        "time.sleep(0.6)\n"
+    )
+    result = run_cli_worker(
+        CliWorkerRequest(
+            executable=sys.executable,
+            argv=("-c", code),
+            cwd=str(tmp_path),
+            sweep_descendants_on_exit=True,
+        )
+    )
+    pid = int(result.stdout.split()[0])
+    assert result.descendants_swept is True
+    assert _wait_dead(pid)
+
+
+def test_sweep_kills_double_forked_child_resident_in_sweep_root(tmp_path):
+    """Immediate double fork (parent gone before any poll) is caught by its cwd."""
+    work = (tmp_path / "work").resolve()
+    work.mkdir()
+    code = (
+        "import os, sys\n"
+        "r, w = os.pipe()\n"
+        "if os.fork() == 0:\n"
+        "    os.setsid()\n"
+        "    if os.fork() == 0:\n"
+        "        os.chdir(sys.argv[1])\n"
+        "        os.write(w, str(os.getpid()).encode())\n"
+        "        null = os.open(os.devnull, os.O_RDWR)\n"
+        "        for fd in (0, 1, 2):\n"
+        "            os.dup2(null, fd)\n"
+        "        os.execve(sys.executable, [sys.executable, '-c', 'import time; time.sleep(60)'], {})\n"
+        "    os._exit(0)\n"
+        "os.close(w)\n"
+        "print(os.read(r, 32).decode(), flush=True)\n"
+    )
+    result = run_cli_worker(
+        CliWorkerRequest(
+            executable=sys.executable,
+            argv=("-c", code, str(work)),
+            cwd=str(tmp_path),
+            sweep_descendants_on_exit=True,
+            sweep_roots=(str(work),),
+        )
+    )
+    pid = int(result.stdout.strip())
+    assert result.descendants_swept is True
+    assert _wait_dead(pid)
