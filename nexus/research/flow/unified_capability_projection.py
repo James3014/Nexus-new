@@ -59,9 +59,14 @@ def not_executable_reason(name: str) -> str:
 
 
 _SIMULATION_KEYS = frozenset({"simulated", "stub", "mock"})
-_SIMULATION_TOKEN = re.compile(r"\b(?:simulated|stub|mock)\b", re.IGNORECASE)
+# SIMULATED / STUB / MOCK as a token: delimited by anything that is not a letter or digit, so
+# ``STUB_INVOKED`` and ``SIMULATED_BY_DESIGN`` match but ``structural_stubber`` does not.
+_SIMULATION_TOKEN = re.compile(r"(?<![A-Za-z0-9])(?:simulated|stub|mock)(?![A-Za-z0-9])", re.I)
+# Only status-like keys are scanned for marker words (never arbitrary code text).
+_STATUS_LIKE_KEY = re.compile(r"(?:status|state|kind|mode|claim|provider|source|type|label)$", re.I)
+_CODE_TEXT = re.compile(r"\bimport\b|unittest\.mock|\bfrom\s+\S+\s+import\b")
 _FALSY_STRINGS = frozenset({"", "0", "false", "no", "off", "none", "null"})
-# Outcome keys that only describe a status; a record made of these alone is not physical output.
+# Outcome keys that only describe status, identity or the inputs; never physical output.
 _TRIVIAL_OUTCOME_KEYS = frozenset({
     "action",
     "status",
@@ -80,6 +85,39 @@ _TRIVIAL_OUTCOME_KEYS = frozenset({
     "consumer_payload",
     "task_id",
     "telemetry",
+    "delegated_to",
+    "response_task_id",
+    "task_identity_shared",
+    "reason",
+    "query",
+    "lookup_symbol",
+    "task_desc",
+    "statement",
+    "input",
+    "inputs",
+    "message",
+})
+_SUCCESS_STATUSES = frozenset({"SUCCEEDED", "VERIFIED", "PASS"})
+# Refusal codes meaning "started, but an input it needs was not supplied" (executor registry
+# + runtime).  Any other refusal / failure code is ``failed_or_refused``.
+MISSING_INPUT_CODES = frozenset({
+    "ENTROPY_AUDIT_TEXT_REQUIRED",
+    "EXPLICIT_VERIFY_COMMANDS_REQUIRED",
+    "JIT_TOOL_CATALOG_REQUIRED",
+    "JUDGE_REQUIRES_TWO_DISTINCT_CANDIDATES",
+    "MEMPALACE_ARTIFACT_CONTEXT_REQUIRED",
+    "PLAN_QUALITY_CONTEXT_REQUIRED",
+    "PROJECT_MEMORY_CONTEXT_REQUIRED",
+    "REAL_OUTCOME_EPISODE_REQUIRED",
+    "REAL_REPAIR_ATTEMPT_RECEIPT_REQUIRED",
+    "REAL_TARGET_FILES_REQUIRED",
+    "REGISTRY_PEER_CONTEXT_REQUIRED",
+    "SANDBOX_COMMAND_CONTEXT_REQUIRED",
+    "SWARM_TARGET_AND_VERIFY_SCRIPT_REQUIRED",
+    "TARGET_SYMBOL_REQUIRED",
+    "TWO_INDEPENDENT_CANDIDATES_REQUIRED",
+    "TWO_REAL_DISCARD_FAILURES_REQUIRED",
+    "VERIFY_COMMAND_WIRING_REQUIRED",
 })
 REAL_INVOKED_STATUS = "REAL_INVOKED"
 # Stamped on re-projected real boundaries: consistent with runtime-sealed evidence, which is
@@ -93,23 +131,37 @@ def _truthy_marker(value: Any) -> bool:
     return bool(value)
 
 
+def _marker_text(value: str) -> bool:
+    return not _CODE_TEXT.search(value) and bool(_SIMULATION_TOKEN.search(value))
+
+
 def _declares_simulated(value: Any, depth: int = 0) -> bool:
-    """True when an executor outcome declares a simulation anywhere (bounded, all keys).
+    """True when an executor outcome declares a simulation anywhere (bounded).
 
     Counted from the executor's return value, up to ``_MAX_OUTCOME_DEPTH`` levels: a
     ``simulated`` / ``stub`` / ``mock`` key with any truthy value (``True``, ``"true"``, ``1``),
-    or any string containing SIMULATED / STUB / MOCK as a word (case-insensitive).
+    or a status-like key (``*status``, ``*state``, ``*kind``, ``*mode``, ``*claim``,
+    ``*provider``, ``*source``, ``*type``, ``*label``) whose string value carries SIMULATED /
+    STUB / MOCK as a token (``STUB_INVOKED``, ``simulated-run``); code text is ignored.
     """
 
     if depth > _MAX_OUTCOME_DEPTH:
         return False
-    if isinstance(value, str):
-        return bool(_SIMULATION_TOKEN.search(value))
     if isinstance(value, Mapping):
         for key, item in value.items():
-            if str(key).strip().lower() in _SIMULATION_KEYS and _truthy_marker(item):
+            key_text = str(key).strip()
+            if key_text.lower() in _SIMULATION_KEYS and _truthy_marker(item):
                 return True
-        return any(_declares_simulated(item, depth + 1) for item in value.values())
+            if isinstance(item, str) and _STATUS_LIKE_KEY.search(key_text) and _marker_text(item):
+                return True
+            if isinstance(item, (list, tuple)) and _STATUS_LIKE_KEY.search(key_text):
+                if any(isinstance(x, str) and _marker_text(x) for x in item):
+                    return True
+        return any(
+            _declares_simulated(item, depth + 1)
+            for item in value.values()
+            if isinstance(item, (Mapping, list, tuple))
+        )
     if isinstance(value, (list, tuple)):
         return any(_declares_simulated(item, depth + 1) for item in value)
     return False
@@ -132,21 +184,42 @@ def _ref_list(value: Any) -> tuple[list[str], bool]:
     return [str(ref) for ref in value if isinstance(ref, str) and ref.strip()], True
 
 
+def _non_trivial(item: Any, depth: int) -> bool:
+    if item is None or isinstance(item, bool):
+        return False
+    if isinstance(item, str):
+        return bool(item.strip())
+    if isinstance(item, (int, float)):
+        return item != 0
+    if isinstance(item, Mapping):
+        return _physical_output(item, depth + 1)
+    if isinstance(item, (list, tuple)):
+        return any(_non_trivial(x, depth + 1) for x in item)
+    return False
+
+
 def _physical_output(value: Any, depth: int = 0) -> bool:
-    """True when an executor outcome carries output beyond status/evidence bookkeeping."""
+    """True when an executor outcome carries output beyond status / identity / input echo.
+
+    Trivial: ``_TRIVIAL_OUTCOME_KEYS``, any ``*_id`` / ``*_ids`` key, booleans, blank strings,
+    zero numbers and containers holding only those.
+    """
 
     if depth > _MAX_OUTCOME_DEPTH or not isinstance(value, Mapping):
         return False
     for key, item in value.items():
-        if key in ("response", "outcome", "result") and isinstance(item, Mapping):
-            if _physical_output(item, depth + 1):
-                return True
-            if key == "result" and item:
+        key_text = str(key)
+        if key_text in ("response", "outcome", "result"):
+            if isinstance(item, Mapping):
+                if _physical_output(item, depth + 1):
+                    return True
+                continue
+            if key_text == "result" and _non_trivial(item, depth):
                 return True
             continue
-        if key in _TRIVIAL_OUTCOME_KEYS:
+        if key_text in _TRIVIAL_OUTCOME_KEYS or key_text.endswith(("_id", "_ids")):
             continue
-        if item not in (None, "", [], {}, False):
+        if _non_trivial(item, depth):
             return True
     return False
 
@@ -154,11 +227,11 @@ def _physical_output(value: Any, depth: int = 0) -> bool:
 def _bundle_index(receipt: Mapping[str, Any], name: str) -> set[str]:
     """Evidence ids sealed by the runtime for this capability (runtime-authored).
 
-    Only the ``capability_evidence_bundle`` entry whose ``name``/``capability`` is this
-    capability, whose status is ``REAL_INVOKED`` (or ``invoked_real`` is true) and which has a
-    ``physical_callable`` counts.  When the capability's executor record is present it must
-    also carry physical output (``_physical_output``), so a no-op executor never resolves.
-    Another capability's entry or a failed / stub / pending entry never resolve a ref.
+    Only the ``capability_evidence_bundle`` entry whose ``name`` is this capability, whose
+    status is ``REAL_INVOKED`` (and ``invoked_real`` is not false) and which has a
+    ``physical_callable`` counts; when the capability's executor record is present it must
+    also carry physical output.  Another capability's entry or a failed / stub / pending entry
+    never resolve a ref.
     """
 
     index: set[str] = set()
@@ -169,16 +242,11 @@ def _bundle_index(receipt: Mapping[str, Any], name: str) -> set[str]:
     if record is not None and not _physical_output(record):
         return index
     for entry in entries if isinstance(entries, (list, tuple)) else ():
-        if not isinstance(entry, Mapping):
+        if not isinstance(entry, Mapping) or str(entry.get("name") or "") != name:
             continue
-        if name not in (str(entry.get("name") or ""), str(entry.get("capability") or "")):
+        if str(entry.get("status") or "") != REAL_INVOKED_STATUS:
             continue
-        if not (
-            str(entry.get("status") or "") == REAL_INVOKED_STATUS
-            or entry.get("invoked_real") is True
-        ):
-            continue
-        if not entry.get("physical_callable"):
+        if entry.get("invoked_real") is False or not entry.get("physical_callable"):
             continue
         refs, well_formed = _ref_list(entry.get("evidence_ids"))
         if well_formed:
@@ -193,8 +261,6 @@ def _self_index(receipt: Mapping[str, Any], name: str) -> set[str]:
     record = results.get(name) if isinstance(results, Mapping) else None
     if not isinstance(record, Mapping) or not record.get("physical_callable"):
         return set()
-    if not _physical_output(record):
-        return set()
     index: set[str] = set()
     for key in ("evidence_refs", "evidence_ids"):
         refs, well_formed = _ref_list(record.get(key))
@@ -203,8 +269,7 @@ def _self_index(receipt: Mapping[str, Any], name: str) -> set[str]:
     return index
 
 
-_REQUIRED_INPUT_ERROR = re.compile(r"^[A-Z][A-Z0-9_]*_REQUIRED$")
-_MISSING_INPUT_FIELDS = ("missing_inputs", "missing_evidence", "blockers")
+_VERDICT_LISTS = ("missing_evidence", "blockers")
 
 
 def _executor_outcome(value: Any, depth: int = 0) -> Mapping[str, Any] | None:
@@ -219,43 +284,91 @@ def _executor_outcome(value: Any, depth: int = 0) -> Mapping[str, Any] | None:
     return value if "semantic_status" in value else None
 
 
-def _blocked_missing_inputs(record: Any) -> dict[str, Any]:
-    """Reason an executor started but refused for missing inputs ({} when it did not).
+def _code(value: Any) -> str:
+    return re.sub(r"[^A-Z0-9_:]", "_", str(value or "").strip().upper()).strip("_")
 
-    * ``semantic_status=BLOCKED`` with an ``*_REQUIRED`` error code (e.g.
-      ``EXPLICIT_VERIFY_COMMANDS_REQUIRED``, ``PLAN_QUALITY_CONTEXT_REQUIRED``);
-    * ``semantic_status=BLOCKED`` whose blockers name missing proof (``missing_*``), as the
-      postflight artifact/claim/delivery gates report;
-    * ``semantic_status=UNVERIFIED`` with ``missing_evidence`` (acceptance_check deciding with
-      no evidence).
-    Authorization blocks (``BLOCKED_EXTERNAL_AUTH``) are not missing inputs.
+
+def _str_items(value: Any) -> list[str]:
+    if not isinstance(value, (list, tuple)):
+        return []
+    return [item for item in value if isinstance(item, str) and item.strip()]
+
+
+def outcome_disposition(record: Any) -> dict[str, Any]:
+    """What the executor's own outcome says happened.
+
+    ``kind`` is one of:
+
+    * ``succeeded`` -- innermost ``semantic_status`` in SUCCEEDED / VERIFIED / PASS;
+    * ``missing_inputs`` -- refused with a ``MISSING_INPUT_CODES`` code, or a verdict list
+      (``missing_evidence`` / ``blockers``) whose every item is ``missing_*``;
+    * ``evaluated_rejected`` -- a gate that evaluated and rejected (a verdict list with at least
+      one verdict item such as ``verifier_status_not_pass``): it ran, ``gate_passed`` false;
+    * ``failed_or_refused`` -- anything else that started and did not succeed (other codes,
+      ``MALFORMED_*``, exception text, no ``semantic_status``);
+    * ``none`` -- no executor record.
     """
 
+    if not isinstance(record, Mapping):
+        return {"kind": "none", "reason": ""}
     outcome = _executor_outcome(record)
     if outcome is None:
-        return {}
-    status = str(outcome.get("semantic_status") or "").upper()
-    error = str(outcome.get("error") or "")
-    missing: list[str] = []
-    for key in _MISSING_INPUT_FIELDS:
-        items = outcome.get(key)
-        if isinstance(items, (list, tuple)):
-            missing.extend(str(item) for item in items if isinstance(item, str) and item)
-    if status == "BLOCKED" and _REQUIRED_INPUT_ERROR.match(error):
-        return {"reason": error, "missing_inputs": missing}
-    if status == "BLOCKED" and any(item.startswith("missing_") for item in missing):
-        return {"reason": "VERIFIER_PROOF_REQUIRED", "missing_inputs": missing}
-    if status == "UNVERIFIED" and missing:
-        return {"reason": "ACCEPTANCE_EVIDENCE_REQUIRED", "missing_inputs": missing}
-    return {}
+        error = _code(record.get("error") or _deep_error(record))
+        return {"kind": "failed_or_refused", "reason": error or "NO_SEMANTIC_STATUS"}
+    status = _code(outcome.get("semantic_status"))
+    error = _code(outcome.get("error"))
+    if status in _SUCCESS_STATUSES:
+        return {"kind": "succeeded", "reason": status}
+    if error in MISSING_INPUT_CODES:
+        return {
+            "kind": "missing_inputs",
+            "reason": error,
+            "missing_inputs": _str_items(outcome.get("missing_inputs")),
+        }
+    for field in _VERDICT_LISTS:
+        items = _str_items(outcome.get(field))
+        if not items:
+            continue
+        if all(item.startswith("missing_") for item in items):
+            reason = (
+                "ACCEPTANCE_EVIDENCE_REQUIRED"
+                if field == "missing_evidence"
+                else "VERIFIER_PROOF_REQUIRED"
+            )
+            return {"kind": "missing_inputs", "reason": reason, "missing_inputs": items}
+        verdict = next(item for item in items if not item.startswith("missing_"))
+        return {"kind": "evaluated_rejected", "reason": _code(verdict), "verdicts": items}
+    return {"kind": "failed_or_refused", "reason": error or status or "NO_SUCCESS_STATUS"}
 
 
-def _safe_blocked(receipt: Mapping[str, Any], name: str) -> dict[str, Any]:
+def _deep_error(record: Mapping[str, Any], depth: int = 0) -> str:
+    if depth > _MAX_OUTCOME_DEPTH:
+        return ""
+    for key in ("response", "outcome"):
+        inner = record.get(key)
+        if isinstance(inner, Mapping):
+            if inner.get("error"):
+                return str(inner.get("error"))
+            found = _deep_error(inner, depth + 1)
+            if found:
+                return found
+    return ""
+
+
+def _safe_disposition(receipt: Mapping[str, Any], name: str) -> dict[str, Any]:
     try:
         results = receipt.get("capability_results")
-        return _blocked_missing_inputs(results.get(name) if isinstance(results, Mapping) else None)
-    except Exception:  # noqa: BLE001 - unreadable outcome: not classified as blocked
-        return {}
+        return outcome_disposition(results.get(name) if isinstance(results, Mapping) else None)
+    except Exception:  # noqa: BLE001 - unreadable outcome: started, outcome unknown
+        return {"kind": "failed_or_refused", "reason": "OUTCOME_UNREADABLE"}
+
+
+def _safe_physical(receipt: Mapping[str, Any], name: str) -> bool:
+    try:
+        results = receipt.get("capability_results")
+        return _physical_output(results.get(name) if isinstance(results, Mapping) else None)
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _safe_index(fn: Any, receipt: Mapping[str, Any], name: str) -> set[str]:
@@ -281,7 +394,8 @@ def _compact_stage(
     outcome_simulated: bool = False,
     evidence_index: set[str] | None = None,
     self_index: set[str] | None = None,
-    blocked: Mapping[str, Any] | None = None,
+    disposition: Mapping[str, Any] | None = None,
+    self_physical_output: bool = False,
 ) -> dict[str, Any]:
     boundary = (
         stage.get("claim_boundary") if isinstance(stage.get("claim_boundary"), Mapping) else {}
@@ -314,7 +428,8 @@ def _compact_stage(
         "refs_resolved": refs_well_formed
         and bool(refs)
         and all(ref in (evidence_index or set()) for ref in refs),
-        **({"blocked_missing_inputs": dict(blocked)} if blocked else {}),
+        "disposition": dict(disposition or {"kind": "none", "reason": ""}),
+        "self_physical_output": bool(self_physical_output),
         "refs_self_reported": refs_well_formed
         and bool(refs)
         and all(ref in (self_index or set()) for ref in refs),
@@ -346,7 +461,8 @@ def project_unified_capability_stages(receipts: Iterable[Any] | None) -> list[di
                 outcome_simulated=_outcome_simulated(receipt, name),
                 evidence_index=_safe_index(_bundle_index, receipt, name),
                 self_index=_safe_index(_self_index, receipt, name),
-                blocked=_safe_blocked(receipt, name),
+                disposition=_safe_disposition(receipt, name),
+                self_physical_output=_safe_physical(receipt, name),
             )
             prev = merged.get(row["name"])
             if prev is None or _STATUS_RANK.get(row["status"], 0) >= _STATUS_RANK.get(
@@ -372,31 +488,27 @@ ATTESTATION_REAL = "real"
 ATTESTATION_REAL_SELF_REPORTED = "real_self_reported"
 ATTESTATION_SIMULATED = "simulated"
 ATTESTATION_BLOCKED_MISSING_INPUTS = "blocked_missing_inputs"
+ATTESTATION_FAILED_OR_REFUSED = "failed_or_refused"
 
 
 def runtime_attestation(receipt: Mapping[str, Any], stage: Mapping[str, Any] | None = None) -> str:
-    """Classify a runtime invocation: ``real``, ``real_self_reported`` or ``simulated``.
+    """Classify one runtime invocation (a consistency check, not provenance).
 
-    A consistency check over what the runtime receipt reports, not provenance.  Common
-    signals (all must hold, else ``simulated``):
+    In order:
 
-    * the name is not in ``SIMULATED_BY_DESIGN_EXECUTORS``;
-    * the stage's own ``simulated`` flag is exactly ``False`` (and the receipt's, if present);
-    * ``claim_boundary.simulated`` is exactly ``False`` and ``claim_boundary.receipt_present``
-      is exactly ``True`` (missing is not real);
-    * well-formed, non-empty evidence refs;
-    * no simulation marker in the executor outcome (``outcome_simulated``).
-
-    Before those signals: a simulation marker makes it ``simulated``; an executor that started
-    and refused for missing inputs (``_blocked_missing_inputs``) is ``blocked_missing_inputs``:
-    the capability did not run.
-
-    Then ``real`` when every ref is sealed by the runtime in this capability's own
-    ``REAL_INVOKED`` evidence-bundle entry (``refs_resolved``, see ``_bundle_index``);
-    ``real_self_reported`` when the refs resolve only through the capability's own executor
-    record with physical output (``refs_self_reported``, see ``_self_index``): the executor
-    says it ran, but the runtime sealed no evidence for it (postflight stages today); anything
-    else is ``simulated``.
+    1. ``simulated`` -- name in ``SIMULATED_BY_DESIGN_EXECUTORS``; a simulation marker in the
+       executor outcome; stage ``simulated`` or ``claim_boundary.simulated`` not exactly
+       ``False``; ``claim_boundary.receipt_present`` not exactly ``True``; evidence refs
+       missing or malformed.
+    2. ``blocked_missing_inputs`` -- the executor started and refused because an input was
+       not supplied (``outcome_disposition`` kind ``missing_inputs``): it did not run.
+    3. ``failed_or_refused`` -- started and did not succeed for any other reason (other
+       refusal codes, ``MALFORMED_*``, exceptions, no success status).
+    4. ``real`` -- every ref sealed in this capability's own ``REAL_INVOKED`` bundle entry.
+    5. ``real_self_reported`` -- refs resolve only through the capability's own executor
+       record, which succeeded with physical output, or is a gate that evaluated and rejected
+       (``gate_passed`` stays false).
+    6. otherwise ``simulated``.
 
     ``claim_eligible`` is deliberately not required: it is false whenever the gate did not
     pass, which says nothing about whether the capability ran; boundaries keep the runtime's
@@ -410,11 +522,6 @@ def runtime_attestation(receipt: Mapping[str, Any], stage: Mapping[str, Any] | N
         source = stage if isinstance(stage, Mapping) else receipt
         if bool(receipt.get("outcome_simulated")) or bool(source.get("outcome_simulated")):
             return ATTESTATION_SIMULATED
-        if isinstance(source.get("blocked_missing_inputs"), Mapping) and source.get(
-            "blocked_missing_inputs"
-        ):
-            # Started and refused for missing inputs: the capability did not run.
-            return ATTESTATION_BLOCKED_MISSING_INPUTS
         if source.get("simulated") is not False:
             return ATTESTATION_SIMULATED
         if "simulated" in receipt and receipt.get("simulated") is not False:
@@ -427,12 +534,22 @@ def runtime_attestation(receipt: Mapping[str, Any], stage: Mapping[str, Any] | N
         refs, well_formed = _ref_list(source.get("evidence_refs"))
         if not well_formed or not refs:
             return ATTESTATION_SIMULATED
-        if bool(receipt.get("outcome_simulated")) or bool(source.get("outcome_simulated")):
-            return ATTESTATION_SIMULATED
+        raw = source.get("disposition")
+        disposition: Mapping[str, Any] = raw if isinstance(raw, Mapping) else {}
+        kind = str(disposition.get("kind") or "none")
+        if kind == "missing_inputs":
+            return ATTESTATION_BLOCKED_MISSING_INPUTS
+        if kind == "failed_or_refused":
+            return ATTESTATION_FAILED_OR_REFUSED
         if source.get("refs_resolved") is True:
             return ATTESTATION_REAL
         if source.get("refs_self_reported") is True:
-            return ATTESTATION_REAL_SELF_REPORTED
+            if kind == "evaluated_rejected":
+                return ATTESTATION_REAL_SELF_REPORTED
+            if kind == "succeeded" and source.get("self_physical_output") is True:
+                return ATTESTATION_REAL_SELF_REPORTED
+            if kind == "succeeded":
+                return ATTESTATION_FAILED_OR_REFUSED  # success with nothing produced
     except Exception:  # noqa: BLE001 - a malformed receipt is never real
         return ATTESTATION_SIMULATED
     return ATTESTATION_SIMULATED
@@ -470,16 +587,24 @@ def reproject_receipt_base_claim_boundary(
     top_cb: dict[str, Any] = dict(top) if isinstance(top, Mapping) else {}
     attestation = runtime_attestation(updated, stage) if refs else ATTESTATION_SIMULATED
     real = attestation == ATTESTATION_REAL
+    raw_disp = stage.get("disposition") if isinstance(stage, Mapping) else None
+    disposition: Mapping[str, Any] = raw_disp if isinstance(raw_disp, Mapping) else {}
+    if attestation in (
+        ATTESTATION_BLOCKED_MISSING_INPUTS,
+        ATTESTATION_FAILED_OR_REFUSED,
+        ATTESTATION_REAL_SELF_REPORTED,
+    ):
+        # Never real: both boundaries stay simulated so no claim reader can see a real claim.
+        updated["attestation"] = attestation
+    if attestation in (ATTESTATION_BLOCKED_MISSING_INPUTS, ATTESTATION_FAILED_OR_REFUSED):
+        updated["blocked_reason"] = str(disposition.get("reason") or "unspecified")
     if attestation == ATTESTATION_BLOCKED_MISSING_INPUTS:
-        updated["attestation"] = ATTESTATION_BLOCKED_MISSING_INPUTS
-        blocked = stage.get("blocked_missing_inputs") if isinstance(stage, Mapping) else None
-        if isinstance(blocked, Mapping):
-            updated["blocked_reason"] = str(blocked.get("reason") or "")
-            updated["blocked_missing_inputs"] = list(blocked.get("missing_inputs") or [])
-    if attestation == ATTESTATION_REAL_SELF_REPORTED:
-        # The executor says it ran but the runtime sealed no evidence: its own class, never
-        # real; both boundaries stay simulated so no claim reader can see a real claim.
-        updated["attestation"] = ATTESTATION_REAL_SELF_REPORTED
+        updated["blocked_missing_inputs"] = _str_items(disposition.get("missing_inputs"))
+    if attestation in (ATTESTATION_REAL, ATTESTATION_REAL_SELF_REPORTED) and (
+        str(disposition.get("kind") or "") == "evaluated_rejected"
+    ):
+        updated["gate_passed"] = False
+        updated["gate_verdict"] = str(disposition.get("reason") or "")
     if not real:
         updated["claim_boundary"] = {
             **top_cb,

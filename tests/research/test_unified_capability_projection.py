@@ -58,7 +58,15 @@ def _results(*stages: dict) -> dict:
         stage["name"]: {
             "physical_callable": f"capability_executor_registry:{stage['name']}",
             "evidence_refs": list(stage.get("evidence_refs") or []),
-            "response": {"response": {"outcome": {"action": "run", "output_paths": ["out.json"]}}},
+            "response": {
+                "response": {
+                    "outcome": {
+                        "action": "run",
+                        "semantic_status": "SUCCEEDED",
+                        "output_paths": ["out.json"],
+                    }
+                }
+            },
         }
         for stage in stages
         if stage.get("status") == "INVOKED"
@@ -728,6 +736,7 @@ def test_noop_executor_self_report_is_not_real_but_a_real_record_is() -> None:
             "response": {
                 "outcome": {
                     "action": "lookup_implementation",
+                    "semantic_status": "SUCCEEDED",
                     "lookup_symbol": "normalize",
                     "result": {"impacted_files": ["demo.py"]},
                 }
@@ -788,11 +797,18 @@ def test_simulation_markers_deep_truthy_and_token_forms() -> None:
     assert _declares_simulated(deep) is True
     for marker in ({"stub": "true"}, {"mock": 1}, {"Simulated": "yes"}):
         assert _declares_simulated({"response": marker}) is True, marker
-    assert _declares_simulated({"note": "ran against a MOCK provider"}) is True
-    assert _declares_simulated({"note": "Stub-backed lookup"}) is True
+    assert _declares_simulated({"provider": "ran against a MOCK provider"}) is True
+    assert _declares_simulated({"status": "Stub-backed lookup"}) is True
+    assert _declares_simulated({"semantic_status": "STUB_INVOKED"}) is True
+    assert _declares_simulated({"claim": "SIMULATED_BY_DESIGN"}) is True
+    # Marker words in free text or code are not status markers.
+    assert _declares_simulated({"note": "ran against a MOCK provider"}) is False
+    assert _declares_simulated({"source": "from unittest.mock import MagicMock"}) is False
     # Falsy markers and identifiers that only embed the word are not markers.
     assert _declares_simulated({"stub": False, "mock": "false", "simulated": 0}) is False
-    assert _declares_simulated({"mask_kind": "keyword_mock", "kind": "structural_stubber"}) is False
+    assert _declares_simulated({"kind": "structural_stubber"}) is False
+    # ``_``-delimited tokens count (jit_validation's mask_kind=keyword_mock is a marker).
+    assert _declares_simulated({"mask_kind": "keyword_mock"}) is True
 
 
 def test_malformed_evidence_lists_fail_closed_without_raising() -> None:
@@ -825,7 +841,11 @@ def test_attestation_class_transitions_real_self_reported_simulated() -> None:
         "acceptance_check": {
             "physical_callable": "capability_executor_registry:acceptance_check",
             "evidence_refs": list(stage["evidence_refs"]),
-            "response": {"response": {"outcome": {"result": "decide_completion: UNVERIFIED"}}},
+            "response": {
+                "response": {
+                    "outcome": {"semantic_status": "VERIFIED", "result": "decision recorded"}
+                }
+            },
         }
     }
 
@@ -876,7 +896,11 @@ def test_attestation_class_transitions_real_self_reported_simulated() -> None:
     marked = {
         "acceptance_check": {
             **record["acceptance_check"],
-            "response": {"response": {"outcome": {"result": "simulated-run of decide"}}},
+            "response": {
+                "response": {
+                    "outcome": {"semantic_status": "VERIFIED", "provider": "simulated-run"}
+                }
+            },
         }
     }
     kind, _out = run({**sealed, "capability_results": marked})
@@ -947,7 +971,7 @@ def test_executors_refusing_for_missing_inputs_are_blocked_not_run() -> None:
             {
                 "action": "decide_completion",
                 "semantic_status": "UNVERIFIED",
-                "missing_evidence": ["verifier_status_not_pass", "missing_verifier_artifact"],
+                "missing_evidence": ["missing_verifier_artifact", "missing_source_hash"],
             },
             "ACCEPTANCE_EVIDENCE_REQUIRED",
         ),
@@ -964,7 +988,7 @@ def test_executors_refusing_for_missing_inputs_are_blocked_not_run() -> None:
         # Even a sealed REAL_INVOKED bundle entry cannot make a refusal real.
         kind, out, stage = _blocked_case(name, outcome, sealed=True)
         assert kind == "blocked_missing_inputs", name
-        assert stage["blocked_missing_inputs"]["reason"] == reason
+        assert stage["disposition"]["reason"] == reason
         assert out["blocked_reason"] == reason
         assert out["claim_boundary"]["simulated"] is True
         assert out["receipt_base"]["claim_boundary"]["simulated"] is True
@@ -995,3 +1019,174 @@ def test_auth_blocks_and_real_input_output_are_not_missing_inputs() -> None:
     )
     assert kind == "real_self_reported"
     assert out["attestation"] == "real_self_reported"
+
+
+def test_r4_failed_or_refused_and_evaluated_rejected_transitions() -> None:
+    """r4 probes: success needs a success status and real output; other refusals are visible
+    as failed_or_refused; a gate that evaluated and rejected ran (gate_passed false)."""
+
+    from scripts.bench.strict_llm_baseline import (
+        capability_summary,
+        classify_receipt,
+        classify_row_capabilities,
+    )
+
+    cases = [
+        # vacuous success outputs -> failed_or_refused (started, produced nothing)
+        ("pregate", {"semantic_status": "SUCCEEDED", "result": {"ok": True}}, "failed_or_refused"),
+        ("pregate", {"semantic_status": "SUCCEEDED", "message": "   "}, "failed_or_refused"),
+        (
+            "pregate",
+            {"semantic_status": "SUCCEEDED", "delegated_to": "Local", "response_task_id": "t"},
+            "failed_or_refused",
+        ),
+        # BLOCKED with a non-input code -> failed_or_refused (never self-reported)
+        (
+            "committee",
+            {"semantic_status": "BLOCKED", "error": "COMMITTEE_FEATURE_DISABLED"},
+            "failed_or_refused",
+        ),
+        (
+            "pregate",
+            {"semantic_status": "BLOCKED", "error": "MALFORMED_VERIFY_COMMAND"},
+            "failed_or_refused",
+        ),
+        (
+            "file_lock",
+            {"semantic_status": "BLOCKED", "error": "FILE_LOCK_HELD_BY_OTHER_TASK:t2"},
+            "failed_or_refused",
+        ),
+        (
+            "pregate",
+            {"semantic_status": "FAILED", "error": "boom: KeyError('x')"},
+            "failed_or_refused",
+        ),
+        # lower-cased missing-input code is still missing input
+        (
+            "pregate",
+            {"semantic_status": "blocked", "error": "explicit_verify_commands_required"},
+            "blocked_missing_inputs",
+        ),
+        (
+            "judge_panel",
+            {"semantic_status": "BLOCKED", "error": "JUDGE_REQUIRES_TWO_DISTINCT_CANDIDATES"},
+            "blocked_missing_inputs",
+        ),
+        # a gate that evaluated and rejected ran
+        (
+            "acceptance_check",
+            {
+                "semantic_status": "UNVERIFIED",
+                "missing_evidence": ["verifier_status_not_pass", "missing_verifier_artifact"],
+            },
+            "real_self_reported",
+        ),
+        # success with physical output on real inputs
+        ("memory", {"semantic_status": "SUCCEEDED", "hits": ["note-1"]}, "real_self_reported"),
+    ]
+    outs = []
+    for name, outcome, expected in cases:
+        kind, out, _row = _blocked_case(name, outcome)
+        assert kind == expected, (name, outcome)
+        assert classify_receipt(out) == expected, (name, outcome)
+        if expected != "real_self_reported":
+            assert out["claim_boundary"]["simulated"] is True
+        outs.append(out)
+    assert outs[3]["blocked_reason"] == "COMMITTEE_FEATURE_DISABLED"
+    assert outs[9]["gate_passed"] is False and outs[9]["gate_verdict"] == "VERIFIER_STATUS_NOT_PASS"
+
+    # No semantic_status at all (decide_completion_not_callable) -> failed_or_refused.
+    stage = _stage("acceptance_check", "INVOKED")
+    receipt = {
+        "task_id": "t",
+        "capabilities": [stage],
+        "capability_results": {
+            "acceptance_check": {
+                "physical_callable": "capability_executor_registry:acceptance_check",
+                "evidence_refs": list(stage["evidence_refs"]),
+                "response": {"response": {"outcome": {"error": "decide_completion_not_callable"}}},
+            }
+        },
+    }
+    row = project_unified_capability_stages([receipt])[0]
+    assert row["disposition"] == {
+        "kind": "failed_or_refused",
+        "reason": "DECIDE_COMPLETION_NOT_CALLABLE",
+    }
+
+    # A simulated stage that refused stays simulated (simulation checks run first).
+    sim = {**_stage("pregate", "INVOKED"), "simulated": True}
+    stages = project_unified_capability_stages([
+        {
+            "task_id": "t",
+            "capabilities": [sim],
+            "capability_results": {
+                "pregate": {
+                    "physical_callable": "capability_executor_registry:pregate",
+                    "evidence_refs": list(sim["evidence_refs"]),
+                    "response": {
+                        "response": {
+                            "outcome": {
+                                "semantic_status": "BLOCKED",
+                                "error": "EXPLICIT_VERIFY_COMMANDS_REQUIRED",
+                            }
+                        }
+                    },
+                }
+            },
+        }
+    ])
+    sim_out = overlay_unified_capability_receipts([_stale_flow_receipt("pregate")], stages)[0]
+    assert classify_receipt(sim_out) == "simulated"
+
+    rows = [{"mode": "with_nexus", "task_id": "x", "capability_receipts": outs[3:5]}]
+    classify_row_capabilities(rows[0])
+    assert rows[0]["capabilities_failed_or_refused"] == ["committee", "pregate"]
+    assert capability_summary(rows)["capability_failed_or_refused"] == {
+        "committee": {"COMMITTEE_FEATURE_DISABLED": 1},
+        "pregate": {"MALFORMED_VERIFY_COMMAND": 1},
+    }
+
+
+def test_bundle_requires_real_invoked_status_and_name_and_guards_bad_lists() -> None:
+    record = {
+        "physical_callable": "capability_executor_registry:pregate",
+        "response": {"response": {"outcome": {"semantic_status": "SUCCEEDED", "commands_run": 2}}},
+    }
+    flagged_only = {
+        "name": "pregate",
+        "status": "INVOKED_NOT_SUCCESS",
+        "invoked_real": True,
+        "physical_callable": "x",
+        "evidence_ids": ["ev_x"],
+    }
+    assert (
+        _probe("pregate", ["ev_x"], entries=[flagged_only], record=record)["refs_resolved"] is False
+    )
+    by_capability_key = {
+        **flagged_only,
+        "name": "",
+        "capability": "pregate",
+        "status": "REAL_INVOKED",
+    }
+    assert (
+        _probe("pregate", ["ev_x"], entries=[by_capability_key], record=record)["refs_resolved"]
+        is False
+    )
+    vetoed = {**flagged_only, "status": "REAL_INVOKED", "invoked_real": False}
+    assert _probe("pregate", ["ev_x"], entries=[vetoed], record=record)["refs_resolved"] is False
+    # missing_inputs that is not a list never raises
+    from nexus.research.flow.unified_capability_projection import outcome_disposition
+
+    disp = outcome_disposition({
+        "response": {
+            "semantic_status": "BLOCKED",
+            "error": "TARGET_SYMBOL_REQUIRED",
+            "missing_inputs": 7,
+        }
+    })
+    assert disp == {
+        "kind": "missing_inputs",
+        "reason": "TARGET_SYMBOL_REQUIRED",
+        "missing_inputs": [],
+    }

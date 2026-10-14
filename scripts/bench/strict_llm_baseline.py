@@ -48,6 +48,9 @@ REAL_SELF_REPORTED_CLASS = "real_self_reported"
 # Receipt class for an executor that started and refused for missing inputs (set by the
 # overlay with ``blocked_reason``): the capability did not run; never real, never simulated.
 BLOCKED_MISSING_INPUTS_CLASS = "blocked_missing_inputs"
+# Started and did not succeed for any other reason (refusal / failure code recorded): visible,
+# never real, never simulated.
+FAILED_OR_REFUSED_CLASS = "failed_or_refused"
 # A SUCCESS reached by a bounded Hyper re-run after the first attempt failed (Nexus treatment).
 NEXUS_TREATMENT_RESCUE = "rescued_by_nexus_treatment"
 # The run's captured-prompt symmetry audit failed or errored: no row of it is a solve of any kind.
@@ -259,6 +262,7 @@ def classify_receipt(receipt: dict[str, Any]) -> str:
     Everything else invoked (simulated=true, or no evidence) is ``simulated``.
     ``not_executable``: an explicit ``NOT_EXECUTABLE:<class>`` receipt (nothing could run).
     ``blocked_missing_inputs``: the executor started and refused for missing inputs.
+    ``failed_or_refused``: the executor started and did not succeed for another reason.
     ``real_self_reported``: the overlay found every runtime signal consistent but the evidence
     refs resolve only through the executor's own record (no runtime-sealed evidence).
     """
@@ -269,6 +273,8 @@ def classify_receipt(receipt: dict[str, Any]) -> str:
         return "selected_not_invoked"
     if str(receipt.get("attestation") or "") == BLOCKED_MISSING_INPUTS_CLASS:
         return BLOCKED_MISSING_INPUTS_CLASS
+    if str(receipt.get("attestation") or "") == FAILED_OR_REFUSED_CLASS:
+        return FAILED_OR_REFUSED_CLASS
     if str(receipt.get("attestation") or "") == REAL_SELF_REPORTED_CLASS:
         has_refs = bool([ref for ref in (receipt.get("evidence_refs") or []) if str(ref).strip()])
         return REAL_SELF_REPORTED_CLASS if has_refs else "simulated"
@@ -288,6 +294,7 @@ def classify_row_capabilities(row: dict[str, Any]) -> dict[str, Any]:
     not_executable: list[str] = []
     self_reported: list[str] = []
     blocked: dict[str, str] = {}
+    failed: dict[str, str] = {}
     for receipt in row.get("capability_receipts") or []:
         if not isinstance(receipt, dict) or not receipt.get("selected", True):
             continue
@@ -305,6 +312,8 @@ def classify_row_capabilities(row: dict[str, Any]) -> dict[str, Any]:
             self_reported.append(name)
         elif kind == BLOCKED_MISSING_INPUTS_CLASS:
             blocked[name] = str(receipt.get("blocked_reason") or "unspecified")
+        elif kind == FAILED_OR_REFUSED_CLASS:
+            failed[name] = str(receipt.get("blocked_reason") or "unspecified")
         else:
             not_invoked.append(name)
     row["capabilities_real"] = sorted(set(real))
@@ -315,6 +324,10 @@ def classify_row_capabilities(row: dict[str, Any]) -> dict[str, Any]:
     row["capabilities_blocked_missing_inputs"] = sorted(set(blocked) - set(real))
     row["capability_blocked_reasons"] = {
         name: blocked[name] for name in row["capabilities_blocked_missing_inputs"]
+    }
+    row["capabilities_failed_or_refused"] = sorted(set(failed) - set(real))
+    row["capability_failed_reasons"] = {
+        name: failed[name] for name in row["capabilities_failed_or_refused"]
     }
     row["capabilities_not_executable"] = sorted(
         set(not_executable) - set(real) - set(simulated) - set(not_invoked)
@@ -356,12 +369,14 @@ def not_executable_tally(
     return dict(sorted(tally.items()))
 
 
-def blocked_missing_inputs_tally(rows: Iterable[dict[str, Any]]) -> dict[str, dict[str, int]]:
-    """Per-capability ``{reason_code: count}`` for receipts blocked on missing inputs."""
+def blocked_missing_inputs_tally(
+    rows: Iterable[dict[str, Any]], *, field: str = "capability_blocked_reasons"
+) -> dict[str, dict[str, int]]:
+    """Per-capability ``{reason_code: count}`` for a reason-carrying class (default blocked)."""
 
     tally: dict[str, dict[str, int]] = {}
     for row in rows:
-        for name, reason in (row.get("capability_blocked_reasons") or {}).items():
+        for name, reason in (row.get(field) or {}).items():
             entry = tally.setdefault(name, {})
             entry[reason] = entry.get(reason, 0) + 1
     return {name: dict(sorted(v.items())) for name, v in sorted(tally.items())}
@@ -394,6 +409,9 @@ def capability_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "capability_tally": capability_tally(classified),
         "capability_not_executable_tally": not_executable_tally(classified),
         "capability_blocked_missing_inputs": blocked_missing_inputs_tally(classified),
+        "capability_failed_or_refused": blocked_missing_inputs_tally(
+            classified, field="capability_failed_reasons"
+        ),
         "capability_real_self_reported_tally": not_executable_tally(
             classified, field="capabilities_real_self_reported"
         ),
@@ -471,6 +489,7 @@ def reclassify_report_dir(report_dir: str | Path) -> dict[str, Any]:
             "capabilities_not_executable": r.get("capabilities_not_executable"),
             "capabilities_real_self_reported": r.get("capabilities_real_self_reported"),
             "capability_blocked_reasons": r.get("capability_blocked_reasons"),
+            "capability_failed_reasons": r.get("capability_failed_reasons"),
             "capability_not_exercised": r.get("capability_not_exercised"),
         }
         for r in rows
