@@ -659,12 +659,15 @@ def test_fetching_evaluate_never_deepens_the_shallow_controller_repo(
     before = _shallow_state(controller)
 
     fetches: list[tuple[Path, tuple[str, ...], dict[str, str]]] = []
+    remotes: list[str] = []
     original_git = anchor._git
 
     def recording_git(repo: Path, *args: str, binary: bool = False) -> bytes | str:
+        if args[:2] == ("remote", "add"):
+            remotes.append(args[3])
         if args and args[0] == "fetch":
             config = {
-                key: original_git(repo, "config", "--get", key)
+                key: original_git(repo, "config", "--default", "", "--get", key)
                 for key in ("gc.auto", "maintenance.auto", "fetch.writeCommitGraph")
             }
             fetches.append((Path(repo), args, config))
@@ -691,6 +694,7 @@ def test_fetching_evaluate_never_deepens_the_shallow_controller_repo(
         "fetch.writeCommitGraph": "false",
     }
     assert not fetch_repo.exists()
+    assert remotes == [fx.origin.as_uri()]
 
 
 def test_fetching_evaluate_fails_closed_without_origin(fx: Fixture) -> None:

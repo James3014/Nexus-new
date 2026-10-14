@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -192,7 +193,9 @@ def evaluate(repo: Path, ident: dict[str, Any], *, fetch: bool = True) -> dict[s
     assert isinstance(origin, str)
     if not origin:
         raise ContractError("controller repository has no origin remote")
-    with tempfile.TemporaryDirectory(prefix="trusted-dependency-contract-") as scratch:
+    with tempfile.TemporaryDirectory(
+        prefix="trusted-dependency-contract-", dir=os.environ.get("RUNNER_TEMP") or None
+    ) as scratch:
         full = Path(scratch) / "full.git"
         anchor._init_ephemeral_bare_repo(full)
         anchor._git(full, "remote", "add", "origin", origin)
