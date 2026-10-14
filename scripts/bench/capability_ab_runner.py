@@ -657,39 +657,26 @@ def _apply_per_task_stop_loss(row: dict[str, Any], limit_sec: int) -> bool:
 def _direct_provider_timeout_row(row: dict[str, Any]) -> bool:
     if str(row.get("mode") or "") != "without_nexus":
         return False
-    timeout_markers = {
-        str(row.get("gateway_error_category") or ""),
-        str(row.get("baseline_gateway_error_category") or ""),
-        str(row.get("infra_invalid_reason") or ""),
-    }
-    return bool(timeout_markers & {"timeout", "timeout_before_model_call", "task_stop_loss_exceeded"})
+    return _arm_provider_abort_flags(row)[0]
 
 
 def _direct_provider_infra_row(row: dict[str, Any]) -> bool:
     if str(row.get("mode") or "") != "without_nexus":
         return False
-    return not bool(row.get("run_eligible", True)) and bool(str(row.get("infra_invalid_reason") or ""))
+    return _arm_provider_abort_flags(row)[1]
 
 
-_PROVIDER_INFRA_MARKERS = ("agy_", "quota", "model_identity", "cli_missing", "model_gateway_error", "account_pool")
+def _arm_provider_abort_flags(row: dict[str, Any]) -> tuple[bool, bool]:
+    """(provider timeout, infra-invalid) for the consecutive-abort rule; identical for both arms."""
 
-
-def _with_nexus_provider_timeout_row(row: dict[str, Any]) -> bool:
-    """Provider-side timeout on a with-Nexus row (same markers the bare abort rule uses)."""
-
-    markers = {
+    timeout_markers = {
         str(row.get("gateway_error_category") or ""),
         str(row.get("baseline_gateway_error_category") or ""),
         str(row.get("infra_invalid_reason") or ""),
     }
-    return bool(markers & {"timeout", "timeout_before_model_call"})
-
-
-def _with_nexus_provider_infra_row(row: dict[str, Any]) -> bool:
-    """Provider/account infra failure on a with-Nexus row (not a Nexus routing/delivery failure)."""
-
-    reason = str(row.get("infra_invalid_reason") or "").lower()
-    return bool(reason) and any(marker in reason for marker in _PROVIDER_INFRA_MARKERS)
+    timed_out = bool(timeout_markers & {"timeout", "timeout_before_model_call", "task_stop_loss_exceeded"})
+    infra = not bool(row.get("run_eligible", True)) and bool(str(row.get("infra_invalid_reason") or ""))
+    return timed_out, infra
 
 
 def _direct_timeout_abort_reason(consecutive_timeouts: int, threshold: int) -> str:
@@ -3185,25 +3172,40 @@ def _hidden_retry_disabled() -> bool:
     return os.environ.get("NEXUS_BENCH_DISABLE_HIDDEN_RETRY", "").strip().lower() in {"1", "true", "yes"}
 
 
-def _install_prompt_capture(out_dir: Path) -> Path:
-    """Route both arms' ``agy`` calls through scripts/bench/agy_prompt_capture.py (S21)."""
+def _install_prompt_capture(out_dir: Path) -> tuple[Path, str]:
+    """Route both arms' ``agy`` calls through scripts/bench/agy_prompt_capture.py (S21).
+
+    Each run gets its own private (0700, ``mkdtemp``) directory under ``out_dir/prompt_capture``;
+    the wrapper script is created with ``O_EXCL|O_NOFOLLOW`` and only this run's capture files are
+    audited, so reruns into the same output dir and planted symlinks cannot leak in.
+    """
+
+    import tempfile
 
     from scripts.bench.agy_provider import resolve_agy_bin
 
-    capture_dir = out_dir / "prompt_capture"
-    bin_dir = out_dir / "prompt_capture_bin"
-    capture_dir.mkdir(parents=True, exist_ok=True)
-    bin_dir.mkdir(parents=True, exist_ok=True)
+    parent = out_dir / "prompt_capture"
+    parent.mkdir(parents=True, exist_ok=True)
+    run_dir = Path(tempfile.mkdtemp(prefix=f"run-{int(time.time())}-{os.getpid()}-", dir=parent))
+    run_id = run_dir.name
+    calls_dir = run_dir / "calls"
+    bin_dir = run_dir / "bin"
+    calls_dir.mkdir(mode=0o700)
+    bin_dir.mkdir(mode=0o700)
     real = resolve_agy_bin(os.environ) or ""
     wrapper = bin_dir / "agy"
     script = Path(__file__).resolve().parent / "agy_prompt_capture.py"
-    wrapper.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n', encoding="utf-8")
-    wrapper.chmod(0o755)
+    fd = os.open(wrapper, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o755)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n')
     os.environ["NEXUS_BENCH_PROMPT_CAPTURE_REAL"] = real
-    os.environ["NEXUS_BENCH_PROMPT_CAPTURE_DIR"] = str(capture_dir)
+    os.environ["NEXUS_BENCH_PROMPT_CAPTURE_DIR"] = str(calls_dir)
+    os.environ["NEXUS_BENCH_CAPTURE_RUN_ID"] = run_id
+    # Both aliases the runtime resolves (it fails closed when they differ) point at the wrapper.
     os.environ["NEXUS_AGY_BIN"] = str(wrapper)
+    os.environ["NEXUS_AGY_EXECUTABLE"] = str(wrapper)
     os.environ["PATH"] = f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"
-    return capture_dir
+    return calls_dir, run_id
 
 
 def _prompt_capture_key(task: CapabilityTask) -> str:
@@ -3239,13 +3241,28 @@ def _begin_prompt_capture_leg(
 
 
 def _apply_prompt_symmetry_audit(
-    capture_dir: Path, materials: dict[str, Any], rows: list[dict[str, Any]], *, out_dir: Path
+    capture: tuple[Path, str],
+    materials: dict[str, Any],
+    rows: list[dict[str, Any]],
+    *,
+    out_dir: Path,
+    expect_model_calls: bool = False,
 ) -> dict[str, Any]:
-    """S21: fail the counted metric on any hidden literal or with-Nexus-only prompt text."""
+    """S21: fail the counted metric on any hidden literal or with-Nexus-only prompt text.
+
+    An audit that cannot complete (corrupt/foreign capture, unexpected data) is ERROR, never PASS;
+    the rows are kept and written either way.
+    """
 
     from scripts.bench.prompt_symmetry_audit import audit_run
 
-    report = audit_run(capture_dir, materials, rows=rows)
+    capture_dir, run_id = capture
+    try:
+        report = audit_run(
+            capture_dir, materials, rows=rows, run_id=run_id, expect_model_calls=expect_model_calls
+        )
+    except Exception as exc:  # noqa: BLE001
+        report = {"status": "ERROR", "run_id": run_id, "error": f"{type(exc).__name__}: {exc}", "tasks": []}
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "prompt_symmetry_audit.json").write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
     by_key = {str(task["key"]): task for task in report.get("tasks") or []}
@@ -3257,13 +3274,41 @@ def _apply_prompt_symmetry_audit(
             row["nexus_prompt_extra_chars"] = task_audit.get("nexus_prompt_extra_chars")
             row["with_nexus_prompt_chars"] = task_audit.get("with_nexus_prompt_chars")
             row["bare_prompt_chars"] = task_audit.get("bare_prompt_chars")
+            arm = "with_nexus" if str(row.get("mode")) == "with_nexus" else "bare"
+            # Identical prompt re-sent after a pre-effect quota failure (visible at the wrapper).
+            row["account_rotations"] = task_audit.get(f"{arm}_account_rotations")
         row["prompt_symmetry_status"] = report["status"]
         if report["status"] != "PASS":
             row["prompt_symmetry_violation"] = True
+            if report["status"] == "ERROR":
+                row["prompt_symmetry_error"] = report.get("error")
             row.setdefault("infra_invalid_reason", None)
             row["infra_invalid_reason"] = row["infra_invalid_reason"] or "prompt_symmetry_violation"
             row["run_eligible"] = False
     return report
+
+
+def _counted_mode_expects_model_calls(args: Any) -> bool:
+    return str(getattr(args, "with_llm_mode", "off")) != "off" or str(getattr(args, "without_mode", "")) in {
+        "agy",
+        "gemini",
+        "codex",
+    }
+
+
+def _enforce_hidden_verifier_on_success_rows(rows: list[dict[str, Any]]) -> None:
+    """L2: in the counted run a SUCCESS needs the hidden test on the delivered file, both arms."""
+
+    for row in rows:
+        if str(row.get("status") or "") != "SUCCESS":
+            continue
+        hidden = str(row.get("hidden_verifier_file") or "")
+        if Path(hidden).name == "test_hidden.py" and row.get("hidden_verifier_passed") is not False:
+            continue
+        row["status"] = "FAILED"
+        row["semantic_status"] = "UNVERIFIED"
+        row["semantic_completed"] = False
+        row["hidden_verifier_missing"] = True
 
 
 def _counted_first_attempt_only() -> bool:
@@ -16385,6 +16430,7 @@ def _run_without_nexus_impl(
             },
         }
         row = _extract_record(mode="without_nexus", task=task, payload=payload, wall_time_sec=wall)
+        row["hidden_verifier_file"] = verification_test_file
         _annotate_warning_ledger(row, warning_records)
         return _annotate_with_contract(
             row,
@@ -19894,6 +19940,17 @@ def main() -> int:
         os.environ["NEXUS_DISABLE_PROMOTED_ROUTE_COST_POLICY"] = "1"
         os.environ["NEXUS_BENCH_DISABLE_DETERMINISTIC_RESCUE"] = "1"
         os.environ["NEXUS_BENCH_DISABLE_HIDDEN_RETRY"] = "1"
+        # The captured-prompt audit only sees agy calls: refuse providers it cannot observe.
+        if str(os.environ.get("NEXUS_AGY_COMMAND") or "").strip():
+            parser.error("--counted-first-attempt cannot run with NEXUS_AGY_COMMAND set (bypasses the prompt capture)")
+        if args.without_mode in {"gemini", "codex"}:
+            parser.error(f"--counted-first-attempt needs --without-mode agy (prompt capture cannot observe {args.without_mode})")
+        if args.with_llm_mode != "off" and (
+            args.with_model_provider not in {"gemini", "agy"} or os.environ.get("NEXUS_PREFER_AGY", "1") != "1"
+        ):
+            parser.error("--counted-first-attempt needs the with-Nexus arm on agy (prompt capture observes only agy)")
+        if _counted_mode_expects_model_calls(args) and not _hidden_verifier_mode_enabled():
+            parser.error("--counted-first-attempt needs the hidden verifier (--enable-hidden-verifier or NEXUS_VALUE_HIDDEN_VERIFIER=1)")
     if args.skip_llm_baseline and args.strict_llm_baseline:
         parser.error("--strict-llm-baseline cannot be combined with --skip-llm-baseline")
     if args.nexus_only and args.without_only:
@@ -20011,7 +20068,7 @@ def main() -> int:
             row["learn_slo_policy"] = "forced_ready" if args.force_learn_slo_ready else "repo_state"
             row["hidden_verifier_mode"] = hidden_verifier_mode
         benchmark_summary = _summarize_with_strict_baseline(
-            [*with_rows, *without_rows], strict=bool(args.strict_llm_baseline)
+            [*with_rows, *without_rows], strict=bool(args.strict_llm_baseline or getattr(args, "counted_first_attempt", False))
         )
         with_path = out_dir / f"with_nexus_{ts}.jsonl"
         without_path = out_dir / f"without_nexus_{ts}.jsonl"
@@ -20142,7 +20199,7 @@ def main() -> int:
     with_timeout_streak = 0
     with_infra_streak = 0
     interleave_arms = _interleave_arms_enabled(args)
-    prompt_audit_dir = (
+    prompt_audit_capture = (
         _install_prompt_capture(out_dir)
         if bool(args.counted_first_attempt) and not bool(args.nexus_only) and not bool(args.without_only)
         else None
@@ -20304,8 +20361,9 @@ def main() -> int:
                 )
             if interleave_arms:
                 # S22: the bare arm's consecutive provider timeout/infra abort applies to this arm too.
-                with_timeout_streak = with_timeout_streak + 1 if _with_nexus_provider_timeout_row(row) else 0
-                with_infra_streak = with_infra_streak + 1 if _with_nexus_provider_infra_row(row) else 0
+                arm_timeout, arm_infra = _arm_provider_abort_flags(row)
+                with_timeout_streak = with_timeout_streak + 1 if arm_timeout else 0
+                with_infra_streak = with_infra_streak + 1 if arm_infra else 0
                 arm_abort_reason = _direct_timeout_abort_reason(
                     with_timeout_streak, int(args.direct_timeout_abort_threshold)
                 ) or _direct_infra_abort_reason(with_infra_streak, int(args.direct_infra_abort_threshold))
@@ -20490,7 +20548,9 @@ def main() -> int:
         # one abort rule stops both arms at the same task.
         for pair_index, task in enumerate(tasks):
             legs = (_with_nexus_leg, _without_nexus_leg) if pair_index % 2 == 0 else (_without_nexus_leg, _with_nexus_leg)
-            if any(leg(task) == "break" for leg in legs):
+            # Both legs always run, so an abort never leaves an unpaired row in one arm.
+            outcomes = [leg(task) for leg in legs]
+            if "break" in outcomes:
                 timed_out = True
                 break
     else:
@@ -20511,9 +20571,15 @@ def main() -> int:
 
     _clear_total_timeout(previous_timeout_handler)
     prompt_symmetry_report = None
-    if prompt_audit_dir is not None:
+    if bool(args.counted_first_attempt) and _counted_mode_expects_model_calls(args):
+        _enforce_hidden_verifier_on_success_rows([*with_rows, *without_rows])
+    if prompt_audit_capture is not None:
         prompt_symmetry_report = _apply_prompt_symmetry_audit(
-            prompt_audit_dir, prompt_audit_materials, [*with_rows, *without_rows], out_dir=out_dir
+            prompt_audit_capture,
+            prompt_audit_materials,
+            [*with_rows, *without_rows],
+            out_dir=out_dir,
+            expect_model_calls=_counted_mode_expects_model_calls(args),
         )
 
     hidden_verifier_mode = _hidden_verifier_mode_enabled()
@@ -20523,7 +20589,7 @@ def main() -> int:
         row["disable_promoted_route_cost_policy"] = bool(args.disable_promoted_route_cost_policy)
         row["hidden_verifier_mode"] = hidden_verifier_mode
     benchmark_summary = _summarize_with_strict_baseline(
-        [*with_rows, *without_rows], strict=bool(args.strict_llm_baseline)
+        [*with_rows, *without_rows], strict=bool(args.strict_llm_baseline or getattr(args, "counted_first_attempt", False))
     )
 
     with_path = out_dir / f"with_nexus_{ts}.jsonl"

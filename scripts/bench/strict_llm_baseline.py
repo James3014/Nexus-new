@@ -29,6 +29,11 @@ HIDDEN_FEEDBACK_RETRY_REASONS = frozenset({
     "hidden_verifier_failure_bounded_nexus_retry",
 })
 MODEL_SOLVE = "model_solve"
+# The run's captured-prompt symmetry audit failed or errored: no row of it is a solve of any kind.
+PROMPT_SYMMETRY_VIOLATION = "prompt_symmetry_violation"
+# Winner sources that name the model; any other non-empty source is a local/deterministic delivery.
+MODEL_WINNER_PREFIXES = ("llm", "model", "nexus_llm", "direct_")
+NON_MODEL_WINNER_SOURCES = frozenset({"nexus_llm_deterministic_pre_rescue"})
 NOT_SOLVED = "not_solved"
 RECEIPT_DATA_CONTRACT_VIOLATION = "receipt_data_contract_violation"
 SCORECARD_SCHEMA = "strict_v2_honest_scorecard_v1"
@@ -42,11 +47,23 @@ def _model_calls(row: dict[str, Any]) -> int:
 
 
 def local_delivery(row: dict[str, Any]) -> bool:
-    """True when Nexus's local/deterministic path, not the model, delivered the result."""
+    """True when Nexus's local/deterministic path, not the model, delivered the result.
 
-    return row.get("local_success_source") is True or str(
-        row.get("nexus_winner_source") or ""
-    ).startswith("local")
+    Allowlist, not denylist: only ``llm*`` / ``model*`` / ``nexus_llm*`` / ``direct_*`` (the bare
+    provider path) winner sources (minus
+    ``nexus_llm_deterministic_pre_rescue``) are model deliveries; ``deterministic_local``,
+    ``verification_only`` or any other named source is local.  An empty source (the bare arm,
+    legacy rows) is not treated as local.
+    """
+
+    if row.get("local_success_source") is True:
+        return True
+    source = str(row.get("nexus_winner_source") or "").strip().lower()
+    if not source:
+        return False
+    if source in NON_MODEL_WINNER_SOURCES:
+        return True
+    return not source.startswith(MODEL_WINNER_PREFIXES)
 
 
 def hidden_feedback_used(row: dict[str, Any]) -> bool:
@@ -83,7 +100,10 @@ def apply_strict_llm_baseline_classification(
         row["strict_llm_baseline_applied"] = True
         mode = str(row.get("mode", ""))
         row["rescued_by_local"] = False
-        if (
+        if row.get("prompt_symmetry_violation"):
+            row["solve_classification"] = PROMPT_SYMMETRY_VIOLATION
+            row["deterministic_rescue"] = False
+        elif (
             row.get("status") != "SUCCESS"
             or str(row.get("infra_invalid_reason") or "") == "task_stop_loss_exceeded"
         ):
