@@ -25,6 +25,7 @@ from typing import Any, Mapping
 from click.testing import CliRunner
 
 from scripts.bench.gemini_nexus_report import render_markdown_report
+from scripts.bench import hidden_test_staging as _hidden_staging
 from scripts.bench.warning_ledger import (
     annotate_row as _annotate_warning_ledger,
     capture_python_warnings as _capture_python_warnings,
@@ -2282,9 +2283,15 @@ def _resolve_task_files(repo_root: Path, task: CapabilityTask, *, materialize_mi
 def _hidden_test_for_visible_test(test_file: str) -> str:
     test_path = Path(test_file)
     hidden_path = test_path.with_name("test_hidden.py")
-    if hidden_path.exists():
+    if hidden_path.exists() or _hidden_staging.active_staging_for(hidden_path) is not None:
+        # Staged out of the workspace for the with-Nexus row: still the verifier file.
         return str(hidden_path)
     return test_file
+
+
+def _hidden_staging_enabled(args: argparse.Namespace) -> bool:
+    """Strict/counted lane: the hidden test leaves the workspace for the with-Nexus row."""
+    return bool(getattr(args, "strict_llm_baseline", False) or getattr(args, "counted_first_attempt", False))
 
 
 def _verification_test_for_task(task: CapabilityTask, test_file: str) -> str:
@@ -4471,6 +4478,26 @@ def _finally_control_flow_warning(code: str) -> str:
 
 
 def _run_process_group(
+    cmd: list[str],
+    *,
+    cwd: Path,
+    env: dict[str, str],
+    timeout_sec: int,
+) -> subprocess.CompletedProcess[str]:
+    """Run ``cmd``; a staged hidden test is back in place only when ``cmd`` names it."""
+    windows = _hidden_staging.stagings_named_in(cmd)
+    _hidden_staging.check_all_absent("subprocess_start")
+    if not windows:
+        return _run_process_group_unstaged(cmd, cwd=cwd, env=env, timeout_sec=timeout_sec)
+    from contextlib import ExitStack
+
+    with ExitStack() as stack:
+        for staging in windows:
+            stack.enter_context(staging.verify_window())
+        return _run_process_group_unstaged(cmd, cwd=cwd, env=env, timeout_sec=timeout_sec)
+
+
+def _run_process_group_unstaged(
     cmd: list[str],
     *,
     cwd: Path,
@@ -20806,7 +20833,15 @@ def main() -> int:
                 test_file=test_file,
                 elapsed_sec=leg_start - run_start,
             )
-            with _capture_python_warnings(source="with_nexus_runtime") as runtime_warning_records:
+            # PR-2: under the strict/counted lane test_hidden.py is outside the workspace for the
+            # whole with-Nexus row (restored for the runner's hidden verifier and at row end).
+            with _hidden_staging.staged_hidden_test(
+                enabled=_hidden_staging_enabled(args),
+                repo_root=repo_root,
+                test_file=test_file,
+                task_id=task.id,
+                trial_index=task.trial_index,
+            ) as hidden_staging, _capture_python_warnings(source="with_nexus_runtime") as runtime_warning_records:
                 row = run_with_nexus(
                     repo_root=repo_root,
                     task=task,
@@ -20830,6 +20865,7 @@ def main() -> int:
                     strict_llm_baseline=bool(args.strict_llm_baseline),
                 )
             _annotate_warning_ledger(row, runtime_warning_records, append=True)
+            row.update(hidden_staging.row_fields() if hidden_staging is not None else {"hidden_staged": False})
             row["per_call_timeout_cap_sec"] = _symmetric_per_call_cap_sec()
             row["isolation_mode"] = args.isolation_mode
             row["clean_checkout_required"] = args.isolation_mode == "worktree"

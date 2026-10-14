@@ -12,6 +12,7 @@ import hashlib
 import os
 from pathlib import Path
 from datetime import datetime, timezone
+from collections.abc import Mapping
 from typing import Any
 from dataclasses import asdict
 import click
@@ -75,6 +76,11 @@ from nexus.research.flow.evidence_packer import (
     apply_nightshift_auto_run,
     maybe_run_nightshift_after_hyper_failure,
 )
+from nexus.research.flow.unified_capability_projection import (
+    project_unified_capability_stages,
+    unified_receipts_from_meta,
+)
+from nexus.services import post_candidate_seam as _post_candidate_seam
 from nexus.research.flow.baseline_report import (
     baseline_report_from_meta,
     local_baseline_meta,
@@ -139,6 +145,58 @@ def _unified_runtime_capability_stages(result_report: dict[str, Any] | None) -> 
     if not isinstance(stages, list):
         return []
     return [dict(item) for item in stages if isinstance(item, dict)]
+
+
+def _unified_receipt_from_meta(meta: Mapping[str, Any] | None) -> dict[str, Any]:
+    receipts = unified_receipts_from_meta(meta if isinstance(meta, dict) else None)
+    return dict(receipts[0]) if receipts else {}
+
+
+def _seam_task_id(task_id: str | None, target_file: str) -> str:
+    return f"auto-flow:{task_id or _safe_trace_slug(target_file)}"
+
+
+def _apply_post_candidate_seam(
+    report: dict[str, Any],
+    *,
+    generation_meta: Mapping[str, Any] | None,
+    task_id: str,
+    target_path: Path,
+    test_file: Path,
+    original_code: str,
+    candidate_code: str,
+    pre_stages: list[dict[str, Any]],
+    released: Mapping[str, list[str]],
+) -> None:
+    """Run sandbox/ultra_review on the candidate (scratch copy) and project every seam stage.
+
+    Never changes the row outcome: the stages only reach the capability receipts.
+    """
+
+    unified = _unified_receipt_from_meta(generation_meta)
+    try:
+        post = _post_candidate_seam.run_seam_for_candidate(
+            task_id=task_id,
+            unified_receipt=unified,
+            target_path=target_path,
+            visible_test_path=test_file,
+            original_code=original_code,
+            candidate_code=candidate_code,
+        )
+    except Exception as exc:  # noqa: BLE001 - the seam never breaks the row
+        post = None
+        report["post_candidate_seam_error"] = f"{type(exc).__name__}: {exc}"[:300]
+    merged = _post_candidate_seam.merge_seam_receipts(
+        task_id=task_id, pre_stages=pre_stages, post_receipt=post, released=released
+    )
+    if merged is None:
+        return
+    report["post_candidate_seam"] = {
+        key: value for key, value in merged.items() if key != "capabilities"
+    } | {"capabilities": [str(stage.get("name")) for stage in merged["capabilities"]]}
+    stages = project_unified_capability_stages([unified, merged] if unified else [merged])
+    if stages:
+        report["unified_runtime_capability_stages"] = stages
 
 
 def _write_source_text(path: Path, text: str) -> None:
@@ -1102,6 +1160,9 @@ def run_auto_flow(
         generation_meta = local_baseline_meta()
         companion_edits: dict[Path, str] = {}
         restored_files: dict[Path, str | None] = {}
+        seam_lock_task = ""
+        seam_pre_stages: list[dict[str, Any]] = []
+        seam_released: dict[str, list[str]] = {}
         try:
             patched, source, generation_meta = _build_baseline_patch(
                 trial=0,
@@ -1118,6 +1179,13 @@ def run_auto_flow(
             if patched == original_code:
                 err = "no_mutation_generated"
             else:
+                # PR-2 seam: lock the target before the candidate is written (runtime-selected only).
+                seam_lock_task, seam_pre_stages = _post_candidate_seam.lock_target_if_selected(
+                    unified_receipt=_unified_receipt_from_meta(generation_meta),
+                    task_id=_seam_task_id(task_id, target_file),
+                    workspace_root=repo_root,
+                    target_file=target_file,
+                )
                 companion_edits = (
                     {}
                     if symmetric_prompt
@@ -1141,8 +1209,23 @@ def run_auto_flow(
             # S20: in the like-for-like A/B the model's file stays delivered even when the visible
             # test fails, so the bench verifies it with the hidden test exactly like the bare arm.
             keep_model_delivery = symmetric_prompt and _is_symmetric_model_source(str(source))
-            _restore_baseline_files(restored_files, keep_target=ok or keep_model_delivery)
+            try:
+                _restore_baseline_files(restored_files, keep_target=ok or keep_model_delivery)
+            finally:
+                if seam_lock_task:
+                    seam_released = _post_candidate_seam.release_target_lock(seam_lock_task)
         report = baseline_report_from_meta(source, generation_meta)
+        _apply_post_candidate_seam(
+            report,
+            generation_meta=generation_meta,
+            task_id=_seam_task_id(task_id, target_file),
+            target_path=target_path,
+            test_file=test_path_for_prompt,
+            original_code=original_code,
+            candidate_code=patched,
+            pre_stages=seam_pre_stages,
+            released=seam_released,
+        )
         if symmetric_prompt and _is_symmetric_model_source(str(source)) and patched != original_code:
             # P1-2: identity of the model candidate, checked by the bench against the delivered file.
             report["model_candidate_sha256"] = hashlib.sha256(patched.encode("utf-8")).hexdigest()

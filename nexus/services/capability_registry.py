@@ -1953,7 +1953,7 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
         }
     )
     _SANDBOX_CONSTRAINT_KEYS = frozenset(
-        {"workspace_root", "sandbox_command", "sandbox_timeout_sec"}
+        {"workspace_root", "sandbox_command", "sandbox_timeout_sec", "sandbox_forbidden_paths"}
     )
     _SCHEDULER_CONSTRAINT_KEYS = frozenset({"workspace_root"})
     _METABOLISM_CONSTRAINT_KEYS = frozenset(
@@ -1994,7 +1994,9 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
         {"workspace_root", "registry_peer_host", "registry_peer_port", "registry_query_tokens"}
     )
     _NIGHTSHIFT_CONSTRAINT_KEYS = frozenset({"workspace_root", "nightshift_target_file"})
-    _ULTRA_REVIEW_CONSTRAINT_KEYS = frozenset({"workspace_root"})
+    _ULTRA_REVIEW_CONSTRAINT_KEYS = frozenset(
+        {"workspace_root", "ultra_review_regression_tests", "ultra_review_excluded_tests"}
+    )
 
     def _allowlisted_constraints(context: Mapping[str, Any]) -> dict[str, Any]:
         keys: frozenset[str]
