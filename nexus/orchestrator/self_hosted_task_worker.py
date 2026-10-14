@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 
+from nexus.orchestrator.ambient_core import LazyCanonicalCoreControlPort
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
 
 
@@ -16,6 +17,10 @@ def main() -> int:
     service = SelfHostedTaskService(
         state_dir=args.state_dir,
         auto_reconcile=False,
+        # The detached worker owns preparation and finalization, so it needs
+        # the same lazy Core seam as the Gateway (#2181). Legacy tasks never
+        # touch it.
+        ambient_core_port=LazyCanonicalCoreControlPort(args.state_dir),
     )
     if not service._wait_for_owner(args.task_id, args.attempt_id, __import__("os").getpid()):
         return 2
