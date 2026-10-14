@@ -344,7 +344,7 @@ def _run_gemini_patch(
 ) -> dict[str, Any]:
     prompt = _build_gemini_prompt(task, case_dir, mode=mode, nexus_profile=nexus_profile)
     bin_path = _resolve_gemini_bin()
-    if "agy" in str(bin_path):
+    if "agy" in str(bin_path) or "agy" in os.path.basename(os.path.realpath(bin_path)):
         # #1912: no permission bypass; file edits inside the case dir only.
         cmd = [
             bin_path,
@@ -365,7 +365,7 @@ def _run_gemini_patch(
         f"/opt/homebrew/bin:/Users/jameschen/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{env.get('PATH', '')}"
     )
 
-    if "agy" in str(bin_path):
+    if "agy" in str(bin_path) or "agy" in os.path.basename(os.path.realpath(bin_path)):
         # #1912: same confinement as the production adapter, through the shared
         # worker runner: disposable HOME, allowlisted exact env, Seatbelt
         # profile (case dir minus .git/.agents, plus the per-run root), and a

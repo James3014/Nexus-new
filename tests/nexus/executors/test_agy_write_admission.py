@@ -1674,3 +1674,65 @@ def test_cwd_scan_fails_closed_on_name_before_pid(monkeypatch):
         ),
     )
     assert cli_worker._pids_with_cwd_under(("/tmp/worker-root",), baseline) is None
+
+
+@pytest.mark.parametrize(
+    "listing",
+    [
+        "p{me}\nn/\n",  # missing fcwd
+        "p{me}\nftxt\nn/\n",  # wrong fd
+        "p{me}\nn/\nfcwd\n",  # name before fd
+        "p{me}\nfcwd\nn/\np{me}\nfcwd\nn/\n",  # duplicate record
+    ],
+)
+def test_cwd_scan_requires_strict_lsof_records(monkeypatch, listing):
+    baseline = cli_worker._SweepBaseline(
+        started_at=0.0, preexisting=frozenset(), protected=frozenset()
+    )
+    out = listing.format(me=os.getpid())
+    monkeypatch.setattr(
+        cli_worker.subprocess, "run", lambda *a, **k: SimpleNamespace(stdout=out, returncode=0)
+    )
+    assert cli_worker._pids_with_cwd_under(("/nonexistent-root",), baseline) is None
+
+
+def test_duplicate_process_table_rows_are_rejected(monkeypatch):
+    monkeypatch.setattr(
+        cli_worker.subprocess,
+        "run",
+        lambda *a, **k: SimpleNamespace(stdout="10 1\n10 2\n", returncode=0),
+    )
+    with pytest.raises(ValueError):
+        cli_worker._process_table()
+
+
+def test_start_time_filter_rejects_surplus_fields(monkeypatch):
+    me = os.getpid()
+    row = f"{me} {os.getuid()} Mon Jan  1 00:00:00 2001 Tue Oct 14 12:00:00 2026\n"
+    monkeypatch.setattr(
+        cli_worker.subprocess, "run", lambda *a, **k: SimpleNamespace(stdout=row, returncode=0)
+    )
+    assert cli_worker._started_after_by_us({me}, 0.0) is None
+
+
+def test_zombie_excuse_needs_a_clean_ps_listing(monkeypatch):
+    def deny(pid, sig):
+        raise PermissionError
+
+    monkeypatch.setattr(cli_worker, "_SWEEP_DEADLINE_SECONDS", 0.1)
+    monkeypatch.setattr(cli_worker.os, "kill", deny)
+    for rc, out in ((1, "424242 Z\n"), (0, "424242 Z\n424242 S\n"), (0, "424242 Z\ngarbage\n")):
+        monkeypatch.setattr(
+            cli_worker.subprocess,
+            "run",
+            lambda *a, _rc=rc, _out=out, **k: SimpleNamespace(stdout=_out, returncode=_rc),
+        )
+        assert cli_worker._kill_and_confirm({424242}) is False
+
+
+def test_tracker_marks_snapshot_without_self_as_probe_failure(monkeypatch):
+    tracker = cli_worker._DescendantTracker(os.getpid(), interval=0.01)
+    tracker.stop()
+    monkeypatch.setattr(cli_worker, "_process_table", lambda: {1: 0})
+    tracker._snapshot()
+    assert tracker.probe_failed is True

@@ -314,6 +314,8 @@ def _process_table() -> dict[int, int]:
         if len(parts) != 2 or not parts[0].isdigit() or not parts[1].isdigit():
             # A partial table would let a pre-existing process pass as new.
             raise ValueError(f"unparseable ps row: {line!r}")
+        if int(parts[0]) in table:
+            raise ValueError(f"duplicate ps row: {line!r}")
         table[int(parts[0])] = int(parts[1])
     return table
 
@@ -343,6 +345,9 @@ class _DescendantTracker:
             table = _process_table()
         except Exception:  # noqa: BLE001
             self.probe_failed = True
+            return
+        if os.getpid() not in table:
+            self.probe_failed = True  # structurally incomplete snapshot
             return
         with self._lock:
             changed = True
@@ -436,7 +441,9 @@ def _started_after_by_us(pids: set[int], since: float) -> Optional[set[int]]:
         parts = line.split()
         if not parts:
             continue
-        if len(parts) < 7 or not parts[0].isdigit() or not parts[1].isdigit():
+        if len(parts) != 7 or not parts[0].isdigit() or not parts[1].isdigit():
+            return None
+        if int(parts[0]) in seen:
             return None
         try:
             started = time.mktime(time.strptime(" ".join(parts[2:7]), "%a %b %d %H:%M:%S %Y"))
@@ -493,23 +500,28 @@ def _pids_with_cwd_under(
     if completed.returncode != 0 or f"p{os.getpid()}" not in out.splitlines():
         return None
     found: set[int] = set()
+    seen: set[int] = set()
     pid: Optional[int] = None
-    pid_has_cwd = True
+    expect = "p"  # each record is exactly: p<pid>, fcwd, n<path>
     for line in out.splitlines():
-        if not line or line[0] not in "pfn" or (line[0] == "p" and not line[1:].isdigit()):
-            return None  # unexpected field or malformed row: incomplete scan
-        if line.startswith("p"):
-            if not pid_has_cwd:
-                return None  # a process record without its cwd: incomplete scan
-            pid, pid_has_cwd = int(line[1:]), False
-        elif line.startswith("n"):
-            if pid is None or not line[1:]:
-                return None  # empty cwd name: malformed record
-            pid_has_cwd = True
+        field = line[:1]
+        if expect == "p" and field == "p" and line[1:].isdigit():
+            pid = int(line[1:])
+            if pid in seen:
+                return None  # duplicate record
+            seen.add(pid)
+            expect = "f"
+        elif expect == "f" and line == "fcwd":
+            expect = "n"
+        elif expect == "n" and field == "n" and line[1:]:
+            assert pid is not None
             cwd = os.path.realpath(line[1:])
             if any(cwd == root or cwd.startswith(root + os.sep) for root in real_roots):
                 found.add(pid)
-    if not pid_has_cwd:
+            expect = "p"
+        else:
+            return None  # unexpected or malformed field: incomplete scan
+    if expect != "p" or os.getpid() not in seen:
         return None
     found -= baseline.preexisting | baseline.protected | {os.getpid()}
     return _started_after_by_us(found, baseline.started_at)
@@ -543,17 +555,24 @@ def _kill_and_confirm(pids: set[int]) -> bool:
         if alive:
             # A killed process may linger as an unreaped zombie; it runs nothing.
             try:
-                stats = subprocess.run(
+                completed = subprocess.run(
                     ["ps", "-o", "pid=,stat=", "-p", ",".join(str(pid) for pid in alive)],
                     capture_output=True,
                     text=True,
                     timeout=10,
                     check=False,
-                ).stdout
-                for line in stats.splitlines():
-                    parts = line.split()
-                    if len(parts) == 2 and parts[1].startswith("Z"):
-                        alive.discard(int(parts[0]))
+                )
+                rows = [line.split() for line in completed.stdout.splitlines()]
+                well_formed = (
+                    completed.returncode == 0
+                    and all(len(row) == 2 and row[0].isdigit() for row in rows)
+                    and len({row[0] for row in rows}) == len(rows)
+                )
+                # Only a clean, unambiguous listing may excuse a zombie.
+                if well_formed:
+                    for pid_text, stat in rows:
+                        if stat.startswith("Z") and int(pid_text) in alive:
+                            alive.discard(int(pid_text))
             except (OSError, subprocess.SubprocessError, ValueError):
                 pass
         if not alive:
