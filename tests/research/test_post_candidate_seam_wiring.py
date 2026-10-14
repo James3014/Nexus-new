@@ -224,3 +224,93 @@ def test_report_untouched_when_runtime_selected_nothing(tmp_path: Path) -> None:
     )
 
     assert report == {"unified_runtime_capability_stages": [{"name": "pregate"}]}
+
+
+def test_lock_held_by_another_task_blocks_candidate_delivery(tmp_path: Path, monkeypatch) -> None:
+    """HIGH-2: a denied file_lock means the candidate is never written to the target."""
+
+    import json as _json
+
+    original = "def value():\n    return 1\n"
+    (tmp_path / "demo.py").write_text(original, encoding="utf-8")
+    (tmp_path / "test_demo.py").write_text(
+        "from demo import value\n\ndef test_value():\n    assert value() == 2\n", encoding="utf-8"
+    )
+    holder = seam.acquire_target_lock(
+        task_id="other-task", workspace_root=tmp_path, target_file="demo.py"
+    )
+    assert holder["gate_passed"] is True
+    runtime = {
+        "task_id": "sprint-x-s0-a1",
+        "capabilities": [
+            {
+                "name": "file_lock",
+                "status": "SKIPPED",
+                "invoked": False,
+                "skip_reason": SKIP_POLICY_NOT_TRIGGERED,
+            }
+        ],
+    }
+
+    class FakeLLMGenerator:
+        def __init__(self, *_a: Any, **_k: Any) -> None:
+            pass
+
+        def generate(self, **_kwargs: Any):
+            return "def value():\n    return 2\n", {
+                "source": "llm",
+                "model_calls": 1,
+                "model_name": "gemini-3-flash-preview",
+                "tokens_used": 10,
+                "token_capture_status": "measured",
+                "model_patch_generated": True,
+                "unified_runtime_receipt": runtime,
+            }
+
+    pytest_calls: list[Any] = []
+    monkeypatch.setenv("NEXUS_SYMMETRIC_PROMPT", "1")
+    monkeypatch.setattr(rfs, "LLMCandidateGenerator", FakeLLMGenerator)
+    monkeypatch.setattr(rfs, "_build_codeintel_evidence", lambda *_a, **_k: {"status": "ok"})
+    monkeypatch.setattr(
+        rfs.subprocess,
+        "run",
+        lambda *a, **k: pytest_calls.append(a[0]) or subprocess.CompletedProcess(a[0], 0, "", ""),
+    )
+    try:
+        payload, _ = rfs.run_auto_flow(
+            repo_root=tmp_path,
+            task_desc="Fix value bug",
+            target_file="demo.py",
+            test_file="test_demo.py",
+            task_type="bug",
+            candidate_count=1,
+            root_cause_confidence=1.0,
+            findings_query=None,
+            llm_mode=True,
+            llm_baseline=True,
+            llm_baseline_required=True,
+            timeout_sec=30,
+            stage1_timeout_sec=10,
+            max_time_ratio_guard=1.5,
+            baseline_fast_sec=0.0,
+            history_window=1,
+            history_fail_threshold=999,
+            dynamic_timeout_multiplier=2.5,
+            min_dynamic_stage1_timeout=1,
+            force_flow="baseline",
+            report_file=".nexus/reports/research/auto-flow-report.json",
+            output_file=None,
+            task_id="case-lock-denied",
+        )
+    finally:
+        seam.release_target_lock("other-task")
+
+    assert (tmp_path / "demo.py").read_text(encoding="utf-8") == original
+    assert not any(
+        "test_demo.py" in " ".join(map(str, call))
+        for call in pytest_calls
+        if isinstance(call, list)
+    )
+    text = _json.dumps(payload, default=str)
+    assert "file_lock_denied" in text
+    assert payload.get("status") != "SUCCESS"

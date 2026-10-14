@@ -1441,10 +1441,11 @@ def _exec_sandbox_confined(plan: CapabilityExecutionPlan, constraints: Mapping[s
     elapsed = int((time.monotonic() - start) * 1000)
     executed = bool(result.get("executed"))
     if not executed:
+        # Refused by the confinement (no OS barrier, forbidden root/argv): nothing ran.
         return _make_receipt(
             "sandbox_runner",
             plan,
-            invoked=True,
+            invoked=False,
             gate_passed=False,
             wall_time_ms=elapsed,
             outcome=_structured_outcome(

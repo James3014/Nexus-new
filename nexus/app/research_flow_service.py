@@ -1176,9 +1176,7 @@ def run_auto_flow(
                 task_type=task_type,
                 test_source=visible_test_source,
             )
-            if patched == original_code:
-                err = "no_mutation_generated"
-            else:
+            if patched != original_code:
                 # PR-2 seam: lock the target before the candidate is written (runtime-selected only).
                 seam_lock_task, seam_pre_stages = _post_candidate_seam.lock_target_if_selected(
                     unified_receipt=_unified_receipt_from_meta(generation_meta),
@@ -1186,6 +1184,12 @@ def run_auto_flow(
                     workspace_root=repo_root,
                     target_file=target_file,
                 )
+            if patched == original_code:
+                err = "no_mutation_generated"
+            elif _post_candidate_seam.lock_denied(seam_pre_stages):
+                # Another task holds the target: the candidate is never written (no delivery).
+                err = "file_lock_denied"
+            else:
                 companion_edits = (
                     {}
                     if symmetric_prompt
@@ -1215,6 +1219,9 @@ def run_auto_flow(
                 if seam_lock_task:
                     seam_released = _post_candidate_seam.release_target_lock(seam_lock_task)
         report = baseline_report_from_meta(source, generation_meta)
+        lock_denied = err == "file_lock_denied"
+        if lock_denied:
+            report["file_lock_denied"] = True
         _apply_post_candidate_seam(
             report,
             generation_meta=generation_meta,
@@ -1222,7 +1229,7 @@ def run_auto_flow(
             target_path=target_path,
             test_file=test_path_for_prompt,
             original_code=original_code,
-            candidate_code=patched,
+            candidate_code=original_code if lock_denied else patched,
             pre_stages=seam_pre_stages,
             released=seam_released,
         )

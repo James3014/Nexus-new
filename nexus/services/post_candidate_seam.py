@@ -47,6 +47,8 @@ SEAM_CAPABILITIES: tuple[str, ...] = (*POST_CANDIDATE_CAPABILITIES, FILE_LOCK_CA
 # "0"/"false"/"off" turns the seam off (the preflight skip receipts stay as they were).
 SEAM_DISABLE_ENV = "NEXUS_POST_CANDIDATE_SEAM"
 HIDDEN_TEST_BASENAMES: tuple[str, ...] = ("test_hidden.py",)
+SANDBOX_REFUSED_STATUS = "NOT_EXECUTED_SANDBOX_REFUSED"
+SKIPPED_SANDBOX_REFUSED = "SKIPPED_SANDBOX_REFUSED"
 SANDBOX_TIMEOUT_SEC = 60
 _SKIP_POLICY_NOT_TRIGGERED = "SKIPPED_POLICY_NOT_TRIGGERED"
 _GIT_IDENTITY = ("-c", "user.name=nexus-post-candidate", "-c", "user.email=nexus@localhost")
@@ -268,12 +270,16 @@ def stage_from_invocation(name: str, out: Mapping[str, Any], *, phase: str) -> d
     )
     response = _as_mapping(out.get("response"))
     outcome = _as_mapping(response.get("outcome"))
+    skip_reason = "" if invoked else str(out.get("skip_reason") or out.get("reason") or "")
+    if not invoked and str(outcome.get("semantic_status") or "") == SANDBOX_REFUSED_STATUS:
+        # The confinement refused to run anything: a skip with its reason, never INVOKED.
+        skip_reason = f"{SKIPPED_SANDBOX_REFUSED}:{outcome.get('error') or 'refused'}"[:300]
     return {
         "name": name,
         "status": "INVOKED" if invoked else "SKIPPED",
         "invoked": invoked,
         "gate_passed": bool(out.get("gate_passed")) if invoked else False,
-        "skip_reason": "" if invoked else str(out.get("skip_reason") or out.get("reason") or ""),
+        "skip_reason": skip_reason,
         "evidence_refs": [str(ref) for ref in (out.get("evidence_refs") or []) if str(ref).strip()],
         "simulated": boundary["simulated"],
         "claim_boundary": boundary,
@@ -491,6 +497,16 @@ def lock_target_if_selected(
         invoker_factory=invoker_factory,
     )
     return (task_id if stage["invoked"] else ""), [stage]
+
+
+def lock_denied(pre_stages: list[dict[str, Any]]) -> bool:
+    """True when the seam acquired-or-tried the target lock and it was not granted."""
+    for stage in pre_stages:
+        if stage.get("name") != FILE_LOCK_CAPABILITY:
+            continue
+        if not stage.get("gate_passed") or stage.get("outcome", {}).get("access_granted") is not True:
+            return True
+    return False
 
 
 def merge_seam_receipts(

@@ -2283,8 +2283,13 @@ def _resolve_task_files(repo_root: Path, task: CapabilityTask, *, materialize_mi
 def _hidden_test_for_visible_test(test_file: str) -> str:
     test_path = Path(test_file)
     hidden_path = test_path.with_name("test_hidden.py")
-    if hidden_path.exists() or _hidden_staging.active_staging_for(hidden_path) is not None:
-        # Staged out of the workspace for the with-Nexus row: still the verifier file.
+    if (
+        hidden_path.exists()
+        or _hidden_staging.active_staging_for(hidden_path) is not None
+        or _hidden_staging.is_quarantined(hidden_path)
+    ):
+        # Staged out of the workspace (or quarantined after tampering): still the verifier
+        # file, so a missing copy fails the verifier instead of falling back to the visible test.
         return str(hidden_path)
     return test_file
 
@@ -4487,6 +4492,9 @@ def _run_process_group(
     """Run ``cmd``; a staged hidden test is back in place only when ``cmd`` names it."""
     windows = _hidden_staging.stagings_named_in(cmd)
     _hidden_staging.check_all_absent("subprocess_start")
+    if _hidden_staging._ACTIVE:
+        # Nothing the subprocess inherits may name the staging location.
+        env = _hidden_staging.scrub_subprocess_env(env)
     if not windows:
         return _run_process_group_unstaged(cmd, cwd=cwd, env=env, timeout_sec=timeout_sec)
     from contextlib import ExitStack
@@ -20740,10 +20748,6 @@ def main() -> int:
         else None
     )
     prompt_audit_materials: dict[str, Any] = {}
-    if _hidden_staging_enabled(args) and not os.environ.get("BENCH_ROOT", "").strip():
-        # The staging root is never a shared temp path: without BENCH_ROOT this run gets a
-        # private 0700 directory of its own.
-        os.environ["BENCH_ROOT"] = os.path.realpath(tempfile.mkdtemp(prefix="nexus-bench-root-"))
     early_audit_checked_pairs = 0
     early_audit_failed = False
 
@@ -20877,6 +20881,12 @@ def main() -> int:
             row.update(hidden_staging.row_fields() if hidden_staging is not None else {"hidden_staged": False})
             if row.get("hidden_test_tampered"):
                 row["hidden_verifier_passed"] = False
+            if _hidden_staging.run_abort_reason():
+                # Fail closed: a tampered hidden test invalidates the run (exit 3).
+                row["hidden_staging_run_abort"] = _hidden_staging.run_abort_reason()
+                with_rows.append(row)
+                timed_out = True
+                return "break"
             row["per_call_timeout_cap_sec"] = _symmetric_per_call_cap_sec()
             row["isolation_mode"] = args.isolation_mode
             row["clean_checkout_required"] = args.isolation_mode == "worktree"
@@ -20964,6 +20974,9 @@ def main() -> int:
 
     def _without_nexus_leg(task: CapabilityTask) -> str:
         nonlocal timed_out, direct_timeout_streak, direct_infra_streak
+        if _hidden_staging.run_abort_reason():
+            timed_out = True
+            return "break"
         if _budget_exceeded(run_start, effective_total_timeout_sec):
             timed_out = True
             _emit_progress(
@@ -21315,6 +21328,13 @@ def main() -> int:
         except Exception:
             persistent_worker_proc.kill()
 
+    if _hidden_staging.run_abort_reason():
+        print(
+            f"hidden test staging failed closed ({_hidden_staging.run_abort_reason()}); run is invalid",
+            file=sys.stderr,
+            flush=True,
+        )
+        return 3
     if prompt_symmetry_report is not None and prompt_symmetry_report.get("status") != "PASS":
         print(
             f"prompt symmetry audit FAILED ({len(prompt_symmetry_report.get('failed_keys') or [])} task(s)); "

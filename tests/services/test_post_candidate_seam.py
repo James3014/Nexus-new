@@ -313,10 +313,33 @@ def test_without_os_barrier_sandbox_is_reported_not_executed(
 
     (stage,) = receipt["capabilities"]
     assert stage["gate_passed"] is False
-    # No barrier -> nothing ran: never reported as a real (non-simulated) execution.
+    # No barrier -> nothing ran: a skip with the refusal reason, never INVOKED or real.
+    assert stage["invoked"] is False and stage["status"] == "SKIPPED"
+    assert stage["skip_reason"].startswith(seam.SKIPPED_SANDBOX_REFUSED)
+    assert "no_os_barrier" in stage["skip_reason"]
     assert stage["simulated"] is True
     assert stage["outcome"]["sandbox_executed"] is False
     assert "no_os_barrier" in stage["outcome"]["error"]
+
+
+def test_confinement_refusal_receipt_is_not_invoked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """MEDIUM: a refused confinement is reported by the executor as not invoked."""
+    case = _case(tmp_path)
+    monkeypatch.setattr(lane, "os_sandbox_available", lambda: True)
+    out = build_real_executor_invoker("sandbox")({
+        "task_id": "t",
+        "workspace_root": str(case),
+        "sandbox_command": ["python", "-m", "pytest", "-q", "test_hidden.py"],
+        "sandbox_forbidden_paths": [str(case / "test_hidden.py")],
+    })
+
+    assert out["invoked"] is False and out["gate_passed"] is False
+    stage = seam.stage_from_invocation("sandbox", out, phase="post_candidate")
+    assert stage["status"] == "SKIPPED" and stage["simulated"] is True
+    assert "sandbox_argv_names_forbidden_path" in stage["skip_reason"]
+    assert not (case / HIDDEN_MARKER).exists()
 
 
 def test_real_barrier_or_refusal_on_this_host(tmp_path: Path) -> None:
