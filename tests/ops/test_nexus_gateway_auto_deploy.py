@@ -1953,3 +1953,89 @@ def test_busy_manager_during_reconcile_keeps_the_journal(cfg: ad.Config) -> None
     result = cycle(cfg, host, FakeProber())
     assert result["status"] == "RECONCILED_BLOCKED_MANAGER_BUSY"
     assert cfg.journal.exists() and not cfg.hold_file.exists()
+
+
+# Documented timeline payload (docs.github.com/rest/using-the-rest-api/issue-event-types#committed):
+# `author`/`committer` carry name/email/date; some sources omit `date`, and a
+# committed event always carries the commit `sha`.
+def _committed_event(sha: str, date: str | None) -> dict[str, Any]:
+    person: dict[str, Any] = {"name": "alice", "email": "alice@example.invalid"}
+    if date is not None:
+        person["date"] = date
+    return {"event": "committed", "sha": sha, "author": dict(person), "committer": person}
+
+
+def _old_pin_pr(number: int) -> list[dict[str, Any]]:
+    return [
+        {
+            "number": number,
+            "title": "pin nexus-runtime",
+            "head": {"ref": "x", "sha": "e" * 40},
+            "created_at": OLD_ISO,
+        }
+    ]
+
+
+def test_committed_event_without_a_date_does_not_block_forever() -> None:
+    """Round 4: `committer` without `date` (e.g. {"login": "alice"}) is no timestamp."""
+    for event in (
+        {"event": "committed", "committer": {"login": "alice"}},
+        _committed_event("d" * 40, None),
+    ):
+        api = green_api(
+            open_pulls=_old_pin_pr(13),
+            pushed_at={"e" * 40: OLD_ISO, "d" * 40: OLD_ISO},
+            timeline={13: [event]},
+        )
+        result = ad.pin_bumps_in_flight(api, now=NOW)
+        assert result["verdict"] == "CLEAR", event
+        assert result["warnings"] == ["STALE_PIN_PR_IGNORED #13"]
+
+
+def test_committed_event_falls_back_to_the_commit_date_via_sha() -> None:
+    api = green_api(
+        open_pulls=_old_pin_pr(14),
+        pushed_at={"e" * 40: OLD_ISO, "d" * 40: NOW_ISO},
+        timeline={14: [_committed_event("d" * 40, None)]},
+    )
+    assert ad.pin_bumps_in_flight(api, now=NOW)["verdict"] == "IN_FLIGHT"
+
+
+def test_committed_event_reads_documented_author_or_committer_date() -> None:
+    event = _committed_event("d" * 40, None)
+    event["author"]["date"] = NOW_ISO
+    api = green_api(
+        open_pulls=_old_pin_pr(15),
+        pushed_at={"e" * 40: OLD_ISO, "d" * 40: OLD_ISO},
+        timeline={15: [event]},
+    )
+    assert ad.pin_bumps_in_flight(api, now=NOW)["verdict"] == "IN_FLIGHT"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        plistlib.dumps(["not", "a", "dict"]),
+        plistlib.dumps({"Label": ad.GATEWAY_LABEL, "ProgramArguments": "zsh"}),
+        b"not a plist",
+    ],
+    ids=["plist-array", "argv-not-list", "garbage"],
+)
+def test_journal_with_malformed_embedded_plist_is_quarantined(
+    cfg: ad.Config, payload: bytes
+) -> None:
+    import base64
+
+    journal = _crash_journal(cfg)
+    journal["previous_plist_b64"] = base64.b64encode(payload).decode("ascii")
+    cfg.journal.write_text(json.dumps(journal))
+    host = FakeHost()
+    result = cycle(cfg, host, FakeProber())
+    assert result["status"] == "RECONCILED_JOURNAL_CORRUPT"
+    assert cfg.hold_file.exists() and not cfg.journal.exists()
+    assert host.reloads == []
+
+
+def test_live_root_rejects_non_dict_plist() -> None:
+    with pytest.raises(ad.DeployError, match="NOT_A_DICT"):
+        ad.live_root(plistlib.dumps(["x"]))

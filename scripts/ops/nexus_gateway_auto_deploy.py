@@ -467,9 +467,6 @@ def _paged(api_get: Callable[[str], Any], path: str) -> Iterator[dict]:
         page += 1
 
 
-_PUSH_EVENTS = ("head_ref_force_pushed", "head_ref_restored", "committed")
-
-
 def _is_stale_pin_pr(api_get: Callable[[str], Any], repo: str, pr: dict, now: float) -> bool:
     """Stale only if PR creation, head commit time AND last head push are all old.
 
@@ -489,14 +486,30 @@ def _is_stale_pin_pr(api_get: Callable[[str], Any], repo: str, pr: dict, now: fl
     commit = api_get(f"repos/{repo}/commits/{head}").get("commit") or {}
     if recent(_parse_time((commit.get("committer") or {}).get("date"))):
         return False
-    pushes: List[Optional[float]] = []
     for event in _paged(api_get, f"repos/{repo}/issues/{pr['number']}/timeline"):
-        kind = event.get("event")
-        if kind == "committed":
-            pushes.append(_parse_time((event.get("committer") or {}).get("date")))
-        elif kind in _PUSH_EVENTS:
-            pushes.append(_parse_time(event.get("created_at")))
-    return not any(recent(t) for t in pushes)
+        when = _timeline_time(api_get, repo, event)
+        # An event without a usable timestamp is ignored, never "recent forever".
+        if when is not None and when > cutoff:
+            return False
+    return True
+
+
+def _timeline_time(api_get: Callable[[str], Any], repo: str, event: dict) -> Optional[float]:
+    """Timestamp of a push-like timeline event, from documented fields only."""
+    kind = event.get("event")
+    if kind in ("head_ref_force_pushed", "head_ref_restored"):
+        return _parse_time(event.get("created_at"))
+    if kind != "committed":
+        return None
+    for actor in ("committer", "author"):
+        when = _parse_time((event.get(actor) or {}).get("date"))
+        if when is not None:
+            return when
+    sha = event.get("sha")
+    if isinstance(sha, str) and _SHA.match(sha):
+        commit = api_get(f"repos/{repo}/commits/{sha}").get("commit") or {}
+        return _parse_time((commit.get("committer") or {}).get("date"))
+    return None
 
 
 def pin_bumps_in_flight(
@@ -640,8 +653,24 @@ def wrapper_command(
     )
 
 
+def _load_gateway_plist(plist_bytes: bytes) -> Dict[str, Any]:
+    """Parse plist bytes and require the Gateway LaunchAgent shape."""
+    try:
+        data = plistlib.loads(plist_bytes)
+    except Exception as exc:  # noqa: BLE001 - any decode error is a bad plist
+        raise DeployError(f"GATEWAY_PLIST_UNREADABLE:{type(exc).__name__}") from exc
+    if not isinstance(data, dict):
+        raise DeployError("GATEWAY_PLIST_NOT_A_DICT")
+    if data.get("Label") != GATEWAY_LABEL:
+        raise DeployError("GATEWAY_PLIST_LABEL_MISMATCH")
+    args = data.get("ProgramArguments")
+    if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
+        raise DeployError("GATEWAY_PLIST_PROGRAM_ARGUMENTS_INVALID")
+    return data
+
+
 def _wrapper_tokens(plist_bytes: bytes) -> List[str]:
-    data = plistlib.loads(plist_bytes)
+    data = _load_gateway_plist(plist_bytes)
     if data.get("Label") != GATEWAY_LABEL:
         raise DeployError("GATEWAY_PLIST_LABEL_MISMATCH")
     args = data.get("ProgramArguments") or []
@@ -651,7 +680,7 @@ def _wrapper_tokens(plist_bytes: bytes) -> List[str]:
 
 
 def live_root(plist_bytes: bytes) -> Optional[Path]:
-    data = plistlib.loads(plist_bytes)
+    data = _load_gateway_plist(plist_bytes)
     if data.get("Label") != GATEWAY_LABEL:
         raise DeployError("GATEWAY_PLIST_LABEL_MISMATCH")
     root = data.get("WorkingDirectory")
@@ -678,9 +707,7 @@ def commit_of(root: Optional[Path]) -> Optional[str]:
 
 
 def render_plist(previous: bytes, command: str, root: Path) -> bytes:
-    data = plistlib.loads(previous)
-    if data.get("Label") != GATEWAY_LABEL:
-        raise DeployError("GATEWAY_PLIST_LABEL_MISMATCH")
+    data = _load_gateway_plist(previous)
     data["ProgramArguments"] = ["/bin/zsh", "-c", command]
     data["WorkingDirectory"] = str(root)
     return plistlib.dumps(data, sort_keys=True)
@@ -1301,7 +1328,7 @@ class _Cycle:
         cfg = self.cfg
         try:
             loaded = _load_journal(cfg.journal)
-        except (OSError, ValueError, KeyError, TypeError, DeployError) as exc:
+        except Exception as exc:  # noqa: BLE001 - any decode/shape error quarantines
             return self.quarantine_journal(f"{type(exc).__name__}:{exc}"[:300])
         receipt, previous_plist, root, python, new_plist_sha = loaded
         receipt.update(reconciled=True, switched=True)
@@ -1444,7 +1471,7 @@ def _load_journal(path: Path) -> tuple:
     if not re.fullmatch(r"[0-9a-f]{64}", journal["new_plist_sha256"]):
         raise ValueError("journal new_plist_sha256")
     previous_plist = base64.b64decode(journal["previous_plist_b64"], validate=True)
-    live_root(previous_plist)  # parses and checks the label
+    _load_gateway_plist(previous_plist)  # a dict with the Gateway label and argv
     return (
         dict(receipt),
         previous_plist,
