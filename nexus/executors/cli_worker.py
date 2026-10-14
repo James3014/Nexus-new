@@ -345,9 +345,82 @@ class _DescendantTracker:
             return set(self._pids) - {self._root}
 
 
-def _pids_with_cwd_under(roots: Tuple[str, ...]) -> set[int]:
-    """PIDs whose current directory is inside one of ``roots``."""
-    if not roots:
+@dataclass(frozen=True)
+class _SweepBaseline:
+    """Process facts recorded just before the worker starts."""
+
+    started_at: float
+    preexisting: frozenset[int]
+    protected: frozenset[int]
+
+
+def _ancestors(pid: int, table: dict[int, int]) -> set[int]:
+    found: set[int] = set()
+    while pid > 1 and pid not in found:
+        found.add(pid)
+        pid = table.get(pid, 1)
+    return found
+
+
+def _sweep_baseline() -> Optional[_SweepBaseline]:
+    try:
+        table = _process_table()
+    except Exception:  # noqa: BLE001
+        return None
+    return _SweepBaseline(
+        started_at=time.time(),
+        preexisting=frozenset(table),
+        protected=frozenset(_ancestors(os.getpid(), table)),
+    )
+
+
+_START_MARGIN_SECONDS = 1.0
+
+
+def _started_after_by_us(pids: set[int], since: float) -> set[int]:
+    """Subset of ``pids`` owned by our uid and started at/after ``since``.
+
+    ``ps -o lstart`` has one-second resolution, so a margin is allowed; the
+    pre-start pid snapshot excludes anything that already existed.
+    """
+    if not pids:
+        return set()
+    try:
+        out = subprocess.run(
+            ["ps", "-o", "pid=,uid=,lstart=", "-p", ",".join(str(pid) for pid in sorted(pids))],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+            env={**os.environ, "LC_ALL": "C", "LANG": "C"},
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    uid = os.getuid()
+    found: set[int] = set()
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) < 7 or not parts[0].isdigit() or not parts[1].isdigit():
+            continue
+        try:
+            started = time.mktime(time.strptime(" ".join(parts[2:7]), "%a %b %d %H:%M:%S %Y"))
+        except ValueError:
+            continue
+        if int(parts[1]) == uid and started >= since - _START_MARGIN_SECONDS:
+            found.add(int(parts[0]))
+    return found
+
+
+def _pids_with_cwd_under(
+    roots: Tuple[str, ...], baseline: Optional[_SweepBaseline] = None
+) -> set[int]:
+    """Worker-era PIDs whose current directory is inside one of ``roots``.
+
+    Only processes owned by our uid, started at or after the worker, absent
+    from the pre-start snapshot, and not this process or its ancestors.
+    Without a baseline nothing is returned (never kill unknown processes).
+    """
+    if not roots or baseline is None:
         return set()
     real_roots = [os.path.realpath(root).rstrip(os.sep) for root in roots]
     try:
@@ -369,7 +442,8 @@ def _pids_with_cwd_under(roots: Tuple[str, ...]) -> set[int]:
             cwd = os.path.realpath(line[1:])
             if any(cwd == root or cwd.startswith(root + os.sep) for root in real_roots):
                 found.add(pid)
-    return found
+    found -= baseline.preexisting | baseline.protected | {os.getpid()}
+    return _started_after_by_us(found, baseline.started_at)
 
 
 def _kill_and_confirm(pids: set[int]) -> bool:
@@ -610,6 +684,7 @@ def run_cli_worker(
 
     process: Optional[subprocess.Popen[bytes]] = None
     try:
+        baseline = _sweep_baseline() if request.sweep_descendants_on_exit else None
         process = subprocess.Popen(
             command,
             cwd=request.cwd,
@@ -629,18 +704,20 @@ def run_cli_worker(
             group_killed = False
             status = CliWorkerStatus.COMPLETED
             if tracker is not None:
-                tracked = tracker.stop()
+                tracked = tracker.stop() - (baseline.preexisting if baseline else frozenset())
                 _kill_process_group(process)
                 tagged_clean = _sweep_tagged_processes(run_tag)
                 descendants_swept = (
-                    _kill_and_confirm(tracked | _pids_with_cwd_under(request.sweep_roots))
+                    _kill_and_confirm(tracked | _pids_with_cwd_under(request.sweep_roots, baseline))
                     and tagged_clean
                 )
         except subprocess.TimeoutExpired as exc:
             group_killed = _kill_process_group(process)
             if tracker is not None:
-                tracked = tracker.stop()
-                if not _kill_and_confirm(tracked | _pids_with_cwd_under(request.sweep_roots)):
+                tracked = tracker.stop() - (baseline.preexisting if baseline else frozenset())
+                if not _kill_and_confirm(
+                    tracked | _pids_with_cwd_under(request.sweep_roots, baseline)
+                ):
                     group_killed = False
             # Descendants that called setsid() left the group; find them by the
             # per-run tag in their environment and kill them too.  A receipt may

@@ -365,14 +365,15 @@ def _run_gemini_patch(
         f"/opt/homebrew/bin:/Users/jameschen/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{env.get('PATH', '')}"
     )
 
-    agy_run_root: Path | None = None
     if "agy" in str(bin_path):
-        # #1912: same confinement as the production adapter: disposable HOME,
-        # allowlisted env and a Seatbelt profile that only lets agy write the
-        # case dir (minus .git/.agents) and its per-run root.
+        # #1912: same confinement as the production adapter, through the shared
+        # worker runner: disposable HOME, allowlisted exact env, Seatbelt
+        # profile (case dir minus .git/.agents, plus the per-run root), and a
+        # process-group + descendant sweep on timeout and on normal exit.
         import tempfile
 
         from nexus.executors import agy_write_admission as admission
+        from nexus.executors.cli_worker import CliWorkerRequest, CliWorkerStatus, run_cli_worker
 
         if not admission.seatbelt_available():
             return {
@@ -387,82 +388,47 @@ def _run_gemini_patch(
                 "error": "agy_seatbelt_unavailable",
             }
         agy_run_root = Path(os.path.realpath(tempfile.mkdtemp(prefix="nexus-bench-agy-")))
-        run_home = agy_run_root / "home"
-        run_tmp = agy_run_root / "tmp"
-        run_tmp.mkdir(parents=True)
-        admission.materialize_run_home(Path(env["HOME"]), run_home, read_only=False)
-        env = admission.agy_child_env(env, home=run_home, tmpdir=run_tmp)
-        profile_path = agy_run_root / "agy.sb"
-        profile_path.write_text(
-            admission.build_seatbelt_profile(
-                run_root=agy_run_root,
-                writable_target=Path(os.path.realpath(case_dir)),
-                run_home=run_home,
-            ),
-            encoding="utf-8",
-        )
-        cmd = [admission.SANDBOX_EXEC_PATH, "-f", str(profile_path), *cmd]
-
-    if "agy" in str(bin_path):
-        import pty
-        import select
-        master, slave = pty.openpty()
+        case_real = Path(os.path.realpath(case_dir))
         try:
-            p = subprocess.Popen(
-                cmd,
-                cwd=case_dir,
-                env=env,
-                stdin=slave,
-                stdout=slave,
-                stderr=slave,
-                text=True,
-                close_fds=True,
-            )
-            os.close(slave)
-            
-            output_chunks = []
-            start_time = time.time()
-            while True:
-                if time.time() - start_time > timeout_sec:
-                    p.kill()
-                    return {
-                        "regression_test_added": False,
-                        "unrelated_change": False,
-                        "root_cause": "",
-                        "written_files": [],
-                        "model_calls": 1,
-                        "total_tokens": 0,
-                        "token_capture_status": "timeout",
-                        "gemini_returncode": None,
-                        "error": "gemini_timeout: PTY execution timed out",
-                    }
-                try:
-                    r, _, _ = select.select([master], [], [], 0.5)
-                    if master in r:
-                        data = os.read(master, 4096)
-                        if not data:
-                            break
-                        output_chunks.append(data.decode("utf-8", errors="ignore"))
-                    else:
-                        if p.poll() is not None:
-                            break
-                except OSError:
-                    break
-            p.wait(timeout=5)
-            res_stdout = "".join(output_chunks)
-            res = subprocess.CompletedProcess(
-                args=cmd,
-                returncode=p.returncode,
-                stdout=res_stdout,
-                stderr="",
+            run_home = agy_run_root / "home"
+            run_tmp = agy_run_root / "tmp"
+            run_tmp.mkdir(parents=True)
+            admission.materialize_run_home(Path(env["HOME"]), run_home, read_only=False)
+            result = run_cli_worker(
+                CliWorkerRequest(
+                    executable=str(bin_path),
+                    argv=tuple(cmd[1:]),
+                    cwd=str(case_real),
+                    env=admission.agy_child_env(env, home=run_home, tmpdir=run_tmp),
+                    timeout_seconds=float(timeout_sec),
+                    seatbelt_profile=admission.build_seatbelt_profile(
+                        run_root=agy_run_root, writable_target=case_real, run_home=run_home
+                    ),
+                    sweep_descendants_on_exit=True,
+                    sweep_roots=(str(case_real), str(agy_run_root)),
+                    exact_env=True,
+                )
             )
         finally:
-            try:
-                os.close(master)
-            except:
-                pass
-            if agy_run_root is not None:
-                shutil.rmtree(agy_run_root, ignore_errors=True)
+            shutil.rmtree(agy_run_root, ignore_errors=True)
+        if result.status is CliWorkerStatus.TIMED_OUT:
+            return {
+                "regression_test_added": False,
+                "unrelated_change": False,
+                "root_cause": "",
+                "written_files": [],
+                "model_calls": 1,
+                "total_tokens": 0,
+                "token_capture_status": "timeout",
+                "gemini_returncode": None,
+                "error": "gemini_timeout: agy execution timed out",
+            }
+        res = subprocess.CompletedProcess(
+            args=cmd,
+            returncode=result.exit_code if result.exit_code is not None else 1,
+            stdout=result.stdout.decode("utf-8", errors="ignore"),
+            stderr=result.stderr.decode("utf-8", errors="ignore"),
+        )
     else:
         try:
             res = subprocess.run(cmd, cwd=case_dir, env=env, text=True, capture_output=True, timeout=timeout_sec, check=False)

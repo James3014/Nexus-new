@@ -1287,3 +1287,51 @@ def test_sweep_kills_double_forked_child_resident_in_sweep_root(tmp_path):
     pid = int(result.stdout.strip())
     assert result.descendants_swept is True
     assert _wait_dead(pid)
+
+
+def test_cwd_sweep_spares_processes_that_predate_the_worker(tmp_path):
+    """A process resident in the sweep root before the worker started survives;
+    one the worker leaves behind there is killed."""
+    work = (tmp_path / "work").resolve()
+    work.mkdir()
+    bystander = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        cwd=str(work),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    try:
+        time.sleep(1.2)  # older than the worker beyond the lstart margin
+        code = (
+            "import os, sys\n"
+            "r, w = os.pipe()\n"
+            "if os.fork() == 0:\n"
+            "    os.setsid()\n"
+            "    if os.fork() == 0:\n"
+            "        os.chdir(sys.argv[1])\n"
+            "        os.write(w, str(os.getpid()).encode())\n"
+            "        null = os.open(os.devnull, os.O_RDWR)\n"
+            "        for fd in (0, 1, 2):\n"
+            "            os.dup2(null, fd)\n"
+            "        os.execve(sys.executable, [sys.executable, '-c', 'import time; time.sleep(60)'], {})\n"
+            "    os._exit(0)\n"
+            "os.close(w)\n"
+            "print(os.read(r, 32).decode(), flush=True)\n"
+        )
+        result = run_cli_worker(
+            CliWorkerRequest(
+                executable=sys.executable,
+                argv=("-c", code, str(work)),
+                cwd=str(tmp_path),
+                sweep_descendants_on_exit=True,
+                sweep_roots=(str(work),),
+            )
+        )
+        leftover = int(result.stdout.strip())
+        assert result.descendants_swept is True
+        assert _wait_dead(leftover)
+        assert bystander.poll() is None  # pre-existing resident was not killed
+    finally:
+        bystander.kill()
+        bystander.wait(timeout=5)
