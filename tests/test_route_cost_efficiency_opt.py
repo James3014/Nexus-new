@@ -771,34 +771,30 @@ def test_heuristic_prefilter_is_observation_only():
     assert diag_run["public_claim_safe"] is False
 
 
-def test_context_compaction_is_observation_only():
+def test_context_compaction_is_observation_only(tmp_path):
     """
-    TDD Task C (GREEN): Verify Context Window Compaction dual rendering is strictly
-    observation-only and does not alter the production execution prompt.
+    Current contract (#1926): an unbound BattlesuitGateway fails closed before any
+    physical Online call, even with shadow compaction enabled. It refuses with
+    online_execution_not_authorized, invokes no provider and emits no shadow
+    compaction telemetry, so compaction can never alter an execution prompt.
     """
     from nexus.services.gateway import BattlesuitGateway
-    gateway = BattlesuitGateway(
-        project_root="/Users/jameschen/Workspace/nexus",
-        enable_shadow_compaction=True
-    )
-    
-    # 模擬 gateway 呼叫前置 telemetry 收集 (dual-render)
+
+    gateway = BattlesuitGateway(project_root=str(tmp_path), enable_shadow_compaction=True)
     sys_msg = "You are the pilot of the Nexus Battlesuit v16. Do not use tools, do not inspect files, and do not create an execution plan. Required output shape: {}"
     content = "required_governance_rules: active\npayload:\n\n   too   much   spaces   \n\n\n   newlines"
-    
-    # 呼叫結構化前置 render 的模擬 telemetry
-    res, _ = gateway.ask_structured(
-        prompt=sys_msg,
-        payload=content,
-        phase="R"
-    )
-    
-    assert res["status"] in {"FAIL", "REJECTED"} # 預期為 FAIL (缺失 binary) 或是 REJECTED (實體執行成功但被拒絕)
-    # 但 gateway_telemetry (包含 shadow dual render 統計) 必須存在於回傳 data 中
-    assert "shadow_compaction_ratio" in res
-    assert res["shadow_compaction_ratio"] > 0.0 # 空間有壓縮
-    assert res["shadow_schema_preserved"] is True
-    assert res["public_claim_safe"] is False
+
+    res, reason = gateway.ask_structured(prompt=sys_msg, payload=content, phase="R")
+
+    assert reason == "online_execution_not_authorized"
+    assert res == {
+        "status": "FAILED",
+        "error": "online_execution_not_authorized",
+        "error_category": "online_execution_not_authorized",
+        "provider_call_count": 0,
+        "invoked": False,
+    }
+    assert not any(key.startswith("shadow_") for key in res)
 
 
 
@@ -836,6 +832,7 @@ def test_spike_telemetry_does_not_change_paired_denominator():
     active_treatment_wall = 5000
     # Shadow prefilter 預計節省 1200ms，但不折算入真實 wall
     est_saving = 1200
+    assert est_saving > 0
     assert (active_treatment_wall / active_baseline_wall) == 1.0 # 保持 100% 物理守恆，無 overclaim
 
 
@@ -902,7 +899,6 @@ def test_shadow_telemetry_dataset_hygiene_strict():
     1. 驗證所有帶有 shadow/observation 欄位的 rows，不論是 prefilter 還是 compaction 欄位，均被嚴格阻隔，不可設為 public_claim_safe 或是混入 public promotion bundle。
     2. 驗證真實運行中必須提供穩定 run_id，以防止 run_id 淪為 run_unknown 妨礙分桶統計，達成物理防呆。
     """
-    import pytest
     from scripts.bench.public_gate_bundle import validate_observation_vs_public_claim_boundary
     
     # 測試 A: prefilter 穩定欄位與 run_id 驗證

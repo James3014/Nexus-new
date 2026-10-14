@@ -252,7 +252,11 @@ def _predecessor_verified_row(
     manager: Any,
     predecessor: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Require the consumed generation to be terminal VERIFIED in the ledger."""
+    """Require the consumed generation to be an acceptable terminal in the ledger.
+
+    VERIFIED, or (#1995) BLOCKED while still the latest R1 request: pre-effect
+    as is, post-effect only with an Owner reconcile record.
+    """
     ledger = manager.GatewayLedger()
     path = Path(ledger.path)
     if path.is_symlink() or not path.is_file():
@@ -279,6 +283,27 @@ def _predecessor_verified_row(
             raise _succession_refusal("PREDECESSOR_LEDGER_BINDING_MISMATCH")
     terminal = selected[-1]
     state = terminal.get("state")
+    if state == "BLOCKED":
+        # #1995 item 2a (Owner decision): a BLOCKED predecessor may be succeeded
+        # only while it is still the latest R1 request in the ledger, so an
+        # acceptance (or reconcile record) can never be reused after another
+        # generation started. Pre-effect BLOCKED (no physical effect) needs no
+        # record; post-effect BLOCKED needs the Owner reconcile record bound to
+        # this exact BLOCKED row.
+        r1_requests: list[str] = []
+        for row in rows:
+            if row.get("schema") == _LEDGER_SCHEMA and row.get("request_id") not in r1_requests:
+                r1_requests.append(row.get("request_id"))
+        if not r1_requests or r1_requests[-1] != predecessor["request_id"]:
+            raise _succession_refusal("PREDECESSOR_NOT_LATEST_R1_REQUEST")
+        if not any(row.get("state") == "EFFECT_STARTED" for row in selected):
+            return dict(terminal)
+        try:
+            reconciled = manager._r1_owner_reconcile_matches(selected)
+        except Exception as exc:
+            raise _succession_refusal("PREDECESSOR_OWNER_RECONCILE_INVALID") from exc
+        if reconciled:
+            return dict(terminal)
     if state != "VERIFIED":
         raise _succession_refusal(f"PREDECESSOR_NOT_VERIFIED:{state}")
     observed = terminal.get("observed_identity")
@@ -375,6 +400,10 @@ def _build_succession_entry(
     values["schema"] = SUCCESSION_ENTRY_SCHEMA
     values["predecessor_consumption_hash"] = predecessor["consumption_hash"]
     values["predecessor_request_id"] = predecessor["request_id"]
+    # Field names are frozen by the persisted v2 marker schema (renaming would
+    # invalidate existing markers). Since #1995 they bind the predecessor's
+    # terminal ledger row: VERIFIED, or an accepted BLOCKED (pre-effect, or
+    # post-effect with an Owner reconcile record).
     values["predecessor_verified_ledger_sequence"] = verified_row["sequence"]
     values["predecessor_verified_ledger_record_hash"] = verified_row["record_hash"]
     values["consumption_hash"] = manager.canonical_hash(values)

@@ -102,6 +102,10 @@ class FakeManager:
     def _safe_store_path(self, path, **_kwargs):
         return Path(path)
 
+    def _r1_owner_reconcile_matches(self, rows):
+        # #1995 item 2a double: tests opt in by naming reconciled request ids.
+        return rows[-1]["request_id"] in getattr(self, "owner_reconciled", set())
+
     def _r1_materialize_value_store(self, path, data):
         path = Path(path)
         if path.exists():
@@ -434,6 +438,8 @@ def test_next_generation_succeeds_after_verified_and_appends_marker_history(tmp_
         _VERIFIED_PATH[:8],  # CLIENT_BOUND: in flight, not yet VERIFIED
         [*_VERIFIED_PATH[:5], "UNCERTAIN_EFFECT"],
         [*_VERIFIED_PATH[:5], "BLOCKED"],
+        # #1995: a pre-effect BLOCKED predecessor no longer blocks succession
+        # (no physical effect happened); this case now asserts acceptance.
         ["REQUESTED", "BLOCKED"],
         [*_VERIFIED_PATH[:5], "UNCERTAIN_EFFECT", "ROLLED_BACK"],
     ],
@@ -455,6 +461,14 @@ def test_non_verified_predecessor_blocks_succession_before_any_effect(tmp_path, 
     marker_before = _marker_bytes(manager)
     manager.advance_generation()
     before = len(manager.calls)
+
+    if states == ["REQUESTED", "BLOCKED"]:
+        # #1995 Owner decision: only a post-effect BLOCKED needs an Owner
+        # reconcile record; a pre-effect BLOCKED predecessor is accepted.
+        result = b._run_bootstrap(manager)
+        assert result["request_id"] == "request-v2"
+        assert _marker_bytes(manager) != marker_before
+        return
 
     with pytest.raises(
         b.BootstrapError,
@@ -753,3 +767,137 @@ def test_1958_successor_runs_when_all_prior_requests_are_terminal(tmp_path):
     assert b._run_bootstrap(manager)["status"] == "VERIFIED"
     assert manager.effects == ["request-v1", "request-v2"]
     assert _request_rows(manager, "request-v2")[-1]["state"] == "VERIFIED"
+
+
+# --- #1995 item 3: bootstrap first consumption is atomic create-if-absent ----
+
+
+def _i1995_consumption(manager, tag: str) -> dict[str, object]:
+    values: dict[str, object] = {key: f"{key}-{tag}" for key in b._GENERATION_KEYS}
+    values["schema"] = b.CONSUMPTION_SCHEMA
+    values["effect_started_at_marker"] = False
+    values["consumption_hash"] = manager.canonical_hash(values)
+    return values
+
+
+def test_1995_persist_consumption_two_writers_exactly_one_wins(tmp_path, monkeypatch):
+    import threading
+
+    root = tmp_path / "state"
+    root.mkdir(mode=0o700)
+    root.chmod(0o700)
+    monkeypatch.setattr(real_manager, "GATEWAY_STATE_ROOT", root)
+    monkeypatch.setattr(real_manager, "HOST_UID", __import__("os").getuid())
+    real_mkstemp = real_manager.tempfile.mkstemp
+    barrier = threading.Barrier(2)
+
+    def racing_mkstemp(*args, **kwargs):
+        # Both writers already observed the marker absent; release together.
+        barrier.wait(timeout=5)
+        return real_mkstemp(*args, **kwargs)
+
+    monkeypatch.setattr(real_manager, "tempfile", SimpleNamespace(mkstemp=racing_mkstemp))
+    payloads = [_i1995_consumption(real_manager, tag) for tag in ("a", "b")]
+    outcomes: list[tuple[str, object]] = []
+
+    def writer(payload):
+        try:
+            outcomes.append(("ok", b._persist_consumption(real_manager, payload)))
+        except Exception as exc:  # noqa: BLE001 - classified below
+            outcomes.append(("error", exc))
+
+    threads = [threading.Thread(target=writer, args=(payload,)) for payload in payloads]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    marker = root / b.CONSUMPTION_FILENAME
+    stored = json.loads(marker.read_bytes())
+    winners = [value for kind, value in outcomes if kind == "ok"]
+    losers = [value for kind, value in outcomes if kind == "error"]
+    assert len(winners) == 1 and len(losers) == 1, outcomes
+    assert winners[0] == stored and stored in payloads
+    assert isinstance(losers[0], real_manager.GatewayContractError)
+    assert "store drift" in str(losers[0])
+    assert b._load_consumption(real_manager) == stored
+    assert sorted(p.name for p in root.glob(f".{marker.name}.*")) == []
+
+
+# --- #1995 item 2a: Owner reconcile lets exactly the next generation succeed --
+
+
+@pytest.mark.parametrize(
+    "states",
+    [[*_VERIFIED_PATH[:5], "BLOCKED"], ["REQUESTED", "BLOCKED"]],
+    ids=["blocked-after-effect", "blocked-pre-effect"],
+)
+def test_1995_owner_reconciled_blocked_predecessor_allows_succession(tmp_path, states):
+    manager = FakeManager(tmp_path / "gateway-direct")
+    b._run_bootstrap(manager)
+    _append_ledger(manager, _current_marker_entry(manager), states)
+    manager.owner_reconciled = {"request-v1"}
+    manager.advance_generation("2")
+
+    result = b._run_bootstrap(manager)
+
+    assert result["request_id"] == "request-v2"
+    second = json.loads(_marker_bytes(manager))["generations"][-1]
+    assert second["predecessor_request_id"] == "request-v1"
+    assert second["predecessor_verified_ledger_sequence"] == len(states)
+
+
+def test_1995_invalid_owner_reconcile_blocks_succession(tmp_path):
+    manager = FakeManager(tmp_path / "gateway-direct")
+    b._run_bootstrap(manager)
+    _append_ledger(manager, _current_marker_entry(manager), [*_VERIFIED_PATH[:5], "BLOCKED"])
+    marker_before = _marker_bytes(manager)
+
+    def invalid(_rows):
+        raise real_manager.GatewayContractError("R1 Owner reconcile record malformed")
+
+    manager._r1_owner_reconcile_matches = invalid
+    manager.advance_generation("2")
+    with pytest.raises(b.BootstrapError, match="PREDECESSOR_OWNER_RECONCILE_INVALID$"):
+        b._run_bootstrap(manager)
+    assert _marker_bytes(manager) == marker_before
+
+
+def test_1995_pre_effect_blocked_predecessor_needs_no_reconcile_record(tmp_path):
+    manager = FakeManager(tmp_path / "gateway-direct")
+    b._run_bootstrap(manager)
+    _append_ledger(manager, _current_marker_entry(manager), ["REQUESTED", "BLOCKED"])
+    assert not getattr(manager, "owner_reconciled", set())
+    manager.advance_generation("2")
+
+    result = b._run_bootstrap(manager)
+
+    assert result["request_id"] == "request-v2"
+    second = json.loads(_marker_bytes(manager))["generations"][-1]
+    assert second["predecessor_request_id"] == "request-v1"
+
+
+@pytest.mark.parametrize(
+    "other_states",
+    [["REQUESTED", "PREFLIGHTED"], _VERIFIED_PATH],
+    ids=["other-started", "other-verified"],
+)
+def test_1995_reconcile_record_is_not_reused_after_another_r1_request(tmp_path, other_states):
+    manager = FakeManager(tmp_path / "gateway-direct")
+    b._run_bootstrap(manager)
+    marker_a = _current_marker_entry(manager)
+    _append_ledger(manager, marker_a, [*_VERIFIED_PATH[:5], "BLOCKED"])
+    manager.owner_reconciled = {"request-v1"}
+    marker_b = {
+        **marker_a,
+        "request_id": "request-other",
+        "request_hash": hashlib.sha256(b"request-other").hexdigest(),
+        "idempotency_fence": "fence-other",
+    }
+    _append_ledger(manager, marker_b, other_states)
+    marker_before = _marker_bytes(manager)
+    manager.advance_generation("3")
+
+    with pytest.raises(b.BootstrapError, match="PREDECESSOR_NOT_LATEST_R1_REQUEST$"):
+        b._run_bootstrap(manager)
+    assert _marker_bytes(manager) == marker_before

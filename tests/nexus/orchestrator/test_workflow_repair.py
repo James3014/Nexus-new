@@ -975,39 +975,104 @@ def test_self_hosted_task_service_has_single_integrate_approved_definition():
     assert names["integrate_approved"] == 1, f"Expected 1 integrate_approved definition, got: {names['integrate_approved']}"
 
 
-def test_integrate_approved_accepts_integration_branch_keyword(tmp_path, monkeypatch):
-    from nexus.orchestrator.governed_integration import IntegrationReceipt
-    calls = []
-    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
-    task_id = "kwarg-test-task"
+def _authorized_integration_state(service, tmp_path, monkeypatch, task_id):
+    """Persist a fully authorized APPROVED state and stub the repository contract gate.
+
+    a1b77a658 made integrate_approved require persisted external acceptance, an
+    integration authorization, a consumed one-shot grant and the persisted contract,
+    and moved the manager call to ``integrate_authorized_task_state``.  This mirrors
+    the GB-042 fixture in test_self_hosted_task_service.py.
+    """
+    from datetime import datetime, timezone
+
+    from nexus.orchestrator.governed_integration import IntegrationAuthorizationEnvelope
+    from nexus.orchestrator.repository_contract_gate import (
+        RepositoryContractGate,
+        RepositoryContractGateReceipt,
+    )
+    from tests.nexus.orchestrator.test_self_hosted_task_service import (
+        _closure_context,
+        _request,
+    )
+
+    candidate = "c" * 40
+    contract = service.build_contract(_request(tmp_path, task_id=task_id))
+    closure = _closure_context(task_id, candidate)
+    authorization_hash = IntegrationAuthorizationEnvelope(
+        **closure["integration_authorization"]
+    ).authorization_hash
+    closure["integration_authorization"]["authorization_hash"] = authorization_hash
+    packet = {
+        "candidate_commit_sha": candidate,
+        "candidate_tree_sha": "d" * 40,
+        "candidate_state_hash": "e" * 64,
+        "verified_receipt_hash": "f" * 64,
+    }
+    grant = {**closure["approval_context"], "consumed_at": datetime.now(timezone.utc).isoformat()}
     service._write_state(task_id, {
         "task_id": task_id,
         "status": "APPROVED",
-        "attempt_id": "a" * 32,
         "promotion_status": "APPROVED",
-        "promotion_packet": {"candidate_commit_sha": "c" * 40},
-        "approved_binding": {"candidate_commit_sha": "c" * 40},
-        "contract": {"target_worktree_root": str(tmp_path / "targets")},
+        "attempt_id": "attempt-1",
+        "request": _request(tmp_path, task_id=task_id),
+        "contract": contract.model_dump(mode="json"),
+        "promotion_packet": packet,
+        "approved_binding": {**packet, "approval_grant": grant},
+        "external_acceptance": closure["external_acceptance"],
+        "integration_authorization": closure["integration_authorization"],
+        "verified_receipt": {
+            "repository_contract_gate_passed": True,
+            "repository_contract_policy_revision_hash": "a" * 64,
+        },
     })
+
+    def passing_gate(self, **kwargs):
+        return RepositoryContractGateReceipt(
+            passed=True,
+            mode="shadow",
+            policy_revision_hash="a" * 64,
+            findings=(),
+            blocking_reasons=(),
+        )
+
+    monkeypatch.setattr(RepositoryContractGate, "evaluate_committed_candidate", passing_gate)
+    return candidate, closure["external_acceptance"]["receipt_hash"], authorization_hash
+
+
+def _integration_receipt(task_id, integration_branch, candidate, acceptance_hash, authorization_hash):
+    from nexus.orchestrator.governed_integration import IntegrationReceipt
+
+    return IntegrationReceipt(
+        schema="nexus.integration_receipt/v1",
+        task_id=task_id,
+        integration_branch=integration_branch,
+        source_branch=f"nexus/task/{task_id}",
+        candidate_commit_sha=candidate,
+        integration_base_sha="b" * 40,
+        integration_commit_sha="1" * 40,
+        verifier_passed=True,
+        merge_performed=True,
+        push_performed=False,
+        worktree_removed=True,
+        staging_commit_sha="1" * 40,
+        post_apply_verified=True,
+        acceptance_receipt_hash=acceptance_hash,
+        authorization_hash=authorization_hash,
+    )
+
+
+def test_integrate_approved_accepts_integration_branch_keyword(tmp_path, monkeypatch):
+    calls = []
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    task_id = "kwarg-test-task"
+    bound = _authorized_integration_state(service, tmp_path, monkeypatch, task_id)
 
     class DummyIntegrationManager:
         def __init__(self, integration_root):
             pass
-        def integrate_task_state(self, state, integration_branch):
+        def integrate_authorized_task_state(self, state, *, integration_branch, **kwargs):
             calls.append(integration_branch)
-            return IntegrationReceipt(
-                schema="nexus.integration_receipt/v1",
-                task_id=task_id,
-                integration_branch=integration_branch,
-                source_branch=f"nexus/task/{task_id}",
-                candidate_commit_sha="c" * 40,
-                integration_base_sha="b" * 40,
-                integration_commit_sha="c" * 40,
-                verifier_passed=True,
-                merge_performed=True,
-                push_performed=False,
-                worktree_removed=True,
-            )
+            return _integration_receipt(task_id, integration_branch, *bound)
 
     monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.ControlledIntegrationManager", DummyIntegrationManager)
     res = service.integrate_approved(
@@ -1020,38 +1085,17 @@ def test_integrate_approved_accepts_integration_branch_keyword(tmp_path, monkeyp
 
 
 def test_integrate_approved_is_idempotent_after_integration(tmp_path, monkeypatch):
-    from nexus.orchestrator.governed_integration import IntegrationReceipt
     calls = []
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
     task_id = "idempotent-test-task"
-    service._write_state(task_id, {
-        "task_id": task_id,
-        "status": "APPROVED",
-        "attempt_id": "a" * 32,
-        "promotion_status": "APPROVED",
-        "promotion_packet": {"candidate_commit_sha": "c" * 40},
-        "approved_binding": {"candidate_commit_sha": "c" * 40},
-        "contract": {"target_worktree_root": str(tmp_path / "targets")},
-    })
+    bound = _authorized_integration_state(service, tmp_path, monkeypatch, task_id)
 
     class DummyIntegrationManager:
         def __init__(self, integration_root):
             pass
-        def integrate_task_state(self, state, integration_branch):
+        def integrate_authorized_task_state(self, state, *, integration_branch, **kwargs):
             calls.append(integration_branch)
-            return IntegrationReceipt(
-                schema="nexus.integration_receipt/v1",
-                task_id=task_id,
-                integration_branch=integration_branch,
-                source_branch=f"nexus/task/{task_id}",
-                candidate_commit_sha="c" * 40,
-                integration_base_sha="b" * 40,
-                integration_commit_sha="c" * 40,
-                verifier_passed=True,
-                merge_performed=True,
-                push_performed=False,
-                worktree_removed=True,
-            )
+            return _integration_receipt(task_id, integration_branch, *bound)
 
     monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.ControlledIntegrationManager", DummyIntegrationManager)
     first = service.integrate_approved(task_id, integration_branch="nexus/integration/main")
@@ -1097,18 +1141,12 @@ def test_record_integration_rejects_duck_typed_fake_receipt(tmp_path):
 def test_integration_failure_records_failed_without_merge(tmp_path, monkeypatch):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
     task_id = "failed-without-merge-task"
-    service._write_state(task_id, {
-        "task_id": task_id,
-        "status": "APPROVED",
-        "attempt_id": "a" * 32,
-        "promotion_status": "APPROVED",
-        "contract": {"target_worktree_root": str(tmp_path / "targets")},
-    })
+    _authorized_integration_state(service, tmp_path, monkeypatch, task_id)
 
     class FailingManager:
         def __init__(self, integration_root):
             pass
-        def integrate_task_state(self, state, integration_branch):
+        def integrate_authorized_task_state(self, state, **kwargs):
             raise RuntimeError("merge failed due to conflicts")
 
     monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.ControlledIntegrationManager", FailingManager)
@@ -1116,8 +1154,10 @@ def test_integration_failure_records_failed_without_merge(tmp_path, monkeypatch)
         service.integrate_approved(task_id)
 
     st = service._read_state(task_id)
-    assert st["status"] == "INTEGRATION_FAILED"
-    assert st["promotion_status"] == "INTEGRATION_FAILED"
+    # c956f8f7e: a manager failure before apply records the native pre-apply status.
+    assert st["status"] == "INTEGRATION_FAILED_PRE_APPLY"
+    assert st["promotion_status"] == "INTEGRATION_FAILED_PRE_APPLY"
+    assert st["integration_status"] == "NOT_APPLIED"
     assert st["merge_performed"] is False
     assert st["push_performed"] is False
 
