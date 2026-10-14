@@ -697,7 +697,8 @@ def test_hard_v1_prompts_carry_no_hidden_literals_or_codeintel(
 
     tasks = _hard_v1_tasks()
     for task in tasks:
-        target_file, visible_test_file = _materialize_fixture(tmp_path / task.id, task)
+        repo = Path(__file__).resolve().parents[2]
+        target_file, visible_test_file = repo / task.target_file, repo / task.test_file
         source = Path(target_file).read_text(encoding="utf-8")
         visible = Path(visible_test_file).read_text(encoding="utf-8")
         hidden = Path(visible_test_file).with_name("test_hidden.py").read_text(encoding="utf-8")
