@@ -73,10 +73,12 @@ Current allowed operations are:
 - `status`
 - `wait`
 - `list-actionable` / `list_actionable`
-- `approve`
 - `integrate`
 - `dispose`
 - `cancel`
+
+`approve` is retired (#1928) and rejected before any CLI call; approve through the gateway tool
+`nexus_candidate_approve` with a bound approval grant.
 
 Example:
 

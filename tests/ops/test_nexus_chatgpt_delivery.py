@@ -162,7 +162,10 @@ def test_launch_surfaces_existing_approval_before_new_submission(tmp_path: Path)
     assert service.submitted_requests == []
     command = payload["actionable"]["next_commands"][0]
     assert command["connector_tool"] == "nexus.bash"
-    assert command["command"].startswith(f"{sys.executable} -m scripts.engine.nexus_cli self-hosted approve --task-id chatgpt-cutover")
+    # CLI approve is retired (#1928): no shell command; approve via the gateway tool.
+    assert command["command"] is None
+    assert command["gateway_tool"] == "nexus_candidate_approve"
+    assert command["recommended_tool"] == "nexus_candidate_approve"
 
 
 def test_launch_submits_once_then_surfaces_integration_command(tmp_path: Path):
@@ -284,14 +287,26 @@ def test_cli_guard_tool_returns_blocking_json(capsys):
 
 
 def test_action_command_uses_real_executable_path_and_avoids_nonexistent_nexus_binary():
-    task = _actionable_task()
+    task = _actionable_task("APPROVED")
+    task["task_action"]["recommended_tool"] = "nexus_self_hosted_integrate_approved"
     cmd_info = action_command_for_task(task)
     cmd_str = cmd_info["command"]
     assert cmd_str is not None
     assert not cmd_str.startswith("nexus ")
     exe_path = cmd_str.split()[0]
     assert Path(exe_path).exists()
-    assert f"{sys.executable} -m scripts.engine.nexus_cli self-hosted approve" in cmd_str
+    assert f"{sys.executable} -m scripts.engine.nexus_cli self-hosted integrate" in cmd_str
+
+
+def test_action_command_points_approval_to_gateway_not_retired_cli():
+    for tool in ("nexus_candidate_approve", "nexus_self_hosted_approve_promotion"):
+        task = _actionable_task()
+        task["task_action"]["recommended_tool"] = tool
+        cmd_info = action_command_for_task(task)
+        assert cmd_info["command"] is None
+        assert cmd_info["gateway_tool"] == "nexus_candidate_approve"
+        assert cmd_info["recommended_tool"] == "nexus_candidate_approve"
+        assert cmd_info["missing"] == []
 
 
 def test_subcommand_is_list_actionable_not_wrong_actionable():
@@ -337,3 +352,14 @@ def test_task_launch_skill_exits_for_owner_authorized_direct_canonical_work():
     assert "Use only after work is classified as governed" in normalized
     assert "DIRECT_CANONICAL does not require a Task Card or lifecycle state" in normalized
     assert "Code mutation must use the self-hosted lifecycle tools" not in normalized
+
+
+def test_summarize_actionable_rewrites_retired_approve_tool_in_tasks():
+    from scripts.ops.nexus_chatgpt_delivery import summarize_actionable
+
+    task = _actionable_task()
+    task["task_action"]["recommended_tool"] = "nexus_self_hosted_approve_promotion"
+    summary = summarize_actionable({"tasks": [task], "actionable_count": 1})
+    assert summary["tasks"][0]["task_action"]["recommended_tool"] == "nexus_candidate_approve"
+    assert summary["next_commands"][0]["recommended_tool"] == "nexus_candidate_approve"
+    assert "nexus_self_hosted_approve_promotion" not in json.dumps(summary)

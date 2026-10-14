@@ -12,6 +12,11 @@ from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
 from nexus.orchestrator.worker_competition import WorkerCompetitionCoordinator
 
 WORKER_ENUM = list(SUPPORTED_WORKER_PROVIDERS)
+LEGACY_APPROVE_RETIRED_MESSAGE = (
+    "APPROVAL_GRANT_REQUIRED: nexus_self_hosted_approve_promotion is retired (#1928) because it "
+    "cannot carry an approval grant. Approve through nexus_candidate_approve with a bound "
+    "approval grant."
+)
 
 
 class NexusSelfHostedMCPServer:
@@ -265,7 +270,10 @@ class NexusSelfHostedMCPServer:
             },
             {
                 "name": "nexus_self_hosted_approve_promotion",
-                "description": "Approve an exact candidate binding without merging or pushing.",
+                "description": (
+                    "RETIRED (#1928): always fails with APPROVAL_GRANT_REQUIRED and changes nothing. "
+                    "Approve through nexus_candidate_approve with a bound approval grant."
+                ),
                 "inputSchema": {
                     "type": "object",
                     "required": [
@@ -473,13 +481,9 @@ class NexusSelfHostedMCPServer:
         if name == "nexus_self_hosted_resume_task":
             return self.service.resume_task(task_id)
         if name == "nexus_self_hosted_approve_promotion":
-            return self.service.approve_promotion(
-                task_id,
-                candidate_commit_sha=str(arguments["candidate_commit_sha"]),
-                candidate_tree_sha=str(arguments["candidate_tree_sha"]),
-                candidate_state_hash=str(arguments["candidate_state_hash"]),
-                verified_receipt_hash=str(arguments["verified_receipt_hash"]),
-            )
+            # Retired (#1928): this tool cannot carry an approval grant, so it never
+            # calls approve_promotion. The grant requirement itself is unchanged.
+            raise RuntimeError(LEGACY_APPROVE_RETIRED_MESSAGE)
         if name == "nexus_self_hosted_status":
             return self.service.lifecycle_status()
         if name == "nexus_self_hosted_cleanup":

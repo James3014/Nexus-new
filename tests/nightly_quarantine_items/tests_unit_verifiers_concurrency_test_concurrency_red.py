@@ -2,10 +2,5 @@
 
 from __future__ import annotations
 
-ENTRY: dict[str, object] = {
-    "file": "tests/unit/verifiers/concurrency/test_concurrency_red.py",
-    "disposition": "delete-candidate",
-    "issue": "#1928",
-    "cause": "target fixed in ac87243dc; deadlock no longer reproducible; fixed behaviour pinned by test_deadlock.py",
-    "tests": ("TestConcurrencyTargetsRed::test_target3_deadlock_happens",),
-}
+# Tombstone (#1928): the red-phase test asserted the AB/BA deadlock fixed in ac87243dc (test_deadlock.py pins the fix); Owner approved deleting the file.
+ENTRY = None

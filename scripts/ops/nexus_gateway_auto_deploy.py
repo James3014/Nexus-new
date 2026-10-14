@@ -149,15 +149,31 @@ _SHA = re.compile(r"^[0-9a-f]{40}$")
 _DEPLOYMENT_NAME = re.compile(r"(?:^|/)[ar]1-([0-9a-f]{40})$")
 _SHELL_UNSAFE = ('"', "$", "`", "\\", "\n", "\r", "\x00")
 
+# GB-077 per-request timeout and tries: a freshly started candidate can take
+# longer than _fetch_gateway_health's 2 s default to answer /health.
+GB077_TIMEOUT_SECONDS = 30.0
+GB077_ATTEMPTS = 3
 GB077_PROBE_CODE = """
-import json, sys
-root, url, commit = sys.argv[1:4]
+import json, sys, time
+root, url, commit, timeout, attempts = sys.argv[1:6]
 sys.path.insert(0, root)
 from scripts.ops.run_golden_behavior_eval import _fetch_gateway_health, probe_gb077_live_gateway_identity
-ok, detail = probe_gb077_live_gateway_identity(
-    fetch_health=lambda: _fetch_gateway_health(url),
-    evaluated_identity=lambda: (commit, False),
-)
+for attempt in range(int(attempts)):
+    ok, detail = probe_gb077_live_gateway_identity(
+        fetch_health=lambda: _fetch_gateway_health(url, timeout=float(timeout)),
+        evaluated_identity=lambda: (commit, False),
+    )
+    if ok:
+        break
+    time.sleep(2)
+try:
+    # The probe reports its fixed live endpoint; record the URL actually probed.
+    parsed = json.loads(detail)
+    parsed.setdefault("observed", {})["endpoint"] = url
+    parsed["attempts"] = attempt + 1
+    detail = json.dumps(parsed, sort_keys=True, separators=(",", ":"))
+except (ValueError, AttributeError):
+    pass
 print(detail)
 sys.exit(0 if ok else 1)
 """
@@ -450,10 +466,11 @@ def _from_origin(run: dict, workflow_run: dict, sha: str, origin: Dict[str, Any]
         return False
     if not opened <= created <= merged or not opened <= started <= merged:
         return False
-    if run.get("completed_at") is not None:
-        completed = _parse_time(run.get("completed_at"))
-        if completed is None or completed > merged:
-            return False
+    # Only a provably finished attempt binds: a missing/null completed_at could
+    # have finished after the merge.
+    completed = _parse_time(run.get("completed_at"))
+    if completed is None or not started <= completed <= merged:
+        return False
     for listed in (run.get("pull_requests"), workflow_run.get("pull_requests")):
         numbers = {p.get("number") for p in listed or []}
         if numbers and origin["number"] not in numbers:
@@ -774,9 +791,18 @@ class Prober:
             self.host.sleep(2)
         checks["health"] = {"ok": observed.get("status") == "ok", "status": observed.get("status")}
         gb077 = self.host.run(
-            [str(python), "-c", GB077_PROBE_CODE, str(root), f"{base}/health", commit],
+            [
+                str(python),
+                "-c",
+                GB077_PROBE_CODE,
+                str(root),
+                f"{base}/health",
+                commit,
+                str(GB077_TIMEOUT_SECONDS),
+                str(GB077_ATTEMPTS),
+            ],
             env={"PYTHONDONTWRITEBYTECODE": "1"},
-            timeout=60,
+            timeout=GB077_ATTEMPTS * (GB077_TIMEOUT_SECONDS + 2) + 30,
         )
         checks["gb077"] = {"ok": gb077.returncode == 0, "detail": gb077.stdout.strip()[-2000:]}
         try:

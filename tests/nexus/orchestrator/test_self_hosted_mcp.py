@@ -59,7 +59,10 @@ class FakeService:
             "tasks": [{"task_id": "mcp-task-001", "task_action": {"action_state": "ACTION_REQUIRED"}}],
         }
 
+    approve_calls: list = []
+
     def approve_promotion(self, task_id, **kwargs):
+        self.approve_calls.append(task_id)
         if kwargs.get("candidate_tree_sha") == "0" * 40:
             return {
                 "task_id": task_id,
@@ -259,10 +262,13 @@ def test_mcp_exact_approval_mismatch_returns_action_required_envelope():
         }
     )
 
+    # Retired (#1928): the legacy tool carries no grant, so it never reaches the
+    # service (even a mismatching binding) and redirects to nexus_candidate_approve.
     payload = json.loads(response["result"]["content"][0]["text"])
-    assert response["result"]["isError"] is False
-    assert payload["status"] == "APPROVAL_INVALIDATED"
-    assert payload["task_action"]["action_state"] == "ACTION_REQUIRED"
+    assert response["result"]["isError"] is True
+    assert "APPROVAL_GRANT_REQUIRED" in payload["error"]
+    assert "nexus_candidate_approve" in payload["error"]
+    assert server.service.approve_calls == []
 
 
 def test_mcp_integrated_task_envelope_is_terminal():
