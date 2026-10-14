@@ -413,6 +413,8 @@ def _run_gemini_patch(
             shutil.rmtree(agy_run_root, ignore_errors=True)
         if result.status is CliWorkerStatus.TIMED_OUT:
             return {
+                # #1912: a timeout whose kill/sweep was not clean is a failed sweep.
+                "agy_sweep_failed": result.process_group_killed is not True,
                 "regression_test_added": False,
                 "unrelated_change": False,
                 "root_cause": "",
@@ -431,6 +433,7 @@ def _run_gemini_patch(
                 "written_files": [],
                 "model_calls": 1,
                 "total_tokens": 0,
+                "agy_sweep_failed": True,
                 "token_capture_status": "sweep_failed",
                 "gemini_returncode": result.exit_code,
                 "error": "agy_descendant_sweep_failed: worker descendants may survive",
@@ -1121,7 +1124,7 @@ def run_task(
         )
     coverage, phase_trace, _ = _nexus_strategy_pack(task, profile=nexus_profile if mode == "with_nexus" else "core")
     verified = _run_tests(case_dir, timeout_sec)
-    if patch_info.get("token_capture_status") == "sweep_failed":
+    if patch_info.get("agy_sweep_failed"):
         # #1912: descendants may still be editing the case dir; never a solve.
         verified = False
     if executor in {"gemini", "full_nexus"}:

@@ -1490,3 +1490,15 @@ def test_start_time_filter_fails_closed_on_ps_error(monkeypatch):
 def test_empty_process_snapshot_is_not_a_baseline(monkeypatch):
     monkeypatch.setattr(cli_worker, "_process_table", lambda: {})
     assert cli_worker._sweep_baseline() is None
+
+
+def test_partial_process_table_is_not_a_baseline(monkeypatch):
+    me, parent = os.getpid(), os.getppid()
+    monkeypatch.setattr(
+        cli_worker.subprocess,
+        "run",
+        lambda *a, **k: SimpleNamespace(
+            stdout=f"{me} {parent}\n{parent} 1\ngarbled row\n", returncode=0
+        ),
+    )
+    assert cli_worker._sweep_baseline() is None
