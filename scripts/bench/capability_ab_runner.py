@@ -3540,7 +3540,14 @@ def _hidden_feedback_disabled() -> bool:
     ``--strict-llm-baseline`` / ``--require-same-model-baseline``).
     """
 
-    return os.environ.get("NEXUS_BENCH_NO_HIDDEN_FEEDBACK", "").strip().lower() in {"1", "true", "yes"}
+    if os.environ.get("NEXUS_BENCH_NO_HIDDEN_FEEDBACK", "").strip().lower() in {"1", "true", "yes"}:
+        return True
+    # Like-for-like / counted lanes never feed hidden-verifier output back, whatever the flag:
+    # the symmetric prompt contract and the counted-lane confinement imply it.
+    return any(
+        os.environ.get(name, "").strip().lower() in {"1", "true", "yes"}
+        for name in ("NEXUS_SYMMETRIC_PROMPT", "NEXUS_CONFINE_VISIBLE_TEST")
+    )
 
 
 @dataclass(frozen=True)
