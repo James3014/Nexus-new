@@ -1166,7 +1166,13 @@ def test_fallback_cannot_make_a_wrong_candidate_resolved(tmp_path):
 def test_droppable_classification():
     assert ros.is_droppable_non_code("docs/a.md")
     assert ros.is_droppable_non_code("README.md")
-    assert ros.is_droppable_non_code(".github/actions/x/action.yml")
+    assert ros.is_droppable_non_code("docs/x/matrix.json")
+    assert ros.is_droppable_non_code("nexus_wiki_vault/99_Schema/generated/agent-index.json")
+    # Codex review round 2: config and workflow/action files are behaviour, never dropped.
+    assert not ros.is_droppable_non_code(".github/actions/x/action.yml")
+    assert not ros.is_droppable_non_code(".github/workflows/ci.md")
+    assert not ros.is_droppable_non_code("package.json")
+    assert not ros.is_droppable_non_code("src/pkg/config/model_workforce.yaml")
     assert not ros.is_droppable_non_code("pkg/a.py")
     assert not ros.is_droppable_non_code("scripts/run.sh")
     assert not ros.is_droppable_non_code("pyproject.toml")
@@ -1176,7 +1182,7 @@ def test_droppable_classification():
 CFG_TEST = (
     "import json\nfrom pathlib import Path\n\n\n"
     "def test_cfg_mode():\n"
-    '    assert json.loads(Path("cfg/mode.json").read_text())["mode"] == "fixed"\n'
+    '    assert json.loads(Path("docs/mode.json").read_text())["mode"] == "fixed"\n'
 )
 
 
@@ -1185,13 +1191,13 @@ def test_dropped_file_that_changes_an_oracle_outcome_stays_gold_port_failed(tmp_
     # test_cfg_mode fail on GOLD and silently leave F2P, so a candidate fixing only
     # mul() could be RESOLVED. GOLD_REF (GOLD + merge content of the dropped file) exposes
     # the outcome change and the task stays GOLD_PORT_FAILED.
-    fx = Fixture(tmp_path, extra_base={"cfg/mode.json": '{"mode": "base",\n "x": 1}\n'})
+    fx = Fixture(tmp_path, extra_base={"docs/mode.json": '{"mode": "base",\n "x": 1}\n'})
     merge = _drift_then_fix(
         fx,
-        {"cfg/mode.json": '{"mode": "base",\n "x": 2}\n'},
+        {"docs/mode.json": '{"mode": "base",\n "x": 2}\n'},
         {
             **_fix_with(MUL_TEST + "\n\n" + CFG_TEST),
-            "cfg/mode.json": '{"mode": "fixed",\n "x": 3}\n',
+            "docs/mode.json": '{"mode": "fixed",\n "x": 3}\n',
         },
     )
     mul_only = fx.diff_from_base({"pkg/calc.py": FIXED})
@@ -1199,7 +1205,7 @@ def test_dropped_file_that_changes_an_oracle_outcome_stays_gold_port_failed(tmp_
     assert (r["label"], r["sub_reason"]) == (ros.NOT_SCORABLE_ORACLE_INVALID, "GOLD_PORT_FAILED")
     assert r["detail"] == "dropped_paths_change_oracle_outcome"
     assert r["gold_ref_mismatch"] == ["tests.test_mul::test_cfg_mode"]
-    assert r["gold_port_dropped_non_code_paths"] == ["cfg/mode.json"]
+    assert r["gold_port_dropped_non_code_paths"] == ["docs/mode.json"]
 
 
 def test_dropped_doc_with_no_oracle_effect_records_gold_ref_tree(tmp_path):
@@ -1226,3 +1232,98 @@ def test_gold_port_path_restore_never_unlinks_through_escaping_parent(tmp_path, 
     with pytest.raises(ros.UnsafeTreePath):
         ros._set_path_from(repo, wt, fx.base, "linkdir/victim.txt")
     assert (outside / "victim.txt").read_text() == "keep\n"
+
+
+class _TreeTimeoutRunner(ros.PytestRunner):
+    """Times out every non-candidate run of ``targets`` on the named trees."""
+
+    def __init__(self, *a, trees: set[str], targets: set[str], **kw):
+        super().__init__(*a, **kw)
+        self.trees, self.targets = trees, targets
+
+    def run(self, env, tree, tree_id, target, ignores, run_idx, role=""):
+        if tree.name in self.trees and target in self.targets and not role:
+            return ros.RunResult({}, -1, True)
+        return super().run(env, tree, tree_id, target, ignores, run_idx, role)
+
+
+def _docs_drop_fixture(tmp_path: Path) -> tuple[Fixture, str]:
+    fx = Fixture(tmp_path, extra_base={"docs/status.md": STATUS_BASE})
+    merge = _drift_then_fix(
+        fx,
+        {"docs/status.md": "status: drift\nline2\n"},
+        {**_fix_with(MUL_TEST), "docs/status.md": "status: fixed\nline2\n"},
+    )
+    return fx, merge
+
+
+def test_gold_ref_oracle_run_failure_fails_closed(tmp_path):
+    # Codex review round 2: a failed GOLD_REF oracle run must not pass the detector.
+    fx, merge = _docs_drop_fixture(tmp_path)
+    ctx = _ctx(tmp_path, fx)
+    ctx.runner = _TreeTimeoutRunner(
+        tmp_path / "work" / "scratch",
+        timeout=300,
+        log=lambda m: None,
+        trees={"goldref"},
+        targets={"tests/test_mul.py"},
+    )
+    task = fx.task(fx.diff_from_base({"pkg/calc.py": FIXED}), merge=merge)
+    r = ros.score_task(task, ctx)["receipt"]
+    assert (r["label"], r["sub_reason"]) == (ros.NOT_SCORABLE_ORACLE_INVALID, "GOLD_PORT_FAILED")
+    assert r["detail"] == "gold_ref_run_failed"
+
+
+def test_gold_ref_p2p_run_failure_excuses_nothing(tmp_path):
+    # The candidate breaks add(). GOLD's P2P run times out, which under v1 alone would make
+    # the suspect gold_also_fails. GOLD_REF also times out, so A5 excuses nothing.
+    fx, merge = _docs_drop_fixture(tmp_path)
+    ctx = _ctx(tmp_path, fx)
+    ctx.runner = _TreeTimeoutRunner(
+        tmp_path / "work" / "scratch",
+        timeout=300,
+        log=lambda m: None,
+        trees={"gold", "goldref"},
+        targets={"tests"},
+    )
+    calc = FIXED.replace("return a + b", "return a - b")
+    r = ros.score_task(fx.task(fx.diff_from_base({"pkg/calc.py": calc}), merge=merge), ctx)[
+        "receipt"
+    ]
+    assert r["gold_also_fails"] == []
+    assert r["p2p_new_failures"] == ["tests.test_add::test_add"]
+    assert r["label"] == ros.BROKE_EXISTING
+
+
+LONG_DOC = "status: {}\n2\n3\n4\n5\n6\n7\n8\n{}\n"
+
+
+def test_gold_ref_uses_latest_merge_content_for_a_redropped_path(tmp_path, fx):
+    # Codex review round 2: PR 1 drops docs/status.md; PR 2 changes it again cleanly.
+    up = fx.upstream
+    _git(up, "checkout", "-q", "--detach", fx.base)
+    _write(up, {"docs/status.md": LONG_DOC.format("base", "end")})
+    _git(up, "add", "-A")
+    _git(up, "commit", "-qm", "status doc")
+    fx.base = _git(up, "rev-parse", "HEAD").strip()
+    merge1 = _drift_then_fix(
+        fx,
+        {"docs/status.md": LONG_DOC.format("drift", "end")},
+        {**_fix_with(MUL_TEST), "docs/status.md": LONG_DOC.format("fix1", "end")},
+    )
+    _write(up, {"docs/status.md": LONG_DOC.format("fix1", "end2")})
+    _git(up, "commit", "-qam", "pr2")
+    merge2 = _git(up, "rev-parse", "HEAD").strip()
+    repo = ros.GitRepo(tmp_path / "scorer-repo", [str(up)])
+    for sha in (fx.base, merge1, merge2):
+        assert repo.ensure_commit(sha)
+    wt = repo.worktree(tmp_path / "wt", fx.base)
+    prs = [
+        {"number": 1, "merge_commit_sha": merge1},
+        {"number": 2, "merge_commit_sha": merge2},
+    ]
+    port = ros.port_gold(repo, wt, prs)
+    assert port.ok
+    assert port.dropped_non_code_paths == ["docs/status.md"]
+    assert port.dropped_from == {"docs/status.md": merge2}
+    assert (wt / "docs/status.md").read_text() == LONG_DOC.format("base", "end2")

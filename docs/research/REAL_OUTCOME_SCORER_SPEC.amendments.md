@@ -101,9 +101,14 @@ this way. In every case BASE was an ancestor of `M^1`, and the failing files wer
      in the merge commit `M`, or delete it if `M` deletes it. This is the SWE-bench
      rule: tests are taken at their post-fix state. The path is listed in
      `gold_port_test_files_from_merge`.
-   - If a **non-test documentation/data file** does not merge, leave it at its pre-PR
-     state. The suffixes are `.md .rst .txt .json .jsonl .yml .yaml .csv`. The path is
-     listed in `gold_port_dropped_non_code_paths`.
+   - If a **documentation file** does not merge, leave it at its pre-PR state. The path
+     is listed in `gold_port_dropped_non_code_paths`. Documentation files are:
+     - prose (`.md .rst .txt`) anywhere;
+     - data (`.json .jsonl .yml .yaml .csv`) only inside a documentation tree (first
+       segment `docs`, or a segment ending in `_wiki_vault`).
+
+     A path under `.github/`, and any config, workflow or action file, is never
+     documentation.
    - If **any other file** (Python and all other code) does not merge, the task stays
      `GOLD_PORT_FAILED`. The paths are listed in `gold_port_failed_paths`.
 
@@ -130,9 +135,14 @@ tree.
   has a different outcome than on GOLD, the task stays `GOLD_PORT_FAILED`, with
   `detail = "dropped_paths_change_oracle_outcome"` and `gold_ref_mismatch[]` listing the
   nodes. So a drop is accepted only when it provably changes no oracle outcome.
+- If any `GOLD_REF` oracle invocation times out or exits with a code other than 0 or 1,
+  the task stays `GOLD_PORT_FAILED` with `detail = "gold_ref_run_failed"` (fail closed).
 - In §6.4 step 2, a P2P suspect is `gold_also_fails` only if it fails on **both** GOLD
-  and `GOLD_REF`. If it fails only on GOLD, the dropped file explains the failure, so it
-  stays a P2P new failure. This is stricter than v1, never looser.
+  and a clean `GOLD_REF` run. A clean run exits 0, 1 or 5 and does not time out. If the
+  suspect fails only on GOLD, or the `GOLD_REF` run is not clean, it stays a P2P new
+  failure. This is stricter than v1, never looser.
+- A path that one PR drops and a later PR changes again takes the later merge commit's
+  content in `GOLD_REF`.
 
 `trees.GOLD_REF` is recorded. A candidate that does not make the F2P nodes pass is still
 `UNRESOLVED`/`PARTIAL`. The fixture tests

@@ -396,24 +396,26 @@ class GitRepo:
 
 GOLD_PORT_3WAY = "3way"
 GOLD_PORT_PER_FILE = "3way_per_file_fallback"
-# Non-test, non-code files whose PR change may be left out of GOLD when it does not merge
-# onto BASE (amendment A5). Python and every other file type are never dropped.
-DROPPABLE_SUFFIXES = frozenset({
-    ".md",
-    ".rst",
-    ".txt",
-    ".json",
-    ".jsonl",
-    ".yml",
-    ".yaml",
-    ".csv",
-})
+# Documentation whose PR change may be left out of GOLD when it does not merge onto BASE
+# (amendment A5): prose files anywhere, and data files only inside a documentation tree.
+# Code, config, workflow/action files (anything under .github/) are never dropped.
+DROPPABLE_PROSE_SUFFIXES = frozenset({".md", ".rst", ".txt"})
+DROPPABLE_DOC_DATA_SUFFIXES = frozenset({".json", ".jsonl", ".yml", ".yaml", ".csv"})
+
+
+def _in_doc_tree(parts: Sequence[str]) -> bool:
+    return bool(parts) and (parts[0] == "docs" or any(p.endswith("_wiki_vault") for p in parts))
 
 
 def is_droppable_non_code(path: str) -> bool:
-    return (
-        not is_oracle_test_file(path) and PurePosixPath(path).suffix.lower() in DROPPABLE_SUFFIXES
-    )
+    p = PurePosixPath(path)
+    parts = p.parts[:-1]
+    if is_oracle_test_file(path) or ".github" in p.parts:
+        return False
+    suffix = p.suffix.lower()
+    if suffix in DROPPABLE_PROSE_SUFFIXES:
+        return True
+    return suffix in DROPPABLE_DOC_DATA_SUFFIXES and _in_doc_tree(parts)
 
 
 @dataclass
@@ -503,6 +505,10 @@ def port_gold(repo: GitRepo, wt: Path, prs: Sequence[Mapping[str, Any]]) -> Gold
             continue
         pre = _snapshot(repo, wt)
         if _apply_3way(repo, wt, patch):
+            # A path dropped by an earlier PR and changed again here: GOLD_REF must use
+            # the latest merge content for it.
+            for path in set(repo.pr_paths(merge_sha)) & set(port.dropped_from):
+                port.dropped_from[path] = merge_sha
             continue
         _restore_tree(repo, wt, pre)
         port.method = GOLD_PORT_PER_FILE
@@ -513,6 +519,8 @@ def port_gold(repo: GitRepo, wt: Path, prs: Sequence[Mapping[str, Any]]) -> Gold
                 continue
             file_patch = repo.pr_patch(merge_sha, path)
             if file_patch.strip() and _apply_3way(repo, wt, file_patch):
+                if path in port.dropped_from:
+                    port.dropped_from[path] = merge_sha
                 continue
             try:
                 _set_path_from(repo, wt, pre, path)  # undo the partial apply of this file
@@ -1295,7 +1303,15 @@ def score_task(
         if "goldref" in wts:
             goldref_tree = repo.tree_id(wts["goldref"])
             receipt["trees"]["GOLD_REF"] = goldref_tree
-            ref = _merge(_run_modules(ctx, env, wts["goldref"], goldref_tree, modules, 0))
+            ref_results = _run_modules(ctx, env, wts["goldref"], goldref_tree, modules, 0)
+            if any(r.timed_out or r.exit_code not in (0, 1) for r in ref_results):
+                # The detector itself failed: fail closed.
+                receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
+                receipt["sub_reason"] = "GOLD_PORT_FAILED"
+                receipt["detail"] = "gold_ref_run_failed"
+                receipt["flaky_dropped"] = len(flaky)
+                return _finish(receipt, timing, t0, ctx)
+            ref = _merge(ref_results)
             # A5: every stable oracle node must have the same outcome with and without the
             # dropped files; otherwise the drop could hide an F2P node -> GOLD_PORT_FAILED.
             mismatch = sorted(
@@ -1509,13 +1525,18 @@ def _evaluate_candidate(
         g_run = baseline_run("gold", gold_tree, t, 0)
         # A5: with dropped doc/data files, a suspect is excused only if it also fails on
         # GOLD_REF, so a failure explained by a dropped file stays a P2P new failure.
-        r_run = baseline_run("goldref", goldref_tree, t, 0) if goldref_tree is not None else None
+        # A failed or timed-out GOLD_REF run excuses nothing (fail closed).
+        r_run, r_ok = None, True
+        if goldref_tree is not None:
+            n_before = len(baseline_failures)
+            r_run = baseline_run("goldref", goldref_tree, t, 0)
+            r_ok = len(baseline_failures) == n_before
         for n in suspects:
             if not all(_get(r, n) != PASS for r in c_runs) or not all(
                 _get(r, n) == PASS for r in b_runs
             ):
                 flaky_dropped.add(n)
-            elif _get(g_run, n) != PASS and (r_run is None or _get(r_run, n) != PASS):
+            elif _get(g_run, n) != PASS and (r_run is None or (r_ok and _get(r_run, n) != PASS)):
                 gold_also_fails.add(n)
             else:
                 new_failures.add(n)
