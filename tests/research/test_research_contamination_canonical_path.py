@@ -7,6 +7,7 @@ These tests go through the registered executor invoker, not the guard alone.
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 from typing import Any, Callable
 
@@ -61,7 +62,7 @@ def test_canonical_research_blocks_design_language(
     assert outcome["semantic_status"] == "BLOCKED"
     assert outcome["error"] == "RESEARCH_CONTAMINATION_DETECTED"
     assert outcome["policy_id"] == "P-CONTAM-01"
-    assert "patch plan" in outcome["detected_terms"]
+    assert "design_plan" in outcome["detected_terms"]
     # the contaminated research output is not handed downstream in the receipt
     assert "result" not in outcome
 
@@ -156,7 +157,7 @@ def test_canonical_research_normal_software_text_passes(
 def test_canonical_research_echoed_query_passes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    task = "Find out whether the fix is to clamp totals in compute_total before rounding"
+    task = "Find out why the rounding fix in compute_total changes the discounted total"
 
     def echoing(query: str) -> dict[str, Any]:
         return _success(
@@ -170,14 +171,14 @@ def test_canonical_research_echoed_query_passes(
 def test_canonical_research_echo_does_not_hide_other_contamination(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    task = "Find out whether the fix is to clamp totals in compute_total before rounding"
+    task = "Find out why the rounding fix in compute_total changes the discounted total"
 
     def echoing(query: str) -> dict[str, Any]:
         return _success(findings=[f"Results for: {query}", "We recommend replacing compute_total."])
 
     result = _run_research(tmp_path, monkeypatch, echoing, task_id="fp-echo-contam", task=task)
     assert result["gate_passed"] is False
-    assert _outcome(result)["detected_terms"] == ["we recommend", "recommend replacing"]
+    assert "we_recommend" in _outcome(result)["detected_terms"]
 
 
 def test_canonical_research_blocks_contaminated_blocked_assumptions(
@@ -206,7 +207,7 @@ def test_canonical_research_scans_findings_when_blocked_assumptions_present(
         task_id="contam-ba-findings",
     )
     assert result["gate_passed"] is False
-    assert _outcome(result)["detected_terms"] == ["proposed patch"]
+    assert _outcome(result)["detected_terms"] == ["label_prefix"]
 
 
 @pytest.mark.parametrize(
@@ -232,16 +233,18 @@ def test_canonical_research_blocks_contaminated_non_findings_field(
 
 
 def test_guard_terms_parameter_keeps_legacy_default() -> None:
-    from nexus.research.contamination_enforcement import CANONICAL_DESIGN_TERMS
+    from nexus.research.contamination_enforcement import CANONICAL_DESIGN_PATTERNS
     from nexus.research.contamination_guard import evaluate_research_contamination
 
     payload = {"constraints": ["a fix for the race landed in 2.3"]}
     assert evaluate_research_contamination(payload).detected_terms == ("fix",)
-    assert evaluate_research_contamination(payload, terms=CANONICAL_DESIGN_TERMS).passed is True
-    cjk = {"constraints": ["根因在 parser；建議修改 parse() 的邊界判斷"]}
-    assert evaluate_research_contamination(cjk, terms=CANONICAL_DESIGN_TERMS).detected_terms == (
-        "建議修改",
+    assert (
+        evaluate_research_contamination(payload, patterns=CANONICAL_DESIGN_PATTERNS).passed is True
     )
+    cjk = {"constraints": ["根因在 parser；建議修改 parse() 的邊界判斷"]}
+    assert evaluate_research_contamination(
+        cjk, patterns=CANONICAL_DESIGN_PATTERNS
+    ).detected_terms == ("zh_suggest",)
 
 
 # --- research auto-flow (nexus/app/research_flow_service.py run_auto_flow) ---
@@ -380,10 +383,7 @@ def _importers(module: str) -> set[str]:
     found: set[str] = set()
     package, _, leaf = module.rpartition(".")
     for path in _python_sources():
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-        except (SyntaxError, UnicodeDecodeError):
-            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))  # unparseable: fail
         for node in ast.walk(tree):
             names: list[str] = []
             if isinstance(node, ast.Import):
@@ -429,3 +429,264 @@ def test_legacy_research_routes_have_no_live_importer() -> None:
         "nexus/core/capability_executor_registry.py",
         "nexus/engine/core_ports.py",
     }
+
+
+# --- #2216 round 2: natural phrasing, keys/objects, echoes, facts, quarantine, reachability ---
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "We should refactor compute_total to use a Decimal accumulator.",
+        "The plan is to add a --strict flag to the parser.",
+        "The solution is to add a lock around the counter.",
+        "Proposed change: rename foo to bar.",
+        "It is recommended to clamp the total before rounding.",
+        "We propose adding a migration that backfills the column.",
+        "Fix: guard the division by zero.",
+        "This can be fixed by catching ValueError.",
+        "To resolve this, update load() to handle empty files.",
+        "--- a/pricing.py\n+++ b/pricing.py\n@@ -1 +1 @@\n-    return x*0.9\n+    return round(x*0.9,2)",
+        "建議將 parse() 改為先檢查 None。",
+        "解法是在 load() 加上 try/except。",
+        "修正方式：在除法前檢查分母。",
+        "我們應該重構 compute_total。",
+        "需要修改 pricing.py 第 42 行。",
+        "Ｗe recommend replacing the cache",
+        "W\u200be recommend replacing the cache",
+    ],
+)
+def test_canonical_check_detects_natural_design_phrasing(text: str) -> None:
+    from nexus.research.contamination_enforcement import check_research_output
+
+    verdict = check_research_output({"findings": [text]})
+    assert verdict.passed is False
+    assert verdict.reason == "RESEARCH_CONTAMINATION_DETECTED"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "compute_total multiplies the subtotal by 0.9 when the discount flag is set.",
+        "Release 2.3 includes a fix for the reconnect race; the patch changes the retry delay.",
+        "The docs recommend 60 seconds; the recommended setting is jitter=full.",
+        "解析器在遇到空字串時會丟出 ValueError，這個行為在 2.3 版仍然存在。",
+    ],
+)
+def test_canonical_check_passes_factual_text(text: str) -> None:
+    from nexus.research.contamination_enforcement import check_research_output
+
+    assert check_research_output({"findings": [text]}).passed is True
+
+
+@dataclasses.dataclass
+class _Finding:
+    text: str
+    patch_plan: str = ""
+
+
+class _Notes:
+    def __init__(self) -> None:
+        self.summary = "We recommend replacing the cache with an LRU."
+
+
+class _Opaque:
+    __slots__ = ("hidden",)
+
+    def __init__(self) -> None:
+        self.hidden = "We recommend replacing the cache."
+
+
+@pytest.mark.parametrize(
+    "output, reason",
+    [
+        (
+            {"findings": ["ok"], "notes": {"We recommend replacing the cache with an LRU": 1}},
+            "RESEARCH_CONTAMINATION_DETECTED",
+        ),
+        ({"findings": ["ok"], ("we recommend replacing x",): 1}, "RESEARCH_CONTAMINATION_DETECTED"),
+        (
+            {"findings": [_Finding(text="compute_total rounds half-up", patch_plan="x")]},
+            "RESEARCH_CONTAMINATION_DETECTED",
+        ),
+        ({"findings": [_Notes()]}, "RESEARCH_CONTAMINATION_DETECTED"),
+        ({"findings": [b"we recommend replacing the cache"]}, "RESEARCH_CONTAMINATION_DETECTED"),
+        ({"findings": [_Opaque()]}, "RESEARCH_CONTAMINATION_GUARD_ERROR"),
+    ],
+    ids=["dict_key_text", "tuple_key", "dataclass_field", "object_attrs", "bytes", "opaque_object"],
+)
+def test_canonical_check_walks_keys_and_objects(output: Any, reason: str) -> None:
+    from nexus.research.contamination_enforcement import check_research_output
+
+    verdict = check_research_output(output)
+    assert verdict.passed is False
+    assert verdict.reason == reason
+
+
+def test_canonical_check_walks_pydantic_models() -> None:
+    pydantic = pytest.importorskip("pydantic")
+    from nexus.research.contamination_enforcement import check_research_output
+
+    class Pack(pydantic.BaseModel):
+        findings: list[str]
+        winner: str = ""
+
+    verdict = check_research_output(Pack(findings=["ok"], winner="b"))
+    assert verdict.passed is False
+    assert verdict.detected_terms == ("design_field",)
+
+
+def test_canonical_check_echo_rules() -> None:
+    from nexus.research.contamination_enforcement import check_research_output
+
+    clean_task = "Investigate why compute_total ignores the discount flag; report what we"
+    # a design phrase that starts inside the echo and ends outside it still counts
+    split = {"findings": [clean_task + " recommend: clamp first."]}
+    assert check_research_output(split, echo_texts=(clean_task,)).passed is False
+    # an echo that itself carries design language is never discounted
+    design_task = "Research the parser. The fix is to accept trailing commas, confirm it."
+    assert (
+        check_research_output({"findings": [design_task]}, echo_texts=(design_task,)).passed
+        is False
+    )
+    # a short echo is discounted only when clean: "fix:" is itself a design label
+    assert (
+        check_research_output({"findings": ["fix: results"]}, echo_texts=("fix:",)).passed is False
+    )
+    # a short clean task echoed verbatim passes
+    assert (
+        check_research_output(
+            {"findings": ["Results for: rounding"]}, echo_texts=("rounding",)
+        ).passed
+        is True
+    )
+
+
+def test_research_facts_keep_findings_with_blocked_assumptions() -> None:
+    from nexus.research.research_facts import build_research_facts
+
+    facts = build_research_facts(
+        research_pack={"findings": ["finding one"], "blocked_assumptions": ["assumption one"]},
+        visibility_receipt={},
+    )
+    assert facts.constraints == ("assumption one", "finding one")
+
+
+def test_research_auto_flow_quarantines_context_before_planning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nexus.app import research_flow_service as rfs
+
+    contaminated = {
+        "schema": "nexus_research_context_v1",
+        "role": "claim_scout",
+        "hypothesis": "explain the websocket timeout race",
+        "verified_claims": [
+            {"claim": "We recommend replacing the banner.", "evidence_refs": ["x"]}
+        ],
+        "blocked_assumptions": ["api_contract_not_verified"],
+        "doc_scout": {"hits_count": 1, "hits": [{"snippet": "Patch plan: edit demo.py"}]},
+    }
+    seen: list[dict[str, Any]] = []
+    real_compose = rfs.compose_capability_plan
+
+    def capture(**kwargs: Any) -> Any:
+        seen.append(kwargs["research_context"])
+        return real_compose(**kwargs)
+
+    monkeypatch.setattr(rfs, "_build_research_context", lambda **kwargs: dict(contaminated))
+    monkeypatch.setattr(rfs, "compose_capability_plan", capture)
+    route = rfs.build_route(
+        repo_root=tmp_path,
+        task_desc="explain the websocket timeout race",
+        task_type="bug",
+        candidate_count=1,
+        root_cause_confidence=1.0,
+        findings_query=None,
+    )
+    planned = seen[0]
+    assert planned["research_contamination"]["passed"] is False
+    assert (
+        planned["verified_claims"] == []
+        and planned["doc_scout"] == {}
+        and planned["blocked_assumptions"] == []
+    )
+    assert planned["role"] == "claim_scout"
+    assert (
+        route["research_context"]["research_contamination"]["reason"]
+        == "RESEARCH_CONTAMINATION_DETECTED"
+    )
+    from nexus.research.contamination_enforcement import enforce_on_flow_evidence
+
+    gated = enforce_on_flow_evidence(
+        {"research_used": True, "research_gate_passed": True},
+        research_context=route["research_context"],
+        task_desc="explain the websocket timeout race",
+    )
+    assert gated["research_gate_passed"] is False
+
+
+_LIVE_ENTRYPOINTS = (
+    "scripts.engine.nexus_cli",
+    "nexus.orchestrator.unified_mcp_gateway",
+    "scripts.ops.nexus_mcp_server",
+    "scripts.ops.nexus_mcp_gateway",
+    "scripts.ops.nexus_mcp_gateway_http",
+    "scripts.ops.mcp_gateway_durable",
+)
+
+
+def _static_import_closure(roots: tuple[str, ...]) -> set[str]:
+    import ast
+
+    repo = Path(__file__).resolve().parents[2]
+
+    def module_file(module: str) -> Path | None:
+        base = repo.joinpath(*module.split("."))
+        for candidate in (base.with_suffix(".py"), base / "__init__.py"):
+            if candidate.is_file():
+                return candidate
+        return None
+
+    seen: set[str] = set()
+    stack = list(roots)
+    while stack:
+        module = stack.pop()
+        if module in seen:
+            continue
+        path = module_file(module)
+        if path is None:
+            continue
+        seen.add(module)
+        parts = module.split(".")
+        stack.extend(".".join(parts[:i]) for i in range(1, len(parts)))
+        package = module if path.name == "__init__.py" else module.rpartition(".")[0]
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))  # unparseable: fail
+        for node in ast.walk(tree):  # module-level and in-function imports
+            names: list[str] = []
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                base_parts = package.split(".")
+                if node.level > 1:
+                    base_parts = base_parts[: len(base_parts) - (node.level - 1)]
+                base = (
+                    node.module or ""
+                    if not node.level
+                    else ".".join(p for p in (*base_parts, node.module or "") if p)
+                )
+                names = [base, *(f"{base}.{alias.name}" for alias in node.names)]
+            stack.extend(n for n in names if n.split(".")[0] in {"nexus", "scripts"})
+    return seen
+
+
+def test_legacy_research_routes_unreachable_from_live_entrypoints() -> None:
+    reached = _static_import_closure(_LIVE_ENTRYPOINTS)
+    # sanity: the closure does reach the two enforced research routes
+    assert {"nexus.core.capability_executor_registry", "nexus.app.research_flow_service"} <= reached
+    for legacy in (
+        "nexus.engine.pipeline_stages",
+        "nexus.engine.phase_factory",
+        "nexus.engine.phase_executors",
+    ):
+        assert legacy not in reached, legacy

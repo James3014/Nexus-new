@@ -1,23 +1,34 @@
-"""P-CONTAM-01 enforcement on live research routes (#2199).
+"""P-CONTAM-01 enforcement on live research routes (#2199, #2216).
 
-One check shared by every route that accepts research output: the canonical research
-executor (``nexus/core/capability_executor_registry.py``) and the research auto-flow
-(``nexus/app/research_flow_service.py``).  It calls the contamination guard
-(``nexus/research/contamination_guard.py``) on every string in the research output, plus
-every design field found at any depth.
+One fail-closed check shared by every route that accepts research output: the canonical
+research executor (``nexus/core/capability_executor_registry.py``) and the research
+auto-flow (``nexus/app/research_flow_service.py``).
 
-Matching uses ``CANONICAL_DESIGN_TERMS``: design-proposal phrases, not the generic single
-words (fix, patch, change, modify, implement, recommend) of the guard's legacy
-``DESIGN_TERMS``.  Those words are ordinary in factual software research text and blocked
-most of it.  Text the provider echoes from the task/query is removed before scanning.
+- Walks the research output: strings, dict keys (as text), lists/tuples/sets, bytes
+  (UTF-8), dataclasses, pydantic models (``model_dump``) and plain objects (``vars``).
+  Design-field names (``DESIGN_FIELD_NAMES``) are detected at any depth, in keys and in
+  object attribute names.  Any other object type cannot be inspected, so the check fails
+  closed instead of scanning ``str(obj)``.
+- Calls the contamination guard with ``CANONICAL_DESIGN_PATTERNS``: structural patterns
+  for design proposals (modal + design verb, "the fix/plan/solution is to", labelled
+  prefixes such as "Fix:" or "Proposed change:", "can be fixed by", "we recommend",
+  diff hunks, and Chinese equivalents) instead of the guard's legacy single words.
+- Task/query echoes are discounted only when the echo itself has no design pattern and the
+  match lies fully inside it.
 
-Contamination returns ``RESEARCH_CONTAMINATION_DETECTED``; any error in the check returns
+Contamination returns ``RESEARCH_CONTAMINATION_DETECTED``; any error returns
 ``RESEARCH_CONTAMINATION_GUARD_ERROR``.  Both mean the research output is not accepted.
 """
 
 from __future__ import annotations
 
+import dataclasses
+import datetime as _dt
+import decimal
+import enum
+import os
 import re
+import uuid
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
@@ -25,46 +36,171 @@ POLICY_ID = "P-CONTAM-01"
 REASON_DETECTED = "RESEARCH_CONTAMINATION_DETECTED"
 REASON_GUARD_ERROR = "RESEARCH_CONTAMINATION_GUARD_ERROR"
 
-# Design-proposal phrasing: a research result telling the implementer what to build or
-# change.  Measured 2026-10-15 (#2216): 1/500 Nexus-new issue title+body, 30/2660 300-word
-# docs chunks, 0/59 historical research packs blocked; 15/15 contamination samples caught.
-CANONICAL_DESIGN_TERMS: tuple[str, ...] = (
-    "should change",
-    "should modify",
-    "should be changed",
-    "should be modified",
-    "should be rewritten",
-    "fix by",
-    "fix it by",
-    "fix this by",
-    "the fix is to",
-    "patch plan",
-    "implementation plan",
-    "proposed fix",
-    "proposed patch",
-    "suggested fix",
-    "suggested patch",
-    "recommended fix",
-    "recommended patch",
-    "we recommend",
-    "i recommend",
-    "i suggest",
-    "we suggest",
-    "recommend changing",
-    "recommend modifying",
-    "recommend replacing",
-    "recommend implementing",
-    "應該改",
-    "修法",
-    "建議修改",
-    "建議改成",
-    "建議實作",
+# Design verbs (stems).  _V is broad (after "recommend ...ing"/"consider ...ing"); _DV is
+# the narrower set used after modal verbs.
+_V = r"(?:refactor|replac|add|remov|delet|chang|us|switch|renam|rewrit|modif|updat|mov|introduc|implement|wrap|split|extract|migrat|convert|drop|patch|fix|adjust|increas|decreas|rais|lower|bump|clamp|guard|catch|handl|avoid|adopt|swap|redesign|restructur|reorganiz|merg|inlin|deprecat|disabl|enabl|set|mak|call|pass|return|check|validat|instead|insert|append|prepend|replac|cach|retry|limit|throttl|lock|initializ|configur|expos|hid|export|import|rais|throw|log|emit|reject|accept|skip|filter|sort|normaliz|escap|sanitiz|pin|upgrad|downgrad|install|uninstall|creat|build|defin|declar|overrid|extend|subclass|inject|mock|stub|bound|cap)"
+_VE = _V + r"\w*"
+_DV = r"(?:refactor|replac|add|remov|delet|chang|us|switch|renam|rewrit|modif|updat|mov|introduc|implement|wrap|split|extract|migrat|convert|drop|patch|fix|adjust|increas|decreas|bump|clamp|guard|catch|swap|redesign|restructur|adopt|consider|avoid|insert|reorder|batch|cach|retry|lock|pin|upgrad|downgrad|throttl|debounc|memoiz|parametriz|inject|overrid|skip|check|validat|return|set|ignor|filter|handl|reject|defer|reset|clos|releas|escap|sanitiz|acquir|normalis|normaliz|keep|mak|call|gate|default|shorten|lengthen|rais|lower|increas|decreas)"
+_DVE = _DV + r"\w*"
+_PATTERN_SOURCES: tuple[tuple[str, str], ...] = (
+    (
+        "modal_design",
+        r"\b(?:we|you|i|one|they|developers?|the developer|the team|maintainers?|callers?|the caller|users?)\s+(?:should|could|ought to|must|need to|have to|might want to|may want to|had better|would do well to|can)\s+(?:also\s+|probably\s+|instead\s+|just\s+|really\s+|first\s+|simply\s+|now\s+|then\s+|definitely\s+)?"
+        + _DVE
+        + r"\b|\b(?:it\'?s|it is|it would be|would be)\s+better\s+to\s+"
+        + _DVE
+        + r"\b",
+    ),
+    (
+        "solution_is",
+        r"\b(?:the|a|one|our|my|best|better|simplest|cleanest|right|correct|proper|real|easiest|recommended|proposed|suggested|only|safest|obvious|quickest|ideal)\s+(?:\w+\s+){0,2}?(?:solution|plan|approach|remedy|fix|answer|idea|proposal|recommendation|suggestion|workaround|way forward|way out|option|design|resolution|patch|change|move|step|course of action|thing to do|bet|way to go|advice|practice|remediation|strategy|direction|route|path forward)\s+(?:here\s+|then\s+)?(?:is|would be|will be|is simply|would simply be|might be|could be)\s+(?:to\b|that\b|:|a\s+one|(?:upgrading|replacing|adding|switching|moving|using|removing|splitting|wrapping|dropping|migrating|rewriting|refactoring|introducing|caching|disabling|enabling|pinning)\b)",
+    ),
+    (
+        "label_prefix",
+        r"(?:^|\n|[.!?;。！？；]\s*|\n\s*[-*>#\d.)]+\s*)(?:the\s+|my\s+|our\s+|a\s+)?(?:fix|patch|proposed (?:change|fix|patch|solution|approach|design|plan)|recommended (?:change|fix|patch|solution|approach|action)|recommendations?|solution|better|alternative|suggestions?|suggested (?:change|fix|patch|approach|design)|proposal|remedy|workaround|next steps?|todo|action items?|quick win|improvement|(?:implementation|patch|migration|remediation|fix|action) plan)\s*(?:[:：]|\s[—–]\s)",
+    ),
+    (
+        "fixed_by",
+        r"\b(?:can|could|may|might|should|would|will)\s+(?:easily\s+|simply\s+)?be\s+(?:fixed|resolved|solved|addressed|avoided|mitigated|corrected|repaired|remedied|prevented|handled)\s+by\b",
+    ),
+    (
+        "to_resolve",
+        r"\bto\s+(?:fix|resolve|solve|address|work around|mitigate|correct|remedy|repair|avoid|prevent)\s+(?:this|it|that|these|the\s+(?:\w+\s+)?(?:issue|bug|problem|error|failure|regression|crash|race|leak|deadlock|timeout))\b\s*,\s*\w+",
+    ),
+    (
+        "we_recommend",
+        r"\b(?:we|i|i'?d|i would|we'?d|we would|i'?m|we are|we're|i strongly|we strongly|i would strongly|we would strongly)\s+(?:strongly\s+|would\s+)?(?:recommend|suggest|propose|advise|advocate)\w*\b",
+    ),
+    (
+        "recommend_gerund",
+        r"\b(?:recommend|suggest|propose|advise)(?:s|ing)?\s+(?:that\s+(?:we|you|the)\b|"
+        + _V
+        + r"\w*ing\b|to\s+"
+        + _VE
+        + r"\b)",
+    ),
+    (
+        "it_is_recommended",
+        r"\b(?:it\s+is|it'?s|it\s+would\s+be)\s+(?:strongly\s+|highly\s+)?(?:recommended|advisable|advised|suggested|preferable|better|best|wise)\s+(?:to|that)\b",
+    ),
+    ("consider_gerund", r"\bconsider\s+" + _V + r"\w*ing\b"),
+    (
+        "better_design",
+        r"\b(?:a\s+)?(?:better|cleaner|simpler|safer|more robust)\s+(?:design|approach|solution|option|fix|implementation|way)\s+(?:would|is|might|could)\b",
+    ),
+    (
+        "gerund_would_fix",
+        r"\b(?:replacing|adding|switching|moving|changing|using|wrapping|removing|bumping|caching|introducing|splitting|raising|lowering|pinning|upgrading|catching|guarding|clamping|validating|checking|skipping|making|setting)\b[^.\n]{1,80}\b(?:would|should|will|could|might)\s+(?:fix|solve|resolve|address|eliminate|prevent|avoid|remove|cure)\b",
+    ),
+    (
+        "needs_to",
+        r"\b(?:needs?|has|have)\s+to\s+(?:be\s+)?(?:refactor|replac|rewrit|modif|updat|chang|patch|fix|renam|migrat|redesign)\w*\b",
+    ),
+    (
+        "change_from_to",
+        r"\b(?:change|switch|convert|bump|raise|lower)\s+[^\n]{1,60}?\s+from\s+[^\n]{1,60}?\s+to\s+\S",
+    ),
+    (
+        "imperative_start",
+        r"(?:^|\n|[.!?;。！？]\s+)\s*(?:[-*]\s+)?(?:implement|introduce|redesign)\s+(?:a|an)\s+",
+    ),
+    ("diff_hunk", r"(?:^|\n)@@ -\d+(?:,\d+)? \+\d+|(?:^|\n)--- a/\S+\s*\n\+\+\+ b/"),
+    (
+        "diff_lines",
+        r"(?:^|\n)-(?!-)[^\n]*\n(?:[- ][^\n]*\n)*\+(?!\+)\S?|(?:^|\n)\+(?!\+)[^\n]*\n(?:[+ ][^\n]*\n)*-(?!-)",
+    ),
+    (
+        "design_plan",
+        r"\b(?:recommend|suggest|propose|draft|write|prepare|here is|here's|following)\w*\s+(?:a|an|the|this|our|my)\s+(?:\w+\s+)?(?:patch|implementation|migration|remediation|fix|refactor(?:ing)?)\s+plan\b",
+    ),
+    (
+        "passive_should",
+        r"\b(?:should|ought to|must|needs? to|would ideally|would better)\s+(?:really\s+|probably\s+|ideally\s+)?be\s+(?:split|rewritten|refactored|replaced|moved|changed|removed|renamed|extracted|migrated|converted|dropped|deprecated|deleted|redesigned|restructured|wrapped|cached|memoized|reworked|simplified|merged|inlined|swapped|consolidated|decoupled|parameterized|batched)\b",
+    ),
+    (
+        "ought_better",
+        r"\bought to\s+\w+|\b(?:be|is|are)\s+better off\s+\w+ing\b|\bit makes (?:more |the most )?sense to\s+"
+        + _DVE
+        + r"\b|\bbest practice (?:here )?(?:is|would be) to\b",
+    ),
+    (
+        "first_person_would",
+        r"\b(?:i|we)\s+would\s+(?:\w+\s+)?"
+        + _DVE
+        + r"\b|\bif i were you\b|\bin my (?:opinion|view)\b[^.\n]{0,80}\b(?:should|would|could)\b|\blet'?s\s+"
+        + _DVE
+        + r"\b",
+    ),
+    (
+        "use_instead",
+        r"\buse\s+[^\s.,]{1,40}\s+instead of\b|\binstead of\s+[^.\n]{1,60},\s*(?:use|call|switch to|try)\b",
+    ),
+    (
+        "np_modal",
+        r"\b(?:the|this|that|your|our)\s+(?:\w+\s+){0,2}(?:should|ought to|needs to|has to)\s+(?:\w+ly\s+)?"
+        + _DVE
+        + r"\b|\byou(?:'ll| will|'d| would)?\s+(?:want|need) to\s+"
+        + _DVE
+        + r"\b",
+    ),
+    (
+        "fix_by_requires",
+        r"\b(?:fix|resolv|address)\w*\s+(?:this|it|that)\s+(?:is\s+)?(?:by|requires|would require)\b|\bone way to (?:fix|solve|resolve|address|avoid)\b|\bworth\s+"
+        + _V
+        + r"\w*ing\b|\bit would make sense to\b|\b(?:i'?d|we'?d|i would|we would)\s+go with\b",
+    ),
+    (
+        "imperative_purpose",
+        r"(?:^|\n|[.!?]\s+)\s*(?:[-*]\s+)?(?:add|make|use|rewrite|move|change|replace|wrap|acquire|convert|normalise|normalize|cache|pin|bump|drop|keep|switch|guard)\b[^.\n]{1,100}?\b(?:to (?:avoid|prevent|fix|eliminate|stop)|so (?:that|the|it) (?:is|are|always|never|no longer))\b",
+    ),
+    # Chinese
+    (
+        "zh_suggest",
+        r"建議(?:您|你|我們)?(?:將|把|改|重構|更換|調整|刪除|修改|新增|加入|加上|使用|採用|移除|替換|實作|拆分|增加|直接|換|補上|導入|引入|升級|降級|關閉|開啟|設定|設為|重寫)",
+    ),
+    (
+        "zh_solution",
+        r"(?:解法|解決方案|解決方法|解決辦法|修正方式|修正方法|修復方式|修復方法|修法|改法|改善方式|改進方式|修補方式|對策|(?:比較好|更好|較好|正確|建議|理想|合理)的(?:做法|作法|方式|方法|處理方式))(?:是|為|就是|：|:|如下)",
+    ),
+    (
+        "zh_should",
+        r"(?:應該|應當|最好|宜|可以考慮|可考慮|不妨|考慮)(?:要|先|直接|再)?(?:把|將|改|重構|修改|換|移除|刪除|新增|加上|加入|調整|使用|採用|改用|替換|拆分|重寫|補上|移到|移至|搬到)|需要(?:修改|重構|調整|替換|改寫|改成|改為|改用)|可以(?:把|將)",
+    ),
+    (
+        "zh_via",
+        r"(?:可以|能夠|能)(?:透過|藉由|經由)[^。\n]{1,30}(?:來)?(?:解決|修正|修復|避免|改善|處理)",
+    ),
+    (
+        "zh_label",
+        r"(?:^|\n|[。！？；]\s*)(?:方案|下一步|建議|修正|修改|改法|解法|做法|處理)\s*[：:]",
+    ),
+    ("zh_we", r"我們(?:應該|應當|建議|最好|可以考慮|不妨)"),
+    (
+        "zh_would",
+        r"(?:可以|可|能)(?:改寫|改成|改為|改用|換成|重構|拆成|拆分成|調成|調整成)|(?:我|我們)(?:會|會比較)?建議|應(?:改|換|移|拆|重構|刪除|移除)|需要(?:把|將)|(?:就能|即可|就可以)(?:解決|修正|修復|避免)",
+    ),
+    (
+        "zh_label2",
+        r"(?:建議做法|修改建議|改進方向|改善建議|優化建議|處理方式|解決辦法|改善方向|最佳做法|最佳作法|推薦做法)(?:是|為|：|:)",
+    ),
+    (
+        "zh_method",
+        r"(?:解決|修正|修復|修改|處理|改善|修)的?(?:方法|方式|辦法|做法|作法|建議)(?:是|為|如下|：|:)|(?:修正|修改|下一步|改善|優化)建議\s*[：:]|應該要|需要(?:重寫|重新設計|拆分|改|新增|移除|刪除)|(?:改成|改為|換成|改用)[^。\n]{1,30}(?:就|即可|才)(?:不會|能|可以)|可以解決[^。\n]{0,12}問題",
+    ),
 )
 
-# Echoes shorter than this are not stripped, so a short task text (for example a bare
-# "we recommend") cannot erase the design phrases it contains from the findings.
-_MIN_ECHO_CHARS = 24
-_WS = re.compile(r"\s+")
+
+CANONICAL_DESIGN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
+    (label, re.compile(source, re.IGNORECASE | re.MULTILINE)) for label, source in _PATTERN_SOURCES
+)
+
+_MAX_NODES = 200_000
+_MAX_DEPTH = 64
+_SCALARS = (int, float, bool, decimal.Decimal, _dt.date, _dt.time, _dt.timedelta, uuid.UUID)
+
+
+class UninspectableResearchOutput(TypeError):
+    """Research output holds an object the check cannot read; fail closed."""
 
 
 @dataclass(frozen=True)
@@ -82,38 +218,76 @@ class ContaminationVerdict:
         }
 
 
-def _normalise(text: str) -> str:
-    return _WS.sub(" ", text).strip()
+class _Walker:
+    def __init__(self) -> None:
+        from nexus.research.research_facts import DESIGN_FIELD_NAMES
 
+        self.design_fields = DESIGN_FIELD_NAMES
+        self.texts: list[str] = []
+        self.fields: set[str] = set()
+        self.nodes = 0
+        self.active: set[int] = set()
 
-def _strip_echoes(text: str, echoes: tuple[str, ...]) -> str:
-    for echo in echoes:
-        text = re.sub(re.escape(echo), " ", text, flags=re.IGNORECASE)
-    return text
+    def name(self, key: Any, depth: int) -> None:
+        if isinstance(key, str) and key in self.design_fields:
+            self.fields.add(key)
+        self.walk(key, depth)
 
+    def walk(self, value: Any, depth: int = 0) -> None:
+        self.nodes += 1
+        if self.nodes > _MAX_NODES or depth > _MAX_DEPTH:
+            raise UninspectableResearchOutput("research output too large or too deep to scan")
+        if value is None or isinstance(value, _SCALARS):
+            return
+        if isinstance(value, str):
+            self.texts.append(value)
+            return
+        if isinstance(value, (bytes, bytearray, memoryview)):
+            self.texts.append(bytes(value).decode("utf-8", errors="replace"))
+            return
+        if isinstance(value, enum.Enum):
+            self.walk(value.value, depth + 1)
+            return
+        if isinstance(value, os.PathLike):
+            self.walk(os.fspath(value), depth + 1)
+            return
+        marker = id(value)
+        if marker in self.active:
+            return  # cycle: this container is already being scanned
+        self.active.add(marker)
+        try:
+            self._walk_container(value, depth)
+        finally:
+            self.active.discard(marker)
 
-def _collect(
-    value: Any, echoes: tuple[str, ...], texts: list[str], fields: set[str], depth: int = 0
-) -> None:
-    from nexus.research.research_facts import DESIGN_FIELD_NAMES
-
-    if depth > 32:
-        raise ValueError("research output nested too deeply to scan")
-    if isinstance(value, str):
-        text = _normalise(_strip_echoes(_normalise(value), echoes))
-        if text:
-            texts.append(text)
-    elif isinstance(value, Mapping):
-        for key, item in value.items():
-            name = str(key)
-            if name in DESIGN_FIELD_NAMES:
-                fields.add(name)
-            _collect(item, echoes, texts, fields, depth + 1)
-    elif isinstance(value, (list, tuple, set, frozenset)):
-        for item in value:
-            _collect(item, echoes, texts, fields, depth + 1)
-    elif value is not None and not isinstance(value, (bool, int, float)):
-        _collect(str(value), echoes, texts, fields, depth + 1)
+    def _walk_container(self, value: Any, depth: int) -> None:
+        if isinstance(value, Mapping):
+            for key, item in value.items():
+                self.name(key, depth + 1)
+                self.walk(item, depth + 1)
+        elif isinstance(value, (list, tuple, set, frozenset)):
+            for item in value:
+                self.walk(item, depth + 1)
+        elif dataclasses.is_dataclass(value) and not isinstance(value, type):
+            for field in dataclasses.fields(value):
+                self.name(field.name, depth + 1)
+                self.walk(getattr(value, field.name, None), depth + 1)
+        elif callable(getattr(value, "model_dump", None)) and not isinstance(value, type):
+            dumped = value.model_dump()
+            if not isinstance(dumped, Mapping):
+                raise UninspectableResearchOutput(
+                    f"model_dump of {type(value).__name__} is not a mapping"
+                )
+            self.walk(dumped, depth + 1)
+        elif hasattr(value, "__dict__") and not isinstance(value, type) and not callable(value):
+            attrs = vars(value)
+            for key, item in attrs.items():
+                self.name(key, depth + 1)
+                self.walk(item, depth + 1)
+        else:
+            raise UninspectableResearchOutput(
+                f"cannot inspect research output of type {type(value).__name__}"
+            )
 
 
 def check_research_output(
@@ -123,25 +297,15 @@ def check_research_output(
     try:
         from nexus.research import contamination_guard
 
-        echoes = tuple(
-            sorted(
-                {
-                    _normalise(str(e))
-                    for e in echo_texts
-                    if len(_normalise(str(e or ""))) >= _MIN_ECHO_CHARS
-                },
-                key=len,
-                reverse=True,
-            )
-        )
-        texts: list[str] = []
-        fields: set[str] = set()
-        _collect(research_output, echoes, texts, fields)
-        payload: dict[str, Any] = {"research_text": texts}
-        for name in sorted(fields):
+        walker = _Walker()
+        walker.walk(research_output)
+        payload: dict[str, Any] = {"research_text": walker.texts}
+        for name in sorted(walker.fields):
             payload[name] = True
         guard = contamination_guard.evaluate_research_contamination(
-            payload, terms=CANONICAL_DESIGN_TERMS
+            payload,
+            patterns=CANONICAL_DESIGN_PATTERNS,
+            echo_texts=tuple(str(text) for text in echo_texts if text),
         )
         if guard.passed is True:
             return ContaminationVerdict(passed=True)
@@ -150,7 +314,7 @@ def check_research_output(
             reason=REASON_DETECTED,
             detected_terms=tuple(str(term) for term in guard.detected_terms),
         )
-    except Exception:  # fail closed: a broken check never lets research through
+    except Exception:  # fail closed: a broken or blind check never lets research through
         return ContaminationVerdict(passed=False, reason=REASON_GUARD_ERROR)
 
 
@@ -167,7 +331,47 @@ FLOW_CONTEXT_PLANNER_KEYS = frozenset({
     "next_action_hint",
     "confidence",
     "constraint_lookup_receipt",
+    "route_cost_policy",
+    "research_contamination",
 })
+
+
+def _empty_like(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return []
+    if isinstance(value, str):
+        return ""
+    return None
+
+
+def _research_part(research_context: Any) -> Any:
+    if isinstance(research_context, Mapping):
+        return {
+            str(key): value
+            for key, value in research_context.items()
+            if str(key) not in FLOW_CONTEXT_PLANNER_KEYS
+        }
+    return research_context
+
+
+def quarantine_research_context(research_context: Any, *, task_desc: str) -> dict[str, Any]:
+    """Check a research context before the auto-flow plans or generates code from it.
+
+    A contaminated (or uninspectable) context keeps only its planner-owned keys; every
+    research-sourced key is emptied, and the verdict is recorded under
+    ``research_contamination`` so the research gate later reports BLOCK.
+    """
+    context = dict(research_context) if isinstance(research_context, Mapping) else {}
+    verdict = check_research_output(_research_part(research_context), echo_texts=(task_desc,))
+    if not verdict.passed:
+        context = {
+            key: (value if str(key) in FLOW_CONTEXT_PLANNER_KEYS else _empty_like(value))
+            for key, value in context.items()
+        }
+    context["research_contamination"] = verdict.to_dict()
+    return context
 
 
 def enforce_on_flow_evidence(
@@ -178,15 +382,20 @@ def enforce_on_flow_evidence(
         "research_gate_passed"
     ):
         return capability_evidence
-    if isinstance(research_context, Mapping):
-        research_output: Any = {
-            str(key): value
-            for key, value in research_context.items()
-            if str(key) not in FLOW_CONTEXT_PLANNER_KEYS
-        }
+    recorded = (
+        research_context.get("research_contamination")
+        if isinstance(research_context, Mapping)
+        else None
+    )
+    if isinstance(recorded, Mapping) and recorded.get("passed") is not True:
+        verdict = ContaminationVerdict(
+            passed=False,
+            reason=str(recorded.get("reason") or REASON_GUARD_ERROR),
+            detected_terms=tuple(str(term) for term in recorded.get("detected_terms") or ()),
+        )
     else:
-        research_output = research_context
-    verdict = check_research_output(research_output, echo_texts=(task_desc,))
+        # Also re-checks a context that changed after build_route quarantined it.
+        verdict = check_research_output(_research_part(research_context), echo_texts=(task_desc,))
     updated = dict(capability_evidence)
     updated["research_contamination"] = verdict.to_dict()
     if not verdict.passed:

@@ -377,6 +377,10 @@ def build_route(
             route_features=route_features,
             historical_hints=list(dict.fromkeys(historical_hints))[:3],
         )
+    # P-CONTAM-01 (#2199): check research output before planning or code generation uses it.
+    from nexus.research.contamination_enforcement import quarantine_research_context
+
+    research_context = quarantine_research_context(research_context, task_desc=task_desc)
     route_features = {
         **route_features,
         "research_role": str(research_context.get("role", "general") or "general"),
