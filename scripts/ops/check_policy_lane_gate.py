@@ -11,6 +11,7 @@ Usage:
 import argparse
 import ast
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -146,16 +147,56 @@ def _imported_modules(path: Path, repo_root: Path) -> set[str]:
 
 _DEFS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 _FUNCS = (ast.FunctionDef, ast.AsyncFunctionDef)
+_DRILLED = re.compile(r"^drilled-\d{4}-\d{2}-\d{2}$")
 
 
-def _is_fixture(node: ast.AST) -> bool:
-    """``@pytest.fixture`` / ``@fixture`` / ``@pytest.fixture(...)`` — not a test."""
-    for dec in getattr(node, "decorator_list", []):
-        target = dec.func if isinstance(dec, ast.Call) else dec
-        name = target.attr if isinstance(target, ast.Attribute) else getattr(target, "id", "")
-        if name == "fixture":
-            return True
-    return False
+def _terminal_name(node: ast.AST) -> str:
+    """``pytest.fixture`` -> ``fixture``; ``fixture`` -> ``fixture``; ``fixture(...)`` likewise."""
+    target = node.func if isinstance(node, ast.Call) else node
+    if isinstance(target, ast.Attribute):
+        return target.attr
+    return getattr(target, "id", "")
+
+
+def _fixture_aliases(tree: ast.Module) -> set[str]:
+    """Names bound to pytest's fixture decorator in this module.
+
+    Covers ``from pytest import fixture as fx``, ``from _pytest.fixtures import
+    fixture``, and ``fx = pytest.fixture`` / ``fx = fixture``. Dynamic aliases
+    (``getattr``) are outside a static check.
+    """
+    names = {"fixture"}
+    changed = True
+    while changed:
+        changed = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module in ("pytest", "_pytest.fixtures"):
+                for alias in node.names:
+                    if alias.name == "fixture" and (alias.asname or alias.name) not in names:
+                        names.add(alias.asname or alias.name)
+                        changed = True
+            elif isinstance(node, ast.Assign) and _terminal_name(node.value) in names:
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id not in names:
+                        names.add(target.id)
+                        changed = True
+    return names
+
+
+def _is_fixture(node: ast.AST, aliases: set[str]) -> bool:
+    """``@pytest.fixture`` / ``@fixture`` / ``@fx`` (alias) / ``...(...)`` — not a test."""
+    return any(_terminal_name(dec) in aliases for dec in getattr(node, "decorator_list", []))
+
+
+def _accepts_params(node: ast.AST) -> bool:
+    """A ``[param]`` selector needs a parametrized test: a ``parametrize`` mark or arguments."""
+    if any(_terminal_name(dec) == "parametrize" for dec in getattr(node, "decorator_list", [])):
+        return True
+    args = getattr(node, "args", None)
+    if args is None:
+        return False
+    positional = [a for a in args.args + args.posonlyargs if a.arg not in ("self", "cls")]
+    return bool(positional or args.kwonlyargs)
 
 
 def _entrypoint_exists(path: Path, selector: str) -> bool:
@@ -165,14 +206,17 @@ def _entrypoint_exists(path: Path, selector: str) -> bool:
     component a def/class directly inside the previous one, and the last one a
     plain function that is not a fixture. A ``[param]`` part may only end the
     selector. ``file::a::b`` with two unrelated top-level functions, a fixture,
-    or ``file::test_x[p]::y`` are not nodes. Tests defined under ``if``/``try``
-    or inherited from a base class are not recognised (fail closed).
+    or ``file::test_x[p]::y`` are not nodes; ``[p]`` needs a parametrize mark or
+    test arguments. Tests defined under ``if``/``try``, inherited from a base
+    class, or a whole class ``file::TestA`` are not recognised (fail closed).
     """
     if not selector.strip():
         return True  # whole file
     head, bracket, tail = selector.partition("[")
-    if bracket and (not tail.endswith("]") or "::" in tail.rsplit("]", 1)[1]):
-        return False
+    if bracket:
+        # ``[id]`` must be the whole remainder, non-empty, with no second ``]``.
+        if not tail.endswith("]") or len(tail) < 2 or "]" in tail[:-1]:
+            return False
     tree = _parse(path)
     if tree is None:
         return False
@@ -188,7 +232,9 @@ def _entrypoint_exists(path: Path, selector: str) -> bool:
         if match is None:
             return False
         body = list(match.body)
-    return match is not None and not _is_fixture(match)
+    if match is None or _is_fixture(match, _fixture_aliases(tree)):
+        return False
+    return not bracket or _accepts_params(match)
 
 
 def check_enforcement_wiring(policy: dict, repo_root: Path | None = None) -> list[str]:
@@ -288,7 +334,9 @@ def check_hard_lane(policy: dict, action: str) -> dict:
     errors = []
 
     if action in ("modify", "promote", "cutover"):
-        if policy.get("rollback_drill_status", "no-drill") == "no-drill":
+        # Only an explicit ``drilled-YYYY-MM-DD`` counts; "no-drill", "", null or any
+        # other spelling is missing (#2263 review).
+        if not _DRILLED.match(str(policy.get("rollback_drill_status") or "")):
             errors.append("ROLLBACK_DRILL_MISSING")
         if not policy.get("test_entrypoints"):
             errors.append("TEST_COVERAGE_MISSING")

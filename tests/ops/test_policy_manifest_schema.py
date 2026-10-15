@@ -195,7 +195,10 @@ def _fake_repo(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     (root / "tests" / "test_caller.py").write_text(
-        "from pkg import caller\n\ndef test_run():\n    assert caller.run(1)\n", encoding="utf-8"
+        "import pytest\nfrom pkg import caller\n\n"
+        "@pytest.mark.parametrize('x', [1, 2])\ndef test_run(x):\n    assert caller.run(x)\n"
+        "\ndef test_plain():\n    assert caller.run(1)\n",
+        encoding="utf-8",
     )
     (root / "tests" / "test_via_shim.py").write_text(
         "import pkg.shim\n\ndef test_shim():\n    assert pkg.shim.run(1)\n", encoding="utf-8"
@@ -271,6 +274,13 @@ def test_wiring_check_edge_cases(tmp_path: Path) -> None:
     assert check_enforcement_wiring(parametrized, root) == []
     colon_param = _fake_policy(test_entrypoints=["tests/test_caller.py::test_run[a::b]"])
     assert check_enforcement_wiring(colon_param, root) == []
+    # A [param] selector on a test that is not parametrized, or a malformed one, is not a node.
+    for selector in ("test_plain[1]", "test_run[]", "test_run[a]junk]", "test_run[a]::zz]"):
+        bad = _fake_policy(test_entrypoints=[f"tests/test_caller.py::{selector}"])
+        assert check_enforcement_wiring(bad, root) == [
+            f"TEST_ENTRYPOINT_NOT_FOUND: tests/test_caller.py::{selector}",
+            "TEST_ENTRYPOINT_NOT_BEHAVIOURAL",
+        ], selector
     # Two unrelated top-level functions do not form a pytest node.
     (root / "tests" / "test_two.py").write_text(
         "from pkg import caller\n\ndef test_a():\n    assert caller\n\ndef test_b():\n    pass\n"
@@ -307,12 +317,23 @@ def test_wiring_check_edge_cases(tmp_path: Path) -> None:
     assert check_enforcement_wiring(package_alias, root) == ["ENFORCEMENT_CALLER_NOT_FOUND: pkg.py"]
     # Fixtures and classes are not tests; a [param] part can only end the selector.
     (root / "tests" / "test_fx.py").write_text(
-        "import pytest\nfrom pkg import caller\n\n@pytest.fixture\ndef test_fx():\n    return caller\n"
-        "\n@pytest.fixture()\ndef test_fx2():\n    return 1\n\nclass TestK:\n    pass\n"
-        "\ndef test_ok():\n    assert caller\n",
+        "import pytest\nfrom pytest import fixture as fx\nfrom pkg import caller\n"
+        "alias = pytest.fixture\n\n@pytest.fixture\ndef test_fx():\n    return caller\n"
+        "\n@pytest.fixture()\ndef test_fx2():\n    return 1\n\n@fx\ndef test_fx3():\n    return 1\n"
+        "\n@alias()\ndef test_fx4():\n    return 1\n\nclass TestK:\n    pass\n"
+        "\ndef test_ok(x):\n    assert caller\n",
         encoding="utf-8",
     )
-    for selector in ("test_fx", "test_fx2", "TestK", "test_ok[a]::zzz", "test_ok[a", "::test_ok"):
+    for selector in (
+        "test_fx",
+        "test_fx2",
+        "test_fx3",
+        "test_fx4",
+        "TestK",
+        "test_ok[a]::zzz",
+        "test_ok[a",
+        "::test_ok",
+    ):
         bad = _fake_policy(test_entrypoints=[f"tests/test_fx.py::{selector}"])
         assert check_enforcement_wiring(bad, root) == [
             f"TEST_ENTRYPOINT_NOT_FOUND: tests/test_fx.py::{selector}",
@@ -496,7 +517,7 @@ def test_real_manifest_hard_lane_policies_are_behaviourally_tested(action: str) 
         # Not drilled, not wired, or blocked on modify: a real hard-lane policy must not be
         # any of these, so a manifest-only relabel (with or without a drill-status edit)
         # turns this red in the required gate and in the policy-lane workflow.
-        assert policy["rollback_drill_status"] != "no-drill", policy["policy_id"]
+        assert gate._DRILLED.match(str(policy["rollback_drill_status"])), policy["policy_id"]
         assert policy["enforcement_mode"] in ("block", "record_only"), policy["policy_id"]
         if action == "modify":
             assert result["allowed"] is True, (policy["policy_id"], result["errors"])
@@ -514,3 +535,21 @@ def test_drill_updater_keeps_schema_fields_and_distribution() -> None:
         updated["summary"]["enforcement_mode_distribution"]
         == manifest["summary"]["enforcement_mode_distribution"]
     )
+
+
+@pytest.mark.parametrize(
+    "status", ["no-drill", "", None, "not-drilled", "drilled", "drilled-2026-1-5"]
+)
+def test_only_an_explicit_drill_date_counts_as_drilled(monkeypatch, status) -> None:
+    original = load_manifest()
+    tampered = {
+        **original,
+        "policies": [
+            {**p, "rollback_drill_status": status} if p["policy_id"] == "P-GATE-03" else p
+            for p in original["policies"]
+        ],
+    }
+    monkeypatch.setattr(gate, "load_manifest", lambda: tampered)
+    result = check_lane_gate("P-GATE-03", "modify")
+    assert result["allowed"] is False
+    assert "ROLLBACK_DRILL_MISSING" in result["errors"]
