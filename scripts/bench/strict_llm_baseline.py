@@ -254,7 +254,9 @@ def is_not_executable(receipt: dict[str, Any]) -> bool:
 def classify_receipt(receipt: dict[str, Any]) -> str:
     """Return ``real``, ``simulated``, ``selected_not_invoked`` or ``not_executable``.
 
-    ``real``: invoked, ``claim_boundary.simulated`` is not true, and ``evidence_refs`` is non-empty.
+    ``real``: invoked, ``attestation == "real"`` (written by the unified-capability overlay),
+    ``claim_boundary.simulated`` is not true, and ``evidence_refs`` is non-empty; the same
+    without that attestation is ``real_self_reported``.
     A receipt that carries no claim_boundary at all (runner-synthesized telemetry backfill or
     deterministic receipt-lite entries) attests nothing: with evidence refs it is
     ``real_self_reported`` (never ``real``; also listed under ``capabilities_real_unattested`` so
@@ -279,13 +281,19 @@ def classify_receipt(receipt: dict[str, Any]) -> str:
     if str(receipt.get("attestation") or "") == REAL_SELF_REPORTED_CLASS:
         has_refs = bool([ref for ref in (receipt.get("evidence_refs") or []) if str(ref).strip()])
         return REAL_SELF_REPORTED_CLASS if has_refs else "simulated"
+    if str(receipt.get("attestation") or "") == "simulated":
+        return "simulated"
     boundary = _claim_boundary(receipt)
     has_refs = bool([ref for ref in (receipt.get("evidence_refs") or []) if str(ref).strip()])
     if boundary is None:
         # No boundary at all attests nothing: never real, never in the real tally or uplift.
         return REAL_SELF_REPORTED_CLASS if has_refs else "simulated"
     simulated = boundary.get("simulated", True) is not False
-    return "real" if (not simulated and has_refs) else "simulated"
+    if simulated or not has_refs:
+        return "simulated"
+    # Real only when the unified-capability overlay attested it; a non-simulated boundary
+    # without that attestation is the receipt's own claim (Gemini review of #2212, G2).
+    return "real" if str(receipt.get("attestation") or "") == "real" else REAL_SELF_REPORTED_CLASS
 
 
 def classify_row_capabilities(row: dict[str, Any]) -> dict[str, Any]:
@@ -312,8 +320,8 @@ def classify_row_capabilities(row: dict[str, Any]) -> dict[str, Any]:
             not_executable.append(name)
         elif kind == REAL_SELF_REPORTED_CLASS:
             self_reported.append(name)
-            if _claim_boundary(receipt) is None:
-                unattested.append(name)  # visibility only; never counted real
+            if str(receipt.get("attestation") or "") != "real_self_reported":
+                unattested.append(name)  # no runtime attestation; visibility only
         elif kind == BLOCKED_MISSING_INPUTS_CLASS:
             blocked[name] = str(receipt.get("blocked_reason") or "unspecified")
         elif kind == FAILED_OR_REFUSED_CLASS:

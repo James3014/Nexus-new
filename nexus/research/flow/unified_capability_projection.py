@@ -29,6 +29,7 @@ Reporting truth (wiring plan PR-1):
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Iterable, Mapping
 from typing import Any
 
@@ -51,20 +52,52 @@ NOT_EXECUTABLE_ROUTING_NODES: dict[str, str] = {"research_route": NOT_EXECUTABLE
 _MAX_OUTCOME_DEPTH = 12
 
 
+_ZERO_WIDTH = dict.fromkeys(map(ord, "\u200b\u200c\u200d\u2060\ufeff"))
+_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+
+
+def canonical_capability_name(name: Any) -> str:
+    """Capability name normalised like ``capability_planning`` (NFKC, zero-width removed,
+    CamelCase -> snake, ``-``/space -> ``_``, lower case) before any lookup."""
+
+    text = unicodedata.normalize("NFKC", str(name or "")).translate(_ZERO_WIDTH).strip()
+    text = _CAMEL_BOUNDARY.sub("_", text)
+    return re.sub(r"[\s\-]+", "_", text.lower()).strip("_")
+
+
+def simulated_by_design(name: Any) -> bool:
+    return canonical_capability_name(name) in SIMULATED_BY_DESIGN_EXECUTORS
+
+
 def not_executable_reason(name: str) -> str:
     """``NOT_EXECUTABLE:<class>`` for a planner node with no executable body, else ""."""
 
-    key = str(name or "")
+    key = canonical_capability_name(name)
     return NOT_EXECUTABLE_CAPABILITY_REASONS.get(key) or NOT_EXECUTABLE_ROUTING_NODES.get(key, "")
 
 
 _SIMULATION_KEYS = frozenset({"simulated", "stub", "mock"})
+# Key tokens (split on ``_``) that declare a simulation when the value is truthy:
+# ``simulation``, ``is_simulated``, ``mock_mode``, ``stubbed`` ...
+_SIMULATION_KEY_TOKENS = frozenset({
+    "simulated",
+    "simulation",
+    "simulate",
+    "stub",
+    "stubbed",
+    "mock",
+    "mocked",
+})
 # SIMULATED / STUB / MOCK as a token: delimited by anything that is not a letter or digit, so
 # ``STUB_INVOKED`` and ``SIMULATED_BY_DESIGN`` match but ``structural_stubber`` does not.
 _SIMULATION_TOKEN = re.compile(r"(?<![A-Za-z0-9])(?:simulated|stub|mock)(?![A-Za-z0-9])", re.I)
 # Only status-like keys are scanned for marker words (never arbitrary code text).
 _STATUS_LIKE_KEY = re.compile(r"(?:status|state|kind|mode|claim|provider|source|type|label)$", re.I)
-_CODE_TEXT = re.compile(r"\bimport\b|unittest\.mock|\bfrom\s+\S+\s+import\b")
+# Code fragments removed before scanning (``from unittest import mock``, ``import mock``);
+# the rest of the text is still scanned, so "simulated import failure" is a marker.
+_CODE_TEXT = re.compile(
+    r"unittest\.mock|\bfrom\s+\S+\s+import\s+[\w., ]+|\bimport\s+[\w.]+(?:\s+as\s+\w+)?"
+)
 _FALSY_STRINGS = frozenset({"", "0", "false", "no", "off", "none", "null"})
 # Outcome keys that only describe status, identity or the inputs; never physical output.
 _TRIVIAL_OUTCOME_KEYS = frozenset({
@@ -132,7 +165,14 @@ def _truthy_marker(value: Any) -> bool:
 
 
 def _marker_text(value: str) -> bool:
-    return not _CODE_TEXT.search(value) and bool(_SIMULATION_TOKEN.search(value))
+    return bool(_SIMULATION_TOKEN.search(_CODE_TEXT.sub(" ", value)))
+
+
+def _simulation_key(key_text: str) -> bool:
+    tokens = canonical_capability_name(key_text).split("_")
+    return key_text.strip().lower() in _SIMULATION_KEYS or any(
+        token in _SIMULATION_KEY_TOKENS for token in tokens
+    )
 
 
 def _declares_simulated(value: Any, depth: int = 0) -> bool:
@@ -150,7 +190,11 @@ def _declares_simulated(value: Any, depth: int = 0) -> bool:
     if isinstance(value, Mapping):
         for key, item in value.items():
             key_text = str(key).strip()
-            if key_text.lower() in _SIMULATION_KEYS and _truthy_marker(item):
+            if (
+                _simulation_key(key_text)
+                and not isinstance(item, (Mapping, list, tuple))
+                and _truthy_marker(item)
+            ):
                 return True
             if isinstance(item, str) and _STATUS_LIKE_KEY.search(key_text) and _marker_text(item):
                 return True
@@ -249,7 +293,9 @@ def _bundle_index(receipt: Mapping[str, Any], name: str) -> set[str]:
             continue
         if str(entry.get("status") or "") != REAL_INVOKED_STATUS:
             continue
-        if entry.get("invoked_real") is False or not entry.get("physical_callable"):
+        if ("invoked_real" in entry and entry.get("invoked_real") is not True) or not entry.get(
+            "physical_callable"
+        ):
             continue
         refs, well_formed = _ref_list(entry.get("evidence_ids"))
         if well_formed:
@@ -288,21 +334,24 @@ def _executor_outcome(value: Any, depth: int = 0) -> Mapping[str, Any] | None:
 
 
 def _outcome_layers(value: Any) -> list[Mapping[str, Any]]:
-    """The record and its nested ``response`` / ``outcome`` mappings, outermost first.
+    """The record and every nested ``response`` / ``outcome`` mapping, outermost first.
 
-    Follows the same path as ``_executor_outcome`` (``response`` before ``outcome``).
+    Breadth-first over both keys at every level (siblings included), bounded by
+    ``_MAX_OUTCOME_DEPTH``; a contradiction in any of them counts.
     """
 
     layers: list[Mapping[str, Any]] = []
-    current: Any = value
-    while isinstance(current, Mapping) and len(layers) <= _MAX_OUTCOME_DEPTH:
-        layers.append(current)
-        nxt = None
-        for key in ("response", "outcome"):
-            if _executor_outcome(current.get(key)) is not None:
-                nxt = current.get(key)
-                break
-        current = nxt
+    frontier: list[Any] = [value]
+    depth = 0
+    while frontier and depth <= _MAX_OUTCOME_DEPTH:
+        nxt: list[Any] = []
+        for item in frontier:
+            if not isinstance(item, Mapping):
+                continue
+            layers.append(item)
+            nxt.extend(item.get(key) for key in ("response", "outcome"))
+        frontier = nxt
+        depth += 1
     return layers
 
 
@@ -320,14 +369,16 @@ def _success_contradicted(record: Mapping[str, Any]) -> str:
     (``nexus_runtime.kernel.capabilities._capability_stage``); a record-level status other
     than ``SUCCEEDED``, any ``gate_passed`` false, any layer ``status`` that is not a success
     word, or a non-empty ``error`` / ``blockers`` / ``missing_evidence`` on any layer wins over
-    an inner ``semantic_status`` of success.
+    an inner ``semantic_status`` of success.  ``gate_passed`` counts only when exactly
+    ``True`` (``"false"``, ``0``, ``"no"``, ``None`` all contradict).  Every layer, siblings
+    included (``_outcome_layers``), is checked.
     """
 
     if "status" in record and _exact(record.get("status")) != "SUCCEEDED":
         return "RECORD_STATUS_NOT_SUCCEEDED"
     for layer in _outcome_layers(record):
-        if "gate_passed" in layer and layer.get("gate_passed") is False:
-            return "GATE_PASSED_FALSE"
+        if "gate_passed" in layer and layer.get("gate_passed") is not True:
+            return "GATE_PASSED_NOT_TRUE"
         if "status" in layer and _exact(layer.get("status")) not in _LAYER_SUCCESS_STATUSES:
             return "LAYER_STATUS_NOT_SUCCESS"
         if str(layer.get("error") or "").strip():
@@ -377,12 +428,22 @@ def outcome_disposition(record: Any) -> dict[str, Any]:
         (layer for layer in _outcome_layers(record) if "semantic_status" in layer), outcome
     )
     status = _code(outer.get("semantic_status"))
-    error = _code(outcome.get("error"))
+    layers = _outcome_layers(record)
+    # The innermost outcome's error / verdict lists first, then any other layer's (siblings).
+    error = _code(outcome.get("error")) or next(
+        (_code(layer.get("error")) for layer in layers if str(layer.get("error") or "").strip()),
+        "",
+    )
+    verdict_lists = {
+        field: _str_items(outcome.get(field))
+        or next((_str_items(x.get(field)) for x in layers if _str_items(x.get(field))), [])
+        for field in _VERDICT_LISTS
+    }
     if _exact(outer.get("semantic_status")) in _SUCCESS_STATUSES:
         contradiction = _success_contradicted(record)
         if not contradiction:
             return {"kind": "succeeded", "reason": status}
-        if not error and not any(_str_items(outcome.get(f)) for f in _VERDICT_LISTS):
+        if not error and not any(verdict_lists.values()):
             return {"kind": "failed_or_refused", "reason": contradiction}
     if error in MISSING_INPUT_CODES:
         return {
@@ -391,7 +452,7 @@ def outcome_disposition(record: Any) -> dict[str, Any]:
             "missing_inputs": _str_items(outcome.get("missing_inputs")),
         }
     for field in _VERDICT_LISTS:
-        items = _str_items(outcome.get(field))
+        items = verdict_lists[field]
         if not items:
             continue
         if all(item.startswith("missing_") for item in items):
@@ -584,7 +645,7 @@ def runtime_attestation(receipt: Mapping[str, Any], stage: Mapping[str, Any] | N
 
     try:
         name = str(receipt.get("name") or "")
-        if name in SIMULATED_BY_DESIGN_EXECUTORS:
+        if simulated_by_design(name):
             return ATTESTATION_SIMULATED
         if not isinstance(stage, Mapping):
             # Without the projected runtime stage only the receipt's own (self-asserted)
@@ -635,8 +696,25 @@ def runtime_attests_real(
     return runtime_attestation(receipt, stage) == ATTESTATION_REAL
 
 
+def _own_boundary_not_simulated(receipt: Mapping[str, Any]) -> bool:
+    """True only when every boundary the receipt itself carries says exactly simulated=False
+    (and it carries at least one)."""
+
+    boundaries = []
+    top = receipt.get("claim_boundary")
+    if isinstance(top, Mapping):
+        boundaries.append(top)
+    base = receipt.get("receipt_base")
+    if isinstance(base, Mapping) and isinstance(base.get("claim_boundary"), Mapping):
+        boundaries.append(base["claim_boundary"])
+    return bool(boundaries) and all(b.get("simulated", True) is False for b in boundaries)
+
+
 def reproject_receipt_base_claim_boundary(
-    receipt: dict[str, Any], stage: Mapping[str, Any] | None = None
+    receipt: dict[str, Any],
+    stage: Mapping[str, Any] | None = None,
+    *,
+    never_upgrade: bool = False,
 ) -> dict[str, Any]:
     """Make ``receipt_base.claim_boundary`` agree with the runtime boundary (tighten-only).
 
@@ -645,9 +723,14 @@ def reproject_receipt_base_claim_boundary(
     ``receipt_base`` (``simulated=true, receipt_present=false``) is re-projected from the
     runtime boundary.  Otherwise both the top-level and the ``receipt_base`` boundary are set
     to ``simulated=true, claim_eligible=false`` so no reader can see a real claim.
+    ``attestation`` is always written (``simulated`` included), so no inherited value
+    survives.  ``never_upgrade`` (receipts that were already invoked): a receipt whose own
+    boundary is not exactly non-simulated is never made real.
     """
 
     if not bool(receipt.get("invoked")):
+        if "attestation" in receipt:
+            receipt = {k: v for k, v in receipt.items() if k != "attestation"}
         return receipt
     updated = dict(receipt)
     refs, _well_formed = _ref_list(updated.get("evidence_refs"))
@@ -658,7 +741,14 @@ def reproject_receipt_base_claim_boundary(
     top = updated.get("claim_boundary")
     top_cb: dict[str, Any] = dict(top) if isinstance(top, Mapping) else {}
     attestation = runtime_attestation(updated, stage) if refs else ATTESTATION_SIMULATED
+    if (
+        never_upgrade
+        and attestation == ATTESTATION_REAL
+        and not _own_boundary_not_simulated(receipt)
+    ):
+        attestation = ATTESTATION_SIMULATED
     real = attestation == ATTESTATION_REAL
+    updated["attestation"] = attestation
     raw_disp = stage.get("disposition") if isinstance(stage, Mapping) else None
     disposition: Mapping[str, Any] = raw_disp if isinstance(raw_disp, Mapping) else {}
     if attestation in (
@@ -667,7 +757,7 @@ def reproject_receipt_base_claim_boundary(
         ATTESTATION_REAL_SELF_REPORTED,
     ):
         # Never real: both boundaries stay simulated so no claim reader can see a real claim.
-        updated["attestation"] = attestation
+        pass
     if attestation in (ATTESTATION_BLOCKED_MISSING_INPUTS, ATTESTATION_FAILED_OR_REFUSED):
         updated["blocked_reason"] = str(disposition.get("reason") or "unspecified")
     if attestation == ATTESTATION_BLOCKED_MISSING_INPUTS:
@@ -684,7 +774,7 @@ def reproject_receipt_base_claim_boundary(
             "claim_eligible": False,
             "evidence_complete": False,
         }
-        if str(updated.get("name") or "") in SIMULATED_BY_DESIGN_EXECUTORS:
+        if simulated_by_design(updated.get("name")):
             updated["simulated_reason"] = "executor_simulated_by_design"
         elif bool(updated.get("outcome_simulated")) or (
             isinstance(stage, Mapping) and bool(stage.get("outcome_simulated"))
@@ -702,7 +792,6 @@ def reproject_receipt_base_claim_boundary(
                 },
             }
         return updated
-    updated["attestation"] = ATTESTATION_REAL
     updated["claim_boundary"] = {**top_cb, "attestation_kind": ATTESTATION_KIND_RUNTIME_SEALED}
     if not old_rb:
         return updated
@@ -749,6 +838,7 @@ def reproject_receipt_base_claim_boundary(
         )
     except Exception as exc:  # noqa: BLE001 - fail closed, record why
         updated["receipt_base_reprojection_error"] = str(exc)[:200]
+        updated["attestation"] = ATTESTATION_SIMULATED
         updated["claim_boundary"] = {**top_cb, "simulated": True, "claim_eligible": False}
         updated["receipt_base"] = {
             **old_rb,
@@ -793,6 +883,57 @@ def _runtime_reason(stage: Mapping[str, Any] | None) -> str:
     return f"unified_runtime:{stage.get('status') or 'UNKNOWN'}" + (f":{reason}" if reason else "")
 
 
+def _tighten_invoked_receipt(
+    receipt: dict[str, Any], stage: Mapping[str, Any] | None
+) -> dict[str, Any]:
+    """An already-invoked flow receipt, checked against the runtime stage (tighten-only).
+
+    * no runtime stage: unchanged except any inherited ``attestation`` is dropped (a receipt
+      the runtime did not attest is at most ``real_self_reported`` downstream);
+    * stage not invoked / SKIPPED / FAILED: downgraded to ``attestation=simulated`` with both
+      boundaries simulated and the runtime status named;
+    * stage invoked: re-checked through ``runtime_attestation`` and never upgraded beyond the
+      receipt's own boundary.
+    """
+
+    if stage is None:
+        if "attestation" not in receipt:
+            return receipt
+        return {k: v for k, v in receipt.items() if k != "attestation"}
+    status = str(stage.get("status") or "")
+    stage_invoked = bool(stage.get("invoked")) and status == "INVOKED"
+    updated = dict(receipt)
+    updated["unified_runtime_status"] = status
+    updated["unified_runtime_gate_passed"] = (
+        bool(stage.get("gate_passed")) if stage_invoked else False
+    )
+    if not stage_invoked:
+        updated["attestation"] = ATTESTATION_SIMULATED
+        updated["unified_runtime_contradiction"] = _runtime_reason(stage)
+        top = updated.get("claim_boundary")
+        updated["claim_boundary"] = {
+            **(dict(top) if isinstance(top, Mapping) else {}),
+            "simulated": True,
+            "claim_eligible": False,
+            "evidence_complete": False,
+        }
+        base = updated.get("receipt_base")
+        if isinstance(base, Mapping):
+            cb = base.get("claim_boundary")
+            updated["receipt_base"] = {
+                **dict(base),
+                "claim_boundary": {
+                    **(dict(cb) if isinstance(cb, Mapping) else {}),
+                    "simulated": True,
+                    "claim_eligible": False,
+                    "public_claim_allowed": False,
+                    "evidence_complete": False,
+                },
+            }
+        return updated
+    return reproject_receipt_base_claim_boundary(updated, stage, never_upgrade=True)
+
+
 def overlay_unified_capability_receipts(
     receipts: list[dict[str, Any]],
     stages: Iterable[Mapping[str, Any]] | None,
@@ -829,13 +970,7 @@ def overlay_unified_capability_receipts(
             out.append(receipt)
             continue
         if bool(receipt.get("invoked")):
-            if stage is not None and bool(stage.get("invoked")):
-                annotated = dict(receipt)
-                annotated["unified_runtime_status"] = str(stage.get("status") or "")
-                annotated["unified_runtime_gate_passed"] = bool(stage.get("gate_passed"))
-                out.append(annotated)
-            else:
-                out.append(receipt)
+            out.append(_tighten_invoked_receipt(receipt, stage))
             continue
         refs = (
             [str(ref) for ref in (stage.get("evidence_refs") or []) if str(ref).strip()]

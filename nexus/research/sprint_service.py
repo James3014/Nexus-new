@@ -11,7 +11,7 @@ import warnings
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional, cast
 
 from nexus.core.outcome_schema import SprintOutcome
 from nexus.engine.autoreason_service import AutoreasonService
@@ -402,7 +402,9 @@ class LLMCandidateGenerator:
                 verdict.update({
                     "status": "fail",
                     "gate_passed": False,
-                    "invoked": True,
+                    # Nothing ran: not observed by the runtime's replan logic.
+                    "invoked": False,
+                    "evidence_refs": [],
                     "verifier_status": VISIBLE_TEST_TARGET_INVALID,
                     "evidence": f"{VISIBLE_TEST_TARGET_INVALID}:{self.visible_test_target_invalid}",
                     "visible_test_passed": False,
@@ -415,6 +417,10 @@ class LLMCandidateGenerator:
                 # Never "pass" -- the runtime records the verifier stage as not succeeded.
                 verdict.update({
                     "status": VERIFIER_STATUS_NO_VERIFIER,
+                    # Nothing was tested: not invoked and no evidence ref, so the runtime's
+                    # replan logic sees verifier_not_observed (untrusted, no replan).
+                    "invoked": False,
+                    "evidence_refs": [],
                     "gate_passed": False,
                     "evidence": "online_candidate_payload_present:no_visible_test_run",
                     "visible_test_passed": False,
@@ -804,6 +810,24 @@ def _estimate_tokens(text: str) -> int:
 
 _OPERATION_PAYLOAD_KEYS = frozenset({"operation", "target_snippet", "replacement", "patch"})
 _OPERATION_EDIT_KEYS = ("operation", "target_snippet", "replacement", "patch", "explanation")
+# Gateway telemetry a structured candidate response may carry (read by generate()).
+_STRUCTURED_TELEMETRY_KEYS = (
+    "tokens_used",
+    "token_capture_status",
+    "error_category",
+    "gateway_stats_present",
+    "gateway_usage_metadata_present",
+    "gateway_token_source",
+    "gateway_prompt_chars",
+    "gateway_payload_chars",
+    "gateway_total_chars",
+    "gateway_timeout_sec",
+    "gateway_total_sec",
+    "gateway_invocation_build_sec",
+    "gateway_process_sec",
+    "gateway_provider_wait_sec",
+    "gateway_parse_sec",
+)
 _JSON_FENCE_RE = re.compile(r"^```[a-zA-Z0-9_-]*\s*\n(.*?)\n?```\s*$", re.DOTALL)
 
 
@@ -865,11 +889,19 @@ def _candidate_out_from_online_stage(online_stage: Mapping[str, Any]) -> dict[st
     from nexus.services.unified_runtime import extract_online_stage_payload
 
     provider_response, _raw, _payload = extract_online_stage_payload(dict(online_stage))
+    stage_status = "APPROVED" if online_stage.get("status") == "SUCCEEDED" else "FAIL"
     if isinstance(provider_response, dict):
-        structured = dict(provider_response)
+        # Whitelisted edit + gateway telemetry keys only; status comes from the stage
+        # (tighten-only: a structured FAIL stays FAIL), like the text path.
+        structured = {
+            key: provider_response[key]
+            for key in (*_OPERATION_EDIT_KEYS, *_STRUCTURED_TELEMETRY_KEYS)
+            if key in provider_response
+        }
+        own_status = str(provider_response.get("status") or "").strip().upper()
+        structured["status"] = "FAIL" if own_status == "FAIL" else stage_status
         structured["candidate_response_path"] = "structured"
         return structured
-    stage_status = "APPROVED" if online_stage.get("status") == "SUCCEEDED" else "FAIL"
     parsed = _parse_operation_payload(str(provider_response or ""))
     if parsed is not None:
         # Model text is untrusted: keep only the edit keys; status and path come from code.
@@ -885,25 +917,21 @@ VISIBLE_TEST_TARGET_INVALID = "visible_test_target_invalid"
 VERIFIER_STATUS_NO_VERIFIER = "no_verifier"
 VISIBLE_TEST_CONFINEMENT_UNAVAILABLE = "visible_test_confinement_unavailable"
 CONFINE_VISIBLE_TEST_ENV = "NEXUS_CONFINE_VISIBLE_TEST"
-_CONFINED_TEST_RUNNER_MODULE = "nexus.engine.confined_test_runner"
 
 
-def visible_test_confinement_available() -> bool:
-    """True only when the visible test would run confined (opt-in env + confined runner present).
+def confined_visible_evaluator(executor: Any) -> Callable[..., CandidateEval] | None:
+    """The executor's confined visible-test entry point, or None.
 
-    The runtime verifier executes model-produced code, so it is bound only when
-    ``NEXUS_CONFINE_VISIBLE_TEST=1`` and the confined test runner module exists (``find_spec``
-    imports only the parent package ``nexus.engine``, not the runner); otherwise it
-    adds no execution of its own (the sprint's pre-existing visible-test run is unchanged).
+    Explicit contract: the runtime verifier executes model-produced code only through an
+    executor method ``evaluate_candidate_confined(*, seed, hint, code, source)`` (implemented
+    for ``InPlaceSprintExecutor`` by #2211, routed to its confined runner) and only with the
+    opt-in ``NEXUS_CONFINE_VISIBLE_TEST=1``.  Plain ``evaluate_candidate`` is never used by the
+    verifier.
     """
     if os.environ.get(CONFINE_VISIBLE_TEST_ENV, "").strip() != "1":
-        return False
-    try:
-        import importlib.util
-
-        return importlib.util.find_spec(_CONFINED_TEST_RUNNER_MODULE) is not None
-    except (ImportError, ValueError):
-        return False
+        return None
+    method = getattr(executor, "evaluate_candidate_confined", None)
+    return cast("Callable[..., CandidateEval]", method) if callable(method) else None
 
 
 def visible_test_target_error(repo_root: Path, test_file: str) -> str:
@@ -919,6 +947,8 @@ def visible_test_target_error(repo_root: Path, test_file: str) -> str:
     candidate = Path(raw)
     if candidate.is_absolute() or ".." in candidate.parts:
         return "test_file_not_repo_relative"
+    if any(part.startswith("-") for part in candidate.parts):
+        return "test_file_option_like"
     if candidate.name.lower().startswith("test_hidden"):
         return "hidden_test_target"
     if candidate.suffix != ".py":
@@ -937,7 +967,10 @@ def visible_test_target_error(repo_root: Path, test_file: str) -> str:
 
 def sprint_pytest_cmd(test_file: str | None) -> list[str]:
     """The sprint's candidate pytest command (one test file target when given)."""
-    return [sys.executable, "-m", "pytest", "-q", "--maxfail=1"] + ([test_file] if test_file else [])
+    # ``--`` ends pytest options, so a test path is never parsed as one.
+    return [sys.executable, "-m", "pytest", "-q", "--maxfail=1"] + (
+        ["--", test_file] if test_file else []
+    )
 
 
 def visible_test_pytest_cmd(test_file: str) -> list[str]:
@@ -1618,12 +1651,14 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         config.test_file or ""
     ):
         visible_target_error = "sprint_pytest_cmd_mismatch"
-    verifier_executor = executor
+    confined_evaluate = confined_visible_evaluator(executor)
 
     def _runtime_visible_verifier(code: str, _seed: int) -> CandidateEval:
         hint_now = str(visible_verifier_binding["hint"])
         seed_now = int(visible_verifier_binding["seed"])
-        evaluation = verifier_executor.evaluate_candidate(seed=seed_now, hint=hint_now, code=code, source="llm")
+        if confined_evaluate is None:  # bound only when the confined method exists
+            raise RuntimeError("visible_verifier_without_confined_evaluator")
+        evaluation = confined_evaluate(seed=seed_now, hint=hint_now, code=code, source="llm")
         visible_eval_memo[(hashlib.sha256(code.encode("utf-8")).hexdigest(), hint_now, seed_now)] = evaluation
         return evaluation
 
@@ -1638,7 +1673,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         # Only the online generator has the seam (tests may substitute the generator class).
         if visible_target_error:
             setattr(llm_generator, "visible_test_target_invalid", visible_target_error)
-        elif not visible_test_confinement_available():
+        elif confined_evaluate is None:
             # Model code is never executed by the verifier without confinement (#2211).
             setattr(
                 llm_generator,

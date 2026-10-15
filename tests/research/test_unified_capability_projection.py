@@ -1374,3 +1374,148 @@ def test_receipt_builder_marks_non_executable_nodes_with_zero_runtime_stages() -
     assert classify_receipt(by_name["direct_mode"]) == "not_executable"
     assert by_name["direct_mode"]["failure_reason"].startswith("NOT_EXECUTABLE:")
     assert classify_receipt(by_name["pregate"]) != "not_executable"
+
+
+def test_sibling_outcome_contradiction_defeats_a_response_success() -> None:
+    """Gemini G3: every layer (siblings included) is checked; outermost success status."""
+
+    from nexus.research.flow.unified_capability_projection import (
+        _success_contradicted,
+        outcome_disposition,
+    )
+
+    record = {
+        "response": {"semantic_status": "SUCCEEDED", "output": "payload"},
+        "outcome": {
+            "status": "FAILED",
+            "error": "CRITICAL_ERROR",
+            "gate_passed": False,
+            "missing_evidence": ["missing_input_x"],
+        },
+    }
+    assert _success_contradicted(record)
+    assert outcome_disposition(record)["kind"] != "succeeded"
+    # Sibling error alone, and a sibling non-success status alone, also contradict.
+    for sibling in ({"error": "boom"}, {"status": "FAILED"}, {"blockers": ["x"]}):
+        probe = {"response": {"semantic_status": "SUCCEEDED", "output": "p"}, "outcome": sibling}
+        assert outcome_disposition(probe)["kind"] != "succeeded", sibling
+
+
+def test_non_true_gate_passed_and_invoked_real_values_contradict() -> None:
+    """Gemini G5: present-but-not-exactly-True values count as false."""
+
+    from nexus.research.flow.unified_capability_projection import outcome_disposition
+
+    for value in ("false", 0, "no", None, "true"):
+        record = {
+            "status": "SUCCEEDED",
+            "gate_passed": value,
+            "semantic_status": "SUCCEEDED",
+            "output": "data",
+        }
+        assert outcome_disposition(record)["kind"] != "succeeded", value
+    record = {
+        "physical_callable": "capability_executor_registry:pregate",
+        "response": {"response": {"outcome": {"semantic_status": "SUCCEEDED", "hits": [1]}}},
+    }
+    for value in ("false", 0, "no", None):
+        entry = {
+            "name": "pregate",
+            "status": "REAL_INVOKED",
+            "invoked_real": value,
+            "physical_callable": "x",
+            "evidence_ids": ["ev_x"],
+        }
+        assert _probe("pregate", ["ev_x"], entries=[entry], record=record)["refs_resolved"] is False
+    ok = {**entry, "invoked_real": True}
+    assert _probe("pregate", ["ev_x"], entries=[ok], record=record)["refs_resolved"] is True
+
+
+def test_simulation_markers_in_status_text_and_simulation_keys() -> None:
+    """Gemini G6: import words no longer hide a marker; simulation-named keys count."""
+
+    from nexus.research.flow.unified_capability_projection import _declares_simulated
+
+    assert _declares_simulated({"status": "simulated import failure"}) is True
+    assert _declares_simulated({"mock_mode": True}) is True
+    assert _declares_simulated({"simulation": True}) is True
+    assert _declares_simulated({"is_simulated": "yes"}) is True
+    # Code text and falsy values are still not markers.
+    assert _declares_simulated({"source": "from unittest import mock"}) is False
+    assert _declares_simulated({"mock_mode": False, "simulation": 0}) is False
+    assert _declares_simulated({"structural_stubber": "on"}) is False
+
+
+def test_capability_names_are_normalised_before_lookups() -> None:
+    """Gemini G7: whitespace / case / NFKC variants hit the same tables."""
+
+    from nexus.research.flow.unified_capability_projection import (
+        not_executable_reason,
+        simulated_by_design,
+    )
+
+    expected = not_executable_reason("research_route")
+    assert expected
+    for name in ("research_route ", "RESEARCH_ROUTE", "Research-Route", "research​_route"):
+        assert not_executable_reason(name) == expected, name
+    assert simulated_by_design("jit_validation ") and simulated_by_design("JIT-Validation")
+
+
+def test_reprojection_always_writes_attestation() -> None:
+    """Gemini G8: an inherited attestation never survives re-projection."""
+
+    from nexus.research.flow.unified_capability_projection import (
+        reproject_receipt_base_claim_boundary,
+    )
+
+    receipt = {
+        "name": "test_cap",
+        "invoked": True,
+        "evidence_refs": ["ref1"],
+        "attestation": "real",
+        "claim_boundary": {"simulated": False},
+    }
+    assert reproject_receipt_base_claim_boundary(receipt, None)["attestation"] == "simulated"
+    uninvoked = {**receipt, "invoked": False}
+    assert "attestation" not in reproject_receipt_base_claim_boundary(uninvoked, None)
+
+
+def test_already_invoked_receipts_are_tightened_by_the_runtime_stage() -> None:
+    """Gemini G4 + G2: invoked receipts go through runtime_attestation; real needs it."""
+
+    from scripts.bench.strict_llm_baseline import classify_receipt
+
+    claimed = {
+        "name": "autoreason",
+        "selected": True,
+        "invoked": True,
+        "evidence_refs": ["ref_1"],
+        "claim_boundary": {"simulated": False, "receipt_present": True},
+        "attestation": "real",
+    }
+    # Runtime stage SKIPPED: downgraded.
+    skipped = {"name": "autoreason", "status": "SKIPPED", "invoked": False, "skip_reason": "x"}
+    out = overlay_unified_capability_receipts([dict(claimed)], [skipped])[0]
+    assert out["attestation"] == "simulated"
+    assert out["claim_boundary"]["simulated"] is True
+    assert classify_receipt(out) == "simulated"
+    # No runtime stage for it (other stages present): the injected attestation is dropped.
+    other = {"name": "pregate", "status": "SKIPPED", "invoked": False}
+    out = overlay_unified_capability_receipts([dict(claimed)], [other])[0]
+    assert "attestation" not in out
+    assert classify_receipt(out) == "real_self_reported"
+    # Runtime invoked but its evidence is not sealed: not real.
+    stage = _stage("autoreason", "INVOKED")
+    rows = project_unified_capability_stages([
+        {"task_id": "t", "capabilities": [stage], "capability_results": _results(stage)}
+    ])
+    out = overlay_unified_capability_receipts([dict(claimed)], rows)[0]
+    assert out["attestation"] != "real"
+    assert classify_receipt(out) != "real"
+    # Sealed and successful: real, but never upgraded past the receipt's own boundary.
+    rows = project_unified_capability_stages([_receipt("t", stage)])
+    out = overlay_unified_capability_receipts([dict(claimed)], rows)[0]
+    assert out["attestation"] == "real" and classify_receipt(out) == "real"
+    own_sim = {**claimed, "claim_boundary": {"simulated": True}}
+    out = overlay_unified_capability_receipts([own_sim], rows)[0]
+    assert out["attestation"] == "simulated" and classify_receipt(out) == "simulated"

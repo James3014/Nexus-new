@@ -27,6 +27,9 @@ def _receipt(
     }
     if simulated is not None:
         receipt["receipt_base"] = {"claim_boundary": {"simulated": simulated}}
+    if simulated is False:
+        # Real needs the unified-capability overlay's attestation (#2212 round 7, G2).
+        receipt["attestation"] = "real"
     return receipt
 
 
@@ -80,6 +83,12 @@ def test_receipt_classification() -> None:
     assert classify_receipt(_receipt("a", simulated=False, invoked=False)) == "selected_not_invoked"
     # No claim boundary attests nothing: never real (Codex #2212 F3).
     assert classify_receipt(_receipt("a", simulated=None)) == "real_self_reported"
+    # A non-simulated boundary without the overlay's attestation is self-reported (G2), and
+    # an explicit simulated attestation wins over a non-simulated boundary.
+    unattested = {k: v for k, v in _receipt("a", simulated=False).items() if k != "attestation"}
+    assert classify_receipt(unattested) == "real_self_reported"
+    assert classify_receipt({**unattested, "attestation": "bogus"}) == "real_self_reported"
+    assert classify_receipt({**unattested, "attestation": "simulated"}) == "simulated"
     assert classify_receipt(_receipt("a", simulated=None, refs=())) == "simulated"
 
 
@@ -175,6 +184,7 @@ def test_claim_boundary_takes_the_stricter_of_receipt_base_and_runtime() -> None
         item = _receipt("acceptance_check", simulated=rb)
         if top is not None:
             item["claim_boundary"] = {"simulated": top}
+        item["attestation"] = "real"  # overlay-attested; the boundaries decide here
         return item
 
     assert classify_receipt(receipt(False, False)) == "real"
