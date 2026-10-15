@@ -9,7 +9,7 @@ import stat
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TypeVar
@@ -126,7 +126,12 @@ class UltraReviewService:
         base_ref: str = "HEAD",
         report_path: Path | str = ".nexus/reports/ultra_review_report.json",
         sandbox_root: Path | str = ".nexus/reports/ultra_review/sandboxes",
+        regression_tests: Sequence[str] = (),
+        excluded_tests: Sequence[str] = (),
     ) -> dict[str, Any]:
+        """``regression_tests`` adds explicit ghost-regression tests (repo-relative, must exist);
+        ``excluded_tests`` removes any mapped test whose path or file name matches (e.g. a hidden
+        verifier test that must never run)."""
         mode = DRY_RUN_MODE if dry_run else REVIEW_MODE
         try:
             if os.getenv(ULTRA_REVIEW_NESTED_ENV, "").strip():
@@ -137,6 +142,8 @@ class UltraReviewService:
                 base_ref=base_ref,
                 report_path=report_path,
                 sandbox_root=sandbox_root,
+                regression_tests=tuple(regression_tests),
+                excluded_tests=tuple(excluded_tests),
             )
         except (SandboxError, OSError, subprocess.SubprocessError) as exc:
             # Fail closed with a reason instead of an unhandled traceback.
@@ -171,6 +178,8 @@ class UltraReviewService:
         base_ref: str,
         report_path: Path | str,
         sandbox_root: Path | str,
+        regression_tests: tuple[str, ...] = (),
+        excluded_tests: tuple[str, ...] = (),
     ) -> dict[str, Any]:
         mode = DRY_RUN_MODE if dry_run else REVIEW_MODE
         run_id = self._run_id()
@@ -195,6 +204,9 @@ class UltraReviewService:
 
         regression_map = self._derive_regression_candidate_map(diff_text)
         test_candidates = self._existing_regression_candidates(regression_map)
+        test_candidates, excluded_regression_tests = self._apply_explicit_regression_tests(
+            test_candidates, regression_tests=regression_tests, excluded_tests=excluded_tests
+        )
         execution_root, mirror_metadata = self._prepare_execution_workspace(sandbox_path, diff_path=diff_path)
         mirror_violations = self._post_apply_violations(execution_root)
         if self._neutralized_head_links:
@@ -345,6 +357,7 @@ class UltraReviewService:
             },
             "progress": progress,
             "regression_candidate_map": regression_map,
+            "excluded_regression_tests": excluded_regression_tests,
             "verification": {
                 "verified_findings": sum(1 for finding in findings if finding.get("state") == "VERIFIED_FINDING"),
                 "unverified_observations": sum(1 for finding in findings if finding.get("state") != "VERIFIED_FINDING"),
@@ -1041,6 +1054,32 @@ class UltraReviewService:
                 seen.add(candidate)
                 deduped.append(candidate)
         return deduped
+
+    def _apply_explicit_regression_tests(
+        self,
+        test_candidates: list[str],
+        *,
+        regression_tests: Sequence[str] = (),
+        excluded_tests: Sequence[str] = (),
+    ) -> tuple[list[str], list[str]]:
+        """Add explicit (existing, contained) tests, then drop every excluded path or file name."""
+        merged = list(test_candidates)
+        for rel in regression_tests:
+            text = str(rel).strip()
+            if text and text not in merged and self._contained_path(text, self.project_root) is not None:
+                if (self.project_root / text).is_file():
+                    merged.append(text)
+        excluded_keys = {str(item).strip() for item in excluded_tests if str(item).strip()}
+        if not excluded_keys:
+            return merged, []
+        kept: list[str] = []
+        dropped: list[str] = []
+        for rel in merged:
+            if rel in excluded_keys or Path(rel).name in excluded_keys:
+                dropped.append(rel)
+            else:
+                kept.append(rel)
+        return kept, dropped
 
     def _existing_regression_candidates(self, regression_map: list[dict[str, Any]]) -> list[str]:
         seen: set[str] = set()

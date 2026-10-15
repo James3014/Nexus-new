@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from nexus.services.model_workforce_policy import WorkforcePolicyError
 from nexus.services.unified_runtime import UnifiedRuntimeRequest
 
 SCHEMA = "nexus.nightshift_candidate_demand.v1"
@@ -180,11 +181,11 @@ class NightshiftQueueConsumer:
         # The consumer itself supplies no task card, tests or output verifier
         # for this call, so it declares no controls.
         try:
-            from nexus.services.model_workforce_policy import WorkforcePolicyError
-
             bindings = build_nightshift_workforce_bindings()
             provider = resolve_nightshift_online_worker().provider
-        except WorkforcePolicyError:
+        except (WorkforcePolicyError, ImportError):
+            # Fail closed: an unloadable policy (or an unimportable policy
+            # module) sends empty bindings, which Workforce Admission blocks.
             bindings, provider = {}, ""
         route: dict[str, Any] = {
             "online_enabled": True,

@@ -54,6 +54,44 @@ def _fixture_git(cwd: Path, *args: str) -> str:
     ).stdout.strip()
 
 
+# Minimal stand-in for nexus-core's product/protocol/build_identity.py: the same
+# public functions and digest rule, with "shipped" simplified to every *.py
+# outside __pycache__.  The real module is exercised by the opt-in real-Core
+# test below.
+FIXTURE_BUILD_IDENTITY = """
+import hashlib, os
+from pathlib import Path
+
+
+def _shipped(rel):
+    return rel.startswith("product/") and rel.endswith(".py") and "__pycache__" not in rel
+
+
+def select_shipped_paths(paths):
+    return sorted((p for p in paths if _shipped(p)), key=lambda p: p.encode("utf-8"))
+
+
+def source_digest_of_files(files):
+    manifest = hashlib.sha256()
+    for path, data in sorted(files, key=lambda item: item[0].encode("utf-8")):
+        manifest.update(hashlib.sha256(data).hexdigest().encode("ascii"))
+        manifest.update(b"  " + path.encode("utf-8") + b"\\n")
+    return "sha256:" + manifest.hexdigest()
+
+
+def source_digest(package_root):
+    root = Path(package_root)
+    found = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+        for name in filenames:
+            rel = "product/" + Path(dirpath, name).relative_to(root).as_posix()
+            if _shipped(rel):
+                found.append((rel, Path(dirpath, name).read_bytes()))
+    return source_digest_of_files(found)
+"""
+
+
 class CoreOrigin:
     """A local stand-in for James3014/nexus-core (no network in these tests)."""
 
@@ -76,6 +114,10 @@ def _core_origin(tmp_path_factory: pytest.TempPathFactory) -> None:
     _fixture_git(repo, "commit", "-q", "-m", "core one")
     CORE.other = _fixture_git(repo, "rev-parse", "HEAD")
     (repo / "product" / "two.py").write_text("")
+    # The pin ships Core's build_identity leaf module (#2246); "other" predates it.
+    (repo / "product" / "protocol").mkdir()
+    (repo / "product" / "protocol" / "__init__.py").write_text("")
+    (repo / "product" / "protocol" / "build_identity.py").write_text(FIXTURE_BUILD_IDENTITY)
     _fixture_git(repo, "add", ".")
     _fixture_git(repo, "commit", "-q", "-m", "core two")
     CORE.path, CORE.pin = repo, _fixture_git(repo, "rev-parse", "HEAD")
@@ -118,6 +160,7 @@ class FakeHost(ad.Host):
         self.after_r1_check: Callable[[], None] | None = None
         self.core_pin: str = CORE.pin
         self.core_fetch_fails = False
+        self.digest_runs = 0
         # Task quiescence (#2227): CLEAR unless a test says otherwise.
         self.in_flight: list[dict[str, Any]] = []
         self.real_classifier = False
@@ -125,6 +168,10 @@ class FakeHost(ad.Host):
         self.issue_comments: list[str] = []
         self.comment_issues: list[int | None] = []
         self.comment_fails = False
+        # Controller worktrees (#1939): accepted unless a test says otherwise.
+        self.controller_checks: list[Path] = []
+        self.controller_verdicts: list[str | None] = []
+        self.real_controller_check = False
 
     def tasks_in_flight(self, cfg: ad.Config, live_plist: bytes) -> dict[str, Any]:  # type: ignore[override]
         self.quiescence_checks += 1
@@ -150,6 +197,14 @@ class FakeHost(ad.Host):
         if self.in_flight:
             return dict(self.in_flight.pop(0) if len(self.in_flight) > 1 else self.in_flight[0])
         return {"verdict": "CLEAR", "checked": 0}
+
+    def controller_problem(  # type: ignore[override]
+        self, python: Path, root: Path, controller: Path, code_root: Path | None = None
+    ) -> str | None:
+        self.controller_checks.append(controller)
+        if self.real_controller_check:
+            return ad.Host.controller_problem(self, Path(sys.executable), REPO_ROOT, controller)
+        return self.controller_verdicts.pop(0) if self.controller_verdicts else None
 
     def post_issue_comment(  # type: ignore[override]
         self, cfg: ad.Config, body: str, issue: int | None = None
@@ -209,6 +264,10 @@ class FakeHost(ad.Host):
             if self.dirty_after_sync:
                 (Path(cwd) / ".venv").mkdir()
             return _done()
+        if len(argv) > 4 and argv[4] == ad.CORE_SOURCE_DIGEST_CODE:
+            # Core's digest module runs for real against the fixture checkout.
+            self.digest_runs += 1
+            return ad.Host.run(self, argv, cwd=cwd, env={**GIT_ENV, **(env or {})}, timeout=timeout)
         if argv[1:] == ["-c", "import sys"]:
             return _done(code=0 if Path(argv[0]).exists() else 1)
         if len(argv) > 2 and argv[1].endswith(ad.DEPLOYER):
@@ -221,6 +280,9 @@ class FakeHost(ad.Host):
             return _done(self.origin + "\n")
         if "fetch" in argv:
             return _done()
+        if argv[:2] == ["git", "-C"] and argv[3:] == ["rev-parse", "--verify", "HEAD^{commit}"]:
+            # A deployment or Controller worktree is at the commit in its name.
+            return _done(Path(argv[2]).name.split("-", 1)[1] + "\n")
         if "rev-parse" in argv and argv[-1].endswith("^{commit}"):
             return _done(self.candidate + "\n")
         if argv[:2] == ["git", "-C"] and argv[3:] == ["rev-parse", "HEAD"]:
@@ -2285,10 +2347,13 @@ def test_candidate_runs_the_core_revision_its_tree_pins(cfg: ad.Config) -> None:
     assert result["status"] == "DEPLOYED"
     checkout = cfg.core_checkouts / CORE.pin
     receipt = ad.last_receipt(cfg.state_dir)
+    digest = receipt["core"]["source_digest"]
     assert receipt["core"] == {
         "revision": CORE.pin,
         "root": str(checkout),
         "repository": ad.CORE_REPOSITORY_URL,
+        "source_digest": digest,
+        "source_digest_status": "COMPUTED",
     }
     # A clean, detached checkout at exactly the pinned commit.
     assert _core_head(checkout) == CORE.pin
@@ -2448,9 +2513,171 @@ def test_wrapper_exports_core_root_and_rejects_unsafe_core_path(cfg: ad.Config) 
     root, python = Path("/d/a1-x"), Path("/v/bin/python")
     assert "NEXUS_CORE_REPO_ROOT" not in ad.wrapper_command(cfg, root, python)
     command = ad.wrapper_command(cfg, root, python, core_root=Path("/g/core/abc"))
-    assert 'export NEXUS_CORE_REPO_ROOT="/g/core/abc" ; exec ' in command
+    assert 'export NEXUS_CORE_REPO_ROOT="/g/core/abc" ; ' in command
+    assert command.endswith(f'exec "{python}" "{root / ad.ENTRYPOINT}"')
     with pytest.raises(ad.DeployError, match="WRAPPER_PATH_UNSAFE"):
         ad.wrapper_command(cfg, root, python, core_root=Path('/g/core/"; rm -rf ~'))
+
+
+def _fixture_digest(checkout: Path) -> str:
+    """The fixture Core's own digest of ``checkout`` (no deployer code involved)."""
+    out = subprocess.run(
+        [
+            sys.executable,
+            "-B",
+            "-I",
+            "-c",
+            "import importlib.util, sys\n"
+            "spec = importlib.util.spec_from_file_location('bi', sys.argv[1])\n"
+            "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)\n"
+            "print(m.source_digest(sys.argv[2]))\n",
+            str(checkout / ad.CORE_BUILD_IDENTITY_FILE),
+            str(checkout / "product"),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return out.stdout.strip()
+
+
+def test_build_records_core_source_digest_and_exports_it(cfg: ad.Config) -> None:
+    """#2246: the build computes the pinned Core's source_digest with Core's own
+    module, records it in the receipt and exports it to spare and live Gateways."""
+    host, prober = FakeHost(), FakeProber()
+    assert cycle(cfg, host, prober)["status"] == "DEPLOYED"
+    checkout = cfg.core_checkouts / CORE.pin
+    core = ad.last_receipt(cfg.state_dir)["core"]
+    assert core["source_digest_status"] == "COMPUTED"
+    assert core["source_digest"] == _fixture_digest(checkout)
+    assert ad._CORE_DIGEST.match(core["source_digest"])
+    assert host.digest_runs == 1
+    digest_call = next(c for c in host.calls if ad.CORE_SOURCE_DIGEST_CODE in c)
+    assert digest_call[1:3] == ["-B", "-I"] and digest_call[-2:] == [str(checkout), CORE.pin]
+    exports = (
+        f'export NEXUS_CORE_SOURCE_DIGEST_REVISION="{CORE.pin}" ; '
+        f'export NEXUS_CORE_SOURCE_DIGEST="{core["source_digest"]}" ; '
+    )
+    live_command = plistlib.loads(cfg.plist.read_bytes())["ProgramArguments"][2]
+    for command in (host.started[0], live_command):
+        assert exports in command
+        assert command.index(exports) > command.index(f'source "{cfg.env_file}"')
+    # Computing the digest wrote nothing into the pinned checkout.
+    assert _fixture_git(checkout, "status", "--porcelain", "--ignored") == ""
+
+
+def test_core_pin_without_build_identity_exports_no_digest(cfg: ad.Config) -> None:
+    host = FakeHost()
+    host.core_pin = CORE.other  # predates Core's core_identity()
+    assert cycle(cfg, host, FakeProber())["status"] == "DEPLOYED"
+    core = ad.last_receipt(cfg.state_dir)["core"]
+    assert core["source_digest"] is None
+    assert core["source_digest_status"] == "UNSUPPORTED_CORE"
+    assert host.digest_runs == 0
+    live_command = plistlib.loads(cfg.plist.read_bytes())["ProgramArguments"][2]
+    unset = "unset NEXUS_CORE_SOURCE_DIGEST NEXUS_CORE_SOURCE_DIGEST_REVISION ; "
+    for command in (live_command, host.started[0]):
+        assert "export NEXUS_CORE_SOURCE_DIGEST" not in command
+        # A stale value from the env file cannot reach the host.
+        assert unset in command
+        assert command.index(unset) > command.index(f'source "{cfg.env_file}"')
+
+
+def test_no_build_digest_never_leaks_a_stale_digest_into_the_host(
+    cfg: ad.Config, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#2246 review: without a build digest the wrapper unsets the digest env and
+    the provenance probe subprocess does not inherit it from the deployer."""
+    monkeypatch.setenv("NEXUS_CORE_SOURCE_DIGEST", "sha256:" + "9" * 64)
+    monkeypatch.setenv("NEXUS_CORE_SOURCE_DIGEST_REVISION", NEW)
+    core = {"revision": NEW, "root": str(tmp_path / "core"), "source_digest": None}
+    seen: list[dict[str, str]] = []
+
+    class EnvHost(ad.Host):
+        def run(self, argv, *, cwd=None, env=None, timeout=1800):  # type: ignore[override]
+            if len(argv) > 2 and argv[2] == ad.CORE_PROVENANCE_PROBE_CODE:
+                argv = [
+                    sys.executable,
+                    "-c",
+                    "import json, os; print(json.dumps(dict(os.environ)))",
+                ]
+                result = super().run(argv, cwd=cwd, env=env, timeout=timeout)
+                seen.append(json.loads(result.stdout))
+                return _done(json.dumps(_pinned_status(Path(core["root"]))) + "\n")
+            return super().run(argv, cwd=cwd, env=env, timeout=timeout)
+
+    ad.Prober(EnvHost()).core_provenance(root=REPO_ROOT, python=Path(sys.executable), core=core)
+    assert "NEXUS_CORE_SOURCE_DIGEST" not in seen[0]
+    assert "NEXUS_CORE_SOURCE_DIGEST_REVISION" not in seen[0]
+    assert seen[0]["NEXUS_CORE_REPO_ROOT"] == core["root"]
+    # With a build digest the build's values replace the stale ones.
+    seen.clear()
+    core["source_digest"] = "sha256:" + "1" * 64
+    ad.Prober(EnvHost()).core_provenance(root=REPO_ROOT, python=Path(sys.executable), core=core)
+    assert seen[0]["NEXUS_CORE_SOURCE_DIGEST"] == core["source_digest"]
+    # The real wrapper, after an env file that exports a stale digest, hands the
+    # Gateway process none of it.
+    if not Path("/bin/zsh").exists():
+        return
+    cfg.env_file.write_text(
+        'export NEXUS_CORE_SOURCE_DIGEST="sha256:' + "9" * 64 + '"\n'
+        f'export NEXUS_CORE_SOURCE_DIGEST_REVISION="{NEW}"\n'
+    )
+    root = tmp_path / "deploy"
+    (root / ad.ENTRYPOINT).parent.mkdir(parents=True)
+    (root / ad.ENTRYPOINT).write_text("import json, os; print(json.dumps(dict(os.environ)))\n")
+    for digest in (None, ("c" * 40, "sha256:" + "d" * 64)):
+        command = ad.wrapper_command(
+            cfg, root, Path(sys.executable), core_root=tmp_path / "core", core_digest=digest
+        )
+        out = subprocess.run(
+            ["/bin/zsh", "-c", command], capture_output=True, text=True, check=True
+        )
+        environ = json.loads(out.stdout.strip().splitlines()[-1])
+        if digest is None:
+            assert "NEXUS_CORE_SOURCE_DIGEST" not in environ
+            assert "NEXUS_CORE_SOURCE_DIGEST_REVISION" not in environ
+        else:
+            assert environ["NEXUS_CORE_SOURCE_DIGEST"] == digest[1]
+            assert environ["NEXUS_CORE_SOURCE_DIGEST_REVISION"] == digest[0]
+
+
+def test_core_source_digest_requires_disk_to_match_the_commit(cfg: ad.Config) -> None:
+    checkout = Path(ad.materialize_core(cfg, FakeHost(), CORE.pin)["root"])
+    host = FakeHost()
+    clean = ad.core_source_digest(host, checkout, CORE.pin)
+    assert clean["source_digest"] == _fixture_digest(checkout)
+    # A stray __pycache__ changes neither digest.
+    (checkout / "product" / "__pycache__").mkdir()
+    (checkout / "product" / "__pycache__" / "two.cpython-312.pyc").write_bytes(b"junk")
+    assert ad.core_source_digest(host, checkout, CORE.pin) == clean
+    # A shipped source that differs from the commit rejects the candidate.
+    (checkout / "product" / "two.py").write_text("tampered = True\n")
+    with pytest.raises(ad.DeployError, match="CORE_SOURCE_DIGEST_MISMATCH"):
+        ad.core_source_digest(host, checkout, CORE.pin)
+
+
+def test_core_source_digest_failure_rejects(cfg: ad.Config) -> None:
+    checkout = Path(ad.materialize_core(cfg, FakeHost(), CORE.pin)["root"])
+    (checkout / ad.CORE_BUILD_IDENTITY_FILE).write_text("raise SystemExit(3)\n")
+    with pytest.raises(ad.DeployError, match="CORE_SOURCE_DIGEST_FAILED"):
+        ad.core_source_digest(FakeHost(), checkout, CORE.pin)
+
+
+def test_wrapper_rejects_a_malformed_core_digest(cfg: ad.Config) -> None:
+    root, python, core = Path("/d/a1-x"), Path("/v/bin/python"), Path("/g/core/abc")
+    good = ("c" * 40, "sha256:" + "d" * 64)
+    command = ad.wrapper_command(cfg, root, python, core_root=core, core_digest=good)
+    assert f'export NEXUS_CORE_SOURCE_DIGEST="sha256:{"d" * 64}" ; exec ' in command
+    for bad in (
+        ("c" * 40, "sha256:" + "d" * 63),
+        ("c" * 40, 'sha256:"; rm -rf ~'),
+        ("not-a-sha", "sha256:" + "d" * 64),
+    ):
+        with pytest.raises(ad.DeployError, match="WRAPPER_CORE_DIGEST_INVALID"):
+            ad.wrapper_command(cfg, root, python, core_root=core, core_digest=bad)
+    with pytest.raises(ad.DeployError, match="WRAPPER_CORE_DIGEST_INVALID"):
+        ad.wrapper_command(cfg, root, python, core_digest=good)
 
 
 def test_rollback_probe_of_the_predecessor_does_not_demand_core(cfg: ad.Config) -> None:
@@ -2659,6 +2886,56 @@ def _real_core_checkout(tmp_path: Path, pin: str) -> Path | None:
     return None
 
 
+@pytest.mark.parametrize(
+    ("case", "ok"),
+    [
+        pytest.param("digest_verified", True, id="digest_verified"),
+        pytest.param("digest_wrong", False, id="digest_wrong"),
+        pytest.param("digest_expected_wrong", False, id="digest_expected_wrong"),
+        pytest.param("digest_reported_without_source", False, id="digest_reported_without_source"),
+        pytest.param("build_stamp_source", False, id="build_stamp_source"),
+        pytest.param("digest_but_build_has_none", False, id="digest_but_build_has_none"),
+        pytest.param("legacy_transport", True, id="legacy_transport"),
+    ],
+)
+def test_real_prober_requires_the_build_source_digest(tmp_path: Path, case: str, ok: bool) -> None:
+    """#2246: a git-free transport passes only when it verified this build's digest."""
+    core_root = tmp_path / "core" / NEW
+    core_root.mkdir(parents=True)
+    digest, other = "sha256:" + "1" * 64, "sha256:" + "2" * 64
+    core: dict[str, Any] = {"revision": NEW, "root": str(core_root), "source_digest": digest}
+    status: dict[str, Any] = {
+        **_pinned_status(core_root),
+        "identity_source": "source_digest",
+        "observed_source_digest": digest,
+        "expected_source_digest": digest,
+    }
+    if case == "digest_wrong":
+        status["observed_source_digest"] = other
+    elif case == "digest_expected_wrong":
+        status["expected_source_digest"] = other
+    elif case == "digest_reported_without_source":
+        del status["identity_source"]
+    elif case == "build_stamp_source":
+        status["identity_source"] = "build_stamp"
+    elif case == "digest_but_build_has_none":
+        core["source_digest"] = None
+    elif case == "legacy_transport":
+        status = _pinned_status(core_root)
+    host = _CoreStatusHost(status)
+    check = ad.Prober(host).core_provenance(root=REPO_ROOT, python=Path(sys.executable), core=core)
+    assert check["ok"] is ok, check
+    env = host.core_envs[0]
+    assert env["NEXUS_CORE_REPO_ROOT"] == str(core_root)
+    if core["source_digest"] is None:
+        # Explicitly removed, so no inherited value reaches the transport.
+        assert env["NEXUS_CORE_SOURCE_DIGEST"] is None
+        assert env["NEXUS_CORE_SOURCE_DIGEST_REVISION"] is None
+    else:
+        assert env["NEXUS_CORE_SOURCE_DIGEST"] == digest
+        assert env["NEXUS_CORE_SOURCE_DIGEST_REVISION"] == NEW
+
+
 # Opt-in: collected only when NEXUS_CORE_REPO_ROOT names a real nexus-core, so the
 # exact-base impact gate never sees a newly added test id that merely skips.
 if os.environ.get("NEXUS_CORE_REPO_ROOT"):
@@ -2676,6 +2953,33 @@ if os.environ.get("NEXUS_CORE_REPO_ROOT"):
         )
         assert check["status"] == "CORE_REVISION_PINNED", check
         assert check["ok"] is True and check["observed_commit"] == pin
+
+    def test_build_source_digest_equals_real_core_identity(tmp_path: Path) -> None:
+        """The deployer's digest is exactly what real Core's core_identity() reports."""
+        pin = ad.read_core_pin(REPO_ROOT)
+        checkout = _real_core_checkout(tmp_path, pin)
+        if checkout is None:
+            pytest.skip("no local nexus-core with the pinned tree (set NEXUS_CORE_REPO_ROOT)")
+        computed = ad.core_source_digest(ad.Host(), checkout, pin)
+        assert computed["source_digest_status"] == "COMPUTED"
+        reported = subprocess.run(
+            [
+                sys.executable,
+                "-B",
+                "-c",
+                "import json, sys; sys.path.insert(0, sys.argv[1]);"
+                "from product.protocol import core_identity;"
+                "print(json.dumps(core_identity()))",
+                str(checkout),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+        identity = json.loads(reported.stdout.strip().splitlines()[-1])
+        assert identity["build_identity"] == "UNSTAMPED"
+        assert computed["source_digest"] == identity["source_digest"]
 
 
 # ------------------------------------------------- live required-check set (#2173)
@@ -4634,6 +4938,420 @@ def test_quiescence_candidate_arriving_inside_the_hour_still_rearms(cfg: ad.Conf
     cycle(cfg, host, prober)  # 65 min after the warning: NEW gets its own
     assert len(host.issue_comments) == 1
     assert json.loads(cfg.quiescence_file.read_text())["warned_candidate"] == NEW
+
+
+# ------------------------------------------------- Controller worktrees (#1939)
+
+
+def _rg(cwd: Path, *args: str) -> str:
+    return _fixture_git(cwd, *args)
+
+
+@pytest.fixture()
+def controller_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """A real gateway-direct layout: bare repository.git, a live a1-OLD deployment
+    with its Controller, and a NEW main commit."""
+    for key, value in GIT_ENV.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("GIT_AUTHOR_NAME", "t")
+    monkeypatch.setenv("GIT_AUTHOR_EMAIL", "t@example.invalid")
+    monkeypatch.setenv("GIT_COMMITTER_NAME", "t")
+    monkeypatch.setenv("GIT_COMMITTER_EMAIL", "t@example.invalid")
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    _rg(seed, "init", "-q", "-b", "main")
+    (seed / "README.md").write_text("base\n")
+    (seed / "tasks").mkdir()
+    (seed / "tasks" / "keep.md").write_text("tracked\n")
+    _rg(seed, "add", ".")
+    _rg(seed, "commit", "-qm", "old")
+    old = _rg(seed, "rev-parse", "HEAD")
+    (seed / "nexus.py").write_text("x = 1\n")
+    _rg(seed, "add", ".")
+    _rg(seed, "commit", "-qm", "new")
+    new = _rg(seed, "rev-parse", "HEAD")
+    cfg = ad.Config.default(tmp_path / "home")
+    cfg.gateway_root.mkdir(parents=True)
+    subprocess.run(
+        ["git", "clone", "-q", "--bare", str(seed), str(cfg.bare_repo)],
+        check=True,
+        env={**os.environ, **GIT_ENV},
+    )
+    host = ad.Host()
+    deployment = cfg.deployments / f"a1-{old}"
+    host.run(ad._git(cfg, "worktree", "add", "--detach", str(deployment), old))
+    live_controller = ad.materialize_controller(cfg, host, old)
+    plist = plistlib.dumps({
+        "Label": ad.GATEWAY_LABEL,
+        "KeepAlive": True,
+        "RunAtLoad": True,
+        "ProgramArguments": [
+            "/bin/zsh",
+            "-c",
+            f'cd "{deployment}" ; export NEXUS_CANONICAL_SOURCE_ROOT="{live_controller}" ; '
+            f'exec /usr/bin/python3 "{deployment}/scripts/ops/nexus_mcp_gateway_http.py"',
+        ],
+        "WorkingDirectory": str(deployment),
+    })
+    return {
+        "cfg": cfg,
+        "host": host,
+        "old": old,
+        "new": new,
+        "deployment": deployment,
+        "live_controller": live_controller,
+        "plist": plist,
+    }
+
+
+def _bind(controller: Path, path: str, text: str) -> str:
+    target = controller / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text)
+    _rg(controller, "--literal-pathspecs", "add", "--", path)
+    _rg(controller, "commit", "-qm", f"chore(tasks): bind {path}")
+    return _rg(controller, "rev-parse", "HEAD")
+
+
+def test_controller_is_a_fresh_absolute_linked_worktree(controller_repo: dict[str, Any]) -> None:
+    cfg, host, new = controller_repo["cfg"], controller_repo["host"], controller_repo["new"]
+    controller = ad.materialize_controller(cfg, host, new)
+    assert controller == cfg.controllers / f"a1-{new}"
+    assert _rg(controller, "rev-parse", "HEAD") == new
+    gitdir = Path(_rg(controller, "rev-parse", "--absolute-git-dir"))
+    assert Path((gitdir / "gitdir").read_text().strip()).is_absolute()
+    (controller / "stray.txt").write_text("dirty\n")
+    again = ad.materialize_controller(cfg, host, new)  # recreated clean
+    assert not (again / "stray.txt").exists()
+
+
+def test_bound_cards_are_carried_byte_for_byte_and_accepted_by_the_gateway_check(
+    controller_repo: dict[str, Any],
+) -> None:
+    cfg, host = controller_repo["cfg"], controller_repo["host"]
+    card = "# Task Card: t\n\ntask_id: `t`\n"
+    bound = _bind(controller_repo["live_controller"], "tasks/c/00-t.md", card)
+    new_controller = ad.materialize_controller(cfg, host, controller_repo["new"])
+    carry = ad.carry_bound_cards(
+        host, controller_repo["plist"], new_controller, controller_repo["new"]
+    )
+    assert carry["status"] == "CARRIED"
+    assert carry["from_head"] == bound
+    assert carry["carried"] == ["tasks/c/00-t.md"]
+    assert (new_controller / "tasks/c/00-t.md").read_bytes() == card.encode()
+    assert _rg(new_controller, "rev-parse", "HEAD^") == controller_repo["new"]
+    assert _rg(new_controller, "status", "--porcelain") == ""
+    # The real Gateway rule (this checkout's code) accepts the carried Controller
+    # for a deployment of NEW.
+    deployment_new = cfg.deployments / f"a1-{controller_repo['new']}"
+    host.run(
+        ad._git(cfg, "worktree", "add", "--detach", str(deployment_new), controller_repo["new"])
+    )
+    assert (
+        host.controller_problem(
+            Path(sys.executable), deployment_new, new_controller, code_root=REPO_ROOT
+        )
+        is None
+    )
+
+
+def test_carry_skips_paths_main_changed_and_refuses_non_bind_controllers(
+    controller_repo: dict[str, Any],
+) -> None:
+    cfg, host = controller_repo["cfg"], controller_repo["host"]
+    live = controller_repo["live_controller"]
+    _bind(live, "tasks/keep.md", "rebound\n")
+    new_controller = ad.materialize_controller(cfg, host, controller_repo["new"])
+    carry = ad.carry_bound_cards(
+        host, controller_repo["plist"], new_controller, controller_repo["new"]
+    )
+    assert carry["status"] == "CARRIED"  # main did not touch tasks/keep.md since OLD
+    # A code commit in the live Controller is not a bind: nothing is carried.
+    (live / "nexus.py").write_text("evil = 1\n")
+    _rg(live, "add", "nexus.py")
+    _rg(live, "commit", "-qm", "not a bind")
+    fresh = ad.materialize_controller(cfg, host, controller_repo["new"])
+    refused = ad.carry_bound_cards(host, controller_repo["plist"], fresh, controller_repo["new"])
+    assert refused["status"] == "SKIPPED"
+    assert refused["reason"] == "LIVE_CONTROLLER_NOT_BIND_ONLY"
+    assert _rg(fresh, "rev-parse", "HEAD") == controller_repo["new"]
+
+
+def test_carry_skips_a_card_main_also_changed(controller_repo: dict[str, Any]) -> None:
+    cfg, host = controller_repo["cfg"], controller_repo["host"]
+    _bind(controller_repo["live_controller"], "tasks/keep.md", "rebound\n")
+    seedless = cfg.deployments / "edit"
+    host.run(ad._git(cfg, "worktree", "add", "--detach", str(seedless), controller_repo["new"]))
+    (seedless / "tasks/keep.md").write_text("main changed it\n")
+    _rg(seedless, "add", "tasks/keep.md")
+    _rg(seedless, "commit", "-qm", "main edit")
+    newer = _rg(seedless, "rev-parse", "HEAD")
+    controller = ad.materialize_controller(cfg, host, newer)
+    carry = ad.carry_bound_cards(host, controller_repo["plist"], controller, newer)
+    assert carry["status"] == "NONE"
+    assert carry["skipped_main_changed"] == ["tasks/keep.md"]
+    assert (controller / "tasks/keep.md").read_text() == "main changed it\n"
+
+
+def test_live_controller_moved_after_the_carry_is_detected(controller_repo: dict[str, Any]) -> None:
+    cfg, host = controller_repo["cfg"], controller_repo["host"]
+    live = controller_repo["live_controller"]
+    _bind(live, "tasks/c/00-a.md", "a\n")
+    controller = ad.materialize_controller(cfg, host, controller_repo["new"])
+    carry = ad.carry_bound_cards(host, controller_repo["plist"], controller, controller_repo["new"])
+    receipt = {"controller": {"root": str(controller), "carry": carry}}
+    ctx = ad._Cycle(cfg, host, FakeProber(), green_api(), {}, Path("/tool/python"))
+    assert ctx.live_controller_moved(controller_repo["plist"], receipt) is None
+    _bind(live, "tasks/c/00-b.md", "b\n")
+    assert ctx.live_controller_moved(controller_repo["plist"], receipt).startswith(
+        "LIVE_CONTROLLER_MOVED:"
+    )
+
+
+def test_rollback_needs_the_predecessor_controller(controller_repo: dict[str, Any]) -> None:
+    plist = controller_repo["plist"]
+    (controller_repo["deployment"] / "scripts/ops").mkdir(parents=True, exist_ok=True)
+    (controller_repo["deployment"] / ad.ENTRYPOINT).write_text("")
+    host = controller_repo["host"]
+    assert ad.rollback_readiness(host, plist)["ok"] is True
+    shutil.rmtree(controller_repo["live_controller"])
+    assert ad.rollback_readiness(host, plist)["reason"] == "PREDECESSOR_CONTROLLER_MISSING"
+
+
+def test_switch_exports_the_new_controller_and_receipts_it(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    result = cycle(cfg, host, prober)
+    assert result["status"] == "DEPLOYED"
+    controller = cfg.controllers / f"a1-{NEW}"
+    tokens = ad._wrapper_tokens(cfg.plist.read_bytes())
+    assert f"NEXUS_CANONICAL_SOURCE_ROOT={controller}" in tokens
+    assert ad.live_root(cfg.plist.read_bytes()) == cfg.deployments / f"a1-{NEW}"
+    assert ad.live_controller(cfg.plist.read_bytes()) == controller
+    receipt = ad.read_receipts(cfg.state_dir)[-1]
+    assert receipt["controller"]["root"] == str(controller)
+    assert any(f'NEXUS_CANONICAL_SOURCE_ROOT="{controller}"' in c for c in host.started)
+
+
+def test_candidate_refusing_the_carry_falls_back_to_a_fresh_controller(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    host, prober = FakeHost(), FakeProber()
+    monkeypatch.setattr(
+        ad,
+        "carry_bound_cards",
+        lambda *args, **kwargs: {
+            "status": "CARRIED",
+            "from_head": "c" * 40,
+            "carried": ["tasks/x.md"],
+        },
+    )
+    host.controller_verdicts = ["CONTROLLER_CHANGES_OUTSIDE_TASKS", None]
+    result = cycle(cfg, host, prober)
+    assert result["status"] == "DEPLOYED"
+    receipt = ad.read_receipts(cfg.state_dir)[-1]
+    assert receipt["controller"]["carry"]["status"] == "DROPPED"
+    assert "CONTROLLER_CHANGES_OUTSIDE_TASKS" in receipt["controller"]["carry"]["reason"]
+    assert any(w.startswith("BOUND_CARDS_NOT_CARRIED:") for w in receipt["warnings"])
+
+
+def test_candidate_refusing_a_fresh_controller_fails_the_build(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    host.controller_verdicts = ["CONTROLLER_NOT_A_REGISTERED_WORKTREE"]
+    result = cycle(cfg, host, prober)
+    assert result["status"] == "BUILD_FAILED"
+    assert host.reloads == []
+    assert "CONTROLLER_INVALID" in ad.read_receipts(cfg.state_dir)[-1]["reason"]
+
+
+def test_prune_removes_orphan_controllers_but_never_protected_ones(cfg: ad.Config) -> None:
+    host = FakeHost()
+    for name in ("a1-" + "1" * 40, "a1-" + "2" * 40):
+        (cfg.controllers / name).mkdir(parents=True)
+    keep = cfg.deployments / ("a1-" + "2" * 40)
+    keep.mkdir(parents=True)
+    ad.prune(cfg, host, [keep])
+    assert not (cfg.controllers / ("a1-" + "1" * 40)).exists()
+    assert (cfg.controllers / ("a1-" + "2" * 40)).exists()
+
+
+def test_first_run_carries_binds_from_the_live_deployment(controller_repo: dict[str, Any]) -> None:
+    """The live Gateway still binds into its deployment until the first split deploy."""
+    cfg, host = controller_repo["cfg"], controller_repo["host"]
+    deployment = controller_repo["deployment"]
+    _bind(deployment, "tasks/c/00-first.md", "first\n")
+    plist = plistlib.dumps({
+        "Label": ad.GATEWAY_LABEL,
+        "ProgramArguments": [
+            "/bin/zsh",
+            "-c",
+            f'cd "{deployment}" ; export NEXUS_CANONICAL_SOURCE_ROOT="{deployment}" ; '
+            f'exec /usr/bin/python3 "{deployment}/x.py"',
+        ],
+        "WorkingDirectory": str(deployment),
+    })
+    controller = ad.materialize_controller(cfg, host, controller_repo["new"])
+    carry = ad.carry_bound_cards(host, plist, controller, controller_repo["new"])
+    assert carry["status"] == "CARRIED"
+    assert carry["from"] == str(deployment)
+    assert (controller / "tasks/c/00-first.md").read_text() == "first\n"
+
+
+def test_non_utf8_bound_path_is_skipped_not_raised(controller_repo: dict[str, Any]) -> None:
+    cfg, host = controller_repo["cfg"], controller_repo["host"]
+    live = controller_repo["live_controller"]
+    name = b"tasks/c/\xff.md"
+    target = os.fsencode(str(live)) + b"/" + name
+    try:
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with open(target, "wb") as handle:
+            handle.write(b"x\n")
+    except OSError:
+        pytest.skip("filesystem refuses non-UTF-8 names")
+    subprocess.run(["git", "-C", str(live), "add", "-A"], check=True, env={**os.environ, **GIT_ENV})
+    _rg(live, "commit", "-qm", "odd name")
+    controller = ad.materialize_controller(cfg, host, controller_repo["new"])
+    carry = ad.carry_bound_cards(host, controller_repo["plist"], controller, controller_repo["new"])
+    assert carry["status"] == "SKIPPED"
+    assert carry["lost"] is True
+    assert _rg(controller, "rev-parse", "HEAD") == controller_repo["new"]
+
+
+def test_carry_uses_literal_pathspecs(controller_repo: dict[str, Any]) -> None:
+    """A bound file literally named ``tasks/k*`` must not drag ``tasks/keep.md`` along."""
+    cfg, host = controller_repo["cfg"], controller_repo["host"]
+    live = controller_repo["live_controller"]
+    (live / "tasks/keep.md").write_text("live edit, not a bind of this file\n")
+    _bind(live, "tasks/k*", "glob\n")
+    controller = ad.materialize_controller(cfg, host, controller_repo["new"])
+    carry = ad.carry_bound_cards(host, controller_repo["plist"], controller, controller_repo["new"])
+    assert carry["carried"] == ["tasks/k*"]
+    assert (controller / "tasks/keep.md").read_text() == "tracked\n"
+
+
+def test_rollback_refuses_a_predecessor_controller_its_gateway_would_refuse(
+    controller_repo: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (controller_repo["deployment"] / "scripts/ops").mkdir(parents=True, exist_ok=True)
+    (controller_repo["deployment"] / ad.ENTRYPOINT).write_text("")
+    host = controller_repo["host"]
+    monkeypatch.setattr(host, "controller_problem", lambda *a, **k: "CONTROLLER_WORKTREE_DIRTY")
+    verdict = ad.rollback_readiness(host, controller_repo["plist"])
+    assert verdict == {
+        "ok": False,
+        "reason": "PREDECESSOR_CONTROLLER_INVALID:CONTROLLER_WORKTREE_DIRTY",
+    }
+
+
+def test_materialize_refuses_a_symlinked_controllers_dir(cfg: ad.Config, tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    (outside / ("a1-" + NEW)).mkdir(parents=True)
+    cfg.gateway_root.mkdir(parents=True, exist_ok=True)
+    cfg.controllers.symlink_to(outside)
+    with pytest.raises(ad.DeployError, match="CONTROLLER_ROOT_UNSAFE"):
+        ad.materialize_controller(cfg, FakeHost(), NEW)
+    assert (outside / ("a1-" + NEW)).exists()
+
+
+def test_gateway_runs_with_the_controller_as_cwd(cfg: ad.Config) -> None:
+    """cwd keeps its pre-split meaning (the canonical root) for cwd-based fallbacks."""
+    controller = cfg.controllers / ("a1-" + NEW)
+    command = ad.wrapper_command(
+        cfg, cfg.deployments / ("a1-" + NEW), Path("/py"), controller_root=controller
+    )
+    assert command.startswith(f'cd "{controller}" ;')
+    assert f'exec "/py" "{cfg.deployments / ("a1-" + NEW) / ad.ENTRYPOINT}"' in command
+
+
+def test_late_bind_after_the_check_is_reported(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    host, prober = FakeHost(), FakeProber()
+    verdicts = iter([None, "LIVE_CONTROLLER_MOVED:aaaaaaaaaaaa->bbbbbbbbbbbb"])
+    monkeypatch.setattr(
+        ad._Cycle, "live_controller_moved", lambda self, plist, receipt: next(verdicts)
+    )
+    monkeypatch.setattr(
+        ad,
+        "carry_bound_cards",
+        lambda *args, **kwargs: {
+            "status": "NONE",
+            "from": str(cfg.controllers / ("a1-" + OLD)),
+            "from_head": OLD,
+        },
+    )
+    assert cycle(cfg, host, prober)["status"] == "DEPLOYED"
+    warnings = ad.read_receipts(cfg.state_dir)[-1]["warnings"]
+    assert any(w.startswith("LATE_BIND_NOT_CARRIED:LIVE_CONTROLLER_MOVED") for w in warnings)
+    # The old Controller holds the only copy of that bind: it is never pruned.
+    retained = json.loads(cfg.retained_controllers.read_text())
+    assert ("a1-" + OLD) in retained
+    old_controller = cfg.controllers / ("a1-" + OLD)
+    old_controller.mkdir(parents=True)
+    ad.prune(cfg, host, [])
+    assert old_controller.exists()
+
+
+def test_controller_moved_defers_without_debounce(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    host, prober = FakeHost(), FakeProber()
+    monkeypatch.setattr(
+        ad._Cycle,
+        "live_controller_moved",
+        lambda self, plist, receipt: "LIVE_CONTROLLER_MOVED:x->y",
+    )
+    assert cycle(cfg, host, prober)["status"] == ad.CONTROLLER_MOVED_OUTCOME
+    assert host.reloads == []
+    monkeypatch.setattr(ad._Cycle, "live_controller_moved", lambda self, plist, receipt: None)
+    host.clock += 60  # inside min_interval_seconds
+    assert cycle(cfg, host, prober)["status"] == "DEPLOYED"
+
+
+def test_carry_reset_failure_still_never_raises(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Exploding(FakeHost):
+        def run(self, argv, **kwargs):  # type: ignore[override]
+            raise OSError("disk gone")
+
+    def boom(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("carry broke")
+
+    monkeypatch.setattr(ad, "_carry_bound_cards", boom)
+    result = ad.carry_bound_cards(Exploding(), b"", cfg.controllers / "a1-x", NEW)
+    assert result == {"status": "SKIPPED", "reason": "CARRY_ERROR:RuntimeError", "lost": True}
+
+
+def test_unreadable_retention_list_stops_pruning(cfg: ad.Config) -> None:
+    host = FakeHost()
+    orphan = cfg.controllers / ("a1-" + "1" * 40)
+    orphan.mkdir(parents=True)
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    cfg.retained_controllers.write_text("{broken")
+    assert ad.prune(cfg, host, []) == []
+    assert orphan.exists()
+
+
+def test_retain_failure_is_a_warning_not_a_rollback(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    host, prober = FakeHost(), FakeProber()
+    verdicts = iter([None, "LIVE_CONTROLLER_MOVED:aaaaaaaaaaaa->bbbbbbbbbbbb"])
+    monkeypatch.setattr(
+        ad._Cycle, "live_controller_moved", lambda self, plist, receipt: next(verdicts)
+    )
+
+    def broken(self: Any, receipt: Any, reason: str) -> None:
+        raise OSError("full")
+
+    monkeypatch.setattr(ad._Cycle, "retain_controller", broken)
+    assert cycle(cfg, host, prober)["status"] == "DEPLOYED"
+    assert host.reloads and len(host.reloads) == 1
+    warnings = ad.read_receipts(cfg.state_dir)[-1]["warnings"]
+    assert any(w.startswith("RETAIN_CONTROLLER_FAILED:OSError") for w in warnings)
+    # The old Controller cannot be pruned by a later cycle: everything is held.
+    assert "RETAIN_CONTROLLER_FAILED" in cfg.hold_file.read_text()
+    assert cycle(cfg, host, prober)["status"] == "HELD"
 
 
 # ------------------------------------------------- degraded live Controller (#2230 F2)

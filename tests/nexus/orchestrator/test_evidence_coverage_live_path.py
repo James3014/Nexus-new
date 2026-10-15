@@ -47,6 +47,11 @@ from nexus.orchestrator.task_contract import (
     parse_task_card_expected_evidence,
 )
 
+# In-process seam units compute the card identity with the test reference of
+# Core's formula (the in-tree ``product`` shadows Core here); the live driver
+# uses the real pinned Core, and the two are proven equal below (#2246).
+pytestmark = pytest.mark.usefixtures("reference_core_universe_identity")
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DRIVER = Path(__file__).with_name("_evidence_coverage_live_driver.py")
 CORE_GITHUB_URL = "https://github.com/James3014/nexus-core.git"
@@ -227,6 +232,39 @@ def pinned_core(tmp_path_factory) -> Path:
     head = _git(dest, "rev-parse", "HEAD").stdout.strip()
     assert head == revision
     return dest
+
+
+@pytest.fixture(scope="module")
+def pinned_core_digest(pinned_core) -> tuple[str, str]:
+    """The deployer's expected source digest of the pinned checkout (#2246)."""
+    from scripts.ops import nexus_gateway_auto_deploy as ad
+
+    revision = _pinned_core_revision()
+    computed = ad.core_source_digest(ad.Host(), pinned_core, revision)
+    assert computed["source_digest_status"] == "COMPUTED", computed
+    return revision, computed["source_digest"]
+
+
+def test_deployer_source_digest_equals_pinned_core_identity(pinned_core, pinned_core_digest):
+    """The Gateway auto-deployer's digest is what real Core's core_identity() reports."""
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-B",
+            "-c",
+            "import json, sys; sys.path.insert(0, sys.argv[1]);"
+            "from product.protocol import core_identity; print(json.dumps(core_identity()))",
+            str(pinned_core),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+    )
+    identity = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert identity["build_identity"] == "UNSTAMPED"
+    assert identity["source_digest"] == pinned_core_digest[1]
+    assert pinned_core_digest[0] == _pinned_core_revision()
 
 
 @pytest.fixture(scope="module")
@@ -718,9 +756,71 @@ def test_gateway_status_tool_carries_core_provenance(monkeypatch, tmp_path):
 
 def test_live_coverage_identity_is_the_host_computed_card_identity(live):
     verdict = _verdict(live["complete"])
-    assert verdict["coverage"]["universe_identity"] == core_universe_identity(
-        SCENARIOS[0]["universe"]
+    # Computed in the Gateway process by Core's public expected_universe_identity.
+    host_identity = live["host_core_universe_identities"]["complete"]
+    assert host_identity.startswith("sha256:"), host_identity
+    assert verdict["coverage"]["universe_identity"] == host_identity
+    assert verdict["core_universe_identity"] == host_identity
+
+
+def test_reference_universe_identity_matches_pinned_core(live):
+    """The in-process test reference equals real Core on every declared universe."""
+    identities = live["host_core_universe_identities"]
+    declared = [s for s in SCENARIOS if s["universe"] is not None]
+    assert sorted(identities) == sorted(s["name"] for s in declared)
+    for scenario in declared:
+        assert identities[scenario["name"]] == core_universe_identity(scenario["universe"])
+    conformance = live["core_conformance_universe_identity"]
+    assert conformance["ok"] is True, conformance
+
+
+def test_verdict_blocks_when_core_response_universe_identity_differs(tmp_path):
+    contract = _universe_contract(tmp_path)
+    projection = _verified_projection(1)
+    declared = {"universe_generation": 1, "subjects": [DIFF_CHECK]}
+    projection["core_response"]["hashes"] = {"universe_identity": core_universe_identity(declared)}
+    ok = build_core_verdict(contract=contract, projection=projection)
+    assert ok["blocking"] is False, ok["host_reason_codes"]
+    projection["core_response"]["hashes"] = {"universe_identity": "sha256:" + "2" * 64}
+    verdict = build_core_verdict(contract=contract, projection=projection)
+    assert verdict["blocking"] is True
+    assert verdict["host_reason_codes"] == ["CORE_RESPONSE_UNIVERSE_IDENTITY_MISMATCH"]
+    # A legacy task never carries a universe identity in Core's response.
+    legacy = build_core_verdict(contract=SimpleNamespace(task_id="legacy"), projection=projection)
+    assert legacy["blocking"] is True
+    assert "CORE_RESPONSE_UNIVERSE_IDENTITY_MISMATCH" in legacy["host_reason_codes"]
+
+
+def test_verdict_blocks_when_core_cannot_compute_universe_identity(tmp_path, monkeypatch):
+    from nexus.orchestrator import ambient_core
+
+    def unavailable():
+        raise RuntimeError("CORE_UNIVERSE_IDENTITY_UNAVAILABLE")
+
+    monkeypatch.setattr(ambient_core, "_core_expected_universe_identity", unavailable)
+    contract = _universe_contract(tmp_path)
+    verdict = build_core_verdict(
+        contract=contract, projection=_verified_projection(1, identity="sha256:" + "3" * 64)
     )
+    assert verdict["blocking"] is True
+    assert "CORE_UNIVERSE_IDENTITY_UNAVAILABLE" in verdict["host_reason_codes"]
+    assert "CORE_COVERAGE_IDENTITY_MISMATCH" in verdict["host_reason_codes"]
+    assert verdict["core_universe_identity"] is None
+    # Core returning a non-hash is never accepted as an identity.
+    monkeypatch.setattr(ambient_core, "_core_expected_universe_identity", lambda: lambda _c: None)
+    with pytest.raises(RuntimeError, match="CORE_UNIVERSE_IDENTITY_INVALID"):
+        core_universe_identity({"universe_generation": 1, "subjects": [DIFF_CHECK]})
+
+
+def test_host_has_no_copy_of_the_universe_identity_formula():
+    """Without Core the host cannot compute the identity (no fallback formula)."""
+    import inspect
+
+    from nexus.orchestrator import ambient_core
+
+    source = inspect.getsource(ambient_core.core_universe_identity)
+    assert "hashlib" not in source and "json.dumps" not in source
+    assert "_core_expected_universe_identity()" in source
 
 
 @pytest.mark.parametrize(
