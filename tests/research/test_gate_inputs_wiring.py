@@ -1000,27 +1000,22 @@ def test_strict_route_names_the_receipt_only_capabilities_and_the_pinned_runtime
 
 
 def test_misspelt_kill_switch_is_ignored_in_the_strict_lane_and_refused_by_the_runner(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    import subprocess
     import sys
+
+    from scripts.bench import capability_ab_runner as runner
 
     monkeypatch.setenv("NEXUS_SPRINT_GATE_INPUTS", "yes")
     monkeypatch.setenv("NEXUS_SYMMETRIC_PROMPT", "1")
     request, _root = _capture_request(tmp_path, monkeypatch)  # strict lane: never parsed
     assert dict(request.codeintel) == {}
-    env = {**os.environ, "NEXUS_SPRINT_GATE_INPUTS": "yes", "PYTHONPATH": str(_REPO_ROOT)}
-    proc = subprocess.run(
-        [sys.executable, "scripts/bench/capability_ab_runner.py", "--preflight-only"],
-        cwd=_REPO_ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=300,
-        check=False,
-    )
-    assert proc.returncode == 2, proc.stderr[-2000:]
-    assert "NEXUS_SPRINT_GATE_INPUTS must be 0 or 1" in proc.stderr
+    # The runner refuses to start (argparse error, exit 2) before doing anything else.
+    monkeypatch.setattr(sys, "argv", ["capability_ab_runner.py", "--preflight-only"])
+    with pytest.raises(SystemExit) as exc:
+        runner.main()
+    assert exc.value.code == 2
+    assert "NEXUS_SPRINT_GATE_INPUTS must be 0 or 1" in capsys.readouterr().err
 
 
 def test_visibility_flag_alone_is_not_physical_output() -> None:
