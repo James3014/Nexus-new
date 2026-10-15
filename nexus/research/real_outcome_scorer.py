@@ -1111,6 +1111,9 @@ def trusted_impact_plan(
 # ----------------------------------------------------------------------- scoring
 
 
+_SHA256_HEX = re.compile(r"[0-9a-f]{64}")
+
+
 @dataclass
 class ScoreContext:
     work: Path
@@ -1118,10 +1121,17 @@ class ScoreContext:
     runner: PytestRunner
     repo_sources: Mapping[str, Sequence[str]]
     spec_sha256: str
+    # Required (no default): a v2 receipt must never carry an empty spec hash.
+    spec_v2_sha256: str
     leakage_flags: Mapping[str, str] = field(default_factory=dict)
     log: Callable[[str], None] = print
     keep_trees: bool = False
-    spec_v2_sha256: str = ""
+
+    def __post_init__(self) -> None:
+        for name in ("spec_sha256", "spec_v2_sha256"):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not _SHA256_HEX.fullmatch(value):
+                raise ValueError(f"{name} must be 64 lowercase hex characters")
 
 
 def _capped(inputs: TaskInputs) -> bool:
@@ -1251,14 +1261,12 @@ def score_task(
             receipt["sub_reason"] = "GOLD_PORT_FAILED"
             receipt["detail"] = f"pr:{port.failed_pr}"
             return _finish(receipt, timing, t0, ctx)
-        # v2: a merge-taken test file that is not a test module (conftest.py, test data)
-        # and exists at BASE could change how BASE tests in other files behave, and those
-        # tests are not re-run at their BASE state (P2P(d) covers modules only): refuse.
-        support = sorted(
-            f
-            for f in set(port.test_files_from_merge)
-            if not is_oracle_module_name(f) and repo.path_in(inputs.base_sha, f)
-        )
+        # v2: a merge-taken test file that is not a test module (conftest.py, __init__.py,
+        # test data, helpers), whether or not it exists at BASE, could change how BASE
+        # tests in other files behave (a new conftest.py can stop them being collected),
+        # and those tests are not re-run at their BASE state (P2P(d) covers modules
+        # only): refuse.
+        support = sorted(f for f in set(port.test_files_from_merge) if not is_oracle_module_name(f))
         if support:
             receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
             receipt["sub_reason"] = "GOLD_PORT_FAILED"
@@ -1452,20 +1460,22 @@ def score_task(
             sources = {"cand0": cand_tree, "gold0": gold_tree}
             if "goldref" in wts:
                 sources["goldref0"] = repo.tree_id(wts["goldref"])
+            key = ""
             try:
                 for key, tree in sources.items():
                     wts[key] = repo.worktree(trees_dir / key, inputs.base_sha)
                     _restore_tree(repo, wts[key], tree)
                     overwrite_oracle_files(wts[key], wts["base"], files)
                     d_trees[key] = repo.tree_id(wts[key])
-            except UnsafeOracleSource as exc:
-                # A BASE oracle file is a link: candidate-independent, the oracle is invalid.
-                receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
-                receipt["sub_reason"] = "ORACLE_FILE_UNSAFE"
-                receipt["detail"] = str(exc)
-                receipt["flaky_dropped"] = len(flaky)
-                return _finish(receipt, timing, t0, ctx)
             except UnsafeTreePath as exc:
+                if isinstance(exc, UnsafeOracleSource) or key != "cand0":
+                    # A BASE oracle file is a link, or a GOLD/GOLD_REF tree cannot be
+                    # built: candidate-independent, the oracle is invalid.
+                    receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
+                    receipt["sub_reason"] = "ORACLE_FILE_UNSAFE"
+                    receipt["detail"] = str(exc)
+                    receipt["flaky_dropped"] = len(flaky)
+                    return _finish(receipt, timing, t0, ctx)
                 receipt["label"] = NOT_RUNNABLE
                 receipt["sub_reason"] = not_runnable or "APPLY_FAILED"
                 receipt["detail"] = str(exc)
@@ -1663,19 +1673,29 @@ def _evaluate_candidate(
         ]
         b_runs = [b0] + [baseline_run(*trees["base"], t, i, ign) for i in (1, 2)]
         g_run = baseline_run(*trees["gold"], t, 0, ign)
-        # A5: with dropped doc/data files, a suspect is excused only if it also fails on
-        # GOLD_REF, so a failure explained by a dropped file stays a P2P new failure. A
-        # GOLD_REF run that is not clean makes the task NOT_SCORABLE (below).
-        n_ref_failures = len(goldref_failures)
-        r_run = baseline_run(*trees["goldref"], t, 0, ign) if "goldref" in trees else None
-        if len(goldref_failures) != n_ref_failures:
-            return len(base_pass)  # no verdict on these suspects: the task is NOT_SCORABLE
+        stable = []
         for n in suspects:
             if not all(_get(r, n) != PASS for r in c_runs) or not all(
                 _get(r, n) == PASS for r in b_runs
             ):
                 flaky_dropped.add(n)
-            elif _get(g_run, n) != PASS and (r_run is None or _get(r_run, n) != PASS):
+            elif _get(g_run, n) == PASS:
+                new_failures.add(n)  # GOLD passes it: a new failure whatever GOLD_REF says
+            else:
+                stable.append(n)
+        # A5: with dropped doc/data files, a suspect that GOLD fails is excused only if it
+        # also fails on GOLD_REF, so a failure explained by a dropped file stays a P2P new
+        # failure. GOLD_REF runs only when such a suspect exists; a GOLD_REF run that is
+        # not clean then leaves these suspects without a verdict and the task NOT_SCORABLE
+        # (below).
+        r_run = None
+        if stable and "goldref" in trees:
+            n_ref_failures = len(goldref_failures)
+            r_run = baseline_run(*trees["goldref"], t, 0, ign)
+            if len(goldref_failures) != n_ref_failures:
+                return len(base_pass)
+        for n in stable:
+            if r_run is None or _get(r_run, n) != PASS:
                 gold_also_fails.add(n)
             else:
                 new_failures.add(n)
@@ -1817,21 +1837,37 @@ def clopper_pearson(k: int, n: int, alpha: float = 0.05) -> tuple[float, float]:
 
 
 def spec_version_of(receipt: Mapping[str, Any]) -> str:
-    """Receipts written before spec v2 existed carry no version: they are v1."""
-    return str(receipt.get("spec_version") or SPEC_V1)
+    """Receipts written before spec v2 existed carry no ``spec_version`` key: they are v1.
+    Any value that is present is taken as written (an empty or null one is not v1)."""
+    if "spec_version" not in receipt:
+        return SPEC_V1
+    return str(receipt["spec_version"])
+
+
+def v1_equivalent(receipt: Mapping[str, Any]) -> Mapping[str, Any]:
+    """The receipt as spec v1 would have reported it. A v2 receipt exists only because the
+    PR patch did not apply whole (A5), which under v1 is NOT_SCORABLE / GOLD_PORT_FAILED."""
+    if spec_version_of(receipt) != SPEC_V2:
+        return receipt
+    return {**receipt, "label": NOT_SCORABLE_ORACLE_INVALID, "sub_reason": "GOLD_PORT_FAILED"}
 
 
 def summarize(receipts: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """Headline numbers use v1 (pre-registered) receipts only; ``v1_plus_v2`` adds the
-    receipts scored under spec v2 (A5, designed after the V11/V12 replays), reported apart."""
-    v1 = [r for r in receipts if spec_version_of(r) == SPEC_V1]
+    """Headline numbers are what spec v1 (pre-registered) reports: v1 receipts, plus each
+    v2 receipt at its v1-equivalent label (GOLD_PORT_FAILED). ``v1_plus_v2`` counts the v2
+    receipts at their own labels (A5, designed after the V11/V12 replays), reported apart.
+    A receipt with any other spec version is in neither block (``unknown_spec_versions``)."""
     versions: dict[str, int] = {}
     for r in receipts:
         versions[spec_version_of(r)] = versions.get(spec_version_of(r), 0) + 1
+    known = [r for r in receipts if spec_version_of(r) in (SPEC_V1, SPEC_V2)]
     return {
-        **_summary(v1),
-        "v1_plus_v2": _summary(receipts),
+        **_summary([v1_equivalent(r) for r in known]),
+        "v1_plus_v2": _summary(known),
         "spec_version_counts": dict(sorted(versions.items())),
+        "unknown_spec_versions": {
+            v: n for v, n in sorted(versions.items()) if v not in (SPEC_V1, SPEC_V2)
+        },
     }
 
 

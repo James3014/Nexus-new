@@ -17,8 +17,14 @@ evidence**, and they are always reported apart from v1:
   `spec_version: "v2"` and this file's sha256 in `spec_sha256`. Every other receipt records
   `spec_version: "v1"` and the v1 sha256. A receipt with no `spec_version` key predates
   v2 and is v1.
-- `--summarize` gives its headline numbers from v1 receipts only. A separate `v1_plus_v2`
-  block and `spec_version_counts` show the results with v2 receipts added.
+- `--summarize` gives its headline numbers exactly as v1 would report them: every v1
+  receipt, plus every v2 receipt counted at its v1 label,
+  `NOT_SCORABLE_ORACLE_INVALID / GOLD_PORT_FAILED` (under v1 the PR patch did not apply).
+  So the v1 counts are complete and the valid-oracle denominator is the v1 one. A
+  separate `v1_plus_v2` block counts the v2 receipts at their own labels.
+  `spec_version_counts` counts every receipt by version. A receipt whose `spec_version`
+  is present but is neither `"v1"` nor `"v2"` (including an empty or null value) is in
+  neither block; `unknown_spec_versions` counts those by version.
 - For every task whose PR patches all apply whole (step 1 below), v2 builds the same GOLD,
   oracle and label as v1. The receipt only gains the keys `spec_version` and
   `gold_port_method = "3way"` (scorer 1.2.0).
@@ -56,9 +62,11 @@ For each PR, in §5 order:
      `GOLD_PORT_FAILED`, with the paths in `gold_port_failed_paths`. So does a path that is
      not a safe relative path, and unmerged index entries left after the PR.
 3. If a merge-taken oracle test file is **not** a test module (for example
-   `conftest.py` or test data) and exists at BASE, the task is `GOLD_PORT_FAILED` with
+   `conftest.py`, `__init__.py`, test data or a helper), whether or not it exists at BASE,
+   the task is `NOT_SCORABLE_ORACLE_INVALID / GOLD_PORT_FAILED` with
    `detail = "merge_taken_test_support_file:<paths>"`. Such a file can change BASE tests
-   in other files, and Rule 3 re-runs only test modules.
+   in other files (a new `conftest.py` can even stop them being collected), and Rule 3
+   re-runs only test modules.
 
 GOLD's non-test content is therefore BASE plus a **subset** of the human fix's non-test
 changes. It never contains a non-test change made by another main commit, so an F2P node
@@ -80,11 +88,16 @@ never a scoring tree.
   task is `GOLD_PORT_FAILED` with `detail = "dropped_paths_change_oracle_outcome"`, and
   `gold_ref_mismatch` lists the nodes.
 - In §6.4 step 2 a P2P suspect is `gold_also_fails` only if it fails on **both** GOLD and
-  GOLD_REF.
-- If any `GOLD_REF` run (oracle or P2P) times out, or exits outside {0, 1} for oracle runs
-  and outside {0, 1, 5} for P2P runs, the task is
-  `NOT_SCORABLE_ORACLE_INVALID / GOLD_REF_RUN_FAILED`. It is neither excused nor counted
-  against the candidate. This sub-reason takes precedence over `NOT_RUNNABLE`.
+  GOLD_REF. A suspect that passes on GOLD is a new failure whatever GOLD_REF says, so it
+  is judged without GOLD_REF. For a P2P target, the GOLD_REF run is made only when at
+  least one of its suspects (failing 3/3 on the candidate tree, passing 3/3 on the base
+  tree) fails on GOLD.
+- If the `GOLD_REF` oracle run times out or exits outside {0, 1}, the task is
+  `NOT_SCORABLE_ORACLE_INVALID / GOLD_REF_RUN_FAILED`. The same holds when a `GOLD_REF`
+  P2P run that was made (above) times out or exits outside {0, 1, 5}: the suspects that
+  GOLD fails on that target get no verdict, neither excused nor counted against the
+  candidate. This sub-reason takes precedence over `NOT_RUNNABLE` and over any other
+  label.
 
 **Known limit.** The `GOLD_REF` outcome check compares oracle modules only. A dropped file
 that only non-oracle tests or runtime code read is guarded in two ways. First, the
@@ -107,7 +120,7 @@ the BASE bytes of **every** oracle file:
 | `GOLD_REF@BASE_TESTS` | GOLD_REF, with every oracle file set to BASE (only when files were dropped) |
 
 §6.4 is applied unchanged, with these trees in place of `BASE+T`, `CAND+T`, GOLD and
-GOLD_REF. A node that passes on BASE run 0 and does not pass on CAND run 0 is a suspect.
+GOLD_REF (and Rule 2 decides when `GOLD_REF@BASE_TESTS` is run). A node that passes on BASE run 0 and does not pass on CAND run 0 is a suspect.
 It is a new failure if it fails 3/3 on `CAND@BASE_TESTS`, passes 3/3 on `BASE`, and does
 not fail on both `GOLD@BASE_TESTS` and `GOLD_REF@BASE_TESTS`. Oracle node ids are **not**
 excluded, because the BASE test body may differ from the merge-tree one. The receipt
@@ -124,6 +137,10 @@ BASE behaviour directly, so it covers both deletions and rewrites.
 
 When oracle files are copied into a tree (BASE+T, CAND+T and the Rule 3 trees), a source
 that is a symlink is refused. For BASE+T this gives
-`NOT_SCORABLE_ORACLE_INVALID / ORACLE_FILE_UNSAFE`. A destination link is removed, never
+`NOT_SCORABLE_ORACLE_INVALID / ORACLE_FILE_UNSAFE`. In the Rule 3 trees, any unsafe path
+met while building `GOLD@BASE_TESTS` or `GOLD_REF@BASE_TESTS` (candidate-independent
+trees), and a symlinked BASE source for any of them, also gives
+`NOT_SCORABLE_ORACLE_INVALID / ORACLE_FILE_UNSAFE`. Only an unsafe destination path in
+`CAND@BASE_TESTS` is the candidate's `NOT_RUNNABLE / APPLY_FAILED`. A destination link is removed, never
 written through. This refusal also applies to v1 tasks: it rejects unsafe input in the
 same way as amendment A3.

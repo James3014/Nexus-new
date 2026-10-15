@@ -186,6 +186,7 @@ def _ctx(tmp: Path, fx: Fixture, work: str = "work") -> ros.ScoreContext:
         runner=ros.PytestRunner(w / "scratch", timeout=300, log=lambda m: None),
         repo_sources={fx.repo_name: [str(fx.upstream)]},
         spec_sha256="0" * 64,
+        spec_v2_sha256="2" * 64,
         log=lambda m: None,
     )
 
@@ -1653,3 +1654,179 @@ def test_symlinked_base_oracle_file_in_rule3_trees_is_oracle_invalid(tmp_path):
     assert r["gold_port_test_files_from_merge"] == ["tests/test_mul.py"]
     assert (r["label"], r["sub_reason"]) == (ros.NOT_SCORABLE_ORACLE_INVALID, "ORACLE_FILE_UNSAFE")
     assert r["detail"] == "oracle_source_symlink:tests/test_ln.py"
+
+
+# Spec v2 review round 5.
+
+
+def test_merge_taken_conftest_absent_at_base_is_refused(tmp_path):
+    # Review round 5, H1 (Opus repro): main adds tests/conftest.py, which hides
+    # tests/test_add.py from collection; the human PR edits it, so GOLD takes it from M.
+    # The candidate fixes mul() and breaks add(); BASE+T and CAND+T never collect
+    # test_add, so it used to be RESOLVED. Any merge-taken non-module test file is refused.
+    fx = Fixture(tmp_path)
+    merge = _drift_then_fix(
+        fx,
+        {"tests/conftest.py": "collect_ignore = ['test_add.py']\n"},
+        {**_fix_with(MUL_TEST), "tests/conftest.py": "collect_ignore = ['test_add.py']\nX = 1\n"},
+    )
+    calc = FIXED.replace("return a + b", "return a - b")
+    r = _score(tmp_path, fx, fx.task(fx.diff_from_base({"pkg/calc.py": calc}), merge=merge))
+    assert r["gold_port_test_files_from_merge"] == ["tests/conftest.py"]
+    assert (r["label"], r["sub_reason"]) == (ros.NOT_SCORABLE_ORACLE_INVALID, "GOLD_PORT_FAILED")
+    assert r["detail"] == "merge_taken_test_support_file:tests/conftest.py"
+
+
+def test_gold_ref_p2p_failure_does_not_hide_a_regression_gold_passes(tmp_path):
+    # Review round 5, M1 (Opus repro): the candidate breaks add(), which GOLD passes, so
+    # it is a new failure whatever GOLD_REF says. A timed-out GOLD_REF P2P run used to make
+    # the task NOT_SCORABLE; GOLD_REF is now run only for suspects that GOLD fails.
+    fx, merge = _docs_drop_fixture(tmp_path)
+    ctx = _ctx(tmp_path, fx)
+    ctx.runner = _TreeTimeoutRunner(
+        tmp_path / "work" / "scratch",
+        timeout=300,
+        log=lambda m: None,
+        trees={"goldref"},
+        targets={"tests"},
+    )
+    calc = FIXED.replace("return a + b", "return a - b")
+    r = ros.score_task(fx.task(fx.diff_from_base({"pkg/calc.py": calc}), merge=merge), ctx)[
+        "receipt"
+    ]
+    assert (r["label"], r["sub_reason"]) == (ros.BROKE_EXISTING, None)
+    assert r["p2p_new_failures"] == ["tests.test_add::test_add"]
+    assert all(d["tree"] != "GOLD_REF" for d in r["p2p_baseline_failures"])
+    honest = fx.task(fx.diff_from_base({"pkg/calc.py": FIXED}), merge=merge)
+    assert ros.score_task(honest, ctx)["receipt"]["label"] == ros.RESOLVED
+
+
+VERSION_TEST = (
+    "import json\nfrom pathlib import Path\n\nfrom pkg import calc\n\n\n"
+    "def test_version():\n"
+    '    assert calc.VERSION == json.loads(Path("docs/meta.json").read_text())["version"]\n'
+)
+
+
+def test_p2p_failure_explained_by_a_dropped_file_is_not_excused(tmp_path):
+    # Review round 5, M2: the A5 core rule. test_version fails on GOLD (meta.json dropped,
+    # so still at BASE) but passes on GOLD_REF (merge content). GOLD failing alone must not
+    # excuse the candidate, whose VERSION matches neither: BROKE_EXISTING.
+    fx = Fixture(
+        tmp_path,
+        extra_base={
+            "pkg/calc.py": BUGGY + "\n\nVERSION = 1\n",
+            "docs/meta.json": '{"version": 1,\n "x": 1}\n',
+            "tests/test_version.py": VERSION_TEST,
+        },
+    )
+    merge = _drift_then_fix(
+        fx,
+        {"docs/meta.json": '{"version": 1,\n "x": 2}\n'},
+        {
+            **_fix_with(MUL_TEST),
+            "pkg/calc.py": FIXED + "\n\nVERSION = 2\n",
+            "docs/meta.json": '{"version": 2,\n "x": 3}\n',
+        },
+    )
+    cand = fx.diff_from_base({"pkg/calc.py": FIXED + "\n\nVERSION = 3\n"})
+    r = _score(tmp_path, fx, fx.task(cand, merge=merge))
+    assert r["gold_port_dropped_non_code_paths"] == ["docs/meta.json"]
+    assert "tests" in r["p2p_targets"]
+    assert r["gold_also_fails"] == []
+    assert r["p2p_new_failures"] == ["tests.test_version::test_version"]
+    assert r["label"] == ros.BROKE_EXISTING
+
+
+def _summary_row(i: int, label: str, version: object = None, **extra) -> dict:
+    r = {
+        "label": label,
+        "route": "B",
+        "candidate_raw_status": "VALID",
+        "capped": False,
+        "candidate_empty": False,
+        "failure_kind": None,
+        "task_key": str(i),
+        **extra,
+    }
+    if version is not None:
+        r["spec_version"] = version
+    return r
+
+
+def test_summary_v1_block_maps_v2_receipts_to_gold_port_failed():
+    # Review round 5, L1: under v1 a fallback task is NOT_SCORABLE / GOLD_PORT_FAILED.
+    rows = [
+        _summary_row(0, ros.RESOLVED),
+        _summary_row(1, ros.NOT_SCORABLE_ORACLE_INVALID, "v1", sub_reason="GOLD_PORT_FAILED"),
+        _summary_row(2, ros.RESOLVED, "v2"),
+    ]
+    s = ros.summarize(rows)
+    assert s["counts"] == {ros.NOT_SCORABLE_ORACLE_INVALID: 2, ros.RESOLVED: 1}
+    assert (s["resolved"], s["valid_oracle_n"]) == (1, 1)
+    assert s["v1_plus_v2"]["counts"] == {ros.NOT_SCORABLE_ORACLE_INVALID: 1, ros.RESOLVED: 2}
+    assert (s["v1_plus_v2"]["resolved"], s["v1_plus_v2"]["valid_oracle_n"]) == (2, 2)
+    assert rows[2]["label"] == ros.RESOLVED  # the input receipt is not modified
+
+
+def test_summary_excludes_unknown_spec_versions():
+    # Review round 5, Codex 4: only v1 and v2 receipts are counted.
+    rows = [_summary_row(0, ros.RESOLVED), _summary_row(1, ros.UNRESOLVED, "v1")]
+    before = ros.summarize(rows)
+    after = ros.summarize([
+        *rows,
+        _summary_row(2, ros.RESOLVED, "v3"),
+        _summary_row(3, ros.RESOLVED, "v3"),
+        _summary_row(4, ros.RESOLVED, ""),
+    ])
+    for key in ("counts", "resolved", "valid_oracle_n", "ci95"):
+        assert after[key] == before[key]
+        assert after["v1_plus_v2"][key] == before["v1_plus_v2"][key]
+    assert after["unknown_spec_versions"] == {"": 1, "v3": 2}
+    assert before["unknown_spec_versions"] == {}
+    assert after["spec_version_counts"] == {"": 1, "v1": 2, "v3": 2}
+
+
+@pytest.mark.parametrize("field", ["spec_sha256", "spec_v2_sha256"])
+@pytest.mark.parametrize("value", ["", "abc", "A" * 64, "g" * 64, "0" * 63])
+def test_score_context_requires_both_spec_hashes(tmp_path, fx, field, value):
+    # Review round 5, L2 / Codex 3: a v2 receipt must never carry an empty spec hash.
+    kw = {
+        "work": tmp_path,
+        "env_provider": LocalEnv(),
+        "runner": ros.PytestRunner(tmp_path / "scratch", log=lambda m: None),
+        "repo_sources": {},
+        "spec_sha256": "0" * 64,
+        "spec_v2_sha256": "2" * 64,
+    }
+    ros.ScoreContext(**kw)
+    with pytest.raises(ValueError):
+        ros.ScoreContext(**{**kw, field: value})
+
+
+def test_score_context_has_no_default_spec_v2_hash(tmp_path):
+    with pytest.raises(TypeError):
+        ros.ScoreContext(
+            work=tmp_path,
+            env_provider=LocalEnv(),
+            runner=ros.PytestRunner(tmp_path / "scratch", log=lambda m: None),
+            repo_sources={},
+            spec_sha256="0" * 64,
+        )
+
+
+def test_unsafe_gold_tree_in_rule3_build_is_oracle_invalid(tmp_path, monkeypatch):
+    # Review round 5, L3: GOLD@BASE_TESTS is candidate-independent, so a failure to build
+    # it is the oracle's, never the candidate's NOT_RUNNABLE / APPLY_FAILED.
+    fx, merge = _guard_dropped_by_drift(tmp_path)
+    real = ros.overwrite_oracle_files
+
+    def unsafe_on_gold0(wt, src, files):
+        if Path(wt).name == "gold0":
+            raise ros.UnsafeTreePath("oracle_path_escapes:tests/test_mul.py")
+        real(wt, src, files)
+
+    monkeypatch.setattr(ros, "overwrite_oracle_files", unsafe_on_gold0)
+    r = _score(tmp_path, fx, fx.task(fx.diff_from_base({"pkg/calc.py": FIXED}), merge=merge))
+    assert (r["label"], r["sub_reason"]) == (ros.NOT_SCORABLE_ORACLE_INVALID, "ORACLE_FILE_UNSAFE")
+    assert r["detail"] == "oracle_path_escapes:tests/test_mul.py"
