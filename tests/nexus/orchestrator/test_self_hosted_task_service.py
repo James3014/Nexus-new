@@ -11363,7 +11363,18 @@ def _state_root_repo(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.delenv("XDG_STATE_HOME", raising=False)
     monkeypatch.delenv("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR", raising=False)
+    monkeypatch.setattr(mod, "_repository_root_from_git", lambda: repo)
     return mod, home, workspace, repo
+
+
+def _populated_legacy(workspace):
+    legacy = workspace / "Nexus-new-self-hosted-state"
+    (legacy / "sub").mkdir(parents=True)
+    (legacy / "sub" / "task.json").write_text("{}")
+    return legacy
+
+
+_LEGACY = "NEXUS_SELF_HOSTED_STATE_ROOT_LEGACY_PRESENT"
 
 
 def test_default_state_root_is_outside_repository_workspace(tmp_path, monkeypatch):
@@ -11384,19 +11395,6 @@ def test_default_state_root_ignores_xdg_state_home(tmp_path, monkeypatch):
     )
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root reads mode-000 directories")
-def test_default_state_root_fails_closed_on_unreadable_legacy_dir(tmp_path, monkeypatch):
-    mod, _home, workspace, repo = _state_root_repo(tmp_path, monkeypatch)
-    locked = workspace / "Nexus-new-self-hosted-state" / "locked"
-    locked.mkdir(parents=True)
-    locked.chmod(0)
-    try:
-        with pytest.raises(RuntimeError, match="NEXUS_SELF_HOSTED_STATE_ROOT_LEGACY_PRESENT"):
-            mod._default_state_dir_for_repository(repo)
-    finally:
-        locked.chmod(0o700)
-
-
 def test_canonical_state_dir_env_override_still_wins(tmp_path, monkeypatch):
     _state_root_repo(tmp_path, monkeypatch)
     override = tmp_path / "explicit"
@@ -11404,27 +11402,108 @@ def test_canonical_state_dir_env_override_still_wins(tmp_path, monkeypatch):
     assert SelfHostedTaskService.canonical_state_dir() == override.resolve()
 
 
-def test_default_state_root_fails_closed_on_legacy_state(tmp_path, monkeypatch):
-    mod, _home, workspace, repo = _state_root_repo(tmp_path, monkeypatch)
-    legacy = workspace / "Nexus-new-self-hosted-state" / "sub"
-    legacy.mkdir(parents=True)
-    (legacy / "task.json").write_text("{}")
-    with pytest.raises(RuntimeError, match="NEXUS_SELF_HOSTED_STATE_ROOT_LEGACY_PRESENT"):
-        mod._default_state_dir_for_repository(repo)
-    assert (legacy / "task.json").exists()
-
-
-def test_default_state_root_ignores_empty_legacy_dirs(tmp_path, monkeypatch):
-    mod, home, workspace, repo = _state_root_repo(tmp_path, monkeypatch)
-    legacy = workspace / "Nexus-new-self-hosted-state"
-    (legacy / "assisted_provider_jobs").mkdir(parents=True)
-    result = mod._default_state_dir_for_repository(repo)
-    assert result == (home / ".local/state/Nexus-new-self-hosted-state").resolve()
-    assert (legacy / "assisted_provider_jobs").is_dir()
-
-
 def test_canonical_state_dir_default_is_not_inside_canonical_workspace(tmp_path, monkeypatch):
     _state_root_repo(tmp_path, monkeypatch)
     result = SelfHostedTaskService.canonical_state_dir()
-    assert result.parent == (tmp_path / "home/.local/state").resolve()
-    assert result.name.endswith("-self-hosted-state")
+    assert result == (tmp_path / "home/.local/state/Nexus-new-self-hosted-state").resolve()
+
+
+def test_canonical_state_dir_never_raises_with_populated_legacy(tmp_path, monkeypatch):
+    _mod, home, workspace, _repo = _state_root_repo(tmp_path, monkeypatch)
+    _populated_legacy(workspace)
+    assert (
+        SelfHostedTaskService.canonical_state_dir()
+        == (home / ".local/state/Nexus-new-self-hosted-state").resolve()
+    )
+
+
+def test_ephemeral_and_explicit_tmp_construction_ignore_populated_legacy(tmp_path, monkeypatch):
+    _state_root_repo(tmp_path, monkeypatch)
+    _populated_legacy(tmp_path / "workspace")
+    explicit = SelfHostedTaskService(
+        state_dir=tmp_path / "explicit-state", ephemeral=True, auto_reconcile=False
+    )
+    assert explicit.ephemeral
+    default_ephemeral = SelfHostedTaskService(ephemeral=True, auto_reconcile=False)
+    assert default_ephemeral.ephemeral
+
+
+def test_default_production_construction_refuses_populated_legacy(tmp_path, monkeypatch):
+    _state_root_repo(tmp_path, monkeypatch)
+    legacy = _populated_legacy(tmp_path / "workspace")
+    with pytest.raises(RuntimeError, match=_LEGACY):
+        SelfHostedTaskService(auto_reconcile=False)
+    assert (legacy / "sub" / "task.json").exists()
+
+
+def test_env_override_construction_ignores_populated_legacy(tmp_path, monkeypatch):
+    _state_root_repo(tmp_path, monkeypatch)
+    _populated_legacy(tmp_path / "workspace")
+    monkeypatch.setenv("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR", str(tmp_path / "explicit"))
+    SelfHostedTaskService(auto_reconcile=False)
+
+
+def test_legacy_guard_ignores_empty_legacy_dirs(tmp_path, monkeypatch):
+    mod, _home, workspace, repo = _state_root_repo(tmp_path, monkeypatch)
+    legacy = workspace / "Nexus-new-self-hosted-state"
+    (legacy / "assisted_provider_jobs").mkdir(parents=True)
+    mod.require_no_legacy_self_hosted_state(repo)
+    assert (legacy / "assisted_provider_jobs").is_dir()
+
+
+def test_legacy_guard_fails_closed_on_legacy_state(tmp_path, monkeypatch):
+    mod, _home, workspace, repo = _state_root_repo(tmp_path, monkeypatch)
+    legacy = _populated_legacy(workspace)
+    with pytest.raises(RuntimeError, match=_LEGACY):
+        mod.require_no_legacy_self_hosted_state(repo)
+    assert (legacy / "sub" / "task.json").exists()
+
+
+def test_legacy_guard_fails_closed_when_legacy_is_symlink(tmp_path, monkeypatch):
+    mod, _home, workspace, repo = _state_root_repo(tmp_path, monkeypatch)
+    (tmp_path / "elsewhere").mkdir()
+    (workspace / "Nexus-new-self-hosted-state").symlink_to(tmp_path / "elsewhere")
+    with pytest.raises(RuntimeError, match=_LEGACY):
+        mod.require_no_legacy_self_hosted_state(repo)
+
+
+def test_legacy_guard_fails_closed_when_legacy_is_not_a_directory(tmp_path, monkeypatch):
+    mod, _home, workspace, repo = _state_root_repo(tmp_path, monkeypatch)
+    (workspace / "Nexus-new-self-hosted-state").write_text("x")
+    with pytest.raises(RuntimeError, match=_LEGACY):
+        mod.require_no_legacy_self_hosted_state(repo)
+
+
+def test_legacy_guard_fails_closed_on_symlinked_subdir(tmp_path, monkeypatch):
+    mod, _home, workspace, repo = _state_root_repo(tmp_path, monkeypatch)
+    target = tmp_path / "elsewhere"
+    target.mkdir()
+    (target / "task.json").write_text("{}")
+    legacy = workspace / "Nexus-new-self-hosted-state"
+    legacy.mkdir()
+    (legacy / "linked").symlink_to(target)
+    with pytest.raises(RuntimeError, match=_LEGACY):
+        mod.require_no_legacy_self_hosted_state(repo)
+
+
+def test_legacy_guard_fails_closed_when_new_root_symlinks_to_legacy(tmp_path, monkeypatch):
+    mod, home, workspace, repo = _state_root_repo(tmp_path, monkeypatch)
+    legacy = _populated_legacy(workspace)
+    new_root = home / ".local/state/Nexus-new-self-hosted-state"
+    new_root.parent.mkdir(parents=True)
+    new_root.symlink_to(legacy)
+    with pytest.raises(RuntimeError, match=_LEGACY):
+        mod.require_no_legacy_self_hosted_state(repo)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads mode-000 directories")
+def test_legacy_guard_fails_closed_on_unreadable_legacy_dir(tmp_path, monkeypatch):
+    mod, _home, workspace, repo = _state_root_repo(tmp_path, monkeypatch)
+    locked = workspace / "Nexus-new-self-hosted-state" / "locked"
+    locked.mkdir(parents=True)
+    locked.chmod(0)
+    try:
+        with pytest.raises(RuntimeError, match=_LEGACY):
+            mod.require_no_legacy_self_hosted_state(repo)
+    finally:
+        locked.chmod(0o700)

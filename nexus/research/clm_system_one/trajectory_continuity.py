@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from nexus.contracts.self_hosted_state_root import raise_if_legacy_state
 from nexus.research.clm_system_one.research_evidence_root import (
     resolve_research_evidence_root,
 )
@@ -1211,11 +1212,16 @@ def resolve_canonical_state_root() -> Path:
     if configured:
         return Path(configured).expanduser().resolve()
     home = Path.home()
-    for candidate in (
-        home / ".local" / "state" / "Nexus-new-self-hosted-state",
+    new_root = home / ".local" / "state" / "Nexus-new-self-hosted-state"
+    legacy_roots = (
         home / "Workspace" / "Nexus-new-self-hosted-state",
         home / "workspace" / "Nexus-new-self-hosted-state",
-    ):
+    )
+    if new_root.exists():
+        for legacy in legacy_roots:
+            raise_if_legacy_state(legacy, new_root)
+        return new_root.resolve()
+    for candidate in legacy_roots:
         if candidate.exists():
             return candidate.resolve()
     raise FileNotFoundError("canonical Nexus state root is unavailable")

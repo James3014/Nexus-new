@@ -62,6 +62,7 @@ from nexus.contracts.operator_outcome_receipt import (
     OperatorOutcomeReceipt,
     validate_operator_outcome_receipt,
 )
+from nexus.contracts.self_hosted_state_root import raise_if_legacy_state
 from nexus.contracts.target_integration_lifecycle import (
     ExternalAcceptanceReceipt,
     IntegrationAuthorizationEnvelope,
@@ -1539,36 +1540,41 @@ def _require_verified_receipt_binding(receipt: Any, packet: Mapping[str, Any]) -
         raise RuntimeError("APPROVAL_VERIFIED_RECEIPT_HASH_MISMATCH")
 
 
-def _tree_holds_regular_file(root: Path) -> bool:
-    """True when ``root`` holds any file; an unreadable directory counts as state."""
-
-    def unreadable(exc: OSError) -> None:
-        raise exc
-
-    try:
-        for _dirpath, _dirs, files in os.walk(root, onerror=unreadable):
-            if files:
-                return True
-    except OSError:
-        return True
-    return False
+def _repository_root_from_git() -> Path | None:
+    """The repository root named by the git common dir, or None when unresolvable."""
+    source_root = Path(__file__).resolve().parents[2]
+    result = subprocess.run(
+        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        cwd=source_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    return Path(result.stdout.strip()).resolve().parent
 
 
 def _default_state_dir_for_repository(repository_root: Path) -> Path:
     """Default durable-state root: ``~/.local/state``, never inside the workspace (#1539).
 
-    Fixed (no XDG override) so it equals the root the auto-deployed Gateway
-    exports; ``NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR`` stays the only override.
+    Pure: never raises. Fixed (no XDG override) so it equals the root the
+    auto-deployed Gateway exports; ``NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR``
+    stays the only override.
     """
     name = f"{repository_root.name}-self-hosted-state"
-    new_root = (Path.home() / ".local" / "state" / name).resolve()
-    legacy = (repository_root.parent / name).resolve()
-    if legacy != new_root and legacy.is_dir() and _tree_holds_regular_file(legacy):
-        raise RuntimeError(
-            f"NEXUS_SELF_HOSTED_STATE_ROOT_LEGACY_PRESENT: {legacy} holds durable state; "
-            f"move it to {new_root} or set NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR"
-        )
-    return new_root
+    return (Path.home() / ".local" / "state" / name).resolve()
+
+
+def require_no_legacy_self_hosted_state(repository_root: Path) -> None:
+    """Refuse the default root while the legacy sibling tree still holds state."""
+    legacy = repository_root.parent / f"{repository_root.name}-self-hosted-state"
+    raise_if_legacy_state(legacy, _default_state_dir_for_repository(repository_root))
+
+
+def _require_no_legacy_default_state() -> None:
+    repository_root = _repository_root_from_git()
+    if repository_root is not None:
+        require_no_legacy_self_hosted_state(repository_root)
 
 
 class SelfHostedTaskService:
@@ -1595,14 +1601,10 @@ class SelfHostedTaskService:
         configured = os.getenv("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR", "").strip()
         if configured:
             return Path(configured).expanduser().resolve()
-        source_root = Path(__file__).resolve().parents[2]
-        result = subprocess.run(
-            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
-            cwd=source_root, capture_output=True, text=True,
-        )
-        if result.returncode == 0:
-            repository_root = Path(result.stdout.strip()).resolve().parent
+        repository_root = _repository_root_from_git()
+        if repository_root is not None:
             return _default_state_dir_for_repository(repository_root)
+        source_root = Path(__file__).resolve().parents[2]
         return (source_root / ".nexus/self_hosted_tasks").resolve()
 
     def __init__(
@@ -1616,6 +1618,12 @@ class SelfHostedTaskService:
         ephemeral: bool = False,
         ambient_core_port: Optional[AmbientCoreControlPort] = None,
     ):
+        if (
+            state_dir is None
+            and not ephemeral
+            and not os.getenv("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR", "").strip()
+        ):
+            _require_no_legacy_default_state()
         canonical = self.canonical_state_dir()
         raw_state_dir = Path(state_dir).expanduser() if state_dir is not None else canonical
         self.state_dir = raw_state_dir.resolve()
