@@ -2929,3 +2929,53 @@ def test_json_log_safe_round_trips_and_defuses_legacy_commands():
     text = _json_log_safe(json.dumps(payload, indent=2))
     assert "##[" not in text
     assert json.loads(text) == payload
+
+
+def test_classify_cli_annotates_blocking_cause_on_stderr(tmp_path, capsys):
+    # #1895: a blocked gate must name its cause as a check annotation, not only in
+    # the artifact. Candidate-controlled ids cannot add a second workflow command.
+    from dataclasses import asdict
+
+    from scripts.ops import pr_impact_gate
+
+    hostile = "tests.test_contract::test_x[a%0A::warning::b\n##[error]c]"
+    base = _with_node_outcomes(_run(0, [], revision="base"), passed=[hostile])
+    head = _with_node_outcomes(_run(1, [hostile], revision="head"), passed=[], failed=[hostile])
+    (tmp_path / "base-result.json").write_text(json.dumps(asdict(base)), encoding="utf-8")
+    (tmp_path / "head-result.json").write_text(json.dumps(asdict(head)), encoding="utf-8")
+
+    status = pr_impact_gate.main([
+        "classify",
+        "--base-result",
+        str(tmp_path / "base-result.json"),
+        "--head-result",
+        str(tmp_path / "head-result.json"),
+        "--output",
+        str(tmp_path / "classification.json"),
+    ])
+
+    captured = capsys.readouterr()
+    payload = json.loads((tmp_path / "classification.json").read_text(encoding="utf-8"))
+    assert status == 1
+    assert payload["new_failures"]
+    lines = captured.err.splitlines()
+    assert lines[0].startswith("::error title=Exact-base impact gate::NEW_REGRESSION")
+    assert any("new failure on head" in line for line in lines[1:])
+    for line in lines:
+        assert line.startswith("::error title=Exact-base impact gate::")
+        body = line.removeprefix("::error title=Exact-base impact gate::")
+        # Mid-line `::` (pytest ids) is inert; only a line start or `##[` is a command,
+        # and `%` must be encoded so `%0A` cannot decode to a new line.
+        assert not body.startswith("::")
+        assert "##[" not in body
+        assert "%0A" not in body.replace("%250A", "")
+        assert "\r" not in body
+
+
+def test_non_blocking_classification_has_no_annotations():
+    from scripts.ops.pr_impact_gate import _blocking_annotations
+
+    base = _run(0, [], revision="base")
+    head = _run(0, [], revision="head")
+
+    assert _blocking_annotations(classify_regression(base, head)) == []
