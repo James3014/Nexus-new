@@ -389,6 +389,9 @@ class LLMCandidateGenerator:
         # Visible test file of the sprint task (bound by run_hyper_sprint).  The runtime's
         # preflight gates get their inputs from it (wiring PR-4, nexus.research.gate_inputs).
         self.gate_input_test_file: str = ""
+        # Target file for the gate inputs when the caller (the flow's baseline path) does not
+        # give the generator a target_file; never used for the Local assist request.
+        self.gate_input_target_file: str = ""
 
     def _workspace_revision(self) -> str:
         try:
@@ -518,7 +521,11 @@ class LLMCandidateGenerator:
         # candidate ran armor-off (host-default invokers, no prompt armor).
         route.setdefault("with_nexus_armor", True)
         gate_codeintel: dict[str, Any] = {}
-        if _gate_inputs_enabled():
+        # Strict (symmetric) lane: not fed.  A gate that then succeeds is sealed REAL_INVOKED and
+        # the runtime's [NEXUS MODEL CONTEXT] (consumer_projection) materialises its evidence ids
+        # and payload into the prompt, which the bare arm never sees; that block comes from the
+        # hash-sealed bundle, so Nexus-new cannot withhold it.  Fed in every other lane.
+        if _gate_inputs_enabled() and not _symmetric_prompt_mode():
             from nexus.research.gate_inputs import sprint_gate_inputs
 
             # Wiring PR-4: the preflight gates' inputs from the sprint's own task contract
@@ -527,7 +534,7 @@ class LLMCandidateGenerator:
             gate_inputs = sprint_gate_inputs(
                 repo_root=self.project_root,
                 task=task,
-                target_file=self.target_file,
+                target_file=self.gate_input_target_file or self.target_file,
                 test_file=self.gate_input_test_file,
                 registered_test_file=self.gate_input_test_file,
                 source_code=source_code,

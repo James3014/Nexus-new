@@ -876,3 +876,38 @@ def test_gate_inputs_kill_switch_is_fail_closed(monkeypatch: pytest.MonkeyPatch,
     assert gate_inputs_enabled() is True
     monkeypatch.delenv("NEXUS_SPRINT_GATE_INPUTS")
     assert gate_inputs_enabled() is True
+
+
+def test_strict_lane_feeds_no_gate_inputs_because_model_context_would_carry_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Counted-shape proof (round 3): with the inputs fed, the runtime's [NEXUS MODEL CONTEXT]
+    materialised the passing gates' evidence ids and payloads and the prompt audit failed."""
+
+    monkeypatch.delenv("NEXUS_SPRINT_GATE_INPUTS", raising=False)
+    monkeypatch.setenv("NEXUS_SYMMETRIC_PROMPT", "1")
+    (tmp_path / "strict").mkdir()
+    (tmp_path / "fed").mkdir()
+    strict, _root = _capture_request(tmp_path / "strict", monkeypatch)
+    assert dict(strict.codeintel) == {} and "workspace_root" not in strict.route
+    monkeypatch.delenv("NEXUS_SYMMETRIC_PROMPT")
+    fed, _root = _capture_request(tmp_path / "fed", monkeypatch)
+    assert fed.codeintel["verify_commands"]
+
+
+def test_baseline_path_binds_the_task_files_for_gate_inputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nexus.app import research_flow_service as rfs
+    from nexus.research.sprint_service import LLMCandidateGenerator
+
+    root = _workspace(tmp_path)
+    gen = LLMCandidateGenerator(root, safe_mode=True)
+    rfs._bind_gate_input_files(
+        gen, root, target_file=str(root / "target.py"), test_file=str(root / "test_visible.py")
+    )
+    assert gen.gate_input_target_file == "target.py"
+    assert gen.gate_input_test_file == "test_visible.py"
+    assert gen.target_file == ""  # never enables a Local assist request
+    rfs._bind_gate_input_files(gen, root, target_file="target.py", test_file="test_hidden.py")
+    assert gen.gate_input_test_file == ""
