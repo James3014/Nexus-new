@@ -471,6 +471,11 @@ def _cli() -> int:
     args = parser.parse_args()
     base_root = args.base_root or args.root
     head_root = args.head_root or args.root
+    distinct_roots = (
+        base_root is not None
+        and head_root is not None
+        and Path(base_root).resolve() != Path(head_root).resolve()
+    )
     report: dict[str, Any]
     try:
         if args.base_exit_code not in {0, 1} or args.head_exit_code not in {0, 1}:
@@ -482,8 +487,10 @@ def _cli() -> int:
             head,
             base_valid=args.base_valid and (args.base_exit_code == 0 or bool(base)),
             head_valid=args.head_valid and (args.head_exit_code == 0 or bool(head)),
-            base_root=base_root,
-            head_root=head_root,
+            # Source-text keys need two distinct trees; one shared root would read
+            # the base finding's line from the head tree and misreport it as new.
+            base_root=base_root if distinct_roots else None,
+            head_root=head_root if distinct_roots else None,
         )
         report = {
             "classification": result.classification,

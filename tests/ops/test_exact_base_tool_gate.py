@@ -771,3 +771,82 @@ def test_unformatted_is_keyed_per_file_not_by_first_line(tmp_path):
         head_root=head_root,
     )
     assert other.classification == "NEW_REGRESSION"
+
+
+def _run_cli_ruff(tmp_path, base_rows, head_rows, *root_args):
+    base = tmp_path / "base.json"
+    head = tmp_path / "head.json"
+    output = tmp_path / "classification.json"
+    base.write_text(json.dumps(base_rows), encoding="utf-8")
+    head.write_text(json.dumps(head_rows), encoding="utf-8")
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "scripts/ops/exact_base_tool_gate.py",
+            "--tool",
+            "ruff",
+            "--base",
+            str(base),
+            "--head",
+            str(head),
+            "--output",
+            str(output),
+            *root_args,
+        ],
+        check=False,
+        capture_output=True,
+    )
+    return completed.returncode, json.loads(output.read_text(encoding="utf-8"))
+
+
+def _ruff_row(rel, row):
+    return {
+        "filename": rel,
+        "code": "F401",
+        "location": {"row": row, "column": 1},
+        "message": "`os` imported but unused",
+    }
+
+
+def test_cli_shared_root_keeps_line_shift_as_baseline_debt(tmp_path):
+    # One --root cannot hold both trees: reading the base finding's line from the
+    # head tree would misreport a shifted debt finding as new, so the CLI falls back
+    # to the source-independent identity.
+    root = tmp_path / "tree"
+    _write_src(root, "nexus/a.py", ["# new", "# lines", "import os"])
+
+    code, report = _run_cli_ruff(
+        tmp_path,
+        [_ruff_row("nexus/a.py", 1)],
+        [_ruff_row("nexus/a.py", 3)],
+        "--root",
+        str(root),
+    )
+
+    assert code == 0
+    assert report["classification"] == "EXACT_BASELINE_DEBT"
+    assert report["new_findings"] == []
+
+
+def test_cli_distinct_roots_report_swapped_finding_as_new(tmp_path):
+    # Base debt on one line is fixed while the same rule and message appear on a
+    # different statement: the source-independent identity matched the two and hid
+    # the new finding.
+    base_root, head_root = tmp_path / "base", tmp_path / "head"
+    _write_src(base_root, "nexus/a.py", ["OLD = 'a' * 1", "NEW = 1"])
+    _write_src(head_root, "nexus/a.py", ["OLD = 1", "NEW = 'b' * 1"])
+    row = {"filename": "nexus/a.py", "code": "E501", "message": "Line too long (120 > 100)"}
+
+    code, report = _run_cli_ruff(
+        tmp_path,
+        [{**row, "location": {"row": 1, "column": 101}}],
+        [{**row, "location": {"row": 2, "column": 101}}],
+        "--base-root",
+        str(base_root),
+        "--head-root",
+        str(head_root),
+    )
+
+    assert code == 1
+    assert report["classification"] == "NEW_REGRESSION"
+    assert [item["line"] for item in report["new_findings"]] == [2]
