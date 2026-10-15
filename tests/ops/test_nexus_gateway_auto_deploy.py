@@ -2810,13 +2810,13 @@ def _real_core_checkout(tmp_path: Path, pin: str) -> Path | None:
 @pytest.mark.parametrize(
     ("case", "ok"),
     [
-        ("digest_verified", True),
-        ("digest_wrong", False),
-        ("digest_expected_wrong", False),
-        ("digest_reported_without_source", False),
-        ("build_stamp_source", False),
-        ("digest_but_build_has_none", False),
-        ("legacy_transport", True),
+        pytest.param("digest_verified", True, id="digest_verified"),
+        pytest.param("digest_wrong", False, id="digest_wrong"),
+        pytest.param("digest_expected_wrong", False, id="digest_expected_wrong"),
+        pytest.param("digest_reported_without_source", False, id="digest_reported_without_source"),
+        pytest.param("build_stamp_source", False, id="build_stamp_source"),
+        pytest.param("digest_but_build_has_none", False, id="digest_but_build_has_none"),
+        pytest.param("legacy_transport", True, id="legacy_transport"),
     ],
 )
 def test_real_prober_requires_the_build_source_digest(tmp_path: Path, case: str, ok: bool) -> None:
