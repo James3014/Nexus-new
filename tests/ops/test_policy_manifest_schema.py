@@ -296,7 +296,30 @@ def test_wiring_check_edge_cases(tmp_path: Path) -> None:
     ghost = _fake_policy(
         source_file="pkg/guard.py; pkg/ghost.py", test_entrypoints=["tests/test_ghost.py::test_g"]
     )
-    assert check_enforcement_wiring(ghost, root) == ["ENFORCEMENT_CALLER_NOT_FOUND: pkg.ghost"]
+    assert check_enforcement_wiring(ghost, root) == ["ENFORCEMENT_CALLER_NOT_FOUND: pkg/ghost.py"]
+    # A declared file must exist as that file: pkg.py does not become pkg/__init__.py.
+    (root / "tests" / "test_pkg.py").write_text(
+        "import pkg\n\ndef test_p():\n    assert pkg\n", encoding="utf-8"
+    )
+    package_alias = _fake_policy(
+        source_file="pkg/guard.py; pkg.py", test_entrypoints=["tests/test_pkg.py::test_p"]
+    )
+    assert check_enforcement_wiring(package_alias, root) == ["ENFORCEMENT_CALLER_NOT_FOUND: pkg.py"]
+    # Fixtures and classes are not tests; a [param] part can only end the selector.
+    (root / "tests" / "test_fx.py").write_text(
+        "import pytest\nfrom pkg import caller\n\n@pytest.fixture\ndef test_fx():\n    return caller\n"
+        "\n@pytest.fixture()\ndef test_fx2():\n    return 1\n\nclass TestK:\n    pass\n"
+        "\ndef test_ok():\n    assert caller\n",
+        encoding="utf-8",
+    )
+    for selector in ("test_fx", "test_fx2", "TestK", "test_ok[a]::zzz", "test_ok[a", "::test_ok"):
+        bad = _fake_policy(test_entrypoints=[f"tests/test_fx.py::{selector}"])
+        assert check_enforcement_wiring(bad, root) == [
+            f"TEST_ENTRYPOINT_NOT_FOUND: tests/test_fx.py::{selector}",
+            "TEST_ENTRYPOINT_NOT_BEHAVIOURAL",
+        ], selector
+    good = _fake_policy(test_entrypoints=["tests/test_fx.py::test_ok[a::b]"])
+    assert check_enforcement_wiring(good, root) == []
     # A stale entry is reported even when another entry reaches a caller.
     stale_plus_good = _fake_policy(
         test_entrypoints=["tests/test_caller.py::test_run", "tests/gone.py::test_x"]
@@ -451,6 +474,12 @@ def test_lane_gate_rejects_guard_only_entrypoint_for_real_policy(
     assert check_lane_gate("P-CONTAM-01", "modify")["allowed"] is True
 
 
+# The only hard-lane entry allowed to be undrilled / not_wired: the drill fixture that
+# scripts/ops/update_manifest_drills.py maintains so the "blocked without drill" tests
+# have a subject. Every other hard-lane policy must be drilled, wired and modifiable.
+HARD_LANE_FIXTURE_IDS = frozenset({"P-TEST-NODRILL-01"})
+
+
 @pytest.mark.parametrize("action", ["modify", "promote", "cutover"])
 def test_real_manifest_hard_lane_policies_are_behaviourally_tested(action: str) -> None:
     """Every hard-lane policy on main must pass the wiring check, or CI would block its files."""
@@ -461,11 +490,16 @@ def test_real_manifest_hard_lane_policies_are_behaviourally_tested(action: str) 
         result = check_lane_gate(policy["policy_id"], action)
         assert "TEST_ENTRYPOINT_NOT_BEHAVIOURAL" not in result["errors"], policy["policy_id"]
         assert "ENFORCEMENT_MODE_INVALID" not in result["errors"], policy["policy_id"]
-        if action == "modify" and policy["rollback_drill_status"] != "no-drill":
-            # A drilled hard-lane policy must stay modifiable; relabelling it not_wired
-            # or breaking its wiring would turn this red (and the lane workflow with it).
+        if policy["policy_id"] in HARD_LANE_FIXTURE_IDS:
+            assert policy["enforcement_mode"] == "not_wired"
+            continue
+        # Not drilled, not wired, or blocked on modify: a real hard-lane policy must not be
+        # any of these, so a manifest-only relabel (with or without a drill-status edit)
+        # turns this red in the required gate and in the policy-lane workflow.
+        assert policy["rollback_drill_status"] != "no-drill", policy["policy_id"]
+        assert policy["enforcement_mode"] in ("block", "record_only"), policy["policy_id"]
+        if action == "modify":
             assert result["allowed"] is True, (policy["policy_id"], result["errors"])
-            assert policy["enforcement_mode"] in ("block", "record_only"), policy["policy_id"]
 
 
 def test_drill_updater_keeps_schema_fields_and_distribution() -> None:

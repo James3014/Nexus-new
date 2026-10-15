@@ -145,26 +145,50 @@ def _imported_modules(path: Path, repo_root: Path) -> set[str]:
 
 
 _DEFS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+_FUNCS = (ast.FunctionDef, ast.AsyncFunctionDef)
+
+
+def _is_fixture(node: ast.AST) -> bool:
+    """``@pytest.fixture`` / ``@fixture`` / ``@pytest.fixture(...)`` — not a test."""
+    for dec in getattr(node, "decorator_list", []):
+        target = dec.func if isinstance(dec, ast.Call) else dec
+        name = target.attr if isinstance(target, ast.Attribute) else getattr(target, "id", "")
+        if name == "fixture":
+            return True
+    return False
 
 
 def _entrypoint_exists(path: Path, selector: str) -> bool:
-    """``file::Class::test_name[param]`` names a def/class chain the way pytest collects it.
+    """``file::Class::test_name[param]`` names a test the way pytest collects it.
 
     The first component must be a top-level def/class of the module, each next
-    component a def/class directly inside the previous one. ``file::a::b`` with
-    two unrelated top-level functions is not a node.
+    component a def/class directly inside the previous one, and the last one a
+    plain function that is not a fixture. A ``[param]`` part may only end the
+    selector. ``file::a::b`` with two unrelated top-level functions, a fixture,
+    or ``file::test_x[p]::y`` are not nodes. Tests defined under ``if``/``try``
+    or inherited from a base class are not recognised (fail closed).
     """
+    if not selector.strip():
+        return True  # whole file
+    head, bracket, tail = selector.partition("[")
+    if bracket and (not tail.endswith("]") or "::" in tail.rsplit("]", 1)[1]):
+        return False
     tree = _parse(path)
     if tree is None:
         return False
-    names = [part.strip() for part in selector.split("[", 1)[0].split("::") if part.strip()]
+    names = [part.strip() for part in head.split("::")]
+    if not names or any(not name for name in names):
+        return False
     body: list[ast.stmt] = list(tree.body)
-    for name in names:
-        match = next((n for n in body if isinstance(n, _DEFS) and n.name == name), None)
+    match: ast.stmt | None = None
+    for index, name in enumerate(names):
+        last = index == len(names) - 1
+        kinds = _FUNCS if last else (ast.ClassDef,)
+        match = next((n for n in body if isinstance(n, kinds) and n.name == name), None)
         if match is None:
             return False
         body = list(match.body)
-    return True
+    return match is not None and not _is_fixture(match)
 
 
 def check_enforcement_wiring(policy: dict, repo_root: Path | None = None) -> list[str]:
@@ -201,14 +225,21 @@ def check_enforcement_wiring(policy: dict, repo_root: Path | None = None) -> lis
     if not py_sources:
         return []
     guard_modules = {m for m in (_module_name(g) for g in guards) if m}
-    callers = py_sources - guard_modules
-    if not callers:
+    caller_paths = [p for p in sources if _module_name(p) and _module_name(p) not in guard_modules]
+    if not caller_paths:
         return ["ENFORCEMENT_CALLERS_MISSING"]
-    # A caller must be a real module inside the repo; a name that only appears in an
-    # import statement proves nothing.
-    absent = sorted(m for m in callers if _module_file(m, root) is None)
+    # A caller must be the declared file, inside the repo; a name that only appears
+    # in an import statement (or a package that merely shares the name) proves nothing.
+    absent = sorted(
+        path
+        for path in caller_paths
+        if Path(path).is_absolute()
+        or (resolved := _contained(root / path, root)) is None
+        or not resolved.is_file()
+    )
     if absent:
         return [f"ENFORCEMENT_CALLER_NOT_FOUND: {', '.join(absent)}"]
+    callers = {m for m in (_module_name(p) for p in caller_paths) if m}
 
     missing: list[str] = []
     reached = False
