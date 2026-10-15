@@ -305,8 +305,9 @@ def _comparison_keys(findings: list[Finding], root: Path | None) -> list[tuple[A
     """Line-independent keys: identity + stripped source text + ordinal per key.
 
     Without a root the legacy identity is used. With a root, an unreadable source
-    line falls back to a key that includes the line number, so an unverifiable
-    finding can only ever look new, never be matched by accident.
+    line falls back to a key that includes the line number: it matches only an
+    identical finding at the same line and column, which is never looser than the
+    legacy identity it replaces.
     """
     if root is None:
         return [finding.identity for finding in findings]
