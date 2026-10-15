@@ -33,6 +33,19 @@ from nexus.engine.patch.apply_engine import PatchApplyEngine
 
 logger = logging.getLogger(__name__)
 
+# Same success set nexus-runtime uses for a contributing Local stage
+# (nexus_runtime/kernel/unified_runtime.py, local_stage status check).
+_LOCAL_STAGE_SUCCESS_STATUSES = frozenset({"SUCCEEDED", "PASS", "COMPLETED"})
+
+
+def _local_stage_admitted(local_stage: Any) -> bool:
+    """True only when the Local stage passed its gate with a success status (#2245)."""
+    return (
+        isinstance(local_stage, Mapping)
+        and local_stage.get("gate_passed") is True
+        and str(local_stage.get("status") or "") in _LOCAL_STAGE_SUCCESS_STATUSES
+    )
+
 
 
 def _run_cli_with_hard_timeout(
@@ -527,6 +540,16 @@ class BattlesuitGateway:
             local_stage = context.get("local", {}) if isinstance(context, dict) else {}
             local_response = local_stage.get("response", {}) if isinstance(local_stage, dict) else {}
             local_outputs = local_response.get("local_outputs", {}) if isinstance(local_response, dict) else {}
+            local_withheld_status = ""
+            if local_outputs and not _local_stage_admitted(local_stage):
+                # #2245: a refused / failed Local stage may still carry the model
+                # response; its advice must not shape the online candidate.
+                local_withheld_status = (
+                    str(local_stage.get("status") or "UNKNOWN")
+                    if isinstance(local_stage, dict)
+                    else "UNKNOWN"
+                )
+                local_outputs = {}
             local_context = ""
             capability_context_forwarded = False
             if local_outputs:
@@ -585,6 +608,11 @@ class BattlesuitGateway:
             refs = (
                 [f"gateway:{task_id}:provider_call"]
                 + ([f"gateway:{task_id}:local_context_forwarded"] if local_outputs else [])
+                + (
+                    [f"gateway:{task_id}:local_context_withheld:{local_withheld_status}"]
+                    if local_withheld_status
+                    else []
+                )
                 + ([f"gateway:{task_id}:capability_context_forwarded"] if capability_context_forwarded else [])
                 + ([f"gateway:{task_id}:compressed_context_applied"] if context.get("capability_context_compressed") else [])
                 if delivered
