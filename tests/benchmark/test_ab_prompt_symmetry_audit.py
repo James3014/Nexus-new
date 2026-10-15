@@ -502,6 +502,9 @@ def _run_main_with_fake_arms(
 
     monkeypatch.setattr(runner, "run_with_nexus", fake_with)
     monkeypatch.setattr(runner, "run_without_nexus", fake_without)
+    # Both arms are faked: no visible/hidden test runs, so the counted-lane confinement parity
+    # preflight (which would exclude every task on a host without an OS barrier) is moot here.
+    monkeypatch.setattr(runner, "_confinement_parity_failures", lambda *_a, **_k: {})
     monkeypatch.setenv("NEXUS_AGY_BIN", str(_fake_agy(tmp_path)))
     monkeypatch.delenv("NEXUS_AGY_EXECUTABLE", raising=False)
     monkeypatch.delenv("NEXUS_AGY_COMMAND", raising=False)
