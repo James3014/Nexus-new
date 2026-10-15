@@ -16,6 +16,9 @@ from nexus.executors.worker_registry import (
     WorkerRegistry,
 )
 
+# Agy delivery requires a parseable JSON result with status SUCCESS (#1912).
+AGY_JSON_OK = b'{"status": "SUCCESS", "response": "done"}'
+
 
 def test_registry_recognizes_all_governed_provider_names():
     registry = WorkerRegistry.default()
@@ -64,6 +67,7 @@ def test_agy_adapter_requires_external_runtime_authorization(monkeypatch, tmp_pa
             type("Contract", (), {"task_id": "agy-task"})(),
             type("Lease", (), {"target_worktree": str(tmp_path)})(),
             prompt="bounded",
+            worker_role="implementation",
         )
 
 
@@ -154,7 +158,7 @@ def test_agy_adapter_invokes_headless_project_scoped_cli_and_records_evidence(mo
             argv=request.argv,
             cwd=request.cwd,
             exit_code=0,
-            stdout=b"agy stdout",
+            stdout=AGY_JSON_OK,
             stderr=b"agy stderr",
             wall_time_ms=25,
             process_group_id=777,
@@ -168,6 +172,7 @@ def test_agy_adapter_invokes_headless_project_scoped_cli_and_records_evidence(mo
         prompt=prompt,
         timeout_seconds=42,
         on_process_group=process_group_callback,
+        worker_role="implementation",
     )
 
     assert captured["request"].cwd == str(target.resolve())
@@ -175,11 +180,12 @@ def test_agy_adapter_invokes_headless_project_scoped_cli_and_records_evidence(mo
         "--new-project",
         "--add-dir",
         str(target.resolve()),
-        "--dangerously-skip-permissions",
         "--mode",
         "accept-edits",
         "--model",
         "gemini-3.8-flash-medium",
+        "--output-format",
+        "json",
         "--print-timeout",
         "42s",
         "--print",
@@ -193,7 +199,7 @@ def test_agy_adapter_invokes_headless_project_scoped_cli_and_records_evidence(mo
     assert receipt.argv == captured["request"].argv
     assert receipt.target_worktree == str(target.resolve())
     assert receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
-    assert receipt.stdout_sha256 == CliWorkerResult.hash_bytes(b"agy stdout")
+    assert receipt.stdout_sha256 == CliWorkerResult.hash_bytes(AGY_JSON_OK)
     assert receipt.stderr_sha256 == CliWorkerResult.hash_bytes(b"agy stderr")
     assert receipt.wall_time_ms == 25
     assert receipt.process_group_id == 777
@@ -386,7 +392,7 @@ def test_every_adapter_exit_0_result_is_execution_completed(tmp_path, monkeypatc
             argv=request.argv,
             cwd=request.cwd,
             exit_code=0,
-            stdout=b"{}",
+            stdout=AGY_JSON_OK,
             stderr=b"",
             wall_time_ms=1,
             process_group_id=None,
@@ -407,7 +413,7 @@ def test_every_adapter_exit_0_result_is_execution_completed(tmp_path, monkeypatc
         assert receipt.evidence_complete is True
 
     agy_adapter = AgyWorkerAdapter()
-    agy_receipt = agy_adapter.invoke(contract, lease, prompt="test")
+    agy_receipt = agy_adapter.invoke(contract, lease, prompt="test", worker_role="implementation")
     assert agy_receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
     assert agy_receipt.evidence_complete is True
 
@@ -760,7 +766,7 @@ def test_agy_pool_disabled_preserves_existing_behavior(monkeypatch, tmp_path):
             argv=request.argv,
             cwd=request.cwd,
             exit_code=0,
-            stdout=b"ok",
+            stdout=AGY_JSON_OK,
             stderr=b"",
             wall_time_ms=10,
             process_group_id=None,
@@ -772,6 +778,7 @@ def test_agy_pool_disabled_preserves_existing_behavior(monkeypatch, tmp_path):
         type("Contract", (), {"task_id": "task-disabled"})(),
         type("Lease", (), {"target_worktree": str(tmp_path)})(),
         prompt="hello",
+        worker_role="implementation",
     )
     assert receipt.provider_calls == 1
     assert receipt.account_alias_hash is None
@@ -793,7 +800,7 @@ def test_agy_injected_pool_applies_without_env_var(monkeypatch, tmp_path):
             argv=request.argv,
             cwd=request.cwd,
             exit_code=0,
-            stdout=b"ok",
+            stdout=AGY_JSON_OK,
             stderr=b"",
             wall_time_ms=12,
             process_group_id=None,
@@ -804,6 +811,7 @@ def test_agy_injected_pool_applies_without_env_var(monkeypatch, tmp_path):
         type("Contract", (), {"task_id": "task-injected"})(),
         type("Lease", (), {"target_worktree": str(tmp_path)})(),
         prompt="hello",
+        worker_role="implementation",
     )
     assert receipt.provider_calls == 1
     assert receipt.account_alias_hash == pool.active_account_alias_hash
@@ -841,7 +849,7 @@ def test_agy_quota_failure_rotates_then_succeeds(monkeypatch, tmp_path):
             argv=request.argv,
             cwd=request.cwd,
             exit_code=0,
-            stdout=b"success",
+            stdout=AGY_JSON_OK,
             stderr=b"",
             wall_time_ms=15,
             process_group_id=None,
@@ -853,6 +861,7 @@ def test_agy_quota_failure_rotates_then_succeeds(monkeypatch, tmp_path):
         type("Contract", (), {"task_id": "task-quota", "maximum_provider_calls": 2})(),
         type("Lease", (), {"target_worktree": str(tmp_path)})(),
         prompt="hello",
+        worker_role="implementation",
     )
     assert receipt.provider_calls == 2
     assert receipt.wall_time_ms == 25
@@ -904,7 +913,7 @@ def test_agy_two_rotations_then_success_exactly_three_calls(monkeypatch, tmp_pat
             argv=request.argv,
             cwd=request.cwd,
             exit_code=0,
-            stdout=b"ok",
+            stdout=AGY_JSON_OK,
             stderr=b"",
             wall_time_ms=5,
             process_group_id=None,
@@ -916,6 +925,7 @@ def test_agy_two_rotations_then_success_exactly_three_calls(monkeypatch, tmp_pat
         type("Contract", (), {"task_id": "task-3calls", "maximum_provider_calls": 3})(),
         type("Lease", (), {"target_worktree": str(tmp_path)})(),
         prompt="hello",
+        worker_role="implementation",
     )
     assert receipt.provider_calls == 3
     assert receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
@@ -954,7 +964,7 @@ def test_agy_auth_failure_rotates(monkeypatch, tmp_path):
             argv=request.argv,
             cwd=request.cwd,
             exit_code=0,
-            stdout=b"ok",
+            stdout=AGY_JSON_OK,
             stderr=b"",
             wall_time_ms=5,
             process_group_id=None,
@@ -966,6 +976,7 @@ def test_agy_auth_failure_rotates(monkeypatch, tmp_path):
         type("Contract", (), {"task_id": "task-auth", "maximum_provider_calls": 2})(),
         type("Lease", (), {"target_worktree": str(tmp_path)})(),
         prompt="hello",
+        worker_role="implementation",
     )
     assert receipt.provider_calls == 2
     assert receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
@@ -1003,6 +1014,7 @@ def test_agy_one_call_contract_cannot_execute_three_subprocesses(monkeypatch, tm
         type("Contract", (), {"task_id": "task-one-call", "maximum_provider_calls": 1})(),
         type("Lease", (), {"target_worktree": str(tmp_path)})(),
         prompt="hello",
+        worker_role="implementation",
     )
 
     assert call_count == 1
@@ -1025,6 +1037,7 @@ def test_agy_zero_call_contract_performs_no_subprocess(monkeypatch, tmp_path):
         type("Contract", (), {"task_id": "task-zero-budget", "maximum_provider_calls": 0})(),
         type("Lease", (), {"target_worktree": str(tmp_path)})(),
         prompt="hello",
+        worker_role="implementation",
     )
 
     assert call_count == 0
@@ -1066,7 +1079,7 @@ def test_agy_shared_timeout_decreases_across_retries(monkeypatch, tmp_path):
             argv=request.argv,
             cwd=request.cwd,
             exit_code=0,
-            stdout=b"ok",
+            stdout=AGY_JSON_OK,
             stderr=b"",
             wall_time_ms=5,
             process_group_id=None,
@@ -1078,6 +1091,7 @@ def test_agy_shared_timeout_decreases_across_retries(monkeypatch, tmp_path):
         type("Lease", (), {"target_worktree": str(tmp_path)})(),
         prompt="hello",
         timeout_seconds=1.0,
+        worker_role="implementation",
     )
 
     assert receipt.provider_calls == 2
@@ -1118,6 +1132,7 @@ def test_agy_exhausted_shared_timeout_stops_before_rotation(monkeypatch, tmp_pat
         type("Lease", (), {"target_worktree": str(tmp_path)})(),
         prompt="hello",
         timeout_seconds=0.01,
+        worker_role="implementation",
     )
 
     assert call_count == 1
@@ -1142,6 +1157,7 @@ def test_agy_explicit_zero_timeout_executes_zero_subprocesses(monkeypatch, tmp_p
         type("Lease", (), {"target_worktree": str(tmp_path)})(),
         prompt="hello",
         timeout_seconds=0,
+        worker_role="implementation",
     )
 
     assert call_count == 0
@@ -1177,6 +1193,7 @@ def test_agy_slow_ensure_active_exhausts_timeout_before_first_subprocess(monkeyp
         type("Lease", (), {"target_worktree": str(tmp_path)})(),
         prompt="hello",
         timeout_seconds=0.01,
+        worker_role="implementation",
     )
 
     assert call_count == 0
@@ -1211,6 +1228,7 @@ def test_agy_slow_build_isolated_env_exhausts_timeout_before_first_subprocess(mo
         type("Lease", (), {"target_worktree": str(tmp_path)})(),
         prompt="hello",
         timeout_seconds=0.01,
+        worker_role="implementation",
     )
 
     assert call_count == 0
@@ -1240,7 +1258,7 @@ def test_agy_receipt_wall_time_includes_setup_overhead(monkeypatch, tmp_path):
             argv=request.argv,
             cwd=request.cwd,
             exit_code=0,
-            stdout=b"ok",
+            stdout=AGY_JSON_OK,
             stderr=b"",
             wall_time_ms=5,
             process_group_id=None,
@@ -1252,6 +1270,7 @@ def test_agy_receipt_wall_time_includes_setup_overhead(monkeypatch, tmp_path):
         type("Lease", (), {"target_worktree": str(tmp_path)})(),
         prompt="hello",
         timeout_seconds=1.0,
+        worker_role="implementation",
     )
 
     assert receipt.provider_calls == 1
@@ -1290,6 +1309,7 @@ def test_agy_syntax_failure_does_not_rotate(monkeypatch, tmp_path):
         type("Contract", (), {"task_id": "task-syntax"})(),
         type("Lease", (), {"target_worktree": str(tmp_path)})(),
         prompt="hello",
+        worker_role="implementation",
     )
     assert receipt.provider_calls == 1
     assert call_count == 1
@@ -1329,6 +1349,7 @@ def test_agy_timeout_does_not_rotate(monkeypatch, tmp_path):
         type("Contract", (), {"task_id": "task-timeout"})(),
         type("Lease", (), {"target_worktree": str(tmp_path)})(),
         prompt="hello",
+        worker_role="implementation",
     )
     assert receipt.provider_calls == 1
     assert call_count == 1
@@ -1367,6 +1388,7 @@ def test_agy_ensure_active_failure_before_first_call_yields_zero_calls(monkeypat
         type("Contract", (), {"task_id": "task-zero-calls"})(),
         type("Lease", (), {"target_worktree": str(tmp_path)})(),
         prompt="hello",
+        worker_role="implementation",
     )
     assert receipt.provider_calls == 0
     assert call_count == 0
@@ -1417,6 +1439,7 @@ def test_agy_ensure_active_failure_after_one_call_does_not_overcount(monkeypatch
         type("Contract", (), {"task_id": "task-no-overcount", "maximum_provider_calls": 2})(),
         type("Lease", (), {"target_worktree": str(tmp_path)})(),
         prompt="hello",
+        worker_role="implementation",
     )
     assert receipt.provider_calls == 1
     assert subprocess_calls == 1
@@ -1451,6 +1474,7 @@ def test_agy_failed_rotation_stops_and_records_call(monkeypatch, tmp_path):
         type("Contract", (), {"task_id": "task-fail-rotate", "maximum_provider_calls": 2})(),
         type("Lease", (), {"target_worktree": str(tmp_path)})(),
         prompt="hello",
+        worker_role="implementation",
     )
     assert receipt.provider_calls == 1
     assert call_count == 1
@@ -1477,7 +1501,7 @@ def test_agy_subprocess_api_keys_absent(monkeypatch, tmp_path):
             argv=request.argv,
             cwd=request.cwd,
             exit_code=0,
-            stdout=b"ok",
+            stdout=AGY_JSON_OK,
             stderr=b"",
             wall_time_ms=5,
             process_group_id=None,
@@ -1489,6 +1513,7 @@ def test_agy_subprocess_api_keys_absent(monkeypatch, tmp_path):
         type("Contract", (), {"task_id": "task-api-keys"})(),
         type("Lease", (), {"target_worktree": str(tmp_path)})(),
         prompt="hello",
+        worker_role="implementation",
     )
     assert "GEMINI_API_KEY" not in captured_env
     assert "GOOGLE_API_KEY" not in captured_env
@@ -1510,7 +1535,7 @@ def test_agy_receipt_contains_alias_hash_only_no_identity(monkeypatch, tmp_path)
             argv=request.argv,
             cwd=request.cwd,
             exit_code=0,
-            stdout=b"ok",
+            stdout=AGY_JSON_OK,
             stderr=b"",
             wall_time_ms=5,
             process_group_id=None,
@@ -1521,6 +1546,7 @@ def test_agy_receipt_contains_alias_hash_only_no_identity(monkeypatch, tmp_path)
         type("Contract", (), {"task_id": "task-hash-only"})(),
         type("Lease", (), {"target_worktree": str(tmp_path)})(),
         prompt="hello",
+        worker_role="implementation",
     )
     assert receipt.account_alias_hash == acc.alias_hash
     assert "user@example.com" not in str(receipt)
@@ -1567,7 +1593,7 @@ def test_agy_eligible_failover_continuation_prompt(monkeypatch, tmp_path):
             argv=request.argv,
             cwd=request.cwd,
             exit_code=0,
-            stdout=b"success",
+            stdout=AGY_JSON_OK,
             stderr=b"",
             wall_time_ms=15,
             process_group_id=None,
@@ -1579,6 +1605,7 @@ def test_agy_eligible_failover_continuation_prompt(monkeypatch, tmp_path):
         type("Contract", (), {"task_id": "agy-continuation-task", "maximum_provider_calls": 2})(),
         type("Lease", (), {"target_worktree": str(tmp_path)})(),
         prompt="original prompt text",
+        worker_role="implementation",
     )
 
     assert len(seen_requests) == 2
@@ -1632,6 +1659,7 @@ def test_agy_non_eligible_failure_aborts_loop(monkeypatch, tmp_path):
         type("Contract", (), {"task_id": "agy-abort-task", "maximum_provider_calls": 2})(),
         type("Lease", (), {"target_worktree": str(tmp_path)})(),
         prompt="hello",
+        worker_role="implementation",
     )
 
     assert len(seen_requests) == 1
@@ -1659,36 +1687,72 @@ def test_terminal_release_spy(monkeypatch, tmp_path):
 
     monkeypatch.setattr(pool, "release", spy_release)
 
-    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", lambda req, **opts: CliWorkerResult(
-        status=CliWorkerStatus.COMPLETED, executable_identity=req.executable, argv=req.argv, cwd=req.cwd, exit_code=0, stdout=b"ok", stderr=b"", wall_time_ms=5, process_group_id=None
-    ))
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry.run_cli_worker",
+        lambda req, **opts: CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=req.executable,
+            argv=req.argv,
+            cwd=req.cwd,
+            exit_code=0,
+            stdout=AGY_JSON_OK,
+            stderr=b"",
+            wall_time_ms=5,
+            process_group_id=None,
+        ),
+    )
     adapter = AgyWorkerAdapter(account_pool=pool)
     adapter.invoke(
         type("Contract", (), {"task_id": "success-task", "maximum_provider_calls": 1})(),
         type("Lease", (), {"target_worktree": str(tmp_path)})(),
         prompt="hello",
+        worker_role="implementation",
     )
     assert len(released_leases) == 1
     released_leases.clear()
 
-    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", lambda req, **opts: CliWorkerResult(
-        status=CliWorkerStatus.COMPLETED, executable_identity=req.executable, argv=req.argv, cwd=req.cwd, exit_code=1, stdout=b"", stderr=b"403 Forbidden", wall_time_ms=5, process_group_id=None
-    ))
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry.run_cli_worker",
+        lambda req, **opts: CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=req.executable,
+            argv=req.argv,
+            cwd=req.cwd,
+            exit_code=1,
+            stdout=b"",
+            stderr=b"403 Forbidden",
+            wall_time_ms=5,
+            process_group_id=None,
+        ),
+    )
     adapter.invoke(
         type("Contract", (), {"task_id": "non-eligible-task", "maximum_provider_calls": 1})(),
         type("Lease", (), {"target_worktree": str(tmp_path)})(),
         prompt="hello",
+        worker_role="implementation",
     )
     assert len(released_leases) == 1
     released_leases.clear()
 
-    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", lambda req, **opts: CliWorkerResult(
-        status=CliWorkerStatus.TIMED_OUT, executable_identity=req.executable, argv=req.argv, cwd=req.cwd, exit_code=1, stdout=b"", stderr=b"", wall_time_ms=5, process_group_id=None
-    ))
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry.run_cli_worker",
+        lambda req, **opts: CliWorkerResult(
+            status=CliWorkerStatus.TIMED_OUT,
+            executable_identity=req.executable,
+            argv=req.argv,
+            cwd=req.cwd,
+            exit_code=1,
+            stdout=b"",
+            stderr=b"",
+            wall_time_ms=5,
+            process_group_id=None,
+        ),
+    )
     adapter.invoke(
         type("Contract", (), {"task_id": "timeout-task", "maximum_provider_calls": 1})(),
         type("Lease", (), {"target_worktree": str(tmp_path)})(),
         prompt="hello",
+        worker_role="implementation",
     )
     assert len(released_leases) == 1
     released_leases.clear()
@@ -1727,6 +1791,7 @@ def test_clock_decrease_real_time(monkeypatch, tmp_path):
         type("Lease", (), {"target_worktree": str(tmp_path)})(),
         prompt="hello",
         timeout_seconds=0.5,
+        worker_role="implementation",
     )
 
     assert len(seen_timeouts) == 2
@@ -1743,19 +1808,45 @@ def test_mandatory_negative_tests(monkeypatch, tmp_path):
 
     failures = [
         (CliWorkerStatus.TIMED_OUT, 1, b"", b"", "TIMEOUT"),
-        (CliWorkerStatus.COMPLETED, 2, b"", b"SyntaxError: unexpected EOF", "SYNTAX_OR_IMPLEMENTATION_ERROR"),
-        (CliWorkerStatus.COMPLETED, 3, b"", b"ValueError: Invalid model option", "MODEL_OR_TASK_ERROR"),
+        (
+            CliWorkerStatus.COMPLETED,
+            2,
+            b"",
+            b"SyntaxError: unexpected EOF",
+            "SYNTAX_OR_IMPLEMENTATION_ERROR",
+        ),
+        (
+            CliWorkerStatus.COMPLETED,
+            3,
+            b"",
+            b"ValueError: Invalid model option",
+            "MODEL_OR_TASK_ERROR",
+        ),
     ]
 
     for status, exit_code, stdout, stderr, expected_kind in failures:
         pool = AgyAccountPoolManager([acc1, acc2])
-        monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", lambda req, **opts: CliWorkerResult(
-            status=status, executable_identity=req.executable, argv=req.argv, cwd=req.cwd, exit_code=exit_code, stdout=stdout, stderr=stderr, wall_time_ms=5, process_group_id=None
-        ))
+        monkeypatch.setattr(
+            "nexus.executors.worker_registry.run_cli_worker",
+            lambda req, **opts: CliWorkerResult(
+                status=status,
+                executable_identity=req.executable,
+                argv=req.argv,
+                cwd=req.cwd,
+                exit_code=exit_code,
+                stdout=stdout,
+                stderr=stderr,
+                wall_time_ms=5,
+                process_group_id=None,
+            ),
+        )
         adapter = AgyWorkerAdapter(account_pool=pool)
         receipt = adapter.invoke(
-            type("Contract", (), {"task_id": f"neg-{expected_kind}", "maximum_provider_calls": 2})(),
+            type(
+                "Contract", (), {"task_id": f"neg-{expected_kind}", "maximum_provider_calls": 2}
+            )(),
             type("Lease", (), {"target_worktree": str(tmp_path)})(),
             prompt="hello",
+            worker_role="implementation",
         )
         assert receipt.provider_calls == 1

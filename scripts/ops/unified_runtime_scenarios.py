@@ -354,9 +354,14 @@ def _build_agy_online_invoker(
                     default=str,
                 )
                 capability_context_forwarded = True
+        # Read-only Online answer: plan mode, no auto-approve (#1912).
         argv = [
             agy_bin,
-            "--dangerously-skip-permissions",
+            "--mode",
+            "plan",
+            "--sandbox",
+            "--output-format",
+            "json",
             "--print",
             prompt,
         ]
@@ -399,7 +404,18 @@ def _build_agy_online_invoker(
         stdout = str(getattr(result, "stdout", "") or "")
         stderr = str(getattr(result, "stderr", "") or "")
         returncode = int(getattr(result, "returncode", 1))
-        delivered = returncode == 0 and bool(stdout.strip())
+        from nexus.executors.agy_write_admission import agy_delivery_failure, last_json_object
+
+        # Strict #1912 classification: parseable JSON, status SUCCESS, no
+        # denied_actions, non-empty response; the denial marker only on stderr.
+        delivery_failure = (
+            agy_delivery_failure(stdout.encode("utf-8"), stderr.encode("utf-8"))
+            if returncode == 0
+            else "provider_subprocess_failed"
+        )
+        delivered = delivery_failure is None
+        payload = last_json_object(stdout) if delivered else None
+        answer = str((payload or {}).get("response") or "")
         refs = [f"online:agy:{task_id}:subprocess"]
         if local_context_forwarded:
             refs.append(f"online:agy:{task_id}:local_context_forwarded")
@@ -412,13 +428,17 @@ def _build_agy_online_invoker(
             output_delivered=delivered,
             gate_passed=delivered,
             provider_call_count=1,
-            response=stdout,
+            response=answer,
             raw_response=stdout,
-            error="" if delivered else "provider_subprocess_failed",
+            error="" if delivered else str(delivery_failure),
             evidence_refs=refs,
             transport="registered_cli",
             selection_source="explicit_request",
-            extra={"returncode": returncode, "stderr": stderr},
+            extra={
+                "returncode": returncode,
+                "stderr": stderr,
+                "provider_permission_mode": "plan_no_autoapprove",
+            },
         )
 
     invoke.provider = "agy"

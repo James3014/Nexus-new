@@ -2,13 +2,38 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import subprocess
+import tempfile
 import time
+from dataclasses import replace
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
+from nexus.executors.agy_write_admission import (
+    AGY_IMPLEMENTATION_ROLES,
+    AGY_PERMISSION_BYPASS_FLAGS,
+    AGY_PERMISSION_MODE_ACCEPT_EDITS,
+    AGY_PERMISSION_MODE_PLAN,
+    AGY_READ_ONLY_ROLES,
+    agy_child_env,
+    agy_delivery_failure,
+    agy_model_shape_ok,
+    agy_permission_bypass_flags,
+    build_seatbelt_profile,
+    checkout_fingerprint,
+    escaping_symlinks,
+    fingerprint_roots,
+    leased_target_failure,
+    materialize_run_home,
+    paths_overlap,
+    protected_checkout_plan,
+    run_home_settings_sha256,
+    target_git_entry_state,
+    worker_home,
+)
 from nexus.executors.cli_worker import (
     CliWorkerRequest,
     CliWorkerResult,
@@ -30,6 +55,32 @@ from nexus.services.external_account_pool import (
     is_rotation_eligible,
 )
 from nexus.services.unified_runtime import resolve_registered_provider_executable
+
+__all__ = [
+    "AGY_IMPLEMENTATION_ROLES",
+    "AGY_PERMISSION_BYPASS_FLAGS",
+    "AGY_PERMISSION_MODE_ACCEPT_EDITS",
+    "AGY_PERMISSION_MODE_PLAN",
+    "AGY_READ_ONLY_ROLES",
+    "AgyWorkerAdapter",
+    "CodexWorkerAdapter",
+    "DirectCliWorkerAdapter",
+    "OllamaPatchWorkerAdapter",
+    "UnimplementedWorkerAdapter",
+    "WorkerRegistry",
+    "agy_delivery_failure",
+    "agy_permission_bypass_flags",
+    "canonical_checkout_fingerprint",
+]
+
+# Backwards-compatible name for the single-checkout fingerprint.
+canonical_checkout_fingerprint = checkout_fingerprint
+
+
+def _default_canonical_checkout_root() -> Path:
+    from nexus.orchestrator.canonical_source_root import CANONICAL_SOURCE_ROOT
+
+    return Path(CANONICAL_SOURCE_ROOT)
 
 
 class CodexWorkerAdapter:
@@ -221,10 +272,21 @@ class DirectCliWorkerAdapter:
         )
 
 
+def _agy_result_failure(result: CliWorkerResult) -> Optional[str]:
+    """Non-delivery reason for an Agy process that exited 0, else ``None``."""
+    reason = agy_delivery_failure(result.stdout, result.stderr)
+    if reason is None and result.descendants_swept is False:
+        reason = "agy_descendant_sweep_failed"
+    return reason
+
+
 class AgyWorkerAdapter:
     """Governed Antigravity CLI adapter with explicit external-runtime gates and account-pool failover."""
 
     provider = "agy"
+    # The registry forwards ``worker_role`` only to role-aware adapters; Agy
+    # refuses to run without an explicit, admitted role (#1912).
+    accepts_worker_role = True
 
     def __init__(
         self,
@@ -233,12 +295,22 @@ class AgyWorkerAdapter:
         model_env: str = "NEXUS_AGY_WORKER_MODEL",
         default_model: str = "gemini-3.8-flash-medium",
         account_pool: Optional[Any] = None,
+        canonical_root: Optional[Path | str] = None,
     ):
         self.executable_env = executable_env
         self.project_id_env = project_id_env
         self.model_env = model_env
         self.default_model = default_model
         self._injected_account_pool = account_pool
+        self._canonical_root = Path(canonical_root) if canonical_root is not None else None
+
+    def _canonical_checkout_root(self) -> Path:
+        root = (
+            self._canonical_root
+            if self._canonical_root is not None
+            else _default_canonical_checkout_root()
+        )
+        return root.resolve()
 
     def _configured_executable(self) -> str:
         try:
@@ -341,33 +413,205 @@ class AgyWorkerAdapter:
         timeout_seconds: Optional[float] = None,
         on_process_group: Any = None,
         model: Optional[str] = None,
+        worker_role: Optional[str] = None,
+        require_leased_target: bool = False,
     ) -> WorkerExecutionReceipt:
+        """Run Agy under the #1912 write-admission model.
+
+        The target must be a runtime-owned worktree outside the canonical
+        checkout; the canonical checkout is fingerprinted before and after the
+        run and any change fails the run closed (it is reported, never
+        reverted). The candidate diff stays in the target worktree for the
+        existing governed collect/verify/apply path.
+        """
         started_at = time.monotonic()
         preflight = self.preflight()
         if not preflight.ready:
             raise WorkerProviderUnavailable(f"{self.provider}: {preflight.reason}")
-        target = str(Path(lease.target_worktree).resolve())
-        timeout = 900.0 if timeout_seconds is None else max(0.0, float(timeout_seconds))
+        target_path = Path(lease.target_worktree).resolve()
+        target = str(target_path)
         executable = preflight.executable or self._configured_executable()
-        raw_budget = getattr(contract, "maximum_provider_calls", 1)
-        provider_call_budget = max(0, int(1 if raw_budget is None else raw_budget))
+
+        def refuse(
+            reason: str, permission_mode: Optional[str], argv: tuple[str, ...] = ()
+        ) -> WorkerExecutionReceipt:
+            return WorkerExecutionReceipt(
+                provider=self.provider,
+                task_id=contract.task_id,
+                target_worktree=target,
+                worker_status=CliWorkerStatus.START_FAILED.value,
+                outcome=WorkerOutcome.FAILED.value,
+                exit_code=1,
+                executable_identity=executable,
+                argv=argv,
+                stdout_sha256=CliWorkerResult.hash_bytes(b""),
+                stderr_sha256=CliWorkerResult.hash_bytes(b""),
+                wall_time_ms=int((time.monotonic() - started_at) * 1000),
+                process_group_id=None,
+                process_group_killed=False,
+                timed_out=False,
+                provider_calls=0,
+                evidence_complete=False,
+                commit_created=False,
+                merge_performed=False,
+                push_performed=False,
+                failure_reason=reason,
+                account_alias_hash=None,
+                provider_attempt_count=0,
+                provider_permission_mode=permission_mode,
+            )
+
+        if worker_role is None or not str(worker_role).strip():
+            return refuse("agy_worker_role_required", None)
+        # The registry (production path) always requires a leased target; a
+        # contract that carries a target root is always bound as well.
+        if require_leased_target or hasattr(contract, "target_worktree_root"):
+            lease_failure = leased_target_failure(contract, lease)
+            if lease_failure is not None:
+                return refuse(lease_failure, None)
+        role = str(worker_role).strip().lower()
+        if role in AGY_READ_ONLY_ROLES:
+            read_only, permission_mode = True, AGY_PERMISSION_MODE_PLAN
+        elif role in AGY_IMPLEMENTATION_ROLES:
+            read_only, permission_mode = False, AGY_PERMISSION_MODE_ACCEPT_EDITS
+        else:
+            return refuse("agy_worker_role_unsupported", None)
+
+        selected_model = str(model or self._model())
+        timeout = 900.0 if timeout_seconds is None else max(0.0, float(timeout_seconds))
+        mode_flags = ("--mode", "plan", "--sandbox") if read_only else ("--mode", "accept-edits")
 
         def build_argv(call_timeout: float, current_prompt: str) -> tuple[str, ...]:
             return (
                 "--new-project",
                 "--add-dir",
                 target,
-                "--dangerously-skip-permissions",
-                "--mode",
-                "accept-edits",
+                *mode_flags,
                 "--model",
-                model or self._model(),
+                selected_model,
+                "--output-format",
+                "json",
                 "--print-timeout",
                 self._timeout_arg(call_timeout),
                 "--print",
                 current_prompt,
             )
 
+        argv = build_argv(timeout, prompt)
+        if not agy_model_shape_ok(selected_model) or agy_permission_bypass_flags(argv):
+            return refuse("agy_command_shape_unsupported", permission_mode)
+
+        plan = protected_checkout_plan(
+            target=target_path,
+            controller_repo_root=getattr(contract, "controller_repo_root", None),
+            canonical_source_root=self._canonical_checkout_root(),
+        )
+        if any(paths_overlap(target_path, root) for root, _ in plan):
+            return refuse("agy_target_overlaps_canonical_checkout", permission_mode, argv)
+        before = fingerprint_roots(plan)
+        if before is None:
+            return refuse("canonical_checkout_snapshot_unavailable", permission_mode, argv)
+        symlinks_before = escaping_symlinks(target_path)
+        git_entry_before = target_git_entry_state(target_path)
+
+        run_tmp = Path(os.path.realpath(tempfile.mkdtemp(prefix="nexus-agy-run-")))
+        facts: dict[str, str] = {}
+        run_homes: list[tuple[Path, str]] = []
+
+        def admit_request(
+            env: Optional[Mapping[str, str]],
+        ) -> tuple[Optional[str], dict[str, str], str]:
+            """Per-attempt disposable HOME, explicit settings and Seatbelt profile."""
+            source_home = worker_home(env)
+            attempt_root = Path(tempfile.mkdtemp(prefix="attempt-", dir=run_tmp))
+            run_home = attempt_root / "home"
+            run_tmpdir = attempt_root / "tmp"
+            run_tmpdir.mkdir(parents=True)
+            # Explicit allowlist: the pool/ambient env is never forwarded.
+            run_env = agy_child_env(env, home=run_home, tmpdir=run_tmpdir)
+            refusal, profile_sha256 = materialize_run_home(
+                source_home, run_home, read_only=read_only
+            )
+            facts["profile_sha256"] = profile_sha256
+            if refusal is not None:
+                return refusal, run_env, ""
+            run_homes.append((run_home, run_home_settings_sha256(run_home)))
+            try:
+                seatbelt = build_seatbelt_profile(
+                    run_root=run_tmp,
+                    writable_target=None if read_only else target_path,
+                    run_home=run_home,
+                )
+            except ValueError:
+                return "agy_seatbelt_profile_unrepresentable", run_env, ""
+            facts["seatbelt_sha256"] = hashlib.sha256(seatbelt.encode("utf-8")).hexdigest()
+            return refusal, run_env, seatbelt
+
+        try:
+            # The shared provider wall-time budget starts after the integrity
+            # snapshot so Git bookkeeping never eats into the provider deadline.
+            receipt = self._invoke_admitted(
+                contract,
+                prompt=prompt,
+                started_at=time.monotonic(),
+                target=target,
+                timeout=timeout,
+                executable=executable,
+                build_argv=build_argv,
+                on_process_group=on_process_group,
+                admit_request=admit_request,
+                sweep_roots=(str(run_tmp),) if read_only else (str(target_path), str(run_tmp)),
+            )
+            profile_tampered = any(
+                run_home_settings_sha256(home) != digest for home, digest in run_homes
+            )
+        finally:
+            shutil.rmtree(run_tmp, ignore_errors=True)
+        receipt = replace(
+            receipt,
+            provider_permission_mode=permission_mode,
+            provider_permission_profile_sha256=facts.get("profile_sha256") or None,
+            provider_write_sandbox=(
+                f"seatbelt:{facts['seatbelt_sha256']}" if facts.get("seatbelt_sha256") else None
+            ),
+        )
+        after = fingerprint_roots(plan)
+        post_failure: Optional[str] = None
+        if after is None:
+            post_failure = "canonical_snapshot_failed"
+        elif after != before:
+            post_failure = "canonical_checkout_integrity_violation"
+        elif profile_tampered:
+            post_failure = "agy_permission_profile_tampered"
+        elif target_git_entry_state(target_path) != git_entry_before:
+            post_failure = "agy_target_gitdir_tampered"
+        elif escaping_symlinks(target_path) != symlinks_before:
+            post_failure = "agy_target_symlink_escape"
+        if post_failure is not None:
+            receipt = replace(
+                receipt,
+                outcome=WorkerOutcome.FAILED.value,
+                evidence_complete=False,
+                failure_reason=post_failure,
+            )
+        return receipt
+
+    def _invoke_admitted(
+        self,
+        contract: Any,
+        *,
+        prompt: str,
+        started_at: float,
+        target: str,
+        timeout: float,
+        executable: str,
+        build_argv: Any,
+        on_process_group: Any,
+        admit_request: Any,
+        sweep_roots: tuple[str, ...] = (),
+    ) -> WorkerExecutionReceipt:
+        raw_budget = getattr(contract, "maximum_provider_calls", 1)
+        provider_call_budget = max(0, int(1 if raw_budget is None else raw_budget))
         argv = build_argv(timeout, prompt)
 
         if provider_call_budget == 0:
@@ -435,19 +679,56 @@ class AgyWorkerAdapter:
             argv_seconds = int(round(remaining_seconds))
             if argv_seconds < 1:
                 argv_seconds = 1
+            refusal, run_env, seatbelt = admit_request(None)
+            if refusal is not None:
+                return WorkerExecutionReceipt(
+                    provider=self.provider,
+                    task_id=contract.task_id,
+                    target_worktree=target,
+                    worker_status=CliWorkerStatus.START_FAILED.value,
+                    outcome=WorkerOutcome.FAILED.value,
+                    exit_code=1,
+                    executable_identity=executable,
+                    argv=argv,
+                    stdout_sha256=CliWorkerResult.hash_bytes(b""),
+                    stderr_sha256=CliWorkerResult.hash_bytes(b""),
+                    wall_time_ms=int((time.monotonic() - started_at) * 1000),
+                    process_group_id=None,
+                    process_group_killed=False,
+                    timed_out=False,
+                    provider_calls=0,
+                    evidence_complete=False,
+                    commit_created=False,
+                    merge_performed=False,
+                    push_performed=False,
+                    failure_reason=refusal,
+                    account_alias_hash=None,
+                    provider_attempt_count=0,
+                )
             request = CliWorkerRequest(
                 executable=executable,
                 argv=build_argv(argv_seconds, prompt),
                 cwd=target,
+                env=run_env,
                 timeout_seconds=remaining_seconds,
+                seatbelt_profile=seatbelt,
+                sweep_descendants_on_exit=True,
+                sweep_roots=sweep_roots,
+                exact_env=True,
             )
             result = run_cli_worker(request, on_process_group=on_process_group)
+            delivery_failure: Optional[str] = None
             if result.status is CliWorkerStatus.TIMED_OUT:
                 outcome = WorkerOutcome.INCOMPLETE
             elif result.status is not CliWorkerStatus.COMPLETED or result.exit_code != 0:
                 outcome = WorkerOutcome.FAILED
+                if result.stderr == b"seatbelt_unavailable":
+                    delivery_failure = "agy_seatbelt_unavailable"
             else:
-                outcome = WorkerOutcome.EXECUTION_COMPLETED
+                delivery_failure = _agy_result_failure(result)
+                outcome = (
+                    WorkerOutcome.FAILED if delivery_failure else WorkerOutcome.EXECUTION_COMPLETED
+                )
             return WorkerExecutionReceipt(
                 provider=self.provider,
                 task_id=contract.task_id,
@@ -468,9 +749,14 @@ class AgyWorkerAdapter:
                 commit_created=False,
                 merge_performed=False,
                 push_performed=False,
-                failure_reason=None if outcome == WorkerOutcome.EXECUTION_COMPLETED else f"{self.provider} execution did not complete successfully",
+                failure_reason=None
+                if outcome == WorkerOutcome.EXECUTION_COMPLETED
+                else (
+                    delivery_failure or f"{self.provider} execution did not complete successfully"
+                ),
                 account_alias_hash=None,
                 provider_attempt_count=1,
+                provider_env_keys_sha256=result.env_keys_sha256 or None,
             )
 
         max_subprocesses = min(3, provider_call_budget)
@@ -542,7 +828,8 @@ class AgyWorkerAdapter:
                             f"New Account Hash: {active_hash}\n"
                             f"Failure Kind: {last_failure_kind.value}\n"
                             f"Original Instruction: {prompt}\n\n"
-                            f"Please re-inspect the current worktree, code changes, diffs, and run tests to proceed with the task."
+                            "Please re-inspect the current worktree and its file changes, then continue "
+                            "the task with file edits only; shell commands are not available."
                         )
 
                     remaining_seconds = get_remaining_seconds()
@@ -553,12 +840,20 @@ class AgyWorkerAdapter:
                     argv_seconds = int(round(remaining_seconds))
                     if argv_seconds < 1:
                         argv_seconds = 1
+                    refusal, run_env, seatbelt = admit_request(sub_env)
+                    if refusal is not None:
+                        failure_reason = refusal
+                        break
                     request = CliWorkerRequest(
                         executable=executable,
                         argv=build_argv(argv_seconds, current_prompt),
                         cwd=target,
-                        env=sub_env,
+                        env=run_env,
                         timeout_seconds=remaining_seconds,
+                        seatbelt_profile=seatbelt,
+                        sweep_descendants_on_exit=True,
+                        sweep_roots=sweep_roots,
+                        exact_env=True,
                     )
 
                     keys_to_restore = {}
@@ -652,7 +947,12 @@ class AgyWorkerAdapter:
         if last_result.status is CliWorkerStatus.TIMED_OUT:
             outcome_val = WorkerOutcome.INCOMPLETE.value
         elif last_result.status is CliWorkerStatus.COMPLETED and last_result.exit_code == 0:
-            outcome_val = WorkerOutcome.EXECUTION_COMPLETED.value
+            delivery_failure = _agy_result_failure(last_result)
+            if delivery_failure:
+                outcome_val = WorkerOutcome.FAILED.value
+                failure_reason = delivery_failure
+            else:
+                outcome_val = WorkerOutcome.EXECUTION_COMPLETED.value
         else:
             outcome_val = WorkerOutcome.FAILED.value
 
@@ -679,6 +979,7 @@ class AgyWorkerAdapter:
             failure_reason=None if outcome_val == WorkerOutcome.EXECUTION_COMPLETED.value else (failure_reason or f"{self.provider} execution did not complete successfully"),
             account_alias_hash=last_account_hash,
             provider_attempt_count=actual_calls,
+            provider_env_keys_sha256=last_result.env_keys_sha256 or None,
         )
 
 
@@ -816,7 +1117,7 @@ class WorkerRegistry:
         adapters = dict(adapters)
         missing = set(SUPPORTED_WORKER_PROVIDERS) - set(adapters)
         if missing <= {"agy", "grok", "cline"}:
-            adapters.setdefault("agy", AgyWorkerAdapter())
+            adapters.setdefault("agy", AgyWorkerAdapter())  # pyright: ignore[reportArgumentType]  # pre-existing WorkerAdapter protocol mismatch, line-shifted by #1912
             adapters.setdefault(
                 "grok",
                 DirectCliWorkerAdapter("grok", "grok", "NEXUS_GROK_WORKER_MODEL", "grok-4.5", _grok_args),
@@ -876,6 +1177,12 @@ class WorkerRegistry:
             raise WorkerProviderUnavailable(f"{provider}: {preflight.reason}")
 
         adapter = self.adapter(provider)
+        worker_role = options.pop("worker_role", None)
+        options.pop("require_leased_target", None)
+        if bool(getattr(adapter, "accepts_worker_role", False)):
+            options["worker_role"] = worker_role
+            # Production entry: the target must be the contract's leased worktree.
+            options["require_leased_target"] = True
         effect_authorization = options.pop("effect_authorization", None)
         tool_projection_manifest = options.pop("tool_projection_manifest", None)
         if (effect_authorization is None) != (tool_projection_manifest is None):
