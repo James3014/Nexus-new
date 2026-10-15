@@ -284,30 +284,91 @@ def parse_wiki_governance_receipt(value: Any, *, root: Path | None = None) -> li
     )
 
 
+_MAX_SOURCE_BYTES = 8 * 1024 * 1024
+_FILE_LEVEL_RULES = frozenset({"unformatted"})
+
+
+def _read_source_lines(root: Path, rel_path: str) -> list[str] | None:
+    """Read a file strictly inside ``root``; ``None`` when it cannot be trusted."""
+    try:
+        resolved_root = root.resolve()
+        candidate = (resolved_root / rel_path).resolve()
+        candidate.relative_to(resolved_root)
+        if not candidate.is_file() or candidate.stat().st_size > _MAX_SOURCE_BYTES:
+            return None
+        return candidate.read_bytes().decode("utf-8", errors="replace").splitlines()
+    except (OSError, ValueError, RuntimeError):
+        return None
+
+
+def _comparison_keys(findings: list[Finding], root: Path | None) -> list[tuple[Any, ...]]:
+    """Line-independent keys: identity + stripped source text + ordinal per key.
+
+    Without a root the legacy identity is used. With a root, an unreadable source
+    line falls back to a key that includes the line number: it matches only an
+    identical finding at the same line and column, which is never looser than the
+    legacy identity it replaces.
+    """
+    if root is None:
+        return [finding.identity for finding in findings]
+    cache: dict[str, list[str] | None] = {}
+    ordinals: Counter[tuple[Any, ...]] = Counter()
+    keys: list[tuple[Any, ...]] = []
+    for finding in findings:  # already ordered by (tool, path, line, ...)
+        if finding.rule_id in _FILE_LEVEL_RULES or finding.line <= 0:
+            context: tuple[Any, ...] = ("file",)
+        else:
+            if finding.path not in cache:
+                cache[finding.path] = _read_source_lines(root, finding.path)
+            lines = cache[finding.path]
+            if lines is None or finding.line > len(lines):
+                context = ("unreadable", finding.line, finding.column)
+            else:
+                context = ("text", lines[finding.line - 1].strip())
+        base_key = (*finding.identity, context)
+        keys.append((*base_key, ordinals[base_key]))
+        ordinals[base_key] += 1
+    return keys
+
+
+def _distinct_roots(base_root: Path | None, head_root: Path | None) -> bool:
+    """True only for two resolvable, different trees; any doubt keeps legacy keys."""
+    if base_root is None or head_root is None:
+        return False
+    try:
+        return Path(base_root).resolve() != Path(head_root).resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
 def classify_findings(
     base_findings: Iterable[Finding],
     head_findings: Iterable[Finding],
     *,
     base_valid: bool = True,
     head_valid: bool = True,
+    base_root: Path | None = None,
+    head_root: Path | None = None,
 ) -> FindingClassification:
     """Compare exact-base and exact-head findings; any new identity blocks."""
     ordered_base = _sorted(base_findings)
     ordered_head = _sorted(head_findings)
-    base_counts = Counter(finding.identity for finding in ordered_base)
-    head_counts = Counter(finding.identity for finding in ordered_head)
+    base_keys = _comparison_keys(ordered_base, base_root)
+    head_keys = _comparison_keys(ordered_head, head_root)
+    base_counts = Counter(base_keys)
+    head_counts = Counter(head_keys)
     new_counts = head_counts - base_counts
     resolved_counts = base_counts - head_counts
     new = []
     resolved = []
-    for finding in ordered_head:
-        if new_counts[finding.identity] > 0:
+    for finding, key in zip(ordered_head, head_keys):
+        if new_counts[key] > 0:
             new.append(finding)
-            new_counts[finding.identity] -= 1
-    for finding in ordered_base:
-        if resolved_counts[finding.identity] > 0:
+            new_counts[key] -= 1
+    for finding, key in zip(ordered_base, base_keys):
+        if resolved_counts[key] > 0:
             resolved.append(finding)
-            resolved_counts[finding.identity] -= 1
+            resolved_counts[key] -= 1
     if not base_valid or not head_valid:
         classification, blocking = "IMPACT_UNKNOWN", True
     elif new:
@@ -421,6 +482,7 @@ def _cli() -> int:
     args = parser.parse_args()
     base_root = args.base_root or args.root
     head_root = args.head_root or args.root
+    distinct_roots = _distinct_roots(base_root, head_root)
     report: dict[str, Any]
     try:
         if args.base_exit_code not in {0, 1} or args.head_exit_code not in {0, 1}:
@@ -432,6 +494,10 @@ def _cli() -> int:
             head,
             base_valid=args.base_valid and (args.base_exit_code == 0 or bool(base)),
             head_valid=args.head_valid and (args.head_exit_code == 0 or bool(head)),
+            # Source-text keys need two distinct trees; one shared root would read
+            # the base finding's line from the head tree and misreport it as new.
+            base_root=base_root if distinct_roots else None,
+            head_root=head_root if distinct_roots else None,
         )
         report = {
             "classification": result.classification,
