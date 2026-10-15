@@ -27,7 +27,7 @@ logical_subject_id = "dependency/nexus-runtime"
 evidence_kind = "resolved-dependency"
 requirement_mode = "REQUIRED"
 applicability = "APPLICABLE"
-expected_identity = "git-commit:0cedab1ed38e80db85639f9d0ad6e0e17cdaf627"
+expected_identity = "git-commit:e73d152f17d5d06b78da258b62354cca11d6a352"
 
 [[verifiers]]
 id = "fast-l1"
