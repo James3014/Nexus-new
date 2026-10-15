@@ -78,25 +78,45 @@ None of these changes how a candidate that applies cleanly is scored.
   `CAND+T` runs are never replayed from a `GOLD` run with the same tree id
   (self-check (a)).
 
-## 2026-10-15: A6, scratch TMPDIR cleanup and cap (operational, #2291)
+## 2026-10-15: A6, scratch cleanup, caps and lock (operational, #2291)
 
 Every pytest run gets `HOME=scratch/home` and `TMPDIR=scratch/tmp` (§8). Before 1.2.1,
-`scratch/tmp` was never emptied, so one leaky test in any tree could fill the disk and
-the leak carried over to every later task (#2291: 96 GB in one run).
+neither was ever emptied, so one leaky test in any tree could fill the disk and the
+leak carried over to every later task (#2291: 96 GB in one run).
 
 Scorer 1.2.1:
-- Empties `scratch/tmp` after every task that reached the tree stage, in the same cleanup
-  step that removes the worktrees, and also when `--keep-trees` is set. Only the runner's
-  own `junit-*.xml` files are kept while a run reads them; each is deleted as soon as its
-  results are parsed and cached.
-- Records the size of `scratch/tmp` before that cleanup as `scratch_tmp_bytes` in
-  `real_outcome_timing.json`. The walk never follows symlinks.
-- Fails a run that leaves more than `SCRATCH_TMP_CAP_BYTES` (20 GiB) in `scratch/tmp`.
-  The run is treated like a crashed run on that tree: no outcomes (§8: its expected
-  nodes count as `fail`), exit code `-2`, and the diagnostic `SCRATCH_TMP_CAP_EXCEEDED`.
-  The diagnostic appears in `p2p_baseline_failures[]` (A2) or in the
-  `GOLD_COLLECTION_FAILED` detail. `scratch/tmp` is then emptied.
+- **Cleanup.** After every task that reached the tree stage, `scratch/tmp` and
+  `scratch/home` are emptied, in the same cleanup step that removes the worktrees, also
+  with `--keep-trees`. Only the junit report of a run still in flight is kept; each
+  report is deleted as soon as its results are parsed. Cleanup never follows a symlink
+  and never raises: errors go to `scratch_tmp_cleanup_errors` in the timing receipt.
+- **Receipt.** `real_outcome_timing.json` records `scratch_tmp_bytes` and
+  `scratch_home_bytes`, the sizes before cleanup (regular files, symlinks not followed).
+- **Process group.** Each pytest run starts in its own session. When it exits or times
+  out, the whole process group is killed, so a child it left behind cannot keep writing
+  while the next run is measured. A child that starts its own session escapes this.
+- **Per-run cap.** A run that leaves more than `SCRATCH_TMP_CAP_BYTES` (20 GiB) in
+  `scratch/tmp` + `scratch/home` (its junit report excluded) is never read as test
+  results and is not cached:
+  - on a candidate tree (`CAND+T`, `CAND@BASE_TESTS`): `NOT_RUNNABLE` /
+    `SCRATCH_TMP_CAP_EXCEEDED`, no `shadow_label`;
+  - on any other tree (`BASE+T`, `GOLD`, `GOLD_REF`, the P2P(d) trees):
+    `NOT_SCORABLE_ORACLE_INVALID` / `ORACLE_RUN_FAILED`.
+- **Per-task cap.** When the runs of one task together leave more than
+  `SCRATCH_TMP_TASK_CAP_BYTES` (40 GiB): `NOT_SCORABLE_ORACLE_INVALID` /
+  `SCRATCH_TMP_TASK_CAP_EXCEEDED`, not cached.
+- In both cap cases, `detail` names the cap, tree, target, run, role and the bytes left.
+- **Not limited:** the peak usage while a single run is still going (only the
+  `SpeculativeSandbox` guard of #2291 prevents the 96 GB case), and writes outside
+  `scratch/` (a test that writes elsewhere is not measured).
+- **Symlinked scratch.** If `scratch/tmp` or `scratch/home` is a symlink when a run
+  starts or when cleanup runs, the scorer refuses (`ScratchUnsafe`, no receipt).
+- **Lock.** `score_task` holds an exclusive `flock` on `<work>/.scorer.lock`, because
+  cleanup would delete another scorer's in-flight files. A second scorer on the same
+  `--work` stops at once (`ScorerBusy`, CLI exit 6).
 
-No scoring rule changes: a run over the cap goes down the path v1 already defines for a
-run without a usable junit report. The env and test-result cache keys include the scorer
-version (A4), so 1.2.1 rebuilds its envs and does not reuse 1.2.0 results.
+Timeouts and crashes keep their v1 meaning (§8, A2): their expected nodes count as
+`fail`, and a P2P baseline failure is a diagnostic only. The cap is a new refusal, like
+the unsafe-input refusals of A3, and is never a benchmark label. The env and
+test-result cache keys include the scorer version (A4), so 1.2.1 rebuilds its envs and
+does not reuse 1.2.0 results.

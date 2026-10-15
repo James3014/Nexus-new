@@ -4,6 +4,7 @@ import getpass
 import logging
 import os
 import shutil
+import stat
 import subprocess
 import tempfile
 from pathlib import Path
@@ -11,45 +12,77 @@ from typing import Callable
 
 logger = logging.getLogger(__name__)
 
-# Copied names (shutil.ignore_patterns) that never enter a sandbox copy.
-_IGNORED_NAMES = (
+# Names that never enter a sandbox copy, at any depth.
+_IGNORED_NAMES = frozenset({
     ".git",
     ".venv",
     "__pycache__",
     ".pytest_cache",
     ".ruff_cache",
     ".mypy_cache",
-    ".nexus/runs",
-)
+})
+# (parent directory name, child name) pairs that never enter a sandbox copy: run
+# artifacts under .nexus/runs. ignore_patterns() matches base names only, so the old
+# ".nexus/runs" pattern never matched anything.
+_IGNORED_CHILDREN = frozenset({(".nexus", "runs")})
 # Sanity caps checked before any copy (#2291). A source root with more top-level entries,
 # or more bytes of regular files (ignored names excluded, symlinks not followed), is
 # refused: it is not a project checkout.
 SANDBOX_MAX_TOP_LEVEL_ENTRIES = 2000
 SANDBOX_MAX_SOURCE_BYTES = 4 * 1024**3
+# Directories whose direct children have the shape of an account home, plus root's
+# home itself. A backstop for when the account database cannot be read.
+_ACCOUNT_HOME_PARENTS = ("/Users", "/home", "/var/home")
+_ROOT_HOME = "/root"
+
+
+def _ignored(dirpath: str, names: list[str] | set[str]) -> set[str]:
+    parent = os.path.basename(os.path.normpath(dirpath))
+    return {n for n in names if n in _IGNORED_NAMES or (parent, n) in _IGNORED_CHILDREN}
+
+
+def _pwd_home() -> Path | None:
+    try:
+        import pwd
+
+        return Path(pwd.getpwuid(os.getuid()).pw_dir)
+    except (ImportError, KeyError, AttributeError, OSError):
+        return None
+
+
+def _expanduser_home() -> Path | None:
+    try:
+        expanded = os.path.expanduser("~" + getpass.getuser())
+    except (KeyError, OSError, ImportError):
+        return None
+    return None if expanded.startswith("~") else Path(expanded)
 
 
 def _account_homes() -> set[Path]:
     """The real account home, whatever ``$HOME`` says (a harness may override it)."""
-    homes: set[Path] = set()
-    try:
-        import pwd
-
-        homes.add(Path(pwd.getpwuid(os.getuid()).pw_dir))
-    except (ImportError, KeyError, AttributeError, OSError):
-        pass
-    try:
-        expanded = os.path.expanduser("~" + getpass.getuser())
-        if not expanded.startswith("~"):
-            homes.add(Path(expanded))
-    except (KeyError, OSError, ImportError):
-        pass
     resolved: set[Path] = set()
-    for home in homes:
+    for home in (_pwd_home(), _expanduser_home()):
+        if home is None:
+            continue
         try:
             resolved.add(home.resolve())
         except OSError:
             continue
     return resolved
+
+
+def _has_account_home_shape(resolved: Path) -> bool:
+    parents = set()
+    for raw in _ACCOUNT_HOME_PARENTS:
+        try:
+            parents.add(Path(raw).resolve())
+        except OSError:
+            continue
+    try:
+        root_home = Path(_ROOT_HOME).resolve()
+    except OSError:
+        root_home = Path(_ROOT_HOME)
+    return resolved.parent in parents or resolved == root_home
 
 
 def _checkout_root(start: Path) -> Path | None:
@@ -60,10 +93,9 @@ def _checkout_root(start: Path) -> Path | None:
     return None
 
 
-def _running_checkout_root() -> Path:
-    """The tree that holds this module: its git checkout, else the package's parent."""
-    module = Path(__file__).resolve()
-    return _checkout_root(module.parent) or module.parents[2]
+def _running_checkout_root() -> Path | None:
+    """The git checkout that holds this module; None for an install outside a checkout."""
+    return _checkout_root(Path(__file__).resolve().parent)
 
 
 def _is_strict_ancestor(candidate: Path, path: Path) -> bool:
@@ -73,13 +105,16 @@ def _is_strict_ancestor(candidate: Path, path: Path) -> bool:
 def _source_size_exceeds(root: Path, limit: int) -> bool:
     total = 0
     for dirpath, dirs, files in os.walk(root, followlinks=False):
-        dirs[:] = [d for d in dirs if d not in _IGNORED_NAMES]
+        skip = _ignored(dirpath, dirs)
+        dirs[:] = [d for d in dirs if d not in skip]
         for name in files:
+            if name in _ignored(dirpath, [name]):
+                continue
             try:
                 st = os.lstat(os.path.join(dirpath, name))
             except OSError:
                 continue
-            if not os.path.islink(os.path.join(dirpath, name)):
+            if stat.S_ISREG(st.st_mode):
                 total += st.st_size
                 if total > limit:
                     return True
@@ -143,28 +178,26 @@ class SpeculativeSandbox:
         broad_roots = {
             Path("/").resolve(),
             Path.home().resolve(),
-            *_account_homes(),
             Path(tempfile.gettempdir()).resolve(),
             Path("/tmp").resolve(),
             Path("/private/tmp").resolve(),
             Path("/var/tmp").resolve(),
         }
+        if resolved in _account_homes():
+            raise ValueError(f"sandbox source root is too broad: {resolved} is the account home")
         if resolved in broad_roots:
             raise ValueError(f"sandbox source root is too broad: {resolved}")
-        # A tree that contains the running checkout (or the checkout of the current
-        # directory) is never intended: it is the user's home or workspace (#2291).
-        anchors = [_running_checkout_root()]
-        try:
-            cwd_root = _checkout_root(Path.cwd().resolve())
-        except OSError:
-            cwd_root = None
-        if cwd_root is not None:
-            anchors.append(cwd_root)
-        for anchor in anchors:
-            if _is_strict_ancestor(resolved, anchor):
-                raise ValueError(
-                    f"sandbox source root is too broad: {resolved} contains the checkout {anchor}"
-                )
+        if _has_account_home_shape(resolved):
+            raise ValueError(
+                f"sandbox source root is too broad: {resolved} has the shape of an account home"
+            )
+        # A tree that contains the running checkout is never intended: it is the user's
+        # home or workspace (#2291). Only applies when this module sits in a checkout.
+        checkout = _running_checkout_root()
+        if checkout is not None and _is_strict_ancestor(resolved, checkout):
+            raise ValueError(
+                f"sandbox source root is too broad: {resolved} contains the checkout {checkout}"
+            )
         return resolved
 
     @staticmethod
@@ -196,7 +229,7 @@ class SpeculativeSandbox:
             self.sandbox_root,
             dirs_exist_ok=True,
             symlinks=True,
-            ignore=shutil.ignore_patterns(*_IGNORED_NAMES),
+            ignore=_ignored,
         )
         return self.sandbox_root
 

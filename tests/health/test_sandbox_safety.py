@@ -172,6 +172,10 @@ def test_executor_cleanup_runs_when_fork_raises_after_partial_initialization(
 # #2291: a harness that overrides HOME must not turn the real account home, or a tree
 # that contains the running checkout, into an acceptable source root.
 
+ACCOUNT_HOME = "is the account home"
+HOME_SHAPE = "has the shape of an account home"
+CONTAINS_CHECKOUT = "contains the checkout"
+
 
 def _real_account_home() -> Path:
     pwd = pytest.importorskip("pwd")
@@ -189,19 +193,62 @@ def _refuse_mkdtemp(monkeypatch, tmp_path: Path) -> list[str]:
     return created
 
 
-def test_real_account_home_is_refused_when_home_is_overridden(monkeypatch, tmp_path: Path) -> None:
-    real_home = _real_account_home()
+def _fake_home(monkeypatch, tmp_path: Path) -> None:
     fake_home = tmp_path / "scratch-home"
     fake_home.mkdir()
     monkeypatch.setenv("HOME", str(fake_home))
     assert Path.home().resolve() == fake_home.resolve()
+
+
+def test_real_account_home_is_refused_when_home_is_overridden(monkeypatch, tmp_path: Path) -> None:
+    real_home = _real_account_home()
+    _fake_home(monkeypatch, tmp_path)
     created = _refuse_mkdtemp(monkeypatch, tmp_path)
 
     sandbox = SpeculativeSandbox(real_home, mode="tmpdir")
-    with pytest.raises(ValueError, match="too broad"):
+    with pytest.raises(ValueError, match=ACCOUNT_HOME):
         sandbox.fork()
     assert created == []
     assert sandbox.sandbox_root is None
+
+
+def test_account_home_found_by_pwd_alone(monkeypatch, tmp_path: Path) -> None:
+    real_home = _real_account_home()
+    _fake_home(monkeypatch, tmp_path)
+    monkeypatch.setattr(sandbox_module, "_expanduser_home", lambda: None)
+    with pytest.raises(ValueError, match=ACCOUNT_HOME):
+        SpeculativeSandbox(real_home, mode="tmpdir").fork()
+
+
+def test_account_home_found_by_expanduser_alone(monkeypatch, tmp_path: Path) -> None:
+    real_home = _real_account_home()
+    _fake_home(monkeypatch, tmp_path)
+    monkeypatch.setattr(sandbox_module, "_pwd_home", lambda: None)
+    with pytest.raises(ValueError, match=ACCOUNT_HOME):
+        SpeculativeSandbox(real_home, mode="tmpdir").fork()
+
+
+def test_account_home_shape_is_refused_without_account_lookups(monkeypatch, tmp_path: Path) -> None:
+    homes = tmp_path / "homes"
+    (homes / "alice" / "project").mkdir(parents=True)
+    _fake_home(monkeypatch, tmp_path)
+    monkeypatch.setattr(sandbox_module, "_account_homes", lambda: set())
+    monkeypatch.setattr(sandbox_module, "_ACCOUNT_HOME_PARENTS", (str(homes),))
+    with pytest.raises(ValueError, match=HOME_SHAPE):
+        SpeculativeSandbox(homes / "alice", mode="tmpdir").fork()
+    sandbox = SpeculativeSandbox(homes / "alice" / "project", mode="tmpdir")
+    try:
+        assert sandbox.fork().is_dir()
+    finally:
+        sandbox.cleanup()
+
+
+def test_default_account_home_shapes() -> None:
+    assert sandbox_module._has_account_home_shape(Path("/Users/someone"))
+    assert sandbox_module._has_account_home_shape(Path("/home/someone").resolve())
+    assert sandbox_module._has_account_home_shape(Path("/root").resolve())
+    assert not sandbox_module._has_account_home_shape(Path("/Users/someone/project"))
+    assert not sandbox_module._has_account_home_shape(Path("/home/runner/work/repo"))
 
 
 def test_account_homes_ignore_home_env(monkeypatch, tmp_path: Path) -> None:
@@ -212,32 +259,78 @@ def test_account_homes_ignore_home_env(monkeypatch, tmp_path: Path) -> None:
 
 
 def test_ancestor_of_running_checkout_is_refused(monkeypatch, tmp_path: Path) -> None:
-    checkout = sandbox_module._running_checkout_root()
-    assert Path(sandbox_module.__file__).resolve().is_relative_to(checkout)
-    # Pretend the account home is elsewhere so only the ancestor rule can refuse.
-    monkeypatch.setattr(sandbox_module, "_account_homes", lambda: set())
-    monkeypatch.setenv("HOME", str(tmp_path))
+    outer = tmp_path / "workspace"
+    checkout = outer / "checkout"
+    (checkout / "nexus").mkdir(parents=True)
+    monkeypatch.setattr(sandbox_module, "_running_checkout_root", lambda: checkout)
     created = _refuse_mkdtemp(monkeypatch, tmp_path)
 
-    sandbox = SpeculativeSandbox(checkout.parent, mode="tmpdir")
-    with pytest.raises(ValueError, match="contains the checkout"):
+    sandbox = SpeculativeSandbox(outer, mode="tmpdir")
+    with pytest.raises(ValueError, match=CONTAINS_CHECKOUT):
         sandbox.fork()
     assert created == []
 
 
-def test_ancestor_of_cwd_checkout_is_refused(monkeypatch, tmp_path: Path) -> None:
-    outer = tmp_path / "outer"
-    repo = outer / "repo"
-    (repo / ".git").mkdir(parents=True)
-    (repo / "sub").mkdir()
-    monkeypatch.chdir(repo / "sub")
+def test_running_checkout_root_is_the_git_checkout_of_this_module() -> None:
+    module = Path(sandbox_module.__file__).resolve()
+    root = sandbox_module._running_checkout_root()
+    expected = next((p for p in module.parents if (p / ".git").exists()), None)
+    assert root == expected
+    if root is not None:
+        assert module.is_relative_to(root)
 
-    with pytest.raises(ValueError, match="contains the checkout"):
-        SpeculativeSandbox(outer, mode="tmpdir").fork()
-    # The checkout itself is still a valid source root.
+
+def test_checkout_itself_is_a_valid_source(monkeypatch, tmp_path: Path) -> None:
+    checkout = tmp_path / "checkout"
+    (checkout / "nexus").mkdir(parents=True)
+    monkeypatch.setattr(sandbox_module, "_running_checkout_root", lambda: checkout)
+    sandbox = SpeculativeSandbox(checkout, mode="tmpdir")
+    try:
+        assert (sandbox.fork() / "nexus").is_dir()
+    finally:
+        sandbox.cleanup()
+
+
+def test_checkout_rule_is_skipped_outside_a_git_checkout(monkeypatch, tmp_path: Path) -> None:
+    # A non-editable install with no .git above it: the project root stays valid.
+    monkeypatch.setattr(sandbox_module, "_running_checkout_root", lambda: None)
+    source = tmp_path / "project"
+    source.mkdir()
+    (source / "f.txt").write_text("x", encoding="utf-8")
+    sandbox = SpeculativeSandbox(source, mode="tmpdir")
+    try:
+        assert (sandbox.fork() / "f.txt").exists()
+    finally:
+        sandbox.cleanup()
+
+
+def test_cwd_inside_nested_checkout_does_not_block_fork(monkeypatch, tmp_path: Path) -> None:
+    # RepairExecutor may run from inside a submodule of its repo_root.
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / "sub" / ".git").mkdir(parents=True)
+    monkeypatch.chdir(repo / "sub")
     sandbox = SpeculativeSandbox(repo, mode="tmpdir")
     try:
         assert (sandbox.fork() / "sub").is_dir()
+    finally:
+        sandbox.cleanup()
+
+
+def test_nexus_runs_is_not_copied_or_counted(monkeypatch, tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    (source / ".nexus" / "runs").mkdir(parents=True)
+    (source / ".nexus" / "runs" / "big.bin").write_bytes(b"x" * 10_000)
+    (source / ".nexus" / "config.toml").write_text("k = 1\n", encoding="utf-8")
+    (source / "pkg" / "runs").mkdir(parents=True)  # "runs" elsewhere is copied
+    (source / "pkg" / "runs" / "r.txt").write_text("r", encoding="utf-8")
+    monkeypatch.setattr(sandbox_module, "SANDBOX_MAX_SOURCE_BYTES", 1000)
+    sandbox = SpeculativeSandbox(source, mode="tmpdir")
+    try:
+        root = sandbox.fork()
+        assert not (root / ".nexus" / "runs").exists()
+        assert (root / ".nexus" / "config.toml").exists()
+        assert (root / "pkg" / "runs" / "r.txt").exists()
     finally:
         sandbox.cleanup()
 
