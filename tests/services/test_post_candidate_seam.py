@@ -810,6 +810,116 @@ def test_confined_hidden_verifier_cannot_read_outside_its_copy(tmp_path: Path) -
     assert (case / "test_hidden.py").is_file()  # the workspace copy is never touched
 
 
+def test_seam_seals_real_invoked_evidence_for_the_stages_it_ran(
+    tmp_path: Path, barrier: list[list[str]]
+) -> None:
+    """#2212 attestation: the seam ran the confined test itself, so each physically executed
+    stage carries ``receipt_present`` plus a seam-sealed ``REAL_INVOKED`` bundle entry and a
+    matching ``capability_results`` executor record (ids = the stage's evidence refs)."""
+    case = _case(tmp_path)
+
+    receipt = seam.run_seam_for_candidate(
+        task_id="auto-flow:demo",
+        unified_receipt=_runtime_receipt("sandbox", "ultra_review"),
+        target_path=case / "target.py",
+        visible_test_path=case / "test_visible.py",
+        original_code=ORIGINAL,
+        candidate_code=CANDIDATE,
+    )
+
+    assert receipt is not None
+    stages = {stage["name"]: stage for stage in receipt["capabilities"]}
+    entries = {e["name"]: e for e in receipt["capability_evidence_bundle"]["entries"]}
+    assert set(entries) == set(stages) == {"sandbox", "ultra_review"}
+    for name, stage in stages.items():
+        assert stage["claim_boundary"]["receipt_present"] is True
+        entry = entries[name]
+        assert entry["status"] == "REAL_INVOKED" and entry["invoked_real"] is True
+        assert entry["physical_callable"] == stage["physical_callable"] != ""
+        assert entry["evidence_ids"] == stage["evidence_refs"] != []
+        assert entry["sealed_by"] == seam.SEAM_EVIDENCE_SEALER
+        record = receipt["capability_results"][name]
+        assert record["evidence_refs"] == stage["evidence_refs"]
+        assert record["response"]["outcome"] == stage["outcome"]
+        assert record["response"]["outcome"]["semantic_status"]
+    # The merged row receipt (file_lock + post-candidate) recomputes the seal from its stages.
+    merged = seam.merge_seam_receipts(
+        task_id="auto-flow:demo", pre_stages=[], post_receipt=receipt, released={}
+    )
+    assert merged["capability_evidence_bundle"] == receipt["capability_evidence_bundle"]
+
+
+def test_seam_never_seals_unexecuted_stages_or_copied_in_bundles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    case = _case(tmp_path)
+    monkeypatch.setattr(lane, "os_sandbox_available", lambda: False)
+    receipt = seam.run_seam_for_candidate(
+        task_id="auto-flow:demo",
+        unified_receipt=_runtime_receipt("sandbox"),
+        target_path=case / "target.py",
+        visible_test_path=case / "test_visible.py",
+        original_code=ORIGINAL,
+        candidate_code=CANDIDATE,
+    )
+    (stage,) = receipt["capabilities"]
+    assert stage["invoked"] is False and stage["claim_boundary"].get("receipt_present") is not True
+    assert "capability_evidence_bundle" not in receipt and "capability_results" not in receipt
+
+    forged = {"entries": [{"name": "sandbox", "status": "REAL_INVOKED", "evidence_ids": ["x"]}]}
+    merged = seam.merge_seam_receipts(
+        task_id="auto-flow:demo",
+        pre_stages=[],
+        post_receipt={**receipt, "capability_evidence_bundle": forged},
+        released={},
+    )
+    assert "capability_evidence_bundle" not in merged  # never copied in, only recomputed
+    direct = seam.post_candidate_receipt(
+        task_id="t",
+        stages=list(receipt["capabilities"]),
+        extra={"capability_evidence_bundle": forged, "capability_results": {"sandbox": {}}},
+    )
+    assert "capability_evidence_bundle" not in direct and "capability_results" not in direct
+
+
+def test_target_held_by_other_guards_in_place_writes_before_the_lock(tmp_path: Path) -> None:
+    """Coordinator #3: a path that writes the candidate before the seam's own lock is taken
+    (the runtime verifier) can ask whether another live holder has the target."""
+    from nexus.orchestrator.file_lock_registry import FileLockRegistry
+
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    mine = seam.seam_holder_id(workspace, "pkg/target.py")
+    assert seam.target_held_by_other(workspace, "pkg/target.py", mine) is False  # no registry
+    other = seam.acquire_target_lock(
+        task_id="other-task", workspace_root=workspace, target_file="pkg/target.py"
+    )
+    assert other["gate_passed"] is True
+    try:
+        assert seam.target_held_by_other(workspace, "pkg/target.py", mine) is True
+        assert seam.target_held_by_other(workspace, "pkg/./target.py", mine) is True
+        assert seam.target_held_by_other(workspace, "pkg/other.py", mine) is False
+        assert seam.target_held_by_other(workspace, "pkg/target.py", "other-task") is False
+    finally:
+        seam.release_target_lock("other-task")
+    assert seam.target_held_by_other(workspace, "pkg/target.py", mine) is False
+    # A stale lock (older than the executor TTL) does not block, exactly like acquire.
+    lock_file = workspace / ".nexus" / "multi_agent" / "locks" / "file_locks.json"
+    registry = FileLockRegistry(lock_file=str(lock_file))
+    registry.acquire("old-task", ["pkg/target.py"])
+    data = __import__("json").loads(lock_file.read_text(encoding="utf-8"))
+    data["acquired_at"]["pkg/target.py"] = 0.0
+    lock_file.write_text(__import__("json").dumps(data), encoding="utf-8")
+    assert seam.target_held_by_other(workspace, "pkg/target.py", mine) is False
+    # An unreadable registry fails closed (treated as held).
+    lock_file.chmod(0o000)
+    try:
+        if not os.access(lock_file, os.R_OK):
+            assert seam.target_held_by_other(workspace, "pkg/target.py", mine) is True
+    finally:
+        lock_file.chmod(0o600)
+
+
 def test_scratch_copy_includes_sibling_helper_modules_never_hidden(tmp_path: Path) -> None:
     """LOW-6: sibling modules the visible test imports are in the confined copy."""
     case = _case(tmp_path)
@@ -881,3 +991,29 @@ def test_sprint_confined_executor_refuses_companion_edits(
     assert ev.score == 0.0 and ev.error.startswith("confinement_unavailable:multi_file")
     assert (case / "target.py").read_text(encoding="utf-8") == ORIGINAL
     assert not (case / "other.py").exists()
+
+
+def test_non_python_sandbox_command_is_confined_too(
+    tmp_path: Path, barrier: list[list[str]]
+) -> None:
+    """Coordinator #6: any ``sandbox_command`` routed by ``sandbox_forbidden_paths`` (here a
+    non-python argv[0]) runs under the OS confinement and cannot read outside its copy."""
+    case = _case(tmp_path)
+    secret = tmp_path / "outside_secret.txt"
+    secret.write_text("SECRET_OUTSIDE_7c1", encoding="utf-8")
+    cat = "/bin/cat" if os.path.exists("/bin/cat") else "/usr/bin/cat"
+    out = build_real_executor_invoker("sandbox")({
+        "task_id": "t",
+        "workspace_root": str(case),
+        "sandbox_command": [cat, str(secret)],
+        "sandbox_forbidden_paths": [str(case / "test_hidden.py")],
+    })
+
+    cat_runs = [argv for argv in barrier if cat in argv]
+    assert cat_runs, barrier
+    assert all(os.path.basename(argv[0]) == "sandbox-exec" for argv in cat_runs), cat_runs
+    outcome = out["response"]["outcome"]
+    assert outcome["confined"] is True
+    if REAL_BARRIER:
+        assert outcome["exit_code"] != 0
+        assert "SECRET_OUTSIDE_7c1" not in str(outcome.get("output_tail") or "")

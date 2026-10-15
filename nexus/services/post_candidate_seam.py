@@ -27,11 +27,13 @@ execution-derived ``claim_boundary``.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import subprocess  # nosec B404 - fixed git argv, never a shell
 import sys
 import tempfile
+import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -271,10 +273,17 @@ def _claim_boundary(out: Mapping[str, Any]) -> dict[str, Any]:
         failure_reason=str(out.get("reason") or ""),
     )
     data = boundary.to_dict()
+    simulated = bool(data.get("simulated", True))
+    refs = [str(ref) for ref in (out.get("evidence_refs") or []) if str(ref).strip()]
     return {
-        "simulated": bool(data.get("simulated", True)),
+        "simulated": simulated,
         "claim_eligible": bool(data.get("claim_eligible", False)),
         "evidence_complete": bool(data.get("evidence_complete", False)),
+        # The seam itself invoked the executor and holds its record: the execution receipt is
+        # present exactly when the run was physical (not simulated) and produced evidence.
+        "receipt_present": bool(
+            out.get("invoked") and not simulated and refs and out.get("physical_callable")
+        ),
     }
 
 
@@ -438,6 +447,39 @@ def _lock_file(workspace_root: Path | str) -> Path:
     )
 
 
+def target_held_by_other(workspace_root: Path | str, target_file: str, holder: str) -> bool:
+    """True when another (live, non-stale) holder has the target locked in this workspace.
+
+    Read-only guard for paths that would write the candidate before the seam's own lock is
+    taken (e.g. a runtime verifier that applies the candidate in place): such a write must not
+    happen while another task holds the target. Dead seam holders are swept first; a stale lock
+    (older than the file_lock executor's TTL) does not count. Fails closed on an unreadable
+    registry file.
+    """
+
+    from nexus.orchestrator.file_lock_registry import FileLockRegistry
+
+    lock_file = _lock_file(workspace_root)
+    if not lock_file.is_file():
+        return False
+    try:
+        sweep_dead_seam_locks(workspace_root)
+        from nexus.core.capability_executor_registry import _FILE_LOCK_DEFAULT_TTL_SEC
+
+        # The registry treats an unreadable file as "no locks"; this guard must not.
+        raw = json.loads(lock_file.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict) or not isinstance(raw.get("locks", {}), dict):
+            return True
+        registry = FileLockRegistry(lock_file=str(lock_file), ttl_sec=_FILE_LOCK_DEFAULT_TTL_SEC)
+        path = os.path.normpath(str(target_file))
+        current = registry.locks.get(path)
+        if not current or current == holder:
+            return False
+        return not registry._stale(path, time.time())  # noqa: SLF001 - same TTL rule as acquire
+    except Exception:  # noqa: BLE001 - unreadable registry: treat as held (never write)
+        return True
+
+
 def acquire_target_lock(
     *,
     task_id: str,
@@ -487,8 +529,66 @@ def post_candidate_receipt(
         "candidate_sha256": candidate_sha256,
     }
     if extra:
-        receipt.update(dict(extra))
+        receipt.update({
+            key: value for key, value in dict(extra).items() if key not in _SEAM_SEALED_KEYS
+        })
+    receipt.update(seam_execution_evidence(stages))
     return receipt
+
+
+SEAM_EVIDENCE_SEALER = POST_CANDIDATE_SEAM_SOURCE
+_SEAM_SEALED_KEYS = frozenset({"capability_evidence_bundle", "capability_results"})
+
+
+def seam_execution_evidence(stages: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    """Seam-sealed execution evidence for the stages the seam physically ran.
+
+    The seam invoked these executors itself (not a self-report relayed from elsewhere), so it
+    seals, per physically executed stage (invoked, not simulated, ``receipt_present``, evidence
+    refs and a ``physical_callable``): a ``REAL_INVOKED`` ``capability_evidence_bundle`` entry
+    naming the evidence ids, and the executor record in ``capability_results`` (its bounded
+    outcome, incl. ``semantic_status``). Always recomputed from the stages; never copied in.
+    """
+
+    entries: list[dict[str, Any]] = []
+    results: dict[str, dict[str, Any]] = {}
+    for stage in stages:
+        name = str(stage.get("name") or "")
+        boundary = _as_mapping(stage.get("claim_boundary"))
+        refs = [str(ref) for ref in (stage.get("evidence_refs") or []) if str(ref).strip()]
+        callable_ = str(stage.get("physical_callable") or "")
+        if not (
+            name
+            and stage.get("invoked") is True
+            and stage.get("status") == "INVOKED"
+            and stage.get("simulated") is False
+            and boundary.get("simulated") is False
+            and boundary.get("receipt_present") is True
+            and refs
+            and callable_
+        ):
+            continue
+        outcome = dict(_as_mapping(stage.get("outcome")))
+        entries.append({
+            "name": name,
+            "status": "REAL_INVOKED",
+            "invoked_real": True,
+            "physical_callable": callable_,
+            "evidence_ids": refs,
+            "sealed_by": SEAM_EVIDENCE_SEALER,
+        })
+        results[name] = {
+            "physical_callable": callable_,
+            "evidence_refs": refs,
+            "gate_passed": bool(stage.get("gate_passed")),
+            "response": {"outcome": outcome},
+        }
+    if not entries:
+        return {}
+    return {
+        "capability_evidence_bundle": {"sealed_by": SEAM_EVIDENCE_SEALER, "entries": entries},
+        "capability_results": results,
+    }
 
 
 def run_seam_for_candidate(
