@@ -70,6 +70,7 @@ import base64
 import contextlib
 import hashlib
 import json
+import math
 import os
 import plistlib
 import re
@@ -164,7 +165,10 @@ import json, sys
 from pathlib import Path
 root, state_dir = sys.argv[1:3]
 sys.path.insert(0, root)
+import nexus.orchestrator.self_hosted_task_service as lifecycle
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
+durable = lifecycle.DURABLE_SELF_HOSTED_STATUSES
+invalid = lifecycle.INVALID_STATE_STATUSES
 base = Path(state_dir)
 paths = sorted(base.glob("*.json")) if base.exists() else []
 tasks = []
@@ -177,8 +181,25 @@ for path in paths:
     if not isinstance(state, dict):
         tasks.append({"task_id": path.stem, "action_state": "UNREADABLE"})
         continue
+    status = state.get("status")
+    if not isinstance(status, str) or status in invalid or status not in durable:
+        # The lifecycle maps an unknown status to FINAL_BLOCK; fail closed here.
+        tasks.append({"task_id": path.stem, "action_state": "INVALID_STATUS"})
+        continue
     action = SelfHostedTaskService._task_action_envelope(state)
     tasks.append({"task_id": path.stem, "action_state": str(action.get("action_state"))})
+# Assisted provider jobs run as children the Gateway tracks in memory; a reload
+# orphans them, so a non-terminal job is in flight too.
+jobs = base / "assisted_provider_jobs"
+for path in sorted(jobs.glob("*.json")) if jobs.exists() else []:
+    try:
+        job = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        tasks.append({"task_id": "assist." + path.stem, "action_state": "UNREADABLE"})
+        continue
+    status = job.get("status") if isinstance(job, dict) else None
+    if status not in ("COMPLETED", "FAILED", "CANCELLED"):
+        tasks.append({"task_id": "assist." + path.stem, "action_state": "ASSIST_RUNNING"})
 print(json.dumps({"schema": "nexus.gateway.task_quiescence.v1", "tasks": tasks}))
 """
 # Open PRs that bump the runtime/dependency pin (or anchor such a bump).  While
@@ -354,6 +375,12 @@ class Config:
     @property
     def probe_state_root(self) -> Path:
         return self.state_dir / "probe-state"
+
+    @property
+    def deferrals(self) -> Path:
+        """Deferral episode log (#2227); kept out of receipts.jsonl so backoff,
+        give-up counting and the drift checker only ever see real attempts."""
+        return self.state_dir / "deferrals.jsonl"
 
     @property
     def quiescence_file(self) -> Path:
@@ -1561,6 +1588,16 @@ def _append_receipt(cfg: Config, receipt: Dict[str, Any]) -> None:
 
 
 _TASK_ID_SAFE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_ACTION_STATE_SAFE = re.compile(r"^[A-Z][A-Z_]{0,39}$")
+
+
+def _safe_reason(reason: str) -> str:
+    """Only a code-like prefix of an UNKNOWN reason may reach a comment or log."""
+    match = re.match(r"[A-Z][A-Z0-9_]{0,63}", reason)
+    return match.group(0) if match else "UNKNOWN"
+
+
+_ISO_UTC = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
 
 def classify_task_report(returncode: int, stdout: str, stderr: str = "") -> Dict[str, Any]:
@@ -1587,7 +1624,10 @@ def classify_task_report(returncode: int, stdout: str, stderr: str = "") -> Dict
         if state in IN_FLIGHT_ACTION_STATES:
             blocking.append(name)
         else:
-            blocking.append(f"{name}:{str(state)[:40]}")
+            label = (
+                state if isinstance(state, str) and _ACTION_STATE_SAFE.match(state) else "UNKNOWN"
+            )
+            blocking.append(f"{name}:{label}")
     if blocking:
         return {"verdict": "IN_FLIGHT", "task_ids": sorted(blocking), "checked": len(tasks)}
     return {"verdict": "CLEAR", "checked": len(tasks)}
@@ -1751,41 +1791,55 @@ class _Cycle:
     # -- task quiescence (#2227) --------------------------------------------
 
     def quiescence(self, live_plist: bytes, candidate: str) -> Dict[str, Any]:
-        """Classify live tasks and track the deferral episode; never switches anything.
+        """Classify live tasks and track the deferral episode; never switches anything."""
+        return self.track_deferral(candidate, self.host.tasks_in_flight(self.cfg, live_plist))
 
-        CLEAR ends the episode.  Otherwise the episode start is kept in
-        ``quiescence.json``; a new or changed blocking set appends one receipt,
-        and once the episode is older than the warning cap one loud comment
-        naming the blocking tasks goes to the alert Issue.  The switch stays
-        deferred whatever the age: it is never forced automatically.
+    def track_deferral(self, candidate: str, verdict: Dict[str, Any]) -> Dict[str, Any]:
+        """CLEAR ends the episode; anything else extends it (#2227).
+
+        The episode start lives in ``quiescence.json``.  A new or changed
+        blocking set and the warning append one line to ``deferrals.jsonl``;
+        once the episode is older than the warning cap, one loud comment naming
+        the blocking tasks goes to the alert Issue.  The switch stays deferred
+        whatever the age: it is never forced automatically.
         """
         cfg, host = self.cfg, self.host
-        verdict = host.tasks_in_flight(cfg, live_plist)
         now = host.now()
         if verdict.get("verdict") == "CLEAR":
-            with contextlib.suppress(FileNotFoundError):
-                cfg.quiescence_file.unlink()
+            # The episode ends only when the Gateway is current (a switch or
+            # IN_SYNC, see ``end_deferral``), so a task that keeps appearing
+            # during the build window still ages toward the warning.
             return verdict
         episode = _read_json_object(cfg.quiescence_file) or {}
         since = episode.get("since_epoch")
-        if not isinstance(since, (int, float)) or since > now:
+        if (
+            isinstance(since, bool)
+            or not isinstance(since, (int, float))
+            or not math.isfinite(since)
+        ):
             since = now
-        blocking = sorted(verdict.get("task_ids") or [verdict.get("reason") or "UNKNOWN"])
+        warned_at = episode.get("warned_at")
+        if not isinstance(warned_at, str) or not _ISO_UTC.match(warned_at):
+            warned_at = None
+        reason = str(verdict.get("reason") or "UNKNOWN")
+        blocking = sorted(verdict.get("task_ids") or [_safe_reason(reason)])
         changed = episode.get("blocking") != blocking or episode.get("candidate") != candidate
-        age = now - float(since)
-        updated = {
+        # A clock that went backwards never restarts the episode; it just ages 0.
+        age = max(0.0, now - float(since))
+        updated: Dict[str, Any] = {
             "schema": "nexus.gateway.quiescence_episode.v1",
             "since": _iso(float(since)),
             "since_epoch": float(since),
             "candidate": candidate,
             "blocking": blocking,
-            "warned_at": episode.get("warned_at"),
+            "warned_at": warned_at,
         }
-        warn_due = age >= cfg.quiescence_warn_after_seconds and not episode.get("warned_at")
+        warn_due = age >= cfg.quiescence_warn_after_seconds and warned_at is None
         if warn_due:
-            posted = host.post_issue_comment(
-                cfg, _quiescence_warning(cfg, candidate, blocking, age)
-            )
+            # Posted before the marker is saved: a crash in between can repeat
+            # the warning, but can never lose it.
+            body = _quiescence_warning(cfg, candidate, blocking, age)
+            posted = host.post_issue_comment(cfg, body)
             updated["warned_at"] = _iso(now) if posted else None
             updated["warning_failed"] = not posted
         _atomic_write(cfg.quiescence_file, json.dumps(updated, sort_keys=True).encode(), 0o600)
@@ -1797,29 +1851,36 @@ class _Cycle:
             "warned_at": updated["warned_at"],
         }
         if changed or warn_due:
-            _append_receipt(
-                cfg,
-                {
-                    "schema": RECEIPT_SCHEMA,
-                    "attempt_id": f"{candidate[:12]}-{int(now)}-deferred",
-                    "candidate_commit": candidate,
-                    "outcome": DEFERRED_OUTCOME,
-                    "finished_at": _iso(now),
-                    "quiescence": result,
-                    "switched": False,
-                    "rolled_back": False,
-                },
-            )
+            cfg.state_dir.mkdir(parents=True, exist_ok=True)
+            line = {
+                "schema": "nexus.gateway.quiescence_deferral.v1",
+                "candidate_commit": candidate,
+                "outcome": DEFERRED_OUTCOME,
+                "at": _iso(now),
+                "quiescence": result,
+            }
+            with open(cfg.deferrals, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps(line, sort_keys=True, separators=(",", ":")) + "\n")
         return result
+
+    def end_deferral(self) -> None:
+        """A switch (automatic or overridden) or IN_SYNC ends the episode."""
+        with contextlib.suppress(FileNotFoundError):
+            self.cfg.quiescence_file.unlink()
 
     def deferral_age(self) -> Optional[Dict[str, Any]]:
         """The episode that ended, for the receipt of the deploy that follows it."""
         episode = _read_json_object(self.cfg.quiescence_file)
-        if not episode or not isinstance(episode.get("since_epoch"), (int, float)):
+        since = (episode or {}).get("since_epoch")
+        if (
+            isinstance(since, bool)
+            or not isinstance(since, (int, float))
+            or not math.isfinite(since)
+        ):
             return None
         return {
-            "deferred_since": episode.get("since"),
-            "deferral_age_seconds": int(self.host.now() - float(episode["since_epoch"])),
+            "deferred_since": _iso(float(since)),
+            "deferral_age_seconds": int(max(0.0, self.host.now() - float(since))),
         }
 
     # -- entry -------------------------------------------------------------
@@ -1867,6 +1928,7 @@ class _Cycle:
             return {**status, "status": state, **extra}
 
         if candidate == previous_commit:
+            self.end_deferral()
             return finish("IN_SYNC")
         receipts = [
             r for r in read_receipts(cfg.state_dir) if r.get("candidate_commit") == candidate
@@ -1958,6 +2020,8 @@ class _Cycle:
             "overridden": bool(status.get("quiescence_overridden")),
         }
         receipt = self.attempt(candidate, previous_plist, checks, status.get("warnings", []))
+        if receipt.get("outcome") == "DEPLOYED":
+            self.end_deferral()
         status["receipt"] = receipt
         return finish(receipt["outcome"])
 
@@ -2076,6 +2140,11 @@ class _Cycle:
         hold: Optional[str] = None
         try:
             receipt.update(self.attempt_effects(candidate, previous_plist, receipt))
+            if receipt.get("outcome") == DEFERRED_OUTCOME:
+                # Caught under the lock: the same episode clock and warning (#2227).
+                receipt["quiescence_episode"] = self.track_deferral(
+                    candidate, receipt.get("quiescence_before_switch") or {}
+                )
         except Exception as exc:  # noqa: BLE001 - every failure must still leave a receipt
             receipt["reason"] = f"{type(exc).__name__}:{exc}"[:500]
             if receipt["switched"] and not receipt["rolled_back"]:
