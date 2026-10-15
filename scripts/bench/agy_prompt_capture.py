@@ -87,7 +87,14 @@ def _private_dir(path: Path) -> Path:
 
 def write_record(record: dict[str, object], capture_dir: str) -> Path:
     root = _private_dir(Path(capture_dir))
-    name = f"{record['arm']}__{record['key']}__{time.time_ns()}-{os.getpid()}.json"
+    prefix = f"{record['arm']}__{record['key']}__"
+    if "seq" not in record:
+        # Per-row call sequence (0, 1, ...): the runner orders calls by it, never by timestamp.
+        record = {
+            **record,
+            "seq": sum(1 for entry in root.iterdir() if entry.name.startswith(prefix)),
+        }
+    name = f"{prefix}{time.time_ns()}-{os.getpid()}.json"
     path = root / name
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     fd = os.open(path, flags, 0o600)

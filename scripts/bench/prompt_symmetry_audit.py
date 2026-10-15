@@ -223,6 +223,7 @@ class TaskAudit:
     lane: str = LANE_STRICT
     treatment_literal_hits: list[str] = field(default_factory=list)
     row_void: bool = False
+    treatment_round_findings_deferred: bool = False
     treatment_rounds_audited: int = 0
     self_heal_rounds_observed: int = 0
     treatment_round_findings: list[str] = field(default_factory=list)
@@ -257,6 +258,7 @@ class TaskAudit:
             "lane": self.lane,
             "treatment_literal_hits": self.treatment_literal_hits,
             "row_void": self.row_void,
+            "treatment_round_findings_deferred": self.treatment_round_findings_deferred,
             "treatment_rounds_audited": self.treatment_rounds_audited,
             "self_heal_rounds_observed": self.self_heal_rounds_observed,
             "treatment_round_findings": self.treatment_round_findings,
@@ -1056,7 +1058,12 @@ def audit_task(
                 result.violations.append("hidden_verifier_guidance_not_empty")
             if result.json_string_findings:
                 result.violations.append("nexus_block_string_not_allowed")
-        if treatment and len(with_records) > 1:
+        deferred = treatment and with_row is not None and "_treatment_rescore" in with_row
+        if deferred and len(with_records) > 1:
+            # The visible re-runs this classification needs happen at the end of the run (no
+            # staging window open); the early audit defers it, the final audit always runs it.
+            result.treatment_round_findings_deferred = True
+        elif treatment and len(with_records) > 1:
             for index, record in enumerate(with_records[1:], start=2):
                 findings, self_heal = audit_treatment_round(
                     str(record.get("prompt") or ""),

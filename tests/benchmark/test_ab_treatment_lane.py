@@ -170,23 +170,75 @@ def test_treatment_lane_refuses_inherited_env(staging_ready, monkeypatch, name) 
 
 
 def test_treatment_lane_refused_until_hidden_staging_and_confinement(monkeypatch) -> None:
-    """M2: until #2211 lands (staging module + NEXUS_CONFINE_VISIBLE_TEST=1) the lane is refused."""
+    """M2/N1: refused unless #2211's modules are THIS repository's files and confinement is on."""
 
     monkeypatch.delenv("NEXUS_CONFINE_VISIBLE_TEST", raising=False)
     errors = lane.validate_lane_args(_fair_args())
     assert any(e.startswith("treatment_requires_hidden_staging_and_confinement") for e in errors)
     monkeypatch.setenv("NEXUS_CONFINE_VISIBLE_TEST", "1")
     ready, reason = lane.hidden_staging_ready(_fair_args())
-    try:
-        import scripts.bench.hidden_test_staging  # noqa: F401
-    except ImportError:
-        assert ready is False and "hidden_test_staging" in reason
-    else:
-        assert ready is True
+    real = all((REPO_ROOT / rel).is_file() for rel, _names in lane.BOUND_MODULES.values())
+    assert ready is real, reason
+    if real:
         assert lane.hidden_staging_ready(_fair_args(counted_first_attempt=False))[0] is False
 
 
+def test_a_stub_staging_module_does_not_satisfy_the_gate(monkeypatch, tmp_path: Path) -> None:
+    """N1 probe: a module with the right name and dummy callables, but not the repo's file."""
+
+    import types
+
+    for name in lane.BOUND_MODULES:
+        stub = types.ModuleType(name)
+        stub.__file__ = str(tmp_path / "stub.py")
+        for attr in lane.BOUND_MODULES[name][1]:
+            setattr(stub, attr, lambda *_a, **_k: None)
+        monkeypatch.setitem(sys.modules, name, stub)
+    monkeypatch.setenv("NEXUS_CONFINE_VISIBLE_TEST", "1")
+    ready, reason = lane.hidden_staging_ready(_fair_args())
+    assert ready is False and "not the repository file" in reason
+    with pytest.raises(RuntimeError):
+        lane.bound_module("nexus.engine.confined_test_runner")
+
+
+def test_lane_rescore_never_runs_unconfined_without_the_repo_runners(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """N1: the lane's own re-score / visible re-run go through the confined runners only; with a
+    stub (or missing) runner they refuse, and the row is unverifiable, never scored unconfined."""
+
+    import types
+
+    stub = types.ModuleType("nexus.engine.confined_test_runner")
+    stub.__file__ = str(tmp_path / "stub.py")
+    stub.run_confined_test = stub.run_pytest_dir_copy = lambda *_a, **_k: {
+        "executed": True,
+        "exit_code": 0,
+    }
+    monkeypatch.setitem(sys.modules, "nexus.engine.confined_test_runner", stub)
+    case = tmp_path / "case"
+    case.mkdir()
+    (case / "target.py").write_text("x = 0\n", encoding="utf-8")
+    (case / "test_hidden.py").write_text("def test_x():\n    assert False\n", encoding="utf-8")
+    with pytest.raises(RuntimeError):
+        lane.confined_hidden_runner(tmp_path)(
+            "x = 1\n", str(case / "target.py"), str(case / "test_hidden.py"), 10
+        )
+    with pytest.raises(RuntimeError):
+        lane.confined_visible_runner(tmp_path)(
+            "x = 1\n", "x = 0\n", str(case / "target.py"), str(case / "test_v.py"), 10
+        )
+
+
 def test_strict_lane_clears_inherited_treatment_switches(monkeypatch) -> None:
+    """M3/N6: every key the treatment env sets (one template) is cleared by the strict lane."""
+
+    monkeypatch.setenv("NEXUS_BENCH_LANE", "treatment")
+    every = set(
+        lane.with_nexus_env_overrides(deadline_epoch=1.0, response_dir="/r", per_call_cap_sec=5)
+    )
+    assert every <= set(lane.TREATMENT_ONLY_ENV)
+    assert {"NEXUS_USE_COMMITTEE", "NEXUS_ULTRA_REVIEW_DRY_GATE"} <= every
     for name in lane.TREATMENT_ONLY_ENV:
         monkeypatch.setenv(name, "1")
     lane.configure_lane(_fair_args(lane="strict"))
@@ -904,7 +956,7 @@ def test_failed_audit_voids_both_columns_and_marks_the_run_invalid(
         row.update({"status": "SUCCESS", "hidden_verifier_passed": True})
     rows[1].update({
         "first_attempt_hidden_passed": True,
-        "first_attempt_status": "verified_in_scratch_copy",
+        "first_attempt_status": "verified_confined_rescore",
         "first_model_candidate_sha256": _sha(CANDIDATE1),
     })
     report = _apply_prompt_symmetry_audit(
@@ -941,7 +993,7 @@ def _treated_row(**overrides) -> dict:
         "final_model_candidate_sha256": b,
         "final_candidate_in_model_candidates": True,
         "first_attempt_hidden_passed": False,
-        "first_attempt_status": "verified_in_scratch_copy",
+        "first_attempt_status": "verified_confined_rescore",
         "treatment_applied": ["self_heal"],
     }
     row.update(overrides)
@@ -1274,7 +1326,7 @@ def _with_nexus_row(
             for index, code in enumerate(produced):
                 prompt = "Task: fix\n" + (SELF_HEAL_SENTENCE if index else "") + "\n"
                 record = capture_record(
-                    ["--print", prompt],
+                    ["--output-format", "json", "--print", prompt],
                     "",
                     {
                         "NEXUS_BENCH_ARM": "with_nexus",
@@ -1335,7 +1387,62 @@ def _with_nexus_row(
     )
     row["mode"] = "with_nexus"
     assert len(envs) == 1, "one product subprocess per row (no probe, no rescue, no retry)"
+    lane.rescore_rows([row], run_hidden=_plain_hidden, run_visible=_plain_visible)
     return row, envs
+
+
+def _plain_hidden(
+    code: str, target_file: str, hidden: str, timeout: int
+) -> subprocess.CompletedProcess[str]:
+    """Test double for the confined hidden runner (#2211 not on this base): same scratch copy,
+    plain pytest. The production path is ``confined_hidden_runner`` (confined only)."""
+
+    with lane.scratch_task_dir(target_file, hidden, code) as test:
+        return subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "-q",
+                "--maxfail=1",
+                "-p",
+                "no:cacheprovider",
+                "--",
+                test.name,
+            ],
+            cwd=test.parent,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+
+
+def _plain_visible(
+    code: str, _original: str, target_file: str, visible: str, timeout: int
+) -> subprocess.CompletedProcess[str]:
+    """Test double for the seam's confined visible runner: no hidden test in the copy."""
+
+    with lane.scratch_task_dir(target_file, visible, code) as test:
+        (test.parent / "test_hidden.py").unlink(missing_ok=True)
+        return subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "-q",
+                "--maxfail=1",
+                "-p",
+                "no:cacheprovider",
+                "--",
+                test.name,
+            ],
+            cwd=test.parent,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
 
 
 def _bare_row(tmp_path: Path, monkeypatch, *, lane_name: str, answer_ok: bool) -> dict:
@@ -1436,7 +1543,7 @@ def test_zero_model_both_lanes_produce_rows_and_first_attempt_equals_strict(
     )
     assert treated_row["treatment_rounds"] == len(candidates)
     expected_status = (
-        "verified_as_delivered" if len(candidates) == 1 else "verified_in_scratch_copy"
+        "verified_as_delivered" if len(candidates) == 1 else "verified_confined_rescore"
     )
     assert treated_row["first_attempt_status"] == expected_status
     for bare in (strict_bare, treated_bare):
@@ -1454,7 +1561,7 @@ def test_first_attempt_rescore_never_writes_the_workspace(tmp_path: Path, monkey
     row, _ = _with_nexus_row(
         tmp_path, monkeypatch, lane_name="treatment", candidates=[writer, GOOD_CLASSIFY]
     )
-    assert row["first_attempt_status"] == "verified_in_scratch_copy"
+    assert row["first_attempt_status"] == "verified_confined_rescore"
     assert row["first_attempt_hidden_passed"] is False and row["hidden_verifier_passed"] is True
     assert not list(tmp_path.rglob("SIDE_EFFECT.txt"))
     delivered = [
@@ -1521,7 +1628,7 @@ def test_killed_subprocess_still_scores_the_first_attempt(tmp_path: Path, monkey
     )
     assert row["treatment_timeout"] is True and row["after_treatment_status"] == "not_run:timeout"
     assert row["model_calls"] == 2 and row["model_calls_source"] == "prompt_capture"
-    assert row["first_attempt_status"] == "verified_in_scratch_copy"
+    assert row["first_attempt_status"] == "verified_confined_rescore"
     assert row["first_attempt_hidden_passed"] is True
     apply_strict_llm_baseline_classification([row])
     assert row["first_attempt"] is True and row["after_treatment"] is False
@@ -1531,7 +1638,7 @@ def test_no_response_capture_makes_the_first_attempt_unverifiable(tmp_path: Path
     os.environ["NEXUS_BENCH_LANE"] = "treatment"
     os.environ.pop("NEXUS_BENCH_PROMPT_CAPTURE_DIR", None)
 
-    def never(_test, _timeout):
+    def never(*_args):
         raise AssertionError("no verifier may run without a runner-derived candidate")
 
     row = {"model_candidate_sha256": _sha("x = 2\n"), "delivered_target_sha256": _sha("x = 2\n")}
@@ -1553,10 +1660,10 @@ def test_no_response_capture_makes_the_first_attempt_unverifiable(tmp_path: Path
         verification_test_file=str(tmp_path / "test_hidden.py"),
         original_source="x = 0\n",
         key="k__1",
-        run_hidden=never,
-        run_visible=never,
         timeout_sec=10,
     )
+    lane.rescore_rows([row], run_hidden=never, run_visible=never)
+    assert lane.RESCORE_KEY not in row
     assert row["first_attempt_status"] == "first_attempt_unverifiable"
     assert row["treatment_unverifiable"] is True
     row.update({
@@ -1570,28 +1677,105 @@ def test_no_response_capture_makes_the_first_attempt_unverifiable(tmp_path: Path
 
 
 def test_target_outside_the_test_directory_is_unverifiable_not_a_crash(tmp_path: Path) -> None:
-    """L1: a re-score that cannot run is a row-level status, never an exception out of the run."""
+    """L1/N2: a re-score that cannot run is a row-level status, never an exception out of the run.
+    (The strict scorer copies only the test directory as well; both datasets co-locate target.py.)"""
 
-    test_dir = tmp_path / "case"
+    test_dir = tmp_path / "tests"
     test_dir.mkdir()
     (test_dir / "test_hidden.py").write_text("def test_x():\n    pass\n", encoding="utf-8")
-    row: dict = {}
-
-    def run(_test, _timeout):
-        raise AssertionError("must not run")
-
+    row: dict = {"treatment_first_consistent": True}
+    job = {
+        "target_file": str(tmp_path / "src" / "target.py"),
+        "verification_test_file": str(test_dir / "test_hidden.py"),
+        "timeout_sec": 10,
+    }
     lane._first_attempt(
         row,
-        entries=[{"kind": "stage1", "sha": _sha("a = 1\n"), "code": "a = 1\n", "error": ""}],
-        capture_error="",
-        first_consistent=True,
-        target_file=str(tmp_path / "elsewhere" / "target.py"),
-        verification_test_file=str(test_dir / "test_hidden.py"),
-        run_hidden=run,
-        timeout_sec=10,
+        job=job,
+        entries=[{"kind": "stage1", "sha": _sha("a = 1\n"), "code": "a = 1\n"}],
+        run_hidden=_plain_hidden,
     )
     assert row["first_attempt_status"] == "first_attempt_unverifiable"
+    assert "target_outside_test_directory" in row["first_attempt_error"]
     assert row["first_attempt_hidden_passed"] is None
+
+
+def test_early_audit_defers_round_classification_until_the_rescore(tmp_path: Path) -> None:
+    rows = _rows()
+    rows[1]["_treatment_rescore"] = {"target_file": "x"}
+    rows[1]["treatment_visible_outputs"] = {}
+    report = _audit(tmp_path, _round2(), rows=rows)
+    assert (
+        report["status"] == "PASS"
+        and report["tasks"][0]["treatment_round_findings_deferred"] is True
+    )
+    rows[1].pop("_treatment_rescore")
+    assert _audit(tmp_path / "f", _round2(), rows=rows)["status"] == "FAIL"
+
+
+def _derive_setup(tmp_path: Path, monkeypatch, records: list[dict]) -> None:
+    capture = tmp_path / "cap"
+    responses = tmp_path / "cap.responses"
+    capture.mkdir(mode=0o700, parents=True)
+    responses.mkdir(mode=0o700, parents=True)
+    monkeypatch.setenv("NEXUS_BENCH_PROMPT_CAPTURE_DIR", str(capture))
+    monkeypatch.setenv("NEXUS_BENCH_RESPONSE_CAPTURE_DIR", str(responses))
+    monkeypatch.setenv("NEXUS_BENCH_CAPTURE_RUN_ID", "r")
+    for index, extra in enumerate(records):
+        record = {
+            **capture_record(
+                extra.pop("argv", ["--output-format", "json", "--print", "Task: fix"]),
+                "",
+                {
+                    "NEXUS_BENCH_ARM": "with_nexus",
+                    "NEXUS_BENCH_CAPTURE_KEY": "k__1",
+                    "NEXUS_BENCH_CAPTURE_RUN_ID": "r",
+                },
+            ),
+            **extra,
+        }
+        path = write_record(record, str(capture))
+        write_response(str(responses), path.name, _agy_stdout(f"x = {index}\n"), 0)
+
+
+def test_forged_capture_records_make_the_row_unverifiable(tmp_path: Path, monkeypatch) -> None:
+    """N3 probes: a record dated before the row, a broken sequence, a non-JSON-mode call."""
+
+    start = time.time()
+    _derive_setup(tmp_path / "ok", monkeypatch, [{}, {}])
+    entries, error = lane.derive_runner_candidates(
+        original_source="x = 9\n", key="k__1", row_start_epoch=start - 1
+    )
+    assert error == "" and [e["code"] for e in entries] == ["x = 0\n", "x = 1\n"]
+    _derive_setup(tmp_path / "ts", monkeypatch, [{}, {"ts": 0.0}])
+    assert lane.derive_runner_candidates(original_source="", key="k__1", row_start_epoch=start - 1)[
+        1
+    ].startswith("capture_record_before_row_start")
+    _derive_setup(tmp_path / "seq", monkeypatch, [{}, {"seq": 0}])
+    assert (
+        lane.derive_runner_candidates(original_source="", key="k__1")[1]
+        == "capture_sequence_broken"
+    )
+    _derive_setup(tmp_path / "txt", monkeypatch, [{"argv": ["--print", "Task: fix"]}])
+    entries, error = lane.derive_runner_candidates(original_source="", key="k__1")
+    assert (
+        error == "" and entries[0]["error"] == "agy_not_json_output_mode" and not entries[0]["sha"]
+    )
+
+
+def test_plain_text_agy_output_is_refused_by_runner_and_runtime() -> None:
+    """N4: in JSON output mode the pinned runtime requires the envelope (agy_envelope_missing);
+    the runner uses the same parser, so plain text is refused on both sides."""
+
+    import importlib
+
+    transport = importlib.import_module("nexus_runtime.kernel.transport")
+    plain = "def f():\n    return 2\n"
+    assert transport.parse_agy_envelope(plain) is None
+    assert lane.candidate_from_response("def f():\n    return 1\n", plain) == (
+        "",
+        "no_model_response",
+    )
 
 
 def test_candidate_from_response_uses_the_product_extraction() -> None:
@@ -1792,63 +1976,26 @@ def test_candidate_from_response_tolerates_leading_agy_warning_lines() -> None:
     )
 
 
-def test_scratch_copy_has_repo_pytest_ini_and_no_hidden_test_for_visible_runs(
-    tmp_path: Path,
-) -> None:
-    """LOW-1 / LOW-2 on trust-002: the visible re-run copy has no test_hidden.py; both copies get
-    the repo's pytest.ini at the scratch root (strict scorer semantics)."""
+def test_scratch_copy_mirrors_the_strict_scorers_test_dir_copy(tmp_path: Path) -> None:
+    """LOW-1/LOW-2: the re-score copy is the strict scorer's shape (regular files of the test
+    dir, no dotfiles, no subdirs) with the candidate as target; the visible re-run is the seam's
+    confined runner, which never copies a hidden test. Checked on trust-002."""
 
     from scripts.bench.capability_ab_runner import _materialize_fixture, load_tasks
 
     tasks = load_tasks(REPO_ROOT / "scripts" / "bench" / "public_benchmark_nexus_value_v1.json")
     task = next(t for t in tasks if t.id == "nexus-value-trust-002")
     target_file, visible = _materialize_fixture(tmp_path, task)
+    (Path(visible).parent / ".hidden_dotfile").write_text("x", encoding="utf-8")
+    (Path(visible).parent / "sub").mkdir()
     hidden = str(Path(visible).with_name("test_hidden.py"))
-    seen: dict[str, object] = {}
-
-    def run(test: Path, root: Path, _timeout: int) -> subprocess.CompletedProcess[str]:
-        seen.setdefault("files", sorted(p.name for p in test.parent.iterdir()))
-        seen["ini"] = (root / "pytest.ini").read_text(encoding="utf-8")
-        return subprocess.run(
-            [sys.executable, "-m", "pytest", "-q", "--maxfail=1", "--", str(test)],
-            cwd=root,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=120,
-        )
-
-    entries = [
-        {"kind": "stage1", "sha": _sha(GOOD_CLASSIFY), "code": GOOD_CLASSIFY, "error": ""},
-        {"kind": "self_heal", "sha": _sha(BAD_CLASSIFY), "code": BAD_CLASSIFY, "error": ""},
-    ]
-    ini = REPO_ROOT / "pytest.ini"
-    out = lane._visible_outputs(
-        entries,
-        target_file=target_file,
-        test_file=visible,
-        run_visible=run,
-        timeout_sec=60,
-        exclude=frozenset({"test_hidden.py"}),
-        pytest_ini=ini,
-    )
-    assert "test_hidden.py" not in seen["files"] and "test_visible.py" in seen["files"]
-    assert seen["ini"] == ini.read_text(encoding="utf-8")
-    assert "passed" in out[_sha(GOOD_CLASSIFY)]
-    row: dict = {}
-    lane._first_attempt(
-        row,
-        entries=entries,
-        capture_error="",
-        first_consistent=True,
-        target_file=target_file,
-        verification_test_file=hidden,
-        run_hidden=run,
-        timeout_sec=60,
-        pytest_ini=ini,
-    )
-    assert row["first_attempt_status"] == "verified_in_scratch_copy"
-    assert row["first_attempt_hidden_passed"] is True
+    with lane.scratch_task_dir(target_file, hidden, GOOD_CLASSIFY) as test:
+        names = sorted(p.name for p in test.parent.iterdir())
+        assert names == ["target.py", "test_hidden.py", "test_visible.py"]
+        assert (test.parent / "target.py").read_text(encoding="utf-8") == GOOD_CLASSIFY
+    done = _plain_hidden(GOOD_CLASSIFY, target_file, hidden, 60)
+    assert done.returncode == 0, done.stdout
+    assert Path(target_file).read_text(encoding="utf-8") != GOOD_CLASSIFY  # workspace untouched
 
 
 def test_hyper_counts_only_with_more_than_one_stage1_candidate() -> None:

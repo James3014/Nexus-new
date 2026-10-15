@@ -16372,15 +16372,9 @@ def run_with_nexus(
                 verification_test_file=verification_test_file,
                 original_source=strict_target_before or "",
                 key=_prompt_capture_key(task),
-                run_hidden=lambda test, root, limit: _run_process_group(
-                    _pytest_verifier_cmd(str(test)), cwd=root, env=os.environ.copy(), timeout_sec=limit
-                ),
-                run_visible=lambda test, root, limit: _run_process_group(
-                    _pytest_verifier_cmd(str(test)), cwd=root, env=os.environ.copy(), timeout_sec=limit
-                ),
                 timeout_sec=int(timeout_sec),
                 row_deadline_sec=float(effective_timeout_sec) if shared_task_deadline is not None else None,
-                repo_root=repo_root,
+                row_start_epoch=start_wall,
             )
         return _finalize_with_nexus_row(
             row,
@@ -21159,6 +21153,14 @@ def main() -> int:
         row.setdefault("lane", lane_manifest["lane"])
         if str(row.get("mode")) == "without_nexus":
             _treatment_lane.finalize_bare_row(row)
+    if _treatment_lane.lane_active():
+        # PR-3: first-attempt re-score and visible re-runs after all rows (no staging window is
+        # open), through the confined runners only (#2211); never unconfined.
+        _treatment_lane.rescore_rows(
+            with_rows,
+            run_hidden=_treatment_lane.confined_hidden_runner(repo_root),
+            run_visible=_treatment_lane.confined_visible_runner(repo_root),
+        )
     if prompt_audit_capture is not None:
         prompt_symmetry_report = _apply_prompt_symmetry_audit(
             prompt_audit_capture,

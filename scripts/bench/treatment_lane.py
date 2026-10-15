@@ -50,7 +50,8 @@ import stat
 import subprocess
 import tempfile
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -81,16 +82,47 @@ STAGE1_MODEL_SOURCES = frozenset({"llm", "nexus_llm_baseline", "llm_assisted"})
 MODEL_CANDIDATE_SOURCES = STAGE1_MODEL_SOURCES | {"llm_self_heal"}
 ROUND_MIN_REMAINING_ENV = "NEXUS_BENCH_ROUND_MIN_REMAINING_SEC"
 HIDDEN_STAGING_MODULE = "scripts.bench.hidden_test_staging"
-# Lane-specific variables the strict lane must never inherit.
-TREATMENT_ONLY_ENV = (
-    "NEXUS_BENCH_TREATMENT_LANE",
-    RESPONSE_DIR_ENV,
-    "NEXUS_BENCH_CANDIDATE_ARCHIVE_DIR",  # retired (round 2); never inherited
-    ROW_DEADLINE_ENV,
-    MAX_CALLS_ENV,
-    ROUND_MIN_REMAINING_ENV,
-)
 NOT_RUN_TIMEOUT = "not_run:timeout"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _treatment_env_template(
+    *, calls: int, response_dir: str, deadline_epoch: float | None, per_call_cap_sec: int | None
+) -> dict[str, str]:
+    """THE treatment-lane env (one list: the strict lane clears exactly these keys, N6)."""
+
+    env = {
+        "NEXUS_BENCH_TREATMENT_LANE": "1",
+        "NEXUS_SYMMETRIC_PROMPT": "1",
+        "NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL": "1",
+        "NEXUS_LLM_CANDIDATE_CAP": str(calls),
+        MAX_CALLS_ENV: str(calls),
+        "NEXUS_ULTRA_REVIEW_DRY_GATE": "1",
+        "NEXUS_USE_COMMITTEE": "1",
+        RESPONSE_DIR_ENV: response_dir,
+        # unchanged fairness pins, re-asserted after the treatment switches
+        "NEXUS_DISABLE_LOCAL_PREFLIGHT_BEFORE_LLM": "1",
+        "NEXUS_DISABLE_HIDDEN_CONTRACT_FAST_PATH": "1",
+        "NEXUS_DISABLE_HIDDEN_INVARIANT_SHADOW": "1",
+        "NEXUS_MODEL_REQUIRED_EXECUTION_MODE": "model_participation_only",
+        "NEXUS_AUTO_NIGHTSHIFT_ON_HYPER_FAILURE": "0",
+        "NEXUS_ONLINE_LOCAL_ASSIST": "0",
+        "NEXUS_DISABLE_DAYSHIFT_OPTIMIZER": "1",
+        # A new round starts only with a full per-call cap left before the row deadline.
+        ROUND_MIN_REMAINING_ENV: str(int(per_call_cap_sec) if per_call_cap_sec else 300),
+        ROW_DEADLINE_ENV: "" if deadline_epoch is None else f"{float(deadline_epoch):.3f}",
+    }
+    if deadline_epoch is None:
+        env.pop(ROW_DEADLINE_ENV)
+    return env
+
+
+# Every variable the treatment lane sets, derived from the template (plus the retired archive
+# variable): the strict lane never inherits any of them from the operator's environment.
+TREATMENT_ONLY_ENV: tuple[str, ...] = (
+    *_treatment_env_template(calls=1, response_dir="", deadline_epoch=0.0, per_call_cap_sec=1),
+    "NEXUS_BENCH_CANDIDATE_ARCHIVE_DIR",
+)
 TREATMENT_WINNER_SOURCES = frozenset({"llm_self_heal"})
 _TRUE = {"1", "true", "yes"}
 
@@ -203,24 +235,60 @@ def validate_lane_args(args: Any) -> list[str]:
     return errors
 
 
-def hidden_staging_ready(args: Any) -> tuple[bool, str]:
-    """The treatment lane needs #2211's hidden-test staging and visible-test confinement.
+# #2211 modules the treatment lane depends on, bound to THIS repository's files (N1): a stub
+# module elsewhere on sys.path never satisfies the check.
+BOUND_MODULES: dict[str, tuple[str, tuple[str, ...]]] = {
+    HIDDEN_STAGING_MODULE: (
+        "scripts/bench/hidden_test_staging.py",
+        ("staged_hidden_test", "active_staging_for"),
+    ),
+    "nexus.engine.confined_test_runner": (
+        "nexus/engine/confined_test_runner.py",
+        ("run_confined_test", "run_pytest_dir_copy"),
+    ),
+    "nexus.services.post_candidate_seam": (
+        "nexus/services/post_candidate_seam.py",
+        ("run_visible_test_confined", "bench_forbidden_roots"),
+    ),
+}
 
-    Without them a later round could carry text a candidate derived from ``test_hidden.py``
-    (the candidate runs next to it). Contract checked: the runner confines the visible test
-    (``NEXUS_CONFINE_VISIBLE_TEST=1``), ``scripts.bench.hidden_test_staging`` is importable with
-    ``staged_hidden_test`` / ``active_staging_for``, and the counted lane (which stages) is on.
+
+def bound_module(name: str) -> Any:
+    """Import ``name`` only if it is this repository's own file with the expected callables."""
+
+    rel, callables = BOUND_MODULES[name]
+    try:
+        module = importlib.import_module(name)
+    except ImportError as exc:
+        raise RuntimeError(f"{name} is not available") from exc
+    expected = (REPO_ROOT / rel).resolve()
+    actual = Path(str(getattr(module, "__file__", "") or "")).resolve()
+    if actual != expected:
+        raise RuntimeError(f"{name} is not the repository file ({actual})")
+    for attr in callables:
+        if not callable(getattr(module, attr, None)):
+            raise RuntimeError(f"{name}.{attr} missing")
+    return module
+
+
+def hidden_staging_ready(args: Any) -> tuple[bool, str]:
+    """The treatment lane needs #2211's hidden-test staging and confined runners.
+
+    Without them a later round could carry text a candidate derived from ``test_hidden.py``.
+    Contract checked: the runner confines the visible test (``NEXUS_CONFINE_VISIBLE_TEST=1``),
+    the staging module, the confined test runner and the post-candidate seam are this
+    repository's own files with their entry points, and the counted strict config (which stages)
+    is on. The lane's own re-runs go through those confined runners only (``confined_*_runner``),
+    so even a fooled gate never runs a candidate unconfined.
     """
 
     if os.environ.get("NEXUS_CONFINE_VISIBLE_TEST", "") != "1":
         return False, "NEXUS_CONFINE_VISIBLE_TEST is not 1"
-    try:
-        module = importlib.import_module(HIDDEN_STAGING_MODULE)
-    except ImportError:
-        return False, f"{HIDDEN_STAGING_MODULE} is not available"
-    for name in ("staged_hidden_test", "active_staging_for"):
-        if not callable(getattr(module, name, None)):
-            return False, f"{HIDDEN_STAGING_MODULE}.{name} missing"
+    for name in BOUND_MODULES:
+        try:
+            bound_module(name)
+        except RuntimeError as exc:
+            return False, str(exc)
     if not (
         bool(getattr(args, "strict_llm_baseline", False))
         and bool(getattr(args, "counted_first_attempt", False))
@@ -297,30 +365,12 @@ def with_nexus_env_overrides(
 
     if not lane_active():
         return {}
-    calls = max_model_calls()
-    env = {
-        "NEXUS_BENCH_TREATMENT_LANE": "1",
-        "NEXUS_SYMMETRIC_PROMPT": "1",
-        "NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL": "1",
-        "NEXUS_LLM_CANDIDATE_CAP": str(calls),
-        MAX_CALLS_ENV: str(calls),
-        "NEXUS_ULTRA_REVIEW_DRY_GATE": "1",
-        "NEXUS_USE_COMMITTEE": "1",
-        RESPONSE_DIR_ENV: response_dir,
-        # unchanged fairness pins, re-asserted after the treatment switches
-        "NEXUS_DISABLE_LOCAL_PREFLIGHT_BEFORE_LLM": "1",
-        "NEXUS_DISABLE_HIDDEN_CONTRACT_FAST_PATH": "1",
-        "NEXUS_DISABLE_HIDDEN_INVARIANT_SHADOW": "1",
-        "NEXUS_MODEL_REQUIRED_EXECUTION_MODE": "model_participation_only",
-        "NEXUS_AUTO_NIGHTSHIFT_ON_HYPER_FAILURE": "0",
-        "NEXUS_ONLINE_LOCAL_ASSIST": "0",
-        "NEXUS_DISABLE_DAYSHIFT_OPTIMIZER": "1",
-    }
-    if deadline_epoch is not None:
-        env[ROW_DEADLINE_ENV] = f"{float(deadline_epoch):.3f}"
-    # A new round starts only with a full per-call cap left before the row deadline.
-    env[ROUND_MIN_REMAINING_ENV] = str(int(per_call_cap_sec) if per_call_cap_sec else 300)
-    return env
+    return _treatment_env_template(
+        calls=max_model_calls(),
+        response_dir=response_dir,
+        deadline_epoch=deadline_epoch,
+        per_call_cap_sec=per_call_cap_sec,
+    )
 
 
 def row_deadline_epoch(shared_task_deadline_monotonic: float | None) -> float | None:
@@ -406,12 +456,33 @@ def _private_entries(directory: Path, prefix: str) -> list[Path]:
     return out
 
 
-def derive_runner_candidates(*, original_source: str, key: str) -> tuple[list[dict[str, Any]], str]:
+def _json_output_mode(argv: list[str]) -> bool:
+    """agy ``--output-format json`` (the bench's runtime argv; the envelope is then REQUIRED by
+    the pinned runtime, ``nexus_runtime/kernel/transport.py`` ``agy_envelope_missing``)."""
+
+    for index, item in enumerate(argv):
+        if item == "--output-format" and index + 1 < len(argv) and argv[index + 1] == "json":
+            return True
+        if item == "--output-format=json":
+            return True
+    return False
+
+
+def derive_runner_candidates(
+    *, original_source: str, key: str, row_start_epoch: float | None = None
+) -> tuple[list[dict[str, Any]], str]:
     """Every with-Nexus model call of this row, in call order, re-derived by the runner.
 
     Source of truth is the capture wrapper, not the product: the prompt record (call order,
     self-heal or stage 1) and the recorded model response. A stage-1 call edits the row's
     original source; a self-heal call edits the latest stage-1 candidate before it.
+
+    Order is the wrapper's per-row sequence number (``seq``), never a timestamp. Fail closed
+    (N3) on a record from before the row started, on a sequence that is not exactly 0..n-1, and
+    on a call made without agy's JSON output mode (the pinned runtime refuses those too).
+    Residual (documented): the capture directories are writable by the same user as the
+    product subprocess (our code); the model's code runs confined (#2211), which is the
+    boundary for model-written code.
     """
 
     capture_dir = os.environ.get("NEXUS_BENCH_PROMPT_CAPTURE_DIR", "").strip()
@@ -431,10 +502,19 @@ def derive_runner_candidates(*, original_source: str, key: str) -> tuple[list[di
             or str(record.get("run_id")) != run_id
         ):
             continue
-        records.append((float(record.get("ts") or 0.0), path.name, record))
+        if row_start_epoch is not None and float(record.get("ts") or 0.0) < float(row_start_epoch):
+            return [], f"capture_record_before_row_start:{path.name}"
+        try:
+            seq = int(record["seq"])
+        except (KeyError, TypeError, ValueError):
+            return [], f"capture_sequence_missing:{path.name}"
+        records.append((seq, path.name, record))
+    records.sort(key=lambda item: item[0])
+    if [seq for seq, _name, _record in records] != list(range(len(records))):
+        return [], "capture_sequence_broken"
     entries: list[dict[str, Any]] = []
     stage1_code: str | None = None
-    for _ts, name, record in sorted(records):
+    for _seq, name, record in records:
         prompt = str(record.get("prompt") or "")
         self_heal = SELF_HEAL_SENTENCE in prompt
         entry: dict[str, Any] = {
@@ -452,8 +532,11 @@ def derive_runner_candidates(*, original_source: str, key: str) -> tuple[list[di
             entry["error"] = "no_response_recorded"
             entries.append(entry)
             continue
+        argv = [str(item) for item in record.get("argv") or []]
         if int(response.get("returncode") or 0) != 0:
             entry["error"] = "provider_failed"
+        elif not _json_output_mode(argv):
+            entry["error"] = "agy_not_json_output_mode"
         elif self_heal and stage1_code is None:
             entry["error"] = "self_heal_without_stage1_candidate"
         else:
@@ -468,26 +551,23 @@ def derive_runner_candidates(*, original_source: str, key: str) -> tuple[list[di
     return entries, ""
 
 
-# A test run on a scratch copy: (copied test file, scratch root used as cwd, timeout).
-RunTest = Callable[[Path, Path, int], subprocess.CompletedProcess[str]]
 HIDDEN_TEST_NAME = "test_hidden.py"
+RESCORE_KEY = "_treatment_rescore"
+# run_hidden(code, target_file, hidden_test_file, timeout): the hidden verifier on ``code``.
+RunHidden = Callable[[str, str, str, int], subprocess.CompletedProcess[str]]
+# run_visible(code, original_code, target_file, visible_test_file, timeout): the visible test.
+RunVisible = Callable[[str, str, str, str, int], subprocess.CompletedProcess[str]]
 
 
-def _in_scratch_copy(
-    target_file: str,
-    test_file: str,
-    code: str,
-    action: Callable[[Path, Path], Any],
-    *,
-    exclude: frozenset[str] = frozenset(),
-    pytest_ini: Path | None = None,
-) -> Any:
-    """Run ``action(copied_test, scratch_root)`` on a scratch copy of the task directory.
+@contextmanager
+def scratch_task_dir(target_file: str, test_file: str, code: str) -> Iterator[Path]:
+    """A non-recursive copy of the test directory's regular files with ``code`` as the target.
 
-    The workspace is never written: a candidate that writes files only touches the copy. Files
-    named in ``exclude`` (the hidden verifier for a visible re-run) are not copied. The repo's
-    ``pytest.ini`` is copied to the scratch root, so the run has the strict scorer's pytest
-    semantics (rootdir, addopts, import mode, asyncio mode, filters).
+    The same shape the strict scorer's hidden verifier copies (#2211 ``run_pytest_dir_copy``:
+    regular files of the test directory, no dotfiles, no symlinks). Yields the copied test path.
+    A target outside the test directory cannot be scored this way, by the strict scorer either
+    (both datasets, P16 ``.nexus/bench_cases/<id>/`` and hard_v1 ``bench_fixtures/
+    online_ab_hard_v1/<dir>/``, keep ``target.py`` next to the tests).
     """
 
     target = Path(target_file).resolve()
@@ -496,24 +576,70 @@ def _in_scratch_copy(
         raise RuntimeError("target_outside_test_directory")
     with tempfile.TemporaryDirectory(prefix="nexus-bench-rescore-") as tmp:
         root = Path(tmp)
-        copy = root / test.parent.name
-        shutil.copytree(
-            test.parent,
-            copy,
-            symlinks=False,
-            ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache", *sorted(exclude)),
+        for entry in sorted(test.parent.iterdir()):
+            if entry.name.startswith(".") or entry.is_symlink() or not entry.is_file():
+                continue
+            shutil.copyfile(entry, root / entry.name, follow_symlinks=False)
+        (root / target.name).write_text(code, encoding="utf-8")
+        yield root / test.name
+
+
+def confined_hidden_runner(repo_root: str | Path) -> RunHidden:
+    """The treatment lane's hidden re-score: the strict scorer's own confined runner (#2211).
+
+    Never unconfined: without this repository's ``confined_test_runner`` / ``post_candidate_seam``
+    it raises, and the row's first attempt is ``first_attempt_unverifiable``.
+    """
+
+    def run(
+        code: str, target_file: str, hidden_test_file: str, timeout: int
+    ) -> subprocess.CompletedProcess[str]:
+        runner = bound_module("nexus.engine.confined_test_runner")
+        seam = bound_module("nexus.services.post_candidate_seam")
+        with scratch_task_dir(target_file, hidden_test_file, code) as test:
+            result = runner.run_pytest_dir_copy(
+                test.parent,
+                test.name,
+                forbidden_paths=seam.bench_forbidden_roots(repo_root),
+                timeout_sec=timeout,
+            )
+        argv = list(result.get("command") or [])
+        if not result.get("executed"):
+            raise RuntimeError(f"confinement_unavailable:{result.get('error')}")
+        if result.get("timed_out"):
+            raise subprocess.TimeoutExpired(argv, timeout)
+        return subprocess.CompletedProcess(
+            argv,
+            int(result.get("exit_code") or 0),
+            str(result.get("stdout_tail") or ""),
+            str(result.get("stderr_tail") or ""),
         )
-        if pytest_ini is not None and pytest_ini.is_file():
-            shutil.copyfile(pytest_ini, root / "pytest.ini")
-        (copy / target.name).write_text(code, encoding="utf-8")
-        return action(copy / test.name, root)
+
+    return run
 
 
-def _repo_pytest_ini(repo_root: str | Path | None) -> Path | None:
-    if not repo_root:
-        return None
-    ini = Path(repo_root) / "pytest.ini"
-    return ini if ini.is_file() and not ini.is_symlink() else None
+def confined_visible_runner(repo_root: str | Path) -> RunVisible:
+    """The visible re-run: the product's own confined visible runner (#2211 seam), so the output
+    the audit compares against comes from the same runner that produced the ``[FAILURE]`` text,
+    with the hidden test excluded and forbidden."""
+
+    def run(
+        code: str, original: str, target_file: str, visible_test_file: str, timeout: int
+    ) -> subprocess.CompletedProcess[str]:
+        seam = bound_module("nexus.services.post_candidate_seam")
+        completed, executed = seam.run_visible_test_confined(
+            target_path=target_file,
+            visible_test_path=visible_test_file,
+            original_code=original,
+            candidate_code=code,
+            timeout_sec=timeout,
+            workspace_root=repo_root,
+        )
+        if not executed:
+            raise RuntimeError(f"confinement_unavailable:{completed.stderr}"[:300])
+        return completed
+
+    return run
 
 
 def finalize_with_nexus_row(
@@ -525,16 +651,16 @@ def finalize_with_nexus_row(
     verification_test_file: str,
     original_source: str,
     key: str,
-    run_hidden: RunTest,
-    run_visible: RunTest,
     timeout_sec: int,
     row_deadline_sec: float | None = None,
-    repo_root: str | Path | None = None,
+    row_start_epoch: float | None = None,
 ) -> dict[str, Any]:
     """Add the treatment-lane columns to a finished with-Nexus row (no-op in the strict lane).
 
     Every candidate is re-derived by the runner from the capture wrapper's records; the product's
-    list is accepted only where it matches (first entry, and every sha it names).
+    list is accepted only where it matches (first entry, and every sha it names). Nothing runs
+    here: the first-attempt re-score and the visible re-runs happen in ``rescore_rows`` after all
+    rows, outside any hidden-test staging window, through the confined runners only.
     """
 
     if not lane_active():
@@ -544,7 +670,9 @@ def finalize_with_nexus_row(
         "" if item is None else str(item) for item in trace.get("model_candidate_sha256s") or []
     ]
     product_sources = [str(item) for item in trace.get("model_candidate_sources") or []]
-    entries, capture_error = derive_runner_candidates(original_source=original_source, key=key)
+    entries, capture_error = derive_runner_candidates(
+        original_source=original_source, key=key, row_start_epoch=row_start_epoch
+    )
     codes = {entry["sha"]: entry["code"] for entry in entries if entry["sha"]}
     runner_shas = [str(entry["sha"]) for entry in entries]
     unverified = sorted({sha for sha in product_shas if sha and sha not in codes})
@@ -576,6 +704,7 @@ def finalize_with_nexus_row(
         "treatment_unverified_shas": unverified,
         "treatment_unverifiable": unverifiable,
         "treatment_capture_error": capture_error,
+        "treatment_first_consistent": first_consistent,
         "first_model_candidate_sha256": runner_first,
         "final_model_candidate_sha256": final,
         "final_candidate_in_model_candidates": final_bound,
@@ -591,45 +720,56 @@ def finalize_with_nexus_row(
         "row_deadline_sec": row_deadline_sec,
         "tokens": int(row.get("total_tokens") or row.get("model_total_tokens") or 0),
         "treatment_applied": list(row.get("treatment_applied") or []),
+        "first_attempt_hidden_passed": None,
+        "first_attempt_status": "rescore_not_run",
+        "treatment_visible_outputs": {},
+        RESCORE_KEY: {
+            "target_file": str(target_file),
+            "test_file": str(test_file),
+            "verification_test_file": str(verification_test_file),
+            "original_source": original_source,
+            "timeout_sec": int(timeout_sec),
+        },
     })
     if timeout:
         # after_treatment of a killed row is a timeout (a failure that stays in the denominator,
         # S16); the first attempt is still scored from the runner-derived first candidate.
         row["after_treatment_status"] = NOT_RUN_TIMEOUT
-    _first_attempt(
-        row,
-        entries=entries,
-        capture_error=capture_error,
-        first_consistent=first_consistent,
-        target_file=target_file,
-        verification_test_file=verification_test_file,
-        run_hidden=run_hidden,
-        timeout_sec=timeout_sec,
-        pytest_ini=_repo_pytest_ini(repo_root),
-    )
-    row["treatment_visible_outputs"] = _visible_outputs(
-        entries,
-        target_file=target_file,
-        test_file=test_file,
-        run_visible=run_visible,
-        timeout_sec=timeout_sec,
-        exclude=frozenset({HIDDEN_TEST_NAME, Path(verification_test_file).name}),
-        pytest_ini=_repo_pytest_ini(repo_root),
-    )
     return row
+
+
+def _row_entries(row: Mapping[str, Any]) -> list[dict[str, Any]]:
+    codes = row.get("treatment_candidates") or {}
+    return [
+        {"kind": str(kind), "sha": str(sha), "code": str(codes.get(sha, "")) if sha else ""}
+        for kind, sha in zip(
+            row.get("runner_candidate_kinds") or [], row.get("runner_candidate_sha256s") or []
+        )
+    ]
+
+
+def rescore_rows(
+    rows: list[dict[str, Any]], *, run_hidden: RunHidden, run_visible: RunVisible
+) -> None:
+    """First-attempt re-score and visible re-runs for every finalized treatment row (end of run)."""
+
+    for row in rows:
+        job = row.pop(RESCORE_KEY, None)
+        if not isinstance(job, Mapping):
+            continue
+        entries = _row_entries(row)
+        _first_attempt(row, job=job, entries=entries, run_hidden=run_hidden)
+        row["treatment_visible_outputs"] = _visible_outputs(
+            entries, job=job, run_visible=run_visible
+        )
 
 
 def _first_attempt(
     row: dict[str, Any],
     *,
+    job: Mapping[str, Any],
     entries: list[dict[str, Any]],
-    capture_error: str,
-    first_consistent: bool,
-    target_file: str,
-    verification_test_file: str,
-    run_hidden: RunTest,
-    timeout_sec: int,
-    pytest_ini: Path | None = None,
+    run_hidden: RunHidden,
 ) -> None:
     """Score the FIRST model call exactly like the strict lane: hidden test on its bytes.
 
@@ -638,7 +778,8 @@ def _first_attempt(
     """
 
     row["first_attempt_hidden_passed"] = None
-    if capture_error or not first_consistent:
+    verification_test_file = str(job.get("verification_test_file") or "")
+    if row.get("treatment_capture_error") or row.get("treatment_first_consistent") is False:
         row["first_attempt_status"] = "first_attempt_unverifiable"
         return
     first = entries[0] if entries else None
@@ -648,7 +789,7 @@ def _first_attempt(
     if first["kind"] != "stage1":
         row["first_attempt_status"] = "first_candidate_not_model"
         return
-    if Path(verification_test_file).name != "test_hidden.py":
+    if Path(verification_test_file).name != HIDDEN_TEST_NAME:
         row["first_attempt_status"] = "no_hidden_verifier"
         return
     if (
@@ -662,15 +803,14 @@ def _first_attempt(
         row["first_attempt_status"] = "verified_as_delivered"
         return
     try:
-        done = _in_scratch_copy(
-            target_file,
-            verification_test_file,
+        done = run_hidden(
             first["code"],
-            lambda test, root: run_hidden(test, root, timeout_sec),
-            pytest_ini=pytest_ini,
+            str(job.get("target_file") or ""),
+            verification_test_file,
+            int(job.get("timeout_sec") or 300),
         )
         row["first_attempt_hidden_passed"] = done.returncode == 0
-        row["first_attempt_status"] = "verified_in_scratch_copy"
+        row["first_attempt_status"] = "verified_confined_rescore"
     except subprocess.TimeoutExpired:
         row["first_attempt_hidden_passed"] = False
         row["first_attempt_status"] = "hidden_verifier_timeout"
@@ -680,19 +820,12 @@ def _first_attempt(
 
 
 def _visible_outputs(
-    entries: list[dict[str, Any]],
-    *,
-    target_file: str,
-    test_file: str,
-    run_visible: RunTest,
-    timeout_sec: int,
-    exclude: frozenset[str] = frozenset({HIDDEN_TEST_NAME}),
-    pytest_ini: Path | None = None,
+    entries: list[dict[str, Any]], *, job: Mapping[str, Any], run_visible: RunVisible
 ) -> dict[str, str]:
-    """The runner's own visible-test output on every stage-1 candidate a later round could quote.
+    """The visible-test output on every stage-1 candidate a later round could quote.
 
     The per-round prompt audit allows a ``[FAILURE]`` body only when its lines appear here
-    (after the hidden-literal scan of the whole prompt). Visible test only, on a scratch copy.
+    (after the hidden-literal scan of the whole prompt). Product's confined visible runner only.
     """
 
     if len(entries) < 2:
@@ -701,20 +834,15 @@ def _visible_outputs(
     for entry in entries[:-1]:
         if entry["kind"] != "stage1" or not entry["sha"] or entry["sha"] in out:
             continue
-
-        def _visible(test: Path, root: Path) -> str:
-            done = run_visible(test, root, timeout_sec)
-            return f"{done.stdout or ''}\n{done.stderr or ''}"
-
         try:
-            out[entry["sha"]] = _in_scratch_copy(
-                target_file,
-                test_file,
+            done = run_visible(
                 entry["code"],
-                _visible,
-                exclude=exclude,
-                pytest_ini=pytest_ini,
-            )[-20000:]
+                str(job.get("original_source") or ""),
+                str(job.get("target_file") or ""),
+                str(job.get("test_file") or ""),
+                int(job.get("timeout_sec") or 300),
+            )
+            out[entry["sha"]] = f"{done.stdout or ''}\n{done.stderr or ''}"[-20000:]
         except (subprocess.TimeoutExpired, OSError, RuntimeError, shutil.Error):
             out[entry["sha"]] = ""
     return out

@@ -184,7 +184,7 @@ def apply_strict_llm_baseline_classification(
 
 
 # Only these first-attempt statuses mean the runner scored call 1's own model candidate.
-FIRST_ATTEMPT_VERIFIED = frozenset({"verified_as_delivered", "verified_in_scratch_copy"})
+FIRST_ATTEMPT_VERIFIED = frozenset({"verified_as_delivered", "verified_confined_rescore"})
 
 
 def _treatment_lane_solve(row: dict[str, Any]) -> str:
