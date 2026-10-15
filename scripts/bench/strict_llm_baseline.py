@@ -38,6 +38,12 @@ HIDDEN_FEEDBACK_RETRY_REASONS = frozenset({
     "hidden_verifier_failure_bounded_nexus_retry",
 })
 MODEL_SOLVE = "model_solve"
+# Treatment lane (wiring plan PR-3): a with-Nexus SUCCESS whose delivered candidate is a LATER model
+# candidate of the row (self-heal, candidate pool). Counts in ``after_treatment`` only, never in
+# ``first_attempt``; the first candidate is scored separately (``first_attempt_hidden_passed``).
+TREATMENT_MODEL_SOLVE = "treatment_model_solve"
+LANE_TREATMENT = "treatment"
+LANE_SCORECARD_SCHEMA = "online_ab_lane_scorecard_v1"
 # Receipt class for a selected planner node with no executable body (control-plane reference,
 # routing node): reported apart from ``selected_not_invoked``; never real, never simulated.
 NOT_EXECUTABLE = "NOT_EXECUTABLE"
@@ -165,13 +171,142 @@ def apply_strict_llm_baseline_classification(
                 else:
                     row["solve_classification"] = NOT_SOLVED
                     row["bare_local_delivery_rejected"] = True
+            elif mode == WITH_NEXUS_MODE and row.get("lane") == LANE_TREATMENT:
+                row["solve_classification"] = _treatment_lane_solve(row)
             else:
                 row["solve_classification"] = MODEL_SOLVE
+        apply_lane_columns(row)
         if mode == WITH_NEXUS_MODE and receipt_contract_violation(row):
             row["wiring_defect"] = RECEIPT_DATA_CONTRACT_VIOLATION
         if mode == WITH_NEXUS_MODE:
             classify_row_capabilities(row)
     return rows
+
+
+# Only these first-attempt statuses mean the runner scored call 1's own model candidate.
+FIRST_ATTEMPT_VERIFIED = frozenset({"verified_as_delivered", "verified_confined_rescore"})
+
+
+def _treatment_lane_solve(row: dict[str, Any]) -> str:
+    """A treatment-lane with-Nexus SUCCESS, bound to the RUNNER-derived model candidates.
+
+    The delivered sha must be one the runner re-derived from a captured model response and the
+    row must not be unverifiable (a product sha with no captured origin). ``model_solve`` only
+    when that is call 1's stage-1 candidate; any later candidate is ``treatment_model_solve``.
+    """
+
+    final = str(row.get("final_model_candidate_sha256") or row.get("model_candidate_sha256") or "")
+    runner = [str(item) for item in row.get("runner_candidate_sha256s") or []]
+    kinds = [str(item) for item in row.get("runner_candidate_kinds") or []]
+    if (
+        not final
+        or final not in runner
+        or row.get("final_candidate_in_model_candidates") is not True
+        or row.get("treatment_unverifiable") is True
+    ):
+        row["treatment_sha_unbound"] = True
+        return NOT_SOLVED
+    if row.get("treatment_round_void") is True:
+        return NOT_SOLVED  # a later round carried hidden text (R2-3): the row is void, not a solve
+    if runner[0] == final and kinds[:1] == ["stage1"]:
+        return MODEL_SOLVE  # call 1's own candidate was delivered: a first-attempt solve
+    return TREATMENT_MODEL_SOLVE
+
+
+def _int(row: dict[str, Any], *keys: str) -> int:
+    for key in keys:
+        try:
+            value = int(row.get(key) or 0)
+        except (TypeError, ValueError):
+            continue
+        if value:
+            return value
+    return 0
+
+
+def apply_lane_columns(row: dict[str, Any]) -> dict[str, Any]:
+    """Per-row ``first_attempt`` / ``after_treatment`` (bool, None for not_run) plus cost columns.
+
+    Strict lane and the bare arm: both columns are the strict model solve. Treatment-lane
+    with-Nexus rows: ``first_attempt`` is the hidden test on the FIRST model candidate's bytes
+    (same verifier as the strict lane) and ``after_treatment`` the delivered candidate's
+    classification. A prompt-symmetry violation or hidden feedback voids both.
+    """
+
+    row["tokens"] = _int(row, "tokens", "total_tokens", "model_total_tokens")
+    row.setdefault("treatment_applied", [])
+    classification = row.get("solve_classification")
+    if row.get("not_run"):
+        row["first_attempt"] = None
+        row["after_treatment"] = None
+        return row
+    if row.get("lane") != LANE_TREATMENT or str(row.get("mode", "")) != WITH_NEXUS_MODE:
+        solved = classification == MODEL_SOLVE
+        row["first_attempt"] = solved
+        row["after_treatment"] = solved
+        return row
+    void = (
+        classification == PROMPT_SYMMETRY_VIOLATION
+        or bool(row.get("prompt_symmetry_violation"))
+        or hidden_feedback_used(row)
+        or row.get("bounded_nexus_rescue_used") is True
+    )
+    row["first_attempt"] = bool(
+        not void
+        and _model_calls(row) > 0
+        and row.get("first_model_candidate_sha256")
+        and row.get("first_attempt_status") in FIRST_ATTEMPT_VERIFIED
+        and row.get("first_attempt_hidden_passed") is True
+    )
+    row["after_treatment"] = bool(
+        not void
+        and row.get("treatment_unverifiable") is not True
+        and row.get("treatment_round_void") is not True
+        and classification in {MODEL_SOLVE, TREATMENT_MODEL_SOLVE}
+    )
+    return row
+
+
+def lane_scorecard(rows: Iterable[dict[str, Any]], mode: str) -> dict[str, Any]:
+    """``first_attempt`` and ``after_treatment`` solves for one arm, with cost (all-rows denominator)."""
+
+    arm = [r for r in rows if str(r.get("mode", "")) == mode and not r.get("not_run")]
+    lanes = sorted({str(r.get("lane") or "strict") for r in arm})
+    first = sum(1 for r in arm if r.get("first_attempt") is True)
+    after = sum(1 for r in arm if r.get("after_treatment") is True)
+    calls = sum(_model_calls(r) for r in arm)
+    tokens = sum(_int(r, "tokens", "total_tokens", "model_total_tokens") for r in arm)
+    first_calls = sum(min(1, _model_calls(r)) for r in arm)
+    gain = after - first
+    applied: dict[str, int] = {}
+    for row in arm:
+        for name in row.get("treatment_applied") or []:
+            applied[str(name)] = applied.get(str(name), 0) + 1
+    total = len(arm)
+    return {
+        "schema": LANE_SCORECARD_SCHEMA,
+        "lanes": lanes,
+        "total_n": total,
+        "first_attempt": first,
+        "after_treatment": after,
+        "treatment_gain": gain,
+        "first_attempt_rate": round(first / total, 4) if total else None,
+        "after_treatment_rate": round(after / total, 4) if total else None,
+        "model_calls_total": calls,
+        "extra_model_calls": calls - first_calls,
+        "tokens_total": tokens,
+        "tokens_per_extra_solve": round(tokens / gain, 1) if gain > 0 else None,
+        "treatment_applied": dict(sorted(applied.items())),
+        "treatment_sha_unbound_n": sum(1 for r in arm if r.get("treatment_sha_unbound")),
+        "first_attempt_unverified_n": sum(
+            1
+            for r in arm
+            if r.get("lane") == LANE_TREATMENT
+            and mode == WITH_NEXUS_MODE
+            and _model_calls(r) > 0
+            and r.get("first_attempt_hidden_passed") is None
+        ),
+    }
 
 
 def honest_scorecard(rows: Iterable[dict[str, Any]], mode: str) -> dict[str, Any]:
@@ -195,13 +330,16 @@ def honest_scorecard(rows: Iterable[dict[str, Any]], mode: str) -> dict[str, Any
     else:
         rescued = []
     total = len(arm)
+    treatment_solved = [r for r in arm if r.get("solve_classification") == TREATMENT_MODEL_SOLVE]
     violations = [r for r in arm if mode == WITH_NEXUS_MODE and receipt_contract_violation(r)]
     return {
         "schema": SCORECARD_SCHEMA,
         "total_n": total,
         "solved_by_model": len(solved),
         "rescued_by_local": len(rescued),
-        "failed": total - len(solved) - len(rescued),
+        # Treatment lane only (0 in the strict lane): solved by a later model candidate.
+        "solved_by_model_after_treatment": len(treatment_solved),
+        "failed": total - len(solved) - len(rescued) - len(treatment_solved),
         "contract_violation": len(violations),
         "contract_violation_failed": sum(1 for r in violations if r.get("status") != "SUCCESS"),
         "infra_invalid": sum(1 for r in arm if r.get("infra_invalid_reason")),
@@ -480,6 +618,7 @@ def apply_strict_llm_baseline_to_summary(
             1 for row in eligible if row.get("deterministic_rescue") is True
         )
         arm["scorecard"] = honest_scorecard(rows, mode)
+        arm["lane_scorecard"] = lane_scorecard(rows, mode)
         arm["solve_rate"] = round(len(solved) / len(eligible), 4) if eligible else None
         arm["first_pass_rate"] = round(len(first_pass) / len(eligible), 4) if eligible else None
         if mode == WITH_NEXUS_MODE:
@@ -511,6 +650,10 @@ def reclassify_report_dir(report_dir: str | Path) -> dict[str, Any]:
             "status": r.get("status"),
             "model_calls": _model_calls(r),
             "solve_classification": r.get("solve_classification"),
+            "first_attempt": r.get("first_attempt"),
+            "after_treatment": r.get("after_treatment"),
+            "tokens": r.get("tokens"),
+            "treatment_applied": r.get("treatment_applied"),
             "wiring_defect": r.get("wiring_defect"),
             "capabilities_real": r.get("capabilities_real"),
             "capabilities_real_unattested": r.get("capabilities_real_unattested"),
