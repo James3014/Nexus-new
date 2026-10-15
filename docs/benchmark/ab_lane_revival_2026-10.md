@@ -257,3 +257,9 @@ May 2026 reports (the 24/24 results): no `with_nexus_*.jsonl`/`summary*.json` re
 (`find` over Nexus-new and nexus found only `.nexus/reports/bench/wave34/wave34_run_1789877609.json`, a 2026-09-20 `--with-llm-mode off` run summary, not a May report, with no per-row receipts; `.nexus/` is gitignored).
 They cannot be reclassified here; by the mechanism above any run on the pinned runtime had simulated receipts for the engine-built capabilities, so their with-Nexus figures should be
 read as not capability-attributed until re-read with `--reclassify` against a surviving report.
+
+## Bench path precheck (counted runs, 2026-10-16)
+
+nexus-runtime (e73d152f1) renders the resolved run root into the with-Nexus `[NEXUS MODEL CONTEXT]` block. That run root is an absolute path inside the bench worktree. The prompt symmetry audit rejects any Nexus-block string that contains a hidden-only word, line or literal of the task. A bench path such as `.../20261016-proof-main/...` (`main` is hidden-only for hard_v1 `oabh-remote`) therefore voids a whole counted run with `nexus_block_string_not_allowed`, and only after the models have been paid for.
+
+`capability_ab_runner` now refuses to start a counted run (`--counted-first-attempt` with model calls) when the repo root or the output dir, as given or resolved, contains any task's hidden-only text. It exits with code 2 and prints the offending task, path and word. The check (`scripts/bench/bench_path_precheck.py`) uses the audit's own extraction: `hidden_only_words` against the synthetic bare reference, plus `hidden_only_literals` and `hidden_only_lines`. The audit itself is unchanged. To fix a refused run, move `BENCH_ROOT` or `--output-dir` to a path without the reported word.

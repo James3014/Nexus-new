@@ -3384,6 +3384,39 @@ def _missing_hidden_tests(tasks: list[CapabilityTask], repo_root: Path, *, mater
     return missing
 
 
+def _bench_path_hidden_hits(
+    tasks: list[CapabilityTask], repo_root: Path, out_dir: Path, *, materialize_missing: bool
+) -> list[str]:
+    """Counted mode: bench paths (repo root, output dir) carrying any task's hidden-only text."""
+
+    from scripts.bench.bench_path_precheck import bench_path_hidden_hits
+    from scripts.bench.prompt_symmetry_audit import TaskMaterial
+
+    materials = []
+    for task in tasks:
+        target, test_file = _resolve_task_files(
+            repo_root, task, materialize_missing=materialize_missing
+        )
+        materials.append(
+            TaskMaterial(
+                task_id=task.id,
+                visible_test=Path(test_file).read_text(encoding="utf-8"),
+                hidden_test=Path(_hidden_test_for_visible_test(test_file)).read_text(
+                    encoding="utf-8"
+                ),
+                source=Path(target).read_text(encoding="utf-8"),
+                task_desc=task.task_desc,
+            )
+        )
+    paths = [
+        os.path.abspath(repo_root),
+        str(Path(repo_root).resolve()),
+        os.path.abspath(out_dir),
+        str(Path(out_dir).resolve()),
+    ]
+    return bench_path_hidden_hits(dict.fromkeys(paths), materials)
+
+
 FILE_LOCK_DENIED = "file_lock_denied"
 
 
@@ -21113,6 +21146,15 @@ def main() -> int:
         missing_hidden = _missing_hidden_tests(tasks, repo_root, materialize_missing=bool(args.materialize_missing))
         if missing_hidden:
             parser.error(f"--counted-first-attempt needs every task's hidden and visible test: {missing_hidden[:5]}")
+        path_hits = _bench_path_hidden_hits(
+            tasks, repo_root, out_dir, materialize_missing=bool(args.materialize_missing)
+        )
+        if path_hits:
+            parser.error(
+                "counted run refused: a bench path contains a task's hidden-only text and would reach "
+                "the with-Nexus prompt ([NEXUS MODEL CONTEXT] resolved_run_root), voiding the run; "
+                f"move BENCH_ROOT / --output-dir: {path_hits[:5]}"
+            )
     prompt_audit_capture = (
         _install_prompt_capture(out_dir)
         if bool(args.counted_first_attempt) and not bool(args.nexus_only) and not bool(args.without_only)
