@@ -20,7 +20,6 @@ CHANGED = (
     "nexus-core-effectiveness-g1.yml",
     "policy-lane-gate.yml",
     "pytest.yml",
-    "review-record-present.yml",
     "security.yml",
     "trusted-deletion-anchor.yml",
     "trusted-dependency-contract.yml",
@@ -42,6 +41,8 @@ UNTOUCHED = (
     "repository-intelligence.yml",
     # Own per-PR group (cancel-in-progress) plus a debounce step (#2012).
     "repository-intelligence-comment.yml",
+    # Own per-PR group keyed by issue number too: comment runs must serialize (#2290).
+    "review-record-present.yml",
 )
 
 
