@@ -399,8 +399,9 @@ GOLD_PORT_PER_FILE = "3way_per_file_fallback"
 # Documentation whose PR change may be left out of GOLD when it does not merge onto BASE
 # (amendment A5): prose files anywhere, and data files only inside a documentation tree.
 # Code, config, workflow/action files (anything under .github/) are never dropped.
-DROPPABLE_PROSE_SUFFIXES = frozenset({".md", ".rst", ".txt"})
-DROPPABLE_DOC_DATA_SUFFIXES = frozenset({".json", ".jsonl", ".yml", ".yaml", ".csv"})
+DROPPABLE_PROSE_SUFFIXES = frozenset({".md", ".rst"})
+# .txt is data here: outside a doc tree it can be a dependency manifest (requirements.txt).
+DROPPABLE_DOC_DATA_SUFFIXES = frozenset({".txt", ".json", ".jsonl", ".yml", ".yaml", ".csv"})
 
 
 def _in_doc_tree(parts: Sequence[str]) -> bool:
@@ -532,7 +533,7 @@ def port_gold(repo: GitRepo, wt: Path, prs: Sequence[Mapping[str, Any]]) -> Gold
                     port.dropped_from[path] = merge_sha
                 else:
                     failed.append(path)
-            except UnsafeTreePath:
+            except (UnsafeTreePath, RuntimeError, OSError):
                 failed.append(path)
                 break
         if failed or _unmerged(repo, wt):
@@ -1222,7 +1223,7 @@ def score_task(
             try:
                 for path, merge_sha in sorted(port.dropped_from.items()):
                     _set_path_from(repo, wts["goldref"], merge_sha, path)
-            except UnsafeTreePath as exc:
+            except (UnsafeTreePath, RuntimeError, OSError) as exc:
                 receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
                 receipt["sub_reason"] = "GOLD_PORT_FAILED"
                 receipt["detail"] = str(exc)
@@ -1314,10 +1315,13 @@ def score_task(
             ref = _merge(ref_results)
             # A5: every stable oracle node must have the same outcome with and without the
             # dropped files; otherwise the drop could hide an F2P node -> GOLD_PORT_FAILED.
+            # Presence counts too: a node collected on only one of the two trees is a
+            # mismatch even when "absent" and "fail" would compare equal.
+            gold0 = gold_runs[0]
             mismatch = sorted(
                 n
-                for n in set(ref) | set(stable)
-                if n not in set(flaky) and _get(ref, n) != _get(gold_runs[0], n)
+                for n in set(ref) | set(gold0)
+                if n not in set(flaky) and ref.get(n) != gold0.get(n)
             )
             if mismatch:
                 receipt["label"] = NOT_SCORABLE_ORACLE_INVALID

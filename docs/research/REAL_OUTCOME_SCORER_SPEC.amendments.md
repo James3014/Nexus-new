@@ -103,9 +103,10 @@ this way. In every case BASE was an ancestor of `M^1`, and the failing files wer
      `gold_port_test_files_from_merge`.
    - If a **documentation file** does not merge, leave it at its pre-PR state. The path
      is listed in `gold_port_dropped_non_code_paths`. Documentation files are:
-     - prose (`.md .rst .txt`) anywhere;
-     - data (`.json .jsonl .yml .yaml .csv`) only inside a documentation tree (first
-       segment `docs`, or a segment ending in `_wiki_vault`).
+     - prose (`.md .rst`) anywhere;
+     - text and data (`.txt .json .jsonl .yml .yaml .csv`) only inside a documentation
+       tree (first segment `docs`, or a segment ending in `_wiki_vault`). This keeps
+       dependency manifests such as `requirements.txt` out.
 
      A path under `.github/`, and any config, workflow or action file, is never
      documentation.
@@ -132,9 +133,10 @@ with each dropped file set to its merge-commit content. `GOLD_REF` is never a sc
 tree.
 
 - The oracle modules run once on `GOLD_REF`. If any stable oracle node (not flaky, §6.2)
-  has a different outcome than on GOLD, the task stays `GOLD_PORT_FAILED`, with
+  has a different outcome than on GOLD, or is collected on only one of the two trees,
+  the task stays `GOLD_PORT_FAILED`, with
   `detail = "dropped_paths_change_oracle_outcome"` and `gold_ref_mismatch[]` listing the
-  nodes. So a drop is accepted only when it provably changes no oracle outcome.
+  nodes. So a drop is accepted only when it changes no oracle outcome.
 - If any `GOLD_REF` oracle invocation times out or exits with a code other than 0 or 1,
   the task stays `GOLD_PORT_FAILED` with `detail = "gold_ref_run_failed"` (fail closed).
 - In §6.4 step 2, a P2P suspect is `gold_also_fails` only if it fails on **both** GOLD

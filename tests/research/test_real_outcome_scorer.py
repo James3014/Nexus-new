@@ -1173,6 +1173,10 @@ def test_droppable_classification():
     assert not ros.is_droppable_non_code(".github/workflows/ci.md")
     assert not ros.is_droppable_non_code("package.json")
     assert not ros.is_droppable_non_code("src/pkg/config/model_workforce.yaml")
+    # Agy review round 3: dependency manifests are never prose.
+    assert not ros.is_droppable_non_code("requirements.txt")
+    assert not ros.is_droppable_non_code("requirements/canonical-runtime.txt")
+    assert ros.is_droppable_non_code("docs/notes.txt")
     assert not ros.is_droppable_non_code("pkg/a.py")
     assert not ros.is_droppable_non_code("scripts/run.sh")
     assert not ros.is_droppable_non_code("pyproject.toml")
@@ -1327,3 +1331,27 @@ def test_gold_ref_uses_latest_merge_content_for_a_redropped_path(tmp_path, fx):
     assert port.dropped_non_code_paths == ["docs/status.md"]
     assert port.dropped_from == {"docs/status.md": merge2}
     assert (wt / "docs/status.md").read_text() == LONG_DOC.format("base", "end2")
+
+
+def test_gold_ref_node_present_on_one_tree_only_is_a_mismatch(tmp_path):
+    # Agy review round 3: a test that is collected only when the dropped doc file has its
+    # merge content (failing there) must not compare equal to "absent on GOLD".
+    param_test = (
+        "import json\nfrom pathlib import Path\n\nimport pytest\n\n"
+        'CASES = json.loads(Path("docs/cases.json").read_text())["cases"]\n\n\n'
+        '@pytest.mark.parametrize("c", CASES)\n'
+        "def test_case(c):\n    assert c == 'never'\n"
+    )
+    fx = Fixture(tmp_path, extra_base={"docs/cases.json": '{"cases": [],\n "x": 1}\n'})
+    merge = _drift_then_fix(
+        fx,
+        {"docs/cases.json": '{"cases": [],\n "x": 2}\n'},
+        {
+            **_fix_with(MUL_TEST + "\n\n" + param_test),
+            "docs/cases.json": '{"cases": ["new"],\n "x": 3}\n',
+        },
+    )
+    r = _score(tmp_path, fx, fx.task(fx.diff_from_base({"pkg/calc.py": FIXED}), merge=merge))
+    assert (r["label"], r["sub_reason"]) == (ros.NOT_SCORABLE_ORACLE_INVALID, "GOLD_PORT_FAILED")
+    # GOLD collects an empty-parametrize placeholder; GOLD_REF collects the real case.
+    assert "tests.test_mul::test_case[new]" in r["gold_ref_mismatch"]
