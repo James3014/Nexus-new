@@ -72,6 +72,7 @@ from nexus.engine.learning_policy_loader import (
     DEFAULT_GOVERNED_ADOPTION_PATH,
     DEFAULT_GOVERNED_ROLLBACK_PATH,
 )
+from nexus.orchestrator import bootstrap_agent_authority
 from nexus.orchestrator.ambient_core import LazyCanonicalCoreControlPort
 from nexus.orchestrator.canonical_mcp_ingress import (
     build_mcp_execution_context,
@@ -618,6 +619,13 @@ def _require_bound_controller(expected_head: Optional[str] = None) -> None:
         raise GatewayInputError(f"CONTROLLER_BINDING_INVALID:{reason}")
     if expected_head is not None and _git("rev-parse", "HEAD").strip() != expected_head:
         raise GatewayInputError("CONTROLLER_BINDING_INVALID:HEAD_MOVED_DURING_CHECK")
+
+
+def _current_controller_binding() -> dict[str, Optional[str]]:
+    """Controller state as this module sees it (same globals as ``_require_bound_controller``)."""
+    if CONTROLLER_BINDING_PROBLEM is not None:
+        return {"status": "DEGRADED", "reason": CONTROLLER_BINDING_PROBLEM}
+    return {"status": "SEPARATE" if CONTROLLER_IS_SEPARATE else "NOT_SEPARATE", "reason": None}
 
 
 def _loaded_git(*args: str, timeout: float = 3.0) -> str:
@@ -1946,6 +1954,28 @@ class UnifiedMCPGateway:
         *,
         key: StandingGrantKey,
     ) -> dict[str, Any]:
+        # #2270: in BOOTSTRAP with a SEPARATE Controller, Task Card binds into
+        # that Controller are authorized by the agent identity under the
+        # Owner's chat delegation and recorded durably. Every other effect, or
+        # these outside that state, still needs the Owner standing grant.
+        context = bootstrap_agent_authority.delegation_context(
+            action,
+            source_root=Path(LOADED_SOURCE_ROOT),
+            controller_binding=_current_controller_binding(),
+        )
+        if context is not None:
+            try:
+                return bootstrap_agent_authority.authorize_bootstrap_agent_effect(
+                    repository=GITHUB_REPOSITORY,
+                    action=action,
+                    effect=effect,
+                    key=key,
+                    context=context,
+                    record_directory=_standing_grant_store_module.DEFAULT_RECEIPT_PATH.parent,
+                    server_instance_id=SERVER_INSTANCE_ID,
+                )
+            except bootstrap_agent_authority.BootstrapAgentAuthorityError as exc:
+                raise GatewayInputError(f"OWNER_AUTHORITY_REQUIRED:{exc}") from exc
         try:
             return authorize_durable_standing_grant_effect(
                 repository=GITHUB_REPOSITORY,

@@ -530,7 +530,12 @@ def test_tampered_vap_is_not_forwarded_to_online_prompt() -> None:
                 "source_hash": "source-2",
                 "canonical_execution": identity,
                 "execution_attempt": {"attempt_id": "attempt-2", "attempt_number": 1},
-                "local": {"invoked": True, "response": {"task_id": "vap-bind-002", "verified_assist_packet": packet}},
+                "local": {
+                    "invoked": True,
+                    "status": "SUCCEEDED",
+                    "gate_passed": True,
+                    "response": {"task_id": "vap-bind-002", "verified_assist_packet": packet},
+                },
                 "planner": {},
             }
         )
@@ -556,6 +561,8 @@ def test_declared_vap_without_packet_blocks_before_online_provider() -> None:
                 "execution_attempt": {"attempt_id": "attempt-3", "attempt_number": 1},
                 "local": {
                     "invoked": True,
+                    "status": "SUCCEEDED",
+                    "gate_passed": True,
                     "response": {
                         "task_id": "vap-bind-003",
                         "consume_verified_assist": True,
@@ -593,6 +600,8 @@ def test_expected_packet_hash_substitution_blocks_before_online_provider() -> No
                 "source_hash": "source-4",
                 "local": {
                     "invoked": True,
+                    "status": "SUCCEEDED",
+                    "gate_passed": True,
                     "verified_assist_packet_expected_hash": "expected-runtime-hash",
                     "response": {"task_id": "vap-bind-004", "verified_assist_packet": packet},
                 },
