@@ -254,3 +254,19 @@ def test_confined_visible_test_can_run_git_from_the_toolchain(tmp_path: Path) ->
         assert completed.returncode == 0, completed.stdout[-600:] + completed.stderr[-300:]
     else:
         assert executed is False
+
+
+def test_parity_report_cannot_emit_workflow_commands(capsys: pytest.CaptureFixture[str]) -> None:
+    """Gemini G10: task ids from a fixture manifest are printed as one defused line."""
+    from scripts.bench import capability_ab_runner as runner
+
+    runner._report_confinement_parity({
+        "task_1\n::set-output name=pwned::true": "visible_verdict_differs",
+        "##[error]boom": "hidden_timeout",
+        "::warning::x": "visible:confinement_unavailable",
+    })
+    err = capsys.readouterr().err
+    lines = [line for line in err.splitlines() if line.strip()]
+    assert len(lines) == 1
+    assert not lines[0].lstrip().startswith("::")
+    assert "##[" not in err and "\n::" not in err

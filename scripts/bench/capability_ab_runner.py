@@ -4631,6 +4631,27 @@ def _hidden_trusted_shas(tasks: list[CapabilityTask], repo_root: Path) -> dict[s
     return trusted
 
 
+def _log_line_safe(line: str) -> str:
+    """One physical log line that can never be read as a GitHub workflow command (same rule
+    as #2152's gate sanitiser): control characters collapse to spaces, a leading ``::`` is
+    prefixed, the legacy ``##[`` form is broken up. Task ids come from fixture manifests."""
+    body = " ".join("".join(ch if ch.isprintable() else " " for ch in str(line)).split())
+    while "##[" in body:
+        body = body.replace("##[", "# #[")
+    return "> " + body if body.startswith("::") else body
+
+
+def _report_confinement_parity(failures: Mapping[str, str]) -> None:
+    ids = ", ".join(_log_line_safe(task_id)[:120] for task_id in sorted(failures))
+    print(
+        _log_line_safe(
+            f"confinement parity failed for {len(failures)} task(s); excluded from both arms: {ids}"
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
+
+
 def _confinement_parity_row(mode: str, task: CapabilityTask, reason: str) -> dict[str, Any]:
     return {
         "mode": mode,
@@ -20805,12 +20826,7 @@ def main() -> int:
             tasks, repo_root, materialize_missing=bool(args.materialize_missing)
         )
         if confinement_parity:
-            print(
-                f"confinement parity failed for {len(confinement_parity)} task(s); excluded from both arms: "
-                f"{sorted(confinement_parity)}",
-                file=sys.stderr,
-                flush=True,
-            )
+            _report_confinement_parity(confinement_parity)
     else:
         confinement_parity = {}
     ts = int(time.time())
