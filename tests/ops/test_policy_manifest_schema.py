@@ -1003,7 +1003,11 @@ def test_wiring_check_round15_cases(tmp_path: Path, monkeypatch) -> None:
         guard_modules=["app/g.py"],
         test_entrypoints=["tests/test_child_guard.py::test_x"],
     )
-    assert check_enforcement_wiring(caller_pkg, root) == []
+    # Refused up front: a caller package containing the guard would let a guard-only
+    # test pass. The manifest must name a concrete caller module.
+    assert check_enforcement_wiring(caller_pkg, root) == [
+        "GUARD_UNDER_CALLER_PACKAGE: app/__init__.py"
+    ]
     # A guard package above a caller still wins (route goes through the guard).
     (root / "gp").mkdir()
     (root / "gp" / "__init__.py").symlink_to(root / "pkg" / "guard.py")
@@ -1031,3 +1035,31 @@ def test_wiring_check_round15_cases(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(os, "lstat", flaky_lstat)
     monkeypatch.setattr(Path, "resolve", flaky_resolve)
     assert check_enforcement_wiring(via_guard_pkg, root) == ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"]
+
+
+def test_wiring_check_round16_cases(tmp_path: Path, monkeypatch) -> None:
+    root = _fake_repo(tmp_path)
+    policy = _fake_policy(test_entrypoints=["tests/test_caller.py::test_plain"])
+    assert check_enforcement_wiring(policy, root) == []
+    # A declared caller that stops resolving during the walk is not credited by name.
+    real_module_file = gate._module_file
+
+    def flaky_module_file(module, repo_root):
+        if module == "pkg.caller":
+            return None
+        return real_module_file(module, repo_root)
+
+    monkeypatch.setattr(gate, "_module_file", flaky_module_file)
+    assert check_enforcement_wiring(policy, root) == ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"]
+    monkeypatch.setattr(gate, "_module_file", real_module_file)
+    # A declared caller whose resolved file turns out to be the guard is a guard.
+    real_file_id = gate._file_id
+    guard_id = real_file_id(root / "pkg" / "guard.py")
+
+    def swapped_file_id(path):
+        if path.name == "caller.py":
+            return guard_id
+        return real_file_id(path)
+
+    monkeypatch.setattr(gate, "_file_id", swapped_file_id)
+    assert check_enforcement_wiring(policy, root) == ["ENFORCEMENT_CALLERS_MISSING"]

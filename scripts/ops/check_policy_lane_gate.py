@@ -533,6 +533,21 @@ def check_enforcement_wiring(policy: dict, repo_root: Path | None = None) -> lis
     )
     if shadowed:
         return errors + [f"CALLER_UNDER_GUARD_PACKAGE: {', '.join(shadowed)}"]
+    # The mirror image is refused too: a caller package that contains a guard
+    # would let a guard-only test pass (the package runs before the guard), so
+    # the manifest must name the concrete caller module instead.
+    guard_names = {m for m in (_module_name(g) for g in guards) if m}
+    covering = sorted(
+        path
+        for path in caller_paths
+        if path.endswith("__init__.py")
+        and any(
+            g == (_module_name(path) or "") or g.startswith((_module_name(path) or "") + ".")
+            for g in guard_names
+        )
+    )
+    if covering:
+        return errors + [f"GUARD_UNDER_CALLER_PACKAGE: {', '.join(covering)}"]
 
     def _on_disk(path: Path) -> bool:
         """``lstat`` succeeds (dangling symlinks count); an lstat *error* counts as present."""
@@ -559,18 +574,21 @@ def check_enforcement_wiring(policy: dict, repo_root: Path | None = None) -> lis
             prefix = ".".join(parts[:depth])
             if prefix in guard_modules:
                 return "guard"
-            if prefix in callers:
-                return "caller"
             base = root.joinpath(*parts[:depth])
             file = _module_file(prefix, root)
             if file is None:
-                if _on_disk(base.with_suffix(".py")) or _on_disk(base / "__init__.py"):
-                    return "guard"
+                if (
+                    prefix in callers
+                    or _on_disk(base.with_suffix(".py"))
+                    or _on_disk(base / "__init__.py")
+                ):
+                    return "guard"  # a declared caller that no longer resolves: fail closed
                 continue
             identity = _file_id(file)
             if identity is None or identity in guard_ids:
                 return "guard"
-            if identity in caller_ids:
+            # A caller counts only once its file resolved to a non-guard identity.
+            if prefix in callers or identity in caller_ids:
                 return "caller"
         return None
 
