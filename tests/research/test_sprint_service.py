@@ -1028,7 +1028,7 @@ def test_llm_generator_uses_unified_runtime_on_revisioned_workspace(monkeypatch,
     assert receipt["claim_boundary"]["public_claim_allowed"] is False
 
 
-def test_planning_advisor_local_assist_routes_into_online_context(monkeypatch, tmp_path: Path, governed_admission_advisor):
+def test_llm_generator_can_route_local_assist_into_online_context(monkeypatch, tmp_path: Path, governed_admission_advisor):
     """Covers the *planning* + Local advisor combination only (#2089).
 
     A repair sprint with a Local advisor action is not supported and is refused; see
