@@ -99,13 +99,17 @@ _sha256() {
   fi
 }
 
-# HEAD, porcelain status, tracked diff, untracked file bytes, refs
-# (for-each-ref + packed-refs) and the Git common dir's code-bearing metadata
-# (config, hooks/, info/).  Every step that can fail returns 1 so a snapshot
+# HEAD, the checked-out branch (name + object), porcelain status, tracked
+# diff, untracked file bytes and the Git common dir's code-bearing metadata
+# (config, hooks/, info/).  Refs are deliberately limited to HEAD and its
+# branch: the common dir is shared with every other worktree, so another
+# session's commit, fetch (refs/remotes) or `gc --auto` (packed-refs) during
+# a multi-minute run would otherwise be a false integrity violation; codex
+# workspace-write already denies writes under .git.  Every step that can fail returns 1 so a snapshot
 # that cannot be taken is never mistaken for an unchanged checkout; a missing
 # hooks/ or info/ directory is a normal state, not a failure.
 _fingerprint_material() {
-  local root="$1" common dir file
+  local root="$1" common dir file branch rc
   common="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir)" || return 1
   git -C "$root" rev-parse --verify HEAD || return 1
   git -C "$root" status --porcelain=v1 -uall -z || return 1
@@ -114,13 +118,16 @@ _fingerprint_material() {
     printf 'untracked:%s:' "$file"
     _sha256 < "$root/$file" || echo unreadable
   done || return 1
-  printf 'refs:'
-  git -C "$root" for-each-ref --format='%(refname) %(objectname)' || return 1
-  printf 'packed-refs:'
-  if [[ -f "$common/packed-refs" ]]; then
-    _sha256 < "$common/packed-refs" || return 1
+  printf 'head-ref:'
+  # symbolic-ref -q exits 1 for a detached HEAD (a valid state), >1 on error.
+  branch="$(git -C "$root" symbolic-ref -q HEAD)" && rc=0 || rc=$?
+  if [[ "$rc" -eq 0 ]]; then
+    printf '%s ' "$branch"
+    git -C "$root" rev-parse --verify "$branch" || return 1
+  elif [[ "$rc" -eq 1 ]]; then
+    echo detached
   else
-    echo missing
+    return 1
   fi
   printf 'config:'
   _sha256 < "$common/config" || echo missing

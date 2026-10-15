@@ -103,7 +103,7 @@ bypass mode (#2195). The second argument is `workspace-write` (default; the old
 works in a disposable detached worktree under `NEXUS_CODEX_WORK_ROOT` (default
 `${XDG_STATE_HOME:-~/.local/state}/nexus-codex/runs`, never inside the
 checkout); `TMPDIR` and `/tmp` are excluded from the sandbox's writable roots.
-The checkout (files, refs, Git config/hooks/info) is fingerprinted before and
+The checkout (files, HEAD and its branch, Git config/hooks/info) is fingerprinted before and
 after and any change fails the run (exit 5). A denied action (a declined /
 rejected item or a sandbox-denied error event in the `--json` stream) is
 non-delivery (exit 4); quoted text is never read as a denial.

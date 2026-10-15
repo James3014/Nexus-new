@@ -2,12 +2,12 @@
   "schema": "nexus.wiki.governance-closure-receipt.v1",
   "authority": "derived_non_authoritative",
   "status": "closed",
-  "source_fingerprint": "91ad5195acb9be9e2dc3da4bd8d79df6f28cf3e68ad58fa9a7c1cdc65636cedf",
-  "governance_input_fingerprint": "1d1c8630a2e4d8241df17fe12c53367b92a274b40f38e3bea72e1af02e3b2a0f",
+  "source_fingerprint": "3a19a496331af6252212221eb00c5cc39e5e61519d352b1bea2544b186b7e6a9",
+  "governance_input_fingerprint": "18d19e33770080d9e6c6fee0529b35152e1e978d530ef5ba3c806c5389c548d5",
   "artifact_hashes": {
-    "agent-index.json": "da58216f6b609aee4b1b1bd4c944e407a8dd79fc555b25ed03a8ef8c3ea8c98a",
-    "wikilink-graph.json": "da1c5f3434bac7caa43d504f99f334146660bacdd69ae30632b8c53ca9d5e446",
-    "unresolved-link-inventory.json": "7ecf69f3462db366f224c3c0d64a9c3340b6888bfae2b0090de9cd73ad8c2565"
+    "agent-index.json": "fb61aac9b585bc9bfb4f8379bbc84117a6d57429cccc40b2a6a91fcd2a278449",
+    "wikilink-graph.json": "04796f3a4434ad44771f4e886d279aaebec29ef99d0f3f3de2d3a7b0b6503f06",
+    "unresolved-link-inventory.json": "b2441c6e1c33c54fede4f2b0731f930a35def4b67474d45d174d9e1c0b029410"
   },
   "checks": [
     {

@@ -1,5 +1,6 @@
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -50,11 +51,20 @@ case "$FAKE_CODEX_MODE" in
     echo '{"type":"item.completed","item":{"type":"command_execution","status":"completed","aggregated_output":"sandbox denied rejected by user \"status\": \"declined\""}}'
     echo 'sandbox denied exec error, exit code: 1 (not JSON)'
     echo '{"type":"turn.completed"}' ;;
+  pyfail) echo '{"type":"turn.completed"}' ;;
   fail) echo '{"type":"turn.failed","error":{"message":"model unavailable"}}'; exit 3 ;;
   ref)
     moved="$(GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t \
       git -C "$FAKE_CANONICAL" commit-tree 'HEAD^{tree}' -p HEAD -m moved)"
+    # Moves the checked-out branch (HEAD follows it).
+    git -C "$FAKE_CANONICAL" update-ref "$(git -C "$FAKE_CANONICAL" symbolic-ref HEAD)" "$moved"
+    echo '{"type":"turn.completed"}' ;;
+  sideref)
+    # Another session moving a different branch in the shared common dir.
+    moved="$(GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t \
+      git -C "$FAKE_CANONICAL" commit-tree 'HEAD^{tree}' -p HEAD -m moved)"
     git -C "$FAKE_CANONICAL" update-ref refs/heads/side "$moved"
+    git -C "$FAKE_CANONICAL" pack-refs --all
     echo '{"type":"turn.completed"}' ;;
 esac
 """
@@ -89,6 +99,14 @@ def _launch(
     fake = bin_dir / "codex"
     fake.write_text(_FAKE_CODEX, encoding="utf-8")
     fake.chmod(0o755)
+    if mode == "pyfail":
+        # The denial classifier (python3 -I) fails; the startup check still runs.
+        stub = bin_dir / "python3"
+        stub.write_text(
+            f'#!/usr/bin/env bash\n[[ "$1" == "-I" ]] && exit 1\nexec "{sys.executable}" "$@"\n',
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
     prompt = tmp_path / "prompt.md"
     prompt.write_text("bounded task\n", encoding="utf-8")
     state = tmp_path / "state"
@@ -185,9 +203,11 @@ def test_codex_launcher_excludes_tmp_from_the_sandbox_and_state(tmp_path):
     work = Path(argv[argv.index("-C") + 1]).resolve()
     assert work.parent == state / "runs"
     assert (state / "antigravity_invoke_report.txt").is_file()
-    for tmp_root in ((tmp_path / "tmpdir").resolve(), Path("/tmp").resolve()):
-        assert tmp_root not in work.parents
-        assert tmp_root not in (state / "antigravity_invoke_report.txt").parents
+    # Only the TMPDIR fixture is checked: on Linux CI tmp_path itself is
+    # under /tmp, and the sandbox flags above cover /tmp.
+    tmpdir = (tmp_path / "tmpdir").resolve()
+    assert tmpdir not in work.parents
+    assert tmpdir not in (state / "antigravity_invoke_report.txt").parents
 
 
 def test_codex_launcher_ignores_denial_markers_in_free_text(tmp_path):
@@ -211,7 +231,7 @@ def test_codex_launcher_fails_when_a_canonical_ref_moves(tmp_path):
     assert "canonical_checkout_integrity_violation" in res.stderr
     # Reported, never reverted.
     side = subprocess.run(
-        ["git", "log", "-1", "--format=%s", "side"],
+        ["git", "log", "-1", "--format=%s", "HEAD"],
         cwd=canonical,
         capture_output=True,
         text=True,
@@ -245,3 +265,20 @@ def test_codex_launcher_refuses_symlinked_work_root_into_canonical(tmp_path):
     assert res.returncode == 2
     assert "overlaps the canonical checkout" in res.stderr
     assert argv == []
+
+
+def test_codex_launcher_ignores_other_refs_in_the_shared_common_dir(tmp_path):
+    # Deliberate narrowing: only HEAD and its branch are fingerprinted, so a
+    # concurrent session moving another branch (or packing refs) is not a
+    # violation.
+    res, _, _ = _launch(tmp_path, "sideref")
+
+    assert res.returncode == 0, res.stderr
+    assert "canonical_checkout_integrity_violation" not in res.stderr
+
+
+def test_codex_launcher_denial_classifier_failure_is_non_delivery(tmp_path):
+    res, _, _ = _launch(tmp_path, "pyfail")
+
+    assert res.returncode == 4, res.stderr
+    assert "codex_action_denied" in res.stderr
