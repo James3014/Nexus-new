@@ -11496,6 +11496,26 @@ def test_legacy_guard_fails_closed_when_new_root_symlinks_to_legacy(tmp_path, mo
         mod.require_no_legacy_self_hosted_state(repo)
 
 
+def test_legacy_guard_fails_closed_when_new_root_symlinks_to_empty_legacy(tmp_path, monkeypatch):
+    mod, home, workspace, repo = _state_root_repo(tmp_path, monkeypatch)
+    legacy = workspace / "Nexus-new-self-hosted-state"
+    legacy.mkdir()
+    new_root = home / ".local/state/Nexus-new-self-hosted-state"
+    new_root.parent.mkdir(parents=True)
+    new_root.symlink_to(legacy)
+    with pytest.raises(RuntimeError, match=_LEGACY):
+        mod.require_no_legacy_self_hosted_state(repo)
+
+
+def test_explicit_default_root_construction_refuses_populated_legacy(tmp_path, monkeypatch):
+    _mod, home, workspace, _repo = _state_root_repo(tmp_path, monkeypatch)
+    _populated_legacy(workspace)
+    with pytest.raises(RuntimeError, match=_LEGACY):
+        SelfHostedTaskService(
+            state_dir=home / ".local/state/Nexus-new-self-hosted-state", auto_reconcile=False
+        )
+
+
 @pytest.mark.skipif(os.geteuid() == 0, reason="root reads mode-000 directories")
 def test_legacy_guard_fails_closed_on_unreadable_legacy_dir(tmp_path, monkeypatch):
     mod, _home, workspace, repo = _state_root_repo(tmp_path, monkeypatch)

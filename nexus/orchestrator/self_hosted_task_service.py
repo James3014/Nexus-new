@@ -62,7 +62,7 @@ from nexus.contracts.operator_outcome_receipt import (
     OperatorOutcomeReceipt,
     validate_operator_outcome_receipt,
 )
-from nexus.contracts.self_hosted_state_root import raise_if_legacy_state
+from nexus.contracts.self_hosted_state_root import LEGACY_PRESENT_CODE, raise_if_legacy_state
 from nexus.contracts.target_integration_lifecycle import (
     ExternalAcceptanceReceipt,
     IntegrationAuthorizationEnvelope,
@@ -1567,8 +1567,16 @@ def _default_state_dir_for_repository(repository_root: Path) -> Path:
 
 def require_no_legacy_self_hosted_state(repository_root: Path) -> None:
     """Refuse the default root while the legacy sibling tree still holds state."""
-    legacy = repository_root.parent / f"{repository_root.name}-self-hosted-state"
-    raise_if_legacy_state(legacy, _default_state_dir_for_repository(repository_root))
+    name = f"{repository_root.name}-self-hosted-state"
+    legacy = repository_root.parent / name
+    new_root = _default_state_dir_for_repository(repository_root)
+    # A symlinked default root could redirect writes anywhere, the workspace
+    # included (#1539); refuse it like legacy state.
+    if (Path.home() / ".local" / "state" / name).is_symlink():
+        raise RuntimeError(
+            f"{LEGACY_PRESENT_CODE}: default state root ~/.local/state/{name} is a symlink"
+        )
+    raise_if_legacy_state(legacy, new_root)
 
 
 def _require_no_legacy_default_state() -> None:
@@ -1618,12 +1626,13 @@ class SelfHostedTaskService:
         ephemeral: bool = False,
         ambient_core_port: Optional[AmbientCoreControlPort] = None,
     ):
-        if (
-            state_dir is None
-            and not ephemeral
-            and not os.getenv("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR", "").strip()
-        ):
-            _require_no_legacy_default_state()
+        # The legacy guard applies whenever a production service adopts the
+        # default root, whether implicitly or by naming it explicitly (#1539).
+        if not ephemeral and not os.getenv("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR", "").strip():
+            if state_dir is None or (
+                Path(state_dir).expanduser().resolve() == self.canonical_state_dir()
+            ):
+                _require_no_legacy_default_state()
         canonical = self.canonical_state_dir()
         raw_state_dir = Path(state_dir).expanduser() if state_dir is not None else canonical
         self.state_dir = raw_state_dir.resolve()
