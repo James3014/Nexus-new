@@ -1519,3 +1519,72 @@ def test_already_invoked_receipts_are_tightened_by_the_runtime_stage() -> None:
     own_sim = {**claimed, "claim_boundary": {"simulated": True}}
     out = overlay_unified_capability_receipts([own_sim], rows)[0]
     assert out["attestation"] == "simulated" and classify_receipt(out) == "simulated"
+
+
+def test_round8_every_status_bearing_layer_must_agree_and_depth_fails_closed() -> None:
+    """Round 8 (G3 a-e): sibling semantic_status, depth overflow, list items under status-like
+    keys, mappings outside the response/outcome chain and non-list blockers all contradict."""
+
+    from nexus.research.flow.unified_capability_projection import (
+        _MAX_OUTCOME_DEPTH,
+        _success_contradicted,
+        outcome_disposition,
+    )
+
+    def sealed_kind(record: dict) -> str:
+        from nexus.research.flow.unified_capability_projection import runtime_attestation
+
+        stage = _stage("pregate", "INVOKED")
+        receipt = {
+            "task_id": "t",
+            "capabilities": [stage],
+            "capability_evidence_bundle": _bundle(stage),
+            "capability_results": {"pregate": {"physical_callable": "x:pregate", **record}},
+        }
+        return runtime_attestation(
+            {"name": "pregate"}, project_unified_capability_stages([receipt])[0]
+        )
+
+    ok = {"semantic_status": "SUCCEEDED", "output": "p"}
+    # (a) sibling semantic_status FAILED next to a SUCCEEDED response.
+    a = {"response": ok, "outcome": {"semantic_status": "FAILED"}}
+    assert _success_contradicted(a) == "SEMANTIC_STATUS_NOT_SUCCESS"
+    assert outcome_disposition(a)["kind"] != "succeeded" and sealed_kind(a) != "real"
+    # (d) nesting deeper than the walk bound fails closed.
+    deep: dict = {"leaf": 1}
+    for _ in range(_MAX_OUTCOME_DEPTH + 2):
+        deep = {"nested": deep}
+    d = {"response": {**ok, "result": deep}}
+    assert _success_contradicted(d) == "OUTCOME_DEPTH_EXCEEDED"
+    assert outcome_disposition(d)["kind"] != "succeeded" and sealed_kind(d) != "real"
+    # (b) list items under a status-like key.
+    b = {"response": {**ok, "results": [{"status": "FAILED"}]}}
+    assert _success_contradicted(b) == "LAYER_STATUS_NOT_SUCCESS"
+    assert sealed_kind(b) != "real"
+    # (c) a mapping outside the response/outcome chain.
+    c = {"response": {**ok, "result": {"gate_passed": False}}}
+    assert _success_contradicted(c) == "GATE_PASSED_NOT_TRUE"
+    assert sealed_kind(c) != "real"
+    # (e) blockers as a non-empty mapping or non-blank string.
+    for blockers in ({"x": 1}, "verifier_failed"):
+        e = {"response": {**ok, "blockers": blockers}}
+        assert _success_contradicted(e) == "BLOCKERS_PRESENT", blockers
+        assert sealed_kind(e) != "real", blockers
+    # Agreeing layers (and an empty blockers list) still succeed and attest real.
+    good = {"response": {**ok, "blockers": [], "result": {"hits": ["n"]}}}
+    assert _success_contradicted(good) == ""
+    assert sealed_kind(good) == "real"
+
+
+def test_round8_format_characters_inside_names_are_ignored() -> None:
+    """Round 8 (G7): any Unicode Cf character, also where the ``_`` was."""
+
+    from nexus.research.flow.unified_capability_projection import (
+        not_executable_reason,
+        simulated_by_design,
+    )
+
+    assert simulated_by_design("jit​validation")
+    assert simulated_by_design("jit_­validation")  # soft hyphen (Cf)
+    assert not_executable_reason("research⁡route") == not_executable_reason("research_route")
+    assert not simulated_by_design("jitvalidator")

@@ -60,19 +60,33 @@ def canonical_capability_name(name: Any) -> str:
     """Capability name normalised like ``capability_planning`` (NFKC, zero-width removed,
     CamelCase -> snake, ``-``/space -> ``_``, lower case) before any lookup."""
 
-    text = unicodedata.normalize("NFKC", str(name or "")).translate(_ZERO_WIDTH).strip()
+    text = unicodedata.normalize("NFKC", str(name or "")).translate(_ZERO_WIDTH)
+    # Every format character (Unicode category Cf: zero-width, soft hyphen, ...) is dropped.
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Cf").strip()
     text = _CAMEL_BOUNDARY.sub("_", text)
     return re.sub(r"[\s\-]+", "_", text.lower()).strip("_")
 
 
+def _lookup_name(name: Any, table: Iterable[str]) -> str:
+    """The table key ``name`` denotes: canonical match, else the same letters without ``_``
+    (a format character hidden where the ``_`` was, e.g. ``jit<ZWSP>validation``)."""
+
+    key = canonical_capability_name(name)
+    keys = set(table)
+    if key in keys:
+        return key
+    squashed = key.replace("_", "")
+    return next((k for k in sorted(keys) if k.replace("_", "") == squashed and squashed), "")
+
+
 def simulated_by_design(name: Any) -> bool:
-    return canonical_capability_name(name) in SIMULATED_BY_DESIGN_EXECUTORS
+    return bool(_lookup_name(name, SIMULATED_BY_DESIGN_EXECUTORS))
 
 
 def not_executable_reason(name: str) -> str:
     """``NOT_EXECUTABLE:<class>`` for a planner node with no executable body, else ""."""
 
-    key = canonical_capability_name(name)
+    key = _lookup_name(name, [*NOT_EXECUTABLE_CAPABILITY_REASONS, *NOT_EXECUTABLE_ROUTING_NODES])
     return NOT_EXECUTABLE_CAPABILITY_REASONS.get(key) or NOT_EXECUTABLE_ROUTING_NODES.get(key, "")
 
 
@@ -362,31 +376,73 @@ def _exact(value: Any) -> str:
     return str(value or "").strip().upper()
 
 
-def _success_contradicted(record: Mapping[str, Any]) -> str:
-    """Why a nested success status is contradicted by the record ("" when it is not).
+def _verdict_present(value: Any) -> bool:
+    """A verdict field (``blockers`` / ``missing_evidence``) that carries anything."""
 
-    The runtime sets the record-level ``status`` / ``gate_passed``
-    (``nexus_runtime.kernel.capabilities._capability_stage``); a record-level status other
-    than ``SUCCEEDED``, any ``gate_passed`` false, any layer ``status`` that is not a success
-    word, or a non-empty ``error`` / ``blockers`` / ``missing_evidence`` on any layer wins over
-    an inner ``semantic_status`` of success.  ``gate_passed`` counts only when exactly
-    ``True`` (``"false"``, ``0``, ``"no"``, ``None`` all contradict).  Every layer, siblings
-    included (``_outcome_layers``), is checked.
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, Mapping):
+        return bool(value)
+    if isinstance(value, (list, tuple)):
+        return any(
+            (isinstance(item, str) and item.strip()) or (item and not isinstance(item, str))
+            for item in value
+        )
+    return bool(value) and value is not True
+
+
+def _contradiction_in(value: Any, depth: int, *, top: bool) -> str:
+    if isinstance(value, (list, tuple)):
+        if depth > _MAX_OUTCOME_DEPTH:
+            return (
+                "OUTCOME_DEPTH_EXCEEDED"
+                if any(isinstance(item, (Mapping, list, tuple)) for item in value)
+                else ""
+            )
+        for item in value:
+            found = _contradiction_in(item, depth + 1, top=False)
+            if found:
+                return found
+        return ""
+    if not isinstance(value, Mapping):
+        return ""
+    if depth > _MAX_OUTCOME_DEPTH:
+        return "OUTCOME_DEPTH_EXCEEDED"
+    if top and "status" in value and _exact(value.get("status")) != "SUCCEEDED":
+        return "RECORD_STATUS_NOT_SUCCEEDED"
+    if "gate_passed" in value and value.get("gate_passed") is not True:
+        return "GATE_PASSED_NOT_TRUE"
+    if "semantic_status" in value and _exact(value.get("semantic_status")) not in _SUCCESS_STATUSES:
+        return "SEMANTIC_STATUS_NOT_SUCCESS"
+    if "status" in value and _exact(value.get("status")) not in _LAYER_SUCCESS_STATUSES:
+        return "LAYER_STATUS_NOT_SUCCESS"
+    if str(value.get("error") or "").strip():
+        return _code(value.get("error")) or "ERROR_PRESENT"
+    for field in _VERDICT_LISTS:
+        if field in value and _verdict_present(value.get(field)):
+            return f"{field.upper()}_PRESENT"
+    for item in value.values():
+        if isinstance(item, (Mapping, list, tuple)):
+            found = _contradiction_in(item, depth + 1, top=False)
+            if found:
+                return found
+    return ""
+
+
+def _success_contradicted(record: Mapping[str, Any]) -> str:
+    """Why a success status is contradicted anywhere in the record ("" when it is not).
+
+    Walks every nested mapping and list (not only the ``response`` / ``outcome`` chain), up to
+    ``_MAX_OUTCOME_DEPTH``; deeper unexplored containers are ``OUTCOME_DEPTH_EXCEEDED`` (fail
+    closed).  Contradictions: a record-level ``status`` (set by the runtime,
+    ``nexus_runtime.kernel.capabilities._capability_stage``) other than ``SUCCEEDED``; any
+    ``gate_passed`` that is not exactly ``True``; any ``semantic_status`` that is not exactly a
+    success status; any ``status`` that is not a success word; a non-empty ``error``; a
+    ``blockers`` / ``missing_evidence`` carrying anything (list, mapping or string).  Success
+    holds only when every status-bearing layer agrees.
     """
 
-    if "status" in record and _exact(record.get("status")) != "SUCCEEDED":
-        return "RECORD_STATUS_NOT_SUCCEEDED"
-    for layer in _outcome_layers(record):
-        if "gate_passed" in layer and layer.get("gate_passed") is not True:
-            return "GATE_PASSED_NOT_TRUE"
-        if "status" in layer and _exact(layer.get("status")) not in _LAYER_SUCCESS_STATUSES:
-            return "LAYER_STATUS_NOT_SUCCESS"
-        if str(layer.get("error") or "").strip():
-            return _code(layer.get("error")) or "ERROR_PRESENT"
-        for field in _VERDICT_LISTS:
-            if _str_items(layer.get(field)):
-                return f"{field.upper()}_PRESENT"
-    return ""
+    return _contradiction_in(record, 0, top=True)
 
 
 def _code(value: Any) -> str:
