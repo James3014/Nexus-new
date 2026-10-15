@@ -814,3 +814,18 @@ def test_hidden_and_code_like_text_is_skipped():
     ):
         record = rrc.classify_record(body, HEAD)
         assert record is None or record["verdict"] is False, body
+
+
+def test_negative_verdict_label_denies_without_the_after_word():
+    body = (
+        f"## Independent review (Claude Opus 5.5), head {HEAD}\n"
+        "**Verdict: REJECT** — ACCEPT on the next head.\n"
+    )
+    record = rrc.classify_record(body, HEAD)
+    assert record is not None and record["verdict"] is False
+
+
+def test_a_reject_word_after_the_token_in_its_clause_denies():
+    body = f"Head {HEAD}\n**Claude**\n- G12: APPROVED then CHANGES_REQUESTED\n"
+    record = rrc.classify_record(body, HEAD)
+    assert record is not None and record["verdict"] is False
