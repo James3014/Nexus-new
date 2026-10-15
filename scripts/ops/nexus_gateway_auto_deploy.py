@@ -30,6 +30,14 @@ the #526 governed rebind.  One cycle (run every few minutes by the LaunchAgent
    dir (never the live self-hosted state) and require ``/health`` for the exact
    commit, the candidate's own GB-077 live identity probe, MCP ``tools/list``
    and ``nexus_gateway_status``.  On failure the live Gateway is left untouched.
+3a. Quiescence (#2227): no switch while a governed task is in flight.  The
+   live deployment's own lifecycle code classifies every task in the live
+   self-hosted state dir (``IN_PROGRESS``/``ACTION_REQUIRED`` or unreadable =
+   in flight; fail closed) before the build and again under the lock right
+   before the plist write.  A deferral is ``DEFERRED_TASKS_IN_FLIGHT`` (not a
+   failure); its age is kept in ``quiescence.json`` and the receipts, and after
+   6 h one warning naming the tasks goes to #2227.  It never forces a switch;
+   only a manual ``run --allow-in-flight`` does.
 4. Switch: under the #526 manager's ledger lock, journal the previous plist,
    rewrite the ``com.nexus.mcp.gateway.direct`` plist, reload it, and probe the
    real port.  If that fails, restore the exact previous plist bytes and reload
@@ -137,6 +145,42 @@ FAILED_OUTCOMES = (
     "RECONCILE_FAILED",
 )
 MAX_BACKOFF_SECONDS = 6 * 60 * 60
+# Task quiescence (#2227): a switch moves the Controller HEAD, which every
+# non-terminal governed task is bound to, so no switch while one is in flight.
+DEFERRED_OUTCOME = "DEFERRED_TASKS_IN_FLIGHT"
+# Task action states (SelfHostedTaskService._task_action_envelope) that a
+# switch would break; TERMINAL and FINAL_BLOCK tasks are not executing.
+IN_FLIGHT_ACTION_STATES = ("IN_PROGRESS", "ACTION_REQUIRED")
+# Deferral never ends in an automatic switch; after this long the Issue below
+# gets one loud warning per deferral episode naming the blocking tasks.
+QUIESCENCE_WARN_AFTER_SECONDS = 6 * 60 * 60
+QUIESCENCE_ALERT_ISSUE = 2227
+QUIESCENCE_CLASSIFY_TIMEOUT_SECONDS = 120
+# Runs with the LIVE deployment's interpreter and tree, so tasks are classified
+# by exactly the lifecycle code that owns them.  Read-only: it never takes the
+# task state lock or reconciles anything.
+TASK_QUIESCENCE_PROBE_CODE = """
+import json, sys
+from pathlib import Path
+root, state_dir = sys.argv[1:3]
+sys.path.insert(0, root)
+from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
+base = Path(state_dir)
+paths = sorted(base.glob("*.json")) if base.exists() else []
+tasks = []
+for path in paths:
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        tasks.append({"task_id": path.stem, "action_state": "UNREADABLE"})
+        continue
+    if not isinstance(state, dict):
+        tasks.append({"task_id": path.stem, "action_state": "UNREADABLE"})
+        continue
+    action = SelfHostedTaskService._task_action_envelope(state)
+    tasks.append({"task_id": path.stem, "action_state": str(action.get("action_state"))})
+print(json.dumps({"schema": "nexus.gateway.task_quiescence.v1", "tasks": tasks}))
+"""
 # Open PRs that bump the runtime/dependency pin (or anchor such a bump).  While
 # one is in flight no deploy starts, so deploys and pin bumps never interleave.
 PIN_BUMP_PR = re.compile(
@@ -244,6 +288,9 @@ class Config:
     min_interval_seconds: int = 600
     max_irrelevant_lag: int = 25
     probe_timeout_seconds: float = 120.0
+    gh: str = "gh"
+    quiescence_warn_after_seconds: int = QUIESCENCE_WARN_AFTER_SECONDS
+    alert_issue: int = QUIESCENCE_ALERT_ISSUE
 
     @classmethod
     def default(cls, home: Optional[Path] = None, **overrides: Any) -> "Config":
@@ -307,6 +354,11 @@ class Config:
     @property
     def probe_state_root(self) -> Path:
         return self.state_dir / "probe-state"
+
+    @property
+    def quiescence_file(self) -> Path:
+        """The current deferral episode (#2227); absent when nothing is deferred."""
+        return self.state_dir / "quiescence.json"
 
 
 # --------------------------------------------------------------------------- host
@@ -384,6 +436,56 @@ class Host:
                 f"is not {cfg.gateway_root}"
             )
         return lock
+
+    def tasks_in_flight(self, cfg: Config, live_plist: bytes) -> Dict[str, Any]:
+        """Classify the live self-hosted tasks with the live deployment's own code (#2227).
+
+        Fail closed: anything that cannot be read or classified is ``UNKNOWN``,
+        which defers the switch exactly like an in-flight task.
+        """
+        try:
+            root, python = live_root(live_plist), live_python(live_plist)
+        except DeployError as exc:
+            return {"verdict": "UNKNOWN", "reason": f"LIVE_PLIST_UNREADABLE:{exc}"[:300]}
+        if root is None or python is None or not python.exists() or not root.is_dir():
+            return {"verdict": "UNKNOWN", "reason": "LIVE_INTERPRETER_OR_ROOT_MISSING"}
+        try:
+            result = self.run(
+                [
+                    str(python),
+                    "-W",
+                    "ignore",
+                    "-c",
+                    TASK_QUIESCENCE_PROBE_CODE,
+                    str(root),
+                    str(cfg.canonical_state_dir),
+                ],
+                env={"PYTHONDONTWRITEBYTECODE": "1", "PATH": os.environ.get("PATH", "")},
+                timeout=QUIESCENCE_CLASSIFY_TIMEOUT_SECONDS,
+            )
+        except Exception as exc:  # noqa: BLE001 - unknown is in flight
+            return {"verdict": "UNKNOWN", "reason": f"CLASSIFIER_FAILED:{type(exc).__name__}"}
+        return classify_task_report(result.returncode, result.stdout or "", result.stderr or "")
+
+    def post_issue_comment(self, cfg: Config, body: str) -> bool:
+        """One comment on the quiescence alert Issue; False on any failure."""
+        try:
+            result = self.run(
+                [
+                    cfg.gh,
+                    "issue",
+                    "comment",
+                    str(int(cfg.alert_issue)),
+                    "--repo",
+                    cfg.repository,
+                    "--body",
+                    body,
+                ],
+                timeout=60,
+            )
+        except Exception:  # noqa: BLE001 - a failed alert is retried next cycle
+            return False
+        return result.returncode == 0
 
     def r1_recovery_block(self, cfg: Config) -> Optional[str]:
         """Why an open #526 R1 recovery forbids a Gateway effect now, else None.
@@ -1458,6 +1560,62 @@ def _append_receipt(cfg: Config, receipt: Dict[str, Any]) -> None:
         os.fsync(handle.fileno())
 
 
+_TASK_ID_SAFE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+
+def classify_task_report(returncode: int, stdout: str, stderr: str = "") -> Dict[str, Any]:
+    """Turn the classifier output into CLEAR / IN_FLIGHT / UNKNOWN (fail closed)."""
+    if returncode != 0:
+        return {"verdict": "UNKNOWN", "reason": f"CLASSIFIER_EXIT_{returncode}"}
+    lines = [line for line in stdout.splitlines() if line.strip()]
+    try:
+        report = json.loads(lines[-1]) if lines else None
+    except ValueError:
+        report = None
+    tasks = report.get("tasks") if isinstance(report, dict) else None
+    if not isinstance(tasks, list):
+        return {"verdict": "UNKNOWN", "reason": "CLASSIFIER_OUTPUT_MALFORMED"}
+    blocking: List[str] = []
+    for task in tasks:
+        if not isinstance(task, dict):
+            return {"verdict": "UNKNOWN", "reason": "CLASSIFIER_OUTPUT_MALFORMED"}
+        task_id = str(task.get("task_id") or "")
+        name = task_id if _TASK_ID_SAFE.match(task_id) else "<unprintable-task-id>"
+        state = task.get("action_state")
+        if state == "TERMINAL" or state == "FINAL_BLOCK":
+            continue
+        if state in IN_FLIGHT_ACTION_STATES:
+            blocking.append(name)
+        else:
+            blocking.append(f"{name}:{str(state)[:40]}")
+    if blocking:
+        return {"verdict": "IN_FLIGHT", "task_ids": sorted(blocking), "checked": len(tasks)}
+    return {"verdict": "CLEAR", "checked": len(tasks)}
+
+
+def _read_json_object(path: Path) -> Optional[Dict[str, Any]]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _quiescence_warning(cfg: Config, candidate: str, blocking: List[str], age: float) -> str:
+    hours = age / 3600.0
+    names = "\n".join(f"- `{name}`" for name in blocking[:50])
+    return (
+        "<!-- NEXUS_GATEWAY_QUIESCENCE_WARNING -->\n"
+        f"**Gateway auto-deploy has been deferred for {hours:.1f} h** because governed tasks "
+        f"are still in flight (#2227). Candidate `{candidate}` is waiting; the live Gateway "
+        "is unchanged and will not be switched automatically.\n\n"
+        f"Blocking tasks ({len(blocking)}):\n{names}\n\n"
+        "Resolve each task (finish, reconcile or retire it), or, for an orphaned task, run "
+        "`nexus_gateway_auto_deploy.py run --allow-in-flight` by hand. Deferral never ends "
+        "in an automatic switch.\n"
+    )
+
+
 def _write_status(cfg: Config, payload: Dict[str, Any]) -> None:
     cfg.state_dir.mkdir(parents=True, exist_ok=True)
     _atomic_write(
@@ -1532,6 +1690,7 @@ def run_cycle(
     environ: Optional[Dict[str, str]] = None,
     tool_python: Optional[Path] = None,
     fetch: bool = True,
+    allow_in_flight: bool = False,
 ) -> Dict[str, Any]:
     started = host.now()
     status: Dict[str, Any] = {
@@ -1544,6 +1703,7 @@ def run_cycle(
             return {**status, "status": "BUSY"}
         ctx = _Cycle(cfg, host, prober, api_get, environ, tool_python or Path(sys.executable))
         ctx.fetch = fetch
+        ctx.allow_in_flight = allow_in_flight
         # Stuck: the last receipt says RECONCILE_FAILED, or (if that receipt
         # could not be written) the HOLD text itself does (#2169 F2).
         stuck = hold_reason(cfg, environ) and (
@@ -1584,6 +1744,83 @@ class _Cycle:
         self.environ = environ
         self.tool_python = tool_python
         self.fetch = True
+        # Manual `run --allow-in-flight` only; the LaunchAgent never passes it.
+        self.allow_in_flight = False
+        self.quiescence_note: Optional[Dict[str, Any]] = None
+
+    # -- task quiescence (#2227) --------------------------------------------
+
+    def quiescence(self, live_plist: bytes, candidate: str) -> Dict[str, Any]:
+        """Classify live tasks and track the deferral episode; never switches anything.
+
+        CLEAR ends the episode.  Otherwise the episode start is kept in
+        ``quiescence.json``; a new or changed blocking set appends one receipt,
+        and once the episode is older than the warning cap one loud comment
+        naming the blocking tasks goes to the alert Issue.  The switch stays
+        deferred whatever the age: it is never forced automatically.
+        """
+        cfg, host = self.cfg, self.host
+        verdict = host.tasks_in_flight(cfg, live_plist)
+        now = host.now()
+        if verdict.get("verdict") == "CLEAR":
+            with contextlib.suppress(FileNotFoundError):
+                cfg.quiescence_file.unlink()
+            return verdict
+        episode = _read_json_object(cfg.quiescence_file) or {}
+        since = episode.get("since_epoch")
+        if not isinstance(since, (int, float)) or since > now:
+            since = now
+        blocking = sorted(verdict.get("task_ids") or [verdict.get("reason") or "UNKNOWN"])
+        changed = episode.get("blocking") != blocking or episode.get("candidate") != candidate
+        age = now - float(since)
+        updated = {
+            "schema": "nexus.gateway.quiescence_episode.v1",
+            "since": _iso(float(since)),
+            "since_epoch": float(since),
+            "candidate": candidate,
+            "blocking": blocking,
+            "warned_at": episode.get("warned_at"),
+        }
+        warn_due = age >= cfg.quiescence_warn_after_seconds and not episode.get("warned_at")
+        if warn_due:
+            posted = host.post_issue_comment(
+                cfg, _quiescence_warning(cfg, candidate, blocking, age)
+            )
+            updated["warned_at"] = _iso(now) if posted else None
+            updated["warning_failed"] = not posted
+        _atomic_write(cfg.quiescence_file, json.dumps(updated, sort_keys=True).encode(), 0o600)
+        result = {
+            **verdict,
+            "deferred_since": updated["since"],
+            "deferral_age_seconds": int(age),
+            "blocking": blocking,
+            "warned_at": updated["warned_at"],
+        }
+        if changed or warn_due:
+            _append_receipt(
+                cfg,
+                {
+                    "schema": RECEIPT_SCHEMA,
+                    "attempt_id": f"{candidate[:12]}-{int(now)}-deferred",
+                    "candidate_commit": candidate,
+                    "outcome": DEFERRED_OUTCOME,
+                    "finished_at": _iso(now),
+                    "quiescence": result,
+                    "switched": False,
+                    "rolled_back": False,
+                },
+            )
+        return result
+
+    def deferral_age(self) -> Optional[Dict[str, Any]]:
+        """The episode that ended, for the receipt of the deploy that follows it."""
+        episode = _read_json_object(self.cfg.quiescence_file)
+        if not episode or not isinstance(episode.get("since_epoch"), (int, float)):
+            return None
+        return {
+            "deferred_since": episode.get("since"),
+            "deferral_age_seconds": int(self.host.now() - float(episode["since_epoch"])),
+        }
 
     # -- entry -------------------------------------------------------------
 
@@ -1700,11 +1937,26 @@ class _Cycle:
                     "live_command": wrapper_command(cfg, root, venv_python),
                 },
             )
-        # Advisory early check (the authoritative one is under the lock right
-        # before the plist write): no build or probe churn while R1 is open.
+        # Advisory early checks (the authoritative ones are under the lock right
+        # before the plist write): no build or probe churn while R1 is open or
+        # while governed tasks are in flight (#2227).
         block = host.r1_recovery_block(cfg)
         if block is not None:
             return finish("BLOCKED_MANAGER_BUSY", reason=block)
+        previous_deferral = self.deferral_age()
+        quiet = self.quiescence(previous_plist, candidate)
+        status["quiescence"] = quiet
+        if quiet.get("verdict") != "CLEAR":
+            if not self.allow_in_flight:
+                return finish(DEFERRED_OUTCOME)
+            status["quiescence_overridden"] = True
+        if previous_deferral is not None:
+            status["ended_deferral"] = previous_deferral
+        self.quiescence_note = {
+            "pre_build": quiet,
+            "ended_deferral": previous_deferral,
+            "overridden": bool(status.get("quiescence_overridden")),
+        }
         receipt = self.attempt(candidate, previous_plist, checks, status.get("warnings", []))
         status["receipt"] = receipt
         return finish(receipt["outcome"])
@@ -1818,6 +2070,8 @@ class _Cycle:
     ) -> Dict[str, Any]:
         receipt = self.new_receipt(candidate, previous_plist)
         receipt["required_checks"] = checks
+        if self.quiescence_note is not None:
+            receipt["quiescence"] = self.quiescence_note
         receipt["warnings"] = list(warnings)
         hold: Optional[str] = None
         try:
@@ -1900,6 +2154,15 @@ class _Cycle:
                     "outcome": f"PIN_BUMP_{pins['verdict']}",
                     "reason": "pin bump before switch",
                 }
+            quiet = self.host.tasks_in_flight(cfg, previous_plist)
+            receipt["quiescence_before_switch"] = quiet
+            if quiet.get("verdict") != "CLEAR":
+                if not self.allow_in_flight:
+                    return {
+                        "outcome": DEFERRED_OUTCOME,
+                        "reason": "governed tasks in flight before switch",
+                    }
+                receipt["quiescence_overridden"] = True
             # The R1 ledger lock is held from the R1 check through journal, plist
             # write, reload, live probe and any rollback: R1 cannot open mid-effect.
             with host.r1_guard(cfg):
@@ -2280,6 +2543,12 @@ def main(
     parser.add_argument("--max-irrelevant-lag", type=int, default=None)
     parser.add_argument("--python-version", default=None)
     parser.add_argument(
+        "--allow-in-flight",
+        action="store_true",
+        help="run, by hand only: switch even while governed tasks are in flight (#2227); "
+        "the LaunchAgent never passes it",
+    )
+    parser.add_argument(
         "--no-fetch",
         action="store_true",
         help="run --dry-run only: use the already fetched main (self-update check)",
@@ -2303,6 +2572,7 @@ def main(
         max_irrelevant_lag=args.max_irrelevant_lag,
         python_version=args.python_version,
         uv_extras=args.uv_extras,
+        gh=args.gh,
     )
     if args.command == "hold":
         _set_hold(cfg, args.reason)
@@ -2382,6 +2652,7 @@ def main(
             dry_run=args.dry_run,
             force=args.force,
             fetch=not (args.dry_run and args.no_fetch),
+            allow_in_flight=args.allow_in_flight,
         )
     except (DeployError, OSError, ValueError) as exc:
         error = {
