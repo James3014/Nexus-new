@@ -38,7 +38,10 @@ from typing import Any, Iterable, Mapping, Optional
 
 from nexus.executors import cli_worker
 from nexus.executors.agy_write_admission import (
+    KEYCHAIN_ISOLATED,
+    KEYCHAIN_NOT_APPLICABLE,
     SANDBOX_EXEC_PATH,
+    SECURITY_TOOL_PATH,
     _sbpl_path,
     agy_child_env,
     build_seatbelt_profile,
@@ -99,12 +102,6 @@ def strip_expected_run_home_denials(text: str, run_home: str | Path | None) -> s
         for line in text.splitlines(keepends=True)
         if not is_expected_run_home_denial(line, run_home)
     )
-
-
-# Absolute path: the run's PATH is untrusted input to the boundary.
-SECURITY_TOOL_PATH = "/usr/bin/security"
-KEYCHAIN_ISOLATED = "ISOLATED"
-KEYCHAIN_NOT_APPLICABLE = "NOT_APPLICABLE"
 
 
 def _prepare_run_home_keychain(run_home: Path) -> str:
@@ -298,10 +295,12 @@ def prepare_accept_edits_boundary(
         run_tmp = run_root / "tmp"
         run_tmp.mkdir(parents=True)
         refusal, home_profile_sha256 = materialize_run_home(
-            worker_home(source_env), run_home, read_only=False
+            worker_home(source_env), run_home, read_only=False, isolate_keychain=False
         )
         if refusal is not None:
             raise AgyWriteBoundaryError(f"{AGY_WRITE_BOUNDARY_UNAVAILABLE}:{refusal}")
+        # The boundary isolates the keychain itself so its refusal carries the
+        # security(1) detail; materialize_run_home does it for the other callers.
         keychain_state = _prepare_run_home_keychain(run_home)
         try:
             profile = _with_literal_writes(

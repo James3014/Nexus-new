@@ -309,11 +309,20 @@ def test_implementation_run_uses_accept_edits_seatbelt_and_records_posture(
     run_root = run_home.parent.parent
     assert f'(subpath "{run_root}")' in profile
     assert run_tmp.is_relative_to(run_root)
-    assert captured["home_files"] == {
+    # #2260: on macOS the run HOME also carries its own default keychain under
+    # Library/ (keychain file, security(1) lock files, preferences); the agy
+    # config side still holds only the copied auth files and the explicit settings.
+    agy_files = {f for f in captured["home_files"] if not f.startswith("Library/")}
+    assert agy_files == {
         ".gemini/antigravity-cli/antigravity-oauth-token",
         ".gemini/antigravity-cli/installation_id",
         ".gemini/antigravity-cli/settings.json",
     }
+    library_files = captured["home_files"] - agy_files
+    if sys.platform == "darwin":
+        assert "Library/Keychains/agy.keychain-db" in library_files
+    else:
+        assert library_files == set()
     assert captured["settings"] == {"permissions": {"allow": [], "deny": ["command(*)"]}}
     assert not run_root.exists()  # per-run root is removed afterwards
     assert receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
@@ -1938,3 +1947,122 @@ def test_proc_tag_scan_excuses_vanished_environ_only_for_dead_zombies(monkeypatc
     monkeypatch.setattr(cli_worker, "Path", lambda *a: live if a == ("/proc",) else Path(*a))
     with pytest.raises(FileNotFoundError):
         cli_worker._tagged_pids("exampletag")
+
+
+# ---------------------------------------------------------------------------
+# #2260: the run HOME gets its own default keychain (worker and bench callers)
+# ---------------------------------------------------------------------------
+
+
+def _default_keychain_for(home: Path | None = None) -> str:
+    import pwd
+
+    env = dict(os.environ)
+    # the agy_home fixture points HOME at a scratch dir; the real user's default
+    # keychain lives under the account's real home
+    env["HOME"] = str(home) if home is not None else pwd.getpwuid(os.getuid()).pw_dir
+    return subprocess.run(
+        ["security", "default-keychain"], env=env, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+def test_materialize_run_home_gets_isolated_default_keychain(tmp_path, agy_home):
+    """Without a default keychain in the run HOME, agy's token store makes macOS
+    raise a modal dialog on the Owner's screen (#2256 item 3).  Runs everywhere:
+    on macOS against the real security(1), elsewhere it proves nothing is created."""
+    from nexus.services import agy_account_pool as agy_pool
+
+    run_home = (tmp_path / "run" / "home").resolve()
+    real_default = _default_keychain_for() if sys.platform == "darwin" else None
+    refusal, profile = admission.materialize_run_home(agy_home, run_home, read_only=False)
+    assert refusal is None and profile
+    keychain = run_home / agy_pool.AGY_ISOLATED_KEYCHAIN
+    if sys.platform == "darwin":
+        assert keychain.is_file()
+        assert admission.run_home_keychain_state(run_home) == admission.KEYCHAIN_ISOLATED
+        assert _default_keychain_for(run_home) == f'"{keychain}"'
+        # created with HOME=<run home>: the real user's default is untouched
+        assert _default_keychain_for() == real_default
+    else:
+        assert not (run_home / "Library").exists()
+        assert admission.run_home_keychain_state(run_home) == admission.KEYCHAIN_NOT_APPLICABLE
+    # the keychain lies inside the writable run root; the agy config stays locked
+    profile_text = admission.build_seatbelt_profile(
+        run_root=run_home.parent, writable_target=None, run_home=run_home
+    )
+    assert str(run_home.parent) in profile_text
+
+
+def test_materialize_run_home_can_skip_the_keychain_for_the_dispatch_boundary(
+    tmp_path, agy_home, monkeypatch
+):
+    from nexus.services import agy_account_pool as agy_pool
+
+    monkeypatch.setattr(
+        agy_pool, "ensure_macos_isolated_keychain", lambda *a, **k: pytest.fail("not called")
+    )
+    run_home = tmp_path / "run" / "home"
+    refusal, _ = admission.materialize_run_home(
+        agy_home, run_home, read_only=False, isolate_keychain=False
+    )
+    assert refusal is None
+    assert admission.run_home_keychain_state(run_home) == admission.KEYCHAIN_NOT_APPLICABLE
+
+
+def test_keychain_setup_failure_refuses_the_worker_run_before_any_process(
+    monkeypatch, tmp_path, agy_home
+):
+    from nexus.services import agy_account_pool as agy_pool
+
+    def broken(_home, **_kwargs):
+        raise agy_pool.AgyAccountPoolManagerError("AGY_KEYCHAIN_SETUP_FAILED:create-keychain:1:x")
+
+    monkeypatch.setattr(agy_pool, "ensure_macos_isolated_keychain", broken)
+    _ready(monkeypatch)
+    _no_spawn(monkeypatch)
+    receipt = _invoke(AgyWorkerAdapter(canonical_root=_repo(tmp_path)), _target(tmp_path))
+    assert receipt.failure_reason == admission.AGY_RUN_HOME_KEYCHAIN_UNAVAILABLE
+
+
+def test_worker_receipt_records_the_keychain_state(monkeypatch, tmp_path, agy_home):
+    _ready(monkeypatch)
+    seen: dict[str, str] = {}
+
+    def fake_worker(request, on_process_group=None):
+        seen["home"] = request.env["HOME"]
+        return _result(request, stdout=_OK)
+
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", fake_worker)
+    receipt = _invoke(AgyWorkerAdapter(canonical_root=_repo(tmp_path)), _target(tmp_path))
+    expected = (
+        admission.KEYCHAIN_ISOLATED
+        if sys.platform == "darwin"
+        else admission.KEYCHAIN_NOT_APPLICABLE
+    )
+    assert str(receipt.provider_write_sandbox).endswith(f";keychain:{expected}")
+    assert seen["home"] != str(agy_home)
+
+
+def test_bench_runner_refuses_when_the_run_home_cannot_be_materialized(tmp_path, monkeypatch):
+    from scripts.bench import real_world_task_runner as runner
+
+    monkeypatch.setattr(admission, "seatbelt_available", lambda: True)
+    monkeypatch.setattr(
+        admission,
+        "materialize_run_home",
+        lambda *a, **k: (admission.AGY_RUN_HOME_KEYCHAIN_UNAVAILABLE, ""),
+    )
+    monkeypatch.setattr(
+        "nexus.executors.cli_worker.run_cli_worker",
+        lambda *a, **k: pytest.fail("must not start agy"),
+    )
+    monkeypatch.setattr(runner, "_resolve_gemini_bin", lambda: "/opt/homebrew/bin/agy")
+    case_dir = tmp_path / "case"
+    case_dir.mkdir()
+    task = SimpleNamespace(
+        task_id="t", prompt="p", visible_tests=[], files=[], root_cause="", target_file="x.py"
+    )
+    monkeypatch.setattr(runner, "_build_gemini_prompt", lambda *a, **k: "prompt")
+    row = runner._run_gemini_patch(case_dir, task, mode="with_nexus", timeout_sec=5, model="agy")
+    assert row["error"] == admission.AGY_RUN_HOME_KEYCHAIN_UNAVAILABLE
+    assert row["model_calls"] == 0 and row["written_files"] == []

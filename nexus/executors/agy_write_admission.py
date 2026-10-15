@@ -226,14 +226,57 @@ def agy_run_settings(*, read_only: bool) -> dict[str, Any]:
     return {"permissions": {"allow": [], "deny": deny}}
 
 
+# Absolute path: the run's PATH is untrusted input to the boundary.
+SECURITY_TOOL_PATH = "/usr/bin/security"
+KEYCHAIN_ISOLATED = "ISOLATED"
+KEYCHAIN_NOT_APPLICABLE = "NOT_APPLICABLE"
+AGY_RUN_HOME_KEYCHAIN_UNAVAILABLE = "agy_run_home_keychain_unavailable"
+
+
+def run_home_keychain_state(run_home: Path) -> str:
+    """``ISOLATED`` when the run HOME carries its own default keychain file."""
+    from nexus.services.agy_account_pool import AGY_ISOLATED_KEYCHAIN
+
+    return (
+        KEYCHAIN_ISOLATED
+        if (run_home / AGY_ISOLATED_KEYCHAIN).is_file()
+        else KEYCHAIN_NOT_APPLICABLE
+    )
+
+
+def isolate_run_home_keychain(run_home: Path) -> Optional[str]:
+    """Give the run HOME its own default keychain on macOS; a refusal reason on failure.
+
+    Without one, agy's OAuth token store finds no default keychain and macOS
+    raises a modal "no keychain to store" dialog on the Owner's screen that
+    blocks until a human answers (#2256, #2260).  ``security`` runs here,
+    unsandboxed and with ``HOME=<run_home>``, so the real login keychain and
+    the user's keychain preferences are never touched; the sandboxed agy only
+    reads and writes that keychain file, which lies inside the writable run
+    root.  Not macOS: nothing to do.
+    """
+    from nexus.services.agy_account_pool import (
+        AgyAccountPoolManagerError,
+        ensure_macos_isolated_keychain,
+    )
+
+    try:
+        ensure_macos_isolated_keychain(str(run_home), security=SECURITY_TOOL_PATH)
+    except AgyAccountPoolManagerError:
+        return AGY_RUN_HOME_KEYCHAIN_UNAVAILABLE
+    return None
+
+
 def materialize_run_home(
-    source_home: Path, run_home: Path, *, read_only: bool
+    source_home: Path, run_home: Path, *, read_only: bool, isolate_keychain: bool = True
 ) -> tuple[Optional[str], str]:
     """Create the disposable HOME; return ``(refusal_reason, profile_sha256)``.
 
     The worker never sees the source HOME's settings, hooks, MCP config,
     projects or memory: only the copied auth files and the explicit settings
-    written here.  The profile hash binds those settings and the mode.
+    written here.  The profile hash binds those settings and the mode.  On
+    macOS the HOME also gets its own default keychain (``isolate_keychain``;
+    the dispatch boundary does this itself and passes ``False``).
     """
     for relative in AGY_RUN_HOME_COPIED_FILES:
         source = source_home / relative
@@ -254,6 +297,10 @@ def materialize_run_home(
     settings_path.write_text(settings, encoding="utf-8")
     # agy must create its project record; the rest of config/ stays locked.
     (run_home / AGY_RUN_HOME_PROJECTS).mkdir(parents=True, exist_ok=True)
+    if isolate_keychain:
+        keychain_refusal = isolate_run_home_keychain(run_home)
+        if keychain_refusal is not None:
+            return keychain_refusal, ""
     profile = json.dumps(
         {"mode": "plan" if read_only else "accept-edits", "settings": settings},
         sort_keys=True,
