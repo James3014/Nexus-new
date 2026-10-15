@@ -1212,6 +1212,11 @@ class InPlaceSprintExecutor:
         start = time.time()
         target_path = self.repo_root / self.target_file
         if _target_held_by_other(self.repo_root, self.target_file):
+            if confined_only:
+                # The runtime verifier (#2212) memoises evaluations and replays them after the
+                # lock is released: a denial must never be a cacheable CandidateEval. Stop the
+                # whole sprint attempt instead (caught by run_hyper_sprint, no delivery).
+                raise _SprintLockDenied(lock_denied_in="runtime_verifier")
             # PR-2 seam: another task holds the target's file lock: nothing is applied or run.
             return CandidateEval(
                 seed=seed, score=0.0, hint=hint, error="file_lock_denied", candidate_code=code, source=source,

@@ -1093,9 +1093,14 @@ def test_inplace_executor_refuses_while_another_task_holds_the_target(
     )
     seam.acquire_target_lock(task_id="other-task", workspace_root=case, target_file="target.py")
     try:
-        for evaluate in (executor.evaluate_candidate, executor.evaluate_candidate_confined):
-            ev = evaluate(seed=0, hint="h", code=CANDIDATE, source="llm")
-            assert ev.score == 0.0 and ev.error == "file_lock_denied"
+        ev = executor.evaluate_candidate(seed=0, hint="h", code=CANDIDATE, source="llm")
+        assert ev.score == 0.0 and ev.error == "file_lock_denied"
+        # Reviewer L5: the confined path (the #2212 verifier, which memoises results) never
+        # returns a cacheable denial; it stops the sprint attempt.
+        from nexus.research.sprint_service import _SprintLockDenied
+
+        with pytest.raises(_SprintLockDenied):
+            executor.evaluate_candidate_confined(seed=0, hint="h", code=CANDIDATE, source="llm")
     finally:
         seam.release_target_lock("other-task")
     assert (case / "target.py").read_text(encoding="utf-8") == ORIGINAL
