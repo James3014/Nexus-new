@@ -2414,8 +2414,9 @@ def _soil(checkout: Path, dirt: str) -> None:
     if dirt == "untracked":
         (checkout / "product" / "shadow.py").write_text("x = 1\n")
     elif dirt == "ignored":
-        (checkout / "product" / "__pycache__").mkdir()
-        (checkout / "product" / "__pycache__" / "two.cpython-312.pyc").write_bytes(b"x")
+        # Ignored by *.pyc, yet importable as a sourceless module (#2246: bytecode
+        # inside __pycache__ alone is no longer dirt).
+        (checkout / "product" / "stray.pyc").write_bytes(b"x")
     elif dirt == "modified":
         (checkout / "product" / "__init__.py").write_text("patched = True\n")
     elif dirt == "wrong_head":
@@ -2439,6 +2440,46 @@ def test_unhealthy_unused_core_checkout_is_rebuilt(cfg: ad.Config, dirt: str) ->
     assert ad.core_checkout_problem(ad.Host(), checkout, CORE.pin) is None
     assert any(c[-2:] == ["worktree", "prune"] for c in host.calls)
     assert not ad.hold_reason(cfg, {})
+
+
+@pytest.mark.parametrize(
+    ("dirt", "problem"),
+    [
+        pytest.param("pycache", None, id="pycache"),
+        pytest.param("nested_pycache", None, id="nested_pycache"),
+        pytest.param("sourceless_pyc", "CORE_TREE_DIRTY", id="sourceless_pyc"),
+        pytest.param("py_in_pycache", "CORE_TREE_DIRTY", id="py_in_pycache"),
+        pytest.param("symlinked_pyc", "CORE_TREE_DIRTY", id="symlinked_pyc"),
+        pytest.param("pycache_and_modified", "CORE_TREE_DIRTY", id="pycache_and_modified"),
+    ],
+)
+def test_core_in_use_check_ignores_only_bytecode_caches(
+    cfg: ad.Config, tmp_path: Path, dirt: str, problem: str | None
+) -> None:
+    """#2246 review: a stray __pycache__ in an in-use core/<sha> is not dirt (same
+    rule as the host's Core identity); every other change still is."""
+    checkout = Path(ad.materialize_core(cfg, FakeHost(), CORE.pin)["root"])
+    cache = checkout / "product" / "__pycache__"
+    cache.mkdir()
+    (cache / "two.cpython-312.pyc").write_bytes(b"x")
+    if dirt == "nested_pycache":
+        (checkout / "product" / "protocol" / "__pycache__").mkdir()
+        (checkout / "product" / "protocol" / "__pycache__" / "b.cpython-312.pyc").write_bytes(b"x")
+    elif dirt == "sourceless_pyc":
+        (checkout / "product" / "stray.pyc").write_bytes(b"x")
+    elif dirt == "py_in_pycache":
+        (cache / "evil.py").write_text("x = 1\n")
+    elif dirt == "symlinked_pyc":
+        target = tmp_path / "elsewhere.pyc"
+        target.write_bytes(b"x")
+        (cache / "link.cpython-312.pyc").symlink_to(target)
+    elif dirt == "pycache_and_modified":
+        (checkout / "product" / "two.py").write_text("patched = True\n")
+    assert ad.core_checkout_problem(ad.Host(), checkout, CORE.pin) == problem
+    if problem is None:
+        # In use and only bytecode: materialize keeps it, no rebuild, no hold.
+        _live_on_core(cfg, checkout, export=True, pin_file=True)
+        assert "rebuilt" not in ad.materialize_core(cfg, FakeHost(), CORE.pin)
 
 
 def _live_on_core(cfg: ad.Config, checkout: Path, *, export: bool, pin_file: bool) -> None:

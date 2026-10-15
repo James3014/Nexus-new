@@ -1532,21 +1532,56 @@ def core_checkout_problem(host: Host, checkout: Path, revision: str) -> Optional
         return f"CORE_HEAD_FAILED:{(head.stderr or '').strip()[:200]}"
     if head.stdout.strip() != revision:
         return f"CORE_HEAD_MISMATCH:{head.stdout.strip()}"
-    # --ignored: an ignored file (say a stray .pyc) can still be imported.
+    # --ignored: an ignored file (say a stray module) can still be imported.
     status = host.run([
         "git",
         "-C",
         str(checkout),
         "status",
-        "--porcelain",
+        "--porcelain=v1",
+        "-z",
         "--untracked-files=all",
         "--ignored",
     ])
     if status.returncode != 0:
         return "CORE_STATUS_FAILED"
-    if status.stdout.strip():
+    for entry in (status.stdout or "").split("\0"):
+        if not entry:
+            continue
+        code, rel = entry[:3], entry[3:]
+        # Bytecode caches are not source: the host's Core identity ignores them
+        # (#2246), so the in-use check must too.  Anything else is dirty.
+        if code in ("!! ", "?? ") and _is_bytecode_cache(checkout, rel):
+            continue
         return "CORE_TREE_DIRTY"
     return None
+
+
+def _is_bytecode_cache(checkout: Path, rel: str) -> bool:
+    """``rel`` is a ``__pycache__`` directory of only ``*.pyc`` files, or one such file.
+
+    A ``.pyc`` outside ``__pycache__`` is not accepted: Python imports it as a
+    sourceless module.  Symlinks and nested directories are never accepted.
+    """
+    path = checkout / rel.rstrip("/")
+    parts = Path(rel.rstrip("/")).parts
+    if not parts or ".." in parts or path.is_symlink():
+        return False
+    if rel.endswith("/"):
+        if parts[-1] != "__pycache__" or not path.is_dir():
+            return False
+        children = list(path.iterdir())
+        return all(
+            not child.is_symlink() and child.is_file() and child.name.endswith(".pyc")
+            for child in children
+        )
+    return (
+        len(parts) >= 2
+        and parts[-2] == "__pycache__"
+        and parts[-1].endswith(".pyc")
+        and path.is_file()
+        and not path.parent.is_symlink()
+    )
 
 
 def core_source_digest(host: Host, checkout: Path, revision: str) -> Dict[str, Any]:
