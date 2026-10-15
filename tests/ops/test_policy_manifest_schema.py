@@ -778,3 +778,35 @@ def test_wiring_check_round8_cases(tmp_path: Path) -> None:
         )
         policy = _fake_policy(test_entrypoints=["tests/test_branch.py::test_guard"])
         assert check_enforcement_wiring(policy, root) == expected, prefix
+
+
+def test_wiring_check_round9_cases(tmp_path: Path) -> None:
+    root = _fake_repo(tmp_path)
+    # A live branch must not smuggle def bodies past the scoping filter.
+    (root / "tests" / "test_live_def.py").write_text(
+        "if True:\n    def unused_helper():\n        from pkg import caller\n        return caller\n"
+        "\ndef test_guard():\n    from pkg.guard import check\n    assert check(1)\n",
+        encoding="utf-8",
+    )
+    for entry in ("tests/test_live_def.py::test_guard", "tests/test_live_def.py"):
+        policy = _fake_policy(test_entrypoints=[entry])
+        assert check_enforcement_wiring(policy, root) == ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"], entry
+    (root / "tests" / "test_live_import.py").write_text(
+        "if True:\n    from pkg import caller\n"
+        "\ndef test_guard():\n    from pkg.guard import check\n    assert check(1) and caller\n",
+        encoding="utf-8",
+    )
+    live_import = _fake_policy(test_entrypoints=["tests/test_live_import.py::test_guard"])
+    assert check_enforcement_wiring(live_import, root) == []
+    # A helper module reached by the walk is scanned whole even if its name starts with
+    # test_ (the union rule applies to the entrypoint file only).
+    (root / "tests" / "__init__.py").write_text("", encoding="utf-8")
+    (root / "tests" / "test_helpers_mod.py").write_text(
+        "from pkg import caller\n\ndef make():\n    return caller\n", encoding="utf-8"
+    )
+    (root / "tests" / "test_uses_helper_mod.py").write_text(
+        "from tests import test_helpers_mod\n\ndef test_x():\n    assert test_helpers_mod.make()\n",
+        encoding="utf-8",
+    )
+    via_helper_mod = _fake_policy(test_entrypoints=["tests/test_uses_helper_mod.py::test_x"])
+    assert check_enforcement_wiring(via_helper_mod, root) == []

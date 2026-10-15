@@ -153,16 +153,23 @@ def _imports_in(nodes: list[ast.AST], package: list[str], *, into_defs: bool) ->
     selected test).
     """
     found: set[str] = set()
-    stack = list(nodes)
+
+    def push(children: list[ast.AST] | list[ast.stmt]) -> None:
+        for child in children:
+            if into_defs or not isinstance(child, _DEFS):
+                stack.append(child)
+
+    stack: list[ast.AST] = []
+    push(list(nodes))
     while stack:
         node = stack.pop()
         if isinstance(node, ast.If):
             state = _branch_state(node)
             if state == "dead":
-                stack.extend(node.orelse)
+                push(node.orelse)
                 continue
             if state == "live":
-                stack.extend(node.body)
+                push(node.body)
                 continue
         if isinstance(node, ast.Import):
             found.update(alias.name for alias in node.names)
@@ -177,9 +184,7 @@ def _imports_in(nodes: list[ast.AST], package: list[str], *, into_defs: bool) ->
             if module:
                 found.add(module)
                 found.update(f"{module}.{alias.name}" for alias in node.names)
-        for child in ast.iter_child_nodes(node):
-            if into_defs or not isinstance(child, _DEFS):
-                stack.append(child)
+        push(list(ast.iter_child_nodes(node)))
     return found
 
 
@@ -195,18 +200,22 @@ def _visible_imports(tree: ast.Module, chain: list[ast.AST], package: list[str])
 
 
 def _imported_modules(
-    path: Path, repo_root: Path, selected: list[ast.AST] | None = None
+    path: Path,
+    repo_root: Path,
+    selected: list[ast.AST] | None = None,
+    *,
+    entrypoint: bool = False,
 ) -> set[str]:
-    """Modules visible to the selected test, or to the whole file's tests when ``selected``
-    is None.
+    """Modules visible from ``path``.
 
-    ``selected`` is the resolved chain ``[TestClass, ..., test_function]``. A
-    test sees the module-level statements, the non-def statements of each
-    enclosing class, and its own body. Imports made inside other functions,
-    helpers or fixtures of the same file do not count for it (fail closed). A
-    test *file* entry (``selected`` None) is the union over its collectable
-    tests, so an unused helper's import does not count either. A plain
-    (non-test) module reached by the walk is scanned whole.
+    For the entrypoint file: ``selected`` is the resolved chain ``[TestClass,
+    ..., test_function]``; the test sees the module-level statements, the
+    non-def statements of each enclosing class, and its own body. Imports made
+    inside other functions, helpers or fixtures of the same file do not count
+    for it (fail closed). A whole-file entry (``selected`` None) is the union
+    over its collectable tests, so an unused helper's import does not count
+    either. Any module the walk reaches afterwards (``entrypoint`` False) is
+    scanned whole, whatever its name.
     """
     tree = _parse(path)
     if tree is None:
@@ -214,7 +223,7 @@ def _imported_modules(
     package = _package_parts(path, repo_root)
     if selected is not None:
         return _visible_imports(tree, selected, package)
-    if not path.name.startswith(_TEST_FUNCTION_PREFIX):
+    if not entrypoint:
         return _imports_in([tree], package, into_defs=True)
     found: set[str] = set()
     for chain in _collectable_chains(list(tree.body), _fixture_bindings(tree)):
@@ -484,11 +493,11 @@ def check_enforcement_wiring(policy: dict, repo_root: Path | None = None) -> lis
     reached = False
     for _entry, start, selected in resolved:
         seen: set[str] = set()
-        frontier: list[tuple[Path, list[ast.AST] | None]] = [(start, selected)]
+        frontier: list[tuple[Path, list[ast.AST] | None, bool]] = [(start, selected, True)]
         for _ in range(_IMPORT_WALK_DEPTH):
-            next_frontier: list[tuple[Path, list[ast.AST] | None]] = []
-            for file, node in frontier:
-                for module in _imported_modules(file, root, node):
+            next_frontier: list[tuple[Path, list[ast.AST] | None, bool]] = []
+            for file, node, is_entry in frontier:
+                for module in _imported_modules(file, root, node, entrypoint=is_entry):
                     if module in callers:
                         reached = True
                         break
@@ -497,7 +506,7 @@ def check_enforcement_wiring(policy: dict, repo_root: Path | None = None) -> lis
                     seen.add(module)
                     target = _module_file(module, root)
                     if target is not None:
-                        next_frontier.append((target, None))
+                        next_frontier.append((target, None, False))
                 if reached:
                     break
             if reached or not next_frontier:
