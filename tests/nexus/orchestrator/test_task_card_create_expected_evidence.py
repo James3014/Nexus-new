@@ -174,7 +174,9 @@ def test_task_card_create_null_universe_equals_absent(owner_effects, tmp_path):
     assert _card(tmp_path, result["structuredContent"]) == LEGACY_CARD.encode("utf-8")
 
 
-def test_task_card_create_universe_round_trips_through_the_card_parser(owner_effects, tmp_path):
+def test_task_card_create_universe_round_trips_through_the_card_parser(
+    owner_effects, tmp_path, reference_core_universe_identity
+):
     result = _create({**BASE_ARGUMENTS, "expected_evidence": UNIVERSE})
     assert result["isError"] is False, result
     payload = result["structuredContent"]

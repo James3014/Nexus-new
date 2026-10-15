@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import subprocess
 from dataclasses import asdict, replace
 from datetime import datetime, timedelta, timezone
@@ -19,7 +20,11 @@ from nexus.contracts.target_integration_lifecycle import (
 )
 from nexus.contracts.workforce_admission import WorkforceDemand
 from nexus.executors.cli_worker import bounded_environment_receipt
-from nexus.orchestrator.governed_integration import ControlledIntegrationManager, IntegrationReceipt
+from nexus.orchestrator.governed_integration import (
+    ControlledIntegrationManager,
+    IntegrationExecutionError,
+    IntegrationReceipt,
+)
 from nexus.orchestrator.repository_contract_gate import RepositoryContractGate
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
 from nexus.orchestrator.target_integration_lifecycle import TargetIntegrationLifecycle
@@ -805,6 +810,267 @@ def test_post_apply_physical_truth_is_typed_and_persistable(tmp_path: Path):
     assert raised.value.integration_result_sha == raised.value.branch_head_after
 
 
+def _separate_controller_worktree(tmp_path: Path, root: Path, base: str) -> Path:
+    controller = tmp_path / "controller"
+    _git(root, "worktree", "add", "--detach", str(controller), base)
+    return controller.resolve()
+
+
+def _separate_controller(tmp_path: Path) -> tuple[Path, Path, str, str]:
+    """Primary checkout on main plus a detached Controller worktree (#1939)."""
+    root, base, candidate = _repo(tmp_path)
+    _git(root, "checkout", "main")
+    return root, _separate_controller_worktree(tmp_path, root, base), base, candidate
+
+
+def _separate_controller_integrate(
+    tmp_path: Path, controller: Path, base: str, candidate: str, **kwargs
+):
+    receipt = _acceptance(candidate)
+    auth = _authorization(controller, base, candidate, receipt)
+    state = {
+        "task_id": "task-1",
+        "contract": {"controller_repo_root": str(controller)},
+        "promotion_packet": {"candidate_commit_sha": candidate},
+        "integration_authorization": auth.to_dict(),
+        "external_acceptance": receipt.to_dict(),
+        "lease": {"target_branch": "nexus/task/task-1"},
+    }
+    return ControlledIntegrationManager(
+        integration_root=controller
+    ).integrate_authorized_task_state(
+        state,
+        integration_branch="nexus/integration/canary",
+        staging_root=tmp_path / "stage",
+        **kwargs,
+    )
+
+
+def test_separate_controller_post_apply_output_never_lands_in_controller(tmp_path: Path):
+    """#2230 F3(b): post-apply output must not poison the Controller worktree."""
+    _root, controller, base, candidate = _separate_controller(tmp_path)
+    result = _separate_controller_integrate(
+        tmp_path,
+        controller,
+        base,
+        candidate,
+        post_apply_commands=(("/bin/sh", "-c", "echo out > post-apply-output.txt"),),
+    )
+    assert result.post_apply_verified is True
+    assert _git(controller, "status", "--porcelain=v1", "--untracked-files=all", "--ignored") == ""
+    assert _git(controller, "rev-parse", "HEAD") == base
+    assert not (tmp_path / "stage" / ".post-apply" / "task-1").exists()
+    assert ".post-apply" not in _git(controller, "worktree", "list", "--porcelain")
+
+
+def test_separate_controller_post_apply_verifies_integrated_tree(tmp_path: Path):
+    """#2230 F3(b): post-apply checks the integrated commit, not the stale Controller."""
+    _root, controller, base, candidate = _separate_controller(tmp_path)
+    result = _separate_controller_integrate(
+        tmp_path,
+        controller,
+        base,
+        candidate,
+        post_apply_commands=(
+            ("/bin/sh", "-c", "grep -qx candidate value.txt"),
+            (
+                "/bin/sh",
+                "-c",
+                'test "$(git rev-parse HEAD)" = "$(git rev-parse nexus/integration/canary)"',
+            ),
+        ),
+    )
+    assert result.merge_performed is True
+    assert result.integration_commit_sha == _git(
+        controller, "rev-parse", "nexus/integration/canary"
+    )
+    assert (controller / "value.txt").read_text() == "base\n"
+
+
+def test_separate_controller_pending_task_card_does_not_block_integration(tmp_path: Path):
+    """#2230 F3(a): an untracked pending Task Card under tasks/ is not dirt."""
+    _root, controller, base, candidate = _separate_controller(tmp_path)
+    card = controller / "tasks" / "active" / "pending-card.md"
+    card.parent.mkdir(parents=True)
+    card.write_text("pending\n")
+    result = _separate_controller_integrate(tmp_path, controller, base, candidate)
+    assert result.merge_performed is True
+    assert (
+        _git(controller, "merge-base", "--is-ancestor", candidate, "nexus/integration/canary") == ""
+    )
+    assert card.read_text() == "pending\n"
+    assert _git(controller, "rev-parse", "HEAD") == base
+
+
+@pytest.mark.parametrize("dirt", ["untracked-outside", "tracked-edit", "tasks-symlink"])
+def test_separate_controller_other_dirt_still_blocks_integration(tmp_path: Path, dirt: str):
+    _root, controller, base, candidate = _separate_controller(tmp_path)
+    if dirt == "untracked-outside":
+        (controller / "stray.txt").write_text("stray\n")
+    elif dirt == "tracked-edit":
+        (controller / "value.txt").write_text("edited\n")
+    else:
+        (controller / "tasks").mkdir()
+        (controller / "tasks" / "card.md").symlink_to(controller / "value.txt")
+    with pytest.raises(RuntimeError, match="canonical.*clean"):
+        _separate_controller_integrate(tmp_path, controller, base, candidate)
+    assert _git(controller, "rev-parse", "nexus/integration/canary") == base
+
+
+def test_controller_on_integration_branch_still_rejects_pending_task_card(tmp_path: Path):
+    """When apply fast-forwards the Controller worktree, it stays fully clean."""
+    root, base, candidate = _repo(tmp_path)
+    (root / "tasks").mkdir()
+    (root / "tasks" / "pending-card.md").write_text("pending\n")
+    with pytest.raises(RuntimeError, match="canonical.*clean"):
+        _separate_controller_integrate(tmp_path, root.resolve(), base, candidate)
+    assert _git(root, "rev-parse", "HEAD") == base
+
+
+def test_primary_checkout_on_main_still_rejects_pending_task_card(tmp_path: Path):
+    """#2230 F3: only a separate detached Controller may hold pending cards."""
+    root, base, candidate = _repo(tmp_path)
+    _git(root, "checkout", "main")
+    (root / "tasks").mkdir()
+    (root / "tasks" / "pending-card.md").write_text("pending\n")
+    with pytest.raises(RuntimeError, match="canonical.*clean"):
+        _separate_controller_integrate(tmp_path, root.resolve(), base, candidate)
+    assert _git(root, "rev-parse", "nexus/integration/canary") == base
+
+
+def test_linked_worktree_on_a_branch_still_rejects_pending_task_card(tmp_path: Path):
+    root, base, candidate = _repo(tmp_path)
+    _git(root, "checkout", "main")
+    controller = tmp_path / "on-branch"
+    _git(root, "worktree", "add", "-b", "nexus/other", str(controller), base)
+    (controller / "tasks").mkdir()
+    (controller / "tasks" / "pending-card.md").write_text("pending\n")
+    with pytest.raises(RuntimeError, match="canonical.*clean"):
+        _separate_controller_integrate(tmp_path, controller.resolve(), base, candidate)
+    assert _git(root, "rev-parse", "nexus/integration/canary") == base
+
+
+@pytest.mark.parametrize("trick", ["symlinked-dir", "nested-dot-git", "hardlink"])
+def test_separate_controller_task_card_path_tricks_block_integration(tmp_path: Path, trick: str):
+    _root, controller, base, candidate = _separate_controller(tmp_path)
+    tasks = controller / "tasks"
+    tasks.mkdir()
+    if trick == "symlinked-dir":
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "payload.txt").write_text("outside\n")
+        (tasks / "symdir").symlink_to(outside, target_is_directory=True)
+    elif trick == "nested-dot-git":
+        (tasks / "x" / ".git").mkdir(parents=True)
+        (tasks / "x" / ".git" / "config").write_text("[core]\n")
+    else:
+        outside = tmp_path / "outside.txt"
+        outside.write_text("outside\n")
+        (tasks / "card.md").hardlink_to(outside)
+    with pytest.raises(RuntimeError, match="canonical.*clean"):
+        _separate_controller_integrate(tmp_path, controller, base, candidate)
+    assert _git(controller, "rev-parse", "nexus/integration/canary") == base
+
+
+@pytest.mark.parametrize("kind", ["directory", "dangling-symlink"])
+def test_pre_existing_post_apply_path_is_refused_and_kept(tmp_path: Path, kind: str):
+    """A path this run did not create is never removed, and the error is not masked."""
+    _root, controller, base, candidate = _separate_controller(tmp_path)
+    occupied = tmp_path / "stage" / ".post-apply" / "task-1"
+    occupied.parent.mkdir(parents=True)
+    if kind == "directory":
+        occupied.mkdir()
+        (occupied / "keep.txt").write_text("keep\n")
+    else:
+        occupied.symlink_to(tmp_path / "missing-target")
+    with pytest.raises(RuntimeError, match="post-apply verification Target already exists"):
+        _separate_controller_integrate(
+            tmp_path,
+            controller,
+            base,
+            candidate,
+            post_apply_commands=(("/bin/sh", "-c", "true"),),
+        )
+    assert os.path.lexists(occupied)
+    if kind == "directory":
+        assert (occupied / "keep.txt").read_text() == "keep\n"
+    assert _git(controller, "rev-parse", "nexus/integration/canary") == base
+    assert "stage" not in _git(controller, "worktree", "list", "--porcelain")
+
+
+def test_dangling_symlink_staging_path_is_refused_and_kept(tmp_path: Path):
+    _root, controller, base, candidate = _separate_controller(tmp_path)
+    occupied = tmp_path / "stage" / "task-1"
+    occupied.parent.mkdir(parents=True)
+    occupied.symlink_to(tmp_path / "missing-target")
+    with pytest.raises(RuntimeError, match="staging Target already exists"):
+        _separate_controller_integrate(tmp_path, controller, base, candidate)
+    assert occupied.is_symlink()
+    assert _git(controller, "rev-parse", "nexus/integration/canary") == base
+
+
+def test_post_apply_cleanup_failure_keeps_typed_applied_truth(tmp_path: Path):
+    """Claude F1: a locked post-apply worktree must not erase merge_performed=True."""
+    _root, controller, base, candidate = _separate_controller(tmp_path)
+    with pytest.raises(IntegrationExecutionError) as raised:
+        _separate_controller_integrate(
+            tmp_path,
+            controller,
+            base,
+            candidate,
+            post_apply_commands=(("/bin/sh", "-c", 'git worktree lock "$PWD"'),),
+        )
+    error = raised.value
+    assert error.merge_performed is True
+    assert error.stage == "POST_APPLY_CLEANUP"
+    assert error.post_apply_verified is True
+    assert error.cleanup_failure and "task-1" in error.cleanup_failure
+    assert error.branch_head_after == _git(controller, "rev-parse", "nexus/integration/canary")
+    assert error.branch_head_after != base
+    assert not (tmp_path / "stage" / "task-1").exists()
+    locked = tmp_path / "stage" / ".post-apply" / "task-1"
+    _git(controller, "worktree", "unlock", str(locked))
+    _git(controller, "worktree", "remove", "--force", str(locked))
+
+
+def test_post_apply_failure_with_cleanup_failure_keeps_verification_stage(tmp_path: Path):
+    _root, controller, base, candidate = _separate_controller(tmp_path)
+    with pytest.raises(IntegrationExecutionError) as raised:
+        _separate_controller_integrate(
+            tmp_path,
+            controller,
+            base,
+            candidate,
+            post_apply_commands=(("/bin/sh", "-c", 'git worktree lock "$PWD"; exit 3'),),
+        )
+    error = raised.value
+    assert error.stage == "POST_APPLY_VERIFICATION"
+    assert error.merge_performed is True
+    assert error.post_apply_verified is False
+    assert "post-apply verification failed" in error.failure_reason
+    assert error.cleanup_failure
+    locked = tmp_path / "stage" / ".post-apply" / "task-1"
+    _git(controller, "worktree", "unlock", str(locked))
+    _git(controller, "worktree", "remove", "--force", str(locked))
+
+
+def test_post_apply_failure_removes_its_worktree_and_stays_typed(tmp_path: Path):
+    _root, controller, base, candidate = _separate_controller(tmp_path)
+    with pytest.raises(IntegrationExecutionError) as raised:
+        _separate_controller_integrate(
+            tmp_path,
+            controller,
+            base,
+            candidate,
+            post_apply_commands=(("/bin/sh", "-c", "echo dirt > dirt.txt; exit 1"),),
+        )
+    assert raised.value.merge_performed is True
+    assert raised.value.cleanup_failure is None
+    assert not (tmp_path / "stage" / ".post-apply" / "task-1").exists()
+    assert ".post-apply" not in _git(controller, "worktree", "list", "--porcelain")
+    assert _git(controller, "status", "--porcelain=v1", "--untracked-files=all") == ""
+
+
 def _bound_tracked_approval(task_id: str, contract_hash: str) -> dict:
     """Full versioned grant naming its approver, bound to task, attempt and action (#1758)."""
     now = datetime.now(timezone.utc)
@@ -1046,8 +1312,14 @@ def test_owner_finish_retains_real_dirty_target_with_typed_reason(tmp_path: Path
     assert (target / "untracked.txt").read_text(encoding="utf-8") == "must retain\n"
 
 
-def _approved_closure_service(tmp_path: Path):
+def _approved_closure_service(tmp_path: Path, *, separate_controller: bool = False):
     root, base, candidate = _repo(tmp_path)
+    if separate_controller:
+        # #2229/#2231 shape: primary checkout on main, Controller is a
+        # detached linked worktree and the integration branch is checked out
+        # nowhere.
+        _git(root, "checkout", "main")
+        root = _separate_controller_worktree(tmp_path, root, base)
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
     verifier_executable = Path("/usr/bin/true")
     verifier_command = str(verifier_executable)
@@ -1129,6 +1401,1008 @@ def test_service_closure_binding_rejects_tamper_and_head_drift(tmp_path: Path):
     _git(root, "commit", "-am", "head drift")
     with pytest.raises(RuntimeError, match="CLOSURE_CANONICAL_HEAD_DRIFT"):
         service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=approval, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
+
+
+def _bind_task_card(controller: Path, name: str) -> str:
+    """A tasks/-only Task Card bind commit on the detached Controller (#1939)."""
+    card = controller / "tasks" / "bound" / name
+    card.parent.mkdir(parents=True, exist_ok=True)
+    card.write_text(f"{name}\n")
+    _git(controller, "add", str(card.relative_to(controller)))
+    _git(controller, "commit", "-m", f"bind {name}")
+    return _git(controller, "rev-parse", "HEAD")
+
+
+def _separate_closure_kwargs(acceptance, approval, runtime, head: str) -> dict:
+    return {
+        "external_acceptance": acceptance,
+        "approval": approval,
+        "runtime_identity": runtime,
+        "expected_canonical_head": head,
+        "integration_branch": "nexus/integration/canary",
+    }
+
+
+def test_separate_controller_closure_then_integrate_end_to_end(tmp_path: Path, monkeypatch):
+    """#2230: a detached Controller with bind commits and a pending card integrates."""
+    service, controller, base, candidate, acceptance, approval, runtime = _approved_closure_service(
+        tmp_path, separate_controller=True
+    )
+    state = service._read_state("closure-bind")
+    state["integration_staging_root"] = str(tmp_path / "stage")
+    service._write_state("closure-bind", state)
+    _bind_task_card(controller, "already-bound.md")
+    pending = controller / "tasks" / "active" / "pending-card.md"
+    pending.parent.mkdir(parents=True)
+    pending.write_text("pending\n")
+    monkeypatch.setattr(
+        RepositoryContractGate,
+        "evaluate_committed_candidate",
+        lambda *args, **kwargs: SimpleNamespace(passed=True, blocking_reasons=()),
+    )
+
+    bound = service.bind_candidate_integration_closure(
+        "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+    )
+    closure = bound["closure_binding"]
+    assert closure["canonical_head"] == base
+    assert closure["controller_shape"] == "SEPARATE_DETACHED_WORKTREE"
+    assert closure["controller_head"] == _git(controller, "rev-parse", "HEAD")
+    assert service._read_state("closure-bind")["integration_authorization"]["expected_canonical_head"] == base
+
+    # A Task Card bind commit between closure and integrate moves the
+    # Controller HEAD; integration CASes the branch ref and is unaffected.
+    controller_head = _bind_task_card(controller, "bound-after-closure.md")
+    result = service.integrate_approved(
+        "closure-bind", integration_branch="nexus/integration/canary", runtime_identity=runtime
+    )
+    assert result["status"] in {"INTEGRATED", "INTEGRATED_TARGET_RETAINED", "INTEGRATED_AND_CLEANED"}
+    integrated = _git(controller, "rev-parse", "nexus/integration/canary")
+    assert integrated != base
+    assert _git(controller, "merge-base", "--is-ancestor", candidate, integrated) == ""
+    assert _git(controller, "rev-parse", "HEAD") == controller_head
+    assert pending.read_text() == "pending\n"
+    assert (controller / "value.txt").read_text() == "base\n"
+
+
+@pytest.mark.parametrize("dirt", ["untracked-outside", "tracked-edit", "tasks-symlink", "tracked-tasks-edit"])
+def test_separate_controller_closure_still_blocks_non_card_dirt(tmp_path: Path, dirt: str):
+    service, controller, base, _candidate, acceptance, approval, runtime = _approved_closure_service(
+        tmp_path, separate_controller=True
+    )
+    if dirt == "untracked-outside":
+        (controller / "stray.txt").write_text("stray\n")
+    elif dirt == "tracked-edit":
+        (controller / "value.txt").write_text("edited\n")
+    elif dirt == "tasks-symlink":
+        (controller / "tasks").mkdir()
+        (controller / "tasks" / "card.md").symlink_to(controller / "value.txt")
+    else:
+        _bind_task_card(controller, "card.md")
+        (controller / "tasks" / "bound" / "card.md").write_text("edited\n")
+    before = service._state_path("closure-bind").read_bytes()
+    with pytest.raises(RuntimeError, match="CLOSURE_CANONICAL_DIRTY"):
+        service.bind_candidate_integration_closure(
+            "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+        )
+    assert service._state_path("closure-bind").read_bytes() == before
+
+
+def test_separate_controller_closure_binds_branch_ref_not_controller_head(tmp_path: Path):
+    service, controller, base, _candidate, acceptance, approval, runtime = _approved_closure_service(
+        tmp_path, separate_controller=True
+    )
+    controller_head = _bind_task_card(controller, "card.md")
+    before = service._state_path("closure-bind").read_bytes()
+    with pytest.raises(RuntimeError, match="CLOSURE_CANONICAL_HEAD_DRIFT"):
+        service.bind_candidate_integration_closure(
+            "closure-bind",
+            **_separate_closure_kwargs(
+                acceptance, {**approval, "expected_canonical_head": controller_head}, runtime, controller_head
+            ),
+        )
+    assert service._state_path("closure-bind").read_bytes() == before
+
+
+def test_separate_controller_closure_refuses_checked_out_integration_branch(tmp_path: Path):
+    service, controller, base, _candidate, acceptance, approval, runtime = _approved_closure_service(
+        tmp_path, separate_controller=True
+    )
+    _git(tmp_path / "repo", "checkout", "nexus/integration/canary")
+    with pytest.raises(RuntimeError, match="CLOSURE_INTEGRATION_BRANCH_CHECKED_OUT"):
+        service.bind_candidate_integration_closure(
+            "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+        )
+
+
+@pytest.mark.parametrize("race", ["ref-moved", "dirt-appeared"])
+def test_separate_controller_closure_rechecks_under_state_lock(tmp_path: Path, monkeypatch, race: str):
+    service, controller, base, candidate, acceptance, approval, runtime = _approved_closure_service(
+        tmp_path, separate_controller=True
+    )
+    original = service._mutate_state
+
+    def racing_mutate(task_id, mutate):
+        if race == "ref-moved":
+            _git(controller, "update-ref", "refs/heads/nexus/integration/canary", candidate)
+        else:
+            (controller / "stray.txt").write_text("stray\n")
+        return original(task_id, mutate)
+
+    monkeypatch.setattr(service, "_mutate_state", racing_mutate)
+    before = service._state_path("closure-bind").read_bytes()
+    expected = "CLOSURE_CANONICAL_HEAD_DRIFT" if race == "ref-moved" else "CLOSURE_CANONICAL_REBIND_DRIFT"
+    with pytest.raises(RuntimeError, match=expected):
+        service.bind_candidate_integration_closure(
+            "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+        )
+    assert service._state_path("closure-bind").read_bytes() == before
+
+
+def test_strict_controller_closure_still_rejects_pending_card(tmp_path: Path):
+    """The checked-out integration branch keeps the fully clean rule."""
+    service, root, base, _candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    (root / "tasks").mkdir()
+    (root / "tasks" / "pending-card.md").write_text("pending\n")
+    with pytest.raises(RuntimeError, match="CLOSURE_CANONICAL_DIRTY"):
+        service.bind_candidate_integration_closure(
+            "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+        )
+
+
+def test_main_checkout_on_main_closure_still_strict(tmp_path: Path):
+    """A primary checkout on main is not a separate Controller: branch drift."""
+    service, root, base, _candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    _git(root, "checkout", "main")
+    before = service._state_path("closure-bind").read_bytes()
+    with pytest.raises(RuntimeError, match="CLOSURE_CANONICAL_BRANCH_DRIFT"):
+        service.bind_candidate_integration_closure(
+            "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+        )
+    (root / "tasks").mkdir()
+    (root / "tasks" / "pending-card.md").write_text("pending\n")
+    with pytest.raises(RuntimeError, match="CLOSURE_CANONICAL_DIRTY"):
+        service.bind_candidate_integration_closure(
+            "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+        )
+    assert service._state_path("closure-bind").read_bytes() == before
+
+
+# --- #2248 review round 1: symref / checkout / rebase / ref-syntax / hidden dirt ---
+
+_CANARY = "nexus/integration/canary"
+_CANARY_REF = f"refs/heads/{_CANARY}"
+
+
+def _integrate_ready(service, monkeypatch, tmp_path: Path) -> None:
+    state = service._read_state("closure-bind")
+    state["integration_staging_root"] = str(tmp_path / "stage")
+    service._write_state("closure-bind", state)
+    monkeypatch.setattr(
+        RepositoryContractGate,
+        "evaluate_committed_candidate",
+        lambda *args, **kwargs: SimpleNamespace(passed=True, blocking_reasons=()),
+    )
+
+
+def test_separate_controller_closure_refuses_symbolic_integration_branch(tmp_path: Path):
+    """A symref integration branch would let update-ref move main under the primary checkout."""
+    service, controller, base, _candidate, acceptance, approval, runtime = (
+        _approved_closure_service(tmp_path, separate_controller=True)
+    )
+    root = tmp_path / "repo"
+    _git(root, "symbolic-ref", _CANARY_REF, "refs/heads/main")
+    before = service._state_path("closure-bind").read_bytes()
+    with pytest.raises(RuntimeError, match="CLOSURE_INTEGRATION_BRANCH_SYMBOLIC"):
+        service.bind_candidate_integration_closure(
+            "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+        )
+    assert service._state_path("closure-bind").read_bytes() == before
+    assert _git(root, "rev-parse", "refs/heads/main") == base
+
+
+def test_separate_controller_apply_refuses_symref_created_after_bind(tmp_path: Path, monkeypatch):
+    service, controller, base, _candidate, acceptance, approval, runtime = (
+        _approved_closure_service(tmp_path, separate_controller=True)
+    )
+    _integrate_ready(service, monkeypatch, tmp_path)
+    service.bind_candidate_integration_closure(
+        "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+    )
+    root = tmp_path / "repo"
+    _git(root, "symbolic-ref", _CANARY_REF, "refs/heads/main")
+    with pytest.raises(
+        RuntimeError,
+        match="INTEGRATION_BRANCH_REFUSED_AT_APPLY: CLOSURE_INTEGRATION_BRANCH_SYMBOLIC",
+    ):
+        service.integrate_approved(
+            "closure-bind", integration_branch=_CANARY, runtime_identity=runtime
+        )
+    assert _git(root, "rev-parse", "refs/heads/main") == base
+    assert _git(root, "symbolic-ref", _CANARY_REF) == "refs/heads/main"
+    assert _git(root, "status", "--porcelain=v1", "--untracked-files=all") == ""
+
+
+def test_apply_update_ref_never_follows_an_integration_symref(tmp_path: Path, monkeypatch):
+    """update-ref --no-deref: even with the apply-time in-use guard bypassed, main never moves."""
+    monkeypatch.setattr(
+        ControlledIntegrationManager,
+        "_require_integration_branch_not_in_use",
+        classmethod(lambda cls, root, branch: None),
+    )
+    root, base, candidate = _repo(tmp_path)
+    _git(root, "checkout", "main")
+    _git(root, "symbolic-ref", _CANARY_REF, "refs/heads/main")
+    result = _separate_controller_integrate(tmp_path, root.resolve(), base, candidate)
+    assert _git(root, "rev-parse", "refs/heads/main") == base
+    assert (
+        subprocess.run(
+            ["git", "symbolic-ref", "-q", _CANARY_REF], cwd=root, capture_output=True
+        ).returncode
+        == 1
+    )
+    assert result.branch_head_after == _git(root, "rev-parse", _CANARY_REF) != base
+    assert _git(root, "status", "--porcelain=v1", "--untracked-files=all") == ""
+
+
+def test_non_separate_update_ref_apply_still_integrates(tmp_path: Path):
+    """Primary checkout on main integrating a free canary branch: the legitimate update-ref flow."""
+    root, base, candidate = _repo(tmp_path)
+    _git(root, "checkout", "main")
+    result = _separate_controller_integrate(tmp_path, root.resolve(), base, candidate)
+    assert result.merge_performed is True
+    assert result.branch_head_after == _git(root, "rev-parse", _CANARY_REF) != base
+    assert _git(root, "rev-parse", "refs/heads/main") == base
+    assert _git(root, "status", "--porcelain=v1", "--untracked-files=all") == ""
+
+
+def test_non_separate_apply_refuses_symbolic_integration_branch(tmp_path: Path):
+    root, base, candidate = _repo(tmp_path)
+    _git(root, "checkout", "main")
+    _git(root, "symbolic-ref", _CANARY_REF, "refs/heads/main")
+    with pytest.raises(
+        IntegrationExecutionError,
+        match="INTEGRATION_BRANCH_REFUSED_AT_APPLY: CLOSURE_INTEGRATION_BRANCH_SYMBOLIC",
+    ) as raised:
+        _separate_controller_integrate(tmp_path, root.resolve(), base, candidate)
+    assert raised.value.merge_performed is False
+    assert _git(root, "rev-parse", "refs/heads/main") == base
+    assert _git(root, "symbolic-ref", _CANARY_REF) == "refs/heads/main"
+
+
+def test_strict_closure_apply_refuses_branch_checked_out_after_bind(tmp_path: Path, monkeypatch):
+    """Round 2: strict closure binds, the primary leaves canary, another worktree checks it out."""
+    service, root, base, _candidate, acceptance, approval, runtime = _approved_closure_service(
+        tmp_path
+    )
+    _integrate_ready(service, monkeypatch, tmp_path)
+    service.bind_candidate_integration_closure(
+        "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+    )
+    _git(root, "checkout", "main")
+    other = tmp_path / "other"
+    _git(root, "worktree", "add", str(other), _CANARY)
+    with pytest.raises(
+        IntegrationExecutionError,
+        match="INTEGRATION_BRANCH_REFUSED_AT_APPLY: CLOSURE_INTEGRATION_BRANCH_CHECKED_OUT",
+    ) as raised:
+        service.integrate_approved(
+            "closure-bind", integration_branch=_CANARY, runtime_identity=runtime
+        )
+    assert raised.value.merge_performed is False
+    assert _git(root, "rev-parse", _CANARY_REF) == base
+    assert _git(other, "status", "--porcelain=v1", "--untracked-files=all") == ""
+    assert service._read_state("closure-bind")["status"] == "INTEGRATION_FAILED_PRE_APPLY"
+
+
+def test_separate_controller_closure_refuses_branch_in_rebase_update_refs(tmp_path: Path):
+    """``git rebase -i --update-refs`` will move canary: Git treats it as in use."""
+    service, controller, base, candidate, acceptance, approval, runtime = _approved_closure_service(
+        tmp_path, separate_controller=True
+    )
+    root = tmp_path / "repo"
+    other = tmp_path / "other"
+    _git(root, "worktree", "add", "-b", "topic", str(other), base)
+    (other / "first.txt").write_text("first\n")
+    _git(other, "add", "first.txt")
+    _git(other, "commit", "-m", "first")
+    first = _git(other, "rev-parse", "HEAD")
+    _git(root, "update-ref", _CANARY_REF, first)
+    (other / "second.txt").write_text("second\n")
+    _git(other, "add", "second.txt")
+    _git(other, "commit", "-m", "second")
+    editor = tmp_path / "seq-editor.sh"
+    editor.write_text('#!/bin/sh\n{ echo break; cat "$1"; } > "$1.new" && mv "$1.new" "$1"\n')
+    editor.chmod(0o755)
+    stopped = subprocess.run(
+        ["git", "rebase", "-i", "--update-refs", candidate],
+        cwd=other,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "GIT_SEQUENCE_EDITOR": str(editor)},
+    )
+    assert stopped.returncode == 0, stopped.stderr
+    admin = Path(_git(other, "rev-parse", "--absolute-git-dir"))
+    assert _CANARY_REF in (admin / "rebase-merge" / "update-refs").read_text().splitlines()
+    before = service._state_path("closure-bind").read_bytes()
+    with pytest.raises(RuntimeError, match="CLOSURE_INTEGRATION_BRANCH_CHECKED_OUT"):
+        service.bind_candidate_integration_closure(
+            "closure-bind",
+            **_separate_closure_kwargs(
+                acceptance, {**approval, "expected_canonical_head": first}, runtime, first
+            ),
+        )
+    assert service._state_path("closure-bind").read_bytes() == before
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads mode-000 directories")
+def test_separate_controller_closure_refuses_unreadable_tasks_subdirectory(tmp_path: Path):
+    service, controller, base, _candidate, acceptance, approval, runtime = (
+        _approved_closure_service(tmp_path, separate_controller=True)
+    )
+    locked = controller / "tasks" / "active" / "locked"
+    locked.mkdir(parents=True)
+    (locked / "card.md").write_text("hidden\n")
+    locked.chmod(0o000)
+    try:
+        before = service._state_path("closure-bind").read_bytes()
+        with pytest.raises(RuntimeError, match="CLOSURE_CANONICAL_DIRTY"):
+            service.bind_candidate_integration_closure(
+                "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+            )
+        assert service._state_path("closure-bind").read_bytes() == before
+    finally:
+        locked.chmod(0o755)
+
+
+@pytest.mark.parametrize("kind", ["blob", "annotated-tag"])
+def test_separate_controller_closure_refuses_non_commit_branch_ref(tmp_path: Path, kind: str):
+    """The ref exists but does not name a commit itself: INVALID, not MISSING."""
+    service, controller, base, _candidate, acceptance, approval, runtime = (
+        _approved_closure_service(tmp_path, separate_controller=True)
+    )
+    root = tmp_path / "repo"
+    if kind == "blob":
+        target = subprocess.run(
+            ["git", "hash-object", "-w", "--stdin"],
+            cwd=root,
+            input="blob\n",
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    else:
+        _git(root, "tag", "-a", "-m", "annotated", "annotated", base)
+        target = _git(root, "rev-parse", "refs/tags/annotated")
+    common = Path(_git(root, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+    (common / "refs" / "heads" / "nexus" / "integration" / "canary").write_text(target + "\n")
+    assert _git(root, "show-ref", "--verify", "--hash", _CANARY_REF) == target
+    before = service._state_path("closure-bind").read_bytes()
+    with pytest.raises(RuntimeError, match="CLOSURE_INTEGRATION_BRANCH_INVALID"):
+        service.bind_candidate_integration_closure(
+            "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+        )
+    assert service._state_path("closure-bind").read_bytes() == before
+
+
+@pytest.mark.parametrize("where", ["linked-worktree", "primary-checkout"])
+def test_alias_symref_to_integration_branch_checked_out_is_refused(
+    tmp_path: Path, monkeypatch, where: str
+):
+    """A different branch that is a symref to canary, checked out anywhere, counts as canary."""
+    service, controller, base, _candidate, acceptance, approval, runtime = (
+        _approved_closure_service(tmp_path, separate_controller=True)
+    )
+    _integrate_ready(service, monkeypatch, tmp_path)
+    service.bind_candidate_integration_closure(
+        "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+    )
+    root = tmp_path / "repo"
+    _git(root, "symbolic-ref", "refs/heads/alias", _CANARY_REF)
+    if where == "linked-worktree":
+        _git(root, "worktree", "add", str(tmp_path / "other"), "alias")
+    else:
+        _git(root, "checkout", "alias")
+    with pytest.raises(RuntimeError, match="CLOSURE_INTEGRATION_BRANCH_CHECKED_OUT"):
+        ControlledIntegrationManager.separate_controller_integration_head(controller, _CANARY)
+    with pytest.raises(
+        IntegrationExecutionError,
+        match="INTEGRATION_BRANCH_REFUSED_AT_APPLY: CLOSURE_INTEGRATION_BRANCH_CHECKED_OUT",
+    ) as raised:
+        service.integrate_approved(
+            "closure-bind", integration_branch=_CANARY, runtime_identity=runtime
+        )
+    assert raised.value.merge_performed is False
+    assert _git(root, "rev-parse", _CANARY_REF) == base
+
+
+def test_separate_controller_closure_refuses_branch_checked_out_in_linked_worktree(tmp_path: Path):
+    service, controller, base, _candidate, acceptance, approval, runtime = (
+        _approved_closure_service(tmp_path, separate_controller=True)
+    )
+    _git(tmp_path / "repo", "worktree", "add", str(tmp_path / "other"), _CANARY)
+    before = service._state_path("closure-bind").read_bytes()
+    with pytest.raises(RuntimeError, match="CLOSURE_INTEGRATION_BRANCH_CHECKED_OUT"):
+        service.bind_candidate_integration_closure(
+            "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+        )
+    assert service._state_path("closure-bind").read_bytes() == before
+
+
+@pytest.mark.parametrize("operation", ["rebase", "bisect"])
+def test_separate_controller_closure_refuses_branch_mid_rebase_or_bisect(
+    tmp_path: Path, operation: str
+):
+    """worktree list shows the worktree detached, but the branch is still in use there."""
+    service, controller, base, candidate, acceptance, approval, runtime = _approved_closure_service(
+        tmp_path, separate_controller=True
+    )
+    other = tmp_path / "other"
+    _git(tmp_path / "repo", "worktree", "add", str(other), _CANARY)
+    for text in ("integration\n", "integration two\n"):
+        (other / "value.txt").write_text(text)
+        _git(other, "commit", "-am", text.strip())
+    if operation == "rebase":
+        stopped = subprocess.run(
+            ["git", "rebase", candidate], cwd=other, capture_output=True, text=True
+        )
+        assert stopped.returncode != 0
+    else:
+        _git(other, "bisect", "start", "HEAD", base)
+    assert (
+        "detached"
+        in _git(other, "worktree", "list", "--porcelain")
+        .split("worktree " + str(other.resolve()))[1]
+        .split("\n\n")[0]
+    )
+    head = _git(tmp_path / "repo", "rev-parse", _CANARY_REF)
+    before = service._state_path("closure-bind").read_bytes()
+    with pytest.raises(RuntimeError, match="CLOSURE_INTEGRATION_BRANCH_CHECKED_OUT"):
+        service.bind_candidate_integration_closure(
+            "closure-bind",
+            **_separate_closure_kwargs(
+                acceptance, {**approval, "expected_canonical_head": head}, runtime, head
+            ),
+        )
+    assert service._state_path("closure-bind").read_bytes() == before
+
+
+@pytest.mark.parametrize("where", ["linked-worktree", "primary-checkout"])
+def test_separate_controller_apply_rechecks_branch_checkout(
+    tmp_path: Path, monkeypatch, where: str
+):
+    """Bound while free; checked out before apply: integrate fails closed, zero ref movement."""
+    service, controller, base, _candidate, acceptance, approval, runtime = (
+        _approved_closure_service(tmp_path, separate_controller=True)
+    )
+    _integrate_ready(service, monkeypatch, tmp_path)
+    service.bind_candidate_integration_closure(
+        "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+    )
+    root = tmp_path / "repo"
+    if where == "linked-worktree":
+        _git(root, "worktree", "add", str(tmp_path / "other"), _CANARY)
+    else:
+        _git(root, "checkout", _CANARY)
+    with pytest.raises(
+        IntegrationExecutionError,
+        match="INTEGRATION_BRANCH_REFUSED_AT_APPLY: CLOSURE_INTEGRATION_BRANCH_CHECKED_OUT",
+    ) as raised:
+        service.integrate_approved(
+            "closure-bind", integration_branch=_CANARY, runtime_identity=runtime
+        )
+    assert raised.value.merge_performed is False
+    assert _git(root, "rev-parse", _CANARY_REF) == base
+    assert _git(root, "rev-parse", "refs/heads/main") == base
+    assert service._read_state("closure-bind")["status"] == "INTEGRATION_FAILED_PRE_APPLY"
+
+
+def test_integration_resolves_branch_not_same_named_tag(tmp_path: Path):
+    _root, controller, base, candidate = _separate_controller(tmp_path)
+    _git(controller, "tag", _CANARY, base)
+    result = _separate_controller_integrate(tmp_path, controller, base, candidate)
+    branch_head = _git(controller, "rev-parse", _CANARY_REF)
+    assert branch_head != base
+    assert result.branch_head_after == result.integration_commit_sha == branch_head
+    assert _git(controller, "rev-parse", f"refs/tags/{_CANARY}") == base
+
+
+@pytest.mark.parametrize(
+    ("branch", "code"),
+    [
+        ("feature/not-integration", "CLOSURE_INTEGRATION_BRANCH_INVALID"),
+        (f"{_CANARY}~1", "CLOSURE_INTEGRATION_BRANCH_INVALID"),
+        (_CANARY, "CLOSURE_INTEGRATION_BRANCH_MISSING"),
+    ],
+)
+def test_separate_controller_closure_refuses_invalid_or_missing_branch(
+    tmp_path: Path, branch: str, code: str
+):
+    service, controller, base, _candidate, acceptance, approval, runtime = (
+        _approved_closure_service(tmp_path, separate_controller=True)
+    )
+    root = tmp_path / "repo"
+    if code == "CLOSURE_INTEGRATION_BRANCH_MISSING":
+        _git(root, "branch", "-D", _CANARY)
+    else:
+        # canary~1 == base: a revision expression would bind a non-head commit.
+        child = _git(root, "commit-tree", f"{base}^{{tree}}", "-p", base, "-m", "child")
+        _git(root, "update-ref", _CANARY_REF, child)
+    before = service._state_path("closure-bind").read_bytes()
+    with pytest.raises(RuntimeError, match=code):
+        service.bind_candidate_integration_closure(
+            "closure-bind",
+            external_acceptance=acceptance,
+            approval={**approval, "integration_branch": branch},
+            runtime_identity=runtime,
+            expected_canonical_head=base,
+            integration_branch=branch,
+        )
+    assert service._state_path("closure-bind").read_bytes() == before
+
+
+def test_separate_controller_closure_refuses_shape_flip_under_lock(tmp_path: Path, monkeypatch):
+    """The locked still_separate check: the Controller checks out a branch mid-bind."""
+    service, controller, base, _candidate, acceptance, approval, runtime = (
+        _approved_closure_service(tmp_path, separate_controller=True)
+    )
+    original = service._mutate_state
+
+    def racing_mutate(task_id, mutate):
+        _git(controller, "checkout", "-q", "-b", "flipped")
+        return original(task_id, mutate)
+
+    monkeypatch.setattr(service, "_mutate_state", racing_mutate)
+    before = service._state_path("closure-bind").read_bytes()
+    with pytest.raises(RuntimeError, match="CLOSURE_CANONICAL_REBIND_DRIFT"):
+        service.bind_candidate_integration_closure(
+            "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+        )
+    assert service._state_path("closure-bind").read_bytes() == before
+
+
+def test_separate_controller_closure_seals_lock_time_controller_head(tmp_path: Path, monkeypatch):
+    service, controller, base, _candidate, acceptance, approval, runtime = (
+        _approved_closure_service(tmp_path, separate_controller=True)
+    )
+    original = service._mutate_state
+    moved: list[str] = []
+
+    def racing_mutate(task_id, mutate):
+        moved.append(_bind_task_card(controller, "bound-mid-closure.md"))
+        return original(task_id, mutate)
+
+    monkeypatch.setattr(service, "_mutate_state", racing_mutate)
+    bound = service.bind_candidate_integration_closure(
+        "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+    )
+    persisted = service._read_state("closure-bind")
+    closure = persisted["integration_closure_binding"]
+    assert closure["controller_head"] == moved[0] == bound["closure_binding"]["controller_head"]
+    unsealed = {key: value for key, value in closure.items() if key != "binding_hash"}
+    digest = hashlib.sha256(
+        json.dumps(unsealed, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    ).hexdigest()
+    assert closure["binding_hash"] == persisted["integration_closure_binding_hash"] == digest
+
+
+@pytest.mark.parametrize(
+    "dirt",
+    [
+        "nested-git-dir",
+        "hardlinked-pending-card",
+        "ignored-hardlink-exclude",
+        "ignored-file-exclude",
+        "tasks-gitignore",
+        "skip-worktree",
+        "assume-unchanged",
+    ],
+)
+def test_separate_controller_closure_refuses_hidden_tasks_dirt(tmp_path: Path, dirt: str):
+    """Dirt git status cannot see (nested .git, ignore rules, index flags) still blocks."""
+    service, controller, base, _candidate, acceptance, approval, runtime = (
+        _approved_closure_service(tmp_path, separate_controller=True)
+    )
+    active = controller / "tasks" / "active"
+    active.mkdir(parents=True)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside\n")
+    exclude = (
+        Path(_git(controller, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+        / "info"
+        / "exclude"
+    )
+    if dirt == "nested-git-dir":
+        (active / "nested" / ".git").mkdir(parents=True)
+        (active / "nested" / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+    elif dirt == "hardlinked-pending-card":
+        os.link(outside, active / "card.md")
+    elif dirt in {"ignored-hardlink-exclude", "ignored-file-exclude"}:
+        exclude.parent.mkdir(exist_ok=True)
+        exclude.write_text("*.pyc\n")
+        if dirt == "ignored-hardlink-exclude":
+            os.link(outside, active / "card.pyc")
+        else:
+            (active / "card.pyc").write_text("hidden\n")
+        assert _git(controller, "status", "--porcelain=v1", "--untracked-files=all") == ""
+    elif dirt == "tasks-gitignore":
+        (controller / "tasks" / ".gitignore").write_text("*\n.gitignore\n")
+        (active / "hidden.md").write_text("hidden\n")
+        assert _git(controller, "status", "--porcelain=v1", "--untracked-files=all") == ""
+    else:
+        _bind_task_card(controller, "card.md")
+        flag = "--skip-worktree" if dirt == "skip-worktree" else "--assume-unchanged"
+        _git(controller, "update-index", flag, "tasks/bound/card.md")
+        (controller / "tasks" / "bound" / "card.md").write_text("edited\n")
+        assert _git(controller, "status", "--porcelain=v1", "--untracked-files=all") == ""
+    before = service._state_path("closure-bind").read_bytes()
+    with pytest.raises(RuntimeError, match="CLOSURE_CANONICAL_DIRTY"):
+        service.bind_candidate_integration_closure(
+            "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+        )
+    assert service._state_path("closure-bind").read_bytes() == before
+
+
+def _separate_controller_interrupted_after_update_ref(tmp_path: Path):
+    """#2251: closure bound, then apply's update-ref ran and the run died.
+
+    The integration branch already holds the no-ff staging merge (exactly
+    what #2243's apply writes with ``update-ref <branch> <staging> <base>``),
+    but no result was recorded, so the task is still INTEGRATING.
+    """
+    service, controller, base, candidate, acceptance, approval, runtime = _approved_closure_service(
+        tmp_path, separate_controller=True
+    )
+    service.bind_candidate_integration_closure(
+        "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+    )
+    _bind_task_card(controller, "already-bound.md")
+    pending = controller / "tasks" / "active" / "pending-card.md"
+    pending.parent.mkdir(parents=True)
+    pending.write_text("pending\n")
+    applied = _git(
+        controller,
+        "commit-tree",
+        f"{candidate}^{{tree}}",
+        "-p",
+        base,
+        "-p",
+        candidate,
+        "-m",
+        "applied",
+    )
+    _git(controller, "update-ref", "refs/heads/nexus/integration/canary", applied, base)
+    state = service._read_state("closure-bind") or {}
+    _git(controller, "update-ref", state["candidate_ref"], candidate)
+    state.update(
+        status="INTEGRATING",
+        promotion_status="INTEGRATING",
+        merge_performed=False,
+        integration_receipt=None,
+        integration_result_sha=None,
+        integration_execution=None,
+    )
+    service._write_state("closure-bind", state)
+    recovery_approval = {
+        **approval,
+        "approval_id": approval["approval_id"] + "-recovery",
+        "issued_at": "2026-08-09T00:00:00+00:00",
+        "expected_canonical_head": applied,
+    }
+    return service, controller, base, applied, pending, acceptance, recovery_approval, runtime
+
+
+def test_separate_controller_integrating_recovery_rebind_succeeds(tmp_path: Path):
+    """#2251: recovery binds the integration ref, not the detached Controller HEAD."""
+    service, controller, base, applied, pending, acceptance, recovery, runtime = (
+        _separate_controller_interrupted_after_update_ref(tmp_path)
+    )
+    controller_head = _git(controller, "rev-parse", "HEAD")
+    controller_status = _status_hash(controller)
+    assert controller_head != applied
+
+    rebound = service.bind_candidate_integration_closure(
+        "closure-bind", **_separate_closure_kwargs(acceptance, recovery, runtime, applied)
+    )
+    closure = rebound["integration_closure_binding"]
+    assert closure["recovery_only"] is True
+    assert closure["recovery_pre_apply_head"] == base
+    assert closure["expected_canonical_head"] == applied
+    assert closure["controller_shape"] == "SEPARATE_DETACHED_WORKTREE"
+    assert closure["controller_head"] == controller_head
+    assert rebound["status"] == "INTEGRATING"
+    assert rebound["integration_recovery_only"] is True
+    assert _git(controller, "rev-parse", "nexus/integration/canary") == applied
+    assert _git(controller, "rev-parse", "HEAD") == controller_head
+    assert _status_hash(controller) == controller_status
+    assert pending.read_text() == "pending\n"
+    assert (controller / "value.txt").read_text() == "base\n"
+    with pytest.raises(RuntimeError, match="INTEGRATION_RECOVERY_ONLY"):
+        service.integrate_approved("closure-bind")
+
+
+@pytest.mark.parametrize("dirt", ["untracked-outside", "tracked-edit"])
+def test_separate_controller_integrating_recovery_still_blocks_non_card_dirt(
+    tmp_path: Path, dirt: str
+):
+    service, controller, _base, applied, _pending, acceptance, recovery, runtime = (
+        _separate_controller_interrupted_after_update_ref(tmp_path)
+    )
+    if dirt == "untracked-outside":
+        (controller / "stray.txt").write_text("stray\n")
+    else:
+        (controller / "value.txt").write_text("edited\n")
+    before = service._state_path("closure-bind").read_bytes()
+    with pytest.raises(RuntimeError, match="CLOSURE_INTEGRATING_APPLIED_TREE_REQUIRED"):
+        service.bind_candidate_integration_closure(
+            "closure-bind", **_separate_closure_kwargs(acceptance, recovery, runtime, applied)
+        )
+    assert service._state_path("closure-bind").read_bytes() == before
+
+
+@pytest.mark.parametrize("shape", ["primary-on-main-ref-moved", "pending-card"])
+def test_primary_checkout_integrating_recovery_still_strict(tmp_path: Path, shape: str):
+    """A primary checkout keeps the HEAD tree + full cleanliness recovery rule."""
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(
+        tmp_path
+    )
+    service.bind_candidate_integration_closure(
+        "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+    )
+    state = service._read_state("closure-bind") or {}
+    if shape == "primary-on-main-ref-moved":
+        # Today's live shape: primary checkout on main; only the branch ref moved.
+        _git(root, "checkout", "main")
+        applied = _git(
+            root,
+            "commit-tree",
+            f"{candidate}^{{tree}}",
+            "-p",
+            base,
+            "-p",
+            candidate,
+            "-m",
+            "applied",
+        )
+        _git(root, "update-ref", "refs/heads/nexus/integration/canary", applied, base)
+    else:
+        _git(root, "merge", "--no-ff", "candidate", "-m", "applied")
+        applied = _git(root, "rev-parse", "HEAD")
+        (root / "tasks").mkdir()
+        (root / "tasks" / "pending-card.md").write_text("pending\n")
+    _git(root, "update-ref", state["candidate_ref"], candidate)
+    state.update(
+        status="INTEGRATING",
+        promotion_status="INTEGRATING",
+        merge_performed=False,
+        integration_receipt=None,
+        integration_result_sha=None,
+        integration_execution=None,
+    )
+    service._write_state("closure-bind", state)
+    recovery = {**approval, "approval_id": "integrate-recovery", "expected_canonical_head": applied}
+    before = service._state_path("closure-bind").read_bytes()
+    with pytest.raises(RuntimeError, match="CLOSURE_INTEGRATING_APPLIED_TREE_REQUIRED"):
+        service.bind_candidate_integration_closure(
+            "closure-bind", **_separate_closure_kwargs(acceptance, recovery, runtime, applied)
+        )
+    assert service._state_path("closure-bind").read_bytes() == before
+
+
+@pytest.mark.parametrize("race", ["ref-moved", "dirt-appeared"])
+def test_separate_controller_integrating_recovery_rechecks_under_state_lock(
+    tmp_path: Path, monkeypatch, race: str
+):
+    service, controller, _base, applied, _pending, acceptance, recovery, runtime = (
+        _separate_controller_interrupted_after_update_ref(tmp_path)
+    )
+    original = service._mutate_state
+
+    def racing_mutate(task_id, mutate):
+        if race == "ref-moved":
+            moved = _git(
+                controller, "commit-tree", f"{applied}^{{tree}}", "-p", applied, "-m", "moved"
+            )
+            _git(controller, "update-ref", "refs/heads/nexus/integration/canary", moved, applied)
+        else:
+            (controller / "stray.txt").write_text("stray\n")
+        return original(task_id, mutate)
+
+    monkeypatch.setattr(service, "_mutate_state", racing_mutate)
+    before = service._state_path("closure-bind").read_bytes()
+    expected = (
+        "CLOSURE_CANONICAL_HEAD_DRIFT" if race == "ref-moved" else "CLOSURE_CANONICAL_REBIND_DRIFT"
+    )
+    with pytest.raises(RuntimeError, match=expected):
+        service.bind_candidate_integration_closure(
+            "closure-bind", **_separate_closure_kwargs(acceptance, recovery, runtime, applied)
+        )
+    assert service._state_path("closure-bind").read_bytes() == before
+
+
+def _recovery_receipt(service, base: str, applied: str, acceptance, *, misbound_base: bool = False):
+    """The receipt an interrupted apply would have written for ``applied``."""
+    state = service._read_state("closure-bind") or {}
+    packet = state["promotion_packet"]
+    recorded_base = "d" * 40 if misbound_base else base
+    return IntegrationReceipt(
+        schema="nexus.integration_receipt.v1",
+        task_id="closure-bind",
+        integration_branch="nexus/integration/canary",
+        source_branch="candidate",
+        candidate_commit_sha=packet["candidate_commit_sha"],
+        integration_base_sha=recorded_base,
+        integration_commit_sha=applied,
+        verifier_passed=True,
+        merge_performed=True,
+        push_performed=False,
+        worktree_removed=False,
+        staging_commit_sha=applied,
+        post_apply_verified=True,
+        acceptance_receipt_hash=acceptance.receipt_hash,
+        authorization_hash=state["integration_authorization"]["authorization_hash"],
+        task_card_hash=state["task_card_hash"],
+        candidate_tree_sha=packet["candidate_tree_sha"],
+        candidate_state_hash=packet["candidate_state_hash"],
+        verified_receipt_hash=packet["verified_receipt_hash"],
+        branch_head_before=recorded_base,
+        branch_head_after=applied,
+        candidate_is_ancestor=True,
+        staging_verified=True,
+    )
+
+
+def _separate_controller_rebound_for_receipt_recovery(tmp_path: Path):
+    service, controller, base, applied, pending, acceptance, recovery, runtime = (
+        _separate_controller_interrupted_after_update_ref(tmp_path)
+    )
+    service.bind_candidate_integration_closure(
+        "closure-bind", **_separate_closure_kwargs(acceptance, recovery, runtime, applied)
+    )
+    recovery_runtime = service._read_state("closure-bind")["integration_closure_binding"][
+        "runtime_identity"
+    ]
+    return service, controller, base, applied, pending, acceptance, recovery_runtime
+
+
+def test_separate_controller_integrating_recovery_completes(tmp_path: Path):
+    """#2251: rebind then receipt recovery finish the task on a detached Controller."""
+    service, controller, base, applied, pending, acceptance, recovery_runtime = (
+        _separate_controller_rebound_for_receipt_recovery(tmp_path)
+    )
+    controller_head = _git(controller, "rev-parse", "HEAD")
+    controller_status = _status_hash(controller)
+    receipt = _recovery_receipt(service, base, applied, acceptance)
+
+    recovered = service.recover_applied_integration_receipt(
+        "closure-bind", receipt, runtime_identity=recovery_runtime
+    )
+    assert recovered["status"] == "INTEGRATED"
+    assert recovered["integration_result_sha"] == applied
+    assert recovered["integration_receipt"] == asdict(receipt)
+    replay = service.recover_applied_integration_receipt(
+        "closure-bind", receipt, runtime_identity=recovery_runtime
+    )
+    assert replay["status"] == "INTEGRATED"
+    assert _git(controller, "rev-parse", "nexus/integration/canary") == applied
+    assert _git(controller, "rev-parse", "HEAD") == controller_head
+    assert _status_hash(controller) == controller_status
+    assert pending.read_text() == "pending\n"
+    assert (controller / "value.txt").read_text() == "base\n"
+
+
+@pytest.mark.parametrize(
+    "drift, message",
+    [
+        ("ref-not-receipt", "receipt recovery applied HEAD mismatch"),
+        ("non-card-dirt", "receipt recovery canonical tree is dirty"),
+    ],
+)
+def test_separate_controller_receipt_recovery_stays_fail_closed(
+    tmp_path: Path, drift: str, message: str
+):
+    service, controller, base, applied, _pending, acceptance, recovery_runtime = (
+        _separate_controller_rebound_for_receipt_recovery(tmp_path)
+    )
+    if drift == "ref-not-receipt":
+        moved = _git(controller, "commit-tree", f"{applied}^{{tree}}", "-p", applied, "-m", "moved")
+        _git(controller, "update-ref", "refs/heads/nexus/integration/canary", moved, applied)
+    else:
+        (controller / "stray.txt").write_text("stray\n")
+    before = service._state_path("closure-bind").read_bytes()
+    with pytest.raises(RuntimeError, match=message):
+        service.recover_applied_integration_receipt(
+            "closure-bind",
+            _recovery_receipt(service, base, applied, acceptance),
+            runtime_identity=recovery_runtime,
+        )
+    assert service._state_path("closure-bind").read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "shape, message",
+    [
+        ("pending-card", "receipt recovery canonical tree is dirty"),
+        ("checkout-on-main", "receipt recovery applied HEAD mismatch"),
+    ],
+)
+def test_primary_checkout_receipt_recovery_still_strict(tmp_path: Path, shape: str, message: str):
+    """A primary checkout keeps HEAD, branch and full cleanliness for receipt recovery."""
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(
+        tmp_path
+    )
+    service.bind_candidate_integration_closure(
+        "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+    )
+    _git(root, "merge", "--no-ff", "candidate", "-m", "applied")
+    applied = _git(root, "rev-parse", "HEAD")
+    state = service._read_state("closure-bind") or {}
+    _git(root, "update-ref", state["candidate_ref"], candidate)
+    state.update(
+        status="INTEGRATING",
+        promotion_status="INTEGRATING",
+        merge_performed=False,
+        integration_receipt=None,
+        integration_result_sha=None,
+        integration_execution=None,
+    )
+    service._write_state("closure-bind", state)
+    recovery = {**approval, "approval_id": "integrate-recovery", "expected_canonical_head": applied}
+    service.bind_candidate_integration_closure(
+        "closure-bind", **_separate_closure_kwargs(acceptance, recovery, runtime, applied)
+    )
+    recovery_runtime = service._read_state("closure-bind")["integration_closure_binding"][
+        "runtime_identity"
+    ]
+    if shape == "pending-card":
+        (root / "tasks").mkdir()
+        (root / "tasks" / "pending-card.md").write_text("pending\n")
+    else:
+        _git(root, "checkout", "main")
+    before = service._state_path("closure-bind").read_bytes()
+    with pytest.raises(RuntimeError, match=message):
+        service.recover_applied_integration_receipt(
+            "closure-bind",
+            _recovery_receipt(service, base, applied, acceptance),
+            runtime_identity=recovery_runtime,
+        )
+    assert service._state_path("closure-bind").read_bytes() == before
+
+
+def test_separate_controller_receipt_correction_uses_integration_ref(tmp_path: Path):
+    """#2251: receipt correction's physical check binds the integration ref too."""
+    service, controller, base, applied, pending, acceptance, recovery_runtime = (
+        _separate_controller_rebound_for_receipt_recovery(tmp_path)
+    )
+    receipt = _recovery_receipt(service, base, applied, acceptance, misbound_base=True)
+    service.recover_applied_integration_receipt(
+        "closure-bind", receipt, runtime_identity=recovery_runtime
+    )
+    state = service._read_state("closure-bind") or {}
+    candidate = state["promotion_packet"]["candidate_commit_sha"]
+    controller_head = _git(controller, "rev-parse", "HEAD")
+    kwargs = _correction_kwargs(
+        service, state, receipt, base, applied, candidate, acceptance, None, None
+    )
+    corrected = service.correct_applied_integration_receipt("closure-bind", **kwargs)
+    assert corrected["integration_receipt"]["integration_base_sha"] == base
+    assert corrected["integration_receipt"]["branch_head_before"] == base
+    assert len(corrected["integration_receipt_correction_history"]) == 1
+    assert _git(controller, "rev-parse", "HEAD") == controller_head
+    assert pending.read_text() == "pending\n"
+
+    # Non-card dirt still blocks the correction's physical binding.
+    (controller / "stray.txt").write_text("stray\n")
+    replay_kwargs = {
+        **kwargs,
+        "expected_state_hash": hashlib.sha256(
+            service._state_path("closure-bind").read_bytes()
+        ).hexdigest(),
+    }
+    before = service._state_path("closure-bind").read_bytes()
+    with pytest.raises(RuntimeError, match="RECEIPT_CORRECTION_PHYSICAL_BINDING_MISMATCH"):
+        service.correct_applied_integration_receipt("closure-bind", **replay_kwargs)
+    assert service._state_path("closure-bind").read_bytes() == before
 
 
 def _applied_receipt_correction_fixture(tmp_path: Path):

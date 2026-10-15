@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from nexus.orchestrator.canonical_source_root import controller_binding_status  # noqa: E402
 from nexus.orchestrator.unified_mcp_gateway import (  # noqa: E402
     FULL_TOOL_SCHEMA_HASH,
     GATEWAY_NAME,
@@ -105,8 +106,11 @@ def runtime_identity(
     else:
         path_fields = {"repo_root_sha256": _sha256_text(str(LOADED_SOURCE_ROOT))}
         github_observer = _redacted_github_observer(github_observer)
+    controller_binding = controller_binding_status()
+    ready = github_observer["ready"] is True and controller_binding["status"] != "DEGRADED"
     return {
-        "status": "ok" if github_observer["ready"] is True else "degraded",
+        "status": "ok" if ready else "degraded",
+        "controller_binding": controller_binding,
         "server": GATEWAY_NAME,
         "public_app_name": PUBLIC_APP_NAME,
         "namespace_policy": "stable_public_name_with_manifest_revision",

@@ -39,6 +39,7 @@ from nexus.executors.worker_contract import (  # noqa: E402
 )
 from nexus.orchestrator.ambient_core import (  # noqa: E402
     LazyCanonicalCoreControlPort,
+    core_universe_identity,
     live_core_db_path,
 )
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService  # noqa: E402
@@ -342,6 +343,46 @@ def _run(root: Path, scenario: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _host_universe_identities(scenarios: list[dict[str, Any]]) -> dict[str, Any]:
+    """The card identity the host computes with the real pinned Core (#2246)."""
+    identities: dict[str, Any] = {}
+    for scenario in scenarios:
+        universe = scenario.get("universe")
+        if universe is None:
+            continue
+        try:
+            identities[scenario["name"]] = core_universe_identity(universe)
+        except Exception as exc:
+            identities[scenario["name"]] = f"ERROR:{type(exc).__name__}:{exc}"
+    return identities
+
+
+def _core_conformance_universe_identity() -> dict[str, Any]:
+    """Core's own conformance vector through the host's card->wire projection."""
+    if not transport.CORE_AVAILABLE:
+        return {"ok": False, "error": "CORE_UNAVAILABLE"}
+    from product.protocol.generic_verification import GENERIC_PROTOCOL_CONFORMANCE_VECTORS
+
+    checked = []
+    for name, vector in GENERIC_PROTOCOL_CONFORMANCE_VECTORS.items():
+        if not isinstance(vector, dict) or "expected_universe_identity" not in vector:
+            continue
+        contract = vector["value"]
+        card_universe = {
+            "universe_generation": contract.get("universe_generation", 0),
+            "subjects": contract["expected_subjects"],
+        }
+        checked.append({
+            "vector": name,
+            "expected": vector["expected_universe_identity"],
+            "host": core_universe_identity(card_universe),
+        })
+    return {
+        "ok": bool(checked) and all(c["expected"] == c["host"] for c in checked),
+        "checked": checked,
+    }
+
+
 def main() -> int:
     spec = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
     # Resolved: the Gateway compares resolved paths against its source root.
@@ -351,8 +392,17 @@ def main() -> int:
         "core_import_error": transport.CORE_IMPORT_ERROR,
         # What this (Gateway-hosting) process itself reports to a deploy probe.
         "gateway_core_provenance": gateway_module.gateway_core_provenance(),
+        "public_core_provenance": gateway_module.public_core_provenance(),
         "driver_pid": os.getpid(),
+        "host_core_universe_identities": _host_universe_identities(spec["scenarios"]),
     }
+    try:
+        results["core_conformance_universe_identity"] = _core_conformance_universe_identity()
+    except Exception as exc:
+        results["core_conformance_universe_identity"] = {
+            "ok": False,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
     for scenario in spec["scenarios"]:
         name = scenario["name"]
         try:

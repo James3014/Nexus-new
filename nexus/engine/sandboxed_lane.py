@@ -46,6 +46,9 @@ SANDBOX_DENIED_HOME_PATHS = (
     ".claude",
     ".codex",
     "Library/Keychains",
+    # The bench's hidden-test staging parent: denied by the LAST profile rule for every
+    # confined lane (seam, ultra_review, committee, swarm), whatever its read roots are.
+    ".cache/nexus-bench-hidden",
 )
 _OS_SANDBOX_PROBE: dict[str, bool] = {}
 # The barrier binary is never looked up on the inherited PATH (a planted ``sandbox-exec``
@@ -206,7 +209,12 @@ def scoped_path(root: Path, rel: str) -> Path | None:
     return resolved
 
 
-def checked_read_roots(roots: Iterable[str], *, extra_forbidden: Iterable[Path] = ()) -> list[str]:
+def checked_read_roots(
+    roots: Iterable[str],
+    *,
+    extra_forbidden: Iterable[Path] = (),
+    forbidden_subtrees: Iterable[Path | str] = (),
+) -> list[str]:
     """Validate readable subtrees (none may be, or contain, ``$HOME``/``/Users``/a temp root/
     a repository root) and append the fixed system subpaths. Fails closed."""
 
@@ -215,10 +223,19 @@ def checked_read_roots(roots: Iterable[str], *, extra_forbidden: Iterable[Path] 
     forbidden.add(Path(os.path.expanduser("~")).resolve())
     forbidden.add(Path(tempfile.gettempdir()).resolve())
     forbidden.update(Path(path).resolve() for path in extra_forbidden)
+    # ``forbidden_subtrees`` (hidden tests, the bench staging parent, fixture trees) deny their
+    # WHOLE subtree: a read root inside one would re-open it, because the profile's later
+    # ``allow file-read*`` rule overrides the earlier ``$HOME`` deny. ``extra_forbidden`` (e.g.
+    # a repository root whose venv or worktree legitimately lives below it) and the broad
+    # defaults only forbid being or containing them.
+    subtrees = {Path(path).resolve() for path in forbidden_subtrees}
+    forbidden.update(subtrees)
     for root in validated:
         root_path = Path(root)
         if any(root_path == bad or root_path in bad.parents for bad in forbidden):
             raise SandboxError(f"sandbox_read_root_overbroad:{root}")
+        if any(bad in root_path.parents for bad in subtrees):
+            raise SandboxError(f"sandbox_read_root_inside_forbidden:{root}")
     validated.update(path for path in SANDBOX_SYSTEM_READ_SUBPATHS if os.path.exists(path))
     return sorted(validated)
 
@@ -232,7 +249,9 @@ def interpreter_read_roots() -> list[str]:
     ]
 
 
-def build_sandbox_profile(*, writable: Iterable[str], read_roots: Iterable[str]) -> str:
+def build_sandbox_profile(
+    *, writable: Iterable[str], read_roots: Iterable[str], deny_subtrees: Iterable[Path | str] = ()
+) -> str:
     """SBPL policy for one confined command (last matching rule wins).
 
     Reads: default-deny; ``$HOME`` is denied before the ``read_roots`` allows, and credential
@@ -266,6 +285,11 @@ def build_sandbox_profile(*, writable: Iterable[str], read_roots: Iterable[str])
         "(deny network*)",
         f'(allow file-write* {writes} (literal "/dev/null") (literal "/dev/tty") (literal "/dev/dtracehelper"))',
         f"(deny file-read* {denied})",
+        # Last rule wins: forbidden subtrees stay unreadable even under an allowed root.
+        *(
+            f'(deny file-read* (subpath "{sbpl_path(Path(path).resolve())}"))'
+            for path in deny_subtrees
+        ),
     ])
 
 
@@ -520,6 +544,8 @@ def confinement(
     extra_writable: Iterable[Path] = (),
     untrusted_roots: Iterable[Path] = (),
     extra_forbidden: Iterable[Path] = (),
+    extra_readable: Iterable[Path | str] = (),
+    forbidden_subtrees: Iterable[Path | str] = (),
 ) -> Confinement:
     """Bind a sandbox (``home/`` and ``tmp/`` created inside ``sandbox``): writes and reads only
     in ``sandbox`` + ``extra_writable`` (+ interpreter prefixes and system paths for reads).
@@ -527,6 +553,7 @@ def confinement(
 
     if not os_sandbox_available():
         raise SandboxError("no_os_barrier")
+    subtrees = tuple(forbidden_subtrees)
     home, tmp = sandbox / "home", sandbox / "tmp"
     home.mkdir(parents=True, exist_ok=True)
     tmp.mkdir(parents=True, exist_ok=True)
@@ -534,10 +561,19 @@ def confinement(
     if in_tree(sys.executable, writable):
         raise SandboxError("interpreter_inside_sandbox")
     read_roots = checked_read_roots(
-        [*(str(path) for path in writable), *interpreter_read_roots()],
+        [
+            *(str(path) for path in writable),
+            *interpreter_read_roots(),
+            # Optional read-only system toolchain roots (e.g. /usr/bin for git); validated by
+            # checked_read_roots like every other root, never $HOME or a repository.
+            *(str(path) for path in extra_readable if os.path.exists(path)),
+        ],
         extra_forbidden=extra_forbidden,
+        forbidden_subtrees=subtrees,
     )
-    profile = build_sandbox_profile(writable=[str(p) for p in writable], read_roots=read_roots)
+    profile = build_sandbox_profile(
+        writable=[str(p) for p in writable], read_roots=read_roots, deny_subtrees=subtrees
+    )
     env = scrubbed_env(
         home=sbpl_path(home), tmp=sbpl_path(tmp), untrusted_roots=(*untrusted_roots, *writable)
     )
