@@ -870,3 +870,45 @@ def test_wiring_check_guard_alias_via_symlink_is_still_a_guard(tmp_path: Path) -
         )
         == []
     )
+
+
+def test_wiring_check_guard_identity_round12(tmp_path: Path) -> None:
+    import os
+
+    root = _fake_repo(tmp_path)
+    (root / "pkg" / "guard.py").write_text(
+        "from pkg import caller\n\ndef check(x):\n    return bool(x) and caller\n", encoding="utf-8"
+    )
+    (root / "pkg" / "alias.py").symlink_to(root / "pkg" / "guard.py")
+    # The symlink is declared as the guard and the real path as a "caller": the real
+    # path is physically the guard, so it is not a caller and the test is guard-only.
+    swapped = _fake_policy(
+        source_file="pkg/alias.py; pkg/guard.py",
+        guard_modules=["pkg/alias.py"],
+        test_entrypoints=["tests/test_guard_only.py::test_guard"],
+    )
+    assert check_enforcement_wiring(swapped, root) == ["ENFORCEMENT_CALLERS_MISSING"]
+    # A hard link to the guard is the guard too.
+    os.link(root / "pkg" / "guard.py", root / "pkg" / "hard.py")
+    (root / "tests" / "test_hard.py").write_text(
+        "def test_h():\n    from pkg.hard import check\n    assert check(1)\n", encoding="utf-8"
+    )
+    via_hardlink = _fake_policy(test_entrypoints=["tests/test_hard.py::test_h"])
+    assert check_enforcement_wiring(via_hardlink, root) == ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"]
+    # A caller import whose file is physically a guard does not count as reaching a caller.
+    os.link(root / "pkg" / "guard.py", root / "pkg" / "caller2.py")
+    (root / "tests" / "test_c2.py").write_text(
+        "def test_c():\n    from pkg import caller2\n    assert caller2\n", encoding="utf-8"
+    )
+    fake_caller = _fake_policy(
+        source_file="pkg/guard.py; pkg/caller2.py; pkg/caller.py",
+        test_entrypoints=["tests/test_c2.py::test_c"],
+    )
+    assert check_enforcement_wiring(fake_caller, root) == ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"]
+    # The genuine caller still passes.
+    assert (
+        check_enforcement_wiring(
+            _fake_policy(test_entrypoints=["tests/test_caller.py::test_plain"]), root
+        )
+        == []
+    )
