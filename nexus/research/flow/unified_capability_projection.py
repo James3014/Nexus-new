@@ -170,6 +170,13 @@ REAL_INVOKED_STATUS = "REAL_INVOKED"
 # Stamped on re-projected real boundaries: consistent with runtime-sealed evidence, which is
 # still what the runtime reported (not independent provenance).
 ATTESTATION_KIND_RUNTIME_SEALED = "runtime_sealed_consistent"
+# Written next to ``attestation=real`` by this module only; ``strict_llm_baseline`` requires it.
+ATTESTATION_SOURCE = "unified_capability_projection"
+_ATTESTATION_MARKERS = (
+    "attestation_source",
+    "attestation_refs_resolved",
+    "attestation_disposition",
+)
 
 
 def _truthy_marker(value: Any) -> bool:
@@ -785,8 +792,12 @@ def reproject_receipt_base_claim_boundary(
     """
 
     if not bool(receipt.get("invoked")):
-        if "attestation" in receipt:
-            receipt = {k: v for k, v in receipt.items() if k != "attestation"}
+        if any(key in receipt for key in ("attestation", *_ATTESTATION_MARKERS)):
+            receipt = {
+                k: v
+                for k, v in receipt.items()
+                if k != "attestation" and k not in _ATTESTATION_MARKERS
+            }
         return receipt
     updated = dict(receipt)
     refs, _well_formed = _ref_list(updated.get("evidence_refs"))
@@ -805,6 +816,8 @@ def reproject_receipt_base_claim_boundary(
         attestation = ATTESTATION_SIMULATED
     real = attestation == ATTESTATION_REAL
     updated["attestation"] = attestation
+    for marker in _ATTESTATION_MARKERS:
+        updated.pop(marker, None)
     raw_disp = stage.get("disposition") if isinstance(stage, Mapping) else None
     disposition: Mapping[str, Any] = raw_disp if isinstance(raw_disp, Mapping) else {}
     if attestation in (
@@ -849,6 +862,9 @@ def reproject_receipt_base_claim_boundary(
             }
         return updated
     updated["claim_boundary"] = {**top_cb, "attestation_kind": ATTESTATION_KIND_RUNTIME_SEALED}
+    updated["attestation_source"] = ATTESTATION_SOURCE
+    updated["attestation_refs_resolved"] = True
+    updated["attestation_disposition"] = dict(disposition)
     if not old_rb:
         return updated
     try:
@@ -895,6 +911,8 @@ def reproject_receipt_base_claim_boundary(
     except Exception as exc:  # noqa: BLE001 - fail closed, record why
         updated["receipt_base_reprojection_error"] = str(exc)[:200]
         updated["attestation"] = ATTESTATION_SIMULATED
+        for marker in _ATTESTATION_MARKERS:
+            updated.pop(marker, None)
         updated["claim_boundary"] = {**top_cb, "simulated": True, "claim_eligible": False}
         updated["receipt_base"] = {
             **old_rb,
@@ -953,9 +971,11 @@ def _tighten_invoked_receipt(
     """
 
     if stage is None:
-        if "attestation" not in receipt:
+        if not any(key in receipt for key in ("attestation", *_ATTESTATION_MARKERS)):
             return receipt
-        return {k: v for k, v in receipt.items() if k != "attestation"}
+        return {
+            k: v for k, v in receipt.items() if k != "attestation" and k not in _ATTESTATION_MARKERS
+        }
     status = str(stage.get("status") or "")
     stage_invoked = bool(stage.get("invoked")) and status == "INVOKED"
     updated = dict(receipt)
@@ -965,6 +985,8 @@ def _tighten_invoked_receipt(
     )
     if not stage_invoked:
         updated["attestation"] = ATTESTATION_SIMULATED
+        for marker in _ATTESTATION_MARKERS:
+            updated.pop(marker, None)
         updated["unified_runtime_contradiction"] = _runtime_reason(stage)
         top = updated.get("claim_boundary")
         updated["claim_boundary"] = {

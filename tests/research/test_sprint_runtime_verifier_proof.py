@@ -498,6 +498,53 @@ def test_no_verifier_is_not_observed_by_the_runtime_replan_logic(tmp_path: Path)
     assert request["replan_required"] is False
     assert request["verifier_outcome_trusted"] is False
     assert request["trigger"] == "verifier_not_observed"
+
+    # Gemini r2 N2: an undelivered payload and an edit that does not apply ran no test either.
+    def verdict_for(response_payload: Any, *, bind: bool) -> dict[str, Any]:
+        gen = LLMCandidateGenerator(tmp_path, safe_mode=True, target_file="demo.py")
+        gen._workspace_revision = lambda: "revision-verifier-006"
+        if bind:
+            gen.visible_verifier = lambda code, seed: CandidateEval(seed=seed, score=1.0)
+        got: dict[str, Any] = {}
+
+        def ask(request: Any, *, verifier: Any = None, **_kwargs: Any) -> dict[str, Any]:
+            online = {"status": "SUCCEEDED", "invoked": True, "response": response_payload}
+            got["payload"] = dict(verifier({"task_id": request.task_id, "online": online}))
+            return {"task_id": request.task_id, "online": online}
+
+        gen.gateway.ask_unified = ask  # type: ignore[method-assign]
+        try:
+            gen._ask_unified_candidate(
+                prompt="p", payload="x", task="t", seed=1, attempt=1, model="m", source_code=SOURCE
+            )
+        except Exception:  # noqa: BLE001 - only the verifier verdict matters
+            pass
+        return got["payload"]
+
+    unappliable = {**EDIT, "target_snippet": "not in source"}
+    for label, verdict in (
+        ("not_delivered", verdict_for({"response": "", "raw_response": ""}, bind=False)),
+        (
+            "edit_not_applied",
+            verdict_for({"response": json.dumps(unappliable), "raw_response": ""}, bind=True),
+        ),
+    ):
+        assert verdict["invoked"] is False, label
+        assert verdict["evidence_refs"] == [], label
+        assert verdict["status"] == "fail" and verdict.get("gate_passed") is False, label
+        st = run_callback(
+            "verifier", lambda _ctx, v=verdict: v, {"task_id": verdict["task_id"]}, required=True
+        )
+        req = build_execution_replan_request(
+            ctx,  # type: ignore[arg-type]
+            task_id=verdict["task_id"],
+            planner_decision_id="pd-1",
+            current_execution_depth="LIGHT",
+            verifier_stage=st,
+        )
+        assert req["replan_required"] is False, label
+        assert req["trigger"] == "verifier_not_observed", label
+
     # The old shape (invoked, candidate_response ref) was a trusted failure that replans.
     old = run_callback(
         "verifier",
@@ -553,3 +600,66 @@ def test_structured_candidate_payload_is_whitelisted_and_status_comes_from_the_s
         })["status"]
         == "APPROVED"
     )
+
+
+def test_confined_contract_routes_every_sprint_evaluation_without_fallback(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """Gemini r2 N1: with the contract active a memo miss (verifier never called) and every
+    other sprint evaluation use evaluate_candidate_confined; plain is never called."""
+
+    import nexus.research.sprint_service as sprint
+
+    plain_calls: list[str] = []
+    confined_calls: list[str] = []
+
+    def plain_spy(self: Any, *, seed: int, hint: str, code: str, source: str) -> CandidateEval:
+        plain_calls.append(code)
+        return CandidateEval(seed=seed, score=0.0, hint=hint, candidate_code=code, source=source)
+
+    def confined_spy(self: Any, *, seed: int, hint: str, code: str, source: str) -> CandidateEval:
+        confined_calls.append(code)
+        return CandidateEval(seed=seed, score=0.4, hint=hint, candidate_code=code, source=source)
+
+    class _Generator:
+        visible_verifier = None
+        visible_test_target_invalid = ""
+        visible_verifier_unbound_reason = ""
+        model_chain = ["m"]
+
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            pass
+
+        def generate(self, **kwargs: Any) -> tuple[str, dict[str, Any]]:
+            # Never calls the verifier: every sprint evaluation is a memo miss.
+            code = (
+                CANDIDATE if kwargs.get("source_code") == SOURCE else kwargs["source_code"] + "#r"
+            )
+            return code, {"source": "llm", "model_calls": 1, "model_name": "m"}
+
+    monkeypatch.setattr(sprint, "LLMCandidateGenerator", _Generator)
+    monkeypatch.setattr(sprint.InPlaceSprintExecutor, "evaluate_candidate", plain_spy)
+    monkeypatch.setattr(
+        sprint.InPlaceSprintExecutor, "evaluate_candidate_confined", confined_spy, raising=False
+    )
+    monkeypatch.setenv("NEXUS_CONFINE_VISIBLE_TEST", "1")
+    monkeypatch.setenv("NEXUS_FORCE_LLM_DESPITE_LEARN_SLO", "1")
+    monkeypatch.setenv("NEXUS_FORCE_INPLACE_EXECUTOR", "1")
+    (tmp_path / "demo.py").write_text(SOURCE)
+    (tmp_path / "test_demo.py").write_text("def test_ok():\n    pass\n")
+    try:
+        sprint.run_hyper_sprint(
+            repo_root=tmp_path,
+            config=sprint.SprintConfig(
+                task="fix normalize",
+                target_file="demo.py",
+                test_file="test_demo.py",
+                candidate_count=2,
+                max_rounds=1,
+                llm_mode=True,
+            ),
+        )
+    except Exception:  # noqa: BLE001 - only which evaluator ran matters
+        pass
+    assert CANDIDATE in confined_calls
+    assert plain_calls == []

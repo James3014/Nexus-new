@@ -411,6 +411,8 @@ class LLMCandidateGenerator:
                 })
                 return verdict
             if not delivered:
+                # No payload, nothing tested: not observed (no trusted failure, no replan).
+                verdict.update({"invoked": False, "evidence_refs": [], "gate_passed": False})
                 return verdict
             if self.visible_verifier is None:
                 # No visible-test evaluator bound: the payload arrived but nothing was tested.
@@ -1014,6 +1016,9 @@ def _visible_test_verdict(
         out.update({
             "status": "fail",
             "gate_passed": False,
+            # The edit did not apply, so no test ran: not observed by the runtime replan logic.
+            "invoked": False,
+            "evidence_refs": [],
             "verifier_status": "fail",
             "evidence": f"visible_test_not_run:{edit_error or 'no_candidate_code'}",
             "visible_test_passed": False,
@@ -1652,6 +1657,12 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     ):
         visible_target_error = "sprint_pytest_cmd_mismatch"
     confined_evaluate = confined_visible_evaluator(executor)
+    # With the confined contract active, every candidate evaluation in this sprint (memo miss,
+    # self-heal repair, local/preflight/shadow/support/fallback) goes through the confined
+    # entry point; there is no fallback to plain evaluate_candidate.
+    sprint_evaluate: Callable[..., CandidateEval] = (
+        confined_evaluate if confined_evaluate is not None else executor.evaluate_candidate
+    )
 
     def _runtime_visible_verifier(code: str, _seed: int) -> CandidateEval:
         hint_now = str(visible_verifier_binding["hint"])
@@ -1667,7 +1678,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         visible_eval_memo.clear()
         if cached is not None:
             return replace(cached, source=source)
-        return executor.evaluate_candidate(seed=seed, hint=hint, code=code, source=source)
+        return sprint_evaluate(seed=seed, hint=hint, code=code, source=source)
 
     if llm_generator is not None and hasattr(llm_generator, "visible_verifier"):
         # Only the online generator has the seam (tests may substitute the generator class).
@@ -2115,7 +2126,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                     fast_source = "local_hidden_contract_fast_path"
                 fast_guard_ok, fast_guard_reason = _semantic_guard(source_code, fast_code, config.task, fast_source)
                 if fast_guard_ok:
-                    fast_ev = executor.evaluate_candidate(
+                    fast_ev = sprint_evaluate(
                         seed=idx + 5000,
                         hint=f"{hint} | hidden_verifier_contract_fast_path",
                         code=fast_code,
@@ -2159,7 +2170,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                     preflight_source,
                 )
                 if preflight_guard_ok:
-                    preflight_ev = executor.evaluate_candidate(
+                    preflight_ev = sprint_evaluate(
                         seed=idx + 7000,
                         hint=f"{hint} | local_preflight_before_llm",
                         code=preflight_code,
@@ -2327,7 +2338,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                         support_source,
                     )
                     if support_guard_ok:
-                        support_ev = executor.evaluate_candidate(
+                        support_ev = sprint_evaluate(
                             seed=support_seed,
                             hint=f"{hint} | ddtree_local_support_pool",
                             code=support_code,
@@ -2370,7 +2381,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                 fallback_used = True
                 shadow_guard_ok, shadow_guard_reason = _semantic_guard(source_code, local_code, config.task, local_source)
                 if shadow_guard_ok:
-                    shadow_ev = executor.evaluate_candidate(
+                    shadow_ev = sprint_evaluate(
                         seed=idx + 1000,
                         hint=f"{hint} | hidden_verifier_invariant_shadow",
                         code=local_code,
@@ -2496,7 +2507,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                 fallback_used = True
                 local_guard_ok, local_guard_reason = _semantic_guard(source_code, local_code, config.task, local_source)
                 if local_guard_ok:
-                    local_ev = executor.evaluate_candidate(
+                    local_ev = sprint_evaluate(
                         seed=idx + 1000,
                         hint=f"{hint} | local_guard_fallback",
                         code=local_code,
@@ -2540,7 +2551,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         if code != source_code:
             guard_ok, _ = _semantic_guard(source_code, code, config.task, meta.get("source", "local"))
             if guard_ok:
-                ev = executor.evaluate_candidate(seed=999, hint="emergency_fallback", code=code, source=meta.get("source", "local"))
+                ev = sprint_evaluate(seed=999, hint="emergency_fallback", code=code, source=meta.get("source", "local"))
                 candidates.append(ev)
 
     if not candidates:

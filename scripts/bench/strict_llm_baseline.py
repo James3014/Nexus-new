@@ -293,7 +293,24 @@ def classify_receipt(receipt: dict[str, Any]) -> str:
         return "simulated"
     # Real only when the unified-capability overlay attested it; a non-simulated boundary
     # without that attestation is the receipt's own claim (Gemini review of #2212, G2).
-    return "real" if str(receipt.get("attestation") or "") == "real" else REAL_SELF_REPORTED_CLASS
+    return "real" if _overlay_attested_real(receipt) else REAL_SELF_REPORTED_CLASS
+
+
+def _overlay_attested_real(receipt: dict[str, Any]) -> bool:
+    """``attestation=real`` together with the overlay's own markers (Gemini r2 N3).
+
+    A consistency marker written by ``unified_capability_projection``, not a signature: row
+    JSON is produced by the bench runner, and a hand-edited row can still forge it.
+    """
+
+    disposition = receipt.get("attestation_disposition")
+    return (
+        str(receipt.get("attestation") or "") == "real"
+        and receipt.get("attestation_source") == "unified_capability_projection"
+        and receipt.get("attestation_refs_resolved") is True
+        and isinstance(disposition, dict)
+        and disposition.get("kind") == "succeeded"
+    )
 
 
 def classify_row_capabilities(row: dict[str, Any]) -> dict[str, Any]:
