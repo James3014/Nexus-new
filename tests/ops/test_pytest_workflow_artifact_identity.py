@@ -118,12 +118,13 @@ def test_exact_base_classification_contract_is_unchanged() -> None:
     run = classification["run"]
 
     # The verdict comes from the exact-base classifier, not the candidate copy (#1754).
-    assert '"${{ steps.trusted-impact.outputs.gate }}" classify' in run
+    assert 'python3 -I "${{ steps.trusted-impact.outputs.gate }}" classify' in run
     assert ".venv/bin/python scripts/ops/pr_impact_gate.py classify" not in run
     assert "--base-result .ci-impact/base-result.json" in run
     assert "--head-result .ci-impact/head-result.json" in run
     assert "--output .ci-impact/classification.json" in run
-    assert classification["env"] == {"NEXUS_TEST_MODE": "CI", "PYTHONPATH": "."}
+    # No PYTHONPATH: the PR-head checkout must not shadow classifier modules (#2236).
+    assert classification["env"] == {"NEXUS_TEST_MODE": "CI"}
 
 
 def test_impact_classifier_is_extracted_from_exact_base() -> None:
@@ -195,7 +196,9 @@ def test_impact_run_sides_split_base_and_head() -> None:
     assert steps["Run mapped tests on exact base source"]["if"] == "matrix.side == 'base'"
     assert steps["Run mapped tests on exact head"]["if"] == "matrix.side == 'head'"
     upload = steps["Upload exact-base run evidence"]["with"]["name"]
-    assert upload == f"exact-base-impact-${{{{ matrix.side }}}}-{EXACT_HEAD_EXPRESSION}"
+    assert upload == (
+        f"exact-base-impact-${{{{ matrix.side }}}}-{EXACT_HEAD_EXPRESSION}-a${{{{ github.run_attempt }}}}"
+    )
 
 
 def test_impact_map_coverage_is_advisory_and_pr_only() -> None:
@@ -206,3 +209,19 @@ def test_impact_map_coverage_is_advisory_and_pr_only() -> None:
     assert checkout["with"]["persist-credentials"] is False
     run = job["steps"][-1]["run"]
     assert 'ch not in "%`:#[]"' in run  # no ::cmd or legacy ##[cmd] from PR paths
+
+
+def test_full_suite_notice_strips_workflow_command_characters() -> None:
+    job = _load_workflow()["jobs"]["impact-run"]
+    (notice,) = [s for s in job["steps"] if s["name"] == "Summarize unmapped-path fallback"]
+    assert 'ch not in "%`#[]"' in notice["run"]  # no ::cmd or legacy ##[cmd] from PR paths
+
+
+def test_impact_gate_reads_each_sides_newest_attempt() -> None:
+    download = _step("Download exact-base run evidence")
+    assert download["with"]["pattern"] == (
+        "exact-base-impact-*-${{ steps.base.outputs.head_sha }}-a*"
+    )
+    run = _step("Verify both run sides and assemble evidence")["run"]
+    assert "max(attempts)" in run
+    assert "no {side} run evidence" in run

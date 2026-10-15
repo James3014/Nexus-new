@@ -404,7 +404,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: exact-base-impact-${{ matrix.side }}-${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          # The attempt suffix keeps "Re-run failed jobs" from colliding with the
+          # first attempt's artifact; the gate takes each side's newest attempt.
+          name: exact-base-impact-${{ matrix.side }}-${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}-a${{ github.run_attempt }}
           path: ${{ runner.temp }}/nexus-ci-impact/
           if-no-files-found: error
           retention-days: 7
@@ -508,7 +510,7 @@ jobs:
       - name: Download exact-base run evidence
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          pattern: exact-base-impact-*-${{ steps.base.outputs.head_sha }}
+          pattern: exact-base-impact-*-${{ steps.base.outputs.head_sha }}-a*
           path: ${{ runner.temp }}/nexus-ci-impact-sides
 
       - name: Verify both run sides and assemble evidence
@@ -531,10 +533,20 @@ jobs:
 
           temp = Path(os.environ["RUNNER_TEMP"])
           head_sha = os.environ["HEAD_SHA"]
-          sides = {
-              side: temp / "nexus-ci-impact-sides" / f"exact-base-impact-{side}-{head_sha}"
-              for side in ("base", "head")
-          }
+          downloaded = temp / "nexus-ci-impact-sides"
+
+          def newest_attempt(side):
+              prefix = f"exact-base-impact-{side}-{head_sha}-a"
+              attempts = [
+                  int(path.name.removeprefix(prefix))
+                  for path in downloaded.iterdir()
+                  if path.name.startswith(prefix) and path.name.removeprefix(prefix).isdigit()
+              ]
+              if not attempts:
+                  raise SystemExit(f"no {side} run evidence for {head_sha}")
+              return downloaded / f"{prefix}{max(attempts)}"
+
+          sides = {side: newest_attempt(side) for side in ("base", "head")}
           for side, path in sides.items():
               status = json.loads((path / "side-status.json").read_text(encoding="utf-8"))
               if status != {"side": side, "head_sha": head_sha, "status": "success"}:
@@ -566,7 +578,9 @@ jobs:
       - name: Classify exact-base regression
         run: |
           set -uo pipefail
-          python3 "${{ steps.trusted-impact.outputs.gate }}" classify \
+          # -I and no PYTHONPATH: nothing in the PR-head checkout may shadow a
+          # module of the trusted exact-base classifier (#2236).
+          python3 -I "${{ steps.trusted-impact.outputs.gate }}" classify \
             --base-result .ci-impact/base-result.json \
             --head-result .ci-impact/head-result.json \
             --output .ci-impact/classification.json
@@ -580,7 +594,6 @@ jobs:
           exit "$CLASSIFIER_STATUS"
         env:
           NEXUS_TEST_MODE: CI
-          PYTHONPATH: .
 
       - name: Capture failure tails
         if: failure()
