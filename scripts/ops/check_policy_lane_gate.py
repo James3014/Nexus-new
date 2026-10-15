@@ -121,29 +121,49 @@ def _class_level(node: ast.ClassDef) -> list[ast.AST]:
     return [child for child in node.body if not isinstance(child, _DEFS)]
 
 
-def _is_dead_branch(node: ast.If) -> bool:
-    """``if TYPE_CHECKING:`` / ``if False:`` / ``if 0:`` — the body never runs."""
+def _branch_state(node: ast.If) -> str:
+    """``dead`` (body never runs), ``live`` (body always runs, else never), or ``unknown``.
+
+    ``if TYPE_CHECKING:`` / ``if False:`` / ``if 0:`` are dead; ``if not
+    TYPE_CHECKING:`` / ``if True:`` / ``if 1:`` are live. Anything else is walked
+    on both sides.
+    """
+    test = node.test
     if _is_type_checking_guard(node):
-        return True
-    return isinstance(node.test, ast.Constant) and not node.test.value
+        return "dead"
+    if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
+        inner = ast.If(test=test.operand, body=[], orelse=[])
+        if _is_type_checking_guard(inner):
+            return "live"
+        if isinstance(test.operand, ast.Constant):
+            return "live" if not test.operand.value else "dead"
+    if isinstance(test, ast.Constant):
+        return "live" if test.value else "dead"
+    return "unknown"
 
 
 def _imports_in(nodes: list[ast.AST], package: list[str], *, into_defs: bool) -> set[str]:
     """Absolute module names imported by ``nodes`` (static, ``ast`` only).
 
     Relative imports are resolved against ``package``. ``importlib`` / string
-    imports are not seen (the walk fails closed); anything under a dead branch
-    (``if TYPE_CHECKING:``, ``if False:``) is ignored. With ``into_defs`` False
-    the walk does not enter def/class bodies it meets (used for the module-level
-    view of a selected test).
+    imports are not seen (the walk fails closed); a branch that provably never
+    runs (``if TYPE_CHECKING:``, ``if False:``, the ``else`` of ``if not
+    TYPE_CHECKING:``) is ignored. With ``into_defs`` False the walk does not
+    enter def/class bodies it meets (used for the module-level view of a
+    selected test).
     """
     found: set[str] = set()
     stack = list(nodes)
     while stack:
         node = stack.pop()
-        if isinstance(node, ast.If) and _is_dead_branch(node):
-            stack.extend(node.orelse)
-            continue
+        if isinstance(node, ast.If):
+            state = _branch_state(node)
+            if state == "dead":
+                stack.extend(node.orelse)
+                continue
+            if state == "live":
+                stack.extend(node.body)
+                continue
         if isinstance(node, ast.Import):
             found.update(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
@@ -163,28 +183,42 @@ def _imports_in(nodes: list[ast.AST], package: list[str], *, into_defs: bool) ->
     return found
 
 
+def _visible_imports(tree: ast.Module, chain: list[ast.AST], package: list[str]) -> set[str]:
+    """Imports one resolved test chain ``[TestClass, ..., test_function]`` can see."""
+    visible: list[ast.AST] = list(_module_level(tree))
+    for node in chain[:-1]:
+        if isinstance(node, ast.ClassDef):
+            visible.extend(_class_level(node))
+    found = _imports_in(visible, package, into_defs=False)
+    found |= _imports_in([chain[-1]], package, into_defs=True)
+    return found
+
+
 def _imported_modules(
     path: Path, repo_root: Path, selected: list[ast.AST] | None = None
 ) -> set[str]:
-    """Modules visible to the selected test (or to the whole file when ``selected`` is None).
+    """Modules visible to the selected test, or to the whole file's tests when ``selected``
+    is None.
 
-    ``selected`` is the resolved chain ``[TestClass, ..., test_function]``. The
+    ``selected`` is the resolved chain ``[TestClass, ..., test_function]``. A
     test sees the module-level statements, the non-def statements of each
     enclosing class, and its own body. Imports made inside other functions,
-    helpers or fixtures of the same file do not count for it (fail closed).
+    helpers or fixtures of the same file do not count for it (fail closed). A
+    test *file* entry (``selected`` None) is the union over its collectable
+    tests, so an unused helper's import does not count either. A plain
+    (non-test) module reached by the walk is scanned whole.
     """
     tree = _parse(path)
     if tree is None:
         return set()
     package = _package_parts(path, repo_root)
-    if selected is None:
+    if selected is not None:
+        return _visible_imports(tree, selected, package)
+    if not path.name.startswith(_TEST_FUNCTION_PREFIX):
         return _imports_in([tree], package, into_defs=True)
-    visible: list[ast.AST] = list(_module_level(tree))
-    for node in selected[:-1]:
-        if isinstance(node, ast.ClassDef):
-            visible.extend(_class_level(node))
-    found = _imports_in(visible, package, into_defs=False)
-    found |= _imports_in([selected[-1]], package, into_defs=True)
+    found: set[str] = set()
+    for chain in _collectable_chains(list(tree.body), _fixture_bindings(tree)):
+        found |= _visible_imports(tree, chain, package)
     return found
 
 
@@ -294,16 +328,23 @@ def _is_fixture(node: ast.AST, bindings: tuple[set[str], set[str]]) -> bool:
     return False
 
 
-def _collectable_tests(body: list[ast.stmt], bindings: tuple[set[str], set[str]]) -> bool:
-    """True when ``body`` holds a ``test_*`` function (directly or inside ``Test*`` classes)."""
+def _collectable_chains(
+    body: list[ast.stmt], bindings: tuple[set[str], set[str]], prefix: list[ast.AST] | None = None
+) -> list[list[ast.AST]]:
+    """Every ``test_*`` function in ``body`` (directly or inside ``Test*`` classes), as chains."""
+    chains: list[list[ast.AST]] = []
     for node in body:
         if isinstance(node, _FUNCS) and node.name.startswith(_TEST_FUNCTION_PREFIX):
             if not _is_fixture(node, bindings):
-                return True
+                chains.append((prefix or []) + [node])
         elif isinstance(node, ast.ClassDef) and node.name.startswith(_TEST_CLASS_PREFIX):
-            if _collectable_tests(list(node.body), bindings):
-                return True
-    return False
+            chains.extend(_collectable_chains(list(node.body), bindings, (prefix or []) + [node]))
+    return chains
+
+
+def _collectable_tests(body: list[ast.stmt], bindings: tuple[set[str], set[str]]) -> bool:
+    """True when ``body`` holds a ``test_*`` function (directly or inside ``Test*`` classes)."""
+    return bool(_collectable_chains(body, bindings))
 
 
 def _resolve_entrypoint(path: Path, selector: str | None) -> list[ast.AST] | None:

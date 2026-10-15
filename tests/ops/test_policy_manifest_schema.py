@@ -738,3 +738,43 @@ def test_wiring_check_round7_cases(tmp_path: Path) -> None:
         test_entrypoints=["tests/test_class_import.py::TestWiring::test_caller"]
     )
     assert check_enforcement_wiring(in_class, root) == []
+
+
+def test_wiring_check_round8_cases(tmp_path: Path) -> None:
+    root = _fake_repo(tmp_path)
+    # A whole-file entry is the union of its collectable tests: an unused helper that
+    # imports the caller does not count.
+    (root / "tests" / "test_helper_only.py").write_text(
+        "def helper():\n    from pkg import caller\n    return caller\n\n"
+        "def test_guard():\n    from pkg.guard import check\n    assert check(1)\n",
+        encoding="utf-8",
+    )
+    helper_only = _fake_policy(test_entrypoints=["tests/test_helper_only.py"])
+    assert check_enforcement_wiring(helper_only, root) == ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"]
+    (root / "tests" / "test_one_reaches.py").write_text(
+        "def test_guard():\n    from pkg.guard import check\n    assert check(1)\n\n"
+        "class TestK:\n    def test_c(self):\n        from pkg import caller\n        assert caller\n",
+        encoding="utf-8",
+    )
+    one_reaches = _fake_policy(test_entrypoints=["tests/test_one_reaches.py"])
+    assert check_enforcement_wiring(one_reaches, root) == []
+    # The else of "if not TYPE_CHECKING:" and of "if True:" never runs; the else of
+    # "if TYPE_CHECKING:" always does.
+    cases = {
+        "from typing import TYPE_CHECKING\nif not TYPE_CHECKING:\n    pass\nelse:\n"
+        "    from pkg import caller\n": ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"],
+        "if True:\n    pass\nelse:\n    from pkg import caller\n": [
+            "TEST_ENTRYPOINT_NOT_BEHAVIOURAL"
+        ],
+        "if 1:\n    pass\nelse:\n    from pkg import caller\n": ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"],
+        "import typing\nif typing.TYPE_CHECKING:\n    pass\nelse:\n    from pkg import caller\n": [],
+        "from typing import TYPE_CHECKING\nif not TYPE_CHECKING:\n    from pkg import caller\n": [],
+        "import os\nif os.environ.get('X'):\n    from pkg import caller\n": [],
+    }
+    for prefix, expected in cases.items():
+        (root / "tests" / "test_branch.py").write_text(
+            prefix + "\ndef test_guard():\n    from pkg.guard import check\n    assert check(1)\n",
+            encoding="utf-8",
+        )
+        policy = _fake_policy(test_entrypoints=["tests/test_branch.py::test_guard"])
+        assert check_enforcement_wiring(policy, root) == expected, prefix
