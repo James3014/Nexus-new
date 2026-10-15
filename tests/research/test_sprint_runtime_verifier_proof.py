@@ -500,11 +500,16 @@ def test_no_verifier_is_not_observed_by_the_runtime_replan_logic(tmp_path: Path)
     assert request["trigger"] == "verifier_not_observed"
 
     # Gemini r2 N2: an undelivered payload and an edit that does not apply ran no test either.
-    def verdict_for(response_payload: Any, *, bind: bool) -> dict[str, Any]:
+    def raising_verifier(code: str, seed: int) -> CandidateEval:
+        raise RuntimeError("evaluator crashed")
+
+    def verdict_for(response_payload: Any, *, bind: bool, raises: bool = False) -> dict[str, Any]:
         gen = LLMCandidateGenerator(tmp_path, safe_mode=True, target_file="demo.py")
         gen._workspace_revision = lambda: "revision-verifier-006"
         if bind:
             gen.visible_verifier = lambda code, seed: CandidateEval(seed=seed, score=1.0)
+        if raises:
+            gen.visible_verifier = raising_verifier
         got: dict[str, Any] = {}
 
         def ask(request: Any, *, verifier: Any = None, **_kwargs: Any) -> dict[str, Any]:
@@ -522,7 +527,15 @@ def test_no_verifier_is_not_observed_by_the_runtime_replan_logic(tmp_path: Path)
         return got["payload"]
 
     unappliable = {**EDIT, "target_snippet": "not in source"}
+    crashed = verdict_for(
+        {"response": json.dumps(EDIT), "raw_response": ""}, bind=False, raises=True
+    )
+    # Round 9: an evaluator exception is "error", not a test failure.
+    assert crashed["verifier_status"] == "error"
+    assert crashed["visible_test_error"] == "visible_verifier_error:RuntimeError"
+    assert "verifier_artifact" not in crashed
     for label, verdict in (
+        ("verifier_raised", crashed),
         ("not_delivered", verdict_for({"response": "", "raw_response": ""}, bind=False)),
         (
             "edit_not_applied",

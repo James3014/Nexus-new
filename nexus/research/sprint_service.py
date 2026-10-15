@@ -1029,9 +1029,20 @@ def _visible_test_verdict(
         evaluation = visible_verifier(code, seed)
         passed = float(evaluation.score) >= 1.0 and not str(evaluation.error or "")
         error = str(evaluation.error or "")[:200]
-    except Exception as exc:  # noqa: BLE001 - verifier failure is a failed verdict, never a pass
-        passed = False
-        error = f"visible_verifier_error:{type(exc).__name__}"
+    except Exception as exc:  # noqa: BLE001 - an evaluator error is never a pass
+        # The evaluator itself failed, so no test result exists: not observed (no trusted
+        # verifier failure, no replan), never pass.
+        out.update({
+            "status": "fail",
+            "gate_passed": False,
+            "invoked": False,
+            "evidence_refs": [],
+            "verifier_status": "error",
+            "evidence": "visible_test_not_run:visible_verifier_error",
+            "visible_test_passed": False,
+            "visible_test_error": f"visible_verifier_error:{type(exc).__name__}",
+        })
+        return out
     out.update({
         "status": "pass" if passed else "fail",
         "gate_passed": passed,
