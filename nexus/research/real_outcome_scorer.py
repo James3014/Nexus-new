@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import contextlib
 import gzip
 import hashlib
 import json
@@ -19,15 +20,17 @@ import math
 import os
 import re
 import shutil
+import signal
+import stat
 import subprocess
 import time
 import xml.etree.ElementTree as ET
 import zlib
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Iterable, Mapping, Protocol, Sequence
+from typing import Any, Callable, Iterable, Iterator, Mapping, Protocol, Sequence
 
-SCORER_VERSION = "1.2.0"
+SCORER_VERSION = "1.2.1"
 RECEIPT_SCHEMA = "nexus.research.real_outcome.v1"
 RECEIPT_SEAL_SCHEMA = "nexus.research.real_outcome_seal.v1"
 SPEC_RELATIVE_PATH = "docs/research/REAL_OUTCOME_SCORER_SPEC.md"
@@ -37,6 +40,25 @@ SPEC_V2_RELATIVE_PATH = "docs/research/REAL_OUTCOME_SCORER_SPEC.v2.md"
 SPEC_V1, SPEC_V2 = "v1", "v2"
 
 PYTEST_TIMEOUT_SECONDS = 1800
+# Amendment A6 (operational, #2291). Every pytest run gets scratch/tmp as TMPDIR and
+# scratch/home as HOME; both are emptied after each task.
+# One run that leaves more than SCRATCH_TMP_CAP_BYTES there (its junit report excluded)
+# fails the task; so does a task whose runs together leave more than
+# SCRATCH_TMP_TASK_CAP_BYTES. Neither is cached, and neither ever yields a benchmark
+# label. Peak usage while a single run is still going is not limited.
+SCRATCH_TMP_CAP_BYTES = 20 * 1024**3
+SCRATCH_TMP_TASK_CAP_BYTES = 40 * 1024**3
+SCRATCH_TMP_CAP_EXCEEDED = "SCRATCH_TMP_CAP_EXCEEDED"
+SCRATCH_TMP_TASK_CAP_EXCEEDED = "SCRATCH_TMP_TASK_CAP_EXCEEDED"
+# Exit code recorded for a run refused by the cap (never a real pytest exit code).
+SCRATCH_TMP_CAP_EXIT_CODE = -2
+# A6: sub-reason when a candidate-independent run (BASE+T, GOLD, GOLD_REF, the P2P(d)
+# trees) hits the per-run cap. A candidate run that hits it is NOT_RUNNABLE /
+# SCRATCH_TMP_CAP_EXCEEDED.
+ORACLE_RUN_FAILED = "ORACLE_RUN_FAILED"
+# Seconds to wait for a finished run's process group to disappear after SIGKILL.
+PROCESS_GROUP_KILL_WAIT_SECONDS = 5.0
+SCORER_LOCK_NAME = ".scorer.lock"
 ORACLE_RUNS = 3
 SMALL_REPOS = frozenset({"nexus-runtime", "nexus-core", "nexus-learning"})
 IMPACT_GATE_REPOS = frozenset({"Nexus-new"})
@@ -81,6 +103,36 @@ class EnvBuildError(Exception):
 
 class ReceiptExists(Exception):
     pass
+
+
+class ScratchTmpCapExceeded(Exception):
+    """A6: one pytest run left more than SCRATCH_TMP_CAP_BYTES in scratch/tmp.
+
+    Raised by ``PytestRunner.run`` (such a run is never cached) so that no caller can
+    read the run's empty outcomes as test results; ``score_task`` turns it into a label.
+    """
+
+    def __init__(
+        self,
+        tree: str,
+        target: str,
+        run_idx: int,
+        role: str,
+        result: Any,
+        kind: str = SCRATCH_TMP_CAP_EXCEEDED,
+        left_bytes: int = 0,
+    ):
+        super().__init__(f"{kind}:{tree}:{target}:run{run_idx}")
+        self.tree, self.target, self.run_idx, self.role = tree, target, run_idx, role
+        self.result, self.kind, self.left_bytes = result, kind, left_bytes
+
+
+class ScratchUnsafe(RuntimeError):
+    """scratch/tmp or scratch/home is a symlink: the runner refuses to use or clean it."""
+
+
+class ScorerBusy(RuntimeError):
+    """Another scorer process holds the lock on the same --work directory."""
 
 
 # --------------------------------------------------------------------------- utils
@@ -906,6 +958,86 @@ class RunResult:
     exit_code: int
     timed_out: bool
     seconds: float = 0.0
+    # Set when the run is failed for an operational reason (A6), e.g. the TMPDIR cap.
+    diagnostic: str | None = None
+
+
+def tree_bytes(root: Path) -> int:
+    """Total size of the regular files under ``root``; symlinks are never followed."""
+    total = 0
+    if not root.is_dir() or root.is_symlink():
+        return 0
+    for dirpath, _dirs, files in os.walk(root, followlinks=False):
+        for name in files:
+            try:
+                st = os.lstat(os.path.join(dirpath, name))
+            except OSError:
+                continue
+            if stat.S_ISREG(st.st_mode):
+                total += st.st_size
+    return total
+
+
+def clean_scratch_tmp(tmp: Path, keep: Iterable[str] = ()) -> list[str]:
+    """Empty ``tmp`` except the file names in ``keep`` (the runner's own live junit
+    reports). Never follows a symlink and never raises: returns the errors it met.
+
+    A child process that is still running could swap a directory for a link between
+    the checks and the removal; the runner only cleans after its pytest run has exited.
+    """
+    errors: list[str] = []
+    keep = set(keep)
+    try:
+        if not tmp.is_dir() or tmp.is_symlink():
+            return errors
+        with os.scandir(tmp) as it:
+            entries = list(it)
+    except OSError as exc:
+        return [f"scandir:{type(exc).__name__}:{exc}"[:300]]
+    for entry in entries:
+        path = Path(entry.path)
+        try:
+            if entry.name in keep and entry.is_file(follow_symlinks=False):
+                continue
+            if entry.is_dir(follow_symlinks=False):
+                shutil.rmtree(path, ignore_errors=True)
+                if os.path.lexists(path):
+                    _make_tree_writable(path)
+                    shutil.rmtree(path, ignore_errors=True)
+                if os.path.lexists(path):
+                    errors.append(f"rmtree:{entry.name}"[:300])
+            else:
+                path.unlink()
+        except OSError as exc:
+            errors.append(f"{entry.name}:{type(exc).__name__}:{exc}"[:300])
+    return errors
+
+
+def _chmod_dir_no_follow(path: str) -> None:
+    """chmod 0o700 on ``path`` only if it is a real directory (never through a link)."""
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return
+    if not stat.S_ISDIR(st.st_mode):
+        return
+    try:
+        if os.chmod in os.supports_follow_symlinks:
+            os.chmod(path, 0o700, follow_symlinks=False)
+        else:  # Linux: no lchmod; the lstat above already refused a link
+            os.chmod(path, 0o700)
+    except (OSError, NotImplementedError):
+        pass
+
+
+def _make_tree_writable(root: Path) -> None:
+    """A test may leave read-only directories behind, which rmtree cannot empty."""
+    if root.is_symlink():
+        return
+    _chmod_dir_no_follow(str(root))
+    for dirpath, dirs, _files in os.walk(root, followlinks=False):
+        for name in dirs:
+            _chmod_dir_no_follow(os.path.join(dirpath, name))
 
 
 def parse_junit(path: Path) -> dict[str, str]:
@@ -963,6 +1095,53 @@ class PytestRunner:
         self.timeout = timeout
         self.log = log
         self.total_seconds = 0.0
+        self.tmp = self.scratch / "tmp"
+        # junit report names of runs in flight; the only files cleanup may keep.
+        self._live_junits: set[str] = set()
+
+    @property
+    def home(self) -> Path:
+        return self.scratch / "home"
+
+    def check_scratch(self) -> None:
+        """Refuse a scratch/tmp or scratch/home that is a symlink (A6)."""
+        for path in (self.tmp, self.home):
+            if path.is_symlink():
+                raise ScratchUnsafe(f"{path} is a symlink; refusing to use or clean it")
+
+    def scratch_bytes(self) -> int:
+        return tree_bytes(self.tmp) + tree_bytes(self.home)
+
+    def clean_tmp(self) -> tuple[int, int, list[str]]:
+        """A6: empty scratch/tmp and scratch/home after a task.
+
+        Returns (tmp bytes before, home bytes before, errors). Raises ScratchUnsafe when
+        either is a symlink (nothing is followed or removed then).
+        """
+        self.check_scratch()
+        sizes = []
+        for path in (self.tmp, self.home):
+            try:
+                sizes.append(tree_bytes(path))
+            except OSError:
+                sizes.append(-1)
+        errors = clean_scratch_tmp(self.tmp, self._live_junits)
+        errors += [f"home/{e}" for e in clean_scratch_tmp(self.home)]
+        for err in errors:
+            self.log(f"  scratch cleanup: {err}")
+        return sizes[0], sizes[1], errors
+
+    @staticmethod
+    def _kill_group(pgid: int) -> None:
+        """SIGKILL what is left of a run's process group and wait for it to go."""
+        deadline = time.monotonic() + PROCESS_GROUP_KILL_WAIT_SECONDS
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+            while time.monotonic() < deadline:
+                os.killpg(pgid, 0)
+                time.sleep(0.05)
+        except (ProcessLookupError, PermissionError):
+            return
 
     def _env(self, env: TestEnv, tree: Path) -> dict[str, str]:
         home = self.scratch / "home"
@@ -1002,7 +1181,8 @@ class PytestRunner:
         if cached.exists():
             data = json.loads(cached.read_text())
             return RunResult(data["outcomes"], data["exit_code"], data["timed_out"], 0.0)
-        junit = self.scratch / "tmp" / f"junit-{key}.xml"
+        self.check_scratch()
+        junit = self.tmp / f"junit-{key}.xml"
         junit.parent.mkdir(parents=True, exist_ok=True)
         junit.unlink(missing_ok=True)
         cmd = [
@@ -1016,27 +1196,53 @@ class PytestRunner:
             f"--junitxml={junit}",
             *[f"--ignore={p}" for p in ignores],
         ]
+        run_env = self._env(env, tree)
+        self._live_junits.add(junit.name)
+        before = self.scratch_bytes()
         start = time.monotonic()
         timed_out = False
+        # Own process group, so whatever the tests spawned is killed with the run and
+        # cannot keep writing into scratch/tmp while the next tree is measured (A6).
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(tree),
+            env=run_env,
+            stdout=subprocess.DEVNULL,  # never read; a pipe would also let a leftover
+            stderr=subprocess.DEVNULL,  # child hold the run open
+            start_new_session=True,
+        )
         try:
-            proc = subprocess.run(
-                cmd,
-                cwd=str(tree),
-                env=self._env(env, tree),
-                capture_output=True,
-                timeout=self.timeout,
-            )
-            exit_code = proc.returncode
-        except subprocess.TimeoutExpired:
-            timed_out, exit_code = True, -1
+            try:
+                exit_code = proc.wait(timeout=self.timeout)
+            except subprocess.TimeoutExpired:
+                timed_out, exit_code = True, -1
+                self._kill_group(proc.pid)
+                proc.wait()
+        finally:
+            self._kill_group(proc.pid)
         seconds = time.monotonic() - start
         self.total_seconds += seconds
+        # A6: what this run left in scratch (its own junit report excluded).
+        junit_bytes = junit.stat().st_size if junit.is_file() and not junit.is_symlink() else 0
+        after = self.scratch_bytes() - junit_bytes
+        left = after - before
         outcomes = {} if timed_out else parse_junit(junit)
         junit.unlink(missing_ok=True)
+        self._live_junits.discard(junit.name)
+        kind = None
+        if left > SCRATCH_TMP_CAP_BYTES:
+            kind = SCRATCH_TMP_CAP_EXCEEDED
+        elif after > SCRATCH_TMP_TASK_CAP_BYTES:
+            kind = SCRATCH_TMP_TASK_CAP_EXCEEDED
         self.log(
             f"  pytest {target} run={run_idx}{' role=' + role if role else ''} exit={exit_code}"
-            f"{' TIMEOUT' if timed_out else ''} nodes={len(outcomes)} {seconds:.0f}s"
+            f"{' TIMEOUT' if timed_out else ''}{' ' + kind if kind else ''}"
+            f" nodes={len(outcomes)} {seconds:.0f}s"
         )
+        if kind:
+            # Not cached: an infrastructure refusal, never test results.
+            res = RunResult({}, SCRATCH_TMP_CAP_EXIT_CODE, timed_out, seconds, kind)
+            raise ScratchTmpCapExceeded(tree.name, target, run_idx, role, res, kind, left)
         cached.write_text(
             json.dumps(
                 {"outcomes": outcomes, "exit_code": exit_code, "timed_out": timed_out},
@@ -1183,6 +1389,17 @@ class Oracle:
 
 
 CAND_ROLE = "CAND+T"
+# Worktree directory name -> tree name used in receipts.
+_TREE_NAMES = {
+    "base": "BASE",
+    "gold": "GOLD",
+    "goldref": "GOLD_REF",
+    "baset": "BASE+T",
+    "candt": "CAND+T",
+    "cand0": "CAND@BASE_TESTS",
+    "gold0": "GOLD@BASE_TESTS",
+    "goldref0": "GOLD_REF@BASE_TESTS",
+}
 
 
 def _run_modules(
@@ -1200,7 +1417,43 @@ def _run_modules(
 def score_task(
     task_dir: Path, ctx: ScoreContext, candidate_override: str | None = None
 ) -> dict[str, Any]:
-    """Score one task. Returns {"receipt", "timing"}. Raises SealRefused."""
+    """Score one task. Returns {"receipt", "timing"}. Raises SealRefused.
+
+    Holds an exclusive lock on ``<work>/.scorer.lock`` for the whole task, because the
+    per-task scratch cleanup (A6) would delete another scorer's in-flight files. Raises
+    ScorerBusy at once when another process holds it.
+    """
+    with _work_lock(ctx.work):
+        return _score_task(task_dir, ctx, candidate_override)
+
+
+@contextlib.contextmanager
+def _work_lock(work: Path) -> Iterator[None]:
+    try:
+        import fcntl
+    except ImportError:  # non-POSIX: no lock available
+        yield
+        return
+    Path(work).mkdir(parents=True, exist_ok=True)
+    fd = os.open(Path(work) / SCORER_LOCK_NAME, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise ScorerBusy(
+                f"another scorer holds {Path(work) / SCORER_LOCK_NAME}; one scorer per --work"
+            ) from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
+def _score_task(
+    task_dir: Path, ctx: ScoreContext, candidate_override: str | None = None
+) -> dict[str, Any]:
     t0 = time.monotonic()
     inputs = load_sealed_task(task_dir)  # §4 step 1
     if candidate_override == "empty":
@@ -1528,11 +1781,37 @@ def score_task(
         else:
             receipt["label"] = evaluated
         return _finish(receipt, timing, t0, ctx)
+    except ScratchTmpCapExceeded as cap:
+        # A6: a run over the TMPDIR cap is never read as test results.
+        tree = _TREE_NAMES.get(cap.tree, cap.tree)
+        # A candidate-role run that trips either cap stays in the denominator
+        # (NOT_RUNNABLE); a leaky candidate must never be dropped as not scorable.
+        if cap.role == CAND_ROLE:
+            receipt["label"] = NOT_RUNNABLE
+            receipt["sub_reason"] = cap.kind
+        elif cap.kind == SCRATCH_TMP_TASK_CAP_EXCEEDED:
+            receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
+            receipt["sub_reason"] = SCRATCH_TMP_TASK_CAP_EXCEEDED
+        else:
+            receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
+            receipt["sub_reason"] = ORACLE_RUN_FAILED
+        receipt["detail"] = (
+            f"{cap.kind}:{tree}:{cap.target}:run{cap.run_idx}"
+            f"{':' + cap.role if cap.role else ''}:{cap.left_bytes}"
+        )
+        receipt.pop("shadow_label", None)
+        return _finish(receipt, timing, t0, ctx)
     finally:
         if not ctx.keep_trees:
             for wt in wts.values():
                 repo.remove_worktree(wt)
             shutil.rmtree(trees_dir, ignore_errors=True)
+        # A6: TMPDIR and HOME are emptied after every task (also with keep_trees), so a
+        # leaky test cannot fill the disk across tasks. Their sizes before are recorded.
+        tmp_bytes, home_bytes, errors = ctx.runner.clean_tmp()
+        timing["scratch_tmp_bytes"] = tmp_bytes
+        timing["scratch_home_bytes"] = home_bytes
+        timing["scratch_tmp_cleanup_errors"] = errors[:20]
 
 
 def _broken_candidate(

@@ -18,8 +18,9 @@ The v1 header names `SCORER_VERSION = "1.0.0"`. The scorer versions are:
 | `1.0.1` | the trusted impact-gate copy is registered in `sys.modules`, so the P2P(b) selector no longer fails silently | v1, unchanged |
 | `1.1.0` | post-merge review follow-ups (#1951 review): input validation, write containment, a P2P run diagnostic, a summary fix and cache keys | v1, unchanged; A2–A4 below only add diagnostics, refusals for malformed or unsafe input, and operational behaviour |
 | `1.2.0` | GOLD port fallback (#2233) | v1 for every task whose PR patches apply whole; `REAL_OUTCOME_SCORER_SPEC.v2.md` (v1 + A5) for the tasks that need the fallback. Each receipt records `spec_version` and that spec file's sha256. For all tasks, a symlinked oracle source file is refused (`NOT_SCORABLE_ORACLE_INVALID` / `ORACLE_FILE_UNSAFE`), an unsafe-input refusal like A3. `--summarize` headline numbers are what v1 would report (each v2 receipt counted as `NOT_SCORABLE_ORACLE_INVALID` / `GOLD_PORT_FAILED`); receipts of any other spec version are left out of both blocks (`unknown_spec_versions`) |
+| `1.2.1` | scratch TMPDIR cleanup and cap (#2291), A6 below | unchanged from 1.2.0 (v1, or v2 for the GOLD port fallback); A6 is operational behaviour only |
 
-Current scorer: `SCORER_VERSION = "1.2.0"`. Receipts record the version that wrote them.
+Current scorer: `SCORER_VERSION = "1.2.1"`. Receipts record the version that wrote them.
 
 ## 2026-10-14: A2, P2P(b/c) run diagnostic (no rule change)
 
@@ -76,3 +77,50 @@ None of these changes how a candidate that applies cleanly is scored.
 - The test-result cache key covers the same items. It also covers the run's role, so
   `CAND+T` runs are never replayed from a `GOLD` run with the same tree id
   (self-check (a)).
+
+## 2026-10-15: A6, scratch cleanup, caps and lock (operational, #2291)
+
+Every pytest run gets `HOME=scratch/home` and `TMPDIR=scratch/tmp` (§8). Before 1.2.1,
+neither was ever emptied, so one leaky test in any tree could fill the disk and the
+leak carried over to every later task (#2291: 96 GB in one run).
+
+Scorer 1.2.1:
+- **Cleanup.** After every task that reached the tree stage, `scratch/tmp` and
+  `scratch/home` are emptied, in the same cleanup step that removes the worktrees, also
+  with `--keep-trees`. Only the junit report of a run still in flight is kept; each
+  report is deleted as soon as its results are parsed. Cleanup never follows a symlink
+  and never raises: errors go to `scratch_tmp_cleanup_errors` in the timing receipt.
+- **Receipt.** `real_outcome_timing.json` records `scratch_tmp_bytes` and
+  `scratch_home_bytes`, the sizes before cleanup (regular files, symlinks not followed).
+- **Process group.** Each pytest run starts in its own session. When it exits or times
+  out, the whole process group is killed, so a child it left behind cannot keep writing
+  while the next run is measured. A child that starts its own session escapes this.
+- **Per-run cap.** A run that leaves more than `SCRATCH_TMP_CAP_BYTES` (20 GiB) in
+  `scratch/tmp` + `scratch/home` (its junit report excluded) is never read as test
+  results and is not cached:
+  - on a candidate tree (`CAND+T`, `CAND@BASE_TESTS`): `NOT_RUNNABLE` /
+    `SCRATCH_TMP_CAP_EXCEEDED`, no `shadow_label`;
+  - on any other tree (`BASE+T`, `GOLD`, `GOLD_REF`, the P2P(d) trees):
+    `NOT_SCORABLE_ORACLE_INVALID` / `ORACLE_RUN_FAILED`.
+- **Per-task cap.** When the runs of one task together leave more than
+  `SCRATCH_TMP_TASK_CAP_BYTES` (40 GiB), the task fails with sub-reason
+  `SCRATCH_TMP_TASK_CAP_EXCEEDED`, not cached. If the run that crosses it is a candidate
+  run, the label is `NOT_RUNNABLE` (the candidate stays in the denominator); otherwise it
+  is `NOT_SCORABLE_ORACLE_INVALID`.
+- In both cap cases, `detail` names the cap, tree, target, run, role and the bytes left.
+- **Not limited:** the peak usage while a single run is still going (only the
+  `SpeculativeSandbox` guard of #2291 prevents the 96 GB case), and writes outside
+  `scratch/` (a test that writes elsewhere is not measured).
+- **Old caches.** A `scratch/pytest-cache` written by a pre-release 1.2.1 build (PR
+  #2295 at `2cf90bc`) may hold cap failures cached as exit `-2`; clear it before use.
+- **Symlinked scratch.** If `scratch/tmp` or `scratch/home` is a symlink when a run
+  starts or when cleanup runs, the scorer refuses (`ScratchUnsafe`, no receipt).
+- **Lock.** `score_task` holds an exclusive `flock` on `<work>/.scorer.lock`, because
+  cleanup would delete another scorer's in-flight files. A second scorer on the same
+  `--work` stops at once (`ScorerBusy`, CLI exit 6).
+
+Timeouts and crashes keep their v1 meaning (§8, A2): their expected nodes count as
+`fail`, and a P2P baseline failure is a diagnostic only. The cap is a new refusal, like
+the unsafe-input refusals of A3, and is never a benchmark label. The env and
+test-result cache keys include the scorer version (A4), so 1.2.1 rebuilds its envs and
+does not reuse 1.2.0 results.

@@ -32,6 +32,7 @@ from scripts.bench.warning_ledger import (
     records_from_text as _warning_records_from_text,
     summarize_rows as _summarize_warning_rows,
 )
+from scripts.bench import prompt_symmetry_audit as _psa
 from scripts.bench import treatment_lane as _treatment_lane
 from scripts.bench.benchmark_eligibility import (
     PHASE_OBSERVATION_FIELDS,
@@ -3507,6 +3508,9 @@ def _apply_prompt_symmetry_audit(
             # Identical prompt re-sent after a pre-effect quota failure (visible at the wrapper).
             row["account_rotations"] = task_audit.get(f"{arm}_account_rotations")
             _treatment_lane.attest_row(row, task_audit)
+            if arm == "with_nexus" and row.get("product_crash") is True:
+                # #2275 round 3: a crashed product reports no calls; record the captured ones.
+                row["captured_model_calls"] = task_audit.get("with_nexus_calls")
         row["prompt_symmetry_status"] = report["status"]
         if report["status"] != "PASS":
             row["prompt_symmetry_violation"] = True
@@ -15820,6 +15824,7 @@ def run_with_nexus(
     os.environ.update(bench_env_updates)
     runner: CliRunner | None = None
     receipt_first_payload: dict[str, Any] | None = None
+    product_exit_code: int | None = None
     if runner_mode == "subprocess":
         cmd = _nexus_cli_subprocess_cmd(args, repo_root)
         env = os.environ.copy()
@@ -15868,6 +15873,7 @@ def run_with_nexus(
                 env=env,
                 timeout_sec=_shared_subprocess_timeout(effective_timeout_sec, stage="first_pass"),
             )
+            product_exit_code = res.returncode
             output = res.stdout or ""
             warning_records = [
                 *_warning_records_from_text(res.stdout or "", source="with_nexus_subprocess_stdout"),
@@ -15896,10 +15902,20 @@ def run_with_nexus(
     wall = time.monotonic() - start
 
     payload = _extract_json_payload(output)
+    product_result = isinstance(payload, dict) and isinstance(
+        (payload.get("result") or {}).get("report") if isinstance(payload.get("result"), dict) else None, dict
+    )
     if not payload:
         payload = {"status": "FAILED", "semantic_status": "UNVERIFIED"}
     row = _extract_record(mode="with_nexus", task=task, payload=payload, wall_time_sec=wall)
     row["route_execution_policy"] = route_execution_policy.to_dict()
+    if not product_result and str(payload.get("runtime_classification") or "") != "subprocess_timeout":
+        # The product subprocess crashed (no result report; e.g. an exception after its provider
+        # call): a failure like a killed row, never a solve. Its calls are the captured ones, so
+        # the audit does not void the run over model_calls=0 (#2275 round 3).
+        row["product_crash"] = True
+        row["product_exit_code"] = product_exit_code
+        row["after_treatment_status"] = "not_run:product_crash"
     _annotate_warning_ledger(row, warning_records)
     fallback_needed = bool(
         llm_enabled
@@ -15994,7 +16010,7 @@ def run_with_nexus(
     row["model_required_require_strict_baseline"] = execution_policy.require_strict_baseline
     row["model_attempts"] = [
         {
-            "attempt_type": "strict_baseline" if effective_strict_llm_baseline else "primary",
+            "attempt_type": _psa.ATTEMPT_STRICT_BASELINE if effective_strict_llm_baseline else _psa.ATTEMPT_PRIMARY,
             "wall_sec": row.get("wall_duration_sec"),
             "cli_elapsed_sec": row.get("cli_elapsed_sec"),
             "runner_overhead_sec": row.get("runner_overhead_sec"),
@@ -16206,7 +16222,7 @@ def run_with_nexus(
             rescue_row["total_tokens"] = first_tokens + int(rescue_row.get("total_tokens", 0) or 0)
             rescue_row["model_attempts"] = list(row.get("model_attempts", [])) + [
                 {
-                    "attempt_type": "bounded_hyper_rescue",
+                    "attempt_type": _psa.ATTEMPT_BOUNDED_HYPER_RESCUE,
                     "wall_sec": round(rescue_wall, 4),
                     "cli_elapsed_sec": rescue_row.get("cli_elapsed_sec"),
                     "runner_overhead_sec": rescue_row.get("runner_overhead_sec"),
@@ -16544,7 +16560,7 @@ def run_with_nexus(
                         retry_row["runner_overhead_class"] = "composed_hidden_retry"
                         retry_row["model_attempts"] = list(row.get("model_attempts", [])) + [
                             {
-                                "attempt_type": "hidden_verifier_bounded_retry",
+                                "attempt_type": _psa.ATTEMPT_HIDDEN_VERIFIER_RETRY,
                                 "wall_sec": round(hidden_retry_wall_sec, 4),
                                 "cli_elapsed_sec": retry_cli_elapsed_sec,
                                 "runner_overhead_sec": round(retry_runner_overhead_sec, 4),
