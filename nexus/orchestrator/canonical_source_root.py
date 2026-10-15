@@ -169,8 +169,11 @@ def bound_controller_problem(controller: Path, loaded: Path) -> Optional[str]:
     # Controller, so a .git repointed at a third worktree's gitdir is refused.
     dot_git = controller / ".git"
     if dot_git.is_dir() and not dot_git.is_symlink():
-        # A primary worktree: its gitdir is its own real .git directory.
-        if not _same_physical_directory(Path(controller_gitdir), dot_git):
+        # A primary worktree: its gitdir is its own real .git directory, and
+        # that directory is the repository's common gitdir (not a copy).
+        if not _same_physical_directory(Path(controller_gitdir), dot_git) or not (
+            _same_physical_directory(dot_git, Path(controller_common))
+        ):
             return "CONTROLLER_GITDIR_NOT_ITS_OWN"
     else:
         try:

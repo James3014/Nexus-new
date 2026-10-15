@@ -389,3 +389,15 @@ def test_primary_worktree_controller_with_linked_loaded_checkout_is_accepted(pai
     linked_loaded = tmp_path / "linked-loaded"
     _git(primary, "worktree", "add", "-q", "--detach", str(linked_loaded), head)
     assert roots.bound_controller_problem(primary, linked_loaded) is None
+
+
+def test_copied_gitdir_posing_as_a_primary_worktree_is_refused(pair, tmp_path):
+    loaded, controller, _ = pair
+    gitdir = Path(_git(controller, "rev-parse", "--absolute-git-dir"))
+    (controller / ".git").unlink()
+    subprocess.run(["cp", "-R", str(gitdir), str(controller / ".git")], check=True)
+    assert roots.bound_controller_problem(controller, loaded) in {
+        "CONTROLLER_GITDIR_NOT_ITS_OWN",
+        "DIFFERENT_REPOSITORY",
+        "COMMON_DIR_UNREADABLE",
+    }
