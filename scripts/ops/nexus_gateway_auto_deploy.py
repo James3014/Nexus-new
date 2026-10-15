@@ -1370,7 +1370,7 @@ def wrapper_command(
             f'export NEXUS_CORE_SOURCE_DIGEST_REVISION="{revision}" ; '
             f'export NEXUS_CORE_SOURCE_DIGEST="{digest}" ; '
         )
-    elif core_root is not None:
+    else:
         # No build digest: never let a stale value from the env file through.
         core_export += "unset NEXUS_CORE_SOURCE_DIGEST NEXUS_CORE_SOURCE_DIGEST_REVISION ; "
     return (

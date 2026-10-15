@@ -2658,8 +2658,10 @@ def test_no_build_digest_never_leaks_a_stale_digest_into_the_host(
     assert seen[0]["NEXUS_CORE_SOURCE_DIGEST"] == core["source_digest"]
     # The real wrapper, after an env file that exports a stale digest, hands the
     # Gateway process none of it.
-    if not Path("/bin/zsh").exists():
-        return
+    # launchd runs it with /bin/zsh; Linux CI runners have bash, which runs
+    # the same fixed wrapper (source/unset/export/exec).
+    shell = "/bin/zsh" if Path("/bin/zsh").exists() else shutil.which("bash")
+    assert shell, "no zsh or bash to run the real wrapper"
     cfg.env_file.write_text(
         'export NEXUS_CORE_SOURCE_DIGEST="sha256:' + "9" * 64 + '"\n'
         f'export NEXUS_CORE_SOURCE_DIGEST_REVISION="{NEW}"\n'
@@ -2667,13 +2669,16 @@ def test_no_build_digest_never_leaks_a_stale_digest_into_the_host(
     root = tmp_path / "deploy"
     (root / ad.ENTRYPOINT).parent.mkdir(parents=True)
     (root / ad.ENTRYPOINT).write_text("import json, os; print(json.dumps(dict(os.environ)))\n")
-    for digest in (None, ("c" * 40, "sha256:" + "d" * 64)):
+    cases = [
+        (tmp_path / "core", None),
+        (None, None),  # no Core pin at all: still no stale digest
+        (tmp_path / "core", ("c" * 40, "sha256:" + "d" * 64)),
+    ]
+    for core_root, digest in cases:
         command = ad.wrapper_command(
-            cfg, root, Path(sys.executable), core_root=tmp_path / "core", core_digest=digest
+            cfg, root, Path(sys.executable), core_root=core_root, core_digest=digest
         )
-        out = subprocess.run(
-            ["/bin/zsh", "-c", command], capture_output=True, text=True, check=True
-        )
+        out = subprocess.run([shell, "-c", command], capture_output=True, text=True, check=True)
         environ = json.loads(out.stdout.strip().splitlines()[-1])
         if digest is None:
             assert "NEXUS_CORE_SOURCE_DIGEST" not in environ
