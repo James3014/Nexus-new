@@ -544,6 +544,8 @@ def test_failure_log_redacts_secret_shaped_paths_and_refs(tmp_path: Path) -> Non
     assert token not in text
     assert generic not in text
     assert "<redacted>" in text
+    short_value = "Q7m2V9x4N8b1" + "K6r3T0y5P2"
+    assert short_value not in scan._log_safe(f"refs/remotes/origin/{short_value}")
     assert scan._log_safe("refs/remotes/origin/fix/1898-secret-audit-remediation") == (
         "refs/remotes/origin/fix/1898-secret-audit-remediation"
     )

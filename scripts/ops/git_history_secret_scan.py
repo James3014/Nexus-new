@@ -633,10 +633,11 @@ REMEDIATION_TEXT = (
 )
 
 
-# Provider shapes plus any long unbroken alphanumeric run are redacted: a path or
+# Provider shapes plus any unbroken alphanumeric run of 20+ (the assignment
+# detector minimum) are redacted: a path or
 # ref name may itself carry the leaked value, and the log is more public than the
 # receipt. `-`, `_` and `/` break runs so ordinary branch names and paths survive.
-_LONG_TOKEN_RE = re.compile(r"[A-Za-z0-9+=]{24,}")
+_LONG_TOKEN_RE = re.compile(r"[A-Za-z0-9+=]{20,}")
 
 
 def _redact_secret_shapes(text: str) -> str:
