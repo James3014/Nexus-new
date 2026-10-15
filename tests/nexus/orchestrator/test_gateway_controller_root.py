@@ -465,7 +465,9 @@ def test_real_gateway_import_starts_degraded_not_crash_looping(tmp_path):
     assert result.stdout.split() == ["DEGRADED", "NEXUS_CANONICAL_SOURCE_ROOT_MISSING"]
 
 
-def test_degraded_gateway_refuses_every_controller_effect_and_reports_it(pair, monkeypatch):
+def test_degraded_gateway_refuses_task_card_create_without_writing_and_reports_degraded_identity(
+    pair, monkeypatch
+):
     import nexus.orchestrator.unified_mcp_gateway as gateway_module
     import scripts.ops.nexus_mcp_gateway_http as http_module
 
@@ -554,14 +556,86 @@ def test_degraded_gateway_refuses_governed_mutation_before_validation(pair, monk
     assert "CONTROLLER_BINDING_INVALID:DEGRADED" in result["structuredContent"]["error"]
 
 
-@pytest.mark.parametrize(
-    "tool", ["nexus_task_cancel", "nexus_candidate_dispose", "nexus_task_reconcile"]
-)
-def test_degraded_gateway_still_allows_cleanup_tools(pair, monkeypatch, tool):
+_OWNER_CONFIRMED_EFFECT_ARGS = {
+    "nexus_worker_candidate": {
+        "owner_confirmation": True,
+        "what": "x",
+        "why": "y",
+        "allowed_files": ["README.md"],
+        "verifier_commands": ["git diff --check"],
+        "task_card_path": "tasks/deg/card.md",
+        "task_card_hash": "a" * 64,
+    },
+    "nexus_task_card_create": {
+        **AUTHORITY_ARGS,
+        "owner_confirmation": True,
+        "campaign_id": "deg",
+        "task_id": "card",
+        "objective": "x",
+        "allowed_files": ["README.md"],
+        "verifier_commands": ["git diff --check"],
+    },
+    "nexus_task_card_commit": {
+        **AUTHORITY_ARGS,
+        "owner_confirmation": True,
+        "campaign_id": "deg",
+        "task_id": "card",
+        "expected_head": "a" * 40,
+        "card_hash": "b" * 64,
+        "index_hash": "c" * 64,
+    },
+}
+
+
+@pytest.mark.parametrize("tool", sorted(_OWNER_CONFIRMED_EFFECT_ARGS))
+def test_degraded_gateway_refuses_owner_confirmed_effects(pair, monkeypatch, tool):
     gateway = _degraded_gateway(pair, monkeypatch)
-    result = _call(gateway, tool, {"task_id": "t-1", **AUTHORITY_ARGS})
-    error = str((result.get("structuredContent") or {}).get("error") or "")
-    assert "DEGRADED" not in error
+    result = _call(gateway, tool, dict(_OWNER_CONFIRMED_EFFECT_ARGS[tool]))
+    assert result["isError"] is True
+    assert "CONTROLLER_BINDING_INVALID:DEGRADED" in result["structuredContent"]["error"]
+    assert not (pair[0] / "tasks" / "deg").exists()
+
+
+class _SpyService(FakeService):
+    def __init__(self):
+        super().__init__()
+        self.calls: list[tuple[str, str]] = []
+
+    def cancel_task(self, task_id):
+        self.calls.append(("cancel_task", task_id))
+        return super().cancel_task(task_id)
+
+    def reconcile_task(self, task_id):
+        self.calls.append(("reconcile_task", task_id))
+        return super().reconcile_task(task_id)
+
+    def dispose_candidate(self, task_id, **kwargs):
+        self.calls.append(("dispose_candidate", task_id))
+        return super().dispose_candidate(task_id, **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("tool", "arguments", "service_call"),
+    [
+        ("nexus_task_cancel", {"task_id": "t-1"}, "cancel_task"),
+        (
+            "nexus_candidate_dispose",
+            {"task_id": "t-1", "disposition": "REJECTED", **AUTHORITY_ARGS},
+            "dispose_candidate",
+        ),
+        ("nexus_task_reconcile", {"task_id": "t-1"}, "reconcile_task"),
+    ],
+)
+def test_degraded_gateway_cleanup_tools_reach_their_service_call(
+    pair, monkeypatch, tool, arguments, service_call
+):
+    gateway = _degraded_gateway(pair, monkeypatch)
+    spy = _SpyService()
+    gateway.service = spy
+    result = _call(gateway, tool, arguments)
+    assert result["isError"] is False, result
+    assert spy.calls == [(service_call, "t-1")]
+    assert "CONTROLLER_BINDING_INVALID" not in str(result)
 
 
 def test_direct_canonical_finish_is_refused_with_a_separate_controller(pair, monkeypatch):

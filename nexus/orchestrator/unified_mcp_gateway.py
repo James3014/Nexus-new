@@ -4650,6 +4650,7 @@ class UnifiedMCPGateway:
             raise GatewayInputError(f"WORKER_CANDIDATE_UNKNOWN_FIELDS:{','.join(unknown)}")
         if arguments.get("owner_confirmation") is not True:
             raise GatewayInputError("OWNER_CONFIRMATION_REQUIRED")
+        _require_bound_controller()
         authority_confirmation = arguments.get("authority_change_candidate_confirmation", False)
         if not isinstance(authority_confirmation, bool):
             raise GatewayInputError("AUTHORITY_CHANGE_CONFIRMATION_INVALID")
