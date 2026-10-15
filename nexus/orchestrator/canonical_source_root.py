@@ -302,9 +302,64 @@ def _controller_worktree_problem(controller: Path) -> Optional[str]:
     return None
 
 
-CANONICAL_SOURCE_ROOT = resolve_canonical_source_root()
+def resolve_canonical_source_root_at_startup(
+    env: Optional[Mapping[str, str]] = None,
+    *,
+    source_root: Optional[Path] = None,
+) -> tuple[Path, Optional[str]]:
+    """``(root, problem)`` for process start: a bad separate Controller degrades.
+
+    #2230: a separate Controller that fails its binding (or is gone) must not
+    crash-loop the Gateway at import.  The process then runs with the loaded
+    checkout as its canonical root (the pre-#1939 layout) and reports
+    ``problem``; every Controller effect is refused while degraded.  A broken
+    override that names the loaded checkout itself still fails as before.
+    """
+    environment = os.environ if env is None else env
+    loaded = (source_root or Path(__file__).resolve().parents[2]).resolve()
+    try:
+        return resolve_canonical_source_root(environment, source_root=loaded), None
+    except RuntimeError as exc:
+        raw = str(environment.get(CANONICAL_SOURCE_ROOT_ENV, "") or "").strip()
+        requested = Path(raw).expanduser() if raw else None
+        if (
+            requested is None
+            or not requested.is_absolute()
+            or _same_physical_directory(requested, loaded)
+        ):
+            raise
+        message = str(exc)
+        # Only our own Controller going bad (or away) degrades; a root from
+        # another repository is still refused outright.
+        foreign = message.startswith("NEXUS_CANONICAL_SOURCE_ROOT_SOURCE_MISMATCH:") and any(
+            message.endswith(":" + reason) for reason in _FOREIGN_ROOT_REASONS
+        )
+        degradable = message in _GONE_ROOT_ERRORS or (
+            message.startswith("NEXUS_CANONICAL_SOURCE_ROOT_SOURCE_MISMATCH:") and not foreign
+        )
+        if not degradable:
+            raise
+        match = re.match(r"[A-Z][A-Z0-9_:]{0,159}", message)
+        return loaded, match.group(0) if match else "CONTROLLER_UNUSABLE"
+
+
+_FOREIGN_ROOT_REASONS = ("DIFFERENT_REPOSITORY", "COMMON_DIR_UNREADABLE", "GITDIR_UNREADABLE")
+_GONE_ROOT_ERRORS = (
+    "NEXUS_CANONICAL_SOURCE_ROOT_MISSING",
+    "NEXUS_CANONICAL_SOURCE_ROOT_NOT_DIRECTORY",
+)
+
+
+CANONICAL_SOURCE_ROOT, CONTROLLER_BINDING_PROBLEM = resolve_canonical_source_root_at_startup()
 # True only when the deployer bound a separate Controller worktree (#1939).
 CONTROLLER_IS_SEPARATE = not _same_physical_directory(CANONICAL_SOURCE_ROOT, LOADED_SOURCE_ROOT)
+
+
+def controller_binding_status() -> dict[str, Optional[str]]:
+    """Public, path-free Controller state for /health and gateway status (#2230)."""
+    if CONTROLLER_BINDING_PROBLEM is not None:
+        return {"status": "DEGRADED", "reason": CONTROLLER_BINDING_PROBLEM}
+    return {"status": "SEPARATE" if CONTROLLER_IS_SEPARATE else "NOT_SEPARATE", "reason": None}
 
 
 def resolve_rdc_repo_root(

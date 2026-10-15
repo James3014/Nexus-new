@@ -78,9 +78,11 @@ from nexus.orchestrator.canonical_mcp_ingress import (
     reject_caller_route_overrides,
 )
 from nexus.orchestrator.canonical_source_root import (
+    CONTROLLER_BINDING_PROBLEM,
     CONTROLLER_IS_SEPARATE,
     LOADED_SOURCE_ROOT,
     bound_controller_problem,
+    controller_binding_status,
 )
 from nexus.orchestrator.execution_readiness import (
     _COMPLETION_REQUIRED_CAPABILITIES,
@@ -604,6 +606,10 @@ def _require_bound_controller(expected_head: Optional[str] = None) -> None:
     moved between the check and the bind is refused.  Without a separate
     Controller this is a no-op.
     """
+    if CONTROLLER_BINDING_PROBLEM is not None:
+        # Degraded start (#2230): the canonical root fell back to the loaded
+        # deployment, which must never receive a Controller effect.
+        raise GatewayInputError(f"CONTROLLER_BINDING_INVALID:DEGRADED:{CONTROLLER_BINDING_PROBLEM}")
     if not CONTROLLER_IS_SEPARATE:
         return
     reason = bound_controller_problem(Path(CANONICAL_SOURCE_ROOT), Path(LOADED_SOURCE_ROOT))
@@ -6085,6 +6091,7 @@ class UnifiedMCPGateway:
             "route_authority": "CapabilityPlanner",
             "execution_lanes": ["DIRECT_CANONICAL", "ASSISTED_CANONICAL", "ISOLATED_TARGET"],
             "canonical_repo_root": str(CANONICAL_SOURCE_ROOT),
+            "controller_binding": controller_binding_status(),
             "github_observer": github_observer_runtime_identity(),
             "core_provenance": gateway_core_provenance(),
             "lifecycle": lifecycle,
@@ -7774,6 +7781,10 @@ class UnifiedMCPGateway:
         _require_bound_controller()
         lane = _text(arguments.get("execution_lane"), "execution_lane").upper()
         if lane == "DIRECT_CANONICAL":
+            if CONTROLLER_IS_SEPARATE:
+                # #2230: a Direct commit puts non-tasks/ code into the Controller,
+                # which the next Gateway start would refuse.  Use ISOLATED_TARGET.
+                raise GatewayInputError("DIRECT_CANONICAL_FORBIDDEN_WITH_SEPARATE_CONTROLLER")
             request = dict(arguments.get("request") or {})
             if not request:
                 task_id = _text(arguments.get("task_id"), "task_id")

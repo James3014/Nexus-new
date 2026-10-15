@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -401,3 +402,131 @@ def test_copied_gitdir_posing_as_a_primary_worktree_is_refused(pair, tmp_path):
         "DIFFERENT_REPOSITORY",
         "COMMON_DIR_UNREADABLE",
     }
+
+
+# ----------------------------------------------- #2230: prevention + safety net
+
+
+def test_startup_degrades_instead_of_crashing_on_a_bad_own_controller(pair):
+    loaded, controller, _ = pair
+    _commit(controller, "nexus/evil.py", "x = 1\n", "direct commit")
+    root, problem = roots.resolve_canonical_source_root_at_startup(
+        {roots.CANONICAL_SOURCE_ROOT_ENV: str(controller)}, source_root=loaded
+    )
+    assert root == loaded.resolve()
+    assert problem == "NEXUS_CANONICAL_SOURCE_ROOT_SOURCE_MISMATCH:CONTROLLER_CHANGES_OUTSIDE_TASKS"
+
+
+def test_startup_degrades_when_the_controller_is_gone(pair, tmp_path):
+    loaded, _, _ = pair
+    root, problem = roots.resolve_canonical_source_root_at_startup(
+        {roots.CANONICAL_SOURCE_ROOT_ENV: str(tmp_path / "pruned")}, source_root=loaded
+    )
+    assert root == loaded.resolve()
+    assert problem == "NEXUS_CANONICAL_SOURCE_ROOT_MISSING"
+
+
+def test_startup_still_refuses_a_root_from_another_repository(pair, tmp_path):
+    loaded, _, _ = pair
+    other = tmp_path / "other"
+    other.mkdir()
+    _git(other, "init", "-q")
+    _commit(other, "README.md", "x\n", "other")
+    with pytest.raises(RuntimeError, match="DIFFERENT_REPOSITORY"):
+        roots.resolve_canonical_source_root_at_startup(
+            {roots.CANONICAL_SOURCE_ROOT_ENV: str(other)}, source_root=loaded
+        )
+
+
+def test_real_gateway_import_starts_degraded_not_crash_looping(tmp_path):
+    """A pruned Controller no longer crash-loops the real Gateway module import."""
+    repo = Path(__file__).resolve().parents[3]
+    code = (
+        "from nexus.orchestrator import unified_mcp_gateway as g;"
+        "from nexus.orchestrator import canonical_source_root as r;"
+        "print(r.controller_binding_status()['status'], g.CONTROLLER_BINDING_PROBLEM)"
+    )
+    env = {
+        **os.environ,
+        roots.CANONICAL_SOURCE_ROOT_ENV: str(tmp_path / "controllers" / "a1-pruned"),
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=repo,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+    assert result.stdout.split() == ["DEGRADED", "NEXUS_CANONICAL_SOURCE_ROOT_MISSING"]
+
+
+def test_degraded_gateway_refuses_every_controller_effect_and_reports_it(pair, monkeypatch):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+    import scripts.ops.nexus_mcp_gateway_http as http_module
+
+    loaded, _, _ = pair
+    _allow_owner_effect_authority(monkeypatch)
+    monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", loaded)
+    monkeypatch.setattr(gateway_module, "LOADED_SOURCE_ROOT", loaded)
+    monkeypatch.setattr(gateway_module, "CONTROLLER_IS_SEPARATE", False)
+    monkeypatch.setattr(
+        gateway_module, "CONTROLLER_BINDING_PROBLEM", "NEXUS_CANONICAL_SOURCE_ROOT_MISSING"
+    )
+    monkeypatch.setattr(roots, "CONTROLLER_BINDING_PROBLEM", "NEXUS_CANONICAL_SOURCE_ROOT_MISSING")
+    gateway = gateway_module.UnifiedMCPGateway(service=FakeService())
+    response = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 9,
+        "method": "tools/call",
+        "params": {
+            "name": "nexus_task_card_create",
+            "arguments": {
+                **AUTHORITY_ARGS,
+                "owner_confirmation": True,
+                "campaign_id": "deg",
+                "task_id": "card",
+                "objective": "x",
+                "allowed_files": ["README.md"],
+                "verifier_commands": ["git diff --check"],
+            },
+        },
+    })
+    assert response["result"]["isError"] is True
+    assert "CONTROLLER_BINDING_INVALID:DEGRADED" in response["result"]["structuredContent"]["error"]
+    assert not (loaded / "tasks" / "deg").exists()
+    monkeypatch.setattr(http_module, "LOADED_SOURCE_ROOT", loaded)
+    identity = http_module.runtime_identity()
+    assert identity["status"] == "degraded"
+    assert identity["controller_binding"] == {
+        "status": "DEGRADED",
+        "reason": "NEXUS_CANONICAL_SOURCE_ROOT_MISSING",
+    }
+
+
+def test_direct_canonical_finish_is_refused_with_a_separate_controller(pair, monkeypatch):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    loaded, controller, head = pair
+    monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", controller)
+    monkeypatch.setattr(gateway_module, "LOADED_SOURCE_ROOT", loaded)
+    monkeypatch.setattr(gateway_module, "CONTROLLER_IS_SEPARATE", True)
+    gateway = gateway_module.UnifiedMCPGateway(service=FakeService())
+    with pytest.raises(gateway_module.GatewayInputError, match="DIRECT_CANONICAL_FORBIDDEN"):
+        gateway._finish({"execution_lane": "DIRECT_CANONICAL", "task_id": "t", "base_sha": head})
+    assert _git(controller, "rev-parse", "HEAD") == head
+
+
+def test_direct_lane_is_never_chosen_with_a_separate_controller(monkeypatch):
+    from nexus.orchestrator import self_hosted_task_service as service
+
+    monkeypatch.setattr(roots, "CONTROLLER_IS_SEPARATE", True)
+    lane = service.resolve_execution_lane({
+        "execution_lane": "DIRECT_CANONICAL",
+        "primary_agent": True,
+    })
+    assert lane["execution_lane"] == "ISOLATED_TARGET"
+    assert "separate_controller_direct_forbidden" in lane["blockers"]
