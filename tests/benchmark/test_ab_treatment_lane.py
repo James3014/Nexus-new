@@ -2100,3 +2100,356 @@ def test_hyper_counts_only_with_more_than_one_stage1_candidate() -> None:
     )
     lane.attest_row(pool, {"with_nexus_calls": 2})
     assert {"hyper", "multi_candidate"} <= set(pool["treatment_applied"])
+
+
+# --------------------------------------------------------------------------- merged #2211: real wiring
+
+
+@pytest.fixture
+def isolated_staging(tmp_path: Path, monkeypatch):
+    """#2211 hidden-test staging with a private parent (same isolation as its own tests)."""
+
+    from scripts.bench import hidden_test_staging as staging_mod
+
+    monkeypatch.setattr(staging_mod, "_STAGING_PARENT", tmp_path / "cache" / "nexus-bench-hidden")
+    for name in ("_ACTIVE", "_RUN_ROOTS", "_IN_MEMORY_SHAS"):
+        monkeypatch.setattr(staging_mod, name, {})
+    monkeypatch.setattr(staging_mod, "_QUARANTINED", set())
+    monkeypatch.setattr(staging_mod, "_RUN_ABORT", [])
+    monkeypatch.setattr(staging_mod, "_RUN_RECORD_PATH", [])
+    yield staging_mod
+
+    def unlock(path: Path) -> None:
+        if path.is_symlink() or not path.exists():
+            return
+        if path.is_dir():
+            os.chmod(path, 0o700)
+            for child in path.iterdir():
+                unlock(child)
+        else:
+            os.chmod(path, 0o600)
+
+    unlock(tmp_path)
+
+
+def _real_barrier() -> bool:
+    from nexus.engine.sandboxed_lane import os_sandbox_available
+
+    pytest_isolated = (
+        subprocess.run(
+            [sys.executable, "-I", "-c", "import pytest"], capture_output=True, check=False
+        ).returncode
+        == 0
+    )
+    return bool(os_sandbox_available()) and pytest_isolated
+
+
+HARD_TARGET_BAD = "def level(value):\n    return value\n"
+HARD_TARGET_GOOD = "def level(value):\n    return value if value else 'unknown'\n"
+HARD_IMPORT = (
+    "import importlib.util\nfrom pathlib import Path\n"
+    "_S = importlib.util.spec_from_file_location('t', Path(__file__).resolve().parent / 'target.py')\n"
+    "_M = importlib.util.module_from_spec(_S)\n_S.loader.exec_module(_M)\n"
+)
+
+
+def _hard_v1_shaped_task(root: Path):
+    """A hard_v1-shaped fixture: bench_fixtures/online_ab_hard_v1/<dir>/{target,test_visible,test_hidden}.py."""
+
+    from scripts.bench.capability_ab_runner import CapabilityTask
+
+    case = root / "bench_fixtures" / "online_ab_hard_v1" / "level-blank"
+    case.mkdir(parents=True)
+    (case / "target.py").write_text(
+        "def level(value):\n    raise NotImplementedError\n", encoding="utf-8"
+    )
+    (case / "test_visible.py").write_text(
+        HARD_IMPORT + "\ndef test_v():\n    assert _M.level('x') == 'x'\n", encoding="utf-8"
+    )
+    (case / "test_hidden.py").write_text(
+        HARD_IMPORT + "\ndef test_h():\n    assert _M.level('') == 'unknown'\n", encoding="utf-8"
+    )
+    rel = "bench_fixtures/online_ab_hard_v1/level-blank"
+    task = CapabilityTask(
+        id="oabh-level-blank",
+        difficulty="hard",
+        task_type="public_bugfix",
+        task_desc="Blank levels map to unknown.",
+        target_file=f"{rel}/target.py",
+        test_file=f"{rel}/test_visible.py",
+        success_criteria="patch_and_tests_pass",
+        repo_kind="neutral_fixture",
+        hidden_test_file=f"{rel}/test_hidden.py",
+    )
+    return task, str(case / "target.py"), str(case / "test_visible.py")
+
+
+@pytest.mark.parametrize("shape", ["p16", "hard_v1"])
+def test_counted_treatment_row_inside_staging_with_confined_rescore(
+    tmp_path: Path, monkeypatch, isolated_staging, shape: str
+) -> None:
+    """Merged #2211, zero model calls: the with-Nexus row runs inside ``staged_hidden_test`` (the
+    hidden test is absent while the product runs), then the first-attempt re-score goes through
+    the strict scorer's confined ``run_pytest_dir_copy`` and the visible re-run through the seam's
+    ``run_visible_test_confined``. Without an OS barrier (Linux CI) both refuse: never unconfined."""
+
+    from scripts.bench.capability_ab_runner import _materialize_fixture, load_tasks, run_with_nexus
+    from scripts.bench.capability_ab_runner import _run_process_group as real_run_process_group
+
+    monkeypatch.setenv("NEXUS_CONFINE_VISIBLE_TEST", "1")
+    ws = tmp_path / "ws"  # the workspace; the staging parent (tmp_path/cache) stays outside it
+    ws.mkdir()
+    capture = tmp_path / "captures"
+    capture.mkdir(mode=0o700)
+    for name, value in {
+        "NEXUS_BENCH_PROMPT_CAPTURE_DIR": str(capture),
+        "NEXUS_BENCH_CAPTURE_RUN_ID": "run1",
+        "NEXUS_BENCH_ARM": "with_nexus",
+        "NEXUS_BENCH_NO_TASK_HINTS": "1",
+        "NEXUS_VALUE_HIDDEN_VERIFIER": "1",
+        "NEXUS_SYMMETRIC_PROMPT": "1",
+        "NEXUS_BENCH_LANE": "treatment",
+        "NEXUS_BENCH_TREATMENT_MAX_MODEL_CALLS": "4",
+        "NEXUS_BENCH_COUNTED_FIRST_ATTEMPT": "1",
+        "NEXUS_BENCH_NO_HIDDEN_FEEDBACK": "1",
+        "NEXUS_BENCH_DISABLE_HIDDEN_RETRY": "1",
+        "NEXUS_BENCH_DISABLE_DETERMINISTIC_RESCUE": "1",
+    }.items():
+        monkeypatch.setenv(name, value)
+    if shape == "p16":
+        tasks = load_tasks(REPO_ROOT / "scripts" / "bench" / "public_benchmark_nexus_value_v1.json")
+        task = next(t for t in tasks if t.id == "nexus-value-trust-002")
+        target_file, visible = _materialize_fixture(ws, task)
+        bad, good = BAD_CLASSIFY, GOOD_CLASSIFY
+    else:
+        task, target_file, visible = _hard_v1_shaped_task(ws)
+        bad, good = HARD_TARGET_BAD, HARD_TARGET_GOOD
+    key = f"{task.id}__{task.trial_index}"
+    monkeypatch.setenv("NEXUS_BENCH_CAPTURE_KEY", key)
+    hidden = Path(visible).with_name("test_hidden.py")
+    seen_absent: list[bool] = []
+
+    def fake_run_process_group(cmd, *, cwd, env, timeout_sec):
+        if cmd[:3] == ["uv", "run", "scripts/engine/nexus_cli.py"]:
+            seen_absent.append(not hidden.exists())  # staged out for the whole product run
+            trace: dict = {}
+            for index, code in enumerate([bad, good]):
+                prompt = "Task: fix\n" + (SELF_HEAL_SENTENCE if index else "") + "\n"
+                record = capture_record(
+                    ["--output-format", "json", "--print", prompt],
+                    "",
+                    {
+                        "NEXUS_BENCH_ARM": "with_nexus",
+                        "NEXUS_BENCH_CAPTURE_KEY": key,
+                        "NEXUS_BENCH_CAPTURE_RUN_ID": "run1",
+                    },
+                )
+                path = write_record(record, str(capture))
+                write_response(
+                    env["NEXUS_BENCH_RESPONSE_CAPTURE_DIR"], path.name, _agy_stdout(code), 0
+                )
+                product_lane.record_model_candidate(
+                    trace, code, "llm" if index == 0 else "llm_self_heal"
+                )
+            Path(target_file).write_text(good, encoding="utf-8")
+            payload = {
+                "status": "FAILED",
+                "semantic_status": "UNVERIFIED",
+                "result": {
+                    "elapsed_sec": 0.1,
+                    "error": "pytest_failed",
+                    "report": {
+                        "attempt_count": 2,
+                        "model_calls": 2,
+                        "model_patch_generated": True,
+                        "total_tokens": 200,
+                        "winner_source": "llm_self_heal",
+                        "model_candidate_sha256": _sha(good),
+                        "learning_trace": trace,
+                    },
+                },
+            }
+            return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(payload), stderr="")
+        return real_run_process_group(cmd, cwd=cwd, env=env, timeout_sec=timeout_sec)
+
+    monkeypatch.setattr(
+        "scripts.bench.capability_ab_runner._run_process_group", fake_run_process_group
+    )
+    with isolated_staging.staged_hidden_test(
+        enabled=True,
+        repo_root=ws,
+        test_file=visible,
+        task_id=task.id,
+        trial_index=task.trial_index,
+    ) as staging:
+        assert staging is not None and not hidden.exists()
+        row = run_with_nexus(
+            repo_root=ws,
+            task=task,
+            target_file=target_file,
+            test_file=visible,
+            timeout_sec=120,
+            force_flow="hyper_sprint",
+            runner_mode="subprocess",
+            with_llm_mode="all",
+            strict_llm_baseline=True,
+        )
+    assert hidden.exists() and seen_absent == [True]
+    row["mode"] = "with_nexus"
+    lane.rescore_rows(
+        [row],
+        run_hidden=lane.confined_hidden_runner(ws),
+        run_visible=lane.confined_visible_runner(ws),
+    )
+    outputs = row["treatment_visible_outputs"]
+    assert set(outputs) == {_sha(bad)} and outputs[_sha(bad)].strip()  # non-empty for both shapes
+    assert row["runner_candidate_sha256s"] == [_sha(bad), _sha(good)]
+    assert row["model_calls"] == 2 and row["tokens"] == 200
+    apply_strict_llm_baseline_classification([row])
+    if _real_barrier():
+        assert row["first_attempt_status"] == "verified_confined_rescore", row.get(
+            "first_attempt_error"
+        )
+        assert row["first_attempt_hidden_passed"] is False and row["first_attempt"] is False
+        assert row["hidden_verifier_passed"] is True and row["after_treatment"] is True
+        # the visible test really ran on the first candidate (confined)
+        assert ("failed" if shape == "p16" else "passed") in outputs[_sha(bad)]
+    else:
+        assert row["first_attempt_status"] == "first_attempt_unverifiable"
+        assert "confinement_unavailable" in outputs[_sha(bad)]
+        assert row["first_attempt"] is False
+
+
+def test_round_two_audit_accepts_the_real_confined_visible_output(tmp_path: Path) -> None:
+    """The [FAILURE] tail the product sends (seam ``run_visible_test_confined`` stdout) matches
+    the runner's own re-run of the same function after normalisation; a hint still fails."""
+
+    from nexus.services import post_candidate_seam as seam
+
+    bad = "def classify(smoke_passed, semantic_evidence):\n    return 'closed'\n"
+    case = tmp_path / "ws" / ".nexus" / "bench_cases" / "nexus-value-trust-002"
+    case.mkdir(parents=True)
+    (case / "target.py").write_text(SOURCE, encoding="utf-8")
+    (case / "test_visible.py").write_text(
+        HARD_IMPORT
+        + "\ndef test_v():\n    assert _M.classify(False, {'verified': True}) == 'open'\n",
+        encoding="utf-8",
+    )
+    (case / "test_hidden.py").write_text(HIDDEN, encoding="utf-8")
+    runner = lane.confined_visible_runner(tmp_path / "ws")
+    recorded = runner(bad, SOURCE, str(case / "target.py"), str(case / "test_visible.py"), 60)
+    product, _executed = seam.run_visible_test_confined(
+        target_path=case / "target.py",
+        visible_test_path=case / "test_visible.py",
+        original_code=SOURCE,
+        candidate_code=bad,
+        timeout_sec=60,
+        workspace_root=tmp_path / "ws",
+    )
+    tail = (product.stdout or product.stderr or "")[-1200:]
+    rows = _rows(candidates={_sha(bad): bad, _sha(FINAL): FINAL})
+    rows[1]["treatment_visible_outputs"] = {_sha(bad): f"{recorded.stdout}\n{recorded.stderr}"}
+    report = _audit(tmp_path / "a", _round2(failure=tail, candidate=bad), rows=rows)
+    assert report["status"] == "PASS", report["tasks"][0]["treatment_round_findings"]
+    hinted = _audit(
+        tmp_path / "h",
+        _round2(failure=tail, candidate=bad, extra="hint: return open first.\n"),
+        rows=rows,
+    )
+    assert hinted["status"] == "FAIL"
+
+
+def test_real_seam_receipts_count_only_when_attested_with_seam_evidence(tmp_path: Path) -> None:
+    """treatment_applied takes sandbox/ultra_review from #2211's seam receipts overlaid by #2212's
+    projection (attested real, trigger post_candidate_seam:*, evidence ids); a receipt with the
+    same attestation but no seam trigger does not count."""
+
+    from nexus.research.flow.unified_capability_projection import (
+        overlay_unified_capability_receipts,
+        project_unified_capability_stages,
+    )
+    from nexus.services import post_candidate_seam as seam
+    from tests.services.test_post_candidate_seam import CANDIDATE, ORIGINAL, _case, _runtime_receipt
+
+    case = _case(tmp_path)
+
+    def factory(name: str):
+        def invoke(context):
+            return {
+                "invoked": True,
+                "gate_passed": True,
+                "evidence_refs": [f"ev_{name}_run_001"],
+                "physical_callable": f"tests.fake.{name}",
+                "response": {
+                    "status": "SUCCEEDED",
+                    "outcome": {
+                        "semantic_status": "SUCCEEDED",
+                        "exit_code": 0,
+                        "stdout_sha256": "ab" * 32,
+                        "output_tail": "1 passed",
+                        "simulated": False,
+                        "sandbox_executed": True,
+                        "confined": True,
+                        "executed_checks": ["visible_test"],
+                        "result": "PASS",
+                    },
+                },
+            }
+
+        return invoke
+
+    receipt = seam.run_seam_for_candidate(
+        task_id="auto-flow:demo",
+        unified_receipt=_runtime_receipt("sandbox", "ultra_review"),
+        target_path=case / "target.py",
+        visible_test_path=case / "test_visible.py",
+        original_code=ORIGINAL,
+        candidate_code=CANDIDATE,
+        invoker_factory=factory,
+    )
+    flow = overlay_unified_capability_receipts(
+        [{"name": n, "selected": True, "invoked": False} for n in ("sandbox", "ultra_review")],
+        project_unified_capability_stages([receipt]),
+    )
+    row = _treated_row(capability_receipts=flow)
+    lane.attest_row(row, {"with_nexus_calls": 2, "self_heal_rounds_observed": 1})
+    assert {"sandbox", "ultra_review"} <= set(row["treatment_applied"])
+    stripped = [{**item, "trigger_source": ""} for item in flow]
+    plain = _treated_row(capability_receipts=stripped)
+    lane.attest_row(plain, {"with_nexus_calls": 2, "self_heal_rounds_observed": 1})
+    assert not {"sandbox", "ultra_review"} & set(plain["treatment_applied"])
+
+
+def test_lane_gate_passes_on_the_merged_tree_only_with_confinement(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """With #2211 merged the real modules satisfy the gate; NEXUS_CONFINE_VISIBLE_TEST must be 1
+    (the runner sets it for the counted strict configuration the lane requires)."""
+
+    monkeypatch.setenv("NEXUS_CONFINE_VISIBLE_TEST", "0")
+    assert lane.hidden_staging_ready(_fair_args())[0] is False
+    monkeypatch.setenv("NEXUS_CONFINE_VISIBLE_TEST", "1")
+    assert lane.hidden_staging_ready(_fair_args()) == (True, "")
+    seen = _cli(monkeypatch, tmp_path, *FAIR_CLI, "--lane", "treatment")  # real gate, no fixture
+    assert seen["lane"] == "treatment"
+    assert os.environ.get("NEXUS_CONFINE_VISIBLE_TEST") == "1"
+
+
+def test_treatment_replay_proof_passes_self_heal_and_fails_a_hint(tmp_path: Path) -> None:
+    """The 8th zero-model proof assertion: replaying a run's captured bare + round-1 prompts with a
+    synthetic self-heal round 2 passes the treatment audit; the same round with a hint fails."""
+
+    from scripts.bench.treatment_replay_proof import run_proof, self_heal_round
+
+    calls = tmp_path / "run" / "prompt_capture" / "run-1" / "calls"
+    calls.mkdir(parents=True, mode=0o700)
+    _capture(calls, "without_nexus", BARE)
+    _capture(calls, "with_nexus", ROUND1)
+    assert run_proof(tmp_path / "run", _material()) == {
+        "h_round2_self_heal_passes": [],
+        "h_round2_hint_fails": [],
+    }
+    assert SELF_HEAL_SENTENCE in self_heal_round(ROUND1)
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert run_proof(empty, _material())["h_round2_self_heal_passes"]  # nothing replayed = FAIL

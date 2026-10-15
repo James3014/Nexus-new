@@ -637,8 +637,9 @@ def confined_visible_runner(repo_root: str | Path) -> RunVisible:
     def run(
         code: str, original: str, target_file: str, visible_test_file: str, timeout: int
     ) -> subprocess.CompletedProcess[str]:
+        bound_module("nexus.engine.confined_test_runner")  # the seam runs it; never a stub
         seam = bound_module("nexus.services.post_candidate_seam")
-        completed, executed = seam.run_visible_test_confined(
+        completed, _executed = seam.run_visible_test_confined(
             target_path=target_file,
             visible_test_path=visible_test_file,
             original_code=original,
@@ -646,8 +647,8 @@ def confined_visible_runner(repo_root: str | Path) -> RunVisible:
             timeout_sec=timeout,
             workspace_root=repo_root,
         )
-        if not executed:
-            raise RuntimeError(f"confinement_unavailable:{completed.stderr}"[:300])
+        # Not executed: nothing ran; the refusal text is exactly what the product's own
+        # confined visible run would have put into a failure tail (same function).
         return completed
 
     return run

@@ -173,7 +173,11 @@ PRODUCT_ERROR_CODES = frozenset({
     "semantic_guard_zero_delta",
     "semantic_guard_low_delta_feature",
     "semantic_guard_syntax_warning",
+    "file_lock_denied",
+    "confinement_unavailable:no_visible_test",
 })
+# The confined visible evaluation's refusal for companion edits (#2211 sprint_service).
+_MULTI_FILE_RE = re.compile(r"^confinement_unavailable:multi_file:[0-9]{1,3}$")
 # str(subprocess.TimeoutExpired) of the sprint's own visible pytest argv (sprint_pytest_cmd):
 # [<python>, '-m', 'pytest', '-q', '--maxfail=1', '--', <repo-relative visible test>].
 _TIMEOUT_RE = re.compile(
@@ -1207,7 +1211,7 @@ def audit_treatment_round(
             or (first_failure_line and any(item.endswith(output_line) for item in visible_lines))
         ):
             continue
-        if line in PRODUCT_ERROR_CODES or line in syntax_lines:
+        if line in PRODUCT_ERROR_CODES or line in syntax_lines or _MULTI_FILE_RE.match(line):
             continue
         timeout = _TIMEOUT_RE.match(line)
         if timeout and not Path(timeout.group(2)).name.lower().startswith("test_hidden"):

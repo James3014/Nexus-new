@@ -227,6 +227,7 @@
 | scripts/bench/public_lane_contract.py | tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_accepts_causal_runtime_mount, tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_rejects_quarantined_mount | active | high | benchmark_contract |
 | scripts/bench/treatment_lane.py | tests/benchmark/test_ab_treatment_lane.py, tests/benchmark/test_ab_prompt_symmetry_audit.py | active | high | ab_treatment_lane_fairness_contract |
 | scripts/bench/run_lane.py | tests/benchmark/test_ab_treatment_lane.py | active | medium | ab_treatment_lane_command_contract |
+| scripts/bench/treatment_replay_proof.py | tests/benchmark/test_ab_treatment_lane.py | active | medium | ab_treatment_lane_proof_contract |
 | scripts/bench/analyze_run.py | tests/benchmark/test_ab_treatment_lane.py | active | medium | ab_treatment_lane_report_contract |
 | scripts/bench | tests/benchmark | active | medium | benchmark_contract |
 | scripts/local_heal/run_controlled_local_solve_fixture.py | tests/integration/test_controlled_local_solve_fixture_runner.py | active | high | local_heal_controlled_solve_fixture_contract |
