@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -63,6 +64,7 @@ __all__ = [
     "AGY_PERMISSION_MODE_PLAN",
     "AGY_READ_ONLY_ROLES",
     "AgyWorkerAdapter",
+    "ClineWorkerAdapter",
     "CodexWorkerAdapter",
     "DirectCliWorkerAdapter",
     "OllamaPatchWorkerAdapter",
@@ -71,6 +73,8 @@ __all__ = [
     "agy_delivery_failure",
     "agy_permission_bypass_flags",
     "canonical_checkout_fingerprint",
+    "cline_delivery_failure",
+    "cline_permission_bypass",
 ]
 
 # Backwards-compatible name for the single-checkout fingerprint.
@@ -269,6 +273,193 @@ class DirectCliWorkerAdapter:
             merge_performed=False,
             push_performed=False,
             failure_reason=None if outcome == WorkerOutcome.EXECUTION_COMPLETED else f"{self.provider} execution did not complete successfully",
+        )
+
+
+# Cline reports a refused tool as ``execution-denied`` with the default
+# reason "Tool execution denied by user." (observed in the cline 3.0.69 CLI).
+_CLINE_DENIAL_MARKERS = ("execution-denied", "execution denied", "denied by user")
+CLINE_PERMISSION_MODE = "auto_approve_false"
+
+
+def cline_delivery_failure(stdout: bytes, stderr: bytes) -> Optional[str]:
+    """Typed non-delivery reason for a Cline run that exited 0, else ``None``.
+
+    Delivery requires a JSON ``run_result`` event whose ``finishReason`` is
+    not ``error``; any denied tool action makes the run non-delivery (#2195).
+    """
+    text = stdout.decode("utf-8", errors="replace")
+    combined = (text + "\n" + stderr.decode("utf-8", errors="replace")).lower()
+    if any(marker in combined for marker in _CLINE_DENIAL_MARKERS):
+        return "cline_permission_denied"
+    results: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        try:
+            value = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(value, dict) and value.get("type") == "run_result":
+            results.append(value)
+    if not results:
+        return "cline_output_unparseable"
+    finish = str(results[-1].get("finishReason") or "").lower()
+    if not finish or finish == "error":
+        return "cline_status_not_success"
+    return None
+
+
+# Cline flag spellings, named once so the #1912/#2195 scan sees one site each.
+CLINE_AUTO_APPROVE_FLAG = "--auto-approve"
+CLINE_YOLO_FLAGS = frozenset({"--yolo", "-y"})
+
+
+def cline_permission_bypass(argv: tuple[str, ...]) -> bool:
+    """True when the option part of a Cline argv auto-approves tools (#2195).
+
+    Cline auto-approves by default, so the argv must carry exactly one
+    explicit auto-approve flag set to ``false`` and no yolo flag.  The last
+    element is the prompt and is not inspected.
+    """
+    options = list(argv[:-1])
+    if any(
+        item in CLINE_YOLO_FLAGS or item.startswith(CLINE_AUTO_APPROVE_FLAG + "=")
+        for item in options
+    ):
+        return True
+    approvals = [
+        options[index + 1] if index + 1 < len(options) else ""
+        for index, item in enumerate(options)
+        if item == CLINE_AUTO_APPROVE_FLAG
+    ]
+    return approvals != ["false"]
+
+
+def _cline_target_args(prompt: str, model: str, target: str) -> tuple[str, ...]:
+    return ("--cwd", target, *_cline_args(prompt, model))
+
+
+class ClineWorkerAdapter(DirectCliWorkerAdapter):
+    """Cline under the #1912 write-admission model (#2195).
+
+    No auto-approval: Cline runs with tool auto-approval off in the leased
+    target only, the protected checkouts are fingerprinted before and after
+    the run, and a denied tool action is non-delivery.
+    """
+
+    def __init__(self, canonical_root: Optional[Path | str] = None):
+        super().__init__("cline", "cline", "NEXUS_CLINE_WORKER_MODEL", "glm-5.2", _cline_args)
+        self._canonical_root = Path(canonical_root) if canonical_root is not None else None
+
+    def invoke(
+        self,
+        contract: Any,
+        lease: Any,
+        *,
+        prompt: str,
+        timeout_seconds: Optional[float] = None,
+        on_process_group: Any = None,
+        model: Optional[str] = None,
+    ) -> WorkerExecutionReceipt:
+        preflight = self.preflight()
+        if not preflight.ready:
+            raise WorkerProviderUnavailable(f"{self.provider}: {preflight.reason}")
+        target_path = Path(lease.target_worktree).resolve()
+        selected_model = str(model or os.getenv(self.model_env, self.default_model))
+        argv = _cline_target_args(prompt, selected_model, str(target_path))
+
+        def failed(reason: str) -> WorkerExecutionReceipt:
+            return WorkerExecutionReceipt(
+                provider=self.provider,
+                task_id=contract.task_id,
+                target_worktree=str(target_path),
+                worker_status=CliWorkerStatus.START_FAILED.value,
+                outcome=WorkerOutcome.FAILED.value,
+                exit_code=1,
+                executable_identity=preflight.executable or self.executable,
+                argv=argv,
+                stdout_sha256=CliWorkerResult.hash_bytes(b""),
+                stderr_sha256=CliWorkerResult.hash_bytes(b""),
+                wall_time_ms=0,
+                process_group_id=None,
+                process_group_killed=False,
+                timed_out=False,
+                provider_calls=0,
+                evidence_complete=False,
+                commit_created=False,
+                merge_performed=False,
+                push_performed=False,
+                failure_reason=reason,
+                provider_permission_mode=CLINE_PERMISSION_MODE,
+            )
+
+        if cline_permission_bypass(argv):
+            return failed("cline_command_shape_unsupported")
+        if hasattr(contract, "target_worktree_root"):
+            lease_failure = leased_target_failure(contract, lease)
+            if lease_failure is not None:
+                return failed(lease_failure.replace("agy_", "cline_", 1))
+        canonical = (
+            self._canonical_root
+            if self._canonical_root is not None
+            else _default_canonical_checkout_root()
+        )
+        plan = protected_checkout_plan(
+            target=target_path,
+            controller_repo_root=getattr(contract, "controller_repo_root", None),
+            canonical_source_root=canonical.resolve(),
+        )
+        if any(paths_overlap(target_path, root) for root, _ in plan):
+            return failed("cline_target_overlaps_canonical_checkout")
+        before = fingerprint_roots(plan)
+        if before is None:
+            return failed("canonical_checkout_snapshot_unavailable")
+        request = CliWorkerRequest(
+            executable=self.executable,
+            argv=argv,
+            cwd=str(target_path),
+            timeout_seconds=timeout_seconds or 900.0,
+        )
+        result = run_cli_worker(request, on_process_group=on_process_group)
+        failure_reason: Optional[str] = None
+        if result.status is CliWorkerStatus.TIMED_OUT:
+            outcome = WorkerOutcome.INCOMPLETE
+            failure_reason = f"{self.provider} execution did not complete successfully"
+        elif result.status is not CliWorkerStatus.COMPLETED or result.exit_code != 0:
+            outcome = WorkerOutcome.FAILED
+            failure_reason = f"{self.provider} execution did not complete successfully"
+        else:
+            failure_reason = cline_delivery_failure(result.stdout, result.stderr)
+            outcome = WorkerOutcome.FAILED if failure_reason else WorkerOutcome.EXECUTION_COMPLETED
+        after = fingerprint_roots(plan)
+        if after is None:
+            outcome, failure_reason = WorkerOutcome.FAILED, "canonical_snapshot_failed"
+        elif after != before:
+            outcome, failure_reason = (
+                WorkerOutcome.FAILED,
+                "canonical_checkout_integrity_violation",
+            )
+        return WorkerExecutionReceipt(
+            provider=self.provider,
+            task_id=contract.task_id,
+            target_worktree=str(target_path),
+            worker_status=result.status.value,
+            outcome=outcome.value,
+            exit_code=result.exit_code,
+            executable_identity=result.executable_identity,
+            argv=result.argv,
+            stdout_sha256=result.stdout_sha256,
+            stderr_sha256=result.stderr_sha256,
+            wall_time_ms=result.wall_time_ms,
+            process_group_id=result.process_group_id,
+            process_group_killed=result.process_group_killed,
+            timed_out=result.timed_out,
+            provider_calls=1,
+            evidence_complete=outcome == WorkerOutcome.EXECUTION_COMPLETED,
+            commit_created=False,
+            merge_performed=False,
+            push_performed=False,
+            failure_reason=None if outcome == WorkerOutcome.EXECUTION_COMPLETED else failure_reason,
+            provider_permission_mode=CLINE_PERMISSION_MODE,
         )
 
 
@@ -1104,12 +1295,19 @@ def _mimo_args(prompt: str, model: str) -> tuple[str, ...]:
 
 
 def _cline_args(prompt: str, model: str) -> tuple[str, ...]:
-    """Run Cline non-interactively against the isolated Target only."""
-    return ("--json", "--yolo", "--model", model, prompt)
+    """Run Cline non-interactively with tool auto-approval off (#2195)."""
+    return ("--json", CLINE_AUTO_APPROVE_FLAG, "false", "--model", model, prompt)
 
 
 def _grok_args(prompt: str, model: str) -> tuple[str, ...]:
     return ("--model", model, "--single", prompt, "--output-format", "json", "--no-alt-screen")
+
+
+
+def _cline_adapter() -> DirectCliWorkerAdapter:
+    # Typed as the base class so the pre-existing WorkerAdapter protocol
+    # finding on the registry keeps its identity (#2195).
+    return ClineWorkerAdapter()
 
 
 class WorkerRegistry:
@@ -1122,10 +1320,7 @@ class WorkerRegistry:
                 "grok",
                 DirectCliWorkerAdapter("grok", "grok", "NEXUS_GROK_WORKER_MODEL", "grok-4.5", _grok_args),
             )
-            adapters.setdefault(
-                "cline",
-                DirectCliWorkerAdapter("cline", "cline", "NEXUS_CLINE_WORKER_MODEL", "glm-5.2", _cline_args),
-            )
+            adapters.setdefault("cline", _cline_adapter())
             missing = set()
         unknown = set(adapters) - set(SUPPORTED_WORKER_PROVIDERS)
         if unknown:
@@ -1144,7 +1339,7 @@ class WorkerRegistry:
                 "opencode": DirectCliWorkerAdapter("opencode", "opencode", "NEXUS_OPENCODE_WORKER_MODEL", "opencode/big-pickle", _opencode_args),
                 "mimo": DirectCliWorkerAdapter("mimo", "mimo", "NEXUS_MIMO_WORKER_MODEL", "xiaomi/mimo-v2.5", _mimo_args),
                 "ollama": OllamaPatchWorkerAdapter(),
-                "cline": DirectCliWorkerAdapter("cline", "cline", "NEXUS_CLINE_WORKER_MODEL", "glm-5.2", _cline_args),
+                "cline": _cline_adapter(),
                 "grok": DirectCliWorkerAdapter("grok", "grok", "NEXUS_GROK_WORKER_MODEL", "grok-4.5", _grok_args),
             }
         )

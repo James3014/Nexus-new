@@ -51,6 +51,9 @@ SCANNED_FLAGS = (
     "--yolo",
     "--auto-approve",
     "--dangerously-bypass-approvals-and-sandbox",
+    # #2195: codex sandbox-off mode and deprecated approve-everything alias.
+    "danger-full-access",
+    "--full-auto",
 )
 
 # Reviewed allowlist: (path, flag) -> (max occurrences, reason with issue).
@@ -71,7 +74,11 @@ BYPASS_FLAG_ALLOWLIST: dict[tuple[str, str], tuple[int, str]] = {
         1,
         "#1912 test mock CLI that only parses the flag; never spawns a worker",
     ),
-    ("nexus/executors/worker_registry.py", "--yolo"): (1, "#2195 cline adapter argv"),
+    ("nexus/executors/worker_registry.py", "--auto-approve"): (
+        1,
+        "#2195 CLINE_AUTO_APPROVE_FLAG constant; argv pins it to false",
+    ),
+    ("nexus/executors/worker_registry.py", "--yolo"): (1, "#2195 CLINE_YOLO_FLAGS deny-list"),
     ("nexus/services/external_worker_runtime.py", "--auto-approve"): (
         1,
         "#2195 cline --auto-approve true|false bound to the request",
@@ -83,10 +90,6 @@ BYPASS_FLAG_ALLOWLIST: dict[tuple[str, str], tuple[int, str]] = {
     ("scripts/ops/nexus-external-worker-dispatch", "--auto-approve"): (
         2,
         "#2195 cline dispatcher flag",
-    ),
-    ("scripts/ops/start_codex_nexus_enforced.sh", "--dangerously-bypass-approvals-and-sandbox"): (
-        1,
-        "#2195 codex launcher",
     ),
 }
 

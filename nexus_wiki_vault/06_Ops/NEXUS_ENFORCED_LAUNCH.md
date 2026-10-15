@@ -97,6 +97,14 @@ bash ./scripts/ops/start_gemini_nexus_enforced.sh gemini-3-flash-preview yolo
 bash ./scripts/ops/start_codex_nexus_enforced.sh
 ```
 
+Codex runs under its own sandbox with `approval_policy="never"`; there is no
+bypass mode (#2195). The second argument is `workspace-write` (default; the old
+`full-auto` value maps to it) or `read-only`; anything else is refused. Each run
+works in a disposable detached worktree under `NEXUS_CODEX_WORK_ROOT` (default
+`$TMPDIR/nexus-codex-runs`, never inside the checkout); the checkout is
+fingerprinted before and after and any change fails the run (exit 5). A denied
+action (declined / rejected / sandbox-denied) is non-delivery (exit 4).
+
 If codex is not on PATH:
 ```bash
 CODEX_BIN=/absolute/path/to/codex \
