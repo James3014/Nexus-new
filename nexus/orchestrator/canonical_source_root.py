@@ -165,6 +165,17 @@ def bound_controller_problem(controller: Path, loaded: Path) -> Optional[str]:
     ]
     if not any(_same_physical_directory(path, controller) for path in registered):
         return "CONTROLLER_NOT_A_REGISTERED_WORKTREE"
+    # Detached: no branch operation (e.g. integration onto a checked-out
+    # branch) can move the Controller's working tree (#2230).
+    branch = subprocess.run(
+        ["git", "symbolic-ref", "-q", "HEAD"],
+        cwd=controller,
+        capture_output=True,
+        timeout=5,
+        check=False,
+    )
+    if branch.returncode == 0:
+        return "CONTROLLER_NOT_DETACHED"
     # The gitdir the Controller's .git points at must point back at this very
     # Controller, so a .git repointed at a third worktree's gitdir is refused.
     dot_git = controller / ".git"
@@ -317,16 +328,22 @@ def resolve_canonical_source_root_at_startup(
     """
     environment = os.environ if env is None else env
     loaded = (source_root or Path(__file__).resolve().parents[2]).resolve()
+    raw = str(environment.get(CANONICAL_SOURCE_ROOT_ENV, "") or "").strip()
+    requested = Path(raw).expanduser() if raw else None
+    separate = (
+        requested is not None
+        and requested.is_absolute()
+        and not _same_physical_directory(requested, loaded)
+    )
     try:
         return resolve_canonical_source_root(environment, source_root=loaded), None
+    except (subprocess.SubprocessError, OSError) as exc:
+        # A git call that timed out or failed (cold cache after a reboot).
+        if not separate:
+            raise
+        return loaded, f"CONTROLLER_CHECK_FAILED:{type(exc).__name__}"
     except RuntimeError as exc:
-        raw = str(environment.get(CANONICAL_SOURCE_ROOT_ENV, "") or "").strip()
-        requested = Path(raw).expanduser() if raw else None
-        if (
-            requested is None
-            or not requested.is_absolute()
-            or _same_physical_directory(requested, loaded)
-        ):
+        if not separate:
             raise
         message = str(exc)
         # Only our own Controller going bad (or away) degrades; a root from
@@ -343,7 +360,9 @@ def resolve_canonical_source_root_at_startup(
         return loaded, match.group(0) if match else "CONTROLLER_UNUSABLE"
 
 
-_FOREIGN_ROOT_REASONS = ("DIFFERENT_REPOSITORY", "COMMON_DIR_UNREADABLE", "GITDIR_UNREADABLE")
+# Only a positively proven other repository is refused at import; unreadable
+# metadata of our own Controller degrades (the fallback is the loaded checkout).
+_FOREIGN_ROOT_REASONS = ("DIFFERENT_REPOSITORY",)
 _GONE_ROOT_ERRORS = (
     "NEXUS_CANONICAL_SOURCE_ROOT_MISSING",
     "NEXUS_CANONICAL_SOURCE_ROOT_NOT_DIRECTORY",

@@ -85,6 +85,7 @@ def test_controller_not_descending_from_the_loaded_commit_is_refused(pair):
     _git(controller, "checkout", "-q", "--orphan", "other")
     _git(controller, "rm", "-rq", "--cached", ".")
     _commit(controller, "tasks/c/00-t.md", "card\n", "unrelated root")
+    _git(controller, "checkout", "-q", "--detach")  # Controllers are detached
     assert roots.bound_controller_problem(controller, loaded) == "LOADED_COMMIT_NOT_ANCESTOR"
     assert _git(loaded, "rev-parse", "HEAD") == head
 
@@ -530,3 +531,37 @@ def test_direct_lane_is_never_chosen_with_a_separate_controller(monkeypatch):
     })
     assert lane["execution_lane"] == "ISOLATED_TARGET"
     assert "separate_controller_direct_forbidden" in lane["blockers"]
+
+
+def test_startup_degrades_when_our_controller_metadata_is_broken(pair):
+    loaded, controller, _ = pair
+    (controller / ".git").unlink()  # half-deleted Controller: no gitfile
+    root, problem = roots.resolve_canonical_source_root_at_startup(
+        {roots.CANONICAL_SOURCE_ROOT_ENV: str(controller)}, source_root=loaded
+    )
+    assert root == loaded.resolve()
+    assert problem is not None and problem.startswith("NEXUS_CANONICAL_SOURCE_ROOT_")
+
+
+def test_startup_degrades_when_a_git_check_times_out(pair, monkeypatch):
+    loaded, controller, _ = pair
+    real = subprocess.run
+
+    def slow(argv, *args, **kwargs):
+        if list(argv[:2]) == ["git", "merge-base"] or "status" in argv:
+            raise subprocess.TimeoutExpired(argv, 5)
+        return real(argv, *args, **kwargs)
+
+    _commit(controller, "tasks/c/00-t.md", "card\n", "bind")
+    monkeypatch.setattr(roots.subprocess, "run", slow)
+    root, problem = roots.resolve_canonical_source_root_at_startup(
+        {roots.CANONICAL_SOURCE_ROOT_ENV: str(controller)}, source_root=loaded
+    )
+    assert root == loaded.resolve()
+    assert problem == "CONTROLLER_CHECK_FAILED:TimeoutExpired"
+
+
+def test_controller_with_a_branch_checked_out_is_refused(pair):
+    loaded, controller, _ = pair
+    _git(controller, "checkout", "-q", "-b", "nexus/integration/main")
+    assert roots.bound_controller_problem(controller, loaded) == "CONTROLLER_NOT_DETACHED"
