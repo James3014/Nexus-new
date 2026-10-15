@@ -1623,8 +1623,13 @@ def test_separate_controller_apply_refuses_symref_created_after_bind(tmp_path: P
     assert _git(root, "status", "--porcelain=v1", "--untracked-files=all") == ""
 
 
-def test_apply_update_ref_never_follows_an_integration_symref(tmp_path: Path):
-    """update-ref --no-deref: even without the separate-shape re-check, main never moves."""
+def test_apply_update_ref_never_follows_an_integration_symref(tmp_path: Path, monkeypatch):
+    """update-ref --no-deref: even with the apply-time in-use guard bypassed, main never moves."""
+    monkeypatch.setattr(
+        ControlledIntegrationManager,
+        "_require_integration_branch_not_in_use",
+        classmethod(lambda cls, root, branch: None),
+    )
     root, base, candidate = _repo(tmp_path)
     _git(root, "checkout", "main")
     _git(root, "symbolic-ref", _CANARY_REF, "refs/heads/main")
@@ -1638,6 +1643,177 @@ def test_apply_update_ref_never_follows_an_integration_symref(tmp_path: Path):
     )
     assert result.branch_head_after == _git(root, "rev-parse", _CANARY_REF) != base
     assert _git(root, "status", "--porcelain=v1", "--untracked-files=all") == ""
+
+
+def test_non_separate_update_ref_apply_still_integrates(tmp_path: Path):
+    """Primary checkout on main integrating a free canary branch: the legitimate update-ref flow."""
+    root, base, candidate = _repo(tmp_path)
+    _git(root, "checkout", "main")
+    result = _separate_controller_integrate(tmp_path, root.resolve(), base, candidate)
+    assert result.merge_performed is True
+    assert result.branch_head_after == _git(root, "rev-parse", _CANARY_REF) != base
+    assert _git(root, "rev-parse", "refs/heads/main") == base
+    assert _git(root, "status", "--porcelain=v1", "--untracked-files=all") == ""
+
+
+def test_non_separate_apply_refuses_symbolic_integration_branch(tmp_path: Path):
+    root, base, candidate = _repo(tmp_path)
+    _git(root, "checkout", "main")
+    _git(root, "symbolic-ref", _CANARY_REF, "refs/heads/main")
+    with pytest.raises(
+        IntegrationExecutionError,
+        match="INTEGRATION_BRANCH_REFUSED_AT_APPLY: CLOSURE_INTEGRATION_BRANCH_SYMBOLIC",
+    ) as raised:
+        _separate_controller_integrate(tmp_path, root.resolve(), base, candidate)
+    assert raised.value.merge_performed is False
+    assert _git(root, "rev-parse", "refs/heads/main") == base
+    assert _git(root, "symbolic-ref", _CANARY_REF) == "refs/heads/main"
+
+
+def test_strict_closure_apply_refuses_branch_checked_out_after_bind(tmp_path: Path, monkeypatch):
+    """Round 2: strict closure binds, the primary leaves canary, another worktree checks it out."""
+    service, root, base, _candidate, acceptance, approval, runtime = _approved_closure_service(
+        tmp_path
+    )
+    _integrate_ready(service, monkeypatch, tmp_path)
+    service.bind_candidate_integration_closure(
+        "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+    )
+    _git(root, "checkout", "main")
+    other = tmp_path / "other"
+    _git(root, "worktree", "add", str(other), _CANARY)
+    with pytest.raises(
+        IntegrationExecutionError,
+        match="INTEGRATION_BRANCH_REFUSED_AT_APPLY: CLOSURE_INTEGRATION_BRANCH_CHECKED_OUT",
+    ) as raised:
+        service.integrate_approved(
+            "closure-bind", integration_branch=_CANARY, runtime_identity=runtime
+        )
+    assert raised.value.merge_performed is False
+    assert _git(root, "rev-parse", _CANARY_REF) == base
+    assert _git(other, "status", "--porcelain=v1", "--untracked-files=all") == ""
+    assert service._read_state("closure-bind")["status"] == "INTEGRATION_FAILED_PRE_APPLY"
+
+
+def test_separate_controller_closure_refuses_branch_in_rebase_update_refs(tmp_path: Path):
+    """``git rebase -i --update-refs`` will move canary: Git treats it as in use."""
+    service, controller, base, candidate, acceptance, approval, runtime = _approved_closure_service(
+        tmp_path, separate_controller=True
+    )
+    root = tmp_path / "repo"
+    other = tmp_path / "other"
+    _git(root, "worktree", "add", "-b", "topic", str(other), base)
+    (other / "first.txt").write_text("first\n")
+    _git(other, "add", "first.txt")
+    _git(other, "commit", "-m", "first")
+    first = _git(other, "rev-parse", "HEAD")
+    _git(root, "update-ref", _CANARY_REF, first)
+    (other / "second.txt").write_text("second\n")
+    _git(other, "add", "second.txt")
+    _git(other, "commit", "-m", "second")
+    editor = tmp_path / "seq-editor.sh"
+    editor.write_text('#!/bin/sh\n{ echo break; cat "$1"; } > "$1.new" && mv "$1.new" "$1"\n')
+    editor.chmod(0o755)
+    stopped = subprocess.run(
+        ["git", "rebase", "-i", "--update-refs", candidate],
+        cwd=other,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "GIT_SEQUENCE_EDITOR": str(editor)},
+    )
+    assert stopped.returncode == 0, stopped.stderr
+    admin = Path(_git(other, "rev-parse", "--absolute-git-dir"))
+    assert _CANARY_REF in (admin / "rebase-merge" / "update-refs").read_text().splitlines()
+    before = service._state_path("closure-bind").read_bytes()
+    with pytest.raises(RuntimeError, match="CLOSURE_INTEGRATION_BRANCH_CHECKED_OUT"):
+        service.bind_candidate_integration_closure(
+            "closure-bind",
+            **_separate_closure_kwargs(
+                acceptance, {**approval, "expected_canonical_head": first}, runtime, first
+            ),
+        )
+    assert service._state_path("closure-bind").read_bytes() == before
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads mode-000 directories")
+def test_separate_controller_closure_refuses_unreadable_tasks_subdirectory(tmp_path: Path):
+    service, controller, base, _candidate, acceptance, approval, runtime = (
+        _approved_closure_service(tmp_path, separate_controller=True)
+    )
+    locked = controller / "tasks" / "active" / "locked"
+    locked.mkdir(parents=True)
+    (locked / "card.md").write_text("hidden\n")
+    locked.chmod(0o000)
+    try:
+        before = service._state_path("closure-bind").read_bytes()
+        with pytest.raises(RuntimeError, match="CLOSURE_CANONICAL_DIRTY"):
+            service.bind_candidate_integration_closure(
+                "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+            )
+        assert service._state_path("closure-bind").read_bytes() == before
+    finally:
+        locked.chmod(0o755)
+
+
+@pytest.mark.parametrize("kind", ["blob", "annotated-tag"])
+def test_separate_controller_closure_refuses_non_commit_branch_ref(tmp_path: Path, kind: str):
+    """The ref exists but does not name a commit itself: INVALID, not MISSING."""
+    service, controller, base, _candidate, acceptance, approval, runtime = (
+        _approved_closure_service(tmp_path, separate_controller=True)
+    )
+    root = tmp_path / "repo"
+    if kind == "blob":
+        target = subprocess.run(
+            ["git", "hash-object", "-w", "--stdin"],
+            cwd=root,
+            input="blob\n",
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    else:
+        _git(root, "tag", "-a", "-m", "annotated", "annotated", base)
+        target = _git(root, "rev-parse", "refs/tags/annotated")
+    common = Path(_git(root, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+    (common / "refs" / "heads" / "nexus" / "integration" / "canary").write_text(target + "\n")
+    assert _git(root, "show-ref", "--verify", "--hash", _CANARY_REF) == target
+    before = service._state_path("closure-bind").read_bytes()
+    with pytest.raises(RuntimeError, match="CLOSURE_INTEGRATION_BRANCH_INVALID"):
+        service.bind_candidate_integration_closure(
+            "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+        )
+    assert service._state_path("closure-bind").read_bytes() == before
+
+
+@pytest.mark.parametrize("where", ["linked-worktree", "primary-checkout"])
+def test_alias_symref_to_integration_branch_checked_out_is_refused(
+    tmp_path: Path, monkeypatch, where: str
+):
+    """A different branch that is a symref to canary, checked out anywhere, counts as canary."""
+    service, controller, base, _candidate, acceptance, approval, runtime = (
+        _approved_closure_service(tmp_path, separate_controller=True)
+    )
+    _integrate_ready(service, monkeypatch, tmp_path)
+    service.bind_candidate_integration_closure(
+        "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+    )
+    root = tmp_path / "repo"
+    _git(root, "symbolic-ref", "refs/heads/alias", _CANARY_REF)
+    if where == "linked-worktree":
+        _git(root, "worktree", "add", str(tmp_path / "other"), "alias")
+    else:
+        _git(root, "checkout", "alias")
+    with pytest.raises(RuntimeError, match="CLOSURE_INTEGRATION_BRANCH_CHECKED_OUT"):
+        ControlledIntegrationManager.separate_controller_integration_head(controller, _CANARY)
+    with pytest.raises(
+        IntegrationExecutionError,
+        match="INTEGRATION_BRANCH_REFUSED_AT_APPLY: CLOSURE_INTEGRATION_BRANCH_CHECKED_OUT",
+    ) as raised:
+        service.integrate_approved(
+            "closure-bind", integration_branch=_CANARY, runtime_identity=runtime
+        )
+    assert raised.value.merge_performed is False
+    assert _git(root, "rev-parse", _CANARY_REF) == base
 
 
 def test_separate_controller_closure_refuses_branch_checked_out_in_linked_worktree(tmp_path: Path):
