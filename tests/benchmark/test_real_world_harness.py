@@ -104,6 +104,7 @@ def test_real_world_full_nexus_executor_records_cli_report_fields(tmp_path: Path
             "nexus_payload": {
                 "semantic_status": "VERIFIED",
                 "chosen_flow": "hyper_sprint",
+                "result": {"status": "SUCCESS"},
                 "strategy": {"path": "forced_hyper_direct"},
             },
             "error": "",
@@ -491,3 +492,68 @@ def test_real_world_nightshift_fixture_requires_cross_module_persistence(tmp_pat
 
     assert row["verified_solve"] is True
     assert row["semantic_verified"] is True
+
+
+def test_real_world_full_nexus_failed_pipeline_is_never_a_verified_solve(
+    tmp_path: Path, monkeypatch
+):
+    # #2202: a nested agy sweep failure surfaces only as a non-SUCCESS Nexus
+    # result; passing tests in the case dir must not count as a solve.
+    task = next(
+        task
+        for task in load_tasks("scripts/bench/real_world_tasks_v1.json")
+        if task.fixture_kind == "flag_normalization"
+    )
+    statuses = iter(["FAILED", "SUCCESS"])
+
+    def fake_full_nexus_patch(
+        case_dir, task, *, timeout_sec, model, force_flow=None, candidate_count=1
+    ):
+        status = next(statuses)
+        return {
+            "regression_test_added": False,
+            "unrelated_change": False,
+            "root_cause": "flag normalization misses strip lower conversion",
+            "written_files": [],
+            "model_calls": 1,
+            "total_tokens": 0,
+            "token_capture_status": "measured",
+            "gemini_returncode": 0,
+            "nexus_payload": {
+                "semantic_status": "VERIFIED",
+                "chosen_flow": "hyper_sprint",
+                "result": {
+                    "status": status,
+                    "error": "agy execution did not complete successfully"
+                    if status == "FAILED"
+                    else "",
+                },
+            },
+            "nightshift_info": {"invoked": False},
+            "error": "",
+        }
+
+    monkeypatch.setattr(real_world_task_runner, "_run_full_nexus_patch", fake_full_nexus_patch)
+    monkeypatch.setattr(real_world_task_runner, "_run_tests", lambda case_dir, timeout_sec: True)
+
+    failed = run_task(
+        task,
+        mode="with_nexus",
+        root=tmp_path / "failed",
+        timeout_sec=30,
+        index=0,
+        executor="full_nexus",
+    )
+    assert failed["verified_solve"] is False
+    assert failed["semantic_verified"] is False
+
+    succeeded = run_task(
+        task,
+        mode="with_nexus",
+        root=tmp_path / "ok",
+        timeout_sec=30,
+        index=0,
+        executor="full_nexus",
+    )
+    assert succeeded["verified_solve"] is True
+    assert succeeded["semantic_verified"] is True
