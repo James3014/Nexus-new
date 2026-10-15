@@ -3353,7 +3353,13 @@ def test_controller_job_uploads_failure_reason_only_on_failure():
 
 
 def test_collect_controller_failure_step_copies_lane_block_and_skips_symlink(tmp_path: Path):
+    """#2258: the step no longer copies a merge-lane result (the gate step is gone).
+
+    A stray ``merge-lane-gate.json`` in the anchor dir, real or symlinked, must
+    not reach the failure artifact, and the failure dir is still never empty.
+    """
     run = _named_step("trusted-controller", "Collect controller failure reason")["run"]
+    assert "merge-lane-gate.json" not in run
     anchor_dir = tmp_path / "trusted-anchor"
     anchor_dir.mkdir()
     (anchor_dir / "merge-lane-gate.json").write_text('{"status":"BLOCK"}\n')
@@ -3365,7 +3371,7 @@ def test_collect_controller_failure_step_copies_lane_block_and_skips_symlink(tmp
     )
     assert completed.returncode == 0, completed.stderr
     failure_dir = tmp_path / "trusted-anchor-failure"
-    assert (failure_dir / "merge-lane-gate.json").read_text() == '{"status":"BLOCK"}\n'
+    assert not (failure_dir / "merge-lane-gate.json").exists()
     assert list(failure_dir.iterdir())  # never empty, so the upload cannot vanish
     second = tmp_path / "second"
     (second / "trusted-anchor").mkdir(parents=True)
