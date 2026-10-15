@@ -658,6 +658,12 @@ def is_quarantined(path: str | Path) -> bool:
     return str(Path(os.path.abspath(path))) in _QUARANTINED
 
 
+def record_run_abort(reason: str) -> None:
+    """Mark the whole run invalid (the runner exits 3); first reason wins."""
+    if not _RUN_ABORT:
+        _RUN_ABORT.append(_safe_detail(HiddenTestStagingError(str(reason)))[:200])
+
+
 def run_abort_reason() -> str:
     return _RUN_ABORT[0] if _RUN_ABORT else ""
 

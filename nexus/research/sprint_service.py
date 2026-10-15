@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import json
 import os
@@ -1459,10 +1460,11 @@ class InPlaceSprintExecutor:
                 seed=seed, score=0.0, hint=hint, error="file_lock_denied", candidate_code=code, source=source,
                 elapsed_sec=round(time.time() - start, 4),
             )
-        original = target_path.read_text(encoding="utf-8") if target_path.exists() else ""
         restored_files: dict[Path, str | None] = {}
         lock_release: list[Any] = [release]
         try:
+            # Inside the try: any failure from here on still releases the lock (finally).
+            original = target_path.read_text(encoding="utf-8") if target_path.exists() else ""
             if code == original:
                 return CandidateEval(
                     seed=seed,
@@ -1664,6 +1666,14 @@ class _SprintLockDenied(BaseException):
         self.state = state
 
 
+# Metering for a lock denial raised from deep inside the sprint (the confined executor): the
+# running sprint registers a reader of its counters so the denied result still reports the
+# model calls / tokens spent so far (scoring already excludes the pair).
+_SPRINT_METER: contextvars.ContextVar[Callable[[], dict[str, Any]] | None] = contextvars.ContextVar(
+    "nexus_sprint_meter", default=None
+)
+
+
 def _lock_denied_result(config: SprintConfig, state: Mapping[str, Any]) -> SprintResult:
     learning_trace = dict(state.get("learning_trace") or {})
     learning_trace["file_lock_denied"] = True
@@ -1775,10 +1785,15 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     lock_task = seam_holder_id(repo_root, config.target_file)
     released: dict[str, list[str]] = {}
     try:
+        meter_token = _SPRINT_METER.set(None)
         try:
             result = _run_hyper_sprint_core(repo_root=repo_root, config=config)
         except _SprintLockDenied as denied:
-            result = _lock_denied_result(config, denied.state)
+            meter = _SPRINT_METER.get()
+            counts: dict[str, Any] = meter() if meter is not None else {}
+            result = _lock_denied_result(config, {**counts, **denied.state})
+        finally:
+            _SPRINT_METER.reset(meter_token)
     finally:
         from nexus.services.post_candidate_seam import release_target_lock
 
@@ -2342,6 +2357,17 @@ def _run_hyper_sprint_core(*, repo_root: Path, config: SprintConfig) -> SprintRe
         unified_runtime_receipts[selected_index] = finalized
         return finalized
 
+    def _meter() -> dict[str, Any]:
+        return {
+            "model_calls": model_calls,
+            "total_tokens": total_tokens,
+            "model_name": ",".join(sorted(model_names)),
+            "learning_trace": learning_trace,
+            "unified_runtime_receipts": list(unified_runtime_receipts),
+            "elapsed_sec": round(time.time() - start, 4),
+        }
+
+    _SPRINT_METER.set(_meter)
     for idx in range(max(1, config.candidate_count)):
         hint = policy.get_mutation_hint(
             idx % max(1, config.candidate_count),

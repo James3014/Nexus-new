@@ -456,6 +456,7 @@ def _run_main_with_fake_arms(
     parity_calls: list[list[str]] | None = None,
     parity_result: dict[str, str] | None = None,
     hidden_seen: list[tuple[str, bool]] | None = None,
+    bare_error: BaseException | None = None,
 ) -> tuple[int, list[str], Path]:
     import scripts.bench.capability_ab_runner as runner
 
@@ -506,6 +507,8 @@ def _run_main_with_fake_arms(
     def fake_without(*, task, target_file, test_file, **_kwargs):
         order.append(f"bare:{task.id}")
         _note_hidden("without_nexus", test_file)
+        if bare_error is not None:
+            raise bare_error
         _call_agy(_bare_prompt(target_file, test_file, task))
         return _row("without_nexus", task, test_file)
 
@@ -1223,3 +1226,28 @@ def test_both_arms_run_with_the_hidden_test_staged_out(tmp_path: Path, monkeypat
     )
     assert {mode for mode, _ in hidden_seen} == {"with_nexus", "without_nexus"}
     assert all(present is False for _, present in hidden_seen), hidden_seen
+
+
+def test_bare_leg_staging_failure_writes_the_row_and_exits_3(tmp_path: Path, monkeypatch) -> None:
+    """Reviewer L-a: a hidden-staging failure in the bare leg fails closed exactly like the
+    with-Nexus leg (row written, run invalid, exit 3), never a traceback out of main()."""
+    from scripts.bench import hidden_test_staging as staging_mod
+
+    monkeypatch.setattr(staging_mod, "_RUN_ABORT", [])
+    code, order, out_dir = _run_main_with_fake_arms(
+        tmp_path,
+        monkeypatch,
+        with_prompt_extra="",
+        status="SUCCESS",
+        bare_error=staging_mod.HiddenTestStagingError("hidden_test_tampered:probe"),
+    )
+    assert code == 3
+    assert any(entry.startswith("bare:") for entry in order)
+    rows = [
+        json.loads(line)
+        for path in out_dir.rglob("*.jsonl")
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip().startswith("{")
+    ]
+    bare = [r for r in rows if r.get("mode") == "without_nexus" and r.get("hidden_staging_error")]
+    assert bare and bare[0]["hidden_test_tampered"] is True and bare[0]["run_eligible"] is False

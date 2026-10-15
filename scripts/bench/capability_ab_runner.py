@@ -21264,6 +21264,7 @@ def main() -> int:
                 "hidden_staging_run_abort": _hidden_staging.run_abort_reason() or str(exc)[:200],
                 "run_eligible": False,
             })
+            _hidden_staging.record_run_abort(f"hidden_test_tampered:staging_error:{exc}")
             timed_out = True
             return "break"
         except BenchmarkTotalTimeout:
@@ -21423,6 +21424,22 @@ def main() -> int:
                     status=f"PARTIAL_PROVIDER_ABORT:{direct_abort_reason}",
                 )
                 return "break"
+        except _hidden_staging.HiddenTestStagingError as exc:
+            # Same as the with-Nexus leg: fail closed, the row is invalid, the run stops (exit 3).
+            without_rows.append({
+                "mode": "without_nexus",
+                "task_id": task.id,
+                "trial_index": task.trial_index,
+                "status": "FAILED",
+                "hidden_verifier_passed": False,
+                "hidden_test_tampered": True,
+                "hidden_staging_error": str(exc)[:300],
+                "hidden_staging_run_abort": _hidden_staging.run_abort_reason() or str(exc)[:200],
+                "run_eligible": False,
+            })
+            _hidden_staging.record_run_abort(f"hidden_test_tampered:staging_error:{exc}")
+            timed_out = True
+            return "break"
         except BenchmarkTotalTimeout:
             timed_out = True
             _emit_progress(
@@ -21663,7 +21680,9 @@ def main() -> int:
 
     if _hidden_staging.run_abort_reason():
         print(
-            f"hidden test staging failed closed ({_hidden_staging.run_abort_reason()}); run is invalid",
+            _log_line_safe(
+                f"hidden test staging failed closed ({_hidden_staging.run_abort_reason()}); run is invalid"
+            ),
             file=sys.stderr,
             flush=True,
         )

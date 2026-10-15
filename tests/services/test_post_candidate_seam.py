@@ -1480,3 +1480,115 @@ def test_every_confinement_call_site_is_known_and_protects_the_bench_subtrees(
     profile = lane.build_sandbox_profile(writable=[str(tmp_path)], read_roots=[str(tmp_path)])
     staging = lane.sbpl_path(Path.home().resolve() / ".cache" / "nexus-bench-hidden")
     assert f'(subpath "{staging}")' in profile.splitlines()[-1]  # last rule: denied for all
+
+
+def test_sprint_evaluation_releases_the_lock_when_reading_the_target_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reviewer L-b: the target read happens inside the try, so a failure there still releases
+    the lock (no leak until the TTL)."""
+    from nexus.research.sprint_service import InPlaceSprintExecutor
+
+    case = _case(tmp_path)
+    monkeypatch.delenv(seam.CONFINE_VISIBLE_TEST_ENV, raising=False)
+    real_read = Path.read_text
+
+    def failing_read(self: Path, *a: Any, **k: Any) -> str:
+        if self.name == "target.py":
+            raise OSError(5, "I/O error")
+        return real_read(self, *a, **k)
+
+    monkeypatch.setattr(Path, "read_text", failing_read)
+    executor = InPlaceSprintExecutor(
+        case, "target.py", [sys.executable, "-m", "pytest", "-q", "test_visible.py"], 30
+    )
+    ev = executor.evaluate_candidate(seed=0, hint="h", code=CANDIDATE, source="llm")
+    monkeypatch.setattr(Path, "read_text", real_read)
+    assert ev.score == 0.0 and "I/O error" in ev.error
+    other = seam.acquire_target_lock(
+        task_id="other-task", workspace_root=case, target_file="target.py"
+    )
+    try:
+        assert other["gate_passed"] is True  # our lock was released
+    finally:
+        seam.release_target_lock("other-task")
+
+
+def test_lock_denial_from_the_executor_reports_the_counts_spent_so_far(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reviewer L-c: a denial raised deep inside the sprint (evaluate_candidate_confined)
+    carries the model calls / tokens metered so far into the denied result."""
+    import nexus.research.sprint_service as sprint
+
+    def core(*, repo_root: Path, config: Any):
+        sprint._SPRINT_METER.set(
+            lambda: {"model_calls": 3, "total_tokens": 1234, "model_name": "m"}
+        )
+        raise sprint._SprintLockDenied(lock_denied_in="runtime_verifier")
+
+    monkeypatch.setattr(sprint, "_run_hyper_sprint_core", core)
+    (tmp_path / "t.py").write_text("x = 1\n", encoding="utf-8")
+    result = sprint.run_hyper_sprint(
+        repo_root=tmp_path, config=sprint.SprintConfig(task="t", target_file="t.py")
+    )
+    assert result.reason == "file_lock_denied"
+    assert result.model_calls == 3 and result.total_tokens == 1234 and result.model_name == "m"
+    assert sprint._SPRINT_METER.get() is None  # reset after the sprint
+
+
+def test_seam_stage_with_a_succeeded_physical_outcome_attests_real(tmp_path: Path) -> None:
+    """Reviewer L-d (environment independent): a seam stage whose executor returns a
+    SUCCEEDED physical outcome is attested "real" by #2212's merged projection, so Linux CI
+    proves the seam CAN produce a real claim, not only that it never claims one falsely."""
+    from nexus.research.flow.unified_capability_projection import (
+        overlay_unified_capability_receipts,
+        project_unified_capability_stages,
+    )
+
+    case = _case(tmp_path)
+
+    def factory(name: str):
+        def invoke(context: Any) -> dict[str, Any]:
+            return {
+                "invoked": True,
+                "gate_passed": True,
+                "evidence_refs": [f"ev_{name}_fake_run_001"],
+                "physical_callable": f"tests.fake.{name}",
+                "response": {
+                    "status": "SUCCEEDED",
+                    "outcome": {
+                        "semantic_status": "SUCCEEDED",
+                        "exit_code": 0,
+                        "stdout_sha256": "ab" * 32,
+                        "output_tail": "1 passed",
+                        "simulated": False,
+                        "sandbox_executed": True,
+                        "confined": True,
+                        "executed_checks": ["visible_test"],
+                        "result": "PASS",
+                    },
+                },
+            }
+
+        return invoke
+
+    receipt = seam.run_seam_for_candidate(
+        task_id="auto-flow:demo",
+        unified_receipt=_runtime_receipt("sandbox", "ultra_review"),
+        target_path=case / "target.py",
+        visible_test_path=case / "test_visible.py",
+        original_code=ORIGINAL,
+        candidate_code=CANDIDATE,
+        invoker_factory=factory,
+    )
+    assert receipt is not None
+    stages = project_unified_capability_stages([receipt])
+    flow = overlay_unified_capability_receipts(
+        [{"name": n, "selected": True, "invoked": False} for n in ("sandbox", "ultra_review")],
+        stages,
+    )
+    for row in flow:
+        assert row["invoked"] is True
+        assert row.get("attestation") == "real", row
+        assert row["claim_boundary"]["simulated"] is False
