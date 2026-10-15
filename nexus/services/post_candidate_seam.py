@@ -518,7 +518,11 @@ def hold_target_lock(
     if acquired["conflicts"]:
         return None
     new_keys = list(acquired.get("newly_acquired") or [])
-    return lambda: registry.release_files(holder, new_keys) and None
+
+    def release() -> None:
+        registry.release_files(holder, new_keys)
+
+    return release
 
 
 def run_under_target_lock(
