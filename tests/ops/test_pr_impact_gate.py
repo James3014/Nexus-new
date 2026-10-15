@@ -1228,6 +1228,22 @@ def test_ambiguous_ids_with_head_added_cases_keep_todays_message():
     assert classify_regression(plain_base, plain_head).remedy
 
 
+def test_behind_main_remedy_is_withheld_beside_other_evidence_mismatches():
+    # A merge cannot repair a plan digest mismatch; never suggest it alongside one.
+    from dataclasses import replace as dc_replace
+
+    base, head = _behind_main_pair()
+    head = dc_replace(head, plan_digest="9" * 64)
+
+    result = classify_regression(base, head)
+
+    assert result.classification == "IMPACT_UNKNOWN"
+    assert result.blocking is True
+    assert len(result.mismatch_reasons) > 1
+    assert result.remedy == ""
+    assert "behind main" not in result.reason
+
+
 def test_ids_missing_on_base_instead_keep_todays_message():
     family = "tests.nexus.executors.test_agy_write_admission::test_proc_is_zombie"
     base, head = _behind_main_pair(

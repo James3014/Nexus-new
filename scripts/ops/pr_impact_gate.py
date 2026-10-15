@@ -1633,7 +1633,9 @@ def _classify_regression(
         except Exception as exc:  # noqa: BLE001 - diagnostics must never change the verdict
             mismatch_reasons = [f"could not explain mismatch: {type(exc).__name__}: {exc}"]
         remedy = ""
-        if _AMBIGUOUS_PARAMETERIZED_REASON in mismatch_reasons:
+        # Only when the ambiguity is the sole problem: a merge cannot fix plan,
+        # provenance or other evidence mismatches, so never suggest it beside them.
+        if mismatch_reasons == [_AMBIGUOUS_PARAMETERIZED_REASON]:
             try:
                 remedy = _behind_main_remedy(base, head)
             except Exception:  # noqa: BLE001 - diagnostics must never change the verdict
