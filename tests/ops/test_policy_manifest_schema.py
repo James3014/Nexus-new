@@ -676,3 +676,65 @@ def test_fixture_bindings_cover_assignment_shapes_and_scope(tmp_path: Path) -> N
         ], selector
     good = _fake_policy(test_entrypoints=["tests/test_bind.py::test_local_alias_is_still_a_test"])
     assert check_enforcement_wiring(good, root) == []
+
+
+def test_wiring_check_round7_cases(tmp_path: Path) -> None:
+    root = _fake_repo(tmp_path)
+    # A caller import under a dead branch at module level does not count.
+    for guard_text in ("from typing import TYPE_CHECKING\nif TYPE_CHECKING:", "if False:", "if 0:"):
+        (root / "tests" / "test_dead.py").write_text(
+            f"{guard_text}\n    from pkg import caller\n\n"
+            "def test_guard_only():\n    from pkg.guard import check\n    assert check(1)\n",
+            encoding="utf-8",
+        )
+        dead = _fake_policy(test_entrypoints=["tests/test_dead.py::test_guard_only"])
+        assert check_enforcement_wiring(dead, root) == ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"], (
+            guard_text
+        )
+        whole = _fake_policy(test_entrypoints=["tests/test_dead.py"])
+        assert check_enforcement_wiring(whole, root) == ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"], (
+            guard_text
+        )
+    # An empty source_file is not "no Python sources, nothing to check".
+    assert check_enforcement_wiring(_fake_policy(source_file="", guard_modules=[]), root) == [
+        "SOURCE_FILE_MISSING"
+    ]
+    assert check_enforcement_wiring(_fake_policy(source_file=" ; ", guard_modules=[]), root) == [
+        "SOURCE_FILE_MISSING"
+    ]
+    # A whole-file entry must be a test_*.py file with at least one collectable test.
+    (root / "tests" / "test_empty.py").write_text(
+        "from pkg import caller\n\ndef helper():\n    return caller\n", encoding="utf-8"
+    )
+    (root / "tests" / "test_only_fixture.py").write_text(
+        "import pytest\nfrom pkg import caller\n\n@pytest.fixture\ndef test_fx():\n    return caller\n",
+        encoding="utf-8",
+    )
+    for entry in (
+        "pkg/shim.py",
+        "tests/helper.py",
+        "tests/test_empty.py",
+        "tests/test_only_fixture.py",
+    ):
+        not_a_test_file = _fake_policy(test_entrypoints=[entry])
+        assert check_enforcement_wiring(not_a_test_file, root) == [
+            f"TEST_ENTRYPOINT_NOT_FOUND: {entry}",
+            "TEST_ENTRYPOINT_NOT_BEHAVIOURAL",
+        ], entry
+    (root / "tests" / "test_in_class.py").write_text(
+        "class TestK:\n    def test_m(self):\n        pass\n", encoding="utf-8"
+    )
+    assert check_enforcement_wiring(
+        _fake_policy(test_entrypoints=["tests/test_in_class.py"]), root
+    ) == ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"]
+    # Class-level imports are visible to the class's tests.
+    (root / "tests" / "test_class_import.py").write_text(
+        "class TestWiring:\n    from pkg import caller\n\n    def test_caller(self):\n"
+        "        assert self.caller\n\n    def helper(self):\n        from pkg.guard import check\n"
+        "        return check\n",
+        encoding="utf-8",
+    )
+    in_class = _fake_policy(
+        test_entrypoints=["tests/test_class_import.py::TestWiring::test_caller"]
+    )
+    assert check_enforcement_wiring(in_class, root) == []
