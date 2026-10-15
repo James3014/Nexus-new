@@ -114,6 +114,40 @@ def _write_new(path: Path, data: bytes) -> None:
         handle.write(data)
 
 
+def _open_dir_nofollow(path: Path) -> int:
+    """Open ``path`` as a directory one component at a time, never following a symlink in any
+    component (``openat`` + ``O_NOFOLLOW``): the returned fd pins the real directory, so a
+    later swap of any component for a symlink cannot redirect a write made through it."""
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path.anchor or "/", flags)
+    try:
+        for part in path.parts[1:]:
+            nxt = os.open(part, flags, dir_fd=fd)
+            os.close(fd)
+            fd = nxt
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _write_new_in_dir(path: Path, data: bytes, *, mode: int) -> None:
+    """``O_CREAT|O_EXCL|O_NOFOLLOW`` write of ``path.name`` through a no-symlink dir fd."""
+    try:
+        dir_fd = _open_dir_nofollow(path.parent)
+    except OSError as exc:
+        raise HiddenTestStagingError("origin_parent_not_a_plain_directory") from exc
+    try:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(path.name, flags, 0o600, dir_fd=dir_fd)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fchmod(handle.fileno(), mode)
+    finally:
+        os.close(dir_fd)
+
+
 def _move_file(src: Path, dst: Path) -> None:
     """Atomic rename; across filesystems a verified copy (never following links) + unlink."""
     try:
@@ -121,7 +155,19 @@ def _move_file(src: Path, dst: Path) -> None:
     except OSError as exc:
         if exc.errno != errno.EXDEV:
             raise
-        _write_new(dst, _read_nofollow(src))
+        # Staged bytes are mode 0000: make the (lstat-checked, regular, single-link) source
+        # readable for the copy only, and lock it again if the copy fails.
+        info = _regular_single_link(src, label="move_source")
+        locked = stat.S_IMODE(info.st_mode) & stat.S_IRUSR == 0
+        if locked:
+            os.chmod(src, 0o400)
+        try:
+            data = _read_nofollow(src)
+        except BaseException:
+            if locked:
+                os.chmod(src, _STAGED_MODE)
+            raise
+        _write_new(dst, data)
         os.unlink(src)
 
 
@@ -280,27 +326,6 @@ FIXTURE_ROOTS: tuple[tuple[str, ...], ...] = (
 _IN_MEMORY_SHAS: dict[str, str] = {}
 
 
-def _committed_sha(workspace_root: Path, origin: Path) -> str:
-    """sha256 of the fixture's committed content (``git show HEAD:<origin>``), or ""."""
-    import subprocess  # noqa: PLC0415 - only on the rare recovery path
-
-    from nexus.engine.sandboxed_lane import git_safe_env
-
-    try:
-        rel = origin.relative_to(workspace_root).as_posix()
-        with tempfile.TemporaryDirectory(prefix="nexus-git-home-") as home:
-            proc = subprocess.run(  # noqa: S603 - fixed argv, safe git env
-                ["git", "-C", str(workspace_root), "show", f"HEAD:{rel}"],
-                capture_output=True,
-                check=False,
-                timeout=30,
-                env=git_safe_env(home=home),
-            )
-    except (ValueError, OSError, subprocess.SubprocessError):
-        return ""
-    return hashlib.sha256(proc.stdout).hexdigest() if proc.returncode == 0 else ""
-
-
 def _lock_if_inside(run_root: Path, staged: Path) -> None:
     try:
         if run_root in staged.parents:
@@ -340,16 +365,16 @@ def _recover_entry(
         # (c) staged path is exactly <run_root>/<task key>/test_hidden.py for the recorded task.
         if staged != run_root / task_key / HIDDEN_TEST_NAME or not task_key:
             raise HiddenTestStagingError("staged_path_task_mismatch")
-        # (d) the bytes must match a trusted hash: this run's in-memory sha, else the committed
-        # fixture; the record's own sha is only a hint and must agree too.
-        # Trusted sources, in order: this run's in-memory hash, the fixture generator/manifest
-        # (passed by the runner), the committed fixture.
-        trusted = (
-            _IN_MEMORY_SHAS.get(str(origin))
-            or str((trusted_shas or {}).get(str(origin)) or "")
-            or _committed_sha(ws, origin)
+        # (d) the bytes must match a trusted hash. Recovery authority is ONLY this run's
+        # in-memory sha or the fixture generator / task manifest sha passed by the runner; the
+        # checkout under test (incl. its git HEAD) is never an authority. The record's own sha
+        # is only a hint and must agree too. No authority: refused, bytes stay locked.
+        trusted = _IN_MEMORY_SHAS.get(str(origin)) or str(
+            (trusted_shas or {}).get(str(origin)) or ""
         )
-        if not trusted or not expected or trusted != expected:
+        if not trusted:
+            raise HiddenTestStagingError("untrusted_recovery_authority")
+        if not expected or trusted != expected:
             raise HiddenTestStagingError("untrusted_sha")
         leftover = HiddenTestStaging(
             hidden_path=origin, staged_path=staged, staged=True, sha256=expected
@@ -362,8 +387,7 @@ def _recover_entry(
         os.chmod(staged, _STAGED_MODE)
         if hashlib.sha256(data).hexdigest() != trusted:
             raise HiddenTestStagingError("untrusted_sha")
-        _write_new(origin, data)  # O_CREAT|O_EXCL|O_NOFOLLOW
-        os.chmod(origin, 0o644)
+        _write_new_in_dir(origin, data, mode=0o644)  # pinned parent fd, O_EXCL|O_NOFOLLOW
         os.chmod(staged, 0o600)
         os.unlink(staged)
         os.chmod(leftover.sidecar_path, 0o600)
@@ -435,14 +459,29 @@ class HiddenTestStaging:
                     if not os.path.lexists(target):
                         break
                     index += 1
-                os.replace(self.hidden_path, target)  # moves a link itself, never its target
-                if not os.path.islink(target):
+                if os.path.islink(self.hidden_path):
+                    os.replace(self.hidden_path, target)  # moves the link itself, not its target
+                else:
+                    _move_file(self.hidden_path, target)  # EXDEV-safe verified copy + unlink
                     os.chmod(target, _STAGED_MODE)
                 self.quarantined = True
-        except OSError as exc:
+        except (OSError, HiddenTestStagingError) as exc:
             # The workspace copy could not be moved: the run is already aborted and the path
-            # stays registered as quarantined, so the verifier is refused for it.
+            # stays registered as quarantined; make what is left there unusable.
             self.violations.append(f"quarantine_failed:{type(exc).__name__}")
+            self._disable_in_place()
+
+    def _disable_in_place(self) -> None:
+        """Last resort when quarantine cannot move the hidden path: a link is removed (unlink
+        never follows it), a regular file is locked to mode 0000. Never raises."""
+        try:
+            info = os.lstat(self.hidden_path)
+            if stat.S_ISLNK(info.st_mode):
+                os.unlink(self.hidden_path)
+            elif stat.S_ISREG(info.st_mode):
+                os.chmod(self.hidden_path, _STAGED_MODE)
+        except OSError:
+            pass
 
     @contextmanager
     def _fail_closed_on_error(self, where: str) -> Iterator[None]:

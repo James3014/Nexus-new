@@ -1017,3 +1017,24 @@ def test_non_python_sandbox_command_is_confined_too(
     if REAL_BARRIER:
         assert outcome["exit_code"] != 0
         assert "SECRET_OUTSIDE_7c1" not in str(outcome.get("output_tail") or "")
+
+
+def test_read_root_inside_a_forbidden_root_is_refused_both_directions(tmp_path: Path) -> None:
+    """Gemini G1: a read root equal to, containing, or INSIDE an explicitly forbidden root is
+    refused (a later SBPL allow rule would otherwise re-open the forbidden subtree)."""
+    forbidden = tmp_path / "forbidden"
+    (forbidden / "sub").mkdir(parents=True)
+    sibling = tmp_path / "sibling"
+    sibling.mkdir()
+    staging = seam.BENCH_HIDDEN_STAGING_PARENT
+    for root, bad in (
+        (forbidden, forbidden),
+        (tmp_path, forbidden),  # ancestor of the forbidden root
+        (forbidden / "sub", forbidden),  # descendant of the forbidden root
+        (staging / "run-x", staging),  # inside the bench hidden-test staging parent
+    ):
+        with pytest.raises(SandboxError):
+            lane.checked_read_roots([str(root)], extra_forbidden=[bad])
+    assert lane.sbpl_path(sibling) in lane.checked_read_roots(
+        [str(sibling)], extra_forbidden=[forbidden]
+    )

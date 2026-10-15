@@ -541,9 +541,11 @@ def test_killed_run_is_recovered_and_nothing_outside_the_run_dir_names_a_path(
     # A new run never starts over an unrecovered one.
     with pytest.raises(staging_mod.HiddenTestStagingError, match="unrecovered_previous_run"):
         staging_mod.staging_root(workspace)
-    assert staging_mod.recover_last_run(_expected_sha(record), workspace_root=workspace) == [
-        str(hidden.resolve())
-    ]
+    # Recovery authority: the fixture manifest sha (never the checkout's git HEAD).
+    manifest = {str(hidden.resolve()): hashlib.sha256(HIDDEN_TEXT.encode()).hexdigest()}
+    assert staging_mod.recover_last_run(
+        _expected_sha(record), workspace_root=workspace, trusted_shas=manifest
+    ) == [str(hidden.resolve())]
     assert hidden.read_text(encoding="utf-8") == HIDDEN_TEXT
     assert staging_mod.run_abort_reason() == ""
     staging_mod.staging_root(workspace)  # now allowed
@@ -789,3 +791,112 @@ def test_killed_counted_run_recovers_with_the_fixture_manifest_hashes(
     assert Path(visible).with_name("test_hidden.py").is_file()
     assert (hard_dir / "test_hidden.py").read_text(encoding="utf-8") == HIDDEN_TEXT
     assert staging_mod.run_abort_reason() == ""
+
+
+def _exdev_for_hidden(monkeypatch) -> list[str]:
+    """os.replace raises EXDEV for hidden-test moves (workspace and staging on two devices)."""
+    import errno
+
+    real_replace = os.replace
+    hits: list[str] = []
+
+    def replace(src, dst, *a, **k):
+        if Path(src).name.startswith("test_hidden.py") or Path(dst).name.startswith(
+            "test_hidden.py"
+        ):
+            hits.append(Path(src).name)
+            raise OSError(errno.EXDEV, "Invalid cross-device link")
+        return real_replace(src, dst, *a, **k)
+
+    monkeypatch.setattr(staging_mod.os, "replace", replace)
+    return hits
+
+
+@pytest.mark.skipif(IS_ROOT, reason="root reads mode-0000 files; the EXDEV bug needs non-root")
+def test_cross_device_staging_round_trip_and_verify_window(tmp_path, monkeypatch) -> None:
+    """Gemini G2: across filesystems the 0000 staged file is still copied back (never a
+    PermissionError that would be misread as tampering)."""
+    workspace, visible, hidden = _case(tmp_path)
+    hits = _exdev_for_hidden(monkeypatch)
+    with _staged(workspace, visible) as staging:
+        assert not hidden.exists() and _mode(staging.staged_path) == 0o000
+        with staging.verify_window():
+            assert hidden.read_text(encoding="utf-8") == HIDDEN_TEXT
+        assert not hidden.exists() and _mode(staging.staged_path) == 0o000
+    assert hits  # every move took the cross-device path
+    assert hidden.read_text(encoding="utf-8") == HIDDEN_TEXT
+    assert staging.row_fields()["hidden_test_tampered"] is False
+    assert staging_mod.run_abort_reason() == ""
+
+
+def test_cross_device_quarantine_moves_or_disables_the_hidden_file(tmp_path, monkeypatch) -> None:
+    """Gemini G3: quarantine uses the EXDEV-safe move; if even that fails the hidden file is
+    locked to 0000 in place and quarantine_failed is recorded (still tampered/aborted)."""
+    workspace, visible, hidden = _case(tmp_path)
+    with _staged(workspace, visible) as staging:
+        _exdev_for_hidden(monkeypatch)
+        hidden.write_text("def test_planted():\n    assert True\n", encoding="utf-8")
+        staging._fail_closed("probe")
+        assert staging.quarantined is True and not os.path.lexists(hidden)
+
+    workspace2 = tmp_path / "second"
+    workspace2.mkdir()
+    workspace, visible, hidden = _case(workspace2)
+    with staging_mod.staged_hidden_test(
+        enabled=True,
+        repo_root=workspace,
+        test_file=str(visible),
+        task_id="oabh-demo-second",
+        trial_index=1,
+    ) as staging:
+        monkeypatch.setattr(
+            staging_mod,
+            "_move_file",
+            lambda *a, **k: (_ for _ in ()).throw(OSError(18, "Invalid cross-device link")),
+        )
+        hidden.write_text("def test_planted():\n    assert True\n", encoding="utf-8")
+        staging._fail_closed("probe")
+        assert staging.quarantined is False
+        assert any(v.startswith("quarantine_failed") for v in staging.violations)
+        assert _mode(hidden) == 0o000  # unusable in place
+        assert staging.row_fields()["hidden_test_tampered"] is True
+        assert staging_mod.is_quarantined(hidden)
+    assert staging_mod.run_abort_reason()
+
+
+def test_tampered_committed_hidden_test_is_never_restored(tmp_path, monkeypatch) -> None:
+    """Gemini G4: the checkout's git HEAD is not a recovery authority. A tampered hidden test
+    committed to the branch (and staged) is refused without a manifest sha."""
+    workspace, visible, hidden = _case(tmp_path)
+    hidden.write_text("def test_hidden_contract():\n    assert True\n", encoding="utf-8")
+    killed, record = _killed_run(tmp_path, workspace, hidden)  # commits the tampered bytes
+    _new_process(monkeypatch)
+    with pytest.raises(staging_mod.HiddenTestStagingError):
+        staging_mod.recover_last_run(_expected_sha(record), workspace_root=workspace)
+    assert not os.path.lexists(hidden)
+    assert "untrusted_recovery_authority" in staging_mod.run_abort_reason()
+    assert _mode(killed.staged_path) == 0o000  # bytes stay locked in the run dir
+
+
+def test_recovery_write_cannot_follow_a_parent_swapped_after_the_check(
+    tmp_path, monkeypatch
+) -> None:
+    """Gemini G5: the restore write goes through a no-symlink directory fd, so a parent swapped
+    for a symlink between the component check and the write never redirects it."""
+    workspace, visible, hidden = _case(tmp_path)
+    killed, record = _killed_run(tmp_path, workspace, hidden)
+    case = hidden.parent
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    real_case = tmp_path / "moved_case"
+    case.rename(real_case)
+    case.symlink_to(elsewhere, target_is_directory=True)  # the race the check cannot see
+    monkeypatch.setattr(staging_mod, "_no_symlink_components", lambda _p: None)
+    _new_process(monkeypatch)
+    manifest = {str(case / "test_hidden.py"): hashlib.sha256(HIDDEN_TEXT.encode()).hexdigest()}
+    with pytest.raises(staging_mod.HiddenTestStagingError):
+        staging_mod.recover_last_run(
+            _expected_sha(record), workspace_root=workspace, trusted_shas=manifest
+        )
+    assert not (elsewhere / "test_hidden.py").exists()
+    assert "origin_parent_not_a_plain_directory" in staging_mod.run_abort_reason()
