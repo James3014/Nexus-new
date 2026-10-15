@@ -2,7 +2,7 @@
   "schema": "nexus.wiki.agent-index.v1",
   "authority": "derived_non_authoritative",
   "authority_manifest": "99_Schema/WIKI_AUTHORITY_MANIFEST.yaml",
-  "source_fingerprint": "d81a85de8b8b1f066f849c71de54237d65ac7a2bf3908c37a57e450f5b954c2b",
+  "source_fingerprint": "121aaa65985b37779851dd663c13a3a4ef1582cf832772fa705fec85f0ffe239",
   "included_page_count": 253,
   "excluded_page_count": 38,
   "canonical_page_count": 12,
@@ -8548,7 +8548,7 @@
       "is_canonical": false,
       "canonical_key": "",
       "one_sentence_summary": "TODO",
-      "content_sha256": "eebbfef76f5f42dd5814d5bf93f1b44b3cd1431650ad915b4d063a523178c251",
+      "content_sha256": "3482e9e9199f102a064cc592c6423f9c66246eee84e5219c40c01e93d94bc071",
       "outgoing_links": [
         [
           "canonical:system_overview",
