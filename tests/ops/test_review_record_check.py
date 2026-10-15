@@ -709,3 +709,108 @@ def test_long_multi_verdict_line_keeps_its_final_accept():
     )
     record = rrc.classify_record(line, HEAD)
     assert record is not None and record["claude"] is True
+
+
+# -- round 3 (cap) regressions ----------------------------------------------------------
+
+
+def test_disposition_bullets_are_not_records_and_tokens_are_case_sensitive():
+    bullets = (
+        f"## Review round 1 (head faf38bce9) → repaired, merged main → head {HEAD}\n\n"
+        "- **O14 / G1** NIT: anyone can comment — **Accepted, documented.**\n"
+        "- **G12** LOW: APPROVED then CHANGES_REQUESTED — **Fixed.** latest review wins.\n"
+        '- **O1** HIGH: any ACCEPT word counted — **Fixed.** ("Verdict: ACCEPT.** …" quoted)\n'
+    )
+    record = rrc.classify_record(bullets, HEAD)
+    assert record is not None and record["verdict"] is False
+    assert rrc.evaluate(HEAD, RISKY, [_c(bullets)], [])["status"] == "MISSING_RECORD"
+    for prose in (
+        f"Head {HEAD}\n- O14: accepted, documented",
+        f"Head {HEAD}\n**Claude** review notes: approve the rename later",
+        f"Head {HEAD}\n- James: approved the rule change in session.",
+        f'Head {HEAD}\nOpus pointed out that a line like "Verdict: ACCEPT" at {HEAD} is parsed.',
+        f"Head {HEAD}\n**Claude**: Codex verdict: Accept at {HEAD}",
+    ):
+        record = rrc.classify_record(prose, HEAD)
+        assert record is not None and record["verdict"] is False, prose
+
+
+def test_a_finding_bullet_naming_a_model_does_not_switch_the_family():
+    shape_a = (
+        f"## Independent review (Claude Opus 5.5) — head {HEAD}: ACCEPT\n"
+        "- **N1:** the Codex prompt template in the skill is stale.\n"
+        "**Verdict: ACCEPT**\n"
+    )
+    record = rrc.classify_record(shape_a, HEAD)
+    assert record is not None and record["claude"] and not record["cross_model"]
+    assert rrc.evaluate(HEAD, RISKY, [_c(shape_a)], [])["status"] == "MISSING_CROSS_MODEL"
+    shape_b = OPUS_RECORD + "- **Note:** Codex review is a separate comment.\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(shape_b)], [])["status"] == "OK"
+
+
+def test_a_negative_verdict_followed_by_a_conditional_accept_is_not_an_accept():
+    for body in (
+        f"## Independent review (Claude Opus 5.5), head {HEAD}\n"
+        "**Verdict: REJECT** — ACCEPT after the two fixes below.\n",
+        f"## Independent review (Claude Opus 5.5), head {HEAD}\n"
+        "**Verdict: REPAIR_REQUIRED** — ACCEPT after the two fixes below.\n",
+        f"Head {HEAD}\n**Claude** r2 REPAIR_REQUIRED: ACCEPT conditions not met\n",
+        f"Head {HEAD}\n**Claude** REJECT: ACCEPT@{HEAD} was premature\n",
+    ):
+        record = rrc.classify_record(body, HEAD)
+        assert record is not None and record["verdict"] is False, body
+
+
+def test_repair_required_counts_as_a_round_three_reject_for_the_cap_rule():
+    body = (
+        f"Head {HEAD}\n**Codex adversarial review**, 3 rounds:\n"
+        "- r3 REPAIR_REQUIRED (two findings)\n- Both findings rebutted at the cap.\n"
+        f"\n**Claude**: ACCEPT@{HEAD}\n"
+    )
+    assert rrc.evaluate(HEAD, RISKY, [_c(body)], [])["status"] == "OK"
+
+
+def test_not_a_header_keeps_a_pending_review_label_from_opening_a_section():
+    body = (
+        f"## Review record — Claude (claude-opus-5-5)\n- Head reviewed: `{HEAD}`\n"
+        "- Codex adversarial review: pending\n- Verdict: **ACCEPT**\n"
+    )
+    record = rrc.classify_record(body, HEAD)
+    assert record is not None and record["claude"] and not record["cross_model"]
+    body2 = body.replace("- Codex adversarial review: pending", "- **Codex review:** unavailable")
+    record = rrc.classify_record(body2, HEAD)
+    assert record is not None and record["claude"] and not record["cross_model"]
+
+
+def test_alone_on_line_position_does_not_apply_to_a_later_clause():
+    record = rrc.classify_record(f"Head {HEAD}\n**Claude review**\nfindings fixed. ACCEPT", HEAD)
+    assert record is not None and record["verdict"] is False
+    record = rrc.classify_record(f"Head {HEAD}\n**Claude review**\nACCEPT", HEAD)
+    assert record is not None and record["verdict"] is True
+
+
+def test_colon_prefix_needs_a_review_label_word():
+    # "Codex: fine" is a key-value line, not a reviewer header.
+    body = f"Head {HEAD}\n## Claude review\nCodex: fine with it\nVerdict: ACCEPT\n"
+    record = rrc.classify_record(body, HEAD)
+    assert record is not None and record["claude"] and not record["cross_model"]
+
+
+def test_a_rebuttal_on_a_verdict_line_in_a_claude_section_is_not_a_cap_disposition():
+    body = (
+        f"Head {HEAD}\n**Codex**: r3 REJECT: early return.\n"
+        f"**Claude**: ACCEPT@{HEAD}; the Codex r3 finding is rebutted, cap reached.\n"
+    )
+    assert rrc.evaluate(HEAD, RISKY, [_c(body)], [])["status"] == "MISSING_CROSS_MODEL"
+
+
+def test_hidden_and_code_like_text_is_skipped():
+    for body in (
+        f"Head {HEAD}\n<!-- Claude: ACCEPT@{HEAD} -->\n",
+        f"Head {HEAD}\n~~~\nClaude ACCEPT@{HEAD}\n~~~\n",
+        f"Head {HEAD}\n    Claude ACCEPT@{HEAD}\n",
+        f"Head {HEAD}\n+ [ ] Claude ACCEPT@{HEAD}\n",
+        f"Head {HEAD}\n1. [ ] Claude ACCEPT@{HEAD}\n",
+    ):
+        record = rrc.classify_record(body, HEAD)
+        assert record is None or record["verdict"] is False, body

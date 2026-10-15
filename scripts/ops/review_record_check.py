@@ -86,12 +86,18 @@ _HEX_TOKEN = re.compile(rf"(?<![0-9a-f])([0-9a-f]{{{MIN_PREFIX},40}})(?![0-9a-f]
 _TOKEN = r"(?:ACCEPT|ACCEPTED|APPROVE|APPROVED)"
 # Verdict position: after a "Verdict:" label, bound as "ACCEPT@<sha>", after a colon,
 # dash or round marker ("r3 ACCEPT", "Round 2 @ sha: ACCEPT"), or alone on the line.
+# The token itself is case-sensitive (uppercase only); the label words are not.
 _VERDICT_POS = re.compile(
-    rf"(?:\bverdict\s*:\s*|@\s*|[:\-–—]\s*|\br\d+\s+|\bround\s*\d+\s*:?\s*|^\s*)({_TOKEN})\b"
+    rf"(?:\b(?i:verdict)\s*:\s*|@\s*|[:\-–—]\s*|\b(?i:r)\d+\s+|\b(?i:round)\s*\d+\s*:?\s*|^\s*)"
+    rf"({_TOKEN})\b"
     rf"|({_TOKEN})(?=\s*(?:@|\bat\s)\s*[0-9a-f]{{{MIN_PREFIX},}})",
-    re.IGNORECASE,
 )
-_REJECT = re.compile(r"\b(?:REJECT(?:ED)?|REPAIR_REQUIRED|REQUEST_CHANGES|CHANGES[ _]REQUESTED)\b")
+# _plain strips underscores, so the joined forms must match too.
+_REJECT = re.compile(
+    r"\b(?:REJECT(?:ED)?|REPAIR_?REQUIRED|REQUEST_?CHANGES|CHANGES[ _]?REQUESTED)\b"
+)
+_VERDICT_NEGATIVE = re.compile(r"(?i:verdict)\s*:\s*(?:REJECT|REPAIR_?REQUIRED|REQUEST_?CHANGES)")
+_QUOTE = re.compile("[\"'\u201c\u2018]")
 # Words before the token in its clause that make it a wish, a condition or a negation.
 _PRE_DENY = re.compile(
     r"\b(?:await(?:ing|s)?|need(?:s|ed|ing)?|request(?:s|ed|ing)?|should|would|will|could|may|might"
@@ -103,7 +109,7 @@ _PRE_DENY = re.compile(
 )
 # Words right after the token (before a sha, punctuation or a parenthesis) that withdraw it.
 _POST_DENY = re.compile(
-    r"^\s*(?:pending|withheld|blocked|only|if|unless|once|when|later|is|was|would|will|should"
+    r"^\s*(?:after|pending|withheld|blocked|only|if|unless|once|when|later|is|was|would|will|should"
     r"|could|may|might|needed|required|expected|requested|awaited|\?)",
     re.IGNORECASE,
 )
@@ -120,7 +126,8 @@ _CROSS = re.compile(r"\b(?:codex|gemini|gpt)\b", re.IGNORECASE)
 _HEAD_BIND = re.compile(
     rf"\bhead\b[^\n]{{0,24}}?(?<![0-9a-f])([0-9a-f]{{{MIN_PREFIX},40}})(?![0-9a-f])"
 )
-_SKIP_LINE = re.compile(r"^\s*(?:\||>|- \[ \]|\* \[ \]|\$ |coord ready\b|gh pr\b)")
+_SKIP_LINE = re.compile(r"^\s*(?:\||>|(?:[-*+]|\d+\.)\s+\[ \]|\$ |coord ready\b|gh pr\b)|^ {4}|^\t")
+_HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 _LABEL_LINE = re.compile(r"^\s*(?:#+\s|\*\*|- \*\*|\*\s\*\*|reviewer\b)", re.IGNORECASE)
 _LABEL_WORDS = re.compile(
     r"\b(?:review|reviewer|cross-model|adversarial|independent|verdict)\b", re.IGNORECASE
@@ -274,8 +281,10 @@ def verdict_clauses(line: str) -> list[str]:
         # names several) to this one.
         line_before = _plain(plain_line[window_start : start + span[0]]) if start >= 0 else before
         after = clause[span[1] :]
-        if _PRE_DENY.search(line_before) or _REJECT.search(before):
-            continue
+        if _PRE_DENY.search(line_before) or _REJECT.search(before) or _QUOTE.search(line_before):
+            continue  # a quoted or negated verdict is prose about a verdict, not one
+        if _VERDICT_NEGATIVE.search(line_before) or _REJECT.search(_plain(clause[span[1] :])):
+            continue  # "Verdict: REJECT — ACCEPT after the fixes" is a rejection
         head_of_after = _STOP.split(after, 1)[0]
         if _POST_DENY.match(head_of_after) or _POST_COND.search(head_of_after):
             continue
@@ -315,6 +324,16 @@ def _label_family(line: str) -> str | None:
     plain = _plain(line, keep_parens=True).strip()
     if _NOT_A_HEADER.search(plain):
         return None  # "Codex: unavailable", "Codex adversarial review: pending" open no section
+    bold = re.match(r"^\s*(?:[-*]\s+)?\*\*(.+?)\*\*", line)
+    if (
+        bold
+        and not re.match(r"^\s*#", line)
+        and not verdict_clauses(line)
+        and not _LABEL_WORDS.search(bold.group(1))
+    ):
+        # A finding bullet ("- **N1:** the Codex prompt is stale") labels by its bold
+        # text only, so a model name in the finding text cannot switch the family.
+        return _family(bold.group(1))
     if _LABEL_LINE.match(line) or plain.lower().startswith("reviewer"):
         return _family(plain)
     if ":" in plain:
@@ -353,8 +372,8 @@ def classify_record(body: str, head: str) -> dict[str, Any] | None:
         return None
     lines: list[str] = []
     fenced = False
-    for raw in body.splitlines():
-        if raw.strip().startswith("```"):
+    for raw in _HTML_COMMENT.sub(" ", body).splitlines():
+        if raw.strip().startswith(("```", "~~~")):
             fenced = not fenced
             continue
         if not fenced:
