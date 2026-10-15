@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shlex
+import stat
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,6 +23,10 @@ from nexus.executors.cli_worker import (
     CliWorkerStatus,
     bounded_environment_receipt,
     run_cli_worker,
+)
+from nexus.orchestrator.canonical_source_root import (
+    CONTROLLER_BIND_PREFIX,
+    _bind_path_problem,
 )
 from nexus.orchestrator.lifecycle_guards import LifecycleGuardError, require_bound_approval_grant
 from nexus.orchestrator.worktree_manager import get_canonical_git_hooks_dir
@@ -73,6 +78,7 @@ class IntegrationExecutionError(RuntimeError):
         merge_performed: bool,
         post_apply_verified: bool,
         failure_reason: str,
+        cleanup_failure: str | None = None,
     ) -> None:
         self.stage = stage
         self.branch_head_before = branch_head_before
@@ -82,6 +88,7 @@ class IntegrationExecutionError(RuntimeError):
         self.merge_performed = merge_performed
         self.post_apply_verified = post_apply_verified
         self.failure_reason = failure_reason
+        self.cleanup_failure = cleanup_failure
         self.integration_result_sha = branch_head_after if merge_performed else None
         super().__init__(failure_reason)
 
@@ -109,6 +116,125 @@ class ControlledIntegrationManager:
                 f"git {' '.join(args)} failed: {result.stderr.strip()}"
             )
         return result.stdout.strip()
+
+    @staticmethod
+    def _is_detached_linked_worktree(root: Path) -> bool:
+        """True only for a separate Controller shape: a linked worktree on a detached HEAD.
+
+        A primary checkout, or any worktree with a branch checked out, keeps
+        the fully strict cleanliness rule (#2230 F3).
+        """
+        def probe(*args: str) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                ["git", *args], cwd=root, capture_output=True, text=True, check=False
+            )
+
+        git_dir = probe("rev-parse", "--absolute-git-dir")
+        common_dir = probe("rev-parse", "--path-format=absolute", "--git-common-dir")
+        if git_dir.returncode != 0 or common_dir.returncode != 0:
+            return False
+        try:
+            linked = not os.path.samefile(git_dir.stdout.strip(), common_dir.stdout.strip())
+        except OSError:
+            return False
+        # ``symbolic-ref -q HEAD`` exits 1 exactly when HEAD is detached.
+        return linked and probe("symbolic-ref", "-q", "HEAD").returncode == 1
+
+    @staticmethod
+    def _pending_task_card_problem(root: Path, relative: str) -> str | None:
+        """Why an untracked ``tasks/`` entry is not a plain pending Task Card, else None.
+
+        Every component from ``tasks`` down to the leaf is lstat'ed: none may
+        be a symlink or named ``.git``; the leaf must be a regular file with
+        a single link.
+        """
+        problem = _bind_path_problem(relative)
+        if problem is not None:
+            return problem
+        parts = relative.split("/")
+        if any(part.casefold() == ".git" for part in parts):
+            return "CONTROLLER_BIND_GIT_METADATA"
+        current = root
+        for index, part in enumerate(parts):
+            current = current / part
+            try:
+                info = os.lstat(current)
+            except OSError:
+                return "CONTROLLER_BIND_UNREADABLE"
+            if stat.S_ISLNK(info.st_mode):
+                return "CONTROLLER_BIND_NOT_REGULAR_FILE"
+            if index == len(parts) - 1:
+                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                    return "CONTROLLER_BIND_NOT_REGULAR_FILE"
+            elif not stat.S_ISDIR(info.st_mode):
+                return "CONTROLLER_BIND_NOT_REGULAR_FILE"
+        return None
+
+    @staticmethod
+    def _tasks_tree_problem(root: Path) -> str | None:
+        """Reject symlinks and ``.git`` names anywhere under ``tasks/``.
+
+        ``git status`` never lists paths inside a nested ``.git`` directory,
+        so the on-disk tree is checked directly (without following links).
+        """
+        tasks_root = root / CONTROLLER_BIND_PREFIX.rstrip("/")
+        if os.path.islink(tasks_root):
+            return "CONTROLLER_BIND_NOT_REGULAR_FILE"
+        if not os.path.isdir(tasks_root):
+            return None
+        for current, dirs, files in os.walk(tasks_root, followlinks=False):
+            for name in (*dirs, *files):
+                if name.casefold() == ".git":
+                    return "CONTROLLER_BIND_GIT_METADATA"
+                if os.path.islink(os.path.join(current, name)):
+                    return "CONTROLLER_BIND_NOT_REGULAR_FILE"
+        return None
+
+    @classmethod
+    def _require_clean_controller(
+        cls, controller_root: Path, *, allow_pending_task_cards: bool, message: str
+    ) -> None:
+        """Fail unless the Controller worktree is clean.
+
+        ``allow_pending_task_cards`` admits only untracked plain files under
+        ``tasks/`` (pending Task Cards, #2230 F3).  Callers pass it only for a
+        separate detached Controller, where apply is a pure ref update, so
+        integration never reads or writes that worktree and a pending card
+        cannot reach the integrated commit.  Any other entry, including a
+        tracked edit under ``tasks/``, still blocks.
+        """
+        if allow_pending_task_cards and cls._tasks_tree_problem(controller_root) is not None:
+            raise RuntimeError(message)
+        status = cls._git(
+            ["status", "--porcelain=v1", "-z", "--untracked-files=all"], controller_root
+        )
+        for entry in status.split("\0"):
+            if not entry:
+                continue
+            if (
+                allow_pending_task_cards
+                and entry.startswith("?? " + CONTROLLER_BIND_PREFIX)
+                and cls._pending_task_card_problem(controller_root, entry[3:]) is None
+            ):
+                continue
+            raise RuntimeError(message)
+
+    @classmethod
+    def _remove_owned_worktrees(cls, paths: Sequence[Path], controller_root: Path) -> list[str]:
+        """Remove worktrees this run created; each in its own try, never raising."""
+        failures: list[str] = []
+        for path in paths:
+            if not os.path.lexists(path):
+                continue
+            try:
+                cls._git(["worktree", "remove", "--force", str(path)], controller_root)
+            except RuntimeError as exc:
+                failures.append(f"{path.name}: {exc}")
+        try:
+            cls._git(["worktree", "prune"], controller_root)
+        except RuntimeError as exc:
+            failures.append(f"prune: {exc}")
+        return failures
 
     @staticmethod
     def _validate_branch(branch: str) -> None:
@@ -546,8 +672,14 @@ class ControlledIntegrationManager:
         branch_head = self._git(["rev-parse", f"{integration_branch}^{{commit}}"], controller_root)
         if branch_head != expected_head:
             raise RuntimeError("integration branch HEAD drift")
-        if self._git(["status", "--porcelain=v1", "--untracked-files=all"], controller_root):
-            raise RuntimeError("canonical/integration worktree must be clean before apply")
+        # Only a separate detached Controller (#1939) may hold pending Task
+        # Cards: apply there is a pure ref update.  A primary checkout or any
+        # checkout on a branch stays fully strict.
+        self._require_clean_controller(
+            controller_root,
+            allow_pending_task_cards=self._is_detached_linked_worktree(controller_root),
+            message="canonical/integration worktree must be clean before apply",
+        )
 
         auth_obj = (
             authorization
@@ -610,15 +742,26 @@ class ControlledIntegrationManager:
 
         admitted_verifiers = self._bound_manifest(state, contract)
 
-        staging_path = Path(staging_root).expanduser().resolve() / task_id
-        if staging_path.exists():
+        staging_base = Path(staging_root).expanduser().resolve()
+        staging_path = staging_base / task_id
+        if os.path.lexists(staging_path):
             raise RuntimeError("integration staging Target already exists")
+        # Post-apply verification runs in its own throwaway worktree at the
+        # integrated commit, never in the Controller (#2230 F3).
+        post_apply_parent = staging_base / ".post-apply"
+        post_apply_path = post_apply_parent / task_id
+        if post_apply_commands and (
+            os.path.islink(post_apply_parent) or os.path.lexists(post_apply_path)
+        ):
+            raise RuntimeError("post-apply verification Target already exists")
         staging_path.parent.mkdir(parents=True, exist_ok=True)
         self._git(["worktree", "add", "--detach", str(staging_path), expected_head], controller_root)
+        owned_worktrees: list[Path] = [staging_path]
         staging_sha = ""
         applied = False
         post_apply_verified = False
         branch_head_after = expected_head
+        failure: Exception | None = None
         try:
             self._git(["merge", "--no-ff", "--no-edit", candidate_sha], staging_path)
             self._execute_manifest(admitted_verifiers, staging_path)
@@ -626,9 +769,13 @@ class ControlledIntegrationManager:
             if apply:
                 if self._git(["rev-parse", f"{integration_branch}^{{commit}}"], controller_root) != expected_head:
                     raise RuntimeError("integration branch HEAD drift before apply")
-                if self._git(["status", "--porcelain=v1", "--untracked-files=all"], controller_root):
-                    raise RuntimeError("canonical/integration worktree must be clean before apply")
                 current_branch = self._git(["branch", "--show-current"], controller_root)
+                separate_controller = self._is_detached_linked_worktree(controller_root)
+                self._require_clean_controller(
+                    controller_root,
+                    allow_pending_task_cards=separate_controller,
+                    message="canonical/integration worktree must be clean before apply",
+                )
                 if current_branch == integration_branch:
                     self._git(["merge", "--ff-only", staging_sha], controller_root)
                 else:
@@ -639,21 +786,55 @@ class ControlledIntegrationManager:
                 if exact_head != staging_sha:
                     raise RuntimeError("applied HEAD is not the verified staging commit")
                 self._git(["merge-base", "--is-ancestor", candidate_sha, exact_head], controller_root)
-                if self._git(["status", "--porcelain=v1", "--untracked-files=all"], controller_root):
-                    raise RuntimeError("canonical/integration worktree is dirty after apply")
-                for command in post_apply_commands:
-                    result = subprocess.run(tuple(command), cwd=controller_root, capture_output=True, text=True)
-                    if result.returncode != 0:
-                        raise RuntimeError(f"post-apply verification failed: {' '.join(command)}")
+                self._require_clean_controller(
+                    controller_root,
+                    allow_pending_task_cards=separate_controller,
+                    message="canonical/integration worktree is dirty after apply",
+                )
+                if post_apply_commands:
+                    post_apply_parent.mkdir(exist_ok=True)
+                    if os.path.islink(post_apply_parent) or os.path.lexists(post_apply_path):
+                        raise RuntimeError("post-apply verification Target already exists")
+                    owned_worktrees.append(post_apply_path)
+                    self._git(
+                        ["worktree", "add", "--detach", str(post_apply_path), exact_head],
+                        controller_root,
+                    )
+                    if self._git(["rev-parse", "HEAD"], post_apply_path) != exact_head:
+                        raise RuntimeError("post-apply worktree is not the integrated commit")
+                    for command in post_apply_commands:
+                        result = subprocess.run(
+                            tuple(command), cwd=post_apply_path, capture_output=True, text=True
+                        )
+                        if result.returncode != 0:
+                            raise RuntimeError(
+                                f"post-apply verification failed: {' '.join(command)}"
+                            )
                 post_apply_verified = True
-        except IntegrationExecutionError:
-            raise
         except Exception as exc:
+            failure = exc
+        except BaseException:
+            self._remove_owned_worktrees(owned_worktrees, controller_root)
+            raise
+        # Cleanup never masks the classified outcome: every owned worktree is
+        # removed in its own try and a failure is attached as detail.
+        cleanup_failures = self._remove_owned_worktrees(owned_worktrees, controller_root)
+        cleanup_failure = "; ".join(cleanup_failures) or None
+        if failure is not None or cleanup_failure is not None:
+            if isinstance(failure, IntegrationExecutionError):
+                if cleanup_failure is not None:
+                    failure.cleanup_failure = cleanup_failure
+                raise failure
             try:
                 branch_head_after = self._git(["rev-parse", f"{integration_branch}^{{commit}}"], controller_root)
             except RuntimeError:
                 branch_head_after = expected_head
-            stage = "POST_APPLY_VERIFICATION" if applied else "PRE_APPLY"
+            if failure is not None:
+                stage = "POST_APPLY_VERIFICATION" if applied else "PRE_APPLY"
+                reason = str(failure)
+            else:
+                stage = "POST_APPLY_CLEANUP" if applied else "PRE_APPLY"
+                reason = f"integration worktree cleanup failed: {cleanup_failure}"
             raise IntegrationExecutionError(
                 stage=stage,
                 branch_head_before=expected_head,
@@ -662,12 +843,9 @@ class ControlledIntegrationManager:
                 candidate_commit_sha=candidate_sha,
                 merge_performed=applied,
                 post_apply_verified=post_apply_verified,
-                failure_reason=str(exc),
-            ) from exc
-        finally:
-            if staging_path.exists():
-                self._git(["worktree", "remove", "--force", str(staging_path)], controller_root)
-                self._git(["worktree", "prune"], controller_root)
+                failure_reason=reason,
+                cleanup_failure=cleanup_failure,
+            ) from failure
         final_head = self._git(["rev-parse", f"{integration_branch}^{{commit}}"], controller_root)
         return IntegrationReceipt(
             schema="nexus.integration_receipt.v1", task_id=task_id,
