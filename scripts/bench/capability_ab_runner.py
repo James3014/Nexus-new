@@ -25,6 +25,7 @@ from typing import Any, Mapping
 from click.testing import CliRunner
 
 from scripts.bench.gemini_nexus_report import render_markdown_report
+from scripts.bench import hidden_test_staging as _hidden_staging
 from scripts.bench.warning_ledger import (
     annotate_row as _annotate_warning_ledger,
     capture_python_warnings as _capture_python_warnings,
@@ -176,6 +177,9 @@ class CapabilityTask:
     trial_index: int = 1
     fixture_kind: str = ""
     hidden_test_file: str = ""
+    # sha256 of the task's hidden test from the fixture manifest (hard_v1); the recovery
+    # authority for a killed counted run.
+    hidden_test_sha256: str = ""
     expected_capabilities: tuple[str, ...] = ()
     capability_activation_contract: str = ""
     hidden_oracle_kind: str = ""
@@ -269,7 +273,8 @@ class HyperAdmissionDecision:
 
 
 def _pytest_verifier_cmd(test_file: str) -> list[str]:
-    return [sys.executable, "-m", "pytest", "-q", "--maxfail=1", test_file]
+    # "--": the test path is never parsed as a pytest option (a path starting with "-").
+    return [sys.executable, "-m", "pytest", "-q", "--maxfail=1", "--", test_file]
 
 
 def _expected_capability_receipt_coverage(
@@ -918,6 +923,7 @@ def load_tasks(path: str | Path) -> list[CapabilityTask]:
                 manifest_hash=manifest_hash,
                 fixture_kind=str(row.get("fixture_kind", "")),
                 hidden_test_file=str(row.get("hidden_test_file", "")),
+                hidden_test_sha256=str(row.get("hidden_test_sha256", "") or ""),
                 expected_capabilities=tuple(str(item) for item in row.get("expected_capabilities", []) or []),
                 capability_activation_contract=str(row.get("capability_activation_contract", "")),
                 hidden_oracle_kind=str(row.get("hidden_oracle_kind", "")),
@@ -1056,6 +1062,7 @@ def expand_task_trials(tasks: list[CapabilityTask], *, repeat_trials: int, shuff
                     trial_index=trial_index,
                     fixture_kind=task.fixture_kind,
                     hidden_test_file=task.hidden_test_file,
+                    hidden_test_sha256=task.hidden_test_sha256,
                     expected_capabilities=task.expected_capabilities,
                     capability_activation_contract=task.capability_activation_contract,
                     hidden_oracle_kind=task.hidden_oracle_kind,
@@ -2292,9 +2299,20 @@ def _resolve_task_files(repo_root: Path, task: CapabilityTask, *, materialize_mi
 def _hidden_test_for_visible_test(test_file: str) -> str:
     test_path = Path(test_file)
     hidden_path = test_path.with_name("test_hidden.py")
-    if hidden_path.exists():
+    if (
+        hidden_path.exists()
+        or _hidden_staging.active_staging_for(hidden_path) is not None
+        or _hidden_staging.is_quarantined(hidden_path)
+    ):
+        # Staged out of the workspace (or quarantined after tampering): still the verifier
+        # file, so a missing copy fails the verifier instead of falling back to the visible test.
         return str(hidden_path)
     return test_file
+
+
+def _hidden_staging_enabled(args: argparse.Namespace) -> bool:
+    """Strict/counted lane: the hidden test leaves the workspace for the with-Nexus row."""
+    return bool(getattr(args, "strict_llm_baseline", False) or getattr(args, "counted_first_attempt", False))
 
 
 def _verification_test_for_task(task: CapabilityTask, test_file: str) -> str:
@@ -3365,6 +3383,42 @@ def _missing_hidden_tests(tasks: list[CapabilityTask], repo_root: Path, *, mater
     return missing
 
 
+FILE_LOCK_DENIED = "file_lock_denied"
+
+
+def _row_file_lock_denied(row: Mapping[str, Any]) -> bool:
+    return (
+        str(row.get("nexus_failure_reason") or "") == FILE_LOCK_DENIED
+        or FILE_LOCK_DENIED in [str(code) for code in row.get("nexus_error_codes") or []]
+    )
+
+
+def _exclude_file_lock_denied_pairs(
+    with_rows: list[dict[str, Any]], without_rows: list[dict[str, Any]]
+) -> int:
+    """A with-Nexus row refused by a foreign or stale ``file_lock`` says nothing about either
+    arm (the bare arm never takes the lock). Like the confinement-parity exclusion, the PAIR
+    becomes ``not_run:file_lock_denied`` on BOTH arms (excluded from every denominator), whatever
+    order the arms ran in. Returns the number of excluded pairs."""
+
+    def _key(row: Mapping[str, Any]) -> str:
+        return f"{row.get('task_id')}__{row.get('trial_index')}"
+
+    denied = {_key(row) for row in with_rows if _row_file_lock_denied(row)}
+    for row in [*with_rows, *without_rows]:
+        if _key(row) not in denied:
+            continue
+        row["pre_exclusion_status"] = row.get("status")
+        row.update({
+            "status": "NOT_RUN",
+            "not_run": True,
+            "not_run_reason": FILE_LOCK_DENIED,
+            FILE_LOCK_DENIED: True,
+            "run_eligible": False,
+        })
+    return len(denied)
+
+
 def _fill_not_run_pairs(
     tasks: list[CapabilityTask], with_rows: list[dict[str, Any]], without_rows: list[dict[str, Any]]
 ) -> int:
@@ -3539,7 +3593,14 @@ def _hidden_feedback_disabled() -> bool:
     ``--strict-llm-baseline`` / ``--require-same-model-baseline``).
     """
 
-    return os.environ.get("NEXUS_BENCH_NO_HIDDEN_FEEDBACK", "").strip().lower() in {"1", "true", "yes"}
+    if os.environ.get("NEXUS_BENCH_NO_HIDDEN_FEEDBACK", "").strip().lower() in {"1", "true", "yes"}:
+        return True
+    # Like-for-like / counted lanes never feed hidden-verifier output back, whatever the flag:
+    # the symmetric prompt contract and the counted-lane confinement imply it.
+    from nexus.services.post_candidate_seam import confine_visible_test_enabled
+
+    symmetric = os.environ.get("NEXUS_SYMMETRIC_PROMPT", "").strip().lower() in {"1", "true", "yes"}
+    return symmetric or confine_visible_test_enabled()
 
 
 @dataclass(frozen=True)
@@ -4490,7 +4551,222 @@ def _finally_control_flow_warning(code: str) -> str:
     return ""
 
 
+CONFINEMENT_PARITY_FAILED = "confinement_parity_failed"
+
+
+def _counted_confinement_enabled() -> bool:
+    # One parse everywhere (the seam's helper): a non-"1" spelling routes to the confined
+    # runner, which refuses it, never to the unconfined subprocess.
+    from nexus.services.post_candidate_seam import confine_visible_test_enabled
+
+    return confine_visible_test_enabled()
+
+
+def _is_hidden_verifier_cmd(cmd: list[str]) -> bool:
+    return (
+        len(cmd) == 7
+        and list(cmd[1:6]) == ["-m", "pytest", "-q", "--maxfail=1", "--"]
+        and Path(str(cmd[6])).name == "test_hidden.py"
+    )
+
+
+def _confined_test_run(test_file: str | Path, *, workspace_root: Path, timeout_sec: float) -> tuple[subprocess.CompletedProcess[str], bool]:
+    """The test's directory (delivered target + test files) copied and run inside the OS
+    confinement; the workspace, the staging parent and other fixtures stay unreadable."""
+    from nexus.engine.confined_test_runner import run_pytest_dir_copy
+    from nexus.services.post_candidate_seam import CONFINEMENT_UNAVAILABLE, bench_forbidden_roots
+
+    test = Path(test_file).resolve()
+    argv = [sys.executable, "-m", "pytest", "-q", "--maxfail=1", "--", str(test)]
+    result = run_pytest_dir_copy(
+        test.parent,
+        test.name,
+        forbidden_paths=bench_forbidden_roots(workspace_root),
+        timeout_sec=max(1.0, float(timeout_sec)),
+    )
+    if not result.get("executed"):
+        return subprocess.CompletedProcess(argv, 1, "", f"{CONFINEMENT_UNAVAILABLE}:{result.get('error')}"[:300]), False
+    if result.get("timed_out"):
+        raise subprocess.TimeoutExpired(argv, timeout_sec, output=str(result.get("stdout_tail") or ""))
+    return (
+        subprocess.CompletedProcess(
+            argv, int(result.get("exit_code") or 0), str(result.get("stdout_tail") or ""), str(result.get("stderr_tail") or "")
+        ),
+        True,
+    )
+
+
+def _confinement_parity_failures(
+    tasks: list[CapabilityTask], repo_root: Path, *, materialize_missing: bool, timeout_sec: int = 300
+) -> dict[str, str]:
+    """Counted lane preflight: every task's visible test (product path) and hidden verifier must
+    reach the same verdict confined and unconfined on the original target; otherwise the task is
+    excluded for BOTH arms (``confinement_parity_failed``), never scored. Mismatches are re-run
+    once to separate timing flakes."""
+    from nexus.services import post_candidate_seam as seam
+
+    failures: dict[str, str] = {}
+    for task in tasks:
+        if task.id in failures:
+            continue
+        try:
+            target_file, test_file = _resolve_task_files(repo_root, task, materialize_missing=materialize_missing)
+        except (FileNotFoundError, NotImplementedError, ValueError) as exc:
+            failures[task.id] = f"resolve_failed:{type(exc).__name__}"
+            continue
+        target = Path(target_file)
+        original = target.read_text(encoding="utf-8")
+        hidden = Path(test_file).with_name("test_hidden.py")
+
+        def unconfined(test: Path) -> bool:
+            return (
+                subprocess.run(
+                    [sys.executable, "-m", "pytest", "-q", "--maxfail=1", "--", str(test)],
+                    cwd=repo_root,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=timeout_sec,
+                ).returncode
+                == 0
+            )
+
+        def confined_visible() -> tuple[bool, bool]:
+            completed, executed = seam.run_visible_test_confined(
+                target_path=target,
+                visible_test_path=Path(test_file),
+                original_code=original,
+                candidate_code=original,
+                timeout_sec=timeout_sec,
+                workspace_root=repo_root,
+            )
+            return completed.returncode == 0, executed
+
+        def confined_hidden() -> tuple[bool, bool]:
+            completed, executed = _confined_test_run(hidden, workspace_root=repo_root, timeout_sec=timeout_sec)
+            return completed.returncode == 0, executed
+
+        checks = [("visible", Path(test_file), confined_visible)]
+        if hidden.is_file():
+            checks.append(("hidden", hidden, confined_hidden))
+        for label, test, confined in checks:
+            try:
+                for _attempt in range(2):
+                    conf_ok, executed = confined()
+                    if not executed:
+                        failures[task.id] = f"{label}:{seam.CONFINEMENT_UNAVAILABLE}"
+                        break
+                    if conf_ok == unconfined(test):
+                        break
+                else:
+                    failures[task.id] = f"{label}_verdict_differs"
+            except subprocess.TimeoutExpired:
+                failures[task.id] = f"{label}_timeout"
+            if task.id in failures:
+                break
+    return failures
+
+
+def _hidden_trusted_shas(tasks: list[CapabilityTask], repo_root: Path) -> dict[str, str]:
+    """Recovery authority for a killed counted run: each hidden test's sha256 from its source
+    of truth (materialized fixtures: regenerated deterministically; hard_v1: the task manifest's
+    ``hidden_test_sha256``), keyed by the absolute workspace path it belongs at."""
+    trusted: dict[str, str] = {}
+    with tempfile.TemporaryDirectory(prefix="nexus-hidden-sha-") as tmp:
+        for task in tasks:
+            if task.hidden_test_sha256 and task.test_file:
+                origin = (repo_root / task.test_file).parent.resolve() / "test_hidden.py"
+                trusted.setdefault(str(origin), task.hidden_test_sha256)
+                continue
+            if not task.fixture_kind:
+                continue
+            try:
+                _target, visible = _materialize_fixture(Path(tmp), task)
+            except (ValueError, NotImplementedError, OSError):
+                continue
+            generated = Path(visible).with_name("test_hidden.py")
+            if generated.is_file():
+                origin = (repo_root / ".nexus" / "bench_cases" / task.id).resolve() / "test_hidden.py"
+                trusted.setdefault(str(origin), hashlib.sha256(generated.read_bytes()).hexdigest())
+    return trusted
+
+
+def _log_line_safe(line: str) -> str:
+    """One physical log line that can never be read as a GitHub workflow command (same rule
+    as #2152's gate sanitiser): control characters collapse to spaces, a leading ``::`` is
+    prefixed, the legacy ``##[`` form is broken up. Task ids come from fixture manifests."""
+    body = " ".join("".join(ch if ch.isprintable() else " " for ch in str(line)).split())
+    while "##[" in body:
+        body = body.replace("##[", "# #[")
+    return "> " + body if body.startswith("::") else body
+
+
+def _report_confinement_parity(failures: Mapping[str, str]) -> None:
+    ids = ", ".join(_log_line_safe(task_id)[:120] for task_id in sorted(failures))
+    print(
+        _log_line_safe(
+            f"confinement parity failed for {len(failures)} task(s); excluded from both arms: {ids}"
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
+
+
+def _confinement_parity_row(mode: str, task: CapabilityTask, reason: str) -> dict[str, Any]:
+    return {
+        "mode": mode,
+        "task_id": task.id,
+        "trial_index": task.trial_index,
+        "status": "NOT_RUN",
+        "model_calls": 0,
+        "not_run": True,
+        "not_run_reason": CONFINEMENT_PARITY_FAILED,
+        CONFINEMENT_PARITY_FAILED: True,
+        "confinement_parity_detail": reason,
+        "run_eligible": False,
+    }
+
+
 def _run_process_group(
+    cmd: list[str],
+    *,
+    cwd: Path,
+    env: dict[str, str],
+    timeout_sec: int,
+) -> subprocess.CompletedProcess[str]:
+    """Run ``cmd``; a staged hidden test is back in place only when ``cmd`` names it."""
+    windows = _hidden_staging.stagings_named_in(cmd)
+    _hidden_staging.check_all_absent("subprocess_start")
+    if _hidden_staging._ACTIVE:
+        # Nothing the subprocess inherits may name the staging location.
+        env = _hidden_staging.scrub_subprocess_env(env)
+    if not windows:
+        return _hidden_verifier_run(cmd, cwd=cwd, env=env, timeout_sec=timeout_sec)
+    from contextlib import ExitStack
+
+    try:
+        with ExitStack() as stack:
+            for staging in windows:
+                stack.enter_context(staging.verify_window())
+            return _hidden_verifier_run(cmd, cwd=cwd, env=env, timeout_sec=timeout_sec)
+    except _hidden_staging.HiddenTestStagingError as exc:
+        # Fail closed: a staged hidden test that fails verification is never run; the row's
+        # hidden verifier fails and the row carries hidden_test_tampered.
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr=f"{exc}")
+
+
+def _hidden_verifier_run(
+    cmd: list[str], *, cwd: Path, env: dict[str, str], timeout_sec: int
+) -> subprocess.CompletedProcess[str]:
+    """Counted lane: the hidden verifier (both arms alike) runs confined on a copy of the test
+    directory, so delivered candidate code never runs unconfined next to the hidden test."""
+    if _counted_confinement_enabled() and _is_hidden_verifier_cmd(cmd):
+        completed, _executed = _confined_test_run(cmd[6], workspace_root=Path(cwd), timeout_sec=timeout_sec)
+        return completed
+    return _run_process_group_unstaged(cmd, cwd=cwd, env=env, timeout_sec=timeout_sec)
+
+
+def _run_process_group_unstaged(
     cmd: list[str],
     *,
     cwd: Path,
@@ -20202,6 +20478,16 @@ def main() -> int:
         help="When Nexus LLM baseline is enabled, require the baseline patch to come from the model and forbid local fallback.",
     )
     parser.add_argument(
+        "--recover-hidden-staging",
+        dest="recover_hidden_staging",
+        default="",
+        help=(
+            "run_manifest.json of a killed counted run (holds only sha256(run dir)): the run named by "
+            "~/.cache/nexus-bench-hidden/.last-run must match it; its staged hidden tests are restored "
+            "(each verified against the in-run-dir record and its sidecar) before this run starts."
+        ),
+    )
+    parser.add_argument(
         "--counted-first-attempt",
         dest="counted_first_attempt",
         action="store_true",
@@ -20467,6 +20753,9 @@ def main() -> int:
             args.strict_llm_baseline or getattr(args, "require_same_model_baseline", False)
         )
     os.environ["NEXUS_BENCH_COUNTED_FIRST_ATTEMPT"] = "1" if args.counted_first_attempt else "0"
+    # PR-2: under the strict/counted lane the product runs the visible test inside the OS
+    # confinement (same-user code cannot reach the staged hidden test or the output dir).
+    os.environ["NEXUS_CONFINE_VISIBLE_TEST"] = "1" if _hidden_staging_enabled(args) else "0"
     if args.counted_first_attempt:
         if getattr(args, "enable_background_offload", False):
             parser.error("--counted-first-attempt cannot be combined with --enable-background-offload")
@@ -20598,6 +20887,50 @@ def main() -> int:
     with_rows: list[dict[str, Any]] = []
     without_rows: list[dict[str, Any]] = []
     out_dir = (repo_root / args.output_dir).resolve()
+    if _hidden_staging_enabled(args):
+        # The staging record lives only in the output dir (never in a subprocess env); a killed
+        # run into the same output dir, or an explicit --recover-hidden-staging, is recovered
+        # (sha-verified) before any row runs. Unverifiable leftovers abort the run (exit 3).
+        run_record = out_dir / "run_manifest.json"
+        expected_sha = ""
+        for record in (Path(args.recover_hidden_staging) if args.recover_hidden_staging else None, run_record):
+            if record is not None and record.is_file():
+                try:
+                    staged_info = json.loads(record.read_text(encoding="utf-8")).get("hidden_staging") or {}
+                except ValueError:
+                    staged_info = {}
+                expected_sha = expected_sha or str(staged_info.get("run_root_sha256") or "")
+        try:
+            _hidden_staging.recover_last_run(
+                expected_sha, workspace_root=repo_root, trusted_shas=_hidden_trusted_shas(tasks, repo_root)
+            )
+        except _hidden_staging.HiddenTestStagingError as exc:
+            print(
+                _log_line_safe(
+                    f"hidden test staging recovery failed closed ({exc}); run is invalid. A killed "
+                    "counted run is void: rerun from a clean checkout"
+                ),
+                file=sys.stderr,
+                flush=True,
+            )
+            return 3
+        if _hidden_staging.run_abort_reason():
+            print(
+                _log_line_safe(
+                    f"hidden test staging recovery failed closed ({_hidden_staging.run_abort_reason()})"
+                ),
+                file=sys.stderr,
+                flush=True,
+            )
+            return 3
+        _hidden_staging.configure_run_record(run_record)
+        confinement_parity = _confinement_parity_failures(
+            tasks, repo_root, materialize_missing=bool(args.materialize_missing)
+        )
+        if confinement_parity:
+            _report_confinement_parity(confinement_parity)
+    else:
+        confinement_parity = {}
     ts = int(time.time())
     evidence_root = out_dir / f"evidence_{ts}"
     shared_cli_runner = CliRunner() if args.with_nexus_runner == "inprocess" else None
@@ -20766,6 +21099,9 @@ def main() -> int:
 
     def _with_nexus_leg(task: CapabilityTask) -> str:
         nonlocal timed_out, with_timeout_streak, with_infra_streak
+        if task.id in confinement_parity:
+            with_rows.append(_confinement_parity_row("with_nexus", task, confinement_parity[task.id]))
+            return ""
         if _budget_exceeded(run_start, effective_total_timeout_sec):
             timed_out = True
             _emit_progress(
@@ -20859,7 +21195,15 @@ def main() -> int:
                 test_file=test_file,
                 elapsed_sec=leg_start - run_start,
             )
-            with _capture_python_warnings(source="with_nexus_runtime") as runtime_warning_records:
+            # PR-2: under the strict/counted lane test_hidden.py is outside the workspace for the
+            # whole with-Nexus row (restored for the runner's hidden verifier and at row end).
+            with _hidden_staging.staged_hidden_test(
+                enabled=_hidden_staging_enabled(args),
+                repo_root=repo_root,
+                test_file=test_file,
+                task_id=task.id,
+                trial_index=task.trial_index,
+            ) as hidden_staging, _capture_python_warnings(source="with_nexus_runtime") as runtime_warning_records:
                 row = run_with_nexus(
                     repo_root=repo_root,
                     task=task,
@@ -20883,6 +21227,15 @@ def main() -> int:
                     strict_llm_baseline=bool(args.strict_llm_baseline),
                 )
             _annotate_warning_ledger(row, runtime_warning_records, append=True)
+            row.update(hidden_staging.row_fields() if hidden_staging is not None else {"hidden_staged": False})
+            if row.get("hidden_test_tampered"):
+                row["hidden_verifier_passed"] = False
+            if _hidden_staging.run_abort_reason():
+                # Fail closed: a tampered hidden test invalidates the run (exit 3).
+                row["hidden_staging_run_abort"] = _hidden_staging.run_abort_reason()
+                with_rows.append(row)
+                timed_out = True
+                return "break"
             row["per_call_timeout_cap_sec"] = _symmetric_per_call_cap_sec()
             row["isolation_mode"] = args.isolation_mode
             row["clean_checkout_required"] = args.isolation_mode == "worktree"
@@ -20951,6 +21304,22 @@ def main() -> int:
                     status=f"PARTIAL_WITH_NEXUS_ABORT:{fail_fast_reason}",
                 )
                 return "break"
+        except _hidden_staging.HiddenTestStagingError as exc:
+            # Fail closed: the row is invalid, its hidden verifier never ran, the run stops (exit 3).
+            with_rows.append({
+                "mode": "with_nexus",
+                "task_id": task.id,
+                "trial_index": task.trial_index,
+                "status": "FAILED",
+                "hidden_verifier_passed": False,
+                "hidden_test_tampered": True,
+                "hidden_staging_error": str(exc)[:300],
+                "hidden_staging_run_abort": _hidden_staging.run_abort_reason() or str(exc)[:200],
+                "run_eligible": False,
+            })
+            _hidden_staging.record_run_abort(f"hidden_test_tampered:staging_error:{exc}")
+            timed_out = True
+            return "break"
         except BenchmarkTotalTimeout:
             timed_out = True
             _emit_progress(
@@ -20970,6 +21339,12 @@ def main() -> int:
 
     def _without_nexus_leg(task: CapabilityTask) -> str:
         nonlocal timed_out, direct_timeout_streak, direct_infra_streak
+        if _hidden_staging.run_abort_reason():
+            timed_out = True
+            return "break"
+        if task.id in confinement_parity:
+            without_rows.append(_confinement_parity_row("without_nexus", task, confinement_parity[task.id]))
+            return ""
         if _budget_exceeded(run_start, effective_total_timeout_sec):
             timed_out = True
             _emit_progress(
@@ -20999,7 +21374,16 @@ def main() -> int:
                 test_file=test_file,
                 elapsed_sec=leg_start - run_start,
             )
-            with _capture_python_warnings(source="without_nexus_runtime") as runtime_warning_records:
+            # Same staging context as the with-Nexus leg (symmetry): the bare arm's agent runs in
+            # an empty cwd but is an unconfined same-user process that could read absolute
+            # workspace paths, so the hidden test is out of the workspace for it too.
+            with _hidden_staging.staged_hidden_test(
+                enabled=_hidden_staging_enabled(args),
+                repo_root=repo_root,
+                test_file=test_file,
+                task_id=task.id,
+                trial_index=task.trial_index,
+            ) as hidden_staging, _capture_python_warnings(source="without_nexus_runtime") as runtime_warning_records:
                 row = run_without_nexus(
                     repo_root=repo_root,
                     task=task,
@@ -21012,6 +21396,15 @@ def main() -> int:
                     mode=args.without_mode,
                 )
             _annotate_warning_ledger(row, runtime_warning_records, append=True)
+            row.update(hidden_staging.row_fields() if hidden_staging is not None else {"hidden_staged": False})
+            if row.get("hidden_test_tampered"):
+                row["hidden_verifier_passed"] = False
+            if _hidden_staging.run_abort_reason():
+                # Fail closed exactly like the with-Nexus leg (exit 3).
+                row["hidden_staging_run_abort"] = _hidden_staging.run_abort_reason()
+                without_rows.append(row)
+                timed_out = True
+                return "break"
             row["per_call_timeout_cap_sec"] = _symmetric_per_call_cap_sec()
             row["isolation_mode"] = args.isolation_mode
             row["clean_checkout_required"] = args.isolation_mode == "worktree"
@@ -21084,6 +21477,22 @@ def main() -> int:
                     status=f"PARTIAL_PROVIDER_ABORT:{direct_abort_reason}",
                 )
                 return "break"
+        except _hidden_staging.HiddenTestStagingError as exc:
+            # Same as the with-Nexus leg: fail closed, the row is invalid, the run stops (exit 3).
+            without_rows.append({
+                "mode": "without_nexus",
+                "task_id": task.id,
+                "trial_index": task.trial_index,
+                "status": "FAILED",
+                "hidden_verifier_passed": False,
+                "hidden_test_tampered": True,
+                "hidden_staging_error": str(exc)[:300],
+                "hidden_staging_run_abort": _hidden_staging.run_abort_reason() or str(exc)[:200],
+                "run_eligible": False,
+            })
+            _hidden_staging.record_run_abort(f"hidden_test_tampered:staging_error:{exc}")
+            timed_out = True
+            return "break"
         except BenchmarkTotalTimeout:
             timed_out = True
             _emit_progress(
@@ -21149,6 +21558,7 @@ def main() -> int:
 
     _clear_total_timeout(previous_timeout_handler)
     prompt_symmetry_report = None
+    _exclude_file_lock_denied_pairs(with_rows, without_rows)
     if interleave_arms:
         _fill_not_run_pairs(tasks, with_rows, without_rows)
     if bool(args.counted_first_attempt) and _counted_mode_expects_model_calls(args):
@@ -21334,6 +21744,15 @@ def main() -> int:
         except Exception:
             persistent_worker_proc.kill()
 
+    if _hidden_staging.run_abort_reason():
+        print(
+            _log_line_safe(
+                f"hidden test staging failed closed ({_hidden_staging.run_abort_reason()}); run is invalid"
+            ),
+            file=sys.stderr,
+            flush=True,
+        )
+        return 3
     if prompt_symmetry_report is not None and prompt_symmetry_report.get("status") != "PASS":
         print(
             f"prompt symmetry audit FAILED ({len(prompt_symmetry_report.get('failed_keys') or [])} task(s)); "

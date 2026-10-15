@@ -278,7 +278,7 @@ def _tagged_pids(tag: str) -> set[int]:
                 continue  # exited meanwhile
             except OSError:
                 if _proc_is_zombie(entry):
-                    continue  # a zombie's environ is unreadable; it runs nothing
+                    continue  # a dead zombie's environ is unreadable; no thread runs
                 try:
                     same_uid = entry.stat().st_uid == os.getuid()
                 except (FileNotFoundError, ProcessLookupError):
@@ -348,12 +348,24 @@ def _predates_run(entry: Path, tag: str) -> bool:
 
 
 def _proc_is_zombie(entry: Path) -> bool:
-    """True when ``/proc/<pid>/stat`` reports a zombie or dead task."""
+    """True when ``entry`` is a zombie or dead process with no live threads.
+
+    ``/proc/<pid>/stat`` reports Z for a thread-group leader whose main thread
+    exited while its other threads keep running, so Z/X counts as dead only
+    when ``/proc/<pid>/task`` lists at most one thread. Fails closed: an
+    unreadable stat or task listing is not a zombie.
+    """
     try:
         state = (entry / "stat").read_text().rsplit(")", 1)[1].split()[0]
     except (OSError, IndexError):
         return False
-    return state in ("Z", "X")
+    if state not in ("Z", "X"):
+        return False
+    try:
+        threads = sum(1 for _ in (entry / "task").iterdir())
+    except OSError:
+        return False
+    return threads <= 1
 
 
 def _process_table() -> dict[int, int]:

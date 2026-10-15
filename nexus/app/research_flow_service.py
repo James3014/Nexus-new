@@ -12,6 +12,7 @@ import hashlib
 import os
 from pathlib import Path
 from datetime import datetime, timezone
+from collections.abc import Iterable, Mapping
 from typing import Any
 from dataclasses import asdict
 import click
@@ -77,6 +78,11 @@ from nexus.research.flow.evidence_packer import (
     apply_nightshift_auto_run,
     maybe_run_nightshift_after_hyper_failure,
 )
+from nexus.research.flow.unified_capability_projection import (
+    project_unified_capability_stages,
+    unified_receipts_from_meta,
+)
+from nexus.services import post_candidate_seam as _post_candidate_seam
 from nexus.research.flow.baseline_report import (
     baseline_report_from_meta,
     local_baseline_meta,
@@ -141,6 +147,107 @@ def _unified_runtime_capability_stages(result_report: dict[str, Any] | None) -> 
     if not isinstance(stages, list):
         return []
     return [dict(item) for item in stages if isinstance(item, dict)]
+
+
+def _unified_receipt_from_meta(meta: Mapping[str, Any] | None) -> dict[str, Any]:
+    receipts = unified_receipts_from_meta(meta if isinstance(meta, dict) else None)
+    return dict(receipts[0]) if receipts else {}
+
+
+def _seam_task_id(task_id: str | None, target_file: str) -> str:
+    return f"auto-flow:{task_id or _safe_trace_slug(target_file)}"
+
+
+def _apply_post_candidate_seam(
+    report: dict[str, Any],
+    *,
+    generation_meta: Mapping[str, Any] | None,
+    task_id: str,
+    target_path: Path,
+    test_file: Path,
+    original_code: str,
+    candidate_code: str,
+    pre_stages: list[dict[str, Any]],
+    released: Mapping[str, list[str]],
+    workspace_root: Path | None = None,
+) -> None:
+    """Run sandbox/ultra_review on the candidate (scratch copy) and project every seam stage.
+
+    Never changes the row outcome: the stages only reach the capability receipts.
+    """
+
+    unified = _unified_receipt_from_meta(generation_meta)
+    try:
+        post = _post_candidate_seam.run_seam_for_candidate(
+            workspace_root=workspace_root,
+            task_id=task_id,
+            unified_receipt=unified,
+            target_path=target_path,
+            visible_test_path=test_file,
+            original_code=original_code,
+            candidate_code=candidate_code,
+        )
+    except Exception as exc:  # noqa: BLE001 - the seam never breaks the row
+        post = None
+        report["post_candidate_seam_error"] = f"{type(exc).__name__}: {exc}"[:300]
+    merged = _post_candidate_seam.merge_seam_receipts(
+        task_id=task_id, pre_stages=pre_stages, post_receipt=post, released=released
+    )
+    if merged is None:
+        return
+    report["post_candidate_seam"] = {
+        key: value for key, value in merged.items() if key != "capabilities"
+    } | {"capabilities": [str(stage.get("name")) for stage in merged["capabilities"]]}
+    stages = project_unified_capability_stages([unified, merged] if unified else [merged])
+    if stages:
+        report["unified_runtime_capability_stages"] = stages
+
+
+def _run_visible_pytest(
+    pytest_cmd: list[str],
+    *,
+    repo_root: Path,
+    target_path: Path,
+    test_path: Path,
+    original_code: str,
+    candidate_code: str,
+    timeout_sec: int,
+    companion_files: Iterable[Path] = (),
+) -> subprocess.CompletedProcess:
+    """Visible test for the candidate; confined on a scratch copy under the strict/counted lane
+    (no OS barrier -> not executed, stderr ``confinement_unavailable``).
+
+    The confined copy holds only the candidate target, the visible test and their sibling files;
+    a candidate that also edits companion files elsewhere cannot be reproduced there, so under
+    the confinement it is refused (``confinement_unavailable:multi_file``, not executed) instead
+    of failing its visible test spuriously."""
+    if _post_candidate_seam.confine_visible_test_enabled():
+        companions = sorted(str(p) for p in companion_files if Path(p) != Path(target_path))
+        if companions:
+            return subprocess.CompletedProcess(
+                pytest_cmd,
+                1,
+                "",
+                f"{_post_candidate_seam.CONFINEMENT_UNAVAILABLE}:multi_file:{len(companions)}",
+            )
+        completed, _executed = _post_candidate_seam.run_visible_test_confined(
+            target_path=target_path,
+            visible_test_path=test_path,
+            original_code=original_code,
+            candidate_code=candidate_code,
+            timeout_sec=timeout_sec,
+            workspace_root=repo_root,
+        )
+        return completed
+    return subprocess.run(pytest_cmd, cwd=repo_root, capture_output=True, text=True, timeout=timeout_sec)
+
+
+def _visible_error(res: subprocess.CompletedProcess, default: str) -> str:
+    stderr = str(getattr(res, "stderr", "") or "")
+    multi_file = f"{_post_candidate_seam.CONFINEMENT_UNAVAILABLE}:multi_file"
+    if stderr.startswith(multi_file):
+        return multi_file
+    return _post_candidate_seam.CONFINEMENT_UNAVAILABLE if stderr.startswith(_post_candidate_seam.CONFINEMENT_UNAVAILABLE) else default
 
 
 def _write_source_text(path: Path, text: str) -> None:
@@ -1111,6 +1218,31 @@ def run_auto_flow(
         generation_meta = local_baseline_meta()
         companion_edits: dict[Path, str] = {}
         restored_files: dict[Path, str | None] = {}
+        seam_lock_task = ""
+        seam_pre_stages: list[dict[str, Any]] = []
+        seam_released: dict[str, list[str]] = {}
+        apply_release: list[Any] = []
+
+        apply_companions: list[dict[Path, str]] = []
+
+        def _hold_apply_lock() -> bool:
+            # Held from the in-place write until the row's files are settled (no check-then-write).
+            # The lock covers the target AND every companion file written in place; any one
+            # held by another task refuses the whole delivery.
+            companions = (
+                {}
+                if symmetric_prompt
+                else generate_local_companion_edits(repo_root, target_path, task_desc, "baseline", 0)
+            )
+            release = _post_candidate_seam.hold_target_lock(
+                repo_root, target_file, [path for path in companions if path != target_path]
+            )
+            if release is None:
+                return False
+            apply_release.append(release)
+            apply_companions.append(companions)
+            return True
+
         try:
             patched, source, generation_meta = _build_baseline_patch(
                 trial=0,
@@ -1124,14 +1256,21 @@ def run_auto_flow(
                 task_type=task_type,
                 test_source=visible_test_source,
             )
+            if patched != original_code:
+                # PR-2 seam: lock the target before the candidate is written (runtime-selected only).
+                seam_lock_task, seam_pre_stages = _post_candidate_seam.lock_target_if_selected(
+                    unified_receipt=_unified_receipt_from_meta(generation_meta),
+                    task_id=_post_candidate_seam.seam_holder_id(repo_root, target_file),
+                    workspace_root=repo_root,
+                    target_file=target_file,
+                )
             if patched == original_code:
                 err = "no_mutation_generated"
+            elif _post_candidate_seam.lock_denied(seam_pre_stages) or not _hold_apply_lock():
+                # Another task holds the target: the candidate is never written (no delivery).
+                err = "file_lock_denied"
             else:
-                companion_edits = (
-                    {}
-                    if symmetric_prompt
-                    else generate_local_companion_edits(repo_root, target_path, task_desc, "baseline", 0)
-                )
+                companion_edits = apply_companions[0]
                 restored_files[target_path] = original_code
                 _write_source_text(target_path, patched)
                 for extra_path, extra_code in companion_edits.items():
@@ -1140,18 +1279,48 @@ def run_auto_flow(
                     restored_files[extra_path] = extra_path.read_text(encoding="utf-8") if extra_path.exists() else None
                     extra_path.parent.mkdir(parents=True, exist_ok=True)
                     _write_source_text(extra_path, extra_code)
-                res = subprocess.run(pytest_cmd, cwd=repo_root, capture_output=True, text=True, timeout=timeout_sec)
+                res = _run_visible_pytest(
+                    pytest_cmd,
+                    repo_root=repo_root,
+                    target_path=target_path,
+                    test_path=test_path_for_prompt,
+                    original_code=original_code,
+                    candidate_code=patched,
+                    timeout_sec=timeout_sec,
+                    companion_files=companion_edits,
+                )
                 ok = res.returncode == 0
                 if not ok:
-                    err = "pytest_failed"
+                    err = _visible_error(res, "pytest_failed")
         except subprocess.TimeoutExpired:
             err = "test_timeout"
         finally:
             # S20: in the like-for-like A/B the model's file stays delivered even when the visible
             # test fails, so the bench verifies it with the hidden test exactly like the bare arm.
             keep_model_delivery = symmetric_prompt and _is_symmetric_model_source(str(source))
-            _restore_baseline_files(restored_files, keep_target=ok or keep_model_delivery)
+            try:
+                _restore_baseline_files(restored_files, keep_target=ok or keep_model_delivery)
+            finally:
+                for release in apply_release:
+                    release()
+                if seam_lock_task:
+                    seam_released = _post_candidate_seam.release_target_lock(seam_lock_task)
         report = baseline_report_from_meta(source, generation_meta)
+        lock_denied = err == "file_lock_denied"
+        if lock_denied:
+            report["file_lock_denied"] = True
+        _apply_post_candidate_seam(
+            report,
+            generation_meta=generation_meta,
+            task_id=_seam_task_id(task_id, target_file),
+            target_path=target_path,
+            test_file=test_path_for_prompt,
+            original_code=original_code,
+            candidate_code=original_code if lock_denied else patched,
+            pre_stages=seam_pre_stages,
+            released=seam_released,
+            workspace_root=repo_root,
+        )
         if symmetric_prompt and _is_symmetric_model_source(str(source)) and patched != original_code:
             # P1-2: identity of the model candidate, checked by the bench against the delivered file.
             report["model_candidate_sha256"] = hashlib.sha256(patched.encode("utf-8")).hexdigest()
@@ -1173,6 +1342,29 @@ def run_auto_flow(
         generation_meta = local_baseline_meta()
         patched = original_code
         restored_files: dict[Path, str | None] = {}
+        probe_lock_task = ""
+        probe_release: list[Any] = []
+
+        probe_companions: list[dict[Path, str]] = []
+
+        def _hold_probe_lock() -> bool:
+            # Held from the in-place write until the original is restored (no check-then-write).
+            # The lock covers the target AND every companion file written in place; any one
+            # held by another task refuses the whole delivery.
+            companions = (
+                {}
+                if symmetric_prompt
+                else generate_local_companion_edits(repo_root, target_path, task_desc, "baseline_probe", 0)
+            )
+            release = _post_candidate_seam.hold_target_lock(
+                repo_root, target_file, [path for path in companions if path != target_path]
+            )
+            if release is None:
+                return False
+            probe_release.append(release)
+            probe_companions.append(companions)
+            return True
+
         try:
             patched, source, generation_meta = _build_baseline_patch(
                 trial=0,
@@ -1186,14 +1378,21 @@ def run_auto_flow(
                 task_type=task_type,
                 test_source=visible_test_source,
             )
+            probe_pre: list[dict[str, Any]] = []
+            if patched != original_code:
+                # PR-2 seam: the probe writes the candidate in place too -> same lock as apply.
+                probe_lock_task, probe_pre = _post_candidate_seam.lock_target_if_selected(
+                    unified_receipt=_unified_receipt_from_meta(generation_meta),
+                    task_id=_post_candidate_seam.seam_holder_id(repo_root, target_file),
+                    workspace_root=repo_root,
+                    target_file=target_file,
+                )
             if patched == original_code:
                 err = "no_mutation_generated"
+            elif _post_candidate_seam.lock_denied(probe_pre) or not _hold_probe_lock():
+                err = "file_lock_denied"
             else:
-                companion_edits = (
-                    {}
-                    if symmetric_prompt
-                    else generate_local_companion_edits(repo_root, target_path, task_desc, "baseline_probe", 0)
-                )
+                companion_edits = probe_companions[0]
                 restored_files[target_path] = original_code
                 _write_source_text(target_path, patched)
                 for extra_path, extra_code in companion_edits.items():
@@ -1202,14 +1401,29 @@ def run_auto_flow(
                     restored_files[extra_path] = extra_path.read_text(encoding="utf-8") if extra_path.exists() else None
                     extra_path.parent.mkdir(parents=True, exist_ok=True)
                     _write_source_text(extra_path, extra_code)
-                res = subprocess.run(pytest_cmd, cwd=repo_root, capture_output=True, text=True, timeout=timeout_sec)
+                res = _run_visible_pytest(
+                    pytest_cmd,
+                    repo_root=repo_root,
+                    target_path=target_path,
+                    test_path=test_path_for_prompt,
+                    original_code=original_code,
+                    candidate_code=patched,
+                    timeout_sec=timeout_sec,
+                    companion_files=companion_edits,
+                )
                 ok = res.returncode == 0
                 if not ok:
-                    err = "pytest_failed"
+                    err = _visible_error(res, "pytest_failed")
         except subprocess.TimeoutExpired:
             err = "test_timeout"
         finally:
-            _restore_baseline_files(restored_files, keep_target=False)
+            try:
+                _restore_baseline_files(restored_files, keep_target=False)
+            finally:
+                for release in probe_release:
+                    release()
+                if probe_lock_task:
+                    _post_candidate_seam.release_target_lock(probe_lock_task)
         return {
             "flow": "baseline_probe",
             "status": "SUCCESS" if ok else "FAILED",
@@ -1223,9 +1437,17 @@ def run_auto_flow(
         start = time.monotonic()
         _write_source_text(target_path, original_code)
         try:
-            res = subprocess.run(pytest_cmd, cwd=repo_root, capture_output=True, text=True, timeout=timeout_sec)
+            res = _run_visible_pytest(
+                pytest_cmd,
+                repo_root=repo_root,
+                target_path=target_path,
+                test_path=test_path_for_prompt,
+                original_code=original_code,
+                candidate_code=original_code,
+                timeout_sec=timeout_sec,
+            )
             ok = res.returncode == 0
-            err = "" if ok else "original_pytest_failed"
+            err = "" if ok else _visible_error(res, "original_pytest_failed")
         except subprocess.TimeoutExpired:
             ok = False
             err = "original_test_timeout"
@@ -1311,9 +1533,15 @@ def run_auto_flow(
             and raw_model_sha
             and hashlib.sha256(str(res.patch).encode("utf-8")).hexdigest() == raw_model_sha
         )
-        if ok or symmetric_delivery:
-            _write_source_text(target_path, res.patch)
-        if not ok:
+        if (ok or symmetric_delivery) and not _post_candidate_seam.run_under_target_lock(
+            repo_root, target_file, lambda: _write_source_text(target_path, res.patch)
+        ):
+            # The sprint released its lock; another task holds the target now: no delivery.
+            # The write itself happens while holding the lock (acquire -> write -> release).
+            ok = False
+            symmetric_delivery = False
+            err = "file_lock_denied"
+        if not ok and not err:
             err = res.reason
         breakdown["patch_apply_sec"] = round(time.monotonic() - apply_started_at, 4)
         breakdown["total_sec"] = round(time.monotonic() - start, 4)
@@ -1412,8 +1640,27 @@ def run_auto_flow(
             ):
                 early_baseline_shortcut = True
                 probe_patch = baseline_probe.get("_patch")
-                if isinstance(probe_patch, str) and probe_patch and probe_patch != original_code:
-                    _write_source_text(target_path, probe_patch)
+                if (
+                    isinstance(probe_patch, str)
+                    and probe_patch
+                    and probe_patch != original_code
+                    and not _post_candidate_seam.run_under_target_lock(
+                        repo_root, target_file, lambda: _write_source_text(target_path, probe_patch)
+                    )
+                ):
+                    # The probe's lock is released; another task holds the target now.
+                    result = {
+                        "flow": "baseline",
+                        "status": "FAILED",
+                        "elapsed_sec": baseline_probe["elapsed_sec"],
+                        "error": "file_lock_denied",
+                        "report": {
+                            **(baseline_probe.get("report", {}) if isinstance(baseline_probe.get("report"), dict) else {}),
+                            "reused_from_probe": True,
+                        },
+                    }
+                elif isinstance(probe_patch, str) and probe_patch and probe_patch != original_code:
+                    # Written above while holding the target lock.
                     result = {
                         "flow": "baseline",
                         "status": "SUCCESS",

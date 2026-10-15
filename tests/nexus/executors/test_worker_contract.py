@@ -1,3 +1,4 @@
+import subprocess
 import time
 
 import pytest
@@ -216,7 +217,32 @@ def test_cline_adapter_is_registered_and_binds_glm_52_on_target(monkeypatch, tmp
     executable = tmp_path / "bin" / "cline"
     monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
     monkeypatch.delenv("NEXUS_CLINE_WORKER_MODEL", raising=False)
-    monkeypatch.setattr("nexus.executors.worker_registry.shutil.which", lambda name: str(executable))
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry.shutil.which", lambda name: str(executable)
+    )
+    # #2195: the protected canonical checkout is fingerprinted around the run.
+    canonical = tmp_path / "canonical"
+    canonical.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=canonical, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "i",
+        ],
+        cwd=canonical,
+        check=True,
+    )
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry._default_canonical_checkout_root", lambda: canonical
+    )
     captured = {}
 
     def fake_worker(request, on_process_group=None):
@@ -227,7 +253,7 @@ def test_cline_adapter_is_registered_and_binds_glm_52_on_target(monkeypatch, tmp
             argv=request.argv,
             cwd=request.cwd,
             exit_code=0,
-            stdout=b"cline stdout",
+            stdout=b'{"type":"run_result","finishReason":"stop"}\n',
             stderr=b"",
             wall_time_ms=11,
             process_group_id=None,
@@ -237,15 +263,33 @@ def test_cline_adapter_is_registered_and_binds_glm_52_on_target(monkeypatch, tmp
     registry = WorkerRegistry.default()
 
     preflight = registry.preflight("cline")
+    # #2195: the registry binds Cline to the contract's leased worktree.
     receipt = registry.invoke(
         "cline",
-        type("Contract", (), {"task_id": "cline-glm-52"})(),
-        type("Lease", (), {"target_worktree": str(target)})(),
+        type(
+            "Contract",
+            (),
+            {
+                "task_id": "cline-glm-52",
+                "target_worktree_root": str(tmp_path),
+                "target_repo_root": str(target),
+            },
+        )(),
+        type("Lease", (), {"task_id": "cline-glm-52", "target_worktree": str(target)})(),
         prompt="bounded candidate",
     )
 
     assert preflight.ready is True
-    assert captured["request"].argv == ("--json", "--yolo", "--model", "glm-5.2", "bounded candidate")
+    assert captured["request"].argv == (
+        "--cwd",
+        str(target.resolve()),
+        "--json",
+        "--auto-approve",
+        "false",
+        "--model",
+        "glm-5.2",
+        "bounded candidate",
+    )
     assert captured["request"].cwd == str(target.resolve())
     assert receipt.provider == "cline"
     assert receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
@@ -422,12 +466,36 @@ def test_explicit_worker_model_is_used_in_direct_cli_argv(tmp_path, monkeypatch)
     from types import SimpleNamespace
 
     from nexus.executors.worker_registry import DirectCliWorkerAdapter, _opencode_args
+
     monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
     monkeypatch.setattr("nexus.executors.worker_registry.shutil.which", lambda name: f"/bin/{name}")
     captured = []
-    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", lambda request, on_process_group=None: (captured.append(request) or CliWorkerResult(status=CliWorkerStatus.COMPLETED, executable_identity=request.executable, argv=request.argv, cwd=request.cwd, exit_code=0, stdout=b"{}", stderr=b"", wall_time_ms=1, process_group_id=None)))
-    adapter = DirectCliWorkerAdapter("opencode", "opencode", "NEXUS_OPENCODE_WORKER_MODEL", "opencode/big-pickle", _opencode_args)
-    adapter.invoke(SimpleNamespace(task_id="model-task"), SimpleNamespace(target_worktree=str(tmp_path)), prompt="test", model="opencode/mimo-v2.5-free")
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry.run_cli_worker",
+        lambda request, on_process_group=None: (
+            captured.append(request)
+            or CliWorkerResult(
+                status=CliWorkerStatus.COMPLETED,
+                executable_identity=request.executable,
+                argv=request.argv,
+                cwd=request.cwd,
+                exit_code=0,
+                stdout=b"{}",
+                stderr=b"",
+                wall_time_ms=1,
+                process_group_id=None,
+            )
+        ),
+    )
+    adapter = DirectCliWorkerAdapter(
+        "opencode", "opencode", "NEXUS_OPENCODE_WORKER_MODEL", "opencode/big-pickle", _opencode_args
+    )
+    adapter.invoke(
+        SimpleNamespace(task_id="model-task"),
+        SimpleNamespace(target_worktree=str(tmp_path)),
+        prompt="test",
+        model="opencode/mimo-v2.5-free",
+    )
     assert "opencode/mimo-v2.5-free" in captured[0].argv
     assert "opencode/big-pickle" not in captured[0].argv
 
@@ -684,7 +752,9 @@ def test_escalation_allowed_is_true_only_for_incomplete():
         push_performed=False,
     )
 
-    candidate = SimpleNamespace(changed_files=["file.py"], untracked_files=[], deleted_files=[], candidate_state_hash="hash")
+    candidate = SimpleNamespace(
+        changed_files=["file.py"], untracked_files=[], deleted_files=[], candidate_state_hash="hash"
+    )
     verified_fail = SimpleNamespace(
         verified=False,
         scope_gate_passed=True,
@@ -1202,7 +1272,9 @@ def test_agy_slow_ensure_active_exhausts_timeout_before_first_subprocess(monkeyp
     assert receipt.failure_reason == "shared wall-time budget exhausted"
 
 
-def test_agy_slow_build_isolated_env_exhausts_timeout_before_first_subprocess(monkeypatch, tmp_path):
+def test_agy_slow_build_isolated_env_exhausts_timeout_before_first_subprocess(
+    monkeypatch, tmp_path
+):
     monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
     monkeypatch.setattr("nexus.executors.worker_registry.shutil.which", lambda name: "/bin/agy")
     from nexus.services.agy_account_pool import AgyAccount, AgyAccountPoolManager
@@ -1555,11 +1627,19 @@ def test_agy_receipt_contains_alias_hash_only_no_identity(monkeypatch, tmp_path)
 
 def test_no_unified_runtime_changes():
     from pathlib import Path
+
     unified_runtime_path = Path("nexus/orchestrator/unified_runtime.py")
     if unified_runtime_path.exists():
         import subprocess
-        diff = subprocess.run(["git", "diff", "--name-only", str(unified_runtime_path)], capture_output=True, text=True)
-        assert diff.stdout.strip() == "", "nexus/orchestrator/unified_runtime.py must not be modified"
+
+        diff = subprocess.run(
+            ["git", "diff", "--name-only", str(unified_runtime_path)],
+            capture_output=True,
+            text=True,
+        )
+        assert diff.stdout.strip() == "", (
+            "nexus/orchestrator/unified_runtime.py must not be modified"
+        )
 
 
 def test_agy_eligible_failover_continuation_prompt(monkeypatch, tmp_path):
@@ -1850,3 +1930,262 @@ def test_mandatory_negative_tests(monkeypatch, tmp_path):
             worker_role="implementation",
         )
         assert receipt.provider_calls == 1
+
+
+# ---------------------------------------------------------------------------
+# #2195: Cline write admission (no auto-approve, integrity, denied actions)
+# ---------------------------------------------------------------------------
+
+
+def _cline_git_repo(root):
+    root.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    (root / "tracked.txt").write_text("base\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=root, check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "i"],
+        cwd=root,
+        check=True,
+    )
+    return root.resolve()
+
+
+def _cline_ready(monkeypatch, tmp_path):
+    monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
+    monkeypatch.delenv("NEXUS_CLINE_WORKER_MODEL", raising=False)
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry.shutil.which", lambda name: str(tmp_path / "cline")
+    )
+
+
+def _cline_run(monkeypatch, tmp_path, *, stdout, side_effect=None, target=None, contract=None):
+    from nexus.executors.worker_registry import ClineWorkerAdapter
+
+    _cline_ready(monkeypatch, tmp_path)
+    canonical = _cline_git_repo(tmp_path / "canonical")
+    if target is None:
+        target = tmp_path / "target"
+        target.mkdir()
+    calls = []
+
+    def fake_worker(request, on_process_group=None):
+        calls.append(request)
+        if side_effect is not None:
+            side_effect(canonical)
+        return CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=request.executable,
+            argv=request.argv,
+            cwd=request.cwd,
+            exit_code=0,
+            stdout=stdout,
+            stderr=b"",
+            wall_time_ms=1,
+            process_group_id=None,
+        )
+
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", fake_worker)
+    adapter = ClineWorkerAdapter(canonical_root=canonical)
+    receipt = adapter.invoke(
+        contract or type("Contract", (), {"task_id": "cline-2195"})(),
+        type("Lease", (), {"task_id": "cline-2195", "target_worktree": str(target)})(),
+        prompt="bounded",
+    )
+    return receipt, calls, canonical
+
+
+_CLINE_OK = (
+    b'{"type":"run_start","providerId":"cline"}\n{"type":"run_result","finishReason":"stop"}\n'
+)
+
+
+def test_cline_permission_bypass_detects_every_auto_approve_shape():
+    from nexus.executors.worker_registry import _cline_args, cline_permission_bypass
+
+    assert cline_permission_bypass(_cline_args("p", "m")) is False
+    assert (
+        cline_permission_bypass(("--json", "--model", "m", "p")) is True
+    )  # default is auto-approve
+    assert cline_permission_bypass(("--json", "--yolo", "--model", "m", "p")) is True
+    assert cline_permission_bypass(("--json", "-y", "--auto-approve", "false", "p")) is True
+    assert cline_permission_bypass(("--json", "--auto-approve", "true", "p")) is True
+    assert cline_permission_bypass(("--json", "--auto-approve=false", "p")) is True
+    assert (
+        cline_permission_bypass(("--auto-approve", "false", "--auto-approve", "true", "p")) is True
+    )
+    # Every element is scanned, the trailing prompt included.
+    assert cline_permission_bypass(("--json", "--auto-approve", "false", "--yolo")) is True
+
+
+def test_cline_delivery_requires_a_successful_run_result():
+    from nexus.executors.worker_registry import cline_delivery_failure
+
+    assert cline_delivery_failure(_CLINE_OK, b"") is None
+    assert cline_delivery_failure(b"plain text", b"") == "cline_output_unparseable"
+    assert (
+        cline_delivery_failure(b'{"type":"run_result","finishReason":"error"}\n', b"")
+        == "cline_status_not_success"
+    )
+    denied = (
+        _CLINE_OK
+        + b'{"type":"agent_event","event":{"type":"tool-result",'
+        + b'"output":{"type":"execution-denied","reason":"no"}}}\n'
+    )
+    assert cline_delivery_failure(denied, b"") == "cline_permission_denied"
+    assert cline_delivery_failure(_CLINE_OK, b"execution-denied: write_to_file") == (
+        "cline_permission_denied"
+    )
+
+
+def test_cline_successful_run_on_isolated_target_is_delivery(monkeypatch, tmp_path):
+    receipt, calls, _ = _cline_run(monkeypatch, tmp_path, stdout=_CLINE_OK)
+
+    assert len(calls) == 1
+    assert "--yolo" not in calls[0].argv
+    assert calls[0].argv[calls[0].argv.index("--auto-approve") + 1] == "false"
+    assert receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
+    assert receipt.provider_permission_mode == "auto_approve_false"
+    assert receipt.failure_reason is None
+
+
+def test_cline_denied_action_is_non_delivery(monkeypatch, tmp_path):
+    stdout = (
+        _CLINE_OK
+        + b'{"type":"tool_result","is_error":true,"result":"Tool execution denied by user."}\n'
+    )
+    receipt, _, _ = _cline_run(monkeypatch, tmp_path, stdout=stdout)
+
+    assert receipt.outcome == WorkerOutcome.FAILED.value
+    assert receipt.evidence_complete is False
+    assert receipt.failure_reason == "cline_permission_denied"
+
+
+def test_cline_canonical_checkout_change_fails_the_run(monkeypatch, tmp_path):
+    def mutate(canonical):
+        (canonical / "tracked.txt").write_text("changed\n", encoding="utf-8")
+
+    receipt, _, canonical = _cline_run(monkeypatch, tmp_path, stdout=_CLINE_OK, side_effect=mutate)
+
+    assert receipt.outcome == WorkerOutcome.FAILED.value
+    assert receipt.failure_reason == "canonical_checkout_integrity_violation"
+    # Reported, never reverted.
+    assert (canonical / "tracked.txt").read_text(encoding="utf-8") == "changed\n"
+
+
+def test_cline_target_overlapping_canonical_is_refused_before_launch(monkeypatch, tmp_path):
+    from nexus.executors.worker_registry import ClineWorkerAdapter
+
+    # The target is inside the canonical checkout.
+    target = tmp_path / "canonical" / "nested"
+
+    _cline_ready(monkeypatch, tmp_path)
+    canonical = _cline_git_repo(tmp_path / "canonical")
+    target.mkdir()
+    launched = []
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry.run_cli_worker",
+        lambda request, on_process_group=None: launched.append(request),
+    )
+    receipt = ClineWorkerAdapter(canonical_root=canonical).invoke(
+        type("Contract", (), {"task_id": "cline-2195"})(),
+        type("Lease", (), {"task_id": "cline-2195", "target_worktree": str(target)})(),
+        prompt="bounded",
+    )
+
+    assert launched == []
+    assert receipt.outcome == WorkerOutcome.FAILED.value
+    assert receipt.provider_calls == 0
+    assert receipt.failure_reason == "cline_target_overlaps_canonical_checkout"
+
+
+def test_cline_target_outside_the_lease_is_refused(monkeypatch, tmp_path):
+    contract = type(
+        "Contract",
+        (),
+        {
+            "task_id": "cline-2195",
+            "target_worktree_root": str(tmp_path / "leases"),
+            "target_repo_root": str(tmp_path / "elsewhere"),
+        },
+    )()
+    receipt, calls, _ = _cline_run(monkeypatch, tmp_path, stdout=_CLINE_OK, contract=contract)
+
+    assert calls == []
+    assert receipt.failure_reason == "cline_target_not_leased_worktree"
+
+
+def test_cline_markers_in_model_text_are_not_a_denial():
+    from nexus.executors.worker_registry import cline_delivery_failure
+
+    quoted = (
+        b'{"type":"agent_event","event":{"type":"text","text":'
+        b'"execution-denied / Tool execution denied by user."}}\n'
+        b'{"type":"tool_result","is_error":false,"result":"grep: execution denied, denied by user"}\n'
+        b'{"type":"tool-call","input":{"type":"execution-denied"}}\n'
+        b"plain log line: execution-denied\n"
+    )
+    assert cline_delivery_failure(quoted + _CLINE_OK, b"") is None
+
+
+def test_cline_structured_denial_events_are_non_delivery():
+    from nexus.executors.worker_registry import cline_delivery_failure
+
+    for event in (
+        b'{"type":"tool_result","is_error":true,"result":"Tool execution denied by user."}',
+        b'{"type":"tool-result","output":{"type":"execution-denied"}}',
+        b'{"type":"agent_event","event":{"content":[{"type":"tool-approval-response",'
+        b'"approved":false}]}}',
+    ):
+        assert cline_delivery_failure(_CLINE_OK + event + b"\n", b"") == (
+            "cline_permission_denied"
+        ), event
+
+
+def test_cline_flag_shaped_prompt_is_refused_before_launch(monkeypatch, tmp_path):
+    from nexus.executors.worker_registry import ClineWorkerAdapter
+
+    _cline_ready(monkeypatch, tmp_path)
+    canonical = _cline_git_repo(tmp_path / "canonical")
+    target = tmp_path / "target"
+    target.mkdir()
+    launched = []
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry.run_cli_worker",
+        lambda request, on_process_group=None: launched.append(request),
+    )
+    for prompt in ("--yolo", "-y", "--auto-approve=true", "-"):
+        receipt = ClineWorkerAdapter(canonical_root=canonical).invoke(
+            type("Contract", (), {"task_id": "cline-2195"})(),
+            type("Lease", (), {"task_id": "cline-2195", "target_worktree": str(target)})(),
+            prompt=prompt,
+        )
+        assert receipt.failure_reason == "cline_prompt_shape_unsupported", prompt
+        assert receipt.provider_calls == 0
+    assert launched == []
+
+
+def test_cline_registry_requires_a_leased_target(monkeypatch, tmp_path):
+    _cline_ready(monkeypatch, tmp_path)
+    canonical = _cline_git_repo(tmp_path / "canonical")
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry._default_canonical_checkout_root", lambda: canonical
+    )
+    target = tmp_path / "target"
+    target.mkdir()
+    launched = []
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry.run_cli_worker",
+        lambda request, on_process_group=None: launched.append(request),
+    )
+    # A contract without target_worktree_root must not skip the lease check.
+    receipt = WorkerRegistry.default().invoke(
+        "cline",
+        type("Contract", (), {"task_id": "cline-2195"})(),
+        type("Lease", (), {"task_id": "cline-2195", "target_worktree": str(target)})(),
+        prompt="bounded",
+    )
+
+    assert launched == []
+    assert receipt.outcome == WorkerOutcome.FAILED.value
+    assert receipt.provider_calls == 0
+    assert receipt.failure_reason == "cline_target_not_leased_worktree"

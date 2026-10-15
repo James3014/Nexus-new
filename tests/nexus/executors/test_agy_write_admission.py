@@ -51,6 +51,9 @@ SCANNED_FLAGS = (
     "--yolo",
     "--auto-approve",
     "--dangerously-bypass-approvals-and-sandbox",
+    # #2195: codex sandbox-off mode and deprecated approve-everything alias.
+    "danger-full-access",
+    "--full-auto",
 )
 
 # Reviewed allowlist: (path, flag) -> (max occurrences, reason with issue).
@@ -71,7 +74,11 @@ BYPASS_FLAG_ALLOWLIST: dict[tuple[str, str], tuple[int, str]] = {
         1,
         "#1912 test mock CLI that only parses the flag; never spawns a worker",
     ),
-    ("nexus/executors/worker_registry.py", "--yolo"): (1, "#2195 cline adapter argv"),
+    ("nexus/executors/worker_registry.py", "--auto-approve"): (
+        1,
+        "#2195 CLINE_AUTO_APPROVE_FLAG constant; argv pins it to false",
+    ),
+    ("nexus/executors/worker_registry.py", "--yolo"): (1, "#2195 CLINE_YOLO_FLAGS deny-list"),
     ("nexus/services/external_worker_runtime.py", "--auto-approve"): (
         1,
         "#2195 cline --auto-approve true|false bound to the request",
@@ -83,10 +90,6 @@ BYPASS_FLAG_ALLOWLIST: dict[tuple[str, str], tuple[int, str]] = {
     ("scripts/ops/nexus-external-worker-dispatch", "--auto-approve"): (
         2,
         "#2195 cline dispatcher flag",
-    ),
-    ("scripts/ops/start_codex_nexus_enforced.sh", "--dangerously-bypass-approvals-and-sandbox"): (
-        1,
-        "#2195 codex launcher",
     ),
 }
 
@@ -1845,3 +1848,93 @@ def test_run_start_ticks_are_released_after_the_run(tmp_path):
         CliWorkerRequest(executable=sys.executable, argv=("-c", "pass"), cwd=str(tmp_path))
     )
     assert cli_worker._RUN_START_TICKS == {}
+
+
+def _fake_proc_entry(root: Path, *, state: str, threads: int | None, comm: str = "agy") -> Path:
+    """A /proc tree with one process in ``state`` and ``threads`` task entries."""
+    proc = root / "proc"
+    (proc / "self").mkdir(parents=True)
+    (proc / "self" / "environ").write_bytes(b"")
+    entry = proc / "424242"
+    entry.mkdir()
+    fields = [state] + ["0"] * 18 + ["300"] + ["0"] * 10
+    (entry / "stat").write_text(f"424242 ({comm}) " + " ".join(fields) + "\n")
+    if threads is not None:
+        (entry / "task").mkdir()
+        for tid in range(threads):
+            (entry / "task" / str(424242 + tid)).mkdir()
+    return proc
+
+
+def _deny_environ(monkeypatch) -> None:
+    real_read = Path.read_bytes
+
+    def read_bytes(self):
+        if self.name == "environ" and self.parent.name == "424242":
+            raise PermissionError("denied")
+        return real_read(self)
+
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+
+
+def test_proc_is_zombie_parses_comm_containing_a_paren(tmp_path):
+    proc = _fake_proc_entry(tmp_path, state="Z", threads=1, comm="a) S (b")
+    assert cli_worker._proc_is_zombie(proc / "424242") is True
+    other = _fake_proc_entry(tmp_path / "other", state="S", threads=1, comm="x) Z")
+    assert cli_worker._proc_is_zombie(other / "424242") is False
+
+
+@pytest.mark.parametrize(
+    ("state", "threads", "expected"),
+    [
+        ("Z", 1, True),
+        ("X", 1, True),
+        ("Z", 0, True),
+        ("Z", 2, False),  # leader exited, other threads still run
+        ("Z", None, False),  # task unlistable: fail closed
+        ("S", 1, False),
+    ],
+)
+def test_proc_is_zombie_requires_at_most_one_thread(tmp_path, state, threads, expected):
+    proc = _fake_proc_entry(tmp_path, state=state, threads=threads)
+    assert cli_worker._proc_is_zombie(proc / "424242") is expected
+
+
+def test_proc_tag_scan_skips_dead_zombie_with_unreadable_environ(monkeypatch, tmp_path):
+    proc = _fake_proc_entry(tmp_path, state="Z", threads=1)
+    (proc / "424242" / "environ").write_bytes(b"")
+    _deny_environ(monkeypatch)
+    monkeypatch.setattr(cli_worker, "Path", lambda *a: proc if a == ("/proc",) else Path(*a))
+    monkeypatch.delitem(cli_worker._RUN_START_TICKS, "exampletag", raising=False)
+    assert cli_worker._tagged_pids("exampletag") == set()
+
+
+def test_proc_tag_scan_fails_closed_on_zombie_leader_with_live_threads(monkeypatch, tmp_path):
+    proc = _fake_proc_entry(tmp_path, state="Z", threads=2)
+    (proc / "424242" / "environ").write_bytes(b"")
+    _deny_environ(monkeypatch)
+    monkeypatch.setattr(cli_worker, "Path", lambda *a: proc if a == ("/proc",) else Path(*a))
+    monkeypatch.delitem(cli_worker._RUN_START_TICKS, "exampletag", raising=False)
+    with pytest.raises(PermissionError):
+        cli_worker._tagged_pids("exampletag")
+
+
+def test_proc_tag_scan_fails_closed_when_environ_vanishes_from_live_process(monkeypatch, tmp_path):
+    proc = _fake_proc_entry(tmp_path, state="S", threads=1)  # no environ file
+    monkeypatch.setattr(cli_worker, "Path", lambda *a: proc if a == ("/proc",) else Path(*a))
+    monkeypatch.setattr(cli_worker, "_pid_alive", lambda pid: True)
+    with pytest.raises(FileNotFoundError):
+        cli_worker._tagged_pids("exampletag")
+    monkeypatch.setattr(cli_worker, "_pid_alive", lambda pid: False)
+    assert cli_worker._tagged_pids("exampletag") == set()  # exited meanwhile
+
+
+def test_proc_tag_scan_excuses_vanished_environ_only_for_dead_zombies(monkeypatch, tmp_path):
+    dead = _fake_proc_entry(tmp_path / "dead", state="Z", threads=1)
+    live = _fake_proc_entry(tmp_path / "live", state="Z", threads=3)
+    monkeypatch.setattr(cli_worker, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr(cli_worker, "Path", lambda *a: dead if a == ("/proc",) else Path(*a))
+    assert cli_worker._tagged_pids("exampletag") == set()
+    monkeypatch.setattr(cli_worker, "Path", lambda *a: live if a == ("/proc",) else Path(*a))
+    with pytest.raises(FileNotFoundError):
+        cli_worker._tagged_pids("exampletag")
