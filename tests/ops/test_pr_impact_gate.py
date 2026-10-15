@@ -2840,6 +2840,37 @@ def test_classify_cli_prints_mismatch_reasons_when_blocking(tmp_path, capsys):
     assert any("absent on head" in item for item in payload["mismatch_reasons"])
 
 
+def test_classify_cli_reads_sibling_plan_for_behind_main_remedy(tmp_path, capsys):
+    # The required gate passes no --plan; CI assembles plan.json next to the results.
+    from dataclasses import asdict
+
+    from scripts.ops import pr_impact_gate
+
+    base, head = _behind_main_pair()
+    (tmp_path / "base-result.json").write_text(json.dumps(asdict(base)), encoding="utf-8")
+    (tmp_path / "head-result.json").write_text(json.dumps(asdict(head)), encoding="utf-8")
+    (tmp_path / "plan.json").write_text(
+        json.dumps({"changed_paths": ["scripts/ops/other.py"]}), encoding="utf-8"
+    )
+    output = tmp_path / "classification.json"
+
+    status = pr_impact_gate.main([
+        "classify",
+        "--base-result",
+        str(tmp_path / "base-result.json"),
+        "--head-result",
+        str(tmp_path / "head-result.json"),
+        "--output",
+        str(output),
+    ])
+
+    assert status == 1
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["classification"] == "IMPACT_UNKNOWN"
+    assert payload["blocking"] is True
+    assert "git merge origin/main" in payload["remedy"]
+
+
 def test_classify_cli_log_cannot_emit_workflow_commands_from_test_ids(tmp_path, capsys):
     from dataclasses import asdict
 

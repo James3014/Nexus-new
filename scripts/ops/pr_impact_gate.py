@@ -2095,6 +2095,12 @@ def _plan_changed_paths(plan_path: Path | None) -> list[str] | None:
         return None
 
 
+def _sibling_plan(head_result: Path) -> Path | None:
+    """CI assembles plan.json next to head-result.json (.ci-impact/); diagnostic input only."""
+    candidate = head_result.parent / "plan.json"
+    return candidate if candidate.is_file() else None
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -2141,7 +2147,9 @@ def main(argv: list[str] | None = None) -> int:
     classification = classify_regression(
         _load_run_result(args.base_result),
         _load_run_result(args.head_result),
-        changed_paths=_plan_changed_paths(args.plan),
+        changed_paths=_plan_changed_paths(
+            args.plan if args.plan is not None else _sibling_plan(args.head_result)
+        ),
     )
     payload = asdict(classification)
     args.output.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
