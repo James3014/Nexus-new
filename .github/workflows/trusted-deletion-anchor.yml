@@ -6,8 +6,9 @@ on:
 
 permissions: {}
 
-# Superseded runs of the same PR are cancelled. 'edited' stays: the controller
-# still reads the PR body (Core issue marker). Non-PR events fall back to a per-run group.
+# Superseded runs of the same PR are cancelled. 'edited' is kept only because two
+# tests pin the trigger list (#2258 kept this PR small; nothing here reads the PR body
+# any more). Non-PR events fall back to a per-run group.
 concurrency:
   group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
