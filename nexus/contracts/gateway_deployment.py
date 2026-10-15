@@ -4,6 +4,17 @@ The module deliberately has no filesystem, process, network, or clock access.
 It describes the only identities that the durable adapter may act on and keeps
 the state machine/hash rules deterministic.  The adapter in
 ``scripts/ops/mcp_gateway_durable.py`` is the sole effect owner.
+
+Authority model (Owner decision 2026-10-14, #2155): routine Gateway deploys are
+made by the health-gated auto-deployer (``scripts/ops/nexus_gateway_auto_deploy.py``,
+#2153), whose authority is a green published ``main`` commit and whose record is
+``~/.local/state/nexus-gateway-auto-deploy/receipts.jsonl``.  They need no Owner
+activation and no host-effect authority receipt, and launchd ``KeepAlive`` crash
+restarts read no receipt either.  The owner-activation / BREAK_GLASS receipts
+validated here (including their expiry) now guard only the manual emergency
+path: ``hold`` the auto-deployer, manual #526 rebind or R1 recovery with a fresh
+Owner activation, ``adopt`` the resulting plist, ``release``.  An expired receipt
+therefore blocks only that manual path, never routine deploys or crash restarts.
 """
 
 from __future__ import annotations

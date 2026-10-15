@@ -3557,7 +3557,9 @@ def test_http_health_degrades_when_github_observer_dependency_is_unavailable(
     identity = http_gateway.runtime_identity()
 
     assert identity["status"] == "degraded"
-    assert identity["github_observer"] == unavailable
+    redacted = {k: v for k, v in unavailable.items() if k != "executable_path"}
+    assert identity["github_observer"] == {**redacted, "executable_path_sha256": None}
+    assert http_gateway.runtime_identity(include_paths=True)["github_observer"] == unavailable
 
 
 def test_actual_gateway_surfaces_prove_fixed_contract_identity_without_fake_health_fields():

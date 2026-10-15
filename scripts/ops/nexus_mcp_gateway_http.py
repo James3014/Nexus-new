@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import http.server
 import ipaddress
@@ -65,13 +66,42 @@ def resolve_bind_address(env: Mapping[str, str] | None = None) -> tuple[str, int
 
 
 def _git_head() -> str:
-    result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=CANONICAL_SOURCE_ROOT, capture_output=True, text=True, timeout=3, check=False)
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=CANONICAL_SOURCE_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=3,
+        check=False,
+    )
     return result.stdout.strip() if result.returncode == 0 else "unknown"
 
 
-def runtime_identity(gateway: UnifiedMCPGateway | None = None) -> dict[str, Any]:
+def _sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _redacted_github_observer(observer: Mapping[str, Any]) -> dict[str, Any]:
+    """Path-free projection: the absolute executable path becomes a SHA-256."""
+    redacted = {key: value for key, value in observer.items() if key != "executable_path"}
+    path = observer.get("executable_path")
+    redacted["executable_path_sha256"] = (
+        _sha256_text(path) if isinstance(path, str) and path else None
+    )
+    return redacted
+
+
+def runtime_identity(
+    gateway: UnifiedMCPGateway | None = None, *, include_paths: bool = False
+) -> dict[str, Any]:
+    """Gateway identity; absolute host paths only when ``include_paths`` (authenticated callers)."""
     current_head = _git_head()
     github_observer = github_observer_runtime_identity()
+    if include_paths:
+        path_fields: dict[str, Any] = {"repo_root": str(CANONICAL_SOURCE_ROOT)}
+    else:
+        path_fields = {"repo_root_sha256": _sha256_text(str(CANONICAL_SOURCE_ROOT))}
+        github_observer = _redacted_github_observer(github_observer)
     return {
         "status": "ok" if github_observer["ready"] is True else "degraded",
         "server": GATEWAY_NAME,
@@ -79,13 +109,16 @@ def runtime_identity(gateway: UnifiedMCPGateway | None = None) -> dict[str, Any]
         "namespace_policy": "stable_public_name_with_manifest_revision",
         "version": GATEWAY_VERSION,
         "transport": "streamable_http",
-        "repo_root": str(CANONICAL_SOURCE_ROOT),
+        **path_fields,
         "git_head": current_head,
         "server_instance_id": SERVER_INSTANCE_ID,
         "server_started_at": SERVER_STARTED_AT,
         "repo_head_at_start": SERVER_REPO_HEAD_AT_START,
         "repo_head_current": current_head,
-        "reload_required": bool(SERVER_REPO_HEAD_AT_START not in {"", "unknown"} and current_head != SERVER_REPO_HEAD_AT_START),
+        "reload_required": bool(
+            SERVER_REPO_HEAD_AT_START not in {"", "unknown"}
+            and current_head != SERVER_REPO_HEAD_AT_START
+        ),
         "lifecycle_revision": LIFECYCLE_REVISION,
         "lifecycle_state_schema_revision": LIFECYCLE_STATE_SCHEMA_REVISION,
         "task_contract_revision": TASK_CONTRACT_REVISION,
@@ -94,7 +127,9 @@ def runtime_identity(gateway: UnifiedMCPGateway | None = None) -> dict[str, Any]
         "full_tool_schema_hash": FULL_TOOL_SCHEMA_HASH,
         "session_tracking": "unsupported",
         "active_sessions": None,
-        "pending_actions": None if gateway is None else gateway._gateway_status().get("pending_actions"),
+        "pending_actions": None
+        if gateway is None
+        else gateway._gateway_status().get("pending_actions"),
         "tool_manifest_revision": TOOL_MANIFEST_REVISION,
         "tool_count": len(UnifiedMCPGateway.tool_specs()),
         "github_observer": github_observer,
@@ -104,7 +139,9 @@ def runtime_identity(gateway: UnifiedMCPGateway | None = None) -> dict[str, Any]
     }
 
 
-def build_handler(gateway: UnifiedMCPGateway, *, token: str, max_body_bytes: int = MAX_BODY_BYTES) -> type[http.server.BaseHTTPRequestHandler]:
+def build_handler(
+    gateway: UnifiedMCPGateway, *, token: str, max_body_bytes: int = MAX_BODY_BYTES
+) -> type[http.server.BaseHTTPRequestHandler]:
     class GatewayHTTPHandler(http.server.BaseHTTPRequestHandler):
         server_version = "NexusMCPGatewayHTTP/1.0"
         sys_version = ""
@@ -113,7 +150,9 @@ def build_handler(gateway: UnifiedMCPGateway, *, token: str, max_body_bytes: int
             return
 
         def _send_json(self, status: int, payload: Mapping[str, Any]) -> None:
-            body = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+            body = json.dumps(
+                payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            ).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Cache-Control", "no-store")
@@ -122,11 +161,15 @@ def build_handler(gateway: UnifiedMCPGateway, *, token: str, max_body_bytes: int
             self.wfile.write(body)
 
         def _authorized(self) -> bool:
-            return hmac.compare_digest(self.headers.get("Authorization", ""), f"Bearer {token}")
+            # Compare bytes: a non-ASCII header must be "unauthorized", not a TypeError.
+            supplied = self.headers.get("Authorization", "").encode("utf-8", "surrogateescape")
+            return hmac.compare_digest(
+                supplied, f"Bearer {token}".encode("utf-8", "surrogateescape")
+            )
 
         def do_GET(self) -> None:
             if urlsplit(self.path).path == "/health":
-                self._send_json(200, runtime_identity(gateway))
+                self._send_json(200, runtime_identity(gateway, include_paths=self._authorized()))
             else:
                 self._send_json(404, {"error": "not found"})
 
@@ -182,7 +225,9 @@ def main() -> int:
     if not token:
         raise SystemExit(f"{TOKEN_ENV} is required")
     host, port = resolve_bind_address()
-    server = http.server.ThreadingHTTPServer((host, port), build_handler(UnifiedMCPGateway(), token=token))
+    server = http.server.ThreadingHTTPServer(
+        (host, port), build_handler(UnifiedMCPGateway(), token=token)
+    )
     try:
         server.serve_forever()
     except KeyboardInterrupt:

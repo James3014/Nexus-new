@@ -17,6 +17,7 @@ import importlib
 import importlib.metadata
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -295,7 +296,7 @@ GATEWAY_HEALTH_URL = "http://127.0.0.1:8766/health"
 GATEWAY_SERVER_NAME = "nexus-mcp-gateway"
 _GATEWAY_HEAD_FIELDS = ("git_head", "repo_head_at_start", "repo_head_current")
 _GATEWAY_IDENTITY_FIELDS = (
-    "repo_root",
+    "repo_root_sha256",
     "server_instance_id",
     "tool_manifest_revision",
     "permission_policy_hash",
@@ -349,6 +350,7 @@ def probe_gb077_live_gateway_identity(
     *,
     fetch_health: Callable[[], Any] | None = None,
     evaluated_identity: Callable[[], tuple[str | None, bool | None]] | None = None,
+    evaluated_root: Callable[[], str] | None = None,
 ) -> tuple[bool, str]:
     """RUNTIME_IDENTITY_PROBE for GB-077 / GBF-002 (owner #12).
 
@@ -377,7 +379,7 @@ def probe_gb077_live_gateway_identity(
     for name in ("status", "server", "reload_required", *_GATEWAY_HEAD_FIELDS):
         observed[name] = health.get(name)
     observed["server_instance_id"] = health.get("server_instance_id")
-    observed["repo_root"] = health.get("repo_root")
+    observed["repo_root_sha256"] = health.get("repo_root_sha256")
     if health.get("server") != GATEWAY_SERVER_NAME:
         reasons.append("gateway_server_identity_mismatch")
     if health.get("status") != "ok":
@@ -393,12 +395,27 @@ def probe_gb077_live_gateway_identity(
             reasons.append(f"gateway_field_missing:{name}")
         elif not _is_object_id(health[name]):
             reasons.append(f"gateway_field_malformed:{name}")
+    expected_root = str((evaluated_root or (lambda: str(ROOT.resolve())))())
+    expected_root_sha256 = hashlib.sha256(expected_root.encode("utf-8")).hexdigest()
     for name in _GATEWAY_IDENTITY_FIELDS:
         value = health.get(name)
+        if name == "repo_root_sha256" and name not in health and "repo_root" in health:
+            # A gateway started before #2217 still reports the legacy path; it
+            # must be the evaluated root, resolved.
+            if not isinstance(health["repo_root"], str) or not health["repo_root"].strip():
+                reasons.append("gateway_field_malformed:repo_root")
+            elif str(Path(health["repo_root"]).resolve()) != expected_root:
+                reasons.append("gateway_repo_root_not_evaluated_root")
+            continue
         if name not in health:
             reasons.append(f"gateway_field_missing:{name}")
         elif not isinstance(value, str) or not value.strip():
             reasons.append(f"gateway_field_malformed:{name}")
+        elif name == "repo_root_sha256":
+            if re.fullmatch(r"[0-9a-f]{64}", value) is None:
+                reasons.append("gateway_field_malformed:repo_root_sha256")
+            elif value != expected_root_sha256:
+                reasons.append("gateway_repo_root_not_evaluated_root")
     heads = {name: health.get(name) for name in _GATEWAY_HEAD_FIELDS}
     if all(_is_object_id(value) for value in heads.values()):
         if len(set(heads.values())) != 1:

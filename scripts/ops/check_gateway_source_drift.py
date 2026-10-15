@@ -25,7 +25,9 @@ carries ``auto_deploy`` (the last receipt from
 It never starts, stops, reloads or rebinds anything.  The only write paths are
 ``git fetch`` into the analysis clone (objects and remote-tracking refs) and,
 only when ``--report-issue`` is passed explicitly, one deduplicated Issue
-comment.  Rebind and reload stay with the #526 governed path (Owner decision).
+comment.  Routine deploys are the #2153 auto-deployer's job and need no Owner
+activation (Owner decision 2026-10-14, #2155); a manual #526 rebind is only
+the emergency fallback (hold -> manual rebind -> adopt -> release).
 
 Exit codes: 0 = OK/INFO, 1 = WARN/ALERT, 2 = probe failure.
 """
@@ -56,7 +58,10 @@ DEFAULT_MAIN_REF = "origin/main"
 TASK_BINDING_PREFIX = "tasks/"
 BEHIND_MAX_COMMITS = 50
 BEHIND_MAX_SECONDS = 7 * 24 * 60 * 60
-REMEDY = "let the #2153 auto-deployer catch up, or rebind via the #526 governed fallback"
+REMEDY = (
+    "let the #2153 auto-deployer catch up (no Owner activation needed, #2155); emergency only:"
+    " hold, manual #526 rebind, adopt, release"
+)
 DEFAULT_AUTO_DEPLOY_STATE = Path.home() / ".local/state/nexus-gateway-auto-deploy"
 BIND_ONLY_NOTE = "bind-only local task commits; root cause tracked in #1939"
 
@@ -217,7 +222,7 @@ def analyze(
         "observed": {
             k: health.get(k)
             for k in (
-                "repo_root",
+                "repo_root_sha256",
                 "repo_head_at_start",
                 "repo_head_current",
                 "reload_required",
@@ -368,7 +373,7 @@ def main(
     parser.add_argument(
         "--source-repo",
         default=None,
-        help="where to fetch the deployed git_head from when absent (default: health repo_root)",
+        help="where to fetch the deployed git_head from when absent (default: legacy health repo_root, else the auto-deploy receipt)",
     )
     parser.add_argument(
         "--json", action="store_true", help="print the JSON report instead of the summary line"
