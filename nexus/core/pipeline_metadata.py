@@ -132,3 +132,8 @@ class PipelineMetadata(TypedDict, total=False):
     # --- v7 Command ---
     v7_triggered: bool
     command: str
+
+    # --- Forecast gate (capability_executor_registry._exec_forecast) ---
+    roi_score: float
+    forecast_tokens: int
+    reject_prob: float
