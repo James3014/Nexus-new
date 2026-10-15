@@ -17,20 +17,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  impact-gate:
-    name: Exact-base impact gate
+  impact-run:
+    name: Exact-base impact run (${{ matrix.side }})
     if: github.event_name != 'workflow_dispatch' && github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    # An unmapped path runs the full tests/ suite on exact base and exact head
-    # (#2092). Nightly Tier 3 took 23-42 min per pass (2026-10-04..13), so two
-    # passes plus ~5 min setup need ~90 min; 110 leaves ~20% headroom.
-    timeout-minutes: 110
+    # Base and head run on separate runners at the same time (#2220); the
+    # "Exact-base impact gate" job below classifies both results.  An unmapped
+    # path runs the full tests/ suite (#2092): 23-42 min per pass plus setup.
+    timeout-minutes: 80
+    strategy:
+      fail-fast: false
+      matrix:
+        side: [base, head]
 
     steps:
       - name: Initialize evidence directory
-        run: |
-          mkdir -p "$RUNNER_TEMP/nexus-ci-impact"
-          printf '%s\n' '{"status":"CI_BOOTSTRAP_DEFECT","reason":"impact gate did not reach classification"}' > "$RUNNER_TEMP/nexus-ci-impact/classification.json"
+        run: mkdir -p "$RUNNER_TEMP/nexus-ci-impact"
 
       - name: Checkout exact head
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -142,7 +144,7 @@ jobs:
           echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Run Golden Behavior gate on exact PR or main-push head
-        if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        if: (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && matrix.side == 'head'
         env:
           HEAD_SHA: ${{ steps.base.outputs.head_sha }}
           GIT_AUTHOR_NAME: Nexus CI
@@ -189,21 +191,6 @@ jobs:
       - name: Link persistent evidence directory
         run: ln -s "$RUNNER_TEMP/nexus-ci-impact" .ci-impact
 
-      - name: Extract exact-base impact classifier
-        id: trusted-impact
-        env:
-          BASE_SHA: ${{ steps.base.outputs.sha }}
-        run: |
-          set -euo pipefail
-          # The regression verdict is computed by the exact-base classifier so a
-          # candidate cannot rewrite the code that classifies its own run (#1754).
-          trusted="$RUNNER_TEMP/trusted-impact-gate"
-          mkdir -p "$trusted/scripts/ops"
-          for f in scripts/__init__.py scripts/ops/__init__.py scripts/ops/pr_impact_gate.py scripts/ops/select_tests.py; do
-            git show "$BASE_SHA:$f" > "$trusted/$f"
-          done
-          echo "gate=$trusted/scripts/ops/pr_impact_gate.py" >> "$GITHUB_OUTPUT"
-
       - name: Build tiered exact-base impact plan
         env:
           BASE_SHA: ${{ steps.base.outputs.sha }}
@@ -215,6 +202,7 @@ jobs:
             --output .ci-impact/plan.json
 
       - name: Summarize unmapped-path fallback
+        if: matrix.side == 'head'
         run: |
           set -euo pipefail
           .venv/bin/python - <<'PY'
@@ -249,6 +237,7 @@ jobs:
           PY
 
       - name: Validate workflow syntax when required
+        if: matrix.side == 'head'
         run: |
           set -euo pipefail
           .venv/bin/python - <<'PY'
@@ -264,6 +253,7 @@ jobs:
           PY
 
       - name: Materialize exact base worktree
+        if: matrix.side == 'base'
         id: base-worktree
         env:
           BASE_SHA: ${{ steps.base.outputs.sha }}
@@ -274,6 +264,7 @@ jobs:
           echo "path=$BASE_WORKTREE" >> "$GITHUB_OUTPUT"
 
       - name: Install exact-base dependencies
+        if: matrix.side == 'base'
         env:
           BASE_WORKTREE: ${{ steps.base-worktree.outputs.path }}
         run: |
@@ -314,6 +305,7 @@ jobs:
           fi
 
       - name: Run mapped tests on exact base source
+        if: matrix.side == 'base'
         env:
           BASE_WORKTREE: ${{ steps.base-worktree.outputs.path }}
         run: |
@@ -348,6 +340,7 @@ jobs:
           df -h "$RUNNER_TEMP" "$GITHUB_WORKSPACE"
 
       - name: Run mapped tests on exact head
+        if: matrix.side == 'head'
         run: |
           set +e
           .venv/bin/python "$GITHUB_WORKSPACE/scripts/ops/pr_impact_gate.py" run \
@@ -364,32 +357,6 @@ jobs:
           fi
           echo "head run evidence exit: $RUN_STATUS"
           exit 0
-
-      - name: Classify exact-base regression
-        run: |
-          set -uo pipefail
-          .venv/bin/python "${{ steps.trusted-impact.outputs.gate }}" classify \
-            --base-result .ci-impact/base-result.json \
-            --head-result .ci-impact/head-result.json \
-            --output .ci-impact/classification.json
-          CLASSIFIER_STATUS=$?
-          {
-            echo "## Exact-base impact classification"
-            echo '```json'
-            cat .ci-impact/classification.json
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-          exit "$CLASSIFIER_STATUS"
-        env:
-          NEXUS_TEST_MODE: CI
-          PYTHONPATH: .
-
-      - name: Capture failure tails
-        if: failure()
-        run: |
-          echo "## Exact-base pytest tails" >> "$GITHUB_STEP_SUMMARY"
-          tail -n 80 .ci-impact/base-stdout.log >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
-          tail -n 80 .ci-impact/head-stdout.log >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
 
       - name: Remove exact base worktree
         if: always() && steps.base-worktree.outputs.path != ''
@@ -419,6 +386,208 @@ jobs:
           done < <(git ls-files --stage -z)
           git submodule foreach --recursive ':'
 
+      - name: Upload exact-base run evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: exact-base-impact-${{ matrix.side }}-${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/nexus-ci-impact/
+          if-no-files-found: error
+          retention-days: 7
+
+  impact-gate:
+    name: Exact-base impact gate
+    needs: impact-run
+    # always(): a failed or cancelled run side must fail this required check,
+    # never leave it skipped (GitHub treats a skipped required check as passed).
+    if: always() && github.event_name != 'workflow_dispatch' && github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Initialize evidence directory
+        run: |
+          mkdir -p "$RUNNER_TEMP/nexus-ci-impact"
+          printf '%s\n' '{"status":"CI_BOOTSTRAP_DEFECT","reason":"impact gate did not reach classification"}' > "$RUNNER_TEMP/nexus-ci-impact/classification.json"
+
+      - name: Checkout exact head
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+          submodules: false
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Remove checkout credentials
+        run: |
+          set -euo pipefail
+          credential_count=0
+          host_credential_count=0
+          while IFS= read -r entry; do
+            credential_count=$((credential_count + 1))
+            key="${entry%% *}"
+            credential_file="${entry#* }"
+            case "$credential_file" in
+              "$RUNNER_TEMP"/git-credentials-*.config)
+                host_credential_count=$((host_credential_count + 1))
+                rm -f -- "$credential_file"
+                ;;
+              /github/runner_temp/git-credentials-*.config) ;;
+              *)
+                echo "unexpected checkout credential path: $credential_file" >&2
+                exit 1
+                ;;
+            esac
+            git config --local --unset-all "$key"
+          done < <(git config --local --get-regexp '^includeif\.gitdir:.*\.path$' || true)
+          if [ "$credential_count" -eq 0 ] || [ "$host_credential_count" -eq 0 ]; then
+            echo "checkout credential includeIf entries are missing" >&2
+            exit 1
+          fi
+          git config --local --unset-all 'http.https://github.com/.extraheader' || true
+          git config --local --unset-all core.sshCommand || true
+          if git config --local --get-regexp '^includeif\.gitdir:.*\.path$' >/dev/null; then
+            echo "checkout credentials remain configured" >&2
+            exit 1
+          fi
+      - name: Set up Python 3.12
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Resolve exact comparison base
+        id: base
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "$BASE_SHA" ] || [ -z "$HEAD_SHA" ]; then
+            echo "Exact base/head SHA is empty" >&2
+            exit 1
+          fi
+          if [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ || ! "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Exact revisions must be full 40-character lowercase SHAs" >&2
+            exit 1
+          fi
+          git cat-file -e "$BASE_SHA^{commit}"
+          git cat-file -e "$HEAD_SHA^{commit}"
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          echo "sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Extract exact-base impact classifier
+        id: trusted-impact
+        env:
+          BASE_SHA: ${{ steps.base.outputs.sha }}
+        run: |
+          set -euo pipefail
+          # The regression verdict is computed by the exact-base classifier so a
+          # candidate cannot rewrite the code that classifies its own run (#1754).
+          trusted="$RUNNER_TEMP/trusted-impact-gate"
+          mkdir -p "$trusted/scripts/ops"
+          for f in scripts/__init__.py scripts/ops/__init__.py scripts/ops/pr_impact_gate.py scripts/ops/select_tests.py; do
+            git show "$BASE_SHA:$f" > "$trusted/$f"
+          done
+          echo "gate=$trusted/scripts/ops/pr_impact_gate.py" >> "$GITHUB_OUTPUT"
+
+      - name: Download exact-base run evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: exact-base-impact-*-${{ steps.base.outputs.head_sha }}
+          path: ${{ runner.temp }}/nexus-ci-impact-sides
+
+      - name: Verify both run sides and assemble evidence
+        env:
+          RUN_RESULT: ${{ needs.impact-run.result }}
+          BASE_SHA: ${{ steps.base.outputs.sha }}
+          HEAD_SHA: ${{ steps.base.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$RUN_RESULT" != "success" ]; then
+            echo "::error title=Exact-base impact gate::base/head run jobs ended with '$RUN_RESULT'"
+            exit 1
+          fi
+          python3 -I - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          from pathlib import Path
+
+          temp = Path(os.environ["RUNNER_TEMP"])
+          head_sha = os.environ["HEAD_SHA"]
+          sides = {
+              side: temp / "nexus-ci-impact-sides" / f"exact-base-impact-{side}-{head_sha}"
+              for side in ("base", "head")
+          }
+          plans = {side: (path / "plan.json").read_bytes() for side, path in sides.items()}
+          if hashlib.sha256(plans["base"]).digest() != hashlib.sha256(plans["head"]).digest():
+              raise SystemExit("base and head run sides used different impact plans")
+          plan = json.loads(plans["head"])
+          if plan.get("base_sha") != os.environ["BASE_SHA"] or plan.get("head_sha") != head_sha:
+              raise SystemExit("impact plan does not bind the exact base/head revisions")
+          evidence = temp / "nexus-ci-impact"
+          wanted = {
+              "base": ("base-result.json", "base-junit.xml", "base-stdout.log"),
+              "head": ("plan.json", "golden-behavior.json", "head-result.json", "head-junit.xml", "head-stdout.log"),
+          }
+          for side, names in wanted.items():
+              for name in names:
+                  source = sides[side] / name
+                  if source.exists():
+                      shutil.copyfile(source, evidence / name)
+          for name in ("base-result.json", "head-result.json"):
+              if not (evidence / name).stat().st_size:
+                  raise SystemExit(f"{name} is empty")
+          PY
+
+      - name: Link persistent evidence directory
+        run: ln -s "$RUNNER_TEMP/nexus-ci-impact" .ci-impact
+
+      - name: Classify exact-base regression
+        run: |
+          set -uo pipefail
+          python3 "${{ steps.trusted-impact.outputs.gate }}" classify \
+            --base-result .ci-impact/base-result.json \
+            --head-result .ci-impact/head-result.json \
+            --output .ci-impact/classification.json
+          CLASSIFIER_STATUS=$?
+          {
+            echo "## Exact-base impact classification"
+            echo '```json'
+            cat .ci-impact/classification.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$CLASSIFIER_STATUS"
+        env:
+          NEXUS_TEST_MODE: CI
+          PYTHONPATH: .
+
+      - name: Capture failure tails
+        if: failure()
+        run: |
+          echo "## Exact-base pytest tails" >> "$GITHUB_STEP_SUMMARY"
+          tail -n 80 .ci-impact/base-stdout.log >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          tail -n 80 .ci-impact/head-stdout.log >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+
+      - name: Install gitlink metadata for checkout post-cleanup
+        if: always()
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' index_entry; do
+            mode="${index_entry%% *}"
+            if [ "$mode" != "160000" ]; then
+              continue
+            fi
+            gitlink_path="${index_entry#*$'\t'}"
+            if ! git config --file .gitmodules --get "submodule.${gitlink_path}.path" >/dev/null 2>&1; then
+              git config --file .gitmodules "submodule.${gitlink_path}.path" "$gitlink_path"
+              git config --file .gitmodules "submodule.${gitlink_path}.url" .
+            fi
+          done < <(git ls-files --stage -z)
+          git submodule foreach --recursive ':'
+
       - name: Archive impact evidence 📦
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -427,6 +596,61 @@ jobs:
           path: ${{ runner.temp }}/nexus-ci-impact/
           if-no-files-found: error
           retention-days: 7
+
+  impact-map-coverage:
+    name: Impact map coverage (advisory)
+    # Not a required check: fails within minutes when a changed path has no
+    # docs/testing/test_impact_map.md row, which would make the required gate run
+    # the full suite twice (~75 min instead of a median of ~7; #2220).
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: false
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Check impact-map coverage
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ops/pr_impact_gate.py plan \
+            --base-sha "$BASE_SHA" --head-sha "$HEAD_SHA" \
+            --output "$RUNNER_TEMP/plan.json" > /dev/null
+          python3 -I - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          plan = json.loads(Path(os.environ["RUNNER_TEMP"], "plan.json").read_text(encoding="utf-8"))
+          if plan.get("fallback") != "FULL_SUITE":
+              print("impact map covers every changed path")
+              raise SystemExit(0)
+
+          def clean(path):
+              # Paths are PR-controlled: no CR/LF or workflow-command escapes.
+              text = "".join(ch for ch in str(path) if ch.isprintable() and ch not in "%`:")
+              return text[:200]
+
+          paths = [clean(path) for path in plan.get("unmatched_paths", [])][:20]
+          for path in paths:
+              print(f"::error title=Unmapped path (add a docs/testing/test_impact_map.md row)::{path}")
+          raise SystemExit(
+              f"{len(paths)} changed path(s) have no impact-map row; the required gate will run the full suite"
+          )
+          PY
 
   full-regression:
     name: Tier 3 full regression
