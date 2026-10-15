@@ -1200,8 +1200,23 @@ class InPlaceSprintExecutor:
         return _inplace_evaluate_confined(self, **kwargs)
 
     def evaluate_candidate(self, *, seed: int, hint: str, code: str, source: str) -> CandidateEval:
+        return self._evaluate(seed=seed, hint=hint, code=code, source=source, confined_only=False)
+
+    def evaluate_candidate_confined(self, *, seed: int, hint: str, code: str, source: str) -> CandidateEval:
+        """Same contract as ``evaluate_candidate`` but ALWAYS on a confined scratch copy: never
+        writes the workspace; without an OS barrier it refuses (``confinement_unavailable``).
+        Used by the runtime visible verifier (#2212), which runs before the seam's file_lock."""
+        return self._evaluate(seed=seed, hint=hint, code=code, source=source, confined_only=True)
+
+    def _evaluate(self, *, seed: int, hint: str, code: str, source: str, confined_only: bool) -> CandidateEval:
         start = time.time()
         target_path = self.repo_root / self.target_file
+        if _target_held_by_other(self.repo_root, self.target_file):
+            # PR-2 seam: another task holds the target's file lock: nothing is applied or run.
+            return CandidateEval(
+                seed=seed, score=0.0, hint=hint, error="file_lock_denied", candidate_code=code, source=source,
+                elapsed_sec=round(time.time() - start, 4),
+            )
         original = target_path.read_text(encoding="utf-8") if target_path.exists() else ""
         companion_edits = generate_local_companion_edits(self.repo_root, target_path, self.task, hint, seed)
         restored_files: dict[Path, str | None] = {}
@@ -1247,6 +1262,7 @@ class InPlaceSprintExecutor:
                 original=original,
                 start=start,
                 companions=[path for path in companion_edits if path != target_path],
+                force=confined_only,
             )
             if confined is not None:
                 return confined
@@ -1314,13 +1330,14 @@ def _inplace_evaluate_confined(
     original: str,
     start: float,
     companions: list[Path] | None = None,
+    force: bool = False,
 ) -> CandidateEval | None:
     """Strict/counted lane: the visible test runs on a scratch copy inside the OS confinement,
     never in the workspace (None when confinement is not requested). Companion edits outside the
     target cannot be reproduced in the copy: refused (``confinement_unavailable:multi_file``)."""
     from nexus.services import post_candidate_seam as seam
 
-    if not seam.confine_visible_test_enabled():
+    if not force and not seam.confine_visible_test_enabled():
         return None
     if companions:
         return CandidateEval(
@@ -1430,17 +1447,14 @@ def _sprint_seam_task_id(repo_root: Path, config: SprintConfig) -> str:
     return "auto-flow-sprint:" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
 
 
-def _target_held_by_other_task(repo_root: Path, config: SprintConfig) -> bool:
-    """True when another task holds the sprint target's file lock: code that would apply the
-    candidate in place before the seam's own lock is taken (the runtime visible verifier) must
-    not run then."""
+def _target_held_by_other(repo_root: Path, target_file: str) -> bool:
+    """True when another task holds ``target_file``'s file lock (seam holder id of this
+    process); off when the seam is disabled. Checked before every in-place evaluation."""
     from nexus.services import post_candidate_seam as seam
 
     if not seam.seam_enabled():
         return False
-    return seam.target_held_by_other(
-        repo_root, config.target_file, seam.seam_holder_id(repo_root, config.target_file)
-    )
+    return seam.target_held_by_other(repo_root, target_file, seam.seam_holder_id(repo_root, target_file))
 
 
 def _sprint_lock_denied(

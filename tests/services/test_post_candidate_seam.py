@@ -1038,3 +1038,56 @@ def test_read_root_inside_a_forbidden_root_is_refused_both_directions(tmp_path: 
     assert lane.sbpl_path(sibling) in lane.checked_read_roots(
         [str(sibling)], extra_forbidden=[forbidden]
     )
+
+
+def test_inplace_executor_refuses_while_another_task_holds_the_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Gemini G7: the unconfined in-place evaluation never writes a target another task holds."""
+    from nexus.research.sprint_service import InPlaceSprintExecutor
+
+    case = _case(tmp_path)
+    monkeypatch.delenv(seam.CONFINE_VISIBLE_TEST_ENV, raising=False)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("test ran"))
+    executor = InPlaceSprintExecutor(
+        case, "target.py", [sys.executable, "-m", "pytest", "-q", "test_visible.py"], 30, task="t"
+    )
+    seam.acquire_target_lock(task_id="other-task", workspace_root=case, target_file="target.py")
+    try:
+        for evaluate in (executor.evaluate_candidate, executor.evaluate_candidate_confined):
+            ev = evaluate(seed=0, hint="h", code=CANDIDATE, source="llm")
+            assert ev.score == 0.0 and ev.error == "file_lock_denied"
+    finally:
+        seam.release_target_lock("other-task")
+    assert (case / "target.py").read_text(encoding="utf-8") == ORIGINAL
+
+
+def test_evaluate_candidate_confined_always_confined_never_in_place(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#2212 contract: evaluate_candidate_confined routes to the confined runner even when the
+    counted-lane env is off, and refuses (never in place) when confinement is unavailable."""
+    from nexus.research.sprint_service import InPlaceSprintExecutor
+
+    case = _case(tmp_path)
+    monkeypatch.delenv(seam.CONFINE_VISIBLE_TEST_ENV, raising=False)
+    calls: list[dict[str, Any]] = []
+
+    def confined(**kw: Any):
+        calls.append(kw)
+        assert (case / "target.py").read_text(encoding="utf-8") == ORIGINAL
+        return subprocess.CompletedProcess(
+            [], 1, "", "confinement_unavailable:no_os_barrier"
+        ), False
+
+    monkeypatch.setattr(seam, "run_visible_test_confined", confined)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("ran in place"))
+    executor = InPlaceSprintExecutor(
+        case, "target.py", [sys.executable, "-m", "pytest", "-q", "test_visible.py"], 30, task="t"
+    )
+    ev = executor.evaluate_candidate_confined(seed=3, hint="h", code=CANDIDATE, source="llm")
+
+    assert calls and calls[0]["candidate_code"] == CANDIDATE
+    assert ev.score == 0.0 and ev.error.startswith(seam.CONFINEMENT_UNAVAILABLE)
+    assert ev.seed == 3 and ev.source == "llm"
+    assert (case / "target.py").read_text(encoding="utf-8") == ORIGINAL

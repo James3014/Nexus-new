@@ -248,6 +248,16 @@ def _visible_error(res: subprocess.CompletedProcess, default: str) -> str:
     return _post_candidate_seam.CONFINEMENT_UNAVAILABLE if stderr.startswith(_post_candidate_seam.CONFINEMENT_UNAVAILABLE) else default
 
 
+def _target_locked_by_other(repo_root: Path, target_file: str) -> bool:
+    """PR-2 seam: True when another task holds the target's file lock (no in-place write of
+    model code then). Off when the seam is disabled."""
+    if not _post_candidate_seam.seam_enabled():
+        return False
+    return _post_candidate_seam.target_held_by_other(
+        repo_root, target_file, _post_candidate_seam.seam_holder_id(repo_root, target_file)
+    )
+
+
 def _write_source_text(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
     if path.suffix != ".py":
@@ -1235,7 +1245,7 @@ def run_auto_flow(
                 )
             if patched == original_code:
                 err = "no_mutation_generated"
-            elif _post_candidate_seam.lock_denied(seam_pre_stages):
+            elif _post_candidate_seam.lock_denied(seam_pre_stages) or _target_locked_by_other(repo_root, target_file):
                 # Another task holds the target: the candidate is never written (no delivery).
                 err = "file_lock_denied"
             else:
@@ -1313,6 +1323,7 @@ def run_auto_flow(
         generation_meta = local_baseline_meta()
         patched = original_code
         restored_files: dict[Path, str | None] = {}
+        probe_lock_task = ""
         try:
             patched, source, generation_meta = _build_baseline_patch(
                 trial=0,
@@ -1326,8 +1337,19 @@ def run_auto_flow(
                 task_type=task_type,
                 test_source=visible_test_source,
             )
+            probe_pre: list[dict[str, Any]] = []
+            if patched != original_code:
+                # PR-2 seam: the probe writes the candidate in place too -> same lock as apply.
+                probe_lock_task, probe_pre = _post_candidate_seam.lock_target_if_selected(
+                    unified_receipt=_unified_receipt_from_meta(generation_meta),
+                    task_id=_post_candidate_seam.seam_holder_id(repo_root, target_file),
+                    workspace_root=repo_root,
+                    target_file=target_file,
+                )
             if patched == original_code:
                 err = "no_mutation_generated"
+            elif _post_candidate_seam.lock_denied(probe_pre) or _target_locked_by_other(repo_root, target_file):
+                err = "file_lock_denied"
             else:
                 companion_edits = (
                     {}
@@ -1358,7 +1380,11 @@ def run_auto_flow(
         except subprocess.TimeoutExpired:
             err = "test_timeout"
         finally:
-            _restore_baseline_files(restored_files, keep_target=False)
+            try:
+                _restore_baseline_files(restored_files, keep_target=False)
+            finally:
+                if probe_lock_task:
+                    _post_candidate_seam.release_target_lock(probe_lock_task)
         return {
             "flow": "baseline_probe",
             "status": "SUCCESS" if ok else "FAILED",
@@ -1461,9 +1487,14 @@ def run_auto_flow(
             and raw_model_sha
             and hashlib.sha256(str(res.patch).encode("utf-8")).hexdigest() == raw_model_sha
         )
-        if ok or symmetric_delivery:
+        if (ok or symmetric_delivery) and _target_locked_by_other(repo_root, target_file):
+            # The sprint released its lock; another task took the target since: no delivery.
+            ok = False
+            symmetric_delivery = False
+            err = "file_lock_denied"
+        elif ok or symmetric_delivery:
             _write_source_text(target_path, res.patch)
-        if not ok:
+        if not ok and not err:
             err = res.reason
         breakdown["patch_apply_sec"] = round(time.monotonic() - apply_started_at, 4)
         breakdown["total_sec"] = round(time.monotonic() - start, 4)
@@ -1562,7 +1593,24 @@ def run_auto_flow(
             ):
                 early_baseline_shortcut = True
                 probe_patch = baseline_probe.get("_patch")
-                if isinstance(probe_patch, str) and probe_patch and probe_patch != original_code:
+                if (
+                    isinstance(probe_patch, str)
+                    and probe_patch
+                    and probe_patch != original_code
+                    and _target_locked_by_other(repo_root, target_file)
+                ):
+                    # The probe's lock is released; another task holds the target now.
+                    result = {
+                        "flow": "baseline",
+                        "status": "FAILED",
+                        "elapsed_sec": baseline_probe["elapsed_sec"],
+                        "error": "file_lock_denied",
+                        "report": {
+                            **(baseline_probe.get("report", {}) if isinstance(baseline_probe.get("report"), dict) else {}),
+                            "reused_from_probe": True,
+                        },
+                    }
+                elif isinstance(probe_patch, str) and probe_patch and probe_patch != original_code:
                     _write_source_text(target_path, probe_patch)
                     result = {
                         "flow": "baseline",
