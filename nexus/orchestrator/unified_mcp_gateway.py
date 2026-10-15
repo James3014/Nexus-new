@@ -6777,6 +6777,7 @@ class UnifiedMCPGateway:
         return self._recovery_payload(result, operation="reconcile", include_state=True)
 
     def _task_retry(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        _require_bound_controller()
         task_id = _text(arguments.get("task_id"), "task_id")
         assisted = self._assist_read(task_id)
         if assisted is not None:
@@ -6784,6 +6785,7 @@ class UnifiedMCPGateway:
         return self._recovery_payload(self.service.retry_task(task_id), operation="retry", include_state=True)
 
     def _task_resume(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        _require_bound_controller()
         task_id = _text(arguments.get("task_id"), "task_id")
         assisted = self._assist_read(task_id)
         if assisted is not None:
@@ -6802,6 +6804,7 @@ class UnifiedMCPGateway:
         return text
 
     def _candidate_approve(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        _require_bound_controller()
         task_id = _text(arguments.get("task_id"), "task_id")
         candidate_commit_sha = self._exact_hash(arguments.get("candidate_commit_sha"), "candidate_commit_sha", 40)
         candidate_tree_sha = self._exact_hash(arguments.get("candidate_tree_sha"), "candidate_tree_sha", 40)
@@ -6880,6 +6883,7 @@ class UnifiedMCPGateway:
         service.  Keep the transport envelope closed so callers cannot smuggle
         internal state or downstream approval/integration fields.
         """
+        _require_bound_controller()
         runtime_fields = {
             "server_instance_id", "lifecycle_revision", "full_tool_schema_hash",
             "permission_policy_hash", "controller_repo_root", "controller_branch",
@@ -7016,6 +7020,7 @@ class UnifiedMCPGateway:
         action: AutonomyActionClass,
     ) -> dict[str, Any]:
         """Validate one closed Learning effect, authorize it, then CAS it."""
+        _require_bound_controller()
         common = {
             "artifact", "expected_current_digest", "operation_id", "idempotency_key",
             "source_revision", "task_family", "model_name", "runtime_identity",
@@ -7215,6 +7220,7 @@ class UnifiedMCPGateway:
             raise GatewayInputError("CANDIDATE_ADOPTION_SERVICE_RESULT_CLAIM_CEILING")
 
     def _candidate_bind_integration(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        _require_bound_controller()
         forbidden = {"integration_authorization", "action_set", "approval_context", "shell"}
         if forbidden.intersection(arguments):
             raise GatewayInputError("CLOSURE_SCHEMA_CLOSED")
@@ -7292,6 +7298,7 @@ class UnifiedMCPGateway:
         return payload
 
     def _candidate_integrate(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        _require_bound_controller()
         task_id = _text(arguments.get("task_id"), "task_id")
         branch = str(arguments.get("integration_branch") or "nexus/integration/main").strip()
         if not branch or branch.startswith("-") or any(char in branch for char in "\n\r"):
@@ -7540,6 +7547,7 @@ class UnifiedMCPGateway:
         return "dispatch-" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
 
     def _task_run(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        _require_bound_controller()
         try:
             reject_caller_route_overrides(arguments)
         except ValueError as exc:

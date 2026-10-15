@@ -167,13 +167,16 @@ def bound_controller_problem(controller: Path, loaded: Path) -> Optional[str]:
         return "CONTROLLER_NOT_A_REGISTERED_WORKTREE"
     # Detached: no branch operation (e.g. integration onto a checked-out
     # branch) can move the Controller's working tree (#2230).
-    branch = subprocess.run(
-        ["git", "symbolic-ref", "-q", "HEAD"],
-        cwd=controller,
-        capture_output=True,
-        timeout=5,
-        check=False,
-    )
+    try:
+        branch = subprocess.run(
+            ["git", "symbolic-ref", "-q", "HEAD"],
+            cwd=controller,
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "HEAD_UNREADABLE"
     if branch.returncode == 0:
         return "CONTROLLER_NOT_DETACHED"
     # The gitdir the Controller's .git points at must point back at this very

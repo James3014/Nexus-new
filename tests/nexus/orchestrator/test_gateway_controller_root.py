@@ -508,6 +508,62 @@ def test_degraded_gateway_refuses_every_controller_effect_and_reports_it(pair, m
     }
 
 
+def _degraded_gateway(pair, monkeypatch):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    loaded, _, _ = pair
+    _allow_owner_effect_authority(monkeypatch)
+    monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", loaded)
+    monkeypatch.setattr(gateway_module, "LOADED_SOURCE_ROOT", loaded)
+    monkeypatch.setattr(gateway_module, "CONTROLLER_IS_SEPARATE", False)
+    monkeypatch.setattr(
+        gateway_module, "CONTROLLER_BINDING_PROBLEM", "NEXUS_CANONICAL_SOURCE_ROOT_MISSING"
+    )
+    monkeypatch.setattr(roots, "CONTROLLER_BINDING_PROBLEM", "NEXUS_CANONICAL_SOURCE_ROOT_MISSING")
+    return gateway_module.UnifiedMCPGateway(service=FakeService())
+
+
+def _call(gateway, name: str, arguments: dict) -> dict:
+    return gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 11,
+        "method": "tools/call",
+        "params": {"name": name, "arguments": arguments},
+    })["result"]
+
+
+@pytest.mark.parametrize(
+    "tool",
+    [
+        "nexus_task_retry",
+        "nexus_task_resume",
+        "nexus_candidate_approve",
+        "nexus_candidate_adopt_external",
+        "nexus_candidate_bind_integration",
+        "nexus_candidate_integrate",
+        "nexus_task_run",
+        "nexus_learning_policy_adopt",
+        "nexus_learning_policy_rollback",
+    ],
+)
+def test_degraded_gateway_refuses_governed_mutation_before_validation(pair, monkeypatch, tool):
+    gateway = _degraded_gateway(pair, monkeypatch)
+    # Empty arguments: the degraded refusal must come before argument validation.
+    result = _call(gateway, tool, {})
+    assert result["isError"] is True
+    assert "CONTROLLER_BINDING_INVALID:DEGRADED" in result["structuredContent"]["error"]
+
+
+@pytest.mark.parametrize(
+    "tool", ["nexus_task_cancel", "nexus_candidate_dispose", "nexus_task_reconcile"]
+)
+def test_degraded_gateway_still_allows_cleanup_tools(pair, monkeypatch, tool):
+    gateway = _degraded_gateway(pair, monkeypatch)
+    result = _call(gateway, tool, {"task_id": "t-1", **AUTHORITY_ARGS})
+    error = str((result.get("structuredContent") or {}).get("error") or "")
+    assert "DEGRADED" not in error
+
+
 def test_direct_canonical_finish_is_refused_with_a_separate_controller(pair, monkeypatch):
     import nexus.orchestrator.unified_mcp_gateway as gateway_module
 
@@ -565,3 +621,16 @@ def test_controller_with_a_branch_checked_out_is_refused(pair):
     loaded, controller, _ = pair
     _git(controller, "checkout", "-q", "-b", "nexus/integration/main")
     assert roots.bound_controller_problem(controller, loaded) == "CONTROLLER_NOT_DETACHED"
+
+
+def test_symbolic_ref_timeout_is_a_binding_reason_not_an_exception(pair, monkeypatch):
+    loaded, controller, _ = pair
+    real_run = subprocess.run
+
+    def run(cmd, *args, **kwargs):
+        if cmd[:2] == ["git", "symbolic-ref"]:
+            raise subprocess.TimeoutExpired(cmd, 5)
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(roots.subprocess, "run", run)
+    assert roots.bound_controller_problem(controller, loaded) == "HEAD_UNREADABLE"
