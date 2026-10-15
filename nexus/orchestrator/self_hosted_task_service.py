@@ -11885,7 +11885,20 @@ class SelfHostedTaskService:
         controller_root = Path(contract.controller_repo_root).resolve()
         manager = WorktreeManager(root_dir=contract.target_worktree_root)
         candidate = closure.get("candidate_commit_sha")
+        # A separate detached Controller (#2251) applied by update-ref: the
+        # applied head is the integration branch ref, HEAD stays detached and
+        # only untracked pending Task Cards are admitted.  Read-only probe on
+        # the real class (never an integration run); other shapes unchanged.
+        from nexus.orchestrator.governed_integration import (
+            ControlledIntegrationManager as ControllerShape,
+        )
+
+        separate_head = ControllerShape.separate_controller_integration_head(
+            controller_root, str(branch)
+        )
         actual_head = manager._run_git(["rev-parse", "HEAD"], cwd=controller_root)
+        if separate_head is not None:
+            actual_head = separate_head
         if actual_head != receipt.integration_commit_sha:
             raise RuntimeError("receipt recovery applied HEAD mismatch")
         if receipt.integration_commit_sha != candidate:
@@ -11895,15 +11908,31 @@ class SelfHostedTaskService:
             ).split()
             if len(parents) != 3 or candidate not in parents[1:]:
                 raise RuntimeError("receipt recovery refuses post-candidate extra commit")
-        if manager._run_git(["branch", "--show-current"], cwd=controller_root) != branch:
+        expected_current_branch = "" if separate_head is not None else branch
+        if (
+            manager._run_git(["branch", "--show-current"], cwd=controller_root)
+            != expected_current_branch
+        ):
             raise RuntimeError("receipt recovery branch mismatch")
-        if manager._run_git(["status", "--porcelain=v1", "--untracked-files=all"], cwd=controller_root):
+        if separate_head is not None:
+            ControllerShape._require_clean_controller(
+                controller_root,
+                allow_pending_task_cards=True,
+                message="receipt recovery canonical tree is dirty",
+            )
+        elif manager._run_git(
+            ["status", "--porcelain=v1", "--untracked-files=all"], cwd=controller_root
+        ):
             raise RuntimeError("receipt recovery canonical tree is dirty")
         if candidate:
             candidate_tree = manager._run_git(["rev-parse", f"{candidate}^{{tree}}"], cwd=controller_root)
             if candidate_tree != receipt.candidate_tree_sha:
                 raise RuntimeError("receipt recovery candidate tree mismatch")
             actual_tree = manager._run_git(["rev-parse", "HEAD^{tree}"], cwd=controller_root)
+            if separate_head is not None:
+                actual_tree = manager._run_git(
+                    ["rev-parse", f"{separate_head}^{{tree}}"], cwd=controller_root
+                )
             if actual_tree != receipt.candidate_tree_sha:
                 raise RuntimeError("receipt recovery applied tree mismatch")
             result = subprocess.run(
@@ -12129,11 +12158,41 @@ class SelfHostedTaskService:
             controller_root = Path((state.get("contract") or {}).get("controller_repo_root") or "").resolve()
             if not controller_root.is_dir():
                 reject("RECEIPT_CORRECTION_CONTROLLER_ROOT_REQUIRED")
+            # A separate detached Controller (#2251) binds the integration
+            # ref with HEAD detached and only pending Task Cards untracked.
+            from nexus.orchestrator.governed_integration import (
+                ControlledIntegrationManager as ControllerShape,
+            )
+
+            try:
+                separate_head = ControllerShape.separate_controller_integration_head(
+                    controller_root, integration_branch
+                )
+            except RuntimeError as exc:
+                raise RuntimeError("RECEIPT_CORRECTION_PHYSICAL_BINDING_MISMATCH") from exc
             actual_branch = manager._run_git(["branch", "--show-current"], cwd=controller_root)
             actual_head = manager._run_git(["rev-parse", "HEAD"], cwd=controller_root)
-            dirty = manager._run_git(["status", "--porcelain=v1", "--untracked-files=all"], cwd=controller_root)
-            if actual_branch != integration_branch or actual_head != expected_applied_head or dirty:
-                reject("RECEIPT_CORRECTION_PHYSICAL_BINDING_MISMATCH")
+            if separate_head is not None:
+                try:
+                    ControllerShape._require_clean_controller(
+                        controller_root,
+                        allow_pending_task_cards=True,
+                        message="RECEIPT_CORRECTION_PHYSICAL_BINDING_MISMATCH",
+                    )
+                except RuntimeError as exc:
+                    raise RuntimeError("RECEIPT_CORRECTION_PHYSICAL_BINDING_MISMATCH") from exc
+                if actual_branch != "" or separate_head != expected_applied_head:
+                    reject("RECEIPT_CORRECTION_PHYSICAL_BINDING_MISMATCH")
+            else:
+                dirty = manager._run_git(
+                    ["status", "--porcelain=v1", "--untracked-files=all"], cwd=controller_root
+                )
+                if (
+                    actual_branch != integration_branch
+                    or actual_head != expected_applied_head
+                    or dirty
+                ):
+                    reject("RECEIPT_CORRECTION_PHYSICAL_BINDING_MISMATCH")
             candidate_tree = manager._run_git(["rev-parse", f"{candidate_commit_sha}^{{tree}}"], cwd=controller_root)
             if candidate_tree != candidate_tree_sha:
                 reject("RECEIPT_CORRECTION_CANDIDATE_TREE_MISMATCH")

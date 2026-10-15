@@ -2092,7 +2092,7 @@ def _separate_controller_interrupted_after_update_ref(tmp_path: Path):
     return service, controller, base, applied, pending, acceptance, recovery_approval, runtime
 
 
-def test_separate_controller_integrating_recovery_completes(tmp_path: Path):
+def test_separate_controller_integrating_recovery_rebind_succeeds(tmp_path: Path):
     """#2251: recovery binds the integration ref, not the detached Controller HEAD."""
     service, controller, base, applied, pending, acceptance, recovery, runtime = (
         _separate_controller_interrupted_after_update_ref(tmp_path)
@@ -2217,6 +2217,191 @@ def test_separate_controller_integrating_recovery_rechecks_under_state_lock(
         service.bind_candidate_integration_closure(
             "closure-bind", **_separate_closure_kwargs(acceptance, recovery, runtime, applied)
         )
+    assert service._state_path("closure-bind").read_bytes() == before
+
+
+def _recovery_receipt(service, base: str, applied: str, acceptance, *, misbound_base: bool = False):
+    """The receipt an interrupted apply would have written for ``applied``."""
+    state = service._read_state("closure-bind") or {}
+    packet = state["promotion_packet"]
+    recorded_base = "d" * 40 if misbound_base else base
+    return IntegrationReceipt(
+        schema="nexus.integration_receipt.v1",
+        task_id="closure-bind",
+        integration_branch="nexus/integration/canary",
+        source_branch="candidate",
+        candidate_commit_sha=packet["candidate_commit_sha"],
+        integration_base_sha=recorded_base,
+        integration_commit_sha=applied,
+        verifier_passed=True,
+        merge_performed=True,
+        push_performed=False,
+        worktree_removed=False,
+        staging_commit_sha=applied,
+        post_apply_verified=True,
+        acceptance_receipt_hash=acceptance.receipt_hash,
+        authorization_hash=state["integration_authorization"]["authorization_hash"],
+        task_card_hash=state["task_card_hash"],
+        candidate_tree_sha=packet["candidate_tree_sha"],
+        candidate_state_hash=packet["candidate_state_hash"],
+        verified_receipt_hash=packet["verified_receipt_hash"],
+        branch_head_before=recorded_base,
+        branch_head_after=applied,
+        candidate_is_ancestor=True,
+        staging_verified=True,
+    )
+
+
+def _separate_controller_rebound_for_receipt_recovery(tmp_path: Path):
+    service, controller, base, applied, pending, acceptance, recovery, runtime = (
+        _separate_controller_interrupted_after_update_ref(tmp_path)
+    )
+    service.bind_candidate_integration_closure(
+        "closure-bind", **_separate_closure_kwargs(acceptance, recovery, runtime, applied)
+    )
+    recovery_runtime = service._read_state("closure-bind")["integration_closure_binding"][
+        "runtime_identity"
+    ]
+    return service, controller, base, applied, pending, acceptance, recovery_runtime
+
+
+def test_separate_controller_integrating_recovery_completes(tmp_path: Path):
+    """#2251: rebind then receipt recovery finish the task on a detached Controller."""
+    service, controller, base, applied, pending, acceptance, recovery_runtime = (
+        _separate_controller_rebound_for_receipt_recovery(tmp_path)
+    )
+    controller_head = _git(controller, "rev-parse", "HEAD")
+    controller_status = _status_hash(controller)
+    receipt = _recovery_receipt(service, base, applied, acceptance)
+
+    recovered = service.recover_applied_integration_receipt(
+        "closure-bind", receipt, runtime_identity=recovery_runtime
+    )
+    assert recovered["status"] == "INTEGRATED"
+    assert recovered["integration_result_sha"] == applied
+    assert recovered["integration_receipt"] == asdict(receipt)
+    replay = service.recover_applied_integration_receipt(
+        "closure-bind", receipt, runtime_identity=recovery_runtime
+    )
+    assert replay["status"] == "INTEGRATED"
+    assert _git(controller, "rev-parse", "nexus/integration/canary") == applied
+    assert _git(controller, "rev-parse", "HEAD") == controller_head
+    assert _status_hash(controller) == controller_status
+    assert pending.read_text() == "pending\n"
+    assert (controller / "value.txt").read_text() == "base\n"
+
+
+@pytest.mark.parametrize(
+    "drift, message",
+    [
+        ("ref-not-receipt", "receipt recovery applied HEAD mismatch"),
+        ("non-card-dirt", "receipt recovery canonical tree is dirty"),
+    ],
+)
+def test_separate_controller_receipt_recovery_stays_fail_closed(
+    tmp_path: Path, drift: str, message: str
+):
+    service, controller, base, applied, _pending, acceptance, recovery_runtime = (
+        _separate_controller_rebound_for_receipt_recovery(tmp_path)
+    )
+    if drift == "ref-not-receipt":
+        moved = _git(controller, "commit-tree", f"{applied}^{{tree}}", "-p", applied, "-m", "moved")
+        _git(controller, "update-ref", "refs/heads/nexus/integration/canary", moved, applied)
+    else:
+        (controller / "stray.txt").write_text("stray\n")
+    before = service._state_path("closure-bind").read_bytes()
+    with pytest.raises(RuntimeError, match=message):
+        service.recover_applied_integration_receipt(
+            "closure-bind",
+            _recovery_receipt(service, base, applied, acceptance),
+            runtime_identity=recovery_runtime,
+        )
+    assert service._state_path("closure-bind").read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "shape, message",
+    [
+        ("pending-card", "receipt recovery canonical tree is dirty"),
+        ("checkout-on-main", "receipt recovery applied HEAD mismatch"),
+    ],
+)
+def test_primary_checkout_receipt_recovery_still_strict(tmp_path: Path, shape: str, message: str):
+    """A primary checkout keeps HEAD, branch and full cleanliness for receipt recovery."""
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(
+        tmp_path
+    )
+    service.bind_candidate_integration_closure(
+        "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+    )
+    _git(root, "merge", "--no-ff", "candidate", "-m", "applied")
+    applied = _git(root, "rev-parse", "HEAD")
+    state = service._read_state("closure-bind") or {}
+    _git(root, "update-ref", state["candidate_ref"], candidate)
+    state.update(
+        status="INTEGRATING",
+        promotion_status="INTEGRATING",
+        merge_performed=False,
+        integration_receipt=None,
+        integration_result_sha=None,
+        integration_execution=None,
+    )
+    service._write_state("closure-bind", state)
+    recovery = {**approval, "approval_id": "integrate-recovery", "expected_canonical_head": applied}
+    service.bind_candidate_integration_closure(
+        "closure-bind", **_separate_closure_kwargs(acceptance, recovery, runtime, applied)
+    )
+    recovery_runtime = service._read_state("closure-bind")["integration_closure_binding"][
+        "runtime_identity"
+    ]
+    if shape == "pending-card":
+        (root / "tasks").mkdir()
+        (root / "tasks" / "pending-card.md").write_text("pending\n")
+    else:
+        _git(root, "checkout", "main")
+    before = service._state_path("closure-bind").read_bytes()
+    with pytest.raises(RuntimeError, match=message):
+        service.recover_applied_integration_receipt(
+            "closure-bind",
+            _recovery_receipt(service, base, applied, acceptance),
+            runtime_identity=recovery_runtime,
+        )
+    assert service._state_path("closure-bind").read_bytes() == before
+
+
+def test_separate_controller_receipt_correction_uses_integration_ref(tmp_path: Path):
+    """#2251: receipt correction's physical check binds the integration ref too."""
+    service, controller, base, applied, pending, acceptance, recovery_runtime = (
+        _separate_controller_rebound_for_receipt_recovery(tmp_path)
+    )
+    receipt = _recovery_receipt(service, base, applied, acceptance, misbound_base=True)
+    service.recover_applied_integration_receipt(
+        "closure-bind", receipt, runtime_identity=recovery_runtime
+    )
+    state = service._read_state("closure-bind") or {}
+    candidate = state["promotion_packet"]["candidate_commit_sha"]
+    controller_head = _git(controller, "rev-parse", "HEAD")
+    kwargs = _correction_kwargs(
+        service, state, receipt, base, applied, candidate, acceptance, None, None
+    )
+    corrected = service.correct_applied_integration_receipt("closure-bind", **kwargs)
+    assert corrected["integration_receipt"]["integration_base_sha"] == base
+    assert corrected["integration_receipt"]["branch_head_before"] == base
+    assert len(corrected["integration_receipt_correction_history"]) == 1
+    assert _git(controller, "rev-parse", "HEAD") == controller_head
+    assert pending.read_text() == "pending\n"
+
+    # Non-card dirt still blocks the correction's physical binding.
+    (controller / "stray.txt").write_text("stray\n")
+    replay_kwargs = {
+        **kwargs,
+        "expected_state_hash": hashlib.sha256(
+            service._state_path("closure-bind").read_bytes()
+        ).hexdigest(),
+    }
+    before = service._state_path("closure-bind").read_bytes()
+    with pytest.raises(RuntimeError, match="RECEIPT_CORRECTION_PHYSICAL_BINDING_MISMATCH"):
+        service.correct_applied_integration_receipt("closure-bind", **replay_kwargs)
     assert service._state_path("closure-bind").read_bytes() == before
 
 
