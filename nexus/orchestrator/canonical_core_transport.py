@@ -22,6 +22,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import types
 import uuid
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
@@ -35,9 +36,10 @@ from nexus.orchestrator.ambient_core import (
 
 _EXACT_GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
-# `nexus-certify` is not a declared dependency of this package. When it is
-# installed in the environment (e.g. by CI tooling), its identity is read from
-# its direct_url.json. A local Core checkout is placed ahead of any installed
+# `nexus-certify` is not a declared dependency of this package. Its identity is
+# Core's own git-free `core_identity()` (#2246): an installed wheel carries an
+# embedded build stamp; a checkout is pinned by its source digest, which the
+# deployer supplies in NEXUS_CORE_SOURCE_DIGEST. A local Core checkout is placed ahead of any installed
 # package only when explicitly configured via NEXUS_CORE_REPO_ROOT; no
 # developer-machine path is hardcoded. The ACTUAL executed identity is always
 # derived from the imported product module (see _resolve_core_source_root).
@@ -157,66 +159,79 @@ def _resolve_core_source_root() -> Path | None:
     return root if (root / "product").is_dir() else None
 
 
-def _read_installed_core_identity(root: Path) -> dict[str, Any] | None:
-    """Identity of the installed `nexus-certify` distribution (PEP 610).
+# Git-free Core identity (#2246, nexus-core #267/#270). The deployer computes
+# the expected source digest of the pinned checkout and exports it with the
+# revision it was computed from; an installed wheel instead carries Core's
+# embedded build stamp.
+CORE_SOURCE_DIGEST_ENV = "NEXUS_CORE_SOURCE_DIGEST"
+CORE_SOURCE_DIGEST_REVISION_ENV = "NEXUS_CORE_SOURCE_DIGEST_REVISION"
+CORE_BUILD_IDENTITY_RELPATH = ("product", "protocol", "build_identity.py")
+_CORE_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_BUILD_EMBEDDED = "EMBEDDED"
+_BUILD_UNSTAMPED = "UNSTAMPED"
+_BUILD_INVALID = "INVALID_STAMP"
+# Identity fields carried from read_observed_core_identity into the status.
+_IDENTITY_DETAIL_FIELDS = (
+    "identity_source",
+    "build_identity",
+    "observed_source_digest",
+    "expected_source_digest",
+)
 
-    Returns None when `root` (the imported Core source root) is not that
-    distribution's installed location, so the caller falls back to the
-    checkout/git identity path. Otherwise returns a result that is either
-    available (commit from `direct_url.json` `vcs_info.commit_id`) or an
-    explicit fail-closed reason; the expectation is never substituted.
+
+def _load_core_identity_function(root: Path) -> Any:
+    """Core's ``core_identity`` from ``root``'s own ``product/protocol/build_identity.py``.
+
+    ``build_identity`` is a leaf module (it imports nothing from ``product``);
+    ``product.protocol.core_identity`` re-exports it. It is compiled from the
+    file at ``root`` and executed in a private module, so the identity is
+    always computed by the Core that lives at the observed root, whatever
+    ``product`` won ``sys.modules``, and no bytecode is written into the
+    checkout.
     """
-    from importlib import metadata
+    path = root.joinpath(*CORE_BUILD_IDENTITY_RELPATH)
+    source = path.read_bytes()
+    module = types.ModuleType("_nexus_core_build_identity")
+    module.__file__ = str(path)
+    exec(compile(source, str(path), "exec"), module.__dict__)  # noqa: S102 - pinned Core source
+    function = module.__dict__.get("core_identity")
+    if not callable(function):
+        raise RuntimeError("core_identity missing")
+    return function
 
-    try:
-        dist = metadata.distribution(CANONICAL_CORE_DISTRIBUTION)
-    except metadata.PackageNotFoundError:
-        return None
-    try:
-        installed_init = Path(str(dist.locate_file("product/__init__.py"))).resolve()
-        if installed_init != (root / "product" / "__init__.py").resolve():
-            return None
-    except Exception:
-        return None
-    base: dict[str, Any] = {
-        "available": False,
-        "expected_revision": CANONICAL_CORE_REVISION,
-        "observed_commit": None,
-        "observed_tree": None,
-        "source_root": str(root),
-        "identity_source": "direct_url.json",
-    }
-    try:
-        raw = dist.read_text("direct_url.json")
-    except Exception:
-        raw = None
-    if not raw:
-        return {**base, "reason": "CORE_DIRECT_URL_MISSING"}
-    try:
-        info = json.loads(raw)
-    except ValueError:
-        return {**base, "reason": "CORE_DIRECT_URL_MALFORMED"}
-    vcs_info = info.get("vcs_info") if isinstance(info, dict) else None
-    if not isinstance(vcs_info, dict) or vcs_info.get("vcs") != "git":
-        return {**base, "reason": "CORE_DIRECT_URL_NOT_GIT_VCS"}
-    commit = vcs_info.get("commit_id")
-    if not isinstance(commit, str) or not _EXACT_GIT_SHA_RE.fullmatch(commit):
-        return {**base, "reason": "CORE_IDENTITY_MALFORMED"}
-    return {
-        **base,
-        "available": True,
-        "observed_commit": commit,
-        "revision_match": commit == CANONICAL_CORE_REVISION,
-    }
+
+def _expected_source_digest() -> tuple[str | None, str | None, str | None]:
+    """``(digest, revision, problem)`` the deployer pinned for a Core checkout."""
+    digest = os.environ.get(CORE_SOURCE_DIGEST_ENV, "")
+    revision = os.environ.get(CORE_SOURCE_DIGEST_REVISION_ENV, "")
+    if not digest and not revision:
+        return None, None, "CORE_SOURCE_DIGEST_UNPINNED"
+    if not _CORE_DIGEST_RE.fullmatch(digest) or not _EXACT_GIT_SHA_RE.fullmatch(revision):
+        return None, None, "CORE_SOURCE_DIGEST_PIN_MALFORMED"
+    return digest, revision, None
 
 
 def read_observed_core_identity(core_root: Path | None = None) -> dict[str, Any]:
-    """Bind ACTUAL executed Core identity (INT-8 provenance).
+    """Bind ACTUAL executed Core identity (INT-8 provenance), without git.
 
-    Installed `nexus-certify` package: commit from its `direct_url.json`
-    (no tree available). Explicit/checkout Core root (e.g.
-    NEXUS_CORE_REPO_ROOT): commit+tree via git. Unreadable identity returns
-    available=False explicitly — callers fail closed, never substituting
+    Uses Core's own ``core_identity()`` for the observed Core root (the
+    imported package's root, or an explicit ``core_root``). Host rule, as the
+    ``core_identity`` docstring prescribes:
+
+    - ``EMBEDDED`` (installed wheel): the stamp's ``git_commit`` is the
+      observed commit, and only when ``git_dirty is False`` and
+      ``source_matches_build is True``. When the deployer pinned a digest the
+      stamp is ignored and the checkout rule below applies.
+    - ``UNSTAMPED`` (checkout): ``source_digest`` must equal the digest the
+      deployer computed for ``CANONICAL_CORE_REVISION`` and exported as
+      ``NEXUS_CORE_SOURCE_DIGEST`` / ``NEXUS_CORE_SOURCE_DIGEST_REVISION``.
+      Missing or malformed pin: unavailable. Different digest: the executed
+      Core is not the pinned one (no observed commit).
+    - ``INVALID_STAMP``: unavailable.
+
+    Bytecode never enters the digest, so a stray ``__pycache__`` does not
+    change provenance (2026-10-15). Unreadable identity returns
+    available=False explicitly; callers fail closed and never substitute
     expected == observed.
     """
     root = core_root if core_root is not None else _resolve_core_source_root()
@@ -228,57 +243,98 @@ def read_observed_core_identity(core_root: Path | None = None) -> dict[str, Any]
     }
     if root is None:
         return {**base, "reason": "CORE_SOURCE_UNAVAILABLE"}
-    if core_root is None:
-        installed = _read_installed_core_identity(root)
-        if installed is not None:
-            return installed
+    base["source_root"] = str(root)
     try:
-        commit = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"],
-            cwd=str(root),
-            text=True,
-            stderr=subprocess.DEVNULL,
-            timeout=10,
-        ).strip()
-        tree = subprocess.check_output(
-            ["git", "rev-parse", "HEAD^{tree}"],
-            cwd=str(root),
-            text=True,
-            stderr=subprocess.DEVNULL,
-            timeout=10,
-        ).strip()
-    except Exception:
-        return {**base, "reason": "CORE_IDENTITY_UNREADABLE", "source_root": str(root)}
-    if not _EXACT_GIT_SHA_RE.fullmatch(commit) or not _EXACT_GIT_SHA_RE.fullmatch(tree):
-        return {**base, "reason": "CORE_IDENTITY_MALFORMED", "source_root": str(root)}
-    # HEAD names a commit, but a modified, untracked or ignored file (e.g. a
-    # stray .pyc) means the code that runs may not be that commit: a dirty
-    # checkout is never pinned (#2181).
-    try:
-        dirty = subprocess.check_output(
-            ["git", "status", "--porcelain", "--untracked-files=all", "--ignored"],
-            cwd=str(root),
-            text=True,
-            stderr=subprocess.DEVNULL,
-            timeout=10,
-        ).strip()
-    except Exception:
-        return {**base, "reason": "CORE_IDENTITY_UNREADABLE", "source_root": str(root)}
-    if dirty:
+        identity = _load_core_identity_function(root)(root / "product")
+    except (Exception, SystemExit):  # Core code: never let it end the Gateway
+        return {**base, "reason": "CORE_IDENTITY_UNREADABLE"}
+    if not isinstance(identity, Mapping):
+        return {**base, "reason": "CORE_IDENTITY_MALFORMED"}
+    state = identity.get("build_identity")
+    observed_digest = identity.get("source_digest")
+    if not isinstance(observed_digest, str) or not _CORE_DIGEST_RE.fullmatch(observed_digest):
+        return {**base, "reason": "CORE_IDENTITY_MALFORMED", "build_identity": state}
+    base.update(build_identity=state, observed_source_digest=observed_digest)
+    if state == _BUILD_INVALID:
+        return {**base, "reason": "CORE_BUILD_STAMP_INVALID"}
+    # A deployer that pinned a digest declared a checkout: the digest decides,
+    # and a build stamp found there (which is outside the digest) never does.
+    digest_pinned = bool(
+        os.environ.get(CORE_SOURCE_DIGEST_ENV) or os.environ.get(CORE_SOURCE_DIGEST_REVISION_ENV)
+    )
+    if state == _BUILD_EMBEDDED and not digest_pinned:
+        commit, tree = identity.get("git_commit"), identity.get("git_tree")
+        if not isinstance(commit, str) or not _EXACT_GIT_SHA_RE.fullmatch(commit):
+            return {**base, "reason": "CORE_BUILD_STAMP_WITHOUT_COMMIT"}
+        if identity.get("git_dirty") is not False:
+            return {**base, "reason": "CORE_BUILD_DIRTY"}
+        if identity.get("source_matches_build") is not True:
+            return {**base, "reason": "CORE_SOURCE_NOT_AS_BUILT"}
         return {
             **base,
-            "reason": "CORE_CHECKOUT_DIRTY",
-            "source_root": str(root),
+            "available": True,
+            "identity_source": "build_stamp",
             "observed_commit": commit,
-            "observed_tree": tree,
+            "observed_tree": tree if isinstance(tree, str) else None,
+            "revision_match": commit == CANONICAL_CORE_REVISION,
+        }
+    if state in (_BUILD_UNSTAMPED, _BUILD_EMBEDDED):
+        expected, revision, problem = _expected_source_digest()
+        if problem is not None:
+            return {**base, "reason": problem}
+        if revision != CANONICAL_CORE_REVISION:
+            return {
+                **base,
+                "reason": "CORE_SOURCE_DIGEST_PIN_FOR_OTHER_REVISION",
+                "expected_source_digest": expected,
+            }
+        matched = observed_digest == expected
+        return {
+            **base,
+            "available": True,
+            "identity_source": "source_digest",
+            "expected_source_digest": expected,
+            # Only a matching digest attests the pinned revision.
+            "observed_commit": revision if matched else None,
+            "revision_match": matched,
+            **({} if matched else {"reason": "CORE_SOURCE_DIGEST_MISMATCH"}),
+        }
+    return {**base, "reason": "CORE_IDENTITY_MALFORMED"}
+
+
+def _provenance_from_identity(identity: Mapping[str, Any]) -> dict[str, Any]:
+    details = {k: identity.get(k) for k in _IDENTITY_DETAIL_FIELDS if k in identity}
+    if not identity.get("available"):
+        return {
+            "status": "CORE_IDENTITY_UNAVAILABLE",
+            "fail_closed": True,
+            "reason": identity.get("reason", "CORE_IDENTITY_UNREADABLE"),
+            "expected_revision": CANONICAL_CORE_REVISION,
+            "observed_commit": None,
+            "observed_tree": None,
+            "source_root": identity.get("source_root"),
+            **details,
+        }
+    if identity.get("observed_commit") != CANONICAL_CORE_REVISION:
+        return {
+            "status": "CORE_REVISION_MISMATCH",
+            "fail_closed": True,
+            "reason": identity.get("reason")
+            or "INT-8: executed Core differs from configured expectation",
+            "expected_revision": CANONICAL_CORE_REVISION,
+            "observed_commit": identity.get("observed_commit"),
+            "observed_tree": identity.get("observed_tree"),
+            "source_root": identity.get("source_root"),
+            **details,
         }
     return {
-        "available": True,
-        "source_root": str(root),
+        "status": "CORE_REVISION_PINNED",
+        "fail_closed": False,
         "expected_revision": CANONICAL_CORE_REVISION,
-        "observed_commit": commit,
-        "observed_tree": tree,
-        "revision_match": commit == CANONICAL_CORE_REVISION,
+        "observed_commit": identity.get("observed_commit"),
+        "observed_tree": identity.get("observed_tree"),
+        "source_root": identity.get("source_root"),
+        **details,
     }
 
 
@@ -294,35 +350,7 @@ def core_provenance_status(observed: Mapping[str, Any] | None = None) -> dict[st
     only when no observed identity is supplied and the live import is needed.
     """
     if observed is not None:
-        identity = dict(observed)
-        if not identity.get("available"):
-            return {
-                "status": "CORE_IDENTITY_UNAVAILABLE",
-                "fail_closed": True,
-                "reason": identity.get("reason", "CORE_IDENTITY_UNREADABLE"),
-                "expected_revision": CANONICAL_CORE_REVISION,
-                "observed_commit": None,
-                "observed_tree": None,
-                "source_root": identity.get("source_root"),
-            }
-        if identity.get("observed_commit") != CANONICAL_CORE_REVISION:
-            return {
-                "status": "CORE_REVISION_MISMATCH",
-                "fail_closed": True,
-                "reason": "INT-8: executed Core differs from configured expectation",
-                "expected_revision": CANONICAL_CORE_REVISION,
-                "observed_commit": identity.get("observed_commit"),
-                "observed_tree": identity.get("observed_tree"),
-                "source_root": identity.get("source_root"),
-            }
-        return {
-            "status": "CORE_REVISION_PINNED",
-            "fail_closed": False,
-            "expected_revision": CANONICAL_CORE_REVISION,
-            "observed_commit": identity.get("observed_commit"),
-            "observed_tree": identity.get("observed_tree"),
-            "source_root": identity.get("source_root"),
-        }
+        return _provenance_from_identity(dict(observed))
     if not CORE_AVAILABLE:
         return {
             "status": "CORE_UNAVAILABLE",
@@ -332,35 +360,7 @@ def core_provenance_status(observed: Mapping[str, Any] | None = None) -> dict[st
             "observed_commit": None,
             "observed_tree": None,
         }
-    identity = dict(observed) if isinstance(observed, Mapping) else read_observed_core_identity()
-    if not identity.get("available"):
-        return {
-            "status": "CORE_IDENTITY_UNAVAILABLE",
-            "fail_closed": True,
-            "reason": identity.get("reason", "CORE_IDENTITY_UNREADABLE"),
-            "expected_revision": CANONICAL_CORE_REVISION,
-            "observed_commit": None,
-            "observed_tree": None,
-            "source_root": identity.get("source_root"),
-        }
-    if identity.get("observed_commit") != CANONICAL_CORE_REVISION:
-        return {
-            "status": "CORE_REVISION_MISMATCH",
-            "fail_closed": True,
-            "reason": "INT-8: executed Core differs from configured expectation",
-            "expected_revision": CANONICAL_CORE_REVISION,
-            "observed_commit": identity.get("observed_commit"),
-            "observed_tree": identity.get("observed_tree"),
-            "source_root": identity.get("source_root"),
-        }
-    return {
-        "status": "CORE_REVISION_PINNED",
-        "fail_closed": False,
-        "expected_revision": CANONICAL_CORE_REVISION,
-        "observed_commit": identity.get("observed_commit"),
-        "observed_tree": identity.get("observed_tree"),
-        "source_root": identity.get("source_root"),
-    }
+    return _provenance_from_identity(read_observed_core_identity())
 
 
 def project_expected_evidence_universe(contract: Any) -> dict[str, Any] | None:
@@ -1110,14 +1110,7 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
             "raw_core_response": core_response_payload,
             "expected_evidence_projection": universe_projection,
             "core_source_identity": core_source,
-            "core_provenance": core_provenance_status({
-                "available": core_source.get("available", False),
-                "reason": core_source.get("reason"),
-                "source_root": core_source.get("source_root"),
-                "expected_revision": CANONICAL_CORE_REVISION,
-                "observed_commit": core_source.get("observed_commit"),
-                "observed_tree": core_source.get("observed_tree"),
-            }),
+            "core_provenance": core_provenance_status(dict(core_source)),
         }
 
         proj_hash = projection_hash(projection_payload)

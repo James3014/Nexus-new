@@ -2816,7 +2816,10 @@ def _real_core_checkout(tmp_path: Path, pin: str) -> Path | None:
         pytest.param("digest_reported_without_source", False, id="digest_reported_without_source"),
         pytest.param("build_stamp_source", False, id="build_stamp_source"),
         pytest.param("digest_but_build_has_none", False, id="digest_but_build_has_none"),
-        pytest.param("legacy_transport", True, id="legacy_transport"),
+        # Part 2: a build with a digest no longer accepts a git-identity transport.
+        pytest.param("legacy_transport", False, id="legacy_transport"),
+        pytest.param("legacy_build_and_transport", True, id="legacy_build_and_transport"),
+        pytest.param("git_free_transport_old_build", False, id="git_free_transport_old_build"),
     ],
 )
 def test_real_prober_requires_the_build_source_digest(tmp_path: Path, case: str, ok: bool) -> None:
@@ -2843,6 +2846,13 @@ def test_real_prober_requires_the_build_source_digest(tmp_path: Path, case: str,
         core["source_digest"] = None
     elif case == "legacy_transport":
         status = _pinned_status(core_root)
+    elif case == "legacy_build_and_transport":
+        # A Core pin that predates core_identity(): no digest on either side.
+        core["source_digest"] = None
+        status = _pinned_status(core_root)
+    elif case == "git_free_transport_old_build":
+        core["source_digest"] = None
+        del status["observed_source_digest"], status["expected_source_digest"]
     host = _CoreStatusHost(status)
     check = ad.Prober(host).core_provenance(root=REPO_ROOT, python=Path(sys.executable), core=core)
     assert check["ok"] is ok, check
@@ -2865,13 +2875,24 @@ if os.environ.get("NEXUS_CORE_REPO_ROOT"):
         checkout = _real_core_checkout(tmp_path, pin)
         if checkout is None:
             pytest.skip("no local nexus-core with the pinned tree (set NEXUS_CORE_REPO_ROOT)")
+        core = {"revision": pin, "root": str(checkout)}
+        # #2246: the transport pins a checkout by the digest the build computed.
+        core.update(ad.core_source_digest(ad.Host(), checkout, pin))
         check = ad.Prober(ad.Host()).core_provenance(
+            root=REPO_ROOT, python=Path(sys.executable), core=core
+        )
+        assert check["status"] == "CORE_REVISION_PINNED", check
+        assert check["ok"] is True and check["observed_commit"] == pin
+        assert check["identity_source"] == "source_digest"
+        assert check["observed_source_digest"] == core["source_digest"]
+        # Without the digest the same checkout is not pinned.
+        unpinned = ad.Prober(ad.Host()).core_provenance(
             root=REPO_ROOT,
             python=Path(sys.executable),
             core={"revision": pin, "root": str(checkout)},
         )
-        assert check["status"] == "CORE_REVISION_PINNED", check
-        assert check["ok"] is True and check["observed_commit"] == pin
+        assert unpinned["ok"] is False
+        assert unpinned["reason"] == "CORE_SOURCE_DIGEST_UNPINNED"
 
     def test_build_source_digest_equals_real_core_identity(tmp_path: Path) -> None:
         """The deployer's digest is exactly what real Core's core_identity() reports."""
@@ -4031,6 +4052,27 @@ def test_candidate_probe_also_reads_the_in_process_core_provenance(block: Any, o
     assert result["checks"]["core_provenance"]["ok"] is True
     assert result["checks"]["health_core_provenance"]["ok"] is ok
     assert result["ok"] is ok
+
+
+@pytest.mark.parametrize(
+    ("identity_source", "digest", "ok"),
+    [
+        pytest.param("source_digest", "sha256:" + "1" * 64, True, id="digest_build_digest_host"),
+        pytest.param(None, "sha256:" + "1" * 64, False, id="digest_build_git_host"),
+        pytest.param("build_stamp", "sha256:" + "1" * 64, False, id="digest_build_stamp_host"),
+        pytest.param(None, None, True, id="old_core_pin"),
+    ],
+)
+def test_health_core_provenance_requires_digest_identity_for_a_digest_build(
+    identity_source: str | None, digest: str | None, ok: bool
+) -> None:
+    """#2246: the live Gateway must report it pinned Core by this build's digest."""
+    block = _health_core_block(NEW)
+    if identity_source is not None:
+        block["identity_source"] = identity_source
+    core = {"revision": NEW, "root": "/g/core/" + NEW, "source_digest": digest}
+    check = ad.health_core_provenance({"core_provenance": block}, core)
+    assert check["ok"] is ok, check
 
 
 def test_rollback_probe_does_not_require_the_health_core_block() -> None:

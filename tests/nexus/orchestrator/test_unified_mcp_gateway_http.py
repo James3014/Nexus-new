@@ -123,6 +123,7 @@ def test_unauthenticated_health_has_no_absolute_paths():
             "expected_revision",
             "observed_commit",
             "fail_closed",
+            "identity_source",
         }
     finally:
         server.shutdown()

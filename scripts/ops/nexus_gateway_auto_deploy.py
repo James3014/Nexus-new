@@ -1062,7 +1062,9 @@ def health_core_provenance(health: Any, core: Any) -> Dict[str, Any]:
     """The running Gateway's own ``/health`` ``core_provenance`` (#2169, since #2201).
 
     Required: status ``CORE_REVISION_PINNED``, expected and observed revision
-    both equal to the deployment's Core pin, and ``fail_closed`` exactly False.
+    both equal to the deployment's Core pin, ``fail_closed`` exactly False and,
+    when the build computed a Core digest, ``identity_source`` ``source_digest``
+    (#2246).
     A missing or malformed block fails.
     """
     if not isinstance(core, dict) or not _SHA.match(str(core.get("revision") or "")):
@@ -1075,8 +1077,10 @@ def health_core_provenance(health: Any, core: Any) -> Dict[str, Any]:
         and block.get("expected_revision") == core["revision"]
         and block.get("observed_commit") == core["revision"]
         and block.get("fail_closed") is False
+        # #2246: a build with a Core digest is pinned by that digest, not by git.
+        and (core.get("source_digest") is None or block.get("identity_source") == "source_digest")
     )
-    keys = ("status", "expected_revision", "observed_commit", "fail_closed")
+    keys = ("status", "expected_revision", "observed_commit", "fail_closed", "identity_source")
     return {"ok": ok, **{k: block.get(k) for k in keys if k in block}}
 
 
@@ -1096,21 +1100,21 @@ def core_env(core: Any) -> Dict[str, str]:
 
 
 def core_digest_verified(observed: Dict[str, Any], core: Dict[str, Any]) -> bool:
-    """The transport's own digest verdict must name the build's digest (#2246).
+    """The transport must have verified exactly this build's Core digest (#2246).
 
-    A transport that reports a git-free identity (``identity_source``) must have
-    verified exactly the digest this build computed.  A transport that predates
-    #2246 reports no ``identity_source`` and is judged by revision alone.
+    When the build computed ``core["source_digest"]`` from the pinned commit,
+    the candidate's transport must report a git-free ``source_digest`` identity
+    whose observed and expected digests are both that value; any other
+    identity source (git, build stamp, none) fails.  Only a Core pin that
+    predates ``core_identity()`` has no digest; then the transport must not
+    claim a git-free identity either, and the revision checks decide.
     """
-    source = observed.get("identity_source")
-    if source is None:
-        return "observed_source_digest" not in observed
-    if source != "source_digest":
-        return False
     digest = core.get("source_digest")
+    if digest is None:
+        return observed.get("identity_source") is None and "observed_source_digest" not in observed
     return bool(
-        digest is not None
-        and _CORE_DIGEST.match(str(digest))
+        _CORE_DIGEST.match(str(digest))
+        and observed.get("identity_source") == "source_digest"
         and observed.get("observed_source_digest") == digest
         and observed.get("expected_source_digest") == digest
     )
@@ -1530,7 +1534,8 @@ def core_source_digest(host: Host, checkout: Path, revision: str) -> Dict[str, A
     commit's git objects and over the files on disk; both must agree or the
     candidate is rejected.  A Core pin without ``build_identity`` (before
     nexus-core #270) has no digest: ``source_digest`` is None and nothing is
-    exported, so such a deployment keeps the git-based provenance it had.
+    exported.  Only a tree whose host predates #2246 can pin such a Core; it
+    keeps its git-based provenance (a #2246 host pins Core >= #270 itself).
     """
     if not (checkout / CORE_BUILD_IDENTITY_FILE).is_file():
         return {"source_digest": None, "source_digest_status": "UNSUPPORTED_CORE"}
