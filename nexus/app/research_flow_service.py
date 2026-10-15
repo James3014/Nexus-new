@@ -918,6 +918,24 @@ def _build_hidden_contract_local_first_patch(
     return patched, "local_hidden_contract_fast_path", meta
 
 
+def _bind_gate_input_files(gen: Any, repo_root: Path, *, target_file: str, test_file: str) -> None:
+    """Hand the task's target and registered visible test to the generator's gate inputs.
+
+    Absolute in-repo paths (as the counted runner passes them) are made repo-relative; an
+    invalid or hidden test file is bound as "" so the gates keep refusing.
+    """
+    from nexus.research.sprint_service import repo_relative_path, visible_test_target_error
+
+    target_rel, target_error = repo_relative_path(repo_root, target_file)
+    test_rel, test_error = repo_relative_path(repo_root, test_file)
+    if test_rel and (test_error or visible_test_target_error(repo_root, test_rel)):
+        test_rel = ""
+    if hasattr(gen, "gate_input_target_file"):
+        setattr(gen, "gate_input_target_file", "" if target_error else target_rel)
+    if hasattr(gen, "gate_input_test_file"):
+        setattr(gen, "gate_input_test_file", "" if test_error else test_rel)
+
+
 def _build_baseline_patch(
     *,
     trial: int,
@@ -930,6 +948,8 @@ def _build_baseline_patch(
     repo_root: Path,
     task_type: str,
     test_source: str = "",
+    target_file: str = "",
+    test_file: str = "",
 ) -> tuple[str, str, dict[str, Any]]:
     source_label = "local"
     fallback_reason = None
@@ -966,6 +986,10 @@ def _build_baseline_patch(
         try:
             # Use a very short timeout for baseline assistance to avoid blocking
             gen = LLMCandidateGenerator(repo_root, safe_mode=True, route_signals=route)
+            # Wiring PR-4: the counted A/B baseline path is where the strict lane's model call
+            # happens; bind the task contract for the preflight gate inputs only (the generator's
+            # own target_file, which also gates a Local assist request, stays unset here).
+            _bind_gate_input_files(gen, repo_root, target_file=target_file, test_file=test_file)
             patched, meta = gen.generate(
                 source_code=original_code,
                 task=task_desc_for_llm,
@@ -1255,6 +1279,8 @@ def run_auto_flow(
                 repo_root=repo_root,
                 task_type=task_type,
                 test_source=visible_test_source,
+                target_file=str(target_file),
+                test_file=str(test_file),
             )
             if patched != original_code:
                 # PR-2 seam: lock the target before the candidate is written (runtime-selected only).
@@ -1377,6 +1403,8 @@ def run_auto_flow(
                 repo_root=repo_root,
                 task_type=task_type,
                 test_source=visible_test_source,
+                target_file=str(target_file),
+                test_file=str(test_file),
             )
             probe_pre: list[dict[str, Any]] = []
             if patched != original_code:

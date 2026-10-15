@@ -2244,11 +2244,34 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
                 if isinstance(context.get("codeintel"), Mapping)
                 else {}
             )
+            # Sprint gate inputs (wiring PR-4, ``gate_input_provenance`` present): risk_score
+            # comes only from the request route's route_features, never from codeintel (whose
+            # risk_score renders in the CodeIntel prompt summary).  Callers that seed the plan
+            # context directly in codeintel (wiring audit fixture, family canary) keep it.
+            raw_codeintel = context.get("codeintel")
+            route_only_risk = (
+                name == "plan_quality_gate"
+                and isinstance(raw_codeintel, Mapping)
+                and "gate_input_provenance" in raw_codeintel
+            )
+            if route_only_risk:
+                out.pop("risk_score", None)
             for k in extra_context_keys:
+                if route_only_risk and k == "risk_score":
+                    continue
                 if k not in out and codeintel.get(k) not in (None, ""):
                     out[k] = codeintel.get(k)
                 if k == "workspace_root" and k not in out and route.get(k) not in (None, ""):
                     out[k] = route.get(k)
+            if name == "plan_quality_gate" and "risk_score" not in out:
+                # The flow route's own risk assessment (wiring PR-4); never invented.
+                raw_route = context.get("route")
+                risk_route: Mapping[str, Any] = raw_route if isinstance(raw_route, Mapping) else {}
+                raw_features = risk_route.get("route_features")
+                features = raw_features if isinstance(raw_features, Mapping) else {}
+                route_risk = features.get("risk_score")
+                if isinstance(route_risk, (int, float)) and not isinstance(route_risk, bool):
+                    out["risk_score"] = int(route_risk)
         # Nested verifier block (common mainchain shape)
         verifier = context.get("verifier") if isinstance(context.get("verifier"), Mapping) else {}
         if name in {"acceptance_check", "bdd_acceptance_skill"} and isinstance(verifier, Mapping):
@@ -2450,12 +2473,33 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
         return sorted(set(violations))
 
     def invoke(context: Mapping[str, Any]) -> dict[str, Any]:
+        constraints = _allowlisted_constraints(context if isinstance(context, Mapping) else {})
+        result = _invoke_with(context, constraints)
+        provenance = _input_provenance(context, constraints)
+        if provenance and isinstance(result, dict):
+            result = {**result, "input_provenance": provenance}
+        return result
+
+    def _input_provenance(
+        context: Mapping[str, Any], constraints: Mapping[str, Any]
+    ) -> dict[str, str]:
+        """Where each input this executor received came from (request-declared, PR-4)."""
+        raw_ci = context.get("codeintel") if isinstance(context, Mapping) else None
+        declared = raw_ci.get("gate_input_provenance") if isinstance(raw_ci, Mapping) else None
+        if not isinstance(declared, Mapping):
+            return {}
+        return {
+            str(key): str(declared[key])
+            for key in sorted(constraints)
+            if key in declared and isinstance(declared[key], str)
+        }
+
+    def _invoke_with(context: Mapping[str, Any], constraints: dict[str, Any]) -> dict[str, Any]:
         task_id = str(context.get("task_id") or "")
         task_statement = str(context.get("task_statement") or "")
         plan_hash = ""
         planner = context.get("planner") if isinstance(context.get("planner"), Mapping) else {}
         plan_hash = str(planner.get("plan_hash") or planner.get("planner_decision_id") or "")
-        constraints = _allowlisted_constraints(context if isinstance(context, Mapping) else {})
         try:
             plan = CapabilityExecutionPlan(
                 plan_id=plan_hash or f"mainchain:{task_id}:{name}",

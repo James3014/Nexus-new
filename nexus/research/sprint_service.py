@@ -278,6 +278,12 @@ def _canonical_fact_tree(value: Any, depth: int = 0) -> Any:
     return None
 
 
+def _gate_inputs_enabled() -> bool:
+    from nexus.research.gate_inputs import gate_inputs_enabled
+
+    return gate_inputs_enabled()
+
+
 def planner_route_signals(route: Mapping[str, Any] | None) -> dict[str, Any]:
     """Bounded copy of the flow route's task signals for the mainchain request route."""
 
@@ -380,6 +386,12 @@ class LLMCandidateGenerator:
         self.visible_test_target_invalid: str = ""
         # Why no visible_verifier was bound (e.g. confinement unavailable); reported verbatim.
         self.visible_verifier_unbound_reason: str = ""
+        # Visible test file of the sprint task (bound by run_hyper_sprint).  The runtime's
+        # preflight gates get their inputs from it (wiring PR-4, nexus.research.gate_inputs).
+        self.gate_input_test_file: str = ""
+        # Target file for the gate inputs when the caller (the flow's baseline path) does not
+        # give the generator a target_file; never used for the Local assist request.
+        self.gate_input_target_file: str = ""
 
     def _workspace_revision(self) -> str:
         try:
@@ -508,12 +520,43 @@ class LLMCandidateGenerator:
         # run_mainchain(with_nexus_armor=...) from this flag, and without it the online
         # candidate ran armor-off (host-default invokers, no prompt armor).
         route.setdefault("with_nexus_armor", True)
+        gate_codeintel: dict[str, Any] = {}
+        # Strict (symmetric) lane: not fed.  A gate that then succeeds is sealed REAL_INVOKED and
+        # the runtime's [NEXUS MODEL CONTEXT] (consumer_projection) materialises its evidence ids
+        # and payload into the prompt, which the bare arm never sees; that block comes from the
+        # hash-sealed bundle, so Nexus-new cannot withhold it.  Fed in every other lane.
+        # Symmetric mode is checked first: the switch is never even parsed in the strict lane.
+        if not _symmetric_prompt_mode() and _gate_inputs_enabled():
+            from nexus.research.gate_inputs import sprint_gate_inputs
+
+            # Wiring PR-4: the preflight gates' inputs from the sprint's own task contract
+            # (visible test only).  workspace_root also goes on the route, where the memory
+            # invoker reads it; neither channel is rendered into the model prompt.
+            gate_inputs = sprint_gate_inputs(
+                repo_root=self.project_root,
+                task=task,
+                target_file=self.gate_input_target_file or self.target_file,
+                test_file=self.gate_input_test_file,
+                registered_test_file=self.gate_input_test_file,
+                source_code=source_code,
+                route=route,
+            )
+            gate_codeintel = dict(gate_inputs["codeintel"])
+            route.setdefault("workspace_root", gate_inputs["workspace_root"])
+        if _symmetric_prompt_mode():
+            # Contract B (nexus-runtime #217): a runtime that knows this key hides these
+            # capabilities' evidence from every model-facing projection at the source; the
+            # pinned runtime ignores unknown route keys (tested).
+            from nexus.research.gate_inputs import fed_capability_names
+
+            route["receipt_only_capabilities"] = sorted(fed_capability_names())
         request = UnifiedRuntimeRequest(
             task_id=task_id,
             workspace_revision=revision,
             task_statement=task,
             task_type="repair",
             route=route,
+            codeintel=gate_codeintel,
             online_prompt=prompt,
             online_payload=payload,
             online_phase="R",
@@ -990,12 +1033,74 @@ def confined_visible_evaluator(executor: Any) -> Callable[..., CandidateEval] | 
     return cast("Callable[..., CandidateEval]", method) if callable(method) else None
 
 
+def _symlinked_component(repo_root: Path, relative: Path) -> bool:
+    """True when any directory between ``repo_root`` and ``relative`` is a symlink."""
+    current = Path(repo_root)
+    for part in relative.parts[:-1]:
+        current = current / part
+        if current.is_symlink():
+            return True
+    return False
+
+
+_HIDDEN_TEST_STEMS = frozenset({"hidden", "test_hidden", "hidden_test", "hidden_tests"})
+_HIDDEN_TEST_DIRS = frozenset({"hidden", "test_hidden", "hidden_tests", "hidden_test"})
+
+
+def _names_hidden_test(candidate: Path) -> bool:
+    """A hidden-verifier file or a file inside a hidden-test directory.
+
+    Basename ``test_hidden*`` / ``hidden_test*`` or stem exactly a hidden name; a directory
+    component exactly ``hidden``/``test_hidden``/``hidden_tests``/``hidden_test`` (case-
+    insensitive).  Not a substring match: task ids such as ``nexus-value-hidden-001`` are
+    ordinary directories.
+    """
+    name = candidate.name.lower()
+    if name.startswith(("test_hidden", "hidden_test")) or Path(name).stem in _HIDDEN_TEST_STEMS:
+        return True
+    return any(part.lower() in _HIDDEN_TEST_DIRS for part in candidate.parts[:-1])
+
+
+def repo_relative_path(repo_root: Path, raw: str) -> tuple[str, str]:
+    """``(repo-relative path, error)`` for a task file given relative or as an in-repo absolute path.
+
+    The counted A/B runner passes ``--target-file/--test-file`` as absolute paths.  An absolute
+    path is accepted only when it lies lexically inside ``repo_root`` (as given or resolved)
+    and no component between the repo root and the file is a symlink; it is then returned
+    relative.  Anything outside the repo is refused (``path_outside_repo``).
+    """
+    text = str(raw or "").strip()
+    if not text:
+        return "", ""  # empty stays empty; callers report it as missing
+    candidate = Path(text)
+    if not candidate.is_absolute():
+        return text, ""
+    absolute = Path(os.path.abspath(candidate))
+    root = Path(repo_root)
+    relative: Path | None = None
+    for base in (Path(os.path.abspath(root)), root.resolve()):
+        try:
+            relative = absolute.relative_to(base)
+            break
+        except ValueError:
+            continue
+    if relative is None or not relative.parts:
+        return "", "path_outside_repo"
+    if _symlinked_component(root, relative) or (root / relative).is_symlink():
+        return "", "path_has_symlink"
+    try:
+        (root / relative).resolve().relative_to(root.resolve())
+    except ValueError:
+        return "", "path_outside_repo"
+    return relative.as_posix(), ""
+
+
 def visible_test_target_error(repo_root: Path, test_file: str) -> str:
     """Why ``test_file`` cannot be the runtime verifier's only test target ("" when it can).
 
     The verifier runs exactly one explicit, visible test file: never an empty target (pytest
     would collect the current directory), a directory, a symlink, a path outside the repo or a
-    hidden test (``test_hidden*``).
+    hidden test (``_names_hidden_test``).
     """
     raw = str(test_file or "").strip()
     if not raw:
@@ -1005,12 +1110,12 @@ def visible_test_target_error(repo_root: Path, test_file: str) -> str:
         return "test_file_not_repo_relative"
     if any(part.startswith("-") for part in candidate.parts):
         return "test_file_option_like"
-    if candidate.name.lower().startswith("test_hidden"):
+    if _names_hidden_test(candidate):
         return "hidden_test_target"
     if candidate.suffix != ".py":
         return "test_file_not_python"
     path = Path(repo_root) / candidate
-    if path.is_symlink():
+    if path.is_symlink() or _symlinked_component(Path(repo_root), candidate):
         return "test_file_is_symlink"
     if not path.is_file():
         return "test_file_not_regular_file"
@@ -1956,7 +2061,11 @@ def _run_hyper_sprint_core(*, repo_root: Path, config: SprintConfig) -> SprintRe
     visible_verifier_binding: dict[str, Any] = {"hint": "", "seed": 0}
     visible_eval_memo: dict[tuple[str, str, int], CandidateEval] = {}
 
-    visible_target_error = visible_test_target_error(repo_root, config.test_file or "")
+    # The counted runner passes absolute in-repo paths: normalise before the target check.
+    visible_test_rel, visible_rel_error = repo_relative_path(repo_root, config.test_file or "")
+    visible_target_error = visible_rel_error or visible_test_target_error(
+        repo_root, visible_test_rel
+    )
     # The sprint's own executor: with a valid target its command is exactly
     # visible_test_pytest_cmd(test_file) (one explicit file, same flags), so a memo hit and a
     # miss produce the same evaluation.
@@ -1988,6 +2097,8 @@ def _run_hyper_sprint_core(*, repo_root: Path, config: SprintConfig) -> SprintRe
             return replace(cached, source=source)
         return sprint_evaluate(seed=seed, hint=hint, code=code, source=source)
 
+    if llm_generator is not None and hasattr(llm_generator, "gate_input_test_file"):
+        setattr(llm_generator, "gate_input_test_file", visible_test_rel)
     if llm_generator is not None and hasattr(llm_generator, "visible_verifier"):
         # Only the online generator has the seam (tests may substitute the generator class).
         if visible_target_error:

@@ -142,6 +142,10 @@ _TRIVIAL_OUTCOME_KEYS = frozenset({
     "statement",
     "input",
     "inputs",
+    "input_provenance",
+    # Contract B flag (nexus-runtime #217): a visibility marker, never output.
+    "consumer_visibility",
+    "receipt_only_capabilities",
     "message",
 })
 _SUCCESS_STATUSES = frozenset({"SUCCEEDED", "VERIFIED", "PASS"})
@@ -154,6 +158,7 @@ MISSING_INPUT_CODES = frozenset({
     "JUDGE_REQUIRES_TWO_DISTINCT_CANDIDATES",
     "MEMPALACE_ARTIFACT_CONTEXT_REQUIRED",
     "PLAN_QUALITY_CONTEXT_REQUIRED",
+    "POSTFLIGHT_VERIFIER_PROOF_REQUIRED",
     "PROJECT_MEMORY_CONTEXT_REQUIRED",
     "REAL_OUTCOME_EPISODE_REQUIRED",
     "REAL_REPAIR_ATTEMPT_RECEIPT_REQUIRED",

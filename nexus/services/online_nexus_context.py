@@ -401,6 +401,86 @@ def compact_executor_flags_for_prompt(flags: Mapping[str, Any] | None) -> dict[s
     }
 
 
+# Status of the strict-lane placeholder (the status a refusing gate always rendered).
+_WITHHELD_GATE_STATUS = "INVOKED_NOT_SUCCESS"
+# nexus-runtime #212/#213 status for an evaluated, rejecting gate; the strict prompt renders it
+# as the status the runtime used before it.
+_EVALUATED_REJECTED_STATUS = "EVALUATED_REJECTED"
+
+
+def _opaque_fed_entry(name: str) -> dict[str, Any]:
+    """The one fixed placeholder for a fed (receipt-only) capability, whatever it did.
+
+    Same shape as nexus-runtime #217 renders receipt-only entries: no status, flag, id, callable
+    or payload survives, because evidence ids can carry the outcome (e.g. a record falling back
+    to ``ev_pregate_blocked_<task>``).
+    """
+
+    return {
+        "name": name,
+        "status": _WITHHELD_GATE_STATUS,
+        "success": False,
+        "invoked_real": False,
+        "invoked_stub": False,
+        "skipped": False,
+        "evidence_ids": [],
+        "evidence_refs": [],
+        "physical_callable": "",
+        "consumer_payload": {},
+        "has_consumer_payload": False,
+    }
+
+
+def withhold_fed_gate_verdicts(bundle: Mapping[str, Any]) -> dict[str, Any]:
+    """Strict lane: keep the PR-4 fed gates' outcomes out of the model prompt.
+
+    Every entry of a fed capability (``fed_capability_names()``: pregate,
+    harness_preflight_sensor, plan_quality_gate, mempalace_gate/mempalace, memory, codeintel)
+    is replaced, whatever its status, by one opaque placeholder (``_opaque_fed_entry``); the
+    top-level ``evidence_ids`` (which also feeds the Online consumed-id list) are rebuilt from
+    the visible entries only.  Any other ``EVALUATED_REJECTED`` entry is rendered as
+    ``INVOKED_NOT_SUCCESS`` without payload.  The receipts and the sealed bundle keep the real
+    verdict; this copy is never a receipt.  Matches nexus-runtime #217's receipt-only rendering.
+    """
+
+    from nexus.research.gate_inputs import fed_capability_names
+
+    fed = fed_capability_names()
+    out = dict(bundle)
+    entries = bundle.get("entries")
+    if not isinstance(entries, (list, tuple)):
+        return out
+    rendered: list[Any] = []
+    visible_ids: list[str] = []
+    for entry in entries:
+        if isinstance(entry, Mapping) and str(entry.get("name") or "") in fed:
+            entry = _opaque_fed_entry(str(entry.get("name")))
+        elif (
+            isinstance(entry, Mapping)
+            and str(entry.get("status") or "") == _EVALUATED_REJECTED_STATUS
+        ):
+            entry = {
+                **entry,
+                "status": _WITHHELD_GATE_STATUS,
+                "success": False,
+                "invoked_real": False,
+                "consumer_payload": {},
+                "has_consumer_payload": False,
+            }
+        rendered.append(entry)
+        if isinstance(entry, Mapping):
+            raw_ids = entry.get("evidence_ids") or entry.get("evidence_refs") or []
+            for item in raw_ids if isinstance(raw_ids, (list, tuple)) else []:
+                if str(item) not in visible_ids:
+                    visible_ids.append(str(item))
+    out["entries"] = rendered
+    if "evidence_ids" in bundle:
+        # Derived from the visible entries only (never by subtracting hidden ids, so an id a
+        # visible entry shares with a fed one stays).
+        out["evidence_ids"] = visible_ids
+    return out
+
+
 def compact_capability_evidence_for_prompt(
     bundle: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
@@ -567,6 +647,8 @@ def build_online_nexus_context(
         evidence_bundle = _mapping(plan_map.get("signal_snapshot")).get(
             "capability_evidence_bundle"
         )
+    if symmetric and isinstance(evidence_bundle, Mapping):
+        evidence_bundle = withhold_fed_gate_verdicts(evidence_bundle)
     evidence_compact = compact_capability_evidence_for_prompt(
         evidence_bundle if isinstance(evidence_bundle, Mapping) else None
     )
