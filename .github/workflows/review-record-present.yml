@@ -1,0 +1,55 @@
+name: Review record present
+
+# #2290: advisory. pull_request_target, issue_comment and pull_request_review all
+# run the default-branch copy of this workflow. PR code is never checked out or
+# executed: the script only reads the PR, its file list, comments and reviews
+# through the REST API and publishes a commit status on the PR head, so a record
+# posted after the last push updates the status without a new push. The job
+# itself goes red only on pull_request_target runs (comment-triggered runs
+# publish the status and exit 0). Making this required is an Owner (ruleset)
+# decision.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+  issue_comment:
+    types: [created, edited]
+  pull_request_review:
+    types: [submitted, edited]
+
+concurrency:
+  group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  review-record:
+    name: Review record present (advisory)
+    if: github.event_name != 'issue_comment' || github.event.issue.pull_request
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: write
+    steps:
+      - name: Checkout default branch (never PR code)
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Check the review record at the PR head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number || github.event.issue.number }}
+          EVENT_NAME: ${{ github.event_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          fail_flag=""
+          if [ "$EVENT_NAME" != "pull_request_target" ]; then fail_flag="--no-fail"; fi
+          python3 -I scripts/ops/review_record_check.py --repo "$REPO" --pr "$PR" \
+            --target-url "$RUN_URL" --output "$RUNNER_TEMP/review-record.json" $fail_flag

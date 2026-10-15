@@ -373,6 +373,8 @@
 | SOUL.md | tests/ops/test_bootstrap_authority_files.py, tests/ops/test_bootstrap_context_budget.py, tests/ops/test_codex_task_context_index.py, tests/ops/test_fast_start_consumer_contract.py | active | medium | authority_text_context_budget_contract |
 | docs/agents | tests/ops/test_bootstrap_authority_files.py, tests/ops/test_bootstrap_context_budget.py, tests/ops/test_codex_task_context_index.py, tests/ops/test_fast_start_consumer_contract.py | active | medium | authority_text_context_budget_contract |
 | scripts/ops/deletion_guard.py | tests/ops/test_deletion_guard.py | active | high | deletion_guard_owner_approval_contract |
+| scripts/ops/review_record_check.py | tests/ops/test_review_record_check.py | active | high | review_record_advisory_check_contract |
+| .github/workflows/review-record-present.yml | tests/ops/test_review_record_check.py, tests/ops/test_pr_workflow_concurrency.py | active | high | review_record_workflow_contract |
 | tests/nightly_quarantine_items | tests/ops/test_nightly_quarantine.py, tests/ops/test_nightly_quarantine_items_layout.py | active | medium | nightly_quarantine_items_per_entry_package |
 | tests/ops/test_nightly_quarantine_items_layout.py | tests/ops/test_nightly_quarantine_items_layout.py | active | medium | test_contract |
 | tests/nightly_quarantine_entries.py | tests/ops/test_nightly_quarantine.py, tests/ops/test_nightly_quarantine_items_layout.py | active | medium | nightly_quarantine_entries_compat_shim |

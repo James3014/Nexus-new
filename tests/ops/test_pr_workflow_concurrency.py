@@ -20,6 +20,7 @@ CHANGED = (
     "nexus-core-effectiveness-g1.yml",
     "policy-lane-gate.yml",
     "pytest.yml",
+    "review-record-present.yml",
     "security.yml",
     "trusted-deletion-anchor.yml",
     "trusted-dependency-contract.yml",
