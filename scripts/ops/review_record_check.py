@@ -97,8 +97,8 @@ _PRE_DENY = re.compile(
     r"\b(?:await(?:ing|s)?|need(?:s|ed|ing)?|request(?:s|ed|ing)?|should|would|will|could|may|might"
     r"|no|not|never|cannot|can't|don't|doesn't|didn't|won't|wouldn't|pending|withheld|blocked"
     r"|conditional|missing|without|lacking|unless|until|before|please|expect(?:s|ed|ing)?"
-    r"|wait(?:s|ed|ing)?|still|yet|if|only|reject(?:ed|s)?|repair_required|request_changes"
-    r"|no_verdict|said|say|says|give|gives|gave|get|gets|got|want(?:s|ed)?|hope(?:s|d)?)\b",
+    r"|wait(?:s|ed|ing)?|still|yet|if|only"
+    r"|said|say|says|give|gives|gave|get|gets|got|want(?:s|ed)?|hope(?:s|d)?)\b",
     re.IGNORECASE,
 )
 # Words right after the token (before a sha, punctuation or a parenthesis) that withdraw it.
@@ -111,6 +111,9 @@ _POST_COND = re.compile(
     r"\b(?:only if|if|unless|provided|conditional on|once|when)\b|\?", re.IGNORECASE
 )
 _REBUTTED = re.compile(r"\brebutted\b|\brebuttals? (?:accepted|stands?)\b", re.IGNORECASE)
+_REBUTTAL_DENY = re.compile(
+    r"\b(?:not|nothing|never|none|no|un-?rebutted|without)\b", re.IGNORECASE
+)
 _ROUND = re.compile(r"\b(?:r|round\s*)(\d+)\b", re.IGNORECASE)
 _CLAUDE = re.compile(r"\b(?:claude|opus|sonnet)\b", re.IGNORECASE)
 _CROSS = re.compile(r"\b(?:codex|gemini|gpt)\b", re.IGNORECASE)
@@ -143,9 +146,16 @@ def _headers(token: str) -> dict[str, str]:
     }
 
 
+def _api_url(url: str) -> str:
+    """Only the GitHub REST API over https is ever opened (B310: no file:/ or custom schemes)."""
+    if not url.startswith(API_ROOT + "/"):
+        raise CheckError("refusing to open a non-API URL")
+    return url
+
+
 def _get_json(url: str, token: str) -> Any:
-    request = urllib.request.Request(url, headers=_headers(token))
-    with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310
+    request = urllib.request.Request(_api_url(url), headers=_headers(token))
+    with urllib.request.urlopen(request, timeout=30) as response:  # nosec B310 - https API only
         return json.loads(response.read().decode("utf-8"))
 
 
@@ -153,8 +163,8 @@ def _post_json(url: str, token: str, payload: dict[str, Any]) -> Any:
     data = json.dumps(payload).encode("utf-8")
     headers = _headers(token)
     headers["Content-Type"] = "application/json"
-    request = urllib.request.Request(url, data=data, headers=headers, method="POST")
-    with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310
+    request = urllib.request.Request(_api_url(url), data=data, headers=headers, method="POST")
+    with urllib.request.urlopen(request, timeout=30) as response:  # nosec B310 - https API only
         return json.loads(response.read().decode("utf-8"))
 
 
@@ -239,13 +249,32 @@ def verdict_clauses(line: str) -> list[str]:
     if _SKIP_LINE.match(line):
         return []
     out: list[str] = []
-    for clause in _clauses(_plain(line, keep_parens=True)):
+    plain_line = _plain(line, keep_parens=True)
+    consumed = 0
+    prev_token_end = 0
+    for clause in _clauses(plain_line):
+        start = plain_line.find(clause, consumed)
+        consumed = start + len(clause) if start >= 0 else consumed
         span = _verdict_match(clause)
         if span is None:
             continue
+        window_start, prev_token_end = prev_token_end, max(prev_token_end, start + span[1])
+        if (
+            start > 0
+            and span[0] == 0
+            and not re.search(r"[:\-\u2013\u2014@]\s*$", plain_line[:start].rstrip() + " ")
+        ):
+            # The "alone on its line" position applies to the line, not to a later clause.
+            if not re.match(r"\s*$", plain_line[:start]):
+                continue
         before = _plain(clause[: span[0]])  # parentheticals carry model names, not verdicts
+        # Negations and modals anywhere earlier on the line also deny ("We cannot, under
+        # any circumstances, ACCEPT"); REJECT words deny only inside the clause.
+        # The window runs from the previous verdict token on the line (a round list
+        # names several) to this one.
+        line_before = _plain(plain_line[window_start : start + span[0]]) if start >= 0 else before
         after = clause[span[1] :]
-        if _PRE_DENY.search(before) or _REJECT.search(before):
+        if _PRE_DENY.search(line_before) or _REJECT.search(before):
             continue
         head_of_after = _STOP.split(after, 1)[0]
         if _POST_DENY.match(head_of_after) or _POST_COND.search(head_of_after):
@@ -302,7 +331,10 @@ def _rebuttal_at_cap(section: list[str]) -> bool:
         plain = _plain(line, keep_parens=True)
         if _REJECT.search(plain) and any(int(n) >= 3 for n in _ROUND.findall(plain)):
             reject_round_seen = True
-        if reject_round_seen and _REBUTTED.search(plain):
+        if reject_round_seen and any(
+            _REBUTTED.search(clause) and not _REBUTTAL_DENY.search(clause)
+            for clause in _clauses(plain)
+        ):
             return True
     return False
 
@@ -312,8 +344,10 @@ def classify_record(body: str, head: str) -> dict[str, Any] | None:
 
     Returns the verdicts bound to the head (each with its reviewer family) and
     whether a cross-model section rebuts at the cap. A section starts at a label
-    line that names a family (heading, bold label, ``Reviewer:``) and ends at a
-    verdict line; the family of a bare verdict is the section header's family.
+    line that names a different family (heading, bold label, ``Reviewer:``); its
+    line buffer restarts at each verdict line, while the header family persists
+    until the next label, so a reviewer block that lists its rounds keeps its
+    family. The family of a bare verdict is the section header's family.
     """
     if not isinstance(body, str) or not names_head(body, head):
         return None
@@ -348,7 +382,7 @@ def classify_record(body: str, head: str) -> dict[str, Any] | None:
                 verdicts.append({"family": family, "line": clause.strip()})
         if header_family == "cross_model" and _rebuttal_at_cap(section):
             rebuttal_at_cap = True
-        section, header_family = [], None
+        section = []  # the header family persists: a reviewer block lists its rounds
     if section and header_family == "cross_model" and _rebuttal_at_cap(section):
         rebuttal_at_cap = True
     return {
@@ -422,7 +456,9 @@ def evaluate(
         else:
             unbound = True
     approved_reviews = approved_reviews_at_head(reviews, head)
-    independent = approved_reviews > 0 or any(r["verdict"] for r in records)
+    # The independent record is the Claude-family review (or a submitted approval); a
+    # cross-model record alone satisfies only the cross-model requirement.
+    independent = approved_reviews > 0 or any(r["claude"] for r in records)
     cross_model = any(r["cross_model"] or r["rebuttal_at_cap"] for r in records)
     short = head[:12]
     if not independent:
@@ -430,9 +466,13 @@ def evaluate(
         if stale:
             reason = f"review record found for an older head only; none names head {short}"
         elif unbound:
-            reason = f"a comment names head {short} but carries no reviewer+ACCEPT/APPROVE verdict"
+            reason = (
+                f"a comment names head {short} but carries no Claude/Opus ACCEPT/APPROVE verdict"
+            )
         else:
-            reason = f"no review record names head {short} with an ACCEPT/APPROVE verdict"
+            reason = (
+                f"no Claude/Opus review record names head {short} with an ACCEPT/APPROVE verdict"
+            )
     elif risky and not cross_model:
         status = "MISSING_CROSS_MODEL"
         reason = f"high-risk paths changed but no Codex/Gemini verdict or rebuttal at head {short}"

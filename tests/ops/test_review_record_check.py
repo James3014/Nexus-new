@@ -267,7 +267,7 @@ def test_evaluate_low_risk_needs_one_record_at_head():
 def test_evaluate_a_comment_naming_the_head_without_a_verdict_is_not_a_record():
     report = rrc.evaluate(HEAD, DOCS, [_c(f"Pushed {HEAD}, CI running")], [])
     assert report["status"] == "MISSING_RECORD" and report["records_at_head"] == 0
-    assert "no reviewer+ACCEPT/APPROVE verdict" in report["reason"]
+    assert "no Claude/Opus ACCEPT/APPROVE verdict" in report["reason"]
 
 
 def test_evaluate_record_for_an_older_head_does_not_count_and_is_named():
@@ -652,4 +652,60 @@ def test_section_resets_after_a_verdict_line():
     record = rrc.classify_record(body, HEAD)
     assert record is not None and record["claude"] is True
     assert record["cross_model"] is False  # the OLD-bound Codex verdict does not count
-    assert len(record["verdict_lines"]) == 1
+    # The header family persists through a reviewer's round list (#2288's record shape):
+    rounds = (
+        f"### Independent Claude review\nReviewer: a separate Claude Opus 5.5 agent.\n"
+        f"- **Round 1 @ {OLD}: REJECT.**\n  - HIGH: raised unconditionally.\n"
+        f"- **Round 2 @ {OLD}: ACCEPT.** All four closed.\n"
+        f"- **Round 3 @ {HEAD}: ACCEPT.**\n"
+    )
+    record = rrc.classify_record(rounds, HEAD)
+    assert record is not None and record["claude"] is True and record["cross_model"] is False
+
+
+def test_only_github_api_urls_are_ever_opened():
+    assert rrc._api_url(f"{rrc.API_ROOT}/repos/o/r/pulls/7") == f"{rrc.API_ROOT}/repos/o/r/pulls/7"
+    for bad in ("file:///etc/passwd", "http://api.github.com/x", "https://evil.invalid/x"):
+        with pytest.raises(rrc.CheckError):
+            rrc._api_url(bad)
+
+
+def test_negation_anywhere_before_the_token_on_the_line_denies():
+    assert not rrc.is_verdict_line(
+        f"Codex: We cannot, under any circumstances, ACCEPT this at {HEAD}"
+    )
+    assert not rrc.is_verdict_line(f"Codex: Do NOT - repeat NOT - ACCEPT this at {HEAD}")
+    assert not rrc.is_verdict_line(
+        f"Codex r1: REJECT at {HEAD}. ACCEPT will come only after rework."
+    )
+    # A round list keeps its final ACCEPT: REJECT words deny only inside their own clause.
+    assert rrc.is_verdict_line(f"Codex r1 REJECT (fixed), r2 REJECT (fixed), r3 ACCEPT@{HEAD}")
+
+
+def test_negated_rebuttals_do_not_count():
+    for text in (
+        f"Head {HEAD}\n**Codex**: round 3: findings not rebutted; cap reached. REJECT.",
+        f"Head {HEAD}\n**Codex**: r3 REJECT: 5 bugs found. Author rebutted nothing.",
+        f"Head {HEAD}\n**Codex**: r3 REJECT. Nothing was rebutted, no rebuttal accepted.",
+    ):
+        record = rrc.classify_record(text, HEAD)
+        assert record is not None and record["rebuttal_at_cap"] is False, text
+
+
+def test_a_cross_model_record_alone_is_not_the_independent_review():
+    codex_only = rrc.evaluate(HEAD, RISKY, [_c(CODEX_RECORD)], [])
+    assert codex_only["status"] == "MISSING_RECORD"
+    assert codex_only["cross_model"] is True and codex_only["independent"] is False
+    assert rrc.evaluate(HEAD, DOCS, [_c(CODEX_RECORD)], [])["status"] == "MISSING_RECORD"
+
+
+def test_long_multi_verdict_line_keeps_its_final_accept():
+    # #2286's record: one line with three ACCEPTs and a "should-fix" between the first two.
+    line = (
+        "**Independent review (Claude/Opus, 3 rounds):** ACCEPT at 1e9f3d4ec with one should-fix "
+        "(the concurrency comment claimed the controller reads the PR body; it does not) → fixed in "
+        f"12f909356, ACCEPT; AGENTS.md trimmed to exactly 12000 bytes in {HEAD} after the required "
+        f"impact gate caught test_context_budget → ACCEPT at {HEAD}."
+    )
+    record = rrc.classify_record(line, HEAD)
+    assert record is not None and record["claude"] is True
