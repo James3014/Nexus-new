@@ -93,7 +93,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     p.add_argument("--store", type=Path, help="store dir containing tasks/ (read only)")
     p.add_argument("--out", type=Path, required=True, help="outcome store (create-only)")
-    p.add_argument("--work", type=Path, help="scorer scratch: repos, trees, envs, cache")
+    p.add_argument(
+        "--work",
+        type=Path,
+        help=(
+            "scorer scratch: repos, trees, envs, cache. One scorer per --work: each task"
+            " holds <work>/.scorer.lock, and a second scorer on the same dir stops at once"
+            " (exit 6)"
+        ),
+    )
     p.add_argument("--task", action="append", default=[], help="task key (repeatable)")
     p.add_argument(
         "--candidate-override", default=None, help="self-check only: gold | empty | broken[:path]"
@@ -183,6 +191,9 @@ def main(argv: list[str] | None = None) -> int:
             log(f"{key}: REFUSED_SEAL {exc}")
             rc = 3
             continue
+        except ros.ScorerBusy as exc:
+            log(f"{key}: SCORER_BUSY {exc}; stopping")
+            return 6
         except Exception as exc:  # noqa: BLE001 - one task must not stop the batch
             log(f"{key}: SCORER_ERROR {type(exc).__name__}: {exc}")
             rc = 4
