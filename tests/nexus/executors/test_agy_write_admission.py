@@ -321,6 +321,10 @@ def test_implementation_run_uses_accept_edits_seatbelt_and_records_posture(
     library_files = captured["home_files"] - agy_files
     if sys.platform == "darwin":
         assert "Library/Keychains/agy.keychain-db" in library_files
+        # only the keychain and its preferences; nothing else may land under Library/
+        assert all(
+            f.startswith(("Library/Keychains/", "Library/Preferences/")) for f in library_files
+        ), library_files
     else:
         assert library_files == set()
     assert captured["settings"] == {"permissions": {"allow": [], "deny": ["command(*)"]}}
@@ -1990,7 +1994,26 @@ def test_materialize_run_home_gets_isolated_default_keychain(tmp_path, agy_home)
     profile_text = admission.build_seatbelt_profile(
         run_root=run_home.parent, writable_target=None, run_home=run_home
     )
-    assert str(run_home.parent) in profile_text
+    assert f'(subpath "{run_home.parent}")' in profile_text
+    assert "Keychains" not in profile_text  # no literal: the real ~/Library/Keychains stays denied
+    _assert_profile_text_or_skip_run(
+        profile_text,
+        denied=[run_home / admission.AGY_RUN_HOME_SETTINGS, run_home / ".gemini" / "config"],
+        writable=[run_home.parent, keychain.parent],
+    )
+
+
+def test_keychain_filesystem_errors_are_the_typed_refusal(tmp_path, agy_home, monkeypatch):
+    from nexus.services import agy_account_pool as agy_pool
+
+    def broken(_home, **_kwargs):
+        raise PermissionError("Library/Keychains")
+
+    monkeypatch.setattr(agy_pool, "ensure_macos_isolated_keychain", broken)
+    refusal, profile = admission.materialize_run_home(
+        agy_home, tmp_path / "run" / "home", read_only=False
+    )
+    assert refusal == admission.AGY_RUN_HOME_KEYCHAIN_UNAVAILABLE and profile == ""
 
 
 def test_materialize_run_home_can_skip_the_keychain_for_the_dispatch_boundary(
@@ -2033,7 +2056,8 @@ def test_worker_receipt_records_the_keychain_state(monkeypatch, tmp_path, agy_ho
         return _result(request, stdout=_OK)
 
     monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", fake_worker)
-    receipt = _invoke(AgyWorkerAdapter(canonical_root=_repo(tmp_path)), _target(tmp_path))
+    adapter, target = AgyWorkerAdapter(canonical_root=_repo(tmp_path)), _target(tmp_path)
+    receipt = _invoke(adapter, target)
     expected = (
         admission.KEYCHAIN_ISOLATED
         if sys.platform == "darwin"
@@ -2041,6 +2065,15 @@ def test_worker_receipt_records_the_keychain_state(monkeypatch, tmp_path, agy_ho
     )
     assert str(receipt.provider_write_sandbox).endswith(f";keychain:{expected}")
     assert seen["home"] != str(agy_home)
+    # the receipt reflects the observed state, not a constant
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry.run_home_keychain_state",
+        lambda _home: admission.KEYCHAIN_NOT_APPLICABLE,
+    )
+    receipt = _invoke(adapter, target)
+    assert str(receipt.provider_write_sandbox).endswith(
+        f";keychain:{admission.KEYCHAIN_NOT_APPLICABLE}"
+    )
 
 
 def test_bench_runner_refuses_when_the_run_home_cannot_be_materialized(tmp_path, monkeypatch):

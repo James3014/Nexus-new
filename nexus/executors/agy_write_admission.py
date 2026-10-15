@@ -262,7 +262,9 @@ def isolate_run_home_keychain(run_home: Path) -> Optional[str]:
 
     try:
         ensure_macos_isolated_keychain(str(run_home), security=SECURITY_TOOL_PATH)
-    except AgyAccountPoolManagerError:
+    except (AgyAccountPoolManagerError, OSError):
+        # security(1) failures and filesystem errors (mkdir, chmod, a missing
+        # tool) are the same typed refusal: no isolated keychain, no run.
         return AGY_RUN_HOME_KEYCHAIN_UNAVAILABLE
     return None
 
