@@ -118,6 +118,43 @@ class FakeHost(ad.Host):
         self.after_r1_check: Callable[[], None] | None = None
         self.core_pin: str = CORE.pin
         self.core_fetch_fails = False
+        # Task quiescence (#2227): CLEAR unless a test says otherwise.
+        self.in_flight: list[dict[str, Any]] = []
+        self.real_classifier = False
+        self.quiescence_checks = 0
+        self.issue_comments: list[str] = []
+        self.comment_fails = False
+
+    def tasks_in_flight(self, cfg: ad.Config, live_plist: bytes) -> dict[str, Any]:  # type: ignore[override]
+        self.quiescence_checks += 1
+        if self.real_classifier:
+            # The real classifier code with this checkout's interpreter and tree.
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-W",
+                    "ignore",
+                    "-c",
+                    ad.TASK_QUIESCENCE_PROBE_CODE,
+                    str(REPO_ROOT),
+                    str(cfg.canonical_state_dir),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=300,
+                check=False,
+                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+            )
+            return ad.classify_task_report(result.returncode, result.stdout, result.stderr)
+        if self.in_flight:
+            return dict(self.in_flight.pop(0) if len(self.in_flight) > 1 else self.in_flight[0])
+        return {"verdict": "CLEAR", "checked": 0}
+
+    def post_issue_comment(self, cfg: ad.Config, body: str) -> bool:  # type: ignore[override]
+        if self.comment_fails:
+            return False
+        self.issue_comments.append(body)
+        return True
 
     def r1_recovery_block(self, cfg: ad.Config) -> str | None:  # type: ignore[override]
         self.r1_checks += 1
@@ -4089,3 +4126,498 @@ def test_atomic_write_never_removes_a_temp_path_it_did_not_create(
         ad._atomic_write(dest, b"new")
     assert taken.is_symlink() and victim.read_text() == "keep"
     assert not dest.exists()
+
+
+# ------------------------------------------------------- task quiescence (#2227)
+
+
+def _write_task(cfg: ad.Config, task_id: str, status: str | None, raw: str | None = None) -> None:
+    cfg.canonical_state_dir.mkdir(parents=True, exist_ok=True)
+    path = cfg.canonical_state_dir / f"{task_id}.json"
+    path.write_text(
+        raw if raw is not None else json.dumps({"task_id": task_id, "status": status}),
+        encoding="utf-8",
+    )
+
+
+def _receipts(cfg: ad.Config) -> list[dict[str, Any]]:
+    return ad.read_receipts(cfg.state_dir)
+
+
+def _deferrals(cfg: ad.Config) -> list[dict[str, Any]]:
+    if not cfg.deferrals.exists():
+        return []
+    return [json.loads(line) for line in cfg.deferrals.read_text().splitlines() if line]
+
+
+def test_quiescence_real_in_flight_task_defers_the_switch(cfg: ad.Config) -> None:
+    """Positive control: a real WORKER_RUNNING task, classified by the real lifecycle code."""
+    _write_task(cfg, "running-task", "WORKER_RUNNING")
+    _write_task(cfg, "done-task", "DIRECT_COMPLETED")
+    host, prober = FakeHost(), FakeProber()
+    host.real_classifier = True
+    result = cycle(cfg, host, prober)
+    assert result["status"] == ad.DEFERRED_OUTCOME
+    assert result["quiescence"]["blocking"] == ["running-task"]
+    assert host.reloads == []
+    assert not any(argv[:1] == ["uv"] for argv in host.calls)  # no build churn
+    deferred = _deferrals(cfg)
+    assert deferred and deferred[-1]["quiescence"]["blocking"] == ["running-task"]
+    # Deferral records never enter receipts.jsonl (backoff, give-up, drift).
+    assert not [r for r in _receipts(cfg) if r.get("outcome") == ad.DEFERRED_OUTCOME]
+    assert cfg.quiescence_file.exists()
+
+
+def test_quiescence_real_terminal_task_does_not_block(cfg: ad.Config) -> None:
+    """Negative control: only terminal tasks, classified by the real lifecycle code."""
+    _write_task(cfg, "done-task", "DIRECT_COMPLETED")
+    _write_task(cfg, "old-block", "FINAL_BLOCK")
+    host, prober = FakeHost(), FakeProber()
+    host.real_classifier = True
+    result = cycle(cfg, host, prober)
+    assert result["status"] == "DEPLOYED"
+    assert len(host.reloads) == 1
+    assert not cfg.quiescence_file.exists()
+
+
+def test_quiescence_unreadable_task_state_fails_closed(cfg: ad.Config) -> None:
+    _write_task(cfg, "corrupt", None, raw="{not json")
+    host, prober = FakeHost(), FakeProber()
+    host.real_classifier = True
+    result = cycle(cfg, host, prober)
+    assert result["status"] == ad.DEFERRED_OUTCOME
+    assert result["quiescence"]["blocking"] == ["corrupt:UNREADABLE"]
+    assert host.reloads == []
+
+
+def test_quiescence_unknown_classifier_result_fails_closed(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [{"verdict": "UNKNOWN", "reason": "CLASSIFIER_EXIT_1"}]
+    result = cycle(cfg, host, prober)
+    assert result["status"] == ad.DEFERRED_OUTCOME
+    assert result["quiescence"]["blocking"] == ["CLASSIFIER_EXIT_1"]
+    assert host.reloads == []
+
+
+def test_quiescence_warns_once_after_cap_and_never_forces(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    blocked = {"verdict": "IN_FLIGHT", "task_ids": ["t-1"], "checked": 1}
+    host.in_flight = [blocked]
+    first = cycle(cfg, host, prober)
+    assert first["status"] == ad.DEFERRED_OUTCOME
+    assert first["quiescence"]["deferral_age_seconds"] == 0
+    assert host.issue_comments == []
+    host.clock += ad.QUIESCENCE_WARN_AFTER_SECONDS + 60
+    second = cycle(cfg, host, prober)
+    assert second["status"] == ad.DEFERRED_OUTCOME
+    assert second["quiescence"]["deferral_age_seconds"] >= ad.QUIESCENCE_WARN_AFTER_SECONDS
+    assert len(host.issue_comments) == 1
+    assert "`t-1`" in host.issue_comments[0]
+    assert "NEXUS_GATEWAY_QUIESCENCE_WARNING" in host.issue_comments[0]
+    host.clock += 3600
+    third = cycle(cfg, host, prober)
+    assert third["status"] == ad.DEFERRED_OUTCOME
+    assert len(host.issue_comments) == 1  # one warning per episode
+    assert host.reloads == []  # never forced, however old
+    # Deferral log: the episode start and the warning, not one line per cycle.
+    assert len(_deferrals(cfg)) == 2
+    host.in_flight = []
+    host.clock += 60
+    done = cycle(cfg, host, prober)
+    assert done["status"] == "DEPLOYED"
+    deployed = _receipts(cfg)[-1]
+    assert deployed["outcome"] == "DEPLOYED"
+    ended = deployed["quiescence"]["ended_deferral"]
+    assert ended["deferral_age_seconds"] >= ad.QUIESCENCE_WARN_AFTER_SECONDS + 3600
+    assert not cfg.quiescence_file.exists()
+
+
+def test_quiescence_failed_warning_is_retried(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": ["t-1"], "checked": 1}]
+    cycle(cfg, host, prober)
+    host.clock += ad.QUIESCENCE_WARN_AFTER_SECONDS + 1
+    host.comment_fails = True
+    assert cycle(cfg, host, prober)["quiescence"]["warned_at"] is None
+    host.comment_fails = False
+    host.clock += 300
+    cycle(cfg, host, prober)
+    assert len(host.issue_comments) == 1
+
+
+def test_quiescence_rechecked_under_the_lock_before_the_switch(cfg: ad.Config) -> None:
+    """A task that starts while the candidate builds still stops the switch."""
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [
+        {"verdict": "CLEAR", "checked": 0},
+        {"verdict": "IN_FLIGHT", "task_ids": ["late-task"], "checked": 1},
+    ]
+    result = cycle(cfg, host, prober)
+    assert result["status"] == ad.DEFERRED_OUTCOME
+    receipt = _receipts(cfg)[-1]
+    assert receipt["outcome"] == ad.DEFERRED_OUTCOME
+    assert receipt["switched"] is False
+    assert receipt["quiescence_before_switch"]["task_ids"] == ["late-task"]
+    assert host.reloads == []
+    assert ad.DEFERRED_OUTCOME not in ad.FAILED_OUTCOMES  # no backoff, no give-up
+
+
+def test_quiescence_manual_override_switches_and_is_recorded(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": ["orphan"], "checked": 1}]
+    result = ad.run_cycle(
+        cfg,
+        host,
+        prober,
+        green_api(),
+        environ={},
+        tool_python=Path("/tool/python"),
+        allow_in_flight=True,
+    )
+    assert result["status"] == "DEPLOYED"
+    receipt = _receipts(cfg)[-1]
+    assert receipt["quiescence_overridden"] is True
+    assert receipt["quiescence"]["overridden"] is True
+
+
+def test_quiescence_hold_still_wins_and_checks_nothing(cfg: ad.Config) -> None:
+    ad._set_hold(cfg, "manual")
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": ["t"], "checked": 1}]
+    assert cycle(cfg, host, prober)["status"] == "HELD"
+    assert host.quiescence_checks == 0
+    assert host.reloads == []
+
+
+def test_real_host_classifies_with_the_live_interpreter_and_tree(tmp_path: Path) -> None:
+    cfg = ad.Config.default(tmp_path / "home")
+    _write_task(cfg, "running", "WORKER_RUNNING")
+    plist = live_plist(REPO_ROOT, python=sys.executable)
+    verdict = ad.Host().tasks_in_flight(cfg, plist)
+    assert verdict == {"verdict": "IN_FLIGHT", "task_ids": ["running"], "checked": 1}
+    missing = live_plist(REPO_ROOT, python=str(tmp_path / "no-python"))
+    assert ad.Host().tasks_in_flight(cfg, missing)["verdict"] == "UNKNOWN"
+
+
+@pytest.mark.parametrize(
+    ("code", "stdout", "verdict"),
+    [
+        (1, '{"tasks": []}', "UNKNOWN"),
+        (0, "", "UNKNOWN"),
+        (0, "not json", "UNKNOWN"),
+        (0, '{"tasks": "x"}', "UNKNOWN"),
+        (0, '{"tasks": [1]}', "UNKNOWN"),
+        (0, '{"tasks": []}', "CLEAR"),
+        (0, '{"tasks": [{"task_id": "a", "action_state": "TERMINAL"}]}', "CLEAR"),
+        (0, '{"tasks": [{"task_id": "a", "action_state": "ACTION_REQUIRED"}]}', "IN_FLIGHT"),
+        (0, '{"tasks": [{"task_id": "a", "action_state": "SOMETHING_NEW"}]}', "IN_FLIGHT"),
+    ],
+)
+def test_classify_task_report_fails_closed(code: int, stdout: str, verdict: str) -> None:
+    assert ad.classify_task_report(code, stdout)["verdict"] == verdict
+
+
+def test_classify_task_report_never_echoes_unsafe_task_ids() -> None:
+    report = json.dumps({
+        "tasks": [{"task_id": "x\n::warning::evil", "action_state": "IN_PROGRESS"}]
+    })
+    verdict = ad.classify_task_report(0, report)
+    assert verdict["task_ids"] == ["<unprintable-task-id>"]
+
+
+def test_quiescence_unknown_lifecycle_status_fails_closed(cfg: ad.Config) -> None:
+    """The lifecycle maps an unknown status to FINAL_BLOCK; the gate must not read that as clear."""
+    _write_task(cfg, "future-task", "SOME_FUTURE_STATUS")
+    _write_task(cfg, "no-status", None, raw=json.dumps({"task_id": "no-status"}))
+    host, prober = FakeHost(), FakeProber()
+    host.real_classifier = True
+    result = cycle(cfg, host, prober)
+    assert result["status"] == ad.DEFERRED_OUTCOME
+    assert result["quiescence"]["blocking"] == [
+        "future-task:INVALID_STATUS",
+        "no-status:INVALID_STATUS",
+    ]
+    assert host.reloads == []
+
+
+def test_quiescence_late_detection_shares_the_episode_clock_and_warning(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    late = {"verdict": "IN_FLIGHT", "task_ids": ["late"], "checked": 1}
+    host.in_flight = [{"verdict": "CLEAR", "checked": 0}, late]
+    assert cycle(cfg, host, prober)["status"] == ad.DEFERRED_OUTCOME
+    episode = json.loads(cfg.quiescence_file.read_text())
+    assert episode["blocking"] == ["late"]
+    assert _receipts(cfg)[-1]["quiescence_episode"]["deferral_age_seconds"] == 0
+    host.clock += ad.QUIESCENCE_WARN_AFTER_SECONDS + 1
+    host.in_flight = [{"verdict": "CLEAR", "checked": 0}, late]
+    assert cycle(cfg, host, prober)["status"] == ad.DEFERRED_OUTCOME
+    assert len(host.issue_comments) == 1
+    assert "`late`" in host.issue_comments[0]
+
+
+@pytest.mark.parametrize(
+    "episode",
+    [
+        '{"since_epoch": NaN, "warned_at": null}',
+        '{"since_epoch": "x", "warned_at": true}',
+        '{"since_epoch": 1, "warned_at": ["not", "a", "time"]}',
+        "not json",
+    ],
+)
+def test_quiescence_corrupt_episode_never_suppresses_the_warning(
+    cfg: ad.Config, episode: str
+) -> None:
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": ["t"], "checked": 1}]
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    cfg.quiescence_file.write_text(episode)
+    first = cycle(cfg, host, prober)
+    assert first["status"] == ad.DEFERRED_OUTCOME
+    host.clock += ad.QUIESCENCE_WARN_AFTER_SECONDS + 1
+    assert cycle(cfg, host, prober)["status"] == ad.DEFERRED_OUTCOME
+    assert len(host.issue_comments) == 1
+
+
+def test_quiescence_clock_going_back_does_not_restart_the_episode(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": ["t"], "checked": 1}]
+    cycle(cfg, host, prober)
+    since = json.loads(cfg.quiescence_file.read_text())["since_epoch"]
+    host.clock -= 3600
+    result = cycle(cfg, host, prober)
+    assert result["quiescence"]["deferral_age_seconds"] == 0
+    assert json.loads(cfg.quiescence_file.read_text())["since_epoch"] == since
+
+
+def test_classify_task_report_sanitizes_unknown_action_states() -> None:
+    report = json.dumps({"tasks": [{"task_id": "a", "action_state": "x](http://evil)\n@all"}]})
+    assert ad.classify_task_report(0, report)["task_ids"] == ["a:UNKNOWN"]
+
+
+def test_quiescence_flapping_tasks_still_warn(cfg: ad.Config) -> None:
+    """Pre-build CLEAR, under-lock IN_FLIGHT every cycle must not restart the clock."""
+    host, prober = FakeHost(), FakeProber()
+    late = {"verdict": "IN_FLIGHT", "task_ids": ["flap"], "checked": 1}
+    for _ in range(80):
+        host.in_flight = [{"verdict": "CLEAR", "checked": 0}, late]
+        assert cycle(cfg, host, prober)["status"] == ad.DEFERRED_OUTCOME
+        host.clock += 700
+    assert len(host.issue_comments) == 1
+    assert host.reloads == []
+
+
+def test_quiescence_override_ends_the_episode(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": ["orphan"], "checked": 1}]
+    cycle(cfg, host, prober)
+    host.clock += ad.QUIESCENCE_WARN_AFTER_SECONDS + 1
+    cycle(cfg, host, prober)
+    assert len(host.issue_comments) == 1
+    host.clock += 60
+    result = ad.run_cycle(
+        cfg,
+        host,
+        prober,
+        green_api(),
+        environ={},
+        tool_python=Path("/tool/python"),
+        allow_in_flight=True,
+    )
+    assert result["status"] == "DEPLOYED"
+    assert not cfg.quiescence_file.exists()
+
+
+def test_quiescence_running_assisted_job_defers_and_finished_one_does_not(cfg: ad.Config) -> None:
+    jobs = cfg.canonical_state_dir / "assisted_provider_jobs"
+    jobs.mkdir(parents=True)
+    (jobs / "assist-1.json").write_text(json.dumps({"status": "RUNNING"}))
+    (jobs / "assist-2.json").write_text(json.dumps({"status": "COMPLETED"}))
+    host, prober = FakeHost(), FakeProber()
+    host.real_classifier = True
+    result = cycle(cfg, host, prober)
+    assert result["status"] == ad.DEFERRED_OUTCOME
+    assert result["quiescence"]["blocking"] == ["assist.assist-1:ASSIST_RUNNING"]
+    (jobs / "assist-1.json").write_text(json.dumps({"status": "FAILED"}))
+    host.clock += 3600
+    assert cycle(cfg, host, prober)["status"] == "DEPLOYED"
+
+
+def test_quiescence_unknown_reason_is_sanitized_before_any_comment(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [
+        {"verdict": "UNKNOWN", "reason": "LIVE_PLIST_UNREADABLE:`x` @all\n::warning::"}
+    ]
+    cycle(cfg, host, prober)
+    host.clock += ad.QUIESCENCE_WARN_AFTER_SECONDS + 1
+    result = cycle(cfg, host, prober)
+    assert result["quiescence"]["blocking"] == ["LIVE_PLIST_UNREADABLE"]
+    assert "@all" not in host.issue_comments[0] and "::warning::" not in host.issue_comments[0]
+
+
+def test_quiescence_old_warned_episode_does_not_mute_a_new_candidate(cfg: ad.Config) -> None:
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    cfg.quiescence_file.write_text(
+        json.dumps({
+            "since_epoch": NOW - 10 * 3600,
+            "candidate": "c" * 40,
+            "blocking": ["old"],
+            "warned_at": ad._iso(NOW - 3 * 3600),
+        })
+    )
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": ["new"], "checked": 1}]
+    assert cycle(cfg, host, prober)["status"] == ad.DEFERRED_OUTCOME
+    assert len(host.issue_comments) == 1
+    assert "`new`" in host.issue_comments[0]
+
+
+def test_quiescence_rewarns_daily_while_still_starved(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": ["t"], "checked": 1}]
+    cycle(cfg, host, prober)
+    host.clock += ad.QUIESCENCE_WARN_AFTER_SECONDS + 1
+    cycle(cfg, host, prober)
+    host.clock += 3600
+    cycle(cfg, host, prober)
+    assert len(host.issue_comments) == 1
+    host.clock += ad.QUIESCENCE_REWARN_SECONDS
+    cycle(cfg, host, prober)
+    assert len(host.issue_comments) == 2
+
+
+def test_quiescence_impossible_warned_at_is_ignored(cfg: ad.Config) -> None:
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    cfg.quiescence_file.write_text(
+        json.dumps({
+            "since_epoch": NOW - 10 * 3600,
+            "candidate": NEW,
+            "blocking": ["t"],
+            "warned_at": "9999-99-99T99:99:99Z",
+        })
+    )
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": ["t"], "checked": 1}]
+    cycle(cfg, host, prober)
+    assert len(host.issue_comments) == 1
+
+
+def test_quiescence_late_deferral_receipt_does_not_debounce_the_next_cycle(
+    cfg: ad.Config,
+) -> None:
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [
+        {"verdict": "CLEAR", "checked": 0},
+        {"verdict": "IN_FLIGHT", "task_ids": ["late"], "checked": 1},
+    ]
+    assert cycle(cfg, host, prober)["status"] == ad.DEFERRED_OUTCOME
+    host.in_flight = []
+    host.clock += 60  # well inside min_interval_seconds
+    assert cycle(cfg, host, prober)["status"] == "DEPLOYED"
+
+
+@pytest.mark.parametrize(
+    ("job", "label"),
+    [
+        ({"status": "UNKNOWN_REQUIRES_RECONCILE"}, "ASSIST_RECONCILE"),
+        ({"status": "FAILED", "reconciliation_required": True}, "ASSIST_RECONCILE"),
+        ({"status": "CANCELLED", "process_killed": False}, "ASSIST_UNSETTLED"),
+    ],
+)
+def test_quiescence_unsettled_assisted_jobs_fail_closed(
+    cfg: ad.Config, job: dict[str, Any], label: str
+) -> None:
+    jobs = cfg.canonical_state_dir / "assisted_provider_jobs"
+    jobs.mkdir(parents=True)
+    (jobs / "assist-9.json").write_text(json.dumps(job))
+    host, prober = FakeHost(), FakeProber()
+    host.real_classifier = True
+    result = cycle(cfg, host, prober)
+    assert result["status"] == ad.DEFERRED_OUTCOME
+    assert result["quiescence"]["blocking"] == [f"assist.assist-9:{label}"]
+
+
+def test_deferral_log_is_bounded(cfg: ad.Config, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ad, "DEFERRALS_MAX_BYTES", 200)
+    host, prober = FakeHost(), FakeProber()
+    for index in range(20):
+        host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": [f"t{index}"], "checked": 1}]
+        cycle(cfg, host, prober)
+        host.clock += 60
+    assert cfg.deferrals.stat().st_size < 2000
+    assert cfg.deferrals.with_name(cfg.deferrals.name + ".1").exists()
+
+
+def test_quiescence_rearm_for_new_candidates_is_rate_limited(cfg: ad.Config) -> None:
+    """A new candidate re-arms the warning only if the last one is at least an hour old."""
+
+    def episode(warned_ago: float) -> None:
+        cfg.state_dir.mkdir(parents=True, exist_ok=True)
+        cfg.quiescence_file.write_text(
+            json.dumps({
+                "since_epoch": NOW - 10 * 3600,
+                "candidate": "c" * 40,  # an earlier main commit
+                "blocking": ["stuck"],
+                "warned_at": ad._iso(NOW - warned_ago),
+            })
+        )
+
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": ["stuck"], "checked": 1}]
+    episode(warned_ago=20 * 60)
+    cycle(cfg, host, prober)
+    assert host.issue_comments == []
+    episode(warned_ago=ad.QUIESCENCE_REARM_MIN_SECONDS + 60)
+    cycle(cfg, host, prober)
+    assert len(host.issue_comments) == 1
+
+
+def test_quiescence_future_warned_at_never_mutes(cfg: ad.Config) -> None:
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    cfg.quiescence_file.write_text(
+        json.dumps({
+            "since_epoch": NOW - 10 * 3600,
+            "candidate": NEW,
+            "blocking": ["t"],
+            "warned_at": "9999-12-31T23:59:59Z",
+        })
+    )
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": ["t"], "checked": 1}]
+    cycle(cfg, host, prober)
+    assert len(host.issue_comments) == 1
+
+
+def test_quiescence_blocking_list_is_bounded(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    many = [f"t{index:04d}" for index in range(5000)]
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": many, "checked": 5000}]
+    result = cycle(cfg, host, prober)
+    assert len(result["quiescence"]["blocking"]) == 100
+    assert len(result["quiescence"]["task_ids"]) == 100
+    assert result["quiescence"]["task_count"] == 5000
+    line = json.loads(cfg.deferrals.read_text().splitlines()[-1])
+    assert len(line["quiescence"]["task_ids"]) == 100
+    assert cfg.deferrals.stat().st_size < 20_000
+
+
+def test_quiescence_candidate_arriving_inside_the_hour_still_rearms(cfg: ad.Config) -> None:
+    """Warned for candidate C; NEW shows up 20 min later and must still be warned at 1 h."""
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    cfg.quiescence_file.write_text(
+        json.dumps({
+            "since_epoch": NOW - 10 * 3600,
+            "candidate": "c" * 40,
+            "blocking": ["stuck"],
+            "warned_at": ad._iso(NOW - 20 * 60),
+            "warned_candidate": "c" * 40,
+        })
+    )
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": ["stuck"], "checked": 1}]
+    cycle(cfg, host, prober)  # NEW seen 20 min after the warning: no re-arm yet
+    assert host.issue_comments == []
+    assert json.loads(cfg.quiescence_file.read_text())["warned_candidate"] == "c" * 40
+    host.clock += 45 * 60
+    cycle(cfg, host, prober)  # 65 min after the warning: NEW gets its own
+    assert len(host.issue_comments) == 1
+    assert json.loads(cfg.quiescence_file.read_text())["warned_candidate"] == NEW
