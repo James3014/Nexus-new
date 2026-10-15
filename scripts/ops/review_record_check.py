@@ -348,8 +348,11 @@ def _binding(clause: str, line: str, head: str, comment_head: bool) -> bool:
 def _label_family(line: str) -> str | None:
     """Family named by a heading, bold label, ``Reviewer:`` line or ``<label>:`` prefix."""
     plain = _plain(line, keep_parens=True).strip()
-    if _NOT_A_HEADER.search(plain):
-        return None  # "Codex: unavailable", "Codex adversarial review: pending" open no section
+    if _NOT_A_HEADER.search(_plain(line)):
+        # "Codex: unavailable", "Codex adversarial review: pending" open no section; a
+        # not-run word inside a parenthetical aside ("Gemini ... (Codex: out of credits)")
+        # does not disable the header (#2299, first live false negative on #2296).
+        return None
     bold = re.match(r"^\s*(?:[-*]\s+)?\*\*(.+?)\*\*", line)
     if (
         bold

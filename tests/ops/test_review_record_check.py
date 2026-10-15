@@ -935,3 +935,26 @@ def test_a_later_word_only_withdraws_a_verdict_when_the_line_borrows_a_sha():
     ):
         record = rrc.classify_record(body, HEAD)
         assert record is not None and record["verdict"] is True, body
+
+
+def test_a_parenthetical_aside_does_not_disable_a_reviewer_header():
+    # #2296's record (#2299): the Gemini header carries a "Codex ... out of credits" aside.
+    body = (
+        f"## Review record (coordinator workspace-c6), head {HEAD}\n\n"
+        "**Independent Claude review (Opus 5.5, separate agent)**\n"
+        "- Round 2 @6391634: **ACCEPT.** Mutants killed.\n\n"
+        "**Cross-model review (agy Gemini 3.8 Flash High, Owner-approved Codex substitute; "
+        'Codex: "Your workspace is out of credits")**\n'
+        "- Round 1 @9154965: REJECT. F-01 rebutted.\n"
+        "- Round 2 @6391634: **ACCEPT.** Rebuttal accepted; F-03 judged fixed.\n"
+    )
+    record = rrc.classify_record(body, HEAD)
+    assert record is not None and record["claude"] is True and record["cross_model"] is True
+    assert rrc.evaluate(HEAD, RISKY, [_c(body)], [])["status"] == "OK"
+    # The not-run forms outside parentheses still open no section.
+    pending = body.replace(
+        "**Cross-model review (agy Gemini 3.8 Flash High, Owner-approved Codex substitute; "
+        'Codex: "Your workspace is out of credits")**',
+        "**Cross-model review: pending (Codex out of credits)**",
+    )
+    assert rrc.evaluate(HEAD, RISKY, [_c(pending)], [])["status"] == "MISSING_CROSS_MODEL"
