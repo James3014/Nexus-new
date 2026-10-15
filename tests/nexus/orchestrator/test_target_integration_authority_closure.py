@@ -1239,7 +1239,7 @@ def test_owner_finish_replay_is_idempotent(tmp_path: Path, monkeypatch):
 def test_owner_finish_never_deletes_task_branch_or_candidate_ref(tmp_path: Path):
     root, base, candidate = _repo(tmp_path)
     receipt = _acceptance(candidate)
-    auth = _authorization(root, base, candidate, receipt)
+    _authorization(root, base, candidate, receipt)
     target = tmp_path / "targets" / "task-branch"
     target.parent.mkdir()
     _git(root, "worktree", "add", "-b", "nexus/task/task-branch", str(target), base)
