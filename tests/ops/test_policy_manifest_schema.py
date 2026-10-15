@@ -927,15 +927,17 @@ def test_wiring_check_package_guard_and_stat_failure(tmp_path: Path, monkeypatch
     assert check_enforcement_wiring(package_guard, root) == [
         "CALLER_UNDER_GUARD_PACKAGE: pkg/caller.py"
     ]
-    # An unreadable guard fails closed rather than losing its identity.
-    real_stat = Path.stat
+    # An unreadable guard fails closed rather than losing its identity. The fault is
+    # injected at _file_id (the identity lookup) rather than Path.stat, because other
+    # pathlib calls use stat differently per platform (Linux CI raised through resolve()).
+    real_file_id = gate._file_id
 
-    def flaky_stat(self, *args, **kwargs):
-        if self.name == "guard.py":
-            raise OSError("transient")
-        return real_stat(self, *args, **kwargs)
+    def unreadable_guard(path):
+        if path.name == "guard.py":
+            return None
+        return real_file_id(path)
 
-    monkeypatch.setattr(Path, "stat", flaky_stat)
+    monkeypatch.setattr(gate, "_file_id", unreadable_guard)
     result = check_enforcement_wiring(
         _fake_policy(test_entrypoints=["tests/test_caller.py::test_plain"]), root
     )
