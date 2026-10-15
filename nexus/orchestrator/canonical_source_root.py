@@ -148,6 +148,23 @@ def bound_controller_problem(controller: Path, loaded: Path) -> Optional[str]:
         return "COMMON_DIR_UNREADABLE"
     if not _same_physical_directory(Path(controller_common), Path(loaded_common)):
         return "DIFFERENT_REPOSITORY"
+    # Same repository is not enough: the Controller must be its own registered
+    # worktree, never an alias of the loaded checkout's gitdir (gitfile or
+    # symlinked .git), or a bind commit would move the loaded HEAD again.
+    controller_gitdir = _git_text(controller, "rev-parse", "--absolute-git-dir")
+    loaded_gitdir = _git_text(loaded, "rev-parse", "--absolute-git-dir")
+    if not controller_gitdir or not loaded_gitdir:
+        return "GITDIR_UNREADABLE"
+    if _same_physical_directory(Path(controller_gitdir), Path(loaded_gitdir)):
+        return "CONTROLLER_SHARES_LOADED_GITDIR"
+    listing = _git_text(loaded, "worktree", "list", "--porcelain")
+    registered = [
+        Path(line[len("worktree ") :])
+        for line in (listing or "").splitlines()
+        if line.startswith("worktree ")
+    ]
+    if not any(_same_physical_directory(path, controller) for path in registered):
+        return "CONTROLLER_NOT_A_REGISTERED_WORKTREE"
     loaded_head = _git_text(loaded, "rev-parse", "--verify", "HEAD^{commit}")
     controller_head = _git_text(controller, "rev-parse", "--verify", "HEAD^{commit}")
     if not loaded_head or not controller_head:
@@ -209,12 +226,23 @@ def _bind_only_diff_problem(raw: bytes) -> Optional[str]:
         if len(parts) < 5:
             return "DIFF_UNPARSEABLE"
         old_mode, new_mode = parts[0], parts[1]
-        if not path.startswith(CONTROLLER_BIND_PREFIX):
-            return "CONTROLLER_CHANGES_OUTSIDE_TASKS"
+        reason = _bind_path_problem(path)
+        if reason is not None:
+            return reason
         if old_mode not in _BIND_FILE_MODES or new_mode not in _BIND_FILE_MODES:
             return "CONTROLLER_BIND_NOT_REGULAR_FILE"
-        if Path(path).name in _GIT_META_NAMES:
-            return "CONTROLLER_BIND_GIT_METADATA"
+    return None
+
+
+def _bind_path_problem(path: str) -> Optional[str]:
+    """``tasks/<...>`` with plain segments and no git metadata name (any case)."""
+    if not path.startswith(CONTROLLER_BIND_PREFIX):
+        return "CONTROLLER_CHANGES_OUTSIDE_TASKS"
+    parts = path.split("/")
+    if any(part in {"", ".", ".."} for part in parts[1:]):
+        return "CONTROLLER_BIND_PATH_INVALID"
+    if any(part.casefold() in _GIT_META_NAMES for part in parts):
+        return "CONTROLLER_BIND_GIT_METADATA"
     return None
 
 
@@ -235,8 +263,25 @@ def _controller_worktree_problem(controller: Path) -> Optional[str]:
         text = entry.decode("utf-8", errors="replace")
         if not text.startswith("?? " + CONTROLLER_BIND_PREFIX):
             return "CONTROLLER_WORKTREE_DIRTY"
-        if Path(text[3:]).name in _GIT_META_NAMES:
-            return "CONTROLLER_BIND_GIT_METADATA"
+        reason = _bind_path_problem(text[3:])
+        if reason is not None:
+            return reason
+        if os.path.islink(controller / text[3:]):
+            return "CONTROLLER_BIND_NOT_REGULAR_FILE"
+    # ``git status`` hides edits to entries flagged assume-unchanged (lowercase
+    # tag) or skip-worktree (``S``); every tracked entry must be a plain ``H``.
+    flagged = subprocess.run(
+        ["git", "ls-files", "-v", "-z"],
+        cwd=controller,
+        capture_output=True,
+        timeout=10,
+        check=False,
+    )
+    if flagged.returncode != 0:
+        return "INDEX_UNREADABLE"
+    for entry in flagged.stdout.split(b"\0"):
+        if entry and not entry.startswith(b"H "):
+            return "CONTROLLER_INDEX_FLAGGED"
     return None
 
 

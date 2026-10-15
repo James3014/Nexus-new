@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import os
 import subprocess
 from pathlib import Path
 
@@ -28,6 +30,12 @@ def _commit(root: Path, path: str, text: str, message: str) -> str:
     _git(root, "add", "--", path)
     _git(root, "commit", "-qm", message)
     return _git(root, "rev-parse", "HEAD")
+
+
+@pytest.fixture(autouse=True)
+def _isolated_git_config(monkeypatch):
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
 
 
 @pytest.fixture()
@@ -157,10 +165,15 @@ def test_health_git_head_reports_the_loaded_commit(pair, monkeypatch):
 
     loaded, controller, head = pair
     bind = _commit(controller, "tasks/c/00-t.md", "card\n", "chore(tasks): bind t")
-    monkeypatch.setattr(http_module, "CANONICAL_SOURCE_ROOT", controller)
     monkeypatch.setattr(http_module, "LOADED_SOURCE_ROOT", loaded)
     assert bind != head
     assert http_module._git_head() == head
+    # GB-077 requires /health to name the evaluated (loaded) root, not the Controller.
+    identity = http_module.runtime_identity(include_paths=True)
+    assert identity["repo_root"] == str(loaded)
+    assert identity["git_head"] == head
+    public = http_module.runtime_identity()
+    assert public["repo_root_sha256"] == hashlib.sha256(str(loaded).encode("utf-8")).hexdigest()
 
 
 def _commit_raw(root: Path, message: str) -> None:
@@ -215,7 +228,7 @@ def test_checkout_sharing_the_git_dir_through_a_symlink_is_refused(pair, tmp_pat
     (other / ".git").symlink_to(loaded / ".git")
     (other / "nexus").mkdir()
     (other / "nexus" / "evil.py").write_text("x = 1\n", encoding="utf-8")
-    assert roots.bound_controller_problem(other, loaded) is not None
+    assert roots.bound_controller_problem(other, loaded) == "CONTROLLER_SHARES_LOADED_GITDIR"
     with pytest.raises(RuntimeError, match="SOURCE_MISMATCH"):
         roots.resolve_canonical_source_root(
             {roots.CANONICAL_SOURCE_ROOT_ENV: str(other)}, source_root=loaded
@@ -272,3 +285,70 @@ def test_runtime_identity_hashing_reads_the_loaded_checkout(pair, monkeypatch):
         assert inspect.signature(function).parameters["root"].default is roots.LOADED_SOURCE_ROOT
     source = inspect.getsource(gateway_module._loaded_runtime_source_paths)
     assert "LOADED_SOURCE_ROOT" in source and "CANONICAL_SOURCE_ROOT" not in source
+
+
+def test_clean_alias_of_the_loaded_gitdir_is_refused(pair, tmp_path):
+    """A clean checkout whose .git aliases the loaded gitdir would move the loaded HEAD."""
+    loaded, _, _ = pair
+    gitdir = Path(_git(loaded, "rev-parse", "--absolute-git-dir"))
+    alias = tmp_path / "alias"
+    alias.mkdir()
+    (alias / ".git").write_text(f"gitdir: {gitdir}\n", encoding="utf-8")
+    _git(alias, "checkout", "-q", "--", ".")
+    assert roots.bound_controller_problem(alias, loaded) == "CONTROLLER_SHARES_LOADED_GITDIR"
+    linked = tmp_path / "linked"
+    linked.mkdir()
+    (linked / ".git").symlink_to(loaded / ".git")
+    _git(linked, "checkout", "-q", "--", ".")
+    assert roots.bound_controller_problem(linked, loaded) == "CONTROLLER_SHARES_LOADED_GITDIR"
+
+
+@pytest.mark.parametrize("flag", ["--skip-worktree", "--assume-unchanged"])
+def test_hidden_tracked_edits_are_refused(pair, flag):
+    loaded, controller, _ = pair
+    _git(controller, "update-index", flag, "README.md")
+    (controller / "README.md").write_text("hidden edit\n", encoding="utf-8")
+    assert _git(controller, "status", "--porcelain") == ""
+    assert roots.bound_controller_problem(controller, loaded) == "CONTROLLER_INDEX_FLAGGED"
+
+
+def test_untracked_symlink_under_tasks_is_refused(pair, tmp_path):
+    loaded, controller, _ = pair
+    (controller / "tasks").mkdir()
+    (controller / "tasks" / "c").symlink_to(tmp_path)
+    assert roots.bound_controller_problem(controller, loaded) == "CONTROLLER_BIND_NOT_REGULAR_FILE"
+
+
+@pytest.mark.parametrize("name", [".GitAttributes", ".GITMODULES", ".GitIgnore"])
+def test_case_variant_git_metadata_is_refused(pair, name):
+    loaded, controller, _ = pair
+    _commit(controller, f"tasks/c/{name}", "* eol=crlf\n", "case variant")
+    assert roots.bound_controller_problem(controller, loaded) == "CONTROLLER_BIND_GIT_METADATA"
+
+
+@pytest.mark.parametrize("path", ["tasks/../x.md", "tasks//x.md", "tasks/./x.md"])
+def test_bind_paths_with_dot_segments_are_refused(path):
+    assert roots._bind_path_problem(path) == "CONTROLLER_BIND_PATH_INVALID"
+
+
+def test_controller_must_be_a_registered_worktree(pair, tmp_path):
+    loaded, controller, _ = pair
+    copy = tmp_path / "copy"
+    subprocess.run(["cp", "-R", str(controller), str(copy)], check=True)
+    # The copy reuses the Controller's gitdir file: same gitdir as the Controller,
+    # but it is not the registered worktree path.
+    assert roots.bound_controller_problem(copy, loaded) == "CONTROLLER_NOT_A_REGISTERED_WORKTREE"
+
+
+def test_mutation_admit_and_finish_recheck_the_controller(pair, monkeypatch):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    loaded, controller, _ = pair
+    monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", controller)
+    monkeypatch.setattr(gateway_module, "LOADED_SOURCE_ROOT", loaded)
+    monkeypatch.setattr(gateway_module, "CONTROLLER_IS_SEPARATE", True)
+    _commit(controller, "nexus/evil.py", "x = 1\n", "drift")
+    gateway = gateway_module.UnifiedMCPGateway(service=FakeService())
+    for method in (gateway._mutation_admit, gateway._finish):
+        with pytest.raises(gateway_module.GatewayInputError, match="CONTROLLER_BINDING_INVALID"):
+            method({})

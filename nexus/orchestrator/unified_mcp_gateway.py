@@ -6367,6 +6367,7 @@ class UnifiedMCPGateway:
         }
 
     def _mutation_admit(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        _require_bound_controller()
         if "owner_confirmation" in arguments:
             raise GatewayInputError("MUTATION_ADMISSION_CALLER_AUTHORITY_FORBIDDEN")
         repository = _text(arguments.get("repository"), "repository", max_length=256)
@@ -7764,6 +7765,7 @@ class UnifiedMCPGateway:
         return payload
 
     def _finish(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        _require_bound_controller()
         lane = _text(arguments.get("execution_lane"), "execution_lane").upper()
         if lane == "DIRECT_CANONICAL":
             request = dict(arguments.get("request") or {})
