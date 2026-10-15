@@ -76,6 +76,13 @@ def observe_operating_mode(source_root: Path) -> dict[str, Any]:
         "reason": None,
     }
     try:
+        # No symlink anywhere between the loaded root and the file.
+        current = Path(source_root)
+        for part in OPERATING_MODE_RELATIVE_PATH.parts[:-1]:
+            current = current / part
+            if not stat.S_ISDIR(os.lstat(current).st_mode):
+                observation["reason"] = "MODE_FILE_NOT_REGULAR"
+                return observation
         info = os.lstat(path)
         if not stat.S_ISREG(info.st_mode):
             observation["reason"] = "MODE_FILE_NOT_REGULAR"
@@ -126,24 +133,32 @@ def observe_operating_mode(source_root: Path) -> dict[str, Any]:
 
 def _committed_blob(source_root: Path, relative: str) -> Optional[tuple[str, bytes]]:
     """``(HEAD, bytes)`` of ``relative`` at the loaded checkout's HEAD, or ``None``."""
-    try:
-        head = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=source_root,
+    # Pin git to exactly this checkout: no inherited GIT_DIR/GIT_WORK_TREE,
+    # no walking up into a parent repository.
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env["GIT_CEILING_DIRECTORIES"] = str(Path(source_root).resolve().parent)
+
+    def run(*args: str) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.run(
+            ["git", "-C", str(source_root), *args],
             capture_output=True,
             timeout=5.0,
             check=False,
+            env=env,
         )
+
+    try:
+        top = run("rev-parse", "--show-toplevel")
+        toplevel = top.stdout.decode("utf-8", errors="replace").strip()
+        if top.returncode != 0 or not toplevel:
+            return None
+        if Path(toplevel).resolve() != Path(source_root).resolve():
+            return None
+        head = run("rev-parse", "HEAD")
         sha = head.stdout.decode("ascii", errors="replace").strip()
         if head.returncode != 0 or not _SHA_RE.fullmatch(sha):
             return None
-        blob = subprocess.run(
-            ["git", "cat-file", "blob", f"{sha}:{relative}"],
-            cwd=source_root,
-            capture_output=True,
-            timeout=5.0,
-            check=False,
-        )
+        blob = run("cat-file", "blob", f"{sha}:{relative}")
     except (OSError, subprocess.SubprocessError):
         return None
     if blob.returncode != 0:
@@ -184,7 +199,6 @@ def _append_record(directory: Path, record: Mapping[str, Any]) -> None:
     try:
         store._assert_dir_chain_safe(directory, create=True)
         target = directory / RECORD_FILENAME
-        created = not os.path.lexists(target)
         # O_NONBLOCK: a planted FIFO fails instead of blocking the Gateway.
         fd = os.open(
             str(target),
@@ -204,13 +218,13 @@ def _append_record(directory: Path, record: Mapping[str, Any]) -> None:
             os.fsync(fd)
         finally:
             os.close(fd)
-        if created:
-            # Make the new directory entry durable before the effect runs.
-            dir_fd = os.open(str(directory), os.O_RDONLY)
-            try:
-                os.fsync(dir_fd)
-            finally:
-                os.close(dir_fd)
+        # Make the directory entry durable before the effect runs (always:
+        # the file may have been (re)created by this very open).
+        dir_fd = os.open(str(directory), os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
     except (OSError, store.StandingGrantReceiptError) as exc:
         raise BootstrapAgentAuthorityError(
             f"BOOTSTRAP_AGENT_AUTHORITY_RECORD_WRITE_FAILED:{type(exc).__name__}"

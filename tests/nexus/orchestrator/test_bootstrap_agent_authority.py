@@ -341,6 +341,40 @@ def test_symlinked_mode_file_does_not_delegate(tmp_path):
     assert baa.observe_operating_mode(loaded)["reason"] == "MODE_FILE_NOT_REGULAR"
 
 
+def test_symlinked_mode_parent_directory_does_not_delegate(tmp_path):
+    loaded, _, _ = _make_pair(tmp_path, _real_mode())
+    outside = tmp_path / "outside-governance"
+    outside.mkdir()
+    (outside / baa.OPERATING_MODE_RELATIVE_PATH.name).write_text(_real_mode(), encoding="utf-8")
+    governance = loaded / baa.OPERATING_MODE_RELATIVE_PATH.parent
+    shutil.rmtree(governance)
+    governance.symlink_to(outside, target_is_directory=True)
+    assert baa.observe_operating_mode(loaded)["reason"] == "MODE_FILE_NOT_REGULAR"
+
+
+def test_mode_blob_is_not_taken_from_an_enclosing_repository(tmp_path, monkeypatch):
+    """An untracked copy inside another repo's subdirectory must not match its blob."""
+    outer = tmp_path / "outer"
+    outer.mkdir()
+    _git(outer, "init", "-q")
+    _git(outer, "config", "user.name", "Nexus Test")
+    _git(outer, "config", "user.email", "nexus-test@example.invalid")
+    nested = outer / "nested"
+    mode = nested / baa.OPERATING_MODE_RELATIVE_PATH
+    mode.parent.mkdir(parents=True)
+    mode.write_text(_real_mode(), encoding="utf-8")
+    # The enclosing repository commits the same bytes at the same relative path.
+    top = outer / baa.OPERATING_MODE_RELATIVE_PATH
+    top.parent.mkdir(parents=True)
+    top.write_text(_real_mode(), encoding="utf-8")
+    _git(outer, "add", "-A")
+    _git(outer, "commit", "-qm", "outer")
+    assert baa.observe_operating_mode(outer)["mode"] == "BOOTSTRAP"  # positive control
+    assert baa.observe_operating_mode(nested)["reason"] == "MODE_FILE_NOT_COMMITTED"
+    monkeypatch.setenv("GIT_DIR", str(outer / ".git"))
+    assert baa.observe_operating_mode(nested)["reason"] == "MODE_FILE_NOT_COMMITTED"
+
+
 def test_untracked_mode_file_does_not_delegate(tmp_path):
     loaded, _, _ = _make_pair(tmp_path, None)
     mode = loaded / baa.OPERATING_MODE_RELATIVE_PATH
