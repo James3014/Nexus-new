@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from typing import Any, Mapping, Protocol
+from typing import Any, Callable, Mapping, Protocol
 
 _HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SESSION_RE = re.compile(r"^cms_[0-9a-f]{32}$")
@@ -172,27 +172,56 @@ def _subject_tuple(value: Mapping[str, Any]) -> tuple[str, ...]:
     )
 
 
+def _core_expected_universe_identity() -> Callable[[Mapping[str, Any]], Any]:
+    """Core's public ``expected_universe_identity`` from the pinned Core (#2246).
+
+    Resolved through the Core transport, which owns the import of the
+    configured Core and its shadowing guard. Raises when Core is unavailable;
+    the host never falls back to its own copy of the formula.
+    """
+    from nexus.orchestrator import canonical_core_transport as transport
+
+    if not transport.CORE_AVAILABLE:
+        raise RuntimeError("CORE_UNIVERSE_IDENTITY_UNAVAILABLE")
+    return transport.expected_universe_identity
+
+
 def core_universe_identity(universe: Mapping[str, Any]) -> str:
     """The identity Core assigns to this declared universe.
 
-    Mirrors Core's ``AcceptanceContract.universe_identity``: the sha256 of the
-    canonical JSON of ``(generation, sorted subject tuples)``. Computed on the
-    host from the card declaration, so a Core response cannot redefine it.
+    Computed on the host from the card declaration with Core's public
+    ``product.protocol.generic_verification.expected_universe_identity``, so a
+    Core response cannot redefine it and the host keeps no copy of the
+    formula. Raises ``RuntimeError`` when Core cannot compute it.
     """
-    value = [
-        universe.get("universe_generation"),
-        sorted(list(_subject_tuple(subject)) for subject in universe.get("subjects") or ()),
-    ]
-    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
-    return "sha256:" + hashlib.sha256(encoded.encode()).hexdigest()
+    subjects = sorted(_subject_tuple(subject) for subject in universe.get("subjects") or ())
+    wire_contract = {
+        "universe_generation": universe.get("universe_generation"),
+        "expected_subjects": [dict(zip(_SUBJECT_FIELDS, subject)) for subject in subjects],
+    }
+    try:
+        identity = _core_expected_universe_identity()(wire_contract)
+    except RuntimeError:
+        raise
+    except Exception as exc:  # Core rejected the declaration's shape
+        raise RuntimeError(f"CORE_UNIVERSE_IDENTITY_INVALID:{type(exc).__name__}") from exc
+    if not isinstance(identity, str) or not _HASH_RE.fullmatch(identity):
+        raise RuntimeError("CORE_UNIVERSE_IDENTITY_INVALID")
+    return identity
 
 
-def _coverage_binding_errors(coverage: Mapping[str, Any], universe: Mapping[str, Any]) -> list[str]:
-    """Every way Core coverage can fail to be exactly the declared universe."""
+def _coverage_binding_errors(
+    coverage: Mapping[str, Any], universe: Mapping[str, Any], identity: str | None
+) -> list[str]:
+    """Every way Core coverage can fail to be exactly the declared universe.
+
+    ``identity`` is the card-derived Core identity (None when unavailable,
+    which the caller already reports as blocking).
+    """
     errors: list[str] = []
     if coverage.get("universe_generation") != universe.get("universe_generation"):
         errors.append("CORE_COVERAGE_GENERATION_MISMATCH")
-    if coverage.get("universe_identity") != core_universe_identity(universe):
+    if identity is None or coverage.get("universe_identity") != identity:
         errors.append("CORE_COVERAGE_IDENTITY_MISMATCH")
     if coverage.get("unexpected_subjects"):
         errors.append("CORE_COVERAGE_UNEXPECTED_SUBJECTS")
@@ -232,6 +261,15 @@ def build_core_verdict(
     integrity = None
     coverage = None
     provenance = None
+    response_hashes: Mapping[str, Any] | None = None
+    card_identity: str | None = None
+    if declared:
+        try:
+            card_identity = core_universe_identity(universe)
+        except RuntimeError as exc:
+            # A failed transport already blocks and names the root cause.
+            if transport_error is None:
+                host_reasons.append(str(exc) or "CORE_UNIVERSE_IDENTITY_UNAVAILABLE")
     if transport_error is not None:
         host_reasons.append(transport_error)
     elif not isinstance(projection, Mapping):
@@ -239,6 +277,8 @@ def build_core_verdict(
     else:
         response = projection.get("core_response")
         verification = response.get("verification") if isinstance(response, Mapping) else None
+        raw_hashes = response.get("hashes") if isinstance(response, Mapping) else None
+        response_hashes = raw_hashes if isinstance(raw_hashes, Mapping) else None
         if isinstance(verification, Mapping):
             core_status = verification.get("status")
             reason_codes = [str(item) for item in verification.get("reason_codes") or ()]
@@ -257,7 +297,16 @@ def build_core_verdict(
         if not isinstance(coverage, Mapping):
             host_reasons.append("CORE_COVERAGE_MISSING")
         else:
-            host_reasons.extend(_coverage_binding_errors(coverage, universe))
+            host_reasons.extend(_coverage_binding_errors(coverage, universe, card_identity))
+    # Core reports the identity it bound the contract to (#266). When present
+    # it must be the card-derived one; a legacy (no-universe) task never has one.
+    if (
+        transport_error is None
+        and response_hashes is not None
+        and "universe_identity" in response_hashes
+        and (card_identity is None or response_hashes.get("universe_identity") != card_identity)
+    ):
+        host_reasons.append("CORE_RESPONSE_UNIVERSE_IDENTITY_MISMATCH")
     blocking = bool(host_reasons)
     return {
         "schema": CORE_VERDICT_SCHEMA,
@@ -273,7 +322,7 @@ def build_core_verdict(
         "contract_universe_identity": (
             getattr(contract, "universe_identity", None) if declared else None
         ),
-        "core_universe_identity": core_universe_identity(universe) if declared else None,
+        "core_universe_identity": card_identity,
         # Coverage is claimed only for a declared universe, never for legacy.
         "coverage": coverage if declared else None,
         "coverage_complete": bool(declared and not blocking),

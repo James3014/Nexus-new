@@ -93,6 +93,7 @@ try:
         change_manifest_hash,
         change_set_hash,
         evidence_bundle_hash,
+        expected_universe_identity,
         verification_plan_hash,
     )
 
@@ -123,6 +124,7 @@ except ImportError as exc:
     change_set_hash = _unavailable_hash  # type: ignore[no-redef]
     evidence_bundle_hash = _unavailable_hash  # type: ignore[no-redef]
     verification_plan_hash = _unavailable_hash  # type: ignore[no-redef]
+    expected_universe_identity = _unavailable_hash  # type: ignore[no-redef]
 
     def verify_generic_changeset(_payload: Any) -> tuple[int, dict[str, Any]]:  # type: ignore[misc]
         raise RuntimeError("CANONICAL_NEXUS_CORE_UNAVAILABLE: Cannot perform verification")
@@ -137,7 +139,7 @@ except ImportError as exc:
 # scripts/ops/nexus_gateway_auto_deploy.py text-parses this exact one-line
 # `CANONICAL_CORE_REVISION = "<40-hex sha>"` form (it never imports this file);
 # keep that shape when bumping the pin.
-CANONICAL_CORE_REVISION = "f05cbc53f3eb104e6379283ed8275285c75ae6a8"
+CANONICAL_CORE_REVISION = "96513b24a7254841716a44f68a4d765ddcec201e"
 CANONICAL_CORE_DISTRIBUTION = "nexus-certify"
 CANONICAL_CORE_INTERFACE = "product.adapters.generic_verification.verify_generic_changeset"
 

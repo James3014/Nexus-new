@@ -269,7 +269,7 @@ def test_transport_import_uses_configured_core_root_when_set(tmp_path: Path):
 
 
 # --- NN-1 phase 2: installed-package identity from PEP 610 direct_url.json ---
-EXPECTED_CORE_REVISION = "f05cbc53f3eb104e6379283ed8275285c75ae6a8"
+EXPECTED_CORE_REVISION = "96513b24a7254841716a44f68a4d765ddcec201e"
 
 
 def _install_fake_certify(
@@ -452,7 +452,7 @@ _STUB_CORE_FILES = {
         'GENERIC_VERIFICATION_RESPONSE_SCHEMA_ID = "resp"\n'
         "def _h(value):\n    return 'sha256:0'\n"
         "acceptance_contract_hash = change_manifest_hash = change_set_hash = _h\n"
-        "evidence_bundle_hash = verification_plan_hash = _h\n"
+        "evidence_bundle_hash = verification_plan_hash = expected_universe_identity = _h\n"
     ),
 }
 
