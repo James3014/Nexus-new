@@ -377,10 +377,6 @@ def build_route(
             route_features=route_features,
             historical_hints=list(dict.fromkeys(historical_hints))[:3],
         )
-    # P-CONTAM-01 (#2199): check research output before planning or code generation uses it.
-    from nexus.research.contamination_enforcement import quarantine_research_context
-
-    research_context = quarantine_research_context(research_context, task_desc=task_desc)
     route_features = {
         **route_features,
         "research_role": str(research_context.get("role", "general") or "general"),
@@ -1581,11 +1577,15 @@ def run_auto_flow(
         capability_evidence["research_used"] = True
         capability_evidence["research_refs"] = retrieval_refs[:3] or [f"research:{receipt_slug}:route_selected"]
         capability_evidence["research_gate_passed"] = bool(artifact_verified)
-    # P-CONTAM-01 (#2199): contaminated research output never counts as a research PASS.
-    from nexus.research.contamination_enforcement import enforce_on_flow_evidence
+    # P-CONTAM-01 (#2199/#2216): record-only signal; it never changes research_gate_passed.
+    from nexus.research.contamination_enforcement import record_flow_contamination_signal
 
-    capability_evidence = enforce_on_flow_evidence(
-        capability_evidence, research_context=route.get("research_context"), task_desc=task_desc
+    capability_evidence = record_flow_contamination_signal(
+        capability_evidence,
+        research_context=route.get("research_context"),
+        task_desc=task_desc,
+        log_root=repo_root,
+        task_id=task_id,
     )
     capability_evidence["research_source_projects"] = list(RESEARCH_SOURCE_PROJECTS)
     autoreason_payload = build_autoreason_payload(
@@ -1651,6 +1651,7 @@ def run_auto_flow(
             "research_used": bool(capability_evidence.get("research_used", False)),
             "research_refs": capability_evidence.get("research_refs", []),
             "research_gate_passed": bool(capability_evidence.get("research_gate_passed", False)),
+            "research_contamination_signal": capability_evidence.get("research_contamination_signal"),
             "memory_used": bool(memory_refs),
             "memory_refs": memory_refs,
             "memory_gate_passed": bool(memory_refs),

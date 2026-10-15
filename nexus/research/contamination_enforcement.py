@@ -1,8 +1,11 @@
-"""P-CONTAM-01 enforcement on live research routes (#2199, #2216).
+"""P-CONTAM-01 record-only contamination signal on live research routes (#2199, #2216).
 
-One fail-closed check shared by every route that accepts research output: the canonical
-research executor (``nexus/core/capability_executor_registry.py``) and the research
-auto-flow (``nexus/app/research_flow_service.py``).
+One check shared by every route that accepts research output: the canonical research
+executor (``nexus/core/capability_executor_registry.py``) and the research auto-flow
+(``nexus/app/research_flow_service.py``).  Owner decision (option B, 2026-10-15): the
+routes RECORD the signal and do NOT block; held-out detection was 53/120 (44%), below the
+70% bar for blocking.  Upgrading to block is a later Owner decision based on the recorded
+signals (``<workspace>/.nexus/research/contamination_signals.jsonl``).
 
 - Walks the research output: strings, dict keys (as text), lists/tuples/sets, bytes
   (UTF-8), dataclasses, pydantic models (``model_dump``) and plain objects (``vars``).
@@ -16,8 +19,8 @@ auto-flow (``nexus/app/research_flow_service.py``).
 - Task/query echoes are discounted only when the echo itself has no design pattern and the
   match lies fully inside it.
 
-Contamination returns ``RESEARCH_CONTAMINATION_DETECTED``; any error returns
-``RESEARCH_CONTAMINATION_GUARD_ERROR``.  Both mean the research output is not accepted.
+The verdict is ``RESEARCH_CONTAMINATION_DETECTED`` on a hit and
+``RESEARCH_CONTAMINATION_GUARD_ERROR`` (detected unknown) when the check cannot run.
 """
 
 from __future__ import annotations
@@ -332,18 +335,58 @@ FLOW_CONTEXT_PLANNER_KEYS = frozenset({
     "confidence",
     "constraint_lookup_receipt",
     "route_cost_policy",
-    "research_contamination",
 })
 
 
-def _empty_like(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return {}
-    if isinstance(value, (list, tuple, set, frozenset)):
-        return []
-    if isinstance(value, str):
-        return ""
-    return None
+RECORD_ONLY = "record_only"
+SIGNAL_LOG_RELPATH = (".nexus", "research", "contamination_signals.jsonl")
+
+
+def signal_from_verdict(verdict: ContaminationVerdict) -> dict[str, Any]:
+    """Record-only signal; ``detected`` is None when the check could not run."""
+    if verdict.passed:
+        detected: bool | None = False
+    elif verdict.reason == REASON_DETECTED:
+        detected = True
+    else:
+        detected = None
+    return {
+        "policy_id": POLICY_ID,
+        "mode": RECORD_ONLY,
+        "detected": detected,
+        "reason": verdict.reason,
+        "terms": list(verdict.detected_terms),
+    }
+
+
+def append_contamination_signal(
+    log_root: Any, signal: Mapping[str, Any], *, route: str, task_id: Any
+) -> None:
+    """Append one signal to <log_root>/.nexus/research/contamination_signals.jsonl.
+
+    Best effort: a write failure is logged and never changes the research result.
+    """
+    import json
+    import logging
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    try:
+        path = Path(log_root).joinpath(*SIGNAL_LOG_RELPATH)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "schema": "nexus.research.contamination_signal.v1",
+            "recorded_at": datetime.now(timezone.utc).isoformat(),
+            "route": route,
+            "task_id": str(task_id or ""),
+            **dict(signal),
+        }
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+    except Exception as exc:
+        logging.getLogger(__name__).warning(
+            "contamination signal log write failed: %s", str(exc)[:200]
+        )
 
 
 def _research_part(research_context: Any) -> Any:
@@ -356,49 +399,26 @@ def _research_part(research_context: Any) -> Any:
     return research_context
 
 
-def quarantine_research_context(research_context: Any, *, task_desc: str) -> dict[str, Any]:
-    """Check a research context before the auto-flow plans or generates code from it.
-
-    A contaminated (or uninspectable) context keeps only its planner-owned keys; every
-    research-sourced key is emptied, and the verdict is recorded under
-    ``research_contamination`` so the research gate later reports BLOCK.
-    """
-    context = dict(research_context) if isinstance(research_context, Mapping) else {}
-    verdict = check_research_output(_research_part(research_context), echo_texts=(task_desc,))
-    if not verdict.passed:
-        context = {
-            key: (value if str(key) in FLOW_CONTEXT_PLANNER_KEYS else _empty_like(value))
-            for key, value in context.items()
-        }
-    context["research_contamination"] = verdict.to_dict()
-    return context
-
-
-def enforce_on_flow_evidence(
-    capability_evidence: dict[str, Any], *, research_context: Any, task_desc: str
+def record_flow_contamination_signal(
+    capability_evidence: dict[str, Any],
+    *,
+    research_context: Any,
+    task_desc: str,
+    log_root: Any = None,
+    task_id: Any = None,
 ) -> dict[str, Any]:
-    """Research auto-flow (research_flow_service.run_auto_flow): no research PASS on contamination."""
+    """Research auto-flow: record the P-CONTAM-01 signal; research_gate_passed is unchanged."""
     if not capability_evidence.get("research_used") and not capability_evidence.get(
         "research_gate_passed"
     ):
         return capability_evidence
-    recorded = (
-        research_context.get("research_contamination")
-        if isinstance(research_context, Mapping)
-        else None
+    signal = signal_from_verdict(
+        check_research_output(_research_part(research_context), echo_texts=(task_desc,))
     )
-    if isinstance(recorded, Mapping) and recorded.get("passed") is not True:
-        verdict = ContaminationVerdict(
-            passed=False,
-            reason=str(recorded.get("reason") or REASON_GUARD_ERROR),
-            detected_terms=tuple(str(term) for term in recorded.get("detected_terms") or ()),
-        )
-    else:
-        # Also re-checks a context that changed after build_route quarantined it.
-        verdict = check_research_output(_research_part(research_context), echo_texts=(task_desc,))
     updated = dict(capability_evidence)
-    updated["research_contamination"] = verdict.to_dict()
-    if not verdict.passed:
-        updated["research_gate_passed"] = False
-        updated["research_failure_reason"] = verdict.reason
+    updated["research_contamination_signal"] = signal
+    if log_root is not None:
+        append_contamination_signal(
+            log_root, signal, route="research_flow_service.run_auto_flow", task_id=task_id
+        )
     return updated

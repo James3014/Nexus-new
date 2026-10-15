@@ -44,11 +44,17 @@ def _outcome(result: dict[str, Any]) -> dict[str, Any]:
     return result["response"]["outcome"]
 
 
+def _signal(result: dict[str, Any]) -> dict[str, Any]:
+    signal = _outcome(result)["contamination_signal"]
+    assert signal["mode"] == "record_only" and signal["policy_id"] == "P-CONTAM-01"
+    return signal
+
+
 def _success(**extra: Any) -> dict[str, Any]:
     return {"source": "test", "status": "SUCCESS", "tokens_used": 1, **extra}
 
 
-def test_canonical_research_blocks_design_language(
+def test_canonical_research_flags_design_language(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     result = _run_research(
@@ -58,16 +64,16 @@ def test_canonical_research_blocks_design_language(
         task_id="contam-lang",
     )
     outcome = _outcome(result)
-    assert result["gate_passed"] is False
-    assert outcome["semantic_status"] == "BLOCKED"
-    assert outcome["error"] == "RESEARCH_CONTAMINATION_DETECTED"
-    assert outcome["policy_id"] == "P-CONTAM-01"
-    assert "design_plan" in outcome["detected_terms"]
-    # the contaminated research output is not handed downstream in the receipt
-    assert "result" not in outcome
+    assert result["gate_passed"] is True
+    assert outcome["semantic_status"] == "SUCCEEDED"
+    assert _signal(result)["reason"] == "RESEARCH_CONTAMINATION_DETECTED"
+    assert _signal(result)["policy_id"] == "P-CONTAM-01"
+    assert "design_plan" in _signal(result)["terms"]
+    # record-only: the research output is still handed downstream
+    assert outcome["result"]["findings"]
 
 
-def test_canonical_research_blocks_design_field(
+def test_canonical_research_flags_design_field(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     result = _run_research(
@@ -76,13 +82,13 @@ def test_canonical_research_blocks_design_field(
         _success(findings=["compute_total multiplies by 0.9"], patch_plan="candidate_001"),
         task_id="contam-field",
     )
-    outcome = _outcome(result)
-    assert result["gate_passed"] is False
-    assert outcome["error"] == "RESEARCH_CONTAMINATION_DETECTED"
-    assert outcome["detected_terms"] == ["design_field"]
+    assert _outcome(result)["semantic_status"] == "SUCCEEDED"
+    assert result["gate_passed"] is True
+    assert _signal(result)["reason"] == "RESEARCH_CONTAMINATION_DETECTED"
+    assert _signal(result)["terms"] == ["design_field"]
 
 
-def test_canonical_research_blocks_nested_design_field(
+def test_canonical_research_flags_nested_design_field(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     result = _run_research(
@@ -91,8 +97,8 @@ def test_canonical_research_blocks_nested_design_field(
         _success(findings=["compute_total multiplies by 0.9"], raw={"winner": "candidate_b"}),
         task_id="contam-raw",
     )
-    assert result["gate_passed"] is False
-    assert _outcome(result)["detected_terms"] == ["design_field"]
+    assert result["gate_passed"] is True
+    assert _signal(result)["terms"] == ["design_field"]
 
 
 def test_canonical_research_clean_output_passes_unchanged(
@@ -108,9 +114,10 @@ def test_canonical_research_clean_output_passes_unchanged(
     assert outcome["action"] == "run"
     assert outcome["result"]["findings"] == findings
     assert "error" not in outcome
+    assert _signal(result)["detected"] is False
 
 
-def test_canonical_research_guard_error_fails_closed(
+def test_canonical_research_guard_error_records_signal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from nexus.research import contamination_guard
@@ -126,10 +133,10 @@ def test_canonical_research_guard_error_fails_closed(
         task_id="contam-err",
     )
     outcome = _outcome(result)
-    assert result["gate_passed"] is False
-    assert outcome["semantic_status"] == "BLOCKED"
-    assert outcome["error"] == "RESEARCH_CONTAMINATION_GUARD_ERROR"
-    assert "result" not in outcome
+    assert result["gate_passed"] is True
+    assert outcome["semantic_status"] == "SUCCEEDED"
+    assert _signal(result)["reason"] == "RESEARCH_CONTAMINATION_GUARD_ERROR"
+    assert _signal(result)["detected"] is None
 
 
 # --- #2216 review (Owner option A): phrase-level terms, echo stripping, full-pack scan ---
@@ -177,11 +184,11 @@ def test_canonical_research_echo_does_not_hide_other_contamination(
         return _success(findings=[f"Results for: {query}", "We recommend replacing compute_total."])
 
     result = _run_research(tmp_path, monkeypatch, echoing, task_id="fp-echo-contam", task=task)
-    assert result["gate_passed"] is False
-    assert "we_recommend" in _outcome(result)["detected_terms"]
+    assert result["gate_passed"] is True
+    assert "we_recommend" in _signal(result)["terms"]
 
 
-def test_canonical_research_blocks_contaminated_blocked_assumptions(
+def test_canonical_research_flags_contaminated_blocked_assumptions(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     result = _run_research(
@@ -193,8 +200,8 @@ def test_canonical_research_blocks_contaminated_blocked_assumptions(
         ),
         task_id="contam-ba",
     )
-    assert result["gate_passed"] is False
-    assert _outcome(result)["error"] == "RESEARCH_CONTAMINATION_DETECTED"
+    assert result["gate_passed"] is True
+    assert _signal(result)["reason"] == "RESEARCH_CONTAMINATION_DETECTED"
 
 
 def test_canonical_research_scans_findings_when_blocked_assumptions_present(
@@ -206,8 +213,8 @@ def test_canonical_research_scans_findings_when_blocked_assumptions_present(
         _success(findings=["Proposed patch: drop the rounding."], blocked_assumptions=["none"]),
         task_id="contam-ba-findings",
     )
-    assert result["gate_passed"] is False
-    assert _outcome(result)["detected_terms"] == ["label_prefix"]
+    assert result["gate_passed"] is True
+    assert _signal(result)["terms"] == ["label_prefix"]
 
 
 @pytest.mark.parametrize(
@@ -219,7 +226,7 @@ def test_canonical_research_scans_findings_when_blocked_assumptions_present(
     ],
     ids=["summary", "raw_answer", "non_schema_key"],
 )
-def test_canonical_research_blocks_contaminated_non_findings_field(
+def test_canonical_research_flags_contaminated_non_findings_field(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, extra: dict[str, Any]
 ) -> None:
     result = _run_research(
@@ -228,8 +235,8 @@ def test_canonical_research_blocks_contaminated_non_findings_field(
         _success(findings=["compute_total multiplies by 0.9"], **extra),
         task_id="contam-field-" + next(iter(extra)),
     )
-    assert result["gate_passed"] is False
-    assert _outcome(result)["error"] == "RESEARCH_CONTAMINATION_DETECTED"
+    assert result["gate_passed"] is True
+    assert _signal(result)["reason"] == "RESEARCH_CONTAMINATION_DETECTED"
 
 
 def test_guard_terms_parameter_keeps_legacy_default() -> None:
@@ -345,6 +352,7 @@ def test_research_auto_flow_clean_context_keeps_research_pass(
     caps = _run_auto_flow(tmp_path, monkeypatch, _flow_context())
     assert caps["research_used"] is True
     assert caps["research_gate_passed"] is True
+    assert caps["research_contamination_signal"]["detected"] is False
 
 
 @pytest.mark.parametrize(
@@ -360,12 +368,22 @@ def test_research_auto_flow_clean_context_keeps_research_pass(
     ],
     ids=["verified_claims", "doc_scout", "blocked_assumptions"],
 )
-def test_research_auto_flow_blocks_contaminated_context(
+def test_research_auto_flow_flags_contaminated_context(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, extra: dict[str, Any]
 ) -> None:
+    import json
+
     caps = _run_auto_flow(tmp_path, monkeypatch, _flow_context(**extra))
     assert caps["research_used"] is True
-    assert caps["research_gate_passed"] is False
+    # record-only: the research gate is not flipped
+    assert caps["research_gate_passed"] is True
+    signal = caps["research_contamination_signal"]
+    assert signal["detected"] is True and signal["mode"] == "record_only"
+    assert signal["reason"] == "RESEARCH_CONTAMINATION_DETECTED"
+    log = tmp_path / ".nexus" / "research" / "contamination_signals.jsonl"
+    records = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+    assert records[-1]["route"] == "research_flow_service.run_auto_flow"
+    assert records[-1]["detected"] is True
 
 
 # --- routes with no production caller (proof for #2216 review item 4) ---
@@ -572,7 +590,7 @@ def test_research_facts_keep_findings_with_blocked_assumptions() -> None:
     assert facts.constraints == ("assumption one", "finding one")
 
 
-def test_research_auto_flow_quarantines_context_before_planning(
+def test_research_auto_flow_does_not_quarantine_context(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from nexus.app import research_flow_service as rfs
@@ -585,7 +603,6 @@ def test_research_auto_flow_quarantines_context_before_planning(
             {"claim": "We recommend replacing the banner.", "evidence_refs": ["x"]}
         ],
         "blocked_assumptions": ["api_contract_not_verified"],
-        "doc_scout": {"hits_count": 1, "hits": [{"snippet": "Patch plan: edit demo.py"}]},
     }
     seen: list[dict[str, Any]] = []
     real_compose = rfs.compose_capability_plan
@@ -596,7 +613,7 @@ def test_research_auto_flow_quarantines_context_before_planning(
 
     monkeypatch.setattr(rfs, "_build_research_context", lambda **kwargs: dict(contaminated))
     monkeypatch.setattr(rfs, "compose_capability_plan", capture)
-    route = rfs.build_route(
+    rfs.build_route(
         repo_root=tmp_path,
         task_desc="explain the websocket timeout race",
         task_type="bug",
@@ -604,26 +621,51 @@ def test_research_auto_flow_quarantines_context_before_planning(
         root_cause_confidence=1.0,
         findings_query=None,
     )
-    planned = seen[0]
-    assert planned["research_contamination"]["passed"] is False
-    assert (
-        planned["verified_claims"] == []
-        and planned["doc_scout"] == {}
-        and planned["blocked_assumptions"] == []
-    )
-    assert planned["role"] == "claim_scout"
-    assert (
-        route["research_context"]["research_contamination"]["reason"]
-        == "RESEARCH_CONTAMINATION_DETECTED"
-    )
-    from nexus.research.contamination_enforcement import enforce_on_flow_evidence
+    # record-only (option B): planning sees the research context unchanged
+    assert seen[0] == contaminated
 
-    gated = enforce_on_flow_evidence(
-        {"research_used": True, "research_gate_passed": True},
-        research_context=route["research_context"],
-        task_desc="explain the websocket timeout race",
+
+def test_canonical_research_contaminated_output_passes_with_signal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    findings = ["compute_total rounds half-up. We recommend replacing it with Decimal."]
+    result = _run_research(tmp_path, monkeypatch, _success(findings=findings), task_id="sig-hit")
+    outcome = _outcome(result)
+    assert result["gate_passed"] is True
+    assert outcome["semantic_status"] == "SUCCEEDED"
+    assert outcome["result"]["findings"] == findings
+    signal = _signal(result)
+    assert signal["detected"] is True
+    assert signal["reason"] == "RESEARCH_CONTAMINATION_DETECTED"
+    assert "we_recommend" in signal["terms"]
+    log = tmp_path / ".nexus" / "research" / "contamination_signals.jsonl"
+    record = json.loads(log.read_text(encoding="utf-8").splitlines()[-1])
+    assert record["route"] == "capability_executor_registry._exec_research"
+    assert record["task_id"] == "sig-hit" and record["detected"] is True
+
+
+def test_canonical_research_guard_error_passes_with_signal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nexus.research import contamination_guard
+
+    def broken(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("guard exploded")
+
+    monkeypatch.setattr(contamination_guard, "evaluate_research_contamination", broken)
+    result = _run_research(
+        tmp_path,
+        monkeypatch,
+        _success(findings=["compute_total rounds half-up"]),
+        task_id="sig-err",
     )
-    assert gated["research_gate_passed"] is False
+    assert result["gate_passed"] is True
+    assert _outcome(result)["semantic_status"] == "SUCCEEDED"
+    signal = _signal(result)
+    assert signal["detected"] is None
+    assert signal["reason"] == "RESEARCH_CONTAMINATION_GUARD_ERROR"
 
 
 _LIVE_ENTRYPOINTS = (
