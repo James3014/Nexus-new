@@ -163,10 +163,10 @@ QUIESCENCE_CLASSIFY_TIMEOUT_SECONDS = 120
 # Degraded Controller (#2230 F2): a Gateway that started with an invalid
 # Controller runs DEGRADED until restarted, and /health says so in
 # ``controller_binding``.  While IN_SYNC the deployer reads it and, when
-# degraded, places HOLD, writes a receipt and warns on the Issue below (rate
-# limited like the quiescence warning).  It never restarts or switches.
+# degraded, warns on the Issue below and writes a receipt (rate limited like the
+# quiescence warning).  It never holds, restarts or switches: the next deploy of
+# a new main commit materializes a fresh Controller and heals it.
 LIVE_DEGRADED_OUTCOME = "LIVE_DEGRADED_CONTROLLER"
-LIVE_DEGRADED_HOLD = "auto-hold: LIVE_DEGRADED_CONTROLLER"
 CONTROLLER_ALERT_ISSUE = 2230
 # Runs with the LIVE deployment's interpreter and tree, so tasks are classified
 # by exactly the lifecycle code that owns them.  Read-only: it never takes the
@@ -1980,16 +1980,19 @@ class _Cycle:
         status["live_controller_binding"] = {"status": "DEGRADED", "reason": reason}
         return {"status": "DEGRADED", "reason": reason}
 
-    def hold_degraded(
+    def alert_degraded(
         self, candidate: str, live: Optional[Path], binding: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """HOLD, warn (rate limited) and record; never restarts or switches anything."""
+        """Warn and record (both rate limited); never holds, restarts or switches.
+
+        No HOLD: the next deploy of a new main commit materializes a fresh
+        Controller and so heals the Gateway, and a HOLD would block exactly
+        that.  The receipt is written only with an alert attempt, so a
+        degraded Gateway that stays IN_SYNC does not add one receipt per cycle.
+        """
         cfg, host = self.cfg, self.host
         now = host.now()
         reason = binding["reason"]
-        hold = f"{LIVE_DEGRADED_HOLD} {reason} at {candidate[:12]}"
-        # HOLD first: a failed comment or receipt can never leave it unset.
-        _set_hold(cfg, hold)
         alert = _read_json_object(cfg.controller_alert_file) or {}
         warned_at = _parse_iso(alert.get("warned_at"))
         if warned_at is not None and warned_at > now:
@@ -2002,34 +2005,31 @@ class _Cycle:
             or now - warned_at >= QUIESCENCE_REWARN_SECONDS
         ):
             warned_at = None  # re-arm, as the quiescence warning does
-        warning: Dict[str, Any] = {"posted": False}
-        if warned_at is None:
-            body = (
-                "<!-- NEXUS_GATEWAY_LIVE_DEGRADED_CONTROLLER -->\n"
-                f"**The live Gateway `{candidate[:12]}` is running with a DEGRADED Controller** "
-                f"(`{reason}`, #2230 F2). Every Controller effect is refused until it is "
-                "restarted, and a degraded start never heals by itself.\n\n"
-                "The auto-deployer placed HOLD and changed nothing else: no restart, no "
-                "switch. Fix the Controller binding, restart the Gateway, check that /health "
-                "`controller_binding` is no longer DEGRADED, then "
-                "`nexus_gateway_auto_deploy.py release`.\n"
+        if warned_at is not None:
+            return {"warning": {"posted": False, "suppressed_since": _iso(warned_at)}}
+        body = (
+            "<!-- NEXUS_GATEWAY_LIVE_DEGRADED_CONTROLLER -->\n"
+            f"**The live Gateway `{candidate[:12]}` is running with a DEGRADED Controller** "
+            f"(`{reason}`, #2230 F2). Every Controller effect is refused until the Gateway "
+            "is restarted with a valid Controller; a degraded start never heals in place.\n\n"
+            "The auto-deployer changed nothing: no HOLD, no restart, no switch. The next "
+            "deploy of a new main commit materializes a fresh Controller and should heal it; "
+            "to heal sooner, fix the Controller binding and restart the Gateway, then check "
+            "that /health `controller_binding` is no longer DEGRADED.\n"
+        )
+        # Posted before the marker is saved: a crash in between can repeat the
+        # warning, but can never lose it.
+        posted = host.post_issue_comment(cfg, body, issue=CONTROLLER_ALERT_ISSUE)
+        if posted:
+            marker = {
+                "schema": "nexus.gateway.controller_alert.v1",
+                "warned_at": _iso(now),
+                "reason": reason,
+                "commit": candidate,
+            }
+            _atomic_write(
+                cfg.controller_alert_file, json.dumps(marker, sort_keys=True).encode(), 0o600
             )
-            posted = host.post_issue_comment(cfg, body, issue=CONTROLLER_ALERT_ISSUE)
-            warning = {"posted": posted}
-            if posted:
-                alert = {
-                    "schema": "nexus.gateway.controller_alert.v1",
-                    "warned_at": _iso(now),
-                    "reason": reason,
-                    "commit": candidate,
-                }
-                _atomic_write(
-                    cfg.controller_alert_file,
-                    json.dumps(alert, sort_keys=True).encode(),
-                    0o600,
-                )
-        else:
-            warning = {"posted": False, "suppressed_since": _iso(warned_at)}
         receipt = {
             "schema": RECEIPT_SCHEMA,
             "attempt_id": f"{candidate[:12]}-{int(now)}-degraded",
@@ -2042,11 +2042,10 @@ class _Cycle:
             "switched": False,
             "rolled_back": False,
             "controller_binding": binding,
-            "hold": hold,
-            "warning": warning,
+            "warning": {"posted": posted},
         }
         _append_receipt(cfg, receipt)
-        return {"hold": hold, "receipt": receipt}
+        return {"warning": {"posted": posted}, "receipt": receipt}
 
     # -- entry -------------------------------------------------------------
 
@@ -2096,7 +2095,7 @@ class _Cycle:
             self.end_deferral()
             binding = self.live_controller_binding(status)
             if binding is not None and not dry_run:
-                degraded = self.hold_degraded(candidate, previous_root, binding)
+                degraded = self.alert_degraded(candidate, previous_root, binding)
                 return finish(LIVE_DEGRADED_OUTCOME, **degraded)
             return finish("IN_SYNC")
         receipts = [

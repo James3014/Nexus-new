@@ -4650,20 +4650,19 @@ def _degraded_health() -> dict[str, Any]:
     }
 
 
-def test_in_sync_degraded_controller_holds_receipts_and_warns_once(cfg: ad.Config) -> None:
+def test_in_sync_degraded_controller_warns_once_and_never_holds(cfg: ad.Config) -> None:
     host, prober = FakeHost(candidate=OLD), FakeProber()
     prober.health = _degraded_health()
     result = cycle(cfg, host, prober)
     assert result["status"] == ad.LIVE_DEGRADED_OUTCOME
+    assert result["status"] not in ad.FAILED_OUTCOMES  # CLI exit 0
     assert prober.health_reads == 1
-    # HOLD with a clear reason; nothing restarted, switched or built.
-    assert ad.hold_reason(cfg, {}) is not None
-    hold = cfg.hold_file.read_text(encoding="utf-8")
-    assert hold.startswith(ad.LIVE_DEGRADED_HOLD)
-    assert "NEXUS_CANONICAL_SOURCE_ROOT_MISSING" in hold
+    # No HOLD, and nothing restarted, switched or built.
+    assert ad.hold_reason(cfg, {}) is None and not cfg.hold_file.exists()
     assert host.reloads == [] and host.started == [] and prober.calls == []
     assert not any(argv[:1] == ["uv"] for argv in host.calls)
     receipt = ad.last_receipt(cfg.state_dir)
+    assert receipt == result["receipt"]
     assert receipt["outcome"] == ad.LIVE_DEGRADED_OUTCOME
     assert receipt["candidate_commit"] == OLD and receipt["switched"] is False
     assert receipt["controller_binding"]["status"] == "DEGRADED"
@@ -4674,22 +4673,45 @@ def test_in_sync_degraded_controller_holds_receipts_and_warns_once(cfg: ad.Confi
     assert "NEXUS_GATEWAY_LIVE_DEGRADED_CONTROLLER" in host.issue_comments[0]
     status = json.loads((cfg.state_dir / "status.json").read_text())
     assert status["status"] == ad.LIVE_DEGRADED_OUTCOME
-    # Held: the next cycle does nothing and says nothing.
-    assert cycle(cfg, host, prober)["status"] == "HELD"
-    assert len(host.issue_comments) == 1
-    # Released while still degraded: HOLD again, but no second comment inside the limit.
-    cfg.hold_file.unlink()
-    host.clock += 60
+    # Still degraded on later cycles: no second comment, no receipt per cycle.
+    host.clock += 600
     again = cycle(cfg, host, prober)
     assert again["status"] == ad.LIVE_DEGRADED_OUTCOME
-    assert cfg.hold_file.exists()
+    assert again["warning"]["posted"] is False
     assert len(host.issue_comments) == 1
-    assert again["receipt"]["warning"]["posted"] is False
+    assert len(ad.read_receipts(cfg.state_dir)) == 1
+    assert not cfg.hold_file.exists()
     # A day later the warning re-arms.
-    cfg.hold_file.unlink()
     host.clock += ad.QUIESCENCE_REWARN_SECONDS
     cycle(cfg, host, prober)
     assert len(host.issue_comments) == 2
+    assert len(ad.read_receipts(cfg.state_dir)) == 2
+
+
+def test_in_sync_degraded_failed_comment_is_retried_next_cycle(cfg: ad.Config) -> None:
+    host, prober = FakeHost(candidate=OLD), FakeProber()
+    prober.health = _degraded_health()
+    host.comment_fails = True
+    assert cycle(cfg, host, prober)["receipt"]["warning"]["posted"] is False
+    assert not cfg.controller_alert_file.exists()
+    host.comment_fails = False
+    host.clock += 600
+    cycle(cfg, host, prober)
+    assert len(host.issue_comments) == 1
+
+
+def test_degraded_live_then_new_main_commit_deploys_normally(cfg: ad.Config) -> None:
+    """No HOLD: the next main commit is deployed, which re-materializes the Controller."""
+    host, prober = FakeHost(candidate=OLD), FakeProber()
+    prober.health = _degraded_health()
+    assert cycle(cfg, host, prober)["status"] == ad.LIVE_DEGRADED_OUTCOME
+    host.candidate = NEW
+    host.clock += 600
+    result = cycle(cfg, host, prober)
+    assert result["status"] == "DEPLOYED"
+    assert len(host.reloads) == 1
+    assert ad.last_receipt(cfg.state_dir)["outcome"] == "DEPLOYED"
+    assert not cfg.hold_file.exists()
 
 
 def test_in_sync_degraded_dry_run_reports_without_effects(cfg: ad.Config) -> None:
