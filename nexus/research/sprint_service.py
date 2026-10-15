@@ -542,6 +542,13 @@ class LLMCandidateGenerator:
             )
             gate_codeintel = dict(gate_inputs["codeintel"])
             route.setdefault("workspace_root", gate_inputs["workspace_root"])
+        if _symmetric_prompt_mode():
+            # Contract B (nexus-runtime #217): a runtime that knows this key hides these
+            # capabilities' evidence from every model-facing projection at the source; the
+            # pinned runtime ignores unknown route keys (tested).
+            from nexus.research.gate_inputs import fed_capability_names
+
+            route["receipt_only_capabilities"] = sorted(fed_capability_names())
         request = UnifiedRuntimeRequest(
             task_id=task_id,
             workspace_revision=revision,

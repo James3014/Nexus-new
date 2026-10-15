@@ -46,6 +46,7 @@ def _run(
     task: str = TASK,
     source: str = ORIGINAL,
     prompt: str = "",
+    extra_route: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     from nexus.services.mainchain_entry import run_mainchain
     from nexus.services.unified_runtime import UnifiedRuntimeRequest, build_online_route
@@ -56,6 +57,7 @@ def _run(
     )
     route["with_nexus_armor"] = True
     route["route_features"] = {"risk_score": 55}
+    route.update(extra_route or {})
     codeintel: dict[str, Any] = {}
     if feed:
         inputs = sprint_gate_inputs(
@@ -333,7 +335,8 @@ def test_withheld_view_keeps_other_entries_and_skips() -> None:
     assert out["entries"][0] == bundle["entries"][0]
     assert out["entries"][1]["status"] == "INVOKED_NOT_SUCCESS"
     assert out["entries"][1]["consumer_payload"] == {} and out["entries"][1]["success"] is False
-    assert out["entries"][2] == bundle["entries"][2]
+    # A fed capability is one opaque placeholder whatever its status (here SKIPPED).
+    assert out["entries"][2]["evidence_ids"] == [] and out["entries"][2]["skipped"] is False
     # The runtime patch's EVALUATED_REJECTED renders as the pre-patch status in the prompt.
     assert [e["status"] for e in out["entries"][3:]] == ["INVOKED_NOT_SUCCESS"] * 2
     assert bundle["entries"][1]["status"] == "REAL_INVOKED"  # the sealed bundle is untouched
@@ -911,3 +914,86 @@ def test_baseline_path_binds_the_task_files_for_gate_inputs(
     assert gen.target_file == ""  # never enables a Local assist request
     rfs._bind_gate_input_files(gen, root, target_file="target.py", test_file="test_hidden.py")
     assert gen.gate_input_test_file == ""
+
+
+# ---- round 4 (nexus-runtime #217 receipt-only rendering) ----
+def _fed_entry(status: str, refs: list[str], *, success: bool = False) -> dict[str, Any]:
+    return {
+        "name": "pregate",
+        "status": status,
+        "success": success,
+        "invoked_real": success,
+        "invoked_stub": False,
+        "skipped": False,
+        "evidence_ids": refs,
+        "evidence_refs": refs,
+        "runtime_evidence_ids": [f"rt:output:pregate:sha256:{'a' * 64}"],
+        "physical_callable": "capability_executor_registry:pregate",
+        "consumer_payload": {"fields": {"all_passed": success}} if success else {},
+        "has_consumer_payload": success,
+    }
+
+
+def test_fed_entry_renders_one_opaque_placeholder_for_pass_blocked_and_rejected() -> None:
+    """Outcome-bearing refs must not survive; an id shared with a visible entry must stay."""
+
+    from nexus.services.online_nexus_context import (
+        compact_capability_evidence_for_prompt,
+        withhold_fed_gate_verdicts,
+    )
+
+    shared = "ev_shared_bundle_seed"
+    learn = {
+        "name": "learn_mode",
+        "status": "REAL_INVOKED",
+        "success": True,
+        "invoked_real": True,
+        "evidence_ids": ["ev_learn_1", shared],
+        "physical_callable": "capability_executor_registry:learn_mode",
+    }
+    fed_variants = [
+        _fed_entry("REAL_INVOKED", ["ev_pregate_execution_t", shared], success=True),
+        _fed_entry("INVOKED_NOT_SUCCESS", ["ev_pregate_blocked_t"]),
+        _fed_entry("EVALUATED_REJECTED", ["ev_cap_pregate_1234abcd"]),
+        {"name": "pregate", "status": "SELECTED_NOT_EXECUTED", "evidence_ids": []},
+        {"name": "pregate", "status": "PENDING_OR_STAGE_OWNED", "evidence_ids": []},
+    ]
+    views = []
+    for entry in fed_variants:
+        top = [*entry.get("evidence_ids", []), "ev_learn_1", shared]
+        bundle = {
+            "schema": "nexus.capability_evidence_bundle.v1",
+            "bundle_hash": "b" * 64,
+            "baseline_hash": "c" * 64,
+            "entries": [entry, learn],
+            "evidence_ids": list(dict.fromkeys(top)),
+        }
+        withheld = withhold_fed_gate_verdicts(bundle)
+        assert withheld["evidence_ids"] == ["ev_learn_1", shared]
+        view = json.dumps(compact_capability_evidence_for_prompt(withheld), sort_keys=True)
+        assert "pregate_" not in view and "rt:output" not in view
+        views.append(view)
+    # Identical text for passed / blocked / rejected / not run (fixed hashes: nothing masked).
+    assert len(set(views)) == 1
+
+
+def test_strict_route_names_the_receipt_only_capabilities_and_the_pinned_runtime_accepts_it(
+    governed_admission: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nexus.research.gate_inputs import fed_capability_names
+
+    monkeypatch.delenv("NEXUS_SPRINT_GATE_INPUTS", raising=False)
+    monkeypatch.setenv("NEXUS_SYMMETRIC_PROMPT", "1")
+    (tmp_path / "cap").mkdir()
+    request, _root = _capture_request(tmp_path / "cap", monkeypatch)
+    assert request.route["receipt_only_capabilities"] == sorted(fed_capability_names())
+    root = _workspace(tmp_path)
+    plain, plain_prompts = _run(root, tmp_path, feed=False)
+    keyed, keyed_prompts = _run(
+        root,
+        tmp_path,
+        feed=False,
+        extra_route={"receipt_only_capabilities": sorted(fed_capability_names())},
+    )
+    assert keyed["online"]["status"] == plain["online"]["status"]
+    assert _mask_run_identity(keyed_prompts[0]) == _mask_run_identity(plain_prompts[0])
