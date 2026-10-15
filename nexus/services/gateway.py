@@ -34,6 +34,17 @@ from nexus.engine.patch.apply_engine import PatchApplyEngine
 logger = logging.getLogger(__name__)
 
 
+def _evidence_ref_status(status: Any) -> str:
+    """Status token safe to embed in an evidence ref (#2245).
+
+    Upper-cased, restricted to ``[A-Z0-9_]``, at most 32 characters; anything
+    that leaves nothing falls back to ``UNKNOWN``, so a ref can never carry
+    control characters or workflow-command text.
+    """
+    token = re.sub(r"[^A-Z0-9_]", "", str(status or "").upper())[:32]
+    return token or "UNKNOWN"
+
+
 
 def _run_cli_with_hard_timeout(
     command: list[str],
@@ -527,6 +538,16 @@ class BattlesuitGateway:
             local_stage = context.get("local", {}) if isinstance(context, dict) else {}
             local_response = local_stage.get("response", {}) if isinstance(local_stage, dict) else {}
             local_outputs = local_response.get("local_outputs", {}) if isinstance(local_response, dict) else {}
+            local_withheld_status = ""
+            from nexus.services.online_nexus_context import local_stage_forwardable
+
+            if local_outputs and not local_stage_forwardable(local_stage):
+                # #2245: a refused / failed Local stage may still carry the model
+                # response; its advice must not shape the online candidate.
+                local_withheld_status = _evidence_ref_status(
+                    local_stage.get("status") if isinstance(local_stage, Mapping) else None
+                )
+                local_outputs = {}
             local_context = ""
             capability_context_forwarded = False
             if local_outputs:
@@ -585,6 +606,11 @@ class BattlesuitGateway:
             refs = (
                 [f"gateway:{task_id}:provider_call"]
                 + ([f"gateway:{task_id}:local_context_forwarded"] if local_outputs else [])
+                + (
+                    [f"gateway:{task_id}:local_context_withheld:{local_withheld_status}"]
+                    if local_withheld_status
+                    else []
+                )
                 + ([f"gateway:{task_id}:capability_context_forwarded"] if capability_context_forwarded else [])
                 + ([f"gateway:{task_id}:compressed_context_applied"] if context.get("capability_context_compressed") else [])
                 if delivered
