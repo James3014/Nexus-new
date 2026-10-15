@@ -193,7 +193,7 @@ def _load_core_identity_function(root: Path) -> Any:
     source = path.read_bytes()
     module = types.ModuleType("_nexus_core_build_identity")
     module.__file__ = str(path)
-    exec(compile(source, str(path), "exec"), module.__dict__)  # noqa: S102 - pinned Core source
+    exec(compile(source, str(path), "exec"), module.__dict__)  # noqa: S102  # nosec B102 - the imported Core
     function = module.__dict__.get("core_identity")
     if not callable(function):
         raise RuntimeError("core_identity missing")
