@@ -4545,3 +4545,52 @@ def test_deferral_log_is_bounded(cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
         host.clock += 60
     assert cfg.deferrals.stat().st_size < 2000
     assert cfg.deferrals.with_name(cfg.deferrals.name + ".1").exists()
+
+
+def test_quiescence_rearm_for_new_candidates_is_rate_limited(cfg: ad.Config) -> None:
+    """A new candidate re-arms the warning only if the last one is at least an hour old."""
+
+    def episode(warned_ago: float) -> None:
+        cfg.state_dir.mkdir(parents=True, exist_ok=True)
+        cfg.quiescence_file.write_text(
+            json.dumps({
+                "since_epoch": NOW - 10 * 3600,
+                "candidate": "c" * 40,  # an earlier main commit
+                "blocking": ["stuck"],
+                "warned_at": ad._iso(NOW - warned_ago),
+            })
+        )
+
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": ["stuck"], "checked": 1}]
+    episode(warned_ago=20 * 60)
+    cycle(cfg, host, prober)
+    assert host.issue_comments == []
+    episode(warned_ago=ad.QUIESCENCE_REARM_MIN_SECONDS + 60)
+    cycle(cfg, host, prober)
+    assert len(host.issue_comments) == 1
+
+
+def test_quiescence_future_warned_at_never_mutes(cfg: ad.Config) -> None:
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    cfg.quiescence_file.write_text(
+        json.dumps({
+            "since_epoch": NOW - 10 * 3600,
+            "candidate": NEW,
+            "blocking": ["t"],
+            "warned_at": "9999-12-31T23:59:59Z",
+        })
+    )
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": ["t"], "checked": 1}]
+    cycle(cfg, host, prober)
+    assert len(host.issue_comments) == 1
+
+
+def test_quiescence_blocking_list_is_bounded(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    many = [f"t{index:04d}" for index in range(5000)]
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": many, "checked": 5000}]
+    result = cycle(cfg, host, prober)
+    assert len(result["quiescence"]["blocking"]) == 100
+    assert cfg.deferrals.stat().st_size < ad.DEFERRALS_MAX_BYTES

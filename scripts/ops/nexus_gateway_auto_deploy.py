@@ -156,6 +156,8 @@ IN_FLIGHT_ACTION_STATES = ("IN_PROGRESS", "ACTION_REQUIRED")
 # gets one loud warning per deferral episode naming the blocking tasks.
 QUIESCENCE_WARN_AFTER_SECONDS = 6 * 60 * 60
 QUIESCENCE_REWARN_SECONDS = 24 * 60 * 60
+# A new candidate re-arms the warning at most hourly (no comment per merge).
+QUIESCENCE_REARM_MIN_SECONDS = 60 * 60
 QUIESCENCE_ALERT_ISSUE = 2227
 QUIESCENCE_CLASSIFY_TIMEOUT_SECONDS = 120
 # Runs with the LIVE deployment's interpreter and tree, so tasks are classified
@@ -1849,14 +1851,21 @@ class _Cycle:
         ):
             since = now
         warned_at = _parse_iso(episode.get("warned_at"))
+        if warned_at is not None and warned_at > now:
+            warned_at = None  # a future marker can never mute a warning
         if warned_at is not None and (
-            episode.get("candidate") != candidate or now - warned_at >= QUIESCENCE_REWARN_SECONDS
+            (
+                episode.get("candidate") != candidate
+                and now - warned_at >= QUIESCENCE_REARM_MIN_SECONDS
+            )
+            or now - warned_at >= QUIESCENCE_REWARN_SECONDS
         ):
             # Re-arm: a new candidate or a day-old warning gets a fresh one, so a
             # past warning never mutes a later starvation.
             warned_at = None
         reason = str(verdict.get("reason") or "UNKNOWN")
-        blocking = sorted(verdict.get("task_ids") or [_safe_reason(reason)])
+        # Bounded: comments, episode and log lines never carry an unbounded list.
+        blocking = sorted(verdict.get("task_ids") or [_safe_reason(reason)])[:100]
         changed = episode.get("blocking") != blocking or episode.get("candidate") != candidate
         # A clock that went backwards never restarts the episode; it just ages 0.
         age = max(0.0, now - float(since))
