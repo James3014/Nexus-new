@@ -972,3 +972,18 @@ def test_a_header_whose_parenthetical_starts_with_a_not_run_word_opens_no_sectio
     # An aside that merely mentions Codex's state keeps the Gemini header alive.
     ok = f"Head reviewed: {HEAD}\n**Claude review**: ACCEPT\n**Gemini review (Codex pending)**\nVerdict: ACCEPT @ {HEAD}\n"
     assert rrc.evaluate(HEAD, RISKY, [_c(ok)], [])["status"] == "OK"
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        "**Codex review (still pending)**",
+        "**Codex review (gpt-5.6, not run)**",
+        "**Codex review (currently unavailable)**",
+        "**Codex review (run skipped)**",
+        '**Codex review ("pending")**',
+    ],
+)
+def test_a_not_run_word_anywhere_in_the_headers_own_parenthetical_opens_no_section(header):
+    body = f"Head reviewed: {HEAD}\n**Claude review**: ACCEPT\n{header}\nVerdict: ACCEPT @ {HEAD}\n"
+    assert rrc.evaluate(HEAD, RISKY, [_c(body)], [])["status"] == "MISSING_CROSS_MODEL"

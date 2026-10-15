@@ -352,10 +352,26 @@ def _binding(clause: str, line: str, head: str, comment_head: bool) -> bool:
     return comment_head
 
 
+_MODEL_WORDS = re.compile(r"\b(?:codex|gemini|gpt|claude|opus|sonnet)\b", re.IGNORECASE)
+
+
+def _own_status(line: str) -> bool:
+    """A parenthetical part that holds a not-run word and names no model beyond the
+    header's own is the header's status ("Codex review (still pending)"); a part that
+    names another model is an aside ("Gemini review (Codex pending)")."""
+    own = {m.lower() for m in _MODEL_WORDS.findall(_plain(line))}
+    plain = _plain(line, keep_parens=True)
+    return any(
+        _NOT_A_HEADER.search(part) and {m.lower() for m in _MODEL_WORDS.findall(part)} <= own
+        for paren in re.findall(r"\(([^)]*)\)", plain)
+        for part in re.split(r"[;,]", paren)
+    )
+
+
 def _label_family(line: str) -> str | None:
     """Family named by a heading, bold label, ``Reviewer:`` line or ``<label>:`` prefix."""
     plain = _plain(line, keep_parens=True).strip()
-    if _NOT_A_HEADER.search(_plain(line)) or _ASIDE_NOT_RUN.search(plain):
+    if _NOT_A_HEADER.search(_plain(line)) or _ASIDE_NOT_RUN.search(plain) or _own_status(line):
         # "Codex: unavailable", "Codex adversarial review: pending" open no section; a
         # not-run word inside a parenthetical aside ("Gemini ... (Codex: out of credits)")
         # does not disable the header (#2299, first live false negative on #2296).
