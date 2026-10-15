@@ -324,6 +324,8 @@ class LLMCandidateGenerator:
         # Set instead of visible_verifier when the sprint's visible-test target is not a single
         # regular, non-hidden test file: the verifier then fails closed without running anything.
         self.visible_test_target_invalid: str = ""
+        # Why no visible_verifier was bound (e.g. confinement unavailable); reported verbatim.
+        self.visible_verifier_unbound_reason: str = ""
 
     def _workspace_revision(self) -> str:
         try:
@@ -406,7 +408,19 @@ class LLMCandidateGenerator:
                     "visible_test_passed": False,
                 })
                 return verdict
-            if not delivered or self.visible_verifier is None:
+            if not delivered:
+                return verdict
+            if self.visible_verifier is None:
+                # No visible-test evaluator bound: the payload arrived but nothing was tested.
+                # Never "pass" -- the runtime records the verifier stage as not succeeded.
+                verdict.update({
+                    "status": VERIFIER_STATUS_NO_VERIFIER,
+                    "gate_passed": False,
+                    "evidence": "online_candidate_payload_present:no_visible_test_run",
+                    "visible_test_passed": False,
+                    "verifier_unbound_reason": self.visible_verifier_unbound_reason
+                    or "visible_verifier_not_bound",
+                })
                 return verdict
             return _visible_test_verdict(
                 verdict,
@@ -868,6 +882,27 @@ def _candidate_out_from_online_stage(online_stage: Mapping[str, Any]) -> dict[st
 
 
 VISIBLE_TEST_TARGET_INVALID = "visible_test_target_invalid"
+VERIFIER_STATUS_NO_VERIFIER = "no_verifier"
+VISIBLE_TEST_CONFINEMENT_UNAVAILABLE = "visible_test_confinement_unavailable"
+CONFINE_VISIBLE_TEST_ENV = "NEXUS_CONFINE_VISIBLE_TEST"
+_CONFINED_TEST_RUNNER_MODULE = "nexus.engine.confined_test_runner"
+
+
+def visible_test_confinement_available() -> bool:
+    """True only when the visible test would run confined (opt-in env + confined runner present).
+
+    The runtime verifier executes model-produced code, so it is bound only when
+    ``NEXUS_CONFINE_VISIBLE_TEST=1`` and the confined test runner module exists; otherwise it
+    adds no execution of its own (the sprint's pre-existing visible-test run is unchanged).
+    """
+    if os.environ.get(CONFINE_VISIBLE_TEST_ENV, "").strip() != "1":
+        return False
+    try:
+        import importlib.util
+
+        return importlib.util.find_spec(_CONFINED_TEST_RUNNER_MODULE) is not None
+    except (ImportError, ValueError):
+        return False
 
 
 def visible_test_target_error(repo_root: Path, test_file: str) -> str:
@@ -1602,6 +1637,13 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         # Only the online generator has the seam (tests may substitute the generator class).
         if visible_target_error:
             setattr(llm_generator, "visible_test_target_invalid", visible_target_error)
+        elif not visible_test_confinement_available():
+            # Model code is never executed by the verifier without confinement (#2211).
+            setattr(
+                llm_generator,
+                "visible_verifier_unbound_reason",
+                VISIBLE_TEST_CONFINEMENT_UNAVAILABLE,
+            )
         else:
             setattr(llm_generator, "visible_verifier", _runtime_visible_verifier)
 

@@ -380,9 +380,9 @@ def test_integration_manager_is_never_selected_by_the_flow_plan() -> None:
         assert "integration_manager" not in plan[key]
     if "integration_manager" in raw["selected_capabilities"]:
         assert "integration_manager" in plan["forbidden_capabilities"]
-        assert plan["signal_snapshot"]["archived_capabilities_dropped"] == {
-            "integration_manager": "archived_retired_integration_manager_2026-10-13"
-        }
+        assert plan["signal_snapshot"]["archived_capabilities_dropped"]["integration_manager"] == (
+            "archived_retired_integration_manager_2026-10-13"
+        )
 
     forced = {
         **raw,
@@ -423,7 +423,15 @@ def test_stage_simulated_flag_disagreeing_with_boundary_stays_simulated() -> Non
         "refs_resolved": True,
     }
     assert runtime_attests_real({"name": "pregate"}, bare) is False
-    assert runtime_attests_real({"name": "pregate"}, {**bare, "simulated": False}) is True
+    succeeded = {"kind": "succeeded", "reason": "SUCCEEDED"}
+    assert (
+        runtime_attests_real(
+            {"name": "pregate"}, {**bare, "simulated": False, "disposition": succeeded}
+        )
+        is True
+    )
+    # Sealed refs without the executor's own success record are never real (Codex #2212 F1).
+    assert runtime_attests_real({"name": "pregate"}, {**bare, "simulated": False}) is False
     assert (
         runtime_attests_real({"name": "pregate"}, {**bare, "simulated": False, "evidence_refs": []})
         is False
@@ -761,7 +769,9 @@ def test_refs_resolve_only_through_this_capabilitys_real_invoked_entry() -> None
 
     record = {
         "physical_callable": "capability_executor_registry:pregate",
-        "response": {"response": {"outcome": {"result": {"commands_run": 2}}}},
+        "response": {
+            "response": {"outcome": {"semantic_status": "SUCCEEDED", "result": {"commands_run": 2}}}
+        },
     }
     other = {
         "name": "codeintel",
@@ -1190,3 +1200,82 @@ def test_bundle_requires_real_invoked_status_and_name_and_guards_bad_lists() -> 
         "reason": "TARGET_SYMBOL_REQUIRED",
         "missing_inputs": [],
     }
+
+
+def test_bundle_entry_alone_never_attests_real_without_a_successful_executor_record() -> None:
+    """Codex #2212 F1: a REAL_INVOKED bundle entry needs capability_results[name] with success."""
+
+    from nexus.research.flow.unified_capability_projection import runtime_attestation
+    from scripts.bench.strict_llm_baseline import classify_receipt
+
+    stage = _stage("pregate", "INVOKED")
+    entry = _bundle(stage)["entries"]
+
+    def attest(record: dict | None) -> tuple[str, dict, dict]:
+        receipt: dict = {
+            "task_id": "t",
+            "capabilities": [stage],
+            "capability_evidence_bundle": {"entries": entry},
+        }
+        if record is not None:
+            receipt["capability_results"] = {"pregate": record}
+        row = project_unified_capability_stages([receipt])[0]
+        out = overlay_unified_capability_receipts([_stale_flow_receipt("pregate")], [row])[0]
+        return runtime_attestation({"name": "pregate"}, row), out, row
+
+    # No executor record at all: the bundle entry alone resolves nothing.
+    kind, out, row = attest(None)
+    assert row["refs_resolved"] is False
+    assert kind != "real" and classify_receipt(out) != "real"
+    assert out["receipt_base"]["claim_boundary"]["simulated"] is True
+
+    def record(outcome: dict) -> dict:
+        return {
+            "physical_callable": "capability_executor_registry:pregate",
+            "response": {"response": {"outcome": outcome}},
+        }
+
+    # A record with output but no success status (failed / evaluated-rejected): not real.
+    for outcome in (
+        {"semantic_status": "FAILED", "result": {"commands_run": 2}},
+        {"result": {"commands_run": 2}},
+        {"semantic_status": "UNVERIFIED", "missing_evidence": ["verifier_status_not_pass"]},
+    ):
+        kind, out, row = attest(record(outcome))
+        assert row["refs_resolved"] is False, outcome
+        assert kind != "real" and classify_receipt(out) != "real", outcome
+        assert out["receipt_base"]["claim_boundary"]["simulated"] is True, outcome
+
+    # Bundle entry + successful record with output: real.
+    kind, out, row = attest(record({"semantic_status": "SUCCEEDED", "result": {"commands_run": 2}}))
+    assert row["refs_resolved"] is True
+    assert kind == "real" and classify_receipt(out) == "real"
+
+
+def test_no_runtime_stages_still_marks_selected_non_executable_nodes() -> None:
+    """Codex #2212 F4b: with no runtime stages the overlay still applies NOT_EXECUTABLE."""
+
+    from scripts.bench.strict_llm_baseline import classify_receipt
+
+    direct = _stale_flow_receipt("direct_mode")
+    plain = _stale_flow_receipt("pregate")
+    for stages in ([], None):
+        out = overlay_unified_capability_receipts([dict(direct), dict(plain)], stages)
+        assert classify_receipt(out[0]) == "not_executable"
+        assert out[0]["failure_reason"].startswith("NOT_EXECUTABLE:")
+        assert out[1] == plain  # executable receipts are left unchanged
+
+
+def test_archived_name_only_in_optional_capabilities_is_recorded_as_dropped() -> None:
+    """f1 #2212 finding 4: an archived optional-only name is audited, not silently stripped."""
+
+    from nexus.research.flow.capability_planning import drop_archived_capabilities
+
+    plan = drop_archived_capabilities({
+        "selected_capabilities": ["pregate"],
+        "optional_capabilities": ["integration_manager"],
+        "signal_snapshot": {},
+    })
+    assert plan["optional_capabilities"] == []
+    assert "integration_manager" in plan["forbidden_capabilities"]
+    assert "integration_manager" in plan["signal_snapshot"]["archived_capabilities_dropped"]

@@ -78,7 +78,8 @@ def test_receipt_classification() -> None:
     assert classify_receipt(_receipt("a", simulated=True)) == "simulated"
     assert classify_receipt(_receipt("a", simulated=False, refs=())) == "simulated"
     assert classify_receipt(_receipt("a", simulated=False, invoked=False)) == "selected_not_invoked"
-    assert classify_receipt(_receipt("a", simulated=None)) == "real"
+    # No claim boundary attests nothing: never real (Codex #2212 F3).
+    assert classify_receipt(_receipt("a", simulated=None)) == "real_self_reported"
     assert classify_receipt(_receipt("a", simulated=None, refs=())) == "simulated"
 
 
@@ -158,10 +159,15 @@ def test_reclassify_report_dir(tmp_path: Path, capsys: Any) -> None:
 def test_unattested_real_receipt_is_reported_separately() -> None:
     rows = [_row("with_nexus", "backfill", [_receipt("hyper", simulated=None)])]
     arm = _summarize_with_strict_baseline(rows, strict=True)["with_nexus"]
-    assert rows[0]["capabilities_real"] == ["hyper"]
+    # Reported for visibility, never counted real or as uplift (Codex #2212 F3).
+    assert rows[0]["capabilities_real"] == []
+    assert rows[0]["capabilities_real_self_reported"] == ["hyper"]
     assert rows[0]["capabilities_real_unattested"] == ["hyper"]
-    assert arm["real_capability_rows_n"] == 1
+    assert rows[0]["capability_not_exercised"] is True
+    assert arm["real_capability_rows_n"] == 0
     assert arm["attested_real_capability_rows_n"] == 0
+    assert arm["nexus_uplift_solved_n"] == 0
+    assert arm["capability_tally"].get("hyper", {}).get("real", 0) == 0
 
 
 def test_claim_boundary_takes_the_stricter_of_receipt_base_and_runtime() -> None:

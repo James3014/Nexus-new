@@ -229,9 +229,10 @@ def _bundle_index(receipt: Mapping[str, Any], name: str) -> set[str]:
 
     Only the ``capability_evidence_bundle`` entry whose ``name`` is this capability, whose
     status is ``REAL_INVOKED`` (and ``invoked_real`` is not false) and which has a
-    ``physical_callable`` counts; when the capability's executor record is present it must
-    also carry physical output.  Another capability's entry or a failed / stub / pending entry
-    never resolve a ref.
+    ``physical_callable`` counts, and only when the capability's own executor record
+    (``capability_results[name]``) is present, reports a success status and carries physical
+    output.  A bundle entry alone never resolves a ref; another capability's entry or a
+    failed / stub / pending entry never resolve a ref.
     """
 
     index: set[str] = set()
@@ -239,7 +240,9 @@ def _bundle_index(receipt: Mapping[str, Any], name: str) -> set[str]:
     entries = bundle.get("entries") if isinstance(bundle, Mapping) else None
     results = receipt.get("capability_results")
     record = results.get(name) if isinstance(results, Mapping) else None
-    if record is not None and not _physical_output(record):
+    if not isinstance(record, Mapping) or not _physical_output(record):
+        return index
+    if outcome_disposition(record).get("kind") != "succeeded":
         return index
     for entry in entries if isinstance(entries, (list, tuple)) else ():
         if not isinstance(entry, Mapping) or str(entry.get("name") or "") != name:
@@ -504,7 +507,8 @@ def runtime_attestation(receipt: Mapping[str, Any], stage: Mapping[str, Any] | N
        not supplied (``outcome_disposition`` kind ``missing_inputs``): it did not run.
     3. ``failed_or_refused`` -- started and did not succeed for any other reason (other
        refusal codes, ``MALFORMED_*``, exceptions, no success status).
-    4. ``real`` -- every ref sealed in this capability's own ``REAL_INVOKED`` bundle entry.
+    4. ``real`` -- every ref sealed in this capability's own ``REAL_INVOKED`` bundle entry
+       and the capability's executor record succeeded (a bundle entry alone is never real).
     5. ``real_self_reported`` -- refs resolve only through the capability's own executor
        record, which succeeded with physical output, or is a gate that evaluated and rejected
        (``gate_passed`` stays false).
@@ -541,7 +545,8 @@ def runtime_attestation(receipt: Mapping[str, Any], stage: Mapping[str, Any] | N
             return ATTESTATION_BLOCKED_MISSING_INPUTS
         if kind == "failed_or_refused":
             return ATTESTATION_FAILED_OR_REFUSED
-        if source.get("refs_resolved") is True:
+        if source.get("refs_resolved") is True and kind == "succeeded":
+            # Sealed refs plus the executor's own success record: both are required.
             return ATTESTATION_REAL
         if source.get("refs_self_reported") is True:
             if kind == "evaluated_rejected":
@@ -736,7 +741,8 @@ def overlay_unified_capability_receipts(
     * no runtime stage -> ``unified_runtime:NOT_SELECTED`` (the executing planner did not
       select it).
     * planner node with no executable body (``not_executable_reason``) and no runtime-attested
-      real invocation -> explicit ``NOT_EXECUTABLE:<class>`` receipt.
+      real invocation -> explicit ``NOT_EXECUTABLE:<class>`` receipt, also when the runtime
+      produced no stages at all (other receipts are then returned unchanged).
     Receipts that are already invoked keep their verdict; they only gain the runtime stage's
     status and gate result as ``unified_runtime_status`` / ``unified_runtime_gate_passed``.
     """
@@ -744,8 +750,7 @@ def overlay_unified_capability_receipts(
     by_name = {
         str(stage.get("name")): stage for stage in stages or () if isinstance(stage, Mapping)
     }
-    if not by_name:
-        return receipts
+    no_runtime_stages = not by_name
     out: list[dict[str, Any]] = []
     for receipt in receipts:
         if not isinstance(receipt, dict):
@@ -789,6 +794,10 @@ def overlay_unified_capability_receipts(
                 else UNIFIED_RUNTIME_NOT_SELECTED
             )
             out.append(updated)
+            continue
+        if no_runtime_stages:
+            # No runtime stages at all: only the static NOT_EXECUTABLE marking above applies.
+            out.append(receipt)
             continue
         if stage is None:
             # Selected by the flow plan, but the executing runtime's planner never selected

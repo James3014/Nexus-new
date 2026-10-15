@@ -136,6 +136,10 @@ def test_without_visible_evaluator_the_verifier_claims_no_test_proof(tmp_path: P
     response = context["verifier"]["response"]
     assert "verifier_status" not in response
     assert "verifier_artifact" not in response
+    # Codex #2212 F4: a delivered payload with nothing tested is never "pass".
+    assert response["status"] == "no_verifier"
+    assert response["gate_passed"] is False
+    assert context["verifier"]["gate_passed"] is False
     for verdict in _gates(context).values():
         assert verdict["gate_passed"] is False
 
@@ -274,6 +278,8 @@ def test_memo_hit_and_miss_give_the_sprint_the_same_visible_evaluation(
 
     monkeypatch.setenv("NEXUS_FORCE_LLM_DESPITE_LEARN_SLO", "1")
     monkeypatch.setenv("NEXUS_FORCE_INPLACE_EXECUTOR", "1")
+    # The verifier is bound only when the visible test runs confined (#2211); simulate that.
+    monkeypatch.setattr(sprint, "visible_test_confinement_available", lambda: True)
     outputs = {}
     for call_verifier in (True, False):
         monkeypatch.setattr(sprint, "LLMCandidateGenerator", make_generator(call_verifier))
@@ -298,3 +304,97 @@ def test_memo_hit_and_miss_give_the_sprint_the_same_visible_evaluation(
     assert normalise(outputs[True]) == normalise(outputs[False])
     assert normalise(seen["verifier_stdout"]) == normalise(outputs[True])
     assert "1 failed" in outputs[True]  # --maxfail=1, same as the sprint's own command
+
+
+def test_no_verifier_status_is_not_success_in_the_real_runtime_callback(tmp_path: Path) -> None:
+    """Codex #2212 F4a: UnifiedRuntime's own callback runner records the stage as FAILED."""
+
+    from nexus_runtime.kernel import unified_runtime as kernel
+
+    generator = LLMCandidateGenerator(tmp_path, safe_mode=True, target_file="demo.py")
+    generator._workspace_revision = lambda: "revision-verifier-004"
+    generator.visible_verifier_unbound_reason = "visible_test_confinement_unavailable"
+    captured: dict[str, Any] = {}
+
+    def ask_unified(request: Any, *, verifier: Any = None, **_kwargs: Any) -> dict[str, Any]:
+        online = {
+            "status": "SUCCEEDED",
+            "invoked": True,
+            "response": {"response": json.dumps(EDIT), "raw_response": ""},
+        }
+        captured["payload"] = dict(verifier({"task_id": request.task_id, "online": online}))
+        return {"task_id": request.task_id, "online": online}
+
+    generator.gateway.ask_unified = ask_unified  # type: ignore[method-assign]
+    generator._ask_unified_candidate(
+        prompt="p", payload="x", task="t", seed=1, attempt=1, model="m", source_code=SOURCE
+    )
+    payload = captured["payload"]
+    assert payload["status"] == "no_verifier"
+    assert payload["gate_passed"] is False
+    assert payload["verifier_unbound_reason"] == "visible_test_confinement_unavailable"
+    run_callback = next(
+        value
+        for value in vars(kernel.UnifiedRuntime).values()
+        if getattr(getattr(value, "__func__", value), "__name__", "") == "_run_callback"
+    )
+    run_callback = getattr(run_callback, "__func__", run_callback)
+    stage = run_callback(
+        "verifier", lambda _ctx: payload, {"task_id": payload["task_id"]}, required=True
+    )
+    assert stage["status"] == "FAILED"
+    assert stage["gate_passed"] is False
+
+
+def test_sprint_binds_no_visible_verifier_without_confinement(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """Codex #2212 F2: without confinement the verifier executes no model code at all."""
+
+    import nexus.research.sprint_service as sprint
+
+    bound: dict[str, Any] = {}
+
+    class _Generator:
+        visible_verifier = None
+        visible_test_target_invalid = ""
+        visible_verifier_unbound_reason = ""
+        model_chain = ["m"]
+
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            bound["generator"] = self
+
+        def generate(self, **_kwargs: Any) -> tuple[str, dict[str, Any]]:
+            raise sprint.LLMCandidateError("llm_no_patch", {"model_calls": 0})
+
+    monkeypatch.setattr(sprint, "LLMCandidateGenerator", _Generator)
+    monkeypatch.setenv("NEXUS_FORCE_LLM_DESPITE_LEARN_SLO", "1")
+    monkeypatch.setenv("NEXUS_FORCE_INPLACE_EXECUTOR", "1")
+    (tmp_path / "demo.py").write_text(SOURCE)
+    (tmp_path / "test_demo.py").write_text("def test_ok():\n    pass\n")
+    # Env set but the confined runner module is absent on this tree: still unbound.
+    monkeypatch.setenv("NEXUS_CONFINE_VISIBLE_TEST", "1")
+    monkeypatch.setattr(sprint, "_CONFINED_TEST_RUNNER_MODULE", "nexus._absent_confined_runner")
+    assert sprint.visible_test_confinement_available() is False
+    monkeypatch.delenv("NEXUS_CONFINE_VISIBLE_TEST")
+    assert sprint.visible_test_confinement_available() is False
+    try:
+        sprint.run_hyper_sprint(
+            repo_root=tmp_path,
+            config=sprint.SprintConfig(
+                task="fix normalize",
+                target_file="demo.py",
+                test_file="test_demo.py",
+                candidate_count=1,
+                llm_mode=True,
+            ),
+        )
+    except Exception:  # noqa: BLE001 - only the binding matters here
+        pass
+    generator = bound["generator"]
+    assert generator.visible_verifier is None
+    assert generator.visible_verifier_unbound_reason == "visible_test_confinement_unavailable"
+    # Env + an importable confined runner module: available.
+    monkeypatch.setenv("NEXUS_CONFINE_VISIBLE_TEST", "1")
+    monkeypatch.setattr(sprint, "_CONFINED_TEST_RUNNER_MODULE", "nexus.research.sprint_service")
+    assert sprint.visible_test_confinement_available() is True

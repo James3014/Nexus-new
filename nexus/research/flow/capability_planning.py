@@ -108,8 +108,8 @@ def _strip_archived(
             if name:
                 if isinstance(entry, dict):
                     removed_after[name] = entry.get("after")
-                if not key.startswith("optional"):
-                    dropped[name] = ARCHIVED_CAPABILITY_REASONS[name]
+                # Every strip is recorded, optional lists included, so the audit sees it.
+                dropped[name] = ARCHIVED_CAPABILITY_REASONS[name]
                 continue
             kept.append(_strip_archived(entry, dropped, depth + 1, key, in_context))
         for index, entry in enumerate(kept):
