@@ -7,6 +7,7 @@ Usage:
     python scripts/ops/check_policy_lane_gate.py --policy-id P-ROUTE-01 --action modify
     python scripts/ops/check_policy_lane_gate.py --policy-id P-AUTO-01 --action observe
 """
+
 import argparse
 import ast
 import json
@@ -143,18 +144,27 @@ def _imported_modules(path: Path, repo_root: Path) -> set[str]:
     return found
 
 
+_DEFS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+
+
 def _entrypoint_exists(path: Path, selector: str) -> bool:
-    """``file::Class::test_name[param]`` — every named component is a def/class in the file."""
+    """``file::Class::test_name[param]`` names a def/class chain the way pytest collects it.
+
+    The first component must be a top-level def/class of the module, each next
+    component a def/class directly inside the previous one. ``file::a::b`` with
+    two unrelated top-level functions is not a node.
+    """
     tree = _parse(path)
     if tree is None:
         return False
-    defined = {
-        node.name
-        for node in ast.walk(tree)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-    }
     names = [part.strip() for part in selector.split("[", 1)[0].split("::") if part.strip()]
-    return all(name in defined for name in names)
+    body: list[ast.stmt] = list(tree.body)
+    for name in names:
+        match = next((n for n in body if isinstance(n, _DEFS) and n.name == name), None)
+        if match is None:
+            return False
+        body = list(match.body)
+    return True
 
 
 def check_enforcement_wiring(policy: dict, repo_root: Path | None = None) -> list[str]:
@@ -194,6 +204,11 @@ def check_enforcement_wiring(policy: dict, repo_root: Path | None = None) -> lis
     callers = py_sources - guard_modules
     if not callers:
         return ["ENFORCEMENT_CALLERS_MISSING"]
+    # A caller must be a real module inside the repo; a name that only appears in an
+    # import statement proves nothing.
+    absent = sorted(m for m in callers if _module_file(m, root) is None)
+    if absent:
+        return [f"ENFORCEMENT_CALLER_NOT_FOUND: {', '.join(absent)}"]
 
     missing: list[str] = []
     reached = False
@@ -359,7 +374,11 @@ def check_lane_gate(policy_id: str, action: str, override_receipt: dict | None =
 def main():
     parser = argparse.ArgumentParser(description="Policy Lane Gate Checker")
     parser.add_argument("--policy-id", required=True, help="Policy ID to check")
-    parser.add_argument("--action", required=True, choices=["modify", "promote", "cutover", "observe", "version_bump"])
+    parser.add_argument(
+        "--action",
+        required=True,
+        choices=["modify", "promote", "cutover", "observe", "version_bump"],
+    )
     parser.add_argument("--override-receipt", help="Path to override receipt JSON")
     args = parser.parse_args()
 

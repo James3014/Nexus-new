@@ -271,6 +271,32 @@ def test_wiring_check_edge_cases(tmp_path: Path) -> None:
     assert check_enforcement_wiring(parametrized, root) == []
     colon_param = _fake_policy(test_entrypoints=["tests/test_caller.py::test_run[a::b]"])
     assert check_enforcement_wiring(colon_param, root) == []
+    # Two unrelated top-level functions do not form a pytest node.
+    (root / "tests" / "test_two.py").write_text(
+        "from pkg import caller\n\ndef test_a():\n    assert caller\n\ndef test_b():\n    pass\n"
+        "\nclass TestC:\n    def test_m(self):\n        pass\n",
+        encoding="utf-8",
+    )
+    chained = _fake_policy(test_entrypoints=["tests/test_two.py::test_a::test_b"])
+    assert check_enforcement_wiring(chained, root) == [
+        "TEST_ENTRYPOINT_NOT_FOUND: tests/test_two.py::test_a::test_b",
+        "TEST_ENTRYPOINT_NOT_BEHAVIOURAL",
+    ]
+    in_class = _fake_policy(test_entrypoints=["tests/test_two.py::TestC::test_m"])
+    assert check_enforcement_wiring(in_class, root) == []
+    wrong_class = _fake_policy(test_entrypoints=["tests/test_two.py::TestC::test_a"])
+    assert check_enforcement_wiring(wrong_class, root) == [
+        "TEST_ENTRYPOINT_NOT_FOUND: tests/test_two.py::TestC::test_a",
+        "TEST_ENTRYPOINT_NOT_BEHAVIOURAL",
+    ]
+    # A caller named in source_file must exist inside the repo, even if a test imports it.
+    (root / "tests" / "test_ghost.py").write_text(
+        "from pkg import ghost\n\ndef test_g():\n    assert ghost\n", encoding="utf-8"
+    )
+    ghost = _fake_policy(
+        source_file="pkg/guard.py; pkg/ghost.py", test_entrypoints=["tests/test_ghost.py::test_g"]
+    )
+    assert check_enforcement_wiring(ghost, root) == ["ENFORCEMENT_CALLER_NOT_FOUND: pkg.ghost"]
     # A stale entry is reported even when another entry reaches a caller.
     stale_plus_good = _fake_policy(
         test_entrypoints=["tests/test_caller.py::test_run", "tests/gone.py::test_x"]
@@ -374,6 +400,14 @@ def test_lane_gate_rejects_guard_only_entrypoint_for_real_policy(
         "    assert check_research_output\n",
         encoding="utf-8",
     )
+    # The production callers must exist under the tmp root (ENFORCEMENT_CALLER_NOT_FOUND
+    # otherwise), so the verdict below is about the entrypoint, not the callers.
+    for caller in (
+        "nexus/app/research_flow_service.py",
+        "nexus/core/capability_executor_registry.py",
+    ):
+        (tmp_path / caller).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / caller).write_text("", encoding="utf-8")
     original = load_manifest()
     tampered = {
         **original,
@@ -427,6 +461,11 @@ def test_real_manifest_hard_lane_policies_are_behaviourally_tested(action: str) 
         result = check_lane_gate(policy["policy_id"], action)
         assert "TEST_ENTRYPOINT_NOT_BEHAVIOURAL" not in result["errors"], policy["policy_id"]
         assert "ENFORCEMENT_MODE_INVALID" not in result["errors"], policy["policy_id"]
+        if action == "modify" and policy["rollback_drill_status"] != "no-drill":
+            # A drilled hard-lane policy must stay modifiable; relabelling it not_wired
+            # or breaking its wiring would turn this red (and the lane workflow with it).
+            assert result["allowed"] is True, (policy["policy_id"], result["errors"])
+            assert policy["enforcement_mode"] in ("block", "record_only"), policy["policy_id"]
 
 
 def test_drill_updater_keeps_schema_fields_and_distribution() -> None:
