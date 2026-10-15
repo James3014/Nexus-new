@@ -1001,9 +1001,173 @@ def test_env_cache_keys_cover_interpreter_pythonpath_and_version(tmp_path, monke
 
 def test_scorer_version_is_recorded_in_spec_amendment():
     root = Path(__file__).resolve().parents[2]
-    assert ros.SCORER_VERSION == "1.1.0"
+    assert ros.SCORER_VERSION == "1.2.0"
     amendments = (root / "docs/research/REAL_OUTCOME_SCORER_SPEC.amendments.md").read_text()
     assert f'SCORER_VERSION = "{ros.SCORER_VERSION}"' in amendments
     spec = (root / ros.SPEC_RELATIVE_PATH).read_bytes()
     # The pre-registered spec itself is frozen (spec header); amendments live beside it.
     assert hashlib.sha256(spec).hexdigest().startswith("315d95de21ea7ec8")
+
+
+# Amendment A5: GOLD port fallback when main moved between BASE and the merge.
+
+STATUS_BASE = "status: base\nline2\n"
+OLD_MUL_TEST = "def test_placeholder():\n    assert True  # base\n"
+DRIFT_TEST_SUB = (
+    "def test_placeholder():\n    assert True  # drift\n\n\n"
+    "def test_sub_from_drift():\n    from pkg.extra import sub\n\n    assert sub(3, 1) == 2\n"
+)
+
+
+def _drift_then_fix(fx: Fixture, drift: dict[str, str], fix: dict[str, str]) -> str:
+    """From BASE: one drift commit on main, then the human fix on top (M^1 = drift)."""
+    up = fx.upstream
+    _git(up, "checkout", "-q", "--detach", fx.base)
+    _write(up, drift)
+    _git(up, "add", "-A")
+    _git(up, "commit", "-qm", "main moved")
+    _write(up, fix)
+    _git(up, "add", "-A")
+    _git(up, "commit", "-qm", "human fix after drift")
+    return _git(up, "rev-parse", "HEAD").strip()
+
+
+def _fix_with(test_mul: str) -> dict[str, str]:
+    return {"pkg/calc.py": FIXED, "tests/test_mul.py": test_mul}
+
+
+def test_clean_port_records_v1_method_only(tmp_path, fx):
+    r = _score(tmp_path, fx, fx.task(fx.gold_diff))
+    assert r["gold_port_method"] == ros.GOLD_PORT_3WAY
+    assert "gold_port_dropped_non_code_paths" not in r
+    assert "gold_port_test_files_from_merge" not in r
+    assert r["label"] == ros.RESOLVED
+
+
+def test_docs_conflict_drops_doc_and_keeps_oracle(tmp_path):
+    # Class "conflict only in a non-test doc/data file": v1 GOLD_PORT_FAILED.
+    fx = Fixture(tmp_path, extra_base={"docs/status.md": STATUS_BASE})
+    merge = _drift_then_fix(
+        fx,
+        {"docs/status.md": "status: drift\nline2\n"},
+        {**_fix_with(MUL_TEST), "docs/status.md": "status: fixed\nline2\n"},
+    )
+    r = ros.score_task(fx.task(b"", merge=merge), _ctx(tmp_path, fx), candidate_override="gold")[
+        "receipt"
+    ]
+    assert r["gold_port_method"] == ros.GOLD_PORT_PER_FILE
+    assert r["gold_port_dropped_non_code_paths"] == ["docs/status.md"]
+    assert r["gold_port_test_files_from_merge"] == []
+    assert r["f2p_total"] == 3
+    assert r["label"] == ros.RESOLVED
+
+
+def test_test_file_conflict_takes_merge_tree_test_file(tmp_path):
+    # Class "conflict in an oracle test file": the test file is set to its merge-commit
+    # content; F2P still needs BASE+T fail and GOLD pass.
+    fx = Fixture(tmp_path, extra_base={"tests/test_mul.py": OLD_MUL_TEST})
+    merge = _drift_then_fix(
+        fx,
+        {"tests/test_mul.py": OLD_MUL_TEST.replace("# base", "# drift")},
+        _fix_with(OLD_MUL_TEST.replace("# base", "# fix") + "\n\n" + MUL_TEST),
+    )
+    r = ros.score_task(fx.task(b"", merge=merge), _ctx(tmp_path, fx), candidate_override="gold")[
+        "receipt"
+    ]
+    assert r["gold_port_method"] == ros.GOLD_PORT_PER_FILE
+    assert r["gold_port_test_files_from_merge"] == ["tests/test_mul.py"]
+    assert r["f2p_total"] == 3
+    assert "tests.test_mul::test_placeholder" in r["p2p_a"]
+    assert r["label"] == ros.RESOLVED
+
+
+def test_test_file_missing_at_base_takes_merge_tree_test_file(tmp_path, fx):
+    # Class "the PR modifies a test file that a later main commit added": git apply
+    # reports "does not exist in index" under v1.
+    merge = _drift_then_fix(
+        fx,
+        {"tests/test_mul.py": OLD_MUL_TEST},
+        _fix_with(OLD_MUL_TEST + "\n\n" + MUL_TEST),
+    )
+    r = ros.score_task(fx.task(b"", merge=merge), _ctx(tmp_path, fx), candidate_override="gold")[
+        "receipt"
+    ]
+    assert r["gold_port_test_files_from_merge"] == ["tests/test_mul.py"]
+    assert r["f2p_total"] == 3
+    assert r["label"] == ros.RESOLVED
+
+
+def test_source_conflict_stays_gold_port_failed(tmp_path, fx):
+    # A Python source conflict is never dropped or taken from the merge tree.
+    merge = _drift_then_fix(
+        fx,
+        {
+            "pkg/calc.py": BUGGY.replace(
+                "def mul(a, b):\n    return a + b", "def mul(a, b):\n    return b + a"
+            )
+        },
+        _fix_with(MUL_TEST),
+    )
+    r = _score(tmp_path, fx, fx.task(fx.gold_diff, merge=merge))
+    assert (r["label"], r["sub_reason"]) == (ros.NOT_SCORABLE_ORACLE_INVALID, "GOLD_PORT_FAILED")
+    assert r["gold_port_failed_paths"] == ["pkg/calc.py"]
+    assert r["detail"] == "pr:7"
+
+
+def test_fallback_cannot_make_a_wrong_candidate_resolved(tmp_path):
+    # Main moved: a drift commit adds pkg/extra.py with a test in the oracle test file and
+    # a doc line; the human fix conflicts with both. The merge-tree test file carries the
+    # drift test, which fails on GOLD (no pkg/extra.py there), so it is never F2P.
+    fx = Fixture(
+        tmp_path,
+        extra_base={"tests/test_mul.py": OLD_MUL_TEST, "docs/status.md": STATUS_BASE},
+    )
+    merge = _drift_then_fix(
+        fx,
+        {
+            "tests/test_mul.py": DRIFT_TEST_SUB,
+            "pkg/extra.py": "def sub(a, b):\n    return a - b\n",
+            "docs/status.md": "status: drift\nline2\n",
+        },
+        {
+            **_fix_with(DRIFT_TEST_SUB.replace("# drift", "# fix") + "\n\n" + MUL_TEST),
+            "docs/status.md": "status: fixed\nline2\n",
+        },
+    )
+    ctx = _ctx(tmp_path, fx)
+    docs_only = fx.diff_from_base({"docs/status.md": "status: fixed\nline2\n"})
+    partial_mul = fx.diff_from_base({
+        "pkg/calc.py": BUGGY.replace(
+            "def mul(a, b):\n    return a + b",
+            "def mul(a, b):\n    return 6 if (a, b) == (2, 3) else a + b",
+        )
+    })
+    wrong = (
+        # implements only the drift (the sub() that the merge-tree test file checks)
+        (b"", {"pkg/extra.py": "def sub(a, b):\n    return a - b\n"}, ros.UNRESOLVED),
+        # copies only the dropped doc change
+        (docs_only, None, ros.UNRESOLVED),
+        # fixes one of three F2P nodes
+        (partial_mul, None, ros.PARTIAL),
+    )
+    for diff, untracked, expected in wrong:
+        r = ros.score_task(fx.task(diff, untracked=untracked, merge=merge), ctx)["receipt"]
+        assert r["gold_port_method"] == ros.GOLD_PORT_PER_FILE
+        assert r["gold_port_test_files_from_merge"] == ["tests/test_mul.py"]
+        assert r["gold_port_dropped_non_code_paths"] == ["docs/status.md"]
+        assert "tests.test_mul::test_sub_from_drift" not in r["f2p"]
+        assert r["f2p_total"] == 3
+        assert r["label"] == expected
+    honest = fx.diff_from_base({"pkg/calc.py": FIXED})
+    r = ros.score_task(fx.task(honest, merge=merge), ctx)["receipt"]
+    assert r["label"] == ros.RESOLVED
+
+
+def test_droppable_classification():
+    assert ros.is_droppable_non_code("docs/a.md")
+    assert ros.is_droppable_non_code("README.md")
+    assert ros.is_droppable_non_code(".github/actions/x/action.yml")
+    assert not ros.is_droppable_non_code("pkg/a.py")
+    assert not ros.is_droppable_non_code("scripts/run.sh")
+    assert not ros.is_droppable_non_code("pyproject.toml")
+    assert not ros.is_droppable_non_code("tests/data/fixture.json")  # oracle test file

@@ -4,9 +4,10 @@ These notes go with `docs/research/REAL_OUTCOME_SCORER_SPEC.md` (v1, pre-registe
 sha256 `315d95de21ea7ec82c97bf80165feaa052cb8a36fe99f3a1072d45ff74bb2bda`).
 
 The v1 header says that file is frozen and never edited. So these notes live in this
-sibling file, and the pre-registered file and its sha256 stay unchanged. No note
-changes a scoring rule in v1. Any rule change still needs a new
-`REAL_OUTCOME_SCORER_SPEC.v2.md`.
+sibling file, and the pre-registered file and its sha256 stay unchanged. A1–A4 change
+no scoring rule in v1. A5 is the one exception: it adds a GOLD-construction fallback that
+runs only where v1 has already given up (`GOLD_PORT_FAILED`), so no task v1 could score
+is affected. Any other rule change still needs a new `REAL_OUTCOME_SCORER_SPEC.v2.md`.
 
 ## 2026-10-14: A1, scorer version string
 
@@ -17,8 +18,9 @@ The v1 header names `SCORER_VERSION = "1.0.0"`. The scorer versions are:
 | `1.0.0` | first implementation (#1951) | v1 |
 | `1.0.1` | the trusted impact-gate copy is registered in `sys.modules`, so the P2P(b) selector no longer fails silently | v1, unchanged |
 | `1.1.0` | post-merge review follow-ups (#1951 review): input validation, write containment, a P2P run diagnostic, a summary fix and cache keys | v1, unchanged; A2–A4 below only add diagnostics, refusals for malformed or unsafe input, and operational behaviour |
+| `1.2.0` | GOLD port fallback (A5) | v1 for every task whose PR patches apply whole; A5 only for tasks v1 labels `GOLD_PORT_FAILED` |
 
-Current scorer: `SCORER_VERSION = "1.1.0"`. Receipts record the version that wrote them.
+Current scorer: `SCORER_VERSION = "1.2.0"`. Receipts record the version that wrote them.
 
 ## 2026-10-14: A2, P2P(b/c) run diagnostic (no rule change)
 
@@ -75,3 +77,63 @@ None of these changes how a candidate that applies cleanly is scored.
 - The test-result cache key covers the same items. It also covers the run's role, so
   `CAND+T` runs are never replayed from a `GOLD` run with the same tree id
   (self-check (a)).
+
+## 2026-10-15: A5, GOLD port fallback when main moved (GOLD_PORT_FAILED tasks only)
+
+**Problem.** §5 builds GOLD by applying each merged PR's net patch (`M^1..M`) onto BASE
+with `git apply --3way`. When main moved between BASE and the merge, the patch can
+conflict or touch a file that does not exist at BASE. v1 then labels the task
+`NOT_SCORABLE_ORACLE_INVALID / GOLD_PORT_FAILED`. In the V11/V12 replays 12 tasks failed
+this way. In every case BASE was an ancestor of `M^1`, and the failing files were:
+- generated or documentation files (`README.md`, `docs/*.md`, `docs/*.json`, wiki
+  generated JSON, an action `.yml`);
+- an oracle test file that a later main commit had edited or added;
+- in 3 tasks, a Python source file.
+
+**Rule (scorer 1.2.0).** For each PR in §5 order:
+
+1. Apply the whole net patch with `git apply --3way --binary`, exactly as v1. If it
+   applies with no unmerged index entries, go on to the next PR. `gold_port_method = "3way"`.
+2. Otherwise, restore the pre-PR state and replay the PR **file by file**
+   (`gold_port_method = "3way_per_file_fallback"`):
+   - If the file's own 3-way apply succeeds, keep the result.
+   - If an **oracle test file** (§5 definition) does not merge, set it to its content
+     in the merge commit `M`, or delete it if `M` deletes it. This is the SWE-bench
+     rule: tests are taken at their post-fix state. The path is listed in
+     `gold_port_test_files_from_merge`.
+   - If a **non-test documentation/data file** does not merge, leave it at its pre-PR
+     state. The suffixes are `.md .rst .txt .json .jsonl .yml .yaml .csv`. The path is
+     listed in `gold_port_dropped_non_code_paths`.
+   - If **any other file** (Python and all other code) does not merge, the task stays
+     `GOLD_PORT_FAILED`. The paths are listed in `gold_port_failed_paths`.
+
+**Why F2P/P2P semantics are unchanged.** `BASE+T` is BASE with every oracle test file
+set to its GOLD content (§5). So `GOLD` and `BASE+T` share the same test files. Under
+A5, GOLD's non-test content is BASE plus a **subset** of the human fix's non-test
+changes. It never contains a non-test change made by another main commit. So an F2P
+node (fails on all 3 `BASE+T` runs, passes on all 3 `GOLD` runs, §6.2) still flips only
+because of the human fix.
+
+Tests that a merge-tree test file brings in from other main commits do not pass on GOLD
+unless the human fix makes them pass, so they cannot enter F2P. If they pass on both
+trees they are P2P(a), and the candidate must keep them passing. That makes the check
+stricter, never looser. §6.2–§6.4 and §7 are applied unchanged.
+
+**What the fallback can cost.** If a test reads a dropped doc/data file, its nodes can
+fail on GOLD. They then leave F2P (smaller `f2p_total`) or appear as `gold_also_fails`.
+A smaller F2P is still a set of human-fix tests that fail on `BASE+T` and pass on GOLD.
+It is never a weaker test of those nodes. The receipt lists every dropped path, so a
+report can exclude or separately count fallback tasks. A candidate that does not make
+the F2P nodes pass is still `UNRESOLVED`/`PARTIAL`, as the fixture test
+`test_fallback_cannot_make_a_wrong_candidate_resolved` shows.
+
+**Previously scorable labels are unaffected.** Step 1 is v1's code path, unchanged. The
+fallback runs only when step 1 fails for some PR, and v1 labels exactly those tasks
+`GOLD_PORT_FAILED`. Every task v1 scored, whatever its label, builds the same GOLD tree,
+the same oracle and the same label under 1.2.0. The new key `gold_port_method = "3way"`
+is added to its receipt. The scorer version is part of the env and test-cache keys (A4),
+so 1.2.0 never reuses 1.1.0 cached results.
+
+Check (2026-10-15): the 1.2.0 scorer re-scored three V12 tasks into a fresh store, one
+`RESOLVED`, one `UNRESOLVED` and one `BROKE_EXISTING`. All three labels matched the 1.1.0
+receipts exactly. The PR for this amendment records the evidence.

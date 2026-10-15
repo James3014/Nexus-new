@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterable, Mapping, Protocol, Sequence
 
-SCORER_VERSION = "1.1.0"
+SCORER_VERSION = "1.2.0"
 RECEIPT_SCHEMA = "nexus.research.real_outcome.v1"
 RECEIPT_SEAL_SCHEMA = "nexus.research.real_outcome_seal.v1"
 SPEC_RELATIVE_PATH = "docs/research/REAL_OUTCOME_SCORER_SPEC.md"
@@ -355,15 +355,175 @@ class GitRepo:
         ).stdout.decode()
         return sorted(p for p in out.splitlines() if p)
 
-    def pr_patch(self, merge_sha: str) -> bytes:
+    def pr_patch(self, merge_sha: str, path: str | None = None) -> bytes:
         return self.git(
+            "--literal-pathspecs",
             "diff",
             "--binary",
             "--no-renames",
             _require_rev(f"{merge_sha}^1"),
             _require_rev(merge_sha),
             "--",
+            *([path] if path is not None else []),
         ).stdout
+
+    def pr_paths(self, merge_sha: str) -> list[str]:
+        """Paths the PR net patch changes (``-z``: no quoting, any byte is preserved)."""
+        out = self.git(
+            "diff",
+            "--no-renames",
+            "--name-only",
+            "-z",
+            _require_rev(f"{merge_sha}^1"),
+            _require_rev(merge_sha),
+            "--",
+        ).stdout
+        return [p.decode("utf-8", "surrogateescape") for p in out.split(b"\0") if p]
+
+    def path_in(self, rev: str, path: str) -> bool:
+        """True if ``path`` is a blob or link in commit/tree ``rev``."""
+        out = self.git(
+            "--literal-pathspecs", "ls-tree", "-z", _require_rev(rev), "--", path, check=False
+        ).stdout
+        return any(
+            e.split(b"\t", 1)[-1] == path.encode("utf-8", "surrogateescape")
+            for e in out.split(b"\0")
+            if e
+        )
+
+
+# ------------------------------------------------------------------- GOLD port
+
+GOLD_PORT_3WAY = "3way"
+GOLD_PORT_PER_FILE = "3way_per_file_fallback"
+# Non-test, non-code files whose PR change may be left out of GOLD when it does not merge
+# onto BASE (amendment A5). Python and every other file type are never dropped.
+DROPPABLE_SUFFIXES = frozenset({
+    ".md",
+    ".rst",
+    ".txt",
+    ".json",
+    ".jsonl",
+    ".yml",
+    ".yaml",
+    ".csv",
+})
+
+
+def is_droppable_non_code(path: str) -> bool:
+    return (
+        not is_oracle_test_file(path) and PurePosixPath(path).suffix.lower() in DROPPABLE_SUFFIXES
+    )
+
+
+@dataclass
+class GoldPort:
+    ok: bool
+    method: str = GOLD_PORT_3WAY
+    test_files_from_merge: list[str] = field(default_factory=list)
+    dropped_non_code_paths: list[str] = field(default_factory=list)
+    failed_pr: int | None = None
+    failed_paths: list[str] = field(default_factory=list)
+
+    def receipt_fields(self) -> dict[str, Any]:
+        out: dict[str, Any] = {"gold_port_method": self.method}
+        if self.method != GOLD_PORT_3WAY:
+            out["gold_port_test_files_from_merge"] = sorted(set(self.test_files_from_merge))
+            out["gold_port_dropped_non_code_paths"] = sorted(set(self.dropped_non_code_paths))
+        if self.failed_paths:
+            out["gold_port_failed_paths"] = sorted(self.failed_paths)
+        return out
+
+
+def _snapshot(repo: GitRepo, wt: Path) -> str:
+    repo.git("add", "-A", cwd=wt)
+    return repo.git("write-tree", cwd=wt).stdout.decode().strip()
+
+
+def _restore_tree(repo: GitRepo, wt: Path, tree: str) -> None:
+    repo.git("read-tree", "--reset", "-u", _require_rev(tree), cwd=wt)
+    repo.git("clean", "-fdxq", cwd=wt)
+
+
+def _set_path_from(repo: GitRepo, wt: Path, rev: str, path: str) -> None:
+    """Set one path (index and worktree) to its state in ``rev``; delete it if absent."""
+    repo.git(
+        "--literal-pathspecs",
+        "rm",
+        "-q",
+        "-r",
+        "-f",
+        "--cached",
+        "--ignore-unmatch",
+        "--",
+        path,
+        cwd=wt,
+    )
+    target = wt / path
+    if target.is_symlink() or target.is_file():
+        target.unlink()
+    if repo.path_in(rev, path):
+        repo.git("--literal-pathspecs", "checkout", _require_rev(rev), "--", path, cwd=wt)
+
+
+def _unmerged(repo: GitRepo, wt: Path) -> bool:
+    return bool(repo.git("ls-files", "-u", cwd=wt).stdout.strip())
+
+
+def _apply_3way(repo: GitRepo, wt: Path, patch: bytes) -> bool:
+    proc = repo.git("apply", "--3way", "--binary", "-", cwd=wt, input=patch, check=False)
+    return proc.returncode == 0 and not _unmerged(repo, wt)
+
+
+def port_gold(repo: GitRepo, wt: Path, prs: Sequence[Mapping[str, Any]]) -> GoldPort:
+    """Spec §5 GOLD, with the amendment A5 fallback.
+
+    Each PR net patch is first applied whole with ``git apply --3way`` (v1, unchanged).
+    Only when that fails is the PR replayed file by file onto the pre-PR state:
+
+    - a file whose own 3-way apply succeeds keeps that result;
+    - an oracle test file that does not merge is set to its content in the merge commit
+      (SWE-bench rule: tests are taken at their post-fix state);
+    - a non-test documentation/data file (``DROPPABLE_SUFFIXES``) that does not merge is
+      left at its pre-PR state and recorded;
+    - any other file that does not merge is GOLD_PORT_FAILED, as in v1.
+
+    So GOLD's non-test content is always BASE plus a subset of the human fix's non-test
+    changes: every F2P node still flips because of the human fix alone.
+    """
+    port = GoldPort(ok=True)
+    for p in prs:
+        merge_sha = p["merge_commit_sha"]
+        patch = repo.pr_patch(merge_sha)
+        if not patch.strip():
+            continue
+        pre = _snapshot(repo, wt)
+        if _apply_3way(repo, wt, patch):
+            continue
+        _restore_tree(repo, wt, pre)
+        port.method = GOLD_PORT_PER_FILE
+        failed: list[str] = []
+        for path in repo.pr_paths(merge_sha):
+            if not _safe_relpath(path):
+                failed.append(path)
+                continue
+            file_patch = repo.pr_patch(merge_sha, path)
+            if file_patch.strip() and _apply_3way(repo, wt, file_patch):
+                continue
+            _set_path_from(repo, wt, pre, path)  # undo the partial apply of this file
+            if is_oracle_test_file(path):
+                _set_path_from(repo, wt, merge_sha, path)
+                port.test_files_from_merge.append(path)
+            elif is_droppable_non_code(path):
+                port.dropped_non_code_paths.append(path)
+            else:
+                failed.append(path)
+        if failed or _unmerged(repo, wt):
+            port.ok = False
+            port.failed_pr = int(p["number"])
+            port.failed_paths = failed
+            return port
+    return port
 
 
 def _inside(root_real: Path, path: Path) -> bool:
@@ -1027,19 +1187,13 @@ def score_task(
         base_tree = repo.tree_id(wts["base"])
         # GOLD (§5)
         wts["gold"] = repo.worktree(trees_dir / "gold", inputs.base_sha)
-        for p in prs:
-            patch = repo.pr_patch(p["merge_commit_sha"])
-            if not patch.strip():
-                continue
-            proc = repo.git(
-                "apply", "--3way", "--binary", "-", cwd=wts["gold"], input=patch, check=False
-            )
-            unmerged = repo.git("ls-files", "-u", cwd=wts["gold"]).stdout.strip()
-            if proc.returncode != 0 or unmerged:
-                receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
-                receipt["sub_reason"] = "GOLD_PORT_FAILED"
-                receipt["detail"] = f"pr:{p['number']}"
-                return _finish(receipt, timing, t0, ctx)
+        port = port_gold(repo, wts["gold"], prs)
+        receipt.update(port.receipt_fields())
+        if not port.ok:
+            receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
+            receipt["sub_reason"] = "GOLD_PORT_FAILED"
+            receipt["detail"] = f"pr:{port.failed_pr}"
+            return _finish(receipt, timing, t0, ctx)
         gold_tree = repo.tree_id(wts["gold"])
         files = sorted(oracle_files)
         modules = [f for f in files if is_oracle_module_name(f) and (wts["gold"] / f).exists()]
