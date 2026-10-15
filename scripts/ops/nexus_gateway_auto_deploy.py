@@ -25,6 +25,13 @@ the #526 governed rebind.  One cycle (run every few minutes by the LaunchAgent
    own venv ``venvs/a1-<sha>`` built by ``uv sync --frozen`` from the deployment's
    ``uv.lock``, so the shared clone's ``.venv`` is never used.  The venv lives
    outside the tree and the tree must still be clean after the build (#1939);
+   a separate Controller worktree ``controllers/a1-<sha>`` at the same commit is
+   exported as ``NEXUS_CANONICAL_SOURCE_ROOT`` so Task Card bind commits never
+   touch the deployment (#1939).  The live Controller's bind commits (regular
+   files under ``tasks/`` main did not touch) are carried byte for byte; the
+   candidate's own ``bound_controller_problem`` must accept the result (else a
+   fresh Controller without the carry, else the build fails), and a bind that
+   lands after the carry defers the switch (``DEFERRED_CONTROLLER_MOVED``);
    durable state stays in ``~/.local/state`` (#1539).
 3. Probe: start the candidate on a spare loopback port with a throwaway state
    dir (never the live self-hosted state) and require ``/health`` for the exact
@@ -149,6 +156,8 @@ MAX_BACKOFF_SECONDS = 6 * 60 * 60
 # Task quiescence (#2227): a switch moves the Controller HEAD, which every
 # non-terminal governed task is bound to, so no switch while one is in flight.
 DEFERRED_OUTCOME = "DEFERRED_TASKS_IN_FLIGHT"
+# The live Controller gained a bind after the carry (#1939): retried next cycle.
+CONTROLLER_MOVED_OUTCOME = "DEFERRED_CONTROLLER_MOVED"
 # Task action states (SelfHostedTaskService._task_action_envelope) that a
 # switch would break; TERMINAL and FINAL_BLOCK tasks are not executing.
 IN_FLIGHT_ACTION_STATES = ("IN_PROGRESS", "ACTION_REQUIRED")
@@ -353,6 +362,11 @@ class Config:
         return self.gateway_root / "venvs"
 
     @property
+    def controllers(self) -> Path:
+        """Controller worktrees (#1939): Task Card binds land here, never in deployments/."""
+        return self.gateway_root / "controllers"
+
+    @property
     def tool_link(self) -> Path:
         """Tree the auto-deploy LaunchAgent runs this script from (moves to each new deployment)."""
         return self.gateway_root / "auto-deploy-current"
@@ -502,6 +516,40 @@ class Host:
         except Exception as exc:  # noqa: BLE001 - unknown is in flight
             return {"verdict": "UNKNOWN", "reason": f"CLASSIFIER_FAILED:{type(exc).__name__}"}
         return classify_task_report(result.returncode, result.stdout or "", result.stderr or "")
+
+    def controller_problem(
+        self, python: Path, root: Path, controller: Path, code_root: Optional[Path] = None
+    ) -> Optional[str]:
+        """The candidate tree's own verdict on the Controller (#1939); None when bound.
+
+        ``code_root`` defaults to ``root``: the candidate judges with its own code.
+        """
+        code = root if code_root is None else code_root
+        try:
+            result = self.run(
+                [
+                    str(python),
+                    "-W",
+                    "ignore",
+                    "-c",
+                    CONTROLLER_CHECK_CODE,
+                    str(code),
+                    str(root),
+                    str(controller),
+                ],
+                env={"PYTHONDONTWRITEBYTECODE": "1", "NEXUS_CANONICAL_SOURCE_ROOT": ""},
+                timeout=120,
+            )
+        except Exception as exc:  # noqa: BLE001 - unknown is not bound
+            return f"CONTROLLER_CHECK_FAILED:{type(exc).__name__}"
+        lines = [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
+        if result.returncode != 0 or not lines:
+            return f"CONTROLLER_CHECK_EXIT_{result.returncode}"
+        verdict = lines[-1]
+        if verdict == "OK":
+            return None
+        match = re.match(r"[A-Z][A-Z0-9_]{0,63}", verdict)
+        return match.group(0) if match else "CONTROLLER_CHECK_UNPARSEABLE"
 
     def post_issue_comment(self, cfg: Config, body: str) -> bool:
         """One comment on the quiescence alert Issue; False on any failure."""
@@ -1140,15 +1188,20 @@ def wrapper_command(
     port: Optional[int] = None,
     state_dir: Optional[Path] = None,
     core_root: Optional[Path] = None,
+    controller_root: Optional[Path] = None,
 ) -> str:
     """The same fixed zsh wrapper as the #526 deployments, with a per-deployment venv.
+
+    ``controller_root`` (#1939) is the separate Controller worktree exported as
+    ``NEXUS_CANONICAL_SOURCE_ROOT``; the process still runs the deployment.
 
     ``port``/``state_dir`` are only used for the spare-port probe, which must never
     see the live self-hosted state.  ``core_root`` (exported after the env file, so
     the env file cannot override it) is the deployment's pinned Core checkout.
     """
     state = cfg.canonical_state_dir if state_dir is None else state_dir
-    values = [str(root), str(python), str(cfg.env_file), str(state)]
+    controller = root if controller_root is None else controller_root
+    values = [str(root), str(python), str(cfg.env_file), str(state), str(controller)]
     if core_root is not None:
         values.append(str(core_root))
     for value in values:
@@ -1158,7 +1211,7 @@ def wrapper_command(
     core_export = "" if core_root is None else f'export NEXUS_CORE_REPO_ROOT="{core_root}" ; '
     return (
         f'cd "{root}" ; source "{cfg.env_file}" ; export PYTHONDONTWRITEBYTECODE=1 ; '
-        f'export NEXUS_CANONICAL_SOURCE_ROOT="{root}" ; '
+        f'export NEXUS_CANONICAL_SOURCE_ROOT="{controller}" ; '
         f'export NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR="{state}" ; '
         f'{core_export}{port_export}exec "{python}" "{root / ENTRYPOINT}"'
     )
@@ -1200,6 +1253,16 @@ def live_root(plist_bytes: bytes) -> Optional[Path]:
     for token in _wrapper_tokens(plist_bytes):
         if token.startswith("NEXUS_CANONICAL_SOURCE_ROOT="):
             return Path(token.split("=", 1)[1])
+    return None
+
+
+def live_controller(plist_bytes: bytes) -> Optional[Path]:
+    """The exported Controller root when it is not the deployment itself (#1939)."""
+    root = live_root(plist_bytes)
+    for token in _wrapper_tokens(plist_bytes):
+        if token.startswith("NEXUS_CANONICAL_SOURCE_ROOT="):
+            path = Path(token.split("=", 1)[1])
+            return None if root is not None and path == root else path
     return None
 
 
@@ -1467,6 +1530,180 @@ def build(cfg: Config, host: Host, commit: str) -> Dict[str, Any]:
     }
 
 
+# Runs with the CANDIDATE's interpreter and tree: the exact rules the Gateway
+# will apply at startup (#1939).  Prints OK or the refusal reason.
+CONTROLLER_CHECK_CODE = """
+import sys
+from pathlib import Path
+code_root, root, controller = sys.argv[1:4]
+sys.path.insert(0, code_root)
+from nexus.orchestrator.canonical_source_root import bound_controller_problem
+print(bound_controller_problem(Path(controller), Path(root)) or "OK")
+"""
+CARRY_AUTHOR = (
+    "-c",
+    "user.name=Nexus Gateway auto-deploy",
+    "-c",
+    "user.email=nexus-auto-deploy@localhost",
+)
+CARRY_MAX_PATHS = 500
+
+
+def _ctl(controller: Path, *args: str) -> List[str]:
+    return ["git", "-C", str(controller), *args]
+
+
+def materialize_controller(cfg: Config, host: Host, commit: str) -> Path:
+    """A fresh, clean Controller worktree at ``commit`` (absolute paths, #1939)."""
+    controller = cfg.controllers / f"{DEPLOYMENT_PREFIX}{commit}"
+    if controller.is_symlink():
+        raise DeployError("CONTROLLER_SYMLINKED")
+    if controller.exists():
+        host.run(_git(cfg, "worktree", "remove", "--force", str(controller)), timeout=300)
+        if controller.exists():
+            shutil.rmtree(controller, ignore_errors=True)
+    cfg.controllers.mkdir(parents=True, exist_ok=True)
+    _must(
+        host,
+        _git(
+            cfg,
+            "-c",
+            "worktree.useRelativePaths=false",
+            "worktree",
+            "add",
+            "--detach",
+            str(controller),
+            commit,
+        ),
+        "CONTROLLER_ADD_FAILED",
+    )
+    head = _must(host, _ctl(controller, "rev-parse", "HEAD"), "CONTROLLER_HEAD_FAILED").strip()
+    if head != commit:
+        raise DeployError(f"CONTROLLER_HEAD_MISMATCH:{head}")
+    if _must(host, _ctl(controller, "status", "--porcelain"), "CONTROLLER_STATUS_FAILED").strip():
+        raise DeployError("CONTROLLER_NOT_CLEAN")
+    return controller
+
+
+def carry_bound_cards(
+    host: Host, previous_plist: bytes, controller: Path, commit: str
+) -> Dict[str, Any]:
+    """Replay the live Controller's Task Card bind commits onto the new Controller.
+
+    Only regular files under ``tasks/`` that main did not touch since the live
+    commit are carried, byte for byte (the card SHA-256 a bind recorded stays
+    valid).  Anything unusual is skipped with a warning: this never blocks a
+    deploy, and it never carries anything outside ``tasks/``.
+    """
+    try:
+        previous = live_controller(previous_plist)
+        previous_commit = commit_of(live_root(previous_plist))
+    except DeployError as exc:
+        return {"status": "SKIPPED", "reason": f"LIVE_PLIST_UNREADABLE:{exc}"[:200]}
+    if previous is None or previous_commit is None:
+        return {"status": "NONE", "reason": "NO_SEPARATE_LIVE_CONTROLLER"}
+    head = host.run(_ctl(previous, "rev-parse", "--verify", "HEAD^{commit}"))
+    if head.returncode != 0 or not _SHA.match(head.stdout.strip()):
+        return {"status": "SKIPPED", "reason": "LIVE_CONTROLLER_UNREADABLE"}
+    previous_head = head.stdout.strip()
+    if previous_head == previous_commit:
+        return {"status": "NONE", "from_head": previous_head, "carried": []}
+    changed = host.run(
+        _ctl(
+            previous,
+            "diff",
+            "--raw",
+            "-z",
+            "--no-renames",
+            "--no-abbrev",
+            previous_commit,
+            previous_head,
+        )
+    )
+    if changed.returncode != 0:
+        return {
+            "status": "SKIPPED",
+            "reason": "LIVE_CONTROLLER_DIFF_FAILED",
+            "from_head": previous_head,
+        }
+    fields = changed.stdout.split("\0")
+    entries = []
+    for index in range(0, len(fields) - 1, 2):
+        header, path = fields[index], fields[index + 1]
+        parts = header[1:].split()
+        if not header.startswith(":") or len(parts) < 5:
+            return {"status": "SKIPPED", "reason": "LIVE_CONTROLLER_DIFF_UNPARSEABLE"}
+        entries.append((parts[1], parts[4], path))
+    if len(entries) > CARRY_MAX_PATHS:
+        return {"status": "SKIPPED", "reason": "TOO_MANY_BOUND_PATHS", "from_head": previous_head}
+    carried: List[str] = []
+    skipped: List[str] = []
+    for new_mode, change, path in entries:
+        parts = path.split("/")
+        if (
+            parts[0] != "tasks"
+            or any(part in {"", ".", ".."} for part in parts[1:])
+            or any(
+                part.casefold() in {".gitattributes", ".gitmodules", ".gitignore"} for part in parts
+            )
+            or new_mode not in {"000000", "100644", "100755"}
+        ):
+            # Not a bind: the Gateway would refuse this Controller anyway.
+            return {
+                "status": "SKIPPED",
+                "reason": "LIVE_CONTROLLER_NOT_BIND_ONLY",
+                "from_head": previous_head,
+            }
+        base = host.run(
+            _ctl(controller, "rev-parse", "--verify", "--quiet", f"{previous_commit}:{path}")
+        )
+        now = host.run(_ctl(controller, "rev-parse", "--verify", "--quiet", f"{commit}:{path}"))
+        if base.stdout.strip() != now.stdout.strip():
+            skipped.append(path)  # main changed this path since the live commit
+            continue
+        if change == "D":
+            argv = _ctl(controller, "rm", "-q", "--ignore-unmatch", "--", path)
+        else:
+            argv = _ctl(controller, "checkout", previous_head, "--", path)
+        if host.run(argv).returncode != 0:
+            return _reset_carry(host, controller, commit, previous_head, "CARRY_APPLY_FAILED")
+        carried.append(path)
+    if carried:
+        result = host.run([
+            "git",
+            *CARRY_AUTHOR,
+            "-C",
+            str(controller),
+            "commit",
+            "-q",
+            "--no-verify",
+            "-m",
+            f"chore(tasks): carry bound Task Cards from {previous_head[:12]}",
+        ])
+        if result.returncode != 0:
+            return _reset_carry(host, controller, commit, previous_head, "CARRY_COMMIT_FAILED")
+    return {
+        "status": "CARRIED" if carried else "NONE",
+        "from_head": previous_head,
+        "carried": sorted(carried)[:100],
+        "carried_count": len(carried),
+        "skipped_main_changed": sorted(skipped)[:100],
+    }
+
+
+def _reset_carry(
+    host: Host, controller: Path, commit: str, previous_head: str, reason: str
+) -> Dict[str, Any]:
+    host.run(_ctl(controller, "reset", "-q", "--hard", commit))
+    host.run(_ctl(controller, "clean", "-q", "-fd", "--", "tasks"))
+    return {"status": "SKIPPED", "reason": reason, "from_head": previous_head}
+
+
+def _receipt_controller(receipt: Dict[str, Any]) -> Optional[Path]:
+    root = (receipt.get("controller") or {}).get("root")
+    return Path(root) if isinstance(root, str) and root else None
+
+
 def _contained_dirs(parent: Path) -> List[Path]:
     """Real (non-symlink) ``a1-*`` directories strictly inside a real ``parent``."""
     if parent.is_symlink() or not parent.is_dir():
@@ -1486,7 +1723,7 @@ def prune_refusal(cfg: Config) -> Optional[str]:
     root = cfg.gateway_root
     if not root.is_absolute() or os.path.realpath(root) != str(root):
         return f"GATEWAY_ROOT_NOT_CANONICAL:{root}"
-    for path in (cfg.deployments, cfg.venvs, cfg.core_checkouts):
+    for path in (cfg.deployments, cfg.venvs, cfg.core_checkouts, cfg.controllers):
         if path.is_symlink():
             return f"SYMLINKED_DIRECTORY:{path}"
     return None
@@ -1516,6 +1753,14 @@ def prune(cfg: Config, host: Host, protected: List[Optional[Path]]) -> List[str]
     for venv in _contained_dirs(cfg.venvs):
         if venv.name not in present:
             shutil.rmtree(venv, ignore_errors=True)
+    # A Controller lives exactly as long as its deployment, and never goes while
+    # a protected (live, previous, tool) deployment of that name exists (#1939).
+    for controller in _contained_dirs(cfg.controllers):
+        if controller.name in present or controller.name in keep_names:
+            continue
+        host.run(_git(cfg, "worktree", "remove", "--force", str(controller)), timeout=300)
+        if controller.exists() and not controller.is_symlink():
+            shutil.rmtree(controller, ignore_errors=True)
     prune_core(cfg, host, protected)
     return removed
 
@@ -2229,7 +2474,13 @@ class _Cycle:
         core = receipt.get("core")
         core_root = Path(core["root"]) if isinstance(core, dict) else None
         command = wrapper_command(
-            cfg, root, python, port, state_dir=probe_state, core_root=core_root
+            cfg,
+            root,
+            python,
+            port,
+            state_dir=probe_state,
+            core_root=core_root,
+            controller_root=_receipt_controller(receipt),
         )
         stop = host.start(command, cfg.state_dir / "logs" / f"{receipt['attempt_id']}.probe.log")
         try:
@@ -2254,6 +2505,7 @@ class _Cycle:
         built = build(cfg, host, candidate)
         receipt.update(built)
         root, python = Path(built["deployment_root"]), Path(built["venv_python"])
+        receipt["controller"] = self.prepare_controller(root, python, candidate, previous_plist)
 
         spare = self.spare_probe(root, python, candidate, receipt)
         receipt["probes"]["spare"] = spare
@@ -2303,15 +2555,57 @@ class _Cycle:
                         "outcome": "FOREIGN_PLIST",
                         "reason": "live plist changed during the cycle",
                     }
+                moved = self.live_controller_moved(previous_plist, receipt)
+                if moved is not None:
+                    # A card was bound after the carry: rebuild and carry again.
+                    return {"outcome": CONTROLLER_MOVED_OUTCOME, "reason": moved}
 
                 command = wrapper_command(
-                    cfg, root, python, core_root=Path(receipt["core"]["root"])
+                    cfg,
+                    root,
+                    python,
+                    core_root=Path(receipt["core"]["root"]),
+                    controller_root=_receipt_controller(receipt),
                 )
                 new_plist = render_plist(previous_plist, command, root)
                 self.write_journal(receipt, previous_plist, new_plist, python)
                 _atomic_write(cfg.plist, new_plist)
                 receipt["switched"] = True
                 return self.finish_switch(receipt, previous_plist, root, python)
+
+    def prepare_controller(
+        self, root: Path, python: Path, candidate: str, previous_plist: bytes
+    ) -> Dict[str, Any]:
+        """Fresh Controller + carried binds, accepted by the candidate's own check (#1939).
+
+        A carry the candidate refuses falls back to a fresh Controller without
+        it; a fresh Controller the candidate refuses fails the build.
+        """
+        cfg, host = self.cfg, self.host
+        controller = materialize_controller(cfg, host, candidate)
+        carry = carry_bound_cards(host, previous_plist, controller, candidate)
+        problem = host.controller_problem(python, root, controller)
+        if problem is not None and carry.get("status") == "CARRIED":
+            carry = {**carry, "status": "DROPPED", "reason": f"CANDIDATE_REFUSED_CARRY:{problem}"}
+            controller = materialize_controller(cfg, host, candidate)
+            problem = host.controller_problem(python, root, controller)
+        if problem is not None:
+            raise DeployError(f"CONTROLLER_INVALID:{problem}")
+        return {"root": str(controller), "carry": carry}
+
+    def live_controller_moved(
+        self, previous_plist: bytes, receipt: Dict[str, Any]
+    ) -> Optional[str]:
+        """Why the live Controller is no longer the head the carry read, else None."""
+        from_head = ((receipt.get("controller") or {}).get("carry") or {}).get("from_head")
+        previous = live_controller(previous_plist)
+        if previous is None or not from_head:
+            return None  # nothing was (or could be) read from a live Controller
+        head = self.host.run(_ctl(previous, "rev-parse", "--verify", "HEAD^{commit}"))
+        now = head.stdout.strip() if head.returncode == 0 else "UNREADABLE"
+        if now == from_head:
+            return None
+        return f"LIVE_CONTROLLER_MOVED:{from_head[:12]}->{now[:12]}"
 
     def finish_switch(
         self, receipt: Dict[str, Any], previous_plist: bytes, root: Path, python: Path
@@ -2618,6 +2912,9 @@ def rollback_readiness(host: Host, previous_plist: bytes) -> Dict[str, Any]:
         return {"ok": False, "reason": "PREDECESSOR_DEPLOYMENT_MISSING"}
     if python is None or not python.exists():
         return {"ok": False, "reason": "PREDECESSOR_PYTHON_MISSING"}
+    controller = live_controller(previous_plist)
+    if controller is not None and not (controller / ".git").exists():
+        return {"ok": False, "reason": "PREDECESSOR_CONTROLLER_MISSING"}
     result = host.run([str(python), "-c", "import sys"], timeout=60)
     if result.returncode != 0:
         return {"ok": False, "reason": "PREDECESSOR_PYTHON_NOT_RUNNABLE"}

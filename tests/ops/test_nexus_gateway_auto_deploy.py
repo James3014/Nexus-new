@@ -124,6 +124,10 @@ class FakeHost(ad.Host):
         self.quiescence_checks = 0
         self.issue_comments: list[str] = []
         self.comment_fails = False
+        # Controller worktrees (#1939): accepted unless a test says otherwise.
+        self.controller_checks: list[Path] = []
+        self.controller_verdicts: list[str | None] = []
+        self.real_controller_check = False
 
     def tasks_in_flight(self, cfg: ad.Config, live_plist: bytes) -> dict[str, Any]:  # type: ignore[override]
         self.quiescence_checks += 1
@@ -149,6 +153,14 @@ class FakeHost(ad.Host):
         if self.in_flight:
             return dict(self.in_flight.pop(0) if len(self.in_flight) > 1 else self.in_flight[0])
         return {"verdict": "CLEAR", "checked": 0}
+
+    def controller_problem(  # type: ignore[override]
+        self, python: Path, root: Path, controller: Path, code_root: Path | None = None
+    ) -> str | None:
+        self.controller_checks.append(controller)
+        if self.real_controller_check:
+            return ad.Host.controller_problem(self, Path(sys.executable), REPO_ROOT, controller)
+        return self.controller_verdicts.pop(0) if self.controller_verdicts else None
 
     def post_issue_comment(self, cfg: ad.Config, body: str) -> bool:  # type: ignore[override]
         if self.comment_fails:
@@ -4621,3 +4633,237 @@ def test_quiescence_candidate_arriving_inside_the_hour_still_rearms(cfg: ad.Conf
     cycle(cfg, host, prober)  # 65 min after the warning: NEW gets its own
     assert len(host.issue_comments) == 1
     assert json.loads(cfg.quiescence_file.read_text())["warned_candidate"] == NEW
+
+
+# ------------------------------------------------- Controller worktrees (#1939)
+
+
+def _rg(cwd: Path, *args: str) -> str:
+    return _fixture_git(cwd, *args)
+
+
+@pytest.fixture()
+def controller_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """A real gateway-direct layout: bare repository.git, a live a1-OLD deployment
+    with its Controller, and a NEW main commit."""
+    for key, value in GIT_ENV.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("GIT_AUTHOR_NAME", "t")
+    monkeypatch.setenv("GIT_AUTHOR_EMAIL", "t@example.invalid")
+    monkeypatch.setenv("GIT_COMMITTER_NAME", "t")
+    monkeypatch.setenv("GIT_COMMITTER_EMAIL", "t@example.invalid")
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    _rg(seed, "init", "-q", "-b", "main")
+    (seed / "README.md").write_text("base\n")
+    (seed / "tasks").mkdir()
+    (seed / "tasks" / "keep.md").write_text("tracked\n")
+    _rg(seed, "add", ".")
+    _rg(seed, "commit", "-qm", "old")
+    old = _rg(seed, "rev-parse", "HEAD")
+    (seed / "nexus.py").write_text("x = 1\n")
+    _rg(seed, "add", ".")
+    _rg(seed, "commit", "-qm", "new")
+    new = _rg(seed, "rev-parse", "HEAD")
+    cfg = ad.Config.default(tmp_path / "home")
+    cfg.gateway_root.mkdir(parents=True)
+    subprocess.run(
+        ["git", "clone", "-q", "--bare", str(seed), str(cfg.bare_repo)],
+        check=True,
+        env={**os.environ, **GIT_ENV},
+    )
+    host = ad.Host()
+    deployment = cfg.deployments / f"a1-{old}"
+    host.run(ad._git(cfg, "worktree", "add", "--detach", str(deployment), old))
+    live_controller = ad.materialize_controller(cfg, host, old)
+    plist = plistlib.dumps({
+        "Label": ad.GATEWAY_LABEL,
+        "KeepAlive": True,
+        "RunAtLoad": True,
+        "ProgramArguments": [
+            "/bin/zsh",
+            "-c",
+            f'cd "{deployment}" ; export NEXUS_CANONICAL_SOURCE_ROOT="{live_controller}" ; '
+            f'exec /usr/bin/python3 "{deployment}/scripts/ops/nexus_mcp_gateway_http.py"',
+        ],
+        "WorkingDirectory": str(deployment),
+    })
+    return {
+        "cfg": cfg,
+        "host": host,
+        "old": old,
+        "new": new,
+        "deployment": deployment,
+        "live_controller": live_controller,
+        "plist": plist,
+    }
+
+
+def _bind(controller: Path, path: str, text: str) -> str:
+    target = controller / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text)
+    _rg(controller, "add", "--", path)
+    _rg(controller, "commit", "-qm", f"chore(tasks): bind {path}")
+    return _rg(controller, "rev-parse", "HEAD")
+
+
+def test_controller_is_a_fresh_absolute_linked_worktree(controller_repo: dict[str, Any]) -> None:
+    cfg, host, new = controller_repo["cfg"], controller_repo["host"], controller_repo["new"]
+    controller = ad.materialize_controller(cfg, host, new)
+    assert controller == cfg.controllers / f"a1-{new}"
+    assert _rg(controller, "rev-parse", "HEAD") == new
+    gitdir = Path(_rg(controller, "rev-parse", "--absolute-git-dir"))
+    assert Path((gitdir / "gitdir").read_text().strip()).is_absolute()
+    (controller / "stray.txt").write_text("dirty\n")
+    again = ad.materialize_controller(cfg, host, new)  # recreated clean
+    assert not (again / "stray.txt").exists()
+
+
+def test_bound_cards_are_carried_byte_for_byte_and_accepted_by_the_gateway_check(
+    controller_repo: dict[str, Any],
+) -> None:
+    cfg, host = controller_repo["cfg"], controller_repo["host"]
+    card = "# Task Card: t\n\ntask_id: `t`\n"
+    bound = _bind(controller_repo["live_controller"], "tasks/c/00-t.md", card)
+    new_controller = ad.materialize_controller(cfg, host, controller_repo["new"])
+    carry = ad.carry_bound_cards(
+        host, controller_repo["plist"], new_controller, controller_repo["new"]
+    )
+    assert carry["status"] == "CARRIED"
+    assert carry["from_head"] == bound
+    assert carry["carried"] == ["tasks/c/00-t.md"]
+    assert (new_controller / "tasks/c/00-t.md").read_bytes() == card.encode()
+    assert _rg(new_controller, "rev-parse", "HEAD^") == controller_repo["new"]
+    assert _rg(new_controller, "status", "--porcelain") == ""
+    # The real Gateway rule (this checkout's code) accepts the carried Controller
+    # for a deployment of NEW.
+    deployment_new = cfg.deployments / f"a1-{controller_repo['new']}"
+    host.run(
+        ad._git(cfg, "worktree", "add", "--detach", str(deployment_new), controller_repo["new"])
+    )
+    assert (
+        host.controller_problem(
+            Path(sys.executable), deployment_new, new_controller, code_root=REPO_ROOT
+        )
+        is None
+    )
+
+
+def test_carry_skips_paths_main_changed_and_refuses_non_bind_controllers(
+    controller_repo: dict[str, Any],
+) -> None:
+    cfg, host = controller_repo["cfg"], controller_repo["host"]
+    live = controller_repo["live_controller"]
+    _bind(live, "tasks/keep.md", "rebound\n")
+    new_controller = ad.materialize_controller(cfg, host, controller_repo["new"])
+    carry = ad.carry_bound_cards(
+        host, controller_repo["plist"], new_controller, controller_repo["new"]
+    )
+    assert carry["status"] == "CARRIED"  # main did not touch tasks/keep.md since OLD
+    # A code commit in the live Controller is not a bind: nothing is carried.
+    (live / "nexus.py").write_text("evil = 1\n")
+    _rg(live, "add", "nexus.py")
+    _rg(live, "commit", "-qm", "not a bind")
+    fresh = ad.materialize_controller(cfg, host, controller_repo["new"])
+    refused = ad.carry_bound_cards(host, controller_repo["plist"], fresh, controller_repo["new"])
+    assert refused["status"] == "SKIPPED"
+    assert refused["reason"] == "LIVE_CONTROLLER_NOT_BIND_ONLY"
+    assert _rg(fresh, "rev-parse", "HEAD") == controller_repo["new"]
+
+
+def test_carry_skips_a_card_main_also_changed(controller_repo: dict[str, Any]) -> None:
+    cfg, host = controller_repo["cfg"], controller_repo["host"]
+    _bind(controller_repo["live_controller"], "tasks/keep.md", "rebound\n")
+    seedless = cfg.deployments / "edit"
+    host.run(ad._git(cfg, "worktree", "add", "--detach", str(seedless), controller_repo["new"]))
+    (seedless / "tasks/keep.md").write_text("main changed it\n")
+    _rg(seedless, "add", "tasks/keep.md")
+    _rg(seedless, "commit", "-qm", "main edit")
+    newer = _rg(seedless, "rev-parse", "HEAD")
+    controller = ad.materialize_controller(cfg, host, newer)
+    carry = ad.carry_bound_cards(host, controller_repo["plist"], controller, newer)
+    assert carry["status"] == "NONE"
+    assert carry["skipped_main_changed"] == ["tasks/keep.md"]
+    assert (controller / "tasks/keep.md").read_text() == "main changed it\n"
+
+
+def test_live_controller_moved_after_the_carry_is_detected(controller_repo: dict[str, Any]) -> None:
+    cfg, host = controller_repo["cfg"], controller_repo["host"]
+    live = controller_repo["live_controller"]
+    _bind(live, "tasks/c/00-a.md", "a\n")
+    controller = ad.materialize_controller(cfg, host, controller_repo["new"])
+    carry = ad.carry_bound_cards(host, controller_repo["plist"], controller, controller_repo["new"])
+    receipt = {"controller": {"root": str(controller), "carry": carry}}
+    ctx = ad._Cycle(cfg, host, FakeProber(), green_api(), {}, Path("/tool/python"))
+    assert ctx.live_controller_moved(controller_repo["plist"], receipt) is None
+    _bind(live, "tasks/c/00-b.md", "b\n")
+    assert ctx.live_controller_moved(controller_repo["plist"], receipt).startswith(
+        "LIVE_CONTROLLER_MOVED:"
+    )
+
+
+def test_rollback_needs_the_predecessor_controller(controller_repo: dict[str, Any]) -> None:
+    plist = controller_repo["plist"]
+    (controller_repo["deployment"] / "scripts/ops").mkdir(parents=True, exist_ok=True)
+    (controller_repo["deployment"] / ad.ENTRYPOINT).write_text("")
+    host = controller_repo["host"]
+    assert ad.rollback_readiness(host, plist)["ok"] is True
+    shutil.rmtree(controller_repo["live_controller"])
+    assert ad.rollback_readiness(host, plist)["reason"] == "PREDECESSOR_CONTROLLER_MISSING"
+
+
+def test_switch_exports_the_new_controller_and_receipts_it(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    result = cycle(cfg, host, prober)
+    assert result["status"] == "DEPLOYED"
+    controller = cfg.controllers / f"a1-{NEW}"
+    tokens = ad._wrapper_tokens(cfg.plist.read_bytes())
+    assert f"NEXUS_CANONICAL_SOURCE_ROOT={controller}" in tokens
+    assert ad.live_root(cfg.plist.read_bytes()) == cfg.deployments / f"a1-{NEW}"
+    assert ad.live_controller(cfg.plist.read_bytes()) == controller
+    receipt = ad.read_receipts(cfg.state_dir)[-1]
+    assert receipt["controller"]["root"] == str(controller)
+    assert any(f'NEXUS_CANONICAL_SOURCE_ROOT="{controller}"' in c for c in host.started)
+
+
+def test_candidate_refusing_the_carry_falls_back_to_a_fresh_controller(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    host.controller_verdicts = [None]
+    original = ad.carry_bound_cards
+    calls = []
+
+    def fake_carry(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        calls.append(args)
+        return {"status": "CARRIED", "from_head": "c" * 40, "carried": ["tasks/x.md"]}
+
+    ad.carry_bound_cards = fake_carry  # type: ignore[assignment]
+    try:
+        host.controller_verdicts = ["CONTROLLER_CHANGES_OUTSIDE_TASKS", None]
+        result = cycle(cfg, host, prober)
+    finally:
+        ad.carry_bound_cards = original  # type: ignore[assignment]
+    assert result["status"] == "DEPLOYED"
+    carry = ad.read_receipts(cfg.state_dir)[-1]["controller"]["carry"]
+    assert carry["status"] == "DROPPED"
+    assert "CONTROLLER_CHANGES_OUTSIDE_TASKS" in carry["reason"]
+
+
+def test_candidate_refusing_a_fresh_controller_fails_the_build(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    host.controller_verdicts = ["CONTROLLER_NOT_A_REGISTERED_WORKTREE"]
+    result = cycle(cfg, host, prober)
+    assert result["status"] == "BUILD_FAILED"
+    assert host.reloads == []
+    assert "CONTROLLER_INVALID" in ad.read_receipts(cfg.state_dir)[-1]["reason"]
+
+
+def test_prune_removes_orphan_controllers_but_never_protected_ones(cfg: ad.Config) -> None:
+    host = FakeHost()
+    for name in ("a1-" + "1" * 40, "a1-" + "2" * 40):
+        (cfg.controllers / name).mkdir(parents=True)
+    keep = cfg.deployments / ("a1-" + "2" * 40)
+    keep.mkdir(parents=True)
+    ad.prune(cfg, host, [keep])
+    assert not (cfg.controllers / ("a1-" + "1" * 40)).exists()
+    assert (cfg.controllers / ("a1-" + "2" * 40)).exists()
