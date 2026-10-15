@@ -429,3 +429,91 @@ def test_anthropic_api_key_is_blocking(tmp_path: Path) -> None:
     receipt = scan_repository(repo)
     assert receipt["status"] == "FAIL"
     assert any(f["blocking"] for f in receipt["findings"])
+
+
+def _run_main(repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> tuple[int, str]:
+    from scripts.ops.git_history_secret_scan import main
+
+    out = tmp_path / "receipt.json"
+    code = main(["--repo", str(repo), "--output", str(out)])
+    captured = capsys.readouterr()
+    assert json.loads(out.read_text(encoding="utf-8"))["secret_values_emitted"] is False
+    return code, captured.out + captured.err
+
+
+def test_failure_output_names_ref_and_remediation_without_secret(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo = _init_repo(tmp_path)
+    _git(repo, "checkout", "-b", "feature")
+    secret = "AIza" + "Q7x9mN2pR4sT6vW8yZ1aB3cD5eF7gH9jK2L"
+    commit = _commit(repo, "add secret", {"secret.txt": f"GOOGLE_API_KEY={secret}\n"})
+    _commit(repo, "remove secret", {"secret.txt": "removed\n"})
+    _refresh_remote_ref(repo, "feature", _git(repo, "rev-parse", "HEAD").stdout.strip())
+    code, text = _run_main(repo, tmp_path, capsys)
+    assert code == 1
+    assert text.startswith("::error title=Secret audit::")
+    assert "refs/remotes/origin/feature" in text
+    assert "secret.txt" in text
+    assert "google_api_key" in text
+    assert "rotate" in text
+    assert "split literals" in text
+    assert "does NOT clear" in text
+    assert "rewrite" in text.lower() or "Rewrite" in text
+    assert secret not in text
+    assert secret[4:] not in text
+    assert commit not in text  # only the short id is printed
+    assert commit[:12] in text
+
+
+def test_failure_output_neutralizes_attacker_controlled_text(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo = _init_repo(tmp_path)
+    branch = "evil%0A`x#y"
+    _git(repo, "checkout", "-b", branch)
+    secret = "sk-" + "q7A4nB9cD2eF6gH8jK1mN5pR3sT0vW4xY7z"
+    evil_path = "::error::boom\n##[warning]x%0Ay.txt"
+    _commit(repo, "add", {evil_path: f"OPENAI={secret}\n"})
+    _refresh_remote_ref(repo, branch, _git(repo, "rev-parse", "HEAD").stdout.strip())
+    code, text = _run_main(repo, tmp_path, capsys)
+    assert code == 1
+    assert secret not in text
+    lines = text.splitlines()
+    assert lines[0].startswith("::error title=Secret audit::")
+    assert [ln for ln in lines if ln.lstrip().startswith("::")] == [lines[0]]
+    assert "##[" not in text
+    assert "%0A" not in text
+    assert "`" not in text
+    assert "evil_0A" in text
+
+
+def test_passing_scan_prints_nothing_extra(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo = _init_repo(tmp_path)
+    code, text = _run_main(repo, tmp_path, capsys)
+    assert code == 0
+    assert text == ""
+
+
+def test_failure_log_reports_unknown_refs_on_git_error(tmp_path: Path) -> None:
+    from scripts.ops.git_history_secret_scan import render_failure_log
+
+    receipt = {
+        "status": "FAIL",
+        "blocking": True,
+        "findings": [
+            {
+                "blocking": True,
+                "detector": "d",
+                "classification": "c",
+                "path": "p",
+                "commit_id": "a" * 40,
+                "object_id": None,
+            }
+        ],
+    }
+    lines = render_failure_log(tmp_path / "missing", receipt)
+    assert any("refs: unknown" in line for line in lines)
+    assert render_failure_log(tmp_path, {"status": "PASS", "blocking": False}) == []
