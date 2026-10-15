@@ -78,9 +78,11 @@ from nexus.orchestrator.canonical_mcp_ingress import (
     reject_caller_route_overrides,
 )
 from nexus.orchestrator.canonical_source_root import (
+    CONTROLLER_BINDING_PROBLEM,
     CONTROLLER_IS_SEPARATE,
     LOADED_SOURCE_ROOT,
     bound_controller_problem,
+    controller_binding_status,
 )
 from nexus.orchestrator.execution_readiness import (
     _COMPLETION_REQUIRED_CAPABILITIES,
@@ -604,6 +606,10 @@ def _require_bound_controller(expected_head: Optional[str] = None) -> None:
     moved between the check and the bind is refused.  Without a separate
     Controller this is a no-op.
     """
+    if CONTROLLER_BINDING_PROBLEM is not None:
+        # Degraded start (#2230): the canonical root fell back to the loaded
+        # deployment, which must never receive a Controller effect.
+        raise GatewayInputError(f"CONTROLLER_BINDING_INVALID:DEGRADED:{CONTROLLER_BINDING_PROBLEM}")
     if not CONTROLLER_IS_SEPARATE:
         return
     reason = bound_controller_problem(Path(CANONICAL_SOURCE_ROOT), Path(LOADED_SOURCE_ROOT))
@@ -4644,6 +4650,7 @@ class UnifiedMCPGateway:
             raise GatewayInputError(f"WORKER_CANDIDATE_UNKNOWN_FIELDS:{','.join(unknown)}")
         if arguments.get("owner_confirmation") is not True:
             raise GatewayInputError("OWNER_CONFIRMATION_REQUIRED")
+        _require_bound_controller()
         authority_confirmation = arguments.get("authority_change_candidate_confirmation", False)
         if not isinstance(authority_confirmation, bool):
             raise GatewayInputError("AUTHORITY_CHANGE_CONFIRMATION_INVALID")
@@ -6085,6 +6092,7 @@ class UnifiedMCPGateway:
             "route_authority": "CapabilityPlanner",
             "execution_lanes": ["DIRECT_CANONICAL", "ASSISTED_CANONICAL", "ISOLATED_TARGET"],
             "canonical_repo_root": str(CANONICAL_SOURCE_ROOT),
+            "controller_binding": controller_binding_status(),
             "github_observer": github_observer_runtime_identity(),
             "core_provenance": gateway_core_provenance(),
             "lifecycle": lifecycle,
@@ -6770,6 +6778,7 @@ class UnifiedMCPGateway:
         return self._recovery_payload(result, operation="reconcile", include_state=True)
 
     def _task_retry(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        _require_bound_controller()
         task_id = _text(arguments.get("task_id"), "task_id")
         assisted = self._assist_read(task_id)
         if assisted is not None:
@@ -6777,6 +6786,7 @@ class UnifiedMCPGateway:
         return self._recovery_payload(self.service.retry_task(task_id), operation="retry", include_state=True)
 
     def _task_resume(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        _require_bound_controller()
         task_id = _text(arguments.get("task_id"), "task_id")
         assisted = self._assist_read(task_id)
         if assisted is not None:
@@ -6795,6 +6805,7 @@ class UnifiedMCPGateway:
         return text
 
     def _candidate_approve(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        _require_bound_controller()
         task_id = _text(arguments.get("task_id"), "task_id")
         candidate_commit_sha = self._exact_hash(arguments.get("candidate_commit_sha"), "candidate_commit_sha", 40)
         candidate_tree_sha = self._exact_hash(arguments.get("candidate_tree_sha"), "candidate_tree_sha", 40)
@@ -6873,6 +6884,7 @@ class UnifiedMCPGateway:
         service.  Keep the transport envelope closed so callers cannot smuggle
         internal state or downstream approval/integration fields.
         """
+        _require_bound_controller()
         runtime_fields = {
             "server_instance_id", "lifecycle_revision", "full_tool_schema_hash",
             "permission_policy_hash", "controller_repo_root", "controller_branch",
@@ -7009,6 +7021,7 @@ class UnifiedMCPGateway:
         action: AutonomyActionClass,
     ) -> dict[str, Any]:
         """Validate one closed Learning effect, authorize it, then CAS it."""
+        _require_bound_controller()
         common = {
             "artifact", "expected_current_digest", "operation_id", "idempotency_key",
             "source_revision", "task_family", "model_name", "runtime_identity",
@@ -7208,6 +7221,7 @@ class UnifiedMCPGateway:
             raise GatewayInputError("CANDIDATE_ADOPTION_SERVICE_RESULT_CLAIM_CEILING")
 
     def _candidate_bind_integration(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        _require_bound_controller()
         forbidden = {"integration_authorization", "action_set", "approval_context", "shell"}
         if forbidden.intersection(arguments):
             raise GatewayInputError("CLOSURE_SCHEMA_CLOSED")
@@ -7285,6 +7299,7 @@ class UnifiedMCPGateway:
         return payload
 
     def _candidate_integrate(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        _require_bound_controller()
         task_id = _text(arguments.get("task_id"), "task_id")
         branch = str(arguments.get("integration_branch") or "nexus/integration/main").strip()
         if not branch or branch.startswith("-") or any(char in branch for char in "\n\r"):
@@ -7533,6 +7548,7 @@ class UnifiedMCPGateway:
         return "dispatch-" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
 
     def _task_run(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        _require_bound_controller()
         try:
             reject_caller_route_overrides(arguments)
         except ValueError as exc:
@@ -7774,6 +7790,10 @@ class UnifiedMCPGateway:
         _require_bound_controller()
         lane = _text(arguments.get("execution_lane"), "execution_lane").upper()
         if lane == "DIRECT_CANONICAL":
+            if CONTROLLER_IS_SEPARATE:
+                # #2230: a Direct commit puts non-tasks/ code into the Controller,
+                # which the next Gateway start would refuse.  Use ISOLATED_TARGET.
+                raise GatewayInputError("DIRECT_CANONICAL_FORBIDDEN_WITH_SEPARATE_CONTROLLER")
             request = dict(arguments.get("request") or {})
             if not request:
                 task_id = _text(arguments.get("task_id"), "task_id")

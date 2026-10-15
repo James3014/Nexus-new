@@ -165,6 +165,20 @@ def bound_controller_problem(controller: Path, loaded: Path) -> Optional[str]:
     ]
     if not any(_same_physical_directory(path, controller) for path in registered):
         return "CONTROLLER_NOT_A_REGISTERED_WORKTREE"
+    # Detached: no branch operation (e.g. integration onto a checked-out
+    # branch) can move the Controller's working tree (#2230).
+    try:
+        branch = subprocess.run(
+            ["git", "symbolic-ref", "-q", "HEAD"],
+            cwd=controller,
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "HEAD_UNREADABLE"
+    if branch.returncode == 0:
+        return "CONTROLLER_NOT_DETACHED"
     # The gitdir the Controller's .git points at must point back at this very
     # Controller, so a .git repointed at a third worktree's gitdir is refused.
     dot_git = controller / ".git"
@@ -302,9 +316,72 @@ def _controller_worktree_problem(controller: Path) -> Optional[str]:
     return None
 
 
-CANONICAL_SOURCE_ROOT = resolve_canonical_source_root()
+def resolve_canonical_source_root_at_startup(
+    env: Optional[Mapping[str, str]] = None,
+    *,
+    source_root: Optional[Path] = None,
+) -> tuple[Path, Optional[str]]:
+    """``(root, problem)`` for process start: a bad separate Controller degrades.
+
+    #2230: a separate Controller that fails its binding (or is gone) must not
+    crash-loop the Gateway at import.  The process then runs with the loaded
+    checkout as its canonical root (the pre-#1939 layout) and reports
+    ``problem``; every Controller effect is refused while degraded.  A broken
+    override that names the loaded checkout itself still fails as before.
+    """
+    environment = os.environ if env is None else env
+    loaded = (source_root or Path(__file__).resolve().parents[2]).resolve()
+    raw = str(environment.get(CANONICAL_SOURCE_ROOT_ENV, "") or "").strip()
+    requested = Path(raw).expanduser() if raw else None
+    separate = (
+        requested is not None
+        and requested.is_absolute()
+        and not _same_physical_directory(requested, loaded)
+    )
+    try:
+        return resolve_canonical_source_root(environment, source_root=loaded), None
+    except (subprocess.SubprocessError, OSError) as exc:
+        # A git call that timed out or failed (cold cache after a reboot).
+        if not separate:
+            raise
+        return loaded, f"CONTROLLER_CHECK_FAILED:{type(exc).__name__}"
+    except RuntimeError as exc:
+        if not separate:
+            raise
+        message = str(exc)
+        # Only our own Controller going bad (or away) degrades; a root from
+        # another repository is still refused outright.
+        foreign = message.startswith("NEXUS_CANONICAL_SOURCE_ROOT_SOURCE_MISMATCH:") and any(
+            message.endswith(":" + reason) for reason in _FOREIGN_ROOT_REASONS
+        )
+        degradable = message in _GONE_ROOT_ERRORS or (
+            message.startswith("NEXUS_CANONICAL_SOURCE_ROOT_SOURCE_MISMATCH:") and not foreign
+        )
+        if not degradable:
+            raise
+        match = re.match(r"[A-Z][A-Z0-9_:]{0,159}", message)
+        return loaded, match.group(0) if match else "CONTROLLER_UNUSABLE"
+
+
+# Only a positively proven other repository is refused at import; unreadable
+# metadata of our own Controller degrades (the fallback is the loaded checkout).
+_FOREIGN_ROOT_REASONS = ("DIFFERENT_REPOSITORY",)
+_GONE_ROOT_ERRORS = (
+    "NEXUS_CANONICAL_SOURCE_ROOT_MISSING",
+    "NEXUS_CANONICAL_SOURCE_ROOT_NOT_DIRECTORY",
+)
+
+
+CANONICAL_SOURCE_ROOT, CONTROLLER_BINDING_PROBLEM = resolve_canonical_source_root_at_startup()
 # True only when the deployer bound a separate Controller worktree (#1939).
 CONTROLLER_IS_SEPARATE = not _same_physical_directory(CANONICAL_SOURCE_ROOT, LOADED_SOURCE_ROOT)
+
+
+def controller_binding_status() -> dict[str, Optional[str]]:
+    """Public, path-free Controller state for /health and gateway status (#2230)."""
+    if CONTROLLER_BINDING_PROBLEM is not None:
+        return {"status": "DEGRADED", "reason": CONTROLLER_BINDING_PROBLEM}
+    return {"status": "SEPARATE" if CONTROLLER_IS_SEPARATE else "NOT_SEPARATE", "reason": None}
 
 
 def resolve_rdc_repo_root(
