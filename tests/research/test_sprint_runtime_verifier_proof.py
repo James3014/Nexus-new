@@ -294,6 +294,10 @@ def test_memo_hit_and_miss_give_the_sprint_the_same_visible_evaluation(
         sprint.InPlaceSprintExecutor.evaluate_candidate,
         raising=False,
     )
+    # #2211: with NEXUS_CONFINE_VISIBLE_TEST=1 the executor itself confines its run (and
+    # refuses without an OS barrier, e.g. Linux CI); this test compares memo hit vs miss of
+    # the in-place evaluation, so it keeps the in-place path.
+    monkeypatch.setattr(sprint, "_inplace_evaluate_confined", lambda *_a, **_k: None)
     outputs = {}
     for call_verifier in (True, False):
         monkeypatch.setattr(sprint, "LLMCandidateGenerator", make_generator(call_verifier))
