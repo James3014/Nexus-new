@@ -1028,12 +1028,64 @@ def _symlinked_component(repo_root: Path, relative: Path) -> bool:
     return False
 
 
+_HIDDEN_TEST_STEMS = frozenset({"hidden", "test_hidden", "hidden_test", "hidden_tests"})
+_HIDDEN_TEST_DIRS = frozenset({"hidden", "test_hidden", "hidden_tests", "hidden_test"})
+
+
+def _names_hidden_test(candidate: Path) -> bool:
+    """A hidden-verifier file or a file inside a hidden-test directory.
+
+    Basename ``test_hidden*`` / ``hidden_test*`` or stem exactly a hidden name; a directory
+    component exactly ``hidden``/``test_hidden``/``hidden_tests``/``hidden_test`` (case-
+    insensitive).  Not a substring match: task ids such as ``nexus-value-hidden-001`` are
+    ordinary directories.
+    """
+    name = candidate.name.lower()
+    if name.startswith(("test_hidden", "hidden_test")) or Path(name).stem in _HIDDEN_TEST_STEMS:
+        return True
+    return any(part.lower() in _HIDDEN_TEST_DIRS for part in candidate.parts[:-1])
+
+
+def repo_relative_path(repo_root: Path, raw: str) -> tuple[str, str]:
+    """``(repo-relative path, error)`` for a task file given relative or as an in-repo absolute path.
+
+    The counted A/B runner passes ``--target-file/--test-file`` as absolute paths.  An absolute
+    path is accepted only when it lies lexically inside ``repo_root`` (as given or resolved)
+    and no component between the repo root and the file is a symlink; it is then returned
+    relative.  Anything outside the repo is refused (``path_outside_repo``).
+    """
+    text = str(raw or "").strip()
+    if not text:
+        return "", ""  # empty stays empty; callers report it as missing
+    candidate = Path(text)
+    if not candidate.is_absolute():
+        return text, ""
+    absolute = Path(os.path.abspath(candidate))
+    root = Path(repo_root)
+    relative: Path | None = None
+    for base in (Path(os.path.abspath(root)), root.resolve()):
+        try:
+            relative = absolute.relative_to(base)
+            break
+        except ValueError:
+            continue
+    if relative is None or not relative.parts:
+        return "", "path_outside_repo"
+    if _symlinked_component(root, relative) or (root / relative).is_symlink():
+        return "", "path_has_symlink"
+    try:
+        (root / relative).resolve().relative_to(root.resolve())
+    except ValueError:
+        return "", "path_outside_repo"
+    return relative.as_posix(), ""
+
+
 def visible_test_target_error(repo_root: Path, test_file: str) -> str:
     """Why ``test_file`` cannot be the runtime verifier's only test target ("" when it can).
 
     The verifier runs exactly one explicit, visible test file: never an empty target (pytest
     would collect the current directory), a directory, a symlink, a path outside the repo or a
-    hidden test (``test_hidden*`` or any path component containing ``hidden``).
+    hidden test (``_names_hidden_test``).
     """
     raw = str(test_file or "").strip()
     if not raw:
@@ -1043,10 +1095,7 @@ def visible_test_target_error(repo_root: Path, test_file: str) -> str:
         return "test_file_not_repo_relative"
     if any(part.startswith("-") for part in candidate.parts):
         return "test_file_option_like"
-    if candidate.name.lower().startswith("test_hidden") or any(
-        "hidden" in part.lower() for part in candidate.parts
-    ):
-        # Any component naming "hidden" (test_hidden/..., tests/hidden_test.py, ...).
+    if _names_hidden_test(candidate):
         return "hidden_test_target"
     if candidate.suffix != ".py":
         return "test_file_not_python"
@@ -1997,7 +2046,11 @@ def _run_hyper_sprint_core(*, repo_root: Path, config: SprintConfig) -> SprintRe
     visible_verifier_binding: dict[str, Any] = {"hint": "", "seed": 0}
     visible_eval_memo: dict[tuple[str, str, int], CandidateEval] = {}
 
-    visible_target_error = visible_test_target_error(repo_root, config.test_file or "")
+    # The counted runner passes absolute in-repo paths: normalise before the target check.
+    visible_test_rel, visible_rel_error = repo_relative_path(repo_root, config.test_file or "")
+    visible_target_error = visible_rel_error or visible_test_target_error(
+        repo_root, visible_test_rel
+    )
     # The sprint's own executor: with a valid target its command is exactly
     # visible_test_pytest_cmd(test_file) (one explicit file, same flags), so a memo hit and a
     # miss produce the same evaluation.
@@ -2030,7 +2083,7 @@ def _run_hyper_sprint_core(*, repo_root: Path, config: SprintConfig) -> SprintRe
         return sprint_evaluate(seed=seed, hint=hint, code=code, source=source)
 
     if llm_generator is not None and hasattr(llm_generator, "gate_input_test_file"):
-        setattr(llm_generator, "gate_input_test_file", str(config.test_file or ""))
+        setattr(llm_generator, "gate_input_test_file", visible_test_rel)
     if llm_generator is not None and hasattr(llm_generator, "visible_verifier"):
         # Only the online generator has the seam (tests may substitute the generator class).
         if visible_target_error:

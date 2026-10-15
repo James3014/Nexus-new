@@ -2269,7 +2269,7 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
                 risk_route: Mapping[str, Any] = raw_route if isinstance(raw_route, Mapping) else {}
                 raw_features = risk_route.get("route_features")
                 features = raw_features if isinstance(raw_features, Mapping) else {}
-                route_risk = features.get("risk_score", risk_route.get("risk_score"))
+                route_risk = features.get("risk_score")
                 if isinstance(route_risk, (int, float)) and not isinstance(route_risk, bool):
                     out["risk_score"] = int(route_risk)
         # Nested verifier block (common mainchain shape)

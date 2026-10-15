@@ -114,10 +114,20 @@ def _repo_regular_file(root: Path, relative: str) -> bool:
 
 
 def gate_inputs_enabled() -> bool:
-    """On unless ``NEXUS_SPRINT_GATE_INPUTS`` is set to a false value."""
+    """``NEXUS_SPRINT_GATE_INPUTS``: unset or ``1`` = on, ``0`` = off, anything else is an error.
 
-    raw = os.environ.get(GATE_INPUTS_ENV, "").strip().lower()
-    return raw not in {"0", "false", "no", "off"}
+    Parsed fail-closed like ``NEXUS_CONFINE_VISIBLE_TEST``: a misspelling never silently means
+    "on".  The switch only controls feeding the inputs; the strict-lane verdict withhold
+    (``online_nexus_context.withhold_fed_gate_verdicts``) and the route-only plan-quality risk
+    rule stay active regardless.
+    """
+
+    raw = os.environ.get(GATE_INPUTS_ENV)
+    if raw is None or raw.strip() == "1":
+        return True
+    if raw.strip() == "0":
+        return False
+    raise ValueError(f"{GATE_INPUTS_ENV} must be 0 or 1, got {raw!r}")
 
 
 def _sha256(text: str) -> str:
@@ -145,12 +155,9 @@ def _route_risk_score(route: Mapping[str, Any] | None) -> int | None:
     if not isinstance(route, Mapping):
         return None
     features = route.get("route_features")
-    for source in (features if isinstance(features, Mapping) else {}, route):
-        value = source.get("risk_score")
-        if isinstance(value, bool):
-            continue
-        if isinstance(value, (int, float)):
-            return int(value)
+    value = features.get("risk_score") if isinstance(features, Mapping) else None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return int(value)
     return None
 
 
@@ -172,11 +179,14 @@ def sprint_gate_inputs(
     """
 
     # Imported lazily: sprint_service imports this module.
-    from nexus.research.sprint_service import visible_test_target_error
+    from nexus.research.sprint_service import repo_relative_path, visible_test_target_error
 
     root = Path(repo_root).resolve()
-    target = str(target_file or "").strip()
-    test = str(test_file or "").strip()
+    # The counted runner passes absolute in-repo paths; normalise (outside the repo -> "").
+    target = repo_relative_path(root, str(target_file or ""))[0]
+    test, test_rel_error = repo_relative_path(root, str(test_file or ""))
+    if registered_test_file is not None:
+        registered_test_file = repo_relative_path(root, registered_test_file)[0]
     task_text = str(task or "")
     provenance: dict[str, str] = {}
     codeintel: dict[str, Any] = {"workspace_root": str(root)}
@@ -192,7 +202,9 @@ def sprint_gate_inputs(
 
     # Visible test only: visible_test_target_error() refuses test_hidden*, directories,
     # symlinks, option-like and out-of-repo paths, so a hidden test is never named here.
-    test_error = visible_test_target_error(root, test) if test else "missing_test_file"
+    test_error = (
+        test_rel_error or visible_test_target_error(root, test) if test else "missing_test_file"
+    )
     registered = str(test if registered_test_file is None else registered_test_file).strip()
     if not test_error and Path(test) != Path(registered):
         # Only the task's registered visible test (SprintConfig.test_file), never another file.

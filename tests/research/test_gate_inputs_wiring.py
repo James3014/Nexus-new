@@ -758,3 +758,121 @@ def test_l1_non_fed_evaluated_rejected_entry_drops_its_payload() -> None:
     assert entry["status"] == "INVOKED_NOT_SUCCESS" and entry["consumer_payload"] == {}
     assert entry["success"] is False and entry["invoked_real"] is False
     assert entry["has_consumer_payload"] is False
+
+
+# ---- round 3 (independent review of 050dd62bb) ----
+def test_absolute_in_repo_paths_are_normalised_like_the_counted_runner_passes_them(
+    tmp_path: Path,
+) -> None:
+    root = _workspace(tmp_path)
+    codeintel = sprint_gate_inputs(
+        repo_root=root,
+        task=TASK,
+        target_file=str(root / "target.py"),
+        test_file=str(root / "test_visible.py"),
+        registered_test_file=str(root / "test_visible.py"),
+        route={"route_features": {"risk_score": 55}},
+    )["codeintel"]
+    assert codeintel["target_file"] == "target.py"
+    assert codeintel["verify_commands"][0].endswith("-- test_visible.py")
+    assert codeintel["intent_pass"] is True and codeintel["handoff_readiness"] == 1.0
+    assert codeintel["target_symbol"] == "remaining_ms"
+    # An absolute path outside the repo is refused, never normalised.
+    (tmp_path / "test_out.py").write_text(VISIBLE, encoding="utf-8")
+    outside = sprint_gate_inputs(
+        repo_root=root,
+        task=TASK,
+        target_file=str(tmp_path / "test_out.py"),
+        test_file=str(tmp_path / "test_out.py"),
+    )["codeintel"]
+    assert "verify_commands" not in outside and "target_file" not in outside
+
+
+def test_repo_relative_path_refuses_outside_and_symlinked_absolute_paths(tmp_path: Path) -> None:
+    from nexus.research.sprint_service import repo_relative_path
+
+    root = _workspace(tmp_path)
+    assert repo_relative_path(root, str(root / "test_visible.py")) == ("test_visible.py", "")
+    assert repo_relative_path(root, str(root.resolve() / "test_visible.py"))[0] == (
+        "test_visible.py"
+    )
+    assert repo_relative_path(root, str(tmp_path / "x.py"))[1] == "path_outside_repo"
+    assert repo_relative_path(root, str(root / ".." / "x.py"))[1] == "path_outside_repo"
+    (tmp_path / "d").mkdir()
+    (root / "ln").symlink_to(tmp_path / "d", target_is_directory=True)
+    assert repo_relative_path(root, str(root / "ln" / "t.py"))[1] == "path_has_symlink"
+
+
+def test_sprint_binds_the_relative_visible_test_from_absolute_config_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import nexus.research.sprint_service as sprint
+
+    bound: dict[str, Any] = {}
+
+    class _Generator:
+        visible_verifier = None
+        visible_test_target_invalid = ""
+        visible_verifier_unbound_reason = ""
+        gate_input_test_file = ""
+        model_chain = ["m"]
+
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            bound["generator"] = self
+
+        def generate(self, **_kwargs: Any) -> tuple[str, dict[str, Any]]:
+            raise sprint.LLMCandidateError("llm_no_patch", {"model_calls": 0})
+
+    monkeypatch.setattr(sprint, "LLMCandidateGenerator", _Generator)
+    monkeypatch.setenv("NEXUS_FORCE_LLM_DESPITE_LEARN_SLO", "1")
+    monkeypatch.setenv("NEXUS_FORCE_INPLACE_EXECUTOR", "1")
+    root = _workspace(tmp_path)
+    try:
+        sprint.run_hyper_sprint(
+            repo_root=root,
+            config=sprint.SprintConfig(
+                task=TASK,
+                target_file=str(root / "target.py"),
+                test_file=str(root / "test_visible.py"),
+                candidate_count=1,
+                llm_mode=True,
+            ),
+        )
+    except Exception:  # noqa: BLE001 - only the binding matters here
+        pass
+    generator = bound["generator"]
+    assert generator.gate_input_test_file == "test_visible.py"
+    # #2212's verifier target check sees the normalised path too (no longer "not relative").
+    assert generator.visible_test_target_invalid == ""
+
+
+@pytest.mark.parametrize("task_id", ["nexus-value-hidden-001", "nexus-value-hidden-002"])
+def test_p16_hidden_named_task_directories_keep_their_visible_test(
+    tmp_path: Path, task_id: str
+) -> None:
+    from nexus.research.sprint_service import visible_test_target_error
+
+    root = _workspace(tmp_path)
+    rel = f".nexus/bench_cases/{task_id}/test_visible.py"
+    (root / rel).parent.mkdir(parents=True)
+    (root / rel).write_text(VISIBLE, encoding="utf-8")
+    assert visible_test_target_error(root, rel) == ""
+    codeintel = sprint_gate_inputs(
+        repo_root=root, task=TASK, target_file="target.py", test_file=rel
+    )["codeintel"]
+    assert codeintel["verify_commands"][0].endswith(f"-- {rel}")
+
+
+@pytest.mark.parametrize("raw", ["true", "on", "yes", "2", ""])
+def test_gate_inputs_kill_switch_is_fail_closed(monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
+    from nexus.research.gate_inputs import gate_inputs_enabled
+
+    monkeypatch.setenv("NEXUS_SPRINT_GATE_INPUTS", raw)
+    with pytest.raises(ValueError):
+        gate_inputs_enabled()
+    monkeypatch.setenv("NEXUS_SPRINT_GATE_INPUTS", "0")
+    assert gate_inputs_enabled() is False
+    monkeypatch.setenv("NEXUS_SPRINT_GATE_INPUTS", "1")
+    assert gate_inputs_enabled() is True
+    monkeypatch.delenv("NEXUS_SPRINT_GATE_INPUTS")
+    assert gate_inputs_enabled() is True
