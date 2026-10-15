@@ -8,6 +8,19 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 from pydantic import BaseModel
 
+def canonical_lock_key(workspace_root: str | Path, path: str | Path) -> str:
+    """One registry key per physical file: resolved against ``workspace_root``; inside it the
+    workspace-relative POSIX path, outside it the resolved absolute path. So ``target.py``,
+    ``./target.py`` and ``/abs/ws/target.py`` all lock the same entry."""
+    root = Path(workspace_root).expanduser().resolve()
+    candidate = Path(str(path)).expanduser()
+    resolved = (candidate if candidate.is_absolute() else root / candidate).resolve()
+    try:
+        return resolved.relative_to(root).as_posix()
+    except ValueError:
+        return str(resolved)
+
+
 class LockEntry(BaseModel):
     task_id: str
     files: List[str]
@@ -83,13 +96,21 @@ class FileLockRegistry:
                 for p in paths
                 if p in self.locks and self.locks[p] != task_id and p not in holders
             }
+            newly_acquired: List[str] = []
             if not holders:
                 for p in paths:
                     if self.locks.get(p) != task_id:
                         self.acquired_at[p] = now
+                        newly_acquired.append(p)
                     self.locks[p] = task_id
                 self._save()
-        return {"conflicts": list(holders), "holders": holders, "stale_taken_over": taken_over}
+        # ``newly_acquired`` is decided under the same flock as the acquire (no stale read).
+        return {
+            "conflicts": list(holders),
+            "holders": holders,
+            "stale_taken_over": taken_over,
+            "newly_acquired": newly_acquired,
+        }
 
     def acquire(self, task_id: str, files: List[str]) -> List[str]:
         """
@@ -109,6 +130,19 @@ class FileLockRegistry:
                 self.acquired_at.pop(f, None)
             if to_remove:
                 self._save()
+
+    def release_files(self, task_id: str, files: List[str]) -> List[str]:
+        """Release only ``files`` (normalized) that ``task_id`` holds; other locks it holds
+        stay. Returns the released paths."""
+        paths = {os.path.normpath(f) for f in files}
+        with self._exclusive():
+            to_remove = [f for f, t in self.locks.items() if t == task_id and f in paths]
+            for f in to_remove:
+                del self.locks[f]
+                self.acquired_at.pop(f, None)
+            if to_remove:
+                self._save()
+        return to_remove
 
     def holder(self, file_path: str) -> Optional[str]:
         return self.locks.get(os.path.normpath(file_path))
