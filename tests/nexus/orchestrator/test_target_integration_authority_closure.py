@@ -691,11 +691,7 @@ def test_owner_finish_delegates_full_authorized_integration_then_cleanup(tmp_pat
             "commit_created": True, "merge_performed": False,
         },
     })
-    context = {
-        "schema": "nexus.approval.v2", "approval_id": "approval-task-1",
-        "approval_scope": "ALLOW_ACTION_ONCE", "contract_kind": "TRACKED_TASK_CARD",
-        "contract_hash": "c" * 64, "task_card_hash": "c" * 64,
-    }
+    context = _bound_tracked_approval("task-1", contract.contract_hash)
     result = service.owner_finish(
         "task-1", candidate_commit_sha=candidate,
         candidate_tree_sha=_git(root, "rev-parse", f"{candidate}^{{tree}}"),
