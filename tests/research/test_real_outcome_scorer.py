@@ -1274,13 +1274,15 @@ def test_gold_ref_oracle_run_failure_fails_closed(tmp_path):
     )
     task = fx.task(fx.diff_from_base({"pkg/calc.py": FIXED}), merge=merge)
     r = ros.score_task(task, ctx)["receipt"]
-    assert (r["label"], r["sub_reason"]) == (ros.NOT_SCORABLE_ORACLE_INVALID, "GOLD_PORT_FAILED")
-    assert r["detail"] == "gold_ref_run_failed"
+    assert (r["label"], r["sub_reason"]) == (ros.NOT_SCORABLE_ORACLE_INVALID, "GOLD_REF_RUN_FAILED")
+    assert r["detail"] == "oracle"
 
 
 def test_gold_ref_p2p_run_failure_excuses_nothing(tmp_path):
     # The candidate breaks add(). GOLD's P2P run times out, which under v1 alone would make
-    # the suspect gold_also_fails. GOLD_REF also times out, so A5 excuses nothing.
+    # the suspect gold_also_fails. GOLD_REF also times out, so v2 excuses nothing, and (review
+    # round 4, finding 5) the failure is not counted against the candidate either: the task
+    # is NOT_SCORABLE with its own sub-reason.
     fx, merge = _docs_drop_fixture(tmp_path)
     ctx = _ctx(tmp_path, fx)
     ctx.runner = _TreeTimeoutRunner(
@@ -1295,8 +1297,9 @@ def test_gold_ref_p2p_run_failure_excuses_nothing(tmp_path):
         "receipt"
     ]
     assert r["gold_also_fails"] == []
-    assert r["p2p_new_failures"] == ["tests.test_add::test_add"]
-    assert r["label"] == ros.BROKE_EXISTING
+    assert r["p2p_new_failures"] == []
+    assert (r["label"], r["sub_reason"]) == (ros.NOT_SCORABLE_ORACLE_INVALID, "GOLD_REF_RUN_FAILED")
+    assert r["p2p_baseline_failures"][-1]["tree"] == "GOLD_REF"
 
 
 LONG_DOC = "status: {}\n2\n3\n4\n5\n6\n7\n8\n{}\n"
@@ -1355,3 +1358,270 @@ def test_gold_ref_node_present_on_one_tree_only_is_a_mismatch(tmp_path):
     assert (r["label"], r["sub_reason"]) == (ros.NOT_SCORABLE_ORACLE_INVALID, "GOLD_PORT_FAILED")
     # GOLD collects an empty-parametrize placeholder; GOLD_REF collects the real case.
     assert "tests.test_mul::test_case[new]" in r["gold_ref_mismatch"]
+
+
+# Spec v2 review round 4.
+
+GUARD_BASE_TEST = (
+    "from pkg.guard import g\n\n\ndef test_placeholder():\n    assert True  # base\n\n\n"
+    "def test_guard():\n    assert g() == 1\n"
+)
+GUARD_DRIFT_TEST = "def test_placeholder():\n    assert True  # drift\n"
+
+
+def _guard_dropped_by_drift(tmp_path: Path) -> tuple[Fixture, str]:
+    # BASE tests/test_mul.py::test_guard guards g(); a later main commit deletes it; the
+    # human fix conflicts in that file, so GOLD takes the merge-tree file (no test_guard).
+    fx = Fixture(
+        tmp_path,
+        extra_base={
+            "tests/test_mul.py": GUARD_BASE_TEST,
+            "pkg/guard.py": "def g():\n    return 1\n",
+        },
+    )
+    merge = _drift_then_fix(
+        fx,
+        {"tests/test_mul.py": GUARD_DRIFT_TEST},
+        _fix_with(GUARD_DRIFT_TEST.replace("# drift", "# fix") + "\n\n" + MUL_TEST),
+    )
+    return fx, merge
+
+
+def test_base_test_lost_from_merge_taken_file_is_still_guarded(tmp_path):
+    # Review round 4, finding 1 (reviewer repro): the candidate fixes mul() but breaks g().
+    # Before: RESOLVED with p2p_new_failures == []. P2P(d) runs the BASE version of the
+    # merge-taken file on BASE, CAND, GOLD (all with BASE test bytes) and catches it.
+    fx, merge = _guard_dropped_by_drift(tmp_path)
+    ctx = _ctx(tmp_path, fx)
+    bad = fx.diff_from_base({"pkg/calc.py": FIXED, "pkg/guard.py": "def g():\n    return 2\n"})
+    r = ros.score_task(fx.task(bad, merge=merge), ctx)["receipt"]
+    assert r["gold_port_test_files_from_merge"] == ["tests/test_mul.py"]
+    assert r["p2p_d_targets"] == ["tests/test_mul.py"]
+    assert r["p2p_new_failures"] == ["tests.test_mul::test_guard"]
+    assert r["label"] == ros.BROKE_EXISTING
+    assert {"CAND@BASE_TESTS", "GOLD@BASE_TESTS"} <= set(r["trees"])
+    honest = fx.diff_from_base({"pkg/calc.py": FIXED})
+    r = ros.score_task(fx.task(honest, merge=merge), ctx)["receipt"]
+    assert r["label"] == ros.RESOLVED
+    assert r["p2p_d_total"] >= 2  # test_placeholder and test_guard pass on BASE
+
+
+def test_base_test_the_human_fix_retires_is_gold_also_fails(tmp_path):
+    # A BASE test that asserts the old (buggy) behaviour fails on GOLD@BASE_TESTS too, so
+    # P2P(d) excuses it and an honest candidate is still RESOLVED.
+    old = "from pkg.calc import mul\n\n\ndef test_mul_old():\n    assert mul(2, 3) == 5\n"
+    fx = Fixture(tmp_path, extra_base={"tests/test_mul.py": old})
+    merge = _drift_then_fix(
+        fx,
+        {"tests/test_mul.py": old + "\n\ndef test_drift():\n    assert True\n"},
+        _fix_with(MUL_TEST),
+    )
+    r = _score(tmp_path, fx, fx.task(fx.diff_from_base({"pkg/calc.py": FIXED}), merge=merge))
+    assert r["gold_port_test_files_from_merge"] == ["tests/test_mul.py"]
+    assert r["gold_also_fails"] == ["tests.test_mul::test_mul_old"]
+    assert r["label"] == ros.RESOLVED
+
+
+def test_merge_taken_test_nodes_failing_on_gold_are_counted(tmp_path):
+    # Diagnostic only: test_sub_from_drift needs pkg/extra.py from another main commit.
+    fx = Fixture(tmp_path, extra_base={"tests/test_mul.py": OLD_MUL_TEST})
+    merge = _drift_then_fix(
+        fx,
+        {"tests/test_mul.py": DRIFT_TEST_SUB, "pkg/extra.py": "def sub(a, b):\n    return a - b\n"},
+        _fix_with(DRIFT_TEST_SUB.replace("# drift", "# fix") + "\n\n" + MUL_TEST),
+    )
+    r = _score(tmp_path, fx, fx.task(fx.diff_from_base({"pkg/calc.py": FIXED}), merge=merge))
+    assert r["gold_port_merge_test_nodes_failing_on_gold"] == 1
+    assert r["label"] == ros.RESOLVED
+
+
+def test_merge_taken_conftest_present_at_base_is_refused(tmp_path):
+    # A merge-taken conftest.py could change BASE tests in other files that are never
+    # re-run at their BASE state, so v2 refuses rather than guess.
+    fx = Fixture(tmp_path, extra_base={"tests/conftest.py": "X = 1\n"})
+    merge = _drift_then_fix(
+        fx,
+        {"tests/conftest.py": "X = 2\n"},
+        {**_fix_with(MUL_TEST), "tests/conftest.py": "X = 3\n"},
+    )
+    r = _score(tmp_path, fx, fx.task(fx.diff_from_base({"pkg/calc.py": FIXED}), merge=merge))
+    assert (r["label"], r["sub_reason"]) == (ros.NOT_SCORABLE_ORACLE_INVALID, "GOLD_PORT_FAILED")
+    assert r["detail"] == "merge_taken_test_support_file:tests/conftest.py"
+
+
+def test_droppable_classification_excludes_package_and_runtime_data():
+    # Review round 4, finding 2.
+    assert not ros.is_droppable_non_code("pkg/GUIDE.md", in_python_package=True)
+    assert not ros.is_droppable_non_code("nexus/prompts/system.md")
+    assert not ros.is_droppable_non_code("app/templates/page.rst")
+    assert not ros.is_droppable_non_code("docs/data/table.json")
+    assert ros.is_droppable_non_code("docs/guide.md", in_python_package=False)
+
+
+def test_prose_file_inside_a_python_package_is_never_dropped(tmp_path):
+    fx = Fixture(tmp_path, extra_base={"pkg/GUIDE.md": STATUS_BASE})
+    merge = _drift_then_fix(
+        fx,
+        {"pkg/GUIDE.md": "status: drift\nline2\n"},
+        {**_fix_with(MUL_TEST), "pkg/GUIDE.md": "status: fixed\nline2\n"},
+    )
+    r = _score(tmp_path, fx, fx.task(fx.diff_from_base({"pkg/calc.py": FIXED}), merge=merge))
+    assert (r["label"], r["sub_reason"]) == (ros.NOT_SCORABLE_ORACLE_INVALID, "GOLD_PORT_FAILED")
+    assert r["gold_port_failed_paths"] == ["pkg/GUIDE.md"]
+
+
+def test_gold_ref_tracks_a_redropped_path_through_a_per_file_port(tmp_path, fx):
+    # Review round 4, finding 3: PR 1 drops docs/status.md. PR 2's whole patch fails (its
+    # docs/other.md conflicts), and its docs/status.md change applies file by file:
+    # GOLD_REF must still use PR 2's merge content for docs/status.md.
+    up = fx.upstream
+    _git(up, "checkout", "-q", "--detach", fx.base)
+    _write(up, {"docs/status.md": LONG_DOC.format("base", "end"), "docs/other.md": "o: base\n"})
+    _git(up, "add", "-A")
+    _git(up, "commit", "-qm", "docs")
+    fx.base = _git(up, "rev-parse", "HEAD").strip()
+    merge1 = _drift_then_fix(
+        fx,
+        {"docs/status.md": LONG_DOC.format("drift", "end"), "docs/other.md": "o: drift\n"},
+        {**_fix_with(MUL_TEST), "docs/status.md": LONG_DOC.format("fix1", "end")},
+    )
+    _write(up, {"docs/status.md": LONG_DOC.format("fix1", "end2"), "docs/other.md": "o: pr2\n"})
+    _git(up, "commit", "-qam", "pr2")
+    merge2 = _git(up, "rev-parse", "HEAD").strip()
+    repo = ros.GitRepo(tmp_path / "scorer-repo", [str(up)])
+    for sha in (fx.base, merge1, merge2):
+        assert repo.ensure_commit(sha)
+    wt = repo.worktree(tmp_path / "wt", fx.base)
+    prs = [{"number": 1, "merge_commit_sha": merge1}, {"number": 2, "merge_commit_sha": merge2}]
+    port = ros.port_gold(repo, wt, prs)
+    assert port.ok
+    assert sorted(port.dropped_non_code_paths) == ["docs/other.md", "docs/status.md"]
+    assert port.dropped_from == {"docs/status.md": merge2, "docs/other.md": merge2}
+    assert (wt / "docs/status.md").read_text() == LONG_DOC.format("base", "end2")
+
+
+def test_unmerged_entries_left_by_a_file_step_fail_the_port(tmp_path, monkeypatch):
+    # Review round 4, finding 4: the final unmerged-index check is the backstop when a
+    # per-file step leaves conflict entries behind (here: the undo step is skipped).
+    # The dropped prose file sorts last, so no later file step trips over the leftovers.
+    fx = Fixture(tmp_path, extra_base={"zz_notes.md": STATUS_BASE})
+    merge = _drift_then_fix(
+        fx,
+        {"zz_notes.md": "status: drift\nline2\n"},
+        {**_fix_with(MUL_TEST), "zz_notes.md": "status: fixed\nline2\n"},
+    )
+    repo = ros.GitRepo(tmp_path / "scorer-repo", [str(fx.upstream)])
+    for sha in (fx.base, merge):
+        assert repo.ensure_commit(sha)
+    wt = repo.worktree(tmp_path / "wt", fx.base)
+    real = ros._set_path_from
+
+    def skip_doc_undo(repo_, wt_, rev, path):
+        if path != "zz_notes.md":
+            real(repo_, wt_, rev, path)
+
+    monkeypatch.setattr(ros, "_set_path_from", skip_doc_undo)
+    port = ros.port_gold(repo, wt, [{"number": 7, "merge_commit_sha": merge}])
+    assert not port.ok
+    assert port.failed_pr == 7
+    assert port.failed_paths == []
+
+
+def test_overwrite_oracle_files_refuses_symlinked_source(tmp_path):
+    # Review round 4: copy2 followed links, so an oracle source linking outside the tree
+    # copied the outside file in.
+    outside = tmp_path / "secret.txt"
+    outside.write_text("secret\n")
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    (src / "tests").mkdir(parents=True)
+    (dst / "tests").mkdir(parents=True)
+    (src / "tests/test_x.py").symlink_to(outside)
+    with pytest.raises(ros.UnsafeOracleSource):
+        ros.overwrite_oracle_files(dst, src, ["tests/test_x.py"])
+    assert not (dst / "tests/test_x.py").exists()
+
+
+def test_symlinked_oracle_source_is_oracle_invalid(tmp_path, fx):
+    up = fx.upstream
+    _git(up, "checkout", "-q", "--detach", fx.base)
+    _write(up, _fix_with(MUL_TEST))
+    (up / "tests/test_link.py").symlink_to("/etc/hosts")
+    _git(up, "add", "-A")
+    _git(up, "commit", "-qm", "human fix with a linked test file")
+    merge = _git(up, "rev-parse", "HEAD").strip()
+    r = _score(tmp_path, fx, fx.task(fx.diff_from_base({"pkg/calc.py": FIXED}), merge=merge))
+    assert (r["label"], r["sub_reason"]) == (ros.NOT_SCORABLE_ORACLE_INVALID, "ORACLE_FILE_UNSAFE")
+    assert r["detail"] == "oracle_source_symlink:tests/test_link.py"
+
+
+def test_gold_ref_p2p_failure_never_makes_a_correct_candidate_broke_existing(tmp_path):
+    # Review round 4, finding 5: the honest candidate breaks test_legacy_mul exactly as the
+    # human fix does (GOLD fails it too). A timed-out GOLD_REF run used to turn that into a
+    # P2P new failure (BROKE_EXISTING); now the task is NOT_SCORABLE.
+    fx = Fixture(
+        tmp_path, extra_base={"tests/test_legacy.py": LEGACY_TEST, "docs/status.md": STATUS_BASE}
+    )
+    merge = _drift_then_fix(
+        fx,
+        {"docs/status.md": "status: drift\nline2\n"},
+        {**_fix_with(MUL_TEST), "docs/status.md": "status: fixed\nline2\n"},
+    )
+    task = fx.task(fx.diff_from_base({"pkg/calc.py": FIXED}), merge=merge)
+    r = _score(tmp_path, fx, task)
+    assert r["gold_also_fails"] == ["tests.test_legacy::test_legacy_mul"]
+    assert r["label"] == ros.RESOLVED
+    ctx = _ctx(tmp_path, fx, work="work2")
+    ctx.runner = _TreeTimeoutRunner(
+        tmp_path / "work2" / "scratch",
+        timeout=300,
+        log=lambda m: None,
+        trees={"goldref"},
+        targets={"tests"},
+    )
+    r = ros.score_task(task, ctx)["receipt"]
+    assert (r["label"], r["sub_reason"]) == (ros.NOT_SCORABLE_ORACLE_INVALID, "GOLD_REF_RUN_FAILED")
+    assert r["p2p_new_failures"] == []
+
+
+def test_receipt_spec_version_follows_gold_port_method(tmp_path, fx):
+    ctx = _ctx(tmp_path, fx)
+    ctx.spec_v2_sha256 = "2" * 64
+    r = ros.score_task(fx.task(fx.gold_diff), ctx)["receipt"]
+    assert (r["spec_version"], r["spec_sha256"]) == ("v1", "0" * 64)
+    (tmp_path / "b").mkdir()
+    fx2, merge = _docs_drop_fixture(tmp_path / "b")
+    ctx2 = _ctx(tmp_path / "b", fx2)
+    ctx2.spec_v2_sha256 = "2" * 64
+    r = ros.score_task(fx2.task(fx2.diff_from_base({"pkg/calc.py": FIXED}), merge=merge), ctx2)[
+        "receipt"
+    ]
+    assert (r["spec_version"], r["spec_sha256"]) == ("v2", "2" * 64)
+
+
+def test_summary_reports_v1_only_and_v1_plus_v2_apart():
+    def row(i: int, label: str, version: str | None) -> dict:
+        r = {
+            "label": label,
+            "route": "B",
+            "candidate_raw_status": "VALID",
+            "capped": False,
+            "candidate_empty": False,
+            "failure_kind": None,
+            "task_key": str(i),
+        }
+        if version:
+            r["spec_version"] = version
+        return r
+
+    rows = [row(0, ros.RESOLVED, None), row(1, ros.UNRESOLVED, "v1"), row(2, ros.RESOLVED, "v2")]
+    s = ros.summarize(rows)
+    assert (s["resolved"], s["valid_oracle_n"]) == (1, 2)  # headline: pre-registered v1
+    assert (s["v1_plus_v2"]["resolved"], s["v1_plus_v2"]["valid_oracle_n"]) == (2, 3)
+    assert s["spec_version_counts"] == {"v1": 2, "v2": 1}
+
+
+def test_spec_v2_file_names_v1_sha_and_is_post_hoc():
+    root = Path(__file__).resolve().parents[2]
+    v2 = (root / ros.SPEC_V2_RELATIVE_PATH).read_text()
+    assert "315d95de21ea7ec82c97bf80165feaa052cb8a36fe99f3a1072d45ff74bb2bda" in v2
+    assert "not pre-registered" in v2

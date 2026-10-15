@@ -160,6 +160,7 @@ def main(argv: list[str] | None = None) -> int:
         runner=ros.PytestRunner(args.work / "scratch", log=log),
         repo_sources=sources,
         spec_sha256=_spec_sha256(),
+        spec_v2_sha256=ros.sha256_bytes((ROOT / ros.SPEC_V2_RELATIVE_PATH).read_bytes()),
         leakage_flags=leakage,
         log=log,
         keep_trees=args.keep_trees,

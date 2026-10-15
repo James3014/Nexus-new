@@ -31,6 +31,10 @@ SCORER_VERSION = "1.2.0"
 RECEIPT_SCHEMA = "nexus.research.real_outcome.v1"
 RECEIPT_SEAL_SCHEMA = "nexus.research.real_outcome_seal.v1"
 SPEC_RELATIVE_PATH = "docs/research/REAL_OUTCOME_SCORER_SPEC.md"
+# v2 = v1 + A5 (GOLD port fallback). Receipts whose GOLD needed the fallback record v2 and
+# this file's sha256; every other receipt records v1 (pre-registered) and its sha256.
+SPEC_V2_RELATIVE_PATH = "docs/research/REAL_OUTCOME_SCORER_SPEC.v2.md"
+SPEC_V1, SPEC_V2 = "v1", "v2"
 
 PYTEST_TIMEOUT_SECONDS = 1800
 ORACLE_RUNS = 3
@@ -395,23 +399,32 @@ class GitRepo:
 # ------------------------------------------------------------------- GOLD port
 
 GOLD_PORT_3WAY = "3way"
+# v2: a GOLD_REF run (oracle or P2P) that times out or exits outside the clean codes.
+GOLD_REF_RUN_FAILED = "GOLD_REF_RUN_FAILED"
 GOLD_PORT_PER_FILE = "3way_per_file_fallback"
 # Documentation whose PR change may be left out of GOLD when it does not merge onto BASE
-# (amendment A5): prose files anywhere, and data files only inside a documentation tree.
-# Code, config, workflow/action files (anything under .github/) are never dropped.
+# (spec v2, A5): prose files, and data files only inside a documentation tree. Code,
+# config, workflow/action files (anything under .github/), package data (anything inside
+# a Python package at BASE) and prompt/template/data trees are never dropped.
 DROPPABLE_PROSE_SUFFIXES = frozenset({".md", ".rst"})
 # .txt is data here: outside a doc tree it can be a dependency manifest (requirements.txt).
 DROPPABLE_DOC_DATA_SUFFIXES = frozenset({".txt", ".json", ".jsonl", ".yml", ".yaml", ".csv"})
+# Directory names whose files are commonly read at runtime (prompt text, templates, data).
+NEVER_DROPPED_DIR_NAMES = frozenset({"prompts", "templates", "data"})
 
 
 def _in_doc_tree(parts: Sequence[str]) -> bool:
     return bool(parts) and (parts[0] == "docs" or any(p.endswith("_wiki_vault") for p in parts))
 
 
-def is_droppable_non_code(path: str) -> bool:
+def is_droppable_non_code(path: str, in_python_package: bool = False) -> bool:
+    """``in_python_package``: some ancestor directory of ``path`` has ``__init__.py`` at
+    BASE, so the file may be package data that the code reads at runtime."""
     p = PurePosixPath(path)
     parts = p.parts[:-1]
-    if is_oracle_test_file(path) or ".github" in p.parts:
+    if is_oracle_test_file(path) or ".github" in p.parts or in_python_package:
+        return False
+    if any(part.lower() in NEVER_DROPPED_DIR_NAMES for part in parts):
         return False
     suffix = p.suffix.lower()
     if suffix in DROPPABLE_PROSE_SUFFIXES:
@@ -473,6 +486,12 @@ def _set_path_from(repo: GitRepo, wt: Path, rev: str, path: str) -> None:
         repo.git("--literal-pathspecs", "checkout", _require_rev(rev), "--", path, cwd=wt)
 
 
+def _in_python_package(repo: GitRepo, base: str, path: str) -> bool:
+    """True if any ancestor directory of ``path`` has ``__init__.py`` in ``base``."""
+    parents = PurePosixPath(path).parents
+    return any(repo.path_in(base, f"{d.as_posix()}/__init__.py") for d in parents if d.parts)
+
+
 def _unmerged(repo: GitRepo, wt: Path) -> bool:
     return bool(repo.git("ls-files", "-u", cwd=wt).stdout.strip())
 
@@ -499,17 +518,18 @@ def port_gold(repo: GitRepo, wt: Path, prs: Sequence[Mapping[str, Any]]) -> Gold
     changes: every F2P node still flips because of the human fix alone.
     """
     port = GoldPort(ok=True)
+    base = repo.git("rev-parse", "HEAD", cwd=wt).stdout.decode().strip()
     for p in prs:
         merge_sha = p["merge_commit_sha"]
         patch = repo.pr_patch(merge_sha)
         if not patch.strip():
             continue
+        # A path dropped by an earlier PR and changed again here: GOLD_REF must use this
+        # (later) merge commit's content for it, however this PR's own port goes.
+        for path in set(repo.pr_paths(merge_sha)) & set(port.dropped_from):
+            port.dropped_from[path] = merge_sha
         pre = _snapshot(repo, wt)
         if _apply_3way(repo, wt, patch):
-            # A path dropped by an earlier PR and changed again here: GOLD_REF must use
-            # the latest merge content for it.
-            for path in set(repo.pr_paths(merge_sha)) & set(port.dropped_from):
-                port.dropped_from[path] = merge_sha
             continue
         _restore_tree(repo, wt, pre)
         port.method = GOLD_PORT_PER_FILE
@@ -520,15 +540,13 @@ def port_gold(repo: GitRepo, wt: Path, prs: Sequence[Mapping[str, Any]]) -> Gold
                 continue
             file_patch = repo.pr_patch(merge_sha, path)
             if file_patch.strip() and _apply_3way(repo, wt, file_patch):
-                if path in port.dropped_from:
-                    port.dropped_from[path] = merge_sha
                 continue
             try:
                 _set_path_from(repo, wt, pre, path)  # undo the partial apply of this file
                 if is_oracle_test_file(path):
                     _set_path_from(repo, wt, merge_sha, path)
                     port.test_files_from_merge.append(path)
-                elif is_droppable_non_code(path):
+                elif is_droppable_non_code(path, _in_python_package(repo, base, path)):
                     port.dropped_non_code_paths.append(path)
                     port.dropped_from[path] = merge_sha
                 else:
@@ -647,17 +665,32 @@ class UnsafeTreePath(ValueError):
     """An oracle-file write would leave the worktree (through a parent symlink)."""
 
 
+class UnsafeOracleSource(UnsafeTreePath):
+    """An oracle source file is a symlink (its target, possibly outside the tree, would
+    be copied in). Candidate-independent: the oracle is invalid."""
+
+
 def overwrite_oracle_files(wt: Path, gold_wt: Path, oracle_files: Iterable[str]) -> None:
+    """Set each oracle file in ``wt`` to its content in ``gold_wt`` (delete if absent).
+
+    Never follows a link: a symlinked source is refused (``UnsafeOracleSource``), and a
+    destination link (which the candidate may have placed) is removed, not written through.
+    """
     root_real = wt.resolve()
+    src_root_real = gold_wt.resolve()
     for rel in oracle_files:
         src, dst = gold_wt / rel, wt / rel
+        if src.is_symlink() or (
+            os.path.lexists(src) and not _inside(src_root_real, src.parent.resolve())
+        ):
+            raise UnsafeOracleSource(f"oracle_source_symlink:{rel}")
         if not _inside(root_real, dst.parent.resolve()):
             raise UnsafeTreePath(f"oracle_path_escapes:{rel}")
         if dst.is_symlink():
             dst.unlink()  # never write through a link the candidate may have placed
         if src.exists():
             dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dst)
+            shutil.copy2(src, dst, follow_symlinks=False)
         elif dst.exists():
             dst.unlink()
 
@@ -1088,6 +1121,7 @@ class ScoreContext:
     leakage_flags: Mapping[str, str] = field(default_factory=dict)
     log: Callable[[str], None] = print
     keep_trees: bool = False
+    spec_v2_sha256: str = ""
 
 
 def _capped(inputs: TaskInputs) -> bool:
@@ -1101,6 +1135,7 @@ def _base_receipt(inputs: TaskInputs, ctx: ScoreContext) -> dict[str, Any]:
         "schema": RECEIPT_SCHEMA,
         "scorer_version": SCORER_VERSION,
         "spec_sha256": ctx.spec_sha256,
+        "spec_version": SPEC_V1,
         "task_key": inputs.task_key,
         "repo": f"{inputs.owner}/{inputs.repo}",
         "issue": inputs.issue,
@@ -1207,10 +1242,27 @@ def score_task(
         wts["gold"] = repo.worktree(trees_dir / "gold", inputs.base_sha)
         port = port_gold(repo, wts["gold"], prs)
         receipt.update(port.receipt_fields())
+        if port.method != GOLD_PORT_3WAY:
+            # Spec v2 (A5): reported apart from the pre-registered v1 results.
+            receipt["spec_version"] = SPEC_V2
+            receipt["spec_sha256"] = ctx.spec_v2_sha256
         if not port.ok:
             receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
             receipt["sub_reason"] = "GOLD_PORT_FAILED"
             receipt["detail"] = f"pr:{port.failed_pr}"
+            return _finish(receipt, timing, t0, ctx)
+        # v2: a merge-taken test file that is not a test module (conftest.py, test data)
+        # and exists at BASE could change how BASE tests in other files behave, and those
+        # tests are not re-run at their BASE state (P2P(d) covers modules only): refuse.
+        support = sorted(
+            f
+            for f in set(port.test_files_from_merge)
+            if not is_oracle_module_name(f) and repo.path_in(inputs.base_sha, f)
+        )
+        if support:
+            receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
+            receipt["sub_reason"] = "GOLD_PORT_FAILED"
+            receipt["detail"] = "merge_taken_test_support_file:" + ",".join(support)[:300]
             return _finish(receipt, timing, t0, ctx)
         gold_tree = repo.tree_id(wts["gold"])
         if port.dropped_from:
@@ -1231,7 +1283,13 @@ def score_task(
         files = sorted(oracle_files)
         modules = [f for f in files if is_oracle_module_name(f) and (wts["gold"] / f).exists()]
         wts["baset"] = repo.worktree(trees_dir / "baset", inputs.base_sha)
-        overwrite_oracle_files(wts["baset"], wts["gold"], files)
+        try:
+            overwrite_oracle_files(wts["baset"], wts["gold"], files)
+        except UnsafeTreePath as exc:
+            receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
+            receipt["sub_reason"] = "ORACLE_FILE_UNSAFE"
+            receipt["detail"] = str(exc)
+            return _finish(receipt, timing, t0, ctx)
         baset_tree = repo.tree_id(wts["baset"])
         receipt["trees"] = {"BASE": base_tree, "GOLD": gold_tree, "BASE+T": baset_tree}
         receipt["oracle_modules"] = modules
@@ -1263,8 +1321,11 @@ def score_task(
         # Oracle (§6.2): candidate-independent.
         tq = time.monotonic()
         base_runs, gold_runs = [], []
+        gold_by_module: dict[str, list[dict[str, str]]] = {m: [] for m in modules}
         for i in range(ORACLE_RUNS):
             gr = _run_modules(ctx, env, wts["gold"], gold_tree, modules, i)
+            for m, res in zip(modules, gr):
+                gold_by_module[m].append(res.outcomes)
             if any(r.timed_out or r.exit_code not in (0, 1) for r in gr):
                 receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
                 receipt["sub_reason"] = "GOLD_COLLECTION_FAILED"
@@ -1301,6 +1362,15 @@ def score_task(
                 "BASE+T": [_digest_outcomes(r) for r in base_runs],
             },
         })
+        if port.method != GOLD_PORT_3WAY:
+            # Diagnostic only (v2): nodes of merge-taken test modules that fail on every
+            # GOLD oracle run (typically tests that need another main commit's code).
+            receipt["gold_port_merge_test_nodes_failing_on_gold"] = sum(
+                1
+                for m in sorted(set(port.test_files_from_merge) & set(modules))
+                for n in set().union(*gold_by_module[m])
+                if all(_get(r, n) == FAIL for r in gold_by_module[m])
+            )
         if "goldref" in wts:
             goldref_tree = repo.tree_id(wts["goldref"])
             receipt["trees"]["GOLD_REF"] = goldref_tree
@@ -1308,8 +1378,8 @@ def score_task(
             if any(r.timed_out or r.exit_code not in (0, 1) for r in ref_results):
                 # The detector itself failed: fail closed.
                 receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
-                receipt["sub_reason"] = "GOLD_PORT_FAILED"
-                receipt["detail"] = "gold_ref_run_failed"
+                receipt["sub_reason"] = GOLD_REF_RUN_FAILED
+                receipt["detail"] = "oracle"
                 receipt["flaky_dropped"] = len(flaky)
                 return _finish(receipt, timing, t0, ctx)
             ref = _merge(ref_results)
@@ -1367,6 +1437,39 @@ def score_task(
             return _finish(receipt, timing, t0, ctx)
         candt_tree = repo.tree_id(wts["candt"], untracked_paths)
         receipt["trees"].update({"CAND": cand_tree, "CAND+T": candt_tree})
+        # v2 P2P(d): BASE tests in a merge-taken test file are gone from every scored
+        # tree (main deleted or rewrote them), and P2P(b/c) ignores oracle files. So the
+        # BASE version of each such module is also run, on trees that all carry the BASE
+        # bytes of every oracle file: BASE, CAND@BASE_TESTS, GOLD@BASE_TESTS and (with
+        # dropped files) GOLD_REF@BASE_TESTS.
+        d_targets = sorted(
+            f
+            for f in set(port.test_files_from_merge)
+            if is_oracle_module_name(f) and repo.path_in(inputs.base_sha, f)
+        )
+        d_trees: dict[str, str] = {}
+        if d_targets:
+            sources = {"cand0": cand_tree, "gold0": gold_tree}
+            if "goldref" in wts:
+                sources["goldref0"] = repo.tree_id(wts["goldref"])
+            try:
+                for key, tree in sources.items():
+                    wts[key] = repo.worktree(trees_dir / key, inputs.base_sha)
+                    _restore_tree(repo, wts[key], tree)
+                    overwrite_oracle_files(wts[key], wts["base"], files)
+                    d_trees[key] = repo.tree_id(wts[key])
+            except UnsafeTreePath as exc:
+                receipt["label"] = NOT_RUNNABLE
+                receipt["sub_reason"] = not_runnable or "APPLY_FAILED"
+                receipt["detail"] = str(exc)
+                receipt["flaky_dropped"] = len(flaky)
+                return _finish(receipt, timing, t0, ctx)
+            receipt["trees"].update({
+                {"cand0": "CAND@BASE_TESTS", "gold0": "GOLD@BASE_TESTS"}.get(
+                    k, "GOLD_REF@BASE_TESTS"
+                ): v
+                for k, v in d_trees.items()
+            })
         if not_runnable == "SCOPE_INVALID":
             receipt["label"] = NOT_RUNNABLE
             receipt["sub_reason"] = not_runnable
@@ -1390,11 +1493,18 @@ def score_task(
             f2p,
             p2p_a,
             flaky,
+            d_targets if port.method != GOLD_PORT_3WAY else None,
+            d_trees,
         )
         timing["candidate_seconds"] = round(time.monotonic() - tc, 1)
         receipt.update(evaluation)
         evaluated = evaluation["evaluated_label"]
-        if not_runnable:
+        if evaluated == NOT_SCORABLE_ORACLE_INVALID:
+            # A candidate-independent detector run failed (v2): oracle-invalid comes
+            # before NOT_RUNNABLE in §7 order, and no candidate label is given.
+            receipt["label"] = evaluated
+            receipt["sub_reason"] = evaluation["evaluated_sub_reason"]
+        elif not_runnable:
             receipt["label"] = NOT_RUNNABLE
             receipt["sub_reason"] = not_runnable
             receipt["shadow_label"] = evaluated
@@ -1446,8 +1556,10 @@ def _evaluate_candidate(
     f2p: Sequence[str],
     p2p_a: Sequence[str],
     flaky: Sequence[str],
+    d_targets: Sequence[str] | None = None,
+    d_trees: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Spec §6.3-§6.4."""
+    """Spec §6.3-§6.4, plus v2 P2P(d) when ``d_targets`` is not None."""
     out: dict[str, Any] = {}
     flaky_dropped = set(flaky)
     goldref_tree = repo.tree_id(wts["goldref"]) if "goldref" in wts else None
@@ -1494,58 +1606,112 @@ def _evaluate_candidate(
     # nodes and a GOLD failure makes suspects `gold_also_fails`. The label is unaffected.
     baseline_failures: list[dict[str, Any]] = []
 
-    def baseline_run(tree_key: str, tree_id: str, t: str, i: int) -> dict[str, str]:
-        res = ctx.runner.run(env, wts[tree_key], tree_id, t, ignores, i)
+    tree_names = {
+        "baset": "BASE+T",
+        "gold": "GOLD",
+        "goldref": "GOLD_REF",
+        "base": "BASE",
+        "gold0": "GOLD@BASE_TESTS",
+        "goldref0": "GOLD_REF@BASE_TESTS",
+    }
+    goldref_failures: list[dict[str, Any]] = []
+
+    def baseline_run(
+        tree_key: str, tree_id: str, t: str, i: int, ign: Sequence[str]
+    ) -> dict[str, str]:
+        res = ctx.runner.run(env, wts[tree_key], tree_id, t, ign, i)
         if res.timed_out or res.exit_code not in CLEAN_P2P_EXIT_CODES:
-            baseline_failures.append({
-                "tree": {"baset": "BASE+T", "gold": "GOLD", "goldref": "GOLD_REF"}[tree_key],
+            failure = {
+                "tree": tree_names[tree_key],
                 "target": t,
                 "run": i,
                 "exit_code": res.exit_code,
                 "timed_out": res.timed_out,
-            })
+            }
+            baseline_failures.append(failure)
+            if tree_key.startswith("goldref"):
+                goldref_failures.append(failure)
         return res.outcomes
 
-    for t in targets:
-        base_p2p[t] = baseline_run("baset", baset_tree, t, 0)
-        cand_p2p[t] = ctx.runner.run(
-            env, wts["candt"], candt_tree, t, ignores, 0, CAND_ROLE
-        ).outcomes
-    oracle_nodes = set(f2p) | set(p2p_a) | set(flaky)
-    p2p_bc_total = 0
     new_failures: set[str] = set(p2p_a_fail)
     gold_also_fails: set[str] = set()
-    for t in targets:
-        base_pass = [n for n, o in base_p2p[t].items() if o == PASS and n not in oracle_nodes]
-        p2p_bc_total += len(base_pass)
-        suspects = [n for n in base_pass if _get(cand_p2p[t], n) != PASS]
+
+    def judge(
+        t: str,
+        ign: Sequence[str],
+        trees: Mapping[str, tuple[str, str]],
+        b0: Mapping[str, str],
+        c0: Mapping[str, str],
+        exclude: set[str],
+    ) -> int:
+        """§6.4 for one target. ``trees``: role -> (worktree key, tree id) for base,
+        cand, gold and optionally goldref. Returns the number of base-pass nodes."""
+        base_pass = [n for n, o in b0.items() if o == PASS and n not in exclude]
+        suspects = [n for n in base_pass if _get(c0, n) != PASS]
         if not suspects:
-            continue
-        c_runs = [cand_p2p[t]] + [
-            ctx.runner.run(env, wts["candt"], candt_tree, t, ignores, i, CAND_ROLE).outcomes
-            for i in (1, 2)
+            return len(base_pass)
+        ck, ct = trees["cand"]
+        c_runs = [c0] + [
+            ctx.runner.run(env, wts[ck], ct, t, ign, i, CAND_ROLE).outcomes for i in (1, 2)
         ]
-        b_runs = [base_p2p[t]] + [baseline_run("baset", baset_tree, t, i) for i in (1, 2)]
-        g_run = baseline_run("gold", gold_tree, t, 0)
+        b_runs = [b0] + [baseline_run(*trees["base"], t, i, ign) for i in (1, 2)]
+        g_run = baseline_run(*trees["gold"], t, 0, ign)
         # A5: with dropped doc/data files, a suspect is excused only if it also fails on
-        # GOLD_REF, so a failure explained by a dropped file stays a P2P new failure.
-        # A failed or timed-out GOLD_REF run excuses nothing (fail closed).
-        r_run, r_ok = None, True
-        if goldref_tree is not None:
-            n_before = len(baseline_failures)
-            r_run = baseline_run("goldref", goldref_tree, t, 0)
-            r_ok = len(baseline_failures) == n_before
+        # GOLD_REF, so a failure explained by a dropped file stays a P2P new failure. A
+        # GOLD_REF run that is not clean makes the task NOT_SCORABLE (below).
+        n_ref_failures = len(goldref_failures)
+        r_run = baseline_run(*trees["goldref"], t, 0, ign) if "goldref" in trees else None
+        if len(goldref_failures) != n_ref_failures:
+            return len(base_pass)  # no verdict on these suspects: the task is NOT_SCORABLE
         for n in suspects:
             if not all(_get(r, n) != PASS for r in c_runs) or not all(
                 _get(r, n) == PASS for r in b_runs
             ):
                 flaky_dropped.add(n)
-            elif _get(g_run, n) != PASS and (r_run is None or (r_ok and _get(r_run, n) != PASS)):
+            elif _get(g_run, n) != PASS and (r_run is None or _get(r_run, n) != PASS):
                 gold_also_fails.add(n)
             else:
                 new_failures.add(n)
+        return len(base_pass)
 
-    if new_failures:
+    bc_trees = {
+        "base": ("baset", baset_tree),
+        "cand": ("candt", candt_tree),
+        "gold": ("gold", gold_tree),
+    }
+    if goldref_tree is not None:
+        bc_trees["goldref"] = ("goldref", goldref_tree)
+    for t in targets:
+        base_p2p[t] = baseline_run("baset", baset_tree, t, 0, ignores)
+        cand_p2p[t] = ctx.runner.run(
+            env, wts["candt"], candt_tree, t, ignores, 0, CAND_ROLE
+        ).outcomes
+    oracle_nodes = set(f2p) | set(p2p_a) | set(flaky)
+    p2p_bc_total = 0
+    for t in targets:
+        p2p_bc_total += judge(t, ignores, bc_trees, base_p2p[t], cand_p2p[t], oracle_nodes)
+
+    # v2 P2P(d): the BASE version of each merge-taken test module, with identical BASE
+    # bytes for every oracle file on every tree. Not excluded: oracle node ids, since the
+    # BASE test body may differ from the merge-tree one (stricter, never looser).
+    p2p_d_total = 0
+    if d_targets:
+        d_map = {
+            "base": ("base", base_tree),
+            "cand": ("cand0", (d_trees or {})["cand0"]),
+            "gold": ("gold0", (d_trees or {})["gold0"]),
+        }
+        if "goldref0" in (d_trees or {}):
+            d_map["goldref"] = ("goldref0", (d_trees or {})["goldref0"])
+        for t in d_targets:
+            b0 = baseline_run("base", base_tree, t, 0, ())
+            c0 = ctx.runner.run(env, wts["cand0"], d_map["cand"][1], t, (), 0, CAND_ROLE).outcomes
+            p2p_d_total += judge(t, (), d_map, b0, c0, set())
+
+    if goldref_failures:
+        label = NOT_SCORABLE_ORACLE_INVALID
+        out["evaluated_sub_reason"] = GOLD_REF_RUN_FAILED
+    elif new_failures:
         label = BROKE_EXISTING
     elif len(f2p_pass) == len(f2p):
         label = RESOLVED
@@ -1571,6 +1737,8 @@ def _evaluate_candidate(
         "impact_plan_sha256": plan_sha,
         "candidate_changed_paths_digest": sha256_bytes("\n".join(changed).encode()),
     })
+    if d_targets is not None:
+        out.update({"p2p_d_targets": list(d_targets), "p2p_d_total": p2p_d_total})
     out.setdefault("outcome_digests_cand", [_digest_outcomes(r) for r in runs])
     return out
 
@@ -1641,7 +1809,26 @@ def clopper_pearson(k: int, n: int, alpha: float = 0.05) -> tuple[float, float]:
     return (lower, upper)
 
 
+def spec_version_of(receipt: Mapping[str, Any]) -> str:
+    """Receipts written before spec v2 existed carry no version: they are v1."""
+    return str(receipt.get("spec_version") or SPEC_V1)
+
+
 def summarize(receipts: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Headline numbers use v1 (pre-registered) receipts only; ``v1_plus_v2`` adds the
+    receipts scored under spec v2 (A5, designed after the V11/V12 replays), reported apart."""
+    v1 = [r for r in receipts if spec_version_of(r) == SPEC_V1]
+    versions: dict[str, int] = {}
+    for r in receipts:
+        versions[spec_version_of(r)] = versions.get(spec_version_of(r), 0) + 1
+    return {
+        **_summary(v1),
+        "v1_plus_v2": _summary(receipts),
+        "spec_version_counts": dict(sorted(versions.items())),
+    }
+
+
+def _summary(receipts: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     counts: dict[str, int] = {}
     for r in receipts:
         counts[r["label"]] = counts.get(r["label"], 0) + 1
