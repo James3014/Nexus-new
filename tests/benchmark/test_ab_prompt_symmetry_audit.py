@@ -453,6 +453,10 @@ def _run_main_with_fake_arms(
     extra_argv: tuple[str, ...] = ("--strict-llm-baseline",),
     corrupt_capture: bool = False,
     out_dir: Path | None = None,
+    parity_calls: list[list[str]] | None = None,
+    parity_result: dict[str, str] | None = None,
+    hidden_seen: list[tuple[str, bool]] | None = None,
+    bare_error: BaseException | None = None,
 ) -> tuple[int, list[str], Path]:
     import scripts.bench.capability_ab_runner as runner
 
@@ -485,8 +489,13 @@ def _run_main_with_fake_arms(
             + f"[CURRENT TESTS]\n{Path(test_file).read_text()}"
         )
 
+    def _note_hidden(mode: str, test_file: str) -> None:
+        if hidden_seen is not None:
+            hidden_seen.append((mode, Path(test_file).with_name("test_hidden.py").exists()))
+
     def fake_with(*, task, target_file, test_file, **_kwargs):
         order.append(f"with:{task.id}")
+        _note_hidden("with_nexus", test_file)
         _call_agy(_bare_prompt(target_file, test_file, task) + with_prompt_extra)
         if corrupt_capture:
             capture_dir = Path(os.environ["NEXUS_BENCH_PROMPT_CAPTURE_DIR"])
@@ -497,11 +506,24 @@ def _run_main_with_fake_arms(
 
     def fake_without(*, task, target_file, test_file, **_kwargs):
         order.append(f"bare:{task.id}")
+        _note_hidden("without_nexus", test_file)
+        if bare_error is not None:
+            raise bare_error
         _call_agy(_bare_prompt(target_file, test_file, task))
         return _row("without_nexus", task, test_file)
 
     monkeypatch.setattr(runner, "run_with_nexus", fake_with)
     monkeypatch.setattr(runner, "run_without_nexus", fake_without)
+
+    # Both arms are faked (no visible/hidden test runs), so the real confinement-parity
+    # preflight (which would exclude every task on a host without an OS barrier) is replaced
+    # by a spy: it records that main() invoked it and returns ``parity_result``.
+    def parity_spy(tasks, *_a, **_k):
+        if parity_calls is not None:
+            parity_calls.append([task.id for task in tasks])
+        return dict(parity_result or {})
+
+    monkeypatch.setattr(runner, "_confinement_parity_failures", parity_spy)
     monkeypatch.setenv("NEXUS_AGY_BIN", str(_fake_agy(tmp_path)))
     monkeypatch.delenv("NEXUS_AGY_EXECUTABLE", raising=False)
     monkeypatch.delenv("NEXUS_AGY_COMMAND", raising=False)
@@ -604,14 +626,17 @@ def test_counted_run_without_strict_flag_uses_strict_scoring(
 ) -> None:
     """B: counted-first-attempt implies the strict (rescue-aware) scorecard."""
 
+    parity_calls: list[list[str]] = []
     code, _, out_dir = _run_main_with_fake_arms(
         tmp_path,
         monkeypatch,
         with_prompt_extra="",
         status="SUCCESS",
         extra_argv=("--counted-first-attempt",),
+        parity_calls=parity_calls,
     )
     assert code == 0
+    assert len(parity_calls) == 1 and len(parity_calls[0]) == 2  # the counted preflight ran
     summary = json.loads(capsys.readouterr().out.strip().splitlines()[-1])["benchmark_summary"]
     assert summary["with_nexus"]["strict_llm_baseline_applied"] is True
     assert summary["with_nexus"]["solved_n"] == 2
@@ -1153,3 +1178,76 @@ def test_clean_run_audits_every_pair(tmp_path: Path, monkeypatch, capsys) -> Non
     printed = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert printed["early_audit_checked_pairs"] == 2
     assert printed["early_audit_aborted"] is False
+
+
+def test_counted_run_applies_parity_exclusions_to_both_arms(tmp_path: Path, monkeypatch) -> None:
+    """Gemini N7: in a counted run the preflight is invoked and its exclusions reach the rows:
+    the excluded task is not_run on BOTH arms and neither fake arm is ever called for it."""
+    parity_calls: list[list[str]] = []
+    _run_main_with_fake_arms(
+        tmp_path,
+        monkeypatch,
+        with_prompt_extra="",
+        status="SUCCESS",
+        extra_argv=("--counted-first-attempt",),
+        parity_calls=parity_calls,
+    )
+    assert parity_calls  # invoked by main()
+    excluded = parity_calls[0][0]
+    # Re-run with that task excluded by the preflight.
+    tmp2 = tmp_path / "second"
+    tmp2.mkdir()
+    code, order, out_dir = _run_main_with_fake_arms(
+        tmp2,
+        monkeypatch,
+        with_prompt_extra="",
+        status="SUCCESS",
+        extra_argv=("--counted-first-attempt",),
+        parity_result={excluded: "visible_verdict_differs"},
+    )
+    assert not any(entry.endswith(f":{excluded}") for entry in order)
+    rows = [
+        json.loads(line)
+        for path in out_dir.rglob("*.jsonl")
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip().startswith("{")
+    ]
+    excluded_rows = [r for r in rows if r.get("task_id") == excluded and r.get("not_run")]
+    assert {r.get("mode") for r in excluded_rows} >= {"with_nexus", "without_nexus"}
+    assert all(r.get("not_run_reason") == "confinement_parity_failed" for r in excluded_rows)
+
+
+def test_both_arms_run_with_the_hidden_test_staged_out(tmp_path: Path, monkeypatch) -> None:
+    """Gemini N5: the bare leg runs inside the same staging context as the with-Nexus leg, so
+    neither arm's agent can see test_hidden.py in the workspace."""
+    hidden_seen: list[tuple[str, bool]] = []
+    _run_main_with_fake_arms(
+        tmp_path, monkeypatch, with_prompt_extra="", status="SUCCESS", hidden_seen=hidden_seen
+    )
+    assert {mode for mode, _ in hidden_seen} == {"with_nexus", "without_nexus"}
+    assert all(present is False for _, present in hidden_seen), hidden_seen
+
+
+def test_bare_leg_staging_failure_writes_the_row_and_exits_3(tmp_path: Path, monkeypatch) -> None:
+    """Reviewer L-a: a hidden-staging failure in the bare leg fails closed exactly like the
+    with-Nexus leg (row written, run invalid, exit 3), never a traceback out of main()."""
+    from scripts.bench import hidden_test_staging as staging_mod
+
+    monkeypatch.setattr(staging_mod, "_RUN_ABORT", [])
+    code, order, out_dir = _run_main_with_fake_arms(
+        tmp_path,
+        monkeypatch,
+        with_prompt_extra="",
+        status="SUCCESS",
+        bare_error=staging_mod.HiddenTestStagingError("hidden_test_tampered:probe"),
+    )
+    assert code == 3
+    assert any(entry.startswith("bare:") for entry in order)
+    rows = [
+        json.loads(line)
+        for path in out_dir.rglob("*.jsonl")
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip().startswith("{")
+    ]
+    bare = [r for r in rows if r.get("mode") == "without_nexus" and r.get("hidden_staging_error")]
+    assert bare and bare[0]["hidden_test_tampered"] is True and bare[0]["run_eligible"] is False

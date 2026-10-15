@@ -1464,8 +1464,98 @@ def _exec_nightshift(plan: CapabilityExecutionPlan, task_desc: str) -> Capabilit
     return _exec_nightshift_runner_service(plan, task_desc)
 
 
+def _exec_sandbox_confined(plan: CapabilityExecutionPlan, constraints: Mapping[str, Any]) -> CapabilityReceipt:
+    """Post-candidate sandbox: the visible test inside ``sandboxed_lane.confinement``.
+
+    Selected when the caller passes ``sandbox_forbidden_paths`` (the post-candidate seam does,
+    with the hidden verifier test path). The receipt carries the exit code and the stdout
+    sha256; a refused confinement (no OS barrier, forbidden read root, forbidden argv) is
+    reported as not executed, never as a pass.
+    """
+    start = time.monotonic()
+    runner = _try_port("sandbox_runner.run_confined_test")
+    if runner is None:
+        return _make_receipt(
+            "sandbox_runner",
+            plan,
+            invoked=False,
+            gate_passed=False,
+            outcome={"error": _port_error("sandbox_runner.run_confined_test")},
+        )
+    raw_command = constraints.get("sandbox_command") or []
+    command = [str(part) for part in list(raw_command) if str(part).strip()]
+    timeout_sec = max(1, min(120, int(constraints.get("sandbox_timeout_sec") or 30)))
+    forbidden = [str(item) for item in list(constraints.get("sandbox_forbidden_paths") or []) if str(item).strip()]
+    try:
+        result = dict(
+            runner(
+                str(constraints.get("workspace_root") or ""),
+                command=command,
+                forbidden_paths=forbidden,
+                timeout_sec=timeout_sec,
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 - executor boundary must fail closed
+        result = {"executed": False, "error": f"{type(exc).__name__}: {exc}"}
+    elapsed = int((time.monotonic() - start) * 1000)
+    executed = bool(result.get("executed"))
+    if not executed:
+        # Refused by the confinement (no OS barrier, forbidden root/argv): nothing ran.
+        return _make_receipt(
+            "sandbox_runner",
+            plan,
+            invoked=False,
+            gate_passed=False,
+            wall_time_ms=elapsed,
+            outcome=_structured_outcome(
+                action="run_task",
+                semantic_status="NOT_EXECUTED_SANDBOX_REFUSED",
+                error=str(result.get("error") or "sandbox_not_executed"),
+                evidence_refs=[f"ev_sandbox_refused_{plan.task_id}"],
+                sandbox_executed=False,
+                workspace_isolated=False,
+                network_allowed=False,
+                confined=True,
+                forbidden_paths_count=len(forbidden),
+                physical_callable="nexus.engine.confined_test_runner.run_confined_test",
+            ),
+        )
+    ok = bool(result.get("success")) and result.get("exit_code") == 0
+    return _make_receipt(
+        "sandbox_runner",
+        plan,
+        gate_passed=ok,
+        wall_time_ms=elapsed,
+        outcome=_structured_outcome(
+            action="run_task",
+            semantic_status="SUCCEEDED" if ok else "FAILED",
+            evidence_refs=[f"ev_sandbox_run_{plan.task_id}", f"sha256:{result.get('stdout_sha256') or ''}"],
+            result={
+                "run_id": str(result.get("run_id") or ""),
+                "duration_sec": float(result.get("duration_sec") or 0.0),
+                "stdout_sha256": str(result.get("stdout_sha256") or ""),
+                "timed_out": bool(result.get("timed_out")),
+            },
+            sandbox_executed=True,
+            simulated=False,
+            workspace_isolated=str(result.get("workspace_source") or "") == "local_project_copy",
+            exit_code=result.get("exit_code"),
+            stdout_sha256=str(result.get("stdout_sha256") or ""),
+            output_tail=(str(result.get("stdout_tail") or "") + str(result.get("stderr_tail") or ""))[-600:],
+            network_allowed=False,
+            timed_out=bool(result.get("timed_out")),
+            confined=True,
+            forbidden_paths_count=len(forbidden),
+            command=list(result.get("command") or command)[:12],
+            physical_callable="nexus.engine.confined_test_runner.run_confined_test",
+        ),
+    )
+
+
 def _exec_sandbox_runner(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
     start = time.monotonic()
+    if "sandbox_forbidden_paths" in dict(plan.constraints or {}):
+        return _exec_sandbox_confined(plan, dict(plan.constraints or {}))
     cls = _try_port("sandbox_runner.SandboxRunner")
     if cls is None:
         return _make_receipt("sandbox_runner", plan, invoked=False, gate_passed=False,
@@ -1763,6 +1853,15 @@ def _exec_ultra_review(plan: CapabilityExecutionPlan, task_desc: str) -> Capabil
     constraints = dict(plan.constraints or {})
     project_root = Path(str(constraints.get("workspace_root") or ".")).expanduser()
     safe_id = re.sub(r"[^a-zA-Z0-9_-]", "_", str(plan.task_id))[:120] or "task"
+    # Post-candidate seam: explicit mapped tests (the visible test) and excluded test names
+    # (the hidden verifier test); only passed when the caller supplies them.
+    review_kwargs: dict[str, Any] = {}
+    for key, kwarg in (
+        ("ultra_review_regression_tests", "regression_tests"),
+        ("ultra_review_excluded_tests", "excluded_tests"),
+    ):
+        if key in constraints:
+            review_kwargs[kwarg] = [str(item) for item in list(constraints.get(key) or []) if str(item).strip()]
     try:
         payload = cls(project_root=project_root).run(
             dry_run=False,
@@ -1770,6 +1869,7 @@ def _exec_ultra_review(plan: CapabilityExecutionPlan, task_desc: str) -> Capabil
             base_ref="HEAD",
             report_path=f".nexus/reports/ultra_review/{safe_id}_capability_report.json",
             sandbox_root=".nexus/reports/ultra_review/capability_sandboxes",
+            **review_kwargs,
         )
     except Exception as exc:  # noqa: BLE001 - executor boundary must fail closed
         return _make_receipt(
@@ -1838,6 +1938,12 @@ def _exec_ultra_review(plan: CapabilityExecutionPlan, task_desc: str) -> Capabil
                 "changed_files_count": len(diff.get("changed_files") or []),
                 "verified_findings": sum(1 for f in findings if f.get("state") == "VERIFIED_FINDING"),
             },
+            regression_tests=list(
+                (payload.get("ghost_regression") or {}).get("executed_tests") or []
+                if isinstance(payload.get("ghost_regression"), Mapping)
+                else []
+            )[:12],
+            excluded_regression_tests=list(payload.get("excluded_regression_tests") or [])[:12],
             lanes=lanes,
             executed_checks=sorted({c for lane in lanes.values() for c in lane["executed_checks"]}),
             findings=findings,
@@ -3347,18 +3453,21 @@ def _exec_file_lock(plan: CapabilityExecutionPlan, task_desc: str) -> Capability
     try:
         from nexus.orchestrator.file_lock_registry import (
             FileLockRegistry,
+            canonical_lock_key,
             register_task_lock_file,
         )
 
         constraints = dict(plan.constraints or {})
-        target_files = [
-            str(item)
-            for item in constraints.get("target_files", []) or []
-            if str(item).strip()
-        ]
         workspace_root = Path(
             str(constraints.get("workspace_root") or "/tmp")
         ).expanduser().resolve()
+        # Canonical keys (workspace-relative inside the workspace): a relative and an absolute
+        # spelling of one file can never be locked by two tasks at once.
+        target_files = list(dict.fromkeys(
+            canonical_lock_key(workspace_root, str(item))
+            for item in constraints.get("target_files", []) or []
+            if str(item).strip()
+        ))
         if not target_files:
             return _make_receipt(
                 "file_lock",

@@ -450,3 +450,59 @@ def test_strict_cli_turns_on_counted_first_attempt_and_its_guards(
         "NEXUS_DISABLE_PROMOTED_ROUTE_COST_POLICY": "1",
         "NEXUS_BENCH_DISABLE_HIDDEN_RETRY": "1",
     }
+
+
+@pytest.mark.parametrize("lane_env", ["NEXUS_SYMMETRIC_PROMPT", "NEXUS_CONFINE_VISIBLE_TEST"])
+def test_counted_lanes_never_quote_the_hidden_failure_even_with_feedback_enabled(
+    tmp_path: Path, monkeypatch, lane_env: str
+) -> None:
+    """Gemini G9 (pre-existing since #2138): under the symmetric-prompt / counted lanes the
+    hidden verifier's failure tail never reaches a retry prompt, even if the flag says on."""
+    task = CapabilityTask(
+        id="rlm-v2-hidden-retry-001",
+        difficulty="hard",
+        task_type="public_ops_research",
+        task_desc="Fix hidden governance task",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        repo_kind="neutral_fixture",
+        fixture_kind="rlm_harder_v2_governance_guard",
+    )
+    target_file, visible_test_file = _materialize_fixture(tmp_path, task)
+    nexus_cmds: list[list[str]] = []
+    state = {"verify_calls": 0}
+
+    def fake_run_process_group(cmd, *, cwd, env, timeout_sec):
+        if cmd[:3] == NEXUS_CLI_PREFIX:
+            nexus_cmds.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, 0, stdout=_payload(), stderr="")
+        state["verify_calls"] += 1
+        if state["verify_calls"] == 1:
+            return subprocess.CompletedProcess(
+                cmd, 1, stdout="hidden failed: delete_file must be blocked", stderr=""
+            )
+        return subprocess.CompletedProcess(cmd, 0, stdout="hidden passed", stderr="")
+
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    monkeypatch.setenv("NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL", "1")
+    monkeypatch.setenv("NEXUS_BENCH_NO_HIDDEN_FEEDBACK", "0")  # flag says feedback ON
+    monkeypatch.setenv(lane_env, "1")
+    monkeypatch.setattr(
+        "scripts.bench.capability_ab_runner._run_process_group", fake_run_process_group
+    )
+
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=visible_test_file,
+        timeout_sec=10,
+        force_flow="hyper_sprint",
+        runner_mode="subprocess",
+        with_llm_mode="all",
+    )
+
+    assert not any("delete_file must be blocked" in " ".join(cmd) for cmd in nexus_cmds)
+    assert out["hidden_retry_used"] is False
+    assert out["hidden_retry_reason"] == "disabled_no_hidden_feedback"

@@ -10411,8 +10411,22 @@ class SelfHostedTaskService:
             contract_for_rebind = ArchitectTaskContract.model_validate({key: value for key, value in persisted_contract.items() if key != "contract_hash"})
             physical_manager = WorktreeManager(root_dir=contract_for_rebind.target_worktree_root)
             controller_root = Path(contract_for_rebind.controller_repo_root).resolve()
+            # A separate detached Controller (#2251) applied by update-ref: the
+            # applied subject is the integration branch ref, not its HEAD, and
+            # only untracked pending Task Cards are admitted.  Every other
+            # shape keeps the Controller HEAD tree and full cleanliness.
+            separate_recovery_head = (
+                ControlledIntegrationManager.separate_controller_integration_head(
+                    controller_root, integration_branch
+                )
+            )
             current_head = physical_manager._run_git(["rev-parse", "HEAD"], cwd=controller_root)
             current_tree = physical_manager._run_git(["rev-parse", "HEAD^{tree}"], cwd=controller_root)
+            if separate_recovery_head is not None:
+                current_head = separate_recovery_head
+                current_tree = physical_manager._run_git(
+                    ["rev-parse", f"{current_head}^{{tree}}"], cwd=controller_root
+                )
             candidate_tree = physical_manager._run_git(["rev-parse", f"{candidate_sha}^{{tree}}"], cwd=controller_root)
             old_authorization = state.get("integration_authorization") if isinstance(state.get("integration_authorization"), Mapping) else {}
             prior_closure = state.get("integration_closure_binding") if isinstance(state.get("integration_closure_binding"), Mapping) else {}
@@ -10441,10 +10455,21 @@ class SelfHostedTaskService:
                 or old_authorization.get("expected_canonical_head")
                 or ""
             )
+            if separate_recovery_head is not None:
+                ControlledIntegrationManager._require_clean_controller(
+                    controller_root,
+                    allow_pending_task_cards=True,
+                    message="CLOSURE_INTEGRATING_APPLIED_TREE_REQUIRED",
+                )
             if (
                 current_head != expected_canonical_head
                 or current_tree != candidate_tree
-                or physical_manager._run_git(["status", "--porcelain=v1", "--untracked-files=all"], cwd=controller_root)
+                or (
+                    separate_recovery_head is None
+                    and physical_manager._run_git(
+                        ["status", "--porcelain=v1", "--untracked-files=all"], cwd=controller_root
+                    )
+                )
                 or not re.fullmatch(r"[0-9a-f]{40}", old_pre_apply_head)
                 or old_pre_apply_head == current_head
             ):
@@ -10624,18 +10649,35 @@ class SelfHostedTaskService:
         ).hexdigest()
         controller_root = Path(str(contract_data.get("controller_repo_root") or CANONICAL_SOURCE_ROOT)).expanduser().resolve()
         manager = WorktreeManager(root_dir=str(contract_data.get("target_worktree_root") or controller_root))
-        current_head = manager._run_git(["rev-parse", "HEAD"], cwd=controller_root)
+        # A separate detached Controller (#2230) integrates by update-ref: the
+        # canonical head is the integration branch ref (its CAS subject), not
+        # the Controller HEAD, which tasks/-only Task Card bind commits move.
+        # Every other shape keeps HEAD on a checked-out, fully clean branch.
+        separate_controller_head = ControlledIntegrationManager.separate_controller_integration_head(
+            controller_root, integration_branch
+        )
+        separate_controller = separate_controller_head is not None
+        current_head = (
+            separate_controller_head
+            if separate_controller
+            else manager._run_git(["rev-parse", "HEAD"], cwd=controller_root)
+        )
         if not re.fullmatch(r"[0-9a-f]{40}", expected_canonical_head) or current_head != expected_canonical_head:
             raise RuntimeError("CLOSURE_CANONICAL_HEAD_DRIFT")
         if str(approval.get("expected_canonical_head") or expected_canonical_head) != expected_canonical_head:
             raise RuntimeError("CLOSURE_HEAD_BINDING_MISMATCH")
+        if separate_controller:
+            # Only untracked plain pending Task Cards under tasks/ are admitted.
+            ControlledIntegrationManager._require_clean_controller(
+                controller_root, allow_pending_task_cards=True, message="CLOSURE_CANONICAL_DIRTY"
+            )
         status = manager._run_git(["status", "--porcelain=v1", "--untracked-files=all"], cwd=controller_root)
-        if status:
+        if status and not separate_controller:
             raise RuntimeError("CLOSURE_CANONICAL_DIRTY")
         if not approval.get("integration_branch") or integration_branch != str(approval.get("integration_branch")):
             raise RuntimeError("CLOSURE_BRANCH_BINDING_MISMATCH")
         current_branch = manager._run_git(["branch", "--show-current"], cwd=controller_root)
-        if current_branch != integration_branch:
+        if current_branch != ("" if separate_controller else integration_branch):
             raise RuntimeError("CLOSURE_CANONICAL_BRANCH_DRIFT")
         lease = state.get("lease") if isinstance(state.get("lease"), Mapping) else {}
         target_id = str(lease.get("lease_id") or state.get("target_id") or task_id)
@@ -10709,6 +10751,10 @@ class SelfHostedTaskService:
             "preview": preview.to_dict(),
             "authorization_hash": authorization.authorization_hash,
         }
+        if separate_controller:
+            # Audit only: integration never reads this worktree or its HEAD.
+            closure["controller_shape"] = "SEPARATE_DETACHED_WORKTREE"
+            closure["controller_head"] = manager._run_git(["rev-parse", "HEAD"], cwd=controller_root)
         closure_hash = hashlib.sha256(json.dumps(closure, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
         closure["binding_hash"] = closure_hash
         now = _utc_now()
@@ -10730,7 +10776,7 @@ class SelfHostedTaskService:
         )
 
         def mutate(current: dict[str, Any]) -> None:
-            nonlocal duplicate
+            nonlocal duplicate, closure_hash
             if (
                 str(current.get("task_id") or "") != task_id
                 or (current.get("status"), current.get("promotion_status")) != expected_prior_pair
@@ -10786,10 +10832,35 @@ class SelfHostedTaskService:
             )
             if list(current_manifest) != verifier_manifest_payload:
                 raise RuntimeError("CLOSURE_BINDING_CONCURRENCY_DRIFT")
-            live_branch = manager._run_git(["branch", "--show-current"], cwd=controller_root)
-            live_status = manager._run_git(["status", "--porcelain=v1", "--untracked-files=all"], cwd=controller_root)
-            if live_branch != integration_branch or live_status:
-                raise RuntimeError("CLOSURE_CANONICAL_REBIND_DRIFT")
+            if separate_controller:
+                try:
+                    still_separate = ControlledIntegrationManager.separate_controller_integration_head(
+                        controller_root, integration_branch
+                    ) is not None
+                    ControlledIntegrationManager._require_clean_controller(
+                        controller_root,
+                        allow_pending_task_cards=True,
+                        message="CLOSURE_CANONICAL_REBIND_DRIFT",
+                    )
+                except RuntimeError as exc:
+                    raise RuntimeError("CLOSURE_CANONICAL_REBIND_DRIFT") from exc
+                if not still_separate:
+                    raise RuntimeError("CLOSURE_CANONICAL_REBIND_DRIFT")
+                # The audit-only Controller HEAD is sealed as of lock time.
+                locked_head = manager._run_git(["rev-parse", "HEAD"], cwd=controller_root)
+                if locked_head != closure["controller_head"]:
+                    closure.pop("binding_hash")
+                    closure["controller_head"] = locked_head
+                    sealed = json.dumps(
+                        closure, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+                    )
+                    closure_hash = hashlib.sha256(sealed.encode()).hexdigest()
+                    closure["binding_hash"] = closure_hash
+            else:
+                live_branch = manager._run_git(["branch", "--show-current"], cwd=controller_root)
+                live_status = manager._run_git(["status", "--porcelain=v1", "--untracked-files=all"], cwd=controller_root)
+                if live_branch != integration_branch or live_status:
+                    raise RuntimeError("CLOSURE_CANONICAL_REBIND_DRIFT")
             try:
                 if hashlib.sha256(artifact_path.read_bytes()).hexdigest() != external_acceptance.receipt_hash:
                     raise RuntimeError("EXTERNAL_ACCEPTANCE_ARTIFACT_HASH_MISMATCH")
@@ -10814,7 +10885,15 @@ class SelfHostedTaskService:
                     "superseded_by": str(approval.get("approval_id") or ""),
                     "reason": "pre_apply_rebind",
                 })
-            live_head = manager._run_git(["rev-parse", "HEAD"], cwd=controller_root)
+            if separate_controller:
+                try:
+                    live_head = ControlledIntegrationManager.separate_controller_integration_head(
+                        controller_root, integration_branch
+                    )
+                except RuntimeError as exc:
+                    raise RuntimeError("CLOSURE_CANONICAL_HEAD_DRIFT") from exc
+            else:
+                live_head = manager._run_git(["rev-parse", "HEAD"], cwd=controller_root)
             if live_head != current_head:
                 raise RuntimeError("CLOSURE_CANONICAL_HEAD_DRIFT")
             consumed = dict(approval)
@@ -11806,7 +11885,20 @@ class SelfHostedTaskService:
         controller_root = Path(contract.controller_repo_root).resolve()
         manager = WorktreeManager(root_dir=contract.target_worktree_root)
         candidate = closure.get("candidate_commit_sha")
+        # A separate detached Controller (#2251) applied by update-ref: the
+        # applied head is the integration branch ref, HEAD stays detached and
+        # only untracked pending Task Cards are admitted.  Read-only probe on
+        # the real class (never an integration run); other shapes unchanged.
+        from nexus.orchestrator.governed_integration import (
+            ControlledIntegrationManager as ControllerShape,
+        )
+
+        separate_head = ControllerShape.separate_controller_integration_head(
+            controller_root, str(branch)
+        )
         actual_head = manager._run_git(["rev-parse", "HEAD"], cwd=controller_root)
+        if separate_head is not None:
+            actual_head = separate_head
         if actual_head != receipt.integration_commit_sha:
             raise RuntimeError("receipt recovery applied HEAD mismatch")
         if receipt.integration_commit_sha != candidate:
@@ -11816,15 +11908,31 @@ class SelfHostedTaskService:
             ).split()
             if len(parents) != 3 or candidate not in parents[1:]:
                 raise RuntimeError("receipt recovery refuses post-candidate extra commit")
-        if manager._run_git(["branch", "--show-current"], cwd=controller_root) != branch:
+        expected_current_branch = "" if separate_head is not None else branch
+        if (
+            manager._run_git(["branch", "--show-current"], cwd=controller_root)
+            != expected_current_branch
+        ):
             raise RuntimeError("receipt recovery branch mismatch")
-        if manager._run_git(["status", "--porcelain=v1", "--untracked-files=all"], cwd=controller_root):
+        if separate_head is not None:
+            ControllerShape._require_clean_controller(
+                controller_root,
+                allow_pending_task_cards=True,
+                message="receipt recovery canonical tree is dirty",
+            )
+        elif manager._run_git(
+            ["status", "--porcelain=v1", "--untracked-files=all"], cwd=controller_root
+        ):
             raise RuntimeError("receipt recovery canonical tree is dirty")
         if candidate:
             candidate_tree = manager._run_git(["rev-parse", f"{candidate}^{{tree}}"], cwd=controller_root)
             if candidate_tree != receipt.candidate_tree_sha:
                 raise RuntimeError("receipt recovery candidate tree mismatch")
             actual_tree = manager._run_git(["rev-parse", "HEAD^{tree}"], cwd=controller_root)
+            if separate_head is not None:
+                actual_tree = manager._run_git(
+                    ["rev-parse", f"{separate_head}^{{tree}}"], cwd=controller_root
+                )
             if actual_tree != receipt.candidate_tree_sha:
                 raise RuntimeError("receipt recovery applied tree mismatch")
             result = subprocess.run(
@@ -12050,11 +12158,41 @@ class SelfHostedTaskService:
             controller_root = Path((state.get("contract") or {}).get("controller_repo_root") or "").resolve()
             if not controller_root.is_dir():
                 reject("RECEIPT_CORRECTION_CONTROLLER_ROOT_REQUIRED")
+            # A separate detached Controller (#2251) binds the integration
+            # ref with HEAD detached and only pending Task Cards untracked.
+            from nexus.orchestrator.governed_integration import (
+                ControlledIntegrationManager as ControllerShape,
+            )
+
+            try:
+                separate_head = ControllerShape.separate_controller_integration_head(
+                    controller_root, integration_branch
+                )
+            except RuntimeError as exc:
+                raise RuntimeError("RECEIPT_CORRECTION_PHYSICAL_BINDING_MISMATCH") from exc
             actual_branch = manager._run_git(["branch", "--show-current"], cwd=controller_root)
             actual_head = manager._run_git(["rev-parse", "HEAD"], cwd=controller_root)
-            dirty = manager._run_git(["status", "--porcelain=v1", "--untracked-files=all"], cwd=controller_root)
-            if actual_branch != integration_branch or actual_head != expected_applied_head or dirty:
-                reject("RECEIPT_CORRECTION_PHYSICAL_BINDING_MISMATCH")
+            if separate_head is not None:
+                try:
+                    ControllerShape._require_clean_controller(
+                        controller_root,
+                        allow_pending_task_cards=True,
+                        message="RECEIPT_CORRECTION_PHYSICAL_BINDING_MISMATCH",
+                    )
+                except RuntimeError as exc:
+                    raise RuntimeError("RECEIPT_CORRECTION_PHYSICAL_BINDING_MISMATCH") from exc
+                if actual_branch != "" or separate_head != expected_applied_head:
+                    reject("RECEIPT_CORRECTION_PHYSICAL_BINDING_MISMATCH")
+            else:
+                dirty = manager._run_git(
+                    ["status", "--porcelain=v1", "--untracked-files=all"], cwd=controller_root
+                )
+                if (
+                    actual_branch != integration_branch
+                    or actual_head != expected_applied_head
+                    or dirty
+                ):
+                    reject("RECEIPT_CORRECTION_PHYSICAL_BINDING_MISMATCH")
             candidate_tree = manager._run_git(["rev-parse", f"{candidate_commit_sha}^{{tree}}"], cwd=controller_root)
             if candidate_tree != candidate_tree_sha:
                 reject("RECEIPT_CORRECTION_CANDIDATE_TREE_MISMATCH")
