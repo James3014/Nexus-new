@@ -108,8 +108,8 @@ class ReceiptExists(Exception):
 class ScratchTmpCapExceeded(Exception):
     """A6: one pytest run left more than SCRATCH_TMP_CAP_BYTES in scratch/tmp.
 
-    Raised by ``PytestRunner.run`` (also on a cached replay) so that no caller can read
-    the run's empty outcomes as test results; ``score_task`` turns it into a label.
+    Raised by ``PytestRunner.run`` (such a run is never cached) so that no caller can
+    read the run's empty outcomes as test results; ``score_task`` turns it into a label.
     """
 
     def __init__(
@@ -1784,12 +1784,14 @@ def _score_task(
     except ScratchTmpCapExceeded as cap:
         # A6: a run over the TMPDIR cap is never read as test results.
         tree = _TREE_NAMES.get(cap.tree, cap.tree)
-        if cap.kind == SCRATCH_TMP_TASK_CAP_EXCEEDED:
+        # A candidate-role run that trips either cap stays in the denominator
+        # (NOT_RUNNABLE); a leaky candidate must never be dropped as not scorable.
+        if cap.role == CAND_ROLE:
+            receipt["label"] = NOT_RUNNABLE
+            receipt["sub_reason"] = cap.kind
+        elif cap.kind == SCRATCH_TMP_TASK_CAP_EXCEEDED:
             receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
             receipt["sub_reason"] = SCRATCH_TMP_TASK_CAP_EXCEEDED
-        elif cap.role == CAND_ROLE:
-            receipt["label"] = NOT_RUNNABLE
-            receipt["sub_reason"] = SCRATCH_TMP_CAP_EXCEEDED
         else:
             receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
             receipt["sub_reason"] = ORACLE_RUN_FAILED

@@ -2062,3 +2062,35 @@ def test_second_scorer_on_same_work_dir_fails_fast(tmp_path, fx):
             ros.score_task(fx.task(fx.diff_from_base({"pkg/calc.py": FIXED})), ctx)
     # Released: the next task scores normally.
     assert ros.score_task(fx.task(fx.gold_diff), ctx)["receipt"]["label"] == ros.RESOLVED
+
+
+def test_scratch_task_cap_on_candidate_run_is_not_runnable(tmp_path, monkeypatch):
+    # Only CAND+T leaks: under the per-run cap, but over the task cap. A leaky candidate
+    # must stay in the denominator (NOT_RUNNABLE), never be dropped as not scorable.
+    monkeypatch.setattr(ros, "SCRATCH_TMP_TASK_CAP_BYTES", 3000)
+    fx = Fixture(tmp_path, mul_test=_leak_test("candt"))
+    r = ros.score_task(fx.task(fx.diff_from_base({"pkg/calc.py": FIXED})), _ctx(tmp_path, fx))[
+        "receipt"
+    ]
+    assert (r["label"], r["sub_reason"]) == (ros.NOT_RUNNABLE, ros.SCRATCH_TMP_TASK_CAP_EXCEEDED)
+    assert r["detail"].startswith(f"{ros.SCRATCH_TMP_TASK_CAP_EXCEEDED}:CAND+T:")
+    assert "shadow_label" not in r
+
+
+def test_scratch_home_leak_counts_toward_per_run_cap(tmp_path, monkeypatch):
+    tree = tmp_path / "tree"
+    _write(
+        tree,
+        {
+            "tests/test_home.py": (
+                "import os\nfrom pathlib import Path\n\n\ndef test_home():\n"
+                '    (Path(os.environ["HOME"]) / "blob").write_bytes(b"x" * 5000)\n'
+            )
+        },
+    )
+    env = LocalEnv().get("fixture-repo", tree)
+    runner = _runner(tmp_path)
+    monkeypatch.setattr(ros, "SCRATCH_TMP_CAP_BYTES", 1000)
+    with pytest.raises(ros.ScratchTmpCapExceeded) as exc:
+        runner.run(env, tree, "t", "tests", (), 0)
+    assert exc.value.kind == ros.SCRATCH_TMP_CAP_EXCEEDED and exc.value.left_bytes >= 5000

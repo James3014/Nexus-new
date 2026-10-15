@@ -103,12 +103,16 @@ Scorer 1.2.1:
   - on any other tree (`BASE+T`, `GOLD`, `GOLD_REF`, the P2P(d) trees):
     `NOT_SCORABLE_ORACLE_INVALID` / `ORACLE_RUN_FAILED`.
 - **Per-task cap.** When the runs of one task together leave more than
-  `SCRATCH_TMP_TASK_CAP_BYTES` (40 GiB): `NOT_SCORABLE_ORACLE_INVALID` /
-  `SCRATCH_TMP_TASK_CAP_EXCEEDED`, not cached.
+  `SCRATCH_TMP_TASK_CAP_BYTES` (40 GiB), the task fails with sub-reason
+  `SCRATCH_TMP_TASK_CAP_EXCEEDED`, not cached. If the run that crosses it is a candidate
+  run, the label is `NOT_RUNNABLE` (the candidate stays in the denominator); otherwise it
+  is `NOT_SCORABLE_ORACLE_INVALID`.
 - In both cap cases, `detail` names the cap, tree, target, run, role and the bytes left.
 - **Not limited:** the peak usage while a single run is still going (only the
   `SpeculativeSandbox` guard of #2291 prevents the 96 GB case), and writes outside
   `scratch/` (a test that writes elsewhere is not measured).
+- **Old caches.** A `scratch/pytest-cache` written by a pre-release 1.2.1 build (PR
+  #2295 at `2cf90bc`) may hold cap failures cached as exit `-2`; clear it before use.
 - **Symlinked scratch.** If `scratch/tmp` or `scratch/home` is a symlink when a run
   starts or when cleanup runs, the scorer refuses (`ScratchUnsafe`, no receipt).
 - **Lock.** `score_task` holds an exclusive `flock` on `<work>/.scorer.lock`, because
