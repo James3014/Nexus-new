@@ -113,6 +113,11 @@ from nexus.orchestrator.owner_confirmation import (
     UnavailableConfirmationChannel,
     client_supports_form_elicitation,
 )
+from nexus.orchestrator.canonical_source_root import (
+    CONTROLLER_IS_SEPARATE,
+    LOADED_SOURCE_ROOT,
+    bound_controller_problem,
+)
 from nexus.orchestrator.self_hosted_task_service import (
     CANONICAL_SOURCE_ROOT,
     SelfHostedTaskService,
@@ -587,6 +592,41 @@ def _safe_search_target(value: Any) -> tuple[Path, Path]:
     except ValueError as exc:
         raise GatewayInputError("path escapes canonical root") from exc
     return lexical, resolved
+
+
+def _require_bound_controller() -> None:
+    """Re-check a separate Controller right before a Controller effect (#1939).
+
+    The startup check can go stale; Task Card create/commit and governed start
+    re-prove that the Controller is still the loaded commit plus bind commits
+    only.  Without a separate Controller this is a no-op.
+    """
+    if not CONTROLLER_IS_SEPARATE:
+        return
+    reason = bound_controller_problem(Path(CANONICAL_SOURCE_ROOT), Path(LOADED_SOURCE_ROOT))
+    if reason is not None:
+        raise GatewayInputError(f"CONTROLLER_BINDING_INVALID:{reason}")
+
+
+def _loaded_git(*args: str, timeout: float = 3.0) -> str:
+    """Git in the checkout this process runs (identity), not the Controller (#1939).
+
+    Without a separate Controller worktree both roots are one checkout, so this
+    is exactly ``_git``.
+    """
+    if not CONTROLLER_IS_SEPARATE:
+        return _git(*args)
+    result = subprocess.run(
+        ["git", *args],
+        cwd=LOADED_SOURCE_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or f"git {' '.join(args)} failed")
+    return result.stdout
 
 
 def _git(*args: str, timeout: float = 3.0) -> str:
@@ -1370,7 +1410,7 @@ def _loaded_runtime_source_paths() -> tuple[Path, ...]:
     The comparison set must be frozen at gateway start; later imports of other
     modules must never change it.
     """
-    root_resolved = CANONICAL_SOURCE_ROOT.resolve()
+    root_resolved = LOADED_SOURCE_ROOT.resolve()
     paths: list[Path] = []
     for module in sorted(sys.modules.values(), key=lambda value: str(getattr(value, "__name__", ""))):
         name = str(getattr(module, "__name__", ""))
@@ -1395,7 +1435,7 @@ def _loaded_runtime_source_paths() -> tuple[Path, ...]:
     return tuple(sorted(set(paths), key=lambda path: path.as_posix()))
 
 
-def _hash_source_paths(paths: tuple[Path, ...], *, root: Path = CANONICAL_SOURCE_ROOT) -> str:
+def _hash_source_paths(paths: tuple[Path, ...], *, root: Path = LOADED_SOURCE_ROOT) -> str:
     """Deterministic SHA-256 over relative path + file bytes for a frozen set.
 
     A missing or unreadable file contributes a distinct marker so any change,
@@ -1470,7 +1510,7 @@ def _action_contract_digest(source: str) -> Optional[str]:
 
 def _action_contract_fingerprint(
     *,
-    root: Path = CANONICAL_SOURCE_ROOT,
+    root: Path = LOADED_SOURCE_ROOT,
     source: Optional[str] = None,
 ) -> tuple[str, bool, tuple[str, ...]]:
     """Return ``(sha256, ok, reasons)`` for the action contract.
@@ -1500,7 +1540,7 @@ PERMISSION_ENFORCEMENT_PATHS = (
 
 def _permission_enforcement_fingerprint(
     *,
-    root: Path = CANONICAL_SOURCE_ROOT,
+    root: Path = LOADED_SOURCE_ROOT,
 ) -> tuple[str, bool, tuple[str, ...]]:
     """Non-executing AST fingerprint of the permission enforcement surface.
 
@@ -3545,6 +3585,7 @@ class UnifiedMCPGateway:
     def _task_card_create(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         if arguments.get("owner_confirmation") is not True:
             raise GatewayInputError("OWNER_CONFIRMATION_REQUIRED")
+        _require_bound_controller()
         owner_key = self._owner_effect_key(arguments)
         campaign = self._safe_slug(arguments.get("campaign_id"), "campaign_id")
         task_id = self._safe_slug(arguments.get("task_id"), "task_id")
@@ -3672,6 +3713,7 @@ class UnifiedMCPGateway:
     def _task_card_commit(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         if arguments.get("owner_confirmation") is not True:
             raise GatewayInputError("OWNER_CONFIRMATION_REQUIRED")
+        _require_bound_controller()
         owner_key = self._owner_effect_key(arguments)
         campaign = self._safe_slug(arguments.get("campaign_id"), "campaign_id")
         task_id = self._safe_slug(arguments.get("task_id"), "task_id")
@@ -4620,6 +4662,7 @@ class UnifiedMCPGateway:
             raise GatewayInputError("TASK_CARD_PATH_HASH_PAIR_REQUIRED")
         if not task_card_path:
             raise GatewayInputError("TRACKED_TASK_CARD_REQUIRED")
+        _require_bound_controller()
         _safe_relative_path(task_card_path, "task_card_path")
         if not task_card_path.startswith("tasks/"):
             raise GatewayInputError("TASK_CARD_PATH_INVALID")
@@ -5980,7 +6023,7 @@ class UnifiedMCPGateway:
 
     def _gateway_status(self) -> dict[str, Any]:
         lifecycle = self.service.lifecycle_status()
-        current_head = _git("rev-parse", "HEAD").strip()
+        current_head = _loaded_git("rev-parse", "HEAD").strip()
         formal_actionable = self.service.list_actionable_tasks()
         pending_actions = int(formal_actionable.get("actionable_count", 0) or 0)
         for job_path in self._assist_root().glob("*.json"):
@@ -6087,7 +6130,7 @@ class UnifiedMCPGateway:
 
         status = self._gateway_status()
         try:
-            loaded_tree = _git("rev-parse", "HEAD^{tree}").strip()
+            loaded_tree = _loaded_git("rev-parse", "HEAD^{tree}").strip()
         except RuntimeError as exc:
             raise GatewayInputError("loaded Gateway tree is unavailable") from exc
 
@@ -6411,7 +6454,7 @@ class UnifiedMCPGateway:
             "tool_manifest_revision": TOOL_MANIFEST_REVISION,
             "full_tool_schema_hash": FULL_TOOL_SCHEMA_HASH,
             "permission_policy_hash": PERMISSION_POLICY_HASH,
-            "gateway_source_head": _git("rev-parse", "HEAD").strip(),
+            "gateway_source_head": _loaded_git("rev-parse", "HEAD").strip(),
             "repository_observed_at": observation.get("observed_at"),
             "default_branch": observation.get("default_branch"),
         }
@@ -7970,7 +8013,7 @@ FULL_TOOL_SCHEMA_HASH = hashlib.sha256(
     json.dumps(UnifiedMCPGateway.tool_specs(), sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 ).hexdigest()
 try:
-    SERVER_REPO_HEAD_AT_START = _git("rev-parse", "HEAD").strip() or "unknown"
+    SERVER_REPO_HEAD_AT_START = _loaded_git("rev-parse", "HEAD").strip() or "unknown"
 except Exception:
     SERVER_REPO_HEAD_AT_START = "unknown"
 # Freeze the runtime source comparison set and its digests at gateway load so

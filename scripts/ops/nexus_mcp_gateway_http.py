@@ -24,6 +24,7 @@ from nexus.orchestrator.unified_mcp_gateway import (  # noqa: E402
     GATEWAY_VERSION,
     LIFECYCLE_REVISION,
     LIFECYCLE_STATE_SCHEMA_REVISION,
+    LOADED_SOURCE_ROOT,
     PERMISSION_POLICY_HASH,
     PERMISSION_POLICY_REVISION,
     PUBLIC_APP_NAME,
@@ -66,9 +67,10 @@ def resolve_bind_address(env: Mapping[str, str] | None = None) -> tuple[str, int
 
 
 def _git_head() -> str:
+    # The loaded checkout, never a separate Controller worktree (#1939).
     result = subprocess.run(
         ["git", "rev-parse", "HEAD"],
-        cwd=CANONICAL_SOURCE_ROOT,
+        cwd=LOADED_SOURCE_ROOT,
         capture_output=True,
         text=True,
         timeout=3,
