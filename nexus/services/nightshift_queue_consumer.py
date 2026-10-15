@@ -183,7 +183,9 @@ class NightshiftQueueConsumer:
         try:
             bindings = build_nightshift_workforce_bindings()
             provider = resolve_nightshift_online_worker().provider
-        except WorkforcePolicyError:
+        except (WorkforcePolicyError, ImportError):
+            # Fail closed: an unloadable policy (or an unimportable policy
+            # module) sends empty bindings, which Workforce Admission blocks.
             bindings, provider = {}, ""
         route: dict[str, Any] = {
             "online_enabled": True,

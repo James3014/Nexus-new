@@ -232,3 +232,35 @@ def test_policy_load_failure_sends_empty_bindings_and_blocks(tmp_path: Path, mon
     assert "provider" not in seen[0].route
     assert [entry["status"] for entry in result] == ["BLOCK"]
     assert result[0]["reason"] == "workforce_admission_not_allow"
+
+
+def test_policy_module_import_failure_blocks_instead_of_name_error(tmp_path: Path, monkeypatch):
+    """#2257: the discriminating case. Before the fix ``WorkforcePolicyError`` was
+    imported inside the ``try``; with the policy module unimportable the import
+    raised, the ``except`` clause evaluated an unbound name and ``consume_file``
+    died with ``NameError``. Now the name is bound at module level and an
+    ``ImportError`` from the policy load falls through to the BLOCK path."""
+    import sys
+
+    import nexus.services.nightshift_queue_consumer as consumer
+
+    assert "WorkforcePolicyError" in vars(consumer)
+    # ``None`` in sys.modules makes ``from nexus.services.model_workforce_policy
+    # import ...`` raise ImportError (the lazy import inside the policy resolver).
+    monkeypatch.setitem(sys.modules, "nexus.services.model_workforce_policy", None)
+    seen = []
+
+    def _runner(request):
+        seen.append(request)
+        return {"workforce_admission": {"overall_decision": "BLOCK"}}
+
+    dispatched = []
+    path = tmp_path / "pending.json"
+    path.write_text(json.dumps([_item(task="no-policy-module")]), encoding="utf-8")
+
+    result = consumer.NightshiftQueueConsumer(_runner, dispatched.append).consume_file(path)
+
+    assert dispatched == []
+    assert len(seen) == 1
+    assert seen[0].route["workforce_bindings"] == {}
+    assert [entry["status"] for entry in result] == ["BLOCK"]
