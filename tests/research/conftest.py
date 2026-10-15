@@ -102,10 +102,17 @@ def admit_request(request: Any, *, advisor_only: bool = False) -> Any:
     """Return ``request`` with canonical Workforce bindings attached to its route."""
     route = dict(request.route)
     local_request = getattr(request, "local_request", None)
-    if advisor_only and request.local_enabled and getattr(local_request, "action", "") == "advisor":
-        # An advisor-only Local assist never mutates; this selects the read-only advisor worker.
+    if (
+        advisor_only
+        and request.local_enabled
+        and getattr(local_request, "action", "") == "advisor"
+        and request.task_type != "repair"
+    ):
+        # Advisor-only Local assist (planning + advisor, #2089): bind the read-only advisor
+        # worker.  task_type is NOT rewritten here; the test must declare "planning" itself.
+        # A repair sprint with an advisor action keeps its product routing (no
+        # mutation_requested rewrite) so the runtime refuses it (fail-closed).
         route["mutation_requested"] = False
-        request = replace(request, task_type="planning")
         if not getattr(local_request, "planner_snapshot", None):
             request = replace(
                 request,
