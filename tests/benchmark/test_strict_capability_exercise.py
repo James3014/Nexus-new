@@ -15,6 +15,13 @@ from scripts.bench.strict_llm_baseline import (
     main as reclassify_main,
 )
 
+_OVERLAY_REAL = {
+    "attestation": "real",
+    "attestation_source": "unified_capability_projection",
+    "attestation_refs_resolved": True,
+    "attestation_disposition": {"kind": "succeeded", "reason": "SUCCEEDED"},
+}
+
 
 def _receipt(
     name: str, *, simulated: bool | None, invoked: bool = True, refs: tuple[str, ...] = ("ref:1",)
@@ -27,6 +34,9 @@ def _receipt(
     }
     if simulated is not None:
         receipt["receipt_base"] = {"claim_boundary": {"simulated": simulated}}
+    if simulated is False:
+        # Real needs the unified-capability overlay's attestation (#2212 round 7, G2).
+        receipt.update(_OVERLAY_REAL)
     return receipt
 
 
@@ -78,7 +88,23 @@ def test_receipt_classification() -> None:
     assert classify_receipt(_receipt("a", simulated=True)) == "simulated"
     assert classify_receipt(_receipt("a", simulated=False, refs=())) == "simulated"
     assert classify_receipt(_receipt("a", simulated=False, invoked=False)) == "selected_not_invoked"
-    assert classify_receipt(_receipt("a", simulated=None)) == "real"
+    # No claim boundary attests nothing: never real (Codex #2212 F3).
+    assert classify_receipt(_receipt("a", simulated=None)) == "real_self_reported"
+    # A non-simulated boundary without the overlay's attestation is self-reported (G2), and
+    # an explicit simulated attestation wins over a non-simulated boundary.
+    unattested = {k: v for k, v in _receipt("a", simulated=False).items() if k not in _OVERLAY_REAL}
+    assert classify_receipt(unattested) == "real_self_reported"
+    assert classify_receipt({**unattested, "attestation": "bogus"}) == "real_self_reported"
+    assert classify_receipt({**unattested, "attestation": "simulated"}) == "simulated"
+    # Gemini r2 N3: a literal attestation=real without the overlay's markers is not real.
+    assert classify_receipt({**unattested, "attestation": "real"}) == "real_self_reported"
+    for marker, bad in (
+        ("attestation_source", "hand_written"),
+        ("attestation_refs_resolved", "true"),
+        ("attestation_disposition", {"kind": "failed_or_refused"}),
+    ):
+        forged = {**unattested, **_OVERLAY_REAL, marker: bad}
+        assert classify_receipt(forged) == "real_self_reported", marker
     assert classify_receipt(_receipt("a", simulated=None, refs=())) == "simulated"
 
 
@@ -158,7 +184,46 @@ def test_reclassify_report_dir(tmp_path: Path, capsys: Any) -> None:
 def test_unattested_real_receipt_is_reported_separately() -> None:
     rows = [_row("with_nexus", "backfill", [_receipt("hyper", simulated=None)])]
     arm = _summarize_with_strict_baseline(rows, strict=True)["with_nexus"]
-    assert rows[0]["capabilities_real"] == ["hyper"]
+    # Reported for visibility, never counted real or as uplift (Codex #2212 F3).
+    assert rows[0]["capabilities_real"] == []
+    assert rows[0]["capabilities_real_self_reported"] == ["hyper"]
     assert rows[0]["capabilities_real_unattested"] == ["hyper"]
-    assert arm["real_capability_rows_n"] == 1
+    assert rows[0]["capability_not_exercised"] is True
+    assert arm["real_capability_rows_n"] == 0
     assert arm["attested_real_capability_rows_n"] == 0
+    assert arm["nexus_uplift_solved_n"] == 0
+    assert arm["capability_tally"].get("hyper", {}).get("real", 0) == 0
+
+
+def test_claim_boundary_takes_the_stricter_of_receipt_base_and_runtime() -> None:
+    def receipt(rb: bool | None, top: bool | None) -> dict[str, Any]:
+        item = _receipt("acceptance_check", simulated=rb)
+        if top is not None:
+            item["claim_boundary"] = {"simulated": top}
+        item.update(_OVERLAY_REAL)  # overlay-attested; the boundaries decide here
+        return item
+
+    assert classify_receipt(receipt(False, False)) == "real"
+    # Stale receipt_base true + runtime false: still simulated (tighten-only).
+    assert classify_receipt(receipt(True, False)) == "simulated"
+    assert classify_receipt(receipt(False, True)) == "simulated"
+    assert classify_receipt(receipt(True, True)) == "simulated"
+    assert classify_receipt(receipt(None, False)) == "real"
+    assert classify_receipt(receipt(None, True)) == "simulated"
+
+
+def test_not_executable_receipts_are_reported_apart() -> None:
+    direct = _receipt("direct_mode", simulated=True, invoked=False, refs=())
+    direct["failure_reason"] = "NOT_EXECUTABLE:control_plane_reference"
+    route = _receipt("research_route", simulated=True, invoked=False, refs=())
+    route["execution_state"] = "NOT_EXECUTABLE"
+    assert classify_receipt(direct) == "not_executable"
+    assert classify_receipt(route) == "not_executable"
+
+    rows = [_row("with_nexus", "ne", [direct, route, _receipt("hyper", simulated=False)])]
+    arm = _summarize_with_strict_baseline(rows, strict=True)["with_nexus"]
+    assert rows[0]["capabilities_not_executable"] == ["direct_mode", "research_route"]
+    assert rows[0]["capabilities_selected_not_invoked"] == []
+    assert rows[0]["capabilities_simulated"] == []
+    assert arm["capability_not_executable_tally"] == {"direct_mode": 1, "research_route": 1}
+    assert "direct_mode" not in arm["capability_tally"]

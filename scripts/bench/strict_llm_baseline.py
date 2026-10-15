@@ -4,6 +4,15 @@ Legacy ADRs (teacher-student sweep plan, route-cost measurement lessons) require
 that a success with ``model_calls == 0`` is not counted as a model solve: it came
 from a deterministic/local rescue path. Under strict mode such rows are tagged
 ``solve_classification="deterministic_rescue"`` and reported separately.
+
+Replay note (wiring plan PR-1): a capability receipt is real only if its boundaries say so.
+The unified-capability overlay (``nexus/research/flow/unified_capability_projection.py``)
+re-projects ``receipt_base.claim_boundary`` to real only when the runtime stage carries
+``simulated=False``, ``receipt_present=True`` and evidence refs sealed in the capability's own
+``REAL_INVOKED`` evidence-bundle entry; refs resolving only through the executor's own record
+are reported as ``real_self_reported``.  Bench rows recorded before that rule (e.g. ``runs_20261014b``) carry none of
+these, so replaying them through the overlay classifies those capabilities simulated by design;
+regenerate the numbers from a fresh run instead of loosening the rule.
 """
 
 from __future__ import annotations
@@ -29,6 +38,19 @@ HIDDEN_FEEDBACK_RETRY_REASONS = frozenset({
     "hidden_verifier_failure_bounded_nexus_retry",
 })
 MODEL_SOLVE = "model_solve"
+# Receipt class for a selected planner node with no executable body (control-plane reference,
+# routing node): reported apart from ``selected_not_invoked``; never real, never simulated.
+NOT_EXECUTABLE = "NOT_EXECUTABLE"
+NOT_EXECUTABLE_CLASS = "not_executable"
+# Receipt class for an invocation whose executor reports it ran but whose evidence the runtime
+# did not seal (set by the unified-capability overlay): never real, never simulated.
+REAL_SELF_REPORTED_CLASS = "real_self_reported"
+# Receipt class for an executor that started and refused for missing inputs (set by the
+# overlay with ``blocked_reason``): the capability did not run; never real, never simulated.
+BLOCKED_MISSING_INPUTS_CLASS = "blocked_missing_inputs"
+# Started and did not succeed for any other reason (refusal / failure code recorded): visible,
+# never real, never simulated.
+FAILED_OR_REFUSED_CLASS = "failed_or_refused"
 # A SUCCESS reached by a bounded Hyper re-run after the first attempt failed (Nexus treatment).
 NEXUS_TREATMENT_RESCUE = "rescued_by_nexus_treatment"
 # The run's captured-prompt symmetry audit failed or errored: no row of it is a solve of any kind.
@@ -191,33 +213,104 @@ def honest_scorecard(rows: Iterable[dict[str, Any]], mode: str) -> dict[str, Any
 
 
 def _claim_boundary(receipt: dict[str, Any]) -> dict[str, Any] | None:
-    """Return the receipt's claim_boundary mapping, or None when it carries none."""
+    """Return the receipt's effective claim_boundary mapping, or None when it carries none.
+
+    A receipt can carry two boundaries: ``receipt_base.claim_boundary`` and the top-level
+    ``claim_boundary`` (the runtime stage's, set by the unified-capability overlay).  When
+    both exist the stricter one wins: the result is ``simulated=False`` only when both say
+    exactly ``False`` (tighten-only, wiring plan PR-1).
+    """
 
     base = receipt.get("receipt_base")
-    if isinstance(base, dict) and isinstance(base.get("claim_boundary"), dict):
-        return base["claim_boundary"]
-    if isinstance(receipt.get("claim_boundary"), dict):
-        return receipt["claim_boundary"]
-    return None
+    rb_cb = (
+        base["claim_boundary"]
+        if isinstance(base, dict) and isinstance(base.get("claim_boundary"), dict)
+        else None
+    )
+    top_cb = receipt["claim_boundary"] if isinstance(receipt.get("claim_boundary"), dict) else None
+    if rb_cb is None or top_cb is None:
+        return rb_cb if rb_cb is not None else top_cb
+    simulated = not (
+        rb_cb.get("simulated", True) is False and top_cb.get("simulated", True) is False
+    )
+    merged = {**top_cb, **rb_cb, "simulated": simulated}
+    if simulated:
+        merged["claim_eligible"] = False
+    return merged
+
+
+def is_not_executable(receipt: dict[str, Any]) -> bool:
+    """True for an explicit ``NOT_EXECUTABLE:<class>`` receipt (planner node with no body)."""
+
+    if bool(receipt.get("invoked")):
+        return False
+    return (
+        receipt.get("not_executable") is True
+        or str(receipt.get("execution_state") or "") == NOT_EXECUTABLE
+        or str(receipt.get("failure_reason") or "").startswith(f"{NOT_EXECUTABLE}:")
+    )
 
 
 def classify_receipt(receipt: dict[str, Any]) -> str:
-    """Return ``real``, ``simulated`` or ``selected_not_invoked`` for one receipt.
+    """Return ``real``, ``simulated``, ``selected_not_invoked`` or ``not_executable``.
 
-    ``real``: invoked, ``claim_boundary.simulated`` is not true, and ``evidence_refs`` is non-empty.
+    ``real``: invoked, ``attestation == "real"`` (written by the unified-capability overlay),
+    ``claim_boundary.simulated`` is not true, and ``evidence_refs`` is non-empty; the same
+    without that attestation is ``real_self_reported``.
     A receipt that carries no claim_boundary at all (runner-synthesized telemetry backfill or
-    deterministic receipt-lite entries) makes no simulated claim; it is counted real only when it
-    has evidence refs and is reported under ``capabilities_real_unattested`` so it stays visible.
+    deterministic receipt-lite entries) attests nothing: with evidence refs it is
+    ``real_self_reported`` (never ``real``; also listed under ``capabilities_real_unattested`` so
+    it stays visible), without refs ``simulated``.
     ``selected_not_invoked``: selected by the planner but never invoked.
     Everything else invoked (simulated=true, or no evidence) is ``simulated``.
+    ``not_executable``: an explicit ``NOT_EXECUTABLE:<class>`` receipt (nothing could run).
+    ``blocked_missing_inputs``: the executor started and refused for missing inputs.
+    ``failed_or_refused``: the executor started and did not succeed for another reason.
+    ``real_self_reported``: the overlay found every runtime signal consistent but the evidence
+    refs resolve only through the executor's own record (no runtime-sealed evidence).
     """
 
+    if is_not_executable(receipt):
+        return NOT_EXECUTABLE_CLASS
     if not bool(receipt.get("invoked")):
         return "selected_not_invoked"
+    if str(receipt.get("attestation") or "") == BLOCKED_MISSING_INPUTS_CLASS:
+        return BLOCKED_MISSING_INPUTS_CLASS
+    if str(receipt.get("attestation") or "") == FAILED_OR_REFUSED_CLASS:
+        return FAILED_OR_REFUSED_CLASS
+    if str(receipt.get("attestation") or "") == REAL_SELF_REPORTED_CLASS:
+        has_refs = bool([ref for ref in (receipt.get("evidence_refs") or []) if str(ref).strip()])
+        return REAL_SELF_REPORTED_CLASS if has_refs else "simulated"
+    if str(receipt.get("attestation") or "") == "simulated":
+        return "simulated"
     boundary = _claim_boundary(receipt)
-    simulated = False if boundary is None else boundary.get("simulated", True) is not False
     has_refs = bool([ref for ref in (receipt.get("evidence_refs") or []) if str(ref).strip()])
-    return "real" if (not simulated and has_refs) else "simulated"
+    if boundary is None:
+        # No boundary at all attests nothing: never real, never in the real tally or uplift.
+        return REAL_SELF_REPORTED_CLASS if has_refs else "simulated"
+    simulated = boundary.get("simulated", True) is not False
+    if simulated or not has_refs:
+        return "simulated"
+    # Real only when the unified-capability overlay attested it; a non-simulated boundary
+    # without that attestation is the receipt's own claim (Gemini review of #2212, G2).
+    return "real" if _overlay_attested_real(receipt) else REAL_SELF_REPORTED_CLASS
+
+
+def _overlay_attested_real(receipt: dict[str, Any]) -> bool:
+    """``attestation=real`` together with the overlay's own markers (Gemini r2 N3).
+
+    A consistency marker written by ``unified_capability_projection``, not a signature: row
+    JSON is produced by the bench runner, and a hand-edited row can still forge it.
+    """
+
+    disposition = receipt.get("attestation_disposition")
+    return (
+        str(receipt.get("attestation") or "") == "real"
+        and receipt.get("attestation_source") == "unified_capability_projection"
+        and receipt.get("attestation_refs_resolved") is True
+        and isinstance(disposition, dict)
+        and disposition.get("kind") == "succeeded"
+    )
 
 
 def classify_row_capabilities(row: dict[str, Any]) -> dict[str, Any]:
@@ -227,6 +320,10 @@ def classify_row_capabilities(row: dict[str, Any]) -> dict[str, Any]:
     unattested: list[str] = []
     simulated: list[str] = []
     not_invoked: list[str] = []
+    not_executable: list[str] = []
+    self_reported: list[str] = []
+    blocked: dict[str, str] = {}
+    failed: dict[str, str] = {}
     for receipt in row.get("capability_receipts") or []:
         if not isinstance(receipt, dict) or not receipt.get("selected", True):
             continue
@@ -234,16 +331,36 @@ def classify_row_capabilities(row: dict[str, Any]) -> dict[str, Any]:
         kind = classify_receipt(receipt)
         if kind == "real":
             real.append(name)
-            if _claim_boundary(receipt) is None:
-                unattested.append(name)
         elif kind == "simulated":
             simulated.append(name)
+        elif kind == NOT_EXECUTABLE_CLASS:
+            not_executable.append(name)
+        elif kind == REAL_SELF_REPORTED_CLASS:
+            self_reported.append(name)
+            if str(receipt.get("attestation") or "") != "real_self_reported":
+                unattested.append(name)  # no runtime attestation; visibility only
+        elif kind == BLOCKED_MISSING_INPUTS_CLASS:
+            blocked[name] = str(receipt.get("blocked_reason") or "unspecified")
+        elif kind == FAILED_OR_REFUSED_CLASS:
+            failed[name] = str(receipt.get("blocked_reason") or "unspecified")
         else:
             not_invoked.append(name)
     row["capabilities_real"] = sorted(set(real))
-    row["capabilities_real_unattested"] = sorted(set(unattested))
+    row["capabilities_real_unattested"] = sorted(set(unattested) - set(real))
     row["capabilities_simulated"] = sorted(set(simulated) - set(real))
     row["capabilities_selected_not_invoked"] = sorted(set(not_invoked) - set(real) - set(simulated))
+    row["capabilities_real_self_reported"] = sorted(set(self_reported) - set(real))
+    row["capabilities_blocked_missing_inputs"] = sorted(set(blocked) - set(real))
+    row["capability_blocked_reasons"] = {
+        name: blocked[name] for name in row["capabilities_blocked_missing_inputs"]
+    }
+    row["capabilities_failed_or_refused"] = sorted(set(failed) - set(real))
+    row["capability_failed_reasons"] = {
+        name: failed[name] for name in row["capabilities_failed_or_refused"]
+    }
+    row["capabilities_not_executable"] = sorted(
+        set(not_executable) - set(real) - set(simulated) - set(not_invoked)
+    )
     row["capability_not_exercised"] = not row["capabilities_real"]
     row["solve_without_capability"] = bool(
         row.get("solve_classification") == MODEL_SOLVE and row["capability_not_exercised"]
@@ -267,6 +384,31 @@ def capability_tally(rows: Iterable[dict[str, Any]]) -> dict[str, dict[str, int]
                 )
                 entry[key] += 1
     return dict(sorted(tally.items()))
+
+
+def not_executable_tally(
+    rows: Iterable[dict[str, Any]], *, field: str = "capabilities_not_executable"
+) -> dict[str, int]:
+    """Per-capability count of a separately reported receipt class (default NOT_EXECUTABLE)."""
+
+    tally: dict[str, int] = {}
+    for row in rows:
+        for name in row.get(field) or []:
+            tally[name] = tally.get(name, 0) + 1
+    return dict(sorted(tally.items()))
+
+
+def blocked_missing_inputs_tally(
+    rows: Iterable[dict[str, Any]], *, field: str = "capability_blocked_reasons"
+) -> dict[str, dict[str, int]]:
+    """Per-capability ``{reason_code: count}`` for a reason-carrying class (default blocked)."""
+
+    tally: dict[str, dict[str, int]] = {}
+    for row in rows:
+        for name, reason in (row.get(field) or {}).items():
+            entry = tally.setdefault(name, {})
+            entry[reason] = entry.get(reason, 0) + 1
+    return {name: dict(sorted(v.items())) for name, v in sorted(tally.items())}
 
 
 def capability_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -294,6 +436,14 @@ def capability_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
             1 for r in classified if r["capability_not_exercised"]
         ),
         "capability_tally": capability_tally(classified),
+        "capability_not_executable_tally": not_executable_tally(classified),
+        "capability_blocked_missing_inputs": blocked_missing_inputs_tally(classified),
+        "capability_failed_or_refused": blocked_missing_inputs_tally(
+            classified, field="capability_failed_reasons"
+        ),
+        "capability_real_self_reported_tally": not_executable_tally(
+            classified, field="capabilities_real_self_reported"
+        ),
         "solves_with_real_capability_n": len(uplift),
         "solve_without_capability_n": len(solves) - len(uplift),
         "nexus_uplift_solved_n": len(uplift),
@@ -365,6 +515,10 @@ def reclassify_report_dir(report_dir: str | Path) -> dict[str, Any]:
             "capabilities_real": r.get("capabilities_real"),
             "capabilities_real_unattested": r.get("capabilities_real_unattested"),
             "capabilities_simulated": r.get("capabilities_simulated"),
+            "capabilities_not_executable": r.get("capabilities_not_executable"),
+            "capabilities_real_self_reported": r.get("capabilities_real_self_reported"),
+            "capability_blocked_reasons": r.get("capability_blocked_reasons"),
+            "capability_failed_reasons": r.get("capability_failed_reasons"),
             "capability_not_exercised": r.get("capability_not_exercised"),
         }
         for r in rows

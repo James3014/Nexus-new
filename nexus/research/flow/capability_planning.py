@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +13,174 @@ from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.engine.learning_policy_loader import merge_runtime_learning_policy
 from nexus.engine.route_decision_adapter import build_route_decision
 from nexus.research.flow.rlm_trace import safe_trace_slug
+from nexus.services.capability_registry import ARCHIVED_CAPABILITY_REASONS
+
+# Plan lists an archived node must never appear in; it is moved to ``forbidden_capabilities``.
+_ARCHIVED_SELECTION_LISTS = (
+    "selected_capabilities",
+    "required_capabilities",
+    "conditional_capabilities",
+    "optional_capabilities",
+    "pending_capabilities",
+)
+# Keys left untouched by the walker: the audit-visible places where an archived name must
+# stay (forbidden list, the planner's decision trace, the drop record itself).
+_ARCHIVED_KEEP_KEYS = frozenset({
+    "forbidden_capabilities",
+    "decision_trace",
+    "archived_capabilities_dropped",
+    "retired_capabilities",
+})
+_ARCHIVED_MAX_DEPTH = 12
+_ZERO_WIDTH = dict.fromkeys(map(ord, "\u200b\u200c\u200d\u2060\ufeff"), None)
+_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+_STEP_NAME_KEYS = ("capability", "name", "id")
+
+
+def _normalise_capability_token(value: str) -> str:
+    text = unicodedata.normalize("NFKC", value).translate(_ZERO_WIDTH).strip()
+    text = _CAMEL_BOUNDARY.sub("_", text)
+    return re.sub(r"[\s\-]+", "_", text.lower()).strip("_")
+
+
+def _archived_name(value: Any) -> str:
+    """Canonical archived name ``value`` denotes, else "".
+
+    Normalised with NFKC, zero-width removal, CamelCase -> snake, ``-``/space -> ``_`` and
+    lower case; ``capability:<name>``, ``<name>:<suffix>`` and dotted forms
+    (``flow.integration_manager.run``) match when any component names an archived capability.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return ""
+    text = unicodedata.normalize("NFKC", value).translate(_ZERO_WIDTH).strip()
+    if text.lower().startswith("capability:"):
+        text = text.split(":", 1)[1]
+    for part in [text, *re.split(r"[.:/]", text)]:
+        name = _normalise_capability_token(part)
+        if name in ARCHIVED_CAPABILITY_REASONS:
+            return name
+    return ""
+
+
+def _is_capability_context(key: str) -> bool:
+    """Keys whose value lists / maps capability names (never generic tags or budgets)."""
+    k = _normalise_capability_token(str(key))
+    return (
+        "capabilit" in k
+        or "route_map" in k
+        or k.endswith(("tool_map", "sequence", "_layers"))
+        or k.startswith(("selected", "conditional", "required", "optional", "pending", "active"))
+    )
+
+
+def _step_name(entry: Any) -> str:
+    if not isinstance(entry, dict):
+        return ""
+    for key in _STEP_NAME_KEYS:
+        name = _archived_name(entry.get(key))
+        if name:
+            return name
+    return ""
+
+
+def _strip_archived(
+    value: Any,
+    dropped: dict[str, str],
+    depth: int = 0,
+    key: str = "",
+    in_context: bool = False,
+) -> Any:
+    """Remove archived capability names from the capability-denoting parts of a plan tree.
+
+    Only inside capability contexts (``_is_capability_context`` keys and everything under a
+    ``*route_map*`` key): archived strings leave lists, ``{"capability"|"name"|"id": X}`` steps
+    are dropped, map keys naming an archived capability are dropped, and ``after`` links to a
+    dropped step are re-pointed at its predecessor (or cleared).  Elsewhere (tags, budgets, ...)
+    nothing is touched.  ``_ARCHIVED_KEEP_KEYS`` are kept verbatim.
+    """
+    if depth > _ARCHIVED_MAX_DEPTH:
+        return value
+    if isinstance(value, (list, tuple)):
+        removed_after: dict[str, Any] = {}
+        kept: list[Any] = []
+        for entry in value:
+            name = (_archived_name(entry) or _step_name(entry)) if in_context else ""
+            if name:
+                if isinstance(entry, dict):
+                    removed_after[name] = entry.get("after")
+                # Every strip is recorded, optional lists included, so the audit sees it.
+                dropped[name] = ARCHIVED_CAPABILITY_REASONS[name]
+                continue
+            kept.append(_strip_archived(entry, dropped, depth + 1, key, in_context))
+        for index, entry in enumerate(kept):
+            if (
+                not in_context
+                or not isinstance(entry, dict)
+                or not _archived_name(entry.get("after"))
+            ):
+                continue
+            after = _archived_name(entry.get("after"))
+            seen: set[str] = set()
+            while after in removed_after and after not in seen:
+                seen.add(after)
+                after = _archived_name(removed_after[after]) or removed_after[after]
+            # A link to an archived step outside this list has no predecessor to point at.
+            kept[index] = {**entry, "after": None if _archived_name(after) else after}
+        return kept
+    if not isinstance(value, dict):
+        return value
+    out: dict[str, Any] = {}
+    route_map = "route_map" in _normalise_capability_token(key)
+    for child_key, item in value.items():
+        if child_key in _ARCHIVED_KEEP_KEYS:
+            out[child_key] = item
+            continue
+        if (in_context or route_map) and _archived_name(child_key):
+            continue  # per-capability map entry
+        child_context = route_map or _is_capability_context(str(child_key))
+        out[child_key] = _strip_archived(item, dropped, depth + 1, str(child_key), child_context)
+    return out
+
+
+def drop_archived_capabilities(plan_payload: dict[str, Any]) -> dict[str, Any]:
+    """Copy of a CapabilityPlan / route-decision payload where archived nodes are never selected.
+
+    The pinned nexus-runtime planner still enables some archived nodes (e.g.
+    ``integration_manager`` on an "integrate"/"merge" task) until its maturity flip lands.
+    Nexus-side, every archived node (``ARCHIVED_CAPABILITY_REASONS``) is removed from the
+    capability-denoting parts of the payload by ``_strip_archived`` (generic tags and budgets
+    are never touched), marked ``forbidden`` in
+    ``decision_trace``, moved to ``forbidden_capabilities`` and named in
+    ``signal_snapshot.archived_capabilities_dropped``.  Those three are the only places an
+    archived name remains.
+    """
+
+    if not isinstance(plan_payload, dict):
+        return plan_payload
+    dropped: dict[str, str] = {}
+    plan: dict[str, Any] = _strip_archived(dict(plan_payload), dropped)
+    if not dropped:
+        return plan
+    raw_forbidden = plan.get("forbidden_capabilities")
+    if raw_forbidden is not None and not isinstance(raw_forbidden, (list, tuple)):
+        # Malformed: fail closed (still forbid the archived nodes) and say why.
+        plan["archived_filter_error"] = "forbidden_capabilities_not_a_list"
+        raw_forbidden = []
+    forbidden = [str(item) for item in raw_forbidden or []]
+    plan["forbidden_capabilities"] = forbidden + [name for name in dropped if name not in forbidden]
+    trace = plan.get("decision_trace")
+    if isinstance(trace, list):
+        plan["decision_trace"] = [
+            {**item, "state": "forbidden", "reasons": [*(item.get("reasons") or []), dropped[name]]}
+            if isinstance(item, dict) and (name := _step_name(item)) in dropped
+            else item
+            for item in trace
+        ]
+    snapshot = plan.get("signal_snapshot")
+    snapshot = dict(snapshot) if isinstance(snapshot, dict) else {}
+    snapshot["archived_capabilities_dropped"] = dict(dropped)
+    plan["signal_snapshot"] = snapshot
+    return plan
 
 
 def compose_capability_plan(
