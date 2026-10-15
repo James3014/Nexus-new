@@ -25,6 +25,7 @@ from nexus.executors.cli_worker import (
     run_cli_worker,
 )
 from nexus.orchestrator.canonical_source_root import (
+    _GIT_META_NAMES,
     CONTROLLER_BIND_PREFIX,
     _bind_path_problem,
 )
@@ -98,19 +99,30 @@ class ControlledIntegrationManager:
         self.integration_root = Path(integration_root).expanduser().resolve()
 
     @staticmethod
-    def _git(args: Sequence[str], cwd: str | Path) -> str:
+    def _run_sanitised_git(
+        args: Sequence[str], cwd: str | Path
+    ) -> subprocess.CompletedProcess[str]:
         git_env = os.environ.copy()
         git_env["GIT_CONFIG_NOSYSTEM"] = "1"
         git_env["GIT_CONFIG_GLOBAL"] = "/dev/null"
         hooks_dir = get_canonical_git_hooks_dir(Path(cwd))
         git_cmd = ["git", "-c", f"core.hooksPath={hooks_dir}", *args]
-        result = subprocess.run(
+        return subprocess.run(
             git_cmd,
             cwd=cwd,
             capture_output=True,
             text=True,
             env=git_env,
         )
+
+    @classmethod
+    def _git_status(cls, args: Sequence[str], cwd: str | Path) -> int:
+        """Exit code of ``git <args>`` under the same sanitised config as ``_git``."""
+        return cls._run_sanitised_git(args, cwd).returncode
+
+    @classmethod
+    def _git(cls, args: Sequence[str], cwd: str | Path) -> str:
+        result = cls._run_sanitised_git(args, cwd)
         if result.returncode != 0:
             raise RuntimeError(
                 f"git {' '.join(args)} failed: {result.stderr.strip()}"
@@ -139,6 +151,100 @@ class ControlledIntegrationManager:
             return False
         # ``symbolic-ref -q HEAD`` exits 1 exactly when HEAD is detached.
         return linked and probe("symbolic-ref", "-q", "HEAD").returncode == 1
+
+    @classmethod
+    def separate_controller_integration_head(
+        cls, controller_root: Path, integration_branch: str
+    ) -> str | None:
+        """Integration-branch head a separate detached Controller binds to, else None.
+
+        None for every shape except a linked worktree on a detached HEAD: those
+        callers keep binding ``HEAD`` with the branch checked out (#2230).
+        For the separate shape apply is ``update-ref refs/heads/<branch>`` with
+        a compare-and-swap on this exact head, while the Controller HEAD moves
+        with tasks/-only Task Card bind commits, so the closure binds the ref.
+        Raises when the branch is invalid, a symbolic ref (update-ref would
+        move its target), missing, or checked out in any worktree, including
+        one mid-rebase or mid-bisect on it (update-ref would move it under
+        that checkout).
+        """
+        if not cls._is_detached_linked_worktree(controller_root):
+            return None
+        try:
+            cls._validate_branch(integration_branch)
+        except ValueError as exc:
+            raise RuntimeError("CLOSURE_INTEGRATION_BRANCH_INVALID") from exc
+        ref = f"refs/heads/{integration_branch}"
+        # A revision expression (``~1``, ``^``, ``@{...}``) would resolve to a
+        # commit other than the ref the apply moves.
+        if cls._git_status(["check-ref-format", ref], controller_root) != 0:
+            raise RuntimeError("CLOSURE_INTEGRATION_BRANCH_INVALID")
+        cls._require_integration_branch_not_in_use(controller_root, integration_branch)
+        try:
+            head = cls._git(["show-ref", "--verify", "--hash", ref], controller_root)
+        except RuntimeError as exc:
+            raise RuntimeError("CLOSURE_INTEGRATION_BRANCH_MISSING") from exc
+        if not _SHA.fullmatch(head):
+            raise RuntimeError("CLOSURE_INTEGRATION_BRANCH_MISSING")
+        # The ref exists; it must name a commit itself (not a tag, tree or blob).
+        try:
+            peeled = cls._git(["rev-parse", "--verify", f"{head}^{{commit}}"], controller_root)
+        except RuntimeError as exc:
+            raise RuntimeError("CLOSURE_INTEGRATION_BRANCH_INVALID") from exc
+        if peeled != head:
+            raise RuntimeError("CLOSURE_INTEGRATION_BRANCH_INVALID")
+        return head
+
+    @classmethod
+    def _require_integration_branch_not_in_use(cls, root: Path, branch: str) -> None:
+        """Raise unless ``update-ref refs/heads/<branch>`` moves only that ref, under no checkout.
+
+        Refuses a symbolic ref (the update would move its target), and a
+        branch checked out, rebasing or bisecting in any worktree.  Used at
+        bind and again right before every update-ref apply (#2230).
+        """
+        ref = f"refs/heads/{branch}"
+        if cls._git_status(["symbolic-ref", "-q", ref], root) == 0:
+            raise RuntimeError("CLOSURE_INTEGRATION_BRANCH_SYMBOLIC")
+        listing = cls._git(["worktree", "list", "--porcelain"], root)
+        if f"branch {ref}" in listing.splitlines() or cls._branch_in_progress_in_any_worktree(
+            root, branch
+        ):
+            raise RuntimeError("CLOSURE_INTEGRATION_BRANCH_CHECKED_OUT")
+
+    @classmethod
+    def _branch_in_progress_in_any_worktree(cls, controller_root: Path, branch: str) -> bool:
+        """True when any worktree is rebasing (incl. ``--update-refs``) or bisecting ``branch``.
+
+        ``worktree list`` reports such a worktree as detached, but Git still
+        treats the branch as in use there.  Every worktree's admin dir is read
+        from the common dir (main plus ``worktrees/*``), as Git itself does.
+        """
+        ref = f"refs/heads/{branch}"
+        common = Path(
+            cls._git(["rev-parse", "--path-format=absolute", "--git-common-dir"], controller_root)
+        )
+        linked = common / "worktrees"
+        admin_dirs = [common, *(sorted(linked.iterdir()) if linked.is_dir() else ())]
+
+        def read(path: Path) -> str | None:
+            try:
+                return path.read_text(encoding="utf-8").strip()
+            except OSError:
+                return None
+
+        for admin in admin_dirs:
+            for state in ("rebase-merge", "rebase-apply"):
+                if read(admin / state / "head-name") == ref:
+                    return True
+            # ``rebase --update-refs`` lists each ref it will move (refname,
+            # old oid, new oid per entry).
+            update_refs = read(admin / "rebase-merge" / "update-refs")
+            if update_refs is not None and ref in update_refs.splitlines():
+                return True
+            if read(admin / "BISECT_START") in {branch, ref}:
+                return True
+        return False
 
     @staticmethod
     def _pending_task_card_problem(root: Path, relative: str) -> str | None:
@@ -172,22 +278,37 @@ class ControlledIntegrationManager:
 
     @staticmethod
     def _tasks_tree_problem(root: Path) -> str | None:
-        """Reject symlinks and ``.git`` names anywhere under ``tasks/``.
+        """Reject symlinks, multi-link files and Git metadata names under ``tasks/``.
 
-        ``git status`` never lists paths inside a nested ``.git`` directory,
-        so the on-disk tree is checked directly (without following links).
+        ``git status`` never lists paths inside a nested ``.git`` directory
+        nor ignored paths (a ``tasks/.gitignore`` or any exclude rule can hide
+        them), so the on-disk tree is checked directly (without following
+        links).
         """
         tasks_root = root / CONTROLLER_BIND_PREFIX.rstrip("/")
         if os.path.islink(tasks_root):
             return "CONTROLLER_BIND_NOT_REGULAR_FILE"
         if not os.path.isdir(tasks_root):
             return None
-        for current, dirs, files in os.walk(tasks_root, followlinks=False):
+        unreadable: list[OSError] = []
+        for current, dirs, files in os.walk(
+            tasks_root, followlinks=False, onerror=unreadable.append
+        ):
             for name in (*dirs, *files):
-                if name.casefold() == ".git":
+                if name.casefold() == ".git" or name.casefold() in _GIT_META_NAMES:
                     return "CONTROLLER_BIND_GIT_METADATA"
-                if os.path.islink(os.path.join(current, name)):
+                path = os.path.join(current, name)
+                if os.path.islink(path):
                     return "CONTROLLER_BIND_NOT_REGULAR_FILE"
+            for name in files:
+                try:
+                    info = os.lstat(os.path.join(current, name))
+                except OSError:
+                    return "CONTROLLER_BIND_UNREADABLE"
+                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                    return "CONTROLLER_BIND_NOT_REGULAR_FILE"
+        if unreadable:
+            return "CONTROLLER_BIND_UNREADABLE"
         return None
 
     @classmethod
@@ -201,9 +322,29 @@ class ControlledIntegrationManager:
         separate detached Controller, where apply is a pure ref update, so
         integration never reads or writes that worktree and a pending card
         cannot reach the integrated commit.  Any other entry, including a
-        tracked edit under ``tasks/``, still blocks.
+        tracked edit under ``tasks/`` or an ignored entry there, still blocks.
+        Every tracked entry must be a plain ``H`` in ``ls-files -v``: the
+        assume-unchanged and skip-worktree flags hide edits from status.
         """
-        if allow_pending_task_cards and cls._tasks_tree_problem(controller_root) is not None:
+        if allow_pending_task_cards:
+            if cls._tasks_tree_problem(controller_root) is not None:
+                raise RuntimeError(message)
+            ignored = cls._git(
+                [
+                    "status",
+                    "--porcelain=v1",
+                    "-z",
+                    "--untracked-files=all",
+                    "--ignored=matching",
+                    "--",
+                    CONTROLLER_BIND_PREFIX,
+                ],
+                controller_root,
+            )
+            if any(entry.startswith("!! ") for entry in ignored.split("\0")):
+                raise RuntimeError(message)
+        flagged = cls._git(["ls-files", "-v", "-z"], controller_root)
+        if any(entry and not entry.startswith("H ") for entry in flagged.split("\0")):
             raise RuntimeError(message)
         status = cls._git(
             ["status", "--porcelain=v1", "-z", "--untracked-files=all"], controller_root
@@ -669,7 +810,9 @@ class ControlledIntegrationManager:
             raise RuntimeError("authorization integration root drift")
         if self._git(["rev-parse", f"{candidate_sha}^{{commit}}"], controller_root) != candidate_sha:
             raise RuntimeError("candidate commit is not present in controller repository")
-        branch_head = self._git(["rev-parse", f"{integration_branch}^{{commit}}"], controller_root)
+        # Fully qualified everywhere: a same-named tag must never win (#2230).
+        branch_ref = f"refs/heads/{integration_branch}"
+        branch_head = self._git(["rev-parse", f"{branch_ref}^{{commit}}"], controller_root)
         if branch_head != expected_head:
             raise RuntimeError("integration branch HEAD drift")
         # Only a separate detached Controller (#1939) may hold pending Task
@@ -767,7 +910,7 @@ class ControlledIntegrationManager:
             self._execute_manifest(admitted_verifiers, staging_path)
             staging_sha = self._git(["rev-parse", "HEAD"], staging_path)
             if apply:
-                if self._git(["rev-parse", f"{integration_branch}^{{commit}}"], controller_root) != expected_head:
+                if self._git(["rev-parse", f"{branch_ref}^{{commit}}"], controller_root) != expected_head:
                     raise RuntimeError("integration branch HEAD drift before apply")
                 current_branch = self._git(["branch", "--show-current"], controller_root)
                 separate_controller = self._is_detached_linked_worktree(controller_root)
@@ -779,9 +922,32 @@ class ControlledIntegrationManager:
                 if current_branch == integration_branch:
                     self._git(["merge", "--ff-only", staging_sha], controller_root)
                 else:
-                    self._git(["update-ref", f"refs/heads/{integration_branch}", staging_sha, expected_head], controller_root)
+                    # Whatever the shape, the branch rules are re-proved right
+                    # before the ref moves: a worktree may have checked out
+                    # (or started rebasing) the branch, or turned it into a
+                    # symref, since the closure was bound (#2230).
+                    refused = "INTEGRATION_BRANCH_REFUSED_AT_APPLY"
+                    try:
+                        self._require_integration_branch_not_in_use(
+                            controller_root, integration_branch
+                        )
+                        live_head = (
+                            self.separate_controller_integration_head(
+                                controller_root, integration_branch
+                            )
+                            if separate_controller
+                            else expected_head
+                        )
+                    except RuntimeError as exc:
+                        raise RuntimeError(f"{refused}: {exc}") from exc
+                    if live_head != expected_head:
+                        raise RuntimeError(f"{refused}: shape or head drift")
+                    self._git(
+                        ["update-ref", "--no-deref", branch_ref, staging_sha, expected_head],
+                        controller_root,
+                    )
                 applied = True
-                exact_head = self._git(["rev-parse", f"{integration_branch}^{{commit}}"], controller_root)
+                exact_head = self._git(["rev-parse", f"{branch_ref}^{{commit}}"], controller_root)
                 branch_head_after = exact_head
                 if exact_head != staging_sha:
                     raise RuntimeError("applied HEAD is not the verified staging commit")
@@ -826,7 +992,7 @@ class ControlledIntegrationManager:
                     failure.cleanup_failure = cleanup_failure
                 raise failure
             try:
-                branch_head_after = self._git(["rev-parse", f"{integration_branch}^{{commit}}"], controller_root)
+                branch_head_after = self._git(["rev-parse", f"{branch_ref}^{{commit}}"], controller_root)
             except RuntimeError:
                 branch_head_after = expected_head
             if failure is not None:
@@ -846,7 +1012,7 @@ class ControlledIntegrationManager:
                 failure_reason=reason,
                 cleanup_failure=cleanup_failure,
             ) from failure
-        final_head = self._git(["rev-parse", f"{integration_branch}^{{commit}}"], controller_root)
+        final_head = self._git(["rev-parse", f"{branch_ref}^{{commit}}"], controller_root)
         return IntegrationReceipt(
             schema="nexus.integration_receipt.v1", task_id=task_id,
             integration_branch=integration_branch,
