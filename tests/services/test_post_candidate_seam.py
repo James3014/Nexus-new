@@ -81,10 +81,35 @@ def _runtime_receipt(*names: str) -> dict[str, Any]:
     }
 
 
+def _assert_confining_profile(argv: list[str]) -> None:
+    """Gemini G11: off macOS nothing can be confined for real, so the confinement claim is
+    checked on the generated argv/SBPL profile instead (never "ran unconfined, passed"):
+    the absolute barrier binary, default-deny, no network, $HOME read-denied, and no read
+    allow for a hidden test, the bench staging parent, $HOME or an ancestor of it."""
+    import re
+
+    from nexus.services.post_candidate_seam import BENCH_HIDDEN_STAGING_PARENT
+
+    assert argv[0] == lane.SANDBOX_EXEC and argv[1] == "-p", argv[:2]
+    profile = argv[2]
+    home = lane.sbpl_path(Path(os.path.expanduser("~")).resolve())
+    assert "(deny default)" in profile and "(deny network*)" in profile
+    assert f'(deny file-read* (subpath "{home}"))' in profile
+    allows = " ".join(
+        line for line in profile.splitlines() if line.startswith("(allow file-read* ")
+    )
+    staging = Path(lane.sbpl_path(BENCH_HIDDEN_STAGING_PARENT.resolve()))
+    for root in re.findall(r'\(subpath "([^"]+)"\)', allows):
+        assert "test_hidden" not in root, root
+        assert root != home and not home.startswith(root.rstrip("/") + "/"), root
+        assert Path(root) != staging and staging not in Path(root).parents, root
+
+
 @pytest.fixture
 def barrier(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
-    """Every subprocess argv, recorded. Without a real OS barrier (Linux CI) the sandbox-exec
-    prefix is stripped so the confined command still runs; with one it runs for real."""
+    """Every subprocess argv, recorded. With a real OS barrier the command runs confined.
+    Without one (Linux CI) each sandbox-exec argv must carry a confining profile
+    (``_assert_confining_profile``); only then is the prefix stripped so the wiring runs."""
 
     calls: list[list[str]] = []
     original_run = subprocess.run
@@ -93,6 +118,9 @@ def barrier(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
         argv = [str(part) for part in cmd] if isinstance(cmd, (list, tuple)) else [str(cmd)]
         calls.append(argv)
         if argv and os.path.basename(argv[0]) == "sandbox-exec" and not REAL_BARRIER:
+            # No barrier on this host: the confinement is asserted on the profile, then the
+            # command runs only to exercise the wiring (never counted as confined).
+            _assert_confining_profile(argv)
             cmd = list(cmd)[3:]
         return original_run(cmd, *args, **kwargs)
 
