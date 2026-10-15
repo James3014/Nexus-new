@@ -29,6 +29,13 @@ Where it goes and how it is protected (every failure is fail closed):
   must be ours and closed to group/other, each staged file must lie inside it and match both
   the in-run-dir record and its sidecar; anything else is quarantined and the run aborts. A
   new run refuses to start while a previous run still has staged entries;
+* recovery AUTHORITY is only this run's in-memory sha256 or a fixture-generator / task-manifest
+  sha passed by the runner. The record, the sidecar and the staged bytes are never an
+  authority (same-user unconfined code can rewrite all three consistently), nor is the
+  checkout under test (git HEAD). Without an authority recovery is refused
+  (``untrusted_recovery_authority``) and the run aborts fail closed: **a killed counted run is
+  void** -- rerun from a clean checkout (the hidden tests come back from ``git checkout`` /
+  fixture generation at the start of the next run, before any model code runs);
 * the row records only ``sha256(staged path)``, never the path.
 
 Residual risk (honest): the with-Nexus subprocess runs as the same user, and same-user code can
