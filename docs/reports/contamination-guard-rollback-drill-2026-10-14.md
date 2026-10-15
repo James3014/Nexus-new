@@ -151,3 +151,28 @@ Addendum 1 drilled the first version of the enforcement point (`1f0e0cb5e`). Tha
 Under rollback, the canonical executor and the auto-flow again accept contaminated research. The clean-output, echo and normal-software-text tests keep passing, so rolling back changes only the blocking. Rollback took about 2 minutes, including three test runs, and involves no state.
 
 Limits: the drill script and its log were kept locally by the drill operator, and the results above are copied from that log. Commit SHAs refer to the PR branch before squash-merge.
+
+---
+
+## Addendum 3: structural patterns, full walk, facts fix and auto-flow quarantine (#2216 review round 2)
+
+**Date**: 2026-10-15 (drill run 00:05:05Z–00:06:20Z)
+**Worktree HEAD**: `bfe2760cd2e9e52c3fee49613e2d3daaba7579ac` (#2216 branch)
+**Rolled back**: `nexus/core/capability_executor_registry.py`, `nexus/app/research_flow_service.py`, `nexus/research/contamination_guard.py`, `nexus/research/research_facts.py`
+**Rollback target**: merge-base with main, `0d03612850e86a57ea05af42b211949572d984ff`
+
+The setup is the same as addendum 2. `research_facts.py` is now also rolled back, and the test set is the same three files (now 111 tests).
+
+| Step | Result |
+|------|--------|
+| 1 Baseline | `111 passed`, exit 0 |
+| 2 Roll back (4 files) | 5 insertions, 141 deletions. The sha256 prefixes of the registry, flow service and guard match the main versions (`8b25293cd2d93038`, `7c6f254af7b99c9c`, `d859a968285ee43f`); research_facts is `8ca784a33d64d5db` |
+| 3 Detect | `44 failed, 67 passed`, exit 1 |
+| 4 Restore | sha256 prefixes identical to pre-drill (`e2b260600ce69262`, `91bf46b389ae6dfe`, `e81dfe7a48d357d4`, `bb99dd969f549e1a`), and `git status` is clean |
+| 5 Verify | `111 passed`, exit 0 |
+
+Behaviour under rollback has two parts:
+- The canonical executor and the auto-flow no longer call the check, so contaminated research is accepted. The canonical-path and auto-flow BLOCK tests fail.
+- `contamination_enforcement.py` stays in place, but the rolled-back guard has no `patterns` parameter. Every direct call to `check_research_output` therefore returns `RESEARCH_CONTAMINATION_GUARD_ERROR`. That is fail-closed, so the factual-text PASS tests fail too.
+
+The drill script and log were kept locally by the drill operator.
