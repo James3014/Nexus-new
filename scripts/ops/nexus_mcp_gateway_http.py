@@ -18,12 +18,12 @@ from urllib.parse import urlsplit
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from nexus.orchestrator.unified_mcp_gateway import (  # noqa: E402
-    CANONICAL_SOURCE_ROOT,
     FULL_TOOL_SCHEMA_HASH,
     GATEWAY_NAME,
     GATEWAY_VERSION,
     LIFECYCLE_REVISION,
     LIFECYCLE_STATE_SCHEMA_REVISION,
+    LOADED_SOURCE_ROOT,
     PERMISSION_POLICY_HASH,
     PERMISSION_POLICY_REVISION,
     PUBLIC_APP_NAME,
@@ -66,9 +66,10 @@ def resolve_bind_address(env: Mapping[str, str] | None = None) -> tuple[str, int
 
 
 def _git_head() -> str:
+    # The loaded checkout, never a separate Controller worktree (#1939).
     result = subprocess.run(
         ["git", "rev-parse", "HEAD"],
-        cwd=CANONICAL_SOURCE_ROOT,
+        cwd=LOADED_SOURCE_ROOT,
         capture_output=True,
         text=True,
         timeout=3,
@@ -98,9 +99,11 @@ def runtime_identity(
     current_head = _git_head()
     github_observer = github_observer_runtime_identity()
     if include_paths:
-        path_fields: dict[str, Any] = {"repo_root": str(CANONICAL_SOURCE_ROOT)}
+        # The loaded checkout (GB-077 requires the evaluated root), never a
+        # separate Controller worktree (#1939).
+        path_fields: dict[str, Any] = {"repo_root": str(LOADED_SOURCE_ROOT)}
     else:
-        path_fields = {"repo_root_sha256": _sha256_text(str(CANONICAL_SOURCE_ROOT))}
+        path_fields = {"repo_root_sha256": _sha256_text(str(LOADED_SOURCE_ROOT))}
         github_observer = _redacted_github_observer(github_observer)
     return {
         "status": "ok" if github_observer["ready"] is True else "degraded",
