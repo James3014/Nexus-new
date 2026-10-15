@@ -164,6 +164,25 @@ def syntax_rejection_lines(code: str, filename: str = "candidate.py") -> set[str
     return {line for line in (guard_syntax_rejection(code), executor_syntax_rejection(code, filename)) if line}
 
 
+def visible_timeout_line_re() -> "re.Pattern[str]":
+    """``str(subprocess.TimeoutExpired)`` of the sprint's visible test run, both forms (PR-3).
+
+    Counted lane: the seam's confined run (``post_candidate_seam.run_visible_test_confined``
+    raises with ``[python, -I, -m, pytest, -q, --maxfail=1, *PINNED_PYTEST_ARGS]``). Other runs:
+    the in-place ``sprint_pytest_cmd`` (``... -- <visible test>.py``, group ``test``). Built
+    from the same constants the product uses, so the bench audit cannot drift from them.
+    """
+    from nexus.services.post_candidate_seam import PINNED_PYTEST_ARGS
+
+    python = r"/[A-Za-z0-9_./+-]+/python[0-9.]*"
+    confined = ", ".join(repr(part) for part in ("-I", "-m", "pytest", "-q", "--maxfail=1", *PINNED_PYTEST_ARGS))
+    inplace = ", ".join(repr(part) for part in ("-m", "pytest", "-q", "--maxfail=1", "--"))
+    return re.compile(
+        rf"^Command '\['{python}', (?:{re.escape(confined)}|{re.escape(inplace)}, '(?P<test>[A-Za-z0-9_./-]+\.py)')"
+        rf"\]' timed out after [0-9]+(?:\.[0-9]+)? seconds$"
+    )
+
+
 @dataclass
 class SprintConfig:
     task: str

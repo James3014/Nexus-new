@@ -178,12 +178,6 @@ PRODUCT_ERROR_CODES = frozenset({
 })
 # The confined visible evaluation's refusal for companion edits (#2211 sprint_service).
 _MULTI_FILE_RE = re.compile(r"^confinement_unavailable:multi_file:[0-9]{1,3}$")
-# str(subprocess.TimeoutExpired) of the sprint's own visible pytest argv (sprint_pytest_cmd):
-# [<python>, '-m', 'pytest', '-q', '--maxfail=1', '--', <repo-relative visible test>].
-_TIMEOUT_RE = re.compile(
-    r"^Command '\['(/[A-Za-z0-9_./+-]+/python[0-9.]*)', '-m', 'pytest', '-q', '--maxfail=1', '--', "
-    r"'([A-Za-z0-9_./-]+\.py)'\]' timed out after [0-9]+(?:\.[0-9]+)? seconds$"
-)
 # Volatile parts of pytest output that differ between two runs of the same test.
 _DURATION_RE = re.compile(r"\bin [0-9]+(?:\.[0-9]+)?s\b")
 _ABS_PATH_TOKEN_RE = re.compile(r"(?:/[A-Za-z0-9_.@+-]+)+/")
@@ -476,8 +470,24 @@ def load_block_schema(lane: str = LANE_STRICT) -> dict[str, dict[str, dict[str, 
     blocks = data["blocks"]
     if lane != LANE_TREATMENT:
         return blocks
-    widened = {header: dict(paths) for header, paths in blocks.items()}
-    for header, paths in (data.get("treatment_blocks", {}).get("widen") or {}).items():
+    treatment = data.get("treatment_blocks") or {}
+    round_id = treatment.get("round_id_pattern") or {}
+    extra = dict(treatment.get("extra_capabilities") or {})
+    widened: dict[str, dict[str, dict[str, Any]]] = {}
+    for header, paths in blocks.items():
+        widened[header] = {}
+        for path, spec in paths.items():
+            patterns = list(spec.get("patterns") or [])
+            if patterns:
+                if round_id.get("from"):
+                    patterns = [item.replace(round_id["from"], round_id["to"]) for item in patterns]
+                for name, template in extra.items():
+                    patterns += [
+                        item.replace(template, name) for item in patterns if template in item
+                    ]
+                spec = {**spec, "patterns": list(dict.fromkeys(patterns))}
+            widened[header][path] = spec
+    for header, paths in (treatment.get("widen") or {}).items():
         for path, override in paths.items():
             base = widened.get(header, {}).get(path)
             if base is None:
@@ -640,11 +650,35 @@ def hidden_only_numbers(material: TaskMaterial, bare_prompt: str) -> set[float]:
     }
 
 
+def _round_task_text_ok(value: str, task_desc: str, round_lines: frozenset[str]) -> bool:
+    """A later treatment round's task text (task_desc + the self-heal block) echoed in a Nexus
+    block: it must start with the task description and every further line must be a line of
+    the same prompt (audited there line by line); the last line may be cut (a capped echo)."""
+
+    if not task_desc or not value.startswith(task_desc):
+        return False
+    rest = [" ".join(line.split()) for line in value[len(task_desc) :].splitlines()]
+    rest = [line for line in rest if line]
+    for index, line in enumerate(rest):
+        if line in round_lines:
+            continue
+        if index == len(rest) - 1 and any(item.startswith(line) for item in round_lines):
+            continue
+        return False
+    return True
+
+
 def _format_ok(
-    fmt: str, value: str, material: TaskMaterial, selected: frozenset[str] = frozenset()
+    fmt: str,
+    value: str,
+    material: TaskMaterial,
+    selected: frozenset[str] = frozenset(),
+    round_lines: frozenset[str] | None = None,
 ) -> bool:
     if fmt == "task_desc":
-        return value == material.task_desc
+        return value == material.task_desc or (
+            round_lines is not None and _round_task_text_ok(value, material.task_desc, round_lines)
+        )
     if fmt == "task_desc_prefix":
         return bool(value) and material.task_desc.startswith(value)
     if fmt == "template":
@@ -669,6 +703,7 @@ def _schema_findings(
     *,
     selected: frozenset[str] = frozenset(),
     hidden_numbers: frozenset[float] = frozenset(),
+    round_lines: frozenset[str] | None = None,
 ) -> list[str]:
     """Known paths only; kind, type, enum/range/pattern/format per path (schema v2)."""
 
@@ -712,7 +747,7 @@ def _schema_findings(
         if any(not ch.isascii() for ch in value if ch.isalpha()):
             findings.append(f"{header}: {path} has non-ASCII letters")
         if "format" in spec:
-            if not _format_ok(str(spec["format"]), value, material, selected):
+            if not _format_ok(str(spec["format"]), value, material, selected, round_lines):
                 findings.append(f"{header}: {path} does not match bound format {spec['format']}")
         elif not any(re.match(pattern, value) for pattern in spec.get("patterns") or []):
             findings.append(
@@ -1181,6 +1216,10 @@ def audit_treatment_round(
     forbidden = {str(text) for text in blocks_cfg.get("forbidden_headers") or []}
     candidate_header = re.compile(str(blocks_cfg.get("candidate_header_pattern") or r"^$^"))
     syntax_lines = _syntax_lines(candidate_texts)
+    round_lines = frozenset(_lines(strip_no_tools(prompt)))
+    from nexus.research.sprint_service import visible_timeout_line_re
+
+    timeout_re = visible_timeout_line_re()
     selected = frozenset(_selected_capabilities(prompt))
     hidden_numbers = frozenset(hidden_only_numbers(material, bare_prompt))
     self_heal = False
@@ -1197,6 +1236,8 @@ def audit_treatment_round(
             continue  # body of a forbidden block (already a finding)
         if line in known:
             continue
+        if SESSION_BOUNDARY_RE.match(line):
+            continue  # each round is a new sprint attempt (task_id ...-s<n>-a<k>)
         if line in fixed:
             self_heal = self_heal or line == " ".join(SELF_HEAL_SENTENCE.split())
             continue
@@ -1213,8 +1254,8 @@ def audit_treatment_round(
             continue
         if line in PRODUCT_ERROR_CODES or line in syntax_lines or _MULTI_FILE_RE.match(line):
             continue
-        timeout = _TIMEOUT_RE.match(line)
-        if timeout and not Path(timeout.group(2)).name.lower().startswith("test_hidden"):
+        timeout = timeout_re.match(line)
+        if timeout and not Path(timeout.group("test") or "").name.lower().startswith("test_hidden"):
             continue
         if header in JSON_BLOCK_HEADERS and line.startswith("{"):
             try:
@@ -1230,6 +1271,7 @@ def audit_treatment_round(
                     material,
                     selected=selected,
                     hidden_numbers=hidden_numbers,
+                    round_lines=round_lines,
                 )
             )
             continue

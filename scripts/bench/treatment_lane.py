@@ -855,7 +855,10 @@ def _visible_outputs(
                 int(job.get("timeout_sec") or 300),
             )
             out[entry["sha"]] = f"{done.stdout or ''}\n{done.stderr or ''}"[-20000:]
-        except (subprocess.TimeoutExpired, OSError, RuntimeError, shutil.Error):
+        except subprocess.TimeoutExpired as exc:
+            # The same text the product's [FAILURE] tail carries for a hanging candidate (R5-1).
+            out[entry["sha"]] = str(exc)
+        except (OSError, RuntimeError, shutil.Error):
             out[entry["sha"]] = ""
     return out
 

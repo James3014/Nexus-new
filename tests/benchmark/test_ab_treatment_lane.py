@@ -807,20 +807,36 @@ def test_round_one_of_the_treatment_lane_gets_every_strict_check(tmp_path: Path)
 
 
 def test_schema_widening_touches_only_the_listed_paths() -> None:
+    """Treatment-lane schema = strict schema plus: the 4 listed config numbers, any sprint attempt
+    id (s<n>-a<k>) where the strict schema pins s0-a1, and semantic_failure_sensor cloned from
+    file_lock's patterns (the planner adds it after a failed visible test). Nothing else."""
+
     strict = load_block_schema("strict")
     treatment = load_block_schema("treatment")
-    changed = {
-        (header, path)
-        for header, paths in strict.items()
-        for path, spec in paths.items()
-        if treatment[header][path] != spec
-    }
-    assert changed == {
+    listed = {
         ("[NEXUS EXECUTOR FLAGS]", "ddtree_max_candidates"),
         ("[NEXUS ROUTE SUMMARY]", "recommended_flow"),
         ("[NEXUS EXECUTION PROFILE]", "candidate_count"),
         ("[NEXUS EXECUTION PROFILE]", "max_rounds"),
     }
+    changed = set()
+    for header, paths in strict.items():
+        for path, spec in paths.items():
+            new = treatment[header][path]
+            if new == spec:
+                continue
+            changed.add((header, path))
+            if (header, path) in listed:
+                continue
+            assert set(new) == set(spec) and new["kind"] == spec["kind"]
+            for pattern in new["patterns"]:
+                original = pattern.replace("semantic_failure_sensor", "file_lock").replace(
+                    "\\-s[0-9]{1,5}\\-a[0-9]{1,2}", "\\-s0\\-a1"
+                )
+                assert original in spec["patterns"], pattern
+    assert listed <= changed
+    assert ("[NEXUS CAPABILITY EVIDENCE]", "task_id") in changed
+    assert ("[NEXUS ROUTE SUMMARY]", "selected_capabilities[]") in changed
 
 
 @pytest.mark.parametrize(
@@ -2453,3 +2469,104 @@ def test_treatment_replay_proof_passes_self_heal_and_fails_a_hint(tmp_path: Path
     empty = tmp_path / "empty"
     empty.mkdir()
     assert run_proof(empty, _material())["h_round2_self_heal_passes"]  # nothing replayed = FAIL
+
+
+def test_hanging_candidate_timeout_line_passes_the_round_audit(tmp_path: Path) -> None:
+    """R5-1: the product's [FAILURE] line for a hanging candidate is str(TimeoutExpired) of the
+    seam's confined argv (counted lane) or of the in-place argv; both are allowed, built from the
+    product's own constants; a forged "timeout" text and a hidden-test argv are not."""
+
+    from nexus.research.sprint_service import sprint_pytest_cmd
+    from nexus.services.post_candidate_seam import PINNED_PYTEST_ARGS
+
+    confined = str(
+        subprocess.TimeoutExpired(
+            [sys.executable, "-I", "-m", "pytest", "-q", "--maxfail=1", *PINNED_PYTEST_ARGS], 300
+        )
+    )
+    inplace = str(
+        subprocess.TimeoutExpired(sprint_pytest_cmd(".nexus/bench_cases/x/test_visible.py"), 60)
+    )
+    hidden = str(
+        subprocess.TimeoutExpired(sprint_pytest_cmd(".nexus/bench_cases/x/test_hidden.py"), 60)
+    )
+    for line in (confined, inplace):
+        assert (
+            _audit(tmp_path / str(hash(line)), _round2(failure=line + "\n"))["status"] == "PASS"
+        ), line
+    assert _audit(tmp_path / "hidden", _round2(failure=hidden + "\n"))["status"] == "FAIL"
+    assert (
+        _audit(tmp_path / "forged", _round2(failure=confined.replace("pytest", "answer") + "\n"))[
+            "status"
+        ]
+        == "FAIL"
+    )
+
+
+def test_visible_rerun_timeout_records_the_timeout_line() -> None:
+    """R5-1: the runner's own visible re-run of a hanging candidate records str(TimeoutExpired)."""
+
+    argv = [sys.executable, "-I", "-m", "pytest", "-q"]
+
+    def hang(*_args):
+        raise subprocess.TimeoutExpired(argv, 7)
+
+    entries = [
+        {"kind": "stage1", "sha": _sha("a"), "code": "a"},
+        {"kind": "self_heal", "sha": _sha("b"), "code": "b"},
+    ]
+    out = lane._visible_outputs(entries, job={"timeout_sec": 7}, run_visible=hang)
+    assert out == {_sha("a"): str(subprocess.TimeoutExpired(argv, 7))}
+
+
+def test_later_round_new_sprint_attempt_and_failure_sensor_are_allowed(tmp_path: Path) -> None:
+    """From the wrong-then-right proof run: round 2 is a new sprint attempt (boundary task_id
+    ...-s10000-a1), the planner adds semantic_failure_sensor, and the model-context block echoes
+    the round's task text (task_desc + the self-heal block, capped)."""
+
+    from scripts.bench.prompt_symmetry_audit import _round_task_text_ok, _schema_findings
+
+    boundary1 = "NEXUS_SESSION_BOUNDARY_V1 task_id=sprint-aaaaaaaaaaaa-s0-a1 task_type=repair Treat this as an isolated task. Do not use facts from prior turns."
+    head1 = NEXUS_HEAD.replace(
+        NO_TOOLS_PREFIX + "\n\n", NO_TOOLS_PREFIX + "\n\n" + boundary1 + "\n\n"
+    )
+    round1 = head1 + "\n[TASK]\n" + BARE.replace(NO_TOOLS_PREFIX, "")
+    round2 = _round2().replace(NEXUS_HEAD, head1.replace("-s0-a1", "-s10000-a1"))
+    captures = tmp_path / "captures"
+    captures.mkdir()
+    _capture(captures, "without_nexus", BARE)
+    _capture(captures, "with_nexus", round1)
+    _capture(captures, "with_nexus", round2)
+    report = audit_run(captures, _material(), rows=_rows(), run_id="r1", lane="treatment")
+    assert report["status"] == "PASS", report["tasks"][0]["treatment_round_findings"]
+    material = _material()[KEY]
+    payload = {
+        "selected_capabilities": ["semantic_failure_sensor"],
+        "task_id": "sprint-0123456789ab-s10000-a1",
+    }
+    schema = {
+        "": {"kind": "object"},
+        "selected_capabilities": {"kind": "list"},
+        **{
+            p: s
+            for p, s in load_block_schema("treatment")["[NEXUS CAPABILITY EVIDENCE]"].items()
+            if p in ("selected_capabilities[]", "task_id")
+        },
+    }
+    assert _schema_findings("[NEXUS CAPABILITY EVIDENCE]", payload, schema, material) == []
+    strict = {
+        "": {"kind": "object"},
+        "selected_capabilities": {"kind": "list"},
+        **{
+            p: s
+            for p, s in load_block_schema("strict")["[NEXUS CAPABILITY EVIDENCE]"].items()
+            if p in ("selected_capabilities[]", "task_id")
+        },
+    }
+    assert len(_schema_findings("[NEXUS CAPABILITY EVIDENCE]", payload, strict, material)) == 2
+    task_desc = "Fix an incident classifier."
+    lines = frozenset({SELF_HEAL_SENTENCE, "[FAILURE]", "E assert 'closed' == 'open'"})
+    echo = f"{task_desc}\n\n{SELF_HEAL_SENTENCE}\n[FAILURE]\nE assert 'clo"
+    assert _round_task_text_ok(echo, task_desc, lines)
+    assert not _round_task_text_ok(echo + "\nhint: return open", task_desc, lines)
+    assert not _round_task_text_ok("other task", task_desc, lines)
