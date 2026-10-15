@@ -111,19 +111,28 @@ def _parse(path: Path) -> ast.Module | None:
         return None
 
 
-def _imported_modules(path: Path, repo_root: Path) -> set[str]:
-    """Absolute module names a Python file imports anywhere (static, ``ast`` only).
+def _module_level(tree: ast.Module) -> list[ast.AST]:
+    """Nodes a module-level test can see: everything outside def/class bodies."""
+    out: list[ast.AST] = []
+    stack: list[ast.AST] = list(tree.body)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, _DEFS):
+            continue
+        out.append(node)
+        stack.extend(ast.iter_child_nodes(node))
+    return out
 
-    Relative imports are resolved against the file's package. ``importlib`` /
-    string imports are not seen (the walk fails closed) and anything under
+
+def _imports_in(nodes: list[ast.AST], package: list[str]) -> set[str]:
+    """Absolute module names imported by ``nodes`` (static, ``ast`` only).
+
+    Relative imports are resolved against ``package``. ``importlib`` / string
+    imports are not seen (the walk fails closed) and anything under
     ``if TYPE_CHECKING:`` is ignored because it never executes.
     """
-    tree = _parse(path)
-    if tree is None:
-        return set()
-    package = _package_parts(path, repo_root)
     found: set[str] = set()
-    stack: list[ast.AST] = [tree]
+    stack = list(nodes)
     while stack:
         node = stack.pop()
         if isinstance(node, ast.If) and _is_type_checking_guard(node):
@@ -146,9 +155,28 @@ def _imported_modules(path: Path, repo_root: Path) -> set[str]:
     return found
 
 
+def _imported_modules(path: Path, repo_root: Path, selected: ast.AST | None = None) -> set[str]:
+    """Modules visible to the selected test (or to the whole file when ``selected`` is None).
+
+    A selected test sees the module-level statements and its own body; imports
+    made inside other functions of the same file do not count for it.
+    """
+    tree = _parse(path)
+    if tree is None:
+        return set()
+    package = _package_parts(path, repo_root)
+    if selected is None:
+        return _imports_in([tree], package)
+    return _imports_in(_module_level(tree) + [selected], package)
+
+
 _DEFS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 _FUNCS = (ast.FunctionDef, ast.AsyncFunctionDef)
 _DRILLED = re.compile(r"drilled-[0-9]{4}-[0-9]{2}-[0-9]{2}")
+# pytest.ini: python_classes = Test*, python_functions = test_*
+_TEST_FUNCTION_PREFIX = "test_"
+_TEST_CLASS_PREFIX = "Test"
+_PYTEST_MODULES = ("pytest", "_pytest.fixtures", "pytest_asyncio")
 
 
 def _is_drilled(status: Any) -> bool:
@@ -164,33 +192,53 @@ def _is_drilled(status: Any) -> bool:
 
 
 def _fixture_bindings(tree: ast.Module) -> tuple[set[str], set[str]]:
-    """(names bound to pytest's ``fixture``, names bound to the pytest module).
+    """(names bound to pytest's ``fixture``, names bound to a pytest module), module level.
 
-    Covers ``from pytest import fixture [as fx]``, ``from _pytest.fixtures import
-    fixture``, ``import pytest [as pt]``, ``import _pytest.fixtures`` and simple
-    assignments ``fx = pytest.fixture`` / ``pt = pytest``. Dynamic aliases
-    (``getattr``) are outside a static check.
+    Covers ``from pytest import fixture [as fx]`` / ``*``, ``from _pytest.fixtures
+    import fixture``, ``import pytest [as pt]``, ``import pytest_asyncio``, and
+    simple, tuple or annotated assignments ``fx = pytest.fixture`` / ``pt = pytest``.
+    Only module-level statements count: a binding inside a function cannot
+    decorate a module-level test. Dynamic aliases (``getattr``) are outside a
+    static check.
     """
     fixtures: set[str] = set()
     modules: set[str] = set()
+    nodes = _module_level(tree)
+
+    def pairs(node: ast.AST) -> list[tuple[ast.AST, ast.AST]]:
+        if isinstance(node, ast.AnnAssign) and node.value is not None:
+            return [(node.target, node.value)]
+        if not isinstance(node, ast.Assign):
+            return []
+        out: list[tuple[ast.AST, ast.AST]] = []
+        for target in node.targets:
+            if isinstance(target, ast.Tuple) and isinstance(node.value, ast.Tuple):
+                out.extend(zip(target.elts, node.value.elts))
+            else:
+                out.append((target, node.value))
+        return out
+
     changed = True
     while changed:
         changed = False
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.module in ("pytest", "_pytest.fixtures"):
+        for node in nodes:
+            if isinstance(node, ast.ImportFrom) and node.module in _PYTEST_MODULES:
                 for alias in node.names:
-                    if alias.name == "fixture" and (alias.asname or "fixture") not in fixtures:
-                        fixtures.add(alias.asname or "fixture")
-                        changed = True
+                    if alias.name in ("fixture", "*"):
+                        bound = alias.asname or "fixture"
+                        if bound not in fixtures:
+                            fixtures.add(bound)
+                            changed = True
             elif isinstance(node, ast.Import):
                 for alias in node.names:
-                    if alias.name in ("pytest", "_pytest.fixtures"):
+                    if alias.name in _PYTEST_MODULES:
                         bound = alias.asname or alias.name.split(".", 1)[0]
                         if bound not in modules:
                             modules.add(bound)
                             changed = True
-            elif isinstance(node, ast.Assign):
-                value = node.value
+            for target, value in pairs(node):
+                if not isinstance(target, ast.Name):
+                    continue
                 is_fixture = (isinstance(value, ast.Name) and value.id in fixtures) or (
                     isinstance(value, ast.Attribute)
                     and value.attr == "fixture"
@@ -198,15 +246,12 @@ def _fixture_bindings(tree: ast.Module) -> tuple[set[str], set[str]]:
                     and value.value.id in modules
                 )
                 is_module = isinstance(value, ast.Name) and value.id in modules
-                for target in node.targets:
-                    if not isinstance(target, ast.Name):
-                        continue
-                    if is_fixture and target.id not in fixtures:
-                        fixtures.add(target.id)
-                        changed = True
-                    if is_module and target.id not in modules:
-                        modules.add(target.id)
-                        changed = True
+                if is_fixture and target.id not in fixtures:
+                    fixtures.add(target.id)
+                    changed = True
+                if is_module and target.id not in modules:
+                    modules.add(target.id)
+                    changed = True
     return fixtures, modules
 
 
@@ -231,56 +276,80 @@ def _is_fixture(node: ast.AST, bindings: tuple[set[str], set[str]]) -> bool:
     return False
 
 
-def _entrypoint_exists(path: Path, selector: str) -> bool:
-    """``file::Class::test_name`` names a test the way pytest collects it.
+def _resolve_entrypoint(path: Path, selector: str | None) -> ast.AST | None | bool:
+    """Resolve ``file::Class::test_name`` the way pytest collects it.
 
-    The first component must be a top-level def/class of the module, each next
-    component a class directly inside the previous one, and the last one a
-    plain function that is not a fixture. ``file::a::b`` with two unrelated
-    top-level functions, a fixture, or any ``[param]`` id are not accepted.
-    Tests defined under ``if``/``try``, inherited from a base class, or a whole
-    class ``file::TestA`` are not recognised (fail closed).
+    Returns the selected function node, ``True`` for a whole-file entry
+    (``selector`` is None), or ``False`` when nothing collectable matches. The
+    first component must be a top-level class or function, each next component
+    a class directly inside the previous one, and the last a plain ``test_*``
+    function that is not a fixture; classes must be ``Test*``. ``file::a::b``
+    with two unrelated functions, a fixture, a helper such as ``_run``, an
+    empty selector, or any ``[param]`` id are not accepted. Tests defined under
+    ``if``/``try``, inherited from a base class, or a whole class ``file::TestA``
+    are not recognised (fail closed).
     """
-    if not selector.strip():
-        return True  # whole file
-    if "[" in selector or "]" in selector:
-        # Parametrized ids (``test_x[a-b]``) cannot be resolved statically: pytest
-        # derives them from values, fixtures and ``ids=``. List the function instead.
-        return False
     tree = _parse(path)
     if tree is None:
         return False
+    if selector is None:
+        return True
+    if "[" in selector or "]" in selector or not selector.strip():
+        # Parametrized ids (``test_x[a-b]``) cannot be resolved statically: pytest
+        # derives them from values, fixtures and ``ids=``. List the function instead.
+        return False
     names = [part.strip() for part in selector.split("::")]
-    if not names or any(not name for name in names):
+    if any(not name for name in names):
         return False
     body: list[ast.stmt] = list(tree.body)
     match: ast.stmt | None = None
     for index, name in enumerate(names):
         last = index == len(names) - 1
         kinds = _FUNCS if last else (ast.ClassDef,)
+        prefix = _TEST_FUNCTION_PREFIX if last else _TEST_CLASS_PREFIX
+        if not name.startswith(prefix):
+            return False
         match = next((n for n in body if isinstance(n, kinds) and n.name == name), None)
         if match is None:
             return False
         body = list(match.body)
-    return match is not None and not _is_fixture(match, _fixture_bindings(tree))
+    if match is None or _is_fixture(match, _fixture_bindings(tree)):
+        return False
+    return match
+
+
+def _entrypoint_exists(path: Path, selector: str) -> bool:
+    """Backwards-compatible boolean form of :func:`_resolve_entrypoint`."""
+    return _resolve_entrypoint(path, selector if selector else None) is not False
+
+
+def _declared_file(path_text: str, root: Path) -> Path | None:
+    """The declared repo-relative file, or None when absent / outside the repo."""
+    if not path_text or Path(path_text).is_absolute():
+        return None
+    resolved = _contained(root / path_text, root)
+    return resolved if resolved is not None and resolved.is_file() else None
 
 
 def check_enforcement_wiring(policy: dict, repo_root: Path | None = None) -> list[str]:
     """#2259: a ``block``/``record_only`` policy must be tested through a production caller.
 
-    Static check. ``source_file`` minus ``guard_modules`` are the production
+    Static check. Every ``source_file`` and every test entrypoint must exist
+    inside the repo. ``source_file`` minus ``guard_modules`` are the production
     callers. At least one Python test entrypoint must reach one of them through
-    its static import closure (repo modules only, depth-limited), without passing
-    through a guard module. A test whose only imports are the guard itself proves
-    the guard works, not that anything enforces it (#2199).
+    the static import closure visible to that test (module-level statements and
+    its own body; repo modules only, depth-limited; never through a guard
+    module). A test whose only imports are the guard itself proves the guard
+    works, not that anything enforces it (#2199).
 
     Limits, stated plainly: this is an import check, not an execution check. A
-    test that imports a caller and then exercises only the guard passes. For a
-    single-source policy the guard and the caller are the same file, so the check
-    reduces to "a test entrypoint imports the source module". ``guard_modules``
-    is therefore required whenever ``source_file`` lists more than one path.
-    Policies whose ``source_file`` has no Python module (Rust-only) and
-    ``not_wired`` policies are out of scope and keep the presence check only.
+    test file whose module-level imports reach a caller passes for every test
+    in it. For a single-source policy the guard and the caller are the same
+    file, so the check reduces to "a test entrypoint imports the source
+    module"; ``guard_modules`` is therefore required whenever ``source_file``
+    lists more than one path. Policies whose ``source_file`` has no Python
+    module (Rust-only) get the existence checks only, and ``not_wired``
+    policies are out of scope.
     """
     root = REPO_ROOT if repo_root is None else repo_root
     mode = policy.get("enforcement_mode")
@@ -295,45 +364,49 @@ def check_enforcement_wiring(policy: dict, repo_root: Path | None = None) -> lis
         return [f"GUARD_MODULE_NOT_IN_SOURCE: {', '.join(unknown_guards)}"]
     if len(sources) > 1 and not guards:
         return ["GUARD_MODULES_REQUIRED"]
+    absent_sources = [path for path in sources if _declared_file(path, root) is None]
+    if absent_sources:
+        return [f"SOURCE_FILE_NOT_FOUND: {', '.join(absent_sources)}"]
+
+    entries = [str(entry) for entry in policy.get("test_entrypoints") or []]
+    resolved: list[tuple[str, Path, ast.AST | None]] = []  # (entry, file, selected node)
+    missing: list[str] = []
+    for entry in entries:
+        file_part, sep, selector = entry.partition("::")
+        file_part = file_part.strip()
+        start = _declared_file(file_part, root)
+        if start is None:
+            missing.append(entry)
+            continue
+        if not file_part.endswith(".py"):
+            continue  # exists; not part of the import walk
+        node = _resolve_entrypoint(start, selector if sep else None)
+        if node is False:
+            missing.append(entry)
+            continue
+        resolved.append((entry, start, None if node is True else node))
+    errors: list[str] = []
+    if missing:
+        # Every listed entrypoint must exist, even when another one reaches a caller.
+        errors.append(f"TEST_ENTRYPOINT_NOT_FOUND: {', '.join(missing)}")
+
     py_sources = {m for m in (_module_name(p) for p in sources) if m}
     if not py_sources:
-        return []
+        return errors
     guard_modules = {m for m in (_module_name(g) for g in guards) if m}
     caller_paths = [p for p in sources if _module_name(p) and _module_name(p) not in guard_modules]
     if not caller_paths:
-        return ["ENFORCEMENT_CALLERS_MISSING"]
-    # A caller must be the declared file, inside the repo; a name that only appears
-    # in an import statement (or a package that merely shares the name) proves nothing.
-    absent = sorted(
-        path
-        for path in caller_paths
-        if Path(path).is_absolute()
-        or (resolved := _contained(root / path, root)) is None
-        or not resolved.is_file()
-    )
-    if absent:
-        return [f"ENFORCEMENT_CALLER_NOT_FOUND: {', '.join(absent)}"]
+        return errors + ["ENFORCEMENT_CALLERS_MISSING"]
     callers = {m for m in (_module_name(p) for p in caller_paths) if m}
 
-    missing: list[str] = []
     reached = False
-    for entry in policy.get("test_entrypoints") or []:
-        file_part, _, selector = str(entry).partition("::")
-        file_part = file_part.strip()
-        if not file_part.endswith(".py"):
-            continue
-        start = None if Path(file_part).is_absolute() else _contained(root / file_part, root)
-        if start is None or not start.is_file() or not _entrypoint_exists(start, selector):
-            missing.append(str(entry))
-            continue
-        if reached:
-            continue  # still validate the remaining entries' existence
+    for _entry, start, selected in resolved:
         seen: set[str] = set()
-        frontier = [start]
+        frontier: list[tuple[Path, ast.AST | None]] = [(start, selected)]
         for _ in range(_IMPORT_WALK_DEPTH):
-            next_frontier: list[Path] = []
-            for file in frontier:
-                for module in _imported_modules(file, root):
+            next_frontier: list[tuple[Path, ast.AST | None]] = []
+            for file, node in frontier:
+                for module in _imported_modules(file, root, node):
                     if module in callers:
                         reached = True
                         break
@@ -342,16 +415,14 @@ def check_enforcement_wiring(policy: dict, repo_root: Path | None = None) -> lis
                     seen.add(module)
                     target = _module_file(module, root)
                     if target is not None:
-                        next_frontier.append(target)
+                        next_frontier.append((target, None))
                 if reached:
                     break
             if reached or not next_frontier:
                 break
             frontier = next_frontier
-    errors: list[str] = []
-    if missing:
-        # Every listed entrypoint must exist, even when another one already passed.
-        errors.append(f"TEST_ENTRYPOINT_NOT_FOUND: {', '.join(missing)}")
+        if reached:
+            break
     if not reached:
         errors.append("TEST_ENTRYPOINT_NOT_BEHAVIOURAL")
     return errors

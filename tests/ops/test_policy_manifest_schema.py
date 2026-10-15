@@ -252,12 +252,57 @@ def test_wiring_check_edge_cases(tmp_path: Path) -> None:
     assert check_enforcement_wiring(all_guard, root) == ["ENFORCEMENT_CALLERS_MISSING"]
     foreign = _fake_policy(guard_modules=["pkg/other.py"])
     assert check_enforcement_wiring(foreign, root) == ["GUARD_MODULE_NOT_IN_SOURCE: pkg/other.py"]
+    # Rust-only: no import walk, but every declared file must exist inside the repo.
+    (root / "core" / "src").mkdir(parents=True)
+    (root / "core" / "src" / "guard.rs").write_text("// guard\n", encoding="utf-8")
     rust_only = _fake_policy(
         source_file="core/src/guard.rs",
         guard_modules=[],
         test_entrypoints=["core/src/guard.rs::tests"],
     )
     assert check_enforcement_wiring(rust_only, root) == []
+    rust_missing_test = _fake_policy(
+        source_file="core/src/guard.rs",
+        guard_modules=[],
+        test_entrypoints=["core/src/nope.rs::tests"],
+    )
+    assert check_enforcement_wiring(rust_missing_test, root) == [
+        "TEST_ENTRYPOINT_NOT_FOUND: core/src/nope.rs::tests"
+    ]
+    rust_missing_source = _fake_policy(
+        source_file="core/src/nope.rs",
+        guard_modules=[],
+        test_entrypoints=["core/src/guard.rs::tests"],
+    )
+    assert check_enforcement_wiring(rust_missing_source, root) == [
+        "SOURCE_FILE_NOT_FOUND: core/src/nope.rs"
+    ]
+    # A non-Python entry alongside a Python one must still exist.
+    pyx_missing = _fake_policy(
+        test_entrypoints=["tests/test_caller.py::test_plain", "tests/nope.pyx"]
+    )
+    assert check_enforcement_wiring(pyx_missing, root) == [
+        "TEST_ENTRYPOINT_NOT_FOUND: tests/nope.pyx"
+    ]
+    # ``file.py::`` (empty selector) and helpers that pytest does not collect are not nodes.
+    (root / "tests" / "test_names.py").write_text(
+        "from pkg import caller\n\ndef _run():\n    return caller\n\ndef helper_test():\n"
+        "    pass\n\nclass Helper:\n    def test_m(self):\n        pass\n\nclass TestOk:\n"
+        "    def test_m(self):\n        pass\n",
+        encoding="utf-8",
+    )
+    for selector in ("", "_run", "helper_test", "Helper::test_m", "TestOk::_run"):
+        bad = _fake_policy(test_entrypoints=[f"tests/test_names.py::{selector}"])
+        assert check_enforcement_wiring(bad, root) == [
+            f"TEST_ENTRYPOINT_NOT_FOUND: tests/test_names.py::{selector}",
+            "TEST_ENTRYPOINT_NOT_BEHAVIOURAL",
+        ], selector
+    assert (
+        check_enforcement_wiring(
+            _fake_policy(test_entrypoints=["tests/test_names.py::TestOk::test_m"]), root
+        )
+        == []
+    )
     missing_file = _fake_policy(test_entrypoints=["tests/does_not_exist.py"])
     assert check_enforcement_wiring(missing_file, root) == [
         "TEST_ENTRYPOINT_NOT_FOUND: tests/does_not_exist.py",
@@ -310,7 +355,7 @@ def test_wiring_check_edge_cases(tmp_path: Path) -> None:
     ghost = _fake_policy(
         source_file="pkg/guard.py; pkg/ghost.py", test_entrypoints=["tests/test_ghost.py::test_g"]
     )
-    assert check_enforcement_wiring(ghost, root) == ["ENFORCEMENT_CALLER_NOT_FOUND: pkg/ghost.py"]
+    assert check_enforcement_wiring(ghost, root) == ["SOURCE_FILE_NOT_FOUND: pkg/ghost.py"]
     # A declared file must exist as that file: pkg.py does not become pkg/__init__.py.
     (root / "tests" / "test_pkg.py").write_text(
         "import pkg\n\ndef test_p():\n    assert pkg\n", encoding="utf-8"
@@ -318,7 +363,7 @@ def test_wiring_check_edge_cases(tmp_path: Path) -> None:
     package_alias = _fake_policy(
         source_file="pkg/guard.py; pkg.py", test_entrypoints=["tests/test_pkg.py::test_p"]
     )
-    assert check_enforcement_wiring(package_alias, root) == ["ENFORCEMENT_CALLER_NOT_FOUND: pkg.py"]
+    assert check_enforcement_wiring(package_alias, root) == ["SOURCE_FILE_NOT_FOUND: pkg.py"]
     # Fixtures and classes are not tests; [param] ids are never accepted.
     (root / "tests" / "test_fx.py").write_text(
         "import pytest\nfrom pytest import fixture as fx\nfrom pkg import caller\n"
@@ -458,14 +503,17 @@ def test_lane_gate_rejects_guard_only_entrypoint_for_real_policy(
         "    assert check_research_output\n",
         encoding="utf-8",
     )
-    # The production callers must exist under the tmp root (ENFORCEMENT_CALLER_NOT_FOUND
-    # otherwise), so the verdict below is about the entrypoint, not the callers.
-    for caller in (
+    # Every declared source file must exist under the tmp root (SOURCE_FILE_NOT_FOUND
+    # otherwise), so the verdict below is about the entrypoint, not the sources.
+    for source in (
         "nexus/app/research_flow_service.py",
         "nexus/core/capability_executor_registry.py",
+        "nexus/research/contamination_guard.py",
+        "nexus/research/contamination_enforcement.py",
+        "nexus/research/research_facts.py",
     ):
-        (tmp_path / caller).parent.mkdir(parents=True, exist_ok=True)
-        (tmp_path / caller).write_text("", encoding="utf-8")
+        (tmp_path / source).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / source).write_text("", encoding="utf-8")
     original = load_manifest()
     tampered = {
         **original,
@@ -579,3 +627,52 @@ def test_only_an_explicit_drill_date_counts_as_drilled(monkeypatch, status) -> N
     result = check_lane_gate("P-GATE-03", "modify")
     assert result["allowed"] is False
     assert "ROLLBACK_DRILL_MISSING" in result["errors"]
+
+
+def test_wiring_check_scopes_imports_to_the_selected_test(tmp_path: Path) -> None:
+    """Imports inside *other* functions of the file do not count for the selected test."""
+    root = _fake_repo(tmp_path)
+    (root / "tests" / "test_scoped.py").write_text(
+        "def test_guard_only():\n    from pkg.guard import check\n    assert check(1)\n"
+        "\ndef test_uses_caller():\n    from pkg import caller\n    assert caller.run(1)\n",
+        encoding="utf-8",
+    )
+    guard_only = _fake_policy(test_entrypoints=["tests/test_scoped.py::test_guard_only"])
+    assert check_enforcement_wiring(guard_only, root) == ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"]
+    uses_caller = _fake_policy(test_entrypoints=["tests/test_scoped.py::test_uses_caller"])
+    assert check_enforcement_wiring(uses_caller, root) == []
+    whole_file = _fake_policy(test_entrypoints=["tests/test_scoped.py"])
+    assert check_enforcement_wiring(whole_file, root) == []
+    # A module-level import is visible to every test in the file (documented limit).
+    (root / "tests" / "test_module_import.py").write_text(
+        "from pkg import caller\n\ndef test_guard_only():\n    from pkg.guard import check\n"
+        "    assert check(1)\n",
+        encoding="utf-8",
+    )
+    module_level = _fake_policy(test_entrypoints=["tests/test_module_import.py::test_guard_only"])
+    assert check_enforcement_wiring(module_level, root) == []
+
+
+def test_fixture_bindings_cover_assignment_shapes_and_scope(tmp_path: Path) -> None:
+    root = _fake_repo(tmp_path)
+    (root / "tests" / "test_bind.py").write_text(
+        "import pytest\nimport pytest_asyncio\nfrom pytest import *\nfrom pkg import caller\n"
+        "fx, other = pytest.fixture, None\n"
+        "fy: object = pytest.fixture\n"
+        "\n@fx\ndef test_tuple():\n    return 1\n"
+        "\n@fy()\ndef test_annotated():\n    return 1\n"
+        "\n@pytest_asyncio.fixture\nasync def test_async_fixture():\n    return 1\n"
+        "\n@fixture\ndef test_star():\n    return 1\n"
+        "\ndef _helper():\n    from pytest import fixture as local_fx\n    return local_fx\n"
+        "\nlocal_fx = lambda f: f\n"
+        "\n@local_fx\ndef test_local_alias_is_still_a_test():\n    assert caller\n",
+        encoding="utf-8",
+    )
+    for selector in ("test_tuple", "test_annotated", "test_async_fixture", "test_star"):
+        bad = _fake_policy(test_entrypoints=[f"tests/test_bind.py::{selector}"])
+        assert check_enforcement_wiring(bad, root) == [
+            f"TEST_ENTRYPOINT_NOT_FOUND: tests/test_bind.py::{selector}",
+            "TEST_ENTRYPOINT_NOT_BEHAVIOURAL",
+        ], selector
+    good = _fake_policy(test_entrypoints=["tests/test_bind.py::test_local_alias_is_still_a_test"])
+    assert check_enforcement_wiring(good, root) == []
