@@ -1753,6 +1753,70 @@ def test_owner_inline_gateway_bind_and_integrate_forward_nested_hash(monkeypatch
     assert service.integrated_runtime_identity["owner_inline_contract"] == inline
 
 
+def test_gateway_bind_integration_separate_controller_binds_integration_ref(tmp_path, monkeypatch):
+    """#2230: a detached Controller binds the integration branch ref, not its HEAD."""
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    def git(root, *args):
+        return subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-b", "main")
+    git(repo, "config", "user.name", "canary")
+    git(repo, "config", "user.email", "canary@example.invalid")
+    (repo / "value.txt").write_text("base\n")
+    git(repo, "add", "value.txt")
+    git(repo, "commit", "-m", "base")
+    base = git(repo, "rev-parse", "HEAD")
+    git(repo, "branch", "nexus/integration/main")
+    controller = tmp_path / "controller"
+    git(repo, "worktree", "add", "--detach", str(controller), base)
+    (controller / "tasks").mkdir()
+    (controller / "tasks" / "card.md").write_text("bound\n")
+    git(controller, "add", "tasks/card.md")
+    git(controller, "commit", "-m", "bind card")
+    controller_head = git(controller, "rev-parse", "HEAD")
+    (controller / "tasks" / "pending.md").write_text("pending\n")
+
+    service = FakeService()
+    original_snapshot = service.get_task_snapshot
+
+    def snapshot(task_id, *, include_details=False):
+        state = original_snapshot(task_id, include_details=include_details)
+        state["contract"] = {"allowed_files": ["README.md"], "controller_repo_root": str(controller)}
+        return state
+
+    service.get_task_snapshot = snapshot
+    service.bound_expected_head = None
+    original_bind = service.bind_candidate_integration_closure
+
+    def bind(task_id, **kwargs):
+        service.bound_expected_head = kwargs["expected_canonical_head"]
+        return original_bind(task_id, **kwargs)
+
+    service.bind_candidate_integration_closure = bind
+    monkeypatch.setattr(gateway_module, "pre_action_guard", lambda *args, **kwargs: {"gate_passed": True})
+    gateway = UnifiedMCPGateway(service=service)
+    acceptance = {
+        "schema": "nexus.external_acceptance_receipt.v1", "task_id": "recover-1",
+        "attempt_id": "attempt-recovery", "candidate_commit": "a" * 40, "receipt_hash": "d" * 64,
+        "reviewer_id": "James", "passed": True, "verifier_artifact": "/tmp/not-read-by-fake-service",
+    }
+    with pytest.raises(Exception, match="CANDIDATE_BIND_HEAD_DRIFT"):
+        gateway._candidate_bind_integration({
+            "task_id": "recover-1", "expected_canonical_head": controller_head,
+            "external_acceptance": acceptance, "approval": _approval(),
+        })
+    assert service.bound_expected_head is None
+    bound = gateway._candidate_bind_integration({
+        "task_id": "recover-1", "expected_canonical_head": base,
+        "external_acceptance": acceptance, "approval": _approval(),
+    })
+    assert bound["integration_performed"] is False
+    assert service.bound_expected_head == base
+
+
 def test_cline_parser_extracts_final_patch_from_json_event_array():
     events = json.dumps([
         {"type": "system", "content": "started"},
