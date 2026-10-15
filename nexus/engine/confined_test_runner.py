@@ -200,6 +200,8 @@ def run_confined_test(
             sandbox=sandbox_dir,
             extra_forbidden=[*forbidden, *leaked],
             extra_readable=TOOLCHAIN_READ_ROOTS if toolchain else (),
+            # Hidden tests, the staging parent and fixture trees: whole subtrees denied.
+            forbidden_subtrees=[*forbidden, *leaked],
         )
         result["confinement"] = bound.describe()
         try:
