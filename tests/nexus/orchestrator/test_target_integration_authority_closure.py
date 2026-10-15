@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import subprocess
 from dataclasses import asdict, replace
 from datetime import datetime, timedelta, timezone
@@ -19,7 +20,11 @@ from nexus.contracts.target_integration_lifecycle import (
 )
 from nexus.contracts.workforce_admission import WorkforceDemand
 from nexus.executors.cli_worker import bounded_environment_receipt
-from nexus.orchestrator.governed_integration import ControlledIntegrationManager, IntegrationReceipt
+from nexus.orchestrator.governed_integration import (
+    ControlledIntegrationManager,
+    IntegrationExecutionError,
+    IntegrationReceipt,
+)
 from nexus.orchestrator.repository_contract_gate import RepositoryContractGate
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
 from nexus.orchestrator.target_integration_lifecycle import TargetIntegrationLifecycle
@@ -850,8 +855,8 @@ def test_separate_controller_post_apply_output_never_lands_in_controller(tmp_pat
     assert result.post_apply_verified is True
     assert _git(controller, "status", "--porcelain=v1", "--untracked-files=all", "--ignored") == ""
     assert _git(controller, "rev-parse", "HEAD") == base
-    assert not (tmp_path / "stage" / "task-1.post-apply").exists()
-    assert "task-1.post-apply" not in _git(controller, "worktree", "list", "--porcelain")
+    assert not (tmp_path / "stage" / ".post-apply" / "task-1").exists()
+    assert ".post-apply" not in _git(controller, "worktree", "list", "--porcelain")
 
 
 def test_separate_controller_post_apply_verifies_integrated_tree(tmp_path: Path):
@@ -916,6 +921,150 @@ def test_controller_on_integration_branch_still_rejects_pending_task_card(tmp_pa
     with pytest.raises(RuntimeError, match="canonical.*clean"):
         _separate_controller_integrate(tmp_path, root.resolve(), base, candidate)
     assert _git(root, "rev-parse", "HEAD") == base
+
+
+def test_primary_checkout_on_main_still_rejects_pending_task_card(tmp_path: Path):
+    """#2230 F3: only a separate detached Controller may hold pending cards."""
+    root, base, candidate = _repo(tmp_path)
+    _git(root, "checkout", "main")
+    (root / "tasks").mkdir()
+    (root / "tasks" / "pending-card.md").write_text("pending\n")
+    with pytest.raises(RuntimeError, match="canonical.*clean"):
+        _separate_controller_integrate(tmp_path, root.resolve(), base, candidate)
+    assert _git(root, "rev-parse", "nexus/integration/canary") == base
+
+
+def test_linked_worktree_on_a_branch_still_rejects_pending_task_card(tmp_path: Path):
+    root, base, candidate = _repo(tmp_path)
+    _git(root, "checkout", "main")
+    controller = tmp_path / "on-branch"
+    _git(root, "worktree", "add", "-b", "nexus/other", str(controller), base)
+    (controller / "tasks").mkdir()
+    (controller / "tasks" / "pending-card.md").write_text("pending\n")
+    with pytest.raises(RuntimeError, match="canonical.*clean"):
+        _separate_controller_integrate(tmp_path, controller.resolve(), base, candidate)
+    assert _git(root, "rev-parse", "nexus/integration/canary") == base
+
+
+@pytest.mark.parametrize("trick", ["symlinked-dir", "nested-dot-git", "hardlink"])
+def test_separate_controller_task_card_path_tricks_block_integration(tmp_path: Path, trick: str):
+    _root, controller, base, candidate = _separate_controller(tmp_path)
+    tasks = controller / "tasks"
+    tasks.mkdir()
+    if trick == "symlinked-dir":
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "payload.txt").write_text("outside\n")
+        (tasks / "symdir").symlink_to(outside, target_is_directory=True)
+    elif trick == "nested-dot-git":
+        (tasks / "x" / ".git").mkdir(parents=True)
+        (tasks / "x" / ".git" / "config").write_text("[core]\n")
+    else:
+        outside = tmp_path / "outside.txt"
+        outside.write_text("outside\n")
+        (tasks / "card.md").hardlink_to(outside)
+    with pytest.raises(RuntimeError, match="canonical.*clean"):
+        _separate_controller_integrate(tmp_path, controller, base, candidate)
+    assert _git(controller, "rev-parse", "nexus/integration/canary") == base
+
+
+@pytest.mark.parametrize("kind", ["directory", "dangling-symlink"])
+def test_pre_existing_post_apply_path_is_refused_and_kept(tmp_path: Path, kind: str):
+    """A path this run did not create is never removed, and the error is not masked."""
+    _root, controller, base, candidate = _separate_controller(tmp_path)
+    occupied = tmp_path / "stage" / ".post-apply" / "task-1"
+    occupied.parent.mkdir(parents=True)
+    if kind == "directory":
+        occupied.mkdir()
+        (occupied / "keep.txt").write_text("keep\n")
+    else:
+        occupied.symlink_to(tmp_path / "missing-target")
+    with pytest.raises(RuntimeError, match="post-apply verification Target already exists"):
+        _separate_controller_integrate(
+            tmp_path,
+            controller,
+            base,
+            candidate,
+            post_apply_commands=(("/bin/sh", "-c", "true"),),
+        )
+    assert os.path.lexists(occupied)
+    if kind == "directory":
+        assert (occupied / "keep.txt").read_text() == "keep\n"
+    assert _git(controller, "rev-parse", "nexus/integration/canary") == base
+    assert "stage" not in _git(controller, "worktree", "list", "--porcelain")
+
+
+def test_dangling_symlink_staging_path_is_refused_and_kept(tmp_path: Path):
+    _root, controller, base, candidate = _separate_controller(tmp_path)
+    occupied = tmp_path / "stage" / "task-1"
+    occupied.parent.mkdir(parents=True)
+    occupied.symlink_to(tmp_path / "missing-target")
+    with pytest.raises(RuntimeError, match="staging Target already exists"):
+        _separate_controller_integrate(tmp_path, controller, base, candidate)
+    assert occupied.is_symlink()
+    assert _git(controller, "rev-parse", "nexus/integration/canary") == base
+
+
+def test_post_apply_cleanup_failure_keeps_typed_applied_truth(tmp_path: Path):
+    """Claude F1: a locked post-apply worktree must not erase merge_performed=True."""
+    _root, controller, base, candidate = _separate_controller(tmp_path)
+    with pytest.raises(IntegrationExecutionError) as raised:
+        _separate_controller_integrate(
+            tmp_path,
+            controller,
+            base,
+            candidate,
+            post_apply_commands=(("/bin/sh", "-c", 'git worktree lock "$PWD"'),),
+        )
+    error = raised.value
+    assert error.merge_performed is True
+    assert error.stage == "POST_APPLY_CLEANUP"
+    assert error.post_apply_verified is True
+    assert error.cleanup_failure and "task-1" in error.cleanup_failure
+    assert error.branch_head_after == _git(controller, "rev-parse", "nexus/integration/canary")
+    assert error.branch_head_after != base
+    assert not (tmp_path / "stage" / "task-1").exists()
+    locked = tmp_path / "stage" / ".post-apply" / "task-1"
+    _git(controller, "worktree", "unlock", str(locked))
+    _git(controller, "worktree", "remove", "--force", str(locked))
+
+
+def test_post_apply_failure_with_cleanup_failure_keeps_verification_stage(tmp_path: Path):
+    _root, controller, base, candidate = _separate_controller(tmp_path)
+    with pytest.raises(IntegrationExecutionError) as raised:
+        _separate_controller_integrate(
+            tmp_path,
+            controller,
+            base,
+            candidate,
+            post_apply_commands=(("/bin/sh", "-c", 'git worktree lock "$PWD"; exit 3'),),
+        )
+    error = raised.value
+    assert error.stage == "POST_APPLY_VERIFICATION"
+    assert error.merge_performed is True
+    assert error.post_apply_verified is False
+    assert "post-apply verification failed" in error.failure_reason
+    assert error.cleanup_failure
+    locked = tmp_path / "stage" / ".post-apply" / "task-1"
+    _git(controller, "worktree", "unlock", str(locked))
+    _git(controller, "worktree", "remove", "--force", str(locked))
+
+
+def test_post_apply_failure_removes_its_worktree_and_stays_typed(tmp_path: Path):
+    _root, controller, base, candidate = _separate_controller(tmp_path)
+    with pytest.raises(IntegrationExecutionError) as raised:
+        _separate_controller_integrate(
+            tmp_path,
+            controller,
+            base,
+            candidate,
+            post_apply_commands=(("/bin/sh", "-c", "echo dirt > dirt.txt; exit 1"),),
+        )
+    assert raised.value.merge_performed is True
+    assert raised.value.cleanup_failure is None
+    assert not (tmp_path / "stage" / ".post-apply" / "task-1").exists()
+    assert ".post-apply" not in _git(controller, "worktree", "list", "--porcelain")
+    assert _git(controller, "status", "--porcelain=v1", "--untracked-files=all") == ""
 
 
 def _bound_tracked_approval(task_id: str, contract_hash: str) -> dict:
