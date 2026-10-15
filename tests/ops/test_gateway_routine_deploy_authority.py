@@ -157,15 +157,19 @@ def test_release_gates_doc_names_the_manual_emergency_sequence():
 
 
 def test_full_deploy_cycle_succeeds_with_expired_owner_activation_receipts(cfg):  # noqa: F811
-    """#2155 done-when: expired #526 receipts next to the Gateway never block a routine deploy."""
+    """#2155 done-when: expired #526 receipts next to the Gateway never block a routine deploy.
+
+    Both receipts expire before the fake host clock (2025-10-09); the deployer
+    never opens them, so their shape does not matter.
+    """
     cfg.gateway_root.mkdir(parents=True, exist_ok=True)
     (cfg.gateway_root / "host-authority.json").write_text(
-        '{"schema": "host_effect_authority_bundle.v1", "expires_at": "2026-08-24T00:00:00Z"}\n',
+        '{"schema": "host_effect_authority_bundle.v1", "expires_at": "2025-08-24T00:00:00Z"}\n',
         encoding="utf-8",
     )
     (cfg.gateway_root / "recovery-authority.json").write_text(
         '{"schema": "nexus.gateway.durable_recovery_authority.v2",'
-        ' "expires_at": "2026-10-14T09:40:00Z"}\n',
+        ' "expires_at": "2025-10-01T09:40:00Z"}\n',
         encoding="utf-8",
     )
     result = cycle(cfg, FakeHost(), FakeProber())
