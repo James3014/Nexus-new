@@ -12,6 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from nexus.engine.sandboxed_lane import os_sandbox_available
 from scripts.bench.agy_provider import (
     AGY_DEFAULT_MODEL,
     AGY_NO_TOOLS_PREFIX,
@@ -21,6 +22,21 @@ from scripts.bench.agy_provider import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _assert_excluded_without_os_barrier(res: dict) -> None:
+    """The counted lane confines the visible test (#2211). With no OS barrier (Seatbelt is
+    macOS-only, so Linux CI) the task is excluded for both arms before any model call (fail closed)."""
+    row = res["row"]
+    assert row["status"] == "NOT_RUN"
+    assert row["not_run_reason"] == "confinement_parity_failed"
+    assert row["confinement_parity_detail"] == "visible:confinement_unavailable"
+    assert row["model_calls"] == 0
+    assert row["run_eligible"] is False
+    assert res["summary"]["eligible_n"] == 0
+    assert res["summary"]["solved_n"] == 0
+
+
 VALUE_FIXTURE = REPO_ROOT / "scripts" / "bench" / "public_benchmark_nexus_value_v1.json"
 
 
@@ -142,6 +158,8 @@ def _run_bare_arm(tmp_path: Path, agy_bin: str, pool_env: dict[str, str]) -> dic
 
 def test_lane_bare_arm_with_agy_missing_is_infra_invalid_agy_missing(tmp_path: Path, agy_pool):
     res = _run_bare_arm(tmp_path, "/nonexistent/agy", agy_pool.env())
+    if not os_sandbox_available():
+        return _assert_excluded_without_os_barrier(res)
     assert res["row"]["model_calls"] == 0
     assert res["row"]["run_eligible"] is False
     assert res["row"]["infra_invalid_reason"] == "agy_missing"
@@ -152,6 +170,9 @@ def test_lane_bare_arm_with_agy_missing_is_infra_invalid_agy_missing(tmp_path: P
 def test_lane_bare_arm_counts_one_model_call_and_no_rescue(tmp_path: Path, agy_pool):
     agy_pool.set_behaviour('{"status": "ok", "patch": "unchanged = True\\n"}')
     res = _run_bare_arm(tmp_path, str(agy_pool.exe), agy_pool.env())
+    if not os_sandbox_available():
+        assert agy_pool.calls() == []
+        return _assert_excluded_without_os_barrier(res)
     row = res["row"]
     assert row["model_calls"] == 1
     assert row["model_name"] == AGY_DEFAULT_MODEL
@@ -167,6 +188,8 @@ def test_lane_bare_arm_without_an_eligible_account_makes_no_model_call(tmp_path:
         tmp_path, str(agy_pool.exe), agy_pool.env(NEXUS_AGY_ACCOUNT_ALLOWLIST="acc-none")
     )
     assert agy_pool.calls() == []
+    if not os_sandbox_available():
+        return _assert_excluded_without_os_barrier(res)
     assert res["row"]["model_calls"] == 0
     assert res["row"]["run_eligible"] is False
     assert res["row"]["infra_invalid_reason"] == "agy_no_eligible_account"
