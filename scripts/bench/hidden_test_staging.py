@@ -207,7 +207,9 @@ def configure_run_record(path: Path | None) -> None:
 def _safe_detail(exc: BaseException) -> str:
     """Error detail for rows/logs without any filesystem path (no staged-path disclosure)."""
     if isinstance(exc, HiddenTestStagingError):
-        return re.sub(r"/[^\s:'\"]+", "<path>", str(exc))[:160]
+        text = re.sub(r"/[^\s:'\"]+", "<path>", str(exc))
+        # One printable line: no control characters (log/workflow-command safe).
+        return " ".join("".join(ch if ch.isprintable() else " " for ch in text).split())[:160]
     code = getattr(exc, "errno", None)
     return f"{type(exc).__name__}" + (f":errno{code}" if code is not None else "")
 

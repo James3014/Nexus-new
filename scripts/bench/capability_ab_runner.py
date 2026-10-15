@@ -20852,11 +20852,20 @@ def main() -> int:
                 expected_sha, workspace_root=repo_root, trusted_shas=_hidden_trusted_shas(tasks, repo_root)
             )
         except _hidden_staging.HiddenTestStagingError as exc:
-            print(f"hidden test staging recovery failed closed ({exc}); run is invalid", file=sys.stderr, flush=True)
+            print(
+                _log_line_safe(
+                    f"hidden test staging recovery failed closed ({exc}); run is invalid. A killed "
+                    "counted run is void: rerun from a clean checkout"
+                ),
+                file=sys.stderr,
+                flush=True,
+            )
             return 3
         if _hidden_staging.run_abort_reason():
             print(
-                f"hidden test staging recovery failed closed ({_hidden_staging.run_abort_reason()})",
+                _log_line_safe(
+                    f"hidden test staging recovery failed closed ({_hidden_staging.run_abort_reason()})"
+                ),
                 file=sys.stderr,
                 flush=True,
             )

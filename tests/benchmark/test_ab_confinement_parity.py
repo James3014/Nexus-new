@@ -300,3 +300,18 @@ def test_file_lock_denied_with_nexus_row_excludes_the_pair_on_both_arms(bare_fir
         assert r["not_run_reason"] == "file_lock_denied"
     untouched = [r for r in [*with_rows, *without_rows] if r["task_id"] == "c"]
     assert all(r["status"] == "SUCCESS" and not r.get("not_run") for r in untouched)
+
+
+def test_staging_error_details_are_single_printable_lines() -> None:
+    """Gemini N8: exception details that reach stderr/rows carry no control characters and no
+    path; the runner's recovery prints go through _log_line_safe."""
+    from scripts.bench import capability_ab_runner as runner
+    from scripts.bench import hidden_test_staging as staging_mod
+
+    detail = staging_mod._safe_detail(
+        staging_mod.HiddenTestStagingError("bad\n::set-output name=x::y /etc/passwd\r##[error]z")
+    )
+    assert "\n" not in detail and "\r" not in detail and "/etc" not in detail
+    assert staging_mod._safe_detail(OSError(13, "x\n::warning::y")) == "PermissionError:errno13"
+    line = runner._log_line_safe(f"hidden test staging recovery failed closed ({detail})")
+    assert "\n" not in line and "##[" not in line and not line.startswith("::")
