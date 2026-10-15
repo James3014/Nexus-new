@@ -10,6 +10,8 @@ from nexus.contracts.target_integration_lifecycle import (
     ExternalAcceptanceReceipt,
     IntegrationAuthorizationEnvelope,
 )
+from nexus.executors.cli_worker import bounded_environment_receipt
+from nexus.orchestrator.governed_integration import ControlledIntegrationManager
 from nexus.orchestrator.target_integration_lifecycle import TargetIntegrationLifecycle
 
 
@@ -71,26 +73,48 @@ def authorization(root: Path, base: str, candidate: str, receipt: ExternalAccept
     )
 
 
+def _verifier_lifecycle_state(tmp_path: Path, exit_code: int) -> tuple[tuple[str, ...], dict]:
+    """Sealed verifier evidence + admitted manifest, as the Candidate receipt would carry (a9a8a531e)."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    tmp_path = tmp_path.resolve()
+    executable = tmp_path / "python3"
+    executable.symlink_to(Path(sys.executable))
+    argv = ["-c", f"exit({exit_code})"]
+    command = " ".join(["python3", *argv])
+    state = {"verified_receipt": {"verifier_evidence": [{
+        "command": command, "status": "COMPLETED", "exit_code": 0,
+        "executable_identity": str(executable), "argv": argv,
+        "executable_sha256": hashlib.sha256(executable.read_bytes()).hexdigest(),
+        "env": bounded_environment_receipt({"PYTHONDONTWRITEBYTECODE": "1"}),
+        "timed_out": False, "process_group_killed": False,
+    }]}}
+    manifest = ControlledIntegrationManager._admitted_manifest(state, {"verifier_commands": [command]})
+    state["integration_verifier_manifest"] = [dict(item) for item in manifest]
+    return ("python3", *argv), state
+
+
 def test_real_git_staging_failure_and_success_do_not_fake_ancestry(tmp_path: Path):
     root, base, candidate = make_repo(tmp_path)
     receipt = acceptance(candidate)
     auth = authorization(root, base, candidate, receipt)
+    failing_argv, failing_state = _verifier_lifecycle_state(tmp_path / "fail-ev", 1)
     with pytest.raises(RuntimeError, match="staging verifier failed"):
         TargetIntegrationLifecycle.transactional_integration(
             task_id="task-1", canonical_root=root, candidate_commit=candidate,
             expected_canonical_head=base, expected_status_hash=status_hash(root),
             staging_root=str(tmp_path / "failed-stage"),
-            verifier_commands=((sys.executable, "-c", "raise SystemExit(1)"),),
+            verifier_commands=(failing_argv,), lifecycle_state=failing_state,
             external_acceptance=receipt, authorization=auth,
         )
     assert git(root, "rev-parse", "HEAD") == base
     assert not (tmp_path / "failed-stage" / "task-1").exists()
 
+    good_argv, good_state = _verifier_lifecycle_state(tmp_path / "good-ev", 0)
     staged = TargetIntegrationLifecycle.transactional_integration(
         task_id="task-1", canonical_root=root, candidate_commit=candidate,
         expected_canonical_head=base, expected_status_hash=status_hash(root),
         staging_root=str(tmp_path / "good-stage"),
-        verifier_commands=((sys.executable, "-c", "raise SystemExit(0)"),),
+        verifier_commands=(good_argv,), lifecycle_state=good_state,
         external_acceptance=receipt, authorization=auth,
     )
     assert staged.staged is True

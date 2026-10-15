@@ -99,6 +99,8 @@
 | nexus/orchestrator/ambient_core.py | tests/nexus/orchestrator/test_evidence_coverage_live_path.py, tests/nexus/orchestrator/test_self_hosted_task_service.py, tests/nexus/orchestrator/test_managed_local_agent.py | active | high | evidence_coverage_core_verdict_contract |
 | nexus/orchestrator/canonical_core_transport.py | tests/nexus/orchestrator/test_evidence_coverage_live_path.py, tests/nexus/orchestrator/test_canonical_core_transport.py, tests/nexus/orchestrator/test_canonical_core_transport_tool_exposure.py, tests/nexus/orchestrator/test_evidence_coverage_reuse_v1.py, tests/nexus/orchestrator/test_wave_d_canaries.py | active | high | canonical_core_transport_contract |
 | tests/nexus/orchestrator/_evidence_coverage_live_driver.py | tests/nexus/orchestrator/test_evidence_coverage_live_path.py | active | medium | evidence_coverage_live_driver |
+| nexus/orchestrator/bootstrap_agent_authority.py | tests/nexus/orchestrator/test_bootstrap_agent_authority.py, tests/nexus/orchestrator/test_gateway_controller_root.py, tests/nexus/orchestrator/test_owner_confirmation_elicitation.py, tests/nexus/orchestrator/test_task_card_create_expected_evidence.py | active | high | bootstrap_agent_task_card_authority_contract |
+| tests/nexus/orchestrator/test_bootstrap_agent_authority.py | tests/nexus/orchestrator/test_bootstrap_agent_authority.py | active | high | test_contract |
 | docs/runbooks/declaring_expected_evidence_universe.md | tests/nexus/orchestrator/test_task_card_create_expected_evidence.py, tests/nexus/orchestrator/test_evidence_coverage_live_path.py | active | medium | task_card_expected_evidence_declaration |
 | docs/runbooks/gateway_r1_lost_ledger_runbook.md | tests/ops/test_mcp_gateway_durable.py | active | medium | gateway_r1_lost_ledger_runbook |
 | nexus/orchestrator/candidate_verifier.py | tests/nexus/orchestrator/test_candidate_verifier.py, tests/nexus/orchestrator/test_self_hosted_task_service.py | active | high | verifier_static_contract_and_retry_recovery |
@@ -217,6 +219,9 @@
 | scripts/ops/build_test_impact_index.py | tests/ops/test_build_test_impact_index.py | active | medium | jit_index |
 | scripts/ops/test_changed.sh | tests/ops/test_select_tests.py | active | medium | jit_entrypoint |
 | scripts/ops | tests/ops | active | medium | ops_tooling |
+| docs/reports/policy-manifest.v2.json | tests/ops/test_policy_manifest_schema.py, tests/ops/test_policy_lane_gate.py, tests/integration/test_policy_lane_integration.py, tests/ops/test_update_manifest_drills.py | active | high | policy_manifest_contract |
+| scripts/ops/check_policy_lane_gate.py | tests/ops/test_policy_manifest_schema.py, tests/ops/test_policy_lane_gate.py, tests/integration/test_policy_lane_integration.py | active | high | policy_lane_gate_contract |
+| scripts/ops/update_manifest_drills.py | tests/ops/test_update_manifest_drills.py, tests/ops/test_policy_manifest_schema.py | active | medium | policy_manifest_updater_contract |
 | scripts/ci/nexus-core-verify.sh | tests/ops/test_select_tests.py, tests/ops/test_pr_impact_gate.py | active | high | nexus_core_completion_ci_entrypoint_contract |
 | scripts/ci/nexus_core_trusted_pin_policy.py | tests/ops/test_nexus_core_trusted_pin_policy.py, tests/ops/test_select_tests.py, tests/ops/test_pr_impact_gate.py | active | high | nexus_core_trusted_pin_maintenance_contract |
 | scripts/bench/capability_ab_runner.py | tests/benchmark/test_capability_ab_runner.py::test_run_with_nexus_subprocess_preserves_executor_receipts_without_llm, tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_accepts_causal_runtime_mount, tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_rejects_quarantined_mount, tests/benchmark/test_ab_hidden_test_staging.py | active | high | benchmark_contract |
@@ -370,6 +375,8 @@
 | SOUL.md | tests/ops/test_bootstrap_authority_files.py, tests/ops/test_bootstrap_context_budget.py, tests/ops/test_codex_task_context_index.py, tests/ops/test_fast_start_consumer_contract.py | active | medium | authority_text_context_budget_contract |
 | docs/agents | tests/ops/test_bootstrap_authority_files.py, tests/ops/test_bootstrap_context_budget.py, tests/ops/test_codex_task_context_index.py, tests/ops/test_fast_start_consumer_contract.py | active | medium | authority_text_context_budget_contract |
 | scripts/ops/deletion_guard.py | tests/ops/test_deletion_guard.py | active | high | deletion_guard_owner_approval_contract |
+| scripts/ops/review_record_check.py | tests/ops/test_review_record_check.py | active | high | review_record_advisory_check_contract |
+| .github/workflows/review-record-present.yml | tests/ops/test_review_record_check.py, tests/ops/test_pr_workflow_concurrency.py | active | high | review_record_workflow_contract |
 | tests/nightly_quarantine_items | tests/ops/test_nightly_quarantine.py, tests/ops/test_nightly_quarantine_items_layout.py | active | medium | nightly_quarantine_items_per_entry_package |
 | tests/ops/test_nightly_quarantine_items_layout.py | tests/ops/test_nightly_quarantine_items_layout.py | active | medium | test_contract |
 | tests/nightly_quarantine_entries.py | tests/ops/test_nightly_quarantine.py, tests/ops/test_nightly_quarantine_items_layout.py | active | medium | nightly_quarantine_entries_compat_shim |
@@ -382,3 +389,4 @@
 | tests/nexus/orchestrator/test_gateway_controller_root.py | tests/nexus/orchestrator/test_gateway_controller_root.py | active | medium | test_contract |
 | tests/ops/test_gateway_routine_deploy_authority.py | tests/ops/test_gateway_routine_deploy_authority.py | active | medium | test_contract |
 | scripts/ops/eia_scoreboard.py | tests/ops/test_eia_scoreboard.py | active | medium | eia_scoreboard_report |
+| nexus/contracts/self_hosted_state_root.py | tests/nexus/orchestrator/test_self_hosted_task_service.py, tests/research/test_trajectory_continuity.py | active | high | self_hosted_state_root_legacy_guard_contract |

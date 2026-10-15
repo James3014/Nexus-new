@@ -167,6 +167,7 @@ class RegressionClassification:
     fallback: str = ""
     unmatched_paths: list[str] = field(default_factory=list)
     mismatch_reasons: list[str] = field(default_factory=list)
+    remedy: str = ""
 
 
 def _exact_sha(value: str, label: str) -> None:
@@ -1188,6 +1189,58 @@ def _replaced_parameterized_node_keys(
     return replaced_base, replacement_head, False
 
 
+_AMBIGUOUS_PARAMETERIZED_REASON = "parameterized test ids changed ambiguously between base and head"
+
+
+def _behind_main_remedy(base: PytestRunResult, head: PytestRunResult) -> str:
+    """Diagnostic only: name the likely fix when ambiguity is only base-side ids.
+
+    Fires when every parameterized family with more than one id missing on head has
+    no head-only id of its own: base gained cases that head never collected, which is
+    what a PR branch behind main looks like (``pull_request.base.sha`` is the main tip,
+    so the plan's ``git diff base head`` cannot tell main's additions from PR edits).
+    Never alters the verdict; any doubt returns an empty string (today's message stays).
+    """
+    base_index = _logical_node_index(base.node_ids)
+    head_index = _logical_node_index(head.node_ids)
+    if base_index is None or head_index is None or not base_index or not head_index:
+        return ""
+    if base.test_inventory_tree == head.test_inventory_tree:
+        return ""
+    if _logical_node_set(base.passed_node_ids) is None:
+        return ""
+    if _expanded_node_keys(base, head, base_index, head_index)[2]:
+        return ""
+    base_by_family: dict[str, list[LogicalNodeKey]] = {}
+    for key, raw_node in base_index.items():
+        family = _parameterized_family(raw_node)
+        if family is not None:
+            base_by_family.setdefault(family, []).append(key)
+    head_only_families = {
+        _parameterized_family(raw_node)
+        for key, raw_node in head_index.items()
+        if key not in base_index
+    }
+    ambiguous: list[str] = []
+    for family, keys in base_by_family.items():
+        missing = [key for key in keys if key not in head_index]
+        if len(missing) > 1:
+            if family in head_only_families:
+                return ""
+            ambiguous.extend(base_index[key] for key in missing)
+    if not ambiguous:
+        return ""
+    examples = sorted(ambiguous)[:3]
+    return (
+        "parameterized ids "
+        + ", ".join(examples)
+        + (", ..." if len(ambiguous) > len(examples) else "")
+        + " exist on base but not on head and head adds no cases in their place. "
+        "Unless this PR removed those cases, the PR branch is behind main. "
+        "Fix: `git merge origin/main` and push."
+    )
+
+
 def _metadata_mismatch(base: PytestRunResult, head: PytestRunResult) -> bool:
     return bool(_metadata_mismatch_detail(base, head))
 
@@ -1210,6 +1263,40 @@ def _log_safe(line: str) -> str:
     if body.startswith("::"):
         body = "> " + body
     return " " * indent + body
+
+
+_ANNOTATION_TITLE = "Exact-base impact gate"
+_MAX_ANNOTATED_FAILURES = 10
+
+
+def _annotation_message(text: str, limit: int = 900) -> str:
+    """Annotation body: log-safe, bounded, and percent-encoded as the runner expects."""
+    body = _log_safe(text).strip()
+    if len(body) > limit:
+        body = body[:limit] + "..."
+    return body.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def _blocking_annotations(classification: RegressionClassification) -> list[str]:
+    """`::error` annotations so a blocked check names its cause on the PR (#1895).
+
+    Our own prefix is the only workflow command: every candidate-controlled byte
+    (test ids, reasons) goes through `_log_safe` and percent-encoding first.
+    """
+    if not classification.blocking:
+        return []
+    title = f"::error title={_ANNOTATION_TITLE}::"
+    reason = f"{classification.classification}: {classification.reason}"
+    if classification.remedy:
+        reason += f" | {classification.remedy}"
+    lines = [title + _annotation_message(reason)]
+    failures = classification.new_failures
+    for node in failures[:_MAX_ANNOTATED_FAILURES]:
+        lines.append(title + _annotation_message(f"new failure on head: {node}"))
+    if len(failures) > _MAX_ANNOTATED_FAILURES:
+        extra = len(failures) - _MAX_ANNOTATED_FAILURES
+        lines.append(title + _annotation_message(f"... and {extra} more; see classification.json"))
+    return lines
 
 
 def _json_log_safe(text: str) -> str:
@@ -1264,7 +1351,7 @@ def _metadata_mismatch_detail(base: PytestRunResult, head: PytestRunResult) -> s
         base, head, base_index, head_index
     )
     if expansion_ambiguous or replacement_ambiguous:
-        return "parameterized test ids changed ambiguously between base and head"
+        return _AMBIGUOUS_PARAMETERIZED_REASON
     evolved_base = expanded_base | replaced_base
     evolved_head = expanded_head | replacement_head
     if not base_nodes:
@@ -1493,7 +1580,10 @@ def _evidence_mismatch_reasons(
 
 
 def _classify_regression(
-    base: PytestRunResult, head: PytestRunResult, *, full_suite: bool
+    base: PytestRunResult,
+    head: PytestRunResult,
+    *,
+    full_suite: bool,
 ) -> RegressionClassification:
     base_failures = sorted(set(base.failures))
     head_failures = sorted(set(head.failures))
@@ -1576,6 +1666,21 @@ def _classify_regression(
             )
         except Exception as exc:  # noqa: BLE001 - diagnostics must never change the verdict
             mismatch_reasons = [f"could not explain mismatch: {type(exc).__name__}: {exc}"]
+        remedy = ""
+        # Only when the ambiguity is the sole problem: a merge cannot fix plan,
+        # provenance or other evidence mismatches, so never suggest it beside them.
+        if mismatch_reasons == [_AMBIGUOUS_PARAMETERIZED_REASON]:
+            try:
+                remedy = _behind_main_remedy(base, head)
+            except Exception:  # noqa: BLE001 - diagnostics must never change the verdict
+                remedy = ""
+            if remedy:
+                mismatch_reasons = [
+                    f"{_AMBIGUOUS_PARAMETERIZED_REASON}: {remedy}"
+                    if item == _AMBIGUOUS_PARAMETERIZED_REASON
+                    else item
+                    for item in mismatch_reasons
+                ]
         reason = "test execution metadata did not prove a trustworthy exact-base comparison"
         if mismatch_reasons:
             reason += ": " + "; ".join(mismatch_reasons)
@@ -1588,6 +1693,7 @@ def _classify_regression(
             resolved,
             reason,
             mismatch_reasons=mismatch_reasons,
+            remedy=remedy,
         )
     bootstrap_targets = _scoped_targets_in_collection_errors(base) if full_suite else []
     if bootstrap_targets and not (head.exit_code == 0 and head.status == "COMPLETE"):
@@ -2046,7 +2152,8 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     classification = classify_regression(
-        _load_run_result(args.base_result), _load_run_result(args.head_result)
+        _load_run_result(args.base_result),
+        _load_run_result(args.head_result),
     )
     payload = asdict(classification)
     args.output.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
@@ -2055,6 +2162,8 @@ def main(argv: list[str] | None = None) -> int:
         print(_log_safe(f"Exact-base impact gate BLOCKED: {classification.classification}"))
         for mismatch in classification.mismatch_reasons or [classification.reason]:
             print(_log_safe(f"  - {mismatch}"))
+        for line in _blocking_annotations(classification):
+            print(line, file=sys.stderr)
     return 1 if classification.blocking else 0
 
 
