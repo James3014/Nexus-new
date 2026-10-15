@@ -30,5 +30,6 @@ receipt is evidence, not a claim by itself.
 - For mutation work tracked by a repository-local GitHub Issue, push the branch, then run `scripts/ops/nexus-core-precheck dispatch` (the Claude Code Stop hook does this automatically). It starts the signed Core issue check for the exact pushed HEAD on a trusted runner (30-60 min); the PR gate later reuses that receipt.
 - In the completion report, give the Core status from `scripts/ops/nexus-core-precheck status --issue <N>` (`PENDING`, `VERIFIED`, `FAILED`, `NOT_FOUND`). Do not claim engineering completion until it is `VERIFIED`.
 - The local `nexus-core-issue-check-local` / `nexus-certify issue-check` run remains optional; it needs Docker and produces an unsigned receipt.
+  Its JSON summary includes `reason_codes` and `transport_error` from the receipt outcome; `--json-out PATH` also writes the summary to a file (a failed write only warns on stderr and keeps the exit code).
 - This binding is Evidence Trust + Completion only. It does not select the execution lane, route, worker/model, Candidate acceptance, merge, release, deployment, or production authority.
 - DIRECT work remains transport-neutral. A Core mutation session is not required solely because repository files are being changed.

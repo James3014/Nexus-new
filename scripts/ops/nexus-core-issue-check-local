@@ -7,6 +7,12 @@ isolated pin-keyed tool directory, builds a hash-keyed material venv, runs
 exact committed HEAD, and prints a JSON summary. It holds no completion
 authority: the Core receipt is the only verdict. Local or tooling problems fail
 closed with exit 2; a Core verdict other than VERIFIED exits 1.
+
+The JSON summary carries the receipt ``status`` plus ``reason_codes`` (list from
+``outcome.reason_codes``, [] when absent) and ``transport_error`` (bool from
+``outcome.transport_error``, false when absent). ``--json-out PATH`` also writes
+the identical summary to PATH; if that write fails, a warning goes to stderr and
+the original exit code is kept.
 """
 
 from __future__ import annotations
@@ -271,6 +277,12 @@ def run_check(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         status = outcome.get("status") if isinstance(outcome, dict) else None
         if status is None:
             status = "NO_RECEIPT_STATUS"
+        reason_codes = outcome.get("reason_codes") if isinstance(outcome, dict) else None
+        if not isinstance(reason_codes, list):
+            reason_codes = []
+        transport_error = outcome.get("transport_error") if isinstance(outcome, dict) else None
+        if not isinstance(transport_error, bool):
+            transport_error = False
         claim_match = CLAIM_RE.findall(log_text)
         summary = {
             "schema": SCHEMA,
@@ -281,6 +293,8 @@ def run_check(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             "head_tree": head_tree,
             "issue": args.issue,
             "status": status,
+            "reason_codes": reason_codes,
+            "transport_error": transport_error,
             "claim": claim_match[-1] if claim_match else None,
             "receipt_path": str(receipt_out) if receipt_out else None,
             "receipt_sha256": _sha256_file(receipt_out) if receipt_out else None,
@@ -311,6 +325,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--base-ref", default="origin/main")
     parser.add_argument("--cache-root", default="~/.cache/nexus-core-local")
     parser.add_argument("--output-dir")
+    parser.add_argument(
+        "--json-out",
+        help="also write the summary JSON (same bytes as stdout) to this path, creating "
+        "parent directories; if the write fails a warning is printed to stderr and the "
+        "exit code is unchanged",
+    )
     parser.add_argument("--no-fetch", action="store_true")
     parser.add_argument("--certify-bin", help="override Core binary (tests)")
     parser.add_argument("--material-python", help="override material python")
@@ -330,7 +350,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             "error": str(exc),
         }
         code = EXIT_ERROR
-    print(json.dumps(summary, indent=2, sort_keys=True))
+    text = json.dumps(summary, indent=2, sort_keys=True)
+    print(text)
+    if args.json_out:
+        try:
+            out_path = Path(args.json_out).expanduser()
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(text + "\n", encoding="utf-8")
+        except OSError as exc:
+            print(f"warning: cannot write --json-out {args.json_out}: {exc}", file=sys.stderr)
     return code
 
 
