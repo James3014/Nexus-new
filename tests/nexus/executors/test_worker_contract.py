@@ -263,10 +263,19 @@ def test_cline_adapter_is_registered_and_binds_glm_52_on_target(monkeypatch, tmp
     registry = WorkerRegistry.default()
 
     preflight = registry.preflight("cline")
+    # #2195: the registry binds Cline to the contract's leased worktree.
     receipt = registry.invoke(
         "cline",
-        type("Contract", (), {"task_id": "cline-glm-52"})(),
-        type("Lease", (), {"target_worktree": str(target)})(),
+        type(
+            "Contract",
+            (),
+            {
+                "task_id": "cline-glm-52",
+                "target_worktree_root": str(tmp_path),
+                "target_repo_root": str(target),
+            },
+        )(),
+        type("Lease", (), {"task_id": "cline-glm-52", "target_worktree": str(target)})(),
         prompt="bounded candidate",
     )
 
@@ -2004,8 +2013,8 @@ def test_cline_permission_bypass_detects_every_auto_approve_shape():
     assert (
         cline_permission_bypass(("--auto-approve", "false", "--auto-approve", "true", "p")) is True
     )
-    # The prompt itself is never inspected.
-    assert cline_permission_bypass(("--json", "--auto-approve", "false", "--yolo")) is False
+    # Every element is scanned, the trailing prompt included.
+    assert cline_permission_bypass(("--json", "--auto-approve", "false", "--yolo")) is True
 
 
 def test_cline_delivery_requires_a_successful_run_result():
@@ -2018,7 +2027,9 @@ def test_cline_delivery_requires_a_successful_run_result():
         == "cline_status_not_success"
     )
     denied = (
-        _CLINE_OK + b'{"type":"agent_event","event":{"result":"Tool execution denied by user."}}\n'
+        _CLINE_OK
+        + b'{"type":"agent_event","event":{"type":"tool-result",'
+        + b'"output":{"type":"execution-denied","reason":"no"}}}\n'
     )
     assert cline_delivery_failure(denied, b"") == "cline_permission_denied"
     assert cline_delivery_failure(_CLINE_OK, b"execution-denied: write_to_file") == (
@@ -2100,4 +2111,81 @@ def test_cline_target_outside_the_lease_is_refused(monkeypatch, tmp_path):
     receipt, calls, _ = _cline_run(monkeypatch, tmp_path, stdout=_CLINE_OK, contract=contract)
 
     assert calls == []
+    assert receipt.failure_reason == "cline_target_not_leased_worktree"
+
+
+def test_cline_markers_in_model_text_are_not_a_denial():
+    from nexus.executors.worker_registry import cline_delivery_failure
+
+    quoted = (
+        b'{"type":"agent_event","event":{"type":"text","text":'
+        b'"execution-denied / Tool execution denied by user."}}\n'
+        b'{"type":"tool_result","is_error":false,"result":"grep: execution denied, denied by user"}\n'
+        b'{"type":"tool-call","input":{"type":"execution-denied"}}\n'
+        b"plain log line: execution-denied\n"
+    )
+    assert cline_delivery_failure(quoted + _CLINE_OK, b"") is None
+
+
+def test_cline_structured_denial_events_are_non_delivery():
+    from nexus.executors.worker_registry import cline_delivery_failure
+
+    for event in (
+        b'{"type":"tool_result","is_error":true,"result":"Tool execution denied by user."}',
+        b'{"type":"tool-result","output":{"type":"execution-denied"}}',
+        b'{"type":"agent_event","event":{"content":[{"type":"tool-approval-response",'
+        b'"approved":false}]}}',
+    ):
+        assert cline_delivery_failure(_CLINE_OK + event + b"\n", b"") == (
+            "cline_permission_denied"
+        ), event
+
+
+def test_cline_flag_shaped_prompt_is_refused_before_launch(monkeypatch, tmp_path):
+    from nexus.executors.worker_registry import ClineWorkerAdapter
+
+    _cline_ready(monkeypatch, tmp_path)
+    canonical = _cline_git_repo(tmp_path / "canonical")
+    target = tmp_path / "target"
+    target.mkdir()
+    launched = []
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry.run_cli_worker",
+        lambda request, on_process_group=None: launched.append(request),
+    )
+    for prompt in ("--yolo", "-y", "--auto-approve=true", "-"):
+        receipt = ClineWorkerAdapter(canonical_root=canonical).invoke(
+            type("Contract", (), {"task_id": "cline-2195"})(),
+            type("Lease", (), {"task_id": "cline-2195", "target_worktree": str(target)})(),
+            prompt=prompt,
+        )
+        assert receipt.failure_reason == "cline_prompt_shape_unsupported", prompt
+        assert receipt.provider_calls == 0
+    assert launched == []
+
+
+def test_cline_registry_requires_a_leased_target(monkeypatch, tmp_path):
+    _cline_ready(monkeypatch, tmp_path)
+    canonical = _cline_git_repo(tmp_path / "canonical")
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry._default_canonical_checkout_root", lambda: canonical
+    )
+    target = tmp_path / "target"
+    target.mkdir()
+    launched = []
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry.run_cli_worker",
+        lambda request, on_process_group=None: launched.append(request),
+    )
+    # A contract without target_worktree_root must not skip the lease check.
+    receipt = WorkerRegistry.default().invoke(
+        "cline",
+        type("Contract", (), {"task_id": "cline-2195"})(),
+        type("Lease", (), {"task_id": "cline-2195", "target_worktree": str(target)})(),
+        prompt="bounded",
+    )
+
+    assert launched == []
+    assert receipt.outcome == WorkerOutcome.FAILED.value
+    assert receipt.provider_calls == 0
     assert receipt.failure_reason == "cline_target_not_leased_worktree"

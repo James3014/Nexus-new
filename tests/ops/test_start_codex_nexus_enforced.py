@@ -43,7 +43,19 @@ case "$FAKE_CODEX_MODE" in
   work) echo delivered > "$work/candidate.txt"; echo '{"type":"turn.completed"}' ;;
   canonical) echo tampered > "$FAKE_CANONICAL/tracked.txt"; echo '{"type":"turn.completed"}' ;;
   declined) echo '{"type":"item.completed","item":{"type":"command_execution","status":"declined"}}' ;;
-  sandbox) echo 'sandbox denied exec error, exit code: 1' ;;
+  sandbox) echo '{"type":"error","message":"sandbox denied exec error, exit code: 1"}' ;;
+  quoted)
+    # Model text and command output that merely quote the old markers.
+    echo '{"type":"item.completed","item":{"type":"agent_message","text":"grep: sandbox denied|rejected by user|\"status\": \"declined\""}}'
+    echo '{"type":"item.completed","item":{"type":"command_execution","status":"completed","aggregated_output":"sandbox denied rejected by user \"status\": \"declined\""}}'
+    echo 'sandbox denied exec error, exit code: 1 (not JSON)'
+    echo '{"type":"turn.completed"}' ;;
+  fail) echo '{"type":"turn.failed","error":{"message":"model unavailable"}}'; exit 3 ;;
+  ref)
+    moved="$(GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t \
+      git -C "$FAKE_CANONICAL" commit-tree 'HEAD^{tree}' -p HEAD -m moved)"
+    git -C "$FAKE_CANONICAL" update-ref refs/heads/side "$moved"
+    echo '{"type":"turn.completed"}' ;;
 esac
 """
 
@@ -53,7 +65,13 @@ def _git(root: Path, *args: str) -> None:
 
 
 def _launch(
-    tmp_path: Path, mode: str, approval: str = "workspace-write", work_root: Path | None = None
+    tmp_path: Path,
+    mode: str,
+    approval: str = "workspace-write",
+    work_root: Path | None = None,
+    model: str = "gpt-test",
+    commit: bool = True,
+    default_work_root: bool = False,
 ):
     canonical = tmp_path / "canonical"
     ops = canonical / "scripts" / "ops"
@@ -63,7 +81,9 @@ def _launch(
     (canonical / "tracked.txt").write_text("base\n", encoding="utf-8")
     _git(canonical, "init", "-q")
     _git(canonical, "add", ".")
-    _git(canonical, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init")
+    if commit:
+        _git(canonical, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init")
+        _git(canonical, "branch", "side")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     fake = bin_dir / "codex"
@@ -82,9 +102,15 @@ def _launch(
         "NEXUS_MACHINE_STATE_DIR": str(state),
         "LOCK_FILE": str(tmp_path / "launcher.lock"),
         "NEXUS_CODEX_WORK_ROOT": str(work_root or tmp_path / "runs"),
+        # Keep the default state dir (work copies, report) inside the test.
+        "XDG_STATE_HOME": str(tmp_path / "xdg"),
+        "TMPDIR": str(tmp_path / "tmpdir"),
     }
+    env.pop("REPORT_FILE", None)
+    if default_work_root:
+        env.pop("NEXUS_CODEX_WORK_ROOT")
     res = subprocess.run(
-        ["bash", str(_LAUNCHER), "gpt-test", approval, str(prompt)],
+        ["bash", str(_LAUNCHER), model, approval, str(prompt)],
         cwd=canonical,
         env=env,
         capture_output=True,
@@ -142,6 +168,79 @@ def test_codex_launcher_denied_actions_are_non_delivery(tmp_path):
 
 def test_codex_launcher_refuses_work_root_inside_canonical(tmp_path):
     res, argv, _ = _launch(tmp_path, "work", work_root=tmp_path / "canonical" / "runs")
+
+    assert res.returncode == 2
+    assert "overlaps the canonical checkout" in res.stderr
+    assert argv == []
+
+
+def test_codex_launcher_excludes_tmp_from_the_sandbox_and_state(tmp_path):
+    res, argv, _ = _launch(tmp_path, "work", default_work_root=True)
+
+    assert res.returncode == 0, res.stderr
+    configs = [argv[index + 1] for index, item in enumerate(argv) if item == "-c"]
+    assert "sandbox_workspace_write.exclude_tmpdir_env_var=true" in configs
+    assert "sandbox_workspace_write.exclude_slash_tmp=true" in configs
+    state = (tmp_path / "xdg" / "nexus-codex").resolve()
+    work = Path(argv[argv.index("-C") + 1]).resolve()
+    assert work.parent == state / "runs"
+    assert (state / "antigravity_invoke_report.txt").is_file()
+    for tmp_root in ((tmp_path / "tmpdir").resolve(), Path("/tmp").resolve()):
+        assert tmp_root not in work.parents
+        assert tmp_root not in (state / "antigravity_invoke_report.txt").parents
+
+
+def test_codex_launcher_ignores_denial_markers_in_free_text(tmp_path):
+    res, _, _ = _launch(tmp_path, "quoted")
+
+    assert res.returncode == 0, res.stderr
+    assert "codex_action_denied" not in res.stderr
+
+
+def test_codex_launcher_propagates_a_nonzero_codex_exit(tmp_path):
+    res, _, _ = _launch(tmp_path, "fail")
+
+    assert res.returncode == 3, res.stderr
+    assert "codex exited 3" in res.stderr
+
+
+def test_codex_launcher_fails_when_a_canonical_ref_moves(tmp_path):
+    res, _, canonical = _launch(tmp_path, "ref")
+
+    assert res.returncode == 5, res.stderr
+    assert "canonical_checkout_integrity_violation" in res.stderr
+    # Reported, never reverted.
+    side = subprocess.run(
+        ["git", "log", "-1", "--format=%s", "side"],
+        cwd=canonical,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert side.stdout.strip() == "moved"
+
+
+def test_codex_launcher_refuses_when_the_canonical_snapshot_fails(tmp_path):
+    # An unborn HEAD cannot be fingerprinted; the run must not start.
+    res, argv, _ = _launch(tmp_path, "work", commit=False)
+
+    assert res.returncode == 2
+    assert "canonical_checkout_snapshot_unavailable" in res.stderr
+    assert argv == []
+
+
+def test_codex_launcher_refuses_flag_shaped_models(tmp_path):
+    for index, model in enumerate(("--yolo", "-m", " ", "gpt 5", "a=b", "x\ty")):
+        res, argv, _ = _launch(tmp_path / str(index), "work", model=model)
+        assert res.returncode == 2, model
+        assert "model refused" in res.stderr
+        assert argv == []
+
+
+def test_codex_launcher_refuses_symlinked_work_root_into_canonical(tmp_path):
+    link = tmp_path / "runs-link"
+    link.symlink_to(tmp_path / "canonical", target_is_directory=True)
+    res, argv, _ = _launch(tmp_path, "work", work_root=link)
 
     assert res.returncode == 2
     assert "overlaps the canonical checkout" in res.stderr

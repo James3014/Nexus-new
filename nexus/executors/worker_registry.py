@@ -278,8 +278,45 @@ class DirectCliWorkerAdapter:
 
 # Cline reports a refused tool as ``execution-denied`` with the default
 # reason "Tool execution denied by user." (observed in the cline 3.0.69 CLI).
+# The text markers are trusted on stderr only (as for Agy's headless marker);
+# stdout is read as JSON events and only structural keys are inspected.
 _CLINE_DENIAL_MARKERS = ("execution-denied", "execution denied", "denied by user")
 CLINE_PERMISSION_MODE = "auto_approve_false"
+# Assumed structured shapes (cline 3.0.69 bundles the AI SDK tool-result
+# model; the exact ``--json`` envelope is not pinned, so any nesting depth is
+# searched):
+#   {"type": "execution-denied", "reason": ...}             a denied tool output
+#   {"type": "tool-approval-response", "approved": false}   a refused approval
+#   {"is_error": true, "result": "Tool execution denied ..."} a provider-mapped
+#       denied tool result (the default reasons below, prefix match only)
+_CLINE_DENIED_TYPES = frozenset({"execution-denied"})
+_CLINE_DENIED_DEFAULT_REASONS = ("tool execution denied", "tool call execution denied")
+# Model-authored tool arguments are never read as structure.
+_CLINE_MODEL_ARGUMENT_KEYS = frozenset({"input", "args", "arguments", "params", "parameters"})
+
+
+def _cline_structured_denial(value: Any) -> bool:
+    if isinstance(value, list):
+        return any(_cline_structured_denial(item) for item in value)
+    if not isinstance(value, dict):
+        return False
+    kind = value.get("type")
+    if kind in _CLINE_DENIED_TYPES:
+        return True
+    if kind == "tool-approval-response" and value.get("approved") is False:
+        return True
+    result = value.get("result")
+    if (
+        value.get("is_error") is True
+        and isinstance(result, str)
+        and result.strip().lower().startswith(_CLINE_DENIED_DEFAULT_REASONS)
+    ):
+        return True
+    return any(
+        _cline_structured_denial(item)
+        for key, item in value.items()
+        if key not in _CLINE_MODEL_ARGUMENT_KEYS
+    )
 
 
 def cline_delivery_failure(stdout: bytes, stderr: bytes) -> Optional[str]:
@@ -287,19 +324,27 @@ def cline_delivery_failure(stdout: bytes, stderr: bytes) -> Optional[str]:
 
     Delivery requires a JSON ``run_result`` event whose ``finishReason`` is
     not ``error``; any denied tool action makes the run non-delivery (#2195).
+    A denial is a text marker on stderr or a structured stdout event; model
+    text that merely quotes a marker is not a denial.
     """
-    text = stdout.decode("utf-8", errors="replace")
-    combined = (text + "\n" + stderr.decode("utf-8", errors="replace")).lower()
-    if any(marker in combined for marker in _CLINE_DENIAL_MARKERS):
+    err = stderr.decode("utf-8", errors="replace").lower()
+    if any(marker in err for marker in _CLINE_DENIAL_MARKERS):
         return "cline_permission_denied"
+    text = stdout.decode("utf-8", errors="replace")
     results: list[dict[str, Any]] = []
+    denied = False
     for line in text.splitlines():
         try:
             value = json.loads(line)
         except ValueError:
             continue
-        if isinstance(value, dict) and value.get("type") == "run_result":
+        if not isinstance(value, dict):
+            continue
+        denied = denied or _cline_structured_denial(value)
+        if value.get("type") == "run_result":
             results.append(value)
+    if denied:
+        return "cline_permission_denied"
     if not results:
         return "cline_output_unparseable"
     finish = str(results[-1].get("finishReason") or "").lower()
@@ -314,13 +359,14 @@ CLINE_YOLO_FLAGS = frozenset({"--yolo", "-y"})
 
 
 def cline_permission_bypass(argv: tuple[str, ...]) -> bool:
-    """True when the option part of a Cline argv auto-approves tools (#2195).
+    """True when a Cline argv auto-approves tools (#2195).
 
     Cline auto-approves by default, so the argv must carry exactly one
-    explicit auto-approve flag set to ``false`` and no yolo flag.  The last
-    element is the prompt and is not inspected.
+    explicit auto-approve flag set to ``false`` and no yolo flag.  Every
+    element is scanned, the trailing prompt included; the adapter refuses a
+    prompt that starts with ``-`` before launch so it is never a flag.
     """
-    options = list(argv[:-1])
+    options = list(argv)
     if any(
         item in CLINE_YOLO_FLAGS or item.startswith(CLINE_AUTO_APPROVE_FLAG + "=")
         for item in options
@@ -346,6 +392,9 @@ class ClineWorkerAdapter(DirectCliWorkerAdapter):
     the run, and a denied tool action is non-delivery.
     """
 
+    # The registry (production path) always binds the target to the lease.
+    requires_leased_target = True
+
     def __init__(self, canonical_root: Optional[Path | str] = None):
         super().__init__("cline", "cline", "NEXUS_CLINE_WORKER_MODEL", "glm-5.2", _cline_args)
         self._canonical_root = Path(canonical_root) if canonical_root is not None else None
@@ -359,6 +408,7 @@ class ClineWorkerAdapter(DirectCliWorkerAdapter):
         timeout_seconds: Optional[float] = None,
         on_process_group: Any = None,
         model: Optional[str] = None,
+        require_leased_target: bool = False,
     ) -> WorkerExecutionReceipt:
         preflight = self.preflight()
         if not preflight.ready:
@@ -392,9 +442,15 @@ class ClineWorkerAdapter(DirectCliWorkerAdapter):
                 provider_permission_mode=CLINE_PERMISSION_MODE,
             )
 
+        # The prompt is the last positional argv element; one starting with
+        # "-" could be parsed by Cline as a flag or subcommand.
+        if prompt.startswith("-"):
+            return failed("cline_prompt_shape_unsupported")
         if cline_permission_bypass(argv):
             return failed("cline_command_shape_unsupported")
-        if hasattr(contract, "target_worktree_root"):
+        # Same rule as Agy: a required lease is never skipped because the
+        # contract lacks the attribute (it then fails the lease check).
+        if require_leased_target or hasattr(contract, "target_worktree_root"):
             lease_failure = leased_target_failure(contract, lease)
             if lease_failure is not None:
                 return failed(lease_failure.replace("agy_", "cline_", 1))
@@ -1303,7 +1359,6 @@ def _grok_args(prompt: str, model: str) -> tuple[str, ...]:
     return ("--model", model, "--single", prompt, "--output-format", "json", "--no-alt-screen")
 
 
-
 def _cline_adapter() -> DirectCliWorkerAdapter:
     # Typed as the base class so the pre-existing WorkerAdapter protocol
     # finding on the registry keeps its identity (#2195).
@@ -1377,6 +1432,8 @@ class WorkerRegistry:
         if bool(getattr(adapter, "accepts_worker_role", False)):
             options["worker_role"] = worker_role
             # Production entry: the target must be the contract's leased worktree.
+            options["require_leased_target"] = True
+        elif bool(getattr(adapter, "requires_leased_target", False)):
             options["require_leased_target"] = True
         effect_authorization = options.pop("effect_authorization", None)
         tool_projection_manifest = options.pop("tool_projection_manifest", None)

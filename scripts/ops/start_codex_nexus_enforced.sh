@@ -5,9 +5,13 @@
 #   (workspace-write, or read-only) with an explicit approval policy.
 # * Disposable work copy: codex works in a detached Git worktree under
 #   NEXUS_CODEX_WORK_ROOT that may not overlap the canonical checkout.
+# * TMPDIR and /tmp are excluded from the sandbox's writable roots, and the
+#   work copies and the JSONL report default to a state dir outside both, so
+#   a sandboxed run cannot rewrite earlier work copies or its own report.
 # * Integrity: the canonical checkout is fingerprinted before and after the
 #   run; any change fails the run (it is reported, never reverted).
-# * Denied actions (declined / rejected / sandbox-denied) are non-delivery.
+# * Denied actions (declined / rejected / sandbox-denied) are non-delivery;
+#   they are read from structured JSONL events, never from free text.
 set -euo pipefail
 
 NEXUS_ROOT="."
@@ -17,9 +21,19 @@ PROMPT_FILE="${3:-/tmp/antigravity_nexus_task.md}"
 NEXUS_MACHINE_STATE_DIR="${NEXUS_MACHINE_STATE_DIR:-${NEXUS_STATE_DIR:-${TMPDIR:-/tmp}/nexus-machine-state}}"
 NEXUS_STARTUP_REPORT_DIR="${NEXUS_STARTUP_REPORT_DIR:-$NEXUS_MACHINE_STATE_DIR/startup_hardening}"
 export NEXUS_MACHINE_STATE_DIR NEXUS_STARTUP_REPORT_DIR
-REPORT_FILE="${REPORT_FILE:-$NEXUS_MACHINE_STATE_DIR/antigravity_invoke_report.txt}"
+# Outside TMPDIR and /tmp: workspace-write would otherwise let the run rewrite them.
+CODEX_STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/nexus-codex"
+REPORT_FILE="${REPORT_FILE:-$CODEX_STATE_DIR/antigravity_invoke_report.txt}"
 LOCK_FILE="${LOCK_FILE:-/tmp/nexus_antigravity_invoke.lock}"
 CODEX_BIN="${CODEX_BIN:-codex}"
+
+# The model is an argv value (an empty $1 already means the default model):
+# refuse anything codex could parse as a flag
+# (mirrors agy_model_shape_ok in nexus/executors/agy_write_admission.py).
+if [[ -z "$MODEL" || "$MODEL" == -* || "$MODEL" =~ [[:space:]=] ]]; then
+  echo "[nexus-enforced] model refused: '$MODEL' (non-empty, no leading '-', no whitespace or '=')" >&2
+  exit 2
+fi
 
 # Map the requested mode onto a codex sandbox; anything else is refused.
 # "full-auto" is the historical default and now means workspace-write.
@@ -32,7 +46,7 @@ case "$APPROVAL_MODE" in
     ;;
 esac
 
-mkdir -p "$NEXUS_MACHINE_STATE_DIR" "$NEXUS_STARTUP_REPORT_DIR"
+mkdir -p "$NEXUS_MACHINE_STATE_DIR" "$NEXUS_STARTUP_REPORT_DIR" "$(dirname "$REPORT_FILE")"
 
 if [[ ! -f "$PROMPT_FILE" ]]; then
   cat >&2 <<EOF
@@ -85,26 +99,42 @@ _sha256() {
   fi
 }
 
-# HEAD, porcelain status, tracked diff, untracked file bytes and the Git
-# common dir's code-bearing metadata (config, hooks/, info/).
-canonical_fingerprint() {
-  local root="$1" common file
-  common="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir)"
-  {
-    git -C "$root" rev-parse --verify HEAD
-    git -C "$root" status --porcelain=v1 -uall -z
-    git -C "$root" diff --binary HEAD | _sha256
-    while IFS= read -r -d '' file; do
-      printf 'untracked:%s:' "$file"
-      _sha256 < "$root/$file" || echo unreadable
-    done < <(git -C "$root" ls-files -z --others --exclude-standard)
-    printf 'config:'
-    _sha256 < "$common/config" || echo missing
-    for file in $(find "$common/hooks" "$common/info" -type f 2>/dev/null | LC_ALL=C sort); do
+# HEAD, porcelain status, tracked diff, untracked file bytes, refs
+# (for-each-ref + packed-refs) and the Git common dir's code-bearing metadata
+# (config, hooks/, info/).  Every step that can fail returns 1 so a snapshot
+# that cannot be taken is never mistaken for an unchanged checkout; a missing
+# hooks/ or info/ directory is a normal state, not a failure.
+_fingerprint_material() {
+  local root="$1" common dir file
+  common="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir)" || return 1
+  git -C "$root" rev-parse --verify HEAD || return 1
+  git -C "$root" status --porcelain=v1 -uall -z || return 1
+  git -C "$root" diff --binary HEAD | _sha256 || return 1
+  git -C "$root" ls-files -z --others --exclude-standard | while IFS= read -r -d '' file; do
+    printf 'untracked:%s:' "$file"
+    _sha256 < "$root/$file" || echo unreadable
+  done || return 1
+  printf 'refs:'
+  git -C "$root" for-each-ref --format='%(refname) %(objectname)' || return 1
+  printf 'packed-refs:'
+  if [[ -f "$common/packed-refs" ]]; then
+    _sha256 < "$common/packed-refs" || return 1
+  else
+    echo missing
+  fi
+  printf 'config:'
+  _sha256 < "$common/config" || echo missing
+  for dir in hooks info; do
+    [[ -d "$common/$dir" ]] || continue
+    find "$common/$dir" -type f -print0 | LC_ALL=C sort -z | while IFS= read -r -d '' file; do
       printf '%s:' "${file#"$common"/}"
       _sha256 < "$file" || echo unreadable
-    done
-  } | _sha256
+    done || return 1
+  done
+}
+
+canonical_fingerprint() {
+  _fingerprint_material "$1" | _sha256
 }
 
 paths_overlap() {
@@ -113,7 +143,7 @@ paths_overlap() {
   return 1
 }
 
-WORK_PARENT="${NEXUS_CODEX_WORK_ROOT:-${TMPDIR:-/tmp}/nexus-codex-runs}"
+WORK_PARENT="${NEXUS_CODEX_WORK_ROOT:-$CODEX_STATE_DIR/runs}"
 mkdir -p "$WORK_PARENT"
 WORK_PARENT="$(cd "$WORK_PARENT" && pwd -P)"
 if paths_overlap "$WORK_PARENT" "$CANONICAL_ROOT"; then
@@ -121,7 +151,10 @@ if paths_overlap "$WORK_PARENT" "$CANONICAL_ROOT"; then
   exit 2
 fi
 
-BEFORE="$(canonical_fingerprint "$CANONICAL_ROOT")"
+if ! BEFORE="$(canonical_fingerprint "$CANONICAL_ROOT")"; then
+  echo "[nexus-enforced] canonical_checkout_snapshot_unavailable: $CANONICAL_ROOT" >&2
+  exit 2
+fi
 WORK_DIR="$(mktemp -d "$WORK_PARENT/run.XXXXXX")"
 rmdir "$WORK_DIR"
 git -C "$CANONICAL_ROOT" worktree add --quiet --detach "$WORK_DIR" HEAD
@@ -131,17 +164,65 @@ echo "[nexus-enforced] work_copy=$WORK_DIR"
 echo "[nexus-enforced] invoke codex-nexus (enforced)"
 set +e
 "$CODEX_BIN" exec --ephemeral --json -C "$WORK_DIR" -m "$MODEL" \
-  --sandbox "$SANDBOX_MODE" -c 'approval_policy="never"' - < "$PROMPT_FILE" | tee "$REPORT_FILE"
+  --sandbox "$SANDBOX_MODE" -c 'approval_policy="never"' \
+  -c sandbox_workspace_write.exclude_tmpdir_env_var=true \
+  -c sandbox_workspace_write.exclude_slash_tmp=true \
+  - < "$PROMPT_FILE" | tee "$REPORT_FILE"
 CODEX_STATUS=${PIPESTATUS[0]}
 set -e
 
-AFTER="$(canonical_fingerprint "$CANONICAL_ROOT" || echo unavailable)"
+if ! AFTER="$(canonical_fingerprint "$CANONICAL_ROOT")"; then
+  echo "[nexus-enforced] canonical_snapshot_failed: $CANONICAL_ROOT could not be re-fingerprinted" >&2
+  exit 5
+fi
 if [[ "$AFTER" != "$BEFORE" ]]; then
   echo "[nexus-enforced] canonical_checkout_integrity_violation: $CANONICAL_ROOT changed during the run" >&2
   exit 5
 fi
-if grep -Eqi 'sandbox denied|rejected by user|"status": *"declined"' "$REPORT_FILE"; then
-  echo "[nexus-enforced] codex_action_denied: a denied action is non-delivery (work copy kept: $WORK_DIR)" >&2
+
+# Denials are read from the structured `codex exec --json` stream only.
+# Assumed event shapes (codex-cli 0.162.1; not confirmable without a model
+# run, so the matched key set is kept small and explicit):
+#   {"type":"item.*","item":{"type":"command_execution"|"file_change"|
+#     "mcp_tool_call"|...,"status":"declined"|"rejected"}}   -> denied
+#   {"type":"error","message":"sandbox denied ..."} and
+#   {"type":"turn.failed","error":{"message":"sandbox denied ..."}} -> denied
+# Free text (agent messages, command output, file contents) is never
+# inspected, and a line that is not a JSON object is ignored.
+DENIAL_STATUS=0
+python3 -I - "$REPORT_FILE" <<'PY' || DENIAL_STATUS=$?
+import json
+import sys
+
+DENIED_ITEM_STATUSES = {"declined", "rejected"}
+ERROR_EVENT_TYPES = {"error", "turn.failed"}
+
+
+def denied(event):
+    item = event.get("item")
+    if isinstance(item, dict) and item.get("status") in DENIED_ITEM_STATUSES:
+        return True
+    if event.get("type") in ERROR_EVENT_TYPES:
+        error = event.get("error")
+        message = error.get("message") if isinstance(error, dict) else event.get("message")
+        if isinstance(message, str) and message.lower().startswith("sandbox denied"):
+            return True
+    return False
+
+
+with open(sys.argv[1], encoding="utf-8", errors="replace") as report:
+    for line in report:
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(event, dict) and denied(event):
+            sys.exit(10)
+PY
+if [[ "$DENIAL_STATUS" -ne 0 ]]; then
+  # 10 = a structured denial; anything else means the report could not be
+  # classified, which is also non-delivery (fail closed).
+  echo "[nexus-enforced] codex_action_denied: a denied action is non-delivery (work copy kept: $WORK_DIR; classifier status $DENIAL_STATUS)" >&2
   exit 4
 fi
 if [[ "$CODEX_STATUS" -ne 0 ]]; then
