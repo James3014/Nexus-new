@@ -4179,3 +4179,59 @@ def test_integration_blocks_worker_registry_without_persisted_dispatch(tmp_path:
             "closure-bind", integration_branch="nexus/integration/canary",
             runtime_identity=runtime,
         )
+
+
+def test_strict_apply_refuses_second_worktree_forced_onto_integration_branch(tmp_path: Path):
+    """``worktree add -f`` can double-check-out the branch the Controller ff-merges (#2230)."""
+    root, base, candidate = _repo(tmp_path)  # Controller itself is on canary
+    other = tmp_path / "other worktree"
+    _git(root, "worktree", "add", "-f", str(other), _CANARY)
+    with pytest.raises(
+        IntegrationExecutionError, match="INTEGRATION_BRANCH_REFUSED_AT_APPLY"
+    ) as raised:
+        _separate_controller_integrate(tmp_path, root.resolve(), base, candidate)
+    assert raised.value.merge_performed is False
+    assert _git(root, "rev-parse", _CANARY_REF) == base
+    assert _git(other, "status", "--porcelain=v1", "--untracked-files=all") == ""
+    assert _git(root, "status", "--porcelain=v1", "--untracked-files=all") == ""
+
+
+def test_strict_apply_sole_controller_checkout_still_fast_forwards(tmp_path: Path):
+    """Positive control: only the Controller (path with a space) is on the branch."""
+    spaced = tmp_path / "with space"
+    spaced.mkdir()
+    root, base, candidate = _repo(spaced)
+    result = _separate_controller_integrate(tmp_path, root.resolve(), base, candidate)
+    assert result.merge_performed is True
+    assert _git(root, "rev-parse", _CANARY_REF) == result.branch_head_after != base
+    assert _git(root, "status", "--porcelain=v1", "--untracked-files=all") == ""
+
+
+def test_detached_linked_worktree_probe_shapes_and_sanitised_env(tmp_path: Path, monkeypatch):
+    root, base, _candidate = _repo(tmp_path)
+    detached = _separate_controller_worktree(tmp_path, root, base)
+    probe = ControlledIntegrationManager._is_detached_linked_worktree
+    assert probe(detached) is True
+    assert ControlledIntegrationManager(integration_root=root)._is_detached_linked_worktree(
+        detached
+    )
+    assert probe(root) is False  # primary checkout on a branch
+    plain = tmp_path / "not-a-repo"
+    plain.mkdir()
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    assert probe(plain) is False
+
+    seen: list[dict[str, str]] = []
+    real_run = subprocess.run
+
+    def spy(cmd, *args, **kwargs):
+        seen.append(dict(kwargs["env"]))
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", spy)
+    assert probe(detached) is True
+    assert seen
+    assert all(
+        env.get("GIT_CONFIG_GLOBAL") == "/dev/null" and env.get("GIT_CONFIG_NOSYSTEM") == "1"
+        for env in seen
+    )
