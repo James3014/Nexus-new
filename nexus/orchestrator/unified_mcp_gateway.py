@@ -77,6 +77,11 @@ from nexus.orchestrator.canonical_mcp_ingress import (
     build_mcp_execution_context,
     reject_caller_route_overrides,
 )
+from nexus.orchestrator.canonical_source_root import (
+    CONTROLLER_IS_SEPARATE,
+    LOADED_SOURCE_ROOT,
+    bound_controller_problem,
+)
 from nexus.orchestrator.execution_readiness import (
     _COMPLETION_REQUIRED_CAPABILITIES,
     COMPLETION_INTERFACE_REVISION,
@@ -112,11 +117,6 @@ from nexus.orchestrator.owner_confirmation import (
     StdioElicitationChannel,
     UnavailableConfirmationChannel,
     client_supports_form_elicitation,
-)
-from nexus.orchestrator.canonical_source_root import (
-    CONTROLLER_IS_SEPARATE,
-    LOADED_SOURCE_ROOT,
-    bound_controller_problem,
 )
 from nexus.orchestrator.self_hosted_task_service import (
     CANONICAL_SOURCE_ROOT,
