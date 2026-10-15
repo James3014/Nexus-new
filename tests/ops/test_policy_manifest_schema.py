@@ -270,12 +270,16 @@ def test_wiring_check_edge_cases(tmp_path: Path) -> None:
         "TEST_ENTRYPOINT_NOT_FOUND: tests/test_caller.py::test_nope",
         "TEST_ENTRYPOINT_NOT_BEHAVIOURAL",
     ]
-    parametrized = _fake_policy(test_entrypoints=["tests/test_caller.py::test_run[1-2]"])
-    assert check_enforcement_wiring(parametrized, root) == []
-    colon_param = _fake_policy(test_entrypoints=["tests/test_caller.py::test_run[a::b]"])
-    assert check_enforcement_wiring(colon_param, root) == []
-    # A [param] selector on a test that is not parametrized, or a malformed one, is not a node.
-    for selector in ("test_plain[1]", "test_run[]", "test_run[a]junk]", "test_run[a]::zz]"):
+    # Parametrized ids cannot be resolved statically, so any [param] selector is refused;
+    # the manifest lists the function instead.
+    for selector in (
+        "test_run[1-2]",
+        "test_run[a::b]",
+        "test_plain[1]",
+        "test_run[]",
+        "test_run[a]junk]",
+        "test_run[a]::zz]",
+    ):
         bad = _fake_policy(test_entrypoints=[f"tests/test_caller.py::{selector}"])
         assert check_enforcement_wiring(bad, root) == [
             f"TEST_ENTRYPOINT_NOT_FOUND: tests/test_caller.py::{selector}",
@@ -315,13 +319,18 @@ def test_wiring_check_edge_cases(tmp_path: Path) -> None:
         source_file="pkg/guard.py; pkg.py", test_entrypoints=["tests/test_pkg.py::test_p"]
     )
     assert check_enforcement_wiring(package_alias, root) == ["ENFORCEMENT_CALLER_NOT_FOUND: pkg.py"]
-    # Fixtures and classes are not tests; a [param] part can only end the selector.
+    # Fixtures and classes are not tests; [param] ids are never accepted.
     (root / "tests" / "test_fx.py").write_text(
         "import pytest\nfrom pytest import fixture as fx\nfrom pkg import caller\n"
         "alias = pytest.fixture\n\n@pytest.fixture\ndef test_fx():\n    return caller\n"
         "\n@pytest.fixture()\ndef test_fx2():\n    return 1\n\n@fx\ndef test_fx3():\n    return 1\n"
         "\n@alias()\ndef test_fx4():\n    return 1\n\nclass TestK:\n    pass\n"
-        "\ndef test_ok(x):\n    assert caller\n",
+        "import pytest as pt\npt2 = pt\n\n@pt.fixture\ndef test_fx5():\n    return 1\n"
+        "\n@pt2.fixture()\ndef test_fx6():\n    return 1\n"
+        "\nclass Marker:\n    fx = staticmethod(lambda f: f)\n    fixture = fx\n"
+        "\ndef test_ok():\n    assert caller\n"
+        "\n@Marker.fx\ndef test_marked():\n    assert caller\n"
+        "\n@Marker.fixture\ndef test_other_fixture():\n    assert caller\n",
         encoding="utf-8",
     )
     for selector in (
@@ -329,6 +338,8 @@ def test_wiring_check_edge_cases(tmp_path: Path) -> None:
         "test_fx2",
         "test_fx3",
         "test_fx4",
+        "test_fx5",
+        "test_fx6",
         "TestK",
         "test_ok[a]::zzz",
         "test_ok[a",
@@ -339,8 +350,11 @@ def test_wiring_check_edge_cases(tmp_path: Path) -> None:
             f"TEST_ENTRYPOINT_NOT_FOUND: tests/test_fx.py::{selector}",
             "TEST_ENTRYPOINT_NOT_BEHAVIOURAL",
         ], selector
-    good = _fake_policy(test_entrypoints=["tests/test_fx.py::test_ok[a::b]"])
-    assert check_enforcement_wiring(good, root) == []
+    # Structural, not name-based: an unrelated decorator that happens to end in an alias
+    # name (@Marker.fx) or in "fixture" (@other.fixture) is still a test.
+    for selector in ("test_ok", "test_marked", "test_other_fixture"):
+        good = _fake_policy(test_entrypoints=[f"tests/test_fx.py::{selector}"])
+        assert check_enforcement_wiring(good, root) == [], selector
     # A stale entry is reported even when another entry reaches a caller.
     stale_plus_good = _fake_policy(
         test_entrypoints=["tests/test_caller.py::test_run", "tests/gone.py::test_x"]
@@ -517,7 +531,7 @@ def test_real_manifest_hard_lane_policies_are_behaviourally_tested(action: str) 
         # Not drilled, not wired, or blocked on modify: a real hard-lane policy must not be
         # any of these, so a manifest-only relabel (with or without a drill-status edit)
         # turns this red in the required gate and in the policy-lane workflow.
-        assert gate._DRILLED.match(str(policy["rollback_drill_status"])), policy["policy_id"]
+        assert gate._is_drilled(policy["rollback_drill_status"]), policy["policy_id"]
         assert policy["enforcement_mode"] in ("block", "record_only"), policy["policy_id"]
         if action == "modify":
             assert result["allowed"] is True, (policy["policy_id"], result["errors"])
@@ -538,7 +552,19 @@ def test_drill_updater_keeps_schema_fields_and_distribution() -> None:
 
 
 @pytest.mark.parametrize(
-    "status", ["no-drill", "", None, "not-drilled", "drilled", "drilled-2026-1-5"]
+    "status",
+    [
+        "no-drill",
+        "",
+        None,
+        "not-drilled",
+        "drilled",
+        "drilled-2026-1-5",
+        "drilled-2026-99-99",
+        "drilled-2026-10-15\n",
+        "drilled-\u0662\u0660\u0662\u0666-10-15",
+        7,
+    ],
 )
 def test_only_an_explicit_drill_date_counts_as_drilled(monkeypatch, status) -> None:
     original = load_manifest()

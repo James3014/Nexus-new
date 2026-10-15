@@ -13,8 +13,9 @@ import ast
 import json
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST_PATH = REPO_ROOT / "docs" / "reports" / "policy-manifest.v2.json"
@@ -147,80 +148,109 @@ def _imported_modules(path: Path, repo_root: Path) -> set[str]:
 
 _DEFS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 _FUNCS = (ast.FunctionDef, ast.AsyncFunctionDef)
-_DRILLED = re.compile(r"^drilled-\d{4}-\d{2}-\d{2}$")
+_DRILLED = re.compile(r"drilled-[0-9]{4}-[0-9]{2}-[0-9]{2}")
 
 
-def _terminal_name(node: ast.AST) -> str:
-    """``pytest.fixture`` -> ``fixture``; ``fixture`` -> ``fixture``; ``fixture(...)`` likewise."""
-    target = node.func if isinstance(node, ast.Call) else node
-    if isinstance(target, ast.Attribute):
-        return target.attr
-    return getattr(target, "id", "")
+def _is_drilled(status: Any) -> bool:
+    """Exactly ``drilled-YYYY-MM-DD`` with a real calendar date; nothing else counts."""
+    text = status if isinstance(status, str) else ""
+    if _DRILLED.fullmatch(text) is None:
+        return False
+    try:
+        date.fromisoformat(text[len("drilled-") :])
+    except ValueError:
+        return False
+    return True
 
 
-def _fixture_aliases(tree: ast.Module) -> set[str]:
-    """Names bound to pytest's fixture decorator in this module.
+def _fixture_bindings(tree: ast.Module) -> tuple[set[str], set[str]]:
+    """(names bound to pytest's ``fixture``, names bound to the pytest module).
 
-    Covers ``from pytest import fixture as fx``, ``from _pytest.fixtures import
-    fixture``, and ``fx = pytest.fixture`` / ``fx = fixture``. Dynamic aliases
+    Covers ``from pytest import fixture [as fx]``, ``from _pytest.fixtures import
+    fixture``, ``import pytest [as pt]``, ``import _pytest.fixtures`` and simple
+    assignments ``fx = pytest.fixture`` / ``pt = pytest``. Dynamic aliases
     (``getattr``) are outside a static check.
     """
-    names = {"fixture"}
+    fixtures: set[str] = set()
+    modules: set[str] = set()
     changed = True
     while changed:
         changed = False
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.module in ("pytest", "_pytest.fixtures"):
                 for alias in node.names:
-                    if alias.name == "fixture" and (alias.asname or alias.name) not in names:
-                        names.add(alias.asname or alias.name)
+                    if alias.name == "fixture" and (alias.asname or "fixture") not in fixtures:
+                        fixtures.add(alias.asname or "fixture")
                         changed = True
-            elif isinstance(node, ast.Assign) and _terminal_name(node.value) in names:
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name in ("pytest", "_pytest.fixtures"):
+                        bound = alias.asname or alias.name.split(".", 1)[0]
+                        if bound not in modules:
+                            modules.add(bound)
+                            changed = True
+            elif isinstance(node, ast.Assign):
+                value = node.value
+                is_fixture = (isinstance(value, ast.Name) and value.id in fixtures) or (
+                    isinstance(value, ast.Attribute)
+                    and value.attr == "fixture"
+                    and isinstance(value.value, ast.Name)
+                    and value.value.id in modules
+                )
+                is_module = isinstance(value, ast.Name) and value.id in modules
                 for target in node.targets:
-                    if isinstance(target, ast.Name) and target.id not in names:
-                        names.add(target.id)
+                    if not isinstance(target, ast.Name):
+                        continue
+                    if is_fixture and target.id not in fixtures:
+                        fixtures.add(target.id)
                         changed = True
-    return names
+                    if is_module and target.id not in modules:
+                        modules.add(target.id)
+                        changed = True
+    return fixtures, modules
 
 
-def _is_fixture(node: ast.AST, aliases: set[str]) -> bool:
-    """``@pytest.fixture`` / ``@fixture`` / ``@fx`` (alias) / ``...(...)`` — not a test."""
-    return any(_terminal_name(dec) in aliases for dec in getattr(node, "decorator_list", []))
+def _is_fixture(node: ast.AST, bindings: tuple[set[str], set[str]]) -> bool:
+    """``@pytest.fixture`` / ``@fixture`` / ``@fx`` (alias) / ``...(...)`` — not a test.
 
-
-def _accepts_params(node: ast.AST) -> bool:
-    """A ``[param]`` selector needs a parametrized test: a ``parametrize`` mark or arguments."""
-    if any(_terminal_name(dec) == "parametrize" for dec in getattr(node, "decorator_list", [])):
-        return True
-    args = getattr(node, "args", None)
-    if args is None:
-        return False
-    positional = [a for a in args.args + args.posonlyargs if a.arg not in ("self", "cls")]
-    return bool(positional or args.kwonlyargs)
+    Structural match only: ``@Marker.fx`` is not a fixture even when ``fx`` is an
+    alias, and ``@other.fixture`` is not unless ``other`` is bound to pytest.
+    """
+    fixtures, modules = bindings
+    for dec in getattr(node, "decorator_list", []):
+        target = dec.func if isinstance(dec, ast.Call) else dec
+        if isinstance(target, ast.Name) and target.id in fixtures:
+            return True
+        if (
+            isinstance(target, ast.Attribute)
+            and target.attr == "fixture"
+            and isinstance(target.value, ast.Name)
+            and target.value.id in modules
+        ):
+            return True
+    return False
 
 
 def _entrypoint_exists(path: Path, selector: str) -> bool:
-    """``file::Class::test_name[param]`` names a test the way pytest collects it.
+    """``file::Class::test_name`` names a test the way pytest collects it.
 
     The first component must be a top-level def/class of the module, each next
-    component a def/class directly inside the previous one, and the last one a
-    plain function that is not a fixture. A ``[param]`` part may only end the
-    selector. ``file::a::b`` with two unrelated top-level functions, a fixture,
-    or ``file::test_x[p]::y`` are not nodes; ``[p]`` needs a parametrize mark or
-    test arguments. Tests defined under ``if``/``try``, inherited from a base
-    class, or a whole class ``file::TestA`` are not recognised (fail closed).
+    component a class directly inside the previous one, and the last one a
+    plain function that is not a fixture. ``file::a::b`` with two unrelated
+    top-level functions, a fixture, or any ``[param]`` id are not accepted.
+    Tests defined under ``if``/``try``, inherited from a base class, or a whole
+    class ``file::TestA`` are not recognised (fail closed).
     """
     if not selector.strip():
         return True  # whole file
-    head, bracket, tail = selector.partition("[")
-    if bracket:
-        # ``[id]`` must be the whole remainder, non-empty, with no second ``]``.
-        if not tail.endswith("]") or len(tail) < 2 or "]" in tail[:-1]:
-            return False
+    if "[" in selector or "]" in selector:
+        # Parametrized ids (``test_x[a-b]``) cannot be resolved statically: pytest
+        # derives them from values, fixtures and ``ids=``. List the function instead.
+        return False
     tree = _parse(path)
     if tree is None:
         return False
-    names = [part.strip() for part in head.split("::")]
+    names = [part.strip() for part in selector.split("::")]
     if not names or any(not name for name in names):
         return False
     body: list[ast.stmt] = list(tree.body)
@@ -232,9 +262,7 @@ def _entrypoint_exists(path: Path, selector: str) -> bool:
         if match is None:
             return False
         body = list(match.body)
-    if match is None or _is_fixture(match, _fixture_aliases(tree)):
-        return False
-    return not bracket or _accepts_params(match)
+    return match is not None and not _is_fixture(match, _fixture_bindings(tree))
 
 
 def check_enforcement_wiring(policy: dict, repo_root: Path | None = None) -> list[str]:
@@ -336,7 +364,7 @@ def check_hard_lane(policy: dict, action: str) -> dict:
     if action in ("modify", "promote", "cutover"):
         # Only an explicit ``drilled-YYYY-MM-DD`` counts; "no-drill", "", null or any
         # other spelling is missing (#2263 review).
-        if not _DRILLED.match(str(policy.get("rollback_drill_status") or "")):
+        if not _is_drilled(policy.get("rollback_drill_status")):
             errors.append("ROLLBACK_DRILL_MISSING")
         if not policy.get("test_entrypoints"):
             errors.append("TEST_COVERAGE_MISSING")
