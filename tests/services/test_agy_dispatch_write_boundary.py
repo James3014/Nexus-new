@@ -510,6 +510,8 @@ def test_run_home_denials_alone_do_not_fail_a_clean_run(tmp_path, monkeypatch, s
     assert metas[-1]["status"] == "completed"
 
 
+# The id is kept for exact-base impact continuity; the assertion is now the
+# reverse: a genuine permission signal outranks a quota signal.
 def test_classify_failure_quota_outranks_permission_markers():
     """(Id kept.) Quota wins only once no genuine permission signal remains."""
     stdout = "open /elsewhere/file: operation not permitted"
@@ -632,6 +634,154 @@ def test_descendant_sweep_failure_is_terminal(tmp_path, monkeypatch, seatbelt_on
     assert metas[-1]["status"] == "failed"
     assert metas[-1]["failure_kind"] == "AGY_DESCENDANT_SWEEP_FAILED"
     assert metas[-1]["reconciliation_required"] is True
+
+
+def _counting_sweep(monkeypatch) -> list[bool]:
+    results: list[bool] = []
+    real_sweep = boundary_mod.AgyDispatchBoundary.sweep
+
+    def counting(self):
+        first = self._swept is None and self._launched
+        result = real_sweep(self)
+        if first:
+            results.append(result)
+        return result
+
+    monkeypatch.setattr(boundary_mod.AgyDispatchBoundary, "sweep", counting)
+    return results
+
+
+def _launched_then_raises(write_boundary):
+    # stands in for run_agy failing after after_launch (e.g. the provider
+    # identity hook): launched, never swept, no live tracker
+    write_boundary._launched = True
+    raise RuntimeError("PROVIDER_IDENTITY_PERSIST_FAILED")
+
+
+def test_launch_frame_exception_is_swept_and_terminal(tmp_path, monkeypatch, seatbelt_on, capsys):
+    swept = _counting_sweep(monkeypatch)
+    coordinator = _RotatingCoordinator(_source_home(tmp_path))
+    target = _target(tmp_path)
+    calls = []
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        calls.append(1)
+        _launched_then_raises(write_boundary)
+
+    code = dispatch.dispatch_run(
+        prompt="edit",
+        cwd=str(target),
+        mode="accept-edits",
+        write_paths=[str(target / "a.py")],
+        coordinator=coordinator,
+        run_agy_fn=runner,
+    )
+    metas = _metas(capsys.readouterr().err)
+    assert swept == [False]  # swept exactly once, and not provably clean
+    assert code != 0 and calls == [1]
+    assert coordinator.rotated == []
+    assert metas[-1]["failure_kind"] == "AGY_DESCENDANT_SWEEP_FAILED"
+    assert coordinator.claim.released is True
+
+
+def test_launch_frame_exception_with_clean_sweep_still_raises(tmp_path, monkeypatch, seatbelt_on):
+    monkeypatch.setattr(boundary_mod.AgyDispatchBoundary, "sweep", lambda self: True)
+    target = _target(tmp_path)
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        _launched_then_raises(write_boundary)
+
+    with pytest.raises(RuntimeError, match="PROVIDER_IDENTITY_PERSIST_FAILED"):
+        dispatch.dispatch_run(
+            prompt="edit",
+            cwd=str(target),
+            mode="accept-edits",
+            write_paths=[str(target / "a.py")],
+            coordinator=_Coordinator(_source_home(tmp_path)),
+            run_agy_fn=runner,
+        )
+
+
+def test_cleanup_sweeps_a_launched_unswept_run_once(tmp_path, monkeypatch, seatbelt_on):
+    swept = _counting_sweep(monkeypatch)
+    boundary = boundary_mod.prepare_accept_edits_boundary(
+        source_env={"HOME": str(_source_home(tmp_path))}, target=_target(tmp_path)
+    )
+    boundary._launched = True
+    boundary.cleanup()
+    assert swept == [False]
+    assert boundary.sweep() is False and swept == [False]  # cached, not re-run
+
+
+def test_attestation_log_symlink_or_non_regular_is_refused(tmp_path, seatbelt_on):
+    home = _source_home(tmp_path)
+    target = _target(tmp_path)
+    ops = (tmp_path / "ops").resolve()
+    ops.mkdir()
+    other = ops / "other-operation.json"
+    other.write_text("{}", encoding="utf-8")
+    link = ops / "agy.log"
+    link.symlink_to(other)
+    fifo = ops / "fifo.log"
+    os.mkfifo(fifo)
+    for extra, reason in ((link, "extra_path_is_symlink"), (fifo, "extra_path_not_regular_file")):
+        with pytest.raises(boundary_mod.AgyWriteBoundaryError, match=reason):
+            boundary_mod.prepare_accept_edits_boundary(
+                source_env={"HOME": str(home)},
+                target=target,
+                extra_writable_files=[extra],
+                extra_writable_roots=[ops],
+            )
+    # a symlinked parent directory (/var -> /private/var) is fine
+    ops_alias = tmp_path / "ops-alias"
+    ops_alias.symlink_to(ops, target_is_directory=True)
+    boundary = boundary_mod.prepare_accept_edits_boundary(
+        source_env={"HOME": str(home)},
+        target=target,
+        extra_writable_files=[ops_alias / "fresh.log"],
+        extra_writable_roots=[ops],
+    )
+    boundary.cleanup()
+
+
+def test_attestation_log_replaced_by_symlink_refuses_next_attempt(
+    tmp_path, monkeypatch, seatbelt_on, capsys
+):
+    """Attempt 1 swaps its writable log for a symlink; attempt 2 must not follow it."""
+    home = _source_home(tmp_path)
+    target = (tmp_path / "work").resolve()
+    target.mkdir()
+    subprocess.run(["git", "init", "-q", str(target)], check=True)
+    coordinator = _RotatingCoordinator(home)
+    ops = (tmp_path / "ops").resolve()
+    ops.mkdir()
+    log = ops / "agy.log"
+    log.write_text("", encoding="utf-8")
+    victim = ops / "victim.json"
+    victim.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(log))
+    monkeypatch.setattr(dispatch, "OPERATION_ROOT", ops)
+    attempts = []
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        attempts.append(1)
+        log.unlink()
+        log.symlink_to(victim)
+        return 1, "", _AGY_QUOTA_STDERR, False, 1
+
+    code = dispatch.dispatch_run(
+        prompt="edit",
+        cwd=str(target),
+        mode="accept-edits",
+        write_paths=[str(target / "a.py")],
+        coordinator=coordinator,
+        run_agy_fn=runner,
+    )
+    metas = _metas(capsys.readouterr().err)
+    assert attempts == [1]
+    assert code == 64
+    assert metas[-1]["failure_kind"].endswith("extra_path_is_symlink")
+    assert victim.read_text() == "{}"
 
 
 def test_extra_writable_file_admitted_only_under_allowed_roots(tmp_path, seatbelt_on):

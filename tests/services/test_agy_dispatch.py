@@ -32,7 +32,7 @@ class _PassThroughBoundary:
     ``run_agy`` refuses accept-edits runs without a boundary; these telemetry
     tests exercise the stream/watchdog loop, so the double launches the fake
     agy unwrapped and reports a clean sweep.  Boundary construction itself is
-    covered in ``tests/nexus/executors/test_agy_dispatch_boundary.py``.
+    covered in ``tests/services/test_agy_dispatch_write_boundary.py``.
     """
 
     def __init__(self, env):

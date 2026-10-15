@@ -14,7 +14,11 @@ adapter gets from ``run_cli_worker``:
   per-run root, plus literal files the dispatcher itself must let Agy append
   to (its ``--log-file`` attestation log);
 * a post-exit descendant sweep over the process tree, the run tag and the
-  processes whose cwd is inside the target or the run root.
+  processes whose cwd is inside the target or the run root; it runs exactly
+  once per launched run, also when the launch frame raised.
+
+The ``--log-file`` attestation log is writable by the confined process, so
+attestation parsing must not treat its content as trusted (follow-up #2260).
 
 There is no unconfined fallback: when ``sandbox-exec`` is unavailable the
 boundary cannot be prepared and the dispatcher refuses the run.
@@ -148,6 +152,7 @@ class AgyDispatchBoundary:
     _baseline: Any = field(default=None, repr=False)
     _tracker: Any = field(default=None, repr=False)
     _launched: bool = field(default=False, repr=False)
+    _swept: Optional[bool] = field(default=None, repr=False)
 
     @property
     def seatbelt_sha256(self) -> str:
@@ -172,16 +177,22 @@ class AgyDispatchBoundary:
         self._tracker = cli_worker._DescendantTracker(pid)
 
     def sweep(self) -> bool:
-        """Kill every surviving worker descendant; True only when provably clean."""
+        """Kill every surviving worker descendant; True only when provably clean.
+
+        Runs once per launched run; later calls return the first result.
+        """
         if not self._launched:
             return True
+        if self._swept is not None:
+            return self._swept
         tracker, self._tracker = self._tracker, None
         if tracker is None:
+            self._swept = False
             return False
         baseline = self._baseline
         tracked = tracker.stop() - (baseline.preexisting if baseline else frozenset())
         tagged_clean = cli_worker._sweep_tagged_processes(self.run_tag)
-        return (
+        self._swept = bool(
             cli_worker._sweep_clean(
                 tracked, cli_worker._pids_with_cwd_under(self.sweep_roots, baseline)
             )
@@ -189,8 +200,12 @@ class AgyDispatchBoundary:
             and baseline is not None
             and not tracker.probe_failed
         )
+        return self._swept
 
     def cleanup(self) -> None:
+        # A launched run whose frame raised before its sweep is swept here.
+        if self._launched and self._swept is None:
+            self.sweep()
         tracker, self._tracker = self._tracker, None
         if tracker is not None:
             tracker.stop()
@@ -213,12 +228,22 @@ def _admit_extra_writable_file(
     candidate = Path(raw).expanduser()
     if not candidate.is_absolute():
         raise refuse("relative_extra_path")
+    # The confined process can write (and so replace) a literal-allowed path;
+    # a symlinked leaf would redirect the next attempt's grant elsewhere.
+    # Only the parent may resolve (e.g. /var -> /private/var).
+    if candidate.is_symlink():
+        raise refuse("extra_path_is_symlink")
+    parent_real = os.path.realpath(candidate.parent)
     real = Path(os.path.realpath(candidate))
+    if str(real) != os.path.join(parent_real, candidate.name):
+        raise refuse("extra_path_is_symlink")
     # A literal re-allow inside the target could reopen the .git/.agents denies.
     if path_inside(real, target):
         raise refuse("extra_path_in_target")
     if real.is_dir():
         raise refuse("extra_path_is_directory")
+    if real.exists() and not real.is_file():
+        raise refuse("extra_path_not_regular_file")
     real_home = Path(os.path.realpath(Path.home()))
     # (A lease HOME equal to the real HOME is covered by the dotfile rule below.)
     if lease_home is not None and lease_home != real_home and path_inside(real, lease_home):

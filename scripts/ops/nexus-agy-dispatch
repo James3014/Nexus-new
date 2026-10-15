@@ -3725,7 +3725,19 @@ def dispatch_run(
                     runner_kwargs["pre_effect_max_tool_events"] = pre_effect_max_tool_events
                 if write_boundary is not None:
                     runner_kwargs["write_boundary"] = write_boundary
-                code, out, err, timed_out, wall_ms = runner(**runner_kwargs)
+                try:
+                    code, out, err, timed_out, wall_ms = runner(**runner_kwargs)
+                except Exception as runner_exc:
+                    # #2202: a launch frame that raised after launch skipped its
+                    # own sweep; sweep now (once) and, when descendants may
+                    # survive, end the operation as a sweep failure.
+                    if write_boundary is None or write_boundary.sweep():
+                        raise
+                    code, out, timed_out, wall_ms = 1, "", False, 0
+                    err = (
+                        f"{type(runner_exc).__name__}: {runner_exc}\n"
+                        f"{DESCENDANT_SWEEP_FAILED_MARKER}\n"
+                    )
             finally:
                 try:
                     restore_temp_permissions(permission_token)
