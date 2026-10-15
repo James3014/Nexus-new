@@ -1441,6 +1441,15 @@ def check_fast_lane_eligible(contract: ArchitectTaskContract, request: Optional[
 CANONICAL_SOURCE_BRANCH = "nexus/integration/main"
 
 
+def _controller_is_separate() -> bool:
+    from nexus.orchestrator import canonical_source_root
+
+    return bool(
+        canonical_source_root.CONTROLLER_IS_SEPARATE
+        or canonical_source_root.CONTROLLER_BINDING_PROBLEM is not None
+    )
+
+
 def resolve_execution_lane(
     request: Mapping[str, Any],
     *,
@@ -1464,6 +1473,9 @@ def resolve_execution_lane(
     controller = Path(str(request.get("controller_repo_root") or CANONICAL_SOURCE_ROOT)).expanduser().resolve()
     if controller != CANONICAL_SOURCE_ROOT:
         blockers.append("controller_is_not_canonical_source")
+    if _controller_is_separate():
+        # #2230: Direct edits would put non-tasks/ changes into the Controller.
+        blockers.append("separate_controller_direct_forbidden")
     if request.get("primary_agent") is not True:
         blockers.append("primary_agent_attestation_required")
     worker = str(request.get("worker", "primary")).strip().lower()
