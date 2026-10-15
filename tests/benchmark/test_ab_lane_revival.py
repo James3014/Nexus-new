@@ -13,6 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from nexus.engine.sandboxed_lane import os_sandbox_available
 from scripts.bench.capability_ab_runner import _summarize_with_strict_baseline
 from scripts.bench.strict_llm_baseline import apply_strict_llm_baseline_classification
 
@@ -134,6 +135,16 @@ def test_dry_mode_without_llm_reports_deterministic_rescue_not_solves(tmp_path: 
     )
     with_summary = result["benchmark_summary"]["with_nexus"]
     assert with_summary["total_n"] == 1
+    if not os_sandbox_available():
+        # The strict lane confines the visible test (#2211); with no OS barrier (Seatbelt is
+        # macOS-only, so Linux CI) the task is excluded for both arms, never scored (fail closed).
+        assert with_summary["eligible_n"] == 0
+        assert with_summary["solved_n"] == 0
+        row = json.loads(Path(result["with_nexus_file"]).read_text().splitlines()[0])
+        assert row["status"] == "NOT_RUN"
+        assert row["not_run_reason"] == "confinement_parity_failed"
+        assert row["confinement_parity_detail"] == "visible:confinement_unavailable"
+        return
     assert with_summary["avg_model_calls"] == 0.0
     assert with_summary["solved_n"] == 0
     assert with_summary["deterministic_rescue_n"] == with_summary["eligible_n"]
