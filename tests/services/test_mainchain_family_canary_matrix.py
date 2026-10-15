@@ -74,22 +74,11 @@ _SHALLOW_ACTIONS = frozenset({
 
 # Canonical online Workforce Admission bindings mirror the role map in
 # nexus/config/model_workforce.yaml.  We first derive the Planner role from the
-# same task-description signals as CapabilityPlanner, then bind that role to
-# its enrolled worker.  This keeps the fixture truthful without selecting a
-# worker by provider availability or silently falling back on admission.
-_ONLINE_ROLE_KEYWORDS: dict[str, tuple[str, ...]] = {
-    "independent_review": ("review", "audit"),
-    "main_engineering": (
-        "architecture",
-        "security",
-        "irreversible",
-        "integration",
-        "runtime-closure",
-        "runtime_closure",
-        "cross-module",
-        "cross_module",
-    ),
-}
+# exact classifier the Planner uses (nexus-runtime #204/#205: whole-word complex
+# keywords, review/audit only on request intent, so a capability identifier such
+# as ``architecture_scout`` or ``ultra_review`` no longer implies a role), then
+# bind that role to its enrolled worker.  This keeps the fixture truthful without
+# selecting a worker by provider availability or silently falling back on admission.
 _ONLINE_WORKER_BY_ROLE: dict[str, str] = {
     "fast_bounded_implementation": "agy_flash_38",
     "independent_review": "grok_review",
@@ -117,12 +106,19 @@ _ONLINE_WORKER_CONTROLS: dict[str, list[str]] = {
 }
 
 
-def _online_worker_for(text: str) -> str:
-    # The Planner's demand classifier reads task_desc substrings.  Mirror that
-    # role classification on the exact statement supplied to MainchainEntry.
-    for role, keywords in _ONLINE_ROLE_KEYWORDS.items():
-        if any(kw in text for kw in keywords):
-            return _ONLINE_WORKER_BY_ROLE[role]
+def _online_worker_for(text: str, task_type: str = "codeintel") -> str:
+    # Use the Planner's own demand classifier on the exact statement supplied to
+    # MainchainEntry (same precedence as CapabilityPlanner._build_workforce_demands).
+    from nexus_runtime.planning.engine.capability_planner import (
+        _task_desc_requests_review_audit,
+        _task_desc_signals_complex_work,
+    )
+
+    desc = str(text).lower()
+    if _task_desc_signals_complex_work(desc, task_type):
+        return _ONLINE_WORKER_BY_ROLE["main_engineering"]
+    if _task_desc_requests_review_audit(desc):
+        return _ONLINE_WORKER_BY_ROLE["independent_review"]
     return _ONLINE_WORKER_BY_ROLE["fast_bounded_implementation"]
 
 
@@ -505,7 +501,9 @@ def _run_family_canary(
     ).strip().lower() or "agy"
     if online_provider not in {"agy", "grok", "codex", "gemini", "openai"}:
         online_provider = "agy"
-    online_worker_id = _online_worker_for(str(statement))
+    online_worker_id = _online_worker_for(
+        str(statement), str(family_ctx.get("task_type") or "codeintel")
+    )
     route: dict[str, Any] = {
         "recommended_flow": "direct",
         "provider": online_provider,
