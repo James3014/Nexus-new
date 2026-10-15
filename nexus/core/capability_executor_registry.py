@@ -3394,18 +3394,21 @@ def _exec_file_lock(plan: CapabilityExecutionPlan, task_desc: str) -> Capability
     try:
         from nexus.orchestrator.file_lock_registry import (
             FileLockRegistry,
+            canonical_lock_key,
             register_task_lock_file,
         )
 
         constraints = dict(plan.constraints or {})
-        target_files = [
-            str(item)
-            for item in constraints.get("target_files", []) or []
-            if str(item).strip()
-        ]
         workspace_root = Path(
             str(constraints.get("workspace_root") or "/tmp")
         ).expanduser().resolve()
+        # Canonical keys (workspace-relative inside the workspace): a relative and an absolute
+        # spelling of one file can never be locked by two tasks at once.
+        target_files = list(dict.fromkeys(
+            canonical_lock_key(workspace_root, str(item))
+            for item in constraints.get("target_files", []) or []
+            if str(item).strip()
+        ))
         if not target_files:
             return _make_receipt(
                 "file_lock",

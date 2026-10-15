@@ -8,6 +8,19 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 from pydantic import BaseModel
 
+def canonical_lock_key(workspace_root: str | Path, path: str | Path) -> str:
+    """One registry key per physical file: resolved against ``workspace_root``; inside it the
+    workspace-relative POSIX path, outside it the resolved absolute path. So ``target.py``,
+    ``./target.py`` and ``/abs/ws/target.py`` all lock the same entry."""
+    root = Path(workspace_root).expanduser().resolve()
+    candidate = Path(str(path)).expanduser()
+    resolved = (candidate if candidate.is_absolute() else root / candidate).resolve()
+    try:
+        return resolved.relative_to(root).as_posix()
+    except ValueError:
+        return str(resolved)
+
+
 class LockEntry(BaseModel):
     task_id: str
     files: List[str]

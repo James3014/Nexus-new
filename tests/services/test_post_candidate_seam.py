@@ -1062,9 +1062,20 @@ def test_read_root_inside_a_forbidden_root_is_refused_both_directions(tmp_path: 
         (staging / "run-x", staging),  # inside the bench hidden-test staging parent
     ):
         with pytest.raises(SandboxError):
-            lane.checked_read_roots([str(root)], extra_forbidden=[bad])
+            lane.checked_read_roots([str(root)], forbidden_subtrees=[bad])
     assert lane.sbpl_path(sibling) in lane.checked_read_roots(
-        [str(sibling)], extra_forbidden=[forbidden]
+        [str(sibling)], forbidden_subtrees=[forbidden]
+    )
+    # A repository-root style ``extra_forbidden`` still allows roots below it (venv/worktree).
+    assert lane.sbpl_path(forbidden / "sub") in lane.checked_read_roots(
+        [str(forbidden / "sub")], extra_forbidden=[forbidden]
+    )
+    # The profile denies forbidden subtrees last (after every allow rule).
+    profile = lane.build_sandbox_profile(
+        writable=[str(sibling)], read_roots=[str(sibling)], deny_subtrees=[staging]
+    )
+    assert profile.splitlines()[-1] == (
+        f'(deny file-read* (subpath "{lane.sbpl_path(staging.resolve())}"))'
     )
 
 
@@ -1211,3 +1222,28 @@ def test_every_seam_and_bench_test_command_separates_the_path_with_double_dash(
         trusted = confined_test_runner._trusted_argv(argv)  # what the runner would execute
         assert confined_test_runner._refused_option_parts(trusted) == []
     assert runner._is_hidden_verifier_cmd(verifier)
+
+
+def test_relative_and_absolute_spellings_lock_the_same_file(tmp_path: Path) -> None:
+    """Gemini G12: one canonical registry key per file (workspace-relative inside it)."""
+    workspace = tmp_path / "ws"
+    (workspace / "pkg").mkdir(parents=True)
+    first = seam.acquire_target_lock(
+        task_id="task-a", workspace_root=workspace, target_file="pkg/target.py"
+    )
+    try:
+        assert first["gate_passed"] is True
+        for spelling in (
+            str(workspace / "pkg" / "target.py"),
+            "./pkg/target.py",
+            "pkg/../pkg/target.py",
+        ):
+            other = seam.acquire_target_lock(
+                task_id="task-b", workspace_root=workspace, target_file=spelling
+            )
+            assert other["gate_passed"] is False, spelling
+            assert seam.target_held_by_other(workspace, spelling, "task-b") is True
+    finally:
+        released = seam.release_target_lock("task-a")
+    assert list(released.values()) == [["pkg/target.py"]]
+    seam.release_target_lock("task-b")

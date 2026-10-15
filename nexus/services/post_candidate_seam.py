@@ -471,7 +471,9 @@ def target_held_by_other(workspace_root: Path | str, target_file: str, holder: s
         if not isinstance(raw, dict) or not isinstance(raw.get("locks", {}), dict):
             return True
         registry = FileLockRegistry(lock_file=str(lock_file), ttl_sec=_FILE_LOCK_DEFAULT_TTL_SEC)
-        path = os.path.normpath(str(target_file))
+        from nexus.orchestrator.file_lock_registry import canonical_lock_key
+
+        path = canonical_lock_key(workspace_root, target_file)
         current = registry.locks.get(path)
         if not current or current == holder:
             return False
