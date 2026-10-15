@@ -2001,6 +2001,10 @@ def _strict_symmetric_with_nexus_env() -> dict[str, str]:
         "NEXUS_LLM_CANDIDATE_CAP": "1",
         "NEXUS_AUTO_NIGHTSHIFT_ON_HYPER_FAILURE": "0",
         "NEXUS_ONLINE_LOCAL_ASSIST": "0",
+        # PR-3 R3-1: the treatment switches are pinned off here, never inherited from the
+        # operator's environment (the treatment lane overlays them afterwards).
+        "NEXUS_USE_COMMITTEE": "0",
+        "NEXUS_ULTRA_REVIEW_DRY_GATE": "0",
     }
 
 

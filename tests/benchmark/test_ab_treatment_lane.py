@@ -231,19 +231,96 @@ def test_lane_rescore_never_runs_unconfined_without_the_repo_runners(
 
 
 def test_strict_lane_clears_inherited_treatment_switches(monkeypatch) -> None:
-    """M3/N6: every key the treatment env sets (one template) is cleared by the strict lane."""
+    """M3/N6/R3-1: the strict lane (the runner default) clears ONLY the treatment-only keys;
+    shared operator knobs stay as the operator set them."""
 
     monkeypatch.setenv("NEXUS_BENCH_LANE", "treatment")
     every = set(
         lane.with_nexus_env_overrides(deadline_epoch=1.0, response_dir="/r", per_call_cap_sec=5)
     )
-    assert every <= set(lane.TREATMENT_ONLY_ENV)
-    assert {"NEXUS_USE_COMMITTEE", "NEXUS_ULTRA_REVIEW_DRY_GATE"} <= every
-    for name in lane.TREATMENT_ONLY_ENV:
+    assert every == set(lane.TREATMENT_ENV_KEYS)
+    assert set(lane.TREATMENT_ONLY_ENV) - {"NEXUS_BENCH_CANDIDATE_ARCHIVE_DIR"} <= every
+    shared = every - set(lane.TREATMENT_ONLY_ENV)
+    assert {
+        "NEXUS_USE_COMMITTEE",
+        "NEXUS_ULTRA_REVIEW_DRY_GATE",
+        "NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL",
+    } <= shared
+    for name in [*lane.TREATMENT_ONLY_ENV, *shared]:
         monkeypatch.setenv(name, "1")
     lane.configure_lane(_fair_args(lane="strict"))
     for name in lane.TREATMENT_ONLY_ENV:
         assert name not in os.environ, name
+    for name in shared:
+        assert os.environ.get(name) == "1", name
+
+
+def test_default_non_counted_run_keeps_the_operators_self_heal(monkeypatch, tmp_path: Path) -> None:
+    """R3-1 probe: a plain runner invocation with NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL=1 keeps it."""
+
+    import scripts.bench.capability_ab_runner as runner
+
+    class _Stop(Exception):
+        pass
+
+    seen: dict[str, str] = {}
+
+    def stop(_args, **_kwargs):
+        seen["self_heal"] = os.environ.get("NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL", "")
+        seen["committee"] = os.environ.get("NEXUS_USE_COMMITTEE", "")
+        raise _Stop
+
+    monkeypatch.setenv("NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL", "1")
+    monkeypatch.setenv("NEXUS_USE_COMMITTEE", "1")
+    monkeypatch.setattr(runner, "build_public_benchmark_preflight", stop)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "capability_ab_runner.py",
+            "--tasks-file",
+            "scripts/bench/public_benchmark_nexus_value_v1.json",
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--preflight-only",
+        ],
+    )
+    with pytest.raises(_Stop):
+        runner.main()
+    assert seen == {"self_heal": "1", "committee": "1"}
+
+
+def test_counted_strict_run_pins_committee_and_ultra_review_off(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """R3-1: inherited committee / ultra_review dry-gate = 1 never reach a counted strict row."""
+
+    monkeypatch.setenv("NEXUS_USE_COMMITTEE", "1")
+    monkeypatch.setenv("NEXUS_ULTRA_REVIEW_DRY_GATE", "1")
+    _row, envs = _with_nexus_row(
+        tmp_path, monkeypatch, lane_name="strict", candidates=[GOOD_CLASSIFY]
+    )
+    assert envs[0]["NEXUS_USE_COMMITTEE"] == "0"
+    assert envs[0]["NEXUS_ULTRA_REVIEW_DRY_GATE"] == "0"
+    assert envs[0]["NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL"] == "0"
+
+
+def test_bound_module_needs_the_repo_file_to_exist(monkeypatch, tmp_path: Path) -> None:
+    """LOW: a stub whose __file__ is spoofed to the (absent) repository path does not pass."""
+
+    import types
+
+    name = "scripts.bench.hidden_test_staging"
+    expected = lane.REPO_ROOT / lane.BOUND_MODULES[name][0]
+    stub = types.ModuleType(name)
+    stub.__file__ = str(expected)
+    stub.staged_hidden_test = stub.active_staging_for = lambda *_a, **_k: None
+    monkeypatch.setitem(sys.modules, name, stub)
+    if expected.is_file():
+        assert lane.bound_module(name) is stub  # the real file: the binding is by path
+    else:
+        with pytest.raises(RuntimeError):
+            lane.bound_module(name)
 
 
 def _cli(monkeypatch, tmp_path: Path, *flags: str) -> dict[str, str]:

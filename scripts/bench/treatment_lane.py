@@ -117,11 +117,22 @@ def _treatment_env_template(
     return env
 
 
-# Every variable the treatment lane sets, derived from the template (plus the retired archive
-# variable): the strict lane never inherits any of them from the operator's environment.
+# Variables ONLY the treatment lane uses: the strict lane (the runner default) clears exactly
+# these. Shared operator knobs in the template (self-heal, committee, ultra_review gate, local
+# paths...) are NOT cleared: a non-counted run keeps the operator's setting, and the counted
+# strict run pins each of them itself (``_strict_symmetric_with_nexus_env``) (R3-1).
 TREATMENT_ONLY_ENV: tuple[str, ...] = (
-    *_treatment_env_template(calls=1, response_dir="", deadline_epoch=0.0, per_call_cap_sec=1),
-    "NEXUS_BENCH_CANDIDATE_ARCHIVE_DIR",
+    "NEXUS_BENCH_TREATMENT_LANE",
+    RESPONSE_DIR_ENV,
+    ROW_DEADLINE_ENV,
+    MAX_CALLS_ENV,
+    ROUND_MIN_REMAINING_ENV,
+    "NEXUS_BENCH_CANDIDATE_ARCHIVE_DIR",  # retired (round 2); never inherited
+)
+# Every key the treatment env sets: the treatment-only ones above plus shared knobs the counted
+# strict env pins to its own values.
+TREATMENT_ENV_KEYS: tuple[str, ...] = tuple(
+    _treatment_env_template(calls=1, response_dir="", deadline_epoch=0.0, per_call_cap_sec=1)
 )
 TREATMENT_WINNER_SOURCES = frozenset({"llm_self_heal"})
 _TRUE = {"1", "true", "yes"}
@@ -263,7 +274,7 @@ def bound_module(name: str) -> Any:
         raise RuntimeError(f"{name} is not available") from exc
     expected = (REPO_ROOT / rel).resolve()
     actual = Path(str(getattr(module, "__file__", "") or "")).resolve()
-    if actual != expected:
+    if not expected.is_file() or actual != expected:
         raise RuntimeError(f"{name} is not the repository file ({actual})")
     for attr in callables:
         if not callable(getattr(module, attr, None)):
