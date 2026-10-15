@@ -5047,3 +5047,6 @@ def test_retain_failure_is_a_warning_not_a_rollback(
     assert host.reloads and len(host.reloads) == 1
     warnings = ad.read_receipts(cfg.state_dir)[-1]["warnings"]
     assert any(w.startswith("RETAIN_CONTROLLER_FAILED:OSError") for w in warnings)
+    # The old Controller cannot be pruned by a later cycle: everything is held.
+    assert "RETAIN_CONTROLLER_FAILED" in cfg.hold_file.read_text()
+    assert cycle(cfg, host, prober)["status"] == "HELD"

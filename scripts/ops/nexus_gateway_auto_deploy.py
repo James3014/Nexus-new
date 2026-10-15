@@ -2667,6 +2667,9 @@ class _Cycle:
                             receipt["warnings"].append(
                                 f"RETAIN_CONTROLLER_FAILED:{type(exc).__name__}:{exc}"[:300]
                             )
+                            # HOLD stops every later cycle (and so every prune) until
+                            # the Owner recovers the late bind and runs `release`.
+                            _set_hold(cfg, f"auto-hold: RETAIN_CONTROLLER_FAILED ({late})"[:300])
                 return result
 
     def prepare_controller(
