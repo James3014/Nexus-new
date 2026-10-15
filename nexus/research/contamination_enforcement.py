@@ -10,8 +10,8 @@ signals (``<workspace>/.nexus/research/contamination_signals.jsonl``).
 - Walks the research output: strings, dict keys (as text), lists/tuples/sets, bytes
   (UTF-8), dataclasses, pydantic models (``model_dump``) and plain objects (``vars``).
   Design-field names (``DESIGN_FIELD_NAMES``) are detected at any depth, in keys and in
-  object attribute names.  Any other object type cannot be inspected, so the check fails
-  closed instead of scanning ``str(obj)``.
+  object attribute names.  Any other object type cannot be inspected, so the verdict is
+  GUARD_ERROR instead of scanning ``str(obj)``.
 - Calls the contamination guard with ``CANONICAL_DESIGN_PATTERNS``: structural patterns
   for design proposals (modal + design verb, "the fix/plan/solution is to", labelled
   prefixes such as "Fix:" or "Proposed change:", "can be fixed by", "we recommend",
@@ -203,7 +203,7 @@ _SCALARS = (int, float, bool, decimal.Decimal, _dt.date, _dt.time, _dt.timedelta
 
 
 class UninspectableResearchOutput(TypeError):
-    """Research output holds an object the check cannot read; fail closed."""
+    """Research output holds an object the check cannot read (verdict GUARD_ERROR)."""
 
 
 @dataclass(frozen=True)
@@ -296,7 +296,11 @@ class _Walker:
 def check_research_output(
     research_output: Any, *, echo_texts: Iterable[str] = ()
 ) -> ContaminationVerdict:
-    """Fail-closed P-CONTAM-01 check of one research output (pack, context, ...)."""
+    """P-CONTAM-01 check of one research output (pack, context, ...); never raises.
+
+    A check that cannot run returns GUARD_ERROR (passed=False, detected unknown), so callers
+    never mistake a blind check for a clean one.
+    """
     try:
         from nexus.research import contamination_guard
 
@@ -317,7 +321,7 @@ def check_research_output(
             reason=REASON_DETECTED,
             detected_terms=tuple(str(term) for term in guard.detected_terms),
         )
-    except Exception:  # fail closed: a broken or blind check never lets research through
+    except Exception:  # a broken or blind check is reported, never read as clean
         return ContaminationVerdict(passed=False, reason=REASON_GUARD_ERROR)
 
 
