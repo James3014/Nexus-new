@@ -1996,11 +1996,39 @@ def test_materialize_run_home_gets_isolated_default_keychain(tmp_path, agy_home)
     )
     assert f'(subpath "{run_home.parent}")' in profile_text
     assert "Keychains" not in profile_text  # no literal: the real ~/Library/Keychains stays denied
-    _assert_profile_text_or_skip_run(
+    if not _assert_profile_text_or_skip_run(
         profile_text,
         denied=[run_home / admission.AGY_RUN_HOME_SETTINGS, run_home / ".gemini" / "config"],
         writable=[run_home.parent, keychain.parent],
+    ):
+        return
+    # real Seatbelt probe: the keychain dir is writable, the agy settings are not
+    code = (
+        "import os, sys\n"
+        "h = sys.argv[1]\n"
+        "out = []\n"
+        "for rel in ('Library/Keychains/probe.keychain-db', "
+        "'Library/Preferences/com.apple.security.plist', "
+        "'.gemini/antigravity-cli/settings.json'):\n"
+        "    path = os.path.join(h, rel)\n"
+        "    try:\n"
+        "        os.makedirs(os.path.dirname(path), exist_ok=True)\n"
+        "        open(path, 'a').write('x')\n"
+        "        out.append('WROTE')\n"
+        "    except OSError:\n"
+        "        out.append('BLOCKED')\n"
+        "print(','.join(out))\n"
     )
+    result = run_cli_worker(
+        CliWorkerRequest(
+            executable=sys.executable,
+            argv=("-c", code, str(run_home)),
+            cwd=str(run_home.parent),
+            env={"HOME": str(run_home), "TMPDIR": str(run_home.parent)},
+            seatbelt_profile=profile_text,
+        )
+    )
+    assert result.stdout.strip() == b"WROTE,WROTE,BLOCKED", result.stderr
 
 
 def test_keychain_filesystem_errors_are_the_typed_refusal(tmp_path, agy_home, monkeypatch):
