@@ -195,6 +195,9 @@ def test_bench_like_refactor_task_sandbox_and_ultra_review_now_invoked(
     for receipt in flow:
         assert receipt["invoked"] is True
         assert receipt["claim_boundary"]["simulated"] is False
+        # #2212's tighten-only projection attests these runs as real: the seam sealed the
+        # REAL_INVOKED evidence; the attestation markers themselves come from the overlay.
+        assert receipt.get("attestation") == "real", receipt
     assert not any(part.endswith("test_hidden.py") for argv in barrier for part in argv)
     assert not (case / "HIDDEN_RAN").exists()
 
@@ -899,3 +902,59 @@ def test_baseline_apply_refuses_when_a_companion_file_is_held(tmp_path: Path, mo
     assert (tmp_path / "demo.py").read_text(encoding="utf-8") == original
     assert not (tmp_path / "helper.py").exists()
     assert payload["result"]["error"] == "file_lock_denied"
+
+
+def test_runtime_visible_verifier_goes_through_confined_evaluation_and_is_refused_on_a_held_lock(
+    governed_admission: None, tmp_path: Path, monkeypatch
+) -> None:
+    """Post-#2212 merge: the runtime verifier (inside generate(), before the seam's lock)
+    evaluates only through InPlaceSprintExecutor.evaluate_candidate_confined; while another
+    task holds the target that raises _SprintLockDenied (never a memoisable denial), so the
+    attempt ends file_lock_denied with nothing written or delivered."""
+    import nexus.research.sprint_service as sprint_service
+
+    real_executor = sprint_service.InPlaceSprintExecutor
+    case, workspace, target_rel, cfg, run_hyper_sprint = _sprint(
+        tmp_path, monkeypatch, task=LEDGER_TASK
+    )
+    confined_calls: list[str] = []
+    plain_calls: list[str] = []
+
+    class SpyExecutor(real_executor):  # type: ignore[misc, valid-type]
+        def evaluate_candidate(self, **kwargs: Any):
+            plain_calls.append(kwargs["code"])
+            return super().evaluate_candidate(**kwargs)
+
+        def evaluate_candidate_confined(self, **kwargs: Any):
+            confined_calls.append(kwargs["code"])
+            return super().evaluate_candidate_confined(**kwargs)
+
+    plain_generator = sprint_service.LLMCandidateGenerator
+    verdicts: list[Any] = []
+
+    class VerifyingGenerator(plain_generator):  # type: ignore[misc, valid-type]
+        visible_verifier = None
+
+        def generate(self, *a: Any, **k: Any):
+            if self.visible_verifier is not None:  # what #2212's response_contract does
+                verdicts.append(self.visible_verifier(CANDIDATE, 0))
+            return super().generate(*a, **k)
+
+    monkeypatch.setattr(sprint_service, "InPlaceSprintExecutor", SpyExecutor)
+    monkeypatch.setattr(sprint_service, "LLMCandidateGenerator", VerifyingGenerator)
+    monkeypatch.setenv(seam.CONFINE_VISIBLE_TEST_ENV, "1")
+    holder = seam.acquire_target_lock(
+        task_id="other-task", workspace_root=workspace, target_file=target_rel
+    )
+    assert holder["gate_passed"] is True
+    try:
+        result = run_hyper_sprint(repo_root=workspace, config=cfg)
+    finally:
+        seam.release_target_lock("other-task")
+
+    assert confined_calls == [CANDIDATE]  # the verifier used the confined entry point only
+    assert verdicts == []  # it never returned a (memoisable) verdict: the attempt stopped
+    assert plain_calls == []
+    assert result.status == "FAILED" and result.reason == "file_lock_denied"
+    assert result.patch == ""
+    assert (case / "target.py").read_text(encoding="utf-8") == ORIGINAL

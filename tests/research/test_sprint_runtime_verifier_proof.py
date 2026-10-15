@@ -422,6 +422,8 @@ def test_sprint_binds_no_visible_verifier_without_confinement(
 
     # 1. Env set, executor without evaluate_candidate_confined: unbound, verifier never ran.
     monkeypatch.setenv("NEXUS_CONFINE_VISIBLE_TEST", "1")
+    # #2211 implements the method; remove it here to keep the "executor without it" case.
+    monkeypatch.delattr(sprint.InPlaceSprintExecutor, "evaluate_candidate_confined", raising=False)
     assert not hasattr(sprint.InPlaceSprintExecutor, "evaluate_candidate_confined")
     generator = run()
     assert generator.visible_verifier is None
