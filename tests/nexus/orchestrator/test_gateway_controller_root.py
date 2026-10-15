@@ -432,6 +432,9 @@ def test_startup_still_refuses_a_root_from_another_repository(pair, tmp_path):
     other = tmp_path / "other"
     other.mkdir()
     _git(other, "init", "-q")
+    # CI runners have no global git identity.
+    _git(other, "config", "user.name", "Nexus Test")
+    _git(other, "config", "user.email", "nexus-test@example.invalid")
     _commit(other, "README.md", "x\n", "other")
     with pytest.raises(RuntimeError, match="DIFFERENT_REPOSITORY"):
         roots.resolve_canonical_source_root_at_startup(
