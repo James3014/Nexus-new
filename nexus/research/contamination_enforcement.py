@@ -110,7 +110,8 @@ _PATTERN_SOURCES: tuple[tuple[str, str], ...] = (
     ("diff_hunk", r"(?:^|\n)@@ -\d+(?:,\d+)? \+\d+|(?:^|\n)--- a/\S+\s*\n\+\+\+ b/"),
     (
         "diff_lines",
-        r"(?:^|\n)-(?!-)[^\n]*\n(?:[- ][^\n]*\n)*\+(?!\+)\S?|(?:^|\n)\+(?!\+)[^\n]*\n(?:[+ ][^\n]*\n)*-(?!-)",
+        # adjacent -/+ lines only: linear time on long bullet lists
+        r"(?:^|\n)-(?!-)[^\n]*\n\+(?!\+)|(?:^|\n)\+(?!\+)[^\n]*\n-(?!-)",
     ),
     (
         "design_plan",
@@ -363,6 +364,17 @@ def signal_from_verdict(verdict: ContaminationVerdict) -> dict[str, Any]:
     }
 
 
+def guard_error_signal() -> dict[str, Any]:
+    """Record-only signal for a check that could not run."""
+    return {
+        "policy_id": POLICY_ID,
+        "mode": RECORD_ONLY,
+        "detected": None,
+        "reason": REASON_GUARD_ERROR,
+        "terms": [],
+    }
+
+
 def append_contamination_signal(
     log_root: Any, signal: Mapping[str, Any], *, route: str, task_id: Any
 ) -> None:
@@ -416,9 +428,12 @@ def record_flow_contamination_signal(
         "research_gate_passed"
     ):
         return capability_evidence
-    signal = signal_from_verdict(
-        check_research_output(_research_part(research_context), echo_texts=(task_desc,))
-    )
+    try:
+        signal = signal_from_verdict(
+            check_research_output(_research_part(research_context), echo_texts=(task_desc,))
+        )
+    except Exception:  # record-only: a broken check is reported, never breaks the flow
+        signal = guard_error_signal()
     updated = dict(capability_evidence)
     updated["research_contamination_signal"] = signal
     if log_root is not None:

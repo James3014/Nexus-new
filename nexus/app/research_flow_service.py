@@ -1578,15 +1578,24 @@ def run_auto_flow(
         capability_evidence["research_refs"] = retrieval_refs[:3] or [f"research:{receipt_slug}:route_selected"]
         capability_evidence["research_gate_passed"] = bool(artifact_verified)
     # P-CONTAM-01 (#2199/#2216): record-only signal; it never changes research_gate_passed.
-    from nexus.research.contamination_enforcement import record_flow_contamination_signal
+    try:
+        from nexus.research.contamination_enforcement import record_flow_contamination_signal
 
-    capability_evidence = record_flow_contamination_signal(
-        capability_evidence,
-        research_context=route.get("research_context"),
-        task_desc=task_desc,
-        log_root=repo_root,
-        task_id=task_id,
-    )
+        capability_evidence = record_flow_contamination_signal(
+            capability_evidence,
+            research_context=route.get("research_context"),
+            task_desc=task_desc,
+            log_root=repo_root,
+            task_id=task_id,
+        )
+    except Exception:  # record-only signal must never break the auto-flow
+        capability_evidence["research_contamination_signal"] = {
+            "policy_id": "P-CONTAM-01",
+            "mode": "record_only",
+            "detected": None,
+            "reason": "RESEARCH_CONTAMINATION_GUARD_ERROR",
+            "terms": [],
+        }
     capability_evidence["research_source_projects"] = list(RESEARCH_SOURCE_PROJECTS)
     autoreason_payload = build_autoreason_payload(
         result=result,

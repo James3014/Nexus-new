@@ -104,8 +104,8 @@ def evaluate_research_contamination(
     included) is matched separately after normalisation, with clean task/query echoes
     discounted.  The default keeps the original single-word matching unchanged.
     """
-    blob = json.dumps(payload, ensure_ascii=False, sort_keys=True)
     if patterns is None:
+        blob = json.dumps(payload, ensure_ascii=False, sort_keys=True)
         detected = [term for term in DESIGN_TERMS if re.search(r'\b' + re.escape(term) + r'\b', blob, re.IGNORECASE)]
     else:
         detected = [

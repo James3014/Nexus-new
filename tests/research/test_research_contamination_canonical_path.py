@@ -1,8 +1,10 @@
 """P-CONTAM-01 on the canonical research path (#2199).
 
-The contamination guard must run where the canonical research executor accepts research
-output: contaminated output and guard errors are BLOCKed, clean output still passes.
-These tests go through the registered executor invoker, not the guard alone.
+Record-only (Owner option B, #2216): where the canonical research executor and the research
+auto-flow accept research output, the contamination check RECORDS a contamination_signal
+(detected / GUARD_ERROR) and never blocks; research status and research_gate_passed are
+unchanged.  These tests go through the registered executor invoker and run_auto_flow, not
+the guard alone.
 """
 
 from __future__ import annotations
@@ -588,6 +590,24 @@ def test_research_facts_keep_findings_with_blocked_assumptions() -> None:
         visibility_receipt={},
     )
     assert facts.constraints == ("assumption one", "finding one")
+
+
+@pytest.mark.parametrize("broken", ["_research_part", "signal_from_verdict"])
+def test_research_auto_flow_signal_error_records_guard_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, broken: str
+) -> None:
+    from nexus.research import contamination_enforcement
+
+    def boom(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("signal exploded")
+
+    monkeypatch.setattr(contamination_enforcement, broken, boom)
+    caps = _run_auto_flow(tmp_path, monkeypatch, _flow_context())
+    assert caps["research_used"] is True
+    assert caps["research_gate_passed"] is True
+    signal = caps["research_contamination_signal"]
+    assert signal["detected"] is None and signal["mode"] == "record_only"
+    assert signal["reason"] == "RESEARCH_CONTAMINATION_GUARD_ERROR"
 
 
 def test_research_auto_flow_does_not_quarantine_context(

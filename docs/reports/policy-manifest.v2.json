@@ -991,7 +991,7 @@
         "tests/research/test_research_contamination_canonical_path.py::test_legacy_research_routes_unreachable_from_live_entrypoints"
       ],
       "receipt_type": "RECORD-ONLY signal, never a block: canonical executor _exec_research CapabilityReceipt outcome.contamination_signal {policy_id, mode: record_only, detected, reason, terms}; research auto-flow capability_evidence / nexus_usage_trace.capabilities research_contamination_signal; both appended to <workspace>/.nexus/research/contamination_signals.jsonl",
-      "rollback_drill_status": "drilled-2026-10-14",
+      "rollback_drill_status": "drilled-2026-10-15",
       "promotion_allowed": false,
       "lane": "hard",
       "risk_tier": "high",
