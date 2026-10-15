@@ -2280,11 +2280,27 @@ def _r1_materialize_recovery_store_pair(
 ) -> tuple[bytes, bytes]:
     # #1995 (Codex P1): refuse every materialization branch, authority store
     # present or not, when the ledger was lost after R1 rows existed.
+    # #2177: the ledger lock is held from that check through the store writes
+    # (caller holds GATEWAY_LOCK first, so lock order is unchanged; the CAS
+    # helper re-enters GATEWAY_LOCK reentrantly).
     ledger = GatewayLedger(Path(GATEWAY_STATE_ROOT) / "ledger.jsonl")
     with InterProcessLock(ledger.lock_path):
-        lost = _r1_ledger_lost_reason(ledger.path)
-    if lost is not None:
-        raise _gateway_error(lost)
+        _r1_materialization_ledger_guard_unlocked(ledger)
+        return _r1_materialize_recovery_store_pair_locked(
+            target_receipt=target_receipt,
+            target_authority_bytes=target_authority_bytes,
+            target_request=target_request,
+            target_request_bytes=target_request_bytes,
+        )
+
+
+def _r1_materialize_recovery_store_pair_locked(
+    *,
+    target_receipt: RecoveryAuthorityReceipt,
+    target_authority_bytes: bytes,
+    target_request: GatewayRecoveryRequest,
+    target_request_bytes: bytes,
+) -> tuple[bytes, bytes]:
     authority_path = _safe_store_path(
         GATEWAY_RECOVERY_AUTHORITY_STORE,
         leaf_mode=0o600,
@@ -2503,6 +2519,12 @@ def _r1_reconcile_materialization_receipt(
         raise _gateway_error("R1 durable materialization authority bytes drift")
     if hashlib.sha256(request_bytes).hexdigest() != receipt.materialized_request_sha256:
         raise _gateway_error("R1 durable materialization request bytes drift")
+    # #2177: lost-ledger check before the predecessor artifact is written. The
+    # lock is not held across the (slow, git-backed) artifact build; the store
+    # pair below re-checks under the ledger lock before any store write.
+    ledger = GatewayLedger(Path(GATEWAY_STATE_ROOT) / "ledger.jsonl")
+    with InterProcessLock(ledger.lock_path):
+        _r1_materialization_ledger_guard_unlocked(ledger)
     _r1_materialize_predecessor_artifact(tracked_receipt)
     materialized_authority, materialized_request = (
         _r1_materialize_recovery_store_pair(
@@ -2583,9 +2605,11 @@ def gateway_recovery_materialize(
         receipt_bytes = json.dumps(
             receipt.model_dump(), sort_keys=True, separators=(",", ":")
         ).encode("utf-8")
-        _r1_materialize_value_store(
-            _r1_materialization_receipt_path(typed), receipt_bytes
-        )
+        # #2177: never persist a materialization receipt next to a lost ledger.
+        ledger = GatewayLedger(Path(GATEWAY_STATE_ROOT) / "ledger.jsonl")
+        with InterProcessLock(ledger.lock_path):
+            _r1_materialization_ledger_guard_unlocked(ledger)
+            _r1_materialize_value_store(_r1_materialization_receipt_path(typed), receipt_bytes)
         return _r1_reconcile_materialization_receipt(typed, receipt)
 
 
@@ -2934,8 +2958,9 @@ def _r1_prior_state_evidence(state_root: Path, *, exclude: Path | None = None) -
     return evidence
 
 
-# #1995 (Codex P1 at c38881d11): written next to the ledger right after the
-# first R1 row is appended (and backfilled by any read that sees R1 rows). It
+# #1995 (Codex P1 at c38881d11): written next to the ledger. Since #2177 it is
+# written BEFORE the first R1 row is appended, and plain scans no longer
+# backfill it (only R1 appends/reads do, failing closed). It
 # is the one signal that cannot predate the ledger: recovery-authority.json,
 # the materialization receipt and the bootstrap marker all legitimately exist
 # before the first REQUESTED row of a first-ever run.
@@ -2966,6 +2991,51 @@ def _r1_ledger_lost_reason(ledger_path: Path) -> str | None:
     if not evidence:
         return None
     return f"{R1_LEDGER_MISSING_WITH_PRIOR_STATE_FAIL_CLOSED}:{','.join(evidence)}"
+
+
+# #2177: an R1 operation on a ledger that holds R1 rows must be able to see
+# (or create) the genesis marker; otherwise a later ledger loss would read as
+# a first run. Failure is loud and fails the R1 operation closed. Plain v1
+# reads (``_scan_unlocked``) never write it.
+R1_LEDGER_GENESIS_UNAVAILABLE_FAIL_CLOSED = "R1_LEDGER_GENESIS_UNAVAILABLE_FAIL_CLOSED"
+
+
+def _r1_require_ledger_genesis(ledger_path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
+    """Backfill the genesis marker for ledgers with R1 rows; fail closed if impossible."""
+    if not any(
+        row["schema"] == "nexus.gateway.ledger.v2"
+        or row["effect_class"] == EffectClass.GATEWAY_DURABLE_RECOVERY.value
+        for row in rows
+    ):
+        return
+    _r1_write_ledger_genesis_or_fail(ledger_path)
+
+
+def _r1_write_ledger_genesis_or_fail(ledger_path: Path) -> None:
+    try:
+        _r1_ensure_ledger_genesis(ledger_path)
+    except (OSError, GatewayContractError) as exc:
+        raise _gateway_error(f"{R1_LEDGER_GENESIS_UNAVAILABLE_FAIL_CLOSED}:{exc}", exc) from exc
+
+
+def _r1_materialization_ledger_guard_unlocked(store: "GatewayLedger") -> None:
+    """#2177: lost-ledger check for materialization; caller holds ``store.lock_path``.
+
+    Runs before any materialization write (receipt, predecessor artifact,
+    authority/request stores). A ledger that is legitimately absent (first-ever
+    run: no genesis marker, no reconcile records) passes; a present ledger
+    must scan cleanly and, when it holds R1 rows, carry the genesis marker.
+    """
+    lost = _r1_ledger_lost_reason(store.path)
+    if lost is not None:
+        raise _gateway_error(lost)
+    if not store.path.exists() and not store.path.is_symlink():
+        return
+    try:
+        rows = store._scan_unlocked()
+    except LedgerCorruption as exc:
+        raise _gateway_error(f"{R1_LEDGER_CORRUPT_FAIL_CLOSED}:{exc}", exc) from exc
+    _r1_require_ledger_genesis(store.path, rows)
 
 
 def _r1_missing_ledger_reason(store: "GatewayLedger", *, exclude: Path | None = None) -> str | None:
@@ -3197,6 +3267,7 @@ def record_r1_owner_reconcile(
     store = GatewayLedger(ledger) if ledger is not None else GatewayLedger()
     with InterProcessLock(store.lock_path):
         rows = store._scan_unlocked()
+        _r1_require_ledger_genesis(store.path, rows)
         latest = _r1_latest_prior_request(rows, None)
         if latest is None or latest[0] != request_id:
             raise GatewayContractError(
@@ -3462,16 +3533,20 @@ class GatewayLedger:
             last_schema[row["request_id"]] = row["schema"]
             if len(rows) > MAX_GATEWAY_LEDGER_RECORDS:
                 raise LedgerCorruption("ledger record limit exceeded")
-        if _r1_last_states(rows) and not (self.path.parent / R1_LEDGER_GENESIS_FILENAME).exists():
-            # Backfill for ledgers written before the genesis marker existed.
-            # Best effort: a read must never fail because of it.
-            with contextlib.suppress(OSError, GatewayContractError):
-                _r1_ensure_ledger_genesis(self.path)
+        # #2177: no marker backfill here. This scan backs v1 effects and plain
+        # reads, which must not write; R1 operations call
+        # ``_r1_require_ledger_genesis`` explicitly and fail closed.
         return rows
 
     def read(self) -> list[dict[str, Any]]:
+        """Locked read; backfills the R1 genesis marker and fails closed if it cannot.
+
+        Pure v1 ledgers (no R1 rows) are never written to.
+        """
         with InterProcessLock(self.lock_path):
-            return self._scan_unlocked()
+            rows = self._scan_unlocked()
+            _r1_require_ledger_genesis(self.path, rows)
+            return rows
 
     def append(self, *, request_id: str, request_hash: str, state: DeploymentState | str,
                pre_effect_identity: Mapping[str, Any] | None = None,
@@ -3607,17 +3682,39 @@ class GatewayLedger:
             candidate_row=record.model_dump(),
         )
         self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        if self.path.exists():
-            with self.path.open("ab") as handle:
-                handle.write(encoded)
-                handle.flush()
-                os.fsync(handle.fileno())
-            _fsync_dir(self.path.parent)
-        else:
-            _atomic_gateway_write(self.path, encoded)
-        # After the row is durable, so a crash in between never strands a
-        # genesis marker without a ledger (a later read backfills it).
-        _r1_ensure_ledger_genesis(self.path)
+        # #2177: the marker is durable BEFORE the first R1 row, so there is no
+        # interval in which an R1 row exists without it (a lost ledger can
+        # never read as a first run). A crash between the two leaves a marker
+        # with no R1 row; if that host had no ledger yet, R1 fails closed until
+        # the Owner clears it (docs/runbooks/gateway_r1_lost_ledger_runbook.md).
+        marker_path = self.path.parent / R1_LEDGER_GENESIS_FILENAME
+        marker_preexisted = marker_path.exists() or marker_path.is_symlink()
+        _r1_write_ledger_genesis_or_fail(self.path)
+        try:
+            if self.path.exists():
+                with self.path.open("ab") as handle:
+                    handle.write(encoded)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                _fsync_dir(self.path.parent)
+            else:
+                _atomic_gateway_write(self.path, encoded)
+        except Exception:
+            # An ordinary write failure (ENOSPC, EIO, permission) on a host
+            # with no ledger must not strand the marker we just wrote: that
+            # would fail every later read closed until the Owner runbook reset.
+            # Only a real process crash (no Python unwinding) needs the runbook.
+            if (
+                not marker_preexisted
+                and not self.path.exists()
+                and not self.path.is_symlink()
+            ):
+                try:
+                    marker_path.unlink()
+                    _fsync_dir(self.path.parent)
+                except OSError:
+                    pass
+            raise
         return record
 
     @staticmethod
@@ -4868,6 +4965,7 @@ def _gateway_recover_with_adapters(
         ledger.lock_path, timeout=RECOVERY_LEDGER_LOCK_TIMEOUT_SECONDS
     ):
         rows = ledger._scan_unlocked()
+        _r1_require_ledger_genesis(ledger.path, rows)
         for prior in rows:
             if (
                 prior["idempotency_fence"] == typed.idempotency_fence
