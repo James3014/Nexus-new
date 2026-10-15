@@ -997,3 +997,44 @@ def test_strict_route_names_the_receipt_only_capabilities_and_the_pinned_runtime
     )
     assert keyed["online"]["status"] == plain["online"]["status"]
     assert _mask_run_identity(keyed_prompts[0]) == _mask_run_identity(plain_prompts[0])
+
+
+def test_misspelt_kill_switch_is_ignored_in_the_strict_lane_and_refused_by_the_runner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess
+    import sys
+
+    monkeypatch.setenv("NEXUS_SPRINT_GATE_INPUTS", "yes")
+    monkeypatch.setenv("NEXUS_SYMMETRIC_PROMPT", "1")
+    request, _root = _capture_request(tmp_path, monkeypatch)  # strict lane: never parsed
+    assert dict(request.codeintel) == {}
+    env = {**os.environ, "NEXUS_SPRINT_GATE_INPUTS": "yes", "PYTHONPATH": str(_REPO_ROOT)}
+    proc = subprocess.run(
+        [sys.executable, "scripts/bench/capability_ab_runner.py", "--preflight-only"],
+        cwd=_REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
+    assert proc.returncode == 2, proc.stderr[-2000:]
+    assert "NEXUS_SPRINT_GATE_INPUTS must be 0 or 1" in proc.stderr
+
+
+def test_visibility_flag_alone_is_not_physical_output() -> None:
+    from nexus.research.flow.unified_capability_projection import _physical_output
+
+    record = {
+        "status": "SUCCEEDED",
+        "consumer_visibility": "receipt_only",
+        "response": {
+            "status": "SUCCEEDED",
+            "consumer_visibility": "receipt_only",
+            "outcome": {"semantic_status": "SUCCEEDED", "consumer_visibility": "receipt_only"},
+        },
+    }
+    assert _physical_output(record) is False
+    record["response"]["outcome"]["result"] = {"hit_count": 2}
+    assert _physical_output(record) is True

@@ -20688,6 +20688,11 @@ def main() -> int:
     )
     _treatment_lane.add_lane_arguments(parser)
     args = parser.parse_args()
+    from nexus.research.gate_inputs import gate_inputs_env_error
+
+    if gate_inputs_env_error():
+        # Wiring PR-4: refuse to start instead of failing every with-Nexus row later.
+        parser.error(gate_inputs_env_error())
 
     if args.quadrant == "bare":
         args.without_only = True

@@ -525,7 +525,8 @@ class LLMCandidateGenerator:
         # the runtime's [NEXUS MODEL CONTEXT] (consumer_projection) materialises its evidence ids
         # and payload into the prompt, which the bare arm never sees; that block comes from the
         # hash-sealed bundle, so Nexus-new cannot withhold it.  Fed in every other lane.
-        if _gate_inputs_enabled() and not _symmetric_prompt_mode():
+        # Symmetric mode is checked first: the switch is never even parsed in the strict lane.
+        if not _symmetric_prompt_mode() and _gate_inputs_enabled():
             from nexus.research.gate_inputs import sprint_gate_inputs
 
             # Wiring PR-4: the preflight gates' inputs from the sprint's own task contract

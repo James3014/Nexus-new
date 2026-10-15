@@ -143,6 +143,9 @@ _TRIVIAL_OUTCOME_KEYS = frozenset({
     "input",
     "inputs",
     "input_provenance",
+    # Contract B flag (nexus-runtime #217): a visibility marker, never output.
+    "consumer_visibility",
+    "receipt_only_capabilities",
     "message",
 })
 _SUCCESS_STATUSES = frozenset({"SUCCEEDED", "VERIFIED", "PASS"})

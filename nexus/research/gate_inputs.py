@@ -113,6 +113,16 @@ def _repo_regular_file(root: Path, relative: str) -> bool:
     return current.is_file()
 
 
+def gate_inputs_env_error() -> str:
+    """ "" when ``NEXUS_SPRINT_GATE_INPUTS`` is unset, ``0`` or ``1``; else the error text."""
+
+    try:
+        gate_inputs_enabled()
+    except ValueError as exc:
+        return str(exc)
+    return ""
+
+
 def gate_inputs_enabled() -> bool:
     """``NEXUS_SPRINT_GATE_INPUTS``: unset or ``1`` = on, ``0`` = off, anything else is an error.
 
