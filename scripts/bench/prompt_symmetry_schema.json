@@ -2082,5 +2082,70 @@
    }
   }
  },
- "schema": "nexus_bench_prompt_block_schema_v2"
+ "schema": "nexus_bench_prompt_block_schema_v2",
+ "treatment_blocks": {
+  "_note": "Treatment lane only (wiring plan PR-3). Round 1 of the treatment lane uses `blocks` with only the `widen` overrides below (config numbers the lane changes: candidate pool, rounds, flow); every other path is unchanged. Later rounds may add only these retry headers and fixed sentences, plus lines proven to come from the row's own earlier model candidates or the runner's visible-test output (see prompt_symmetry_audit.audit_treatment_round). Later rounds run under a new sprint attempt id (seed s<n>, e.g. s10000 for the self-heal) and the planner adds semantic_failure_sensor after a failed visible test: `round_id_pattern` lets every sprint-id pattern accept any s<n>-a<k>, and `extra_capabilities` clones the template capability's patterns (same skip shape) for the listed capability. Nothing else is widened.",
+  "candidate_header_pattern": "^\\[CANDIDATE [0-9]{1,2}\\]$",
+  "extra_capabilities": {
+   "semantic_failure_sensor": "file_lock"
+  },
+  "fixed_sentences": [
+   "Previous candidate failed verification. Repair the candidate using the failure evidence below."
+  ],
+  "forbidden_headers": [
+   "[NEXUS LOCAL SUPPORT CANDIDATE]"
+  ],
+  "headers": [
+   "[FAILURE]",
+   "[ULTRA REVIEW FINDINGS]"
+  ],
+  "round_id_pattern": {
+   "from": "\\-s0\\-a1",
+   "to": "\\-s[0-9]{1,5}\\-a[0-9]{1,2}"
+  },
+  "widen": {
+   "[NEXUS EXECUTION PROFILE]": {
+    "candidate_count": {
+     "enum": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+     ]
+    },
+    "max_rounds": {
+     "enum": [
+      1,
+      2,
+      3,
+      4
+     ]
+    }
+   },
+   "[NEXUS EXECUTOR FLAGS]": {
+    "ddtree_max_candidates": {
+     "enum": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+     ]
+    }
+   },
+   "[NEXUS ROUTE SUMMARY]": {
+    "recommended_flow": {
+     "patterns": [
+      "^direct$",
+      "^hybrid$",
+      "^hyper$"
+     ]
+    }
+   }
+  }
+ }
 }

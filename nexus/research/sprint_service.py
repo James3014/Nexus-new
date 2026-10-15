@@ -19,6 +19,7 @@ from nexus.engine.autoreason_service import AutoreasonService
 from nexus.engine.ddtree_adapter import DDTreeAdapter
 from nexus.engine.learning_policy_loader import route_cost_controls_from_env
 from nexus.engine.policies.research_policy import ResearchPolicy
+from nexus.research import bench_treatment_lane as _bench_lane
 from nexus.research.candidate_pool_policy import decide_candidate_pool_policy
 from nexus.research.day_shift_optimizer import DayShiftOptimizer
 from nexus.research.local_sprint_mutator import (
@@ -130,6 +131,58 @@ def _compile_candidate_or_warning(code: str, filename: str) -> str:
         if issubclass(warning.category, SyntaxWarning):
             return str(warning.message)
     return ""
+
+
+def guard_syntax_rejection(code: str) -> str:
+    """The semantic guard's syntax rejection for ``code`` ("" when it compiles cleanly)."""
+    try:
+        syntax_warning = _compile_candidate_or_warning(code, "<semantic_guard>")
+    except SyntaxError as exc:
+        return f"syntax_error: {exc}"
+    if syntax_warning:
+        return f"syntax_warning: {syntax_warning}"
+    return ""
+
+
+def executor_syntax_rejection(code: str, filename: str) -> str:
+    """The in-place executor's syntax rejection for ``code`` ("" when it compiles cleanly)."""
+    try:
+        syntax_warning = _compile_candidate_or_warning(code, filename)
+    except SyntaxError as exc:
+        return f"syntax_error:{exc.msg}"
+    if syntax_warning:
+        return f"syntax_warning:{syntax_warning}"
+    return ""
+
+
+def syntax_rejection_lines(code: str, filename: str = "candidate.py") -> set[str]:
+    """Every syntax rejection text the sprint can put into a failure tail for ``code``.
+
+    The bench prompt audit allows exactly these lines in a later treatment round (shared helper,
+    so the audit and the product can never drift apart).
+    """
+    return {line for line in (guard_syntax_rejection(code), executor_syntax_rejection(code, filename)) if line}
+
+
+def visible_timeout_line_re(python: str, visible_test_arg: str | None = None) -> "re.Pattern[str]":
+    """``str(subprocess.TimeoutExpired)`` of the sprint's visible test run, bound EXACTLY (PR-3).
+
+    ``python`` is the interpreter the product process runs with (its ``sys.executable``, which
+    the bench runner chose when it launched the product); nothing about it is pattern-matched.
+    Counted lane: the seam's confined argv ``[python, -I, -m, pytest, -q, --maxfail=1,
+    *PINNED_PYTEST_ARGS]``. In-place form (``sprint_pytest_cmd``): ``[python, -m, pytest, -q,
+    --maxfail=1, --, <visible test as the product received it>]``. Only the seconds vary.
+    Without an interpreter the pattern matches nothing.
+    """
+    from nexus.services.post_candidate_seam import PINNED_PYTEST_ARGS
+
+    if not python:
+        return re.compile(r"(?!)")
+    forms = [str([python, "-I", "-m", "pytest", "-q", "--maxfail=1", *PINNED_PYTEST_ARGS])]
+    if visible_test_arg:
+        forms.append(str([python, "-m", "pytest", "-q", "--maxfail=1", "--", visible_test_arg]))
+    alternatives = "|".join(re.escape(" ".join(f"Command '{form}'".split())) for form in forms)
+    return re.compile(rf"^(?:{alternatives}) timed out after [0-9]+(?:\.[0-9]+)? seconds$")
 
 
 @dataclass
@@ -1517,24 +1570,13 @@ class InPlaceSprintExecutor:
                     elapsed_sec=round(time.time() - start, 4),
                 )
             if target_path.suffix == ".py":
-                try:
-                    syntax_warning = _compile_candidate_or_warning(code, str(target_path))
-                except SyntaxError as exc:
+                syntax_rejection = executor_syntax_rejection(code, str(target_path))
+                if syntax_rejection:
                     return CandidateEval(
                         seed=seed,
                         score=0.0,
                         hint=hint,
-                        error=f"syntax_error:{exc.msg}",
-                        candidate_code=code,
-                        source=source,
-                        elapsed_sec=round(time.time() - start, 4),
-                    )
-                if syntax_warning:
-                    return CandidateEval(
-                        seed=seed,
-                        score=0.0,
-                        hint=hint,
-                        error=f"syntax_warning:{syntax_warning}",
+                        error=syntax_rejection,
                         candidate_code=code,
                         source=source,
                         elapsed_sec=round(time.time() - start, 4),
@@ -2116,12 +2158,9 @@ def _run_hyper_sprint_core(*, repo_root: Path, config: SprintConfig) -> SprintRe
             return False, "no_change_candidate"
         
         # R7: Strict rejection for invalid AST/syntax
-        try:
-            syntax_warning = _compile_candidate_or_warning(candidate, "<semantic_guard>")
-        except SyntaxError as exc:
-            return False, f"syntax_error: {exc}"
-        if syntax_warning:
-            return False, f"syntax_warning: {syntax_warning}"
+        syntax_rejection = guard_syntax_rejection(candidate)
+        if syntax_rejection:
+            return False, syntax_rejection
 
         src_lines = {ln.strip() for ln in source.splitlines() if ln.strip()}
         cand_lines = {ln.strip() for ln in candidate.splitlines() if ln.strip()}
@@ -2412,6 +2451,9 @@ def _run_hyper_sprint_core(*, repo_root: Path, config: SprintConfig) -> SprintRe
 
     _SPRINT_METER.set(_meter)
     for idx in range(max(1, config.candidate_count)):
+        if idx > 0 and _bench_lane.treatment_lane_active() and not _bench_lane.treatment_round_allowed(learning_trace, f"candidate_{idx}", model_calls):
+            # PR-3: one row deadline and one call budget cover every round of the row.
+            break
         hint = policy.get_mutation_hint(
             idx % max(1, config.candidate_count),
             task_desc=config.task,
@@ -2536,7 +2578,16 @@ def _run_hyper_sprint_core(*, repo_root: Path, config: SprintConfig) -> SprintRe
                             "model_candidate_sha256",
                             hashlib.sha256(candidate_code.encode("utf-8")).hexdigest(),
                         )
+                    if _symmetric_prompt_mode():
+                        # PR-3: every model call in order (first + final binding); a call that
+                        # yielded no model candidate is a placeholder, never a candidate.
+                        if isinstance(candidate_code, str) and candidate_code and _bench_lane.is_stage1_model_source(used_source):
+                            _bench_lane.record_model_candidate(learning_trace, candidate_code, used_source)
+                        else:
+                            _bench_lane.record_failed_model_call(learning_trace)
                 except Exception as llm_exc:  # noqa: BLE001
+                    if _symmetric_prompt_mode():
+                        _bench_lane.record_failed_model_call(learning_trace)
                     fallback_used = True
                     failure_meta = getattr(llm_exc, "metadata", {})
                     failure_meta = failure_meta if isinstance(failure_meta, dict) else {}
@@ -2694,7 +2745,9 @@ def _run_hyper_sprint_core(*, repo_root: Path, config: SprintConfig) -> SprintRe
                     candidates.append(support_ev)
             self_heal_enabled = (
                 os.environ.get("NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL", "1").strip().lower() not in {"0", "false", "no"}
-                and not _symmetric_prompt_mode()  # L2: symmetric mode itself means one model call
+                # L2: symmetric mode itself means one model call, except in the bench treatment
+                # lane (PR-3), where the visible-test self-heal is the treatment being measured.
+                and (not _symmetric_prompt_mode() or _bench_lane.treatment_lane_active())
             )
             if (
                 hidden_verifier_mode
@@ -2742,12 +2795,16 @@ def _run_hyper_sprint_core(*, repo_root: Path, config: SprintConfig) -> SprintRe
                 and (used_source.startswith("llm") or model_required_final_delivery)
                 and ev.score < 1.0
                 and "quota" not in error_codes
+                # PR-3: the treatment lane repairs only a model candidate, never a local fallback.
+                and (not _bench_lane.treatment_lane_active() or _bench_lane.is_stage1_model_source(used_source))
+                and (not _bench_lane.treatment_lane_active() or _bench_lane.treatment_round_allowed(learning_trace, "self_heal", model_calls))
             ):
                 candidates.append(ev)
                 ev_recorded = True
                 failure_tail = (ev.error or ev.stdout or "")[-1200:]
                 local_support_block = ""
-                if model_required_final_delivery:
+                # PR-3: a local candidate is never shown to the model in the audited A/B prompt.
+                if model_required_final_delivery and not _symmetric_prompt_mode():
                     try:
                         support_code, support_meta = local_generator.generate(
                             source_code=source_code,
@@ -2770,6 +2827,7 @@ def _run_hyper_sprint_core(*, repo_root: Path, config: SprintConfig) -> SprintRe
                             )
                     except Exception:  # noqa: BLE001
                         error_codes.append("model_required_local_support_hint_failed")
+                heal_call_recorded = False
                 repair_task = (
                     f"{config.task}\n\n"
                     "Previous candidate failed verification. "
@@ -2790,6 +2848,12 @@ def _run_hyper_sprint_core(*, repo_root: Path, config: SprintConfig) -> SprintRe
                         codeintel_block=codeintel_block,
                     )
                     _record_llm_meta(repair_meta)
+                    heal_call_recorded = True
+                    if _symmetric_prompt_mode():
+                        if isinstance(repair_code, str) and repair_code:
+                            _bench_lane.record_model_candidate(learning_trace, repair_code, "llm_self_heal")
+                        else:
+                            _bench_lane.record_failed_model_call(learning_trace, "llm_self_heal_failed")
                     repair_guard_ok, repair_guard_reason = _semantic_guard(candidate_code, repair_code, config.task, "llm_self_heal")
                     if repair_guard_ok:
                         repair_ev = _evaluate_candidate(
@@ -2812,6 +2876,16 @@ def _run_hyper_sprint_core(*, repo_root: Path, config: SprintConfig) -> SprintRe
                     if repair_ev.score >= 1.0:
                         ev = repair_ev
                 except Exception as heal_exc:  # noqa: BLE001
+                    if _symmetric_prompt_mode() and not heal_call_recorded:
+                        _bench_lane.record_failed_model_call(learning_trace, "llm_self_heal_failed")
+                        # PR-3: a failed repair call still counts (call budget, calls and tokens
+                        # reconciled with the prompt capture).
+                        heal_meta = getattr(heal_exc, "metadata", {})
+                        heal_meta = dict(heal_meta) if isinstance(heal_meta, dict) else {}
+                        heal_meta["model_calls"] = (
+                            int(heal_meta.get("model_calls", 0) or 0) if "model_calls" in heal_meta else 1
+                        )
+                        _record_llm_meta(heal_meta)
                     error_codes.append("llm_self_heal_failed")
                     candidates.append(
                         CandidateEval(

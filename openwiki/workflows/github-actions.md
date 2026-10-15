@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: GitHub Actions Workflows & Operational Lanes
-description: Current inventory and trigger classification of all 23 GitHub Actions workflows, including Fast Start v2 shadow/invalidation/reconciliation lanes, exact-base Pytest impact selection, G2 published-history audit, and trusted deletion-evidence bootstrap.
+description: Current inventory and trigger classification of all 24 GitHub Actions workflows, including Fast Start v2 shadow/invalidation/reconciliation lanes, exact-base Pytest impact selection, G2 published-history audit, and trusted deletion-evidence bootstrap.
 tags: [workflows, github-actions, ci-cd, operational-lanes]
 openwiki:
   roles: [architecture, operations, testing]
@@ -15,7 +15,7 @@ openwiki:
 
 # GitHub Actions Workflows & Operational Lanes
 
-The repository currently contains **all 23 GitHub Actions workflows** under `.github/workflows/`. Display names and trigger modes below are derived from the physical YAML at the synchronized GitHub revision; they are not inferred from filenames or historical workflow intent.
+The repository currently contains **all 24 GitHub Actions workflows** under `.github/workflows/`. Display names and trigger modes below are derived from the physical YAML at the synchronized GitHub revision; they are not inferred from filenames or historical workflow intent.
 
 ---
 
@@ -39,6 +39,7 @@ The repository currently contains **all 23 GitHub Actions workflows** under `.gi
 | `policy-lane-gate.yml` | Policy Lane Gate CI | `push`, `pull_request`, `workflow_dispatch` | Event-driven & Manual | Policy-contract validation lane |
 | `pytest.yml` | Nexus Pytest CI | `push`, `pull_request`, `workflow_dispatch`, `schedule` (`17 3 * * *`) | Scheduled, Event-driven & Manual | Exact-base impact gate followed by revision-bound Pytest verification |
 | `repository-intelligence-comment.yml` | Repository Intelligence comment | `pull_request_target` (`main`; `opened`, `synchronize`, `reopened`, `ready_for_review`) | Event-driven | Default-branch sticky Repository Intelligence PR comment |
+| `review-record-present.yml` | Review record present | `pull_request_target` (`main`; `opened`, `synchronize`, `reopened`), `issue_comment` (`created`, `edited`, `deleted`) | Event-driven | Advisory #2290 check that the PR carries a review record (reviewer, current head sha, verdict; cross-model for high-risk paths); default-branch script via the REST API only, publishes the commit status `Review record present (advisory)` on the PR head |
 | `repository-intelligence.yml` | Repository Intelligence | `pull_request` (`opened`, `synchronize`, `reopened`, `ready_for_review`) | Event-driven | Repository Intelligence snapshot and guard-delta jobs |
 | `security.yml` | Nexus Exact-Base Bandit CI | `push`, `pull_request`, `workflow_dispatch` | Event-driven & Manual | Exact-base Bandit security scan |
 | `trusted-deletion-anchor.yml` | Trusted deletion-evidence bootstrap anchor | `pull_request_target` (`opened`, `synchronize`, `reopened`, `ready_for_review`) | Event-driven | Trusted controller → unprivileged executor → trusted verification path for deletion evidence |

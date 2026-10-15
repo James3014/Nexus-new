@@ -1138,3 +1138,39 @@ def test_trusted_full_suite_fallback_new_head_failure_blocks(pr_repo):
     assert verdict["classification"] == "NEW_REGRESSION"
     assert verdict["blocking"] is True
     assert verdict["fallback"] == "FULL_SUITE"
+
+
+def test_verifier_log_defuses_legacy_workflow_commands(tmp_path, capsys):
+    # Reasons can carry candidate-controlled text (test ids, paths); the job log must
+    # never contain a literal `##[` while the written classification stays exact.
+    missing = tmp_path / "##[error]forged"
+    output = tmp_path / "classification.json"
+    code = tig.main([
+        "verifier",
+        "--event-json",
+        str(missing / "event.json"),
+        "--repo-root",
+        str(tmp_path),
+        "--bundle-dir",
+        str(tmp_path / "missing"),
+        "--evidence-dir",
+        str(tmp_path / "missing"),
+        "--expected-manifest-sha256",
+        "0" * 64,
+        "--expected-base-evidence-sha256",
+        "0" * 64,
+        "--controller-result",
+        "failure",
+        "--base-executor-result",
+        "skipped",
+        "--head-executor-result",
+        "skipped",
+        "--output",
+        str(output),
+    ])
+    log = capsys.readouterr().out
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert code == 1
+    assert "##[error]forged" in payload["reason"]
+    assert "##[" not in log
+    assert json.loads(log)["reason"] == payload["reason"]

@@ -69,6 +69,7 @@ from nexus.research.flow.route_decider import (
     _derive_findings_query,
     _task_body_only,
 )
+from nexus.research.bench_treatment_lane import treatment_lane_active as _bench_treatment_lane_active
 from nexus.research.flow.evidence_packer import (
     _build_research_context,
     _doc_scout_supports_specific_claim,
@@ -404,10 +405,17 @@ def _mapping_get(value: object, key: str) -> object:
 _SYMMETRIC_MODEL_SOURCES = frozenset({"llm", "nexus_llm_baseline", "llm_assisted"})
 
 
+# PR-3 treatment lane: the visible-test self-heal output is also the model's own candidate.
+_TREATMENT_MODEL_SOURCES = frozenset({"llm_self_heal"})
+
+
 def _is_symmetric_model_source(source: str) -> bool:
     """Exact model-source allowlist: the product labels of a model-generated candidate only."""
 
-    return str(source or "").strip().lower() in _SYMMETRIC_MODEL_SOURCES
+    label = str(source or "").strip().lower()
+    if label in _SYMMETRIC_MODEL_SOURCES:
+        return True
+    return label in _TREATMENT_MODEL_SOURCES and _bench_treatment_lane_active()
 
 
 def _symmetric_prompt_mode() -> bool:
@@ -1475,8 +1483,9 @@ def run_auto_flow(
             except ValueError:
                 pass
         effective_max_rounds = execution_profile["effective_max_rounds"]
-        if symmetric_prompt and llm_mode:
-            # L3: exactly one model candidate, one round, in the counted A/B.
+        if symmetric_prompt and llm_mode and not _bench_treatment_lane_active():
+            # L3: exactly one model candidate, one round, in the counted A/B (strict lane). The
+            # treatment lane (PR-3) keeps the profile counts, capped by NEXUS_LLM_CANDIDATE_CAP.
             effective_candidate_count = 1
             effective_max_rounds = 1
         sprint_executor_flags = {
@@ -1510,6 +1519,12 @@ def run_auto_flow(
         # H1 / P1-1: in the symmetric A/B the model candidate's file is delivered even when the
         # visible test fails (status stays FAILED); the bench's hidden-only gate decides.
         raw_model_sha = str(_mapping_get(getattr(res, "learning_trace", None), "model_candidate_sha256"))
+        if symmetric_prompt and _bench_treatment_lane_active() and res.patch:
+            # PR-3: the delivered candidate is the winner of the row's model candidates (last of
+            # its lineage), bound only if its sha is one of the recorded raw model outputs.
+            recorded = _mapping_get(getattr(res, "learning_trace", None), "model_candidate_sha256s")
+            patch_sha = hashlib.sha256(str(res.patch).encode("utf-8")).hexdigest()
+            raw_model_sha = patch_sha if isinstance(recorded, list) and patch_sha in recorded else ""
         symmetric_delivery = bool(
             symmetric_prompt
             and res.patch

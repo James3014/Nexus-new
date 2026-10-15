@@ -2,10 +2,5 @@
 
 from __future__ import annotations
 
-ENTRY: dict[str, object] = {
-    "file": "tests/nexus/orchestrator/test_target_integration_authority_closure.py",
-    "disposition": "quarantine-product-bug?",
-    "issue": "#1923",
-    "cause": "assertion encodes a safety/boundary invariant that the product currently violates; possible real product bug, file a new Issue before fixing",
-    "tests": ("test_owner_finish_delegates_full_authorized_integration_then_cleanup",),
-}
+# Tombstone (#1923): stale test updated to the full nexus.approval.v2 binding (#1884); the safety property (approval bound to task/attempt/action) is still enforced and asserted.
+ENTRY = None

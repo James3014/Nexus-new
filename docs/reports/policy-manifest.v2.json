@@ -2,6 +2,8 @@
   "manifest_version": "2.0.0",
   "generated_at": "2026-06-15T00:00:00Z",
   "commit_sha": "1c9dce6597f3eb52006df8223000d2162624f55d",
+  "commit_ref_policy": "#2259: per-policy commit_sha must be verifiable after a squash merge, so it is the full SHA of the squash-merge commit on main and verified_in_pr names the PR (gh pr view N --json mergeCommit). PR-branch commits are never recorded. The 27 baseline-freeze entries (2026-06-15) keep the historical short id 1c9dce65 with verified_in_pr null; that commit predates this repository's history and is kept as a label, not a reference. New entries must carry a verified_in_pr.",
+  "enforcement_mode_policy": "#2259: enforcement_mode was backfilled on 2026-10-15 from the lane definition, not from a per-policy verification: hard and soft code-backed entries -> block, shadow (observation-only) -> record_only, the drill fixture P-TEST-NODRILL-01 -> not_wired, P-CONTAM-01 -> record_only (#2216). Only hard-lane entries are checked by the lane gate (check_enforcement_wiring); for soft and shadow entries the value is an unverified declaration until a later change adds coverage.",
   "baseline_freeze": true,
   "principle": "lane-based governance, not monolithic lock-down",
   "lane_model": "policy-lane-model.v1",
@@ -12,8 +14,11 @@
       "owner_module": "string — owning module name",
       "source_file": "string — path to source file",
       "schema_version": "string — version of the policy implementation",
-      "commit_sha": "string — commit when policy was last verified",
+      "commit_sha": "string — full SHA of the commit on main that last verified the policy (the squash-merge commit of verified_in_pr); baseline-freeze entries keep the pre-split short id 1c9dce65, which is not resolvable in this repository (see commit_ref_policy)",
+      "verified_in_pr": "integer|null — Nexus-new PR whose squash merge is commit_sha; null only for the 2026-06-15 baseline-freeze entries",
       "status_tag": "string — code-backed|spec-backed|inferred|historical",
+      "enforcement_mode": "string — block|record_only|not_wired — block stops or alters execution, record_only records a signal and never blocks, not_wired has no production caller (see enforcement_mode_policy)",
+      "guard_modules": "list[string] — the entries of source_file that implement the check itself; required when source_file lists more than one path. The lane gate requires a test entrypoint that reaches a source_file module outside this list (a production caller), see check_enforcement_wiring (#2259). For a single-source policy the check reduces to 'a test entrypoint imports the source module'",
       "test_entrypoints": "list[string] — test file paths or inline test locations",
       "receipt_type": "string — receipt type produced by this policy",
       "rollback_drill_status": "string — no-drill|drilled-{date}",
@@ -36,7 +41,9 @@
       "source_file": "nexus/engine/autonomic_router.py",
       "schema_version": "v4.40",
       "commit_sha": "1c9dce65",
+      "verified_in_pr": null,
       "status_tag": "code-backed",
+      "enforcement_mode": "block",
       "test_entrypoints": [],
       "receipt_type": "ExecutionPlan",
       "rollback_drill_status": "drilled-2026-06-15",
@@ -64,7 +71,9 @@
       "source_file": "nexus/engine/autonomic_router.py",
       "schema_version": "v4.40",
       "commit_sha": "1c9dce65",
+      "verified_in_pr": null,
       "status_tag": "code-backed",
+      "enforcement_mode": "block",
       "test_entrypoints": [],
       "receipt_type": "ExecutionPlan",
       "rollback_drill_status": "drilled-2026-06-15",
@@ -92,7 +101,9 @@
       "source_file": "nexus/engine/autonomic_router.py",
       "schema_version": "v4.40",
       "commit_sha": "1c9dce65",
+      "verified_in_pr": null,
       "status_tag": "code-backed",
+      "enforcement_mode": "block",
       "test_entrypoints": [],
       "receipt_type": "ExecutionPlan",
       "rollback_drill_status": "drilled-2026-06-15",
@@ -120,7 +131,9 @@
       "source_file": "nexus/engine/autonomic_router.py",
       "schema_version": "v4.40",
       "commit_sha": "1c9dce65",
+      "verified_in_pr": null,
       "status_tag": "code-backed",
+      "enforcement_mode": "block",
       "test_entrypoints": [],
       "receipt_type": "ExecutionPlan",
       "rollback_drill_status": "drilled-2026-06-15",
@@ -148,7 +161,9 @@
       "source_file": "nexus/engine/budget_governor.py",
       "schema_version": "v1.0",
       "commit_sha": "1c9dce65",
+      "verified_in_pr": null,
       "status_tag": "code-backed",
+      "enforcement_mode": "block",
       "test_entrypoints": [],
       "receipt_type": "TaskCompactionReceipt",
       "rollback_drill_status": "drilled-2026-06-15",
@@ -218,7 +233,9 @@
       "source_file": "nexus/engine/capability_planner.py",
       "schema_version": "v1.0",
       "commit_sha": "1c9dce65",
+      "verified_in_pr": null,
       "status_tag": "code-backed",
+      "enforcement_mode": "block",
       "test_entrypoints": [
         "tests/engine/test_capability_planner.py"
       ],
@@ -248,7 +265,9 @@
       "source_file": "nexus/engine/capability_planner.py",
       "schema_version": "v1.0",
       "commit_sha": "1c9dce65",
+      "verified_in_pr": null,
       "status_tag": "code-backed",
+      "enforcement_mode": "block",
       "test_entrypoints": [
         "tests/engine/test_capability_planner.py"
       ],
@@ -278,7 +297,9 @@
       "source_file": "nexus/services/s2t_strict.py",
       "schema_version": "v2.0",
       "commit_sha": "1c9dce65",
+      "verified_in_pr": null,
       "status_tag": "code-backed",
+      "enforcement_mode": "block",
       "test_entrypoints": [
         "tests/gates/test_s2t_claim_gate.py",
         "tests/gates/test_s2t_rollout_control.py"
@@ -309,7 +330,9 @@
       "source_file": "nexus/services/s2t_strict.py",
       "schema_version": "v2.0",
       "commit_sha": "1c9dce65",
+      "verified_in_pr": null,
       "status_tag": "code-backed",
+      "enforcement_mode": "block",
       "test_entrypoints": [
         "tests/gates/test_s2t_claim_gate.py"
       ],
@@ -339,7 +362,9 @@
       "source_file": "nexus/services/s2t_strict.py",
       "schema_version": "v2.0",
       "commit_sha": "1c9dce65",
+      "verified_in_pr": null,
       "status_tag": "code-backed",
+      "enforcement_mode": "block",
       "test_entrypoints": [
         "tests/gates/test_s2t_claim_gate.py",
         "tests/gates/test_s2t_rollout_control.py"
@@ -370,7 +395,9 @@
       "source_file": "nexus/core/cost_hook.py",
       "schema_version": "v1.0",
       "commit_sha": "1c9dce65",
+      "verified_in_pr": null,
       "status_tag": "code-backed",
+      "enforcement_mode": "block",
       "test_entrypoints": [],
       "receipt_type": "CostPrediction",
       "rollback_drill_status": "drilled-2026-06-15",
@@ -413,7 +440,9 @@
       "source_file": "nexus/governance/capability_gate.py",
       "schema_version": "v1.0",
       "commit_sha": "1c9dce65",
+      "verified_in_pr": null,
       "status_tag": "code-backed",
+      "enforcement_mode": "block",
       "test_entrypoints": [],
       "receipt_type": "ToolsJson",
       "rollback_drill_status": "drilled-2026-06-15",
@@ -441,7 +470,9 @@
       "source_file": "nexus/services/local_heal/evaluation_gate.py",
       "schema_version": "v1.0",
       "commit_sha": "1c9dce65",
+      "verified_in_pr": null,
       "status_tag": "code-backed",
+      "enforcement_mode": "record_only",
       "test_entrypoints": [],
       "receipt_type": "TestResult",
       "rollback_drill_status": "drilled-2026-06-15",
@@ -469,7 +500,9 @@
       "source_file": "nexus-core-rs/src/receipt_verifier.rs",
       "schema_version": "v1.0",
       "commit_sha": "1c9dce65",
+      "verified_in_pr": null,
       "status_tag": "code-backed",
+      "enforcement_mode": "block",
       "test_entrypoints": [
         "nexus-core-rs/src/receipt_verifier.rs::tests (11 tests)"
       ],
@@ -499,7 +532,9 @@
       "source_file": "nexus/core/critique_engine.py",
       "schema_version": "v1.0",
       "commit_sha": "1c9dce65",
+      "verified_in_pr": null,
       "status_tag": "code-backed",
+      "enforcement_mode": "block",
       "test_entrypoints": [],
       "receipt_type": "HallucinationNote",
       "rollback_drill_status": "drilled-2026-06-15",
@@ -527,7 +562,9 @@
       "source_file": "nexus/governance/hallucination_guard.py",
       "schema_version": "v1",
       "commit_sha": "1c9dce65",
+      "verified_in_pr": null,
       "status_tag": "code-backed",
+      "enforcement_mode": "block",
       "test_entrypoints": [
         "tests/core/test_hallucination_guard.py"
       ],
@@ -557,7 +594,9 @@
       "source_file": "nexus/engine/capability_receipt_policy.py",
       "schema_version": "v1.0",
       "commit_sha": "1c9dce65",
+      "verified_in_pr": null,
       "status_tag": "code-backed",
+      "enforcement_mode": "block",
       "test_entrypoints": [
         "tests/engine/test_capability_receipt_policy.py"
       ],
@@ -587,7 +626,9 @@
       "source_file": "nexus/delivery/gate.py",
       "schema_version": "v1.0",
       "commit_sha": "1c9dce65",
+      "verified_in_pr": null,
       "status_tag": "code-backed",
+      "enforcement_mode": "block",
       "test_entrypoints": [
         "tests/delivery/test_completion_gate.py"
       ],
@@ -617,7 +658,9 @@
       "source_file": "nexus/delivery/contract.py",
       "schema_version": "v1.0",
       "commit_sha": "1c9dce65",
+      "verified_in_pr": null,
       "status_tag": "code-backed",
+      "enforcement_mode": "block",
       "test_entrypoints": [
         "tests/delivery/test_contract.py"
       ],
@@ -647,7 +690,9 @@
       "source_file": "nexus/core/policy_drift.py",
       "schema_version": "v1.0",
       "commit_sha": "1c9dce65",
+      "verified_in_pr": null,
       "status_tag": "code-backed",
+      "enforcement_mode": "block",
       "test_entrypoints": [],
       "receipt_type": "DriftReport",
       "rollback_drill_status": "drilled-2026-06-15",
@@ -765,7 +810,9 @@
       "source_file": "nexus/governance/application/drift_stop_gate.py",
       "schema_version": "v1.0",
       "commit_sha": "1c9dce65",
+      "verified_in_pr": null,
       "status_tag": "code-backed",
+      "enforcement_mode": "block",
       "test_entrypoints": [
         "tests/unit/governance/test_drift_stop_gate.py"
       ],
@@ -795,7 +842,9 @@
       "source_file": "nexus/engine/autonomy_observation.py",
       "schema_version": "v1.0",
       "commit_sha": "1c9dce65",
+      "verified_in_pr": null,
       "status_tag": "code-backed",
+      "enforcement_mode": "record_only",
       "test_entrypoints": [],
       "receipt_type": "AutonomyObservationReceipt",
       "rollback_drill_status": "drilled-2026-06-15",
@@ -823,7 +872,9 @@
       "source_file": "nexus/core/belief_engine.py",
       "schema_version": "v1.0",
       "commit_sha": "1c9dce65",
+      "verified_in_pr": null,
       "status_tag": "code-backed",
+      "enforcement_mode": "block",
       "test_entrypoints": [
         "tests/core/test_belief_engine.py"
       ],
@@ -895,7 +946,9 @@
       "source_file": "nexus/core/context_hub.py",
       "schema_version": "v1.0",
       "commit_sha": "1c9dce65",
+      "verified_in_pr": null,
       "status_tag": "code-backed",
+      "enforcement_mode": "block",
       "test_entrypoints": [],
       "receipt_type": "ContextAssemblyContract",
       "rollback_drill_status": "drilled-2026-06-15",
@@ -923,7 +976,9 @@
       "source_file": "nexus/engine/attempt_settlement_service.py",
       "schema_version": "v1.0",
       "commit_sha": "1c9dce65",
+      "verified_in_pr": null,
       "status_tag": "code-backed",
+      "enforcement_mode": "block",
       "test_entrypoints": [],
       "receipt_type": "AutoEvidence",
       "rollback_drill_status": "drilled-2026-06-15",
@@ -951,7 +1006,9 @@
       "source_file": "nexus-core-rs/src/flow_machine.rs",
       "schema_version": "v1.0",
       "commit_sha": "1c9dce65",
+      "verified_in_pr": null,
       "status_tag": "code-backed",
+      "enforcement_mode": "block",
       "test_entrypoints": [
         "nexus-core-rs/src/flow_machine.rs::tests (27 tests)",
         "tests/integration/test_rust_wave3_cutover.py"
@@ -981,8 +1038,15 @@
       "owner_module": "contamination_guard",
       "source_file": "nexus/research/contamination_guard.py; nexus/research/contamination_enforcement.py; nexus/research/research_facts.py; nexus/core/capability_executor_registry.py; nexus/app/research_flow_service.py",
       "schema_version": "v0.1",
-      "commit_sha": "8e1da0e9b",
+      "commit_sha": "f8481d16149a8d7a95a3e743a753997c3e0593fe",
+      "verified_in_pr": 2216,
       "status_tag": "code-backed",
+      "enforcement_mode": "record_only",
+      "guard_modules": [
+        "nexus/research/contamination_guard.py",
+        "nexus/research/contamination_enforcement.py",
+        "nexus/research/research_facts.py"
+      ],
       "test_entrypoints": [
         "tests/research/test_research_contamination_canonical_path.py::test_canonical_research_contaminated_output_passes_with_signal",
         "tests/research/test_research_contamination_canonical_path.py::test_canonical_research_guard_error_passes_with_signal",
@@ -1024,6 +1088,12 @@
           "timestamp": "2026-10-15T00:18:39Z",
           "diff_summary": "#2199/#2216, Owner fallback to option B (2026-10-15). ENFORCEMENT MODE: RECORD-ONLY. The canonical research path RECORDS a contamination signal and does NOT block; the research auto-flow does not change research_gate_passed and does not quarantine the research context. Upgrading to blocking is a later Owner decision, based on the accumulated signals. Code commit 8e1da0e9b is a PR-branch commit (pre squash-merge). ROUTES: (1) canonical research executor nexus/core/capability_executor_registry.py _exec_research -> _research_contamination_signal: on accepted research output, the receipt keeps its normal status and its outcome carries contamination_signal {policy_id, mode: record_only, detected: true|false, reason: RESEARCH_CONTAMINATION_DETECTED|'', terms}; when the check cannot run, detected=null and reason=RESEARCH_CONTAMINATION_GUARD_ERROR. (2) research auto-flow nexus/app/research_flow_service.py run_auto_flow -> record_flow_contamination_signal: the same signal goes into capability_evidence and nexus_usage_trace.capabilities.research_contamination_signal. Both routes append every signal to <workspace>/.nexus/research/contamination_signals.jsonl (schema nexus.research.contamination_signal.v1) for later aggregation. WHAT IS SCANNED: strings, dict keys (as text), lists/tuples/sets, bytes, dataclasses, pydantic models and plain objects (vars); design-field names at any depth; other object types, or more than 200000 nodes / depth 64, give GUARD_ERROR. For the auto-flow the planner-owned context keys (FLOW_CONTEXT_PLANNER_KEYS) are not scanned. DETECTION: CANONICAL_DESIGN_PATTERNS, structural regexes (modal + design verb, 'the fix/plan/solution is to', labelled prefixes, 'can be fixed by', we recommend/propose, diff hunks, Chinese equivalents) on NFKC/zero-width/hyphen-normalised text; a match is discounted only when fully inside a clean task/query echo. MEASURED: held-out (coordinator corpus, unseen by the author) detection 53/120 (44%), Chinese 18/40; held-out clean-text false positives 4/120 (3.3%, quoted-doc recommendations). Below the 70% detection bar for blocking, hence record-only. Author measurements 2026-10-15: proxy false positives Nexus-new issue title+body 20/500 (4.0%), docs 300-word chunks 97/2661 (3.6%), historical research packs 0/59; reviewer dev set 37/38 (tuned on it); own untuned fresh sets 17/40 and 17/40 (42%). ALSO IN THIS CHANGE: build_research_facts keeps findings when blocked_assumptions is present. NOT COVERED: (a) design advice phrased outside the patterns (held-out recall 44%); bare code blocks with a suggested change. (b) the legacy pipeline_stages research stage (facts_only and L0) and the phase_factory/phase_executors research phase are not wired; they are not in the static import closure of the live entrypoints (nexus CLI, MCP gateway and server modules), pinned by test_legacy_research_routes_unreachable_from_live_entrypoints; dynamic (string/port) imports are outside that proof. (c) the canonical executor still sends the unmasked task to the provider; this is an output signal, not L1/L2 isolation. Real rollback drill: addendum 4 in docs/reports/contamination-guard-rollback-drill-2026-10-14.md.",
           "lane": "hard"
+        },
+        {
+          "version": "P-CONTAM-01.0.3.1",
+          "timestamp": "2026-10-15T12:00:00Z",
+          "diff_summary": "#2259 manifest schema: enforcement_mode=record_only (was prose in receipt_type and the 0.3.0 record); commit_sha rebound from the PR-branch commit 8e1da0e9b to the #2216 squash-merge commit f8481d16149a8d7a95a3e743a753997c3e0593fe with verified_in_pr=2216; guard_modules lists contamination_guard, contamination_enforcement and research_facts, so the lane gate requires a test entrypoint that reaches capability_executor_registry or research_flow_service (the production callers). No behaviour change to the policy itself.",
+          "lane": "hard"
         }
       ]
     },
@@ -1034,7 +1104,9 @@
       "source_file": "tests/test_policy_manager.py",
       "schema_version": "v1.0",
       "commit_sha": "1c9dce65",
+      "verified_in_pr": null,
       "status_tag": "spec-backed",
+      "enforcement_mode": "not_wired",
       "test_entrypoints": [
         "tests/test_policy_manager.py"
       ],
@@ -1111,6 +1183,42 @@
           "P-AUTO-01"
         ]
       }
+    },
+    "enforcement_mode_distribution": {
+      "block": [
+        "P-BELIEF-01",
+        "P-BUDGET-01",
+        "P-CLAIM-01",
+        "P-CLAIM-02",
+        "P-CLAIM-03",
+        "P-COST-01",
+        "P-CTX-01",
+        "P-DELIVERY-01",
+        "P-DELIVERY-02",
+        "P-FLOW-01",
+        "P-GATE-01",
+        "P-GATE-03",
+        "P-LEARN-01",
+        "P-LEARN-02",
+        "P-PLAN-01",
+        "P-PLAN-02",
+        "P-ROUTE-01",
+        "P-ROUTE-02",
+        "P-ROUTE-03",
+        "P-ROUTE-04",
+        "P-S2T-01",
+        "P-S2T-02",
+        "P-S2T-03",
+        "P-SETTLE-01"
+      ],
+      "record_only": [
+        "P-AUTO-01",
+        "P-CONTAM-01",
+        "P-GATE-02"
+      ],
+      "not_wired": [
+        "P-TEST-NODRILL-01"
+      ]
     }
   }
 }

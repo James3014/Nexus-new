@@ -5,11 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from nexus.services.online_nexus_context import (
     NEXUS_CODEINTEL_MARKER,
     NEXUS_ROUTE_MARKER,
     build_codeintel_preflight_invoker,
     build_online_nexus_context,
+    local_stage_forwardable,
     make_with_nexus_online_invoker,
     prompt_has_with_nexus_sections,
 )
@@ -307,3 +310,169 @@ def test_non_selected_capability_invoker_skipped(tmp_path: Path) -> None:
     else:
         # If planner did select memory, invoker must have run — still plan-gated.
         assert calls == ["memory"]
+
+
+# --- Nexus-new#2245: refused Local stages never reach the with_nexus Online prompt ---
+
+_LOCAL_SENTINEL = "local-advice-sentinel-2245"
+
+
+def _capturing_base_invoker(seen: list[str]) -> Any:
+    def base_invoker(context: dict[str, Any]) -> dict[str, Any]:
+        seen.append(str(context.get("online_prompt") or ""))
+        return normalize_online_invoker_payload(
+            provider="fixture",
+            task_id=str(context.get("task_id") or ""),
+            invoked=True,
+            output_delivered=True,
+            gate_passed=True,
+            provider_call_count=1,
+            response={"status": "ok"},
+            raw_response='{"status":"ok"}',
+            evidence_refs=[f"online:{context.get('task_id')}:fixture"],
+            transport="structured_callable",
+            selection_source="explicit_request",
+        )
+
+    return base_invoker
+
+
+def _with_nexus_context(local_stage: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "task_id": "t2245-wn",
+        "task_statement": "repair parse_kv",
+        "task_type": "repair",
+        "online_prompt": "online body",
+        "source_hash": "source-2245",
+        "route": {"recommended_flow": "direct"},
+        "planner": {},
+        "local": local_stage,
+        "capability_results": {},
+    }
+
+
+def _local_response() -> dict[str, Any]:
+    return {
+        "task_id": "t2245-wn",
+        "concise_summary": _LOCAL_SENTINEL,
+        "local_outputs": {"concise_summary": _LOCAL_SENTINEL},
+    }
+
+
+def test_with_nexus_refused_local_stage_injects_no_local_block() -> None:
+    seen: list[str] = []
+    invoker = make_with_nexus_online_invoker(_capturing_base_invoker(seen), provider="fixture")
+    payload = invoker(
+        _with_nexus_context({
+            "invoked": True,
+            "status": "FAILED",
+            "gate_passed": False,
+            "reason": "local_action_not_executor_bound",
+            "response": _local_response(),
+        })
+    )
+    assert len(seen) == 1
+    assert "[LOCAL_ASSIST_CONTEXT]" not in seen[0]
+    assert _LOCAL_SENTINEL not in seen[0]
+    assert payload["armor"] == "with_nexus"
+
+
+def test_with_nexus_gate_failed_stage_with_vap_hash_skips_binding_and_runs_online() -> None:
+    seen: list[str] = []
+    invoker = make_with_nexus_online_invoker(_capturing_base_invoker(seen), provider="fixture")
+    payload = invoker(
+        _with_nexus_context({
+            "invoked": True,
+            "status": "SUCCEEDED",
+            "gate_passed": False,
+            "verified_assist_packet_expected_hash": "expected-runtime-hash",
+            "response": {
+                **_local_response(),
+                "verified_assist_packet": {"packet_hash": "other-hash", "packet_id": "p"},
+            },
+        })
+    )
+    assert len(seen) == 1
+    assert "[LOCAL_ASSIST_CONTEXT]" not in seen[0]
+    assert _LOCAL_SENTINEL not in seen[0]
+    assert payload["invoked"] is True
+
+
+def test_with_nexus_succeeded_gate_passed_stage_still_forwards_local_block() -> None:
+    seen: list[str] = []
+    invoker = make_with_nexus_online_invoker(_capturing_base_invoker(seen), provider="fixture")
+    invoker(
+        _with_nexus_context({
+            "invoked": True,
+            "status": "SUCCEEDED",
+            "gate_passed": True,
+            "response": _local_response(),
+        })
+    )
+    assert len(seen) == 1
+    assert "[LOCAL_ASSIST_CONTEXT]" in seen[0]
+    assert _LOCAL_SENTINEL in seen[0]
+
+
+def test_with_nexus_withheld_flag_blocks_otherwise_forwardable_stage() -> None:
+    seen: list[str] = []
+    invoker = make_with_nexus_online_invoker(_capturing_base_invoker(seen), provider="fixture")
+    invoker(
+        _with_nexus_context({
+            "invoked": True,
+            "status": "SUCCEEDED",
+            "gate_passed": True,
+            "online_context_withheld": True,
+            "response": _local_response(),
+        })
+    )
+    assert len(seen) == 1
+    assert "[LOCAL_ASSIST_CONTEXT]" not in seen[0]
+    assert _LOCAL_SENTINEL not in seen[0]
+
+
+@pytest.mark.parametrize("gate_value", ["true", 1, "True"])
+def test_with_nexus_non_bool_gate_passed_is_not_forwarded(gate_value: Any) -> None:
+    seen: list[str] = []
+    invoker = make_with_nexus_online_invoker(_capturing_base_invoker(seen), provider="fixture")
+    invoker(
+        _with_nexus_context({
+            "invoked": True,
+            "status": "SUCCEEDED",
+            "gate_passed": gate_value,
+            "response": _local_response(),
+        })
+    )
+    assert len(seen) == 1
+    assert "[LOCAL_ASSIST_CONTEXT]" not in seen[0]
+    assert _LOCAL_SENTINEL not in seen[0]
+
+
+def test_with_nexus_status_is_normalised_before_success_check() -> None:
+    seen: list[str] = []
+    invoker = make_with_nexus_online_invoker(_capturing_base_invoker(seen), provider="fixture")
+    invoker(
+        _with_nexus_context({
+            "invoked": True,
+            "status": " succeeded ",
+            "gate_passed": True,
+            "response": _local_response(),
+        })
+    )
+    assert len(seen) == 1
+    assert "[LOCAL_ASSIST_CONTEXT]" in seen[0]
+    assert _LOCAL_SENTINEL in seen[0]
+
+
+def test_local_stage_forwardable_truth_table() -> None:
+    ok = {"status": "SUCCEEDED", "gate_passed": True}
+    assert local_stage_forwardable(ok) is True
+    assert local_stage_forwardable({**ok, "status": "pass"}) is True
+    assert local_stage_forwardable({**ok, "status": "COMPLETED"}) is True
+    assert local_stage_forwardable({**ok, "online_context_withheld": "yes"}) is False
+    assert local_stage_forwardable({**ok, "online_context_withheld": 1}) is False
+    assert local_stage_forwardable({**ok, "gate_passed": "true"}) is False
+    assert local_stage_forwardable({**ok, "gate_passed": 1}) is False
+    assert local_stage_forwardable({**ok, "status": "FAILED"}) is False
+    assert local_stage_forwardable({"status": "SUCCEEDED"}) is False
+    assert local_stage_forwardable(None) is False

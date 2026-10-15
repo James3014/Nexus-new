@@ -691,11 +691,7 @@ def test_owner_finish_delegates_full_authorized_integration_then_cleanup(tmp_pat
             "commit_created": True, "merge_performed": False,
         },
     })
-    context = {
-        "schema": "nexus.approval.v2", "approval_id": "approval-task-1",
-        "approval_scope": "ALLOW_ACTION_ONCE", "contract_kind": "TRACKED_TASK_CARD",
-        "contract_hash": "c" * 64, "task_card_hash": "c" * 64,
-    }
+    context = _bound_tracked_approval("task-1", contract.contract_hash)
     result = service.owner_finish(
         "task-1", candidate_commit_sha=candidate,
         candidate_tree_sha=_git(root, "rev-parse", f"{candidate}^{{tree}}"),
@@ -1243,7 +1239,7 @@ def test_owner_finish_replay_is_idempotent(tmp_path: Path, monkeypatch):
 def test_owner_finish_never_deletes_task_branch_or_candidate_ref(tmp_path: Path):
     root, base, candidate = _repo(tmp_path)
     receipt = _acceptance(candidate)
-    auth = _authorization(root, base, candidate, receipt)
+    _authorization(root, base, candidate, receipt)
     target = tmp_path / "targets" / "task-branch"
     target.parent.mkdir()
     _git(root, "worktree", "add", "-b", "nexus/task/task-branch", str(target), base)
@@ -3998,6 +3994,13 @@ def test_receipt_only_recovery_records_applied_integrating_state_without_merge(
         integration_execution=None,
     )
     service._write_state("closure-bind", state)
+    # The recovery fence comes from a real recovery rebind onto the applied head.
+    _git(root, "update-ref", state["candidate_ref"], candidate)
+    recovery = {**approval, "approval_id": "integrate-recovery", "expected_canonical_head": candidate}
+    service.bind_candidate_integration_closure(
+        "closure-bind", **_separate_closure_kwargs(acceptance, recovery, runtime, candidate)
+    )
+    state = service._read_state("closure-bind") or {}
     receipt = IntegrationReceipt(
         schema="nexus.integration_receipt/v1",
         task_id="closure-bind",
@@ -4041,30 +4044,11 @@ def test_receipt_only_recovery_records_applied_integrating_state_without_merge(
     state["request"].pop("canonical_dispatch_envelope", None)
     state.pop("workforce_dispatch", None)
     state.pop("canonical_dispatch_envelope", None)
-    state["integration_recovery_only"] = True
-    state["integration_closure_binding"]["recovery_only"] = True
-    closure_payload = {
-        key: value for key, value in state["integration_closure_binding"].items()
-        if key != "binding_hash"
-    }
-    state["integration_closure_binding"]["binding_hash"] = hashlib.sha256(
-        json.dumps(closure_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
-    ).hexdigest()
     service._write_state("closure-bind", state)
     with pytest.raises(RuntimeError, match="INTEGRATION_WORKFORCE_DISPATCH_DRIFT"):
         service.recover_applied_integration_receipt(
             "closure-bind", receipt, runtime_identity=recovery_runtime
         )
-    service._write_state("closure-bind", original_state)
-    original_state["integration_recovery_only"] = True
-    original_state["integration_closure_binding"]["recovery_only"] = True
-    restored_closure = {
-        key: value for key, value in original_state["integration_closure_binding"].items()
-        if key != "binding_hash"
-    }
-    original_state["integration_closure_binding"]["binding_hash"] = hashlib.sha256(
-        json.dumps(restored_closure, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
-    ).hexdigest()
     service._write_state("closure-bind", original_state)
     first = service.recover_applied_integration_receipt(
         "closure-bind", receipt, runtime_identity=recovery_runtime
@@ -4179,3 +4163,179 @@ def test_integration_blocks_worker_registry_without_persisted_dispatch(tmp_path:
             "closure-bind", integration_branch="nexus/integration/canary",
             runtime_identity=runtime,
         )
+
+
+def _attacker_merge_commit(root: Path, applied: str, candidate: str) -> str:
+    """A different merge commit (other parent, same candidate tree) than ``applied``."""
+    other = _git(root, "commit-tree", f"{candidate}^{{tree}}", "-p", applied, "-m", "other")
+    return _git(
+        root, "commit-tree", f"{candidate}^{{tree}}", "-p", other, "-p", candidate, "-m", "X"
+    )
+
+
+def _primary_rebound_for_receipt_recovery(tmp_path: Path):
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(
+        tmp_path
+    )
+    service.bind_candidate_integration_closure(
+        "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+    )
+    _git(root, "merge", "--no-ff", "candidate", "-m", "applied")
+    applied = _git(root, "rev-parse", "HEAD")
+    state = service._read_state("closure-bind") or {}
+    _git(root, "update-ref", state["candidate_ref"], candidate)
+    state.update(
+        status="INTEGRATING",
+        promotion_status="INTEGRATING",
+        merge_performed=False,
+        integration_receipt=None,
+        integration_result_sha=None,
+        integration_execution=None,
+    )
+    service._write_state("closure-bind", state)
+    recovery = {**approval, "approval_id": "integrate-recovery", "expected_canonical_head": applied}
+    service.bind_candidate_integration_closure(
+        "closure-bind", **_separate_closure_kwargs(acceptance, recovery, runtime, applied)
+    )
+    recovery_runtime = service._read_state("closure-bind")["integration_closure_binding"][
+        "runtime_identity"
+    ]
+    return service, root, base, candidate, applied, acceptance, recovery_runtime
+
+
+def test_primary_checkout_receipt_recovery_completes_for_rebound_applied_head(tmp_path: Path):
+    service, _root, base, _candidate, applied, acceptance, recovery_runtime = (
+        _primary_rebound_for_receipt_recovery(tmp_path)
+    )
+    recovered = service.recover_applied_integration_receipt(
+        "closure-bind",
+        _recovery_receipt(service, base, applied, acceptance),
+        runtime_identity=recovery_runtime,
+    )
+    assert recovered["status"] == "INTEGRATED"
+    assert recovered["integration_result_sha"] == applied
+
+
+def test_separate_controller_receipt_recovery_rejects_other_same_tree_merge_head(tmp_path: Path):
+    """#2269: a moved ref head X is not the rebound applied commit."""
+    service, controller, base, applied, _pending, acceptance, recovery_runtime = (
+        _separate_controller_rebound_for_receipt_recovery(tmp_path)
+    )
+    candidate = _git(controller, "rev-parse", "candidate")
+    forged = _attacker_merge_commit(controller, applied, candidate)
+    _git(controller, "update-ref", "refs/heads/nexus/integration/canary", forged)
+    receipt = replace(
+        _recovery_receipt(service, base, applied, acceptance),
+        integration_commit_sha=forged,
+        staging_commit_sha=forged,
+        branch_head_after=forged,
+    )
+    before = service._state_path("closure-bind").read_bytes()
+    with pytest.raises(
+        RuntimeError, match="receipt recovery commit does not match rebound applied head"
+    ):
+        service.recover_applied_integration_receipt(
+            "closure-bind", receipt, runtime_identity=recovery_runtime
+        )
+    assert service._state_path("closure-bind").read_bytes() == before
+
+
+def test_primary_checkout_receipt_recovery_rejects_other_same_tree_merge_head(tmp_path: Path):
+    """#2269: same attack with the checked-out branch reset to X."""
+    service, root, base, candidate, applied, acceptance, recovery_runtime = (
+        _primary_rebound_for_receipt_recovery(tmp_path)
+    )
+    forged = _attacker_merge_commit(root, applied, candidate)
+    _git(root, "reset", "--hard", forged)
+    receipt = replace(
+        _recovery_receipt(service, base, applied, acceptance),
+        integration_commit_sha=forged,
+        staging_commit_sha=forged,
+        branch_head_after=forged,
+    )
+    before = service._state_path("closure-bind").read_bytes()
+    with pytest.raises(
+        RuntimeError, match="receipt recovery commit does not match rebound applied head"
+    ):
+        service.recover_applied_integration_receipt(
+            "closure-bind", receipt, runtime_identity=recovery_runtime
+        )
+    assert service._state_path("closure-bind").read_bytes() == before
+
+
+def test_strict_apply_refuses_second_worktree_forced_onto_integration_branch(tmp_path: Path):
+    """``worktree add -f`` can double-check-out the branch the Controller ff-merges (#2230)."""
+    root, base, candidate = _repo(tmp_path)  # Controller itself is on canary
+    other = tmp_path / "other worktree"
+    _git(root, "worktree", "add", "-f", str(other), _CANARY)
+    with pytest.raises(
+        IntegrationExecutionError, match="INTEGRATION_BRANCH_REFUSED_AT_APPLY"
+    ) as raised:
+        _separate_controller_integrate(tmp_path, root.resolve(), base, candidate)
+    assert raised.value.merge_performed is False
+    assert _git(root, "rev-parse", _CANARY_REF) == base
+    assert _git(other, "status", "--porcelain=v1", "--untracked-files=all") == ""
+    assert _git(root, "status", "--porcelain=v1", "--untracked-files=all") == ""
+
+
+def test_strict_apply_sole_controller_checkout_still_fast_forwards(tmp_path: Path):
+    """Positive control: only the Controller (path with a space) is on the branch."""
+    spaced = tmp_path / "with space"
+    spaced.mkdir()
+    root, base, candidate = _repo(spaced)
+    result = _separate_controller_integrate(tmp_path, root.resolve(), base, candidate)
+    assert result.merge_performed is True
+    assert _git(root, "rev-parse", _CANARY_REF) == result.branch_head_after != base
+    assert _git(root, "status", "--porcelain=v1", "--untracked-files=all") == ""
+
+
+def test_detached_linked_worktree_probe_shapes_and_sanitised_env(tmp_path: Path, monkeypatch):
+    root, base, _candidate = _repo(tmp_path)
+    detached = _separate_controller_worktree(tmp_path, root, base)
+    probe = ControlledIntegrationManager._is_detached_linked_worktree
+    assert probe(detached) is True
+    assert ControlledIntegrationManager(integration_root=root)._is_detached_linked_worktree(
+        detached
+    )
+    assert probe(root) is False  # primary checkout on a branch
+    plain = tmp_path / "not-a-repo"
+    plain.mkdir()
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    assert probe(plain) is False
+
+    seen: list[dict[str, str]] = []
+    real_run = subprocess.run
+
+    def spy(cmd, *args, **kwargs):
+        seen.append(dict(kwargs["env"]))
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", spy)
+    assert probe(detached) is True
+    assert seen
+    assert all(
+        env.get("GIT_CONFIG_GLOBAL") == "/dev/null" and env.get("GIT_CONFIG_NOSYSTEM") == "1"
+        for env in seen
+    )
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads mode-000 files")
+def test_strict_apply_refuses_unreadable_in_progress_marker(tmp_path: Path):
+    """An unreadable rebase marker in any worktree admin dir fails closed (#2230)."""
+    root, base, candidate = _repo(tmp_path)
+    other = tmp_path / "other"
+    _git(root, "worktree", "add", "--detach", str(other), base)
+    admin = Path(_git(other, "rev-parse", "--absolute-git-dir"))
+    marker = admin / "rebase-merge" / "head-name"
+    marker.parent.mkdir()
+    marker.write_text(_CANARY_REF + "\n")
+    marker.chmod(0)
+    try:
+        with pytest.raises(
+            IntegrationExecutionError, match="INTEGRATION_BRANCH_REFUSED_AT_APPLY"
+        ) as raised:
+            _separate_controller_integrate(tmp_path, root.resolve(), base, candidate)
+    finally:
+        marker.chmod(0o600)
+    assert raised.value.merge_performed is False
+    assert _git(root, "rev-parse", _CANARY_REF) == base

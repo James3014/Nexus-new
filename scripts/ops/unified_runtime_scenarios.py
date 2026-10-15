@@ -330,7 +330,10 @@ def _build_agy_online_invoker(
         capability_context_forwarded = False
         if include_local_context:
             local_stage = context.get("local") if isinstance(context.get("local"), Mapping) else {}
-            if local_stage:
+            # #2245: refused / failed / withheld Local stages never reach Online.
+            from nexus.services.online_nexus_context import local_stage_forwardable
+
+            if local_stage and local_stage_forwardable(local_stage):
                 from nexus.services.local_substitution import build_online_safe_local_forward
 
                 safe = build_online_safe_local_forward(local_stage)
@@ -464,7 +467,10 @@ def _build_injected_online_invoker(
         capability_context_forwarded = False
         if include_local_context:
             local_stage = context.get("local") if isinstance(context.get("local"), Mapping) else {}
-            if local_stage:
+            # #2245: refused / failed / withheld Local stages never reach Online.
+            from nexus.services.online_nexus_context import local_stage_forwardable
+
+            if local_stage and local_stage_forwardable(local_stage):
                 from nexus.services.local_substitution import build_online_safe_local_forward
 
                 safe = build_online_safe_local_forward(local_stage)

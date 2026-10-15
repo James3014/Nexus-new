@@ -32,6 +32,7 @@ from scripts.bench.warning_ledger import (
     records_from_text as _warning_records_from_text,
     summarize_rows as _summarize_warning_rows,
 )
+from scripts.bench import treatment_lane as _treatment_lane
 from scripts.bench.benchmark_eligibility import (
     PHASE_OBSERVATION_FIELDS,
     PILLAR_OBSERVATION_FIELDS,
@@ -2007,6 +2008,10 @@ def _strict_symmetric_with_nexus_env() -> dict[str, str]:
         "NEXUS_LLM_CANDIDATE_CAP": "1",
         "NEXUS_AUTO_NIGHTSHIFT_ON_HYPER_FAILURE": "0",
         "NEXUS_ONLINE_LOCAL_ASSIST": "0",
+        # PR-3 R3-1: the treatment switches are pinned off here, never inherited from the
+        # operator's environment (the treatment lane overlays them afterwards).
+        "NEXUS_USE_COMMITTEE": "0",
+        "NEXUS_ULTRA_REVIEW_DRY_GATE": "0",
     }
 
 
@@ -2028,8 +2033,13 @@ def _delivered_file_is_model_candidate(payload: dict[str, Any], row: dict[str, A
     row["delivered_target_sha256"] = delivered
     if row.get("local_success_source") is True or local_delivery(row):
         return False
-    # L3: exact model winner sources only (product labels for a model-generated candidate).
-    return bool(expected) and delivered == expected and winner in SYMMETRIC_MODEL_WINNER_SOURCES
+    # L3: exact model winner sources only (product labels for a model-generated candidate); the
+    # treatment lane (PR-3) also delivers the visible-test self-heal output.
+    return (
+        bool(expected)
+        and delivered == expected
+        and (winner in SYMMETRIC_MODEL_WINNER_SOURCES or _treatment_lane.model_winner_source_ok(winner))
+    )
 
 
 def _counted_mode_unsupported_row(task: CapabilityTask, *, reason: str) -> dict[str, Any]:
@@ -3473,7 +3483,12 @@ def _apply_prompt_symmetry_audit(
     capture_dir, run_id = capture
     try:
         report = audit_run(
-            capture_dir, materials, rows=rows, run_id=run_id, expect_model_calls=expect_model_calls
+            capture_dir,
+            materials,
+            rows=rows,
+            run_id=run_id,
+            expect_model_calls=expect_model_calls,
+            lane=_treatment_lane.current_lane(),
         )
     except Exception as exc:  # noqa: BLE001
         report = {"status": "ERROR", "run_id": run_id, "error": f"{type(exc).__name__}: {exc}", "tasks": []}
@@ -3491,6 +3506,7 @@ def _apply_prompt_symmetry_audit(
             arm = "with_nexus" if str(row.get("mode")) == "with_nexus" else "bare"
             # Identical prompt re-sent after a pre-effect quota failure (visible at the wrapper).
             row["account_rotations"] = task_audit.get(f"{arm}_account_rotations")
+            _treatment_lane.attest_row(row, task_audit)
         row["prompt_symmetry_status"] = report["status"]
         if report["status"] != "PASS":
             row["prompt_symmetry_violation"] = True
@@ -3522,6 +3538,7 @@ def _early_prompt_symmetry_audit(
             rows=rows,
             run_id=run_id,
             expect_model_calls=expect_model_calls,
+            lane=_treatment_lane.current_lane(),
         )
     except Exception as exc:  # noqa: BLE001
         return {"status": "ERROR", "error": f"{type(exc).__name__}: {exc}"}
@@ -3965,6 +3982,9 @@ def _route_oracle_force_flow_policy(
 ) -> tuple[str | None, str]:
     """Defer forced Hyper when the task is meant to validate non-Hyper capability lanes."""
     if force_flow != "hyper_sprint":
+        return force_flow, ""
+    if _treatment_lane.lane_active():
+        # PR-3: the treatments (candidate pool, self-heal) run in the hyper flow.
         return force_flow, ""
     expected = set(normalize_capability_names(task.expected_capabilities))
     if task.id.startswith("route-oracle-"):
@@ -15773,6 +15793,17 @@ def run_with_nexus(
     if effective_enable_ddtree_executor:
         bench_env_updates["NEXUS_DDTREE_EXECUTOR"] = "1"
     bench_env_updates["NEXUS_LLM_CANDIDATE_CAP"] = str(effective_llm_candidate_cap)
+    treatment_row = bool(llm_enabled and _no_nexus_task_hints() and _treatment_lane.lane_active())
+    if treatment_row:
+        # PR-3 treatment lane: treatments on, same symmetric prompt and local-path disables, one
+        # row deadline for every round, model responses recorded by the capture wrapper.
+        bench_env_updates.update(
+            _treatment_lane.with_nexus_env_overrides(
+                deadline_epoch=_treatment_lane.row_deadline_epoch(shared_task_deadline),
+                response_dir=_treatment_lane.response_capture_dir(),
+                per_call_cap_sec=_symmetric_per_call_cap_sec(),
+            )
+        )
     bench_env_updates["NEXUS_TASK_DIFFICULTY"] = task.difficulty
     bench_env_updates["NEXUS_TASK_ID"] = task.id
     if route_cost_controls:
@@ -15813,7 +15844,9 @@ def run_with_nexus(
                 probe_cap = _shared_subprocess_timeout(effective_timeout_sec, stage="receipt_first_probe")
             except subprocess.TimeoutExpired:
                 probe_cap = 0
-        if llm_enabled and not force_flow_defer_reason and probe_cap != 0:
+        # PR-3: the receipt-first probe is a second full auto-flow run (more model calls on the
+        # same row); the treatment lane's calls are exactly the product's own rounds.
+        if llm_enabled and not force_flow_defer_reason and probe_cap != 0 and not _treatment_lane.lane_active():
             receipt_first_payload = _run_receipt_first_probe_payload(
                 hard_cap_sec=probe_cap,
                 repo_root=repo_root,
@@ -16610,6 +16643,23 @@ def run_with_nexus(
         )
         _reconcile_skill_mount_contract_after_receipts(row, repo_root=repo_root)
     try:
+        if treatment_row:
+            _treatment_lane.finalize_with_nexus_row(
+                row,
+                payload,
+                target_file=target_file,
+                test_file=test_file,
+                verification_test_file=verification_test_file,
+                original_source=strict_target_before or "",
+                key=_prompt_capture_key(task),
+                timeout_sec=int(timeout_sec),
+                row_deadline_sec=float(effective_timeout_sec) if shared_task_deadline is not None else None,
+                row_start_epoch=start_wall,
+                product_python=_treatment_lane.product_interpreter(
+                    _nexus_cli_subprocess_cmd([], repo_root)[0], repo_root
+                ),
+                product_test_arg=str(test_file_arg),
+            )
         return _finalize_with_nexus_row(
             row,
             provider=with_model_provider if llm_enabled else "local",
@@ -20636,6 +20686,7 @@ def main() -> int:
         default=False,
         help="Use persistent worker to eliminate cold start overhead (~10-15s per task).",
     )
+    _treatment_lane.add_lane_arguments(parser)
     args = parser.parse_args()
 
     if args.quadrant == "bare":
@@ -20739,6 +20790,12 @@ def main() -> int:
         os.environ.pop("NEXUS_BENCH_PER_CALL_CAP_SEC", None)
     else:
         os.environ["NEXUS_BENCH_PER_CALL_CAP_SEC"] = str(symmetric_per_call_cap)
+    # PR-3: --lane treatment is the only way to turn Nexus treatments on in the counted A/B, and it
+    # refuses every flag that would break the strict lane's information fairness.
+    lane_errors = _treatment_lane.validate_lane_args(args)
+    if lane_errors:
+        parser.error("; ".join(lane_errors))
+    lane_manifest = _treatment_lane.configure_lane(args)
     if args.skip_llm_baseline and args.strict_llm_baseline:
         parser.error("--strict-llm-baseline cannot be combined with --skip-llm-baseline")
     if args.nexus_only and args.without_only:
@@ -21510,6 +21567,18 @@ def main() -> int:
         _fill_not_run_pairs(tasks, with_rows, without_rows)
     if bool(args.counted_first_attempt) and _counted_mode_expects_model_calls(args):
         _enforce_hidden_verifier_on_success_rows([*with_rows, *without_rows])
+    for row in [*with_rows, *without_rows]:
+        row.setdefault("lane", lane_manifest["lane"])
+        if str(row.get("mode")) == "without_nexus":
+            _treatment_lane.finalize_bare_row(row)
+    if _treatment_lane.lane_active():
+        # PR-3: first-attempt re-score and visible re-runs after all rows (no staging window is
+        # open), through the confined runners only (#2211); never unconfined.
+        _treatment_lane.rescore_rows(
+            with_rows,
+            run_hidden=_treatment_lane.confined_hidden_runner(repo_root),
+            run_visible=_treatment_lane.confined_visible_runner(repo_root),
+        )
     if prompt_audit_capture is not None:
         prompt_symmetry_report = _apply_prompt_symmetry_audit(
             prompt_audit_capture,
@@ -21578,6 +21647,7 @@ def main() -> int:
                     "strict_llm_baseline": bool(args.strict_llm_baseline),
                     "no_hidden_feedback": bool(args.no_hidden_feedback),
                     "counted_first_attempt": bool(args.counted_first_attempt),
+                    **{f"lane_{key}" if key != "lane" else key: value for key, value in lane_manifest.items()},
                     "interleave_arms": _interleave_arms_enabled(args),
                     "per_call_timeout_cap_sec": _symmetric_per_call_cap_sec(),
                     "disable_promoted_route_cost_policy": bool(args.disable_promoted_route_cost_policy),

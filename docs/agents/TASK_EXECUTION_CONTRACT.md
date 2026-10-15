@@ -454,8 +454,9 @@ repository Owner identity, explicit Owner confirmation, and a canonical record
 hash. The outer binding has its own canonical hash. Random prose, branch names,
 or an execution-lane argument cannot substitute for either typed record.
 
-The active repository ruleset already requires
-`Trusted verifier (default branch)`. Its trusted default-branch controller runs
+Historical (until #2258; the lane block was retired in #2006 and the anchor
+workflow no longer runs the gate): the repository ruleset required
+`Trusted verifier (default branch)`, whose trusted default-branch controller ran
 `scripts/ops/trusted_merge_lane_gate.py` against the exact
 `pull_request_target` event and exact base/head Task Card blobs. Missing or
 duplicate binding, malformed JSON/schema, Task Card mutation, wrong
