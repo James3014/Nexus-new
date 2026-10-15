@@ -39,6 +39,78 @@ FED_CAPABILITIES: frozenset[str] = frozenset({
     "codeintel",
 })
 _WORD_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+# Fields ``compact_codeintel_for_prompt`` renders into ``[NEXUS CODEINTEL SUMMARY]`` (and the
+# planner reads ``impact_report_present``): never part of the gate inputs.
+FORBIDDEN_CODEINTEL_KEYS: frozenset[str] = frozenset({
+    "scan_report_present",
+    "impact_report_present",
+    "risk_score",
+    "risk_reason",
+    "impacted_files_count",
+    "impacted_symbols_count",
+    "dci_evidence_count",
+    "dci_locator_report_path",
+})
+
+
+def fed_capability_names() -> frozenset[str]:
+    """``FED_CAPABILITIES`` plus every executor-registry alias (e.g. ``mempalace``)."""
+
+    from nexus.services.capability_registry import EXECUTOR_REGISTRY_ALIASES
+
+    return FED_CAPABILITIES | frozenset(
+        EXECUTOR_REGISTRY_ALIASES[name]
+        for name in FED_CAPABILITIES
+        if name in EXECUTOR_REGISTRY_ALIASES
+    )
+
+
+def pregate_verify_argv(root: Path, test_file: str) -> list[str]:
+    """pregate's pinned pytest invocation of exactly one visible test file.
+
+    No configuration is discovered from the workspace: ``-c os.devnull`` (no pytest.ini /
+    pyproject / setup.cfg, so no ``addopts`` or ``testpaths`` can add the hidden test),
+    ``--noconftest`` (no conftest.py hooks), ``--rootdir`` pinned to the test's directory and
+    no cache.  ``--`` ends the options before the single test path.
+    """
+
+    import sys
+
+    rootdir = (Path(root) / test_file).parent
+    return [
+        sys.executable,
+        "-m",
+        "pytest",
+        "-q",
+        "--maxfail=1",
+        "-p",
+        "no:cacheprovider",
+        "--noconftest",
+        "-c",
+        os.devnull,
+        f"--rootdir={rootdir}",
+        "--",
+        test_file,
+    ]
+
+
+def _repo_regular_file(root: Path, relative: str) -> bool:
+    """A repo-relative regular file: no absolute/``..`` path, no symlink in any component,
+    resolving inside ``root``."""
+
+    candidate = Path(relative)
+    if not relative or candidate.is_absolute() or ".." in candidate.parts:
+        return False
+    current = root
+    for part in candidate.parts:
+        current = current / part
+        if current.is_symlink():
+            return False
+    try:
+        current.resolve().relative_to(root)
+    except ValueError:
+        return False
+    return current.is_file()
 
 
 def gate_inputs_enabled() -> bool:
@@ -90,6 +162,7 @@ def sprint_gate_inputs(
     test_file: str,
     source_code: str = "",
     route: Mapping[str, Any] | None = None,
+    registered_test_file: str | None = None,
 ) -> dict[str, Any]:
     """Return ``{"codeintel": {...}, "workspace_root": str}`` for one sprint request.
 
@@ -99,7 +172,7 @@ def sprint_gate_inputs(
     """
 
     # Imported lazily: sprint_service imports this module.
-    from nexus.research.sprint_service import visible_test_pytest_cmd, visible_test_target_error
+    from nexus.research.sprint_service import visible_test_target_error
 
     root = Path(repo_root).resolve()
     target = str(target_file or "").strip()
@@ -110,13 +183,7 @@ def sprint_gate_inputs(
     provenance["workspace_root"] = "sprint.repo_root"
 
     target_path = root / target if target else None
-    target_exists = bool(
-        target
-        and target_path is not None
-        and not Path(target).is_absolute()
-        and ".." not in Path(target).parts
-        and target_path.is_file()
-    )
+    target_exists = bool(target) and _repo_regular_file(root, target)
     if target_exists:
         codeintel["target_file"] = target
         codeintel["search_paths"] = [target]
@@ -126,14 +193,18 @@ def sprint_gate_inputs(
     # Visible test only: visible_test_target_error() refuses test_hidden*, directories,
     # symlinks, option-like and out-of-repo paths, so a hidden test is never named here.
     test_error = visible_test_target_error(root, test) if test else "missing_test_file"
+    registered = str(test if registered_test_file is None else registered_test_file).strip()
+    if not test_error and Path(test) != Path(registered):
+        # Only the task's registered visible test (SprintConfig.test_file), never another file.
+        test_error = "test_file_not_registered_visible_test"
     test_source = ""
     verify_command = ""
     if not test_error:
         test_source = (root / test).read_text(encoding="utf-8", errors="replace")
-        verify_command = shlex.join(visible_test_pytest_cmd(test))
+        verify_command = shlex.join(pregate_verify_argv(root, test))
         codeintel["verify_commands"] = [verify_command]
         codeintel["verify_timeout_sec"] = VERIFY_TIMEOUT_SEC
-        provenance["verify_commands"] = "sprint.visible_test_pytest_cmd(config.test_file)"
+        provenance["verify_commands"] = "gate_inputs.pregate_verify_argv(config.test_file)"
         provenance["verify_timeout_sec"] = "gate_inputs.VERIFY_TIMEOUT_SEC"
 
     if target_exists and test_source:
@@ -200,5 +271,7 @@ def sprint_gate_inputs(
         ):
             provenance[key] = "task_contract.artifact"
 
+    for key in FORBIDDEN_CODEINTEL_KEYS:
+        codeintel.pop(key, None)
     codeintel[GATE_INPUT_PROVENANCE_KEY] = provenance
     return {"codeintel": codeintel, "workspace_root": str(root)}

@@ -2244,7 +2244,21 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
                 if isinstance(context.get("codeintel"), Mapping)
                 else {}
             )
+            # Sprint gate inputs (wiring PR-4, ``gate_input_provenance`` present): risk_score
+            # comes only from the request route's route_features, never from codeintel (whose
+            # risk_score renders in the CodeIntel prompt summary).  Callers that seed the plan
+            # context directly in codeintel (wiring audit fixture, family canary) keep it.
+            raw_codeintel = context.get("codeintel")
+            route_only_risk = (
+                name == "plan_quality_gate"
+                and isinstance(raw_codeintel, Mapping)
+                and "gate_input_provenance" in raw_codeintel
+            )
+            if route_only_risk:
+                out.pop("risk_score", None)
             for k in extra_context_keys:
+                if route_only_risk and k == "risk_score":
+                    continue
                 if k not in out and codeintel.get(k) not in (None, ""):
                     out[k] = codeintel.get(k)
                 if k == "workspace_root" and k not in out and route.get(k) not in (None, ""):

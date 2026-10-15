@@ -248,7 +248,7 @@ def test_fed_gates_evaluate_instead_of_refusing_for_missing_inputs(
     assert result["cmd"].endswith("-- test_visible.py") and "1 failed" in result["stdout_tail"]
     assert not (root / "HIDDEN_RAN").exists()
     provenance = after["capability_results"]["pregate"]["response"]["input_provenance"]
-    assert provenance["verify_commands"] == "sprint.visible_test_pytest_cmd(config.test_file)"
+    assert provenance["verify_commands"] == "gate_inputs.pregate_verify_argv(config.test_file)"
     assert after["capability_results"]["plan_quality_gate"]["status"] == "SUCCEEDED"
     plan = after["capability_results"]["plan_quality_gate"]["response"]["input_provenance"]
     assert plan["risk_score"] == "flow_route.route_features.risk_score"
@@ -555,3 +555,206 @@ def test_runtime_seal_vocabulary_is_known_to_the_audit_and_classifier() -> None:
     schema = psa.load_block_schema()["[NEXUS CAPABILITY EVIDENCE]"]["entries[].status"]
     patterns = [re.compile(p) for p in schema["patterns"]]
     assert any(p.fullmatch("EVALUATED_REJECTED") for p in patterns)
+
+
+# ---- round 2 (Gemini review of 587f63e43: H1-H3, M1-M2, L1) ----
+PLAN_FIELDS = {
+    "intent_pass": True,
+    "target_files": ["target.py"],
+    "impact_map": {"edges": [{"source": "target.py", "covered_by": "test_visible.py"}]},
+    "acceptance_criteria": ["visible test test_visible.py passes"],
+    "deliverables": ["target.py"],
+    "steps": ["apply one model edit to target.py"],
+    "handoff_readiness": 1.0,
+}
+
+
+def _plan_quality_probe(codeintel: dict[str, Any], route: dict[str, Any]) -> dict[str, Any]:
+    from nexus.services.capability_registry import build_real_executor_invoker
+
+    invoker = build_real_executor_invoker("plan_quality_gate")
+    assert invoker is not None
+    return dict(
+        invoker({
+            "task_id": "probe",
+            "task_statement": TASK,
+            "codeintel": codeintel,
+            "route": route,
+            "planner": {},
+        })
+    )
+
+
+def test_h1_plan_quality_risk_comes_only_from_route_features_for_gate_inputs() -> None:
+    fed = {**PLAN_FIELDS, "risk_score": 99, "gate_input_provenance": {"intent_pass": "x"}}
+    # codeintel.risk_score is ignored for gate inputs: without a route risk the gate refuses.
+    refused = _plan_quality_probe(fed, {})
+    outcome = refused["response"]["outcome"]
+    assert outcome["error"] == "PLAN_QUALITY_CONTEXT_REQUIRED"
+    assert outcome["missing_inputs"] == ["risk_score"]
+    evaluated = _plan_quality_probe(fed, {"route_features": {"risk_score": 55}})
+    assert evaluated["response"]["outcome"]["semantic_status"] == "SUCCEEDED"
+    # Callers that seed the plan context directly in codeintel (wiring audit fixture, family
+    # canary; no gate_input_provenance) keep their behaviour.
+    legacy = _plan_quality_probe({**PLAN_FIELDS, "risk_score": 10}, {})
+    assert legacy["response"]["outcome"]["semantic_status"] == "SUCCEEDED"
+
+
+def test_h1_gate_inputs_never_carry_codeintel_summary_fields(tmp_path: Path) -> None:
+    from nexus.research.gate_inputs import FORBIDDEN_CODEINTEL_KEYS
+
+    root = _workspace(tmp_path)
+    codeintel = sprint_gate_inputs(
+        repo_root=root,
+        task=TASK,
+        target_file="target.py",
+        test_file="test_visible.py",
+        route={"route_features": {"risk_score": 55}, "risk_score": 55},
+    )["codeintel"]
+    assert not FORBIDDEN_CODEINTEL_KEYS & set(codeintel)
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["test_hidden/test_cases.py", "tests/hidden_test.py", "Hidden/test_x.py", "x/HIDDEN.py"],
+)
+def test_h2_any_hidden_path_component_is_refused(tmp_path: Path, path: str) -> None:
+    from nexus.research.sprint_service import visible_test_target_error
+
+    root = _workspace(tmp_path)
+    (root / path).parent.mkdir(parents=True, exist_ok=True)
+    (root / path).write_text(VISIBLE, encoding="utf-8")
+    assert visible_test_target_error(root, path) == "hidden_test_target"
+    codeintel = sprint_gate_inputs(
+        repo_root=root, task=TASK, target_file="target.py", test_file=path
+    )["codeintel"]
+    assert "verify_commands" not in codeintel
+
+
+def test_h2_only_the_registered_visible_test_and_no_symlinked_directory(tmp_path: Path) -> None:
+    from nexus.research.sprint_service import visible_test_target_error
+
+    root = _workspace(tmp_path)
+    (root / "test_other.py").write_text(VISIBLE, encoding="utf-8")
+    other = sprint_gate_inputs(
+        repo_root=root,
+        task=TASK,
+        target_file="target.py",
+        test_file="test_other.py",
+        registered_test_file="test_visible.py",
+    )["codeintel"]
+    assert "verify_commands" not in other
+    (tmp_path / "elsewhere").mkdir()
+    (tmp_path / "elsewhere" / "test_v.py").write_text(VISIBLE, encoding="utf-8")
+    (root / "linked").symlink_to(tmp_path / "elsewhere", target_is_directory=True)
+    assert visible_test_target_error(root, "linked/test_v.py") == "test_file_is_symlink"
+    assert visible_test_target_error(root, "linked") != ""  # never a directory
+
+
+def _hostile_workspace(tmp_path: Path) -> Path:
+    root = _workspace(tmp_path)
+    (root / "pytest.ini").write_text("[pytest]\naddopts = test_hidden.py\n", encoding="utf-8")
+    (root / "conftest.py").write_text(
+        "from pathlib import Path\nPath(__file__).with_name('CONFTEST_RAN').write_text('x')\n",
+        encoding="utf-8",
+    )
+    return root
+
+
+def test_h3_pregate_ignores_workspace_pytest_config_and_conftest(
+    governed_admission: None, tmp_path: Path
+) -> None:
+    root = _hostile_workspace(tmp_path)
+    after, _ = _run(root, tmp_path, feed=True)
+    pregate = _outcome(after["capability_results"]["pregate"])
+    assert pregate["command_count"] == 1
+    result = pregate["results"][0]
+    assert "--noconftest" in result["cmd"] and f"-c {os.devnull}" in result["cmd"]
+    assert result["cmd"].endswith("-- test_visible.py")
+    assert "1 failed" in result["stdout_tail"]  # the visible test ran (and fails here)
+    assert not (root / "HIDDEN_RAN").exists()
+    assert not (root / "CONFTEST_RAN").exists()
+
+
+def test_h3_pregate_inside_bench_staging_cannot_see_the_hidden_test(
+    governed_admission: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.bench import hidden_test_staging as staging_mod
+
+    monkeypatch.setattr(staging_mod, "_STAGING_PARENT", tmp_path / "cache" / "hidden")
+    for name in ("_ACTIVE", "_RUN_ROOTS", "_IN_MEMORY_SHAS"):
+        monkeypatch.setattr(staging_mod, name, {})
+    monkeypatch.setattr(staging_mod, "_QUARANTINED", set())
+    monkeypatch.setattr(staging_mod, "_RUN_ABORT", [])
+    monkeypatch.setattr(staging_mod, "_RUN_RECORD_PATH", [])
+    root = _hostile_workspace(tmp_path)
+    with staging_mod.staged_hidden_test(
+        enabled=True,
+        repo_root=root,
+        test_file=str(root / "test_visible.py"),
+        task_id="gate-inputs",
+        trial_index=1,
+    ) as staging:
+        assert staging is not None and not (root / "test_hidden.py").exists()
+        after, _ = _run(root, tmp_path, feed=True)
+        assert staging.check_absent("after_pregate")
+    pregate = _outcome(after["capability_results"]["pregate"])
+    assert pregate["command_count"] == 1 and "1 failed" in pregate["results"][0]["stdout_tail"]
+    assert not (root / "HIDDEN_RAN").exists() and (root / "test_hidden.py").exists()
+    assert not staging.violations
+
+
+def test_m1_withhold_covers_the_mempalace_registry_alias() -> None:
+    from nexus.research.gate_inputs import fed_capability_names
+    from nexus.services.online_nexus_context import withhold_fed_gate_verdicts
+
+    assert "mempalace" in fed_capability_names()
+    out = withhold_fed_gate_verdicts({
+        "entries": [
+            {
+                "name": "mempalace",
+                "status": "REAL_INVOKED",
+                "success": True,
+                "invoked_real": True,
+                "consumer_payload": {"fields": {"hit_count": 1}},
+                "has_consumer_payload": True,
+            }
+        ]
+    })
+    assert out["entries"][0]["status"] == "INVOKED_NOT_SUCCESS"
+    assert out["entries"][0]["consumer_payload"] == {}
+
+
+def test_m2_symlinked_or_escaping_target_is_not_a_target(tmp_path: Path) -> None:
+    root = _workspace(tmp_path)
+    (tmp_path / "outside.py").write_text(ORIGINAL, encoding="utf-8")
+    (root / "link.py").symlink_to(tmp_path / "outside.py")
+    (tmp_path / "outdir").mkdir()
+    (tmp_path / "outdir" / "t.py").write_text(ORIGINAL, encoding="utf-8")
+    (root / "pkg").symlink_to(tmp_path / "outdir", target_is_directory=True)
+    for target in ("link.py", "pkg/t.py", "../outside.py", str(tmp_path / "outside.py")):
+        codeintel = sprint_gate_inputs(
+            repo_root=root, task=TASK, target_file=target, test_file="test_visible.py"
+        )["codeintel"]
+        assert "target_file" not in codeintel and codeintel["intent_pass"] is False, target
+
+
+def test_l1_non_fed_evaluated_rejected_entry_drops_its_payload() -> None:
+    from nexus.services.online_nexus_context import withhold_fed_gate_verdicts
+
+    out = withhold_fed_gate_verdicts({
+        "entries": [
+            {
+                "name": "research",
+                "status": "EVALUATED_REJECTED",
+                "success": True,
+                "invoked_real": True,
+                "consumer_payload": {"fields": {"hit_count": 1}},
+                "has_consumer_payload": True,
+            }
+        ]
+    })
+    entry = out["entries"][0]
+    assert entry["status"] == "INVOKED_NOT_SUCCESS" and entry["consumer_payload"] == {}
+    assert entry["success"] is False and entry["invoked_real"] is False
+    assert entry["has_consumer_payload"] is False

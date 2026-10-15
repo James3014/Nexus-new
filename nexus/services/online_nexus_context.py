@@ -401,8 +401,9 @@ def withhold_fed_gate_verdicts(bundle: Mapping[str, Any]) -> dict[str, Any]:
     the sealed bundle keep the real verdict; this copy is never a receipt.
     """
 
-    from nexus.research.gate_inputs import FED_CAPABILITIES
+    from nexus.research.gate_inputs import fed_capability_names
 
+    fed = fed_capability_names()
     out = dict(bundle)
     entries = bundle.get("entries")
     if not isinstance(entries, (list, tuple)):
@@ -411,7 +412,7 @@ def withhold_fed_gate_verdicts(bundle: Mapping[str, Any]) -> dict[str, Any]:
     for entry in entries:
         if (
             isinstance(entry, Mapping)
-            and str(entry.get("name") or "") in FED_CAPABILITIES
+            and str(entry.get("name") or "") in fed
             and str(entry.get("status") or "") in _INVOKED_ENTRY_STATUSES
         ):
             entry = {
@@ -426,7 +427,14 @@ def withhold_fed_gate_verdicts(bundle: Mapping[str, Any]) -> dict[str, Any]:
             isinstance(entry, Mapping)
             and str(entry.get("status") or "") == _EVALUATED_REJECTED_STATUS
         ):
-            entry = {**entry, "status": _WITHHELD_GATE_STATUS}
+            entry = {
+                **entry,
+                "status": _WITHHELD_GATE_STATUS,
+                "success": False,
+                "invoked_real": False,
+                "consumer_payload": {},
+                "has_consumer_payload": False,
+            }
         rendered.append(entry)
     out["entries"] = rendered
     return out

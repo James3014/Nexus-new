@@ -476,6 +476,7 @@ class LLMCandidateGenerator:
                 task=task,
                 target_file=self.target_file,
                 test_file=self.gate_input_test_file,
+                registered_test_file=self.gate_input_test_file,
                 source_code=source_code,
                 route=route,
             )
@@ -964,12 +965,22 @@ def confined_visible_evaluator(executor: Any) -> Callable[..., CandidateEval] | 
     return cast("Callable[..., CandidateEval]", method) if callable(method) else None
 
 
+def _symlinked_component(repo_root: Path, relative: Path) -> bool:
+    """True when any directory between ``repo_root`` and ``relative`` is a symlink."""
+    current = Path(repo_root)
+    for part in relative.parts[:-1]:
+        current = current / part
+        if current.is_symlink():
+            return True
+    return False
+
+
 def visible_test_target_error(repo_root: Path, test_file: str) -> str:
     """Why ``test_file`` cannot be the runtime verifier's only test target ("" when it can).
 
     The verifier runs exactly one explicit, visible test file: never an empty target (pytest
     would collect the current directory), a directory, a symlink, a path outside the repo or a
-    hidden test (``test_hidden*``).
+    hidden test (``test_hidden*`` or any path component containing ``hidden``).
     """
     raw = str(test_file or "").strip()
     if not raw:
@@ -979,12 +990,15 @@ def visible_test_target_error(repo_root: Path, test_file: str) -> str:
         return "test_file_not_repo_relative"
     if any(part.startswith("-") for part in candidate.parts):
         return "test_file_option_like"
-    if candidate.name.lower().startswith("test_hidden"):
+    if candidate.name.lower().startswith("test_hidden") or any(
+        "hidden" in part.lower() for part in candidate.parts
+    ):
+        # Any component naming "hidden" (test_hidden/..., tests/hidden_test.py, ...).
         return "hidden_test_target"
     if candidate.suffix != ".py":
         return "test_file_not_python"
     path = Path(repo_root) / candidate
-    if path.is_symlink():
+    if path.is_symlink() or _symlinked_component(Path(repo_root), candidate):
         return "test_file_is_symlink"
     if not path.is_file():
         return "test_file_not_regular_file"
