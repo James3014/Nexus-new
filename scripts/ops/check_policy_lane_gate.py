@@ -130,7 +130,7 @@ def _imported_modules(path: Path, repo_root: Path) -> set[str]:
             found.update(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
             if node.level:
-                if node.level - 1 > len(package):
+                if node.level - 1 >= len(package):
                     continue
                 base = package[: len(package) - (node.level - 1)]
                 module = ".".join(base + ([node.module] if node.module else []))
@@ -153,7 +153,7 @@ def _entrypoint_exists(path: Path, selector: str) -> bool:
         for node in ast.walk(tree)
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
     }
-    names = [part.split("[", 1)[0].strip() for part in selector.split("::") if part.strip()]
+    names = [part.strip() for part in selector.split("[", 1)[0].split("::") if part.strip()]
     return all(name in defined for name in names)
 
 
@@ -196,6 +196,7 @@ def check_enforcement_wiring(policy: dict, repo_root: Path | None = None) -> lis
         return ["ENFORCEMENT_CALLERS_MISSING"]
 
     missing: list[str] = []
+    reached = False
     for entry in policy.get("test_entrypoints") or []:
         file_part, _, selector = str(entry).partition("::")
         file_part = file_part.strip()
@@ -205,6 +206,8 @@ def check_enforcement_wiring(policy: dict, repo_root: Path | None = None) -> lis
         if start is None or not start.is_file() or not _entrypoint_exists(start, selector):
             missing.append(str(entry))
             continue
+        if reached:
+            continue  # still validate the remaining entries' existence
         seen: set[str] = set()
         frontier = [start]
         for _ in range(_IMPORT_WALK_DEPTH):
@@ -212,19 +215,25 @@ def check_enforcement_wiring(policy: dict, repo_root: Path | None = None) -> lis
             for file in frontier:
                 for module in _imported_modules(file, root):
                     if module in callers:
-                        return []
+                        reached = True
+                        break
                     if module in seen or module in guard_modules:
                         continue
                     seen.add(module)
                     target = _module_file(module, root)
                     if target is not None:
                         next_frontier.append(target)
-            if not next_frontier:
+                if reached:
+                    break
+            if reached or not next_frontier:
                 break
             frontier = next_frontier
-    errors = ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"]
+    errors: list[str] = []
     if missing:
-        errors.insert(0, f"TEST_ENTRYPOINT_NOT_FOUND: {', '.join(missing)}")
+        # Every listed entrypoint must exist, even when another one already passed.
+        errors.append(f"TEST_ENTRYPOINT_NOT_FOUND: {', '.join(missing)}")
+    if not reached:
+        errors.append("TEST_ENTRYPOINT_NOT_BEHAVIOURAL")
     return errors
 
 

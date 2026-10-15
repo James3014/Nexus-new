@@ -269,6 +269,15 @@ def test_wiring_check_edge_cases(tmp_path: Path) -> None:
     ]
     parametrized = _fake_policy(test_entrypoints=["tests/test_caller.py::test_run[1-2]"])
     assert check_enforcement_wiring(parametrized, root) == []
+    colon_param = _fake_policy(test_entrypoints=["tests/test_caller.py::test_run[a::b]"])
+    assert check_enforcement_wiring(colon_param, root) == []
+    # A stale entry is reported even when another entry reaches a caller.
+    stale_plus_good = _fake_policy(
+        test_entrypoints=["tests/test_caller.py::test_run", "tests/gone.py::test_x"]
+    )
+    assert check_enforcement_wiring(stale_plus_good, root) == [
+        "TEST_ENTRYPOINT_NOT_FOUND: tests/gone.py::test_x"
+    ]
     # Multi-source entries must say which files are the guard, otherwise the guard
     # itself would count as a production caller.
     no_guards = _fake_policy(guard_modules=[], test_entrypoints=["tests/test_guard_only.py"])
@@ -308,6 +317,12 @@ def test_wiring_check_ignores_type_checking_and_relative_imports(tmp_path: Path)
     )
     relative_guard = _fake_policy(test_entrypoints=["tests/test_relative_guard.py"])
     assert check_enforcement_wiring(relative_guard, root) == ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"]
+    # Beyond the top-level package: Python would refuse it, so the walk ignores it.
+    (root / "tests" / "test_beyond.py").write_text(
+        "from ..pkg import caller\n\ndef test_x():\n    assert caller\n", encoding="utf-8"
+    )
+    beyond = _fake_policy(test_entrypoints=["tests/test_beyond.py"])
+    assert check_enforcement_wiring(beyond, root) == ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"]
 
 
 def test_wiring_check_keeps_paths_inside_the_repo(tmp_path: Path) -> None:
