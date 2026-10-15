@@ -148,6 +148,13 @@ _NOT_A_HEADER = re.compile(
     r"\b(?:pending|unavailable|timed out|out of credits|not run|tbd|skipped|n/a|no run|none)\b",
     re.IGNORECASE,
 )
+# A parenthetical that STARTS with a not-run word is the header's own status ("Codex
+# review (pending)"); one that merely mentions it later is an aside ("(agy Gemini ...;
+# Codex: out of credits)").
+_ASIDE_NOT_RUN = re.compile(
+    r"\(\s*(?:pending|unavailable|timed out|out of credits|not run|tbd|skipped|n/a|no run|none)\b",
+    re.IGNORECASE,
+)
 _CLAUSE_SPLIT = re.compile(r"[;,]\s+|\.\s+|!\s+|\s[—–]\s|\s-\s|\)\s+")
 _STOP = re.compile(r"[.;,:(\n]")
 
@@ -348,7 +355,7 @@ def _binding(clause: str, line: str, head: str, comment_head: bool) -> bool:
 def _label_family(line: str) -> str | None:
     """Family named by a heading, bold label, ``Reviewer:`` line or ``<label>:`` prefix."""
     plain = _plain(line, keep_parens=True).strip()
-    if _NOT_A_HEADER.search(_plain(line)):
+    if _NOT_A_HEADER.search(_plain(line)) or _ASIDE_NOT_RUN.search(plain):
         # "Codex: unavailable", "Codex adversarial review: pending" open no section; a
         # not-run word inside a parenthetical aside ("Gemini ... (Codex: out of credits)")
         # does not disable the header (#2299, first live false negative on #2296).

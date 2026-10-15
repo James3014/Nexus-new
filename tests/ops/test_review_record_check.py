@@ -958,3 +958,17 @@ def test_a_parenthetical_aside_does_not_disable_a_reviewer_header():
         "**Cross-model review: pending (Codex out of credits)**",
     )
     assert rrc.evaluate(HEAD, RISKY, [_c(pending)], [])["status"] == "MISSING_CROSS_MODEL"
+
+
+def test_a_header_whose_parenthetical_starts_with_a_not_run_word_opens_no_section():
+    a1 = (
+        f"## Review record, head {HEAD}\n**Independent Claude review (Opus 5.5)**\n"
+        f"- Round 2: ACCEPT @ {HEAD}\n\n**Codex adversarial review (pending)**\n\n"
+        f"Overall verdict: ACCEPT @ {HEAD}\n"
+    )
+    assert rrc.evaluate(HEAD, RISKY, [_c(a1)], [])["status"] == "MISSING_CROSS_MODEL"
+    a3 = f"Head reviewed: {HEAD}\n**Claude review**: ACCEPT\n**Codex review** (skipped)\nVerdict: ACCEPT @ {HEAD}\n"
+    assert rrc.evaluate(HEAD, RISKY, [_c(a3)], [])["status"] == "MISSING_CROSS_MODEL"
+    # An aside that merely mentions Codex's state keeps the Gemini header alive.
+    ok = f"Head reviewed: {HEAD}\n**Claude review**: ACCEPT\n**Gemini review (Codex pending)**\nVerdict: ACCEPT @ {HEAD}\n"
+    assert rrc.evaluate(HEAD, RISKY, [_c(ok)], [])["status"] == "OK"
