@@ -172,7 +172,15 @@ def test_impact_gate_fails_unless_both_run_sides_succeeded() -> None:
     assert "run side did not record success" in run
     side_steps = [step["name"] for step in _load_workflow()["jobs"]["impact-run"]["steps"]]
     # The success marker is the last step before the always() upload.
-    assert side_steps[-2:] == ["Record run side success", "Upload exact-base run evidence"]
+    assert side_steps[-3:] == [
+        "Clear run side marker",
+        "Record run side success",
+        "Upload exact-base run evidence",
+    ]
+    side = {step["name"]: step for step in _load_workflow()["jobs"]["impact-run"]["steps"]}
+    assert side["Clear run side marker"]["if"] == "always()"
+    assert "rm -f" in side["Clear run side marker"]["run"]
+    assert "if" not in side["Record run side success"]  # runs only when all prior steps passed
     names = [step["name"] for step in _steps()]
     assert names.index("Verify both run sides and assemble evidence") < names.index(
         "Classify exact-base regression"

@@ -386,6 +386,12 @@ jobs:
           done < <(git ls-files --stage -z)
           git submodule foreach --recursive ':'
 
+      - name: Clear run side marker
+        # always(): a marker pre-written by PR code must never survive a failed
+        # side; only the success-only step below may (re)create it.
+        if: always()
+        run: rm -f "$RUNNER_TEMP/nexus-ci-impact/side-status.json"
+
       - name: Record run side success
         # Last step before upload: present only when every earlier step of this
         # side succeeded, so the gate can verify each side on its own (#2220).
