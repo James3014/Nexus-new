@@ -422,6 +422,8 @@ class GoldPort:
     method: str = GOLD_PORT_3WAY
     test_files_from_merge: list[str] = field(default_factory=list)
     dropped_non_code_paths: list[str] = field(default_factory=list)
+    # dropped path -> merge commit whose content GOLD_REF uses for it (the last PR wins)
+    dropped_from: dict[str, str] = field(default_factory=dict)
     failed_pr: int | None = None
     failed_paths: list[str] = field(default_factory=list)
 
@@ -460,6 +462,8 @@ def _set_path_from(repo: GitRepo, wt: Path, rev: str, path: str) -> None:
         cwd=wt,
     )
     target = wt / path
+    if not _inside(wt.resolve(), target.parent.resolve()):
+        raise UnsafeTreePath(f"gold_path_escapes:{path}")  # never touch a file outside wt
     if target.is_symlink() or target.is_file():
         target.unlink()
     if repo.path_in(rev, path):
@@ -510,14 +514,19 @@ def port_gold(repo: GitRepo, wt: Path, prs: Sequence[Mapping[str, Any]]) -> Gold
             file_patch = repo.pr_patch(merge_sha, path)
             if file_patch.strip() and _apply_3way(repo, wt, file_patch):
                 continue
-            _set_path_from(repo, wt, pre, path)  # undo the partial apply of this file
-            if is_oracle_test_file(path):
-                _set_path_from(repo, wt, merge_sha, path)
-                port.test_files_from_merge.append(path)
-            elif is_droppable_non_code(path):
-                port.dropped_non_code_paths.append(path)
-            else:
+            try:
+                _set_path_from(repo, wt, pre, path)  # undo the partial apply of this file
+                if is_oracle_test_file(path):
+                    _set_path_from(repo, wt, merge_sha, path)
+                    port.test_files_from_merge.append(path)
+                elif is_droppable_non_code(path):
+                    port.dropped_non_code_paths.append(path)
+                    port.dropped_from[path] = merge_sha
+                else:
+                    failed.append(path)
+            except UnsafeTreePath:
                 failed.append(path)
+                break
         if failed or _unmerged(repo, wt):
             port.ok = False
             port.failed_pr = int(p["number"])
@@ -1195,6 +1204,21 @@ def score_task(
             receipt["detail"] = f"pr:{port.failed_pr}"
             return _finish(receipt, timing, t0, ctx)
         gold_tree = repo.tree_id(wts["gold"])
+        if port.dropped_from:
+            # Amendment A5 detector tree: GOLD with each dropped doc/data file set to its
+            # merge-commit content. Never scored; used only to prove the drop changes no
+            # oracle outcome and to keep `gold_also_fails` from excusing a P2P failure
+            # that the dropped file explains.
+            wts["goldref"] = repo.worktree(trees_dir / "goldref", inputs.base_sha)
+            _restore_tree(repo, wts["goldref"], gold_tree)
+            try:
+                for path, merge_sha in sorted(port.dropped_from.items()):
+                    _set_path_from(repo, wts["goldref"], merge_sha, path)
+            except UnsafeTreePath as exc:
+                receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
+                receipt["sub_reason"] = "GOLD_PORT_FAILED"
+                receipt["detail"] = str(exc)
+                return _finish(receipt, timing, t0, ctx)
         files = sorted(oracle_files)
         modules = [f for f in files if is_oracle_module_name(f) and (wts["gold"] / f).exists()]
         wts["baset"] = repo.worktree(trees_dir / "baset", inputs.base_sha)
@@ -1268,6 +1292,24 @@ def score_task(
                 "BASE+T": [_digest_outcomes(r) for r in base_runs],
             },
         })
+        if "goldref" in wts:
+            goldref_tree = repo.tree_id(wts["goldref"])
+            receipt["trees"]["GOLD_REF"] = goldref_tree
+            ref = _merge(_run_modules(ctx, env, wts["goldref"], goldref_tree, modules, 0))
+            # A5: every stable oracle node must have the same outcome with and without the
+            # dropped files; otherwise the drop could hide an F2P node -> GOLD_PORT_FAILED.
+            mismatch = sorted(
+                n
+                for n in set(ref) | set(stable)
+                if n not in set(flaky) and _get(ref, n) != _get(gold_runs[0], n)
+            )
+            if mismatch:
+                receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
+                receipt["sub_reason"] = "GOLD_PORT_FAILED"
+                receipt["detail"] = "dropped_paths_change_oracle_outcome"
+                receipt["gold_ref_mismatch"] = mismatch
+                receipt["flaky_dropped"] = len(flaky)
+                return _finish(receipt, timing, t0, ctx)
         if not f2p:
             receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
             receipt["sub_reason"] = "EMPTY_F2P"
@@ -1388,6 +1430,7 @@ def _evaluate_candidate(
     """Spec §6.3-§6.4."""
     out: dict[str, Any] = {}
     flaky_dropped = set(flaky)
+    goldref_tree = repo.tree_id(wts["goldref"]) if "goldref" in wts else None
     # 1. oracle modules on CAND+T with majority rerun.
     runs = [_merge(_run_modules(ctx, env, wts["candt"], candt_tree, modules, 0, CAND_ROLE))]
     watched = list(f2p) + list(p2p_a)
@@ -1435,7 +1478,7 @@ def _evaluate_candidate(
         res = ctx.runner.run(env, wts[tree_key], tree_id, t, ignores, i)
         if res.timed_out or res.exit_code not in CLEAN_P2P_EXIT_CODES:
             baseline_failures.append({
-                "tree": {"baset": "BASE+T", "gold": "GOLD"}[tree_key],
+                "tree": {"baset": "BASE+T", "gold": "GOLD", "goldref": "GOLD_REF"}[tree_key],
                 "target": t,
                 "run": i,
                 "exit_code": res.exit_code,
@@ -1464,12 +1507,15 @@ def _evaluate_candidate(
         ]
         b_runs = [base_p2p[t]] + [baseline_run("baset", baset_tree, t, i) for i in (1, 2)]
         g_run = baseline_run("gold", gold_tree, t, 0)
+        # A5: with dropped doc/data files, a suspect is excused only if it also fails on
+        # GOLD_REF, so a failure explained by a dropped file stays a P2P new failure.
+        r_run = baseline_run("goldref", goldref_tree, t, 0) if goldref_tree is not None else None
         for n in suspects:
             if not all(_get(r, n) != PASS for r in c_runs) or not all(
                 _get(r, n) == PASS for r in b_runs
             ):
                 flaky_dropped.add(n)
-            elif _get(g_run, n) != PASS:
+            elif _get(g_run, n) != PASS and (r_run is None or _get(r_run, n) != PASS):
                 gold_also_fails.add(n)
             else:
                 new_failures.add(n)

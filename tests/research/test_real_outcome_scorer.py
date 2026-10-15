@@ -1171,3 +1171,58 @@ def test_droppable_classification():
     assert not ros.is_droppable_non_code("scripts/run.sh")
     assert not ros.is_droppable_non_code("pyproject.toml")
     assert not ros.is_droppable_non_code("tests/data/fixture.json")  # oracle test file
+
+
+CFG_TEST = (
+    "import json\nfrom pathlib import Path\n\n\n"
+    "def test_cfg_mode():\n"
+    '    assert json.loads(Path("cfg/mode.json").read_text())["mode"] == "fixed"\n'
+)
+
+
+def test_dropped_file_that_changes_an_oracle_outcome_stays_gold_port_failed(tmp_path):
+    # Codex review (P1): a dropped data file the human tests read would make
+    # test_cfg_mode fail on GOLD and silently leave F2P, so a candidate fixing only
+    # mul() could be RESOLVED. GOLD_REF (GOLD + merge content of the dropped file) exposes
+    # the outcome change and the task stays GOLD_PORT_FAILED.
+    fx = Fixture(tmp_path, extra_base={"cfg/mode.json": '{"mode": "base",\n "x": 1}\n'})
+    merge = _drift_then_fix(
+        fx,
+        {"cfg/mode.json": '{"mode": "base",\n "x": 2}\n'},
+        {
+            **_fix_with(MUL_TEST + "\n\n" + CFG_TEST),
+            "cfg/mode.json": '{"mode": "fixed",\n "x": 3}\n',
+        },
+    )
+    mul_only = fx.diff_from_base({"pkg/calc.py": FIXED})
+    r = _score(tmp_path, fx, fx.task(mul_only, merge=merge))
+    assert (r["label"], r["sub_reason"]) == (ros.NOT_SCORABLE_ORACLE_INVALID, "GOLD_PORT_FAILED")
+    assert r["detail"] == "dropped_paths_change_oracle_outcome"
+    assert r["gold_ref_mismatch"] == ["tests.test_mul::test_cfg_mode"]
+    assert r["gold_port_dropped_non_code_paths"] == ["cfg/mode.json"]
+
+
+def test_dropped_doc_with_no_oracle_effect_records_gold_ref_tree(tmp_path):
+    fx = Fixture(tmp_path, extra_base={"docs/status.md": STATUS_BASE})
+    merge = _drift_then_fix(
+        fx,
+        {"docs/status.md": "status: drift\nline2\n"},
+        {**_fix_with(MUL_TEST), "docs/status.md": "status: fixed\nline2\n"},
+    )
+    r = _score(tmp_path, fx, fx.task(fx.diff_from_base({"pkg/calc.py": FIXED}), merge=merge))
+    assert r["label"] == ros.RESOLVED
+    assert "GOLD_REF" in r["trees"] and r["trees"]["GOLD_REF"] != r["trees"]["GOLD"]
+
+
+def test_gold_port_path_restore_never_unlinks_through_escaping_parent(tmp_path, fx):
+    # Codex review (P1): a PR path under a BASE symlink to outside the tree.
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "victim.txt").write_text("keep\n")
+    repo = ros.GitRepo(tmp_path / "scorer-repo", [str(fx.upstream)])
+    assert repo.ensure_commit(fx.base)
+    wt = repo.worktree(tmp_path / "wt", fx.base)
+    (wt / "linkdir").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ros.UnsafeTreePath):
+        ros._set_path_from(repo, wt, fx.base, "linkdir/victim.txt")
+    assert (outside / "victim.txt").read_text() == "keep\n"

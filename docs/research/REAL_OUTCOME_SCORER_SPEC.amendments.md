@@ -119,13 +119,29 @@ unless the human fix makes them pass, so they cannot enter F2P. If they pass on 
 trees they are P2P(a), and the candidate must keep them passing. That makes the check
 stricter, never looser. §6.2–§6.4 and §7 are applied unchanged.
 
-**What the fallback can cost.** If a test reads a dropped doc/data file, its nodes can
-fail on GOLD. They then leave F2P (smaller `f2p_total`) or appear as `gold_also_fails`.
-A smaller F2P is still a set of human-fix tests that fail on `BASE+T` and pass on GOLD.
-It is never a weaker test of those nodes. The receipt lists every dropped path, so a
-report can exclude or separately count fallback tasks. A candidate that does not make
-the F2P nodes pass is still `UNRESOLVED`/`PARTIAL`, as the fixture test
-`test_fallback_cannot_make_a_wrong_candidate_resolved` shows.
+**Guard against a dropped file hiding an oracle node (`GOLD_REF`).** A test could read
+a dropped doc/data file. That test would then fail on GOLD and silently leave F2P, so a
+candidate that skips that part of the fix could still reach `RESOLVED`. To rule this
+out, the scorer builds a detector tree whenever a file was dropped. `GOLD_REF` is GOLD
+with each dropped file set to its merge-commit content. `GOLD_REF` is never a scoring
+tree.
+
+- The oracle modules run once on `GOLD_REF`. If any stable oracle node (not flaky, §6.2)
+  has a different outcome than on GOLD, the task stays `GOLD_PORT_FAILED`, with
+  `detail = "dropped_paths_change_oracle_outcome"` and `gold_ref_mismatch[]` listing the
+  nodes. So a drop is accepted only when it provably changes no oracle outcome.
+- In §6.4 step 2, a P2P suspect is `gold_also_fails` only if it fails on **both** GOLD
+  and `GOLD_REF`. If it fails only on GOLD, the dropped file explains the failure, so it
+  stays a P2P new failure. This is stricter than v1, never looser.
+
+`trees.GOLD_REF` is recorded. A candidate that does not make the F2P nodes pass is still
+`UNRESOLVED`/`PARTIAL`. The fixture tests
+`test_fallback_cannot_make_a_wrong_candidate_resolved` and
+`test_dropped_file_that_changes_an_oracle_outcome_stays_gold_port_failed` show this. The
+fallback can still make F2P smaller in one case: a human test node that also needs a
+non-test change from another main commit fails on GOLD. A candidate made at BASE could
+not pass that node either. v1 already drops such nodes whenever the patch applies
+cleanly.
 
 **Previously scorable labels are unaffected.** Step 1 is v1's code path, unchanged. The
 fallback runs only when step 1 fails for some PR, and v1 labels exactly those tasks
