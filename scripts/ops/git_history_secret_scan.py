@@ -741,7 +741,8 @@ def render_failure_log(repo: Path, receipt: dict[str, object]) -> list[str]:
     if not receipt.get("blocking") or receipt.get("status") != "FAIL":
         return []
     raw = receipt.get("findings")
-    blocking = [f for f in raw if isinstance(f, dict) and f.get("blocking")] if raw else []
+    items = raw if isinstance(raw, list) else []
+    blocking = [f for f in items if isinstance(f, dict) and f.get("blocking")]
     count = len(blocking)
     lines = [
         f"::error title=Secret audit::{count} blocking secret finding(s) in published git "
