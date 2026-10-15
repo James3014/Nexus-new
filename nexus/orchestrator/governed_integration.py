@@ -129,28 +129,40 @@ class ControlledIntegrationManager:
             )
         return result.stdout.strip()
 
-    @staticmethod
-    def _is_detached_linked_worktree(root: Path) -> bool:
+    @classmethod
+    def _is_detached_linked_worktree(cls, root: Path) -> bool:
         """True only for a separate Controller shape: a linked worktree on a detached HEAD.
 
         A primary checkout, or any worktree with a branch checked out, keeps
-        the fully strict cleanliness rule (#2230 F3).
+        the fully strict cleanliness rule (#2230 F3).  Probes run under the
+        same sanitised git environment as every other Controller git call;
+        any failure (not a repository, hooks dir unusable) is "not separate".
         """
-        def probe(*args: str) -> subprocess.CompletedProcess[str]:
-            return subprocess.run(
-                ["git", *args], cwd=root, capture_output=True, text=True, check=False
-            )
+
+        def probe(*args: str) -> subprocess.CompletedProcess[str] | None:
+            try:
+                return cls._run_sanitised_git(args, root)
+            except (OSError, RuntimeError):
+                return None
 
         git_dir = probe("rev-parse", "--absolute-git-dir")
         common_dir = probe("rev-parse", "--path-format=absolute", "--git-common-dir")
-        if git_dir.returncode != 0 or common_dir.returncode != 0:
+        if (
+            git_dir is None
+            or common_dir is None
+            or git_dir.returncode != 0
+            or common_dir.returncode != 0
+        ):
             return False
         try:
             linked = not os.path.samefile(git_dir.stdout.strip(), common_dir.stdout.strip())
         except OSError:
             return False
         # ``symbolic-ref -q HEAD`` exits 1 exactly when HEAD is detached.
-        return linked and probe("symbolic-ref", "-q", "HEAD").returncode == 1
+        if not linked:
+            return False
+        head = probe("symbolic-ref", "-q", "HEAD")
+        return head is not None and head.returncode == 1
 
     @classmethod
     def separate_controller_integration_head(
@@ -213,6 +225,35 @@ class ControlledIntegrationManager:
             raise RuntimeError("CLOSURE_INTEGRATION_BRANCH_CHECKED_OUT")
 
     @classmethod
+    def _require_sole_controller_checkout(cls, controller_root: Path, branch: str) -> None:
+        """Raise unless the Controller root is the only worktree on ``branch``.
+
+        ``git merge --ff-only`` in the Controller moves the branch under any
+        other worktree forced onto it (``worktree add -f``), leaving that
+        checkout with a staged reverse diff.  Re-proved right before the
+        fast-forward (#2230).
+        """
+        ref = f"refs/heads/{branch}"
+        raw = cls._git(["worktree", "list", "--porcelain", "-z"], controller_root)
+        paths: list[str] = []
+        current: str | None = None
+        for field in raw.split("\0"):
+            if field.startswith("worktree "):
+                current = field[len("worktree ") :]
+            elif field == f"branch {ref}" and current is not None:
+                paths.append(current)
+        if len(paths) != 1:
+            raise RuntimeError(f"integration branch is checked out in {len(paths)} worktrees")
+        try:
+            same = os.path.samefile(paths[0], controller_root)
+        except OSError:
+            same = False
+        if not same:
+            raise RuntimeError("integration branch is checked out outside the Controller")
+        if cls._branch_in_progress_in_any_worktree(controller_root, branch):
+            raise RuntimeError("integration branch is rebasing or bisecting in a worktree")
+
+    @classmethod
     def _branch_in_progress_in_any_worktree(cls, controller_root: Path, branch: str) -> bool:
         """True when any worktree is rebasing (incl. ``--update-refs``) or bisecting ``branch``.
 
@@ -228,10 +269,16 @@ class ControlledIntegrationManager:
         admin_dirs = [common, *(sorted(linked.iterdir()) if linked.is_dir() else ())]
 
         def read(path: Path) -> str | None:
+            # Only an absent marker means "not in progress"; a marker that
+            # exists but cannot be read fails closed (#2230).
             try:
                 return path.read_text(encoding="utf-8").strip()
-            except OSError:
+            except (FileNotFoundError, NotADirectoryError):
                 return None
+            except (OSError, UnicodeDecodeError) as exc:
+                raise RuntimeError(
+                    f"integration branch state unreadable: {path.name}: {type(exc).__name__}"
+                ) from exc
 
         for admin in admin_dirs:
             for state in ("rebase-merge", "rebase-apply"):
@@ -920,6 +967,14 @@ class ControlledIntegrationManager:
                     message="canonical/integration worktree must be clean before apply",
                 )
                 if current_branch == integration_branch:
+                    try:
+                        self._require_sole_controller_checkout(
+                            controller_root, integration_branch
+                        )
+                    except RuntimeError as exc:
+                        raise RuntimeError(
+                            f"INTEGRATION_BRANCH_REFUSED_AT_APPLY: {exc}"
+                        ) from exc
                     self._git(["merge", "--ff-only", staging_sha], controller_root)
                 else:
                     # Whatever the shape, the branch rules are re-proved right
