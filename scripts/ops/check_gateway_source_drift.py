@@ -222,7 +222,7 @@ def analyze(
         "observed": {
             k: health.get(k)
             for k in (
-                "repo_root",
+                "repo_root_sha256",
                 "repo_head_at_start",
                 "repo_head_current",
                 "reload_required",
@@ -373,7 +373,7 @@ def main(
     parser.add_argument(
         "--source-repo",
         default=None,
-        help="where to fetch the deployed git_head from when absent (default: health repo_root)",
+        help="where to fetch the deployed git_head from when absent (default: legacy health repo_root, else the auto-deploy receipt)",
     )
     parser.add_argument(
         "--json", action="store_true", help="print the JSON report instead of the summary line"

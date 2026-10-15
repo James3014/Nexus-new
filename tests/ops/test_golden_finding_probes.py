@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import sys
 import urllib.error
@@ -13,6 +14,8 @@ import pytest
 from scripts.ops import run_golden_behavior_eval as evaluator
 from tests.golden_behavior.corpus import CASES
 
+EVAL_ROOT = "/srv/nexus/deployments/r1"
+EVAL_ROOT_SHA256 = hashlib.sha256(EVAL_ROOT.encode()).hexdigest()
 EVALUATED = "1" * 40
 OTHER = "2" * 40
 
@@ -21,7 +24,7 @@ def _health(**overrides: Any) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "status": "ok",
         "server": "nexus-mcp-gateway",
-        "repo_root": "/srv/nexus/deployments/r1",
+        "repo_root_sha256": EVAL_ROOT_SHA256,
         "git_head": EVALUATED,
         "repo_head_at_start": EVALUATED,
         "repo_head_current": EVALUATED,
@@ -42,7 +45,9 @@ def _gb077(payload: Any = None, *, identity: tuple[str | None, bool | None] = (E
         return _health() if payload is None else payload
 
     passed, detail = evaluator.probe_gb077_live_gateway_identity(
-        fetch_health=fetch, evaluated_identity=lambda: identity
+        fetch_health=fetch,
+        evaluated_identity=lambda: identity,
+        evaluated_root=lambda: EVAL_ROOT,
     )
     return passed, json.loads(detail)
 
@@ -96,7 +101,7 @@ def test_gb077_stale_tampered_or_substituted_identity_fails_closed(
         "git_head",
         "repo_head_at_start",
         "repo_head_current",
-        "repo_root",
+        "repo_root_sha256",
         "server_instance_id",
         "tool_manifest_revision",
         "permission_policy_hash",
@@ -299,3 +304,34 @@ def test_include_findings_stays_nonzero_even_when_probe_passes(monkeypatch, caps
         "finding_unresolved": True,
     }
     assert report["case_evidence"][0]["status"] == "finding"
+
+
+def test_gb077_accepts_legacy_repo_root_from_pre_2217_gateway() -> None:
+    payload = _health()
+    del payload["repo_root_sha256"]
+    payload["repo_root"] = EVAL_ROOT
+    passed, _detail = _gb077(payload)
+    assert passed is True
+
+
+@pytest.mark.parametrize(
+    ("overrides", "drop", "reason"),
+    [
+        ({"repo_root_sha256": "b" * 64}, (), "gateway_repo_root_not_evaluated_root"),
+        ({"repo_root_sha256": "XYZ"}, (), "gateway_field_malformed:repo_root_sha256"),
+        ({"repo_root_sha256": "A" * 64}, (), "gateway_field_malformed:repo_root_sha256"),
+        (
+            {"repo_root": "/srv/nexus/deployments/other"},
+            ("repo_root_sha256",),
+            "gateway_repo_root_not_evaluated_root",
+        ),
+        ({"repo_root": "  "}, ("repo_root_sha256",), "gateway_field_malformed:repo_root"),
+    ],
+)
+def test_gb077_repo_root_must_be_the_evaluated_root(overrides, drop, reason) -> None:
+    payload = _health(**overrides)
+    for name in drop:
+        del payload[name]
+    passed, detail = _gb077(payload)
+    assert passed is False
+    assert reason in detail["reasons"]
