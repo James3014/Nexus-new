@@ -46,6 +46,9 @@ SANDBOX_DENIED_HOME_PATHS = (
     ".claude",
     ".codex",
     "Library/Keychains",
+    # The bench's hidden-test staging parent: denied by the LAST profile rule for every
+    # confined lane (seam, ultra_review, committee, swarm), whatever its read roots are.
+    ".cache/nexus-bench-hidden",
 )
 _OS_SANDBOX_PROBE: dict[str, bool] = {}
 # The barrier binary is never looked up on the inherited PATH (a planted ``sandbox-exec``

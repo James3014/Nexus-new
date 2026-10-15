@@ -1421,3 +1421,62 @@ def test_sprint_inplace_evaluation_holds_the_lock_from_write_to_restore(
     assert ev.score == 1.0 and during == [False]
     assert seam.target_held_by_other(case, "target.py", "other-task") is False  # released
     assert (case / "target.py").read_text(encoding="utf-8") == ORIGINAL  # restored
+
+
+def test_every_confinement_call_site_is_known_and_protects_the_bench_subtrees(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Gemini N1, proven: (a) the confinement() call sites are exactly the known ones; the
+    seam/bench one (run_confined_test) passes the hidden tests, the staging parent, .nexus,
+    bench_fixtures, artifacts and .git as forbidden SUBTREES; the staging parent is also denied
+    by the last rule of EVERY profile (committee/swarm/ultra_review included); (b) its read
+    roots are the sandbox, the interpreter prefixes and the TOOLCHAIN constant, never input."""
+    import re as _re
+
+    repo = Path(__file__).resolve().parents[2]
+    sites = sorted(
+        str(path.relative_to(repo))
+        for top in ("nexus", "scripts")
+        for path in (repo / top).rglob("*.py")
+        if _re.search(r"(?<![\w.])(?:lane\.)?confinement\(", path.read_text(encoding="utf-8"))
+        and "def confinement(" not in path.read_text(encoding="utf-8")
+    )
+    assert sites == [
+        "nexus/committee/execution_verifier.py",
+        "nexus/engine/confined_test_runner.py",
+        "nexus/engine/swarm_run.py",
+    ], sites
+
+    case = _case(tmp_path)
+    workspace = tmp_path / "workspace"
+    captured: dict[str, Any] = {}
+
+    def capture(**kwargs: Any):
+        captured.update(kwargs)
+        raise SandboxError("captured")
+
+    monkeypatch.setattr(lane, "os_sandbox_available", lambda: True)
+    monkeypatch.setattr(confined_test_runner, "confinement", capture)
+    seam.run_visible_test_confined(
+        target_path=case / "target.py",
+        visible_test_path=case / "test_visible.py",
+        original_code=ORIGINAL,
+        candidate_code=CANDIDATE,
+        timeout_sec=5,
+        workspace_root=workspace,
+    )
+    subtrees = {Path(p).resolve() for p in captured["forbidden_subtrees"]}
+    for required in (
+        case / "test_hidden.py",
+        seam.BENCH_HIDDEN_STAGING_PARENT,
+        workspace / ".nexus",
+        workspace / "bench_fixtures",
+        workspace / "artifacts",
+        workspace / ".git",
+    ):
+        assert Path(required).resolve() in subtrees, required
+    assert captured["extra_readable"] is confined_test_runner.TOOLCHAIN_READ_ROOTS
+
+    profile = lane.build_sandbox_profile(writable=[str(tmp_path)], read_roots=[str(tmp_path)])
+    staging = lane.sbpl_path(Path.home().resolve() / ".cache" / "nexus-bench-hidden")
+    assert f'(subpath "{staging}")' in profile.splitlines()[-1]  # last rule: denied for all

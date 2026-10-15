@@ -801,7 +801,7 @@ def bench_forbidden_roots(workspace_root: Path | str | None) -> list[Path]:
     roots = [BENCH_HIDDEN_STAGING_PARENT]
     if workspace_root:
         base = Path(workspace_root)
-        roots += [base / ".nexus", base / "bench_fixtures", base / "artifacts"]
+        roots += [base / ".nexus", base / "bench_fixtures", base / "artifacts", base / ".git"]
     return roots
 
 
