@@ -34,9 +34,21 @@ REPLY = json.dumps({
     "replacement": "return text.strip()",
 })
 
+# Mirrors the real print-mode contract the runtime enforces since runtime #205: glog-format
+# identity lines go into the ``--log-file`` path (the served-model witness; without them the
+# runtime returns ``model_identity_unobserved``) and the JSON envelope goes to stdout.
 FAKE_AGY = """#!{python}
 import json, sys
-open({log!r}, "a").write(json.dumps(sys.argv[1:]) + "\\n")
+argv = sys.argv[1:]
+open({log!r}, "a").write(json.dumps(argv) + "\\n")
+model = argv[argv.index("--model") + 1] if "--model" in argv else ""
+if "--log-file" in argv:
+    with open(argv[argv.index("--log-file") + 1], "a") as glog:
+        glog.write("I1014 10:36:21.492269       1 model_resolver.go:93] Resolving model " + model + "\\n")
+        glog.write(
+            "I1014 10:36:21.492301       1 model_config_manager.go:328] "
+            'Propagating selected model override to backend: label="Gemini 3.8 Flash (Medium)"\\n'
+        )
 print(json.dumps({{"conversation_id": "c1", "status": "SUCCESS", "response": {reply!r},
                   "duration_seconds": 0.1, "num_turns": 1,
                   "usage": {{"input_tokens": 900, "output_tokens": 100, "total_tokens": 1000}}}}))
