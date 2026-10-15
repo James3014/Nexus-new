@@ -724,10 +724,16 @@ def test_recovery_never_writes_outside_a_validated_fixture(tmp_path, monkeypatch
 
 
 def test_recovery_without_a_trusted_hash_is_refused(tmp_path, monkeypatch) -> None:
-    """No in-memory sha and no committed fixture: the record alone never authorizes a write."""
+    """No in-memory sha and no staging-record sha: nothing authorizes a write."""
     workspace, visible, hidden = _case(tmp_path)
     (workspace / ".git").mkdir()  # skip the commit: the fixture is not in git
     killed, record = _killed_run(tmp_path, workspace, hidden)
+    run_root = killed.staged_path.parent.parent
+    os.chmod(run_root, 0o700)
+    try:
+        _edit_record(run_root, hidden, sha256="")  # the record names no hash
+    finally:
+        os.chmod(run_root, 0o300)
     _new_process(monkeypatch)
     with pytest.raises(staging_mod.HiddenTestStagingError):
         staging_mod.recover_last_run(_expected_sha(record), workspace_root=workspace)
@@ -865,16 +871,26 @@ def test_cross_device_quarantine_moves_or_disables_the_hidden_file(tmp_path, mon
 
 
 def test_tampered_committed_hidden_test_is_never_restored(tmp_path, monkeypatch) -> None:
-    """Gemini G4: the checkout's git HEAD is not a recovery authority. A tampered hidden test
-    committed to the branch (and staged) is refused without a manifest sha."""
+    """Gemini G4: the checkout's git HEAD is not a recovery authority. Staged bytes swapped for
+    a tampered test that is ALSO committed to the branch are refused: the staging record
+    (written at staging time, outside the workspace) still names the original hash."""
     workspace, visible, hidden = _case(tmp_path)
-    hidden.write_text("def test_hidden_contract():\n    assert True\n", encoding="utf-8")
-    killed, record = _killed_run(tmp_path, workspace, hidden)  # commits the tampered bytes
+    killed, record = _killed_run(tmp_path, workspace, hidden)
+    tampered = "def test_hidden_contract():\n    assert True\n"
+    _plant(killed.staged_path, tampered)
+    hidden.parent.joinpath("test_hidden.py").write_text(tampered, encoding="utf-8")
+    env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+    for args in (
+        ["add", "-A"],
+        ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "tamper"],
+    ):
+        subprocess.run(["git", *args], cwd=workspace, check=True, env=env, capture_output=True)
+    hidden.unlink()  # the commit carries the tampered test; the workspace slot is empty again
     _new_process(monkeypatch)
     with pytest.raises(staging_mod.HiddenTestStagingError):
         staging_mod.recover_last_run(_expected_sha(record), workspace_root=workspace)
     assert not os.path.lexists(hidden)
-    assert "untrusted_recovery_authority" in staging_mod.run_abort_reason()
+    assert "hidden_recovery_refused" in staging_mod.run_abort_reason()
     assert _mode(killed.staged_path) == 0o000  # bytes stay locked in the run dir
 
 
@@ -900,3 +916,69 @@ def test_recovery_write_cannot_follow_a_parent_swapped_after_the_check(
         )
     assert not (elsewhere / "test_hidden.py").exists()
     assert "origin_parent_not_a_plain_directory" in staging_mod.run_abort_reason()
+
+
+def test_killed_run_recovers_from_the_staging_record_without_any_manifest(
+    tmp_path, monkeypatch
+) -> None:
+    """Round 3b: after a kill (no in-memory sha, no manifest sha) the staging record written
+    at staging time in the private run dir is the authority, so hard_v1 recovers."""
+    workspace, visible, hidden = _case(tmp_path)
+    (workspace / ".git").mkdir()  # nothing committed: git is never consulted
+    killed, record = _killed_run(tmp_path, workspace, hidden)
+    _new_process(monkeypatch)
+    restored = staging_mod.recover_last_run(_expected_sha(record), workspace_root=workspace)
+    assert restored == [str(hidden.resolve())]
+    assert hidden.read_text(encoding="utf-8") == HIDDEN_TEXT
+    assert staging_mod.run_abort_reason() == ""
+
+
+@pytest.mark.parametrize("attack", ["workspace_copy_present", "manifest_disagrees", "size"])
+def test_staging_record_recovery_refuses_tampering(tmp_path, monkeypatch, attack) -> None:
+    workspace, visible, hidden = _case(tmp_path)
+    (workspace / ".git").mkdir()
+    killed, record = _killed_run(tmp_path, workspace, hidden)
+    trusted: dict[str, str] = {}
+    if attack == "workspace_copy_present":
+        hidden.write_text("def test_planted():\n    assert True\n", encoding="utf-8")
+    elif attack == "manifest_disagrees":
+        trusted = {str(hidden.resolve()): "0" * 64}
+    else:
+        run_root = killed.staged_path.parent.parent
+        os.chmod(run_root, 0o700)
+        try:
+            _edit_record(run_root, hidden, size="1")
+        finally:
+            os.chmod(run_root, 0o300)
+    _new_process(monkeypatch)
+    with pytest.raises(staging_mod.HiddenTestStagingError):
+        staging_mod.recover_last_run(
+            _expected_sha(record), workspace_root=workspace, trusted_shas=trusted
+        )
+    if attack == "workspace_copy_present":
+        assert hidden.read_text(encoding="utf-8") != HIDDEN_TEXT  # never overwritten
+    else:
+        assert not os.path.lexists(hidden)
+    assert "hidden_recovery_refused" in staging_mod.run_abort_reason()
+
+
+@pytest.mark.parametrize("where", ["symlinked_parent", "foreign_owned"])
+def test_staging_record_outside_a_trusted_private_dir_is_no_authority(
+    tmp_path, monkeypatch, _isolated_staging, where
+) -> None:
+    workspace, visible, hidden = _case(tmp_path)
+    (workspace / ".git").mkdir()
+    killed, record = _killed_run(tmp_path, workspace, hidden)
+    _new_process(monkeypatch)
+    if where == "symlinked_parent":
+        real = tmp_path / "real-staging-parent"
+        os.chmod(_isolated_staging, 0o700)
+        _isolated_staging.rename(real)
+        _isolated_staging.symlink_to(real, target_is_directory=True)
+    else:
+        real_uid = os.geteuid()
+        monkeypatch.setattr(staging_mod.os, "geteuid", lambda: real_uid + 1)
+    with pytest.raises(staging_mod.HiddenTestStagingError, match="hidden_test_tampered"):
+        staging_mod.recover_last_run(_expected_sha(record), workspace_root=workspace)
+    assert not os.path.lexists(hidden)
+    assert "recovery_run_root" in staging_mod.run_abort_reason()

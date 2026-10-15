@@ -257,6 +257,31 @@ def _trusted_run_root(run_root: Path) -> None:
         raise HiddenTestStagingError("run_root_open_to_others")
 
 
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _owned_by_us(path: Path, *, label: str) -> None:
+    info = os.lstat(path)
+    if hasattr(os, "geteuid") and info.st_uid != os.geteuid():
+        raise HiddenTestStagingError(f"{label}_not_owned")
+
+
+def _trusted_staging_parent(run_root: Path) -> None:
+    """The recovery authority (the staging record) only counts inside OUR private staging
+    parent outside any workspace: run_root is a direct child of it, and the parent is a real
+    directory we own, with no symlinked component, closed to group/other."""
+    parent = _staging_parent()
+    if run_root.parent != parent:
+        raise HiddenTestStagingError("run_root_outside_staging_parent")
+    _no_symlink_components(parent)
+    info = os.lstat(parent)
+    if not stat.S_ISDIR(info.st_mode):
+        raise HiddenTestStagingError("staging_parent_not_a_directory")
+    _owned_by_us(parent, label="staging_parent")
+    if stat.S_IMODE(info.st_mode) & 0o077:
+        raise HiddenTestStagingError("staging_parent_open_to_others")
+
+
 def _last_run_root() -> Path | None:
     """The previous run's root from ``.last-run`` (0600, holds only the run-dir basename)."""
     marker = _staging_parent() / LAST_RUN_NAME
@@ -295,8 +320,10 @@ def recover_last_run(
         if expected_run_root_sha256 and _path_digest(run_root) != expected_run_root_sha256:
             raise HiddenTestStagingError("run_root_sha_mismatch")
         _trusted_run_root(run_root)
+        _trusted_staging_parent(run_root)
         os.chmod(run_root, 0o700)
         try:
+            _owned_by_us(run_root / RUN_RECORD_NAME, label="staging_record")
             entries = _pending_entries(run_root)
         finally:
             os.chmod(run_root, _DIR_MODE)
@@ -365,17 +392,20 @@ def _recover_entry(
         # (c) staged path is exactly <run_root>/<task key>/test_hidden.py for the recorded task.
         if staged != run_root / task_key / HIDDEN_TEST_NAME or not task_key:
             raise HiddenTestStagingError("staged_path_task_mismatch")
-        # (d) the bytes must match a trusted hash. Recovery authority is ONLY this run's
-        # in-memory sha or the fixture generator / task manifest sha passed by the runner; the
-        # checkout under test (incl. its git HEAD) is never an authority. The record's own sha
-        # is only a hint and must agree too. No authority: refused, bytes stay locked.
-        trusted = _IN_MEMORY_SHAS.get(str(origin)) or str(
-            (trusted_shas or {}).get(str(origin)) or ""
-        )
-        if not trusted:
+        # (d) the bytes must match a trusted hash. Authority, in order: this run's in-memory
+        # sha, else the staging record written at staging time (before any model code ran)
+        # in the private run dir OUTSIDE the workspace -- recover_last_run has verified that
+        # dir and record (under the staging parent, ours, no symlink, closed to others). The
+        # checkout under test (its git HEAD, an in-repo manifest) is never an authority; a
+        # manifest sha passed by the runner is only a cross-check. No authority: refused.
+        trusted = _IN_MEMORY_SHAS.get(str(origin)) or expected
+        if not trusted or not _SHA256_RE.fullmatch(trusted):
             raise HiddenTestStagingError("untrusted_recovery_authority")
         if not expected or trusted != expected:
             raise HiddenTestStagingError("untrusted_sha")
+        cross_check = str((trusted_shas or {}).get(str(origin)) or "")
+        if cross_check and cross_check != trusted:
+            raise HiddenTestStagingError("manifest_sha_mismatch")
         leftover = HiddenTestStaging(
             hidden_path=origin, staged_path=staged, staged=True, sha256=expected
         )
@@ -387,6 +417,8 @@ def _recover_entry(
         os.chmod(staged, _STAGED_MODE)
         if hashlib.sha256(data).hexdigest() != trusted:
             raise HiddenTestStagingError("untrusted_sha")
+        if str(entry.get("size") or "") and str(len(data)) != str(entry.get("size")):
+            raise HiddenTestStagingError("size_mismatch")
         _write_new_in_dir(origin, data, mode=0o644)  # pinned parent fd, O_EXCL|O_NOFOLLOW
         os.chmod(staged, 0o600)
         os.unlink(staged)
@@ -526,6 +558,7 @@ class HiddenTestStaging:
             {
                 "staged": str(self.staged_path),
                 "sha256": digest,
+                "size": str(os.lstat(self.staged_path).st_size),
                 "task": self.staged_path.parent.name,
             },
         )

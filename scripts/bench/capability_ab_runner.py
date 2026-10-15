@@ -176,8 +176,8 @@ class CapabilityTask:
     trial_index: int = 1
     fixture_kind: str = ""
     hidden_test_file: str = ""
-    # sha256 of the task's hidden test from the fixture manifest (hard_v1); the recovery
-    # authority for a killed counted run.
+    # sha256 of the task's hidden test from the fixture manifest (hard_v1); an optional
+    # cross-check when recovering a killed counted run (the staging record is the authority).
     hidden_test_sha256: str = ""
     expected_capabilities: tuple[str, ...] = ()
     capability_activation_contract: str = ""
@@ -4608,9 +4608,10 @@ def _confinement_parity_failures(
 
 
 def _hidden_trusted_shas(tasks: list[CapabilityTask], repo_root: Path) -> dict[str, str]:
-    """Recovery authority for a killed counted run: each hidden test's sha256 from its source
-    of truth (materialized fixtures: regenerated deterministically; hard_v1: the task manifest's
-    ``hidden_test_sha256``), keyed by the absolute workspace path it belongs at."""
+    """Optional cross-check for recovering a killed counted run: each hidden test's sha256 from
+    the fixture generator (P16) or the task manifest's ``hidden_test_sha256`` (hard_v1), keyed
+    by the absolute workspace path it belongs at. The authority itself is the staging record
+    written outside the workspace at staging time; a disagreeing cross-check refuses."""
     trusted: dict[str, str] = {}
     with tempfile.TemporaryDirectory(prefix="nexus-hidden-sha-") as tmp:
         for task in tasks:
