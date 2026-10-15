@@ -123,7 +123,10 @@ def test_boundary_profile_env_and_home(tmp_path, seatbelt_on):
         "GH_TOKEN": "x",
     }
     boundary = boundary_mod.prepare_accept_edits_boundary(
-        source_env=source_env, target=target, extra_writable_files=[str(log)]
+        source_env=source_env,
+        target=target,
+        extra_writable_files=[str(log)],
+        extra_writable_roots=[log.parent],
     )
     try:
         run_root = boundary.run_root
@@ -324,6 +327,7 @@ def test_accept_edits_attempt_runs_in_disposable_home_with_profile(
     log = (tmp_path / "op" / "agy.log").resolve()
     log.parent.mkdir()
     monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(log))
+    monkeypatch.setattr(dispatch, "OPERATION_ROOT", log.parent)
     seen: dict = {}
 
     def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
@@ -431,6 +435,7 @@ def _run_with_log(tmp_path, monkeypatch, attempts):
     log.parent.mkdir()
     log.write_text("", encoding="utf-8")
     monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(log))
+    monkeypatch.setattr(dispatch, "OPERATION_ROOT", log.parent)
     monkeypatch.setenv("NEXUS_AGY_MAX_ACCOUNT_FAILOVERS", "3")
     pending = list(attempts)
 
@@ -478,13 +483,18 @@ def test_quota_failure_with_run_home_denials_rotates(tmp_path, monkeypatch, seat
         # a tool-permission denial still counts even when it names a run-HOME path
         "I1015 14:31:57.000000      32 tool.go:1] Tool permission denied: "
         "write_file({home}/notes.txt): operation not permitted\n",
+        # a denied write to a locked run-HOME file outside the expected allowlist
+        "E1015 14:31:57.000000      32 settings.go:1] save: open "
+        "{home}/.gemini/antigravity-cli/settings.json: operation not permitted\n",
     ],
 )
+@pytest.mark.parametrize("stderr", ["", _AGY_QUOTA_STDERR], ids=["no-quota", "with-quota"])
 def test_genuine_permission_denial_still_blocks(
-    tmp_path, monkeypatch, seatbelt_on, capsys, genuine
+    tmp_path, monkeypatch, seatbelt_on, capsys, genuine, stderr
 ):
+    """A genuine permission signal wins even over a provider quota failure."""
     code, coordinator, _ = _run_with_log(
-        tmp_path, monkeypatch, [(_RUN_HOME_DENIALS + genuine, 1, "")]
+        tmp_path, monkeypatch, [(_RUN_HOME_DENIALS + genuine, 1, stderr)]
     )
     metas = _metas(capsys.readouterr().err)
     assert code != 0
@@ -501,19 +511,21 @@ def test_run_home_denials_alone_do_not_fail_a_clean_run(tmp_path, monkeypatch, s
 
 
 def test_classify_failure_quota_outranks_permission_markers():
+    """(Id kept.) Quota wins only once no genuine permission signal remains."""
     stdout = "open /elsewhere/file: operation not permitted"
+    for stderr in (_AGY_QUOTA_STDERR, "error: boom\n"):
+        assert (
+            dispatch.classify_failure(1, stdout, stderr, False)
+            == dispatch.AccountFailureKind.PERMISSION_OR_SCOPE_ERROR
+        )
     assert (
-        dispatch.classify_failure(1, stdout, _AGY_QUOTA_STDERR, False)
+        dispatch.classify_failure(1, "", _AGY_QUOTA_STDERR, False)
         == dispatch.AccountFailureKind.QUOTA_EXHAUSTED
     )
     bare_429 = 'AGY_ERROR: {"status":"UNAVAILABLE_X","error_code":429}\n'
     assert (
-        dispatch.classify_failure(1, stdout, bare_429, False)
+        dispatch.classify_failure(1, "", bare_429, False)
         == dispatch.AccountFailureKind.QUOTA_EXHAUSTED
-    )
-    assert (
-        dispatch.classify_failure(1, stdout, "error: boom\n", False)
-        == dispatch.AccountFailureKind.PERMISSION_OR_SCOPE_ERROR
     )
 
 
@@ -529,6 +541,130 @@ def test_expected_run_home_denial_matches_only_run_home_eperm(tmp_path):
     )
     assert not boundary_mod.is_expected_run_home_denial(f"open {home}/x: permission denied", home)
     assert not boundary_mod.is_expected_run_home_denial("operation not permitted", home)
+    assert boundary_mod.is_expected_run_home_denial(
+        f"open {home}/.gemini/config/mcp_config.json: operation not permitted", home
+    )
+    # only the exact startup paths: other run-HOME paths are real signals
+    for other in (
+        f"{home}/{admission.AGY_RUN_HOME_SETTINGS}",
+        f"{home}/.gemini/config",
+        f"{home}/.gemini/config/hooks.json",
+        f"{home}/x",
+    ):
+        assert not boundary_mod.is_expected_run_home_denial(
+            f"open {other}: operation not permitted", home
+        ), other
+
+
+def test_runner_without_boundary_parameter_is_refused_before_lease(tmp_path, seatbelt_on, capsys):
+    coordinator = _Coordinator(_source_home(tmp_path))
+    target = _target(tmp_path)
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout):
+        raise AssertionError("an unconfined accept-edits runner must not start")
+
+    code = dispatch.dispatch_run(
+        prompt="edit",
+        cwd=str(target),
+        mode="accept-edits",
+        write_paths=[str(target / "a.py")],
+        coordinator=coordinator,
+        run_agy_fn=runner,
+    )
+    metas = _metas(capsys.readouterr().err)
+    assert code == 64
+    assert metas[-1]["failure_kind"] == (
+        "DISPATCH_CONTRACT_REJECTED:AGY_WRITE_BOUNDARY_RUNNER_UNSUPPORTED"
+    )
+    assert coordinator.acquire_count == 0
+
+
+def test_boundary_prepare_failure_is_terminal_and_releases_lease(
+    tmp_path, monkeypatch, seatbelt_on, capsys
+):
+    coordinator = _RotatingCoordinator(_source_home(tmp_path))
+    scratch = tmp_path / "tmpdir"
+    scratch.mkdir()
+    monkeypatch.setattr(boundary_mod.tempfile, "tempdir", str(scratch))
+    # an unrepresentable path aborts after the run root exists
+    monkeypatch.setattr(
+        boundary_mod,
+        "build_seatbelt_profile",
+        lambda **_kw: (_ for _ in ()).throw(ValueError("unrepresentable")),
+    )
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        raise AssertionError("no attempt may start without its boundary")
+
+    target = _target(tmp_path)
+    code = dispatch.dispatch_run(
+        prompt="edit",
+        cwd=str(target),
+        mode="accept-edits",
+        write_paths=[str(target / "a.py")],
+        coordinator=coordinator,
+        run_agy_fn=runner,
+    )
+    metas = _metas(capsys.readouterr().err)
+    assert code == 64
+    assert metas[-1]["status"] == "invalid_contract"
+    assert metas[-1]["failure_kind"] == (
+        "DISPATCH_CONTRACT_REJECTED:AGY_WRITE_BOUNDARY_PREPARE_FAILED:"
+        "AGY_WRITE_BOUNDARY_UNAVAILABLE:profile_unrepresentable"
+    )
+    assert coordinator.rotated == [] and coordinator.claim.released is True
+    assert list(scratch.iterdir()) == []  # run root and profile dir removed
+
+
+def test_descendant_sweep_failure_is_terminal(tmp_path, monkeypatch, seatbelt_on, capsys):
+    code, coordinator, pending = _run_with_log(
+        tmp_path,
+        monkeypatch,
+        [
+            ("", 1, _AGY_QUOTA_STDERR + "\nNEXUS_AGY_DESCENDANT_SWEEP_FAILED\n"),
+            ("", 0, ""),
+        ],
+    )
+    metas = _metas(capsys.readouterr().err)
+    assert code != 0
+    assert len(pending) == 1  # no second attempt
+    assert coordinator.rotated == []
+    assert metas[-1]["status"] == "failed"
+    assert metas[-1]["failure_kind"] == "AGY_DESCENDANT_SWEEP_FAILED"
+    assert metas[-1]["reconciliation_required"] is True
+
+
+def test_extra_writable_file_admitted_only_under_allowed_roots(tmp_path, seatbelt_on):
+    home = _source_home(tmp_path)
+    target = _target(tmp_path)
+    ops = (tmp_path / "ops").resolve()
+    ops.mkdir()
+    log = ops / "agy.log"
+    boundary = boundary_mod.prepare_accept_edits_boundary(
+        source_env={"HOME": str(home)},
+        target=target,
+        extra_writable_files=[log],
+        extra_writable_roots=[ops],
+    )
+    try:
+        assert _effective_write(boundary.profile, log) == "allow"
+    finally:
+        boundary.cleanup()
+    real_home = Path(os.path.realpath(Path.home()))
+    for extra, roots, reason in (
+        (real_home / ".ssh" / "authorized_keys", [ops], "extra_path_outside_allowed_roots"),
+        # even a misconfigured root cannot open a real-HOME dotfile dir
+        (real_home / ".ssh" / "authorized_keys", [real_home], "extra_path_in_home_dotfiles"),
+        (ops, [ops], "extra_path_is_directory"),
+        (home / "agy.log", [tmp_path], "extra_path_in_lease_home"),
+    ):
+        with pytest.raises(boundary_mod.AgyWriteBoundaryError, match=reason):
+            boundary_mod.prepare_accept_edits_boundary(
+                source_env={"HOME": str(home)},
+                target=target,
+                extra_writable_files=[extra],
+                extra_writable_roots=roots,
+            )
 
 
 class _RecordingBoundary:
@@ -615,6 +751,7 @@ def test_real_boundary_blocks_writes_outside_target(tmp_path, monkeypatch, seatb
         source_env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
         target=target,
         extra_writable_files=[log],
+        extra_writable_roots=[log.parent],
     )
     settings = boundary.run_home / admission.AGY_RUN_HOME_SETTINGS
     probes = [target / "inside.txt", log, outside / "escape.txt", target / ".git", settings]
@@ -642,6 +779,7 @@ def test_real_boundary_blocks_writes_outside_target(tmp_path, monkeypatch, seatb
         fake_agy.chmod(0o755)
         monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ.get('PATH', '')}")
         monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(log))
+        monkeypatch.setattr(dispatch, "OPERATION_ROOT", log.parent)
         code, out, err, _timed_out, _ = dispatch.run_agy(
             env={},
             prompt="edit",
@@ -744,6 +882,8 @@ _LAUNCH_MARKERS = (
     re.compile(r'"--new-project"'),
     re.compile(r'"--add-dir"'),
     re.compile(r'"agy",\s*"--terminal"'),
+    # a bare print-mode launch: [<agy binary>, "-p" | "--print", ...] (not claude -p)
+    re.compile(r'\[\s*(?:"agy"|[\w.]*agy[\w.]*),\s*"(?:-p|--print)"', re.IGNORECASE),
 )
 
 WRAPPED_CLI_WORKER = "wrapped: run_cli_worker + build_seatbelt_profile"
@@ -751,6 +891,7 @@ WRAPPED_DISPATCH = "wrapped: agy_dispatch_boundary"
 PLAN_ONLY = "plan-mode only"
 VIA_DISPATCHER = "calls nexus-agy-dispatch, never raw agy"
 REVIEWED = "reviewed exception"
+READ_ONLY_PROBE = "read-only probe"
 
 # Every file whose source carries an Agy argv shape, with its classification.
 AGY_LAUNCHERS: dict[str, tuple[str, str]] = {
@@ -772,6 +913,10 @@ AGY_LAUNCHERS: dict[str, tuple[str, str]] = {
     "scripts/ops/nexus-hermes-soak": (
         REVIEWED,
         "#2202 its --mode is the controller's observe/execute, not an Agy mode",
+    ),
+    "scripts/ops/nexus-agy-quota": (
+        READ_ONLY_PROBE,
+        "#2202 `agy -p /usage` quota probe: one slash command, no prompt, no edits",
     ),
     "scripts/ops/nexus-hcom-agy-safe": (
         REVIEWED,
@@ -845,13 +990,25 @@ def test_every_production_agy_launcher_is_wrapped_or_plan_only():
             assert not re.search(r'"--mode",\s*[A-Za-z_][\w.]*\s*[,\]]', text), relative
         elif kind == VIA_DISPATCHER:
             assert "nexus-agy-dispatch" in text, relative
+        elif kind == READ_ONLY_PROBE:
+            # the only Agy argv is the print-mode /usage slash command
+            launches = re.findall(r'\[\s*[A-Za-z_][\w.]*,\s*"(?:-p|--print)",\s*"([^"]*)"\]', text)
+            assert launches == ["/usage"], (relative, launches)
+            assert "accept-edits" not in text and '"--mode"' not in text, relative
             assert '"--print-timeout"' not in text and '"--new-project"' not in text, relative
 
 
 def test_launcher_scan_detects_new_raw_agy_argv():
-    sample = 'cmd = [agy, "--mode", "accept-" "edits", "--print", p]'
-    joined = _JOINED.sub("", sample)
-    assert any(marker.search(joined) for marker in _LAUNCH_MARKERS)
+    for sample in (
+        'cmd = [agy, "--mode", "accept-" "edits", "--print", p]',
+        'proc = subprocess.Popen([agy_binary, "-p", prompt], env=env)',
+        'subprocess.run(["agy", "-p", prompt])',
+        "proc = subprocess.Popen([self.agy, '--print', prompt])".replace("'", '"'),
+    ):
+        joined = _JOINED.sub("", sample)
+        assert any(marker.search(joined) for marker in _LAUNCH_MARKERS), sample
+    claude = _JOINED.sub("", 'return [self.claude_bin, "-p", "--model", m]')
+    assert not any(marker.search(claude) for marker in _LAUNCH_MARKERS)
 
 
 def test_gateway_compiles_plan_sandbox_only():

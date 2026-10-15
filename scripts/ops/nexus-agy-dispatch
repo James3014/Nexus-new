@@ -1102,7 +1102,7 @@ def _has_structured_quota_error(stderr: str) -> bool:
 
 
 def _has_provider_quota_signal(stderr: str) -> bool:
-    """#2202: a provider quota failure on stderr outranks permission markers."""
+    """#2202: quota markers or agy's structured ``AGY_ERROR`` quota failure."""
     return _has_quota_failure_signal(stderr) or _has_structured_quota_error(stderr)
 
 
@@ -1133,10 +1133,12 @@ def classify_failure(
     if timed_out:
         return AccountFailureKind.TIMEOUT
     text = (stdout + "\n" + stderr).lower()
-    if _has_provider_quota_signal(stderr):
-        return AccountFailureKind.QUOTA_EXHAUSTED
+    # A genuine permission signal is never masked by a quota failure; callers
+    # strip the boundary's expected run-HOME noise first (#2202).
     if _has_permission_failure_signal(text):
         return AccountFailureKind.PERMISSION_OR_SCOPE_ERROR
+    if _has_provider_quota_signal(stderr):
+        return AccountFailureKind.QUOTA_EXHAUSTED
     if (
         "invalid model selection" in text
         or "not supported for model" in text
@@ -1874,7 +1876,7 @@ def run_agy(
         )
 
     if not descendants_swept:
-        err += "\nNEXUS_AGY_DESCENDANT_SWEEP_FAILED\n"
+        err += f"\n{DESCENDANT_SWEEP_FAILED_MARKER}\n"
         return (
             process.returncode if process.returncode not in (None, 0) else 1,
             out,
@@ -1905,6 +1907,10 @@ def run_agy(
 
 
 AGY_WRITE_BOUNDARY_UNAVAILABLE = "AGY_WRITE_BOUNDARY_UNAVAILABLE"
+AGY_WRITE_BOUNDARY_RUNNER_UNSUPPORTED = "AGY_WRITE_BOUNDARY_RUNNER_UNSUPPORTED"
+AGY_WRITE_BOUNDARY_PREPARE_FAILED = "AGY_WRITE_BOUNDARY_PREPARE_FAILED"
+AGY_DESCENDANT_SWEEP_FAILED = "AGY_DESCENDANT_SWEEP_FAILED"
+DESCENDANT_SWEEP_FAILED_MARKER = "NEXUS_AGY_DESCENDANT_SWEEP_FAILED"
 
 
 def _agy_dispatch_boundary() -> Any:
@@ -3164,9 +3170,16 @@ def dispatch_run(
     runner = run_agy_fn if run_agy_fn is not None else run_agy
     # #2202: an accept-edits Agy run only ever starts inside the #1912 Seatbelt
     # write boundary.  Refuse before any account is leased when it is missing.
-    needs_write_boundary = mode == "accept-edits" and _runner_accepts(runner, "write_boundary")
-    if needs_write_boundary and not _write_boundary_available():
-        boundary_failure = f"DISPATCH_CONTRACT_REJECTED:{AGY_WRITE_BOUNDARY_UNAVAILABLE}"
+    # A runner that cannot take the boundary would run unconfined, so it is
+    # refused here too rather than after a lease.
+    needs_write_boundary = mode == "accept-edits"
+    boundary_refusal = None
+    if needs_write_boundary and not _runner_accepts(runner, "write_boundary"):
+        boundary_refusal = AGY_WRITE_BOUNDARY_RUNNER_UNSUPPORTED
+    elif needs_write_boundary and not _write_boundary_available():
+        boundary_refusal = AGY_WRITE_BOUNDARY_UNAVAILABLE
+    if boundary_refusal is not None:
+        boundary_failure = f"DISPATCH_CONTRACT_REJECTED:{boundary_refusal}"
         _operation_hook(
             operation_hook,
             phase="CONTRACT_REJECTED",
@@ -3614,11 +3627,41 @@ def dispatch_run(
                     # profile below is installed into the disposable HOME, never
                     # into the leased account HOME.
                     attestation_log = os.getenv("NEXUS_AGY_ATTESTATION_LOG")
-                    write_boundary = _agy_dispatch_boundary().prepare_accept_edits_boundary(
-                        source_env=env,
-                        target=cwd,
-                        extra_writable_files=[attestation_log] if attestation_log else [],
-                    )
+                    boundary_module = _agy_dispatch_boundary()
+                    try:
+                        write_boundary = boundary_module.prepare_accept_edits_boundary(
+                            source_env=env,
+                            target=cwd,
+                            extra_writable_files=[attestation_log] if attestation_log else [],
+                            extra_writable_roots=[OPERATION_ROOT],
+                        )
+                    except boundary_module.AgyWriteBoundaryError as exc:
+                        # Typed, non-rotating contract rejection; the boundary
+                        # already removed its run root and the outer finally
+                        # releases the lease.
+                        prepare_failure = (
+                            f"DISPATCH_CONTRACT_REJECTED:{AGY_WRITE_BOUNDARY_PREPARE_FAILED}:{exc}"
+                        )
+                        last_kind = prepare_failure
+                        _operation_hook(
+                            operation_hook,
+                            phase="CONTRACT_REJECTED",
+                            attempts=attempts,
+                            rotations=rotations,
+                            failure_kind=prepare_failure,
+                            provider_effect=False,
+                        )
+                        emit_meta({
+                            "status": "invalid_contract",
+                            "attempts": attempts,
+                            "rotations": rotations,
+                            "failure_kind": prepare_failure,
+                            "provider_effect": False,
+                            "account_alias_hash": claim.account_alias_hash,
+                            "lease_id_hash": claim.lease_id_hash,
+                            "wall_ms": total_wall_ms,
+                        })
+                        return 64
                     env = write_boundary.env
                 allow_rules = list(effective_permissions.get("allow") or [])
                 deny_rules = list(effective_permissions.get("deny") or [])
@@ -3691,6 +3734,42 @@ def dispatch_run(
                         write_boundary.cleanup()
             total_wall_ms += wall_ms
 
+            if write_boundary is not None and DESCENDANT_SWEEP_FAILED_MARKER in (err or ""):
+                # Descendants of this attempt may still be running: never
+                # classify, rotate or retry; end the operation for reconciliation.
+                last_kind = AGY_DESCENDANT_SWEEP_FAILED
+                _operation_hook(
+                    operation_hook,
+                    phase="CLASSIFYING_FAILURE",
+                    attempts=attempts,
+                    rotations=rotations,
+                    failure_kind=last_kind,
+                    timed_out=bool(timed_out),
+                    account_alias_hash=claim.account_alias_hash,
+                    lease_id_hash=claim.lease_id_hash,
+                    provider_effect=None,
+                    reconciliation_required=True,
+                )
+                if out:
+                    sys.stdout.write(out)
+                if err:
+                    sys.stderr.write(err)
+                emit_meta({
+                    "status": "failed",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "failure_kind": last_kind,
+                    "provider_effect": None,
+                    "reconciliation_required": True,
+                    "account_alias_hash": claim.account_alias_hash,
+                    "lease_id_hash": claim.lease_id_hash,
+                    "parallel_slot": True,
+                    "wall_ms": total_wall_ms,
+                    "permission_profile_sha256": permission_profile_sha256,
+                    "permission_profile_kind": permission_profile_kind,
+                })
+                return code if isinstance(code, int) and code != 0 else 1
+
             provider_log_text = ""
             attempt_log_text = ""
             if provider_log_path:
@@ -3716,26 +3795,21 @@ def dispatch_run(
                 or "headless mode cannot prompt for" in provider_log_lower
                 or "auto-denied" in provider_log_lower
             )
-            # #2202: a provider quota failure wins over permission markers, and
-            # Seatbelt's expected run-HOME denials are not permission evidence.
-            provider_quota_signal = _has_provider_quota_signal(err)
-            if write_boundary is not None:
-                boundary_run_homes.append(write_boundary.run_home)
-            provider_permission_denial = (
-                mode == "accept-edits"
-                and not provider_quota_signal
-                and _has_permission_failure_signal(
-                    _permission_scan_text(provider_log_text, boundary_run_homes)
-                )
+            # #2202: Seatbelt's expected run-HOME denials are not permission
+            # evidence; any other permission signal still wins over quota.
+            # A boundary without a run HOME filters nothing (fail-closed).
+            run_home = getattr(write_boundary, "run_home", None)
+            if run_home is not None:
+                boundary_run_homes.append(run_home)
+            provider_permission_denial = mode == "accept-edits" and _has_permission_failure_signal(
+                _permission_scan_text(provider_log_text, boundary_run_homes)
             )
+            scanned_out = _permission_scan_text(out, boundary_run_homes)
+            scanned_err = _permission_scan_text(err, boundary_run_homes)
             semantic_output = out + "\n" + err
             semantic_output_lower = semantic_output.lower()
-            semantic_permission_refusal = (
-                mode == "accept-edits"
-                and not provider_quota_signal
-                and _has_permission_failure_signal(
-                    _permission_scan_text(semantic_output, boundary_run_homes)
-                )
+            semantic_permission_refusal = mode == "accept-edits" and _has_permission_failure_signal(
+                scanned_out + "\n" + scanned_err
             )
             semantic_headless_denial = mode == "accept-edits" and (
                 "headless mode cannot prompt for" in semantic_output_lower
@@ -3801,7 +3875,7 @@ def dispatch_run(
                 if (permission_blocked or scope_blocked or no_tool_violation)
                 else AccountFailureKind.QUOTA_EXHAUSTED
                 if provider_terminal_quota
-                else classify_failure(code, out, err, timed_out)
+                else classify_failure(code, scanned_out, scanned_err, timed_out)
             )
             last_kind = kind.value
             provider_effect_observed: bool | None = False

@@ -38,6 +38,8 @@ class _PassThroughBoundary:
     def __init__(self, env):
         self.env = dict(env)
         self.calls: list[str] = []
+        # no disposable HOME: nothing in a provider log is expected run-HOME noise
+        self.run_home = Path("/nonexistent-nexus-agy-run-home")
 
     def wrap_argv(self, argv):
         self.calls.append("wrap_argv")
@@ -60,9 +62,19 @@ class _PassThroughBoundary:
 class _PassThroughBoundaryModule:
     """Stands in for ``nexus.executors.agy_dispatch_boundary`` off macOS."""
 
+    from nexus.executors.agy_dispatch_boundary import AgyWriteBoundaryError
+
     @staticmethod
-    def prepare_accept_edits_boundary(*, source_env, target, extra_writable_files=()):
+    def prepare_accept_edits_boundary(
+        *, source_env, target, extra_writable_files=(), extra_writable_roots=()
+    ):
         return _PassThroughBoundary(source_env)
+
+    @staticmethod
+    def is_expected_run_home_denial(line, run_home):
+        from nexus.executors.agy_dispatch_boundary import is_expected_run_home_denial
+
+        return is_expected_run_home_denial(line, run_home)
 
 
 def _boundary_or_pass_through(monkeypatch) -> None:
@@ -75,6 +87,18 @@ def _boundary_or_pass_through(monkeypatch) -> None:
     if not dispatch._write_boundary_available():
         monkeypatch.setattr(dispatch, "_write_boundary_available", lambda: True)
         monkeypatch.setattr(dispatch, "_agy_dispatch_boundary", _PassThroughBoundaryModule)
+
+
+@pytest.fixture
+def pass_through_boundary(monkeypatch):
+    """#2202: an accept-edits fake runner must accept ``write_boundary``.
+
+    These tests exercise permission projection and classification on the lease
+    HOME, so the boundary is the pass-through double (no disposable HOME);
+    boundary construction is covered in ``test_agy_dispatch_write_boundary``.
+    """
+    monkeypatch.setattr(dispatch, "_write_boundary_available", lambda: True)
+    monkeypatch.setattr(dispatch, "_agy_dispatch_boundary", _PassThroughBoundaryModule)
 
 
 def _window(remaining: float, *, reset_at: str | None = None) -> dict:
@@ -1652,6 +1676,7 @@ def test_quota_preflight_decision_survives_terminal_journal_readback(
 
 def test_accept_edits_projects_bounded_write_scope_and_restores(
     tmp_path: Path,
+    pass_through_boundary,
 ) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -1660,7 +1685,7 @@ def test_accept_edits_projects_bounded_write_scope_and_restores(
     coordinator = _WriteScopeCoordinator(home)
     settings = home / ".gemini" / "antigravity-cli" / "settings.json"
 
-    def runner(**_kwargs):
+    def runner(write_boundary=None, **_kwargs):
         data = json.loads(settings.read_text(encoding="utf-8"))
         assert f"write_file({work})" in data["permissions"]["allow"]
         # #2202: commands are never granted, always denied.
@@ -1685,6 +1710,7 @@ def test_accept_edits_projects_bounded_write_scope_and_restores(
 
 def test_accept_edits_replaces_stale_wildcard_policy_and_restores_exact_bytes(
     tmp_path: Path,
+    pass_through_boundary,
 ) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -1702,7 +1728,7 @@ def test_accept_edits_replaces_stale_wildcard_policy_and_restores_exact_bytes(
     ).encode("utf-8")
     settings.write_bytes(original)
 
-    def runner(**_kwargs):
+    def runner(write_boundary=None, **_kwargs):
         data = json.loads(settings.read_text(encoding="utf-8"))
         permissions = data["permissions"]
         assert data["profile"] == "keep-me"
@@ -1912,7 +1938,9 @@ def test_read_only_research_tool_events_are_not_no_tool_violation(tmp_path: Path
     assert not any(e.get("failure_kind") == dispatch.NO_TOOL_PROFILE_VIOLATION for e in events)
 
 
-def test_accept_edits_permission_refusal_exit_zero_is_failure(tmp_path: Path) -> None:
+def test_accept_edits_permission_refusal_exit_zero_is_failure(
+    tmp_path: Path, pass_through_boundary
+) -> None:
     home = tmp_path / "home"
     home.mkdir()
     work = tmp_path / "work"
@@ -1928,7 +1956,7 @@ def test_accept_edits_permission_refusal_exit_zero_is_failure(tmp_path: Path) ->
         write_paths=[str(target)],
         temp_command_permissions=False,
         coordinator=coordinator,
-        run_agy_fn=lambda **_kwargs: (
+        run_agy_fn=lambda write_boundary=None, **_kwargs: (
             0,
             "Permission denied for read_file(/repo/target.py)",
             "",
@@ -2015,6 +2043,7 @@ def test_accept_edits_rejects_write_path_outside_cwd_before_claim(
 
 def test_accept_edits_existing_narrow_write_allow_is_supported(
     tmp_path: Path,
+    pass_through_boundary,
 ) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -2028,7 +2057,7 @@ def test_accept_edits_existing_narrow_write_allow_is_supported(
         mode="accept-edits",
         allow=[f"write_file({work})"],
         coordinator=coordinator,
-        run_agy_fn=lambda **_kwargs: (0, "ok", "", False, 1),
+        run_agy_fn=lambda write_boundary=None, **_kwargs: (0, "ok", "", False, 1),
     )
 
     assert code == 0
@@ -2804,7 +2833,7 @@ def test_provider_exit_invalid_model_selection_classified_as_model_contract_reje
 
 
 def test_provider_model_rejection_after_observed_source_effect_requires_reconciliation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, pass_through_boundary, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     work = tmp_path / "repo"
     work.mkdir()
@@ -2826,7 +2855,7 @@ def test_provider_model_rejection_after_observed_source_effect_requires_reconcil
     monkeypatch.setattr(dispatch, "_load_quota_snapshot", lambda *_a, **_kw: {})
     monkeypatch.setattr(dispatch, "_refresh_quota_snapshot_for_account", lambda *_a, **_kw: {})
 
-    def runner(**_kwargs):
+    def runner(write_boundary=None, **_kwargs):
         target.write_text("provider already changed source", encoding="utf-8")
         return (
             1,
@@ -2858,7 +2887,9 @@ def test_provider_model_rejection_after_observed_source_effect_requires_reconcil
     assert not any(event.get("phase") == "ACCOUNT_ROTATED" for event in events)
 
 
-def test_headless_tool_permission_denial_classified_as_failure(tmp_path: Path) -> None:
+def test_headless_tool_permission_denial_classified_as_failure(
+    tmp_path: Path, pass_through_boundary
+) -> None:
     home = tmp_path / "home"
     home.mkdir()
     work = tmp_path / "work"
@@ -2873,7 +2904,7 @@ def test_headless_tool_permission_denial_classified_as_failure(tmp_path: Path) -
         mode="accept-edits",
         write_paths=[str(target)],
         coordinator=coordinator,
-        run_agy_fn=lambda **_kwargs: (
+        run_agy_fn=lambda write_boundary=None, **_kwargs: (
             0,
             "",
             'jetski: no output produced — a tool required the "command" permission that headless mode cannot prompt for, so it was auto-denied.\n',
@@ -3541,7 +3572,7 @@ def test_run_agy_no_tool_task_is_not_killed_by_coding_watchdog(tmp_path: Path, m
     assert "NEXUS_AGY_NON_PROGRESS" not in err
 
 
-def test_independent_quota_after_effect_never_rotates(tmp_path):
+def test_independent_quota_after_effect_never_rotates(tmp_path, pass_through_boundary):
     work = tmp_path / "repo"
     work.mkdir()
     subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
@@ -3559,7 +3590,7 @@ def test_independent_quota_after_effect_never_rotates(tmp_path):
     calls = []
     events = []
 
-    def runner(**kwargs):
+    def runner(write_boundary=None, **kwargs):
         calls.append(True)
         (work / "changed.txt").write_text("partial effect")
         return 1, "", "RESOURCE_EXHAUSTED: quota exhausted", False, 10
@@ -3597,6 +3628,7 @@ def test_independent_headless_denial_only_in_provider_log_is_failure(tmp_path, m
     binary.chmod(0o700)
     monkeypatch.setattr(dispatch.shutil, "which", lambda name: str(binary))
     monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(tmp_path / "agy.log"))
+    monkeypatch.setattr(dispatch, "OPERATION_ROOT", tmp_path)
     _boundary_or_pass_through(monkeypatch)
     events = []
     code = dispatch.dispatch_run(
@@ -3613,6 +3645,7 @@ def test_independent_headless_denial_only_in_provider_log_is_failure(tmp_path, m
 
 def test_headless_permission_failure_after_physical_effect_requires_reconciliation(
     tmp_path: Path,
+    pass_through_boundary,
 ) -> None:
     work = tmp_path / "repo"
     work.mkdir()
@@ -3631,7 +3664,7 @@ def test_headless_permission_failure_after_physical_effect_requires_reconciliati
     coordinator = Coordinator(home)
     events: list[dict[str, object]] = []
 
-    def runner(**_kwargs):
+    def runner(write_boundary=None, **_kwargs):
         target.write_text("provider already changed source", encoding="utf-8")
         return (
             0,
@@ -4617,6 +4650,7 @@ def test_contradictory_exact_rule_in_both_allow_and_deny_fails_closed(
 
 def test_permission_profile_preflight_and_journal_projection(
     tmp_path: Path,
+    pass_through_boundary,
 ) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -4633,7 +4667,7 @@ def test_permission_profile_preflight_and_journal_projection(
         write_paths=[str(target)],
         temp_command_permissions=False,
         coordinator=coordinator,
-        run_agy_fn=lambda **_kwargs: (0, "all good", "", False, 1),
+        run_agy_fn=lambda write_boundary=None, **_kwargs: (0, "all good", "", False, 1),
         operation_hook=events.append,
     )
 
@@ -4684,6 +4718,7 @@ def test_permission_profile_preflight_fails_on_tampered_settings(
 )
 def test_accept_edits_semantic_refusal_variants(
     tmp_path: Path,
+    pass_through_boundary,
     marker: str,
     expected_kind: str,
 ) -> None:
@@ -4702,7 +4737,7 @@ def test_accept_edits_semantic_refusal_variants(
         write_paths=[str(target)],
         temp_command_permissions=False,
         coordinator=coordinator,
-        run_agy_fn=lambda **_kwargs: (0, marker, "", False, 1),
+        run_agy_fn=lambda write_boundary=None, **_kwargs: (0, marker, "", False, 1),
         operation_hook=events.append,
     )
 
@@ -4871,7 +4906,9 @@ def test_read_only_git_commands_not_in_deny() -> None:
         assert cmd not in dispatch.TEMP_COMMAND_DENY
 
 
-def test_command_scope_g0_transient_mutation_red_fixture(tmp_path: Path) -> None:
+def test_command_scope_g0_transient_mutation_red_fixture(
+    tmp_path: Path, pass_through_boundary
+) -> None:
     """Witness incident G0 reproduction:
 
     Pre-existing uncommitted dirty file exists outside write scope.
@@ -4902,7 +4939,7 @@ def test_command_scope_g0_transient_mutation_red_fixture(tmp_path: Path) -> None
     coordinator = _WriteScopeCoordinator(home)
     events: list[dict[str, object]] = []
 
-    def mock_runner(**_kwargs):
+    def mock_runner(write_boundary=None, **_kwargs):
         target.write_text("after modified\n", encoding="utf-8")
         dirty_sentinel.write_text("mutated by worker\n", encoding="utf-8")
         return 0, "completed task\nnow let me restore my changes", "", False, 10
@@ -4928,7 +4965,9 @@ def test_command_scope_g0_transient_mutation_red_fixture(tmp_path: Path) -> None
     assert failure_events[-1].get("reconciliation_required") is True
 
 
-def test_write_scope_clean_completion_verified_in_scope(tmp_path: Path) -> None:
+def test_write_scope_clean_completion_verified_in_scope(
+    tmp_path: Path, pass_through_boundary
+) -> None:
     home = tmp_path / "home"
     home.mkdir()
     work = tmp_path / "work"
@@ -4948,7 +4987,7 @@ def test_write_scope_clean_completion_verified_in_scope(tmp_path: Path) -> None:
     coordinator = _WriteScopeCoordinator(home)
     events: list[dict[str, object]] = []
 
-    def mock_runner(**_kwargs):
+    def mock_runner(write_boundary=None, **_kwargs):
         target.write_text("updated in scope\n", encoding="utf-8")
         return 0, "edited target successfully", "", False, 5
 
@@ -5768,7 +5807,7 @@ def _agy_created_conversation_line(session_id: str) -> str:
 
 
 def test_exit_zero_empty_output_with_current_terminal_quota_log_is_not_completed(
-    tmp_path: Path, monkeypatch, capsys
+    tmp_path: Path, pass_through_boundary, monkeypatch, capsys
 ) -> None:
     work = tmp_path / "repo"
     work.mkdir()
@@ -5803,7 +5842,7 @@ def test_exit_zero_empty_output_with_current_terminal_quota_log_is_not_completed
     calls = 0
     events: list[dict[str, object]] = []
 
-    def runner(**_kwargs):
+    def runner(write_boundary=None, **_kwargs):
         nonlocal calls
         calls += 1
         with log.open("a", encoding="utf-8") as fh:
@@ -5886,7 +5925,7 @@ def test_exit_zero_output_with_earlier_unrelated_503_diagnostic_stays_completed(
 
 
 def test_stale_or_nonterminal_quota_log_lines_do_not_fail_current_success(
-    tmp_path: Path, monkeypatch, capsys
+    tmp_path: Path, pass_through_boundary, monkeypatch, capsys
 ) -> None:
     work = tmp_path / "repo"
     work.mkdir()
@@ -5914,7 +5953,7 @@ def test_stale_or_nonterminal_quota_log_lines_do_not_fail_current_success(
     calls = 0
     events: list[dict[str, object]] = []
 
-    def runner(**_kwargs):
+    def runner(write_boundary=None, **_kwargs):
         nonlocal calls
         calls += 1
         with log.open("a", encoding="utf-8") as fh:
@@ -5946,7 +5985,7 @@ def test_stale_or_nonterminal_quota_log_lines_do_not_fail_current_success(
 
 
 def test_exit_zero_terminal_quota_after_source_effect_requires_reconciliation(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, pass_through_boundary, monkeypatch
 ) -> None:
     work = tmp_path / "repo"
     work.mkdir()
@@ -5967,7 +6006,7 @@ def test_exit_zero_terminal_quota_after_source_effect_requires_reconciliation(
     coordinator = Coordinator(home)
     events: list[dict[str, object]] = []
 
-    def runner(**_kwargs):
+    def runner(write_boundary=None, **_kwargs):
         target.write_text("partial provider effect", encoding="utf-8")
         log.write_text(
             _agy_created_conversation_line("bb007db1-8535-4f40-b074-232d0da1e9a8")

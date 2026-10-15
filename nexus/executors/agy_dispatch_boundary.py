@@ -57,24 +57,33 @@ def boundary_available() -> bool:
 
 
 # Agy's own startup writes under the disposable HOME's locked ``.gemini/config``
-# (``mcp_config.json``, ``.migrated``) are denied by the #1912 profile by design;
-# Seatbelt reports them as EPERM.  Only that exact error, naming only paths
-# inside the run HOME, is expected boundary noise.
+# are denied by the #1912 profile by design; Seatbelt reports them as EPERM
+# (observed in agy.log of agyop_2bdee3a289264238a3667857302c7fca).  Only that
+# exact error for exactly these run-HOME paths is expected boundary noise; any
+# other denied path, inside the run HOME or not, is a real permission signal.
+EXPECTED_RUN_HOME_DENIED_PATHS = (
+    Path(".gemini") / "config" / "mcp_config.json",
+    Path(".gemini") / "config" / ".migrated",
+)
 _SEATBELT_DENIAL_MARKER = "operation not permitted"
 _ABSOLUTE_PATH_RE = re.compile(r"/[^\s:'\"]+")
 
 
-def is_expected_run_home_denial(line: str, run_home: str | Path) -> bool:
-    """True for a Seatbelt EPERM line whose every named path is inside ``run_home``.
+def _path_key(path: Path) -> str:
+    return os.path.normcase(os.path.realpath(path))
 
-    ``path_inside`` compares realpaths, so macOS's ``/var`` alias of the
+
+def is_expected_run_home_denial(line: str, run_home: str | Path) -> bool:
+    """True for a Seatbelt EPERM line naming only the expected run-HOME paths.
+
+    Paths compare as realpaths, so macOS's ``/var`` alias of the
     ``/private/var`` run root matches too.
     """
     if _SEATBELT_DENIAL_MARKER not in line.lower():
         return False
     paths = _ABSOLUTE_PATH_RE.findall(line)
-    home = Path(run_home)
-    return bool(paths) and all(path_inside(Path(raw), home) for raw in paths)
+    expected = {_path_key(Path(run_home) / rel) for rel in EXPECTED_RUN_HOME_DENIED_PATHS}
+    return bool(paths) and all(_path_key(Path(raw)) in expected for raw in paths)
 
 
 def strip_expected_run_home_denials(text: str, run_home: str | Path | None) -> str:
@@ -193,32 +202,70 @@ class AgyDispatchBoundary:
         shutil.rmtree(self.profile_path.parent, ignore_errors=True)
 
 
+def _admit_extra_writable_file(
+    raw: str | Path, *, target: Path, roots: list[Path], lease_home: Optional[Path]
+) -> Path:
+    """Admit one literal write grant, or refuse the boundary with a typed code."""
+
+    def refuse(reason: str) -> AgyWriteBoundaryError:
+        return AgyWriteBoundaryError(f"{AGY_WRITE_BOUNDARY_UNAVAILABLE}:{reason}")
+
+    candidate = Path(raw).expanduser()
+    if not candidate.is_absolute():
+        raise refuse("relative_extra_path")
+    real = Path(os.path.realpath(candidate))
+    # A literal re-allow inside the target could reopen the .git/.agents denies.
+    if path_inside(real, target):
+        raise refuse("extra_path_in_target")
+    if real.is_dir():
+        raise refuse("extra_path_is_directory")
+    real_home = Path(os.path.realpath(Path.home()))
+    # (A lease HOME equal to the real HOME is covered by the dotfile rule below.)
+    if lease_home is not None and lease_home != real_home and path_inside(real, lease_home):
+        raise refuse("extra_path_in_lease_home")
+    if not any(path_inside(real, root) for root in roots):
+        raise refuse("extra_path_outside_allowed_roots")
+    # Even under an allowed root, never a real-HOME dotfile dir other than
+    # ~/.local/state (where the operations state dir lives).
+    if path_inside(real, real_home) and real != real_home:
+        relative = Path(os.path.relpath(real, real_home))
+        if relative.parts[0].startswith(".") and not path_inside(
+            real, real_home / ".local" / "state"
+        ):
+            raise refuse("extra_path_in_home_dotfiles")
+    return real
+
+
 def prepare_accept_edits_boundary(
     *,
     source_env: Optional[Mapping[str, str]],
     target: str | Path,
     extra_writable_files: Iterable[str | Path] = (),
+    extra_writable_roots: Iterable[str | Path] = (),
 ) -> AgyDispatchBoundary:
     """Build the disposable HOME, exact env and Seatbelt profile for one run.
 
     ``source_env`` is the leased account environment; only its HOME (for the
     copied auth files) and the ``agy_child_env`` allowlist reach the child.
+    ``extra_writable_files`` (the dispatcher's ``--log-file``) are honoured only
+    inside one of ``extra_writable_roots`` (the operations state dir); see
+    ``_admit_extra_writable_file``.
     """
     if not boundary_available():
         raise AgyWriteBoundaryError(f"{AGY_WRITE_BOUNDARY_UNAVAILABLE}:seatbelt_unavailable")
     target_real = Path(os.path.realpath(Path(target).expanduser()))
     if not target_real.is_dir():
         raise AgyWriteBoundaryError(f"{AGY_WRITE_BOUNDARY_UNAVAILABLE}:target_missing")
-    extras: list[Path] = []
-    for raw in extra_writable_files:
-        candidate = Path(raw).expanduser()
-        if not candidate.is_absolute():
-            raise AgyWriteBoundaryError(f"{AGY_WRITE_BOUNDARY_UNAVAILABLE}:relative_extra_path")
-        real = Path(os.path.realpath(candidate))
-        # A literal re-allow inside the target could reopen the .git/.agents denies.
-        if path_inside(real, target_real):
-            raise AgyWriteBoundaryError(f"{AGY_WRITE_BOUNDARY_UNAVAILABLE}:extra_path_in_target")
-        extras.append(real)
+    roots = [Path(os.path.realpath(Path(root).expanduser())) for root in extra_writable_roots]
+    extras = [
+        _admit_extra_writable_file(
+            raw,
+            target=target_real,
+            roots=roots,
+            lease_home=worker_home(source_env) if (source_env or {}).get("HOME") else None,
+        )
+        for raw in extra_writable_files
+    ]
     run_root = Path(os.path.realpath(tempfile.mkdtemp(prefix="nexus-agy-dispatch-run-")))
     profile_dir = Path(os.path.realpath(tempfile.mkdtemp(prefix="nexus-agy-dispatch-sb-")))
     try:
