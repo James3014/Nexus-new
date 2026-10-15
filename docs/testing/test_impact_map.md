@@ -217,6 +217,9 @@
 | scripts/ops/build_test_impact_index.py | tests/ops/test_build_test_impact_index.py | active | medium | jit_index |
 | scripts/ops/test_changed.sh | tests/ops/test_select_tests.py | active | medium | jit_entrypoint |
 | scripts/ops | tests/ops | active | medium | ops_tooling |
+| docs/reports/policy-manifest.v2.json | tests/ops/test_policy_manifest_schema.py, tests/ops/test_policy_lane_gate.py, tests/integration/test_policy_lane_integration.py, tests/ops/test_update_manifest_drills.py | active | high | policy_manifest_contract |
+| scripts/ops/check_policy_lane_gate.py | tests/ops/test_policy_manifest_schema.py, tests/ops/test_policy_lane_gate.py, tests/integration/test_policy_lane_integration.py | active | high | policy_lane_gate_contract |
+| scripts/ops/update_manifest_drills.py | tests/ops/test_update_manifest_drills.py, tests/ops/test_policy_manifest_schema.py | active | medium | policy_manifest_updater_contract |
 | scripts/ci/nexus-core-verify.sh | tests/ops/test_select_tests.py, tests/ops/test_pr_impact_gate.py | active | high | nexus_core_completion_ci_entrypoint_contract |
 | scripts/ci/nexus_core_trusted_pin_policy.py | tests/ops/test_nexus_core_trusted_pin_policy.py, tests/ops/test_select_tests.py, tests/ops/test_pr_impact_gate.py | active | high | nexus_core_trusted_pin_maintenance_contract |
 | scripts/bench/capability_ab_runner.py | tests/benchmark/test_capability_ab_runner.py::test_run_with_nexus_subprocess_preserves_executor_receipts_without_llm, tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_accepts_causal_runtime_mount, tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_rejects_quarantined_mount, tests/benchmark/test_ab_hidden_test_staging.py | active | high | benchmark_contract |
