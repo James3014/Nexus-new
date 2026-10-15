@@ -10751,7 +10751,7 @@ class SelfHostedTaskService:
         )
 
         def mutate(current: dict[str, Any]) -> None:
-            nonlocal duplicate
+            nonlocal duplicate, closure_hash
             if (
                 str(current.get("task_id") or "") != task_id
                 or (current.get("status"), current.get("promotion_status")) != expected_prior_pair
@@ -10821,6 +10821,16 @@ class SelfHostedTaskService:
                     raise RuntimeError("CLOSURE_CANONICAL_REBIND_DRIFT") from exc
                 if not still_separate:
                     raise RuntimeError("CLOSURE_CANONICAL_REBIND_DRIFT")
+                # The audit-only Controller HEAD is sealed as of lock time.
+                locked_head = manager._run_git(["rev-parse", "HEAD"], cwd=controller_root)
+                if locked_head != closure["controller_head"]:
+                    closure.pop("binding_hash")
+                    closure["controller_head"] = locked_head
+                    sealed = json.dumps(
+                        closure, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+                    )
+                    closure_hash = hashlib.sha256(sealed.encode()).hexdigest()
+                    closure["binding_hash"] = closure_hash
             else:
                 live_branch = manager._run_git(["branch", "--show-current"], cwd=controller_root)
                 live_status = manager._run_git(["status", "--porcelain=v1", "--untracked-files=all"], cwd=controller_root)
