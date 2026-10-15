@@ -392,6 +392,7 @@ def main() -> int:
         "core_import_error": transport.CORE_IMPORT_ERROR,
         # What this (Gateway-hosting) process itself reports to a deploy probe.
         "gateway_core_provenance": gateway_module.gateway_core_provenance(),
+        "public_core_provenance": gateway_module.public_core_provenance(),
         "driver_pid": os.getpid(),
         "host_core_universe_identities": _host_universe_identities(spec["scenarios"]),
     }

@@ -87,6 +87,7 @@ import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.parse
 import urllib.request
@@ -442,6 +443,16 @@ class Config:
     @property
     def core_checkouts(self) -> Path:
         return self.gateway_root / "core"
+
+    @property
+    def pycache_prefixes(self) -> Path:
+        """Per-deployment ``PYTHONPYCACHEPREFIX`` dirs, outside ``core/`` and every tree.
+
+        With a prefix Python never reads an in-tree ``__pycache__``, so bytecode
+        planted next to the pinned Core sources (which the source digest does
+        not cover) is never executed (#2246).
+        """
+        return self.gateway_root / "pycache"
 
     @property
     def receipts(self) -> Path:
@@ -1120,7 +1131,9 @@ def health_core_provenance(health: Any, core: Any) -> Dict[str, Any]:
     """The running Gateway's own ``/health`` ``core_provenance`` (#2169, since #2201).
 
     Required: status ``CORE_REVISION_PINNED``, expected and observed revision
-    both equal to the deployment's Core pin, and ``fail_closed`` exactly False.
+    both equal to the deployment's Core pin, ``fail_closed`` exactly False and,
+    when the build computed a Core digest, ``identity_source`` ``source_digest``
+    (#2246).
     A missing or malformed block fails.
     """
     if not isinstance(core, dict) or not _SHA.match(str(core.get("revision") or "")):
@@ -1133,8 +1146,10 @@ def health_core_provenance(health: Any, core: Any) -> Dict[str, Any]:
         and block.get("expected_revision") == core["revision"]
         and block.get("observed_commit") == core["revision"]
         and block.get("fail_closed") is False
+        # #2246: a build with a Core digest is pinned by that digest, not by git.
+        and (core.get("source_digest") is None or block.get("identity_source") == "source_digest")
     )
-    keys = ("status", "expected_revision", "observed_commit", "fail_closed")
+    keys = ("status", "expected_revision", "observed_commit", "fail_closed", "identity_source")
     return {"ok": ok, **{k: block.get(k) for k in keys if k in block}}
 
 
@@ -1153,36 +1168,39 @@ def core_env(core: Any) -> Dict[str, str]:
     return env
 
 
-def core_probe_env(core: Any) -> Dict[str, Optional[str]]:
+def core_probe_env(core: Any, pycache_prefix: Path) -> Dict[str, Optional[str]]:
     """``core_env`` for a probe subprocess; ``None`` removes an inherited value.
 
     Without a build digest, a stale ``NEXUS_CORE_SOURCE_DIGEST*`` from the
     deployer's own environment must not reach the probed transport.
+    ``pycache_prefix`` (outside the Core checkout) keeps Python from reading
+    bytecode inside it, as the wrapper does.
     """
     env: Dict[str, Optional[str]] = {
         "NEXUS_CORE_SOURCE_DIGEST": None,
         "NEXUS_CORE_SOURCE_DIGEST_REVISION": None,
     }
     env.update(core_env(core))
+    env["PYTHONPYCACHEPREFIX"] = str(pycache_prefix)
     return env
 
 
 def core_digest_verified(observed: Dict[str, Any], core: Dict[str, Any]) -> bool:
-    """The transport's own digest verdict must name the build's digest (#2246).
+    """The transport must have verified exactly this build's Core digest (#2246).
 
-    A transport that reports a git-free identity (``identity_source``) must have
-    verified exactly the digest this build computed.  A transport that predates
-    #2246 reports no ``identity_source`` and is judged by revision alone.
+    When the build computed ``core["source_digest"]`` from the pinned commit,
+    the candidate's transport must report a git-free ``source_digest`` identity
+    whose observed and expected digests are both that value; any other
+    identity source (git, build stamp, none) fails.  Only a Core pin that
+    predates ``core_identity()`` has no digest; then the transport must not
+    claim a git-free identity either, and the revision checks decide.
     """
-    source = observed.get("identity_source")
-    if source is None:
-        return "observed_source_digest" not in observed
-    if source != "source_digest":
-        return False
     digest = core.get("source_digest")
+    if digest is None:
+        return observed.get("identity_source") is None and "observed_source_digest" not in observed
     return bool(
-        digest is not None
-        and _CORE_DIGEST.match(str(digest))
+        _CORE_DIGEST.match(str(digest))
+        and observed.get("identity_source") == "source_digest"
         and observed.get("observed_source_digest") == digest
         and observed.get("expected_source_digest") == digest
     )
@@ -1212,12 +1230,13 @@ class Prober:
         """The candidate's transport must resolve Core as CORE_REVISION_PINNED at ``core``."""
         if not isinstance(core, dict) or not _SHA.match(str(core.get("revision") or "")):
             return {"ok": False, "error": "CORE_PIN_UNKNOWN"}
-        result = self.host.run(
-            [str(python), "-c", CORE_PROVENANCE_PROBE_CODE, str(root)],
-            cwd=root,
-            env={"PYTHONDONTWRITEBYTECODE": "1", **core_probe_env(core)},
-            timeout=120,
-        )
+        with tempfile.TemporaryDirectory(prefix="nexus-core-probe-pycache-") as prefix:
+            result = self.host.run(
+                [str(python), "-c", CORE_PROVENANCE_PROBE_CODE, str(root)],
+                cwd=root,
+                env={"PYTHONDONTWRITEBYTECODE": "1", **core_probe_env(core, Path(prefix))},
+                timeout=120,
+            )
         lines = (result.stdout or "").strip().splitlines()
         try:
             observed = json.loads(lines[-1]) if lines else None
@@ -1343,6 +1362,9 @@ def wrapper_command(
     the env file cannot override it) is the deployment's pinned Core checkout.
     ``core_digest`` is ``(revision, source_digest)`` of that checkout, exported as
     ``NEXUS_CORE_SOURCE_DIGEST_REVISION`` / ``NEXUS_CORE_SOURCE_DIGEST`` (#2246).
+    With a Core root, ``PYTHONPYCACHEPREFIX`` points at the deployment's own
+    ``pycache/<deployment>`` dir: the source digest excludes bytecode, so an
+    in-tree ``__pycache__`` must never be read (#2246).
     """
     state = cfg.canonical_state_dir if state_dir is None else state_dir
     controller = root if controller_root is None else controller_root
@@ -1354,6 +1376,12 @@ def wrapper_command(
             raise DeployError("WRAPPER_PATH_UNSAFE")
     port_export = "" if port is None else f"export NEXUS_MCP_GATEWAY_PORT={int(port)} ; "
     core_export = "" if core_root is None else f'export NEXUS_CORE_REPO_ROOT="{core_root}" ; '
+    if core_root is not None:
+        # Bytecode is never read from (or written into) the Core checkout.
+        prefix = cfg.pycache_prefixes / root.name
+        if any(token in str(prefix) for token in _SHELL_UNSAFE):
+            raise DeployError("WRAPPER_PATH_UNSAFE")
+        core_export += f'export PYTHONPYCACHEPREFIX="{prefix}" ; '
     if core_digest is not None:
         revision, digest = core_digest
         if (
@@ -1366,7 +1394,7 @@ def wrapper_command(
             f'export NEXUS_CORE_SOURCE_DIGEST_REVISION="{revision}" ; '
             f'export NEXUS_CORE_SOURCE_DIGEST="{digest}" ; '
         )
-    elif core_root is not None:
+    else:
         # No build digest: never let a stale value from the env file through.
         core_export += "unset NEXUS_CORE_SOURCE_DIGEST NEXUS_CORE_SOURCE_DIGEST_REVISION ; "
     return (
@@ -1596,21 +1624,56 @@ def core_checkout_problem(host: Host, checkout: Path, revision: str) -> Optional
         return f"CORE_HEAD_FAILED:{(head.stderr or '').strip()[:200]}"
     if head.stdout.strip() != revision:
         return f"CORE_HEAD_MISMATCH:{head.stdout.strip()}"
-    # --ignored: an ignored file (say a stray .pyc) can still be imported.
+    # --ignored: an ignored file (say a stray module) can still be imported.
     status = host.run([
         "git",
         "-C",
         str(checkout),
         "status",
-        "--porcelain",
+        "--porcelain=v1",
+        "-z",
         "--untracked-files=all",
         "--ignored",
     ])
     if status.returncode != 0:
         return "CORE_STATUS_FAILED"
-    if status.stdout.strip():
+    for entry in (status.stdout or "").split("\0"):
+        if not entry:
+            continue
+        code, rel = entry[:3], entry[3:]
+        # Bytecode caches are not source: the host's Core identity ignores them
+        # (#2246), so the in-use check must too.  Anything else is dirty.
+        if code in ("!! ", "?? ") and _is_bytecode_cache(checkout, rel):
+            continue
         return "CORE_TREE_DIRTY"
     return None
+
+
+def _is_bytecode_cache(checkout: Path, rel: str) -> bool:
+    """``rel`` is a ``__pycache__`` directory of only ``*.pyc`` files, or one such file.
+
+    A ``.pyc`` outside ``__pycache__`` is not accepted: Python imports it as a
+    sourceless module.  Symlinks and nested directories are never accepted.
+    """
+    path = checkout / rel.rstrip("/")
+    parts = Path(rel.rstrip("/")).parts
+    if not parts or ".." in parts or path.is_symlink():
+        return False
+    if rel.endswith("/"):
+        if parts[-1] != "__pycache__" or not path.is_dir():
+            return False
+        children = list(path.iterdir())
+        return all(
+            not child.is_symlink() and child.is_file() and child.name.endswith(".pyc")
+            for child in children
+        )
+    return (
+        len(parts) >= 2
+        and parts[-2] == "__pycache__"
+        and parts[-1].endswith(".pyc")
+        and path.is_file()
+        and not path.parent.is_symlink()
+    )
 
 
 def core_source_digest(host: Host, checkout: Path, revision: str) -> Dict[str, Any]:
@@ -1620,7 +1683,8 @@ def core_source_digest(host: Host, checkout: Path, revision: str) -> Dict[str, A
     commit's git objects and over the files on disk; both must agree or the
     candidate is rejected.  A Core pin without ``build_identity`` (before
     nexus-core #270) has no digest: ``source_digest`` is None and nothing is
-    exported, so such a deployment keeps the git-based provenance it had.
+    exported.  Only a tree whose host predates #2246 can pin such a Core; it
+    keeps its git-based provenance (a #2246 host pins Core >= #270 itself).
     """
     if not (checkout / CORE_BUILD_IDENTITY_FILE).is_file():
         return {"source_digest": None, "source_digest_status": "UNSUPPORTED_CORE"}
@@ -1735,6 +1799,7 @@ def build(cfg: Config, host: Host, commit: str) -> Dict[str, Any]:
 # will apply at startup (#1939).  Prints OK or the refusal reason.
 CONTROLLER_CHECK_CODE = """
 import sys
+import tempfile
 from pathlib import Path
 code_root, root, controller = sys.argv[1:4]
 sys.path.insert(0, code_root)
@@ -1972,7 +2037,13 @@ def prune_refusal(cfg: Config) -> Optional[str]:
     root = cfg.gateway_root
     if not root.is_absolute() or os.path.realpath(root) != str(root):
         return f"GATEWAY_ROOT_NOT_CANONICAL:{root}"
-    for path in (cfg.deployments, cfg.venvs, cfg.core_checkouts, cfg.controllers):
+    for path in (
+        cfg.deployments,
+        cfg.venvs,
+        cfg.core_checkouts,
+        cfg.controllers,
+        cfg.pycache_prefixes,
+    ):
         if path.is_symlink():
             return f"SYMLINKED_DIRECTORY:{path}"
     return None
@@ -2007,6 +2078,10 @@ def prune(cfg: Config, host: Host, protected: List[Optional[Path]]) -> List[str]
     for venv in _contained_dirs(cfg.venvs):
         if venv.name not in present:
             shutil.rmtree(venv, ignore_errors=True)
+    # A deployment's bytecode prefix goes with it (#2246).
+    for cache in _contained_dirs(cfg.pycache_prefixes):
+        if cache.name not in present:
+            shutil.rmtree(cache, ignore_errors=True)
     # A Controller lives exactly as long as its deployment, and never goes while
     # a protected (live, previous, tool) deployment of that name exists (#1939).
     for controller in _contained_dirs(cfg.controllers):

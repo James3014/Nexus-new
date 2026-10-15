@@ -2429,8 +2429,9 @@ def _soil(checkout: Path, dirt: str) -> None:
     if dirt == "untracked":
         (checkout / "product" / "shadow.py").write_text("x = 1\n")
     elif dirt == "ignored":
-        (checkout / "product" / "__pycache__").mkdir()
-        (checkout / "product" / "__pycache__" / "two.cpython-312.pyc").write_bytes(b"x")
+        # Ignored by *.pyc, yet importable as a sourceless module (#2246: bytecode
+        # inside __pycache__ alone is no longer dirt).
+        (checkout / "product" / "stray.pyc").write_bytes(b"x")
     elif dirt == "modified":
         (checkout / "product" / "__init__.py").write_text("patched = True\n")
     elif dirt == "wrong_head":
@@ -2454,6 +2455,46 @@ def test_unhealthy_unused_core_checkout_is_rebuilt(cfg: ad.Config, dirt: str) ->
     assert ad.core_checkout_problem(ad.Host(), checkout, CORE.pin) is None
     assert any(c[-2:] == ["worktree", "prune"] for c in host.calls)
     assert not ad.hold_reason(cfg, {})
+
+
+@pytest.mark.parametrize(
+    ("dirt", "problem"),
+    [
+        pytest.param("pycache", None, id="pycache"),
+        pytest.param("nested_pycache", None, id="nested_pycache"),
+        pytest.param("sourceless_pyc", "CORE_TREE_DIRTY", id="sourceless_pyc"),
+        pytest.param("py_in_pycache", "CORE_TREE_DIRTY", id="py_in_pycache"),
+        pytest.param("symlinked_pyc", "CORE_TREE_DIRTY", id="symlinked_pyc"),
+        pytest.param("pycache_and_modified", "CORE_TREE_DIRTY", id="pycache_and_modified"),
+    ],
+)
+def test_core_in_use_check_ignores_only_bytecode_caches(
+    cfg: ad.Config, tmp_path: Path, dirt: str, problem: str | None
+) -> None:
+    """#2246 review: a stray __pycache__ in an in-use core/<sha> is not dirt (same
+    rule as the host's Core identity); every other change still is."""
+    checkout = Path(ad.materialize_core(cfg, FakeHost(), CORE.pin)["root"])
+    cache = checkout / "product" / "__pycache__"
+    cache.mkdir()
+    (cache / "two.cpython-312.pyc").write_bytes(b"x")
+    if dirt == "nested_pycache":
+        (checkout / "product" / "protocol" / "__pycache__").mkdir()
+        (checkout / "product" / "protocol" / "__pycache__" / "b.cpython-312.pyc").write_bytes(b"x")
+    elif dirt == "sourceless_pyc":
+        (checkout / "product" / "stray.pyc").write_bytes(b"x")
+    elif dirt == "py_in_pycache":
+        (cache / "evil.py").write_text("x = 1\n")
+    elif dirt == "symlinked_pyc":
+        target = tmp_path / "elsewhere.pyc"
+        target.write_bytes(b"x")
+        (cache / "link.cpython-312.pyc").symlink_to(target)
+    elif dirt == "pycache_and_modified":
+        (checkout / "product" / "two.py").write_text("patched = True\n")
+    assert ad.core_checkout_problem(ad.Host(), checkout, CORE.pin) == problem
+    if problem is None:
+        # In use and only bytecode: materialize keeps it, no rebuild, no hold.
+        _live_on_core(cfg, checkout, export=True, pin_file=True)
+        assert "rebuilt" not in ad.materialize_core(cfg, FakeHost(), CORE.pin)
 
 
 def _live_on_core(cfg: ad.Config, checkout: Path, *, export: bool, pin_file: bool) -> None:
@@ -2583,6 +2624,106 @@ def test_core_pin_without_build_identity_exports_no_digest(cfg: ad.Config) -> No
         assert command.index(unset) > command.index(f'source "{cfg.env_file}"')
 
 
+def _wrapper_shell() -> str:
+    """launchd runs the wrapper with /bin/zsh; Linux CI runners have bash."""
+    shell = "/bin/zsh" if Path("/bin/zsh").exists() else shutil.which("bash")
+    assert shell, "no zsh or bash to run the real wrapper"
+    return shell
+
+
+def test_wrapper_exports_a_pycache_prefix_outside_core_after_the_env_file(cfg: ad.Config) -> None:
+    root = cfg.deployments / f"a1-{NEW}"
+    core = cfg.core_checkouts / CORE.pin
+    command = ad.wrapper_command(cfg, root, Path("/v/bin/python"), core_root=core)
+    prefix = cfg.pycache_prefixes / root.name
+    export = f'export PYTHONPYCACHEPREFIX="{prefix}" ; '
+    assert export in command
+    assert command.index(export) > command.index(f'source "{cfg.env_file}"')
+    assert command.index(export) < command.index("exec ")
+    for tree in (core, root, cfg.controllers):
+        assert tree not in prefix.parents and prefix != tree
+    # Every candidate probe and live switch uses it.
+    host = FakeHost()
+    assert cycle(cfg, host, FakeProber())["status"] == "DEPLOYED"
+    live = plistlib.loads(cfg.plist.read_bytes())["ProgramArguments"][2]
+    for started in (host.started[0], live):
+        assert "export PYTHONPYCACHEPREFIX=" in started
+        assert started.index("PYTHONPYCACHEPREFIX") > started.index("source ")
+
+
+def test_core_provenance_probe_env_carries_a_pycache_prefix(tmp_path: Path) -> None:
+    core_root = tmp_path / "core" / NEW
+    core_root.mkdir(parents=True)
+    host = _CoreStatusHost(_pinned_status(core_root))
+    ad.Prober(host).core_provenance(
+        root=REPO_ROOT,
+        python=Path(sys.executable),
+        core={"revision": NEW, "root": str(core_root), "source_digest": None},
+    )
+    prefix = Path(str(host.core_envs[0]["PYTHONPYCACHEPREFIX"]))
+    assert prefix.is_absolute()
+    assert core_root not in prefix.parents and REPO_ROOT not in prefix.parents
+
+
+def _plant_mismatched_pyc(package: Path) -> None:
+    """Bytecode of other code that CPython accepts for ``mod.py`` (same mtime and size)."""
+    import py_compile
+
+    source = package / "mod.py"
+    source.write_text("print('EVIL!!')\n")
+    pyc = package / "__pycache__" / f"mod.{sys.implementation.cache_tag}.pyc"
+    py_compile.compile(str(source), cfile=str(pyc), doraise=True)
+    stamp = source.stat().st_mtime_ns
+    source.write_text("print('SOURCE')\n")  # same size, real code
+    os.utime(source, ns=(stamp, stamp))
+
+
+def test_planted_bytecode_in_the_core_checkout_never_runs_under_the_wrapper(
+    cfg: ad.Config, tmp_path: Path
+) -> None:
+    """#2246 review: a pyc matching mod.py's mtime/size is executed instead of
+    mod.py, even with -B, unless PYTHONPYCACHEPREFIX moves the cache away."""
+    core = tmp_path / "core-checkout"
+    core.mkdir()
+    _plant_mismatched_pyc(core)
+    importer = (
+        "import sys, os; sys.path.insert(0, os.environ['NEXUS_CORE_REPO_ROOT']); import mod\n"
+    )
+    # Positive control: without a prefix the planted bytecode wins.
+    control = subprocess.run(
+        [sys.executable, "-B", "-c", importer],
+        capture_output=True,
+        text=True,
+        check=True,
+        env={**os.environ, "NEXUS_CORE_REPO_ROOT": str(core)},
+    )
+    assert control.stdout.strip() == "EVIL!!"
+    root = tmp_path / "deploy" / f"a1-{NEW}"
+    (root / ad.ENTRYPOINT).parent.mkdir(parents=True)
+    (root / ad.ENTRYPOINT).write_text(importer)
+    command = ad.wrapper_command(cfg, root, Path(sys.executable), core_root=core)
+    out = subprocess.run([_wrapper_shell(), "-c", command], capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "SOURCE"
+    # Nothing was written into the Core checkout's own cache.
+    assert sorted(p.name for p in (core / "__pycache__").iterdir()) == [
+        f"mod.{sys.implementation.cache_tag}.pyc"
+    ]
+
+
+def test_pycache_prefix_is_pruned_with_its_deployment(cfg: ad.Config) -> None:
+    host = FakeHost()
+    assert cycle(cfg, host, FakeProber())["status"] == "DEPLOYED"
+    live = cfg.pycache_prefixes / f"a1-{NEW}"
+    gone = cfg.pycache_prefixes / f"a1-{'9' * 40}"
+    for cache in (live, gone):
+        cache.mkdir(parents=True, exist_ok=True)
+        (cache / "x.pyc").write_bytes(b"x")
+    ad.prune(cfg, host, [cfg.deployments / f"a1-{NEW}"])
+    assert live.is_dir()
+    assert not gone.exists()
+
+
 def test_no_build_digest_never_leaks_a_stale_digest_into_the_host(
     cfg: ad.Config, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2617,8 +2758,7 @@ def test_no_build_digest_never_leaks_a_stale_digest_into_the_host(
     assert seen[0]["NEXUS_CORE_SOURCE_DIGEST"] == core["source_digest"]
     # The real wrapper, after an env file that exports a stale digest, hands the
     # Gateway process none of it.
-    if not Path("/bin/zsh").exists():
-        return
+    shell = _wrapper_shell()
     cfg.env_file.write_text(
         'export NEXUS_CORE_SOURCE_DIGEST="sha256:' + "9" * 64 + '"\n'
         f'export NEXUS_CORE_SOURCE_DIGEST_REVISION="{NEW}"\n'
@@ -2626,13 +2766,16 @@ def test_no_build_digest_never_leaks_a_stale_digest_into_the_host(
     root = tmp_path / "deploy"
     (root / ad.ENTRYPOINT).parent.mkdir(parents=True)
     (root / ad.ENTRYPOINT).write_text("import json, os; print(json.dumps(dict(os.environ)))\n")
-    for digest in (None, ("c" * 40, "sha256:" + "d" * 64)):
+    cases = [
+        (tmp_path / "core", None),
+        (None, None),  # no Core pin at all: still no stale digest
+        (tmp_path / "core", ("c" * 40, "sha256:" + "d" * 64)),
+    ]
+    for core_root, digest in cases:
         command = ad.wrapper_command(
-            cfg, root, Path(sys.executable), core_root=tmp_path / "core", core_digest=digest
+            cfg, root, Path(sys.executable), core_root=core_root, core_digest=digest
         )
-        out = subprocess.run(
-            ["/bin/zsh", "-c", command], capture_output=True, text=True, check=True
-        )
+        out = subprocess.run([shell, "-c", command], capture_output=True, text=True, check=True)
         environ = json.loads(out.stdout.strip().splitlines()[-1])
         if digest is None:
             assert "NEXUS_CORE_SOURCE_DIGEST" not in environ
@@ -2895,7 +3038,10 @@ def _real_core_checkout(tmp_path: Path, pin: str) -> Path | None:
         pytest.param("digest_reported_without_source", False, id="digest_reported_without_source"),
         pytest.param("build_stamp_source", False, id="build_stamp_source"),
         pytest.param("digest_but_build_has_none", False, id="digest_but_build_has_none"),
-        pytest.param("legacy_transport", True, id="legacy_transport"),
+        # Part 2: a build with a digest no longer accepts a git-identity transport.
+        pytest.param("legacy_transport", False, id="legacy_transport"),
+        pytest.param("legacy_build_and_transport", True, id="legacy_build_and_transport"),
+        pytest.param("git_free_transport_old_build", False, id="git_free_transport_old_build"),
     ],
 )
 def test_real_prober_requires_the_build_source_digest(tmp_path: Path, case: str, ok: bool) -> None:
@@ -2922,6 +3068,13 @@ def test_real_prober_requires_the_build_source_digest(tmp_path: Path, case: str,
         core["source_digest"] = None
     elif case == "legacy_transport":
         status = _pinned_status(core_root)
+    elif case == "legacy_build_and_transport":
+        # A Core pin that predates core_identity(): no digest on either side.
+        core["source_digest"] = None
+        status = _pinned_status(core_root)
+    elif case == "git_free_transport_old_build":
+        core["source_digest"] = None
+        del status["observed_source_digest"], status["expected_source_digest"]
     host = _CoreStatusHost(status)
     check = ad.Prober(host).core_provenance(root=REPO_ROOT, python=Path(sys.executable), core=core)
     assert check["ok"] is ok, check
@@ -2946,13 +3099,24 @@ if os.environ.get("NEXUS_CORE_REPO_ROOT"):
         checkout = _real_core_checkout(tmp_path, pin)
         if checkout is None:
             pytest.skip("no local nexus-core with the pinned tree (set NEXUS_CORE_REPO_ROOT)")
+        core = {"revision": pin, "root": str(checkout)}
+        # #2246: the transport pins a checkout by the digest the build computed.
+        core.update(ad.core_source_digest(ad.Host(), checkout, pin))
         check = ad.Prober(ad.Host()).core_provenance(
+            root=REPO_ROOT, python=Path(sys.executable), core=core
+        )
+        assert check["status"] == "CORE_REVISION_PINNED", check
+        assert check["ok"] is True and check["observed_commit"] == pin
+        assert check["identity_source"] == "source_digest"
+        assert check["observed_source_digest"] == core["source_digest"]
+        # Without the digest the same checkout is not pinned.
+        unpinned = ad.Prober(ad.Host()).core_provenance(
             root=REPO_ROOT,
             python=Path(sys.executable),
             core={"revision": pin, "root": str(checkout)},
         )
-        assert check["status"] == "CORE_REVISION_PINNED", check
-        assert check["ok"] is True and check["observed_commit"] == pin
+        assert unpinned["ok"] is False
+        assert unpinned["reason"] == "CORE_SOURCE_DIGEST_UNPINNED"
 
     def test_build_source_digest_equals_real_core_identity(tmp_path: Path) -> None:
         """The deployer's digest is exactly what real Core's core_identity() reports."""
@@ -4112,6 +4276,27 @@ def test_candidate_probe_also_reads_the_in_process_core_provenance(block: Any, o
     assert result["checks"]["core_provenance"]["ok"] is True
     assert result["checks"]["health_core_provenance"]["ok"] is ok
     assert result["ok"] is ok
+
+
+@pytest.mark.parametrize(
+    ("identity_source", "digest", "ok"),
+    [
+        pytest.param("source_digest", "sha256:" + "1" * 64, True, id="digest_build_digest_host"),
+        pytest.param(None, "sha256:" + "1" * 64, False, id="digest_build_git_host"),
+        pytest.param("build_stamp", "sha256:" + "1" * 64, False, id="digest_build_stamp_host"),
+        pytest.param(None, None, True, id="old_core_pin"),
+    ],
+)
+def test_health_core_provenance_requires_digest_identity_for_a_digest_build(
+    identity_source: str | None, digest: str | None, ok: bool
+) -> None:
+    """#2246: the live Gateway must report it pinned Core by this build's digest."""
+    block = _health_core_block(NEW)
+    if identity_source is not None:
+        block["identity_source"] = identity_source
+    core = {"revision": NEW, "root": "/g/core/" + NEW, "source_digest": digest}
+    check = ad.health_core_provenance({"core_provenance": block}, core)
+    assert check["ok"] is ok, check
 
 
 def test_rollback_probe_does_not_require_the_health_core_block() -> None:

@@ -181,12 +181,24 @@ def _materialize_core(dest: Path, revision: str) -> str | None:
 
 
 def _run_driver(
-    work: Path, scenarios: list[dict[str, Any]], core_root: Path | None
+    work: Path,
+    scenarios: list[dict[str, Any]],
+    core_root: Path | None,
+    core_digest: tuple[str, str] | None = None,
 ) -> dict[str, Any]:
     work.mkdir(parents=True, exist_ok=True)
     spec = {"work": str(work / "run"), "out": str(work / "out.json"), "scenarios": scenarios}
     (work / "spec.json").write_text(json.dumps(spec), encoding="utf-8")
-    env = {k: v for k, v in os.environ.items() if k != "NEXUS_CORE_REPO_ROOT"}
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k
+        not in (
+            "NEXUS_CORE_REPO_ROOT",
+            "NEXUS_CORE_SOURCE_DIGEST",
+            "NEXUS_CORE_SOURCE_DIGEST_REVISION",
+        )
+    }
     # Same import environment as this test process (CI executors provide
     # dependencies such as nexus_runtime through sys.path), repo first.
     inherited = [entry for entry in sys.path if entry and Path(entry).exists()]
@@ -196,6 +208,9 @@ def _run_driver(
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     if core_root is not None:
         env["NEXUS_CORE_REPO_ROOT"] = str(core_root)
+    if core_digest is not None:
+        # What the Gateway auto-deployer exports for its pinned Core (#2246).
+        env["NEXUS_CORE_SOURCE_DIGEST_REVISION"], env["NEXUS_CORE_SOURCE_DIGEST"] = core_digest
     proc = subprocess.run(
         [sys.executable, "-W", "ignore", str(DRIVER), str(work / "spec.json")],
         cwd=work,
@@ -268,8 +283,10 @@ def test_deployer_source_digest_equals_pinned_core_identity(pinned_core, pinned_
 
 
 @pytest.fixture(scope="module")
-def live(pinned_core, tmp_path_factory) -> dict[str, Any]:
-    results = _run_driver(tmp_path_factory.mktemp("live"), SCENARIOS, pinned_core)
+def live(pinned_core, pinned_core_digest, tmp_path_factory) -> dict[str, Any]:
+    results = _run_driver(
+        tmp_path_factory.mktemp("live"), SCENARIOS, pinned_core, pinned_core_digest
+    )
     assert results["core_available"] is True, results["core_import_error"]
     return results
 
@@ -424,9 +441,13 @@ def test_live_receipt_survives_reload_from_state_dir(live):
     assert live["missing"]["db_verification_row"]["core_status"] == "UNVERIFIABLE"
 
 
-def test_live_core_revision_mismatch_fails_closed(pinned_core, tmp_path):
+def test_live_core_revision_mismatch_fails_closed(pinned_core, pinned_core_digest, tmp_path):
     drifted = tmp_path / "drifted-core"
     assert _git(tmp_path, "clone", "-q", str(pinned_core), str(drifted)).returncode == 0
+    # A drifted Core runs different source than the digest pinned for the
+    # revision (#2246: identity is the source digest, not git HEAD).
+    init = drifted / "product" / "__init__.py"
+    init.write_text(init.read_text(encoding="utf-8") + "\n# drift\n", encoding="utf-8")
     commit = _git(
         drifted,
         "-c",
@@ -435,12 +456,12 @@ def test_live_core_revision_mismatch_fails_closed(pinned_core, tmp_path):
         "user.email=drift@example.com",
         "commit",
         "-q",
-        "--allow-empty",
+        "-a",
         "-m",
         "drift",
     )
     assert commit.returncode == 0, commit.stderr
-    results = _run_driver(tmp_path / "work", [SCENARIOS[0]], drifted)
+    results = _run_driver(tmp_path / "work", [SCENARIOS[0]], drifted, pinned_core_digest)
     result = results["complete"]
     _assert_blocked(result)
     verdict = _verdict(result)
@@ -451,6 +472,134 @@ def test_live_core_revision_mismatch_fails_closed(pinned_core, tmp_path):
     assert verdict["core_status"] == "VERIFIED"
     assert result["core_verification_status"] == "HOST_BLOCKED:VERIFIED"
     assert results["gateway_core_provenance"]["fail_closed"] is True
+    assert results["gateway_core_provenance"]["reason"] == "CORE_SOURCE_DIGEST_MISMATCH"
+
+
+def test_live_gateway_pins_core_by_source_digest(live, pinned_core_digest):
+    provenance = live["gateway_core_provenance"]
+    assert provenance["identity_source"] == "source_digest"
+    assert provenance["build_identity"] == "UNSTAMPED"
+    assert provenance["observed_source_digest"] == pinned_core_digest[1]
+    assert provenance["expected_source_digest"] == pinned_core_digest[1]
+    assert live["public_core_provenance"]["identity_source"] == "source_digest"
+
+
+def test_live_stray_pycache_keeps_core_pinned(pinned_core, pinned_core_digest, tmp_path):
+    """Regression for 2026-10-15: bytecode in the in-use Core checkout no longer
+    flips provenance to unavailable."""
+    checkout = tmp_path / "core-with-pycache"
+    assert _git(tmp_path, "clone", "-q", str(pinned_core), str(checkout)).returncode == 0
+    for package in ("product", "product/protocol", "product/adapters"):
+        cache = checkout / package / "__pycache__"
+        cache.mkdir(exist_ok=True)
+        (cache / "stray.cpython-312.pyc").write_bytes(b"\x00stray")
+    results = _run_driver(tmp_path / "work", [SCENARIOS[0]], checkout, pinned_core_digest)
+    provenance = results["gateway_core_provenance"]
+    assert provenance["status"] == "CORE_REVISION_PINNED", provenance
+    assert provenance["observed_commit"] == _pinned_core_revision()
+    verdict = _verdict(results["complete"])
+    assert verdict["blocking"] is False
+    assert verdict["core_provenance"]["status"] == "CORE_REVISION_PINNED"
+
+
+def test_live_checkout_without_source_digest_pin_fails_closed(pinned_core, tmp_path):
+    results = _run_driver(tmp_path / "work", [SCENARIOS[0]], pinned_core)
+    provenance = results["gateway_core_provenance"]
+    assert provenance["status"] == "CORE_IDENTITY_UNAVAILABLE"
+    assert provenance["reason"] == "CORE_SOURCE_DIGEST_UNPINNED"
+    assert provenance["fail_closed"] is True
+    result = results["complete"]
+    _assert_blocked(result)
+    assert (
+        "CORE_PROVENANCE_NOT_PINNED:CORE_IDENTITY_UNAVAILABLE"
+        in (_verdict(result)["host_reason_codes"])
+    )
+
+
+def _stamp_core_copy(pinned_core: Path, dest: Path, *, dirty: bool = False) -> Path:
+    """A copy of the pinned Core stamped exactly as Core's setup.py would stamp a wheel."""
+    shutil.copytree(pinned_core / "product", dest / "product")
+    tree = _git(pinned_core, "rev-parse", "HEAD^{tree}").stdout.strip()
+    code = (
+        "import json, sys\n"
+        "from pathlib import Path\n"
+        "sys.path.insert(0, sys.argv[1])\n"
+        "from product.protocol.build_identity import make_build_identity, source_digest\n"
+        "stamp = make_build_identity(version='0-test', git_commit=sys.argv[2],"
+        " git_tree=sys.argv[3], git_dirty=sys.argv[4] == '1',"
+        " source_digest_value=source_digest(Path(sys.argv[1]) / 'product'))\n"
+        "Path(sys.argv[1], 'product', '_build_identity.json').write_text(json.dumps(stamp))\n"
+    )
+    subprocess.run(
+        [
+            sys.executable,
+            "-B",
+            "-c",
+            code,
+            str(dest),
+            _pinned_core_revision(),
+            tree,
+            "1" if dirty else "0",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+    )
+    return dest
+
+
+def test_live_embedded_build_stamp_is_pinned_without_digest_env(pinned_core, tmp_path):
+    """Installed-wheel path: Core's EMBEDDED stamp at the pin, no deployer digest."""
+    stamped = _stamp_core_copy(pinned_core, tmp_path / "stamped")
+    results = _run_driver(tmp_path / "work", [SCENARIOS[0]], stamped)
+    provenance = results["gateway_core_provenance"]
+    assert provenance["status"] == "CORE_REVISION_PINNED", provenance
+    assert provenance["identity_source"] == "build_stamp"
+    assert provenance["build_identity"] == "EMBEDDED"
+    assert _verdict(results["complete"])["blocking"] is False
+    # A stamp made from a dirty tree is never pinned.
+    dirty = _stamp_core_copy(pinned_core, tmp_path / "dirty", dirty=True)
+    results = _run_driver(tmp_path / "work-dirty", [SCENARIOS[0]], dirty)
+    assert results["gateway_core_provenance"]["reason"] == "CORE_BUILD_DIRTY"
+    assert results["gateway_core_provenance"]["fail_closed"] is True
+
+
+def test_core_build_identity_fixture_matches_pinned_core(pinned_core, tmp_path):
+    """The vendored test fixture behaves exactly like the pinned Core's module."""
+    fixture = Path(__file__).with_name("_core_build_identity_fixture.py")
+    code = (
+        "import importlib.util, json, sys\n"
+        "def load(name, path):\n"
+        "    spec = importlib.util.spec_from_file_location(name, path)\n"
+        "    module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)\n"
+        "    return module\n"
+        "real = load('real_bi', sys.argv[1] + '/product/protocol/build_identity.py')\n"
+        "copy = load('copy_bi', sys.argv[2])\n"
+        "out = {}\n"
+        "for name, module in (('real', real), ('copy', copy)):\n"
+        "    vector = module.SOURCE_DIGEST_CONFORMANCE_VECTOR\n"
+        "    files = [(f['path'], f['content_utf8'].encode()) for f in vector['files']]\n"
+        "    out[name] = {\n"
+        "        'identity': module.core_identity(sys.argv[3] + '/product'),\n"
+        "        'vector': module.source_digest_of_files(files) == vector['expected_digest'],\n"
+        "        'rule': module.SOURCE_DIGEST_RULE,\n"
+        "        'schema': module.CORE_IDENTITY_SCHEMA,\n"
+        "    }\n"
+        "print(json.dumps(out))\n"
+    )
+    stamped = _stamp_core_copy(pinned_core, tmp_path / "stamped")
+    for target in (pinned_core, stamped):
+        proc = subprocess.run(
+            [sys.executable, "-B", "-c", code, str(pinned_core), str(fixture), str(target)],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+        out = json.loads(proc.stdout)
+        assert out["real"]["vector"] is True
+        assert out["copy"] == out["real"], "refresh _core_build_identity_fixture.py"
 
 
 def test_live_core_unavailable_fails_closed_for_universe_task(tmp_path):
@@ -725,6 +874,7 @@ def test_gateway_status_and_health_report_in_process_core_provenance(monkeypatch
         "expected_revision",
         "observed_commit",
         "fail_closed",
+        "identity_source",
     }
 
     import nexus.orchestrator.canonical_core_transport as transport
@@ -1099,17 +1249,21 @@ def test_core_provenance_is_cached_per_process(monkeypatch):
 
 
 def test_core_identity_git_probes_are_time_bounded(monkeypatch, tmp_path):
+    """Since #2246 the identity runs no git (or other) subprocess at all."""
     import nexus.orchestrator.canonical_core_transport as transport
 
     seen = []
 
-    def fake_check_output(args, **kwargs):
-        seen.append(kwargs.get("timeout"))
-        return "" if args[1] == "status" else "a" * 40
+    def fake_subprocess(args, **kwargs):
+        seen.append(args)
+        raise AssertionError("no subprocess on the provenance path")
 
-    monkeypatch.setattr(transport.subprocess, "check_output", fake_check_output)
-    transport.read_observed_core_identity(tmp_path)
-    assert seen and all(isinstance(value, (int, float)) and value > 0 for value in seen)
+    monkeypatch.setattr(transport.subprocess, "check_output", fake_subprocess)
+    monkeypatch.setattr(transport.subprocess, "run", fake_subprocess)
+    monkeypatch.setattr(transport.subprocess, "Popen", fake_subprocess)
+    identity = transport.read_observed_core_identity(tmp_path)
+    assert identity["available"] is False
+    assert seen == []
 
 
 def test_core_unobtainable_fails_in_ci_and_skips_locally(monkeypatch):
@@ -1137,13 +1291,18 @@ print(json.dumps(gateway_core_provenance(refresh=True)))
 """
 
 
-def test_gateway_startup_binds_product_to_core_before_eia(pinned_core, tmp_path):
+def test_gateway_startup_binds_product_to_core_before_eia(
+    pinned_core, pinned_core_digest, tmp_path
+):
     def probe(mode: str) -> dict[str, Any]:
         env = {k: v for k, v in os.environ.items() if k != "NEXUS_CORE_REPO_ROOT"}
         inherited = [entry for entry in sys.path if entry and Path(entry).exists()]
         env["PYTHONPATH"] = os.pathsep.join(dict.fromkeys([str(REPO_ROOT), *inherited]))
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         env["NEXUS_CORE_REPO_ROOT"] = str(pinned_core)
+        env["NEXUS_CORE_SOURCE_DIGEST_REVISION"], env["NEXUS_CORE_SOURCE_DIGEST"] = (
+            pinned_core_digest
+        )
         proc = subprocess.run(
             [sys.executable, "-W", "ignore", "-c", _PRELOAD_PROBE, mode, str(tmp_path / mode)],
             cwd=tmp_path,
@@ -1265,8 +1424,10 @@ CREATED_SCENARIOS: list[dict[str, Any]] = [
 
 
 @pytest.fixture(scope="module")
-def live_created(pinned_core, tmp_path_factory) -> dict[str, Any]:
-    results = _run_driver(tmp_path_factory.mktemp("live-created"), CREATED_SCENARIOS, pinned_core)
+def live_created(pinned_core, pinned_core_digest, tmp_path_factory) -> dict[str, Any]:
+    results = _run_driver(
+        tmp_path_factory.mktemp("live-created"), CREATED_SCENARIOS, pinned_core, pinned_core_digest
+    )
     assert results["core_available"] is True, results["core_import_error"]
     return results
 

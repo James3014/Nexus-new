@@ -681,7 +681,13 @@ def _resolve_github_cli() -> tuple[str | None, str | None]:
 
 
 CORE_PROVENANCE_RECHECK_SECONDS = 300.0
-_CORE_PROVENANCE_PUBLIC_FIELDS = ("status", "expected_revision", "observed_commit", "fail_closed")
+_CORE_PROVENANCE_PUBLIC_FIELDS = (
+    "status",
+    "expected_revision",
+    "observed_commit",
+    "fail_closed",
+    "identity_source",
+)
 _core_provenance_cache: dict[str, Any] = {}
 _core_provenance_lock = threading.Lock()
 
