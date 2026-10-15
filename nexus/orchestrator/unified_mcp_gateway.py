@@ -96,6 +96,7 @@ from nexus.orchestrator.execution_readiness import (
     evaluate_source_binding,
 )
 from nexus.orchestrator.gateway_convergence import evaluate_gateway_convergence
+from nexus.orchestrator.governed_integration import ControlledIntegrationManager
 from nexus.orchestrator.learning_policy_control import (
     apply_learning_policy_effect,
 )
@@ -7252,9 +7253,20 @@ class UnifiedMCPGateway:
             raise GatewayInputError(str(exc)) from exc
         contract = state.get("contract") if isinstance(state.get("contract"), Mapping) else {}
         controller_root = Path(str(contract.get("controller_repo_root") or CANONICAL_SOURCE_ROOT)).expanduser().resolve()
-        live_head_result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=controller_root, capture_output=True, text=True, check=False)
-        live_head = live_head_result.stdout.strip()
-        if live_head_result.returncode != 0 or live_head != expected_head:
+        # A separate detached Controller binds the integration branch ref,
+        # not its HEAD (#2230); every other shape keeps binding HEAD.
+        try:
+            separate_head = ControlledIntegrationManager.separate_controller_integration_head(controller_root, branch)
+        except RuntimeError as exc:
+            raise GatewayInputError(str(exc)) from exc
+        if separate_head is not None:
+            live_head = separate_head
+        else:
+            live_head_result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=controller_root, capture_output=True, text=True, check=False)
+            live_head = live_head_result.stdout.strip()
+            if live_head_result.returncode != 0:
+                raise GatewayInputError("CANDIDATE_BIND_HEAD_DRIFT")
+        if live_head != expected_head:
             raise GatewayInputError("CANDIDATE_BIND_HEAD_DRIFT")
         allowed_files = [str(path) for path in contract.get("allowed_files") or [] if str(path).strip()]
         if not allowed_files:

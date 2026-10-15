@@ -810,13 +810,17 @@ def test_post_apply_physical_truth_is_typed_and_persistable(tmp_path: Path):
     assert raised.value.integration_result_sha == raised.value.branch_head_after
 
 
+def _separate_controller_worktree(tmp_path: Path, root: Path, base: str) -> Path:
+    controller = tmp_path / "controller"
+    _git(root, "worktree", "add", "--detach", str(controller), base)
+    return controller.resolve()
+
+
 def _separate_controller(tmp_path: Path) -> tuple[Path, Path, str, str]:
     """Primary checkout on main plus a detached Controller worktree (#1939)."""
     root, base, candidate = _repo(tmp_path)
     _git(root, "checkout", "main")
-    controller = tmp_path / "controller"
-    _git(root, "worktree", "add", "--detach", str(controller), base)
-    return root, controller.resolve(), base, candidate
+    return root, _separate_controller_worktree(tmp_path, root, base), base, candidate
 
 
 def _separate_controller_integrate(
@@ -1308,8 +1312,14 @@ def test_owner_finish_retains_real_dirty_target_with_typed_reason(tmp_path: Path
     assert (target / "untracked.txt").read_text(encoding="utf-8") == "must retain\n"
 
 
-def _approved_closure_service(tmp_path: Path):
+def _approved_closure_service(tmp_path: Path, *, separate_controller: bool = False):
     root, base, candidate = _repo(tmp_path)
+    if separate_controller:
+        # #2229/#2231 shape: primary checkout on main, Controller is a
+        # detached linked worktree and the integration branch is checked out
+        # nowhere.
+        _git(root, "checkout", "main")
+        root = _separate_controller_worktree(tmp_path, root, base)
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
     verifier_executable = Path("/usr/bin/true")
     verifier_command = str(verifier_executable)
@@ -1391,6 +1401,171 @@ def test_service_closure_binding_rejects_tamper_and_head_drift(tmp_path: Path):
     _git(root, "commit", "-am", "head drift")
     with pytest.raises(RuntimeError, match="CLOSURE_CANONICAL_HEAD_DRIFT"):
         service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=approval, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
+
+
+def _bind_task_card(controller: Path, name: str) -> str:
+    """A tasks/-only Task Card bind commit on the detached Controller (#1939)."""
+    card = controller / "tasks" / "bound" / name
+    card.parent.mkdir(parents=True, exist_ok=True)
+    card.write_text(f"{name}\n")
+    _git(controller, "add", str(card.relative_to(controller)))
+    _git(controller, "commit", "-m", f"bind {name}")
+    return _git(controller, "rev-parse", "HEAD")
+
+
+def _separate_closure_kwargs(acceptance, approval, runtime, head: str) -> dict:
+    return {
+        "external_acceptance": acceptance,
+        "approval": approval,
+        "runtime_identity": runtime,
+        "expected_canonical_head": head,
+        "integration_branch": "nexus/integration/canary",
+    }
+
+
+def test_separate_controller_closure_then_integrate_end_to_end(tmp_path: Path, monkeypatch):
+    """#2230: a detached Controller with bind commits and a pending card integrates."""
+    service, controller, base, candidate, acceptance, approval, runtime = _approved_closure_service(
+        tmp_path, separate_controller=True
+    )
+    state = service._read_state("closure-bind")
+    state["integration_staging_root"] = str(tmp_path / "stage")
+    service._write_state("closure-bind", state)
+    _bind_task_card(controller, "already-bound.md")
+    pending = controller / "tasks" / "active" / "pending-card.md"
+    pending.parent.mkdir(parents=True)
+    pending.write_text("pending\n")
+    monkeypatch.setattr(
+        RepositoryContractGate,
+        "evaluate_committed_candidate",
+        lambda *args, **kwargs: SimpleNamespace(passed=True, blocking_reasons=()),
+    )
+
+    bound = service.bind_candidate_integration_closure(
+        "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+    )
+    closure = bound["closure_binding"]
+    assert closure["canonical_head"] == base
+    assert closure["controller_shape"] == "SEPARATE_DETACHED_WORKTREE"
+    assert closure["controller_head"] == _git(controller, "rev-parse", "HEAD")
+    assert service._read_state("closure-bind")["integration_authorization"]["expected_canonical_head"] == base
+
+    # A Task Card bind commit between closure and integrate moves the
+    # Controller HEAD; integration CASes the branch ref and is unaffected.
+    controller_head = _bind_task_card(controller, "bound-after-closure.md")
+    result = service.integrate_approved(
+        "closure-bind", integration_branch="nexus/integration/canary", runtime_identity=runtime
+    )
+    assert result["status"] in {"INTEGRATED", "INTEGRATED_TARGET_RETAINED", "INTEGRATED_AND_CLEANED"}
+    integrated = _git(controller, "rev-parse", "nexus/integration/canary")
+    assert integrated != base
+    assert _git(controller, "merge-base", "--is-ancestor", candidate, integrated) == ""
+    assert _git(controller, "rev-parse", "HEAD") == controller_head
+    assert pending.read_text() == "pending\n"
+    assert (controller / "value.txt").read_text() == "base\n"
+
+
+@pytest.mark.parametrize("dirt", ["untracked-outside", "tracked-edit", "tasks-symlink", "tracked-tasks-edit"])
+def test_separate_controller_closure_still_blocks_non_card_dirt(tmp_path: Path, dirt: str):
+    service, controller, base, _candidate, acceptance, approval, runtime = _approved_closure_service(
+        tmp_path, separate_controller=True
+    )
+    if dirt == "untracked-outside":
+        (controller / "stray.txt").write_text("stray\n")
+    elif dirt == "tracked-edit":
+        (controller / "value.txt").write_text("edited\n")
+    elif dirt == "tasks-symlink":
+        (controller / "tasks").mkdir()
+        (controller / "tasks" / "card.md").symlink_to(controller / "value.txt")
+    else:
+        _bind_task_card(controller, "card.md")
+        (controller / "tasks" / "bound" / "card.md").write_text("edited\n")
+    before = service._state_path("closure-bind").read_bytes()
+    with pytest.raises(RuntimeError, match="CLOSURE_CANONICAL_DIRTY"):
+        service.bind_candidate_integration_closure(
+            "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+        )
+    assert service._state_path("closure-bind").read_bytes() == before
+
+
+def test_separate_controller_closure_binds_branch_ref_not_controller_head(tmp_path: Path):
+    service, controller, base, _candidate, acceptance, approval, runtime = _approved_closure_service(
+        tmp_path, separate_controller=True
+    )
+    controller_head = _bind_task_card(controller, "card.md")
+    before = service._state_path("closure-bind").read_bytes()
+    with pytest.raises(RuntimeError, match="CLOSURE_CANONICAL_HEAD_DRIFT"):
+        service.bind_candidate_integration_closure(
+            "closure-bind",
+            **_separate_closure_kwargs(
+                acceptance, {**approval, "expected_canonical_head": controller_head}, runtime, controller_head
+            ),
+        )
+    assert service._state_path("closure-bind").read_bytes() == before
+
+
+def test_separate_controller_closure_refuses_checked_out_integration_branch(tmp_path: Path):
+    service, controller, base, _candidate, acceptance, approval, runtime = _approved_closure_service(
+        tmp_path, separate_controller=True
+    )
+    _git(tmp_path / "repo", "checkout", "nexus/integration/canary")
+    with pytest.raises(RuntimeError, match="CLOSURE_INTEGRATION_BRANCH_CHECKED_OUT"):
+        service.bind_candidate_integration_closure(
+            "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+        )
+
+
+@pytest.mark.parametrize("race", ["ref-moved", "dirt-appeared"])
+def test_separate_controller_closure_rechecks_under_state_lock(tmp_path: Path, monkeypatch, race: str):
+    service, controller, base, candidate, acceptance, approval, runtime = _approved_closure_service(
+        tmp_path, separate_controller=True
+    )
+    original = service._mutate_state
+
+    def racing_mutate(task_id, mutate):
+        if race == "ref-moved":
+            _git(controller, "update-ref", "refs/heads/nexus/integration/canary", candidate)
+        else:
+            (controller / "stray.txt").write_text("stray\n")
+        return original(task_id, mutate)
+
+    monkeypatch.setattr(service, "_mutate_state", racing_mutate)
+    before = service._state_path("closure-bind").read_bytes()
+    expected = "CLOSURE_CANONICAL_HEAD_DRIFT" if race == "ref-moved" else "CLOSURE_CANONICAL_REBIND_DRIFT"
+    with pytest.raises(RuntimeError, match=expected):
+        service.bind_candidate_integration_closure(
+            "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+        )
+    assert service._state_path("closure-bind").read_bytes() == before
+
+
+def test_strict_controller_closure_still_rejects_pending_card(tmp_path: Path):
+    """The checked-out integration branch keeps the fully clean rule."""
+    service, root, base, _candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    (root / "tasks").mkdir()
+    (root / "tasks" / "pending-card.md").write_text("pending\n")
+    with pytest.raises(RuntimeError, match="CLOSURE_CANONICAL_DIRTY"):
+        service.bind_candidate_integration_closure(
+            "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+        )
+
+
+def test_main_checkout_on_main_closure_still_strict(tmp_path: Path):
+    """A primary checkout on main is not a separate Controller: branch drift."""
+    service, root, base, _candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    _git(root, "checkout", "main")
+    before = service._state_path("closure-bind").read_bytes()
+    with pytest.raises(RuntimeError, match="CLOSURE_CANONICAL_BRANCH_DRIFT"):
+        service.bind_candidate_integration_closure(
+            "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+        )
+    (root / "tasks").mkdir()
+    (root / "tasks" / "pending-card.md").write_text("pending\n")
+    with pytest.raises(RuntimeError, match="CLOSURE_CANONICAL_DIRTY"):
+        service.bind_candidate_integration_closure(
+            "closure-bind", **_separate_closure_kwargs(acceptance, approval, runtime, base)
+        )
+    assert service._state_path("closure-bind").read_bytes() == before
 
 
 def _applied_receipt_correction_fixture(tmp_path: Path):

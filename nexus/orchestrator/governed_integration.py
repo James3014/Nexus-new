@@ -140,6 +140,38 @@ class ControlledIntegrationManager:
         # ``symbolic-ref -q HEAD`` exits 1 exactly when HEAD is detached.
         return linked and probe("symbolic-ref", "-q", "HEAD").returncode == 1
 
+    @classmethod
+    def separate_controller_integration_head(
+        cls, controller_root: Path, integration_branch: str
+    ) -> str | None:
+        """Integration-branch head a separate detached Controller binds to, else None.
+
+        None for every shape except a linked worktree on a detached HEAD: those
+        callers keep binding ``HEAD`` with the branch checked out (#2230).
+        For the separate shape apply is ``update-ref refs/heads/<branch>`` with
+        a compare-and-swap on this exact head, while the Controller HEAD moves
+        with tasks/-only Task Card bind commits, so the closure binds the ref.
+        Raises when the branch is invalid, missing, or checked out in any
+        worktree (update-ref would move it under that checkout).
+        """
+        if not cls._is_detached_linked_worktree(controller_root):
+            return None
+        try:
+            cls._validate_branch(integration_branch)
+        except ValueError as exc:
+            raise RuntimeError("CLOSURE_INTEGRATION_BRANCH_INVALID") from exc
+        ref = f"refs/heads/{integration_branch}"
+        try:
+            head = cls._git(["rev-parse", "--verify", f"{ref}^{{commit}}"], controller_root)
+        except RuntimeError as exc:
+            raise RuntimeError("CLOSURE_INTEGRATION_BRANCH_MISSING") from exc
+        if not _SHA.fullmatch(head):
+            raise RuntimeError("CLOSURE_INTEGRATION_BRANCH_MISSING")
+        listing = cls._git(["worktree", "list", "--porcelain"], controller_root)
+        if f"branch {ref}" in listing.splitlines():
+            raise RuntimeError("CLOSURE_INTEGRATION_BRANCH_CHECKED_OUT")
+        return head
+
     @staticmethod
     def _pending_task_card_problem(root: Path, relative: str) -> str | None:
         """Why an untracked ``tasks/`` entry is not a plain pending Task Card, else None.
