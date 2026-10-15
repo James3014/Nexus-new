@@ -19,6 +19,7 @@ The result never carries test output text beyond a short tail of the *visible* r
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
 import subprocess  # nosec B404 - argv lists only, never a shell
 import sys
@@ -177,6 +178,9 @@ def run_confined_test(
     try:
         if not argv:
             raise SandboxError("empty_lane_command")
+        if os.environ.get("NEXUS_CONFINE_VISIBLE_TEST", "").strip() not in {"", "0", "1"}:
+            # An ambiguous spelling ("true", "yes") must not silently mean "off" anywhere.
+            raise SandboxError("ambiguous_env:NEXUS_CONFINE_VISIBLE_TEST")
         if not root.is_dir():
             raise SandboxError("workspace_root_missing")
         if forbidden and in_tree(root, forbidden):

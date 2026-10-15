@@ -3580,10 +3580,10 @@ def _hidden_feedback_disabled() -> bool:
         return True
     # Like-for-like / counted lanes never feed hidden-verifier output back, whatever the flag:
     # the symmetric prompt contract and the counted-lane confinement imply it.
-    return any(
-        os.environ.get(name, "").strip().lower() in {"1", "true", "yes"}
-        for name in ("NEXUS_SYMMETRIC_PROMPT", "NEXUS_CONFINE_VISIBLE_TEST")
-    )
+    from nexus.services.post_candidate_seam import confine_visible_test_enabled
+
+    symmetric = os.environ.get("NEXUS_SYMMETRIC_PROMPT", "").strip().lower() in {"1", "true", "yes"}
+    return symmetric or confine_visible_test_enabled()
 
 
 @dataclass(frozen=True)
@@ -4535,7 +4535,11 @@ CONFINEMENT_PARITY_FAILED = "confinement_parity_failed"
 
 
 def _counted_confinement_enabled() -> bool:
-    return os.environ.get("NEXUS_CONFINE_VISIBLE_TEST", "").strip() == "1"
+    # One parse everywhere (the seam's helper): a non-"1" spelling routes to the confined
+    # runner, which refuses it, never to the unconfined subprocess.
+    from nexus.services.post_candidate_seam import confine_visible_test_enabled
+
+    return confine_visible_test_enabled()
 
 
 def _is_hidden_verifier_cmd(cmd: list[str]) -> bool:

@@ -793,9 +793,22 @@ def bench_forbidden_roots(workspace_root: Path | str | None) -> list[Path]:
     return roots
 
 
+def confine_visible_test_value() -> str:
+    return os.environ.get(CONFINE_VISIBLE_TEST_ENV, "").strip()
+
+
 def confine_visible_test_enabled() -> bool:
-    # Exactly "1", like the bench runner and #2212's verifier binding (one parse everywhere).
-    return os.environ.get(CONFINE_VISIBLE_TEST_ENV, "").strip() == "1"
+    """THE one parse of ``NEXUS_CONFINE_VISIBLE_TEST`` (seam, sprint, bench runner).
+
+    "1" -> confined. "" / "0" -> off. Any other spelling ("true", "yes", ...) is treated as a
+    request for confinement that cannot be honoured: True here (callers take the confined
+    path) and the confined runner refuses it (``confinement_unavailable:ambiguous_env``), so
+    model code never runs unconfined because of a spelling."""
+    return confine_visible_test_value() not in {"", "0"}
+
+
+def confine_visible_test_env_valid() -> bool:
+    return confine_visible_test_value() in {"", "0", "1"}
 
 
 def run_visible_test_confined(

@@ -1277,9 +1277,9 @@ def test_seam_holder_id_is_the_same_for_every_spelling_of_the_target(tmp_path: P
     [
         ("1", True),
         (" 1 ", True),
-        ("true", False),
-        ("yes", False),
-        ("on", False),
+        ("true", True),
+        ("yes", True),
+        ("on", True),
         ("0", False),
         ("", False),
     ],
@@ -1287,9 +1287,15 @@ def test_seam_holder_id_is_the_same_for_every_spelling_of_the_target(tmp_path: P
 def test_confine_visible_test_env_accepts_only_1(
     monkeypatch: pytest.MonkeyPatch, value: str, enabled: bool
 ) -> None:
-    """Reviewer L6: one parse everywhere (bench runner, #2212's verifier binding, the seam)."""
+    """Reviewer L6 + Gemini N2: ONE parse everywhere. "1" confines; "" / "0" is off; any other
+    spelling routes to the confined path (never unconfined) and the confined runner refuses
+    it, so a spelling can never make one side confined and the other unconfined."""
+    import scripts.bench.capability_ab_runner as runner
+
     monkeypatch.setenv(seam.CONFINE_VISIBLE_TEST_ENV, value)
     assert seam.confine_visible_test_enabled() is enabled
+    assert runner._counted_confinement_enabled() is enabled
+    assert seam.confine_visible_test_env_valid() is (value.strip() in {"", "0", "1"})
 
 
 def test_run_under_target_lock_holds_the_lock_across_the_write(tmp_path: Path) -> None:
@@ -1314,3 +1320,28 @@ def test_run_under_target_lock_holds_the_lock_across_the_write(tmp_path: Path) -
         assert seen == [False]  # the write never ran
     finally:
         seam.release_target_lock("other-task")
+
+
+@pytest.mark.parametrize("spelling", ["true", "yes", "on"])
+def test_ambiguous_confine_env_never_runs_the_hidden_verifier_unconfined(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, spelling: str
+) -> None:
+    """Gemini N2: NEXUS_CONFINE_VISIBLE_TEST=true no longer sends the runner's hidden verifier
+    to the unconfined subprocess; the confined runner refuses the spelling (fail closed)."""
+    import scripts.bench.capability_ab_runner as runner
+
+    case = _case(tmp_path)
+    monkeypatch.setenv(seam.CONFINE_VISIBLE_TEST_ENV, spelling)
+    monkeypatch.setattr(lane, "os_sandbox_available", lambda: True)
+    monkeypatch.setattr(
+        runner, "_run_process_group_unstaged", lambda *a, **k: pytest.fail("ran unconfined")
+    )
+    completed = runner._run_process_group(
+        runner._pytest_verifier_cmd(str(case / "test_hidden.py")),
+        cwd=tmp_path,
+        env={},
+        timeout_sec=5,
+    )
+    assert completed.returncode != 0
+    assert "confinement_unavailable" in completed.stderr and "ambiguous_env" in completed.stderr
+    assert not (case / HIDDEN_MARKER).exists()
