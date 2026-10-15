@@ -86,7 +86,7 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Tuple
 
 if __name__ == "__main__":
     # Run from a Nexus-new tree: the Gateway launchd effect lives in
@@ -480,7 +480,7 @@ class Host:
         argv: List[str],
         *,
         cwd: Optional[Path] = None,
-        env: Optional[Dict[str, Optional[str]]] = None,
+        env: Optional[Mapping[str, Optional[str]]] = None,
         timeout: float = 1800,
     ) -> subprocess.CompletedProcess:
         full_env = dict(os.environ)
