@@ -636,37 +636,60 @@ def test_descendant_sweep_failure_is_terminal(tmp_path, monkeypatch, seatbelt_on
     assert metas[-1]["reconciliation_required"] is True
 
 
-def _counting_sweep(monkeypatch) -> list[bool]:
-    results: list[bool] = []
-    real_sweep = boundary_mod.AgyDispatchBoundary.sweep
+class _SweepSpy:
+    """Records every ``sweep()`` call and, separately, the sweep work done.
 
-    def counting(self):
-        first = self._swept is None and self._launched
-        result = real_sweep(self)
-        if first:
-            results.append(result)
-        return result
+    The work is the tracker stop plus the tagged-process sweep; both are fakes
+    here, so nothing on the host is signalled.
+    """
 
-    monkeypatch.setattr(boundary_mod.AgyDispatchBoundary, "sweep", counting)
-    return results
+    def __init__(self, monkeypatch, *, clean: bool = False) -> None:
+        self.calls: list[bool] = []
+        self.work: list[str] = []
+        real_sweep = boundary_mod.AgyDispatchBoundary.sweep
 
+        def sweep(boundary):
+            result = real_sweep(boundary)
+            self.calls.append(result)
+            return result
 
-def _launched_then_raises(write_boundary):
-    # stands in for run_agy failing after after_launch (e.g. the provider
-    # identity hook): launched, never swept, no live tracker
-    write_boundary._launched = True
-    raise RuntimeError("PROVIDER_IDENTITY_PERSIST_FAILED")
+        monkeypatch.setattr(boundary_mod.AgyDispatchBoundary, "sweep", sweep)
+        cli_worker = boundary_mod.cli_worker
+        monkeypatch.setattr(
+            cli_worker, "_sweep_tagged_processes", lambda _tag: self.work.append("tagged") or True
+        )
+        monkeypatch.setattr(cli_worker, "_pids_with_cwd_under", lambda *_a: frozenset())
+        monkeypatch.setattr(cli_worker, "_sweep_clean", lambda *_a: clean)
+
+    def launch(self, boundary) -> None:
+        """Mark ``boundary`` launched with a fake live tracker (no real pid)."""
+        spy = self
+
+        class _Tracker:
+            probe_failed = False
+
+            def stop(self):
+                spy.work.append("tracker.stop")
+                return set()
+
+        boundary._launched = True
+        boundary._tracker = _Tracker()
+        if boundary._baseline is None:
+            boundary._baseline = type("Baseline", (), {"preexisting": frozenset()})()
 
 
 def test_launch_frame_exception_is_swept_and_terminal(tmp_path, monkeypatch, seatbelt_on, capsys):
-    swept = _counting_sweep(monkeypatch)
+    spy = _SweepSpy(monkeypatch)
     coordinator = _RotatingCoordinator(_source_home(tmp_path))
     target = _target(tmp_path)
     calls = []
 
     def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        # stands in for run_agy failing after after_launch (e.g. the provider
+        # identity hook): launched, never swept
         calls.append(1)
-        _launched_then_raises(write_boundary)
+        spy.launch(write_boundary)
+        raise RuntimeError("PROVIDER_IDENTITY_PERSIST_FAILED")
 
     code = dispatch.dispatch_run(
         prompt="edit",
@@ -677,11 +700,18 @@ def test_launch_frame_exception_is_swept_and_terminal(tmp_path, monkeypatch, sea
         run_agy_fn=runner,
     )
     metas = _metas(capsys.readouterr().err)
-    assert swept == [False]  # swept exactly once, and not provably clean
+    # the handler sweeps; cleanup() sees the recorded result and does not
+    assert spy.calls == [False]
+    assert spy.work == ["tracker.stop", "tagged"]
     assert code != 0 and calls == [1]
     assert coordinator.rotated == []
     assert metas[-1]["failure_kind"] == "AGY_DESCENDANT_SWEEP_FAILED"
     assert coordinator.claim.released is True
+
+
+def _launched_then_raises(write_boundary):
+    write_boundary._launched = True
+    raise RuntimeError("PROVIDER_IDENTITY_PERSIST_FAILED")
 
 
 def test_launch_frame_exception_with_clean_sweep_still_raises(tmp_path, monkeypatch, seatbelt_on):
@@ -702,15 +732,22 @@ def test_launch_frame_exception_with_clean_sweep_still_raises(tmp_path, monkeypa
         )
 
 
-def test_cleanup_sweeps_a_launched_unswept_run_once(tmp_path, monkeypatch, seatbelt_on):
-    swept = _counting_sweep(monkeypatch)
+@pytest.mark.parametrize("clean", [True, False])
+def test_cleanup_sweeps_a_launched_unswept_run_once(tmp_path, monkeypatch, seatbelt_on, clean):
+    spy = _SweepSpy(monkeypatch, clean=clean)
     boundary = boundary_mod.prepare_accept_edits_boundary(
         source_env={"HOME": str(_source_home(tmp_path))}, target=_target(tmp_path)
     )
-    boundary._launched = True
+    spy.launch(boundary)
     boundary.cleanup()
-    assert swept == [False]
-    assert boundary.sweep() is False and swept == [False]  # cached, not re-run
+    assert spy.calls == [clean]
+    assert spy.work == ["tracker.stop", "tagged"]
+    # later sweep() calls return the first result (a clean run stays clean)
+    # without doing the work again
+    assert boundary.sweep() is clean
+    assert boundary.sweep() is clean
+    assert spy.calls == [clean, clean, clean]
+    assert spy.work == ["tracker.stop", "tagged"]
 
 
 def test_attestation_log_symlink_or_non_regular_is_refused(tmp_path, seatbelt_on):
