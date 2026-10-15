@@ -381,3 +381,11 @@ def test_controller_moved_during_the_check_is_refused(pair, monkeypatch):
     monkeypatch.setattr(gateway_module, "bound_controller_problem", check_then_move)
     with pytest.raises(gateway_module.GatewayInputError, match="HEAD_MOVED_DURING_CHECK"):
         gateway_module._require_bound_controller(head)
+
+
+def test_primary_worktree_controller_with_linked_loaded_checkout_is_accepted(pair, tmp_path):
+    """Loaded = a linked worktree, Controller = the repository's primary worktree."""
+    primary, _, head = pair
+    linked_loaded = tmp_path / "linked-loaded"
+    _git(primary, "worktree", "add", "-q", "--detach", str(linked_loaded), head)
+    assert roots.bound_controller_problem(primary, linked_loaded) is None

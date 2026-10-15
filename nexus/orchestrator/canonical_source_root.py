@@ -167,12 +167,18 @@ def bound_controller_problem(controller: Path, loaded: Path) -> Optional[str]:
         return "CONTROLLER_NOT_A_REGISTERED_WORKTREE"
     # The gitdir the Controller's .git points at must point back at this very
     # Controller, so a .git repointed at a third worktree's gitdir is refused.
-    try:
-        back = (Path(controller_gitdir) / "gitdir").read_text(encoding="utf-8").strip()
-    except OSError:
-        return "CONTROLLER_NOT_A_LINKED_WORKTREE"
-    if not _same_physical_directory(Path(back), controller / ".git"):
-        return "CONTROLLER_GITDIR_NOT_ITS_OWN"
+    dot_git = controller / ".git"
+    if dot_git.is_dir() and not dot_git.is_symlink():
+        # A primary worktree: its gitdir is its own real .git directory.
+        if not _same_physical_directory(Path(controller_gitdir), dot_git):
+            return "CONTROLLER_GITDIR_NOT_ITS_OWN"
+    else:
+        try:
+            back = (Path(controller_gitdir) / "gitdir").read_text(encoding="utf-8").strip()
+        except OSError:
+            return "CONTROLLER_GITDIR_NOT_ITS_OWN"
+        if not _same_physical_directory(Path(back), dot_git):
+            return "CONTROLLER_GITDIR_NOT_ITS_OWN"
     loaded_head = _git_text(loaded, "rev-parse", "--verify", "HEAD^{commit}")
     controller_head = _git_text(controller, "rev-parse", "--verify", "HEAD^{commit}")
     if not loaded_head or not controller_head:
