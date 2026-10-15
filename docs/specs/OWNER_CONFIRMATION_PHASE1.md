@@ -85,6 +85,60 @@ CAS failures never prompt.
 A stronger identity can be added later through URL-mode elicitation, which
 sends the user to an out-of-band page such as an OAuth or passkey check.
 
+## BOOTSTRAP delegation for Task Card binds (#2270)
+
+Owner decision, recorded on #2270 (James, 2026-10-13 and 2026-10-15): Owner
+authorization is what the Owner says in chat to the agent. Governed tasks run
+with no interactive Owner step while the operating mode is BOOTSTRAP. Before
+this change, every governed task on the live HTTP Gateway stopped at
+`nexus_task_card_create`, because HTTP can never show the confirmation form.
+
+The change is to **what two effects require**, not a new way to obtain a grant:
+
+| Condition (all must hold) | Source of truth |
+|---|---|
+| Effect is `TASK_CARD_CREATE` or `TASK_CARD_COMMIT` | `nexus/orchestrator/bootstrap_agent_authority.py` `DELEGABLE_ACTIONS` |
+| Operating mode is `BOOTSTRAP` and the file is VALID | `docs/governance/current_operating_mode.yaml` of the **loaded deployment** (not the Controller), checked by `scripts/ops/check_operating_mode.py` |
+| Controller binding is `SEPARATE` with no problem | the same state `/health` reports as `controller_binding`; `_require_bound_controller` re-proves it right before the effect |
+
+When all hold, the effect is authorized by the agent identity, and an authority
+record is appended to `bootstrap-agent-authority.jsonl` next to the
+standing-grant store (`~/.local/state/nexus/authority/`, same directory and
+`O_NOFOLLOW` rules as `owner-confirmations.jsonl`) **before** the effect runs.
+If the record cannot be written, the effect is refused. Each record carries:
+the effect and its exact payload hash, `actor: AGENT`,
+`authority_basis: OWNER_CHAT_DELEGATION_BOOTSTRAP`,
+`decision_reference: James3014/Nexus-new#2270`, the operating mode with the
+mode file's SHA-256, the Controller binding, the Goal/scope key,
+`standing_grant_used: false`, a timestamp and a record hash. The tool result's
+`owner_authority` names the record hash.
+
+Why these two effects: they only write `tasks/` files into, and commit them on,
+the separate Controller worktree. The worker that follows runs in an isolated
+target lane and produces a Candidate pending approval. Nothing is pushed,
+merged, released or deleted.
+
+Everything else is unchanged:
+- In any other state (`NOT_SEPARATE`, `DEGRADED`, a missing, invalid or
+  non-BOOTSTRAP mode file), create and commit still need the Owner standing
+  grant.
+- Every other effect class still needs the standing grant, including
+  `TASK_SUBMIT`, `CANDIDATE_ADOPT_EXTERNAL`, `CANDIDATE_REJECT`,
+  `CANDIDATE_SUPERSEDE`, the learning-policy effects, `REPOSITORY_PUSH` and
+  `GITHUB_MERGE`. Candidate approval and integration still need their own
+  `nexus.approval.v2` binding. Merge, release, deletion and ruleset changes
+  keep their Owner gates.
+- **The self-grant prohibition stands.** Delegation never writes a standing
+  grant, never answers or simulates the confirmation form, and grant issuance
+  over HTTP still returns `OWNER_CONFIRMATION_CHANNEL_UNAVAILABLE`. An agent
+  must not start a stdio Gateway to confirm its own grant.
+- Leaving BOOTSTRAP (a separate, Owner-only policy change to the mode file)
+  turns the delegation off without a code change.
+
+Tests: `tests/nexus/orchestrator/test_bootstrap_agent_authority.py`, including
+an end-to-end run over the HTTP tool surface (create, commit,
+`nexus_worker_candidate`, real service, fake provider, verified receipt).
+
 ## Host test matrix
 
 | Host | Declared at `initialize` | Behaviour observed | Status |
