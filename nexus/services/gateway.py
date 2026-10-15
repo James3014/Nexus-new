@@ -34,6 +34,17 @@ from nexus.engine.patch.apply_engine import PatchApplyEngine
 logger = logging.getLogger(__name__)
 
 
+def _evidence_ref_status(status: Any) -> str:
+    """Status token safe to embed in an evidence ref (#2245).
+
+    Upper-cased, restricted to ``[A-Z0-9_]``, at most 32 characters; anything
+    that leaves nothing falls back to ``UNKNOWN``, so a ref can never carry
+    control characters or workflow-command text.
+    """
+    token = re.sub(r"[^A-Z0-9_]", "", str(status or "").upper())[:32]
+    return token or "UNKNOWN"
+
+
 
 def _run_cli_with_hard_timeout(
     command: list[str],
@@ -533,10 +544,8 @@ class BattlesuitGateway:
             if local_outputs and not local_stage_forwardable(local_stage):
                 # #2245: a refused / failed Local stage may still carry the model
                 # response; its advice must not shape the online candidate.
-                local_withheld_status = (
-                    str(local_stage.get("status") or "UNKNOWN")
-                    if isinstance(local_stage, dict)
-                    else "UNKNOWN"
+                local_withheld_status = _evidence_ref_status(
+                    local_stage.get("status") if isinstance(local_stage, Mapping) else None
                 )
                 local_outputs = {}
             local_context = ""

@@ -105,3 +105,43 @@ def test_gate_passed_local_stage_with_failed_status_is_not_forwarded(
     refs = [str(r) for r in result.get("evidence_refs", [])]
     assert not any("local_context_forwarded" in r for r in refs)
     assert "gateway:t2245:local_context_withheld:FAILED" in refs
+
+
+def test_succeeded_local_stage_without_gate_passed_is_not_forwarded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    invoker, prompts = _gateway_invoker(tmp_path, monkeypatch)
+    result = invoker(_context(_local_stage(status="SUCCEEDED", gate_passed=False)))
+    assert len(prompts) == 1
+    assert "[LOCAL_ASSIST_CONTEXT]" not in prompts[0]
+    assert LOCAL_ADVICE not in prompts[0]
+    refs = [str(r) for r in result.get("evidence_refs", [])]
+    assert not any("local_context_forwarded" in r for r in refs)
+    assert "gateway:t2245:local_context_withheld:SUCCEEDED" in refs
+
+
+def test_withheld_evidence_ref_status_is_sanitised(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    invoker, prompts = _gateway_invoker(tmp_path, monkeypatch)
+    weird = "failed\n::error file=x::%0A[pwn] " + "x" * 80
+    result = invoker(_context(_local_stage(status=weird, gate_passed=False)))
+    assert "[LOCAL_ASSIST_CONTEXT]" not in prompts[0]
+    withheld = [
+        str(r) for r in result.get("evidence_refs", []) if "local_context_withheld" in str(r)
+    ]
+    assert len(withheld) == 1
+    token = withheld[0].rsplit(":", 1)[1]
+    assert token
+    assert len(token) <= 32
+    assert all(ch.isupper() or ch.isdigit() or ch == "_" for ch in token)
+    assert token.startswith("FAILED")
+
+
+def test_withheld_evidence_ref_status_falls_back_to_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    invoker, _prompts = _gateway_invoker(tmp_path, monkeypatch)
+    result = invoker(_context(_local_stage(status="::%[]", gate_passed=False)))
+    refs = [str(r) for r in result.get("evidence_refs", [])]
+    assert "gateway:t2245:local_context_withheld:UNKNOWN" in refs

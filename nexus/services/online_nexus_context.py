@@ -52,23 +52,27 @@ NEXUS_HIDDEN_MARKER = "[NEXUS HIDDEN-VERIFIER GUIDANCE]"
 NEXUS_LOCAL_MARKER = "[LOCAL_ASSIST_CONTEXT]"
 
 # Nexus-new#2245: statuses under which a Local stage may contribute to Online.
-# Mirrors nexus_runtime.kernel.local_stage.LOCAL_STAGE_SUCCESS_STATUSES.
+# Mirrors nexus_runtime.kernel.local_stage.LOCAL_STAGE_SUCCESS_STATUSES
+# (nexus-runtime#214); keep the two in step until Nexus-new can import it.
 LOCAL_STAGE_SUCCESS_STATUSES = frozenset({"SUCCEEDED", "PASS", "COMPLETED"})
 
 
 def local_stage_forwardable(local_stage: Any) -> bool:
     """True only when a Local stage may feed context into the Online prompt (#2245).
 
-    Fail closed: the stage must be a mapping, report a success status, have
-    ``gate_passed`` exactly ``True`` and not be flagged ``online_context_withheld``.
+    Mirrors nexus-runtime#214's ``_local_stage_forwardable``.  Fail closed: the
+    stage must be a mapping, must not carry a truthy ``online_context_withheld``
+    flag, must report a success status (compared after ``strip().upper()``) and
+    must have ``gate_passed`` exactly ``True`` (``"true"`` / ``1`` do not count).
     A refused / failed stage contributes nothing to Online even when it still
     carries the raw model response for evidence.
     """
     if not isinstance(local_stage, Mapping):
         return False
-    if local_stage.get("online_context_withheld") is True:
+    if local_stage.get("online_context_withheld"):
         return False
-    if str(local_stage.get("status") or "") not in LOCAL_STAGE_SUCCESS_STATUSES:
+    status = str(local_stage.get("status") or "").strip().upper()
+    if status not in LOCAL_STAGE_SUCCESS_STATUSES:
         return False
     return local_stage.get("gate_passed") is True
 NEXUS_EVIDENCE_MARKER = "[NEXUS CAPABILITY EVIDENCE]"

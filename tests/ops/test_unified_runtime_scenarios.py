@@ -510,3 +510,55 @@ def test_hybrid_scenario_fails_closed_when_ollama_endpoint_is_unavailable(monkey
     assert report["terminal_status"] == "EVIDENCE_PRECONDITION_NOT_MET"
     assert report["reason"] == "ollama_endpoint_unavailable"
     assert report["provider_call_count"] == 0
+
+
+_SCENARIO_LOCAL_SENTINEL = "scenario-local-advice-2245"
+
+
+def _echo_injected_invoker() -> object:
+    return scenarios._build_injected_online_invoker(
+        [sys.executable, "-c", "import sys; sys.stdout.write(sys.stdin.read())"],
+        timeout_sec=30,
+        include_local_context=True,
+    )
+
+
+def _scenario_local_stage(*, status: str, gate_passed: object) -> dict[str, object]:
+    return {
+        "invoked": True,
+        "status": status,
+        "gate_passed": gate_passed,
+        "response": {
+            "task_id": "scn-2245",
+            "concise_summary": _SCENARIO_LOCAL_SENTINEL,
+            "local_outputs": {"concise_summary": _SCENARIO_LOCAL_SENTINEL},
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("status", "gate_passed"),
+    (("FAILED", False), ("SUCCEEDED", False), ("FAILED", True), ("SUCCEEDED", "true")),
+)
+def test_injected_scenario_invoker_withholds_refused_local_stage(status, gate_passed) -> None:
+    response = _echo_injected_invoker()({
+        "task_id": "scn-2245",
+        "online_prompt": "online body",
+        "local": _scenario_local_stage(status=status, gate_passed=gate_passed),
+    })
+    echoed = str(response.get("raw_response") or "")
+    assert "online body" in echoed
+    assert "[LOCAL_ASSIST_CONTEXT]" not in echoed
+    assert _SCENARIO_LOCAL_SENTINEL not in echoed
+    assert not any("local_context_forwarded" in str(r) for r in response["evidence_refs"])
+
+
+def test_injected_scenario_invoker_forwards_succeeded_gate_passed_local_stage() -> None:
+    response = _echo_injected_invoker()({
+        "task_id": "scn-2245",
+        "online_prompt": "online body",
+        "local": _scenario_local_stage(status="SUCCEEDED", gate_passed=True),
+    })
+    echoed = str(response.get("raw_response") or "")
+    assert "[LOCAL_ASSIST_CONTEXT]" in echoed
+    assert any("local_context_forwarded" in str(r) for r in response["evidence_refs"])
