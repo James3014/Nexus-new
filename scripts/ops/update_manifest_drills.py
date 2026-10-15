@@ -7,6 +7,7 @@ from typing import Any, Mapping
 
 MANIFEST_PATH = Path("docs/reports/policy-manifest.v2.json")
 LANES = ("hard", "soft", "shadow")
+ENFORCEMENT_MODES = ("block", "record_only", "not_wired")
 TEST_POLICY_ID = "P-TEST-NODRILL-01"
 
 
@@ -19,8 +20,8 @@ def _test_policy() -> dict[str, Any]:
         "schema_version": "v1.0",
         "commit_sha": "1c9dce65",
         "verified_in_pr": None,
-        "enforcement_mode": "not_wired",
         "status_tag": "spec-backed",
+        "enforcement_mode": "not_wired",
         "test_entrypoints": ["tests/test_policy_manager.py"],
         "receipt_type": "TestReceipt",
         "rollback_drill_status": "no-drill",
@@ -89,6 +90,14 @@ def update_manifest(data: Mapping[str, Any]) -> dict[str, Any]:
     for lane in LANES:
         summary[f"{lane}_lane"] = distribution.get(lane, {}).get("count", 0)
     summary["lane_distribution"] = distribution
+    summary["enforcement_mode_distribution"] = {
+        mode: sorted(
+            str(policy["policy_id"])
+            for policy in policies
+            if policy.get("enforcement_mode") == mode
+        )
+        for mode in ENFORCEMENT_MODES
+    }
     updated["summary"] = summary
     return updated
 

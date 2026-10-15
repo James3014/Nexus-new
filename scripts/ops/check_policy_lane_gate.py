@@ -57,31 +57,107 @@ def _module_name(path: str) -> str | None:
     return ".".join(parts) if parts else None
 
 
+def _contained(path: Path, repo_root: Path) -> Path | None:
+    """``path`` resolved, only if it stays inside ``repo_root`` (symlinks followed)."""
+    try:
+        resolved = path.resolve()
+        resolved.relative_to(repo_root.resolve())
+    except (OSError, ValueError, RuntimeError):
+        return None
+    return resolved
+
+
 def _module_file(module: str, repo_root: Path) -> Path | None:
-    base = repo_root.joinpath(*module.split("."))
+    parts = module.split(".")
+    if not module or any(not part or part in (".", "..") for part in parts):
+        return None
+    base = repo_root.joinpath(*parts)
     for candidate in (base.with_suffix(".py"), base / "__init__.py"):
-        if candidate.is_file():
-            return candidate
+        resolved = _contained(candidate, repo_root)
+        if resolved is not None and resolved.is_file():
+            return resolved
     return None
 
 
-def _imported_modules(path: Path) -> set[str]:
-    """Absolute module names a Python file imports anywhere (static, ``ast`` only)."""
+def _is_type_checking_guard(node: ast.AST) -> bool:
+    """``if TYPE_CHECKING:`` / ``if typing.TYPE_CHECKING:`` — imports there never run."""
+    if not isinstance(node, ast.If):
+        return False
+    test = node.test
+    if isinstance(test, ast.Name):
+        return test.id == "TYPE_CHECKING"
+    return isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
+
+
+def _package_parts(path: Path, repo_root: Path) -> list[str]:
+    """Dotted-path components of the package that ``path`` belongs to."""
     try:
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    except (OSError, SyntaxError, UnicodeDecodeError):
+        parts = list(path.resolve().relative_to(repo_root.resolve()).with_suffix("").parts)
+    except (OSError, ValueError, RuntimeError):
+        return []
+    if parts and parts[-1] == "__init__":
+        parts.pop()
+        return parts
+    return parts[:-1]
+
+
+def _parse(path: Path) -> ast.Module | None:
+    try:
+        return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    except (OSError, SyntaxError, UnicodeDecodeError, ValueError):
+        return None
+
+
+def _imported_modules(path: Path, repo_root: Path) -> set[str]:
+    """Absolute module names a Python file imports anywhere (static, ``ast`` only).
+
+    Relative imports are resolved against the file's package. ``importlib`` /
+    string imports are not seen (the walk fails closed) and anything under
+    ``if TYPE_CHECKING:`` is ignored because it never executes.
+    """
+    tree = _parse(path)
+    if tree is None:
         return set()
+    package = _package_parts(path, repo_root)
     found: set[str] = set()
-    for node in ast.walk(tree):
+    stack: list[ast.AST] = [tree]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, ast.If) and _is_type_checking_guard(node):
+            stack.extend(node.orelse)
+            continue
         if isinstance(node, ast.Import):
             found.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
-            found.add(node.module)
-            found.update(f"{node.module}.{alias.name}" for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                if node.level - 1 > len(package):
+                    continue
+                base = package[: len(package) - (node.level - 1)]
+                module = ".".join(base + ([node.module] if node.module else []))
+            else:
+                module = node.module or ""
+            if module:
+                found.add(module)
+                found.update(f"{module}.{alias.name}" for alias in node.names)
+        stack.extend(ast.iter_child_nodes(node))
     return found
 
 
-def check_enforcement_wiring(policy: dict, repo_root: Path = REPO_ROOT) -> list[str]:
+def _entrypoint_exists(path: Path, selector: str) -> bool:
+    """``file::Class::test_name[param]`` — every named component is a def/class in the file."""
+    tree = _parse(path)
+    if tree is None:
+        return False
+    defined = {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    }
+    names = [part.split("[", 1)[0].strip() for part in selector.split("::") if part.strip()]
+    return all(name in defined for name in names)
+
+
+def check_enforcement_wiring(policy: dict, repo_root: Path | None = None) -> list[str]:
     """#2259: a ``block``/``record_only`` policy must be tested through a production caller.
 
     Static check. ``source_file`` minus ``guard_modules`` are the production
@@ -90,9 +166,15 @@ def check_enforcement_wiring(policy: dict, repo_root: Path = REPO_ROOT) -> list[
     through a guard module. A test whose only imports are the guard itself proves
     the guard works, not that anything enforces it (#2199).
 
+    Limits, stated plainly: this is an import check, not an execution check. A
+    test that imports a caller and then exercises only the guard passes. For a
+    single-source policy the guard and the caller are the same file, so the check
+    reduces to "a test entrypoint imports the source module". ``guard_modules``
+    is therefore required whenever ``source_file`` lists more than one path.
     Policies whose ``source_file`` has no Python module (Rust-only) and
     ``not_wired`` policies are out of scope and keep the presence check only.
     """
+    root = REPO_ROOT if repo_root is None else repo_root
     mode = policy.get("enforcement_mode")
     if mode not in ENFORCEMENT_MODES:
         return ["ENFORCEMENT_MODE_INVALID"]
@@ -103,6 +185,8 @@ def check_enforcement_wiring(policy: dict, repo_root: Path = REPO_ROOT) -> list[
     unknown_guards = sorted(guards - set(sources))
     if unknown_guards:
         return [f"GUARD_MODULE_NOT_IN_SOURCE: {', '.join(unknown_guards)}"]
+    if len(sources) > 1 and not guards:
+        return ["GUARD_MODULES_REQUIRED"]
     py_sources = {m for m in (_module_name(p) for p in sources) if m}
     if not py_sources:
         return []
@@ -111,31 +195,37 @@ def check_enforcement_wiring(policy: dict, repo_root: Path = REPO_ROOT) -> list[
     if not callers:
         return ["ENFORCEMENT_CALLERS_MISSING"]
 
+    missing: list[str] = []
     for entry in policy.get("test_entrypoints") or []:
-        file_part = str(entry).split("::", 1)[0].strip()
+        file_part, _, selector = str(entry).partition("::")
+        file_part = file_part.strip()
         if not file_part.endswith(".py"):
             continue
-        start = repo_root / file_part
-        if not start.is_file():
+        start = None if Path(file_part).is_absolute() else _contained(root / file_part, root)
+        if start is None or not start.is_file() or not _entrypoint_exists(start, selector):
+            missing.append(str(entry))
             continue
         seen: set[str] = set()
         frontier = [start]
         for _ in range(_IMPORT_WALK_DEPTH):
             next_frontier: list[Path] = []
             for file in frontier:
-                for module in _imported_modules(file):
+                for module in _imported_modules(file, root):
                     if module in callers:
                         return []
                     if module in seen or module in guard_modules:
                         continue
                     seen.add(module)
-                    target = _module_file(module, repo_root)
+                    target = _module_file(module, root)
                     if target is not None:
                         next_frontier.append(target)
             if not next_frontier:
                 break
             frontier = next_frontier
-    return ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"]
+    errors = ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"]
+    if missing:
+        errors.insert(0, f"TEST_ENTRYPOINT_NOT_FOUND: {', '.join(missing)}")
+    return errors
 
 
 def check_hard_lane(policy: dict, action: str) -> dict:
@@ -149,6 +239,10 @@ def check_hard_lane(policy: dict, action: str) -> dict:
             errors.append("TEST_COVERAGE_MISSING")
         else:
             errors.extend(check_enforcement_wiring(policy))
+        if policy.get("enforcement_mode") == "not_wired":
+            # A hard-lane policy that enforces nothing cannot be modified under the
+            # hard-lane contract; relabelling is not a way around the wiring check.
+            errors.append("HARD_LANE_NOT_WIRED")
 
     if action == "promote":
         if policy.get("promotion_allowed") is False:

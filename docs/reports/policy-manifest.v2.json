@@ -2,7 +2,8 @@
   "manifest_version": "2.0.0",
   "generated_at": "2026-06-15T00:00:00Z",
   "commit_sha": "1c9dce6597f3eb52006df8223000d2162624f55d",
-  "commit_ref_policy": "#2259: per-policy commit_sha must be verifiable after a squash merge, so it is the full SHA of the squash-merge commit on main and verified_in_pr names the PR (gh pr view N --json mergeCommit). PR-branch commits are never recorded. The 27 baseline-freeze entries (2026-06-15) keep the historical short id 1c9dce65 with verified_in_pr null; that commit predates this repository's history and is kept as a label, not a reference.",
+  "commit_ref_policy": "#2259: per-policy commit_sha must be verifiable after a squash merge, so it is the full SHA of the squash-merge commit on main and verified_in_pr names the PR (gh pr view N --json mergeCommit). PR-branch commits are never recorded. The 27 baseline-freeze entries (2026-06-15) keep the historical short id 1c9dce65 with verified_in_pr null; that commit predates this repository's history and is kept as a label, not a reference. New entries must carry a verified_in_pr.",
+  "enforcement_mode_policy": "#2259: enforcement_mode was backfilled on 2026-10-15 from the lane definition, not from a per-policy verification: hard and soft code-backed entries -> block, shadow (observation-only) -> record_only, the drill fixture P-TEST-NODRILL-01 -> not_wired, P-CONTAM-01 -> record_only (#2216). Only hard-lane entries are checked by the lane gate (check_enforcement_wiring); for soft and shadow entries the value is an unverified declaration until a later change adds coverage.",
   "baseline_freeze": true,
   "principle": "lane-based governance, not monolithic lock-down",
   "lane_model": "policy-lane-model.v1",
@@ -14,10 +15,10 @@
       "source_file": "string — path to source file",
       "schema_version": "string — version of the policy implementation",
       "commit_sha": "string — full SHA of the commit on main that last verified the policy (the squash-merge commit of verified_in_pr); baseline-freeze entries keep the pre-split short id 1c9dce65, which is not resolvable in this repository (see commit_ref_policy)",
-      "verified_in_pr": "integer|null — Nexus-new PR whose squash merge is commit_sha; null for baseline-freeze entries",
+      "verified_in_pr": "integer|null — Nexus-new PR whose squash merge is commit_sha; null only for the 2026-06-15 baseline-freeze entries",
       "status_tag": "string — code-backed|spec-backed|inferred|historical",
-      "enforcement_mode": "string — block|record_only|not_wired — block stops or alters execution, record_only records a signal and never blocks, not_wired has no production caller",
-      "guard_modules": "list[string] — optional; the entries of source_file that implement the check itself. The lane gate requires a test entrypoint that reaches a source_file module outside this list (a production caller), see check_enforcement_wiring (#2259)",
+      "enforcement_mode": "string — block|record_only|not_wired — block stops or alters execution, record_only records a signal and never blocks, not_wired has no production caller (see enforcement_mode_policy)",
+      "guard_modules": "list[string] — the entries of source_file that implement the check itself; required when source_file lists more than one path. The lane gate requires a test entrypoint that reaches a source_file module outside this list (a production caller), see check_enforcement_wiring (#2259). For a single-source policy the check reduces to 'a test entrypoint imports the source module'",
       "test_entrypoints": "list[string] — test file paths or inline test locations",
       "receipt_type": "string — receipt type produced by this policy",
       "rollback_drill_status": "string — no-drill|drilled-{date}",
@@ -222,13 +223,6 @@
           "diff_summary": "Override applied: Integration test override",
           "lane": "soft",
           "override_id": "OVR-2026-06-15-125245-30cb6b1c"
-        },
-        {
-          "version": "P-BUDGET-01.1.0.override",
-          "timestamp": "2026-10-15T07:18:28.287427+00:00",
-          "diff_summary": "Override applied: Integration test override",
-          "lane": "soft",
-          "override_id": "OVR-2026-10-15-071828-1a38e764"
         }
       ]
     },
@@ -806,21 +800,6 @@
           "lane": "soft",
           "rollback_from": "OVR-2026-06-15-125245-c92b59bb",
           "rollback_to": "P-LEARN-01.1.0.0"
-        },
-        {
-          "version": "P-LEARN-01.1.0.override",
-          "timestamp": "2026-10-15T07:18:28.457727+00:00",
-          "diff_summary": "Override applied: Rollback test",
-          "lane": "soft",
-          "override_id": "OVR-2026-10-15-071828-47f01f23"
-        },
-        {
-          "version": "P-LEARN-01.rollback",
-          "timestamp": "2026-10-15T07:18:28.548818+00:00",
-          "diff_summary": "Rollback from override OVR-2026-10-15-071828-47f01f23 to P-LEARN-01.1.0.0",
-          "lane": "soft",
-          "rollback_from": "OVR-2026-10-15-071828-47f01f23",
-          "rollback_to": "P-LEARN-01.1.0.0"
         }
       ]
     },
@@ -957,13 +936,6 @@
           "diff_summary": "Override applied: Expiry test",
           "lane": "soft",
           "override_id": "OVR-2026-06-15-125248-1b215fc8"
-        },
-        {
-          "version": "P-BELIEF-01.1.0.override",
-          "timestamp": "2026-10-15T07:18:31.971412+00:00",
-          "diff_summary": "Override applied: Expiry test",
-          "lane": "soft",
-          "override_id": "OVR-2026-10-15-071831-ab053dec"
         }
       ]
     },

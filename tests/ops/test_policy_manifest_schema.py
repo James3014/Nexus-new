@@ -24,6 +24,38 @@ from scripts.ops.check_policy_lane_gate import (
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
+BASELINE_LABEL = "1c9dce65"
+# The entries frozen on 2026-06-15 before this repository's history begins; any
+# policy added later must carry verified_in_pr and a real squash-merge commit.
+BASELINE_FREEZE_IDS = frozenset({
+    "P-ROUTE-01",
+    "P-ROUTE-02",
+    "P-ROUTE-03",
+    "P-ROUTE-04",
+    "P-BUDGET-01",
+    "P-PLAN-01",
+    "P-PLAN-02",
+    "P-COST-01",
+    "P-S2T-01",
+    "P-S2T-02",
+    "P-S2T-03",
+    "P-GATE-01",
+    "P-GATE-02",
+    "P-GATE-03",
+    "P-CLAIM-01",
+    "P-CLAIM-02",
+    "P-CLAIM-03",
+    "P-DELIVERY-01",
+    "P-DELIVERY-02",
+    "P-LEARN-01",
+    "P-LEARN-02",
+    "P-AUTO-01",
+    "P-BELIEF-01",
+    "P-CTX-01",
+    "P-SETTLE-01",
+    "P-FLOW-01",
+    "P-TEST-NODRILL-01",
+})
 
 
 def _policy(manifest: dict, policy_id: str) -> dict:
@@ -36,6 +68,7 @@ def _policy(manifest: dict, policy_id: str) -> dict:
 def test_every_policy_declares_a_valid_enforcement_mode() -> None:
     manifest = load_manifest()
     assert "enforcement_mode" in manifest["schema"]["fields"]
+    assert "enforcement_mode_policy" in manifest
     for policy in manifest["policies"]:
         assert policy.get("enforcement_mode") in ENFORCEMENT_MODES, policy["policy_id"]
     distribution = manifest["summary"]["enforcement_mode_distribution"]
@@ -62,10 +95,13 @@ def test_p_contam_01_is_record_only_with_guard_modules() -> None:
     ]
 
 
-def test_guard_modules_are_always_a_subset_of_source_file() -> None:
+def test_guard_modules_are_a_subset_of_source_file_and_present_for_multi_source() -> None:
     for policy in load_manifest()["policies"]:
+        sources = gate._source_paths(policy)
         guards = set(policy.get("guard_modules") or [])
-        assert guards <= set(gate._source_paths(policy)), policy["policy_id"]
+        assert guards <= set(sources), policy["policy_id"]
+        if len(sources) > 1 and policy["enforcement_mode"] != "not_wired":
+            assert guards, policy["policy_id"]
 
 
 def test_invalid_enforcement_mode_fails_closed_in_every_lane(monkeypatch) -> None:
@@ -88,19 +124,23 @@ def test_invalid_enforcement_mode_fails_closed_in_every_lane(monkeypatch) -> Non
 # ─── commit refs ────────────────────────────────────────────────────
 
 
-def _history_available() -> bool:
+def _git(*args: str) -> subprocess.CompletedProcess[str] | None:
     try:
-        shallow = subprocess.run(
-            ["git", "rev-parse", "--is-shallow-repository"],
+        return subprocess.run(
+            ["git", *args],
             cwd=REPO_ROOT,
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=60,
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
-        return False
-    return shallow.returncode == 0 and shallow.stdout.strip() == "false"
+        return None
+
+
+def _history_available() -> bool:
+    shallow = _git("rev-parse", "--is-shallow-repository")
+    return shallow is not None and shallow.returncode == 0 and shallow.stdout.strip() == "false"
 
 
 def test_commit_refs_are_verifiable_after_squash() -> None:
@@ -114,23 +154,19 @@ def test_commit_refs_are_verifiable_after_squash() -> None:
         pr = policy.get("verified_in_pr")
         sha = policy["commit_sha"]
         if pr is None:
-            # Baseline-freeze label (pre-split history), never a PR-branch commit.
-            assert baseline.startswith(sha), policy["policy_id"]
+            # Only the 2026-06-15 baseline-freeze label (pre-split history) may be unverified.
+            assert policy["policy_id"] in BASELINE_FREEZE_IDS, policy["policy_id"]
+            assert sha == BASELINE_LABEL and baseline.startswith(sha), policy["policy_id"]
             continue
         verified += 1
         assert isinstance(pr, int) and pr > 0, policy["policy_id"]
         assert FULL_SHA.match(sha), (policy["policy_id"], sha)
         if history:
-            # The squash-merge commit must be reachable from the current checkout.
-            ancestor = subprocess.run(
-                ["git", "merge-base", "--is-ancestor", sha, "HEAD"],
-                cwd=REPO_ROOT,
-                capture_output=True,
-                text=True,
-                timeout=60,
-                check=False,
-            )
-            assert ancestor.returncode == 0, (policy["policy_id"], sha, ancestor.stderr)
+            # The commit must be reachable from the checkout and be that PR's squash merge.
+            ancestor = _git("merge-base", "--is-ancestor", sha, "HEAD")
+            assert ancestor is not None and ancestor.returncode == 0, (policy["policy_id"], sha)
+            subject = _git("log", "-1", "--format=%s", sha)
+            assert subject is not None and f"(#{pr})" in subject.stdout, (policy["policy_id"], sha)
     assert verified >= 1  # P-CONTAM-01 (#2216)
 
 
@@ -220,7 +256,96 @@ def test_wiring_check_edge_cases(tmp_path: Path) -> None:
     )
     assert check_enforcement_wiring(rust_only, root) == []
     missing_file = _fake_policy(test_entrypoints=["tests/does_not_exist.py"])
-    assert check_enforcement_wiring(missing_file, root) == ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"]
+    assert check_enforcement_wiring(missing_file, root) == [
+        "TEST_ENTRYPOINT_NOT_FOUND: tests/does_not_exist.py",
+        "TEST_ENTRYPOINT_NOT_BEHAVIOURAL",
+    ]
+    # The named test must exist in the file; a file that merely imports the caller is
+    # not an entrypoint.
+    wrong_name = _fake_policy(test_entrypoints=["tests/test_caller.py::test_nope"])
+    assert check_enforcement_wiring(wrong_name, root) == [
+        "TEST_ENTRYPOINT_NOT_FOUND: tests/test_caller.py::test_nope",
+        "TEST_ENTRYPOINT_NOT_BEHAVIOURAL",
+    ]
+    parametrized = _fake_policy(test_entrypoints=["tests/test_caller.py::test_run[1-2]"])
+    assert check_enforcement_wiring(parametrized, root) == []
+    # Multi-source entries must say which files are the guard, otherwise the guard
+    # itself would count as a production caller.
+    no_guards = _fake_policy(guard_modules=[], test_entrypoints=["tests/test_guard_only.py"])
+    assert check_enforcement_wiring(no_guards, root) == ["GUARD_MODULES_REQUIRED"]
+    single = _fake_policy(
+        source_file="pkg/caller.py", guard_modules=[], test_entrypoints=["tests/test_caller.py"]
+    )
+    assert check_enforcement_wiring(single, root) == []
+
+
+def test_wiring_check_ignores_type_checking_and_relative_imports(tmp_path: Path) -> None:
+    root = _fake_repo(tmp_path)
+    (root / "tests" / "test_type_checking.py").write_text(
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n"
+        "    from pkg.caller import run\n"
+        "else:\n"
+        "    from pkg.guard import check\n"
+        "def test_x():\n    assert check(1)\n",
+        encoding="utf-8",
+    )
+    (root / "tests" / "__init__.py").write_text("", encoding="utf-8")
+    (root / "tests" / "helper.py").write_text("from pkg.caller import run\n", encoding="utf-8")
+    (root / "tests" / "test_relative.py").write_text(
+        "from .helper import run\n\ndef test_x():\n    assert run(1)\n", encoding="utf-8"
+    )
+    typed = _fake_policy(test_entrypoints=["tests/test_type_checking.py"])
+    assert check_enforcement_wiring(typed, root) == ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"]
+    # Relative imports are resolved against the file's package.
+    relative = _fake_policy(test_entrypoints=["tests/test_relative.py"])
+    assert check_enforcement_wiring(relative, root) == []
+    (root / "tests" / "test_relative_guard.py").write_text(
+        "from . import helper_guard\n\ndef test_x():\n    assert helper_guard\n", encoding="utf-8"
+    )
+    (root / "tests" / "helper_guard.py").write_text(
+        "from pkg.guard import check\n", encoding="utf-8"
+    )
+    relative_guard = _fake_policy(test_entrypoints=["tests/test_relative_guard.py"])
+    assert check_enforcement_wiring(relative_guard, root) == ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"]
+
+
+def test_wiring_check_keeps_paths_inside_the_repo(tmp_path: Path) -> None:
+    root = _fake_repo(tmp_path)
+    outside = tmp_path / "outside_test.py"
+    outside.write_text(
+        "from pkg import caller\n\ndef test_run():\n    assert caller\n", encoding="utf-8"
+    )
+    for entry in (str(outside), "../outside_test.py::test_run"):
+        policy = _fake_policy(test_entrypoints=[entry])
+        assert check_enforcement_wiring(policy, root) == [
+            f"TEST_ENTRYPOINT_NOT_FOUND: {entry}",
+            "TEST_ENTRYPOINT_NOT_BEHAVIOURAL",
+        ]
+    link = root / "tests" / "test_link.py"
+    link.symlink_to(outside)
+    linked = _fake_policy(test_entrypoints=["tests/test_link.py::test_run"])
+    assert check_enforcement_wiring(linked, root) == [
+        "TEST_ENTRYPOINT_NOT_FOUND: tests/test_link.py::test_run",
+        "TEST_ENTRYPOINT_NOT_BEHAVIOURAL",
+    ]
+
+
+def test_hard_lane_not_wired_is_not_an_escape_hatch(monkeypatch) -> None:
+    original = load_manifest()
+    tampered = {
+        **original,
+        "policies": [
+            {**p, "enforcement_mode": "not_wired"} if p["policy_id"] == "P-CONTAM-01" else p
+            for p in original["policies"]
+        ],
+    }
+    monkeypatch.setattr(gate, "load_manifest", lambda: tampered)
+    for action in ("modify", "promote", "cutover"):
+        result = check_lane_gate("P-CONTAM-01", action)
+        assert result["allowed"] is False
+        assert "HARD_LANE_NOT_WIRED" in result["errors"]
+    assert check_lane_gate("P-CONTAM-01", "observe")["allowed"] is True
 
 
 def test_lane_gate_rejects_guard_only_entrypoint_for_real_policy(
@@ -235,11 +360,10 @@ def test_lane_gate_rejects_guard_only_entrypoint_for_real_policy(
         encoding="utf-8",
     )
     original = load_manifest()
-    rel = guard_only.relative_to(tmp_path).as_posix()
     tampered = {
         **original,
         "policies": [
-            {**p, "test_entrypoints": [f"{rel}::test_direct"]}
+            {**p, "test_entrypoints": ["test_guard_direct.py::test_direct"]}
             if p["policy_id"] == "P-CONTAM-01"
             else p
             for p in original["policies"]
@@ -247,9 +371,35 @@ def test_lane_gate_rejects_guard_only_entrypoint_for_real_policy(
     }
     monkeypatch.setattr(gate, "load_manifest", lambda: tampered)
     monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+    assert gate.check_enforcement_wiring(_policy(tampered, "P-CONTAM-01")) == [
+        "TEST_ENTRYPOINT_NOT_BEHAVIOURAL"
+    ]
     result = check_lane_gate("P-CONTAM-01", "modify")
     assert result["allowed"] is False
     assert "TEST_ENTRYPOINT_NOT_BEHAVIOURAL" in result["errors"]
+
+    # Positive control under the same tmp root: an entrypoint that reaches a production
+    # caller is accepted, so the rejection above is about the guard-only import, not a
+    # missing file.
+    via_caller = tmp_path / "test_via_caller.py"
+    via_caller.write_text(
+        "def test_flow():\n"
+        "    from nexus.app import research_flow_service\n"
+        "    assert research_flow_service\n",
+        encoding="utf-8",
+    )
+    accepted = {
+        **tampered,
+        "policies": [
+            {**p, "test_entrypoints": ["test_via_caller.py::test_flow"]}
+            if p["policy_id"] == "P-CONTAM-01"
+            else p
+            for p in tampered["policies"]
+        ],
+    }
+    monkeypatch.setattr(gate, "load_manifest", lambda: accepted)
+    assert gate.check_enforcement_wiring(_policy(accepted, "P-CONTAM-01")) == []
+    assert check_lane_gate("P-CONTAM-01", "modify")["allowed"] is True
 
 
 @pytest.mark.parametrize("action", ["modify", "promote", "cutover"])
@@ -262,3 +412,17 @@ def test_real_manifest_hard_lane_policies_are_behaviourally_tested(action: str) 
         result = check_lane_gate(policy["policy_id"], action)
         assert "TEST_ENTRYPOINT_NOT_BEHAVIOURAL" not in result["errors"], policy["policy_id"]
         assert "ENFORCEMENT_MODE_INVALID" not in result["errors"], policy["policy_id"]
+
+
+def test_drill_updater_keeps_schema_fields_and_distribution() -> None:
+    from scripts.ops.update_manifest_drills import update_manifest
+
+    manifest = load_manifest()
+    updated = update_manifest(manifest)
+    fixture = _policy(updated, "P-TEST-NODRILL-01")
+    assert list(fixture) == list(_policy(manifest, "P-TEST-NODRILL-01"))
+    assert fixture["enforcement_mode"] == "not_wired" and fixture["verified_in_pr"] is None
+    assert (
+        updated["summary"]["enforcement_mode_distribution"]
+        == manifest["summary"]["enforcement_mode_distribution"]
+    )

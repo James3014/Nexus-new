@@ -134,7 +134,7 @@ jobs:
 
       - name: Run Lane Gate Tests
         run: |
-          uv run pytest tests/ops/test_policy_lane_gate.py -v --tb=short
+          uv run pytest tests/ops/test_policy_lane_gate.py tests/ops/test_policy_manifest_schema.py -v --tb=short
 
       - name: No Policy Changes
         if: steps.files.outputs.has_changes != 'true'
