@@ -163,11 +163,21 @@ def build_isolated_env(
     return env
 
 
-def _ensure_macos_isolated_keychain(home_dir: str) -> None:
-    """Give an isolated AGY HOME its own default keychain on macOS."""
+AGY_ISOLATED_KEYCHAIN = Path("Library") / "Keychains" / "agy.keychain-db"
+
+
+def ensure_macos_isolated_keychain(
+    home_dir: str, *, security: Optional[str] = None
+) -> Optional[Path]:
+    """Give an isolated AGY HOME its own default keychain on macOS.
+
+    Returns the keychain path, or ``None`` when not applicable (not macOS).
+    Every ``security`` call runs with ``HOME=<home_dir>``, so the login
+    keychain and the real user's keychain preferences are never touched.
+    """
     if sys.platform != "darwin":
-        return
-    security = shutil.which("security")
+        return None
+    security = security or shutil.which("security")
     if not security:
         raise AgyAccountPoolManagerError("AGY_KEYCHAIN_SECURITY_TOOL_MISSING")
 
@@ -179,7 +189,7 @@ def _ensure_macos_isolated_keychain(home_dir: str) -> None:
     prefs_dir = home / "Library" / "Preferences"
     keychains_dir.mkdir(parents=True, exist_ok=True)
     prefs_dir.mkdir(parents=True, exist_ok=True)
-    keychain = keychains_dir / "agy.keychain-db"
+    keychain = home / AGY_ISOLATED_KEYCHAIN
     env = dict(os.environ)
     env["HOME"] = str(home)
 
@@ -208,6 +218,12 @@ def _ensure_macos_isolated_keychain(home_dir: str) -> None:
     run("set-keychain-settings", str(keychain))
     run("default-keychain", "-s", str(keychain))
     run("list-keychains", "-s", str(keychain), "/Library/Keychains/System.keychain")
+    return keychain
+
+
+def _ensure_macos_isolated_keychain(home_dir: str) -> None:
+    """Pool account HOMEs (kept as the pool's patchable call site)."""
+    ensure_macos_isolated_keychain(home_dir)
 
 
 def _is_populated_runtime(path: Path) -> bool:

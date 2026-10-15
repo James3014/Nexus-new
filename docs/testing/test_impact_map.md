@@ -120,6 +120,7 @@
 | nexus/evidence/receipt_base.py | tests/architecture/test_planner_alias.py, tests/services/test_unified_runtime.py | active | high | runtime_owned_planner_alias_contract |
 | nexus/engine | tests/engine, tests/test_engine_*.py | active | high | governance |
 | nexus/engine/sandbox_runner.py | tests/engine/test_sandbox_actions.py | active | high | sandbox_physical_runner_contract |
+| nexus/executors/agy_dispatch_boundary.py | tests/services/test_agy_dispatch_write_boundary.py, tests/services/test_agy_dispatch.py | active | high | agy_dispatch_write_boundary_contract |
 | nexus/engine/confined_test_runner.py | tests/services/test_post_candidate_seam.py, tests/research/test_post_candidate_seam_wiring.py | active | high | post_candidate_confined_sandbox_hidden_test_forbidden_contract |
 | nexus/services/post_candidate_seam.py | tests/services/test_post_candidate_seam.py, tests/research/test_post_candidate_seam_wiring.py, tests/services/test_escalate_planner_signal_triggers.py | active | high | post_candidate_seam_sandbox_ultra_review_file_lock_contract |
 | nexus/executors/cli_worker.py | tests/nexus/executors/test_cli_worker.py | active | high | cli_worker_executor_contract |

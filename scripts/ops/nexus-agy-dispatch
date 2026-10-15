@@ -1083,15 +1083,61 @@ def _has_permission_failure_signal(text: str) -> bool:
     return any(marker in lowered for marker in _PERMISSION_FAILURE_MARKERS)
 
 
+_AGY_ERROR_LINE_RE = re.compile(r"(?m)^AGY_ERROR:\s*(?P<payload>\{.*\})\s*$")
+
+
+def _has_structured_quota_error(stderr: str) -> bool:
+    """agy's ``AGY_ERROR`` JSON reporting RESOURCE_EXHAUSTED or HTTP 429."""
+    for match in _AGY_ERROR_LINE_RE.finditer(stderr):
+        try:
+            payload = json.loads(match.group("payload"))
+        except ValueError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        status = str(payload.get("status") or "").upper()
+        if status == "RESOURCE_EXHAUSTED" or payload.get("error_code") in (429, "429"):
+            return True
+    return False
+
+
+def _has_provider_quota_signal(stderr: str) -> bool:
+    """#2202: quota markers or agy's structured ``AGY_ERROR`` quota failure."""
+    return _has_quota_failure_signal(stderr) or _has_structured_quota_error(stderr)
+
+
+def _permission_scan_text(text: str, run_homes: list[Path]) -> str:
+    """#2202: drop Seatbelt's expected EPERM lines for agy's own run-HOME writes.
+
+    ``run_homes`` are the disposable HOMEs of this dispatch's attempts (the
+    provider log spans attempts).  A line is dropped only when the boundary
+    attributes it to one of them and it carries no permission marker besides
+    the EPERM text, so a real tool-permission denial (anywhere) still counts.
+    """
+    if not text or not run_homes:
+        return text
+    boundary = _agy_dispatch_boundary()
+    kept = []
+    for line in text.splitlines(keepends=True):
+        if any(boundary.is_expected_run_home_denial(line, home) for home in run_homes):
+            residue = line.lower().replace("operation not permitted", "")
+            if not _has_permission_failure_signal(residue):
+                continue
+        kept.append(line)
+    return "".join(kept)
+
+
 def classify_failure(
     returncode: int | None, stdout: str, stderr: str, timed_out: bool
 ) -> AccountFailureKind:
     if timed_out:
         return AccountFailureKind.TIMEOUT
     text = (stdout + "\n" + stderr).lower()
+    # A genuine permission signal is never masked by a quota failure; callers
+    # strip the boundary's expected run-HOME noise first (#2202).
     if _has_permission_failure_signal(text):
         return AccountFailureKind.PERMISSION_OR_SCOPE_ERROR
-    if _has_quota_failure_signal(stderr):
+    if _has_provider_quota_signal(stderr):
         return AccountFailureKind.QUOTA_EXHAUSTED
     if (
         "invalid model selection" in text
@@ -1265,8 +1311,15 @@ def run_agy(
     stream_no_progress_seconds: float | None = None,
     pre_effect_max_seconds: float | None = None,
     pre_effect_max_tool_events: int | None = None,
+    write_boundary: Any = None,
 ):
     expect_coding_progress = bool(expect_coding_progress and mode == "accept-edits")
+    if mode == "accept-edits":
+        # #2202: never launch an editing Agy run without the Seatbelt write
+        # boundary, disposable HOME, exact env and descendant sweep.
+        if write_boundary is None:
+            raise RuntimeError("AGY_WRITE_BOUNDARY_REQUIRED")
+        env = write_boundary.env
     agy = shutil.which("agy")
     if not agy:
         raise RuntimeError("AGY_BINARY_NOT_FOUND")
@@ -1316,8 +1369,12 @@ def run_agy(
         provider_log_offset = 0
 
     started = time.monotonic()
+    launch_argv = argv
+    if write_boundary is not None:
+        launch_argv = write_boundary.wrap_argv(argv)
+        write_boundary.before_launch()
     process = subprocess.Popen(
-        argv,
+        launch_argv,
         cwd=cwd,
         env=env,
         stdout=subprocess.PIPE,
@@ -1327,6 +1384,8 @@ def run_agy(
         start_new_session=True,
     )
     provider_pid = getattr(process, "pid", None)
+    if write_boundary is not None and isinstance(provider_pid, int):
+        write_boundary.after_launch(provider_pid)
     provider_pgid: int | None = (
         provider_pid if isinstance(provider_pid, int) and provider_pid > 0 else None
     )
@@ -1720,6 +1779,11 @@ def run_agy(
             except Exception:
                 pass
 
+    # #2202: a descendant that survives the provider (setsid, cleared env,
+    # cwd inside the target or run root) is killed; an unproven sweep fails
+    # the attempt.
+    descendants_swept = write_boundary.sweep() if write_boundary is not None else True
+
     stdout_thread.join(timeout=2)
     stderr_thread.join(timeout=2)
     out = "".join(stdout_lines)
@@ -1811,6 +1875,15 @@ def run_agy(
             provider_process_state="EXITED",
         )
 
+    if not descendants_swept:
+        err += f"\n{DESCENDANT_SWEEP_FAILED_MARKER}\n"
+        return (
+            process.returncode if process.returncode not in (None, 0) else 1,
+            out,
+            err,
+            False,
+            wall_ms,
+        )
     if non_progress_failure is not None:
         err += f"\nNEXUS_AGY_NON_PROGRESS:{non_progress_failure}\n"
         return (
@@ -1831,6 +1904,32 @@ def run_agy(
             wall_ms,
         )
     return process.returncode, out, err, agy_print_timed_out, wall_ms
+
+
+AGY_WRITE_BOUNDARY_UNAVAILABLE = "AGY_WRITE_BOUNDARY_UNAVAILABLE"
+AGY_WRITE_BOUNDARY_RUNNER_UNSUPPORTED = "AGY_WRITE_BOUNDARY_RUNNER_UNSUPPORTED"
+AGY_WRITE_BOUNDARY_PREPARE_FAILED = "AGY_WRITE_BOUNDARY_PREPARE_FAILED"
+AGY_DESCENDANT_SWEEP_FAILED = "AGY_DESCENDANT_SWEEP_FAILED"
+DESCENDANT_SWEEP_FAILED_MARKER = "NEXUS_AGY_DESCENDANT_SWEEP_FAILED"
+
+
+def _agy_dispatch_boundary() -> Any:
+    """The #2202 boundary module, loaded from the snapshot on first use."""
+    return import_module("nexus.executors.agy_dispatch_boundary")
+
+
+def _write_boundary_available() -> bool:
+    try:
+        return bool(_agy_dispatch_boundary().boundary_available())
+    except Exception:
+        # A snapshot without the boundary module cannot confine the run.
+        return False
+
+
+def _runner_accepts(runner: Any, name: str) -> bool:
+    return runner is run_agy or (
+        hasattr(runner, "__code__") and name in runner.__code__.co_varnames
+    )
 
 
 def emit_meta(data: dict) -> None:
@@ -1898,6 +1997,13 @@ _UNSAFE_PERMISSION_RULES = {
     "read_file(/)",
     "write_file(/)",
 }
+
+
+COMMAND_GRANT_REFUSED = "COMMAND_GRANT_REFUSED"
+
+
+def _is_command_rule(rule: str) -> bool:
+    return rule.strip().lower().startswith("command")
 
 
 def install_temp_permissions(
@@ -2088,6 +2194,13 @@ def build_effective_permission_profile(
     for rule in user_allow:
         if rule in _UNSAFE_PERMISSION_RULES:
             raise ValueError(f"UNSAFE_PERMISSION_RULE:{rule}")
+    # #2202 / Owner decision on #1912: no auto-approved commands.  No caller
+    # needs a narrow command grant, so every command allow is refused.
+    if temp_command_permissions:
+        raise ValueError(f"{COMMAND_GRANT_REFUSED}:--temp-command-permissions")
+    for rule in user_allow:
+        if _is_command_rule(rule):
+            raise ValueError(f"{COMMAND_GRANT_REFUSED}:{rule}")
 
     effective_allow: list[str] = list(user_allow)
     effective_deny: list[str] = list(user_deny)
@@ -2133,6 +2246,11 @@ def build_effective_permission_profile(
                     effective_deny.append(r)
         else:
             kind = "CUSTOM"
+
+    # Every profile explicitly denies commands, like the worker adapter's
+    # per-run settings (``agy_run_settings``).
+    if "command(*)" not in effective_deny:
+        effective_deny.append("command(*)")
 
     # Anti-blanket-override / contradiction prevention
     has_command_allow = any(r.startswith("command") for r in effective_allow)
@@ -3049,6 +3167,37 @@ def dispatch_run(
             })
             return 64
 
+    runner = run_agy_fn if run_agy_fn is not None else run_agy
+    # #2202: an accept-edits Agy run only ever starts inside the #1912 Seatbelt
+    # write boundary.  Refuse before any account is leased when it is missing.
+    # A runner that cannot take the boundary would run unconfined, so it is
+    # refused here too rather than after a lease.
+    needs_write_boundary = mode == "accept-edits"
+    boundary_refusal = None
+    if needs_write_boundary and not _runner_accepts(runner, "write_boundary"):
+        boundary_refusal = AGY_WRITE_BOUNDARY_RUNNER_UNSUPPORTED
+    elif needs_write_boundary and not _write_boundary_available():
+        boundary_refusal = AGY_WRITE_BOUNDARY_UNAVAILABLE
+    if boundary_refusal is not None:
+        boundary_failure = f"DISPATCH_CONTRACT_REJECTED:{boundary_refusal}"
+        _operation_hook(
+            operation_hook,
+            phase="CONTRACT_REJECTED",
+            attempts=0,
+            rotations=0,
+            failure_kind=boundary_failure,
+            provider_effect=False,
+        )
+        emit_meta({
+            "status": "invalid_contract",
+            "attempts": 0,
+            "rotations": 0,
+            "failure_kind": boundary_failure,
+            "provider_effect": False,
+            "wall_ms": 0,
+        })
+        return 64
+
     if coordinator is None:
         if not MANAGER.is_file() or not MANAGER_ROOT.is_dir():
             raise SystemExit("AGY_ACCOUNT_POOL_RUNTIME_MISSING")
@@ -3064,7 +3213,6 @@ def dispatch_run(
             leases_dir=LEASES_DIR,
         )
 
-    runner = run_agy_fn if run_agy_fn is not None else run_agy
     quota_snapshot, availability_state = _apply_dynamic_availability(model)
     model_family = str(availability_state["family"])
     scoped_model_family = model_family if model_family in {"gemini", "claude_gpt"} else None
@@ -3197,6 +3345,8 @@ def dispatch_run(
     active_provider_pgid: int | None = None
 
     attempt_tool_event_count = 0
+    # #2202: disposable run HOMEs of this dispatch's boundary-wrapped attempts.
+    boundary_run_homes: list[Path] = []
 
     def _inner_operation_hook(event: dict[str, Any] | None = None, **kwargs: Any) -> None:
         nonlocal active_provider_pid, active_provider_pgid, attempt_tool_event_count
@@ -3469,8 +3619,50 @@ def dispatch_run(
                 except OSError:
                     provider_log_attempt_offset = None
             permission_token = None
+            write_boundary = None
             attempt_tool_event_count = 0
             try:
+                if needs_write_boundary:
+                    # Disposable HOME + exact env + Seatbelt profile; the permission
+                    # profile below is installed into the disposable HOME, never
+                    # into the leased account HOME.
+                    attestation_log = os.getenv("NEXUS_AGY_ATTESTATION_LOG")
+                    boundary_module = _agy_dispatch_boundary()
+                    try:
+                        write_boundary = boundary_module.prepare_accept_edits_boundary(
+                            source_env=env,
+                            target=cwd,
+                            extra_writable_files=[attestation_log] if attestation_log else [],
+                            extra_writable_roots=[OPERATION_ROOT],
+                        )
+                    except boundary_module.AgyWriteBoundaryError as exc:
+                        # Typed, non-rotating contract rejection; the boundary
+                        # already removed its run root and the outer finally
+                        # releases the lease.
+                        prepare_failure = (
+                            f"DISPATCH_CONTRACT_REJECTED:{AGY_WRITE_BOUNDARY_PREPARE_FAILED}:{exc}"
+                        )
+                        last_kind = prepare_failure
+                        _operation_hook(
+                            operation_hook,
+                            phase="CONTRACT_REJECTED",
+                            attempts=attempts,
+                            rotations=rotations,
+                            failure_kind=prepare_failure,
+                            provider_effect=False,
+                        )
+                        emit_meta({
+                            "status": "invalid_contract",
+                            "attempts": attempts,
+                            "rotations": rotations,
+                            "failure_kind": prepare_failure,
+                            "provider_effect": False,
+                            "account_alias_hash": claim.account_alias_hash,
+                            "lease_id_hash": claim.lease_id_hash,
+                            "wall_ms": total_wall_ms,
+                        })
+                        return 64
+                    env = write_boundary.env
                 allow_rules = list(effective_permissions.get("allow") or [])
                 deny_rules = list(effective_permissions.get("deny") or [])
                 replace_allow_deny = bool(
@@ -3531,10 +3723,64 @@ def dispatch_run(
                     and "pre_effect_max_tool_events" in runner.__code__.co_varnames
                 ):
                     runner_kwargs["pre_effect_max_tool_events"] = pre_effect_max_tool_events
-                code, out, err, timed_out, wall_ms = runner(**runner_kwargs)
+                if write_boundary is not None:
+                    runner_kwargs["write_boundary"] = write_boundary
+                try:
+                    code, out, err, timed_out, wall_ms = runner(**runner_kwargs)
+                except Exception as runner_exc:
+                    # #2202: a launch frame that raised after launch skipped its
+                    # own sweep; sweep now (once) and, when descendants may
+                    # survive, end the operation as a sweep failure.
+                    if write_boundary is None or write_boundary.sweep():
+                        raise
+                    code, out, timed_out, wall_ms = 1, "", False, 0
+                    err = (
+                        f"{type(runner_exc).__name__}: {runner_exc}\n"
+                        f"{DESCENDANT_SWEEP_FAILED_MARKER}\n"
+                    )
             finally:
-                restore_temp_permissions(permission_token)
+                try:
+                    restore_temp_permissions(permission_token)
+                finally:
+                    if write_boundary is not None:
+                        write_boundary.cleanup()
             total_wall_ms += wall_ms
+
+            if write_boundary is not None and DESCENDANT_SWEEP_FAILED_MARKER in (err or ""):
+                # Descendants of this attempt may still be running: never
+                # classify, rotate or retry; end the operation for reconciliation.
+                last_kind = AGY_DESCENDANT_SWEEP_FAILED
+                _operation_hook(
+                    operation_hook,
+                    phase="CLASSIFYING_FAILURE",
+                    attempts=attempts,
+                    rotations=rotations,
+                    failure_kind=last_kind,
+                    timed_out=bool(timed_out),
+                    account_alias_hash=claim.account_alias_hash,
+                    lease_id_hash=claim.lease_id_hash,
+                    provider_effect=None,
+                    reconciliation_required=True,
+                )
+                if out:
+                    sys.stdout.write(out)
+                if err:
+                    sys.stderr.write(err)
+                emit_meta({
+                    "status": "failed",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "failure_kind": last_kind,
+                    "provider_effect": None,
+                    "reconciliation_required": True,
+                    "account_alias_hash": claim.account_alias_hash,
+                    "lease_id_hash": claim.lease_id_hash,
+                    "parallel_slot": True,
+                    "wall_ms": total_wall_ms,
+                    "permission_profile_sha256": permission_profile_sha256,
+                    "permission_profile_kind": permission_profile_kind,
+                })
+                return code if isinstance(code, int) and code != 0 else 1
 
             provider_log_text = ""
             attempt_log_text = ""
@@ -3561,13 +3807,21 @@ def dispatch_run(
                 or "headless mode cannot prompt for" in provider_log_lower
                 or "auto-denied" in provider_log_lower
             )
+            # #2202: Seatbelt's expected run-HOME denials are not permission
+            # evidence; any other permission signal still wins over quota.
+            # A boundary without a run HOME filters nothing (fail-closed).
+            run_home = getattr(write_boundary, "run_home", None)
+            if run_home is not None:
+                boundary_run_homes.append(run_home)
             provider_permission_denial = mode == "accept-edits" and _has_permission_failure_signal(
-                provider_log_text
+                _permission_scan_text(provider_log_text, boundary_run_homes)
             )
+            scanned_out = _permission_scan_text(out, boundary_run_homes)
+            scanned_err = _permission_scan_text(err, boundary_run_homes)
             semantic_output = out + "\n" + err
             semantic_output_lower = semantic_output.lower()
             semantic_permission_refusal = mode == "accept-edits" and _has_permission_failure_signal(
-                semantic_output
+                scanned_out + "\n" + scanned_err
             )
             semantic_headless_denial = mode == "accept-edits" and (
                 "headless mode cannot prompt for" in semantic_output_lower
@@ -3633,7 +3887,7 @@ def dispatch_run(
                 if (permission_blocked or scope_blocked or no_tool_violation)
                 else AccountFailureKind.QUOTA_EXHAUSTED
                 if provider_terminal_quota
-                else classify_failure(code, out, err, timed_out)
+                else classify_failure(code, scanned_out, scanned_err, timed_out)
             )
             last_kind = kind.value
             provider_effect_observed: bool | None = False
@@ -4672,12 +4926,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--mode", choices=("plan", "accept-edits"), default="accept-edits")
     ap.add_argument("--model")
     ap.add_argument("--effort", choices=("low", "medium", "high"))
-    ap.add_argument("--temp-command-permissions", action="store_true")
+    ap.add_argument(
+        "--temp-command-permissions",
+        action="store_true",
+        help="Refused since #2202 (Owner decision on #1912: no auto-approved commands)",
+    )
     ap.add_argument(
         "--allow",
         action="append",
         default=[],
-        help="Temporary exact Agy permission rule; repeatable",
+        help="Temporary exact Agy permission rule; repeatable; command(...) rules are refused",
     )
     ap.add_argument(
         "--deny", action="append", default=[], help="Temporary exact Agy deny rule; repeatable"
