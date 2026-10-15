@@ -959,6 +959,26 @@ def load_captures(
     return out
 
 
+def model_attempts(row: Mapping[str, Any]) -> int:
+    """Model attempts of a with-Nexus row (strict rule ``attempt_count>1``).
+
+    The product's ``attempt_count`` is ``len(candidates)`` and includes local/deterministic
+    candidates (e.g. the ``local_guard_fallback`` the sprint appends when the model's only
+    candidate fails the visible test). Those are never solves and never attempts. A model
+    attempt is a provider call (``model_calls``; the task audit separately requires the
+    captured calls to agree and to be at most one) or a runner-level re-run (each
+    ``model_attempts`` entry: bounded rescue, hidden retry). Rows that carry neither field
+    (legacy) fall back to ``attempt_count``.
+    """
+
+    runs = row.get("model_attempts")
+    has_calls = row.get("model_calls") is not None
+    if not has_calls and not isinstance(runs, list):
+        return int(row.get("attempt_count") or 0)
+    reruns = len(runs) if isinstance(runs, list) else 0
+    return max(int(row.get("model_calls") or 0), reruns)
+
+
 def _row_key(row: Mapping[str, Any]) -> str:
     return f"{row.get('task_id')}__{row.get('trial_index')}"
 
@@ -1009,7 +1029,8 @@ def audit_run(
             row_violations.append(f"{ident}:no_fixture_material")
         if str(row.get("route_cost_policy_source") or ""):
             row_violations.append(f"{ident}:promoted_route_cost_policy")
-        if str(row.get("mode")) == "with_nexus" and int(row.get("attempt_count") or 0) > 1:
+        if str(row.get("mode")) == "with_nexus" and model_attempts(row) > 1:
+            # Label kept for continuity; it counts MODEL attempts (see model_attempts).
             row_violations.append(f"{ident}:attempt_count>1")
         if str(row.get("hidden_retry_reason") or "") in {
             "hidden_verifier_failure_deterministic_pre_retry",

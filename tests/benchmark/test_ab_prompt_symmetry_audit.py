@@ -1251,3 +1251,142 @@ def test_bare_leg_staging_failure_writes_the_row_and_exits_3(tmp_path: Path, mon
     ]
     bare = [r for r in rows if r.get("mode") == "without_nexus" and r.get("hidden_staging_error")]
     assert bare and bare[0]["hidden_test_tampered"] is True and bare[0]["run_eligible"] is False
+
+
+def _strict_row(**fields) -> list[dict]:
+    return [
+        {"mode": "with_nexus", "task_id": "nexus-value-trust-002", "trial_index": 1, **fields},
+        {
+            "mode": "without_nexus",
+            "task_id": "nexus-value-trust-002",
+            "trial_index": 1,
+            "model_calls": 1,
+        },
+    ]
+
+
+def test_local_fallback_candidate_is_not_a_model_attempt(tmp_path: Path) -> None:
+    """The model's only candidate failed the visible test, the sprint appended its
+    local_guard_fallback candidate: attempt_count=2 but one model call, one runner attempt.
+    That is one model attempt; the strict run stays valid (the row is simply not a solve)."""
+
+    _capture(tmp_path, "without_nexus", BARE)
+    _capture(tmp_path, "with_nexus", BARE)
+    rows = _strict_row(
+        attempt_count=2,
+        model_calls=1,
+        model_attempts=[{"attempt_type": "strict_baseline", "model_calls": 1}],
+        status="FAILED",
+    )
+    report = audit_run(tmp_path, _material(), rows=rows)
+    assert report["row_violations"] == []
+    assert report["status"] == "PASS", report
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {
+            "attempt_count": 2,
+            "model_calls": 2,
+            "model_attempts": [{"attempt_type": "strict_baseline"}],
+        },
+        {
+            "attempt_count": 2,
+            "model_calls": 1,
+            "model_attempts": [
+                {"attempt_type": "strict_baseline"},
+                {"attempt_type": "bounded_hyper_rescue"},
+            ],
+        },
+        {"attempt_count": 1, "model_calls": 2},
+    ],
+    ids=["second_model_call", "runner_rescue_rerun", "model_calls_without_attempt_count"],
+)
+def test_a_second_model_attempt_still_fails_the_strict_rule(tmp_path: Path, fields: dict) -> None:
+    _capture(tmp_path, "without_nexus", BARE)
+    _capture(tmp_path, "with_nexus", BARE)
+    report = audit_run(tmp_path, _material(), rows=_strict_row(**fields))
+    assert report["status"] == "FAIL"
+    assert report["row_violations"] == ["with_nexus:nexus-value-trust-002#1:attempt_count>1"]
+
+
+def test_strict_sprint_local_fallback_counts_as_one_model_attempt(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Product side: in the strict symmetric sprint a visible-test failure of the model's
+    candidate adds a local candidate (attempt_count 2) while model_calls stays 1."""
+
+    from nexus.research import sprint_service
+    from nexus.research.sprint_service import CandidateEval, SprintConfig, run_hyper_sprint
+    from scripts.bench.prompt_symmetry_audit import model_attempts
+
+    phase_slo = tmp_path / ".nexus" / "reports" / "learn" / "phase_slo_summary.json"
+    phase_slo.parent.mkdir(parents=True, exist_ok=True)
+    phase_slo.write_text(
+        '{"phase_slo_pass": true, "global": {"required_done_ratio": 1.0}}', encoding="utf-8"
+    )
+    (tmp_path / "demo.py").write_text("def value():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "test_demo.py").write_text(
+        "from demo import value\n\ndef test_value():\n    assert value() == 2\n", encoding="utf-8"
+    )
+
+    class FakeLLMGenerator:
+        source = "llm"
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, **_kwargs):
+            return "def value():\n    return 3\n", {
+                "source": "llm",
+                "model_calls": 1,
+                "tokens_used": 5,
+            }
+
+    class FakeExecutor:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def evaluate_candidate(self, **kwargs):
+            ok = "return 2" in kwargs["code"]
+            return CandidateEval(
+                seed=kwargs["seed"],
+                score=1.0 if ok else 0.4,
+                candidate_code=kwargs["code"],
+                source=kwargs["source"],
+            )
+
+    for name, value in {
+        "NEXUS_SYMMETRIC_PROMPT": "1",
+        "NEXUS_DISABLE_DAYSHIFT_OPTIMIZER": "1",
+        "NEXUS_DISABLE_HIDDEN_INVARIANT_SHADOW": "1",
+        "NEXUS_MODEL_REQUIRED_EXECUTION_MODE": "model_participation_only",
+        "NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL": "0",
+    }.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(sprint_service, "LLMCandidateGenerator", FakeLLMGenerator)
+    monkeypatch.setattr(sprint_service, "SprintExecutor", FakeExecutor)
+    monkeypatch.setattr(
+        "nexus.research.flow.codeintel_context.sprint_codeintel_block", lambda *_a, **_k: ""
+    )
+    res = run_hyper_sprint(
+        repo_root=tmp_path,
+        config=SprintConfig(
+            task="fix value",
+            target_file="demo.py",
+            test_file="test_demo.py",
+            candidate_count=1,
+            llm_mode=True,
+            safe_mode=True,
+        ),
+    )
+    assert res.model_calls == 1
+    assert res.attempt_count >= 2  # the local candidate is in the pool...
+    row = {
+        "mode": "with_nexus",
+        "attempt_count": res.attempt_count,
+        "model_calls": res.model_calls,
+        "model_attempts": [{"attempt_type": "strict_baseline"}],
+    }
+    assert model_attempts(row) == 1  # ...but it is not a model attempt
