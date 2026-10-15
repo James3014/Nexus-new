@@ -8,6 +8,7 @@ import pytest
 
 from scripts.ops.exact_base_tool_gate import (
     Finding,
+    _distinct_roots,
     classify_findings,
     parse_bandit_json,
     parse_pyright_json,
@@ -614,3 +615,252 @@ def test_log_safe_defuses_legacy_and_trimmed_workflow_commands():
         assert "\n" not in safe and "\r" not in safe and "\u2028" not in safe
         assert not safe.lstrip().startswith("::")
         assert "##[" not in safe
+
+
+def _write_src(root, rel, lines):
+    target = root / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _ruff_at(root, rel, row, code="F401", message="`os` imported but unused"):
+    return parse_ruff_json(
+        [
+            {
+                "filename": rel,
+                "code": code,
+                "location": {"row": row, "column": 1},
+                "message": message,
+            }
+        ],
+        root=root,
+    )
+
+
+def _pyright_at(root, rel, line0, message="Unknown import"):
+    return parse_pyright_json(
+        {
+            "generalDiagnostics": [
+                {
+                    "file": str(root / rel),
+                    "severity": "error",
+                    "message": message,
+                    "rule": "reportMissingImports",
+                    "range": {"start": {"line": line0, "character": 0}},
+                }
+            ]
+        },
+        root=root,
+    )
+
+
+def _finding_at(rel, row):
+    # built directly: the parsers already reject symlink-escaping paths
+    return Finding("ruff", "F401", rel, row, 1, "error", "`os` imported but unused")
+
+
+def test_inserted_lines_above_baseline_debt_are_not_new(tmp_path):
+    base_root, head_root = tmp_path / "base", tmp_path / "head"
+    _write_src(base_root, "nexus/a.py", ["import os", "x = 1"])
+    _write_src(head_root, "nexus/a.py", ["# new", "# lines", "import os", "x = 1"])
+    _write_src(base_root, "nexus/b.py", ["import foo", "y = 1"])
+    _write_src(head_root, "nexus/b.py", ["", "", "import foo", "y = 1"])
+
+    ruff = classify_findings(
+        _ruff_at(base_root, "nexus/a.py", 1),
+        _ruff_at(head_root, "nexus/a.py", 3),
+        base_root=base_root,
+        head_root=head_root,
+    )
+    pyright = classify_findings(
+        _pyright_at(base_root, "nexus/b.py", 0),
+        _pyright_at(head_root, "nexus/b.py", 2),
+        base_root=base_root,
+        head_root=head_root,
+    )
+
+    for result in (ruff, pyright):
+        assert result.classification == "EXACT_BASELINE_DEBT"
+        assert result.new_findings == []
+        assert result.resolved_findings == []
+        assert not result.blocking
+
+
+def test_same_rule_on_new_line_with_different_text_is_new(tmp_path):
+    base_root, head_root = tmp_path / "base", tmp_path / "head"
+    _write_src(base_root, "nexus/a.py", ["import os", "x = 1"])
+    _write_src(head_root, "nexus/a.py", ["import os", "x = 1", "import os as other"])
+    head = _ruff_at(head_root, "nexus/a.py", 1) + _ruff_at(head_root, "nexus/a.py", 3)
+
+    result = classify_findings(
+        _ruff_at(base_root, "nexus/a.py", 1), head, base_root=base_root, head_root=head_root
+    )
+
+    assert result.classification == "NEW_REGRESSION"
+    assert [f.line for f in result.new_findings] == [3]
+
+
+def test_duplicated_identical_line_is_new_via_ordinal(tmp_path):
+    base_root, head_root = tmp_path / "base", tmp_path / "head"
+    _write_src(base_root, "nexus/a.py", ["import os", "x = 1"])
+    _write_src(head_root, "nexus/a.py", ["import os", "x = 1", "import os"])
+    head = _ruff_at(head_root, "nexus/a.py", 1) + _ruff_at(head_root, "nexus/a.py", 3)
+
+    result = classify_findings(
+        _ruff_at(base_root, "nexus/a.py", 1), head, base_root=base_root, head_root=head_root
+    )
+
+    assert result.classification == "NEW_REGRESSION"
+    assert len(result.new_findings) == 1
+    assert result.resolved_findings == []
+
+
+def test_unreadable_source_falls_back_without_hiding_new_findings(tmp_path):
+    base_root, head_root = tmp_path / "base", tmp_path / "head"
+    base_root.mkdir()
+    head_root.mkdir()
+    outside = tmp_path / "outside.py"
+    outside.write_text("import os\n", encoding="utf-8")
+    (head_root / "link.py").symlink_to(outside)
+    _write_src(head_root, "short.py", ["import os"])
+
+    # missing file, symlink escaping the root, and out-of-range line: none may crash
+    # or be matched against a base finding at a different line.
+    for rel, base_row, head_row in (
+        ("missing.py", 1, 5),
+        ("link.py", 1, 2),
+        ("short.py", 1, 9),
+    ):
+        result = classify_findings(
+            [_finding_at(rel, base_row)],
+            [_finding_at(rel, head_row)],
+            base_root=base_root,
+            head_root=head_root,
+        )
+        assert result.classification == "NEW_REGRESSION", rel
+        assert len(result.new_findings) == 1
+
+    # an extra finding in an unreadable file still shows as new
+    result = classify_findings(
+        [_finding_at("missing.py", 1)],
+        [_finding_at("missing.py", 1), _finding_at("missing.py", 4)],
+        base_root=base_root,
+        head_root=head_root,
+    )
+    assert result.classification == "NEW_REGRESSION"
+    assert [f.line for f in result.new_findings] == [4]
+
+
+def test_unformatted_is_keyed_per_file_not_by_first_line(tmp_path):
+    base_root, head_root = tmp_path / "base", tmp_path / "head"
+    _write_src(base_root, "nexus/f.py", ["x=1"])
+    _write_src(head_root, "nexus/f.py", ["# header", "x=1"])
+    args = ("unformatted", "File would be reformatted")
+
+    same = classify_findings(
+        _ruff_at(base_root, "nexus/f.py", 1, *args),
+        _ruff_at(head_root, "nexus/f.py", 1, *args),
+        base_root=base_root,
+        head_root=head_root,
+    )
+    assert same.classification == "EXACT_BASELINE_DEBT"
+
+    other = classify_findings(
+        _ruff_at(base_root, "nexus/f.py", 1, *args),
+        _ruff_at(head_root, "nexus/f.py", 1, *args) + _ruff_at(head_root, "nexus/g.py", 1, *args),
+        base_root=base_root,
+        head_root=head_root,
+    )
+    assert other.classification == "NEW_REGRESSION"
+
+
+def _run_cli_ruff(tmp_path, base_rows, head_rows, *root_args):
+    base = tmp_path / "base.json"
+    head = tmp_path / "head.json"
+    output = tmp_path / "classification.json"
+    base.write_text(json.dumps(base_rows), encoding="utf-8")
+    head.write_text(json.dumps(head_rows), encoding="utf-8")
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "scripts/ops/exact_base_tool_gate.py",
+            "--tool",
+            "ruff",
+            "--base",
+            str(base),
+            "--head",
+            str(head),
+            "--output",
+            str(output),
+            *root_args,
+        ],
+        check=False,
+        capture_output=True,
+    )
+    return completed.returncode, json.loads(output.read_text(encoding="utf-8"))
+
+
+def _ruff_row(rel, row):
+    return {
+        "filename": rel,
+        "code": "F401",
+        "location": {"row": row, "column": 1},
+        "message": "`os` imported but unused",
+    }
+
+
+def test_cli_shared_root_keeps_line_shift_as_baseline_debt(tmp_path):
+    # One --root cannot hold both trees: reading the base finding's line from the
+    # head tree would misreport a shifted debt finding as new, so the CLI falls back
+    # to the source-independent identity.
+    root = tmp_path / "tree"
+    _write_src(root, "nexus/a.py", ["# new", "# lines", "import os"])
+
+    code, report = _run_cli_ruff(
+        tmp_path,
+        [_ruff_row("nexus/a.py", 1)],
+        [_ruff_row("nexus/a.py", 3)],
+        "--root",
+        str(root),
+    )
+
+    assert code == 0
+    assert report["classification"] == "EXACT_BASELINE_DEBT"
+    assert report["new_findings"] == []
+
+
+def test_cli_distinct_roots_report_swapped_finding_as_new(tmp_path):
+    # Base debt on one line is fixed while the same rule and message appear on a
+    # different statement: the source-independent identity matched the two and hid
+    # the new finding.
+    base_root, head_root = tmp_path / "base", tmp_path / "head"
+    _write_src(base_root, "nexus/a.py", ["OLD = 'a' * 1", "NEW = 1"])
+    _write_src(head_root, "nexus/a.py", ["OLD = 1", "NEW = 'b' * 1"])
+    row = {"filename": "nexus/a.py", "code": "E501", "message": "Line too long (120 > 100)"}
+
+    code, report = _run_cli_ruff(
+        tmp_path,
+        [{**row, "location": {"row": 1, "column": 101}}],
+        [{**row, "location": {"row": 2, "column": 101}}],
+        "--base-root",
+        str(base_root),
+        "--head-root",
+        str(head_root),
+    )
+
+    assert code == 1
+    assert report["classification"] == "NEW_REGRESSION"
+    assert [item["line"] for item in report["new_findings"]] == [2]
+
+
+def test_unresolvable_roots_fall_back_to_legacy_keys(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    def boom(self, *args, **kwargs):
+        raise OSError("resolve failed")
+
+    assert _distinct_roots(tmp_path / "a", tmp_path / "b") is True
+    assert _distinct_roots(tmp_path / "a", tmp_path / "a") is False
+    assert _distinct_roots(None, tmp_path / "b") is False
+    monkeypatch.setattr(Path, "resolve", boom)
+    assert _distinct_roots(tmp_path / "a", tmp_path / "b") is False

@@ -1054,7 +1054,9 @@ def _verifier(args: argparse.Namespace) -> int:
         }
     rendered = json.dumps(payload, indent=2, sort_keys=True)
     Path(args.output).write_text(rendered + "\n", encoding="utf-8")
-    print(rendered)
+    # Test ids in reasons are candidate-controlled; `\u005b` decodes identically but
+    # keeps the runner from reading a legacy `##[command]` in the job log.
+    print(rendered.replace("##[", "##\\u005b"))
     return 1 if payload.get("blocking", True) else 0
 
 
