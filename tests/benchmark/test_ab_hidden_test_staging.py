@@ -928,3 +928,51 @@ def test_consistently_rewritten_staging_state_cannot_self_certify(tmp_path, monk
         staging_mod.recover_last_run(_expected_sha(record), workspace_root=workspace)
     assert not os.path.lexists(hidden)
     assert "untrusted_recovery_authority" in staging_mod.run_abort_reason()
+
+
+def test_cross_device_move_pins_the_destination_parent(tmp_path, monkeypatch) -> None:
+    """Gemini N4: the EXDEV fallback writes through a no-symlink directory fd, so a destination
+    parent swapped for a symlink is refused instead of followed."""
+    import errno
+
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    src = src_dir / "test_hidden.py"
+    src.write_text(HIDDEN_TEXT, encoding="utf-8")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    linked = tmp_path / "linked"
+    linked.symlink_to(elsewhere, target_is_directory=True)
+
+    def exdev(*_a, **_k):
+        raise OSError(errno.EXDEV, "Invalid cross-device link")
+
+    monkeypatch.setattr(staging_mod.os, "replace", exdev)
+    with pytest.raises(staging_mod.HiddenTestStagingError):
+        staging_mod._move_file(src, linked / "test_hidden.py")
+    assert not (elsewhere / "test_hidden.py").exists()
+    assert src.read_text(encoding="utf-8") == HIDDEN_TEXT  # source kept
+
+
+@pytest.mark.skipif(IS_ROOT, reason="mode bits do not restrict root")
+def test_cross_device_move_relocks_the_staged_source_when_the_write_fails(
+    tmp_path, monkeypatch
+) -> None:
+    """Gemini N4: a failure AFTER the source was made readable (the write) re-locks it 0000."""
+    import errno
+
+    src = tmp_path / "test_hidden.py"
+    src.write_text(HIDDEN_TEXT, encoding="utf-8")
+    os.chmod(src, 0o000)
+
+    def exdev(*_a, **_k):
+        raise OSError(errno.EXDEV, "Invalid cross-device link")
+
+    def failing_write(*_a, **_k):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(staging_mod.os, "replace", exdev)
+    monkeypatch.setattr(staging_mod, "_write_new_in_dir", failing_write)
+    with pytest.raises(OSError):
+        staging_mod._move_file(src, tmp_path / "dst" / "test_hidden.py")
+    assert _mode(src) == 0o000

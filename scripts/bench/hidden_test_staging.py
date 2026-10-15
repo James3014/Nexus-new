@@ -125,7 +125,10 @@ def _open_dir_nofollow(path: Path) -> int:
     """Open ``path`` as a directory one component at a time, never following a symlink in any
     component (``openat`` + ``O_NOFOLLOW``): the returned fd pins the real directory, so a
     later swap of any component for a symlink cannot redirect a write made through it."""
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    # Search-only directory fds (Linux O_PATH, macOS O_SEARCH): the private 0300 staging dirs
+    # have no read bit, and openat only needs search permission on them.
+    search = getattr(os, "O_PATH", 0) or getattr(os, "O_SEARCH", 0) or os.O_RDONLY
+    flags = search | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
     fd = os.open(path.anchor or "/", flags)
     try:
         for part in path.parts[1:]:
@@ -170,11 +173,11 @@ def _move_file(src: Path, dst: Path) -> None:
             os.chmod(src, 0o400)
         try:
             data = _read_nofollow(src)
-        except BaseException:
-            if locked:
-                os.chmod(src, _STAGED_MODE)
-            raise
-        _write_new(dst, data)
+            # Destination parent pinned by a no-symlink dir fd (same as the recovery write).
+            _write_new_in_dir(dst, data, mode=0o600)
+        finally:
+            if locked and os.path.lexists(src):
+                os.chmod(src, _STAGED_MODE)  # never left readable, whatever failed
         os.unlink(src)
 
 
