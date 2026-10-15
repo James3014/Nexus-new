@@ -517,3 +517,33 @@ def test_failure_log_reports_unknown_refs_on_git_error(tmp_path: Path) -> None:
     lines = render_failure_log(tmp_path / "missing", receipt)
     assert any("refs: unknown" in line for line in lines)
     assert render_failure_log(tmp_path, {"status": "PASS", "blocking": False}) == []
+
+
+def test_failure_log_redacts_secret_shaped_paths_and_refs(tmp_path: Path) -> None:
+    from scripts.ops import git_history_secret_scan as scan
+
+    token = "sk-" + "ant-" + "api03" + "Q7m2V9x4N8b1K6r3T0y5P2w7"
+    generic = "R7m4C9x2V6b1K8p3" + "T5y0N2w7D4f9H1j6"
+    receipt = {
+        "status": "FAIL",
+        "blocking": True,
+        "findings": [
+            {
+                "blocking": True,
+                "detector": "anthropic_api_key",
+                "classification": "UNCLASSIFIED_SECRET",
+                "path": f"cfg/{token}/{generic}.txt",
+                "commit_id": "not-a-sha",
+            }
+        ],
+    }
+
+    lines = scan.render_failure_log(tmp_path, receipt)
+    text = "\n".join(lines)
+
+    assert token not in text
+    assert generic not in text
+    assert "<redacted>" in text
+    assert scan._log_safe("refs/remotes/origin/fix/1898-secret-audit-remediation") == (
+        "refs/remotes/origin/fix/1898-secret-audit-remediation"
+    )

@@ -633,6 +633,20 @@ REMEDIATION_TEXT = (
 )
 
 
+# Provider shapes plus any long unbroken alphanumeric run are redacted: a path or
+# ref name may itself carry the leaked value, and the log is more public than the
+# receipt. `-`, `_` and `/` break runs so ordinary branch names and paths survive.
+_LONG_TOKEN_RE = re.compile(r"[A-Za-z0-9+=]{24,}")
+
+
+def _redact_secret_shapes(text: str) -> str:
+    raw = text.encode("utf-8", errors="replace")
+    for _detector, pattern in PROVIDER_PATTERNS:
+        raw = pattern.sub(b"<redacted>", raw)
+    text = raw.decode("utf-8", errors="replace")
+    return _LONG_TOKEN_RE.sub("<redacted>", text)
+
+
 def _log_safe(value: object, limit: int = 200) -> str:
     """One log token that can never be read as a GitHub workflow command.
 
@@ -640,7 +654,8 @@ def _log_safe(value: object, limit: int = 200) -> str:
     paths and messages are attacker-controlled, so control characters, ``%``,
     backtick, ``:``, ``#``, ``[`` and ``]`` are all replaced.
     """
-    text = "".join(ch if ch.isprintable() else " " for ch in str(value))
+    text = _redact_secret_shapes(str(value))
+    text = "".join(ch if ch.isprintable() else " " for ch in text)
     text = "".join("_" if ch in "%`:#[]" else ch for ch in text)
     text = " ".join(text.split())
     if len(text) > limit:
