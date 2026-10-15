@@ -224,4 +224,5 @@ def test_impact_gate_reads_each_sides_newest_attempt() -> None:
     )
     run = _step("Verify both run sides and assemble evidence")["run"]
     assert "max(attempts)" in run
+    assert 're.fullmatch(r"[1-9][0-9]*"' in run  # canonical decimal attempts only
     assert "no {side} run evidence" in run

@@ -528,6 +528,7 @@ jobs:
           import hashlib
           import json
           import os
+          import re
           import shutil
           from pathlib import Path
 
@@ -540,7 +541,8 @@ jobs:
               attempts = [
                   int(path.name.removeprefix(prefix))
                   for path in downloaded.iterdir()
-                  if path.name.startswith(prefix) and path.name.removeprefix(prefix).isdigit()
+                  if path.name.startswith(prefix)
+                  and re.fullmatch(r"[1-9][0-9]*", path.name.removeprefix(prefix))
               ]
               if not attempts:
                   raise SystemExit(f"no {side} run evidence for {head_sha}")
