@@ -1210,7 +1210,7 @@ def wrapper_command(
     port_export = "" if port is None else f"export NEXUS_MCP_GATEWAY_PORT={int(port)} ; "
     core_export = "" if core_root is None else f'export NEXUS_CORE_REPO_ROOT="{core_root}" ; '
     return (
-        f'cd "{root}" ; source "{cfg.env_file}" ; export PYTHONDONTWRITEBYTECODE=1 ; '
+        f'cd "{controller}" ; source "{cfg.env_file}" ; export PYTHONDONTWRITEBYTECODE=1 ; '
         f'export NEXUS_CANONICAL_SOURCE_ROOT="{controller}" ; '
         f'export NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR="{state}" ; '
         f'{core_export}{port_export}exec "{python}" "{root / ENTRYPOINT}"'
@@ -1556,8 +1556,17 @@ def _ctl(controller: Path, *args: str) -> List[str]:
 def materialize_controller(cfg: Config, host: Host, commit: str) -> Path:
     """A fresh, clean Controller worktree at ``commit`` (absolute paths, #1939)."""
     controller = cfg.controllers / f"{DEPLOYMENT_PREFIX}{commit}"
+    refusal = prune_refusal(cfg)
+    if refusal is not None:
+        raise DeployError(f"CONTROLLER_ROOT_UNSAFE:{refusal}")
     if controller.is_symlink():
         raise DeployError("CONTROLLER_SYMLINKED")
+    try:
+        live = live_controller(cfg.plist.read_bytes())
+    except (OSError, DeployError):
+        live = None
+    if live is not None and controller.exists() and os.path.samefile(live, controller):
+        raise DeployError("CONTROLLER_IS_LIVE")
     if controller.exists():
         host.run(_git(cfg, "worktree", "remove", "--force", str(controller)), timeout=300)
         if controller.exists():
@@ -1590,25 +1599,37 @@ def carry_bound_cards(
 ) -> Dict[str, Any]:
     """Replay the live Controller's Task Card bind commits onto the new Controller.
 
+    The source is the live Controller, or (first run after this change, when
+    the live Gateway still binds into its deployment) the live deployment.
     Only regular files under ``tasks/`` that main did not touch since the live
     commit are carried, byte for byte (the card SHA-256 a bind recorded stays
-    valid).  Anything unusual is skipped with a warning: this never blocks a
-    deploy, and it never carries anything outside ``tasks/``.
+    valid).  Anything unusual is skipped and reported in ``lost``; this never
+    raises and never carries anything outside ``tasks/``.
     """
     try:
-        previous = live_controller(previous_plist)
+        return _carry_bound_cards(host, previous_plist, controller, commit)
+    except Exception as exc:  # noqa: BLE001 - a carry problem must never block a deploy
+        return _reset_carry(host, controller, commit, None, f"CARRY_ERROR:{type(exc).__name__}")
+
+
+def _carry_bound_cards(
+    host: Host, previous_plist: bytes, controller: Path, commit: str
+) -> Dict[str, Any]:
+    try:
+        previous = live_controller(previous_plist) or live_root(previous_plist)
         previous_commit = commit_of(live_root(previous_plist))
     except DeployError as exc:
         return {"status": "SKIPPED", "reason": f"LIVE_PLIST_UNREADABLE:{exc}"[:200]}
     if previous is None or previous_commit is None:
-        return {"status": "NONE", "reason": "NO_SEPARATE_LIVE_CONTROLLER"}
+        return {"status": "NONE", "reason": "NO_LIVE_CONTROLLER"}
     head = host.run(_ctl(previous, "rev-parse", "--verify", "HEAD^{commit}"))
     if head.returncode != 0 or not _SHA.match(head.stdout.strip()):
         return {"status": "SKIPPED", "reason": "LIVE_CONTROLLER_UNREADABLE"}
     previous_head = head.stdout.strip()
     if previous_head == previous_commit:
-        return {"status": "NONE", "from_head": previous_head, "carried": []}
-    changed = host.run(
+        return {"status": "NONE", "from": str(previous), "from_head": previous_head, "carried": []}
+    # Bytes, not text: a non-UTF-8 path must not break the deploy.
+    changed = subprocess.run(
         _ctl(
             previous,
             "diff",
@@ -1618,27 +1639,28 @@ def carry_bound_cards(
             "--no-abbrev",
             previous_commit,
             previous_head,
-        )
+        ),
+        capture_output=True,
+        timeout=120,
+        check=False,
     )
     if changed.returncode != 0:
-        return {
-            "status": "SKIPPED",
-            "reason": "LIVE_CONTROLLER_DIFF_FAILED",
-            "from_head": previous_head,
-        }
-    fields = changed.stdout.split("\0")
+        return _skipped("LIVE_CONTROLLER_DIFF_FAILED", previous, previous_head)
+    fields = changed.stdout.split(b"\0")
     entries = []
     for index in range(0, len(fields) - 1, 2):
-        header, path = fields[index], fields[index + 1]
+        header = fields[index].decode("ascii", errors="replace")
+        try:
+            path = fields[index + 1].decode("utf-8")
+        except UnicodeDecodeError:
+            return _skipped("LIVE_CONTROLLER_PATH_NOT_UTF8", previous, previous_head)
         parts = header[1:].split()
         if not header.startswith(":") or len(parts) < 5:
-            return {"status": "SKIPPED", "reason": "LIVE_CONTROLLER_DIFF_UNPARSEABLE"}
+            return _skipped("LIVE_CONTROLLER_DIFF_UNPARSEABLE", previous, previous_head)
         entries.append((parts[1], parts[4], path))
     if len(entries) > CARRY_MAX_PATHS:
-        return {"status": "SKIPPED", "reason": "TOO_MANY_BOUND_PATHS", "from_head": previous_head}
-    carried: List[str] = []
-    skipped: List[str] = []
-    for new_mode, change, path in entries:
+        return _skipped("TOO_MANY_BOUND_PATHS", previous, previous_head)
+    for new_mode, _change, path in entries:
         parts = path.split("/")
         if (
             parts[0] != "tasks"
@@ -1647,13 +1669,13 @@ def carry_bound_cards(
                 part.casefold() in {".gitattributes", ".gitmodules", ".gitignore"} for part in parts
             )
             or new_mode not in {"000000", "100644", "100755"}
+            or any(ord(char) < 32 for char in path)
         ):
             # Not a bind: the Gateway would refuse this Controller anyway.
-            return {
-                "status": "SKIPPED",
-                "reason": "LIVE_CONTROLLER_NOT_BIND_ONLY",
-                "from_head": previous_head,
-            }
+            return _skipped("LIVE_CONTROLLER_NOT_BIND_ONLY", previous, previous_head)
+    carried: List[str] = []
+    skipped: List[str] = []
+    for _new_mode, change, path in entries:
         base = host.run(
             _ctl(controller, "rev-parse", "--verify", "--quiet", f"{previous_commit}:{path}")
         )
@@ -1661,10 +1683,11 @@ def carry_bound_cards(
         if base.stdout.strip() != now.stdout.strip():
             skipped.append(path)  # main changed this path since the live commit
             continue
+        # Literal pathspecs: a bound file named ``tasks/c/x*`` must not match others.
         if change == "D":
-            argv = _ctl(controller, "rm", "-q", "--ignore-unmatch", "--", path)
+            argv = _ctl_literal(controller, "rm", "-q", "--ignore-unmatch", "--", path)
         else:
-            argv = _ctl(controller, "checkout", previous_head, "--", path)
+            argv = _ctl_literal(controller, "checkout", previous_head, "--", path)
         if host.run(argv).returncode != 0:
             return _reset_carry(host, controller, commit, previous_head, "CARRY_APPLY_FAILED")
         carried.append(path)
@@ -1672,6 +1695,8 @@ def carry_bound_cards(
         result = host.run([
             "git",
             *CARRY_AUTHOR,
+            "-c",
+            "commit.gpgsign=false",
             "-C",
             str(controller),
             "commit",
@@ -1684,19 +1709,35 @@ def carry_bound_cards(
             return _reset_carry(host, controller, commit, previous_head, "CARRY_COMMIT_FAILED")
     return {
         "status": "CARRIED" if carried else "NONE",
+        "from": str(previous),
         "from_head": previous_head,
         "carried": sorted(carried)[:100],
         "carried_count": len(carried),
         "skipped_main_changed": sorted(skipped)[:100],
+        "lost": bool(skipped),
     }
 
 
+def _skipped(reason: str, previous: Path, previous_head: str) -> Dict[str, Any]:
+    return {
+        "status": "SKIPPED",
+        "reason": reason,
+        "from": str(previous),
+        "from_head": previous_head,
+        "lost": True,
+    }
+
+
+def _ctl_literal(controller: Path, *args: str) -> List[str]:
+    return ["git", "--literal-pathspecs", "-C", str(controller), *args]
+
+
 def _reset_carry(
-    host: Host, controller: Path, commit: str, previous_head: str, reason: str
+    host: Host, controller: Path, commit: str, previous_head: Optional[str], reason: str
 ) -> Dict[str, Any]:
     host.run(_ctl(controller, "reset", "-q", "--hard", commit))
     host.run(_ctl(controller, "clean", "-q", "-fd", "--", "tasks"))
-    return {"status": "SKIPPED", "reason": reason, "from_head": previous_head}
+    return {"status": "SKIPPED", "reason": reason, "from_head": previous_head, "lost": True}
 
 
 def _receipt_controller(receipt: Dict[str, Any]) -> Optional[Path]:
@@ -2330,7 +2371,11 @@ class _Cycle:
             return 0.0
         interval = self.cfg.min_interval_seconds * (2 ** max(0, len(failures) - 1))
         interval = min(float(interval), float(MAX_BACKOFF_SECONDS))
-        attempts = [r for r in receipts if r.get("outcome") != DEFERRED_OUTCOME]
+        attempts = [
+            r
+            for r in receipts
+            if r.get("outcome") not in (DEFERRED_OUTCOME, CONTROLLER_MOVED_OUTCOME)
+        ]
         if not attempts:
             return 0.0
         last_started = float(attempts[-1].get("started_epoch", 0))
@@ -2506,6 +2551,15 @@ class _Cycle:
         receipt.update(built)
         root, python = Path(built["deployment_root"]), Path(built["venv_python"])
         receipt["controller"] = self.prepare_controller(root, python, candidate, previous_plist)
+        carry = receipt["controller"].get("carry") or {}
+        if carry.get("lost"):
+            receipt.setdefault("warnings", []).append(
+                "BOUND_CARDS_NOT_CARRIED:"
+                + str(
+                    carry.get("reason")
+                    or "MAIN_CHANGED:" + ",".join(carry.get("skipped_main_changed") or [])
+                )[:300]
+            )
 
         spare = self.spare_probe(root, python, candidate, receipt)
         receipt["probes"]["spare"] = spare
@@ -2571,7 +2625,14 @@ class _Cycle:
                 self.write_journal(receipt, previous_plist, new_plist, python)
                 _atomic_write(cfg.plist, new_plist)
                 receipt["switched"] = True
-                return self.finish_switch(receipt, previous_plist, root, python)
+                result = self.finish_switch(receipt, previous_plist, root, python)
+                if result.get("outcome") == "DEPLOYED":
+                    # A bind the old Gateway committed between the check above and
+                    # its bootout is in neither Controller's new HEAD: say so loudly.
+                    late = self.live_controller_moved(previous_plist, receipt)
+                    if late is not None:
+                        receipt["warnings"].append(f"LATE_BIND_NOT_CARRIED:{late}")
+                return result
 
     def prepare_controller(
         self, root: Path, python: Path, candidate: str, previous_plist: bytes
@@ -2586,7 +2647,12 @@ class _Cycle:
         carry = carry_bound_cards(host, previous_plist, controller, candidate)
         problem = host.controller_problem(python, root, controller)
         if problem is not None and carry.get("status") == "CARRIED":
-            carry = {**carry, "status": "DROPPED", "reason": f"CANDIDATE_REFUSED_CARRY:{problem}"}
+            carry = {
+                **carry,
+                "status": "DROPPED",
+                "reason": f"CANDIDATE_REFUSED_CARRY:{problem}",
+                "lost": True,
+            }
             controller = materialize_controller(cfg, host, candidate)
             problem = host.controller_problem(python, root, controller)
         if problem is not None:
@@ -2596,12 +2662,12 @@ class _Cycle:
     def live_controller_moved(
         self, previous_plist: bytes, receipt: Dict[str, Any]
     ) -> Optional[str]:
-        """Why the live Controller is no longer the head the carry read, else None."""
-        from_head = ((receipt.get("controller") or {}).get("carry") or {}).get("from_head")
-        previous = live_controller(previous_plist)
-        if previous is None or not from_head:
+        """Why the carry source is no longer the head the carry read, else None."""
+        carry = (receipt.get("controller") or {}).get("carry") or {}
+        source, from_head = carry.get("from"), carry.get("from_head")
+        if not source or not from_head:
             return None  # nothing was (or could be) read from a live Controller
-        head = self.host.run(_ctl(previous, "rev-parse", "--verify", "HEAD^{commit}"))
+        head = self.host.run(_ctl(Path(source), "rev-parse", "--verify", "HEAD^{commit}"))
         now = head.stdout.strip() if head.returncode == 0 else "UNREADABLE"
         if now == from_head:
             return None
@@ -2913,8 +2979,14 @@ def rollback_readiness(host: Host, previous_plist: bytes) -> Dict[str, Any]:
     if python is None or not python.exists():
         return {"ok": False, "reason": "PREDECESSOR_PYTHON_MISSING"}
     controller = live_controller(previous_plist)
-    if controller is not None and not (controller / ".git").exists():
-        return {"ok": False, "reason": "PREDECESSOR_CONTROLLER_MISSING"}
+    if controller is not None:
+        if not (controller / ".git").exists():
+            return {"ok": False, "reason": "PREDECESSOR_CONTROLLER_MISSING"}
+        # The predecessor's own startup rule must still accept its Controller,
+        # or a rollback would restart a Gateway that refuses to start.
+        problem = host.controller_problem(python, root, controller)
+        if problem is not None:
+            return {"ok": False, "reason": f"PREDECESSOR_CONTROLLER_INVALID:{problem}"}
     result = host.run([str(python), "-c", "import sys"], timeout=60)
     if result.returncode != 0:
         return {"ok": False, "reason": "PREDECESSOR_PYTHON_NOT_RUNNABLE"}

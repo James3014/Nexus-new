@@ -229,6 +229,9 @@ class FakeHost(ad.Host):
             return _done(self.origin + "\n")
         if "fetch" in argv:
             return _done()
+        if argv[:2] == ["git", "-C"] and argv[3:] == ["rev-parse", "--verify", "HEAD^{commit}"]:
+            # A deployment or Controller worktree is at the commit in its name.
+            return _done(Path(argv[2]).name.split("-", 1)[1] + "\n")
         if "rev-parse" in argv and argv[-1].endswith("^{commit}"):
             return _done(self.candidate + "\n")
         if argv[:2] == ["git", "-C"] and argv[3:] == ["rev-parse", "HEAD"]:
@@ -4703,7 +4706,7 @@ def _bind(controller: Path, path: str, text: str) -> str:
     target = controller / path
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(text)
-    _rg(controller, "add", "--", path)
+    _rg(controller, "--literal-pathspecs", "add", "--", path)
     _rg(controller, "commit", "-qm", f"chore(tasks): bind {path}")
     return _rg(controller, "rev-parse", "HEAD")
 
@@ -4827,26 +4830,26 @@ def test_switch_exports_the_new_controller_and_receipts_it(cfg: ad.Config) -> No
     assert any(f'NEXUS_CANONICAL_SOURCE_ROOT="{controller}"' in c for c in host.started)
 
 
-def test_candidate_refusing_the_carry_falls_back_to_a_fresh_controller(cfg: ad.Config) -> None:
+def test_candidate_refusing_the_carry_falls_back_to_a_fresh_controller(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
     host, prober = FakeHost(), FakeProber()
-    host.controller_verdicts = [None]
-    original = ad.carry_bound_cards
-    calls = []
-
-    def fake_carry(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        calls.append(args)
-        return {"status": "CARRIED", "from_head": "c" * 40, "carried": ["tasks/x.md"]}
-
-    ad.carry_bound_cards = fake_carry  # type: ignore[assignment]
-    try:
-        host.controller_verdicts = ["CONTROLLER_CHANGES_OUTSIDE_TASKS", None]
-        result = cycle(cfg, host, prober)
-    finally:
-        ad.carry_bound_cards = original  # type: ignore[assignment]
+    monkeypatch.setattr(
+        ad,
+        "carry_bound_cards",
+        lambda *args, **kwargs: {
+            "status": "CARRIED",
+            "from_head": "c" * 40,
+            "carried": ["tasks/x.md"],
+        },
+    )
+    host.controller_verdicts = ["CONTROLLER_CHANGES_OUTSIDE_TASKS", None]
+    result = cycle(cfg, host, prober)
     assert result["status"] == "DEPLOYED"
-    carry = ad.read_receipts(cfg.state_dir)[-1]["controller"]["carry"]
-    assert carry["status"] == "DROPPED"
-    assert "CONTROLLER_CHANGES_OUTSIDE_TASKS" in carry["reason"]
+    receipt = ad.read_receipts(cfg.state_dir)[-1]
+    assert receipt["controller"]["carry"]["status"] == "DROPPED"
+    assert "CONTROLLER_CHANGES_OUTSIDE_TASKS" in receipt["controller"]["carry"]["reason"]
+    assert any(w.startswith("BOUND_CARDS_NOT_CARRIED:") for w in receipt["warnings"])
 
 
 def test_candidate_refusing_a_fresh_controller_fails_the_build(cfg: ad.Config) -> None:
@@ -4867,3 +4870,120 @@ def test_prune_removes_orphan_controllers_but_never_protected_ones(cfg: ad.Confi
     ad.prune(cfg, host, [keep])
     assert not (cfg.controllers / ("a1-" + "1" * 40)).exists()
     assert (cfg.controllers / ("a1-" + "2" * 40)).exists()
+
+
+def test_first_run_carries_binds_from_the_live_deployment(controller_repo: dict[str, Any]) -> None:
+    """The live Gateway still binds into its deployment until the first split deploy."""
+    cfg, host = controller_repo["cfg"], controller_repo["host"]
+    deployment = controller_repo["deployment"]
+    _bind(deployment, "tasks/c/00-first.md", "first\n")
+    plist = plistlib.dumps({
+        "Label": ad.GATEWAY_LABEL,
+        "ProgramArguments": [
+            "/bin/zsh",
+            "-c",
+            f'cd "{deployment}" ; export NEXUS_CANONICAL_SOURCE_ROOT="{deployment}" ; '
+            f'exec /usr/bin/python3 "{deployment}/x.py"',
+        ],
+        "WorkingDirectory": str(deployment),
+    })
+    controller = ad.materialize_controller(cfg, host, controller_repo["new"])
+    carry = ad.carry_bound_cards(host, plist, controller, controller_repo["new"])
+    assert carry["status"] == "CARRIED"
+    assert carry["from"] == str(deployment)
+    assert (controller / "tasks/c/00-first.md").read_text() == "first\n"
+
+
+def test_non_utf8_bound_path_is_skipped_not_raised(controller_repo: dict[str, Any]) -> None:
+    cfg, host = controller_repo["cfg"], controller_repo["host"]
+    live = controller_repo["live_controller"]
+    name = b"tasks/c/\xff.md"
+    target = os.fsencode(str(live)) + b"/" + name
+    try:
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with open(target, "wb") as handle:
+            handle.write(b"x\n")
+    except OSError:
+        pytest.skip("filesystem refuses non-UTF-8 names")
+    subprocess.run(["git", "-C", str(live), "add", "-A"], check=True, env={**os.environ, **GIT_ENV})
+    _rg(live, "commit", "-qm", "odd name")
+    controller = ad.materialize_controller(cfg, host, controller_repo["new"])
+    carry = ad.carry_bound_cards(host, controller_repo["plist"], controller, controller_repo["new"])
+    assert carry["status"] == "SKIPPED"
+    assert carry["lost"] is True
+    assert _rg(controller, "rev-parse", "HEAD") == controller_repo["new"]
+
+
+def test_carry_uses_literal_pathspecs(controller_repo: dict[str, Any]) -> None:
+    """A bound file literally named ``tasks/k*`` must not drag ``tasks/keep.md`` along."""
+    cfg, host = controller_repo["cfg"], controller_repo["host"]
+    live = controller_repo["live_controller"]
+    (live / "tasks/keep.md").write_text("live edit, not a bind of this file\n")
+    _bind(live, "tasks/k*", "glob\n")
+    controller = ad.materialize_controller(cfg, host, controller_repo["new"])
+    carry = ad.carry_bound_cards(host, controller_repo["plist"], controller, controller_repo["new"])
+    assert carry["carried"] == ["tasks/k*"]
+    assert (controller / "tasks/keep.md").read_text() == "tracked\n"
+
+
+def test_rollback_refuses_a_predecessor_controller_its_gateway_would_refuse(
+    controller_repo: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (controller_repo["deployment"] / "scripts/ops").mkdir(parents=True, exist_ok=True)
+    (controller_repo["deployment"] / ad.ENTRYPOINT).write_text("")
+    host = controller_repo["host"]
+    monkeypatch.setattr(host, "controller_problem", lambda *a, **k: "CONTROLLER_WORKTREE_DIRTY")
+    verdict = ad.rollback_readiness(host, controller_repo["plist"])
+    assert verdict == {
+        "ok": False,
+        "reason": "PREDECESSOR_CONTROLLER_INVALID:CONTROLLER_WORKTREE_DIRTY",
+    }
+
+
+def test_materialize_refuses_a_symlinked_controllers_dir(cfg: ad.Config, tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    (outside / ("a1-" + NEW)).mkdir(parents=True)
+    cfg.gateway_root.mkdir(parents=True, exist_ok=True)
+    cfg.controllers.symlink_to(outside)
+    with pytest.raises(ad.DeployError, match="CONTROLLER_ROOT_UNSAFE"):
+        ad.materialize_controller(cfg, FakeHost(), NEW)
+    assert (outside / ("a1-" + NEW)).exists()
+
+
+def test_gateway_runs_with_the_controller_as_cwd(cfg: ad.Config) -> None:
+    """cwd keeps its pre-split meaning (the canonical root) for cwd-based fallbacks."""
+    controller = cfg.controllers / ("a1-" + NEW)
+    command = ad.wrapper_command(
+        cfg, cfg.deployments / ("a1-" + NEW), Path("/py"), controller_root=controller
+    )
+    assert command.startswith(f'cd "{controller}" ;')
+    assert f'exec "/py" "{cfg.deployments / ("a1-" + NEW) / ad.ENTRYPOINT}"' in command
+
+
+def test_late_bind_after_the_check_is_reported(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    host, prober = FakeHost(), FakeProber()
+    verdicts = iter([None, "LIVE_CONTROLLER_MOVED:aaaaaaaaaaaa->bbbbbbbbbbbb"])
+    monkeypatch.setattr(
+        ad._Cycle, "live_controller_moved", lambda self, plist, receipt: next(verdicts)
+    )
+    assert cycle(cfg, host, prober)["status"] == "DEPLOYED"
+    warnings = ad.read_receipts(cfg.state_dir)[-1]["warnings"]
+    assert any(w.startswith("LATE_BIND_NOT_CARRIED:LIVE_CONTROLLER_MOVED") for w in warnings)
+
+
+def test_controller_moved_defers_without_debounce(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    host, prober = FakeHost(), FakeProber()
+    monkeypatch.setattr(
+        ad._Cycle,
+        "live_controller_moved",
+        lambda self, plist, receipt: "LIVE_CONTROLLER_MOVED:x->y",
+    )
+    assert cycle(cfg, host, prober)["status"] == ad.CONTROLLER_MOVED_OUTCOME
+    assert host.reloads == []
+    monkeypatch.setattr(ad._Cycle, "live_controller_moved", lambda self, plist, receipt: None)
+    host.clock += 60  # inside min_interval_seconds
+    assert cycle(cfg, host, prober)["status"] == "DEPLOYED"
