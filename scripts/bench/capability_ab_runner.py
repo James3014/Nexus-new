@@ -15513,15 +15513,15 @@ def run_with_nexus(
     if effective_enable_ddtree_executor:
         bench_env_updates["NEXUS_DDTREE_EXECUTOR"] = "1"
     bench_env_updates["NEXUS_LLM_CANDIDATE_CAP"] = str(effective_llm_candidate_cap)
-    treatment_archive = ""
-    if llm_enabled and _no_nexus_task_hints() and _treatment_lane.lane_active():
+    treatment_row = bool(llm_enabled and _no_nexus_task_hints() and _treatment_lane.lane_active())
+    if treatment_row:
         # PR-3 treatment lane: treatments on, same symmetric prompt and local-path disables, one
-        # row deadline for every round, raw model candidates archived for the first-attempt score.
-        treatment_archive = _treatment_lane.new_candidate_archive()
+        # row deadline for every round, model responses recorded by the capture wrapper.
         bench_env_updates.update(
             _treatment_lane.with_nexus_env_overrides(
                 deadline_epoch=_treatment_lane.row_deadline_epoch(shared_task_deadline),
-                archive_dir=treatment_archive,
+                response_dir=_treatment_lane.response_capture_dir(),
+                per_call_cap_sec=_symmetric_per_call_cap_sec(),
             )
         )
     bench_env_updates["NEXUS_TASK_DIFFICULTY"] = task.difficulty
@@ -15564,7 +15564,9 @@ def run_with_nexus(
                 probe_cap = _shared_subprocess_timeout(effective_timeout_sec, stage="receipt_first_probe")
             except subprocess.TimeoutExpired:
                 probe_cap = 0
-        if llm_enabled and not force_flow_defer_reason and probe_cap != 0:
+        # PR-3: the receipt-first probe is a second full auto-flow run (more model calls on the
+        # same row); the treatment lane's calls are exactly the product's own rounds.
+        if llm_enabled and not force_flow_defer_reason and probe_cap != 0 and not _treatment_lane.lane_active():
             receipt_first_payload = _run_receipt_first_probe_payload(
                 hard_cap_sec=probe_cap,
                 repo_root=repo_root,
@@ -16360,23 +16362,25 @@ def run_with_nexus(
             hidden_verifier_file=str(row.get("hidden_verifier_file") or _verification_test_for_task(task, test_file)),
         )
         _reconcile_skill_mount_contract_after_receipts(row, repo_root=repo_root)
-    if treatment_archive:
-        _treatment_lane.finalize_with_nexus_row(
-            row,
-            payload,
-            target_file=target_file,
-            verification_test_file=verification_test_file,
-            archive_dir=treatment_archive,
-            run_hidden=lambda limit: _run_process_group(
-                _pytest_verifier_cmd(verification_test_file), cwd=repo_root, env=os.environ.copy(), timeout_sec=limit
-            ),
-            run_visible=lambda limit: _run_process_group(
-                _pytest_verifier_cmd(test_file), cwd=repo_root, env=os.environ.copy(), timeout_sec=limit
-            ),
-            timeout_sec=int(timeout_sec),
-            row_deadline_sec=float(effective_timeout_sec) if shared_task_deadline is not None else None,
-        )
     try:
+        if treatment_row:
+            _treatment_lane.finalize_with_nexus_row(
+                row,
+                payload,
+                target_file=target_file,
+                test_file=test_file,
+                verification_test_file=verification_test_file,
+                original_source=strict_target_before or "",
+                key=_prompt_capture_key(task),
+                run_hidden=lambda test, limit: _run_process_group(
+                    _pytest_verifier_cmd(str(test)), cwd=Path(test).parent, env=os.environ.copy(), timeout_sec=limit
+                ),
+                run_visible=lambda test, limit: _run_process_group(
+                    _pytest_verifier_cmd(str(test)), cwd=Path(test).parent, env=os.environ.copy(), timeout_sec=limit
+                ),
+                timeout_sec=int(timeout_sec),
+                row_deadline_sec=float(effective_timeout_sec) if shared_task_deadline is not None else None,
+            )
         return _finalize_with_nexus_row(
             row,
             provider=with_model_provider if llm_enabled else "local",

@@ -121,7 +121,7 @@ def build_command(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").strip().splitlines()[0])
     parser.add_argument("--lane", choices=["strict", "treatment"], default="strict")
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--repeat", type=int, default=1)

@@ -162,8 +162,23 @@ SELF_HEAL_SENTENCE = (
 )
 # Short product error codes a failed visible evaluation can carry instead of pytest output
 # (sprint_service CandidateEval.error); detail is bounded and still goes through the hidden grep.
-_ERROR_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{2,63}(:[A-Za-z0-9_ .,'()<>-]{0,160})?$")
-_TIMEOUT_RE = re.compile(r"^command '\[.*\]' timed out after [0-9.]+ seconds$")
+# Exact product error codes a failed visible evaluation can carry instead of pytest output
+# (sprint_service CandidateEval.error / _semantic_guard). Nothing else, no free-text detail.
+PRODUCT_ERROR_CODES = frozenset({
+    "broker_timeout",
+    "no_change_candidate",
+    "pytest_failed",
+    "test_timeout",
+    "semantic_guard_placeholder_only",
+    "semantic_guard_zero_delta",
+    "semantic_guard_low_delta_feature",
+})
+# str(subprocess.TimeoutExpired) of the sprint's own visible pytest argv (sprint_pytest_cmd):
+# [<python>, '-m', 'pytest', '-q', '--maxfail=1', '--', <repo-relative visible test>].
+_TIMEOUT_RE = re.compile(
+    r"^Command '\['(/[A-Za-z0-9_./+-]+/python[0-9.]*)', '-m', 'pytest', '-q', '--maxfail=1', '--', "
+    r"'([A-Za-z0-9_./-]+\.py)'\]' timed out after [0-9]+(?:\.[0-9]+)? seconds$"
+)
 # Volatile parts of pytest output that differ between two runs of the same test.
 _DURATION_RE = re.compile(r"\bin [0-9]+(?:\.[0-9]+)?s\b")
 _ABS_PATH_TOKEN_RE = re.compile(r"(?:/[A-Za-z0-9_.@+-]+)+/")
@@ -914,7 +929,17 @@ def audit_task(
                 result.violations.append(f"with_nexus_calls={calls}>treatment_max={cap}")
         elif calls > 1:
             result.violations.append(f"{arm}_calls={calls}")
-    if treatment and with_row is not None:
+    killed = with_row is not None and (
+        with_row.get("treatment_timeout") is True
+        or str(with_row.get("runtime_classification") or "") == "subprocess_timeout"
+        or with_row.get("task_deadline_exceeded") is True
+    )
+    if (
+        treatment
+        and with_row is not None
+        and not (killed and int(with_row.get("model_calls") or 0) == 0)
+    ):
+        # A killed subprocess reports no calls; its calls are the captured ones (H2).
         row_calls = int(with_row.get("model_calls") or 0)
         if row_calls != result.with_nexus_calls:
             # Every model call the row reports was captured, and nothing else was.
@@ -922,27 +947,15 @@ def audit_task(
                 f"with_nexus_calls_mismatch:captured={result.with_nexus_calls},row={row_calls}"
             )
     candidate_lines: set[str] = set()
+    candidate_texts: list[str] = []
     visible_lines: set[str] = set()
-    hidden_line_set = set(hidden_only_lines(material))
     if treatment and len(with_records) > 1:
-        candidates, archive_errors = load_row_candidates(with_row or {})
-        result.treatment_round_findings.extend(archive_errors)
-        candidate_lines = {
-            line
-            for text in candidates.values()
-            for line in _lines(text)
-            if normalize(line) not in hidden_line_set
-        }
+        candidates, candidate_errors = load_row_candidates(with_row or {})
+        result.treatment_round_findings.extend(candidate_errors)
+        clean = clean_candidates(candidates, material)
+        candidate_texts = list(clean.values())
+        candidate_lines = {line for text in candidate_texts for line in _lines(text)}
         visible_lines = row_visible_output_lines(with_row or {})
-
-    def _model_derived(line: str) -> bool:
-        """A later-round line quoting the row's own model candidate or the runner's visible run of it."""
-
-        flat = " ".join(line.split())
-        if not flat or normalize(flat) in hidden_line_set:
-            return False
-        return flat in candidate_lines or normalize_output_line(flat) in visible_lines
-
     if not not_run and result.bare_calls == 0 and result.with_nexus_calls > 0:
         result.violations.append("bare_calls=0")
     bare_prompt = str(bare_records[0].get("prompt") or "") if bare_records else ""
@@ -950,12 +963,10 @@ def audit_task(
     literals = hidden_only_literals(material)
     inventory = set(HIDDEN_LITERALS.get(material.task_id, ()))
     hidden_lines = hidden_only_lines(material)
-    for index, record in enumerate(with_records):
+    for record in with_records:
+        # (1) Every round's FULL raw prompt goes through the hidden-literal / hidden-line scan
+        # first; nothing (model candidate, visible output) is exempt from it (G2).
         prompt = str(record.get("prompt") or "")
-        if index > 0 and (candidate_lines or visible_lines):
-            # A later round may quote the row's own earlier model candidate or the visible test's
-            # output on it (model output, not a leak); hidden test LINES are never exempt.
-            prompt = "\n".join(line for line in prompt.splitlines() if not _model_derived(line))
         corpus = _decoded_corpus(prompt)
         for literal in literals:
             if literal in result.hidden_hits:
@@ -1020,6 +1031,7 @@ def audit_task(
                     bare_prompt=reference,
                     material=material,
                     candidate_lines=candidate_lines,
+                    candidate_texts=candidate_texts,
                     visible_lines=visible_lines,
                 )
                 result.treatment_rounds_audited += 1
@@ -1044,35 +1056,63 @@ _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def load_row_candidates(row: Mapping[str, Any]) -> tuple[dict[str, str], list[str]]:
-    """The row's archived raw model candidates, each re-hashed against its recorded sha256."""
+    """The row's runner-derived model candidates (``treatment_candidates``), each re-hashed.
 
-    shas = [str(item) for item in row.get("model_candidate_sha256s") or []]
-    root = str(row.get("treatment_candidate_archive") or "")
+    The runner derived them from the capture wrapper's recorded model responses
+    (``treatment_lane.derive_runner_candidates``), not from anything the product reported.
+    """
+
+    raw = row.get("treatment_candidates")
     out: dict[str, str] = {}
     errors: list[str] = []
-    if not shas:
-        return out, ["no_model_candidates_recorded"]
-    if not root:
-        return out, ["candidate_archive_missing"]
-    for sha in dict.fromkeys(shas):
-        if not _SHA256_RE.match(sha):
+    if not isinstance(raw, Mapping) or not raw:
+        return out, ["no_runner_derived_candidates"]
+    for sha, text in raw.items():
+        sha = str(sha)
+        if not _SHA256_RE.match(sha) or not isinstance(text, str):
             errors.append(f"candidate_sha_malformed:{sha[:16]}")
             continue
-        path = Path(root) / f"{sha}.txt"
-        try:
-            info = os.lstat(path)
-            if not stat.S_ISREG(info.st_mode):
-                errors.append(f"candidate_archive_not_regular:{sha[:12]}")
-                continue
-            text = path.read_text(encoding="utf-8")
-        except OSError:
-            errors.append(f"candidate_archive_unreadable:{sha[:12]}")
-            continue
         if hashlib.sha256(text.encode("utf-8")).hexdigest() != sha:
-            errors.append(f"candidate_archive_sha_mismatch:{sha[:12]}")
+            errors.append(f"candidate_sha_mismatch:{sha[:12]}")
             continue
         out[sha] = text
     return out, errors
+
+
+def clean_candidates(candidates: Mapping[str, str], material: TaskMaterial) -> dict[str, str]:
+    """Candidates whose lines may be quoted in a later round: no hidden literal, no hidden test line.
+
+    A candidate that contains any hidden-only literal or hidden test line is not allowlisted at
+    all (its lines then fail the round audit), and the literal scan still runs on the full prompt.
+    Residual (documented): a value DERIVED from the hidden test without its literal text is only
+    closed by #2211's hidden-test staging, which the treatment lane requires.
+    """
+
+    inventory = set(HIDDEN_LITERALS.get(material.task_id, ()))
+    literals = hidden_only_literals(material)
+    hidden_lines = set(hidden_only_lines(material))
+    out: dict[str, str] = {}
+    for sha, text in candidates.items():
+        corpus = _decoded_corpus(text)
+        if any(needle in corpus for literal in literals for needle in _needles(literal, inventory)):
+            continue
+        if any(normalize(line) in hidden_lines for line in text.splitlines()):
+            continue
+        out[sha] = text
+    return out
+
+
+def _syntax_lines(candidate_texts: Iterable[str]) -> set[str]:
+    """The exact ``syntax_error``/``syntax_warning`` lines the product would print for these candidates."""
+
+    out: set[str] = set()
+    for text in candidate_texts:
+        try:
+            compile(text, "<candidate>", "exec")
+        except SyntaxError as exc:
+            out.add(" ".join(f"syntax_error:{exc.msg}".split()))
+            out.add(" ".join(f"syntax_error: {exc}".split()))
+    return out
 
 
 def normalize_output_line(line: str) -> str:
@@ -1105,6 +1145,7 @@ def audit_treatment_round(
     material: TaskMaterial,
     candidate_lines: set[str],
     visible_lines: set[str],
+    candidate_texts: Iterable[str] = (),
 ) -> tuple[list[str], bool]:
     """Findings for one later with-Nexus round (round >= 2) and whether it was a self-heal round."""
 
@@ -1118,10 +1159,13 @@ def audit_treatment_round(
     headers = {str(text) for text in blocks_cfg.get("headers") or []}
     forbidden = {str(text) for text in blocks_cfg.get("forbidden_headers") or []}
     candidate_header = re.compile(str(blocks_cfg.get("candidate_header_pattern") or r"^$^"))
+    syntax_lines = _syntax_lines(candidate_texts)
     selected = frozenset(_selected_capabilities(prompt))
     hidden_numbers = frozenset(hidden_only_numbers(material, bare_prompt))
     self_heal = False
+    previous = ""
     for header, line in _blocks(prompt):
+        first_failure_line, previous = previous == "[FAILURE]", line
         if line in forbidden:
             findings.append(f"forbidden_block:{line}")
             continue
@@ -1142,12 +1186,14 @@ def audit_treatment_round(
         output_line = normalize_output_line(line)
         if output_line and (
             output_line in visible_lines
-            or any(item.endswith(output_line) for item in visible_lines)
+            # only the first [FAILURE] line can be cut mid-line (the product keeps the last 1200 chars)
+            or (first_failure_line and any(item.endswith(output_line) for item in visible_lines))
         ):
             continue
-        if _ERROR_CODE_RE.match(line) or (
-            _TIMEOUT_RE.match(line.casefold()) and "test_hidden" not in line
-        ):
+        if line in PRODUCT_ERROR_CODES or line in syntax_lines:
+            continue
+        timeout = _TIMEOUT_RE.match(line)
+        if timeout and not Path(timeout.group(2)).name.lower().startswith("test_hidden"):
             continue
         if header in JSON_BLOCK_HEADERS and line.startswith("{"):
             try:

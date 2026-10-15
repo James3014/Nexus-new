@@ -3,13 +3,15 @@
 The treatment lane keeps every information-fairness rule of the strict lane (no hidden feedback,
 no task hints, no local/deterministic solve, same model and per-call cap, one row deadline,
 captured-prompt audit of EVERY call) and turns the product's treatments on for the with-Nexus
-arm only. Rows carry ``first_attempt`` (the first model candidate scored exactly like the strict
-lane) and ``after_treatment`` (the delivered candidate), plus model calls and tokens.
+arm only. Rows carry ``first_attempt`` (call 1's model candidate scored exactly like the strict
+lane) and ``after_treatment`` (the delivered candidate), plus model calls and tokens. Every
+candidate is re-derived by the RUNNER from the capture wrapper's recorded model responses.
 """
 
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -22,7 +24,7 @@ import pytest
 
 from nexus.research import bench_treatment_lane as product_lane
 from scripts.bench import treatment_lane as lane
-from scripts.bench.agy_prompt_capture import capture_record, write_record
+from scripts.bench.agy_prompt_capture import capture_record, write_record, write_response
 from scripts.bench.prompt_symmetry_audit import (
     NO_TOOLS_PREFIX,
     SELF_HEAL_SENTENCE,
@@ -37,6 +39,7 @@ from scripts.bench.strict_llm_baseline import (
     TREATMENT_MODEL_SOLVE,
     apply_strict_llm_baseline_classification,
     apply_strict_llm_baseline_to_summary,
+    honest_scorecard,
     lane_scorecard,
 )
 
@@ -49,6 +52,13 @@ def _restore_environ():
     yield
     os.environ.clear()
     os.environ.update(saved)
+
+
+@pytest.fixture
+def staging_ready(monkeypatch):
+    """#2211's hidden-test staging + confinement (the lane refuses without them)."""
+
+    monkeypatch.setattr(lane, "hidden_staging_ready", lambda _args: (True, ""))
 
 
 def _sha(text: str) -> str:
@@ -73,6 +83,9 @@ def _fair_args(**overrides) -> argparse.Namespace:
         "without_only": False,
         "enable_background_offload": False,
         "skip_llm_baseline": False,
+        "enable_ddtree_executor": False,
+        "enable_autoreason_executor": False,
+        "allow_learning_loop": False,
         "force_flow": "auto",
         "without_mode": "agy",
         "with_llm_mode": "all",
@@ -92,10 +105,10 @@ def test_strict_is_the_default_lane_and_needs_nothing() -> None:
     manifest = lane.configure_lane(args)
     assert manifest == {"lane": "strict", "bare_retries": 0}
     assert lane.current_lane() == "strict" and not lane.lane_active()
-    assert lane.with_nexus_env_overrides(deadline_epoch=time.time() + 60, archive_dir="/x") == {}
+    assert lane.with_nexus_env_overrides(deadline_epoch=time.time() + 60, response_dir="/x") == {}
 
 
-def test_treatment_lane_with_every_fairness_flag_is_accepted() -> None:
+def test_treatment_lane_with_every_fairness_flag_is_accepted(staging_ready) -> None:
     args = _fair_args()
     assert lane.validate_lane_args(args) == []
     manifest = lane.configure_lane(args)
@@ -122,6 +135,9 @@ def test_treatment_lane_with_every_fairness_flag_is_accepted() -> None:
         ({"without_only": True}, "--without-only"),
         ({"enable_background_offload": True}, "--enable-background-offload"),
         ({"skip_llm_baseline": True}, "--skip-llm-baseline"),
+        ({"enable_ddtree_executor": True}, "--enable-ddtree-executor"),
+        ({"enable_autoreason_executor": True}, "--enable-autoreason-executor"),
+        ({"allow_learning_loop": True}, "--allow-learning-loop"),
         ({"force_flow": "baseline"}, "--force-flow baseline"),
         ({"without_mode": "gemini"}, "--without-mode agy"),
         ({"with_llm_mode": "off"}, "--with-llm-mode"),
@@ -130,7 +146,7 @@ def test_treatment_lane_with_every_fairness_flag_is_accepted() -> None:
         ({"bare_retries": 2}, "--bare-retries"),
     ],
 )
-def test_treatment_lane_refuses_flags_that_break_fairness(override, needle) -> None:
+def test_treatment_lane_refuses_flags_that_break_fairness(staging_ready, override, needle) -> None:
     errors = lane.validate_lane_args(_fair_args(**override))
     assert errors and any(needle in error for error in errors), errors
 
@@ -140,10 +156,42 @@ def test_strict_lane_refuses_treatment_only_knobs() -> None:
     assert lane.validate_lane_args(_fair_args(lane="strict", bare_retries=1))
 
 
-@pytest.mark.parametrize("name", ["NEXUS_ONLINE_LOCAL_ASSIST", "NEXUS_EXTERNAL_RUNTIME_AUTHORIZED"])
-def test_treatment_lane_refuses_local_and_external_paths(monkeypatch, name) -> None:
+@pytest.mark.parametrize(
+    "name",
+    [
+        "NEXUS_ONLINE_LOCAL_ASSIST",
+        "NEXUS_EXTERNAL_RUNTIME_AUTHORIZED",
+        "NEXUS_BENCH_ROUND_MIN_REMAINING_SEC",
+    ],
+)
+def test_treatment_lane_refuses_inherited_env(staging_ready, monkeypatch, name) -> None:
     monkeypatch.setenv(name, "1")
     assert any(name in error for error in lane.validate_lane_args(_fair_args()))
+
+
+def test_treatment_lane_refused_until_hidden_staging_and_confinement(monkeypatch) -> None:
+    """M2: until #2211 lands (staging module + NEXUS_CONFINE_VISIBLE_TEST=1) the lane is refused."""
+
+    monkeypatch.delenv("NEXUS_CONFINE_VISIBLE_TEST", raising=False)
+    errors = lane.validate_lane_args(_fair_args())
+    assert any(e.startswith("treatment_requires_hidden_staging_and_confinement") for e in errors)
+    monkeypatch.setenv("NEXUS_CONFINE_VISIBLE_TEST", "1")
+    ready, reason = lane.hidden_staging_ready(_fair_args())
+    try:
+        import scripts.bench.hidden_test_staging  # noqa: F401
+    except ImportError:
+        assert ready is False and "hidden_test_staging" in reason
+    else:
+        assert ready is True
+        assert lane.hidden_staging_ready(_fair_args(counted_first_attempt=False))[0] is False
+
+
+def test_strict_lane_clears_inherited_treatment_switches(monkeypatch) -> None:
+    for name in lane.TREATMENT_ONLY_ENV:
+        monkeypatch.setenv(name, "1")
+    lane.configure_lane(_fair_args(lane="strict"))
+    for name in lane.TREATMENT_ONLY_ENV:
+        assert name not in os.environ, name
 
 
 def _cli(monkeypatch, tmp_path: Path, *flags: str) -> dict[str, str]:
@@ -197,11 +245,20 @@ FAIR_CLI = (
 )
 
 
-def test_cli_lane_treatment_reaches_the_run_with_the_lane_set(monkeypatch, tmp_path: Path) -> None:
+def test_cli_lane_treatment_reaches_the_run_with_the_lane_set(
+    staging_ready, monkeypatch, tmp_path: Path
+) -> None:
     seen = _cli(monkeypatch, tmp_path, *FAIR_CLI, "--lane", "treatment")
     assert seen == {"lane": "treatment", "force_flow": "hyper_sprint", "no_hidden_feedback": "1"}
     default = _cli(monkeypatch, tmp_path, *FAIR_CLI)
     assert default["lane"] == "strict" and default["force_flow"] == "auto"
+
+
+def test_cli_refuses_the_treatment_lane_without_hidden_staging(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(lane, "hidden_staging_ready", lambda _args: (False, "missing"))
+    with pytest.raises(SystemExit) as exc:
+        _cli(monkeypatch, tmp_path, *FAIR_CLI, "--lane", "treatment")
+    assert exc.value.code == 2
 
 
 @pytest.mark.parametrize(
@@ -211,11 +268,15 @@ def test_cli_lane_treatment_reaches_the_run_with_the_lane_set(monkeypatch, tmp_p
         (*FAIR_CLI, "--lane", "treatment", "--allow-nexus-treatment"),
         (*FAIR_CLI, "--lane", "treatment", "--nexus-only"),
         (*FAIR_CLI, "--lane", "treatment", "--force-flow", "baseline"),
+        (*FAIR_CLI, "--lane", "treatment", "--enable-ddtree-executor"),
+        (*FAIR_CLI, "--lane", "treatment", "--allow-learning-loop"),
         (*FAIR_CLI, "--bare-retries", "1"),
         (*FAIR_CLI, "--treatment-max-model-calls", "3"),
     ],
 )
-def test_cli_refuses_unfair_lane_combinations(monkeypatch, tmp_path: Path, flags) -> None:
+def test_cli_refuses_unfair_lane_combinations(
+    staging_ready, monkeypatch, tmp_path: Path, flags
+) -> None:
     with pytest.raises(SystemExit) as exc:
         _cli(monkeypatch, tmp_path, *flags)
     assert exc.value.code == 2
@@ -225,7 +286,9 @@ def test_treatment_env_turns_treatments_on_and_keeps_the_fairness_pins(monkeypat
     monkeypatch.setenv("NEXUS_BENCH_LANE", "treatment")
     monkeypatch.setenv("NEXUS_BENCH_TREATMENT_MAX_MODEL_CALLS", "3")
     deadline = time.time() + 120
-    env = lane.with_nexus_env_overrides(deadline_epoch=deadline, archive_dir="/tmp/a")
+    env = lane.with_nexus_env_overrides(
+        deadline_epoch=deadline, response_dir="/tmp/r", per_call_cap_sec=240
+    )
     assert env["NEXUS_BENCH_TREATMENT_LANE"] == "1"
     assert env["NEXUS_SYMMETRIC_PROMPT"] == "1"  # same prompt contract as the strict lane
     assert env["NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL"] == "1"
@@ -245,7 +308,10 @@ def test_treatment_env_turns_treatments_on_and_keeps_the_fairness_pins(monkeypat
     }.items():
         assert env[pinned] == value, pinned
     assert abs(float(env["NEXUS_BENCH_ROW_DEADLINE_EPOCH"]) - deadline) < 1.0
-    assert env["NEXUS_BENCH_CANDIDATE_ARCHIVE_DIR"] == "/tmp/a"
+    assert env["NEXUS_BENCH_RESPONSE_CAPTURE_DIR"] == "/tmp/r"
+    # a new round needs a full per-call cap left (H2)
+    assert env["NEXUS_BENCH_ROUND_MIN_REMAINING_SEC"] == "240"
+    assert "NEXUS_BENCH_CANDIDATE_ARCHIVE_DIR" not in env
 
 
 def test_row_deadline_epoch_tracks_the_monotonic_row_deadline() -> None:
@@ -265,30 +331,32 @@ def test_product_lane_flag_needs_the_symmetric_prompt(monkeypatch) -> None:
     assert product_lane.treatment_lane_active() is True
 
 
-def test_record_model_candidate_keeps_order_and_archives_bytes(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("NEXUS_BENCH_CANDIDATE_ARCHIVE_DIR", str(tmp_path))
+def test_record_model_candidate_keeps_call_order_with_failed_call_placeholders() -> None:
     trace: dict = {}
-    first = product_lane.record_model_candidate(trace, "a = 1\n", "llm")
-    second = product_lane.record_model_candidate(trace, "a = 2\n", "llm_self_heal")
-    assert trace["model_candidate_sha256s"] == [first, second]
-    assert trace["model_candidate_sources"] == ["llm", "llm_self_heal"]
-    assert trace["first_model_candidate_sha256"] == first
-    assert (tmp_path / f"{first}.txt").read_text(encoding="utf-8") == "a = 1\n"
-    assert lane.read_archived_candidate(str(tmp_path), second) == "a = 2\n"
-    (tmp_path / f"{second}.txt").write_text("tampered", encoding="utf-8")
-    assert lane.read_archived_candidate(str(tmp_path), second) is None
+    product_lane.record_failed_model_call(trace)
+    second = product_lane.record_model_candidate(trace, "a = 2\n", "llm")
+    assert trace["model_candidate_sha256s"] == [None, second]
+    assert trace["model_candidate_sources"] == ["llm_failed", "llm"]
+    assert trace["first_model_candidate_sha256"] is None
 
 
 def test_one_row_deadline_and_call_budget_cover_every_round(monkeypatch) -> None:
     trace: dict = {}
-    monkeypatch.delenv("NEXUS_BENCH_ROW_DEADLINE_EPOCH", raising=False)
-    monkeypatch.delenv("NEXUS_BENCH_TREATMENT_MAX_MODEL_CALLS", raising=False)
+    for name in (
+        "NEXUS_BENCH_ROW_DEADLINE_EPOCH",
+        "NEXUS_BENCH_TREATMENT_MAX_MODEL_CALLS",
+        "NEXUS_BENCH_ROUND_MIN_REMAINING_SEC",
+        "NEXUS_GATEWAY_TIMEOUT_SEC",
+    ):
+        monkeypatch.delenv(name, raising=False)
     assert product_lane.treatment_round_allowed(trace, "self_heal", 3) is True
     now = time.time()
-    monkeypatch.setenv("NEXUS_BENCH_ROW_DEADLINE_EPOCH", str(now + 30))
+    # without an explicit minimum a round needs the per-call cap (gateway timeout) left
+    monkeypatch.setenv("NEXUS_GATEWAY_TIMEOUT_SEC", "300")
+    monkeypatch.setenv("NEXUS_BENCH_ROW_DEADLINE_EPOCH", str(now + 200))
     assert product_lane.row_deadline_allows_round(trace, "self_heal", now=now) is False
     assert trace["treatment_rounds_skipped_row_deadline"] == ["self_heal"]
-    monkeypatch.setenv("NEXUS_BENCH_ROW_DEADLINE_EPOCH", str(now + 600))
+    monkeypatch.setenv("NEXUS_BENCH_ROUND_MIN_REMAINING_SEC", "120")
     assert product_lane.row_deadline_allows_round(trace, "candidate_1", now=now) is True
     monkeypatch.setenv("NEXUS_BENCH_ROW_DEADLINE_EPOCH", "not-a-number")
     assert product_lane.row_deadline_allows_round(trace, "x") is False
@@ -299,7 +367,15 @@ def test_one_row_deadline_and_call_budget_cover_every_round(monkeypatch) -> None
     assert trace["treatment_rounds_skipped_call_budget"] == ["candidate_2"]
 
 
-def _sprint(monkeypatch, tmp_path: Path, *, treatment: bool, first: str, repair: str):
+class _GenFail(Exception):
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.metadata = {"model_calls": 1, "tokens_used": 11}
+
+
+def _sprint(monkeypatch, tmp_path: Path, *, treatment: bool, answers: list):
+    """run_hyper_sprint with a fake generator; each answer is code or an Exception to raise."""
+
     from nexus.research import sprint_service
     from nexus.research.sprint_service import CandidateEval, SprintConfig, run_hyper_sprint
 
@@ -322,8 +398,17 @@ def _sprint(monkeypatch, tmp_path: Path, *, treatment: bool, first: str, repair:
 
         def generate(self, **kwargs):
             calls.append(dict(kwargs))
-            code = first if len(calls) == 1 else repair
-            return code, {"source": "llm", "model_calls": 1, "tokens_used": 7}
+            answer = answers[min(len(calls), len(answers)) - 1]
+            if isinstance(answer, Exception):
+                raise answer
+            return answer, {"source": "llm", "model_calls": 1, "tokens_used": 7}
+
+    class FakeLocal:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, **kwargs):
+            return "def value():\n    return 9\n", {"source": "local"}
 
     class FakeExecutor:
         def __init__(self, *_args, **_kwargs):
@@ -339,13 +424,10 @@ def _sprint(monkeypatch, tmp_path: Path, *, treatment: bool, first: str, repair:
                 source=kwargs["source"],
             )
 
-    archive = tmp_path / "archive"
-    archive.mkdir()
     monkeypatch.setenv("NEXUS_SYMMETRIC_PROMPT", "1")
     monkeypatch.setenv("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "1")
     monkeypatch.setenv("NEXUS_DISABLE_HIDDEN_INVARIANT_SHADOW", "1")
     monkeypatch.setenv("NEXUS_MODEL_REQUIRED_EXECUTION_MODE", "model_participation_only")
-    monkeypatch.setenv("NEXUS_BENCH_CANDIDATE_ARCHIVE_DIR", str(archive))
     monkeypatch.setenv("NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL", "1")
     if treatment:
         monkeypatch.setenv("NEXUS_BENCH_TREATMENT_LANE", "1")
@@ -353,6 +435,8 @@ def _sprint(monkeypatch, tmp_path: Path, *, treatment: bool, first: str, repair:
         monkeypatch.delenv("NEXUS_BENCH_TREATMENT_LANE", raising=False)
     monkeypatch.setattr(sprint_service, "LLMCandidateGenerator", FakeLLMGenerator)
     monkeypatch.setattr(sprint_service, "SprintExecutor", FakeExecutor)
+    if hasattr(sprint_service, "LocalSprintMutator"):
+        monkeypatch.setattr(sprint_service, "LocalSprintMutator", FakeLocal)
     monkeypatch.setattr(
         "nexus.research.flow.codeintel_context.sprint_codeintel_block", lambda *_a, **_k: ""
     )
@@ -364,7 +448,7 @@ def _sprint(monkeypatch, tmp_path: Path, *, treatment: bool, first: str, repair:
         llm_mode=True,
         safe_mode=True,
     )
-    return run_hyper_sprint(repo_root=tmp_path, config=cfg), calls, archive
+    return run_hyper_sprint(repo_root=tmp_path, config=cfg), calls
 
 
 BAD_VALUE = "def value():\n    return 3\n"
@@ -374,18 +458,12 @@ GOOD_VALUE = "def value():\n    return 2\n"
 def test_sprint_treatment_lane_self_heals_and_records_every_model_candidate(
     monkeypatch, tmp_path: Path
 ) -> None:
-    res, calls, archive = _sprint(
-        monkeypatch, tmp_path, treatment=True, first=BAD_VALUE, repair=GOOD_VALUE
-    )
+    res, calls = _sprint(monkeypatch, tmp_path, treatment=True, answers=[BAD_VALUE, GOOD_VALUE])
     trace = res.learning_trace
     assert len(calls) == 2
     assert trace["model_candidate_sha256s"] == [_sha(BAD_VALUE), _sha(GOOD_VALUE)]
     assert trace["model_candidate_sources"] == ["llm", "llm_self_heal"]
     assert trace["first_model_candidate_sha256"] == _sha(BAD_VALUE)
-    assert {p.name for p in archive.iterdir()} == {
-        f"{_sha(BAD_VALUE)}.txt",
-        f"{_sha(GOOD_VALUE)}.txt",
-    }
     repair_task = calls[1]["task"]
     assert SELF_HEAL_SENTENCE in repair_task and "[FAILURE]" in repair_task
     # The local support candidate never reaches the audited prompt.
@@ -393,28 +471,53 @@ def test_sprint_treatment_lane_self_heals_and_records_every_model_candidate(
     assert res.winner_source == "llm_self_heal" and res.patch == GOOD_VALUE
 
 
-def test_sprint_strict_lane_stays_at_one_model_call(monkeypatch, tmp_path: Path) -> None:
-    res, calls, _archive = _sprint(
-        monkeypatch, tmp_path, treatment=False, first=BAD_VALUE, repair=GOOD_VALUE
+def test_sprint_failed_first_call_is_a_placeholder_and_a_local_fallback_is_never_repaired(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """H1 (reviewer probe): call 1 fails (no patch), the sprint falls back to a local candidate.
+
+    The local candidate must never be sent to self-heal, and the first entry is the failed call,
+    so the row can never become a first-attempt solve.
+    """
+
+    res, calls = _sprint(
+        monkeypatch, tmp_path, treatment=True, answers=[RuntimeError("llm_no_patch"), GOOD_VALUE]
     )
+    trace = res.learning_trace
+    assert len(calls) == 1, "no self-heal of a local fallback candidate"
+    assert trace["model_candidate_sha256s"][0] is None
+    assert trace["model_candidate_sources"][0] == "llm_failed"
+    assert "llm_self_heal" not in trace["model_candidate_sources"]
+
+
+def test_sprint_failed_self_heal_call_is_still_counted(monkeypatch, tmp_path: Path) -> None:
+    """G5: a repair call that raises still counts (call budget, calls and tokens)."""
+
+    res, calls = _sprint(
+        monkeypatch, tmp_path, treatment=True, answers=[BAD_VALUE, _GenFail("gateway timeout")]
+    )
+    assert len(calls) == 2
+    assert res.model_calls == 2
+    assert res.total_tokens >= 7 + 11
+    assert res.learning_trace["model_candidate_sources"] == ["llm", "llm_self_heal_failed"]
+
+
+def test_sprint_strict_lane_stays_at_one_model_call(monkeypatch, tmp_path: Path) -> None:
+    res, calls = _sprint(monkeypatch, tmp_path, treatment=False, answers=[BAD_VALUE, GOOD_VALUE])
     assert len(calls) == 1
     assert res.learning_trace["model_candidate_sha256s"] == [_sha(BAD_VALUE)]
 
 
 def test_sprint_treatment_round_skipped_near_the_row_deadline(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("NEXUS_BENCH_ROW_DEADLINE_EPOCH", str(time.time() + 5))
-    res, calls, _archive = _sprint(
-        monkeypatch, tmp_path, treatment=True, first=BAD_VALUE, repair=GOOD_VALUE
-    )
+    res, calls = _sprint(monkeypatch, tmp_path, treatment=True, answers=[BAD_VALUE, GOOD_VALUE])
     assert len(calls) == 1
     assert res.learning_trace["treatment_rounds_skipped_row_deadline"] == ["self_heal"]
 
 
 def test_sprint_treatment_round_skipped_at_the_call_budget(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("NEXUS_BENCH_TREATMENT_MAX_MODEL_CALLS", "1")
-    res, calls, _archive = _sprint(
-        monkeypatch, tmp_path, treatment=True, first=BAD_VALUE, repair=GOOD_VALUE
-    )
+    res, calls = _sprint(monkeypatch, tmp_path, treatment=True, answers=[BAD_VALUE, GOOD_VALUE])
     assert len(calls) == 1
     assert res.learning_trace["treatment_rounds_skipped_call_budget"] == ["self_heal"]
 
@@ -428,9 +531,9 @@ HIDDEN = (
     "    assert classify(True, {'verified': False}) == 'needs_evidence'\n"
 )
 SOURCE = "def classify(smoke_passed, semantic_evidence):\n    return 'open'\n"
-# Round-1 model candidate: fails the visible test and happens to contain a hidden literal (the
-# model's own guess). Quoting it back in round 2 is model output, not a leak.
-CANDIDATE1 = "def classify(smoke_passed, semantic_evidence):\n    return 'needs_evidence'\n"
+# Round-1 model candidate: fails the visible test; contains no hidden-only literal.
+CANDIDATE1 = "def classify(smoke_passed, semantic_evidence):\n    return 'closed'\n"
+FINAL = "def classify(smoke_passed, semantic_evidence):\n    return 'open' if not smoke_passed else 'closed'\n"
 KEY = "nexus-value-trust-002__1"
 TASK_LINE = "Task: Fix an incident classifier."
 BARE = (
@@ -453,8 +556,13 @@ VISIBLE_OUTPUT = (
     "=================================== FAILURES ===================================\n"
     "____________________________________ test_v ____________________________________\n"
     "/tmp/run-abc/case/test_visible.py:2: AssertionError\n"
-    "E       AssertionError: assert 'needs_evidence' == 'open'\n"
+    "E       AssertionError: assert 'closed' == 'open'\n"
     "1 failed in 0.03s\n"
+)
+PY = "/usr/local/bin/python3.12"
+TIMEOUT_LINE = (
+    f"Command '['{PY}', '-m', 'pytest', '-q', '--maxfail=1', '--', "
+    "'.nexus/bench_cases/nexus-value-trust-002/test_visible.py']' timed out after 60 seconds"
 )
 
 
@@ -462,7 +570,7 @@ def _round2(failure: str = "", *, candidate: str = CANDIDATE1, extra: str = "") 
     tail = failure or (
         "_ test_v _\n"
         "/private/var/folders/x/case/test_visible.py:2: AssertionError\n"
-        "E       AssertionError: assert 'needs_evidence' == 'open'\n"
+        "E       AssertionError: assert 'closed' == 'open'\n"
         "1 failed in 0.05s\n"
     )
     return (
@@ -493,12 +601,12 @@ def _capture(tmp_path: Path, arm: str, prompt: str) -> None:
     time.sleep(0.002)  # captures are ordered by timestamp
 
 
-def _rows(archive: Path, *, model_calls: int = 2, max_calls: int = 4) -> list[dict]:
-    final = SOURCE.replace("'open'", "'resolved'")
-    shas = [_sha(CANDIDATE1), _sha(final)]
-    archive.mkdir(exist_ok=True)
-    (archive / f"{shas[0]}.txt").write_text(CANDIDATE1, encoding="utf-8")
-    (archive / f"{shas[1]}.txt").write_text(final, encoding="utf-8")
+def _rows(
+    *, model_calls: int = 2, max_calls: int = 4, candidates: dict | None = None
+) -> list[dict]:
+    texts = (
+        candidates if candidates is not None else {_sha(CANDIDATE1): CANDIDATE1, _sha(FINAL): FINAL}
+    )
     return [
         {
             "mode": "without_nexus",
@@ -514,9 +622,8 @@ def _rows(archive: Path, *, model_calls: int = 2, max_calls: int = 4) -> list[di
             "attempt_count": 3,
             "lane": "treatment",
             "treatment_max_model_calls": max_calls,
-            "model_candidate_sha256s": shas,
-            "treatment_candidate_archive": str(archive),
-            "treatment_visible_outputs": {shas[0]: VISIBLE_OUTPUT},
+            "treatment_candidates": texts,
+            "treatment_visible_outputs": {_sha(CANDIDATE1): VISIBLE_OUTPUT},
         },
     ]
 
@@ -533,7 +640,7 @@ def _material() -> dict[str, TaskMaterial]:
 
 
 def _audit(
-    tmp_path: Path, round2: str | None, *, lane_name: str = "treatment", **row_kwargs
+    tmp_path: Path, round2: str | None, *, lane_name: str = "treatment", rows=None, **row_kwargs
 ) -> dict:
     captures = tmp_path / "captures"
     captures.mkdir(parents=True)
@@ -541,8 +648,9 @@ def _audit(
     _capture(captures, "with_nexus", ROUND1)
     if round2 is not None:
         _capture(captures, "with_nexus", round2)
-    rows = _rows(tmp_path / "archive", **row_kwargs)
-    return audit_run(captures, _material(), rows=rows, run_id="r1", lane=lane_name)
+    return audit_run(
+        captures, _material(), rows=rows or _rows(**row_kwargs), run_id="r1", lane=lane_name
+    )
 
 
 def test_treatment_round_two_self_heal_prompt_passes(tmp_path: Path) -> None:
@@ -598,14 +706,29 @@ def test_schema_widening_touches_only_the_listed_paths() -> None:
             _round2(extra="    assert classify(True, {'verified': False}) == 'needs_evidence'\n"),
             "hidden_test_line_in_with_nexus_prompt",
         ),
-        # a task hint the bare arm never sees
+        # task hints the bare arm never sees (capitalised and lowercase, M1 / G1 probes)
         (
             _round2(extra="Hint: return open unless the evidence is verified.\n"),
             "treatment_round_not_allowed",
         ),
+        (
+            _round2(extra="hint: return open unless the evidence is verified.\n"),
+            "treatment_round_not_allowed",
+        ),
+        (
+            _round2(
+                extra="note: please use binary search on variable nums to find target answer 42.\n"
+            ),
+            "treatment_round_not_allowed",
+        ),
+        # a timeout line whose argv is not the product's visible-test command (M1 probe)
+        (
+            _round2(extra="Command '[return open unless verified]' timed out after 1 seconds\n"),
+            "treatment_round_not_allowed",
+        ),
         # failure text the runner's own visible run never printed
         (
-            _round2(failure="E   expected the canonical needs_evidence status\n"),
+            _round2(failure="E   expected the canonical closed status\n"),
             "treatment_round_not_allowed",
         ),
         # the local support candidate block
@@ -613,10 +736,10 @@ def test_schema_widening_touches_only_the_listed_paths() -> None:
             _round2(extra="[NEXUS LOCAL SUPPORT CANDIDATE]\nreturn 'resolved'\n"),
             "treatment_round_not_allowed",
         ),
-        # a "candidate" that is not one of the row's archived model candidates
+        # a "candidate" that is not one of the row's runner-derived model candidates
         (
             _round2(
-                candidate="def classify(smoke_passed, semantic_evidence):\n    return smoke_passed and 'resolved'\n"
+                candidate="def classify(smoke_passed, semantic_evidence):\n    return smoke_passed and 'x'\n"
             ),
             "treatment_round_not_allowed",
         ),
@@ -625,6 +748,9 @@ def test_schema_widening_touches_only_the_listed_paths() -> None:
         "hidden_literal",
         "hidden_line",
         "hint",
+        "hint_lowercase",
+        "note_lowercase",
+        "free_text_timeout",
         "failure_not_in_visible_output",
         "local_support",
         "non_model_candidate",
@@ -636,6 +762,31 @@ def test_treatment_round_two_fails_closed(tmp_path: Path, round2: str, violation
     assert violation in report["tasks"][0]["violations"], report["tasks"][0]
 
 
+def test_product_error_codes_and_the_exact_timeout_line_pass(tmp_path: Path) -> None:
+    report = _audit(tmp_path, _round2(failure=f"no_change_candidate\n{TIMEOUT_LINE}\n"))
+    assert report["status"] == "PASS", report["tasks"][0]
+    hidden = TIMEOUT_LINE.replace("test_visible.py", "test_hidden.py")
+    assert _audit(tmp_path / "h", _round2(failure=hidden + "\n"))["status"] == "FAIL"
+
+
+def test_model_candidate_and_visible_output_never_exempt_a_hidden_literal(tmp_path: Path) -> None:
+    """G2 probes: a candidate holding a hidden literal, and a failure tail quoting a hidden value."""
+
+    leaky = "def classify(smoke_passed, semantic_evidence):\n    x = 'needs_evidence'\n    return 'closed'\n"
+    rows = _rows(candidates={_sha(leaky): leaky, _sha(FINAL): FINAL})
+    rows[1]["treatment_visible_outputs"] = {
+        _sha(leaky): "E AssertionError: assert 'needs_evidence' == 'open'\n"
+    }
+    report = _audit(tmp_path, _round2(candidate=leaky), rows=rows)
+    assert "hidden_literal_in_with_nexus_prompt" in report["tasks"][0]["violations"]
+    tail = _audit(
+        tmp_path / "t",
+        _round2(failure="E AssertionError: assert 'needs_evidence' == 'open'\n"),
+        rows=rows,
+    )
+    assert "hidden_literal_in_with_nexus_prompt" in tail["tasks"][0]["violations"]
+
+
 def test_captured_calls_must_equal_row_model_calls_and_the_cap(tmp_path: Path) -> None:
     mismatch = _audit(tmp_path, _round2(), model_calls=3)
     assert any(
@@ -645,6 +796,20 @@ def test_captured_calls_must_equal_row_model_calls_and_the_cap(tmp_path: Path) -
     assert "with_nexus_calls=2>treatment_max=1" in over["tasks"][0]["violations"]
 
 
+def test_killed_row_with_zero_reported_calls_is_not_a_mismatch(tmp_path: Path) -> None:
+    """H2: a subprocess-timeout payload reports 0 calls; the captured calls are its calls."""
+
+    rows = _rows(model_calls=0)
+    rows[1]["runtime_classification"] = "subprocess_timeout"
+    report = _audit(tmp_path, _round2(), rows=rows)
+    assert not any(
+        v.startswith("with_nexus_calls_mismatch") for v in report["tasks"][0]["violations"]
+    )
+    rows[1]["lane"] = "treatment"
+    lane.attest_row(rows[1], report["tasks"][0])
+    assert rows[1]["model_calls"] == 2 and rows[1]["model_calls_source"] == "prompt_capture"
+
+
 def test_bare_arm_stays_at_one_call_in_the_treatment_lane(tmp_path: Path) -> None:
     captures = tmp_path / "captures"
     captures.mkdir()
@@ -652,41 +817,25 @@ def test_bare_arm_stays_at_one_call_in_the_treatment_lane(tmp_path: Path) -> Non
     _capture(captures, "without_nexus", BARE + "\nretry\n")
     _capture(captures, "with_nexus", ROUND1)
     report = audit_run(
-        captures,
-        _material(),
-        rows=_rows(tmp_path / "a", model_calls=1),
-        run_id="r1",
-        lane="treatment",
+        captures, _material(), rows=_rows(model_calls=1), run_id="r1", lane="treatment"
     )
     assert "bare_calls=2" in report["tasks"][0]["violations"]
 
 
-def test_tampered_candidate_archive_fails_the_round_audit(tmp_path: Path) -> None:
-    captures = tmp_path / "captures"
-    captures.mkdir()
-    _capture(captures, "without_nexus", BARE)
-    _capture(captures, "with_nexus", ROUND1)
-    _capture(captures, "with_nexus", _round2())
-    rows = _rows(tmp_path / "archive")
-    (tmp_path / "archive" / f"{_sha(CANDIDATE1)}.txt").write_text(
-        CANDIDATE1 + "# edited\n", encoding="utf-8"
-    )
-    report = audit_run(captures, _material(), rows=rows, run_id="r1", lane="treatment")
+def test_tampered_candidate_text_fails_the_round_audit(tmp_path: Path) -> None:
+    rows = _rows()
+    rows[1]["treatment_candidates"] = {_sha(CANDIDATE1): CANDIDATE1 + "# edited\n"}
+    report = _audit(tmp_path, _round2(), rows=rows)
     assert report["status"] == "FAIL"
     assert any(
-        "candidate_archive_sha_mismatch" in f
-        for f in report["tasks"][0]["treatment_round_findings"]
+        "candidate_sha_mismatch" in f for f in report["tasks"][0]["treatment_round_findings"]
     )
 
 
 def test_runner_rescue_is_a_row_violation_in_the_treatment_lane(tmp_path: Path) -> None:
-    captures = tmp_path / "captures"
-    captures.mkdir()
-    _capture(captures, "without_nexus", BARE)
-    _capture(captures, "with_nexus", ROUND1)
-    rows = _rows(tmp_path / "a", model_calls=1)
+    rows = _rows(model_calls=1)
     rows[1]["bounded_nexus_rescue_used"] = True
-    report = audit_run(captures, _material(), rows=rows, run_id="r1", lane="treatment")
+    report = _audit(tmp_path, None, rows=rows)
     assert any("runner_rescue_in_treatment_lane" in v for v in report["row_violations"])
 
 
@@ -711,13 +860,14 @@ def test_failed_audit_voids_both_columns_and_marks_the_run_invalid(
     captures.mkdir()
     _capture(captures, "without_nexus", BARE)
     _capture(captures, "with_nexus", ROUND1)
-    _capture(captures, "with_nexus", _round2(extra="Hint: needs_evidence when unverified.\n"))
-    rows = _rows(tmp_path / "a")
+    _capture(captures, "with_nexus", _round2(extra="hint: closed when unverified.\n"))
+    rows = _rows()
     for row in rows:
         row.update({"status": "SUCCESS", "hidden_verifier_passed": True})
     rows[1].update({
         "first_attempt_hidden_passed": True,
-        "first_model_candidate_sha256": rows[1]["model_candidate_sha256s"][0],
+        "first_attempt_status": "verified_in_scratch_copy",
+        "first_model_candidate_sha256": _sha(CANDIDATE1),
     })
     report = _apply_prompt_symmetry_audit(
         (captures, "r1"), _material(), rows, out_dir=tmp_path / "out"
@@ -746,10 +896,14 @@ def _treated_row(**overrides) -> dict:
         "model_candidate_sha256": b,
         "model_candidate_sha256s": [a, b],
         "model_candidate_sources": ["llm", "llm_self_heal"],
+        "runner_candidate_sha256s": [a, b],
+        "runner_candidate_kinds": ["stage1", "self_heal"],
+        "treatment_unverifiable": False,
         "first_model_candidate_sha256": a,
         "final_model_candidate_sha256": b,
         "final_candidate_in_model_candidates": True,
         "first_attempt_hidden_passed": False,
+        "first_attempt_status": "verified_in_scratch_copy",
         "treatment_applied": ["self_heal"],
     }
     row.update(overrides)
@@ -773,14 +927,35 @@ def test_first_candidate_delivered_counts_in_both_columns() -> None:
         final_model_candidate_sha256=a,
         model_candidate_sha256s=[a],
         model_candidate_sources=["llm"],
+        runner_candidate_sha256s=[a],
+        runner_candidate_kinds=["stage1"],
         first_attempt_hidden_passed=True,
+        first_attempt_status="verified_as_delivered",
     )
     apply_strict_llm_baseline_classification([row])
     assert row["solve_classification"] == MODEL_SOLVE
     assert row["first_attempt"] is True and row["after_treatment"] is True
 
 
-def test_delivered_candidate_outside_the_model_candidates_never_counts() -> None:
+def test_self_heal_after_a_failed_first_call_is_never_a_first_attempt_solve() -> None:
+    """H1: call 1 produced nothing; a delivered self-heal/second candidate is treatment only."""
+
+    b = _sha("b")
+    row = _treated_row(
+        model_candidate_sha256s=[None, b],
+        model_candidate_sources=["llm_failed", "llm_self_heal"],
+        runner_candidate_sha256s=["", b],
+        runner_candidate_kinds=["stage1", "self_heal"],
+        first_model_candidate_sha256="",
+        first_attempt_hidden_passed=None,
+        first_attempt_status="no_model_candidate",
+    )
+    apply_strict_llm_baseline_classification([row])
+    assert row["solve_classification"] == TREATMENT_MODEL_SOLVE
+    assert row["first_attempt"] is False
+
+
+def test_delivered_candidate_outside_the_runner_candidates_never_counts() -> None:
     row = _treated_row(
         final_candidate_in_model_candidates=False,
         model_candidate_sha256=_sha("local"),
@@ -788,6 +963,12 @@ def test_delivered_candidate_outside_the_model_candidates_never_counts() -> None
     )
     apply_strict_llm_baseline_classification([row])
     assert row["solve_classification"] == NOT_SOLVED and row["treatment_sha_unbound"] is True
+    assert row["after_treatment"] is False
+
+
+def test_unverifiable_row_never_counts_after_treatment() -> None:
+    row = _treated_row(treatment_unverifiable=True)
+    apply_strict_llm_baseline_classification([row])
     assert row["after_treatment"] is False
 
 
@@ -819,16 +1000,20 @@ def test_lane_scorecard_reports_both_columns_gain_and_cost() -> None:
         "lane": "treatment",
     }
     bare2 = {**bare, "task_id": "u", "status": "SUCCESS"}
+    a = _sha("a")
     solved_first = _treated_row(
         task_id="u",
         model_calls=1,
         total_tokens=120,
         nexus_winner_source="llm",
-        model_candidate_sha256=_sha("a"),
-        final_model_candidate_sha256=_sha("a"),
-        model_candidate_sha256s=[_sha("a")],
+        model_candidate_sha256=a,
+        final_model_candidate_sha256=a,
+        model_candidate_sha256s=[a],
         model_candidate_sources=["llm"],
+        runner_candidate_sha256s=[a],
+        runner_candidate_kinds=["stage1"],
         first_attempt_hidden_passed=True,
+        first_attempt_status="verified_as_delivered",
         treatment_applied=[],
     )
     rows = [bare, bare2, _treated_row(), solved_first]
@@ -861,8 +1046,95 @@ def test_strict_lane_rows_have_equal_columns() -> None:
     assert row["first_attempt"] is True and row["after_treatment"] is True and row["tokens"] == 9
 
 
+# Strict-lane output on main (3d39a2479) for these two rows; the PR only ADDS keys (G7).
+MAIN_STRICT_WITH = {
+    "mode": "with_nexus",
+    "status": "SUCCESS",
+    "model_calls": 1,
+    "nexus_winner_source": "llm",
+    "total_tokens": 9,
+    "task_id": "t",
+    "trial_index": 1,
+    "strict_llm_baseline_applied": True,
+    "rescued_by_local": False,
+    "deterministic_rescue": False,
+    "solve_classification": "model_solve",
+    "capabilities_real": [],
+    "capabilities_real_unattested": [],
+    "capabilities_simulated": [],
+    "capabilities_selected_not_invoked": [],
+    "capabilities_real_self_reported": [],
+    "capabilities_blocked_missing_inputs": [],
+    "capability_blocked_reasons": {},
+    "capabilities_failed_or_refused": [],
+    "capability_failed_reasons": {},
+    "capabilities_not_executable": [],
+    "capability_not_exercised": True,
+    "solve_without_capability": True,
+}
+MAIN_STRICT_BARE = {
+    "mode": "without_nexus",
+    "status": "FAILED",
+    "model_calls": 1,
+    "total_tokens": 3,
+    "task_id": "t",
+    "trial_index": 1,
+    "strict_llm_baseline_applied": True,
+    "rescued_by_local": False,
+    "solve_classification": "not_solved",
+    "deterministic_rescue": False,
+}
+ADDITIVE_ROW_KEYS = {"first_attempt", "after_treatment", "tokens", "treatment_applied"}
+MAIN_SCORECARD_KEYS = {
+    "contract_violation",
+    "contract_violation_failed",
+    "failed",
+    "infra_invalid",
+    "model_solve_rate_all_rows",
+    "rescued_by_local",
+    "schema",
+    "solved_by_model",
+    "total_n",
+    "wiring_defects",
+}
+
+
+def test_strict_lane_output_differs_from_main_only_by_additive_keys() -> None:
+    keys = (
+        "mode",
+        "status",
+        "model_calls",
+        "nexus_winner_source",
+        "total_tokens",
+        "task_id",
+        "trial_index",
+    )
+    rows = [
+        {k: MAIN_STRICT_WITH[k] for k in keys},
+        {k: MAIN_STRICT_BARE[k] for k in keys if k in MAIN_STRICT_BARE},
+    ]
+    apply_strict_llm_baseline_classification(rows)
+    for row, main in zip(rows, (MAIN_STRICT_WITH, MAIN_STRICT_BARE)):
+        assert set(row) - set(main) == ADDITIVE_ROW_KEYS
+        assert {k: row[k] for k in main} == main
+    card = honest_scorecard(copy.deepcopy(rows), "with_nexus")
+    assert set(card) - MAIN_SCORECARD_KEYS == {"solved_by_model_after_treatment"}
+    assert MAIN_SCORECARD_KEYS <= set(card)
+
+
 def test_treatment_applied_comes_from_attested_evidence_only() -> None:
+    attested = {
+        "attestation": "real",
+        "attestation_source": "unified_capability_projection",
+        "attestation_refs_resolved": True,
+        "attestation_disposition": {"kind": "succeeded"},
+        "selected": True,
+        "invoked": True,
+        "evidence_refs": ["ref1"],
+        "claim_boundary": {"simulated": False},
+    }
     row = _treated_row(
+        treatment_rounds=1,
         capability_receipts=[
             {
                 "name": "ultra_review",
@@ -871,16 +1143,21 @@ def test_treatment_applied_comes_from_attested_evidence_only() -> None:
                 "attestation": "real_self_reported",
                 "evidence_refs": ["x"],
             },
-            {"name": "sandbox", "selected": True, "invoked": False},
+            {**attested, "name": "sandbox"},  # no seam trigger: not counted (G6)
+            {**attested, "name": "ultra_review", "trigger_source": "post_candidate_seam:verify"},
+            {**attested, "name": "hyper"},  # one round: not counted (L1)
         ],
         treatment_applied=["claimed_by_product"],
     )
     lane.attest_row(row, {"with_nexus_calls": 2, "self_heal_rounds_observed": 1})
-    assert row["treatment_applied"] == ["self_heal"]
+    assert row["treatment_applied"] == ["self_heal", "ultra_review"]
     assert row["treatment_calls_reconciled"] is True
     unreconciled = _treated_row()
     lane.attest_row(unreconciled, {"with_nexus_calls": 1, "self_heal_rounds_observed": 1})
     assert unreconciled["treatment_applied"] == []
+    unverified = _treated_row(treatment_unverifiable=True)
+    lane.attest_row(unverified, {"with_nexus_calls": 2, "self_heal_rounds_observed": 1})
+    assert unverified["treatment_applied"] == []
 
 
 # --------------------------------------------------------------------------- zero-model end to end
@@ -896,19 +1173,54 @@ GOOD_CLASSIFY = (
 BAD_CLASSIFY = "def classify(smoke_passed, semantic_evidence):\n    return 'resolved'\n"
 
 
+def _agy_stdout(code: str) -> str:
+    return json.dumps({
+        "conversation_id": "c",
+        "status": "SUCCESS",
+        "response": json.dumps({"patch": code}),
+    })
+
+
 def _with_nexus_row(
-    tmp_path: Path, monkeypatch, *, lane_name: str, candidates: list[str]
+    tmp_path: Path,
+    monkeypatch,
+    *,
+    lane_name: str,
+    candidates: list,
+    product_list=None,
+    timeout: bool = False,
 ) -> tuple[dict, list[dict]]:
-    """run_with_nexus with a fake product subprocess (zero model calls) and the REAL hidden test."""
+    """run_with_nexus with a fake product subprocess (zero model calls) and the REAL hidden test.
 
-    from scripts.bench.capability_ab_runner import _materialize_fixture, load_tasks, run_with_nexus
-    from scripts.bench.capability_ab_runner import _run_process_group as real_run_process_group
+    The fake also plays the capture wrapper: one prompt record + recorded response per call. A
+    ``None`` candidate is a call that returned no usable answer.
+    """
 
+    from scripts.bench.capability_ab_runner import (
+        _materialize_fixture,
+        load_tasks,
+        run_with_nexus,
+    )
+    from scripts.bench.capability_ab_runner import (
+        _run_process_group as real_run_process_group,
+    )
+
+    capture = tmp_path / "captures"
+    capture.mkdir(mode=0o700, parents=True)
+    monkeypatch.setenv("NEXUS_BENCH_PROMPT_CAPTURE_DIR", str(capture))
+    monkeypatch.setenv("NEXUS_BENCH_CAPTURE_RUN_ID", "run1")
+    monkeypatch.setenv("NEXUS_BENCH_ARM", "with_nexus")
+    monkeypatch.setenv("NEXUS_BENCH_CAPTURE_KEY", "nexus-value-trust-002__1")
     monkeypatch.setenv("NEXUS_BENCH_NO_TASK_HINTS", "1")
     monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
     monkeypatch.setenv("NEXUS_SYMMETRIC_PROMPT", "1")
     monkeypatch.setenv("NEXUS_BENCH_LANE", lane_name)
     monkeypatch.setenv("NEXUS_BENCH_TREATMENT_MAX_MODEL_CALLS", "4")
+    # what main() sets for both counted lanes (no bounded hyper rescue, no hidden retry)
+    monkeypatch.setenv("NEXUS_BENCH_COUNTED_FIRST_ATTEMPT", "1")
+    monkeypatch.setenv("NEXUS_BENCH_NO_HIDDEN_FEEDBACK", "1")
+    monkeypatch.setenv("NEXUS_BENCH_DISABLE_HIDDEN_RETRY", "1")
+    monkeypatch.setenv("NEXUS_BENCH_DISABLE_DETERMINISTIC_RESCUE", "1")
     tasks = load_tasks(REPO_ROOT / "scripts" / "bench" / "public_benchmark_nexus_value_v1.json")
     task = next(t for t in tasks if t.id == "nexus-value-trust-002")
     target_file, visible_test_file = _materialize_fixture(tmp_path, task)
@@ -919,16 +1231,36 @@ def _with_nexus_row(
             envs.append(dict(env))
             treatment = env.get("NEXUS_BENCH_TREATMENT_LANE") == "1"
             produced = candidates if treatment else candidates[:1]
-            archive = env.get("NEXUS_BENCH_CANDIDATE_ARCHIVE_DIR", "")
+            response_dir = env.get("NEXUS_BENCH_RESPONSE_CAPTURE_DIR", "")
             trace: dict = {}
             for index, code in enumerate(produced):
-                if archive:
-                    os.environ["NEXUS_BENCH_CANDIDATE_ARCHIVE_DIR"] = archive
-                product_lane.record_model_candidate(
-                    trace, code, "llm" if index == 0 else "llm_self_heal"
+                prompt = "Task: fix\n" + (SELF_HEAL_SENTENCE if index else "") + "\n"
+                record = capture_record(
+                    ["--print", prompt],
+                    "",
+                    {
+                        "NEXUS_BENCH_ARM": "with_nexus",
+                        "NEXUS_BENCH_CAPTURE_KEY": "nexus-value-trust-002__1",
+                        "NEXUS_BENCH_CAPTURE_RUN_ID": "run1",
+                    },
                 )
-            final = produced[-1]
-            Path(target_file).write_text(final, encoding="utf-8")
+                path = write_record(record, str(capture))
+                time.sleep(0.002)
+                if response_dir:
+                    write_response(response_dir, path.name, _agy_stdout(code) if code else "{}", 0)
+                if code:
+                    product_lane.record_model_candidate(
+                        trace, code, "llm" if index == 0 else "llm_self_heal"
+                    )
+                else:
+                    product_lane.record_failed_model_call(trace)
+            if product_list is not None:
+                trace["model_candidate_sha256s"] = product_list
+            final = next((code for code in reversed(produced) if code), None)
+            if timeout:
+                raise subprocess.TimeoutExpired(cmd, timeout_sec)
+            if final:
+                Path(target_file).write_text(final, encoding="utf-8")
             payload = {
                 "status": "FAILED",
                 "semantic_status": "UNVERIFIED",
@@ -940,7 +1272,7 @@ def _with_nexus_row(
                         "model_calls": len(produced),
                         "model_patch_generated": True,
                         "total_tokens": 100 * len(produced),
-                        "winner_source": "llm" if len(produced) == 1 else "llm_self_heal",
+                        "winner_source": "llm" if produced.index(final) == 0 else "llm_self_heal",
                         "model_candidate_sha256": _sha(final),
                         "learning_trace": trace,
                     },
@@ -964,6 +1296,7 @@ def _with_nexus_row(
         strict_llm_baseline=True,
     )
     row["mode"] = "with_nexus"
+    assert len(envs) == 1, "one product subprocess per row (no probe, no rescue, no retry)"
     return row, envs
 
 
@@ -1039,6 +1372,7 @@ def test_zero_model_both_lanes_produce_rows_and_first_attempt_equals_strict(
     # env: the strict lane is unchanged; the treatment lane only adds the treatment switches
     assert strict_envs[0]["NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL"] == "0"
     assert "NEXUS_BENCH_TREATMENT_LANE" not in strict_envs[0]
+    assert "NEXUS_BENCH_RESPONSE_CAPTURE_DIR" not in strict_envs[0]
     assert treated_envs[0]["NEXUS_BENCH_TREATMENT_LANE"] == "1"
     assert treated_envs[0]["NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL"] == "1"
     assert (
@@ -1058,14 +1392,15 @@ def test_zero_model_both_lanes_produce_rows_and_first_attempt_equals_strict(
     assert treated_row["first_attempt"] is strict_row["first_attempt"]
     assert treated_row["after_treatment"] is after_solved
     assert treated_row["first_model_candidate_sha256"] == _sha(candidates[0])
-    assert treated_row["final_model_candidate_sha256"] == _sha(candidates[-1])
+    assert treated_row["runner_candidate_sha256s"] == [_sha(code) for code in candidates]
     assert treated_row["model_calls"] == len(candidates) and treated_row["tokens"] == 100 * len(
         candidates
     )
     assert treated_row["treatment_rounds"] == len(candidates)
-    expected_status = "verified_as_delivered" if len(candidates) == 1 else "verified_from_archive"
+    expected_status = (
+        "verified_as_delivered" if len(candidates) == 1 else "verified_in_scratch_copy"
+    )
     assert treated_row["first_attempt_status"] == expected_status
-    # the bare arm is identical in both lanes (one call)
     for bare in (strict_bare, treated_bare):
         assert bare["first_attempt"] is strict_solved and bare["after_treatment"] is strict_solved
     assert treated_bare["lane"] == "treatment" and treated_bare["bare_retries"] == 0
@@ -1073,25 +1408,94 @@ def test_zero_model_both_lanes_produce_rows_and_first_attempt_equals_strict(
         assert set(treated_row["treatment_visible_outputs"]) == {_sha(candidates[0])}
 
 
-def test_first_attempt_reverification_restores_the_delivered_file(
+def test_first_attempt_rescore_never_writes_the_workspace(tmp_path: Path, monkeypatch) -> None:
+    """G8: the first candidate is re-scored on a scratch copy; a candidate writing files only
+    touches the copy, and the delivered file stays the final candidate."""
+
+    writer = BAD_CLASSIFY + "open('SIDE_EFFECT.txt', 'w').write('x')\n"
+    row, _ = _with_nexus_row(
+        tmp_path, monkeypatch, lane_name="treatment", candidates=[writer, GOOD_CLASSIFY]
+    )
+    assert row["first_attempt_status"] == "verified_in_scratch_copy"
+    assert row["first_attempt_hidden_passed"] is False and row["hidden_verifier_passed"] is True
+    assert not list(tmp_path.rglob("SIDE_EFFECT.txt"))
+    delivered = [
+        p for p in tmp_path.rglob("target.py") if p.read_text(encoding="utf-8") == GOOD_CLASSIFY
+    ]
+    assert delivered
+
+
+def test_failed_first_call_then_self_heal_is_not_a_first_attempt_solve(
     tmp_path: Path, monkeypatch
 ) -> None:
+    """H1 end to end: call 1 returned nothing usable; strict scores not solved, so must first_attempt."""
+
     row, _ = _with_nexus_row(
-        tmp_path, monkeypatch, lane_name="treatment", candidates=[BAD_CLASSIFY, GOOD_CLASSIFY]
+        tmp_path, monkeypatch, lane_name="treatment", candidates=[None, GOOD_CLASSIFY]
     )
-    target = next(tmp_path.rglob("*.py"), None)
-    assert target is not None
-    delivered = [
-        p for p in tmp_path.rglob("*.py") if p.read_text(encoding="utf-8") == GOOD_CLASSIFY
-    ]
-    assert delivered, "the final (delivered) candidate must be back in the target file"
-    assert row["first_attempt_hidden_passed"] is False and row["hidden_verifier_passed"] is True
+    apply_strict_llm_baseline_classification([row])
+    assert row["first_attempt_status"] == "no_model_candidate"
+    assert row["first_attempt"] is False
 
 
-def test_unarchived_first_candidate_is_not_verifiable_and_never_counts(tmp_path: Path) -> None:
+def test_product_list_reordered_is_first_attempt_unverifiable(tmp_path: Path, monkeypatch) -> None:
+    """G3 probe: the product puts the winning later sha at index 0."""
+
+    row, _ = _with_nexus_row(
+        tmp_path,
+        monkeypatch,
+        lane_name="treatment",
+        candidates=[BAD_CLASSIFY, GOOD_CLASSIFY],
+        product_list=[_sha(GOOD_CLASSIFY), _sha(BAD_CLASSIFY)],
+    )
+    apply_strict_llm_baseline_classification([row])
+    assert row["first_attempt_status"] == "first_attempt_unverifiable"
+    assert row["first_attempt"] is False and row["after_treatment"] is False
+
+
+def test_product_sha_without_a_captured_origin_makes_the_row_unverifiable(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """G4 probe: the product appends a sha no captured model response produced."""
+
+    local = GOOD_CLASSIFY + "# local rescue\n"
+    row, _ = _with_nexus_row(
+        tmp_path,
+        monkeypatch,
+        lane_name="treatment",
+        candidates=[BAD_CLASSIFY, GOOD_CLASSIFY],
+        product_list=[_sha(BAD_CLASSIFY), _sha(GOOD_CLASSIFY), _sha(local)],
+    )
+    apply_strict_llm_baseline_classification([row])
+    assert row["treatment_unverified_shas"] == [_sha(local)]
+    assert row["treatment_unverifiable"] is True and row["after_treatment"] is False
+
+
+def test_killed_subprocess_still_scores_the_first_attempt(tmp_path: Path, monkeypatch) -> None:
+    """H2: at the row deadline the product never reports; the runner recovers call 1 from the capture."""
+
+    row, _ = _with_nexus_row(
+        tmp_path,
+        monkeypatch,
+        lane_name="treatment",
+        candidates=[GOOD_CLASSIFY, BAD_CLASSIFY],
+        timeout=True,
+    )
+    assert row["treatment_timeout"] is True and row["after_treatment_status"] == "not_run:timeout"
+    assert row["model_calls"] == 2 and row["model_calls_source"] == "prompt_capture"
+    assert row["first_attempt_status"] == "verified_in_scratch_copy"
+    assert row["first_attempt_hidden_passed"] is True
+    apply_strict_llm_baseline_classification([row])
+    assert row["first_attempt"] is True and row["after_treatment"] is False
+
+
+def test_no_response_capture_makes_the_first_attempt_unverifiable(tmp_path: Path) -> None:
     os.environ["NEXUS_BENCH_LANE"] = "treatment"
-    target = tmp_path / "t.py"
-    target.write_text("x = 2\n", encoding="utf-8")
+    os.environ.pop("NEXUS_BENCH_PROMPT_CAPTURE_DIR", None)
+
+    def never(_test, _timeout):
+        raise AssertionError("no verifier may run without a runner-derived candidate")
+
     row = {"model_candidate_sha256": _sha("x = 2\n"), "delivered_target_sha256": _sha("x = 2\n")}
     payload = {
         "result": {
@@ -1103,22 +1507,20 @@ def test_unarchived_first_candidate_is_not_verifiable_and_never_counts(tmp_path:
             }
         }
     }
-
-    def never(_timeout):
-        raise AssertionError("no verifier may run on a candidate that is not archived")
-
     lane.finalize_with_nexus_row(
         row,
         payload,
-        target_file=str(target),
+        target_file=str(tmp_path / "t.py"),
+        test_file=str(tmp_path / "test_v.py"),
         verification_test_file=str(tmp_path / "test_hidden.py"),
-        archive_dir=str(tmp_path / "empty"),
+        original_source="x = 0\n",
+        key="k__1",
         run_hidden=never,
         run_visible=never,
         timeout_sec=10,
     )
-    assert row["first_attempt_status"] == "first_candidate_unarchived"
-    assert row["first_attempt_hidden_passed"] is None
+    assert row["first_attempt_status"] == "first_attempt_unverifiable"
+    assert row["treatment_unverifiable"] is True
     row.update({
         "mode": "with_nexus",
         "status": "SUCCESS",
@@ -1126,7 +1528,53 @@ def test_unarchived_first_candidate_is_not_verifiable_and_never_counts(tmp_path:
         "nexus_winner_source": "llm_self_heal",
     })
     apply_strict_llm_baseline_classification([row])
-    assert row["first_attempt"] is False
+    assert row["first_attempt"] is False and row["after_treatment"] is False
+
+
+def test_target_outside_the_test_directory_is_unverifiable_not_a_crash(tmp_path: Path) -> None:
+    """L1: a re-score that cannot run is a row-level status, never an exception out of the run."""
+
+    test_dir = tmp_path / "case"
+    test_dir.mkdir()
+    (test_dir / "test_hidden.py").write_text("def test_x():\n    pass\n", encoding="utf-8")
+    row: dict = {}
+
+    def run(_test, _timeout):
+        raise AssertionError("must not run")
+
+    lane._first_attempt(
+        row,
+        entries=[{"kind": "stage1", "sha": _sha("a = 1\n"), "code": "a = 1\n", "error": ""}],
+        capture_error="",
+        first_consistent=True,
+        target_file=str(tmp_path / "elsewhere" / "target.py"),
+        verification_test_file=str(test_dir / "test_hidden.py"),
+        run_hidden=run,
+        timeout_sec=10,
+    )
+    assert row["first_attempt_status"] == "first_attempt_unverifiable"
+    assert row["first_attempt_hidden_passed"] is None
+
+
+def test_candidate_from_response_uses_the_product_extraction() -> None:
+    source = "def f():\n    return 1\n"
+    edit = json.dumps({
+        "status": "ok",
+        "operation": "replace",
+        "target_snippet": "return 1",
+        "replacement": "return 2",
+    })
+    stdout = json.dumps({"response": edit})
+    assert lane.candidate_from_response(source, stdout) == ("def f():\n    return 2\n", "")
+    assert lane.candidate_from_response(source, json.dumps({"response": ""}))[0] == ""
+    bad = json.dumps({
+        "response": json.dumps({
+            "operation": "replace",
+            "target_snippet": "nope",
+            "replacement": "x",
+        })
+    })
+    assert lane.candidate_from_response(source, bad) == ("", "llm_target_snippet_not_unique")
 
 
 # --------------------------------------------------------------------------- run_lane / analyze_run
@@ -1218,3 +1666,45 @@ def test_analyze_run_reports_both_columns_paired_and_flags(tmp_path: Path, capsy
     assert main([str(tmp_path)]) == 0
     out = capsys.readouterr().out
     assert "first_attempt" in out and "after_treatment" in out and "| t | 1 |" in out
+
+
+def test_capture_wrapper_records_the_model_response_and_forwards_stdout(tmp_path: Path) -> None:
+    """The response record the runner derives candidates from (treatment lane only)."""
+
+    real = tmp_path / "agy-real"
+    real.write_text(
+        f"#!{sys.executable}\nimport json, sys\nprint(json.dumps({{'response': 'hello'}}))\n",
+        encoding="utf-8",
+    )
+    real.chmod(0o755)
+    capture = tmp_path / "cap"
+    responses = tmp_path / "cap.responses"
+    capture.mkdir(mode=0o700)
+    responses.mkdir(mode=0o700)
+    env = {
+        **os.environ,
+        "NEXUS_BENCH_PROMPT_CAPTURE_REAL": str(real),
+        "NEXUS_BENCH_PROMPT_CAPTURE_DIR": str(capture),
+        "NEXUS_BENCH_RESPONSE_CAPTURE_DIR": str(responses),
+        "NEXUS_BENCH_ARM": "with_nexus",
+        "NEXUS_BENCH_CAPTURE_KEY": "k__1",
+        "NEXUS_BENCH_CAPTURE_RUN_ID": "r",
+    }
+    done = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "bench" / "agy_prompt_capture.py"),
+            "--print",
+            "hi",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+        stdin=subprocess.DEVNULL,
+    )
+    assert done.returncode == 0, done.stderr
+    assert json.loads(done.stdout) == {"response": "hello"}
+    (prompt_file,) = list(capture.iterdir())
+    record = json.loads((responses / prompt_file.name).read_text(encoding="utf-8"))
+    assert json.loads(record["stdout"]) == {"response": "hello"} and record["returncode"] == 0

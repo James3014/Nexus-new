@@ -183,20 +183,31 @@ def apply_strict_llm_baseline_classification(
     return rows
 
 
+# Only these first-attempt statuses mean the runner scored call 1's own model candidate.
+FIRST_ATTEMPT_VERIFIED = frozenset({"verified_as_delivered", "verified_in_scratch_copy"})
+
+
 def _treatment_lane_solve(row: dict[str, Any]) -> str:
-    """A treatment-lane with-Nexus SUCCESS: bound to the row's recorded model candidates."""
+    """A treatment-lane with-Nexus SUCCESS, bound to the RUNNER-derived model candidates.
+
+    The delivered sha must be one the runner re-derived from a captured model response and the
+    row must not be unverifiable (a product sha with no captured origin). ``model_solve`` only
+    when that is call 1's stage-1 candidate; any later candidate is ``treatment_model_solve``.
+    """
 
     final = str(row.get("final_model_candidate_sha256") or row.get("model_candidate_sha256") or "")
-    shas = [str(item) for item in row.get("model_candidate_sha256s") or []]
-    if not final or final not in shas or row.get("final_candidate_in_model_candidates") is not True:
+    runner = [str(item) for item in row.get("runner_candidate_sha256s") or []]
+    kinds = [str(item) for item in row.get("runner_candidate_kinds") or []]
+    if (
+        not final
+        or final not in runner
+        or row.get("final_candidate_in_model_candidates") is not True
+        or row.get("treatment_unverifiable") is True
+    ):
         row["treatment_sha_unbound"] = True
         return NOT_SOLVED
-    if (
-        shas
-        and final == shas[0]
-        and str(row.get("first_model_candidate_sha256") or shas[0]) == final
-    ):
-        return MODEL_SOLVE  # the first candidate was delivered: a first-attempt solve
+    if runner[0] == final and kinds[:1] == ["stage1"]:
+        return MODEL_SOLVE  # call 1's own candidate was delivered: a first-attempt solve
     return TREATMENT_MODEL_SOLVE
 
 
@@ -238,17 +249,17 @@ def apply_lane_columns(row: dict[str, Any]) -> dict[str, Any]:
         or hidden_feedback_used(row)
         or row.get("bounded_nexus_rescue_used") is True
     )
-    sources = [str(item) for item in row.get("model_candidate_sources") or []]
     row["first_attempt"] = bool(
         not void
         and _model_calls(row) > 0
         and row.get("first_model_candidate_sha256")
-        and sources
-        and sources[0].startswith(MODEL_WINNER_PREFIXES)
+        and row.get("first_attempt_status") in FIRST_ATTEMPT_VERIFIED
         and row.get("first_attempt_hidden_passed") is True
     )
     row["after_treatment"] = bool(
-        not void and classification in {MODEL_SOLVE, TREATMENT_MODEL_SOLVE}
+        not void
+        and row.get("treatment_unverifiable") is not True
+        and classification in {MODEL_SOLVE, TREATMENT_MODEL_SOLVE}
     )
     return row
 

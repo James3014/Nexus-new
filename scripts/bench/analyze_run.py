@@ -160,7 +160,7 @@ def render_markdown(result: dict[str, Any]) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").strip().splitlines()[0])
     parser.add_argument("run_dir")
     parser.add_argument("--json", action="store_true", help="print the analysis as JSON")
     args = parser.parse_args(argv)

@@ -2231,9 +2231,16 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                             "model_candidate_sha256",
                             hashlib.sha256(candidate_code.encode("utf-8")).hexdigest(),
                         )
-                        # PR-3: every raw model candidate, in order (first + final binding).
-                        _bench_lane.record_model_candidate(learning_trace, candidate_code, used_source)
+                    if _symmetric_prompt_mode():
+                        # PR-3: every model call in order (first + final binding); a call that
+                        # yielded no model candidate is a placeholder, never a candidate.
+                        if isinstance(candidate_code, str) and candidate_code and _bench_lane.is_stage1_model_source(used_source):
+                            _bench_lane.record_model_candidate(learning_trace, candidate_code, used_source)
+                        else:
+                            _bench_lane.record_failed_model_call(learning_trace)
                 except Exception as llm_exc:  # noqa: BLE001
+                    if _symmetric_prompt_mode():
+                        _bench_lane.record_failed_model_call(learning_trace)
                     fallback_used = True
                     failure_meta = getattr(llm_exc, "metadata", {})
                     failure_meta = failure_meta if isinstance(failure_meta, dict) else {}
@@ -2427,6 +2434,8 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                 and (used_source.startswith("llm") or model_required_final_delivery)
                 and ev.score < 1.0
                 and "quota" not in error_codes
+                # PR-3: the treatment lane repairs only a model candidate, never a local fallback.
+                and (not _bench_lane.treatment_lane_active() or _bench_lane.is_stage1_model_source(used_source))
                 and (not _bench_lane.treatment_lane_active() or _bench_lane.treatment_round_allowed(learning_trace, "self_heal", model_calls))
             ):
                 candidates.append(ev)
@@ -2457,6 +2466,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                             )
                     except Exception:  # noqa: BLE001
                         error_codes.append("model_required_local_support_hint_failed")
+                heal_call_recorded = False
                 repair_task = (
                     f"{config.task}\n\n"
                     "Previous candidate failed verification. "
@@ -2477,8 +2487,12 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                         codeintel_block=codeintel_block,
                     )
                     _record_llm_meta(repair_meta)
-                    if _symmetric_prompt_mode() and isinstance(repair_code, str) and repair_code:
-                        _bench_lane.record_model_candidate(learning_trace, repair_code, "llm_self_heal")
+                    heal_call_recorded = True
+                    if _symmetric_prompt_mode():
+                        if isinstance(repair_code, str) and repair_code:
+                            _bench_lane.record_model_candidate(learning_trace, repair_code, "llm_self_heal")
+                        else:
+                            _bench_lane.record_failed_model_call(learning_trace, "llm_self_heal_failed")
                     repair_guard_ok, repair_guard_reason = _semantic_guard(candidate_code, repair_code, config.task, "llm_self_heal")
                     if repair_guard_ok:
                         repair_ev = _evaluate_candidate(
@@ -2501,6 +2515,16 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                     if repair_ev.score >= 1.0:
                         ev = repair_ev
                 except Exception as heal_exc:  # noqa: BLE001
+                    if _symmetric_prompt_mode() and not heal_call_recorded:
+                        _bench_lane.record_failed_model_call(learning_trace, "llm_self_heal_failed")
+                        # PR-3: a failed repair call still counts (call budget, calls and tokens
+                        # reconciled with the prompt capture).
+                        heal_meta = getattr(heal_exc, "metadata", {})
+                        heal_meta = dict(heal_meta) if isinstance(heal_meta, dict) else {}
+                        heal_meta["model_calls"] = (
+                            int(heal_meta.get("model_calls", 0) or 0) if "model_calls" in heal_meta else 1
+                        )
+                        _record_llm_meta(heal_meta)
                     error_codes.append("llm_self_heal_failed")
                     candidates.append(
                         CandidateEval(

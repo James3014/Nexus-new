@@ -10,11 +10,14 @@ This module gives the sprint three things:
 * ``treatment_lane_active``: the lane switch. It is only honoured together with the symmetric
   prompt, so it can never turn treatments on outside the audited A/B.
 * ``record_model_candidate``: every raw model candidate the sprint produces in symmetric mode is
-  recorded by sha256, in order, so the bench can bind both the first candidate and the delivered
-  (final) candidate to model output. When the runner gives an archive directory, the candidate
-  bytes are written there too, so the first candidate can be re-verified after the row ends.
+  recorded by sha256, in order. The research flow delivers only a recorded candidate; the bench
+  does NOT trust this list: it re-derives every candidate from the prompt-capture wrapper's own
+  record of each model response and accepts the product's list only where it matches.
 * ``row_deadline_allows_round``: one wall-clock deadline for the whole row. A treatment round
-  that would start too close to it is skipped, so later rounds never extend the row's budget.
+  starts only with at least one full per-call cap left, so later rounds never extend the row's
+  budget and a round is never cut off by the row deadline.
+* ``record_failed_model_call``: a model call that produced no candidate is recorded as a
+  placeholder (sha ``None``), so the first entry always belongs to the first call.
 * ``treatment_round_allowed``: the deadline check plus the row's model-call budget
   (``NEXUS_BENCH_TREATMENT_MAX_MODEL_CALLS``); a round that would exceed either never starts.
 """
@@ -25,15 +28,19 @@ import hashlib
 import os
 import time
 from collections.abc import MutableMapping
-from pathlib import Path
 from typing import Any
 
 TREATMENT_LANE_ENV = "NEXUS_BENCH_TREATMENT_LANE"
-CANDIDATE_ARCHIVE_ENV = "NEXUS_BENCH_CANDIDATE_ARCHIVE_DIR"
 ROW_DEADLINE_ENV = "NEXUS_BENCH_ROW_DEADLINE_EPOCH"
 ROUND_MIN_REMAINING_ENV = "NEXUS_BENCH_ROUND_MIN_REMAINING_SEC"
 MAX_MODEL_CALLS_ENV = "NEXUS_BENCH_TREATMENT_MAX_MODEL_CALLS"
-DEFAULT_ROUND_MIN_REMAINING_SEC = 60.0
+# Without an explicit minimum, a new round needs a full per-call cap left (the gateway timeout the
+# runner gives both arms); without that, a conservative 300 s.
+DEFAULT_ROUND_MIN_REMAINING_SEC = 300.0
+PER_CALL_CAP_ENV = "NEXUS_GATEWAY_TIMEOUT_SEC"
+# Product labels of a stage-1 model candidate (the first attempt can only be one of these).
+STAGE1_MODEL_SOURCES = frozenset({"llm", "nexus_llm_baseline", "llm_assisted"})
+FAILED_CALL_SOURCE = "llm_failed"
 # learning_trace keys (read by the bench through the hyper-sprint report's learning_trace).
 SHA_LIST_KEY = "model_candidate_sha256s"
 SOURCE_LIST_KEY = "model_candidate_sources"
@@ -57,23 +64,8 @@ def candidate_sha256(code: str) -> str:
     return hashlib.sha256(code.encode("utf-8")).hexdigest()
 
 
-def _archive(code: str, sha: str) -> None:
-    root = os.environ.get(CANDIDATE_ARCHIVE_ENV, "").strip()
-    if not root:
-        return
-    directory = Path(root)
-    if not directory.is_dir() or directory.is_symlink():
-        return
-    path = directory / f"{sha}.txt"
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-    try:
-        fd = os.open(path, flags, 0o600)
-    except FileExistsError:
-        return  # the same bytes were already archived (identical candidate)
-    except OSError:
-        return
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        handle.write(code)
+def is_stage1_model_source(source: str) -> bool:
+    return str(source or "").strip().lower() in STAGE1_MODEL_SOURCES
 
 
 def record_model_candidate(trace: MutableMapping[str, Any], code: str, source: str) -> str:
@@ -87,8 +79,21 @@ def record_model_candidate(trace: MutableMapping[str, Any], code: str, source: s
     shas.append(sha)
     sources.append(str(source or ""))
     trace.setdefault(FIRST_SHA_KEY, sha)
-    _archive(code, sha)
     return sha
+
+
+def record_failed_model_call(
+    trace: MutableMapping[str, Any], source: str = FAILED_CALL_SOURCE
+) -> None:
+    """A model call that produced no model candidate (no patch, parse error, refusal...).
+
+    Keeps the list aligned with the calls: the first attempt is bound to the FIRST call, so a
+    failed first call leaves ``first_attempt`` unsolved whatever later rounds deliver.
+    """
+
+    trace.setdefault(SHA_LIST_KEY, []).append(None)
+    trace.setdefault(SOURCE_LIST_KEY, []).append(str(source or FAILED_CALL_SOURCE))
+    trace.setdefault(FIRST_SHA_KEY, None)
 
 
 def row_deadline_remaining_sec(now: float | None = None) -> float | None:
@@ -112,7 +117,9 @@ def row_deadline_allows_round(
         return True
     try:
         minimum = float(
-            os.environ.get(ROUND_MIN_REMAINING_ENV, "") or DEFAULT_ROUND_MIN_REMAINING_SEC
+            os.environ.get(ROUND_MIN_REMAINING_ENV, "")
+            or os.environ.get(PER_CALL_CAP_ENV, "")
+            or DEFAULT_ROUND_MIN_REMAINING_SEC
         )
     except ValueError:
         minimum = DEFAULT_ROUND_MIN_REMAINING_SEC

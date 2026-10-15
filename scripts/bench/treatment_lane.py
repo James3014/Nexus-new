@@ -14,23 +14,39 @@ treatments on for the with-Nexus arm:
 
 Each with-Nexus row then carries two outcomes:
 
-* ``first_attempt``: the first model candidate, scored exactly like the strict lane (the hidden
-  test on those exact bytes, put back in the target file after the row ended);
-* ``after_treatment``: the delivered (final) candidate, which must be one of the row's recorded
-  model candidates.
+* ``first_attempt``: call 1's model candidate, scored exactly like the strict lane (the hidden
+  test on those exact bytes, on a scratch copy of the task directory after the row ended);
+* ``after_treatment``: the delivered (final) candidate.
+
+The runner does not trust the product's account of its own rounds. The capture wrapper records
+every with-Nexus prompt and model response; ``derive_runner_candidates`` re-derives each call's
+candidate with the product's own extraction. The product's ``model_candidate_sha256s`` is
+accepted only where it matches (its first entry must be call 1's candidate, every sha it names
+must come from a captured response), otherwise the row is unverifiable and never a solve.
 
 The bare arm is the strict lane's bare arm (one call): its ``after_treatment`` is its first attempt.
 ``--bare-retries`` exists so the choice is explicit and recorded; only 0 is supported.
 
-``treatment_applied`` lists treatments that are attested, not self-reported: a capability receipt
-classified ``real`` by ``strict_llm_baseline.classify_receipt``, or for self-heal / several
-candidates the prompt-capture wrapper's own count of calls, which must match the product's record.
+The lane is refused until #2211's hidden-test staging and visible-test confinement are active
+(``hidden_staging_ready``): without them a candidate could read ``test_hidden.py`` and carry
+derived values into a later round.
+
+``treatment_applied`` lists treatments with evidence: the runner-derived calls (self-heal,
+several candidates) reconciled with the capture count, or capability receipts classified
+``real`` (seam treatments also need the #2211 seam trigger and evidence ids). Receipts are
+written by our own product subprocess (residual as in #2212 N3: consistency markers, not a
+signature).
 """
 
 from __future__ import annotations
 
 import hashlib
+import importlib
+import json
 import os
+import re
+import shutil
+import stat
 import subprocess
 import tempfile
 import time
@@ -45,7 +61,7 @@ LANE_ENV = "NEXUS_BENCH_LANE"
 MAX_CALLS_ENV = "NEXUS_BENCH_TREATMENT_MAX_MODEL_CALLS"
 DEFAULT_TREATMENT_MAX_MODEL_CALLS = 4
 MAX_TREATMENT_MAX_MODEL_CALLS = 8
-ARCHIVE_ENV = "NEXUS_BENCH_CANDIDATE_ARCHIVE_DIR"
+RESPONSE_DIR_ENV = "NEXUS_BENCH_RESPONSE_CAPTURE_DIR"
 ROW_DEADLINE_ENV = "NEXUS_BENCH_ROW_DEADLINE_EPOCH"
 TREATMENTS_ENABLED = ("self_heal", "multi_candidate", "ultra_review", "committee")
 # Capability receipts that count as a treatment when classified ``real`` (attested).
@@ -59,8 +75,22 @@ RECEIPT_TREATMENTS = frozenset({
     "autoreason",
     "ddtree",
 })
-# Product labels of a model-generated candidate (strict lane) plus the self-heal output.
-MODEL_CANDIDATE_SOURCES = frozenset({"llm", "nexus_llm_baseline", "llm_assisted", "llm_self_heal"})
+# Product labels of a stage-1 model candidate: the only possible first attempt.
+STAGE1_MODEL_SOURCES = frozenset({"llm", "nexus_llm_baseline", "llm_assisted"})
+# Stage-1 labels plus the self-heal output (a later model candidate).
+MODEL_CANDIDATE_SOURCES = STAGE1_MODEL_SOURCES | {"llm_self_heal"}
+ROUND_MIN_REMAINING_ENV = "NEXUS_BENCH_ROUND_MIN_REMAINING_SEC"
+HIDDEN_STAGING_MODULE = "scripts.bench.hidden_test_staging"
+# Lane-specific variables the strict lane must never inherit.
+TREATMENT_ONLY_ENV = (
+    "NEXUS_BENCH_TREATMENT_LANE",
+    RESPONSE_DIR_ENV,
+    "NEXUS_BENCH_CANDIDATE_ARCHIVE_DIR",  # retired (round 2); never inherited
+    ROW_DEADLINE_ENV,
+    MAX_CALLS_ENV,
+    ROUND_MIN_REMAINING_ENV,
+)
+NOT_RUN_TIMEOUT = "not_run:timeout"
 TREATMENT_WINNER_SOURCES = frozenset({"llm_self_heal"})
 _TRUE = {"1", "true", "yes"}
 
@@ -154,7 +184,49 @@ def validate_lane_args(args: Any) -> list[str]:
     for name in ("NEXUS_ONLINE_LOCAL_ASSIST", "NEXUS_EXTERNAL_RUNTIME_AUTHORIZED"):
         if os.environ.get(name, "").strip().lower() in _TRUE:
             errors.append(f"--lane treatment refuses {name}=1 (local/external paths stay off)")
+    if os.environ.get(ROUND_MIN_REMAINING_ENV) is not None:
+        errors.append(
+            f"--lane treatment refuses a pre-set {ROUND_MIN_REMAINING_ENV} (the runner sets it)"
+        )
+    for attr, flag in (
+        ("enable_ddtree_executor", "--enable-ddtree-executor"),
+        ("enable_autoreason_executor", "--enable-autoreason-executor"),
+        ("allow_learning_loop", "--allow-learning-loop"),
+    ):
+        # ddtree/autoreason keep the candidate loop going after a pass; the learning loop carries
+        # state between trials.
+        if bool(getattr(args, attr, False)):
+            errors.append(f"--lane treatment cannot be combined with {flag}")
+    ready, reason = hidden_staging_ready(args)
+    if not ready:
+        errors.append(f"treatment_requires_hidden_staging_and_confinement: {reason}")
     return errors
+
+
+def hidden_staging_ready(args: Any) -> tuple[bool, str]:
+    """The treatment lane needs #2211's hidden-test staging and visible-test confinement.
+
+    Without them a later round could carry text a candidate derived from ``test_hidden.py``
+    (the candidate runs next to it). Contract checked: the runner confines the visible test
+    (``NEXUS_CONFINE_VISIBLE_TEST=1``), ``scripts.bench.hidden_test_staging`` is importable with
+    ``staged_hidden_test`` / ``active_staging_for``, and the counted lane (which stages) is on.
+    """
+
+    if os.environ.get("NEXUS_CONFINE_VISIBLE_TEST", "") != "1":
+        return False, "NEXUS_CONFINE_VISIBLE_TEST is not 1"
+    try:
+        module = importlib.import_module(HIDDEN_STAGING_MODULE)
+    except ImportError:
+        return False, f"{HIDDEN_STAGING_MODULE} is not available"
+    for name in ("staged_hidden_test", "active_staging_for"):
+        if not callable(getattr(module, name, None)):
+            return False, f"{HIDDEN_STAGING_MODULE}.{name} missing"
+    if not (
+        bool(getattr(args, "strict_llm_baseline", False))
+        and bool(getattr(args, "counted_first_attempt", False))
+    ):
+        return False, "hidden-test staging is active only in the counted strict configuration"
+    return True, ""
 
 
 def configure_lane(args: Any) -> dict[str, Any]:
@@ -167,7 +239,8 @@ def configure_lane(args: Any) -> dict[str, Any]:
         "bare_retries": int(getattr(args, "bare_retries", 0) or 0),
     }
     if lane != LANE_TREATMENT:
-        os.environ.pop(MAX_CALLS_ENV, None)
+        for name in TREATMENT_ONLY_ENV:
+            os.environ.pop(name, None)  # the strict lane never inherits treatment switches
         return manifest
     calls = int(
         getattr(args, "treatment_max_model_calls", None) or DEFAULT_TREATMENT_MAX_MODEL_CALLS
@@ -195,13 +268,27 @@ def model_winner_source_ok(winner: str) -> bool:
     return lane_active() and str(winner or "").strip().lower() in TREATMENT_WINNER_SOURCES
 
 
-def new_candidate_archive() -> str:
-    """A private per-row directory outside the workspace for the raw model candidates."""
+def response_capture_dir() -> str:
+    """The run's private response-capture directory, next to the prompt-capture directory.
 
-    return tempfile.mkdtemp(prefix="nexus-bench-candidates-")
+    The capture wrapper records each model response there (with-Nexus treatment rows only), so
+    the runner derives every candidate from what the model actually returned. ``""`` when the
+    run has no prompt capture (then every treatment row is unverifiable, never a solve).
+    """
+
+    capture = os.environ.get("NEXUS_BENCH_PROMPT_CAPTURE_DIR", "").strip()
+    if not capture:
+        return ""
+    path = Path(f"{capture.rstrip('/')}.responses")
+    path.mkdir(mode=0o700, exist_ok=True)
+    if path.is_symlink() or not path.is_dir():
+        return ""
+    return str(path)
 
 
-def with_nexus_env_overrides(*, deadline_epoch: float | None, archive_dir: str) -> dict[str, str]:
+def with_nexus_env_overrides(
+    *, deadline_epoch: float | None, response_dir: str, per_call_cap_sec: int | None = None
+) -> dict[str, str]:
     """Env for the with-Nexus subprocess in the treatment lane ({} in the strict lane).
 
     Applied after the strict symmetric env: the symmetric prompt and every local-path disable stay
@@ -219,7 +306,7 @@ def with_nexus_env_overrides(*, deadline_epoch: float | None, archive_dir: str) 
         MAX_CALLS_ENV: str(calls),
         "NEXUS_ULTRA_REVIEW_DRY_GATE": "1",
         "NEXUS_USE_COMMITTEE": "1",
-        ARCHIVE_ENV: archive_dir,
+        RESPONSE_DIR_ENV: response_dir,
         # unchanged fairness pins, re-asserted after the treatment switches
         "NEXUS_DISABLE_LOCAL_PREFLIGHT_BEFORE_LLM": "1",
         "NEXUS_DISABLE_HIDDEN_CONTRACT_FAST_PATH": "1",
@@ -231,6 +318,8 @@ def with_nexus_env_overrides(*, deadline_epoch: float | None, archive_dir: str) 
     }
     if deadline_epoch is not None:
         env[ROW_DEADLINE_ENV] = f"{float(deadline_epoch):.3f}"
+    # A new round starts only with a full per-call cap left before the row deadline.
+    env[ROUND_MIN_REMAINING_ENV] = str(int(per_call_cap_sec) if per_call_cap_sec else 300)
     return env
 
 
@@ -243,9 +332,11 @@ def row_deadline_epoch(shared_task_deadline_monotonic: float | None) -> float | 
 
 
 def _report(payload: Mapping[str, Any]) -> Mapping[str, Any]:
-    result = payload.get("result") if isinstance(payload.get("result"), Mapping) else {}
-    report = result.get("report") if isinstance(result.get("report"), Mapping) else {}
-    return report
+    result = payload.get("result")
+    if not isinstance(result, Mapping):
+        return {}
+    report = result.get("report")
+    return report if isinstance(report, Mapping) else {}
 
 
 def _trace(payload: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -257,40 +348,150 @@ def _sha(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def read_archived_candidate(archive_dir: str, sha: str) -> str | None:
-    if not archive_dir or len(sha) != 64:
-        return None
-    path = Path(archive_dir) / f"{sha}.txt"
-    try:
-        if path.is_symlink() or not path.is_file():
-            return None
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return None
-    return text if _sha(text) == sha else None
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+SELF_HEAL_SENTENCE = (
+    "Previous candidate failed verification. Repair the candidate using the failure evidence below."
+)
+# Seam treatments (#2211) count only with the seam's own trigger and evidence on the receipt.
+SEAM_TREATMENTS = frozenset({"sandbox", "ultra_review", "file_lock"})
+SEAM_TRIGGER_PREFIX = "post_candidate_seam:"
 
 
-# A verifier run on whatever is in the target file: the runner's own hidden or visible test
-# command (same process group, staging and confinement as the strict lane), given a timeout.
-RunTest = Callable[[int], subprocess.CompletedProcess[str]]
+def is_timeout_row(row: Mapping[str, Any]) -> bool:
+    """The with-Nexus subprocess was killed (row deadline / subprocess timeout)."""
+
+    return (
+        row.get("treatment_timeout") is True
+        or str(row.get("runtime_classification") or "") == "subprocess_timeout"
+        or row.get("task_deadline_exceeded") is True
+    )
 
 
-def _with_candidate(target_file: str, code: str, action: Callable[[], Any]) -> Any:
-    """Run ``action`` with ``code`` in the target file; the delivered bytes are always put back."""
+def candidate_from_response(source_code: str, stdout: str) -> tuple[str, str]:
+    """The candidate a captured agy response yields, with the product's own extraction.
 
-    target = Path(target_file)
-    delivered = target.read_bytes() if target.exists() else None
-    try:
-        target.write_text(code, encoding="utf-8")
-        return action()
-    finally:
-        if delivered is None:
-            target.unlink(missing_ok=True)
+    agy envelope -> ``response`` text -> ``_parse_operation_payload`` (edit JSON, else the whole
+    text) -> ``_candidate_code_from_llm_output(source, out)``. ``("", reason)`` when none.
+    """
+
+    from nexus.research.sprint_service import (
+        _OPERATION_EDIT_KEYS,
+        _candidate_code_from_llm_output,
+        _parse_operation_payload,
+    )
+    from scripts.bench.agy_provider import _agy_envelope
+
+    envelope = _agy_envelope(stdout)
+    text = str(envelope.get("response") or "") if isinstance(envelope, dict) else ""
+    if not text.strip():
+        return "", "no_model_response"
+    parsed = _parse_operation_payload(text)
+    out = (
+        {key: parsed[key] for key in _OPERATION_EDIT_KEYS if key in parsed}
+        if parsed
+        else {"patch": text}
+    )
+    code, error = _candidate_code_from_llm_output(source_code, out)
+    return (code or "", "" if code else (error or "no_candidate_code"))
+
+
+def _private_entries(directory: Path, prefix: str) -> list[Path]:
+    if not directory.is_dir() or directory.is_symlink():
+        return []
+    out = []
+    for path in sorted(directory.iterdir()):
+        if path.name.startswith(prefix) and stat.S_ISREG(os.lstat(path).st_mode):
+            out.append(path)
+    return out
+
+
+def derive_runner_candidates(*, original_source: str, key: str) -> tuple[list[dict[str, Any]], str]:
+    """Every with-Nexus model call of this row, in call order, re-derived by the runner.
+
+    Source of truth is the capture wrapper, not the product: the prompt record (call order,
+    self-heal or stage 1) and the recorded model response. A stage-1 call edits the row's
+    original source; a self-heal call edits the latest stage-1 candidate before it.
+    """
+
+    capture_dir = os.environ.get("NEXUS_BENCH_PROMPT_CAPTURE_DIR", "").strip()
+    response_dir = os.environ.get(RESPONSE_DIR_ENV, "").strip()
+    run_id = os.environ.get("NEXUS_BENCH_CAPTURE_RUN_ID", "").strip()
+    if not capture_dir or not response_dir:
+        return [], "no_response_capture"
+    records: list[tuple[float, str, dict[str, Any]]] = []
+    for path in _private_entries(Path(capture_dir), f"with_nexus__{key}__"):
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return [], f"capture_unreadable:{path.name}"
+        if (
+            not isinstance(record, dict)
+            or str(record.get("key")) != key
+            or str(record.get("run_id")) != run_id
+        ):
+            continue
+        records.append((float(record.get("ts") or 0.0), path.name, record))
+    entries: list[dict[str, Any]] = []
+    stage1_code: str | None = None
+    for _ts, name, record in sorted(records):
+        prompt = str(record.get("prompt") or "")
+        self_heal = SELF_HEAL_SENTENCE in prompt
+        entry: dict[str, Any] = {
+            "kind": "self_heal" if self_heal else "stage1",
+            "sha": "",
+            "code": "",
+            "error": "",
+        }
+        response_path = Path(response_dir) / name
+        try:
+            if not stat.S_ISREG(os.lstat(response_path).st_mode):
+                raise OSError("not a regular file")
+            response = json.loads(response_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            entry["error"] = "no_response_recorded"
+            entries.append(entry)
+            continue
+        if int(response.get("returncode") or 0) != 0:
+            entry["error"] = "provider_failed"
+        elif self_heal and stage1_code is None:
+            entry["error"] = "self_heal_without_stage1_candidate"
         else:
-            target.write_bytes(delivered)
-        restored = target.read_bytes() if target.exists() else None
-        if restored != delivered:
-            raise RuntimeError("treatment lane could not restore the delivered target file")
+            code, error = candidate_from_response(
+                (stage1_code or "") if self_heal else original_source,
+                str(response.get("stdout") or ""),
+            )
+            entry.update({"code": code, "sha": _sha(code) if code else "", "error": error})
+            if code and not self_heal:
+                stage1_code = code
+        entries.append(entry)
+    return entries, ""
+
+
+RunTest = Callable[[Path, int], subprocess.CompletedProcess[str]]
+
+
+def _in_scratch_copy(
+    target_file: str, test_file: str, code: str, action: Callable[[Path], Any]
+) -> Any:
+    """Run ``action(copied_test)`` on a scratch copy of the task directory holding ``code``.
+
+    The workspace is never written: a candidate that writes files only touches the copy.
+    """
+
+    target = Path(target_file).resolve()
+    test = Path(test_file).resolve()
+    if target.parent != test.parent:
+        raise RuntimeError("target_outside_test_directory")
+    with tempfile.TemporaryDirectory(prefix="nexus-bench-rescore-") as tmp:
+        copy = Path(tmp) / test.parent.name
+        shutil.copytree(
+            test.parent,
+            copy,
+            symlinks=False,
+            ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache"),
+        )
+        (copy / target.name).write_text(code, encoding="utf-8")
+        return action(copy / test.name)
 
 
 def finalize_with_nexus_row(
@@ -298,60 +499,94 @@ def finalize_with_nexus_row(
     payload: Mapping[str, Any],
     *,
     target_file: str,
+    test_file: str,
     verification_test_file: str,
-    archive_dir: str,
+    original_source: str,
+    key: str,
     run_hidden: RunTest,
     run_visible: RunTest,
     timeout_sec: int,
     row_deadline_sec: float | None = None,
 ) -> dict[str, Any]:
-    """Add the treatment-lane columns to a finished with-Nexus row (no-op in the strict lane)."""
+    """Add the treatment-lane columns to a finished with-Nexus row (no-op in the strict lane).
+
+    Every candidate is re-derived by the runner from the capture wrapper's records; the product's
+    list is accepted only where it matches (first entry, and every sha it names).
+    """
 
     if not lane_active():
         return row
     trace = _trace(payload)
-    shas = [
-        str(item) for item in trace.get("model_candidate_sha256s") or [] if isinstance(item, str)
+    product_shas = [
+        "" if item is None else str(item) for item in trace.get("model_candidate_sha256s") or []
     ]
-    sources = [str(item) for item in trace.get("model_candidate_sources") or []]
-    first = shas[0] if shas else ""
+    product_sources = [str(item) for item in trace.get("model_candidate_sources") or []]
+    entries, capture_error = derive_runner_candidates(original_source=original_source, key=key)
+    codes = {entry["sha"]: entry["code"] for entry in entries if entry["sha"]}
+    runner_shas = [str(entry["sha"]) for entry in entries]
+    unverified = sorted({sha for sha in product_shas if sha and sha not in codes})
+    timeout = is_timeout_row(row) or is_timeout_row(payload)
+    if timeout and int(row.get("model_calls") or 0) == 0 and entries:
+        # The killed subprocess reported no calls; the wrapper saw them (H2).
+        row["model_calls"] = len(entries)
+        row["model_calls_source"] = "prompt_capture"
+    runner_first = runner_shas[0] if runner_shas else ""
+    product_first = product_shas[0] if product_shas else ""
+    first_consistent = not product_shas or product_first == runner_first
+    delivered = str(row.get("delivered_target_sha256") or "")
     final = str(row.get("model_candidate_sha256") or "")
-    final_index = max((i for i, sha in enumerate(shas) if sha == final), default=None)
-    skipped = {
-        "row_deadline": list(trace.get("treatment_rounds_skipped_row_deadline") or []),
-        "call_budget": list(trace.get("treatment_rounds_skipped_call_budget") or []),
-    }
+    unverifiable = bool(capture_error) or bool(unverified) or not first_consistent
+    final_bound = bool(final) and final == delivered and final in codes and not unverifiable
+    final_index = (
+        max((i for i, sha in enumerate(runner_shas) if sha == final), default=None)
+        if final_bound
+        else None
+    )
     row.update({
         "lane": LANE_TREATMENT,
         "treatment_max_model_calls": max_model_calls(),
-        "model_candidate_sha256s": shas,
-        "model_candidate_sources": sources,
-        "first_model_candidate_sha256": first,
+        "model_candidate_sha256s": product_shas,
+        "model_candidate_sources": product_sources,
+        "runner_candidate_sha256s": runner_shas,
+        "runner_candidate_kinds": [entry["kind"] for entry in entries],
+        "runner_candidate_errors": [entry["error"] for entry in entries],
+        "treatment_unverified_shas": unverified,
+        "treatment_unverifiable": unverifiable,
+        "treatment_capture_error": capture_error,
+        "first_model_candidate_sha256": runner_first,
         "final_model_candidate_sha256": final,
-        "final_candidate_in_model_candidates": final_index is not None,
+        "final_candidate_in_model_candidates": final_bound,
         "winner_candidate_index": final_index,
         "winner_round": None if final_index is None else final_index + 1,
-        "treatment_rounds": len(shas),
-        "treatment_rounds_skipped": skipped,
-        "treatment_candidate_archive": archive_dir,
+        "treatment_rounds": len(entries),
+        "treatment_rounds_skipped": {
+            "row_deadline": list(trace.get("treatment_rounds_skipped_row_deadline") or []),
+            "call_budget": list(trace.get("treatment_rounds_skipped_call_budget") or []),
+        },
+        "treatment_candidates": codes,
+        "treatment_timeout": timeout,
         "row_deadline_sec": row_deadline_sec,
         "tokens": int(row.get("total_tokens") or row.get("model_total_tokens") or 0),
         "treatment_applied": list(row.get("treatment_applied") or []),
     })
+    if timeout:
+        # after_treatment of a killed row is a timeout (a failure that stays in the denominator,
+        # S16); the first attempt is still scored from the runner-derived first candidate.
+        row["after_treatment_status"] = NOT_RUN_TIMEOUT
     _first_attempt(
         row,
-        first=first,
-        sources=sources,
+        entries=entries,
+        capture_error=capture_error,
+        first_consistent=first_consistent,
         target_file=target_file,
         verification_test_file=verification_test_file,
-        archive_dir=archive_dir,
         run_hidden=run_hidden,
         timeout_sec=timeout_sec,
     )
     row["treatment_visible_outputs"] = _visible_outputs(
-        shas,
+        entries,
         target_file=target_file,
-        archive_dir=archive_dir,
+        test_file=test_file,
         run_visible=run_visible,
         timeout_sec=timeout_sec,
     )
@@ -361,82 +596,92 @@ def finalize_with_nexus_row(
 def _first_attempt(
     row: dict[str, Any],
     *,
-    first: str,
-    sources: list[str],
+    entries: list[dict[str, Any]],
+    capture_error: str,
+    first_consistent: bool,
     target_file: str,
     verification_test_file: str,
-    archive_dir: str,
     run_hidden: RunTest,
     timeout_sec: int,
 ) -> None:
-    """Score the first model candidate exactly like the strict lane: hidden test on its bytes."""
+    """Score the FIRST model call exactly like the strict lane: hidden test on its bytes.
+
+    Only call 1's runner-derived stage-1 candidate can be a first attempt; a failed first call,
+    a local fallback or a self-heal output never is.
+    """
 
     row["first_attempt_hidden_passed"] = None
-    if not first:
+    if capture_error or not first_consistent:
+        row["first_attempt_status"] = "first_attempt_unverifiable"
+        return
+    first = entries[0] if entries else None
+    if first is None or not first["sha"]:
         row["first_attempt_status"] = "no_model_candidate"
         return
-    if not sources or sources[0] not in MODEL_CANDIDATE_SOURCES:
+    if first["kind"] != "stage1":
         row["first_attempt_status"] = "first_candidate_not_model"
         return
     if Path(verification_test_file).name != "test_hidden.py":
         row["first_attempt_status"] = "no_hidden_verifier"
         return
-    delivered = str(row.get("delivered_target_sha256") or "")
     if (
-        first == delivered
+        first["sha"] == str(row.get("delivered_target_sha256") or "")
         and row.get("hidden_verifier_file") == verification_test_file
         and isinstance(row.get("hidden_verifier_passed"), bool)
     ):
-        # The first candidate is what was delivered: the row's own hidden verification scored it.
+        # The runner-derived first candidate is the delivered file: the row's own hidden
+        # verification scored exactly those bytes.
         row["first_attempt_hidden_passed"] = bool(row["hidden_verifier_passed"])
         row["first_attempt_status"] = "verified_as_delivered"
         return
-    code = read_archived_candidate(archive_dir, first)
-    if code is None:
-        row["first_attempt_status"] = "first_candidate_unarchived"
-        return
-
-    def _verify() -> bool:
-        return run_hidden(timeout_sec).returncode == 0
-
     try:
-        row["first_attempt_hidden_passed"] = bool(_with_candidate(target_file, code, _verify))
-        row["first_attempt_status"] = "verified_from_archive"
+        done = _in_scratch_copy(
+            target_file,
+            verification_test_file,
+            first["code"],
+            lambda test: run_hidden(test, timeout_sec),
+        )
+        row["first_attempt_hidden_passed"] = done.returncode == 0
+        row["first_attempt_status"] = "verified_in_scratch_copy"
     except subprocess.TimeoutExpired:
         row["first_attempt_hidden_passed"] = False
         row["first_attempt_status"] = "hidden_verifier_timeout"
+    except (OSError, RuntimeError, shutil.Error) as exc:
+        row["first_attempt_status"] = "first_attempt_unverifiable"
+        row["first_attempt_error"] = f"{type(exc).__name__}: {exc}"[:200]
 
 
 def _visible_outputs(
-    shas: list[str],
+    entries: list[dict[str, Any]],
     *,
     target_file: str,
-    archive_dir: str,
+    test_file: str,
     run_visible: RunTest,
     timeout_sec: int,
 ) -> dict[str, str]:
-    """The runner's own visible-test output on every candidate that a later round could quote.
+    """The runner's own visible-test output on every stage-1 candidate a later round could quote.
 
-    The per-round prompt audit allows a ``[FAILURE]`` body only when its lines appear here.
-    Only rows with more than one candidate need it; the visible test only, never the hidden one.
+    The per-round prompt audit allows a ``[FAILURE]`` body only when its lines appear here
+    (after the hidden-literal scan of the whole prompt). Visible test only, on a scratch copy.
     """
 
-    if len(shas) < 2:
+    if len(entries) < 2:
         return {}
     out: dict[str, str] = {}
-    for sha in dict.fromkeys(shas[:-1]):
-        code = read_archived_candidate(archive_dir, sha)
-        if code is None:
+    for entry in entries[:-1]:
+        if entry["kind"] != "stage1" or not entry["sha"] or entry["sha"] in out:
             continue
 
-        def _visible() -> str:
-            done = run_visible(timeout_sec)
+        def _visible(test: Path) -> str:
+            done = run_visible(test, timeout_sec)
             return f"{done.stdout or ''}\n{done.stderr or ''}"
 
         try:
-            out[sha] = _with_candidate(target_file, code, _visible)[-20000:]
-        except subprocess.TimeoutExpired:
-            out[sha] = ""
+            out[entry["sha"]] = _in_scratch_copy(target_file, test_file, entry["code"], _visible)[
+                -20000:
+            ]
+        except (subprocess.TimeoutExpired, OSError, RuntimeError, shutil.Error):
+            out[entry["sha"]] = ""
     return out
 
 
@@ -452,32 +697,58 @@ def finalize_bare_row(row: dict[str, Any]) -> dict[str, Any]:
     return row
 
 
+def _receipt_attested(receipt: Mapping[str, Any], rounds: int) -> bool:
+    """Receipt-based treatment evidence (residual, as in #2212 N3: the with-Nexus subprocess is
+    our product and writes these receipts; overlay markers are consistency, not a signature).
+    """
+
+    from scripts.bench.strict_llm_baseline import classify_receipt
+
+    name = str(receipt.get("name") or "")
+    if name not in RECEIPT_TREATMENTS or classify_receipt(dict(receipt)) != "real":
+        return False
+    if name == "hyper" and rounds <= 1:
+        return False  # one candidate, one round: nothing beyond the strict lane ran
+    if name in SEAM_TREATMENTS:
+        # #2211 seam: its own trigger and sealed evidence ids, or it did not run post-candidate.
+        trigger = str(receipt.get("trigger_source") or "")
+        refs = [ref for ref in receipt.get("evidence_refs") or [] if str(ref).strip()]
+        return trigger.startswith(SEAM_TRIGGER_PREFIX) and bool(refs)
+    return True
+
+
 def attest_row(row: dict[str, Any], task_audit: Mapping[str, Any] | None) -> None:
-    """``treatment_applied`` from attested evidence only (receipts classified real, captures)."""
+    """``treatment_applied`` from attested evidence only: receipts (see ``_receipt_attested``) and
+    the runner-derived calls (self-heal / several candidates) reconciled with the capture count.
+    """
 
     if row.get("lane") != LANE_TREATMENT or str(row.get("mode")) != "with_nexus":
         return
-    from scripts.bench.strict_llm_baseline import classify_receipt
-
-    applied: set[str] = set()
-    for receipt in row.get("capability_receipts") or []:
-        if isinstance(receipt, dict) and str(receipt.get("name") or "") in RECEIPT_TREATMENTS:
-            if classify_receipt(receipt) == "real":
-                applied.add(str(receipt.get("name")))
     audit = task_audit or {}
     captured = int(audit.get("with_nexus_calls") or 0)
-    sources = [str(item) for item in row.get("model_candidate_sources") or []]
-    # The wrapper's call count must equal the row's; every recorded candidate came from one call.
+    if is_timeout_row(row) and int(row.get("model_calls") or 0) == 0 and captured > 0:
+        row["model_calls"] = captured
+        row["model_calls_source"] = "prompt_capture"
+    rounds = int(row.get("treatment_rounds") or 0)
+    applied = {
+        str(receipt.get("name"))
+        for receipt in row.get("capability_receipts") or []
+        if isinstance(receipt, Mapping) and _receipt_attested(receipt, rounds)
+    }
+    kinds = [str(kind) for kind in row.get("runner_candidate_kinds") or []]
+    shas = [str(sha) for sha in row.get("runner_candidate_sha256s") or []]
     consistent = (
-        captured > 0 and captured == int(row.get("model_calls") or 0) and len(sources) <= captured
+        captured > 0
+        and captured == int(row.get("model_calls") or 0) == len(kinds)
+        and row.get("treatment_unverifiable") is not True
     )
     if (
         consistent
         and int(audit.get("self_heal_rounds_observed") or 0) > 0
-        and "llm_self_heal" in sources
+        and any(kind == "self_heal" and sha for kind, sha in zip(kinds, shas))
     ):
         applied.add("self_heal")
-    if consistent and sum(1 for item in sources if item != "llm_self_heal") >= 2:
+    if consistent and sum(1 for kind, sha in zip(kinds, shas) if kind == "stage1" and sha) >= 2:
         applied.add("multi_candidate")
     row["treatment_applied"] = sorted(applied)
     row["treatment_calls_reconciled"] = consistent
