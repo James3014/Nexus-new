@@ -3466,7 +3466,10 @@ def test_auto_flow_keeps_external_doc_scout_rejected_only_diagnostic(tmp_path: P
     assert "external_doc_scout_report_path" not in capabilities
     assert capabilities["external_doc_scout_diagnostic_rejected_claims"]
     assert receipts["external_doc_scout"]["public_claim_safe"] is False
-    assert receipts["external_doc_scout"]["failure_reason"] == "selected_without_invocation"
+    # No live connector: with zero runtime stages the overlay now names it explicitly
+    # (#2212 round 6) instead of the bare "selected_without_invocation".
+    assert receipts["external_doc_scout"]["failure_reason"] == "NOT_EXECUTABLE:no_live_connector"
+    assert receipts["external_doc_scout"]["invoked"] is False
 
 
 def test_runtime_receipt_plan_prunes_unexecuted_judge_panel():

@@ -124,9 +124,10 @@ def build_capability_receipt_payloads(
         )
     ]
     unified_stages = nexus_usage_trace.get("unified_runtime_capabilities")
-    if isinstance(unified_stages, list) and unified_stages:
+    if isinstance(unified_stages, list):
         # Executed-runtime truth: a capability the UnifiedRuntime really ran is not
-        # "selected_without_invocation", and a skipped one names the runtime reason.
+        # "selected_without_invocation", and a skipped one names the runtime reason.  An
+        # empty list still marks selected non-executable nodes NOT_EXECUTABLE.
         receipts = overlay_unified_capability_receipts(receipts, unified_stages)
     bound_receipts = bind_shared_playbook_runtime_receipts(
         capability_plan_payload=runtime_plan,

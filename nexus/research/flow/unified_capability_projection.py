@@ -287,6 +287,57 @@ def _executor_outcome(value: Any, depth: int = 0) -> Mapping[str, Any] | None:
     return value if "semantic_status" in value else None
 
 
+def _outcome_layers(value: Any) -> list[Mapping[str, Any]]:
+    """The record and its nested ``response`` / ``outcome`` mappings, outermost first.
+
+    Follows the same path as ``_executor_outcome`` (``response`` before ``outcome``).
+    """
+
+    layers: list[Mapping[str, Any]] = []
+    current: Any = value
+    while isinstance(current, Mapping) and len(layers) <= _MAX_OUTCOME_DEPTH:
+        layers.append(current)
+        nxt = None
+        for key in ("response", "outcome"):
+            if _executor_outcome(current.get(key)) is not None:
+                nxt = current.get(key)
+                break
+        current = nxt
+    return layers
+
+
+_LAYER_SUCCESS_STATUSES = frozenset({"SUCCEEDED", "VERIFIED", "PASS", "PASSED", "OK", "SUCCESS"})
+
+
+def _exact(value: Any) -> str:
+    return str(value or "").strip().upper()
+
+
+def _success_contradicted(record: Mapping[str, Any]) -> str:
+    """Why a nested success status is contradicted by the record ("" when it is not).
+
+    The runtime sets the record-level ``status`` / ``gate_passed``
+    (``nexus_runtime.kernel.capabilities._capability_stage``); a record-level status other
+    than ``SUCCEEDED``, any ``gate_passed`` false, any layer ``status`` that is not a success
+    word, or a non-empty ``error`` / ``blockers`` / ``missing_evidence`` on any layer wins over
+    an inner ``semantic_status`` of success.
+    """
+
+    if "status" in record and _exact(record.get("status")) != "SUCCEEDED":
+        return "RECORD_STATUS_NOT_SUCCEEDED"
+    for layer in _outcome_layers(record):
+        if "gate_passed" in layer and layer.get("gate_passed") is False:
+            return "GATE_PASSED_FALSE"
+        if "status" in layer and _exact(layer.get("status")) not in _LAYER_SUCCESS_STATUSES:
+            return "LAYER_STATUS_NOT_SUCCESS"
+        if str(layer.get("error") or "").strip():
+            return _code(layer.get("error")) or "ERROR_PRESENT"
+        for field in _VERDICT_LISTS:
+            if _str_items(layer.get(field)):
+                return f"{field.upper()}_PRESENT"
+    return ""
+
+
 def _code(value: Any) -> str:
     return re.sub(r"[^A-Z0-9_:]", "_", str(value or "").strip().upper()).strip("_")
 
@@ -302,7 +353,10 @@ def outcome_disposition(record: Any) -> dict[str, Any]:
 
     ``kind`` is one of:
 
-    * ``succeeded`` -- innermost ``semantic_status`` in SUCCEEDED / VERIFIED / PASS;
+    * ``succeeded`` -- the outermost ``semantic_status`` is exactly SUCCEEDED / VERIFIED / PASS
+      and nothing contradicts it (``_success_contradicted``: record-level ``status`` must be
+      ``SUCCEEDED`` when present, no ``gate_passed`` false, no non-success layer status, no
+      ``error`` / ``blockers`` / ``missing_evidence``);
     * ``missing_inputs`` -- refused with a ``MISSING_INPUT_CODES`` code, or a verdict list
       (``missing_evidence`` / ``blockers``) whose every item is ``missing_*``;
     * ``evaluated_rejected`` -- a gate that evaluated and rejected (a verdict list with at least
@@ -318,10 +372,18 @@ def outcome_disposition(record: Any) -> dict[str, Any]:
     if outcome is None:
         error = _code(record.get("error") or _deep_error(record))
         return {"kind": "failed_or_refused", "reason": error or "NO_SEMANTIC_STATUS"}
-    status = _code(outcome.get("semantic_status"))
+    # The outermost semantic_status wins over inner ones.
+    outer = next(
+        (layer for layer in _outcome_layers(record) if "semantic_status" in layer), outcome
+    )
+    status = _code(outer.get("semantic_status"))
     error = _code(outcome.get("error"))
-    if status in _SUCCESS_STATUSES:
-        return {"kind": "succeeded", "reason": status}
+    if _exact(outer.get("semantic_status")) in _SUCCESS_STATUSES:
+        contradiction = _success_contradicted(record)
+        if not contradiction:
+            return {"kind": "succeeded", "reason": status}
+        if not error and not any(_str_items(outcome.get(f)) for f in _VERDICT_LISTS):
+            return {"kind": "failed_or_refused", "reason": contradiction}
     if error in MISSING_INPUT_CODES:
         return {
             "kind": "missing_inputs",
@@ -499,7 +561,8 @@ def runtime_attestation(receipt: Mapping[str, Any], stage: Mapping[str, Any] | N
 
     In order:
 
-    1. ``simulated`` -- name in ``SIMULATED_BY_DESIGN_EXECUTORS``; a simulation marker in the
+    1. ``simulated`` -- no projected runtime ``stage`` (the receipt's own fields are
+       self-asserted); name in ``SIMULATED_BY_DESIGN_EXECUTORS``; a simulation marker in the
        executor outcome; stage ``simulated`` or ``claim_boundary.simulated`` not exactly
        ``False``; ``claim_boundary.receipt_present`` not exactly ``True``; evidence refs
        missing or malformed.
@@ -523,7 +586,11 @@ def runtime_attestation(receipt: Mapping[str, Any], stage: Mapping[str, Any] | N
         name = str(receipt.get("name") or "")
         if name in SIMULATED_BY_DESIGN_EXECUTORS:
             return ATTESTATION_SIMULATED
-        source = stage if isinstance(stage, Mapping) else receipt
+        if not isinstance(stage, Mapping):
+            # Without the projected runtime stage only the receipt's own (self-asserted)
+            # fields remain: never real.
+            return ATTESTATION_SIMULATED
+        source = stage
         if bool(receipt.get("outcome_simulated")) or bool(source.get("outcome_simulated")):
             return ATTESTATION_SIMULATED
         if source.get("simulated") is not False:

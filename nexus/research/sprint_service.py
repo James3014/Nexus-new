@@ -892,7 +892,8 @@ def visible_test_confinement_available() -> bool:
     """True only when the visible test would run confined (opt-in env + confined runner present).
 
     The runtime verifier executes model-produced code, so it is bound only when
-    ``NEXUS_CONFINE_VISIBLE_TEST=1`` and the confined test runner module exists; otherwise it
+    ``NEXUS_CONFINE_VISIBLE_TEST=1`` and the confined test runner module exists (``find_spec``
+    imports only the parent package ``nexus.engine``, not the runner); otherwise it
     adds no execution of its own (the sprint's pre-existing visible-test run is unchanged).
     """
     if os.environ.get(CONFINE_VISIBLE_TEST_ENV, "").strip() != "1":

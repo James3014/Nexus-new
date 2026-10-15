@@ -1279,3 +1279,98 @@ def test_archived_name_only_in_optional_capabilities_is_recorded_as_dropped() ->
     assert plan["optional_capabilities"] == []
     assert "integration_manager" in plan["forbidden_capabilities"]
     assert "integration_manager" in plan["signal_snapshot"]["archived_capabilities_dropped"]
+
+
+def _runtime_record(outer: dict, inner: dict) -> dict:
+    """The real record shape: record-level status / gate_passed set by the runtime
+    (``nexus_runtime.kernel.capabilities._capability_stage``) around the executor outcome."""
+
+    return {
+        "physical_callable": "capability_executor_registry:pregate",
+        **outer,
+        "response": {
+            **{k: v for k, v in outer.items() if k in ("status", "gate_passed")},
+            "response": {"outcome": inner},
+        },
+    }
+
+
+def test_record_level_runtime_status_contradicting_inner_success_is_never_real() -> None:
+    """Round 6 MEDIUM-1: record-level status / gate_passed, outer semantic_status, sibling
+    error / blockers and inexact success words all defeat an inner SUCCEEDED."""
+
+    from nexus.research.flow.unified_capability_projection import (
+        outcome_disposition,
+        runtime_attestation,
+    )
+
+    stage = _stage("pregate", "INVOKED")
+    ok = {"status": "SUCCEEDED", "gate_passed": True}
+    inner_ok = {"semantic_status": "SUCCEEDED", "detail": "x"}
+    cases = {
+        "record_failed": _runtime_record({"status": "FAILED", "gate_passed": False}, inner_ok),
+        "record_gate_false": _runtime_record(
+            {"status": "SUCCEEDED", "gate_passed": False}, inner_ok
+        ),
+        "outer_semantic_failed": {
+            **_runtime_record(ok, inner_ok),
+            "semantic_status": "FAILED",
+        },
+        "sibling_error": _runtime_record(ok, {**inner_ok, "error": "boom"}),
+        "blockers": _runtime_record(ok, {**inner_ok, "blockers": ["verifier_status_not_pass"]}),
+        "inexact_pass": _runtime_record(ok, {"semantic_status": " pass!", "detail": "x"}),
+    }
+    for label, record in cases.items():
+        assert outcome_disposition(record)["kind"] != "succeeded", label
+        receipt = {
+            "task_id": "t",
+            "capabilities": [stage],
+            "capability_evidence_bundle": _bundle(stage),
+            "capability_results": {"pregate": record},
+        }
+        row = project_unified_capability_stages([receipt])[0]
+        assert row["refs_resolved"] is False, label
+        assert runtime_attestation({"name": "pregate"}, row) != "real", label
+
+    # The same real shape with every layer agreeing is real.
+    good = {
+        "task_id": "t",
+        "capabilities": [stage],
+        "capability_evidence_bundle": _bundle(stage),
+        "capability_results": {"pregate": _runtime_record(ok, inner_ok)},
+    }
+    row = project_unified_capability_stages([good])[0]
+    assert runtime_attestation({"name": "pregate"}, row) == "real"
+
+
+def test_receipt_without_a_projected_stage_never_attests_real() -> None:
+    """Round 6 LOW-2: a receipt's own refs_resolved / disposition / boundary are not trusted."""
+
+    from nexus.research.flow.unified_capability_projection import runtime_attestation
+
+    forged = {
+        "name": "pregate",
+        "simulated": False,
+        "claim_boundary": {"simulated": False, "receipt_present": True},
+        "evidence_refs": ["ev"],
+        "refs_resolved": True,
+        "disposition": {"kind": "succeeded", "reason": "SUCCEEDED"},
+    }
+    assert runtime_attestation(forged) == "simulated"
+    assert runtime_attestation(forged, None) == "simulated"
+    assert runtime_attestation({"name": "pregate"}, forged) == "real"  # as a projected stage
+
+
+def test_receipt_builder_marks_non_executable_nodes_with_zero_runtime_stages() -> None:
+    """Round 6 MEDIUM-2: the production caller runs the overlay for an empty stage list."""
+
+    from scripts.bench.strict_llm_baseline import classify_receipt
+
+    receipts = build_capability_receipt_payloads(
+        {"selected_capabilities": ["direct_mode", "pregate"]},
+        {"capabilities": {}, "unified_runtime_capabilities": []},
+    )
+    by_name = {item["name"]: item for item in receipts}
+    assert classify_receipt(by_name["direct_mode"]) == "not_executable"
+    assert by_name["direct_mode"]["failure_reason"].startswith("NOT_EXECUTABLE:")
+    assert classify_receipt(by_name["pregate"]) != "not_executable"
