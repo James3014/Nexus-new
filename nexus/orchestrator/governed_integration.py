@@ -269,10 +269,16 @@ class ControlledIntegrationManager:
         admin_dirs = [common, *(sorted(linked.iterdir()) if linked.is_dir() else ())]
 
         def read(path: Path) -> str | None:
+            # Only an absent marker means "not in progress"; a marker that
+            # exists but cannot be read fails closed (#2230).
             try:
                 return path.read_text(encoding="utf-8").strip()
-            except OSError:
+            except (FileNotFoundError, NotADirectoryError):
                 return None
+            except (OSError, UnicodeDecodeError) as exc:
+                raise RuntimeError(
+                    f"integration branch state unreadable: {path.name}: {type(exc).__name__}"
+                ) from exc
 
         for admin in admin_dirs:
             for state in ("rebase-merge", "rebase-apply"):

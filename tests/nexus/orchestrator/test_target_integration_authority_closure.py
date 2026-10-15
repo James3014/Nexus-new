@@ -4235,3 +4235,25 @@ def test_detached_linked_worktree_probe_shapes_and_sanitised_env(tmp_path: Path,
         env.get("GIT_CONFIG_GLOBAL") == "/dev/null" and env.get("GIT_CONFIG_NOSYSTEM") == "1"
         for env in seen
     )
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads mode-000 files")
+def test_strict_apply_refuses_unreadable_in_progress_marker(tmp_path: Path):
+    """An unreadable rebase marker in any worktree admin dir fails closed (#2230)."""
+    root, base, candidate = _repo(tmp_path)
+    other = tmp_path / "other"
+    _git(root, "worktree", "add", "--detach", str(other), base)
+    admin = Path(_git(other, "rev-parse", "--absolute-git-dir"))
+    marker = admin / "rebase-merge" / "head-name"
+    marker.parent.mkdir()
+    marker.write_text(_CANARY_REF + "\n")
+    marker.chmod(0)
+    try:
+        with pytest.raises(
+            IntegrationExecutionError, match="INTEGRATION_BRANCH_REFUSED_AT_APPLY"
+        ) as raised:
+            _separate_controller_integrate(tmp_path, root.resolve(), base, candidate)
+    finally:
+        marker.chmod(0o600)
+    assert raised.value.merge_performed is False
+    assert _git(root, "rev-parse", _CANARY_REF) == base
