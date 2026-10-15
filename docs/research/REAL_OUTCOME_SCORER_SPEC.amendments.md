@@ -17,8 +17,9 @@ The v1 header names `SCORER_VERSION = "1.0.0"`. The scorer versions are:
 | `1.0.0` | first implementation (#1951) | v1 |
 | `1.0.1` | the trusted impact-gate copy is registered in `sys.modules`, so the P2P(b) selector no longer fails silently | v1, unchanged |
 | `1.1.0` | post-merge review follow-ups (#1951 review): input validation, write containment, a P2P run diagnostic, a summary fix and cache keys | v1, unchanged; A2–A4 below only add diagnostics, refusals for malformed or unsafe input, and operational behaviour |
+| `1.2.0` | GOLD port fallback (#2233) | v1 for every task whose PR patches apply whole; `REAL_OUTCOME_SCORER_SPEC.v2.md` (v1 + A5) for the tasks that need the fallback. Each receipt records `spec_version` and that spec file's sha256. For all tasks, a symlinked oracle source file is refused (`NOT_SCORABLE_ORACLE_INVALID` / `ORACLE_FILE_UNSAFE`), an unsafe-input refusal like A3. `--summarize` headline numbers are what v1 would report (each v2 receipt counted as `NOT_SCORABLE_ORACLE_INVALID` / `GOLD_PORT_FAILED`); receipts of any other spec version are left out of both blocks (`unknown_spec_versions`) |
 
-Current scorer: `SCORER_VERSION = "1.1.0"`. Receipts record the version that wrote them.
+Current scorer: `SCORER_VERSION = "1.2.0"`. Receipts record the version that wrote them.
 
 ## 2026-10-14: A2, P2P(b/c) run diagnostic (no rule change)
 
