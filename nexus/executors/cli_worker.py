@@ -283,8 +283,11 @@ def _tagged_pids(tag: str) -> set[int]:
                     same_uid = entry.stat().st_uid == os.getuid()
                 except (FileNotFoundError, ProcessLookupError):
                     continue  # exited meanwhile
-                if same_uid:
+                if same_uid and not _predates_run(entry, tag):
                     # One of ours we cannot inspect: unknown, not clean.
+                    # (Same-uid non-dumpable system processes such as
+                    # ``(sd-pam)`` that started before the worker cannot be
+                    # its descendants.)
                     raise
                 continue
         return found
@@ -323,6 +326,25 @@ def _probe_env() -> dict[str, str]:
     worker-writable files) may influence which code they run.
     """
     return {"PATH": _PROBE_PATH, "LC_ALL": "C", "LANG": "C"}
+
+
+# run tag -> the worker's Linux start time (clock ticks since boot).
+_RUN_START_TICKS: dict[str, int] = {}
+
+
+def _proc_start_ticks(entry: Path) -> Optional[int]:
+    """``starttime`` from ``/proc/<pid>/stat`` (clock ticks since boot), or None."""
+    try:
+        return int((entry / "stat").read_text().rsplit(")", 1)[1].split()[19])
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def _predates_run(entry: Path, tag: str) -> bool:
+    """True when ``entry`` provably started before the run's worker process."""
+    floor = _RUN_START_TICKS.get(tag)
+    started = _proc_start_ticks(entry)
+    return floor is not None and started is not None and started < floor
 
 
 def _proc_is_zombie(entry: Path) -> bool:
@@ -867,6 +889,9 @@ def run_cli_worker(
         )
         if on_process_group is not None:
             on_process_group(process.pid)
+        worker_ticks = _proc_start_ticks(Path("/proc") / str(process.pid))
+        if worker_ticks is not None:
+            _RUN_START_TICKS[run_tag] = worker_ticks
         tracker = _DescendantTracker(process.pid) if request.sweep_descendants_on_exit else None
         try:
             stdout, stderr = process.communicate(timeout=request.timeout_seconds)
@@ -941,6 +966,7 @@ def run_cli_worker(
         group_killed = False
         status = CliWorkerStatus.START_FAILED
     finally:
+        _RUN_START_TICKS.pop(run_tag, None)
         if on_process_group is not None:
             on_process_group(None)
         shutil.rmtree(isolated_home, ignore_errors=True)

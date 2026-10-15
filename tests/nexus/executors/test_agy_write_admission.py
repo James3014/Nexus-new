@@ -1793,3 +1793,55 @@ def test_sweep_probes_resolve_tools_through_system_path_only(monkeypatch):
     monkeypatch.setattr(cli_worker.subprocess, "run", capture)
     cli_worker._ps_clock_now()
     assert seen and seen[-1].get("PATH") == "/usr/bin:/bin:/usr/sbin:/sbin"
+
+
+def _fake_proc(root: Path, pid: int, start_ticks: int) -> Path:
+    """A /proc tree with one same-uid process whose environ is unreadable."""
+    proc = root / "proc"
+    (proc / "self").mkdir(parents=True)
+    (proc / "self" / "environ").write_bytes(b"")
+    entry = proc / str(pid)
+    entry.mkdir()
+    fields = ["S"] + ["0"] * 18 + [str(start_ticks)] + ["0"] * 10
+    (entry / "stat").write_text(f"{pid} (sd-pam) " + " ".join(fields) + "\n")
+    environ = entry / "environ"
+    environ.write_bytes(b"")
+    environ.chmod(0)
+    return proc
+
+
+def _readable_as_owner(path: Path) -> bool:
+    try:
+        path.read_bytes()
+        return True
+    except PermissionError:
+        return False
+
+
+def test_tag_sweep_skips_unreadable_process_that_predates_the_run(monkeypatch, tmp_path):
+    proc = _fake_proc(tmp_path, 424242, start_ticks=100)
+    if _readable_as_owner(proc / "424242" / "environ"):
+        pytest.skip("running as root: mode 000 files stay readable")
+    monkeypatch.setattr(cli_worker, "Path", lambda *a: proc if a == ("/proc",) else Path(*a))
+    monkeypatch.setitem(cli_worker._RUN_START_TICKS, "exampletag", 200)
+    assert cli_worker._tagged_pids("exampletag") == set()
+
+
+def test_tag_sweep_fails_closed_on_unreadable_process_started_during_the_run(monkeypatch, tmp_path):
+    proc = _fake_proc(tmp_path, 424242, start_ticks=300)
+    if _readable_as_owner(proc / "424242" / "environ"):
+        pytest.skip("running as root: mode 000 files stay readable")
+    monkeypatch.setattr(cli_worker, "Path", lambda *a: proc if a == ("/proc",) else Path(*a))
+    monkeypatch.setitem(cli_worker._RUN_START_TICKS, "exampletag", 200)
+    with pytest.raises(PermissionError):
+        cli_worker._tagged_pids("exampletag")
+    cli_worker._RUN_START_TICKS.pop("exampletag")
+    with pytest.raises(PermissionError):
+        cli_worker._tagged_pids("exampletag")  # no recorded run start: unknown
+
+
+def test_run_start_ticks_are_released_after_the_run(tmp_path):
+    run_cli_worker(
+        CliWorkerRequest(executable=sys.executable, argv=("-c", "pass"), cwd=str(tmp_path))
+    )
+    assert cli_worker._RUN_START_TICKS == {}
