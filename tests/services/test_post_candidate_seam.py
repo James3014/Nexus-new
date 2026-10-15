@@ -1247,3 +1247,41 @@ def test_relative_and_absolute_spellings_lock_the_same_file(tmp_path: Path) -> N
         released = seam.release_target_lock("task-a")
     assert list(released.values()) == [["pkg/target.py"]]
     seam.release_target_lock("task-b")
+
+
+def test_seam_holder_id_is_the_same_for_every_spelling_of_the_target(tmp_path: Path) -> None:
+    """Reviewer L3: the holder id uses the canonical lock key, so a sprint and a baseline
+    path that spell the target differently are one holder, not two."""
+    workspace = tmp_path / "ws"
+    (workspace / "pkg").mkdir(parents=True)
+    ids = {
+        seam.seam_holder_id(workspace, spelling)
+        for spelling in (
+            "pkg/target.py",
+            "./pkg/target.py",
+            "pkg/../pkg/target.py",
+            str(workspace / "pkg" / "target.py"),
+        )
+    }
+    assert len(ids) == 1
+    assert seam.seam_holder_id(workspace, "pkg/other.py") not in ids
+
+
+@pytest.mark.parametrize(
+    ("value", "enabled"),
+    [
+        ("1", True),
+        (" 1 ", True),
+        ("true", False),
+        ("yes", False),
+        ("on", False),
+        ("0", False),
+        ("", False),
+    ],
+)
+def test_confine_visible_test_env_accepts_only_1(
+    monkeypatch: pytest.MonkeyPatch, value: str, enabled: bool
+) -> None:
+    """Reviewer L6: one parse everywhere (bench runner, #2212's verifier binding, the seam)."""
+    monkeypatch.setenv(seam.CONFINE_VISIBLE_TEST_ENV, value)
+    assert seam.confine_visible_test_enabled() is enabled

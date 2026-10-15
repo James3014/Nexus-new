@@ -401,7 +401,10 @@ SEAM_LOCK_HOLDER_PREFIX = "nexus-seam:"
 def seam_holder_id(workspace_root: Path | str, target_file: str) -> str:
     """One lock holder per task (workspace + target) and process, shared by the baseline and
     sprint paths; the pid suffix lets a later run sweep locks of a killed process."""
-    key = f"{Path(workspace_root).resolve()}|{target_file}"
+    from nexus.orchestrator.file_lock_registry import canonical_lock_key
+
+    # Canonical target key: every spelling of one file is one holder (same rule as the lock).
+    key = f"{Path(workspace_root).resolve()}|{canonical_lock_key(workspace_root, target_file)}"
     return f"{SEAM_LOCK_HOLDER_PREFIX}{hashlib.sha256(key.encode('utf-8')).hexdigest()[:16]}:{os.getpid()}"
 
 
@@ -747,12 +750,8 @@ def bench_forbidden_roots(workspace_root: Path | str | None) -> list[Path]:
 
 
 def confine_visible_test_enabled() -> bool:
-    return os.environ.get(CONFINE_VISIBLE_TEST_ENV, "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    # Exactly "1", like the bench runner and #2212's verifier binding (one parse everywhere).
+    return os.environ.get(CONFINE_VISIBLE_TEST_ENV, "").strip() == "1"
 
 
 def run_visible_test_confined(
