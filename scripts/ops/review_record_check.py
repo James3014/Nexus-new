@@ -104,6 +104,7 @@ _PRE_DENY = re.compile(
     r"|no|not|never|cannot|can't|don't|doesn't|didn't|won't|wouldn't|pending|withheld|blocked"
     r"|conditional|missing|without|lacking|unless|until|before|please|expect(?:s|ed|ing)?"
     r"|wait(?:s|ed|ing)?|still|yet|if|only"
+    r"|author|self-check|self-review"
     r"|said|say|says|give|gives|gave|get|gets|got|want(?:s|ed)?|hope(?:s|d)?)\b",
     re.IGNORECASE,
 )
@@ -311,7 +312,7 @@ def verdict_clauses(line: str) -> list[str]:
             rest_of_line = _plain(plain_line[start + span[1] :]) if start >= 0 else after
             next_token = _VERDICT_POS.search(rest_of_line)
             rest_of_line = rest_of_line[: next_token.start()] if next_token else rest_of_line
-            if _POST_LINE_DENY.search(rest_of_line):
+            if _hex_tokens(rest_of_line) and _POST_LINE_DENY.search(rest_of_line):
                 continue
         out.append(clause)
     return out
@@ -419,9 +420,17 @@ def classify_record(body: str, head: str) -> dict[str, Any] | None:
     rebuttal_at_cap = False
     section: list[str] = []
     header_family: str | None = None
+    header_level = 0  # heading level that opened the section; 99 for a non-heading label
     for line in lines:
         label = _label_family(line)
-        neutral_heading = label is None and re.match(r"^\s*#+\s", line) is not None
+        level = re.match(r"^\s*(#+)\s", line)
+        if label is not None:
+            header_level = len(level.group(1)) if level else 99
+        # A plain heading closes the section only at the same or a higher level than
+        # the heading that opened it ("### Findings" inside "## Review record" does not).
+        neutral_heading = (
+            label is None and level is not None and len(level.group(1)) <= header_level
+        )
         if (label is not None and label != header_family) or neutral_heading:
             if section and header_family == "cross_model" and _rebuttal_at_cap(section, head):
                 rebuttal_at_cap = True

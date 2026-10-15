@@ -904,3 +904,34 @@ def test_head_label_binds_through_verbose_phrasing():
     body = f"Head commit for this round is {HEAD}\n**Claude**: ACCEPT"
     record = rrc.classify_record(body, HEAD)
     assert record is not None and record["verdict"] is True
+
+
+def test_an_authors_self_check_is_not_a_review():
+    for body in (
+        f"Author (Claude) self-check: ACCEPT@{HEAD}",
+        f"Author (Opus 5.5) status at head {HEAD}: ACCEPT",
+    ):
+        record = rrc.classify_record(body, HEAD)
+        assert record is not None and record["verdict"] is False, body
+
+
+def test_a_sub_heading_inside_a_review_record_keeps_the_section():
+    body = (
+        "## Review record — Claude (claude-opus-5-5)\n"
+        f"- Head reviewed: `{HEAD}`\n### Findings\n- none blocking\n### Verdict\n**ACCEPT**\n"
+    )
+    record = rrc.classify_record(body, HEAD)
+    assert record is not None and record["verdict"] is True and record["claude"]
+    same_level = body.replace("### Verdict", "## Verdict")
+    record = rrc.classify_record(same_level, HEAD)
+    assert record is not None and record["verdict"] is False
+
+
+def test_a_later_word_only_withdraws_a_verdict_when_the_line_borrows_a_sha():
+    for body in (
+        f"Head reviewed: {HEAD}\n**Claude**\n- Verdict: **ACCEPT** — nothing blocked\n",
+        f"Head reviewed: {HEAD}\n**Claude**\n**Verdict: ACCEPT.** One nit is pending a follow-up.\n",
+        f"Head reviewed: {HEAD}\n**Claude**\nVerdict: ACCEPT. I cannot reproduce the old failure.\n",
+    ):
+        record = rrc.classify_record(body, HEAD)
+        assert record is not None and record["verdict"] is True, body
