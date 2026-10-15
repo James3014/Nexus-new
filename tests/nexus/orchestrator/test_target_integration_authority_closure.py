@@ -691,11 +691,7 @@ def test_owner_finish_delegates_full_authorized_integration_then_cleanup(tmp_pat
             "commit_created": True, "merge_performed": False,
         },
     })
-    context = {
-        "schema": "nexus.approval.v2", "approval_id": "approval-task-1",
-        "approval_scope": "ALLOW_ACTION_ONCE", "contract_kind": "TRACKED_TASK_CARD",
-        "contract_hash": "c" * 64, "task_card_hash": "c" * 64,
-    }
+    context = _bound_tracked_approval("task-1", contract.contract_hash)
     result = service.owner_finish(
         "task-1", candidate_commit_sha=candidate,
         candidate_tree_sha=_git(root, "rev-parse", f"{candidate}^{{tree}}"),
@@ -1243,7 +1239,7 @@ def test_owner_finish_replay_is_idempotent(tmp_path: Path, monkeypatch):
 def test_owner_finish_never_deletes_task_branch_or_candidate_ref(tmp_path: Path):
     root, base, candidate = _repo(tmp_path)
     receipt = _acceptance(candidate)
-    auth = _authorization(root, base, candidate, receipt)
+    _authorization(root, base, candidate, receipt)
     target = tmp_path / "targets" / "task-branch"
     target.parent.mkdir()
     _git(root, "worktree", "add", "-b", "nexus/task/task-branch", str(target), base)

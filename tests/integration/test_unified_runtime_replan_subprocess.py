@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -14,6 +14,7 @@ from nexus.services.unified_runtime import (
     UnifiedRuntimeRequest,
     build_subprocess_online_invoker,
 )
+from tests.services.test_unified_runtime import _admit_gateway_request
 
 
 def _create_child_script(tmp_path: Path) -> Path:
@@ -62,8 +63,47 @@ print(json.dumps(out))
     return script_path
 
 
+ADMITTED_AGY_MODEL = "gemini-3.8-flash-medium"  # agy_flash_38 under the current Workforce policy
+
+
+def _agy_shim_spec(tmp_path: Path, script_path: Path, ledger_path: Path, mode: str) -> OnlineCliSpec:
+    """Executable ``agy`` shim: the sealed Gateway admits agy/agy_flash_38, so the physical child
+    must be invoked as ``agy`` with a single-element argv and must emit the Agy log lines that
+    attest the admitted model identity.  The shim then runs the original child script with the
+    prompt on stdin, so the ledger/PID assertions still observe a real subprocess."""
+    bin_dir = tmp_path / "agy-bin"
+    bin_dir.mkdir()
+    shim = bin_dir / "agy"
+    shim.write_text(
+        f"""#!{sys.executable}
+import subprocess
+import sys
+
+argv = sys.argv[1:]
+log_path = argv[argv.index("--log-file") + 1]
+prompt = argv[-1]
+with open(log_path, "w", encoding="utf-8") as log:
+    log.write("I1013 10:36:21.492269       1 model_resolver.go:93] Resolving model {ADMITTED_AGY_MODEL}\\n")
+    log.write(
+        "I1013 10:36:21.492300       1 backend.go:12] "
+        'Propagating selected model override to backend: label="{ADMITTED_AGY_MODEL}"\\n'
+    )
+done = subprocess.run(
+    [{sys.executable!r}, {str(script_path)!r}, {str(ledger_path)!r}, {mode!r}],
+    input=prompt, text=True, capture_output=True, check=False,
+)
+sys.stdout.write(done.stdout)
+sys.stderr.write(done.stderr)
+sys.exit(done.returncode)
+""",
+        encoding="utf-8",
+    )
+    shim.chmod(0o755)
+    return OnlineCliSpec(provider="agy", command=(str(shim),), model_name=ADMITTED_AGY_MODEL)
+
+
 def _build_request(task_id: str) -> UnifiedRuntimeRequest:
-    return UnifiedRuntimeRequest(
+    return _admit_gateway_request(UnifiedRuntimeRequest(
         task_id=task_id,
         workspace_revision="rev-subprocess-1",
         task_statement="Sealed physical subprocess test prompt",
@@ -76,7 +116,7 @@ def _build_request(task_id: str) -> UnifiedRuntimeRequest:
         },
         online_enabled=True,
         local_enabled=False,
-    )
+    ))
 
 
 def _make_dummy_cap_invoker(name: str):
@@ -110,10 +150,7 @@ def test_physical_subprocess_light_to_standard_replan_lifecycle(tmp_path: Path):
     receipt1_path = tmp_path / "receipt1.json"
     receipt2_path = tmp_path / "receipt2.json"
 
-    spec = OnlineCliSpec(
-        provider="gemini",
-        command=(sys.executable, str(script_path), str(ledger_path), "normal"),
-    )
+    spec = _agy_shim_spec(tmp_path, script_path, ledger_path, "normal")
     invoker = build_subprocess_online_invoker(spec)
     runtime = UnifiedRuntime()
     req = _build_request("task-sub-lifecycle-1")
@@ -204,10 +241,7 @@ def test_physical_subprocess_receipts_form_strict_valid_lineage(tmp_path: Path):
     script_path = _create_child_script(tmp_path)
     ledger_path = tmp_path / "ledger_lineage.jsonl"
 
-    spec = OnlineCliSpec(
-        provider="gemini",
-        command=(sys.executable, str(script_path), str(ledger_path), "normal"),
-    )
+    spec = _agy_shim_spec(tmp_path, script_path, ledger_path, "normal")
     invoker = build_subprocess_online_invoker(spec)
     runtime = UnifiedRuntime()
     req = _build_request("task-sub-lineage-1")
@@ -236,10 +270,7 @@ def test_physical_subprocess_attempt_one_bytes_remain_unchanged(tmp_path: Path):
     ledger_path = tmp_path / "ledger_bytes.jsonl"
     r1_path = tmp_path / "r1_bytes.json"
 
-    spec = OnlineCliSpec(
-        provider="gemini",
-        command=(sys.executable, str(script_path), str(ledger_path), "normal"),
-    )
+    spec = _agy_shim_spec(tmp_path, script_path, ledger_path, "normal")
     invoker = build_subprocess_online_invoker(spec)
     runtime = UnifiedRuntime()
     req = _build_request("task-sub-bytes-1")
@@ -268,10 +299,7 @@ def test_physical_subprocess_invoked_exactly_twice(tmp_path: Path):
     script_path = _create_child_script(tmp_path)
     ledger_path = tmp_path / "ledger_twice.jsonl"
 
-    spec = OnlineCliSpec(
-        provider="gemini",
-        command=(sys.executable, str(script_path), str(ledger_path), "normal"),
-    )
+    spec = _agy_shim_spec(tmp_path, script_path, ledger_path, "normal")
     invoker = build_subprocess_online_invoker(spec)
     runtime = UnifiedRuntime()
     req = _build_request("task-sub-twice-1")
@@ -298,10 +326,7 @@ def test_physical_subprocess_second_failure_stops_without_third_attempt(tmp_path
     script_path = _create_child_script(tmp_path)
     ledger_path = tmp_path / "ledger_fail_second.jsonl"
 
-    spec = OnlineCliSpec(
-        provider="gemini",
-        command=(sys.executable, str(script_path), str(ledger_path), "fail_second"),
-    )
+    spec = _agy_shim_spec(tmp_path, script_path, ledger_path, "fail_second")
     invoker = build_subprocess_online_invoker(spec)
     runtime = UnifiedRuntime()
     req = _build_request("task-sub-fail2-1")
@@ -332,10 +357,7 @@ def test_physical_subprocess_second_verifier_failure_stops_without_third_attempt
     script_path = _create_child_script(tmp_path)
     ledger_path = tmp_path / "ledger_fail_v2.jsonl"
 
-    spec = OnlineCliSpec(
-        provider="gemini",
-        command=(sys.executable, str(script_path), str(ledger_path), "normal"),
-    )
+    spec = _agy_shim_spec(tmp_path, script_path, ledger_path, "normal")
     invoker = build_subprocess_online_invoker(spec)
     runtime = UnifiedRuntime()
     req = _build_request("task-sub-v2-1")
@@ -377,10 +399,7 @@ def test_physical_subprocess_tampered_prior_receipt_blocks_before_second_process
     script_path = _create_child_script(tmp_path)
     ledger_path = tmp_path / "ledger_tamper_block.jsonl"
 
-    spec = OnlineCliSpec(
-        provider="gemini",
-        command=(sys.executable, str(script_path), str(ledger_path), "normal"),
-    )
+    spec = _agy_shim_spec(tmp_path, script_path, ledger_path, "normal")
     invoker = build_subprocess_online_invoker(spec)
     runtime = UnifiedRuntime()
     req = _build_request("task-sub-tamper-1")
@@ -412,10 +431,7 @@ def test_physical_subprocess_receipt_does_not_claim_live_model_provider(tmp_path
     script_path = _create_child_script(tmp_path)
     ledger_path = tmp_path / "ledger_claim.jsonl"
 
-    spec = OnlineCliSpec(
-        provider="gemini",
-        command=(sys.executable, str(script_path), str(ledger_path), "normal"),
-    )
+    spec = _agy_shim_spec(tmp_path, script_path, ledger_path, "normal")
     invoker = build_subprocess_online_invoker(spec)
     runtime = UnifiedRuntime()
     req = _build_request("task-sub-claim-1")
