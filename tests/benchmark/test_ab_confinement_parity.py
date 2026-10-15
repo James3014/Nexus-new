@@ -270,3 +270,33 @@ def test_parity_report_cannot_emit_workflow_commands(capsys: pytest.CaptureFixtu
     assert len(lines) == 1
     assert not lines[0].lstrip().startswith("::")
     assert "##[" not in err and "\n::" not in err
+
+
+@pytest.mark.parametrize("bare_first", [True, False])
+def test_file_lock_denied_with_nexus_row_excludes_the_pair_on_both_arms(bare_first: bool) -> None:
+    """Reviewer L2: a foreign/stale lock refuses only the with-Nexus arm; the pair becomes
+    not_run:file_lock_denied on BOTH arms (like the parity exclusion), in either arm order."""
+    from scripts.bench import capability_ab_runner as runner
+
+    def row(mode: str, task: str, **extra: object) -> dict:
+        return {"mode": mode, "task_id": task, "trial_index": 1, "status": "FAILED", **extra}
+
+    with_rows = [
+        row("with_nexus", "a", nexus_failure_reason="file_lock_denied"),
+        row("with_nexus", "b", nexus_error_codes=["file_lock_denied"]),
+        row("with_nexus", "c", status="SUCCESS"),
+    ]
+    without_rows = [row("without_nexus", t, status="SUCCESS") for t in ("a", "b", "c")]
+    if bare_first:
+        without_rows.reverse()
+
+    assert runner._exclude_file_lock_denied_pairs(with_rows, without_rows) == 2
+    excluded = [r for r in [*with_rows, *without_rows] if r.get("not_run")]
+    assert {(r["mode"], r["task_id"]) for r in excluded} == {
+        (m, t) for m in ("with_nexus", "without_nexus") for t in ("a", "b")
+    }
+    for r in excluded:
+        assert r["status"] == "NOT_RUN" and r["run_eligible"] is False
+        assert r["not_run_reason"] == "file_lock_denied"
+    untouched = [r for r in [*with_rows, *without_rows] if r["task_id"] == "c"]
+    assert all(r["status"] == "SUCCESS" and not r.get("not_run") for r in untouched)

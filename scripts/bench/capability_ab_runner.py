@@ -3373,6 +3373,42 @@ def _missing_hidden_tests(tasks: list[CapabilityTask], repo_root: Path, *, mater
     return missing
 
 
+FILE_LOCK_DENIED = "file_lock_denied"
+
+
+def _row_file_lock_denied(row: Mapping[str, Any]) -> bool:
+    return (
+        str(row.get("nexus_failure_reason") or "") == FILE_LOCK_DENIED
+        or FILE_LOCK_DENIED in [str(code) for code in row.get("nexus_error_codes") or []]
+    )
+
+
+def _exclude_file_lock_denied_pairs(
+    with_rows: list[dict[str, Any]], without_rows: list[dict[str, Any]]
+) -> int:
+    """A with-Nexus row refused by a foreign or stale ``file_lock`` says nothing about either
+    arm (the bare arm never takes the lock). Like the confinement-parity exclusion, the PAIR
+    becomes ``not_run:file_lock_denied`` on BOTH arms (excluded from every denominator), whatever
+    order the arms ran in. Returns the number of excluded pairs."""
+
+    def _key(row: Mapping[str, Any]) -> str:
+        return f"{row.get('task_id')}__{row.get('trial_index')}"
+
+    denied = {_key(row) for row in with_rows if _row_file_lock_denied(row)}
+    for row in [*with_rows, *without_rows]:
+        if _key(row) not in denied:
+            continue
+        row["pre_exclusion_status"] = row.get("status")
+        row.update({
+            "status": "NOT_RUN",
+            "not_run": True,
+            "not_run_reason": FILE_LOCK_DENIED,
+            FILE_LOCK_DENIED: True,
+            "run_eligible": False,
+        })
+    return len(denied)
+
+
 def _fill_not_run_pairs(
     tasks: list[CapabilityTask], with_rows: list[dict[str, Any]], without_rows: list[dict[str, Any]]
 ) -> int:
@@ -21421,6 +21457,7 @@ def main() -> int:
 
     _clear_total_timeout(previous_timeout_handler)
     prompt_symmetry_report = None
+    _exclude_file_lock_denied_pairs(with_rows, without_rows)
     if interleave_arms:
         _fill_not_run_pairs(tasks, with_rows, without_rows)
     if bool(args.counted_first_attempt) and _counted_mode_expects_model_calls(args):
