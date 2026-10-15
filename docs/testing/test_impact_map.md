@@ -147,6 +147,7 @@
 | nexus/app/research_s2t_runtime.py | tests/app/test_research_s2t_runtime.py, tests/app/test_research_flow_service.py::test_run_auto_flow_populates_autoreason_from_candidate_summaries | active | high | research_s2t_runtime_trace_contract |
 | nexus/app | tests/app | active | medium | app_flow |
 | scripts/nightshift.py | tests/services/test_nightshift_queue_consumer.py, tests/app/test_nightshift_runner_service.py | active | high | issue111_nightshift_entrypoint_queue_contract |
+| nexus/research/bench_treatment_lane.py | tests/benchmark/test_ab_treatment_lane.py, tests/app/test_research_flow_treatment_lane.py | active | high | ab_treatment_lane_product_contract |
 | nexus/research | tests/research | active | medium | research_loop |
 | nexus/experiments/msa_routing/msa_indexer.py | tests/experiments/test_msa_routing.py | active | medium | msa_routing_contract |
 | nexus/research/flow/codeintel_context.py | tests/app/test_research_flow_service.py::test_codeintel_evidence_facade_delegates_to_leaf_module, tests/app/test_research_flow_service.py::test_codeintel_context_is_injected_into_task_text, tests/app/test_research_flow_service.py::test_codeintel_context_compact_mode_keeps_evidence_but_trims_payload, tests/app/test_research_flow_service.py::test_codeintel_dci_runs_only_for_evidence_heavy_lane, tests/app/test_research_flow_service.py::test_build_codeintel_evidence_reuses_run_cache_graph | active | high | research_codeintel_context_contract |
@@ -220,12 +221,16 @@
 | scripts/ci/nexus_core_trusted_pin_policy.py | tests/ops/test_nexus_core_trusted_pin_policy.py, tests/ops/test_select_tests.py, tests/ops/test_pr_impact_gate.py | active | high | nexus_core_trusted_pin_maintenance_contract |
 | scripts/bench/capability_ab_runner.py | tests/benchmark/test_capability_ab_runner.py::test_run_with_nexus_subprocess_preserves_executor_receipts_without_llm, tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_accepts_causal_runtime_mount, tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_rejects_quarantined_mount, tests/benchmark/test_ab_hidden_test_staging.py | active | high | benchmark_contract |
 | tests/benchmark/data/online_ab_hard_v1_prompt_data.json | tests/benchmark/test_ab_no_answer_hints.py | active | medium | ab_prompt_symmetry_contract |
-| scripts/bench/agy_prompt_capture.py | tests/benchmark/test_ab_prompt_symmetry_audit.py | active | high | ab_prompt_symmetry_contract |
-| scripts/bench/prompt_symmetry_schema.json | tests/benchmark/test_ab_prompt_symmetry_audit.py | active | high | ab_prompt_symmetry_contract |
-| scripts/bench/prompt_symmetry_audit.py | tests/benchmark/test_ab_prompt_symmetry_audit.py | active | high | ab_prompt_symmetry_contract |
+| scripts/bench/agy_prompt_capture.py | tests/benchmark/test_ab_prompt_symmetry_audit.py, tests/benchmark/test_ab_treatment_lane.py | active | high | ab_prompt_symmetry_contract |
+| scripts/bench/prompt_symmetry_schema.json | tests/benchmark/test_ab_prompt_symmetry_audit.py, tests/benchmark/test_ab_treatment_lane.py | active | high | ab_prompt_symmetry_contract |
+| scripts/bench/prompt_symmetry_audit.py | tests/benchmark/test_ab_prompt_symmetry_audit.py, tests/benchmark/test_ab_treatment_lane.py | active | high | ab_prompt_symmetry_contract |
 | scripts/bench/hidden_test_staging.py | tests/benchmark/test_ab_hidden_test_staging.py, tests/benchmark/test_ab_prompt_symmetry_audit.py | active | high | ab_hidden_test_staging_contract |
 | scripts/bench/fixture_materialization.py | tests/benchmark/test_fixture_materialization.py | active | high | external_fixture_materialization_contract |
 | scripts/bench/public_lane_contract.py | tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_accepts_causal_runtime_mount, tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_rejects_quarantined_mount | active | high | benchmark_contract |
+| scripts/bench/treatment_lane.py | tests/benchmark/test_ab_treatment_lane.py, tests/benchmark/test_ab_prompt_symmetry_audit.py | active | high | ab_treatment_lane_fairness_contract |
+| scripts/bench/run_lane.py | tests/benchmark/test_ab_treatment_lane.py | active | medium | ab_treatment_lane_command_contract |
+| scripts/bench/treatment_replay_proof.py | tests/benchmark/test_ab_treatment_lane.py | active | medium | ab_treatment_lane_proof_contract |
+| scripts/bench/analyze_run.py | tests/benchmark/test_ab_treatment_lane.py | active | medium | ab_treatment_lane_report_contract |
 | scripts/bench | tests/benchmark | active | medium | benchmark_contract |
 | scripts/local_heal/run_controlled_local_solve_fixture.py | tests/integration/test_controlled_local_solve_fixture_runner.py | active | high | local_heal_controlled_solve_fixture_contract |
 | nexus/learning/skill_catalog.py | tests/learning/test_skill_catalog.py, tests/ops/test_ci_gate_report_trust_audit.py | active | high | skill_catalog_governance |

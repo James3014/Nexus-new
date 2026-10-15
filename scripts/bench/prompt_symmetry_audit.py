@@ -16,6 +16,17 @@ Per task x trial the audit requires (any miss -> the counted metric is invalid):
       appears exactly once in both prompts, at the top of the bare prompt and before ``[TASK]``;
   (f) every with-Nexus-only line is one of the allowlisted Nexus blocks (2026-10-14 decision: the
       wrapper blocks ARE the treatment) and their bodies pass the block checks.
+
+Treatment lane (``lane="treatment"``, wiring plan PR-3): the with-Nexus arm may send 1..N prompts
+per row (N = the row's ``treatment_max_model_calls``) and the captured count must equal the row's
+``model_calls``; the bare arm still sends exactly one. Round 1 gets every strict check above (only
+the four config numbers listed under ``treatment_blocks.widen`` in the schema may differ). Every
+later round is audited on its own (``audit_treatment_round``): the no-tools prefix once before
+``[TASK]``, no hidden literal or hidden test line, no ``[Prior Art]``, no local support candidate,
+and each line that is in neither the round-1 prompt nor the bare prompt must be a fixed retry
+sentence/header, a line of an earlier model candidate of the same row (bytes from the row's
+candidate archive, sha256 in the row's ``model_candidate_sha256s``), a line of the runner's own
+visible-test run on such a candidate, a short product error code, or a schema-valid Nexus block.
 """
 
 from __future__ import annotations
@@ -24,6 +35,7 @@ import ast
 import base64
 import binascii
 import codecs
+import hashlib
 import html
 import json
 import os
@@ -141,6 +153,35 @@ HIDDEN_LITERALS: dict[str, tuple[str, ...]] = {
 }
 
 
+LANE_STRICT = "strict"
+LANE_TREATMENT = "treatment"
+DEFAULT_TREATMENT_MAX_MODEL_CALLS = 4
+LOCAL_SUPPORT_HEADER = "[NEXUS LOCAL SUPPORT CANDIDATE]"
+SELF_HEAL_SENTENCE = (
+    "Previous candidate failed verification. Repair the candidate using the failure evidence below."
+)
+# Short product error codes a failed visible evaluation can carry instead of pytest output
+# (sprint_service CandidateEval.error); detail is bounded and still goes through the hidden grep.
+# Exact product error codes a failed visible evaluation can carry instead of pytest output
+# (sprint_service CandidateEval.error / _semantic_guard). Nothing else, no free-text detail.
+PRODUCT_ERROR_CODES = frozenset({
+    "broker_timeout",
+    "no_change_candidate",
+    "pytest_failed",
+    "test_timeout",
+    "semantic_guard_placeholder_only",
+    "semantic_guard_zero_delta",
+    "semantic_guard_low_delta_feature",
+    "semantic_guard_syntax_warning",
+    "file_lock_denied",
+    "confinement_unavailable:no_visible_test",
+})
+# The confined visible evaluation's refusal for companion edits (#2211 sprint_service).
+_MULTI_FILE_RE = re.compile(r"^confinement_unavailable:multi_file:[0-9]{1,3}$")
+# Volatile parts of pytest output that differ between two runs of the same test.
+_DURATION_RE = re.compile(r"\bin [0-9]+(?:\.[0-9]+)?s\b")
+
+
 class CaptureError(RuntimeError):
     """A capture file is unreadable, not a regular file, or from another run."""
 
@@ -176,6 +217,13 @@ class TaskAudit:
     with_nexus_prompt_chars: int = 0
     bare_prompt_chars: int = 0
     violations: list[str] = field(default_factory=list)
+    lane: str = LANE_STRICT
+    treatment_literal_hits: list[str] = field(default_factory=list)
+    row_void: bool = False
+    treatment_round_findings_deferred: bool = False
+    treatment_rounds_audited: int = 0
+    self_heal_rounds_observed: int = 0
+    treatment_round_findings: list[str] = field(default_factory=list)
 
     @property
     def extra_chars(self) -> int:
@@ -204,6 +252,13 @@ class TaskAudit:
             "nexus_prompt_extra_lines": len(self.extra_lines),
             "nexus_prompt_extra_chars": self.extra_chars,
             "violations": self.violations,
+            "lane": self.lane,
+            "treatment_literal_hits": self.treatment_literal_hits,
+            "row_void": self.row_void,
+            "treatment_round_findings_deferred": self.treatment_round_findings_deferred,
+            "treatment_rounds_audited": self.treatment_rounds_audited,
+            "self_heal_rounds_observed": self.self_heal_rounds_observed,
+            "treatment_round_findings": self.treatment_round_findings,
         }
 
 
@@ -407,8 +462,43 @@ def _codeintel_findings(body: str) -> list[str]:
     return findings
 
 
-def load_block_schema() -> dict[str, dict[str, dict[str, Any]]]:
-    return json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))["blocks"]
+def load_block_schema(lane: str = LANE_STRICT) -> dict[str, dict[str, dict[str, Any]]]:
+    """Block schema; the treatment lane widens only the paths listed in ``treatment_blocks.widen``."""
+
+    data = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    blocks = data["blocks"]
+    if lane != LANE_TREATMENT:
+        return blocks
+    treatment = data.get("treatment_blocks") or {}
+    round_id = treatment.get("round_id_pattern") or {}
+    extra = dict(treatment.get("extra_capabilities") or {})
+    widened: dict[str, dict[str, dict[str, Any]]] = {}
+    for header, paths in blocks.items():
+        widened[header] = {}
+        for path, spec in paths.items():
+            patterns = list(spec.get("patterns") or [])
+            if patterns:
+                if round_id.get("from"):
+                    patterns = [item.replace(round_id["from"], round_id["to"]) for item in patterns]
+                for name, template in extra.items():
+                    patterns += [
+                        item.replace(template, name) for item in patterns if template in item
+                    ]
+                spec = {**spec, "patterns": list(dict.fromkeys(patterns))}
+            widened[header][path] = spec
+    for header, paths in (treatment.get("widen") or {}).items():
+        for path, override in paths.items():
+            base = widened.get(header, {}).get(path)
+            if base is None:
+                raise ValueError(f"treatment_blocks widens an unknown path: {header} {path}")
+            merged = {**base, **override}
+            merged.pop("enum" if "patterns" in override else "patterns", None)
+            widened[header][path] = merged
+    return widened
+
+
+def load_treatment_blocks() -> dict[str, Any]:
+    return dict(json.loads(_SCHEMA_PATH.read_text(encoding="utf-8")).get("treatment_blocks") or {})
 
 
 class DuplicateKeyError(ValueError):
@@ -559,11 +649,35 @@ def hidden_only_numbers(material: TaskMaterial, bare_prompt: str) -> set[float]:
     }
 
 
+def _round_task_text_ok(value: str, task_desc: str, round_lines: frozenset[str]) -> bool:
+    """A later treatment round's task text (task_desc + the self-heal block) echoed in a Nexus
+    block: it must start with the task description and every further line must be a line of
+    the same prompt (audited there line by line); the last line may be cut (a capped echo)."""
+
+    if not task_desc or not value.startswith(task_desc):
+        return False
+    rest = [" ".join(line.split()) for line in value[len(task_desc) :].splitlines()]
+    rest = [line for line in rest if line]
+    for index, line in enumerate(rest):
+        if line in round_lines:
+            continue
+        if index == len(rest) - 1 and any(item.startswith(line) for item in round_lines):
+            continue
+        return False
+    return True
+
+
 def _format_ok(
-    fmt: str, value: str, material: TaskMaterial, selected: frozenset[str] = frozenset()
+    fmt: str,
+    value: str,
+    material: TaskMaterial,
+    selected: frozenset[str] = frozenset(),
+    round_lines: frozenset[str] | None = None,
 ) -> bool:
     if fmt == "task_desc":
-        return value == material.task_desc
+        return value == material.task_desc or (
+            round_lines is not None and _round_task_text_ok(value, material.task_desc, round_lines)
+        )
     if fmt == "task_desc_prefix":
         return bool(value) and material.task_desc.startswith(value)
     if fmt == "template":
@@ -588,6 +702,7 @@ def _schema_findings(
     *,
     selected: frozenset[str] = frozenset(),
     hidden_numbers: frozenset[float] = frozenset(),
+    round_lines: frozenset[str] | None = None,
 ) -> list[str]:
     """Known paths only; kind, type, enum/range/pattern/format per path (schema v2)."""
 
@@ -631,7 +746,7 @@ def _schema_findings(
         if any(not ch.isascii() for ch in value if ch.isalpha()):
             findings.append(f"{header}: {path} has non-ASCII letters")
         if "format" in spec:
-            if not _format_ok(str(spec["format"]), value, material, selected):
+            if not _format_ok(str(spec["format"]), value, material, selected, round_lines):
                 findings.append(f"{header}: {path} does not match bound format {spec['format']}")
         elif not any(re.match(pattern, value) for pattern in spec.get("patterns") or []):
             findings.append(
@@ -663,6 +778,8 @@ def classify_extra_lines(
     with_nexus_prompt: str,
     bare_prompt: str,
     material: TaskMaterial,
+    *,
+    lane: str = LANE_STRICT,
 ) -> dict[str, list[str]]:
     """Split the with-Nexus-only lines into allowed / disallowed and run the block-body checks."""
 
@@ -680,7 +797,7 @@ def classify_extra_lines(
         "json": [],
     }
     preamble = " ".join(NEXUS_PREAMBLE.split())
-    schema = load_block_schema()
+    schema = load_block_schema(lane)
     # Only exact, checked-in Nexus sentences, the task description verbatim, or a whole line of
     # the bare prompt are exempt from the length/vocabulary checks. Nothing is inferred.
     exempt = {normalize(text) for text in TEMPLATE_STRINGS}
@@ -817,8 +934,12 @@ def audit_task(
     *,
     bare_rows: list[Mapping[str, Any]] | None = None,
     with_rows: list[Mapping[str, Any]] | None = None,
+    lane: str = LANE_STRICT,
 ) -> TaskAudit:
-    result = TaskAudit(key=key, task_id=material.task_id)
+    treatment = lane == LANE_TREATMENT
+    result = TaskAudit(
+        key=key, task_id=material.task_id, lane=LANE_TREATMENT if treatment else LANE_STRICT
+    )
     if material.error:
         result.violations.append(f"fixture_unreadable:{material.error}")
     bare_folds = sum(int(row.get("pre_effect_quota_resends") or 0) for row in bare_rows or [])
@@ -837,6 +958,7 @@ def audit_task(
         "bare": [row for row in bare_rows or [] if not row.get("not_run")],
         "with_nexus": [row for row in with_rows or [] if not row.get("not_run")],
     }
+    with_row = completed["with_nexus"][0] if completed["with_nexus"] else None
     for arm, calls in (("bare", result.bare_calls), ("with_nexus", result.with_nexus_calls)):
         arm_rows = completed[arm]
         if (
@@ -845,8 +967,55 @@ def audit_task(
             and any(int(row.get("model_calls") or 0) > 0 for row in arm_rows)
         ):
             result.violations.append(f"{arm}_model_call_not_captured")
-        if calls > 1:
+        if treatment and arm == "with_nexus":
+            # Treatment lane: 1..N with-Nexus calls; the bare arm stays at exactly one.
+            cap = _treatment_max_calls(with_row)
+            if calls > cap:
+                result.violations.append(f"with_nexus_calls={calls}>treatment_max={cap}")
+        elif calls > 1:
             result.violations.append(f"{arm}_calls={calls}")
+    killed = with_row is not None and (
+        with_row.get("treatment_timeout") is True
+        or str(with_row.get("runtime_classification") or "") == "subprocess_timeout"
+        or with_row.get("task_deadline_exceeded") is True
+    )
+    if (
+        treatment
+        and with_row is not None
+        and not (killed and int(with_row.get("model_calls") or 0) == 0)
+    ):
+        # A killed subprocess reports no calls; its calls are the captured ones (H2).
+        row_calls = int(with_row.get("model_calls") or 0)
+        if row_calls != result.with_nexus_calls:
+            # Every model call the row reports was captured, and nothing else was.
+            result.violations.append(
+                f"with_nexus_calls_mismatch:captured={result.with_nexus_calls},row={row_calls}"
+            )
+    candidates: dict[str, str] = {}
+    runner_order: list[str] = []
+    visible_lines: set[str] = set()
+    hidden_line_set = set(hidden_only_lines(material))
+    if treatment and len(with_records) > 1:
+        candidates, candidate_errors = load_row_candidates(with_row or {})
+        result.treatment_round_findings.extend(candidate_errors)
+        runner_order = [str(sha) for sha in (with_row or {}).get("runner_candidate_sha256s") or []]
+        visible_lines = row_visible_output_lines(with_row or {})
+
+    def _earlier_candidates(round_index: int) -> list[str]:
+        """Runner-derived candidates of the calls before ``round_index`` (0-based)."""
+
+        return [candidates[sha] for sha in runner_order[:round_index] if sha in candidates]
+
+    def _earlier_candidate_lines(round_index: int) -> set[str]:
+        """Exact raw lines of earlier runner-derived candidates (never a hidden test line)."""
+
+        return {
+            line
+            for text in _earlier_candidates(round_index)
+            for line in text.splitlines()
+            if line.strip() and normalize(line) not in hidden_line_set
+        }
+
     if not not_run and result.bare_calls == 0 and result.with_nexus_calls > 0:
         result.violations.append("bare_calls=0")
     bare_prompt = str(bare_records[0].get("prompt") or "") if bare_records else ""
@@ -854,17 +1023,31 @@ def audit_task(
     literals = hidden_only_literals(material)
     inventory = set(HIDDEN_LITERALS.get(material.task_id, ()))
     hidden_lines = hidden_only_lines(material)
-    for record in with_records:
+    for index, record in enumerate(with_records):
+        # (1) Every round's FULL raw prompt goes through the hidden-line scan first (no exemption,
+        # aborts the run) and the hidden-literal scan (G2). Only in rounds >= 2 of the treatment
+        # lane, a literal inside a line byte-identical to a line of an EARLIER runner-derived model
+        # candidate is exempt: the model wrote it before any feedback (R2-3). Other literal hits
+        # in rounds >= 2 void the row (treatment_literal_hits) instead of aborting the run.
         prompt = str(record.get("prompt") or "")
         corpus = _decoded_corpus(prompt)
+        later_round = treatment and index > 0
+        if later_round:
+            exempt = _earlier_candidate_lines(index)
+            literal_corpus = _decoded_corpus(
+                "\n".join(line for line in prompt.splitlines() if line not in exempt)
+            )
+        else:
+            literal_corpus = corpus
+        hits = result.treatment_literal_hits if later_round else result.hidden_hits
         for literal in literals:
-            if literal in result.hidden_hits:
+            if literal in hits:
                 continue
             if any(
-                needle in corpus and needle not in bare_corpus
+                needle in literal_corpus and needle not in bare_corpus
                 for needle in _needles(literal, inventory)
             ):
-                result.hidden_hits.append(literal)
+                hits.append(literal)
         for line in hidden_lines:
             if line in corpus and line not in bare_corpus and line not in result.hidden_line_hits:
                 result.hidden_line_hits.append(line)
@@ -872,6 +1055,7 @@ def audit_task(
             result.prior_art_present = True
     if result.hidden_hits:
         result.violations.append("hidden_literal_in_with_nexus_prompt")
+    result.row_void = bool(result.treatment_literal_hits)
     if result.hidden_line_hits:
         result.violations.append("hidden_test_line_in_with_nexus_prompt")
     if result.prior_art_present:
@@ -896,7 +1080,7 @@ def audit_task(
         reference = bare_prompt if bare_records else synthetic_bare_reference(material)
         if bare_records or not_run:
             result.extra_lines = extra_lines(first, reference)
-            checks = classify_extra_lines(first, reference, material)
+            checks = classify_extra_lines(first, reference, material, lane=result.lane)
             result.disallowed_lines = checks["disallowed"]
             result.code_lines = checks["code"]
             result.codeintel_findings = checks["codeintel"]
@@ -912,7 +1096,190 @@ def audit_task(
                 result.violations.append("hidden_verifier_guidance_not_empty")
             if result.json_string_findings:
                 result.violations.append("nexus_block_string_not_allowed")
+        deferred = treatment and with_row is not None and "_treatment_rescore" in with_row
+        if deferred and len(with_records) > 1:
+            # The visible re-runs this classification needs happen at the end of the run (no
+            # staging window open); the early audit defers it, the final audit always runs it.
+            result.treatment_round_findings_deferred = True
+        elif treatment and len(with_records) > 1:
+            for index, record in enumerate(with_records[1:], start=2):
+                findings, self_heal = audit_treatment_round(
+                    str(record.get("prompt") or ""),
+                    round1_prompt=first,
+                    bare_prompt=reference,
+                    material=material,
+                    candidate_lines={
+                        " ".join(line.split()) for line in _earlier_candidate_lines(index - 1)
+                    },
+                    candidate_texts=_earlier_candidates(index - 1),
+                    visible_lines=visible_lines,
+                    product_python=str((with_row or {}).get("treatment_product_python") or ""),
+                    visible_test_arg=str((with_row or {}).get("treatment_visible_test_arg") or ""),
+                )
+                result.treatment_rounds_audited += 1
+                result.self_heal_rounds_observed += int(self_heal)
+                result.treatment_round_findings.extend(f"round{index}:{item}" for item in findings)
+            if result.treatment_round_findings:
+                result.violations.append("treatment_round_not_allowed")
     return result
+
+
+def _treatment_max_calls(row: Mapping[str, Any] | None) -> int:
+    try:
+        value = int(
+            (row or {}).get("treatment_max_model_calls") or DEFAULT_TREATMENT_MAX_MODEL_CALLS
+        )
+    except (TypeError, ValueError):
+        value = DEFAULT_TREATMENT_MAX_MODEL_CALLS
+    return max(1, value)
+
+
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def load_row_candidates(row: Mapping[str, Any]) -> tuple[dict[str, str], list[str]]:
+    """The row's runner-derived model candidates (``treatment_candidates``), each re-hashed.
+
+    The runner derived them from the capture wrapper's recorded model responses
+    (``treatment_lane.derive_runner_candidates``), not from anything the product reported.
+    """
+
+    raw = row.get("treatment_candidates")
+    out: dict[str, str] = {}
+    errors: list[str] = []
+    if not isinstance(raw, Mapping) or not raw:
+        return out, ["no_runner_derived_candidates"]
+    for sha, text in raw.items():
+        sha = str(sha)
+        if not _SHA256_RE.match(sha) or not isinstance(text, str):
+            errors.append(f"candidate_sha_malformed:{sha[:16]}")
+            continue
+        if hashlib.sha256(text.encode("utf-8")).hexdigest() != sha:
+            errors.append(f"candidate_sha_mismatch:{sha[:12]}")
+            continue
+        out[sha] = text
+    return out, errors
+
+
+def _syntax_lines(candidate_texts: Iterable[str]) -> set[str]:
+    """The exact ``syntax_error``/``syntax_warning`` lines the product would print for these candidates."""
+
+    from nexus.research.sprint_service import syntax_rejection_lines
+
+    out: set[str] = set()
+    for text in candidate_texts:
+        out |= {" ".join(line.split()) for line in syntax_rejection_lines(text)}
+    return out
+
+
+def normalize_output_line(line: str) -> str:
+    """One pytest output line without its volatile parts (durations, rule fills)."""
+
+    # Durations only. Directories are NOT stripped (G5-3 class): the counted lane's confined
+    # runs print rootdir-relative paths, so a path can never carry text past this check.
+    text = _DURATION_RE.sub("in Xs", " ".join(str(line).split()))
+    return text.strip(" =_-")
+
+
+def row_visible_output_lines(row: Mapping[str, Any]) -> set[str]:
+    """The runner's own visible-test output on the row's candidates (normalised lines)."""
+
+    out: set[str] = set()
+    outputs = row.get("treatment_visible_outputs") or {}
+    if isinstance(outputs, Mapping):
+        for text in outputs.values():
+            for line in str(text or "").splitlines():
+                normalized = normalize_output_line(line)
+                if normalized:
+                    out.add(normalized)
+    return out
+
+
+def audit_treatment_round(
+    prompt: str,
+    *,
+    round1_prompt: str,
+    bare_prompt: str,
+    material: TaskMaterial,
+    candidate_lines: set[str],
+    visible_lines: set[str],
+    candidate_texts: Iterable[str] = (),
+    product_python: str = "",
+    visible_test_arg: str = "",
+) -> tuple[list[str], bool]:
+    """Findings for one later with-Nexus round (round >= 2) and whether it was a self-heal round."""
+
+    blocks_cfg = load_treatment_blocks()
+    schema = load_block_schema(LANE_TREATMENT)
+    findings: list[str] = []
+    if not _no_tools_position_ok(prompt, bare=False):
+        findings.append("no_tools_prefix_not_once_before_task")
+    known = set(_lines(strip_no_tools(round1_prompt))) | set(_lines(strip_no_tools(bare_prompt)))
+    fixed = {" ".join(str(text).split()) for text in blocks_cfg.get("fixed_sentences") or []}
+    headers = {str(text) for text in blocks_cfg.get("headers") or []}
+    forbidden = {str(text) for text in blocks_cfg.get("forbidden_headers") or []}
+    candidate_header = re.compile(str(blocks_cfg.get("candidate_header_pattern") or r"^$^"))
+    syntax_lines = _syntax_lines(candidate_texts)
+    round_lines = frozenset(_lines(strip_no_tools(prompt)))
+    from nexus.research.sprint_service import visible_timeout_line_re
+
+    timeout_re = visible_timeout_line_re(product_python, visible_test_arg)
+    selected = frozenset(_selected_capabilities(prompt))
+    hidden_numbers = frozenset(hidden_only_numbers(material, bare_prompt))
+    self_heal = False
+    previous = ""
+    for header, line in _blocks(prompt):
+        first_failure_line, previous = previous == "[FAILURE]", line
+        if line in forbidden:
+            findings.append(f"forbidden_block:{line}")
+            continue
+        if header == HIDDEN_GUIDANCE_HEADER and not SECTION_HEADER_RE.match(line):
+            findings.append("hidden_verifier_guidance_not_empty")
+            continue
+        if header in forbidden:
+            continue  # body of a forbidden block (already a finding)
+        if line in known:
+            continue
+        if SESSION_BOUNDARY_RE.match(line):
+            continue  # each round is a new sprint attempt (task_id ...-s<n>-a<k>)
+        if line in fixed:
+            self_heal = self_heal or line == " ".join(SELF_HEAL_SENTENCE.split())
+            continue
+        if line in headers or candidate_header.match(line):
+            continue
+        if line in candidate_lines:
+            continue
+        output_line = normalize_output_line(line)
+        if output_line and (
+            output_line in visible_lines
+            # only the first [FAILURE] line can be cut mid-line (the product keeps the last 1200 chars)
+            or (first_failure_line and any(item.endswith(output_line) for item in visible_lines))
+        ):
+            continue
+        if line in PRODUCT_ERROR_CODES or line in syntax_lines or _MULTI_FILE_RE.match(line):
+            continue
+        if timeout_re.match(line):
+            continue
+        if header in JSON_BLOCK_HEADERS and line.startswith("{"):
+            try:
+                payload = parse_block_json(line)
+            except ValueError:
+                findings.append(f"block_not_json:{header}")
+                continue
+            findings.extend(
+                _schema_findings(
+                    header,
+                    payload,
+                    schema.get(header, {}),
+                    material,
+                    selected=selected,
+                    hidden_numbers=hidden_numbers,
+                    round_lines=round_lines,
+                )
+            )
+            continue
+        findings.append(f"line_not_allowed:{line[:80]}")
+    return findings, self_heal
 
 
 def synthetic_bare_reference(material: TaskMaterial) -> str:
@@ -970,7 +1337,9 @@ def audit_run(
     rows: Iterable[Mapping[str, Any]] = (),
     run_id: str | None = None,
     expect_model_calls: bool = False,
+    lane: str = LANE_STRICT,
 ) -> dict[str, Any]:
+    treatment = lane == LANE_TREATMENT
     captures = load_captures(capture_dir, run_id=run_id)
     rows = list(rows)
     by_arm: dict[tuple[str, str], list[Mapping[str, Any]]] = defaultdict(list)
@@ -986,6 +1355,7 @@ def audit_run(
                 captures.get(("with_nexus", key), []),
                 bare_rows=by_arm.get(("without_nexus", key), []) if rows else None,
                 with_rows=by_arm.get(("with_nexus", key), []) if rows else None,
+                lane=lane,
             )
         )
     unknown = sorted(
@@ -1009,8 +1379,14 @@ def audit_run(
             row_violations.append(f"{ident}:no_fixture_material")
         if str(row.get("route_cost_policy_source") or ""):
             row_violations.append(f"{ident}:promoted_route_cost_policy")
-        if str(row.get("mode")) == "with_nexus" and int(row.get("attempt_count") or 0) > 1:
+        if (
+            str(row.get("mode")) == "with_nexus"
+            and int(row.get("attempt_count") or 0) > 1
+            and not treatment  # treatment lane: in-product rounds; calls are reconciled per task
+        ):
             row_violations.append(f"{ident}:attempt_count>1")
+        if treatment and row.get("bounded_nexus_rescue_used") is True:
+            row_violations.append(f"{ident}:runner_rescue_in_treatment_lane")
         if str(row.get("hidden_retry_reason") or "") in {
             "hidden_verifier_failure_deterministic_pre_retry",
             "hidden_verifier_failure_bounded_nexus_retry",
@@ -1032,6 +1408,7 @@ def audit_run(
     return {
         "schema": SCHEMA,
         "status": status,
+        "lane": LANE_TREATMENT if treatment else LANE_STRICT,
         "run_id": run_id,
         "tasks": [item.to_dict() for item in tasks],
         "failed_keys": [item.key for item in failed],
