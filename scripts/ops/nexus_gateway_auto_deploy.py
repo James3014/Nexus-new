@@ -160,6 +160,14 @@ QUIESCENCE_REWARN_SECONDS = 24 * 60 * 60
 QUIESCENCE_REARM_MIN_SECONDS = 60 * 60
 QUIESCENCE_ALERT_ISSUE = 2227
 QUIESCENCE_CLASSIFY_TIMEOUT_SECONDS = 120
+# Degraded Controller (#2230 F2): a Gateway that started with an invalid
+# Controller runs DEGRADED until restarted, and /health says so in
+# ``controller_binding``.  While IN_SYNC the deployer reads it and, when
+# degraded, places HOLD, writes a receipt and warns on the Issue below (rate
+# limited like the quiescence warning).  It never restarts or switches.
+LIVE_DEGRADED_OUTCOME = "LIVE_DEGRADED_CONTROLLER"
+LIVE_DEGRADED_HOLD = "auto-hold: LIVE_DEGRADED_CONTROLLER"
+CONTROLLER_ALERT_ISSUE = 2230
 # Runs with the LIVE deployment's interpreter and tree, so tasks are classified
 # by exactly the lifecycle code that owns them.  Read-only: it never takes the
 # task state lock or reconciles anything.
@@ -396,6 +404,11 @@ class Config:
         """The current deferral episode (#2227); absent when nothing is deferred."""
         return self.state_dir / "quiescence.json"
 
+    @property
+    def controller_alert_file(self) -> Path:
+        """When the degraded-Controller warning (#2230) was last posted."""
+        return self.state_dir / "controller_alert.json"
+
 
 # --------------------------------------------------------------------------- host
 
@@ -503,15 +516,15 @@ class Host:
             return {"verdict": "UNKNOWN", "reason": f"CLASSIFIER_FAILED:{type(exc).__name__}"}
         return classify_task_report(result.returncode, result.stdout or "", result.stderr or "")
 
-    def post_issue_comment(self, cfg: Config, body: str) -> bool:
-        """One comment on the quiescence alert Issue; False on any failure."""
+    def post_issue_comment(self, cfg: Config, body: str, issue: Optional[int] = None) -> bool:
+        """One comment on the alert Issue (default: quiescence); False on any failure."""
         try:
             result = self.run(
                 [
                     cfg.gh,
                     "issue",
                     "comment",
-                    str(int(cfg.alert_issue)),
+                    str(int(cfg.alert_issue if issue is None else issue)),
                     "--repo",
                     cfg.repository,
                     "--body",
@@ -1026,6 +1039,10 @@ class Prober:
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         with opener.open(request, timeout=30) as response:
             return json.loads(response.read(8 * 1024 * 1024).decode("utf-8"))
+
+    def live_health(self) -> Any:
+        """The live Gateway's unauthenticated /health (#2230 F2); raises when unreachable."""
+        return self._http(f"http://127.0.0.1:{LIVE_PORT}/health")
 
     def core_provenance(self, *, root: Path, python: Path, core: Any) -> Dict[str, Any]:
         """The candidate's transport must resolve Core as CORE_REVISION_PINNED at ``core``."""
@@ -1937,6 +1954,100 @@ class _Cycle:
             "deferral_age_seconds": int(max(0.0, self.host.now() - float(since))),
         }
 
+    # -- degraded Controller (#2230 F2) --------------------------------------
+
+    def live_controller_binding(self, status: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """The live ``controller_binding`` when it is DEGRADED, else None.
+
+        Absent (a Gateway from before #2232) or any other value changes nothing.
+        An unreachable or unreadable /health only adds a warning: a single
+        transient failure never holds the deployer.
+        """
+        try:
+            health = self.prober.live_health()
+        except Exception as exc:  # noqa: BLE001 - IN_SYNC must not gain a failure mode
+            status.setdefault("warnings", []).append(f"LIVE_HEALTH_UNREADABLE:{type(exc).__name__}")
+            return None
+        binding = health.get("controller_binding") if isinstance(health, dict) else None
+        degraded = binding.get("status") == "DEGRADED" if isinstance(binding, dict) else False
+        if not degraded:
+            # A non-degraded reading ends the alert episode, so a later
+            # degraded start (after a restart) is announced again.
+            with contextlib.suppress(FileNotFoundError):
+                self.cfg.controller_alert_file.unlink()
+            return None
+        reason = _safe_reason(str(binding.get("reason") or "UNKNOWN"))
+        status["live_controller_binding"] = {"status": "DEGRADED", "reason": reason}
+        return {"status": "DEGRADED", "reason": reason}
+
+    def hold_degraded(
+        self, candidate: str, live: Optional[Path], binding: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """HOLD, warn (rate limited) and record; never restarts or switches anything."""
+        cfg, host = self.cfg, self.host
+        now = host.now()
+        reason = binding["reason"]
+        hold = f"{LIVE_DEGRADED_HOLD} {reason} at {candidate[:12]}"
+        # HOLD first: a failed comment or receipt can never leave it unset.
+        _set_hold(cfg, hold)
+        alert = _read_json_object(cfg.controller_alert_file) or {}
+        warned_at = _parse_iso(alert.get("warned_at"))
+        if warned_at is not None and warned_at > now:
+            warned_at = None  # a future marker can never mute a warning
+        if warned_at is not None and (
+            (
+                (alert.get("reason"), alert.get("commit")) != (reason, candidate)
+                and now - warned_at >= QUIESCENCE_REARM_MIN_SECONDS
+            )
+            or now - warned_at >= QUIESCENCE_REWARN_SECONDS
+        ):
+            warned_at = None  # re-arm, as the quiescence warning does
+        warning: Dict[str, Any] = {"posted": False}
+        if warned_at is None:
+            body = (
+                "<!-- NEXUS_GATEWAY_LIVE_DEGRADED_CONTROLLER -->\n"
+                f"**The live Gateway `{candidate[:12]}` is running with a DEGRADED Controller** "
+                f"(`{reason}`, #2230 F2). Every Controller effect is refused until it is "
+                "restarted, and a degraded start never heals by itself.\n\n"
+                "The auto-deployer placed HOLD and changed nothing else: no restart, no "
+                "switch. Fix the Controller binding, restart the Gateway, check that /health "
+                "`controller_binding` is no longer DEGRADED, then "
+                "`nexus_gateway_auto_deploy.py release`.\n"
+            )
+            posted = host.post_issue_comment(cfg, body, issue=CONTROLLER_ALERT_ISSUE)
+            warning = {"posted": posted}
+            if posted:
+                alert = {
+                    "schema": "nexus.gateway.controller_alert.v1",
+                    "warned_at": _iso(now),
+                    "reason": reason,
+                    "commit": candidate,
+                }
+                _atomic_write(
+                    cfg.controller_alert_file,
+                    json.dumps(alert, sort_keys=True).encode(),
+                    0o600,
+                )
+        else:
+            warning = {"posted": False, "suppressed_since": _iso(warned_at)}
+        receipt = {
+            "schema": RECEIPT_SCHEMA,
+            "attempt_id": f"{candidate[:12]}-{int(now)}-degraded",
+            "candidate_commit": candidate,
+            "previous_commit": candidate,
+            "previous_root": str(live),
+            "started_at": _iso(now),
+            "finished_at": _iso(now),
+            "outcome": LIVE_DEGRADED_OUTCOME,
+            "switched": False,
+            "rolled_back": False,
+            "controller_binding": binding,
+            "hold": hold,
+            "warning": warning,
+        }
+        _append_receipt(cfg, receipt)
+        return {"hold": hold, "receipt": receipt}
+
     # -- entry -------------------------------------------------------------
 
     def run(self, status: Dict[str, Any], *, dry_run: bool, force: bool) -> Dict[str, Any]:
@@ -1983,6 +2094,10 @@ class _Cycle:
 
         if candidate == previous_commit:
             self.end_deferral()
+            binding = self.live_controller_binding(status)
+            if binding is not None and not dry_run:
+                degraded = self.hold_degraded(candidate, previous_root, binding)
+                return finish(LIVE_DEGRADED_OUTCOME, **degraded)
             return finish("IN_SYNC")
         receipts = [
             r for r in read_receipts(cfg.state_dir) if r.get("candidate_commit") == candidate

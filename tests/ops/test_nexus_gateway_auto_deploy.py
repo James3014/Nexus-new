@@ -123,6 +123,7 @@ class FakeHost(ad.Host):
         self.real_classifier = False
         self.quiescence_checks = 0
         self.issue_comments: list[str] = []
+        self.comment_issues: list[int | None] = []
         self.comment_fails = False
 
     def tasks_in_flight(self, cfg: ad.Config, live_plist: bytes) -> dict[str, Any]:  # type: ignore[override]
@@ -150,10 +151,13 @@ class FakeHost(ad.Host):
             return dict(self.in_flight.pop(0) if len(self.in_flight) > 1 else self.in_flight[0])
         return {"verdict": "CLEAR", "checked": 0}
 
-    def post_issue_comment(self, cfg: ad.Config, body: str) -> bool:  # type: ignore[override]
+    def post_issue_comment(  # type: ignore[override]
+        self, cfg: ad.Config, body: str, issue: int | None = None
+    ) -> bool:
         if self.comment_fails:
             return False
         self.issue_comments.append(body)
+        self.comment_issues.append(issue)
         return True
 
     def r1_recovery_block(self, cfg: ad.Config) -> str | None:  # type: ignore[override]
@@ -282,6 +286,15 @@ class FakeProber:
         self.results = results or {}
         self.hook = hook
         self.calls: list[dict[str, Any]] = []
+        # Live /health (#2230 F2): a pre-#2232 Gateway has no controller_binding.
+        self.health: Any = {"status": "ok", "git_head": OLD}
+        self.health_reads = 0
+
+    def live_health(self) -> Any:
+        self.health_reads += 1
+        if isinstance(self.health, BaseException):
+            raise self.health
+        return self.health
 
     def probe(self, *, port, token, commit, root, python, timeout, core=None):
         call = {"port": port, "commit": commit, "root": root, "python": python, "core": core}
@@ -4621,3 +4634,120 @@ def test_quiescence_candidate_arriving_inside_the_hour_still_rearms(cfg: ad.Conf
     cycle(cfg, host, prober)  # 65 min after the warning: NEW gets its own
     assert len(host.issue_comments) == 1
     assert json.loads(cfg.quiescence_file.read_text())["warned_candidate"] == NEW
+
+
+# ------------------------------------------------- degraded live Controller (#2230 F2)
+
+
+def _degraded_health() -> dict[str, Any]:
+    return {
+        "status": "degraded",
+        "git_head": OLD,
+        "controller_binding": {
+            "status": "DEGRADED",
+            "reason": "NEXUS_CANONICAL_SOURCE_ROOT_MISSING",
+        },
+    }
+
+
+def test_in_sync_degraded_controller_holds_receipts_and_warns_once(cfg: ad.Config) -> None:
+    host, prober = FakeHost(candidate=OLD), FakeProber()
+    prober.health = _degraded_health()
+    result = cycle(cfg, host, prober)
+    assert result["status"] == ad.LIVE_DEGRADED_OUTCOME
+    assert prober.health_reads == 1
+    # HOLD with a clear reason; nothing restarted, switched or built.
+    assert ad.hold_reason(cfg, {}) is not None
+    hold = cfg.hold_file.read_text(encoding="utf-8")
+    assert hold.startswith(ad.LIVE_DEGRADED_HOLD)
+    assert "NEXUS_CANONICAL_SOURCE_ROOT_MISSING" in hold
+    assert host.reloads == [] and host.started == [] and prober.calls == []
+    assert not any(argv[:1] == ["uv"] for argv in host.calls)
+    receipt = ad.last_receipt(cfg.state_dir)
+    assert receipt["outcome"] == ad.LIVE_DEGRADED_OUTCOME
+    assert receipt["candidate_commit"] == OLD and receipt["switched"] is False
+    assert receipt["controller_binding"]["status"] == "DEGRADED"
+    assert receipt["outcome"] not in ad.FAILED_OUTCOMES  # no backoff / give-up effect
+    assert receipt["previous_root"] == str(cfg.deployments / f"r1-{OLD}")
+    assert len(host.issue_comments) == 1
+    assert host.comment_issues == [ad.CONTROLLER_ALERT_ISSUE] and ad.CONTROLLER_ALERT_ISSUE == 2230
+    assert "NEXUS_GATEWAY_LIVE_DEGRADED_CONTROLLER" in host.issue_comments[0]
+    status = json.loads((cfg.state_dir / "status.json").read_text())
+    assert status["status"] == ad.LIVE_DEGRADED_OUTCOME
+    # Held: the next cycle does nothing and says nothing.
+    assert cycle(cfg, host, prober)["status"] == "HELD"
+    assert len(host.issue_comments) == 1
+    # Released while still degraded: HOLD again, but no second comment inside the limit.
+    cfg.hold_file.unlink()
+    host.clock += 60
+    again = cycle(cfg, host, prober)
+    assert again["status"] == ad.LIVE_DEGRADED_OUTCOME
+    assert cfg.hold_file.exists()
+    assert len(host.issue_comments) == 1
+    assert again["receipt"]["warning"]["posted"] is False
+    # A day later the warning re-arms.
+    cfg.hold_file.unlink()
+    host.clock += ad.QUIESCENCE_REWARN_SECONDS
+    cycle(cfg, host, prober)
+    assert len(host.issue_comments) == 2
+
+
+def test_in_sync_degraded_dry_run_reports_without_effects(cfg: ad.Config) -> None:
+    host, prober = FakeHost(candidate=OLD), FakeProber()
+    prober.health = _degraded_health()
+    result = cycle(cfg, host, prober, dry_run=True)
+    assert result["status"] == "IN_SYNC"
+    assert result["live_controller_binding"]["status"] == "DEGRADED"
+    assert not cfg.hold_file.exists() and host.issue_comments == []
+    assert ad.read_receipts(cfg.state_dir) == []
+
+
+@pytest.mark.parametrize(
+    "binding",
+    [
+        None,
+        {"status": "SEPARATE", "reason": None},
+        {"status": "NOT_SEPARATE", "reason": None},
+    ],
+    ids=["field-absent", "separate", "not-separate"],
+)
+def test_in_sync_without_degraded_controller_is_unchanged(cfg: ad.Config, binding: Any) -> None:
+    host, prober = FakeHost(candidate=OLD), FakeProber()
+    if binding is not None:
+        prober.health = {"status": "ok", "git_head": OLD, "controller_binding": binding}
+    result = cycle(cfg, host, prober)
+    assert result["status"] == "IN_SYNC"
+    assert prober.health_reads == 1
+    assert "warnings" not in result and "live_controller_binding" not in result
+    assert not cfg.hold_file.exists()
+    assert host.issue_comments == [] and ad.read_receipts(cfg.state_dir) == []
+
+
+@pytest.mark.parametrize(
+    "health",
+    [TimeoutError("timed out"), ConnectionRefusedError(61, "refused"), "not-json-object"],
+    ids=["timeout", "refused", "garbage"],
+)
+def test_in_sync_unreachable_live_health_never_holds(cfg: ad.Config, health: Any) -> None:
+    host, prober = FakeHost(candidate=OLD), FakeProber()
+    prober.health = health
+    result = cycle(cfg, host, prober)
+    assert result["status"] == "IN_SYNC"
+    assert not cfg.hold_file.exists()
+    assert host.issue_comments == [] and ad.read_receipts(cfg.state_dir) == []
+    if isinstance(health, BaseException):
+        assert result["warnings"] == [f"LIVE_HEALTH_UNREADABLE:{type(health).__name__}"]
+
+
+def test_live_health_reads_the_live_port_with_the_probe_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[str] = []
+
+    def fake_http(self: ad.Prober, url: str, **_kw: Any) -> Any:
+        seen.append(url)
+        return {"status": "ok"}
+
+    monkeypatch.setattr(ad.Prober, "_http", fake_http)
+    assert ad.Prober(ad.Host()).live_health() == {"status": "ok"}
+    assert seen == [f"http://127.0.0.1:{ad.LIVE_PORT}/health"]
