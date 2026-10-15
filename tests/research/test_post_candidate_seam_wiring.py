@@ -447,3 +447,31 @@ def test_hyper_sprint_lock_held_by_another_task_never_writes_the_candidate(
     assert result.patch == ""
     assert result.learning_trace.get("file_lock_denied") is True
     assert (case / "target.py").read_text(encoding="utf-8") == ORIGINAL
+
+
+def test_sprint_target_held_by_other_task_sees_a_foreign_lock_only(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Coordinator #3: the sprint's pre-write guard (used by the runtime verifier after #2212)."""
+    from nexus.research.sprint_service import SprintConfig, _target_held_by_other_task
+
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    cfg = SprintConfig(task="t", target_file="pkg/target.py", test_file="pkg/test_visible.py")
+    assert _target_held_by_other_task(workspace, cfg) is False
+    seam.acquire_target_lock(
+        task_id=seam.seam_holder_id(workspace, cfg.target_file),
+        workspace_root=workspace,
+        target_file=cfg.target_file,
+    )
+    assert _target_held_by_other_task(workspace, cfg) is False  # our own holder
+    seam.release_target_lock(seam.seam_holder_id(workspace, cfg.target_file))
+    seam.acquire_target_lock(
+        task_id="other-task", workspace_root=workspace, target_file=cfg.target_file
+    )
+    try:
+        assert _target_held_by_other_task(workspace, cfg) is True
+        monkeypatch.setenv(seam.SEAM_DISABLE_ENV, "0")
+        assert _target_held_by_other_task(workspace, cfg) is False  # seam off: no guard
+    finally:
+        seam.release_target_lock("other-task")

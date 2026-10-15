@@ -1430,6 +1430,19 @@ def _sprint_seam_task_id(repo_root: Path, config: SprintConfig) -> str:
     return "auto-flow-sprint:" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
 
 
+def _target_held_by_other_task(repo_root: Path, config: SprintConfig) -> bool:
+    """True when another task holds the sprint target's file lock: code that would apply the
+    candidate in place before the seam's own lock is taken (the runtime visible verifier) must
+    not run then."""
+    from nexus.services import post_candidate_seam as seam
+
+    if not seam.seam_enabled():
+        return False
+    return seam.target_held_by_other(
+        repo_root, config.target_file, seam.seam_holder_id(repo_root, config.target_file)
+    )
+
+
 def _sprint_lock_denied(
     meta: Mapping[str, Any] | None, *, repo_root: Path, config: SprintConfig, learning_trace: dict[str, Any]
 ) -> bool:
