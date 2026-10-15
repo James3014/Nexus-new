@@ -614,3 +614,160 @@ def test_log_safe_defuses_legacy_and_trimmed_workflow_commands():
         assert "\n" not in safe and "\r" not in safe and "\u2028" not in safe
         assert not safe.lstrip().startswith("::")
         assert "##[" not in safe
+
+
+def _write_src(root, rel, lines):
+    target = root / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _ruff_at(root, rel, row, code="F401", message="`os` imported but unused"):
+    return parse_ruff_json(
+        [
+            {
+                "filename": rel,
+                "code": code,
+                "location": {"row": row, "column": 1},
+                "message": message,
+            }
+        ],
+        root=root,
+    )
+
+
+def _pyright_at(root, rel, line0, message="Unknown import"):
+    return parse_pyright_json(
+        {
+            "generalDiagnostics": [
+                {
+                    "file": str(root / rel),
+                    "severity": "error",
+                    "message": message,
+                    "rule": "reportMissingImports",
+                    "range": {"start": {"line": line0, "character": 0}},
+                }
+            ]
+        },
+        root=root,
+    )
+
+
+def _finding_at(rel, row):
+    # built directly: the parsers already reject symlink-escaping paths
+    return Finding("ruff", "F401", rel, row, 1, "error", "`os` imported but unused")
+
+
+def test_inserted_lines_above_baseline_debt_are_not_new(tmp_path):
+    base_root, head_root = tmp_path / "base", tmp_path / "head"
+    _write_src(base_root, "nexus/a.py", ["import os", "x = 1"])
+    _write_src(head_root, "nexus/a.py", ["# new", "# lines", "import os", "x = 1"])
+    _write_src(base_root, "nexus/b.py", ["import foo", "y = 1"])
+    _write_src(head_root, "nexus/b.py", ["", "", "import foo", "y = 1"])
+
+    ruff = classify_findings(
+        _ruff_at(base_root, "nexus/a.py", 1),
+        _ruff_at(head_root, "nexus/a.py", 3),
+        base_root=base_root,
+        head_root=head_root,
+    )
+    pyright = classify_findings(
+        _pyright_at(base_root, "nexus/b.py", 0),
+        _pyright_at(head_root, "nexus/b.py", 2),
+        base_root=base_root,
+        head_root=head_root,
+    )
+
+    for result in (ruff, pyright):
+        assert result.classification == "EXACT_BASELINE_DEBT"
+        assert result.new_findings == []
+        assert result.resolved_findings == []
+        assert not result.blocking
+
+
+def test_same_rule_on_new_line_with_different_text_is_new(tmp_path):
+    base_root, head_root = tmp_path / "base", tmp_path / "head"
+    _write_src(base_root, "nexus/a.py", ["import os", "x = 1"])
+    _write_src(head_root, "nexus/a.py", ["import os", "x = 1", "import os as other"])
+    head = _ruff_at(head_root, "nexus/a.py", 1) + _ruff_at(head_root, "nexus/a.py", 3)
+
+    result = classify_findings(
+        _ruff_at(base_root, "nexus/a.py", 1), head, base_root=base_root, head_root=head_root
+    )
+
+    assert result.classification == "NEW_REGRESSION"
+    assert [f.line for f in result.new_findings] == [3]
+
+
+def test_duplicated_identical_line_is_new_via_ordinal(tmp_path):
+    base_root, head_root = tmp_path / "base", tmp_path / "head"
+    _write_src(base_root, "nexus/a.py", ["import os", "x = 1"])
+    _write_src(head_root, "nexus/a.py", ["import os", "x = 1", "import os"])
+    head = _ruff_at(head_root, "nexus/a.py", 1) + _ruff_at(head_root, "nexus/a.py", 3)
+
+    result = classify_findings(
+        _ruff_at(base_root, "nexus/a.py", 1), head, base_root=base_root, head_root=head_root
+    )
+
+    assert result.classification == "NEW_REGRESSION"
+    assert len(result.new_findings) == 1
+    assert result.resolved_findings == []
+
+
+def test_unreadable_source_falls_back_without_hiding_new_findings(tmp_path):
+    base_root, head_root = tmp_path / "base", tmp_path / "head"
+    base_root.mkdir()
+    head_root.mkdir()
+    outside = tmp_path / "outside.py"
+    outside.write_text("import os\n", encoding="utf-8")
+    (head_root / "link.py").symlink_to(outside)
+    _write_src(head_root, "short.py", ["import os"])
+
+    # missing file, symlink escaping the root, and out-of-range line: none may crash
+    # or be matched against a base finding at a different line.
+    for rel, base_row, head_row in (
+        ("missing.py", 1, 5),
+        ("link.py", 1, 2),
+        ("short.py", 1, 9),
+    ):
+        result = classify_findings(
+            [_finding_at(rel, base_row)],
+            [_finding_at(rel, head_row)],
+            base_root=base_root,
+            head_root=head_root,
+        )
+        assert result.classification == "NEW_REGRESSION", rel
+        assert len(result.new_findings) == 1
+
+    # an extra finding in an unreadable file still shows as new
+    result = classify_findings(
+        [_finding_at("missing.py", 1)],
+        [_finding_at("missing.py", 1), _finding_at("missing.py", 4)],
+        base_root=base_root,
+        head_root=head_root,
+    )
+    assert result.classification == "NEW_REGRESSION"
+    assert [f.line for f in result.new_findings] == [4]
+
+
+def test_unformatted_is_keyed_per_file_not_by_first_line(tmp_path):
+    base_root, head_root = tmp_path / "base", tmp_path / "head"
+    _write_src(base_root, "nexus/f.py", ["x=1"])
+    _write_src(head_root, "nexus/f.py", ["# header", "x=1"])
+    args = ("unformatted", "File would be reformatted")
+
+    same = classify_findings(
+        _ruff_at(base_root, "nexus/f.py", 1, *args),
+        _ruff_at(head_root, "nexus/f.py", 1, *args),
+        base_root=base_root,
+        head_root=head_root,
+    )
+    assert same.classification == "EXACT_BASELINE_DEBT"
+
+    other = classify_findings(
+        _ruff_at(base_root, "nexus/f.py", 1, *args),
+        _ruff_at(head_root, "nexus/f.py", 1, *args) + _ruff_at(head_root, "nexus/g.py", 1, *args),
+        base_root=base_root,
+        head_root=head_root,
+    )
+    assert other.classification == "NEW_REGRESSION"
