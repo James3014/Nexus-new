@@ -44,6 +44,20 @@ CONFINED_COPY_IGNORE: tuple[str, ...] = (
     ".mypy_cache",
 )
 _TAIL_CHARS = 1000
+# Read-only system toolchain the bench fixtures need (some visible/hidden tests shell out to
+# ``git``): system binaries and the macOS Command Line Tools. Nothing under $HOME, no workspace.
+TOOLCHAIN_READ_ROOTS: tuple[str, ...] = (
+    "/usr/bin",
+    "/bin",
+    "/usr/libexec",
+    "/usr/share",
+    "/private/etc",
+    "/Library/Developer/CommandLineTools",
+    "/Applications/Xcode.app/Contents/Developer",
+    # Python's subprocess lists /dev/fd to close inherited descriptors; without it every spawn
+    # falls back to closing all RLIMIT_NOFILE descriptors (~1 s per git call).
+    "/dev/fd",
+)
 
 
 def _forbidden_argv_parts(
@@ -81,6 +95,7 @@ def run_confined_test(
     forbidden_paths: Iterable[Path | str] = (),
     forbidden_names: Iterable[str] = HIDDEN_TEST_BASENAMES,
     timeout_sec: float = 60,
+    toolchain: bool = True,
 ) -> dict[str, Any]:
     """Copy ``workspace_root`` into a confined sandbox and run ``command`` there (cwd = copy).
 
@@ -131,7 +146,11 @@ def run_confined_test(
             raise SandboxError(
                 "sandbox_argv_names_forbidden_path:" + ",".join(sorted(refused))[:200]
             )
-        bound = confinement(sandbox=sandbox_dir, extra_forbidden=[*forbidden, *leaked])
+        bound = confinement(
+            sandbox=sandbox_dir,
+            extra_forbidden=[*forbidden, *leaked],
+            extra_readable=TOOLCHAIN_READ_ROOTS if toolchain else (),
+        )
         result["confinement"] = bound.describe()
         try:
             proc = bound.run(argv, cwd=workspace, timeout=max(1.0, float(timeout_sec)))
@@ -166,3 +185,54 @@ def run_confined_test(
     finally:
         result["duration_sec"] = round(time.monotonic() - start, 4)
         shutil.rmtree(sandbox_dir, ignore_errors=True)
+
+
+DIR_COPY_PYTEST_CONFIG = ".nexus-confined-pytest.ini"
+
+
+def run_pytest_dir_copy(
+    source_dir: Path | str,
+    test_name: str,
+    *,
+    forbidden_paths: Iterable[Path | str] = (),
+    timeout_sec: float = 300,
+) -> dict[str, Any]:
+    """Copy the regular files of ``source_dir`` (non-recursive, no symlinks, no dotfiles) into a
+    fresh directory and run ``pytest <test_name>`` there inside the confinement.
+
+    Used for the bench's hidden verifier: the test (hidden included) and the delivered target
+    are read from the copy only; the workspace is never readable by the run. Pytest config
+    discovery is pinned to the copy."""
+
+    source = Path(source_dir).resolve()
+    staging = Path(tempfile.mkdtemp(prefix="nexus-confined-dir-")).resolve()
+    try:
+        for entry in sorted(source.iterdir()):
+            if entry.name.startswith(".") or entry.is_symlink() or not entry.is_file():
+                continue
+            shutil.copyfile(entry, staging / entry.name, follow_symlinks=False)
+        (staging / DIR_COPY_PYTEST_CONFIG).write_text("[pytest]\n", encoding="utf-8")
+        command = [
+            sys.executable,
+            "-I",
+            "-m",
+            "pytest",
+            "-q",
+            "--maxfail=1",
+            "--rootdir",
+            ".",
+            "-c",
+            DIR_COPY_PYTEST_CONFIG,
+            "-p",
+            "no:cacheprovider",
+            Path(test_name).name,
+        ]
+        return run_confined_test(
+            staging,
+            command=command,
+            forbidden_paths=forbidden_paths,
+            forbidden_names=(),
+            timeout_sec=timeout_sec,
+        )
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)

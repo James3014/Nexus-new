@@ -1239,7 +1239,15 @@ class InPlaceSprintExecutor:
                         source=source,
                         elapsed_sec=round(time.time() - start, 4),
                     )
-            confined = self._evaluate_confined(seed=seed, hint=hint, code=code, source=source, original=original, start=start)
+            confined = self._evaluate_confined(
+                seed=seed,
+                hint=hint,
+                code=code,
+                source=source,
+                original=original,
+                start=start,
+                companions=[path for path in companion_edits if path != target_path],
+            )
             if confined is not None:
                 return confined
             target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1297,14 +1305,28 @@ class InPlaceSprintExecutor:
 
 
 def _inplace_evaluate_confined(
-    executor: "InPlaceSprintExecutor", *, seed: int, hint: str, code: str, source: str, original: str, start: float
+    executor: "InPlaceSprintExecutor",
+    *,
+    seed: int,
+    hint: str,
+    code: str,
+    source: str,
+    original: str,
+    start: float,
+    companions: list[Path] | None = None,
 ) -> CandidateEval | None:
     """Strict/counted lane: the visible test runs on a scratch copy inside the OS confinement,
-    never in the workspace (None when confinement is not requested)."""
+    never in the workspace (None when confinement is not requested). Companion edits outside the
+    target cannot be reproduced in the copy: refused (``confinement_unavailable:multi_file``)."""
     from nexus.services import post_candidate_seam as seam
 
     if not seam.confine_visible_test_enabled():
         return None
+    if companions:
+        return CandidateEval(
+            seed=seed, score=0.0, hint=hint, error=f"{seam.CONFINEMENT_UNAVAILABLE}:multi_file:{len(companions)}",
+            candidate_code=code, source=source, elapsed_sec=round(time.time() - start, 4),
+        )
     test_arg = str(executor.pytest_cmd[-1]) if executor.pytest_cmd else ""
     if not test_arg.endswith(".py"):
         return CandidateEval(
@@ -1368,6 +1390,41 @@ def _symmetric_prompt_mode() -> bool:
     return os.environ.get("NEXUS_SYMMETRIC_PROMPT", "").strip().lower() in {"1", "true", "yes"}
 
 
+class _SprintLockDenied(BaseException):
+    """The target lock was refused: the sprint attempt short-circuits without any delivery.
+
+    A BaseException on purpose: the candidate loop's broad ``except Exception`` handlers must not
+    turn it into an ordinary failed candidate (which would let self-heal/rescue continue)."""
+
+    def __init__(self, **state: Any) -> None:
+        super().__init__("file_lock_denied")
+        self.state = state
+
+
+def _lock_denied_result(config: SprintConfig, state: Mapping[str, Any]) -> SprintResult:
+    learning_trace = dict(state.get("learning_trace") or {})
+    learning_trace["file_lock_denied"] = True
+    return SprintResult(
+        status="FAILED",
+        reason="file_lock_denied",
+        target_file=config.target_file,
+        winner_source="file_lock_denied",
+        final_score=0.0,
+        elapsed_sec=float(state.get("elapsed_sec") or 0.0),
+        attempt_count=0,
+        model_calls=int(state.get("model_calls") or 0),
+        quota_backoffs=0,
+        test_timeouts=0,
+        total_tokens=int(state.get("total_tokens") or 0),
+        model_name=str(state.get("model_name") or ""),
+        model_patch_generated=False,
+        error_codes=["file_lock_denied"],
+        learning_trace=learning_trace,
+        unified_runtime_receipts=list(state.get("unified_runtime_receipts") or []),
+        patch="",
+    )
+
+
 def _sprint_seam_task_id(repo_root: Path, config: SprintConfig) -> str:
     key = f"{Path(repo_root).resolve()}|{config.target_file}|{config.task}"
     return "auto-flow-sprint:" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
@@ -1385,7 +1442,7 @@ def _sprint_lock_denied(
         unified = meta.get("unified_runtime_receipt") if isinstance(meta, Mapping) else None
         _lock_task, new_stages = seam.lock_target_if_selected(
             unified_receipt=unified if isinstance(unified, Mapping) else None,
-            task_id=_sprint_seam_task_id(repo_root, config),
+            task_id=seam.seam_holder_id(repo_root, config.target_file),
             workspace_root=repo_root,
             target_file=config.target_file,
         )
@@ -1450,10 +1507,15 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     """Hyper sprint with the PR-2 post-candidate seam around it (file_lock released after the row)."""
     target = Path(repo_root) / config.target_file
     original_code = target.read_text(encoding="utf-8") if target.is_file() else None
-    lock_task = _sprint_seam_task_id(repo_root, config)
+    from nexus.services.post_candidate_seam import seam_holder_id
+
+    lock_task = seam_holder_id(repo_root, config.target_file)
     released: dict[str, list[str]] = {}
     try:
-        result = _run_hyper_sprint_core(repo_root=repo_root, config=config)
+        try:
+            result = _run_hyper_sprint_core(repo_root=repo_root, config=config)
+        except _SprintLockDenied as denied:
+            result = _lock_denied_result(config, denied.state)
     finally:
         from nexus.services.post_candidate_seam import release_target_lock
 
@@ -2187,11 +2249,16 @@ def _run_hyper_sprint_core(*, repo_root: Path, config: SprintConfig) -> SprintRe
                 if used_source.startswith("llm") and _sprint_lock_denied(
                     meta, repo_root=repo_root, config=config, learning_trace=learning_trace
                 ):
-                    # Another task holds the target: the candidate is never written (no delivery).
-                    ev = CandidateEval(
-                        seed=idx, score=0.0, hint=hint, error="file_lock_denied", candidate_code=source_code, source=used_source
+                    # Another task holds the target: the whole attempt stops here (no evaluation,
+                    # no self-heal, no rescue, no delivery).
+                    raise _SprintLockDenied(
+                        model_calls=model_calls,
+                        total_tokens=total_tokens,
+                        model_name=",".join(sorted(model_names)),
+                        learning_trace=learning_trace,
+                        unified_runtime_receipts=list(unified_runtime_receipts),
+                        elapsed_sec=round(time.time() - start, 4),
                     )
-                    error_codes.append("file_lock_denied")
                 else:
                     ev = executor.evaluate_candidate(seed=idx, hint=hint, code=candidate_code, source=used_source)
             if (

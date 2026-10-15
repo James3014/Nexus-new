@@ -47,6 +47,19 @@ SEAM_CAPABILITIES: tuple[str, ...] = (*POST_CANDIDATE_CAPABILITIES, FILE_LOCK_CA
 # "0"/"false"/"off" turns the seam off (the preflight skip receipts stay as they were).
 SEAM_DISABLE_ENV = "NEXUS_POST_CANDIDATE_SEAM"
 HIDDEN_TEST_BASENAMES: tuple[str, ...] = ("test_hidden.py",)
+SCRATCH_SIBLING_LIMIT = 200
+SCRATCH_SIBLING_MAX_BYTES = 2_000_000
+# Pytest never discovers config outside the scratch copy (a planted pytest.ini in a $TMPDIR
+# ancestor would otherwise be read, or crash the confined run with PermissionError).
+SCRATCH_PYTEST_CONFIG = ".nexus-scratch-pytest.ini"
+PINNED_PYTEST_ARGS: tuple[str, ...] = (
+    "--rootdir",
+    ".",
+    "-c",
+    SCRATCH_PYTEST_CONFIG,
+    "-p",
+    "no:cacheprovider",
+)
 SANDBOX_REFUSED_STATUS = "NOT_EXECUTED_SANDBOX_REFUSED"
 SKIPPED_SANDBOX_REFUSED = "SKIPPED_SANDBOX_REFUSED"
 SANDBOX_TIMEOUT_SEC = 60
@@ -138,7 +151,7 @@ def prepare_candidate_scratch(
     candidate_code: str,
     forbidden_paths: Iterable[Path | str] = (),
 ) -> CandidateScratch:
-    """Build the scratch copy: target + visible test (+ sibling ``conftest.py``), never hidden.
+    """Build the scratch copy: target + visible test + their sibling files, never hidden tests.
 
     Paths keep their layout relative to the common parent of target and visible test.
     """
@@ -158,17 +171,28 @@ def prepare_candidate_scratch(
         target.relative_to(base).as_posix(): original_code,
         visible.relative_to(base).as_posix(): visible.read_text(encoding="utf-8"),
     }
-    conftest = visible.parent / "conftest.py"
-    if conftest.is_file() and not conftest.is_symlink():
-        sources.setdefault(
-            conftest.relative_to(base).as_posix(), conftest.read_text(encoding="utf-8")
-        )
+    # Sibling files of the target and the visible test (fixture helpers, conftest, companion
+    # modules) so the copy behaves like the workspace; hidden tests and symlinks never.
+    for folder in dict.fromkeys((target.parent, visible.parent)):
+        for sibling in sorted(folder.iterdir())[:SCRATCH_SIBLING_LIMIT]:
+            rel_sib = sibling.relative_to(base).as_posix()
+            if rel_sib in sources or sibling.name in names or sibling.name.startswith("."):
+                continue
+            if sibling.is_symlink() or not sibling.is_file() or sibling.resolve() in forbidden:
+                continue
+            if sibling.stat().st_size > SCRATCH_SIBLING_MAX_BYTES:
+                continue
+            try:
+                sources[rel_sib] = sibling.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
     for rel in sources:
         if Path(rel).name in names or (base / rel).resolve() in forbidden:
             raise PostCandidateSeamError(f"forbidden_file_in_scratch:{rel}")
     cleanup_dir = Path(tempfile.mkdtemp(prefix="nexus-post-candidate-")).resolve()
     root = cleanup_dir / "repo"
     try:
+        sources[SCRATCH_PYTEST_CONFIG] = "[pytest]\n"
         for rel, text in sources.items():
             dest = root / rel
             dest.parent.mkdir(parents=True, exist_ok=True)
@@ -191,7 +215,7 @@ def prepare_candidate_scratch(
         candidate_sha256=hashlib.sha256(candidate_code.encode("utf-8")).hexdigest(),
         forbidden_paths=forbidden,
         cleanup_dir=cleanup_dir,
-        files=tuple(sorted(sources)),
+        files=tuple(sorted(rel for rel in sources if rel != SCRATCH_PYTEST_CONFIG)),
     )
 
 
@@ -205,8 +229,7 @@ def sandbox_context(task_id: str, scratch: CandidateScratch) -> dict[str, Any]:
             "-m",
             "pytest",
             "-q",
-            "-p",
-            "no:cacheprovider",
+            *PINNED_PYTEST_ARGS,
             scratch.visible_rel,
         ],
         "sandbox_timeout_sec": SANDBOX_TIMEOUT_SEC,
@@ -363,6 +386,58 @@ def run_post_candidate_capabilities(
     return stages
 
 
+SEAM_LOCK_HOLDER_PREFIX = "nexus-seam:"
+
+
+def seam_holder_id(workspace_root: Path | str, target_file: str) -> str:
+    """One lock holder per task (workspace + target) and process, shared by the baseline and
+    sprint paths; the pid suffix lets a later run sweep locks of a killed process."""
+    key = f"{Path(workspace_root).resolve()}|{target_file}"
+    return f"{SEAM_LOCK_HOLDER_PREFIX}{hashlib.sha256(key.encode('utf-8')).hexdigest()[:16]}:{os.getpid()}"
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def sweep_dead_seam_locks(workspace_root: Path | str) -> list[str]:
+    """Release seam locks whose holder process is gone (startup sweep after a killed CLI)."""
+    from nexus.orchestrator.file_lock_registry import FileLockRegistry
+
+    lock_file = _lock_file(workspace_root)
+    if not lock_file.is_file():
+        return []
+    registry = FileLockRegistry(lock_file=str(lock_file))
+    swept: list[str] = []
+    for holder in sorted(set(registry.locks.values())):
+        if not str(holder).startswith(SEAM_LOCK_HOLDER_PREFIX):
+            continue
+        try:
+            pid = int(str(holder).rsplit(":", 1)[1])
+        except (IndexError, ValueError):
+            continue
+        if pid != os.getpid() and not _pid_alive(pid):
+            registry.release(holder)
+            swept.append(holder)
+    return swept
+
+
+def _lock_file(workspace_root: Path | str) -> Path:
+    return (
+        Path(workspace_root).expanduser().resolve()
+        / ".nexus"
+        / "multi_agent"
+        / "locks"
+        / "file_locks.json"
+    )
+
+
 def acquire_target_lock(
     *,
     task_id: str,
@@ -371,6 +446,10 @@ def acquire_target_lock(
     invoker_factory: InvokerFactory | None = None,
 ) -> dict[str, Any]:
     """Acquire the ``file_lock`` capability on the target (before the candidate is written)."""
+    try:
+        sweep_dead_seam_locks(workspace_root)
+    except Exception:  # noqa: BLE001 - a failed sweep never grants a lock; acquire decides
+        pass
 
     out = _invoke(
         FILE_LOCK_CAPABILITY,
@@ -591,7 +670,7 @@ def run_visible_test_confined(
     from nexus.engine.confined_test_runner import run_confined_test
 
     forbidden = [*hidden_test_paths(visible_test_path), *bench_forbidden_roots(workspace_root)]
-    argv = [sys.executable, "-I", "-m", "pytest", "-q", "--maxfail=1", "-p", "no:cacheprovider"]
+    argv = [sys.executable, "-I", "-m", "pytest", "-q", "--maxfail=1", *PINNED_PYTEST_ARGS]
     try:
         scratch = prepare_candidate_scratch(
             target_path=target_path,

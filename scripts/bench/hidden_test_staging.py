@@ -230,7 +230,10 @@ def _pending_entries(run_root: Path) -> dict:
 
 
 def recover_last_run(
-    expected_run_root_sha256: str = "", *, workspace_root: Path | None = None
+    expected_run_root_sha256: str = "",
+    *,
+    workspace_root: Path | None = None,
+    trusted_shas: Mapping[str, str] | None = None,
 ) -> list[str]:
     """Restore hidden tests a killed run left staged. Everything on disk is untrusted: the run
     dir named by ``.last-run`` must match ``expected_run_root_sha256`` when the runner has one
@@ -257,7 +260,9 @@ def recover_last_run(
     restored: list[str] = []
     for origin, entry in sorted(entries.items()):
         try:
-            _recover_entry(run_root, origin, entry, workspace_root=workspace_root)
+            _recover_entry(
+                run_root, origin, entry, workspace_root=workspace_root, trusted_shas=trusted_shas
+            )
             restored.append(origin)
         except HiddenTestStagingError as exc:
             _RUN_ABORT.append(f"hidden_recovery_refused:{_safe_detail(exc)}"[:200])
@@ -279,14 +284,18 @@ def _committed_sha(workspace_root: Path, origin: Path) -> str:
     """sha256 of the fixture's committed content (``git show HEAD:<origin>``), or ""."""
     import subprocess  # noqa: PLC0415 - only on the rare recovery path
 
+    from nexus.engine.sandboxed_lane import git_safe_env
+
     try:
         rel = origin.relative_to(workspace_root).as_posix()
-        proc = subprocess.run(  # noqa: S603 - fixed argv
-            ["git", "-C", str(workspace_root), "show", f"HEAD:{rel}"],
-            capture_output=True,
-            check=False,
-            timeout=30,
-        )
+        with tempfile.TemporaryDirectory(prefix="nexus-git-home-") as home:
+            proc = subprocess.run(  # noqa: S603 - fixed argv, safe git env
+                ["git", "-C", str(workspace_root), "show", f"HEAD:{rel}"],
+                capture_output=True,
+                check=False,
+                timeout=30,
+                env=git_safe_env(home=home),
+            )
     except (ValueError, OSError, subprocess.SubprocessError):
         return ""
     return hashlib.sha256(proc.stdout).hexdigest() if proc.returncode == 0 else ""
@@ -303,7 +312,12 @@ def _lock_if_inside(run_root: Path, staged: Path) -> None:
 
 
 def _recover_entry(
-    run_root: Path, origin_text: str, entry: dict, *, workspace_root: Path | None
+    run_root: Path,
+    origin_text: str,
+    entry: dict,
+    *,
+    workspace_root: Path | None,
+    trusted_shas: Mapping[str, str] | None = None,
 ) -> None:
     """Restore ONE recorded entry, treating the record as an untrusted hint. Never writes or
     moves anything at a path that fails validation (no quarantine of an attacker-chosen path)."""
@@ -328,7 +342,13 @@ def _recover_entry(
             raise HiddenTestStagingError("staged_path_task_mismatch")
         # (d) the bytes must match a trusted hash: this run's in-memory sha, else the committed
         # fixture; the record's own sha is only a hint and must agree too.
-        trusted = _IN_MEMORY_SHAS.get(str(origin)) or _committed_sha(ws, origin)
+        # Trusted sources, in order: this run's in-memory hash, the fixture generator/manifest
+        # (passed by the runner), the committed fixture.
+        trusted = (
+            _IN_MEMORY_SHAS.get(str(origin))
+            or str((trusted_shas or {}).get(str(origin)) or "")
+            or _committed_sha(ws, origin)
+        )
         if not trusted or not expected or trusted != expected:
             raise HiddenTestStagingError("untrusted_sha")
         leftover = HiddenTestStaging(

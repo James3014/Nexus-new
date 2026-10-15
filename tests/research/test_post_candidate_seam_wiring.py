@@ -430,6 +430,8 @@ def test_hyper_sprint_lock_held_by_another_task_never_writes_the_candidate(
     case, workspace, target_rel, cfg, run_hyper_sprint = _sprint(
         tmp_path, monkeypatch, task=LEDGER_TASK, executed=executed
     )
+    # HIGH-2: with self-heal ON the denial must still stop the whole attempt (no repair round).
+    monkeypatch.setenv("NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL", "1")
     holder = seam.acquire_target_lock(
         task_id="other-task", workspace_root=workspace, target_file=target_rel
     )
@@ -439,9 +441,9 @@ def test_hyper_sprint_lock_held_by_another_task_never_writes_the_candidate(
     finally:
         seam.release_target_lock("other-task")
 
-    assert CANDIDATE not in executed  # the model candidate was never applied to the target
-    assert "file_lock_denied" in result.error_codes
-    # Only a non-model (local) fallback can win; the model candidate is never delivered.
-    assert result.patch != CANDIDATE and not result.winner_source.startswith("llm")
+    assert executed == []  # nothing was evaluated or applied: no candidate, no self-heal, no rescue
+    assert result.status == "FAILED" and result.reason == "file_lock_denied"
+    assert result.error_codes == ["file_lock_denied"] and result.winner_source == "file_lock_denied"
+    assert result.patch == ""
     assert result.learning_trace.get("file_lock_denied") is True
     assert (case / "target.py").read_text(encoding="utf-8") == ORIGINAL

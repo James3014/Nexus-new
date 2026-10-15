@@ -520,6 +520,7 @@ def confinement(
     extra_writable: Iterable[Path] = (),
     untrusted_roots: Iterable[Path] = (),
     extra_forbidden: Iterable[Path] = (),
+    extra_readable: Iterable[Path | str] = (),
 ) -> Confinement:
     """Bind a sandbox (``home/`` and ``tmp/`` created inside ``sandbox``): writes and reads only
     in ``sandbox`` + ``extra_writable`` (+ interpreter prefixes and system paths for reads).
@@ -534,7 +535,13 @@ def confinement(
     if in_tree(sys.executable, writable):
         raise SandboxError("interpreter_inside_sandbox")
     read_roots = checked_read_roots(
-        [*(str(path) for path in writable), *interpreter_read_roots()],
+        [
+            *(str(path) for path in writable),
+            *interpreter_read_roots(),
+            # Optional read-only system toolchain roots (e.g. /usr/bin for git); validated by
+            # checked_read_roots like every other root, never $HOME or a repository.
+            *(str(path) for path in extra_readable if os.path.exists(path)),
+        ],
         extra_forbidden=extra_forbidden,
     )
     profile = build_sandbox_profile(writable=[str(p) for p in writable], read_roots=read_roots)

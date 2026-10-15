@@ -176,6 +176,9 @@ class CapabilityTask:
     trial_index: int = 1
     fixture_kind: str = ""
     hidden_test_file: str = ""
+    # sha256 of the task's hidden test from the fixture manifest (hard_v1); the recovery
+    # authority for a killed counted run.
+    hidden_test_sha256: str = ""
     expected_capabilities: tuple[str, ...] = ()
     capability_activation_contract: str = ""
     hidden_oracle_kind: str = ""
@@ -918,6 +921,7 @@ def load_tasks(path: str | Path) -> list[CapabilityTask]:
                 manifest_hash=manifest_hash,
                 fixture_kind=str(row.get("fixture_kind", "")),
                 hidden_test_file=str(row.get("hidden_test_file", "")),
+                hidden_test_sha256=str(row.get("hidden_test_sha256", "") or ""),
                 expected_capabilities=tuple(str(item) for item in row.get("expected_capabilities", []) or []),
                 capability_activation_contract=str(row.get("capability_activation_contract", "")),
                 hidden_oracle_kind=str(row.get("hidden_oracle_kind", "")),
@@ -1056,6 +1060,7 @@ def expand_task_trials(tasks: list[CapabilityTask], *, repeat_trials: int, shuff
                     trial_index=trial_index,
                     fixture_kind=task.fixture_kind,
                     hidden_test_file=task.hidden_test_file,
+                    hidden_test_sha256=task.hidden_test_sha256,
                     expected_capabilities=task.expected_capabilities,
                     capability_activation_contract=task.capability_activation_contract,
                     hidden_oracle_kind=task.hidden_oracle_kind,
@@ -4482,6 +4487,157 @@ def _finally_control_flow_warning(code: str) -> str:
     return ""
 
 
+CONFINEMENT_PARITY_FAILED = "confinement_parity_failed"
+
+
+def _counted_confinement_enabled() -> bool:
+    return os.environ.get("NEXUS_CONFINE_VISIBLE_TEST", "").strip() == "1"
+
+
+def _is_hidden_verifier_cmd(cmd: list[str]) -> bool:
+    return (
+        len(cmd) == 6
+        and list(cmd[1:5]) == ["-m", "pytest", "-q", "--maxfail=1"]
+        and Path(str(cmd[5])).name == "test_hidden.py"
+    )
+
+
+def _confined_test_run(test_file: str | Path, *, workspace_root: Path, timeout_sec: float) -> tuple[subprocess.CompletedProcess[str], bool]:
+    """The test's directory (delivered target + test files) copied and run inside the OS
+    confinement; the workspace, the staging parent and other fixtures stay unreadable."""
+    from nexus.engine.confined_test_runner import run_pytest_dir_copy
+    from nexus.services.post_candidate_seam import CONFINEMENT_UNAVAILABLE, bench_forbidden_roots
+
+    test = Path(test_file).resolve()
+    argv = [sys.executable, "-m", "pytest", "-q", "--maxfail=1", str(test)]
+    result = run_pytest_dir_copy(
+        test.parent,
+        test.name,
+        forbidden_paths=bench_forbidden_roots(workspace_root),
+        timeout_sec=max(1.0, float(timeout_sec)),
+    )
+    if not result.get("executed"):
+        return subprocess.CompletedProcess(argv, 1, "", f"{CONFINEMENT_UNAVAILABLE}:{result.get('error')}"[:300]), False
+    if result.get("timed_out"):
+        raise subprocess.TimeoutExpired(argv, timeout_sec, output=str(result.get("stdout_tail") or ""))
+    return (
+        subprocess.CompletedProcess(
+            argv, int(result.get("exit_code") or 0), str(result.get("stdout_tail") or ""), str(result.get("stderr_tail") or "")
+        ),
+        True,
+    )
+
+
+def _confinement_parity_failures(
+    tasks: list[CapabilityTask], repo_root: Path, *, materialize_missing: bool, timeout_sec: int = 300
+) -> dict[str, str]:
+    """Counted lane preflight: every task's visible test (product path) and hidden verifier must
+    reach the same verdict confined and unconfined on the original target; otherwise the task is
+    excluded for BOTH arms (``confinement_parity_failed``), never scored. Mismatches are re-run
+    once to separate timing flakes."""
+    from nexus.services import post_candidate_seam as seam
+
+    failures: dict[str, str] = {}
+    for task in tasks:
+        if task.id in failures:
+            continue
+        try:
+            target_file, test_file = _resolve_task_files(repo_root, task, materialize_missing=materialize_missing)
+        except (FileNotFoundError, NotImplementedError, ValueError) as exc:
+            failures[task.id] = f"resolve_failed:{type(exc).__name__}"
+            continue
+        target = Path(target_file)
+        original = target.read_text(encoding="utf-8")
+        hidden = Path(test_file).with_name("test_hidden.py")
+
+        def unconfined(test: Path) -> bool:
+            return (
+                subprocess.run(
+                    [sys.executable, "-m", "pytest", "-q", "--maxfail=1", str(test)],
+                    cwd=repo_root,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=timeout_sec,
+                ).returncode
+                == 0
+            )
+
+        def confined_visible() -> tuple[bool, bool]:
+            completed, executed = seam.run_visible_test_confined(
+                target_path=target,
+                visible_test_path=Path(test_file),
+                original_code=original,
+                candidate_code=original,
+                timeout_sec=timeout_sec,
+                workspace_root=repo_root,
+            )
+            return completed.returncode == 0, executed
+
+        def confined_hidden() -> tuple[bool, bool]:
+            completed, executed = _confined_test_run(hidden, workspace_root=repo_root, timeout_sec=timeout_sec)
+            return completed.returncode == 0, executed
+
+        checks = [("visible", Path(test_file), confined_visible)]
+        if hidden.is_file():
+            checks.append(("hidden", hidden, confined_hidden))
+        for label, test, confined in checks:
+            try:
+                for _attempt in range(2):
+                    conf_ok, executed = confined()
+                    if not executed:
+                        failures[task.id] = f"{label}:{seam.CONFINEMENT_UNAVAILABLE}"
+                        break
+                    if conf_ok == unconfined(test):
+                        break
+                else:
+                    failures[task.id] = f"{label}_verdict_differs"
+            except subprocess.TimeoutExpired:
+                failures[task.id] = f"{label}_timeout"
+            if task.id in failures:
+                break
+    return failures
+
+
+def _hidden_trusted_shas(tasks: list[CapabilityTask], repo_root: Path) -> dict[str, str]:
+    """Recovery authority for a killed counted run: each hidden test's sha256 from its source
+    of truth (materialized fixtures: regenerated deterministically; hard_v1: the task manifest's
+    ``hidden_test_sha256``), keyed by the absolute workspace path it belongs at."""
+    trusted: dict[str, str] = {}
+    with tempfile.TemporaryDirectory(prefix="nexus-hidden-sha-") as tmp:
+        for task in tasks:
+            if task.hidden_test_sha256 and task.test_file:
+                origin = (repo_root / task.test_file).parent.resolve() / "test_hidden.py"
+                trusted.setdefault(str(origin), task.hidden_test_sha256)
+                continue
+            if not task.fixture_kind:
+                continue
+            try:
+                _target, visible = _materialize_fixture(Path(tmp), task)
+            except (ValueError, NotImplementedError, OSError):
+                continue
+            generated = Path(visible).with_name("test_hidden.py")
+            if generated.is_file():
+                origin = (repo_root / ".nexus" / "bench_cases" / task.id).resolve() / "test_hidden.py"
+                trusted.setdefault(str(origin), hashlib.sha256(generated.read_bytes()).hexdigest())
+    return trusted
+
+
+def _confinement_parity_row(mode: str, task: CapabilityTask, reason: str) -> dict[str, Any]:
+    return {
+        "mode": mode,
+        "task_id": task.id,
+        "trial_index": task.trial_index,
+        "status": "NOT_RUN",
+        "model_calls": 0,
+        "not_run": True,
+        "not_run_reason": CONFINEMENT_PARITY_FAILED,
+        CONFINEMENT_PARITY_FAILED: True,
+        "confinement_parity_detail": reason,
+        "run_eligible": False,
+    }
+
+
 def _run_process_group(
     cmd: list[str],
     *,
@@ -4496,18 +4652,29 @@ def _run_process_group(
         # Nothing the subprocess inherits may name the staging location.
         env = _hidden_staging.scrub_subprocess_env(env)
     if not windows:
-        return _run_process_group_unstaged(cmd, cwd=cwd, env=env, timeout_sec=timeout_sec)
+        return _hidden_verifier_run(cmd, cwd=cwd, env=env, timeout_sec=timeout_sec)
     from contextlib import ExitStack
 
     try:
         with ExitStack() as stack:
             for staging in windows:
                 stack.enter_context(staging.verify_window())
-            return _run_process_group_unstaged(cmd, cwd=cwd, env=env, timeout_sec=timeout_sec)
+            return _hidden_verifier_run(cmd, cwd=cwd, env=env, timeout_sec=timeout_sec)
     except _hidden_staging.HiddenTestStagingError as exc:
         # Fail closed: a staged hidden test that fails verification is never run; the row's
         # hidden verifier fails and the row carries hidden_test_tampered.
         return subprocess.CompletedProcess(cmd, 1, stdout="", stderr=f"{exc}")
+
+
+def _hidden_verifier_run(
+    cmd: list[str], *, cwd: Path, env: dict[str, str], timeout_sec: int
+) -> subprocess.CompletedProcess[str]:
+    """Counted lane: the hidden verifier (both arms alike) runs confined on a copy of the test
+    directory, so delivered candidate code never runs unconfined next to the hidden test."""
+    if _counted_confinement_enabled() and _is_hidden_verifier_cmd(cmd):
+        completed, _executed = _confined_test_run(cmd[5], workspace_root=Path(cwd), timeout_sec=timeout_sec)
+        return completed
+    return _run_process_group_unstaged(cmd, cwd=cwd, env=env, timeout_sec=timeout_sec)
 
 
 def _run_process_group_unstaged(
@@ -20612,7 +20779,9 @@ def main() -> int:
                     staged_info = {}
                 expected_sha = expected_sha or str(staged_info.get("run_root_sha256") or "")
         try:
-            _hidden_staging.recover_last_run(expected_sha, workspace_root=repo_root)
+            _hidden_staging.recover_last_run(
+                expected_sha, workspace_root=repo_root, trusted_shas=_hidden_trusted_shas(tasks, repo_root)
+            )
         except _hidden_staging.HiddenTestStagingError as exc:
             print(f"hidden test staging recovery failed closed ({exc}); run is invalid", file=sys.stderr, flush=True)
             return 3
@@ -20624,6 +20793,18 @@ def main() -> int:
             )
             return 3
         _hidden_staging.configure_run_record(run_record)
+        confinement_parity = _confinement_parity_failures(
+            tasks, repo_root, materialize_missing=bool(args.materialize_missing)
+        )
+        if confinement_parity:
+            print(
+                f"confinement parity failed for {len(confinement_parity)} task(s); excluded from both arms: "
+                f"{sorted(confinement_parity)}",
+                file=sys.stderr,
+                flush=True,
+            )
+    else:
+        confinement_parity = {}
     ts = int(time.time())
     evidence_root = out_dir / f"evidence_{ts}"
     shared_cli_runner = CliRunner() if args.with_nexus_runner == "inprocess" else None
@@ -20792,6 +20973,9 @@ def main() -> int:
 
     def _with_nexus_leg(task: CapabilityTask) -> str:
         nonlocal timed_out, with_timeout_streak, with_infra_streak
+        if task.id in confinement_parity:
+            with_rows.append(_confinement_parity_row("with_nexus", task, confinement_parity[task.id]))
+            return ""
         if _budget_exceeded(run_start, effective_total_timeout_sec):
             timed_out = True
             _emit_progress(
@@ -21031,6 +21215,9 @@ def main() -> int:
         if _hidden_staging.run_abort_reason():
             timed_out = True
             return "break"
+        if task.id in confinement_parity:
+            without_rows.append(_confinement_parity_row("without_nexus", task, confinement_parity[task.id]))
+            return ""
         if _budget_exceeded(run_start, effective_total_timeout_sec):
             timed_out = True
             _emit_progress(

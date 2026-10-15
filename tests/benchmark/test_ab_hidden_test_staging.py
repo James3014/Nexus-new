@@ -23,6 +23,7 @@ from scripts.bench import hidden_test_staging as staging_mod
 from scripts.bench.capability_ab_runner import CapabilityTask, _materialize_fixture, run_with_nexus
 
 NEXUS_CLI_PREFIX = ["uv", "run", "scripts/engine/nexus_cli.py"]
+REPO = Path(__file__).resolve().parents[2]
 HIDDEN_MARKER = "HIDDEN_ONLY_SENTINEL_7f3a"
 HIDDEN_TEXT = f"def test_hidden_contract():\n    assert '{HIDDEN_MARKER}'\n"
 IS_ROOT = hasattr(os, "geteuid") and os.geteuid() == 0
@@ -52,7 +53,7 @@ def _isolated_staging(tmp_path, monkeypatch):
     monkeypatch.setattr(staging_mod, "_RUN_RECORD_PATH", [])
     monkeypatch.setattr(staging_mod, "_IN_MEMORY_SHAS", {})
     yield parent
-    _unlock_tree(tmp_path / "cache")
+    _unlock_tree(tmp_path)  # every 0300/0000 entry made by the test is removable again
     os.environ.clear()
     os.environ.update(saved)
 
@@ -729,3 +730,62 @@ def test_recovery_without_a_trusted_hash_is_refused(tmp_path, monkeypatch) -> No
     with pytest.raises(staging_mod.HiddenTestStagingError):
         staging_mod.recover_last_run(_expected_sha(record), workspace_root=workspace)
     assert not os.path.lexists(hidden)
+
+
+def test_killed_counted_run_recovers_with_the_fixture_manifest_hashes(
+    tmp_path, monkeypatch
+) -> None:
+    """End to end: stage, kill, recover. P16 hashes come from regenerating the fixture, hard_v1
+    hashes from the task manifest (neither is committed in the bench worktree)."""
+    from scripts.bench.capability_ab_runner import (
+        CapabilityTask,
+        _hidden_trusted_shas,
+        _materialize_fixture,
+        load_tasks,
+    )
+
+    root = tmp_path / "nn"
+    p16 = next(
+        t
+        for t in load_tasks(REPO / "scripts" / "bench" / "public_benchmark_nexus_value_v1.json")
+        if t.fixture_kind
+    )
+    _target, visible = _materialize_fixture(root, p16)
+    hard_dir = root / "bench_fixtures" / "online_ab_hard_v1" / "demo"
+    hard_dir.mkdir(parents=True)
+    (hard_dir / "test_visible.py").write_text("def test_v():\n    pass\n", encoding="utf-8")
+    (hard_dir / "test_hidden.py").write_text(HIDDEN_TEXT, encoding="utf-8")
+    hard = CapabilityTask(
+        id="oabh-demo",
+        difficulty="hard",
+        task_type="public_bugfix",
+        category="bugfix",
+        repo_kind="neutral_fixture",
+        task_desc="d",
+        target_file="bench_fixtures/online_ab_hard_v1/demo/target.py",
+        test_file="bench_fixtures/online_ab_hard_v1/demo/test_visible.py",
+        success_criteria="s",
+        hidden_test_sha256=hashlib.sha256(HIDDEN_TEXT.encode()).hexdigest(),
+    )
+    record = tmp_path / "out" / "run_manifest.json"
+    staging_mod.configure_run_record(record)
+    for test_file, key in ((visible, "p16__t0"), (str(hard_dir / "test_visible.py"), "hard__t0")):
+        killed = staging_mod.HiddenTestStaging(
+            hidden_path=Path(test_file).with_name("test_hidden.py").resolve(),
+            staged_path=staging_mod.staging_root(root) / key / "test_hidden.py",
+        )
+        killed.stage()
+    assert (
+        not Path(visible).with_name("test_hidden.py").exists()
+        and not (hard_dir / "test_hidden.py").exists()
+    )
+
+    _new_process(monkeypatch)  # a fresh runner process: no in-memory hashes
+    trusted = _hidden_trusted_shas([p16, hard], root)
+    restored = staging_mod.recover_last_run(
+        _expected_sha(record), workspace_root=root, trusted_shas=trusted
+    )
+    assert len(restored) == 2
+    assert Path(visible).with_name("test_hidden.py").is_file()
+    assert (hard_dir / "test_hidden.py").read_text(encoding="utf-8") == HIDDEN_TEXT
+    assert staging_mod.run_abort_reason() == ""

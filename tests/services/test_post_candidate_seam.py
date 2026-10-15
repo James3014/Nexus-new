@@ -150,7 +150,7 @@ def test_scratch_copy_holds_candidate_and_visible_test_never_hidden(tmp_path: Pa
         files = sorted(
             p.relative_to(scratch.root).as_posix()
             for p in scratch.root.rglob("*")
-            if ".git" not in p.parts
+            if ".git" not in p.parts and p.name != seam.SCRATCH_PYTEST_CONFIG
         )
         assert files == ["target.py", "test_visible.py"]
         assert (scratch.root / "target.py").read_text(encoding="utf-8") == CANDIDATE
@@ -724,3 +724,160 @@ def test_sprint_inplace_executor_is_confined_under_the_counted_lane(
     assert (case / "target.py").read_text(
         encoding="utf-8"
     ) == ORIGINAL  # never written in the workspace
+
+
+def test_dead_process_seam_locks_are_swept_live_ones_kept(tmp_path: Path) -> None:
+    """LOW-7: one holder id per task; a killed CLI's lock is swept, a live holder's is not."""
+    import os as _os
+
+    from nexus.orchestrator.file_lock_registry import FileLockRegistry
+
+    lock_file = tmp_path / ".nexus" / "multi_agent" / "locks" / "file_locks.json"
+    lock_file.parent.mkdir(parents=True)
+    registry = FileLockRegistry(lock_file=str(lock_file))
+    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    dead.wait()
+    registry.acquire(f"{seam.SEAM_LOCK_HOLDER_PREFIX}aaaa:{dead.pid}", ["a.py"])
+    registry.acquire(f"{seam.SEAM_LOCK_HOLDER_PREFIX}bbbb:{_os.getppid()}", ["b.py"])
+    registry.acquire("someone-else", ["c.py"])
+
+    swept = seam.sweep_dead_seam_locks(tmp_path)
+
+    assert swept == [f"{seam.SEAM_LOCK_HOLDER_PREFIX}aaaa:{dead.pid}"]
+    after = FileLockRegistry(lock_file=str(lock_file)).locks
+    assert set(after) == {"b.py", "c.py"}
+    assert seam.seam_holder_id(tmp_path, "t.py") == seam.seam_holder_id(tmp_path, "t.py")
+    assert seam.seam_holder_id(tmp_path, "t.py").endswith(f":{_os.getpid()}")
+
+
+def test_counted_lane_hidden_verifier_is_confined_for_both_arms(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """MEDIUM-5: the runner's hidden verifier (bare and with-Nexus alike) runs on a confined
+    copy under the counted lane; outside it the plain subprocess path is unchanged."""
+    import scripts.bench.capability_ab_runner as runner
+
+    case = _case(tmp_path)
+    hidden = case / "test_hidden.py"
+    confined: list[str] = []
+    plain: list[list[str]] = []
+    monkeypatch.setattr(
+        runner,
+        "_confined_test_run",
+        lambda test, **kw: (
+            confined.append(str(test)) or (subprocess.CompletedProcess([], 0, "", ""), True)
+        ),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_run_process_group_unstaged",
+        lambda cmd, **kw: plain.append(cmd) or subprocess.CompletedProcess(cmd, 0, "", ""),
+    )
+    monkeypatch.setenv("NEXUS_CONFINE_VISIBLE_TEST", "1")
+    runner._run_process_group(
+        runner._pytest_verifier_cmd(str(hidden)), cwd=tmp_path, env={}, timeout_sec=5
+    )
+    runner._run_process_group(["nexus", "research:auto-flow"], cwd=tmp_path, env={}, timeout_sec=5)
+    monkeypatch.setenv("NEXUS_CONFINE_VISIBLE_TEST", "0")
+    runner._run_process_group(
+        runner._pytest_verifier_cmd(str(hidden)), cwd=tmp_path, env={}, timeout_sec=5
+    )
+
+    assert confined == [str(hidden)]
+    assert [cmd[-1] for cmd in plain] == ["research:auto-flow", str(hidden)]
+
+
+def test_confined_hidden_verifier_cannot_read_outside_its_copy(tmp_path: Path) -> None:
+    import scripts.bench.capability_ab_runner as runner
+
+    case = _case(tmp_path)
+    secret = tmp_path / "ws_secret.txt"
+    secret.write_text("never readable", encoding="utf-8")
+    (case / "target.py").write_text(CANDIDATE, encoding="utf-8")
+    (case / "test_hidden.py").write_text(
+        "import sys\nfrom pathlib import Path\nsys.path.insert(0, str(Path(__file__).parent))\n"
+        "from target import add\n\ndef test_h():\n    assert add(1, 2) == 3\n"
+        f"    assert Path({str(secret)!r}).read_text() == 'never readable'\n",
+        encoding="utf-8",
+    )
+    completed, executed = runner._confined_test_run(
+        case / "test_hidden.py", workspace_root=tmp_path, timeout_sec=60
+    )
+    if REAL_BARRIER:
+        assert executed is True and completed.returncode != 0
+    else:
+        assert executed is False and completed.stderr.startswith(seam.CONFINEMENT_UNAVAILABLE)
+    assert (case / "test_hidden.py").is_file()  # the workspace copy is never touched
+
+
+def test_scratch_copy_includes_sibling_helper_modules_never_hidden(tmp_path: Path) -> None:
+    """LOW-6: sibling modules the visible test imports are in the confined copy."""
+    case = _case(tmp_path)
+    (case / "helpers.py").write_text("BASE = 1\n", encoding="utf-8")
+    (case / ".secret").write_text("x", encoding="utf-8")
+    scratch = seam.prepare_candidate_scratch(
+        target_path=case / "target.py",
+        visible_test_path=case / "test_visible.py",
+        original_code=ORIGINAL,
+        candidate_code=CANDIDATE,
+        forbidden_paths=seam.hidden_test_paths(case / "test_visible.py"),
+    )
+    try:
+        assert scratch.files == ("helpers.py", "target.py", "test_visible.py")
+        assert (scratch.root / "helpers.py").read_text(encoding="utf-8") == "BASE = 1\n"
+        assert not (scratch.root / "test_hidden.py").exists()
+        assert not (scratch.root / ".secret").exists()
+    finally:
+        scratch.cleanup()
+
+
+def test_rfs_confined_visible_pytest_refuses_companion_edits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """LOW-6: companion edits cannot be reproduced in the confined copy -> refused as
+    ``confinement_unavailable:multi_file`` (not executed), never a spurious visible failure."""
+    from nexus.app import research_flow_service as rfs
+
+    monkeypatch.setenv(seam.CONFINE_VISIBLE_TEST_ENV, "1")
+    monkeypatch.setattr(
+        seam, "run_visible_test_confined", lambda **kw: pytest.fail("ran with companions")
+    )
+    monkeypatch.setattr(rfs.subprocess, "run", lambda *a, **k: pytest.fail("ran unconfined"))
+    res = rfs._run_visible_pytest(
+        ["python", "-m", "pytest", "t.py"],
+        repo_root=tmp_path,
+        target_path=tmp_path / "target.py",
+        test_path=tmp_path / "t.py",
+        original_code=ORIGINAL,
+        candidate_code=CANDIDATE,
+        timeout_sec=5,
+        companion_files={tmp_path / "other.py": "x", tmp_path / "target.py": CANDIDATE},
+    )
+    assert res.returncode != 0
+    assert rfs._visible_error(res, "pytest_failed") == "confinement_unavailable:multi_file"
+
+
+def test_sprint_confined_executor_refuses_companion_edits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nexus.research import sprint_service
+    from nexus.research.sprint_service import InPlaceSprintExecutor
+
+    case = _case(tmp_path)
+    monkeypatch.setenv(seam.CONFINE_VISIBLE_TEST_ENV, "1")
+    monkeypatch.setattr(
+        sprint_service,
+        "generate_local_companion_edits",
+        lambda *a, **k: {case / "other.py": "X = 1\n"},
+    )
+    monkeypatch.setattr(
+        seam, "run_visible_test_confined", lambda **kw: pytest.fail("ran with companions")
+    )
+    executor = InPlaceSprintExecutor(
+        case, "target.py", [sys.executable, "-m", "pytest", "-q", "test_visible.py"], 30, task="t"
+    )
+    ev = executor.evaluate_candidate(seed=0, hint="h", code=CANDIDATE, source="llm")
+
+    assert ev.score == 0.0 and ev.error.startswith("confinement_unavailable:multi_file")
+    assert (case / "target.py").read_text(encoding="utf-8") == ORIGINAL
+    assert not (case / "other.py").exists()

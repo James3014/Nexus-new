@@ -12,7 +12,7 @@ import hashlib
 import os
 from pathlib import Path
 from datetime import datetime, timezone
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any
 from dataclasses import asdict
 import click
@@ -210,10 +210,24 @@ def _run_visible_pytest(
     original_code: str,
     candidate_code: str,
     timeout_sec: int,
+    companion_files: Iterable[Path] = (),
 ) -> subprocess.CompletedProcess:
     """Visible test for the candidate; confined on a scratch copy under the strict/counted lane
-    (no OS barrier -> not executed, stderr ``confinement_unavailable``)."""
+    (no OS barrier -> not executed, stderr ``confinement_unavailable``).
+
+    The confined copy holds only the candidate target, the visible test and their sibling files;
+    a candidate that also edits companion files elsewhere cannot be reproduced there, so under
+    the confinement it is refused (``confinement_unavailable:multi_file``, not executed) instead
+    of failing its visible test spuriously."""
     if _post_candidate_seam.confine_visible_test_enabled():
+        companions = sorted(str(p) for p in companion_files if Path(p) != Path(target_path))
+        if companions:
+            return subprocess.CompletedProcess(
+                pytest_cmd,
+                1,
+                "",
+                f"{_post_candidate_seam.CONFINEMENT_UNAVAILABLE}:multi_file:{len(companions)}",
+            )
         completed, _executed = _post_candidate_seam.run_visible_test_confined(
             target_path=target_path,
             visible_test_path=test_path,
@@ -228,6 +242,9 @@ def _run_visible_pytest(
 
 def _visible_error(res: subprocess.CompletedProcess, default: str) -> str:
     stderr = str(getattr(res, "stderr", "") or "")
+    multi_file = f"{_post_candidate_seam.CONFINEMENT_UNAVAILABLE}:multi_file"
+    if stderr.startswith(multi_file):
+        return multi_file
     return _post_candidate_seam.CONFINEMENT_UNAVAILABLE if stderr.startswith(_post_candidate_seam.CONFINEMENT_UNAVAILABLE) else default
 
 
@@ -1212,7 +1229,7 @@ def run_auto_flow(
                 # PR-2 seam: lock the target before the candidate is written (runtime-selected only).
                 seam_lock_task, seam_pre_stages = _post_candidate_seam.lock_target_if_selected(
                     unified_receipt=_unified_receipt_from_meta(generation_meta),
-                    task_id=_seam_task_id(task_id, target_file),
+                    task_id=_post_candidate_seam.seam_holder_id(repo_root, target_file),
                     workspace_root=repo_root,
                     target_file=target_file,
                 )
@@ -1243,6 +1260,7 @@ def run_auto_flow(
                     original_code=original_code,
                     candidate_code=patched,
                     timeout_sec=timeout_sec,
+                    companion_files=companion_edits,
                 )
                 ok = res.returncode == 0
                 if not ok:
@@ -1332,6 +1350,7 @@ def run_auto_flow(
                     original_code=original_code,
                     candidate_code=patched,
                     timeout_sec=timeout_sec,
+                    companion_files=companion_edits,
                 )
                 ok = res.returncode == 0
                 if not ok:
