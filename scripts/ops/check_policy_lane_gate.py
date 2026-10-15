@@ -534,47 +534,45 @@ def check_enforcement_wiring(policy: dict, repo_root: Path | None = None) -> lis
     if shadowed:
         return errors + [f"CALLER_UNDER_GUARD_PACKAGE: {', '.join(shadowed)}"]
 
-    def _prefix_files(module: str) -> list[tuple[str, Path | None, bool]]:
-        """(prefix, resolved file or None, an __init__/module exists on disk) for a.b.c."""
+    def _on_disk(path: Path) -> bool:
+        """``lstat`` succeeds (dangling symlinks count); an lstat *error* counts as present."""
+        try:
+            os.lstat(path)
+        except (FileNotFoundError, NotADirectoryError):
+            return False
+        except OSError:
+            return True  # unreadable: fail closed
+        return True
+
+    def classify(module: str) -> str | None:
+        """``"guard"``, ``"caller"`` or None for an import of ``a.b.c``.
+
+        Python loads ``a``, then ``a.b``, then ``a.b.c``, so the prefixes are
+        classified shallow to deep and the first guard or caller met decides:
+        a guard above a caller means the route goes through the guard; a caller
+        package above a guard child means the caller package ran first. A prefix
+        whose file exists on disk but cannot be resolved or read is a guard (fail
+        closed); a namespace package (nothing on disk) is neither.
+        """
         parts = module.split(".")
-        out: list[tuple[str, Path | None, bool]] = []
         for depth in range(1, len(parts) + 1):
             prefix = ".".join(parts[:depth])
-            base = root.joinpath(*parts[:depth])
-            exists = os.path.lexists(base.with_suffix(".py")) or os.path.lexists(
-                base / "__init__.py"
-            )
-            out.append((prefix, _module_file(prefix, root), exists))
-        return out
-
-    def through_guard(module: str) -> bool:
-        """True when ``module`` or any package above it is a guard (or unreadable).
-
-        Python imports ``a.b.c`` by loading ``a`` and ``a.b`` first, so a guard
-        declared as a package ``__init__.py`` guards everything beneath it. A
-        prefix whose file exists but cannot be resolved or read is treated as a
-        guard (fail closed); a namespace package (no ``__init__.py``) is not.
-        """
-        for prefix, file, exists in _prefix_files(module):
             if prefix in guard_modules:
-                return True
+                return "guard"
+            if prefix in callers:
+                return "caller"
+            base = root.joinpath(*parts[:depth])
+            file = _module_file(prefix, root)
             if file is None:
-                if exists:
-                    return True
+                if _on_disk(base.with_suffix(".py")) or _on_disk(base / "__init__.py"):
+                    return "guard"
                 continue
             identity = _file_id(file)
             if identity is None or identity in guard_ids:
-                return True
-        return False
-
-    def reaches_caller(module: str) -> bool:
-        """True when ``module`` or a package above it is a declared caller file."""
-        for prefix, file, _exists in _prefix_files(module):
-            if prefix in callers:
-                return True
-            if file is not None and _file_id(file) in caller_ids:
-                return True
-        return False
+                return "guard"
+            if identity in caller_ids:
+                return "caller"
+        return None
 
     reached = False
     for _entry, start, selected in resolved:
@@ -592,12 +590,13 @@ def check_enforcement_wiring(policy: dict, repo_root: Path | None = None) -> lis
                     if module in seen:
                         continue
                     seen.add(module)
-                    target = _module_file(module, root)
-                    if through_guard(module):
+                    kind = classify(module)
+                    if kind == "guard":
                         continue
-                    if reaches_caller(module):
+                    if kind == "caller":
                         reached = True
                         break
+                    target = _module_file(module, root)
                     if target is None or target == start:
                         continue
                     next_frontier.append((target, None, False))

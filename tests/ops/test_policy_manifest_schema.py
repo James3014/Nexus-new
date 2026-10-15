@@ -984,3 +984,50 @@ def test_wiring_check_round14_cases(tmp_path: Path, monkeypatch) -> None:
 
     monkeypatch.setattr(Path, "resolve", flaky_resolve)
     assert check_enforcement_wiring(via_alias_pkg, root) == ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"]
+
+
+def test_wiring_check_round15_cases(tmp_path: Path, monkeypatch) -> None:
+    import os
+
+    root = _fake_repo(tmp_path)
+    # A caller package whose child is the guard: importing the guard child executes
+    # the caller package first, so the route reaches the caller.
+    (root / "app").mkdir()
+    (root / "app" / "__init__.py").write_text("", encoding="utf-8")
+    (root / "app" / "g.py").write_text("def check(x):\n    return bool(x)\n", encoding="utf-8")
+    (root / "tests" / "test_child_guard.py").write_text(
+        "def test_x():\n    from app.g import check\n    assert check(1)\n", encoding="utf-8"
+    )
+    caller_pkg = _fake_policy(
+        source_file="app/g.py; app/__init__.py",
+        guard_modules=["app/g.py"],
+        test_entrypoints=["tests/test_child_guard.py::test_x"],
+    )
+    assert check_enforcement_wiring(caller_pkg, root) == []
+    # A guard package above a caller still wins (route goes through the guard).
+    (root / "gp").mkdir()
+    (root / "gp" / "__init__.py").symlink_to(root / "pkg" / "guard.py")
+    (root / "gp" / "child.py").write_text("from pkg import caller\n", encoding="utf-8")
+    (root / "tests" / "test_gp2.py").write_text(
+        "def test_g():\n    from gp import child\n    assert child\n", encoding="utf-8"
+    )
+    via_guard_pkg = _fake_policy(test_entrypoints=["tests/test_gp2.py::test_g"])
+    assert check_enforcement_wiring(via_guard_pkg, root) == ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"]
+    # An lstat error on the prefix's __init__ counts as present (fail closed).
+    real_lstat = os.lstat
+
+    def flaky_lstat(path, *args, **kwargs):
+        if str(path).endswith("gp/__init__.py"):
+            raise PermissionError("transient")
+        return real_lstat(path, *args, **kwargs)
+
+    real_resolve = Path.resolve
+
+    def flaky_resolve(self, *args, **kwargs):
+        if self.name == "__init__.py" and self.parent.name == "gp":
+            raise OSError("transient")
+        return real_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(os, "lstat", flaky_lstat)
+    monkeypatch.setattr(Path, "resolve", flaky_resolve)
+    assert check_enforcement_wiring(via_guard_pkg, root) == ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"]
