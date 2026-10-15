@@ -176,3 +176,37 @@ Behaviour under rollback has two parts:
 - `contamination_enforcement.py` stays in place, but the rolled-back guard has no `patterns` parameter. Every direct call to `check_research_output` therefore returns `RESEARCH_CONTAMINATION_GUARD_ERROR`. That is fail-closed, so the factual-text PASS tests fail too.
 
 The drill script and log were kept locally by the drill operator.
+
+---
+
+## Addendum 4: record-only mode (#2216, Owner fallback to option B)
+
+**Date**: 2026-10-15 (drill run 00:17:28Z–00:18:39Z)
+**Worktree HEAD**: `8e1da0e9b4a151036dde6b4ce40bdf88df7937ee` (#2216 branch)
+**Rolled back**: `nexus/core/capability_executor_registry.py`, `nexus/app/research_flow_service.py`, `nexus/research/contamination_guard.py`, `nexus/research/research_facts.py`
+**Rollback target**: merge-base with main, `c3ab5036e5b7350c6079bff3423cc5a2dd94d00a`
+
+Held-out detection was 53/120 (44%), below the 70% bar, so the Owner fell back to option B. Addenda 1–3 drilled enforcement points that **blocked**. Those versions are superseded.
+
+The canonical executor and the research auto-flow now only **record** a `contamination_signal` and never block:
+- the signal is attached to the receipt outcome or the capability evidence;
+- it is appended to `<workspace>/.nexus/research/contamination_signals.jsonl`.
+
+The research status and `research_gate_passed` are unchanged. A later move to blocking is an Owner decision, based on the accumulated signals.
+
+The test set is the same three files as addendum 2 (now 113 tests).
+
+| Step | Result |
+|------|--------|
+| 1 Baseline | `113 passed`, exit 0 |
+| 2 Roll back (4 files) | 5 insertions, 138 deletions. The registry, flow service and guard return to their main versions (`8b25293cd2d93038`, `7c6f254af7b99c9c`, `d859a968285ee43f`) |
+| 3 Detect | `47 failed, 66 passed`, exit 1 |
+| 4 Restore | sha256 prefixes identical to pre-drill (`5ba0311b43749885`, `eaae399291c0a2a8`, `e81dfe7a48d357d4`, `bb99dd969f549e1a`), and `git status` is clean |
+| 5 Verify | `113 passed`, exit 0 |
+
+What the 47 failures show under rollback:
+- The receipts and auto-flow evidence no longer carry `contamination_signal` and nothing is logged, so every signal assertion fails, including the clean (`detected: false`) cases.
+- The rolled-back guard has no `patterns` parameter. Direct calls to `check_research_output` therefore return GUARD_ERROR, which fails the detection and factual-text tests.
+- The `build_research_facts` test fails because findings are dropped again.
+
+The drill script and log were kept locally by the drill operator.
