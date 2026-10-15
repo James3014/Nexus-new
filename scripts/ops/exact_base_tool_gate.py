@@ -331,6 +331,16 @@ def _comparison_keys(findings: list[Finding], root: Path | None) -> list[tuple[A
     return keys
 
 
+def _distinct_roots(base_root: Path | None, head_root: Path | None) -> bool:
+    """True only for two resolvable, different trees; any doubt keeps legacy keys."""
+    if base_root is None or head_root is None:
+        return False
+    try:
+        return Path(base_root).resolve() != Path(head_root).resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
 def classify_findings(
     base_findings: Iterable[Finding],
     head_findings: Iterable[Finding],
@@ -472,11 +482,7 @@ def _cli() -> int:
     args = parser.parse_args()
     base_root = args.base_root or args.root
     head_root = args.head_root or args.root
-    distinct_roots = (
-        base_root is not None
-        and head_root is not None
-        and Path(base_root).resolve() != Path(head_root).resolve()
-    )
+    distinct_roots = _distinct_roots(base_root, head_root)
     report: dict[str, Any]
     try:
         if args.base_exit_code not in {0, 1} or args.head_exit_code not in {0, 1}:

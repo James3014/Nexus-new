@@ -8,6 +8,7 @@ import pytest
 
 from scripts.ops.exact_base_tool_gate import (
     Finding,
+    _distinct_roots,
     classify_findings,
     parse_bandit_json,
     parse_pyright_json,
@@ -850,3 +851,16 @@ def test_cli_distinct_roots_report_swapped_finding_as_new(tmp_path):
     assert code == 1
     assert report["classification"] == "NEW_REGRESSION"
     assert [item["line"] for item in report["new_findings"]] == [2]
+
+
+def test_unresolvable_roots_fall_back_to_legacy_keys(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    def boom(self, *args, **kwargs):
+        raise OSError("resolve failed")
+
+    assert _distinct_roots(tmp_path / "a", tmp_path / "b") is True
+    assert _distinct_roots(tmp_path / "a", tmp_path / "a") is False
+    assert _distinct_roots(None, tmp_path / "b") is False
+    monkeypatch.setattr(Path, "resolve", boom)
+    assert _distinct_roots(tmp_path / "a", tmp_path / "b") is False
