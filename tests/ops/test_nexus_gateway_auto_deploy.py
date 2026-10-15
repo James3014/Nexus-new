@@ -4968,9 +4968,25 @@ def test_late_bind_after_the_check_is_reported(
     monkeypatch.setattr(
         ad._Cycle, "live_controller_moved", lambda self, plist, receipt: next(verdicts)
     )
+    monkeypatch.setattr(
+        ad,
+        "carry_bound_cards",
+        lambda *args, **kwargs: {
+            "status": "NONE",
+            "from": str(cfg.controllers / ("a1-" + OLD)),
+            "from_head": OLD,
+        },
+    )
     assert cycle(cfg, host, prober)["status"] == "DEPLOYED"
     warnings = ad.read_receipts(cfg.state_dir)[-1]["warnings"]
     assert any(w.startswith("LATE_BIND_NOT_CARRIED:LIVE_CONTROLLER_MOVED") for w in warnings)
+    # The old Controller holds the only copy of that bind: it is never pruned.
+    retained = json.loads(cfg.retained_controllers.read_text())
+    assert ("a1-" + OLD) in retained
+    old_controller = cfg.controllers / ("a1-" + OLD)
+    old_controller.mkdir(parents=True)
+    ad.prune(cfg, host, [])
+    assert old_controller.exists()
 
 
 def test_controller_moved_defers_without_debounce(
@@ -4987,3 +5003,18 @@ def test_controller_moved_defers_without_debounce(
     monkeypatch.setattr(ad._Cycle, "live_controller_moved", lambda self, plist, receipt: None)
     host.clock += 60  # inside min_interval_seconds
     assert cycle(cfg, host, prober)["status"] == "DEPLOYED"
+
+
+def test_carry_reset_failure_still_never_raises(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Exploding(FakeHost):
+        def run(self, argv, **kwargs):  # type: ignore[override]
+            raise OSError("disk gone")
+
+    def boom(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("carry broke")
+
+    monkeypatch.setattr(ad, "_carry_bound_cards", boom)
+    result = ad.carry_bound_cards(Exploding(), b"", cfg.controllers / "a1-x", NEW)
+    assert result == {"status": "SKIPPED", "reason": "CARRY_ERROR:RuntimeError", "lost": True}

@@ -406,6 +406,11 @@ class Config:
         return self.state_dir / "deferrals.jsonl"
 
     @property
+    def retained_controllers(self) -> Path:
+        """Controllers kept from pruning because they hold a bind not carried (#1939)."""
+        return self.state_dir / "retained-controllers.json"
+
+    @property
     def quiescence_file(self) -> Path:
         """The current deferral episode (#2227); absent when nothing is deferred."""
         return self.state_dir / "quiescence.json"
@@ -1609,7 +1614,14 @@ def carry_bound_cards(
     try:
         return _carry_bound_cards(host, previous_plist, controller, commit)
     except Exception as exc:  # noqa: BLE001 - a carry problem must never block a deploy
-        return _reset_carry(host, controller, commit, None, f"CARRY_ERROR:{type(exc).__name__}")
+        try:
+            return _reset_carry(host, controller, commit, None, f"CARRY_ERROR:{type(exc).__name__}")
+        except Exception:  # noqa: BLE001 - prepare_controller re-checks the Controller
+            return {
+                "status": "SKIPPED",
+                "reason": f"CARRY_ERROR:{type(exc).__name__}",
+                "lost": True,
+            }
 
 
 def _carry_bound_cards(
@@ -1783,8 +1795,9 @@ def prune(cfg: Config, host: Host, protected: List[Optional[Path]]) -> List[str]
         _contained_dirs(cfg.deployments), key=lambda p: p.stat().st_mtime, reverse=True
     )
     removed: List[str] = []
+    retained_names = set(_read_json_object(cfg.retained_controllers) or {})
     for index, path in enumerate(candidates):
-        if index < cfg.keep or path.name in keep_names:
+        if index < cfg.keep or path.name in keep_names or path.name in retained_names:
             continue
         host.run(_git(cfg, "worktree", "remove", "--force", str(path)), timeout=300)
         if path.exists() and not path.is_symlink():
@@ -1796,8 +1809,13 @@ def prune(cfg: Config, host: Host, protected: List[Optional[Path]]) -> List[str]
             shutil.rmtree(venv, ignore_errors=True)
     # A Controller lives exactly as long as its deployment, and never goes while
     # a protected (live, previous, tool) deployment of that name exists (#1939).
+    retained = set(_read_json_object(cfg.retained_controllers) or {})
     for controller in _contained_dirs(cfg.controllers):
-        if controller.name in present or controller.name in keep_names:
+        if (
+            controller.name in present
+            or controller.name in keep_names
+            or controller.name in retained
+        ):
             continue
         host.run(_git(cfg, "worktree", "remove", "--force", str(controller)), timeout=300)
         if controller.exists() and not controller.is_symlink():
@@ -2632,6 +2650,7 @@ class _Cycle:
                     late = self.live_controller_moved(previous_plist, receipt)
                     if late is not None:
                         receipt["warnings"].append(f"LATE_BIND_NOT_CARRIED:{late}")
+                        self.retain_controller(receipt, late)
                 return result
 
     def prepare_controller(
@@ -2672,6 +2691,18 @@ class _Cycle:
         if now == from_head:
             return None
         return f"LIVE_CONTROLLER_MOVED:{from_head[:12]}->{now[:12]}"
+
+    def retain_controller(self, receipt: Dict[str, Any], reason: str) -> None:
+        """Keep the old Controller (the only copy of a late bind) out of pruning."""
+        source = ((receipt.get("controller") or {}).get("carry") or {}).get("from")
+        if not source:
+            return
+        retained = _read_json_object(self.cfg.retained_controllers) or {}
+        retained[Path(source).name] = {"reason": reason[:200], "at": _iso(self.host.now())}
+        self.cfg.state_dir.mkdir(parents=True, exist_ok=True)
+        _atomic_write(
+            self.cfg.retained_controllers, json.dumps(retained, sort_keys=True).encode(), 0o600
+        )
 
     def finish_switch(
         self, receipt: Dict[str, Any], previous_plist: bytes, root: Path, python: Path
