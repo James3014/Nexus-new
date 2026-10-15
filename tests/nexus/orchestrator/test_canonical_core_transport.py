@@ -325,6 +325,10 @@ def test_expected_core_revision_is_owner_decided_pin():
     pinned = re.findall(r"nexus-certify-ref:\s*[\"']?([0-9a-f]{40})[\"']?", workflow)
     assert pinned, "workflow must pin nexus-certify to an exact SHA"
     assert set(pinned) == {transport.CANONICAL_CORE_REVISION}
+    # The Core actions themselves are pinned to the same commit (#2246 review).
+    uses = re.findall(r"nexus-core/\.github/actions/([\w.-]+)@([^\s\"']+)", workflow)
+    assert {name for name, _ in uses} == {"issue-gate", "receipt-verify"}, uses
+    assert {ref for _, ref in uses} == {transport.CANONICAL_CORE_REVISION}, uses
 
 
 def test_installed_core_identity_available_when_direct_url_matches(

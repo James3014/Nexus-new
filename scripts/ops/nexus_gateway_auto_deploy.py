@@ -480,10 +480,15 @@ class Host:
         argv: List[str],
         *,
         cwd: Optional[Path] = None,
-        env: Optional[Dict[str, str]] = None,
+        env: Optional[Dict[str, Optional[str]]] = None,
         timeout: float = 1800,
     ) -> subprocess.CompletedProcess:
-        full_env = dict(os.environ, **(env or {}))
+        full_env = dict(os.environ)
+        for key, value in (env or {}).items():
+            if value is None:  # explicit removal of an inherited variable
+                full_env.pop(key, None)
+            else:
+                full_env[key] = value
         return subprocess.run(
             argv,
             cwd=str(cwd) if cwd else None,
@@ -1095,6 +1100,20 @@ def core_env(core: Any) -> Dict[str, str]:
     return env
 
 
+def core_probe_env(core: Any) -> Dict[str, Optional[str]]:
+    """``core_env`` for a probe subprocess; ``None`` removes an inherited value.
+
+    Without a build digest, a stale ``NEXUS_CORE_SOURCE_DIGEST*`` from the
+    deployer's own environment must not reach the probed transport.
+    """
+    env: Dict[str, Optional[str]] = {
+        "NEXUS_CORE_SOURCE_DIGEST": None,
+        "NEXUS_CORE_SOURCE_DIGEST_REVISION": None,
+    }
+    env.update(core_env(core))
+    return env
+
+
 def core_digest_verified(observed: Dict[str, Any], core: Dict[str, Any]) -> bool:
     """The transport's own digest verdict must name the build's digest (#2246).
 
@@ -1143,7 +1162,7 @@ class Prober:
         result = self.host.run(
             [str(python), "-c", CORE_PROVENANCE_PROBE_CODE, str(root)],
             cwd=root,
-            env={"PYTHONDONTWRITEBYTECODE": "1", **core_env(core)},
+            env={"PYTHONDONTWRITEBYTECODE": "1", **core_probe_env(core)},
             timeout=120,
         )
         lines = (result.stdout or "").strip().splitlines()
@@ -1289,6 +1308,9 @@ def wrapper_command(
             f'export NEXUS_CORE_SOURCE_DIGEST_REVISION="{revision}" ; '
             f'export NEXUS_CORE_SOURCE_DIGEST="{digest}" ; '
         )
+    elif core_root is not None:
+        # No build digest: never let a stale value from the env file through.
+        core_export += "unset NEXUS_CORE_SOURCE_DIGEST NEXUS_CORE_SOURCE_DIGEST_REVISION ; "
     return (
         f'cd "{root}" ; source "{cfg.env_file}" ; export PYTHONDONTWRITEBYTECODE=1 ; '
         f'export NEXUS_CANONICAL_SOURCE_ROOT="{root}" ; '

@@ -2498,7 +2498,8 @@ def test_wrapper_exports_core_root_and_rejects_unsafe_core_path(cfg: ad.Config) 
     root, python = Path("/d/a1-x"), Path("/v/bin/python")
     assert "NEXUS_CORE_REPO_ROOT" not in ad.wrapper_command(cfg, root, python)
     command = ad.wrapper_command(cfg, root, python, core_root=Path("/g/core/abc"))
-    assert 'export NEXUS_CORE_REPO_ROOT="/g/core/abc" ; exec ' in command
+    assert 'export NEXUS_CORE_REPO_ROOT="/g/core/abc" ; ' in command
+    assert command.endswith(f'exec "{python}" "{root / ad.ENTRYPOINT}"')
     with pytest.raises(ad.DeployError, match="WRAPPER_PATH_UNSAFE"):
         ad.wrapper_command(cfg, root, python, core_root=Path('/g/core/"; rm -rf ~'))
 
@@ -2559,8 +2560,71 @@ def test_core_pin_without_build_identity_exports_no_digest(cfg: ad.Config) -> No
     assert core["source_digest_status"] == "UNSUPPORTED_CORE"
     assert host.digest_runs == 0
     live_command = plistlib.loads(cfg.plist.read_bytes())["ProgramArguments"][2]
-    assert "NEXUS_CORE_SOURCE_DIGEST" not in live_command
-    assert "NEXUS_CORE_SOURCE_DIGEST" not in host.started[0]
+    unset = "unset NEXUS_CORE_SOURCE_DIGEST NEXUS_CORE_SOURCE_DIGEST_REVISION ; "
+    for command in (live_command, host.started[0]):
+        assert "export NEXUS_CORE_SOURCE_DIGEST" not in command
+        # A stale value from the env file cannot reach the host.
+        assert unset in command
+        assert command.index(unset) > command.index(f'source "{cfg.env_file}"')
+
+
+def test_no_build_digest_never_leaks_a_stale_digest_into_the_host(
+    cfg: ad.Config, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#2246 review: without a build digest the wrapper unsets the digest env and
+    the provenance probe subprocess does not inherit it from the deployer."""
+    monkeypatch.setenv("NEXUS_CORE_SOURCE_DIGEST", "sha256:" + "9" * 64)
+    monkeypatch.setenv("NEXUS_CORE_SOURCE_DIGEST_REVISION", NEW)
+    core = {"revision": NEW, "root": str(tmp_path / "core"), "source_digest": None}
+    seen: list[dict[str, str]] = []
+
+    class EnvHost(ad.Host):
+        def run(self, argv, *, cwd=None, env=None, timeout=1800):  # type: ignore[override]
+            if len(argv) > 2 and argv[2] == ad.CORE_PROVENANCE_PROBE_CODE:
+                argv = [
+                    sys.executable,
+                    "-c",
+                    "import json, os; print(json.dumps(dict(os.environ)))",
+                ]
+                result = super().run(argv, cwd=cwd, env=env, timeout=timeout)
+                seen.append(json.loads(result.stdout))
+                return _done(json.dumps(_pinned_status(Path(core["root"]))) + "\n")
+            return super().run(argv, cwd=cwd, env=env, timeout=timeout)
+
+    ad.Prober(EnvHost()).core_provenance(root=REPO_ROOT, python=Path(sys.executable), core=core)
+    assert "NEXUS_CORE_SOURCE_DIGEST" not in seen[0]
+    assert "NEXUS_CORE_SOURCE_DIGEST_REVISION" not in seen[0]
+    assert seen[0]["NEXUS_CORE_REPO_ROOT"] == core["root"]
+    # With a build digest the build's values replace the stale ones.
+    seen.clear()
+    core["source_digest"] = "sha256:" + "1" * 64
+    ad.Prober(EnvHost()).core_provenance(root=REPO_ROOT, python=Path(sys.executable), core=core)
+    assert seen[0]["NEXUS_CORE_SOURCE_DIGEST"] == core["source_digest"]
+    # The real wrapper, after an env file that exports a stale digest, hands the
+    # Gateway process none of it.
+    if not Path("/bin/zsh").exists():
+        return
+    cfg.env_file.write_text(
+        'export NEXUS_CORE_SOURCE_DIGEST="sha256:' + "9" * 64 + '"\n'
+        f'export NEXUS_CORE_SOURCE_DIGEST_REVISION="{NEW}"\n'
+    )
+    root = tmp_path / "deploy"
+    (root / ad.ENTRYPOINT).parent.mkdir(parents=True)
+    (root / ad.ENTRYPOINT).write_text("import json, os; print(json.dumps(dict(os.environ)))\n")
+    for digest in (None, ("c" * 40, "sha256:" + "d" * 64)):
+        command = ad.wrapper_command(
+            cfg, root, Path(sys.executable), core_root=tmp_path / "core", core_digest=digest
+        )
+        out = subprocess.run(
+            ["/bin/zsh", "-c", command], capture_output=True, text=True, check=True
+        )
+        environ = json.loads(out.stdout.strip().splitlines()[-1])
+        if digest is None:
+            assert "NEXUS_CORE_SOURCE_DIGEST" not in environ
+            assert "NEXUS_CORE_SOURCE_DIGEST_REVISION" not in environ
+        else:
+            assert environ["NEXUS_CORE_SOURCE_DIGEST"] == digest[1]
+            assert environ["NEXUS_CORE_SOURCE_DIGEST_REVISION"] == digest[0]
 
 
 def test_core_source_digest_requires_disk_to_match_the_commit(cfg: ad.Config) -> None:
@@ -2849,7 +2913,9 @@ def test_real_prober_requires_the_build_source_digest(tmp_path: Path, case: str,
     env = host.core_envs[0]
     assert env["NEXUS_CORE_REPO_ROOT"] == str(core_root)
     if core["source_digest"] is None:
-        assert "NEXUS_CORE_SOURCE_DIGEST" not in env
+        # Explicitly removed, so no inherited value reaches the transport.
+        assert env["NEXUS_CORE_SOURCE_DIGEST"] is None
+        assert env["NEXUS_CORE_SOURCE_DIGEST_REVISION"] is None
     else:
         assert env["NEXUS_CORE_SOURCE_DIGEST"] == digest
         assert env["NEXUS_CORE_SOURCE_DIGEST_REVISION"] == NEW
