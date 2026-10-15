@@ -8712,3 +8712,187 @@ def test_1995_ledger_genesis_is_backfilled_by_reads(tmp_path):
     ledger.path.unlink()
     with pytest.raises(g.LedgerCorruption, match="r1-ledger-genesis.json"):
         ledger.read()
+
+
+# --- #2177: residual lost-ledger windows after #2170 -------------------------
+
+
+def test_2177_genesis_marker_is_durable_before_first_r1_row(tmp_path, monkeypatch):
+    ledger = _i1995_ledger(tmp_path)
+    genesis = ledger.path.parent / g.R1_LEDGER_GENESIS_FILENAME
+    seen = []
+
+    def crash_before_row(path, data):
+        seen.append(genesis.is_file())
+        raise OSError(errno.EIO, "simulated crash before the first R1 row")
+
+    monkeypatch.setattr(g, "_atomic_gateway_write", crash_before_row)
+    with pytest.raises(OSError, match="simulated crash"):
+        _i1995_seed_r1(ledger, "gen1-request", ("REQUESTED",))
+    assert seen == [True]
+    assert not ledger.path.exists()
+    # The stranded marker fails closed instead of reading as a first run.
+    with pytest.raises(
+        g.LedgerCorruption, match="^R1_LEDGER_MISSING_WITH_PRIOR_STATE_FAIL_CLOSED:"
+    ):
+        ledger.read()
+
+
+def test_2177_refused_r1_row_does_not_write_genesis_marker(tmp_path):
+    ledger = _i1995_ledger(tmp_path)
+    with pytest.raises(g.GatewayContractError):
+        _i1995_seed_r1(ledger, "gen1-request", ("PREFLIGHTED",))
+    assert not ledger.path.exists()
+    assert not (ledger.path.parent / g.R1_LEDGER_GENESIS_FILENAME).exists()
+
+
+def test_2177_v1_scan_and_guard_never_write_genesis_marker(tmp_path):
+    ledger = _i1995_ledger(tmp_path)
+    _i1995_seed_r1(ledger, "gen1-request", _R1958_VERIFIED_PATH)
+    genesis = ledger.path.parent / g.R1_LEDGER_GENESIS_FILENAME
+    genesis.unlink()
+    with g.InterProcessLock(ledger.lock_path):
+        assert len(ledger._scan_unlocked()) == len(_R1958_VERIFIED_PATH)
+    assert g.open_r1_recovery_blocks_effect(ledger=ledger.path) is None
+    assert not genesis.exists()
+
+
+def test_2177_r1_append_backfills_genesis_marker_before_writing(tmp_path):
+    ledger = _i1995_ledger(tmp_path)
+    _i1995_seed_r1(ledger, "gen1-request", _R1958_VERIFIED_PATH)
+    genesis = ledger.path.parent / g.R1_LEDGER_GENESIS_FILENAME
+    genesis.unlink()
+    _i1995_seed_r1(ledger, "gen2-request", ("REQUESTED",))
+    assert genesis.is_file()
+
+
+def _i2177_receipt_path(request):
+    return g._r1_materialization_receipt_path(
+        g.GatewayRecoveryMaterializationRequest.model_validate(request)
+    )
+
+
+def _i2177_failing_genesis(monkeypatch):
+    def refuse(_ledger_path):
+        raise OSError(errno.EACCES, "Permission denied")
+
+    monkeypatch.setattr(g, "_r1_ensure_ledger_genesis", refuse)
+
+
+def test_2177_failed_genesis_backfill_fails_r1_operations_closed(tmp_path, monkeypatch):
+    ledger = _i1995_owner_state(tmp_path, monkeypatch)
+    _i1995_seed_r1(ledger, "gen1-request", _I1995_POST_EFFECT_BLOCKED)
+    (ledger.path.parent / g.R1_LEDGER_GENESIS_FILENAME).unlink()
+    before = ledger.path.read_bytes()
+    _i2177_failing_genesis(monkeypatch)
+
+    with pytest.raises(g.GatewayContractError, match="^R1_LEDGER_GENESIS_UNAVAILABLE_FAIL_CLOSED:"):
+        ledger.read()
+    with pytest.raises(g.GatewayContractError, match="^R1_LEDGER_GENESIS_UNAVAILABLE_FAIL_CLOSED:"):
+        g.record_r1_owner_reconcile(
+            "gen1-request", "Owner approved", owner_approval_ref="chat-ref", ledger=ledger.path
+        )
+    assert not (ledger.path.parent / g.R1_OWNER_RECONCILE_DIRNAME).exists()
+    assert ledger.path.read_bytes() == before
+    # v1 stays read-only: the v1 effect guard neither writes nor fails on it.
+    assert g.open_r1_recovery_blocks_effect(ledger=ledger.path) is None
+    assert not (ledger.path.parent / g.R1_LEDGER_GENESIS_FILENAME).exists()
+
+
+def test_2177_failed_genesis_backfill_refuses_r1_append_without_writing(tmp_path, monkeypatch):
+    ledger = _i1995_ledger(tmp_path)
+    _i1995_seed_r1(ledger, "gen1-request", ("REQUESTED",))
+    (ledger.path.parent / g.R1_LEDGER_GENESIS_FILENAME).unlink()
+    before = ledger.path.read_bytes()
+    _i2177_failing_genesis(monkeypatch)
+
+    with pytest.raises(g.GatewayContractError, match="^R1_LEDGER_GENESIS_UNAVAILABLE_FAIL_CLOSED:"):
+        _i1995_seed_r1(ledger, "gen1-request", ("PREFLIGHTED",))
+    assert ledger.path.read_bytes() == before
+
+
+def test_2177_tampered_genesis_marker_fails_r1_read_closed(tmp_path):
+    ledger = _i1995_ledger(tmp_path)
+    _i1995_seed_r1(ledger, "gen1-request", ("REQUESTED",))
+    genesis = ledger.path.parent / g.R1_LEDGER_GENESIS_FILENAME
+    genesis.write_bytes(b'{"schema":"forged"}')
+    with pytest.raises(g.GatewayContractError, match="^R1_LEDGER_GENESIS_UNAVAILABLE_FAIL_CLOSED:"):
+        ledger.read()
+
+
+def test_2177_materialization_receipt_not_written_next_to_lost_ledger(tmp_path, monkeypatch):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    _r1m_clear_materialized_stores(fixture, monkeypatch)
+    (fixture["state"] / g.R1_LEDGER_GENESIS_FILENAME).write_bytes(g._R1_LEDGER_GENESIS_BYTES)
+    assert not fixture["ledger_path"].exists()
+    request = _r1m_materialization_request(fixture["receipt"])
+    monkeypatch.setattr(
+        g,
+        "_r1_materialize_predecessor_artifact",
+        lambda _receipt: pytest.fail("predecessor artifact must not be written"),
+    )
+
+    with pytest.raises(
+        g.GatewayContractError,
+        match="^R1_LEDGER_MISSING_WITH_PRIOR_STATE_FAIL_CLOSED:r1-ledger-genesis.json",
+    ):
+        g.gateway_recovery_materialize(request)
+    assert not _i2177_receipt_path(request).exists()
+    assert not g.GATEWAY_RECOVERY_AUTHORITY_STORE.exists()
+    assert not g.GATEWAY_REQUEST_STORE.exists()
+
+
+def test_2177_durable_receipt_reconcile_checks_before_predecessor_artifact(tmp_path, monkeypatch):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    _r1m_clear_materialized_stores(fixture, monkeypatch)
+    request = _r1m_materialization_request(fixture["receipt"])
+    g.gateway_recovery_materialize(request)
+    assert _i2177_receipt_path(request).is_file()
+    g.GATEWAY_RECOVERY_AUTHORITY_STORE.unlink()
+    g.GATEWAY_REQUEST_STORE.unlink()
+    (fixture["state"] / g.R1_LEDGER_GENESIS_FILENAME).write_bytes(g._R1_LEDGER_GENESIS_BYTES)
+    monkeypatch.setattr(
+        g,
+        "_r1_materialize_predecessor_artifact",
+        lambda _receipt: pytest.fail("predecessor artifact must not be written"),
+    )
+
+    with pytest.raises(
+        g.GatewayContractError,
+        match="^R1_LEDGER_MISSING_WITH_PRIOR_STATE_FAIL_CLOSED:r1-ledger-genesis.json",
+    ):
+        g.gateway_recovery_materialize(request)
+    assert not g.GATEWAY_RECOVERY_AUTHORITY_STORE.exists()
+    assert not g.GATEWAY_REQUEST_STORE.exists()
+
+
+def test_2177_store_pair_holds_ledger_lock_through_store_writes(tmp_path, monkeypatch):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    _r1m_clear_materialized_stores(fixture, monkeypatch)
+    lock_key_path = str((Path(g.GATEWAY_STATE_ROOT) / "ledger.jsonl.lock").resolve())
+    original = g._r1_materialize_value_store
+    held_during = {}
+
+    def recording_store(path, data):
+        if Path(path) in {g.GATEWAY_RECOVERY_AUTHORITY_STORE, g.GATEWAY_REQUEST_STORE}:
+            key = (os.getpid(), threading.get_ident(), lock_key_path)
+            held_during[Path(path).name] = key in g.InterProcessLock._process_holds
+        return original(path, data)
+
+    monkeypatch.setattr(g, "_r1_materialize_value_store", recording_store)
+    outcome = g.gateway_recovery_materialize(_r1m_materialization_request(fixture["receipt"]))
+    assert outcome["effect_started"] is False
+    assert held_during == {"recovery-authority.json": True, "request.json": True}
+
+
+def test_2177_corrupt_ledger_blocks_materialization_before_any_write(tmp_path, monkeypatch):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    _r1m_clear_materialized_stores(fixture, monkeypatch)
+    fixture["ledger_path"].write_bytes(b"not json\n")
+    fixture["ledger_path"].chmod(0o600)
+    request = _r1m_materialization_request(fixture["receipt"])
+
+    with pytest.raises(g.GatewayContractError, match="^R1_LEDGER_CORRUPT_FAIL_CLOSED:"):
+        g.gateway_recovery_materialize(request)
+    assert not _i2177_receipt_path(request).exists()
+    assert not g.GATEWAY_RECOVERY_AUTHORITY_STORE.exists()
