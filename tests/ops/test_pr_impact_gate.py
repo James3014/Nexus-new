@@ -1200,7 +1200,7 @@ def _behind_main_pair(*, base_ids=None, head_ids=None):
 def test_behind_main_ambiguous_ids_in_untouched_file_name_the_merge_remedy():
     base, head = _behind_main_pair()
 
-    result = classify_regression(base, head, changed_paths=["scripts/ops/other.py"])
+    result = classify_regression(base, head)
 
     assert result.classification == "IMPACT_UNKNOWN"
     assert result.blocking is True
@@ -1212,18 +1212,20 @@ def test_behind_main_ambiguous_ids_in_untouched_file_name_the_merge_remedy():
     assert "behind main" in result.reason
 
 
-def test_ambiguous_ids_in_a_file_the_pr_touches_keep_todays_message():
-    base, head = _behind_main_pair()
-    touched = "tests/nexus/executors/test_agy_write_admission.py"
+def test_ambiguous_ids_with_head_added_cases_keep_todays_message():
+    # Head replaced cases in the same family: that is a PR edit, not a stale branch.
+    base, head = _behind_main_pair(
+        head_ids=[f"{_BEHIND_FAMILY}[one]", f"{_BEHIND_FAMILY}[renamed]"],
+    )
+    plain_base, plain_head = _behind_main_pair()
 
-    with_paths = classify_regression(base, head, changed_paths=[touched])
-    without_paths = classify_regression(base, head)
+    result = classify_regression(base, head)
 
-    assert with_paths.classification == "IMPACT_UNKNOWN"
-    assert with_paths.remedy == ""
-    assert _BEHIND_AMBIGUOUS in with_paths.mismatch_reasons
-    assert with_paths.reason == without_paths.reason
-    assert "behind main" not in with_paths.reason
+    assert result.classification == "IMPACT_UNKNOWN"
+    assert result.blocking is True
+    assert result.remedy == ""
+    assert "behind main" not in result.reason
+    assert classify_regression(plain_base, plain_head).remedy
 
 
 def test_ids_missing_on_base_instead_keep_todays_message():
@@ -1233,7 +1235,7 @@ def test_ids_missing_on_base_instead_keep_todays_message():
         head_ids=[f"{family}[new-a]", f"{family}[new-b]", f"{family}[one]"],
     )
 
-    result = classify_regression(base, head, changed_paths=["scripts/ops/other.py"])
+    result = classify_regression(base, head)
 
     assert result.remedy == ""
     assert "behind main" not in result.reason
@@ -2840,8 +2842,8 @@ def test_classify_cli_prints_mismatch_reasons_when_blocking(tmp_path, capsys):
     assert any("absent on head" in item for item in payload["mismatch_reasons"])
 
 
-def test_classify_cli_reads_sibling_plan_for_behind_main_remedy(tmp_path, capsys):
-    # The required gate passes no --plan; CI assembles plan.json next to the results.
+def test_classify_cli_names_behind_main_remedy(tmp_path, capsys):
+    # The required gate's classify invocation (pytest.yml) passes only the two results.
     from dataclasses import asdict
 
     from scripts.ops import pr_impact_gate
@@ -2849,9 +2851,6 @@ def test_classify_cli_reads_sibling_plan_for_behind_main_remedy(tmp_path, capsys
     base, head = _behind_main_pair()
     (tmp_path / "base-result.json").write_text(json.dumps(asdict(base)), encoding="utf-8")
     (tmp_path / "head-result.json").write_text(json.dumps(asdict(head)), encoding="utf-8")
-    (tmp_path / "plan.json").write_text(
-        json.dumps({"changed_paths": ["scripts/ops/other.py"]}), encoding="utf-8"
-    )
     output = tmp_path / "classification.json"
 
     status = pr_impact_gate.main([

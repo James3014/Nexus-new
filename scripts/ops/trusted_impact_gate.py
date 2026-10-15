@@ -1016,11 +1016,7 @@ def verify(
             expected_manifest_sha256=expected_manifest_sha256,
             verifier_digest=verifier_digest,
         )
-    classification = gate.classify_regression(
-        results["base"],
-        results["head"],
-        changed_paths=[str(path) for path in plan.get("changed_paths", [])],
-    )
+    classification = gate.classify_regression(results["base"], results["head"])
     return {
         "schema_version": SCHEMA_VERSION,
         "trusted_source": "default-branch-verifier",
@@ -1058,7 +1054,9 @@ def _verifier(args: argparse.Namespace) -> int:
         }
     rendered = json.dumps(payload, indent=2, sort_keys=True)
     Path(args.output).write_text(rendered + "\n", encoding="utf-8")
-    print(rendered)
+    # Test ids in reasons are candidate-controlled; `\u005b` decodes identically but
+    # keeps the runner from reading a legacy `##[command]` in the job log.
+    print(rendered.replace("##[", "##\\u005b"))
     return 1 if payload.get("blocking", True) else 0
 
 

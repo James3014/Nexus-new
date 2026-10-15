@@ -1192,26 +1192,15 @@ def _replaced_parameterized_node_keys(
 _AMBIGUOUS_PARAMETERIZED_REASON = "parameterized test ids changed ambiguously between base and head"
 
 
-def _node_test_file(raw_node: str) -> str:
-    """Repo-relative test file of a node id (dotted-module or path form)."""
-    module = raw_node.split("::", 1)[0]
-    if module.endswith(".py") or "/" in module:
-        return module
-    return module.replace(".", "/") + ".py"
+def _behind_main_remedy(base: PytestRunResult, head: PytestRunResult) -> str:
+    """Diagnostic only: name the likely fix when ambiguity is only base-side ids.
 
-
-def _behind_main_remedy(
-    base: PytestRunResult, head: PytestRunResult, changed_paths: Iterable[str] | None
-) -> str:
-    """Diagnostic only: name the fix when ambiguity is just main-added parameter ids.
-
-    Returns a remedy only when every ambiguous parameterized id exists on base but
-    not on head and lives in a test file the PR did not change.  Never alters the
-    verdict; any doubt returns an empty string (today's message stays).
+    Fires when every parameterized family with more than one id missing on head has
+    no head-only id of its own: base gained cases that head never collected, which is
+    what a PR branch behind main looks like (``pull_request.base.sha`` is the main tip,
+    so the plan's ``git diff base head`` cannot tell main's additions from PR edits).
+    Never alters the verdict; any doubt returns an empty string (today's message stays).
     """
-    if changed_paths is None:
-        return ""
-    changed = {str(path).strip().replace("\\", "/").strip("/") for path in changed_paths}
     base_index = _logical_node_index(base.node_ids)
     head_index = _logical_node_index(head.node_ids)
     if base_index is None or head_index is None or not base_index or not head_index:
@@ -1227,21 +1216,27 @@ def _behind_main_remedy(
         family = _parameterized_family(raw_node)
         if family is not None:
             base_by_family.setdefault(family, []).append(key)
+    head_only_families = {
+        _parameterized_family(raw_node)
+        for key, raw_node in head_index.items()
+        if key not in base_index
+    }
     ambiguous: list[str] = []
-    for keys in base_by_family.values():
+    for family, keys in base_by_family.items():
         missing = [key for key in keys if key not in head_index]
         if len(missing) > 1:
+            if family in head_only_families:
+                return ""
             ambiguous.extend(base_index[key] for key in missing)
     if not ambiguous:
         return ""
-    if any(_node_test_file(node) in changed for node in ambiguous):
-        return ""
     examples = sorted(ambiguous)[:3]
     return (
-        "PR branch is behind main; parameterized ids "
+        "parameterized ids "
         + ", ".join(examples)
         + (", ..." if len(ambiguous) > len(examples) else "")
-        + " exist on base but not on head, in test files this PR does not touch. "
+        + " exist on base but not on head and head adds no cases in their place. "
+        "Unless this PR removed those cases, the PR branch is behind main. "
         "Fix: `git merge origin/main` and push."
     )
 
@@ -1451,14 +1446,9 @@ def _valid_test_provenance(result: PytestRunResult) -> bool:
     )
 
 
-def classify_regression(
-    base: PytestRunResult,
-    head: PytestRunResult,
-    *,
-    changed_paths: Iterable[str] | None = None,
-) -> RegressionClassification:
+def classify_regression(base: PytestRunResult, head: PytestRunResult) -> RegressionClassification:
     full_suite = FULL_SUITE_IMPACT_CLASS in {base.impact_class, head.impact_class}
-    result = _classify_regression(base, head, full_suite=full_suite, changed_paths=changed_paths)
+    result = _classify_regression(base, head, full_suite=full_suite)
     if not full_suite:
         return result
     return replace(
@@ -1560,7 +1550,6 @@ def _classify_regression(
     head: PytestRunResult,
     *,
     full_suite: bool,
-    changed_paths: Iterable[str] | None = None,
 ) -> RegressionClassification:
     base_failures = sorted(set(base.failures))
     head_failures = sorted(set(head.failures))
@@ -1646,7 +1635,7 @@ def _classify_regression(
         remedy = ""
         if _AMBIGUOUS_PARAMETERIZED_REASON in mismatch_reasons:
             try:
-                remedy = _behind_main_remedy(base, head, changed_paths)
+                remedy = _behind_main_remedy(base, head)
             except Exception:  # noqa: BLE001 - diagnostics must never change the verdict
                 remedy = ""
             if remedy:
@@ -2084,23 +2073,6 @@ def _load_run_result(path: Path) -> PytestRunResult:
     )
 
 
-def _plan_changed_paths(plan_path: Path | None) -> list[str] | None:
-    """Changed paths from an optional plan file; None (no remedy) on any problem."""
-    if plan_path is None:
-        return None
-    try:
-        plan = json.loads(plan_path.read_text(encoding="utf-8"))
-        return [str(path) for path in plan.get("changed_paths", [])]
-    except (OSError, ValueError, AttributeError, TypeError):
-        return None
-
-
-def _sibling_plan(head_result: Path) -> Path | None:
-    """CI assembles plan.json next to head-result.json (.ci-impact/); diagnostic input only."""
-    candidate = head_result.parent / "plan.json"
-    return candidate if candidate.is_file() else None
-
-
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -2122,7 +2094,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     classify.add_argument("--base-result", type=Path, required=True)
     classify.add_argument("--head-result", type=Path, required=True)
     classify.add_argument("--output", type=Path, required=True)
-    classify.add_argument("--plan", type=Path, default=None)
     return parser.parse_args(argv)
 
 
@@ -2147,9 +2118,6 @@ def main(argv: list[str] | None = None) -> int:
     classification = classify_regression(
         _load_run_result(args.base_result),
         _load_run_result(args.head_result),
-        changed_paths=_plan_changed_paths(
-            args.plan if args.plan is not None else _sibling_plan(args.head_result)
-        ),
     )
     payload = asdict(classification)
     args.output.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
