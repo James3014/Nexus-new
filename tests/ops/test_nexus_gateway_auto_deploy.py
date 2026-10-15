@@ -5018,3 +5018,32 @@ def test_carry_reset_failure_still_never_raises(
     monkeypatch.setattr(ad, "_carry_bound_cards", boom)
     result = ad.carry_bound_cards(Exploding(), b"", cfg.controllers / "a1-x", NEW)
     assert result == {"status": "SKIPPED", "reason": "CARRY_ERROR:RuntimeError", "lost": True}
+
+
+def test_unreadable_retention_list_stops_pruning(cfg: ad.Config) -> None:
+    host = FakeHost()
+    orphan = cfg.controllers / ("a1-" + "1" * 40)
+    orphan.mkdir(parents=True)
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    cfg.retained_controllers.write_text("{broken")
+    assert ad.prune(cfg, host, []) == []
+    assert orphan.exists()
+
+
+def test_retain_failure_is_a_warning_not_a_rollback(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    host, prober = FakeHost(), FakeProber()
+    verdicts = iter([None, "LIVE_CONTROLLER_MOVED:aaaaaaaaaaaa->bbbbbbbbbbbb"])
+    monkeypatch.setattr(
+        ad._Cycle, "live_controller_moved", lambda self, plist, receipt: next(verdicts)
+    )
+
+    def broken(self: Any, receipt: Any, reason: str) -> None:
+        raise OSError("full")
+
+    monkeypatch.setattr(ad._Cycle, "retain_controller", broken)
+    assert cycle(cfg, host, prober)["status"] == "DEPLOYED"
+    assert host.reloads and len(host.reloads) == 1
+    warnings = ad.read_receipts(cfg.state_dir)[-1]["warnings"]
+    assert any(w.startswith("RETAIN_CONTROLLER_FAILED:OSError") for w in warnings)

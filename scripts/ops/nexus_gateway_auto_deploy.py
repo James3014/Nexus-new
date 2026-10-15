@@ -1795,7 +1795,11 @@ def prune(cfg: Config, host: Host, protected: List[Optional[Path]]) -> List[str]
         _contained_dirs(cfg.deployments), key=lambda p: p.stat().st_mtime, reverse=True
     )
     removed: List[str] = []
-    retained_names = set(_read_json_object(cfg.retained_controllers) or {})
+    retained_names = _retained_names(cfg)
+    if retained_names is None:
+        # Fail closed: an unreadable retention list may protect the only copy
+        # of a late bind, so nothing is pruned until it is repaired.
+        return []
     for index, path in enumerate(candidates):
         if index < cfg.keep or path.name in keep_names or path.name in retained_names:
             continue
@@ -1809,12 +1813,11 @@ def prune(cfg: Config, host: Host, protected: List[Optional[Path]]) -> List[str]
             shutil.rmtree(venv, ignore_errors=True)
     # A Controller lives exactly as long as its deployment, and never goes while
     # a protected (live, previous, tool) deployment of that name exists (#1939).
-    retained = set(_read_json_object(cfg.retained_controllers) or {})
     for controller in _contained_dirs(cfg.controllers):
         if (
             controller.name in present
             or controller.name in keep_names
-            or controller.name in retained
+            or controller.name in retained_names
         ):
             continue
         host.run(_git(cfg, "worktree", "remove", "--force", str(controller)), timeout=300)
@@ -1967,6 +1970,14 @@ def classify_task_report(returncode: int, stdout: str, stderr: str = "") -> Dict
     if blocking:
         return {"verdict": "IN_FLIGHT", "task_ids": sorted(blocking), "checked": len(tasks)}
     return {"verdict": "CLEAR", "checked": len(tasks)}
+
+
+def _retained_names(cfg: Config) -> Optional[set]:
+    """Names kept from pruning; None when an existing list cannot be trusted."""
+    if not cfg.retained_controllers.exists():
+        return set()
+    retained = _read_json_object(cfg.retained_controllers)
+    return None if retained is None else set(retained)
 
 
 def _read_json_object(path: Path) -> Optional[Dict[str, Any]]:
@@ -2650,7 +2661,12 @@ class _Cycle:
                     late = self.live_controller_moved(previous_plist, receipt)
                     if late is not None:
                         receipt["warnings"].append(f"LATE_BIND_NOT_CARRIED:{late}")
-                        self.retain_controller(receipt, late)
+                        try:
+                            self.retain_controller(receipt, late)
+                        except Exception as exc:  # noqa: BLE001 - never roll back a good deploy
+                            receipt["warnings"].append(
+                                f"RETAIN_CONTROLLER_FAILED:{type(exc).__name__}:{exc}"[:300]
+                            )
                 return result
 
     def prepare_controller(
@@ -2697,7 +2713,13 @@ class _Cycle:
         source = ((receipt.get("controller") or {}).get("carry") or {}).get("from")
         if not source:
             return
-        retained = _read_json_object(self.cfg.retained_controllers) or {}
+        if self.cfg.retained_controllers.exists():
+            retained = _read_json_object(self.cfg.retained_controllers)
+            if retained is None:
+                # Never overwrite a list we cannot read; prune refuses meanwhile.
+                raise DeployError("RETAINED_CONTROLLERS_UNREADABLE")
+        else:
+            retained = {}
         retained[Path(source).name] = {"reason": reason[:200], "at": _iso(self.host.now())}
         self.cfg.state_dir.mkdir(parents=True, exist_ok=True)
         _atomic_write(
