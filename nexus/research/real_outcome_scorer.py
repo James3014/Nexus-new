@@ -19,6 +19,7 @@ import math
 import os
 import re
 import shutil
+import stat
 import subprocess
 import time
 import xml.etree.ElementTree as ET
@@ -27,7 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterable, Mapping, Protocol, Sequence
 
-SCORER_VERSION = "1.2.0"
+SCORER_VERSION = "1.2.1"
 RECEIPT_SCHEMA = "nexus.research.real_outcome.v1"
 RECEIPT_SEAL_SCHEMA = "nexus.research.real_outcome_seal.v1"
 SPEC_RELATIVE_PATH = "docs/research/REAL_OUTCOME_SCORER_SPEC.md"
@@ -37,6 +38,12 @@ SPEC_V2_RELATIVE_PATH = "docs/research/REAL_OUTCOME_SCORER_SPEC.v2.md"
 SPEC_V1, SPEC_V2 = "v1", "v2"
 
 PYTEST_TIMEOUT_SECONDS = 1800
+# Amendment A6 (operational, #2291): one pytest run that leaves more than this many bytes
+# in the runner's TMPDIR (``scratch/tmp``) is a failed run for that tree, like a timeout.
+SCRATCH_TMP_CAP_BYTES = 20 * 1024**3
+SCRATCH_TMP_CAP_EXCEEDED = "SCRATCH_TMP_CAP_EXCEEDED"
+# Exit code recorded for a run refused by the cap (never a real pytest exit code).
+SCRATCH_TMP_CAP_EXIT_CODE = -2
 ORACLE_RUNS = 3
 SMALL_REPOS = frozenset({"nexus-runtime", "nexus-core", "nexus-learning"})
 IMPACT_GATE_REPOS = frozenset({"Nexus-new"})
@@ -906,6 +913,60 @@ class RunResult:
     exit_code: int
     timed_out: bool
     seconds: float = 0.0
+    # Set when the run is failed for an operational reason (A6), e.g. the TMPDIR cap.
+    diagnostic: str | None = None
+
+
+def tree_bytes(root: Path) -> int:
+    """Total size of the regular files under ``root``; symlinks are never followed."""
+    total = 0
+    if not root.is_dir() or root.is_symlink():
+        return 0
+    for dirpath, _dirs, files in os.walk(root, followlinks=False):
+        for name in files:
+            try:
+                st = os.lstat(os.path.join(dirpath, name))
+            except OSError:
+                continue
+            if stat.S_ISREG(st.st_mode):
+                total += st.st_size
+    return total
+
+
+def _is_junit_name(name: str) -> bool:
+    return name.startswith("junit-") and name.endswith(".xml")
+
+
+def clean_scratch_tmp(tmp: Path) -> None:
+    """Empty ``tmp`` except the runner's own ``junit-*.xml`` files; never follows links."""
+    if not tmp.is_dir() or tmp.is_symlink():
+        return
+    with os.scandir(tmp) as it:
+        entries = list(it)
+    for entry in entries:
+        if _is_junit_name(entry.name) and entry.is_file(follow_symlinks=False):
+            continue
+        path = Path(entry.path)
+        try:
+            if entry.is_dir(follow_symlinks=False):
+                shutil.rmtree(path, ignore_errors=True)
+                if path.exists():
+                    _make_tree_writable(path)
+                    shutil.rmtree(path, ignore_errors=True)
+            else:
+                path.unlink()
+        except OSError:
+            pass  # best effort: what is left is measured again after the next task
+
+
+def _make_tree_writable(root: Path) -> None:
+    """A test may leave read-only directories behind, which rmtree cannot empty."""
+    os.chmod(root, 0o700)
+    for dirpath, dirs, _files in os.walk(root, followlinks=False):
+        for name in dirs:
+            path = os.path.join(dirpath, name)
+            if not os.path.islink(path):
+                os.chmod(path, 0o700)
 
 
 def parse_junit(path: Path) -> dict[str, str]:
@@ -963,6 +1024,13 @@ class PytestRunner:
         self.timeout = timeout
         self.log = log
         self.total_seconds = 0.0
+        self.tmp = self.scratch / "tmp"
+
+    def clean_tmp(self) -> int:
+        """A6: empty ``scratch/tmp`` after a task. Returns its size in bytes before."""
+        size = tree_bytes(self.tmp)
+        clean_scratch_tmp(self.tmp)
+        return size
 
     def _env(self, env: TestEnv, tree: Path) -> dict[str, str]:
         home = self.scratch / "home"
@@ -1001,7 +1069,13 @@ class PytestRunner:
         cached = self.cache / f"{key}.json"
         if cached.exists():
             data = json.loads(cached.read_text())
-            return RunResult(data["outcomes"], data["exit_code"], data["timed_out"], 0.0)
+            return RunResult(
+                data["outcomes"],
+                data["exit_code"],
+                data["timed_out"],
+                0.0,
+                data.get("diagnostic"),
+            )
         junit = self.scratch / "tmp" / f"junit-{key}.xml"
         junit.parent.mkdir(parents=True, exist_ok=True)
         junit.unlink(missing_ok=True)
@@ -1016,8 +1090,10 @@ class PytestRunner:
             f"--junitxml={junit}",
             *[f"--ignore={p}" for p in ignores],
         ]
+        tmp_before = tree_bytes(self.tmp)
         start = time.monotonic()
         timed_out = False
+        diagnostic = None
         try:
             proc = subprocess.run(
                 cmd,
@@ -1031,19 +1107,32 @@ class PytestRunner:
             timed_out, exit_code = True, -1
         seconds = time.monotonic() - start
         self.total_seconds += seconds
-        outcomes = {} if timed_out else parse_junit(junit)
+        # A6: what this run left in TMPDIR (its own junit report excluded).
+        junit_bytes = junit.stat().st_size if junit.is_file() and not junit.is_symlink() else 0
+        left = tree_bytes(self.tmp) - tmp_before - junit_bytes
+        if left > SCRATCH_TMP_CAP_BYTES:
+            # Same path as a crashed run: no outcomes, so expected nodes count as fail.
+            diagnostic, exit_code = SCRATCH_TMP_CAP_EXCEEDED, SCRATCH_TMP_CAP_EXIT_CODE
+            outcomes: dict[str, str] = {}
+        else:
+            outcomes = {} if timed_out else parse_junit(junit)
         junit.unlink(missing_ok=True)
+        if diagnostic:
+            clean_scratch_tmp(self.tmp)
         self.log(
             f"  pytest {target} run={run_idx}{' role=' + role if role else ''} exit={exit_code}"
-            f"{' TIMEOUT' if timed_out else ''} nodes={len(outcomes)} {seconds:.0f}s"
+            f"{' TIMEOUT' if timed_out else ''}{' ' + diagnostic if diagnostic else ''}"
+            f" nodes={len(outcomes)} {seconds:.0f}s"
         )
-        cached.write_text(
-            json.dumps(
-                {"outcomes": outcomes, "exit_code": exit_code, "timed_out": timed_out},
-                sort_keys=True,
-            )
-        )
-        return RunResult(outcomes, exit_code, timed_out, seconds)
+        record: dict[str, Any] = {
+            "outcomes": outcomes,
+            "exit_code": exit_code,
+            "timed_out": timed_out,
+        }
+        if diagnostic:
+            record["diagnostic"] = diagnostic
+        cached.write_text(json.dumps(record, sort_keys=True))
+        return RunResult(outcomes, exit_code, timed_out, seconds, diagnostic)
 
 
 def _merge(results: Iterable[RunResult]) -> dict[str, str]:
@@ -1338,7 +1427,7 @@ def score_task(
                 receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
                 receipt["sub_reason"] = "GOLD_COLLECTION_FAILED"
                 receipt["detail"] = ",".join(
-                    f"{m}:{r.exit_code}"
+                    f"{m}:{r.exit_code}" + (f":{r.diagnostic}" if r.diagnostic else "")
                     for m, r in zip(modules, gr)
                     if r.timed_out or r.exit_code not in (0, 1)
                 )
@@ -1533,6 +1622,9 @@ def score_task(
             for wt in wts.values():
                 repo.remove_worktree(wt)
             shutil.rmtree(trees_dir, ignore_errors=True)
+        # A6: TMPDIR is emptied after every task (also with keep_trees), so a leaky test
+        # cannot fill the disk across tasks. Its size before cleaning is recorded.
+        timing["scratch_tmp_bytes"] = ctx.runner.clean_tmp()
 
 
 def _broken_candidate(
@@ -1645,6 +1737,8 @@ def _evaluate_candidate(
                 "exit_code": res.exit_code,
                 "timed_out": res.timed_out,
             }
+            if res.diagnostic:
+                failure["diagnostic"] = res.diagnostic
             baseline_failures.append(failure)
             if tree_key.startswith("goldref"):
                 goldref_failures.append(failure)

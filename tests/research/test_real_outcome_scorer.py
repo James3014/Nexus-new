@@ -1002,7 +1002,7 @@ def test_env_cache_keys_cover_interpreter_pythonpath_and_version(tmp_path, monke
 
 def test_scorer_version_is_recorded_in_spec_amendment():
     root = Path(__file__).resolve().parents[2]
-    assert ros.SCORER_VERSION == "1.2.0"
+    assert ros.SCORER_VERSION == "1.2.1"
     amendments = (root / "docs/research/REAL_OUTCOME_SCORER_SPEC.amendments.md").read_text()
     assert f'SCORER_VERSION = "{ros.SCORER_VERSION}"' in amendments
     spec = (root / ros.SPEC_RELATIVE_PATH).read_bytes()
@@ -1830,3 +1830,86 @@ def test_unsafe_gold_tree_in_rule3_build_is_oracle_invalid(tmp_path, monkeypatch
     r = _score(tmp_path, fx, fx.task(fx.diff_from_base({"pkg/calc.py": FIXED}), merge=merge))
     assert (r["label"], r["sub_reason"]) == (ros.NOT_SCORABLE_ORACLE_INVALID, "ORACLE_FILE_UNSAFE")
     assert r["detail"] == "oracle_path_escapes:tests/test_mul.py"
+
+
+# Amendment A6 (#2291): scratch TMPDIR cleanup, size receipt and per-run cap.
+
+LEAKY_ORACLE_TEST = (
+    MUL_TEST + "\n\nimport os\nfrom pathlib import Path\n\n\n"
+    "def test_leaks_into_tmpdir():\n"
+    '    d = Path(os.environ["TMPDIR"]) / ("leak-" + Path.cwd().name)\n'
+    "    d.mkdir(exist_ok=True)\n"
+    '    (d / "blob.bin").write_bytes(b"x" * 4096)\n'
+)
+
+
+def test_scratch_tmp_is_emptied_after_task_and_size_recorded(tmp_path):
+    fx = Fixture(tmp_path, mul_test=LEAKY_ORACLE_TEST)
+    result = ros.score_task(fx.task(fx.diff_from_base({"pkg/calc.py": FIXED})), _ctx(tmp_path, fx))
+    assert result["receipt"]["label"] == ros.RESOLVED
+    # GOLD, BASE+T and CAND+T each leaked 4 KiB before the cleanup.
+    assert result["timing"]["scratch_tmp_bytes"] >= 3 * 4096
+    tmp = tmp_path / "work" / "scratch" / "tmp"
+    assert tmp.is_dir()
+    assert list(tmp.iterdir()) == []  # leaks and junit reports are both gone
+
+
+def test_scratch_tmp_cleanup_keeps_only_junit_and_never_follows_links(tmp_path):
+    tmp = tmp_path / "tmp"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("keep")
+    (tmp / "nested" / "ro").mkdir(parents=True)
+    (tmp / "nested" / "ro" / "f").write_bytes(b"y" * 10)
+    (tmp / "nested" / "ro").chmod(0o500)
+    (tmp / "junit-abc.xml").write_text("<testsuite/>")
+    (tmp / "loose.bin").write_bytes(b"z" * 7)
+    (tmp / "link").symlink_to(outside, target_is_directory=True)
+    assert ros.tree_bytes(tmp) == 10 + len("<testsuite/>") + 7
+    ros.clean_scratch_tmp(tmp)
+    assert sorted(p.name for p in tmp.iterdir()) == ["junit-abc.xml"]
+    assert (outside / "keep.txt").read_text() == "keep"
+
+
+def test_scratch_tmp_cap_exceeded_fails_the_run(tmp_path, monkeypatch):
+    monkeypatch.setattr(ros, "SCRATCH_TMP_CAP_BYTES", 16)
+    fx = Fixture(tmp_path, mul_test=LEAKY_ORACLE_TEST)
+    result = ros.score_task(fx.task(fx.diff_from_base({"pkg/calc.py": FIXED})), _ctx(tmp_path, fx))
+    r = result["receipt"]
+    # The GOLD oracle run is failed like a crashed run, not reported as a silent pass.
+    assert (r["label"], r["sub_reason"]) == (
+        ros.NOT_SCORABLE_ORACLE_INVALID,
+        "GOLD_COLLECTION_FAILED",
+    )
+    assert ros.SCRATCH_TMP_CAP_EXCEEDED in r["detail"]
+    assert str(ros.SCRATCH_TMP_CAP_EXIT_CODE) in r["detail"]
+    assert list((tmp_path / "work" / "scratch" / "tmp").iterdir()) == []
+
+
+def test_scratch_tmp_cap_run_result_and_cache(tmp_path, monkeypatch):
+    tree = tmp_path / "tree"
+    _write(
+        tree,
+        {
+            "tests/test_leak.py": (
+                "import os\nfrom pathlib import Path\n\n\ndef test_leak():\n"
+                '    (Path(os.environ["TMPDIR"]) / "blob").write_bytes(b"x" * 100)\n'
+            )
+        },
+    )
+    env = LocalEnv().get("fixture-repo", tree)
+    runner = ros.PytestRunner(tmp_path / "scratch", timeout=300, log=lambda m: None)
+    ok = runner.run(env, tree, "t1", "tests", (), 0)
+    assert ok.diagnostic is None and ok.outcomes == {"tests.test_leak::test_leak": ros.PASS}
+    assert runner.clean_tmp() >= 100
+    monkeypatch.setattr(ros, "SCRATCH_TMP_CAP_BYTES", 50)
+    bad = runner.run(env, tree, "t2", "tests", (), 0)
+    assert (bad.outcomes, bad.exit_code, bad.timed_out, bad.diagnostic) == (
+        {},
+        ros.SCRATCH_TMP_CAP_EXIT_CODE,
+        False,
+        ros.SCRATCH_TMP_CAP_EXCEEDED,
+    )
+    assert list((tmp_path / "scratch" / "tmp").iterdir()) == []
+    # A cached replay keeps the diagnostic.
+    assert runner.run(env, tree, "t2", "tests", (), 0).diagnostic == ros.SCRATCH_TMP_CAP_EXCEEDED

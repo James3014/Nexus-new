@@ -167,3 +167,124 @@ def test_executor_cleanup_runs_when_fork_raises_after_partial_initialization(
     assert rc == 1
     assert note.startswith("sandbox_error:OSError:injected fork failure")
     assert not partial_root.exists()
+
+
+# #2291: a harness that overrides HOME must not turn the real account home, or a tree
+# that contains the running checkout, into an acceptable source root.
+
+
+def _real_account_home() -> Path:
+    pwd = pytest.importorskip("pwd")
+    return Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
+
+
+def _refuse_mkdtemp(monkeypatch, tmp_path: Path) -> list[str]:
+    created: list[str] = []
+
+    def unexpected_mkdtemp(*, prefix: str) -> str:
+        created.append(prefix)
+        return str(tmp_path / prefix)
+
+    monkeypatch.setattr(sandbox_module.tempfile, "mkdtemp", unexpected_mkdtemp)
+    return created
+
+
+def test_real_account_home_is_refused_when_home_is_overridden(monkeypatch, tmp_path: Path) -> None:
+    real_home = _real_account_home()
+    fake_home = tmp_path / "scratch-home"
+    fake_home.mkdir()
+    monkeypatch.setenv("HOME", str(fake_home))
+    assert Path.home().resolve() == fake_home.resolve()
+    created = _refuse_mkdtemp(monkeypatch, tmp_path)
+
+    sandbox = SpeculativeSandbox(real_home, mode="tmpdir")
+    with pytest.raises(ValueError, match="too broad"):
+        sandbox.fork()
+    assert created == []
+    assert sandbox.sandbox_root is None
+
+
+def test_account_homes_ignore_home_env(monkeypatch, tmp_path: Path) -> None:
+    real_home = _real_account_home()
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert real_home in sandbox_module._account_homes()
+    assert tmp_path.resolve() not in sandbox_module._account_homes()
+
+
+def test_ancestor_of_running_checkout_is_refused(monkeypatch, tmp_path: Path) -> None:
+    checkout = sandbox_module._running_checkout_root()
+    assert Path(sandbox_module.__file__).resolve().is_relative_to(checkout)
+    # Pretend the account home is elsewhere so only the ancestor rule can refuse.
+    monkeypatch.setattr(sandbox_module, "_account_homes", lambda: set())
+    monkeypatch.setenv("HOME", str(tmp_path))
+    created = _refuse_mkdtemp(monkeypatch, tmp_path)
+
+    sandbox = SpeculativeSandbox(checkout.parent, mode="tmpdir")
+    with pytest.raises(ValueError, match="contains the checkout"):
+        sandbox.fork()
+    assert created == []
+
+
+def test_ancestor_of_cwd_checkout_is_refused(monkeypatch, tmp_path: Path) -> None:
+    outer = tmp_path / "outer"
+    repo = outer / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / "sub").mkdir()
+    monkeypatch.chdir(repo / "sub")
+
+    with pytest.raises(ValueError, match="contains the checkout"):
+        SpeculativeSandbox(outer, mode="tmpdir").fork()
+    # The checkout itself is still a valid source root.
+    sandbox = SpeculativeSandbox(repo, mode="tmpdir")
+    try:
+        assert (sandbox.fork() / "sub").is_dir()
+    finally:
+        sandbox.cleanup()
+
+
+def test_source_root_with_too_many_top_level_entries_is_refused(
+    monkeypatch, tmp_path: Path
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    for i in range(4):
+        (source / f"f{i}").write_text("x", encoding="utf-8")
+    monkeypatch.setattr(sandbox_module, "SANDBOX_MAX_TOP_LEVEL_ENTRIES", 3)
+    created = _refuse_mkdtemp(monkeypatch, tmp_path)
+
+    with pytest.raises(ValueError, match="SANDBOX_MAX_TOP_LEVEL_ENTRIES=3"):
+        SpeculativeSandbox(source, mode="tmpdir").fork()
+    assert created == []
+
+
+def test_source_root_over_size_cap_is_refused(monkeypatch, tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    (source / "pkg").mkdir(parents=True)
+    (source / "pkg" / "big.bin").write_bytes(b"x" * 200)
+    # Ignored names do not count toward the cap.
+    (source / ".venv").mkdir()
+    (source / ".venv" / "huge.bin").write_bytes(b"x" * 10_000)
+    monkeypatch.setattr(sandbox_module, "SANDBOX_MAX_SOURCE_BYTES", 500)
+    sandbox = SpeculativeSandbox(source, mode="tmpdir")
+    try:
+        assert (sandbox.fork() / "pkg" / "big.bin").exists()
+    finally:
+        sandbox.cleanup()
+
+    monkeypatch.setattr(sandbox_module, "SANDBOX_MAX_SOURCE_BYTES", 100)
+    created = _refuse_mkdtemp(monkeypatch, tmp_path)
+    with pytest.raises(ValueError, match="SANDBOX_MAX_SOURCE_BYTES=100"):
+        SpeculativeSandbox(source, mode="tmpdir").fork()
+    assert created == []
+
+
+def test_small_project_dir_still_forks_with_home_overridden(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    source = tmp_path / "project"
+    (source / "pkg").mkdir(parents=True)
+    (source / "pkg" / "mod.py").write_text("x = 1\n", encoding="utf-8")
+    sandbox = SpeculativeSandbox(source, mode="tmpdir")
+    try:
+        assert (sandbox.fork() / "pkg" / "mod.py").read_text(encoding="utf-8") == "x = 1\n"
+    finally:
+        sandbox.cleanup()

@@ -18,8 +18,9 @@ The v1 header names `SCORER_VERSION = "1.0.0"`. The scorer versions are:
 | `1.0.1` | the trusted impact-gate copy is registered in `sys.modules`, so the P2P(b) selector no longer fails silently | v1, unchanged |
 | `1.1.0` | post-merge review follow-ups (#1951 review): input validation, write containment, a P2P run diagnostic, a summary fix and cache keys | v1, unchanged; A2–A4 below only add diagnostics, refusals for malformed or unsafe input, and operational behaviour |
 | `1.2.0` | GOLD port fallback (#2233) | v1 for every task whose PR patches apply whole; `REAL_OUTCOME_SCORER_SPEC.v2.md` (v1 + A5) for the tasks that need the fallback. Each receipt records `spec_version` and that spec file's sha256. For all tasks, a symlinked oracle source file is refused (`NOT_SCORABLE_ORACLE_INVALID` / `ORACLE_FILE_UNSAFE`), an unsafe-input refusal like A3. `--summarize` headline numbers are what v1 would report (each v2 receipt counted as `NOT_SCORABLE_ORACLE_INVALID` / `GOLD_PORT_FAILED`); receipts of any other spec version are left out of both blocks (`unknown_spec_versions`) |
+| `1.2.1` | scratch TMPDIR cleanup and cap (#2291), A6 below | unchanged from 1.2.0 (v1, or v2 for the GOLD port fallback); A6 is operational behaviour only |
 
-Current scorer: `SCORER_VERSION = "1.2.0"`. Receipts record the version that wrote them.
+Current scorer: `SCORER_VERSION = "1.2.1"`. Receipts record the version that wrote them.
 
 ## 2026-10-14: A2, P2P(b/c) run diagnostic (no rule change)
 
@@ -76,3 +77,26 @@ None of these changes how a candidate that applies cleanly is scored.
 - The test-result cache key covers the same items. It also covers the run's role, so
   `CAND+T` runs are never replayed from a `GOLD` run with the same tree id
   (self-check (a)).
+
+## 2026-10-15: A6, scratch TMPDIR cleanup and cap (operational, #2291)
+
+Every pytest run gets `HOME=scratch/home` and `TMPDIR=scratch/tmp` (§8). Before 1.2.1,
+`scratch/tmp` was never emptied, so one leaky test in any tree could fill the disk and
+the leak carried over to every later task (#2291: 96 GB in one run).
+
+Scorer 1.2.1:
+- Empties `scratch/tmp` after every task that reached the tree stage, in the same cleanup
+  step that removes the worktrees, and also when `--keep-trees` is set. Only the runner's
+  own `junit-*.xml` files are kept while a run reads them; each is deleted as soon as its
+  results are parsed and cached.
+- Records the size of `scratch/tmp` before that cleanup as `scratch_tmp_bytes` in
+  `real_outcome_timing.json`. The walk never follows symlinks.
+- Fails a run that leaves more than `SCRATCH_TMP_CAP_BYTES` (20 GiB) in `scratch/tmp`.
+  The run is treated like a crashed run on that tree: no outcomes (§8: its expected
+  nodes count as `fail`), exit code `-2`, and the diagnostic `SCRATCH_TMP_CAP_EXCEEDED`.
+  The diagnostic appears in `p2p_baseline_failures[]` (A2) or in the
+  `GOLD_COLLECTION_FAILED` detail. `scratch/tmp` is then emptied.
+
+No scoring rule changes: a run over the cap goes down the path v1 already defines for a
+run without a usable junit report. The env and test-result cache keys include the scorer
+version (A4), so 1.2.1 rebuilds its envs and does not reuse 1.2.0 results.

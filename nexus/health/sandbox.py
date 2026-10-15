@@ -1,13 +1,90 @@
 from __future__ import annotations
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
 
-import shutil
-import tempfile
-import subprocess
+import getpass
 import logging
+import os
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+from typing import Callable
 
 logger = logging.getLogger(__name__)
+
+# Copied names (shutil.ignore_patterns) that never enter a sandbox copy.
+_IGNORED_NAMES = (
+    ".git",
+    ".venv",
+    "__pycache__",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".mypy_cache",
+    ".nexus/runs",
+)
+# Sanity caps checked before any copy (#2291). A source root with more top-level entries,
+# or more bytes of regular files (ignored names excluded, symlinks not followed), is
+# refused: it is not a project checkout.
+SANDBOX_MAX_TOP_LEVEL_ENTRIES = 2000
+SANDBOX_MAX_SOURCE_BYTES = 4 * 1024**3
+
+
+def _account_homes() -> set[Path]:
+    """The real account home, whatever ``$HOME`` says (a harness may override it)."""
+    homes: set[Path] = set()
+    try:
+        import pwd
+
+        homes.add(Path(pwd.getpwuid(os.getuid()).pw_dir))
+    except (ImportError, KeyError, AttributeError, OSError):
+        pass
+    try:
+        expanded = os.path.expanduser("~" + getpass.getuser())
+        if not expanded.startswith("~"):
+            homes.add(Path(expanded))
+    except (KeyError, OSError, ImportError):
+        pass
+    resolved: set[Path] = set()
+    for home in homes:
+        try:
+            resolved.add(home.resolve())
+        except OSError:
+            continue
+    return resolved
+
+
+def _checkout_root(start: Path) -> Path | None:
+    """Nearest ancestor of ``start`` (inclusive) that is a git checkout or worktree."""
+    for candidate in (start, *start.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    return None
+
+
+def _running_checkout_root() -> Path:
+    """The tree that holds this module: its git checkout, else the package's parent."""
+    module = Path(__file__).resolve()
+    return _checkout_root(module.parent) or module.parents[2]
+
+
+def _is_strict_ancestor(candidate: Path, path: Path) -> bool:
+    return candidate != path and candidate in path.parents
+
+
+def _source_size_exceeds(root: Path, limit: int) -> bool:
+    total = 0
+    for dirpath, dirs, files in os.walk(root, followlinks=False):
+        dirs[:] = [d for d in dirs if d not in _IGNORED_NAMES]
+        for name in files:
+            try:
+                st = os.lstat(os.path.join(dirpath, name))
+            except OSError:
+                continue
+            if not os.path.islink(os.path.join(dirpath, name)):
+                total += st.st_size
+                if total > limit:
+                    return True
+    return False
+
 
 class SpeculativeSandbox:
     """Temporary repo clone for speculative validation before mainline apply."""
@@ -16,24 +93,19 @@ class SpeculativeSandbox:
         self.source_root = Path(source_root)
         self.sandbox_root: Path | None = None
         self._temp_root: Path | None = None
-        
+
         # 🆕 自動偵測 Docker 可用性
         if mode == "auto":
             self.mode = "docker" if self._docker_available() else "tmpdir"
         else:
             self.mode = mode
-            
+
         logger.info("Sandbox initialized in mode: %s", self.mode)
 
     @staticmethod
     def _docker_available() -> bool:
         try:
-            result = subprocess.run(
-                ["docker", "info"],
-                capture_output=True,
-                check=False,
-                timeout=5
-            )
+            result = subprocess.run(["docker", "info"], capture_output=True, check=False, timeout=5)
             return result.returncode == 0
         except Exception:
             return False
@@ -71,6 +143,7 @@ class SpeculativeSandbox:
         broad_roots = {
             Path("/").resolve(),
             Path.home().resolve(),
+            *_account_homes(),
             Path(tempfile.gettempdir()).resolve(),
             Path("/tmp").resolve(),
             Path("/private/tmp").resolve(),
@@ -78,10 +151,44 @@ class SpeculativeSandbox:
         }
         if resolved in broad_roots:
             raise ValueError(f"sandbox source root is too broad: {resolved}")
+        # A tree that contains the running checkout (or the checkout of the current
+        # directory) is never intended: it is the user's home or workspace (#2291).
+        anchors = [_running_checkout_root()]
+        try:
+            cwd_root = _checkout_root(Path.cwd().resolve())
+        except OSError:
+            cwd_root = None
+        if cwd_root is not None:
+            anchors.append(cwd_root)
+        for anchor in anchors:
+            if _is_strict_ancestor(resolved, anchor):
+                raise ValueError(
+                    f"sandbox source root is too broad: {resolved} contains the checkout {anchor}"
+                )
         return resolved
+
+    @staticmethod
+    def _check_source_size(source_root: Path) -> None:
+        try:
+            with os.scandir(source_root) as it:
+                entries = sum(1 for _ in it)
+        except OSError as exc:
+            raise ValueError(f"sandbox source root cannot be listed: {exc}") from exc
+        if entries > SANDBOX_MAX_TOP_LEVEL_ENTRIES:
+            raise ValueError(
+                f"sandbox source root is too broad: {source_root} has {entries} top-level"
+                f" entries (SANDBOX_MAX_TOP_LEVEL_ENTRIES={SANDBOX_MAX_TOP_LEVEL_ENTRIES})"
+            )
+        if _source_size_exceeds(source_root, SANDBOX_MAX_SOURCE_BYTES):
+            raise ValueError(
+                f"sandbox source root is too broad: {source_root} holds more than"
+                f" {SANDBOX_MAX_SOURCE_BYTES} bytes of files"
+                f" (SANDBOX_MAX_SOURCE_BYTES={SANDBOX_MAX_SOURCE_BYTES})"
+            )
 
     def _copy_source_tree(self, prefix: str) -> Path:
         source_root = self._validate_source_root()
+        self._check_source_size(source_root)
         self._temp_root = Path(tempfile.mkdtemp(prefix=prefix))
         self.sandbox_root = self._temp_root / "repo"
         shutil.copytree(
@@ -89,15 +196,7 @@ class SpeculativeSandbox:
             self.sandbox_root,
             dirs_exist_ok=True,
             symlinks=True,
-            ignore=shutil.ignore_patterns(
-                ".git",
-                ".venv",
-                "__pycache__",
-                ".pytest_cache",
-                ".ruff_cache",
-                ".mypy_cache",
-                ".nexus/runs",
-            ),
+            ignore=shutil.ignore_patterns(*_IGNORED_NAMES),
         )
         return self.sandbox_root
 
@@ -107,26 +206,30 @@ class SpeculativeSandbox:
     def _fork_docker(self) -> Path:
         """用 Docker 建立隔離環境"""
         self._copy_source_tree("nexus_docker_")
-        
+
         # 建立 Dockerfile（如果專案沒有）
         dockerfile = self.sandbox_root / "Dockerfile.nexus"
         if not dockerfile.exists():
             dockerfile.write_text(self._generate_dockerfile())
-        
+
         # Build & Tag
         tag = f"nexus-sandbox:{hash(str(self.source_root.absolute())) % 1000000}"
         logger.info("Building Docker image: %s", tag)
         subprocess.run(
             ["docker", "build", "-f", str(dockerfile), "-t", tag, "."],
-            cwd=self.sandbox_root, capture_output=True, timeout=120
+            cwd=self.sandbox_root,
+            capture_output=True,
+            timeout=120,
         )
-        
+
         self._docker_tag = tag
         return self.sandbox_root
 
     def _generate_dockerfile(self) -> str:
         """根據專案語言自動生成 Dockerfile"""
-        if (self.source_root / "pyproject.toml").exists() or (self.source_root / "pytest.ini").exists():
+        if (self.source_root / "pyproject.toml").exists() or (
+            self.source_root / "pytest.ini"
+        ).exists():
             return """FROM python:3.12-slim
 WORKDIR /app
 COPY . .
@@ -158,10 +261,10 @@ COPY . .
     ) -> int:
         if self.sandbox_root is None:
             raise RuntimeError("sandbox not initialized")
-            
+
         if self.mode == "docker" and hasattr(self, "_docker_tag"):
             return self._run_docker(manifest_path, runner)
-            
+
         return runner(manifest_path, self.sandbox_root)
 
     def _run_docker(self, manifest_path: Path, runner: Callable[[Path, Path | None], int]) -> int:
@@ -175,11 +278,22 @@ COPY . .
             # 我們直接呼叫 runner 讓它在 sandbox_root 下生成所需的測試檔，
             # 然後我們在 docker 內掛載這個資料夾跑一次 python -m pytest
             result = subprocess.run(
-                ["docker", "run", "--rm",
-                 "-v", f"{self.sandbox_root}:/app",
-                 self._docker_tag,
-                 "python3", "-m", "pytest", "--tb=short", "-q"],
-                capture_output=True, text=True, timeout=180,
+                [
+                    "docker",
+                    "run",
+                    "--rm",
+                    "-v",
+                    f"{self.sandbox_root}:/app",
+                    self._docker_tag,
+                    "python3",
+                    "-m",
+                    "pytest",
+                    "--tb=short",
+                    "-q",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=180,
             )
             return result.returncode
         except subprocess.TimeoutExpired:
@@ -189,10 +303,7 @@ COPY . .
         docker_tag = getattr(self, "_docker_tag", None)
         if self.mode == "docker" and docker_tag:
             try:
-                subprocess.run(
-                    ["docker", "rmi", docker_tag],
-                    capture_output=True, timeout=10
-                )
+                subprocess.run(["docker", "rmi", docker_tag], capture_output=True, timeout=10)
             except Exception as exc:
                 logger.warning("Failed to remove sandbox Docker image %s: %s", docker_tag, exc)
             finally:
