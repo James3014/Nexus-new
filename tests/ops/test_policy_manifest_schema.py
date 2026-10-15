@@ -924,7 +924,9 @@ def test_wiring_check_package_guard_and_stat_failure(tmp_path: Path, monkeypatch
         guard_modules=["pkg/__init__.py"],
         test_entrypoints=["tests/test_caller.py::test_plain"],
     )
-    assert check_enforcement_wiring(package_guard, root) == ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"]
+    assert check_enforcement_wiring(package_guard, root) == [
+        "CALLER_UNDER_GUARD_PACKAGE: pkg/caller.py"
+    ]
     # An unreadable guard fails closed rather than losing its identity.
     real_stat = Path.stat
 
@@ -938,3 +940,47 @@ def test_wiring_check_package_guard_and_stat_failure(tmp_path: Path, monkeypatch
         _fake_policy(test_entrypoints=["tests/test_caller.py::test_plain"]), root
     )
     assert result == ["SOURCE_FILE_NOT_FOUND: pkg/guard.py"]
+
+
+def test_wiring_check_round14_cases(tmp_path: Path, monkeypatch) -> None:
+    root = _fake_repo(tmp_path)
+    # A package __init__ declared as the caller is credited when a child is imported.
+    (root / "app").mkdir()
+    (root / "app" / "__init__.py").write_text("from pkg.guard import check\n", encoding="utf-8")
+    (root / "app" / "svc.py").write_text("def run():\n    return 1\n", encoding="utf-8")
+    (root / "tests" / "test_app_child.py").write_text(
+        "def test_c():\n    from app import svc\n    assert svc.run()\n", encoding="utf-8"
+    )
+    pkg_caller = _fake_policy(
+        source_file="pkg/guard.py; app/__init__.py",
+        test_entrypoints=["tests/test_app_child.py::test_c"],
+    )
+    assert check_enforcement_wiring(pkg_caller, root) == []
+    # A caller beneath a guard package is reported as such, not as a silent failure.
+    (root / "pkg" / "__init__.py").write_text("", encoding="utf-8")
+    under_guard = _fake_policy(
+        source_file="pkg/__init__.py; pkg/caller.py",
+        guard_modules=["pkg/__init__.py"],
+        test_entrypoints=["tests/test_caller.py::test_plain"],
+    )
+    assert check_enforcement_wiring(under_guard, root) == [
+        "CALLER_UNDER_GUARD_PACKAGE: pkg/caller.py"
+    ]
+    # A guard package whose __init__ exists but cannot be resolved is still a guard.
+    (root / "gp").mkdir()
+    (root / "gp" / "__init__.py").symlink_to(root / "pkg" / "guard.py")  # alias of the guard
+    (root / "gp" / "child.py").write_text("from pkg import caller\n", encoding="utf-8")
+    (root / "tests" / "test_gp.py").write_text(
+        "def test_g():\n    from gp import child\n    assert child\n", encoding="utf-8"
+    )
+    via_alias_pkg = _fake_policy(test_entrypoints=["tests/test_gp.py::test_g"])
+    assert check_enforcement_wiring(via_alias_pkg, root) == ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"]
+    real_resolve = Path.resolve
+
+    def flaky_resolve(self, *args, **kwargs):
+        if self.name == "__init__.py" and self.parent.name == "gp":
+            raise OSError("transient")
+        return real_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", flaky_resolve)
+    assert check_enforcement_wiring(via_alias_pkg, root) == ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"]

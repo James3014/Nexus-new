@@ -11,6 +11,7 @@ Usage:
 import argparse
 import ast
 import json
+import os
 import re
 import sys
 from datetime import date, datetime, timezone
@@ -519,23 +520,59 @@ def check_enforcement_wiring(policy: dict, repo_root: Path | None = None) -> lis
     if not caller_paths:
         return errors + ["ENFORCEMENT_CALLERS_MISSING"]
     callers = {m for m in (_module_name(p) for p in caller_paths) if m}
+    caller_ids = {i for i in (_file_id(_declared_file(p, root) or root) for p in caller_paths)}
+    # A caller inside a guard package can never be reached without loading the
+    # guard first; say so instead of failing every entrypoint silently.
+    shadowed = sorted(
+        path
+        for path in caller_paths
+        if any(
+            ".".join((_module_name(path) or "").split(".")[:depth]) in guard_modules
+            for depth in range(1, len((_module_name(path) or "").split(".")))
+        )
+    )
+    if shadowed:
+        return errors + [f"CALLER_UNDER_GUARD_PACKAGE: {', '.join(shadowed)}"]
+
+    def _prefix_files(module: str) -> list[tuple[str, Path | None, bool]]:
+        """(prefix, resolved file or None, an __init__/module exists on disk) for a.b.c."""
+        parts = module.split(".")
+        out: list[tuple[str, Path | None, bool]] = []
+        for depth in range(1, len(parts) + 1):
+            prefix = ".".join(parts[:depth])
+            base = root.joinpath(*parts[:depth])
+            exists = os.path.lexists(base.with_suffix(".py")) or os.path.lexists(
+                base / "__init__.py"
+            )
+            out.append((prefix, _module_file(prefix, root), exists))
+        return out
 
     def through_guard(module: str) -> bool:
         """True when ``module`` or any package above it is a guard (or unreadable).
 
         Python imports ``a.b.c`` by loading ``a`` and ``a.b`` first, so a guard
-        declared as a package ``__init__.py`` guards everything beneath it.
+        declared as a package ``__init__.py`` guards everything beneath it. A
+        prefix whose file exists but cannot be resolved or read is treated as a
+        guard (fail closed); a namespace package (no ``__init__.py``) is not.
         """
-        parts = module.split(".")
-        for depth in range(1, len(parts) + 1):
-            prefix = ".".join(parts[:depth])
+        for prefix, file, exists in _prefix_files(module):
             if prefix in guard_modules:
                 return True
-            file = _module_file(prefix, root)
             if file is None:
+                if exists:
+                    return True
                 continue
             identity = _file_id(file)
             if identity is None or identity in guard_ids:
+                return True
+        return False
+
+    def reaches_caller(module: str) -> bool:
+        """True when ``module`` or a package above it is a declared caller file."""
+        for prefix, file, _exists in _prefix_files(module):
+            if prefix in callers:
+                return True
+            if file is not None and _file_id(file) in caller_ids:
                 return True
         return False
 
@@ -556,11 +593,13 @@ def check_enforcement_wiring(policy: dict, repo_root: Path | None = None) -> lis
                         continue
                     seen.add(module)
                     target = _module_file(module, root)
-                    if target is None or target == start or through_guard(module):
+                    if through_guard(module):
                         continue
-                    if module in callers:
+                    if reaches_caller(module):
                         reached = True
                         break
+                    if target is None or target == start:
+                        continue
                     next_frontier.append((target, None, False))
                 if reached:
                     break
