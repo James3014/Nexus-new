@@ -7,15 +7,24 @@ Usage:
     python scripts/ops/check_policy_lane_gate.py --policy-id P-ROUTE-01 --action modify
     python scripts/ops/check_policy_lane_gate.py --policy-id P-AUTO-01 --action observe
 """
+import argparse
+import ast
 import json
 import sys
-import argparse
-from pathlib import Path
 from datetime import datetime, timezone
-from typing import Any
+from pathlib import Path
 
-MANIFEST_PATH = Path(__file__).resolve().parents[2] / "docs" / "reports" / "policy-manifest.v2.json"
-OVERRIDE_DIR = Path(__file__).resolve().parents[2] / ".nexus" / "policy_overrides"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+MANIFEST_PATH = REPO_ROOT / "docs" / "reports" / "policy-manifest.v2.json"
+OVERRIDE_DIR = REPO_ROOT / ".nexus" / "policy_overrides"
+
+# #2259: how a policy acts in production. ``block`` stops or alters execution,
+# ``record_only`` records a signal and never blocks, ``not_wired`` has no
+# production caller (fixture or spec-only entry).
+ENFORCEMENT_MODES = ("block", "record_only", "not_wired")
+# How far the static import walk follows repo modules from a test entrypoint
+# before giving up (test -> helper -> re-export shim -> production caller).
+_IMPORT_WALK_DEPTH = 3
 
 
 def load_manifest() -> dict:
@@ -32,6 +41,103 @@ def find_policy(manifest: dict, policy_id: str) -> dict | None:
     return None
 
 
+def _source_paths(policy: dict) -> list[str]:
+    """``source_file`` is one path or a ``;``-separated list of paths."""
+    raw = str(policy.get("source_file") or "")
+    return [part.strip() for part in raw.split(";") if part.strip()]
+
+
+def _module_name(path: str) -> str | None:
+    """Repo-relative ``.py`` path -> dotted module name (None for non-Python)."""
+    if not path.endswith(".py"):
+        return None
+    parts = Path(path).with_suffix("").parts
+    if parts and parts[-1] == "__init__":
+        parts = parts[:-1]
+    return ".".join(parts) if parts else None
+
+
+def _module_file(module: str, repo_root: Path) -> Path | None:
+    base = repo_root.joinpath(*module.split("."))
+    for candidate in (base.with_suffix(".py"), base / "__init__.py"):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _imported_modules(path: Path) -> set[str]:
+    """Absolute module names a Python file imports anywhere (static, ``ast`` only)."""
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    except (OSError, SyntaxError, UnicodeDecodeError):
+        return set()
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            found.add(node.module)
+            found.update(f"{node.module}.{alias.name}" for alias in node.names)
+    return found
+
+
+def check_enforcement_wiring(policy: dict, repo_root: Path = REPO_ROOT) -> list[str]:
+    """#2259: a ``block``/``record_only`` policy must be tested through a production caller.
+
+    Static check. ``source_file`` minus ``guard_modules`` are the production
+    callers. At least one Python test entrypoint must reach one of them through
+    its static import closure (repo modules only, depth-limited), without passing
+    through a guard module. A test whose only imports are the guard itself proves
+    the guard works, not that anything enforces it (#2199).
+
+    Policies whose ``source_file`` has no Python module (Rust-only) and
+    ``not_wired`` policies are out of scope and keep the presence check only.
+    """
+    mode = policy.get("enforcement_mode")
+    if mode not in ENFORCEMENT_MODES:
+        return ["ENFORCEMENT_MODE_INVALID"]
+    if mode == "not_wired":
+        return []
+    sources = _source_paths(policy)
+    guards = {str(g).strip() for g in policy.get("guard_modules") or []}
+    unknown_guards = sorted(guards - set(sources))
+    if unknown_guards:
+        return [f"GUARD_MODULE_NOT_IN_SOURCE: {', '.join(unknown_guards)}"]
+    py_sources = {m for m in (_module_name(p) for p in sources) if m}
+    if not py_sources:
+        return []
+    guard_modules = {m for m in (_module_name(g) for g in guards) if m}
+    callers = py_sources - guard_modules
+    if not callers:
+        return ["ENFORCEMENT_CALLERS_MISSING"]
+
+    for entry in policy.get("test_entrypoints") or []:
+        file_part = str(entry).split("::", 1)[0].strip()
+        if not file_part.endswith(".py"):
+            continue
+        start = repo_root / file_part
+        if not start.is_file():
+            continue
+        seen: set[str] = set()
+        frontier = [start]
+        for _ in range(_IMPORT_WALK_DEPTH):
+            next_frontier: list[Path] = []
+            for file in frontier:
+                for module in _imported_modules(file):
+                    if module in callers:
+                        return []
+                    if module in seen or module in guard_modules:
+                        continue
+                    seen.add(module)
+                    target = _module_file(module, repo_root)
+                    if target is not None:
+                        next_frontier.append(target)
+            if not next_frontier:
+                break
+            frontier = next_frontier
+    return ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"]
+
+
 def check_hard_lane(policy: dict, action: str) -> dict:
     """Hard lane: fail-closed. Requires evidence, drill, held-out, feature flag."""
     errors = []
@@ -41,6 +147,8 @@ def check_hard_lane(policy: dict, action: str) -> dict:
             errors.append("ROLLBACK_DRILL_MISSING")
         if not policy.get("test_entrypoints"):
             errors.append("TEST_COVERAGE_MISSING")
+        else:
+            errors.extend(check_enforcement_wiring(policy))
 
     if action == "promote":
         if policy.get("promotion_allowed") is False:
@@ -120,6 +228,15 @@ def check_lane_gate(policy_id: str, action: str, override_receipt: dict | None =
         }
 
     lane = policy.get("lane", "unknown")
+
+    if policy.get("enforcement_mode") not in ENFORCEMENT_MODES:
+        # #2259: every entry declares how it enforces; an unreadable entry fails closed.
+        return {
+            "allowed": False,
+            "lane": lane,
+            "errors": ["ENFORCEMENT_MODE_INVALID"],
+            "policy_id": policy_id,
+        }
 
     if lane == "hard":
         return check_hard_lane(policy, action)

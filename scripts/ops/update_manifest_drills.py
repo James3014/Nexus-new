@@ -18,6 +18,8 @@ def _test_policy() -> dict[str, Any]:
         "source_file": "tests/test_policy_manager.py",
         "schema_version": "v1.0",
         "commit_sha": "1c9dce65",
+        "verified_in_pr": None,
+        "enforcement_mode": "not_wired",
         "status_tag": "spec-backed",
         "test_entrypoints": ["tests/test_policy_manager.py"],
         "receipt_type": "TestReceipt",
