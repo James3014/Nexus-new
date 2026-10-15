@@ -147,6 +147,12 @@ PIN_BUMP_PR = re.compile(
 PIN_FILES = ("uv.lock", "pyproject.toml", "requirements/canonical-runtime.txt")
 PIN_BUMP_MAX_AGE_SECONDS = 3 * 24 * 60 * 60
 _SHA = re.compile(r"^[0-9a-f]{40}$")
+# RFC 3339 date-time with an explicit offset; fractions up to microseconds (#2169).
+_RFC3339 = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:[Zz]|[+-]\d{2}:\d{2})$"
+)
+# Timeline events that move a PR head; one of unknown age counts as recent.
+_HEAD_PUSH_EVENTS = ("head_ref_force_pushed", "head_ref_restored")
 _DEPLOYMENT_NAME = re.compile(r"(?:^|/)[ar]1-([0-9a-f]{40})$")
 _SHELL_UNSAFE = ('"', "$", "`", "\\", "\n", "\r", "\x00")
 # Each deployment runs the nexus-core revision its own tree pins (#2181).  The pin
@@ -217,6 +223,10 @@ print(json.dumps(core_provenance_status(), sort_keys=True, default=str))
 
 class DeployError(RuntimeError):
     pass
+
+
+# HOLD text written when a validated journal could not be reconciled.
+RECONCILE_FAILED_HOLD = "auto-hold: RECONCILE_FAILED"
 
 
 @dataclass(frozen=True)
@@ -304,6 +314,9 @@ class Config:
 
 class Host:
     """Every process, launchd and clock effect.  Tests replace this class."""
+
+    # How long GATEWAY_LOCK and the R1 ledger lock are waited for.
+    lock_timeout_seconds: float = 30.0
 
     def run(
         self,
@@ -405,7 +418,7 @@ class Host:
         try:
             self.manager_lock_path(cfg)
             path = durable.GatewayLedger(Path(durable.GATEWAY_LEDGER)).lock_path
-            lock = durable.InterProcessLock(path, timeout=30.0)
+            lock = durable.InterProcessLock(path, timeout=self.lock_timeout_seconds)
             lock.__enter__()
         except DeployError:
             raise
@@ -422,7 +435,9 @@ class Host:
         from scripts.ops import mcp_gateway_durable as durable
 
         try:
-            lock = durable.InterProcessLock(self.manager_lock_path(cfg), timeout=30.0)
+            lock = durable.InterProcessLock(
+                self.manager_lock_path(cfg), timeout=self.lock_timeout_seconds
+            )
             lock.__enter__()
         except DeployError:
             raise
@@ -697,15 +712,20 @@ def on_github_main(
 
 
 def _parse_time(value: Any) -> Optional[float]:
+    """Epoch seconds of an RFC 3339 timestamp (``Z``, ``+00:00``, fractions), else None.
+
+    A value without a UTC offset, or one that is not a full date-time, is
+    unparseable: guessing its zone could make an event look older than it is.
+    """
+    if not isinstance(value, str) or not _RFC3339.match(value):
+        return None
     try:
-        return (
-            datetime
-            .strptime(str(value), "%Y-%m-%dT%H:%M:%SZ")
-            .replace(tzinfo=timezone.utc)
-            .timestamp()
-        )
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00" if value[-1] in "Zz" else value)
     except ValueError:
         return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.timestamp()
 
 
 def _paged(api_get: Callable[[str], Any], path: str) -> Iterator[dict]:
@@ -743,7 +763,11 @@ def _is_stale_pin_pr(api_get: Callable[[str], Any], repo: str, pr: dict, now: fl
         return False
     for event in _paged(api_get, f"repos/{repo}/issues/{pr['number']}/timeline"):
         when = _timeline_time(api_get, repo, event)
-        # An event without a usable timestamp is ignored, never "recent forever".
+        if when is None and event.get("event") in _HEAD_PUSH_EVENTS:
+            # A head push of unknown age may be recent: fail closed (#2169).
+            return False
+        # Any other event without a usable timestamp is ignored, never
+        # "recent forever" (a dateless ``committed`` event stays stale).
         if when is not None and when > cutoff:
             return False
     return True
@@ -752,7 +776,7 @@ def _is_stale_pin_pr(api_get: Callable[[str], Any], repo: str, pr: dict, now: fl
 def _timeline_time(api_get: Callable[[str], Any], repo: str, event: dict) -> Optional[float]:
     """Timestamp of a push-like timeline event, from documented fields only."""
     kind = event.get("event")
-    if kind in ("head_ref_force_pushed", "head_ref_restored"):
+    if kind in _HEAD_PUSH_EVENTS:
         return _parse_time(event.get("created_at"))
     if kind != "committed":
         return None
@@ -825,6 +849,28 @@ def read_env_token(env_file: Path) -> str:
             if parts and parts[0]:
                 return parts[0]
     raise DeployError("GATEWAY_TOKEN_UNAVAILABLE")
+
+
+def health_core_provenance(health: Any, core: Any) -> Dict[str, Any]:
+    """The running Gateway's own ``/health`` ``core_provenance`` (#2169, since #2201).
+
+    Required: status ``CORE_REVISION_PINNED``, expected and observed revision
+    both equal to the deployment's Core pin, and ``fail_closed`` exactly False.
+    A missing or malformed block fails.
+    """
+    if not isinstance(core, dict) or not _SHA.match(str(core.get("revision") or "")):
+        return {"ok": False, "error": "CORE_PIN_UNKNOWN"}
+    block = health.get("core_provenance") if isinstance(health, dict) else None
+    if not isinstance(block, dict):
+        return {"ok": False, "error": "HEALTH_CORE_PROVENANCE_MISSING"}
+    ok = (
+        block.get("status") == "CORE_REVISION_PINNED"
+        and block.get("expected_revision") == core["revision"]
+        and block.get("observed_commit") == core["revision"]
+        and block.get("fail_closed") is False
+    )
+    keys = ("status", "expected_revision", "observed_commit", "fail_closed")
+    return {"ok": ok, **{k: block.get(k) for k in keys if k in block}}
 
 
 class Prober:
@@ -939,7 +985,10 @@ class Prober:
         except Exception as exc:  # noqa: BLE001
             checks["gateway_status"] = {"ok": False, "error": f"{type(exc).__name__}:{exc}"[:300]}
         if core is not None:
+            # Both: the fresh subprocess proves the on-disk resolution, the
+            # /health block proves what the running process actually loaded.
             checks["core_provenance"] = self.core_provenance(root=root, python=python, core=core)
+            checks["health_core_provenance"] = health_core_provenance(observed, core)
         return {"ok": all(c["ok"] for c in checks.values()), "checks": checks}
 
 
@@ -1042,13 +1091,23 @@ def _sha256(data: bytes) -> str:
 
 
 def _atomic_write(path: Path, data: bytes, mode: int = 0o644) -> None:
-    tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}")
-    with open(tmp, "wb") as handle:
-        handle.write(data)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.chmod(tmp, mode)
-    os.replace(tmp, path)
+    # Unique per write and created exclusively (O_EXCL, so never through an
+    # existing file or symlink).  Cleanup runs only once this write has created
+    # its own temp file, so it never removes anything it does not own (#2169 review).
+    tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}.{os.urandom(6).hex()}")
+    handle = open(tmp, "xb")
+    try:
+        with handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except BaseException:
+        # Never leave a half-written temp file behind (#2169 review).
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        raise
 
 
 def _atomic_symlink(target: Path, link: Path) -> None:
@@ -1415,9 +1474,18 @@ def hold_reason(cfg: Config, environ: Optional[Dict[str, str]] = None) -> Option
     return None
 
 
+def _hold_text(cfg: Config) -> str:
+    """The HOLD file's reason text, or "" when absent or unreadable."""
+    try:
+        return cfg.hold_file.read_text(encoding="utf-8")
+    except (OSError, ValueError):
+        return ""
+
+
 def _set_hold(cfg: Config, reason: str) -> None:
+    """Write HOLD atomically: a crash or full disk leaves the whole text or none (#2169)."""
     cfg.state_dir.mkdir(parents=True, exist_ok=True)
-    cfg.hold_file.write_text(reason + "\n", encoding="utf-8")
+    _atomic_write(cfg.hold_file, (reason + "\n").encode("utf-8"), 0o600)
 
 
 def known_plist_hashes(cfg: Config) -> List[str]:
@@ -1476,9 +1544,11 @@ def run_cycle(
             return {**status, "status": "BUSY"}
         ctx = _Cycle(cfg, host, prober, api_get, environ, tool_python or Path(sys.executable))
         ctx.fetch = fetch
-        stuck = (
-            hold_reason(cfg, environ)
-            and (last_receipt(cfg.state_dir) or {}).get("outcome") == "RECONCILE_FAILED"
+        # Stuck: the last receipt says RECONCILE_FAILED, or (if that receipt
+        # could not be written) the HOLD text itself does (#2169 F2).
+        stuck = hold_reason(cfg, environ) and (
+            (last_receipt(cfg.state_dir) or {}).get("outcome") == "RECONCILE_FAILED"
+            or _hold_text(cfg).startswith(RECONCILE_FAILED_HOLD)
         )
         if cfg.journal.exists() and not dry_run and stuck:
             # A valid journal whose reconciliation failed unexpectedly: kept and
@@ -1959,10 +2029,13 @@ class _Cycle:
                 # healthy live candidate proceeds; everything else is postponed
                 # with the journal kept and no HOLD.
                 block = self.host.r1_recovery_block(cfg)
+                if block is not None:
+                    # Recorded before anything else can fail, so a later error
+                    # still postpones instead of writing HOLD (#2169 F1).
+                    receipt["r1_block_observed"] = block
                 live_plist = cfg.plist.read_bytes()
                 is_candidate = _sha256(live_plist) == new_plist_sha
                 if block is not None:
-                    receipt["r1_block_observed"] = block
                     if not is_candidate:
                         return self.postpone(receipt, block)
                     core = receipt.get("core") if isinstance(receipt.get("core"), dict) else {}
@@ -1988,23 +2061,32 @@ class _Cycle:
                     hold = "auto-hold: FOREIGN_PLIST while reconciling a pending switch"
                     receipt.update(outcome="FOREIGN_PLIST", reason="unexpected live plist")
         except DeployError as exc:
-            if not str(exc).startswith("MANAGER_LOCK_UNAVAILABLE"):
-                return self.quarantine_journal(f"RECONCILE_FAILED:DeployError:{exc}"[:300])
-            # The #526 manager or its ledger is busy: keep the journal, retry.
-            return self.postpone(receipt, str(exc))
+            if str(exc).startswith("MANAGER_LOCK_UNAVAILABLE"):
+                # The #526 manager or its ledger is busy: keep the journal, retry.
+                return self.postpone(receipt, str(exc))
+            # A validated journal is never quarantined, whatever the error (#2169 F3).
+            return self.reconcile_failed(receipt, exc)
         except Exception as exc:  # noqa: BLE001 - never crash every cycle on one journal
-            # The journal passed validation, so it is kept (never quarantined):
-            # HOLD stops the retry loop until the Owner has looked at it.
-            receipt.update(
-                outcome="RECONCILE_FAILED",
-                reason=f"RECONCILE_FAILED:{type(exc).__name__}:{exc}"[:300],
-                journal_kept=True,
-            )
-            return self.close_receipt(
-                receipt,
-                hold=f"auto-hold: RECONCILE_FAILED {receipt.get('attempt_id')}; journal kept",
-            )
+            return self.reconcile_failed(receipt, exc)
         return self.close_receipt(receipt, hold=hold)
+
+    def reconcile_failed(self, receipt: Dict[str, Any], exc: BaseException) -> Dict[str, Any]:
+        """A validated journal whose reconciliation failed: kept, never quarantined.
+
+        Normally HOLD stops the retry loop until the Owner has looked at it.
+        While an R1 recovery was seen open, R1 owns the Gateway, so no HOLD is
+        written: the journal is kept and the next cycle retries (#2169 F1).  If
+        even that receipt cannot be written, the error propagates and the
+        journal stays, as for every receipt failure.
+        """
+        reason = f"RECONCILE_FAILED:{type(exc).__name__}:{exc}"[:300]
+        if receipt.get("r1_block_observed"):
+            return self.postpone(receipt, reason)
+        receipt.update(outcome="RECONCILE_FAILED", reason=reason, journal_kept=True)
+        return self.close_receipt(
+            receipt,
+            hold=f"{RECONCILE_FAILED_HOLD} {receipt.get('attempt_id')}; journal kept",
+        )
 
     def quarantine_journal(self, reason: str) -> Dict[str, Any]:
         """An unusable journal: HOLD, then a receipt, then move it aside."""

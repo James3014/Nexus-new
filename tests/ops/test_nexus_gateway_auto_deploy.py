@@ -2534,7 +2534,10 @@ def test_real_prober_requires_core_revision_pinned(tmp_path: Path, case: str, ok
     elif case == "no_pin":
         core = {}
     host = _CoreStatusHost(status, code)
-    with fake_gateway(_health(NEW), 3, False) as port:
+    # The running Gateway reports a healthy in-process block (#2169); only the
+    # on-disk subprocess result varies here.
+    health = {**_health(NEW), "core_provenance": _health_core_block(NEW)}
+    with fake_gateway(health, 3, False) as port:
         result = ad.Prober(host).probe(
             port=port,
             token="tok",
@@ -3555,3 +3558,530 @@ def test_tool_link_error_does_not_fail_a_deploy(
     result = cycle(cfg, FakeHost(), FakeProber())
     assert result["status"] == "DEPLOYED"
     assert result["receipt"]["deployer_link"]["moved"] is False
+
+
+# ------------------------------------------------------------ #2169 follow-ups
+
+
+def _health_core_block(
+    revision: str, *, status: str = "CORE_REVISION_PINNED", **changes: Any
+) -> dict[str, Any]:
+    """The unauthenticated ``/health`` ``core_provenance`` projection (#2201)."""
+    return {
+        "status": status,
+        "expected_revision": revision,
+        "observed_commit": revision,
+        "fail_closed": False,
+        **changes,
+    }
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("2025-10-09T08:53:20Z", NOW),
+        ("2025-10-09T08:53:20z", NOW),
+        ("2025-10-09T08:53:20+00:00", NOW),
+        ("2025-10-09T10:53:20+02:00", NOW),
+        ("2025-10-09T08:53:20.000Z", NOW),
+        ("2025-10-09T08:53:20.5Z", NOW + 0.5),
+        ("2025-10-09T08:53:20.123456+00:00", NOW + 0.123456),
+        ("2025-10-09T08:53:20", None),  # no offset: zone unknown
+        ("2025-10-09", None),
+        ("2025-10-09T08:53:20.1234567Z", None),
+        ("2025-13-09T08:53:20Z", None),
+        ("yesterday", None),
+        ("", None),
+        (None, None),
+        (1_760_000_000, None),
+    ],
+    # No timestamps in ids: the impact gate normalizes datetimes in node ids.
+    ids=[
+        "z-upper",
+        "z-lower",
+        "offset-zero",
+        "offset-plus2",
+        "millis",
+        "half-second",
+        "micros",
+        "naive",
+        "date-only",
+        "seven-digit-fraction",
+        "bad-month",
+        "word",
+        "empty",
+        "none",
+        "number",
+    ],
+)
+def test_parse_time_accepts_rfc3339_variants_only(value: Any, expected: float | None) -> None:
+    parsed = ad._parse_time(value)
+    if expected is None:
+        assert parsed is None
+    else:
+        assert parsed == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("kind", ["head_ref_force_pushed", "head_ref_restored"])
+@pytest.mark.parametrize(
+    "created_at",
+    [None, "", "not a date", "2025-01-01T00:00:00", 12345],
+    ids=["missing", "empty", "garbage", "naive", "number"],
+)
+def test_head_push_event_without_a_parseable_time_counts_as_recent(
+    kind: str, created_at: Any
+) -> None:
+    """#2169 F1: a force-push/restore of unknown age may be recent, so it blocks."""
+    event: dict[str, Any] = {"event": kind}
+    if created_at is not None:
+        event["created_at"] = created_at
+    api = green_api(
+        open_pulls=_old_pin_pr(16),
+        pushed_at={"e" * 40: OLD_ISO},
+        timeline={16: [event]},
+    )
+    result = ad.pin_bumps_in_flight(api, now=NOW)
+    assert result["verdict"] == "IN_FLIGHT" and result["ignored_stale"] == []
+
+
+@pytest.mark.parametrize(
+    ("created_at", "verdict"),
+    [
+        ("2025-01-01T00:00:00+00:00", "CLEAR"),
+        ("2025-01-01T00:00:00.000Z", "CLEAR"),
+        ("2025-10-09T08:53:20.000Z", "IN_FLIGHT"),
+        ("2025-10-09T10:53:20+02:00", "IN_FLIGHT"),
+    ],
+    ids=["old-offset-zero", "old-millis", "recent-millis", "recent-offset-plus2"],
+)
+def test_head_push_event_with_an_rfc3339_variant_time_is_dated(
+    created_at: str, verdict: str
+) -> None:
+    api = green_api(
+        open_pulls=_old_pin_pr(17),
+        pushed_at={"e" * 40: OLD_ISO},
+        timeline={17: [{"event": "head_ref_force_pushed", "created_at": created_at}]},
+    )
+    assert ad.pin_bumps_in_flight(api, now=NOW)["verdict"] == verdict
+
+
+def test_raising_commit_lookup_for_a_dateless_committed_event_is_unknown() -> None:
+    base = green_api(
+        open_pulls=_old_pin_pr(18),
+        pushed_at={"e" * 40: OLD_ISO},
+        timeline={18: [_committed_event("d" * 40, None)]},
+    )
+
+    def api(path: str) -> Any:
+        if path.endswith("/commits/" + "d" * 40):
+            raise RuntimeError("HTTP 502")
+        return base(path)
+
+    result = ad.pin_bumps_in_flight(api, now=NOW)
+    assert result["verdict"] == "UNKNOWN" and "HTTP 502" in result["error"]
+
+
+@pytest.mark.parametrize(
+    ("block", "ok"),
+    [
+        (_health_core_block(NEW), True),
+        (None, False),
+        ("CORE_REVISION_PINNED", False),
+        (_health_core_block(NEW, status="CORE_REVISION_MISMATCH"), False),
+        (_health_core_block(NEW, status="CORE_PROVENANCE_PROBE_FAILED"), False),
+        (_health_core_block(NEW, expected_revision=OLD), False),
+        (_health_core_block(NEW, observed_commit=OLD), False),
+        (_health_core_block(OLD), False),
+        (_health_core_block(NEW, fail_closed=True), False),
+        (_health_core_block(NEW, fail_closed=None), False),
+        (_health_core_block(NEW, fail_closed="false"), False),
+    ],
+    ids=[
+        "pinned",
+        "missing",
+        "not-a-dict",
+        "mismatch",
+        "probe-failed",
+        "other-expectation",
+        "other-observed",
+        "other-revision",
+        "fail-closed",
+        "fail-closed-missing",
+        "fail-closed-string",
+    ],
+)
+def test_health_core_provenance_requires_the_pinned_revision(block: Any, ok: bool) -> None:
+    health = _health(NEW)
+    if block is not None:
+        health["core_provenance"] = block
+    check = ad.health_core_provenance(health, {"revision": NEW, "root": "/core"})
+    assert check["ok"] is ok
+    assert ad.health_core_provenance(health, {})["ok"] is False  # no pin: fail closed
+
+
+class _OnDiskCorePinned(ad.Prober):
+    """The on-disk subprocess check passes; only ``/health`` varies."""
+
+    def core_provenance(self, *, root: Path, python: Path, core: Any) -> dict[str, Any]:  # type: ignore[override]
+        return {"ok": True, "status": "CORE_REVISION_PINNED"}
+
+
+@pytest.mark.parametrize(
+    ("block", "ok"),
+    [
+        (_health_core_block(NEW), True),
+        (None, False),
+        (_health_core_block(NEW, observed_commit=OLD), False),
+        (_health_core_block(NEW, fail_closed=True), False),
+    ],
+    ids=["pinned", "missing", "preload-broken", "fail-closed"],
+)
+def test_candidate_probe_also_reads_the_in_process_core_provenance(block: Any, ok: bool) -> None:
+    """An in-process vs on-disk mismatch fails the probe (both checks are kept)."""
+    health = _health(NEW)
+    if block is not None:
+        health["core_provenance"] = block
+    with fake_gateway(health, 3, False) as port:
+        result = _OnDiskCorePinned(ad.Host()).probe(
+            port=port,
+            token="tok",
+            commit=NEW,
+            root=REPO_ROOT,
+            python=Path(sys.executable),
+            timeout=10,
+            core={"revision": NEW, "root": "/core"},
+        )
+    assert result["checks"]["core_provenance"]["ok"] is True
+    assert result["checks"]["health_core_provenance"]["ok"] is ok
+    assert result["ok"] is ok
+
+
+def test_rollback_probe_does_not_require_the_health_core_block() -> None:
+    """A predecessor from before #2201 has no ``core_provenance`` in ``/health``."""
+    with fake_gateway(_health(OLD), 3, False) as port:
+        result = ad.Prober(ad.Host()).probe(
+            port=port,
+            token="tok",
+            commit=OLD,
+            root=REPO_ROOT,
+            python=Path(sys.executable),
+            timeout=10,
+        )
+    assert result["ok"] is True and "health_core_provenance" not in result["checks"]
+
+
+def _fail_receipts(monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(cfg: ad.Config, receipt: dict[str, Any]) -> None:
+        raise OSError("receipts disk full")
+
+    monkeypatch.setattr(ad, "_append_receipt", boom)
+
+
+def test_receipt_failure_under_open_r1_never_writes_hold(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#2169 F1: R1 open + receipt append fails: no HOLD, journal kept, retried."""
+    _crash_after_candidate_plist(cfg)
+    live_before = cfg.plist.read_bytes()
+    _fail_receipts(monkeypatch)
+    host = FakeHost()
+    host.r1_block = "R1_OPEN_RECOVERY_BLOCKS_V1_EFFECT:gen10:REQUESTED"
+    with pytest.raises(OSError, match="receipts disk full"):
+        cycle(cfg, host, FakeProber({(ad.LIVE_PORT, NEW): False}))
+    assert not cfg.hold_file.exists() and cfg.journal.exists()
+    assert cfg.plist.read_bytes() == live_before and host.reloads == []
+    monkeypatch.undo()
+    # R1 still open, receipts writable again: an ordinary postponement.
+    result = cycle(cfg, host, FakeProber({(ad.LIVE_PORT, NEW): False}))
+    assert result["status"] == "RECONCILED_BLOCKED_MANAGER_BUSY"
+    assert not cfg.hold_file.exists() and cfg.journal.exists()
+
+
+def test_unexpected_reconcile_error_under_open_r1_postpones_without_hold(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#2169 F1: any reconcile failure seen while R1 is open keeps the journal, no HOLD.
+
+    Defence in depth: ``move_tool_link`` swallows its own errors today, so this
+    stands in for any future raising step (the reachable ones are the plist read
+    and the receipt write, tested separately).
+    """
+    _crash_after_candidate_plist(cfg)
+
+    def explode(*_a: Any, **_k: Any) -> Any:
+        raise RuntimeError("tool link exploded")
+
+    monkeypatch.setattr(ad._Cycle, "move_tool_link", explode)
+    host = FakeHost()
+    host.r1_block = "R1_OPEN_RECOVERY_BLOCKS_V1_EFFECT:gen11:PREFLIGHTED"
+    result = cycle(cfg, host, FakeProber())
+    assert result["status"] == "RECONCILED_BLOCKED_MANAGER_BUSY"
+    assert "RECONCILE_FAILED:RuntimeError" in result["receipt"]["reason"]
+    assert not cfg.hold_file.exists() and cfg.journal.exists()
+
+
+def test_reconcile_failed_hold_without_its_receipt_still_stops_retries(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#2169 F2: the RECONCILE_FAILED receipt could not be written, only the HOLD."""
+    _crash_journal(cfg)
+
+    def explode(*_a: Any, **_k: Any) -> Any:
+        raise RuntimeError("unexpected")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(ad._Cycle, "finish_switch", explode)
+        _fail_receipts(patch)
+        with pytest.raises(OSError, match="receipts disk full"):
+            cycle(cfg, FakeHost(), FakeProber())
+    assert cfg.hold_file.read_text().startswith(ad.RECONCILE_FAILED_HOLD)
+    assert cfg.journal.exists() and ad.read_receipts(cfg.state_dir) == []
+    host, prober = FakeHost(), FakeProber()
+    result = cycle(cfg, host, prober)
+    assert result["status"] == "HELD"
+    assert host.reloads == [] and prober.calls == [] and cfg.journal.exists()
+
+
+def test_other_hold_with_a_pending_journal_is_still_reconciled(cfg: ad.Config) -> None:
+    """F2 is narrow: an ordinary Owner HOLD does not stop journal reconciliation."""
+    _crash_journal(cfg)
+    ad._set_hold(cfg, "owner: paused for maintenance")
+    result = cycle(cfg, FakeHost(), FakeProber())
+    assert result["status"].startswith("RECONCILED_") and not cfg.journal.exists()
+
+
+def test_deploy_error_during_reconcile_keeps_a_validated_journal(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#2169 F3: a non-lock DeployError is RECONCILE_FAILED, never JOURNAL_CORRUPT."""
+    _crash_journal(cfg)
+
+    def explode(*_a: Any, **_k: Any) -> Any:
+        raise ad.DeployError("GATEWAY_LABEL_MISMATCH")
+
+    monkeypatch.setattr(ad._Cycle, "finish_switch", explode)
+    result = cycle(cfg, FakeHost(), FakeProber())
+    assert result["status"] == "RECONCILED_RECONCILE_FAILED"
+    assert "RECONCILE_FAILED:DeployError:GATEWAY_LABEL_MISMATCH" in result["receipt"]["reason"]
+    assert cfg.hold_file.read_text().startswith(ad.RECONCILE_FAILED_HOLD)
+    assert cfg.journal.exists()
+    assert not list(cfg.state_dir.glob("pending-switch.corrupt.*.json"))
+
+
+# Real InterProcessLock (fcntl) on both #526 locks, no counting fakes.
+
+
+def _real_locks_host(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> tuple[FakeHost, Path, Path]:
+    from scripts.ops import mcp_gateway_durable as durable
+
+    cfg.gateway_root.chmod(0o700)
+    monkeypatch.setattr(durable, "GATEWAY_STATE_ROOT", cfg.gateway_root)
+    monkeypatch.setattr(durable, "GATEWAY_LOCK", cfg.gateway_root / "ledger.lock")
+    monkeypatch.setattr(durable, "GATEWAY_LEDGER", cfg.gateway_root / "ledger.jsonl")
+    ledger_lock = durable.GatewayLedger(cfg.gateway_root / "ledger.jsonl").lock_path
+
+    class RealLocks(FakeHost):
+        def r1_recovery_block(self, c: ad.Config) -> str | None:  # type: ignore[override]
+            block = ad.Host.r1_recovery_block(self, c)
+            if self.after_r1_check is not None:
+                self.after_r1_check()
+            return block
+
+        def r1_guard(self, c: ad.Config):  # type: ignore[override]
+            return ad.Host.r1_guard(self, c)
+
+        def manager_lock(self, c: ad.Config):  # type: ignore[override]
+            return ad.Host.manager_lock(self, c)
+
+    return RealLocks(), cfg.gateway_root / "ledger.lock", ledger_lock
+
+
+def _other_process_gets(path: Path) -> bool:
+    """Try ``path`` from another thread (no re-entrancy), as R1 or the manager would."""
+    from scripts.ops import mcp_gateway_durable as durable
+
+    got: list[bool] = []
+
+    def attempt() -> None:
+        try:
+            with durable.InterProcessLock(path, timeout=0.2):
+                got.append(True)
+        except Exception:  # noqa: BLE001 - contention
+            got.append(False)
+
+    thread = threading.Thread(target=attempt)
+    thread.start()
+    thread.join(timeout=10)
+    return got == [True]
+
+
+@contextlib.contextmanager
+def _held_elsewhere(path: Path) -> Iterator[None]:
+    """Hold ``path`` from another thread until the block ends."""
+    from scripts.ops import mcp_gateway_durable as durable
+
+    taken, release = threading.Event(), threading.Event()
+
+    def hold() -> None:
+        with durable.InterProcessLock(path, timeout=5):
+            taken.set()
+            release.wait(timeout=30)
+
+    thread = threading.Thread(target=hold)
+    thread.start()
+    assert taken.wait(timeout=10)
+    try:
+        yield
+    finally:
+        release.set()
+        thread.join(timeout=10)
+
+
+def test_real_locks_held_from_r1_check_through_rollback(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GATEWAY_LOCK then ledger.jsonl.lock, both real, are held at the R1 check, the
+    journal + plist write, the reload, the live probe, the rollback's nested
+    (re-entrant) guard and R1 re-read, its reload and its probe."""
+    host, gateway_lock, ledger_lock = _real_locks_host(cfg, monkeypatch)
+    host.lock_timeout_seconds = 2.0  # a re-entrancy bug fails fast, not after 30 s
+    seen: list[tuple[str, bool, bool]] = []
+
+    def contend(where: str) -> None:
+        seen.append((where, _other_process_gets(gateway_lock), _other_process_gets(ledger_lock)))
+
+    def on_reload(count: int) -> None:
+        assert cfg.journal.exists()  # journal written before the plist and reload
+        contend(f"reload{count}")
+
+    host.on_reload = on_reload
+
+    def hook(call: dict[str, Any]) -> None:
+        if call["port"] == 50123:  # pre-build advisory check is done
+            host.after_r1_check = lambda: contend("r1-check")
+        if call["port"] == ad.LIVE_PORT:
+            contend(f"live-probe-{call['commit'][:1]}")
+
+    result = cycle(cfg, host, FakeProber({(ad.LIVE_PORT, NEW): False}, hook=hook))
+    assert result["status"] == "ROLLED_BACK"
+    where = [w for w, _g, _l in seen]
+    assert where == ["r1-check", "reload1", "live-probe-b", "r1-check", "reload2", "live-probe-a"]
+    assert all(not gw and not lg for _w, gw, lg in seen), seen
+    assert _other_process_gets(gateway_lock) and _other_process_gets(ledger_lock)
+
+
+def test_real_ledger_lock_held_by_r1_blocks_the_switch(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    host, _gateway_lock, ledger_lock = _real_locks_host(cfg, monkeypatch)
+    host.lock_timeout_seconds = 0.2
+    before = cfg.plist.read_bytes()
+    stack = contextlib.ExitStack()
+
+    def hook(call: dict[str, Any]) -> None:
+        if call["port"] == 50123:  # R1 takes its ledger lock after the advisory check
+            stack.enter_context(_held_elsewhere(ledger_lock))
+
+    with stack:
+        result = cycle(cfg, host, FakeProber(hook=hook))
+    assert result["status"] == "BLOCKED_MANAGER_BUSY"
+    assert "MANAGER_LOCK_UNAVAILABLE:r1-ledger" in result["receipt"]["reason"]
+    assert cfg.plist.read_bytes() == before and not cfg.journal.exists()
+    assert host.reloads == [] and not cfg.hold_file.exists()
+
+
+def test_real_gateway_lock_held_by_the_manager_blocks_the_switch(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    host, gateway_lock, _ledger_lock = _real_locks_host(cfg, monkeypatch)
+    host.lock_timeout_seconds = 0.2
+    before = cfg.plist.read_bytes()
+    with _held_elsewhere(gateway_lock):
+        result = cycle(cfg, host, FakeProber())
+    assert result["status"] == "BLOCKED_MANAGER_BUSY"
+    assert "MANAGER_LOCK_UNAVAILABLE" in result["receipt"]["reason"]
+    assert cfg.plist.read_bytes() == before and not cfg.journal.exists()
+    assert host.reloads == [] and not cfg.hold_file.exists()
+
+
+def test_real_locks_reconcile_journal_under_both_locks(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Journal reconciliation also runs under the real GATEWAY_LOCK -> ledger lock."""
+    _crash_after_candidate_plist(cfg)
+    host, gateway_lock, ledger_lock = _real_locks_host(cfg, monkeypatch)
+    host.lock_timeout_seconds = 2.0
+    seen: list[tuple[bool, bool]] = []
+
+    def hook(call: dict[str, Any]) -> None:
+        seen.append((_other_process_gets(gateway_lock), _other_process_gets(ledger_lock)))
+
+    result = cycle(cfg, host, FakeProber(hook=hook))
+    assert result["status"] == "RECONCILED_DEPLOYED" and not cfg.journal.exists()
+    assert seen and all(not gw and not lg for gw, lg in seen)
+    # Positive control: the same helper gets both locks once the cycle is over.
+    assert _other_process_gets(gateway_lock) and _other_process_gets(ledger_lock)
+
+
+def test_plist_read_error_under_open_r1_postpones_without_hold(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Codex round 1: the R1 block is recorded before the live plist is read."""
+    _crash_after_candidate_plist(cfg)
+    real_read = Path.read_bytes
+
+    def flaky(self: Path) -> bytes:
+        if self == cfg.plist:
+            raise OSError("EIO on plist")
+        return real_read(self)
+
+    host = FakeHost()
+    host.r1_block = "R1_OPEN_RECOVERY_BLOCKS_V1_EFFECT:gen12:REQUESTED"
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "read_bytes", flaky)
+        result = cycle(cfg, host, FakeProber())
+    assert result["status"] == "RECONCILED_BLOCKED_MANAGER_BUSY"
+    assert "EIO on plist" in result["receipt"]["reason"]
+    assert not cfg.hold_file.exists() and cfg.journal.exists() and host.reloads == []
+
+
+def test_hold_is_written_atomically(cfg: ad.Config, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Codex round 1: a failed HOLD write leaves no truncated HOLD text behind."""
+    real_fsync = os.fsync
+
+    def full_disk(fd: int) -> None:
+        raise OSError("disk full")
+
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    other = cfg.state_dir / f".HOLD.tmp.{os.getpid()}"  # a concurrent writer's file
+    other.write_text("theirs")
+    with monkeypatch.context() as patch:
+        patch.setattr(ad.os, "fsync", full_disk)
+        with pytest.raises(OSError, match="disk full"):
+            ad._set_hold(cfg, f"{ad.RECONCILE_FAILED_HOLD} x; journal kept")
+    assert not cfg.hold_file.exists()
+    # Its own temp file is gone; another writer's is untouched.
+    assert list(cfg.state_dir.glob(".HOLD*.tmp.*")) == [other]
+    assert other.read_text() == "theirs"
+    assert ad.os.fsync is real_fsync
+    ad._set_hold(cfg, "owner: paused")
+    assert cfg.hold_file.read_text() == "owner: paused\n"
+    assert cfg.hold_file.stat().st_mode & 0o777 == 0o600
+
+
+def test_atomic_write_never_removes_a_temp_path_it_did_not_create(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Codex round 4: a pre-existing file or symlink at the temp name is left alone."""
+    monkeypatch.setattr(ad.os, "urandom", lambda n: b"\x00" * n)
+    dest = tmp_path / "status.json"
+    taken = tmp_path / f".status.json.tmp.{os.getpid()}.{'00' * 6}"
+    victim = tmp_path / "victim"
+    victim.write_text("keep")
+    taken.symlink_to(victim)
+    with pytest.raises(FileExistsError):
+        ad._atomic_write(dest, b"new")
+    assert taken.is_symlink() and victim.read_text() == "keep"
+    assert not dest.exists()
