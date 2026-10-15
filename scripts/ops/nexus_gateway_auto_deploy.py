@@ -1973,7 +1973,8 @@ class _Cycle:
         if not degraded:
             # A non-degraded reading ends the alert episode, so a later
             # degraded start (after a restart) is announced again.
-            with contextlib.suppress(FileNotFoundError):
+            # Any OSError: a clean IN_SYNC cycle must never fail on this marker.
+            with contextlib.suppress(OSError):
                 self.cfg.controller_alert_file.unlink()
             return None
         reason = _safe_reason(str(binding.get("reason") or "UNKNOWN"))
@@ -1981,7 +1982,11 @@ class _Cycle:
         return {"status": "DEGRADED", "reason": reason}
 
     def alert_degraded(
-        self, candidate: str, live: Optional[Path], binding: Dict[str, Any]
+        self,
+        candidate: str,
+        live: Optional[Path],
+        binding: Dict[str, Any],
+        status: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Warn and record (both rate limited); never holds, restarts or switches.
 
@@ -1989,6 +1994,7 @@ class _Cycle:
         Controller and so heals the Gateway, and a HOLD would block exactly
         that.  The receipt is written only with an alert attempt, so a
         degraded Gateway that stays IN_SYNC does not add one receipt per cycle.
+        A local write failure only adds a warning: this path never fails a cycle.
         """
         cfg, host = self.cfg, self.host
         now = host.now()
@@ -2027,9 +2033,14 @@ class _Cycle:
                 "reason": reason,
                 "commit": candidate,
             }
-            _atomic_write(
-                cfg.controller_alert_file, json.dumps(marker, sort_keys=True).encode(), 0o600
-            )
+            try:
+                _atomic_write(
+                    cfg.controller_alert_file, json.dumps(marker, sort_keys=True).encode(), 0o600
+                )
+            except OSError as exc:
+                status.setdefault("warnings", []).append(
+                    f"CONTROLLER_ALERT_MARKER_UNWRITABLE:{type(exc).__name__}"
+                )
         receipt = {
             "schema": RECEIPT_SCHEMA,
             "attempt_id": f"{candidate[:12]}-{int(now)}-degraded",
@@ -2044,7 +2055,12 @@ class _Cycle:
             "controller_binding": binding,
             "warning": {"posted": posted},
         }
-        _append_receipt(cfg, receipt)
+        try:
+            _append_receipt(cfg, receipt)
+        except OSError as exc:
+            status.setdefault("warnings", []).append(
+                f"LIVE_DEGRADED_RECEIPT_UNWRITABLE:{type(exc).__name__}"
+            )
         return {"warning": {"posted": posted}, "receipt": receipt}
 
     # -- entry -------------------------------------------------------------
@@ -2095,7 +2111,7 @@ class _Cycle:
             self.end_deferral()
             binding = self.live_controller_binding(status)
             if binding is not None and not dry_run:
-                degraded = self.alert_degraded(candidate, previous_root, binding)
+                degraded = self.alert_degraded(candidate, previous_root, binding, status)
                 return finish(LIVE_DEGRADED_OUTCOME, **degraded)
             return finish("IN_SYNC")
         receipts = [
@@ -2199,7 +2215,11 @@ class _Cycle:
             return 0.0
         interval = self.cfg.min_interval_seconds * (2 ** max(0, len(failures) - 1))
         interval = min(float(interval), float(MAX_BACKOFF_SECONDS))
-        attempts = [r for r in receipts if r.get("outcome") != DEFERRED_OUTCOME]
+        # Neither a deferral nor a degraded-Controller alert (#2230 F2) is an
+        # attempt: they must not move the debounce or backoff clock.
+        attempts = [
+            r for r in receipts if r.get("outcome") not in (DEFERRED_OUTCOME, LIVE_DEGRADED_OUTCOME)
+        ]
         if not attempts:
             return 0.0
         last_started = float(attempts[-1].get("started_epoch", 0))

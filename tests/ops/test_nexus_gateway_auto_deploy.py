@@ -4773,3 +4773,119 @@ def test_live_health_reads_the_live_port_with_the_probe_helper(
     monkeypatch.setattr(ad.Prober, "_http", fake_http)
     assert ad.Prober(ad.Host()).live_health() == {"status": "ok"}
     assert seen == [f"http://127.0.0.1:{ad.LIVE_PORT}/health"]
+
+
+def test_degraded_receipt_never_moves_the_debounce_or_backoff(cfg: ad.Config) -> None:
+    """A LIVE_DEGRADED_CONTROLLER receipt is not an attempt (review F1)."""
+    host, prober = FakeHost(), FakeProber()
+    assert cycle(cfg, host, prober)["status"] == "DEPLOYED"
+    host.clock += 60
+    prober.health = _degraded_health()
+    assert cycle(cfg, host, prober)["status"] == ad.LIVE_DEGRADED_OUTCOME
+    assert ad.last_receipt(cfg.state_dir)["outcome"] == ad.LIVE_DEGRADED_OUTCOME
+    host.clock += 60
+    ctx = ad._Cycle(cfg, host, prober, green_api(), {}, Path("/tool/python"))
+    failed = [{"outcome": "REJECTED_PROBE"}, {"outcome": "REJECTED_PROBE"}]
+    with_degraded = (ctx.backoff_remaining([]), ctx.backoff_remaining(failed))
+    assert with_degraded[0] == pytest.approx(cfg.min_interval_seconds - 120)
+    lines = cfg.receipts.read_text(encoding="utf-8").splitlines()
+    kept = [line for line in lines if ad.LIVE_DEGRADED_OUTCOME not in line]
+    assert len(kept) == len(lines) - 1
+    cfg.receipts.write_text("".join(f"{line}\n" for line in kept), encoding="utf-8")
+    # Neither shorter nor longer than without the degraded receipt.
+    assert with_degraded == (ctx.backoff_remaining([]), ctx.backoff_remaining(failed))
+
+
+@pytest.mark.parametrize("binding", [None, "DEGRADED", 5, ["DEGRADED"], {"status": ["DEGRADED"]}])
+def test_in_sync_odd_controller_binding_shapes_are_not_degraded(
+    cfg: ad.Config, binding: Any
+) -> None:
+    host, prober = FakeHost(candidate=OLD), FakeProber()
+    prober.health = {"status": "ok", "git_head": OLD, "controller_binding": binding}
+    result = cycle(cfg, host, prober)
+    assert result["status"] == "IN_SYNC"
+    assert host.issue_comments == [] and ad.read_receipts(cfg.state_dir) == []
+
+
+@pytest.mark.parametrize(
+    "marker",
+    [
+        "{not json",
+        "[]",
+        json.dumps({"warned_at": 12345, "reason": "X", "commit": OLD}),
+        json.dumps({
+            "warned_at": "2099-01-01T00:00:00Z",
+            "reason": "NEXUS_CANONICAL_SOURCE_ROOT_MISSING",
+            "commit": OLD,
+        }),
+    ],
+    ids=["corrupt", "not-object", "non-string-time", "future"],
+)
+def test_in_sync_bad_alert_marker_never_mutes_the_alert(cfg: ad.Config, marker: str) -> None:
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    cfg.controller_alert_file.write_text(marker, encoding="utf-8")
+    host, prober = FakeHost(candidate=OLD), FakeProber()
+    prober.health = _degraded_health()
+    cycle(cfg, host, prober)
+    assert len(host.issue_comments) == 1
+    fresh = json.loads(cfg.controller_alert_file.read_text(encoding="utf-8"))
+    assert fresh["warned_at"] == ad._iso(host.clock)
+    host.clock += 600
+    cycle(cfg, host, prober)
+    assert len(host.issue_comments) == 1  # the fresh marker rate-limits again
+
+
+@pytest.mark.parametrize(
+    ("reason", "commit"),
+    [
+        ("NEXUS_CANONICAL_SOURCE_ROOT_SOURCE_MISMATCH", OLD),
+        ("NEXUS_CANONICAL_SOURCE_ROOT_MISSING", NEW),
+    ],
+    ids=["reason-changed", "commit-changed"],
+)
+def test_in_sync_degraded_alert_rearms_after_an_hour_on_a_change(
+    cfg: ad.Config, reason: str, commit: str
+) -> None:
+    host, prober = FakeHost(candidate=OLD), FakeProber()
+    prober.health = _degraded_health()
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+
+    def mark(age: float) -> None:
+        cfg.controller_alert_file.write_text(
+            json.dumps({
+                "warned_at": ad._iso(host.clock - age),
+                "reason": reason,
+                "commit": commit,
+            }),
+            encoding="utf-8",
+        )
+
+    mark(ad.QUIESCENCE_REARM_MIN_SECONDS - 60)
+    cycle(cfg, host, prober)
+    assert host.issue_comments == []  # changed, but inside the hour
+    mark(ad.QUIESCENCE_REARM_MIN_SECONDS + 60)
+    cycle(cfg, host, prober)
+    assert len(host.issue_comments) == 1
+
+
+def test_in_sync_clean_reading_survives_an_unremovable_marker(cfg: ad.Config) -> None:
+    cfg.controller_alert_file.mkdir(parents=True)  # unlink() raises a non-FileNotFound OSError
+    host, prober = FakeHost(candidate=OLD), FakeProber()
+    result = cycle(cfg, host, prober)
+    assert result["status"] == "IN_SYNC" and "warnings" not in result
+
+
+def test_in_sync_degraded_survives_unwritable_marker_and_receipt(cfg: ad.Config) -> None:
+    cfg.controller_alert_file.mkdir(parents=True)  # os.replace onto a directory fails
+    cfg.receipts.mkdir(parents=True)  # appending to a directory fails
+    host, prober = FakeHost(candidate=OLD), FakeProber()
+    prober.health = _degraded_health()
+    result = cycle(cfg, host, prober)
+    assert result["status"] == ad.LIVE_DEGRADED_OUTCOME
+    assert result["status"] not in ad.FAILED_OUTCOMES
+    assert len(host.issue_comments) == 1
+    assert result["warnings"] == [
+        "CONTROLLER_ALERT_MARKER_UNWRITABLE:IsADirectoryError",
+        "LIVE_DEGRADED_RECEIPT_UNWRITABLE:IsADirectoryError",
+    ]
+    assert not cfg.hold_file.exists()
