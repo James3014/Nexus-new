@@ -1028,11 +1028,26 @@ def test_llm_generator_uses_unified_runtime_on_revisioned_workspace(monkeypatch,
     assert receipt["claim_boundary"]["public_claim_allowed"] is False
 
 
-def test_llm_generator_can_route_local_assist_into_online_context(monkeypatch, tmp_path: Path, governed_admission_advisor):
+def test_planning_advisor_local_assist_routes_into_online_context(monkeypatch, tmp_path: Path, governed_admission_advisor):
+    """Covers the *planning* + Local advisor combination only (#2089).
+
+    A repair sprint with a Local advisor action is not supported and is refused; see
+    ``test_repair_sprint_local_advisor_is_refused_fail_closed``.
+    """
+    from dataclasses import replace
+
+    from nexus.services.gateway import BattlesuitGateway
     from nexus.services.local_assist_service import LocalAssistService
     from nexus.services.local_heal.local_model_provider import InjectedLocalModelProvider
 
     monkeypatch.setenv("NEXUS_ONLINE_LOCAL_ASSIST", "1")
+    inner_ask_unified = BattlesuitGateway.ask_unified
+
+    def ask_unified_as_planning(self, request, *args, **kwargs):
+        # The sprint generator builds task_type="repair"; this test explicitly exercises planning.
+        return inner_ask_unified(self, replace(request, task_type="planning"), *args, **kwargs)
+
+    monkeypatch.setattr(BattlesuitGateway, "ask_unified", ask_unified_as_planning)
     generator = LLMCandidateGenerator(tmp_path, safe_mode=True, target_file="demo.py")
     generator._workspace_revision = lambda: "revision-hybrid-001"
     generator.local_service = LocalAssistService(
@@ -1071,6 +1086,56 @@ def test_llm_generator_can_route_local_assist_into_online_context(monkeypatch, t
     assert "local diagnosis: prefer strip" in online_calls[0][1]["prompt"]
     assert receipt["claim_boundary"]["local_online_continuation"] is True
     assert receipt["claim_boundary"]["public_claim_allowed"] is False
+
+
+def test_repair_sprint_local_advisor_is_refused_fail_closed(monkeypatch, tmp_path: Path, governed_admission):
+    """Product path (#2089): repair task_type + Local advisor action is not executor-bound.
+
+    No task_type rewrite: the sprint generator's real routing is used.  The admitted Local
+    provider is reached, but the runtime refuses the advisor action with
+    ``local_action_not_executor_bound`` (Local assist on repair
+    sprints is NOT supported; fail-closed).  Known gap, not asserted here: the fixture's
+    forwarding invoker still relays the refused advisor text into the online prompt.
+    """
+    from nexus.services.local_assist_service import LocalAssistService
+    from nexus.services.local_heal.local_model_provider import InjectedLocalModelProvider
+
+    monkeypatch.setenv("NEXUS_ONLINE_LOCAL_ASSIST", "1")
+    online_calls: list[tuple[tuple, dict]] = []
+    generator = LLMCandidateGenerator(tmp_path, safe_mode=True, target_file="demo.py")
+    generator._workspace_revision = lambda: "revision-repair-advisor-001"
+    generator.local_service = LocalAssistService(
+        provider=InjectedLocalModelProvider(
+            lambda _request: "local diagnosis: prefer strip",
+            provider_identity="ollama",
+            model_identity="qwen2.5-coder:7b-instruct",
+        )
+    )
+
+    def _online_call(*args, **kwargs):
+        online_calls.append((args, kwargs))
+        return ({"status": "APPROVED", "operation": "replace", "target_snippet": "return text",
+                 "replacement": "return text.strip()"}, "raw-candidate")
+
+    monkeypatch.setattr(generator.gateway, "ask_structured", _online_call)
+    code, metadata = generator.generate(
+        source_code="def normalize(text):\n    return text\n",
+        task="fix normalize",
+        mutation_hint="strip whitespace",
+        seed=9,
+    )
+
+    receipt = metadata["unified_runtime_receipt"]
+    local = receipt["local"]
+    # The runtime refuses the advisor action as not executor-bound: the local stage fails
+    # closed and contributes nothing to the outcome.
+    assert local["status"] == "FAILED"
+    assert local["reason"] == "local_action_not_executor_bound"
+    assert local["gate_passed"] is False
+    assert local["outcome_contributed"] is False
+    assert receipt["claim_boundary"]["local_online_continuation"] is not True
+    assert receipt["claim_boundary"]["public_claim_allowed"] is False
+    assert online_calls, "the online stage runs independently of the refused Local assist"
 
 
 def test_llm_mode_estimates_tokens_when_gateway_stats_missing(monkeypatch, tmp_path: Path, governed_admission):
@@ -1205,6 +1270,40 @@ def test_llm_model_name_can_be_overridden(monkeypatch, tmp_path: Path, governed_
     assert captured["model_name"] == "gemini-3.8-flash-medium"
     assert res.model_name == "gemini-3.8-flash-medium"
     assert res.model_patch_generated is True
+
+
+def test_llm_non_admitted_model_override_is_refused(monkeypatch, tmp_path: Path, governed_admission):
+    """Only the admitted identity can be dispatched; any other override fails closed (#2089)."""
+    _write_ready_learn_slo(tmp_path)
+    (tmp_path / "demo.py").write_text("print('x')\n", encoding="utf-8")
+    calls: list[str] = []
+
+    class FakeGateway:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def ask_structured(self, **kwargs):
+            calls.append(kwargs["model_name"])
+            return ({"status": "APPROVED", "patch": "print('ok')\n", "tokens_used": 5}, "print('ok')\n")
+
+    class FakeExecutor:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def evaluate_candidate(self, **kwargs):
+            return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code="print('ok')\n", source=kwargs["source"])
+
+    monkeypatch.setenv("NEXUS_GEMINI_MODEL_NAME", "gemini-3.1-pro-preview")
+    monkeypatch.setattr("nexus.services.gateway.BattlesuitGateway", FakeGateway)
+    monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
+
+    cfg = SprintConfig(task="fix", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+
+    # Admission refuses the transport before it is reached; the sprint falls back, not substitutes.
+    assert calls == []
+    assert res.fallback_used is True
+    assert res.model_patch_generated is False
 
 
 def test_llm_gateway_fail_payload_falls_back_to_local(monkeypatch, tmp_path: Path, governed_admission):
