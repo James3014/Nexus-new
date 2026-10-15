@@ -630,6 +630,8 @@ def test_expected_packet_id_substitution_blocks_before_online_provider() -> None
     ).to_dict()
     stage = {
         "invoked": True,
+        "status": "SUCCEEDED",
+        "gate_passed": True,
         "verified_assist_packet_expected_hash": packet["packet_hash"],
         "verified_assist_packet_id": "substituted-id",
         "response": {"task_id": "vap-bind-id", "verified_assist_packet": packet},
@@ -726,6 +728,8 @@ def test_runtime_preprovider_gate_blocks_custom_invoker_for_missing_vap() -> Non
             "task_id": request.task_id,
             "local": {
                 "invoked": True,
+                "status": "SUCCEEDED",
+                "gate_passed": True,
                 "response": {"task_id": request.task_id, "consume_verified_assist": True},
             },
             "source_hash": "source-5",
