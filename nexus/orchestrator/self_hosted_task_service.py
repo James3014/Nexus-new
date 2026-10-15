@@ -11776,6 +11776,14 @@ class SelfHostedTaskService:
         ).encode()).hexdigest()
         if closure.get("binding_hash") != closure_hash:
             raise RuntimeError("receipt recovery closure binding drift")
+        rebound_applied_head = closure.get("expected_canonical_head")
+        if (
+            not isinstance(rebound_applied_head, str)
+            or not re.fullmatch(r"[0-9a-f]{40}", rebound_applied_head)
+            or not isinstance(receipt.integration_commit_sha, str)
+            or receipt.integration_commit_sha != rebound_applied_head
+        ):
+            raise RuntimeError("receipt recovery commit does not match rebound applied head")
         try:
             authorization_obj = IntegrationAuthorizationEnvelope(**{
                 key: value for key, value in authorization.items() if key != "authorization_hash"
