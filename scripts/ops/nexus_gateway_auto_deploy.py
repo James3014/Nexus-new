@@ -87,6 +87,7 @@ import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.parse
 import urllib.request
@@ -442,6 +443,16 @@ class Config:
     @property
     def core_checkouts(self) -> Path:
         return self.gateway_root / "core"
+
+    @property
+    def pycache_prefixes(self) -> Path:
+        """Per-deployment ``PYTHONPYCACHEPREFIX`` dirs, outside ``core/`` and every tree.
+
+        With a prefix Python never reads an in-tree ``__pycache__``, so bytecode
+        planted next to the pinned Core sources (which the source digest does
+        not cover) is never executed (#2246).
+        """
+        return self.gateway_root / "pycache"
 
     @property
     def receipts(self) -> Path:
@@ -1157,17 +1168,20 @@ def core_env(core: Any) -> Dict[str, str]:
     return env
 
 
-def core_probe_env(core: Any) -> Dict[str, Optional[str]]:
+def core_probe_env(core: Any, pycache_prefix: Path) -> Dict[str, Optional[str]]:
     """``core_env`` for a probe subprocess; ``None`` removes an inherited value.
 
     Without a build digest, a stale ``NEXUS_CORE_SOURCE_DIGEST*`` from the
     deployer's own environment must not reach the probed transport.
+    ``pycache_prefix`` (outside the Core checkout) keeps Python from reading
+    bytecode inside it, as the wrapper does.
     """
     env: Dict[str, Optional[str]] = {
         "NEXUS_CORE_SOURCE_DIGEST": None,
         "NEXUS_CORE_SOURCE_DIGEST_REVISION": None,
     }
     env.update(core_env(core))
+    env["PYTHONPYCACHEPREFIX"] = str(pycache_prefix)
     return env
 
 
@@ -1216,12 +1230,13 @@ class Prober:
         """The candidate's transport must resolve Core as CORE_REVISION_PINNED at ``core``."""
         if not isinstance(core, dict) or not _SHA.match(str(core.get("revision") or "")):
             return {"ok": False, "error": "CORE_PIN_UNKNOWN"}
-        result = self.host.run(
-            [str(python), "-c", CORE_PROVENANCE_PROBE_CODE, str(root)],
-            cwd=root,
-            env={"PYTHONDONTWRITEBYTECODE": "1", **core_probe_env(core)},
-            timeout=120,
-        )
+        with tempfile.TemporaryDirectory(prefix="nexus-core-probe-pycache-") as prefix:
+            result = self.host.run(
+                [str(python), "-c", CORE_PROVENANCE_PROBE_CODE, str(root)],
+                cwd=root,
+                env={"PYTHONDONTWRITEBYTECODE": "1", **core_probe_env(core, Path(prefix))},
+                timeout=120,
+            )
         lines = (result.stdout or "").strip().splitlines()
         try:
             observed = json.loads(lines[-1]) if lines else None
@@ -1347,6 +1362,9 @@ def wrapper_command(
     the env file cannot override it) is the deployment's pinned Core checkout.
     ``core_digest`` is ``(revision, source_digest)`` of that checkout, exported as
     ``NEXUS_CORE_SOURCE_DIGEST_REVISION`` / ``NEXUS_CORE_SOURCE_DIGEST`` (#2246).
+    With a Core root, ``PYTHONPYCACHEPREFIX`` points at the deployment's own
+    ``pycache/<deployment>`` dir: the source digest excludes bytecode, so an
+    in-tree ``__pycache__`` must never be read (#2246).
     """
     state = cfg.canonical_state_dir if state_dir is None else state_dir
     controller = root if controller_root is None else controller_root
@@ -1358,6 +1376,12 @@ def wrapper_command(
             raise DeployError("WRAPPER_PATH_UNSAFE")
     port_export = "" if port is None else f"export NEXUS_MCP_GATEWAY_PORT={int(port)} ; "
     core_export = "" if core_root is None else f'export NEXUS_CORE_REPO_ROOT="{core_root}" ; '
+    if core_root is not None:
+        # Bytecode is never read from (or written into) the Core checkout.
+        prefix = cfg.pycache_prefixes / root.name
+        if any(token in str(prefix) for token in _SHELL_UNSAFE):
+            raise DeployError("WRAPPER_PATH_UNSAFE")
+        core_export += f'export PYTHONPYCACHEPREFIX="{prefix}" ; '
     if core_digest is not None:
         revision, digest = core_digest
         if (
@@ -1775,6 +1799,7 @@ def build(cfg: Config, host: Host, commit: str) -> Dict[str, Any]:
 # will apply at startup (#1939).  Prints OK or the refusal reason.
 CONTROLLER_CHECK_CODE = """
 import sys
+import tempfile
 from pathlib import Path
 code_root, root, controller = sys.argv[1:4]
 sys.path.insert(0, code_root)
@@ -2012,7 +2037,13 @@ def prune_refusal(cfg: Config) -> Optional[str]:
     root = cfg.gateway_root
     if not root.is_absolute() or os.path.realpath(root) != str(root):
         return f"GATEWAY_ROOT_NOT_CANONICAL:{root}"
-    for path in (cfg.deployments, cfg.venvs, cfg.core_checkouts, cfg.controllers):
+    for path in (
+        cfg.deployments,
+        cfg.venvs,
+        cfg.core_checkouts,
+        cfg.controllers,
+        cfg.pycache_prefixes,
+    ):
         if path.is_symlink():
             return f"SYMLINKED_DIRECTORY:{path}"
     return None
@@ -2047,6 +2078,10 @@ def prune(cfg: Config, host: Host, protected: List[Optional[Path]]) -> List[str]
     for venv in _contained_dirs(cfg.venvs):
         if venv.name not in present:
             shutil.rmtree(venv, ignore_errors=True)
+    # A deployment's bytecode prefix goes with it (#2246).
+    for cache in _contained_dirs(cfg.pycache_prefixes):
+        if cache.name not in present:
+            shutil.rmtree(cache, ignore_errors=True)
     # A Controller lives exactly as long as its deployment, and never goes while
     # a protected (live, previous, tool) deployment of that name exists (#1939).
     for controller in _contained_dirs(cfg.controllers):

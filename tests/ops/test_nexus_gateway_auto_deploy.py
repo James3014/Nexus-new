@@ -2624,6 +2624,106 @@ def test_core_pin_without_build_identity_exports_no_digest(cfg: ad.Config) -> No
         assert command.index(unset) > command.index(f'source "{cfg.env_file}"')
 
 
+def _wrapper_shell() -> str:
+    """launchd runs the wrapper with /bin/zsh; Linux CI runners have bash."""
+    shell = "/bin/zsh" if Path("/bin/zsh").exists() else shutil.which("bash")
+    assert shell, "no zsh or bash to run the real wrapper"
+    return shell
+
+
+def test_wrapper_exports_a_pycache_prefix_outside_core_after_the_env_file(cfg: ad.Config) -> None:
+    root = cfg.deployments / f"a1-{NEW}"
+    core = cfg.core_checkouts / CORE.pin
+    command = ad.wrapper_command(cfg, root, Path("/v/bin/python"), core_root=core)
+    prefix = cfg.pycache_prefixes / root.name
+    export = f'export PYTHONPYCACHEPREFIX="{prefix}" ; '
+    assert export in command
+    assert command.index(export) > command.index(f'source "{cfg.env_file}"')
+    assert command.index(export) < command.index("exec ")
+    for tree in (core, root, cfg.controllers):
+        assert tree not in prefix.parents and prefix != tree
+    # Every candidate probe and live switch uses it.
+    host = FakeHost()
+    assert cycle(cfg, host, FakeProber())["status"] == "DEPLOYED"
+    live = plistlib.loads(cfg.plist.read_bytes())["ProgramArguments"][2]
+    for started in (host.started[0], live):
+        assert "export PYTHONPYCACHEPREFIX=" in started
+        assert started.index("PYTHONPYCACHEPREFIX") > started.index("source ")
+
+
+def test_core_provenance_probe_env_carries_a_pycache_prefix(tmp_path: Path) -> None:
+    core_root = tmp_path / "core" / NEW
+    core_root.mkdir(parents=True)
+    host = _CoreStatusHost(_pinned_status(core_root))
+    ad.Prober(host).core_provenance(
+        root=REPO_ROOT,
+        python=Path(sys.executable),
+        core={"revision": NEW, "root": str(core_root), "source_digest": None},
+    )
+    prefix = Path(str(host.core_envs[0]["PYTHONPYCACHEPREFIX"]))
+    assert prefix.is_absolute()
+    assert core_root not in prefix.parents and REPO_ROOT not in prefix.parents
+
+
+def _plant_mismatched_pyc(package: Path) -> None:
+    """Bytecode of other code that CPython accepts for ``mod.py`` (same mtime and size)."""
+    import py_compile
+
+    source = package / "mod.py"
+    source.write_text("print('EVIL!!')\n")
+    pyc = package / "__pycache__" / f"mod.{sys.implementation.cache_tag}.pyc"
+    py_compile.compile(str(source), cfile=str(pyc), doraise=True)
+    stamp = source.stat().st_mtime_ns
+    source.write_text("print('SOURCE')\n")  # same size, real code
+    os.utime(source, ns=(stamp, stamp))
+
+
+def test_planted_bytecode_in_the_core_checkout_never_runs_under_the_wrapper(
+    cfg: ad.Config, tmp_path: Path
+) -> None:
+    """#2246 review: a pyc matching mod.py's mtime/size is executed instead of
+    mod.py, even with -B, unless PYTHONPYCACHEPREFIX moves the cache away."""
+    core = tmp_path / "core-checkout"
+    core.mkdir()
+    _plant_mismatched_pyc(core)
+    importer = (
+        "import sys, os; sys.path.insert(0, os.environ['NEXUS_CORE_REPO_ROOT']); import mod\n"
+    )
+    # Positive control: without a prefix the planted bytecode wins.
+    control = subprocess.run(
+        [sys.executable, "-B", "-c", importer],
+        capture_output=True,
+        text=True,
+        check=True,
+        env={**os.environ, "NEXUS_CORE_REPO_ROOT": str(core)},
+    )
+    assert control.stdout.strip() == "EVIL!!"
+    root = tmp_path / "deploy" / f"a1-{NEW}"
+    (root / ad.ENTRYPOINT).parent.mkdir(parents=True)
+    (root / ad.ENTRYPOINT).write_text(importer)
+    command = ad.wrapper_command(cfg, root, Path(sys.executable), core_root=core)
+    out = subprocess.run([_wrapper_shell(), "-c", command], capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "SOURCE"
+    # Nothing was written into the Core checkout's own cache.
+    assert sorted(p.name for p in (core / "__pycache__").iterdir()) == [
+        f"mod.{sys.implementation.cache_tag}.pyc"
+    ]
+
+
+def test_pycache_prefix_is_pruned_with_its_deployment(cfg: ad.Config) -> None:
+    host = FakeHost()
+    assert cycle(cfg, host, FakeProber())["status"] == "DEPLOYED"
+    live = cfg.pycache_prefixes / f"a1-{NEW}"
+    gone = cfg.pycache_prefixes / f"a1-{'9' * 40}"
+    for cache in (live, gone):
+        cache.mkdir(parents=True, exist_ok=True)
+        (cache / "x.pyc").write_bytes(b"x")
+    ad.prune(cfg, host, [cfg.deployments / f"a1-{NEW}"])
+    assert live.is_dir()
+    assert not gone.exists()
+
+
 def test_no_build_digest_never_leaks_a_stale_digest_into_the_host(
     cfg: ad.Config, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2658,10 +2758,7 @@ def test_no_build_digest_never_leaks_a_stale_digest_into_the_host(
     assert seen[0]["NEXUS_CORE_SOURCE_DIGEST"] == core["source_digest"]
     # The real wrapper, after an env file that exports a stale digest, hands the
     # Gateway process none of it.
-    # launchd runs it with /bin/zsh; Linux CI runners have bash, which runs
-    # the same fixed wrapper (source/unset/export/exec).
-    shell = "/bin/zsh" if Path("/bin/zsh").exists() else shutil.which("bash")
-    assert shell, "no zsh or bash to run the real wrapper"
+    shell = _wrapper_shell()
     cfg.env_file.write_text(
         'export NEXUS_CORE_SOURCE_DIGEST="sha256:' + "9" * 64 + '"\n'
         f'export NEXUS_CORE_SOURCE_DIGEST_REVISION="{NEW}"\n'
