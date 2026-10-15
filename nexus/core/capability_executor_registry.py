@@ -288,9 +288,14 @@ def _structured_outcome(
     error: str | None = None,
     control_plane: bool = False,
     legacy_alias_of: str | None = None,
+    contamination_signal: Mapping[str, Any] | None = None,
     **extra: Any,
 ) -> dict[str, Any]:
-    """Bounded structured mapping for executor outcomes (not str(result) theater)."""
+    """Bounded structured mapping for executor outcomes (not str(result) theater).
+
+    ``contamination_signal`` (P-CONTAM-01, record-only) is emitted only when given,
+    so receipts without a signal keep their shape.
+    """
     out: dict[str, Any] = {
         "action": action,
         "semantic_status": semantic_status,
@@ -325,6 +330,8 @@ def _structured_outcome(
         out["legacy_alias_of"] = legacy_alias_of
         out["not_independent_executor"] = True
     out.update(extra)
+    if contamination_signal is not None:
+        out["contamination_signal"] = dict(contamination_signal)
     return out
 
 
@@ -687,6 +694,8 @@ def _exec_codeintel(plan: CapabilityExecutionPlan, task_desc: str) -> Capability
 def _exec_lancedb(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
     start = time.monotonic()
     try:
+        import pandas as pd
+
         from nexus.services.lancedb_roots import KNOWLEDGE, resolve_lancedb_root
         from nexus.services.memory_repository import MemoryRepository
 
@@ -702,7 +711,11 @@ def _exec_lancedb(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRe
             limit=limit,
             fallback_columns=["condition", "action"],
         )
-        records = frame.to_dict("records") if hasattr(frame, "to_dict") else []
+        # search_fts may return a DataFrame, a Series or a fallback; only a DataFrame
+        # supports ``to_dict(orient="records")``.
+        records: list[Any] = (
+            frame.to_dict(orient="records") if isinstance(frame, pd.DataFrame) else []
+        )
         elapsed = int((time.monotonic() - start) * 1000)
         return _make_receipt(
             "lancedb",
@@ -867,7 +880,7 @@ def _exec_research(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityR
                 evidence_refs=[f"ev_research_{plan.task_id}"],
                 result=result if isinstance(result, Mapping) else {"value": str(result)[:200]},
                 physical_callable="nexus.engine.phases.research.ResearchPhaseHandler.run",
-                **({"contamination_signal": signal} if signal is not None else {}),
+                contamination_signal=signal,
             ),
         )
     except Exception as exc:
