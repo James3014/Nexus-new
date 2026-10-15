@@ -49,12 +49,20 @@ unchanged.
 2. **If it cannot be restored, the Owner approves in chat.** Explain what was
    lost and which R1 request was last known to the Owner. Do not continue
    without that approval.
-3. **Only after that approval**, deliberately remove `r1-ledger-genesis.json`
-   and, if present, `r1-owner-reconciles/` from the Gateway state root. This
-   re-establishes first-run semantics for R1. If the v1 guard still lists
-   `recovery-authority.json`, `recovery-actuator-bootstrap-consumed.json` or
-   `recovery-materializations`, those are part of the same Owner-approved reset.
-   Move them to a dated folder outside the state root; do not delete them.
+3. **Only after that approval**, first put the auto-deployer on hold
+   (`python scripts/ops/nexus_gateway_auto_deploy.py hold --reason "<Issue #2177 reset>"`,
+   the `com.nexus.gateway-auto-deploy` hold from `docs/ops/release-gates.md`)
+   and stop the Gateway service, so nothing reads or writes the state root
+   while you work. Then deliberately move `r1-ledger-genesis.json` and, if
+   present, `r1-owner-reconciles/` out of the Gateway state root into a dated
+   evidence folder outside it. This re-establishes first-run semantics for R1.
+   `r1-owner-reconciles/` holds Owner-approval evidence, so move it into the
+   same dated folder as the other files; never remove it. If the v1 guard still
+   lists `recovery-authority.json`, `recovery-actuator-bootstrap-consumed.json`
+   or `recovery-materializations`, those are part of the same Owner-approved
+   reset and go into the same dated folder; do not delete them. Afterwards
+   restart the Gateway and release the hold
+   (`python scripts/ops/nexus_gateway_auto_deploy.py release`).
 4. **Record** the Owner approval reference (chat session and quote, or Issue
    comment URL) on Issue #2177.
 

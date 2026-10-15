@@ -8722,12 +8722,15 @@ def test_2177_genesis_marker_is_durable_before_first_r1_row(tmp_path, monkeypatc
     genesis = ledger.path.parent / g.R1_LEDGER_GENESIS_FILENAME
     seen = []
 
+    class _ProcessCrash(BaseException):
+        """A real crash: no ordinary-error cleanup runs."""
+
     def crash_before_row(path, data):
         seen.append(genesis.is_file())
-        raise OSError(errno.EIO, "simulated crash before the first R1 row")
+        raise _ProcessCrash("simulated crash before the first R1 row")
 
     monkeypatch.setattr(g, "_atomic_gateway_write", crash_before_row)
-    with pytest.raises(OSError, match="simulated crash"):
+    with pytest.raises(_ProcessCrash):
         _i1995_seed_r1(ledger, "gen1-request", ("REQUESTED",))
     assert seen == [True]
     assert not ledger.path.exists()
@@ -8736,6 +8739,53 @@ def test_2177_genesis_marker_is_durable_before_first_r1_row(tmp_path, monkeypatc
         g.LedgerCorruption, match="^R1_LEDGER_MISSING_WITH_PRIOR_STATE_FAIL_CLOSED:"
     ):
         ledger.read()
+
+
+def test_2177_failed_first_ledger_write_unlinks_stranded_genesis_marker(tmp_path, monkeypatch):
+    ledger = _i1995_ledger(tmp_path)
+    genesis = ledger.path.parent / g.R1_LEDGER_GENESIS_FILENAME
+    real_write = g._atomic_gateway_write
+    calls = []
+
+    def failing_write(path, data):
+        calls.append(genesis.is_file())
+        raise OSError(errno.ENOSPC, "simulated ENOSPC on the first R1 row")
+
+    monkeypatch.setattr(g, "_atomic_gateway_write", failing_write)
+    with pytest.raises(OSError, match="ENOSPC"):
+        _i1995_seed_r1(ledger, "gen1-request", ("REQUESTED",))
+    assert calls == [True]
+    assert not ledger.path.exists()
+    assert not genesis.exists()
+    assert ledger.read() == []
+
+    monkeypatch.setattr(g, "_atomic_gateway_write", real_write)
+    _i1995_seed_r1(ledger, "gen1-request", ("REQUESTED",))
+    assert genesis.is_file()
+    assert ledger.path.is_file()
+    assert len(ledger.read()) == 1
+
+
+def test_2177_failed_later_append_keeps_genesis_marker(tmp_path, monkeypatch):
+    ledger = _i1995_ledger(tmp_path)
+    _i1995_seed_r1(ledger, "gen1-request", ("REQUESTED",))
+    genesis = ledger.path.parent / g.R1_LEDGER_GENESIS_FILENAME
+    assert genesis.is_file()
+    before = ledger.path.read_bytes()
+
+    real_open = Path.open
+
+    def failing_open(self, mode="r", *a, **k):
+        if self == ledger.path and "a" in mode:
+            raise OSError(errno.EIO, "simulated EIO on append")
+        return real_open(self, mode, *a, **k)
+
+    monkeypatch.setattr(Path, "open", failing_open)
+    with pytest.raises(OSError, match="EIO"):
+        _i1995_seed_r1(ledger, "gen1-request", ("PREFLIGHTED",))
+    monkeypatch.undo()
+    assert genesis.is_file()
+    assert ledger.path.read_bytes() == before
 
 
 def test_2177_refused_r1_row_does_not_write_genesis_marker(tmp_path):

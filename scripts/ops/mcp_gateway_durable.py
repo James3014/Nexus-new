@@ -2958,8 +2958,9 @@ def _r1_prior_state_evidence(state_root: Path, *, exclude: Path | None = None) -
     return evidence
 
 
-# #1995 (Codex P1 at c38881d11): written next to the ledger right after the
-# first R1 row is appended (and backfilled by any read that sees R1 rows). It
+# #1995 (Codex P1 at c38881d11): written next to the ledger. Since #2177 it is
+# written BEFORE the first R1 row is appended, and plain scans no longer
+# backfill it (only R1 appends/reads do, failing closed). It
 # is the one signal that cannot predate the ledger: recovery-authority.json,
 # the materialization receipt and the bootstrap marker all legitimately exist
 # before the first REQUESTED row of a first-ever run.
@@ -3686,15 +3687,34 @@ class GatewayLedger:
         # never read as a first run). A crash between the two leaves a marker
         # with no R1 row; if that host had no ledger yet, R1 fails closed until
         # the Owner clears it (docs/runbooks/gateway_r1_lost_ledger_runbook.md).
+        marker_path = self.path.parent / R1_LEDGER_GENESIS_FILENAME
+        marker_preexisted = marker_path.exists() or marker_path.is_symlink()
         _r1_write_ledger_genesis_or_fail(self.path)
-        if self.path.exists():
-            with self.path.open("ab") as handle:
-                handle.write(encoded)
-                handle.flush()
-                os.fsync(handle.fileno())
-            _fsync_dir(self.path.parent)
-        else:
-            _atomic_gateway_write(self.path, encoded)
+        try:
+            if self.path.exists():
+                with self.path.open("ab") as handle:
+                    handle.write(encoded)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                _fsync_dir(self.path.parent)
+            else:
+                _atomic_gateway_write(self.path, encoded)
+        except Exception:
+            # An ordinary write failure (ENOSPC, EIO, permission) on a host
+            # with no ledger must not strand the marker we just wrote: that
+            # would fail every later read closed until the Owner runbook reset.
+            # Only a real process crash (no Python unwinding) needs the runbook.
+            if (
+                not marker_preexisted
+                and not self.path.exists()
+                and not self.path.is_symlink()
+            ):
+                try:
+                    marker_path.unlink()
+                    _fsync_dir(self.path.parent)
+                except OSError:
+                    pass
+            raise
         return record
 
     @staticmethod
