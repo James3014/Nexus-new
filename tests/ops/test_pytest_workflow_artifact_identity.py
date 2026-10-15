@@ -100,8 +100,16 @@ def test_pytest_workflow_triggers_and_permissions_are_unchanged() -> None:
         "schedule": [{"cron": "17 3 * * *"}],
     }
     assert workflow["permissions"] == {"contents": "read"}
-    assert workflow["jobs"]["impact-gate"]["if"] == (
+    assert workflow["jobs"]["impact-run"]["if"] == (
         "github.event_name != 'workflow_dispatch' && github.event_name != 'schedule'"
+    )
+    # The required gate classifies the parallel base/head runs (#2220). It must
+    # run even when a run side fails: a skipped required check counts as passed.
+    gate = workflow["jobs"]["impact-gate"]
+    assert gate["name"] == "Exact-base impact gate"
+    assert gate["needs"] == "impact-run"
+    assert gate["if"] == (
+        "always() && github.event_name != 'workflow_dispatch' && github.event_name != 'schedule'"
     )
 
 
@@ -152,3 +160,49 @@ def test_exact_head_expression_truth_table(
     assert expression == EXACT_HEAD_EXPRESSION
     selected_sha = pull_request_head_sha if event_name == "pull_request" else github_sha
     assert selected_sha == expected_sha
+
+
+def test_impact_gate_fails_unless_both_run_sides_succeeded() -> None:
+    verify = _step("Verify both run sides and assemble evidence")
+    assert verify["env"]["RUN_RESULT"] == "${{ needs.impact-run.result }}"
+    run = verify["run"]
+    assert 'if [ "$RUN_RESULT" != "success" ]; then' in run
+    assert "different impact plans" in run
+    assert "does not bind the exact base/head revisions" in run
+    assert "run side did not record success" in run
+    side_steps = [step["name"] for step in _load_workflow()["jobs"]["impact-run"]["steps"]]
+    # The success marker is the last step before the always() upload.
+    assert side_steps[-3:] == [
+        "Clear run side marker",
+        "Record run side success",
+        "Upload exact-base run evidence",
+    ]
+    side = {step["name"]: step for step in _load_workflow()["jobs"]["impact-run"]["steps"]}
+    assert side["Clear run side marker"]["if"] == "always()"
+    assert "rm -f" in side["Clear run side marker"]["run"]
+    assert "if" not in side["Record run side success"]  # runs only when all prior steps passed
+    names = [step["name"] for step in _steps()]
+    assert names.index("Verify both run sides and assemble evidence") < names.index(
+        "Classify exact-base regression"
+    )
+
+
+def test_impact_run_sides_split_base_and_head() -> None:
+    job = _load_workflow()["jobs"]["impact-run"]
+    assert job["strategy"]["matrix"]["side"] == ["base", "head"]
+    assert job["strategy"]["fail-fast"] is False
+    steps = {step["name"]: step for step in job["steps"]}
+    assert steps["Run mapped tests on exact base source"]["if"] == "matrix.side == 'base'"
+    assert steps["Run mapped tests on exact head"]["if"] == "matrix.side == 'head'"
+    upload = steps["Upload exact-base run evidence"]["with"]["name"]
+    assert upload == f"exact-base-impact-${{{{ matrix.side }}}}-{EXACT_HEAD_EXPRESSION}"
+
+
+def test_impact_map_coverage_is_advisory_and_pr_only() -> None:
+    job = _load_workflow()["jobs"]["impact-map-coverage"]
+    assert job["if"] == "github.event_name == 'pull_request'"
+    assert job.get("permissions") is None  # inherits contents: read
+    (checkout,) = [step for step in job["steps"] if step["name"] == "Checkout exact head"]
+    assert checkout["with"]["persist-credentials"] is False
+    run = job["steps"][-1]["run"]
+    assert 'ch not in "%`:#[]"' in run  # no ::cmd or legacy ##[cmd] from PR paths
