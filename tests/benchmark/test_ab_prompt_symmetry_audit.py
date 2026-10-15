@@ -356,7 +356,13 @@ def test_identical_prompt_resent_after_quota_rotation_counts_once(tmp_path: Path
             "trial_index": 1,
             "pre_effect_quota_resends": 1,
         },
-        {"mode": "with_nexus", "task_id": "nexus-value-trust-002", "trial_index": 1},
+        # the runner writes model_calls on every with-Nexus row; it is reconciled two-way
+        {
+            "mode": "with_nexus",
+            "task_id": "nexus-value-trust-002",
+            "trial_index": 1,
+            "model_calls": 1,
+        },
     ]
     task = audit_run(tmp_path, _material(), rows=rows)["tasks"][0]
     assert task["bare_calls"] == 1
@@ -1562,3 +1568,157 @@ def test_strict_sprint_local_fallback_counts_as_one_model_attempt(
     assert not any("calls" in v for v in report["tasks"][0]["violations"]), report["tasks"][0][
         "violations"
     ]
+
+
+def test_crashed_product_row_is_handled_like_a_killed_row(tmp_path: Path, monkeypatch) -> None:
+    """#2275 round 3: the product subprocess calls the model, then crashes (traceback, no result
+    report, non-zero exit). The runner marks the row product_crash (FAILED, never a solve, in the
+    denominator); the audit treats it like a killed row, so model_calls=0 vs 1 captured call does
+    not void the run. A normal row with the same counts still fails the run."""
+
+    import subprocess
+
+    from scripts.bench.capability_ab_runner import _materialize_fixture, load_tasks, run_with_nexus
+    from scripts.bench.capability_ab_runner import _run_process_group as real_run_process_group
+    from scripts.bench.strict_llm_baseline import apply_strict_llm_baseline_classification
+
+    for name, value in {
+        "NEXUS_BENCH_NO_TASK_HINTS": "1",
+        "NEXUS_VALUE_HIDDEN_VERIFIER": "1",
+        "NEXUS_SYMMETRIC_PROMPT": "1",
+        "NEXUS_BENCH_COUNTED_FIRST_ATTEMPT": "1",
+        "NEXUS_BENCH_NO_HIDDEN_FEEDBACK": "1",
+        "NEXUS_BENCH_DISABLE_HIDDEN_RETRY": "1",
+        "NEXUS_BENCH_DISABLE_DETERMINISTIC_RESCUE": "1",
+    }.items():
+        monkeypatch.setenv(name, value)
+    tasks = load_tasks(
+        Path(__file__).resolve().parents[2]
+        / "scripts"
+        / "bench"
+        / "public_benchmark_nexus_value_v1.json"
+    )
+    task = next(t for t in tasks if t.id == "nexus-value-trust-002")
+    target_file, visible = _materialize_fixture(tmp_path / "ws", task)
+
+    def crash(cmd, *, cwd, env, timeout_sec):
+        if "research:auto-flow" in cmd:
+            return subprocess.CompletedProcess(
+                cmd, 1, stdout="Traceback (most recent call last):\nRuntimeError: boom\n", stderr=""
+            )
+        return real_run_process_group(cmd, cwd=cwd, env=env, timeout_sec=timeout_sec)
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", crash)
+    row = run_with_nexus(
+        repo_root=tmp_path / "ws",
+        task=task,
+        target_file=target_file,
+        test_file=visible,
+        timeout_sec=120,
+        force_flow="hyper_sprint",
+        runner_mode="subprocess",
+        with_llm_mode="all",
+        strict_llm_baseline=True,
+    )
+    row["mode"] = "with_nexus"
+    assert row["product_crash"] is True and row["product_exit_code"] == 1
+    assert row["after_treatment_status"] == "not_run:product_crash"
+    assert row["status"] != "SUCCESS" and int(row.get("model_calls") or 0) == 0
+    capture = tmp_path / "captures"
+    capture.mkdir()
+    _capture(capture, "without_nexus", BARE)
+    _capture(capture, "with_nexus", BARE)
+    bare = {
+        "mode": "without_nexus",
+        "task_id": task.id,
+        "trial_index": task.trial_index,
+        "model_calls": 1,
+    }
+    report = audit_run(capture, _material(), rows=[row, bare])
+    assert report["status"] == "PASS", (report["row_violations"], report["tasks"][0]["violations"])
+    apply_strict_llm_baseline_classification([row])
+    assert row["solve_classification"] == "not_solved"
+    # the same counts on a row that completed normally still fail the run
+    normal = {k: v for k, v in row.items() if k not in {"product_crash", "after_treatment_status"}}
+    failed = audit_run(capture, _material(), rows=[normal, bare])
+    assert failed["status"] == "FAIL"
+    assert "with_nexus_calls_mismatch:captured=1,row=0" in failed["tasks"][0]["violations"]
+
+
+@pytest.mark.parametrize(
+    "calls, entries, attempts",
+    [
+        (1, ["strict_baseline"], 1),
+        (1, ["strict_baseline", "bounded_hyper_rescue"], 2),
+        (2, ["primary"], 2),
+        (0, ["primary", "hidden_verifier_bounded_retry"], 2),
+    ],
+)
+def test_model_attempts_is_max_of_calls_and_entries(
+    calls: int, entries: list, attempts: int
+) -> None:
+    from scripts.bench.prompt_symmetry_audit import model_attempts
+
+    row = {
+        "model_calls": calls,
+        "model_attempts": [{"attempt_type": kind} for kind in entries],
+        "attempt_count": 5,
+    }
+    assert model_attempts(row) == attempts
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {
+            "model_calls": 1,
+            "model_attempts": [],
+            "attempt_count": 2,
+        },  # N2: empty list erases nothing
+        {"model_calls": 1, "model_attempts": [{"attempt_type": "mystery"}]},  # N4: unknown type
+        {"model_calls": 1, "model_attempts": [{}]},
+    ],
+    ids=["empty_attempt_list", "unknown_attempt_type", "attempt_without_type"],
+)
+def test_attempt_list_must_be_the_runners(tmp_path: Path, fields: dict) -> None:
+    _capture(tmp_path, "without_nexus", BARE)
+    _capture(tmp_path, "with_nexus", BARE)
+    report = audit_run(tmp_path, _material(), rows=_strict_row(**fields))
+    assert "with_nexus:nexus-value-trust-002#1:attempt_count_invalid" in report["row_violations"]
+
+
+@pytest.mark.parametrize("lane", ["strict", "treatment"])
+@pytest.mark.parametrize("bad", [True, "1", -1, {"n": 1}], ids=["bool", "str", "negative", "dict"])
+def test_invalid_model_calls_fail_in_both_lanes(tmp_path: Path, lane: str, bad) -> None:
+    """N1: an invalid model_calls never skips the reconciliation and is flagged in both lanes
+    (the treatment exemption covers only attempt_count>1)."""
+
+    _capture(tmp_path, "without_nexus", BARE)
+    _capture(tmp_path, "with_nexus", BARE)
+    _capture(tmp_path, "with_nexus", BARE + "\n")
+    rows = _strict_row(model_calls=bad, model_attempts=ONE_ATTEMPT, lane=lane)
+    report = audit_run(tmp_path, _material(), rows=rows, lane=lane)
+    task = report["tasks"][0]
+    assert report["status"] == "FAIL"
+    assert "model_calls_invalid" in task["violations"]
+    assert any(v.startswith("with_nexus_calls_mismatch") for v in task["violations"])
+    assert "with_nexus:nexus-value-trust-002#1:attempt_count_invalid" in report["row_violations"]
+
+
+def test_missing_model_calls_is_a_mismatch_not_a_skip(tmp_path: Path) -> None:
+    _capture(tmp_path, "without_nexus", BARE)
+    _capture(tmp_path, "with_nexus", BARE)
+    report = audit_run(tmp_path, _material(), rows=_strict_row(attempt_count=1))
+    assert "with_nexus_calls_mismatch:captured=1,row=None" in report["tasks"][0]["violations"]
+
+
+def test_runner_attempt_types_come_from_the_audit_constants() -> None:
+    """N4: the runner writes no attempt_type literal of its own (single source of the enum)."""
+
+    import re
+
+    source = (
+        Path(__file__).resolve().parents[2] / "scripts" / "bench" / "capability_ab_runner.py"
+    ).read_text(encoding="utf-8")
+    assert not re.findall(r'"attempt_type":\s*"', source)
+    assert source.count('"attempt_type": _psa.ATTEMPT_') >= 3
