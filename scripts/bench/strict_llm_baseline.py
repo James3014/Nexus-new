@@ -206,6 +206,8 @@ def _treatment_lane_solve(row: dict[str, Any]) -> str:
     ):
         row["treatment_sha_unbound"] = True
         return NOT_SOLVED
+    if row.get("treatment_round_void") is True:
+        return NOT_SOLVED  # a later round carried hidden text (R2-3): the row is void, not a solve
     if runner[0] == final and kinds[:1] == ["stage1"]:
         return MODEL_SOLVE  # call 1's own candidate was delivered: a first-attempt solve
     return TREATMENT_MODEL_SOLVE
@@ -259,6 +261,7 @@ def apply_lane_columns(row: dict[str, Any]) -> dict[str, Any]:
     row["after_treatment"] = bool(
         not void
         and row.get("treatment_unverifiable") is not True
+        and row.get("treatment_round_void") is not True
         and classification in {MODEL_SOLVE, TREATMENT_MODEL_SOLVE}
     )
     return row

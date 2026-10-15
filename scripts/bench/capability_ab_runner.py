@@ -16372,14 +16372,15 @@ def run_with_nexus(
                 verification_test_file=verification_test_file,
                 original_source=strict_target_before or "",
                 key=_prompt_capture_key(task),
-                run_hidden=lambda test, limit: _run_process_group(
-                    _pytest_verifier_cmd(str(test)), cwd=Path(test).parent, env=os.environ.copy(), timeout_sec=limit
+                run_hidden=lambda test, root, limit: _run_process_group(
+                    _pytest_verifier_cmd(str(test)), cwd=root, env=os.environ.copy(), timeout_sec=limit
                 ),
-                run_visible=lambda test, limit: _run_process_group(
-                    _pytest_verifier_cmd(str(test)), cwd=Path(test).parent, env=os.environ.copy(), timeout_sec=limit
+                run_visible=lambda test, root, limit: _run_process_group(
+                    _pytest_verifier_cmd(str(test)), cwd=root, env=os.environ.copy(), timeout_sec=limit
                 ),
                 timeout_sec=int(timeout_sec),
                 row_deadline_sec=float(effective_timeout_sec) if shared_task_deadline is not None else None,
+                repo_root=repo_root,
             )
         return _finalize_with_nexus_row(
             row,

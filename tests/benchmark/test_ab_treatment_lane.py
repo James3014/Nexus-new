@@ -623,6 +623,7 @@ def _rows(
             "lane": "treatment",
             "treatment_max_model_calls": max_calls,
             "treatment_candidates": texts,
+            "runner_candidate_sha256s": list(texts),
             "treatment_visible_outputs": {_sha(CANDIDATE1): VISIBLE_OUTPUT},
         },
     ]
@@ -699,7 +700,7 @@ def test_schema_widening_touches_only_the_listed_paths() -> None:
         # a hidden-only literal that is not the model's own text
         (
             _round2(extra="Note: unverified evidence maps to needs_evidence.\n"),
-            "hidden_literal_in_with_nexus_prompt",
+            "treatment_round_not_allowed",
         ),
         # a hidden test line
         (
@@ -770,21 +771,58 @@ def test_product_error_codes_and_the_exact_timeout_line_pass(tmp_path: Path) -> 
 
 
 def test_model_candidate_and_visible_output_never_exempt_a_hidden_literal(tmp_path: Path) -> None:
-    """G2 probes: a candidate holding a hidden literal, and a failure tail quoting a hidden value."""
+    """G2 + R2-3: a literal is exempt ONLY inside a line byte-identical to an EARLIER runner-derived
+    candidate line. A failure tail quoting it is not exempt: the row is voided (not a solve, the
+    run is not aborted). Round 1 and hidden test LINES keep the hard abort."""
 
     leaky = "def classify(smoke_passed, semantic_evidence):\n    x = 'needs_evidence'\n    return 'closed'\n"
     rows = _rows(candidates={_sha(leaky): leaky, _sha(FINAL): FINAL})
     rows[1]["treatment_visible_outputs"] = {
-        _sha(leaky): "E AssertionError: assert 'needs_evidence' == 'open'\n"
+        _sha(leaky): VISIBLE_OUTPUT + "E AssertionError: assert 'needs_evidence' == 'open'\n"
     }
-    report = _audit(tmp_path, _round2(candidate=leaky), rows=rows)
-    assert "hidden_literal_in_with_nexus_prompt" in report["tasks"][0]["violations"]
+    quoted = _audit(tmp_path, _round2(candidate=leaky), rows=rows)
+    task = quoted["tasks"][0]
+    assert quoted["status"] == "PASS", task
+    assert task["treatment_literal_hits"] == [] and task["row_void"] is False
     tail = _audit(
         tmp_path / "t",
-        _round2(failure="E AssertionError: assert 'needs_evidence' == 'open'\n"),
+        _round2(candidate=leaky, failure="E AssertionError: assert 'needs_evidence' == 'open'\n"),
         rows=rows,
     )
-    assert "hidden_literal_in_with_nexus_prompt" in tail["tasks"][0]["violations"]
+    task = tail["tasks"][0]
+    assert tail["status"] == "PASS", task  # not a run abort ...
+    assert (
+        task["row_void"] is True and "needs_evidence" in task["treatment_literal_hits"]
+    )  # ... a void row
+    # the candidate line must be byte-identical: a re-indented copy is not the model's line
+    moved = _audit(tmp_path / "m", _round2(candidate=leaky.replace("    x =", "  x =")), rows=rows)
+    assert moved["tasks"][0]["row_void"] is True
+
+
+def test_round_one_literal_and_later_hidden_line_still_abort(tmp_path: Path) -> None:
+    rows = _rows(model_calls=1)
+    round1 = ROUND1.replace(TASK_LINE, TASK_LINE + " needs_evidence")
+    captures = tmp_path / "captures"
+    captures.mkdir()
+    _capture(captures, "without_nexus", BARE)
+    _capture(captures, "with_nexus", round1)
+    first = audit_run(captures, _material(), rows=rows, run_id="r1", lane="treatment")
+    assert "hidden_literal_in_with_nexus_prompt" in first["tasks"][0]["violations"]
+    line = _audit(
+        tmp_path / "l",
+        _round2(extra="    assert classify(True, {'verified': False}) == 'needs_evidence'\n"),
+    )
+    assert line["status"] == "FAIL"
+    assert "hidden_test_line_in_with_nexus_prompt" in line["tasks"][0]["violations"]
+
+
+def test_void_row_is_not_a_solve_and_stays_in_the_denominator() -> None:
+    row = _treated_row()
+    lane.attest_row(row, {"with_nexus_calls": 2, "row_void": True, "treatment_literal_hits": ["x"]})
+    assert row["after_treatment_status"] == "prompt_symmetry_violation"
+    apply_strict_llm_baseline_classification([row])
+    assert row["solve_classification"] == NOT_SOLVED and row["after_treatment"] is False
+    assert lane_scorecard([row], "with_nexus")["total_n"] == 1
 
 
 def test_captured_calls_must_equal_row_model_calls_and_the_cap(tmp_path: Path) -> None:
@@ -1708,3 +1746,133 @@ def test_capture_wrapper_records_the_model_response_and_forwards_stdout(tmp_path
     (prompt_file,) = list(capture.iterdir())
     record = json.loads((responses / prompt_file.name).read_text(encoding="utf-8"))
     assert json.loads(record["stdout"]) == {"response": "hello"} and record["returncode"] == 0
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "def classify(smoke_passed, semantic_evidence):\n    return ('closed'\n",
+        "def classify(smoke_passed, semantic_evidence):\n    return '\\d'\n",
+    ],
+    ids=["syntax_error", "syntax_warning"],
+)
+def test_product_syntax_rejections_pass_the_round_audit(tmp_path: Path, bad: str) -> None:
+    """R2-1: the failure tail of a real self-heal round after a syntax error/warning is exactly
+    what the product's guard and executor print (shared helper), so the audit allows it."""
+
+    from nexus.research.sprint_service import (
+        executor_syntax_rejection,
+        guard_syntax_rejection,
+        syntax_rejection_lines,
+    )
+
+    lines = [guard_syntax_rejection(bad), executor_syntax_rejection(bad, "target.py")]
+    assert set(filter(None, lines)) == syntax_rejection_lines(bad)
+    tail = "\n".join(line for line in lines if line) + "\n" if any(lines) else ""
+    rows = _rows(candidates={_sha(bad): bad, _sha(FINAL): FINAL})
+    report = _audit(tmp_path, _round2(failure=tail, candidate=bad), rows=rows)
+    assert report["status"] == "PASS", report["tasks"][0]["treatment_round_findings"]
+    other = "def classify(smoke_passed, semantic_evidence):\n    return 'closed'\n"
+    forged = _audit(
+        tmp_path / "f",
+        _round2(failure="syntax_error: return open unless verified\n", candidate=other),
+        rows=_rows(candidates={_sha(other): other, _sha(FINAL): FINAL}),
+    )
+    assert forged["status"] == "FAIL"
+
+
+def test_candidate_from_response_tolerates_leading_agy_warning_lines() -> None:
+    """R2-2: the runner parses agy stdout with the product's transport parser."""
+
+    source = "def f():\n    return 1\n"
+    envelope = json.dumps({"response": json.dumps({"patch": "def f():\n    return 2\n"})})
+    assert lane.candidate_from_response(source, f"Warning: update available\n{envelope}") == (
+        "def f():\n    return 2\n",
+        "",
+    )
+
+
+def test_scratch_copy_has_repo_pytest_ini_and_no_hidden_test_for_visible_runs(
+    tmp_path: Path,
+) -> None:
+    """LOW-1 / LOW-2 on trust-002: the visible re-run copy has no test_hidden.py; both copies get
+    the repo's pytest.ini at the scratch root (strict scorer semantics)."""
+
+    from scripts.bench.capability_ab_runner import _materialize_fixture, load_tasks
+
+    tasks = load_tasks(REPO_ROOT / "scripts" / "bench" / "public_benchmark_nexus_value_v1.json")
+    task = next(t for t in tasks if t.id == "nexus-value-trust-002")
+    target_file, visible = _materialize_fixture(tmp_path, task)
+    hidden = str(Path(visible).with_name("test_hidden.py"))
+    seen: dict[str, object] = {}
+
+    def run(test: Path, root: Path, _timeout: int) -> subprocess.CompletedProcess[str]:
+        seen.setdefault("files", sorted(p.name for p in test.parent.iterdir()))
+        seen["ini"] = (root / "pytest.ini").read_text(encoding="utf-8")
+        return subprocess.run(
+            [sys.executable, "-m", "pytest", "-q", "--maxfail=1", "--", str(test)],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=120,
+        )
+
+    entries = [
+        {"kind": "stage1", "sha": _sha(GOOD_CLASSIFY), "code": GOOD_CLASSIFY, "error": ""},
+        {"kind": "self_heal", "sha": _sha(BAD_CLASSIFY), "code": BAD_CLASSIFY, "error": ""},
+    ]
+    ini = REPO_ROOT / "pytest.ini"
+    out = lane._visible_outputs(
+        entries,
+        target_file=target_file,
+        test_file=visible,
+        run_visible=run,
+        timeout_sec=60,
+        exclude=frozenset({"test_hidden.py"}),
+        pytest_ini=ini,
+    )
+    assert "test_hidden.py" not in seen["files"] and "test_visible.py" in seen["files"]
+    assert seen["ini"] == ini.read_text(encoding="utf-8")
+    assert "passed" in out[_sha(GOOD_CLASSIFY)]
+    row: dict = {}
+    lane._first_attempt(
+        row,
+        entries=entries,
+        capture_error="",
+        first_consistent=True,
+        target_file=target_file,
+        verification_test_file=hidden,
+        run_hidden=run,
+        timeout_sec=60,
+        pytest_ini=ini,
+    )
+    assert row["first_attempt_status"] == "verified_in_scratch_copy"
+    assert row["first_attempt_hidden_passed"] is True
+
+
+def test_hyper_counts_only_with_more_than_one_stage1_candidate() -> None:
+    """LOW-3: a stage-1 call plus a self-heal round is self_heal, not hyper."""
+
+    hyper = {
+        "name": "hyper",
+        "attestation": "real",
+        "attestation_source": "unified_capability_projection",
+        "attestation_refs_resolved": True,
+        "attestation_disposition": {"kind": "succeeded"},
+        "selected": True,
+        "invoked": True,
+        "evidence_refs": ["ref1"],
+        "claim_boundary": {"simulated": False},
+    }
+    row = _treated_row(treatment_rounds=2, capability_receipts=[hyper])
+    lane.attest_row(row, {"with_nexus_calls": 2, "self_heal_rounds_observed": 1})
+    assert "hyper" not in row["treatment_applied"]
+    a, b = _sha("a"), _sha("b")
+    pool = _treated_row(
+        runner_candidate_sha256s=[a, b],
+        runner_candidate_kinds=["stage1", "stage1"],
+        capability_receipts=[hyper],
+    )
+    lane.attest_row(pool, {"with_nexus_calls": 2})
+    assert {"hyper", "multi_candidate"} <= set(pool["treatment_applied"])

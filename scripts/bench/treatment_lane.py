@@ -374,14 +374,15 @@ def candidate_from_response(source_code: str, stdout: str) -> tuple[str, str]:
     text) -> ``_candidate_code_from_llm_output(source, out)``. ``("", reason)`` when none.
     """
 
+    # The product's own transport parser (last JSON object on stdout, leading warnings tolerated).
     from nexus.research.sprint_service import (
         _OPERATION_EDIT_KEYS,
         _candidate_code_from_llm_output,
         _parse_operation_payload,
     )
-    from scripts.bench.agy_provider import _agy_envelope
 
-    envelope = _agy_envelope(stdout)
+    transport = importlib.import_module("nexus_runtime.kernel.transport")
+    envelope = transport.parse_agy_envelope(stdout)
     text = str(envelope.get("response") or "") if isinstance(envelope, dict) else ""
     if not text.strip():
         return "", "no_model_response"
@@ -467,15 +468,26 @@ def derive_runner_candidates(*, original_source: str, key: str) -> tuple[list[di
     return entries, ""
 
 
-RunTest = Callable[[Path, int], subprocess.CompletedProcess[str]]
+# A test run on a scratch copy: (copied test file, scratch root used as cwd, timeout).
+RunTest = Callable[[Path, Path, int], subprocess.CompletedProcess[str]]
+HIDDEN_TEST_NAME = "test_hidden.py"
 
 
 def _in_scratch_copy(
-    target_file: str, test_file: str, code: str, action: Callable[[Path], Any]
+    target_file: str,
+    test_file: str,
+    code: str,
+    action: Callable[[Path, Path], Any],
+    *,
+    exclude: frozenset[str] = frozenset(),
+    pytest_ini: Path | None = None,
 ) -> Any:
-    """Run ``action(copied_test)`` on a scratch copy of the task directory holding ``code``.
+    """Run ``action(copied_test, scratch_root)`` on a scratch copy of the task directory.
 
-    The workspace is never written: a candidate that writes files only touches the copy.
+    The workspace is never written: a candidate that writes files only touches the copy. Files
+    named in ``exclude`` (the hidden verifier for a visible re-run) are not copied. The repo's
+    ``pytest.ini`` is copied to the scratch root, so the run has the strict scorer's pytest
+    semantics (rootdir, addopts, import mode, asyncio mode, filters).
     """
 
     target = Path(target_file).resolve()
@@ -483,15 +495,25 @@ def _in_scratch_copy(
     if target.parent != test.parent:
         raise RuntimeError("target_outside_test_directory")
     with tempfile.TemporaryDirectory(prefix="nexus-bench-rescore-") as tmp:
-        copy = Path(tmp) / test.parent.name
+        root = Path(tmp)
+        copy = root / test.parent.name
         shutil.copytree(
             test.parent,
             copy,
             symlinks=False,
-            ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache"),
+            ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache", *sorted(exclude)),
         )
+        if pytest_ini is not None and pytest_ini.is_file():
+            shutil.copyfile(pytest_ini, root / "pytest.ini")
         (copy / target.name).write_text(code, encoding="utf-8")
-        return action(copy / test.name)
+        return action(copy / test.name, root)
+
+
+def _repo_pytest_ini(repo_root: str | Path | None) -> Path | None:
+    if not repo_root:
+        return None
+    ini = Path(repo_root) / "pytest.ini"
+    return ini if ini.is_file() and not ini.is_symlink() else None
 
 
 def finalize_with_nexus_row(
@@ -507,6 +529,7 @@ def finalize_with_nexus_row(
     run_visible: RunTest,
     timeout_sec: int,
     row_deadline_sec: float | None = None,
+    repo_root: str | Path | None = None,
 ) -> dict[str, Any]:
     """Add the treatment-lane columns to a finished with-Nexus row (no-op in the strict lane).
 
@@ -582,6 +605,7 @@ def finalize_with_nexus_row(
         verification_test_file=verification_test_file,
         run_hidden=run_hidden,
         timeout_sec=timeout_sec,
+        pytest_ini=_repo_pytest_ini(repo_root),
     )
     row["treatment_visible_outputs"] = _visible_outputs(
         entries,
@@ -589,6 +613,8 @@ def finalize_with_nexus_row(
         test_file=test_file,
         run_visible=run_visible,
         timeout_sec=timeout_sec,
+        exclude=frozenset({HIDDEN_TEST_NAME, Path(verification_test_file).name}),
+        pytest_ini=_repo_pytest_ini(repo_root),
     )
     return row
 
@@ -603,6 +629,7 @@ def _first_attempt(
     verification_test_file: str,
     run_hidden: RunTest,
     timeout_sec: int,
+    pytest_ini: Path | None = None,
 ) -> None:
     """Score the FIRST model call exactly like the strict lane: hidden test on its bytes.
 
@@ -639,7 +666,8 @@ def _first_attempt(
             target_file,
             verification_test_file,
             first["code"],
-            lambda test: run_hidden(test, timeout_sec),
+            lambda test, root: run_hidden(test, root, timeout_sec),
+            pytest_ini=pytest_ini,
         )
         row["first_attempt_hidden_passed"] = done.returncode == 0
         row["first_attempt_status"] = "verified_in_scratch_copy"
@@ -658,6 +686,8 @@ def _visible_outputs(
     test_file: str,
     run_visible: RunTest,
     timeout_sec: int,
+    exclude: frozenset[str] = frozenset({HIDDEN_TEST_NAME}),
+    pytest_ini: Path | None = None,
 ) -> dict[str, str]:
     """The runner's own visible-test output on every stage-1 candidate a later round could quote.
 
@@ -672,14 +702,19 @@ def _visible_outputs(
         if entry["kind"] != "stage1" or not entry["sha"] or entry["sha"] in out:
             continue
 
-        def _visible(test: Path) -> str:
-            done = run_visible(test, timeout_sec)
+        def _visible(test: Path, root: Path) -> str:
+            done = run_visible(test, root, timeout_sec)
             return f"{done.stdout or ''}\n{done.stderr or ''}"
 
         try:
-            out[entry["sha"]] = _in_scratch_copy(target_file, test_file, entry["code"], _visible)[
-                -20000:
-            ]
+            out[entry["sha"]] = _in_scratch_copy(
+                target_file,
+                test_file,
+                entry["code"],
+                _visible,
+                exclude=exclude,
+                pytest_ini=pytest_ini,
+            )[-20000:]
         except (subprocess.TimeoutExpired, OSError, RuntimeError, shutil.Error):
             out[entry["sha"]] = ""
     return out
@@ -697,7 +732,7 @@ def finalize_bare_row(row: dict[str, Any]) -> dict[str, Any]:
     return row
 
 
-def _receipt_attested(receipt: Mapping[str, Any], rounds: int) -> bool:
+def _receipt_attested(receipt: Mapping[str, Any], stage1_calls: int) -> bool:
     """Receipt-based treatment evidence (residual, as in #2212 N3: the with-Nexus subprocess is
     our product and writes these receipts; overlay markers are consistency, not a signature).
     """
@@ -707,8 +742,10 @@ def _receipt_attested(receipt: Mapping[str, Any], rounds: int) -> bool:
     name = str(receipt.get("name") or "")
     if name not in RECEIPT_TREATMENTS or classify_receipt(dict(receipt)) != "real":
         return False
-    if name == "hyper" and rounds <= 1:
-        return False  # one candidate, one round: nothing beyond the strict lane ran
+    if name == "hyper" and stage1_calls <= 1:
+        # One stage-1 candidate: the hyper pool did not run beyond the strict lane (a self-heal
+        # round is counted as self_heal, not as hyper).
+        return False
     if name in SEAM_TREATMENTS:
         # #2211 seam: its own trigger and sealed evidence ids, or it did not run post-candidate.
         trigger = str(receipt.get("trigger_source") or "")
@@ -729,13 +766,19 @@ def attest_row(row: dict[str, Any], task_audit: Mapping[str, Any] | None) -> Non
     if is_timeout_row(row) and int(row.get("model_calls") or 0) == 0 and captured > 0:
         row["model_calls"] = captured
         row["model_calls_source"] = "prompt_capture"
-    rounds = int(row.get("treatment_rounds") or 0)
+    if audit.get("row_void"):
+        # R2-3: a later round carried a hidden literal the model did not write itself: the row's
+        # after_treatment is void (not a solve, stays in the denominator); round 1 stays scored.
+        row["treatment_round_void"] = True
+        row["after_treatment_status"] = "prompt_symmetry_violation"
+        row["treatment_literal_hits"] = list(audit.get("treatment_literal_hits") or [])
+    kinds = [str(kind) for kind in row.get("runner_candidate_kinds") or []]
+    stage1_calls = sum(1 for kind in kinds if kind == "stage1")
     applied = {
         str(receipt.get("name"))
         for receipt in row.get("capability_receipts") or []
-        if isinstance(receipt, Mapping) and _receipt_attested(receipt, rounds)
+        if isinstance(receipt, Mapping) and _receipt_attested(receipt, stage1_calls)
     }
-    kinds = [str(kind) for kind in row.get("runner_candidate_kinds") or []]
     shas = [str(sha) for sha in row.get("runner_candidate_sha256s") or []]
     consistent = (
         captured > 0

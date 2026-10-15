@@ -172,6 +172,7 @@ PRODUCT_ERROR_CODES = frozenset({
     "semantic_guard_placeholder_only",
     "semantic_guard_zero_delta",
     "semantic_guard_low_delta_feature",
+    "semantic_guard_syntax_warning",
 })
 # str(subprocess.TimeoutExpired) of the sprint's own visible pytest argv (sprint_pytest_cmd):
 # [<python>, '-m', 'pytest', '-q', '--maxfail=1', '--', <repo-relative visible test>].
@@ -220,6 +221,8 @@ class TaskAudit:
     bare_prompt_chars: int = 0
     violations: list[str] = field(default_factory=list)
     lane: str = LANE_STRICT
+    treatment_literal_hits: list[str] = field(default_factory=list)
+    row_void: bool = False
     treatment_rounds_audited: int = 0
     self_heal_rounds_observed: int = 0
     treatment_round_findings: list[str] = field(default_factory=list)
@@ -252,6 +255,8 @@ class TaskAudit:
             "nexus_prompt_extra_chars": self.extra_chars,
             "violations": self.violations,
             "lane": self.lane,
+            "treatment_literal_hits": self.treatment_literal_hits,
+            "row_void": self.row_void,
             "treatment_rounds_audited": self.treatment_rounds_audited,
             "self_heal_rounds_observed": self.self_heal_rounds_observed,
             "treatment_round_findings": self.treatment_round_findings,
@@ -946,16 +951,31 @@ def audit_task(
             result.violations.append(
                 f"with_nexus_calls_mismatch:captured={result.with_nexus_calls},row={row_calls}"
             )
-    candidate_lines: set[str] = set()
-    candidate_texts: list[str] = []
+    candidates: dict[str, str] = {}
+    runner_order: list[str] = []
     visible_lines: set[str] = set()
+    hidden_line_set = set(hidden_only_lines(material))
     if treatment and len(with_records) > 1:
         candidates, candidate_errors = load_row_candidates(with_row or {})
         result.treatment_round_findings.extend(candidate_errors)
-        clean = clean_candidates(candidates, material)
-        candidate_texts = list(clean.values())
-        candidate_lines = {line for text in candidate_texts for line in _lines(text)}
+        runner_order = [str(sha) for sha in (with_row or {}).get("runner_candidate_sha256s") or []]
         visible_lines = row_visible_output_lines(with_row or {})
+
+    def _earlier_candidates(round_index: int) -> list[str]:
+        """Runner-derived candidates of the calls before ``round_index`` (0-based)."""
+
+        return [candidates[sha] for sha in runner_order[:round_index] if sha in candidates]
+
+    def _earlier_candidate_lines(round_index: int) -> set[str]:
+        """Exact raw lines of earlier runner-derived candidates (never a hidden test line)."""
+
+        return {
+            line
+            for text in _earlier_candidates(round_index)
+            for line in text.splitlines()
+            if line.strip() and normalize(line) not in hidden_line_set
+        }
+
     if not not_run and result.bare_calls == 0 and result.with_nexus_calls > 0:
         result.violations.append("bare_calls=0")
     bare_prompt = str(bare_records[0].get("prompt") or "") if bare_records else ""
@@ -963,19 +983,31 @@ def audit_task(
     literals = hidden_only_literals(material)
     inventory = set(HIDDEN_LITERALS.get(material.task_id, ()))
     hidden_lines = hidden_only_lines(material)
-    for record in with_records:
-        # (1) Every round's FULL raw prompt goes through the hidden-literal / hidden-line scan
-        # first; nothing (model candidate, visible output) is exempt from it (G2).
+    for index, record in enumerate(with_records):
+        # (1) Every round's FULL raw prompt goes through the hidden-line scan first (no exemption,
+        # aborts the run) and the hidden-literal scan (G2). Only in rounds >= 2 of the treatment
+        # lane, a literal inside a line byte-identical to a line of an EARLIER runner-derived model
+        # candidate is exempt: the model wrote it before any feedback (R2-3). Other literal hits
+        # in rounds >= 2 void the row (treatment_literal_hits) instead of aborting the run.
         prompt = str(record.get("prompt") or "")
         corpus = _decoded_corpus(prompt)
+        later_round = treatment and index > 0
+        if later_round:
+            exempt = _earlier_candidate_lines(index)
+            literal_corpus = _decoded_corpus(
+                "\n".join(line for line in prompt.splitlines() if line not in exempt)
+            )
+        else:
+            literal_corpus = corpus
+        hits = result.treatment_literal_hits if later_round else result.hidden_hits
         for literal in literals:
-            if literal in result.hidden_hits:
+            if literal in hits:
                 continue
             if any(
-                needle in corpus and needle not in bare_corpus
+                needle in literal_corpus and needle not in bare_corpus
                 for needle in _needles(literal, inventory)
             ):
-                result.hidden_hits.append(literal)
+                hits.append(literal)
         for line in hidden_lines:
             if line in corpus and line not in bare_corpus and line not in result.hidden_line_hits:
                 result.hidden_line_hits.append(line)
@@ -983,6 +1015,7 @@ def audit_task(
             result.prior_art_present = True
     if result.hidden_hits:
         result.violations.append("hidden_literal_in_with_nexus_prompt")
+    result.row_void = bool(result.treatment_literal_hits)
     if result.hidden_line_hits:
         result.violations.append("hidden_test_line_in_with_nexus_prompt")
     if result.prior_art_present:
@@ -1030,8 +1063,10 @@ def audit_task(
                     round1_prompt=first,
                     bare_prompt=reference,
                     material=material,
-                    candidate_lines=candidate_lines,
-                    candidate_texts=candidate_texts,
+                    candidate_lines={
+                        " ".join(line.split()) for line in _earlier_candidate_lines(index - 1)
+                    },
+                    candidate_texts=_earlier_candidates(index - 1),
                     visible_lines=visible_lines,
                 )
                 result.treatment_rounds_audited += 1
@@ -1079,39 +1114,14 @@ def load_row_candidates(row: Mapping[str, Any]) -> tuple[dict[str, str], list[st
     return out, errors
 
 
-def clean_candidates(candidates: Mapping[str, str], material: TaskMaterial) -> dict[str, str]:
-    """Candidates whose lines may be quoted in a later round: no hidden literal, no hidden test line.
-
-    A candidate that contains any hidden-only literal or hidden test line is not allowlisted at
-    all (its lines then fail the round audit), and the literal scan still runs on the full prompt.
-    Residual (documented): a value DERIVED from the hidden test without its literal text is only
-    closed by #2211's hidden-test staging, which the treatment lane requires.
-    """
-
-    inventory = set(HIDDEN_LITERALS.get(material.task_id, ()))
-    literals = hidden_only_literals(material)
-    hidden_lines = set(hidden_only_lines(material))
-    out: dict[str, str] = {}
-    for sha, text in candidates.items():
-        corpus = _decoded_corpus(text)
-        if any(needle in corpus for literal in literals for needle in _needles(literal, inventory)):
-            continue
-        if any(normalize(line) in hidden_lines for line in text.splitlines()):
-            continue
-        out[sha] = text
-    return out
-
-
 def _syntax_lines(candidate_texts: Iterable[str]) -> set[str]:
     """The exact ``syntax_error``/``syntax_warning`` lines the product would print for these candidates."""
 
+    from nexus.research.sprint_service import syntax_rejection_lines
+
     out: set[str] = set()
     for text in candidate_texts:
-        try:
-            compile(text, "<candidate>", "exec")
-        except SyntaxError as exc:
-            out.add(" ".join(f"syntax_error:{exc.msg}".split()))
-            out.add(" ".join(f"syntax_error: {exc}".split()))
+        out |= {" ".join(line.split()) for line in syntax_rejection_lines(text)}
     return out
 
 

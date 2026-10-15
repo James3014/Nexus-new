@@ -132,6 +132,37 @@ def _compile_candidate_or_warning(code: str, filename: str) -> str:
     return ""
 
 
+def guard_syntax_rejection(code: str) -> str:
+    """The semantic guard's syntax rejection for ``code`` ("" when it compiles cleanly)."""
+    try:
+        syntax_warning = _compile_candidate_or_warning(code, "<semantic_guard>")
+    except SyntaxError as exc:
+        return f"syntax_error: {exc}"
+    if syntax_warning:
+        return f"syntax_warning: {syntax_warning}"
+    return ""
+
+
+def executor_syntax_rejection(code: str, filename: str) -> str:
+    """The in-place executor's syntax rejection for ``code`` ("" when it compiles cleanly)."""
+    try:
+        syntax_warning = _compile_candidate_or_warning(code, filename)
+    except SyntaxError as exc:
+        return f"syntax_error:{exc.msg}"
+    if syntax_warning:
+        return f"syntax_warning:{syntax_warning}"
+    return ""
+
+
+def syntax_rejection_lines(code: str, filename: str = "candidate.py") -> set[str]:
+    """Every syntax rejection text the sprint can put into a failure tail for ``code``.
+
+    The bench prompt audit allows exactly these lines in a later treatment round (shared helper,
+    so the audit and the product can never drift apart).
+    """
+    return {line for line in (guard_syntax_rejection(code), executor_syntax_rejection(code, filename)) if line}
+
+
 @dataclass
 class SprintConfig:
     task: str
@@ -1443,24 +1474,13 @@ class InPlaceSprintExecutor:
                     elapsed_sec=round(time.time() - start, 4),
                 )
             if target_path.suffix == ".py":
-                try:
-                    syntax_warning = _compile_candidate_or_warning(code, str(target_path))
-                except SyntaxError as exc:
+                syntax_rejection = executor_syntax_rejection(code, str(target_path))
+                if syntax_rejection:
                     return CandidateEval(
                         seed=seed,
                         score=0.0,
                         hint=hint,
-                        error=f"syntax_error:{exc.msg}",
-                        candidate_code=code,
-                        source=source,
-                        elapsed_sec=round(time.time() - start, 4),
-                    )
-                if syntax_warning:
-                    return CandidateEval(
-                        seed=seed,
-                        score=0.0,
-                        hint=hint,
-                        error=f"syntax_warning:{syntax_warning}",
+                        error=syntax_rejection,
                         candidate_code=code,
                         source=source,
                         elapsed_sec=round(time.time() - start, 4),
@@ -1819,12 +1839,9 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             return False, "no_change_candidate"
         
         # R7: Strict rejection for invalid AST/syntax
-        try:
-            syntax_warning = _compile_candidate_or_warning(candidate, "<semantic_guard>")
-        except SyntaxError as exc:
-            return False, f"syntax_error: {exc}"
-        if syntax_warning:
-            return False, f"syntax_warning: {syntax_warning}"
+        syntax_rejection = guard_syntax_rejection(candidate)
+        if syntax_rejection:
+            return False, syntax_rejection
 
         src_lines = {ln.strip() for ln in source.splitlines() if ln.strip()}
         cand_lines = {ln.strip() for ln in candidate.splitlines() if ln.strip()}
