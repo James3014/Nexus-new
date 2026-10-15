@@ -640,12 +640,16 @@ def test_authorize_default_action_set_excludes_branch_deletion(tmp_path: Path):
     )
 
 
-def test_owner_finish_delegates_full_authorized_integration_then_cleanup(tmp_path: Path):
+def test_owner_finish_delegates_full_authorized_integration_then_cleanup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     root, base, candidate = _repo(tmp_path)
     receipt = _acceptance(candidate)
     auth = _authorization(root, base, candidate, receipt)
     target = tmp_path / "targets" / "task-1"
     target.parent.mkdir()
+    # resolve_canonical_target_roots ignores requested roots containing "/tmp"
+    # (Linux tmp_path), so pin the base root explicitly; the contract's target
+    # then equals the worktree created here on every platform.
+    monkeypatch.setenv("NEXUS_TARGET_ROOT_OVERRIDE", str(target.parent))
     _git(root, "worktree", "add", "-b", "nexus/task/task-1", str(target), base)
     _git(target, "merge", "--ff-only", candidate)
     durable_ref = "refs/nexus-candidate/task-1"
