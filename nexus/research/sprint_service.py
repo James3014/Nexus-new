@@ -18,6 +18,7 @@ from nexus.engine.autoreason_service import AutoreasonService
 from nexus.engine.ddtree_adapter import DDTreeAdapter
 from nexus.engine.learning_policy_loader import route_cost_controls_from_env
 from nexus.engine.policies.research_policy import ResearchPolicy
+from nexus.research import bench_treatment_lane as _bench_lane
 from nexus.research.candidate_pool_policy import decide_candidate_pool_policy
 from nexus.research.day_shift_optimizer import DayShiftOptimizer
 from nexus.research.local_sprint_mutator import (
@@ -2103,6 +2104,9 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         return finalized
 
     for idx in range(max(1, config.candidate_count)):
+        if idx > 0 and _bench_lane.treatment_lane_active() and not _bench_lane.treatment_round_allowed(learning_trace, f"candidate_{idx}", model_calls):
+            # PR-3: one row deadline and one call budget cover every round of the row.
+            break
         hint = policy.get_mutation_hint(
             idx % max(1, config.candidate_count),
             task_desc=config.task,
@@ -2227,6 +2231,8 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                             "model_candidate_sha256",
                             hashlib.sha256(candidate_code.encode("utf-8")).hexdigest(),
                         )
+                        # PR-3: every raw model candidate, in order (first + final binding).
+                        _bench_lane.record_model_candidate(learning_trace, candidate_code, used_source)
                 except Exception as llm_exc:  # noqa: BLE001
                     fallback_used = True
                     failure_meta = getattr(llm_exc, "metadata", {})
@@ -2371,7 +2377,9 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                     candidates.append(support_ev)
             self_heal_enabled = (
                 os.environ.get("NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL", "1").strip().lower() not in {"0", "false", "no"}
-                and not _symmetric_prompt_mode()  # L2: symmetric mode itself means one model call
+                # L2: symmetric mode itself means one model call, except in the bench treatment
+                # lane (PR-3), where the visible-test self-heal is the treatment being measured.
+                and (not _symmetric_prompt_mode() or _bench_lane.treatment_lane_active())
             )
             if (
                 hidden_verifier_mode
@@ -2419,12 +2427,14 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                 and (used_source.startswith("llm") or model_required_final_delivery)
                 and ev.score < 1.0
                 and "quota" not in error_codes
+                and (not _bench_lane.treatment_lane_active() or _bench_lane.treatment_round_allowed(learning_trace, "self_heal", model_calls))
             ):
                 candidates.append(ev)
                 ev_recorded = True
                 failure_tail = (ev.error or ev.stdout or "")[-1200:]
                 local_support_block = ""
-                if model_required_final_delivery:
+                # PR-3: a local candidate is never shown to the model in the audited A/B prompt.
+                if model_required_final_delivery and not _symmetric_prompt_mode():
                     try:
                         support_code, support_meta = local_generator.generate(
                             source_code=source_code,
@@ -2467,6 +2477,8 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                         codeintel_block=codeintel_block,
                     )
                     _record_llm_meta(repair_meta)
+                    if _symmetric_prompt_mode() and isinstance(repair_code, str) and repair_code:
+                        _bench_lane.record_model_candidate(learning_trace, repair_code, "llm_self_heal")
                     repair_guard_ok, repair_guard_reason = _semantic_guard(candidate_code, repair_code, config.task, "llm_self_heal")
                     if repair_guard_ok:
                         repair_ev = _evaluate_candidate(
