@@ -412,12 +412,12 @@ def _entrypoint_exists(path: Path, selector: str) -> bool:
     return _resolve_entrypoint(path, selector if selector else None) is not None
 
 
-def _file_id(path: Path) -> tuple[int, int] | Path:
-    """Physical identity of a file (device, inode); falls back to the path."""
+def _file_id(path: Path) -> tuple[int, int] | None:
+    """Physical identity of a file (device, inode); None when it cannot be read."""
     try:
         info = path.stat()
     except OSError:
-        return path
+        return None
     return (info.st_dev, info.st_ino)
 
 
@@ -502,15 +502,42 @@ def check_enforcement_wiring(policy: dict, repo_root: Path | None = None) -> lis
     # Guards are excluded by module name *and* by file identity (device+inode, so
     # symlinks and hard links to a guard are the guard), and a declared caller that
     # is physically a guard file is not a caller.
-    guard_ids = {_file_id(f) for f in (_declared_file(g, root) for g in guards) if f is not None}
+    guard_ids: set[tuple[int, int]] = set()
+    for guard in guards:
+        file = _declared_file(guard, root)
+        identity = _file_id(file) if file is not None else None
+        if identity is None:
+            return errors + [f"SOURCE_FILE_NOT_FOUND: {guard}"]  # unreadable: fail closed
+        guard_ids.add(identity)
     caller_paths = [
         path
         for path in caller_paths
-        if (f := _declared_file(path, root)) is not None and _file_id(f) not in guard_ids
+        if (f := _declared_file(path, root)) is not None
+        and (fid := _file_id(f)) is not None
+        and fid not in guard_ids
     ]
     if not caller_paths:
         return errors + ["ENFORCEMENT_CALLERS_MISSING"]
     callers = {m for m in (_module_name(p) for p in caller_paths) if m}
+
+    def through_guard(module: str) -> bool:
+        """True when ``module`` or any package above it is a guard (or unreadable).
+
+        Python imports ``a.b.c`` by loading ``a`` and ``a.b`` first, so a guard
+        declared as a package ``__init__.py`` guards everything beneath it.
+        """
+        parts = module.split(".")
+        for depth in range(1, len(parts) + 1):
+            prefix = ".".join(parts[:depth])
+            if prefix in guard_modules:
+                return True
+            file = _module_file(prefix, root)
+            if file is None:
+                continue
+            identity = _file_id(file)
+            if identity is None or identity in guard_ids:
+                return True
+        return False
 
     reached = False
     for _entry, start, selected in resolved:
@@ -529,10 +556,7 @@ def check_enforcement_wiring(policy: dict, repo_root: Path | None = None) -> lis
                         continue
                     seen.add(module)
                     target = _module_file(module, root)
-                    is_guard = module in guard_modules or (
-                        target is not None and _file_id(target) in guard_ids
-                    )
-                    if is_guard or target is None or target == start:
+                    if target is None or target == start or through_guard(module):
                         continue
                     if module in callers:
                         reached = True

@@ -912,3 +912,29 @@ def test_wiring_check_guard_identity_round12(tmp_path: Path) -> None:
         )
         == []
     )
+
+
+def test_wiring_check_package_guard_and_stat_failure(tmp_path: Path, monkeypatch) -> None:
+    root = _fake_repo(tmp_path)
+    # A guard declared as a package __init__ guards every module beneath it: importing
+    # pkg.caller loads pkg/__init__.py first, so the route is not guard-free.
+    (root / "pkg" / "__init__.py").write_text("from pkg import caller\n", encoding="utf-8")
+    package_guard = _fake_policy(
+        source_file="pkg/__init__.py; pkg/caller.py",
+        guard_modules=["pkg/__init__.py"],
+        test_entrypoints=["tests/test_caller.py::test_plain"],
+    )
+    assert check_enforcement_wiring(package_guard, root) == ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"]
+    # An unreadable guard fails closed rather than losing its identity.
+    real_stat = Path.stat
+
+    def flaky_stat(self, *args, **kwargs):
+        if self.name == "guard.py":
+            raise OSError("transient")
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", flaky_stat)
+    result = check_enforcement_wiring(
+        _fake_policy(test_entrypoints=["tests/test_caller.py::test_plain"]), root
+    )
+    assert result == ["SOURCE_FILE_NOT_FOUND: pkg/guard.py"]
