@@ -493,3 +493,163 @@ def test_workflow_never_checks_out_pr_code_and_runs_the_script_isolated():
     assert "--no-fail" in check["run"]
     assert "PYTHONPATH" not in check.get("env", {})
     assert "${{" not in check["run"]  # no PR-controlled text interpolated into the shell
+
+
+# -- round 2 regressions (allow-list verdict position, section headers, cap rule) --------
+
+DISPOSITION_TABLE = (
+    f"## Review round 1 (head faf38bce9) → repaired in 20d54b496, merged main → head {HEAD}\n\n"
+    "**Independent Claude (Opus 5.5): REPAIR_REQUIRED, 14 findings.** "
+    "**Gemini 3.8 Flash High: REJECT, 12 findings.**\n\n"
+    "| # | Finding | Disposition |\n|---|---|---|\n"
+    "| O1 | HIGH: any ACCEPT/APPROVE word counted | **Fixed.** Verdicts are read per clause. |\n"
+    "| O3 | MEDIUM: rebuttal too loose | **Fixed.** Needs rebutted plus cap (3 rounds), Gemini. |\n"
+    "| G1 | NIT | **Accepted, documented.** |\n\n"
+    "Dry run: #2286 → MISSING_CROSS_MODEL (its Codex ACCEPT was at an older head).\n"
+)
+
+
+def test_an_authors_disposition_table_is_not_a_record():
+    # #2293's own round-1 comment: names the head, quotes ACCEPT/rebutted/cap/Codex/Gemini.
+    record = rrc.classify_record(DISPOSITION_TABLE, HEAD)
+    assert record is not None
+    assert record["verdict"] is False and record["rebuttal_at_cap"] is False
+    assert rrc.evaluate(HEAD, RISKY, [_c(DISPOSITION_TABLE)], [])["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "Awaiting Codex ACCEPT@{h}",
+        "Need Codex ACCEPT@{h}",
+        "Requesting Codex ACCEPT@{h}",
+        "Codex should ACCEPT@{h}",
+        "Codex will ACCEPT at {h}",
+        "Codex: no ACCEPT at {h}",
+        "Codex never said ACCEPT at {h}",
+        "Codex ACCEPT withheld at {h}",
+        "Codex ACCEPT blocked at {h}",
+        "Codex: conditional ACCEPT@{h} (fix finding 2 first)",
+        "Gemini ACCEPT@{h}?",
+        "- [ ] Codex ACCEPT@{h}",
+        'coord ready Nexus-new#1 --as x --note "head {h}; Claude ACCEPT@{h}; Codex ACCEPT@{h}"',
+        "Codex: ACCEPT at {h} only if X",
+        "I don't ACCEPT@{h}",
+        "won't ACCEPT@{h}",
+        "would ACCEPT@{h} if the test were red first",
+        "will ACCEPT@{h} once CI is green",
+        "| Codex | ACCEPT@{h} |",
+        "> Codex ACCEPT@{h}",
+        "Codex r3 REJECT@{h}; cannot ACCEPT",
+    ],
+)
+def test_wishes_conditions_and_quotes_are_not_verdicts(line):
+    assert not rrc.is_verdict_line(line.format(h=HEAD))
+    body = f"Head {HEAD}\n" + line.format(h=HEAD)
+    record = rrc.classify_record(body, HEAD)
+    assert record is None or record["cross_model"] is False
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "Codex @ {h}: **Verdict: ACCEPT.** Not a product bug.",
+        "Codex ACCEPT@{h}: P2 is NOT blocking",
+        "Codex ACCEPT@{h}: the regression was not reproduced",
+        "Codex ACCEPT@{h} (please note the residual nit)",
+        "Codex ACCEPT@{h} (earlier REJECT addressed)",
+        "Codex r2 ACCEPT@{h} (the race noted before is fixed)",
+        "Codex ACCEPT@{h}: holds until main moves",
+        "Codex ACCEPT@{h}; no new findings",
+        "Codex ACCEPT@{h} (two Low residuals, neither blocking)",
+        "Codex: ACCEPT at {h} after the round-2 repair",
+        "**Gemini 3.8 Flash High** (approved substitute): **ACCEPT@{h}**.",
+        "**Round 2 @ {h}: ACCEPT.** Codex found no new issues.",
+        "- **Gemini round 3 @ {h}: ACCEPT.**",
+        "Cross-model (agy Gemini 3.8 Flash High, Codex substitute): r5 REJECT 3 → fixed, r6 ACCEPT@{h} 0 new",
+    ],
+)
+def test_real_cross_model_accept_shapes_count(line):
+    text = line.format(h=HEAD)
+    assert rrc.is_verdict_line(text)
+    record = rrc.classify_record(text, HEAD)
+    assert record is not None and record["cross_model"] is True
+
+
+def test_section_header_decides_the_family_not_a_stray_mention():
+    claude_header = (
+        f"## Review record — Claude (claude-opus-5-5)\n- Head reviewed: `{HEAD}`\n"
+        "- Codex: unavailable (out of credits)\n- Verdict: **ACCEPT**\n"
+    )
+    record = rrc.classify_record(claude_header, HEAD)
+    assert record is not None and record["claude"] and not record["cross_model"]
+    assert rrc.evaluate(HEAD, RISKY, [_c(claude_header)], [])["status"] == "MISSING_CROSS_MODEL"
+    pending = claude_header.replace("unavailable (out of credits)", "adversarial review: pending")
+    assert rrc.evaluate(HEAD, RISKY, [_c(pending)], [])["status"] == "MISSING_CROSS_MODEL"
+    # A bare ACCEPT whose section has no label line has no family: not a record.
+    no_label = f"Head {HEAD}\nCodex timed out.\nACCEPT"
+    record = rrc.classify_record(no_label, HEAD)
+    assert record is not None and record["verdict"] is False
+    stale_codex = f"## Codex\nr3 ACCEPT at {OLD}\nHead: {HEAD}\nGPT run TBD\nACCEPT"
+    # The Codex section's ACCEPT is bound to OLD; the trailing bare ACCEPT inherits the
+    # Codex header but is a verdict without a reviewer label of its own: it is counted
+    # as cross-model only because the header says so (the convention, documented).
+    record = rrc.classify_record(stale_codex, HEAD)
+    assert record is not None and record["claude"] is False
+
+
+def test_both_families_in_one_label_read_as_claude():
+    both = f"**Claude review (with Codex notes)**: ACCEPT@{HEAD}"
+    record = rrc.classify_record(both, HEAD)
+    assert record is not None and record["claude"] and not record["cross_model"]
+
+
+def test_rebuttal_at_cap_needs_a_round_three_reject_in_a_cross_model_section():
+    r1 = f"Head {HEAD}\n**Codex**: r1 REJECT; finding rebutted. Cap is 3 rounds.\nClaude ACCEPT@{HEAD}"
+    assert rrc.evaluate(HEAD, RISKY, [_c(r1)], [])["status"] == "MISSING_CROSS_MODEL"
+    asserted = (
+        f"Head {HEAD}\n**Codex review**: author rebutted all findings, cap reached.\n"
+        f"Claude ACCEPT@{HEAD}"
+    )
+    assert rrc.evaluate(HEAD, RISKY, [_c(asserted)], [])["status"] == "MISSING_CROSS_MODEL"
+    real = (
+        f"Head {HEAD}\n**Codex adversarial review**, 3 rounds:\n- r1 REJECT: fixed.\n"
+        "- **r3 REJECT**: early return.\n  - **Rebutted:** verdict unchanged, cap reached.\n"
+        f"\n**Claude**: ACCEPT@{HEAD}"
+    )
+    assert rrc.evaluate(HEAD, RISKY, [_c(real)], [])["status"] == "OK"
+    # Same text but the rebuttal lives in a later Claude section: not a cross-model disposition.
+    moved = (
+        f"Head {HEAD}\n**Codex adversarial review**, 3 rounds:\n- **r3 REJECT**: early return.\n"
+        f"\n**Claude**: ACCEPT@{HEAD}\n- Rebutted: the Codex finding is pre-existing, cap reached.\n"
+    )
+    assert rrc.evaluate(HEAD, RISKY, [_c(moved)], [])["status"] == "MISSING_CROSS_MODEL"
+
+
+def test_head_label_binding_needs_a_head_word_before_the_sha():
+    labelled = f"Head reviewed: `{HEAD}`\n**Claude**: ACCEPT"
+    record = rrc.classify_record(labelled, HEAD)
+    assert record is not None and record["verdict"] is True
+    # The sha appears, but not as a Head label: a bare verdict is unbound.
+    unlabelled = f"CI run for {HEAD} is green\n**Claude**: ACCEPT"
+    record = rrc.classify_record(unlabelled, HEAD)
+    assert record is not None and record["verdict"] is False
+    # "ahead of" is not a Head label.
+    ahead = f"the branch is ahead of main at {HEAD}\n**Claude**: ACCEPT"
+    record = rrc.classify_record(ahead, HEAD)
+    assert record is not None and record["verdict"] is False
+
+
+def test_fenced_code_is_ignored():
+    fenced = f"Head {HEAD}\n```\nClaude ACCEPT@{HEAD}\nCodex ACCEPT@{HEAD}\n```\n"
+    record = rrc.classify_record(fenced, HEAD)
+    assert record is not None and record["verdict"] is False
+
+
+def test_section_resets_after_a_verdict_line():
+    # The Codex header must not carry over into a later bare ACCEPT after Claude's verdict.
+    body = f"Head {HEAD}\n**Codex**: r2 ACCEPT at {OLD}\n**Claude**: ACCEPT@{HEAD}\nACCEPT\n"
+    record = rrc.classify_record(body, HEAD)
+    assert record is not None and record["claude"] is True
+    assert record["cross_model"] is False  # the OLD-bound Codex verdict does not count
+    assert len(record["verdict_lines"]) == 1

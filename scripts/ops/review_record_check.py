@@ -7,24 +7,28 @@ the PR head. PR code is never checked out or executed, and PR-controlled text
 (comment bodies, paths) is only pattern-matched; every printed line goes through
 ``_log_safe`` so it can never be read as a workflow command.
 
-What counts as a record (parsed line by line, so prose like "cannot ACCEPT until"
-or "Codex review still pending" never counts):
+What counts as a record (parsed line by line and clause by clause, so prose
+like "cannot ACCEPT until", "awaiting Codex ACCEPT" or a disposition table that
+quotes the words never counts):
 
-- A *verdict line* carries an uppercase ``ACCEPT``/``ACCEPTED``/``APPROVE``/
-  ``APPROVED`` token and no negation (``NOT``, ``cannot``, ``until``, ``pending``,
-  ``please``, ``REJECT``, ``REPAIR_REQUIRED``, ``REQUEST_CHANGES`` ...).
-- The verdict is *bound to the head* when that line names the head sha (full, or a
-  hex prefix of at least ``MIN_PREFIX`` characters), or when the comment has a
-  ``Head`` line naming it (``Head reviewed: <sha>``, ``head <sha>``).
-- The *reviewer family* is read from the verdict line itself, else from the lines
-  of its section (the lines since the previous verdict line): ``claude``/``opus``/
-  ``sonnet``, or cross-model ``codex``/``gemini``/``gpt``. A verdict with no family
-  is not a record (Issue #2290 asks for the reviewer identity).
-- A *rebuttal at the cap* is a cross-model section (the lines since the previous
-  verdict line) that says ``rebutted`` (past tense; "will rebut" does not count)
-  and ``cap`` or a round number of three or more, in a comment that names the head.
+- A *verdict* is an uppercase ``ACCEPT``/``ACCEPTED``/``APPROVE``/``APPROVED``
+  token in verdict position: after ``Verdict:``, bound as ``ACCEPT@<sha>``, after a
+  colon or dash, after a round marker (``r3 ACCEPT``) or alone on its line. Nothing
+  before it in the clause may be a wish, condition or negation, and nothing right
+  after it may withdraw it. Table rows, block quotes, unticked checklist items,
+  fenced code and pasted ``coord ready`` lines are skipped.
+- The verdict is *bound to the head* when its clause names the head sha (full, or
+  a hex prefix of at least ``MIN_PREFIX`` characters), else when its line does,
+  else when the comment has a ``Head`` label naming it (``Head reviewed: <sha>``,
+  ``final head <sha>``). A clause bound to another sha cannot be rebound.
+- The *reviewer family* comes from the words before the token in its clause, else
+  from the header of its section (a heading, bold label or ``Reviewer:`` line):
+  ``claude``/``opus``/``sonnet``, or cross-model ``codex``/``gemini``/``gpt``. When
+  both appear, the family is Claude. A verdict with no family is not a record.
+- A *rebuttal at the cap* is a cross-model section with a REJECT line at round
+  three or later followed by a past-tense ``rebutted`` line.
 - A submitted ``APPROVED`` review whose ``commit_id`` is the head also counts as an
-  independent record.
+  independent record, unless the same reviewer later requested changes.
 
 Verdict:
 - ``OK``: an independent record at head and, for a high-risk PR, a cross-model
@@ -79,18 +83,51 @@ HIGH_RISK_FILES = frozenset({
 })
 
 _HEX_TOKEN = re.compile(rf"(?<![0-9a-f])([0-9a-f]{{{MIN_PREFIX},40}})(?![0-9a-f])")
-_POSITIVE = re.compile(r"\b(?:ACCEPT|ACCEPTED|APPROVE|APPROVED)\b")
-_NEGATION = re.compile(
-    r"\bNOT\b|\bcannot\b|\bcan't\b|\buntil\b|\bpending\b|\bplease\b|\bbefore\b|\bno longer\b"
-    r"|\bREJECT(?:ED)?\b|\bREPAIR_REQUIRED\b|\bREQUEST_CHANGES\b|\bCHANGES[ _]REQUESTED\b"
-    r"|\bNO_VERDICT\b|\bnot run\b|\bwas not\b|\bwere not\b",
+_TOKEN = r"(?:ACCEPT|ACCEPTED|APPROVE|APPROVED)"
+# Verdict position: after a "Verdict:" label, bound as "ACCEPT@<sha>", after a colon,
+# dash or round marker ("r3 ACCEPT", "Round 2 @ sha: ACCEPT"), or alone on the line.
+_VERDICT_POS = re.compile(
+    rf"(?:\bverdict\s*:\s*|@\s*|[:\-–—]\s*|\br\d+\s+|\bround\s*\d+\s*:?\s*|^\s*)({_TOKEN})\b"
+    rf"|({_TOKEN})(?=\s*(?:@|\bat\s)\s*[0-9a-f]{{{MIN_PREFIX},}})",
     re.IGNORECASE,
 )
-_REBUTTED = re.compile(r"\brebutted\b|\brebuttals? (?:accepted|stands)\b", re.IGNORECASE)
-_CAP = re.compile(r"\bcap\b|\bround\s*(?:[3-9]|[1-9]\d)\b|\br(?:[3-9]|[1-9]\d)\b", re.IGNORECASE)
+_REJECT = re.compile(r"\b(?:REJECT(?:ED)?|REPAIR_REQUIRED|REQUEST_CHANGES|CHANGES[ _]REQUESTED)\b")
+# Words before the token in its clause that make it a wish, a condition or a negation.
+_PRE_DENY = re.compile(
+    r"\b(?:await(?:ing|s)?|need(?:s|ed|ing)?|request(?:s|ed|ing)?|should|would|will|could|may|might"
+    r"|no|not|never|cannot|can't|don't|doesn't|didn't|won't|wouldn't|pending|withheld|blocked"
+    r"|conditional|missing|without|lacking|unless|until|before|please|expect(?:s|ed|ing)?"
+    r"|wait(?:s|ed|ing)?|still|yet|if|only|reject(?:ed|s)?|repair_required|request_changes"
+    r"|no_verdict|said|say|says|give|gives|gave|get|gets|got|want(?:s|ed)?|hope(?:s|d)?)\b",
+    re.IGNORECASE,
+)
+# Words right after the token (before a sha, punctuation or a parenthesis) that withdraw it.
+_POST_DENY = re.compile(
+    r"^\s*(?:pending|withheld|blocked|only|if|unless|once|when|later|is|was|would|will|should"
+    r"|could|may|might|needed|required|expected|requested|awaited|\?)",
+    re.IGNORECASE,
+)
+_POST_COND = re.compile(
+    r"\b(?:only if|if|unless|provided|conditional on|once|when)\b|\?", re.IGNORECASE
+)
+_REBUTTED = re.compile(r"\brebutted\b|\brebuttals? (?:accepted|stands?)\b", re.IGNORECASE)
+_ROUND = re.compile(r"\b(?:r|round\s*)(\d+)\b", re.IGNORECASE)
 _CLAUDE = re.compile(r"\b(?:claude|opus|sonnet)\b", re.IGNORECASE)
 _CROSS = re.compile(r"\b(?:codex|gemini|gpt)\b", re.IGNORECASE)
-_HEAD_LINE = re.compile(r"\bhead\b", re.IGNORECASE)
+_HEAD_BIND = re.compile(
+    rf"\bhead\b[^\n]{{0,24}}?(?<![0-9a-f])([0-9a-f]{{{MIN_PREFIX},40}})(?![0-9a-f])"
+)
+_SKIP_LINE = re.compile(r"^\s*(?:\||>|- \[ \]|\* \[ \]|\$ |coord ready\b|gh pr\b)")
+_LABEL_LINE = re.compile(r"^\s*(?:#+\s|\*\*|- \*\*|\*\s\*\*|reviewer\b)", re.IGNORECASE)
+_LABEL_WORDS = re.compile(
+    r"\b(?:review|reviewer|cross-model|adversarial|independent|verdict)\b", re.IGNORECASE
+)
+_NOT_A_HEADER = re.compile(
+    r"\b(?:pending|unavailable|timed out|out of credits|not run|tbd|skipped|n/a|no run|none)\b",
+    re.IGNORECASE,
+)
+_CLAUSE_SPLIT = re.compile(r"[;,]\s+|\.\s+|!\s+|\s[—–]\s|\s-\s|\)\s+")
+_STOP = re.compile(r"[.;,:(\n]")
 
 
 class CheckError(Exception):
@@ -163,36 +200,72 @@ def names_other_sha(text: str, head: str) -> bool:
 
 
 def _family(text: str) -> str | None:
-    if _CROSS.search(text):
-        return "cross_model"
+    """Reviewer family named in the text: Claude beats cross-model when both appear."""
     if _CLAUDE.search(text):
         return "claude"
+    if _CROSS.search(text):
+        return "cross_model"
     return None
 
 
-_CLAUSE_SPLIT = re.compile(r"[;,]\s+|\.\s+|!\s+|\s[\u2014\u2013]\s|\s-\s|\)\s+")
+def _plain(line: str, keep_parens: bool = False) -> str:
+    """Markdown emphasis and code spans removed; parentheticals dropped unless kept."""
+    text = re.sub(r"[*_`]+", "", line)
+    return text if keep_parens else re.sub(r"\([^)]*\)", " ", text)
+
+
+def _verdict_match(clause: str) -> tuple[int, int] | None:
+    match = _VERDICT_POS.search(clause)
+    if not match:
+        return None
+    group = 1 if match.group(1) else 2
+    return match.start(group), match.end(group)
 
 
 def _clauses(line: str) -> list[str]:
-    return [clause for clause in _CLAUSE_SPLIT.split(line) if clause]
+    return [clause for clause in _CLAUSE_SPLIT.split(line) if clause.strip()]
 
 
 def verdict_clauses(line: str) -> list[str]:
-    """Clauses of the line that carry an uppercase accepting token and no negation.
+    """Clauses of the line whose accepting token sits in verdict position.
 
-    A clause is a comma/semicolon/sentence-separated part of the line, so a round
-    list such as ``r1 REJECT (fixed), r2 REJECT (fixed), r3 ACCEPT@<sha>`` keeps its
-    final ACCEPT while ``cannot ACCEPT until ...`` or ``Please APPROVE`` never count.
+    The token must follow ``Verdict:``, ``@``, a colon or dash, a round marker
+    (``r3``, ``Round 2 @ sha:``) or start the line; nothing before it in the
+    clause may be a wish, condition or negation (``awaiting``, ``should``, ``not``,
+    ``cannot``, ``pending``, ``please``, ``if`` ...), and nothing right after it may
+    withdraw it (``pending``, ``withheld``, ``only if``, ``?``). Table rows, block
+    quotes, unticked checklist items and pasted commands never count.
     """
-    return [
-        clause
-        for clause in _clauses(line)
-        if _POSITIVE.search(clause) and not _NEGATION.search(clause)
-    ]
+    if _SKIP_LINE.match(line):
+        return []
+    out: list[str] = []
+    for clause in _clauses(_plain(line, keep_parens=True)):
+        span = _verdict_match(clause)
+        if span is None:
+            continue
+        before = _plain(clause[: span[0]])  # parentheticals carry model names, not verdicts
+        after = clause[span[1] :]
+        if _PRE_DENY.search(before) or _REJECT.search(before):
+            continue
+        head_of_after = _STOP.split(after, 1)[0]
+        if _POST_DENY.match(head_of_after) or _POST_COND.search(head_of_after):
+            continue
+        out.append(clause)
+    return out
 
 
 def is_verdict_line(line: str) -> bool:
     return bool(verdict_clauses(line))
+
+
+def _comment_head(lines: list[str], head: str) -> bool:
+    """A line that labels the head: ``Head reviewed: <sha>``, ``final head <sha>``."""
+    head = head.lower()
+    for line in lines:
+        for found in _HEAD_BIND.findall(_plain(line).lower()):
+            if head.startswith(found):
+                return True
+    return False
 
 
 def _binding(clause: str, line: str, head: str, comment_head: bool) -> bool:
@@ -208,35 +281,76 @@ def _binding(clause: str, line: str, head: str, comment_head: bool) -> bool:
     return comment_head
 
 
+def _label_family(line: str) -> str | None:
+    """Family named by a heading, bold label, ``Reviewer:`` line or ``<label>:`` prefix."""
+    plain = _plain(line, keep_parens=True).strip()
+    if _NOT_A_HEADER.search(plain):
+        return None  # "Codex: unavailable", "Codex adversarial review: pending" open no section
+    if _LABEL_LINE.match(line) or plain.lower().startswith("reviewer"):
+        return _family(plain)
+    if ":" in plain:
+        prefix = plain.split(":", 1)[0]
+        if _LABEL_WORDS.search(prefix):
+            return _family(prefix)
+    return None
+
+
+def _rebuttal_at_cap(section: list[str]) -> bool:
+    """A cross-model REJECT at round >= 3 followed (or joined) by a past-tense rebuttal."""
+    reject_round_seen = False
+    for line in section:
+        plain = _plain(line, keep_parens=True)
+        if _REJECT.search(plain) and any(int(n) >= 3 for n in _ROUND.findall(plain)):
+            reject_round_seen = True
+        if reject_round_seen and _REBUTTED.search(plain):
+            return True
+    return False
+
+
 def classify_record(body: str, head: str) -> dict[str, Any] | None:
     """Classify one comment body; None when it does not name the head anywhere.
 
     Returns the verdicts bound to the head (each with its reviewer family) and
-    whether a cross-model section rebuts at the cap.
+    whether a cross-model section rebuts at the cap. A section starts at a label
+    line that names a family (heading, bold label, ``Reviewer:``) and ends at a
+    verdict line; the family of a bare verdict is the section header's family.
     """
     if not isinstance(body, str) or not names_head(body, head):
         return None
-    lines = body.splitlines()
-    comment_head = any(_HEAD_LINE.search(line) and names_head(line, head) for line in lines)
+    lines: list[str] = []
+    fenced = False
+    for raw in body.splitlines():
+        if raw.strip().startswith("```"):
+            fenced = not fenced
+            continue
+        if not fenced:
+            lines.append(raw)
+    comment_head = _comment_head(lines, head)
     verdicts: list[dict[str, Any]] = []
     rebuttal_at_cap = False
     section: list[str] = []
+    header_family: str | None = None
     for line in lines:
+        label = _label_family(line)
+        if label is not None and label != header_family:
+            if section and header_family == "cross_model" and _rebuttal_at_cap(section):
+                rebuttal_at_cap = True
+            section, header_family = [], label
         section.append(line)
         clauses = verdict_clauses(line)
-        if clauses:
-            for clause in clauses:
-                family = _family(clause) or _family("\n".join(section))
-                if family and _binding(clause, line, head, comment_head):
-                    verdicts.append({"family": family, "line": clause.strip()})
-            section = []
+        if not clauses:
             continue
-        # A rebuttal at the cap is read per section (the lines since the previous
-        # verdict line): "Rebutted" and "cap reached (3 rounds)" are often on
-        # different lines of the same cross-model section (#2280's record).
-        text = "\n".join(section)
-        if _family(text) == "cross_model" and _REBUTTED.search(text) and _CAP.search(text):
+        for clause in clauses:
+            span = _verdict_match(clause)
+            before = clause[: span[0]] if span else ""
+            family = _family(before) or header_family
+            if family and _binding(clause, line, head, comment_head):
+                verdicts.append({"family": family, "line": clause.strip()})
+        if header_family == "cross_model" and _rebuttal_at_cap(section):
             rebuttal_at_cap = True
+        section, header_family = [], None
+    if section and header_family == "cross_model" and _rebuttal_at_cap(section):
+        rebuttal_at_cap = True
     return {
         "verdict": bool(verdicts),
         "claude": any(v["family"] == "claude" for v in verdicts),
@@ -246,10 +360,8 @@ def classify_record(body: str, head: str) -> dict[str, Any] | None:
     }
 
 
-def _is_high_risk(name: Any) -> bool:
-    return isinstance(name, str) and (
-        name in HIGH_RISK_FILES or name.startswith(HIGH_RISK_PREFIXES)
-    )
+def _is_high_risk(name: str) -> bool:
+    return name in HIGH_RISK_FILES or name.startswith(HIGH_RISK_PREFIXES)
 
 
 def high_risk_paths(files: list[Any]) -> list[str]:
