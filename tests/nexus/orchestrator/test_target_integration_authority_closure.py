@@ -805,6 +805,119 @@ def test_post_apply_physical_truth_is_typed_and_persistable(tmp_path: Path):
     assert raised.value.integration_result_sha == raised.value.branch_head_after
 
 
+def _separate_controller(tmp_path: Path) -> tuple[Path, Path, str, str]:
+    """Primary checkout on main plus a detached Controller worktree (#1939)."""
+    root, base, candidate = _repo(tmp_path)
+    _git(root, "checkout", "main")
+    controller = tmp_path / "controller"
+    _git(root, "worktree", "add", "--detach", str(controller), base)
+    return root, controller.resolve(), base, candidate
+
+
+def _separate_controller_integrate(
+    tmp_path: Path, controller: Path, base: str, candidate: str, **kwargs
+):
+    receipt = _acceptance(candidate)
+    auth = _authorization(controller, base, candidate, receipt)
+    state = {
+        "task_id": "task-1",
+        "contract": {"controller_repo_root": str(controller)},
+        "promotion_packet": {"candidate_commit_sha": candidate},
+        "integration_authorization": auth.to_dict(),
+        "external_acceptance": receipt.to_dict(),
+        "lease": {"target_branch": "nexus/task/task-1"},
+    }
+    return ControlledIntegrationManager(
+        integration_root=controller
+    ).integrate_authorized_task_state(
+        state,
+        integration_branch="nexus/integration/canary",
+        staging_root=tmp_path / "stage",
+        **kwargs,
+    )
+
+
+def test_separate_controller_post_apply_output_never_lands_in_controller(tmp_path: Path):
+    """#2230 F3(b): post-apply output must not poison the Controller worktree."""
+    _root, controller, base, candidate = _separate_controller(tmp_path)
+    result = _separate_controller_integrate(
+        tmp_path,
+        controller,
+        base,
+        candidate,
+        post_apply_commands=(("/bin/sh", "-c", "echo out > post-apply-output.txt"),),
+    )
+    assert result.post_apply_verified is True
+    assert _git(controller, "status", "--porcelain=v1", "--untracked-files=all", "--ignored") == ""
+    assert _git(controller, "rev-parse", "HEAD") == base
+    assert not (tmp_path / "stage" / "task-1.post-apply").exists()
+    assert "task-1.post-apply" not in _git(controller, "worktree", "list", "--porcelain")
+
+
+def test_separate_controller_post_apply_verifies_integrated_tree(tmp_path: Path):
+    """#2230 F3(b): post-apply checks the integrated commit, not the stale Controller."""
+    _root, controller, base, candidate = _separate_controller(tmp_path)
+    result = _separate_controller_integrate(
+        tmp_path,
+        controller,
+        base,
+        candidate,
+        post_apply_commands=(
+            ("/bin/sh", "-c", "grep -qx candidate value.txt"),
+            (
+                "/bin/sh",
+                "-c",
+                'test "$(git rev-parse HEAD)" = "$(git rev-parse nexus/integration/canary)"',
+            ),
+        ),
+    )
+    assert result.merge_performed is True
+    assert result.integration_commit_sha == _git(
+        controller, "rev-parse", "nexus/integration/canary"
+    )
+    assert (controller / "value.txt").read_text() == "base\n"
+
+
+def test_separate_controller_pending_task_card_does_not_block_integration(tmp_path: Path):
+    """#2230 F3(a): an untracked pending Task Card under tasks/ is not dirt."""
+    _root, controller, base, candidate = _separate_controller(tmp_path)
+    card = controller / "tasks" / "active" / "pending-card.md"
+    card.parent.mkdir(parents=True)
+    card.write_text("pending\n")
+    result = _separate_controller_integrate(tmp_path, controller, base, candidate)
+    assert result.merge_performed is True
+    assert (
+        _git(controller, "merge-base", "--is-ancestor", candidate, "nexus/integration/canary") == ""
+    )
+    assert card.read_text() == "pending\n"
+    assert _git(controller, "rev-parse", "HEAD") == base
+
+
+@pytest.mark.parametrize("dirt", ["untracked-outside", "tracked-edit", "tasks-symlink"])
+def test_separate_controller_other_dirt_still_blocks_integration(tmp_path: Path, dirt: str):
+    _root, controller, base, candidate = _separate_controller(tmp_path)
+    if dirt == "untracked-outside":
+        (controller / "stray.txt").write_text("stray\n")
+    elif dirt == "tracked-edit":
+        (controller / "value.txt").write_text("edited\n")
+    else:
+        (controller / "tasks").mkdir()
+        (controller / "tasks" / "card.md").symlink_to(controller / "value.txt")
+    with pytest.raises(RuntimeError, match="canonical.*clean"):
+        _separate_controller_integrate(tmp_path, controller, base, candidate)
+    assert _git(controller, "rev-parse", "nexus/integration/canary") == base
+
+
+def test_controller_on_integration_branch_still_rejects_pending_task_card(tmp_path: Path):
+    """When apply fast-forwards the Controller worktree, it stays fully clean."""
+    root, base, candidate = _repo(tmp_path)
+    (root / "tasks").mkdir()
+    (root / "tasks" / "pending-card.md").write_text("pending\n")
+    with pytest.raises(RuntimeError, match="canonical.*clean"):
+        _separate_controller_integrate(tmp_path, root.resolve(), base, candidate)
+    assert _git(root, "rev-parse", "HEAD") == base
+
+
 def _bound_tracked_approval(task_id: str, contract_hash: str) -> dict:
     """Full versioned grant naming its approver, bound to task, attempt and action (#1758)."""
     now = datetime.now(timezone.utc)
