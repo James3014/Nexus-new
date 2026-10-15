@@ -1544,10 +1544,32 @@ def test_local_and_online_share_root_bundle_hash(tmp_path: Path) -> None:
     local_outputs = local_resp.get("local_outputs") if isinstance(local_resp, dict) else {}
     ec = local_outputs.get("evidence_consumption") if isinstance(local_outputs, dict) else {}
     local_hash = str((ec or {}).get("bundle_hash") or "")
+    # nexus-runtime #213 (0cedab1) re-seals the receipt's capability evidence
+    # bundle after the postflight stage, so its bundle_hash now also covers the
+    # gate/postflight entries. The hash Local and Online actually consumed is
+    # kept as preflight_bundle_hash, and the re-sealed bundle binds it. So both
+    # consumers must match that preflight hash (the root hash when no re-seal
+    # happened), and a different consumed hash must be rejected by the bundle
+    # verifier as a preflight mismatch.
+    from nexus_runtime.planning.services.capability_evidence_bundle import (
+        verify_capability_evidence_bundle,
+    )
+
+    preflight_hash = str(bundle.get("preflight_bundle_hash") or "")
+    consumed_hash = preflight_hash or root_hash
     if online_hash:
-        assert online_hash == root_hash
+        assert online_hash == consumed_hash
     if local_hash:
-        assert local_hash == root_hash
+        assert local_hash == consumed_hash
+    if preflight_hash:
+        assert preflight_hash != root_hash
+        bound = verify_capability_evidence_bundle(
+            bundle, expected_preflight_bundle_hash=consumed_hash
+        )
+        assert "preflight_bundle_hash_mismatch" not in bound["blockers"]
+        other = verify_capability_evidence_bundle(bundle, expected_preflight_bundle_hash="0" * 64)
+        assert other["ok"] is False
+        assert "preflight_bundle_hash_mismatch" in other["blockers"]
     # Prompt must contain real evidence IDs when local ran.
     if captured_local.get("prompt"):
         assert "capability:codeintel:share-hash-1:real" in captured_local["prompt"]
