@@ -21311,7 +21311,16 @@ def main() -> int:
                 test_file=test_file,
                 elapsed_sec=leg_start - run_start,
             )
-            with _capture_python_warnings(source="without_nexus_runtime") as runtime_warning_records:
+            # Same staging context as the with-Nexus leg (symmetry): the bare arm's agent runs in
+            # an empty cwd but is an unconfined same-user process that could read absolute
+            # workspace paths, so the hidden test is out of the workspace for it too.
+            with _hidden_staging.staged_hidden_test(
+                enabled=_hidden_staging_enabled(args),
+                repo_root=repo_root,
+                test_file=test_file,
+                task_id=task.id,
+                trial_index=task.trial_index,
+            ) as hidden_staging, _capture_python_warnings(source="without_nexus_runtime") as runtime_warning_records:
                 row = run_without_nexus(
                     repo_root=repo_root,
                     task=task,
@@ -21324,6 +21333,15 @@ def main() -> int:
                     mode=args.without_mode,
                 )
             _annotate_warning_ledger(row, runtime_warning_records, append=True)
+            row.update(hidden_staging.row_fields() if hidden_staging is not None else {"hidden_staged": False})
+            if row.get("hidden_test_tampered"):
+                row["hidden_verifier_passed"] = False
+            if _hidden_staging.run_abort_reason():
+                # Fail closed exactly like the with-Nexus leg (exit 3).
+                row["hidden_staging_run_abort"] = _hidden_staging.run_abort_reason()
+                without_rows.append(row)
+                timed_out = True
+                return "break"
             row["per_call_timeout_cap_sec"] = _symmetric_per_call_cap_sec()
             row["isolation_mode"] = args.isolation_mode
             row["clean_checkout_required"] = args.isolation_mode == "worktree"
