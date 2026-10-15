@@ -1265,6 +1265,40 @@ def _log_safe(line: str) -> str:
     return " " * indent + body
 
 
+_ANNOTATION_TITLE = "Exact-base impact gate"
+_MAX_ANNOTATED_FAILURES = 10
+
+
+def _annotation_message(text: str, limit: int = 900) -> str:
+    """Annotation body: log-safe, bounded, and percent-encoded as the runner expects."""
+    body = _log_safe(text).strip()
+    if len(body) > limit:
+        body = body[:limit] + "..."
+    return body.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def _blocking_annotations(classification: RegressionClassification) -> list[str]:
+    """`::error` annotations so a blocked check names its cause on the PR (#1895).
+
+    Our own prefix is the only workflow command: every candidate-controlled byte
+    (test ids, reasons) goes through `_log_safe` and percent-encoding first.
+    """
+    if not classification.blocking:
+        return []
+    title = f"::error title={_ANNOTATION_TITLE}::"
+    reason = f"{classification.classification}: {classification.reason}"
+    if classification.remedy:
+        reason += f" | {classification.remedy}"
+    lines = [title + _annotation_message(reason)]
+    failures = classification.new_failures
+    for node in failures[:_MAX_ANNOTATED_FAILURES]:
+        lines.append(title + _annotation_message(f"new failure on head: {node}"))
+    if len(failures) > _MAX_ANNOTATED_FAILURES:
+        extra = len(failures) - _MAX_ANNOTATED_FAILURES
+        lines.append(title + _annotation_message(f"... and {extra} more; see classification.json"))
+    return lines
+
+
 def _json_log_safe(text: str) -> str:
     """JSON text for the job log: `json.dumps` already escapes newlines; also escape
     `[` after `##` (as \\u005b, which decodes identically) to defuse legacy commands."""
@@ -2128,6 +2162,8 @@ def main(argv: list[str] | None = None) -> int:
         print(_log_safe(f"Exact-base impact gate BLOCKED: {classification.classification}"))
         for mismatch in classification.mismatch_reasons or [classification.reason]:
             print(_log_safe(f"  - {mismatch}"))
+        for line in _blocking_annotations(classification):
+            print(line, file=sys.stderr)
     return 1 if classification.blocking else 0
 
 
