@@ -1129,3 +1129,84 @@ def test_live_verdict_core_identity_matches_real_core(live):
     verdict = _verdict(live["complete"])
     assert verdict["core_universe_identity"] == verdict["coverage"]["universe_identity"]
     assert verdict["contract_universe_identity"].startswith("sha256:")
+
+
+# --- cards created by nexus_task_card_create (#2218) ------------------------
+
+_CREATED_UNIVERSES = {
+    "created_complete": {
+        "universe_generation": 1,
+        "subjects": [
+            _subject("lint:ruff", "lint-report", "CONDITIONALLY_REQUIRED", "NOT_APPLICABLE"),
+            DIFF_CHECK,
+        ],
+    },
+    "created_missing": {"universe_generation": 1, "subjects": [SECURITY_REVIEW, DIFF_CHECK]},
+}
+CREATED_SCENARIOS: list[dict[str, Any]] = [
+    {
+        "name": name,
+        "task_id": name.replace("_", "-"),
+        "verifiers": ["git diff --check"],
+        "create_card": {
+            "authority_goal_id": "goal-test",
+            "authority_coordination_scope_id": "thread-test",
+            "owner_confirmation": True,
+            "campaign_id": f"cov-{name.replace('_', '-')}",
+            "task_id": name.replace("_", "-"),
+            "objective": "Change README.md in one bounded step.",
+            "allowed_files": ["README.md"],
+            "verifier_commands": ["git diff --check"],
+            "expected_evidence": universe,
+        },
+    }
+    for name, universe in _CREATED_UNIVERSES.items()
+]
+
+
+@pytest.fixture(scope="module")
+def live_created(pinned_core, tmp_path_factory) -> dict[str, Any]:
+    results = _run_driver(tmp_path_factory.mktemp("live-created"), CREATED_SCENARIOS, pinned_core)
+    assert results["core_available"] is True, results["core_import_error"]
+    return results
+
+
+def _assert_created_card_drives_the_declared_universe(result: dict[str, Any], name: str) -> None:
+    created = result["created_card"]
+    declared = parse_task_card_expected_evidence(created["card_text"])
+    assert declared is not None
+    assert core_universe_identity(declared) == core_universe_identity(_CREATED_UNIVERSES[name])
+    assert hashlib.sha256(created["card_text"].encode("utf-8")).hexdigest() == created["card_hash"]
+    # The Gateway read the universe from the created, hashed card.
+    assert result["request_expected_evidence"] == declared
+    assert result["request_core_envelope_required"] is True
+    verdict = _verdict(result)
+    assert verdict["coverage"]["universe_identity"] == core_universe_identity(declared)
+    assert verdict["core_provenance"]["status"] == "CORE_REVISION_PINNED"
+    assert result["reloaded_core_verdict"] == verdict
+
+
+def test_live_created_card_with_complete_coverage_reaches_core_verdict(live_created):
+    result = live_created["created_complete"]
+    _assert_created_card_drives_the_declared_universe(result, "created_complete")
+    verdict = _verdict(result)
+    assert verdict["blocking"] is False
+    assert verdict["coverage_complete"] is True
+    assert _categories(verdict) == {
+        "git diff --check": "COVERED",
+        "lint:ruff": "CONDITIONALLY_NOT_APPLICABLE",
+    }
+    assert result["receipt_verified"] is True
+    assert result["receipt_commit_allowed"] is True
+
+
+def test_live_created_card_with_missing_evidence_blocks(live_created):
+    result = live_created["created_missing"]
+    _assert_created_card_drives_the_declared_universe(result, "created_missing")
+    _assert_blocked(result)
+    verdict = _verdict(result)
+    assert verdict["core_status"] == "UNVERIFIABLE"
+    assert _categories(verdict) == {
+        "git diff --check": "COVERED",
+        "review:security": "NOT_COVERED",
+    }

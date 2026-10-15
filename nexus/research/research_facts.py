@@ -27,7 +27,8 @@ def build_research_facts(
     return ResearchFacts(
         observed_components=_as_tuple(raw.get("observed_components") or research_pack.get("observed_components")),
         execution_flows=_as_tuple(raw.get("execution_flows") or research_pack.get("execution_flows")),
-        constraints=_as_tuple(research_pack.get("blocked_assumptions")) or findings,
+        # Both: blocked_assumptions used to replace findings entirely (#2216 review).
+        constraints=tuple(dict.fromkeys((*_as_tuple(research_pack.get("blocked_assumptions")), *findings))),
         evidence_refs=refs,
         open_questions=_as_tuple(raw.get("open_questions") or research_pack.get("open_questions")),
         unknowns=_as_tuple(raw.get("unknowns") or research_pack.get("unknowns")),

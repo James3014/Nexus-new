@@ -96,6 +96,11 @@ _SEMANTIC_FAIL_STATUSES = frozenset(
     }
 )
 
+# Executors whose body is a self-declared mock on every path (the mask in
+# jit_tool_injector.py is a keyword mock; the blocked path never masks anything).
+# Their receipts stay simulated even when a runtime boundary says otherwise.
+SIMULATED_BY_DESIGN_EXECUTORS = frozenset({"jit_validation"})
+
 
 def _structured_fail_in_value(value: Any, *, depth: int = 0, max_depth: int = 4) -> bool:
     """Bounded recursive inspection of Mapping/list for structured fail fields.
@@ -721,6 +726,40 @@ def _exec_lancedb(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRe
                              outcome={"error": str(exc)[:300]})
 
 
+def _research_contamination_signal(
+    plan: CapabilityExecutionPlan, result: Mapping[str, Any], research_task: str, log_root: Path
+) -> dict[str, Any]:
+    """P-CONTAM-01 record-only signal for accepted research output (#2199/#2216).
+
+    The check never changes the receipt status.  The signal goes into the receipt outcome
+    and is appended to <workspace>/.nexus/research/contamination_signals.jsonl.
+    """
+    try:
+        from nexus.research.contamination_enforcement import (
+            append_contamination_signal,
+            check_research_output,
+            signal_from_verdict,
+        )
+
+        signal = signal_from_verdict(check_research_output(result, echo_texts=(research_task,)))
+        append_contamination_signal(
+            log_root,
+            signal,
+            route="capability_executor_registry._exec_research",
+            task_id=plan.task_id,
+        )
+        return signal
+    except Exception as exc:  # the record-only signal must never break research
+        logger.warning("research contamination signal error: %s", str(exc)[:200])
+        return {
+            "policy_id": "P-CONTAM-01",
+            "mode": "record_only",
+            "detected": None,
+            "reason": "RESEARCH_CONTAMINATION_GUARD_ERROR",
+            "terms": [],
+        }
+
+
 def _exec_research(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
     start = time.monotonic()
     cls = _try_port("research.ResearchPhaseHandler")
@@ -811,6 +850,12 @@ def _exec_research(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityR
             and bool(research_task)
             and list(result.get("findings") or []) != ["Empty research task."]
         )
+        # P-CONTAM-01 (#2199/#2216): record-only signal on accepted research output.
+        signal = (
+            _research_contamination_signal(plan, result, research_task, research_root)
+            if ok and isinstance(result, Mapping)
+            else None
+        )
         return _make_receipt(
             "research",
             plan,
@@ -822,6 +867,7 @@ def _exec_research(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityR
                 evidence_refs=[f"ev_research_{plan.task_id}"],
                 result=result if isinstance(result, Mapping) else {"value": str(result)[:200]},
                 physical_callable="nexus.engine.phases.research.ResearchPhaseHandler.run",
+                **({"contamination_signal": signal} if signal is not None else {}),
             ),
         )
     except Exception as exc:

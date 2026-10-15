@@ -30,6 +30,14 @@ the #526 governed rebind.  One cycle (run every few minutes by the LaunchAgent
    dir (never the live self-hosted state) and require ``/health`` for the exact
    commit, the candidate's own GB-077 live identity probe, MCP ``tools/list``
    and ``nexus_gateway_status``.  On failure the live Gateway is left untouched.
+3a. Quiescence (#2227): no switch while a governed task is in flight.  The
+   live deployment's own lifecycle code classifies every task in the live
+   self-hosted state dir (``IN_PROGRESS``/``ACTION_REQUIRED`` or unreadable =
+   in flight; fail closed) before the build and again under the lock right
+   before the plist write.  A deferral is ``DEFERRED_TASKS_IN_FLIGHT`` (not a
+   failure); its age is kept in ``quiescence.json`` and the receipts, and after
+   6 h one warning naming the tasks goes to #2227.  It never forces a switch;
+   only a manual ``run --allow-in-flight`` does.
 4. Switch: under the #526 manager's ledger lock, journal the previous plist,
    rewrite the ``com.nexus.mcp.gateway.direct`` plist, reload it, and probe the
    real port.  If that fails, restore the exact previous plist bytes and reload
@@ -62,6 +70,7 @@ import base64
 import contextlib
 import hashlib
 import json
+import math
 import os
 import plistlib
 import re
@@ -137,6 +146,71 @@ FAILED_OUTCOMES = (
     "RECONCILE_FAILED",
 )
 MAX_BACKOFF_SECONDS = 6 * 60 * 60
+# Task quiescence (#2227): a switch moves the Controller HEAD, which every
+# non-terminal governed task is bound to, so no switch while one is in flight.
+DEFERRED_OUTCOME = "DEFERRED_TASKS_IN_FLIGHT"
+# Task action states (SelfHostedTaskService._task_action_envelope) that a
+# switch would break; TERMINAL and FINAL_BLOCK tasks are not executing.
+IN_FLIGHT_ACTION_STATES = ("IN_PROGRESS", "ACTION_REQUIRED")
+# Deferral never ends in an automatic switch; after this long the Issue below
+# gets one loud warning per deferral episode naming the blocking tasks.
+QUIESCENCE_WARN_AFTER_SECONDS = 6 * 60 * 60
+QUIESCENCE_REWARN_SECONDS = 24 * 60 * 60
+# A new candidate re-arms the warning at most hourly (no comment per merge).
+QUIESCENCE_REARM_MIN_SECONDS = 60 * 60
+QUIESCENCE_ALERT_ISSUE = 2227
+QUIESCENCE_CLASSIFY_TIMEOUT_SECONDS = 120
+# Runs with the LIVE deployment's interpreter and tree, so tasks are classified
+# by exactly the lifecycle code that owns them.  Read-only: it never takes the
+# task state lock or reconciles anything.
+TASK_QUIESCENCE_PROBE_CODE = """
+import json, sys
+from pathlib import Path
+root, state_dir = sys.argv[1:3]
+sys.path.insert(0, root)
+import nexus.orchestrator.self_hosted_task_service as lifecycle
+from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
+durable = lifecycle.DURABLE_SELF_HOSTED_STATUSES
+invalid = lifecycle.INVALID_STATE_STATUSES
+base = Path(state_dir)
+paths = sorted(base.glob("*.json")) if base.exists() else []
+tasks = []
+for path in paths:
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        tasks.append({"task_id": path.stem, "action_state": "UNREADABLE"})
+        continue
+    if not isinstance(state, dict):
+        tasks.append({"task_id": path.stem, "action_state": "UNREADABLE"})
+        continue
+    status = state.get("status")
+    if not isinstance(status, str) or status in invalid or status not in durable:
+        # The lifecycle maps an unknown status to FINAL_BLOCK; fail closed here.
+        tasks.append({"task_id": path.stem, "action_state": "INVALID_STATUS"})
+        continue
+    action = SelfHostedTaskService._task_action_envelope(state)
+    tasks.append({"task_id": path.stem, "action_state": str(action.get("action_state"))})
+# Assisted provider jobs run as children the Gateway tracks in memory; a reload
+# orphans them, so a non-terminal job is in flight too.
+jobs = base / "assisted_provider_jobs"
+for path in sorted(jobs.glob("*.json")) if jobs.exists() else []:
+    try:
+        job = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        tasks.append({"task_id": "assist." + path.stem, "action_state": "UNREADABLE"})
+        continue
+    job = job if isinstance(job, dict) else {}
+    status = job.get("status")
+    if status == "UNKNOWN_REQUIRES_RECONCILE" or job.get("reconciliation_required"):
+        tasks.append({"task_id": "assist." + path.stem, "action_state": "ASSIST_RECONCILE"})
+    elif status not in ("COMPLETED", "FAILED", "CANCELLED"):
+        tasks.append({"task_id": "assist." + path.stem, "action_state": "ASSIST_RUNNING"})
+    elif status == "CANCELLED" and job.get("process_killed") is False:
+        # Cancellation could not confirm the child exited.
+        tasks.append({"task_id": "assist." + path.stem, "action_state": "ASSIST_UNSETTLED"})
+print(json.dumps({"schema": "nexus.gateway.task_quiescence.v1", "tasks": tasks}))
+"""
 # Open PRs that bump the runtime/dependency pin (or anchor such a bump).  While
 # one is in flight no deploy starts, so deploys and pin bumps never interleave.
 PIN_BUMP_PR = re.compile(
@@ -147,6 +221,12 @@ PIN_BUMP_PR = re.compile(
 PIN_FILES = ("uv.lock", "pyproject.toml", "requirements/canonical-runtime.txt")
 PIN_BUMP_MAX_AGE_SECONDS = 3 * 24 * 60 * 60
 _SHA = re.compile(r"^[0-9a-f]{40}$")
+# RFC 3339 date-time with an explicit offset; fractions up to microseconds (#2169).
+_RFC3339 = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:[Zz]|[+-]\d{2}:\d{2})$"
+)
+# Timeline events that move a PR head; one of unknown age counts as recent.
+_HEAD_PUSH_EVENTS = ("head_ref_force_pushed", "head_ref_restored")
 _DEPLOYMENT_NAME = re.compile(r"(?:^|/)[ar]1-([0-9a-f]{40})$")
 _SHELL_UNSAFE = ('"', "$", "`", "\\", "\n", "\r", "\x00")
 # Each deployment runs the nexus-core revision its own tree pins (#2181).  The pin
@@ -219,6 +299,10 @@ class DeployError(RuntimeError):
     pass
 
 
+# HOLD text written when a validated journal could not be reconciled.
+RECONCILE_FAILED_HOLD = "auto-hold: RECONCILE_FAILED"
+
+
 @dataclass(frozen=True)
 class Config:
     gateway_root: Path
@@ -234,6 +318,9 @@ class Config:
     min_interval_seconds: int = 600
     max_irrelevant_lag: int = 25
     probe_timeout_seconds: float = 120.0
+    gh: str = "gh"
+    quiescence_warn_after_seconds: int = QUIESCENCE_WARN_AFTER_SECONDS
+    alert_issue: int = QUIESCENCE_ALERT_ISSUE
 
     @classmethod
     def default(cls, home: Optional[Path] = None, **overrides: Any) -> "Config":
@@ -298,12 +385,26 @@ class Config:
     def probe_state_root(self) -> Path:
         return self.state_dir / "probe-state"
 
+    @property
+    def deferrals(self) -> Path:
+        """Deferral episode log (#2227); kept out of receipts.jsonl so backoff,
+        give-up counting and the drift checker only ever see real attempts."""
+        return self.state_dir / "deferrals.jsonl"
+
+    @property
+    def quiescence_file(self) -> Path:
+        """The current deferral episode (#2227); absent when nothing is deferred."""
+        return self.state_dir / "quiescence.json"
+
 
 # --------------------------------------------------------------------------- host
 
 
 class Host:
     """Every process, launchd and clock effect.  Tests replace this class."""
+
+    # How long GATEWAY_LOCK and the R1 ledger lock are waited for.
+    lock_timeout_seconds: float = 30.0
 
     def run(
         self,
@@ -372,6 +473,56 @@ class Host:
             )
         return lock
 
+    def tasks_in_flight(self, cfg: Config, live_plist: bytes) -> Dict[str, Any]:
+        """Classify the live self-hosted tasks with the live deployment's own code (#2227).
+
+        Fail closed: anything that cannot be read or classified is ``UNKNOWN``,
+        which defers the switch exactly like an in-flight task.
+        """
+        try:
+            root, python = live_root(live_plist), live_python(live_plist)
+        except DeployError as exc:
+            return {"verdict": "UNKNOWN", "reason": f"LIVE_PLIST_UNREADABLE:{exc}"[:300]}
+        if root is None or python is None or not python.exists() or not root.is_dir():
+            return {"verdict": "UNKNOWN", "reason": "LIVE_INTERPRETER_OR_ROOT_MISSING"}
+        try:
+            result = self.run(
+                [
+                    str(python),
+                    "-W",
+                    "ignore",
+                    "-c",
+                    TASK_QUIESCENCE_PROBE_CODE,
+                    str(root),
+                    str(cfg.canonical_state_dir),
+                ],
+                env={"PYTHONDONTWRITEBYTECODE": "1", "PATH": os.environ.get("PATH", "")},
+                timeout=QUIESCENCE_CLASSIFY_TIMEOUT_SECONDS,
+            )
+        except Exception as exc:  # noqa: BLE001 - unknown is in flight
+            return {"verdict": "UNKNOWN", "reason": f"CLASSIFIER_FAILED:{type(exc).__name__}"}
+        return classify_task_report(result.returncode, result.stdout or "", result.stderr or "")
+
+    def post_issue_comment(self, cfg: Config, body: str) -> bool:
+        """One comment on the quiescence alert Issue; False on any failure."""
+        try:
+            result = self.run(
+                [
+                    cfg.gh,
+                    "issue",
+                    "comment",
+                    str(int(cfg.alert_issue)),
+                    "--repo",
+                    cfg.repository,
+                    "--body",
+                    body,
+                ],
+                timeout=60,
+            )
+        except Exception:  # noqa: BLE001 - a failed alert is retried next cycle
+            return False
+        return result.returncode == 0
+
     def r1_recovery_block(self, cfg: Config) -> Optional[str]:
         """Why an open #526 R1 recovery forbids a Gateway effect now, else None.
 
@@ -405,7 +556,7 @@ class Host:
         try:
             self.manager_lock_path(cfg)
             path = durable.GatewayLedger(Path(durable.GATEWAY_LEDGER)).lock_path
-            lock = durable.InterProcessLock(path, timeout=30.0)
+            lock = durable.InterProcessLock(path, timeout=self.lock_timeout_seconds)
             lock.__enter__()
         except DeployError:
             raise
@@ -422,7 +573,9 @@ class Host:
         from scripts.ops import mcp_gateway_durable as durable
 
         try:
-            lock = durable.InterProcessLock(self.manager_lock_path(cfg), timeout=30.0)
+            lock = durable.InterProcessLock(
+                self.manager_lock_path(cfg), timeout=self.lock_timeout_seconds
+            )
             lock.__enter__()
         except DeployError:
             raise
@@ -697,15 +850,20 @@ def on_github_main(
 
 
 def _parse_time(value: Any) -> Optional[float]:
+    """Epoch seconds of an RFC 3339 timestamp (``Z``, ``+00:00``, fractions), else None.
+
+    A value without a UTC offset, or one that is not a full date-time, is
+    unparseable: guessing its zone could make an event look older than it is.
+    """
+    if not isinstance(value, str) or not _RFC3339.match(value):
+        return None
     try:
-        return (
-            datetime
-            .strptime(str(value), "%Y-%m-%dT%H:%M:%SZ")
-            .replace(tzinfo=timezone.utc)
-            .timestamp()
-        )
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00" if value[-1] in "Zz" else value)
     except ValueError:
         return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.timestamp()
 
 
 def _paged(api_get: Callable[[str], Any], path: str) -> Iterator[dict]:
@@ -743,7 +901,11 @@ def _is_stale_pin_pr(api_get: Callable[[str], Any], repo: str, pr: dict, now: fl
         return False
     for event in _paged(api_get, f"repos/{repo}/issues/{pr['number']}/timeline"):
         when = _timeline_time(api_get, repo, event)
-        # An event without a usable timestamp is ignored, never "recent forever".
+        if when is None and event.get("event") in _HEAD_PUSH_EVENTS:
+            # A head push of unknown age may be recent: fail closed (#2169).
+            return False
+        # Any other event without a usable timestamp is ignored, never
+        # "recent forever" (a dateless ``committed`` event stays stale).
         if when is not None and when > cutoff:
             return False
     return True
@@ -752,7 +914,7 @@ def _is_stale_pin_pr(api_get: Callable[[str], Any], repo: str, pr: dict, now: fl
 def _timeline_time(api_get: Callable[[str], Any], repo: str, event: dict) -> Optional[float]:
     """Timestamp of a push-like timeline event, from documented fields only."""
     kind = event.get("event")
-    if kind in ("head_ref_force_pushed", "head_ref_restored"):
+    if kind in _HEAD_PUSH_EVENTS:
         return _parse_time(event.get("created_at"))
     if kind != "committed":
         return None
@@ -825,6 +987,28 @@ def read_env_token(env_file: Path) -> str:
             if parts and parts[0]:
                 return parts[0]
     raise DeployError("GATEWAY_TOKEN_UNAVAILABLE")
+
+
+def health_core_provenance(health: Any, core: Any) -> Dict[str, Any]:
+    """The running Gateway's own ``/health`` ``core_provenance`` (#2169, since #2201).
+
+    Required: status ``CORE_REVISION_PINNED``, expected and observed revision
+    both equal to the deployment's Core pin, and ``fail_closed`` exactly False.
+    A missing or malformed block fails.
+    """
+    if not isinstance(core, dict) or not _SHA.match(str(core.get("revision") or "")):
+        return {"ok": False, "error": "CORE_PIN_UNKNOWN"}
+    block = health.get("core_provenance") if isinstance(health, dict) else None
+    if not isinstance(block, dict):
+        return {"ok": False, "error": "HEALTH_CORE_PROVENANCE_MISSING"}
+    ok = (
+        block.get("status") == "CORE_REVISION_PINNED"
+        and block.get("expected_revision") == core["revision"]
+        and block.get("observed_commit") == core["revision"]
+        and block.get("fail_closed") is False
+    )
+    keys = ("status", "expected_revision", "observed_commit", "fail_closed")
+    return {"ok": ok, **{k: block.get(k) for k in keys if k in block}}
 
 
 class Prober:
@@ -939,7 +1123,10 @@ class Prober:
         except Exception as exc:  # noqa: BLE001
             checks["gateway_status"] = {"ok": False, "error": f"{type(exc).__name__}:{exc}"[:300]}
         if core is not None:
+            # Both: the fresh subprocess proves the on-disk resolution, the
+            # /health block proves what the running process actually loaded.
             checks["core_provenance"] = self.core_provenance(root=root, python=python, core=core)
+            checks["health_core_provenance"] = health_core_provenance(observed, core)
         return {"ok": all(c["ok"] for c in checks.values()), "checks": checks}
 
 
@@ -1042,13 +1229,23 @@ def _sha256(data: bytes) -> str:
 
 
 def _atomic_write(path: Path, data: bytes, mode: int = 0o644) -> None:
-    tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}")
-    with open(tmp, "wb") as handle:
-        handle.write(data)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.chmod(tmp, mode)
-    os.replace(tmp, path)
+    # Unique per write and created exclusively (O_EXCL, so never through an
+    # existing file or symlink).  Cleanup runs only once this write has created
+    # its own temp file, so it never removes anything it does not own (#2169 review).
+    tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}.{os.urandom(6).hex()}")
+    handle = open(tmp, "xb")
+    try:
+        with handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except BaseException:
+        # Never leave a half-written temp file behind (#2169 review).
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        raise
 
 
 def _atomic_symlink(target: Path, link: Path) -> None:
@@ -1399,6 +1596,98 @@ def _append_receipt(cfg: Config, receipt: Dict[str, Any]) -> None:
         os.fsync(handle.fileno())
 
 
+_TASK_ID_SAFE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_ACTION_STATE_SAFE = re.compile(r"^[A-Z][A-Z_]{0,39}$")
+
+
+def _parse_iso(value: Any) -> Optional[float]:
+    """Epoch of a ``%Y-%m-%dT%H:%M:%SZ`` string, or None for anything else."""
+    if not isinstance(value, str) or not _ISO_UTC.match(value):
+        return None
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return parsed.timestamp()
+
+
+DEFERRALS_MAX_BYTES = 1_000_000
+
+
+def _rotate_if_large(path: Path) -> None:
+    """Keep the deferral log bounded: one previous generation, ~1 MB each."""
+    try:
+        if path.stat().st_size >= DEFERRALS_MAX_BYTES:
+            os.replace(path, path.with_name(path.name + ".1"))
+    except FileNotFoundError:
+        pass
+
+
+def _safe_reason(reason: str) -> str:
+    """Only a code-like prefix of an UNKNOWN reason may reach a comment or log."""
+    match = re.match(r"[A-Z][A-Z0-9_]{0,63}", reason)
+    return match.group(0) if match else "UNKNOWN"
+
+
+_ISO_UTC = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
+
+def classify_task_report(returncode: int, stdout: str, stderr: str = "") -> Dict[str, Any]:
+    """Turn the classifier output into CLEAR / IN_FLIGHT / UNKNOWN (fail closed)."""
+    if returncode != 0:
+        return {"verdict": "UNKNOWN", "reason": f"CLASSIFIER_EXIT_{returncode}"}
+    lines = [line for line in stdout.splitlines() if line.strip()]
+    try:
+        report = json.loads(lines[-1]) if lines else None
+    except ValueError:
+        report = None
+    tasks = report.get("tasks") if isinstance(report, dict) else None
+    if not isinstance(tasks, list):
+        return {"verdict": "UNKNOWN", "reason": "CLASSIFIER_OUTPUT_MALFORMED"}
+    blocking: List[str] = []
+    for task in tasks:
+        if not isinstance(task, dict):
+            return {"verdict": "UNKNOWN", "reason": "CLASSIFIER_OUTPUT_MALFORMED"}
+        task_id = str(task.get("task_id") or "")
+        name = task_id if _TASK_ID_SAFE.match(task_id) else "<unprintable-task-id>"
+        state = task.get("action_state")
+        if state == "TERMINAL" or state == "FINAL_BLOCK":
+            continue
+        if state in IN_FLIGHT_ACTION_STATES:
+            blocking.append(name)
+        else:
+            label = (
+                state if isinstance(state, str) and _ACTION_STATE_SAFE.match(state) else "UNKNOWN"
+            )
+            blocking.append(f"{name}:{label}")
+    if blocking:
+        return {"verdict": "IN_FLIGHT", "task_ids": sorted(blocking), "checked": len(tasks)}
+    return {"verdict": "CLEAR", "checked": len(tasks)}
+
+
+def _read_json_object(path: Path) -> Optional[Dict[str, Any]]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _quiescence_warning(cfg: Config, candidate: str, blocking: List[str], age: float) -> str:
+    hours = age / 3600.0
+    names = "\n".join(f"- `{name}`" for name in blocking[:50])
+    return (
+        "<!-- NEXUS_GATEWAY_QUIESCENCE_WARNING -->\n"
+        f"**Gateway auto-deploy has been deferred for {hours:.1f} h** because governed tasks "
+        f"are still in flight (#2227). Candidate `{candidate}` is waiting; the live Gateway "
+        "is unchanged and will not be switched automatically.\n\n"
+        f"Blocking tasks ({len(blocking)}):\n{names}\n\n"
+        "Resolve each task (finish, reconcile or retire it), or, for an orphaned task, run "
+        "`nexus_gateway_auto_deploy.py run --allow-in-flight` by hand. Deferral never ends "
+        "in an automatic switch.\n"
+    )
+
+
 def _write_status(cfg: Config, payload: Dict[str, Any]) -> None:
     cfg.state_dir.mkdir(parents=True, exist_ok=True)
     _atomic_write(
@@ -1415,9 +1704,18 @@ def hold_reason(cfg: Config, environ: Optional[Dict[str, str]] = None) -> Option
     return None
 
 
+def _hold_text(cfg: Config) -> str:
+    """The HOLD file's reason text, or "" when absent or unreadable."""
+    try:
+        return cfg.hold_file.read_text(encoding="utf-8")
+    except (OSError, ValueError):
+        return ""
+
+
 def _set_hold(cfg: Config, reason: str) -> None:
+    """Write HOLD atomically: a crash or full disk leaves the whole text or none (#2169)."""
     cfg.state_dir.mkdir(parents=True, exist_ok=True)
-    cfg.hold_file.write_text(reason + "\n", encoding="utf-8")
+    _atomic_write(cfg.hold_file, (reason + "\n").encode("utf-8"), 0o600)
 
 
 def known_plist_hashes(cfg: Config) -> List[str]:
@@ -1464,6 +1762,7 @@ def run_cycle(
     environ: Optional[Dict[str, str]] = None,
     tool_python: Optional[Path] = None,
     fetch: bool = True,
+    allow_in_flight: bool = False,
 ) -> Dict[str, Any]:
     started = host.now()
     status: Dict[str, Any] = {
@@ -1476,9 +1775,12 @@ def run_cycle(
             return {**status, "status": "BUSY"}
         ctx = _Cycle(cfg, host, prober, api_get, environ, tool_python or Path(sys.executable))
         ctx.fetch = fetch
-        stuck = (
-            hold_reason(cfg, environ)
-            and (last_receipt(cfg.state_dir) or {}).get("outcome") == "RECONCILE_FAILED"
+        ctx.allow_in_flight = allow_in_flight
+        # Stuck: the last receipt says RECONCILE_FAILED, or (if that receipt
+        # could not be written) the HOLD text itself does (#2169 F2).
+        stuck = hold_reason(cfg, environ) and (
+            (last_receipt(cfg.state_dir) or {}).get("outcome") == "RECONCILE_FAILED"
+            or _hold_text(cfg).startswith(RECONCILE_FAILED_HOLD)
         )
         if cfg.journal.exists() and not dry_run and stuck:
             # A valid journal whose reconciliation failed unexpectedly: kept and
@@ -1514,6 +1816,126 @@ class _Cycle:
         self.environ = environ
         self.tool_python = tool_python
         self.fetch = True
+        # Manual `run --allow-in-flight` only; the LaunchAgent never passes it.
+        self.allow_in_flight = False
+        self.quiescence_note: Optional[Dict[str, Any]] = None
+
+    # -- task quiescence (#2227) --------------------------------------------
+
+    def quiescence(self, live_plist: bytes, candidate: str) -> Dict[str, Any]:
+        """Classify live tasks and track the deferral episode; never switches anything."""
+        return self.track_deferral(candidate, self.host.tasks_in_flight(self.cfg, live_plist))
+
+    def track_deferral(self, candidate: str, verdict: Dict[str, Any]) -> Dict[str, Any]:
+        """CLEAR ends the episode; anything else extends it (#2227).
+
+        The episode start lives in ``quiescence.json``.  A new or changed
+        blocking set and the warning append one line to ``deferrals.jsonl``;
+        once the episode is older than the warning cap, one loud comment naming
+        the blocking tasks goes to the alert Issue.  The switch stays deferred
+        whatever the age: it is never forced automatically.
+        """
+        cfg, host = self.cfg, self.host
+        now = host.now()
+        if verdict.get("verdict") == "CLEAR":
+            # The episode ends only when the Gateway is current (a switch or
+            # IN_SYNC, see ``end_deferral``), so a task that keeps appearing
+            # during the build window still ages toward the warning.
+            return verdict
+        episode = _read_json_object(cfg.quiescence_file) or {}
+        since = episode.get("since_epoch")
+        if (
+            isinstance(since, bool)
+            or not isinstance(since, (int, float))
+            or not math.isfinite(since)
+        ):
+            since = now
+        warned_at = _parse_iso(episode.get("warned_at"))
+        if warned_at is not None and warned_at > now:
+            warned_at = None  # a future marker can never mute a warning
+        if warned_at is not None and (
+            (
+                # The candidate the last warning named, not the latest one seen,
+                # so a candidate that arrives inside the hour still re-arms later.
+                episode.get("warned_candidate", episode.get("candidate")) != candidate
+                and now - warned_at >= QUIESCENCE_REARM_MIN_SECONDS
+            )
+            or now - warned_at >= QUIESCENCE_REWARN_SECONDS
+        ):
+            # Re-arm: a new candidate or a day-old warning gets a fresh one, so a
+            # past warning never mutes a later starvation.
+            warned_at = None
+        reason = str(verdict.get("reason") or "UNKNOWN")
+        # Bounded: comments, episode and log lines never carry an unbounded list.
+        blocking = sorted(verdict.get("task_ids") or [_safe_reason(reason)])[:100]
+        changed = episode.get("blocking") != blocking or episode.get("candidate") != candidate
+        # A clock that went backwards never restarts the episode; it just ages 0.
+        age = max(0.0, now - float(since))
+        updated: Dict[str, Any] = {
+            "schema": "nexus.gateway.quiescence_episode.v1",
+            "since": _iso(float(since)),
+            "since_epoch": float(since),
+            "candidate": candidate,
+            "blocking": blocking,
+            "warned_at": None if warned_at is None else _iso(warned_at),
+            "warned_candidate": (
+                None
+                if warned_at is None
+                else episode.get("warned_candidate", episode.get("candidate"))
+            ),
+        }
+        warn_due = age >= cfg.quiescence_warn_after_seconds and warned_at is None
+        if warn_due:
+            # Posted before the marker is saved: a crash in between can repeat
+            # the warning, but can never lose it.
+            body = _quiescence_warning(cfg, candidate, blocking, age)
+            posted = host.post_issue_comment(cfg, body)
+            updated["warned_at"] = _iso(now) if posted else None
+            updated["warned_candidate"] = candidate if posted else None
+            updated["warning_failed"] = not posted
+        _atomic_write(cfg.quiescence_file, json.dumps(updated, sort_keys=True).encode(), 0o600)
+        result = {
+            **verdict,
+            "task_ids": blocking if verdict.get("task_ids") else None,
+            "task_count": len(verdict.get("task_ids") or []),
+            "deferred_since": updated["since"],
+            "deferral_age_seconds": int(age),
+            "blocking": blocking,
+            "warned_at": updated["warned_at"],
+        }
+        if changed or (warn_due and updated["warned_at"] is not None):
+            cfg.state_dir.mkdir(parents=True, exist_ok=True)
+            _rotate_if_large(cfg.deferrals)
+            line = {
+                "schema": "nexus.gateway.quiescence_deferral.v1",
+                "candidate_commit": candidate,
+                "outcome": DEFERRED_OUTCOME,
+                "at": _iso(now),
+                "quiescence": result,
+            }
+            with open(cfg.deferrals, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps(line, sort_keys=True, separators=(",", ":")) + "\n")
+        return result
+
+    def end_deferral(self) -> None:
+        """A switch (automatic or overridden) or IN_SYNC ends the episode."""
+        with contextlib.suppress(FileNotFoundError):
+            self.cfg.quiescence_file.unlink()
+
+    def deferral_age(self) -> Optional[Dict[str, Any]]:
+        """The episode that ended, for the receipt of the deploy that follows it."""
+        episode = _read_json_object(self.cfg.quiescence_file)
+        since = (episode or {}).get("since_epoch")
+        if (
+            isinstance(since, bool)
+            or not isinstance(since, (int, float))
+            or not math.isfinite(since)
+        ):
+            return None
+        return {
+            "deferred_since": _iso(float(since)),
+            "deferral_age_seconds": int(max(0.0, self.host.now() - float(since))),
+        }
 
     # -- entry -------------------------------------------------------------
 
@@ -1560,6 +1982,7 @@ class _Cycle:
             return {**status, "status": state, **extra}
 
         if candidate == previous_commit:
+            self.end_deferral()
             return finish("IN_SYNC")
         receipts = [
             r for r in read_receipts(cfg.state_dir) if r.get("candidate_commit") == candidate
@@ -1630,12 +2053,29 @@ class _Cycle:
                     "live_command": wrapper_command(cfg, root, venv_python),
                 },
             )
-        # Advisory early check (the authoritative one is under the lock right
-        # before the plist write): no build or probe churn while R1 is open.
+        # Advisory early checks (the authoritative ones are under the lock right
+        # before the plist write): no build or probe churn while R1 is open or
+        # while governed tasks are in flight (#2227).
         block = host.r1_recovery_block(cfg)
         if block is not None:
             return finish("BLOCKED_MANAGER_BUSY", reason=block)
+        previous_deferral = self.deferral_age()
+        quiet = self.quiescence(previous_plist, candidate)
+        status["quiescence"] = quiet
+        if quiet.get("verdict") != "CLEAR":
+            if not self.allow_in_flight:
+                return finish(DEFERRED_OUTCOME)
+            status["quiescence_overridden"] = True
+        if previous_deferral is not None:
+            status["ended_deferral"] = previous_deferral
+        self.quiescence_note = {
+            "pre_build": quiet,
+            "ended_deferral": previous_deferral,
+            "overridden": bool(status.get("quiescence_overridden")),
+        }
         receipt = self.attempt(candidate, previous_plist, checks, status.get("warnings", []))
+        if receipt.get("outcome") == "DEPLOYED":
+            self.end_deferral()
         status["receipt"] = receipt
         return finish(receipt["outcome"])
 
@@ -1645,7 +2085,10 @@ class _Cycle:
             return 0.0
         interval = self.cfg.min_interval_seconds * (2 ** max(0, len(failures) - 1))
         interval = min(float(interval), float(MAX_BACKOFF_SECONDS))
-        last_started = float(receipts[-1].get("started_epoch", 0))
+        attempts = [r for r in receipts if r.get("outcome") != DEFERRED_OUTCOME]
+        if not attempts:
+            return 0.0
+        last_started = float(attempts[-1].get("started_epoch", 0))
         return interval - (self.host.now() - last_started)
 
     def prune(self, extra: List[Optional[Path]]) -> List[str]:
@@ -1748,10 +2191,17 @@ class _Cycle:
     ) -> Dict[str, Any]:
         receipt = self.new_receipt(candidate, previous_plist)
         receipt["required_checks"] = checks
+        if self.quiescence_note is not None:
+            receipt["quiescence"] = self.quiescence_note
         receipt["warnings"] = list(warnings)
         hold: Optional[str] = None
         try:
             receipt.update(self.attempt_effects(candidate, previous_plist, receipt))
+            if receipt.get("outcome") == DEFERRED_OUTCOME:
+                # Caught under the lock: the same episode clock and warning (#2227).
+                receipt["quiescence_episode"] = self.track_deferral(
+                    candidate, receipt.get("quiescence_before_switch") or {}
+                )
         except Exception as exc:  # noqa: BLE001 - every failure must still leave a receipt
             receipt["reason"] = f"{type(exc).__name__}:{exc}"[:500]
             if receipt["switched"] and not receipt["rolled_back"]:
@@ -1830,6 +2280,15 @@ class _Cycle:
                     "outcome": f"PIN_BUMP_{pins['verdict']}",
                     "reason": "pin bump before switch",
                 }
+            quiet = self.host.tasks_in_flight(cfg, previous_plist)
+            receipt["quiescence_before_switch"] = quiet
+            if quiet.get("verdict") != "CLEAR":
+                if not self.allow_in_flight:
+                    return {
+                        "outcome": DEFERRED_OUTCOME,
+                        "reason": "governed tasks in flight before switch",
+                    }
+                receipt["quiescence_overridden"] = True
             # The R1 ledger lock is held from the R1 check through journal, plist
             # write, reload, live probe and any rollback: R1 cannot open mid-effect.
             with host.r1_guard(cfg):
@@ -1959,10 +2418,13 @@ class _Cycle:
                 # healthy live candidate proceeds; everything else is postponed
                 # with the journal kept and no HOLD.
                 block = self.host.r1_recovery_block(cfg)
+                if block is not None:
+                    # Recorded before anything else can fail, so a later error
+                    # still postpones instead of writing HOLD (#2169 F1).
+                    receipt["r1_block_observed"] = block
                 live_plist = cfg.plist.read_bytes()
                 is_candidate = _sha256(live_plist) == new_plist_sha
                 if block is not None:
-                    receipt["r1_block_observed"] = block
                     if not is_candidate:
                         return self.postpone(receipt, block)
                     core = receipt.get("core") if isinstance(receipt.get("core"), dict) else {}
@@ -1988,23 +2450,32 @@ class _Cycle:
                     hold = "auto-hold: FOREIGN_PLIST while reconciling a pending switch"
                     receipt.update(outcome="FOREIGN_PLIST", reason="unexpected live plist")
         except DeployError as exc:
-            if not str(exc).startswith("MANAGER_LOCK_UNAVAILABLE"):
-                return self.quarantine_journal(f"RECONCILE_FAILED:DeployError:{exc}"[:300])
-            # The #526 manager or its ledger is busy: keep the journal, retry.
-            return self.postpone(receipt, str(exc))
+            if str(exc).startswith("MANAGER_LOCK_UNAVAILABLE"):
+                # The #526 manager or its ledger is busy: keep the journal, retry.
+                return self.postpone(receipt, str(exc))
+            # A validated journal is never quarantined, whatever the error (#2169 F3).
+            return self.reconcile_failed(receipt, exc)
         except Exception as exc:  # noqa: BLE001 - never crash every cycle on one journal
-            # The journal passed validation, so it is kept (never quarantined):
-            # HOLD stops the retry loop until the Owner has looked at it.
-            receipt.update(
-                outcome="RECONCILE_FAILED",
-                reason=f"RECONCILE_FAILED:{type(exc).__name__}:{exc}"[:300],
-                journal_kept=True,
-            )
-            return self.close_receipt(
-                receipt,
-                hold=f"auto-hold: RECONCILE_FAILED {receipt.get('attempt_id')}; journal kept",
-            )
+            return self.reconcile_failed(receipt, exc)
         return self.close_receipt(receipt, hold=hold)
+
+    def reconcile_failed(self, receipt: Dict[str, Any], exc: BaseException) -> Dict[str, Any]:
+        """A validated journal whose reconciliation failed: kept, never quarantined.
+
+        Normally HOLD stops the retry loop until the Owner has looked at it.
+        While an R1 recovery was seen open, R1 owns the Gateway, so no HOLD is
+        written: the journal is kept and the next cycle retries (#2169 F1).  If
+        even that receipt cannot be written, the error propagates and the
+        journal stays, as for every receipt failure.
+        """
+        reason = f"RECONCILE_FAILED:{type(exc).__name__}:{exc}"[:300]
+        if receipt.get("r1_block_observed"):
+            return self.postpone(receipt, reason)
+        receipt.update(outcome="RECONCILE_FAILED", reason=reason, journal_kept=True)
+        return self.close_receipt(
+            receipt,
+            hold=f"{RECONCILE_FAILED_HOLD} {receipt.get('attempt_id')}; journal kept",
+        )
 
     def quarantine_journal(self, reason: str) -> Dict[str, Any]:
         """An unusable journal: HOLD, then a receipt, then move it aside."""
@@ -2198,6 +2669,12 @@ def main(
     parser.add_argument("--max-irrelevant-lag", type=int, default=None)
     parser.add_argument("--python-version", default=None)
     parser.add_argument(
+        "--allow-in-flight",
+        action="store_true",
+        help="run, by hand only: switch even while governed tasks are in flight (#2227); "
+        "the LaunchAgent never passes it",
+    )
+    parser.add_argument(
         "--no-fetch",
         action="store_true",
         help="run --dry-run only: use the already fetched main (self-update check)",
@@ -2221,6 +2698,7 @@ def main(
         max_irrelevant_lag=args.max_irrelevant_lag,
         python_version=args.python_version,
         uv_extras=args.uv_extras,
+        gh=args.gh,
     )
     if args.command == "hold":
         _set_hold(cfg, args.reason)
@@ -2300,6 +2778,7 @@ def main(
             dry_run=args.dry_run,
             force=args.force,
             fetch=not (args.dry_run and args.no_fetch),
+            allow_in_flight=args.allow_in_flight,
         )
     except (DeployError, OSError, ValueError) as exc:
         error = {

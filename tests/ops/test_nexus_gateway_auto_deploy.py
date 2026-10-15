@@ -118,6 +118,43 @@ class FakeHost(ad.Host):
         self.after_r1_check: Callable[[], None] | None = None
         self.core_pin: str = CORE.pin
         self.core_fetch_fails = False
+        # Task quiescence (#2227): CLEAR unless a test says otherwise.
+        self.in_flight: list[dict[str, Any]] = []
+        self.real_classifier = False
+        self.quiescence_checks = 0
+        self.issue_comments: list[str] = []
+        self.comment_fails = False
+
+    def tasks_in_flight(self, cfg: ad.Config, live_plist: bytes) -> dict[str, Any]:  # type: ignore[override]
+        self.quiescence_checks += 1
+        if self.real_classifier:
+            # The real classifier code with this checkout's interpreter and tree.
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-W",
+                    "ignore",
+                    "-c",
+                    ad.TASK_QUIESCENCE_PROBE_CODE,
+                    str(REPO_ROOT),
+                    str(cfg.canonical_state_dir),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=300,
+                check=False,
+                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+            )
+            return ad.classify_task_report(result.returncode, result.stdout, result.stderr)
+        if self.in_flight:
+            return dict(self.in_flight.pop(0) if len(self.in_flight) > 1 else self.in_flight[0])
+        return {"verdict": "CLEAR", "checked": 0}
+
+    def post_issue_comment(self, cfg: ad.Config, body: str) -> bool:  # type: ignore[override]
+        if self.comment_fails:
+            return False
+        self.issue_comments.append(body)
+        return True
 
     def r1_recovery_block(self, cfg: ad.Config) -> str | None:  # type: ignore[override]
         self.r1_checks += 1
@@ -1824,6 +1861,9 @@ def test_verify_commit_subcommand(capsys: pytest.CaptureFixture[str]) -> None:
 # ------------------------------------------------------- real Prober over HTTP
 
 
+REPO_ROOT_FOR_GB077 = Path(__file__).resolve().parents[2]
+
+
 def _health(commit: str, *, status: str = "ok") -> dict[str, Any]:
     return {
         "status": status,
@@ -1832,7 +1872,8 @@ def _health(commit: str, *, status: str = "ok") -> dict[str, Any]:
         "git_head": commit,
         "repo_head_at_start": commit,
         "repo_head_current": commit,
-        "repo_root": "/srv/a1",
+        # GB-077 requires the hash of the evaluated root, i.e. this tree.
+        "repo_root_sha256": hashlib.sha256(str(REPO_ROOT_FOR_GB077).encode("utf-8")).hexdigest(),
         "server_instance_id": "i",
         "tool_manifest_revision": "r",
         "permission_policy_hash": "p",
@@ -2534,7 +2575,10 @@ def test_real_prober_requires_core_revision_pinned(tmp_path: Path, case: str, ok
     elif case == "no_pin":
         core = {}
     host = _CoreStatusHost(status, code)
-    with fake_gateway(_health(NEW), 3, False) as port:
+    # The running Gateway reports a healthy in-process block (#2169); only the
+    # on-disk subprocess result varies here.
+    health = {**_health(NEW), "core_provenance": _health_core_block(NEW)}
+    with fake_gateway(health, 3, False) as port:
         result = ad.Prober(host).probe(
             port=port,
             token="tok",
@@ -3555,3 +3599,1025 @@ def test_tool_link_error_does_not_fail_a_deploy(
     result = cycle(cfg, FakeHost(), FakeProber())
     assert result["status"] == "DEPLOYED"
     assert result["receipt"]["deployer_link"]["moved"] is False
+
+
+# ------------------------------------------------------------ #2169 follow-ups
+
+
+def _health_core_block(
+    revision: str, *, status: str = "CORE_REVISION_PINNED", **changes: Any
+) -> dict[str, Any]:
+    """The unauthenticated ``/health`` ``core_provenance`` projection (#2201)."""
+    return {
+        "status": status,
+        "expected_revision": revision,
+        "observed_commit": revision,
+        "fail_closed": False,
+        **changes,
+    }
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("2025-10-09T08:53:20Z", NOW),
+        ("2025-10-09T08:53:20z", NOW),
+        ("2025-10-09T08:53:20+00:00", NOW),
+        ("2025-10-09T10:53:20+02:00", NOW),
+        ("2025-10-09T08:53:20.000Z", NOW),
+        ("2025-10-09T08:53:20.5Z", NOW + 0.5),
+        ("2025-10-09T08:53:20.123456+00:00", NOW + 0.123456),
+        ("2025-10-09T08:53:20", None),  # no offset: zone unknown
+        ("2025-10-09", None),
+        ("2025-10-09T08:53:20.1234567Z", None),
+        ("2025-13-09T08:53:20Z", None),
+        ("yesterday", None),
+        ("", None),
+        (None, None),
+        (1_760_000_000, None),
+    ],
+    # No timestamps in ids: the impact gate normalizes datetimes in node ids.
+    ids=[
+        "z-upper",
+        "z-lower",
+        "offset-zero",
+        "offset-plus2",
+        "millis",
+        "half-second",
+        "micros",
+        "naive",
+        "date-only",
+        "seven-digit-fraction",
+        "bad-month",
+        "word",
+        "empty",
+        "none",
+        "number",
+    ],
+)
+def test_parse_time_accepts_rfc3339_variants_only(value: Any, expected: float | None) -> None:
+    parsed = ad._parse_time(value)
+    if expected is None:
+        assert parsed is None
+    else:
+        assert parsed == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("kind", ["head_ref_force_pushed", "head_ref_restored"])
+@pytest.mark.parametrize(
+    "created_at",
+    [None, "", "not a date", "2025-01-01T00:00:00", 12345],
+    ids=["missing", "empty", "garbage", "naive", "number"],
+)
+def test_head_push_event_without_a_parseable_time_counts_as_recent(
+    kind: str, created_at: Any
+) -> None:
+    """#2169 F1: a force-push/restore of unknown age may be recent, so it blocks."""
+    event: dict[str, Any] = {"event": kind}
+    if created_at is not None:
+        event["created_at"] = created_at
+    api = green_api(
+        open_pulls=_old_pin_pr(16),
+        pushed_at={"e" * 40: OLD_ISO},
+        timeline={16: [event]},
+    )
+    result = ad.pin_bumps_in_flight(api, now=NOW)
+    assert result["verdict"] == "IN_FLIGHT" and result["ignored_stale"] == []
+
+
+@pytest.mark.parametrize(
+    ("created_at", "verdict"),
+    [
+        ("2025-01-01T00:00:00+00:00", "CLEAR"),
+        ("2025-01-01T00:00:00.000Z", "CLEAR"),
+        ("2025-10-09T08:53:20.000Z", "IN_FLIGHT"),
+        ("2025-10-09T10:53:20+02:00", "IN_FLIGHT"),
+    ],
+    ids=["old-offset-zero", "old-millis", "recent-millis", "recent-offset-plus2"],
+)
+def test_head_push_event_with_an_rfc3339_variant_time_is_dated(
+    created_at: str, verdict: str
+) -> None:
+    api = green_api(
+        open_pulls=_old_pin_pr(17),
+        pushed_at={"e" * 40: OLD_ISO},
+        timeline={17: [{"event": "head_ref_force_pushed", "created_at": created_at}]},
+    )
+    assert ad.pin_bumps_in_flight(api, now=NOW)["verdict"] == verdict
+
+
+def test_raising_commit_lookup_for_a_dateless_committed_event_is_unknown() -> None:
+    base = green_api(
+        open_pulls=_old_pin_pr(18),
+        pushed_at={"e" * 40: OLD_ISO},
+        timeline={18: [_committed_event("d" * 40, None)]},
+    )
+
+    def api(path: str) -> Any:
+        if path.endswith("/commits/" + "d" * 40):
+            raise RuntimeError("HTTP 502")
+        return base(path)
+
+    result = ad.pin_bumps_in_flight(api, now=NOW)
+    assert result["verdict"] == "UNKNOWN" and "HTTP 502" in result["error"]
+
+
+@pytest.mark.parametrize(
+    ("block", "ok"),
+    [
+        (_health_core_block(NEW), True),
+        (None, False),
+        ("CORE_REVISION_PINNED", False),
+        (_health_core_block(NEW, status="CORE_REVISION_MISMATCH"), False),
+        (_health_core_block(NEW, status="CORE_PROVENANCE_PROBE_FAILED"), False),
+        (_health_core_block(NEW, expected_revision=OLD), False),
+        (_health_core_block(NEW, observed_commit=OLD), False),
+        (_health_core_block(OLD), False),
+        (_health_core_block(NEW, fail_closed=True), False),
+        (_health_core_block(NEW, fail_closed=None), False),
+        (_health_core_block(NEW, fail_closed="false"), False),
+    ],
+    ids=[
+        "pinned",
+        "missing",
+        "not-a-dict",
+        "mismatch",
+        "probe-failed",
+        "other-expectation",
+        "other-observed",
+        "other-revision",
+        "fail-closed",
+        "fail-closed-missing",
+        "fail-closed-string",
+    ],
+)
+def test_health_core_provenance_requires_the_pinned_revision(block: Any, ok: bool) -> None:
+    health = _health(NEW)
+    if block is not None:
+        health["core_provenance"] = block
+    check = ad.health_core_provenance(health, {"revision": NEW, "root": "/core"})
+    assert check["ok"] is ok
+    assert ad.health_core_provenance(health, {})["ok"] is False  # no pin: fail closed
+
+
+class _OnDiskCorePinned(ad.Prober):
+    """The on-disk subprocess check passes; only ``/health`` varies."""
+
+    def core_provenance(self, *, root: Path, python: Path, core: Any) -> dict[str, Any]:  # type: ignore[override]
+        return {"ok": True, "status": "CORE_REVISION_PINNED"}
+
+
+@pytest.mark.parametrize(
+    ("block", "ok"),
+    [
+        (_health_core_block(NEW), True),
+        (None, False),
+        (_health_core_block(NEW, observed_commit=OLD), False),
+        (_health_core_block(NEW, fail_closed=True), False),
+    ],
+    ids=["pinned", "missing", "preload-broken", "fail-closed"],
+)
+def test_candidate_probe_also_reads_the_in_process_core_provenance(block: Any, ok: bool) -> None:
+    """An in-process vs on-disk mismatch fails the probe (both checks are kept)."""
+    health = _health(NEW)
+    if block is not None:
+        health["core_provenance"] = block
+    with fake_gateway(health, 3, False) as port:
+        result = _OnDiskCorePinned(ad.Host()).probe(
+            port=port,
+            token="tok",
+            commit=NEW,
+            root=REPO_ROOT,
+            python=Path(sys.executable),
+            timeout=10,
+            core={"revision": NEW, "root": "/core"},
+        )
+    assert result["checks"]["core_provenance"]["ok"] is True
+    assert result["checks"]["health_core_provenance"]["ok"] is ok
+    assert result["ok"] is ok
+
+
+def test_rollback_probe_does_not_require_the_health_core_block() -> None:
+    """A predecessor from before #2201 has no ``core_provenance`` in ``/health``."""
+    with fake_gateway(_health(OLD), 3, False) as port:
+        result = ad.Prober(ad.Host()).probe(
+            port=port,
+            token="tok",
+            commit=OLD,
+            root=REPO_ROOT,
+            python=Path(sys.executable),
+            timeout=10,
+        )
+    assert result["ok"] is True and "health_core_provenance" not in result["checks"]
+
+
+def _fail_receipts(monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(cfg: ad.Config, receipt: dict[str, Any]) -> None:
+        raise OSError("receipts disk full")
+
+    monkeypatch.setattr(ad, "_append_receipt", boom)
+
+
+def test_receipt_failure_under_open_r1_never_writes_hold(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#2169 F1: R1 open + receipt append fails: no HOLD, journal kept, retried."""
+    _crash_after_candidate_plist(cfg)
+    live_before = cfg.plist.read_bytes()
+    _fail_receipts(monkeypatch)
+    host = FakeHost()
+    host.r1_block = "R1_OPEN_RECOVERY_BLOCKS_V1_EFFECT:gen10:REQUESTED"
+    with pytest.raises(OSError, match="receipts disk full"):
+        cycle(cfg, host, FakeProber({(ad.LIVE_PORT, NEW): False}))
+    assert not cfg.hold_file.exists() and cfg.journal.exists()
+    assert cfg.plist.read_bytes() == live_before and host.reloads == []
+    monkeypatch.undo()
+    # R1 still open, receipts writable again: an ordinary postponement.
+    result = cycle(cfg, host, FakeProber({(ad.LIVE_PORT, NEW): False}))
+    assert result["status"] == "RECONCILED_BLOCKED_MANAGER_BUSY"
+    assert not cfg.hold_file.exists() and cfg.journal.exists()
+
+
+def test_unexpected_reconcile_error_under_open_r1_postpones_without_hold(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#2169 F1: any reconcile failure seen while R1 is open keeps the journal, no HOLD.
+
+    Defence in depth: ``move_tool_link`` swallows its own errors today, so this
+    stands in for any future raising step (the reachable ones are the plist read
+    and the receipt write, tested separately).
+    """
+    _crash_after_candidate_plist(cfg)
+
+    def explode(*_a: Any, **_k: Any) -> Any:
+        raise RuntimeError("tool link exploded")
+
+    monkeypatch.setattr(ad._Cycle, "move_tool_link", explode)
+    host = FakeHost()
+    host.r1_block = "R1_OPEN_RECOVERY_BLOCKS_V1_EFFECT:gen11:PREFLIGHTED"
+    result = cycle(cfg, host, FakeProber())
+    assert result["status"] == "RECONCILED_BLOCKED_MANAGER_BUSY"
+    assert "RECONCILE_FAILED:RuntimeError" in result["receipt"]["reason"]
+    assert not cfg.hold_file.exists() and cfg.journal.exists()
+
+
+def test_reconcile_failed_hold_without_its_receipt_still_stops_retries(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#2169 F2: the RECONCILE_FAILED receipt could not be written, only the HOLD."""
+    _crash_journal(cfg)
+
+    def explode(*_a: Any, **_k: Any) -> Any:
+        raise RuntimeError("unexpected")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(ad._Cycle, "finish_switch", explode)
+        _fail_receipts(patch)
+        with pytest.raises(OSError, match="receipts disk full"):
+            cycle(cfg, FakeHost(), FakeProber())
+    assert cfg.hold_file.read_text().startswith(ad.RECONCILE_FAILED_HOLD)
+    assert cfg.journal.exists() and ad.read_receipts(cfg.state_dir) == []
+    host, prober = FakeHost(), FakeProber()
+    result = cycle(cfg, host, prober)
+    assert result["status"] == "HELD"
+    assert host.reloads == [] and prober.calls == [] and cfg.journal.exists()
+
+
+def test_other_hold_with_a_pending_journal_is_still_reconciled(cfg: ad.Config) -> None:
+    """F2 is narrow: an ordinary Owner HOLD does not stop journal reconciliation."""
+    _crash_journal(cfg)
+    ad._set_hold(cfg, "owner: paused for maintenance")
+    result = cycle(cfg, FakeHost(), FakeProber())
+    assert result["status"].startswith("RECONCILED_") and not cfg.journal.exists()
+
+
+def test_deploy_error_during_reconcile_keeps_a_validated_journal(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#2169 F3: a non-lock DeployError is RECONCILE_FAILED, never JOURNAL_CORRUPT."""
+    _crash_journal(cfg)
+
+    def explode(*_a: Any, **_k: Any) -> Any:
+        raise ad.DeployError("GATEWAY_LABEL_MISMATCH")
+
+    monkeypatch.setattr(ad._Cycle, "finish_switch", explode)
+    result = cycle(cfg, FakeHost(), FakeProber())
+    assert result["status"] == "RECONCILED_RECONCILE_FAILED"
+    assert "RECONCILE_FAILED:DeployError:GATEWAY_LABEL_MISMATCH" in result["receipt"]["reason"]
+    assert cfg.hold_file.read_text().startswith(ad.RECONCILE_FAILED_HOLD)
+    assert cfg.journal.exists()
+    assert not list(cfg.state_dir.glob("pending-switch.corrupt.*.json"))
+
+
+# Real InterProcessLock (fcntl) on both #526 locks, no counting fakes.
+
+
+def _real_locks_host(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> tuple[FakeHost, Path, Path]:
+    from scripts.ops import mcp_gateway_durable as durable
+
+    cfg.gateway_root.chmod(0o700)
+    monkeypatch.setattr(durable, "GATEWAY_STATE_ROOT", cfg.gateway_root)
+    monkeypatch.setattr(durable, "GATEWAY_LOCK", cfg.gateway_root / "ledger.lock")
+    monkeypatch.setattr(durable, "GATEWAY_LEDGER", cfg.gateway_root / "ledger.jsonl")
+    ledger_lock = durable.GatewayLedger(cfg.gateway_root / "ledger.jsonl").lock_path
+
+    class RealLocks(FakeHost):
+        def r1_recovery_block(self, c: ad.Config) -> str | None:  # type: ignore[override]
+            block = ad.Host.r1_recovery_block(self, c)
+            if self.after_r1_check is not None:
+                self.after_r1_check()
+            return block
+
+        def r1_guard(self, c: ad.Config):  # type: ignore[override]
+            return ad.Host.r1_guard(self, c)
+
+        def manager_lock(self, c: ad.Config):  # type: ignore[override]
+            return ad.Host.manager_lock(self, c)
+
+    return RealLocks(), cfg.gateway_root / "ledger.lock", ledger_lock
+
+
+def _other_process_gets(path: Path) -> bool:
+    """Try ``path`` from another thread (no re-entrancy), as R1 or the manager would."""
+    from scripts.ops import mcp_gateway_durable as durable
+
+    got: list[bool] = []
+
+    def attempt() -> None:
+        try:
+            with durable.InterProcessLock(path, timeout=0.2):
+                got.append(True)
+        except Exception:  # noqa: BLE001 - contention
+            got.append(False)
+
+    thread = threading.Thread(target=attempt)
+    thread.start()
+    thread.join(timeout=10)
+    return got == [True]
+
+
+@contextlib.contextmanager
+def _held_elsewhere(path: Path) -> Iterator[None]:
+    """Hold ``path`` from another thread until the block ends."""
+    from scripts.ops import mcp_gateway_durable as durable
+
+    taken, release = threading.Event(), threading.Event()
+
+    def hold() -> None:
+        with durable.InterProcessLock(path, timeout=5):
+            taken.set()
+            release.wait(timeout=30)
+
+    thread = threading.Thread(target=hold)
+    thread.start()
+    assert taken.wait(timeout=10)
+    try:
+        yield
+    finally:
+        release.set()
+        thread.join(timeout=10)
+
+
+def test_real_locks_held_from_r1_check_through_rollback(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GATEWAY_LOCK then ledger.jsonl.lock, both real, are held at the R1 check, the
+    journal + plist write, the reload, the live probe, the rollback's nested
+    (re-entrant) guard and R1 re-read, its reload and its probe."""
+    host, gateway_lock, ledger_lock = _real_locks_host(cfg, monkeypatch)
+    host.lock_timeout_seconds = 2.0  # a re-entrancy bug fails fast, not after 30 s
+    seen: list[tuple[str, bool, bool]] = []
+
+    def contend(where: str) -> None:
+        seen.append((where, _other_process_gets(gateway_lock), _other_process_gets(ledger_lock)))
+
+    def on_reload(count: int) -> None:
+        assert cfg.journal.exists()  # journal written before the plist and reload
+        contend(f"reload{count}")
+
+    host.on_reload = on_reload
+
+    def hook(call: dict[str, Any]) -> None:
+        if call["port"] == 50123:  # pre-build advisory check is done
+            host.after_r1_check = lambda: contend("r1-check")
+        if call["port"] == ad.LIVE_PORT:
+            contend(f"live-probe-{call['commit'][:1]}")
+
+    result = cycle(cfg, host, FakeProber({(ad.LIVE_PORT, NEW): False}, hook=hook))
+    assert result["status"] == "ROLLED_BACK"
+    where = [w for w, _g, _l in seen]
+    assert where == ["r1-check", "reload1", "live-probe-b", "r1-check", "reload2", "live-probe-a"]
+    assert all(not gw and not lg for _w, gw, lg in seen), seen
+    assert _other_process_gets(gateway_lock) and _other_process_gets(ledger_lock)
+
+
+def test_real_ledger_lock_held_by_r1_blocks_the_switch(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    host, _gateway_lock, ledger_lock = _real_locks_host(cfg, monkeypatch)
+    host.lock_timeout_seconds = 0.2
+    before = cfg.plist.read_bytes()
+    stack = contextlib.ExitStack()
+
+    def hook(call: dict[str, Any]) -> None:
+        if call["port"] == 50123:  # R1 takes its ledger lock after the advisory check
+            stack.enter_context(_held_elsewhere(ledger_lock))
+
+    with stack:
+        result = cycle(cfg, host, FakeProber(hook=hook))
+    assert result["status"] == "BLOCKED_MANAGER_BUSY"
+    assert "MANAGER_LOCK_UNAVAILABLE:r1-ledger" in result["receipt"]["reason"]
+    assert cfg.plist.read_bytes() == before and not cfg.journal.exists()
+    assert host.reloads == [] and not cfg.hold_file.exists()
+
+
+def test_real_gateway_lock_held_by_the_manager_blocks_the_switch(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    host, gateway_lock, _ledger_lock = _real_locks_host(cfg, monkeypatch)
+    host.lock_timeout_seconds = 0.2
+    before = cfg.plist.read_bytes()
+    with _held_elsewhere(gateway_lock):
+        result = cycle(cfg, host, FakeProber())
+    assert result["status"] == "BLOCKED_MANAGER_BUSY"
+    assert "MANAGER_LOCK_UNAVAILABLE" in result["receipt"]["reason"]
+    assert cfg.plist.read_bytes() == before and not cfg.journal.exists()
+    assert host.reloads == [] and not cfg.hold_file.exists()
+
+
+def test_real_locks_reconcile_journal_under_both_locks(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Journal reconciliation also runs under the real GATEWAY_LOCK -> ledger lock."""
+    _crash_after_candidate_plist(cfg)
+    host, gateway_lock, ledger_lock = _real_locks_host(cfg, monkeypatch)
+    host.lock_timeout_seconds = 2.0
+    seen: list[tuple[bool, bool]] = []
+
+    def hook(call: dict[str, Any]) -> None:
+        seen.append((_other_process_gets(gateway_lock), _other_process_gets(ledger_lock)))
+
+    result = cycle(cfg, host, FakeProber(hook=hook))
+    assert result["status"] == "RECONCILED_DEPLOYED" and not cfg.journal.exists()
+    assert seen and all(not gw and not lg for gw, lg in seen)
+    # Positive control: the same helper gets both locks once the cycle is over.
+    assert _other_process_gets(gateway_lock) and _other_process_gets(ledger_lock)
+
+
+def test_plist_read_error_under_open_r1_postpones_without_hold(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Codex round 1: the R1 block is recorded before the live plist is read."""
+    _crash_after_candidate_plist(cfg)
+    real_read = Path.read_bytes
+
+    def flaky(self: Path) -> bytes:
+        if self == cfg.plist:
+            raise OSError("EIO on plist")
+        return real_read(self)
+
+    host = FakeHost()
+    host.r1_block = "R1_OPEN_RECOVERY_BLOCKS_V1_EFFECT:gen12:REQUESTED"
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "read_bytes", flaky)
+        result = cycle(cfg, host, FakeProber())
+    assert result["status"] == "RECONCILED_BLOCKED_MANAGER_BUSY"
+    assert "EIO on plist" in result["receipt"]["reason"]
+    assert not cfg.hold_file.exists() and cfg.journal.exists() and host.reloads == []
+
+
+def test_hold_is_written_atomically(cfg: ad.Config, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Codex round 1: a failed HOLD write leaves no truncated HOLD text behind."""
+    real_fsync = os.fsync
+
+    def full_disk(fd: int) -> None:
+        raise OSError("disk full")
+
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    other = cfg.state_dir / f".HOLD.tmp.{os.getpid()}"  # a concurrent writer's file
+    other.write_text("theirs")
+    with monkeypatch.context() as patch:
+        patch.setattr(ad.os, "fsync", full_disk)
+        with pytest.raises(OSError, match="disk full"):
+            ad._set_hold(cfg, f"{ad.RECONCILE_FAILED_HOLD} x; journal kept")
+    assert not cfg.hold_file.exists()
+    # Its own temp file is gone; another writer's is untouched.
+    assert list(cfg.state_dir.glob(".HOLD*.tmp.*")) == [other]
+    assert other.read_text() == "theirs"
+    assert ad.os.fsync is real_fsync
+    ad._set_hold(cfg, "owner: paused")
+    assert cfg.hold_file.read_text() == "owner: paused\n"
+    assert cfg.hold_file.stat().st_mode & 0o777 == 0o600
+
+
+def test_atomic_write_never_removes_a_temp_path_it_did_not_create(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Codex round 4: a pre-existing file or symlink at the temp name is left alone."""
+    monkeypatch.setattr(ad.os, "urandom", lambda n: b"\x00" * n)
+    dest = tmp_path / "status.json"
+    taken = tmp_path / f".status.json.tmp.{os.getpid()}.{'00' * 6}"
+    victim = tmp_path / "victim"
+    victim.write_text("keep")
+    taken.symlink_to(victim)
+    with pytest.raises(FileExistsError):
+        ad._atomic_write(dest, b"new")
+    assert taken.is_symlink() and victim.read_text() == "keep"
+    assert not dest.exists()
+
+
+# ------------------------------------------------------- task quiescence (#2227)
+
+
+def _write_task(cfg: ad.Config, task_id: str, status: str | None, raw: str | None = None) -> None:
+    cfg.canonical_state_dir.mkdir(parents=True, exist_ok=True)
+    path = cfg.canonical_state_dir / f"{task_id}.json"
+    path.write_text(
+        raw if raw is not None else json.dumps({"task_id": task_id, "status": status}),
+        encoding="utf-8",
+    )
+
+
+def _receipts(cfg: ad.Config) -> list[dict[str, Any]]:
+    return ad.read_receipts(cfg.state_dir)
+
+
+def _deferrals(cfg: ad.Config) -> list[dict[str, Any]]:
+    if not cfg.deferrals.exists():
+        return []
+    return [json.loads(line) for line in cfg.deferrals.read_text().splitlines() if line]
+
+
+def test_quiescence_real_in_flight_task_defers_the_switch(cfg: ad.Config) -> None:
+    """Positive control: a real WORKER_RUNNING task, classified by the real lifecycle code."""
+    _write_task(cfg, "running-task", "WORKER_RUNNING")
+    _write_task(cfg, "done-task", "DIRECT_COMPLETED")
+    host, prober = FakeHost(), FakeProber()
+    host.real_classifier = True
+    result = cycle(cfg, host, prober)
+    assert result["status"] == ad.DEFERRED_OUTCOME
+    assert result["quiescence"]["blocking"] == ["running-task"]
+    assert host.reloads == []
+    assert not any(argv[:1] == ["uv"] for argv in host.calls)  # no build churn
+    deferred = _deferrals(cfg)
+    assert deferred and deferred[-1]["quiescence"]["blocking"] == ["running-task"]
+    # Deferral records never enter receipts.jsonl (backoff, give-up, drift).
+    assert not [r for r in _receipts(cfg) if r.get("outcome") == ad.DEFERRED_OUTCOME]
+    assert cfg.quiescence_file.exists()
+
+
+def test_quiescence_real_terminal_task_does_not_block(cfg: ad.Config) -> None:
+    """Negative control: only terminal tasks, classified by the real lifecycle code."""
+    _write_task(cfg, "done-task", "DIRECT_COMPLETED")
+    _write_task(cfg, "old-block", "FINAL_BLOCK")
+    host, prober = FakeHost(), FakeProber()
+    host.real_classifier = True
+    result = cycle(cfg, host, prober)
+    assert result["status"] == "DEPLOYED"
+    assert len(host.reloads) == 1
+    assert not cfg.quiescence_file.exists()
+
+
+def test_quiescence_unreadable_task_state_fails_closed(cfg: ad.Config) -> None:
+    _write_task(cfg, "corrupt", None, raw="{not json")
+    host, prober = FakeHost(), FakeProber()
+    host.real_classifier = True
+    result = cycle(cfg, host, prober)
+    assert result["status"] == ad.DEFERRED_OUTCOME
+    assert result["quiescence"]["blocking"] == ["corrupt:UNREADABLE"]
+    assert host.reloads == []
+
+
+def test_quiescence_unknown_classifier_result_fails_closed(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [{"verdict": "UNKNOWN", "reason": "CLASSIFIER_EXIT_1"}]
+    result = cycle(cfg, host, prober)
+    assert result["status"] == ad.DEFERRED_OUTCOME
+    assert result["quiescence"]["blocking"] == ["CLASSIFIER_EXIT_1"]
+    assert host.reloads == []
+
+
+def test_quiescence_warns_once_after_cap_and_never_forces(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    blocked = {"verdict": "IN_FLIGHT", "task_ids": ["t-1"], "checked": 1}
+    host.in_flight = [blocked]
+    first = cycle(cfg, host, prober)
+    assert first["status"] == ad.DEFERRED_OUTCOME
+    assert first["quiescence"]["deferral_age_seconds"] == 0
+    assert host.issue_comments == []
+    host.clock += ad.QUIESCENCE_WARN_AFTER_SECONDS + 60
+    second = cycle(cfg, host, prober)
+    assert second["status"] == ad.DEFERRED_OUTCOME
+    assert second["quiescence"]["deferral_age_seconds"] >= ad.QUIESCENCE_WARN_AFTER_SECONDS
+    assert len(host.issue_comments) == 1
+    assert "`t-1`" in host.issue_comments[0]
+    assert "NEXUS_GATEWAY_QUIESCENCE_WARNING" in host.issue_comments[0]
+    host.clock += 3600
+    third = cycle(cfg, host, prober)
+    assert third["status"] == ad.DEFERRED_OUTCOME
+    assert len(host.issue_comments) == 1  # one warning per episode
+    assert host.reloads == []  # never forced, however old
+    # Deferral log: the episode start and the warning, not one line per cycle.
+    assert len(_deferrals(cfg)) == 2
+    host.in_flight = []
+    host.clock += 60
+    done = cycle(cfg, host, prober)
+    assert done["status"] == "DEPLOYED"
+    deployed = _receipts(cfg)[-1]
+    assert deployed["outcome"] == "DEPLOYED"
+    ended = deployed["quiescence"]["ended_deferral"]
+    assert ended["deferral_age_seconds"] >= ad.QUIESCENCE_WARN_AFTER_SECONDS + 3600
+    assert not cfg.quiescence_file.exists()
+
+
+def test_quiescence_failed_warning_is_retried(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": ["t-1"], "checked": 1}]
+    cycle(cfg, host, prober)
+    host.clock += ad.QUIESCENCE_WARN_AFTER_SECONDS + 1
+    host.comment_fails = True
+    assert cycle(cfg, host, prober)["quiescence"]["warned_at"] is None
+    host.comment_fails = False
+    host.clock += 300
+    cycle(cfg, host, prober)
+    assert len(host.issue_comments) == 1
+
+
+def test_quiescence_rechecked_under_the_lock_before_the_switch(cfg: ad.Config) -> None:
+    """A task that starts while the candidate builds still stops the switch."""
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [
+        {"verdict": "CLEAR", "checked": 0},
+        {"verdict": "IN_FLIGHT", "task_ids": ["late-task"], "checked": 1},
+    ]
+    result = cycle(cfg, host, prober)
+    assert result["status"] == ad.DEFERRED_OUTCOME
+    receipt = _receipts(cfg)[-1]
+    assert receipt["outcome"] == ad.DEFERRED_OUTCOME
+    assert receipt["switched"] is False
+    assert receipt["quiescence_before_switch"]["task_ids"] == ["late-task"]
+    assert host.reloads == []
+    assert ad.DEFERRED_OUTCOME not in ad.FAILED_OUTCOMES  # no backoff, no give-up
+
+
+def test_quiescence_manual_override_switches_and_is_recorded(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": ["orphan"], "checked": 1}]
+    result = ad.run_cycle(
+        cfg,
+        host,
+        prober,
+        green_api(),
+        environ={},
+        tool_python=Path("/tool/python"),
+        allow_in_flight=True,
+    )
+    assert result["status"] == "DEPLOYED"
+    receipt = _receipts(cfg)[-1]
+    assert receipt["quiescence_overridden"] is True
+    assert receipt["quiescence"]["overridden"] is True
+
+
+def test_quiescence_hold_still_wins_and_checks_nothing(cfg: ad.Config) -> None:
+    ad._set_hold(cfg, "manual")
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": ["t"], "checked": 1}]
+    assert cycle(cfg, host, prober)["status"] == "HELD"
+    assert host.quiescence_checks == 0
+    assert host.reloads == []
+
+
+def test_real_host_classifies_with_the_live_interpreter_and_tree(tmp_path: Path) -> None:
+    cfg = ad.Config.default(tmp_path / "home")
+    _write_task(cfg, "running", "WORKER_RUNNING")
+    plist = live_plist(REPO_ROOT, python=sys.executable)
+    verdict = ad.Host().tasks_in_flight(cfg, plist)
+    assert verdict == {"verdict": "IN_FLIGHT", "task_ids": ["running"], "checked": 1}
+    missing = live_plist(REPO_ROOT, python=str(tmp_path / "no-python"))
+    assert ad.Host().tasks_in_flight(cfg, missing)["verdict"] == "UNKNOWN"
+
+
+@pytest.mark.parametrize(
+    ("code", "stdout", "verdict"),
+    [
+        (1, '{"tasks": []}', "UNKNOWN"),
+        (0, "", "UNKNOWN"),
+        (0, "not json", "UNKNOWN"),
+        (0, '{"tasks": "x"}', "UNKNOWN"),
+        (0, '{"tasks": [1]}', "UNKNOWN"),
+        (0, '{"tasks": []}', "CLEAR"),
+        (0, '{"tasks": [{"task_id": "a", "action_state": "TERMINAL"}]}', "CLEAR"),
+        (0, '{"tasks": [{"task_id": "a", "action_state": "ACTION_REQUIRED"}]}', "IN_FLIGHT"),
+        (0, '{"tasks": [{"task_id": "a", "action_state": "SOMETHING_NEW"}]}', "IN_FLIGHT"),
+    ],
+)
+def test_classify_task_report_fails_closed(code: int, stdout: str, verdict: str) -> None:
+    assert ad.classify_task_report(code, stdout)["verdict"] == verdict
+
+
+def test_classify_task_report_never_echoes_unsafe_task_ids() -> None:
+    report = json.dumps({
+        "tasks": [{"task_id": "x\n::warning::evil", "action_state": "IN_PROGRESS"}]
+    })
+    verdict = ad.classify_task_report(0, report)
+    assert verdict["task_ids"] == ["<unprintable-task-id>"]
+
+
+def test_quiescence_unknown_lifecycle_status_fails_closed(cfg: ad.Config) -> None:
+    """The lifecycle maps an unknown status to FINAL_BLOCK; the gate must not read that as clear."""
+    _write_task(cfg, "future-task", "SOME_FUTURE_STATUS")
+    _write_task(cfg, "no-status", None, raw=json.dumps({"task_id": "no-status"}))
+    host, prober = FakeHost(), FakeProber()
+    host.real_classifier = True
+    result = cycle(cfg, host, prober)
+    assert result["status"] == ad.DEFERRED_OUTCOME
+    assert result["quiescence"]["blocking"] == [
+        "future-task:INVALID_STATUS",
+        "no-status:INVALID_STATUS",
+    ]
+    assert host.reloads == []
+
+
+def test_quiescence_late_detection_shares_the_episode_clock_and_warning(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    late = {"verdict": "IN_FLIGHT", "task_ids": ["late"], "checked": 1}
+    host.in_flight = [{"verdict": "CLEAR", "checked": 0}, late]
+    assert cycle(cfg, host, prober)["status"] == ad.DEFERRED_OUTCOME
+    episode = json.loads(cfg.quiescence_file.read_text())
+    assert episode["blocking"] == ["late"]
+    assert _receipts(cfg)[-1]["quiescence_episode"]["deferral_age_seconds"] == 0
+    host.clock += ad.QUIESCENCE_WARN_AFTER_SECONDS + 1
+    host.in_flight = [{"verdict": "CLEAR", "checked": 0}, late]
+    assert cycle(cfg, host, prober)["status"] == ad.DEFERRED_OUTCOME
+    assert len(host.issue_comments) == 1
+    assert "`late`" in host.issue_comments[0]
+
+
+@pytest.mark.parametrize(
+    "episode",
+    [
+        '{"since_epoch": NaN, "warned_at": null}',
+        '{"since_epoch": "x", "warned_at": true}',
+        '{"since_epoch": 1, "warned_at": ["not", "a", "time"]}',
+        "not json",
+    ],
+)
+def test_quiescence_corrupt_episode_never_suppresses_the_warning(
+    cfg: ad.Config, episode: str
+) -> None:
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": ["t"], "checked": 1}]
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    cfg.quiescence_file.write_text(episode)
+    first = cycle(cfg, host, prober)
+    assert first["status"] == ad.DEFERRED_OUTCOME
+    host.clock += ad.QUIESCENCE_WARN_AFTER_SECONDS + 1
+    assert cycle(cfg, host, prober)["status"] == ad.DEFERRED_OUTCOME
+    assert len(host.issue_comments) == 1
+
+
+def test_quiescence_clock_going_back_does_not_restart_the_episode(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": ["t"], "checked": 1}]
+    cycle(cfg, host, prober)
+    since = json.loads(cfg.quiescence_file.read_text())["since_epoch"]
+    host.clock -= 3600
+    result = cycle(cfg, host, prober)
+    assert result["quiescence"]["deferral_age_seconds"] == 0
+    assert json.loads(cfg.quiescence_file.read_text())["since_epoch"] == since
+
+
+def test_classify_task_report_sanitizes_unknown_action_states() -> None:
+    report = json.dumps({"tasks": [{"task_id": "a", "action_state": "x](http://evil)\n@all"}]})
+    assert ad.classify_task_report(0, report)["task_ids"] == ["a:UNKNOWN"]
+
+
+def test_quiescence_flapping_tasks_still_warn(cfg: ad.Config) -> None:
+    """Pre-build CLEAR, under-lock IN_FLIGHT every cycle must not restart the clock."""
+    host, prober = FakeHost(), FakeProber()
+    late = {"verdict": "IN_FLIGHT", "task_ids": ["flap"], "checked": 1}
+    for _ in range(80):
+        host.in_flight = [{"verdict": "CLEAR", "checked": 0}, late]
+        assert cycle(cfg, host, prober)["status"] == ad.DEFERRED_OUTCOME
+        host.clock += 700
+    assert len(host.issue_comments) == 1
+    assert host.reloads == []
+
+
+def test_quiescence_override_ends_the_episode(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": ["orphan"], "checked": 1}]
+    cycle(cfg, host, prober)
+    host.clock += ad.QUIESCENCE_WARN_AFTER_SECONDS + 1
+    cycle(cfg, host, prober)
+    assert len(host.issue_comments) == 1
+    host.clock += 60
+    result = ad.run_cycle(
+        cfg,
+        host,
+        prober,
+        green_api(),
+        environ={},
+        tool_python=Path("/tool/python"),
+        allow_in_flight=True,
+    )
+    assert result["status"] == "DEPLOYED"
+    assert not cfg.quiescence_file.exists()
+
+
+def test_quiescence_running_assisted_job_defers_and_finished_one_does_not(cfg: ad.Config) -> None:
+    jobs = cfg.canonical_state_dir / "assisted_provider_jobs"
+    jobs.mkdir(parents=True)
+    (jobs / "assist-1.json").write_text(json.dumps({"status": "RUNNING"}))
+    (jobs / "assist-2.json").write_text(json.dumps({"status": "COMPLETED"}))
+    host, prober = FakeHost(), FakeProber()
+    host.real_classifier = True
+    result = cycle(cfg, host, prober)
+    assert result["status"] == ad.DEFERRED_OUTCOME
+    assert result["quiescence"]["blocking"] == ["assist.assist-1:ASSIST_RUNNING"]
+    (jobs / "assist-1.json").write_text(json.dumps({"status": "FAILED"}))
+    host.clock += 3600
+    assert cycle(cfg, host, prober)["status"] == "DEPLOYED"
+
+
+def test_quiescence_unknown_reason_is_sanitized_before_any_comment(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [
+        {"verdict": "UNKNOWN", "reason": "LIVE_PLIST_UNREADABLE:`x` @all\n::warning::"}
+    ]
+    cycle(cfg, host, prober)
+    host.clock += ad.QUIESCENCE_WARN_AFTER_SECONDS + 1
+    result = cycle(cfg, host, prober)
+    assert result["quiescence"]["blocking"] == ["LIVE_PLIST_UNREADABLE"]
+    assert "@all" not in host.issue_comments[0] and "::warning::" not in host.issue_comments[0]
+
+
+def test_quiescence_old_warned_episode_does_not_mute_a_new_candidate(cfg: ad.Config) -> None:
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    cfg.quiescence_file.write_text(
+        json.dumps({
+            "since_epoch": NOW - 10 * 3600,
+            "candidate": "c" * 40,
+            "blocking": ["old"],
+            "warned_at": ad._iso(NOW - 3 * 3600),
+        })
+    )
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": ["new"], "checked": 1}]
+    assert cycle(cfg, host, prober)["status"] == ad.DEFERRED_OUTCOME
+    assert len(host.issue_comments) == 1
+    assert "`new`" in host.issue_comments[0]
+
+
+def test_quiescence_rewarns_daily_while_still_starved(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": ["t"], "checked": 1}]
+    cycle(cfg, host, prober)
+    host.clock += ad.QUIESCENCE_WARN_AFTER_SECONDS + 1
+    cycle(cfg, host, prober)
+    host.clock += 3600
+    cycle(cfg, host, prober)
+    assert len(host.issue_comments) == 1
+    host.clock += ad.QUIESCENCE_REWARN_SECONDS
+    cycle(cfg, host, prober)
+    assert len(host.issue_comments) == 2
+
+
+def test_quiescence_impossible_warned_at_is_ignored(cfg: ad.Config) -> None:
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    cfg.quiescence_file.write_text(
+        json.dumps({
+            "since_epoch": NOW - 10 * 3600,
+            "candidate": NEW,
+            "blocking": ["t"],
+            "warned_at": "9999-99-99T99:99:99Z",
+        })
+    )
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": ["t"], "checked": 1}]
+    cycle(cfg, host, prober)
+    assert len(host.issue_comments) == 1
+
+
+def test_quiescence_late_deferral_receipt_does_not_debounce_the_next_cycle(
+    cfg: ad.Config,
+) -> None:
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [
+        {"verdict": "CLEAR", "checked": 0},
+        {"verdict": "IN_FLIGHT", "task_ids": ["late"], "checked": 1},
+    ]
+    assert cycle(cfg, host, prober)["status"] == ad.DEFERRED_OUTCOME
+    host.in_flight = []
+    host.clock += 60  # well inside min_interval_seconds
+    assert cycle(cfg, host, prober)["status"] == "DEPLOYED"
+
+
+@pytest.mark.parametrize(
+    ("job", "label"),
+    [
+        ({"status": "UNKNOWN_REQUIRES_RECONCILE"}, "ASSIST_RECONCILE"),
+        ({"status": "FAILED", "reconciliation_required": True}, "ASSIST_RECONCILE"),
+        ({"status": "CANCELLED", "process_killed": False}, "ASSIST_UNSETTLED"),
+    ],
+)
+def test_quiescence_unsettled_assisted_jobs_fail_closed(
+    cfg: ad.Config, job: dict[str, Any], label: str
+) -> None:
+    jobs = cfg.canonical_state_dir / "assisted_provider_jobs"
+    jobs.mkdir(parents=True)
+    (jobs / "assist-9.json").write_text(json.dumps(job))
+    host, prober = FakeHost(), FakeProber()
+    host.real_classifier = True
+    result = cycle(cfg, host, prober)
+    assert result["status"] == ad.DEFERRED_OUTCOME
+    assert result["quiescence"]["blocking"] == [f"assist.assist-9:{label}"]
+
+
+def test_deferral_log_is_bounded(cfg: ad.Config, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ad, "DEFERRALS_MAX_BYTES", 200)
+    host, prober = FakeHost(), FakeProber()
+    for index in range(20):
+        host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": [f"t{index}"], "checked": 1}]
+        cycle(cfg, host, prober)
+        host.clock += 60
+    assert cfg.deferrals.stat().st_size < 2000
+    assert cfg.deferrals.with_name(cfg.deferrals.name + ".1").exists()
+
+
+def test_quiescence_rearm_for_new_candidates_is_rate_limited(cfg: ad.Config) -> None:
+    """A new candidate re-arms the warning only if the last one is at least an hour old."""
+
+    def episode(warned_ago: float) -> None:
+        cfg.state_dir.mkdir(parents=True, exist_ok=True)
+        cfg.quiescence_file.write_text(
+            json.dumps({
+                "since_epoch": NOW - 10 * 3600,
+                "candidate": "c" * 40,  # an earlier main commit
+                "blocking": ["stuck"],
+                "warned_at": ad._iso(NOW - warned_ago),
+            })
+        )
+
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": ["stuck"], "checked": 1}]
+    episode(warned_ago=20 * 60)
+    cycle(cfg, host, prober)
+    assert host.issue_comments == []
+    episode(warned_ago=ad.QUIESCENCE_REARM_MIN_SECONDS + 60)
+    cycle(cfg, host, prober)
+    assert len(host.issue_comments) == 1
+
+
+def test_quiescence_future_warned_at_never_mutes(cfg: ad.Config) -> None:
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    cfg.quiescence_file.write_text(
+        json.dumps({
+            "since_epoch": NOW - 10 * 3600,
+            "candidate": NEW,
+            "blocking": ["t"],
+            "warned_at": "9999-12-31T23:59:59Z",
+        })
+    )
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": ["t"], "checked": 1}]
+    cycle(cfg, host, prober)
+    assert len(host.issue_comments) == 1
+
+
+def test_quiescence_blocking_list_is_bounded(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    many = [f"t{index:04d}" for index in range(5000)]
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": many, "checked": 5000}]
+    result = cycle(cfg, host, prober)
+    assert len(result["quiescence"]["blocking"]) == 100
+    assert len(result["quiescence"]["task_ids"]) == 100
+    assert result["quiescence"]["task_count"] == 5000
+    line = json.loads(cfg.deferrals.read_text().splitlines()[-1])
+    assert len(line["quiescence"]["task_ids"]) == 100
+    assert cfg.deferrals.stat().st_size < 20_000
+
+
+def test_quiescence_candidate_arriving_inside_the_hour_still_rearms(cfg: ad.Config) -> None:
+    """Warned for candidate C; NEW shows up 20 min later and must still be warned at 1 h."""
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    cfg.quiescence_file.write_text(
+        json.dumps({
+            "since_epoch": NOW - 10 * 3600,
+            "candidate": "c" * 40,
+            "blocking": ["stuck"],
+            "warned_at": ad._iso(NOW - 20 * 60),
+            "warned_candidate": "c" * 40,
+        })
+    )
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": ["stuck"], "checked": 1}]
+    cycle(cfg, host, prober)  # NEW seen 20 min after the warning: no re-arm yet
+    assert host.issue_comments == []
+    assert json.loads(cfg.quiescence_file.read_text())["warned_candidate"] == "c" * 40
+    host.clock += 45 * 60
+    cycle(cfg, host, prober)  # 65 min after the warning: NEW gets its own
+    assert len(host.issue_comments) == 1
+    assert json.loads(cfg.quiescence_file.read_text())["warned_candidate"] == NEW

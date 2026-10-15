@@ -648,7 +648,9 @@ def test_notify_mentions_gateway_pending(tmp_path: Path) -> None:
     call = next(c for c in fake.calls if c[1:3] == ["issue", "comment"])
     assert call[3] == "1996" and call[5] == wf.NEXUS_REPO
     body = fake.inputs[-1]
-    assert "Gateway reload is pending Owner #526 activation" in body
+    # #2155: routine reloads are the auto-deployer's; no Owner #526 activation is pending.
+    assert "auto-deployer deploys the merged pin" in body
+    assert "pending Owner #526 activation" not in body
     assert MERGE_SHA in body and "agy_flash_37_medium" in body
 
 
@@ -893,7 +895,8 @@ def test_full_flow_merges_runtime_then_anchor_then_pin(tmp_path: Path) -> None:
     pin_body = world.prs[102]["body"]
     assert '"on_merge": "KEEP_OPEN"' in pin_body and "<!-- NEXUS_CORE_ISSUE: 2001 -->" in pin_body
     assert "ONLY when the predecessor is retired" in pin_body  # F3 scope text
-    assert "Gateway reload is pending Owner #526 activation" in world.comments[-1]
+    assert "auto-deployer deploys the merged pin" in world.comments[-1]
+    assert "pending Owner #526 activation" not in world.comments[-1]
     assert str(tmp_path) not in world.comments[-1]  # public repo: no local paths
     receipt = json.loads(Path(result.receipt_path).read_text())
     assert set(receipt["merges"]) == {"runtime", "anchor", "pin"}

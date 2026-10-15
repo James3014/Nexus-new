@@ -51,6 +51,7 @@ from nexus.research.research_runtime_contracts import (
 from nexus.app import research_semantic_runtime as _research_semantic_runtime
 from nexus.app.research_autoreason_runtime import build_autoreason_payload
 from nexus.app.research_receipt_runtime import build_capability_receipt_payloads, runtime_receipt_plan_payload
+from nexus.research.flow.capability_planning import drop_archived_capabilities
 from nexus.app.research_s2t_runtime import (
     autoreason_s2t_candidates as _autoreason_s2t_candidates,
     record_autoreason_s2t_trace as _record_autoreason_s2t_trace,
@@ -1824,6 +1825,25 @@ def run_auto_flow(
         capability_evidence["research_used"] = True
         capability_evidence["research_refs"] = retrieval_refs[:3] or [f"research:{receipt_slug}:route_selected"]
         capability_evidence["research_gate_passed"] = bool(artifact_verified)
+    # P-CONTAM-01 (#2199/#2216): record-only signal; it never changes research_gate_passed.
+    try:
+        from nexus.research.contamination_enforcement import record_flow_contamination_signal
+
+        capability_evidence = record_flow_contamination_signal(
+            capability_evidence,
+            research_context=route.get("research_context"),
+            task_desc=task_desc,
+            log_root=repo_root,
+            task_id=task_id,
+        )
+    except Exception:  # record-only signal must never break the auto-flow
+        capability_evidence["research_contamination_signal"] = {
+            "policy_id": "P-CONTAM-01",
+            "mode": "record_only",
+            "detected": None,
+            "reason": "RESEARCH_CONTAMINATION_GUARD_ERROR",
+            "terms": [],
+        }
     capability_evidence["research_source_projects"] = list(RESEARCH_SOURCE_PROJECTS)
     autoreason_payload = build_autoreason_payload(
         result=result,
@@ -1888,6 +1908,7 @@ def run_auto_flow(
             "research_used": bool(capability_evidence.get("research_used", False)),
             "research_refs": capability_evidence.get("research_refs", []),
             "research_gate_passed": bool(capability_evidence.get("research_gate_passed", False)),
+            "research_contamination_signal": capability_evidence.get("research_contamination_signal"),
             "memory_used": bool(memory_refs),
             "memory_refs": memory_refs,
             "memory_gate_passed": bool(memory_refs),
@@ -1994,8 +2015,10 @@ def run_auto_flow(
             skills=benchmark_skill_mount_requests,
         )
         capability_plan_payload = capability_plan.to_dict()
+    # Archived nodes are never selectable (integration_manager, archived 2026-10-13).
+    capability_plan_payload = drop_archived_capabilities(capability_plan_payload)
     nexus_usage_trace["capability_plan"] = capability_plan_payload
-    nexus_usage_trace["route_decision"] = route_decision_payload or build_route_decision(
+    nexus_usage_trace["route_decision"] = drop_archived_capabilities(route_decision_payload or build_route_decision(
         task_id=task_id or _safe_trace_slug(task_desc),
         task_desc=task_desc,
         task_type=task_type,
@@ -2010,7 +2033,7 @@ def run_auto_flow(
             budget=runtime_budget,
             skills=benchmark_skill_mount_requests,
         ),
-    ).to_dict()
+    ).to_dict())
     selected_for_runtime_receipts = {
         str(item)
         for item in (capability_plan_payload.get("selected_capabilities", []) or [])

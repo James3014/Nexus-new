@@ -99,6 +99,7 @@
 | nexus/orchestrator/ambient_core.py | tests/nexus/orchestrator/test_evidence_coverage_live_path.py, tests/nexus/orchestrator/test_self_hosted_task_service.py, tests/nexus/orchestrator/test_managed_local_agent.py | active | high | evidence_coverage_core_verdict_contract |
 | nexus/orchestrator/canonical_core_transport.py | tests/nexus/orchestrator/test_evidence_coverage_live_path.py, tests/nexus/orchestrator/test_canonical_core_transport.py, tests/nexus/orchestrator/test_canonical_core_transport_tool_exposure.py, tests/nexus/orchestrator/test_evidence_coverage_reuse_v1.py, tests/nexus/orchestrator/test_wave_d_canaries.py | active | high | canonical_core_transport_contract |
 | tests/nexus/orchestrator/_evidence_coverage_live_driver.py | tests/nexus/orchestrator/test_evidence_coverage_live_path.py | active | medium | evidence_coverage_live_driver |
+| docs/runbooks/declaring_expected_evidence_universe.md | tests/nexus/orchestrator/test_task_card_create_expected_evidence.py, tests/nexus/orchestrator/test_evidence_coverage_live_path.py | active | medium | task_card_expected_evidence_declaration |
 | nexus/orchestrator/candidate_verifier.py | tests/nexus/orchestrator/test_candidate_verifier.py, tests/nexus/orchestrator/test_self_hosted_task_service.py | active | high | verifier_static_contract_and_retry_recovery |
 | nexus/orchestrator/code_integrity_verifier.py | tests/nexus/orchestrator/test_code_integrity_verifier.py, tests/nexus/orchestrator/test_candidate_verifier.py | active | high | code_integrity_candidate_evidence_contract |
 | nexus/orchestrator/managed_local_agent.py | tests/nexus/orchestrator/test_managed_local_agent.py, tests/nexus/orchestrator/test_self_hosted_task_service.py | active | high | managed_local_agent_effect_binding_contract |
@@ -371,4 +372,6 @@
 | scripts/ops/install_nexus_gateway_auto_deploy.sh | tests/ops/test_nexus_gateway_auto_deploy.py | active | medium | gateway_auto_deploy_launchagent_installer |
 | scripts/ops/check_gateway_source_drift.py | tests/ops/test_check_gateway_source_drift.py, tests/ops/test_nexus_gateway_auto_deploy.py | active | medium | gateway_source_drift_reads_auto_deploy_receipt |
 | tests/ops/test_nexus_gateway_auto_deploy.py | tests/ops/test_nexus_gateway_auto_deploy.py | active | medium | test_contract |
+| tests/nexus/orchestrator/test_gateway_controller_root.py | tests/nexus/orchestrator/test_gateway_controller_root.py | active | medium | test_contract |
+| tests/ops/test_gateway_routine_deploy_authority.py | tests/ops/test_gateway_routine_deploy_authority.py | active | medium | test_contract |
 | scripts/ops/eia_scoreboard.py | tests/ops/test_eia_scoreboard.py | active | medium | eia_scoreboard_report |
