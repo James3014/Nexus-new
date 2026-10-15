@@ -198,3 +198,37 @@ def test_consumer_ignores_tampered_manifest_bindings_and_controls(tmp_path: Path
         assert request.route["provider"] == resolve_nightshift_online_worker().provider
     assert seen[0].route == {**seen[1].route}
     assert "task_card" not in expected["online"]["controls"]
+
+
+def test_policy_load_failure_sends_empty_bindings_and_blocks(tmp_path: Path, monkeypatch):
+    """#2257: a failing policy load must reach the empty-bindings BLOCK path.
+
+    Before the fix ``WorkforcePolicyError`` was imported inside the same ``try``
+    whose ``except`` clause named it, so an import failure raised ``NameError``
+    instead of falling through to the fail-closed branch.
+    """
+    import nexus.services.nightshift_queue_consumer as consumer
+    from nexus.services.model_workforce_policy import WorkforcePolicyError
+
+    def _raise(*_args, **_kwargs):
+        raise WorkforcePolicyError("policy unavailable")
+
+    monkeypatch.setattr(consumer, "build_nightshift_workforce_bindings", _raise)
+    seen = []
+
+    def _runner(request):
+        seen.append(request)
+        return {"workforce_admission": {"overall_decision": "BLOCK"}}
+
+    dispatched = []
+    path = tmp_path / "pending.json"
+    path.write_text(json.dumps([_item(task="no-policy")]), encoding="utf-8")
+
+    result = consumer.NightshiftQueueConsumer(_runner, dispatched.append).consume_file(path)
+
+    assert dispatched == []
+    assert len(seen) == 1
+    assert seen[0].route["workforce_bindings"] == {}
+    assert "provider" not in seen[0].route
+    assert [entry["status"] for entry in result] == ["BLOCK"]
+    assert result[0]["reason"] == "workforce_admission_not_allow"
