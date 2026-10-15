@@ -4593,4 +4593,31 @@ def test_quiescence_blocking_list_is_bounded(cfg: ad.Config) -> None:
     host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": many, "checked": 5000}]
     result = cycle(cfg, host, prober)
     assert len(result["quiescence"]["blocking"]) == 100
-    assert cfg.deferrals.stat().st_size < ad.DEFERRALS_MAX_BYTES
+    assert len(result["quiescence"]["task_ids"]) == 100
+    assert result["quiescence"]["task_count"] == 5000
+    line = json.loads(cfg.deferrals.read_text().splitlines()[-1])
+    assert len(line["quiescence"]["task_ids"]) == 100
+    assert cfg.deferrals.stat().st_size < 20_000
+
+
+def test_quiescence_candidate_arriving_inside_the_hour_still_rearms(cfg: ad.Config) -> None:
+    """Warned for candidate C; NEW shows up 20 min later and must still be warned at 1 h."""
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    cfg.quiescence_file.write_text(
+        json.dumps({
+            "since_epoch": NOW - 10 * 3600,
+            "candidate": "c" * 40,
+            "blocking": ["stuck"],
+            "warned_at": ad._iso(NOW - 20 * 60),
+            "warned_candidate": "c" * 40,
+        })
+    )
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": ["stuck"], "checked": 1}]
+    cycle(cfg, host, prober)  # NEW seen 20 min after the warning: no re-arm yet
+    assert host.issue_comments == []
+    assert json.loads(cfg.quiescence_file.read_text())["warned_candidate"] == "c" * 40
+    host.clock += 45 * 60
+    cycle(cfg, host, prober)  # 65 min after the warning: NEW gets its own
+    assert len(host.issue_comments) == 1
+    assert json.loads(cfg.quiescence_file.read_text())["warned_candidate"] == NEW

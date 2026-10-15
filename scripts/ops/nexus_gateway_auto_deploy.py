@@ -1855,7 +1855,9 @@ class _Cycle:
             warned_at = None  # a future marker can never mute a warning
         if warned_at is not None and (
             (
-                episode.get("candidate") != candidate
+                # The candidate the last warning named, not the latest one seen,
+                # so a candidate that arrives inside the hour still re-arms later.
+                episode.get("warned_candidate", episode.get("candidate")) != candidate
                 and now - warned_at >= QUIESCENCE_REARM_MIN_SECONDS
             )
             or now - warned_at >= QUIESCENCE_REWARN_SECONDS
@@ -1876,6 +1878,11 @@ class _Cycle:
             "candidate": candidate,
             "blocking": blocking,
             "warned_at": None if warned_at is None else _iso(warned_at),
+            "warned_candidate": (
+                None
+                if warned_at is None
+                else episode.get("warned_candidate", episode.get("candidate"))
+            ),
         }
         warn_due = age >= cfg.quiescence_warn_after_seconds and warned_at is None
         if warn_due:
@@ -1884,10 +1891,13 @@ class _Cycle:
             body = _quiescence_warning(cfg, candidate, blocking, age)
             posted = host.post_issue_comment(cfg, body)
             updated["warned_at"] = _iso(now) if posted else None
+            updated["warned_candidate"] = candidate if posted else None
             updated["warning_failed"] = not posted
         _atomic_write(cfg.quiescence_file, json.dumps(updated, sort_keys=True).encode(), 0o600)
         result = {
             **verdict,
+            "task_ids": blocking if verdict.get("task_ids") else None,
+            "task_count": len(verdict.get("task_ids") or []),
             "deferred_since": updated["since"],
             "deferral_age_seconds": int(age),
             "blocking": blocking,
