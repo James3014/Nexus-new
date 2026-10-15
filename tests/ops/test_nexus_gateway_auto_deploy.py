@@ -54,6 +54,44 @@ def _fixture_git(cwd: Path, *args: str) -> str:
     ).stdout.strip()
 
 
+# Minimal stand-in for nexus-core's product/protocol/build_identity.py: the same
+# public functions and digest rule, with "shipped" simplified to every *.py
+# outside __pycache__.  The real module is exercised by the opt-in real-Core
+# test below.
+FIXTURE_BUILD_IDENTITY = """
+import hashlib, os
+from pathlib import Path
+
+
+def _shipped(rel):
+    return rel.startswith("product/") and rel.endswith(".py") and "__pycache__" not in rel
+
+
+def select_shipped_paths(paths):
+    return sorted((p for p in paths if _shipped(p)), key=lambda p: p.encode("utf-8"))
+
+
+def source_digest_of_files(files):
+    manifest = hashlib.sha256()
+    for path, data in sorted(files, key=lambda item: item[0].encode("utf-8")):
+        manifest.update(hashlib.sha256(data).hexdigest().encode("ascii"))
+        manifest.update(b"  " + path.encode("utf-8") + b"\\n")
+    return "sha256:" + manifest.hexdigest()
+
+
+def source_digest(package_root):
+    root = Path(package_root)
+    found = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+        for name in filenames:
+            rel = "product/" + Path(dirpath, name).relative_to(root).as_posix()
+            if _shipped(rel):
+                found.append((rel, Path(dirpath, name).read_bytes()))
+    return source_digest_of_files(found)
+"""
+
+
 class CoreOrigin:
     """A local stand-in for James3014/nexus-core (no network in these tests)."""
 
@@ -76,6 +114,10 @@ def _core_origin(tmp_path_factory: pytest.TempPathFactory) -> None:
     _fixture_git(repo, "commit", "-q", "-m", "core one")
     CORE.other = _fixture_git(repo, "rev-parse", "HEAD")
     (repo / "product" / "two.py").write_text("")
+    # The pin ships Core's build_identity leaf module (#2246); "other" predates it.
+    (repo / "product" / "protocol").mkdir()
+    (repo / "product" / "protocol" / "__init__.py").write_text("")
+    (repo / "product" / "protocol" / "build_identity.py").write_text(FIXTURE_BUILD_IDENTITY)
     _fixture_git(repo, "add", ".")
     _fixture_git(repo, "commit", "-q", "-m", "core two")
     CORE.path, CORE.pin = repo, _fixture_git(repo, "rev-parse", "HEAD")
@@ -118,6 +160,7 @@ class FakeHost(ad.Host):
         self.after_r1_check: Callable[[], None] | None = None
         self.core_pin: str = CORE.pin
         self.core_fetch_fails = False
+        self.digest_runs = 0
         # Task quiescence (#2227): CLEAR unless a test says otherwise.
         self.in_flight: list[dict[str, Any]] = []
         self.real_classifier = False
@@ -209,6 +252,10 @@ class FakeHost(ad.Host):
             if self.dirty_after_sync:
                 (Path(cwd) / ".venv").mkdir()
             return _done()
+        if len(argv) > 4 and argv[4] == ad.CORE_SOURCE_DIGEST_CODE:
+            # Core's digest module runs for real against the fixture checkout.
+            self.digest_runs += 1
+            return ad.Host.run(self, argv, cwd=cwd, env={**GIT_ENV, **(env or {})}, timeout=timeout)
         if argv[1:] == ["-c", "import sys"]:
             return _done(code=0 if Path(argv[0]).exists() else 1)
         if len(argv) > 2 and argv[1].endswith(ad.DEPLOYER):
@@ -2285,10 +2332,13 @@ def test_candidate_runs_the_core_revision_its_tree_pins(cfg: ad.Config) -> None:
     assert result["status"] == "DEPLOYED"
     checkout = cfg.core_checkouts / CORE.pin
     receipt = ad.last_receipt(cfg.state_dir)
+    digest = receipt["core"]["source_digest"]
     assert receipt["core"] == {
         "revision": CORE.pin,
         "root": str(checkout),
         "repository": ad.CORE_REPOSITORY_URL,
+        "source_digest": digest,
+        "source_digest_status": "COMPUTED",
     }
     # A clean, detached checkout at exactly the pinned commit.
     assert _core_head(checkout) == CORE.pin
@@ -2448,9 +2498,171 @@ def test_wrapper_exports_core_root_and_rejects_unsafe_core_path(cfg: ad.Config) 
     root, python = Path("/d/a1-x"), Path("/v/bin/python")
     assert "NEXUS_CORE_REPO_ROOT" not in ad.wrapper_command(cfg, root, python)
     command = ad.wrapper_command(cfg, root, python, core_root=Path("/g/core/abc"))
-    assert 'export NEXUS_CORE_REPO_ROOT="/g/core/abc" ; exec ' in command
+    assert 'export NEXUS_CORE_REPO_ROOT="/g/core/abc" ; ' in command
+    assert command.endswith(f'exec "{python}" "{root / ad.ENTRYPOINT}"')
     with pytest.raises(ad.DeployError, match="WRAPPER_PATH_UNSAFE"):
         ad.wrapper_command(cfg, root, python, core_root=Path('/g/core/"; rm -rf ~'))
+
+
+def _fixture_digest(checkout: Path) -> str:
+    """The fixture Core's own digest of ``checkout`` (no deployer code involved)."""
+    out = subprocess.run(
+        [
+            sys.executable,
+            "-B",
+            "-I",
+            "-c",
+            "import importlib.util, sys\n"
+            "spec = importlib.util.spec_from_file_location('bi', sys.argv[1])\n"
+            "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)\n"
+            "print(m.source_digest(sys.argv[2]))\n",
+            str(checkout / ad.CORE_BUILD_IDENTITY_FILE),
+            str(checkout / "product"),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return out.stdout.strip()
+
+
+def test_build_records_core_source_digest_and_exports_it(cfg: ad.Config) -> None:
+    """#2246: the build computes the pinned Core's source_digest with Core's own
+    module, records it in the receipt and exports it to spare and live Gateways."""
+    host, prober = FakeHost(), FakeProber()
+    assert cycle(cfg, host, prober)["status"] == "DEPLOYED"
+    checkout = cfg.core_checkouts / CORE.pin
+    core = ad.last_receipt(cfg.state_dir)["core"]
+    assert core["source_digest_status"] == "COMPUTED"
+    assert core["source_digest"] == _fixture_digest(checkout)
+    assert ad._CORE_DIGEST.match(core["source_digest"])
+    assert host.digest_runs == 1
+    digest_call = next(c for c in host.calls if ad.CORE_SOURCE_DIGEST_CODE in c)
+    assert digest_call[1:3] == ["-B", "-I"] and digest_call[-2:] == [str(checkout), CORE.pin]
+    exports = (
+        f'export NEXUS_CORE_SOURCE_DIGEST_REVISION="{CORE.pin}" ; '
+        f'export NEXUS_CORE_SOURCE_DIGEST="{core["source_digest"]}" ; '
+    )
+    live_command = plistlib.loads(cfg.plist.read_bytes())["ProgramArguments"][2]
+    for command in (host.started[0], live_command):
+        assert exports in command
+        assert command.index(exports) > command.index(f'source "{cfg.env_file}"')
+    # Computing the digest wrote nothing into the pinned checkout.
+    assert _fixture_git(checkout, "status", "--porcelain", "--ignored") == ""
+
+
+def test_core_pin_without_build_identity_exports_no_digest(cfg: ad.Config) -> None:
+    host = FakeHost()
+    host.core_pin = CORE.other  # predates Core's core_identity()
+    assert cycle(cfg, host, FakeProber())["status"] == "DEPLOYED"
+    core = ad.last_receipt(cfg.state_dir)["core"]
+    assert core["source_digest"] is None
+    assert core["source_digest_status"] == "UNSUPPORTED_CORE"
+    assert host.digest_runs == 0
+    live_command = plistlib.loads(cfg.plist.read_bytes())["ProgramArguments"][2]
+    unset = "unset NEXUS_CORE_SOURCE_DIGEST NEXUS_CORE_SOURCE_DIGEST_REVISION ; "
+    for command in (live_command, host.started[0]):
+        assert "export NEXUS_CORE_SOURCE_DIGEST" not in command
+        # A stale value from the env file cannot reach the host.
+        assert unset in command
+        assert command.index(unset) > command.index(f'source "{cfg.env_file}"')
+
+
+def test_no_build_digest_never_leaks_a_stale_digest_into_the_host(
+    cfg: ad.Config, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#2246 review: without a build digest the wrapper unsets the digest env and
+    the provenance probe subprocess does not inherit it from the deployer."""
+    monkeypatch.setenv("NEXUS_CORE_SOURCE_DIGEST", "sha256:" + "9" * 64)
+    monkeypatch.setenv("NEXUS_CORE_SOURCE_DIGEST_REVISION", NEW)
+    core = {"revision": NEW, "root": str(tmp_path / "core"), "source_digest": None}
+    seen: list[dict[str, str]] = []
+
+    class EnvHost(ad.Host):
+        def run(self, argv, *, cwd=None, env=None, timeout=1800):  # type: ignore[override]
+            if len(argv) > 2 and argv[2] == ad.CORE_PROVENANCE_PROBE_CODE:
+                argv = [
+                    sys.executable,
+                    "-c",
+                    "import json, os; print(json.dumps(dict(os.environ)))",
+                ]
+                result = super().run(argv, cwd=cwd, env=env, timeout=timeout)
+                seen.append(json.loads(result.stdout))
+                return _done(json.dumps(_pinned_status(Path(core["root"]))) + "\n")
+            return super().run(argv, cwd=cwd, env=env, timeout=timeout)
+
+    ad.Prober(EnvHost()).core_provenance(root=REPO_ROOT, python=Path(sys.executable), core=core)
+    assert "NEXUS_CORE_SOURCE_DIGEST" not in seen[0]
+    assert "NEXUS_CORE_SOURCE_DIGEST_REVISION" not in seen[0]
+    assert seen[0]["NEXUS_CORE_REPO_ROOT"] == core["root"]
+    # With a build digest the build's values replace the stale ones.
+    seen.clear()
+    core["source_digest"] = "sha256:" + "1" * 64
+    ad.Prober(EnvHost()).core_provenance(root=REPO_ROOT, python=Path(sys.executable), core=core)
+    assert seen[0]["NEXUS_CORE_SOURCE_DIGEST"] == core["source_digest"]
+    # The real wrapper, after an env file that exports a stale digest, hands the
+    # Gateway process none of it.
+    if not Path("/bin/zsh").exists():
+        return
+    cfg.env_file.write_text(
+        'export NEXUS_CORE_SOURCE_DIGEST="sha256:' + "9" * 64 + '"\n'
+        f'export NEXUS_CORE_SOURCE_DIGEST_REVISION="{NEW}"\n'
+    )
+    root = tmp_path / "deploy"
+    (root / ad.ENTRYPOINT).parent.mkdir(parents=True)
+    (root / ad.ENTRYPOINT).write_text("import json, os; print(json.dumps(dict(os.environ)))\n")
+    for digest in (None, ("c" * 40, "sha256:" + "d" * 64)):
+        command = ad.wrapper_command(
+            cfg, root, Path(sys.executable), core_root=tmp_path / "core", core_digest=digest
+        )
+        out = subprocess.run(
+            ["/bin/zsh", "-c", command], capture_output=True, text=True, check=True
+        )
+        environ = json.loads(out.stdout.strip().splitlines()[-1])
+        if digest is None:
+            assert "NEXUS_CORE_SOURCE_DIGEST" not in environ
+            assert "NEXUS_CORE_SOURCE_DIGEST_REVISION" not in environ
+        else:
+            assert environ["NEXUS_CORE_SOURCE_DIGEST"] == digest[1]
+            assert environ["NEXUS_CORE_SOURCE_DIGEST_REVISION"] == digest[0]
+
+
+def test_core_source_digest_requires_disk_to_match_the_commit(cfg: ad.Config) -> None:
+    checkout = Path(ad.materialize_core(cfg, FakeHost(), CORE.pin)["root"])
+    host = FakeHost()
+    clean = ad.core_source_digest(host, checkout, CORE.pin)
+    assert clean["source_digest"] == _fixture_digest(checkout)
+    # A stray __pycache__ changes neither digest.
+    (checkout / "product" / "__pycache__").mkdir()
+    (checkout / "product" / "__pycache__" / "two.cpython-312.pyc").write_bytes(b"junk")
+    assert ad.core_source_digest(host, checkout, CORE.pin) == clean
+    # A shipped source that differs from the commit rejects the candidate.
+    (checkout / "product" / "two.py").write_text("tampered = True\n")
+    with pytest.raises(ad.DeployError, match="CORE_SOURCE_DIGEST_MISMATCH"):
+        ad.core_source_digest(host, checkout, CORE.pin)
+
+
+def test_core_source_digest_failure_rejects(cfg: ad.Config) -> None:
+    checkout = Path(ad.materialize_core(cfg, FakeHost(), CORE.pin)["root"])
+    (checkout / ad.CORE_BUILD_IDENTITY_FILE).write_text("raise SystemExit(3)\n")
+    with pytest.raises(ad.DeployError, match="CORE_SOURCE_DIGEST_FAILED"):
+        ad.core_source_digest(FakeHost(), checkout, CORE.pin)
+
+
+def test_wrapper_rejects_a_malformed_core_digest(cfg: ad.Config) -> None:
+    root, python, core = Path("/d/a1-x"), Path("/v/bin/python"), Path("/g/core/abc")
+    good = ("c" * 40, "sha256:" + "d" * 64)
+    command = ad.wrapper_command(cfg, root, python, core_root=core, core_digest=good)
+    assert f'export NEXUS_CORE_SOURCE_DIGEST="sha256:{"d" * 64}" ; exec ' in command
+    for bad in (
+        ("c" * 40, "sha256:" + "d" * 63),
+        ("c" * 40, 'sha256:"; rm -rf ~'),
+        ("not-a-sha", "sha256:" + "d" * 64),
+    ):
+        with pytest.raises(ad.DeployError, match="WRAPPER_CORE_DIGEST_INVALID"):
+            ad.wrapper_command(cfg, root, python, core_root=core, core_digest=bad)
+    with pytest.raises(ad.DeployError, match="WRAPPER_CORE_DIGEST_INVALID"):
+        ad.wrapper_command(cfg, root, python, core_digest=good)
 
 
 def test_rollback_probe_of_the_predecessor_does_not_demand_core(cfg: ad.Config) -> None:
@@ -2659,6 +2871,56 @@ def _real_core_checkout(tmp_path: Path, pin: str) -> Path | None:
     return None
 
 
+@pytest.mark.parametrize(
+    ("case", "ok"),
+    [
+        pytest.param("digest_verified", True, id="digest_verified"),
+        pytest.param("digest_wrong", False, id="digest_wrong"),
+        pytest.param("digest_expected_wrong", False, id="digest_expected_wrong"),
+        pytest.param("digest_reported_without_source", False, id="digest_reported_without_source"),
+        pytest.param("build_stamp_source", False, id="build_stamp_source"),
+        pytest.param("digest_but_build_has_none", False, id="digest_but_build_has_none"),
+        pytest.param("legacy_transport", True, id="legacy_transport"),
+    ],
+)
+def test_real_prober_requires_the_build_source_digest(tmp_path: Path, case: str, ok: bool) -> None:
+    """#2246: a git-free transport passes only when it verified this build's digest."""
+    core_root = tmp_path / "core" / NEW
+    core_root.mkdir(parents=True)
+    digest, other = "sha256:" + "1" * 64, "sha256:" + "2" * 64
+    core: dict[str, Any] = {"revision": NEW, "root": str(core_root), "source_digest": digest}
+    status: dict[str, Any] = {
+        **_pinned_status(core_root),
+        "identity_source": "source_digest",
+        "observed_source_digest": digest,
+        "expected_source_digest": digest,
+    }
+    if case == "digest_wrong":
+        status["observed_source_digest"] = other
+    elif case == "digest_expected_wrong":
+        status["expected_source_digest"] = other
+    elif case == "digest_reported_without_source":
+        del status["identity_source"]
+    elif case == "build_stamp_source":
+        status["identity_source"] = "build_stamp"
+    elif case == "digest_but_build_has_none":
+        core["source_digest"] = None
+    elif case == "legacy_transport":
+        status = _pinned_status(core_root)
+    host = _CoreStatusHost(status)
+    check = ad.Prober(host).core_provenance(root=REPO_ROOT, python=Path(sys.executable), core=core)
+    assert check["ok"] is ok, check
+    env = host.core_envs[0]
+    assert env["NEXUS_CORE_REPO_ROOT"] == str(core_root)
+    if core["source_digest"] is None:
+        # Explicitly removed, so no inherited value reaches the transport.
+        assert env["NEXUS_CORE_SOURCE_DIGEST"] is None
+        assert env["NEXUS_CORE_SOURCE_DIGEST_REVISION"] is None
+    else:
+        assert env["NEXUS_CORE_SOURCE_DIGEST"] == digest
+        assert env["NEXUS_CORE_SOURCE_DIGEST_REVISION"] == NEW
+
+
 # Opt-in: collected only when NEXUS_CORE_REPO_ROOT names a real nexus-core, so the
 # exact-base impact gate never sees a newly added test id that merely skips.
 if os.environ.get("NEXUS_CORE_REPO_ROOT"):
@@ -2676,6 +2938,33 @@ if os.environ.get("NEXUS_CORE_REPO_ROOT"):
         )
         assert check["status"] == "CORE_REVISION_PINNED", check
         assert check["ok"] is True and check["observed_commit"] == pin
+
+    def test_build_source_digest_equals_real_core_identity(tmp_path: Path) -> None:
+        """The deployer's digest is exactly what real Core's core_identity() reports."""
+        pin = ad.read_core_pin(REPO_ROOT)
+        checkout = _real_core_checkout(tmp_path, pin)
+        if checkout is None:
+            pytest.skip("no local nexus-core with the pinned tree (set NEXUS_CORE_REPO_ROOT)")
+        computed = ad.core_source_digest(ad.Host(), checkout, pin)
+        assert computed["source_digest_status"] == "COMPUTED"
+        reported = subprocess.run(
+            [
+                sys.executable,
+                "-B",
+                "-c",
+                "import json, sys; sys.path.insert(0, sys.argv[1]);"
+                "from product.protocol import core_identity;"
+                "print(json.dumps(core_identity()))",
+                str(checkout),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+        identity = json.loads(reported.stdout.strip().splitlines()[-1])
+        assert identity["build_identity"] == "UNSTAMPED"
+        assert computed["source_digest"] == identity["source_digest"]
 
 
 # ------------------------------------------------- live required-check set (#2173)

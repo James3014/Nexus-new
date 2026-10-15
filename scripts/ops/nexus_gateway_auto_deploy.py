@@ -86,7 +86,7 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Tuple
 
 if __name__ == "__main__":
     # Run from a Nexus-new tree: the Gateway launchd effect lives in
@@ -302,6 +302,62 @@ from nexus.orchestrator.canonical_core_transport import core_provenance_status
 print(json.dumps(core_provenance_status(), sort_keys=True, default=str))
 """
 
+# Expected Core ``source_digest`` of a pinned checkout (#2246), with Core's own
+# algorithm: ``product/protocol/build_identity.py`` is a leaf module and is loaded
+# by file path (the ``product`` package is never imported).  Run with ``-B -I``
+# so no bytecode lands in the checkout.  The digest is taken over the commit's
+# git objects and over the files on disk; the deployer requires both to agree.
+CORE_BUILD_IDENTITY_FILE = "product/protocol/build_identity.py"
+CORE_SOURCE_DIGEST_CODE = r"""
+import importlib.util, json, subprocess, sys
+checkout, revision = sys.argv[1], sys.argv[2]
+spec = importlib.util.spec_from_file_location(
+    "_nexus_core_build_identity", checkout + "/product/protocol/build_identity.py"
+)
+core = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(core)
+
+
+def git(*args, data=None):
+    return subprocess.run(
+        ["git", "-C", checkout, *args],
+        input=data, capture_output=True, check=True, timeout=300,
+    ).stdout
+
+
+entries = {}
+for raw in git("ls-tree", "-r", "-z", "--full-tree", revision, "--", "product").split(b"\0"):
+    if raw:
+        meta, _, rel = raw.partition(b"\t")
+        mode, kind, sha = meta.decode("ascii").split(" ")
+        entries[rel.decode("utf-8")] = (mode, kind, sha)
+shipped = core.select_shipped_paths(entries)
+for rel in shipped:
+    mode, kind, _sha = entries[rel]
+    if kind != "blob" or mode not in ("100644", "100755"):
+        raise SystemExit("CORE_SOURCE_NOT_A_REGULAR_FILE:" + rel)
+batch = git("cat-file", "--batch", data="".join(entries[r][2] + "\n" for r in shipped).encode())
+files, offset = [], 0
+for rel in shipped:
+    end = batch.index(b"\n", offset)
+    sha, kind, size = batch[offset:end].decode("ascii").split(" ")
+    if sha != entries[rel][2] or kind != "blob":
+        raise SystemExit("CORE_SOURCE_BATCH_MISMATCH:" + rel)
+    start, stop = end + 1, end + 1 + int(size)
+    if stop >= len(batch) or batch[stop : stop + 1] != b"\n":
+        raise SystemExit("CORE_SOURCE_BATCH_TRUNCATED:" + rel)
+    files.append((rel, batch[start:stop]))
+    offset = stop + 1
+if offset != len(batch):
+    raise SystemExit("CORE_SOURCE_BATCH_TRAILING_OUTPUT")
+print(json.dumps({
+    "committed": core.source_digest_of_files(files),
+    "on_disk": core.source_digest(checkout + "/product"),
+    "files": len(files),
+}))
+"""
+_CORE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+
 
 class DeployError(RuntimeError):
     pass
@@ -424,10 +480,15 @@ class Host:
         argv: List[str],
         *,
         cwd: Optional[Path] = None,
-        env: Optional[Dict[str, str]] = None,
+        env: Optional[Mapping[str, Optional[str]]] = None,
         timeout: float = 1800,
     ) -> subprocess.CompletedProcess:
-        full_env = dict(os.environ, **(env or {}))
+        full_env = dict(os.environ)
+        for key, value in (env or {}).items():
+            if value is None:  # explicit removal of an inherited variable
+                full_env.pop(key, None)
+            else:
+                full_env[key] = value
         return subprocess.run(
             argv,
             cwd=str(cwd) if cwd else None,
@@ -1024,6 +1085,56 @@ def health_core_provenance(health: Any, core: Any) -> Dict[str, Any]:
     return {"ok": ok, **{k: block.get(k) for k in keys if k in block}}
 
 
+def core_env(core: Any) -> Dict[str, str]:
+    """Environment that binds a process to the deployment's pinned Core.
+
+    ``NEXUS_CORE_SOURCE_DIGEST`` (and the revision it was computed from) is set
+    only when the build computed it; a Core pin that predates Core's
+    ``core_identity()`` has none.
+    """
+    env = {"NEXUS_CORE_REPO_ROOT": str(core["root"])}
+    digest = core.get("source_digest")
+    if digest is not None:
+        env["NEXUS_CORE_SOURCE_DIGEST"] = str(digest)
+        env["NEXUS_CORE_SOURCE_DIGEST_REVISION"] = str(core["revision"])
+    return env
+
+
+def core_probe_env(core: Any) -> Dict[str, Optional[str]]:
+    """``core_env`` for a probe subprocess; ``None`` removes an inherited value.
+
+    Without a build digest, a stale ``NEXUS_CORE_SOURCE_DIGEST*`` from the
+    deployer's own environment must not reach the probed transport.
+    """
+    env: Dict[str, Optional[str]] = {
+        "NEXUS_CORE_SOURCE_DIGEST": None,
+        "NEXUS_CORE_SOURCE_DIGEST_REVISION": None,
+    }
+    env.update(core_env(core))
+    return env
+
+
+def core_digest_verified(observed: Dict[str, Any], core: Dict[str, Any]) -> bool:
+    """The transport's own digest verdict must name the build's digest (#2246).
+
+    A transport that reports a git-free identity (``identity_source``) must have
+    verified exactly the digest this build computed.  A transport that predates
+    #2246 reports no ``identity_source`` and is judged by revision alone.
+    """
+    source = observed.get("identity_source")
+    if source is None:
+        return "observed_source_digest" not in observed
+    if source != "source_digest":
+        return False
+    digest = core.get("source_digest")
+    return bool(
+        digest is not None
+        and _CORE_DIGEST.match(str(digest))
+        and observed.get("observed_source_digest") == digest
+        and observed.get("expected_source_digest") == digest
+    )
+
+
 class Prober:
     """Smoke probe of one Gateway instance.  Tests replace this class."""
 
@@ -1051,7 +1162,7 @@ class Prober:
         result = self.host.run(
             [str(python), "-c", CORE_PROVENANCE_PROBE_CODE, str(root)],
             cwd=root,
-            env={"PYTHONDONTWRITEBYTECODE": "1", "NEXUS_CORE_REPO_ROOT": str(core["root"])},
+            env={"PYTHONDONTWRITEBYTECODE": "1", **core_probe_env(core)},
             timeout=120,
         )
         lines = (result.stdout or "").strip().splitlines()
@@ -1074,8 +1185,17 @@ class Prober:
             and observed.get("observed_commit") == core["revision"]
             and observed.get("expected_revision") == core["revision"]
             and same_root
+            and core_digest_verified(observed, core)
         )
-        keys = ("status", "reason", "expected_revision", "observed_commit", "source_root")
+        keys = (
+            "status",
+            "reason",
+            "expected_revision",
+            "observed_commit",
+            "source_root",
+            "identity_source",
+            "observed_source_digest",
+        )
         return {"ok": ok, **{k: observed.get(k) for k in keys if k in observed}}
 
     def probe(
@@ -1157,12 +1277,15 @@ def wrapper_command(
     port: Optional[int] = None,
     state_dir: Optional[Path] = None,
     core_root: Optional[Path] = None,
+    core_digest: Optional[Tuple[str, str]] = None,
 ) -> str:
     """The same fixed zsh wrapper as the #526 deployments, with a per-deployment venv.
 
     ``port``/``state_dir`` are only used for the spare-port probe, which must never
     see the live self-hosted state.  ``core_root`` (exported after the env file, so
     the env file cannot override it) is the deployment's pinned Core checkout.
+    ``core_digest`` is ``(revision, source_digest)`` of that checkout, exported as
+    ``NEXUS_CORE_SOURCE_DIGEST_REVISION`` / ``NEXUS_CORE_SOURCE_DIGEST`` (#2246).
     """
     state = cfg.canonical_state_dir if state_dir is None else state_dir
     values = [str(root), str(python), str(cfg.env_file), str(state)]
@@ -1173,6 +1296,21 @@ def wrapper_command(
             raise DeployError("WRAPPER_PATH_UNSAFE")
     port_export = "" if port is None else f"export NEXUS_MCP_GATEWAY_PORT={int(port)} ; "
     core_export = "" if core_root is None else f'export NEXUS_CORE_REPO_ROOT="{core_root}" ; '
+    if core_digest is not None:
+        revision, digest = core_digest
+        if (
+            core_root is None
+            or not _SHA.match(str(revision))
+            or not _CORE_DIGEST.match(str(digest))
+        ):
+            raise DeployError("WRAPPER_CORE_DIGEST_INVALID")
+        core_export += (
+            f'export NEXUS_CORE_SOURCE_DIGEST_REVISION="{revision}" ; '
+            f'export NEXUS_CORE_SOURCE_DIGEST="{digest}" ; '
+        )
+    elif core_root is not None:
+        # No build digest: never let a stale value from the env file through.
+        core_export += "unset NEXUS_CORE_SOURCE_DIGEST NEXUS_CORE_SOURCE_DIGEST_REVISION ; "
     return (
         f'cd "{root}" ; source "{cfg.env_file}" ; export PYTHONDONTWRITEBYTECODE=1 ; '
         f'export NEXUS_CANONICAL_SOURCE_ROOT="{root}" ; '
@@ -1407,6 +1545,46 @@ def core_checkout_problem(host: Host, checkout: Path, revision: str) -> Optional
     return None
 
 
+def core_source_digest(host: Host, checkout: Path, revision: str) -> Dict[str, Any]:
+    """Expected Core ``source_digest`` of the clean pinned checkout (#2246).
+
+    Computed by Core's own ``build_identity`` module from the checkout, over the
+    commit's git objects and over the files on disk; both must agree or the
+    candidate is rejected.  A Core pin without ``build_identity`` (before
+    nexus-core #270) has no digest: ``source_digest`` is None and nothing is
+    exported, so such a deployment keeps the git-based provenance it had.
+    """
+    if not (checkout / CORE_BUILD_IDENTITY_FILE).is_file():
+        return {"source_digest": None, "source_digest_status": "UNSUPPORTED_CORE"}
+    result = host.run(
+        [sys.executable, "-B", "-I", "-c", CORE_SOURCE_DIGEST_CODE, str(checkout), revision],
+        cwd=checkout,
+        env={"PYTHONDONTWRITEBYTECODE": "1"},
+        timeout=300,
+    )
+    lines = (result.stdout or "").strip().splitlines()
+    try:
+        report = json.loads(lines[-1]) if result.returncode == 0 and lines else None
+    except ValueError:
+        report = None
+    if not isinstance(report, dict):
+        detail = (result.stderr or result.stdout or "").strip()[-200:]
+        raise DeployError(f"CORE_SOURCE_DIGEST_FAILED:{detail}"[:300])
+    committed, on_disk = report.get("committed"), report.get("on_disk")
+    if not _CORE_DIGEST.match(str(committed)) or not _CORE_DIGEST.match(str(on_disk)):
+        raise DeployError("CORE_SOURCE_DIGEST_MALFORMED")
+    if committed != on_disk:
+        raise DeployError(f"CORE_SOURCE_DIGEST_MISMATCH:{committed}!={on_disk}"[:300])
+    return {"source_digest": committed, "source_digest_status": "COMPUTED"}
+
+
+def _core_digest_arg(core: Any) -> Optional[Tuple[str, str]]:
+    """``wrapper_command(core_digest=...)`` for a receipt's ``core`` block."""
+    if isinstance(core, dict) and core.get("source_digest") is not None:
+        return (str(core.get("revision")), str(core["source_digest"]))
+    return None
+
+
 def core_pins_in_use(cfg: Config) -> set:
     """Core revisions the live Gateway or the deployer tree may be running.
 
@@ -1450,6 +1628,7 @@ def build(cfg: Config, host: Host, commit: str) -> Dict[str, Any]:
     if head != commit:
         raise DeployError(f"WORKTREE_HEAD_MISMATCH:{head}")
     core = materialize_core(cfg, host, read_core_pin(root))
+    core = {**core, **core_source_digest(host, Path(core["root"]), core["revision"])}
     cfg.venvs.mkdir(parents=True, exist_ok=True)
     _must(
         host,
@@ -2362,7 +2541,13 @@ class _Cycle:
         core = receipt.get("core")
         core_root = Path(core["root"]) if isinstance(core, dict) else None
         command = wrapper_command(
-            cfg, root, python, port, state_dir=probe_state, core_root=core_root
+            cfg,
+            root,
+            python,
+            port,
+            state_dir=probe_state,
+            core_root=core_root,
+            core_digest=_core_digest_arg(core),
         )
         stop = host.start(command, cfg.state_dir / "logs" / f"{receipt['attempt_id']}.probe.log")
         try:
@@ -2438,7 +2623,11 @@ class _Cycle:
                     }
 
                 command = wrapper_command(
-                    cfg, root, python, core_root=Path(receipt["core"]["root"])
+                    cfg,
+                    root,
+                    python,
+                    core_root=Path(receipt["core"]["root"]),
+                    core_digest=_core_digest_arg(receipt["core"]),
                 )
                 new_plist = render_plist(previous_plist, command, root)
                 self.write_journal(receipt, previous_plist, new_plist, python)
