@@ -50,6 +50,7 @@ from nexus.research.research_runtime_contracts import (
 from nexus.app import research_semantic_runtime as _research_semantic_runtime
 from nexus.app.research_autoreason_runtime import build_autoreason_payload
 from nexus.app.research_receipt_runtime import build_capability_receipt_payloads, runtime_receipt_plan_payload
+from nexus.research.flow.capability_planning import drop_archived_capabilities
 from nexus.app.research_s2t_runtime import (
     autoreason_s2t_candidates as _autoreason_s2t_candidates,
     record_autoreason_s2t_trace as _record_autoreason_s2t_trace,
@@ -1767,8 +1768,10 @@ def run_auto_flow(
             skills=benchmark_skill_mount_requests,
         )
         capability_plan_payload = capability_plan.to_dict()
+    # Archived nodes are never selectable (integration_manager, archived 2026-10-13).
+    capability_plan_payload = drop_archived_capabilities(capability_plan_payload)
     nexus_usage_trace["capability_plan"] = capability_plan_payload
-    nexus_usage_trace["route_decision"] = route_decision_payload or build_route_decision(
+    nexus_usage_trace["route_decision"] = drop_archived_capabilities(route_decision_payload or build_route_decision(
         task_id=task_id or _safe_trace_slug(task_desc),
         task_desc=task_desc,
         task_type=task_type,
@@ -1783,7 +1786,7 @@ def run_auto_flow(
             budget=runtime_budget,
             skills=benchmark_skill_mount_requests,
         ),
-    ).to_dict()
+    ).to_dict())
     selected_for_runtime_receipts = {
         str(item)
         for item in (capability_plan_payload.get("selected_capabilities", []) or [])

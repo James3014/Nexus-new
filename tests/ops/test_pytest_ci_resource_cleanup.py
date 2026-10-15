@@ -12,7 +12,7 @@ WORKFLOW = REPO_ROOT / ".github/workflows/pytest.yml"
 
 def _impact_job() -> dict[str, object]:
     payload = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    return dict(payload["jobs"]["impact-gate"])
+    return dict(payload["jobs"]["impact-run"])
 
 
 def _impact_steps() -> list[dict[str, object]]:

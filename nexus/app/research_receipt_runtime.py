@@ -5,6 +5,7 @@ from typing import Any
 from nexus.core.repo_root import REPO_ROOT
 from nexus.engine.capability_receipts import build_trace_receipts
 from nexus.learning.shared_playbook import bind_shared_playbook_runtime_receipts
+from nexus.research.flow.capability_planning import drop_archived_capabilities
 from nexus.research.flow.unified_capability_projection import overlay_unified_capability_receipts
 
 
@@ -15,7 +16,7 @@ def runtime_receipt_plan_payload(
     plan = dict(capability_plan_payload)
     selected = [str(item).strip() for item in (plan.get("selected_capabilities", []) or []) if str(item).strip()]
     if not selected:
-        return plan
+        return drop_archived_capabilities(plan)
 
     capabilities = nexus_usage_trace.get("capabilities", {}) if isinstance(nexus_usage_trace.get("capabilities"), dict) else {}
     autoreason = nexus_usage_trace.get("autoreason", {}) if isinstance(nexus_usage_trace.get("autoreason"), dict) else {}
@@ -66,7 +67,9 @@ def runtime_receipt_plan_payload(
         plan["selected_capabilities"] = selected
         capabilities["runtime_pruned_capabilities"] = pruned
         capabilities["runtime_pruned_capability_count"] = len(pruned)
-    return plan
+    # Archived nodes are never receipt-bearing selections (integration_manager, 2026-10-13);
+    # applied after the runtime pruning above so its reasons are kept.
+    return drop_archived_capabilities(plan)
 
 
 def _apply_planner_playbook_violations(
@@ -121,9 +124,10 @@ def build_capability_receipt_payloads(
         )
     ]
     unified_stages = nexus_usage_trace.get("unified_runtime_capabilities")
-    if isinstance(unified_stages, list) and unified_stages:
+    if isinstance(unified_stages, list):
         # Executed-runtime truth: a capability the UnifiedRuntime really ran is not
-        # "selected_without_invocation", and a skipped one names the runtime reason.
+        # "selected_without_invocation", and a skipped one names the runtime reason.  An
+        # empty list still marks selected non-executable nodes NOT_EXECUTABLE.
         receipts = overlay_unified_capability_receipts(receipts, unified_stages)
     bound_receipts = bind_shared_playbook_runtime_receipts(
         capability_plan_payload=runtime_plan,
