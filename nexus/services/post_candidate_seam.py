@@ -54,13 +54,12 @@ SCRATCH_SIBLING_MAX_BYTES = 2_000_000
 # Pytest never discovers config outside the scratch copy (a planted pytest.ini in a $TMPDIR
 # ancestor would otherwise be read, or crash the confined run with PermissionError).
 SCRATCH_PYTEST_CONFIG = ".nexus-scratch-pytest.ini"
+# Exact single tokens (value options only in "=" / attached form) so the confined runner's
+# allowlist and pytest's argparse can never parse them differently.
 PINNED_PYTEST_ARGS: tuple[str, ...] = (
-    "--rootdir",
-    ".",
-    "-c",
-    SCRATCH_PYTEST_CONFIG,
-    "-p",
-    "no:cacheprovider",
+    "--rootdir=.",
+    f"--config-file={SCRATCH_PYTEST_CONFIG}",
+    "-pno:cacheprovider",
 )
 SANDBOX_REFUSED_STATUS = "NOT_EXECUTED_SANDBOX_REFUSED"
 SKIPPED_SANDBOX_REFUSED = "SKIPPED_SANDBOX_REFUSED"

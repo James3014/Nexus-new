@@ -60,53 +60,46 @@ TOOLCHAIN_READ_ROOTS: tuple[str, ...] = (
 )
 
 
-# Option tokens a confined command may carry (interpreter + pinned pytest flags); anything else
-# starting with "-" is refused, so ``-o``/``-k``/``--override-ini``/``--pyargs`` and friends can
-# never re-select or reconfigure tests. Options taking a value have their value pinned too.
-ALLOWED_FLAG_OPTIONS: frozenset[str] = frozenset({"-I", "-m", "-q", "-x", "--maxfail=1"})
-ALLOWED_VALUE_OPTIONS: dict[str, tuple[str, ...]] = {
-    "--rootdir": (".",),
-    "-c": (".nexus-scratch-pytest.ini", ".nexus-confined-pytest.ini"),
-    "-p": ("no:cacheprovider",),
-}
-# ``python -m <module>``: only pytest may be run as a module.
-ALLOWED_MODULES: frozenset[str] = frozenset({"pytest"})
+# Confined command shape (one exact grammar, so this filter and pytest/argparse can never
+# parse the argv differently):
+#   python: <python> -I -m pytest <allowed pytest tokens...> -- <one test path>
+#   other : <program> <positional paths...>       (no option tokens at all)
+# Allowed pytest tokens are matched as whole strings; options that take a value appear only in
+# "--opt=value" / attached "-pvalue" form with a pinned value. Everything else is refused:
+# unknown or abbreviated long options (argparse allow_abbrev), "--opt value", combined short
+# flags ("-xk expr"), extra tokens after "--", and a test path starting with "-".
+ALLOWED_PYTEST_TOKENS: frozenset[str] = frozenset({
+    "-q",
+    "-x",
+    "--maxfail=1",
+    "--rootdir=.",
+    "--config-file=.nexus-scratch-pytest.ini",
+    "--config-file=.nexus-confined-pytest.ini",
+    "-pno:cacheprovider",
+})
+_PYTHON_PREFIX: tuple[str, ...] = ("-I", "-m", "pytest")
 
 
 def _refused_option_parts(argv: Sequence[str]) -> list[str]:
-    """Option tokens outside the allowlist (before ``--``) and positional paths that start with
-    ``-`` (after it). Tokens after ``--`` are never options."""
+    """Tokens that break the confined command grammar above ([] when the argv conforms)."""
 
-    refused: list[str] = []
-    expect_value: tuple[str, ...] | None = None
-    expect_module = False
-    after_separator = False
-    for part in argv[1:]:
-        text = str(part)
-        if expect_module:
-            expect_module = False
-            if text not in ALLOWED_MODULES:
-                refused.append(text)
-            continue
-        if expect_value is not None:
-            if text not in expect_value:
-                refused.append(text)
-            expect_value = None
-            continue
-        if after_separator:
-            if Path(text).name.startswith("-") or text.startswith("-"):
-                refused.append(text)
-            continue
-        if text == "--":
-            after_separator = True
-        elif text == "-m":
-            expect_module = True
-        elif text in ALLOWED_VALUE_OPTIONS:
-            expect_value = ALLOWED_VALUE_OPTIONS[text]
-        elif text.startswith("-") and text not in ALLOWED_FLAG_OPTIONS:
-            refused.append(text)
-    if expect_value is not None or expect_module:
-        refused.append("<missing_option_value>")
+    parts = [str(part) for part in argv]
+    if not parts:
+        return ["<empty>"]
+    if parts[0] != sys.executable:
+        return [text for text in parts[1:] if text.startswith("-")]
+    if tuple(parts[1:4]) != _PYTHON_PREFIX:
+        return [" ".join(parts[1:4]) or "<missing_-I_-m_pytest>"]
+    rest = parts[4:]
+    if "--" not in rest:
+        return ["<missing_-->"]
+    split = rest.index("--")
+    refused = [text for text in rest[:split] if text not in ALLOWED_PYTEST_TOKENS]
+    tail = rest[split + 1 :]
+    if len(tail) != 1:
+        refused.append(f"<expected_one_test_path_after_--:{len(tail)}>")
+    elif not tail[0] or tail[0].startswith("-") or Path(tail[0]).name.startswith("-"):
+        refused.append(tail[0] or "<empty_test_path>")
     return refused
 
 
@@ -276,12 +269,9 @@ def run_pytest_dir_copy(
             "pytest",
             "-q",
             "--maxfail=1",
-            "--rootdir",
-            ".",
-            "-c",
-            DIR_COPY_PYTEST_CONFIG,
-            "-p",
-            "no:cacheprovider",
+            "--rootdir=.",
+            f"--config-file={DIR_COPY_PYTEST_CONFIG}",
+            "-pno:cacheprovider",
             "--",
             Path(test_name).name,
         ]

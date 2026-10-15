@@ -295,7 +295,7 @@ def test_confined_runner_fails_closed_if_a_copy_leaks_the_hidden_test(
 
     result = confined_test_runner.run_confined_test(
         case,
-        command=["python", "-m", "pytest", "-q", "test_visible.py"],
+        command=["python", "-m", "pytest", "-q", "--", "test_visible.py"],
         forbidden_paths=[case / "test_hidden.py"],
     )
 
@@ -1125,33 +1125,66 @@ def test_evaluate_candidate_confined_always_confined_never_in_place(
     "extra",
     [
         ["-o", "python_files=test_hidden.py"],
+        ["-opython_files=test_hidden.py"],  # attached short value
         ["-k", "test_hidden"],
+        ["-xk", "test_hidden"],  # combined short flags
         ["--override-ini=python_files=*.py"],
+        ["--over=python_files=*.py"],  # argparse abbreviation
+        ["--maxf=1"],  # abbreviation of an allowed option
+        ["--maxfail", "1"],  # space form of an allowed "=" option
+        ["--rootdir", "."],
+        ["--rootdir=/"],
+        ["--rootdir=-x"],  # value starting with "-"
         ["-p", "evil_plugin"],
+        ["-pevil_plugin"],
+        ["-p", "no:cacheprovider"],  # space form of an allowed attached option
         ["-c", "/etc/pytest.ini"],
-        ["--rootdir", "/"],
+        ["--config-file=/etc/pytest.ini"],
         ["--pyargs"],
-        ["--", "-k"],
+        ["--", "-k"],  # a second token after "--"
+        ["--", "other.py"],
     ],
 )
 def test_confined_runner_refuses_unlisted_pytest_options(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, extra: list[str]
 ) -> None:
-    """Gemini G8: option tokens are allowlisted (values pinned), test paths after "--" may
-    not start with "-": nothing can re-select or reconfigure the tests. Refused before any
-    sandbox is built, so this holds on every platform."""
+    """Gemini G8 (+ parser-differential addendum): the confined command has one exact grammar
+    (python -I -m pytest <exact allowed tokens> -- <one path>), so no token shape pytest's
+    argparse would read differently gets through. Refused before any sandbox is built, so
+    this holds on every platform."""
     case = _case(tmp_path)
     monkeypatch.setattr(lane, "os_sandbox_available", lambda: True)
     monkeypatch.setattr(
         confined_test_runner, "confinement", lambda **kw: pytest.fail("reached the sandbox")
     )
+    base = [sys.executable, "-I", "-m", "pytest", "-q", *seam.PINNED_PYTEST_ARGS]
+    assert confined_test_runner._refused_option_parts([*base, "--", "test_visible.py"]) == []
     result = confined_test_runner.run_confined_test(
         case,
-        command=[sys.executable, "-m", "pytest", "-q", *extra, "test_visible.py"],
+        command=[*base, *extra, "--", "test_visible.py"],
         forbidden_paths=[case / "test_hidden.py"],
     )
     assert result["executed"] is False
     assert "sandbox_argv_option_refused" in result["error"]
+
+
+@pytest.mark.parametrize(
+    "argv_tail",
+    [
+        ["-q", "test_visible.py"],  # no "--"
+        ["-q", "--", "-test_visible.py"],  # path starting with "-"
+        ["-q", "--"],  # no path
+    ],
+)
+def test_confined_runner_requires_one_double_dash_path(argv_tail: list[str]) -> None:
+    argv = [sys.executable, "-I", "-m", "pytest", *argv_tail]
+    assert confined_test_runner._refused_option_parts(argv) != []
+    # Non-python programs carry no option tokens at all.
+    assert confined_test_runner._refused_option_parts(["/bin/cat", "-n", "x"]) == ["-n"]
+    assert confined_test_runner._refused_option_parts(["/bin/cat", "x"]) == []
+    assert (
+        confined_test_runner._refused_option_parts([sys.executable, "-I", "-c", "print(1)"]) != []
+    )
 
 
 def test_every_seam_and_bench_test_command_separates_the_path_with_double_dash(
@@ -1175,5 +1208,6 @@ def test_every_seam_and_bench_test_command_separates_the_path_with_double_dash(
     verifier = runner._pytest_verifier_cmd(str(case / "test_hidden.py"))
     for argv in (sandbox_argv, verifier):
         assert argv[-2] == "--"
-        assert confined_test_runner._refused_option_parts(argv) == []
+        trusted = confined_test_runner._trusted_argv(argv)  # what the runner would execute
+        assert confined_test_runner._refused_option_parts(trusted) == []
     assert runner._is_hidden_verifier_cmd(verifier)
