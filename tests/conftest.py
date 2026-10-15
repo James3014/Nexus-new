@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import sys
 import types
 import math
@@ -61,7 +62,9 @@ def _install_opentelemetry_stub() -> None:
             return None
 
         def add_event(self, name, attributes=None):
-            self.events.append(types.SimpleNamespace(name=name, timestamp=0, attributes=attributes or {}))
+            self.events.append(
+                types.SimpleNamespace(name=name, timestamp=0, attributes=attributes or {})
+            )
 
         def set_attribute(self, key, value):
             self.attributes[key] = value
@@ -226,9 +229,18 @@ def _install_dependency_injector_stub() -> None:
             if self._override is not None:
                 return self._override
             if self._instance is None:
-                r_args = [a() if callable(a) and hasattr(a, "__class__") and not isinstance(a, type) else a for a in self.args]
+                r_args = [
+                    a()
+                    if callable(a) and hasattr(a, "__class__") and not isinstance(a, type)
+                    else a
+                    for a in self.args
+                ]
                 r_kwargs = {
-                    k: (v() if callable(v) and hasattr(v, "__class__") and not isinstance(v, type) else v)
+                    k: (
+                        v()
+                        if callable(v) and hasattr(v, "__class__") and not isinstance(v, type)
+                        else v
+                    )
                     for k, v in self.kwargs.items()
                 }
                 self._instance = self.factory(*r_args, **r_kwargs)
@@ -245,9 +257,16 @@ def _install_dependency_injector_stub() -> None:
         def __call__(self, *args, **kwargs):
             if self._override is not None:
                 return self._override
-            r_args = [a() if callable(a) and hasattr(a, "__class__") and not isinstance(a, type) else a for a in self.args]
+            r_args = [
+                a() if callable(a) and hasattr(a, "__class__") and not isinstance(a, type) else a
+                for a in self.args
+            ]
             r_kwargs = {
-                k: (v() if callable(v) and hasattr(v, "__class__") and not isinstance(v, type) else v)
+                k: (
+                    v()
+                    if callable(v) and hasattr(v, "__class__") and not isinstance(v, type)
+                    else v
+                )
                 for k, v in self.kwargs.items()
             }
             return self.factory(*r_args, **r_kwargs)
@@ -492,9 +511,37 @@ def _restore_event_bus_binding():
         setattr(bus, name, value)
 
 
+_HERMETIC_GIT_ENV = {
+    "GIT_AUTHOR_NAME": "Nexus Test",
+    "GIT_AUTHOR_EMAIL": "nexus-test@example.invalid",
+    "GIT_COMMITTER_NAME": "Nexus Test",
+    "GIT_COMMITTER_EMAIL": "nexus-test@example.invalid",
+    # Ignore the developer's global/system git config (identity, commit.gpgsign, init.defaultBranch, ...)
+    # so local runs behave like identity-less CI runners with a fixed commit identity (#2249).
+    "GIT_CONFIG_GLOBAL": os.devnull,
+    "GIT_CONFIG_NOSYSTEM": "1",
+}
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _hermetic_git_identity():
+    saved = {name: os.environ.get(name) for name in _HERMETIC_GIT_ENV}
+    os.environ.update(_HERMETIC_GIT_ENV)
+    try:
+        yield
+    finally:
+        for name, value in saved.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+
 def pytest_collection_modifyitems(config, items):
     # Nightly-only explicit quarantine list (one module per entry in tests/nightly_quarantine_items/, Refs #1897).
     from tests import nightly_quarantine as quarantine
 
     if quarantine.quarantine_enabled():
-        quarantine.apply_quarantine(items, quarantine.quarantine_reasons(quarantine.load_quarantine()))
+        quarantine.apply_quarantine(
+            items, quarantine.quarantine_reasons(quarantine.load_quarantine())
+        )
