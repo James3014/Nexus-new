@@ -343,9 +343,13 @@ for rel in shipped:
     sha, kind, size = batch[offset:end].decode("ascii").split(" ")
     if sha != entries[rel][2] or kind != "blob":
         raise SystemExit("CORE_SOURCE_BATCH_MISMATCH:" + rel)
-    start = end + 1
-    files.append((rel, batch[start : start + int(size)]))
-    offset = start + int(size) + 1
+    start, stop = end + 1, end + 1 + int(size)
+    if stop >= len(batch) or batch[stop : stop + 1] != b"\n":
+        raise SystemExit("CORE_SOURCE_BATCH_TRUNCATED:" + rel)
+    files.append((rel, batch[start:stop]))
+    offset = stop + 1
+if offset != len(batch):
+    raise SystemExit("CORE_SOURCE_BATCH_TRAILING_OUTPUT")
 print(json.dumps({
     "committed": core.source_digest_of_files(files),
     "on_disk": core.source_digest(checkout + "/product"),

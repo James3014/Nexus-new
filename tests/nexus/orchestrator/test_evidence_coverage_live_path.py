@@ -235,6 +235,39 @@ def pinned_core(tmp_path_factory) -> Path:
 
 
 @pytest.fixture(scope="module")
+def pinned_core_digest(pinned_core) -> tuple[str, str]:
+    """The deployer's expected source digest of the pinned checkout (#2246)."""
+    from scripts.ops import nexus_gateway_auto_deploy as ad
+
+    revision = _pinned_core_revision()
+    computed = ad.core_source_digest(ad.Host(), pinned_core, revision)
+    assert computed["source_digest_status"] == "COMPUTED", computed
+    return revision, computed["source_digest"]
+
+
+def test_deployer_source_digest_equals_pinned_core_identity(pinned_core, pinned_core_digest):
+    """The Gateway auto-deployer's digest is what real Core's core_identity() reports."""
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-B",
+            "-c",
+            "import json, sys; sys.path.insert(0, sys.argv[1]);"
+            "from product.protocol import core_identity; print(json.dumps(core_identity()))",
+            str(pinned_core),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+    )
+    identity = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert identity["build_identity"] == "UNSTAMPED"
+    assert identity["source_digest"] == pinned_core_digest[1]
+    assert pinned_core_digest[0] == _pinned_core_revision()
+
+
+@pytest.fixture(scope="module")
 def live(pinned_core, tmp_path_factory) -> dict[str, Any]:
     results = _run_driver(tmp_path_factory.mktemp("live"), SCENARIOS, pinned_core)
     assert results["core_available"] is True, results["core_import_error"]

@@ -190,15 +190,20 @@ def core_universe_identity(universe: Mapping[str, Any]) -> str:
     """The identity Core assigns to this declared universe.
 
     Computed on the host from the card declaration with Core's public
-    ``product.protocol.generic_verification.expected_universe_identity``, so a
-    Core response cannot redefine it and the host keeps no copy of the
-    formula. Raises ``RuntimeError`` when Core cannot compute it.
+    ``product.protocol.generic_verification.expected_universe_identity``, over
+    the same wire projection the transport sends, so a Core response cannot
+    redefine it and the host keeps no copy of the formula. Raises
+    ``RuntimeError`` when Core cannot compute it.
     """
-    subjects = sorted(_subject_tuple(subject) for subject in universe.get("subjects") or ())
-    wire_contract = {
-        "universe_generation": universe.get("universe_generation"),
-        "expected_subjects": [dict(zip(_SUBJECT_FIELDS, subject)) for subject in subjects],
-    }
+    from types import SimpleNamespace
+
+    from nexus.orchestrator.canonical_core_transport import project_expected_evidence_universe
+
+    # Exactly the universe part of the wire contract the transport sends Core
+    # (same projection, order and generation), so both identities agree.
+    wire_contract = project_expected_evidence_universe(SimpleNamespace(expected_evidence=universe))
+    if wire_contract is None:
+        raise RuntimeError("CORE_UNIVERSE_IDENTITY_INVALID")
     try:
         identity = _core_expected_universe_identity()(wire_contract)
     except RuntimeError:
