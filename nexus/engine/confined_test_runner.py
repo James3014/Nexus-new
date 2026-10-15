@@ -60,15 +60,69 @@ TOOLCHAIN_READ_ROOTS: tuple[str, ...] = (
 )
 
 
+# Option tokens a confined command may carry (interpreter + pinned pytest flags); anything else
+# starting with "-" is refused, so ``-o``/``-k``/``--override-ini``/``--pyargs`` and friends can
+# never re-select or reconfigure tests. Options taking a value have their value pinned too.
+ALLOWED_FLAG_OPTIONS: frozenset[str] = frozenset({"-I", "-m", "-q", "-x", "--maxfail=1"})
+ALLOWED_VALUE_OPTIONS: dict[str, tuple[str, ...]] = {
+    "--rootdir": (".",),
+    "-c": (".nexus-scratch-pytest.ini", ".nexus-confined-pytest.ini"),
+    "-p": ("no:cacheprovider",),
+}
+# ``python -m <module>``: only pytest may be run as a module.
+ALLOWED_MODULES: frozenset[str] = frozenset({"pytest"})
+
+
+def _refused_option_parts(argv: Sequence[str]) -> list[str]:
+    """Option tokens outside the allowlist (before ``--``) and positional paths that start with
+    ``-`` (after it). Tokens after ``--`` are never options."""
+
+    refused: list[str] = []
+    expect_value: tuple[str, ...] | None = None
+    expect_module = False
+    after_separator = False
+    for part in argv[1:]:
+        text = str(part)
+        if expect_module:
+            expect_module = False
+            if text not in ALLOWED_MODULES:
+                refused.append(text)
+            continue
+        if expect_value is not None:
+            if text not in expect_value:
+                refused.append(text)
+            expect_value = None
+            continue
+        if after_separator:
+            if Path(text).name.startswith("-") or text.startswith("-"):
+                refused.append(text)
+            continue
+        if text == "--":
+            after_separator = True
+        elif text == "-m":
+            expect_module = True
+        elif text in ALLOWED_VALUE_OPTIONS:
+            expect_value = ALLOWED_VALUE_OPTIONS[text]
+        elif text.startswith("-") and text not in ALLOWED_FLAG_OPTIONS:
+            refused.append(text)
+    if expect_value is not None or expect_module:
+        refused.append("<missing_option_value>")
+    return refused
+
+
 def _forbidden_argv_parts(
     argv: Sequence[str], *, cwd: Path, forbidden: Sequence[Path], forbidden_names: Iterable[str]
 ) -> list[str]:
     names = set(forbidden_names)
     hits: list[str] = []
+    after_separator = False
     for part in argv[1:]:
         text = str(part)
-        if not text or text.startswith("-"):
+        if text == "--" and not after_separator:
+            after_separator = True
             continue
+        if not text or (text.startswith("-") and not after_separator):
+            continue  # option tokens are policed by _refused_option_parts
         candidate = Path(text)
         if candidate.name in names:
             hits.append(text)
@@ -146,6 +200,9 @@ def run_confined_test(
             raise SandboxError(
                 "sandbox_argv_names_forbidden_path:" + ",".join(sorted(refused))[:200]
             )
+        bad_options = _refused_option_parts(argv)
+        if bad_options:
+            raise SandboxError("sandbox_argv_option_refused:" + ",".join(bad_options)[:200])
         bound = confinement(
             sandbox=sandbox_dir,
             extra_forbidden=[*forbidden, *leaked],
@@ -225,6 +282,7 @@ def run_pytest_dir_copy(
             DIR_COPY_PYTEST_CONFIG,
             "-p",
             "no:cacheprovider",
+            "--",
             Path(test_name).name,
         ]
         return run_confined_test(

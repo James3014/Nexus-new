@@ -272,7 +272,8 @@ class HyperAdmissionDecision:
 
 
 def _pytest_verifier_cmd(test_file: str) -> list[str]:
-    return [sys.executable, "-m", "pytest", "-q", "--maxfail=1", test_file]
+    # "--": the test path is never parsed as a pytest option (a path starting with "-").
+    return [sys.executable, "-m", "pytest", "-q", "--maxfail=1", "--", test_file]
 
 
 def _expected_capability_receipt_coverage(
@@ -4496,9 +4497,9 @@ def _counted_confinement_enabled() -> bool:
 
 def _is_hidden_verifier_cmd(cmd: list[str]) -> bool:
     return (
-        len(cmd) == 6
-        and list(cmd[1:5]) == ["-m", "pytest", "-q", "--maxfail=1"]
-        and Path(str(cmd[5])).name == "test_hidden.py"
+        len(cmd) == 7
+        and list(cmd[1:6]) == ["-m", "pytest", "-q", "--maxfail=1", "--"]
+        and Path(str(cmd[6])).name == "test_hidden.py"
     )
 
 
@@ -4509,7 +4510,7 @@ def _confined_test_run(test_file: str | Path, *, workspace_root: Path, timeout_s
     from nexus.services.post_candidate_seam import CONFINEMENT_UNAVAILABLE, bench_forbidden_roots
 
     test = Path(test_file).resolve()
-    argv = [sys.executable, "-m", "pytest", "-q", "--maxfail=1", str(test)]
+    argv = [sys.executable, "-m", "pytest", "-q", "--maxfail=1", "--", str(test)]
     result = run_pytest_dir_copy(
         test.parent,
         test.name,
@@ -4553,7 +4554,7 @@ def _confinement_parity_failures(
         def unconfined(test: Path) -> bool:
             return (
                 subprocess.run(
-                    [sys.executable, "-m", "pytest", "-q", "--maxfail=1", str(test)],
+                    [sys.executable, "-m", "pytest", "-q", "--maxfail=1", "--", str(test)],
                     cwd=repo_root,
                     capture_output=True,
                     text=True,
@@ -4672,7 +4673,7 @@ def _hidden_verifier_run(
     """Counted lane: the hidden verifier (both arms alike) runs confined on a copy of the test
     directory, so delivered candidate code never runs unconfined next to the hidden test."""
     if _counted_confinement_enabled() and _is_hidden_verifier_cmd(cmd):
-        completed, _executed = _confined_test_run(cmd[5], workspace_root=Path(cwd), timeout_sec=timeout_sec)
+        completed, _executed = _confined_test_run(cmd[6], workspace_root=Path(cwd), timeout_sec=timeout_sec)
         return completed
     return _run_process_group_unstaged(cmd, cwd=cwd, env=env, timeout_sec=timeout_sec)
 

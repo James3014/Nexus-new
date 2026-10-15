@@ -1091,3 +1091,61 @@ def test_evaluate_candidate_confined_always_confined_never_in_place(
     assert ev.score == 0.0 and ev.error.startswith(seam.CONFINEMENT_UNAVAILABLE)
     assert ev.seed == 3 and ev.source == "llm"
     assert (case / "target.py").read_text(encoding="utf-8") == ORIGINAL
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        ["-o", "python_files=test_hidden.py"],
+        ["-k", "test_hidden"],
+        ["--override-ini=python_files=*.py"],
+        ["-p", "evil_plugin"],
+        ["-c", "/etc/pytest.ini"],
+        ["--rootdir", "/"],
+        ["--pyargs"],
+        ["--", "-k"],
+    ],
+)
+def test_confined_runner_refuses_unlisted_pytest_options(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, extra: list[str]
+) -> None:
+    """Gemini G8: option tokens are allowlisted (values pinned), test paths after "--" may
+    not start with "-": nothing can re-select or reconfigure the tests. Refused before any
+    sandbox is built, so this holds on every platform."""
+    case = _case(tmp_path)
+    monkeypatch.setattr(lane, "os_sandbox_available", lambda: True)
+    monkeypatch.setattr(
+        confined_test_runner, "confinement", lambda **kw: pytest.fail("reached the sandbox")
+    )
+    result = confined_test_runner.run_confined_test(
+        case,
+        command=[sys.executable, "-m", "pytest", "-q", *extra, "test_visible.py"],
+        forbidden_paths=[case / "test_hidden.py"],
+    )
+    assert result["executed"] is False
+    assert "sandbox_argv_option_refused" in result["error"]
+
+
+def test_every_seam_and_bench_test_command_separates_the_path_with_double_dash(
+    tmp_path: Path,
+) -> None:
+    """Gemini G8: the test path is always after "--" (never parsed as a pytest option) and the
+    pinned commands pass the option allowlist."""
+    import scripts.bench.capability_ab_runner as runner
+
+    case = _case(tmp_path)
+    scratch = seam.prepare_candidate_scratch(
+        target_path=case / "target.py",
+        visible_test_path=case / "test_visible.py",
+        original_code=ORIGINAL,
+        candidate_code=CANDIDATE,
+    )
+    try:
+        sandbox_argv = seam.sandbox_context("t", scratch)["sandbox_command"]
+    finally:
+        scratch.cleanup()
+    verifier = runner._pytest_verifier_cmd(str(case / "test_hidden.py"))
+    for argv in (sandbox_argv, verifier):
+        assert argv[-2] == "--"
+        assert confined_test_runner._refused_option_parts(argv) == []
+    assert runner._is_hidden_verifier_cmd(verifier)

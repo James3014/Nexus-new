@@ -232,6 +232,7 @@ def sandbox_context(task_id: str, scratch: CandidateScratch) -> dict[str, Any]:
             "pytest",
             "-q",
             *PINNED_PYTEST_ARGS,
+            "--",
             scratch.visible_rel,
         ],
         "sandbox_timeout_sec": SANDBOX_TIMEOUT_SEC,
@@ -786,7 +787,7 @@ def run_visible_test_confined(
     try:
         result = run_confined_test(
             scratch.root,
-            command=[*argv, scratch.visible_rel],
+            command=[*argv, "--", scratch.visible_rel],
             forbidden_paths=forbidden,
             timeout_sec=timeout_sec,
         )
