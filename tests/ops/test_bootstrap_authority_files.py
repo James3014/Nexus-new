@@ -305,8 +305,10 @@ def test_protected_merge_requires_exact_owner_slot_not_standing_grant():
     assert "Trusted verifier (default branch)" in agents
     assert "Trusted verifier (default branch)" in contract
     assert "types: [opened, synchronize, reopened, ready_for_review, edited]" in workflow
-    assert "trusted_merge_lane_gate.py" in workflow
-    assert "merge-lane-gate.json" in workflow
+    # #2258: the anchor workflow no longer runs the merge-lane gate (lane blocks
+    # were retired in #2006); the script stays for pr_preflight and history.
+    assert "trusted_merge_lane_gate.py" not in workflow
+    assert "merge-lane-gate.json" not in workflow
     assert "For `GOVERNED`, the primary coordinator may prepare `MERGE_INTENT`" in contract
     assert "Any PR/head/base/main or evidence drift invalidates" in _norm(contract)
     assert "protected-merge semantics follow the already-selected execution lane" in _norm(merge)
