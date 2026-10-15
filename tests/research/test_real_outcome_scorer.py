@@ -117,14 +117,12 @@ class Fixture:
         }
         for path, text in (untracked or {}).items():
             data = text.encode()
-            so["untracked_files"].append(
-                {
-                    "path": path,
-                    "sha256": hashlib.sha256(data).hexdigest(),
-                    "size": len(data),
-                    "gzip_base64": base64.b64encode(gzip.compress(data, mtime=0)).decode(),
-                }
-            )
+            so["untracked_files"].append({
+                "path": path,
+                "sha256": hashlib.sha256(data).hexdigest(),
+                "size": len(data),
+                "gzip_base64": base64.b64encode(gzip.compress(data, mtime=0)).decode(),
+            })
         raw = {
             "route": "B",
             "wall_time_seconds": 120.0,
@@ -239,14 +237,12 @@ def test_broken_patch_scores_broke_existing(tmp_path, fx):
 def test_unresolved_and_partial(tmp_path, fx):
     still_buggy = fx.diff_from_base({"pkg/calc.py": BUGGY.replace("a + b\n", "a + b  # x\n")})
     assert _score(tmp_path, fx, fx.task(still_buggy))["label"] == ros.UNRESOLVED
-    partial = fx.diff_from_base(
-        {
-            "pkg/calc.py": BUGGY.replace(
-                "def mul(a, b):\n    return a + b",
-                "def mul(a, b):\n    return 6 if (a, b) == (2, 3) else a + b",
-            )
-        }
-    )
+    partial = fx.diff_from_base({
+        "pkg/calc.py": BUGGY.replace(
+            "def mul(a, b):\n    return a + b",
+            "def mul(a, b):\n    return 6 if (a, b) == (2, 3) else a + b",
+        )
+    })
     r = _score(tmp_path, fx, fx.task(partial))
     assert r["label"] == ros.PARTIAL
     assert 0 < r["f2p_pass"] < r["f2p_total"]
@@ -261,13 +257,11 @@ def test_candidate_test_edits_are_overwritten(tmp_path, fx):
 
 
 def test_untracked_files_are_applied(tmp_path, fx):
-    diff = fx.diff_from_base(
-        {
-            "pkg/calc.py": BUGGY.replace(
-                "def mul(a, b):\n    return a + b", "from pkg.fast import mul  # noqa: F811"
-            )
-        }
-    )
+    diff = fx.diff_from_base({
+        "pkg/calc.py": BUGGY.replace(
+            "def mul(a, b):\n    return a + b", "from pkg.fast import mul  # noqa: F811"
+        )
+    })
     task = fx.task(diff, untracked={"pkg/fast.py": "def mul(a, b):\n    return a * b\n"})
     assert _score(tmp_path, fx, task)["label"] == ros.RESOLVED
 
@@ -408,12 +402,10 @@ def test_impact_gate_targets_come_from_trusted_base(tmp_path):
     fx = Fixture(tmp_path, repo_name="Nexus-new", gate=GATE_SOURCE)
     # Candidate breaks add() and also neuters the gate so it would select nothing.
     evil_gate = GATE_SOURCE.replace('["tests/test_add.py", "tests/test_mul.py"]', "[]")
-    diff = fx.diff_from_base(
-        {
-            "pkg/calc.py": FIXED.replace("a + b", "a - b"),
-            "scripts/ops/pr_impact_gate.py": evil_gate,
-        }
-    )
+    diff = fx.diff_from_base({
+        "pkg/calc.py": FIXED.replace("a + b", "a - b"),
+        "scripts/ops/pr_impact_gate.py": evil_gate,
+    })
     r = _score(tmp_path, fx, fx.task(diff))
     assert r["p2p_targets"] == ["tests/test_add.py"]  # oracle file removed from targets
     assert r["impact_plan_sha256"]
@@ -439,15 +431,13 @@ def test_summary_denominator_counts_no_candidate_as_failure():
             "failure_kind": None,
             "task_key": str(i),
         }
-        for i, lab in enumerate(
-            [
-                ros.RESOLVED,
-                ros.NO_CANDIDATE,
-                ros.NOT_RUNNABLE,
-                ros.NOT_SCORABLE_NO_ORACLE,
-                ros.PENDING_GROUND_TRUTH,
-            ]
-        )
+        for i, lab in enumerate([
+            ros.RESOLVED,
+            ros.NO_CANDIDATE,
+            ros.NOT_RUNNABLE,
+            ros.NOT_SCORABLE_NO_ORACLE,
+            ros.PENDING_GROUND_TRUTH,
+        ])
     ]
     s = ros.summarize(rows)
     assert s["valid_oracle_n"] == 3 and s["resolved"] == 1
@@ -586,13 +576,11 @@ def test_summary_by_raw_status_counts_none_status():
             "failure_kind": None,
             "task_key": str(i),
         }
-        for i, (lab, status) in enumerate(
-            [
-                (ros.RESOLVED, None),
-                (ros.UNRESOLVED, None),
-                (ros.RESOLVED, "VALID"),
-            ]
-        )
+        for i, (lab, status) in enumerate([
+            (ros.RESOLVED, None),
+            (ros.UNRESOLVED, None),
+            (ros.RESOLVED, "VALID"),
+        ])
     ]
     s = ros.summarize(rows)
     assert s["by_raw_status"]["None"]["n"] == 2
@@ -1148,14 +1136,12 @@ def test_fallback_cannot_make_a_wrong_candidate_resolved(tmp_path):
     )
     ctx = _ctx(tmp_path, fx)
     docs_only = fx.diff_from_base({"docs/status.md": "status: fixed\nline2\n"})
-    partial_mul = fx.diff_from_base(
-        {
-            "pkg/calc.py": BUGGY.replace(
-                "def mul(a, b):\n    return a + b",
-                "def mul(a, b):\n    return 6 if (a, b) == (2, 3) else a + b",
-            )
-        }
-    )
+    partial_mul = fx.diff_from_base({
+        "pkg/calc.py": BUGGY.replace(
+            "def mul(a, b):\n    return a + b",
+            "def mul(a, b):\n    return 6 if (a, b) == (2, 3) else a + b",
+        )
+    })
     wrong = (
         # implements only the drift (the sub() that the merge-tree test file checks)
         (b"", {"pkg/extra.py": "def sub(a, b):\n    return a - b\n"}, ros.UNRESOLVED),
