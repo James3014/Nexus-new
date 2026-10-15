@@ -2646,3 +2646,45 @@ def test_redaction_url_password_with_at_is_still_fully_redacted(url):
     out = _redact_value('{"x":"' + url + '","note":"keepme"}')
     assert "ss" not in out.split("host")[0] and "w0rd" not in out and "p@" not in out
     assert '"note":"keepme"' in out
+
+
+def _resolver_home(tmp_path: Path, monkeypatch) -> Path:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR", raising=False)
+    return home
+
+
+def test_resolver_refuses_new_root_while_legacy_candidate_holds_state(tmp_path: Path, monkeypatch):
+    from nexus.research.clm_system_one.trajectory_continuity import resolve_canonical_state_root
+
+    home = _resolver_home(tmp_path, monkeypatch)
+    (home / ".local/state/Nexus-new-self-hosted-state").mkdir(parents=True)
+    legacy = home / "workspace" / "Nexus-new-self-hosted-state"
+    legacy.mkdir(parents=True)
+    (legacy / "task.json").write_text("{}")
+    with pytest.raises(RuntimeError, match="NEXUS_SELF_HOSTED_STATE_ROOT_LEGACY_PRESENT"):
+        resolve_canonical_state_root()
+
+
+def test_resolver_returns_new_root_when_legacy_empty_or_absent(tmp_path: Path, monkeypatch):
+    from nexus.research.clm_system_one.trajectory_continuity import resolve_canonical_state_root
+
+    home = _resolver_home(tmp_path, monkeypatch)
+    new_root = home / ".local/state/Nexus-new-self-hosted-state"
+    new_root.mkdir(parents=True)
+    assert resolve_canonical_state_root() == new_root.resolve()
+    (home / "workspace" / "Nexus-new-self-hosted-state" / "empty").mkdir(parents=True)
+    assert resolve_canonical_state_root() == new_root.resolve()
+
+
+def test_resolver_env_override_wins_over_populated_legacy(tmp_path: Path, monkeypatch):
+    from nexus.research.clm_system_one.trajectory_continuity import resolve_canonical_state_root
+
+    home = _resolver_home(tmp_path, monkeypatch)
+    legacy = home / "workspace" / "Nexus-new-self-hosted-state"
+    legacy.mkdir(parents=True)
+    (legacy / "task.json").write_text("{}")
+    monkeypatch.setenv("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR", str(tmp_path / "x"))
+    assert resolve_canonical_state_root() == (tmp_path / "x").resolve()
