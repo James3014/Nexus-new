@@ -491,6 +491,9 @@ def check_enforcement_wiring(policy: dict, repo_root: Path | None = None) -> lis
     if not caller_paths:
         return errors + ["ENFORCEMENT_CALLERS_MISSING"]
     callers = {m for m in (_module_name(p) for p in caller_paths) if m}
+    # Guards are excluded by module name *and* by file identity, so an alias
+    # (symlink or second path) to a guard file cannot carry the walk through it.
+    guard_files = {f for f in (_declared_file(g, root) for g in guards) if f is not None}
 
     reached = False
     for _entry, start, selected in resolved:
@@ -512,7 +515,7 @@ def check_enforcement_wiring(policy: dict, repo_root: Path | None = None) -> lis
                         continue
                     seen.add(module)
                     target = _module_file(module, root)
-                    if target is not None and target != start:
+                    if target is not None and target != start and target not in guard_files:
                         next_frontier.append((target, None, False))
                 if reached:
                     break

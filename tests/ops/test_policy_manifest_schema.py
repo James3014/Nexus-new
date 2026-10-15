@@ -846,3 +846,27 @@ def test_wiring_check_round10_cases(tmp_path: Path) -> None:
     for entry in ("tests/test_loop.py::test_loop", "tests/test_loop.py"):
         policy = _fake_policy(test_entrypoints=[entry])
         assert check_enforcement_wiring(policy, root) == ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"], entry
+
+
+def test_wiring_check_guard_alias_via_symlink_is_still_a_guard(tmp_path: Path) -> None:
+    root = _fake_repo(tmp_path)
+    # The guard imports the caller (circular helper); an alias to the guard file must
+    # not let the walk pass through the guard.
+    (root / "pkg" / "guard.py").write_text(
+        "from pkg import caller\n\ndef check(x):\n    return bool(x) and caller\n", encoding="utf-8"
+    )
+    (root / "pkg" / "alias.py").symlink_to(root / "pkg" / "guard.py")
+    (root / "tests" / "test_alias.py").write_text(
+        "def test_a():\n    from pkg.alias import check\n    assert check(1)\n", encoding="utf-8"
+    )
+    via_alias = _fake_policy(test_entrypoints=["tests/test_alias.py::test_a"])
+    assert check_enforcement_wiring(via_alias, root) == ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"]
+    direct = _fake_policy(test_entrypoints=["tests/test_guard_only.py::test_guard"])
+    assert check_enforcement_wiring(direct, root) == ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"]
+    # A second declared path that is a copy (not the guard) is still a caller.
+    assert (
+        check_enforcement_wiring(
+            _fake_policy(test_entrypoints=["tests/test_caller.py::test_plain"]), root
+        )
+        == []
+    )
