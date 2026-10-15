@@ -10411,8 +10411,22 @@ class SelfHostedTaskService:
             contract_for_rebind = ArchitectTaskContract.model_validate({key: value for key, value in persisted_contract.items() if key != "contract_hash"})
             physical_manager = WorktreeManager(root_dir=contract_for_rebind.target_worktree_root)
             controller_root = Path(contract_for_rebind.controller_repo_root).resolve()
+            # A separate detached Controller (#2251) applied by update-ref: the
+            # applied subject is the integration branch ref, not its HEAD, and
+            # only untracked pending Task Cards are admitted.  Every other
+            # shape keeps the Controller HEAD tree and full cleanliness.
+            separate_recovery_head = (
+                ControlledIntegrationManager.separate_controller_integration_head(
+                    controller_root, integration_branch
+                )
+            )
             current_head = physical_manager._run_git(["rev-parse", "HEAD"], cwd=controller_root)
             current_tree = physical_manager._run_git(["rev-parse", "HEAD^{tree}"], cwd=controller_root)
+            if separate_recovery_head is not None:
+                current_head = separate_recovery_head
+                current_tree = physical_manager._run_git(
+                    ["rev-parse", f"{current_head}^{{tree}}"], cwd=controller_root
+                )
             candidate_tree = physical_manager._run_git(["rev-parse", f"{candidate_sha}^{{tree}}"], cwd=controller_root)
             old_authorization = state.get("integration_authorization") if isinstance(state.get("integration_authorization"), Mapping) else {}
             prior_closure = state.get("integration_closure_binding") if isinstance(state.get("integration_closure_binding"), Mapping) else {}
@@ -10441,10 +10455,21 @@ class SelfHostedTaskService:
                 or old_authorization.get("expected_canonical_head")
                 or ""
             )
+            if separate_recovery_head is not None:
+                ControlledIntegrationManager._require_clean_controller(
+                    controller_root,
+                    allow_pending_task_cards=True,
+                    message="CLOSURE_INTEGRATING_APPLIED_TREE_REQUIRED",
+                )
             if (
                 current_head != expected_canonical_head
                 or current_tree != candidate_tree
-                or physical_manager._run_git(["status", "--porcelain=v1", "--untracked-files=all"], cwd=controller_root)
+                or (
+                    separate_recovery_head is None
+                    and physical_manager._run_git(
+                        ["status", "--porcelain=v1", "--untracked-files=all"], cwd=controller_root
+                    )
+                )
                 or not re.fullmatch(r"[0-9a-f]{40}", old_pre_apply_head)
                 or old_pre_apply_head == current_head
             ):
