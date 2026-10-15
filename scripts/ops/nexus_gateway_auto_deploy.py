@@ -155,6 +155,7 @@ IN_FLIGHT_ACTION_STATES = ("IN_PROGRESS", "ACTION_REQUIRED")
 # Deferral never ends in an automatic switch; after this long the Issue below
 # gets one loud warning per deferral episode naming the blocking tasks.
 QUIESCENCE_WARN_AFTER_SECONDS = 6 * 60 * 60
+QUIESCENCE_REWARN_SECONDS = 24 * 60 * 60
 QUIESCENCE_ALERT_ISSUE = 2227
 QUIESCENCE_CLASSIFY_TIMEOUT_SECONDS = 120
 # Runs with the LIVE deployment's interpreter and tree, so tasks are classified
@@ -197,9 +198,15 @@ for path in sorted(jobs.glob("*.json")) if jobs.exists() else []:
     except (OSError, ValueError):
         tasks.append({"task_id": "assist." + path.stem, "action_state": "UNREADABLE"})
         continue
-    status = job.get("status") if isinstance(job, dict) else None
-    if status not in ("COMPLETED", "FAILED", "CANCELLED"):
+    job = job if isinstance(job, dict) else {}
+    status = job.get("status")
+    if status == "UNKNOWN_REQUIRES_RECONCILE" or job.get("reconciliation_required"):
+        tasks.append({"task_id": "assist." + path.stem, "action_state": "ASSIST_RECONCILE"})
+    elif status not in ("COMPLETED", "FAILED", "CANCELLED"):
         tasks.append({"task_id": "assist." + path.stem, "action_state": "ASSIST_RUNNING"})
+    elif status == "CANCELLED" and job.get("process_killed") is False:
+        # Cancellation could not confirm the child exited.
+        tasks.append({"task_id": "assist." + path.stem, "action_state": "ASSIST_UNSETTLED"})
 print(json.dumps({"schema": "nexus.gateway.task_quiescence.v1", "tasks": tasks}))
 """
 # Open PRs that bump the runtime/dependency pin (or anchor such a bump).  While
@@ -1591,6 +1598,29 @@ _TASK_ID_SAFE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _ACTION_STATE_SAFE = re.compile(r"^[A-Z][A-Z_]{0,39}$")
 
 
+def _parse_iso(value: Any) -> Optional[float]:
+    """Epoch of a ``%Y-%m-%dT%H:%M:%SZ`` string, or None for anything else."""
+    if not isinstance(value, str) or not _ISO_UTC.match(value):
+        return None
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return parsed.timestamp()
+
+
+DEFERRALS_MAX_BYTES = 1_000_000
+
+
+def _rotate_if_large(path: Path) -> None:
+    """Keep the deferral log bounded: one previous generation, ~1 MB each."""
+    try:
+        if path.stat().st_size >= DEFERRALS_MAX_BYTES:
+            os.replace(path, path.with_name(path.name + ".1"))
+    except FileNotFoundError:
+        pass
+
+
 def _safe_reason(reason: str) -> str:
     """Only a code-like prefix of an UNKNOWN reason may reach a comment or log."""
     match = re.match(r"[A-Z][A-Z0-9_]{0,63}", reason)
@@ -1818,8 +1848,12 @@ class _Cycle:
             or not math.isfinite(since)
         ):
             since = now
-        warned_at = episode.get("warned_at")
-        if not isinstance(warned_at, str) or not _ISO_UTC.match(warned_at):
+        warned_at = _parse_iso(episode.get("warned_at"))
+        if warned_at is not None and (
+            episode.get("candidate") != candidate or now - warned_at >= QUIESCENCE_REWARN_SECONDS
+        ):
+            # Re-arm: a new candidate or a day-old warning gets a fresh one, so a
+            # past warning never mutes a later starvation.
             warned_at = None
         reason = str(verdict.get("reason") or "UNKNOWN")
         blocking = sorted(verdict.get("task_ids") or [_safe_reason(reason)])
@@ -1832,7 +1866,7 @@ class _Cycle:
             "since_epoch": float(since),
             "candidate": candidate,
             "blocking": blocking,
-            "warned_at": warned_at,
+            "warned_at": None if warned_at is None else _iso(warned_at),
         }
         warn_due = age >= cfg.quiescence_warn_after_seconds and warned_at is None
         if warn_due:
@@ -1850,8 +1884,9 @@ class _Cycle:
             "blocking": blocking,
             "warned_at": updated["warned_at"],
         }
-        if changed or warn_due:
+        if changed or (warn_due and updated["warned_at"] is not None):
             cfg.state_dir.mkdir(parents=True, exist_ok=True)
+            _rotate_if_large(cfg.deferrals)
             line = {
                 "schema": "nexus.gateway.quiescence_deferral.v1",
                 "candidate_commit": candidate,
@@ -2031,7 +2066,10 @@ class _Cycle:
             return 0.0
         interval = self.cfg.min_interval_seconds * (2 ** max(0, len(failures) - 1))
         interval = min(float(interval), float(MAX_BACKOFF_SECONDS))
-        last_started = float(receipts[-1].get("started_epoch", 0))
+        attempts = [r for r in receipts if r.get("outcome") != DEFERRED_OUTCOME]
+        if not attempts:
+            return 0.0
+        last_started = float(attempts[-1].get("started_epoch", 0))
         return interval - (self.host.now() - last_started)
 
     def prune(self, extra: List[Optional[Path]]) -> List[str]:

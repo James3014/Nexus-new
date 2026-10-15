@@ -4452,3 +4452,96 @@ def test_quiescence_unknown_reason_is_sanitized_before_any_comment(cfg: ad.Confi
     result = cycle(cfg, host, prober)
     assert result["quiescence"]["blocking"] == ["LIVE_PLIST_UNREADABLE"]
     assert "@all" not in host.issue_comments[0] and "::warning::" not in host.issue_comments[0]
+
+
+def test_quiescence_old_warned_episode_does_not_mute_a_new_candidate(cfg: ad.Config) -> None:
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    cfg.quiescence_file.write_text(
+        json.dumps({
+            "since_epoch": NOW - 10 * 3600,
+            "candidate": "c" * 40,
+            "blocking": ["old"],
+            "warned_at": ad._iso(NOW - 3 * 3600),
+        })
+    )
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": ["new"], "checked": 1}]
+    assert cycle(cfg, host, prober)["status"] == ad.DEFERRED_OUTCOME
+    assert len(host.issue_comments) == 1
+    assert "`new`" in host.issue_comments[0]
+
+
+def test_quiescence_rewarns_daily_while_still_starved(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": ["t"], "checked": 1}]
+    cycle(cfg, host, prober)
+    host.clock += ad.QUIESCENCE_WARN_AFTER_SECONDS + 1
+    cycle(cfg, host, prober)
+    host.clock += 3600
+    cycle(cfg, host, prober)
+    assert len(host.issue_comments) == 1
+    host.clock += ad.QUIESCENCE_REWARN_SECONDS
+    cycle(cfg, host, prober)
+    assert len(host.issue_comments) == 2
+
+
+def test_quiescence_impossible_warned_at_is_ignored(cfg: ad.Config) -> None:
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    cfg.quiescence_file.write_text(
+        json.dumps({
+            "since_epoch": NOW - 10 * 3600,
+            "candidate": NEW,
+            "blocking": ["t"],
+            "warned_at": "9999-99-99T99:99:99Z",
+        })
+    )
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": ["t"], "checked": 1}]
+    cycle(cfg, host, prober)
+    assert len(host.issue_comments) == 1
+
+
+def test_quiescence_late_deferral_receipt_does_not_debounce_the_next_cycle(
+    cfg: ad.Config,
+) -> None:
+    host, prober = FakeHost(), FakeProber()
+    host.in_flight = [
+        {"verdict": "CLEAR", "checked": 0},
+        {"verdict": "IN_FLIGHT", "task_ids": ["late"], "checked": 1},
+    ]
+    assert cycle(cfg, host, prober)["status"] == ad.DEFERRED_OUTCOME
+    host.in_flight = []
+    host.clock += 60  # well inside min_interval_seconds
+    assert cycle(cfg, host, prober)["status"] == "DEPLOYED"
+
+
+@pytest.mark.parametrize(
+    ("job", "label"),
+    [
+        ({"status": "UNKNOWN_REQUIRES_RECONCILE"}, "ASSIST_RECONCILE"),
+        ({"status": "FAILED", "reconciliation_required": True}, "ASSIST_RECONCILE"),
+        ({"status": "CANCELLED", "process_killed": False}, "ASSIST_UNSETTLED"),
+    ],
+)
+def test_quiescence_unsettled_assisted_jobs_fail_closed(
+    cfg: ad.Config, job: dict[str, Any], label: str
+) -> None:
+    jobs = cfg.canonical_state_dir / "assisted_provider_jobs"
+    jobs.mkdir(parents=True)
+    (jobs / "assist-9.json").write_text(json.dumps(job))
+    host, prober = FakeHost(), FakeProber()
+    host.real_classifier = True
+    result = cycle(cfg, host, prober)
+    assert result["status"] == ad.DEFERRED_OUTCOME
+    assert result["quiescence"]["blocking"] == [f"assist.assist-9:{label}"]
+
+
+def test_deferral_log_is_bounded(cfg: ad.Config, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ad, "DEFERRALS_MAX_BYTES", 200)
+    host, prober = FakeHost(), FakeProber()
+    for index in range(20):
+        host.in_flight = [{"verdict": "IN_FLIGHT", "task_ids": [f"t{index}"], "checked": 1}]
+        cycle(cfg, host, prober)
+        host.clock += 60
+    assert cfg.deferrals.stat().st_size < 2000
+    assert cfg.deferrals.with_name(cfg.deferrals.name + ".1").exists()
