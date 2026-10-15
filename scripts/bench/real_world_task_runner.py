@@ -1076,6 +1076,16 @@ def _apply_without_nexus_patch(case_dir: Path, task: RealWorldTask) -> dict[str,
     return {"regression_test_added": regression_test_added, "unrelated_change": unrelated_change}
 
 
+def _full_nexus_succeeded(patch_info: dict[str, Any]) -> bool:
+    """True when the Nexus pipeline (or its nightshift recovery) reported SUCCESS."""
+    result = (patch_info.get("nexus_payload") or {}).get("result") or {}
+    nightshift = patch_info.get("nightshift_info") or {}
+    return (
+        str(result.get("status") or "") == "SUCCESS"
+        or str(nightshift.get("status") or "") == "SUCCESS"
+    )
+
+
 def run_task(
     task: RealWorldTask,
     *,
@@ -1126,6 +1136,10 @@ def run_task(
     verified = _run_tests(case_dir, timeout_sec)
     if patch_info.get("agy_sweep_failed") or patch_info.get("token_capture_status") == "sweep_failed":
         # #1912: descendants may still be editing the case dir; never a solve.
+        verified = False
+    if executor == "full_nexus" and mode == "with_nexus" and not _full_nexus_succeeded(patch_info):
+        # #2202: a nested agy sweep failure only surfaces as a non-SUCCESS
+        # Nexus result; its survivors may still be editing the case dir.
         verified = False
     if executor in {"gemini", "full_nexus"}:
         root_cause_accurate = _root_cause_matches(
