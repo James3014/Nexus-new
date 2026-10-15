@@ -41,6 +41,8 @@ UNTOUCHED = (
     "repository-intelligence.yml",
     # Own per-PR group (cancel-in-progress) plus a debounce step (#2012).
     "repository-intelligence-comment.yml",
+    # Own per-PR group keyed by issue number too: comment runs must serialize (#2290).
+    "review-record-present.yml",
 )
 
 
