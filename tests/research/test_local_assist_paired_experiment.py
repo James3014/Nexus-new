@@ -70,7 +70,8 @@ def test_paired_arms_share_identity_and_separate_policies(tmp_path: Path, govern
         "task_statement": "advise demo.py advisory",
         "workspace_revision": "rev-paired",
         "allowed_files": ["demo.py"],
-        "task_type": "repair",
+        # Planning + advisor combination; a repair task with an advisor action is refused (#2089).
+        "task_type": "planning",
     }
     (tmp_path / "demo.py").write_text("x=1\n", encoding="utf-8")
     local = LocalAssistService(
