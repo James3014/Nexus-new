@@ -1212,6 +1212,7 @@ def resolve_canonical_state_root() -> Path:
         return Path(configured).expanduser().resolve()
     home = Path.home()
     for candidate in (
+        home / ".local" / "state" / "Nexus-new-self-hosted-state",
         home / "Workspace" / "Nexus-new-self-hosted-state",
         home / "workspace" / "Nexus-new-self-hosted-state",
     ):

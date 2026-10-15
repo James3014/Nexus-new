@@ -1539,6 +1539,31 @@ def _require_verified_receipt_binding(receipt: Any, packet: Mapping[str, Any]) -
         raise RuntimeError("APPROVAL_VERIFIED_RECEIPT_HASH_MISMATCH")
 
 
+def _tree_holds_regular_file(root: Path) -> bool:
+    try:
+        for _dirpath, _dirs, files in os.walk(root):
+            if files:
+                return True
+    except OSError:
+        return False
+    return False
+
+
+def _default_state_dir_for_repository(repository_root: Path) -> Path:
+    """Default durable-state root: user state dir, never inside the workspace."""
+    name = f"{repository_root.name}-self-hosted-state"
+    xdg = os.getenv("XDG_STATE_HOME", "").strip()
+    base = Path(xdg) if xdg and Path(xdg).is_absolute() else Path.home() / ".local" / "state"
+    new_root = (base / name).resolve()
+    legacy = (repository_root.parent / name).resolve()
+    if legacy != new_root and legacy.is_dir() and _tree_holds_regular_file(legacy):
+        raise RuntimeError(
+            f"NEXUS_SELF_HOSTED_STATE_ROOT_LEGACY_PRESENT: {legacy} holds durable state; "
+            f"move it to {new_root} or set NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR"
+        )
+    return new_root
+
+
 class SelfHostedTaskService:
     _CUSTOM_RUNNER_FORBIDDEN_EVIDENCE_FIELDS = frozenset(
         {
@@ -1570,7 +1595,7 @@ class SelfHostedTaskService:
         )
         if result.returncode == 0:
             repository_root = Path(result.stdout.strip()).resolve().parent
-            return repository_root.parent / f"{repository_root.name}-self-hosted-state"
+            return _default_state_dir_for_repository(repository_root)
         return (source_root / ".nexus/self_hosted_tasks").resolve()
 
     def __init__(

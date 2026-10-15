@@ -11350,3 +11350,67 @@ def test_service_approval_rejects_expired_untracked_grant(tmp_path):
     with pytest.raises(RuntimeError, match="APPROVAL_EXPIRED"):
         service.approve_promotion("expired", **_APPROVE_PACKET, approval_context=grant)
     assert service._read_state("expired")["promotion_status"] == "PENDING_HUMAN_APPROVAL"
+
+
+def _state_root_repo(tmp_path, monkeypatch):
+    from nexus.orchestrator import self_hosted_task_service as mod
+
+    home = tmp_path / "home"
+    home.mkdir()
+    workspace = tmp_path / "workspace"
+    repo = workspace / "Nexus-new"
+    repo.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+    monkeypatch.delenv("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR", raising=False)
+    return mod, home, workspace, repo
+
+
+def test_default_state_root_is_outside_repository_workspace(tmp_path, monkeypatch):
+    mod, home, workspace, repo = _state_root_repo(tmp_path, monkeypatch)
+    result = mod._default_state_dir_for_repository(repo)
+    assert result == (home / ".local/state/Nexus-new-self-hosted-state").resolve()
+    assert workspace.resolve() not in result.parents
+    assert not (workspace / "Nexus-new-self-hosted-state").exists()
+
+
+def test_default_state_root_honours_xdg_state_home(tmp_path, monkeypatch):
+    mod, _home, _ws, repo = _state_root_repo(tmp_path, monkeypatch)
+    xdg = tmp_path / "xdg"
+    monkeypatch.setenv("XDG_STATE_HOME", str(xdg))
+    assert mod._default_state_dir_for_repository(repo) == (
+        xdg / "Nexus-new-self-hosted-state"
+    ).resolve()
+
+
+def test_canonical_state_dir_env_override_still_wins(tmp_path, monkeypatch):
+    _state_root_repo(tmp_path, monkeypatch)
+    override = tmp_path / "explicit"
+    monkeypatch.setenv("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR", str(override))
+    assert SelfHostedTaskService.canonical_state_dir() == override.resolve()
+
+
+def test_default_state_root_fails_closed_on_legacy_state(tmp_path, monkeypatch):
+    mod, _home, workspace, repo = _state_root_repo(tmp_path, monkeypatch)
+    legacy = workspace / "Nexus-new-self-hosted-state" / "sub"
+    legacy.mkdir(parents=True)
+    (legacy / "task.json").write_text("{}")
+    with pytest.raises(RuntimeError, match="NEXUS_SELF_HOSTED_STATE_ROOT_LEGACY_PRESENT"):
+        mod._default_state_dir_for_repository(repo)
+    assert (legacy / "task.json").exists()
+
+
+def test_default_state_root_ignores_empty_legacy_dirs(tmp_path, monkeypatch):
+    mod, home, workspace, repo = _state_root_repo(tmp_path, monkeypatch)
+    legacy = workspace / "Nexus-new-self-hosted-state"
+    (legacy / "assisted_provider_jobs").mkdir(parents=True)
+    result = mod._default_state_dir_for_repository(repo)
+    assert result == (home / ".local/state/Nexus-new-self-hosted-state").resolve()
+    assert (legacy / "assisted_provider_jobs").is_dir()
+
+
+def test_canonical_state_dir_default_is_not_inside_canonical_workspace(tmp_path, monkeypatch):
+    _state_root_repo(tmp_path, monkeypatch)
+    result = SelfHostedTaskService.canonical_state_dir()
+    assert result.parent == (tmp_path / "home/.local/state").resolve()
+    assert result.name.endswith("-self-hosted-state")
