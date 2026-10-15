@@ -1179,6 +1179,84 @@ def test_multiple_missing_parameterized_base_cases_are_ambiguous():
     assert classify_regression(base, head).classification == "IMPACT_UNKNOWN"
 
 
+_BEHIND_FAMILY = "tests.nexus.executors.test_agy_write_admission::test_proc_is_zombie"
+_BEHIND_BASE_IDS = [f"{_BEHIND_FAMILY}[{n}]" for n in ("one", "two", "three", "four")]
+_BEHIND_AMBIGUOUS = "parameterized test ids changed ambiguously between base and head"
+
+
+def _behind_main_pair(*, base_ids=None, head_ids=None):
+    base = _with_node_outcomes(
+        _run(0, [], revision="base"),
+        passed=list(base_ids if base_ids is not None else _BEHIND_BASE_IDS),
+    )
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=list(head_ids if head_ids is not None else [f"{_BEHIND_FAMILY}[one]"]),
+        test_inventory_tree="f" * 40,
+    )
+    return base, head
+
+
+def test_behind_main_ambiguous_ids_in_untouched_file_name_the_merge_remedy():
+    base, head = _behind_main_pair()
+
+    result = classify_regression(base, head)
+
+    assert result.classification == "IMPACT_UNKNOWN"
+    assert result.blocking is True
+    assert "git merge origin/main" in result.remedy
+    assert _BEHIND_BASE_IDS[1] in result.remedy
+    assert any(
+        _BEHIND_AMBIGUOUS in item and "behind main" in item for item in result.mismatch_reasons
+    )
+    assert "behind main" in result.reason
+
+
+def test_ambiguous_ids_with_head_added_cases_keep_todays_message():
+    # Head replaced cases in the same family: that is a PR edit, not a stale branch.
+    base, head = _behind_main_pair(
+        head_ids=[f"{_BEHIND_FAMILY}[one]", f"{_BEHIND_FAMILY}[renamed]"],
+    )
+    plain_base, plain_head = _behind_main_pair()
+
+    result = classify_regression(base, head)
+
+    assert result.classification == "IMPACT_UNKNOWN"
+    assert result.blocking is True
+    assert result.remedy == ""
+    assert "behind main" not in result.reason
+    assert classify_regression(plain_base, plain_head).remedy
+
+
+def test_behind_main_remedy_is_withheld_beside_other_evidence_mismatches():
+    # A merge cannot repair a plan digest mismatch; never suggest it alongside one.
+    from dataclasses import replace as dc_replace
+
+    base, head = _behind_main_pair()
+    head = dc_replace(head, plan_digest="9" * 64)
+
+    result = classify_regression(base, head)
+
+    assert result.classification == "IMPACT_UNKNOWN"
+    assert result.blocking is True
+    assert len(result.mismatch_reasons) > 1
+    assert result.remedy == ""
+    assert "behind main" not in result.reason
+
+
+def test_ids_missing_on_base_instead_keep_todays_message():
+    family = "tests.nexus.executors.test_agy_write_admission::test_proc_is_zombie"
+    base, head = _behind_main_pair(
+        base_ids=[f"{family}[one]"],
+        head_ids=[f"{family}[new-a]", f"{family}[new-b]", f"{family}[one]"],
+    )
+
+    result = classify_regression(base, head)
+
+    assert result.remedy == ""
+    assert "behind main" not in result.reason
+
+
 def test_dynamic_failure_identity_preserves_raw_evidence_without_false_regression():
     base_node = "tests.test_contract::test_expiry[2026-08-12T07:32:05Z]"
     head_node = "tests.test_contract::test_expiry[2026-08-12T07:40:05+00:00]"
@@ -2778,6 +2856,34 @@ def test_classify_cli_prints_mismatch_reasons_when_blocking(tmp_path, capsys):
     payload = json.loads(output.read_text(encoding="utf-8"))
     assert payload["classification"] == "IMPACT_UNKNOWN"
     assert any("absent on head" in item for item in payload["mismatch_reasons"])
+
+
+def test_classify_cli_names_behind_main_remedy(tmp_path, capsys):
+    # The required gate's classify invocation (pytest.yml) passes only the two results.
+    from dataclasses import asdict
+
+    from scripts.ops import pr_impact_gate
+
+    base, head = _behind_main_pair()
+    (tmp_path / "base-result.json").write_text(json.dumps(asdict(base)), encoding="utf-8")
+    (tmp_path / "head-result.json").write_text(json.dumps(asdict(head)), encoding="utf-8")
+    output = tmp_path / "classification.json"
+
+    status = pr_impact_gate.main([
+        "classify",
+        "--base-result",
+        str(tmp_path / "base-result.json"),
+        "--head-result",
+        str(tmp_path / "head-result.json"),
+        "--output",
+        str(output),
+    ])
+
+    assert status == 1
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["classification"] == "IMPACT_UNKNOWN"
+    assert payload["blocking"] is True
+    assert "git merge origin/main" in payload["remedy"]
 
 
 def test_classify_cli_log_cannot_emit_workflow_commands_from_test_ids(tmp_path, capsys):
