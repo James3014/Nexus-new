@@ -1209,23 +1209,31 @@ class InPlaceSprintExecutor:
         return self._evaluate(seed=seed, hint=hint, code=code, source=source, confined_only=True)
 
     def _evaluate(self, *, seed: int, hint: str, code: str, source: str, confined_only: bool) -> CandidateEval:
+        from nexus.services import post_candidate_seam as seam
+
         start = time.time()
         target_path = self.repo_root / self.target_file
-        if _target_held_by_other(self.repo_root, self.target_file):
+        companion_edits = generate_local_companion_edits(self.repo_root, target_path, self.task, hint, seed)
+        # PR-2 seam: the lock on the target AND every companion is taken FIRST and held for the
+        # whole evaluation (acquire is the check; no separate "held by another?" pre-check),
+        # covering the in-place write, the test run and the restore.
+        release = seam.hold_target_lock(
+            self.repo_root, self.target_file, [path for path in companion_edits if path != target_path]
+        )
+        if release is None:
             if confined_only:
                 # The runtime verifier (#2212) memoises evaluations and replays them after the
                 # lock is released: a denial must never be a cacheable CandidateEval. Stop the
                 # whole sprint attempt instead (caught by run_hyper_sprint, no delivery).
                 raise _SprintLockDenied(lock_denied_in="runtime_verifier")
-            # PR-2 seam: another task holds the target's file lock: nothing is applied or run.
+            # Another task holds the target or a companion: nothing is applied or run.
             return CandidateEval(
                 seed=seed, score=0.0, hint=hint, error="file_lock_denied", candidate_code=code, source=source,
                 elapsed_sec=round(time.time() - start, 4),
             )
         original = target_path.read_text(encoding="utf-8") if target_path.exists() else ""
-        companion_edits = generate_local_companion_edits(self.repo_root, target_path, self.task, hint, seed)
         restored_files: dict[Path, str | None] = {}
-        lock_release: list[Any] = []
+        lock_release: list[Any] = [release]
         try:
             if code == original:
                 return CandidateEval(
@@ -1272,19 +1280,6 @@ class InPlaceSprintExecutor:
             )
             if confined is not None:
                 return confined
-            # PR-2 seam: hold the lock on the target AND every companion file from the in-place
-            # write until they are restored; any one held by another task refuses the run.
-            from nexus.services import post_candidate_seam as seam
-
-            release = seam.hold_target_lock(
-                self.repo_root, self.target_file, [path for path in companion_edits if path != target_path]
-            )
-            if release is None:
-                return CandidateEval(
-                    seed=seed, score=0.0, hint=hint, error="file_lock_denied", candidate_code=code, source=source,
-                    elapsed_sec=round(time.time() - start, 4),
-                )
-            lock_release.append(release)
             target_path.parent.mkdir(parents=True, exist_ok=True)
             target_path.write_text(code, encoding="utf-8")
             restored_files[target_path] = original
@@ -1468,16 +1463,6 @@ def _lock_denied_result(config: SprintConfig, state: Mapping[str, Any]) -> Sprin
 def _sprint_seam_task_id(repo_root: Path, config: SprintConfig) -> str:
     key = f"{Path(repo_root).resolve()}|{config.target_file}|{config.task}"
     return "auto-flow-sprint:" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
-
-
-def _target_held_by_other(repo_root: Path, target_file: str) -> bool:
-    """True when another task holds ``target_file``'s file lock (seam holder id of this
-    process); off when the seam is disabled. Checked before every in-place evaluation."""
-    from nexus.services import post_candidate_seam as seam
-
-    if not seam.seam_enabled():
-        return False
-    return seam.target_held_by_other(repo_root, target_file, seam.seam_holder_id(repo_root, target_file))
 
 
 def _sprint_lock_denied(

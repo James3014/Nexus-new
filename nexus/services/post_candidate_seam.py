@@ -453,11 +453,10 @@ def _lock_file(workspace_root: Path | str) -> Path:
 def target_held_by_other(workspace_root: Path | str, target_file: str, holder: str) -> bool:
     """True when another (live, non-stale) holder has the target locked in this workspace.
 
-    Read-only guard for paths that would write the candidate before the seam's own lock is
-    taken (e.g. a runtime verifier that applies the candidate in place): such a write must not
-    happen while another task holds the target. Dead seam holders are swept first; a stale lock
-    (older than the file_lock executor's TTL) does not count. Fails closed on an unreadable
-    registry file.
+    OBSERVATION ONLY (reports, tests): never a write decision -- a check followed by a write
+    is a race. Every in-place write of model code takes the lock instead (``hold_target_lock``:
+    the acquire is the check). Dead seam holders are swept first; a stale lock (older than the
+    file_lock executor's TTL) does not count. Fails closed on an unreadable registry file.
     """
 
     from nexus.orchestrator.file_lock_registry import FileLockRegistry
@@ -513,9 +512,12 @@ def hold_target_lock(
     registry = FileLockRegistry(
         lock_file=str(_lock_file(workspace_root)), ttl_sec=_FILE_LOCK_DEFAULT_TTL_SEC
     )
-    new_keys = [key for key in keys if registry.locks.get(key) != holder]
-    if registry.acquire_detailed(holder, keys)["conflicts"]:
+    # Acquire is the check: all or nothing under the registry flock; the keys to release
+    # later are the ones that acquire newly took (decided inside that same flock).
+    acquired = registry.acquire_detailed(holder, keys)
+    if acquired["conflicts"]:
         return None
+    new_keys = list(acquired.get("newly_acquired") or [])
     return lambda: registry.release_files(holder, new_keys) and None
 
 

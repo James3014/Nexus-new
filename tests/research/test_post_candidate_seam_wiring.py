@@ -479,27 +479,31 @@ def test_hyper_sprint_lock_held_by_another_task_never_writes_the_candidate(
 def test_sprint_target_held_by_other_task_sees_a_foreign_lock_only(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """Coordinator #3: the sprint's pre-write guard (used by the runtime verifier after #2212)."""
-    from nexus.research.sprint_service import SprintConfig, _target_held_by_other
+    """Coordinator #3 / scanner TOCTOU: the sprint's guard is the acquire itself
+    (hold_target_lock with the seam holder id); only a FOREIGN lock refuses it, our own lock
+    is re-entrant and kept on release, and with the seam off there is no guard."""
+    from nexus.research.sprint_service import SprintConfig
 
     workspace = tmp_path / "ws"
     workspace.mkdir()
     cfg = SprintConfig(task="t", target_file="pkg/target.py", test_file="pkg/test_visible.py")
-    assert _target_held_by_other(workspace, cfg.target_file) is False
-    seam.acquire_target_lock(
-        task_id=seam.seam_holder_id(workspace, cfg.target_file),
-        workspace_root=workspace,
-        target_file=cfg.target_file,
-    )
-    assert _target_held_by_other(workspace, cfg.target_file) is False  # our own holder
-    seam.release_target_lock(seam.seam_holder_id(workspace, cfg.target_file))
+    release = seam.hold_target_lock(workspace, cfg.target_file)
+    assert release is not None
+    release()
+    own = seam.seam_holder_id(workspace, cfg.target_file)
+    seam.acquire_target_lock(task_id=own, workspace_root=workspace, target_file=cfg.target_file)
+    release = seam.hold_target_lock(workspace, cfg.target_file)  # our own holder: granted
+    assert release is not None
+    release()
+    assert seam.target_held_by_other(workspace, cfg.target_file, "x") is True  # still ours
+    seam.release_target_lock(own)
     seam.acquire_target_lock(
         task_id="other-task", workspace_root=workspace, target_file=cfg.target_file
     )
     try:
-        assert _target_held_by_other(workspace, cfg.target_file) is True
+        assert seam.hold_target_lock(workspace, cfg.target_file) is None
         monkeypatch.setenv(seam.SEAM_DISABLE_ENV, "0")
-        assert _target_held_by_other(workspace, cfg.target_file) is False  # seam off: no guard
+        assert seam.hold_target_lock(workspace, cfg.target_file) is not None  # seam off
     finally:
         seam.release_target_lock("other-task")
 

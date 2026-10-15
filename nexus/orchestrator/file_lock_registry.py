@@ -96,13 +96,21 @@ class FileLockRegistry:
                 for p in paths
                 if p in self.locks and self.locks[p] != task_id and p not in holders
             }
+            newly_acquired: List[str] = []
             if not holders:
                 for p in paths:
                     if self.locks.get(p) != task_id:
                         self.acquired_at[p] = now
+                        newly_acquired.append(p)
                     self.locks[p] = task_id
                 self._save()
-        return {"conflicts": list(holders), "holders": holders, "stale_taken_over": taken_over}
+        # ``newly_acquired`` is decided under the same flock as the acquire (no stale read).
+        return {
+            "conflicts": list(holders),
+            "holders": holders,
+            "stale_taken_over": taken_over,
+            "newly_acquired": newly_acquired,
+        }
 
     def acquire(self, task_id: str, files: List[str]) -> List[str]:
         """

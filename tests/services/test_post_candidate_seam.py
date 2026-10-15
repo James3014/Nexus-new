@@ -1393,3 +1393,31 @@ def test_sprint_inplace_executor_refuses_when_a_companion_is_held(
     assert ev.error == "file_lock_denied" and ev.score == 0.0
     assert (case / "target.py").read_text(encoding="utf-8") == ORIGINAL
     assert not (case / "helper.py").exists()
+
+
+def test_sprint_inplace_evaluation_holds_the_lock_from_write_to_restore(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Scanner TOCTOU (sprint): no separate pre-check; our lock is held while the candidate
+    sits in the workspace and the test runs, and released after the restore."""
+    from nexus.research.sprint_service import InPlaceSprintExecutor
+
+    case = _case(tmp_path)
+    monkeypatch.delenv(seam.CONFINE_VISIBLE_TEST_ENV, raising=False)
+    during: list[bool] = []
+
+    def fake_run(*a: Any, **k: Any) -> subprocess.CompletedProcess:
+        other = seam.acquire_target_lock(
+            task_id="other-task", workspace_root=case, target_file="target.py"
+        )
+        during.append(other["gate_passed"])
+        return subprocess.CompletedProcess(a[0], 0, "1 passed", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    executor = InPlaceSprintExecutor(
+        case, "target.py", [sys.executable, "-m", "pytest", "-q", "test_visible.py"], 30
+    )
+    ev = executor.evaluate_candidate(seed=0, hint="h", code=CANDIDATE, source="llm")
+    assert ev.score == 1.0 and during == [False]
+    assert seam.target_held_by_other(case, "target.py", "other-task") is False  # released
+    assert (case / "target.py").read_text(encoding="utf-8") == ORIGINAL  # restored
