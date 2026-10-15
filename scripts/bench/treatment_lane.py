@@ -654,6 +654,17 @@ def confined_visible_runner(repo_root: str | Path) -> RunVisible:
     return run
 
 
+def product_interpreter(argv0: str, repo_root: str | Path) -> str:
+    """The product process's ``sys.executable``: its argv[0] made absolute against its cwd
+    (``repo_root``), not resolved (CPython keeps the path it was started with). ``""`` for a
+    launcher such as ``uv`` (unknown interpreter: no timeout line can be allowed)."""
+
+    if not argv0 or os.sep not in argv0:
+        return ""
+    path = Path(argv0)
+    return os.path.abspath(path if path.is_absolute() else Path(repo_root) / path)
+
+
 def finalize_with_nexus_row(
     row: dict[str, Any],
     payload: Mapping[str, Any],
@@ -666,6 +677,8 @@ def finalize_with_nexus_row(
     timeout_sec: int,
     row_deadline_sec: float | None = None,
     row_start_epoch: float | None = None,
+    product_python: str = "",
+    product_test_arg: str = "",
 ) -> dict[str, Any]:
     """Add the treatment-lane columns to a finished with-Nexus row (no-op in the strict lane).
 
@@ -735,6 +748,10 @@ def finalize_with_nexus_row(
         "first_attempt_hidden_passed": None,
         "first_attempt_status": "rescore_not_run",
         "treatment_visible_outputs": {},
+        # The product's own interpreter and visible-test argument (the runner launched it): the
+        # only interpreter / test a [FAILURE] timeout line may name (G5-1..G5-3).
+        "treatment_product_python": product_python,
+        "treatment_visible_test_arg": product_test_arg,
         RESCORE_KEY: {
             "target_file": str(target_file),
             "test_file": str(test_file),

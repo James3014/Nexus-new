@@ -684,21 +684,22 @@ VISIBLE_OUTPUT = (
     "F                                                                        [100%]\n"
     "=================================== FAILURES ===================================\n"
     "____________________________________ test_v ____________________________________\n"
-    "/tmp/run-abc/case/test_visible.py:2: AssertionError\n"
+    "test_visible.py:2: AssertionError\n"
     "E       AssertionError: assert 'closed' == 'open'\n"
     "1 failed in 0.03s\n"
 )
-PY = "/usr/local/bin/python3.12"
+PY = "/opt/homebrew/opt/python@3.14/bin/python3.14"  # an '@' in the path (G5-2)
+VISIBLE_ARG = ".nexus/bench_cases/nexus-value-trust-002/test_visible.py"
 TIMEOUT_LINE = (
     f"Command '['{PY}', '-m', 'pytest', '-q', '--maxfail=1', '--', "
-    "'.nexus/bench_cases/nexus-value-trust-002/test_visible.py']' timed out after 60 seconds"
+    f"'{VISIBLE_ARG}']' timed out after 60 seconds"
 )
 
 
 def _round2(failure: str = "", *, candidate: str = CANDIDATE1, extra: str = "") -> str:
     tail = failure or (
         "_ test_v _\n"
-        "/private/var/folders/x/case/test_visible.py:2: AssertionError\n"
+        "test_visible.py:2: AssertionError\n"
         "E       AssertionError: assert 'closed' == 'open'\n"
         "1 failed in 0.05s\n"
     )
@@ -753,6 +754,8 @@ def _rows(
             "treatment_max_model_calls": max_calls,
             "treatment_candidates": texts,
             "runner_candidate_sha256s": list(texts),
+            "treatment_product_python": PY,
+            "treatment_visible_test_arg": VISIBLE_ARG,
             "treatment_visible_outputs": {_sha(CANDIDATE1): VISIBLE_OUTPUT},
         },
     ]
@@ -1023,9 +1026,10 @@ def test_runner_rescue_is_a_row_violation_in_the_treatment_lane(tmp_path: Path) 
 
 
 def test_output_line_normalisation_drops_only_volatile_parts() -> None:
+    # directories are kept: a path can never smuggle text past the visible-output match (G5-3)
     assert (
         normalize_output_line("/tmp/a/b/test_visible.py:2: AssertionError")
-        == "test_visible.py:2: AssertionError"
+        == "/tmp/a/b/test_visible.py:2: AssertionError"
     )
     assert normalize_output_line("==== 1 failed in 0.03s ====") == "1 failed in Xs"
     assert normalize_output_line("E   assert 'x' == 'y'") == "E assert 'x' == 'y'"
@@ -2472,35 +2476,112 @@ def test_treatment_replay_proof_passes_self_heal_and_fails_a_hint(tmp_path: Path
 
 
 def test_hanging_candidate_timeout_line_passes_the_round_audit(tmp_path: Path) -> None:
-    """R5-1: the product's [FAILURE] line for a hanging candidate is str(TimeoutExpired) of the
-    seam's confined argv (counted lane) or of the in-place argv; both are allowed, built from the
-    product's own constants; a forged "timeout" text and a hidden-test argv are not."""
+    """R5-1 + G5-1..G5-3: the [FAILURE] timeout line must be str(TimeoutExpired) of the EXACT
+    argv the product runs: its own interpreter (recorded by the runner), the seam's pinned args
+    or the in-place form with the exact visible test. Only the seconds vary."""
 
-    from nexus.research.sprint_service import sprint_pytest_cmd
     from nexus.services.post_candidate_seam import PINNED_PYTEST_ARGS
 
     confined = str(
         subprocess.TimeoutExpired(
-            [sys.executable, "-I", "-m", "pytest", "-q", "--maxfail=1", *PINNED_PYTEST_ARGS], 300
+            [PY, "-I", "-m", "pytest", "-q", "--maxfail=1", *PINNED_PYTEST_ARGS], 300
         )
     )
     inplace = str(
-        subprocess.TimeoutExpired(sprint_pytest_cmd(".nexus/bench_cases/x/test_visible.py"), 60)
+        subprocess.TimeoutExpired(
+            [PY, "-m", "pytest", "-q", "--maxfail=1", "--", VISIBLE_ARG], 60.5
+        )
     )
-    hidden = str(
-        subprocess.TimeoutExpired(sprint_pytest_cmd(".nexus/bench_cases/x/test_hidden.py"), 60)
-    )
-    for line in (confined, inplace):
-        assert (
-            _audit(tmp_path / str(hash(line)), _round2(failure=line + "\n"))["status"] == "PASS"
-        ), line
-    assert _audit(tmp_path / "hidden", _round2(failure=hidden + "\n"))["status"] == "FAIL"
+    for index, line in enumerate((confined, inplace)):
+        assert _audit(tmp_path / f"ok{index}", _round2(failure=line + "\n"))["status"] == "PASS", (
+            line
+        )
+    probes = [
+        # G5-1: an arbitrary "visible test" name carrying a hint
+        "Command '['/bin/python', '-m', 'pytest', '-q', '--maxfail=1', '--', "
+        "'hint_the_bug_is_off_by_one_in_counter.py']' timed out after 300 seconds",
+        str(
+            subprocess.TimeoutExpired(
+                [PY, "-m", "pytest", "-q", "--maxfail=1", "--", "hint_the_bug_is_here.py"], 60
+            )
+        ),
+        # G5-3: text smuggled through the interpreter path
+        str(
+            subprocess.TimeoutExpired(
+                [
+                    "/hint_return_zero_when_list_is_empty/python",
+                    "-I",
+                    "-m",
+                    "pytest",
+                    "-q",
+                    "--maxfail=1",
+                    *PINNED_PYTEST_ARGS,
+                ],
+                300,
+            )
+        ),
+        # a different (real-looking) interpreter than the product's
+        str(
+            subprocess.TimeoutExpired(
+                [
+                    "/usr/bin/python3",
+                    "-I",
+                    "-m",
+                    "pytest",
+                    "-q",
+                    "--maxfail=1",
+                    *PINNED_PYTEST_ARGS,
+                ],
+                300,
+            )
+        ),
+        # the hidden test
+        str(
+            subprocess.TimeoutExpired(
+                [
+                    PY,
+                    "-m",
+                    "pytest",
+                    "-q",
+                    "--maxfail=1",
+                    "--",
+                    VISIBLE_ARG.replace("visible", "hidden"),
+                ],
+                60,
+            )
+        ),
+        confined.replace("300", "three hundred"),
+    ]
+    for index, line in enumerate(probes):
+        assert _audit(tmp_path / f"p{index}", _round2(failure=line + "\n"))["status"] == "FAIL", (
+            line
+        )
+    rows = _rows()
+    rows[1]["treatment_product_python"] = ""
     assert (
-        _audit(tmp_path / "forged", _round2(failure=confined.replace("pytest", "answer") + "\n"))[
-            "status"
-        ]
-        == "FAIL"
+        _audit(tmp_path / "nopy", _round2(failure=confined + "\n"), rows=rows)["status"] == "FAIL"
     )
+
+
+def test_real_seam_timeout_argv_on_this_host_passes(tmp_path: Path) -> None:
+    """The seam's real argv on this host (sys.executable, '@' allowed in the path) passes when the
+    runner recorded that interpreter as the product's."""
+
+    from nexus.services.post_candidate_seam import PINNED_PYTEST_ARGS
+
+    real = str(
+        subprocess.TimeoutExpired(
+            [sys.executable, "-I", "-m", "pytest", "-q", "--maxfail=1", *PINNED_PYTEST_ARGS], 300
+        )
+    )
+    rows = _rows()
+    rows[1]["treatment_product_python"] = sys.executable
+    assert _audit(tmp_path, _round2(failure=real + "\n"), rows=rows)["status"] == "PASS"
+    assert lane.product_interpreter("uv", tmp_path) == ""
+    assert lane.product_interpreter(".venv/bin/python", tmp_path) == str(
+        tmp_path / ".venv" / "bin" / "python"
+    )
+    assert lane.product_interpreter(sys.executable, tmp_path) == sys.executable
 
 
 def test_visible_rerun_timeout_records_the_timeout_line() -> None:

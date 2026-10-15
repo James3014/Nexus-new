@@ -164,23 +164,25 @@ def syntax_rejection_lines(code: str, filename: str = "candidate.py") -> set[str
     return {line for line in (guard_syntax_rejection(code), executor_syntax_rejection(code, filename)) if line}
 
 
-def visible_timeout_line_re() -> "re.Pattern[str]":
-    """``str(subprocess.TimeoutExpired)`` of the sprint's visible test run, both forms (PR-3).
+def visible_timeout_line_re(python: str, visible_test_arg: str | None = None) -> "re.Pattern[str]":
+    """``str(subprocess.TimeoutExpired)`` of the sprint's visible test run, bound EXACTLY (PR-3).
 
-    Counted lane: the seam's confined run (``post_candidate_seam.run_visible_test_confined``
-    raises with ``[python, -I, -m, pytest, -q, --maxfail=1, *PINNED_PYTEST_ARGS]``). Other runs:
-    the in-place ``sprint_pytest_cmd`` (``... -- <visible test>.py``, group ``test``). Built
-    from the same constants the product uses, so the bench audit cannot drift from them.
+    ``python`` is the interpreter the product process runs with (its ``sys.executable``, which
+    the bench runner chose when it launched the product); nothing about it is pattern-matched.
+    Counted lane: the seam's confined argv ``[python, -I, -m, pytest, -q, --maxfail=1,
+    *PINNED_PYTEST_ARGS]``. In-place form (``sprint_pytest_cmd``): ``[python, -m, pytest, -q,
+    --maxfail=1, --, <visible test as the product received it>]``. Only the seconds vary.
+    Without an interpreter the pattern matches nothing.
     """
     from nexus.services.post_candidate_seam import PINNED_PYTEST_ARGS
 
-    python = r"/[A-Za-z0-9_./+-]+/python[0-9.]*"
-    confined = ", ".join(repr(part) for part in ("-I", "-m", "pytest", "-q", "--maxfail=1", *PINNED_PYTEST_ARGS))
-    inplace = ", ".join(repr(part) for part in ("-m", "pytest", "-q", "--maxfail=1", "--"))
-    return re.compile(
-        rf"^Command '\['{python}', (?:{re.escape(confined)}|{re.escape(inplace)}, '(?P<test>[A-Za-z0-9_./-]+\.py)')"
-        rf"\]' timed out after [0-9]+(?:\.[0-9]+)? seconds$"
-    )
+    if not python:
+        return re.compile(r"(?!)")
+    forms = [str([python, "-I", "-m", "pytest", "-q", "--maxfail=1", *PINNED_PYTEST_ARGS])]
+    if visible_test_arg:
+        forms.append(str([python, "-m", "pytest", "-q", "--maxfail=1", "--", visible_test_arg]))
+    alternatives = "|".join(re.escape(" ".join(f"Command '{form}'".split())) for form in forms)
+    return re.compile(rf"^(?:{alternatives}) timed out after [0-9]+(?:\.[0-9]+)? seconds$")
 
 
 @dataclass

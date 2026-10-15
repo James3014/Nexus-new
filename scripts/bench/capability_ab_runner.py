@@ -16655,6 +16655,10 @@ def run_with_nexus(
                 timeout_sec=int(timeout_sec),
                 row_deadline_sec=float(effective_timeout_sec) if shared_task_deadline is not None else None,
                 row_start_epoch=start_wall,
+                product_python=_treatment_lane.product_interpreter(
+                    _nexus_cli_subprocess_cmd([], repo_root)[0], repo_root
+                ),
+                product_test_arg=str(test_file_arg),
             )
         return _finalize_with_nexus_row(
             row,

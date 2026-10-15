@@ -180,7 +180,6 @@ PRODUCT_ERROR_CODES = frozenset({
 _MULTI_FILE_RE = re.compile(r"^confinement_unavailable:multi_file:[0-9]{1,3}$")
 # Volatile parts of pytest output that differ between two runs of the same test.
 _DURATION_RE = re.compile(r"\bin [0-9]+(?:\.[0-9]+)?s\b")
-_ABS_PATH_TOKEN_RE = re.compile(r"(?:/[A-Za-z0-9_.@+-]+)+/")
 
 
 class CaptureError(RuntimeError):
@@ -1114,6 +1113,8 @@ def audit_task(
                     },
                     candidate_texts=_earlier_candidates(index - 1),
                     visible_lines=visible_lines,
+                    product_python=str((with_row or {}).get("treatment_product_python") or ""),
+                    visible_test_arg=str((with_row or {}).get("treatment_visible_test_arg") or ""),
                 )
                 result.treatment_rounds_audited += 1
                 result.self_heal_rounds_observed += int(self_heal)
@@ -1172,10 +1173,11 @@ def _syntax_lines(candidate_texts: Iterable[str]) -> set[str]:
 
 
 def normalize_output_line(line: str) -> str:
-    """One pytest output line without its volatile parts (durations, directories, rule fills)."""
+    """One pytest output line without its volatile parts (durations, rule fills)."""
 
-    text = _ABS_PATH_TOKEN_RE.sub("", " ".join(str(line).split()))
-    text = _DURATION_RE.sub("in Xs", text)
+    # Durations only. Directories are NOT stripped (G5-3 class): the counted lane's confined
+    # runs print rootdir-relative paths, so a path can never carry text past this check.
+    text = _DURATION_RE.sub("in Xs", " ".join(str(line).split()))
     return text.strip(" =_-")
 
 
@@ -1202,6 +1204,8 @@ def audit_treatment_round(
     candidate_lines: set[str],
     visible_lines: set[str],
     candidate_texts: Iterable[str] = (),
+    product_python: str = "",
+    visible_test_arg: str = "",
 ) -> tuple[list[str], bool]:
     """Findings for one later with-Nexus round (round >= 2) and whether it was a self-heal round."""
 
@@ -1219,7 +1223,7 @@ def audit_treatment_round(
     round_lines = frozenset(_lines(strip_no_tools(prompt)))
     from nexus.research.sprint_service import visible_timeout_line_re
 
-    timeout_re = visible_timeout_line_re()
+    timeout_re = visible_timeout_line_re(product_python, visible_test_arg)
     selected = frozenset(_selected_capabilities(prompt))
     hidden_numbers = frozenset(hidden_only_numbers(material, bare_prompt))
     self_heal = False
@@ -1254,8 +1258,7 @@ def audit_treatment_round(
             continue
         if line in PRODUCT_ERROR_CODES or line in syntax_lines or _MULTI_FILE_RE.match(line):
             continue
-        timeout = timeout_re.match(line)
-        if timeout and not Path(timeout.group("test") or "").name.lower().startswith("test_hidden"):
+        if timeout_re.match(line):
             continue
         if header in JSON_BLOCK_HEADERS and line.startswith("{"):
             try:
