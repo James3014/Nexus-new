@@ -352,3 +352,32 @@ def test_mutation_admit_and_finish_recheck_the_controller(pair, monkeypatch):
     for method in (gateway._mutation_admit, gateway._finish):
         with pytest.raises(gateway_module.GatewayInputError, match="CONTROLLER_BINDING_INVALID"):
             method({})
+
+
+def test_controller_git_pointing_at_a_third_worktrees_gitdir_is_refused(pair, tmp_path):
+    loaded, controller, head = pair
+    third = tmp_path / "third"
+    _git(loaded, "worktree", "add", "-q", "--detach", str(third), head)
+    third_gitdir = _git(third, "rev-parse", "--absolute-git-dir")
+    (controller / ".git").write_text(f"gitdir: {third_gitdir}\n", encoding="utf-8")
+    assert roots.bound_controller_problem(controller, loaded) == "CONTROLLER_GITDIR_NOT_ITS_OWN"
+
+
+def test_controller_moved_during_the_check_is_refused(pair, monkeypatch):
+    """The HEAD a caller binds must be the HEAD that was validated."""
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    loaded, controller, head = pair
+    monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", controller)
+    monkeypatch.setattr(gateway_module, "LOADED_SOURCE_ROOT", loaded)
+    monkeypatch.setattr(gateway_module, "CONTROLLER_IS_SEPARATE", True)
+    real = gateway_module.bound_controller_problem
+
+    def check_then_move(controller_root, loaded_root):
+        reason = real(controller_root, loaded_root)
+        _commit(controller, "tasks/c/00-late.md", "late\n", "moved after the check")
+        return reason
+
+    monkeypatch.setattr(gateway_module, "bound_controller_problem", check_then_move)
+    with pytest.raises(gateway_module.GatewayInputError, match="HEAD_MOVED_DURING_CHECK"):
+        gateway_module._require_bound_controller(head)

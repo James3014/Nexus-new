@@ -594,18 +594,23 @@ def _safe_search_target(value: Any) -> tuple[Path, Path]:
     return lexical, resolved
 
 
-def _require_bound_controller() -> None:
+def _require_bound_controller(expected_head: Optional[str] = None) -> None:
     """Re-check a separate Controller right before a Controller effect (#1939).
 
-    The startup check can go stale; Task Card create/commit and governed start
-    re-prove that the Controller is still the loaded commit plus bind commits
-    only.  Without a separate Controller this is a no-op.
+    The startup check can go stale; Task Card create/commit, governed start,
+    mutation admission and finish re-prove that the Controller is still the
+    loaded commit plus bind commits only.  With ``expected_head`` the HEAD the
+    caller binds must also be the HEAD that was just validated, so a Controller
+    moved between the check and the bind is refused.  Without a separate
+    Controller this is a no-op.
     """
     if not CONTROLLER_IS_SEPARATE:
         return
     reason = bound_controller_problem(Path(CANONICAL_SOURCE_ROOT), Path(LOADED_SOURCE_ROOT))
     if reason is not None:
         raise GatewayInputError(f"CONTROLLER_BINDING_INVALID:{reason}")
+    if expected_head is not None and _git("rev-parse", "HEAD").strip() != expected_head:
+        raise GatewayInputError("CONTROLLER_BINDING_INVALID:HEAD_MOVED_DURING_CHECK")
 
 
 def _loaded_git(*args: str, timeout: float = 3.0) -> str:
@@ -3756,6 +3761,7 @@ class UnifiedMCPGateway:
         current_head = _git("rev-parse", "HEAD").strip()
         if current_head != expected_head:
             raise GatewayInputError("TASK_CARD_COMMIT_HEAD_MISMATCH")
+        _require_bound_controller(expected_head)
         owner_authority = self._require_owner_effect_authority(
             AutonomyActionClass.TASK_CARD_COMMIT,
             {
@@ -4662,13 +4668,13 @@ class UnifiedMCPGateway:
             raise GatewayInputError("TASK_CARD_PATH_HASH_PAIR_REQUIRED")
         if not task_card_path:
             raise GatewayInputError("TRACKED_TASK_CARD_REQUIRED")
-        _require_bound_controller()
         _safe_relative_path(task_card_path, "task_card_path")
         if not task_card_path.startswith("tasks/"):
             raise GatewayInputError("TASK_CARD_PATH_INVALID")
         if len(task_card_hash) != 64 or any(char not in "0123456789abcdef" for char in task_card_hash):
             raise GatewayInputError("TASK_CARD_HASH_INVALID")
         head = self._exact_hash(_git("rev-parse", "HEAD").strip(), "expected_head", 40)
+        _require_bound_controller(head)
         contract_binding = {
             "contract_kind": ContractKind.TRACKED_TASK_CARD.value,
             "contract_hash": None,
