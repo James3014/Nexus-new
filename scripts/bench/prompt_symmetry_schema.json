@@ -799,6 +799,7 @@
    "entries[].status": {
     "kind": "leaf",
     "patterns": [
+     "^EVALUATED_REJECTED$",
      "^INVOKED_NOT_SUCCESS$",
      "^PENDING_OR_STAGE_OWNED$",
      "^REAL_INVOKED$",

@@ -225,6 +225,12 @@ def _canonical_fact_tree(value: Any, depth: int = 0) -> Any:
     return None
 
 
+def _gate_inputs_enabled() -> bool:
+    from nexus.research.gate_inputs import gate_inputs_enabled
+
+    return gate_inputs_enabled()
+
+
 def planner_route_signals(route: Mapping[str, Any] | None) -> dict[str, Any]:
     """Bounded copy of the flow route's task signals for the mainchain request route."""
 
@@ -327,6 +333,9 @@ class LLMCandidateGenerator:
         self.visible_test_target_invalid: str = ""
         # Why no visible_verifier was bound (e.g. confinement unavailable); reported verbatim.
         self.visible_verifier_unbound_reason: str = ""
+        # Visible test file of the sprint task (bound by run_hyper_sprint).  The runtime's
+        # preflight gates get their inputs from it (wiring PR-4, nexus.research.gate_inputs).
+        self.gate_input_test_file: str = ""
 
     def _workspace_revision(self) -> str:
         try:
@@ -455,12 +464,30 @@ class LLMCandidateGenerator:
         # run_mainchain(with_nexus_armor=...) from this flag, and without it the online
         # candidate ran armor-off (host-default invokers, no prompt armor).
         route.setdefault("with_nexus_armor", True)
+        gate_codeintel: dict[str, Any] = {}
+        if _gate_inputs_enabled():
+            from nexus.research.gate_inputs import sprint_gate_inputs
+
+            # Wiring PR-4: the preflight gates' inputs from the sprint's own task contract
+            # (visible test only).  workspace_root also goes on the route, where the memory
+            # invoker reads it; neither channel is rendered into the model prompt.
+            gate_inputs = sprint_gate_inputs(
+                repo_root=self.project_root,
+                task=task,
+                target_file=self.target_file,
+                test_file=self.gate_input_test_file,
+                source_code=source_code,
+                route=route,
+            )
+            gate_codeintel = dict(gate_inputs["codeintel"])
+            route.setdefault("workspace_root", gate_inputs["workspace_root"])
         request = UnifiedRuntimeRequest(
             task_id=task_id,
             workspace_revision=revision,
             task_statement=task,
             task_type="repair",
             route=route,
+            codeintel=gate_codeintel,
             online_prompt=prompt,
             online_payload=payload,
             online_phase="R",
@@ -1946,6 +1973,8 @@ def _run_hyper_sprint_core(*, repo_root: Path, config: SprintConfig) -> SprintRe
             return replace(cached, source=source)
         return sprint_evaluate(seed=seed, hint=hint, code=code, source=source)
 
+    if llm_generator is not None and hasattr(llm_generator, "gate_input_test_file"):
+        setattr(llm_generator, "gate_input_test_file", str(config.test_file or ""))
     if llm_generator is not None and hasattr(llm_generator, "visible_verifier"):
         # Only the online generator has the seam (tests may substitute the generator class).
         if visible_target_error:

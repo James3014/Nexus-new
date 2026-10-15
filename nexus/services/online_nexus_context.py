@@ -376,6 +376,62 @@ def compact_executor_flags_for_prompt(flags: Mapping[str, Any] | None) -> dict[s
     }
 
 
+# Placeholder the strict lane always rendered for these capabilities before wiring PR-4 fed
+# their inputs (they refused for missing inputs, so they were invoked but not successful).
+_WITHHELD_GATE_STATUS = "INVOKED_NOT_SUCCESS"
+# EVALUATED_REJECTED: proposed runtime status for an evaluated, rejecting gate (the wiring PR-4
+# runtime patch); the strict prompt renders it as the status the runtime used before it.
+_EVALUATED_REJECTED_STATUS = "EVALUATED_REJECTED"
+_INVOKED_ENTRY_STATUSES = frozenset({
+    "REAL_INVOKED",
+    "INVOKED_NOT_SUCCESS",
+    _EVALUATED_REJECTED_STATUS,
+})
+
+
+def withhold_fed_gate_verdicts(bundle: Mapping[str, Any]) -> dict[str, Any]:
+    """Strict lane: keep the PR-4 fed gates' verdicts out of the model prompt.
+
+    Wiring PR-4 (``nexus.research.gate_inputs``) lets pregate, harness_preflight_sensor,
+    plan_quality_gate, mempalace_gate, memory and codeintel evaluate.  Their verdicts (e.g.
+    "the visible test fails on the unmodified source", memory hit counts) would be information
+    the bare arm does not get.  For the prompt view only, an invoked entry of those capabilities
+    is rendered exactly as it was before PR-4 (``INVOKED_NOT_SUCCESS``, no consumer payload), so
+    the symmetric prompt text does not depend on whether the inputs were fed.  The receipts and
+    the sealed bundle keep the real verdict; this copy is never a receipt.
+    """
+
+    from nexus.research.gate_inputs import FED_CAPABILITIES
+
+    out = dict(bundle)
+    entries = bundle.get("entries")
+    if not isinstance(entries, (list, tuple)):
+        return out
+    rendered: list[Any] = []
+    for entry in entries:
+        if (
+            isinstance(entry, Mapping)
+            and str(entry.get("name") or "") in FED_CAPABILITIES
+            and str(entry.get("status") or "") in _INVOKED_ENTRY_STATUSES
+        ):
+            entry = {
+                **entry,
+                "status": _WITHHELD_GATE_STATUS,
+                "success": False,
+                "invoked_real": False,
+                "consumer_payload": {},
+                "has_consumer_payload": False,
+            }
+        elif (
+            isinstance(entry, Mapping)
+            and str(entry.get("status") or "") == _EVALUATED_REJECTED_STATUS
+        ):
+            entry = {**entry, "status": _WITHHELD_GATE_STATUS}
+        rendered.append(entry)
+    out["entries"] = rendered
+    return out
+
+
 def compact_capability_evidence_for_prompt(
     bundle: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
@@ -542,6 +598,8 @@ def build_online_nexus_context(
         evidence_bundle = _mapping(plan_map.get("signal_snapshot")).get(
             "capability_evidence_bundle"
         )
+    if symmetric and isinstance(evidence_bundle, Mapping):
+        evidence_bundle = withhold_fed_gate_verdicts(evidence_bundle)
     evidence_compact = compact_capability_evidence_for_prompt(
         evidence_bundle if isinstance(evidence_bundle, Mapping) else None
     )

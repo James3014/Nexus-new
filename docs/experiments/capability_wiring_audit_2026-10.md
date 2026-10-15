@@ -410,3 +410,22 @@ Earlier reclassification (2026-10-15, F3 only) with `strict_llm_baseline` (class
 |---|---|---|
 | structured edit vs `patch` precedence | `nexus/research/sprint_service.py` `_candidate_code_from_llm_output` (main :807, unchanged by this PR) | `patch` is checked before `operation=replace`, so a payload with both applies the whole-file `patch` although the prompt calls it a fallback (Gemini G12). |
 | legacy fail-closed rate | `scripts/bench/ab_eval.py:158-171` `_is_fail_closed_block` | counts `selected_without_invocation` as fail-closed but not `NOT_EXECUTABLE:*`, so `fail_closed_block_rate` can drop for rows whose only trigger was a non-executable node now relabelled by this PR. |
+
+## Gate inputs (wiring PR-4, 2026-10-15)
+
+The sprint's UnifiedRuntime request now carries the preflight gates' inputs, derived from the sprint's own task contract by `nexus/research/gate_inputs.py` (`sprint_gate_inputs`): `request.codeintel` gets `workspace_root`, `verify_commands` (exactly `visible_test_pytest_cmd(test_file)`, only for a valid visible test file; never `test_hidden*`), `target_file`/`search_paths`/`target_symbol` (first top-level definition of the target that the visible test names), the plan-quality context (`intent_pass`, `handoff_readiness` from deterministic contract checks, `target_files`, `deliverables`, `acceptance_criteria`, `impact_map` = visible test covers target, `steps`) and a task-contract MemPalace artifact; `route.workspace_root` feeds memory, and the plan-quality invoker reads `risk_score` from the flow route's `route_features`. `gate_input_provenance` names the source of every input; the registry invoker echoes the keys it used as `input_provenance` on the stage record. `NEXUS_SPRINT_GATE_INPUTS=0` turns it off.
+
+Fairness: none of these keys is rendered into the model prompt (the CodeIntel summary reads other fields). The gates' verdicts reach the prompt only through `[NEXUS CAPABILITY EVIDENCE]`; under `NEXUS_SYMMETRIC_PROMPT` (`withhold_fed_gate_verdicts`) the fed gates' entries keep the pre-PR-4 rendering (`INVOKED_NOT_SUCCESS`, no consumer payload), so the strict-lane prompt is byte-identical with and without the inputs except the per-run random evidence ids and content hashes (`tests/research/test_gate_inputs_wiring.py`). Non-strict lanes see the real verdicts.
+
+Re-execution of the fed gates on the 65 receipts of `_diag/receipts_snap` (task rebuilt from each sprint id's with-Nexus prompt capture: statement, source, visible test; zero-model `run_mainchain`; 591 invoked stages + 35 `research_route` NOT_EXECUTABLE = 626):
+
+| capability | before | after |
+|---|---|---|
+| pregate | blocked_missing_inputs 65 | real 63, failed_or_refused 2 (`FAILED`: the visible test fails on the unmodified source) |
+| harness_preflight_sensor | blocked_missing_inputs 65 | real 65 |
+| plan_quality_gate | blocked_missing_inputs 65 | real 65 |
+| mempalace_gate | blocked_missing_inputs 65 | real 65 |
+| memory | blocked_missing_inputs 16 | real 16 |
+| codeintel | blocked_missing_inputs 28 | real 28 |
+
+`real` here is the runtime's existing seal: a preflight stage with status `SUCCEEDED` is already sealed `REAL_INVOKED` in the evidence bundle, so #2212's attestation resolves it. An evaluated rejection is not sealed (`INVOKED_NOT_SUCCESS`) and stays `failed_or_refused`. Postflight gates (acceptance_check, artifact/claim/delivery) get their inputs from #2212's verifier proof and are never in the preflight bundle, so they stay `real_self_reported` at best. Both are handled by nexus-runtime Issue #212 / PR #213 (entry status `EVALUATED_REJECTED`, whole-bundle re-seal after postflight with the postflight entries in `entries`, `runtime_evidence_ids`); they take effect after a pin bump. Ahead of it: the strict-lane view also renders `EVALUATED_REJECTED` as `INVOKED_NOT_SUCCESS`, the prompt audit schema accepts `EVALUATED_REJECTED` as an entry status, and `POSTFLIGHT_VERIFIER_PROOF_REQUIRED` is a missing-input code. `tests/research/test_gate_inputs_wiring.py` passes against both the pinned runtime and PR #213's head 19ccc8b, and checks all 12 P16 and 10 hard_v1 tasks: strict prompt identical, and no hidden literal in any gate input. Every with-Nexus row now has real governance gates, so `capability_not_exercised` no longer separates rows; "real" means the gate ran, not that it helped the model.
