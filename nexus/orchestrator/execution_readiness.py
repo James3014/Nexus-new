@@ -115,19 +115,20 @@ _BLOCKER_MESSAGE: dict[ExecutionReadinessBlockerCode, str] = {
         "Gateway source"
     ),
     ExecutionReadinessBlockerCode.GATEWAY_REBIND_REQUIRED: (
-        "route gateway rebinding to the issue #526 canonical rebind/reload primitive; "
-        "this gate never reloads the gateway"
+        "the loaded Gateway is not the desired source: the #2153 auto-deployer deploys "
+        "published main with no Owner activation (#2155); the manual issue #526 "
+        "rebind/reload path is the emergency fallback only; this gate never reloads the gateway"
     ),
     ExecutionReadinessBlockerCode.HOST_ACTION_BINDING_GAP: (
         "reconnect and rebind the exact connector/host tool mapping"
     ),
     ExecutionReadinessBlockerCode.ACTION_SCHEMA_OR_REVIEW_STALE: (
         "action surface schema or review fingerprint is stale relative to the desired "
-        "source; refresh via the issue #526 rebind/reload path"
+        "source; refresh via the #2153 auto-deployer (emergency fallback: issue #526 rebind)"
     ),
     ExecutionReadinessBlockerCode.PERMISSION_SURFACE_STALE: (
         "permission surface fingerprint is stale relative to the desired source; refresh "
-        "via the issue #526 rebind/reload path"
+        "via the #2153 auto-deployer (emergency fallback: issue #526 rebind)"
     ),
     ExecutionReadinessBlockerCode.COMPLETION_CONTRACT_BINDING_REQUIRED: (
         "bind the exact canonical completion authority identity required by the "

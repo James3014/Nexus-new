@@ -49,14 +49,15 @@ Stages (each returns a typed result; nothing raises past :func:`run`):
    rebuilt once by the tool and re-reviewed), and an optional ``--pre-merge-hook`` GO; it merges
    with ``--match-head-commit``. A head the tool did not author is never merged. Nexus-new
    merges only after nexus-runtime; the pin PR is rebuilt by the tool after the anchor merge.
-8. :func:`notify` comments on #1996 (old -> new, receipts, merge SHAs, Gateway reload pending
-   Owner #526 activation).
+8. :func:`notify` comments on #1996 (old -> new, receipts, merge SHAs; the Gateway reload is
+   the #2153 auto-deployer's, no Owner activation needed, #2155).
 9. :func:`run` adds a lock file, an idempotency key (catalog hash + yaml hash) with PR reuse, and
    a durable JSON receipt per run under ``~/.local/state/nexus-workforce-autoupdate/``.
 
 Issues opened by this tool use ``on_merge: KEEP_OPEN``: #1216 V12 requires ``v12-closable``
 before any Issue created after 2026-10-13T04:05:51Z is closed, so closing stays manual.
-The live Gateway reload is out of scope (#526 R1, Owner BREAK_GLASS).
+The live Gateway reload is out of scope here: the #2153 auto-deployer deploys the merged pin
+from main with no Owner activation (Owner decision 2026-10-14, #2155).
 """
 
 from __future__ import annotations
@@ -959,7 +960,8 @@ SCOPE_NOTE = (
     "tier only; autonomy inherited, never raised; fallbacks unchanged. Campaign/consumer pins "
     "move with the default ONLY when the predecessor is retired (no longer served, so the pin is "
     "unservable); a superseded but still-served predecessor keeps its pins, preserving exact "
-    "experiment identities. The live Gateway reload stays on #526 (Owner BREAK_GLASS).\n"
+    "experiment identities. The live Gateway picks up the merged pin through the #2153 "
+    "auto-deployer; no Owner activation is needed (#2155).\n"
 )
 
 
@@ -1448,8 +1450,8 @@ def notify(gh: GitHub, *, decision: Decision, outcome: str, receipt: Mapping[str
         f"- Merge SHAs: {json.dumps(merges)}\n"
         f"- Run id: `{receipt.get('run_id', '')}` (receipt kept on the M5 host)\n"
         f"- Blocker: {sanitize_reason(receipt.get('reason') or 'none')}\n\n"
-        "Gateway reload is pending Owner #526 activation (BREAK_GLASS); this run did not "
-        "touch the live Gateway. Issues opened here stay open (KEEP_OPEN) until `v12-closable` "
+        "This run did not touch the live Gateway; the #2153 auto-deployer deploys the merged "
+        "pin from main, no Owner activation needed (#2155). Issues opened here stay open (KEEP_OPEN) until `v12-closable` "
         "says 可關閉.\n"
     )
     return gh.comment(NEXUS_REPO, ISSUE_NUMBER, body, issue=True)
@@ -1522,7 +1524,9 @@ def build_plan(decision: Decision, key: str, *, runtime_issue: int | None) -> li
             "rebuild+review+merge",
             "pin PR rebuilt by this tool on the new main after the anchor merged",
         ),
-        PlanStep(NEXUS_REPO, "notify", f"comment on #{ISSUE_NUMBER}; Gateway reload pending #526"),
+        PlanStep(
+            NEXUS_REPO, "notify", f"comment on #{ISSUE_NUMBER}; Gateway reload by the auto-deployer"
+        ),
     ]
 
 
