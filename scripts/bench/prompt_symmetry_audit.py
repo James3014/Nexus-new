@@ -153,6 +153,18 @@ HIDDEN_LITERALS: dict[str, tuple[str, ...]] = {
 }
 
 
+# The runner's attempt list entries (capability_ab_runner writes exactly these attempt types;
+# it imports them from here, so the set cannot drift).
+ATTEMPT_STRICT_BASELINE = "strict_baseline"
+ATTEMPT_PRIMARY = "primary"
+ATTEMPT_BOUNDED_HYPER_RESCUE = "bounded_hyper_rescue"
+ATTEMPT_HIDDEN_VERIFIER_RETRY = "hidden_verifier_bounded_retry"
+MODEL_ATTEMPT_TYPES = frozenset({
+    ATTEMPT_STRICT_BASELINE,
+    ATTEMPT_PRIMARY,
+    ATTEMPT_BOUNDED_HYPER_RESCUE,
+    ATTEMPT_HIDDEN_VERIFIER_RETRY,
+})
 LANE_STRICT = "strict"
 LANE_TREATMENT = "treatment"
 DEFAULT_TREATMENT_MAX_MODEL_CALLS = 4
@@ -964,7 +976,7 @@ def audit_task(
         if (
             arm_rows
             and calls == 0
-            and any(int(row.get("model_calls") or 0) > 0 for row in arm_rows)
+            and any((_count(row.get("model_calls")) or 0) > 0 for row in arm_rows)
         ):
             result.violations.append(f"{arm}_model_call_not_captured")
         if treatment and arm == "with_nexus":
@@ -978,15 +990,20 @@ def audit_task(
         with_row.get("treatment_timeout") is True
         or str(with_row.get("runtime_classification") or "") == "subprocess_timeout"
         or with_row.get("task_deadline_exceeded") is True
+        # the product subprocess crashed (no result report): handled exactly like a killed row
+        or with_row.get("product_crash") is True
     )
-    if (
-        treatment
-        and with_row is not None
-        and not (killed and int(with_row.get("model_calls") or 0) == 0)
-    ):
-        # A killed subprocess reports no calls; its calls are the captured ones (H2).
-        row_calls = int(with_row.get("model_calls") or 0)
-        if row_calls != result.with_nexus_calls:
+    if with_row is not None:
+        # Both lanes: two-way reconciliation of the row's model calls with the interceptor
+        # captures (strict: the calls>1 check above caps both at one). A missing or invalid
+        # model_calls is a mismatch, never a skip; an invalid one is also model_calls_invalid.
+        # A killed or crashed product subprocess reports no calls; its calls are the captured
+        # ones (H2, #2275 round 3).
+        raw_calls = with_row.get("model_calls")
+        row_calls = _count(raw_calls)
+        if raw_calls is not None and row_calls is None:
+            result.violations.append("model_calls_invalid")
+        if not (killed and row_calls == 0) and row_calls != result.with_nexus_calls:
             # Every model call the row reports was captured, and nothing else was.
             result.violations.append(
                 f"with_nexus_calls_mismatch:captured={result.with_nexus_calls},row={row_calls}"
@@ -1326,6 +1343,47 @@ def load_captures(
     return out
 
 
+def _count(value: Any) -> int | None:
+    """A non-negative int count, or None for anything else (bool, float, str, dict, negative)."""
+
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def model_attempts(row: Mapping[str, Any]) -> int | None:
+    """Model attempts of a with-Nexus row (strict rule ``attempt_count>1``); None if invalid.
+
+    The product's ``attempt_count`` is ``len(candidates)`` and includes local/deterministic
+    candidates (e.g. the ``local_guard_fallback`` the sprint appends when the model's only
+    candidate fails the visible test). Those are never solves and never attempts.
+
+    The new rule applies only when the runner wrote BOTH fields: ``model_calls`` (int >= 0,
+    reconciled two-way with the interceptor captures by the task audit) and ``model_attempts``
+    (the runner's attempt list: the primary attempt plus one entry per runner-level re-run,
+    i.e. bounded rescue / hidden retry; each ``attempt_type`` in ``MODEL_ATTEMPT_TYPES``).
+    Attempts = ``max(model_calls, len(model_attempts))``: the primary is counted once, a re-run
+    counts even without a provider call, and a second provider call counts on its own
+    (``(1,[p])->1``, ``(1,[p,r])->2``, ``(2,[p])->2``, ``(0,[p,r])->2``). A row lacking either
+    field keeps the old rule on ``attempt_count`` (conservative). Non-int / negative / bool
+    counts, a non-list or EMPTY list, non-mapping entries or an unknown ``attempt_type`` are
+    invalid (``attempt_count_invalid``), never 0.
+    """
+
+    calls = row.get("model_calls")
+    runs = row.get("model_attempts")
+    if calls is None or runs is None:
+        legacy = row.get("attempt_count")
+        return 0 if legacy is None else _count(legacy)
+    count = _count(calls)
+    if count is None or not isinstance(runs, list) or not runs:
+        return None
+    for item in runs:
+        if not isinstance(item, Mapping) or item.get("attempt_type") not in MODEL_ATTEMPT_TYPES:
+            return None
+    return max(count, len(runs))
+
+
 def _row_key(row: Mapping[str, Any]) -> str:
     return f"{row.get('task_id')}__{row.get('trial_index')}"
 
@@ -1379,12 +1437,15 @@ def audit_run(
             row_violations.append(f"{ident}:no_fixture_material")
         if str(row.get("route_cost_policy_source") or ""):
             row_violations.append(f"{ident}:promoted_route_cost_policy")
-        if (
-            str(row.get("mode")) == "with_nexus"
-            and int(row.get("attempt_count") or 0) > 1
-            and not treatment  # treatment lane: in-product rounds; calls are reconciled per task
-        ):
-            row_violations.append(f"{ident}:attempt_count>1")
+        if str(row.get("mode")) == "with_nexus":
+            # Validity in both lanes; the treatment lane is exempt only from attempt_count>1
+            # (in-product rounds; its calls are reconciled per task).
+            attempts = model_attempts(row)
+            if attempts is None:
+                row_violations.append(f"{ident}:attempt_count_invalid")
+            elif attempts > 1 and not treatment:
+                # Label kept for continuity; it counts MODEL attempts (see model_attempts).
+                row_violations.append(f"{ident}:attempt_count>1")
         if treatment and row.get("bounded_nexus_rescue_used") is True:
             row_violations.append(f"{ident}:runner_rescue_in_treatment_lane")
         if str(row.get("hidden_retry_reason") or "") in {
