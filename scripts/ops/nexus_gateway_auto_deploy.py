@@ -1969,8 +1969,7 @@ class _Cycle:
             status.setdefault("warnings", []).append(f"LIVE_HEALTH_UNREADABLE:{type(exc).__name__}")
             return None
         binding = health.get("controller_binding") if isinstance(health, dict) else None
-        degraded = binding.get("status") == "DEGRADED" if isinstance(binding, dict) else False
-        if not degraded:
+        if not isinstance(binding, dict) or binding.get("status") != "DEGRADED":
             # A non-degraded reading ends the alert episode, so a later
             # degraded start (after a restart) is announced again.
             # Any OSError: a clean IN_SYNC cycle must never fail on this marker.
