@@ -53,6 +53,9 @@ NON_MODEL_JSON_PARSE_ALLOWLIST = {
     # HTTP envelope: Ollama /api/chat body (#1985); the model text in message.content
     # is parsed separately by _parse_json_object.
     ("nexus/engine/llm_judge_providers.py", "OllamaJudgeProvider._chat", "raw"),
+    # Deep copy of the Core verifier's coverage block (#2247): a json round-trip of a
+    # Mapping from the Core host response, not model output.
+    ("nexus/orchestrator/ambient_core.py", "build_core_verdict", "json.dumps(raw_coverage)"),
     # HTTP envelope: JEV structured-answer API body (answers/usage), schema-checked field by field below.
     ("nexus/research/hybrid_replication_live.py", "_jev_request", "response.read()"),
     # File read: local_assist response.json receipt written by the executor, not raw model text.
