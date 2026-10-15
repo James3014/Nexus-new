@@ -1016,7 +1016,11 @@ def verify(
             expected_manifest_sha256=expected_manifest_sha256,
             verifier_digest=verifier_digest,
         )
-    classification = gate.classify_regression(results["base"], results["head"])
+    classification = gate.classify_regression(
+        results["base"],
+        results["head"],
+        changed_paths=[str(path) for path in plan.get("changed_paths", [])],
+    )
     return {
         "schema_version": SCHEMA_VERSION,
         "trusted_source": "default-branch-verifier",

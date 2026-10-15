@@ -1179,6 +1179,66 @@ def test_multiple_missing_parameterized_base_cases_are_ambiguous():
     assert classify_regression(base, head).classification == "IMPACT_UNKNOWN"
 
 
+_BEHIND_FAMILY = "tests.nexus.executors.test_agy_write_admission::test_proc_is_zombie"
+_BEHIND_BASE_IDS = [f"{_BEHIND_FAMILY}[{n}]" for n in ("one", "two", "three", "four")]
+_BEHIND_AMBIGUOUS = "parameterized test ids changed ambiguously between base and head"
+
+
+def _behind_main_pair(*, base_ids=None, head_ids=None):
+    base = _with_node_outcomes(
+        _run(0, [], revision="base"),
+        passed=list(base_ids if base_ids is not None else _BEHIND_BASE_IDS),
+    )
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=list(head_ids if head_ids is not None else [f"{_BEHIND_FAMILY}[one]"]),
+        test_inventory_tree="f" * 40,
+    )
+    return base, head
+
+
+def test_behind_main_ambiguous_ids_in_untouched_file_name_the_merge_remedy():
+    base, head = _behind_main_pair()
+
+    result = classify_regression(base, head, changed_paths=["scripts/ops/other.py"])
+
+    assert result.classification == "IMPACT_UNKNOWN"
+    assert result.blocking is True
+    assert "git merge origin/main" in result.remedy
+    assert _BEHIND_BASE_IDS[1] in result.remedy
+    assert any(
+        _BEHIND_AMBIGUOUS in item and "behind main" in item for item in result.mismatch_reasons
+    )
+    assert "behind main" in result.reason
+
+
+def test_ambiguous_ids_in_a_file_the_pr_touches_keep_todays_message():
+    base, head = _behind_main_pair()
+    touched = "tests/nexus/executors/test_agy_write_admission.py"
+
+    with_paths = classify_regression(base, head, changed_paths=[touched])
+    without_paths = classify_regression(base, head)
+
+    assert with_paths.classification == "IMPACT_UNKNOWN"
+    assert with_paths.remedy == ""
+    assert _BEHIND_AMBIGUOUS in with_paths.mismatch_reasons
+    assert with_paths.reason == without_paths.reason
+    assert "behind main" not in with_paths.reason
+
+
+def test_ids_missing_on_base_instead_keep_todays_message():
+    family = "tests.nexus.executors.test_agy_write_admission::test_proc_is_zombie"
+    base, head = _behind_main_pair(
+        base_ids=[f"{family}[one]"],
+        head_ids=[f"{family}[new-a]", f"{family}[new-b]", f"{family}[one]"],
+    )
+
+    result = classify_regression(base, head, changed_paths=["scripts/ops/other.py"])
+
+    assert result.remedy == ""
+    assert "behind main" not in result.reason
+
+
 def test_dynamic_failure_identity_preserves_raw_evidence_without_false_regression():
     base_node = "tests.test_contract::test_expiry[2026-08-12T07:32:05Z]"
     head_node = "tests.test_contract::test_expiry[2026-08-12T07:40:05+00:00]"
