@@ -19,6 +19,7 @@ from nexus.executors.agy_write_admission import (
     AGY_PERMISSION_MODE_ACCEPT_EDITS,
     AGY_PERMISSION_MODE_PLAN,
     AGY_READ_ONLY_ROLES,
+    KEYCHAIN_NOT_APPLICABLE,
     agy_child_env,
     agy_delivery_failure,
     agy_model_shape_ok,
@@ -31,6 +32,7 @@ from nexus.executors.agy_write_admission import (
     materialize_run_home,
     paths_overlap,
     protected_checkout_plan,
+    run_home_keychain_state,
     run_home_settings_sha256,
     target_git_entry_state,
     worker_home,
@@ -782,6 +784,9 @@ class AgyWorkerAdapter:
             facts["profile_sha256"] = profile_sha256
             if refusal is not None:
                 return refusal, run_env, ""
+            # #2260: the run HOME has its own default keychain on macOS, so agy's
+            # token store never raises the modal "no keychain" dialog.
+            facts["keychain_state"] = run_home_keychain_state(run_home)
             run_homes.append((run_home, run_home_settings_sha256(run_home)))
             try:
                 seatbelt = build_seatbelt_profile(
@@ -819,7 +824,10 @@ class AgyWorkerAdapter:
             provider_permission_mode=permission_mode,
             provider_permission_profile_sha256=facts.get("profile_sha256") or None,
             provider_write_sandbox=(
-                f"seatbelt:{facts['seatbelt_sha256']}" if facts.get("seatbelt_sha256") else None
+                f"seatbelt:{facts['seatbelt_sha256']}"
+                f";keychain:{facts.get('keychain_state', KEYCHAIN_NOT_APPLICABLE)}"
+                if facts.get("seatbelt_sha256")
+                else None
             ),
         )
         after = fingerprint_roots(plan)

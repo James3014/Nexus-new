@@ -393,7 +393,23 @@ def _run_gemini_patch(
             run_home = agy_run_root / "home"
             run_tmp = agy_run_root / "tmp"
             run_tmp.mkdir(parents=True)
-            admission.materialize_run_home(Path(env["HOME"]), run_home, read_only=False)
+            refusal, _profile = admission.materialize_run_home(
+                Path(env["HOME"]), run_home, read_only=False
+            )
+            if refusal is not None:
+                # #2260: no run HOME (or no isolated keychain on macOS) means no
+                # confined run; never fall back to the real HOME.
+                return {
+                    "regression_test_added": False,
+                    "unrelated_change": False,
+                    "root_cause": "",
+                    "written_files": [],
+                    "model_calls": 0,
+                    "total_tokens": 0,
+                    "token_capture_status": "not_run",
+                    "gemini_returncode": None,
+                    "error": refusal,
+                }
             result = run_cli_worker(
                 CliWorkerRequest(
                     executable=str(bin_path),
