@@ -88,16 +88,16 @@ _TOKEN = r"(?:ACCEPT|ACCEPTED|APPROVE|APPROVED)"
 # dash or round marker ("r3 ACCEPT", "Round 2 @ sha: ACCEPT"), or alone on the line.
 # The token itself is case-sensitive (uppercase only); the label words are not.
 _VERDICT_POS = re.compile(
-    rf"(?:\b(?i:verdict)\s*:\s*|@\s*|[:\-–—]\s*|\b(?i:r)\d+\s+|\b(?i:round)\s*\d+\s*:?\s*|^\s*)"
+    rf"(?:\b(?i:verdict)\s*:\s*|@\s*|:\s*|\s[\-–—]\s*|\b(?i:r)\d+\s+|\b(?i:round)\s*\d+\s*:?\s*|^\s*)"
     rf"({_TOKEN})\b"
-    rf"|({_TOKEN})(?=\s*(?:@|\bat\s)\s*[0-9a-f]{{{MIN_PREFIX},}})",
+    rf"|(?<![\w-])({_TOKEN})(?=\s*(?:@|\bat\s)\s*[0-9a-f]{{{MIN_PREFIX},}})",
 )
 # _plain strips underscores, so the joined forms must match too.
 _REJECT = re.compile(
     r"\b(?:REJECT(?:ED)?|REPAIR_?REQUIRED|REQUEST_?CHANGES|CHANGES[ _]?REQUESTED)\b"
 )
 _VERDICT_NEGATIVE = re.compile(r"(?i:verdict)\s*:\s*(?:REJECT|REPAIR_?REQUIRED|REQUEST_?CHANGES)")
-_QUOTE = re.compile("[\"'\u201c\u2018]")
+_QUOTE = re.compile("[\"\u201c\u2018]|(?<![A-Za-z])'")  # an apostrophe inside a word is possessive
 # Words before the token in its clause that make it a wish, a condition or a negation.
 _PRE_DENY = re.compile(
     r"\b(?:await(?:ing|s)?|need(?:s|ed|ing)?|request(?:s|ed|ing)?|should|would|will|could|may|might"
@@ -124,9 +124,20 @@ _ROUND = re.compile(r"\b(?:r|round\s*)(\d+)\b", re.IGNORECASE)
 _CLAUDE = re.compile(r"\b(?:claude|opus|sonnet)\b", re.IGNORECASE)
 _CROSS = re.compile(r"\b(?:codex|gemini|gpt)\b", re.IGNORECASE)
 _HEAD_BIND = re.compile(
-    rf"\bhead\b[^\n]{{0,24}}?(?<![0-9a-f])([0-9a-f]{{{MIN_PREFIX},40}})(?![0-9a-f])"
+    rf"\bhead\b[^\n]{{0,48}}?(?<![0-9a-f])([0-9a-f]{{{MIN_PREFIX},40}})(?![0-9a-f])"
 )
-_SKIP_LINE = re.compile(r"^\s*(?:\||>|(?:[-*+]|\d+\.)\s+\[ \]|\$ |coord ready\b|gh pr\b)|^ {4}|^\t")
+_SKIP_LINE = re.compile(
+    r"^\s*(?:\||>|(?:[-*+]|\d+\.)\s+\[ \]|\$ |coord ready\b|gh pr\b)"
+    r"|^(?: {4}|\t)(?![-*+]\s|\d+\.\s)"  # indented code, but not a nested list item
+)
+_ROUND_MARKER = re.compile(r"\b(?i:r)\d+\b|\b(?i:round)\s*\d+\b")
+_POST_LINE_DENY = re.compile(
+    r"\b(?:pending|withheld|blocked|cannot|unless|only if)\b", re.IGNORECASE
+)
+_REBUTTAL_BUT_NOT = re.compile(
+    r"\brebutted\b[^.;\n]*\b(?:but|though|however|yet)\b[^.;\n]*\b(?:not|nothing|never|wasn't|isn't)\b",
+    re.IGNORECASE,
+)
 _HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 _LABEL_LINE = re.compile(r"^\s*(?:#+\s|\*\*|- \*\*|\*\s\*\*|reviewer\b)", re.IGNORECASE)
 _LABEL_WORDS = re.compile(
@@ -265,7 +276,11 @@ def verdict_clauses(line: str) -> list[str]:
         span = _verdict_match(clause)
         if span is None:
             continue
-        window_start, prev_token_end = prev_token_end, max(prev_token_end, start + span[1])
+        token_at = start + span[0]
+        window_start = prev_token_end
+        for marker in _ROUND_MARKER.finditer(plain_line, prev_token_end, token_at):
+            window_start = marker.start()  # "r1 ... with one should-fix, r2 ACCEPT": new round
+        prev_token_end = max(prev_token_end, start + span[1])
         if (
             start > 0
             and span[0] == 0
@@ -288,6 +303,16 @@ def verdict_clauses(line: str) -> list[str]:
         head_of_after = _STOP.split(after, 1)[0]
         if _POST_DENY.match(head_of_after) or _POST_COND.search(head_of_after):
             continue
+        if not _hex_tokens(clause):
+            # A verdict not bound by its own clause borrows the sha from later on the
+            # line, so a withdrawal later on the line ("ACCEPT, pending CI at <sha>",
+            # "ACCEPT; cannot merge <sha>") belongs to it. A clause-bound
+            # "ACCEPT@<sha>; Codex review still pending" is unaffected.
+            rest_of_line = _plain(plain_line[start + span[1] :]) if start >= 0 else after
+            next_token = _VERDICT_POS.search(rest_of_line)
+            rest_of_line = rest_of_line[: next_token.start()] if next_token else rest_of_line
+            if _POST_LINE_DENY.search(rest_of_line):
+                continue
         out.append(clause)
     return out
 
@@ -343,19 +368,30 @@ def _label_family(line: str) -> str | None:
     return None
 
 
-def _rebuttal_at_cap(section: list[str]) -> bool:
-    """A cross-model REJECT at round >= 3 followed (or joined) by a past-tense rebuttal."""
+def _rebuttal_at_cap(section: list[str], head: str) -> bool:
+    """A cross-model REJECT at round >= 3 followed (or joined) by a past-tense rebuttal.
+
+    A later REJECT line that names the current head withdraws it: a rebuttal of an
+    earlier round does not cover a fresh rejection of this head.
+    """
     reject_round_seen = False
+    rebutted = False
     for line in section:
         plain = _plain(line, keep_parens=True)
         if _REJECT.search(plain) and any(int(n) >= 3 for n in _ROUND.findall(plain)):
             reject_round_seen = True
-        if reject_round_seen and any(
-            _REBUTTED.search(clause) and not _REBUTTAL_DENY.search(clause)
-            for clause in _clauses(plain)
+            if rebutted and names_head(plain, head):
+                return False
+        if (
+            reject_round_seen
+            and not _REBUTTAL_BUT_NOT.search(plain)
+            and any(
+                _REBUTTED.search(clause) and not _REBUTTAL_DENY.search(clause)
+                for clause in _clauses(plain)
+            )
         ):
-            return True
-    return False
+            rebutted = True
+    return rebutted
 
 
 def classify_record(body: str, head: str) -> dict[str, Any] | None:
@@ -385,24 +421,32 @@ def classify_record(body: str, head: str) -> dict[str, Any] | None:
     header_family: str | None = None
     for line in lines:
         label = _label_family(line)
-        if label is not None and label != header_family:
-            if section and header_family == "cross_model" and _rebuttal_at_cap(section):
+        neutral_heading = label is None and re.match(r"^\s*#+\s", line) is not None
+        if (label is not None and label != header_family) or neutral_heading:
+            if section and header_family == "cross_model" and _rebuttal_at_cap(section, head):
                 rebuttal_at_cap = True
-            section, header_family = [], label
+            section, header_family = [], label  # "## Notes" opens a section with no family
         section.append(line)
         clauses = verdict_clauses(line)
         if not clauses:
             continue
+        plain_line = _plain(line, keep_parens=True)
+        consumed = 0
         for clause in clauses:
             span = _verdict_match(clause)
             before = clause[: span[0]] if span else ""
-            family = _family(before) or header_family
+            start = plain_line.find(clause, consumed)
+            consumed = start + len(clause) if start >= 0 else consumed
+            # The family named on the line before the token ("Claude: r1 ..., r2 ACCEPT"),
+            # else the section header's.
+            line_before = plain_line[: start + span[0]] if (span and start >= 0) else before
+            family = _family(before) or _family(line_before) or header_family
             if family and _binding(clause, line, head, comment_head):
                 verdicts.append({"family": family, "line": clause.strip()})
-        if header_family == "cross_model" and _rebuttal_at_cap(section):
+        if header_family == "cross_model" and _rebuttal_at_cap(section, head):
             rebuttal_at_cap = True
         section = []  # the header family persists: a reviewer block lists its rounds
-    if section and header_family == "cross_model" and _rebuttal_at_cap(section):
+    if section and header_family == "cross_model" and _rebuttal_at_cap(section, head):
         rebuttal_at_cap = True
     return {
         "verdict": bool(verdicts),

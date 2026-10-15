@@ -829,3 +829,78 @@ def test_a_reject_word_after_the_token_in_its_clause_denies():
     body = f"Head {HEAD}\n**Claude**\n- G12: APPROVED then CHANGES_REQUESTED\n"
     record = rrc.classify_record(body, HEAD)
     assert record is not None and record["verdict"] is False
+
+
+# -- Gemini round 3 ---------------------------------------------------------------------
+
+
+def test_nested_list_items_are_not_code():
+    body = (
+        "## Review record — Claude (claude-opus-5-5)\n"
+        f"- Head reviewed: `{HEAD}`\n    - Verdict: **ACCEPT**\n"
+    )
+    record = rrc.classify_record(body, HEAD)
+    assert record is not None and record["verdict"] is True and record["claude"]
+    record = rrc.classify_record(f"Head {HEAD}\n    Claude ACCEPT@{HEAD}\n", HEAD)
+    assert record is not None and record["verdict"] is False  # indented code stays skipped
+
+
+def test_possessive_apostrophes_are_not_quotes_but_quoted_tokens_are():
+    for line in (f"Claude's verdict: ACCEPT@{HEAD}", f"Opus's review: ACCEPT@{HEAD}"):
+        assert rrc.is_verdict_line(line), line
+    for line in (f"Claude: Verdict: 'ACCEPT' at {HEAD}", f'Claude: Verdict: "ACCEPT" at {HEAD}'):
+        assert not rrc.is_verdict_line(line), line
+
+
+def test_a_round_marker_restarts_the_negation_window():
+    line = f"Claude: r1 ACCEPT at {OLD} with one should-fix, r2 ACCEPT at {HEAD}"
+    record = rrc.classify_record(line, HEAD)
+    assert record is not None and record["verdict"] is True
+    assert not rrc.is_verdict_line(f"Claude: We cannot, under any circumstances, ACCEPT at {HEAD}")
+
+
+def test_hyphenated_non_accept_is_not_a_verdict():
+    for line in (f"Claude: non-ACCEPT at {HEAD}", f"Claude: un-ACCEPT at {HEAD}"):
+        assert not rrc.is_verdict_line(line), line
+    assert rrc.is_verdict_line(f"Claude - ACCEPT at {HEAD}")
+
+
+def test_withdrawals_later_on_the_line_deny_an_unbound_verdict():
+    for line in (
+        f"Claude: ACCEPT, pending CI at {HEAD}",
+        f"Claude: ACCEPT, only if tests pass at {HEAD}",
+        f"Claude: ACCEPT; cannot merge {HEAD}",
+        f"Claude: ACCEPT, withheld until review at {HEAD}",
+    ):
+        assert not rrc.is_verdict_line(line), line
+    assert rrc.is_verdict_line(f"Claude ACCEPT@{HEAD}; Codex review still pending")
+
+
+def test_a_later_reject_at_the_head_withdraws_a_historical_rebuttal():
+    body = (
+        f"Head reviewed: {HEAD}\nClaude: ACCEPT@{HEAD}\n## Codex\n"
+        f"- r3 REJECT at {OLD}: rebutted\n"
+        f"- r4 REJECT at {HEAD}: critical security issue, DO NOT MERGE!\n"
+    )
+    assert rrc.evaluate(HEAD, RISKY, [_c(body)], [])["status"] == "MISSING_CROSS_MODEL"
+
+
+def test_rebutted_but_it_was_not_is_not_a_rebuttal():
+    body = (
+        f"Head reviewed: {HEAD}\nClaude: ACCEPT@{HEAD}\n## Codex\n"
+        "- r3 REJECT: author claims finding was rebutted, but it was not.\n"
+    )
+    record = rrc.classify_record(body, HEAD)
+    assert record is not None and record["rebuttal_at_cap"] is False
+
+
+def test_a_neutral_heading_closes_the_reviewer_section():
+    body = f"Head reviewed: {HEAD}\n## Codex Review\n- r1 REJECT\n## Author Response\n- Verdict: ACCEPT\n"
+    record = rrc.classify_record(body, HEAD)
+    assert record is not None and record["verdict"] is False
+
+
+def test_head_label_binds_through_verbose_phrasing():
+    body = f"Head commit for this round is {HEAD}\n**Claude**: ACCEPT"
+    record = rrc.classify_record(body, HEAD)
+    assert record is not None and record["verdict"] is True
