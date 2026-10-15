@@ -900,3 +900,31 @@ def test_recovery_write_cannot_follow_a_parent_swapped_after_the_check(
         )
     assert not (elsewhere / "test_hidden.py").exists()
     assert "origin_parent_not_a_plain_directory" in staging_mod.run_abort_reason()
+
+
+def test_consistently_rewritten_staging_state_cannot_self_certify(tmp_path, monkeypatch) -> None:
+    """Scanner 'broken-trust-anchor': staged bytes, sidecar and record rewritten consistently
+    (what same-user unconfined code could do) are no authority. Without the in-memory sha or
+    a runner-supplied sha recovery is refused and the run aborts fail closed."""
+    workspace, visible, hidden = _case(tmp_path)
+    (workspace / ".git").mkdir()  # nothing committed: git is never an authority either
+    killed, record = _killed_run(tmp_path, workspace, hidden)
+    forged = "def test_hidden_contract():\n    assert True\n"
+    forged_sha = hashlib.sha256(forged.encode()).hexdigest()
+    run_root = killed.staged_path.parent.parent
+    os.chmod(run_root, 0o700)
+    os.chmod(killed.staged_path.parent, 0o700)
+    try:
+        _plant(killed.staged_path, forged)
+        os.chmod(killed.staged_path, 0o000)
+        sidecar = killed.sidecar_path
+        _plant(sidecar, json.dumps({"sha256": forged_sha, "origin": str(hidden.resolve())}))
+        _edit_record(run_root, hidden, sha256=forged_sha)
+    finally:
+        os.chmod(killed.staged_path.parent, 0o300)
+        os.chmod(run_root, 0o300)
+    _new_process(monkeypatch)
+    with pytest.raises(staging_mod.HiddenTestStagingError):
+        staging_mod.recover_last_run(_expected_sha(record), workspace_root=workspace)
+    assert not os.path.lexists(hidden)
+    assert "untrusted_recovery_authority" in staging_mod.run_abort_reason()
