@@ -119,6 +119,7 @@
 | nexus/evidence/receipt_base.py | tests/architecture/test_planner_alias.py, tests/services/test_unified_runtime.py | active | high | runtime_owned_planner_alias_contract |
 | nexus/engine | tests/engine, tests/test_engine_*.py | active | high | governance |
 | nexus/engine/sandbox_runner.py | tests/engine/test_sandbox_actions.py | active | high | sandbox_physical_runner_contract |
+| nexus/executors/agy_dispatch_boundary.py | tests/services/test_agy_dispatch_write_boundary.py, tests/services/test_agy_dispatch.py | active | high | agy_dispatch_write_boundary_contract |
 | nexus/executors/cli_worker.py | tests/nexus/executors/test_cli_worker.py | active | high | cli_worker_executor_contract |
 | nexus/executors/exec_policy.py | tests/nexus/executors/test_exec_policy.py, tests/nexus/executors/test_cli_worker.py, tests/nexus/orchestrator/test_candidate_verifier.py, tests/engine/test_cli_pregate.py | active | high | worker_exec_policy_contract |
 | nexus/executors/codex_executor.py | tests/nexus/executors/test_codex_executor.py, tests/nexus/executors/test_worker_contract.py, tests/nexus/executors/test_cli_worker.py, tests/nexus/orchestrator/test_worker_planner_context_input.py | active | high | codex_receipt_attempt_count_and_worker_context_contract |

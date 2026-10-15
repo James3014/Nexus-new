@@ -1,0 +1,198 @@
+"""Seatbelt write boundary for the headless Agy dispatcher (#2202, Owner decision on #1912).
+
+``scripts/ops/nexus-agy-dispatch`` owns its own ``Popen`` loop (stream
+telemetry, quota and stall watchdogs), so it cannot hand the run to
+``run_cli_worker``.  This module gives it the same confinement the worker
+adapter gets from ``run_cli_worker``:
+
+* a disposable per-run HOME holding only the copied Agy auth files and an
+  explicit settings profile (``materialize_run_home``);
+* an exact, allowlisted child environment (``agy_child_env``) plus the
+  per-run tag the descendant sweep looks for;
+* a Seatbelt profile (``build_seatbelt_profile``) that denies every file
+  write except the target worktree (minus ``.git``/``.agents``) and the
+  per-run root, plus literal files the dispatcher itself must let Agy append
+  to (its ``--log-file`` attestation log);
+* a post-exit descendant sweep over the process tree, the run tag and the
+  processes whose cwd is inside the target or the run root.
+
+There is no unconfined fallback: when ``sandbox-exec`` is unavailable the
+boundary cannot be prepared and the dispatcher refuses the run.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import os
+import secrets
+import shutil
+import tempfile
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Iterable, Mapping, Optional
+
+from nexus.executors import cli_worker
+from nexus.executors.agy_write_admission import (
+    SANDBOX_EXEC_PATH,
+    _sbpl_path,
+    agy_child_env,
+    build_seatbelt_profile,
+    materialize_run_home,
+    path_inside,
+    seatbelt_available,
+    worker_home,
+)
+
+AGY_WRITE_BOUNDARY_UNAVAILABLE = "AGY_WRITE_BOUNDARY_UNAVAILABLE"
+
+
+class AgyWriteBoundaryError(RuntimeError):
+    """The boundary could not be prepared; the run must not start."""
+
+
+def boundary_available() -> bool:
+    return seatbelt_available()
+
+
+def _with_literal_writes(profile: str, files: Iterable[Path]) -> str:
+    entries = [f'  (literal "{_sbpl_path(path)}")' for path in files]
+    if not entries:
+        return profile
+    return profile + "\n".join(["(allow file-write*", *entries, ")"]) + "\n"
+
+
+@dataclass
+class AgyDispatchBoundary:
+    """One accept-edits run's write boundary; call ``cleanup`` when done."""
+
+    target: Path
+    run_root: Path
+    run_home: Path
+    run_tmp: Path
+    env: dict[str, str]
+    profile: str
+    profile_path: Path
+    run_tag: str
+    home_profile_sha256: str
+    _baseline: Any = field(default=None, repr=False)
+    _tracker: Any = field(default=None, repr=False)
+    _launched: bool = field(default=False, repr=False)
+
+    @property
+    def seatbelt_sha256(self) -> str:
+        return hashlib.sha256(self.profile.encode("utf-8")).hexdigest()
+
+    @property
+    def sweep_roots(self) -> tuple[str, ...]:
+        return (str(self.target), str(self.run_root))
+
+    def wrap_argv(self, argv: Iterable[str]) -> list[str]:
+        return [SANDBOX_EXEC_PATH, "-f", str(self.profile_path), *argv]
+
+    def before_launch(self) -> None:
+        """Record the pre-start process facts the sweep compares against."""
+        self._baseline = cli_worker._sweep_baseline()
+
+    def after_launch(self, pid: int) -> None:
+        self._launched = True
+        ticks = cli_worker._proc_start_ticks(Path("/proc") / str(pid))
+        if ticks is not None:
+            cli_worker._RUN_START_TICKS[self.run_tag] = ticks
+        self._tracker = cli_worker._DescendantTracker(pid)
+
+    def sweep(self) -> bool:
+        """Kill every surviving worker descendant; True only when provably clean."""
+        if not self._launched:
+            return True
+        tracker, self._tracker = self._tracker, None
+        if tracker is None:
+            return False
+        baseline = self._baseline
+        tracked = tracker.stop() - (baseline.preexisting if baseline else frozenset())
+        tagged_clean = cli_worker._sweep_tagged_processes(self.run_tag)
+        return (
+            cli_worker._sweep_clean(
+                tracked, cli_worker._pids_with_cwd_under(self.sweep_roots, baseline)
+            )
+            and tagged_clean
+            and baseline is not None
+            and not tracker.probe_failed
+        )
+
+    def cleanup(self) -> None:
+        tracker, self._tracker = self._tracker, None
+        if tracker is not None:
+            tracker.stop()
+        cli_worker._RUN_START_TICKS.pop(self.run_tag, None)
+        shutil.rmtree(self.run_root, ignore_errors=True)
+        shutil.rmtree(self.profile_path.parent, ignore_errors=True)
+
+
+def prepare_accept_edits_boundary(
+    *,
+    source_env: Optional[Mapping[str, str]],
+    target: str | Path,
+    extra_writable_files: Iterable[str | Path] = (),
+) -> AgyDispatchBoundary:
+    """Build the disposable HOME, exact env and Seatbelt profile for one run.
+
+    ``source_env`` is the leased account environment; only its HOME (for the
+    copied auth files) and the ``agy_child_env`` allowlist reach the child.
+    """
+    if not boundary_available():
+        raise AgyWriteBoundaryError(f"{AGY_WRITE_BOUNDARY_UNAVAILABLE}:seatbelt_unavailable")
+    target_real = Path(os.path.realpath(Path(target).expanduser()))
+    if not target_real.is_dir():
+        raise AgyWriteBoundaryError(f"{AGY_WRITE_BOUNDARY_UNAVAILABLE}:target_missing")
+    extras: list[Path] = []
+    for raw in extra_writable_files:
+        candidate = Path(raw).expanduser()
+        if not candidate.is_absolute():
+            raise AgyWriteBoundaryError(f"{AGY_WRITE_BOUNDARY_UNAVAILABLE}:relative_extra_path")
+        real = Path(os.path.realpath(candidate))
+        # A literal re-allow inside the target could reopen the .git/.agents denies.
+        if path_inside(real, target_real):
+            raise AgyWriteBoundaryError(f"{AGY_WRITE_BOUNDARY_UNAVAILABLE}:extra_path_in_target")
+        extras.append(real)
+    run_root = Path(os.path.realpath(tempfile.mkdtemp(prefix="nexus-agy-dispatch-run-")))
+    profile_dir = Path(os.path.realpath(tempfile.mkdtemp(prefix="nexus-agy-dispatch-sb-")))
+    try:
+        run_home = run_root / "home"
+        run_tmp = run_root / "tmp"
+        run_tmp.mkdir(parents=True)
+        refusal, home_profile_sha256 = materialize_run_home(
+            worker_home(source_env), run_home, read_only=False
+        )
+        if refusal is not None:
+            raise AgyWriteBoundaryError(f"{AGY_WRITE_BOUNDARY_UNAVAILABLE}:{refusal}")
+        try:
+            profile = _with_literal_writes(
+                build_seatbelt_profile(
+                    run_root=run_root, writable_target=target_real, run_home=run_home
+                ),
+                extras,
+            )
+        except ValueError as exc:
+            raise AgyWriteBoundaryError(
+                f"{AGY_WRITE_BOUNDARY_UNAVAILABLE}:profile_unrepresentable"
+            ) from exc
+        profile_path = profile_dir / "agy-dispatch.sb"
+        profile_path.write_text(profile, encoding="utf-8")
+        run_tag = secrets.token_hex(16)
+        env = agy_child_env(source_env, home=run_home, tmpdir=run_tmp)
+        env[cli_worker._RUN_TAG_ENV] = run_tag
+    except BaseException:
+        shutil.rmtree(run_root, ignore_errors=True)
+        shutil.rmtree(profile_dir, ignore_errors=True)
+        raise
+    return AgyDispatchBoundary(
+        target=target_real,
+        run_root=run_root,
+        run_home=run_home,
+        run_tmp=run_tmp,
+        env=env,
+        profile=profile,
+        profile_path=profile_path,
+        run_tag=run_tag,
+        home_profile_sha256=home_profile_sha256,
+    )

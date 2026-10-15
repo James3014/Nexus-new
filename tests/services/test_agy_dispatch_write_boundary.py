@@ -1,0 +1,646 @@
+"""#2202: the headless Agy dispatcher runs accept-edits Agy inside the #1912 boundary.
+
+* accept-edits runs start only inside a Seatbelt profile that lets Agy write
+  the target worktree (minus ``.git``/``.agents``) and a per-run root, with a
+  disposable HOME, an exact env and a post-exit descendant sweep;
+* a missing ``sandbox-exec`` (or a snapshot without the boundary module)
+  refuses the run before any account is leased; there is no unconfined path;
+* ``--temp-command-permissions`` and every ``command(...)`` allow rule are
+  refused (Owner decision on #1912: no auto-approved commands);
+* every production Agy launcher is either wrapped, plan-mode-only, a caller of
+  the dispatcher, or an explicitly reviewed exception.
+
+Seatbelt itself only runs on macOS; elsewhere the profile text is evaluated
+instead, so every test also passes on Linux.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+import re
+import sys
+from importlib.machinery import SourceFileLoader
+from pathlib import Path
+
+import pytest
+
+from nexus.executors import agy_dispatch_boundary as boundary_mod
+from nexus.executors import agy_write_admission as admission
+
+ROOT = Path(__file__).resolve().parents[2]
+DISPATCH_PATH = ROOT / "scripts" / "ops" / "nexus-agy-dispatch"
+
+os.environ["NEXUS_AGY_SNAPSHOT"] = str(ROOT)
+dispatch = SourceFileLoader("nexus_agy_dispatch_write_boundary", str(DISPATCH_PATH)).load_module()
+
+_spec = importlib.util.spec_from_file_location(
+    "agy_write_admission_test_helpers",
+    ROOT / "tests" / "nexus" / "executors" / "test_agy_write_admission.py",
+)
+assert _spec is not None and _spec.loader is not None
+_helpers = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_helpers)
+_effective_write = _helpers._effective_write
+_seatbelt_usable = _helpers._seatbelt_usable
+
+TOKEN = Path(".gemini") / "antigravity-cli" / "antigravity-oauth-token"
+
+
+class _Claim:
+    def __init__(self, home: Path) -> None:
+        self.account_alias_hash = "boundary"
+        self.lease_id_hash = "lease-boundary"
+        self.internal_id = "boundary-account"
+        self.lease = type(
+            "Lease",
+            (),
+            {
+                "execution_env": {
+                    "HOME": str(home),
+                    "PATH": "/usr/bin:/bin",
+                    "ACCOUNT": "boundary-account",
+                    "NEXUS_SECRET_PROBE": "must-not-leak",
+                }
+            },
+        )()
+        self.released = False
+
+    def release(self) -> None:
+        self.released = True
+
+
+class _Coordinator:
+    def __init__(self, home: Path) -> None:
+        self.claim = _Claim(home)
+        self.acquire_count = 0
+
+    def acquire_claim(self, **_kwargs):
+        self.acquire_count += 1
+        return self.claim
+
+
+def _source_home(tmp_path: Path) -> Path:
+    home = (tmp_path / "lease-home").resolve()
+    token = home / TOKEN
+    token.parent.mkdir(parents=True)
+    token.write_text("token", encoding="utf-8")
+    return home
+
+
+def _target(tmp_path: Path) -> Path:
+    target = (tmp_path / "work").resolve()
+    target.mkdir()
+    (target / ".git").write_text("gitdir: /expected\n", encoding="utf-8")
+    return target
+
+
+@pytest.fixture
+def seatbelt_on(monkeypatch):
+    """Let the boundary be prepared off macOS; nothing here runs sandbox-exec."""
+    if not admission.seatbelt_available():
+        monkeypatch.setattr(boundary_mod, "seatbelt_available", lambda: True)
+
+
+# ---------------------------------------------------------------------------
+# boundary construction
+# ---------------------------------------------------------------------------
+
+
+def test_boundary_profile_env_and_home(tmp_path, seatbelt_on):
+    home = _source_home(tmp_path)
+    target = _target(tmp_path)
+    log = (tmp_path / "ops" / "agy.log").resolve()
+    log.parent.mkdir()
+    outside = (tmp_path / "canonical").resolve()
+    source_env = {
+        "HOME": str(home),
+        "PATH": "/usr/bin:/bin",
+        "NEXUS_SECRET_PROBE": "x",
+        "GH_TOKEN": "x",
+    }
+    boundary = boundary_mod.prepare_accept_edits_boundary(
+        source_env=source_env, target=target, extra_writable_files=[str(log)]
+    )
+    try:
+        run_root = boundary.run_root
+        assert boundary.target == target
+        assert boundary.run_home == run_root / "home"
+        assert (boundary.run_home / TOKEN).read_text() == "token"
+        settings = json.loads((boundary.run_home / admission.AGY_RUN_HOME_SETTINGS).read_text())
+        assert "command(*)" in settings["permissions"]["deny"]
+        # exact env: allowlist + disposable HOME/TMPDIR + the sweep tag only
+        assert boundary.env["HOME"] == str(boundary.run_home)
+        assert boundary.env["TMPDIR"] == str(boundary.run_tmp)
+        assert boundary.env["PATH"] == "/usr/bin:/bin"
+        assert boundary.env["NEXUS_CLI_WORKER_RUN_TAG"] == boundary.run_tag
+        assert "NEXUS_SECRET_PROBE" not in boundary.env
+        assert "GH_TOKEN" not in boundary.env
+        # argv: sandbox-exec with the profile file, then agy's own argv
+        assert boundary.wrap_argv(["agy", "--mode", "accept-edits"]) == [
+            admission.SANDBOX_EXEC_PATH,
+            "-f",
+            str(boundary.profile_path),
+            "agy",
+            "--mode",
+            "accept-edits",
+        ]
+        assert boundary.profile_path.read_text() == boundary.profile
+        assert not admission.path_inside(boundary.profile_path, run_root)
+        assert boundary.sweep_roots == (str(target), str(run_root))
+        profile = boundary.profile
+        assert profile.splitlines()[:3] == ["(version 1)", "(allow default)", "(deny file-write*)"]
+        for path in (target / "src" / "a.py", run_root / "tmp" / "x", log):
+            assert _effective_write(profile, path) == "allow", path
+        for path in (
+            target / ".git",
+            target / ".git" / "config",
+            target / ".agents" / "hooks.json",
+            boundary.run_home / admission.AGY_RUN_HOME_SETTINGS,
+            outside / "escape.txt",
+            log.parent / "other.log",
+            home / TOKEN,
+        ):
+            assert _effective_write(profile, path) == "deny", path
+    finally:
+        boundary.cleanup()
+    assert not boundary.run_root.exists()
+    assert not boundary.profile_path.exists()
+
+
+def test_boundary_refuses_without_seatbelt(tmp_path, monkeypatch):
+    monkeypatch.setattr(boundary_mod, "seatbelt_available", lambda: False)
+    with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="seatbelt_unavailable"):
+        boundary_mod.prepare_accept_edits_boundary(
+            source_env={"HOME": str(_source_home(tmp_path))}, target=_target(tmp_path)
+        )
+
+
+def test_boundary_refuses_extra_writable_path_inside_target(tmp_path, seatbelt_on):
+    target = _target(tmp_path)
+    home = _source_home(tmp_path)
+    for extra, reason in (
+        (target / ".git" / "config", "extra_path_in_target"),
+        (target / "notes.log", "extra_path_in_target"),
+        ("relative.log", "relative_extra_path"),
+    ):
+        with pytest.raises(boundary_mod.AgyWriteBoundaryError, match=reason):
+            boundary_mod.prepare_accept_edits_boundary(
+                source_env={"HOME": str(home)}, target=target, extra_writable_files=[extra]
+            )
+
+
+# ---------------------------------------------------------------------------
+# dispatcher integration
+# ---------------------------------------------------------------------------
+
+
+def test_accept_edits_refused_before_lease_when_boundary_unavailable(tmp_path, monkeypatch):
+    monkeypatch.setattr(dispatch, "_write_boundary_available", lambda: False)
+    coordinator = _Coordinator(_source_home(tmp_path))
+    target = _target(tmp_path)
+    events: list[dict] = []
+
+    def popen_must_not_run(*_args, **_kwargs):
+        raise AssertionError("agy launched without the write boundary")
+
+    monkeypatch.setattr(dispatch.subprocess, "Popen", popen_must_not_run)
+    code = dispatch.dispatch_run(
+        prompt="edit",
+        cwd=str(target),
+        mode="accept-edits",
+        write_paths=[str(target / "a.py")],
+        coordinator=coordinator,
+        operation_hook=events.append,
+    )
+    assert code == 64
+    assert coordinator.acquire_count == 0
+    assert any(
+        e.get("failure_kind") == "DISPATCH_CONTRACT_REJECTED:AGY_WRITE_BOUNDARY_UNAVAILABLE"
+        for e in events
+    )
+
+
+def test_snapshot_without_boundary_module_is_unavailable(monkeypatch):
+    def missing(name):
+        raise ModuleNotFoundError(name)
+
+    monkeypatch.setattr(dispatch, "import_module", missing)
+    assert dispatch._write_boundary_available() is False
+
+
+def test_plan_mode_does_not_require_the_boundary(tmp_path, monkeypatch):
+    monkeypatch.setattr(dispatch, "_write_boundary_available", lambda: False)
+    home = _source_home(tmp_path)
+    coordinator = _Coordinator(home)
+    seen: dict = {}
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary=None):
+        seen["boundary"] = write_boundary
+        seen["home"] = env["HOME"]
+        return 0, "ok", "", False, 1
+
+    code = dispatch.dispatch_run(
+        prompt="inspect", cwd=str(tmp_path), mode="plan", coordinator=coordinator, run_agy_fn=runner
+    )
+    assert code == 0
+    assert seen == {"boundary": None, "home": str(home)}
+
+
+def test_accept_edits_attempt_runs_in_disposable_home_with_profile(
+    tmp_path, monkeypatch, seatbelt_on
+):
+    home = _source_home(tmp_path)
+    target = _target(tmp_path)
+    coordinator = _Coordinator(home)
+    log = (tmp_path / "op" / "agy.log").resolve()
+    log.parent.mkdir()
+    monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(log))
+    seen: dict = {}
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        settings = write_boundary.run_home / admission.AGY_RUN_HOME_SETTINGS
+        seen["boundary"] = write_boundary
+        seen["env"] = dict(env)
+        seen["permissions"] = json.loads(settings.read_text())["permissions"]
+        return 0, "edited", "", False, 1
+
+    code = dispatch.dispatch_run(
+        prompt="edit",
+        cwd=str(target),
+        mode="accept-edits",
+        write_paths=[str(target / "a.py")],
+        coordinator=coordinator,
+        run_agy_fn=runner,
+    )
+    assert code == 0
+    boundary = seen["boundary"]
+    assert seen["env"] == boundary.env
+    assert seen["env"]["HOME"] == str(boundary.run_home) != str(home)
+    assert "ACCOUNT" not in seen["env"] and "NEXUS_SECRET_PROBE" not in seen["env"]
+    # the dispatcher's bounded profile lands in the disposable HOME
+    assert f"write_file({target / 'a.py'})" in seen["permissions"]["allow"]
+    assert "command(*)" in seen["permissions"]["deny"]
+    assert not any(rule.startswith("command") for rule in seen["permissions"]["allow"])
+    # the leased account HOME is never touched, and the run root is gone
+    assert not (home / admission.AGY_RUN_HOME_SETTINGS).exists()
+    assert not boundary.run_root.exists()
+    assert _effective_write(boundary.profile, log) == "allow"
+    assert _effective_write(boundary.profile, target / ".git") == "deny"
+    assert coordinator.claim.released is True
+
+
+def test_run_agy_refuses_accept_edits_without_boundary(tmp_path, monkeypatch):
+    def popen_must_not_run(*_args, **_kwargs):
+        raise AssertionError("agy launched without the write boundary")
+
+    monkeypatch.setattr(dispatch.subprocess, "Popen", popen_must_not_run)
+    with pytest.raises(RuntimeError, match="AGY_WRITE_BOUNDARY_REQUIRED"):
+        dispatch.run_agy(
+            env=dict(os.environ),
+            prompt="edit",
+            cwd=str(tmp_path),
+            mode="accept-edits",
+            model=None,
+            effort=None,
+            timeout=5,
+        )
+
+
+class _RecordingBoundary:
+    """Routes the launch through a recorder instead of sandbox-exec."""
+
+    def __init__(self, env: dict, recorder: Path, record: Path, *, swept: bool) -> None:
+        self.env = env
+        self._recorder = recorder
+        self._record = record
+        self._swept = swept
+        self.calls: list[str] = []
+
+    def wrap_argv(self, argv):
+        self.calls.append("wrap_argv")
+        return [sys.executable, str(self._recorder), str(self._record), *argv]
+
+    def before_launch(self):
+        self.calls.append("before_launch")
+
+    def after_launch(self, pid):
+        self.calls.append("after_launch")
+
+    def sweep(self):
+        self.calls.append("sweep")
+        return self._swept
+
+
+@pytest.mark.parametrize("swept", [True, False])
+def test_run_agy_launches_through_boundary_and_fails_unproven_sweep(tmp_path, monkeypatch, swept):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_agy = bin_dir / "agy"
+    fake_agy.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake_agy.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ.get('PATH', '')}")
+    monkeypatch.delenv("NEXUS_AGY_ATTESTATION_LOG", raising=False)
+    recorder = tmp_path / "recorder.py"
+    recorder.write_text(
+        "import json, os, sys\n"
+        "json.dump({'argv': sys.argv[2:], 'home': os.environ.get('HOME'),\n"
+        "           'leak': os.environ.get('LEAK_PROBE')}, open(sys.argv[1], 'w'))\n"
+        "print('done')\n",
+        encoding="utf-8",
+    )
+    record = tmp_path / "record.json"
+    run_env = {"HOME": str(tmp_path / "run-home"), "PATH": "/usr/bin:/bin"}
+    boundary = _RecordingBoundary(run_env, recorder, record, swept=swept)
+    work = tmp_path / "work"
+    work.mkdir()
+
+    code, out, err, timed_out, _ = dispatch.run_agy(
+        env={**os.environ, "LEAK_PROBE": "leaked"},
+        prompt="edit",
+        cwd=str(work),
+        mode="accept-edits",
+        model=None,
+        effort=None,
+        timeout=10,
+        write_boundary=boundary,
+    )
+    data = json.loads(record.read_text())
+    assert data["argv"][:2] == [str(fake_agy), "--new-project"]
+    assert data["argv"][data["argv"].index("--mode") + 1] == "accept-edits"
+    assert data["home"] == run_env["HOME"]
+    assert data["leak"] is None  # the boundary env replaces the caller env
+    assert boundary.calls == ["wrap_argv", "before_launch", "after_launch", "sweep"]
+    assert timed_out is False
+    if swept:
+        assert code == 0 and "done" in out
+    else:
+        assert code == 1
+        assert "NEXUS_AGY_DESCENDANT_SWEEP_FAILED" in err
+
+
+def test_real_boundary_blocks_writes_outside_target(tmp_path, monkeypatch, seatbelt_on):
+    """On macOS a fake agy really runs under sandbox-exec; elsewhere the profile is evaluated."""
+    home = _source_home(tmp_path)
+    target = _target(tmp_path)
+    outside = (tmp_path / "canonical").resolve()
+    outside.mkdir()
+    log = (tmp_path / "op" / "agy.log").resolve()
+    log.parent.mkdir()
+    boundary = boundary_mod.prepare_accept_edits_boundary(
+        source_env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+        target=target,
+        extra_writable_files=[log],
+    )
+    settings = boundary.run_home / admission.AGY_RUN_HOME_SETTINGS
+    probes = [target / "inside.txt", log, outside / "escape.txt", target / ".git", settings]
+    try:
+        if not _seatbelt_usable():
+            verdicts = [_effective_write(boundary.profile, path) for path in probes]
+            assert verdicts == ["allow", "allow", "deny", "deny", "deny"]
+            return
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        fake_agy = bin_dir / "agy"
+        fake_agy.write_text(
+            f"#!{sys.executable}\n"
+            "import sys\n"
+            "results = []\n"
+            f"for path in {[str(p) for p in probes]!r}:\n"
+            "    try:\n"
+            "        open(path, 'w').write('x')\n"
+            "        results.append('WROTE')\n"
+            "    except OSError:\n"
+            "        results.append('BLOCKED')\n"
+            "print(','.join(results))\n",
+            encoding="utf-8",
+        )
+        fake_agy.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ.get('PATH', '')}")
+        monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(log))
+        code, out, err, _timed_out, _ = dispatch.run_agy(
+            env={},
+            prompt="edit",
+            cwd=str(target),
+            mode="accept-edits",
+            model=None,
+            effort=None,
+            timeout=30,
+            write_boundary=boundary,
+        )
+        assert code == 0, err
+        assert out.strip().splitlines()[-1] == "WROTE,WROTE,BLOCKED,BLOCKED,BLOCKED"
+        assert not (outside / "escape.txt").exists()
+        assert (target / ".git").read_text() == "gitdir: /expected\n"
+    finally:
+        boundary.cleanup()
+
+
+# ---------------------------------------------------------------------------
+# command grants (Owner decision on #1912)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("mode", ["plan", "accept-edits"])
+@pytest.mark.parametrize(
+    "kwargs, refused",
+    [
+        ({"temp_command_permissions": True}, "--temp-command-permissions"),
+        ({"allow_rules": ["command(*)"]}, "UNSAFE_PERMISSION_RULE:command(*)"),
+        ({"allow_rules": ["command(git *)"]}, "command(git *)"),
+        ({"allow_rules": ["command(pytest -q)"]}, "command(pytest -q)"),
+        ({"allow_rules": ["Command(ls)"]}, "Command(ls)"),
+    ],
+)
+def test_command_grants_are_refused(tmp_path, mode, kwargs, refused):
+    with pytest.raises(ValueError, match=re.escape(refused)):
+        dispatch.build_effective_permission_profile(
+            cwd=str(tmp_path), mode=mode, write_paths=[str(tmp_path / "a.py")], **kwargs
+        )
+
+
+@pytest.mark.parametrize("mode", ["plan", "accept-edits"])
+def test_every_profile_denies_commands_and_keeps_narrow_denies(tmp_path, mode):
+    perms, _kind, _sha = dispatch.build_effective_permission_profile(
+        cwd=str(tmp_path),
+        mode=mode,
+        write_paths=[str(tmp_path / "a.py")],
+        deny_rules=["command(git push)"],
+    )
+    assert "command(*)" in perms["deny"]
+    assert "command(git push)" in perms["deny"]
+    assert not any(rule.startswith("command") for rule in perms["allow"])
+
+
+def test_cli_refuses_temp_command_permissions_before_lease(tmp_path, monkeypatch):
+    coordinator = _Coordinator(_source_home(tmp_path))
+    events: list[dict] = []
+    code = dispatch.dispatch_run(
+        prompt="edit",
+        cwd=str(tmp_path),
+        mode="plan",
+        temp_command_permissions=True,
+        coordinator=coordinator,
+        run_agy_fn=lambda **_kwargs: (0, "ok", "", False, 1),
+        operation_hook=events.append,
+    )
+    assert code == 64
+    assert coordinator.acquire_count == 0
+    assert any(
+        str(e.get("failure_kind")).endswith("COMMAND_GRANT_REFUSED:--temp-command-permissions")
+        for e in events
+    )
+
+
+@pytest.mark.parametrize("mode", ["plan", "accept-edits"])
+def test_hybrid_replication_caller_requests_no_command_grant(tmp_path, mode):
+    from nexus.research import hybrid_replication_live as live
+
+    args = list(live._agy_permission_args(tmp_path, mode=mode))
+    assert "--temp-command-permissions" not in args
+    allow = [args[i + 1] for i, a in enumerate(args) if a == "--allow"]
+    deny = [args[i + 1] for i, a in enumerate(args) if a == "--deny"]
+    assert not any(rule.startswith("command") for rule in allow)
+    # the dispatcher admits exactly what the caller sends
+    dispatch.build_effective_permission_profile(
+        cwd=str(tmp_path), mode=mode, allow_rules=allow, deny_rules=deny
+    )
+
+
+# ---------------------------------------------------------------------------
+# launcher inventory
+# ---------------------------------------------------------------------------
+
+_JOINED = re.compile(r"""["']\s*\+?\s*\\?\s*["']""")
+# Agy argv shapes: a --mode argument, Agy-only flags, or an hcom agy session.
+_LAUNCH_MARKERS = (
+    re.compile(r'"--mode",\s*"(?:plan|accept-edits)"'),
+    re.compile(r'"--mode",\s*[A-Za-z_][\w.]*\s*[,\]]'),
+    re.compile(r'"--print-timeout"'),
+    re.compile(r'"--new-project"'),
+    re.compile(r'"--add-dir"'),
+    re.compile(r'"agy",\s*"--terminal"'),
+)
+
+WRAPPED_CLI_WORKER = "wrapped: run_cli_worker + build_seatbelt_profile"
+WRAPPED_DISPATCH = "wrapped: agy_dispatch_boundary"
+PLAN_ONLY = "plan-mode only"
+VIA_DISPATCHER = "calls nexus-agy-dispatch, never raw agy"
+REVIEWED = "reviewed exception"
+
+# Every file whose source carries an Agy argv shape, with its classification.
+AGY_LAUNCHERS: dict[str, tuple[str, str]] = {
+    "nexus/executors/worker_registry.py": (WRAPPED_CLI_WORKER, "#1912 production adapter"),
+    "scripts/bench/real_world_task_runner.py": (WRAPPED_CLI_WORKER, "#1912 bench agy arm"),
+    "scripts/ops/nexus-agy-dispatch": (WRAPPED_DISPATCH, "#2202 accept-edits runs"),
+    "nexus/orchestrator/unified_mcp_gateway.py": (PLAN_ONLY, "#2202 gateway, --sandbox"),
+    "scripts/ops/unified_runtime_scenarios.py": (PLAN_ONLY, "#2202 scenarios, --sandbox"),
+    "nexus/services/cloud_agent_cli_adapter.py": (PLAN_ONLY, "#2202 no caller in tree"),
+    "scripts/bench/agy_provider.py": (PLAN_ONLY, "#2202 bench bare arm, --sandbox"),
+    "scripts/bench/experimental/model_workforce_three_arm.py": (
+        PLAN_ONLY,
+        "#2202 experimental bench, --sandbox",
+    ),
+    "nexus/research/hybrid_replication_live.py": (VIA_DISPATCHER, "#2202 hybrid replication"),
+    "scripts/ops/nexus-agy-review": (VIA_DISPATCHER, "#2202 reviewer profiles"),
+    "scripts/ops/nexus-dsh-workflow": (VIA_DISPATCHER, "#2202 DSH classifier"),
+    "scripts/ops/nexus-hermes-continuation-controller": (VIA_DISPATCHER, "#2202 Hermes"),
+    "scripts/ops/nexus-hermes-soak": (
+        REVIEWED,
+        "#2202 its --mode is the controller's observe/execute, not an Agy mode",
+    ),
+    "scripts/ops/nexus-hcom-agy-safe": (
+        REVIEWED,
+        "#2202 Owner-attended interactive hcom session; not a headless launcher",
+    ),
+}
+
+
+def _scanned_files() -> list[Path]:
+    files: list[Path] = []
+    for base in ("nexus", "scripts"):
+        for path in sorted((ROOT / base).rglob("*")):
+            if not path.is_file() or "__pycache__" in path.parts:
+                continue
+            if path.suffix in {".py", ".sh", ".js"}:
+                files.append(path)
+            elif base == "scripts" and not path.suffix:
+                try:
+                    with path.open("rb") as handle:
+                        if handle.read(2) == b"#!":
+                            files.append(path)
+                except OSError:
+                    continue
+    return files
+
+
+def _agy_launch_sites() -> dict[str, str]:
+    sites: dict[str, str] = {}
+    for path in _scanned_files():
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if "agy" not in text.lower():
+            continue
+        joined = _JOINED.sub("", text)
+        if any(marker.search(joined) for marker in _LAUNCH_MARKERS):
+            sites[path.relative_to(ROOT).as_posix()] = joined
+    return sites
+
+
+def test_every_production_agy_launcher_is_wrapped_or_plan_only():
+    sites = _agy_launch_sites()
+    # A new launcher must be classified here; a removed one must be dropped.
+    assert sorted(sites) == sorted(AGY_LAUNCHERS)
+    assert all(re.search(r"#\d+", reason) for _, reason in AGY_LAUNCHERS.values())
+    for relative, (kind, _reason) in AGY_LAUNCHERS.items():
+        text = sites[relative]
+        modes = re.findall(r'"--mode",\s*"([\w-]+)"', text)
+        if kind == WRAPPED_CLI_WORKER:
+            for needle in (
+                "build_seatbelt_profile(",
+                "seatbelt_profile=",
+                "sweep_descendants_on_exit=True",
+                "exact_env=True",
+                "materialize_run_home(",
+            ):
+                assert needle in text, (relative, needle)
+        elif kind == WRAPPED_DISPATCH:
+            for needle in (
+                "write_boundary.wrap_argv(argv)",
+                "write_boundary.before_launch()",
+                "write_boundary.after_launch(",
+                "write_boundary.sweep()",
+                'raise RuntimeError("AGY_WRITE_BOUNDARY_REQUIRED")',
+                "prepare_accept_edits_boundary(",
+            ):
+                assert needle in text, (relative, needle)
+            # exactly one raw agy Popen site, and it launches launch_argv
+            assert text.count("subprocess.Popen(\n        launch_argv,") == 1
+        elif kind == PLAN_ONLY:
+            assert modes and set(modes) == {"plan"}, (relative, modes)
+            assert "accept-edits" not in text, relative
+            assert not re.search(r'"--mode",\s*[A-Za-z_][\w.]*\s*[,\]]', text), relative
+        elif kind == VIA_DISPATCHER:
+            assert "nexus-agy-dispatch" in text, relative
+            assert '"--print-timeout"' not in text and '"--new-project"' not in text, relative
+
+
+def test_launcher_scan_detects_new_raw_agy_argv():
+    sample = 'cmd = [agy, "--mode", "accept-" "edits", "--print", p]'
+    joined = _JOINED.sub("", sample)
+    assert any(marker.search(joined) for marker in _LAUNCH_MARKERS)
+
+
+def test_gateway_compiles_plan_sandbox_only():
+    from nexus.orchestrator.unified_mcp_gateway import _compile_agy_command
+
+    argv = _compile_agy_command(
+        executable="/bin/agy", model="gemini-3.8-flash", prompt="p", explicit_effort="low"
+    )
+    assert argv[1:4] == ["--mode", "plan", "--sandbox"]
+    assert "accept-edits" not in argv
+
+
+def test_scenarios_agy_invoker_is_plan_sandbox_only():
+    text = (ROOT / "scripts" / "ops" / "unified_runtime_scenarios.py").read_text(encoding="utf-8")
+    assert re.search(r'"--mode",\s*"plan",\s*"--sandbox"', text)

@@ -26,6 +26,57 @@ os.environ["NEXUS_AGY_SNAPSHOT"] = str(ROOT)
 dispatch = SourceFileLoader("nexus_agy_dispatch_canonical", str(DISPATCH_PATH)).load_module()
 
 
+class _PassThroughBoundary:
+    """#2202 test double for the dispatcher write boundary.
+
+    ``run_agy`` refuses accept-edits runs without a boundary; these telemetry
+    tests exercise the stream/watchdog loop, so the double launches the fake
+    agy unwrapped and reports a clean sweep.  Boundary construction itself is
+    covered in ``tests/nexus/executors/test_agy_dispatch_boundary.py``.
+    """
+
+    def __init__(self, env):
+        self.env = dict(env)
+        self.calls: list[str] = []
+
+    def wrap_argv(self, argv):
+        self.calls.append("wrap_argv")
+        return list(argv)
+
+    def before_launch(self):
+        self.calls.append("before_launch")
+
+    def after_launch(self, pid):
+        self.calls.append("after_launch")
+
+    def sweep(self):
+        self.calls.append("sweep")
+        return True
+
+    def cleanup(self):
+        self.calls.append("cleanup")
+
+
+class _PassThroughBoundaryModule:
+    """Stands in for ``nexus.executors.agy_dispatch_boundary`` off macOS."""
+
+    @staticmethod
+    def prepare_accept_edits_boundary(*, source_env, target, extra_writable_files=()):
+        return _PassThroughBoundary(source_env)
+
+
+def _boundary_or_pass_through(monkeypatch) -> None:
+    """Keep a real-``run_agy`` accept-edits test runnable where Seatbelt is missing.
+
+    On macOS the run goes through the real #2202 Seatbelt boundary; on Linux
+    (no ``sandbox-exec``) the dispatcher would refuse it, so the test's
+    classification path runs with the pass-through double instead.
+    """
+    if not dispatch._write_boundary_available():
+        monkeypatch.setattr(dispatch, "_write_boundary_available", lambda: True)
+        monkeypatch.setattr(dispatch, "_agy_dispatch_boundary", _PassThroughBoundaryModule)
+
+
 def _window(remaining: float, *, reset_at: str | None = None) -> dict:
     return {
         "status": "known",
@@ -1612,7 +1663,9 @@ def test_accept_edits_projects_bounded_write_scope_and_restores(
     def runner(**_kwargs):
         data = json.loads(settings.read_text(encoding="utf-8"))
         assert f"write_file({work})" in data["permissions"]["allow"]
-        assert "command(*)" in data["permissions"]["allow"]
+        # #2202: commands are never granted, always denied.
+        assert "command(*)" not in data["permissions"]["allow"]
+        assert "command(*)" in data["permissions"]["deny"]
         return 0, "ok", "", False, 1
 
     code = dispatch.dispatch_run(
@@ -1620,7 +1673,7 @@ def test_accept_edits_projects_bounded_write_scope_and_restores(
         cwd=str(work),
         mode="accept-edits",
         write_paths=[str(work)],
-        temp_command_permissions=True,
+        temp_command_permissions=False,
         coordinator=coordinator,
         run_agy_fn=runner,
     )
@@ -1656,14 +1709,13 @@ def test_accept_edits_replaces_stale_wildcard_policy_and_restores_exact_bytes(
         assert permissions["ask"] == ["custom(*)"]
         assert f"write_file({target})" in permissions["allow"]
         assert f"read_file({work.resolve()}/**)" in permissions["allow"]
-        assert "command(*)" in permissions["allow"]
+        # #2202: the stale command(*) allow is replaced by an explicit deny.
+        assert "command(*)" not in permissions["allow"]
         assert "read_file(*)" not in permissions["allow"]
         assert "write_file(/stale)" not in permissions["allow"]
-        assert "command(*)" not in permissions["deny"]
+        assert "command(*)" in permissions["deny"]
         assert "read_file(*)" not in permissions["deny"]
         assert "write_file(*)" not in permissions["deny"]
-        for rule in dispatch.TEMP_COMMAND_DENY:
-            assert rule in permissions["deny"]
         return 0, "ok", "", False, 1
 
     code = dispatch.dispatch_run(
@@ -1671,7 +1723,7 @@ def test_accept_edits_replaces_stale_wildcard_policy_and_restores_exact_bytes(
         cwd=str(work),
         mode="accept-edits",
         write_paths=[str(target)],
-        temp_command_permissions=True,
+        temp_command_permissions=False,
         coordinator=coordinator,
         run_agy_fn=runner,
     )
@@ -1874,7 +1926,7 @@ def test_accept_edits_permission_refusal_exit_zero_is_failure(tmp_path: Path) ->
         cwd=str(work),
         mode="accept-edits",
         write_paths=[str(target)],
-        temp_command_permissions=True,
+        temp_command_permissions=False,
         coordinator=coordinator,
         run_agy_fn=lambda **_kwargs: (
             0,
@@ -2885,6 +2937,7 @@ sys.exit(0)
     events: list[dict[str, object]] = []
     code, out, err, timed_out, wall_ms = dispatch.run_agy(
         env=os.environ.copy(),
+        write_boundary=_PassThroughBoundary(os.environ.copy()),
         prompt="hello",
         cwd=str(work),
         mode="accept-edits",
@@ -2970,6 +3023,7 @@ def test_run_agy_coding_watchdog_classifies_provider_stalled(tmp_path: Path, mon
 
     code, _out, err, timed_out, _wall_ms = dispatch.run_agy(
         env=os.environ.copy(),
+        write_boundary=_PassThroughBoundary(os.environ.copy()),
         prompt="must edit",
         cwd=str(work),
         mode="accept-edits",
@@ -3017,6 +3071,7 @@ def test_run_agy_coding_watchdog_classifies_stream_without_effect(
     events: list[dict[str, object]] = []
     code, _out, err, timed_out, _wall_ms = dispatch.run_agy(
         env=os.environ.copy(),
+        write_boundary=_PassThroughBoundary(os.environ.copy()),
         prompt="must edit",
         cwd=str(work),
         mode="accept-edits",
@@ -3076,6 +3131,7 @@ def test_run_agy_tool_activity_resets_stream_no_progress_watchdog(
     events: list[dict[str, object]] = []
     code, out, err, timed_out, _wall_ms = dispatch.run_agy(
         env=env,
+        write_boundary=_PassThroughBoundary(env),
         prompt="read and reason",
         cwd=str(work),
         mode="accept-edits",
@@ -3136,6 +3192,7 @@ def test_run_agy_pre_effect_tool_event_budget_classifies_thrash(
     events: list[dict[str, object]] = []
     code, _out, err, timed_out, _wall_ms = dispatch.run_agy(
         env=env,
+        write_boundary=_PassThroughBoundary(env),
         prompt="bounded coding",
         cwd=str(work),
         mode="accept-edits",
@@ -3195,6 +3252,7 @@ def test_run_agy_pre_effect_time_budget_classifies_thrash(tmp_path: Path, monkey
 
     code, _out, err, timed_out, _wall_ms = dispatch.run_agy(
         env=env,
+        write_boundary=_PassThroughBoundary(env),
         prompt="bounded coding",
         cwd=str(work),
         mode="accept-edits",
@@ -3254,6 +3312,7 @@ def test_run_agy_source_effect_before_pre_effect_budget_prevents_false_positive(
     events: list[dict[str, object]] = []
     code, _out, err, timed_out, _wall_ms = dispatch.run_agy(
         env=env,
+        write_boundary=_PassThroughBoundary(env),
         prompt="write once",
         cwd=str(work),
         mode="accept-edits",
@@ -3420,6 +3479,7 @@ def test_run_agy_watchdog_boundary_rechecks_source_effect(tmp_path: Path, monkey
     events: list[dict[str, object]] = []
     code, _out, err, timed_out, _wall_ms = dispatch.run_agy(
         env=os.environ.copy(),
+        write_boundary=_PassThroughBoundary(os.environ.copy()),
         prompt="write once",
         cwd=str(work),
         mode="accept-edits",
@@ -3537,6 +3597,7 @@ def test_independent_headless_denial_only_in_provider_log_is_failure(tmp_path, m
     binary.chmod(0o700)
     monkeypatch.setattr(dispatch.shutil, "which", lambda name: str(binary))
     monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(tmp_path / "agy.log"))
+    _boundary_or_pass_through(monkeypatch)
     events = []
     code = dispatch.dispatch_run(
         prompt="edit",
@@ -4455,7 +4516,8 @@ def test_contradictory_command_permission_fails_closed_before_claim(
     assert code == 64
     assert coordinator.acquire_count == 0
     assert any(
-        "CONTRADICTORY_PERMISSION_PROFILE:command(*)" in str(event.get("failure_kind"))
+        # #2202: the command grant itself is refused before any contradiction check.
+        "COMMAND_GRANT_REFUSED:--temp-command-permissions" in str(event.get("failure_kind"))
         for event in events
     )
 
@@ -4536,8 +4598,9 @@ def test_contradictory_exact_rule_in_both_allow_and_deny_fails_closed(
         cwd=str(work),
         mode="accept-edits",
         write_paths=[str(target)],
-        allow=["command(ls)"],
-        deny=["command(ls)"],
+        # #2202: command allows are refused outright, so use a read rule here.
+        allow=[f"read_file({work.resolve()}/notes.md)"],
+        deny=[f"read_file({work.resolve()}/notes.md)"],
         coordinator=coordinator,
         run_agy_fn=lambda **_kwargs: (0, "ok", "", False, 1),
         operation_hook=events.append,
@@ -4546,8 +4609,8 @@ def test_contradictory_exact_rule_in_both_allow_and_deny_fails_closed(
     assert code == 64
     assert coordinator.acquire_count == 0
     assert any(
-        "CONTRADICTORY_PERMISSION_PROFILE:rule present in both allow and deny:command(ls)"
-        in str(event.get("failure_kind"))
+        "CONTRADICTORY_PERMISSION_PROFILE:rule present in both allow and deny:"
+        f"read_file({work.resolve()}/notes.md)" in str(event.get("failure_kind"))
         for event in events
     )
 
@@ -4568,7 +4631,7 @@ def test_permission_profile_preflight_and_journal_projection(
         cwd=str(work),
         mode="accept-edits",
         write_paths=[str(target)],
-        temp_command_permissions=True,
+        temp_command_permissions=False,
         coordinator=coordinator,
         run_agy_fn=lambda **_kwargs: (0, "all good", "", False, 1),
         operation_hook=events.append,
@@ -4583,8 +4646,9 @@ def test_permission_profile_preflight_and_journal_projection(
     effective_perms = profile_events[0].get("effective_permissions")
     assert isinstance(effective_perms, dict)
     assert f"write_file({target.resolve()})" in effective_perms["allow"]
-    assert "command(*)" in effective_perms["allow"]
-    assert "command(git push)" in effective_perms["deny"]
+    # #2202: no command grant; every profile denies commands explicitly.
+    assert not any(rule.startswith("command") for rule in effective_perms["allow"])
+    assert "command(*)" in effective_perms["deny"]
 
 
 def test_permission_profile_preflight_fails_on_tampered_settings(
@@ -4636,7 +4700,7 @@ def test_accept_edits_semantic_refusal_variants(
         cwd=str(work),
         mode="accept-edits",
         write_paths=[str(target)],
-        temp_command_permissions=True,
+        temp_command_permissions=False,
         coordinator=coordinator,
         run_agy_fn=lambda **_kwargs: (0, marker, "", False, 1),
         operation_hook=events.append,
@@ -4848,7 +4912,7 @@ def test_command_scope_g0_transient_mutation_red_fixture(tmp_path: Path) -> None
         cwd=str(work),
         mode="accept-edits",
         write_paths=[str(target)],
-        temp_command_permissions=True,
+        temp_command_permissions=False,
         coordinator=coordinator,
         run_agy_fn=mock_runner,
         operation_hook=events.append,
@@ -4893,7 +4957,7 @@ def test_write_scope_clean_completion_verified_in_scope(tmp_path: Path) -> None:
         cwd=str(work),
         mode="accept-edits",
         write_paths=[str(target)],
-        temp_command_permissions=True,
+        temp_command_permissions=False,
         coordinator=coordinator,
         run_agy_fn=mock_runner,
         operation_hook=events.append,
@@ -5277,6 +5341,7 @@ def test_run_agy_refreshes_telemetry_at_watchdog_boundary(
     events: list[dict[str, object]] = []
     code, _out, err, timed_out, _wall_ms = dispatch.run_agy(
         env={"HOME": str(tmp_path)},
+        write_boundary=_PassThroughBoundary({"HOME": str(tmp_path)}),
         prompt="watchdog boundary",
         cwd=str(tmp_path),
         mode="accept-edits",

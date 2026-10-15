@@ -1278,8 +1278,8 @@ _AGY_DENY_RULES = (
 
 def _agy_permission_args(cwd: Path, *, mode: str) -> tuple[str, ...]:
     root = str(cwd.resolve())
+    # #2202: the dispatcher refuses command grants (Owner decision on #1912).
     args: list[str] = [
-        "--temp-command-permissions",
         "--allow",
         f"read_file({root}/**)",
     ]

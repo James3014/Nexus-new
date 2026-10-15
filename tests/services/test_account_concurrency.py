@@ -1001,7 +1001,7 @@ class TestAccountConcurrencyModel(unittest.TestCase):
             prompt="test prompt permission lifecycle",
             cwd=str(worktree),
             max_calls=2,
-            temp_command_permissions=True,
+            temp_command_permissions=False,
             coordinator=coord,
             run_agy_fn=mock_run_agy,
         )
