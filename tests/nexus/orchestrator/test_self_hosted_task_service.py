@@ -11374,13 +11374,27 @@ def test_default_state_root_is_outside_repository_workspace(tmp_path, monkeypatc
     assert not (workspace / "Nexus-new-self-hosted-state").exists()
 
 
-def test_default_state_root_honours_xdg_state_home(tmp_path, monkeypatch):
-    mod, _home, _ws, repo = _state_root_repo(tmp_path, monkeypatch)
-    xdg = tmp_path / "xdg"
-    monkeypatch.setenv("XDG_STATE_HOME", str(xdg))
-    assert mod._default_state_dir_for_repository(repo) == (
-        xdg / "Nexus-new-self-hosted-state"
-    ).resolve()
+def test_default_state_root_ignores_xdg_state_home(tmp_path, monkeypatch):
+    """One root for every process: the Gateway exports ~/.local/state, not XDG."""
+    mod, home, _ws, repo = _state_root_repo(tmp_path, monkeypatch)
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg"))
+    assert (
+        mod._default_state_dir_for_repository(repo)
+        == (home / ".local/state/Nexus-new-self-hosted-state").resolve()
+    )
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads mode-000 directories")
+def test_default_state_root_fails_closed_on_unreadable_legacy_dir(tmp_path, monkeypatch):
+    mod, _home, workspace, repo = _state_root_repo(tmp_path, monkeypatch)
+    locked = workspace / "Nexus-new-self-hosted-state" / "locked"
+    locked.mkdir(parents=True)
+    locked.chmod(0)
+    try:
+        with pytest.raises(RuntimeError, match="NEXUS_SELF_HOSTED_STATE_ROOT_LEGACY_PRESENT"):
+            mod._default_state_dir_for_repository(repo)
+    finally:
+        locked.chmod(0o700)
 
 
 def test_canonical_state_dir_env_override_still_wins(tmp_path, monkeypatch):

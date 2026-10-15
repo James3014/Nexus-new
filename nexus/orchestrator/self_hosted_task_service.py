@@ -1540,21 +1540,28 @@ def _require_verified_receipt_binding(receipt: Any, packet: Mapping[str, Any]) -
 
 
 def _tree_holds_regular_file(root: Path) -> bool:
+    """True when ``root`` holds any file; an unreadable directory counts as state."""
+
+    def unreadable(exc: OSError) -> None:
+        raise exc
+
     try:
-        for _dirpath, _dirs, files in os.walk(root):
+        for _dirpath, _dirs, files in os.walk(root, onerror=unreadable):
             if files:
                 return True
     except OSError:
-        return False
+        return True
     return False
 
 
 def _default_state_dir_for_repository(repository_root: Path) -> Path:
-    """Default durable-state root: user state dir, never inside the workspace."""
+    """Default durable-state root: ``~/.local/state``, never inside the workspace (#1539).
+
+    Fixed (no XDG override) so it equals the root the auto-deployed Gateway
+    exports; ``NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR`` stays the only override.
+    """
     name = f"{repository_root.name}-self-hosted-state"
-    xdg = os.getenv("XDG_STATE_HOME", "").strip()
-    base = Path(xdg) if xdg and Path(xdg).is_absolute() else Path.home() / ".local" / "state"
-    new_root = (base / name).resolve()
+    new_root = (Path.home() / ".local" / "state" / name).resolve()
     legacy = (repository_root.parent / name).resolve()
     if legacy != new_root and legacy.is_dir() and _tree_holds_regular_file(legacy):
         raise RuntimeError(
