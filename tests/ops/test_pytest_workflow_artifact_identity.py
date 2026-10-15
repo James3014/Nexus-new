@@ -169,6 +169,10 @@ def test_impact_gate_fails_unless_both_run_sides_succeeded() -> None:
     assert 'if [ "$RUN_RESULT" != "success" ]; then' in run
     assert "different impact plans" in run
     assert "does not bind the exact base/head revisions" in run
+    assert "run side did not record success" in run
+    side_steps = [step["name"] for step in _load_workflow()["jobs"]["impact-run"]["steps"]]
+    # The success marker is the last step before the always() upload.
+    assert side_steps[-2:] == ["Record run side success", "Upload exact-base run evidence"]
     names = [step["name"] for step in _steps()]
     assert names.index("Verify both run sides and assemble evidence") < names.index(
         "Classify exact-base regression"
@@ -192,3 +196,5 @@ def test_impact_map_coverage_is_advisory_and_pr_only() -> None:
     assert job.get("permissions") is None  # inherits contents: read
     (checkout,) = [step for step in job["steps"] if step["name"] == "Checkout exact head"]
     assert checkout["with"]["persist-credentials"] is False
+    run = job["steps"][-1]["run"]
+    assert 'ch not in "%`:#[]"' in run  # no ::cmd or legacy ##[cmd] from PR paths

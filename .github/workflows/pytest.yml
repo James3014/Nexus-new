@@ -214,7 +214,7 @@ jobs:
           if plan.get("fallback") == "FULL_SUITE":
               def clean(path):
                   # Paths are PR-controlled: no CR/LF or workflow-command escapes.
-                  text = "".join(ch for ch in str(path) if ch.isprintable() and ch not in "%`")
+                  text = "".join(ch for ch in str(path) if ch.isprintable() and ch not in "%`#[]")
                   return text[:200] + ("..." if len(text) > 200 else "")
 
               paths = [clean(path) for path in plan.get("unmatched_paths", [])][:50]
@@ -386,6 +386,14 @@ jobs:
           done < <(git ls-files --stage -z)
           git submodule foreach --recursive ':'
 
+      - name: Record run side success
+        # Last step before upload: present only when every earlier step of this
+        # side succeeded, so the gate can verify each side on its own (#2220).
+        env:
+          SIDE: ${{ matrix.side }}
+          HEAD_SHA: ${{ steps.base.outputs.head_sha }}
+        run: printf '{"side":"%s","head_sha":"%s","status":"success"}\n' "$SIDE" "$HEAD_SHA" > "$RUNNER_TEMP/nexus-ci-impact/side-status.json"
+
       - name: Upload exact-base run evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -521,6 +529,10 @@ jobs:
               side: temp / "nexus-ci-impact-sides" / f"exact-base-impact-{side}-{head_sha}"
               for side in ("base", "head")
           }
+          for side, path in sides.items():
+              status = json.loads((path / "side-status.json").read_text(encoding="utf-8"))
+              if status != {"side": side, "head_sha": head_sha, "status": "success"}:
+                  raise SystemExit(f"{side} run side did not record success")
           plans = {side: (path / "plan.json").read_bytes() for side, path in sides.items()}
           if hashlib.sha256(plans["base"]).digest() != hashlib.sha256(plans["head"]).digest():
               raise SystemExit("base and head run sides used different impact plans")
@@ -641,7 +653,8 @@ jobs:
 
           def clean(path):
               # Paths are PR-controlled: no CR/LF or workflow-command escapes.
-              text = "".join(ch for ch in str(path) if ch.isprintable() and ch not in "%`:")
+              # The runner also parses legacy ##[command] anywhere in a line.
+              text = "".join(ch for ch in str(path) if ch.isprintable() and ch not in "%`:#[]")
               return text[:200]
 
           paths = [clean(path) for path in plan.get("unmatched_paths", [])][:20]
