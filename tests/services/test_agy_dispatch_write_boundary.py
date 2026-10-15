@@ -20,6 +20,7 @@ import importlib.util
 import json
 import os
 import re
+import subprocess
 import sys
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
@@ -306,6 +307,162 @@ def test_run_agy_refuses_accept_edits_without_boundary(tmp_path, monkeypatch):
             effort=None,
             timeout=5,
         )
+
+
+# ---------------------------------------------------------------------------
+# failure classification under the boundary (2026-10-15 regression)
+# ---------------------------------------------------------------------------
+
+# agy.log lines from operation agyop_2bdee3a289264238a3667857302c7fca: agy's own
+# startup writes under the locked run-HOME config dir, denied by Seatbelt.
+_RUN_HOME_DENIALS = (
+    "E1015 14:31:56.935006      32 mcp_manager.go:793] Failed to create mcp config file: "
+    "open {home}/.gemini/config/mcp_config.json: operation not permitted\n"
+    "E1015 14:31:56.935138      32 server.go:1055] Failed to load MCP config: failed to get "
+    "specs from config: failed to create mcp config file: open "
+    "{home}/.gemini/config/mcp_config.json: operation not permitted\n"
+    "E1015 14:31:56.935414     150 migrate.go:156] Migration: failed to create .migrated "
+    "file: open {home}/.gemini/config/.migrated: operation not permitted\n"
+)
+_AGY_QUOTA_STDERR = (
+    "error: Individual quota reached. Please upgrade your subscription to increase your "
+    "limits. Resets in 83h48m12s.\n"
+    'AGY_ERROR: {"short_error":"RESOURCE_EXHAUSTED (code 429): Individual quota reached. '
+    'Please upgrade your subscription to increase your limits. Resets in 83h48m12s.",'
+    '"status":"RESOURCE_EXHAUSTED","error_code":429,"code_kind":"http","retryable":true,'
+    '"error_id":"59530d02-c4ef-4e9f-87ee-6b2dd626aac9-1"}\n'
+)
+
+
+class _RotatingCoordinator(_Coordinator):
+    def __init__(self, home: Path) -> None:
+        super().__init__(home)
+        self.rotated: list = []
+        self.retired: list = []
+
+    def rotate_claim(self, *, current_claim, failure_kind, **_kwargs):
+        self.rotated.append(failure_kind)
+        return self.claim
+
+    def retire_failed_claim(self, claim, kind, **_kwargs):
+        self.retired.append(kind)
+
+
+def _metas(err: str) -> list[dict]:
+    prefix = "NEXUS_AGY_DISPATCH "
+    return [json.loads(line[len(prefix) :]) for line in err.splitlines() if line.startswith(prefix)]
+
+
+def _run_with_log(tmp_path, monkeypatch, attempts):
+    """Run accept-edits; each attempt appends its log text and returns (code, stderr)."""
+    home = _source_home(tmp_path)
+    target = (tmp_path / "work").resolve()
+    target.mkdir()
+    # a real repository, so each attempt's source baseline proves "no effect"
+    subprocess.run(["git", "init", "-q", str(target)], check=True)
+    coordinator = _RotatingCoordinator(home)
+    log = (tmp_path / "op" / "agy.log").resolve()
+    log.parent.mkdir()
+    log.write_text("", encoding="utf-8")
+    monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(log))
+    monkeypatch.setenv("NEXUS_AGY_MAX_ACCOUNT_FAILOVERS", "3")
+    pending = list(attempts)
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        log_text, code, stderr = pending.pop(0)
+
+        def fill(text: str) -> str:
+            return text.replace("{home}", str(write_boundary.run_home)).replace(
+                "{target}", str(target)
+            )
+
+        with log.open("a", encoding="utf-8") as handle:
+            handle.write(fill(log_text))
+        return code, "", fill(stderr), False, 1
+
+    code = dispatch.dispatch_run(
+        prompt="edit",
+        cwd=str(target),
+        mode="accept-edits",
+        write_paths=[str(target / "a.py")],
+        coordinator=coordinator,
+        run_agy_fn=runner,
+    )
+    return code, coordinator, pending
+
+
+def test_quota_failure_with_run_home_denials_rotates(tmp_path, monkeypatch, seatbelt_on, capsys):
+    code, coordinator, pending = _run_with_log(
+        tmp_path,
+        monkeypatch,
+        [(_RUN_HOME_DENIALS, 1, _AGY_QUOTA_STDERR), (_RUN_HOME_DENIALS, 0, "")],
+    )
+    metas = _metas(capsys.readouterr().err)
+    assert code == 0 and pending == []
+    assert coordinator.rotated == [dispatch.AccountFailureKind.QUOTA_EXHAUSTED]
+    assert metas[-1]["status"] == "completed" and metas[-1]["rotations"] == 1
+
+
+@pytest.mark.parametrize(
+    "genuine",
+    [
+        # a Seatbelt denial outside the run HOME (the target's .git)
+        "E1015 14:31:57.000000      32 tool.go:1] write: open {target}/.git/config: "
+        "operation not permitted\n",
+        # a tool-permission denial still counts even when it names a run-HOME path
+        "I1015 14:31:57.000000      32 tool.go:1] Tool permission denied: "
+        "write_file({home}/notes.txt): operation not permitted\n",
+    ],
+)
+def test_genuine_permission_denial_still_blocks(
+    tmp_path, monkeypatch, seatbelt_on, capsys, genuine
+):
+    code, coordinator, _ = _run_with_log(
+        tmp_path, monkeypatch, [(_RUN_HOME_DENIALS + genuine, 1, "")]
+    )
+    metas = _metas(capsys.readouterr().err)
+    assert code != 0
+    assert coordinator.rotated == []
+    assert metas[-1]["failure_kind"] == "PERMISSION_OR_SCOPE_ERROR"
+
+
+def test_run_home_denials_alone_do_not_fail_a_clean_run(tmp_path, monkeypatch, seatbelt_on, capsys):
+    code, coordinator, _ = _run_with_log(tmp_path, monkeypatch, [(_RUN_HOME_DENIALS, 0, "")])
+    metas = _metas(capsys.readouterr().err)
+    assert code == 0
+    assert coordinator.rotated == []
+    assert metas[-1]["status"] == "completed"
+
+
+def test_classify_failure_quota_outranks_permission_markers():
+    stdout = "open /elsewhere/file: operation not permitted"
+    assert (
+        dispatch.classify_failure(1, stdout, _AGY_QUOTA_STDERR, False)
+        == dispatch.AccountFailureKind.QUOTA_EXHAUSTED
+    )
+    bare_429 = 'AGY_ERROR: {"status":"UNAVAILABLE_X","error_code":429}\n'
+    assert (
+        dispatch.classify_failure(1, stdout, bare_429, False)
+        == dispatch.AccountFailureKind.QUOTA_EXHAUSTED
+    )
+    assert (
+        dispatch.classify_failure(1, stdout, "error: boom\n", False)
+        == dispatch.AccountFailureKind.PERMISSION_OR_SCOPE_ERROR
+    )
+
+
+def test_expected_run_home_denial_matches_only_run_home_eperm(tmp_path):
+    home = (tmp_path / "run" / "home").resolve()
+    line = f"open {home}/.gemini/config/.migrated: operation not permitted"
+    assert boundary_mod.is_expected_run_home_denial(line, home)
+    assert not boundary_mod.is_expected_run_home_denial(
+        f"open {home}/../escape: operation not permitted", home
+    )
+    assert not boundary_mod.is_expected_run_home_denial(
+        f"open {tmp_path}/x: operation not permitted", home
+    )
+    assert not boundary_mod.is_expected_run_home_denial(f"open {home}/x: permission denied", home)
+    assert not boundary_mod.is_expected_run_home_denial("operation not permitted", home)
 
 
 class _RecordingBoundary:

@@ -1083,16 +1083,60 @@ def _has_permission_failure_signal(text: str) -> bool:
     return any(marker in lowered for marker in _PERMISSION_FAILURE_MARKERS)
 
 
+_AGY_ERROR_LINE_RE = re.compile(r"(?m)^AGY_ERROR:\s*(?P<payload>\{.*\})\s*$")
+
+
+def _has_structured_quota_error(stderr: str) -> bool:
+    """agy's ``AGY_ERROR`` JSON reporting RESOURCE_EXHAUSTED or HTTP 429."""
+    for match in _AGY_ERROR_LINE_RE.finditer(stderr):
+        try:
+            payload = json.loads(match.group("payload"))
+        except ValueError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        status = str(payload.get("status") or "").upper()
+        if status == "RESOURCE_EXHAUSTED" or payload.get("error_code") in (429, "429"):
+            return True
+    return False
+
+
+def _has_provider_quota_signal(stderr: str) -> bool:
+    """#2202: a provider quota failure on stderr outranks permission markers."""
+    return _has_quota_failure_signal(stderr) or _has_structured_quota_error(stderr)
+
+
+def _permission_scan_text(text: str, run_homes: list[Path]) -> str:
+    """#2202: drop Seatbelt's expected EPERM lines for agy's own run-HOME writes.
+
+    ``run_homes`` are the disposable HOMEs of this dispatch's attempts (the
+    provider log spans attempts).  A line is dropped only when the boundary
+    attributes it to one of them and it carries no permission marker besides
+    the EPERM text, so a real tool-permission denial (anywhere) still counts.
+    """
+    if not text or not run_homes:
+        return text
+    boundary = _agy_dispatch_boundary()
+    kept = []
+    for line in text.splitlines(keepends=True):
+        if any(boundary.is_expected_run_home_denial(line, home) for home in run_homes):
+            residue = line.lower().replace("operation not permitted", "")
+            if not _has_permission_failure_signal(residue):
+                continue
+        kept.append(line)
+    return "".join(kept)
+
+
 def classify_failure(
     returncode: int | None, stdout: str, stderr: str, timed_out: bool
 ) -> AccountFailureKind:
     if timed_out:
         return AccountFailureKind.TIMEOUT
     text = (stdout + "\n" + stderr).lower()
+    if _has_provider_quota_signal(stderr):
+        return AccountFailureKind.QUOTA_EXHAUSTED
     if _has_permission_failure_signal(text):
         return AccountFailureKind.PERMISSION_OR_SCOPE_ERROR
-    if _has_quota_failure_signal(stderr):
-        return AccountFailureKind.QUOTA_EXHAUSTED
     if (
         "invalid model selection" in text
         or "not supported for model" in text
@@ -3288,6 +3332,8 @@ def dispatch_run(
     active_provider_pgid: int | None = None
 
     attempt_tool_event_count = 0
+    # #2202: disposable run HOMEs of this dispatch's boundary-wrapped attempts.
+    boundary_run_homes: list[Path] = []
 
     def _inner_operation_hook(event: dict[str, Any] | None = None, **kwargs: Any) -> None:
         nonlocal active_provider_pid, active_provider_pgid, attempt_tool_event_count
@@ -3670,13 +3716,26 @@ def dispatch_run(
                 or "headless mode cannot prompt for" in provider_log_lower
                 or "auto-denied" in provider_log_lower
             )
-            provider_permission_denial = mode == "accept-edits" and _has_permission_failure_signal(
-                provider_log_text
+            # #2202: a provider quota failure wins over permission markers, and
+            # Seatbelt's expected run-HOME denials are not permission evidence.
+            provider_quota_signal = _has_provider_quota_signal(err)
+            if write_boundary is not None:
+                boundary_run_homes.append(write_boundary.run_home)
+            provider_permission_denial = (
+                mode == "accept-edits"
+                and not provider_quota_signal
+                and _has_permission_failure_signal(
+                    _permission_scan_text(provider_log_text, boundary_run_homes)
+                )
             )
             semantic_output = out + "\n" + err
             semantic_output_lower = semantic_output.lower()
-            semantic_permission_refusal = mode == "accept-edits" and _has_permission_failure_signal(
-                semantic_output
+            semantic_permission_refusal = (
+                mode == "accept-edits"
+                and not provider_quota_signal
+                and _has_permission_failure_signal(
+                    _permission_scan_text(semantic_output, boundary_run_homes)
+                )
             )
             semantic_headless_denial = mode == "accept-edits" and (
                 "headless mode cannot prompt for" in semantic_output_lower

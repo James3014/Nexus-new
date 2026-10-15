@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import secrets
 import shutil
 import tempfile
@@ -52,6 +53,38 @@ class AgyWriteBoundaryError(RuntimeError):
 
 def boundary_available() -> bool:
     return seatbelt_available()
+
+
+# Agy's own startup writes under the disposable HOME's locked ``.gemini/config``
+# (``mcp_config.json``, ``.migrated``) are denied by the #1912 profile by design;
+# Seatbelt reports them as EPERM.  Only that exact error, naming only paths
+# inside the run HOME, is expected boundary noise.
+_SEATBELT_DENIAL_MARKER = "operation not permitted"
+_ABSOLUTE_PATH_RE = re.compile(r"/[^\s:'\"]+")
+
+
+def is_expected_run_home_denial(line: str, run_home: str | Path) -> bool:
+    """True for a Seatbelt EPERM line whose every named path is inside ``run_home``.
+
+    ``path_inside`` compares realpaths, so macOS's ``/var`` alias of the
+    ``/private/var`` run root matches too.
+    """
+    if _SEATBELT_DENIAL_MARKER not in line.lower():
+        return False
+    paths = _ABSOLUTE_PATH_RE.findall(line)
+    home = Path(run_home)
+    return bool(paths) and all(path_inside(Path(raw), home) for raw in paths)
+
+
+def strip_expected_run_home_denials(text: str, run_home: str | Path | None) -> str:
+    """Drop the expected run-HOME Seatbelt denials before permission-marker matching."""
+    if not text or run_home is None:
+        return text
+    return "".join(
+        line
+        for line in text.splitlines(keepends=True)
+        if not is_expected_run_home_denial(line, run_home)
+    )
 
 
 def _with_literal_writes(profile: str, files: Iterable[Path]) -> str:
