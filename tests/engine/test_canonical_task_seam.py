@@ -144,7 +144,7 @@ def test_canonical_product_task_enters_gateway_once_without_legacy_fallback(
     )
 
     result = execute_canonical_product_task(
-        "audit bounded runtime",
+        "audit the bounded runtime",
         tmp_path,
         execution_context={
             "task_id": "canonical-product-1",
@@ -159,9 +159,12 @@ def test_canonical_product_task_enters_gateway_once_without_legacy_fallback(
     request = captured["request"]
     assert request.canonical_planning_bundle is not None
     assert request.route["online_policy"] == "auto"
-    assert set(request.route).isdisjoint(
-        {"provider", "model", "execution_topology", "recommended_flow"}
-    )
+    assert set(request.route).isdisjoint({
+        "provider",
+        "model",
+        "execution_topology",
+        "recommended_flow",
+    })
     assert request.route["workforce_bindings"]["online"]["worker_id"] == "grok_review"
     assert "provider" not in request.route["workforce_bindings"]["online"]
     assert result.production_ingress_count == 1
@@ -233,7 +236,9 @@ def test_canonical_product_loads_governed_learning_policy_before_planner(
     }
     plan = captured["request"].canonical_planning_bundle.plan
     assert "memory" in plan.selected_capabilities
-    assert plan.signal_snapshot["learning_policy"]["adoption_lineage"]["adoption_id"] == "ladopt:test"
+    assert (
+        plan.signal_snapshot["learning_policy"]["adoption_lineage"]["adoption_id"] == "ladopt:test"
+    )
     assert plan.signal_snapshot["route_truth_source"] == "CapabilityPlanner"
     assert (
         captured["request"].budget["learning_policy"]["adoption_lineage"]["adoption_id"]
@@ -274,7 +279,7 @@ def test_canonical_product_verified_repair_topology_is_planner_owned(
     )
 
     result = execute_canonical_product_task(
-        "repair target.py and independently review the verified result",
+        "repair target.py. Review the verified result.",
         tmp_path,
         execution_context={
             "task_id": "canonical-world-c-1",
@@ -296,9 +301,7 @@ def test_canonical_product_verified_repair_topology_is_planner_owned(
     assert request.local_request.planner_snapshot["executor_model"] == "workforce_admission"
     assert request.route["workforce_bindings"]["local"]["worker_id"] == "local_coder_7b"
     assert request.codeintel["workspace_root"] == str(tmp_path.resolve())
-    assert request.codeintel["verify_commands"] == [
-        "python -m py_compile target.py"
-    ]
+    assert request.codeintel["verify_commands"] == ["python -m py_compile target.py"]
     assert request.codeintel["mempalace_tenant_id"] == "canonical-product"
     assert request.codeintel["mempalace_artifact"]["task_id"] == "canonical-world-c-1"
     assert request.route["workforce_bindings"]["online"]["worker_id"] == "grok_review"
@@ -502,6 +505,7 @@ def test_canonical_product_rejects_target_symlink_outside_workspace(tmp_path):
             },
         )
 
+
 def _verified_campaign_test_identities(tmp_path, campaign_id):
     import hashlib
 
@@ -513,17 +517,14 @@ def _verified_campaign_test_identities(tmp_path, campaign_id):
     task_id = "issue-982-wave-b3-governed-opencode-witness-20260919"
     canonical_card = tmp_path / "02-governed-opencode-runtime-witness.md"
     canonical_card.write_text(
-        "# Task Card: B3 test\n"
-        f"task_id: `{task_id}`\n"
-        f"campaign_id: `{campaign_id}`\n",
+        f"# Task Card: B3 test\ntask_id: `{task_id}`\ncampaign_id: `{campaign_id}`\n",
         encoding="utf-8",
     )
     task_card_hash = hashlib.sha256(canonical_card.read_bytes()).hexdigest()
     card = VerifiedTaskCardIdentity(
         task_id=task_id,
         task_card_path=(
-            "tasks/github-issue-982-wave-b-20260919/"
-            "02-governed-opencode-runtime-witness.md"
+            "tasks/github-issue-982-wave-b-20260919/02-governed-opencode-runtime-witness.md"
         ),
         canonical_task_card_path=str(canonical_card),
         task_card_hash=task_card_hash,
@@ -641,8 +642,10 @@ def test_default_consumer_keeps_global_route_for_integration_text(tmp_path):
     )
 
     demand = result["workforce_demands"]["demands"][0]
-    assert demand["requested_role"] == "main_engineering"
-    assert result["binding"]["worker_id"] == "codex_luna"
+    # Since runtime #205 (S15) the seam's explicit bounded task_type ("repair") is authoritative:
+    # a bare "integration" word in the text no longer escalates it to main_engineering.
+    assert demand["requested_role"] == "fast_bounded_implementation"
+    assert result["binding"]["worker_id"] == "agy_flash_38"
 
 
 @pytest.mark.parametrize("consumer", ["unknown", "External_Intelligence", " ", None, 1])
@@ -682,9 +685,7 @@ def test_canonical_planner_admission_passes_repo_root_to_planning_seam(monkeypat
         calls.append(kwargs)
         raise _StopAfterPlan
 
-    monkeypatch.setattr(
-        "nexus.engine.canonical_execution.plan_canonical_task_bundle", spy
-    )
+    monkeypatch.setattr("nexus.engine.canonical_execution.plan_canonical_task_bundle", spy)
     card_path = "tasks/campaign/root-1.md"
     card = tmp_path / card_path
     card.parent.mkdir(parents=True)
