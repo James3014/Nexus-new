@@ -1265,6 +1265,9 @@ def _strict_row(**fields) -> list[dict]:
     ]
 
 
+ONE_ATTEMPT = [{"attempt_type": "strict_baseline", "model_calls": 1}]
+
+
 def test_local_fallback_candidate_is_not_a_model_attempt(tmp_path: Path) -> None:
     """The model's only candidate failed the visible test, the sprint appended its
     local_guard_fallback candidate: attempt_count=2 but one model call, one runner attempt.
@@ -1272,62 +1275,159 @@ def test_local_fallback_candidate_is_not_a_model_attempt(tmp_path: Path) -> None
 
     _capture(tmp_path, "without_nexus", BARE)
     _capture(tmp_path, "with_nexus", BARE)
-    rows = _strict_row(
-        attempt_count=2,
-        model_calls=1,
-        model_attempts=[{"attempt_type": "strict_baseline", "model_calls": 1}],
-        status="FAILED",
-    )
+    rows = _strict_row(attempt_count=2, model_calls=1, model_attempts=ONE_ATTEMPT, status="FAILED")
     report = audit_run(tmp_path, _material(), rows=rows)
     assert report["row_violations"] == []
     assert report["status"] == "PASS", report
 
 
 @pytest.mark.parametrize(
-    "fields",
+    "fields, with_captures, row_violation, task_violation",
     [
-        {
-            "attempt_count": 2,
-            "model_calls": 2,
-            "model_attempts": [{"attempt_type": "strict_baseline"}],
-        },
-        {
-            "attempt_count": 2,
-            "model_calls": 1,
-            "model_attempts": [
-                {"attempt_type": "strict_baseline"},
-                {"attempt_type": "bounded_hyper_rescue"},
-            ],
-        },
-        {"attempt_count": 1, "model_calls": 2},
+        # a second model call: task level (captured 2 > 1) AND row level (2 model attempts)
+        (
+            {"attempt_count": 2, "model_calls": 2, "model_attempts": ONE_ATTEMPT},
+            2,
+            "attempt_count>1",
+            "with_nexus_calls=2",
+        ),
+        # a runner-level re-run on top of the first call counts as a second attempt
+        (
+            {
+                "attempt_count": 2,
+                "model_calls": 1,
+                "model_attempts": [*ONE_ATTEMPT, {"attempt_type": "bounded_hyper_rescue"}],
+            },
+            1,
+            "attempt_count>1",
+            None,
+        ),
+        # model_calls reported without model_attempts: old attempt_count rule (here 1) for the
+        # row, and the two-way reconciliation still fails the task (captured 1 != row 2)
+        (
+            {"attempt_count": 1, "model_calls": 2},
+            1,
+            None,
+            "with_nexus_calls_mismatch:captured=1,row=2",
+        ),
     ],
     ids=["second_model_call", "runner_rescue_rerun", "model_calls_without_attempt_count"],
 )
-def test_a_second_model_attempt_still_fails_the_strict_rule(tmp_path: Path, fields: dict) -> None:
+def test_a_second_model_attempt_still_fails_the_strict_rule(
+    tmp_path: Path, fields: dict, with_captures: int, row_violation, task_violation
+) -> None:
+    _capture(tmp_path, "without_nexus", BARE)
+    for index in range(with_captures):
+        _capture(tmp_path, "with_nexus", BARE + "\n" * index)
+    report = audit_run(tmp_path, _material(), rows=_strict_row(**fields))
+    assert report["status"] == "FAIL"
+    expected_rows = [f"with_nexus:nexus-value-trust-002#1:{row_violation}"] if row_violation else []
+    assert report["row_violations"] == expected_rows
+    if task_violation:
+        assert task_violation in report["tasks"][0]["violations"], report["tasks"][0]
+
+
+@pytest.mark.parametrize(
+    "fields, violation",
+    [
+        # legacy rows (either new field missing) keep the old attempt_count rule
+        ({"attempt_count": 2, "model_attempts": [], "model_calls": None}, "attempt_count>1"),
+        ({"attempt_count": 2, "model_calls": 1}, "attempt_count>1"),
+        ({"attempt_count": 2, "model_attempts": ONE_ATTEMPT}, "attempt_count>1"),
+        # invalid values fail closed, never an exception, never 0
+        ({"model_calls": "1", "model_attempts": ONE_ATTEMPT}, "attempt_count_invalid"),
+        ({"model_calls": -1, "model_attempts": ONE_ATTEMPT}, "attempt_count_invalid"),
+        ({"model_calls": True, "model_attempts": ONE_ATTEMPT}, "attempt_count_invalid"),
+        ({"model_calls": {"n": 1}, "model_attempts": ONE_ATTEMPT}, "attempt_count_invalid"),
+        ({"model_calls": 1, "model_attempts": "x"}, "attempt_count_invalid"),
+        ({"model_calls": 1, "model_attempts": [1]}, "attempt_count_invalid"),
+        ({"attempt_count": "2"}, "attempt_count_invalid"),
+        ({"attempt_count": -3}, "attempt_count_invalid"),
+    ],
+    ids=[
+        "legacy_calls_none",
+        "legacy_no_attempt_list",
+        "legacy_no_calls",
+        "calls_str",
+        "calls_negative",
+        "calls_bool",
+        "calls_dict",
+        "attempts_not_list",
+        "attempts_item_not_mapping",
+        "attempt_count_str",
+        "attempt_count_negative",
+    ],
+)
+def test_strict_rule_fallback_and_invalid_values(
+    tmp_path: Path, fields: dict, violation: str
+) -> None:
     _capture(tmp_path, "without_nexus", BARE)
     _capture(tmp_path, "with_nexus", BARE)
     report = audit_run(tmp_path, _material(), rows=_strict_row(**fields))
+    assert f"with_nexus:nexus-value-trust-002#1:{violation}" in report["row_violations"]
     assert report["status"] == "FAIL"
-    assert report["row_violations"] == ["with_nexus:nexus-value-trust-002#1:attempt_count>1"]
+
+
+@pytest.mark.parametrize(
+    "captures, model_calls",
+    [(1, 0), (0, 1)],
+    ids=["captured_not_reported", "reported_not_captured"],
+)
+def test_strict_lane_reconciles_calls_both_ways(
+    tmp_path: Path, captures: int, model_calls: int
+) -> None:
+    _capture(tmp_path, "without_nexus", BARE)
+    for _ in range(captures):
+        _capture(tmp_path, "with_nexus", BARE)
+    report = audit_run(
+        tmp_path,
+        _material(),
+        rows=_strict_row(attempt_count=1, model_calls=model_calls, model_attempts=ONE_ATTEMPT),
+    )
+    assert report["status"] == "FAIL"
+    violations = report["tasks"][0]["violations"]
+    assert f"with_nexus_calls_mismatch:captured={captures},row={model_calls}" in violations
+
+
+def test_strict_killed_row_with_zero_reported_calls_is_not_a_mismatch(tmp_path: Path) -> None:
+    _capture(tmp_path, "without_nexus", BARE)
+    _capture(tmp_path, "with_nexus", BARE)
+    rows = _strict_row(
+        attempt_count=1,
+        model_calls=0,
+        model_attempts=ONE_ATTEMPT,
+        runtime_classification="subprocess_timeout",
+    )
+    report = audit_run(tmp_path, _material(), rows=rows)
+    assert not any(
+        v.startswith("with_nexus_calls_mismatch") for v in report["tasks"][0]["violations"]
+    )
 
 
 def test_strict_sprint_local_fallback_counts_as_one_model_attempt(
     monkeypatch, tmp_path: Path
 ) -> None:
-    """Product side: in the strict symmetric sprint a visible-test failure of the model's
-    candidate adds a local candidate (attempt_count 2) while model_calls stays 1."""
+    """End to end on the runner-produced row: the real sprint (fake generator, visible test fails)
+    adds a local candidate (attempt_count 2, model_calls 1); run_with_nexus turns its report into a
+    strict row and audit_run, with the one captured call, passes the row."""
+
+    import hashlib
+    import json
+    import subprocess
 
     from nexus.research import sprint_service
     from nexus.research.sprint_service import CandidateEval, SprintConfig, run_hyper_sprint
-    from scripts.bench.prompt_symmetry_audit import model_attempts
+    from scripts.bench.capability_ab_runner import _materialize_fixture, load_tasks, run_with_nexus
+    from scripts.bench.capability_ab_runner import _run_process_group as real_run_process_group
 
-    phase_slo = tmp_path / ".nexus" / "reports" / "learn" / "phase_slo_summary.json"
+    work = tmp_path / "sprint"
+    phase_slo = work / ".nexus" / "reports" / "learn" / "phase_slo_summary.json"
     phase_slo.parent.mkdir(parents=True, exist_ok=True)
     phase_slo.write_text(
         '{"phase_slo_pass": true, "global": {"required_done_ratio": 1.0}}', encoding="utf-8"
     )
-    (tmp_path / "demo.py").write_text("def value():\n    return 1\n", encoding="utf-8")
-    (tmp_path / "test_demo.py").write_text(
+    (work / "demo.py").write_text("def value():\n    return 1\n", encoding="utf-8")
+    (work / "test_demo.py").write_text(
         "from demo import value\n\ndef test_value():\n    assert value() == 2\n", encoding="utf-8"
     )
 
@@ -1371,7 +1471,7 @@ def test_strict_sprint_local_fallback_counts_as_one_model_attempt(
         "nexus.research.flow.codeintel_context.sprint_codeintel_block", lambda *_a, **_k: ""
     )
     res = run_hyper_sprint(
-        repo_root=tmp_path,
+        repo_root=work,
         config=SprintConfig(
             task="fix value",
             target_file="demo.py",
@@ -1381,12 +1481,84 @@ def test_strict_sprint_local_fallback_counts_as_one_model_attempt(
             safe_mode=True,
         ),
     )
-    assert res.model_calls == 1
-    assert res.attempt_count >= 2  # the local candidate is in the pool...
-    row = {
-        "mode": "with_nexus",
-        "attempt_count": res.attempt_count,
-        "model_calls": res.model_calls,
-        "model_attempts": [{"attempt_type": "strict_baseline"}],
-    }
-    assert model_attempts(row) == 1  # ...but it is not a model attempt
+    assert res.model_calls == 1 and res.attempt_count >= 2  # the local candidate is in the pool
+
+    # The runner turns that report into a strict with-Nexus row (product subprocess faked).
+    for name, value in {
+        "NEXUS_BENCH_NO_TASK_HINTS": "1",
+        "NEXUS_VALUE_HIDDEN_VERIFIER": "1",
+        "NEXUS_BENCH_COUNTED_FIRST_ATTEMPT": "1",
+        "NEXUS_BENCH_NO_HIDDEN_FEEDBACK": "1",
+        "NEXUS_BENCH_DISABLE_HIDDEN_RETRY": "1",
+        "NEXUS_BENCH_DISABLE_DETERMINISTIC_RESCUE": "1",
+    }.items():
+        monkeypatch.setenv(name, value)
+    tasks = load_tasks(
+        Path(__file__).resolve().parents[2]
+        / "scripts"
+        / "bench"
+        / "public_benchmark_nexus_value_v1.json"
+    )
+    task = next(t for t in tasks if t.id == "nexus-value-trust-002")
+    target_file, visible = _materialize_fixture(tmp_path / "ws", task)
+    wrong = "def classify(smoke_passed, semantic_evidence):\n    return 'resolved'\n"
+
+    def fake_run_process_group(cmd, *, cwd, env, timeout_sec):
+        if "research:auto-flow" in cmd:
+            Path(target_file).write_text(wrong, encoding="utf-8")
+            payload = {
+                "status": "FAILED",
+                "semantic_status": "UNVERIFIED",
+                "result": {
+                    "elapsed_sec": 0.1,
+                    "error": "pytest_failed",
+                    "report": {
+                        "attempt_count": res.attempt_count,
+                        "model_calls": res.model_calls,
+                        "total_tokens": 5,
+                        "winner_source": "llm",
+                        "model_candidate_sha256": hashlib.sha256(wrong.encode()).hexdigest(),
+                    },
+                },
+            }
+            return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(payload), stderr="")
+        return real_run_process_group(cmd, cwd=cwd, env=env, timeout_sec=timeout_sec)
+
+    monkeypatch.setattr(
+        "scripts.bench.capability_ab_runner._run_process_group", fake_run_process_group
+    )
+    row = run_with_nexus(
+        repo_root=tmp_path / "ws",
+        task=task,
+        target_file=target_file,
+        test_file=visible,
+        timeout_sec=120,
+        force_flow="hyper_sprint",
+        runner_mode="subprocess",
+        with_llm_mode="all",
+        strict_llm_baseline=True,
+    )
+    row["mode"] = "with_nexus"
+    assert row["attempt_count"] >= 2 and row["model_calls"] == 1
+    assert isinstance(row["model_attempts"], list) and len(row["model_attempts"]) == 1
+    capture = tmp_path / "captures"
+    capture.mkdir()
+    _capture(capture, "without_nexus", BARE)
+    _capture(capture, "with_nexus", BARE)
+    report = audit_run(
+        capture,
+        _material(),
+        rows=[
+            row,
+            {
+                "mode": "without_nexus",
+                "task_id": task.id,
+                "trial_index": task.trial_index,
+                "model_calls": 1,
+            },
+        ],
+    )
+    assert report["row_violations"] == [], report["row_violations"]
+    assert not any("calls" in v for v in report["tasks"][0]["violations"]), report["tasks"][0][
+        "violations"
+    ]
