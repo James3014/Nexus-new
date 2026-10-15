@@ -810,3 +810,39 @@ def test_wiring_check_round9_cases(tmp_path: Path) -> None:
     )
     via_helper_mod = _fake_policy(test_entrypoints=["tests/test_uses_helper_mod.py::test_x"])
     assert check_enforcement_wiring(via_helper_mod, root) == []
+
+
+def test_wiring_check_round10_cases(tmp_path: Path) -> None:
+    root = _fake_repo(tmp_path)
+    # A helper nested inside the selected test does not count.
+    (root / "tests" / "test_nested.py").write_text(
+        "def test_guard():\n    def unused():\n        from pkg import caller\n"
+        "        return caller\n    from pkg.guard import check\n    assert check(1)\n",
+        encoding="utf-8",
+    )
+    for entry in ("tests/test_nested.py::test_guard", "tests/test_nested.py"):
+        policy = _fake_policy(test_entrypoints=[entry])
+        assert check_enforcement_wiring(policy, root) == ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"], entry
+    # Imports inside a with/try/for block of the test body still count.
+    (root / "tests" / "test_block.py").write_text(
+        "def test_guard():\n    try:\n        from pkg import caller\n    except ImportError:\n"
+        "        caller = None\n    assert caller\n",
+        encoding="utf-8",
+    )
+    assert (
+        check_enforcement_wiring(
+            _fake_policy(test_entrypoints=["tests/test_block.py::test_guard"]), root
+        )
+        == []
+    )
+    # An import cycle back into the entrypoint file must not rescan it whole.
+    (root / "tests" / "__init__.py").write_text("", encoding="utf-8")
+    (root / "tests" / "loop_helper.py").write_text("import tests.test_loop\n", encoding="utf-8")
+    (root / "tests" / "test_loop.py").write_text(
+        "import tests.loop_helper\n\ndef _unused():\n    from pkg import caller\n    return caller\n"
+        "\ndef test_loop():\n    from pkg.guard import check\n    assert check(1)\n",
+        encoding="utf-8",
+    )
+    for entry in ("tests/test_loop.py::test_loop", "tests/test_loop.py"):
+        policy = _fake_policy(test_entrypoints=[entry])
+        assert check_enforcement_wiring(policy, root) == ["TEST_ENTRYPOINT_NOT_BEHAVIOURAL"], entry

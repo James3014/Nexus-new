@@ -195,7 +195,9 @@ def _visible_imports(tree: ast.Module, chain: list[ast.AST], package: list[str])
         if isinstance(node, ast.ClassDef):
             visible.extend(_class_level(node))
     found = _imports_in(visible, package, into_defs=False)
-    found |= _imports_in([chain[-1]], package, into_defs=True)
+    # The test's own body, but not functions nested inside it: a nested helper
+    # that the test never calls must not count either.
+    found |= _imports_in(list(ast.iter_child_nodes(chain[-1])), package, into_defs=False)
     return found
 
 
@@ -493,6 +495,11 @@ def check_enforcement_wiring(policy: dict, repo_root: Path | None = None) -> lis
     reached = False
     for _entry, start, selected in resolved:
         seen: set[str] = set()
+        # Never re-enter the entrypoint file through an import cycle: at depth >= 1
+        # it would be scanned whole and credit its unused helpers.
+        entry_module = _module_name(start.relative_to(root.resolve()).as_posix())
+        if entry_module:
+            seen.add(entry_module)
         frontier: list[tuple[Path, list[ast.AST] | None, bool]] = [(start, selected, True)]
         for _ in range(_IMPORT_WALK_DEPTH):
             next_frontier: list[tuple[Path, list[ast.AST] | None, bool]] = []
@@ -505,7 +512,7 @@ def check_enforcement_wiring(policy: dict, repo_root: Path | None = None) -> lis
                         continue
                     seen.add(module)
                     target = _module_file(module, root)
-                    if target is not None:
+                    if target is not None and target != start:
                         next_frontier.append((target, None, False))
                 if reached:
                     break
