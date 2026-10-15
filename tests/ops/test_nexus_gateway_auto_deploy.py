@@ -3043,33 +3043,6 @@ if os.environ.get("NEXUS_CORE_REPO_ROOT"):
         assert identity["build_identity"] == "UNSTAMPED"
         assert computed["source_digest"] == identity["source_digest"]
 
-    def test_build_source_digest_equals_real_core_identity(tmp_path: Path) -> None:
-        """The deployer's digest is exactly what real Core's core_identity() reports."""
-        pin = ad.read_core_pin(REPO_ROOT)
-        checkout = _real_core_checkout(tmp_path, pin)
-        if checkout is None:
-            pytest.skip("no local nexus-core with the pinned tree (set NEXUS_CORE_REPO_ROOT)")
-        computed = ad.core_source_digest(ad.Host(), checkout, pin)
-        assert computed["source_digest_status"] == "COMPUTED"
-        reported = subprocess.run(
-            [
-                sys.executable,
-                "-B",
-                "-c",
-                "import json, sys; sys.path.insert(0, sys.argv[1]);"
-                "from product.protocol import core_identity;"
-                "print(json.dumps(core_identity()))",
-                str(checkout),
-            ],
-            capture_output=True,
-            text=True,
-            check=True,
-            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
-        )
-        identity = json.loads(reported.stdout.strip().splitlines()[-1])
-        assert identity["build_identity"] == "UNSTAMPED"
-        assert computed["source_digest"] == identity["source_digest"]
-
 
 # ------------------------------------------------- live required-check set (#2173)
 
