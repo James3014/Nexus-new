@@ -650,9 +650,26 @@ def test_lock_taken_after_the_probe_blocks_the_later_in_place_delivery(
         )
 
     def fake_run(*a: Any, **k: Any) -> subprocess.CompletedProcess:
-        if late_writer == "early_shortcut":
-            take_lock()  # another task takes the target while the probe's test runs
         return subprocess.CompletedProcess(a[0], 0, "1 passed", "")
+
+    real_hold = seam.hold_target_lock
+    probe_holds: list[int] = []
+
+    def hold_then_lose_it(workspace_root: Any, target_file: str):
+        # The probe holds the lock across its write/test/restore (L1); the moment it releases
+        # it, another task takes the target before the early-shortcut delivery.
+        release = real_hold(workspace_root, target_file)
+        if release is None or probe_holds or late_writer != "early_shortcut":
+            return release
+        probe_holds.append(1)
+
+        def release_and_lose() -> None:
+            release()
+            take_lock()
+
+        return release_and_lose
+
+    monkeypatch.setattr(seam, "hold_target_lock", hold_then_lose_it)
 
     def fake_hyper(*, repo_root: Path, config: Any):
         take_lock()
@@ -708,3 +725,104 @@ def test_lock_taken_after_the_probe_blocks_the_later_in_place_delivery(
         assert payload["guard"]["early_baseline_shortcut"] is True
     else:
         assert payload["result"]["flow"] == "hyper_sprint"
+
+
+@pytest.mark.parametrize("late_writer", ["early_shortcut", "hyper_delivery"])
+def test_in_place_delivery_writes_while_holding_the_target_lock(
+    tmp_path: Path, monkeypatch, late_writer: str
+) -> None:
+    """Reviewer L1: the early-shortcut and hyper deliveries hold the target lock DURING the
+    write (acquire -> write -> release), not only a check before it."""
+    import dataclasses
+
+    from nexus.research import sprint_service
+
+    original = "def value():\n    return 1\n"
+    candidate = "def value():\n    return 2\n"
+    (tmp_path / "demo.py").write_text(original, encoding="utf-8")
+    (tmp_path / "test_demo.py").write_text(
+        "from demo import value\n\ndef test_value():\n    assert value() == 2\n", encoding="utf-8"
+    )
+
+    class FakeLLMGenerator:
+        def __init__(self, *_a: Any, **_k: Any) -> None:
+            pass
+
+        def generate(self, **_kwargs: Any):
+            return candidate, {
+                "source": "llm",
+                "model_calls": 1,
+                "model_name": "gemini-3-flash-preview",
+                "tokens_used": 10,
+                "token_capture_status": "measured",
+                "model_patch_generated": True,
+                "unified_runtime_receipt": {"task_id": "s", "capabilities": []},
+            }
+
+    held_during_write: list[bool] = []
+    real_write = rfs._write_source_text
+
+    def take_lock() -> None:
+        return None
+
+    def recording_write(path: Path, text: str) -> None:
+        if text == candidate and path.name == "demo.py":
+            held_during_write.append(seam.target_held_by_other(tmp_path, "demo.py", "someone-else"))
+        real_write(path, text)
+
+    def fake_run(*a: Any, **k: Any) -> subprocess.CompletedProcess:
+        if late_writer == "early_shortcut":
+            take_lock()  # another task takes the target while the probe's test runs
+        return subprocess.CompletedProcess(a[0], 0, "1 passed", "")
+
+    def fake_hyper(*, repo_root: Path, config: Any):
+        take_lock()
+        denied = sprint_service._lock_denied_result(config, {})
+        return dataclasses.replace(
+            denied,
+            status="SUCCESS",
+            reason="",
+            winner_source="llm",
+            patch=candidate,
+            error_codes=[],
+            final_score=1.0,
+        )
+
+    monkeypatch.delenv("NEXUS_SYMMETRIC_PROMPT", raising=False)
+    monkeypatch.setattr(rfs, "LLMCandidateGenerator", FakeLLMGenerator)
+    monkeypatch.setattr(rfs, "_build_codeintel_evidence", lambda *_a, **_k: {"status": "ok"})
+    monkeypatch.setattr(rfs, "run_hyper_sprint", fake_hyper)
+    monkeypatch.setattr(rfs.subprocess, "run", fake_run)
+    monkeypatch.setattr(rfs, "_write_source_text", recording_write)
+    try:
+        payload, _ = rfs.run_auto_flow(
+            repo_root=tmp_path,
+            task_desc="Fix flaky websocket normalization timeout",
+            target_file="demo.py",
+            test_file="test_demo.py",
+            task_type="bug",
+            candidate_count=1,
+            root_cause_confidence=1.0,
+            findings_query=None,
+            llm_mode=True,
+            llm_baseline=True,
+            llm_baseline_required=True,
+            timeout_sec=30,
+            stage1_timeout_sec=10,
+            max_time_ratio_guard=1000.0,
+            baseline_fast_sec=999.0 if late_writer == "early_shortcut" else 0.0,
+            history_window=1,
+            history_fail_threshold=999,
+            dynamic_timeout_multiplier=2.5,
+            min_dynamic_stage1_timeout=1,
+            force_flow=None,
+            report_file=".nexus/reports/research/auto-flow-report.json",
+            output_file=None,
+            task_id=f"case-late-{late_writer}",
+        )
+    finally:
+        seam.release_target_lock("other-task")
+
+    assert held_during_write and all(held_during_write)  # every delivery write was locked
+    assert seam.target_held_by_other(tmp_path, "demo.py", "someone-else") is False  # released
+    assert payload["result"]["status"] == "SUCCESS"

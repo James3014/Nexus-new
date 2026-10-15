@@ -485,6 +485,50 @@ def target_held_by_other(workspace_root: Path | str, target_file: str, holder: s
         return True
 
 
+def hold_target_lock(workspace_root: Path | str, target_file: str) -> Callable[[], None] | None:
+    """Take the target's file lock for an in-place write of model code (seam holder id).
+
+    Returns a release callable, or None when another live holder has the target. A lock this
+    holder already held is left held on release. Seam disabled: a no-op release (old
+    behaviour, unguarded)."""
+
+    if not seam_enabled():
+        return lambda: None
+    from nexus.core.capability_executor_registry import _FILE_LOCK_DEFAULT_TTL_SEC
+    from nexus.orchestrator.file_lock_registry import FileLockRegistry, canonical_lock_key
+
+    try:
+        sweep_dead_seam_locks(workspace_root)
+    except Exception:  # noqa: BLE001 - a failed sweep never grants a lock; acquire decides
+        pass
+    holder = seam_holder_id(workspace_root, target_file)
+    key = canonical_lock_key(workspace_root, target_file)
+    registry = FileLockRegistry(
+        lock_file=str(_lock_file(workspace_root)), ttl_sec=_FILE_LOCK_DEFAULT_TTL_SEC
+    )
+    already_held = registry.locks.get(key) == holder
+    if registry.acquire_detailed(holder, [key])["conflicts"]:
+        return None
+    return (lambda: None) if already_held else (lambda: registry.release(holder))
+
+
+def run_under_target_lock(
+    workspace_root: Path | str, target_file: str, action: Callable[[], None]
+) -> bool:
+    """Run ``action`` (an in-place write of model code) while holding the target's file lock:
+    acquire -> action -> release, so no other task can take the target between the check and
+    the write. False (``action`` not run) when another live holder has it."""
+
+    release = hold_target_lock(workspace_root, target_file)
+    if release is None:
+        return False
+    try:
+        action()
+    finally:
+        release()
+    return True
+
+
 def acquire_target_lock(
     *,
     task_id: str,

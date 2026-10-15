@@ -248,16 +248,6 @@ def _visible_error(res: subprocess.CompletedProcess, default: str) -> str:
     return _post_candidate_seam.CONFINEMENT_UNAVAILABLE if stderr.startswith(_post_candidate_seam.CONFINEMENT_UNAVAILABLE) else default
 
 
-def _target_locked_by_other(repo_root: Path, target_file: str) -> bool:
-    """PR-2 seam: True when another task holds the target's file lock (no in-place write of
-    model code then). Off when the seam is disabled."""
-    if not _post_candidate_seam.seam_enabled():
-        return False
-    return _post_candidate_seam.target_held_by_other(
-        repo_root, target_file, _post_candidate_seam.seam_holder_id(repo_root, target_file)
-    )
-
-
 def _write_source_text(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
     if path.suffix != ".py":
@@ -1222,6 +1212,16 @@ def run_auto_flow(
         seam_lock_task = ""
         seam_pre_stages: list[dict[str, Any]] = []
         seam_released: dict[str, list[str]] = {}
+        apply_release: list[Any] = []
+
+        def _hold_apply_lock() -> bool:
+            # Held from the in-place write until the row's files are settled (no check-then-write).
+            release = _post_candidate_seam.hold_target_lock(repo_root, target_file)
+            if release is None:
+                return False
+            apply_release.append(release)
+            return True
+
         try:
             patched, source, generation_meta = _build_baseline_patch(
                 trial=0,
@@ -1245,7 +1245,7 @@ def run_auto_flow(
                 )
             if patched == original_code:
                 err = "no_mutation_generated"
-            elif _post_candidate_seam.lock_denied(seam_pre_stages) or _target_locked_by_other(repo_root, target_file):
+            elif _post_candidate_seam.lock_denied(seam_pre_stages) or not _hold_apply_lock():
                 # Another task holds the target: the candidate is never written (no delivery).
                 err = "file_lock_denied"
             else:
@@ -1284,6 +1284,8 @@ def run_auto_flow(
             try:
                 _restore_baseline_files(restored_files, keep_target=ok or keep_model_delivery)
             finally:
+                for release in apply_release:
+                    release()
                 if seam_lock_task:
                     seam_released = _post_candidate_seam.release_target_lock(seam_lock_task)
         report = baseline_report_from_meta(source, generation_meta)
@@ -1324,6 +1326,16 @@ def run_auto_flow(
         patched = original_code
         restored_files: dict[Path, str | None] = {}
         probe_lock_task = ""
+        probe_release: list[Any] = []
+
+        def _hold_probe_lock() -> bool:
+            # Held from the in-place write until the original is restored (no check-then-write).
+            release = _post_candidate_seam.hold_target_lock(repo_root, target_file)
+            if release is None:
+                return False
+            probe_release.append(release)
+            return True
+
         try:
             patched, source, generation_meta = _build_baseline_patch(
                 trial=0,
@@ -1348,7 +1360,7 @@ def run_auto_flow(
                 )
             if patched == original_code:
                 err = "no_mutation_generated"
-            elif _post_candidate_seam.lock_denied(probe_pre) or _target_locked_by_other(repo_root, target_file):
+            elif _post_candidate_seam.lock_denied(probe_pre) or not _hold_probe_lock():
                 err = "file_lock_denied"
             else:
                 companion_edits = (
@@ -1383,6 +1395,8 @@ def run_auto_flow(
             try:
                 _restore_baseline_files(restored_files, keep_target=False)
             finally:
+                for release in probe_release:
+                    release()
                 if probe_lock_task:
                     _post_candidate_seam.release_target_lock(probe_lock_task)
         return {
@@ -1487,13 +1501,14 @@ def run_auto_flow(
             and raw_model_sha
             and hashlib.sha256(str(res.patch).encode("utf-8")).hexdigest() == raw_model_sha
         )
-        if (ok or symmetric_delivery) and _target_locked_by_other(repo_root, target_file):
-            # The sprint released its lock; another task took the target since: no delivery.
+        if (ok or symmetric_delivery) and not _post_candidate_seam.run_under_target_lock(
+            repo_root, target_file, lambda: _write_source_text(target_path, res.patch)
+        ):
+            # The sprint released its lock; another task holds the target now: no delivery.
+            # The write itself happens while holding the lock (acquire -> write -> release).
             ok = False
             symmetric_delivery = False
             err = "file_lock_denied"
-        elif ok or symmetric_delivery:
-            _write_source_text(target_path, res.patch)
         if not ok and not err:
             err = res.reason
         breakdown["patch_apply_sec"] = round(time.monotonic() - apply_started_at, 4)
@@ -1597,7 +1612,9 @@ def run_auto_flow(
                     isinstance(probe_patch, str)
                     and probe_patch
                     and probe_patch != original_code
-                    and _target_locked_by_other(repo_root, target_file)
+                    and not _post_candidate_seam.run_under_target_lock(
+                        repo_root, target_file, lambda: _write_source_text(target_path, probe_patch)
+                    )
                 ):
                     # The probe's lock is released; another task holds the target now.
                     result = {
@@ -1611,7 +1628,7 @@ def run_auto_flow(
                         },
                     }
                 elif isinstance(probe_patch, str) and probe_patch and probe_patch != original_code:
-                    _write_source_text(target_path, probe_patch)
+                    # Written above while holding the target lock.
                     result = {
                         "flow": "baseline",
                         "status": "SUCCESS",

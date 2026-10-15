@@ -1285,3 +1285,27 @@ def test_confine_visible_test_env_accepts_only_1(
     """Reviewer L6: one parse everywhere (bench runner, #2212's verifier binding, the seam)."""
     monkeypatch.setenv(seam.CONFINE_VISIBLE_TEST_ENV, value)
     assert seam.confine_visible_test_enabled() is enabled
+
+
+def test_run_under_target_lock_holds_the_lock_across_the_write(tmp_path: Path) -> None:
+    """Reviewer L1: check-then-write is replaced by acquire -> write -> release."""
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    seen: list[bool] = []
+
+    def write() -> None:
+        # While writing, nobody else can take the target.
+        other = seam.acquire_target_lock(
+            task_id="other-task", workspace_root=workspace, target_file="t.py"
+        )
+        seen.append(other["gate_passed"])
+
+    assert seam.run_under_target_lock(workspace, "t.py", write) is True
+    assert seen == [False]
+    assert seam.target_held_by_other(workspace, "t.py", "other-task") is False  # released
+    seam.acquire_target_lock(task_id="other-task", workspace_root=workspace, target_file="t.py")
+    try:
+        assert seam.run_under_target_lock(workspace, "./t.py", lambda: seen.append(True)) is False
+        assert seen == [False]  # the write never ran
+    finally:
+        seam.release_target_lock("other-task")
