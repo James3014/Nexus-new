@@ -29,6 +29,7 @@ import pytest
 
 from nexus.executors import agy_dispatch_boundary as boundary_mod
 from nexus.executors import agy_write_admission as admission
+from nexus.services import agy_account_pool as agy_pool
 
 ROOT = Path(__file__).resolve().parents[2]
 DISPATCH_PATH = ROOT / "scripts" / "ops" / "nexus-agy-dispatch"
@@ -168,6 +169,71 @@ def test_boundary_profile_env_and_home(tmp_path, seatbelt_on):
         boundary.cleanup()
     assert not boundary.run_root.exists()
     assert not boundary.profile_path.exists()
+
+
+def _default_keychain(home: str | None = None) -> str:
+    env = dict(os.environ)
+    if home is not None:
+        env["HOME"] = home
+    return subprocess.run(
+        ["security", "default-keychain"], env=env, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+def test_run_home_gets_isolated_default_keychain(tmp_path, seatbelt_on):
+    """No default keychain in the run HOME makes macOS raise a blocking dialog."""
+    home = _source_home(tmp_path)
+    target = _target(tmp_path)
+    real_default = _default_keychain() if sys.platform == "darwin" else None
+    boundary = boundary_mod.prepare_accept_edits_boundary(
+        source_env={"HOME": str(home), "PATH": "/usr/bin:/bin"}, target=target
+    )
+    try:
+        keychain = boundary.run_home / agy_pool.AGY_ISOLATED_KEYCHAIN
+        if sys.platform == "darwin":
+            assert boundary.keychain_state == boundary_mod.KEYCHAIN_ISOLATED
+            assert keychain.is_file()
+            assert _default_keychain(str(boundary.run_home)) == f'"{keychain}"'
+            # created with HOME=<run home>: the real user's default is untouched
+            assert _default_keychain() == real_default
+        else:
+            assert boundary.keychain_state == boundary_mod.KEYCHAIN_NOT_APPLICABLE
+            assert not keychain.exists()
+        # the sandboxed agy may update the keychain and its preferences (both
+        # inside the writable run root); the agy config stays locked
+        profile = boundary.profile
+        for path in (
+            keychain,
+            boundary.run_home / "Library" / "Keychains" / "agy.keychain-db.sb-x",
+            boundary.run_home / "Library" / "Preferences" / "com.apple.security.plist",
+        ):
+            assert _effective_write(profile, path) == "allow", path
+        assert _effective_write(profile, boundary.run_home / ".gemini" / "config" / "x") == "deny"
+    finally:
+        boundary.cleanup()
+    assert not boundary.run_root.exists()
+
+
+def test_isolated_keychain_helper_is_not_applicable_off_macos(tmp_path, monkeypatch):
+    monkeypatch.setattr(agy_pool.sys, "platform", "linux")
+    assert agy_pool.ensure_macos_isolated_keychain(str(tmp_path)) is None
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_keychain_setup_failure_refuses_the_boundary(tmp_path, monkeypatch, seatbelt_on):
+    def broken(_home, **_kwargs):
+        raise agy_pool.AgyAccountPoolManagerError("AGY_KEYCHAIN_SETUP_FAILED:create-keychain:1:x")
+
+    monkeypatch.setattr(agy_pool, "ensure_macos_isolated_keychain", broken)
+    scratch = tmp_path / "tmpdir"
+    scratch.mkdir()
+    monkeypatch.setattr(boundary_mod.tempfile, "tempdir", str(scratch))
+    with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="AGY_KEYCHAIN_SETUP_FAILED"):
+        boundary_mod.prepare_accept_edits_boundary(
+            source_env={"HOME": str(_source_home(tmp_path)), "PATH": "/usr/bin:/bin"},
+            target=_target(tmp_path),
+        )
+    assert list(scratch.iterdir()) == []  # run root and profile dir removed
 
 
 def test_boundary_refuses_without_seatbelt(tmp_path, monkeypatch):

@@ -45,6 +45,7 @@ from nexus.executors.agy_write_admission import (
 )
 
 AGY_WRITE_BOUNDARY_UNAVAILABLE = "AGY_WRITE_BOUNDARY_UNAVAILABLE"
+KEEP_RUN_ROOT_ENV = "NEXUS_AGY_KEEP_RUN_ROOT"
 
 
 class AgyWriteBoundaryError(RuntimeError):
@@ -87,6 +88,33 @@ def strip_expected_run_home_denials(text: str, run_home: str | Path | None) -> s
     )
 
 
+# Absolute path: the run's PATH is untrusted input to the boundary.
+SECURITY_TOOL_PATH = "/usr/bin/security"
+KEYCHAIN_ISOLATED = "ISOLATED"
+KEYCHAIN_NOT_APPLICABLE = "NOT_APPLICABLE"
+
+
+def _prepare_run_home_keychain(run_home: Path) -> str:
+    """Give the run HOME its own default keychain before Seatbelt starts.
+
+    Without one, agy's OAuth token store finds no default keychain and macOS
+    raises a modal "no keychain" dialog that blocks until a human answers.
+    ``security`` runs here, unsandboxed and with ``HOME=<run_home>``; the
+    sandboxed agy only reads/writes that keychain file, which lies inside the
+    writable run root.
+    """
+    from nexus.services.agy_account_pool import (
+        AgyAccountPoolManagerError,
+        ensure_macos_isolated_keychain,
+    )
+
+    try:
+        keychain = ensure_macos_isolated_keychain(str(run_home), security=SECURITY_TOOL_PATH)
+    except AgyAccountPoolManagerError as exc:
+        raise AgyWriteBoundaryError(f"{AGY_WRITE_BOUNDARY_UNAVAILABLE}:{exc}") from exc
+    return KEYCHAIN_NOT_APPLICABLE if keychain is None else KEYCHAIN_ISOLATED
+
+
 def _with_literal_writes(profile: str, files: Iterable[Path]) -> str:
     entries = [f'  (literal "{_sbpl_path(path)}")' for path in files]
     if not entries:
@@ -107,6 +135,7 @@ class AgyDispatchBoundary:
     profile_path: Path
     run_tag: str
     home_profile_sha256: str
+    keychain_state: str = KEYCHAIN_NOT_APPLICABLE
     _baseline: Any = field(default=None, repr=False)
     _tracker: Any = field(default=None, repr=False)
     _launched: bool = field(default=False, repr=False)
@@ -157,7 +186,10 @@ class AgyDispatchBoundary:
         if tracker is not None:
             tracker.stop()
         cli_worker._RUN_START_TICKS.pop(self.run_tag, None)
-        shutil.rmtree(self.run_root, ignore_errors=True)
+        # Diagnostics only: keep the run root (disposable HOME, keychain) for
+        # inspection; the operator deletes it afterwards.
+        if os.environ.get(KEEP_RUN_ROOT_ENV) != "1":
+            shutil.rmtree(self.run_root, ignore_errors=True)
         shutil.rmtree(self.profile_path.parent, ignore_errors=True)
 
 
@@ -198,6 +230,7 @@ def prepare_accept_edits_boundary(
         )
         if refusal is not None:
             raise AgyWriteBoundaryError(f"{AGY_WRITE_BOUNDARY_UNAVAILABLE}:{refusal}")
+        keychain_state = _prepare_run_home_keychain(run_home)
         try:
             profile = _with_literal_writes(
                 build_seatbelt_profile(
@@ -228,4 +261,5 @@ def prepare_accept_edits_boundary(
         profile_path=profile_path,
         run_tag=run_tag,
         home_profile_sha256=home_profile_sha256,
+        keychain_state=keychain_state,
     )
