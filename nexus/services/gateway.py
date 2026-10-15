@@ -33,19 +33,6 @@ from nexus.engine.patch.apply_engine import PatchApplyEngine
 
 logger = logging.getLogger(__name__)
 
-# Same success set nexus-runtime uses for a contributing Local stage
-# (nexus_runtime/kernel/unified_runtime.py, local_stage status check).
-_LOCAL_STAGE_SUCCESS_STATUSES = frozenset({"SUCCEEDED", "PASS", "COMPLETED"})
-
-
-def _local_stage_admitted(local_stage: Any) -> bool:
-    """True only when the Local stage passed its gate with a success status (#2245)."""
-    return (
-        isinstance(local_stage, Mapping)
-        and local_stage.get("gate_passed") is True
-        and str(local_stage.get("status") or "") in _LOCAL_STAGE_SUCCESS_STATUSES
-    )
-
 
 
 def _run_cli_with_hard_timeout(
@@ -541,7 +528,9 @@ class BattlesuitGateway:
             local_response = local_stage.get("response", {}) if isinstance(local_stage, dict) else {}
             local_outputs = local_response.get("local_outputs", {}) if isinstance(local_response, dict) else {}
             local_withheld_status = ""
-            if local_outputs and not _local_stage_admitted(local_stage):
+            from nexus.services.online_nexus_context import local_stage_forwardable
+
+            if local_outputs and not local_stage_forwardable(local_stage):
                 # #2245: a refused / failed Local stage may still carry the model
                 # response; its advice must not shape the online candidate.
                 local_withheld_status = (

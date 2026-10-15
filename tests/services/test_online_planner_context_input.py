@@ -162,7 +162,12 @@ def test_final_input_includes_local_capability_and_payload_before_package():
     context = _context()
     context.update({
         "online_payload": "payload-boundary",
-        "local": {"invoked": True, "response": {"concise_summary": "local-safe"}},
+        "local": {
+            "invoked": True,
+            "status": "SUCCEEDED",
+            "gate_passed": True,
+            "response": {"concise_summary": "local-safe"},
+        },
         "capability_results": {"memory": {"status": "SUCCEEDED", "evidence_refs": ["ev:1"]}},
     })
     result = build_registered_online_invoker(

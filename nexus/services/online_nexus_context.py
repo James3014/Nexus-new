@@ -50,6 +50,27 @@ NEXUS_PROFILE_MARKER = "[NEXUS EXECUTION PROFILE]"
 NEXUS_FLAGS_MARKER = "[NEXUS EXECUTOR FLAGS]"
 NEXUS_HIDDEN_MARKER = "[NEXUS HIDDEN-VERIFIER GUIDANCE]"
 NEXUS_LOCAL_MARKER = "[LOCAL_ASSIST_CONTEXT]"
+
+# Nexus-new#2245: statuses under which a Local stage may contribute to Online.
+# Mirrors nexus_runtime.kernel.local_stage.LOCAL_STAGE_SUCCESS_STATUSES.
+LOCAL_STAGE_SUCCESS_STATUSES = frozenset({"SUCCEEDED", "PASS", "COMPLETED"})
+
+
+def local_stage_forwardable(local_stage: Any) -> bool:
+    """True only when a Local stage may feed context into the Online prompt (#2245).
+
+    Fail closed: the stage must be a mapping, report a success status, have
+    ``gate_passed`` exactly ``True`` and not be flagged ``online_context_withheld``.
+    A refused / failed stage contributes nothing to Online even when it still
+    carries the raw model response for evidence.
+    """
+    if not isinstance(local_stage, Mapping):
+        return False
+    if local_stage.get("online_context_withheld") is True:
+        return False
+    if str(local_stage.get("status") or "") not in LOCAL_STAGE_SUCCESS_STATUSES:
+        return False
+    return local_stage.get("gate_passed") is True
 NEXUS_EVIDENCE_MARKER = "[NEXUS CAPABILITY EVIDENCE]"
 
 
@@ -774,7 +795,15 @@ def build_online_nexus_context_from_runtime(
     local_forward: dict[str, Any] = {}
     vap_injection = ""
     local_stage = ctx.get("local")
-    if isinstance(local_stage, Mapping) and local_stage.get("invoked") and not symmetric_prompt_mode():
+    # Nexus-new#2245: only a succeeded, gate-passed Local stage contributes a
+    # forward, a VAP injection or a VAP binding attempt; refused / failed /
+    # withheld stages contribute nothing and raise nothing.
+    if (
+        isinstance(local_stage, Mapping)
+        and local_stage.get("invoked")
+        and local_stage_forwardable(local_stage)
+        and not symmetric_prompt_mode()
+    ):
         # (Symmetric A/B: no local-assist forward and no VAP fragment reach the prompt.)
         declared = False
         expected_packet_hash = ""
