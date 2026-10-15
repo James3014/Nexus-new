@@ -123,6 +123,19 @@ class FileLockRegistry:
             if to_remove:
                 self._save()
 
+    def release_files(self, task_id: str, files: List[str]) -> List[str]:
+        """Release only ``files`` (normalized) that ``task_id`` holds; other locks it holds
+        stay. Returns the released paths."""
+        paths = {os.path.normpath(f) for f in files}
+        with self._exclusive():
+            to_remove = [f for f, t in self.locks.items() if t == task_id and f in paths]
+            for f in to_remove:
+                del self.locks[f]
+                self.acquired_at.pop(f, None)
+            if to_remove:
+                self._save()
+        return to_remove
+
     def holder(self, file_path: str) -> Optional[str]:
         return self.locks.get(os.path.normpath(file_path))
 

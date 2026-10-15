@@ -485,12 +485,15 @@ def target_held_by_other(workspace_root: Path | str, target_file: str, holder: s
         return True
 
 
-def hold_target_lock(workspace_root: Path | str, target_file: str) -> Callable[[], None] | None:
-    """Take the target's file lock for an in-place write of model code (seam holder id).
+def hold_target_lock(
+    workspace_root: Path | str, target_file: str, extra_files: Iterable[Path | str] = ()
+) -> Callable[[], None] | None:
+    """Take the file lock on the target AND every companion file of an in-place write of
+    model code (all or nothing, seam holder id of the target, canonical keys).
 
-    Returns a release callable, or None when another live holder has the target. A lock this
-    holder already held is left held on release. Seam disabled: a no-op release (old
-    behaviour, unguarded)."""
+    Returns a release callable (releases only the keys this call newly took; locks the holder
+    already had, e.g. the seam's own file_lock, stay), or None when another live holder has
+    any of the files. Seam disabled: a no-op release (old behaviour, unguarded)."""
 
     if not seam_enabled():
         return lambda: None
@@ -502,24 +505,31 @@ def hold_target_lock(workspace_root: Path | str, target_file: str) -> Callable[[
     except Exception:  # noqa: BLE001 - a failed sweep never grants a lock; acquire decides
         pass
     holder = seam_holder_id(workspace_root, target_file)
-    key = canonical_lock_key(workspace_root, target_file)
+    keys = list(
+        dict.fromkeys(
+            canonical_lock_key(workspace_root, str(path)) for path in (target_file, *extra_files)
+        )
+    )
     registry = FileLockRegistry(
         lock_file=str(_lock_file(workspace_root)), ttl_sec=_FILE_LOCK_DEFAULT_TTL_SEC
     )
-    already_held = registry.locks.get(key) == holder
-    if registry.acquire_detailed(holder, [key])["conflicts"]:
+    new_keys = [key for key in keys if registry.locks.get(key) != holder]
+    if registry.acquire_detailed(holder, keys)["conflicts"]:
         return None
-    return (lambda: None) if already_held else (lambda: registry.release(holder))
+    return lambda: registry.release_files(holder, new_keys) and None
 
 
 def run_under_target_lock(
-    workspace_root: Path | str, target_file: str, action: Callable[[], None]
+    workspace_root: Path | str,
+    target_file: str,
+    action: Callable[[], None],
+    extra_files: Iterable[Path | str] = (),
 ) -> bool:
     """Run ``action`` (an in-place write of model code) while holding the target's file lock:
     acquire -> action -> release, so no other task can take the target between the check and
     the write. False (``action`` not run) when another live holder has it."""
 
-    release = hold_target_lock(workspace_root, target_file)
+    release = hold_target_lock(workspace_root, target_file, extra_files)
     if release is None:
         return False
     try:

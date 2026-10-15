@@ -1345,3 +1345,51 @@ def test_ambiguous_confine_env_never_runs_the_hidden_verifier_unconfined(
     assert completed.returncode != 0
     assert "confinement_unavailable" in completed.stderr and "ambiguous_env" in completed.stderr
     assert not (case / HIDDEN_MARKER).exists()
+
+
+def test_companion_file_held_by_another_task_refuses_the_whole_write(tmp_path: Path) -> None:
+    """Gemini N3: the lock covers every companion file too (all or nothing); the release only
+    drops what this call took, so the seam's own file_lock on the target stays held."""
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    holder = seam.seam_holder_id(workspace, "t.py")
+    seam.acquire_target_lock(task_id=holder, workspace_root=workspace, target_file="t.py")
+    seam.acquire_target_lock(task_id="other-task", workspace_root=workspace, target_file="c.py")
+    try:
+        assert seam.hold_target_lock(workspace, "t.py", [workspace / "c.py"]) is None
+        release = seam.hold_target_lock(workspace, "t.py", [workspace / "d.py"])
+        assert release is not None
+        assert seam.target_held_by_other(workspace, "d.py", "x") is True
+        release()
+        assert seam.target_held_by_other(workspace, "d.py", "x") is False  # released
+        assert seam.target_held_by_other(workspace, "t.py", "x") is True  # seam lock kept
+    finally:
+        seam.release_target_lock(holder)
+        seam.release_target_lock("other-task")
+
+
+def test_sprint_inplace_executor_refuses_when_a_companion_is_held(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nexus.research import sprint_service
+    from nexus.research.sprint_service import InPlaceSprintExecutor
+
+    case = _case(tmp_path)
+    monkeypatch.delenv(seam.CONFINE_VISIBLE_TEST_ENV, raising=False)
+    monkeypatch.setattr(
+        sprint_service,
+        "generate_local_companion_edits",
+        lambda *a, **k: {case / "helper.py": "X = 2\n"},
+    )
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("test ran"))
+    seam.acquire_target_lock(task_id="other-task", workspace_root=case, target_file="helper.py")
+    try:
+        executor = InPlaceSprintExecutor(
+            case, "target.py", [sys.executable, "-m", "pytest", "-q", "test_visible.py"], 30
+        )
+        ev = executor.evaluate_candidate(seed=0, hint="h", code=CANDIDATE, source="llm")
+    finally:
+        seam.release_target_lock("other-task")
+    assert ev.error == "file_lock_denied" and ev.score == 0.0
+    assert (case / "target.py").read_text(encoding="utf-8") == ORIGINAL
+    assert not (case / "helper.py").exists()

@@ -1225,6 +1225,7 @@ class InPlaceSprintExecutor:
         original = target_path.read_text(encoding="utf-8") if target_path.exists() else ""
         companion_edits = generate_local_companion_edits(self.repo_root, target_path, self.task, hint, seed)
         restored_files: dict[Path, str | None] = {}
+        lock_release: list[Any] = []
         try:
             if code == original:
                 return CandidateEval(
@@ -1271,6 +1272,19 @@ class InPlaceSprintExecutor:
             )
             if confined is not None:
                 return confined
+            # PR-2 seam: hold the lock on the target AND every companion file from the in-place
+            # write until they are restored; any one held by another task refuses the run.
+            from nexus.services import post_candidate_seam as seam
+
+            release = seam.hold_target_lock(
+                self.repo_root, self.target_file, [path for path in companion_edits if path != target_path]
+            )
+            if release is None:
+                return CandidateEval(
+                    seed=seed, score=0.0, hint=hint, error="file_lock_denied", candidate_code=code, source=source,
+                    elapsed_sec=round(time.time() - start, 4),
+                )
+            lock_release.append(release)
             target_path.parent.mkdir(parents=True, exist_ok=True)
             target_path.write_text(code, encoding="utf-8")
             restored_files[target_path] = original
@@ -1317,12 +1331,16 @@ class InPlaceSprintExecutor:
                 elapsed_sec=round(time.time() - start, 4),
             )
         finally:
-            for path, original_text in restored_files.items():
-                if original_text is None:
-                    if path.exists():
-                        path.unlink()
-                else:
-                    path.write_text(original_text, encoding="utf-8")
+            try:
+                for path, original_text in restored_files.items():
+                    if original_text is None:
+                        if path.exists():
+                            path.unlink()
+                    else:
+                        path.write_text(original_text, encoding="utf-8")
+            finally:
+                for release in lock_release:
+                    release()
 
 
 def _inplace_evaluate_confined(

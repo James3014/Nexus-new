@@ -1214,12 +1214,24 @@ def run_auto_flow(
         seam_released: dict[str, list[str]] = {}
         apply_release: list[Any] = []
 
+        apply_companions: list[dict[Path, str]] = []
+
         def _hold_apply_lock() -> bool:
             # Held from the in-place write until the row's files are settled (no check-then-write).
-            release = _post_candidate_seam.hold_target_lock(repo_root, target_file)
+            # The lock covers the target AND every companion file written in place; any one
+            # held by another task refuses the whole delivery.
+            companions = (
+                {}
+                if symmetric_prompt
+                else generate_local_companion_edits(repo_root, target_path, task_desc, "baseline", 0)
+            )
+            release = _post_candidate_seam.hold_target_lock(
+                repo_root, target_file, [path for path in companions if path != target_path]
+            )
             if release is None:
                 return False
             apply_release.append(release)
+            apply_companions.append(companions)
             return True
 
         try:
@@ -1249,11 +1261,7 @@ def run_auto_flow(
                 # Another task holds the target: the candidate is never written (no delivery).
                 err = "file_lock_denied"
             else:
-                companion_edits = (
-                    {}
-                    if symmetric_prompt
-                    else generate_local_companion_edits(repo_root, target_path, task_desc, "baseline", 0)
-                )
+                companion_edits = apply_companions[0]
                 restored_files[target_path] = original_code
                 _write_source_text(target_path, patched)
                 for extra_path, extra_code in companion_edits.items():
@@ -1328,12 +1336,24 @@ def run_auto_flow(
         probe_lock_task = ""
         probe_release: list[Any] = []
 
+        probe_companions: list[dict[Path, str]] = []
+
         def _hold_probe_lock() -> bool:
             # Held from the in-place write until the original is restored (no check-then-write).
-            release = _post_candidate_seam.hold_target_lock(repo_root, target_file)
+            # The lock covers the target AND every companion file written in place; any one
+            # held by another task refuses the whole delivery.
+            companions = (
+                {}
+                if symmetric_prompt
+                else generate_local_companion_edits(repo_root, target_path, task_desc, "baseline_probe", 0)
+            )
+            release = _post_candidate_seam.hold_target_lock(
+                repo_root, target_file, [path for path in companions if path != target_path]
+            )
             if release is None:
                 return False
             probe_release.append(release)
+            probe_companions.append(companions)
             return True
 
         try:
@@ -1363,11 +1383,7 @@ def run_auto_flow(
             elif _post_candidate_seam.lock_denied(probe_pre) or not _hold_probe_lock():
                 err = "file_lock_denied"
             else:
-                companion_edits = (
-                    {}
-                    if symmetric_prompt
-                    else generate_local_companion_edits(repo_root, target_path, task_desc, "baseline_probe", 0)
-                )
+                companion_edits = probe_companions[0]
                 restored_files[target_path] = original_code
                 _write_source_text(target_path, patched)
                 for extra_path, extra_code in companion_edits.items():
