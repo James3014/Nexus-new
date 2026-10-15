@@ -98,7 +98,7 @@ The change is to **what two effects require**, not a new way to obtain a grant:
 | Condition (all must hold) | Source of truth |
 |---|---|
 | Effect is `TASK_CARD_CREATE` or `TASK_CARD_COMMIT` | `nexus/orchestrator/bootstrap_agent_authority.py` `DELEGABLE_ACTIONS` |
-| Operating mode is `BOOTSTRAP` and the file is VALID | `docs/governance/current_operating_mode.yaml` of the **loaded deployment** (not the Controller), checked by `scripts/ops/check_operating_mode.py` |
+| Operating mode is `BOOTSTRAP` and the file is VALID | `docs/governance/current_operating_mode.yaml` of the **loaded deployment** (not the Controller), checked by `scripts/ops/check_operating_mode.py`. It must be a regular file whose bytes equal the blob committed at the loaded `HEAD`, so an uncommitted edit, untracked file or symlink does not count |
 | Controller binding is `SEPARATE` with no problem | the same state `/health` reports as `controller_binding`; `_require_bound_controller` re-proves it right before the effect |
 
 When all hold, the effect is authorized by the agent identity, and an authority
@@ -110,13 +110,30 @@ the effect and its exact payload hash, `actor: AGENT`,
 `authority_basis: OWNER_CHAT_DELEGATION_BOOTSTRAP`,
 `decision_reference: James3014/Nexus-new#2270`, the operating mode with the
 mode file's SHA-256, the Controller binding, the Goal/scope key,
-`standing_grant_used: false`, a timestamp and a record hash. The tool result's
+`standing_grant_used: false`, the Gateway `server_instance_id`, the loaded
+source `HEAD`, a timestamp and a record hash. A record is an authorization,
+not proof that the effect completed: a create that is then refused (for example
+`TASK_CARD_CREATE_WOULD_OVERWRITE`) still leaves its record. The tool result's
 `owner_authority` names the record hash.
 
 Why these two effects: they only write `tasks/` files into, and commit them on,
 the separate Controller worktree. The worker that follows runs in an isolated
 target lane and produces a Candidate pending approval. Nothing is pushed,
 merged, released or deleted.
+
+What this unlocks, stated plainly: `nexus_worker_candidate` never needed a
+standing grant, only a tracked Task Card in the Controller. With create and
+commit delegated, a caller holding the Gateway's bearer token (or a local stdio
+session) can now run a governed task up to a verified Candidate with no Owner
+step, including worker provider spend and the card's verifier commands in the
+isolated target. That is the Owner's stated intent for #2270. The record's
+`actor: AGENT` is the authenticated Gateway caller, not a person; the bearer
+token is the agent credential.
+
+This uses the operating-mode file as an authority input, although the file's
+own header says it selects no approval authority. That header still holds for
+everything else in it. The Owner-only rule for changing the mode is a
+convention, not a protected-path control.
 
 Everything else is unchanged:
 - In any other state (`NOT_SEPARATE`, `DEGRADED`, a missing, invalid or

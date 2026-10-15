@@ -1972,6 +1972,7 @@ class UnifiedMCPGateway:
                     key=key,
                     context=context,
                     record_directory=_standing_grant_store_module.DEFAULT_RECEIPT_PATH.parent,
+                    server_instance_id=SERVER_INSTANCE_ID,
                 )
             except bootstrap_agent_authority.BootstrapAgentAuthorityError as exc:
                 raise GatewayInputError(f"OWNER_AUTHORITY_REQUIRED:{exc}") from exc

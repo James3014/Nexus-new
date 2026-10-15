@@ -25,6 +25,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
+import stat
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Optional
@@ -42,6 +45,7 @@ RECORD_FILENAME = "bootstrap-agent-authority.jsonl"
 OPERATING_MODE_RELATIVE_PATH = Path("docs/governance/current_operating_mode.yaml")
 REQUIRED_MODE = "BOOTSTRAP"
 REQUIRED_CONTROLLER_BINDING = "SEPARATE"
+_SHA_RE = re.compile(r"[0-9a-f]{40}")
 
 # Effects that only bind Task Card files into the separate Controller. Anything
 # that publishes or is irreversible (merge, push, release, deletion, ruleset,
@@ -68,15 +72,31 @@ def observe_operating_mode(source_root: Path) -> dict[str, Any]:
         "path": OPERATING_MODE_RELATIVE_PATH.as_posix(),
         "mode": None,
         "source_sha256": None,
+        "loaded_source_head": None,
         "reason": None,
     }
     try:
+        info = os.lstat(path)
+        if not stat.S_ISREG(info.st_mode):
+            observation["reason"] = "MODE_FILE_NOT_REGULAR"
+            return observation
         raw = path.read_bytes()
     except OSError as exc:
         observation["reason"] = f"MODE_FILE_UNREADABLE:{type(exc).__name__}"
         return observation
     digest = hashlib.sha256(raw).hexdigest()
     observation["source_sha256"] = digest
+    # The mode must be the committed one of the loaded deployment, not an
+    # uncommitted edit or a replacement file in its working tree.
+    committed = _committed_blob(Path(source_root), OPERATING_MODE_RELATIVE_PATH.as_posix())
+    if committed is None:
+        observation["reason"] = "MODE_FILE_NOT_COMMITTED"
+        return observation
+    head, blob = committed
+    observation["loaded_source_head"] = head
+    if blob != raw:
+        observation["reason"] = "MODE_FILE_DIFFERS_FROM_LOADED_COMMIT"
+        return observation
     try:
         from scripts.ops.check_operating_mode import STATUS_VALID, evaluate_operating_mode
 
@@ -102,6 +122,33 @@ def observe_operating_mode(source_root: Path) -> dict[str, Any]:
         return observation
     observation["mode"] = mode
     return observation
+
+
+def _committed_blob(source_root: Path, relative: str) -> Optional[tuple[str, bytes]]:
+    """``(HEAD, bytes)`` of ``relative`` at the loaded checkout's HEAD, or ``None``."""
+    try:
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=source_root,
+            capture_output=True,
+            timeout=5.0,
+            check=False,
+        )
+        sha = head.stdout.decode("ascii", errors="replace").strip()
+        if head.returncode != 0 or not _SHA_RE.fullmatch(sha):
+            return None
+        blob = subprocess.run(
+            ["git", "cat-file", "blob", f"{sha}:{relative}"],
+            cwd=source_root,
+            capture_output=True,
+            timeout=5.0,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if blob.returncode != 0:
+        return None
+    return sha, blob.stdout
 
 
 def delegation_context(
@@ -136,12 +183,18 @@ def _append_record(directory: Path, record: Mapping[str, Any]) -> None:
 
     try:
         store._assert_dir_chain_safe(directory, create=True)
+        target = directory / RECORD_FILENAME
+        created = not os.path.lexists(target)
+        # O_NONBLOCK: a planted FIFO fails instead of blocking the Gateway.
         fd = os.open(
-            str(directory / RECORD_FILENAME),
-            os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW,
+            str(target),
+            os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
             0o600,
         )
         try:
+            opened = os.fstat(fd)
+            if not stat.S_ISREG(opened.st_mode) or opened.st_uid != os.getuid():
+                raise OSError("authority record is not a regular file owned by this user")
             line = (json.dumps(dict(record), sort_keys=True, ensure_ascii=False) + "\n").encode(
                 "utf-8"
             )
@@ -151,6 +204,13 @@ def _append_record(directory: Path, record: Mapping[str, Any]) -> None:
             os.fsync(fd)
         finally:
             os.close(fd)
+        if created:
+            # Make the new directory entry durable before the effect runs.
+            dir_fd = os.open(str(directory), os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
     except (OSError, store.StandingGrantReceiptError) as exc:
         raise BootstrapAgentAuthorityError(
             f"BOOTSTRAP_AGENT_AUTHORITY_RECORD_WRITE_FAILED:{type(exc).__name__}"
@@ -165,6 +225,7 @@ def authorize_bootstrap_agent_effect(
     key: Any,
     context: Mapping[str, Any],
     record_directory: Path,
+    server_instance_id: Optional[str] = None,
     now: Optional[datetime] = None,
 ) -> dict[str, Any]:
     """Write the authority record, then return the effect authorization.
@@ -193,6 +254,9 @@ def authorize_bootstrap_agent_effect(
         "coordination_scope_id": getattr(key, "coordinator_thread", None),
         "standing_grant_key": getattr(key, "digest", None),
         "standing_grant_used": False,
+        # Attribution: which Gateway process and loaded commit acted.
+        "server_instance_id": server_instance_id,
+        "loaded_source_head": context["operating_mode"].get("loaded_source_head"),
         "recorded_at": recorded_at,
     }
     record["record_hash"] = canonical_autonomy_hash(record)

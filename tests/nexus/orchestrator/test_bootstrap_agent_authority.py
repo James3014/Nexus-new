@@ -20,8 +20,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
+import sys
 import threading
 import urllib.request
 from datetime import datetime, timezone
@@ -149,7 +151,16 @@ def _commit_args(created: dict[str, Any], head: str) -> dict[str, Any]:
 
 
 def _real_mode() -> str:
-    return REAL_MODE_FILE.read_text(encoding="utf-8")
+    """The real mode file's schema with ``mode: BOOTSTRAP``.
+
+    Positive tests must not turn red when the Owner leaves BOOTSTRAP; that
+    change should only switch the delegation off. The live file itself is
+    checked separately below.
+    """
+    text = REAL_MODE_FILE.read_text(encoding="utf-8")
+    text, count = re.subn(r"(?m)^mode: .*$", "mode: BOOTSTRAP", text, count=1)
+    assert count == 1
+    return text
 
 
 # --- BOOTSTRAP + SEPARATE ------------------------------------------------------
@@ -206,6 +217,13 @@ def test_bootstrap_separate_create_and_commit_need_no_grant_and_write_records(
         assert record["recorded_at"]
         assert record["goal_id"] == "goal-2270"
         assert record["coordination_scope_id"] == "thread-2270"
+        assert (
+            record["standing_grant_key"]
+            == UnifiedMCPGateway._owner_effect_key(AUTHORITY_ARGS).digest
+        )
+        assert record["server_instance_id"] == gateway_module.SERVER_INSTANCE_ID
+        assert record["loaded_source_head"] == head
+        assert record["operating_mode"]["loaded_source_head"] == head
         # The returned authorization names the exact durable record and effect.
         assert authority["authority_record_hash"] == record["record_hash"]
         assert authority["effect_hash"] == record["effect_hash"]
@@ -287,6 +305,8 @@ def test_mode_is_read_from_the_loaded_deployment_not_the_controller(tmp_path, mo
     target = controller / baa.OPERATING_MODE_RELATIVE_PATH
     target.parent.mkdir(parents=True)
     target.write_text(_real_mode(), encoding="utf-8")
+    _git(controller, "add", "-A")
+    _git(controller, "commit", "-qm", "controller-only mode file")
     assert baa.observe_operating_mode(controller)["mode"] == "BOOTSTRAP"
     assert (
         baa.delegation_context(
@@ -296,6 +316,60 @@ def test_mode_is_read_from_the_loaded_deployment_not_the_controller(tmp_path, mo
         )
         is None
     )
+
+
+def test_uncommitted_bootstrap_edit_in_the_loaded_tree_does_not_delegate(tmp_path, monkeypatch):
+    """Only the committed mode of the loaded deployment counts (Codex review)."""
+    governed = _real_mode().replace("mode: BOOTSTRAP", "mode: GOVERNED_DEFAULT", 1)
+    loaded, controller, _ = _make_pair(tmp_path, governed)
+    (loaded / baa.OPERATING_MODE_RELATIVE_PATH).write_text(_real_mode(), encoding="utf-8")
+    observed = baa.observe_operating_mode(loaded)
+    assert observed["mode"] is None
+    assert observed["reason"] == "MODE_FILE_DIFFERS_FROM_LOADED_COMMIT"
+    _bind(monkeypatch, loaded, controller, separate=True)
+    result = _call(UnifiedMCPGateway(service=MagicMock()), "nexus_task_card_create", _create_args())
+    _assert_grant_required(result, tmp_path, controller)
+
+
+def test_symlinked_mode_file_does_not_delegate(tmp_path):
+    loaded, _, _ = _make_pair(tmp_path, _real_mode())
+    mode = loaded / baa.OPERATING_MODE_RELATIVE_PATH
+    elsewhere = tmp_path / "mode.yaml"
+    elsewhere.write_text(_real_mode(), encoding="utf-8")
+    mode.unlink()
+    mode.symlink_to(elsewhere)
+    assert baa.observe_operating_mode(loaded)["reason"] == "MODE_FILE_NOT_REGULAR"
+
+
+def test_untracked_mode_file_does_not_delegate(tmp_path):
+    loaded, _, _ = _make_pair(tmp_path, None)
+    mode = loaded / baa.OPERATING_MODE_RELATIVE_PATH
+    mode.parent.mkdir(parents=True)
+    mode.write_text(_real_mode(), encoding="utf-8")
+    assert baa.observe_operating_mode(loaded)["reason"] == "MODE_FILE_NOT_COMMITTED"
+
+
+def test_validator_unavailable_does_not_delegate(tmp_path, monkeypatch):
+    loaded, _, _ = _make_pair(tmp_path, _real_mode())
+    monkeypatch.setitem(sys.modules, "scripts.ops.check_operating_mode", None)
+    observed = baa.observe_operating_mode(loaded)
+    assert observed["mode"] is None
+    assert str(observed["reason"]).startswith("MODE_VALIDATOR_UNAVAILABLE")
+
+
+def test_validator_seeing_other_bytes_does_not_delegate(tmp_path, monkeypatch):
+    import scripts.ops.check_operating_mode as checker
+
+    loaded, _, _ = _make_pair(tmp_path, _real_mode())
+    real = checker.evaluate_operating_mode
+
+    def other_bytes(path):
+        verdict = dict(real(path))
+        verdict["source_sha256"] = "0" * 64
+        return verdict
+
+    monkeypatch.setattr(checker, "evaluate_operating_mode", other_bytes)
+    assert baa.observe_operating_mode(loaded)["reason"] == "MODE_FILE_CHANGED_DURING_READ"
 
 
 @pytest.mark.parametrize(
