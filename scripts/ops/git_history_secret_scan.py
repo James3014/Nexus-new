@@ -14,6 +14,7 @@ import math
 import re
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -616,6 +617,155 @@ def scan_repository(repo: Path) -> dict[str, object]:
     }
 
 
+_MAX_REPORTED_FINDINGS = 20
+_MAX_REFS_PER_FINDING = 5
+_GIT_DIAG_TIMEOUT_SECONDS = 20
+_GIT_DIAG_TOTAL_BUDGET_SECONDS = 90
+
+REMEDIATION_TEXT = (
+    "Remediation: treat any leaked value as real and rotate or revoke it now. "
+    "If the value is a test fixture, build it from split literals "
+    '(for example "AIza" + "...") as described in '
+    "scripts/ops/check_fixture_secret_literals.py. A follow-up commit that deletes "
+    "the value does NOT clear this check, because the blob stays reachable from "
+    "history. Rewrite the offending branch history (or delete the branch) so that no "
+    "published ref contains the blob. If the blob is on main, owner action is needed."
+)
+
+
+# Provider shapes plus any unbroken alphanumeric run of 20+ (the assignment
+# detector minimum) are redacted: a path or
+# ref name may itself carry the leaked value, and the log is more public than the
+# receipt. `-`, `_` and `/` break runs so ordinary branch names and paths survive.
+_LONG_TOKEN_RE = re.compile(r"[A-Za-z0-9+=]{20,}")
+
+
+def _redact_secret_shapes(text: str) -> str:
+    raw = text.encode("utf-8", errors="replace")
+    for _detector, pattern in PROVIDER_PATTERNS:
+        raw = pattern.sub(b"<redacted>", raw)
+    text = raw.decode("utf-8", errors="replace")
+    return _LONG_TOKEN_RE.sub("<redacted>", text)
+
+
+def _log_safe(value: object, limit: int = 200) -> str:
+    """One log token that can never be read as a GitHub workflow command.
+
+    Mirrors scripts/ops/exact_base_tool_gate.py::_log_safe and is stricter: ref names,
+    paths and messages are attacker-controlled, so control characters, ``%``,
+    backtick, ``:``, ``#``, ``[`` and ``]`` are all replaced.
+    """
+    text = _redact_secret_shapes(str(value))
+    text = "".join(ch if ch.isprintable() else " " for ch in text)
+    text = "".join("_" if ch in "%`:#[]" else ch for ch in text)
+    text = " ".join(text.split())
+    if len(text) > limit:
+        text = text[:limit] + "..."
+    return text
+
+
+def _diag_git(repo: Path, *args: str, input_text: str | None = None, timeout: float) -> str:
+    proc = subprocess.run(
+        ["git", "-C", str(repo), *args],
+        input=input_text,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=timeout,
+    )
+    if proc.returncode != 0:
+        raise ScanError("diagnostic git call failed")
+    return proc.stdout
+
+
+def _commit_for_finding(repo: Path, finding: dict[str, object], timeout: float) -> str | None:
+    commit = finding.get("commit_id")
+    if isinstance(commit, str) and re.fullmatch(r"[0-9a-f]{40,64}", commit):
+        return commit
+    oid = finding.get("object_id")
+    if not isinstance(oid, str) or not re.fullmatch(r"[0-9a-f]{40,64}", oid):
+        return None
+    tips = _diag_git(
+        repo,
+        "for-each-ref",
+        "--format=%(objectname)",
+        "refs/remotes",
+        "refs/tags",
+        timeout=timeout,
+    )
+    if not tips.strip():
+        return None
+    found = _diag_git(
+        repo,
+        "log",
+        "--format=%H",
+        f"--find-object={oid}",
+        "--stdin",
+        input_text=tips,
+        timeout=timeout,
+    ).split()
+    found = [item for item in found if re.fullmatch(r"[0-9a-f]{40,64}", item)]
+    # git log lists newest first; the last entry is the oldest commit touching the blob.
+    return found[-1] if found else None
+
+
+def _refs_containing(
+    repo: Path, finding: dict[str, object], timeout: float
+) -> tuple[str | None, str]:
+    try:
+        commit = _commit_for_finding(repo, finding, timeout)
+        if commit is None:
+            return None, "unknown"
+        out = _diag_git(
+            repo,
+            "for-each-ref",
+            f"--contains={commit}",
+            "--format=%(refname)",
+            "refs/remotes",
+            "refs/heads",
+            "refs/tags",
+            timeout=timeout,
+        )
+        refs = [r for r in out.splitlines() if r and r != "refs/remotes/origin/HEAD"]
+        if not refs:
+            return commit, "unknown"
+        shown = ", ".join(_log_safe(r) for r in refs[:_MAX_REFS_PER_FINDING])
+        extra = len(refs) - _MAX_REFS_PER_FINDING
+        return commit, shown + (f" (+{extra} more)" if extra > 0 else "")
+    except Exception:
+        return None, "unknown"
+
+
+def render_failure_log(repo: Path, receipt: dict[str, object]) -> list[str]:
+    """Human-readable lines for a blocking receipt; never includes matched bytes."""
+    if not receipt.get("blocking") or receipt.get("status") != "FAIL":
+        return []
+    raw = receipt.get("findings")
+    items = raw if isinstance(raw, list) else []
+    blocking = [f for f in items if isinstance(f, dict) and f.get("blocking")]
+    count = len(blocking)
+    lines = [
+        f"::error title=Secret audit::{count} blocking secret finding(s) in published git "
+        "history; values are never printed (see git-history-secret-scan.json receipt)"
+    ]
+    deadline = time.monotonic() + _GIT_DIAG_TOTAL_BUDGET_SECONDS
+    for item in blocking[:_MAX_REPORTED_FINDINGS]:
+        remaining = deadline - time.monotonic()
+        if remaining > 1:
+            commit, refs = _refs_containing(repo, item, min(_GIT_DIAG_TIMEOUT_SECONDS, remaining))
+        else:
+            commit, refs = None, "unknown"
+        short = _log_safe(commit[:12]) if commit else "n/a"
+        lines.append(
+            f"  {_log_safe(item.get('detector'))} / {_log_safe(item.get('classification'))}: "
+            f"path={_log_safe(item.get('path') or 'n/a')} commit={short} refs: {refs}"
+        )
+    if count > _MAX_REPORTED_FINDINGS:
+        lines.append(f"  ... and {count - _MAX_REPORTED_FINDINGS} more blocking finding(s)")
+    lines.append(REMEDIATION_TEXT)
+    return lines
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", default=".")
@@ -639,6 +789,13 @@ def main(argv: list[str] | None = None) -> int:
         Path(args.output).write_text(payload, encoding="utf-8")
     else:
         sys.stdout.write(payload)
+    if exit_code == 1:
+        try:
+            for line in render_failure_log(Path(args.repo), receipt):
+                print(line, file=sys.stderr)
+            sys.stderr.flush()
+        except Exception:
+            pass
     return exit_code
 
 
