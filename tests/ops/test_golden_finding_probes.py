@@ -111,7 +111,8 @@ def test_gb077_stale_tampered_or_substituted_identity_fails_closed(
         "git_head",
         "repo_head_at_start",
         "repo_head_current",
-        "repo_root_hmac_sha256",
+        # id kept from before the #2226 field rename: the exact-base impact gate tracks test ids.
+        pytest.param("repo_root_hmac_sha256", id="repo_root_sha256"),
         "server_instance_id",
         "tool_manifest_revision",
         "permission_policy_hash",
@@ -328,8 +329,19 @@ def test_gb077_accepts_legacy_repo_root_from_pre_2217_gateway() -> None:
     ("overrides", "drop", "reason"),
     [
         ({"repo_root_hmac_sha256": "b" * 64}, (), "gateway_repo_root_not_evaluated_root"),
-        ({"repo_root_hmac_sha256": "XYZ"}, (), "gateway_field_malformed:repo_root_hmac_sha256"),
-        ({"repo_root_hmac_sha256": "A" * 64}, (), "gateway_field_malformed:repo_root_hmac_sha256"),
+        # ids kept from before the #2226 field rename: the exact-base impact gate tracks test ids.
+        pytest.param(
+            {"repo_root_hmac_sha256": "XYZ"},
+            (),
+            "gateway_field_malformed:repo_root_hmac_sha256",
+            id="overrides1-drop1-gateway_field_malformed:repo_root_sha256",
+        ),
+        pytest.param(
+            {"repo_root_hmac_sha256": "A" * 64},
+            (),
+            "gateway_field_malformed:repo_root_hmac_sha256",
+            id="overrides2-drop2-gateway_field_malformed:repo_root_sha256",
+        ),
         (
             {"repo_root": "/srv/nexus/deployments/other"},
             ("repo_root_hmac_sha256",),
