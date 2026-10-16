@@ -529,6 +529,7 @@ class ClineWorkerAdapter(DirectCliWorkerAdapter):
                     run_root=run_tmp,
                     writable_target=target_path,
                     extra_protected_target_names=CLINE_TARGET_CUSTOMIZATION_PATHS,
+                    source_home=worker_home(None),
                 )
             except ValueError:
                 return failed("cline_seatbelt_profile_unrepresentable")
@@ -871,6 +872,7 @@ class AgyWorkerAdapter:
                     run_root=run_tmp,
                     writable_target=None if read_only else target_path,
                     run_home=run_home,
+                    source_home=source_home,
                 )
             except ValueError:
                 return "agy_seatbelt_profile_unrepresentable", run_env, ""

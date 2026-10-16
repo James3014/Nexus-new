@@ -418,7 +418,10 @@ def _run_gemini_patch(
                     env=admission.agy_child_env(env, home=run_home, tmpdir=run_tmp),
                     timeout_seconds=float(timeout_sec),
                     seatbelt_profile=admission.build_seatbelt_profile(
-                        run_root=agy_run_root, writable_target=case_real, run_home=run_home
+                        run_root=agy_run_root,
+                        writable_target=case_real,
+                        run_home=run_home,
+                        source_home=Path(env["HOME"]),
                     ),
                     sweep_descendants_on_exit=True,
                     sweep_roots=(str(case_real), str(agy_run_root)),

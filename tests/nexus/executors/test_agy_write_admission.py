@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import pwd
 import re
 import shutil
 import subprocess
@@ -301,8 +302,12 @@ def test_implementation_run_uses_accept_edits_seatbelt_and_records_posture(
     assert "(deny file-write*)" in profile
     assert f'(subpath "{target}")' in profile
     assert f'(subpath "{target / ".git"}")' in profile  # .git entry stays read-only
-    assert str(agy_home) not in profile  # real HOME is never writable
-    assert "Keychains" not in profile
+    # #1752: the profile now also lists the real HOME's credential paths in a
+    # trailing read-deny block; the WRITE rules (everything before it) still
+    # must not mention the real HOME or any keychain.
+    write_rules = profile.split("(deny file-read*")[0]
+    assert str(agy_home) not in write_rules  # real HOME is never writable
+    assert "Keychains" not in write_rules
     assert str(canonical) not in profile
     run_home = Path(request.env["HOME"])
     run_tmp = Path(request.env["TMPDIR"])
@@ -1995,7 +2000,8 @@ def test_materialize_run_home_gets_isolated_default_keychain(tmp_path, agy_home)
         run_root=run_home.parent, writable_target=None, run_home=run_home
     )
     assert f'(subpath "{run_home.parent}")' in profile_text
-    assert "Keychains" not in profile_text  # no literal: the real ~/Library/Keychains stays denied
+    # no write literal: the real ~/Library/Keychains stays denied (#1752 adds a read deny)
+    assert "Keychains" not in profile_text.split("(deny file-read*")[0]
     if not _assert_profile_text_or_skip_run(
         profile_text,
         denied=[run_home / admission.AGY_RUN_HOME_SETTINGS, run_home / ".gemini" / "config"],
@@ -2127,3 +2133,126 @@ def test_bench_runner_refuses_when_the_run_home_cannot_be_materialized(tmp_path,
     row = runner._run_gemini_patch(case_dir, task, mode="with_nexus", timeout_sec=5, model="agy")
     assert row["error"] == admission.AGY_RUN_HOME_KEYCHAIN_UNAVAILABLE
     assert row["model_calls"] == 0 and row["written_files"] == []
+
+
+# --- #1752: confined workers must not read the real home's credentials -------
+
+
+def _read_denied_entries(profile: str) -> set[str]:
+    """Entries of every ``(deny file-read* ...)`` block in the profile text."""
+    entries: set[str] = set()
+    inside = False
+    for line in profile.splitlines():
+        stripped = line.strip()
+        if stripped == "(deny file-read*":
+            inside = True
+            continue
+        if inside:
+            if stripped == ")":
+                inside = False
+                continue
+            entries.add(stripped)
+    return entries
+
+
+def _effective_read(profile: str, path: Path) -> str:
+    sbpl = admission._sbpl_path(path)
+    denied = _read_denied_entries(profile)
+    for entry in denied:
+        kind, _, quoted = entry.partition(" ")
+        target = quoted.strip().removesuffix(")").strip('"')
+        if kind == "(literal" and target == sbpl:
+            return "deny"
+        if kind == "(subpath" and (sbpl == target or sbpl.startswith(target + "/")):
+            return "deny"
+    return "allow"
+
+
+def test_seatbelt_profile_denies_reading_source_home_credentials(tmp_path):
+    source_home = (tmp_path / "real-home").resolve()
+    target = (tmp_path / "real-home" / "workspace" / "repo").resolve()
+    target.mkdir(parents=True)
+    run_root = (tmp_path / "run").resolve()
+    (run_root / "home").mkdir(parents=True)
+    profile = admission.build_seatbelt_profile(
+        run_root=run_root, writable_target=target, source_home=source_home
+    )
+    for relative in (
+        ".ssh/id_test",
+        ".config/gh/hosts.yml",
+        ".git-credentials",
+        ".netrc",
+        ".gitconfig",
+        ".config/git/credentials",
+        ".config/nexus-agent-bot/app.pem",
+        ".config/nexus-jev/env",
+        ".codex/auth.json",
+        ".cline/data/settings/providers.json",
+        ".gemini/oauth_creds.json",
+        ".grok/auth.json",
+        ".aws/credentials",
+        ".docker/config.json",
+        ".npmrc",
+        ".pypirc",
+        "Library/Keychains/login.keychain-db",
+    ):
+        assert _effective_read(profile, source_home / relative) == "deny", relative
+    # Only the credential subpaths: the target (inside the real home) and the
+    # run root stay readable, as do ordinary files in the real home.
+    assert _effective_read(profile, target / "README.md") == "allow"
+    assert _effective_read(profile, run_root / "home" / ".ssh" / "x") == "allow"
+    assert _effective_read(profile, source_home / "notes.txt") == "allow"
+    # The leading write-profile lines are unchanged.
+    assert profile.splitlines()[:3] == ["(version 1)", "(allow default)", "(deny file-write*)"]
+
+
+def test_seatbelt_profile_denies_pool_home_and_account_home_credentials(tmp_path):
+    pool_home = (tmp_path / "pool-home").resolve()
+    profile = admission.build_seatbelt_profile(
+        run_root=(tmp_path / "run").resolve(), writable_target=None, source_home=pool_home
+    )
+    assert _effective_read(profile, pool_home / ".ssh" / "id") == "deny"
+    account_home = Path(os.path.realpath(pwd.getpwuid(os.getuid()).pw_dir))
+    assert _effective_read(profile, account_home / ".ssh" / "id") == "deny"
+
+
+# Opt-in: defined (so collected) only when NEXUS_LOCAL_PHYSICAL_WITNESS=1, never in CI.
+if os.environ.get("NEXUS_LOCAL_PHYSICAL_WITNESS") == "1":
+
+    def test_local_physical_seatbelt_denies_source_home_credential_reads(tmp_path):
+        """Real sandbox-exec: a fake source home's .ssh is unreadable, the target is not."""
+        if not _seatbelt_usable():
+            pytest.skip("sandbox-exec unavailable")
+        source_home = (tmp_path / "fake-home").resolve()
+        (source_home / ".ssh").mkdir(parents=True)
+        (source_home / ".ssh" / "id_test").write_text("FAKE-SECRET", encoding="utf-8")
+        target = (source_home / "workspace" / "repo").resolve()
+        target.mkdir(parents=True)
+        (target / "ok.txt").write_text("fine", encoding="utf-8")
+        run_root = (tmp_path / "run").resolve()
+        (run_root / "home").mkdir(parents=True)
+        profile = admission.build_seatbelt_profile(
+            run_root=run_root, writable_target=target, source_home=source_home
+        )
+        code = (
+            "import sys\n"
+            "out = []\n"
+            "for p in (sys.argv[1], sys.argv[2]):\n"
+            "    try:\n"
+            "        open(p).read()\n"
+            "        out.append('READ')\n"
+            "    except OSError:\n"
+            "        out.append('DENIED')\n"
+            "print(','.join(out))\n"
+        )
+        result = run_cli_worker(
+            CliWorkerRequest(
+                executable=sys.executable,
+                argv=("-c", code, str(source_home / ".ssh" / "id_test"), str(target / "ok.txt")),
+                cwd=str(target),
+                env={"HOME": str(run_root / "home"), "TMPDIR": str(run_root)},
+                seatbelt_profile=profile,
+            )
+        )
+        assert result.exit_code == 0, result.stderr
+        assert result.stdout.strip() == b"DENIED,READ"
