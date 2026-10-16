@@ -557,3 +557,178 @@ def test_real_world_full_nexus_failed_pipeline_is_never_a_verified_solve(
     )
     assert succeeded["verified_solve"] is True
     assert succeeded["semantic_verified"] is True
+
+
+def _flag_task():
+    return next(
+        task
+        for task in load_tasks("scripts/bench/real_world_tasks_v1.json")
+        if task.fixture_kind == "flag_normalization"
+    )
+
+
+def test_real_world_full_nexus_nightshift_recovery_cannot_mask_stage1_sweep_failure(
+    tmp_path: Path, monkeypatch
+):
+    # #2202: a hyper-stage agy sweep failure triggers nightshift; a nightshift
+    # SUCCESS rewrites the result to SUCCESS while stage-1 survivors may still
+    # be editing the case dir. The sweep-failure veto must survive recovery.
+    task = _flag_task()
+
+    def fake_learn_chain(case_dir, task, *, timeout_sec):
+        return {"topic": "t", "semantic_status": "VERIFIED", "converged": True, "claims_count": 1}
+
+    def fake_auto_flow(case_dir, task, *, timeout_sec, model, force_flow=None, candidate_count=1):
+        return (
+            {
+                "semantic_status": "VERIFIED",
+                "chosen_flow": "hyper_sprint",
+                "guard": {"nightshift_recommended": True},
+                "result": {
+                    "status": "FAILED",
+                    "error": "agy_descendant_sweep_failed: worker descendants may survive",
+                    "report": {"model_calls": 1, "total_tokens": 1, "token_capture_status": "measured"},
+                },
+                "_runner_returncode": 0,
+            },
+            case_dir / ".nexus/reports/research/real_world_auto_flow.json",
+        )
+
+    def fake_nightshift(case_dir, task, *, timeout_sec, model):
+        return {"invoked": True, "status": "SUCCESS", "report_file": ""}
+
+    monkeypatch.setattr(real_world_task_runner, "_run_full_nexus_learn_chain", fake_learn_chain)
+    monkeypatch.setattr(real_world_task_runner, "_run_full_nexus_auto_flow_patch", fake_auto_flow)
+    monkeypatch.setattr(real_world_task_runner, "_run_full_nexus_nightshift_patch", fake_nightshift)
+    monkeypatch.setattr(real_world_task_runner, "_run_tests", lambda case_dir, timeout_sec: True)
+
+    row = run_task(task, mode="with_nexus", root=tmp_path, timeout_sec=30, index=0, executor="full_nexus")
+
+    assert row["verified_solve"] is False
+    assert row["semantic_verified"] is False
+
+
+def test_real_world_full_nexus_success_with_propagated_sweep_flag_is_not_a_solve(
+    tmp_path: Path, monkeypatch
+):
+    # #2202: even a SUCCESS Nexus result is vetoed when a nested agy run's
+    # sweep failure is propagated in the payload.
+    task = _flag_task()
+
+    def fake_full_nexus_patch(
+        case_dir, task, *, timeout_sec, model, force_flow=None, candidate_count=1
+    ):
+        return {
+            "regression_test_added": False,
+            "unrelated_change": False,
+            "root_cause": "flag normalization misses strip lower conversion",
+            "written_files": [],
+            "model_calls": 1,
+            "total_tokens": 0,
+            "token_capture_status": "measured",
+            "gemini_returncode": 0,
+            "nexus_payload": {
+                "semantic_status": "VERIFIED",
+                "chosen_flow": "hyper_sprint",
+                "result": {
+                    "status": "SUCCESS",
+                    "error": "",
+                    "report": {"status": "SUCCESS", "agy_sweep_failed": True},
+                },
+            },
+            "nightshift_info": {"invoked": False},
+            "error": "",
+        }
+
+    monkeypatch.setattr(real_world_task_runner, "_run_full_nexus_patch", fake_full_nexus_patch)
+    monkeypatch.setattr(real_world_task_runner, "_run_tests", lambda case_dir, timeout_sec: True)
+
+    row = run_task(task, mode="with_nexus", root=tmp_path, timeout_sec=30, index=0, executor="full_nexus")
+
+    assert row["verified_solve"] is False
+    assert row["semantic_verified"] is False
+
+
+def _capture_nightshift_env(monkeypatch, tmp_path: Path) -> dict[str, str]:
+    captured: dict[str, str] = {}
+
+    def fake_run(cmd, **kwargs):
+        captured.update(kwargs["env"])
+        return real_world_task_runner.subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(real_world_task_runner.subprocess, "run", fake_run)
+    case_dir, _, _ = real_world_task_runner.materialize_fixture(tmp_path / "with_nexus", _flag_task())
+    real_world_task_runner._run_full_nexus_nightshift_patch(
+        case_dir, _flag_task(), timeout_sec=5, model="m"
+    )
+    return captured
+
+
+def test_real_world_bench_env_derives_home_from_host_not_m4(tmp_path: Path, monkeypatch):
+    # #2202: the bench hard-coded /Users/jameschen, so the agy arm could only
+    # run on the M4.
+    home = tmp_path / "fakehome"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("NEXUS_BENCH_HOME", raising=False)
+
+    env = _capture_nightshift_env(monkeypatch, tmp_path)
+
+    assert env["HOME"] == str(home)
+    assert "/Users/jameschen" not in env["PATH"]
+    assert f"{home}/.npm-global/bin" in env["PATH"]
+
+
+def test_real_world_bench_env_keeps_m4_behaviour_and_honours_override(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("HOME", "/Users/jameschen")
+    monkeypatch.delenv("NEXUS_BENCH_HOME", raising=False)
+    env = _capture_nightshift_env(monkeypatch, tmp_path)
+    assert env["HOME"] == "/Users/jameschen"
+    assert env["PATH"].startswith(
+        "/opt/homebrew/bin:/Users/jameschen/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:"
+    )
+
+    override = tmp_path / "override"
+    monkeypatch.setenv("NEXUS_BENCH_HOME", str(override))
+    env = _capture_nightshift_env(monkeypatch, tmp_path / "second")
+    assert env["HOME"] == str(override)
+
+
+def test_real_world_resolve_gemini_bin_finds_agy_under_host_home(tmp_path: Path, monkeypatch):
+    home = tmp_path / "fakehome"
+    agy = home / ".local" / "bin" / "agy"
+    agy.parent.mkdir(parents=True)
+    agy.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("NEXUS_BENCH_HOME", raising=False)
+    monkeypatch.delenv("NEXUS_GEMINI_BIN", raising=False)
+
+    assert real_world_task_runner._resolve_gemini_bin() == str(agy)
+
+
+def test_real_world_resolve_gemini_bin_uses_which_agy(tmp_path: Path, monkeypatch):
+    home = tmp_path / "emptyhome"
+    home.mkdir()
+    agy = tmp_path / "elsewhere" / "agy"
+    agy.parent.mkdir()
+    agy.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("NEXUS_BENCH_HOME", raising=False)
+    monkeypatch.delenv("NEXUS_GEMINI_BIN", raising=False)
+    real_which = real_world_task_runner.shutil.which
+    monkeypatch.setattr(
+        real_world_task_runner.shutil,
+        "which",
+        lambda name, *a, **k: str(agy) if name == "agy" else real_which(name, *a, **k),
+    )
+
+    assert real_world_task_runner._resolve_gemini_bin() == str(agy)
+
+
+def test_real_world_stage1_sweep_failure_detector_covers_production_markers():
+    detect = real_world_task_runner._stage1_sweep_failed
+    assert detect({"result": {"error": "NEXUS_AGY_DESCENDANT_SWEEP_FAILED"}}) is True
+    assert detect({"result": {"report": {"descendants_swept": False}}}) is True
+    assert detect({"result": {"errors": ["x", "agy_descendant_sweep_failed: y"]}}) is True
+    assert detect({"result": {"status": "FAILED", "error": "stage1_no_passing_candidate"}}) is False
+    assert detect({"agy_sweep_failed": False, "descendants_swept": True}) is False
