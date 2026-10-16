@@ -712,7 +712,6 @@ def test_decide_flow_payload_schema_keys(tmp_path: Path):
         "research_role",
         "claim_uncertainty",
         "benchmark_required",
-        "benchmark_hidden_contract_fast_path",
         "plateau_detected",
         "doc_scout_hits",
         "blocked_assumptions_count",
@@ -1007,10 +1006,9 @@ def test_build_route_hidden_contract_fast_path_survives_low_confidence_candidate
         target_file="target.py",
     )
 
-    assert out["recommended_flow"] == "baseline"
-    assert out["recommended_reason"] == "benchmark_hidden_contract_fast_path"
-    assert out["should_research"] is False
-    assert "research" not in out["capability_plan"]["selected_capabilities"]
+    # #2339: the benchmark hidden-contract route (baseline + local-first patch) is deleted.
+    assert out["recommended_reason"] != "benchmark_hidden_contract_fast_path"
+    assert "benchmark_hidden_contract_fast_path" not in out["route_features"]
 
 
 def test_build_route_response_contract_fast_path_ignores_stale_memory(tmp_path: Path, monkeypatch):
@@ -1048,10 +1046,9 @@ def test_build_route_response_contract_fast_path_ignores_stale_memory(tmp_path: 
         target_file="target.py",
     )
 
-    assert out["recommended_flow"] == "baseline"
-    assert out["recommended_reason"] == "benchmark_hidden_contract_fast_path"
-    assert out["should_research"] is False
-    assert "research" not in out["capability_plan"]["selected_capabilities"]
+    # #2339: the benchmark hidden-contract route (baseline + local-first patch) is deleted.
+    assert out["recommended_reason"] != "benchmark_hidden_contract_fast_path"
+    assert "benchmark_hidden_contract_fast_path" not in out["route_features"]
 
 
 def test_build_route_response_contract_fast_path_survives_candidate_cap(tmp_path: Path):
@@ -1070,9 +1067,9 @@ def test_build_route_response_contract_fast_path_survives_candidate_cap(tmp_path
         target_file="target.py",
     )
 
-    assert out["recommended_flow"] == "baseline"
-    assert out["recommended_reason"] == "benchmark_hidden_contract_fast_path"
-    assert out["should_research"] is False
+    # #2339: the benchmark hidden-contract route (baseline + local-first patch) is deleted.
+    assert out["recommended_reason"] != "benchmark_hidden_contract_fast_path"
+    assert "benchmark_hidden_contract_fast_path" not in out["route_features"]
 
 
 def test_build_route_repair_contract_can_skip_research_under_cost_capped_benchmark(tmp_path: Path):
@@ -1719,7 +1716,7 @@ def test_hidden_contract_apply_events_uses_local_first_before_llm(tmp_path: Path
             pass
 
         def generate(self, **_kwargs):
-            raise AssertionError("hidden contract local-first should avoid LLM baseline")
+            raise RuntimeError("noop model: no candidate")
 
     monkeypatch.setattr(research_flow_service, "LLMCandidateGenerator", FailIfCalledLLM)
 
@@ -1752,13 +1749,14 @@ def test_hidden_contract_apply_events_uses_local_first_before_llm(tmp_path: Path
         task_id="case-hidden-local-first",
     )
 
+    # #2339: the hidden-contract local-first patch is deleted. In the non-strict lane a model
+    # baseline that yields no candidate fails; no locally generated patch is delivered.
     report = payload["result"]["report"]
-    assert payload["result"]["status"] == "SUCCESS"
-    assert payload["strategy"]["path"] == "baseline_only"
-    assert report["source"] == "local_hidden_contract_fast_path"
-    assert report["model_calls"] == 0
-    assert report["baseline_source_policy"] == "hidden_contract_local_first_before_llm"
-    assert payload["route"]["recommended_reason"] == "benchmark_hidden_contract_fast_path"
+    assert payload["result"]["status"] == "FAILED"
+    assert report["source"] == "nexus_llm_baseline_failed"
+    assert report["baseline_source_policy"] == "llm_no_local_fallback"
+    assert report["baseline_llm_required"] is False
+    assert payload["route"]["recommended_reason"] != "benchmark_hidden_contract_fast_path"
 
 
 def test_hidden_contract_response_builder_uses_local_first_before_llm(tmp_path: Path, monkeypatch):
@@ -1782,7 +1780,7 @@ def test_hidden_contract_response_builder_uses_local_first_before_llm(tmp_path: 
             pass
 
         def generate(self, **_kwargs):
-            raise AssertionError("response hidden contract local-first should avoid LLM baseline")
+            raise RuntimeError("noop model: no candidate")
 
     monkeypatch.setattr(research_flow_service, "LLMCandidateGenerator", FailIfCalledLLM)
 
@@ -1817,15 +1815,15 @@ def test_hidden_contract_response_builder_uses_local_first_before_llm(tmp_path: 
         task_id="case-response-hidden-local-first",
     )
 
+    # #2339: the hidden-contract local-first patch is deleted. In the non-strict lane a model
+    # baseline that yields no candidate fails; no locally generated patch is delivered.
     report = payload["result"]["report"]
-    assert payload["result"]["status"] == "SUCCESS"
-    assert payload["strategy"]["path"] == "baseline_only"
-    assert report["source"] == "local_hidden_contract_fast_path"
-    assert report["model_calls"] == 0
-    assert report["baseline_source_policy"] == "hidden_contract_local_first_before_llm"
-    assert payload["route"]["recommended_reason"] == "benchmark_hidden_contract_fast_path"
+    assert payload["result"]["status"] == "FAILED"
+    assert report["source"] == "nexus_llm_baseline_failed"
+    assert report["baseline_source_policy"] == "llm_no_local_fallback"
+    assert report["baseline_llm_required"] is False
+    assert payload["route"]["recommended_reason"] != "benchmark_hidden_contract_fast_path"
     assert payload["nexus_usage_trace"]["pillars"]["mempalace"]["active"] is True
-    assert payload["nexus_usage_trace"]["capabilities"]["mempalace_gate_passed"] is True
 
 
 def test_strict_llm_baseline_does_not_fallback_to_local(tmp_path: Path, monkeypatch):

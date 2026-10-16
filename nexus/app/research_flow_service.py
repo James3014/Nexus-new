@@ -883,41 +883,6 @@ def _build_runtime_skill_mount_contracts(
     return {"skill_mount_contracts": contracts, "skill_mount_violations": violations}
 
 
-def _build_hidden_contract_local_first_patch(
-    *,
-    trial: int,
-    original_code: str,
-    task_desc: str,
-    route: dict[str, Any],
-    llm_baseline_required: bool,
-) -> tuple[str, str, dict[str, Any]] | None:
-    if os.environ.get("NEXUS_DISABLE_HIDDEN_CONTRACT_FAST_PATH", "").strip().lower() in {"1", "true", "yes"}:
-        return None
-    hidden_fast_path = str(route.get("recommended_reason") or "") == "benchmark_hidden_contract_fast_path"
-    task_lower = task_desc.lower()
-    has_known_hidden_contract_reducer = (
-        ("def apply_events" in original_code and "duplicate event" in task_lower)
-        or (
-            "def build_response" in original_code
-            and "FIELD" in original_code
-            and (
-                "canonical field" in task_lower
-                or "renamed public field" in task_lower
-                or "canonical response" in task_lower
-                or "build_response" in task_lower
-            )
-        )
-    )
-    if not hidden_fast_path or llm_baseline_required or not has_known_hidden_contract_reducer:
-        return None
-    patched = generate_local_candidate(original_code, task_desc, "baseline", trial)
-    if patched == original_code:
-        return None
-    meta = local_baseline_meta()
-    meta["baseline_source_policy"] = "hidden_contract_local_first_before_llm"
-    return patched, "local_hidden_contract_fast_path", meta
-
-
 def _bind_gate_input_files(gen: Any, repo_root: Path, *, target_file: str, test_file: str) -> None:
     """Hand the task's target and registered visible test to the generator's gate inputs.
 
@@ -936,6 +901,17 @@ def _bind_gate_input_files(gen: Any, repo_root: Path, *, target_file: str, test_
         setattr(gen, "gate_input_test_file", "" if test_error else test_rel)
 
 
+def _model_baseline_failure_meta(
+    reason: str, meta: dict[str, Any] | None = None, *, llm_baseline_required: bool
+) -> dict[str, Any]:
+    """A failed model baseline never falls back to a locally generated patch (any lane)."""
+    out = strict_baseline_failure_meta(reason, meta)
+    if not llm_baseline_required:
+        out["baseline_llm_required"] = False
+        out["baseline_source_policy"] = "llm_no_local_fallback"
+    return out
+
+
 def _build_baseline_patch(
     *,
     trial: int,
@@ -952,19 +928,7 @@ def _build_baseline_patch(
     test_file: str = "",
 ) -> tuple[str, str, dict[str, Any]]:
     source_label = "local"
-    fallback_reason = None
-    fallback_meta: dict[str, Any] | None = None
 
-    local_first = _build_hidden_contract_local_first_patch(
-        trial=trial,
-        original_code=original_code,
-        task_desc=task_desc,
-        route=route,
-        llm_baseline_required=llm_baseline_required,
-    )
-    if local_first is not None:
-        return local_first
-    
     symmetric_prompt = _symmetric_prompt_mode()
     # [NEW: X-2] Prior-Art from Claims
     try:
@@ -1006,33 +970,26 @@ def _build_baseline_patch(
                     return patched, "nexus_llm_baseline", meta
                 return patched, "llm_assisted", meta
             else:
-                if llm_baseline_required:
-                    return original_code, "nexus_llm_baseline_failed", strict_baseline_failure_meta(
-                        "llm_no_patch",
-                        dict(meta),
-                    )
-                fallback_reason = "llm_generation_empty_fallback_local"
-                fallback_meta = dict(meta)
-                fallback_meta["fallback_used"] = True
-                fallback_meta["gateway_error_category"] = fallback_reason
+                return original_code, "nexus_llm_baseline_failed", _model_baseline_failure_meta(
+                    "llm_no_patch",
+                    dict(meta),
+                    llm_baseline_required=llm_baseline_required,
+                )
         except LLMCandidateError as e:
-            if llm_baseline_required:
-                return original_code, "nexus_llm_baseline_failed", strict_baseline_failure_meta(str(e), e.metadata)
-            fallback_reason = f"llm_error_{str(e).lower()}_fallback_local"
-            fallback_meta = dict(e.metadata)
-            fallback_meta["fallback_used"] = True
-            fallback_meta["gateway_error_category"] = str(e)
+            return original_code, "nexus_llm_baseline_failed", _model_baseline_failure_meta(
+                str(e), e.metadata, llm_baseline_required=llm_baseline_required
+            )
         except Exception as e:
             err_str = str(e).lower()
             if "timeout" in err_str:
-                fallback_reason = "timeout"
+                failure_reason = "timeout"
             elif any(p in err_str for p in ["quota", "429", "limit"]):
-                fallback_reason = "quota_exhausted"
+                failure_reason = "quota_exhausted"
             else:
-                fallback_reason = f"llm_error_{err_str}"
-            if llm_baseline_required:
-                return original_code, "nexus_llm_baseline_failed", strict_baseline_failure_meta(fallback_reason)
-            fallback_reason = f"{fallback_reason}_fallback_local"
+                failure_reason = f"llm_error_{err_str}"
+            return original_code, "nexus_llm_baseline_failed", _model_baseline_failure_meta(
+                failure_reason, llm_baseline_required=llm_baseline_required
+            )
     elif llm_baseline_required:
         return original_code, "nexus_llm_baseline_missing", strict_baseline_failure_meta("llm_baseline_required_missing")
     
@@ -1048,21 +1005,7 @@ def _build_baseline_patch(
             patched = _refactor_parser_patch(original_code)
             source_label = "local_conservative_refactor"
         
-    meta = local_baseline_meta()
-    if fallback_reason:
-        meta["baseline_source_policy"] = "fallback_local_due_to_llm_failure"
-        meta["fallback_reason"] = fallback_reason
-        if fallback_meta:
-            meta["fallback_metadata"] = fallback_meta
-    else:
-        meta["baseline_source_policy"] = "local_only_static_rule"
-    meta["fallback_label"] = source_label
-    
-    label = source_label
-    if fallback_reason:
-        label = f"{source_label}({fallback_reason})"
-        
-    return patched, label, fallback_meta or local_baseline_meta(fallback_reason=fallback_reason)
+    return patched, source_label, local_baseline_meta(fallback_reason=None)
 
 
 def run_auto_flow(
