@@ -27,7 +27,7 @@ manifest = {
 manifest_str = json.dumps(manifest, sort_keys=True)
 manifest['fingerprint'] = hashlib.sha256(manifest_str.encode()).hexdigest()
 
-with open('archives/v27.2/v27.2_freeze_manifest.json', 'w') as f:
+with open('archive/legacy-2026-10/archives/v27.2/v27.2_freeze_manifest.json', 'w') as f:
     json.dump(manifest, f, indent=4)
 
 report = f"""# 🧊 v27.2 Mass Production Baseline Report
