@@ -853,7 +853,8 @@ def test_in_place_delivery_writes_while_holding_the_target_lock(
 
 def test_baseline_apply_refuses_when_a_companion_file_is_held(tmp_path: Path, monkeypatch) -> None:
     """Gemini N3: baseline apply's companion edits are locked with the target; a companion
-    held by another task refuses the whole delivery (nothing written)."""
+    held by another task refuses the whole delivery (nothing written). Since #2339 only a
+    no-model local patch carries companion edits, so this runs the local mode."""
     original = "def value():\n    return 1\n"
     (tmp_path / "demo.py").write_text(original, encoding="utf-8")
     (tmp_path / "test_demo.py").write_text(
@@ -878,6 +879,7 @@ def test_baseline_apply_refuses_when_a_companion_file_is_held(tmp_path: Path, mo
     monkeypatch.delenv("NEXUS_SYMMETRIC_PROMPT", raising=False)
     monkeypatch.setattr(rfs, "LLMCandidateGenerator", FakeLLMGenerator)
     monkeypatch.setattr(rfs, "_build_codeintel_evidence", lambda *_a, **_k: {"status": "ok"})
+    monkeypatch.setattr(rfs, "generate_local_candidate", lambda *a, **k: "def value():\n    return 2\n")
     monkeypatch.setattr(
         rfs,
         "generate_local_companion_edits",
@@ -897,9 +899,8 @@ def test_baseline_apply_refuses_when_a_companion_file_is_held(tmp_path: Path, mo
             candidate_count=1,
             root_cause_confidence=1.0,
             findings_query=None,
-            llm_mode=True,
-            llm_baseline=True,
-            llm_baseline_required=True,
+            llm_mode=False,
+            llm_baseline=False,
             timeout_sec=30,
             stage1_timeout_sec=10,
             max_time_ratio_guard=1.5,
