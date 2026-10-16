@@ -3476,7 +3476,124 @@ class SelfHostedTaskService:
 
         result = self._mutate_state(task_id, mutate)
         self._emit_bound_attempt_transition(result, task_id)
+        if status in TERMINAL_STATUSES:
+            self._record_terminal_core_not_covered(task_id, result)
         return result
+
+    TERMINAL_CORE_RECORD_SCHEMA = "nexus.self_hosted_terminal_core_record.v1"
+
+    def _build_terminal_core_record(
+        self, state: Mapping[str, Any], *, contract: Any = None
+    ) -> Optional[dict[str, Any]]:
+        """Core's NOT_COVERED record for a declared-universe task with no receipt (#2346).
+
+        Returns None (nothing to record) for a legacy task, a non-terminal
+        state, or any state that already carries a verified receipt: those
+        paths are unchanged. Otherwise the record always fails closed: it
+        carries no commit permission, and a Core failure is recorded as the
+        failure reason, never as coverage.
+        """
+        status = str(state.get("status") or "")
+        if status not in TERMINAL_STATUSES or state.get("verified_receipt") is not None:
+            return None
+        request = state.get("request")
+        if not isinstance(request, Mapping):
+            return None
+        claims_universe = (
+            request.get("expected_evidence") is not None
+            or request.get("core_envelope_required") is True
+        )
+        if contract is None and not claims_universe:
+            # Legacy (no-universe) task: nothing is built, called or written.
+            return None
+        attempt_id = str(state.get("attempt_id") or "")
+        task_id = str(state.get("task_id") or request.get("task_id") or "")
+        build_error: Optional[str] = None
+        if contract is None:
+            try:
+                contract = self.build_contract(request)
+            except Exception as exc:
+                build_error = f"CORE_TERMINAL_CONTRACT_UNAVAILABLE:{type(exc).__name__}"
+        if (
+            build_error is None
+            and getattr(contract, "expected_evidence", None) is None
+            and not claims_universe
+        ):
+            return None
+        record: dict[str, Any] = {
+            "schema": self.TERMINAL_CORE_RECORD_SCHEMA,
+            "task_id": task_id,
+            "attempt_id": attempt_id,
+            "terminal_status": status,
+            "record_status": "FAILED",
+            "failure_reason": build_error,
+            "verified": False,
+            "candidate_commit_allowed": False,
+            "core_verdict": None,
+        }
+        if build_error is not None:
+            return record
+        try:
+            card_error = self._card_evidence_binding_error(contract, request)
+            if card_error is not None:
+                raise RuntimeError(card_error)
+            port = self.ambient_core_port
+            if port is None:
+                raise RuntimeError("AMBIENT_CORE_CONTROL_PORT_REQUIRED")
+            recorder = getattr(port, "record_terminal_not_covered", None)
+            if not callable(recorder):
+                raise RuntimeError("AMBIENT_CORE_TERMINAL_RECORD_UNSUPPORTED")
+            projection = recorder(
+                contract=contract,
+                request=request,
+                task_id=task_id,
+                attempt_id=attempt_id,
+                terminal_status=status,
+            )
+            verdict = build_core_verdict(contract=contract, projection=projection)
+            if not verdict.get("blocking"):
+                # A task that produced nothing can never read as covered.
+                raise RuntimeError("CORE_TERMINAL_RECORD_NOT_BLOCKING")
+            record.update(record_status="RECORDED", core_verdict=verdict)
+        except Exception as exc:
+            code = str(exc).split(":", 1)[0].strip() or type(exc).__name__
+            reason = f"CORE_TERMINAL_RECORD_FAILED:{code}"
+            record["failure_reason"] = reason
+            try:
+                record["core_verdict"] = build_core_verdict(
+                    contract=contract, projection=None, transport_error=reason
+                )
+            except Exception:
+                record["core_verdict"] = None
+        return record
+
+    def _record_terminal_core_not_covered(self, task_id: str, state: Any) -> None:
+        """Persist the #2346 record; never changes the terminal state it describes."""
+        try:
+            if not isinstance(state, Mapping):
+                return
+            attempt_id = str(state.get("attempt_id") or "")
+            existing = state.get("terminal_core_record")
+            if isinstance(existing, Mapping) and existing.get("attempt_id") == attempt_id:
+                return
+            record = self._build_terminal_core_record(state)
+            if record is None:
+                return
+            status = state.get("status")
+
+            def attach(current: dict[str, Any]) -> None:
+                # Only onto the same attempt, still terminal and receipt-free.
+                if (
+                    current.get("attempt_id") == attempt_id
+                    and current.get("status") == status
+                    and current.get("verified_receipt") is None
+                ):
+                    current["terminal_core_record"] = _jsonable(record)
+
+            self._mutate_state(task_id, attach)
+        except Exception:
+            # Recording is evidence only; the terminal state stands as written.
+            return
 
     def _heartbeat(self, task_id: str, attempt_id: str, stop: threading.Event) -> None:
         while not stop.wait(1.0):

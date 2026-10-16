@@ -665,7 +665,182 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
                     FOREIGN KEY (session_id) REFERENCES core_mutation_sessions(id)
                 )
             """)
+            # #2346: a declared-universe task that ended without a Candidate.
+            # One row per (task, attempt); additive, so existing rows and
+            # readers are unchanged.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS core_terminal_records (
+                    task_id TEXT NOT NULL,
+                    attempt_id TEXT NOT NULL,
+                    terminal_status TEXT NOT NULL,
+                    core_status TEXT NOT NULL,
+                    integrity TEXT NOT NULL,
+                    core_reason_codes_json TEXT NOT NULL,
+                    acceptance_contract_hash TEXT NOT NULL,
+                    universe_identity TEXT NOT NULL,
+                    universe_generation INTEGER NOT NULL,
+                    coverage_json TEXT NOT NULL,
+                    core_provenance_status TEXT NOT NULL,
+                    projection_hash TEXT NOT NULL,
+                    recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (task_id, attempt_id)
+                )
+            """)
             conn.commit()
+
+    def record_terminal_not_covered(self, **kwargs: Any) -> Mapping[str, Any]:
+        """Certify a declared-universe task that ended with no Candidate (#2346).
+
+        Nothing was produced, so there is no change set and there are no
+        observations: the pinned Core's public wire request requires both, so
+        it cannot be used here. Core's own coverage reconciliation
+        (``derive_coverage``) runs over the declared universe and the
+        observations that exist (none), and Core's reducer turns that into a
+        result for the "candidate missing" condition, as Core's change-set
+        certification adapter does for a missing candidate. Every REQUIRED
+        subject is therefore NOT_COVERED with UNVERIFIABLE + MISSING. The host
+        authors no category, status or identity.
+
+        The record is never a pass: it carries no change set, no candidate
+        and no commit permission. Raises on any Core failure; the caller
+        records the failure instead.
+        """
+        if self.simulate_core_unavailable or not CORE_AVAILABLE:
+            raise RuntimeError("CANONICAL_NEXUS_CORE_UNAVAILABLE: Cannot record terminal coverage")
+        task_id = str(kwargs.get("task_id") or "").strip()
+        attempt_id = str(kwargs.get("attempt_id") or "").strip()
+        terminal_status = str(kwargs.get("terminal_status") or "").strip()
+        if not task_id or not attempt_id or not terminal_status:
+            raise RuntimeError("CANONICAL_CORE_ATTEMPT_IDENTITY_MISSING")
+        request = kwargs.get("request") or {}
+        contract_payload = _acceptance_contract_payload(
+            kwargs.get("contract"), request, fallback_contract_id=task_id
+        )
+        if "expected_subjects" not in contract_payload:
+            # Legacy (no-universe) tasks are never recorded.
+            raise RuntimeError("CORE_TERMINAL_RECORD_UNIVERSE_MISSING")
+        try:
+            from product.evidence import (
+                Applicability,
+                ExpectedEvidenceSubject,
+                IntegrityStatus,
+                RequirementMode,
+            )
+            from product.verification import derive_coverage, reduce_verification
+        except ImportError as exc:
+            raise RuntimeError(f"CANONICAL_NEXUS_CORE_UNAVAILABLE: {exc}") from exc
+        shadowed = _loaded_core_shadow_reason(_core_repo_root)
+        if shadowed:
+            raise RuntimeError(f"CANONICAL_NEXUS_CORE_UNAVAILABLE: {shadowed}")
+
+        universe_identity = expected_universe_identity(contract_payload)
+        subjects = tuple(
+            ExpectedEvidenceSubject(
+                subject["logical_subject_id"],
+                subject["evidence_kind"],
+                RequirementMode(subject["requirement_mode"]),
+                Applicability(subject["applicability"]),
+            )
+            for subject in contract_payload["expected_subjects"]
+        )
+        # No Candidate means no verifier ran: the observations are empty.
+        coverage = derive_coverage(
+            subjects,
+            (),
+            universe_generation=contract_payload["universe_generation"],
+            universe_identity=universe_identity,
+        )
+        reasons = {"MISSING", "CANDIDATE_MISSING"}
+        if coverage.unresolved:
+            reasons.add("COVERAGE_UNRESOLVED")
+        result = reduce_verification(
+            IntegrityStatus.MISSING, reasons=tuple(sorted(reasons)), coverage=coverage
+        )
+        if result.status.value == "VERIFIED":  # unreachable by Core's invariants
+            raise RuntimeError("CORE_TERMINAL_RECORD_UNEXPECTED_VERIFIED")
+        contract_hash = acceptance_contract_hash(contract_payload)
+        verification = {
+            "status": result.status.value,
+            "reason_codes": list(result.reason_codes),
+            "integrity": result.integrity.value,
+            "coverage": coverage.to_dict(),
+        }
+        core_source = read_observed_core_identity()
+        provenance = core_provenance_status(dict(core_source))
+        projection_payload = {
+            "schema": "nexus.ambient-core-terminal-record.v1",
+            "task_id": task_id,
+            "attempt_id": attempt_id,
+            "terminal_status": terminal_status,
+            "core_response": {
+                "schema": GENERIC_VERIFICATION_RESPONSE_SCHEMA_ID,
+                "protocol_version": PUBLIC_PROTOCOL_VERSION,
+                "verification": verification,
+                "hashes": {
+                    "acceptance_contract_hash": contract_hash,
+                    "universe_identity": universe_identity,
+                },
+                "certification": None,
+            },
+            "raw_core_request": {"acceptance_contract": contract_payload, "observations": []},
+            "expected_evidence_projection": {
+                "expected_subjects": contract_payload["expected_subjects"],
+                "universe_generation": contract_payload["universe_generation"],
+            },
+            "core_source_identity": core_source,
+            "core_provenance": provenance,
+        }
+        proj_hash = projection_hash(projection_payload)
+
+        self._ensure_db()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT OR IGNORE INTO core_terminal_records
+                (task_id, attempt_id, terminal_status, core_status, integrity,
+                 core_reason_codes_json, acceptance_contract_hash, universe_identity,
+                 universe_generation, coverage_json, core_provenance_status, projection_hash)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+                (
+                    task_id,
+                    attempt_id,
+                    terminal_status,
+                    verification["status"],
+                    verification["integrity"],
+                    json.dumps(verification["reason_codes"]),
+                    contract_hash,
+                    str(universe_identity),
+                    int(contract_payload["universe_generation"]),
+                    json.dumps(verification["coverage"], sort_keys=True),
+                    str(provenance.get("status") or ""),
+                    proj_hash,
+                ),
+            )
+            conn.commit()
+            cursor.execute(
+                "SELECT universe_identity, acceptance_contract_hash FROM core_terminal_records"
+                " WHERE task_id = ? AND attempt_id = ?",
+                (task_id, attempt_id),
+            )
+            row = cursor.fetchone()
+        # An existing row for this attempt must describe the same contract.
+        if row is None or tuple(row) != (str(universe_identity), contract_hash):
+            raise RuntimeError("CORE_TERMINAL_RECORD_CONFLICT")
+        return projection_payload
+
+    def readback_terminal_record(self, task_id: str, attempt_id: str) -> dict[str, Any] | None:
+        self._ensure_db()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM core_terminal_records WHERE task_id = ? AND attempt_id = ?",
+                (task_id, attempt_id),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
 
     def open_or_reuse_mutation_binding(self, **kwargs: Any) -> Mapping[str, Any]:
         request = kwargs.get("request") or {}

@@ -1471,3 +1471,281 @@ def test_live_created_card_with_missing_evidence_blocks(live_created):
         "git diff --check": "COVERED",
         "review:security": "NOT_COVERED",
     }
+
+
+# --- #2346: a declared-universe task that ends before a worker runs ---------
+
+TERMINAL_UNIVERSE = {
+    "universe_generation": 1,
+    "subjects": [
+        DIFF_CHECK,
+        SECURITY_REVIEW,
+        _subject("lint:ruff", "lint-report", "CONDITIONALLY_REQUIRED", "NOT_APPLICABLE"),
+    ],
+}
+TERMINAL_SCENARIOS: list[dict[str, Any]] = [
+    {
+        "name": "preflight_universe",
+        "task_id": "term-universe",
+        "verifiers": ["git diff --check"],
+        "universe": TERMINAL_UNIVERSE,
+        "worker_preflight_ready": False,
+    },
+    {
+        "name": "preflight_legacy",
+        "task_id": "term-legacy",
+        "verifiers": ["git diff --check"],
+        "universe": None,
+        "worker_preflight_ready": False,
+    },
+]
+
+
+@pytest.fixture(scope="module")
+def live_terminal(pinned_core, pinned_core_digest, tmp_path_factory) -> dict[str, Any]:
+    results = _run_driver(
+        tmp_path_factory.mktemp("live-terminal"),
+        TERMINAL_SCENARIOS,
+        pinned_core,
+        pinned_core_digest,
+    )
+    assert results["core_available"] is True, results["core_import_error"]
+    return results
+
+
+def _assert_ended_before_any_worker(result: dict[str, Any]) -> None:
+    assert result["status"] == "FINAL_BLOCK"
+    assert "worker preflight failed" in str(result["error"])
+    assert result["worker_invocations"] == []
+    assert result["verified_receipt_present"] is False
+    assert result["candidate_commit_sha"] is None
+    assert result["promotion_status"] == "NOT_CREATED"
+
+
+def test_live_preflight_final_block_records_core_not_covered(live_terminal):
+    result = live_terminal["preflight_universe"]
+    _assert_ended_before_any_worker(result)
+    record = result["terminal_core_record"]
+    assert record["record_status"] == "RECORDED", record
+    assert record["failure_reason"] is None
+    assert record["attempt_id"] == result["attempt_id"]
+    assert record["terminal_status"] == "FINAL_BLOCK"
+    assert record["verified"] is False
+    assert record["candidate_commit_allowed"] is False
+    verdict = record["core_verdict"]
+    assert verdict["schema"] == CORE_VERDICT_SCHEMA
+    assert verdict["core_status"] == "UNVERIFIABLE"
+    assert verdict["integrity"] == "MISSING"
+    assert "MISSING" in verdict["reason_codes"]
+    assert verdict["blocking"] is True
+    assert verdict["coverage_complete"] is False
+    # Every REQUIRED subject is NOT_COVERED; Core's own category otherwise.
+    assert _categories(verdict) == {
+        "git diff --check": "NOT_COVERED",
+        "lint:ruff": "CONDITIONALLY_NOT_APPLICABLE",
+        "review:security": "NOT_COVERED",
+    }
+    # The coverage is bound to exactly the declared universe and pinned Core.
+    host_identity = live_terminal["host_core_universe_identities"]["preflight_universe"]
+    assert verdict["core_universe_identity"] == host_identity
+    assert verdict["coverage"]["universe_identity"] == host_identity
+    assert verdict["universe_generation"] == 1
+    assert verdict["core_provenance"]["status"] == "CORE_REVISION_PINNED"
+    assert "AMBIENT_CORE_FAILED_VERIFICATION:UNVERIFIABLE" in verdict["host_reason_codes"]
+    assert "CORE_COVERAGE_INCOMPLETE" in verdict["host_reason_codes"]
+    assert not [code for code in verdict["host_reason_codes"] if "MISMATCH" in code]
+    # Durable: the same record after reload, and one Core provenance row.
+    assert result["reloaded_terminal_core_record"] == record
+    row = result["db_terminal_row"]
+    assert row is not None
+    assert row["task_id"] == "term-universe"
+    assert row["attempt_id"] == result["attempt_id"]
+    assert row["terminal_status"] == "FINAL_BLOCK"
+    assert row["core_status"] == "UNVERIFIABLE"
+    assert row["integrity"] == "MISSING"
+    assert row["universe_identity"] == host_identity
+    assert row["universe_generation"] == 1
+    assert row["core_provenance_status"] == "CORE_REVISION_PINNED"
+    assert row["projection_hash"] == verdict["projection_hash"]
+
+
+def test_live_preflight_final_block_of_legacy_task_records_nothing(live_terminal):
+    result = live_terminal["preflight_legacy"]
+    _assert_ended_before_any_worker(result)
+    assert result["terminal_core_record"] is None
+    assert result["core_db_exists"] is False
+    assert result["db_terminal_row"] is None
+
+
+def test_live_terminal_record_carries_no_authority(live_terminal):
+    record = live_terminal["preflight_universe"]["terminal_core_record"]
+
+    def keys(value: Any) -> list[str]:
+        if isinstance(value, dict):
+            return [*value, *(k for item in value.values() for k in keys(item))]
+        if isinstance(value, list):
+            return [k for item in value for k in keys(item)]
+        return []
+
+    allowed = {"candidate_commit_allowed"}
+    for key in keys(record):
+        if key in allowed:
+            continue
+        assert not any(word in key.lower() for word in _AUTHORITY_WORDS), key
+    # The record never becomes the receipt that gates commit or approval.
+    assert live_terminal["preflight_universe"]["verified_receipt_present"] is False
+
+
+def test_live_terminal_record_without_core_fails_closed(tmp_path):
+    results = _run_driver(tmp_path / "work", TERMINAL_SCENARIOS, None)
+    assert results["core_available"] is False
+    result = results["preflight_universe"]
+    _assert_ended_before_any_worker(result)
+    record = result["terminal_core_record"]
+    assert record["record_status"] == "FAILED"
+    assert record["failure_reason"] == (
+        "CORE_TERMINAL_RECORD_FAILED:CANONICAL_NEXUS_CORE_UNAVAILABLE"
+    )
+    assert record["candidate_commit_allowed"] is False
+    assert record["core_verdict"]["blocking"] is True
+    assert record["core_verdict"]["coverage"] is None
+    assert result["reloaded_terminal_core_record"] == record
+    legacy = results["preflight_legacy"]
+    _assert_ended_before_any_worker(legacy)
+    assert legacy["terminal_core_record"] is None
+
+
+def test_live_receipt_paths_get_no_terminal_record(live):
+    # A verified receipt (passing or blocked) keeps its own Core verdict only.
+    for name in ("complete", "missing", "fail", "legacy"):
+        assert live[name]["terminal_core_record"] is None, name
+        assert live[name]["db_terminal_row"] is None, name
+
+
+def _terminal_state(tmp_path: Path, **overrides: Any) -> dict[str, Any]:
+    universe = {"universe_generation": 1, "subjects": [DIFF_CHECK]}
+    state: dict[str, Any] = {
+        "task_id": "verdict-unit",
+        "attempt_id": "attempt-1",
+        "status": "FINAL_BLOCK",
+        "verified_receipt": None,
+        "request": {
+            "task_id": "verdict-unit",
+            "core_envelope_required": True,
+            "expected_evidence": universe,
+            **_card(tmp_path, universe),
+        },
+    }
+    state.update(overrides)
+    return state
+
+
+class _CountingPort:
+    def __init__(self, answer: Any = None, error: Exception | None = None):
+        self.calls: list[dict[str, Any]] = []
+        self.answer, self.error = answer, error
+
+    def record_terminal_not_covered(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.error is not None:
+            raise self.error
+        return self.answer
+
+
+def test_terminal_record_core_failure_is_recorded_not_raised(tmp_path):
+    port = _CountingPort(error=RuntimeError("BOOM: core exploded"))
+    record = _host_service(tmp_path, port)._build_terminal_core_record(
+        _terminal_state(tmp_path), contract=_universe_contract(tmp_path)
+    )
+    assert record is not None and len(port.calls) == 1
+    assert port.calls[0]["terminal_status"] == "FINAL_BLOCK"
+    assert port.calls[0]["attempt_id"] == "attempt-1"
+    assert record["record_status"] == "FAILED"
+    assert record["failure_reason"] == "CORE_TERMINAL_RECORD_FAILED:BOOM"
+    assert record["candidate_commit_allowed"] is False
+    assert record["core_verdict"]["blocking"] is True
+    assert record["core_verdict"]["host_reason_codes"] == ["CORE_TERMINAL_RECORD_FAILED:BOOM"]
+
+
+def test_terminal_record_refuses_a_non_blocking_core_answer(tmp_path):
+    # Even a pinned, fully covered VERIFIED answer cannot pass a task that
+    # produced nothing: the record fails closed.
+    port = _CountingPort(answer=_verified_projection(1))
+    record = _host_service(tmp_path, port)._build_terminal_core_record(
+        _terminal_state(tmp_path), contract=_universe_contract(tmp_path)
+    )
+    assert record["record_status"] == "FAILED"
+    assert (
+        record["failure_reason"] == "CORE_TERMINAL_RECORD_FAILED:CORE_TERMINAL_RECORD_NOT_BLOCKING"
+    )
+    assert record["candidate_commit_allowed"] is False
+    assert record["core_verdict"]["blocking"] is True
+
+
+@pytest.mark.parametrize("port", [None, object()], ids=["no-port", "port-without-recorder"])
+def test_terminal_record_without_a_recording_port_fails_closed(tmp_path, port):
+    record = _host_service(tmp_path, port)._build_terminal_core_record(
+        _terminal_state(tmp_path), contract=_universe_contract(tmp_path)
+    )
+    expected = (
+        "AMBIENT_CORE_CONTROL_PORT_REQUIRED"
+        if port is None
+        else "AMBIENT_CORE_TERMINAL_RECORD_UNSUPPORTED"
+    )
+    assert record["record_status"] == "FAILED"
+    assert record["failure_reason"] == f"CORE_TERMINAL_RECORD_FAILED:{expected}"
+
+
+def test_terminal_record_card_edited_after_intake_fails_closed(tmp_path):
+    state = _terminal_state(tmp_path)
+    Path(state["request"]["task_card_path"]).write_text("edited\n", encoding="utf-8")
+    port = _CountingPort(answer={})
+    record = _host_service(tmp_path, port)._build_terminal_core_record(
+        state, contract=_universe_contract(tmp_path)
+    )
+    assert port.calls == []
+    assert record["failure_reason"] == (
+        "CORE_TERMINAL_RECORD_FAILED:EXPECTED_EVIDENCE_TASK_CARD_HASH_MISMATCH"
+    )
+
+
+def test_terminal_record_leaves_receipt_nonterminal_and_legacy_paths_alone(tmp_path):
+    port = _CountingPort(answer={})
+    service = _host_service(tmp_path, port)
+    contract = _universe_contract(tmp_path)
+    with_receipt = _terminal_state(tmp_path, verified_receipt={"verified": False})
+    assert service._build_terminal_core_record(with_receipt, contract=contract) is None
+    running = _terminal_state(tmp_path, status="WORKER_RUNNING")
+    assert service._build_terminal_core_record(running, contract=contract) is None
+    legacy = _terminal_state(tmp_path)
+    legacy["request"] = {"task_id": "verdict-unit", **_card(tmp_path, None)}
+    assert service._build_terminal_core_record(legacy) is None
+    assert service._build_terminal_core_record(legacy, contract=_legacy_contract(tmp_path)) is None
+    assert port.calls == []
+
+
+def test_terminal_record_hook_never_raises_into_the_terminal_write(tmp_path, monkeypatch):
+    service = _host_service(tmp_path, _CountingPort(answer={}))
+
+    def explode(*args, **kwargs):
+        raise RuntimeError("recorder bug")
+
+    monkeypatch.setattr(service, "_build_terminal_core_record", explode)
+    assert (
+        service._record_terminal_core_not_covered("verdict-unit", _terminal_state(tmp_path)) is None
+    )
+
+
+def test_transport_terminal_record_requires_core(tmp_path):
+    from nexus.orchestrator.canonical_core_transport import CanonicalNexusCoreTransportPort
+
+    port = CanonicalNexusCoreTransportPort(tmp_path / "core.sqlite", simulate_core_unavailable=True)
+    with pytest.raises(RuntimeError, match="CANONICAL_NEXUS_CORE_UNAVAILABLE"):
+        port.record_terminal_not_covered(
+            contract=_universe_contract(tmp_path),
+            request={},
+            task_id="verdict-unit",
+            attempt_id="attempt-1",
+            terminal_status="FINAL_BLOCK",
+        )
+    assert not (tmp_path / "core.sqlite").exists()
