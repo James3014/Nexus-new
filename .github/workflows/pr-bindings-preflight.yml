@@ -91,7 +91,9 @@ jobs:
             --only bindings --no-fetch > "$out" 2>&1
           rc=$?
           # Never let printed text act as a workflow command (#2368 review).
-          stop="$(python3 -c 'import secrets; print(secrets.token_hex(16))' 2>/dev/null || date +%s%N)"
+          stop="$(python3 -I -c 'import secrets; print(secrets.token_hex(16))' 2>/dev/null)" ||
+            stop="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+          [[ "$stop" =~ ^[0-9a-f]{32}$ ]] || { echo "no usable stop token" >&2; exit 1; }
           echo "::stop-commands::${stop}"
           cat "$out"
           echo "::${stop}::"
@@ -109,5 +111,5 @@ jobs:
           fi
           gh api -X POST "repos/${REPO}/statuses/${HEAD_SHA}" \
             -f state="$state" -f context="$CONTEXT" -f target_url="$RUN_URL" \
-            -f description="${description:0:140}" > /dev/null
+            -f description="${description:0:140}" > /dev/null || exit 1
           exit "$rc"
