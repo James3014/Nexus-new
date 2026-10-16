@@ -6,7 +6,7 @@ Target: docs/reports/<rel> -> docs/reports/archive/2026-10/<rel>. NEXUS_REPORT_R
 
 Evidence: ~/Workspace/nexus-handoffs/2026-10-13-online-ab/ARCHIVE_CLASSIFICATION_20261016.md and _docs.tsv (class ARCHIVE). Re-verified at archive time by a one-pass git grep of every basename: referrers in nexus/, scripts/ (non-archive), tests/, .github/, .agents/ or any committed JSON/YAML (other than generated retention inventories) kept files in place. Mentions in other docs, tasks/, wiki vault and the generated inventories are treated as descriptive.
 
-Files: 983
+Files: 981
 
 | original path | new path | class | last commit |
 |---|---|---|---|
@@ -832,8 +832,6 @@ Files: 983
 | docs/reports/patch_mismatch_recovery_v1.1_alignment.md | docs/reports/archive/2026-10/patch_mismatch_recovery_v1.1_alignment.md | ARCHIVE | 2026-06-20 |
 | docs/reports/patch_mismatch_recovery_v1.md | docs/reports/archive/2026-10/patch_mismatch_recovery_v1.md | ARCHIVE | 2026-06-20 |
 | docs/reports/paw_f0_program_as_weights_gap_report_v0.md | docs/reports/archive/2026-10/paw_f0_program_as_weights_gap_report_v0.md | ARCHIVE | 2026-07-09 |
-| docs/reports/policy-baseline-manifest.v1.json | docs/reports/archive/2026-10/policy-baseline-manifest.v1.json | ARCHIVE | 2026-06-15 |
-| docs/reports/policy-baseline-manifest.v1.md | docs/reports/archive/2026-10/policy-baseline-manifest.v1.md | ARCHIVE | 2026-06-15 |
 | docs/reports/policy-lane-model.v1.md | docs/reports/archive/2026-10/policy-lane-model.v1.md | ARCHIVE | 2026-06-15 |
 | docs/reports/policy-rollback-drill-matrix.md | docs/reports/archive/2026-10/policy-rollback-drill-matrix.md | ARCHIVE | 2026-06-15 |
 | docs/reports/post_archive_worktree_hygiene_v0.md | docs/reports/archive/2026-10/post_archive_worktree_hygiene_v0.md | ARCHIVE | 2026-06-20 |
@@ -1107,3 +1105,5 @@ Files: 983
 | docs/reports/s2t_redacted_evidence_bundle.jsonl | scripts/archive/2026-10/ops/export_s2t_traces.py |
 | docs/reports/strategy_envelope_packet_only_commit_gate_v0.md | scripts/archive/2026-10/scratch/execute_strategy_envelope_commit_gate.py |
 | docs/reports/submodule_dirty_state_audit_v0.md | scripts/archive/2026-10/scratch/execute_submodule_dirty_state_audit.py |
+| docs/reports/policy-baseline-manifest.v1.json | tests/ops/test_retired_rust_crate_removed.py:28 reads it (live governance artefact, edited by #2362) |
+| docs/reports/policy-baseline-manifest.v1.md | tests/ops/test_retired_rust_crate_removed.py:28 reads it (live governance artefact, edited by #2362) |
