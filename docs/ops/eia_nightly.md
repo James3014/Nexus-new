@@ -7,7 +7,11 @@ merges anything. Card PRs and candidate PRs both go to the merge-queue session t
 
 ## Queue an Issue
 
-1. Add the label `eia:queue`.
+1. Add the label `eia:queue`. Only a trusted actor may do this (default `James3014` and
+   `james3014-nexus-agent[bot]`; override with `--trusted-actors`). The scheduler reads the
+   Issue timeline: the latest `eia:queue` label event, and every title or body edit after it
+   (GraphQL `userContentEdits`), must come from a trusted actor. Otherwise it leaves the
+   Issue completely untouched.
 2. Put exactly one fenced JSON block in the Issue body:
 
 ````
@@ -15,7 +19,7 @@ merges anything. Card PRs and candidate PRs both go to the merge-queue session t
 {
   "difficulty": "easy",
   "allowed_files": ["nexus/foo/bar.py", "tests/foo/test_bar.py"],
-  "verification": ["python -m pytest -q tests/foo/test_bar.py"],
+  "verification": ["python3 -m pytest -q tests/foo/test_bar.py"],
   "capability_ids": ["nexus_core_domain_runtime"],
   "summary": "One line that the Task Card objective quotes."
 }
@@ -25,17 +29,39 @@ merges anything. Card PRs and candidate PRs both go to the merge-queue session t
 The block's fields:
 
 - `difficulty`: `easy`, `medium` or `hard`. Hard Issues are not scheduled.
-- `allowed_files`: literal repo paths. Globs are not allowed, and neither are `tasks/` or `.github/`.
-- `verification`: commands that start with `python` or `python3`. The scheduler rewrites the
-  interpreter to the EIA daemon's venv python (`<daemon checkout>/.venv/bin/python`), because
-  the daemon's PATH resolves `python3` to Homebrew python, which has no Nexus dependencies.
-  Closure runs verifiers in a clean candidate checkout, with `$NEXUS_BASE_SHA` and
-  `$NEXUS_CANDIDATE_SHA` set.
-- `capability_ids`: ids from `docs/agents/CAPABILITY_DISCOVERY_INDEX.v1.json`.
+- `allowed_files`: at most 10 literal, normalised, repo-relative paths. Globs, `..`, `.`,
+  absolute paths and dotfiles are rejected. At `origin/main`, each path must be a regular file
+  or a new file in an existing directory, with no symlink anywhere on the path. Protected paths
+  are refused: `.github/`, `.nexus-core/`, `.gitmodules`, `docs/governance/`, `docs/agents/`,
+  `docs/testing/test_impact_map.md`, `tasks/`, `pyproject.toml`, `uv.lock`, bootstrap files
+  (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `MUSE_PROTO.md`), `nexus/services/external_intelligence*`,
+  `scripts/ops/external_intelligence*`, `scripts/ops/trusted_*`, and this scheduler with its
+  templates and tests.
+- `verification`: only two forms are accepted. Any other option, shell form or path is
+  rejected.
+  - `python3 -m pytest [-q] [-p no:cacheprovider] tests/<file>.py[::test] ...`, where each
+    target must exist at main or be an allowed file (`python` becomes `python3`).
+  - The exact diff check `sh -c 'git diff --check "$NEXUS_BASE_SHA" "$NEXUS_CANDIDATE_SHA"'`.
+
+  Closure runs these in a clean candidate checkout. The scheduler itself never runs them and
+  never uses a shell.
+- `capability_ids` (required): ids from `docs/agents/CAPABILITY_DISCOVERY_INDEX.v1.json`.
+  The Core validator requires donor ids for the mutating dispositions, and
+  `NEW_CAPABILITY_JUSTIFIED` would be a false claim, so there is no safe default. The template
+  comment lists the valid ids.
 - `capability_disposition` (optional): defaults to `EXTEND_EXISTING`.
 
 An Issue that is malformed or hard gets one comment and the `eia:needs-template` label. Fix
-the block, then remove that label.
+the block, then remove that label. After 3 attempted nights without a candidate PR (counted
+in `issues.json`), an Issue gets `eia:escalate` and is no longer scheduled.
+
+## Deployment prerequisite: `python3` under the daemon PATH
+
+Cards use plain `python3`. Closure runs verifiers with the daemon's environment, so the
+operator must put the Nexus venv `bin` first on `PATH` in
+`~/Library/LaunchAgents/com.nexus.external-intelligence.plist`. `start` checks this by running
+`env -i PATH=<plist PATH> python3 -c 'import nexus, pytest'` in the daemon checkout. If the
+check fails, the night is `START_FAILED` and nothing is armed.
 
 ## Nightly flow
 
@@ -43,7 +69,7 @@ the block, then remove that label.
 | --- | --- | --- |
 | 16:00, re-checked at 20:00 | `prepare` | Takes up to 4 queued Issues. It renders `tasks/eia-nightly/<night>/issue-<N>.md` and validates each card with the daemon's own validators (`parse_issue_contract`, `_task_card`, `_validate_task_card_authority`, Core lane and capability checks). It opens one card PR, using the KEEP_OPEN tracking Issue "EIA nightly task cards", and sends READY to merge-queue. Later runs record the merge sha and each card's blob id. |
 | 23:30 | `start` | If the card PR has not merged, it skips the night and tells coordinator. Otherwise it starts a bounded `caffeinate -dimsu`, opens Chrome and the `ibase` profile window when the Browser Bridge is not connected, bootstraps or kickstarts `com.nexus.external-intelligence`, and runs `eia-healthcheck`. |
-| every 5 min | `dispatch` | Arms one Issue at a time before 06:00: it appends the contract to the body (the original text is kept), reads it back, and adds `nexus:external-intelligence` last. It then follows the daemon state file for that exact identity. |
+| every 5 min | `dispatch` | Arms one Issue at a time before 06:00. It re-checks trust, appends the contract to the body (the original text is kept), confirms a byte-identical read-back, and adds `nexus:external-intelligence` last. It then follows the daemon state file for that exact identity. On every tick it re-reads the Issue, and disarms and escalates if the body changed or `eia:queue` was removed. |
 | 07:30, safety net at 09:05 | `stop` | Arms nothing new. A running Issue may finish until 09:00. Then it runs `launchctl bootout` on the daemon (which stays off during the day), kills caffeinate, writes `<night>-report.md`, sends the report to coordinator and posts a macOS notification. |
 | any time | `status` | Prints the night state. |
 
@@ -75,6 +101,16 @@ acts on that result as follows:
   `SCOPE_DELTA_REQUIRED`, worker blocked, verification or closure failure, or an unknown
   state. The scheduler adds `eia:escalate`, posts one comment with the reason, and removes
   `nexus:external-intelligence`.
+
+A BLOCKED identity whose failure came before any dispatch (`semantic_dispatched: false`) is
+re-run by the daemon on every poll. The re-run does not resend to ChatGPT: the sidecar keys
+attempts by `request_sha256` and raises `INTELLIGENCE_REPLAY_FORBIDDEN` for a FAILED attempt,
+or reconciles an `OUTCOME_UNKNOWN` one. The request hash covers the Issue title and body,
+which is why the scheduler disarms on any body change. The hash also covers the worker binding
+chosen by the canonical planner, so a re-run that binds a different worker would be a new
+request. To keep that window short, `dispatch` watches the local state file every 20 s for up
+to 270 s per invocation (it makes no GitHub calls while watching). It disarms within seconds
+of a terminal result.
 
 `RECONCILIATION_REQUIRED` with prior state `INTELLIGENCE_DISPATCHING` or `FANOUT_DISPATCHING`
 is left alone, because the daemon resumes it by itself.

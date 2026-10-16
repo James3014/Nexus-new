@@ -27,6 +27,7 @@ import fcntl
 import hashlib
 import json
 import os
+import plistlib
 import re
 import shlex
 import signal
@@ -71,7 +72,37 @@ BOT_EMAIL = "341779647+james3014-nexus-agent[bot]@users.noreply.github.com"
 TASK_FENCE_RE = re.compile(r"```eia-task[ \t]*\n(.*?)\n```", re.DOTALL)
 CONTRACT_MARKER = "<!-- eia-nightly:contract -->"
 SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
-SAFE_PATH_RE = re.compile(r"^[A-Za-z0-9_.][A-Za-z0-9_./-]*$")
+SAFE_PATH_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_./-]*$")
+# Paths an overnight worker must never change: CI, governance, dependencies, the EIA daemon and
+# this scheduler (prefix match on whole path components; ``*`` entries are name prefixes).
+PROTECTED_PATHS = (
+    ".github",
+    ".nexus-core",
+    ".gitmodules",
+    "docs/governance",
+    "docs/agents",
+    "docs/testing/test_impact_map.md",
+    "tasks",
+    "pyproject.toml",
+    "uv.lock",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "GEMINI.md",
+    "MUSE_PROTO.md",
+    "nexus/services/external_intelligence*",
+    "scripts/ops/trusted_*",
+    "scripts/ops/external_intelligence*",
+    "scripts/ops/eia_nightly*",
+    "scripts/ops/com.nexus.eia-nightly*",
+    "tests/ops/test_eia_nightly.py",
+)
+# Who may queue an Issue (apply ``eia:queue``) or edit its body after it was queued.
+TRUSTED_ACTORS = frozenset({"James3014", "james3014-nexus-agent", "james3014-nexus-agent[bot]"})
+PYTEST_TARGET_RE = re.compile(r"^tests/[A-Za-z0-9_][A-Za-z0-9_/.-]*\.py(::[A-Za-z0-9_]+)*$")
+DIFF_CHECK_ARGV = ["sh", "-c", 'git diff --check "$NEXUS_BASE_SHA" "$NEXUS_CANDIDATE_SHA"']
+MAX_ALLOWED_FILES = 10
+MAX_NIGHTS_WITHOUT_CANDIDATE = 3
+WATCH_INTERVAL = 20
 EXCEPTION_NAME_RE = re.compile(r"^[A-Za-z]+(Error|Exception|Expired)$")
 WAIT_STATES = {
     "DISCOVERED",
@@ -134,6 +165,13 @@ def _number_from_url(output: str) -> int:
     return _issue_number(lines[-1].rstrip("/").rsplit("/", 1)[-1] if lines else "")
 
 
+def _ts(value: Any) -> dt.datetime:
+    try:
+        return dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise NightlyError("TIMESTAMP_INVALID") from exc
+
+
 def night_of(now: dt.datetime) -> str:
     """Nights run from noon to noon: 16:00 and 23:30 belong to today, 03:00 to yesterday."""
     return (now - dt.timedelta(hours=12)).strftime("%Y%m%d")
@@ -173,18 +211,20 @@ def parse_task_block(body: str) -> dict[str, Any]:
     if difficulty not in ("easy", "medium", "hard"):
         raise NightlyError("TASK_DIFFICULTY_INVALID")
     files = raw.get("allowed_files")
-    if not isinstance(files, list) or not 0 < len(files) <= 20 or len(set(files)) != len(files):
+    if (
+        not isinstance(files, list)
+        or not 0 < len(files) <= MAX_ALLOWED_FILES
+        or len(set(files)) != len(files)
+    ):
         raise NightlyError("TASK_ALLOWED_FILES_INVALID")
     for path in files:
-        parts = PurePosixPath(path).parts if isinstance(path, str) else ()
-        if (
-            not isinstance(path, str)
-            or not SAFE_PATH_RE.fullmatch(path)
-            or ".." in parts
-            or path.endswith("/")
-            or parts[:1] in (("tasks",), (".github",))
-        ):
+        if not isinstance(path, str) or not SAFE_PATH_RE.fullmatch(path):
             raise NightlyError("TASK_ALLOWED_FILES_INVALID")
+        parts = PurePosixPath(path).parts
+        if PurePosixPath(path).as_posix() != path or ".." in parts or "." in parts:
+            raise NightlyError("TASK_ALLOWED_FILES_INVALID")
+        if is_protected(path):
+            raise NightlyError("TASK_ALLOWED_FILES_PROTECTED")
     commands = raw.get("verification")
     if not isinstance(commands, list) or not 0 < len(commands) <= 8:
         raise NightlyError("TASK_VERIFICATION_INVALID")
@@ -194,11 +234,7 @@ def parse_task_block(body: str) -> dict[str, Any]:
             argv = shlex.split(command) if isinstance(command, str) else []
         except ValueError as exc:
             raise NightlyError("TASK_VERIFICATION_INVALID") from exc
-        if len(argv) < 2 or argv[0] not in ("python", "python3"):
-            raise NightlyError("TASK_VERIFICATION_MUST_USE_PYTHON")
-        if any(re.search(r"[\x00-\x1f`]", part) for part in argv):
-            raise NightlyError("TASK_VERIFICATION_INVALID")
-        argvs.append(argv[1:])
+        argvs.append(allowlisted_verifier(argv))
     ids = raw.get("capability_ids")
     if not isinstance(ids, list) or not ids or not all(isinstance(i, str) and i for i in ids):
         raise NightlyError("TASK_CAPABILITY_IDS_INVALID")
@@ -211,11 +247,64 @@ def parse_task_block(body: str) -> dict[str, Any]:
     return {
         "difficulty": difficulty,
         "allowed_files": list(files),
-        "verifier_tails": argvs,
+        "verifiers": argvs,
         "capability_ids": list(ids),
         "capability_disposition": disposition,
         "summary": _one_line(summary, 400),
     }
+
+
+def is_protected(path: str) -> bool:
+    for rule in PROTECTED_PATHS:
+        if rule.endswith("*"):
+            if path.startswith(rule[:-1]):
+                return True
+        elif path == rule or path.startswith(rule + "/"):
+            return True
+    return False
+
+
+def allowlisted_verifier(argv: list[str]) -> list[str]:
+    """Accept only the two verifier shapes a nightly card may authorise; return the card argv.
+
+    * ``python3 -m pytest [-q] [-p no:cacheprovider] tests/<file>.py[::node] ...``
+      (``python`` is normalised to ``python3``; no other option, no shell);
+    * the exact closure diff check ``sh -c 'git diff --check "$NEXUS_BASE_SHA" ...'``.
+    """
+    if argv == DIFF_CHECK_ARGV:
+        return list(argv)
+    if len(argv) < 4 or argv[0] not in ("python", "python3") or argv[1:3] != ["-m", "pytest"]:
+        raise NightlyError("TASK_VERIFICATION_NOT_ALLOWLISTED")
+    rest, targets = list(argv[3:]), []
+    flags: list[str] = []
+    while rest:
+        part = rest.pop(0)
+        if part == "-q" and "-q" not in flags:
+            flags.append(part)
+        elif part == "-p" and rest[:1] == ["no:cacheprovider"] and "-p" not in flags:
+            flags += [part, rest.pop(0)]
+        else:
+            path = part.split("::", 1)[0]
+            if (
+                not PYTEST_TARGET_RE.fullmatch(part)
+                or ".." in PurePosixPath(path).parts
+                or PurePosixPath(path).as_posix() != path
+            ):
+                raise NightlyError("TASK_VERIFICATION_NOT_ALLOWLISTED")
+            targets.append(part)
+    if not targets or len(set(targets)) != len(targets):
+        raise NightlyError("TASK_VERIFICATION_NOT_ALLOWLISTED")
+    return ["python3", "-m", "pytest", *flags, *targets]
+
+
+def verifier_paths(task: Mapping[str, Any]) -> list[str]:
+    return sorted({
+        part.split("::", 1)[0]
+        for argv in task["verifiers"]
+        if argv != DIFF_CHECK_ARGV
+        for part in argv[3:]
+        if part.startswith("tests/")
+    })
 
 
 def render_card(*, task_id: str, issue: int, title: str, task: Mapping[str, Any]) -> str:
@@ -324,7 +413,7 @@ def body_with_contract(body: str, contract: Mapping[str, Any], attempt: int) -> 
     fence = json.dumps(dict(contract), indent=2, sort_keys=True)
     return (
         f"{strip_contract(body)}\n\n{CONTRACT_MARKER}\n## EIA nightly contract (attempt {attempt})"
-        f"\n\n```nexus-external-intelligence\n{fence}\n```\n"
+        f"\n\n```nexus-external-intelligence\n{fence}\n```"
     )
 
 
@@ -430,7 +519,11 @@ class Nightly:
         healthcheck: Path = HOME / ".local/share/nexus-open-swe-runtime/bin/eia-healthcheck",
         coord_host: str = "james@100.104.233.2",
         daemon_plist: Path = HOME / "Library/LaunchAgents" / f"{DAEMON_LABEL}.plist",
+        trusted_actors: Sequence[str] = tuple(TRUSTED_ACTORS),
+        watch_seconds: int = 270,
     ):
+        self.watch_seconds = watch_seconds
+        self.trusted_actors = frozenset(a.strip().removesuffix("[bot]") for a in trusted_actors)
         self.state_dir = Path(state_dir).expanduser()
         self.work_repo = Path(work_repo).expanduser()
         self.run, self.now, self.sleep, self.kill = runner, now, sleep, kill
@@ -451,7 +544,6 @@ class Nightly:
         self.daemon_repo = Path(config["repository_roots"][REPOSITORY]).expanduser()
         self.eia_state_root = Path(config["state_root"]).expanduser().resolve()
         self.opencli = str(config.get("opencli_executable") or "opencli")
-        self.verifier_python = str(self.daemon_repo / ".venv" / "bin" / "python")
 
     # ---- plumbing -------------------------------------------------------------------
     @staticmethod
@@ -637,25 +729,35 @@ class Nightly:
             *("--json", "number,title,body,labels"),
         )
         picked: list[dict[str, Any]] = []
-        commit = ""
+        commit, base, ledger = "", self._fetch_main(), self._ledger()
         for row in sorted(rows or [], key=lambda r: int(r.get("number") or 0)):
             number = _issue_number(row.get("number"))
             names = {label.get("name") for label in row.get("labels") or []}
             if L_QUEUE not in names or names & SKIP_LABELS:
                 continue
+            trusted, why = self._queue_trusted(number)
+            if not trusted:  # never touch an Issue queued or edited by someone else
+                self._event(night, "untrusted_skipped", issue=number, reason=why)
+                continue
+            if len(ledger.get(str(number), {}).get("nights", [])) >= MAX_NIGHTS_WITHOUT_CANDIDATE:
+                self._escalate_issue(
+                    number,
+                    f"<!-- eia-nightly:cross-night-cap:{number} -->",
+                    f"EIA nightly stopped scheduling this Issue: {MAX_NIGHTS_WITHOUT_CANDIDATE} "
+                    "nights attempted without a candidate PR.",
+                )
+                continue
             try:
                 task = parse_task_block(str(row.get("body") or ""))
                 if task["difficulty"] == "hard":
                     raise NightlyError("TASK_DIFFICULTY_HARD_NOT_SCHEDULED")
+                self._check_paths(base, task)
             except NightlyError as exc:
                 self._needs_template(night, number, str(exc))
                 continue
             if len(picked) >= self.max_issues:
                 continue
             task_id = f"eia-nightly-{night_id}-i{number}"
-            task["verifiers"] = [
-                [self.verifier_python, *tail] for tail in task.pop("verifier_tails")
-            ]
             picked.append({
                 "issue": number,
                 "title": _one_line(row.get("title"), 200),
@@ -669,7 +771,7 @@ class Nightly:
         for _round in range(2):
             if not picked:
                 break
-            commit = self._card_commit(night_id, picked)
+            commit = self._card_commit(night_id, picked, base)
             bad = []
             for entry in picked:
                 contract = build_contract(entry, 1, commit)
@@ -757,16 +859,128 @@ class Nightly:
         self.save(night)
         return night
 
+    def _trusted(self, login: Any) -> bool:
+        return isinstance(login, str) and login.removesuffix("[bot]") in self.trusted_actors
+
+    def _queue_trusted(self, issue: int) -> tuple[bool, str]:
+        """The latest ``eia:queue`` label, and every title/body edit after it, by a trusted actor."""
+        try:
+            return self._queue_trusted_unchecked(issue)
+        except (NightlyError, ValueError, TypeError, AttributeError) as exc:
+            return False, f"TRUST_CHECK_FAILED:{_one_line(exc, 120)}"
+
+    def _queue_trusted_unchecked(self, issue: int) -> tuple[bool, str]:
+        jq = (
+            '.[] | select(.event=="labeled" or .event=="renamed") | '
+            "{event, label: .label.name, actor: .actor.login, at: .created_at}"
+        )
+        out = self._ok(
+            [
+                self.gh,
+                "api",
+                "--paginate",
+                f"repos/{REPOSITORY}/issues/{issue}/timeline",
+                "--jq",
+                jq,
+            ],
+            code="GH_TIMELINE_FAILED",
+        )
+        events = [json.loads(line) for line in out.splitlines() if line.strip()]
+        labeled = [e for e in events if e.get("event") == "labeled" and e.get("label") == L_QUEUE]
+        if not labeled:
+            return False, "QUEUE_LABEL_EVENT_MISSING"
+        last = max(labeled, key=lambda e: _ts(e.get("at")))
+        if not self._trusted(last.get("actor")):
+            return False, f"QUEUE_LABELED_BY_UNTRUSTED:{_one_line(last.get('actor'), 60)}"
+        since = _ts(last.get("at"))
+        for e in events:
+            if e.get("event") == "renamed" and _ts(e.get("at")) > since:
+                if not self._trusted(e.get("actor")):
+                    return False, "TITLE_EDITED_BY_UNTRUSTED"
+        owner, name = REPOSITORY.split("/")
+        query = (
+            f'query($num:Int!){{repository(owner:"{owner}",name:"{name}"){{issue(number:$num)'
+            "{userContentEdits(first:100){totalCount nodes{editedAt editor{login}}}}}}"
+        )
+        data = self._ghj("api", "graphql", "-f", f"query={query}", "-F", f"num={issue}")
+        edits = (((data or {}).get("data") or {}).get("repository") or {}).get("issue") or {}
+        edits = edits.get("userContentEdits") or {}
+        nodes = edits.get("nodes")
+        if not isinstance(nodes, list):
+            return False, "EDIT_HISTORY_UNREADABLE"
+        for node in nodes:
+            if _ts(node.get("editedAt")) > since:
+                if not self._trusted((node.get("editor") or {}).get("login")):
+                    return False, "BODY_EDITED_BY_UNTRUSTED"
+        if int(edits.get("totalCount") or 0) > len(nodes) and (
+            not nodes or min(_ts(n.get("editedAt")) for n in nodes) > since
+        ):
+            return False, "EDIT_HISTORY_TRUNCATED"
+        return True, ""
+
+    def _tree_mode(self, base: str, path: str) -> str | None:
+        out = self._git(self.work_repo, "ls-tree", base, "--", path)
+        return out.split()[0] if out else None
+
+    def _check_paths(self, base: str, task: Mapping[str, Any]) -> None:
+        """No symlinks at main; allowed files exist or their parent directory does;
+        verifier test files exist or are allowed files."""
+        for path in [*task["allowed_files"], *verifier_paths(task)]:
+            parts = PurePosixPath(path).parts
+            for depth in range(1, len(parts)):
+                if self._tree_mode(base, "/".join(parts[:depth])) != "040000":
+                    raise NightlyError(f"TASK_PATH_PARENT_INVALID:{path}")
+            mode = self._tree_mode(base, path)
+            if mode not in (None, "100644", "100755"):
+                raise NightlyError(f"TASK_PATH_NOT_REGULAR_FILE:{path}")
+            if mode is None and path not in task["allowed_files"]:
+                raise NightlyError(f"TASK_VERIFIER_TARGET_MISSING:{path}")
+
+    def _ledger(self) -> dict[str, Any]:
+        path = self.state_dir / "issues.json"
+        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+    def _update_ledger(self, night: Mapping[str, Any]) -> None:
+        ledger = self._ledger()
+        for number in night.get("order", []):
+            entry = night["issues"][str(number)]
+            row = ledger.setdefault(str(number), {"nights": []})
+            if entry["status"] == "CANDIDATE_PR":
+                row["nights"] = []
+            elif entry.get("attempts") and night["night"] not in row["nights"]:
+                row["nights"].append(night["night"])
+        path = self.state_dir / "issues.json"
+        fd, tmp = tempfile.mkstemp(prefix=".issues.", dir=self.state_dir)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(ledger, fh, indent=2, sort_keys=True)
+        os.replace(tmp, path)
+
+    def _escalate_issue(self, issue: int, marker: str, text: str) -> None:
+        self._labels(issue, add=[L_ESCALATE], remove=[L_EIA])
+        self._comment_once(issue, marker, text)
+
     def _needs_template(self, night: dict[str, Any], issue: int, reason: str) -> None:
         self._labels(issue, add=[L_TEMPLATE])
         self._comment_once(
             issue,
             f"<!-- eia-nightly:needs-template:{night['night']} -->",
-            f"EIA nightly skipped this Issue: `{_one_line(reason, 300)}`.\n\nFix the ```eia-task "
+            f"EIA nightly skipped this Issue: `{_one_line(reason, 300)}`.{self._capability_hint(reason)}"
+            "\n\nFix the ```eia-task "
             "block (see `docs/ops/eia_nightly.md`; hard tasks are not run nightly), then remove "
             f"the `{L_TEMPLATE}` label.",
         )
         self._event(night, "needs_template", issue=issue, reason=reason)
+
+    def _capability_hint(self, reason: str) -> str:
+        if "CAPABILITY" not in reason:
+            return ""
+        spec = f"refs/remotes/origin/main:{CAPABILITY_DISCOVERY_INDEX_PATH}"
+        out = self.run(["git", "-C", str(self.work_repo), "show", spec])
+        try:
+            ids = [c["id"] for c in json.loads(out.stdout)["capabilities"]]
+        except (ValueError, KeyError, TypeError):
+            return ""
+        return " `capability_ids` is required; valid ids: " + ", ".join(f"`{i}`" for i in ids) + "."
 
     def _ensure_labels(self) -> None:
         have = {
@@ -798,8 +1012,7 @@ class Nightly:
         )
         return _number_from_url(url)
 
-    def _card_commit(self, night_id: str, entries: list[dict[str, Any]]) -> str:
-        base = self._fetch_main()
+    def _card_commit(self, night_id: str, entries: list[dict[str, Any]], base: str) -> str:
         with tempfile.TemporaryDirectory() as tmp:
             env = dict(
                 os.environ,
@@ -908,6 +1121,7 @@ class Nightly:
             ])
         self.save(night)
         try:
+            self._check_daemon_python()
             self._ensure_bridge()
             self._ensure_daemon()
             for attempt in range(3):
@@ -933,6 +1147,19 @@ class Nightly:
         self._event(night, "started")
         self.save(night)
         return night
+
+    def _check_daemon_python(self) -> None:
+        """Cards run plain ``python3``: it must import Nexus under the daemon's PATH."""
+        try:
+            plist = plistlib.loads(Path(self.daemon_plist).read_bytes())
+            path = str(plist["EnvironmentVariables"]["PATH"])
+        except (OSError, KeyError, TypeError, ValueError, plistlib.InvalidFileException) as exc:
+            raise NightlyError("DAEMON_PLIST_PATH_UNREADABLE") from exc
+        argv = ["/usr/bin/env", "-i", f"PATH={path}", f"HOME={HOME}", "python3", "-c"]
+        if self.run(
+            [*argv, "import nexus, pytest"], cwd=str(self.daemon_repo), timeout=60
+        ).returncode:
+            raise NightlyError("DAEMON_PYTHON3_CANNOT_IMPORT_NEXUS")
 
     def _bridge_connected(self) -> bool:
         out = self.run([self.opencli, "daemon", "status"], timeout=30)
@@ -1001,6 +1228,7 @@ class Nightly:
             for entry in self._entries(night, "ARMED"):
                 self._harvest(night, entry)
                 self.save(night)
+            self._watch(night)
             now, busy = (
                 self.now(),
                 bool(self._entries(night, "ARMED") or self._entries(night, "ARMING")),
@@ -1018,6 +1246,24 @@ class Nightly:
             self._flush_outbox(night)
             self.save(night)
         return night
+
+    def _watch(self, night: dict[str, Any]) -> None:
+        """Poll the local daemon state file (no GitHub) every 20 s while an Issue is in flight,
+        so a terminal result is disarmed within seconds instead of at the next 5-min tick."""
+        for _ in range(int(self.watch_seconds // WATCH_INTERVAL)):
+            armed = self._entries(night, "ARMED")
+            if not armed:
+                return
+            att = armed[0]["attempts"][-1]
+            record = self._daemon_record(int(armed[0]["issue"]), att["identity_hash"])
+            if record is not None:
+                kind = classify(record)[0]
+                published = (record.get("publication_record") or {}).get("state") == "COMPLETED"
+                if kind in ("infra", "model") or (kind == "complete" and published):
+                    self._harvest(night, armed[0])
+                    self.save(night)
+                    return
+            self.sleep(WATCH_INTERVAL)
 
     @staticmethod
     def _entries(night: Mapping[str, Any], status: str) -> list[dict[str, Any]]:
@@ -1047,6 +1293,13 @@ class Nightly:
                 self._labels(issue, remove=[L_EIA])
             self._event(night, "arm_skipped", issue=issue)
             return
+        trusted, why = self._queue_trusted(issue)
+        if not trusted:  # disarm only; never write to an Issue someone else controls
+            entry["status"] = "SKIPPED_UNTRUSTED"
+            if L_EIA in view["label_names"]:
+                self._labels(issue, remove=[L_EIA])
+            self._event(night, "arm_untrusted", issue=issue, reason=why)
+            return
         resume = entry["status"] == "ARMING"
         record: dict[str, Any] = entry["attempts"][-1] if resume else {}
         if resume:
@@ -1070,18 +1323,20 @@ class Nightly:
                 "unit_id": contract["execution_units"][0]["unit_id"],
                 "main_sha": main_sha,
                 "identity_hash": identity,
+                "body_sha256": _sha256(new_body.encode("utf-8")),
                 "armed_at": self._iso(),
             }
             entry["attempts"].append(record)
             entry["status"] = "ARMING"
             self.save(night)
-        if self._body_identity(issue, view) != identity:
+        if view.get("body") != new_body:
             if L_EIA in view["label_names"]:
                 self._labels(issue, remove=[L_EIA])
             self._gh_file(["issue", "edit", str(issue), "--repo", REPOSITORY], new_body)
             view = self._view_issue(issue)
-            if self._body_identity(issue, view) != identity:
-                return self._escalate(night, entry, "model", "ARM_READBACK_MISMATCH")
+        # byte-identical read-back, and the daemon will derive exactly this identity
+        if view.get("body") != new_body or self._body_identity(issue, view) != identity:
+            return self._escalate(night, entry, "model", "ARM_READBACK_MISMATCH")
         if L_EIA not in view["label_names"]:
             self._labels(issue, add=[L_EIA])  # the arming mutation, always last
         record["armed_at"] = self._iso()
@@ -1119,6 +1374,12 @@ class Nightly:
 
     def _harvest(self, night: dict[str, Any], entry: dict[str, Any]) -> None:
         issue, att = _issue_number(entry["issue"]), entry["attempts"][-1]
+        view = self._view_issue(issue)
+        body_sha = _sha256(str(view.get("body") or "").encode("utf-8"))
+        if body_sha != att.get("body_sha256") or L_QUEUE not in view["label_names"]:
+            # The daemon's semantic request embeds the Issue body: a changed body or a
+            # withdrawn queue label must stop the run before anything else is sent.
+            return self._escalate(night, entry, "model", "ISSUE_CHANGED_AFTER_ARMING")
         record = self._daemon_record(issue, att["identity_hash"])
         age = self._minutes_since(att["armed_at"])
         if record is None:
@@ -1169,8 +1430,7 @@ class Nightly:
             entry["attempts"][-1].setdefault("finished_at", self._iso())
             entry["attempts"][-1].setdefault("result", kind)
             entry["attempts"][-1].setdefault("reason", reason)
-        self._labels(issue, add=[L_ESCALATE], remove=[L_EIA])
-        self._comment_once(
+        self._escalate_issue(
             issue,
             f"<!-- eia-nightly:escalate:{entry['task_id']}-a{len(entry['attempts'])} -->",
             f"EIA nightly escalated this Issue ({kind}): `{_one_line(reason, 400)}`.\n\n"
@@ -1314,6 +1574,7 @@ class Nightly:
             except NightlyError as exc:  # best effort; the daemon is already booted out
                 entry["disarm_error"] = str(exc)
         report = self.report(night)
+        self._update_ledger(night)
         report_path = self.state_dir / f"{night['night']}-report.md"
         report_path.write_text(report, encoding="utf-8")
         night["finalized"] = {
@@ -1385,6 +1646,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--work-repo", default=str(HOME / "Workspace/Nexus-new"))
     parser.add_argument("--max-issues", type=int, default=4)
     parser.add_argument("--night", help="YYYYMMDD override (prepare/status only)")
+    parser.add_argument(
+        "--trusted-actors",
+        default=",".join(sorted(TRUSTED_ACTORS)),
+        help="comma-separated logins allowed to queue/edit Issues",
+    )
     args = parser.parse_args(argv)
     if args.night and not re.fullmatch(r"20\d{6}", args.night):
         parser.error("--night must be YYYYMMDD")
@@ -1393,6 +1659,7 @@ def main(argv: list[str] | None = None) -> int:
         eia_config=Path(args.eia_config),
         work_repo=Path(args.work_repo),
         max_issues=max(1, min(args.max_issues, 8)),
+        trusted_actors=[a for a in args.trusted_actors.split(",") if a.strip()],
     )
     if args.command == "status":
         night = app.load(args.night or night_of(app.now()))

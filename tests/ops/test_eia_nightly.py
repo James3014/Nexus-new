@@ -9,6 +9,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import plistlib
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -42,7 +43,14 @@ class FakeGitHub:
         self.writes: list[list[str]] = []
         self.next_number = 500
 
-    def add_issue(self, number: int, body: str, labels=("eia:queue",), title: str = "Fix it"):
+    def add_issue(
+        self,
+        number: int,
+        body: str,
+        labels=("eia:queue",),
+        title: str = "Fix it",
+        labeler: str = "James3014",
+    ):
         self.issues[number] = {
             "number": number,
             "title": title,
@@ -50,10 +58,16 @@ class FakeGitHub:
             "labels": set(labels),
             "state": "OPEN",
             "comments": [],
+            "events": [
+                {"event": "labeled", "label": n, "actor": labeler, "at": "2026-10-16T08:00:00Z"}
+                for n in labels
+            ],
+            "edits": [],
         }
 
     def _issue_json(self, issue: dict[str, Any]) -> dict[str, Any]:
-        return {**issue, "labels": [{"name": n} for n in sorted(issue["labels"])], "comments": None}
+        hidden = {"comments": None, "events": None, "edits": None}
+        return {**issue, "labels": [{"name": n} for n in sorted(issue["labels"])], **hidden}
 
     def __call__(self, argv: list[str]) -> subprocess.CompletedProcess:
         args = argv[1:]
@@ -78,6 +92,15 @@ class FakeGitHub:
             return _cp(argv, out=json.dumps(rows))
         if head == ["pr", "view"]:
             return _cp(argv, out=json.dumps(self.prs[int(args[2])]))
+        if args[:2] == ["api", "graphql"]:
+            number = int(args[-1].split("=", 1)[1])
+            nodes = self.issues[number]["edits"]
+            edits = {"totalCount": len(nodes), "nodes": nodes}
+            data = {"data": {"repository": {"issue": {"userContentEdits": edits}}}}
+            return _cp(argv, out=json.dumps(data))
+        if args[0] == "api" and args[2].endswith("/timeline"):
+            number = int(args[2].split("/")[-2])
+            return _cp(argv, out="\n".join(json.dumps(e) for e in self.issues[number]["events"]))
         if args[0] == "api":
             number = int(args[2].split("/")[-2])
             return _cp(argv, out="\n".join(self.issues[number]["comments"]))
@@ -96,6 +119,10 @@ class FakeGitHub:
                     issue["labels"].discard(args[i + 1])
             if body is not None:
                 issue["body"] = body
+                issue["edits"].append({
+                    "editedAt": "2026-10-16T20:00:00Z",
+                    "editor": {"login": "james3014-nexus-agent"},
+                })
         elif head == ["issue", "comment"]:
             self.issues[int(args[2])]["comments"].append(body)
         elif head == ["issue", "create"]:
@@ -129,6 +156,7 @@ class FakeSystem:
         self.launchctl_print = ["state = running"]
         self.healthcheck_rc = 0
         self.bridge = "Extension: connected"
+        self.python3_rc = 0
 
     def __call__(self, argv: list[str], **kw: Any) -> subprocess.CompletedProcess:
         self.calls.append(list(argv))
@@ -154,6 +182,8 @@ class FakeSystem:
                 )
                 return _cp(argv, 113 if "Could not find" in text else 0, text)
             return _cp(argv)
+        if argv[0] == "/usr/bin/env":
+            return _cp(argv, self.python3_rc)
         if argv[0] == "ps":
             return _cp(argv, out="/usr/bin/caffeinate\n")
         if argv[0].endswith("eia-healthcheck"):
@@ -191,6 +221,8 @@ def env(tmp_path: Path):
     )
     (repo / "pkg").mkdir()
     (repo / "pkg/mod.py").write_text("X = 1\n")
+    (repo / "tests").mkdir()
+    (repo / "tests/test_mod.py").write_text("def test_x():\n    pass\n")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "base")
     _git(repo, "remote", "add", "origin", ORIGIN)
@@ -204,6 +236,8 @@ def env(tmp_path: Path):
             "opencli_executable": "/fake/opencli",
         })
     )
+    plist = tmp_path / "daemon.plist"
+    plist.write_bytes(plistlib.dumps({"EnvironmentVariables": {"PATH": "/venv/bin:/usr/bin"}}))
     gh = FakeGitHub(remote={})
     system = FakeSystem(gh)
     clock = Clock("2026-10-16T16:00:00")
@@ -218,6 +252,8 @@ def env(tmp_path: Path):
         spawn=lambda argv: 4242,
         kill=lambda pid, sig: kills.append((pid, sig)),
         gh=Path(GH),
+        daemon_plist=plist,
+        watch_seconds=0,
     )
     return {
         "app": app,
@@ -236,7 +272,7 @@ def task_body(**over: Any) -> str:
     block = {
         "difficulty": "easy",
         "allowed_files": ["pkg/mod.py"],
-        "verification": ["python -m pytest -q tests/test_mod.py"],
+        "verification": ["python3 -m pytest -q tests/test_mod.py"],
         "capability_ids": ["nexus_core_domain_runtime"],
         "summary": "Make X equal 2.",
     }
@@ -281,7 +317,7 @@ def _write_daemon_state(env, issue: int, identity: str, **fields: Any) -> None:
 def test_parse_task_block_accepts_minimal_block() -> None:
     task = en.parse_task_block(task_body())
     assert task["difficulty"] == "easy"
-    assert task["verifier_tails"] == [["-m", "pytest", "-q", "tests/test_mod.py"]]
+    assert task["verifiers"] == [["python3", "-m", "pytest", "-q", "tests/test_mod.py"]]
     assert task["capability_disposition"] == "EXTEND_EXISTING"
 
 
@@ -295,9 +331,30 @@ def test_parse_task_block_accepts_minimal_block() -> None:
         (task_body(difficulty="trivial"), "TASK_DIFFICULTY_INVALID"),
         (task_body(allowed_files=["../x.py"]), "TASK_ALLOWED_FILES_INVALID"),
         (task_body(allowed_files=["pkg/*.py"]), "TASK_ALLOWED_FILES_INVALID"),
-        (task_body(allowed_files=["tasks/x.md"]), "TASK_ALLOWED_FILES_INVALID"),
-        (task_body(verification=["pytest -q"]), "TASK_VERIFICATION_MUST_USE_PYTHON"),
-        (task_body(verification=["python -c '`x`'"]), "TASK_VERIFICATION_INVALID"),
+        (task_body(allowed_files=["tasks/x.md"]), "TASK_ALLOWED_FILES_PROTECTED"),
+        (task_body(verification=["pytest -q"]), "TASK_VERIFICATION_NOT_ALLOWLISTED"),
+        (task_body(verification=["python -c '`x`'"]), "TASK_VERIFICATION_NOT_ALLOWLISTED"),
+        (task_body(verification=["python3 -m pytest -k x tests/a.py"]), "NOT_ALLOWLISTED"),
+        (task_body(verification=["python3 -m pytest tests/../a.py"]), "NOT_ALLOWLISTED"),
+        (task_body(verification=["python3 -m pytest /tmp/test_a.py"]), "NOT_ALLOWLISTED"),
+        (task_body(verification=["python3 -m pytest nexus/a.py"]), "NOT_ALLOWLISTED"),
+        (task_body(verification=["python3 -m pytest tests/a.py;id"]), "NOT_ALLOWLISTED"),
+        (task_body(verification=["python3 -m pytest --rootdir=/ tests/a.py"]), "NOT_ALLOWLISTED"),
+        (task_body(verification=["python3 -m pytest -p evil tests/a.py"]), "NOT_ALLOWLISTED"),
+        (task_body(verification=["sh -c 'git diff --check; id'"]), "NOT_ALLOWLISTED"),
+        (task_body(verification=["bash -c 'git diff --check'"]), "NOT_ALLOWLISTED"),
+        (task_body(allowed_files=[f"pkg/f{i}.py" for i in range(11)]), "ALLOWED_FILES_INVALID"),
+        (task_body(allowed_files=["/etc/passwd"]), "TASK_ALLOWED_FILES_INVALID"),
+        (task_body(allowed_files=["pkg/./mod.py"]), "TASK_ALLOWED_FILES_INVALID"),
+        (task_body(allowed_files=["pyproject.toml"]), "TASK_ALLOWED_FILES_PROTECTED"),
+        (task_body(allowed_files=[".github/x.yml"]), "TASK_ALLOWED_FILES_INVALID"),
+        (task_body(allowed_files=["scripts/ops/trusted_x.py"]), "TASK_ALLOWED_FILES_PROTECTED"),
+        (task_body(allowed_files=["scripts/ops/eia_nightly.py"]), "TASK_ALLOWED_FILES_PROTECTED"),
+        (
+            task_body(allowed_files=["nexus/services/external_intelligence_closure.py"]),
+            "TASK_ALLOWED_FILES_PROTECTED",
+        ),
+        (task_body(allowed_files=["docs/governance/a.md"]), "TASK_ALLOWED_FILES_PROTECTED"),
         (task_body(capability_ids=[]), "TASK_CAPABILITY_IDS_INVALID"),
         (
             task_body(capability_disposition="BLOCKED_UNKNOWN"),
@@ -385,7 +442,7 @@ def test_prepare_opens_one_card_pr_and_hands_it_to_merge_queue(env) -> None:
     changed = _git(env["repo"], "diff", "--name-only", f"{commit}^", commit)
     assert changed == f"tasks/eia-nightly/{NIGHT}/issue-11.md"
     card = _git(env["repo"], "show", f"{commit}:{changed}")
-    assert str(env["repo"] / ".venv/bin/python") + " -m pytest -q tests/test_mod.py" in card
+    assert "\npython3 -m pytest -q tests/test_mod.py\n" in card
     (msg,) = env["sys"].coord()
     assert "msg merge-queue" in msg and f"Nexus-new#{pr['number']}" in msg and commit in msg
     # Idempotent: a second run opens nothing new and records the merge once it lands.
@@ -686,3 +743,139 @@ def test_launchd_templates_run_the_matching_subcommand(command: str) -> None:
     assert plist["ProgramArguments"][1:] == ["__NEXUS_REPO__/scripts/ops/eia_nightly.py", command]
     assert ("StartInterval" in plist) == (command == "dispatch")
     assert plist["RunAtLoad"] is False
+
+
+def test_diff_check_and_cacheprovider_forms_are_allowlisted() -> None:
+    diff = 'sh -c \'git diff --check "$NEXUS_BASE_SHA" "$NEXUS_CANDIDATE_SHA"\''
+    task = en.parse_task_block(
+        task_body(verification=["python -m pytest -p no:cacheprovider tests/a.py::test_x", diff])
+    )
+    assert task["verifiers"] == [
+        ["python3", "-m", "pytest", "-p", "no:cacheprovider", "tests/a.py::test_x"],
+        en.DIFF_CHECK_ARGV,
+    ]
+
+
+def test_prepare_ignores_issue_queued_by_untrusted_actor(env) -> None:
+    env["gh"].add_issue(11, task_body(), labeler="mallory")
+    night = env["app"].prepare()
+    assert night["status"] == "NO_TASKS" and not env["gh"].issues[11]["comments"]
+    assert env["gh"].issues[11]["labels"] == {"eia:queue"}
+    assert any(e["event"] == "untrusted_skipped" for e in night["events"])
+
+
+def test_prepare_ignores_body_edited_by_untrusted_actor_after_queueing(env) -> None:
+    env["gh"].add_issue(11, task_body())
+    env["gh"].issues[11]["edits"].append({
+        "editedAt": "2026-10-16T09:00:00Z",
+        "editor": {"login": "mallory"},
+    })
+    assert env["app"].prepare()["status"] == "NO_TASKS"
+    env["gh"].add_issue(12, task_body(), labeler="james3014-nexus-agent[bot]")
+    env["gh"].issues[12]["edits"].append({
+        "editedAt": "2026-10-16T07:00:00Z",
+        "editor": {"login": "mallory"},
+    })
+    assert env["app"].prepare()["order"] == [12]  # edit before trusted queueing is fine
+
+
+def test_trusted_actor_list_is_configurable(env) -> None:
+    env["app"].trusted_actors = frozenset({"mallory"})
+    env["gh"].add_issue(11, task_body(), labeler="mallory")
+    assert env["app"].prepare()["order"] == [11]
+
+
+def test_arm_refuses_issue_edited_by_untrusted_actor_after_cards(env) -> None:
+    _started(env)
+    env["gh"].issues[11]["edits"].append({
+        "editedAt": "2026-10-16T22:00:00Z",
+        "editor": {"login": "mallory"},
+    })
+    night = _dispatch(env, "2026-10-17T00:30:00")
+    assert night["issues"]["11"]["status"] == "SKIPPED_UNTRUSTED"
+    assert env["gh"].issues[11]["body"] == task_body()
+    assert "nexus:external-intelligence" not in env["gh"].issues[11]["labels"]
+
+
+def test_body_change_after_arming_disarms(env) -> None:
+    _started(env)
+    _dispatch(env, "2026-10-17T00:30:00")
+    env["gh"].issues[11]["body"] += "\nextra prose"
+    night = _dispatch(env, "2026-10-17T00:35:00")
+    assert night["issues"]["11"]["status"] == "ESCALATED"
+    assert "ISSUE_CHANGED_AFTER_ARMING" in night["issues"]["11"]["escalation"]["reason"]
+    assert "nexus:external-intelligence" not in env["gh"].issues[11]["labels"]
+
+
+def test_paths_must_be_regular_files_with_existing_parents(env) -> None:
+    repo = env["repo"]
+    (repo / "link").symlink_to("pkg")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "symlink")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    env["gh"].add_issue(11, task_body(allowed_files=["link/mod.py"]))
+    env["gh"].add_issue(12, task_body(allowed_files=["newdir/sub/x.py"]))
+    env["gh"].add_issue(13, task_body(verification=["python3 -m pytest tests/test_none.py"]))
+    env["gh"].add_issue(14, task_body(allowed_files=["pkg/new.py"]))
+    night = env["app"].prepare()
+    assert night["order"] == [14]
+    for number, code in ((11, "PARENT_INVALID"), (12, "PARENT_INVALID"), (13, "TARGET_MISSING")):
+        assert code in env["gh"].issues[number]["comments"][0]
+
+
+def test_missing_capability_ids_comment_lists_valid_ids(env) -> None:
+    body = task_body()
+    body = body.replace(', "capability_ids": ["nexus_core_domain_runtime"]', "")
+    env["gh"].add_issue(11, body)
+    env["app"].prepare()
+    comment = env["gh"].issues[11]["comments"][0]
+    assert "TASK_CAPABILITY_IDS_INVALID" in comment and "`nexus_core_domain_runtime`" in comment
+
+
+def test_cross_night_cap_escalates_after_three_nights_without_candidate(env) -> None:
+    ledger = env["tmp"] / "nightly" / "issues.json"
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    ledger.write_text(json.dumps({"11": {"nights": ["20261013", "20261014", "20261015"]}}))
+    env["gh"].add_issue(11, task_body())
+    night = env["app"].prepare()
+    assert night["status"] == "NO_TASKS"
+    assert "eia:escalate" in env["gh"].issues[11]["labels"]
+
+
+def test_finalize_records_attempted_nights_in_ledger(env) -> None:
+    _started(env)
+    night = _dispatch(env, "2026-10-17T00:30:00")
+    att = night["issues"]["11"]["attempts"][-1]
+    _write_daemon_state(env, 11, att["identity_hash"], state="UNIT_REPAIR_REQUIRED")
+    _dispatch(env, "2026-10-17T01:00:00")
+    env["clock"].at = dt.datetime.fromisoformat("2026-10-17T07:30:00")
+    env["app"].stop()
+    ledger = json.loads((env["tmp"] / "nightly" / "issues.json").read_text())
+    assert ledger["11"]["nights"] == [NIGHT]
+
+
+def test_start_fails_closed_when_daemon_python3_cannot_import_nexus(env) -> None:
+    _prepared(env)
+    env["sys"].python3_rc = 1
+    env["clock"].at = dt.datetime.fromisoformat("2026-10-16T23:30:00")
+    night = env["app"].start()
+    assert night["status"] == "START_FAILED"
+    assert "DAEMON_PYTHON3_CANNOT_IMPORT_NEXUS" in night["started"]["error"]
+    assert not [c for c in env["sys"].calls if c[0] == "launchctl"]
+
+
+def test_watcher_disarms_terminal_result_within_the_same_invocation(env) -> None:
+    _started(env)
+    night = _dispatch(env, "2026-10-17T00:30:00")
+    att = night["issues"]["11"]["attempts"][-1]
+    polls = []
+
+    def sleep(seconds):
+        polls.append(seconds)
+        if len(polls) == 2:  # the daemon finishes while dispatch is watching
+            _write_daemon_state(env, 11, att["identity_hash"], state="SCOPE_DELTA_REQUIRED")
+
+    env["app"].sleep, env["app"].watch_seconds = sleep, 270
+    night = _dispatch(env, "2026-10-17T00:35:00")
+    assert polls == [20, 20] and night["issues"]["11"]["status"] == "ESCALATED"
+    assert "nexus:external-intelligence" not in env["gh"].issues[11]["labels"]
