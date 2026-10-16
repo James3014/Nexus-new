@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional, Protocol, Any
-
+from typing import Any, Optional, Protocol
 
 SUPPORTED_WORKER_PROVIDERS = (
     "codex",
@@ -214,6 +214,61 @@ class WorkerExecutionReceipt:
     provider_write_sandbox: Optional[str] = None
     # sha256 of the sorted key names of the worker's child environment.
     provider_env_keys_sha256: Optional[str] = None
+    # Bounded, redacted tails of the provider's stdout/stderr (#2403): the
+    # hashes alone cannot say why a run failed.  See ``redacted_output_tail``.
+    stdout_tail: Optional[str] = None
+    stderr_tail: Optional[str] = None
+
+
+# #2403: at most this many UTF-8 bytes of each stream are kept in a receipt.
+OUTPUT_TAIL_MAX_BYTES = 4096
+OUTPUT_TAIL_REDACTED = "<REDACTED>"
+_OUTPUT_TAIL_SECRET_PATTERNS = (
+    # Google OAuth access/refresh tokens and API keys.
+    re.compile(r"ya29\.[A-Za-z0-9_\-.]+"),
+    re.compile(r"1//[A-Za-z0-9_\-]{8,}"),
+    re.compile(r"AIza[A-Za-z0-9_\-]{20,}"),
+    # JWTs.
+    re.compile(r"eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]*"),
+    # GitHub, OpenAI/Anthropic-style and Slack tokens.
+    re.compile(r"\b(?:gh[opsur]_|github_pat_)[A-Za-z0-9_]{16,}"),
+    re.compile(r"\bsk-[A-Za-z0-9_\-]{16,}"),
+    re.compile(r"\bxox[abprs]-[A-Za-z0-9\-]{10,}"),
+    # AWS access key ids.
+    re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"),
+    # Authorization headers.
+    re.compile(r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9_\-.=+/]{8,}"),
+    # key=value / "key": "value" credentials, including OAuth query parameters.
+    re.compile(
+        r"(?i)([A-Za-z0-9_\-]*(?:token|secret|password|passwd|api[_-]?key|access[_-]?key|"
+        r"private[_-]?key|credential|auth)[A-Za-z0-9_\-]*|code|code_verifier|state)(\\?[\"']?\s*[:=]\s*\\?[\"']?)"
+        r"[^\s\"'&,;}]+"
+    ),
+    # Any other long opaque run (not plain hex digests, which are evidence).
+    re.compile(r"(?<![A-Za-z0-9_\-+])(?![0-9a-f]{40,}(?![A-Za-z0-9_\-+]))[A-Za-z0-9_\-+]{40,}"),
+)
+
+
+def redacted_output_tail(
+    data: Optional[bytes], limit: int = OUTPUT_TAIL_MAX_BYTES
+) -> Optional[str]:
+    """The last ``limit`` bytes of ``data`` with credential-shaped text redacted.
+
+    The whole stream is redacted before it is cut, so a secret that straddles
+    the cut is never half-kept.  ``None`` for no data; empty output stays ``""``.
+    """
+    if data is None:
+        return None
+    text = bytes(data).decode("utf-8", errors="replace")
+    for pattern in _OUTPUT_TAIL_SECRET_PATTERNS:
+        if pattern.groups:
+            text = pattern.sub(lambda m: m.group(1) + m.group(2) + OUTPUT_TAIL_REDACTED, text)
+        else:
+            text = pattern.sub(OUTPUT_TAIL_REDACTED, text)
+    encoded = text.encode("utf-8")
+    if len(encoded) <= limit:
+        return text
+    return encoded[-limit:].decode("utf-8", errors="ignore")
 
 
 def classify_worker_failure(receipt: WorkerExecutionReceipt) -> str:
