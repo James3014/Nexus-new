@@ -35,6 +35,21 @@ PROVIDER_PATTERNS: tuple[tuple[str, re.Pattern[bytes]], ...] = (
     ),
     ("slack_token", re.compile(rb"xox[baprs]-[A-Za-z0-9-]{10,}")),
     ("stripe_live_key", re.compile(rb"(?:sk|rk)_live_[A-Za-z0-9]{16,}")),
+    (
+        "slack_webhook_url",
+        re.compile(
+            rb"hooks\.slack\.com/services/[TE][A-Z0-9]{8,}/[BA][A-Z0-9]{8,}/[A-Za-z0-9]{20,}"
+        ),
+    ),
+    (
+        "sendgrid_api_key",
+        re.compile(rb"(?<![A-Za-z0-9_-])SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])"),
+    ),
+    ("twilio_api_key", re.compile(rb"(?<![A-Za-z0-9])SK[0-9a-f]{32}(?![A-Za-z0-9])")),
+    (
+        "azure_storage_account_key",
+        re.compile(rb"(?i:AccountKey|SharedAccessKey)\s*=\s*[\"']?[A-Za-z0-9+/]{86}=="),
+    ),
 )
 
 PEM_PATTERN = re.compile(

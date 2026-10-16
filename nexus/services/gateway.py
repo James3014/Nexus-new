@@ -14,6 +14,11 @@ import signal
 import time
 import urllib.request
 
+from nexus.contracts.model_output_json import (
+    ModelOutputParseError,
+    ModelOutputShapeError,
+    parse_model_json,
+)
 from nexus.services.gemini_cli import (
     build_gemini_env,
     build_gemini_cli_invocation,
@@ -1542,16 +1547,18 @@ class BattlesuitGateway:
         
         try:
             try:
-                data = json.loads(raw_text)
-            except json.JSONDecodeError:
+                data = parse_model_json(raw_text, expect="object", mode="strict")
+            except ModelOutputShapeError:
+                raise
+            except ModelOutputParseError:
                 match = re.search(r"```json\s*(.*?)\s*```", raw_text, re.DOTALL)
                 if match:
-                    data = json.loads(match.group(1).strip())
+                    data = parse_model_json(match.group(1).strip(), expect="object", mode="strict")
                 else:
                     start = raw_text.find("{")
                     end = raw_text.rfind("}")
                     if start != -1 and end != -1:
-                        data = json.loads(raw_text[start:end+1])
+                        data = parse_model_json(raw_text[start : end + 1], expect="object", mode="strict")
                     else:
                         raise ValueError("No JSON block found")
 

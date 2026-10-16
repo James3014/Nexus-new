@@ -10,9 +10,16 @@ Contract:
 
 from __future__ import annotations
 
+import hashlib
+import logging
+import re
+import threading
 from typing import Any, Callable, Mapping
+from urllib.parse import unquote
 
 from nexus.engine.capability_planner import default_capability_nodes
+
+_logger = logging.getLogger(__name__)
 
 # Whitelist skip reasons (receipt contract)
 SKIP_NOT_IMPLEMENTED = "not_implemented_mainchain_v1"
@@ -1423,13 +1430,383 @@ def _node_meta(name: str) -> dict[str, Any]:
     }
 
 
-def _has_physical_executor(name: str) -> bool:
+# Executor resolution is observable (PR-5e): a resolver that raises is recorded as an
+# error with a structured reason, never read as "no executor".  Per-process registry,
+# keyed by capability name; the latest error for a name replaces the previous one.
+EXECUTOR_RESOLUTION_RESOLVED = "resolved"
+EXECUTOR_RESOLUTION_MISSING = "missing"
+EXECUTOR_RESOLUTION_ERROR = "error"
+HOST_EXECUTOR_RESOLVER_ORIGIN = "nexus.core.capability_executor_registry.get_executor"
+_executor_resolution_errors: dict[str, dict[str, str]] = {}
+_executor_resolution_warned: set[tuple[str, str, str]] = set()
+_executor_resolution_warn_counts: dict[tuple[str, str], int] = {}
+_EXECUTOR_RESOLUTION_WARN_MAX = 5  # WARNING lines per (capability, type) per process
+_executor_resolution_lock = threading.Lock()
+
+
+# --- resolution-text sanitizer (keep identical in capability_registry.py and
+# executor_self_check.py; the self-check stays self-contained) ---
+#
+# The text kept is "exception type + redacted gist".  The raw text is capped
+# before any scan, split once on whitespace, quotes, brackets, commas,
+# semicolons and backslashes, and each token is judged on its own with
+# anchored, bounded patterns (linear time).  Credentials after a sensitive key,
+# auth schemes, known token prefixes, URL userinfo, PEM bodies and long
+# base64/hex-like tokens become ``[REDACTED]``; a long path or SHA can be
+# redacted too, which is accepted.  URLs are split on ``/ ? & #`` and every
+# piece goes through the same rules.  A token cut by the raw cap is dropped.
+# Then control characters are replaced, CI workflow commands neutralised, and
+# the result truncated.  Identifier fields (exception type, capability name,
+# registry key, executor qualname) use ``_sanitize_identifier`` instead: no
+# secret rules, so ``OAuth2AuthenticationError`` stays readable.
+_RESOLUTION_RAW_MAX = 2000
+_RESOLUTION_TEXT_MAX = 200
+_RESOLUTION_REDACTED = "[REDACTED]"
+_RESOLUTION_UNSAFE_CHARS = re.compile(r"[^\x20-\x7e]")
+_RESOLUTION_SPLIT = re.compile(r"(\s+|[\"'{}\[\](),;<>\\])")
+_RESOLUTION_SEPARATOR = re.compile(r"\s+|[\"'{}\[\](),;<>\\]")
+_RESOLUTION_URL_SPLIT = re.compile(r"([/?&#])")
+_RESOLUTION_PERCENT = re.compile(r"%[0-9A-Fa-f]{2}")
+_RESOLUTION_SENSITIVE_KEY = re.compile(
+    r"(?i)token|secret|passw(?:or)?d|api[_-]?key|access[_-]?key|private[_-]?key"
+    r"|authorization|bearer|cookie|credential"
+)
+_RESOLUTION_AUTH_SCHEMES = frozenset({"bearer", "basic"})
+_RESOLUTION_TOKEN_PREFIX = re.compile(
+    r"(?:gh[pousr]_|github_pat_|sk-|sk_live_|rk_live_|xox[abprs]-|ya29\.|AIza|eyJ)"
+)
+_RESOLUTION_AWS_KEY = re.compile(r"(?:AKIA|ASIA)[0-9A-Z]{16}")
+_RESOLUTION_BLOB = re.compile(r"[A-Za-z0-9+/_=-]{20,}")
+_RESOLUTION_HEX = re.compile(r"[0-9a-fA-F]{32,}")
+
+
+def _resolution_secret_value(value: str) -> bool:
+    if not value:
+        return False
+    if _RESOLUTION_TOKEN_PREFIX.match(value) or _RESOLUTION_AWS_KEY.search(value):
+        return True
+    if _RESOLUTION_HEX.fullmatch(value):
+        return True
+    return (
+        _RESOLUTION_BLOB.fullmatch(value) is not None
+        and any(c.isalpha() for c in value)
+        and any(c.isdigit() for c in value)
+    )
+
+
+def _resolution_sensitive_key(key: str) -> bool:
+    return bool(key) and _RESOLUTION_SENSITIVE_KEY.search(key) is not None
+
+
+def _redact_resolution_token(token: str) -> tuple[str, int, bool]:
+    """(replacement, values to redact after it, bare sensitive key seen).
+
+    A token with percent-escapes (outside a URL, whose pieces come back here) is
+    decoded once (``%253D`` stays ``%3D``: one pass only) and judged in decoded
+    form; if that form hits a rule, the original token is redacted whole.
+    """
+    if "://" not in token and _RESOLUTION_PERCENT.search(token):
+        decoded = unquote(token)
+        if decoded != token:
+            replacement, pending, bare_key = _redact_resolution_plain_token(decoded)
+            if replacement != decoded or pending:
+                return _RESOLUTION_REDACTED, pending, bare_key
+            return token, 0, bare_key
+    return _redact_resolution_plain_token(token)
+
+
+def _redact_resolution_plain_token(token: str) -> tuple[str, int, bool]:
+    scheme_end = token.find("://")
+    if scheme_end > 0:
+        start = scheme_end + 3
+        at = token.find("@", start)
+        slash = token.find("/", start)
+        rest = token[start:]
+        if at > start and (slash == -1 or at < slash):
+            rest = _RESOLUTION_REDACTED + token[at:]
+        pieces = _RESOLUTION_URL_SPLIT.split(rest)
+        cleaned = [
+            piece
+            if not piece or piece in "/?&#" or piece.startswith(_RESOLUTION_REDACTED)
+            else _redact_resolution_token(piece)[0]
+            for piece in pieces
+        ]
+        return token[:start] + "".join(cleaned), 0, False
+    if _resolution_secret_value(token) and not _resolution_sensitive_key(token):
+        return _RESOLUTION_REDACTED, 0, False
+    seps = [i for i in (token.find("="), token.find(":")) if i > 0]
+    if seps:
+        cut = min(seps)
+        key, sep, value = token[:cut], token[cut], token[cut + 1 :].lstrip("=:")
+        if _resolution_sensitive_key(key):
+            if value.lower() in _RESOLUTION_AUTH_SCHEMES:
+                # ``authorization=Basic <credential>``: the credential is the next token.
+                return f"{key}{sep}{_RESOLUTION_REDACTED}", 1, False
+            if value:
+                return f"{key}{sep}{_RESOLUTION_REDACTED}", 0, False
+            return token, 1, False
+        if _resolution_secret_value(value):
+            return f"{key}{sep}{_RESOLUTION_REDACTED}", 0, False
+        return token, 0, False
+    if token.lower() in _RESOLUTION_AUTH_SCHEMES:
+        return token, 1, False
+    if _resolution_secret_value(token):
+        return _RESOLUTION_REDACTED, 0, False
+    return token, 0, _resolution_sensitive_key(token)
+
+
+def _redact_resolution_secrets(text: str) -> str:
+    """Replace credentials and token-like values with ``[REDACTED]`` (linear time)."""
+    pem = text.find("-----BEGIN")
+    if pem >= 0:
+        text = text[:pem] + _RESOLUTION_REDACTED
+    out: list[str] = []
+    pending = 0
+    scheme_extended = False
+    bare_key = False
+    quote = ""
+    for part in _RESOLUTION_SPLIT.split(text):
+        if not part:
+            continue
+        if _RESOLUTION_SEPARATOR.fullmatch(part):
+            if quote:
+                if part == quote:
+                    quote = ""
+                    pending -= 1
+                out.append(part)
+                continue
+            if pending and part in ("'", '"'):
+                quote = part
+            out.append(part)
+            continue
+        if quote:
+            out.append(_RESOLUTION_REDACTED)
+            continue
+        if pending:
+            if part in (":", "="):
+                out.append(part)
+                continue
+            out.append(_RESOLUTION_REDACTED)
+            if part.lower() in _RESOLUTION_AUTH_SCHEMES and not scheme_extended:
+                scheme_extended = True
+            else:
+                pending -= 1
+            continue
+        if bare_key:
+            bare_key = False
+            if part in (":", "="):
+                pending, scheme_extended = 1, False
+                out.append(part)
+                continue
+        replacement, pending, bare_key = _redact_resolution_token(part)
+        scheme_extended = part.lower() in _RESOLUTION_AUTH_SCHEMES
+        out.append(replacement)
+    return "".join(out)
+
+
+def _resolution_ci_safe(text: str, limit: int) -> str:
+    text = _RESOLUTION_UNSAFE_CHARS.sub("?", text)
+    # Neutralise CI workflow commands (``::error::``, ``::add-mask::``, ``##[group]``).
+    text = text.replace("::", ": :").replace("##[", "# #[")
+    if len(text) > limit:
+        text = text[: max(0, limit - 3)] + "..."
+    return text
+
+
+def _sanitize_resolution_text(value: Any, limit: int = _RESOLUTION_TEXT_MAX) -> str:
+    """Redacted gist: raw cap, per-token redaction, printable ASCII, CI-safe, truncated."""
+    raw = str(value)
+    if len(raw) > _RESOLUTION_RAW_MAX:
+        boundary_is_separator = _RESOLUTION_SEPARATOR.match(raw, _RESOLUTION_RAW_MAX) is not None
+        raw = raw[:_RESOLUTION_RAW_MAX]
+        if not boundary_is_separator:
+            # Drop the token the cap cut through: its remainder could escape every rule.
+            cut = max((m.end() for m in _RESOLUTION_SEPARATOR.finditer(raw)), default=0)
+            raw = raw[:cut]
+        raw += "..."
+    return _resolution_ci_safe(_redact_resolution_secrets(raw), limit)
+
+
+def _sanitize_identifier(value: Any, limit: int = 120) -> str:
+    """Identifier fields: printable ASCII, CI-safe, bounded; never secret-redacted."""
+    return _resolution_ci_safe(str(value)[:_RESOLUTION_RAW_MAX], limit)
+
+
+# --- end resolution-text sanitizer ---
+
+
+def _build_resolution_reason(
+    name: str, exc: BaseException, *, origin: str, registry_key: str | None
+) -> dict[str, str]:
+    """Identifier fields keep their text (no secret rules); only the message is redacted."""
+    raw_name = str(name or "").strip()
+    key = registry_key if registry_key is not None else _resolve_executor_registry_key(raw_name)
+    return {
+        "capability": _sanitize_identifier(raw_name),
+        "registry_key": _sanitize_identifier(key),
+        "error_type": _sanitize_identifier(type(exc).__qualname__),
+        "error_message": _sanitize_resolution_text(exc),
+        "resolver_origin": _sanitize_identifier(origin, 200),
+    }
+
+
+def _store_resolution_reasons(reasons: list[tuple[str, dict[str, str]]]) -> None:
+    """Record ``(raw name, reason)`` pairs under one lock, keyed by the raw name.
+
+    WARNING once per (name, type, message), at most 5 per (name, type) per process.
+    """
+    to_log: list[dict[str, str]] = []
+    with _executor_resolution_lock:
+        for capability, reason in reasons:
+            error_type = reason["error_type"]
+            _executor_resolution_errors[capability] = reason
+            digest = hashlib.sha256(reason["error_message"].encode()).hexdigest()[:12]
+            warn_key = (capability, error_type, digest)
+            count = _executor_resolution_warn_counts.get((capability, error_type), 0)
+            if warn_key in _executor_resolution_warned or count >= _EXECUTOR_RESOLUTION_WARN_MAX:
+                continue
+            _executor_resolution_warned.add(warn_key)
+            _executor_resolution_warn_counts[(capability, error_type)] = count + 1
+            to_log.append(reason)
+    for reason in to_log:
+        _logger.warning(
+            "executor resolution raised for capability=%s registry_key=%s origin=%s: %s: %s",
+            reason["capability"],
+            reason["registry_key"],
+            reason["resolver_origin"],
+            reason["error_type"],
+            reason["error_message"],
+        )
+
+
+def record_executor_resolution_error(
+    name: str,
+    exc: BaseException,
+    *,
+    origin: str,
+    registry_key: str | None = None,
+) -> dict[str, str]:
+    """Record that resolving ``name`` raised (see ``_store_resolution_reasons``)."""
+    reason = _build_resolution_reason(name, exc, origin=origin, registry_key=registry_key)
+    _store_resolution_reasons([(str(name or "").strip(), reason)])
+    return dict(reason)
+
+
+def last_executor_resolution_errors() -> dict[str, dict[str, str]]:
+    """Copy of the per-process executor resolution errors, keyed by capability name."""
+    with _executor_resolution_lock:
+        return {name: dict(reason) for name, reason in _executor_resolution_errors.items()}
+
+
+def executor_resolution_error(name: str) -> dict[str, str] | None:
+    """The last recorded resolution error for ``name`` in this process, or None."""
+    with _executor_resolution_lock:
+        reason = _executor_resolution_errors.get(str(name or "").strip())
+        return dict(reason) if reason is not None else None
+
+
+def clear_executor_resolution_errors() -> None:
+    """Forget recorded errors and warned keys (tests)."""
+    with _executor_resolution_lock:
+        _executor_resolution_errors.clear()
+        _executor_resolution_warned.clear()
+        _executor_resolution_warn_counts.clear()
+
+
+def _clear_resolution_errors_locked(names: list[str]) -> None:
+    for name in names:
+        _executor_resolution_errors.pop(name, None)
+    drop = set(names)
+    for warn_key in [k for k in _executor_resolution_warned if k[0] in drop]:
+        _executor_resolution_warned.discard(warn_key)
+    for count_key in [k for k in _executor_resolution_warn_counts if k[0] in drop]:
+        _executor_resolution_warn_counts.pop(count_key, None)
+
+
+def _clear_resolution_error(name: str) -> None:
+    """Forget ``name``'s error and its warning state, so a later failure warns again."""
+    with _executor_resolution_lock:
+        _clear_resolution_errors_locked([name])
+
+
+def _capabilities_for_registry_key(registry_key: str) -> list[str]:
+    """Capability names that resolve to ``registry_key``.
+
+    Aliases first; the key itself only when no alias targets it or it is also a
+    planner capability (``research``), never as a pseudo-capability entry.
+    """
+    key = str(registry_key or "").strip()
+    names = [name for name, target in EXECUTOR_REGISTRY_ALIASES.items() if target == key]
+    if not names:
+        return [key]
     try:
+        planner_names = set(list_planner_capability_names())
+    except Exception:
+        planner_names = set()
+    if key in planner_names and key not in names:
+        names.append(key)
+    return names
+
+
+def record_executor_resolution_error_for_key(
+    registry_key: str, exc: BaseException, *, origin: str
+) -> list[dict[str, str]]:
+    """Record a raising resolver under every capability name that maps to ``registry_key``."""
+    pairs = [
+        (name, _build_resolution_reason(name, exc, origin=origin, registry_key=registry_key))
+        for name in _capabilities_for_registry_key(registry_key)
+    ]
+    _store_resolution_reasons(pairs)
+    return [dict(reason) for _, reason in pairs]
+
+
+def clear_executor_resolution_errors_for_key(registry_key: str) -> None:
+    """Forget recorded errors for every capability name that maps to ``registry_key``."""
+    names = _capabilities_for_registry_key(registry_key)
+    with _executor_resolution_lock:
+        _clear_resolution_errors_locked(names)
+
+
+def executor_resolution_status(name: str) -> dict[str, Any]:
+    """Resolve ``name`` through the host executor registry: resolved, missing or error.
+
+    ``error`` carries the structured reason (capability, exception type, truncated
+    message, resolver origin); it is also recorded in ``last_executor_resolution_errors``.
+    """
+    capability = str(name or "").strip()
+    registry_key = capability
+    base: dict[str, Any] = {
+        "capability": capability,
+        "registry_key": registry_key,
+        "resolver_origin": HOST_EXECUTOR_RESOLVER_ORIGIN,
+    }
+    try:
+        registry_key = _resolve_executor_registry_key(capability)
+        base["registry_key"] = registry_key
         from nexus.core.capability_executor_registry import get_executor
 
-        return get_executor(_resolve_executor_registry_key(name)) is not None
-    except Exception:
-        return False
+        executor = get_executor(registry_key)
+        executor_name = (
+            None
+            if executor is None
+            else _sanitize_identifier(
+                getattr(executor, "__qualname__", None) or type(executor).__qualname__, 200
+            )
+        )
+    except Exception as exc:
+        reason = record_executor_resolution_error(
+            capability, exc, origin=HOST_EXECUTOR_RESOLVER_ORIGIN, registry_key=registry_key
+        )
+        return {**base, "status": EXECUTOR_RESOLUTION_ERROR, "error": reason}
+    _clear_resolution_error(capability)
+    if executor is None:
+        return {**base, "status": EXECUTOR_RESOLUTION_MISSING}
+    return {**base, "status": EXECUTOR_RESOLUTION_RESOLVED, "executor": executor_name}
+
+
+def _has_physical_executor(name: str) -> bool:
+    """Boolean contract kept for callers; a raising resolver is recorded, not hidden."""
+    return executor_resolution_status(name)["status"] == EXECUTOR_RESOLUTION_RESOLVED
 
 
 def classify_gap(name: str) -> str:
@@ -1486,7 +1863,8 @@ def build_wiring_matrix() -> dict[str, Any]:
                 EXECUTION_CLASS_MISSING_ENGINE,
             }
         )
-        has_exec = _has_physical_executor(name)
+        resolution = executor_resolution_status(name)
+        has_exec = resolution["status"] == EXECUTOR_RESOLUTION_RESOLVED
         reason_code = str(
             contract.get("reason_code")
             or PROBE_ONLY_REASON_CODES.get(name)
@@ -1575,6 +1953,8 @@ def build_wiring_matrix() -> dict[str, Any]:
                 "physical_callable_hint": physical_hint,
             }
         )
+        if resolution["status"] == EXECUTOR_RESOLUTION_ERROR:
+            rows[-1]["executor_resolution_error"] = dict(resolution["error"])
 
     counts: dict[str, int] = {g: 0 for g in sorted(GAP_CLASSES)}
     for row in rows:
@@ -1848,10 +2228,15 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
     try:
         from nexus.core.belief_contracts import CapabilityExecutionPlan
         from nexus.core.capability_executor_registry import get_executor
-    except Exception:
-        return None
 
-    executor = get_executor(registry_key)
+        executor = get_executor(registry_key)
+    except Exception as exc:
+        # Recorded so the stage record says "resolver raised X", not "no executor".
+        record_executor_resolution_error(
+            name, exc, origin=HOST_EXECUTOR_RESOLVER_ORIGIN, registry_key=registry_key
+        )
+        return None
+    _clear_resolution_error(name)
     if executor is None:
         return None
 
@@ -2814,6 +3199,28 @@ def planner_signal_trigger(name: str, context: Mapping[str, Any]) -> str:
     return ""
 
 
+def _with_resolution_error(name: str, receipt: dict[str, Any]) -> dict[str, Any]:
+    """Add ``executor_resolution_error`` when resolving ``name`` raised in this process."""
+    reason = executor_resolution_error(name)
+    if reason is not None:
+        receipt["executor_resolution_error"] = reason
+        response = receipt.get("response")
+        if isinstance(response, dict):
+            response["executor_resolution_error"] = dict(reason)
+    return receipt
+
+
+def _surface_resolution_error(name: str, invoker: CapabilityInvoker) -> CapabilityInvoker:
+    """Wrap a no-executor fallback so its receipt carries a recorded resolver error."""
+    if executor_resolution_error(name) is None:
+        return invoker
+
+    def invoke(context: Mapping[str, Any]) -> dict[str, Any]:
+        return _with_resolution_error(name, dict(invoker(context)))
+
+    return invoke
+
+
 def build_escalate_gated_invoker(
     capability_name: str,
     *,
@@ -2858,7 +3265,7 @@ def build_escalate_gated_invoker(
                     return dict(skip_invoker(context))
         if real_invoker is None:
             task_id = str(context.get("task_id") or "")
-            return {
+            return _with_resolution_error(name, {
                 "task_id": task_id,
                 "invoked": False,
                 "skipped": False,
@@ -2875,7 +3282,7 @@ def build_escalate_gated_invoker(
                     "status": BLOCKED_EXECUTOR_UNAVAILABLE,
                     "capability": name,
                 },
-            }
+            })
         receipt = dict(real_invoker(context))
         if planner_triggered:
             receipt["trigger_source"] = PLANNER_MAINCHAIN_GATE_TRIGGER_SOURCE
@@ -2999,8 +3406,8 @@ def build_default_mainchain_invokers(
             if real is not None:
                 invokers[name] = real
             else:
-                invokers[name] = build_explicit_skip_invoker(
-                    name, skip_reason=SKIP_ONLINE_ARMOR
+                invokers[name] = _surface_resolution_error(
+                    name, build_explicit_skip_invoker(name, skip_reason=SKIP_ONLINE_ARMOR)
                 )
             continue
         # Prefer real physical executor from registry (P4) over stub/skip.
@@ -3009,13 +3416,13 @@ def build_default_mainchain_invokers(
             continue
         if name in WIRED_STUB:
             # No physical executor: explicit skip (not structural stub success).
-            invokers[name] = build_explicit_skip_invoker(
-                name, skip_reason=SKIP_NOT_IMPLEMENTED
+            invokers[name] = _surface_resolution_error(
+                name, build_explicit_skip_invoker(name, skip_reason=SKIP_NOT_IMPLEMENTED)
             )
             continue
         # Remaining: explicit not-implemented skip (visible gap, not silent)
-        invokers[name] = build_explicit_skip_invoker(
-            name, skip_reason=SKIP_NOT_IMPLEMENTED
+        invokers[name] = _surface_resolution_error(
+            name, build_explicit_skip_invoker(name, skip_reason=SKIP_NOT_IMPLEMENTED)
         )
 
     return invokers
