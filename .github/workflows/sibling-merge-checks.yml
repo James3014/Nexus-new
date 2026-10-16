@@ -1,0 +1,141 @@
+name: Sibling merge checks
+
+# #2385: reusable workflow for the Nexus-new sibling repos. Each sibling calls it
+# from a small pull_request_target / issue_comment caller workflow, so both
+# checks run from Nexus-new main, never from PR code, and publish the same
+# commit statuses Nexus-new requires:
+#   "Review record present (advisory)"     (scripts/ops/review_record_check.py)
+#   "Bindings preflight (default branch)"  (scripts/ops/sibling_bindings_check.py)
+# The caller's GITHUB_TOKEN is used for its own repo's statuses; the PR head is
+# fetched as git objects only. Known limit (accepted on #2365): commit statuses
+# can be posted by anything with statuses: write.
+
+on:
+  workflow_call:
+    inputs:
+      pr:
+        type: number
+        required: true
+      head_sha:
+        type: string
+        required: false
+        default: ""
+      run_bindings:
+        type: boolean
+        required: false
+        default: false
+
+permissions: {}
+
+jobs:
+  review-record:
+    name: Review record present (advisory job)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      statuses: write
+    steps:
+      - name: Checkout the Nexus-new tools (main, never PR code)
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: James3014/Nexus-new
+          ref: main
+          path: nexus-tools
+          sparse-checkout: |
+            scripts/ops/review_record_check.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Check the review record at the PR head and publish the status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ inputs.pr }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          python3 -I nexus-tools/scripts/ops/review_record_check.py --repo "$REPO" --pr "$PR" \
+            --target-url "$RUN_URL" --output "$RUNNER_TEMP/review-record.json" --no-fail
+
+  bindings:
+    name: Bindings preflight (default branch job)
+    if: inputs.run_bindings
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: write
+    env:
+      CONTEXT: Bindings preflight (default branch)
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      PR: ${{ inputs.pr }}
+      HEAD_SHA: ${{ inputs.head_sha }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Mark the status pending before anything can fail
+        run: |
+          set -euo pipefail
+          # A bindings run needs the PR head; refuse rather than guess.
+          [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "head_sha input missing or invalid" >&2; exit 1; }
+          gh api -X POST "repos/${REPO}/statuses/${HEAD_SHA}" \
+            -f state=pending -f context="$CONTEXT" -f target_url="$RUN_URL" \
+            -f description="bindings preflight running" > /dev/null
+      - name: Checkout the repository default branch (never PR code)
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: target
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Checkout the Nexus-new tools (main, never PR code)
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: James3014/Nexus-new
+          ref: main
+          path: nexus-tools
+          sparse-checkout: |
+            scripts/ops/sibling_bindings_check.py
+            scripts/ops/trusted_merge_lane_gate.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Fetch the PR head as git objects only
+        run: |
+          set -euo pipefail
+          auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          echo "::add-mask::${auth}"
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth}" \
+            git -C target fetch --no-tags origin "refs/pull/${PR}/head"
+          test "$(git -C target rev-parse FETCH_HEAD)" = "$HEAD_SHA"
+      - name: Run the bindings check and publish the status
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          # The runner starts bash with -e; turn it off so a FAIL still publishes its status.
+          set +e -uo pipefail
+          out="$RUNNER_TEMP/bindings.txt"
+          python3 -I nexus-tools/scripts/ops/sibling_bindings_check.py --repo "$REPO" --repo-dir target \
+            --pr "$PR" --head "$HEAD_SHA" --base-ref "origin/${DEFAULT_BRANCH}" \
+            --gate nexus-tools/scripts/ops/trusted_merge_lane_gate.py > "$out" 2>&1
+          rc=$?
+          stop="$(python3 -I -c 'import secrets; print(secrets.token_hex(16))')"
+          echo "::stop-commands::${stop}"
+          cat "$out"
+          echo "::${stop}::"
+          if [ "$rc" -eq 0 ] && ! grep -q '^PASS  bindings' "$out"; then
+            rc=1
+          fi
+          if [ "$rc" -eq 0 ]; then
+            state=success; description="bindings agree at head ${HEAD_SHA:0:12}"
+          else
+            first="$(grep -m1 -E '^FAIL' "$out" | tr -c 'A-Za-z0-9 _:#.,()/-' ' ' | cut -c1-120 || true)"
+            state=failure; description="${first:-bindings check failed} (head ${HEAD_SHA:0:12})"
+          fi
+          gh api -X POST "repos/${REPO}/statuses/${HEAD_SHA}" \
+            -f state="$state" -f context="$CONTEXT" -f target_url="$RUN_URL" \
+            -f description="${description:0:140}" > /dev/null
+          exit "$rc"
