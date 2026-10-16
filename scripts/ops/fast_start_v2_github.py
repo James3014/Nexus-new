@@ -17,6 +17,11 @@ RATE_LIMIT_RETRIES = 2
 RATE_LIMIT_MAX_WAIT_SECONDS = 60.0
 RATE_LIMIT_FALLBACK_WAIT_SECONDS = 1.0
 RATE_LIMIT_EXIT = 75
+# Transient server-side failures on read-only GETs get their own bounded budget,
+# separate from the rate-limit budget. Writes are never retried.
+SERVER_ERROR_RETRIES = 2
+SERVER_ERROR_BACKOFF_SECONDS = (2.0, 5.0)
+RETRYABLE_SERVER_ERROR_CODES = frozenset({500, 502, 503, 504})
 
 
 class GitHubTransportError(RuntimeError):
@@ -86,6 +91,7 @@ class GitHubMetadataClient:
         max_wait: float = RATE_LIMIT_MAX_WAIT_SECONDS,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.time,
+        server_error_retries: int = SERVER_ERROR_RETRIES,
     ) -> None:
         if not token:
             raise ValueError("GITHUB_TOKEN_REQUIRED")
@@ -97,6 +103,20 @@ class GitHubMetadataClient:
         self.max_wait = max_wait
         self.sleep = sleep
         self.clock = clock
+        self.server_error_retries = server_error_retries
+
+    def _server_error_delay(self, used: int, exc: urllib.error.HTTPError | None) -> float:
+        """Backoff before the next transient-failure retry; numeric Retry-After wins if sane."""
+        if exc is not None:
+            raw = str((exc.headers or {}).get("Retry-After") or "").strip()
+            try:
+                value = float(raw)
+            except ValueError:
+                value = -1.0
+            if 0 <= value <= self.max_wait:
+                return value
+        schedule = SERVER_ERROR_BACKOFF_SECONDS
+        return schedule[min(used, len(schedule) - 1)]
 
     def request(
         self,
@@ -112,8 +132,10 @@ class GitHubMetadataClient:
             raise ValueError("GITHUB_METHOD_UNSUPPORTED")
         data = None if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
-        max_attempts = self.retries + 1 if normalized_method == "GET" else 1
-        for attempt in range(max_attempts):
+        is_get = normalized_method == "GET"
+        rate_limit_used = 0
+        server_error_used = 0
+        while True:
             request = urllib.request.Request(
                 f"https://api.github.com{path}",
                 data=data,
@@ -133,14 +155,24 @@ class GitHubMetadataClient:
             except urllib.error.HTTPError as exc:
                 detail = exc.read(8192).decode("utf-8", errors="replace").strip()
                 delay = rate_limit_retry_delay(exc, detail, clock=self.clock)
-                if delay is not None and normalized_method == "GET":
-                    if attempt >= self.retries or delay > self.max_wait:
+                if delay is not None and is_get:
+                    if rate_limit_used >= self.retries or delay > self.max_wait:
                         raise GitHubRateLimitExhausted(
                             method=normalized_method,
                             path=path,
                             retry_after=delay,
                         ) from exc
+                    rate_limit_used += 1
                     self.sleep(delay)
+                    continue
+                if (
+                    is_get
+                    and exc.code in RETRYABLE_SERVER_ERROR_CODES
+                    and server_error_used < self.server_error_retries
+                ):
+                    wait = self._server_error_delay(server_error_used, exc)
+                    server_error_used += 1
+                    self.sleep(wait)
                     continue
                 if delay is not None:
                     raise GitHubTransportError(
@@ -151,13 +183,16 @@ class GitHubMetadataClient:
                     f"GITHUB_{normalized_method}_FAILED:HTTP_{exc.code}:{path}"
                 ) from exc
             except (urllib.error.URLError, TimeoutError, OSError) as exc:
-                if normalized_method == "GET":
+                if is_get:
+                    if server_error_used < self.server_error_retries:
+                        wait = self._server_error_delay(server_error_used, None)
+                        server_error_used += 1
+                        self.sleep(wait)
+                        continue
                     raise GitHubTransportError(f"GITHUB_GET_TRANSPORT_FAILED:{path}:{exc}") from exc
                 raise GitHubWriteOutcomeUnknown(
                     f"GITHUB_WRITE_OUTCOME_UNKNOWN:{normalized_method}:{path}:{exc}"
                 ) from exc
-
-        raise GitHubTransportError("GITHUB_REQUEST_LOOP_EXHAUSTED")
 
 
 def collect_pr_changed_paths(
