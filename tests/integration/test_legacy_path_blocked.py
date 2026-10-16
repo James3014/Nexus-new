@@ -22,6 +22,19 @@ MODEL_OUTPUT_NAMES = frozenset({
     "raw_model_output",
     "output_text",
     "generated_text",
+    "content",
+    "json_str",
+    # Raw text captured from a model CLI/server. An explicit list rather than a ``raw_*``
+    # prefix: the prefix also catches raw_bytes/raw_packet/raw_jwk/raw_coverage (sealed
+    # files, env secrets, Mapping copies), which would need allowlist entries for
+    # non-model data and dilute the allowlist.
+    "raw_stdout",
+    "raw_stderr",
+    "raw_body",
+    "raw_text",
+    "raw_content",
+    "raw_completion",
+    "raw_reply",
 })
 MODEL_OUTPUT_KEYS = frozenset({"response", "generated_text"})
 
@@ -77,6 +90,29 @@ NON_MODEL_JSON_PARSE_ALLOWLIST = {
         "AppleFMCandidateAdapter._run_structured_json_probe.semantic_validator",
         "output_text",
     ),
+    # File read: pending-manifest JSON this service wrote itself (lock-file bytes under flock); no model text.
+    (
+        "nexus/app/nightshift_runner_service.py",
+        "AutoResearchNightShift._append_to_pending_manifest",
+        "content",
+    ),
+    # State round-trip: json_str is the output of MentalSnapshot.serialize() (json.dumps of self.mind); no model text.
+    ("nexus/core/mental_snapshot.py", "MentalSnapshot.deserialize", "json_str"),
+    # File read: research report JSON written by the research subprocess to report_path; no model text.
+    ("nexus/engine/pipeline_research.py", "PipelineResearchMixin._load_research_report", "content"),
+    # File read: on-disk embedding cache (vectors plus _model_version) written by EmbeddingCache itself.
+    ("nexus/learning/embedding_cache.py", "EmbeddingCache._load", "content"),
+    # File read: JSON evidence block inside a stored SKILL.md under skills_dir (written by the skill store), not a model response.
+    ("nexus/learning/knowledge_index.py", "KnowledgeIndex.load_evidence", "json_str"),
+    # HTTP body: lessons JSON downloaded from the Arweave gateway by tx id (data this system uploaded); not model text.
+    ("nexus/services/arweave_uploader.py", "download_lessons_from_arweave", "content"),
+    # CLI envelope: `gemini --output-format json` stdout; the model text is read from its output/response
+    # field below, and raw_stdout is only the fallback text when the envelope does not parse.
+    ("nexus/services/gateway.py", "BattlesuitGateway._ask_via_cli", "raw_stdout"),
+    # HTTP envelope: Ollama /api/chat|/api/generate body; model text is output_text, parsed later by _parse_json_result.
+    ("nexus/services/gateway.py", "BattlesuitGateway._ask_via_ollama", "raw_body"),
+    # HTTP envelope: Ollama /api/generate body; the model text from payload["response"] goes through robust_json_parse.
+    ("nexus/services/s2t_strict.py", "S2T3BAdvisor._advise_via_ollama", "raw_body"),
     # MCP JSON-RPC envelope: Serena tool-result text read via read_response(); a tool result, not model text.
     ("nexus/services/mcp_delegator.py", "MCPDelegator.delegate_mcp", "text"),
 }
@@ -256,6 +292,50 @@ class TestLegacyPathBlocked(unittest.TestCase):
         self.assertEqual(
             stale, set(), f"Stale allowlist entries (call site moved or removed): {sorted(stale)}"
         )
+
+    def test_scanner_covers_content_json_str_and_raw_names(self):
+        """#2174: names the scanner once missed are flagged; non-model raw_* names stay quiet."""
+        for name in (
+            "content",
+            "json_str",
+            "raw_stdout",
+            "raw_stderr",
+            "raw_body",
+            "raw_text",
+            "raw_content",
+            "raw_completion",
+            "raw_reply",
+        ):
+            source = f"import json\ndef f({name}):\n    return json.loads({name})\n"
+            with self.subTest(name=name):
+                hits = find_model_output_json_parses(source, "synthetic/names.py")
+                self.assertEqual([h[:3] for h in hits], [("synthetic/names.py", "f", name)])
+        propagated = "import json\ndef f(content):\n    body = content.strip()\n    return json.loads(body)\n"
+        self.assertTrue(find_model_output_json_parses(propagated, "synthetic/prop.py"))
+        # raw_bytes/raw_packet are sealed-file bytes, not model text: deliberately not names.
+        for quiet in ("raw_bytes", "raw_packet", "raw_jwk"):
+            source = f"import json\ndef f(path):\n    {quiet} = path.read_bytes()\n    return json.loads({quiet})\n"
+            with self.subTest(quiet=quiet):
+                self.assertEqual(find_model_output_json_parses(source, "synthetic/q.py"), [])
+
+    def test_allowlist_is_exact_per_site(self):
+        """#2174: an allowlisted site is matched by (path, qualname, argument), nothing broader."""
+        source = "import json\ndef f(content):\n    return json.loads(content)\n"
+        (hit,) = find_model_output_json_parses(source, "synthetic/site.py")
+        allow = {hit[:3]}
+        self.assertIn(hit[:3], allow)
+        # Same variable in another function, another file, or another argument is not covered.
+        other_func = "import json\ndef g(content):\n    return json.loads(content)\n"
+        (other,) = find_model_output_json_parses(other_func, "synthetic/site.py")
+        self.assertNotIn(other[:3], allow)
+        (moved,) = find_model_output_json_parses(source, "synthetic/elsewhere.py")
+        self.assertNotIn(moved[:3], allow)
+        # Every real entry names a file that still exists and carries a non-empty reason in source.
+        text = Path(__file__).read_text(encoding="utf-8")
+        for path, qualname, argument in NON_MODEL_JSON_PARSE_ALLOWLIST:
+            with self.subTest(entry=(path, qualname, argument)):
+                self.assertTrue((REPO_ROOT / path).exists(), path)
+                self.assertIn(f'"{qualname}"', text)
 
     def test_no_manual_state_mutation(self):
         """禁止在 Python 中手動修改 flow_state (應經由 Rust TransitionGuard)"""
