@@ -1,6 +1,13 @@
 import asyncio
+import sys
+from pathlib import Path
+
 import pytest
-from nexus_dag_workflow import AsyncDAGWorkflow, WorkflowError
+
+# The module was archived in #2373 (repo root -> docs/archive/root-2026-10).
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "docs" / "archive" / "root-2026-10"))
+from nexus_dag_workflow import AsyncDAGWorkflow, WorkflowError  # noqa: E402
+
 
 @pytest.mark.asyncio
 async def test_circular_dependency():

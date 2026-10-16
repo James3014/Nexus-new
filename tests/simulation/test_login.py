@@ -1,5 +1,10 @@
-import pytest
-from login_service import LoginService
+import sys
+from pathlib import Path
+
+# The module was archived in #2373 (repo root -> docs/archive/root-2026-10).
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "docs" / "archive" / "root-2026-10"))
+from login_service import LoginService  # noqa: E402
+
 
 def test_login_success():
     service = LoginService()
