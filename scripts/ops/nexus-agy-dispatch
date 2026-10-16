@@ -3854,6 +3854,44 @@ def _acquire_claim_queued(
             ticket.close()
 
 
+# #2432: profiles under which agy has no write tool and no command tool (every
+# profile denies commands; ``plan`` mode never edits), so a run cannot have
+# changed the repository even when the change observation is unavailable.
+NO_WRITE_PERMISSION_PROFILE_KINDS = frozenset({"READ_ONLY_RESEARCH", "NO_TOOL_PACKET"})
+
+
+def _quota_failure_effect(
+    attempt_changed_paths: list[str] | None,
+    *,
+    mode: str,
+    permission_profile_kind: str | None,
+    allow_rules: list[str] | None = None,
+) -> tuple[str, bool | None, bool]:
+    """``(failure_kind, provider_effect, reconciliation_required)`` of a quota failure.
+
+    An observed change keeps reconciliation.  Without an observation
+    (``None``: cwd outside git, or the readback failed) a write-capable run is
+    UNKNOWN_EFFECT, but a run that could not write is no-effect (#2432) and
+    rotates like a pre-effect quota failure.
+    """
+    if attempt_changed_paths:
+        return "PROVIDER_QUOTA_EXHAUSTED_AFTER_EFFECT", True, True
+    if attempt_changed_paths == []:
+        return "PROVIDER_QUOTA_EXHAUSTED_PRE_EFFECT", False, False
+    # A READ_ONLY_RESEARCH packet keeps caller allow rules, so it is no-write
+    # only when no write or command tool is granted (Codex r1 on #2435).
+    grants_effect_tool = any(
+        str(rule).startswith(("write_file", "command")) for rule in (allow_rules or [])
+    )
+    if (
+        mode != "accept-edits"
+        and permission_profile_kind in NO_WRITE_PERMISSION_PROFILE_KINDS
+        and not grants_effect_tool
+    ):
+        return "PROVIDER_QUOTA_EXHAUSTED_NO_WRITE_PROFILE", False, False
+    return "PROVIDER_QUOTA_EXHAUSTED_UNKNOWN_EFFECT", None, True
+
+
 def _rotation_cap(coordinator: Any) -> int:
     """Rotations allowed: the configured cap, never more than the other pool accounts."""
     cap = _max_account_failovers()
@@ -4284,6 +4322,11 @@ def dispatch_run(
     # model-family quota cooldown) this run may make before it stops.
     account_retirements = 0
     retirement_cap = max_account_retirements()
+    # #2432: accounts released because their catalog lacks the fixed model.
+    capability_skipped: set[str] = set()
+    # Accounts this run already ran agy on; a capability rotation never
+    # returns to one of them.
+    attempted_accounts: set[str] = set()
     last_kind = None
     total_wall_ms = 0
     active_provider_pid: int | None = None
@@ -4551,8 +4594,68 @@ def dispatch_run(
             )
             if not catalog_decision["admitted"]:
                 # #1357: the leased account's live catalog lacks the fixed model.
-                # Fail before any semantic provider work; no substitution and no
-                # rotation (the lease is released by the outer finally).
+                # No substitution.  #2432: accounts expose different model
+                # lists, so release this one (it is healthy: not retired) and
+                # claim another account not yet tried; fail only when no
+                # remaining account can be claimed.
+                capability_skipped.add(claim.account_alias_hash)
+                exclude_hashes.add(claim.account_alias_hash)
+                skipped_claim = claim
+                skipped_claim.release()
+                if total_deadline - _monotonic() < TOTAL_DEADLINE_MIN_ATTEMPT_SECONDS:
+                    # No budget left to check another account (Codex r1 #2435).
+                    return _emit_total_deadline_exhausted()
+                next_claim = None
+                exhausted_meta: dict[str, Any] = {}
+                try:
+                    next_claim = _queued_claim(
+                        first_pass=lambda: coordinator.acquire_claim(
+                            consumer_id=consumer_id,
+                            exclude_hashes=exclude_hashes,
+                            wait_timeout=0.0,
+                            model_family=scoped_model_family,
+                        )
+                    )
+                except _PoolClaimFailure as capability_exc:
+                    if capability_exc.busy:
+                        # Unchecked accounts are leased elsewhere: the model may
+                        # be available there, so this is a busy pool, not an
+                        # invalid model.
+                        _operation_hook(operation_hook, pool_queue=dict(pool_queue))
+                        emit_meta({
+                            "status": "pool_busy",
+                            "attempts": attempts,
+                            "rotations": rotations,
+                            "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
+                            "capability_checked_accounts": len(capability_skipped),
+                            "wall_ms": total_wall_ms,
+                            "permission_profile_sha256": permission_profile_sha256,
+                            "permission_profile_kind": permission_profile_kind,
+                            **_pool_claim_meta(capability_exc),
+                        })
+                        return 75
+                    exhausted_meta = _pool_claim_meta(capability_exc)
+                    next_claim = None
+                if (
+                    next_claim is not None
+                    and next_claim.account_alias_hash not in capability_skipped
+                    and next_claim.account_alias_hash not in attempted_accounts
+                ):
+                    claim = next_claim
+                    _operation_hook(
+                        operation_hook,
+                        phase="ACCOUNT_ROTATED",
+                        attempts=attempts,
+                        rotations=rotations,
+                        failure_kind="MODEL_CAPABILITY_UNAVAILABLE",
+                        capability_skipped_accounts=len(capability_skipped),
+                        account_alias_hash=claim.account_alias_hash,
+                        lease_id_hash=claim.lease_id_hash,
+                        pool_queue=dict(pool_queue),
+                    )
+                    continue
+                if next_claim is not None and next_claim is not skipped_claim:
+                    next_claim.release()
                 capability_detail = (
                     "DISPATCH_MODEL_CONTRACT_REJECTED:MODEL_CAPABILITY_UNAVAILABLE:"
                     f"{catalog_decision['resolved_model']}"
@@ -4576,6 +4679,9 @@ def dispatch_run(
                     "rotations": rotations,
                     "failure_kind": "MODEL_CAPABILITY_UNAVAILABLE",
                     "failure_detail": capability_detail,
+                    # #2432: every claimable account was checked; none offers it.
+                    "capability_checked_accounts": len(capability_skipped),
+                    **exhausted_meta,
                     "provider_effect": False,
                     "retry_permitted": True,
                     "account_alias_hash": claim.account_alias_hash,
@@ -4587,9 +4693,15 @@ def dispatch_run(
                 })
                 return 64
 
-            if _budget_exhausted():
+            if _budget_exhausted() or (
+                # #2432: capability checks ran before the first attempt; do not
+                # start the provider past the deadline (Codex r2 on #2435).
+                capability_skipped
+                and total_deadline - _monotonic() < TOTAL_DEADLINE_MIN_ATTEMPT_SECONDS
+            ):
                 return _emit_total_deadline_exhausted()
             attempts += 1
+            attempted_accounts.add(claim.account_alias_hash)
             _operation_hook(
                 operation_hook,
                 phase="EXECUTING",
@@ -4956,17 +5068,14 @@ def dispatch_run(
                     provider_effect_observed = True
                     reconciliation_required = True
             elif kind == AccountFailureKind.QUOTA_EXHAUSTED:
-                if attempt_changed_paths:
-                    last_kind = "PROVIDER_QUOTA_EXHAUSTED_AFTER_EFFECT"
-                    provider_effect_observed = True
-                    reconciliation_required = True
-                elif attempt_changed_paths == []:
-                    last_kind = "PROVIDER_QUOTA_EXHAUSTED_PRE_EFFECT"
-                    provider_effect_observed = False
-                else:
-                    last_kind = "PROVIDER_QUOTA_EXHAUSTED_UNKNOWN_EFFECT"
-                    provider_effect_observed = None
-                    reconciliation_required = True
+                last_kind, provider_effect_observed, reconciliation_required = (
+                    _quota_failure_effect(
+                        attempt_changed_paths,
+                        mode=mode,
+                        permission_profile_kind=permission_profile_kind,
+                        allow_rules=list(effective_permissions.get("allow") or []),
+                    )
+                )
             elif attempt_changed_paths:
                 provider_effect_observed = True
                 reconciliation_required = True
