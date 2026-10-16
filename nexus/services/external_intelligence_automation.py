@@ -78,6 +78,22 @@ ALLOWED_KEYS = {
 }
 
 
+# Verifier options whose next argv element is a value, never a repository path.
+_VERIFIER_VALUE_OPTIONS = frozenset({
+    "-c",
+    "-m",
+    "-k",
+    "-p",
+    "-o",
+    "--deselect",
+    "--ignore",
+    "--ignore-glob",
+    "--override-ini",
+    "--rootdir",
+    "--junitxml",
+})
+
+
 class AutomationError(RuntimeError):
     pass
 
@@ -615,16 +631,24 @@ class ExternalIntelligenceAutomation:
         for spec in all_specs:
             argv = spec.get("argv") or []
             if isinstance(argv, list):
+                skip_next = False
                 for part in argv:
-                    if (
-                        not isinstance(part, str)
-                        or not part
-                        or part.startswith("-")
-                        or "\x00" in part
-                        or "\\" in part
-                    ):
+                    if skip_next:
+                        # Value of an option (code string, node id, marker, ...):
+                        # not a file the verifier reads from the repository.
+                        skip_next = False
+                        continue
+                    if not isinstance(part, str) or not part or "\x00" in part or "\\" in part:
+                        continue
+                    if part.startswith("-"):
+                        if part in _VERIFIER_VALUE_OPTIONS:
+                            skip_next = True
                         continue
                     if part in ("python", "python3", "pytest", "bash", "sh", "node", "uv"):
+                        continue
+                    # Positional pytest node id: tests/x.py::test_y -> tests/x.py
+                    part = part.split("::", 1)[0]
+                    if not part or any(c.isspace() or c in "'\"" for c in part):
                         continue
                     try:
                         p = PurePosixPath(part)

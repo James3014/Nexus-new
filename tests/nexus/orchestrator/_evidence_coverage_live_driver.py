@@ -264,17 +264,22 @@ def _run(root: Path, scenario: dict[str, Any]) -> dict[str, Any]:
         ambient_core_port=LazyCanonicalCoreControlPort(state_dir),
     )
     registry = MagicMock()
+    # #2346: a worker preflight that refuses (as on #2218 run2) ends the task
+    # in FINAL_BLOCK before any provider runs.
+    preflight_ready = scenario.get("worker_preflight_ready", True)
     registry.preflight.return_value = WorkerPreflight(
         provider=request["provider"],
         executable="witness-provider",
         executable_available=True,
-        authorized=True,
+        authorized=preflight_ready,
         implementation_status="ready",
-        ready=True,
-        reason=None,
+        ready=preflight_ready,
+        reason=None if preflight_ready else "agy: NEXUS_AGY_RUNTIME_AUTHORIZED=1 is required",
     )
+    invocations: list[str] = []
 
     def invoke(provider, contract, lease, **kwargs):
+        invocations.append(provider)
         target = Path(lease.target_worktree)
         (target / "README.md").write_text("# Repo\n\nbounded change\n", encoding="utf-8")
         return WorkerExecutionReceipt(
@@ -340,6 +345,19 @@ def _run(root: Path, scenario: dict[str, Any]) -> dict[str, Any]:
             db_path=live_core_db_path(state_dir)
         ).readback_session(session_id)
         result["db_verification_row"] = readback["verification_row"]
+    # #2346: the terminal Core record of a task that produced no Candidate.
+    result["worker_invocations"] = invocations
+    result["verified_receipt_present"] = state.get("verified_receipt") is not None
+    result["attempt_id"] = state.get("attempt_id")
+    result["terminal_core_record"] = state.get("terminal_core_record")
+    result["reloaded_terminal_core_record"] = (reloaded._read_state(task_id) or {}).get(
+        "terminal_core_record"
+    )
+    result["db_terminal_row"] = None
+    if result["core_db_exists"] and state.get("attempt_id"):
+        result["db_terminal_row"] = transport.CanonicalNexusCoreTransportPort(
+            db_path=live_core_db_path(state_dir)
+        ).readback_terminal_record(task_id, str(state["attempt_id"]))
     return result
 
 

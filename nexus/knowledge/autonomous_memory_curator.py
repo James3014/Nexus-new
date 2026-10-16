@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from nexus.contracts.model_output_json import ModelOutputParseError, parse_model_json
 from nexus.services.local_heal.local_model_provider import (
     LocalModelProviderRequest,
     OllamaLocalModelProvider,
@@ -81,10 +82,10 @@ def _parse_automem_response(raw_text: str) -> list[str]:
     end = text.rfind("}")
     if start != -1 and end != -1:
         try:
-            parsed = json.loads(text[start:end+1])
+            parsed = parse_model_json(text[start : end + 1], expect="object", mode="strict")
             recs = parsed.get("recommendations", [])
             if isinstance(recs, list):
                 return [str(r).strip() for r in recs if r]
-        except (json.JSONDecodeError, TypeError):
+        except (ModelOutputParseError, TypeError):
             pass
     return []

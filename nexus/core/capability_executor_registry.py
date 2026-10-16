@@ -219,6 +219,26 @@ def _honest_structural_telemetries(
     return tel
 
 
+# #1869: registry receipts whose gate_passed is a constant/default True. ``_make_receipt`` callers
+# must pass gate_passed explicitly (tests/core/test_registry_gate_passed_inventory.py scans this).
+# NON-CLAIM: "the physical call ran without a structured failure" (execution health). It feeds
+# router terminal_outcome / learning telemetry only and is NOT claim evidence; claim gates
+# (claim_gate/artifact_gate) are sealed by router (is_claimable) and artifact_gate below is bound to
+# the verifier-artifact/source-hash helper.
+NON_CLAIM_EXECUTION_HEALTH_RECEIPTS: frozenset[str] = frozenset(
+    {
+        "codeintel",
+        "lancedb",
+        "belief",
+        "memory",
+        "semantic_searcher",
+        "semantic_failure_sensor",
+        "prompt_compression",
+    }
+)
+BOUND_CLAIM_GATE_RECEIPTS: frozenset[str] = frozenset({"artifact_gate"})
+
+
 def _make_receipt(
     cap_name: str,
     plan: CapabilityExecutionPlan,
@@ -675,6 +695,7 @@ def _exec_codeintel(plan: CapabilityExecutionPlan, task_desc: str) -> Capability
         return _make_receipt(
             "codeintel",
             plan,
+            gate_passed=True,  # non-claim execution health (#1869)
             wall_time_ms=elapsed,
             outcome=_structured_outcome(
                 action="lookup_implementation",
@@ -726,6 +747,7 @@ def _exec_lancedb(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRe
         return _make_receipt(
             "lancedb",
             plan,
+            gate_passed=True,  # non-claim execution health (#1869)
             wall_time_ms=elapsed,
             outcome=_structured_outcome(
                 action="query",
@@ -1046,6 +1068,7 @@ def _exec_belief(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRec
         return _make_receipt(
             "belief",
             plan,
+            gate_passed=True,  # non-claim execution health (#1869)
             wall_time_ms=elapsed,
             outcome=_structured_outcome(
                 action="assess_confidence",
@@ -1658,11 +1681,20 @@ def _exec_artifact_gate(plan: CapabilityExecutionPlan, task_desc: str) -> Capabi
         else:
             result = {"executor": type(inst).__name__}
         elapsed = int((time.monotonic() - start) * 1000)
+        # #1869: artifact_gate is a claim gate. A bare "execute() returned" is not a pass: the
+        # executor result must carry a validated verifier artifact/status and a typed source hash.
+        from nexus.core.claim_gate_binding import claim_gate_binding_reasons
+
+        binding_reasons = claim_gate_binding_reasons(dict(result) if isinstance(result, Mapping) else {})
+        outcome: dict[str, Any] = {"action": "execute", "result": str(result)[:200]}
+        if binding_reasons:
+            outcome["binding_blockers"] = binding_reasons
         return _make_receipt(
             "artifact_gate",
             plan,
+            gate_passed=not binding_reasons,
             wall_time_ms=elapsed,
-            outcome={"action": "execute", "result": str(result)[:200]},
+            outcome=outcome,
         )
     except Exception as exc:
         elapsed = int((time.monotonic() - start) * 1000)
@@ -2121,6 +2153,7 @@ def _exec_memory(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRec
         return _make_receipt(
             "memory",
             plan,
+            gate_passed=True,  # non-claim execution health (#1869)
             wall_time_ms=elapsed,
             outcome=_structured_outcome(
                 action="search",
@@ -2259,6 +2292,7 @@ def _exec_semantic_searcher(plan: CapabilityExecutionPlan, task_desc: str) -> Ca
         return _make_receipt(
             "semantic_searcher",
             plan,
+            gate_passed=True,  # non-claim execution health (#1869)
             wall_time_ms=elapsed,
             outcome=_structured_outcome(
                 action="search",
@@ -2969,7 +3003,7 @@ def _exec_semantic_failure_sensor(
             "semantic_failure_sensor",
             plan,
             wall_time_ms=elapsed,
-            gate_passed=True,
+            gate_passed=True,  # non-claim execution health (#1869)
             outcome=_structured_outcome(
                 action="find_similar_bugs",
                 semantic_status="SUCCEEDED",
@@ -4124,7 +4158,7 @@ def _exec_prompt_compression(
             "prompt_compression",
             plan,
             wall_time_ms=elapsed,
-            gate_passed=True,
+            gate_passed=True,  # non-claim execution health (#1869)
             outcome=_structured_outcome(
                 action=action,
                 semantic_status="SUCCEEDED",
