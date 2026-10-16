@@ -169,7 +169,7 @@ def _run_tests(case_dir: Path, timeout_sec: int) -> bool:
 def _bench_home() -> Path:
     """Host home for bench CLIs: ``NEXUS_BENCH_HOME`` override, else the real home (#2202)."""
     override = os.getenv("NEXUS_BENCH_HOME", "").strip()
-    return Path(override) if override else Path.home()
+    return Path(override).expanduser() if override else Path.home()
 
 
 def _apply_bench_env(env: dict[str, str]) -> None:
@@ -184,13 +184,13 @@ def _apply_bench_env(env: dict[str, str]) -> None:
 def _stage1_sweep_failed(payload: Any) -> bool:
     """True when a Nexus payload reports an agy descendant-sweep failure anywhere in it."""
     if isinstance(payload, dict):
-        if payload.get("agy_sweep_failed") is True or payload.get("_stage1_sweep_failed") is True:
+        if any("sweep_failed" in str(key) and bool(value) for key, value in payload.items()):
             return True
         return any(_stage1_sweep_failed(value) for value in payload.values())
     if isinstance(payload, (list, tuple)):
         return any(_stage1_sweep_failed(value) for value in payload)
     if isinstance(payload, str):
-        return "descendant_sweep_failed" in payload
+        return "sweep_failed" in payload
     return False
 
 
