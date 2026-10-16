@@ -218,10 +218,10 @@ def default_identity_observer(config_dir: Path) -> str | None:
         marker in method.lower() for marker in _AUTH_METHOD_MARKERS
     ):
         return None
-    account = _first_str(payload, ("accountUuid", "account_uuid", "userId", "email"))
+    account = _first_str(payload, ("email", "accountUuid", "account_uuid", "userId"))
     if not account:
         return None
-    org = _first_str(payload, ("organizationUuid", "organizationId", "orgId", "orgName"))
+    org = _first_str(payload, ("orgId", "organizationUuid", "organizationId", "orgName"))
     return identity_fingerprint(account, org)
 
 

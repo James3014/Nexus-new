@@ -780,3 +780,30 @@ def test_mark_launch_pending_failure_means_not_launched(tmp_path: Path) -> None:
     adapter.release(binding)
     with pytest.raises(ExternalWorkerRuntimeError, match="NOT_OWNED"):
         adapter.mark_launch_pending(binding)
+
+
+def test_default_observer_with_real_cli_key_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Key set read back from Claude Code 2.1.301 `auth status --json` (fake values)."""
+
+    from nexus.services.claude_account_pool import default_identity_observer
+
+    cfg = tmp_path / "cfg"
+    cfg.mkdir(mode=0o700)
+    payload = {
+        "analyticsDisabled": False,
+        "apiProvider": "firstParty",
+        "authMethod": "claude.ai",
+        "configDirectory": str(cfg),
+        "email": "member@example.invalid",
+        "loggedIn": True,
+        "orgId": "org-123",
+        "orgName": "Example Org",
+        "projectsDirectory": str(cfg / "projects"),
+        "subscriptionType": "team",
+    }
+    monkeypatch.setenv("NEXUS_CLAUDE_BIN", str(_observer_cli(tmp_path, payload)))
+    assert default_identity_observer(cfg) == identity_fingerprint(
+        "member@example.invalid", "org-123"
+    )
