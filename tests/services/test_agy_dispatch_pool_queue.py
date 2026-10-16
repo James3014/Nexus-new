@@ -993,3 +993,67 @@ def test_recovery_estimate_ignores_an_in_memory_pool(tmp_path: Path) -> None:
         quota_snapshot={},
     )
     assert estimate["earliest_reset_ts"] is None
+
+
+def test_restricted_waiters_with_the_same_exclusions_are_ordered(tmp_path: Path) -> None:
+    queue_dir = tmp_path / "queue"
+    excluded = {"0123456789ab"}
+    older = dispatch._PoolQueueTicket(
+        queue_dir, model_family="gemini", restricted=True, exclude_hashes=excluded
+    )
+    other = dispatch._PoolQueueTicket(
+        queue_dir, model_family="gemini", restricted=True, exclude_hashes={"ba9876543210"}
+    )
+    newer = dispatch._PoolQueueTicket(
+        queue_dir, model_family="gemini", restricted=True, exclude_hashes=excluded
+    )
+    assert older.is_head() and other.is_head()
+    assert not newer.is_head()
+    older.close()
+    assert newer.is_head()
+    for ticket in (other, newer):
+        ticket.close()
+
+
+def test_queue_poll_stays_below_ticket_staleness(monkeypatch) -> None:
+    monkeypatch.setenv("NEXUS_AGY_POOL_QUEUE_POLL_SECONDS", "600")
+    assert dispatch._pool_queue_poll_seconds() == dispatch.POOL_QUEUE_MAX_POLL_SECONDS
+    assert dispatch.POOL_QUEUE_MAX_POLL_SECONDS < dispatch.POOL_QUEUE_TICKET_STALE_SECONDS
+    assert dispatch.POOL_QUEUE_MAX_SLEEP_SECONDS < dispatch.POOL_QUEUE_TICKET_STALE_SECONDS
+
+
+def test_busy_wait_rereads_quota_availability(tmp_path: Path, monkeypatch) -> None:
+    clock = {"now": 0.0}
+
+    def fake_sleep(seconds: float) -> None:
+        clock["now"] += seconds
+
+    monkeypatch.setattr(dispatch, "_sleep", fake_sleep)
+    monkeypatch.setattr(dispatch, "_queue_monotonic", lambda: clock["now"])
+    monkeypatch.setenv("NEXUS_AGY_POOL_QUEUE_POLL_SECONDS", "10")
+    refreshes: list[float] = []
+
+    class BusyUntilRefreshed:
+        leases_dir = tmp_path / "leases"
+
+        def acquire_claim(self, **_kwargs):
+            if not refreshes:  # the quota-blocked account is hidden until republished
+                raise dispatch.AgyAccountPoolBusyError("the other account is leased")
+            return _FakeClaim("reset")
+
+    def refresh() -> dict:
+        refreshes.append(clock["now"])
+        return {}
+
+    claim, waited = dispatch._acquire_claim_queued(
+        BusyUntilRefreshed(),
+        consumer_id="c",
+        exclude_hashes=set(),
+        wait_budget=300.0,
+        model_family="gemini",
+        quota_snapshot={},
+        refresh_availability=refresh,
+    )
+    assert claim.internal_id == "reset"
+    assert refreshes == [dispatch.POOL_QUEUE_REFRESH_SECONDS]
+    assert waited == dispatch.POOL_QUEUE_REFRESH_SECONDS

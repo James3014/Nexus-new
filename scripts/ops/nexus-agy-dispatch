@@ -3317,14 +3317,21 @@ def _run_foreground_hcom_operation(
 # carries the earliest recovery time.
 DEFAULT_POOL_QUEUE_POLL_SECONDS = 2.0
 POOL_QUEUE_MAX_SLEEP_SECONDS = 30.0
+POOL_QUEUE_MAX_POLL_SECONDS = 10.0
+POOL_QUEUE_REFRESH_SECONDS = 30.0
 _sleep = time.sleep
 _queue_monotonic = time.monotonic
 
 
 def _pool_queue_poll_seconds() -> float:
-    return _bounded_positive_seconds(
-        "NEXUS_AGY_POOL_QUEUE_POLL_SECONDS",
-        DEFAULT_POOL_QUEUE_POLL_SECONDS,
+    # Capped well below POOL_QUEUE_TICKET_STALE_SECONDS so a sleeping waiter
+    # always touches its ticket before others may prune it.
+    return min(
+        _bounded_positive_seconds(
+            "NEXUS_AGY_POOL_QUEUE_POLL_SECONDS",
+            DEFAULT_POOL_QUEUE_POLL_SECONDS,
+        ),
+        POOL_QUEUE_MAX_POLL_SECONDS,
     )
 
 
@@ -3515,14 +3522,27 @@ class _PoolQueueTicket:
     process exists and keeps touching the file; anything else is pruned.
     """
 
-    def __init__(self, queue_dir: Path, *, model_family: str | None, restricted: bool):
+    def __init__(
+        self,
+        queue_dir: Path,
+        *,
+        model_family: str | None,
+        restricted: bool,
+        exclude_hashes: set[str] | frozenset[str] = frozenset(),
+    ):
         self.family = model_family or "any"
         self.queue_dir = queue_dir
         queue_dir.mkdir(parents=True, exist_ok=True)
-        kind = "r" if restricted else "u"
+        if restricted:
+            signature = hashlib.sha256(
+                ",".join(sorted(exclude_hashes)).encode("utf-8")
+            ).hexdigest()[:12]
+            self.kind = f"r-{signature}"
+        else:
+            self.kind = "u"
         self.path = queue_dir / (
             f"{time.time_ns():020d}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
-            f".{self.family}.{kind}.ticket"
+            f".{self.family}.{self.kind}.ticket"
         )
         self.path.write_text(f"{os.getpid()}\n", encoding="utf-8")
 
@@ -3548,7 +3568,10 @@ class _PoolQueueTicket:
         now = time.time()
         live: list[Path] = []
         try:
-            paths = sorted(queue_dir.glob(f"*.{family}.[ur].ticket"))
+            paths = sorted([
+                *queue_dir.glob(f"*.{family}.u.ticket"),
+                *queue_dir.glob(f"*.{family}.r-*.ticket"),
+            ])
         except OSError:
             return live
         for path in paths:
@@ -3562,11 +3585,16 @@ class _PoolQueueTicket:
         return live
 
     def is_head(self) -> bool:
-        """True when no older live unrestricted ticket of this family is waiting."""
+        """True when no older live ticket that may take this waiter's accounts waits.
+
+        Unrestricted waiters are ordered among themselves; a restricted waiter
+        also waits behind older restricted waiters with the same exclusions.
+        """
+        blocking = {".u.ticket", f".{self.kind}.ticket"}
         for path in self.live_tickets(self.queue_dir, self.family):
             if path == self.path:
                 return True
-            if path.name.endswith(".u.ticket"):
+            if any(path.name.endswith(suffix) for suffix in blocking):
                 return False
         return True
 
@@ -3625,6 +3653,7 @@ def _acquire_claim_queued(
                 queue_dir,
                 model_family=model_family,
                 restricted=bool(exclude_hashes) if restricted is None else restricted,
+                exclude_hashes=exclude_hashes,
             )
         except OSError:
             ticket = None
@@ -3642,6 +3671,7 @@ def _acquire_claim_queued(
     state = "POOL_BUSY"
     recovery: dict[str, Any] | None = None
     refresh_before_pass = False
+    last_refresh = started
 
     def give_up() -> _PoolClaimFailure:
         return _PoolClaimFailure(
@@ -3668,8 +3698,15 @@ def _acquire_claim_queued(
                     )
                 _sleep(max(0.01, min(poll, remaining)))
                 continue
-            if refresh_before_pass and refresh_availability is not None:
+            if refresh_availability is not None and (
+                refresh_before_pass
+                or (passes > 0 and _queue_monotonic() - last_refresh >= POOL_QUEUE_REFRESH_SECONDS)
+            ):
+                # Quota-blocked accounts are hidden through the published
+                # availability; re-read it so one that reset is claimable,
+                # also while other accounts keep the pool busy.
                 refreshed = refresh_availability()
+                last_refresh = _queue_monotonic()
                 if isinstance(refreshed, dict):
                     quota_snapshot = refreshed
             refresh_before_pass = False
