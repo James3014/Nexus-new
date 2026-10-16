@@ -307,6 +307,12 @@ _CLINE_APPROVAL_REQUIRED = "requires approval in a tty session"
 # session ...", "Tool was not executed", "User rejected the tool call", the TTY
 # text above) ends with this fixed suffix (#2332).
 _CLINE_SKIP_SUFFIX = "-- not a tool or system failure"
+# Reason prefixes, so a reason whose suffix was cut off still counts (#2335).
+_CLINE_SKIP_REASONS = (
+    "tool approval requires an interactive session",
+    "tool was not executed",
+    "user rejected the tool call",
+)
 _CLINE_DENIED_TYPES = frozenset({"execution-denied"})
 # Only a finish reason observed from cline 3.0.69 as a clean end counts as
 # delivery; any other, unknown or missing value is non-delivery.
@@ -328,10 +334,16 @@ def _cline_tool_error_denied(event: dict[str, Any]) -> bool:
     if isinstance(output, dict):
         candidates.append(output.get("error"))
     # A structured error object carries its text in ``message`` (#2335 review).
-    candidates += [item.get("message") for item in list(candidates) if isinstance(item, dict)]
+    for item in list(candidates):
+        if isinstance(item, dict):
+            candidates += [item.get("error"), item.get("message")]
     return any(
         isinstance(item, str)
-        and (_CLINE_APPROVAL_REQUIRED in item.lower() or _CLINE_SKIP_SUFFIX in item.lower())
+        and (
+            _CLINE_APPROVAL_REQUIRED in item.lower()
+            or _CLINE_SKIP_SUFFIX in item.lower()
+            or item.strip().lower().startswith(_CLINE_SKIP_REASONS)
+        )
         for item in candidates
     )
 
