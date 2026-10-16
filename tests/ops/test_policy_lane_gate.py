@@ -152,7 +152,9 @@ class TestHardLane:
         tampered = {
             **original,
             "policies": [
-                {**policy, "test_entrypoints": []} if policy["policy_id"] == "P-CLAIM-02" else policy
+                {**policy, "test_entrypoints": []}
+                if policy["policy_id"] == "P-CLAIM-02"
+                else policy
                 for policy in original["policies"]
             ],
         }
