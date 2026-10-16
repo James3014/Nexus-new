@@ -81,7 +81,7 @@ _SHALLOW_ACTIONS = frozenset({
 # selecting a worker by provider availability or silently falling back on admission.
 _ONLINE_WORKER_BY_ROLE: dict[str, str] = {
     "fast_bounded_implementation": "agy_flash_38",
-    "independent_review": "grok_review",
+    "independent_review": "agy_flash_38_high",
     "main_engineering": "codex_luna",
 }
 _ONLINE_WORKER_CONTROLS: dict[str, list[str]] = {
@@ -93,7 +93,7 @@ _ONLINE_WORKER_CONTROLS: dict[str, list[str]] = {
         "verifier",
         "independent_verification",
     ],
-    "grok_review": [
+    "agy_flash_38_high": [
         "bounded_scope",
         "schema_validation",
         "independent_verification",
