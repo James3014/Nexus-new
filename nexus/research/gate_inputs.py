@@ -16,6 +16,7 @@ verdicts from the evidence block (``online_nexus_context``).
 from __future__ import annotations
 
 import ast
+import functools
 import hashlib
 import os
 import re
@@ -116,6 +117,7 @@ def _repo_regular_file(root: Path, relative: str) -> bool:
 RECEIPT_ONLY_ROUTE_KEY = "receipt_only_capabilities"
 
 
+@functools.lru_cache(maxsize=1)
 def runtime_supports_receipt_only() -> bool:
     """True when the installed nexus-runtime honours the strict-lane receipt-only declaration.
 
@@ -158,7 +160,10 @@ def _receipt_only_projection_hides_declared_entry(bundle: Any) -> bool:
     """Run the runtime's projection on a two-entry bundle; True only when the entry the
     route declares receipt-only is sealed ``receipt_only`` and absent from the Online
     model-context package while the undeclared entry is present (no network, no
-    subprocess, in-memory only).
+    subprocess, in-memory only).  Both entries carry a ``consumer_payload`` with a distinct
+    sentinel: the declared entry's evidence id AND payload sentinel must be absent, the
+    undeclared entry's present (positive control).  Pure and cached by the caller
+    (``lru_cache``); tests that patch the runtime call ``.cache_clear()``.
 
     The declaration is resolved through ``unified_runtime.resolve_receipt_only_capabilities``,
     the name the runtime itself calls when it seals a request's bundle.
@@ -176,12 +181,17 @@ def _receipt_only_projection_hides_declared_entry(bundle: Any) -> bool:
         return False
     names = [_PROBE_HIDDEN, _PROBE_VISIBLE]
     ref = "ev_receipt_only_probe_{}".format
+    sentinel = {
+        _PROBE_HIDDEN: "receipt-only-probe-hidden-payload-7f3c",
+        _PROBE_VISIBLE: "receipt-only-probe-visible-payload-2b9e",
+    }
     results = {
         name: {
             "invoked": True,
             "status": "SUCCEEDED",
             "evidence_refs": [ref(name)],
             "physical_callable": f"receipt_only_probe.{name}",
+            "consumer_payload": {"result": sentinel[name], "summary": sentinel[name]},
         }
         for name in names
     }
@@ -209,8 +219,14 @@ def _receipt_only_projection_hides_declared_entry(bundle: Any) -> bool:
         "capability_evidence_bundle": sealed,
     })
     text = json.dumps(package, sort_keys=True, default=str)
-    # Positive control: the projection did render evidence, just not the declared entry's.
-    return ref(_PROBE_VISIBLE) in text and ref(_PROBE_HIDDEN) not in text
+    # Positive control: the projection did render evidence and payload, just not the
+    # declared entry's.
+    return (
+        ref(_PROBE_VISIBLE) in text
+        and sentinel[_PROBE_VISIBLE] in text
+        and ref(_PROBE_HIDDEN) not in text
+        and sentinel[_PROBE_HIDDEN] not in text
+    )
 
 
 def gate_inputs_env_error() -> str:
