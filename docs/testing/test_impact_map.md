@@ -353,7 +353,7 @@
 | tests/services/test_lancedb_roots_guard.py | tests/services/test_lancedb_roots_guard.py | active | medium | test_contract |
 | nexus_swarm | tests/ops/test_retired_go_swarm_removed.py | active | low | governed_deletion_retired_path |
 | nexus-swarm-v22-prod | tests/ops/test_retired_go_swarm_removed.py | active | low | governed_deletion_retired_path |
-| tests/ops/test_swarm_deploy_path.py | tests/ops/test_retired_go_swarm_removed.py | active | low | governed_deletion_retired_path |
+| tests/ops/test_swarm_deploy_path.py | tests/ops/test_swarm_deploy_path.py | active | low | test_contract |
 | scripts/test_local_swarm.sh | tests/ops/test_retired_go_swarm_removed.py | active | low | governed_deletion_retired_path |
 | scripts/ops/wisdom_daemon.py | tests/ops/test_retired_go_swarm_removed.py | active | low | governed_deletion_retired_path |
 | scripts/ops/v23_1_guard_backtest.py | tests/ops/test_retired_go_swarm_removed.py | active | low | governed_deletion_retired_path |
