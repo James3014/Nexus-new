@@ -2273,6 +2273,10 @@ def test_seatbelt_profile_refuses_overlap_in_both_directions_and_read_only_roots
         admission.build_seatbelt_profile(
             run_root=run_root, writable_target=dotfiles, source_home=source_home
         )
+    with pytest.raises(admission.CredentialPathOverlapError):
+        admission.build_seatbelt_profile(
+            run_root=run_root, writable_target=None, source_home=source_home, target_root=dotfiles
+        )
     # a read-only role has no writable target, but its target is checked too
     inside = source_home / ".codex" / "worktrees" / "repo"
     inside.mkdir(parents=True)
@@ -2319,6 +2323,28 @@ def test_bench_runner_refuses_a_target_inside_a_credential_path(tmp_path, monkey
     row = runner._run_gemini_patch(case_dir, task, mode="with_nexus", timeout_sec=5, model="agy")
     assert row["error"] == "agy_target_inside_credential_path"
     assert row["model_calls"] == 0
+
+
+def test_bench_runner_reports_an_unrepresentable_profile_as_a_typed_error(tmp_path, monkeypatch):
+    from scripts.bench import real_world_task_runner as runner
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(admission, "seatbelt_available", lambda: True)
+    monkeypatch.setattr(admission, "materialize_run_home", lambda *a, **k: (None, ""))
+
+    def unrepresentable(**kwargs):
+        raise ValueError("path not representable in a Seatbelt profile")
+
+    monkeypatch.setattr(admission, "build_seatbelt_profile", unrepresentable)
+    monkeypatch.setattr(runner, "_resolve_gemini_bin", lambda: "/opt/homebrew/bin/agy")
+    monkeypatch.setattr(runner, "_build_gemini_prompt", lambda *a, **k: "prompt")
+    case_dir = tmp_path / "case"
+    case_dir.mkdir()
+    task = SimpleNamespace(
+        task_id="t", prompt="p", visible_tests=[], files=[], root_cause="", target_file="x.py"
+    )
+    row = runner._run_gemini_patch(case_dir, task, mode="with_nexus", timeout_sec=5, model="agy")
+    assert row["error"] == "agy_seatbelt_profile_unrepresentable"
 
 
 def test_agy_adapter_refuses_a_read_only_target_inside_a_credential_path(
