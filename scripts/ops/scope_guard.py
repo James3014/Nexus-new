@@ -18,8 +18,10 @@ def main() -> int:
         "scripts/ops/",
         "scripts/engine/",
         "scripts/bench/",
+        "scripts/archive/",
         "scripts/Templates/",
         "tests/",
+        "tests/archive/",
         "docs/",
         "perf_regression_pack_v22.5/",
     }
