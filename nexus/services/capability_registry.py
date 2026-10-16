@@ -10,9 +10,14 @@ Contract:
 
 from __future__ import annotations
 
+import logging
+import re
+import threading
 from typing import Any, Callable, Mapping
 
 from nexus.engine.capability_planner import default_capability_nodes
+
+_logger = logging.getLogger(__name__)
 
 # Whitelist skip reasons (receipt contract)
 SKIP_NOT_IMPLEMENTED = "not_implemented_mainchain_v1"
@@ -1423,13 +1428,127 @@ def _node_meta(name: str) -> dict[str, Any]:
     }
 
 
-def _has_physical_executor(name: str) -> bool:
+# Executor resolution is observable (PR-5e): a resolver that raises is recorded as an
+# error with a structured reason, never read as "no executor".  Per-process registry,
+# keyed by capability name; the latest error for a name replaces the previous one.
+EXECUTOR_RESOLUTION_RESOLVED = "resolved"
+EXECUTOR_RESOLUTION_MISSING = "missing"
+EXECUTOR_RESOLUTION_ERROR = "error"
+HOST_EXECUTOR_RESOLVER_ORIGIN = "nexus.core.capability_executor_registry.get_executor"
+_EXECUTOR_ERROR_MESSAGE_MAX = 200
+_UNSAFE_LOG_CHARS = re.compile(r"[^\x20-\x7e]")
+_executor_resolution_errors: dict[str, dict[str, str]] = {}
+_executor_resolution_warned: set[tuple[str, str]] = set()
+_executor_resolution_lock = threading.Lock()
+
+
+def _sanitize_resolution_text(value: Any, limit: int = _EXECUTOR_ERROR_MESSAGE_MAX) -> str:
+    """Printable ASCII only (no newlines, escapes or control chars), truncated."""
+    text = _UNSAFE_LOG_CHARS.sub("?", str(value))
+    if len(text) > limit:
+        text = text[: max(0, limit - 3)] + "..."
+    return text
+
+
+def record_executor_resolution_error(
+    name: str,
+    exc: BaseException,
+    *,
+    origin: str,
+    registry_key: str | None = None,
+) -> dict[str, str]:
+    """Record that resolving ``name`` raised; WARNING once per (name, exception type)."""
+    capability = _sanitize_resolution_text(str(name or "").strip(), 120)
+    key = _sanitize_resolution_text(
+        registry_key if registry_key is not None else _resolve_executor_registry_key(capability),
+        120,
+    )
+    reason = {
+        "capability": capability,
+        "registry_key": key,
+        "error_type": _sanitize_resolution_text(type(exc).__qualname__, 120),
+        "error_message": _sanitize_resolution_text(exc),
+        "resolver_origin": _sanitize_resolution_text(origin, 200),
+    }
+    warn_key = (capability, reason["error_type"])
+    with _executor_resolution_lock:
+        _executor_resolution_errors[capability] = reason
+        first = warn_key not in _executor_resolution_warned
+        _executor_resolution_warned.add(warn_key)
+    if first:
+        _logger.warning(
+            "executor resolution raised for capability=%s registry_key=%s origin=%s: %s: %s",
+            reason["capability"],
+            reason["registry_key"],
+            reason["resolver_origin"],
+            reason["error_type"],
+            reason["error_message"],
+        )
+    return dict(reason)
+
+
+def last_executor_resolution_errors() -> dict[str, dict[str, str]]:
+    """Copy of the per-process executor resolution errors, keyed by capability name."""
+    with _executor_resolution_lock:
+        return {name: dict(reason) for name, reason in _executor_resolution_errors.items()}
+
+
+def executor_resolution_error(name: str) -> dict[str, str] | None:
+    """The last recorded resolution error for ``name`` in this process, or None."""
+    with _executor_resolution_lock:
+        reason = _executor_resolution_errors.get(str(name or "").strip())
+        return dict(reason) if reason is not None else None
+
+
+def clear_executor_resolution_errors() -> None:
+    """Forget recorded errors and warned keys (tests)."""
+    with _executor_resolution_lock:
+        _executor_resolution_errors.clear()
+        _executor_resolution_warned.clear()
+
+
+def _clear_resolution_error(name: str) -> None:
+    with _executor_resolution_lock:
+        _executor_resolution_errors.pop(name, None)
+
+
+def executor_resolution_status(name: str) -> dict[str, Any]:
+    """Resolve ``name`` through the host executor registry: resolved, missing or error.
+
+    ``error`` carries the structured reason (capability, exception type, truncated
+    message, resolver origin); it is also recorded in ``last_executor_resolution_errors``.
+    """
+    capability = str(name or "").strip()
+    registry_key = _resolve_executor_registry_key(capability)
+    base: dict[str, Any] = {
+        "capability": capability,
+        "registry_key": registry_key,
+        "resolver_origin": HOST_EXECUTOR_RESOLVER_ORIGIN,
+    }
     try:
         from nexus.core.capability_executor_registry import get_executor
 
-        return get_executor(_resolve_executor_registry_key(name)) is not None
-    except Exception:
-        return False
+        executor = get_executor(registry_key)
+    except Exception as exc:
+        reason = record_executor_resolution_error(
+            capability, exc, origin=HOST_EXECUTOR_RESOLVER_ORIGIN, registry_key=registry_key
+        )
+        return {**base, "status": EXECUTOR_RESOLUTION_ERROR, "error": reason}
+    _clear_resolution_error(capability)
+    if executor is None:
+        return {**base, "status": EXECUTOR_RESOLUTION_MISSING}
+    return {
+        **base,
+        "status": EXECUTOR_RESOLUTION_RESOLVED,
+        "executor": _sanitize_resolution_text(
+            getattr(executor, "__qualname__", None) or type(executor).__qualname__, 200
+        ),
+    }
+
+
+def _has_physical_executor(name: str) -> bool:
+    """Boolean contract kept for callers; a raising resolver is recorded, not hidden."""
+    return executor_resolution_status(name)["status"] == EXECUTOR_RESOLUTION_RESOLVED
 
 
 def classify_gap(name: str) -> str:
@@ -1486,7 +1605,8 @@ def build_wiring_matrix() -> dict[str, Any]:
                 EXECUTION_CLASS_MISSING_ENGINE,
             }
         )
-        has_exec = _has_physical_executor(name)
+        resolution = executor_resolution_status(name)
+        has_exec = resolution["status"] == EXECUTOR_RESOLUTION_RESOLVED
         reason_code = str(
             contract.get("reason_code")
             or PROBE_ONLY_REASON_CODES.get(name)
@@ -1575,6 +1695,8 @@ def build_wiring_matrix() -> dict[str, Any]:
                 "physical_callable_hint": physical_hint,
             }
         )
+        if resolution["status"] == EXECUTOR_RESOLUTION_ERROR:
+            rows[-1]["executor_resolution_error"] = dict(resolution["error"])
 
     counts: dict[str, int] = {g: 0 for g in sorted(GAP_CLASSES)}
     for row in rows:
@@ -1848,10 +1970,15 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
     try:
         from nexus.core.belief_contracts import CapabilityExecutionPlan
         from nexus.core.capability_executor_registry import get_executor
-    except Exception:
-        return None
 
-    executor = get_executor(registry_key)
+        executor = get_executor(registry_key)
+    except Exception as exc:
+        # Recorded so the stage record says "resolver raised X", not "no executor".
+        record_executor_resolution_error(
+            name, exc, origin=HOST_EXECUTOR_RESOLVER_ORIGIN, registry_key=registry_key
+        )
+        return None
+    _clear_resolution_error(name)
     if executor is None:
         return None
 
@@ -2814,6 +2941,28 @@ def planner_signal_trigger(name: str, context: Mapping[str, Any]) -> str:
     return ""
 
 
+def _with_resolution_error(name: str, receipt: dict[str, Any]) -> dict[str, Any]:
+    """Add ``executor_resolution_error`` when resolving ``name`` raised in this process."""
+    reason = executor_resolution_error(name)
+    if reason is not None:
+        receipt["executor_resolution_error"] = reason
+        response = receipt.get("response")
+        if isinstance(response, dict):
+            response["executor_resolution_error"] = dict(reason)
+    return receipt
+
+
+def _surface_resolution_error(name: str, invoker: CapabilityInvoker) -> CapabilityInvoker:
+    """Wrap a no-executor fallback so its receipt carries a recorded resolver error."""
+    if executor_resolution_error(name) is None:
+        return invoker
+
+    def invoke(context: Mapping[str, Any]) -> dict[str, Any]:
+        return _with_resolution_error(name, dict(invoker(context)))
+
+    return invoke
+
+
 def build_escalate_gated_invoker(
     capability_name: str,
     *,
@@ -2858,7 +3007,7 @@ def build_escalate_gated_invoker(
                     return dict(skip_invoker(context))
         if real_invoker is None:
             task_id = str(context.get("task_id") or "")
-            return {
+            return _with_resolution_error(name, {
                 "task_id": task_id,
                 "invoked": False,
                 "skipped": False,
@@ -2875,7 +3024,7 @@ def build_escalate_gated_invoker(
                     "status": BLOCKED_EXECUTOR_UNAVAILABLE,
                     "capability": name,
                 },
-            }
+            })
         receipt = dict(real_invoker(context))
         if planner_triggered:
             receipt["trigger_source"] = PLANNER_MAINCHAIN_GATE_TRIGGER_SOURCE
@@ -2999,8 +3148,8 @@ def build_default_mainchain_invokers(
             if real is not None:
                 invokers[name] = real
             else:
-                invokers[name] = build_explicit_skip_invoker(
-                    name, skip_reason=SKIP_ONLINE_ARMOR
+                invokers[name] = _surface_resolution_error(
+                    name, build_explicit_skip_invoker(name, skip_reason=SKIP_ONLINE_ARMOR)
                 )
             continue
         # Prefer real physical executor from registry (P4) over stub/skip.
@@ -3009,13 +3158,13 @@ def build_default_mainchain_invokers(
             continue
         if name in WIRED_STUB:
             # No physical executor: explicit skip (not structural stub success).
-            invokers[name] = build_explicit_skip_invoker(
-                name, skip_reason=SKIP_NOT_IMPLEMENTED
+            invokers[name] = _surface_resolution_error(
+                name, build_explicit_skip_invoker(name, skip_reason=SKIP_NOT_IMPLEMENTED)
             )
             continue
         # Remaining: explicit not-implemented skip (visible gap, not silent)
-        invokers[name] = build_explicit_skip_invoker(
-            name, skip_reason=SKIP_NOT_IMPLEMENTED
+        invokers[name] = _surface_resolution_error(
+            name, build_explicit_skip_invoker(name, skip_reason=SKIP_NOT_IMPLEMENTED)
         )
 
     return invokers

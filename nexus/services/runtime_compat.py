@@ -17,7 +17,10 @@ from nexus_runtime import build_runtime_exports
 
 from nexus.contracts.hybrid_route import hybrid_route_decision_from_payload
 from nexus.core.repo_root import REPO_ROOT
-from nexus.services.capability_registry import build_real_executor_invoker
+from nexus.services.capability_registry import (
+    build_real_executor_invoker,
+    record_executor_resolution_error,
+)
 from nexus.services.local_heal.capability_adapter import advisory_route_from_local_response
 from nexus.services.local_heal.memory_retrieval_adapter import (
     FindingsMemoryLessonStore,
@@ -78,13 +81,25 @@ def build_host_runtime_exports():
 
 
 _EXECUTOR_BINDING_MODULE = "nexus_runtime.support.services.executor_binding"
+RUNTIME_SEAM_RESOLVER_ORIGIN = (
+    "nexus.services.runtime_compat._resolve_physical_executor"
+    " via nexus_runtime.support.services.executor_binding"
+)
 
 
 def _resolve_physical_executor(key: str) -> Any | None:
     # Lazy: the executor registry imports most of the host, so import on first call.
-    from nexus.core.capability_executor_registry import get_executor
+    try:
+        from nexus.core.capability_executor_registry import get_executor
 
-    return get_executor(key)
+        return get_executor(key)
+    except Exception as exc:
+        # The runtime's ``_has_physical_executor`` turns a raise into False; record the
+        # reason first so it is observable, then keep the runtime's contract (re-raise).
+        record_executor_resolution_error(
+            key, exc, origin=RUNTIME_SEAM_RESOLVER_ORIGIN, registry_key=key
+        )
+        raise
 
 
 def register_executor_resolver_if_available() -> bool:
@@ -123,3 +138,16 @@ __all__ = [
     "PLANNER_BINDING_SURFACES",
     *_RUNTIME.names(),
 ]
+
+
+if __name__ == "__main__":
+    import sys
+
+    # ``python -m nexus.services.runtime_compat --check-executors``: reuse this
+    # already-bootstrapped module instead of importing (and building) it twice.
+    sys.modules.setdefault("nexus.services.runtime_compat", sys.modules[__name__])
+    if "--check-executors" not in sys.argv[1:]:
+        sys.exit("usage: python -m nexus.services.runtime_compat --check-executors [--json]")
+    from nexus.services.executor_self_check import main as _check_executors
+
+    sys.exit(_check_executors(sys.argv[1:]))
