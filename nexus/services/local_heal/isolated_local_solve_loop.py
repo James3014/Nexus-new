@@ -308,6 +308,13 @@ def run_isolated_local_solve_loop(request: IsolatedLocalSolveRequest) -> Isolate
     capability_payload["verifier_status"] = verifier_receipt.verifier_status
     if pre_verify_source_hash and not source_hash_blocker:
         capability_payload["source_hash"] = pre_verify_source_hash
+    # #1869: producer-level gate_passed is bound like the receipt adapters' claim gate: an executed
+    # route without a passing verifier verdict and a typed source hash of the verified bytes is False.
+    from nexus.core.claim_gate_binding import claim_gate_binding_reasons
+
+    capability_payload["gate_passed"] = bool(
+        capability_payload.get("gate_passed") and not claim_gate_binding_reasons(capability_payload)
+    )
 
     return IsolatedLocalSolveResponse(
         patch_envelope=envelope,

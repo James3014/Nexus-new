@@ -160,6 +160,9 @@ def test_harness_receipts_fail_closed_without_typed_evidence():
                 "bdd_acceptance_refs": [".nexus/reports/capabilities/bdd/receipt.json", "artifact:task:tests_passed"],
                 "business_verified": True,
                 "bdd_acceptance_skill_gate_passed": True,
+                # claim gate (#1869): needs the verifier/source-hash binding
+                "verifier_status": "pass",
+                "source_hash": "sha256:" + "c" * 64,
             },
         )
     }
@@ -312,6 +315,9 @@ def test_semantic_research_runtime_receipts_require_evidence_and_gate():
                 "formal_report_schema_version": "nexus_formal_report_v1",
                 "verification_summary_ref": "pytest:PASS",
                 "formal_report_gate_passed": True,
+                # claim gate (#1869): needs the verifier/source-hash binding
+                "verifier_status": "pass",
+                "source_hash": "sha256:" + "c" * 64,
             },
         )
     }

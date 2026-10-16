@@ -5,6 +5,11 @@ import json
 from pathlib import Path
 from typing import Any, Protocol
 
+from nexus.core.claim_gate_binding import (
+    _claim_gate_binding_reasons,
+    _looks_like_verifier_artifact,  # noqa: F401  (re-exported; tests import it from here)
+    claim_gate_binding_reasons,  # noqa: F401  (public re-export, #1869)
+)
 from nexus.engine.capability_contracts import CapabilityReceipt
 
 
@@ -197,20 +202,6 @@ def _fail_closed_ref(payload: dict[str, Any], key: str, ref: str) -> list[str]:
     return []
 
 
-def _looks_like_verifier_artifact(value: Any) -> bool:
-    """True only for sha256:<64 hex> or bare 64-hex — never arbitrary strings."""
-    if not isinstance(value, str):
-        return False
-    v = value.strip()
-    if not v:
-        return False
-    lower = v.lower()
-    if lower.startswith("sha256:"):
-        hexpart = lower[7:]
-        return len(hexpart) == 64 and all(c in "0123456789abcdef" for c in hexpart)
-    return len(lower) == 64 and all(c in "0123456789abcdef" for c in lower)
-
-
 def _gate_verifier_ok(payload: dict[str, Any]) -> bool:
     """Validate that verifier proof has genuine provenance.
 
@@ -225,51 +216,53 @@ def _gate_verifier_ok(payload: dict[str, Any]) -> bool:
     return False
 
 
-_PASSING_VERIFIER_STATUSES = frozenset({"pass", "passed", "verified"})
-
-
-def _looks_like_source_hash(value: Any) -> bool:
-    """sha256:<64 hex>, bare 64-hex, or bare 40-hex (git object id)."""
-    if not isinstance(value, str):
-        return False
-    lower = value.strip().lower()
-    if lower.startswith("sha256:"):
-        lower = lower[7:]
-    return len(lower) in (40, 64) and all(c in "0123456789abcdef" for c in lower) and (
-        len(lower) == 64 or not value.strip().lower().startswith("sha256:")
-    )
-
-
-def _claim_gate_binding_reasons(payload: dict[str, Any]) -> list[str]:
-    """Reasons the verifier-artifact/source-hash binding is unmet (#1757).
-
-    Content-validated: a passing verifier_status or a sha256-shaped
-    verifier_artifact, plus a well-formed source_hash. This is only the
-    binding part of the claim gate; ClaimGateReceiptAdapter additionally
-    requires _gate_verifier_ok. Empty list means the binding is satisfied.
-    """
-    reasons: list[str] = []
-    artifact = payload.get("verifier_artifact")
-    artifact_ok = type(artifact) is str and _looks_like_verifier_artifact(artifact)
-    status = payload.get("verifier_status")
-    if status is None:
-        status_text = ""
-    elif type(status) is str:
-        status_text = status.strip().lower()
-    else:
-        status_text = "non_string"
-    status_ok = status_text in _PASSING_VERIFIER_STATUSES
-    if status_text and not status_ok:
-        # An explicit non-passing status is never overridden by an artifact.
-        reasons.append("verifier_not_passed")
-    elif not artifact_ok and not status_ok:
-        reasons.append("missing_verifier_artifact")
-    source_hash = payload.get("source_hash")
-    if not source_hash:
-        reasons.append("missing_source_hash")
-    elif type(source_hash) is not str or not _looks_like_source_hash(source_hash):
-        reasons.append("invalid_source_hash")
-    return reasons
+# #1869: every registered adapter's ``gate_passed`` is classified exactly once.
+# BOUND: a claim gate (feeds a completion/acceptance/claim decision); gate_passed requires
+#   _claim_gate_binding_reasons(payload) == [] (validated verifier artifact/status + source hash).
+# NON-CLAIM: a capability-internal "my own check ran" signal derived from caller payload
+#   booleans. It never mints a claim: outcome_contributed is forced False by
+#   _verified_outcome_contributed/_gate_verifier_ok and public_claim_safe needs
+#   outcome_contributed. tests/engine/test_gate_passed_site_inventory.py fails when an
+#   adapter is added to neither set.
+BOUND_CLAIM_GATE_ADAPTERS: frozenset[str] = frozenset(
+    {
+        "claim_gate",
+        "artifact_gate",
+        "delivery_gate",
+        "mempalace_gate",
+        "bdd_acceptance_skill",
+        "formal_report",
+        "acceptance_check",
+        "benchmark",
+        "local_heal",
+        "local_model_executor",
+    }
+)
+NON_CLAIM_GATE_ADAPTERS: dict[str, str] = {
+    **{
+        name: "internal capability signal from caller payload booleans/claim_verified; no claim authority"
+        for name in (
+            "codeintel", "autoreason", "judge_panel", "llm_judge_panel", "asi_constraint_extractor",
+            "ddtree", "hyper", "ultra_review", "swarm", "drone", "nightshift", "memory", "belief",
+            "research", "lancedb", "semantic_searcher", "architecture_scout", "external_doc_scout",
+            "repair_loop", "msa_router", "jit_validation", "harness_preflight_sensor",
+            "semantic_failure_sensor",
+        )
+    },
+    **{
+        name: "generic *_gate_passed payload flag; operational/trace signal, no claim authority"
+        for name in (
+            "autonomic_router", "direct_mode", "federation", "file_lock", "forecast_gate",
+            "integration_manager", "learn_mode", "learn_phase_slo", "learn_scheduler", "meta_opt",
+            "metabolism", "multi_agent", "oracle_shadow", "plan_quality_gate", "pregate",
+            "registry_sync", "research_control_plane", "research_route", "sandbox", "stress_test",
+            "ui_validator", "xray",
+        )
+    },
+    "swarm_quiet_moment": "constant False; never passes",
+    "intent_intake": "constant False; never passes",
+    "state_transition": "constant False; never passes",
+}
 
 
 def _verified_outcome_contributed(gate_passed: bool, claim_verified: bool, payload: dict[str, Any]) -> bool:
@@ -531,7 +524,10 @@ class MemPalaceGateReceiptAdapter:
         refs = refs or _fail_closed_ref(payload, "mempalace_gate_passed", "mempalace:gate_failed")
         invoked = bool(_pillar_present(payload, "mempalace", "mempalace_gate") or refs or _explicit_bool(payload, "mempalace_gate_passed"))
         verifier_ok = _gate_verifier_ok(payload)
-        gate_passed = bool(refs and _as_bool(payload.get("mempalace_gate_passed", True)) and verifier_ok)
+        binding_reasons = _claim_gate_binding_reasons(payload)
+        gate_passed = bool(
+            refs and _as_bool(payload.get("mempalace_gate_passed", True)) and verifier_ok and not binding_reasons
+        )
         return merge_capability_receipt(
             name=self.name,
             selected=True,
@@ -557,7 +553,10 @@ class ArtifactGateReceiptAdapter:
         refs = refs or _fail_closed_ref(payload, "artifact_gate_passed", "artifact:gate_failed")
         invoked = bool(_pillar_present(payload, "artifact", "artifact_gate") or refs or _explicit_bool(payload, "artifact_gate_passed"))
         verifier_ok = _gate_verifier_ok(payload)
-        gate_passed = bool(refs and _as_bool(payload.get("artifact_gate_passed", True)) and verifier_ok)
+        binding_reasons = _claim_gate_binding_reasons(payload)
+        gate_passed = bool(
+            refs and _as_bool(payload.get("artifact_gate_passed", True)) and verifier_ok and not binding_reasons
+        )
         return merge_capability_receipt(
             name=self.name,
             selected=True,
@@ -615,11 +614,7 @@ class DeliveryGateReceiptAdapter:
         refs = refs or _fail_closed_ref(payload, "delivery_gate_passed", "delivery:gate_failed")
         invoked = bool(payload.get("delivery_gate_passed") is not None or refs or payload.get("delivery_gate_invoked") or claim_verified)
 
-        reasons = []
-        if not payload.get("verifier_artifact") and not payload.get("verifier_status"):
-            reasons.append("missing_verifier_artifact")
-        if not payload.get("source_hash"):
-            reasons.append("missing_source_hash")
+        reasons = _claim_gate_binding_reasons(payload)
         verifier_ok = _gate_verifier_ok(payload)
         if not verifier_ok and not reasons:
             reasons.append("unbound_verifier_proof")
@@ -1009,7 +1004,9 @@ class FormalReportReceiptAdapter:
         summary = str(payload.get("verification_summary_ref") or "").strip()
         refs = [item for item in (report, schema, summary) if item]
         invoked = bool(refs)
-        gate_passed = bool(invoked and report and schema == "nexus_formal_report_v1" and _as_bool(payload.get("formal_report_gate_passed", False)))
+        base_gate = bool(invoked and report and schema == "nexus_formal_report_v1" and _as_bool(payload.get("formal_report_gate_passed", False)))
+        binding_reasons = _claim_gate_binding_reasons(payload)  # claim gate (#1869)
+        gate_passed = base_gate and not binding_reasons
         return merge_capability_receipt(
             name=self.name,
             selected=True,
@@ -1018,7 +1015,11 @@ class FormalReportReceiptAdapter:
             gate_passed=gate_passed,
             outcome_contributed=_verified_outcome_contributed(gate_passed, claim_verified, payload),
             executor_id=self.name,
-            failure_reason=selected_failure_reason(selected=True, invoked=invoked, evidence_refs=refs, gate_passed=gate_passed),
+            failure_reason=(
+                ";".join(binding_reasons)
+                if base_gate and binding_reasons
+                else selected_failure_reason(selected=True, invoked=invoked, evidence_refs=refs, gate_passed=gate_passed)
+            ),
         )
 
 
@@ -1152,8 +1153,10 @@ class GenericCapabilityReceiptAdapter:
         evidence_keys: tuple[str, ...] = (),
         used_keys: tuple[str, ...] = (),
         gate_key: str | None = None,
+        claim_gate: bool = False,
     ) -> None:
         self.name = name
+        self.claim_gate = claim_gate  # #1869: True -> gate_passed needs the verifier/source-hash binding
         self.executor_id = executor_id or name
         self.evidence_keys = evidence_keys or (
             f"{name}_refs",
@@ -1170,7 +1173,9 @@ class GenericCapabilityReceiptAdapter:
             refs.extend(_as_refs(payload.get(key)))
         refs = list(dict.fromkeys(refs))
         invoked = bool(refs or any(_as_bool(payload.get(key)) for key in self.used_keys))
-        gate_passed = bool(refs and _as_bool(payload.get(self.gate_key, False)))
+        base_gate = bool(refs and _as_bool(payload.get(self.gate_key, False)))
+        binding_reasons = _claim_gate_binding_reasons(payload) if self.claim_gate else []
+        gate_passed = base_gate and not binding_reasons
         return merge_capability_receipt(
             name=self.name,
             selected=True,
@@ -1179,11 +1184,15 @@ class GenericCapabilityReceiptAdapter:
             gate_passed=gate_passed,
             outcome_contributed=_verified_outcome_contributed(gate_passed, claim_verified, payload),
             executor_id=self.executor_id,
-            failure_reason=selected_failure_reason(
-                selected=True,
-                invoked=invoked,
-                evidence_refs=refs,
-                gate_passed=gate_passed,
+            failure_reason=(
+                ";".join(binding_reasons)
+                if base_gate and binding_reasons
+                else selected_failure_reason(
+                    selected=True,
+                    invoked=invoked,
+                    evidence_refs=refs,
+                    gate_passed=gate_passed,
+                )
             ),
         )
 
@@ -1279,13 +1288,15 @@ class BddAcceptanceSkillReceiptAdapter(GenericCapabilityReceiptAdapter):
         refs = list(dict.fromkeys(refs))
         invoked = bool(refs or _as_bool(payload.get("bdd_acceptance_skill_used")))
         business_verified = _as_bool(payload.get("business_verified"))
-        gate_passed = bool(
+        base_gate = bool(
             invoked
             and refs
             and claim_verified
             and business_verified
             and _as_bool(payload.get("bdd_acceptance_skill_gate_passed"))
         )
+        binding_reasons = _claim_gate_binding_reasons(payload)  # claim gate (#1869)
+        gate_passed = base_gate and not binding_reasons
         return merge_capability_receipt(
             name=self.name,
             selected=True,
@@ -1294,7 +1305,11 @@ class BddAcceptanceSkillReceiptAdapter(GenericCapabilityReceiptAdapter):
             gate_passed=gate_passed,
             outcome_contributed=_verified_outcome_contributed(gate_passed, claim_verified, payload),
             executor_id=self.name,
-            failure_reason=selected_failure_reason(selected=True, invoked=invoked, evidence_refs=refs, gate_passed=gate_passed),
+            failure_reason=(
+                ";".join(binding_reasons)
+                if base_gate and binding_reasons
+                else selected_failure_reason(selected=True, invoked=invoked, evidence_refs=refs, gate_passed=gate_passed)
+            ),
         )
 
 
@@ -1624,9 +1639,9 @@ RECEIPT_ADAPTERS: dict[str, CapabilityReceiptAdapter] = {
         JitValidationReceiptAdapter(),
         IntentIntakeReceiptAdapter(),
         StateTransitionReceiptAdapter(),
-        GenericCapabilityReceiptAdapter("acceptance_check", evidence_keys=("acceptance_refs", "acceptance_report", "acceptance_report_path")),
+        GenericCapabilityReceiptAdapter("acceptance_check", evidence_keys=("acceptance_refs", "acceptance_report", "acceptance_report_path"), claim_gate=True),
         GenericCapabilityReceiptAdapter("autonomic_router", evidence_keys=("autonomic_route_refs", "autonomic_route", "policy_reason")),
-        GenericCapabilityReceiptAdapter("benchmark", evidence_keys=("benchmark_refs", "benchmark_report", "benchmark_report_path", "public_claim_gate_ref")),
+        GenericCapabilityReceiptAdapter("benchmark", evidence_keys=("benchmark_refs", "benchmark_report", "benchmark_report_path", "public_claim_gate_ref"), claim_gate=True),
         GenericCapabilityReceiptAdapter("direct_mode", evidence_keys=("direct_mode_refs", "run_report", "completion_envelope", "verify_commands")),
         GenericCapabilityReceiptAdapter("federation", evidence_keys=("federation_refs", "federation_report_path")),
         GenericCapabilityReceiptAdapter("file_lock", evidence_keys=("file_lock_refs", "locked_files", "conflicts", "denied_paths")),

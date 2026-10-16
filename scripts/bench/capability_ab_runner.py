@@ -14882,6 +14882,7 @@ def _finalize_with_nexus_row(
             solve_hash = exec_resp.candidate_hash
             verifier_status = "not_run"
             gate_passed = False
+            solve_source_hash = ""
             fallback_block_reason = exec_resp.error if dry_run_val else ""
             
             # Execute C-side gates & verifier verification via isolated solve
@@ -14907,6 +14908,10 @@ def _finalize_with_nexus_row(
                 solve_resp = run_isolated_local_solve_loop(solve_req)
                 solve_invoked = True
                 verifier_status = solve_resp.capability_payload["metadata"].get("verifier_status", "not_run")
+                # #1869: bench-only signal (this receipt is attached directly, not rebuilt by the receipt
+                # adapters, and is never claim evidence). For real runs the payload's gate_passed is
+                # already bound to verifier_status + source_hash by run_isolated_local_solve_loop.
+                solve_source_hash = str(solve_resp.capability_payload.get("source_hash") or "")
                 gate_passed = solve_resp.capability_payload.get("gate_passed", False) and verifier_status == "pass"
                 fallback_block_reason = solve_resp.hybrid_route.fallback_block_reason or ""
             
@@ -14931,6 +14936,7 @@ def _finalize_with_nexus_row(
                 telemetries={
                     "candidate_hash": solve_hash,
                     "verifier_status": verifier_status,
+                    "source_hash": solve_source_hash,
                     "provider": exec_resp.provider,
                     "model_name": exec_resp.model_name,
                 }
