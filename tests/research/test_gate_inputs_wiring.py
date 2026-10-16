@@ -705,6 +705,17 @@ def test_h3_pregate_inside_bench_staging_cannot_see_the_hidden_test(
     assert pregate["command_count"] == 1 and "1 failed" in pregate["results"][0]["stdout_tail"]
     assert not (root / "HIDDEN_RAN").exists() and (root / "test_hidden.py").exists()
     assert not staging.violations
+    # The staging tree is mode 0300/0000 by design; make it removable for tmp_path cleanup.
+    pending = [tmp_path / "cache"]
+    while pending:
+        current = pending.pop()
+        if current.is_symlink():
+            continue
+        if current.is_dir():
+            current.chmod(0o700)  # first, so the directory can be listed
+            pending.extend(current.iterdir())
+        else:
+            current.chmod(0o600)
 
 
 def test_m1_withhold_covers_the_mempalace_registry_alias() -> None:
