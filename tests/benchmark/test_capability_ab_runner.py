@@ -78,7 +78,6 @@ from scripts.bench.capability_ab_runner import (
     _hidden_retry_decision_for_failure,
     _hidden_test_for_visible_test,
     _ask_direct_gemini_flash_patch,
-    _ask_direct_codex_patch,
     _parse_direct_patch_json,
     _direct_codex_timeout_sec,
     _extract_codex_stdout_tokens,
