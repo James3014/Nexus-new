@@ -3299,7 +3299,7 @@ def test_check_no_longer_required_is_dropped() -> None:
     required = [n for n in ad.REQUIRED_CHECKS if n != TRUSTED_DEPENDENCY]
 
     def api(path: str) -> Any:
-        if "check-runs" in path and "Trusted" in path:
+        if "check-runs" in path and "Trusted+dependency" in path:
             raise AssertionError("a dropped (non-floor) check must not be queried")
         return green_api(required=required)(path)
 
@@ -5864,3 +5864,136 @@ def test_in_sync_degraded_survives_unwritable_marker_and_receipt(cfg: ad.Config)
         "LIVE_DEGRADED_RECEIPT_UNWRITABLE:IsADirectoryError",
     ]
     assert not cfg.hold_file.exists()
+
+
+# ------------------------- #2364: Trusted impact gate replaced Exact-base on main
+
+
+TRUSTED_IMPACT = "Trusted impact gate (default branch)"
+# GET repos/James3014/Nexus-new/rules/branches/main on 2026-10-16, in its order.
+LIVE_REQUIRED_2026_10_16 = [
+    "Deletion guard",
+    TRUSTED_IMPACT,
+    "Full published Git history secret audit",
+    TRUSTED_DEPENDENCY,
+]
+# pull_request_target-only workflows: on a real main push they have no run on the
+# merge commit and are found only on the merged PR head (seen on main 8a583ad).
+PR_TARGET_ONLY = ("Deletion guard", TRUSTED_IMPACT, TRUSTED_DEPENDENCY)
+
+
+def _live_2026_10_16_api(
+    *, impact_path: str | None = None, impact_event: str | None = None
+) -> Callable[[str], Any]:
+    """Today's ruleset; PR-target checks only on the PR head, as on real main."""
+    base = green_api(required=LIVE_REQUIRED_2026_10_16)
+    impact_suite = SUITES[TRUSTED_IMPACT] + PR_SUITE_OFFSET
+
+    def api(path: str) -> Any:
+        if "check-runs" in path and f"/commits/{NEW}/" in path:
+            name = urllib.parse.unquote_plus(path.split("check_name=")[1].split("&")[0])
+            if name in PR_TARGET_ONLY:
+                return {"check_runs": []}
+        payload = base(path)
+        if path.endswith(f"check_suite_id={impact_suite}"):
+            for run in payload["workflow_runs"]:
+                if impact_path is not None:
+                    run["path"] = impact_path
+                if impact_event is not None:
+                    run["event"] = impact_event
+        return payload
+
+    return api
+
+
+def test_trusted_impact_gate_is_known_and_bound_to_its_workflow() -> None:
+    workflow = ad.REQUIRED_CHECKS[TRUSTED_IMPACT]
+    assert workflow == ".github/workflows/trusted-impact-gate.yml"
+    text = (REPO_ROOT / workflow).read_text(encoding="utf-8")
+    assert f"name: {TRUSTED_IMPACT}" in text and "pull_request_target" in text
+
+
+def test_live_ruleset_2026_10_16_all_success_from_bound_workflows_is_green() -> None:
+    result = ad.required_checks(_live_2026_10_16_api(), NEW)
+    assert result["verdict"] == "GREEN", result
+    assert set(result["checks"]) == {*LIVE_REQUIRED_2026_10_16, "Exact-base impact gate"}
+    assert result["floor_added"] == ["Exact-base impact gate"]
+    for name in PR_TARGET_ONLY:
+        assert result["checks"][name]["sha"] == PR_HEAD
+    assert result["checks"]["Full published Git history secret audit"]["sha"] == NEW
+    assert result["checks"]["Exact-base impact gate"]["sha"] == NEW
+
+
+def test_live_ruleset_2026_10_16_green_candidate_deploys(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    assert cycle(cfg, host, prober, _live_2026_10_16_api())["status"] == "DEPLOYED"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".github/workflows/pytest.yml",  # a real workflow, but not the bound one
+        ".github/workflows/trusted-dependency-contract.yml",
+        ".github/workflows/stray.yml",
+    ],
+)
+def test_trusted_impact_gate_from_another_workflow_is_not_green(path: str) -> None:
+    result = ad.required_checks(_live_2026_10_16_api(impact_path=path), NEW)
+    assert result["verdict"] == "UNKNOWN"
+    assert result["missing"] == [TRUSTED_IMPACT]
+
+
+@pytest.mark.parametrize("event", ["push", "workflow_dispatch", "schedule", "pull_request"])
+def test_trusted_impact_gate_pr_head_run_with_wrong_event_is_not_green(event: str) -> None:
+    result = ad.required_checks(_live_2026_10_16_api(impact_event=event), NEW)
+    assert result["verdict"] == "UNKNOWN"
+    assert result["missing"] == [TRUSTED_IMPACT]
+
+
+def test_red_trusted_impact_gate_blocks_the_deploy(cfg: ad.Config) -> None:
+    base = _live_2026_10_16_api()
+
+    def api(path: str) -> Any:
+        payload = base(path)
+        if "check-runs" in path and "Trusted+impact" in path:
+            for run in payload["check_runs"]:
+                run["conclusion"] = "failure"
+        return payload
+
+    assert ad.required_checks(api, NEW)["verdict"] == "RED"
+    host, prober = FakeHost(), FakeProber()
+    assert cycle(cfg, host, prober, api)["status"] == "CHECKS_RED"
+    assert prober.calls == [] and host.reloads == []
+
+
+def test_live_ruleset_plus_an_unbound_name_still_fails_closed() -> None:
+    api = green_api(required=[*LIVE_REQUIRED_2026_10_16, "Trusted impact gate (fork)"])
+    result = ad.required_checks(api, NEW)
+    assert result["verdict"] == "UNKNOWN_REQUIRED_CHECK"
+    assert result["unknown_required"] == ["Trusted impact gate (fork)"]
+
+
+@pytest.mark.parametrize("name", sorted(ad.PR_TARGET_ONLY_CHECKS))
+def test_pull_request_event_run_of_a_pr_target_only_check_never_binds(name: str) -> None:
+    """``pull_request`` runs PR-controlled workflow code under the same path and name."""
+    suite = SUITES[name] + PR_SUITE_OFFSET
+    base = _live_2026_10_16_api()
+
+    def api(path: str) -> Any:
+        payload = base(path)
+        if path.endswith(f"check_suite_id={suite}"):
+            for run in payload["workflow_runs"]:
+                run["event"] = "pull_request"
+        return payload
+
+    result = ad.required_checks(api, NEW)
+    assert result["verdict"] == "UNKNOWN"
+    assert result["missing"] == [name]
+
+
+def test_pr_target_only_checks_match_their_workflow_triggers() -> None:
+    import yaml
+
+    for name in ad.PR_TARGET_ONLY_CHECKS:
+        on = yaml.safe_load((REPO_ROOT / ad.REQUIRED_CHECKS[name]).read_text("utf-8"))[True]
+        assert set(on) == {"pull_request_target"}, (name, on)

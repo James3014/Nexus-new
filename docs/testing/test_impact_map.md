@@ -127,6 +127,9 @@
 | nexus/executors/agy_dispatch_boundary.py | tests/services/test_agy_dispatch_write_boundary.py, tests/services/test_agy_dispatch.py | active | high | agy_dispatch_write_boundary_contract |
 | nexus/executors/agy_write_admission.py | tests/nexus/executors/test_agy_write_admission.py, tests/services/test_agy_dispatch_write_boundary.py | active | high | agy_write_admission_run_home_seatbelt_contract |
 | nexus/engine/confined_test_runner.py | tests/services/test_post_candidate_seam.py, tests/research/test_post_candidate_seam_wiring.py | active | high | post_candidate_confined_sandbox_hidden_test_forbidden_contract |
+| tests/conftest.py | tests/conftest.py, tests/services/test_executor_resolution_observable.py | active | high | test_contract |
+| tests/services/test_executor_resolution_observable.py | tests/services/test_executor_resolution_observable.py | active | high | test_contract |
+| nexus/services/executor_self_check.py | tests/services/test_executor_resolution_observable.py, tests/services/test_runtime_compat.py | active | high | executor_resolution_observable_self_check_contract |
 | nexus/services/post_candidate_seam.py | tests/services/test_post_candidate_seam.py, tests/research/test_post_candidate_seam_wiring.py, tests/services/test_escalate_planner_signal_triggers.py | active | high | post_candidate_seam_sandbox_ultra_review_file_lock_contract |
 | nexus/executors/cli_worker.py | tests/nexus/executors/test_cli_worker.py | active | high | cli_worker_executor_contract |
 | nexus/executors/exec_policy.py | tests/nexus/executors/test_exec_policy.py, tests/nexus/executors/test_cli_worker.py, tests/nexus/orchestrator/test_candidate_verifier.py, tests/engine/test_cli_pregate.py | active | high | worker_exec_policy_contract |
@@ -382,6 +385,8 @@
 | scripts/ops/deletion_guard.py | tests/ops/test_deletion_guard.py | active | high | deletion_guard_owner_approval_contract |
 | scripts/ops/review_record_check.py | tests/ops/test_review_record_check.py | active | high | review_record_advisory_check_contract |
 | .github/workflows/review-record-present.yml | tests/ops/test_review_record_check.py, tests/ops/test_pr_workflow_concurrency.py | active | high | review_record_workflow_contract |
+| .github/workflows/pr-bindings-preflight.yml | tests/ops/test_pr_bindings_preflight_workflow.py, tests/ops/test_pr_workflow_concurrency.py | active | high | bindings_preflight_workflow_contract |
+| tests/ops/test_pr_bindings_preflight_workflow.py | tests/ops/test_pr_bindings_preflight_workflow.py | active | high | test_contract |
 | tests/nightly_quarantine_items | tests/ops/test_nightly_quarantine.py, tests/ops/test_nightly_quarantine_items_layout.py | active | medium | nightly_quarantine_items_per_entry_package |
 | tests/ops/test_nightly_quarantine_items_layout.py | tests/ops/test_nightly_quarantine_items_layout.py | active | medium | test_contract |
 | tests/nightly_quarantine_entries.py | tests/ops/test_nightly_quarantine.py, tests/ops/test_nightly_quarantine_items_layout.py | active | medium | nightly_quarantine_entries_compat_shim |
