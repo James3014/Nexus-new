@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from nexus.orchestrator import canonical_source_root as roots
+from scripts.ops.gateway_health_hmac import KEY_FILE_ENV, load_or_create_key, path_hmac
 from tests.nexus.orchestrator.test_unified_mcp_gateway import (
     AUTHORITY_ARGS,
     FakeService,
@@ -31,6 +32,11 @@ def _commit(root: Path, path: str, text: str, message: str) -> str:
     _git(root, "add", "--", path)
     _git(root, "commit", "-qm", message)
     return _git(root, "rev-parse", "HEAD")
+
+
+@pytest.fixture(autouse=True)
+def _health_hmac_key(tmp_path, monkeypatch):
+    monkeypatch.setenv(KEY_FILE_ENV, str(tmp_path / "health-hmac.key"))
 
 
 @pytest.fixture(autouse=True)
@@ -175,7 +181,12 @@ def test_health_git_head_reports_the_loaded_commit(pair, monkeypatch):
     assert identity["repo_root"] == str(loaded)
     assert identity["git_head"] == head
     public = http_module.runtime_identity()
-    assert public["repo_root_sha256"] == hashlib.sha256(str(loaded).encode("utf-8")).hexdigest()
+    assert "repo_root_sha256" not in public
+    assert public["repo_root_hmac_sha256"] == path_hmac(
+        "repo_root", str(loaded), load_or_create_key()
+    )
+    plain = hashlib.sha256(str(loaded).encode("utf-8")).hexdigest()
+    assert public["repo_root_hmac_sha256"] != plain
 
 
 def _commit_raw(root: Path, message: str) -> None:

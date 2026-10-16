@@ -133,3 +133,4 @@ artifacts/external_sources/
 
 # Pinned Repository Intelligence engine checkout (guard-delta advisory job)
 .rie-engine/
+.rie-guard-engine/

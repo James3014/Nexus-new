@@ -4689,7 +4689,7 @@ class UnifiedMCPGateway:
             "task_id", "what", "why", "worker", "provider", "model", "allowed_files", "verifier_commands",
             "owner_confirmation", "authority_change_candidate_confirmation",
             "workforce_demands", "workforce_admission", "planner_output",
-            "task_card_path", "task_card_hash",
+            "task_card_path", "task_card_hash", "fail_to_pass_required",
         }
         unknown = sorted(set(arguments) - allowed_keys)
         if unknown:
@@ -4700,6 +4700,9 @@ class UnifiedMCPGateway:
         authority_confirmation = arguments.get("authority_change_candidate_confirmation", False)
         if not isinstance(authority_confirmation, bool):
             raise GatewayInputError("AUTHORITY_CHANGE_CONFIRMATION_INVALID")
+        fail_to_pass_required = arguments.get("fail_to_pass_required", False)
+        if not isinstance(fail_to_pass_required, bool):
+            raise GatewayInputError("FAIL_TO_PASS_REQUIRED_INVALID")
         what = _text(arguments.get("what"), "what", max_length=4000)
         why = _text(arguments.get("why"), "why", max_length=4000)
         task_id = self._task_id(arguments, what, why, [str(p).strip() for p in arguments.get("allowed_files") or []])
@@ -4756,6 +4759,8 @@ class UnifiedMCPGateway:
         })
         if authority_confirmation:
             card_request["authority_change_candidate_confirmation"] = True
+        if fail_to_pass_required:
+            card_request["fail_to_pass_required"] = True
         try:
             contract = self.service.build_contract(card_request)
             validate_task_card_binding(
@@ -4912,6 +4917,8 @@ class UnifiedMCPGateway:
         bound.update(evidence_binding)
         if authority_confirmation:
             bound["authority_change_candidate_confirmation"] = True
+        if fail_to_pass_required:
+            bound["fail_to_pass_required"] = True
         action = build_action_envelope(
             task_id=task_id, action_type=LifecycleActionType.TASK_RUN,
             request=bound, tool_manifest_hash=TOOL_MANIFEST_REVISION,
@@ -4967,6 +4974,8 @@ class UnifiedMCPGateway:
         request.update(evidence_binding)
         if authority_confirmation:
             request["authority_change_candidate_confirmation"] = True
+        if fail_to_pass_required:
+            request["fail_to_pass_required"] = True
         request["protected_contracts"] = protected_contracts
         current_head = self._exact_hash(_git("rev-parse", "HEAD").strip(), "current_head", 40)
         if current_head != head:
@@ -5493,6 +5502,7 @@ class UnifiedMCPGateway:
                         "verifier_commands": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 4},
                         "owner_confirmation": {"type": "boolean", "const": True},
                         "authority_change_candidate_confirmation": {"type": "boolean", "default": False},
+                        "fail_to_pass_required": {"type": "boolean", "default": False},
                         "workforce_demands": {"type": "object"},
                         "workforce_admission": {"type": "object"},
                         "planner_output": {"type": "object"},

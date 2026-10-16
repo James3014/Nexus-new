@@ -1,0 +1,27 @@
+{
+  "_source": "minimal copy of the real COMPLETE record issue-2150-711ce8b7ac83f9b801f3d1675e67efa4600cb0bd1acd0792e1516fee1c8a633e.json",
+  "closure_run_id": "2dd6509a9406c8e9c72dcfeb371d87a5ee6c6b129147c92e0731be4aec1abbaa",
+  "identity_hash": "711ce8b7ac83f9b801f3d1675e67efa4600cb0bd1acd0792e1516fee1c8a633e",
+  "issue_number": 2150,
+  "publication": {
+    "acceptance_packet_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/closure/acceptance-packets/eia-open-swe-canary-20261014--e8d0b425635b876919be3a521f0e8f7b7a7191de72311ae6a37cc1b1c46de732.json",
+    "acceptance_packet_sha256": "2ff3e8b9127a2ddfdc99f2e9cab2a31241c3771b1cfd4c1b00553337b3c1abfd",
+    "candidate_commit": "6e2f4734ebeb1886f09977caedc85489a6be00bd",
+    "candidate_tree": "6e272db4f150e2e8b2c032df85401df4aca6403c",
+    "claim_ceiling": "TASK_CANDIDATE_VERIFIED_PENDING_INDEPENDENT_ACCEPTANCE",
+    "current_gate": "PENDING_INDEPENDENT_ACCEPTANCE",
+    "next_action": "run_independent_candidate_acceptance_audit",
+    "stop_condition": "independent_acceptance_not_explicitly_granted",
+    "task_id": "eia-open-swe-canary-20261014",
+    "verification_state": "WHOLE_TASK_PASS"
+  },
+  "publication_record": {
+    "state": "COMPLETED"
+  },
+  "schema": "nexus.external_intelligence_automation_state.v1",
+  "state": "COMPLETE",
+  "worker_binding": {
+    "model": "opencli_chatgpt/advanced",
+    "provider": "opencli_chatgpt"
+  }
+}

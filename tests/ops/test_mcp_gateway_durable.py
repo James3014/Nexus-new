@@ -78,6 +78,12 @@ def _r1b2_portable_lstat(path, *, dir_fd=None):
     return observed
 
 @pytest.fixture(autouse=True)
+def _isolated_health_hmac_key(monkeypatch, tmp_path):
+    """#2226: never create the per-host /health HMAC key under the real HOME."""
+    monkeypatch.setenv("NEXUS_GATEWAY_HEALTH_HMAC_KEY_FILE", str(tmp_path / "health-hmac.key"))
+
+
+@pytest.fixture(autouse=True)
 def _isolated_host_authority_store(monkeypatch, tmp_path):
     fake_github_cli = tmp_path / "gh"
     fake_github_cli.write_text("#!/bin/sh\nexit 0\n")
@@ -3558,7 +3564,7 @@ def test_http_health_degrades_when_github_observer_dependency_is_unavailable(
 
     assert identity["status"] == "degraded"
     redacted = {k: v for k, v in unavailable.items() if k != "executable_path"}
-    assert identity["github_observer"] == {**redacted, "executable_path_sha256": None}
+    assert identity["github_observer"] == {**redacted, "executable_path_hmac_sha256": None}
     assert http_gateway.runtime_identity(include_paths=True)["github_observer"] == unavailable
 
 

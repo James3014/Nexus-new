@@ -518,7 +518,6 @@ def test_comment_workflow_runs_only_default_branch_code_with_scoped_write() -> N
         {k: s.get(k) for k in ("run", "env", "with")} for s in job["steps"]
     ])
     for forbidden in (
-        "head.sha",
         "head.ref",
         "head.repo",
         "pull_request.title",
@@ -526,6 +525,13 @@ def test_comment_workflow_runs_only_default_branch_code_with_scoped_write() -> N
         "merge_commit_sha",
     ):
         assert forbidden not in executable
+    # #1580: the PR head SHA (40 hex, not free text) may only be passed as an env value to the
+    # data-only guard step, never interpolated into a script or action input.
+    for step in job["steps"]:
+        assert "head.sha" not in str(step.get("run", "")) + str(step.get("with", ""))
+        if "head.sha" in str(step.get("env", "")):
+            assert "rie_guard_delta_evidence.py" in step["run"]
+            assert step["env"]["HEAD_SHA"] == "${{ github.event.pull_request.head.sha }}"
     assert "python3 -I scripts/ops/rie_pr_comment.py" in executable
 
 
@@ -563,3 +569,273 @@ def test_script_is_stdlib_only() -> None:
         if isinstance(node, ast.ImportFrom) and node.module
     }
     assert imported - {"__future__"} <= set(sys.stdlib_module_names)
+
+
+# ------------------------------------------- guard semantic delta (#1580)
+
+import importlib.util  # noqa: E402
+import json  # noqa: E402
+
+GUARD_SCRIPT = ROOT / "scripts/ops/rie_guard_delta_evidence.py"
+GUARD_PIN = "88285acf570688befbc8e36eb73f46987171bd4e"
+_PR = 77
+_HEAD = "a" * 40
+_BASE = "b" * 40
+_MAIN = "c" * 40
+
+
+def _guard_module() -> Any:
+    spec = importlib.util.spec_from_file_location("rie_guard_delta_evidence_t", GUARD_SCRIPT)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _identity(**overrides: Any) -> dict[str, Any]:
+    ident = {
+        "repository": "James3014/Nexus-new",
+        "pr_number": _PR,
+        "head_sha": _HEAD,
+        "base_sha": _BASE,
+        "current_main_sha": _MAIN,
+    }
+    ident.update(overrides)
+    return ident
+
+
+def _report(classification: str, **extra: Any) -> dict[str, Any]:
+    ident = _identity()
+    old = {**ident, "head_sha": _BASE}
+    report = {
+        "classification": classification,
+        "reason_codes": [],
+        "tightening_witnesses": [],
+        "loosening_witnesses": [],
+        "evidence_gaps": [],
+        "collection_errors": [],
+        "content_sha256": "d" * 64,
+        "is_complete": True,
+        "collection_complete": True,
+        "old_identity": old,
+        "new_identity": ident,
+    }
+    report.update(extra)
+    return report
+
+
+def _projection(classification: str, gaps: tuple[str, ...] = (), **extra: Any) -> dict[str, Any]:
+    return _guard_module().project_report(
+        _report(classification, **extra), _identity(), "e" * 40, gaps
+    )
+
+
+def _write(tmp_path: Path, projection: dict[str, Any]) -> Path:
+    path = tmp_path / "guard.json"
+    path.write_text(json.dumps(projection), encoding="utf-8")
+    return path
+
+
+def _render_guard(tmp_path: Path, projection: dict[str, Any], **kw: Any) -> str:
+    guard = rpc.load_guard_delta(
+        _write(tmp_path, projection), kw.get("pr", _PR), kw.get("head", _HEAD)
+    )
+    return rpc.render_comment(rpc.Findings(guard_delta=guard))
+
+
+def test_guard_loosens_is_flagged_and_suppresses_nothing_to_flag(tmp_path: Path) -> None:
+    proj = _projection(
+        "LOOSENS", loosening_witnesses=["a", "b", "c", "d", "e"], tightening_witnesses=["t"]
+    )
+    body = _render_guard(tmp_path, proj)
+    assert rpc.NOTHING_TO_FLAG not in body
+    line = next(x for x in body.splitlines() if "Guard semantic delta" in x)
+    assert line.startswith("- Guard semantic delta (`canonical_owner_table`): `LOOSENS`")
+    assert "HIGH_SIGNAL_REVIEW_ATTENTION" in line
+    assert "loosening `a`, `b`, `c` (+2 more)" in line
+    assert "tightening `t`" in line
+    assert "`d`" not in line
+    assert f"report `{'d' * 12}`" in line
+
+
+def test_guard_unknown_shows_reason_codes(tmp_path: Path) -> None:
+    body = _render_guard(tmp_path, _projection("UNKNOWN", reason_codes=["R1", "R2"]))
+    assert "`UNKNOWN`" in body and "reasons `R1`, `R2`" in body
+    assert rpc.NOTHING_TO_FLAG not in body
+
+
+def test_guard_unchanged_is_a_note_and_nothing_to_flag_still_shows(tmp_path: Path) -> None:
+    body = _render_guard(tmp_path, _projection("UNCHANGED"))
+    lines = body.splitlines()
+    assert lines[1] == rpc.NOTHING_TO_FLAG
+    assert lines[2].startswith("- Note: guard semantic delta (`canonical_owner_table`) `UNCHANGED`")
+    assert (
+        f"report `{'d' * 12}`, static evidence only (behavioral probes not run), advisory only"
+        in lines[2]
+    )
+
+
+def test_guard_incomplete_projection_is_not_observed_never_unchanged(tmp_path: Path) -> None:
+    proj = _guard_module().make_incomplete_projection(_identity(), "ENGINE_UNAVAILABLE")
+    body = _render_guard(tmp_path, proj)
+    assert "- Note: guard semantic delta not observed (`ENGINE_UNAVAILABLE`)" in body
+    assert "this is not an unchanged result" in body
+    assert "`UNCHANGED`" not in body
+
+
+def test_guard_tampered_seal_is_not_observed(tmp_path: Path) -> None:
+    proj = _projection("LOOSENS")
+    proj["classification"] = "UNCHANGED"  # edited without resealing
+    body = _render_guard(tmp_path, proj)
+    assert "not observed (`BAD_SEAL`)" in body
+    assert "`UNCHANGED`" not in body
+
+
+@pytest.mark.parametrize(
+    ("pr", "head"), [(_PR + 1, _HEAD), (_PR, "f" * 40)], ids=["pr_number", "head_sha"]
+)
+def test_guard_identity_mismatch_is_not_observed(tmp_path: Path, pr: int, head: str) -> None:
+    body = _render_guard(tmp_path, _projection("UNCHANGED"), pr=pr, head=head)
+    assert "not observed (`IDENTITY_MISMATCH`)" in body
+
+
+def test_guard_repository_base_family_and_head_are_bound(tmp_path: Path) -> None:
+    path = _write(tmp_path, _projection("UNCHANGED"))
+    ok = rpc.load_guard_delta(path, _PR, _HEAD, repository="James3014/Nexus-new", base_sha=_BASE)
+    assert ok.observed
+    assert rpc.load_guard_delta(path, _PR, "").reason == "IDENTITY_MISMATCH"
+    assert rpc.load_guard_delta(path, _PR, _HEAD, repository="x/y").reason == "IDENTITY_MISMATCH"
+    assert rpc.load_guard_delta(path, _PR, _HEAD, base_sha="f" * 40).reason == "IDENTITY_MISMATCH"
+    proj = {k: v for k, v in _projection("UNCHANGED").items() if k != "content_sha256"}
+    proj["guard_family"] = "other_family"
+    resealed = _guard_module()._seal(proj)
+    assert rpc.load_guard_delta(_write(tmp_path, resealed), _PR, _HEAD).reason == "BAD_GUARD_FAMILY"
+
+
+def test_guard_missing_or_bad_files_are_not_observed(tmp_path: Path) -> None:
+    missing = rpc.load_guard_delta(tmp_path / "nope.json", _PR, _HEAD)
+    assert (missing.observed, missing.reason) == (False, "FILE_MISSING")
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json", encoding="utf-8")
+    assert rpc.load_guard_delta(bad, _PR, _HEAD).reason == "FILE_UNREADABLE"
+    bad.write_text("[]", encoding="utf-8")
+    assert rpc.load_guard_delta(bad, _PR, _HEAD).reason == "BAD_SHAPE"
+    proj = _projection("UNCHANGED")
+    proj["schema"] = "other.v1"
+    assert rpc.load_guard_delta(_write(tmp_path, proj), _PR, _HEAD).reason == "BAD_SCHEMA"
+    proj = _projection("UNCHANGED")
+    proj["claim_ceiling"] = "MORE"
+    assert rpc.load_guard_delta(_write(tmp_path, proj), _PR, _HEAD).reason == "BAD_CLAIM_CEILING"
+    assert "not observed (`FILE_MISSING`)" in rpc.render_comment(rpc.Findings(guard_delta=missing))
+
+
+def test_no_guard_delta_renders_exactly_as_before() -> None:
+    plain = rpc.Findings(notes=("n",))
+    assert rpc.render_comment(plain) == rpc.render_comment(
+        rpc.Findings(notes=("n",), guard_delta=None)
+    )
+    assert rpc.Findings().guard_delta is None
+    assert rpc.render_comment(rpc.Findings()) == f"{rpc.MARKER}\n{rpc.NOTHING_TO_FLAG}"
+
+
+def test_guard_untrusted_witnesses_are_sanitized(tmp_path: Path) -> None:
+    hostile = "x`](https://evil)\n@James3014 <img>"
+    proj = _projection("LOOSENS", loosening_witnesses=[hostile])
+    # project_report redacts non-identifiers; reseal a hostile one to test the renderer too.
+    proj["loosening_witnesses"] = {"items": [hostile], "total": 1, "truncated": False}
+    proj["content_sha256"] = rpc._guard_canonical_hash({
+        k: v for k, v in proj.items() if k != "content_sha256"
+    })
+    body = _render_guard(tmp_path, proj)
+    assert "\n@James3014" not in body
+    line = next(x for x in body.splitlines() if "Guard semantic delta" in x)
+    assert "`x'](https://evil) @James3014 <img>`" in line
+    assert len(body.splitlines()) == 2
+
+
+def test_guard_canonical_hash_parity_with_evidence_script() -> None:
+    guard = _guard_module()
+    samples: list[dict[str, Any]] = [
+        {},
+        {"b": 1, "a": [1, 2, {"z": None}]},
+        {"u": "caf" + chr(0xE9) + chr(0x4E2D), "t": True, "f": 1.5},
+    ]
+    samples.append(_projection("LOOSENS"))
+    for sample in samples:
+        assert rpc._guard_canonical_hash(sample) == guard.canonical_hash(sample)
+    proj = _projection("UNCHANGED")
+    assert proj["content_sha256"] == rpc._guard_canonical_hash({
+        k: v for k, v in proj.items() if k != "content_sha256"
+    })
+
+
+def _comment_steps() -> list[dict[str, Any]]:
+    data = yaml.safe_load(COMMENT_WORKFLOW.read_text(encoding="utf-8"))
+    return data["jobs"]["sticky-comment"]["steps"]
+
+
+def test_comment_workflow_guard_step_is_data_only() -> None:
+    steps = _comment_steps()
+    guard = [s for s in steps if "rie_guard_delta_evidence.py" in s.get("run", "")]
+    assert len(guard) == 1
+    step = guard[0]
+    assert "--run-behavioral-probes" not in step["run"]
+    assert "--step-summary" not in step["run"]
+    assert step.get("continue-on-error") is True
+    assert "python3 -I" in step["run"]
+    assert "--engine-root" in step["run"] and ".rie-guard-engine" in step["run"]
+    render = [s for s in steps if "rie_pr_comment.py" in s.get("run", "")]
+    assert len(render) == 1
+    assert '--guard-delta-json "$RUNNER_TEMP/rie-guard-delta.json"' in render[0]["run"]
+    assert steps.index(step) < steps.index(render[0])
+    assert "--run-behavioral-probes" not in COMMENT_WORKFLOW.read_text(encoding="utf-8")
+
+
+def test_comment_workflow_checkouts_are_pinned_and_never_the_pr_head() -> None:
+    steps = _comment_steps()
+    checkouts = [s for s in steps if str(s.get("uses", "")).startswith("actions/checkout@")]
+    assert len(checkouts) == 3
+    for step in checkouts:
+        with_ = step["with"]
+        assert with_["persist-credentials"] is False
+        assert "pull_request.head" not in str(with_.get("ref", ""))
+    engines = {s["with"].get("path"): s["with"].get("ref") for s in checkouts}
+    assert engines[".rie-guard-engine"] == GUARD_PIN
+    assert engines[".rie-engine"] == "77a937b67c3da4756f535a41b59cdf5555a25e31"
+    default = next(s for s in checkouts if "path" not in s["with"])
+    assert default["with"]["fetch-depth"] == 0
+    assert "ref" not in default["with"]
+    assert ".rie-guard-engine/" in (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+
+
+def test_guard_non_observed_disposition_is_not_observed_even_if_unchanged(tmp_path: Path) -> None:
+    proj = _projection("UNCHANGED")
+    proj = {k: v for k, v in proj.items() if k != "content_sha256"}
+    proj["disposition"] = "ADVISORY_INCOMPLETE"
+    proj = _guard_module()._seal(proj)
+    out = _render_guard(tmp_path, proj)
+    assert "not observed" in out
+    assert "`UNCHANGED`" not in out
+
+
+def test_comment_workflow_guard_step_has_no_token() -> None:
+    steps = _comment_steps()
+    step = next(s for s in steps if "rie_guard_delta_evidence.py" in s.get("run", ""))
+    env_text = json.dumps(step.get("env", {}))
+    assert "token" not in env_text.lower()
+    assert "secrets." not in env_text
+    assert "GITHUB_TOKEN" not in step["run"]
+
+
+def test_guard_directional_with_gaps_says_so(tmp_path: Path) -> None:
+    proj = _projection(
+        "LOOSENS",
+        loosening_witnesses=["a"],
+        evidence_gaps=["GAP_ONE"],
+        collection_errors=["ERR_ONE"],
+        is_complete=False,
+    )
+    body = _render_guard(tmp_path, proj)
+    assert "`LOOSENS`" in body
+    assert "2 evidence gaps or collection errors" in body

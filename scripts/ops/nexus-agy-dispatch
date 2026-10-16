@@ -339,6 +339,241 @@ def canonicalize_agy_model(model: str | None) -> str | None:
     return stripped
 
 
+AGY_MODEL_CATALOG_TIMEOUT_DEFAULT_SEC = 30.0
+AGY_MODEL_CATALOG_TTL_DEFAULT_SEC = 900.0
+_AGY_MODEL_ID_RE = re.compile(r"[A-Za-z0-9_.:-]+")
+
+
+def _env_positive_float(name: str, default: float) -> float:
+    try:
+        value = float(os.getenv(name, ""))
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def _parse_agy_models_output(text: str) -> list[str]:
+    """Parse ``agy models`` output: ``<id>\\t<label>`` lines; header/blank ignored."""
+    ids: list[str] = []
+    for line in (text or "").splitlines():
+        if "\t" not in line:
+            continue
+        candidate = line.split("\t", 1)[0].strip()
+        if candidate and _AGY_MODEL_ID_RE.fullmatch(candidate) and candidate not in ids:
+            ids.append(candidate)
+    return ids
+
+
+def _agy_model_catalog_sha256(ids: list[str]) -> str:
+    return hashlib.sha256("\n".join(sorted(ids)).encode("utf-8")).hexdigest()
+
+
+def _agy_model_catalog_env_binding(env: dict[str, str]) -> str:
+    """Hash of the leased HOME and resolved agy executable the catalog is fetched with."""
+    material = f"{env.get('HOME', '')}\0{shutil.which('agy') or ''}"
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _agy_model_catalog_cache_path(account_alias_hash: str, env_binding: str) -> Path:
+    safe = re.sub(r"[^A-Za-z0-9_-]", "_", str(account_alias_hash))[:128] or "unknown"
+    return OPERATION_ROOT / "model-catalog" / f"{safe}-{env_binding[:16]}.json"
+
+
+def _agy_model_catalog_read_cache(
+    path: Path, *, now: float, ttl: float, env_binding: str
+) -> dict[str, Any] | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if data.get("env_binding") != env_binding:
+            return None
+        ids = data["ids"]
+        epoch = float(data["checked_at_epoch"])
+        if not (isinstance(ids, list) and ids and all(isinstance(i, str) for i in ids)):
+            return None
+        if data.get("catalog_sha256") != _agy_model_catalog_sha256(ids):
+            return None
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    if not (0 <= now - epoch < ttl):
+        return None
+    return {
+        "catalog_status": "OK",
+        "checked_at": data.get("checked_at"),
+        "checked_at_epoch": epoch,
+        "catalog_sha256": data["catalog_sha256"],
+        "ids": list(ids),
+        "source": "CACHED",
+        "reason": None,
+    }
+
+
+def _agy_model_catalog_write_cache(
+    path: Path, snapshot: dict[str, Any], env_binding: str
+) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+        payload = {
+            "checked_at": snapshot["checked_at"],
+            "checked_at_epoch": snapshot["checked_at_epoch"],
+            "catalog_sha256": snapshot["catalog_sha256"],
+            "ids": snapshot["ids"],
+            "env_binding": env_binding,
+        }
+        fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(payload, sort_keys=True))
+            os.replace(tmp, path)
+        finally:
+            if tmp.exists():
+                tmp.unlink()
+    except OSError:
+        pass  # cache is an optimisation; never fail dispatch on it
+
+
+def _agy_model_catalog_fetch(env: dict[str, str], timeout: float) -> tuple[int | None, str, str]:
+    """Run ``agy models`` with the leased account env; returns (code, out, reason)."""
+    agy = shutil.which("agy")
+    if not agy:
+        return None, "", "AGY_BINARY_NOT_FOUND"
+    try:
+        proc = subprocess.Popen(
+            [agy, "models"],
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            start_new_session=True,
+        )
+    except OSError as exc:
+        return None, "", f"CATALOG_START_FAILED:{type(exc).__name__}"
+    try:
+        out, _ = proc.communicate(timeout=timeout)
+    except BaseException as exc:
+        # Unconditional cleanup (timeout, KeyboardInterrupt, signal-raised
+        # exceptions): kill the group by its own PID and reap, then propagate.
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        try:
+            proc.kill()
+        except OSError:
+            pass
+        try:
+            proc.wait(timeout=5)
+        except BaseException:
+            pass
+        if isinstance(exc, subprocess.TimeoutExpired):
+            return None, "", "CATALOG_TIMEOUT"
+        raise
+    return proc.returncode, out or "", ""
+
+
+def _agy_model_catalog_snapshot(
+    *,
+    env: dict[str, str],
+    account_alias_hash: str,
+    now: float | None = None,
+) -> dict[str, Any]:
+    """Account-scoped catalog snapshot (#1357); DEGRADED never blocks and is not cached."""
+    now = time.time() if now is None else now
+    ttl = _env_positive_float("NEXUS_AGY_MODEL_CATALOG_TTL_SEC", AGY_MODEL_CATALOG_TTL_DEFAULT_SEC)
+    timeout = _env_positive_float(
+        "NEXUS_AGY_MODEL_CATALOG_TIMEOUT_SEC", AGY_MODEL_CATALOG_TIMEOUT_DEFAULT_SEC
+    )
+    env_binding = _agy_model_catalog_env_binding(env)
+    path = _agy_model_catalog_cache_path(account_alias_hash, env_binding)
+    cached = _agy_model_catalog_read_cache(path, now=now, ttl=ttl, env_binding=env_binding)
+    if cached is not None:
+        return cached
+    code, out, reason = _agy_model_catalog_fetch(env, timeout)
+    if not reason and code != 0:
+        reason = f"CATALOG_EXIT_{code}"
+    ids = [] if reason else _parse_agy_models_output(out)
+    if not reason and not ids:
+        reason = "CATALOG_EMPTY"
+    checked_at = datetime.fromtimestamp(now, timezone.utc).isoformat()
+    if reason:
+        return {
+            "catalog_status": "DEGRADED",
+            "checked_at": checked_at,
+            "checked_at_epoch": now,
+            "catalog_sha256": None,
+            "ids": [],
+            "source": "FRESH",
+            "reason": reason,
+        }
+    snapshot = {
+        "catalog_status": "OK",
+        "checked_at": checked_at,
+        "checked_at_epoch": now,
+        "catalog_sha256": _agy_model_catalog_sha256(ids),
+        "ids": ids,
+        "source": "FRESH",
+        "reason": None,
+    }
+    _agy_model_catalog_write_cache(path, snapshot, env_binding)
+    return snapshot
+
+
+def _agy_model_catalog_admission(
+    *,
+    model: str | None,
+    effort: str | None,
+    env: dict[str, str],
+    account_alias_hash: str,
+) -> dict[str, Any]:
+    """Decide fixed-model admission; returns the durable ``model_catalog`` projection."""
+    resolved = canonicalize_agy_model(model) if model else None
+    base: dict[str, Any] = {
+        "requested_model": model,
+        "resolved_model": resolved,
+        "model_catalog": {
+            "status": "NOT_REQUIRED",
+            "checked_at": None,
+            "catalog_sha256": None,
+            "source": None,
+            "mismatch_reason": None,
+        },
+        "admitted": True,
+    }
+    catalog = base["model_catalog"]
+    if not resolved:
+        return base
+    if os.getenv("NEXUS_AGY_MODEL_CATALOG_CHECK", "1").strip() == "0":
+        catalog["status"] = "DISABLED"
+        return base
+    snap = _agy_model_catalog_snapshot(env=env, account_alias_hash=account_alias_hash)
+    catalog.update({
+        "checked_at": snap["checked_at"],
+        "catalog_sha256": snap["catalog_sha256"],
+        "source": snap["source"],
+    })
+    if snap["catalog_status"] != "OK":
+        catalog["status"] = "DEGRADED"
+        catalog["mismatch_reason"] = snap["reason"]
+        return base
+    ids = set(snap["ids"])
+    # Agy receives --model <resolved> --effort <effort>; accept catalogs that
+    # encode the effort in the id (e.g. claude-sonnet-5-5-medium) as well.
+    if resolved in ids or (effort and f"{resolved}-{effort}" in ids):
+        catalog["status"] = "OK"
+        return base
+    # Without an explicit effort Agy resolves a bare alias (e.g.
+    # gemini-3.8-flash) to one of its served effort tiers; admit it only when
+    # the account's catalog actually serves such a tier.
+    if not effort and any(f"{resolved}-{tier}" in ids for tier in ("low", "medium", "high")):
+        catalog["status"] = "OK"
+        return base
+    catalog["status"] = "MODEL_CAPABILITY_UNAVAILABLE"
+    catalog["mismatch_reason"] = "MODEL_NOT_IN_ACCOUNT_CATALOG"
+    base["admitted"] = False
+    return base
+
+
 def _model_family(model: str | None) -> str:
     value = (model or "").strip().lower()
     if value.startswith("gemini-"):
@@ -3581,6 +3816,56 @@ def dispatch_run(
                     ),
                 )
 
+            catalog_decision = _agy_model_catalog_admission(
+                model=model,
+                effort=effort,
+                env=dict(claim.lease.execution_env),
+                account_alias_hash=claim.account_alias_hash,
+            )
+            _operation_hook(
+                operation_hook,
+                requested_model=catalog_decision["requested_model"],
+                resolved_model=catalog_decision["resolved_model"],
+                model_catalog=catalog_decision["model_catalog"],
+            )
+            if not catalog_decision["admitted"]:
+                # #1357: the leased account's live catalog lacks the fixed model.
+                # Fail before any semantic provider work; no substitution and no
+                # rotation (the lease is released by the outer finally).
+                capability_detail = (
+                    "DISPATCH_MODEL_CONTRACT_REJECTED:MODEL_CAPABILITY_UNAVAILABLE:"
+                    f"{catalog_decision['resolved_model']}"
+                )
+                last_kind = "MODEL_CAPABILITY_UNAVAILABLE"
+                _operation_hook(
+                    operation_hook,
+                    phase="MODEL_REJECTED",
+                    attempts=attempts,
+                    rotations=rotations,
+                    failure_kind="MODEL_CAPABILITY_UNAVAILABLE",
+                    failure_detail=capability_detail,
+                    provider_effect=False,
+                    retry_permitted=True,
+                    account_alias_hash=claim.account_alias_hash,
+                    lease_id_hash=claim.lease_id_hash,
+                )
+                emit_meta({
+                    "status": "invalid_model",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "failure_kind": "MODEL_CAPABILITY_UNAVAILABLE",
+                    "failure_detail": capability_detail,
+                    "provider_effect": False,
+                    "retry_permitted": True,
+                    "account_alias_hash": claim.account_alias_hash,
+                    "lease_id_hash": claim.lease_id_hash,
+                    "requested_model": catalog_decision["requested_model"],
+                    "resolved_model": catalog_decision["resolved_model"],
+                    "model_catalog": catalog_decision["model_catalog"],
+                    "wall_ms": total_wall_ms,
+                })
+                return 64
+
             if _budget_exhausted():
                 return _emit_total_deadline_exhausted()
             attempts += 1
@@ -4323,6 +4608,16 @@ def _supervisor_terminal_guard(func):
                 "STARTING",
                 "ACCOUNT_LEASED",
             }
+            if phase == "MODEL_REJECTED":
+                # Pre-provider only when no provider attempt ever ran: after an
+                # account rotation an earlier attempt may have had an effect.
+                provider_effect_possible = bool(
+                    int(record.get("attempts") or 0) > 0
+                    or record.get("provider_pid")
+                    or record.get("provider_started_at")
+                    or record.get("first_effect_at")
+                    or int(record.get("tool_event_count") or 0) > 0
+                )
             attestation = _parse_agy_attestation(
                 attestation_log_path,
                 requested_model=model,
@@ -4526,6 +4821,9 @@ def _run_background_operation(
             permission_profile_sha256=snapshot.get("permission_profile_sha256"),
             permission_profile_kind=snapshot.get("permission_profile_kind"),
             effective_permissions=snapshot.get("effective_permissions"),
+            requested_model=snapshot.get("requested_model"),
+            resolved_model=snapshot.get("resolved_model"),
+            model_catalog=snapshot.get("model_catalog"),
         )
 
     def on_event(event: dict[str, Any]) -> None:
