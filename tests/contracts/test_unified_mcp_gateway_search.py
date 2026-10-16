@@ -33,6 +33,7 @@ from nexus.orchestrator.unified_mcp_gateway import (  # noqa: E402
     _python_literal_search,
     _run_rg_literal_search,
 )
+from nexus.orchestrator.unified_mcp_gateway_parts import search as search_module  # noqa: E402
 
 
 class _StubService:
@@ -577,7 +578,7 @@ def test_natural_exit_never_calls_terminate_or_kill(monkeypatch, tmp_path):
         calls.append(process)
         return real_helper(process)
 
-    monkeypatch.setattr(gateway_module, "_terminate_and_reap_search_process", recording_helper)
+    monkeypatch.setattr(search_module, "_terminate_and_reap_search_process", recording_helper)
     fake = _write_fake_executable(
         "import os, sys, time\n"
         "sys.stdout.write('f.py:1:needle\\n')\n"

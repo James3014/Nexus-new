@@ -349,8 +349,11 @@ def _patched_names(source: str, facades: tuple[str, ...]) -> set[tuple[str, str]
         first = node.args[0]
         if isinstance(first, ast.Constant) and isinstance(first.value, str):
             for facade in facades:
-                if first.value.startswith(f"{facade}."):
-                    found.add((facade, first.value[len(facade) + 1 :].split(".")[0]))
+                rest = first.value[len(facade) + 1 :]
+                # ``facade.X.Y`` patches attribute Y on the object X, which a part
+                # shares (same module/class object); only ``facade.X`` rebinds X.
+                if first.value.startswith(f"{facade}.") and "." not in rest:
+                    found.add((facade, rest))
             continue
         target = _dotted(first)
         facade = aliases.get(target or "") or (target if target in facades else None)
@@ -550,6 +553,18 @@ def test_stale_patch_guard_detects_bare_name_call_in_part() -> None:
         ("tests/test_x.py", SHTS_MODULE, "time", "shts_parts/late.py"),
         ("tests/test_x.py", GW_MODULE, "_terminate", "gw_parts/search.py"),
     ]
+    # ``facade.X.Y`` patches an attribute of a shared object and is never stale.
+    shared_source = (
+        "def test_x(monkeypatch):\n"
+        "    monkeypatch.setattr('nexus.orchestrator.unified_mcp_gateway.os.popen', 1)\n"
+        "    monkeypatch.setattr('nexus.orchestrator.unified_mcp_gateway.subprocess.run', 2)\n"
+    )
+    shared_parts = {
+        GW_MODULE: {
+            "gw_parts/search.py": "import os\nimport subprocess\ndef go():\n    os.popen\n    subprocess.run\n"
+        }
+    }
+    assert _stale_patches({"tests/test_x.py": shared_source}, shared_parts) == []
 
 
 def test_stale_patch_allowlist_entries_are_well_formed() -> None:
