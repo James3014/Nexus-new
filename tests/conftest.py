@@ -495,6 +495,21 @@ def _event_bus_class():
     return getattr(module, "NexusEventBus", None) if module is not None else None
 
 
+def _clear_recorded_executor_resolution_errors() -> None:
+    module = sys.modules.get("nexus.services.capability_registry")
+    clear = getattr(module, "clear_executor_resolution_errors", None)
+    if callable(clear):
+        clear()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_executor_resolution_errors():
+    """Per-process executor resolution errors (PR-5e) never leak between tests."""
+    _clear_recorded_executor_resolution_errors()
+    yield
+    _clear_recorded_executor_resolution_errors()
+
+
 @pytest.fixture(autouse=True)
 def _restore_event_bus_binding():
     bus = _event_bus_class()

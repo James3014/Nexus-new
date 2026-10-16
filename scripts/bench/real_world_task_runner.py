@@ -439,6 +439,29 @@ def _run_gemini_patch(
                     "gemini_returncode": None,
                     "error": refusal,
                 }
+            try:
+                seatbelt_profile = admission.build_seatbelt_profile(
+                    run_root=agy_run_root,
+                    writable_target=case_real,
+                    run_home=run_home,
+                    source_home=Path(env["HOME"]),
+                )
+            except ValueError as exc:
+                return {
+                    "regression_test_added": False,
+                    "unrelated_change": False,
+                    "root_cause": "",
+                    "written_files": [],
+                    "model_calls": 0,
+                    "total_tokens": 0,
+                    "token_capture_status": "not_run",
+                    "gemini_returncode": None,
+                    "error": (
+                        "agy_target_inside_credential_path"
+                        if isinstance(exc, admission.CredentialPathOverlapError)
+                        else "agy_seatbelt_profile_unrepresentable"
+                    ),
+                }
             result = run_cli_worker(
                 CliWorkerRequest(
                     executable=str(bin_path),
@@ -446,9 +469,7 @@ def _run_gemini_patch(
                     cwd=str(case_real),
                     env=admission.agy_child_env(env, home=run_home, tmpdir=run_tmp),
                     timeout_seconds=float(timeout_sec),
-                    seatbelt_profile=admission.build_seatbelt_profile(
-                        run_root=agy_run_root, writable_target=case_real, run_home=run_home
-                    ),
+                    seatbelt_profile=seatbelt_profile,
                     sweep_descendants_on_exit=True,
                     sweep_roots=(str(case_real), str(agy_run_root)),
                     exact_env=True,
