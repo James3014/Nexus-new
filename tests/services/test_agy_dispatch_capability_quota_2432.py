@@ -162,7 +162,7 @@ def _retirements(pool_env) -> list[str]:
     )
 
 
-def _dispatch(pool_env, coordinator, runner, *, model=SONNET_55, allow=None, events=None):
+def _dispatch(pool_env, coordinator, runner, *, model=SONNET_55, allow=None, events=None, **extra):
     return dispatch.dispatch_run(
         prompt="review the PR",
         cwd=str(pool_env.review_dir),
@@ -174,6 +174,7 @@ def _dispatch(pool_env, coordinator, runner, *, model=SONNET_55, allow=None, eve
         coordinator=coordinator,
         run_agy_fn=runner,
         operation_hook=events.append if events is not None else None,
+        **extra,
     )
 
 
@@ -352,3 +353,107 @@ def test_2412_trial_operations_would_have_rotated(tmp_path: Path) -> None:
             False,
         )
         assert dispatch.is_agy_rotation_eligible(dispatch.AccountFailureKind.QUOTA_EXHAUSTED)
+
+
+# --- Codex r1 on #2435 --------------------------------------------------------
+
+
+def test_read_only_packet_with_a_write_grant_keeps_unknown_effect() -> None:
+    effect = dispatch._quota_failure_effect
+    for extra in ("write_file(/repo/**)", "command(git status)"):
+        assert effect(
+            None,
+            mode="plan",
+            permission_profile_kind="READ_ONLY_RESEARCH",
+            allow_rules=["read_file(/repo/**)", extra],
+        ) == ("PROVIDER_QUOTA_EXHAUSTED_UNKNOWN_EFFECT", None, True)
+    assert (
+        effect(
+            None,
+            mode="plan",
+            permission_profile_kind="READ_ONLY_RESEARCH",
+            allow_rules=["read_file(/repo/**)"],
+        )[0]
+        == "PROVIDER_QUOTA_EXHAUSTED_NO_WRITE_PROFILE"
+    )
+
+
+def test_read_only_dispatch_with_write_grant_does_not_rotate_on_quota(pool_env) -> None:
+    coordinator = pool_env.make({"a": [SONNET_55], "b": [SONNET_55]})
+    calls: list[str] = []
+    review_dir = pool_env.review_dir.resolve()
+
+    def runner(**kwargs):
+        calls.append(_account_of(kwargs["env"]))
+        return 1, PARTIAL_REVIEW, QUOTA_STDERR, False, 5
+
+    code = _dispatch(
+        pool_env,
+        coordinator,
+        runner,
+        allow=[f"read_file({review_dir}/**)", f"write_file({review_dir}/notes.md)"],
+    )
+
+    assert calls == ["a"]
+    assert code != 0
+    final = pool_env.metas[-1]
+    assert final["failure_kind"] == "PROVIDER_QUOTA_EXHAUSTED_UNKNOWN_EFFECT"
+    assert final["reconciliation_required"] is True
+
+
+def test_capable_account_busy_elsewhere_is_pool_busy_not_invalid_model(pool_env) -> None:
+    coordinator = pool_env.make({"g1": ["claude-sonnet-4-6"], "primary": [SONNET_55]})
+    holder = CrossProcessLeaseCoordinator(
+        manager=coordinator.manager,
+        allocator_lock_path=pool_env.tmp_path / "allocator.lock",
+        leases_dir=pool_env.tmp_path / "leases",
+    )
+    held = holder.acquire_claim(
+        consumer_id="other-task",
+        exclude_hashes={hashlib.sha256(b"g1").hexdigest()[:12]},
+        wait_timeout=0.0,
+    )
+    calls: list[str] = []
+    try:
+        code = _dispatch(
+            pool_env,
+            coordinator,
+            lambda **kw: calls.append(_account_of(kw["env"])) or (0, "x", "", False, 1),
+            pool_wait_timeout=0.3,
+        )
+    finally:
+        held.release()
+
+    assert calls == []
+    assert code == 75
+    final = pool_env.metas[-1]
+    assert final["status"] == "pool_busy"
+    assert final["failure_kind"] == "AGY_ACCOUNT_POOL_BUSY"
+    assert final["capability_checked_accounts"] == 1
+
+
+def test_capability_skips_stop_at_the_total_deadline(pool_env, monkeypatch) -> None:
+    coordinator = pool_env.make({
+        "g1": ["claude-sonnet-4-6"],
+        "g2": ["claude-sonnet-4-6"],
+        "primary": [SONNET_55],
+    })
+    clock = [1000.0]
+    monkeypatch.setattr(dispatch, "_monotonic", lambda: clock[0])
+    real_snapshot = dispatch._agy_model_catalog_snapshot
+
+    def slow_snapshot(**kwargs):
+        clock[0] += 58.0  # each catalog check eats most of a 60 s budget
+        return real_snapshot(**kwargs)
+
+    monkeypatch.setattr(dispatch, "_agy_model_catalog_snapshot", slow_snapshot)
+    calls: list[str] = []
+
+    code = _dispatch(
+        pool_env, coordinator, lambda **kw: calls.append("ran") or (0, "x", "", False, 1)
+    )
+
+    assert calls == []
+    assert code == 124
+    assert pool_env.catalog_checks == ["g1"]
+    assert pool_env.metas[-1]["total_deadline_exhausted"] is True

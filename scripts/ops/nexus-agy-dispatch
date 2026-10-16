@@ -3865,6 +3865,7 @@ def _quota_failure_effect(
     *,
     mode: str,
     permission_profile_kind: str | None,
+    allow_rules: list[str] | None = None,
 ) -> tuple[str, bool | None, bool]:
     """``(failure_kind, provider_effect, reconciliation_required)`` of a quota failure.
 
@@ -3877,7 +3878,16 @@ def _quota_failure_effect(
         return "PROVIDER_QUOTA_EXHAUSTED_AFTER_EFFECT", True, True
     if attempt_changed_paths == []:
         return "PROVIDER_QUOTA_EXHAUSTED_PRE_EFFECT", False, False
-    if mode != "accept-edits" and permission_profile_kind in NO_WRITE_PERMISSION_PROFILE_KINDS:
+    # A READ_ONLY_RESEARCH packet keeps caller allow rules, so it is no-write
+    # only when no write or command tool is granted (Codex r1 on #2435).
+    grants_effect_tool = any(
+        str(rule).startswith(("write_file", "command")) for rule in (allow_rules or [])
+    )
+    if (
+        mode != "accept-edits"
+        and permission_profile_kind in NO_WRITE_PERMISSION_PROFILE_KINDS
+        and not grants_effect_tool
+    ):
         return "PROVIDER_QUOTA_EXHAUSTED_NO_WRITE_PROFILE", False, False
     return "PROVIDER_QUOTA_EXHAUSTED_UNKNOWN_EFFECT", None, True
 
@@ -4592,7 +4602,11 @@ def dispatch_run(
                 exclude_hashes.add(claim.account_alias_hash)
                 skipped_claim = claim
                 skipped_claim.release()
+                if total_deadline - _monotonic() < TOTAL_DEADLINE_MIN_ATTEMPT_SECONDS:
+                    # No budget left to check another account (Codex r1 #2435).
+                    return _emit_total_deadline_exhausted()
                 next_claim = None
+                exhausted_meta: dict[str, Any] = {}
                 try:
                     next_claim = _queued_claim(
                         first_pass=lambda: coordinator.acquire_claim(
@@ -4602,7 +4616,25 @@ def dispatch_run(
                             model_family=scoped_model_family,
                         )
                     )
-                except _PoolClaimFailure:
+                except _PoolClaimFailure as capability_exc:
+                    if capability_exc.busy:
+                        # Unchecked accounts are leased elsewhere: the model may
+                        # be available there, so this is a busy pool, not an
+                        # invalid model.
+                        _operation_hook(operation_hook, pool_queue=dict(pool_queue))
+                        emit_meta({
+                            "status": "pool_busy",
+                            "attempts": attempts,
+                            "rotations": rotations,
+                            "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
+                            "capability_checked_accounts": len(capability_skipped),
+                            "wall_ms": total_wall_ms,
+                            "permission_profile_sha256": permission_profile_sha256,
+                            "permission_profile_kind": permission_profile_kind,
+                            **_pool_claim_meta(capability_exc),
+                        })
+                        return 75
+                    exhausted_meta = _pool_claim_meta(capability_exc)
                     next_claim = None
                 if (
                     next_claim is not None
@@ -4649,6 +4681,7 @@ def dispatch_run(
                     "failure_detail": capability_detail,
                     # #2432: every claimable account was checked; none offers it.
                     "capability_checked_accounts": len(capability_skipped),
+                    **exhausted_meta,
                     "provider_effect": False,
                     "retry_permitted": True,
                     "account_alias_hash": claim.account_alias_hash,
@@ -5035,6 +5068,7 @@ def dispatch_run(
                         attempt_changed_paths,
                         mode=mode,
                         permission_profile_kind=permission_profile_kind,
+                        allow_rules=list(effective_permissions.get("allow") or []),
                     )
                 )
             elif attempt_changed_paths:
