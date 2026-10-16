@@ -1344,16 +1344,17 @@ def test_all_registered_providers_enter_one_unified_receipt_contract(tmp_path: P
     """Registered transports share a unit contract; Workforce selects product lanes."""
     observed: dict[str, dict] = {}
     for provider in ONLINE_CLI_SPEC_REGISTRY:
-        if provider == "agy":
+        if provider in ("agy", "cline"):
             # build_subprocess_online_invoker adds --dangerously-skip-permissions
-            # for agy, which breaks with a bare sys.executable.  Use a direct
-            # stub instead.
+            # for agy, which breaks with a bare sys.executable.  Since runtime #222
+            # the runtime also owns the cline argv (--auto-approve false) and
+            # refuses a bare sys.executable.  Use a direct stub instead.
             invoker = lambda ctx: {
                 "invoked": True,
                 "output_delivered": True,
                 "gate_passed": True,
                 "provider_call_count": 1,
-                "evidence_refs": ["online:agy:test:subprocess"],
+                "evidence_refs": [f"online:{provider}:test:subprocess"],
             }
         else:
             invoker = build_subprocess_online_invoker(
@@ -1882,7 +1883,7 @@ def test_provider_neutral_cli_registry_is_explicit_and_non_invoking() -> None:
 @pytest.mark.parametrize(
     ("provider", "model", "expected"),
     (
-        ("cline", "glm-5.2", ["cline", "--json", "--yolo", "--model", "glm-5.2", "bounded"]),
+        ("cline", "glm-5.2", ["cline", "--json", "--auto-approve", "false", "--model", "glm-5.2", "bounded"]),
         ("mimo", "xiaomi/mimo-v2.5", ["mimo", "run", "--model", "xiaomi/mimo-v2.5", "bounded"]),
         ("ollama", "qwen3:8b", ["ollama", "run", "qwen3:8b", "bounded"]),
     ),

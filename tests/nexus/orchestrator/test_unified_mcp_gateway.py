@@ -570,9 +570,9 @@ def test_canonical_planner_admission_uses_policy_routing_not_worker_iteration(
     loader = WorkforcePolicyLoader()
     snapshot = loader.load()
     decoy = replace(
-        snapshot.workers["grok_review"],
+        snapshot.workers["agy_flash_38_high"],
         roles=(
-            *snapshot.workers["grok_review"].roles,
+            *snapshot.workers["agy_flash_38_high"].roles,
             "fast_bounded_implementation",
         ),
         preferred_context="nexus_bounded",
@@ -580,11 +580,11 @@ def test_canonical_planner_admission_uses_policy_routing_not_worker_iteration(
     reordered = replace(
         snapshot,
         workers={
-            "grok_review": decoy,
+            "agy_flash_38_high": decoy,
             **{
                 worker_id: worker
                 for worker_id, worker in snapshot.workers.items()
-                if worker_id != "grok_review"
+                if worker_id != "agy_flash_38_high"
             },
         },
     )

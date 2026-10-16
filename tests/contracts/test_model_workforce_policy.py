@@ -124,7 +124,8 @@ def test_mainchain_capability_and_current_availability_are_separate() -> None:
 
     grok = workers["grok_review"]
     assert grok["state"] == "PROVEN_MAINCHAIN"
-    assert grok["availability"] == "AVAILABLE"
+    assert grok["availability"] == "UNAVAILABLE"
+    assert grok["reason"] == "retired_from_frontier_priority_2026-10-15"
     assert grok["benchmark_ref"] == "grok_45"
 
 
@@ -304,7 +305,7 @@ def test_routing_is_deterministic_first_bounded_first_and_fail_closed() -> None:
     assert route_defaults["fallback"] is None
     campaign = routing["online"]["campaign_routing"]["CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01"]
     assert campaign["fast_bounded_implementation"] == "agy_flash_38"
-    assert routing["online"]["independent_review"] == "grok_review"
+    assert routing["online"]["independent_review"] == "agy_flash_38_high"
     assert routing["online"]["complex_milestone"] == "codex_luna_when_available"
 
     mandatory = set(routing["mandatory_escalation_conditions"])
