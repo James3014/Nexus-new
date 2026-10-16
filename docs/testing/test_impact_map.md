@@ -423,3 +423,4 @@
 | nexus/core/claim_gate_binding.py | tests/engine/test_gate_passed_site_inventory.py, tests/core/test_registry_gate_passed_inventory.py, tests/unit/local_heal/test_isolated_loop_receipt_binding.py, tests/engine/test_receipt_adapter_claim_gate_fail_closed.py | active | high | claim_gate_verifier_source_hash_binding_contract |
 | tests/integration/test_model_json_routing_2174.py | tests/integration/test_model_json_routing_2174.py | active | medium | test_contract |
 | nexus/knowledge/autonomous_memory_curator.py | tests/knowledge/test_autonomous_memory_curator.py, tests/integration/test_model_json_routing_2174.py | active | medium | model_output_json_routing_contract |
+| nexus/services/claude_account_pool.py | tests/services/test_claude_account_pool.py, tests/services/test_external_worker_dispatch.py, tests/services/test_external_worker_runtime.py, tests/services/test_grok_account_pool.py | active | high | claude_account_pool_identity_lease_contract |
