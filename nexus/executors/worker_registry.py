@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -39,6 +40,7 @@ from nexus.executors.agy_write_admission import (
     run_home_keychain_state,
     run_home_settings_sha256,
     target_git_entry_state,
+    top_level_json_objects,
     worker_home,
 )
 from nexus.executors.cli_worker import (
@@ -675,6 +677,92 @@ def _installed_agy_account_pool() -> Optional[Any]:
     return get_account_pool_manager()
 
 
+AGY_POOL_EXHAUSTED = "agy_pool_exhausted"
+AGY_POOL_BUSY = "agy_pool_busy"
+AGY_ACCOUNT_RETIREMENT_UNSAFE = "agy_account_retirement_unsafe"
+_AGY_RESET_IN_RE = re.compile(r"[Rr]esets in\s+((?:\d+\s*[dhms]\s*)+)")
+_AGY_DURATION_PART_RE = re.compile(r"(\d+)\s*([dhms])")
+_AGY_DURATION_UNITS = {"d": 86400, "h": 3600, "m": 60, "s": 1}
+
+
+def _agy_model_family(model: str) -> Optional[str]:
+    value = str(model or "").strip().lower()
+    if value.startswith("gemini-"):
+        return "gemini"
+    if value.startswith(("claude-", "gpt-")):
+        return "claude_gpt"
+    return None
+
+
+def _agy_quota_reset_seconds(result: CliWorkerResult) -> Optional[int]:
+    """Seconds until the quota resets, from agy's "Resets in 64h23m29s" text."""
+    text = (
+        result.stdout.decode("utf-8", errors="replace")
+        + "\n"
+        + result.stderr.decode("utf-8", errors="replace")
+    )
+    match = _AGY_RESET_IN_RE.search(text)
+    if match is None:
+        return None
+    return sum(
+        int(amount) * _AGY_DURATION_UNITS[unit]
+        for amount, unit in _AGY_DURATION_PART_RE.findall(match.group(1))
+    )
+
+
+def _format_duration(seconds: int) -> str:
+    hours, rest = divmod(max(0, int(seconds)), 3600)
+    minutes, secs = divmod(rest, 60)
+    return f"{hours}h{minutes:02d}m{secs:02d}s"
+
+
+def _agy_attempt_had_model_output(result: CliWorkerResult) -> bool:
+    """Whether a failed attempt did model work (so it spends the provider-call budget).
+
+    agy's JSON envelope reports token usage; a quota or login rejection reports
+    zero output and thinking tokens.  Anything unparseable counts as model work.
+    """
+    envelopes = top_level_json_objects(result.stdout.decode("utf-8", errors="replace"))
+    if not envelopes:
+        return True
+    for envelope in envelopes:
+        usage = envelope.get("usage")
+        response = envelope.get("response")
+        if not isinstance(usage, dict) or (isinstance(response, str) and response.strip()):
+            return True
+        for key in ("output_tokens", "thinking_tokens"):
+            value = usage.get(key)
+            # A missing or non-integer count is not proof of zero work.
+            if not isinstance(value, int) or isinstance(value, bool) or value != 0:
+                return True
+    return False
+
+
+def _earliest_family_reset_seconds(coordinator: Any, model_family: Optional[str]) -> Optional[int]:
+    """Seconds until the earliest durable model-family cooldown ends, if any."""
+    if model_family is None:
+        return None
+    now = time.time()
+    earliest: Optional[float] = None
+    try:
+        for path in Path(coordinator.leases_dir).glob(f"*.family-unavailable.{model_family}.json"):
+            try:
+                until = float(json.loads(path.read_text(encoding="utf-8"))["unavailable_until"])
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+            if until > now and (earliest is None or until < earliest):
+                earliest = until
+    except OSError:
+        return None
+    return None if earliest is None else int(round(earliest - now))
+
+
+def _supports_cross_process_claims(pool: Any) -> bool:
+    from nexus.services.agy_account_pool import AgyAccountPoolManager
+
+    return isinstance(pool, AgyAccountPoolManager)
+
+
 class AgyWorkerAdapter:
     """Governed Antigravity CLI adapter with explicit external-runtime gates and account-pool failover."""
 
@@ -977,6 +1065,7 @@ class AgyWorkerAdapter:
                 on_process_group=on_process_group,
                 admit_request=admit_request,
                 sweep_roots=(str(run_tmp),) if read_only else (str(target_path), str(run_tmp)),
+                model_family=_agy_model_family(selected_model),
             )
             profile_tampered = any(
                 run_home_settings_sha256(home) != digest for home, digest in run_homes
@@ -1028,6 +1117,7 @@ class AgyWorkerAdapter:
         on_process_group: Any,
         admit_request: Any,
         sweep_roots: tuple[str, ...] = (),
+        model_family: Optional[str] = None,
     ) -> WorkerExecutionReceipt:
         raw_budget = getattr(contract, "maximum_provider_calls", 1)
         provider_call_budget = max(0, int(1 if raw_budget is None else raw_budget))
@@ -1066,6 +1156,27 @@ class AgyWorkerAdapter:
             return timeout - elapsed
 
         pool = self._get_account_pool()
+
+        if (
+            self._use_installed_account_pool
+            and self._injected_account_pool is None
+            and _supports_cross_process_claims(pool)
+        ):
+            return self._invoke_with_claims(
+                pool,
+                contract,
+                prompt=prompt,
+                started_at=started_at,
+                target=target,
+                timeout=timeout,
+                executable=executable,
+                build_argv=build_argv,
+                on_process_group=on_process_group,
+                admit_request=admit_request,
+                sweep_roots=sweep_roots,
+                model_family=model_family,
+                provider_call_budget=provider_call_budget,
+            )
 
         if pool is None:
             remaining_seconds = get_remaining_seconds()
@@ -1412,6 +1523,311 @@ class AgyWorkerAdapter:
             stdout_tail=redacted_output_tail(last_result.stdout),
             stderr_tail=redacted_output_tail(last_result.stderr),
         )
+
+
+    def _invoke_with_claims(
+        self,
+        pool: Any,
+        contract: Any,
+        *,
+        prompt: str,
+        started_at: float,
+        target: str,
+        timeout: float,
+        executable: str,
+        build_argv: Any,
+        on_process_group: Any,
+        admit_request: Any,
+        sweep_roots: tuple[str, ...],
+        model_family: Optional[str],
+        provider_call_budget: int,
+    ) -> WorkerExecutionReceipt:
+        """Run agy under cross-process pool claims, rotating past unusable accounts (#2403).
+
+        Each account is held under the same per-account flock claim as
+        ``nexus_model_probe`` and ``nexus-agy-dispatch``.  An attempt rejected
+        for quota, rate limit or authentication (or an account without an OAuth
+        token) retires that account through the pool's own semantics (quota:
+        model-family cooldown until the reported reset; others: the manager's
+        bad/cooldown state) and claims the next healthy one.  Rejections that
+        did no model work are ``account_rotation_attempts``; only attempts with
+        model output spend ``maximum_provider_calls``.  The loop is bounded by
+        the pool size; when no account is left the run fails as
+        ``agy_pool_exhausted`` with the earliest known reset.
+        """
+        from nexus.services.agy_account_pool import (
+            AgyAccountPoolBusyError,
+            AgyAccountPoolExhaustedError,
+            CrossProcessLeaseCoordinator,
+        )
+
+        argv = build_argv(timeout, prompt)
+        consumer_id = f"worker:{contract.task_id}"
+        try:
+            coordinator = CrossProcessLeaseCoordinator(pool)
+            pool_size = len(pool._ensure_pool()._accounts)
+        except Exception as exc:
+            return _agy_claim_receipt(
+                self.provider, contract, target=target, executable=executable, argv=argv,
+                started_at=started_at, result=None, outcome=WorkerOutcome.FAILED.value,
+                failure_reason=f"account pool unavailable: {type(exc).__name__}",
+                provider_calls=0, rotations=0, attempts=0, account_alias_hash=None,
+            )
+
+        excluded: set[str] = set()
+        real_calls = 0
+        rotations = 0
+        attempts = 0
+        earliest_reset: Optional[int] = None
+        last_result: Optional[CliWorkerResult] = None
+        last_hash: Optional[str] = None
+        failure_reason: Optional[str] = None
+        outcome = WorkerOutcome.FAILED.value
+        current_prompt = prompt
+        previous_hash: Optional[str] = None
+        previous_kind: Optional[AccountFailureKind] = None
+
+        credential_refusals = 0
+
+        retirement_unsafe = False
+
+        def exhausted_reason() -> str:
+            # Accounts other processes already cooled down count too: a known
+            # reset means the pool is only temporarily exhausted.
+            known = [
+                value
+                for value in (earliest_reset, _earliest_family_reset_seconds(coordinator, model_family))
+                if value is not None
+            ]
+            if known:
+                return f"{AGY_POOL_EXHAUSTED}: earliest reset in {_format_duration(min(known))}"
+            if attempts == 0 and credential_refusals:
+                # No account in the pool could authenticate at all.
+                return AGY_CREDENTIALS_UNAVAILABLE
+            return AGY_POOL_EXHAUSTED
+
+        # Each pass claims an account not tried yet, so pool_size + 1 passes
+        # always end in success, a final failure or an exhausted pool.
+        for _ in range(pool_size + 1):
+            if retirement_unsafe:
+                break
+            remaining = timeout - (time.monotonic() - started_at) if timeout > 0 else 0.0
+            if remaining <= 0:
+                failure_reason = "shared wall-time budget exhausted"
+                break
+            try:
+                claim = coordinator.acquire_claim(
+                    consumer_id=consumer_id,
+                    exclude_hashes=set(excluded),
+                    wait_timeout=min(15.0, max(0.0, remaining)),
+                    model_family=model_family,
+                )
+            except AgyAccountPoolExhaustedError:
+                failure_reason = exhausted_reason()
+                break
+            except AgyAccountPoolBusyError:
+                failure_reason = AGY_POOL_BUSY
+                break
+            except Exception as exc:
+                failure_reason = f"account pool lease acquire failed: {type(exc).__name__}"
+                break
+            last_hash = claim.account_alias_hash
+            retire_kind: Optional[AccountFailureKind] = None
+            reset_seconds: Optional[int] = None
+            try:
+                refusal, run_env, seatbelt = admit_request(dict(claim.lease.execution_env))
+                if refusal == AGY_CREDENTIALS_UNAVAILABLE:
+                    # This account cannot authenticate: retire it and rotate.
+                    rotations += 1
+                    credential_refusals += 1
+                    retire_kind = AccountFailureKind.AUTH_OR_SESSION_INVALID
+                    failure_reason = AGY_CREDENTIALS_UNAVAILABLE
+                    continue
+                if refusal is not None:
+                    failure_reason = refusal
+                    break
+                if attempts and previous_hash and previous_kind and real_calls:
+                    current_prompt = (
+                        f"[Continuation Handoff]\n"
+                        f"Task ID: {contract.task_id}\n"
+                        f"Attempt: {attempts + 1}\n"
+                        f"Previous Account Hash: {previous_hash}\n"
+                        f"New Account Hash: {claim.account_alias_hash}\n"
+                        f"Failure Kind: {previous_kind.value}\n"
+                        f"Original Instruction: {prompt}\n\n"
+                        "Please re-inspect the current worktree and its file changes, then continue "
+                        "the task with file edits only; shell commands are not available."
+                    )
+                argv_seconds = max(1, int(round(remaining)))
+                request = CliWorkerRequest(
+                    executable=executable,
+                    argv=build_argv(argv_seconds, current_prompt),
+                    cwd=target,
+                    env=run_env,
+                    timeout_seconds=remaining,
+                    seatbelt_profile=seatbelt,
+                    sweep_descendants_on_exit=True,
+                    sweep_roots=sweep_roots,
+                    exact_env=True,
+                )
+                attempts += 1
+                result = run_cli_worker(request, on_process_group=on_process_group)
+                last_result = result
+                if result.status is CliWorkerStatus.TIMED_OUT:
+                    real_calls += 1
+                    outcome = WorkerOutcome.INCOMPLETE.value
+                    failure_reason = f"{self.provider} execution did not complete successfully"
+                    break
+                if result.status is CliWorkerStatus.COMPLETED and result.exit_code == 0:
+                    real_calls += 1
+                    delivery_failure = _agy_result_failure(result)
+                    if delivery_failure:
+                        failure_reason = delivery_failure
+                    else:
+                        outcome = WorkerOutcome.EXECUTION_COMPLETED.value
+                        failure_reason = None
+                    break
+                kind = self._classify_failure(
+                    result.status, result.exit_code, result.stdout, result.stderr
+                )
+                login = _agy_login_required(result)
+                if result.stderr == b"seatbelt_unavailable":
+                    real_calls += 1
+                    failure_reason = "agy_seatbelt_unavailable"
+                    break
+                if not is_rotation_eligible(kind):
+                    real_calls += 1
+                    failure_reason = f"non-eligible account failure: {kind.value}"
+                    break
+                # A rate limit is transient: rotate away for this run without
+                # retiring the account for everyone else.
+                retire_kind = None if kind is AccountFailureKind.RATE_LIMITED else kind
+                excluded.add(claim.account_alias_hash)
+                if kind is AccountFailureKind.QUOTA_EXHAUSTED:
+                    reset_seconds = _agy_quota_reset_seconds(result)
+                    if reset_seconds is not None and (
+                        earliest_reset is None or reset_seconds < earliest_reset
+                    ):
+                        earliest_reset = reset_seconds
+                failure_reason = (
+                    AGY_AUTHENTICATION_REQUIRED
+                    if login
+                    else f"{self.provider} execution did not complete successfully"
+                )
+                previous_hash, previous_kind = claim.account_alias_hash, kind
+                if _agy_attempt_had_model_output(result):
+                    real_calls += 1
+                    if real_calls >= provider_call_budget:
+                        break
+                else:
+                    rotations += 1
+            finally:
+                if retire_kind is not None:
+                    excluded.add(claim.account_alias_hash)
+                    try:
+                        coordinator.retire_failed_claim(
+                            claim,
+                            retire_kind,
+                            model_family=model_family,
+                            unavailable_until=(
+                                time.time() + reset_seconds if reset_seconds else None
+                            ),
+                        )
+                    except Exception:
+                        # Fail closed like nexus-agy-dispatch: an account whose
+                        # failure is not durably recorded is not rotated past.
+                        retirement_unsafe = True
+                claim.release()
+        else:
+            if not retirement_unsafe:
+                failure_reason = exhausted_reason()
+        if retirement_unsafe:
+            failure_reason = AGY_ACCOUNT_RETIREMENT_UNSAFE
+
+        if outcome != WorkerOutcome.EXECUTION_COMPLETED.value and last_result is not None:
+            if _agy_login_required(last_result) and failure_reason and not failure_reason.startswith(
+                AGY_AUTHENTICATION_REQUIRED
+            ):
+                failure_reason = f"{AGY_AUTHENTICATION_REQUIRED}: {failure_reason}"
+        return _agy_claim_receipt(
+            self.provider, contract, target=target, executable=executable, argv=argv,
+            started_at=started_at, result=last_result, outcome=outcome,
+            failure_reason=failure_reason, provider_calls=real_calls, rotations=rotations,
+            attempts=attempts, account_alias_hash=last_hash,
+        )
+
+
+def _agy_claim_receipt(
+    provider: str,
+    contract: Any,
+    *,
+    target: str,
+    executable: str,
+    argv: tuple[str, ...],
+    started_at: float,
+    result: Optional[CliWorkerResult],
+    outcome: str,
+    failure_reason: Optional[str],
+    provider_calls: int,
+    rotations: int,
+    attempts: int,
+    account_alias_hash: Optional[str],
+) -> WorkerExecutionReceipt:
+    wall = int((time.monotonic() - started_at) * 1000)
+    if result is None:
+        return WorkerExecutionReceipt(
+            provider=provider,
+            task_id=contract.task_id,
+            target_worktree=target,
+            worker_status=CliWorkerStatus.START_FAILED.value,
+            outcome=WorkerOutcome.FAILED.value,
+            exit_code=1,
+            executable_identity=executable,
+            argv=argv,
+            stdout_sha256=CliWorkerResult.hash_bytes(b""),
+            stderr_sha256=CliWorkerResult.hash_bytes(b""),
+            wall_time_ms=wall,
+            process_group_id=None,
+            process_group_killed=False,
+            timed_out=False,
+            provider_calls=0,
+            evidence_complete=False,
+            commit_created=False,
+            merge_performed=False,
+            push_performed=False,
+            failure_reason=failure_reason or f"{provider} execution did not start",
+            account_alias_hash=account_alias_hash,
+            provider_attempt_count=attempts,
+            account_rotation_attempts=rotations,
+        )
+    return WorkerExecutionReceipt(
+        provider=provider,
+        task_id=contract.task_id,
+        target_worktree=target,
+        worker_status=result.status.value,
+        outcome=outcome,
+        exit_code=result.exit_code,
+        executable_identity=result.executable_identity,
+        argv=result.argv,
+        stdout_sha256=result.stdout_sha256,
+        stderr_sha256=result.stderr_sha256,
+        wall_time_ms=max(result.wall_time_ms, wall),
+        process_group_id=result.process_group_id,
+        process_group_killed=result.process_group_killed,
+        timed_out=result.timed_out,
+        provider_calls=provider_calls,
+        evidence_complete=outcome == WorkerOutcome.EXECUTION_COMPLETED.value,
+        commit_created=False,
+        merge_performed=False,
+        push_performed=False,
+        failure_reason=None if outcome == WorkerOutcome.EXECUTION_COMPLETED.value else failure_reason,
+        account_alias_hash=account_alias_hash,
+        provider_attempt_count=attempts,
+        provider_env_keys_sha256=result.env_keys_sha256 or None,
+        stdout_tail=redacted_output_tail(result.stdout),
+        stderr_tail=redacted_output_tail(result.stderr),
+        account_rotation_attempts=rotations,
+    )
 
 
 class OllamaPatchWorkerAdapter:

@@ -218,6 +218,10 @@ class WorkerExecutionReceipt:
     # hashes alone cannot say why a run failed.  See ``redacted_output_tail``.
     stdout_tail: Optional[str] = None
     stderr_tail: Optional[str] = None
+    # Pool account rotations that did no model work (quota/auth rejections,
+    # accounts without credentials, #2403); they do not spend
+    # ``maximum_provider_calls``, which ``provider_calls`` counts.
+    account_rotation_attempts: Optional[int] = None
 
 
 # #2403: at most this many UTF-8 bytes of each stream are kept in a receipt.
