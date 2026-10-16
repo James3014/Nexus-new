@@ -109,9 +109,7 @@ def test_command_service_high_delivery_uses_rust_suggestions(tmp_path):
     from nexus.app.command_service import NexusCommandService
     from nexus.delivery.models import CompletionResult, CompletionStatus, TaskLevel
 
-    rust_dir = tmp_path / "nexus-core-rs"
-    rust_dir.mkdir()
-    (rust_dir / "Cargo.toml").write_text("[package]\nname='nexus-core-rs'\n", encoding="utf-8")
+    (tmp_path / "Cargo.toml").write_text("[package]\nname='rust-project'\n", encoding="utf-8")
     mock_engine = MagicMock()
     mock_engine.run_feature.return_value = True
     mock_engine.project_root = tmp_path
@@ -144,7 +142,7 @@ def test_command_service_high_delivery_uses_rust_suggestions(tmp_path):
         )
 
         assert ok is False
-        assert seen["commands"] == ["cargo test --manifest-path nexus-core-rs/Cargo.toml"]
+        assert seen["commands"] == ["cargo test --manifest-path Cargo.toml"]
 
 
 # ARCHIVED 2026-10-13 legacy-engine: this file tests (in whole or in part) modules archived with

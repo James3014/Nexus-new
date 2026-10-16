@@ -25,7 +25,6 @@ POLICY_GOVERNED_DIRS = [
     "nexus/governance/",
     "nexus/services/",
     "nexus/delivery/",
-    "nexus-core-rs/src/",
 ]
 
 
@@ -65,7 +64,7 @@ def check_test_entrypoints(manifest: dict) -> list:
     issues = []
     for policy in manifest.get("policies", []):
         for test_path in policy.get("test_entrypoints", []):
-            # Skip inline test references (e.g., "nexus-core-rs/src/...::tests")
+            # Inline test references (e.g., "path/to/file.py::test_name")
             if "::" in test_path:
                 file_part = test_path.split("::")[0]
                 full_path = Path(__file__).resolve().parents[2] / file_part

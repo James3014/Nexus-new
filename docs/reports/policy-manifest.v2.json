@@ -2,7 +2,7 @@
   "manifest_version": "2.0.0",
   "generated_at": "2026-06-15T00:00:00Z",
   "commit_sha": "1c9dce6597f3eb52006df8223000d2162624f55d",
-  "commit_ref_policy": "#2259: per-policy commit_sha must be verifiable after a squash merge, so it is the full SHA of the squash-merge commit on main and verified_in_pr names the PR (gh pr view N --json mergeCommit). PR-branch commits are never recorded. The 27 baseline-freeze entries (2026-06-15) keep the historical short id 1c9dce65 with verified_in_pr null; that commit predates this repository's history and is kept as a label, not a reference. New entries must carry a verified_in_pr.",
+  "commit_ref_policy": "#2259: per-policy commit_sha must be verifiable after a squash merge, so it is the full SHA of the squash-merge commit on main and verified_in_pr names the PR (gh pr view N --json mergeCommit). PR-branch commits are never recorded. The 25 baseline-freeze entries (2026-06-15) keep the historical short id 1c9dce65 with verified_in_pr null; that commit predates this repository's history and is kept as a label, not a reference. New entries must carry a verified_in_pr.",
   "enforcement_mode_policy": "#2259: enforcement_mode was backfilled on 2026-10-15 from the lane definition, not from a per-policy verification: hard and soft code-backed entries -> block, shadow (observation-only) -> record_only, the drill fixture P-TEST-NODRILL-01 -> not_wired, P-CONTAM-01 -> record_only (#2216). Only hard-lane entries are checked by the lane gate (check_enforcement_wiring); for soft and shadow entries the value is an unverified declaration until a later change adds coverage.",
   "baseline_freeze": true,
   "principle": "lane-based governance, not monolithic lock-down",
@@ -494,38 +494,6 @@
       ]
     },
     {
-      "policy_id": "P-GATE-03",
-      "phase": "Rust-Kernel",
-      "owner_module": "receipt_verifier",
-      "source_file": "nexus-core-rs/src/receipt_verifier.rs",
-      "schema_version": "v1.0",
-      "commit_sha": "1c9dce65",
-      "verified_in_pr": null,
-      "status_tag": "code-backed",
-      "enforcement_mode": "block",
-      "test_entrypoints": [
-        "nexus-core-rs/src/receipt_verifier.rs::tests (11 tests)"
-      ],
-      "receipt_type": "ReceiptVerificationResult",
-      "rollback_drill_status": "drilled-2026-06-15",
-      "promotion_allowed": false,
-      "lane": "hard",
-      "risk_tier": "critical",
-      "authority_impact": "evidence",
-      "claim_impact": "claim-gated",
-      "cutover_impact": "cutover-gated",
-      "override_mode": "blocked",
-      "expiry": null,
-      "version_history": [
-        {
-          "version": "P-GATE-03.1.0.0",
-          "timestamp": "2026-06-15T00:00:00Z",
-          "diff_summary": "Baseline freeze — hardened with SHA-256 + canonical JSON",
-          "lane": "hard"
-        }
-      ]
-    },
-    {
       "policy_id": "P-CLAIM-01",
       "phase": "Claim",
       "owner_module": "critique_engine",
@@ -1000,39 +968,6 @@
       ]
     },
     {
-      "policy_id": "P-FLOW-01",
-      "phase": "Rust-Kernel",
-      "owner_module": "flow_machine",
-      "source_file": "nexus-core-rs/src/flow_machine.rs",
-      "schema_version": "v1.0",
-      "commit_sha": "1c9dce65",
-      "verified_in_pr": null,
-      "status_tag": "code-backed",
-      "enforcement_mode": "block",
-      "test_entrypoints": [
-        "nexus-core-rs/src/flow_machine.rs::tests (27 tests)",
-        "tests/integration/test_rust_wave3_cutover.py"
-      ],
-      "receipt_type": "TransitionValidation",
-      "rollback_drill_status": "drilled-2026-06-15",
-      "promotion_allowed": false,
-      "lane": "hard",
-      "risk_tier": "critical",
-      "authority_impact": "transition",
-      "claim_impact": "none",
-      "cutover_impact": "cutover-gated",
-      "override_mode": "blocked",
-      "expiry": null,
-      "version_history": [
-        {
-          "version": "P-FLOW-01.1.0.0",
-          "timestamp": "2026-06-15T00:00:00Z",
-          "diff_summary": "Baseline freeze — full 14-state matrix, fail-closed",
-          "lane": "hard"
-        }
-      ]
-    },
-    {
       "policy_id": "P-CONTAM-01",
       "phase": "Pre-Execution",
       "owner_module": "contamination_guard",
@@ -1131,27 +1066,25 @@
     }
   ],
   "summary": {
-    "total_policies": 28,
-    "hard_lane": 11,
+    "total_policies": 26,
+    "hard_lane": 9,
     "soft_lane": 15,
     "shadow_lane": 2,
-    "code_backed": 27,
-    "rollback_drills_passing": 4,
-    "rollback_drills_total": 27,
+    "code_backed": 25,
+    "rollback_drills_passing": 2,
+    "rollback_drills_total": 25,
     "promotion_allowed_count": 0,
     "lane_distribution": {
       "hard": {
-        "count": 11,
+        "count": 9,
         "policies": [
           "P-S2T-01",
           "P-S2T-02",
           "P-S2T-03",
-          "P-GATE-03",
           "P-CLAIM-02",
           "P-CLAIM-03",
           "P-DELIVERY-01",
           "P-DELIVERY-02",
-          "P-FLOW-01",
           "P-CONTAM-01",
           "P-TEST-NODRILL-01"
         ]
@@ -1195,9 +1128,7 @@
         "P-CTX-01",
         "P-DELIVERY-01",
         "P-DELIVERY-02",
-        "P-FLOW-01",
         "P-GATE-01",
-        "P-GATE-03",
         "P-LEARN-01",
         "P-LEARN-02",
         "P-PLAN-01",

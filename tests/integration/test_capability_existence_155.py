@@ -209,6 +209,16 @@ NON_ROUTING_CAPABILITIES = [
 ]
 
 
+# Retired and deleted 2026-10-16 (#2359, nexus-core-rs bridge). Their cases keep their
+# test ids and assert the module is gone, so a re-add is a deliberate change.
+RETIRED_MODULES = frozenset({"nexus.bridge.cutover_manager", "nexus.bridge.rust_kernel"})
+
+
+def _assert_retired(module_path: str) -> None:
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module(module_path)
+
+
 def _resolve_class(module_path: str, class_name: str) -> tuple:
     try:
         module = importlib.import_module(module_path)
@@ -220,6 +230,9 @@ def _resolve_class(module_path: str, class_name: str) -> tuple:
 
 @pytest.mark.parametrize("module_path,class_name", NON_ROUTING_CAPABILITIES)
 def test_capability_exists(module_path: str, class_name: str) -> None:
+    if module_path in RETIRED_MODULES:
+        _assert_retired(module_path)
+        return
     module, cls = _resolve_class(module_path, class_name)
     if module is None:
         pytest.skip(f"optional dep for {module_path} not installed")
@@ -228,6 +241,9 @@ def test_capability_exists(module_path: str, class_name: str) -> None:
 
 @pytest.mark.parametrize("module_path,class_name", NON_ROUTING_CAPABILITIES)
 def test_capability_no_crash_on_construct(module_path: str, class_name: str) -> None:
+    if module_path in RETIRED_MODULES:
+        _assert_retired(module_path)
+        return
     _, cls = _resolve_class(module_path, class_name)
     if cls is None:
         pytest.skip(f"class {module_path} unavailable")
@@ -242,6 +258,9 @@ def test_capability_no_crash_on_construct(module_path: str, class_name: str) -> 
 
 @pytest.mark.parametrize("module_path,class_name", NON_ROUTING_CAPABILITIES)
 def test_capability_has_docstring(module_path: str, class_name: str) -> None:
+    if module_path in RETIRED_MODULES:
+        _assert_retired(module_path)
+        return
     _, cls = _resolve_class(module_path, class_name)
     if cls is None:
         pytest.skip(f"class {module_path} unavailable")

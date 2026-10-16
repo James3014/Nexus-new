@@ -67,17 +67,9 @@ def generate_inventory():
 
 ### Current Split
 1. **Root Crate (`/Cargo.toml`)**: retired and deleted 2026-10-14 (#1927); the PyO3 `nexus_core` extension was never on a production path.
-2. **`nexus-core-rs` (`/nexus-core-rs/`)**: Independent binary/library.
+2. **`nexus-core-rs` (`/nexus-core-rs/`)**: retired and deleted 2026-10-16 (#2359, Owner decision A) together with policies P-GATE-03 / P-FLOW-01 and the `nexus/bridge` Rust adapters; nothing built or shipped the binary.
 
-### Redundancy Detected
-- **Receipt Verifier**: Implemented in both `nexus-core-rs` and `nexus/engine/capability_receipt_adapters.py`.
-- **Flow Machine**: Implemented in Rust (`flow_machine.rs`) and Python (`pipeline.py`).
-
-### P3 Recommendations
-- **Option A (Consolidation)**: Merge `nexus-core-rs` into the root crate. Move shared logic to a `nexus-common` workspace.
-- **Option B (Auth Separation)**: Keep Python as the source of truth for logic, using Rust strictly for compute-intensive AST scanning and matching.
-
-**Next Step**: Perform impact analysis on `tests/bridge/` before moving any Rust files.
+Python is the only implementation: receipt verification in `nexus/engine/capability_receipt_adapters.py`, flow transitions in the contract path of `nexus/engine/governance_bridge.py`.
 """
 
     final_md = "\n".join(md_lines) + "\n" + rust_audit
