@@ -700,9 +700,17 @@ def test_guard_identity_mismatch_is_not_observed(tmp_path: Path, pr: int, head: 
     assert "not observed (`IDENTITY_MISMATCH`)" in body
 
 
-def test_guard_head_not_enforced_when_unknown(tmp_path: Path) -> None:
-    guard = rpc.load_guard_delta(_write(tmp_path, _projection("UNCHANGED")), _PR)
-    assert guard.observed
+def test_guard_repository_base_family_and_head_are_bound(tmp_path: Path) -> None:
+    path = _write(tmp_path, _projection("UNCHANGED"))
+    ok = rpc.load_guard_delta(path, _PR, _HEAD, repository="James3014/Nexus-new", base_sha=_BASE)
+    assert ok.observed
+    assert rpc.load_guard_delta(path, _PR, "").reason == "IDENTITY_MISMATCH"
+    assert rpc.load_guard_delta(path, _PR, _HEAD, repository="x/y").reason == "IDENTITY_MISMATCH"
+    assert rpc.load_guard_delta(path, _PR, _HEAD, base_sha="f" * 40).reason == "IDENTITY_MISMATCH"
+    proj = {k: v for k, v in _projection("UNCHANGED").items() if k != "content_sha256"}
+    proj["guard_family"] = "other_family"
+    resealed = _guard_module()._seal(proj)
+    assert rpc.load_guard_delta(_write(tmp_path, resealed), _PR, _HEAD).reason == "BAD_GUARD_FAMILY"
 
 
 def test_guard_missing_or_bad_files_are_not_observed(tmp_path: Path) -> None:
@@ -781,9 +789,7 @@ def test_comment_workflow_guard_step_is_data_only() -> None:
     assert len(render) == 1
     assert '--guard-delta-json "$RUNNER_TEMP/rie-guard-delta.json"' in render[0]["run"]
     assert steps.index(step) < steps.index(render[0])
-    assert "--run-behavioral-probes" not in COMMENT_WORKFLOW.read_text(encoding="utf-8").replace(
-        "NEVER pass --run-behavioral-probes", ""
-    )
+    assert "--run-behavioral-probes" not in COMMENT_WORKFLOW.read_text(encoding="utf-8")
 
 
 def test_comment_workflow_checkouts_are_pinned_and_never_the_pr_head() -> None:
@@ -820,3 +826,16 @@ def test_comment_workflow_guard_step_has_no_token() -> None:
     assert "token" not in env_text.lower()
     assert "secrets." not in env_text
     assert "GITHUB_TOKEN" not in step["run"]
+
+
+def test_guard_directional_with_gaps_says_so(tmp_path: Path) -> None:
+    proj = _projection(
+        "LOOSENS",
+        loosening_witnesses=["a"],
+        evidence_gaps=["GAP_ONE"],
+        collection_errors=["ERR_ONE"],
+        is_complete=False,
+    )
+    body = _render_guard(tmp_path, proj)
+    assert "`LOOSENS`" in body
+    assert "2 evidence gaps or collection errors" in body

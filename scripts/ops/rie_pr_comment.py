@@ -155,6 +155,7 @@ class Findings:
 
 GUARD_DELTA_SCHEMA = "nexus.rie_guard_semantic_delta_advisory.v1"
 GUARD_DELTA_CLAIM_CEILING = "RIE_GUARD_SEMANTIC_DELTA_PR_REVIEW_ADVISORY_ONLY"
+GUARD_DELTA_FAMILY = "canonical_owner_table"
 GUARD_DELTA_FLAGGED = frozenset({"TIGHTENS", "LOOSENS", "MIXED", "UNKNOWN"})
 MAX_GUARD_WITNESSES = 3
 MAX_GUARD_FILE_BYTES = 1_000_000
@@ -176,6 +177,7 @@ class GuardDelta:
     loosening_total: int = 0
     reason_codes: Sequence[str] = ()
     reason_codes_total: int = 0
+    gaps_total: int = 0
 
 
 def _not_observed(reason: str) -> GuardDelta:
@@ -198,7 +200,14 @@ def _guard_refs(block: Any) -> tuple[list[str], int]:
     return items, total if isinstance(total, int) and total >= len(items) else len(items)
 
 
-def load_guard_delta(path: Path | str, pr_number: int, head_sha: str | None = None) -> GuardDelta:
+def load_guard_delta(
+    path: Path | str,
+    pr_number: int,
+    head_sha: str,
+    *,
+    repository: str | None = None,
+    base_sha: str | None = None,
+) -> GuardDelta:
     """Read and verify the guard-delta projection. Any failure is NOT_OBSERVED, never UNCHANGED."""
     try:
         file_path = Path(path)
@@ -225,8 +234,14 @@ def load_guard_delta(path: Path | str, pr_number: int, head_sha: str | None = No
     identity = _map(raw.get("new_identity"))
     if identity.get("pr_number") != pr_number or isinstance(identity.get("pr_number"), bool):
         return _not_observed("IDENTITY_MISMATCH")
-    if head_sha is not None and identity.get("head_sha") != head_sha:
+    if not head_sha or identity.get("head_sha") != head_sha:
         return _not_observed("IDENTITY_MISMATCH")
+    if repository is not None and identity.get("repository") != repository:
+        return _not_observed("IDENTITY_MISMATCH")
+    if base_sha is not None and identity.get("base_sha") != base_sha:
+        return _not_observed("IDENTITY_MISMATCH")
+    if raw.get("guard_family") != GUARD_DELTA_FAMILY:
+        return _not_observed("BAD_GUARD_FAMILY")
     classification = raw.get("classification")
     if raw.get("disposition") != "OBSERVED" or classification == "NOT_OBSERVED":
         reason = raw.get("reason")
@@ -236,6 +251,9 @@ def load_guard_delta(path: Path | str, pr_number: int, head_sha: str | None = No
     tightening, tightening_total = _guard_refs(raw.get("tightening_witnesses"))
     loosening, loosening_total = _guard_refs(raw.get("loosening_witnesses"))
     codes, codes_total = _guard_refs(raw.get("reason_codes"))
+    gaps_total = (
+        _guard_refs(raw.get("evidence_gaps"))[1] + _guard_refs(raw.get("collection_errors"))[1]
+    )
     return GuardDelta(
         observed=True,
         family=str(raw.get("guard_family") or "?"),
@@ -248,6 +266,7 @@ def load_guard_delta(path: Path | str, pr_number: int, head_sha: str | None = No
         loosening_total=loosening_total,
         reason_codes=codes[:MAX_GUARD_WITNESSES],
         reason_codes_total=codes_total,
+        gaps_total=gaps_total,
     )
 
 
@@ -277,6 +296,8 @@ def render_guard_delta(guard: GuardDelta) -> tuple[str | None, str | None]:
     detail += _guard_witnesses("loosening", guard.loosening, guard.loosening_total)
     if guard.classification == "UNKNOWN":
         detail += _guard_witnesses("reasons", guard.reason_codes, guard.reason_codes_total)
+    if guard.gaps_total:
+        detail += f"; {guard.gaps_total} evidence gaps or collection errors (see artifact)"
     return (
         f"- Guard semantic delta ({code(guard.family)}): {code(guard.classification)}"
         f"{attention}{detail}; report {sha}"
@@ -984,7 +1005,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             _utc_now(),
         )
         if args.guard_delta_json is not None:
-            guard = load_guard_delta(args.guard_delta_json, args.pr_number, acq.this_pr.head_sha)
+            guard = load_guard_delta(
+                args.guard_delta_json,
+                args.pr_number,
+                acq.this_pr.head_sha,
+                repository=args.repository,
+                base_sha=acq.this_pr.base_sha,
+            )
             findings = replace(findings, guard_delta=guard)
         body = render_comment(findings)
         if args.post:
