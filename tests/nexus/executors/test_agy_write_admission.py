@@ -2260,6 +2260,80 @@ def test_seatbelt_profile_refuses_target_or_run_root_inside_a_credential_path(tm
     )
 
 
+def test_seatbelt_profile_refuses_overlap_in_both_directions_and_read_only_roots(tmp_path):
+    source_home = (tmp_path / "real-home").resolve()
+    dotfiles = (source_home / "dotfiles").resolve()
+    dotfiles.mkdir(parents=True)
+    (dotfiles / "gitconfig").write_text("x", encoding="utf-8")
+    (source_home / ".gitconfig").symlink_to(dotfiles / "gitconfig")
+    run_root = (tmp_path / "run").resolve()
+    run_root.mkdir()
+    # the writable target CONTAINS the resolved credential file: it would be writable
+    with pytest.raises(admission.CredentialPathOverlapError):
+        admission.build_seatbelt_profile(
+            run_root=run_root, writable_target=dotfiles, source_home=source_home
+        )
+    # a read-only role has no writable target, but its target is checked too
+    inside = source_home / ".codex" / "worktrees" / "repo"
+    inside.mkdir(parents=True)
+    with pytest.raises(admission.CredentialPathOverlapError):
+        admission.build_seatbelt_profile(
+            run_root=run_root, writable_target=None, source_home=source_home, target_root=inside
+        )
+
+
+def test_seatbelt_profile_denies_symlinks_inside_credential_directories(tmp_path):
+    source_home = (tmp_path / "real-home").resolve()
+    dotfiles = (tmp_path / "dotfiles").resolve()
+    (dotfiles / "ssh").mkdir(parents=True)
+    (dotfiles / "ssh" / "id_rsa").write_text("x", encoding="utf-8")
+    (source_home / ".ssh").mkdir(parents=True)
+    (source_home / ".ssh" / "id_rsa").symlink_to(dotfiles / "ssh" / "id_rsa")
+    run_root = (tmp_path / "run").resolve()
+    run_root.mkdir()
+    profile = admission.build_seatbelt_profile(
+        run_root=run_root, writable_target=None, source_home=source_home
+    )
+    assert _effective_read(profile, dotfiles / "ssh" / "id_rsa") == "deny"
+    assert _effective_read(profile, source_home / ".config" / "git" / "config") == "deny"
+
+
+def test_bench_runner_refuses_a_target_inside_a_credential_path(tmp_path, monkeypatch):
+    from scripts.bench import real_world_task_runner as runner
+
+    fake_home = (tmp_path / "bench-home").resolve()
+    case_dir = fake_home / ".codex" / "case"
+    case_dir.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setattr(admission, "seatbelt_available", lambda: True)
+    monkeypatch.setattr(admission, "materialize_run_home", lambda *a, **k: (None, ""))
+    monkeypatch.setattr(
+        "nexus.executors.cli_worker.run_cli_worker",
+        lambda *a, **k: pytest.fail("must not start agy"),
+    )
+    monkeypatch.setattr(runner, "_resolve_gemini_bin", lambda: "/opt/homebrew/bin/agy")
+    monkeypatch.setattr(runner, "_build_gemini_prompt", lambda *a, **k: "prompt")
+    task = SimpleNamespace(
+        task_id="t", prompt="p", visible_tests=[], files=[], root_cause="", target_file="x.py"
+    )
+    row = runner._run_gemini_patch(case_dir, task, mode="with_nexus", timeout_sec=5, model="agy")
+    assert row["error"] == "agy_target_inside_credential_path"
+    assert row["model_calls"] == 0
+
+
+def test_agy_adapter_refuses_a_read_only_target_inside_a_credential_path(
+    monkeypatch, tmp_path, agy_home
+):
+    _ready(monkeypatch)
+    _no_spawn(monkeypatch)
+    target = agy_home / ".codex" / "worktrees" / "repo"
+    target.mkdir(parents=True)
+    receipt = _invoke(
+        AgyWorkerAdapter(canonical_root=_repo(tmp_path)), target, worker_role="review"
+    )
+    assert receipt.failure_reason == "agy_target_inside_credential_path"
+
+
 def _spy_profile_builder(monkeypatch, dotted: str, seen: list):
     real = admission.build_seatbelt_profile
 
@@ -2283,7 +2357,7 @@ def test_agy_adapter_passes_source_home_to_the_seatbelt_profile(monkeypatch, tmp
     _invoke(AgyWorkerAdapter(canonical_root=_repo(tmp_path)), _target(tmp_path), timeout_seconds=30)
     assert seen and all(kwargs["source_home"] == agy_home for kwargs in seen)
     profile = admission.build_seatbelt_profile(
-        run_root=tmp_path, writable_target=None, source_home=seen[0]["source_home"]
+        run_root=tmp_path / "x-run", writable_target=None, source_home=seen[0]["source_home"]
     )
     assert _effective_read(profile, agy_home / ".ssh" / "id") == "deny"
 
@@ -2357,6 +2431,7 @@ if os.environ.get("NEXUS_LOCAL_PHYSICAL_WITNESS") == "1":
                     str(source_home / ".ssh" / "id_test"),
                     str(target / "ok.txt"),
                     str(dotfiles / "gitconfig"),
+                    str(source_home / ".gitconfig"),
                 ),
                 cwd=str(target),
                 env={"HOME": str(run_root / "home"), "TMPDIR": str(run_root)},
@@ -2364,4 +2439,4 @@ if os.environ.get("NEXUS_LOCAL_PHYSICAL_WITNESS") == "1":
             )
         )
         assert result.exit_code == 0, result.stderr
-        assert result.stdout.strip() == b"DENIED,READ,DENIED"
+        assert result.stdout.strip() == b"DENIED,READ,DENIED,DENIED"

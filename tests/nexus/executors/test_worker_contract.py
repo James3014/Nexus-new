@@ -2505,5 +2505,17 @@ def test_cline_adapter_passes_source_home_to_the_seatbelt_profile(monkeypatch, t
     _cline_run(monkeypatch, tmp_path, stdout=_CLINE_OK)
     assert seen and seen[0]["source_home"] == fake_home
     assert f'(subpath "{fake_home / ".ssh"}")' in real(
-        run_root=tmp_path, writable_target=None, source_home=seen[0]["source_home"]
+        run_root=tmp_path / "x-run", writable_target=None, source_home=seen[0]["source_home"]
     )
+
+
+def test_cline_target_inside_a_credential_path_is_refused_before_launch(monkeypatch, tmp_path):
+    fake_home = (tmp_path / "cline-home").resolve()
+    target = fake_home / ".codex" / "worktrees" / "repo"
+    target.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(fake_home))
+    receipt, calls, _canonical = _cline_run(
+        monkeypatch, tmp_path, stdout=_CLINE_OK, target=target
+    )
+    assert calls == []
+    assert receipt.failure_reason == "cline_target_inside_credential_path"

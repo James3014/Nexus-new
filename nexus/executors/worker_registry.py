@@ -876,6 +876,7 @@ class AgyWorkerAdapter:
                     writable_target=None if read_only else target_path,
                     run_home=run_home,
                     source_home=source_home,
+                    target_root=target_path,
                 )
             except CredentialPathOverlapError:
                 return "agy_target_inside_credential_path", run_env, ""

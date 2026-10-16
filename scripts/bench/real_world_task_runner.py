@@ -446,7 +446,7 @@ def _run_gemini_patch(
                     run_home=run_home,
                     source_home=Path(env["HOME"]),
                 )
-            except admission.CredentialPathOverlapError:
+            except ValueError as exc:
                 return {
                     "regression_test_added": False,
                     "unrelated_change": False,
@@ -456,7 +456,11 @@ def _run_gemini_patch(
                     "total_tokens": 0,
                     "token_capture_status": "not_run",
                     "gemini_returncode": None,
-                    "error": "agy_target_inside_credential_path",
+                    "error": (
+                        "agy_target_inside_credential_path"
+                        if isinstance(exc, admission.CredentialPathOverlapError)
+                        else "agy_seatbelt_profile_unrepresentable"
+                    ),
                 }
             result = run_cli_worker(
                 CliWorkerRequest(

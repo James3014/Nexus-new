@@ -380,6 +380,7 @@ SOURCE_HOME_CREDENTIAL_PATHS = (
     ".git-credentials",
     ".netrc",
     ".gitconfig",
+    ".config/git/config",
     ".config/git/credentials",
     ".config/nexus-agent-bot",
     ".config/nexus-jev",
@@ -400,7 +401,28 @@ class CredentialPathOverlapError(ValueError):
 
 
 def _is_within(path: Path, parent: Path) -> bool:
+    if sys.platform == "darwin":  # case-insensitive filesystems
+        path, parent = Path(str(path).casefold()), Path(str(parent).casefold())
     return path == parent or parent in path.parents
+
+
+def _credential_candidates(unresolved: Path) -> list[Path]:
+    """The credential path, where it resolves to, and where symlinks inside it lead.
+
+    Seatbelt matches resolved vnodes: ``~/.gitconfig -> ~/dotfiles/gitconfig`` or
+    ``~/.ssh/id_rsa -> ~/dotfiles/ssh/id_rsa`` would otherwise stay readable.
+    Only the first level inside a credential directory is scanned.
+    """
+    found = [unresolved, Path(os.path.realpath(unresolved))]
+    if found[1].is_dir():
+        try:
+            with os.scandir(found[1]) as entries:
+                for entry in entries:
+                    if entry.is_symlink():
+                        found.append(Path(os.path.realpath(entry.path)))
+        except OSError:
+            pass
+    return list(dict.fromkeys(found))
 
 
 def _credential_homes(source_home: Optional[Path]) -> list[Path]:
@@ -422,6 +444,7 @@ def build_seatbelt_profile(
     run_home: Optional[Path] = None,
     extra_protected_target_names: tuple[str, ...] = (),
     source_home: Optional[Path] = None,
+    target_root: Optional[Path] = None,
 ) -> str:
     """Deny every file write except the target and the per-run root.
 
@@ -429,7 +452,8 @@ def build_seatbelt_profile(
     ``SOURCE_HOME_CREDENTIAL_PATHS`` under ``source_home`` (the real home the
     run HOME was materialized from; default ``worker_home(None)``).  Only those
     subpaths are denied: the target and run root stay readable wherever they
-    live.  The macOS keychain daemon is not covered (see #1841).
+    live.  ``target_root`` is the (possibly read-only) target, checked for overlap.
+    The macOS keychain daemon is not covered (see #1841).
 
     ``run_root`` holds the disposable HOME and TMPDIR, so the real HOME
     (``~/.gemini`` config, projects, OAuth token, memory) and
@@ -466,14 +490,20 @@ def build_seatbelt_profile(
     for home in _credential_homes(source_home):
         for relative in SOURCE_HOME_CREDENTIAL_PATHS:
             unresolved = home / relative
-            # Seatbelt matches resolved vnodes: also deny where a symlinked
-            # credential path (e.g. ~/.gitconfig -> ~/dotfiles/gitconfig) leads.
-            for candidate in dict.fromkeys((unresolved, Path(os.path.realpath(unresolved)))):
+            for candidate in _credential_candidates(unresolved):
                 entry = _sbpl_path(candidate)
-                for owned in (run_root, writable_target, run_home):
-                    if owned is not None and _is_within(Path(os.path.realpath(owned)), candidate):
+                for owned in (run_root, writable_target, run_home, target_root):
+                    if owned is None:
+                        continue
+                    resolved = Path(os.path.realpath(owned))
+                    # A target inside a denied path cannot be read.  A symlink
+                    # destination inside a writable target (a dotfiles repo)
+                    # would also be writable, so that direction is refused too.
+                    if _is_within(resolved, candidate) or (
+                        candidate != unresolved and _is_within(candidate, resolved)
+                    ):
                         raise CredentialPathOverlapError(
-                            "target or run root lies inside a denied credential path"
+                            "target or run root overlaps a denied credential path"
                         )
                 credential_denies += [f'  (literal "{entry}")', f'  (subpath "{entry}")']
     lines = [

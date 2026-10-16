@@ -1225,7 +1225,7 @@ def test_boundary_profile_denies_reading_the_leased_pool_home_credentials(tmp_pa
     try:
         assert f'(subpath "{admission._sbpl_path(home / ".ssh")}")' in boundary.profile
         assert f'(subpath "{admission._sbpl_path(home / ".config" / "gh")}")' in boundary.profile
-        # the run HOME copy of the token stays readable (it lives in the run root)
+        # no credential read-deny is emitted under the run HOME (it lives in the run root)
         assert f'(subpath "{admission._sbpl_path(boundary.run_home / ".ssh")}")' not in (
             boundary.profile
         )
