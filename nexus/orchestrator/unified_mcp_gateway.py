@@ -140,6 +140,7 @@ from nexus.orchestrator.standing_grant_store import (
     switch_task_card_authority,
     write_keyed_standing_grant_receipt,
 )
+from nexus.orchestrator.task_card_scope import protected_path_reason
 from nexus.orchestrator.task_contract import (
     TASK_CARD_EXPECTED_EVIDENCE_FENCE,
     EvidenceRequirementMode,
@@ -3642,7 +3643,15 @@ class UnifiedMCPGateway:
         if not allowed or len(allowed) > 10:
             raise GatewayInputError("allowed_files must contain 1-10 bounded paths")
         for path in allowed:
-            _safe_relative_path(path, "allowed_files")
+            resolved_path = _safe_relative_path(path, "allowed_files")
+            # #1750: a card must never authorize authority-bearing paths, named
+            # directly or through a symlink. This runs before any authority
+            # check, record or file write.
+            reason = protected_path_reason(path) or protected_path_reason(
+                resolved_path.relative_to(CANONICAL_SOURCE_ROOT).as_posix()
+            )
+            if reason is not None:
+                raise GatewayInputError(f"TASK_CARD_CREATE_PROTECTED_PATH:{reason}:{path}")
         verifiers = [str(command).strip() for command in arguments.get("verifier_commands") or [] if str(command).strip()]
         if not verifiers:
             raise GatewayInputError("verifier_commands is required")

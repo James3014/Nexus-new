@@ -35,6 +35,7 @@ from typing import Any, Mapping, Optional
 import yaml
 
 from nexus.contracts.autonomy_goal import AutonomyActionClass, canonical_autonomy_hash
+from nexus.orchestrator.task_card_scope import protected_path_reason
 
 AUTHORITY_BASIS = "OWNER_CHAT_DELEGATION_BOOTSTRAP"
 DECISION_REFERENCE = "James3014/Nexus-new#2270"
@@ -250,6 +251,10 @@ def authorize_bootstrap_agent_effect(
     """
     if action not in DELEGABLE_ACTIONS:
         raise BootstrapAgentAuthorityError("BOOTSTRAP_AGENT_AUTHORITY_ACTION_NOT_DELEGABLE")
+    # #1750: a Task Card that lists an authority-bearing path is never delegable.
+    for path in effect.get("allowed_files") or ():
+        if protected_path_reason(str(path)) is not None:
+            raise BootstrapAgentAuthorityError("BOOTSTRAP_AGENT_AUTHORITY_PROTECTED_PATH")
     recorded_at = (now or datetime.now(timezone.utc)).isoformat()
     effect_payload = json.loads(json.dumps(dict(effect), sort_keys=True))
     effect_hash = canonical_autonomy_hash(effect_payload)
