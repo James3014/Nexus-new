@@ -2189,3 +2189,300 @@ def test_cline_registry_requires_a_leased_target(monkeypatch, tmp_path):
     assert receipt.outcome == WorkerOutcome.FAILED.value
     assert receipt.provider_calls == 0
     assert receipt.failure_reason == "cline_target_not_leased_worktree"
+
+
+# ---------------------------------------------------------------------------
+# #2254: Cline runs under the Seatbelt + disposable HOME + exact env boundary
+# ---------------------------------------------------------------------------
+
+_CLINE_TTY_DENIAL = (
+    b'{"type":"agent_event","event":{"type":"content_end","contentType":"tool",'
+    b'"toolName":"editor","output":{"error":"Tool \\"editor\\" requires approval in a TTY '
+    b'session -- NOT a tool or system failure. Clarify with user before proceeding."},'
+    b'"error":"{\\"error\\":\\"Tool \\\\\\"editor\\\\\\" requires approval in a TTY session\\"}"}}\n'
+)
+
+
+def _cline_fake_home(tmp_path, monkeypatch):
+    home = tmp_path / "realhome"
+    (home / ".ssh").mkdir(parents=True)
+    (home / ".ssh" / "id_ed25519").write_text("PRIVATE", encoding="utf-8")
+    (home / ".config" / "gh").mkdir(parents=True)
+    (home / ".config" / "gh" / "hosts.yml").write_text("token: x", encoding="utf-8")
+    (home / ".gitconfig").write_text("[user]\nname=x\n", encoding="utf-8")
+    settings = home / ".cline" / "data" / "settings"
+    settings.mkdir(parents=True)
+    (settings / "providers.json").write_text('{"version":1}', encoding="utf-8")
+    (home / ".cline" / "data" / "sessions").mkdir()
+    (home / ".cline" / "data" / "sessions" / "old.json").write_text("{}", encoding="utf-8")
+    (home / ".cline" / "data" / "db").mkdir()
+    (home / ".cline" / "data" / "db" / "teams.db").write_text("db", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("GH_TOKEN", "leak")
+    monkeypatch.setenv("NEXUS_SECRET", "leak")
+    return home
+
+
+def _cline_admitted_run(monkeypatch, tmp_path, *, stdout=_CLINE_OK, side_effect=None, result=None):
+    """Run the adapter with a fake worker; return (receipt, requests, snapshots, target)."""
+    from nexus.executors.worker_registry import ClineWorkerAdapter
+
+    _cline_ready(monkeypatch, tmp_path)
+    canonical = _cline_git_repo(tmp_path / "canonical")
+    target = tmp_path / "target"
+    target.mkdir()
+    requests, snapshots = [], []
+
+    def fake_worker(request, on_process_group=None):
+        requests.append(request)
+        from pathlib import Path
+
+        home = Path((request.env or {}).get("HOME", "/nonexistent"))
+        snapshots.append(
+            sorted(p.relative_to(home).as_posix() for p in home.rglob("*"))
+            if home.is_dir()
+            else None
+        )
+        if side_effect is not None:
+            side_effect(target, canonical)
+        if result is not None:
+            return result
+        return CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=request.executable,
+            argv=request.argv,
+            cwd=request.cwd,
+            exit_code=0,
+            stdout=stdout,
+            stderr=b"",
+            wall_time_ms=1,
+            process_group_id=None,
+        )
+
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", fake_worker)
+    receipt = ClineWorkerAdapter(canonical_root=canonical).invoke(
+        type("Contract", (), {"task_id": "cline-2254"})(),
+        type("Lease", (), {"task_id": "cline-2254", "target_worktree": str(target)})(),
+        prompt="bounded",
+    )
+    return receipt, requests, snapshots, target, canonical
+
+
+def test_cline_request_carries_seatbelt_disposable_home_and_exact_env(monkeypatch, tmp_path):
+    """r1 (#2254 item 1): the request must be confined, not inherit the host HOME."""
+    real_home = _cline_fake_home(tmp_path, monkeypatch)
+    receipt, requests, snapshots, target, canonical = _cline_admitted_run(monkeypatch, tmp_path)
+
+    request = requests[0]
+    assert request.seatbelt_profile, "cline must run under a Seatbelt write profile"
+    assert request.exact_env is True
+    assert request.sweep_descendants_on_exit is True
+    env = dict(request.env or {})
+    assert env.get("HOME") and env["HOME"] != str(real_home)
+    assert "GH_TOKEN" not in env and "NEXUS_SECRET" not in env
+    assert env["TMPDIR"].startswith(env["HOME"].rsplit("/", 1)[0])
+    # the disposable HOME carries only cline's auth file, never other credentials
+    assert snapshots[0] is not None
+    assert ".cline/data/settings/providers.json" in snapshots[0]
+    for forbidden in (".ssh", ".config", ".gitconfig", ".cline/data/sessions", ".cline/data/db"):
+        assert not any(item == forbidden or item.startswith(forbidden + "/") for item in snapshots[0])
+    # target and the run root are writable, the canonical checkout is not
+    assert f'(subpath "{target.resolve()}")' in request.seatbelt_profile
+    assert str(canonical) not in request.seatbelt_profile
+    assert receipt.provider_write_sandbox and receipt.provider_write_sandbox.startswith("seatbelt:")
+    assert receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
+
+
+def test_cline_run_home_is_removed_after_the_run(monkeypatch, tmp_path):
+    from pathlib import Path
+
+    _cline_fake_home(tmp_path, monkeypatch)
+    _, requests, _, _, _ = _cline_admitted_run(monkeypatch, tmp_path)
+    assert not Path(requests[0].env["HOME"]).exists()
+
+
+def test_cline_planted_escaping_symlink_fails_the_run(monkeypatch, tmp_path):
+    """r2 (#2254 item 3): a symlink planted in the target pointing outside is an escape."""
+    import os
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    def plant(target, canonical):
+        os.symlink(outside, target / "escape")
+
+    receipt, _, _, _, _ = _cline_admitted_run(monkeypatch, tmp_path, side_effect=plant)
+
+    assert receipt.outcome == WorkerOutcome.FAILED.value
+    assert receipt.evidence_complete is False
+    assert receipt.failure_reason == "cline_target_symlink_escape"
+
+
+def test_cline_preexisting_escaping_symlink_is_not_attributed_to_the_run(monkeypatch, tmp_path):
+    """Same before/after comparison as agy: only a change fails the run."""
+    import os
+
+    from nexus.executors.worker_registry import ClineWorkerAdapter
+
+    _cline_ready(monkeypatch, tmp_path)
+    canonical = _cline_git_repo(tmp_path / "canonical")
+    target = tmp_path / "target"
+    target.mkdir()
+    os.symlink(tmp_path, target / "old-link")
+
+    def fake_worker(request, on_process_group=None):
+        return CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=request.executable,
+            argv=request.argv,
+            cwd=request.cwd,
+            exit_code=0,
+            stdout=_CLINE_OK,
+            stderr=b"",
+            wall_time_ms=1,
+            process_group_id=None,
+        )
+
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", fake_worker)
+    receipt = ClineWorkerAdapter(canonical_root=canonical).invoke(
+        type("Contract", (), {"task_id": "cline-2254"})(),
+        type("Lease", (), {"task_id": "cline-2254", "target_worktree": str(target)})(),
+        prompt="bounded",
+    )
+    assert receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
+
+
+def test_cline_gitdir_pointer_rewrite_fails_the_run(monkeypatch, tmp_path):
+    """#2254 item 3: the target's .git entry may not be repointed by the worker."""
+
+    def repoint(target, canonical):
+        (target / ".git").write_text(f"gitdir: {canonical}/.git\n", encoding="utf-8")
+
+    receipt, _, _, _, _ = _cline_admitted_run(monkeypatch, tmp_path, side_effect=repoint)
+
+    assert receipt.outcome == WorkerOutcome.FAILED.value
+    assert receipt.failure_reason == "cline_target_gitdir_tampered"
+
+
+def test_cline_denied_tool_with_finish_reason_stop_is_non_delivery(monkeypatch, tmp_path):
+    """r3 (#2254 item 5): the real cline headless denial shape, then a clean 'stop'."""
+    stdout = _CLINE_TTY_DENIAL + _CLINE_OK
+    receipt, _, _, _, _ = _cline_admitted_run(monkeypatch, tmp_path, stdout=stdout)
+
+    assert receipt.outcome == WorkerOutcome.FAILED.value
+    assert receipt.evidence_complete is False
+    assert receipt.failure_reason == "cline_permission_denied"
+
+
+def test_cline_tty_denial_text_in_model_output_is_not_a_denial():
+    from nexus.executors.worker_registry import cline_delivery_failure
+
+    quoted = (
+        b'{"type":"agent_event","event":{"type":"content_end","contentType":"text",'
+        b'"text":"requires approval in a TTY session"}}\n'
+        b'{"type":"agent_event","event":{"type":"content_end","contentType":"tool",'
+        b'"toolName":"read_file","output":{"result":"requires approval in a TTY session"}}}\n'
+    )
+    assert cline_delivery_failure(quoted + _CLINE_OK, b"") is None
+
+
+def test_cline_aborted_run_is_not_delivery():
+    from nexus.executors.worker_registry import cline_delivery_failure
+
+    assert (
+        cline_delivery_failure(b'{"type":"run_result","finishReason":"aborted"}\n', b"")
+        == "cline_status_not_success"
+    )
+
+
+def test_cline_without_seatbelt_fails_closed(monkeypatch, tmp_path):
+    result = CliWorkerResult(
+        status=CliWorkerStatus.START_FAILED,
+        executable_identity="cline",
+        argv=(),
+        cwd=str(tmp_path),
+        exit_code=1,
+        stdout=b"",
+        stderr=b"seatbelt_unavailable",
+        wall_time_ms=0,
+        process_group_id=None,
+    )
+    receipt, requests, _, _, _ = _cline_admitted_run(monkeypatch, tmp_path, result=result)
+
+    assert requests[0].seatbelt_profile  # never launched without a profile
+    assert receipt.outcome == WorkerOutcome.FAILED.value
+    assert receipt.failure_reason == "cline_seatbelt_unavailable"
+
+
+def test_cline_descendant_sweep_failure_is_non_delivery(monkeypatch, tmp_path):
+    result = CliWorkerResult(
+        status=CliWorkerStatus.COMPLETED,
+        executable_identity="cline",
+        argv=(),
+        cwd=str(tmp_path),
+        exit_code=0,
+        stdout=_CLINE_OK,
+        stderr=b"",
+        wall_time_ms=1,
+        process_group_id=None,
+        descendants_swept=False,
+    )
+    receipt, _, _, _, _ = _cline_admitted_run(monkeypatch, tmp_path, result=result)
+
+    assert receipt.outcome == WorkerOutcome.FAILED.value
+    assert receipt.failure_reason == "cline_descendant_sweep_failed"
+
+
+def test_cline_run_home_helper_copies_only_the_auth_file(tmp_path):
+    from nexus.executors.agy_write_admission import (
+        CLINE_RUN_HOME_COPIED_FILES,
+        materialize_cline_run_home,
+    )
+
+    source = tmp_path / "src"
+    settings = source / ".cline" / "data" / "settings"
+    settings.mkdir(parents=True)
+    (settings / "providers.json").write_text('{"a":1}', encoding="utf-8")
+    (settings / "cli-notices.json").write_text("{}", encoding="utf-8")
+    (source / ".ssh").mkdir()
+    (source / ".ssh" / "k").write_text("k", encoding="utf-8")
+    run_home = tmp_path / "run" / "home"
+
+    assert materialize_cline_run_home(source, run_home) is None
+    copied = sorted(p.relative_to(run_home).as_posix() for p in run_home.rglob("*") if p.is_file())
+    assert copied == sorted(p.as_posix() for p in CLINE_RUN_HOME_COPIED_FILES)
+    assert oct((run_home / CLINE_RUN_HOME_COPIED_FILES[0]).stat().st_mode & 0o777) == "0o600"
+
+
+def test_cline_seatbelt_denies_cline_workspace_customizations(tmp_path):
+    from nexus.executors.agy_write_admission import build_seatbelt_profile
+
+    target = tmp_path / "t"
+    profile = build_seatbelt_profile(
+        run_root=tmp_path / "r",
+        writable_target=target,
+        extra_protected_target_names=(".cline", ".clinerules"),
+    )
+    assert f'(subpath "{target}/.cline")' in profile
+    assert f'(literal "{target}/.clinerules")' in profile
+
+
+def test_cline_only_stop_finish_reason_is_delivery():
+    from nexus.executors.worker_registry import cline_delivery_failure
+
+    for reason in ("length", "max_iterations", "tool_calls", "weird", ""):
+        event = ('{"type":"run_result","finishReason":"%s"}\n' % reason).encode()
+        assert cline_delivery_failure(event, b"") == "cline_status_not_success", reason
+    assert cline_delivery_failure(b'{"type":"run_result"}\n', b"") == "cline_status_not_success"
+    assert cline_delivery_failure(_CLINE_OK, b"") is None
+
+
+def test_cline_adapter_request_profile_denies_cline_customizations(monkeypatch, tmp_path):
+    _cline_fake_home(tmp_path, monkeypatch)
+    _, requests, _, target, _ = _cline_admitted_run(monkeypatch, tmp_path)
+
+    profile = requests[0].seatbelt_profile
+    real_target = target.resolve()
+    for name in (".cline", ".clinerules"):
+        assert f'(literal "{real_target}/{name}")' in profile
+        assert f'(subpath "{real_target}/{name}")' in profile

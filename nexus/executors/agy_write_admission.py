@@ -184,6 +184,15 @@ AGY_RUN_HOME_COPIED_FILES = (
     Path(".gemini") / "antigravity-cli" / "antigravity-oauth-token",
     Path(".gemini") / "antigravity-cli" / "installation_id",
 )
+# Cline (#2254): ``~/.cline/data/settings/providers.json`` holds the OAuth
+# tokens and provider/model selection; probed with cline 3.0.69: it is the
+# only file a headless ``--json`` run needs to authenticate (no keychain, no
+# db/, sessions/, cache/ or hooks).  Cline refreshes the access token into the
+# disposable copy; the refresh token is not rotated, so the real file stays valid.
+CLINE_RUN_HOME_COPIED_FILES = (Path(".cline") / "data" / "settings" / "providers.json",)
+# Workspace entries cline loads on a later run in the target (hooks, rules);
+# the Seatbelt profile keeps them read-only for the worker.
+CLINE_TARGET_CUSTOMIZATION_PATHS = (".cline", ".clinerules")
 AGY_RUN_HOME_SETTINGS = Path(".gemini") / "antigravity-cli" / "settings.json"
 AGY_RUN_HOME_PROJECTS = Path(".gemini") / "config" / "projects"
 
@@ -311,6 +320,28 @@ def materialize_run_home(
     return None, hashlib.sha256(profile.encode("utf-8")).hexdigest()
 
 
+def materialize_cline_run_home(source_home: Path, run_home: Path) -> Optional[str]:
+    """Create cline's disposable HOME; a refusal reason, else ``None`` (#2254).
+
+    Only ``CLINE_RUN_HOME_COPIED_FILES`` cross over (mode 0600); the source
+    HOME's other credentials (``~/.ssh``, ``~/.config/gh``, ``~/.gitconfig``,
+    keychains) and cline's history/db/hooks never do.  A missing auth file is
+    not a refusal: cline then fails authentication itself, a typed non-delivery.
+    """
+    run_home.mkdir(parents=True, exist_ok=True)
+    for relative in CLINE_RUN_HOME_COPIED_FILES:
+        destination = run_home / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            shutil.copyfile(source_home / relative, destination)
+            os.chmod(destination, 0o600)
+        except FileNotFoundError:
+            continue
+        except OSError:
+            return "cline_run_home_unavailable"
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Seatbelt
 # ---------------------------------------------------------------------------
@@ -339,7 +370,11 @@ def run_home_settings_sha256(run_home: Path) -> str:
 
 
 def build_seatbelt_profile(
-    *, run_root: Path, writable_target: Optional[Path], run_home: Optional[Path] = None
+    *,
+    run_root: Path,
+    writable_target: Optional[Path],
+    run_home: Optional[Path] = None,
+    extra_protected_target_names: tuple[str, ...] = (),
 ) -> str:
     """Deny every file write except the target and the per-run root.
 
@@ -359,6 +394,10 @@ def build_seatbelt_profile(
         # Workspace customizations agy loads on a later run in this target
         # (hooks, plugins, MCP servers) must not be plantable by a worker.
         for name in TARGET_AGY_CUSTOMIZATION_PATHS:
+            entry = _sbpl_path(writable_target / name)
+            deny += [f'  (literal "{entry}")', f'  (subpath "{entry}")']
+        # Worker-specific workspace customizations (e.g. cline's .cline).
+        for name in extra_protected_target_names:
             entry = _sbpl_path(writable_target / name)
             deny += [f'  (literal "{entry}")', f'  (subpath "{entry}")']
     reallow: list[str] = []
@@ -472,6 +511,10 @@ def protected_checkout_plan(
     working checkout where concurrent sessions touch logs and caches; there
     Seatbelt already denies every worker write, so only the overlap refusal
     and the tracked/untracked fingerprint are kept to avoid false failures.
+    That claim holds for every caller of this plan: the Agy and Cline adapters
+    both launch the worker under ``build_seatbelt_profile`` (#2254) and fail
+    closed when Seatbelt is unavailable.  A worker that runs without Seatbelt
+    must fingerprint ignored files too (``include_ignored=True``).
     """
     candidates: list[tuple[Path, bool]] = []
     if controller_repo_root and str(controller_repo_root).strip():
