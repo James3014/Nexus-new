@@ -1804,3 +1804,34 @@ def test_terminal_record_is_retried_only_after_a_failure(
     )
     service._record_terminal_core_not_covered("verdict-unit", state)
     assert bool(built) is rebuilt
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("candidate", {"candidate_state_hash": "x"}),
+        ("candidate_state_hash", "x"),
+        ("promotion_packet", {"candidate_commit_sha": "a" * 40}),
+    ],
+)
+def test_terminal_record_skips_a_captured_candidate(tmp_path, field, value):
+    port = _CountingPort(answer={})
+    state = _terminal_state(tmp_path, **{field: value})
+    record = _host_service(tmp_path, port)._build_terminal_core_record(
+        state, contract=_universe_contract(tmp_path)
+    )
+    assert record is None and port.calls == []
+
+
+def test_terminal_record_requires_core_missing_not_just_blocking(tmp_path):
+    # A blocking answer that is not UNVERIFIABLE + MISSING (here a FAIL) is
+    # never labelled RECORDED.
+    projection = _not_covered_projection("CORE_REVISION_PINNED", tmp_path)
+    projection["core_response"]["verification"].update(
+        status="FAILED_VERIFICATION", integrity="VALID", reason_codes=["VERIFIER_FAILED"]
+    )
+    record = _host_service(tmp_path, _CountingPort(answer=projection))._build_terminal_core_record(
+        _terminal_state(tmp_path), contract=_universe_contract(tmp_path)
+    )
+    assert record["record_status"] == "FAILED"
+    assert record["candidate_commit_allowed"] is False

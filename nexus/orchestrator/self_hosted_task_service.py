@@ -3493,13 +3493,28 @@ class SelfHostedTaskService:
         """Core's NOT_COVERED record for a declared-universe task with no receipt (#2346).
 
         Returns None (nothing to record) for a legacy task, a non-terminal
-        state, or any state that already carries a verified receipt: those
-        paths are unchanged. Otherwise the record always fails closed: it
+        state, a captured Candidate, or any state that already carries a
+        verified receipt: those paths are unchanged. ``terminal_status`` is the
+        status at which the attempt ended without a receipt; a later lifecycle
+        move of the same attempt (e.g. SUPERSEDED) is the state's own status. Otherwise the record always fails closed: it
         carries no commit permission, and a Core failure is recorded as the
         failure reason, never as coverage.
         """
         status = str(state.get("status") or "")
         if status not in TERMINAL_STATUSES or state.get("verified_receipt") is not None:
+            return None
+        if any(
+            state.get(field) not in (None, "", {})
+            for field in (
+                "candidate",
+                "candidate_state_hash",
+                "candidate_commit_sha",
+                "candidate_ref",
+                "promotion_packet",
+            )
+        ):
+            # A captured Candidate is not "candidate missing"; its own
+            # verification path owns that Core record.
             return None
         request = state.get("request")
         if not isinstance(request, Mapping):
@@ -3562,14 +3577,23 @@ class SelfHostedTaskService:
             # RECORDED means exactly Core's NOT_COVERED answer for this
             # universe from the pinned Core; any other host finding (an
             # unpinned Core, an identity or universe mismatch) is a failure.
+            host_reasons = list(verdict.get("host_reason_codes") or ())
             unexpected = [
                 code
-                for code in verdict.get("host_reason_codes") or ()
+                for code in host_reasons
                 if code not in self._TERMINAL_CORE_EXPECTED_HOST_REASONS
             ]
             if unexpected:
                 record.update(core_verdict=verdict)
                 raise RuntimeError(str(unexpected[0]))
+            if (
+                verdict.get("core_status") != "UNVERIFIABLE"
+                or verdict.get("integrity") != "MISSING"
+                or "MISSING" not in (verdict.get("reason_codes") or ())
+                or "AMBIENT_CORE_FAILED_VERIFICATION:UNVERIFIABLE" not in host_reasons
+            ):
+                record.update(core_verdict=verdict)
+                raise RuntimeError("CORE_TERMINAL_RECORD_NOT_MISSING")
             if isinstance(projection, Mapping) and projection.get("terminal_status"):
                 record["terminal_status"] = str(projection["terminal_status"])
             record.update(record_status="RECORDED", core_verdict=verdict)

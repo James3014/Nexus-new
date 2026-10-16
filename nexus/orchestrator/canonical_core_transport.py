@@ -773,6 +773,8 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
             "task_id": task_id,
             "attempt_id": attempt_id,
             "terminal_status": terminal_status,
+            # Not Core's public wire: no change set exists to send over it.
+            "core_entrypoint": "product.verification.derive_coverage+reduce_verification",
             "core_response": {
                 "schema": GENERIC_VERIFICATION_RESPONSE_SCHEMA_ID,
                 "protocol_version": PUBLIC_PROTOCOL_VERSION,
