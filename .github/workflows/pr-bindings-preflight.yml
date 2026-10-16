@@ -66,8 +66,13 @@ jobs:
           set -euo pipefail
           # No checkout of the PR tree: the script only needs the commits for
           # their messages. The token is passed per command, never stored.
-          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" \
-            fetch --no-tags origin "refs/pull/${PR}/head"
+          auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          # The runner masks the token, not its base64 form: mask that too, and pass
+          # it through the environment instead of argv.
+          echo "::add-mask::${auth}"
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth}" \
+            git fetch --no-tags origin "refs/pull/${PR}/head"
           test "$(git rev-parse FETCH_HEAD)" = "$HEAD_SHA"
 
       - name: Run the bindings preflight and publish the status
@@ -84,7 +89,11 @@ jobs:
           python3 -I scripts/ops/pr_preflight.py --repo . --pr "$PR" --head "$HEAD_SHA" \
             --only bindings --no-fetch > "$out" 2>&1
           rc=$?
+          # Never let printed text act as a workflow command (#2368 review).
+          stop="$(python3 -c 'import secrets; print(secrets.token_hex(16))' 2>/dev/null || date +%s%N)"
+          echo "::stop-commands::${stop}"
           cat "$out"
+          echo "::${stop}::"
           # SKIP is not PASS: the check must report its own PASS line (#2368 review).
           if [ "$rc" -eq 0 ] && ! grep -q '^PASS  bindings' "$out"; then
             rc=1

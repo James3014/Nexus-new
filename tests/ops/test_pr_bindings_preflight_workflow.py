@@ -46,6 +46,9 @@ def test_least_privilege_and_no_pr_checkout() -> None:
     # the PR head is only fetched as objects and pinned to the event's head sha
     assert 'fetch --no-tags origin "refs/pull/${PR}/head"' in text
     assert 'test "$(git rev-parse FETCH_HEAD)" = "$HEAD_SHA"' in text
+    # the derived base64 credential is masked and never on argv
+    assert 'echo "::add-mask::${auth}"' in text
+    assert "git -c " not in text
     for forbidden in ("git checkout", "git switch", "uv sync", "pip install", "PYTHONPATH"):
         assert forbidden not in text
 
@@ -61,6 +64,12 @@ def test_runs_the_bindings_check_isolated_and_publishes_the_status() -> None:
     # the job's own result follows the check, so it cannot go green on a FAIL
     assert script.rstrip().endswith('exit "$rc"')
     assert "set -uo pipefail" in script
+    # printed preflight output cannot run workflow commands
+    assert (
+        script.index("::stop-commands::")
+        < script.index('cat "$out"')
+        < script.index('echo "::${stop}::"')
+    )
 
 
 def test_status_goes_pending_before_any_step_can_fail() -> None:
