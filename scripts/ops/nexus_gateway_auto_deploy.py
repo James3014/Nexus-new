@@ -1342,6 +1342,13 @@ class Prober:
 # --------------------------------------------------------------------- deployment
 
 
+# The Gateway's ``nexus_worker_candidate`` default route is Agy, whose worker
+# preflight requires this flag in the process environment.  Owner approved
+# exporting only this narrow flag (#2318); the broad
+# NEXUS_EXTERNAL_RUNTIME_AUTHORIZED is deliberately not exported.
+AGY_RUNTIME_AUTHORIZATION_EXPORT = "export NEXUS_AGY_RUNTIME_AUTHORIZED=1 ; "
+
+
 def wrapper_command(
     cfg: Config,
     root: Path,
@@ -1365,6 +1372,11 @@ def wrapper_command(
     With a Core root, ``PYTHONPYCACHEPREFIX`` points at the deployment's own
     ``pycache/<deployment>`` dir: the source digest excludes bytecode, so an
     in-tree ``__pycache__`` must never be read (#2246).
+
+    The wrapper always exports ``NEXUS_AGY_RUNTIME_AUTHORIZED=1`` after the env
+    file (Owner approval in #2318), so ``nexus_worker_candidate`` can dispatch
+    its default Agy route.  It never exports the broader
+    ``NEXUS_EXTERNAL_RUNTIME_AUTHORIZED``.
     """
     state = cfg.canonical_state_dir if state_dir is None else state_dir
     controller = root if controller_root is None else controller_root
@@ -1399,6 +1411,7 @@ def wrapper_command(
         core_export += "unset NEXUS_CORE_SOURCE_DIGEST NEXUS_CORE_SOURCE_DIGEST_REVISION ; "
     return (
         f'cd "{controller}" ; source "{cfg.env_file}" ; export PYTHONDONTWRITEBYTECODE=1 ; '
+        f"{AGY_RUNTIME_AUTHORIZATION_EXPORT}"
         f'export NEXUS_CANONICAL_SOURCE_ROOT="{controller}" ; '
         f'export NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR="{state}" ; '
         f'{core_export}{port_export}exec "{python}" "{root / ENTRYPOINT}"'
