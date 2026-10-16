@@ -396,3 +396,4 @@
 | scripts/ops/eia_scoreboard.py | tests/ops/test_eia_scoreboard.py | active | medium | eia_scoreboard_report |
 | nexus/contracts/self_hosted_state_root.py | tests/nexus/orchestrator/test_self_hosted_task_service.py, tests/research/test_trajectory_continuity.py | active | high | self_hosted_state_root_legacy_guard_contract |
 | tests/integration/test_model_json_routing_2174.py | tests/integration/test_model_json_routing_2174.py | active | medium | test_contract |
+| nexus/knowledge/autonomous_memory_curator.py | tests/knowledge/test_autonomous_memory_curator.py, tests/integration/test_model_json_routing_2174.py | active | medium | model_output_json_routing_contract |
