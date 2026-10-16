@@ -1057,3 +1057,44 @@ def test_busy_wait_rereads_quota_availability(tmp_path: Path, monkeypatch) -> No
     assert claim.internal_id == "reset"
     assert refreshes == [dispatch.POOL_QUEUE_REFRESH_SECONDS]
     assert waited == dispatch.POOL_QUEUE_REFRESH_SECONDS
+
+
+def test_first_pass_after_a_long_queue_wait_rereads_availability(
+    tmp_path: Path, monkeypatch
+) -> None:
+    clock = {"now": 0.0}
+    queue_dir = tmp_path / "leases" / "queue"
+    older = _older_ticket(queue_dir, os.getpid())
+
+    def fake_sleep(seconds: float) -> None:
+        clock["now"] += seconds
+        if clock["now"] >= 88.0 and older.exists():
+            older.unlink()  # the older waiter leaves 2 s before the deadline
+
+    monkeypatch.setattr(dispatch, "_sleep", fake_sleep)
+    monkeypatch.setattr(dispatch, "_queue_monotonic", lambda: clock["now"])
+    refreshes: list[float] = []
+
+    class HiddenUntilRefreshed:
+        leases_dir = tmp_path / "leases"
+
+        def acquire_claim(self, **_kwargs):
+            if not refreshes:
+                raise dispatch.AgyAccountPoolBusyError("reset account still hidden")
+            return _FakeClaim("reset")
+
+    def refresh() -> dict:
+        refreshes.append(clock["now"])
+        return {}
+
+    claim, _waited = dispatch._acquire_claim_queued(
+        HiddenUntilRefreshed(),
+        consumer_id="c",
+        exclude_hashes=set(),
+        wait_budget=90.0,
+        model_family="gemini",
+        quota_snapshot={},
+        refresh_availability=refresh,
+    )
+    assert claim.internal_id == "reset"
+    assert len(refreshes) == 1 and refreshes[0] >= 88.0

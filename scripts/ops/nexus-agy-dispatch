@@ -3700,7 +3700,7 @@ def _acquire_claim_queued(
                 continue
             if refresh_availability is not None and (
                 refresh_before_pass
-                or (passes > 0 and _queue_monotonic() - last_refresh >= POOL_QUEUE_REFRESH_SECONDS)
+                or _queue_monotonic() - last_refresh >= POOL_QUEUE_REFRESH_SECONDS
             ):
                 # Quota-blocked accounts are hidden through the published
                 # availability; re-read it so one that reset is claimable,
