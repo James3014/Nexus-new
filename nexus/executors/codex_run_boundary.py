@@ -39,6 +39,9 @@ CODEX_ENV_PROXY_KEYS = frozenset({
 CODEX_ENV_PASSTHROUGH_VAR = "NEXUS_CODEX_ENV_PASSTHROUGH"
 _CREDENTIAL_NAME_MARKERS = ("TOKEN", "KEY", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH_SOCK")
 _CREDENTIAL_NAME_PREFIXES = ("GH_", "GITHUB_", "SSH_")
+# Loader / interpreter / git hooks that run code or fetch credentials.
+_INJECTION_NAME_PREFIXES = ("GIT_", "LD_", "DYLD_", "PYTHON", "NODE_", "NPM_", "BASH_", "PERL")
+_INJECTION_NAMES = frozenset({"ENV", "IFS", "SHELLOPTS", "PS4"})
 CODEX_RUN_HOME_UNAVAILABLE = "codex_run_home_unavailable"
 CODEX_TARGET_ESCAPE = "codex_target_symlink_or_git_escape"
 
@@ -54,8 +57,11 @@ def codex_source_home(source: Optional[Mapping[str, str]] = None) -> Path:
 
 def _credential_shaped(name: str) -> bool:
     upper = name.upper()
-    return upper.startswith(_CREDENTIAL_NAME_PREFIXES) or any(
-        marker in upper for marker in _CREDENTIAL_NAME_MARKERS
+    return (
+        upper.startswith(_CREDENTIAL_NAME_PREFIXES)
+        or upper.startswith(_INJECTION_NAME_PREFIXES)
+        or upper in _INJECTION_NAMES
+        or any(marker in upper for marker in _CREDENTIAL_NAME_MARKERS)
     )
 
 
@@ -113,10 +119,26 @@ def materialize_codex_home(
     return None
 
 
+def _unreadable_directories(target: Path) -> list[str]:
+    """Directories ``os.walk`` could not enter (``escaping_symlinks`` skips them
+    silently, so a symlink hidden in a mode-0000 directory would go unseen)."""
+    real_target = Path(os.path.realpath(target))
+    found: list[str] = []
+
+    def onerror(error: OSError) -> None:
+        found.append(str(error.filename))
+
+    for _directory, dirnames, _filenames in os.walk(real_target, onerror=onerror):
+        if ".git" in dirnames:
+            dirnames.remove(".git")
+    return sorted(found)
+
+
 def target_integrity_snapshot(target: Path) -> dict[str, object]:
-    """Escaping symlinks and ``.git`` entry state of ``target`` right now."""
+    """Escaping symlinks, unreadable directories and ``.git`` entry state of ``target``."""
     return {
         "escaping": escaping_symlinks(target),
+        "unreadable": _unreadable_directories(target),
         "git": target_git_entry_state(target),
     }
 
@@ -130,6 +152,6 @@ def target_integrity_failure(
     Escaping symlinks already committed in the base tree (the Nexus tree has a
     few) are the baseline; only a difference is an escape.
     """
-    if after.get("escaping") != before.get("escaping") or after.get("git") != before.get("git"):
+    if any(after.get(key) != before.get(key) for key in ("escaping", "unreadable", "git")):
         return CODEX_TARGET_ESCAPE
     return None

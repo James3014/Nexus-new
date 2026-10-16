@@ -5,8 +5,8 @@ Run as ``python3 -I`` from the launcher; the repository root is taken from this
 file's location, never from the caller's cwd or PYTHONPATH.
 
   home <run_home>                          create the disposable HOME (auth only)
-  snapshot <target> <out.json>             record escaping symlinks + .git state
-  verify <target> <snap.json>              exit 6 when the run changed either
+  snapshot <target>                        print escaping symlinks + .git state (JSON)
+  verify <target>                          read the snapshot on stdin; exit 6 on change
   exec <run_home> -- <cmd> [args...]       exec cmd with the allowlisted env
 """
 
@@ -31,16 +31,13 @@ def main(argv: list[str]) -> int:
             print(f"[nexus-enforced] {reason}", file=sys.stderr)
             return 2
         return 0
-    if len(argv) == 3 and argv[0] == "snapshot":
-        Path(argv[2]).write_text(
-            json.dumps(boundary.target_integrity_snapshot(Path(argv[1])), sort_keys=True),
-            encoding="utf-8",
-        )
+    if len(argv) == 2 and argv[0] == "snapshot":
+        print(json.dumps(boundary.target_integrity_snapshot(Path(argv[1])), sort_keys=True))
         return 0
-    if len(argv) == 3 and argv[0] == "verify":
+    if len(argv) == 2 and argv[0] == "verify":
         try:
-            before = json.loads(Path(argv[2]).read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+            before = json.loads(sys.stdin.read())
+        except ValueError:
             print("[nexus-enforced] codex_target_snapshot_unreadable", file=sys.stderr)
             return ESCAPE_EXIT
         failure = boundary.target_integrity_failure(

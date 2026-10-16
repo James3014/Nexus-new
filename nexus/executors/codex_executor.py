@@ -163,6 +163,8 @@ class CodexCliExecutor:
                 request,
                 env=codex_child_env(os.environ, home=run_home, tmpdir=run_home / "tmp"),
                 exact_env=True,
+                sweep_descendants_on_exit=True,
+                sweep_roots=(str(target),),
             )
             before = target_integrity_snapshot(target)
             if self.on_process_group is None:

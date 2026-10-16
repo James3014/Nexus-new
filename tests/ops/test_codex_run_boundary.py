@@ -36,6 +36,7 @@ case "$FAKE_CODEX_MODE" in
   symlink) ln -s "$FAKE_ESCAPE_DIR" "$work/escape-link" ;;
   filelink) ln -s "$FAKE_ESCAPE_DIR/secret.txt" "$work/escape-file" ;;
   gitptr) echo "gitdir: $FAKE_ESCAPE_DIR" > "$work/.git" ;;
+  hidden) mkdir "$work/locked"; ln -s "$FAKE_ESCAPE_DIR" "$work/locked/escape"; chmod 000 "$work/locked" ;;
   inside) ln -s tracked.txt "$work/inside-link" ;;
 esac
 echo '{"type":"turn.completed"}'
@@ -51,7 +52,7 @@ def _git(root: Path, *args: str) -> None:
     )
 
 
-def _launch(tmp_path: Path, mode: str, *, prepare=None):
+def _launch(tmp_path: Path, mode: str, *, prepare=None, report_file: Path | None = None):
     canonical = tmp_path / "canonical"
     ops = canonical / "scripts" / "ops"
     ops.mkdir(parents=True)
@@ -108,6 +109,8 @@ def _launch(tmp_path: Path, mode: str, *, prepare=None):
         "TMPDIR": str(tmp_path / "tmpdir"),
     }
     env.pop("REPORT_FILE", None)
+    if report_file is not None:
+        env["REPORT_FILE"] = str(report_file)
     res = subprocess.run(
         ["bash", str(_LAUNCHER), "gpt-test", "workspace-write", str(prompt)],
         cwd=canonical,
@@ -191,3 +194,42 @@ def test_codex_run_home_is_removed_when_the_run_fails(tmp_path):
     home = Path(_value(dump, "HOME"))
     assert not home.exists()
     assert stat.S_ISDIR(os.stat(xdg).st_mode)
+
+
+def test_codex_run_fails_on_an_escaping_symlink_hidden_in_an_unreadable_directory(tmp_path):
+    res, _, _, _ = _launch(tmp_path, "hidden")
+
+    assert res.returncode == 6, res.stderr
+    assert "codex_target_symlink_or_git_escape" in res.stderr
+
+
+def test_codex_launcher_creates_its_state_dir_when_report_file_is_set(tmp_path):
+    res, dump, _, _ = _launch(tmp_path, "inside", report_file=tmp_path / "elsewhere" / "report.txt")
+
+    assert res.returncode == 0, res.stderr
+    assert dump
+
+
+def test_codex_env_passthrough_refuses_injection_and_credential_names():
+    from nexus.executors.codex_run_boundary import codex_child_env
+
+    source = {
+        "PATH": "/usr/bin",
+        "NEXUS_CODEX_ENV_PASSTHROUGH": "GIT_ASKPASS,GIT_SSH_COMMAND,LD_PRELOAD,DYLD_INSERT_LIBRARIES,"
+        "PYTHONPATH,BASH_ENV,NODE_OPTIONS,GH_TOKEN,MY_API_KEY,SAFE_VALUE",
+        "GIT_ASKPASS": "x",
+        "GIT_SSH_COMMAND": "x",
+        "LD_PRELOAD": "x",
+        "DYLD_INSERT_LIBRARIES": "x",
+        "PYTHONPATH": "x",
+        "BASH_ENV": "x",
+        "NODE_OPTIONS": "x",
+        "GH_TOKEN": "x",
+        "MY_API_KEY": "x",
+        "SAFE_VALUE": "ok",
+    }
+    env = codex_child_env(source, home=Path("/h"), tmpdir=Path("/h/tmp"))
+
+    assert env["SAFE_VALUE"] == "ok"
+    for name in list(source)[2:-1]:
+        assert name not in env

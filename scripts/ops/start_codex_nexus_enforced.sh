@@ -174,11 +174,12 @@ echo "[nexus-enforced] work_copy=$WORK_DIR"
 # ~/.gitconfig, ~/.codex history/sessions/memories/MCP config).  The helper
 # runs under python3 -I from this script's own checkout.  Deleted on exit.
 GUARD="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/codex_run_guard.py"
+mkdir -p "$CODEX_STATE_DIR"
 RUN_HOME="$(mktemp -d "$CODEX_STATE_DIR/home.XXXXXX")"
 python3 -I "$GUARD" home "$RUN_HOME" || exit 2
 # Symlinks escaping the work copy and the .git pointer, before and after.
-TARGET_SNAPSHOT="$RUN_HOME/target-snapshot.json"
-python3 -I "$GUARD" snapshot "$WORK_DIR" "$TARGET_SNAPSHOT" || exit 2
+# The baseline lives in this shell, not on disk where the run could rewrite it.
+TARGET_SNAPSHOT="$(python3 -I "$GUARD" snapshot "$WORK_DIR")" || exit 2
 
 echo "[nexus-enforced] invoke codex-nexus (enforced)"
 set +e
@@ -199,7 +200,7 @@ if [[ "$AFTER" != "$BEFORE" ]]; then
   exit 5
 fi
 
-if ! python3 -I "$GUARD" verify "$WORK_DIR" "$TARGET_SNAPSHOT"; then
+if ! printf '%s' "$TARGET_SNAPSHOT" | python3 -I "$GUARD" verify "$WORK_DIR"; then
   echo "[nexus-enforced] codex_target_symlink_or_git_escape: work copy kept: $WORK_DIR" >&2
   exit 6
 fi
