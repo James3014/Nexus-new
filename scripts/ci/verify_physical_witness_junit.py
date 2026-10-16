@@ -56,6 +56,30 @@ SUBJECT_FILES = {
     "verifier": "scripts/ci/verify_physical_witness_junit.py",
     "ci_workflow": ".github/workflows/pytest.yml",
 }
+AGY_TEST_FILE = "tests/nexus/executors/test_agy_dispatch_seatbelt_physical_witness.py"
+AGY_TEST_CLASSNAME = "tests.nexus.executors.test_agy_dispatch_seatbelt_physical_witness"
+AGY_EXPECTED_WITNESSES = (
+    "test_dispatcher_profile_confines_writes_under_real_sandbox_exec",
+    "test_dispatcher_sweep_kills_a_tagged_child_left_running",
+)
+AGY_SUBJECT_FILES = {
+    "test_file": AGY_TEST_FILE,
+    "boundary": "nexus/executors/agy_dispatch_boundary.py",
+    "profile": "nexus/executors/agy_write_admission.py",
+    "sweep": "nexus/executors/cli_worker.py",
+    "verifier": "scripts/ci/verify_physical_witness_junit.py",
+    "ci_workflow": ".github/workflows/pytest.yml",
+}
+# suite name -> (test file, junit classname, expected witness nodes, subject files)
+SUITES: dict[str, tuple[str, str, tuple[str, ...], dict[str, str]]] = {
+    "dsh": (TEST_FILE, TEST_CLASSNAME, EXPECTED_WITNESSES, SUBJECT_FILES),
+    "agy-dispatch": (
+        AGY_TEST_FILE,
+        AGY_TEST_CLASSNAME,
+        AGY_EXPECTED_WITNESSES,
+        AGY_SUBJECT_FILES,
+    ),
+}
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 DENIED = "Operation not permitted"
 
@@ -203,7 +227,9 @@ def _git(repo: Path, *args: str) -> str:
     return proc.stdout.strip()
 
 
-def git_subject(repo: Path, expected_head: str) -> dict:
+def git_subject(
+    repo: Path, expected_head: str, subject_files: dict[str, str] | None = None
+) -> dict:
     if not SHA_RE.match(expected_head or ""):
         raise WitnessError("EXPECTED_HEAD_SHA_INVALID", repr(expected_head))
     head = _git(repo, "rev-parse", "HEAD")
@@ -212,7 +238,7 @@ def git_subject(repo: Path, expected_head: str) -> dict:
     if _git(repo, "status", "--porcelain", "--untracked-files=all"):
         raise WitnessError("WORKTREE_DIRTY", "exact head checkout has local changes")
     blobs = {}
-    for key, rel in SUBJECT_FILES.items():
+    for key, rel in (SUBJECT_FILES if subject_files is None else subject_files).items():
         committed = _git(repo, "rev-parse", f"HEAD:{rel}")
         on_disk = _git(repo, "hash-object", "--", rel)
         if committed != on_disk:
@@ -257,8 +283,10 @@ def verify_junit(
     not_before: str,
     hostname: str,
     now: datetime | None = None,
+    suite_name: str = "dsh",
 ) -> dict:
-    expected = set(EXPECTED_WITNESSES)
+    test_file, test_classname, expected_witnesses, _subject = SUITES[suite_name]
+    expected = set(expected_witnesses)
     tests, witnesses = declared_witnesses(test_source)
     if witnesses != expected:
         raise WitnessError("WITNESS_DECLARATION_MISMATCH", f"source declares {sorted(witnesses)}")
@@ -279,7 +307,7 @@ def verify_junit(
         raise WitnessError("JUNIT_NOT_FRESH", f"{started.isoformat()} outside [{lower}, {upper}]")
 
     cases = list(suite.iter("testcase"))
-    foreign = sorted({case.get("classname", "") for case in cases} - {TEST_CLASSNAME})
+    foreign = sorted({case.get("classname", "") for case in cases} - {test_classname})
     if foreign:
         raise WitnessError("JUNIT_FOREIGN_TESTCASES", ", ".join(foreign))
     names = Counter(case.get("name", "") for case in cases)
@@ -302,7 +330,7 @@ def verify_junit(
             raise WitnessError(f"JUNIT_TESTCASE_{bad[0].upper()}", case.get("name", ""))
         if case.get("name") in expected:
             outcomes.append({
-                "node_id": f"{TEST_FILE}::{case.get('name')}",
+                "node_id": f"{test_file}::{case.get('name')}",
                 "outcome": "passed",
                 "time": case.get("time"),
             })
@@ -366,7 +394,8 @@ def build_receipt(args: argparse.Namespace, env: dict[str, str]) -> dict:
     repo = _real(args.repo_root)
     canary_parent = Path(args.canary_parent) if args.canary_parent else default_canary_parent()
     host = preflight(sys_platform=sys.platform, canary_parent=canary_parent)
-    subject = git_subject(repo, args.expected_head_sha)
+    test_file, _classname, _witnesses, subject_files = SUITES[args.suite]
+    subject = git_subject(repo, args.expected_head_sha, subject_files)
     if not args.command:
         raise WitnessError("COMMAND_MISSING")
     junit_path = Path(args.junit)
@@ -374,13 +403,15 @@ def build_receipt(args: argparse.Namespace, env: dict[str, str]) -> dict:
         raise WitnessError("JUNIT_MISSING", str(junit_path))
     junit = verify_junit(
         junit_path.read_bytes(),
-        (repo / TEST_FILE).read_text(encoding="utf-8"),
+        (repo / test_file).read_text(encoding="utf-8"),
         not_before=args.not_before,
         hostname=platform.node(),
+        suite_name=args.suite,
     )
     receipt: dict[str, Any] = {
         "schema": SCHEMA,
         "status": "PASS",
+        "suite": args.suite,
         "claim_ceiling": CLAIM_CEILING,
         "subject": subject,
         "execution_context": "GITHUB_HOSTED" if args.require_github_hosted else "LOCAL",
@@ -405,6 +436,7 @@ def main(argv: list[str] | None = None) -> int:
     pre = sub.add_parser("preflight")
     pre.add_argument("--canary-parent")
     ver = sub.add_parser("verify")
+    ver.add_argument("--suite", choices=sorted(SUITES), default="dsh")
     ver.add_argument("--repo-root", default=".")
     ver.add_argument("--expected-head-sha", required=True)
     ver.add_argument("--junit", required=True)

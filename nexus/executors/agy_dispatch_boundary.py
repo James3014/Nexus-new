@@ -17,6 +17,11 @@ adapter gets from ``run_cli_worker``:
   processes whose cwd is inside the target or the run root; it runs exactly
   once per launched run, also when the launch frame raised.
 
+Limitation: the run-tag part of the sweep finds processes through ``ps -E``,
+which on macOS hides the environment of SIP-protected system binaries (for
+example ``/bin/sleep``); such a process is only caught by the descendant
+tracker or the cwd sweep. Agy's own descendants (node/go) are not restricted.
+
 The ``--log-file`` attestation log is writable by the confined process, so
 attestation parsing must not treat its content as trusted (follow-up #2260).
 
@@ -164,14 +169,11 @@ class AgyDispatchBoundary:
 
     def before_launch(self) -> None:
         """Record the pre-start process facts the sweep compares against."""
-        self._baseline = cli_worker._sweep_baseline()
+        self._baseline = cli_worker.sweep_baseline()
 
     def after_launch(self, pid: int) -> None:
         self._launched = True
-        ticks = cli_worker._proc_start_ticks(Path("/proc") / str(pid))
-        if ticks is not None:
-            cli_worker._RUN_START_TICKS[self.run_tag] = ticks
-        self._tracker = cli_worker._DescendantTracker(pid)
+        self._tracker = cli_worker.track_run(self.run_tag, pid)
 
     def sweep(self) -> bool:
         """Kill every surviving worker descendant; True only when provably clean.
@@ -186,17 +188,7 @@ class AgyDispatchBoundary:
         if tracker is None:
             self._swept = False
             return False
-        baseline = self._baseline
-        tracked = tracker.stop() - (baseline.preexisting if baseline else frozenset())
-        tagged_clean = cli_worker._sweep_tagged_processes(self.run_tag)
-        self._swept = bool(
-            cli_worker._sweep_clean(
-                tracked, cli_worker._pids_with_cwd_under(self.sweep_roots, baseline)
-            )
-            and tagged_clean
-            and baseline is not None
-            and not tracker.probe_failed
-        )
+        self._swept = cli_worker.sweep_run(self.run_tag, tracker, self._baseline, self.sweep_roots)
         return self._swept
 
     def cleanup(self) -> None:
@@ -206,7 +198,7 @@ class AgyDispatchBoundary:
         tracker, self._tracker = self._tracker, None
         if tracker is not None:
             tracker.stop()
-        cli_worker._RUN_START_TICKS.pop(self.run_tag, None)
+        cli_worker.release_run(self.run_tag)
         # Diagnostics only: keep the run root (disposable HOME, keychain) for
         # inspection; the operator deletes it afterwards.
         if os.environ.get(KEEP_RUN_ROOT_ENV) != "1":
@@ -317,7 +309,7 @@ def prepare_accept_edits_boundary(
         profile_path.write_text(profile, encoding="utf-8")
         run_tag = secrets.token_hex(16)
         env = agy_child_env(source_env, home=run_home, tmpdir=run_tmp)
-        env[cli_worker._RUN_TAG_ENV] = run_tag
+        env[cli_worker.RUN_TAG_ENV] = run_tag
     except BaseException:
         shutil.rmtree(run_root, ignore_errors=True)
         shutil.rmtree(profile_dir, ignore_errors=True)
