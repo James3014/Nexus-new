@@ -4693,7 +4693,12 @@ def dispatch_run(
                 })
                 return 64
 
-            if _budget_exhausted():
+            if _budget_exhausted() or (
+                # #2432: capability checks ran before the first attempt; do not
+                # start the provider past the deadline (Codex r2 on #2435).
+                capability_skipped
+                and total_deadline - _monotonic() < TOTAL_DEADLINE_MIN_ATTEMPT_SECONDS
+            ):
                 return _emit_total_deadline_exhausted()
             attempts += 1
             attempted_accounts.add(claim.account_alias_hash)

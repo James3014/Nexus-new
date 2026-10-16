@@ -460,3 +460,28 @@ def test_capability_skips_stop_at_the_total_deadline(pool_env, monkeypatch) -> N
     assert code == 124
     assert pool_env.catalog_checks == ["g1"]
     assert pool_env.metas[-1]["total_deadline_exhausted"] is True
+
+
+def test_slow_admitting_catalog_after_a_skip_stops_at_the_deadline(pool_env, monkeypatch) -> None:
+    coordinator = pool_env.make({"g1": ["claude-sonnet-4-6"], "primary": [SONNET_55]})
+    clock = [1000.0]
+    monkeypatch.setattr(dispatch, "_monotonic", lambda: clock[0])
+    real_snapshot = dispatch._agy_model_catalog_snapshot
+
+    def snapshot(**kwargs):
+        result = real_snapshot(**kwargs)
+        if pool_env.catalog_checks[-1] == "primary":
+            clock[0] += 58.0  # the admitting check is the slow one
+        return result
+
+    monkeypatch.setattr(dispatch, "_agy_model_catalog_snapshot", snapshot)
+    calls: list[str] = []
+
+    code = _dispatch(
+        pool_env, coordinator, lambda **kw: calls.append("ran") or (0, "x", "", False, 1)
+    )
+
+    assert pool_env.catalog_checks == ["g1", "primary"]
+    assert calls == []
+    assert code == 124
+    assert pool_env.metas[-1]["total_deadline_exhausted"] is True
