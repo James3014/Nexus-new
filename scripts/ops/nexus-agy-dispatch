@@ -2231,10 +2231,14 @@ NO_TOOL_PROFILE_VIOLATION = "NO_TOOL_PROFILE_VIOLATION"
 # all 39 NO_TOOL_PROFILE_VIOLATION runs had only refused calls and a complete
 # answer, which was discarded.  The answer is returned only when the transcript
 # proves that every tool call was refused and no other step ran.
-_NO_TOOL_REFUSAL_MARKERS = (
-    "matches user-configured deny rule",
-    "declaring permissions: cortex tool",
-)
+# agy's two refusal shapes.  Both are anchored: the middle of the message
+# carries model-supplied arguments, so an unanchored substring could make an
+# executed-but-failed tool step look refused.  The cortex shape is a failure
+# while converting the call for the permission check; the tool does not run,
+# but agy may have stat'ed the path, so the model can learn that a path exists.
+_NO_TOOL_DENY_RULE_PREFIX = "permission check failed for "
+_NO_TOOL_DENY_RULE_SUFFIX = "matches user-configured deny rule."
+_NO_TOOL_DECLARATION_PREFIX = "declaring permissions: cortex tool "
 _NO_TOOL_PASSIVE_STEP_TYPES = frozenset({"USER_INPUT", "PLANNER_RESPONSE"})
 
 
@@ -2273,8 +2277,12 @@ def _no_tool_refused_tool_call_count(transcript_path: Path | None) -> int | None
             continue
         if step_type == "ERROR_MESSAGE" and step.get("source") == "SYSTEM":
             continue
-        error = str(step.get("error") or "").lower()
-        if step.get("status") != "ERROR" or not any(m in error for m in _NO_TOOL_REFUSAL_MARKERS):
+        error = str(step.get("error") or "").strip().lower()
+        refusal = (
+            error.startswith(_NO_TOOL_DENY_RULE_PREFIX)
+            and error.endswith(_NO_TOOL_DENY_RULE_SUFFIX)
+        ) or error.startswith(_NO_TOOL_DECLARATION_PREFIX)
+        if step.get("status") != "ERROR" or not refusal:
             return None
         refused += 1
     if calls == 0 or refused != calls:
@@ -4205,9 +4213,10 @@ def dispatch_run(
                 permission_profile_kind == "NO_TOOL_PACKET" and attempt_tool_event_count > 0
             )
             no_tool_refused_calls = 0
-            # A cwd outside git has no source baseline (``None``); there the
-            # transcript is the proof, since agy writes only through tool calls.
-            # Any observed change keeps the quarantine.
+            # Without a source observation (``None``: cwd outside git, or the
+            # baseline/readback failed) the transcript is the proof, since agy
+            # writes only through tool calls.  Any observed change keeps the
+            # quarantine.
             if (
                 no_tool_violation
                 and code == 0

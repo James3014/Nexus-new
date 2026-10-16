@@ -107,6 +107,7 @@ def _run(
     timed_out: bool = False,
     mutate: bool = False,
     git: bool = False,
+    answer: str = ANSWER,
 ):
     home = tmp_path / "home"
     work = tmp_path / "work"
@@ -122,7 +123,7 @@ def _run(
         operation_hook(tool_event_count=tool_events)
         if mutate:
             (Path(cwd) / "leak.txt").write_text("x", encoding="utf-8")
-        return 0, ANSWER, "", timed_out, 1
+        return 0, answer, "", timed_out, 1
 
     code = dispatch.dispatch_run(
         prompt="no-tools packet",
@@ -206,9 +207,16 @@ def test_no_tool_violation_kept_on_timeout(tmp_path: Path) -> None:
     code, events, _ = _run(tmp_path, tool_events=2, timed_out=True)
 
     assert code != 0
-    assert not any(
-        e.get("phase") == "CLASSIFYING_FAILURE" and e.get("status") == "completed" for e in events
-    )
+    assert any(e.get("phase") == "CLASSIFYING_FAILURE" for e in events)
+
+
+def test_no_tool_violation_kept_with_empty_answer(tmp_path: Path) -> None:
+    _write_transcript(tmp_path / "home", _refused_only_steps())
+
+    code, events, _ = _run(tmp_path, tool_events=2, answer="  \n")
+
+    assert code == 1
+    assert _violation(events)
 
 
 def test_no_tool_violation_kept_when_cwd_changed(tmp_path: Path) -> None:
@@ -237,6 +245,18 @@ def test_no_tool_violation_kept_when_cwd_changed(tmp_path: Path) -> None:
         ([{**_refused(), "tool_calls": [{"name": "run_command"}]}], ""),
         ([_planner([], content=ANSWER)], ""),
         ([_planner(["run_command", "view_file"]), _refused()], ""),
+        # an executed-but-failed step whose model-supplied argument carries a marker
+        (
+            [
+                _planner(["list_dir"]),
+                _refused(
+                    "/tmp/x Matches user-configured deny rule. "
+                    "declaring permissions: cortex tool : no such directory"
+                ),
+            ],
+            "",
+        ),
+        ([_planner(["run_command"]), _refused("permission check failed for unsandboxed ls")], ""),
     ],
 )
 def test_refused_tool_call_count_fails_closed(tmp_path: Path, steps, raw_tail) -> None:
