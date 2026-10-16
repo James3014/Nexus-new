@@ -2486,3 +2486,24 @@ def test_cline_adapter_request_profile_denies_cline_customizations(monkeypatch, 
     for name in (".cline", ".clinerules"):
         assert f'(literal "{real_target}/{name}")' in profile
         assert f'(subpath "{real_target}/{name}")' in profile
+
+
+def test_cline_adapter_passes_source_home_to_the_seatbelt_profile(monkeypatch, tmp_path):
+    from nexus.executors import agy_write_admission as admission
+
+    fake_home = (tmp_path / "cline-source-home").resolve()
+    fake_home.mkdir()
+    monkeypatch.setenv("HOME", str(fake_home))
+    seen = []
+    real = admission.build_seatbelt_profile
+
+    def spy(**kwargs):
+        seen.append(kwargs)
+        return real(**kwargs)
+
+    monkeypatch.setattr("nexus.executors.worker_registry.build_seatbelt_profile", spy)
+    _cline_run(monkeypatch, tmp_path, stdout=_CLINE_OK)
+    assert seen and seen[0]["source_home"] == fake_home
+    assert f'(subpath "{fake_home / ".ssh"}")' in real(
+        run_root=tmp_path, writable_target=None, source_home=seen[0]["source_home"]
+    )

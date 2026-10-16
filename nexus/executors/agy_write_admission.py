@@ -395,6 +395,14 @@ SOURCE_HOME_CREDENTIAL_PATHS = (
 )
 
 
+class CredentialPathOverlapError(ValueError):
+    """The writable target or run root sits inside a denied credential path."""
+
+
+def _is_within(path: Path, parent: Path) -> bool:
+    return path == parent or parent in path.parents
+
+
 def _credential_homes(source_home: Optional[Path]) -> list[Path]:
     """The source HOME plus the account's real home (pool HOMEs differ from it)."""
     homes = [Path(os.path.realpath(source_home if source_home is not None else worker_home(None)))]
@@ -457,8 +465,17 @@ def build_seatbelt_profile(
     credential_denies: list[str] = []
     for home in _credential_homes(source_home):
         for relative in SOURCE_HOME_CREDENTIAL_PATHS:
-            entry = _sbpl_path(home / relative)
-            credential_denies += [f'  (literal "{entry}")', f'  (subpath "{entry}")']
+            unresolved = home / relative
+            # Seatbelt matches resolved vnodes: also deny where a symlinked
+            # credential path (e.g. ~/.gitconfig -> ~/dotfiles/gitconfig) leads.
+            for candidate in dict.fromkeys((unresolved, Path(os.path.realpath(unresolved)))):
+                entry = _sbpl_path(candidate)
+                for owned in (run_root, writable_target, run_home):
+                    if owned is not None and _is_within(Path(os.path.realpath(owned)), candidate):
+                        raise CredentialPathOverlapError(
+                            "target or run root lies inside a denied credential path"
+                        )
+                credential_denies += [f'  (literal "{entry}")', f'  (subpath "{entry}")']
     lines = [
         "(version 1)",
         "(allow default)",

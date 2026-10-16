@@ -1211,3 +1211,36 @@ def test_gateway_compiles_plan_sandbox_only():
 def test_scenarios_agy_invoker_is_plan_sandbox_only():
     text = (ROOT / "scripts" / "ops" / "unified_runtime_scenarios.py").read_text(encoding="utf-8")
     assert re.search(r'"--mode",\s*"plan",\s*"--sandbox"', text)
+
+
+def test_boundary_profile_denies_reading_the_leased_pool_home_credentials(tmp_path, seatbelt_on):
+    home = _source_home(tmp_path)
+    target = _target(tmp_path)
+    boundary = boundary_mod.prepare_accept_edits_boundary(
+        source_env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+        target=target,
+        extra_writable_files=[],
+        extra_writable_roots=[],
+    )
+    try:
+        assert f'(subpath "{admission._sbpl_path(home / ".ssh")}")' in boundary.profile
+        assert f'(subpath "{admission._sbpl_path(home / ".config" / "gh")}")' in boundary.profile
+        # the run HOME copy of the token stays readable (it lives in the run root)
+        assert f'(subpath "{admission._sbpl_path(boundary.run_home / ".ssh")}")' not in (
+            boundary.profile
+        )
+    finally:
+        boundary.cleanup()
+
+
+def test_boundary_refuses_a_target_inside_a_credential_path(tmp_path, seatbelt_on):
+    home = _source_home(tmp_path)
+    target = home / ".codex" / "worktrees" / "repo"
+    target.mkdir(parents=True)
+    with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="target_inside_credential_path"):
+        boundary_mod.prepare_accept_edits_boundary(
+            source_env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+            target=target,
+            extra_writable_files=[],
+            extra_writable_roots=[],
+        )
