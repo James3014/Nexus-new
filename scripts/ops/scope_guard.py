@@ -19,6 +19,7 @@ def main() -> int:
         "scripts/engine/",
         "scripts/bench/",
         "scripts/archive/",
+        "archive/",
         "scripts/Templates/",
         "tests/",
         "tests/archive/",
