@@ -83,8 +83,8 @@ _URL_CREDENTIAL_PATTERN = re.compile(
 # line right after a token is redacted too (over-redaction is preferred), a short
 # all-lowercase final fragment of a wrapped token stays visible, and the tail of a token
 # wrapped over more than _MAX_SPLIT_CONTINUATIONS lines, or split across separate
-# JSON strings, stays visible.  Each line is examined O(1) times (a failed join skips
-# its own lines), so the pass is linear in the input.
+# JSON strings, stays visible.  Each line is examined O(1) times (token-only lines of a join
+# are skipped, a trailing text line is revisited once), so the pass is linear in the input.
 _MAX_SPLIT_CONTINUATIONS = 32
 _SPLIT_JOIN_CHECK_CHARS = 8192
 _SPLIT_MIN_TOKEN_CHARS = 20
@@ -359,6 +359,7 @@ def _redact_split_tokens(value: str) -> str:
         parts = [run[prefix.start() :]]
         end = offsets[i] + lead + len(body)
         k = i
+        via_fragment = False  # last consumed line had text after its token run
         state = [False, 0, len(parts[0])]  # complete-so-far, length last checked, total length
 
         def complete(frags: list[str], state: list = state) -> bool:
@@ -390,19 +391,21 @@ def _redact_split_tokens(value: str) -> str:
                 backslash = cbackslash
                 continue
             fragment = _SPLIT_TOKEN_ONLY_RE.match(cont)
-            if fragment is not None and (backslash or not complete(parts)):
+            if fragment is not None and (
+                backslash or fragment.end() >= _SPLIT_PLAIN_MIN_CHARS or not complete(parts)
+            ):
                 parts.append(fragment.group(0))
                 state[2] += fragment.end()
                 k += 1
                 end = offsets[k] + clead + fragment.end()
+                via_fragment = True
             break
         if k > i and (state[0] or _joined_matches("".join(parts))):
             spans.append((start, end))
-            i = k + 1
-        else:
-            # A failed join consumes its lines: a later head inside the span would
-            # only re-check a suffix of the same text (keeps the pass linear).
-            i = k + 1
+        # Token-only lines are consumed (a later head inside them would only re-check a
+        # suffix of the same text).  A fragment line also carries ordinary text that may
+        # hold its own head, so it is examined again: each line is visited at most twice.
+        i = k if via_fragment else k + 1
     if not spans:
         return value
     pieces: list[str] = []

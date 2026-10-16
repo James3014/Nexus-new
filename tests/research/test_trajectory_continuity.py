@@ -2874,6 +2874,8 @@ def test_redaction_issue_1873_continuation_limit_is_documented_bound():
         ("sk-\n" * 250_000, 3.0),
         ("ghp_a\nb\n" * 120_000, 3.0),
         ("ghp_aaaaaaaa\n" * 80_000, 3.0),
+        ("sk- a\n" * 160_000, 3.0),
+        ("ghp_ x\nsk- y\n" * 80_000, 3.0),
     ],
     ids=lambda value: f"{str(value)[:10]!r}-len{len(str(value))}",
 )
@@ -2883,3 +2885,42 @@ def test_redaction_issue_1873_split_pass_linear_second_round(payload, bound):
     start = time.monotonic()
     _redact_value(payload)
     assert time.monotonic() - start < bound
+
+
+def test_redaction_issue_1873_failed_join_does_not_hide_next_line_token():
+    text = (
+        "GitHub tokens start with ghp_\n"
+        "and the leaked one is ghp_ABCDEFGHIJ\nKLMNOPQRSTUVWXYZ012345\nend"
+    )
+    assert _redact_value(text) == (
+        "GitHub tokens start with ghp_\nand the leaked one is [REDACTED]\nend"
+    )
+    text = "see AKIA\nkeys like: export K=sk-proj-ABCDEFGH\nIJKLMNOPQRSTUVWXYZ\nend"
+    assert _redact_value(text) == "see AKIA\nkeys like: export K=[REDACTED]\nend"
+
+
+def test_redaction_issue_1873_backslash_joins_short_lowercase_continuation():
+    token = "ghp_" + "A" * 36
+    assert _redact_value(f"x {token} \\\nab\nnext") == "x [REDACTED]\nnext"
+    assert _redact_value(f"x {token} \\\ntail rest") == "x [REDACTED] rest"
+    # without the backslash a bare lowercase word after a complete token is kept
+    assert _redact_value(f"x {token}\nab\nnext") == f"x [REDACTED]\nab\nnext"
+    assert _redact_value(f"x {token}\ntail rest") == "x [REDACTED]\ntail rest"
+
+
+def test_redaction_issue_1873_continuation_limit_is_32_lines():
+    from nexus.research.clm_system_one import trajectory_continuity as tc
+
+    assert tc._MAX_SPLIT_CONTINUATIONS == 32
+    lines = ["ghp_" + "A" * 30] + ["B" * 10] * 35
+    assert _redact_value("\n".join(lines)) == "\n".join(["[REDACTED]"] + ["B" * 10] * 3)
+
+
+def test_redaction_issue_1873_long_fragment_with_trailing_text_is_consumed():
+    head = "sk-proj-" + "Ab3dE6gH9jK2mN5pR8sT1vW4yZ7" * 3  # 89 chars
+    tail = "Qw3rT6yU9iO2pA5sD8fG1hJ4kL7zX0cV" * 2 + "Qw3rT6yU9iO2pA5sD8fG1hJ"
+    assert len(head) == 89 and len(tail) == 87
+    out = _redact_value(f'export KEY="{head}\n{tail}"')
+    assert out == 'export KEY="[REDACTED]"'
+    out = _redact_value(f"{head}\n{tail} trailing words")
+    assert out == "[REDACTED] trailing words"
