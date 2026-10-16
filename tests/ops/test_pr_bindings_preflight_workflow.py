@@ -60,4 +60,55 @@ def test_runs_the_bindings_check_isolated_and_publishes_the_status() -> None:
     assert "statuses/${HEAD_SHA}" in script
     # the job's own result follows the check, so it cannot go green on a FAIL
     assert script.rstrip().endswith('exit "$rc"')
-    assert "set -uo pipefail" in script and "set -e" not in script.replace("set -euo", "")
+    assert "set -uo pipefail" in script
+
+
+def test_status_goes_pending_before_any_step_can_fail() -> None:
+    steps = _job()["steps"]
+    names = [s.get("name", "") for s in steps]
+    pending = names.index("Mark the status pending before anything can fail")
+    assert pending < names.index("Fetch the PR head as git objects only")
+    assert "state=pending" in steps[pending]["run"]
+    assert steps[pending]["env"]["CONTEXT"] == CONTEXT
+
+
+def _run_publish_step(tmp_path: Path, preflight_output: str, preflight_rc: int) -> tuple[int, str]:
+    """Execute the real publish step with fake python3/gh on PATH."""
+    import os
+    import stat
+    import subprocess
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir(parents=True)
+    (bindir / "python3").write_text(
+        f"#!/bin/sh\ncat <<'OUT'\n{preflight_output}\nOUT\nexit {preflight_rc}\n", encoding="utf-8"
+    )
+    posted = tmp_path / "posted.txt"
+    (bindir / "gh").write_text(f'#!/bin/sh\necho "$@" >> {posted}\n', encoding="utf-8")
+    for tool in ("python3", "gh"):
+        (bindir / tool).chmod(stat.S_IRWXU)
+    run = next(s for s in _job()["steps"] if s.get("name", "").startswith("Run the bindings"))
+    env = {
+        "PATH": f"{bindir}:/usr/bin:/bin",
+        "RUNNER_TEMP": str(tmp_path),
+        "REPO": "o/r",
+        "PR": "1",
+        "HEAD_SHA": "a" * 40,
+        "RUN_URL": "u",
+        "CONTEXT": CONTEXT,
+        "HOME": os.environ.get("HOME", str(tmp_path)),
+    }
+    proc = subprocess.run(["bash", "-c", run["run"]], env=env, capture_output=True, text=True)
+    return proc.returncode, posted.read_text(encoding="utf-8")
+
+
+def test_publish_step_pass_fail_and_skip(tmp_path: Path) -> None:
+    rc, posted = _run_publish_step(tmp_path / "pass", "PASS  bindings: ok\nRESULT: PASS", 0)
+    assert rc == 0 and "state=success" in posted
+    rc, posted = _run_publish_step(tmp_path / "fail", "FAIL  bindings [X]: bad\nRESULT: FAIL", 1)
+    assert rc == 1 and "state=failure" in posted
+    # exit 0 without a PASS line (SKIP) must not publish success
+    rc, posted = _run_publish_step(
+        tmp_path / "skip", "SKIP  bindings: gate missing\nRESULT: PASS", 0
+    )
+    assert rc == 1 and "state=failure" in posted and "state=success" not in posted

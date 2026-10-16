@@ -41,6 +41,21 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Mark the status pending before anything can fail
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          CONTEXT: Bindings preflight (default branch)
+        run: |
+          set -euo pipefail
+          # A re-run (e.g. a body edit) must never leave an earlier success standing
+          # if a later step fails: the status goes pending first.
+          gh api -X POST "repos/${REPO}/statuses/${HEAD_SHA}" \
+            -f state=pending -f context="$CONTEXT" -f target_url="$RUN_URL" \
+            -f description="bindings preflight running" > /dev/null
+
       - name: Fetch the PR head as git objects only
         env:
           GH_TOKEN: ${{ github.token }}
@@ -70,11 +85,16 @@ jobs:
             --only bindings --no-fetch > "$out" 2>&1
           rc=$?
           cat "$out"
+          # SKIP is not PASS: the check must report its own PASS line (#2368 review).
+          if [ "$rc" -eq 0 ] && ! grep -q '^PASS  bindings' "$out"; then
+            rc=1
+            echo "bindings check did not report PASS (skipped or not run)" >> "$out"
+          fi
           if [ "$rc" -eq 0 ]; then
             state=success; description="bindings agree at head ${HEAD_SHA:0:12}"
           else
             # One line, sanitized: the status text is rendered on the PR.
-            first="$(grep -m1 -E '^FAIL|^PREFLIGHT|Error|error' "$out" | tr -c 'A-Za-z0-9 _:#.,()/-' ' ' | cut -c1-120 || true)"
+            first="$(grep -m1 -E '^FAIL|^PREFLIGHT|Error|error|did not report PASS' "$out" | tr -c 'A-Za-z0-9 _:#.,()/-' ' ' | cut -c1-120 || true)"
             state=failure; description="${first:-bindings preflight failed} (head ${HEAD_SHA:0:12})"
           fi
           gh api -X POST "repos/${REPO}/statuses/${HEAD_SHA}" \
