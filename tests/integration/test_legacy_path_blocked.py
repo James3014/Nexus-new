@@ -89,13 +89,6 @@ NON_MODEL_JSON_PARSE_ALLOWLIST = {
         "File read: local_assist response.json receipt written by the executor, not raw model text."
     ),
     (
-        "nexus/services/local_assist_advisor_canary.py",
-        "run_advisor_canary",
-        "Path(response.receipt_path).read_text(encoding='utf-8')",
-    ): (
-        "File read: execution receipt JSON written by LocalAssistService (receipt_path), not raw model text."
-    ),
-    (
         "nexus/calibration/provider_adoption/apple_fm_adapter.py",
         "AppleFMCandidateAdapter._run_structured_json_probe.semantic_validator",
         "output_text",

@@ -91,28 +91,9 @@ def decide_flow(
     has_strong_commercial_signal = signals["has_strong_commercial_signal"]
     has_hard_signal = signals["has_hard_signal"]
 
-    known_benchmark_hidden_contract = bool(
-        "verification test" in task_body_lower
-        or (
-            task_type_base in {"bugfix", "docs_code_sync"}
-            and "renamed public field" in task_body_lower
-            and "canonical field" in task_body_lower
-        )
-    )
-    benchmark_hidden_contract_fast_path = bool(
-        contract_suffix_detected
-        and task_type_base in {"bugfix", "docs_code_sync"}
-        and findings_hits == 0
-        and not has_hard_signal
-        and adjusted_root_cause_confidence >= 0.5
-        and known_benchmark_hidden_contract
-    )
     if is_doc_fix:
         recommended_flow = "baseline"
         recommended_reason = "Matched Doc-Fix Rule"
-    elif benchmark_hidden_contract_fast_path:
-        recommended_flow = "baseline"
-        recommended_reason = "benchmark_hidden_contract_fast_path"
     elif has_strong_commercial_signal:
         recommended_flow = "hyper_sprint"
         recommended_reason = "commercial_public_task_prefers_hyper"
@@ -257,9 +238,7 @@ def decide_flow(
     risk_score += 10 if candidate_count > 1 else 0
     risk_score += 20 if is_cross_module_task else 0
     risk_score += 15 if has_commercial_signal else 0
-    if benchmark_hidden_contract_fast_path:
-        risk_score = min(risk_score, 20)
-    elif benchmark_bounded_repair_contract:
+    if benchmark_bounded_repair_contract:
         risk_score = min(risk_score, 55)
     risk_score = min(100, risk_score)
     route_features = {
@@ -282,7 +261,6 @@ def decide_flow(
         "claim_uncertainty": False,
         "benchmark_required": False,
         "plateau_detected": False,
-        "benchmark_hidden_contract_fast_path": benchmark_hidden_contract_fast_path,
         "doc_scout_hits": 0,
         "blocked_assumptions_count": 0,
     }
