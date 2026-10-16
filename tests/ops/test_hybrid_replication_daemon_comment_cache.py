@@ -23,7 +23,12 @@ UPDATED = "2026-10-15T11:00:00Z"
 
 
 def _issue(number: int = 7, updated_at: str | None = UPDATED, **extra: Any) -> dict[str, Any]:
-    issue: dict[str, Any] = {"number": number, "created_at": "2026-10-07T12:00:00Z", **extra}
+    issue: dict[str, Any] = {
+        "number": number,
+        "created_at": "2026-10-07T12:00:00Z",
+        "comments": 1,
+        **extra,
+    }
     if updated_at is not None:
         issue["updated_at"] = updated_at
     return issue
@@ -57,6 +62,7 @@ def test_cache_hit_when_updated_at_unchanged_within_ttl(
     assert payload == {
         "updated_at": UPDATED,
         "fetched_at": "2026-10-15T12:00:00Z",
+        "comment_count": 1,
         "comments": [{"body": "fetch-1"}],
     }
 
@@ -69,6 +75,51 @@ def test_refetch_when_updated_at_changed(tmp_path: Path, monkeypatch: pytest.Mon
     )
     assert result == [{"body": "fetch-2"}]
     assert len(fetch.calls) == 2
+
+
+def test_cache_hit_with_equal_comment_count_and_refetch_when_count_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fetch = _Fetcher(monkeypatch)
+    daemon._cached_comments(tmp_path, REPO, _issue(comments=3), now=T0)
+    daemon._cached_comments(tmp_path, REPO, _issue(comments=3), now=T0)
+    assert len(fetch.calls) == 1
+    # same updated_at, one comment deleted
+    assert daemon._cached_comments(tmp_path, REPO, _issue(comments=2), now=T0) == [
+        {"body": "fetch-2"}
+    ]
+    assert len(fetch.calls) == 2
+    daemon._cached_comments(tmp_path, REPO, _issue(comments=2), now=T0)
+    assert len(fetch.calls) == 2
+
+
+@pytest.mark.parametrize("count", ["missing", None, "3", 3.0, True])
+def test_refetch_when_listed_comment_count_unusable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, count: Any
+) -> None:
+    fetch = _Fetcher(monkeypatch)
+    issue = _issue()
+    if count == "missing":
+        del issue["comments"]
+    else:
+        issue["comments"] = count
+    daemon._cached_comments(tmp_path, REPO, issue, now=T0)
+    daemon._cached_comments(tmp_path, REPO, issue, now=T0)
+    assert len(fetch.calls) == 2
+
+
+def test_refetch_when_cached_comment_count_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fetch = _Fetcher(monkeypatch)
+    path = _cache_file(tmp_path)
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        json.dumps({"updated_at": UPDATED, "fetched_at": "2026-10-15T12:00:00Z", "comments": []}),
+        encoding="utf-8",
+    )
+    daemon._cached_comments(tmp_path, REPO, _issue(), now=T0)
+    assert len(fetch.calls) == 1
 
 
 def test_refetch_when_ttl_expired(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -108,7 +159,12 @@ def test_refetch_when_issue_has_no_updated_at(
         json.dumps({"updated_at": UPDATED, "comments": []}),
         json.dumps({"updated_at": UPDATED, "fetched_at": "garbage", "comments": []}),
         json.dumps({"updated_at": UPDATED, "fetched_at": 5, "comments": []}),
-        json.dumps({"updated_at": UPDATED, "fetched_at": "2026-10-15T12:00:00Z", "comments": {}}),
+        json.dumps({
+            "updated_at": UPDATED,
+            "fetched_at": "2026-10-15T12:00:00Z",
+            "comment_count": 1,
+            "comments": {},
+        }),
         json.dumps({"updated_at": UPDATED, "fetched_at": "2026-10-15T12:00:00Z"}),
         json.dumps({"fetched_at": "2026-10-15T12:00:00Z", "comments": []}),
         json.dumps({"updated_at": UPDATED, "fetched_at": "2026-10-15T12:00:00", "comments": []}),
@@ -136,7 +192,7 @@ def test_no_stray_tmp_files_after_write(tmp_path: Path, monkeypatch: pytest.Monk
     assert [p.name for p in _cache_file(tmp_path).parent.iterdir()] == ["7.json"]
 
 
-def test_tmp_file_cleaned_up_when_replace_fails(
+def test_cache_write_failure_is_best_effort(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _Fetcher(monkeypatch)
@@ -145,7 +201,30 @@ def test_tmp_file_cleaned_up_when_replace_fails(
         raise OSError("replace failed")
 
     monkeypatch.setattr(daemon.os, "replace", boom)
-    with pytest.raises(OSError, match="replace failed"):
+    assert daemon._cached_comments(tmp_path, REPO, _issue(), now=T0) == [{"body": "fetch-1"}]
+    assert list(tmp_path.rglob("*.tmp")) == []
+    assert not _cache_file(tmp_path).exists()
+
+
+def test_cache_dir_creation_failure_is_best_effort(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _Fetcher(monkeypatch)
+    blocker = tmp_path / "cache"
+    blocker.write_text("a file, not a directory", encoding="utf-8")
+    assert daemon._cached_comments(blocker, REPO, _issue(), now=T0) == [{"body": "fetch-1"}]
+
+
+def test_non_oserror_during_cache_write_propagates_after_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _Fetcher(monkeypatch)
+
+    def boom(src: Any, dst: Any) -> None:
+        raise RuntimeError("not an os error")
+
+    monkeypatch.setattr(daemon.os, "replace", boom)
+    with pytest.raises(RuntimeError, match="not an os error"):
         daemon._cached_comments(tmp_path, REPO, _issue(), now=T0)
     assert list(tmp_path.rglob("*.tmp")) == []
 
@@ -170,10 +249,20 @@ class _FakeResolver:
         return "resolved"
 
 
+class _Clock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
 def _resolver_for(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     listed: dict[tuple[str, int], str] | None,
+    listed_at: float | None = 1000.0,
+    clock: _Clock | None = None,
 ) -> tuple[Any, _FakeResolver]:
     _CapturingController.instances = []
     resolvers: list[_FakeResolver] = []
@@ -191,6 +280,8 @@ def _resolver_for(
         stack_command="stack",
         ground_truth_command="gt",
         listed_issue_states=listed,
+        listed_at_monotonic=listed_at,
+        monotonic=clock or _Clock(),
     )
     return _CapturingController.instances[0].terminal_resolver, resolvers[0]
 
@@ -232,6 +323,27 @@ def test_terminal_resolver_called_when_listed_states_is_none(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     resolver, fake = _resolver_for(tmp_path, monkeypatch, None)
+    assert resolver(_state()) == "resolved"
+    assert len(fake.calls) == 1
+
+
+def test_terminal_resolver_skip_only_while_listing_is_fresh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = _Clock()
+    resolver, fake = _resolver_for(tmp_path, monkeypatch, {(REPO, 5): "open"}, clock=clock)
+    clock.now = 1000.0 + daemon.LISTED_STATE_MAX_AGE_SECONDS
+    assert resolver(_state()) is None
+    assert fake.calls == []
+    clock.now = 1000.0 + daemon.LISTED_STATE_MAX_AGE_SECONDS + 1  # 121 s: stale
+    assert resolver(_state()) == "resolved"
+    assert len(fake.calls) == 1
+
+
+def test_terminal_resolver_called_when_listed_at_is_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    resolver, fake = _resolver_for(tmp_path, monkeypatch, {(REPO, 5): "open"}, listed_at=None)
     assert resolver(_state()) == "resolved"
     assert len(fake.calls) == 1
 
@@ -306,6 +418,7 @@ def _world() -> tuple[dict[str, list[dict[str, Any]]], dict[str, list[dict[str, 
             rows.append({"body": _admission(snapshot)})
         rows.append({"body": "unrelated chatter"})
         comments[key] = rows if kind != "no_capture" and kind != "bot" else []
+        issues[repository][-1]["comments"] = len(comments[key])
     return issues, comments
 
 
@@ -396,3 +509,17 @@ def test_ingest_records_listed_issue_states_without_changing_the_report(
     assert listed[(REPO, 14)] == "open"  # recorded even for the uncaptured bot issue
     assert listed[(REPO_B, 21)] == "open"
     assert len(listed) == 7
+
+
+def test_ingest_with_unwritable_cache_gives_the_same_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    issues, comments = _world()
+    report_a, _ = _run_ingest(tmp_path / "a", monkeypatch, issues, comments, cached=False)
+    root_b = tmp_path / "b"
+    root_b.mkdir()
+    (root_b / "comment-cache").write_text("blocks the cache directory", encoding="utf-8")
+    report_b, gets_b = _run_ingest(root_b, monkeypatch, issues, comments, cached=True)
+    assert gets_b == 7
+    assert json.dumps(report_a, sort_keys=True) == json.dumps(report_b, sort_keys=True)
+    assert _state_bytes(tmp_path / "a") == _state_bytes(root_b)
