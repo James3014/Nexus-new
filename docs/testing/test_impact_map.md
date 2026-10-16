@@ -416,6 +416,7 @@
 | tests/ops/test_gateway_routine_deploy_authority.py | tests/ops/test_gateway_routine_deploy_authority.py | active | medium | test_contract |
 | scripts/ops/eia_scoreboard.py | tests/ops/test_eia_scoreboard.py | active | medium | eia_scoreboard_report |
 | nexus/contracts/self_hosted_state_root.py | tests/nexus/orchestrator/test_self_hosted_task_service.py, tests/research/test_trajectory_continuity.py | active | high | self_hosted_state_root_legacy_guard_contract |
+| scripts/ops/gateway_health_hmac.py | tests/nexus/orchestrator/test_unified_mcp_gateway_http.py, tests/nexus/orchestrator/test_gateway_controller_root.py, tests/ops/test_golden_finding_probes.py, tests/ops/test_nexus_gateway_auto_deploy.py | active | medium | gateway_health_path_hmac_contract |
 | ARCHIVED_2026-10-16-hidden-contract-fast-path.md | tests/research/test_no_benchmark_local_fast_path.py | active | low | hidden_contract_fast_path_archive_manifest |
 | tests/research/test_no_benchmark_local_fast_path.py | tests/research/test_no_benchmark_local_fast_path.py | active | high | no_local_benchmark_delivery_in_model_runs |
 | nexus/core/claim_gate_binding.py | tests/engine/test_gate_passed_site_inventory.py, tests/core/test_registry_gate_passed_inventory.py, tests/unit/local_heal/test_isolated_loop_receipt_binding.py, tests/engine/test_receipt_adapter_claim_gate_fail_closed.py | active | high | claim_gate_verifier_source_hash_binding_contract |

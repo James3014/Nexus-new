@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import hmac
 import http.server
 import ipaddress
@@ -37,6 +36,7 @@ from nexus.orchestrator.unified_mcp_gateway import (  # noqa: E402
     github_observer_runtime_identity,
     public_core_provenance,
 )
+from scripts.ops.gateway_health_hmac import path_hmac_or_none  # noqa: E402
 
 TOKEN_ENV = "NEXUS_MCP_GATEWAY_TOKEN"
 HOST_ENV = "NEXUS_MCP_GATEWAY_HOST"
@@ -79,16 +79,12 @@ def _git_head() -> str:
     return result.stdout.strip() if result.returncode == 0 else "unknown"
 
 
-def _sha256_text(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
 def _redacted_github_observer(observer: Mapping[str, Any]) -> dict[str, Any]:
-    """Path-free projection: the absolute executable path becomes a SHA-256."""
+    """Path-free projection: the absolute executable path becomes a keyed HMAC (#2226)."""
     redacted = {key: value for key, value in observer.items() if key != "executable_path"}
     path = observer.get("executable_path")
-    redacted["executable_path_sha256"] = (
-        _sha256_text(path) if isinstance(path, str) and path else None
+    redacted["executable_path_hmac_sha256"] = (
+        path_hmac_or_none("executable_path", path) if isinstance(path, str) and path else None
     )
     return redacted
 
@@ -104,7 +100,9 @@ def runtime_identity(
         # separate Controller worktree (#1939).
         path_fields: dict[str, Any] = {"repo_root": str(LOADED_SOURCE_ROOT)}
     else:
-        path_fields = {"repo_root_sha256": _sha256_text(str(LOADED_SOURCE_ROOT))}
+        path_fields = {
+            "repo_root_hmac_sha256": path_hmac_or_none("repo_root", str(LOADED_SOURCE_ROOT))
+        }
         github_observer = _redacted_github_observer(github_observer)
     controller_binding = controller_binding_status()
     ready = github_observer["ready"] is True and controller_binding["status"] != "DEGRADED"

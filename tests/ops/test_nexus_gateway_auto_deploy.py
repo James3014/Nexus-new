@@ -26,6 +26,7 @@ import pytest
 from nexus.contracts import gateway_deployment as contract
 from scripts.ops import check_gateway_source_drift as drift
 from scripts.ops import nexus_gateway_auto_deploy as ad
+from scripts.ops.gateway_health_hmac import KEY_FILE_ENV, load_or_create_key, path_hmac
 
 OLD = "a" * 40
 NEW = "b" * 40
@@ -1939,6 +1940,12 @@ def test_verify_commit_subcommand(capsys: pytest.CaptureFixture[str]) -> None:
 REPO_ROOT_FOR_GB077 = Path(__file__).resolve().parents[2]
 
 
+@pytest.fixture(autouse=True)
+def _gateway_health_hmac_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Per-test host key (#2226); the GB-077 subprocess inherits the env."""
+    monkeypatch.setenv(KEY_FILE_ENV, str(tmp_path / "health-hmac.key"))
+
+
 def _health(commit: str, *, status: str = "ok") -> dict[str, Any]:
     return {
         "status": status,
@@ -1948,7 +1955,9 @@ def _health(commit: str, *, status: str = "ok") -> dict[str, Any]:
         "repo_head_at_start": commit,
         "repo_head_current": commit,
         # GB-077 requires the hash of the evaluated root, i.e. this tree.
-        "repo_root_sha256": hashlib.sha256(str(REPO_ROOT_FOR_GB077).encode("utf-8")).hexdigest(),
+        "repo_root_hmac_sha256": path_hmac(
+            "repo_root", str(REPO_ROOT_FOR_GB077), load_or_create_key()
+        ),
         "server_instance_id": "i",
         "tool_manifest_revision": "r",
         "permission_policy_hash": "p",
