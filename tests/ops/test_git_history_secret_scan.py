@@ -565,6 +565,43 @@ _ISSUE_1873_SAMPLES = {
 }
 
 
+_ISSUE_1873_VARIANTS = [
+    (
+        "slack_webhook_url",
+        "https://hooks.slack" + ".com/services/E0AB12CD3/A0EF45GH6/" + "q7A4nB9cD2eF6gH8jK1mN5pR",
+    ),
+    ("sendgrid_api_key", "key=SG" + "." + "q7A4nB9cD2eF6gH8jK1mN5" + "." + "x" * 43 + ";"),
+    (
+        "azure_storage_account_key",
+        "sharedaccesskey = " + ("q7A4nB9cD2eF6gH8jK1mN5pR3sT0vW4xY7zK2L9mN4pR" * 2)[:86] + "==",
+    ),
+    (
+        "azure_storage_account_key",
+        'ACCOUNTKEY="' + ("q7A4nB9cD2eF6gH8jK1mN5pR3sT0vW4xY7zK2L9mN4pR" * 2)[:86] + '=="',
+    ),
+]
+
+
+@pytest.mark.parametrize(("detector", "sample"), _ISSUE_1873_VARIANTS)
+def test_issue_1873_scanner_format_variants_are_blocking(
+    tmp_path: Path, detector: str, sample: str
+) -> None:
+    repo = _init_repo(tmp_path)
+    _commit(repo, "add", {"x.txt": f"{sample}\n"})
+    _refresh_remote_ref(repo, "main", _git(repo, "rev-parse", "HEAD").stdout.strip())
+    receipt = scan_repository(repo)
+    assert any(f["blocking"] and f["detector"] == detector for f in receipt["findings"])
+
+
+def test_issue_1873_sendgrid_inside_longer_identifier_is_not_flagged(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    body = "SG" + "." + "q7A4nB9cD2eF6gH8jK1mN5" + "." + "x" * 43
+    _commit(repo, "near", {"x.txt": f"prefix_{body}\n{body}_suffix\n{body}Z\n"})
+    _refresh_remote_ref(repo, "main", _git(repo, "rev-parse", "HEAD").stdout.strip())
+    receipt = scan_repository(repo)
+    assert not [f for f in receipt["findings"] if f["detector"] == "sendgrid_api_key"]
+
+
 @pytest.mark.parametrize("detector", sorted(_ISSUE_1873_SAMPLES))
 def test_issue_1873_prefixed_provider_formats_are_blocking(tmp_path: Path, detector: str) -> None:
     repo = _init_repo(tmp_path)

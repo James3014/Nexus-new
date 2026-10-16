@@ -2802,3 +2802,84 @@ def test_redaction_issue_1873_each_format_before_after(label, secret, template):
         assert fragment not in out, label
     prefix, _, suffix = template.partition("{s}")
     assert out.startswith(prefix) and out.endswith(suffix.rstrip()), label
+
+
+def _wrap(text: str, width: int) -> str:
+    return "\n".join(text[i : i + width] for i in range(0, len(text), width))
+
+
+_LONG_WRAP_TOKENS = {
+    "sk_proj_164": "sk-" + "proj-" + "Ab3dE6gH9jK2mN5pR8sT1vW4yZ7" * 6,
+    "github_pat_93": "github_pat_" + "11ABCDEFG0aBcDeFgHiJkL_" * 3 + "x" * 13,
+    "jwt": "eyJ"
+    + "hbGciOiJIUzI1NiJ9"
+    + ".eyJ"
+    + "zdWIiOiIxMjM0NTY3ODkwIn0" * 3
+    + "."
+    + "sig_Ab-9" * 9,
+}
+
+
+@pytest.mark.parametrize(
+    ("name", "width"),
+    [
+        ("sk_proj_164", 40),
+        ("sk_proj_164", 72),
+        ("sk_proj_164", 80),
+        ("github_pat_93", 40),
+        ("jwt", 64),
+    ],
+)
+def test_redaction_issue_1873_long_wrapped_token_leaves_no_fragment(name, width):
+    token = _LONG_WRAP_TOKENS[name]
+    out = _redact_value("before\n" + _wrap(token, width) + "\nafter words")
+    assert out == "before\n[REDACTED]\nafter words"
+    for i in range(0, len(token) - 8, 4):
+        assert token[i : i + 8] not in out
+
+
+def test_redaction_issue_1873_long_continuation_fragment_fully_consumed():
+    out = _redact_value("x ghp_ab\n" + "C" * 300 + " y")
+    assert out == "x [REDACTED] y"
+    out = _redact_value("x ghp_ab \\\n" + "C" * 300 + "\nnext")
+    assert out == "x [REDACTED]\nnext"
+
+
+def test_redaction_issue_1873_wrapped_token_after_dash_or_dot():
+    out = _redact_value("auth-" + _wrap(_SPLIT_TOKEN, 20) + "\nnext")
+    assert out == "auth-[REDACTED]\nnext"
+    out = _redact_value("v1." + _wrap(_SPLIT_TOKEN, 20) + "\nnext")
+    assert out == "v1.[REDACTED]\nnext"
+
+
+def test_redaction_issue_1873_continuation_limit_is_documented_bound():
+    from nexus.research.clm_system_one import trajectory_continuity as tc
+
+    n = tc._MAX_SPLIT_CONTINUATIONS
+    lines = ["ghp_" + "A" * 30] + ["B" * 10] * (n + 3)
+    out = _redact_value("\n".join(lines))
+    assert out == "\n".join(["[REDACTED]"] + ["B" * 10] * 3)
+
+
+@pytest.mark.parametrize(
+    ("payload", "bound"),
+    [
+        # single-line payloads: local ~0.2s, bound 1.0s (>=3x headroom)
+        ("_sk-" * 250_000 + "\n", 1.0),
+        ("_ghp_" * 200_000 + "\n", 1.0),
+        ("_xoxa-" * 160_000 + "\n", 1.0),
+        ("x" * 1_000_000 + "\nsk-" + "y" * 100, 1.0),
+        ("sk-" + "a" * 100 + "\n" + "b" * 150 + "\n" * 3000, 1.0),
+        # line-heavy payloads (a prefix on every line): local 0.5-0.75s, bound 3.0s
+        ("sk-\n" * 250_000, 3.0),
+        ("ghp_a\nb\n" * 120_000, 3.0),
+        ("ghp_aaaaaaaa\n" * 80_000, 3.0),
+    ],
+    ids=lambda value: f"{str(value)[:10]!r}-len{len(str(value))}",
+)
+def test_redaction_issue_1873_split_pass_linear_second_round(payload, bound):
+    import time
+
+    start = time.monotonic()
+    _redact_value(payload)
+    assert time.monotonic() - start < bound
