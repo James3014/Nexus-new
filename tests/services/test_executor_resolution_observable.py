@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import sys
+import time
 from typing import Any
 
 import pytest
@@ -373,3 +374,186 @@ def test_warning_dedupe_resets_on_recovery_and_keys_on_message(monkeypatch, capl
         monkeypatch.setattr(executor_registry, "get_executor", _raise_on("pregate", "first"))
         registry.executor_resolution_status("pregate")
         assert len(warnings()) == 3
+
+
+# Secret-shaped fixtures are built from split literals (secret audit, check_fixture_secret_literals).
+_GH_TOKEN = "gh" + "p_" + "abcdefghijklmnopqrstuvwxyz0123456789"
+_AWS_ID = "AK" + "IA" + "IOSFODNN7EXAMPLE"
+_OPENAI = "sk-" + "proj-" + "abcdefghij1234567890"
+_SLACK = "xo" + "xb-" + "1234567890-abcdefghij"
+_JWT = (
+    "eyJ" + "hbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+    ".eyJ" + "zdWIiOiIxMjM0NTY3ODkwIn0"
+    ".dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"
+)
+_AWS_SECRET = "wJalrXUtnFEMI/K7MDENG/" + "bPxRfiCYEXAMPLEKEY"
+
+# (label, raw text, substrings that must NOT survive, substrings that MUST survive)
+_REDACTION_CASES = [
+    ("ghp kv", f"SENTINEL token={_GH_TOKEN}", [_GH_TOKEN, "abcdefghijklmnop"], ["SENTINEL token="]),
+    ("ghp bare", f"failed with {_GH_TOKEN} now", [_GH_TOKEN], ["failed with", "now"]),
+    ("after newline", f"first line\n{_GH_TOKEN}", [_GH_TOKEN], ["first line"]),
+    ("after newline kv", "x\npassword=hunter2hunter2", ["hunter2"], ["password="]),
+    (
+        "two credentials across lines",
+        "Authorization: Bearer my_token_12345\npassword: top_secret_password",
+        ["my_token_12345", "top_secret_password"],
+        ["Authorization:", "password:"],
+    ),
+    (
+        "mixed case auth",
+        "AuThOrIzAtIoN: BeArEr abc.DEF-ghi_jkl~mno+pq/rs=",
+        ["abc.DEF", "BeArEr"],
+        ["AuThOrIzAtIoN:"],
+    ),
+    ("upper auth", "AUTHORIZATION: bearer X1y2Z3", ["X1y2Z3"], ["AUTHORIZATION:"]),
+    (
+        "auth no colon",
+        "header Authorization Bearer abcdefghijklmnop",
+        ["abcdefghijklmnop"],
+        ["header"],
+    ),
+    ("basic", "Basic dXNlcjpwYXNzd29yZA==", ["dXNlcjpw"], ["Basic"]),
+    (
+        "b64 pad",
+        "blob eyJhbGciOiJIUzI1NiJ9-_abcdEFGH1234ijklMNOP== end",
+        ["abcdEFGH"],
+        ["blob", "end"],
+    ),
+    ("aws id", f"key {_AWS_ID} used", [_AWS_ID], ["key", "used"]),
+    ("aws id kv", f"aws_access_key_id={_AWS_ID}", [_AWS_ID], ["aws_access_key_id="]),
+    ("aws secret", f"aws_secret_access_key {_AWS_SECRET}", [_AWS_SECRET, "bPxRfiCY"], []),
+    (
+        "url creds",
+        "https://user:pa55w0rd@github.com/x.git",
+        ["pa55w0rd", "user:"],
+        ["github.com/x.git"],
+    ),
+    ("sk", f"openai {_OPENAI}", [_OPENAI], ["openai"]),
+    ("slack", _SLACK, [_SLACK, "abcdefghij"], []),
+    ("jwt", _JWT, ["hbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9", "zdWIiOiIx", "dozjgNry"], []),
+    (
+        "pem",
+        "-----BEGIN " + "RSA PRIVATE KEY-----MIIEowIBAAKCAQEA",
+        ["MIIEowIBAAKCAQEA"],
+        [],
+    ),
+    ("short password", "password: abc", ["abc"], ["password:"]),
+    ("quoted kv", 'api_key="sk_live_51Habc"', ["51Habc"], ["api_key="]),
+    ("json kv", '{"token": "abcd1234efgh"}', ["abcd1234efgh"], ['{"token": "', '"}']),
+    ("escaped json", '{\\"password\\": \\"hunter2\\"}', ["hunter2"], ["password"]),
+    (
+        "kv inside json string",
+        '{"query": "password=secret123"}',
+        ["secret123"],
+        ['{"query": "password=', '"}'],
+    ),
+    ("signature b64", "signature=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=", ["MDEyMzQ1"], []),
+    (
+        "padded 32",
+        "blob aaaaaaaaaaaaaaa111111111111111== tail",
+        ["aaaaaaaaaaaaaaa111"],
+        ["blob", "tail"],
+    ),
+    (
+        "git sha",
+        "pinned at e73d152f17d5d06b78da258b62354cca11d6a352",
+        ["e73d152f17d5"],
+        ["pinned at"],
+    ),
+    (
+        "plain socket",
+        "connection refused to 127.0.0.1:8080",
+        [],
+        ["connection refused to 127.0.0.1:8080"],
+    ),
+    (
+        "module path",
+        "No module named 'nexus_runtime.support.services.executor_binding'",
+        [],
+        ["No module named 'nexus_runtime.support.services.executor_binding'"],
+    ),
+    (
+        "attribute error",
+        "AttributeError: module 'nexus.core.capability_executor_registry' has no attribute 'get_executor'",
+        [],
+        ["module 'nexus.core.capability_executor_registry' has no attribute 'get_executor'"],
+    ),
+    (
+        "site-packages path",
+        "/opt/homebrew/lib/python3.14/site-packages/nexus_runtime/support/services/x.py",
+        [],
+        ["/opt/homebrew/lib/python3.14/site-packages/nexus_runtime/support/services/x.py"],
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("raw", "forbidden", "kept"),
+    [case[1:] for case in _REDACTION_CASES],
+    ids=[case[0].replace(" ", "_") for case in _REDACTION_CASES],
+)
+def test_redaction_table(raw, forbidden, kept):
+    out = registry._sanitize_resolution_text(raw, 2000)
+    assert out == executor_self_check._sanitize_resolution_text(raw, 2000)
+    for value in forbidden:
+        assert value not in out, (value, out)
+    for value in kept:
+        assert value in out, (value, out)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["a.b.token." * 1000, "tokenx" * 4000, "a" * 200_000 + "://", "A1" * 100_000],
+    ids=["dotted_token_10k", "tokenx_24k", "long_scheme", "b64_run_200k"],
+)
+def test_sanitizer_is_linear_on_keyword_laden_input(raw):
+    started = time.perf_counter()
+    registry._sanitize_resolution_text(raw)
+    executor_self_check._sanitize_resolution_text(raw)
+    assert time.perf_counter() - started < 0.05
+
+
+def test_sanitizer_caps_raw_text_before_scanning():
+    raw = "x" * 5000 + f" token={_GH_TOKEN}"
+    out = registry._sanitize_resolution_text(raw, 10_000)
+    assert len(out) <= registry._RESOLUTION_RAW_MAX
+
+
+def test_registry_key_is_not_recorded_as_pseudo_capability(monkeypatch):
+    from nexus.services import runtime_compat
+
+    monkeypatch.setattr(executor_registry, "get_executor", _raise_on("file_lock_security_gate"))
+    with pytest.raises(_ResolverBoom):
+        runtime_compat._resolve_physical_executor("file_lock_security_gate")
+    recorded = registry.last_executor_resolution_errors()
+    assert "file_lock" in recorded
+    assert "file_lock_security_gate" not in recorded
+    # A key that is also a planner capability keeps its own entry.
+    monkeypatch.setattr(executor_registry, "get_executor", _raise_on("research"))
+    with pytest.raises(_ResolverBoom):
+        runtime_compat._resolve_physical_executor("research")
+    recorded = registry.last_executor_resolution_errors()
+    assert {"research", "research_route"} <= set(recorded)
+
+
+def test_seam_missing_result_keeps_recorded_error(monkeypatch):
+    from nexus.services import runtime_compat
+
+    monkeypatch.setattr(executor_registry, "get_executor", _raise_on("sandbox_runner"))
+    with pytest.raises(_ResolverBoom):
+        runtime_compat._resolve_physical_executor("sandbox_runner")
+    monkeypatch.setattr(executor_registry, "get_executor", lambda key: None)
+    assert runtime_compat._resolve_physical_executor("sandbox_runner") is None
+    assert registry.executor_resolution_error("sandbox") is not None
+
+
+def test_warnings_capped_per_capability_and_type(monkeypatch, caplog):
+    with caplog.at_level(logging.WARNING, logger=registry.__name__):
+        for index in range(12):
+            monkeypatch.setattr(
+                executor_registry, "get_executor", _raise_on("pregate", f"varying message {index}")
+            )
+            registry.executor_resolution_status("pregate")
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == registry._EXECUTOR_RESOLUTION_WARN_MAX

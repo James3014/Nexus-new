@@ -1438,45 +1438,142 @@ EXECUTOR_RESOLUTION_ERROR = "error"
 HOST_EXECUTOR_RESOLVER_ORIGIN = "nexus.core.capability_executor_registry.get_executor"
 _executor_resolution_errors: dict[str, dict[str, str]] = {}
 _executor_resolution_warned: set[tuple[str, str, str]] = set()
+_executor_resolution_warn_counts: dict[tuple[str, str], int] = {}
+_EXECUTOR_RESOLUTION_WARN_MAX = 5  # WARNING lines per (capability, type) per process
 _executor_resolution_lock = threading.Lock()
 
 
 # --- resolution-text sanitizer (keep identical in capability_registry.py and
 # executor_self_check.py; the self-check stays self-contained) ---
+#
+# The text kept is "exception type + redacted gist".  The raw text is capped
+# before any scan, split once on whitespace, quotes, brackets, commas,
+# semicolons and backslashes, and each token is judged on its own with
+# anchored, bounded patterns (linear time).  Credentials after a sensitive key,
+# auth schemes, known token prefixes, URL userinfo, PEM bodies and long
+# base64/hex-like tokens become ``[REDACTED]``; a long path or SHA can be
+# redacted too, which is accepted.  Then control characters are replaced, CI
+# workflow commands neutralised, and the result truncated.
+_RESOLUTION_RAW_MAX = 2000
 _RESOLUTION_TEXT_MAX = 200
 _RESOLUTION_REDACTED = "[REDACTED]"
 _RESOLUTION_UNSAFE_CHARS = re.compile(r"[^\x20-\x7e]")
-_RESOLUTION_URL_CREDENTIALS = re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^/\s@]+@")
-_RESOLUTION_SECRET_ASSIGNMENT = re.compile(
-    r"(?i)\b([a-z0-9_.-]*(?:token|secret|password|passwd|api[_-]?key|authorization|bearer"
-    r"|cookie)[a-z0-9_.-]*[\"']?\s*[:=]\s*)(\"[^\"]*\"?|'[^']*'?|(?:bearer\s+|basic\s+)?[^\s,;]+)"
+_RESOLUTION_SPLIT = re.compile(r"(\s+|[\"'{}\[\],;\\])")
+_RESOLUTION_SEPARATOR = re.compile(r"\s+|[\"'{}\[\],;\\]")
+_RESOLUTION_SENSITIVE_KEY = re.compile(
+    r"(?i)token|secret|passw(?:or)?d|api[_-]?key|access[_-]?key|private[_-]?key"
+    r"|authorization|bearer|cookie|credential"
 )
-_RESOLUTION_BEARER = re.compile(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}")
-_RESOLUTION_TOKEN_PREFIXES = re.compile(
-    r"\b(?:gh[pousr]_[A-Za-z0-9]{10,}|github_pat_[A-Za-z0-9_]{10,}|sk-[A-Za-z0-9_-]{10,}"
-    r"|xox[abprs]-[A-Za-z0-9-]{10,}|A[KS]IA[0-9A-Z]{16}|ya29\.[A-Za-z0-9_-]+"
-    r"|AIza[0-9A-Za-z_-]{20,})"
+_RESOLUTION_AUTH_SCHEMES = frozenset({"bearer", "basic"})
+_RESOLUTION_TOKEN_PREFIX = re.compile(
+    r"(?:gh[pousr]_|github_pat_|sk-|sk_live_|rk_live_|xox[abprs]-|ya29\.|AIza|eyJ)"
 )
-_RESOLUTION_HEX_BLOB = re.compile(r"\b[0-9a-fA-F]{32,}\b")
-_RESOLUTION_B64_BLOB = re.compile(
-    r"(?<![A-Za-z0-9+/_=-])(?=[A-Za-z0-9+/_-]*[0-9])(?=[A-Za-z0-9+/_-]*[A-Za-z])"
-    r"[A-Za-z0-9+/_-]{32,}={0,2}"
-)
+_RESOLUTION_AWS_KEY = re.compile(r"(?:AKIA|ASIA)[0-9A-Z]{16}")
+_RESOLUTION_BLOB = re.compile(r"[A-Za-z0-9+/_=-]{20,}")
+_RESOLUTION_HEX = re.compile(r"[0-9a-fA-F]{32,}")
+
+
+def _resolution_secret_value(value: str) -> bool:
+    if not value:
+        return False
+    if _RESOLUTION_TOKEN_PREFIX.match(value) or _RESOLUTION_AWS_KEY.search(value):
+        return True
+    if _RESOLUTION_HEX.fullmatch(value):
+        return True
+    return (
+        _RESOLUTION_BLOB.fullmatch(value) is not None
+        and any(c.isalpha() for c in value)
+        and any(c.isdigit() for c in value)
+    )
+
+
+def _resolution_sensitive_key(key: str) -> bool:
+    return bool(key) and _RESOLUTION_SENSITIVE_KEY.search(key) is not None
+
+
+def _redact_resolution_token(token: str) -> tuple[str, int, bool]:
+    """(replacement, values to redact after it, bare sensitive key seen)."""
+    scheme_end = token.find("://")
+    if scheme_end > 0:
+        start = scheme_end + 3
+        at = token.find("@", start)
+        slash = token.find("/", start)
+        if at > start and (slash == -1 or at < slash):
+            return token[:start] + _RESOLUTION_REDACTED + token[at:], 0, False
+        return token, 0, False
+    if _resolution_secret_value(token) and not _resolution_sensitive_key(token):
+        return _RESOLUTION_REDACTED, 0, False
+    seps = [i for i in (token.find("="), token.find(":")) if i > 0]
+    if seps:
+        cut = min(seps)
+        key, sep, value = token[:cut], token[cut], token[cut + 1 :].lstrip("=:")
+        if _resolution_sensitive_key(key):
+            if value:
+                return f"{key}{sep}{_RESOLUTION_REDACTED}", 0, False
+            return token, 1, False
+        if _resolution_secret_value(value):
+            return f"{key}{sep}{_RESOLUTION_REDACTED}", 0, False
+        return token, 0, False
+    if token.lower() in _RESOLUTION_AUTH_SCHEMES:
+        return token, 1, False
+    if _resolution_secret_value(token):
+        return _RESOLUTION_REDACTED, 0, False
+    return token, 0, _resolution_sensitive_key(token)
 
 
 def _redact_resolution_secrets(text: str) -> str:
-    """Replace credentials and token-like blobs with ``[REDACTED]``."""
-    text = _RESOLUTION_URL_CREDENTIALS.sub(r"\1" + _RESOLUTION_REDACTED + "@", text)
-    text = _RESOLUTION_SECRET_ASSIGNMENT.sub(r"\1" + _RESOLUTION_REDACTED, text)
-    text = _RESOLUTION_BEARER.sub(r"\1 " + _RESOLUTION_REDACTED, text)
-    text = _RESOLUTION_TOKEN_PREFIXES.sub(_RESOLUTION_REDACTED, text)
-    text = _RESOLUTION_HEX_BLOB.sub(_RESOLUTION_REDACTED, text)
-    return _RESOLUTION_B64_BLOB.sub(_RESOLUTION_REDACTED, text)
+    """Replace credentials and token-like values with ``[REDACTED]`` (linear time)."""
+    pem = text.find("-----BEGIN")
+    if pem >= 0:
+        text = text[:pem] + _RESOLUTION_REDACTED
+    out: list[str] = []
+    pending = 0
+    scheme_extended = False
+    bare_key = False
+    quote = ""
+    for part in _RESOLUTION_SPLIT.split(text):
+        if not part:
+            continue
+        if _RESOLUTION_SEPARATOR.fullmatch(part):
+            if quote:
+                if part == quote:
+                    quote = ""
+                    pending -= 1
+                out.append(part)
+                continue
+            if pending and part in ("'", '"'):
+                quote = part
+            out.append(part)
+            continue
+        if quote:
+            out.append(_RESOLUTION_REDACTED)
+            continue
+        if pending:
+            if part in (":", "="):
+                out.append(part)
+                continue
+            out.append(_RESOLUTION_REDACTED)
+            if part.lower() in _RESOLUTION_AUTH_SCHEMES and not scheme_extended:
+                scheme_extended = True
+            else:
+                pending -= 1
+            continue
+        if bare_key:
+            bare_key = False
+            if part in (":", "="):
+                pending, scheme_extended = 1, False
+                out.append(part)
+                continue
+        replacement, pending, bare_key = _redact_resolution_token(part)
+        scheme_extended = part.lower() in _RESOLUTION_AUTH_SCHEMES
+        out.append(replacement)
+    return "".join(out)
 
 
 def _sanitize_resolution_text(value: Any, limit: int = _RESOLUTION_TEXT_MAX) -> str:
-    """Printable ASCII, secrets redacted, CI commands neutralised, then truncated."""
-    text = _redact_resolution_secrets(_RESOLUTION_UNSAFE_CHARS.sub("?", str(value)))
+    """Redacted gist: raw cap, per-token redaction, printable ASCII, CI-safe, truncated."""
+    text = _redact_resolution_secrets(str(value)[:_RESOLUTION_RAW_MAX])
+    text = _RESOLUTION_UNSAFE_CHARS.sub("?", text)
     # Neutralise CI workflow commands (``::error::``, ``::add-mask::``, ``##[group]``).
     text = text.replace("::", ": :").replace("##[", "# #[")
     if len(text) > limit:
@@ -1487,33 +1584,39 @@ def _sanitize_resolution_text(value: Any, limit: int = _RESOLUTION_TEXT_MAX) -> 
 # --- end resolution-text sanitizer ---
 
 
-def record_executor_resolution_error(
-    name: str,
-    exc: BaseException,
-    *,
-    origin: str,
-    registry_key: str | None = None,
+def _build_resolution_reason(
+    name: str, exc: BaseException, *, origin: str, registry_key: str | None
 ) -> dict[str, str]:
-    """Record that resolving ``name`` raised; WARNING once per (name, type, message)."""
     capability = _sanitize_resolution_text(str(name or "").strip(), 120)
     key = _sanitize_resolution_text(
         registry_key if registry_key is not None else _resolve_executor_registry_key(capability),
         120,
     )
-    reason = {
+    return {
         "capability": capability,
         "registry_key": key,
         "error_type": _sanitize_resolution_text(type(exc).__qualname__, 120),
         "error_message": _sanitize_resolution_text(exc),
         "resolver_origin": _sanitize_resolution_text(origin, 200),
     }
-    message_digest = hashlib.sha256(reason["error_message"].encode()).hexdigest()[:12]
-    warn_key = (capability, reason["error_type"], message_digest)
+
+
+def _store_resolution_reasons(reasons: list[dict[str, str]]) -> None:
+    """Record ``reasons`` under one lock; WARNING once per (name, type, message), max 5."""
+    to_log: list[dict[str, str]] = []
     with _executor_resolution_lock:
-        _executor_resolution_errors[capability] = reason
-        first = warn_key not in _executor_resolution_warned
-        _executor_resolution_warned.add(warn_key)
-    if first:
+        for reason in reasons:
+            capability, error_type = reason["capability"], reason["error_type"]
+            _executor_resolution_errors[capability] = reason
+            digest = hashlib.sha256(reason["error_message"].encode()).hexdigest()[:12]
+            warn_key = (capability, error_type, digest)
+            count = _executor_resolution_warn_counts.get((capability, error_type), 0)
+            if warn_key in _executor_resolution_warned or count >= _EXECUTOR_RESOLUTION_WARN_MAX:
+                continue
+            _executor_resolution_warned.add(warn_key)
+            _executor_resolution_warn_counts[(capability, error_type)] = count + 1
+            to_log.append(reason)
+    for reason in to_log:
         _logger.warning(
             "executor resolution raised for capability=%s registry_key=%s origin=%s: %s: %s",
             reason["capability"],
@@ -1522,6 +1625,18 @@ def record_executor_resolution_error(
             reason["error_type"],
             reason["error_message"],
         )
+
+
+def record_executor_resolution_error(
+    name: str,
+    exc: BaseException,
+    *,
+    origin: str,
+    registry_key: str | None = None,
+) -> dict[str, str]:
+    """Record that resolving ``name`` raised (see ``_store_resolution_reasons``)."""
+    reason = _build_resolution_reason(name, exc, origin=origin, registry_key=registry_key)
+    _store_resolution_reasons([reason])
     return dict(reason)
 
 
@@ -1543,21 +1658,40 @@ def clear_executor_resolution_errors() -> None:
     with _executor_resolution_lock:
         _executor_resolution_errors.clear()
         _executor_resolution_warned.clear()
+        _executor_resolution_warn_counts.clear()
+
+
+def _clear_resolution_errors_locked(names: list[str]) -> None:
+    for name in names:
+        _executor_resolution_errors.pop(name, None)
+    drop = set(names)
+    for warn_key in [k for k in _executor_resolution_warned if k[0] in drop]:
+        _executor_resolution_warned.discard(warn_key)
+    for count_key in [k for k in _executor_resolution_warn_counts if k[0] in drop]:
+        _executor_resolution_warn_counts.pop(count_key, None)
 
 
 def _clear_resolution_error(name: str) -> None:
-    """Forget ``name``'s error and its warned keys, so a later failure warns again."""
+    """Forget ``name``'s error and its warning state, so a later failure warns again."""
     with _executor_resolution_lock:
-        _executor_resolution_errors.pop(name, None)
-        for warn_key in [k for k in _executor_resolution_warned if k[0] == name]:
-            _executor_resolution_warned.discard(warn_key)
+        _clear_resolution_errors_locked([name])
 
 
 def _capabilities_for_registry_key(registry_key: str) -> list[str]:
-    """Capability names that resolve to ``registry_key`` (aliases first, then the key)."""
+    """Capability names that resolve to ``registry_key``.
+
+    Aliases first; the key itself only when no alias targets it or it is also a
+    planner capability (``research``), never as a pseudo-capability entry.
+    """
     key = str(registry_key or "").strip()
     names = [name for name, target in EXECUTOR_REGISTRY_ALIASES.items() if target == key]
-    if key not in names:
+    if not names:
+        return [key]
+    try:
+        planner_names = set(list_planner_capability_names())
+    except Exception:
+        planner_names = set()
+    if key in planner_names and key not in names:
         names.append(key)
     return names
 
@@ -1566,16 +1700,19 @@ def record_executor_resolution_error_for_key(
     registry_key: str, exc: BaseException, *, origin: str
 ) -> list[dict[str, str]]:
     """Record a raising resolver under every capability name that maps to ``registry_key``."""
-    return [
-        record_executor_resolution_error(name, exc, origin=origin, registry_key=registry_key)
+    reasons = [
+        _build_resolution_reason(name, exc, origin=origin, registry_key=registry_key)
         for name in _capabilities_for_registry_key(registry_key)
     ]
+    _store_resolution_reasons(reasons)
+    return [dict(reason) for reason in reasons]
 
 
 def clear_executor_resolution_errors_for_key(registry_key: str) -> None:
     """Forget recorded errors for every capability name that maps to ``registry_key``."""
-    for name in _capabilities_for_registry_key(registry_key):
-        _clear_resolution_error(name)
+    names = _capabilities_for_registry_key(registry_key)
+    with _executor_resolution_lock:
+        _clear_resolution_errors_locked(names)
 
 
 def executor_resolution_status(name: str) -> dict[str, Any]:

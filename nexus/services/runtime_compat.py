@@ -101,7 +101,9 @@ def _resolve_physical_executor(key: str) -> Any | None:
         # the runtime's contract (re-raise).
         record_executor_resolution_error_for_key(key, exc, origin=RUNTIME_SEAM_RESOLVER_ORIGIN)
         raise
-    clear_executor_resolution_errors_for_key(key)
+    if executor is not None:
+        # Only a resolved executor proves recovery; a missing one keeps the reason.
+        clear_executor_resolution_errors_for_key(key)
     return executor
 
 
