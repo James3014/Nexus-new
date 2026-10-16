@@ -247,6 +247,7 @@
 | scripts/ops/test_changed.sh | tests/ops/test_select_tests.py | active | medium | jit_entrypoint |
 | scripts/ops | tests/ops | active | medium | ops_tooling |
 | scripts/archive | tests/nexus/orchestrator/test_owner_representation.py, tests/research/test_research_contamination_canonical_path.py | active | low | archived_scripts_python_tree_walk_contract |
+| archive | tests/ops/test_select_tests.py | active | low | archived_legacy_top_level_dirs_not_imported |
 | docs/reports/policy-manifest.v2.json | tests/ops/test_policy_manifest_schema.py, tests/ops/test_policy_lane_gate.py, tests/integration/test_policy_lane_integration.py, tests/ops/test_update_manifest_drills.py | active | high | policy_manifest_contract |
 | scripts/ops/check_policy_lane_gate.py | tests/ops/test_policy_manifest_schema.py, tests/ops/test_policy_lane_gate.py, tests/integration/test_policy_lane_integration.py | active | high | policy_lane_gate_contract |
 | scripts/ops/update_manifest_drills.py | tests/ops/test_update_manifest_drills.py, tests/ops/test_policy_manifest_schema.py | active | medium | policy_manifest_updater_contract |

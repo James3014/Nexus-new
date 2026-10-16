@@ -4,12 +4,15 @@ from __future__ import annotations
 import argparse
 import fcntl
 import json
+import os
 import subprocess  # nosec B404
+import tempfile
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator, Mapping
 
 from nexus.research.hybrid_replication_pipeline import (
     ADMISSION_MARKER,
@@ -122,6 +125,82 @@ def _comments(repository: str, issue_number: int) -> list[dict[str, Any]]:
     return rows
 
 
+# Comments are re-read only when the issue's updated_at and listed comment count are unchanged
+# and the cached copy is younger than COMMENT_CACHE_TTL_SECONDS. The count catches a comment
+# added or deleted within the same updated_at second, or a deletion that does not bump
+# updated_at. Ported from the Owner-approved V12 in-place patch (2026-10-15, #1216/#2252) to stop
+# exhausting the owner's GitHub API quota without changing what ingest observes.
+COMMENT_CACHE_TTL_SECONDS = 600
+
+# Maximum age of this run's issue listing when it is used to skip the ground-truth subprocess.
+LISTED_STATE_MAX_AGE_SECONDS = 120
+
+
+def _write_comment_cache(path: Path, payload: dict[str, Any]) -> None:
+    tmp_name: str | None = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False)
+        os.replace(tmp_name, path)
+    except OSError:
+        # Best effort: the cache is an optimisation, ingest continues with fetched comments.
+        _discard_temp(tmp_name)
+    except BaseException:
+        _discard_temp(tmp_name)
+        raise
+
+
+def _discard_temp(tmp_name: str | None) -> None:
+    if tmp_name is None:
+        return
+    try:
+        Path(tmp_name).unlink(missing_ok=True)
+    except OSError:
+        pass  # a leftover *.tmp is harmless: readers only open <n>.json
+
+
+def _cached_comments(
+    cache_root: Path,
+    repository: str,
+    issue: dict[str, Any],
+    now: datetime | None = None,
+) -> list[dict[str, Any]]:
+    number = int(issue["number"])
+    updated_at = str(issue.get("updated_at") or "")
+    listed_count = issue.get("comments")
+    count_usable = isinstance(listed_count, int) and not isinstance(listed_count, bool)
+    path = cache_root / repository.replace("/", "__") / f"{number}.json"
+    now = now or datetime.now(timezone.utc)
+    try:
+        cached = json.loads(path.read_text(encoding="utf-8"))
+        fetched_at = _parse_github_timestamp(str(cached["fetched_at"]))
+        if (
+            updated_at
+            and count_usable
+            and cached.get("updated_at") == updated_at
+            and cached.get("comment_count") == listed_count
+            and 0 <= (now - fetched_at).total_seconds() < COMMENT_CACHE_TTL_SECONDS
+            and isinstance(cached.get("comments"), list)
+            and all(isinstance(item, dict) for item in cached["comments"])
+        ):
+            return cached["comments"]
+    except (OSError, ValueError, KeyError, TypeError):
+        pass  # unreadable or malformed cache: refetch (json errors are ValueError)
+    comments = _comments(repository, number)
+    _write_comment_cache(
+        path,
+        {
+            "updated_at": updated_at,
+            "fetched_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "comment_count": listed_count if count_usable else None,
+            "comments": comments,
+        },
+    )
+    return comments
+
+
 # Issues created with the workflow GITHUB_TOKEN never trigger workflows (GitHub platform
 # rule), so the capture workflow never runs for them (e.g. the nightly regression bot's
 # issues). The capture workflow itself has no author filter: a bot-authored issue that does
@@ -154,6 +233,7 @@ def ingest(
     *,
     store: AutomaticReplicationStore,
     since: str,
+    listed_issue_states: dict[tuple[str, int], str] | None = None,
 ) -> dict[str, Any]:
     expected: list[tuple[str, int]] = []
     missing_capture: list[str] = []
@@ -165,7 +245,9 @@ def ingest(
         for issue in _issues_since(repository, since):
             number = int(issue["number"])
             task_key = f"{repository}#{number}"
-            comments = _comments(repository, number)
+            if listed_issue_states is not None:
+                listed_issue_states[(repository, number)] = str(issue.get("state") or "")
+            comments = _cached_comments(store.root / "comment-cache", repository, issue)
             if is_uncaptured_github_token_issue(issue, comments):
                 not_captured_github_token_issue.append(task_key)
                 continue
@@ -358,6 +440,9 @@ def advance_all(
     ground_truth_command: str,
     readiness_control_task_key: str | None = None,
     max_concurrent_tasks: int = 1,
+    listed_issue_states: Mapping[tuple[str, int], str] | None = None,
+    listed_at_monotonic: float | None = None,
+    monotonic: Callable[[], float] = time.monotonic,
 ) -> dict[str, Any]:
     """Advance every executable task.
 
@@ -376,6 +461,19 @@ def advance_all(
     ground_truth_resolver = ExternalGroundTruthResolver(ground_truth_command)
 
     def terminal_resolver(state: dict[str, Any]):
+        # V12 patch (#1216/#2252): skip the ground-truth subprocess for a task whose issue this
+        # run's listing shows open, while that listing is at most LISTED_STATE_MAX_AGE_SECONDS
+        # old at call time (a long stack run earlier in this advance makes it stale). The
+        # subprocess would only return "not closed" (see _resolve_ground_truth_from_state in
+        # nexus/research/hybrid_replication_live.py, which returns None for a non-closed issue).
+        # A close between listing and resolution is picked up on the next tick; closed_at is
+        # unchanged.
+        if listed_issue_states is not None and listed_at_monotonic is not None:
+            snapshot = state.get("snapshot") or {}
+            key = (str(snapshot.get("repository") or ""), int(snapshot.get("issue_number") or 0))
+            fresh = monotonic() - listed_at_monotonic <= LISTED_STATE_MAX_AGE_SECONDS
+            if fresh and listed_issue_states.get(key) == "open":
+                return None
         return ground_truth_resolver(state)
 
     controller = AutomaticReplicationController(
@@ -669,8 +767,12 @@ def main() -> int:
         raise SystemExit("readiness and deferred-admission control task keys must match")
 
     store = AutomaticReplicationStore(Path(args.root))
+    listed_issue_states: dict[tuple[str, int], str] = {}
+    listed_at = time.monotonic()
     with ingest_lock(store):
-        ingest_report = ingest(store=store, since=args.since)
+        ingest_report = ingest(
+            store=store, since=args.since, listed_issue_states=listed_issue_states
+        )
     print(json.dumps(ingest_report, ensure_ascii=False, sort_keys=True, indent=2))
 
     if args.fence_only:
@@ -701,6 +803,8 @@ def main() -> int:
         ground_truth_command=args.ground_truth_command,
         readiness_control_task_key=args.readiness_control_task_key,
         max_concurrent_tasks=args.max_concurrent_tasks,
+        listed_issue_states=listed_issue_states,
+        listed_at_monotonic=listed_at,
     )
     print(json.dumps(advance_report, ensure_ascii=False, sort_keys=True, indent=2))
     if args.readiness_control_task_key:

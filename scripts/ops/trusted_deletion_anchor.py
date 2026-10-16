@@ -47,7 +47,7 @@ TRUSTED_EXTERNAL_RUNTIME_PACKAGES: tuple[tuple[str, str, str, str], ...] = (
         "nexus-runtime",
         "nexus_runtime",
         "https://github.com/James3014/nexus-runtime.git",
-        "e73d152f17d5d06b78da258b62354cca11d6a352",
+        "2b38dd87856a74163de2063feabeb9dca8047eec",
     ),
 )
 UV_VERSION = "uv 0.9.2"
@@ -338,6 +338,19 @@ TRUSTED_PR2278_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, s
     ),
 )
 
+# Exact one-use, four-way binding for Owner-authorized PR #2424 (Issue #2425:
+# nexus-runtime e73d152f1 -> 2b38dd878, runtime #222/#224/#225/#226/#228/#230; Owner
+# approval in chat 2026-10-16, session switched out of auto mode for it 「切好了」).
+TRUSTED_PR2424_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    2424,
+    (
+        "61e302532d3f9c7c87601d0265629b827d3f40c9938c726fbce03c1d23d5e48e",
+        "284a427af830b18981531fa02e2df191141081c2376bef6a349d479c393347b3",
+        "bd6bc8c7cdf20d805009609499842789a2755eb4235c36c5c3a2695950f2e5e1",
+        "c4084a67832b23a1835388af4062ce52f94ba69d30326b082657d51bd445e3de",
+    ),
+)
+
 REQUIRED_EVIDENCE_KEYS = {
     "schema_version",
     "status",
@@ -575,6 +588,7 @@ def _validate_trusted_dependency_contract(
         TRUSTED_PR2122_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR2205_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR2278_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR2424_DEPENDENCY_SNAPSHOT_TRANSITION,
     )
     for authorized_transition_record in authorized_transition_records:
         if authorized_transition_record is None:
