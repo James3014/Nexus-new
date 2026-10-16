@@ -2231,14 +2231,32 @@ NO_TOOL_PROFILE_VIOLATION = "NO_TOOL_PROFILE_VIOLATION"
 # all 39 NO_TOOL_PROFILE_VIOLATION runs had only refused calls and a complete
 # answer, which was discarded.  The answer is returned only when the transcript
 # proves that every tool call was refused and no other step ran.
-# agy's two refusal shapes.  Both are anchored: the middle of the message
-# carries model-supplied arguments, so an unanchored substring could make an
-# executed-but-failed tool step look refused.  The cortex shape is a failure
-# while converting the call for the permission check; the tool does not run,
-# but agy may have stat'ed the path, so the model can learn that a path exists.
-_NO_TOOL_DENY_RULE_PREFIX = "permission check failed for "
-_NO_TOOL_DENY_RULE_SUFFIX = "matches user-configured deny rule."
-_NO_TOOL_DECLARATION_PREFIX = "declaring permissions: cortex tool "
+# agy's two refusal shapes, matched in full because parts of them carry
+# model-supplied arguments.  Each refused result is paired, in order, with the
+# tool call it answers, and the refusal must name that call's tool, so a failed
+# tool whose error echoes a crafted argument cannot pass as a refusal.
+# The cortex shape fails while converting the call for the permission check;
+# the tool does not run, but agy may stat the path, so the model can learn
+# whether a path exists.
+_NO_TOOL_DENY_RULE_RE = re.compile(
+    r'permission check failed for (unsandboxed|read_file|write_file) "(?:[^"\\]|\\.)*": '
+    r"permission denied for \1\(.*\)\. matches user-configured deny rule\.",
+    re.DOTALL,
+)
+_NO_TOOL_DECLARATION_RE = re.compile(
+    r"declaring permissions: cortex tool ([a-z_]+): convert tool call for permissions: "
+    r"model output error: invalid tool call error \(invalid_args\) .*",
+    re.DOTALL,
+)
+_NO_TOOL_DENY_RULE_TOOLS = {
+    "unsandboxed": frozenset({"run_command"}),
+    "read_file": frozenset({"view_file", "view_file_outline", "list_dir", "grep_search"}),
+    "write_file": frozenset({
+        "write_to_file",
+        "replace_file_content",
+        "multi_replace_file_content",
+    }),
+}
 _NO_TOOL_PASSIVE_STEP_TYPES = frozenset({"USER_INPUT", "PLANNER_RESPONSE"})
 
 
@@ -2248,7 +2266,7 @@ def _no_tool_refused_tool_call_count(transcript_path: Path | None) -> int | None
     Reads agy's ``transcript_full.jsonl``.  Returns ``None`` (fail closed) when
     the transcript is missing or malformed, has no tool calls, has a step other
     than user input, model responses, system error messages and refused tool
-    results, or has fewer refused results than tool calls.
+    results, or a result that is not agy's refusal of the call it answers.
     """
     if transcript_path is None:
         return None
@@ -2256,6 +2274,7 @@ def _no_tool_refused_tool_call_count(transcript_path: Path | None) -> int | None
         text = transcript_path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return None
+    pending: list[str] = []
     calls = 0
     refused = 0
     for line in text.splitlines():
@@ -2272,20 +2291,28 @@ def _no_tool_refused_tool_call_count(transcript_path: Path | None) -> int | None
         if tool_calls is not None:
             if step_type != "PLANNER_RESPONSE" or not isinstance(tool_calls, list):
                 return None
+            for call in tool_calls:
+                if not isinstance(call, dict) or not isinstance(call.get("name"), str):
+                    return None
+                pending.append(call["name"])
             calls += len(tool_calls)
         if step_type in _NO_TOOL_PASSIVE_STEP_TYPES:
             continue
         if step_type == "ERROR_MESSAGE" and step.get("source") == "SYSTEM":
             continue
+        if step.get("status") != "ERROR" or not pending:
+            return None
+        tool = pending.pop(0)
         error = str(step.get("error") or "").strip().lower()
-        refusal = (
-            error.startswith(_NO_TOOL_DENY_RULE_PREFIX)
-            and error.endswith(_NO_TOOL_DENY_RULE_SUFFIX)
-        ) or error.startswith(_NO_TOOL_DECLARATION_PREFIX)
-        if step.get("status") != "ERROR" or not refusal:
+        deny = _NO_TOOL_DENY_RULE_RE.fullmatch(error)
+        declaration = _NO_TOOL_DECLARATION_RE.fullmatch(error)
+        if deny is not None:
+            if tool not in _NO_TOOL_DENY_RULE_TOOLS[deny.group(1)]:
+                return None
+        elif declaration is None or declaration.group(1) != tool:
             return None
         refused += 1
-    if calls == 0 or refused != calls:
+    if calls == 0 or refused != calls or pending:
         return None
     return calls
 

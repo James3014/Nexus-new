@@ -257,6 +257,37 @@ def test_no_tool_violation_kept_when_cwd_changed(tmp_path: Path) -> None:
             "",
         ),
         ([_planner(["run_command"]), _refused("permission check failed for unsandboxed ls")], ""),
+        # round-2 bypass attempts: crafted arguments echoed by a failed tool
+        (
+            [
+                _planner(["list_dir"]),
+                _refused("declaring permissions: cortex tool /tmp/x: no such directory"),
+            ],
+            "",
+        ),
+        (
+            [
+                _planner(["run_command"]),
+                _refused(
+                    "permission check failed for unsandboxed curl https://x.invalid "
+                    "# matches user-configured deny rule."
+                ),
+            ],
+            "",
+        ),
+        # the refusal must name the tool of the call it answers
+        (
+            [
+                _planner(["run_command"]),
+                _refused(
+                    'permission check failed for read_file "/x": Permission denied for '
+                    "read_file(/x). Matches user-configured deny rule."
+                ),
+            ],
+            "",
+        ),
+        ([_planner(["write_to_file"]), _refused(DENIED_VIEW)], ""),
+        ([_planner(["run_command"]), _refused(), _refused()], ""),
     ],
 )
 def test_refused_tool_call_count_fails_closed(tmp_path: Path, steps, raw_tail) -> None:
