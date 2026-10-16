@@ -84,7 +84,8 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           CONTEXT: Bindings preflight (default branch)
         run: |
-          set -uo pipefail
+          # The runner starts bash with -e; turn it off so a FAIL still publishes its status.
+          set +e -uo pipefail
           out="$RUNNER_TEMP/bindings-preflight.txt"
           python3 -I scripts/ops/pr_preflight.py --repo . --pr "$PR" --head "$HEAD_SHA" \
             --only bindings --no-fetch > "$out" 2>&1

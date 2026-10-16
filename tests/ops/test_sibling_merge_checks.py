@@ -70,6 +70,8 @@ def test_reusable_bindings_job_fails_closed_and_publishes_status() -> None:
     assert "python3 -I nexus-tools/scripts/ops/sibling_bindings_check.py" in run
     assert "! grep -q '^PASS  bindings'" in run
     assert run.rstrip().endswith('exit "$rc"')
+    # GitHub runs `bash -e`; without `set +e` a FAIL would abort before posting the status
+    assert "set +e -uo pipefail" in run
     assert run.index("::stop-commands::") < run.index('cat "$out"')
 
 

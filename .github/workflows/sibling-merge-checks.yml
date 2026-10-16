@@ -115,7 +115,8 @@ jobs:
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          set -uo pipefail
+          # The runner starts bash with -e; turn it off so a FAIL still publishes its status.
+          set +e -uo pipefail
           out="$RUNNER_TEMP/bindings.txt"
           python3 -I nexus-tools/scripts/ops/sibling_bindings_check.py --repo "$REPO" --repo-dir target \
             --pr "$PR" --head "$HEAD_SHA" --base-ref "origin/${DEFAULT_BRANCH}" \
