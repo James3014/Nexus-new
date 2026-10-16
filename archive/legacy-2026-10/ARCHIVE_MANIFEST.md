@@ -302,7 +302,7 @@ Files: 242
 
 Evidence: ~/Workspace/nexus-handoffs/2026-10-13-online-ab/ARCHIVE_CLASSIFICATION_20261016.md (batch 2) re-derived on main c48689bb4 by whole-repo basename/path scans; each script moves only together with every test that imports it. Pre-move ref: archive/2026-10-17-batch-2-pre.
 
-Edits: scripts/governance/freeze_v27_2.py output path now archive/legacy-2026-10/archives/v27.2/...; scripts/ops/scope_guard.py drops the perf_regression_pack_v22.5/ allowed prefix (archive/ is allowed). scripts/ops/nexus_gateway_auto_deploy.py IRRELEVANT_PREFIXES still lists "archives/" (harmless, untouched); .gitnexusignore entries for perf_regression_pack_v22.5/ are now inert.
+Edits: scripts/ops/scope_guard.py drops the perf_regression_pack_v22.5/ allowed prefix (archive/ is allowed). scripts/governance/freeze_v27_2.py (a one-off v27.2 freeze script that writes archives/v27.2/...) is NOT edited: it is unmapped in the impact map, so editing it would force a full-suite plan; it fails if re-run until its path is updated. scripts/ops/nexus_gateway_auto_deploy.py IRRELEVANT_PREFIXES still lists "archives/" (harmless, untouched); .gitnexusignore entries for perf_regression_pack_v22.5/ are now inert.
 
 Files: 45
 
