@@ -395,3 +395,5 @@
 | tests/ops/test_gateway_routine_deploy_authority.py | tests/ops/test_gateway_routine_deploy_authority.py | active | medium | test_contract |
 | scripts/ops/eia_scoreboard.py | tests/ops/test_eia_scoreboard.py | active | medium | eia_scoreboard_report |
 | nexus/contracts/self_hosted_state_root.py | tests/nexus/orchestrator/test_self_hosted_task_service.py, tests/research/test_trajectory_continuity.py | active | high | self_hosted_state_root_legacy_guard_contract |
+| ARCHIVED_2026-10-16-hidden-contract-fast-path.md | tests/research/test_no_benchmark_local_fast_path.py | active | low | hidden_contract_fast_path_archive_manifest |
+| tests/research/test_no_benchmark_local_fast_path.py | tests/research/test_no_benchmark_local_fast_path.py | active | high | no_local_benchmark_delivery_in_model_runs |
