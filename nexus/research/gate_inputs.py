@@ -123,6 +123,11 @@ def runtime_supports_receipt_only() -> bool:
     ``capability_evidence_bundle.RECEIPT_ONLY_ROUTE_KEY == "receipt_only_capabilities"``,
     ``CONSUMER_VISIBILITY_RECEIPT_ONLY == "receipt_only"`` and a callable
     ``receipt_only_capability_names``.  Any import or contract mismatch means an older pin.
+
+    The names alone do not prove the runtime acts on the declaration, so the detection is
+    also behavioural (``_receipt_only_projection_hides_declared_entry``): one in-memory
+    bundle through the runtime's own route resolution, bundle sealing and Online model
+    context projection.  Any exception there also means no support (fail closed).
     """
 
     import importlib
@@ -133,11 +138,79 @@ def runtime_supports_receipt_only() -> bool:
         )
     except Exception:  # noqa: BLE001 - older/absent runtime: no receipt-only support
         return False
-    return (
+    if not (
         getattr(bundle, "RECEIPT_ONLY_ROUTE_KEY", None) == RECEIPT_ONLY_ROUTE_KEY
         and getattr(bundle, "CONSUMER_VISIBILITY_RECEIPT_ONLY", None) == "receipt_only"
         and callable(getattr(bundle, "receipt_only_capability_names", None))
+    ):
+        return False
+    try:
+        return _receipt_only_projection_hides_declared_entry(bundle)
+    except Exception:  # noqa: BLE001 - any runtime error: treat as no support
+        return False
+
+
+_PROBE_HIDDEN = "memory"
+_PROBE_VISIBLE = "receipt_only_probe_visible"
+
+
+def _receipt_only_projection_hides_declared_entry(bundle: Any) -> bool:
+    """Run the runtime's projection on a two-entry bundle; True only when the entry the
+    route declares receipt-only is sealed ``receipt_only`` and absent from the Online
+    model-context package while the undeclared entry is present (no network, no
+    subprocess, in-memory only).
+
+    The declaration is resolved through ``unified_runtime.resolve_receipt_only_capabilities``,
+    the name the runtime itself calls when it seals a request's bundle.
+    """
+
+    import importlib
+    import json
+
+    unified = importlib.import_module("nexus_runtime.kernel.unified_runtime")
+    projection = importlib.import_module("nexus_runtime.task_context.consumer_projection")
+    declared, invalid = unified.resolve_receipt_only_capabilities({
+        RECEIPT_ONLY_ROUTE_KEY: [_PROBE_HIDDEN]
+    })
+    if invalid is not None:
+        return False
+    names = [_PROBE_HIDDEN, _PROBE_VISIBLE]
+    ref = "ev_receipt_only_probe_{}".format
+    results = {
+        name: {
+            "invoked": True,
+            "status": "SUCCEEDED",
+            "evidence_refs": [ref(name)],
+            "physical_callable": f"receipt_only_probe.{name}",
+        }
+        for name in names
+    }
+    plan_hash = _sha256("receipt-only-probe-plan")
+    sealed = bundle.build_capability_evidence_bundle(
+        task_id="receipt-only-probe",
+        workspace_revision="receipt-only-probe-rev",
+        task_statement="receipt-only probe",
+        plan_payload={},
+        plan_hash=plan_hash,
+        planner_decision_id="receipt-only-probe-decision",
+        capability_results=results,
+        selected_capabilities=names,
+        receipt_only_capabilities=declared,
     )
+    visibility = {e.get("name"): e.get("consumer_visibility") for e in sealed["entries"]}
+    if visibility != {_PROBE_HIDDEN: "receipt_only", _PROBE_VISIBLE: None}:
+        return False
+    package = projection.build_online_context_package({
+        "task_id": "receipt-only-probe",
+        "workspace_revision": "receipt-only-probe-rev",
+        "task_statement": "receipt-only probe",
+        "planner_decision_id": "receipt-only-probe-decision",
+        "planner": {"plan_hash": plan_hash, "selected_capabilities": names},
+        "capability_evidence_bundle": sealed,
+    })
+    text = json.dumps(package, sort_keys=True, default=str)
+    # Positive control: the projection did render evidence, just not the declared entry's.
+    return ref(_PROBE_VISIBLE) in text and ref(_PROBE_HIDDEN) not in text
 
 
 def gate_inputs_env_error() -> str:
