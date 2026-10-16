@@ -14,6 +14,7 @@ verify --suite agy-dispatch`` fails closed unless exactly these two nodes PASSED
 
 from __future__ import annotations
 
+import ast
 import os
 import shutil
 import signal
@@ -42,6 +43,30 @@ DENIED = "Operation not permitted"
 def physical_seatbelt_witness(func, *, available: bool = SEATBELT_AVAILABLE):
     """Expose a physical witness as a test node only where Seatbelt can run."""
     return func if available else None
+
+
+def test_witness_nodes_are_declared_and_darwin_ci_must_collect_them():
+    """Always collected (Linux included), so the impact gate sees a passing node.
+
+    The physical nodes themselves exist only where Seatbelt runs. This keeps
+    the declaration pinned and fails, rather than skips, if a CI macOS host
+    ends up without them.
+    """
+    tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+    declared = {
+        node.name
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and any(
+            isinstance(d, ast.Name) and d.id == "physical_seatbelt_witness"
+            for d in node.decorator_list
+        )
+    }
+    assert declared == set(PHYSICAL_WITNESSES)
+    for name in PHYSICAL_WITNESSES:
+        assert (globals().get(name) is not None) is SEATBELT_AVAILABLE
+    if os.environ.get("CI") and sys.platform == "darwin":
+        assert SEATBELT_AVAILABLE, "macOS CI host has no sandbox-exec"
 
 
 def _build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

@@ -183,9 +183,7 @@ class AgyDispatchBoundary:
         if tracker is None:
             self._swept = False
             return False
-        self._swept = cli_worker.sweep_run(
-            self.run_tag, tracker, self._baseline, self.sweep_roots
-        )
+        self._swept = cli_worker.sweep_run(self.run_tag, tracker, self._baseline, self.sweep_roots)
         return self._swept
 
     def cleanup(self) -> None:
