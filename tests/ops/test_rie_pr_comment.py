@@ -670,7 +670,10 @@ def test_guard_unchanged_is_a_note_and_nothing_to_flag_still_shows(tmp_path: Pat
     lines = body.splitlines()
     assert lines[1] == rpc.NOTHING_TO_FLAG
     assert lines[2].startswith("- Note: guard semantic delta (`canonical_owner_table`) `UNCHANGED`")
-    assert f"report `{'d' * 12}`, advisory only" in lines[2]
+    assert (
+        f"report `{'d' * 12}`, static evidence only (behavioral probes not run), advisory only"
+        in lines[2]
+    )
 
 
 def test_guard_incomplete_projection_is_not_observed_never_unchanged(tmp_path: Path) -> None:
@@ -798,3 +801,22 @@ def test_comment_workflow_checkouts_are_pinned_and_never_the_pr_head() -> None:
     assert default["with"]["fetch-depth"] == 0
     assert "ref" not in default["with"]
     assert ".rie-guard-engine/" in (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+
+
+def test_guard_non_observed_disposition_is_not_observed_even_if_unchanged(tmp_path: Path) -> None:
+    proj = _projection("UNCHANGED")
+    proj = {k: v for k, v in proj.items() if k != "content_sha256"}
+    proj["disposition"] = "ADVISORY_INCOMPLETE"
+    proj = _guard_module()._seal(proj)
+    out = _render_guard(tmp_path, proj)
+    assert "not observed" in out
+    assert "`UNCHANGED`" not in out
+
+
+def test_comment_workflow_guard_step_has_no_token() -> None:
+    steps = _comment_steps()
+    step = next(s for s in steps if "rie_guard_delta_evidence.py" in s.get("run", ""))
+    env_text = json.dumps(step.get("env", {}))
+    assert "token" not in env_text.lower()
+    assert "secrets." not in env_text
+    assert "GITHUB_TOKEN" not in step["run"]

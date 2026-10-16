@@ -270,7 +270,7 @@ def render_guard_delta(guard: GuardDelta) -> tuple[str | None, str | None]:
     if guard.classification == "UNCHANGED":
         return None, (
             f"guard semantic delta ({code(guard.family)}) {code(guard.classification)}, "
-            f"report {sha}, advisory only"
+            f"report {sha}, static evidence only (behavioral probes not run), advisory only"
         )
     attention = f", reviewer attention {code(guard.attention)}" if guard.attention else ""
     detail = _guard_witnesses("tightening", guard.tightening, guard.tightening_total)
