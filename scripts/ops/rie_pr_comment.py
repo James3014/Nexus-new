@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
 import json
 import os
 import subprocess
@@ -39,7 +40,7 @@ import urllib.request
 import warnings
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -147,6 +148,160 @@ class Findings:
     all_impacted: Sequence[str] = ()
     systemic: Sequence[SystemicLine] = ()
     notes: Sequence[str] = ()
+    guard_delta: GuardDelta | None = None
+
+
+# ------------------------------------------------- guard semantic delta (#1580)
+
+GUARD_DELTA_SCHEMA = "nexus.rie_guard_semantic_delta_advisory.v1"
+GUARD_DELTA_CLAIM_CEILING = "RIE_GUARD_SEMANTIC_DELTA_PR_REVIEW_ADVISORY_ONLY"
+GUARD_DELTA_FAMILY = "canonical_owner_table"
+GUARD_DELTA_FLAGGED = frozenset({"TIGHTENS", "LOOSENS", "MIXED", "UNKNOWN"})
+MAX_GUARD_WITNESSES = 3
+MAX_GUARD_FILE_BYTES = 1_000_000
+
+
+@dataclass(frozen=True)
+class GuardDelta:
+    """Verified (or explicitly not observed) guard semantic delta for this PR."""
+
+    observed: bool
+    reason: str = ""
+    family: str = "canonical_owner_table"
+    classification: str = "NOT_OBSERVED"
+    attention: str = ""
+    report_sha: str = ""
+    tightening: Sequence[str] = ()
+    tightening_total: int = 0
+    loosening: Sequence[str] = ()
+    loosening_total: int = 0
+    reason_codes: Sequence[str] = ()
+    reason_codes_total: int = 0
+    gaps_total: int = 0
+
+
+def _not_observed(reason: str) -> GuardDelta:
+    return GuardDelta(observed=False, reason=reason)
+
+
+def _guard_canonical_hash(value: Mapping[str, Any]) -> str:
+    # Must stay byte-identical to rie_guard_delta_evidence.canonical_hash (parity-tested).
+    return hashlib.sha256(
+        json.dumps(
+            dict(value), ensure_ascii=True, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _guard_refs(block: Any) -> tuple[list[str], int]:
+    mapping = _map(block)
+    items = [str(v) for v in _list(mapping.get("items")) if isinstance(v, str)]
+    total = mapping.get("total")
+    return items, total if isinstance(total, int) and total >= len(items) else len(items)
+
+
+def load_guard_delta(
+    path: Path | str,
+    pr_number: int,
+    head_sha: str,
+    *,
+    repository: str | None = None,
+    base_sha: str | None = None,
+) -> GuardDelta:
+    """Read and verify the guard-delta projection. Any failure is NOT_OBSERVED, never UNCHANGED."""
+    try:
+        file_path = Path(path)
+        if file_path.stat().st_size > MAX_GUARD_FILE_BYTES:
+            return _not_observed("FILE_TOO_LARGE")
+        raw = json.loads(file_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return _not_observed("FILE_MISSING")
+    except (OSError, ValueError):
+        return _not_observed("FILE_UNREADABLE")
+    if not isinstance(raw, dict):
+        return _not_observed("BAD_SHAPE")
+    if raw.get("schema") != GUARD_DELTA_SCHEMA:
+        return _not_observed("BAD_SCHEMA")
+    if raw.get("claim_ceiling") != GUARD_DELTA_CLAIM_CEILING:
+        return _not_observed("BAD_CLAIM_CEILING")
+    seal = raw.get("content_sha256")
+    try:
+        body_hash = _guard_canonical_hash({k: v for k, v in raw.items() if k != "content_sha256"})
+    except (TypeError, ValueError):
+        return _not_observed("BAD_SHAPE")
+    if not isinstance(seal, str) or seal != body_hash:
+        return _not_observed("BAD_SEAL")
+    identity = _map(raw.get("new_identity"))
+    if identity.get("pr_number") != pr_number or isinstance(identity.get("pr_number"), bool):
+        return _not_observed("IDENTITY_MISMATCH")
+    if not head_sha or identity.get("head_sha") != head_sha:
+        return _not_observed("IDENTITY_MISMATCH")
+    if repository is not None and identity.get("repository") != repository:
+        return _not_observed("IDENTITY_MISMATCH")
+    if base_sha is not None and identity.get("base_sha") != base_sha:
+        return _not_observed("IDENTITY_MISMATCH")
+    if raw.get("guard_family") != GUARD_DELTA_FAMILY:
+        return _not_observed("BAD_GUARD_FAMILY")
+    classification = raw.get("classification")
+    if raw.get("disposition") != "OBSERVED" or classification == "NOT_OBSERVED":
+        reason = raw.get("reason")
+        return _not_observed(str(reason) if isinstance(reason, str) and reason else "INCOMPLETE")
+    if classification != "UNCHANGED" and classification not in GUARD_DELTA_FLAGGED:
+        return _not_observed("BAD_CLASSIFICATION")
+    tightening, tightening_total = _guard_refs(raw.get("tightening_witnesses"))
+    loosening, loosening_total = _guard_refs(raw.get("loosening_witnesses"))
+    codes, codes_total = _guard_refs(raw.get("reason_codes"))
+    gaps_total = (
+        _guard_refs(raw.get("evidence_gaps"))[1] + _guard_refs(raw.get("collection_errors"))[1]
+    )
+    return GuardDelta(
+        observed=True,
+        family=str(raw.get("guard_family") or "?"),
+        classification=str(classification),
+        attention=str(raw.get("reviewer_attention") or ""),
+        report_sha=str(raw.get("report_content_sha256") or "")[:12],
+        tightening=tightening[:MAX_GUARD_WITNESSES],
+        tightening_total=tightening_total,
+        loosening=loosening[:MAX_GUARD_WITNESSES],
+        loosening_total=loosening_total,
+        reason_codes=codes[:MAX_GUARD_WITNESSES],
+        reason_codes_total=codes_total,
+        gaps_total=gaps_total,
+    )
+
+
+def _guard_witnesses(label: str, items: Sequence[str], total: int) -> str:
+    if not items:
+        return ""
+    shown = ", ".join(code(item) for item in items)
+    extra = total - len(items)
+    return f"; {label} {shown}" + (f" (+{extra} more)" if extra > 0 else "")
+
+
+def render_guard_delta(guard: GuardDelta) -> tuple[str | None, str | None]:
+    """Return (flagged line, note); exactly one is set."""
+    if not guard.observed:
+        return None, (
+            f"guard semantic delta not observed ({code(guard.reason)}); "
+            "this is not an unchanged result"
+        )
+    sha = code(guard.report_sha or "?", 12)
+    if guard.classification == "UNCHANGED":
+        return None, (
+            f"guard semantic delta ({code(guard.family)}) {code(guard.classification)}, "
+            f"report {sha}, static evidence only (behavioral probes not run), advisory only"
+        )
+    attention = f", reviewer attention {code(guard.attention)}" if guard.attention else ""
+    detail = _guard_witnesses("tightening", guard.tightening, guard.tightening_total)
+    detail += _guard_witnesses("loosening", guard.loosening, guard.loosening_total)
+    if guard.classification == "UNKNOWN":
+        detail += _guard_witnesses("reasons", guard.reason_codes, guard.reason_codes_total)
+    if guard.gaps_total:
+        detail += f"; {guard.gaps_total} evidence gaps or collection errors (see artifact)"
+    return (
+        f"- Guard semantic delta ({code(guard.family)}): {code(guard.classification)}"
+        f"{attention}{detail}; report {sha}"
+    ), None
 
 
 def _pr_refs(numbers: Sequence[int], limit: int) -> str:
@@ -185,7 +340,14 @@ def render_comment(findings: Findings) -> str:
             f"({_pr_refs(item.pr_numbers, MAX_PRS_PER_SYSTEMIC)}), likely systemic"
         )
 
-    body_lines = [*(lines or [NOTHING_TO_FLAG]), *(f"- Note: {note}" for note in findings.notes)]
+    notes = list(findings.notes)
+    if findings.guard_delta is not None:
+        guard_line, guard_note = render_guard_delta(findings.guard_delta)
+        if guard_line:
+            lines.append(guard_line)
+        if guard_note:
+            notes.append(guard_note)
+    body_lines = [*(lines or [NOTHING_TO_FLAG]), *(f"- Note: {note}" for note in notes)]
     body = "\n".join([MARKER, *body_lines])
     if len(body) > MAX_COMMENT_CHARS:
         kept: list[str] = []
@@ -813,6 +975,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--post", action="store_true", help="upsert the sticky comment (otherwise dry run)"
     )
     parser.add_argument("--step-summary", default="")
+    parser.add_argument(
+        "--guard-delta-json",
+        default=None,
+        help="sealed guard semantic delta projection (advisory); omitted = not rendered",
+    )
     args = parser.parse_args(argv)
 
     owner, _, name = args.repository.partition("/")
@@ -837,6 +1004,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             run_engine,
             _utc_now(),
         )
+        if args.guard_delta_json is not None:
+            guard = load_guard_delta(
+                args.guard_delta_json,
+                args.pr_number,
+                acq.this_pr.head_sha,
+                repository=args.repository,
+                base_sha=acq.this_pr.base_sha,
+            )
+            findings = replace(findings, guard_delta=guard)
         body = render_comment(findings)
         if args.post:
             outcome = upsert_sticky_comment(
