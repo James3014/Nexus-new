@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from types import SimpleNamespace
 
@@ -723,3 +724,149 @@ def test_both_canonical_fields_missing_with_workforce_binding_denies(tmp_path):
             actual_provider="codex",
             actual_model="model-1",
         )
+
+
+def _run_knowledge_seam(tmp_path, monkeypatch, *, selected, hint, engine_configured=True):
+    """Drive the real codeintel invoker through the #472 materialization seam (#1579)."""
+    from nexus.executors.worker_contract import WorkerExecutionReceipt, WorkerOutcome
+    from nexus.services import capability_registry as cr
+    from nexus.services import rie_knowledge_applicability as ka
+    from nexus.services import rie_knowledge_codeintel_hook as hook
+    from tests.services.test_rie_knowledge_codeintel_hook import (
+        StubRunner,
+        identity,
+        make_repo,
+        stub_report,
+    )
+
+    service, request, state, contract, lease = _fixture(tmp_path)
+    repo = tmp_path / "leased-target"
+    base, head = make_repo(repo)
+    lease.initial_head = head
+    stub = StubRunner(stub_report(head, base))
+    monkeypatch.setattr(hook, "_engine_runner", lambda: stub)
+    if engine_configured:
+        monkeypatch.setenv(ka.ENV_ENGINE_ROOT, "/engine")
+    else:
+        monkeypatch.delenv(ka.ENV_ENGINE_ROOT, raising=False)
+    monkeypatch.setattr(cr, "build_real_executor_invoker", lambda name: None)
+    if hint:
+        request["rie_knowledge_identity"] = identity(base)
+    request["planner_output"]["selected_capabilities"] = selected
+    state["request"] = deepcopy(request)
+    service._write_state(state["task_id"], state)
+    monkeypatch.setattr(
+        "nexus.services.mainchain_entry.build_mainchain_capability_invokers",
+        lambda **kw: {
+            "codeintel": cr.build_default_mainchain_invokers(codeintel=kw.get("codeintel"))[
+                "codeintel"
+            ],
+            "memory": lambda ctx: {"task_id": ctx["task_id"], "status": "SUCCEEDED"},
+        },
+    )
+    monkeypatch.setattr(service, "build_contract", lambda req: contract)
+    monkeypatch.setattr(service, "_revalidate_tracked_dispatch_task_card", lambda *a: None)
+    monkeypatch.setattr(service, "_assert_persisted_workforce_dispatch", lambda *a, **k: None)
+    monkeypatch.setattr(service, "_revalidate_provider_boundary", lambda *a, **k: None)
+    monkeypatch.setattr(service, "_escalation_policy", staticmethod(lambda _: None))
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.CandidateVerifier.validate_static_contract",
+        staticmethod(lambda *a: None),
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.WorktreeManager", lambda **_: object()
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.SelfHostedDevelopmentController",
+        lambda **_: SimpleNamespace(prepare_task=lambda c: lease),
+    )
+    prompts = []
+
+    def invoke(provider, contract_arg, lease_arg, *, prompt, model=None, **kwargs):
+        prompts.append(prompt)
+        return WorkerExecutionReceipt(
+            provider=provider,
+            task_id=contract_arg.task_id,
+            target_worktree=lease_arg.target_worktree,
+            worker_status="COMPLETED",
+            outcome=WorkerOutcome.EXECUTION_COMPLETED.value,
+            exit_code=0,
+            executable_identity="fake",
+            argv=("fake",),
+            stdout_sha256="a" * 64,
+            stderr_sha256="b" * 64,
+            wall_time_ms=1,
+            process_group_id=None,
+            process_group_killed=False,
+            timed_out=False,
+            provider_calls=1,
+            provider_attempt_count=1,
+            evidence_complete=True,
+            commit_created=False,
+            merge_performed=False,
+            push_performed=False,
+        )
+
+    service.worker_registry = SimpleNamespace(
+        invoke=invoke, preflight=lambda _: SimpleNamespace(ready=True)
+    )
+
+    def update(status, values):
+        service._checkpoint(state["task_id"], status, values, attempt_id=state["attempt_id"])
+        if status == "WORKER_COMPLETED":
+            raise RuntimeError("stop after bounded receipt")
+
+    with pytest.raises(RuntimeError, match="stop after bounded receipt"):
+        service._run_default_resumable(
+            contract, request, update, task_id=state["task_id"], attempt_id=state["attempt_id"]
+        )
+    return service._read_state(state["task_id"]), prompts, stub, head
+
+
+def test_codeintel_selected_knowledge_applicability_reaches_package_and_receipt(
+    tmp_path, monkeypatch
+):
+    persisted, prompts, stub, head = _run_knowledge_seam(
+        tmp_path, monkeypatch, selected=["codeintel"], hint=True
+    )
+    assert stub.engine_calls == 1
+    bundle = persisted["worker_model_context_materialization"]["bundle"]
+    text = json.dumps(bundle, sort_keys=True)
+    assert "knowledge_applicability" in text
+    assert '"STALE_EXACT_SOURCE": 1' in text
+    assert "knowledge_applicability" in prompts[0]
+    assert '"CURRENT": 1' not in text
+    consumption = persisted["worker_model_context_consumption"]
+    assert consumption["proof_basis"] == "WORKER_REGISTRY_INVOCATION"
+    assert persisted["worker_model_context_materialization"]["bundle_hash"] == _sha256_json(bundle)
+    assert consumption["serialized_capability_ids"] == ["codeintel"]
+    assert consumption["physical_consumption_state"] == "PROVEN"
+    import hashlib
+
+    # The receipt binds the exact provider input that carried the knowledge evidence.
+    assert consumption["provider_input_sha256"] == hashlib.sha256(prompts[0].encode()).hexdigest()
+    assert len(consumption["serialized_package_sha256"]) == 64
+
+
+def test_codeintel_not_selected_has_no_knowledge_evidence_and_engine_untouched(
+    tmp_path, monkeypatch
+):
+    persisted, prompts, stub, _ = _run_knowledge_seam(
+        tmp_path, monkeypatch, selected=["memory"], hint=True
+    )
+    assert stub.engine_calls == 0
+    assert "knowledge_applicability" not in json.dumps(persisted, sort_keys=True)
+    assert "knowledge_applicability" not in prompts[0]
+
+
+def test_codeintel_selected_without_hint_carries_not_applicable_never_current(
+    tmp_path, monkeypatch
+):
+    persisted, prompts, stub, _ = _run_knowledge_seam(
+        tmp_path, monkeypatch, selected=["codeintel"], hint=False
+    )
+    assert stub.engine_calls == 0
+    text = json.dumps(persisted["worker_model_context_materialization"]["bundle"])
+    assert "NOT_APPLICABLE" in text
+    assert "REVISION_IDENTITY_UNAVAILABLE" in text
+    assert '"CURRENT": 1' not in text and '"status": "CURRENT"' not in text

@@ -4309,7 +4309,15 @@ class SelfHostedTaskService:
                 capability_context={
                     **{
                         key: request[key]
-                        for key in ("task_id", "workspace_revision", "task_statement", "planner")
+                        for key in (
+                            "task_id",
+                            "workspace_revision",
+                            "task_statement",
+                            "planner",
+                            # #1579: optional caller identity hint for RIE knowledge
+                            # applicability; validated by the codeintel hook.
+                            "rie_knowledge_identity",
+                        )
                         if key in request
                     },
                     "workspace_root": target_worktree,

@@ -138,6 +138,7 @@
 | nexus/engine/confined_test_runner.py | tests/services/test_post_candidate_seam.py, tests/research/test_post_candidate_seam_wiring.py | active | high | post_candidate_confined_sandbox_hidden_test_forbidden_contract |
 | tests/conftest.py | tests/conftest.py, tests/services/test_executor_resolution_observable.py | active | high | test_contract |
 | tests/services/test_executor_resolution_observable.py | tests/services/test_executor_resolution_observable.py | active | high | test_contract |
+| nexus/services/rie_knowledge_codeintel_hook.py | tests/services/test_rie_knowledge_codeintel_hook.py, tests/services/test_rie_knowledge_applicability_codeintel.py, tests/services/test_rie_knowledge_manifest.py, tests/nexus/orchestrator/test_worker_planner_context_input.py | active | medium | rie_knowledge_applicability_codeintel_hook_contract |
 | nexus/services/executor_self_check.py | tests/services/test_executor_resolution_observable.py, tests/services/test_runtime_compat.py | active | high | executor_resolution_observable_self_check_contract |
 | nexus/services/post_candidate_seam.py | tests/services/test_post_candidate_seam.py, tests/research/test_post_candidate_seam_wiring.py, tests/services/test_escalate_planner_signal_triggers.py | active | high | post_candidate_seam_sandbox_ultra_review_file_lock_contract |
 | nexus/executors/cli_worker.py | tests/nexus/executors/test_cli_worker.py | active | high | cli_worker_executor_contract |
