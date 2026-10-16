@@ -228,7 +228,7 @@ def _nested_git_entries(target: Path) -> dict[str, str]:
         if here == real_target and ".git" in dirnames:
             dirnames.remove(".git")
         for name in [*dirnames, *filenames]:
-            if name != ".git" or here == real_target:
+            if name.casefold() != ".git" or (here == real_target and name == ".git"):
                 continue
             path = here / name
             digest = hashlib.sha256()
@@ -276,16 +276,45 @@ def _nested_git_escapes(target: Path) -> dict[str, str]:
             if not path.is_symlink():
                 continue
             if Path(directory) == real_target and name == ".git":
-                continue
+                continue  # the real root entry (target_git_entry_state)
             if (
                 Path(directory) != real_target
-                and name != ".git"
-                and ".git" not in path.relative_to(real_target).parts
+                and name.casefold() != ".git"
+                and ".git" not in [part.casefold() for part in path.relative_to(real_target).parts]
             ):
                 continue  # already reported by escaping_symlinks
             if not path_inside(Path(os.path.realpath(path)), real_target):
                 found[path.relative_to(real_target).as_posix()] = os.readlink(path)
     return found
+
+
+_DENIED_ITEM_STATUSES = frozenset({"declined", "rejected"})
+
+
+def jsonl_denial(stdout: bytes) -> bool:
+    """True when codex ``--json`` output carries a structured denial event.
+
+    Same assumed shapes as the launcher classifier (item.status declined or
+    rejected; error / turn.failed whose message starts with "sandbox denied");
+    free text is never inspected.  Unparseable input counts as not denied here;
+    the caller already requires exit 0.
+    """
+    for line in stdout.decode("utf-8", errors="replace").splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        item = event.get("item")
+        if isinstance(item, dict) and item.get("status") in _DENIED_ITEM_STATUSES:
+            return True
+        if event.get("type") in {"error", "turn.failed"}:
+            error = event.get("error")
+            message = error.get("message") if isinstance(error, dict) else event.get("message")
+            if isinstance(message, str) and message.lower().startswith("sandbox denied"):
+                return True
+    return False
 
 
 def target_integrity_snapshot(target: Path) -> dict[str, object]:

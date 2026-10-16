@@ -19,6 +19,7 @@ from nexus.executors.cli_worker import (
 from nexus.executors.codex_run_boundary import (
     CODEX_RUN_HOME_UNAVAILABLE,
     codex_child_env,
+    jsonl_denial,
     materialize_codex_home,
     target_integrity_failure,
     target_integrity_snapshot,
@@ -174,7 +175,7 @@ class CodexCliExecutor:
                 result = run_cli_worker(request, on_process_group=self.on_process_group)
             receipt = self._receipt(contract, lease, result)
             failure = target_integrity_failure(before, target_integrity_snapshot(target))
-            if failure is None and receipt.exit_code == 0:
+            if failure is None and receipt.exit_code == 0 and not jsonl_denial(result.stdout):
                 write_back_refreshed_auth(run_home)
             if failure is not None:
                 receipt = dataclasses.replace(

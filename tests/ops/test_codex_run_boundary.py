@@ -54,6 +54,8 @@ case "$FAKE_CODEX_MODE" in
     ln -s "$FAKE_ESCAPE_DIR" "$work/escape-link" ;;
   refreshempty) echo '{"OPENAI_API_KEY":""}' > "$CODEX_HOME/auth.json" ;;
   nestedhooklink) mkdir -p "$work/sub/.git" "$work/inner"; ln -s "$work/inner" "$work/sub/.git/hooks" ;;
+  nestedupper) mkdir -p "$work/sub/.GIT"; printf '[core]\n\tfsmonitor = x\n' > "$work/sub/.GIT/config" ;;
+  nestedmixedfile) mkdir "$work/sub2"; echo "gitdir: /outside" > "$work/sub2/.Git" ;;
   refreshinvalid) echo 'not json' > "$CODEX_HOME/auth.json" ;;
   inside) ln -s tracked.txt "$work/inside-link" ;;
 esac
@@ -421,3 +423,15 @@ def test_codex_env_strips_credentials_from_schemeless_proxy_values():
     )
 
     assert env["HTTP_PROXY"] == "proxy.example:8080"
+
+
+def test_codex_run_fails_on_a_case_variant_nested_dot_git_directory(tmp_path):
+    res, _, _, _ = _launch(tmp_path, "nestedupper")
+
+    assert res.returncode == 6, res.stderr
+
+
+def test_codex_run_fails_on_a_case_variant_nested_dot_git_file(tmp_path):
+    res, _, _, _ = _launch(tmp_path, "nestedmixedfile")
+
+    assert res.returncode == 6, res.stderr

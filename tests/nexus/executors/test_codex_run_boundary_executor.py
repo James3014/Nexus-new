@@ -15,7 +15,7 @@ def _executable(tmp_path: Path) -> Path:
     return executable
 
 
-def _fake_worker(captured, mutate=None):
+def _fake_worker(captured, mutate=None, refresh=False, stdout=b"{}\n"):
     def fake_worker(request, **_kwargs):
         captured["request"] = request
         home = Path((request.env or {}).get("HOME", "/nonexistent"))
@@ -25,13 +25,15 @@ def _fake_worker(captured, mutate=None):
         )
         if mutate is not None:
             mutate(Path(request.cwd))
+        if refresh:
+            (home / ".codex" / "auth.json").write_text('{"OPENAI_API_KEY":"new"}', encoding="utf-8")
         return CliWorkerResult(
             status=CliWorkerStatus.COMPLETED,
             executable_identity=request.executable,
             argv=request.argv,
             cwd=request.cwd,
             exit_code=0,
-            stdout=b"{}\n",
+            stdout=stdout,
             stderr=b"",
             wall_time_ms=1,
             process_group_id=1,
@@ -43,7 +45,7 @@ def _fake_worker(captured, mutate=None):
 def _real_home(tmp_path: Path, monkeypatch) -> Path:
     home = tmp_path / "realhome"
     (home / ".codex").mkdir(parents=True)
-    (home / ".codex" / "auth.json").write_text('{"k":"v"}', encoding="utf-8")
+    (home / ".codex" / "auth.json").write_text('{"OPENAI_API_KEY":"v"}', encoding="utf-8")
     (home / ".codex" / "history.jsonl").write_text("h\n", encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.delenv("CODEX_HOME", raising=False)
@@ -150,3 +152,35 @@ def test_codex_adapter_surfaces_the_typed_boundary_failure_reason(tmp_path, monk
 
     assert receipt.outcome == "FAILED"
     assert receipt.failure_reason == "codex_target_symlink_or_git_escape"
+
+
+def _run_with_refresh(tmp_path, monkeypatch, *, stdout=b"{}\n", mutate=None):
+    real_home = _real_home(tmp_path, monkeypatch)
+    contract = _contract(tmp_path)
+    lease = _lease(tmp_path, contract)
+    monkeypatch.setattr(
+        "nexus.executors.codex_executor.run_cli_worker",
+        _fake_worker({}, mutate, refresh=True, stdout=stdout),
+    )
+    CodexCliExecutor(executable=str(_executable(tmp_path))).invoke(
+        contract, lease, prompt="Edit only files allowed by the contract."
+    )
+    return (real_home / ".codex" / "auth.json").read_text(encoding="utf-8")
+
+
+def test_codex_executor_writes_back_a_refreshed_token_after_a_clean_run(tmp_path, monkeypatch):
+    assert _run_with_refresh(tmp_path, monkeypatch) == '{"OPENAI_API_KEY":"new"}'
+
+
+def test_codex_executor_does_not_write_back_after_an_escape(tmp_path, monkeypatch):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    body = _run_with_refresh(
+        tmp_path, monkeypatch, mutate=lambda target: os.symlink(outside, target / "escape")
+    )
+    assert body == '{"OPENAI_API_KEY":"v"}'
+
+
+def test_codex_executor_does_not_write_back_after_a_denied_action(tmp_path, monkeypatch):
+    denied = b'{"type":"item.completed","item":{"type":"command_execution","status":"declined"}}\n'
+    assert _run_with_refresh(tmp_path, monkeypatch, stdout=denied) == '{"OPENAI_API_KEY":"v"}'
