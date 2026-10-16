@@ -394,3 +394,83 @@ Files: 359
 | scratch/dummy_repo/reproduce_bug.py | benchmarking/swebench_lite/patch_fix_13579.jsonl, benchmarking/swebench_lite/patch_fix_v2_13579.jsonl, benchmarking/swebench_lite/phase1_A.jsonl |
 | scripts/scratch/phase13_acceptance.py | tests/services/test_archived_legacy_engine_2026_10_13.py |
 | scripts/scratch/phase13_closed_loop_test.py | tests/services/test_archived_legacy_engine_2026_10_13.py |
+
+## Batch 2 (scripts moved with their tests)
+
+Evidence: ~/Workspace/nexus-handoffs/2026-10-13-online-ab/ARCHIVE_CLASSIFICATION_20261016.md (batch 2) re-derived on main c48689bb4 by whole-repo basename/path scans; each script moves only together with every test that imports it. Pre-move ref: archive/2026-10-17-batch-2-pre.
+
+Files: 52
+
+| original path | new path | class | last commit |
+|---|---|---|---|
+| scripts/bench/export_s2t_shadow_policy.py | scripts/archive/2026-10/bench/export_s2t_shadow_policy.py | script (batch 2) | 2026-05-14 |
+| scripts/bench/flash_baseline_summary.py | scripts/archive/2026-10/bench/flash_baseline_summary.py | script (batch 2) | 2026-05-06 |
+| scripts/bench/h5_cloud_fallback_e2e_smoke.py | scripts/archive/2026-10/bench/h5_cloud_fallback_e2e_smoke.py | script (batch 2) | 2026-06-23 |
+| scripts/bench/h5_local_committee_e2e_smoke.py | scripts/archive/2026-10/bench/h5_local_committee_e2e_smoke.py | script (batch 2) | 2026-06-23 |
+| scripts/bench/n30r_task_gate.py | scripts/archive/2026-10/bench/n30r_task_gate.py | script (batch 2) | 2026-07-11 |
+| scripts/bench/n30r_v1_acceptance_oracle.py | scripts/archive/2026-10/bench/n30r_v1_acceptance_oracle.py | script (batch 2) | 2026-07-11 |
+| scripts/bench/nexus_value_comparison_report.py | scripts/archive/2026-10/bench/nexus_value_comparison_report.py | script (batch 2) | 2026-05-02 |
+| scripts/bench/refine_route_cost_policy_from_runs.py | scripts/archive/2026-10/bench/refine_route_cost_policy_from_runs.py | script (batch 2) | 2026-05-14 |
+| scripts/bench/route_cost_optimizer.py | scripts/archive/2026-10/bench/route_cost_optimizer.py | script (batch 2) | 2026-05-29 |
+| scripts/bench/route_decision_simulator.py | scripts/archive/2026-10/bench/route_decision_simulator.py | script (batch 2) | 2026-05-14 |
+| scripts/bench/run_local_problem_diff_eval.py | scripts/archive/2026-10/bench/run_local_problem_diff_eval.py | script (batch 2) | 2026-07-14 |
+| scripts/bench/run_observation_cycle_01.py | scripts/archive/2026-10/bench/run_observation_cycle_01.py | script (batch 2) | 2026-07-14 |
+| scripts/bench/run_observation_cycle_02.py | scripts/archive/2026-10/bench/run_observation_cycle_02.py | script (batch 2) | 2026-07-14 |
+| scripts/bench/run_observation_cycle_03.py | scripts/archive/2026-10/bench/run_observation_cycle_03.py | script (batch 2) | 2026-07-14 |
+| scripts/bench/run_r3_portfolio_bench.py | scripts/archive/2026-10/bench/run_r3_portfolio_bench.py | script (batch 2) | 2026-06-21 |
+| scripts/bench/run_r6_shadow_bench.py | scripts/archive/2026-10/bench/run_r6_shadow_bench.py | script (batch 2) | 2026-06-21 |
+| scripts/bench/run_u1_route_hardening.py | scripts/archive/2026-10/bench/run_u1_route_hardening.py | script (batch 2) | 2026-06-21 |
+| scripts/bench/run_u2_task_expansion.py | scripts/archive/2026-10/bench/run_u2_task_expansion.py | script (batch 2) | 2026-06-21 |
+| scripts/bench/run_u3_expanded_bench.py | scripts/archive/2026-10/bench/run_u3_expanded_bench.py | script (batch 2) | 2026-06-21 |
+| scripts/bench/s2t_failure_taxonomy.py | scripts/archive/2026-10/bench/s2t_failure_taxonomy.py | script (batch 2) | 2026-07-14 |
+| scripts/bench/t1_5_semantic_retry_astropy_13236.py | scripts/archive/2026-10/bench/t1_5_semantic_retry_astropy_13236.py | script (batch 2) | 2026-07-14 |
+| scripts/bench/t1_8_rerun_astropy_12907.py | scripts/archive/2026-10/bench/t1_8_rerun_astropy_12907.py | script (batch 2) | 2026-07-14 |
+| scripts/bench/teacher_student_gap_matrix.py | scripts/archive/2026-10/bench/teacher_student_gap_matrix.py | script (batch 2) | 2026-05-08 |
+| scripts/bench/weak_model_closure_plan.py | scripts/archive/2026-10/bench/weak_model_closure_plan.py | script (batch 2) | 2026-05-07 |
+| scripts/bench/weak_model_cost_truth.py | scripts/archive/2026-10/bench/weak_model_cost_truth.py | script (batch 2) | 2026-05-07 |
+| scripts/bench/weak_model_long_loop.py | scripts/archive/2026-10/bench/weak_model_long_loop.py | script (batch 2) | 2026-05-07 |
+| scripts/ops/build_heep_mat_b_blocked_mode_resolution.py | scripts/archive/2026-10/ops/build_heep_mat_b_blocked_mode_resolution.py | script (batch 2) | 2026-05-20 |
+| scripts/ops/build_heep_mat_b_final_skill_decisions.py | scripts/archive/2026-10/ops/build_heep_mat_b_final_skill_decisions.py | script (batch 2) | 2026-05-20 |
+| scripts/ops/build_heep_mat_b_live_report.py | scripts/archive/2026-10/ops/build_heep_mat_b_live_report.py | script (batch 2) | 2026-05-20 |
+| scripts/ops/build_heep_mat_b_update_packets.py | scripts/archive/2026-10/ops/build_heep_mat_b_update_packets.py | script (batch 2) | 2026-05-20 |
+| scripts/ops/build_heep_runtime_curation_status.py | scripts/archive/2026-10/ops/build_heep_runtime_curation_status.py | script (batch 2) | 2026-05-20 |
+| scripts/ops/build_heep_runtime_default_apply_decision.py | scripts/archive/2026-10/ops/build_heep_runtime_default_apply_decision.py | script (batch 2) | 2026-05-20 |
+| scripts/ops/build_publication_readiness_gate.py | scripts/archive/2026-10/ops/build_publication_readiness_gate.py | script (batch 2) | 2026-05-20 |
+| scripts/ops/build_sf_current_skill_ssot.py | scripts/archive/2026-10/ops/build_sf_current_skill_ssot.py | script (batch 2) | 2026-05-20 |
+| scripts/ops/build_sf_final_capability_skill_settlement.py | scripts/archive/2026-10/ops/build_sf_final_capability_skill_settlement.py | script (batch 2) | 2026-05-21 |
+| scripts/ops/build_sf_final_compare_report.py | scripts/archive/2026-10/ops/build_sf_final_compare_report.py | script (batch 2) | 2026-05-21 |
+| scripts/ops/build_sf_final_live_compare_matrix.py | scripts/archive/2026-10/ops/build_sf_final_live_compare_matrix.py | script (batch 2) | 2026-05-21 |
+| scripts/ops/build_sf_final_live_compare_report.py | scripts/archive/2026-10/ops/build_sf_final_live_compare_report.py | script (batch 2) | 2026-05-21 |
+| scripts/ops/build_sf_final_local_skill_compare.py | scripts/archive/2026-10/ops/build_sf_final_local_skill_compare.py | script (batch 2) | 2026-05-21 |
+| scripts/ops/build_sf_final_runtime_apply.py | scripts/archive/2026-10/ops/build_sf_final_runtime_apply.py | script (batch 2) | 2026-05-22 |
+| scripts/ops/build_sf_replacement_cleanliness_manifest.py | scripts/archive/2026-10/ops/build_sf_replacement_cleanliness_manifest.py | script (batch 2) | 2026-05-20 |
+| scripts/ops/build_sf_systematic_current_overlay.py | scripts/archive/2026-10/ops/build_sf_systematic_current_overlay.py | script (batch 2) | 2026-05-20 |
+| scripts/ops/build_zero_trust_v2_public_claim_gate_review.py | scripts/archive/2026-10/ops/build_zero_trust_v2_public_claim_gate_review.py | script (batch 2) | 2026-05-22 |
+| scripts/ops/evaluate_github_skill_challengers.py | scripts/archive/2026-10/ops/evaluate_github_skill_challengers.py | script (batch 2) | 2026-05-20 |
+| scripts/ops/finalize_heep_mat_b_holds.py | scripts/archive/2026-10/ops/finalize_heep_mat_b_holds.py | script (batch 2) | 2026-05-20 |
+| scripts/ops/optimize_sf_primary_skill_descriptions.py | scripts/archive/2026-10/ops/optimize_sf_primary_skill_descriptions.py | script (batch 2) | 2026-05-20 |
+| scripts/ops/run_heep_live_pilot.py | scripts/archive/2026-10/ops/run_heep_live_pilot.py | script (batch 2) | 2026-05-20 |
+| scripts/ops/run_live_vertical_proof.py | scripts/archive/2026-10/ops/run_live_vertical_proof.py | script (batch 2) | 2026-07-25 |
+| scripts/ops/weak_model_convergence.py | scripts/archive/2026-10/ops/weak_model_convergence.py | script (batch 2) | 2026-05-09 |
+| scripts/ops/zero_trust_v2_report_dag.py | scripts/archive/2026-10/ops/zero_trust_v2_report_dag.py | script (batch 2) | 2026-05-22 |
+| scripts/bench/eia_roi_wave2.py | scripts/archive/2026-10/bench/eia_roi_wave2.py | script (batch 2) | 2026-08-23 |
+| scripts/ops/backfill_telemetry.py | scripts/archive/2026-10/ops/backfill_telemetry.py | script (batch 2) | 2026-05-27 |
+
+### Batch-2 candidates dropped (kept in place)
+
+| path | reason |
+|---|---|
+| scripts/ops/policy_override_lifecycle.py | test_policy_lane_integration.py also tests live check_policy_lane_gate.py (CI policy-lane-gate); impact-map policy rows |
+| scripts/ops/check_policy_override_receipt.py | test_policy_lane_gate.py is run by .github/workflows/policy-lane-gate.yml and also covers live policy_lane_precommit/check_policy_lane_gate |
+| scripts/bench/s2t_memory_sidecar_shadow.py | tests/gates/test_s2t_memory_sidecar_fixtures.py is a target of impact-map row nexus/infrastructure/state_json_store.py and of every plan |
+| scripts/ops/nexus_self_hosted_mcp_http.py | its test file tests the live nexus.orchestrator.self_hosted_mcp_http module (shared test) |
+| scripts/ops/lazy_executor_demo.py | tests/scenario/test_v25_scenarios.py shares it with live nexus.optimize modules |
+| scripts/ops/test_repo.sh | 3 test files read it incl. live test_canonical_core_transport.py and localheal seam test |
+| scripts/bench/freeze_public_manifest.py | its test is a named target of impact-map row nexus/research/sprint_service.py |
+| scripts/ops/nexus_p110_launch_candidate_gate.py | its test is a named target of impact-map row nexus/research/sprint_service.py |
+| scripts/bench/teacher_reference_gate.py | imported by nexus_p110_launch_candidate_gate.py, which stays |
+| scripts/bench/check_post_wiring_regression_readiness.py | test_live_regression_entrypoints.py is shared with live run_c12481/run_c13453 regression scripts |
+| scripts/scratch/phase13_closed_loop_test.py | tests/services/test_archived_legacy_engine_2026_10_13.py is shared (impact-map row nexus/evaluation/eval_harness.py; names live scripts) |
+| scripts/bench/codex_dx_history.py | scripts/ops/pr_impact_gate.py:73-77 (gate code) maps configs/benchmarks/codex_dx_before_v1.json to tests/benchmark/test_codex_dx_history.py |
+| scripts/ops/validate_codex_dx_failure_prevention.py | scripts/ops/pr_impact_gate.py:73 and tests/ops/test_pr_impact_gate.py:480 name tests/ops/test_codex_dx_failure_prevention.py |
+| scripts/ops/repo_doctor.py | tests/ops/test_pr_impact_gate.py:1062 and test_codex_dx_failure_prevention.py:88 use tests/ops/test_repo_doctor.py as a real-file fixture reference |

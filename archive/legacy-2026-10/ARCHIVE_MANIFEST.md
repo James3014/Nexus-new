@@ -297,3 +297,59 @@ Files: 242
 | archives/, perf_regression_pack_v22.5/, .obsidian/ | classification batch 2 (each needs a one-line edit in a guard/script/test) |
 | repro/, packages/ | gitlinks/submodules (.gitmodules), classification batch 3 |
 | KEEP / KEEP-CODE-REF / KEEP-AS-FIXTURE / HOLD dirs | not archive candidates |
+
+## Batch 2 (archives/, perf_regression_pack_v22.5/, .obsidian/)
+
+Evidence: ~/Workspace/nexus-handoffs/2026-10-13-online-ab/ARCHIVE_CLASSIFICATION_20261016.md (batch 2) re-derived on main c48689bb4 by whole-repo basename/path scans; each script moves only together with every test that imports it. Pre-move ref: archive/2026-10-17-batch-2-pre.
+
+Edits: scripts/ops/scope_guard.py drops the perf_regression_pack_v22.5/ allowed prefix (archive/ is allowed). scripts/governance/freeze_v27_2.py (a one-off v27.2 freeze script that writes archives/v27.2/...) is NOT edited: it is unmapped in the impact map, so editing it would force a full-suite plan; it fails if re-run until its path is updated. scripts/ops/nexus_gateway_auto_deploy.py IRRELEVANT_PREFIXES still lists "archives/" (harmless, untouched); .gitnexusignore entries for perf_regression_pack_v22.5/ are now inert.
+
+Files: 45
+
+| original path | new path | class | last commit |
+|---|---|---|---|
+| archives/v27.1/.gitkeep | archive/legacy-2026-10/archives/v27.1/.gitkeep | ARCHIVE dir (batch 2) | 2026-06-04 |
+| archives/v27.1/adr_freeze_manifest.json | archive/legacy-2026-10/archives/v27.1/adr_freeze_manifest.json | ARCHIVE dir (batch 2) | 2026-06-04 |
+| archives/v27.1/rollback_and_replay_index.md | archive/legacy-2026-10/archives/v27.1/rollback_and_replay_index.md | ARCHIVE dir (batch 2) | 2026-06-04 |
+| archives/v27.1/v27.1_archive_bundle.json | archive/legacy-2026-10/archives/v27.1/v27.1_archive_bundle.json | ARCHIVE dir (batch 2) | 2026-06-04 |
+| archives/v27.2/v27.2_freeze_manifest.json | archive/legacy-2026-10/archives/v27.2/v27.2_freeze_manifest.json | ARCHIVE dir (batch 2) | 2026-06-04 |
+| archives/v27.3/v27.3_freeze_manifest.json | archive/legacy-2026-10/archives/v27.3/v27.3_freeze_manifest.json | ARCHIVE dir (batch 2) | 2026-06-04 |
+| archives/v27.4/v27.4_freeze_manifest.json | archive/legacy-2026-10/archives/v27.4/v27.4_freeze_manifest.json | ARCHIVE dir (batch 2) | 2026-06-04 |
+| archives/v27.5/v27.5_freeze_manifest.json | archive/legacy-2026-10/archives/v27.5/v27.5_freeze_manifest.json | ARCHIVE dir (batch 2) | 2026-06-04 |
+| archives/v27.6/v27.6_freeze_manifest.json | archive/legacy-2026-10/archives/v27.6/v27.6_freeze_manifest.json | ARCHIVE dir (batch 2) | 2026-06-04 |
+| archives/v27.7/v27.7_freeze_manifest.json | archive/legacy-2026-10/archives/v27.7/v27.7_freeze_manifest.json | ARCHIVE dir (batch 2) | 2026-06-04 |
+| archives/v27.8/v27.8_freeze_manifest.json | archive/legacy-2026-10/archives/v27.8/v27.8_freeze_manifest.json | ARCHIVE dir (batch 2) | 2026-06-04 |
+| archives/v27.9/v27.9_freeze_manifest.json | archive/legacy-2026-10/archives/v27.9/v27.9_freeze_manifest.json | ARCHIVE dir (batch 2) | 2026-06-04 |
+| archives/v28.0/v28.0_freeze_manifest.json | archive/legacy-2026-10/archives/v28.0/v28.0_freeze_manifest.json | ARCHIVE dir (batch 2) | 2026-06-04 |
+| perf_regression_pack_v22.5/01_PERF_INDEX.md | archive/legacy-2026-10/perf_regression_pack_v22.5/01_PERF_INDEX.md | ARCHIVE dir (batch 2) | 2026-04-08 |
+| perf_regression_pack_v22.5/02_REGRESSION_BASELINE_VS_CURRENT.md | archive/legacy-2026-10/perf_regression_pack_v22.5/02_REGRESSION_BASELINE_VS_CURRENT.md | ARCHIVE dir (batch 2) | 2026-04-07 |
+| perf_regression_pack_v22.5/03_WORKLOAD_AND_TEST_CONDITIONS.md | archive/legacy-2026-10/perf_regression_pack_v22.5/03_WORKLOAD_AND_TEST_CONDITIONS.md | ARCHIVE dir (batch 2) | 2026-04-07 |
+| perf_regression_pack_v22.5/04_TRACE_TIMELINE_BREAKDOWN.md | archive/legacy-2026-10/perf_regression_pack_v22.5/04_TRACE_TIMELINE_BREAKDOWN.md | ARCHIVE dir (batch 2) | 2026-04-07 |
+| perf_regression_pack_v22.5/05_ROOT_CAUSE_HYPOTHESIS_MATRIX.md | archive/legacy-2026-10/perf_regression_pack_v22.5/05_ROOT_CAUSE_HYPOTHESIS_MATRIX.md | ARCHIVE dir (batch 2) | 2026-04-07 |
+| perf_regression_pack_v22.5/06_ORCHESTRATOR_CODE_PATHS.md | archive/legacy-2026-10/perf_regression_pack_v22.5/06_ORCHESTRATOR_CODE_PATHS.md | ARCHIVE dir (batch 2) | 2026-04-07 |
+| perf_regression_pack_v22.5/07_GUARD_HEALER_DECISION_CHAIN.md | archive/legacy-2026-10/perf_regression_pack_v22.5/07_GUARD_HEALER_DECISION_CHAIN.md | ARCHIVE dir (batch 2) | 2026-04-07 |
+| perf_regression_pack_v22.5/08_SERIAL_DISPATCH_PROVE.md | archive/legacy-2026-10/perf_regression_pack_v22.5/08_SERIAL_DISPATCH_PROVE.md | ARCHIVE dir (batch 2) | 2026-04-07 |
+| perf_regression_pack_v22.5/09_SYNC_SUBPROCESS_IMPACT.md | archive/legacy-2026-10/perf_regression_pack_v22.5/09_SYNC_SUBPROCESS_IMPACT.md | ARCHIVE dir (batch 2) | 2026-04-07 |
+| perf_regression_pack_v22.5/10_METRICS_SERIALIZATION_OVERHEAD.md | archive/legacy-2026-10/perf_regression_pack_v22.5/10_METRICS_SERIALIZATION_OVERHEAD.md | ARCHIVE dir (batch 2) | 2026-04-07 |
+| perf_regression_pack_v22.5/11_RECOMMENDED_FIX_ASYNC_BLUEPRINT.md | archive/legacy-2026-10/perf_regression_pack_v22.5/11_RECOMMENDED_FIX_ASYNC_BLUEPRINT.md | ARCHIVE dir (batch 2) | 2026-04-07 |
+| perf_regression_pack_v22.5/12_REPRO_AND_VALIDATION_SCRIPTS.md | archive/legacy-2026-10/perf_regression_pack_v22.5/12_REPRO_AND_VALIDATION_SCRIPTS.md | ARCHIVE dir (batch 2) | 2026-04-07 |
+| perf_regression_pack_v22.5/13_REGRESSION_METHOD_RECONCILIATION.md | archive/legacy-2026-10/perf_regression_pack_v22.5/13_REGRESSION_METHOD_RECONCILIATION.md | ARCHIVE dir (batch 2) | 2026-04-07 |
+| perf_regression_pack_v22.5/14_FULL_REQUEST_TRACE_RAW.md | archive/legacy-2026-10/perf_regression_pack_v22.5/14_FULL_REQUEST_TRACE_RAW.md | ARCHIVE dir (batch 2) | 2026-04-07 |
+| perf_regression_pack_v22.5/15_EVIDENCE_GRADE_MATRIX.md | archive/legacy-2026-10/perf_regression_pack_v22.5/15_EVIDENCE_GRADE_MATRIX.md | ARCHIVE dir (batch 2) | 2026-04-07 |
+| perf_regression_pack_v22.5/21_PATCH_REVIEW_RESOLUTION.md | archive/legacy-2026-10/perf_regression_pack_v22.5/21_PATCH_REVIEW_RESOLUTION.md | ARCHIVE dir (batch 2) | 2026-04-07 |
+| perf_regression_pack_v22.5/22_PATCH_C_SAFETY_INVARIANTS.md | archive/legacy-2026-10/perf_regression_pack_v22.5/22_PATCH_C_SAFETY_INVARIANTS.md | ARCHIVE dir (batch 2) | 2026-04-07 |
+| perf_regression_pack_v22.5/23_PATCH_GATE_THRESHOLDS.md | archive/legacy-2026-10/perf_regression_pack_v22.5/23_PATCH_GATE_THRESHOLDS.md | ARCHIVE dir (batch 2) | 2026-04-07 |
+| perf_regression_pack_v22.5/25_PATCH_B_REPORT.md | archive/legacy-2026-10/perf_regression_pack_v22.5/25_PATCH_B_REPORT.md | ARCHIVE dir (batch 2) | 2026-04-07 |
+| perf_regression_pack_v22.5/26_PATCH_C_PARALLEL_REPORT.md | archive/legacy-2026-10/perf_regression_pack_v22.5/26_PATCH_C_PARALLEL_REPORT.md | ARCHIVE dir (batch 2) | 2026-04-07 |
+| perf_regression_pack_v22.5/FINAL_PERFORMANCE_REPAIR_v22.5.md | archive/legacy-2026-10/perf_regression_pack_v22.5/FINAL_PERFORMANCE_REPAIR_v22.5.md | ARCHIVE dir (batch 2) | 2026-04-07 |
+| perf_regression_pack_v22.5/LEARNING_LOOP_CLOSED_LOOP_CERTIFICATION.md | archive/legacy-2026-10/perf_regression_pack_v22.5/LEARNING_LOOP_CLOSED_LOOP_CERTIFICATION.md | ARCHIVE dir (batch 2) | 2026-04-08 |
+| perf_regression_pack_v22.5/LEARNING_LOOP_MASTER_SPEC.md | archive/legacy-2026-10/perf_regression_pack_v22.5/LEARNING_LOOP_MASTER_SPEC.md | ARCHIVE dir (batch 2) | 2026-04-08 |
+| perf_regression_pack_v22.5/README.md | archive/legacy-2026-10/perf_regression_pack_v22.5/README.md | ARCHIVE dir (batch 2) | 2026-04-08 |
+| perf_regression_pack_v22.5/SWARM_STATUS_AUDIT_3.705.0.md | archive/legacy-2026-10/perf_regression_pack_v22.5/SWARM_STATUS_AUDIT_3.705.0.md | ARCHIVE dir (batch 2) | 2026-04-08 |
+| perf_regression_pack_v22.5/V23_5_MASTER_SPEC.md | archive/legacy-2026-10/perf_regression_pack_v22.5/V23_5_MASTER_SPEC.md | ARCHIVE dir (batch 2) | 2026-04-08 |
+| perf_regression_pack_v22.5/metadata.json | archive/legacy-2026-10/perf_regression_pack_v22.5/metadata.json | ARCHIVE dir (batch 2) | 2026-04-08 |
+| perf_regression_pack_v22.5/phase36.10_review.md | archive/legacy-2026-10/perf_regression_pack_v22.5/phase36.10_review.md | ARCHIVE dir (batch 2) | 2026-04-08 |
+| .obsidian/app.json | archive/legacy-2026-10/.obsidian/app.json | ARCHIVE dir (batch 2) | 2026-03-28 |
+| .obsidian/appearance.json | archive/legacy-2026-10/.obsidian/appearance.json | ARCHIVE dir (batch 2) | 2026-03-28 |
+| .obsidian/core-plugins.json | archive/legacy-2026-10/.obsidian/core-plugins.json | ARCHIVE dir (batch 2) | 2026-03-28 |
+| .obsidian/workspace.json | archive/legacy-2026-10/.obsidian/workspace.json | ARCHIVE dir (batch 2) | 2026-06-06 |

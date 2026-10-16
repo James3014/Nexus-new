@@ -1107,3 +1107,22 @@ Files: 981
 | docs/reports/submodule_dirty_state_audit_v0.md | scripts/archive/2026-10/scratch/execute_submodule_dirty_state_audit.py |
 | docs/reports/policy-baseline-manifest.v1.json | tests/ops/test_retired_rust_crate_removed.py:28 reads it (live governance artefact, edited by #2362) |
 | docs/reports/policy-baseline-manifest.v1.md | tests/ops/test_retired_rust_crate_removed.py:28 reads it (live governance artefact, edited by #2362) |
+
+## Batch 2 (default-input reports of archived scripts)
+
+Evidence: ~/Workspace/nexus-handoffs/2026-10-13-online-ab/ARCHIVE_CLASSIFICATION_20261016.md (batch 2) re-derived on main c48689bb4 by whole-repo basename/path scans; each script moves only together with every test that imports it. Pre-move ref: archive/2026-10-17-batch-2-pre.
+
+Other cluster reports stay: still named by live (batch-3) scripts or by report_retention_policy_manifest.json.
+
+Files: 8
+
+| original path | new path | class | last commit |
+|---|---|---|---|
+| docs/reports/recovery_rule_registry_v1_1_freeze.md | docs/reports/archive/2026-10/recovery_rule_registry_v1_1_freeze.md | default-input report | 2026-06-20 |
+| docs/reports/s2t_export_claim_guard_t2_9_freeze.md | docs/reports/archive/2026-10/s2t_export_claim_guard_t2_9_freeze.md | default-input report | 2026-06-20 |
+| docs/reports/t2_9_20_task_evidence_pack.md | docs/reports/archive/2026-10/t2_9_20_task_evidence_pack.md | default-input report | 2026-06-20 |
+| docs/reports/v1_post_u_p9_integrity_audit_v0.md | docs/reports/archive/2026-10/v1_post_u_p9_integrity_audit_v0.md | default-input report | 2026-06-21 |
+| docs/reports/v2_route_stress_policy_calibration_v0.md | docs/reports/archive/2026-10/v2_route_stress_policy_calibration_v0.md | default-input report | 2026-06-21 |
+| docs/reports/w3_internal_default_policy_validation_v0.md | docs/reports/archive/2026-10/w3_internal_default_policy_validation_v0.md | default-input report | 2026-06-21 |
+| docs/reports/x1_hard_real_repair_task_expansion_v0.md | docs/reports/archive/2026-10/x1_hard_real_repair_task_expansion_v0.md | default-input report | 2026-06-21 |
+| docs/reports/x2_route_capability_frontier_benchmark_v0.md | docs/reports/archive/2026-10/x2_route_capability_frontier_benchmark_v0.md | default-input report | 2026-06-21 |

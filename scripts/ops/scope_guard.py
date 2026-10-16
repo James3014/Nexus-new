@@ -24,7 +24,6 @@ def main() -> int:
         "tests/",
         "tests/archive/",
         "docs/",
-        "perf_regression_pack_v22.5/",
     }
     ignored = {
         "ci_benchmark.csv",
