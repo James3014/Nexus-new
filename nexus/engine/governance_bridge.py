@@ -151,25 +151,14 @@ class RustFlowClient:
     }
 
     def __init__(self, binary_path: Optional[Path] = None):
-        if binary_path is None:
-            candidates = [
-                Path("nexus-core-rs/target/release/nexus-core-rs"),
-                Path("nexus-core-rs/target/debug/nexus-core-rs"),
-                Path("target/release/nexus-core-rs"),
-                Path("target/debug/nexus-core-rs"),
-            ]
-            for c in candidates:
-                if c.exists():
-                    self.binary_path = c
-                    break
-            else:
-                self.binary_path = candidates[0]
-        else:
-            self.binary_path = binary_path
+        # The nexus-core-rs kernel was retired and deleted on 2026-10-16 (#2359): there is
+        # no default binary any more, so without an explicit path every call reports
+        # "Binary not found" and GovernanceBridge uses its Python contract path.
+        self.binary_path = binary_path
 
     def call(self, request_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Send JSON IPC request to Rust binary, return parsed response."""
-        if not self.binary_path.exists():
+        if self.binary_path is None or not self.binary_path.exists():
             return {"success": False, "error_message": f"Binary not found: {self.binary_path}"}
 
         request = {"type": request_type, "payload": payload}
@@ -235,7 +224,8 @@ class GovernanceBridge:
         Shadow (dual-run): compare the contract fallback against Rust.
         Mismatch → write to ledger.
         """
-        rust_available = self.rs_client.binary_path.exists()
+        binary = self.rs_client.binary_path
+        rust_available = binary is not None and binary.exists()
         rs_result = self._rust_validate(from_state, to_state) if rust_available else None
         py_result = self._python_validate(from_state, to_state)
 

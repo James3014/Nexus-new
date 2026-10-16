@@ -998,25 +998,29 @@ def test_rfs_confined_visible_pytest_refuses_companion_edits(
 def test_sprint_confined_executor_refuses_companion_edits(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """#2339 follow-up: the fixture-keyed companion edits were deleted with the local answer
+    table, so a confined evaluation only ever carries the target and is never refused as
+    multi-file; nothing outside the target is written."""
     from nexus.research import sprint_service
     from nexus.research.sprint_service import InPlaceSprintExecutor
 
+    assert not hasattr(sprint_service, "generate_local_companion_edits")
     case = _case(tmp_path)
     monkeypatch.setenv(seam.CONFINE_VISIBLE_TEST_ENV, "1")
-    monkeypatch.setattr(
-        sprint_service,
-        "generate_local_companion_edits",
-        lambda *a, **k: {case / "other.py": "X = 1\n"},
-    )
-    monkeypatch.setattr(
-        seam, "run_visible_test_confined", lambda **kw: pytest.fail("ran with companions")
-    )
+    calls: list[dict] = []
+
+    def fake_confined(**kwargs):
+        calls.append(kwargs)
+        return subprocess.CompletedProcess(["pytest"], 0, "", ""), True
+
+    monkeypatch.setattr(seam, "run_visible_test_confined", fake_confined)
     executor = InPlaceSprintExecutor(
         case, "target.py", [sys.executable, "-m", "pytest", "-q", "test_visible.py"], 30, task="t"
     )
     ev = executor.evaluate_candidate(seed=0, hint="h", code=CANDIDATE, source="llm")
 
-    assert ev.score == 0.0 and ev.error.startswith("confinement_unavailable:multi_file")
+    assert not (ev.error or "").startswith("confinement_unavailable:multi_file")
+    assert len(calls) == 1 and calls[0]["candidate_code"] == CANDIDATE
     assert (case / "target.py").read_text(encoding="utf-8") == ORIGINAL
     assert not (case / "other.py").exists()
 
@@ -1371,17 +1375,17 @@ def test_companion_file_held_by_another_task_refuses_the_whole_write(tmp_path: P
 def test_sprint_inplace_executor_refuses_when_a_companion_is_held(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """#2339 follow-up: no companion edits exist any more, so a lock another task holds on an
+    unrelated file neither blocks the target-only evaluation nor gets that file written."""
     from nexus.research import sprint_service
     from nexus.research.sprint_service import InPlaceSprintExecutor
 
+    assert not hasattr(sprint_service, "generate_local_companion_edits")
     case = _case(tmp_path)
     monkeypatch.delenv(seam.CONFINE_VISIBLE_TEST_ENV, raising=False)
     monkeypatch.setattr(
-        sprint_service,
-        "generate_local_companion_edits",
-        lambda *a, **k: {case / "helper.py": "X = 2\n"},
+        subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a[0], 0, "", "")
     )
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("test ran"))
     seam.acquire_target_lock(task_id="other-task", workspace_root=case, target_file="helper.py")
     try:
         executor = InPlaceSprintExecutor(
@@ -1390,7 +1394,7 @@ def test_sprint_inplace_executor_refuses_when_a_companion_is_held(
         ev = executor.evaluate_candidate(seed=0, hint="h", code=CANDIDATE, source="llm")
     finally:
         seam.release_target_lock("other-task")
-    assert ev.error == "file_lock_denied" and ev.score == 0.0
+    assert ev.error != "file_lock_denied" and ev.score == 1.0
     assert (case / "target.py").read_text(encoding="utf-8") == ORIGINAL
     assert not (case / "helper.py").exists()
 

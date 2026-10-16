@@ -1896,6 +1896,23 @@ def test_response_builder_model_delivery_passes_mempalace_gate(tmp_path: Path, m
     assert payload["nexus_usage_trace"]["capabilities"]["mempalace_gate_passed"] is True
 
 
+def _fake_baseline_model(monkeypatch, patch_fn) -> None:
+    """#2339 follow-up: the local answer table is deleted; the baseline patch comes from a model."""
+
+    class _Model:
+        model_chain = ["fake-model"]
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, *, source_code, task="", mutation_hint="", seed=0, **_kwargs):
+            meta = {"source": "llm", "model_calls": 1, "tokens_used": 0, "token_capture_status": "measured"}
+            meta["model_patch_generated"] = True
+            return patch_fn(source_code, task, mutation_hint, seed), meta
+
+    monkeypatch.setattr("nexus.app.research_flow_service.LLMCandidateGenerator", _Model)
+
+
 def test_strict_llm_baseline_does_not_fallback_to_local(tmp_path: Path, monkeypatch):
     target = tmp_path / "demo.py"
     test_file = tmp_path / "test_demo.py"
@@ -1919,11 +1936,9 @@ def test_strict_llm_baseline_does_not_fallback_to_local(tmp_path: Path, monkeypa
                 },
             )
 
-    def fail_if_local_runs(*_args, **_kwargs):
-        raise AssertionError("strict LLM baseline must not run local fallback")
-
     monkeypatch.setattr(research_flow_service, "LLMCandidateGenerator", FakeLLMGenerator)
-    monkeypatch.setattr(research_flow_service, "generate_local_candidate", fail_if_local_runs)
+    # #2339 follow-up: there is no local fallback generator at all any more.
+    assert not hasattr(research_flow_service, "generate_local_candidate")
 
     payload, _ = research_flow_service.run_auto_flow(
         repo_root=tmp_path,
@@ -1967,7 +1982,7 @@ def test_baseline_apply_restores_target_after_pytest_failure(tmp_path: Path, mon
     target.write_text(original, encoding="utf-8")
     test_file.write_text("from demo import value\n\ndef test_value():\n    assert value() == 3\n", encoding="utf-8")
 
-    monkeypatch.setattr(research_flow_service, "generate_local_candidate", lambda *_args, **_kwargs: patched)
+    _fake_baseline_model(monkeypatch, lambda *_args, **_kwargs: patched)
     monkeypatch.setattr(
         research_flow_service.subprocess,
         "run",
@@ -1983,8 +1998,8 @@ def test_baseline_apply_restores_target_after_pytest_failure(tmp_path: Path, mon
         candidate_count=1,
         root_cause_confidence=1.0,
         findings_query=None,
-        llm_mode=False,
-        llm_baseline=False,
+        llm_mode=True,
+        llm_baseline=True,
         timeout_sec=30,
         stage1_timeout_sec=10,
         max_time_ratio_guard=1.5,
@@ -2015,7 +2030,7 @@ def test_baseline_apply_restores_target_after_timeout(tmp_path: Path, monkeypatc
     def timeout_run(args, **kwargs):
         raise subprocess.TimeoutExpired(args, kwargs.get("timeout", 0))
 
-    monkeypatch.setattr(research_flow_service, "generate_local_candidate", lambda *_args, **_kwargs: patched)
+    _fake_baseline_model(monkeypatch, lambda *_args, **_kwargs: patched)
     monkeypatch.setattr(research_flow_service.subprocess, "run", timeout_run)
 
     payload, _ = research_flow_service.run_auto_flow(
@@ -2027,8 +2042,8 @@ def test_baseline_apply_restores_target_after_timeout(tmp_path: Path, monkeypatc
         candidate_count=1,
         root_cause_confidence=1.0,
         findings_query=None,
-        llm_mode=False,
-        llm_baseline=False,
+        llm_mode=True,
+        llm_baseline=True,
         timeout_sec=30,
         stage1_timeout_sec=10,
         max_time_ratio_guard=1.5,
@@ -2605,38 +2620,13 @@ def test_baseline_local_mutation_ignores_prior_art_keyword_pollution(tmp_path: P
         output_file=None,
     )
 
-    assert payload["result"]["status"] == "SUCCESS"
+    # #2339 follow-up: the deterministic local answer table (which used to patch compute_backoff
+    # here) is deleted. Without a model the baseline has no candidate; prior-art pollution cannot
+    # reach anything, and the target is left untouched.
+    assert payload["result"]["status"] == "FAILED"
+    assert payload["result"]["report"]["source"] == "no_local_candidate_generator"
     assert payload["strategy"]["path"] == "baseline_only"
-    assert "artifact_summary" in payload
-    assert payload["artifact_summary"]["changed"] is True
-    trace = payload["nexus_usage_trace"]
-    assert trace["nexus_context_delivered"] is True
-    assert trace["gemini_uses_nexus"] is False
-    assert trace["pillars"]["lancedb"]["active"] is True
-    assert trace["pillars"]["memory"]["active"] is True
-    assert trace["pillars"]["mempalace"]["active"] is False
-    assert trace["pillars"]["belief"]["route_influenced"] is True
-    assert trace["pillars"]["artifact"]["tests_passed"] is True
-    assert trace["phase_trace"]["P"] == "route_built"
-    assert trace["phase_trace"]["A"] == "artifact_verified"
-    assert trace["capabilities"]["claim_verified"] is True
-    assert trace["codeintel"]["scan_report_present"] is True
-    assert trace["codeintel"]["impact_report_present"] is True
-    assert trace["codeintel"]["claim_bundle_present"] is True
-    assert Path(trace["codeintel"]["scan_report_path"]).exists()
-    assert Path(trace["codeintel"]["impact_report_path"]).exists()
-    assert trace["codeintel"]["impacted_files_count"] >= 1
-    assert trace["capability_plan"]["schema_version"] == "nexus_capability_plan_v1"
-    assert trace["capability_plan"]["planner_mode"] == "dry_run"
-    assert {"mempalace_gate", "artifact_gate", "claim_gate"} <= set(trace["capability_plan"]["required_capabilities"])
-    assert any(item["phase"] == "A" for item in trace["capability_plan"]["replan_trace"])
-    assert payload["timing"]["cli_elapsed_sec"] >= 0
-    assert payload["timing"]["breakdown_sec"]["target_io_sec"] >= 0
-    assert payload["timing"]["breakdown_sec"]["codeintel_sec"] >= 0
-    assert payload["timing"]["breakdown_sec"]["context_pack_sec"] >= 0
-    for phase in ["P", "X", "D", "R", "A", "C"]:
-        assert phase in payload["timing"]["phase_wall_sec"]
-
+    assert target.read_text(encoding="utf-8").endswith("    return 1\n")
 
 def test_build_codeintel_evidence_reuses_run_cache_graph(tmp_path: Path, monkeypatch):
     target = tmp_path / "target.py"
@@ -2975,7 +2965,7 @@ def test_forced_hyper_skips_baseline_probe(tmp_path: Path, monkeypatch):
             candidates=[],
         )
 
-    monkeypatch.setattr(research_flow_service, "generate_local_candidate", fail_if_baseline_runs)
+    monkeypatch.setattr(research_flow_service, "_build_baseline_patch", fail_if_baseline_runs)
     monkeypatch.setattr(research_flow_service, "run_hyper_sprint", fake_hyper)
     payload, _ = research_flow_service.run_auto_flow(
         repo_root=tmp_path,

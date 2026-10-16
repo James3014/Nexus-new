@@ -21,7 +21,7 @@ def _job() -> dict:
 
 def test_runs_default_branch_copy_on_pr_target_including_body_edits() -> None:
     data = _load()
-    triggers = data.get("on", data.get(True))
+    triggers = data["on"] if "on" in data else data[True]
     assert set(triggers) == {"pull_request_target"}
     target = triggers["pull_request_target"]
     assert target["branches"] == ["main"]
@@ -63,7 +63,7 @@ def test_runs_the_bindings_check_isolated_and_publishes_the_status() -> None:
     assert "statuses/${HEAD_SHA}" in script
     # the job's own result follows the check, so it cannot go green on a FAIL
     assert script.rstrip().endswith('exit "$rc"')
-    assert "set -uo pipefail" in script
+    assert "set +e -uo pipefail" in script
     # printed preflight output cannot run workflow commands
     assert (
         script.index("::stop-commands::")
@@ -107,7 +107,7 @@ def _run_publish_step(tmp_path: Path, preflight_output: str, preflight_rc: int) 
         "CONTEXT": CONTEXT,
         "HOME": os.environ.get("HOME", str(tmp_path)),
     }
-    proc = subprocess.run(["bash", "-c", run["run"]], env=env, capture_output=True, text=True)
+    proc = subprocess.run(["bash", "-e", "-c", run["run"]], env=env, capture_output=True, text=True)
     return proc.returncode, posted.read_text(encoding="utf-8")
 
 

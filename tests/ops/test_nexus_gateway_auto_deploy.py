@@ -6,6 +6,7 @@ touches a real Gateway, LaunchAgent or GitHub.
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import hashlib
 import http.server
@@ -6102,3 +6103,366 @@ def test_only_pr_head_statuses_required_still_enforces_the_floor() -> None:
     result = ad.required_checks(api, NEW)
     assert result["verdict"] == "UNKNOWN"
     assert "Exact-base impact gate" in result["missing"]
+
+
+# ------------------------------------------- #2402 deployer-only self-update
+
+NEW_GATE = "Brand new gate"
+SELF_UPDATE_FIXTURES = Path(__file__).parent / "fixtures" / "gateway_auto_deploy_2402"
+
+
+def _deployer_source(*, checks: tuple[str, ...] = (), contexts: tuple[str, ...] = ()) -> str:
+    """A candidate deployer source that knows today's names plus ``checks``/``contexts``."""
+    table = {**ad.REQUIRED_CHECKS, **{name: ".github/workflows/new-gate.yml" for name in checks}}
+    known = sorted({*ad.PR_HEAD_STATUS_CONTEXTS, *contexts})
+    return (
+        '"""candidate deployer."""\n'
+        f"REQUIRED_CHECKS = {table!r}\n"
+        f"PR_HEAD_STATUS_CONTEXTS = frozenset({set(known)!r})\n"
+    )
+
+
+class SelfUpdateHost(FakeHost):
+    """FakeHost whose bare repo answers ``git show <sha>:<deployer>`` with ``source``."""
+
+    def __init__(self, source: str | None, **kw: Any) -> None:
+        super().__init__(**kw)
+        self.source = source
+        self.shows: list[str] = []
+
+    def run(self, argv, *, cwd=None, env=None, timeout=1800):  # type: ignore[override]
+        if argv[:1] == ["git"] and "show" in argv:
+            self.calls.append(list(argv))
+            self.shows.append(argv[-1])
+            if self.source is None:
+                return _done(code=128, stderr="fatal: path does not exist")
+            return _done(self.source)
+        return super().run(argv, cwd=cwd, env=env, timeout=timeout)
+
+
+def _no_gateway_effect(cfg: ad.Config, host: FakeHost, prober: FakeProber, plist: bytes) -> None:
+    assert cfg.plist.read_bytes() == plist
+    assert host.reloads == [] and host.started == [] and prober.calls == []
+    assert not any(c[:1] == ["uv"] for c in host.calls)
+    assert not cfg.journal.exists() and not cfg.hold_file.exists()
+
+
+def _tool_runs(host: FakeHost) -> list[list[str]]:
+    return [c for c in host.calls if len(c) > 2 and c[1].endswith(ad.DEPLOYER)]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [_deployer_source(checks=(NEW_GATE,)), _deployer_source(contexts=(NEW_GATE,))],
+    ids=["bound-check", "pr-head-status"],
+)
+def test_self_update_moves_only_the_deployer_link(cfg: ad.Config, source: str) -> None:
+    """(a) unknown name + candidate knows it + bindable subset green."""
+    api = green_api(required=[*ad.REQUIRED_CHECKS, NEW_GATE])
+    host, prober = SelfUpdateHost(source), FakeProber()
+    plist = cfg.plist.read_bytes()
+    result = cycle(cfg, host, prober, api, tool_python=Path("/agent/python3.12"))
+    assert result["status"] == ad.SELF_UPDATED_OUTCOME
+    assert host.shows == [f"{NEW}:{ad.DEPLOYER}"]
+    root = cfg.deployments / f"a1-{NEW}"
+    assert Path(os.readlink(cfg.tool_link)) == root
+    _no_gateway_effect(cfg, host, prober, plist)
+    assert [c[2] for c in _tool_runs(host)] == ["selftest", "status", "run"]
+    assert all(c[0] == "/agent/python3.12" for c in _tool_runs(host))
+    receipts = ad.read_receipts(cfg.state_dir)
+    assert [r["outcome"] for r in receipts] == [ad.SELF_UPDATED_OUTCOME]
+    receipt = receipts[0]
+    assert receipt["switched"] is False and receipt["rolled_back"] is False
+    assert receipt["candidate_commit"] == NEW and receipt["deployer_link"]["moved"] is True
+    update = receipt["self_update"]
+    assert update["unknown_required"] == [NEW_GATE]
+    subset = update["bindable_checks"]
+    assert subset["verdict"] == "GREEN"
+    assert set(subset["checks"]) == set(ad.REQUIRED_CHECKS)  # every bindable name, not NEW_GATE
+    assert result["self_update"]["verdict"] == "UPDATED"
+
+
+@pytest.mark.parametrize(
+    "source, verdict",
+    [
+        (_deployer_source(), "CANDIDATE_DOES_NOT_KNOW"),
+        (None, "CANDIDATE_SOURCE_UNREADABLE"),
+        ("REQUIRED_CHECKS = compute()\n", "CANDIDATE_SOURCE_UNPARSEABLE"),
+        ("REQUIRED_CHECKS = {\n", "CANDIDATE_SOURCE_UNPARSEABLE"),
+    ],
+    ids=["does-not-know", "unreadable", "computed-table", "syntax-error"],
+)
+def test_self_update_fails_closed_when_the_candidate_cannot_bind_the_name(
+    cfg: ad.Config, source: str | None, verdict: str
+) -> None:
+    """(b) the candidate does not know the name either: stays UNKNOWN_REQUIRED_CHECK."""
+    api = green_api(required=[*ad.REQUIRED_CHECKS, NEW_GATE])
+    host, prober = SelfUpdateHost(source), FakeProber()
+    plist = cfg.plist.read_bytes()
+    result = cycle(cfg, host, prober, api)
+    assert result["status"] == f"UNKNOWN_REQUIRED_CHECK:{NEW_GATE}"
+    assert result["self_update"]["verdict"] == verdict
+    if verdict == "CANDIDATE_DOES_NOT_KNOW":
+        assert result["self_update"]["still_unknown"] == [NEW_GATE]
+    assert not cfg.tool_link.exists() and _tool_runs(host) == []
+    assert ad.read_receipts(cfg.state_dir) == []
+    _no_gateway_effect(cfg, host, prober, plist)
+
+
+@pytest.mark.parametrize(
+    "api_kw, verdict",
+    [
+        ({"conclusion": "failure"}, "CHECKS_RED"),
+        ({"status": "in_progress"}, "CHECKS_PENDING"),
+        ({"on_commit": False}, "CHECKS_UNKNOWN"),
+    ],
+    ids=["red", "pending", "missing"],
+)
+def test_self_update_needs_every_bindable_check_green(
+    cfg: ad.Config, api_kw: dict[str, Any], verdict: str
+) -> None:
+    """(c) a red, pending or missing bindable check: no link move."""
+    base = green_api(required=[*ad.REQUIRED_CHECKS, NEW_GATE], **api_kw)
+
+    def api(path: str) -> Any:
+        if api_kw.get("on_commit") is False and "/pulls" in path and "state=open" not in path:
+            return []  # no merged PR head to fall back to: Deletion guard has no bound run
+        return base(path)
+
+    host, prober = SelfUpdateHost(_deployer_source(checks=(NEW_GATE,))), FakeProber()
+    plist = cfg.plist.read_bytes()
+    result = cycle(cfg, host, prober, api)
+    assert result["status"] == f"UNKNOWN_REQUIRED_CHECK:{NEW_GATE}"
+    assert result["self_update"]["verdict"] == verdict
+    assert not cfg.tool_link.exists() and _tool_runs(host) == []
+    assert ad.read_receipts(cfg.state_dir) == []
+    _no_gateway_effect(cfg, host, prober, plist)
+
+
+def test_self_update_subset_never_drops_a_floor_check(cfg: ad.Config) -> None:
+    """Main requiring only the unknown name still binds every FLOOR_CHECKS name."""
+    api = green_api(required=[NEW_GATE])
+    host = SelfUpdateHost(_deployer_source(checks=(NEW_GATE,)))
+    result = cycle(cfg, host, FakeProber(), api)
+    assert result["status"] == ad.SELF_UPDATED_OUTCOME
+    subset = result["receipt"]["self_update"]["bindable_checks"]
+    assert set(subset["checks"]) == set(ad.FLOOR_CHECKS)
+
+
+def test_bindable_subset_refuses_a_name_this_file_cannot_bind() -> None:
+    result = ad.bindable_subset_checks(green_api(), NEW, {NEW_GATE: None})
+    assert result["verdict"] == "UNKNOWN"
+
+
+@pytest.mark.parametrize(
+    "tip, relation",
+    [(NEW, "x"), ("d" * 40, "behind"), ("d" * 40, "diverged")],
+    ids=["tip-unreadable-relation", "behind", "diverged"],
+)
+def test_self_update_requires_the_candidate_on_main(
+    cfg: ad.Config, tip: str, relation: str
+) -> None:
+    """(d) a candidate not on GitHub main: no source read, no link move."""
+    if tip == NEW:
+
+        def api(path: str) -> Any:
+            if path.endswith("/branches/main"):
+                raise ad.DeployError("GH_API_FAILED:502")
+            return green_api(required=[*ad.REQUIRED_CHECKS, NEW_GATE])(path)
+
+    else:
+        api = green_api(required=[*ad.REQUIRED_CHECKS, NEW_GATE], main_tip=tip, relation=relation)
+    host, prober = SelfUpdateHost(_deployer_source(checks=(NEW_GATE,))), FakeProber()
+    plist = cfg.plist.read_bytes()
+    assert cycle(cfg, host, prober, api)["status"] == "CANDIDATE_NOT_ON_MAIN"
+    assert host.shows == [] and not cfg.tool_link.exists()
+    assert ad.read_receipts(cfg.state_dir) == []
+    _no_gateway_effect(cfg, host, prober, plist)
+
+
+def test_next_cycle_with_the_new_deployer_deploys_normally(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """(e) self-update, then the new code (which knows the name) does a full-gate DEPLOYED."""
+    api = green_api(required=[*ad.REQUIRED_CHECKS, NEW_GATE])
+    host, prober = SelfUpdateHost(_deployer_source(contexts=(NEW_GATE,))), FakeProber()
+    assert cycle(cfg, host, prober, api)["status"] == ad.SELF_UPDATED_OUTCOME
+    # The next cycle runs the candidate deployer: same file, plus the new name.
+    monkeypatch.setattr(
+        ad, "PR_HEAD_STATUS_CONTEXTS", frozenset({*ad.PR_HEAD_STATUS_CONTEXTS, NEW_GATE})
+    )
+    host.clock += 300  # one LaunchAgent interval: the self-update is not a debounce attempt
+    result = cycle(cfg, host, prober, api)
+    assert result["status"] == "DEPLOYED"
+    assert result["receipt"]["required_checks"]["verdict"] == "GREEN"
+    assert result["receipt"]["required_checks"]["merge_time_only"][-1] == NEW_GATE
+    assert host.reloads and prober.calls  # the full probe + switch path ran
+    assert Path(os.readlink(cfg.tool_link)) == cfg.deployments / f"a1-{NEW}"
+    worktree_adds = [c for c in host.calls if "worktree" in c and "add" in c]
+    assert len([c for c in worktree_adds if str(cfg.deployments) in " ".join(c)]) == 1
+    outcomes = [r["outcome"] for r in ad.read_receipts(cfg.state_dir)]
+    assert outcomes == [ad.SELF_UPDATED_OUTCOME, "DEPLOYED"]
+
+
+def test_self_update_never_loops_when_the_new_deployer_still_does_not_know(
+    cfg: ad.Config,
+) -> None:
+    api = green_api(required=[*ad.REQUIRED_CHECKS, NEW_GATE])
+    host, prober = SelfUpdateHost(_deployer_source(checks=(NEW_GATE,))), FakeProber()
+    assert cycle(cfg, host, prober, api)["status"] == ad.SELF_UPDATED_OUTCOME
+    host.clock += 300
+    again = cycle(cfg, host, prober, api)
+    assert again["status"] == f"UNKNOWN_REQUIRED_CHECK:{NEW_GATE}"
+    assert again["self_update"]["verdict"] == "ALREADY_CURRENT"
+    assert len(ad.read_receipts(cfg.state_dir)) == 1
+
+
+def test_refused_self_update_keeps_the_link_backs_off_and_gives_up(
+    cfg: ad.Config, tmp_path: Path
+) -> None:
+    old_tool = tmp_path / "old-tool"
+    old_tool.mkdir()
+    cfg.tool_link.symlink_to(old_tool)
+    api = green_api(required=[*ad.REQUIRED_CHECKS, NEW_GATE])
+    host, prober = SelfUpdateHost(_deployer_source(checks=(NEW_GATE,))), FakeProber()
+    host.tool_fails = True
+    plist = cfg.plist.read_bytes()
+    first = cycle(cfg, host, prober, api)
+    assert first["status"] == ad.SELF_UPDATE_REFUSED_OUTCOME
+    assert "selftest failed" in first["receipt"]["deployer_link"]["reason"]
+    assert Path(os.readlink(cfg.tool_link)) == old_tool
+    assert first["receipt"]["self_update"]["previous_deployer_root"] == os.path.realpath(old_tool)
+    host.clock += 300
+    assert cycle(cfg, host, prober, api)["self_update"]["verdict"] == "BACKOFF"
+    for _ in range(ad.MAX_CANDIDATE_ATTEMPTS - 1):
+        host.clock += ad.MAX_BACKOFF_SECONDS
+        assert cycle(cfg, host, prober, api)["status"] == ad.SELF_UPDATE_REFUSED_OUTCOME
+    host.clock += ad.MAX_BACKOFF_SECONDS
+    assert cycle(cfg, host, prober, api)["self_update"]["verdict"] == "GAVE_UP"
+    outcomes = [r["outcome"] for r in ad.read_receipts(cfg.state_dir)]
+    assert outcomes == [ad.SELF_UPDATE_REFUSED_OUTCOME] * ad.MAX_CANDIDATE_ATTEMPTS
+    assert Path(os.readlink(cfg.tool_link)) == old_tool
+    _no_gateway_effect(cfg, host, prober, plist)
+    # A refused self-update is not a failed deploy attempt of the candidate.
+    assert not set(outcomes) & set(ad.FAILED_OUTCOMES)
+
+
+def test_self_update_dry_run_plans_without_effects(cfg: ad.Config) -> None:
+    api = green_api(required=[*ad.REQUIRED_CHECKS, NEW_GATE])
+    host, prober = SelfUpdateHost(_deployer_source(checks=(NEW_GATE,))), FakeProber()
+    plist = cfg.plist.read_bytes()
+    result = cycle(cfg, host, prober, api, dry_run=True)
+    assert result["status"] == f"UNKNOWN_REQUIRED_CHECK:{NEW_GATE}"
+    assert result["self_update"]["verdict"] == "PLAN"
+    assert not cfg.tool_link.exists() and not cfg.deployments.joinpath(f"a1-{NEW}").exists()
+    assert ad.read_receipts(cfg.state_dir) == []
+    _no_gateway_effect(cfg, host, prober, plist)
+
+
+def test_self_update_honours_hold_set_after_the_cycle_started(cfg: ad.Config) -> None:
+    host, prober = SelfUpdateHost(_deployer_source(checks=(NEW_GATE,))), FakeProber()
+    base = green_api(required=[*ad.REQUIRED_CHECKS, NEW_GATE])
+
+    def api(path: str) -> Any:
+        if "check-runs" in path:  # only the bindable-subset read gets this far
+            ad._set_hold(cfg, "manual hold mid-cycle")
+        return base(path)
+
+    result = cycle(cfg, host, prober, api)
+    assert result["self_update"]["verdict"] == "HELD"
+    assert not cfg.tool_link.exists() and ad.read_receipts(cfg.state_dir) == []
+
+
+def test_deployer_known_checks_reads_this_file() -> None:
+    """Positive control: the live source yields exactly its own tables."""
+    source = (REPO_ROOT / ad.DEPLOYER).read_text(encoding="utf-8")
+    known = ad.deployer_known_checks(source)
+    assert known is not None
+    assert set(known) == set(ad.REQUIRED_CHECKS) | set(ad.PR_HEAD_STATUS_CONTEXTS)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "PR_HEAD_STATUS_CONTEXTS = frozenset({'x'})\n",  # no REQUIRED_CHECKS at all
+        "REQUIRED_CHECKS = {'a': 'w.yml'}\nREQUIRED_CHECKS = {'b': 'w.yml'}\n",
+        "REQUIRED_CHECKS = {'a': 1}\n",
+        "REQUIRED_CHECKS = ['a']\n",
+        "REQUIRED_CHECKS = {'a': 'w.yml'}\nPR_HEAD_STATUS_CONTEXTS = frozenset(names())\n",
+        "REQUIRED_CHECKS = {'a': 'w.yml'}\nPR_HEAD_STATUS_CONTEXTS = frozenset({1})\n",
+        "REQUIRED_CHECKS = {'a': 'w.yml'}\nPR_HEAD_STATUS_CONTEXTS = set_of('b')\n",
+        "REQUIRED_CHECKS = {'a': 'w.yml'}\nPR_HEAD_STATUS_CONTEXTS = 'b'\n",
+    ],
+    ids=[
+        "missing-table",
+        "two-tables",
+        "non-str-value",
+        "not-a-dict",
+        "computed-frozenset",
+        "non-str-context",
+        "other-call",
+        "bare-string",
+    ],
+)
+def test_deployer_known_checks_fails_closed(source: str) -> None:
+    assert ad.deployer_known_checks(source) is None
+
+
+def test_deployer_known_checks_accepts_literal_shapes() -> None:
+    source = (
+        "REQUIRED_CHECKS: dict = {'a': 'w.yml', 'b': ('x' 'y.yml')}\n"
+        "PR_HEAD_STATUS_CONTEXTS = frozenset({'c'})\n"
+    )
+    assert ad.deployer_known_checks(source) == ["a", "b", "c"]
+    assert ad.deployer_known_checks("REQUIRED_CHECKS = {'a': 'w.yml'}\n") == ["a"]
+    assert ad.deployer_known_checks(
+        "REQUIRED_CHECKS = {'a': 'w.yml'}\nPR_HEAD_STATUS_CONTEXTS = frozenset()\n"
+    ) == ["a"]
+
+
+def _module_table(source: str, name: str) -> Any:
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == name for t in node.targets
+        ):
+            value = node.value
+            if isinstance(value, ast.Call):  # frozenset({...})
+                value = value.args[0]
+            return ast.literal_eval(value)
+    return None
+
+
+def test_replay_2026_10_16_old_deployer_self_updates_to_the_2370_deployer(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Replay of 10-16: the running deployer knows what 8cc1c6621 knew, main
+    requires the six #2365 checks, and the candidate's deployer is 044966b2e (#2370)."""
+    old = (SELF_UPDATE_FIXTURES / "deployer_8cc1c6621.py.txt").read_text(encoding="utf-8")
+    new = (SELF_UPDATE_FIXTURES / "deployer_044966b2e.py.txt").read_text(encoding="utf-8")
+    old_checks = _module_table(old, "REQUIRED_CHECKS")
+    assert _module_table(old, "PR_HEAD_STATUS_CONTEXTS") is None  # added by #2370
+    monkeypatch.setattr(ad, "REQUIRED_CHECKS", old_checks)
+    monkeypatch.setattr(
+        ad, "PR_TARGET_ONLY_CHECKS", frozenset(_module_table(old, "PR_TARGET_ONLY_CHECKS"))
+    )
+    monkeypatch.setattr(ad, "PR_HEAD_STATUS_CONTEXTS", frozenset())
+    api = _live_six_api()
+    # What the deployer at 8cc1c6621 saw on 10-16: stuck on the two #2365 statuses.
+    stuck = ad.required_checks(api, NEW)
+    assert stuck["verdict"] == "UNKNOWN_REQUIRED_CHECK"
+    assert stuck["unknown_required"] == [BINDINGS_PREFLIGHT, REVIEW_RECORD]
+    # The old deployer's own source does not know them: no self-update to itself.
+    host_old = SelfUpdateHost(old)
+    held_back = cycle(cfg, host_old, FakeProber(), api)
+    assert held_back["self_update"]["verdict"] == "CANDIDATE_DOES_NOT_KNOW"
+    assert not cfg.tool_link.exists()
+    # The #2370 candidate does: only the deployer link moves.
+    host, prober = SelfUpdateHost(new), FakeProber()
+    plist = cfg.plist.read_bytes()
+    result = cycle(cfg, host, prober, api)
+    assert result["status"] == ad.SELF_UPDATED_OUTCOME
+    assert Path(os.readlink(cfg.tool_link)) == cfg.deployments / f"a1-{NEW}"
+    _no_gateway_effect(cfg, host, prober, plist)
+    subset = result["receipt"]["self_update"]["bindable_checks"]
+    assert subset["verdict"] == "GREEN"
+    assert set(subset["checks"]) == {*LIVE_REQUIRED_2026_10_16, "Exact-base impact gate"}

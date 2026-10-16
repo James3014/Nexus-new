@@ -19,8 +19,7 @@ import click
 
 from nexus.core.repo_root import REPO_ROOT
 from nexus.research.flow.auto_flow_decision import decide_auto_flow_routing, enrich_route_on_plateau
-from nexus.research.local_sprint_mutator import generate_local_candidate, generate_local_companion_edits
-from nexus.research.sprint_service import SprintConfig, run_hyper_sprint, LLMCandidateGenerator, LLMCandidateError, _candidate_summaries, planner_route_signals
+from nexus.research.sprint_service import SprintConfig, run_hyper_sprint, LLMCandidateGenerator, LLMCandidateError, _candidate_summaries, planner_route_signals, NO_LOCAL_CANDIDATE_GENERATOR
 from nexus.contracts import RLMTraceEvent, RLMTraceWriter
 from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.engine.route_decision_adapter import build_route_decision
@@ -928,7 +927,6 @@ def _build_baseline_patch(
     test_file: str = "",
     model_configured: bool = False,
 ) -> tuple[str, str, dict[str, Any]]:
-    source_label = "local"
     if model_configured and not llm_baseline:
         # #2339 follow-up: a run with a model never delivers the local answer table, even when
         # the model baseline is skipped (route-cost skip_llm_baseline); the flow escalates instead.
@@ -1001,19 +999,12 @@ def _build_baseline_patch(
     elif llm_baseline_required:
         return original_code, "nexus_llm_baseline_missing", strict_baseline_failure_meta("llm_baseline_required_missing")
     
-    patched = generate_local_candidate(original_code, task_desc, "baseline", trial)
-    
-    if patched == original_code and task_type in ["feature", "refactor"]:
-        if "discount" in task_desc.lower():
-            from nexus.research.local_sprint_mutator import _feature_discount_patch
-            patched = _feature_discount_patch(original_code)
-            source_label = "local_conservative_feature"
-        elif "parser" in task_desc.lower() or "refactor" in task_desc.lower():
-            from nexus.research.local_sprint_mutator import _refactor_parser_patch
-            patched = _refactor_parser_patch(original_code)
-            source_label = "local_conservative_refactor"
-        
-    return patched, source_label, local_baseline_meta(fallback_reason=None)
+    # No model: the deterministic local answer table was deleted (#2339 follow-up), so the
+    # baseline honestly has no candidate instead of a fabricated patch.
+    meta = local_baseline_meta()
+    meta["source"] = NO_LOCAL_CANDIDATE_GENERATOR
+    meta["baseline_source_policy"] = NO_LOCAL_CANDIDATE_GENERATOR
+    return original_code, NO_LOCAL_CANDIDATE_GENERATOR, meta
 
 
 def run_auto_flow(
@@ -1204,13 +1195,9 @@ def run_auto_flow(
             # Held from the in-place write until the row's files are settled (no check-then-write).
             # The lock covers the target AND every companion file written in place; any one
             # held by another task refuses the whole delivery.
-            companions = (
-                {}
-                # A model patch is delivered alone: fixture-keyed local companion edits are
-                # only for the no-model local mode (#2339 follow-up).
-                if symmetric_prompt or not str(source).startswith("local")
-                else generate_local_companion_edits(repo_root, target_path, task_desc, "baseline", 0)
-            )
+            # The patch is delivered alone: the fixture-keyed local companion edits were deleted
+            # with the answer table (#2339 follow-up).
+            companions: dict[Path, str] = {}
             release = _post_candidate_seam.hold_target_lock(
                 repo_root, target_file, [path for path in companions if path != target_path]
             )
@@ -1331,13 +1318,9 @@ def run_auto_flow(
             # Held from the in-place write until the original is restored (no check-then-write).
             # The lock covers the target AND every companion file written in place; any one
             # held by another task refuses the whole delivery.
-            companions = (
-                {}
-                # A model patch is delivered alone: fixture-keyed local companion edits are
-                # only for the no-model local mode (#2339 follow-up).
-                if symmetric_prompt or not str(source).startswith("local")
-                else generate_local_companion_edits(repo_root, target_path, task_desc, "baseline_probe", 0)
-            )
+            # The patch is delivered alone: the fixture-keyed local companion edits were deleted
+            # with the answer table (#2339 follow-up).
+            companions: dict[Path, str] = {}
             release = _post_candidate_seam.hold_target_lock(
                 repo_root, target_file, [path for path in companions if path != target_path]
             )

@@ -19,6 +19,7 @@ from nexus.executors.agy_write_admission import (
     AGY_PERMISSION_MODE_ACCEPT_EDITS,
     AGY_PERMISSION_MODE_PLAN,
     AGY_READ_ONLY_ROLES,
+    AGY_RUN_HOME_COPIED_FILES,
     CLINE_TARGET_CUSTOMIZATION_PATHS,
     KEYCHAIN_NOT_APPLICABLE,
     CredentialPathOverlapError,
@@ -54,6 +55,7 @@ from nexus.executors.worker_contract import (
     WorkerOutcome,
     WorkerPreflight,
     WorkerProviderUnavailable,
+    redacted_output_tail,
 )
 from nexus.services.external_account_pool import (
     AccountFailureKind,
@@ -641,6 +643,38 @@ def _agy_result_failure(result: CliWorkerResult) -> Optional[str]:
     return reason
 
 
+# #2403: agy without usable credentials prints an interactive OAuth login
+# prompt, waits 60 s for a pasted code and exits 1.  These markers name it.
+AGY_LOGIN_PROMPT_MARKERS = (
+    "Authentication required. Please visit the URL to log in",
+    "Waiting for authentication",
+    "authentication failed or timed out",
+)
+AGY_AUTHENTICATION_REQUIRED = "agy_authentication_required"
+AGY_CREDENTIALS_UNAVAILABLE = "agy_credentials_unavailable"
+_POOL_SWITCH_ON = ("1", "true", "yes")
+_POOL_SWITCH_OFF = ("0", "false", "no")
+
+
+def _agy_login_required(result: CliWorkerResult) -> bool:
+    text = (
+        result.stdout.decode("utf-8", errors="replace")
+        + "\n"
+        + result.stderr.decode("utf-8", errors="replace")
+    )
+    return any(marker in text for marker in AGY_LOGIN_PROMPT_MARKERS)
+
+
+def _installed_agy_account_pool() -> Optional[Any]:
+    """The host's real Agy account pool manager when it is installed, else ``None``."""
+    from nexus.services.agy_account_pool import AgyAccountPoolManager, get_account_pool_manager
+
+    manager_path = AgyAccountPoolManager.resolve_manager_path()
+    if not manager_path or not Path(manager_path).is_file():
+        return None
+    return get_account_pool_manager()
+
+
 class AgyWorkerAdapter:
     """Governed Antigravity CLI adapter with explicit external-runtime gates and account-pool failover."""
 
@@ -657,6 +691,7 @@ class AgyWorkerAdapter:
         default_model: str = "gemini-3.8-flash-medium",
         account_pool: Optional[Any] = None,
         canonical_root: Optional[Path | str] = None,
+        use_installed_account_pool: bool = False,
     ):
         self.executable_env = executable_env
         self.project_id_env = project_id_env
@@ -664,6 +699,10 @@ class AgyWorkerAdapter:
         self.default_model = default_model
         self._injected_account_pool = account_pool
         self._canonical_root = Path(canonical_root) if canonical_root is not None else None
+        # #2403: the production registry takes Agy credentials from the host's
+        # account pool (as ``nexus_model_probe`` does) whenever the pool
+        # manager is installed, without depending on an env switch.
+        self._use_installed_account_pool = use_installed_account_pool
 
     def _canonical_checkout_root(self) -> Path:
         root = (
@@ -704,9 +743,11 @@ class AgyWorkerAdapter:
         if self._injected_account_pool is not None:
             return self._injected_account_pool
         enabled_val = os.getenv("NEXUS_AGY_ACCOUNT_POOL_ENABLED", "").strip().lower()
-        if enabled_val in ("1", "true", "yes"):
+        if enabled_val in _POOL_SWITCH_ON:
             from nexus.services.agy_account_pool import get_account_pool_manager
             return get_account_pool_manager()
+        if self._use_installed_account_pool and enabled_val not in _POOL_SWITCH_OFF:
+            return _installed_agy_account_pool()
         return None
 
     @staticmethod
@@ -884,6 +925,13 @@ class AgyWorkerAdapter:
         ) -> tuple[Optional[str], dict[str, str], str]:
             """Per-attempt disposable HOME, explicit settings and Seatbelt profile."""
             source_home = worker_home(env)
+            if self._use_installed_account_pool and not all(
+                (source_home / rel).is_file() for rel in AGY_RUN_HOME_COPIED_FILES
+            ):
+                # #2403: without the OAuth token (no pool account, or a pool
+                # account without one) agy can only show its interactive
+                # login prompt and time out after 60 s.
+                return AGY_CREDENTIALS_UNAVAILABLE, {}, ""
             attempt_root = Path(tempfile.mkdtemp(prefix="attempt-", dir=run_tmp))
             run_home = attempt_root / "home"
             run_tmpdir = attempt_root / "tmp"
@@ -1095,6 +1143,8 @@ class AgyWorkerAdapter:
                 outcome = WorkerOutcome.FAILED
                 if result.stderr == b"seatbelt_unavailable":
                     delivery_failure = "agy_seatbelt_unavailable"
+                elif _agy_login_required(result):
+                    delivery_failure = AGY_AUTHENTICATION_REQUIRED
             else:
                 delivery_failure = _agy_result_failure(result)
                 outcome = (
@@ -1128,6 +1178,8 @@ class AgyWorkerAdapter:
                 account_alias_hash=None,
                 provider_attempt_count=1,
                 provider_env_keys_sha256=result.env_keys_sha256 or None,
+                stdout_tail=redacted_output_tail(result.stdout),
+                stderr_tail=redacted_output_tail(result.stderr),
             )
 
         max_subprocesses = min(3, provider_call_budget)
@@ -1326,6 +1378,12 @@ class AgyWorkerAdapter:
                 outcome_val = WorkerOutcome.EXECUTION_COMPLETED.value
         else:
             outcome_val = WorkerOutcome.FAILED.value
+            if _agy_login_required(last_result):
+                failure_reason = (
+                    f"{AGY_AUTHENTICATION_REQUIRED}: {failure_reason}"
+                    if failure_reason
+                    else AGY_AUTHENTICATION_REQUIRED
+                )
 
         return WorkerExecutionReceipt(
             provider=self.provider,
@@ -1351,6 +1409,8 @@ class AgyWorkerAdapter:
             account_alias_hash=last_account_hash,
             provider_attempt_count=actual_calls,
             provider_env_keys_sha256=last_result.env_keys_sha256 or None,
+            stdout_tail=redacted_output_tail(last_result.stdout),
+            stderr_tail=redacted_output_tail(last_result.stderr),
         )
 
 
@@ -1514,7 +1574,7 @@ class WorkerRegistry:
             {
                 "codex": CodexWorkerAdapter(),
                 "gemini": DirectCliWorkerAdapter("gemini", "gemini", "NEXUS_GEMINI_WORKER_MODEL", "gemini-2.5-flash", _gemini_args),
-                "agy": AgyWorkerAdapter(),
+                "agy": AgyWorkerAdapter(use_installed_account_pool=True),
                 "opencode": DirectCliWorkerAdapter("opencode", "opencode", "NEXUS_OPENCODE_WORKER_MODEL", "opencode/big-pickle", _opencode_args),
                 "mimo": DirectCliWorkerAdapter("mimo", "mimo", "NEXUS_MIMO_WORKER_MODEL", "xiaomi/mimo-v2.5", _mimo_args),
                 "ollama": OllamaPatchWorkerAdapter(),

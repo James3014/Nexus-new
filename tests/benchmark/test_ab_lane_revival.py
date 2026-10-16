@@ -147,5 +147,7 @@ def test_dry_mode_without_llm_reports_deterministic_rescue_not_solves(tmp_path: 
         return
     assert with_summary["avg_model_calls"] == 0.0
     assert with_summary["solved_n"] == 0
-    assert with_summary["deterministic_rescue_n"] == with_summary["eligible_n"]
+    # #2339 follow-up: the deterministic local rescue (answer table) is deleted; without a model
+    # nothing is rescued either.
+    assert with_summary["deterministic_rescue_n"] == 0
     assert with_summary["strict_llm_baseline_applied"] is True
