@@ -225,7 +225,8 @@ def _render_text(report: dict[str, Any]) -> str:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="executor_self_check", description="Read-only executor self-check for the live Gateway."
+        prog="executor_self_check",
+        description="Read-only executor self-check for the live Gateway.",
     )
     parser.add_argument(
         "--check-executors", action="store_true", help="accepted for runtime_compat"
