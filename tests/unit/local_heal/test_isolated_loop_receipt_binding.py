@@ -108,3 +108,23 @@ def test_executed_route_without_source_hash_has_producer_gate_false(monkeypatch)
         RECEIPT_ADAPTERS["local_heal"].build(claim_verified=True, payload=payload).gate_passed
         is False
     )
+
+
+def test_stale_source_hash_is_dropped_when_verified_hash_unavailable(monkeypatch) -> None:
+    from nexus.services.local_heal import hybrid_route_bridge as bridge
+    from nexus.services.local_heal import isolated_local_solve_loop as loop
+
+    real = bridge.capability_payload_from_hybrid_route
+
+    def injected(decision):
+        payload = real(decision)
+        payload["source_hash"] = "sha256:" + "f" * 64  # stale/injected value
+        payload["verifier_status"] = "pass"
+        return payload
+
+    monkeypatch.setattr(loop, "capability_payload_from_hybrid_route", injected)
+    monkeypatch.setattr(loop, "_verified_source_hash", lambda _receipt: "")
+    resp, _ = _run(_PASS_CMD)
+    payload = resp.capability_payload
+    assert "source_hash" not in payload
+    assert payload["gate_passed"] is False

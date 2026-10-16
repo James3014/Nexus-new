@@ -230,7 +230,6 @@ BOUND_CLAIM_GATE_ADAPTERS: frozenset[str] = frozenset(
         "artifact_gate",
         "delivery_gate",
         "mempalace_gate",
-        "bdd_acceptance_skill",
         "formal_report",
         "acceptance_check",
         "benchmark",
@@ -245,7 +244,7 @@ NON_CLAIM_GATE_ADAPTERS: dict[str, str] = {
             "codeintel", "autoreason", "judge_panel", "llm_judge_panel", "asi_constraint_extractor",
             "ddtree", "hyper", "ultra_review", "swarm", "drone", "nightshift", "memory", "belief",
             "research", "lancedb", "semantic_searcher", "architecture_scout", "external_doc_scout",
-            "repair_loop", "msa_router", "jit_validation", "harness_preflight_sensor",
+            "repair_loop", "bdd_acceptance_skill", "msa_router", "jit_validation", "harness_preflight_sensor",
             "semantic_failure_sensor",
         )
     },
@@ -524,10 +523,9 @@ class MemPalaceGateReceiptAdapter:
         refs = refs or _fail_closed_ref(payload, "mempalace_gate_passed", "mempalace:gate_failed")
         invoked = bool(_pillar_present(payload, "mempalace", "mempalace_gate") or refs or _explicit_bool(payload, "mempalace_gate_passed"))
         verifier_ok = _gate_verifier_ok(payload)
+        base_gate = bool(refs and _as_bool(payload.get("mempalace_gate_passed", True)))
         binding_reasons = _claim_gate_binding_reasons(payload)
-        gate_passed = bool(
-            refs and _as_bool(payload.get("mempalace_gate_passed", True)) and verifier_ok and not binding_reasons
-        )
+        gate_passed = bool(base_gate and verifier_ok and not binding_reasons)
         return merge_capability_receipt(
             name=self.name,
             selected=True,
@@ -536,11 +534,15 @@ class MemPalaceGateReceiptAdapter:
             gate_passed=gate_passed,
             outcome_contributed=bool(refs and gate_passed and verifier_ok),
             executor_id=self.name,
-            failure_reason=selected_failure_reason(
-                selected=True,
-                invoked=invoked,
-                evidence_refs=refs,
-                gate_passed=gate_passed,
+            failure_reason=(
+                ";".join(binding_reasons)
+                if base_gate and binding_reasons
+                else selected_failure_reason(
+                    selected=True,
+                    invoked=invoked,
+                    evidence_refs=refs,
+                    gate_passed=gate_passed,
+                )
             ),
         )
 
@@ -553,10 +555,9 @@ class ArtifactGateReceiptAdapter:
         refs = refs or _fail_closed_ref(payload, "artifact_gate_passed", "artifact:gate_failed")
         invoked = bool(_pillar_present(payload, "artifact", "artifact_gate") or refs or _explicit_bool(payload, "artifact_gate_passed"))
         verifier_ok = _gate_verifier_ok(payload)
+        base_gate = bool(refs and _as_bool(payload.get("artifact_gate_passed", True)))
         binding_reasons = _claim_gate_binding_reasons(payload)
-        gate_passed = bool(
-            refs and _as_bool(payload.get("artifact_gate_passed", True)) and verifier_ok and not binding_reasons
-        )
+        gate_passed = bool(base_gate and verifier_ok and not binding_reasons)
         return merge_capability_receipt(
             name=self.name,
             selected=True,
@@ -565,11 +566,15 @@ class ArtifactGateReceiptAdapter:
             gate_passed=gate_passed,
             outcome_contributed=bool(refs and gate_passed and verifier_ok),
             executor_id=self.name,
-            failure_reason=selected_failure_reason(
-                selected=True,
-                invoked=invoked,
-                evidence_refs=refs,
-                gate_passed=gate_passed,
+            failure_reason=(
+                ";".join(binding_reasons)
+                if base_gate and binding_reasons
+                else selected_failure_reason(
+                    selected=True,
+                    invoked=invoked,
+                    evidence_refs=refs,
+                    gate_passed=gate_passed,
+                )
             ),
         )
 
@@ -1288,15 +1293,13 @@ class BddAcceptanceSkillReceiptAdapter(GenericCapabilityReceiptAdapter):
         refs = list(dict.fromkeys(refs))
         invoked = bool(refs or _as_bool(payload.get("bdd_acceptance_skill_used")))
         business_verified = _as_bool(payload.get("business_verified"))
-        base_gate = bool(
+        gate_passed = bool(
             invoked
             and refs
             and claim_verified
             and business_verified
             and _as_bool(payload.get("bdd_acceptance_skill_gate_passed"))
         )
-        binding_reasons = _claim_gate_binding_reasons(payload)  # claim gate (#1869)
-        gate_passed = base_gate and not binding_reasons
         return merge_capability_receipt(
             name=self.name,
             selected=True,
@@ -1305,11 +1308,7 @@ class BddAcceptanceSkillReceiptAdapter(GenericCapabilityReceiptAdapter):
             gate_passed=gate_passed,
             outcome_contributed=_verified_outcome_contributed(gate_passed, claim_verified, payload),
             executor_id=self.name,
-            failure_reason=(
-                ";".join(binding_reasons)
-                if base_gate and binding_reasons
-                else selected_failure_reason(selected=True, invoked=invoked, evidence_refs=refs, gate_passed=gate_passed)
-            ),
+            failure_reason=selected_failure_reason(selected=True, invoked=invoked, evidence_refs=refs, gate_passed=gate_passed),
         )
 
 

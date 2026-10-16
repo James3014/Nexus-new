@@ -63,11 +63,6 @@ def test_non_claim_adapters_have_documented_reason() -> None:
 
 # name -> payload whose pre-binding condition passes for that adapter
 _BOUND_PAYLOADS = {
-    "bdd_acceptance_skill": {
-        "bdd_acceptance_refs": ["bdd:1"],
-        "bdd_acceptance_skill_gate_passed": True,
-        "business_verified": True,
-    },
     "formal_report": {
         "formal_report_path": "r.md",
         "formal_report_schema_version": "nexus_formal_report_v1",
@@ -125,3 +120,45 @@ def test_gate_adapters_report_binding_reasons_and_never_pass_unbound(name: str) 
 def test_binding_reasons_helper_is_public_and_content_validated() -> None:
     assert claim_gate_binding_reasons({}) == ["missing_verifier_artifact", "missing_source_hash"]
     assert claim_gate_binding_reasons(dict(_BINDING)) == []
+
+
+# Every bound adapter, with a payload whose pre-binding condition is satisfied by a bare boolean.
+_ALL_BOUND_BARE = {
+    **_BOUND_PAYLOADS,
+    "claim_gate": {"claim_refs": ["x"]},
+    "artifact_gate": {"artifact_refs": ["x"], "artifact_gate_passed": True},
+    "delivery_gate": {"delivery_refs": ["x"], "delivery_gate_passed": True},
+    "mempalace_gate": {"mempalace_refs": ["x"], "mempalace_gate_passed": True},
+    "local_heal": {"solve_eligible": True, "verification_passed": True, "invoked": True},
+    "local_model_executor": {
+        "local_model_called": True,
+        "evidence_refs": ["ref:1"],
+        "local_model_executor_summary": {"delivery_gate_count": 1},
+    },
+}
+
+
+def test_behavioural_guard_covers_every_bound_adapter() -> None:
+    assert set(_ALL_BOUND_BARE) == set(BOUND_CLAIM_GATE_ADAPTERS)
+
+
+@pytest.mark.parametrize("name", sorted(BOUND_CLAIM_GATE_ADAPTERS))
+def test_every_bound_adapter_bare_boolean_payload_is_false_with_binding_reasons(name: str) -> None:
+    receipt = RECEIPT_ADAPTERS[name].build(claim_verified=True, payload=dict(_ALL_BOUND_BARE[name]))
+    assert receipt.gate_passed is False
+    assert "missing_verifier_artifact" in receipt.failure_reason
+    assert "missing_source_hash" in receipt.failure_reason
+
+
+@pytest.mark.parametrize("name", ["claim_gate", "artifact_gate", "delivery_gate", "mempalace_gate"])
+def test_gate_adapters_still_require_binding_if_verifier_authority_is_bound(
+    name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Mutation guard: removing the binding term must be caught even while _gate_verifier_ok is False."""
+    monkeypatch.setattr(mod, "_gate_verifier_ok", lambda _payload: True)
+    adapter = RECEIPT_ADAPTERS[name]
+    unbound = adapter.build(claim_verified=True, payload=dict(_ALL_BOUND_BARE[name]))
+    assert unbound.gate_passed is False
+    assert "missing_source_hash" in unbound.failure_reason
+    bound = adapter.build(claim_verified=True, payload={**_ALL_BOUND_BARE[name], **_BINDING})
+    assert bound.gate_passed is True

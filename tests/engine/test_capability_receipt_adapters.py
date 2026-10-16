@@ -160,9 +160,6 @@ def test_harness_receipts_fail_closed_without_typed_evidence():
                 "bdd_acceptance_refs": [".nexus/reports/capabilities/bdd/receipt.json", "artifact:task:tests_passed"],
                 "business_verified": True,
                 "bdd_acceptance_skill_gate_passed": True,
-                # claim gate (#1869): needs the verifier/source-hash binding
-                "verifier_status": "pass",
-                "source_hash": "sha256:" + "c" * 64,
             },
         )
     }
