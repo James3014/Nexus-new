@@ -4,12 +4,14 @@ from __future__ import annotations
 import argparse
 import fcntl
 import json
+import os
 import subprocess  # nosec B404
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, Mapping
 
 from nexus.research.hybrid_replication_pipeline import (
     ADMISSION_MARKER,
@@ -122,6 +124,56 @@ def _comments(repository: str, issue_number: int) -> list[dict[str, Any]]:
     return rows
 
 
+# Comments are re-read only when the issue's updated_at changed (a new comment bumps it) or the
+# cached copy is older than COMMENT_CACHE_TTL_SECONDS. Ported from the Owner-approved V12 in-place
+# patch (2026-10-15, #1216/#2252) to stop exhausting the owner's GitHub API quota without
+# changing what ingest observes.
+COMMENT_CACHE_TTL_SECONDS = 600
+
+
+def _cached_comments(
+    cache_root: Path,
+    repository: str,
+    issue: dict[str, Any],
+    now: datetime | None = None,
+) -> list[dict[str, Any]]:
+    number = int(issue["number"])
+    updated_at = str(issue.get("updated_at") or "")
+    path = cache_root / repository.replace("/", "__") / f"{number}.json"
+    now = now or datetime.now(timezone.utc)
+    try:
+        cached = json.loads(path.read_text(encoding="utf-8"))
+        fetched_at = _parse_github_timestamp(str(cached["fetched_at"]))
+        if (
+            updated_at
+            and cached.get("updated_at") == updated_at
+            and 0 <= (now - fetched_at).total_seconds() < COMMENT_CACHE_TTL_SECONDS
+            and isinstance(cached.get("comments"), list)
+        ):
+            return cached["comments"]
+    except (OSError, ValueError, KeyError, TypeError):
+        pass  # unreadable or malformed cache: refetch (json errors are ValueError)
+    comments = _comments(repository, number)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(
+                {
+                    "updated_at": updated_at,
+                    "fetched_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "comments": comments,
+                },
+                handle,
+                ensure_ascii=False,
+            )
+        os.replace(tmp_name, path)
+    except BaseException:
+        Path(tmp_name).unlink(missing_ok=True)
+        raise
+    return comments
+
+
 # Issues created with the workflow GITHUB_TOKEN never trigger workflows (GitHub platform
 # rule), so the capture workflow never runs for them (e.g. the nightly regression bot's
 # issues). The capture workflow itself has no author filter: a bot-authored issue that does
@@ -154,6 +206,7 @@ def ingest(
     *,
     store: AutomaticReplicationStore,
     since: str,
+    listed_issue_states: dict[tuple[str, int], str] | None = None,
 ) -> dict[str, Any]:
     expected: list[tuple[str, int]] = []
     missing_capture: list[str] = []
@@ -165,7 +218,9 @@ def ingest(
         for issue in _issues_since(repository, since):
             number = int(issue["number"])
             task_key = f"{repository}#{number}"
-            comments = _comments(repository, number)
+            if listed_issue_states is not None:
+                listed_issue_states[(repository, number)] = str(issue.get("state") or "")
+            comments = _cached_comments(store.root / "comment-cache", repository, issue)
             if is_uncaptured_github_token_issue(issue, comments):
                 not_captured_github_token_issue.append(task_key)
                 continue
@@ -358,6 +413,7 @@ def advance_all(
     ground_truth_command: str,
     readiness_control_task_key: str | None = None,
     max_concurrent_tasks: int = 1,
+    listed_issue_states: Mapping[tuple[str, int], str] | None = None,
 ) -> dict[str, Any]:
     """Advance every executable task.
 
@@ -376,6 +432,16 @@ def advance_all(
     ground_truth_resolver = ExternalGroundTruthResolver(ground_truth_command)
 
     def terminal_resolver(state: dict[str, Any]):
+        # V12 patch (#1216/#2252): skip the ground-truth subprocess for a task whose issue this
+        # run's listing shows open. It would only return "not closed" (see
+        # _resolve_ground_truth_from_state in nexus/research/hybrid_replication_live.py, which
+        # returns None for a non-closed issue). A close between listing and resolution is picked
+        # up on the next tick; closed_at is unchanged.
+        if listed_issue_states is not None:
+            snapshot = state.get("snapshot") or {}
+            key = (str(snapshot.get("repository") or ""), int(snapshot.get("issue_number") or 0))
+            if listed_issue_states.get(key) == "open":
+                return None
         return ground_truth_resolver(state)
 
     controller = AutomaticReplicationController(
@@ -669,8 +735,11 @@ def main() -> int:
         raise SystemExit("readiness and deferred-admission control task keys must match")
 
     store = AutomaticReplicationStore(Path(args.root))
+    listed_issue_states: dict[tuple[str, int], str] = {}
     with ingest_lock(store):
-        ingest_report = ingest(store=store, since=args.since)
+        ingest_report = ingest(
+            store=store, since=args.since, listed_issue_states=listed_issue_states
+        )
     print(json.dumps(ingest_report, ensure_ascii=False, sort_keys=True, indent=2))
 
     if args.fence_only:
@@ -701,6 +770,7 @@ def main() -> int:
         ground_truth_command=args.ground_truth_command,
         readiness_control_task_key=args.readiness_control_task_key,
         max_concurrent_tasks=args.max_concurrent_tasks,
+        listed_issue_states=listed_issue_states,
     )
     print(json.dumps(advance_report, ensure_ascii=False, sort_keys=True, indent=2))
     if args.readiness_control_task_key:
