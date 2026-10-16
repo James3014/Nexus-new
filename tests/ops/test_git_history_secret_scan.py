@@ -549,3 +549,79 @@ def test_failure_log_redacts_secret_shaped_paths_and_refs(tmp_path: Path) -> Non
     assert scan._log_safe("refs/remotes/origin/fix/1898-secret-audit-remediation") == (
         "refs/remotes/origin/fix/1898-secret-audit-remediation"
     )
+
+
+_ISSUE_1873_SAMPLES = {
+    "slack_webhook_url": (
+        "https://hooks.slack" + ".com/services/T0AB12CD3/B0EF45GH6/" + "q7A4nB9cD2eF6gH8jK1mN5pR"
+    ),
+    "sendgrid_api_key": (
+        "SG" + "." + "q7A4nB9cD2eF6gH8jK1mN5" + "." + "xY7zK2L9mN4pR6sT8vW1aB3cD5eF7gH9jK2LqZ4xYzA"
+    ),
+    "twilio_api_key": "SK" + "9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+    "azure_storage_account_key": (
+        "AccountKey=" + ("q7A4nB9cD2eF6gH8jK1mN5pR3sT0vW4xY7zK2L9mN4pR" * 2)[:86] + "=="
+    ),
+}
+
+
+_ISSUE_1873_VARIANTS = [
+    (
+        "slack_webhook_url",
+        "https://hooks.slack" + ".com/services/E0AB12CD3/A0EF45GH6/" + "q7A4nB9cD2eF6gH8jK1mN5pR",
+    ),
+    ("sendgrid_api_key", "key=SG" + "." + "q7A4nB9cD2eF6gH8jK1mN5" + "." + "x" * 43 + ";"),
+    (
+        "azure_storage_account_key",
+        "sharedaccesskey = " + ("q7A4nB9cD2eF6gH8jK1mN5pR3sT0vW4xY7zK2L9mN4pR" * 2)[:86] + "==",
+    ),
+    (
+        "azure_storage_account_key",
+        'ACCOUNTKEY="' + ("q7A4nB9cD2eF6gH8jK1mN5pR3sT0vW4xY7zK2L9mN4pR" * 2)[:86] + '=="',
+    ),
+]
+
+
+@pytest.mark.parametrize(("detector", "sample"), _ISSUE_1873_VARIANTS)
+def test_issue_1873_scanner_format_variants_are_blocking(
+    tmp_path: Path, detector: str, sample: str
+) -> None:
+    repo = _init_repo(tmp_path)
+    _commit(repo, "add", {"x.txt": f"{sample}\n"})
+    _refresh_remote_ref(repo, "main", _git(repo, "rev-parse", "HEAD").stdout.strip())
+    receipt = scan_repository(repo)
+    assert any(f["blocking"] and f["detector"] == detector for f in receipt["findings"])
+
+
+def test_issue_1873_sendgrid_inside_longer_identifier_is_not_flagged(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    body = "SG" + "." + "q7A4nB9cD2eF6gH8jK1mN5" + "." + "x" * 43
+    _commit(repo, "near", {"x.txt": f"prefix_{body}\n{body}_suffix\n{body}Z\n"})
+    _refresh_remote_ref(repo, "main", _git(repo, "rev-parse", "HEAD").stdout.strip())
+    receipt = scan_repository(repo)
+    assert not [f for f in receipt["findings"] if f["detector"] == "sendgrid_api_key"]
+
+
+@pytest.mark.parametrize("detector", sorted(_ISSUE_1873_SAMPLES))
+def test_issue_1873_prefixed_provider_formats_are_blocking(tmp_path: Path, detector: str) -> None:
+    repo = _init_repo(tmp_path)
+    _commit(repo, "add", {"x.txt": f"value {_ISSUE_1873_SAMPLES[detector]}\n"})
+    _refresh_remote_ref(repo, "main", _git(repo, "rev-parse", "HEAD").stdout.strip())
+    receipt = scan_repository(repo)
+    assert any(f["blocking"] and f["detector"] == detector for f in receipt["findings"])
+
+
+def test_issue_1873_scanner_ignores_near_miss_formats(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    near_miss = "\n".join([
+        "SK" + "0123456789abcdef0123456789abcdefAB",  # 34 chars after SK
+        "SG." + "short",
+        "AccountKey=" + "A" * 20,
+        "hooks.slack" + ".com/services/ documentation",
+        "0123456789abcdef0123456789abcdef01234567",
+        "sha256:" + "ab" * 32,
+    ])
+    _commit(repo, "near", {"x.txt": near_miss + "\n"})
+    _refresh_remote_ref(repo, "main", _git(repo, "rev-parse", "HEAD").stdout.strip())
+    receipt = scan_repository(repo)
+    assert not [f for f in receipt["findings"] if f["blocking"]]
