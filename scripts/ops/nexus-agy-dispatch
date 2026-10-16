@@ -368,14 +368,24 @@ def _agy_model_catalog_sha256(ids: list[str]) -> str:
     return hashlib.sha256("\n".join(sorted(ids)).encode("utf-8")).hexdigest()
 
 
-def _agy_model_catalog_cache_path(account_alias_hash: str) -> Path:
+def _agy_model_catalog_env_binding(env: dict[str, str]) -> str:
+    """Hash of the leased HOME and resolved agy executable the catalog is fetched with."""
+    material = f"{env.get('HOME', '')}\0{shutil.which('agy') or ''}"
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _agy_model_catalog_cache_path(account_alias_hash: str, env_binding: str) -> Path:
     safe = re.sub(r"[^A-Za-z0-9_-]", "_", str(account_alias_hash))[:128] or "unknown"
-    return OPERATION_ROOT / "model-catalog" / f"{safe}.json"
+    return OPERATION_ROOT / "model-catalog" / f"{safe}-{env_binding[:16]}.json"
 
 
-def _agy_model_catalog_read_cache(path: Path, *, now: float, ttl: float) -> dict[str, Any] | None:
+def _agy_model_catalog_read_cache(
+    path: Path, *, now: float, ttl: float, env_binding: str
+) -> dict[str, Any] | None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
+        if data.get("env_binding") != env_binding:
+            return None
         ids = data["ids"]
         epoch = float(data["checked_at_epoch"])
         if not (isinstance(ids, list) and ids and all(isinstance(i, str) for i in ids)):
@@ -397,7 +407,9 @@ def _agy_model_catalog_read_cache(path: Path, *, now: float, ttl: float) -> dict
     }
 
 
-def _agy_model_catalog_write_cache(path: Path, snapshot: dict[str, Any]) -> None:
+def _agy_model_catalog_write_cache(
+    path: Path, snapshot: dict[str, Any], env_binding: str
+) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         tmp = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
@@ -406,6 +418,7 @@ def _agy_model_catalog_write_cache(path: Path, snapshot: dict[str, Any]) -> None
             "checked_at_epoch": snapshot["checked_at_epoch"],
             "catalog_sha256": snapshot["catalog_sha256"],
             "ids": snapshot["ids"],
+            "env_binding": env_binding,
         }
         fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         try:
@@ -438,16 +451,24 @@ def _agy_model_catalog_fetch(env: dict[str, str], timeout: float) -> tuple[int |
         return None, "", f"CATALOG_START_FAILED:{type(exc).__name__}"
     try:
         out, _ = proc.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
+    except BaseException as exc:
+        # Unconditional cleanup (timeout, KeyboardInterrupt, signal-raised
+        # exceptions): kill the group by its own PID and reap, then propagate.
         try:
             os.killpg(proc.pid, signal.SIGKILL)
         except OSError:
             pass
         try:
-            proc.communicate(timeout=5)
-        except Exception:
+            proc.kill()
+        except OSError:
             pass
-        return None, "", "CATALOG_TIMEOUT"
+        try:
+            proc.wait(timeout=5)
+        except BaseException:
+            pass
+        if isinstance(exc, subprocess.TimeoutExpired):
+            return None, "", "CATALOG_TIMEOUT"
+        raise
     return proc.returncode, out or "", ""
 
 
@@ -463,8 +484,9 @@ def _agy_model_catalog_snapshot(
     timeout = _env_positive_float(
         "NEXUS_AGY_MODEL_CATALOG_TIMEOUT_SEC", AGY_MODEL_CATALOG_TIMEOUT_DEFAULT_SEC
     )
-    path = _agy_model_catalog_cache_path(account_alias_hash)
-    cached = _agy_model_catalog_read_cache(path, now=now, ttl=ttl)
+    env_binding = _agy_model_catalog_env_binding(env)
+    path = _agy_model_catalog_cache_path(account_alias_hash, env_binding)
+    cached = _agy_model_catalog_read_cache(path, now=now, ttl=ttl, env_binding=env_binding)
     if cached is not None:
         return cached
     code, out, reason = _agy_model_catalog_fetch(env, timeout)
@@ -493,7 +515,7 @@ def _agy_model_catalog_snapshot(
         "source": "FRESH",
         "reason": None,
     }
-    _agy_model_catalog_write_cache(path, snapshot)
+    _agy_model_catalog_write_cache(path, snapshot, env_binding)
     return snapshot
 
 
@@ -4579,6 +4601,7 @@ def _supervisor_terminal_guard(func):
                 "QUEUED",
                 "STARTING",
                 "ACCOUNT_LEASED",
+                "MODEL_REJECTED",
             }
             attestation = _parse_agy_attestation(
                 attestation_log_path,
