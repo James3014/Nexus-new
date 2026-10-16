@@ -5988,3 +5988,108 @@ def test_pr_target_only_checks_match_their_workflow_triggers() -> None:
     for name in ad.PR_TARGET_ONLY_CHECKS:
         on = yaml.safe_load((REPO_ROOT / ad.REQUIRED_CHECKS[name]).read_text("utf-8"))[True]
         assert set(on) == {"pull_request_target"}, (name, on)
+
+
+# ---------------- #2364/#2365: PR-head-only commit statuses in the ruleset
+
+BINDINGS_PREFLIGHT = "Bindings preflight (default branch)"
+REVIEW_RECORD = "Review record present (advisory)"
+# GET repos/James3014/Nexus-new/rules/branches/main after #2365 (2026-10-16 ~06:25Z).
+LIVE_REQUIRED_2026_10_16_SIX = [*LIVE_REQUIRED_2026_10_16, BINDINGS_PREFLIGHT, REVIEW_RECORD]
+
+
+def _live_six_api() -> Callable[[str], Any]:
+    base = _live_2026_10_16_api()
+
+    def api(path: str) -> Any:
+        if "/rules/branches/main" in path:
+            if "page=" in path and not path.endswith("page=1"):
+                return []
+            return _branch_rules(LIVE_REQUIRED_2026_10_16_SIX)
+        if "check-runs" in path and ("Bindings" in path or "Review+record" in path):
+            raise AssertionError("PR-head status contexts are not looked up as check runs")
+        return base(path)
+
+    return api
+
+
+def test_pr_head_status_contexts_are_exactly_the_two_2365_statuses() -> None:
+    assert ad.PR_HEAD_STATUS_CONTEXTS == {BINDINGS_PREFLIGHT, REVIEW_RECORD}
+    assert not ad.PR_HEAD_STATUS_CONTEXTS & set(ad.REQUIRED_CHECKS)
+    assert not ad.PR_HEAD_STATUS_CONTEXTS & set(ad.FLOOR_CHECKS)
+
+
+def test_pr_head_status_contexts_are_published_by_pull_request_target_workflows() -> None:
+    import yaml
+
+    for context, workflow, owner in (
+        (BINDINGS_PREFLIGHT, "pr-bindings-preflight.yml", None),
+        (REVIEW_RECORD, "review-record-present.yml", "scripts/ops/review_record_check.py"),
+    ):
+        text = (REPO_ROOT / ".github/workflows" / workflow).read_text("utf-8")
+        assert "pull_request_target" in yaml.safe_load(text)[True]
+        assert "push" not in yaml.safe_load(text)[True]
+        source = text if owner is None else (REPO_ROOT / owner).read_text("utf-8")
+        assert context in source
+
+
+def test_live_ruleset_six_checks_all_success_is_green() -> None:
+    result = ad.required_checks(_live_six_api(), NEW)
+    assert result["verdict"] == "GREEN", result
+    assert result["merge_time_only"] == [BINDINGS_PREFLIGHT, REVIEW_RECORD]
+    assert set(result["checks"]) == {*LIVE_REQUIRED_2026_10_16, "Exact-base impact gate"}
+
+
+def test_live_ruleset_six_checks_green_candidate_deploys(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    assert cycle(cfg, host, prober, _live_six_api())["status"] == "DEPLOYED"
+
+
+def test_live_ruleset_six_checks_still_blocks_on_a_red_bound_check() -> None:
+    base = _live_six_api()
+
+    def api(path: str) -> Any:
+        payload = base(path)
+        if "check-runs" in path and "Deletion+guard" in path:
+            for run in payload["check_runs"]:
+                run["conclusion"] = "failure"
+        return payload
+
+    assert ad.required_checks(api, NEW)["verdict"] == "RED"
+
+
+def test_live_ruleset_six_plus_unknown_seventh_stays_unknown_required_check(
+    cfg: ad.Config,
+) -> None:
+    seven = [*LIVE_REQUIRED_2026_10_16_SIX, "Bindings preflight (fork)"]
+    base = _live_six_api()
+
+    def api(path: str) -> Any:
+        if "/rules/branches/main" in path:
+            return [] if "page=" in path and not path.endswith("page=1") else _branch_rules(seven)
+        return base(path)
+
+    result = ad.required_checks(api, NEW)
+    assert result["verdict"] == "UNKNOWN_REQUIRED_CHECK"
+    assert result["unknown_required"] == ["Bindings preflight (fork)"]
+    host, prober = FakeHost(), FakeProber()
+    status = cycle(cfg, host, prober, api)["status"]
+    assert status == "UNKNOWN_REQUIRED_CHECK:Bindings preflight (fork)"
+    assert prober.calls == [] and host.reloads == []
+
+
+def test_only_pr_head_statuses_required_still_enforces_the_floor() -> None:
+    base = _live_six_api()
+
+    def api(path: str) -> Any:
+        if "/rules/branches/main" in path:
+            if "page=" in path and not path.endswith("page=1"):
+                return []
+            return _branch_rules([BINDINGS_PREFLIGHT, REVIEW_RECORD])
+        if "check-runs" in path and "Exact-base" in path:
+            return {"check_runs": []}
+        return base(path)
+
+    result = ad.required_checks(api, NEW)
+    assert result["verdict"] == "UNKNOWN"
+    assert "Exact-base impact gate" in result["missing"]
