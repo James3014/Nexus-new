@@ -2225,6 +2225,63 @@ NO_TOOL_DENY = [
 ]
 NO_TOOL_PROFILE_VIOLATION = "NO_TOOL_PROFILE_VIOLATION"
 
+# #2411: agy's plan mode prefixes the prompt with ``/plan`` and the model then
+# probes tools (``echo``, ``view_file``, ``ls``) although the packet says it has
+# none.  NO_TOOL_DENY makes agy refuse every such call before it runs.  In 48 h
+# all 39 NO_TOOL_PROFILE_VIOLATION runs had only refused calls and a complete
+# answer, which was discarded.  The answer is returned only when the transcript
+# proves that every tool call was refused and no other step ran.
+_NO_TOOL_REFUSAL_MARKERS = (
+    "matches user-configured deny rule",
+    "declaring permissions: cortex tool",
+)
+_NO_TOOL_PASSIVE_STEP_TYPES = frozenset({"USER_INPUT", "PLANNER_RESPONSE"})
+
+
+def _no_tool_refused_tool_call_count(transcript_path: Path | None) -> int | None:
+    """Return the tool-call count when every call was refused before running.
+
+    Reads agy's ``transcript_full.jsonl``.  Returns ``None`` (fail closed) when
+    the transcript is missing or malformed, has no tool calls, has a step other
+    than user input, model responses, system error messages and refused tool
+    results, or has fewer refused results than tool calls.
+    """
+    if transcript_path is None:
+        return None
+    try:
+        text = transcript_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    calls = 0
+    refused = 0
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        try:
+            step = json.loads(line)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(step, dict):
+            return None
+        step_type = step.get("type")
+        tool_calls = step.get("tool_calls")
+        if tool_calls is not None:
+            if step_type != "PLANNER_RESPONSE" or not isinstance(tool_calls, list):
+                return None
+            calls += len(tool_calls)
+        if step_type in _NO_TOOL_PASSIVE_STEP_TYPES:
+            continue
+        if step_type == "ERROR_MESSAGE" and step.get("source") == "SYSTEM":
+            continue
+        error = str(step.get("error") or "").lower()
+        if step.get("status") != "ERROR" or not any(m in error for m in _NO_TOOL_REFUSAL_MARKERS):
+            return None
+        refused += 1
+    if calls == 0 or refused != calls:
+        return None
+    return calls
+
+
 _UNSAFE_PERMISSION_RULES = {
     "command(*)",
     "read_file(*)",
@@ -3580,15 +3637,19 @@ def dispatch_run(
     active_provider_pgid: int | None = None
 
     attempt_tool_event_count = 0
+    attempt_provider_session_id: str | None = None
     # #2202: disposable run HOMEs of this dispatch's boundary-wrapped attempts.
     boundary_run_homes: list[Path] = []
 
     def _inner_operation_hook(event: dict[str, Any] | None = None, **kwargs: Any) -> None:
         nonlocal active_provider_pid, active_provider_pgid, attempt_tool_event_count
+        nonlocal attempt_provider_session_id
         merged = dict(event or {})
         merged.update(kwargs)
         if isinstance(merged.get("tool_event_count"), int):
             attempt_tool_event_count = max(attempt_tool_event_count, merged["tool_event_count"])
+        if isinstance(merged.get("provider_session_id"), str):
+            attempt_provider_session_id = merged["provider_session_id"]
         if isinstance(merged.get("provider_pid"), int):
             active_provider_pid = merged["provider_pid"]
         if isinstance(merged.get("provider_pgid"), int):
@@ -3906,6 +3967,7 @@ def dispatch_run(
             permission_token = None
             write_boundary = None
             attempt_tool_event_count = 0
+            attempt_provider_session_id = None
             try:
                 if needs_write_boundary:
                     # Disposable HOME + exact env + Seatbelt profile; the permission
@@ -4142,6 +4204,23 @@ def dispatch_run(
             no_tool_violation = bool(
                 permission_profile_kind == "NO_TOOL_PACKET" and attempt_tool_event_count > 0
             )
+            no_tool_refused_calls = 0
+            # A cwd outside git has no source baseline (``None``); there the
+            # transcript is the proof, since agy writes only through tool calls.
+            # Any observed change keeps the quarantine.
+            if (
+                no_tool_violation
+                and code == 0
+                and not timed_out
+                and not attempt_changed_paths
+                and out.strip()
+            ):
+                refused_calls = _no_tool_refused_tool_call_count(
+                    _agy_transcript_path(env, attempt_provider_session_id)
+                )
+                if refused_calls is not None and refused_calls == attempt_tool_event_count:
+                    no_tool_violation = False
+                    no_tool_refused_calls = refused_calls
 
             if (
                 code == 0
@@ -4154,7 +4233,7 @@ def dispatch_run(
                 sys.stdout.write(out)
                 if err:
                     sys.stderr.write(err)
-                emit_meta({
+                completed_meta: dict[str, Any] = {
                     "status": "completed",
                     "attempts": attempts,
                     "rotations": rotations,
@@ -4164,7 +4243,10 @@ def dispatch_run(
                     "wall_ms": total_wall_ms,
                     "permission_profile_sha256": permission_profile_sha256,
                     "permission_profile_kind": permission_profile_kind,
-                })
+                }
+                if no_tool_refused_calls:
+                    completed_meta["no_tool_refused_tool_calls"] = no_tool_refused_calls
+                emit_meta(completed_meta)
                 return 0
 
             kind = (
