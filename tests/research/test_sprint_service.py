@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import nexus.research.sprint_service as sprint_service
-from nexus.research.local_sprint_mutator import generate_local_candidate
 from nexus.research.sprint_service import (
     CandidateEval,
     InPlaceSprintExecutor,
@@ -23,6 +22,31 @@ def _write_ready_learn_slo(tmp_path: Path) -> None:
         '{"phase_slo_pass": true, "global": {"required_done_ratio": 1.0}}',
         encoding="utf-8",
     )
+
+
+def _use_fake_as_model(monkeypatch, tmp_path: Path, fake_cls) -> None:
+    """#2339 follow-up: there is no local generator any more; drive the same fake as the model."""
+    _write_ready_learn_slo(tmp_path)
+    monkeypatch.setenv("NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL", "0")
+    monkeypatch.setenv("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "1")
+    monkeypatch.setenv("NEXUS_FORCE_INPLACE_EXECUTOR", "1")
+
+    class _Model:
+        model_chain = ["fake-model"]
+
+        def __init__(self, *_args, **_kwargs):
+            self._inner = fake_cls()
+
+        def generate(self, **kwargs):
+            keys = ("source_code", "task", "mutation_hint", "seed")
+            code, meta = self._inner.generate(**{key: kwargs[key] for key in keys if key in kwargs})
+            meta = dict(meta)
+            if not str(meta.get("source") or "").startswith(("llm", "model")):
+                meta["source"] = "llm"
+            meta["model_calls"] = max(1, int(meta.get("model_calls", 0) or 0))
+            return code, meta
+
+    monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", _Model)
 
 
 # Issue #2339: the benchmark-keyed local paths (hidden-contract fast path, local preflight,
@@ -60,17 +84,9 @@ def _run_noop_model_sprint(monkeypatch, tmp_path: Path, *, task: str, source: st
             order.append("llm")
             raise RuntimeError("noop model: no candidate")
 
-    real_local = sprint_service.LocalCandidateGenerator
-
-    class SpyLocal(real_local):
-        def generate(self, source_code, task, mutation_hint, seed):
-            order.append(f"local:{mutation_hint.splitlines()[-1]}")
-            return super().generate(source_code, task, mutation_hint, seed)
-
     monkeypatch.setenv("NEXUS_FORCE_INPLACE_EXECUTOR", "1")
     monkeypatch.setenv("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "1")
     monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", NoopModel)
-    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", SpyLocal)
     cfg = SprintConfig(task=task, target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
     return run_hyper_sprint(repo_root=tmp_path, config=cfg), order
 
@@ -183,14 +199,14 @@ def test_run_hyper_sprint_collects_pool_when_route_enables_ddtree(monkeypatch, t
                 stdout="pytest passed" if seed == 2 else "",
             )
 
-    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeGenerator)
     monkeypatch.setattr("nexus.research.sprint_service.InPlaceSprintExecutor", FakeExecutor)
 
+    _use_fake_as_model(monkeypatch, tmp_path, FakeGenerator)
     cfg = SprintConfig(
         task="repair timeout",
         target_file="demo.py",
         candidate_count=3,
-        llm_mode=False,
+        llm_mode=True,
         safe_mode=True,
         enable_autoreason_executor=True,
         enable_ddtree_executor=True,
@@ -251,7 +267,6 @@ def test_run_hyper_sprint_uses_local_support_pool_for_ddtree_cost_cap(monkeypatc
         '{"ddtree_mixed_candidate_pool": true, "candidate_cap": 3, "context_mode": "compact"}',
     )
     monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", FakeLLMGenerator)
-    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeLocalGenerator)
     monkeypatch.setattr("nexus.research.sprint_service.InPlaceSprintExecutor", FakeExecutor)
     monkeypatch.setenv("NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL", "0")
     monkeypatch.setenv("NEXUS_DISABLE_HIDDEN_INVARIANT_SHADOW", "1")
@@ -270,14 +285,15 @@ def test_run_hyper_sprint_uses_local_support_pool_for_ddtree_cost_cap(monkeypatc
     )
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
 
-    assert llm_calls == [0]
+    # #2339 follow-up: the local support pool is deleted; the pool holds model candidates only.
+    assert llm_calls
+    assert not any(str(item.source).startswith("local") for item in res.candidates)
     assert res.status == "SUCCESS"
-    assert res.model_calls == 1
+    assert res.model_calls == len(llm_calls)
     assert res.winner_source == "llm"
     assert res.learning_trace["candidate_pool_policy"]["enabled"] is True
     assert res.learning_trace["ddtree"]["eligible"] is True
-    assert res.learning_trace["ddtree"]["actual_saved_steps"] == 1
-    assert "llm:0" in res.learning_trace["ddtree"]["selected_candidate_ids"]
+    assert all(str(item).startswith("llm:") for item in res.learning_trace["ddtree"]["selected_candidate_ids"])
 
 
 def test_run_hyper_sprint_uses_local_support_pool_for_autoreason_cost_cap(monkeypatch, tmp_path: Path):
@@ -325,7 +341,6 @@ def test_run_hyper_sprint_uses_local_support_pool_for_autoreason_cost_cap(monkey
         '{"autoreason_mixed_candidate_pool": true, "context_mode": "compact"}',
     )
     monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", FakeLLMGenerator)
-    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeLocalGenerator)
     monkeypatch.setattr("nexus.research.sprint_service.InPlaceSprintExecutor", FakeExecutor)
     monkeypatch.setenv("NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL", "0")
     monkeypatch.setenv("NEXUS_DISABLE_HIDDEN_INVARIANT_SHADOW", "1")
@@ -343,13 +358,15 @@ def test_run_hyper_sprint_uses_local_support_pool_for_autoreason_cost_cap(monkey
     )
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
 
-    assert llm_calls == [0]
+    # #2339 follow-up: the local support pool is deleted; the pool holds model candidates only.
+    assert llm_calls
+    assert not any(str(item.source).startswith("local") for item in res.candidates)
     assert res.status == "SUCCESS"
-    assert res.model_calls == 1
+    assert res.model_calls == len(llm_calls)
     assert res.winner_source == "llm"
     assert res.learning_trace["candidate_pool_policy"]["enabled"] is True
     assert res.learning_trace["autoreason"]["enabled"] is True
-    assert res.learning_trace["autoreason"]["winner"] == "llm:0"
+    assert str(res.learning_trace["autoreason"]["winner"]).startswith("llm:")
 
 
 def test_run_hyper_sprint_applies_distant_scout_hint(monkeypatch, tmp_path: Path):
@@ -371,14 +388,14 @@ def test_run_hyper_sprint_applies_distant_scout_hint(monkeypatch, tmp_path: Path
         def evaluate_candidate(self, **kwargs):
             return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code=kwargs["code"], source=kwargs["source"])
 
-    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeGenerator)
     monkeypatch.setattr("nexus.research.sprint_service.InPlaceSprintExecutor", FakeExecutor)
 
+    _use_fake_as_model(monkeypatch, tmp_path, FakeGenerator)
     cfg = SprintConfig(
         task="repair timeout",
         target_file="demo.py",
         candidate_count=1,
-        llm_mode=False,
+        llm_mode=True,
         safe_mode=True,
         distant_scout_plan={
             "status": "READY",
@@ -412,19 +429,19 @@ def test_run_hyper_sprint_success_local(monkeypatch, tmp_path: Path):
         def evaluate_candidate(self, **kwargs):
             return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code="print('ok')\n", source=kwargs["source"])
 
-    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeGenerator)
     monkeypatch.setattr("nexus.research.sprint_service.InPlaceSprintExecutor", FakeExecutor)
 
     cfg = SprintConfig(task="fix bug", target_file="demo.py", candidate_count=2, llm_mode=False, safe_mode=True)
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
-    assert res.status == "SUCCESS"
-    assert res.winner_source == "local"
+    # #2339 follow-up: without a model there is no candidate generator; nothing is fabricated.
+    assert res.status == "FAILED"
+    assert res.reason == "no_local_candidate_generator"
+    assert res.winner_source == "no_local_candidate_generator"
+    assert "no_local_candidate_generator" in res.error_codes
     assert res.model_calls == 0
     assert res.total_tokens == 0
-    assert res.token_capture_status == "not_applicable_local_only"
-    assert res.promotable is True
-    assert res.attempt_count == 1
-    assert "retrieval_hits" in res.learning_trace
+    assert res.attempt_count == 0
+    assert not res.patch
 
 
 def test_should_try_local_preflight_before_llm_skips_claim_evidence_contracts(monkeypatch, tmp_path: Path):
@@ -490,31 +507,13 @@ def test_should_try_local_preflight_before_llm_keeps_rlm_evidence_memory_and_sec
 
 
 def test_local_mutator_patches_rlm_governance_filter_action():
-    source = "def rlm_harder_v2_filter_action(action):\n    return {'allowed': True, 'reason': 'ok'}\n"
+    # #2339 follow-up: the deterministic local answer table (which patched this governance
+    # filter by name) is deleted; the sprint has no local candidate generator.
+    import importlib.util
 
-    patched = generate_local_candidate(
-        source,
-        task="Repair governance action filter; block destructive tools and forbidden paths.",
-        mutation_hint="local_preflight_before_llm",
-        seed=0,
-    )
-    namespace: dict[str, object] = {}
-    exec(patched, namespace)
-    fn = namespace["rlm_harder_v2_filter_action"]
-
-    assert fn({"tool": "read_file"}) == {"allowed": True, "reason": "ok"}
-    assert fn({"tool": "run_command", "cmd": "rm -rf .nexus"}) == {
-        "allowed": False,
-        "reason": "governance_block",
-    }
-    assert fn({"tool": "delete_file", "path": "logs/run.json"}) == {
-        "allowed": False,
-        "reason": "governance_block",
-    }
-    assert fn({"tool": "write_file", "path": "benchmarks/result.json"}) == {
-        "allowed": False,
-        "reason": "governance_block",
-    }
+    assert importlib.util.find_spec("nexus.research.local_sprint_mutator") is None
+    assert not hasattr(sprint_service, "LocalCandidateGenerator")
+    assert sprint_service.NO_LOCAL_CANDIDATE_GENERATOR == "no_local_candidate_generator"
 
 
 def test_run_hyper_sprint_collects_error_codes(monkeypatch, tmp_path: Path):
@@ -540,10 +539,10 @@ def test_run_hyper_sprint_collects_error_codes(monkeypatch, tmp_path: Path):
                 error="command timed out after 20 seconds",
             )
 
-    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeGenerator)
     monkeypatch.setattr("nexus.research.sprint_service.InPlaceSprintExecutor", FakeExecutor)
 
-    cfg = SprintConfig(task="fix", target_file="demo.py", candidate_count=1, llm_mode=False, safe_mode=True)
+    _use_fake_as_model(monkeypatch, tmp_path, FakeGenerator)
+    cfg = SprintConfig(task="fix", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
     assert res.status == "FAILED"
     assert "test_timeout" in res.error_codes
@@ -567,10 +566,10 @@ def test_run_hyper_sprint_semantic_guard_for_feature(monkeypatch, tmp_path: Path
         def evaluate_candidate(self, **_kwargs):
             raise AssertionError("Executor should not be called when semantic guard rejects candidate")
 
-    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeGenerator)
     monkeypatch.setattr("nexus.research.sprint_service.InPlaceSprintExecutor", FakeExecutor)
 
-    cfg = SprintConfig(task="implement parser", target_file="demo.py", candidate_count=1, llm_mode=False, safe_mode=True)
+    _use_fake_as_model(monkeypatch, tmp_path, FakeGenerator)
+    cfg = SprintConfig(task="implement parser", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
     assert res.status == "FAILED"
     assert "semantic_guard" in res.error_codes
@@ -600,10 +599,10 @@ def test_run_hyper_sprint_rejects_hidden_verifier_placeholder_only(monkeypatch, 
             raise AssertionError("placeholder-only candidates must be rejected before pytest")
 
     monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
-    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeGenerator)
     monkeypatch.setattr("nexus.research.sprint_service.InPlaceSprintExecutor", FakeExecutor)
 
-    cfg = SprintConfig(task="Fix hidden report_path contract", target_file="demo.py", candidate_count=1, llm_mode=False, safe_mode=True)
+    _use_fake_as_model(monkeypatch, tmp_path, FakeGenerator)
+    cfg = SprintConfig(task="Fix hidden report_path contract", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
 
     assert res.status == "FAILED"
@@ -637,10 +636,10 @@ def test_run_hyper_sprint_rejects_syntax_warning_candidate(monkeypatch, tmp_path
         def evaluate_candidate(self, **_kwargs):
             raise AssertionError("SyntaxWarning candidates must be rejected before pytest")
 
-    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeGenerator)
     monkeypatch.setattr("nexus.research.sprint_service.InPlaceSprintExecutor", FakeExecutor)
 
-    cfg = SprintConfig(task="fix value", target_file="demo.py", candidate_count=1, llm_mode=False, safe_mode=True)
+    _use_fake_as_model(monkeypatch, tmp_path, FakeGenerator)
+    cfg = SprintConfig(task="fix value", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
 
     assert res.status == "FAILED"
@@ -685,12 +684,12 @@ def test_run_hyper_sprint_learning_trace_persist_path(monkeypatch, tmp_path: Pat
         def trigger_arweave_distillation(self, _data):
             return "ARW-test"
 
-    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeGenerator)
     monkeypatch.setattr("nexus.research.sprint_service.InPlaceSprintExecutor", FakeExecutor)
     monkeypatch.setattr("nexus.research.findings_memory.FindingsMemoryStore", FakeStore)
     monkeypatch.setattr("nexus.services.mem_palace.MemPalace", FakePalace)
 
-    cfg = SprintConfig(task="fix bug", target_file="demo.py", candidate_count=1, llm_mode=False, safe_mode=True)
+    _use_fake_as_model(monkeypatch, tmp_path, FakeGenerator)
+    cfg = SprintConfig(task="fix bug", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
     assert res.status == "SUCCESS"
     assert res.learning_trace.get("mempalace_verified") is True
@@ -738,7 +737,6 @@ def test_llm_quota_falls_back_to_local(monkeypatch, tmp_path: Path):
             return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code="print('ok')\n", source=kwargs["source"])
 
     monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", FakeLLMGenerator)
-    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeLocalGenerator)
     monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
 
     cfg = SprintConfig(task="fix", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
@@ -747,7 +745,7 @@ def test_llm_quota_falls_back_to_local(monkeypatch, tmp_path: Path):
     assert res.status == "FAILED"
     assert res.winner_source == "model_required_no_model_candidate"
     assert "quota" in res.error_codes
-    assert "llm_fallback_local" in res.error_codes
+    assert "llm_fallback_local" not in res.error_codes
     assert res.total_tokens == 0
 
 
@@ -840,7 +838,6 @@ def test_hidden_verifier_shadow_can_be_disabled_for_model_required_benchmark(mon
     monkeypatch.setenv("NEXUS_DISABLE_HIDDEN_INVARIANT_SHADOW", "1")
     monkeypatch.setenv("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "1")
     monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", FakeLLMGenerator)
-    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeLocalGenerator)
     monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
 
     cfg = SprintConfig(task="fix", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
@@ -1398,7 +1395,6 @@ def test_llm_gateway_fail_payload_falls_back_to_local(monkeypatch, tmp_path: Pat
             return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code="print('ok')\n", source=kwargs["source"])
 
     monkeypatch.setattr("nexus.services.gateway.BattlesuitGateway", FakeGateway)
-    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeLocalGenerator)
     monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
 
     cfg = SprintConfig(task="fix", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
@@ -1445,7 +1441,6 @@ def test_model_required_blocks_local_final_delivery_after_llm_attempt(monkeypatc
     monkeypatch.setenv("NEXUS_DISABLE_LOCAL_PREFLIGHT_BEFORE_LLM", "1")
     monkeypatch.setenv("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "1")
     monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", FakeLLMGenerator)
-    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeLocalGenerator)
     monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
 
     cfg = SprintConfig(task="fix", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
@@ -1453,10 +1448,14 @@ def test_model_required_blocks_local_final_delivery_after_llm_attempt(monkeypatc
 
     assert res.status == "FAILED"
     assert res.reason == "model_required_model_delivery_failed"
-    assert res.winner_source == "model_required_no_model_candidate"
+    # The failed self-heal call is the only (model) candidate; nothing is delivered.
+    assert res.winner_source in {"model_required_no_model_candidate", "llm_self_heal"}
+    assert res.final_score == 0.0
     assert res.model_calls == 1
     assert "model_required_model_delivery_failed" in res.error_codes
-    assert "model_required_local_support_not_delivery" in res.error_codes
+    # #2339 follow-up: no local candidate exists at all any more.
+    assert "model_required_local_support_not_delivery" not in res.error_codes
+    assert not any(str(item.source).startswith("local") for item in res.candidates)
     assert res.patch == ""
 
 
@@ -1499,19 +1498,20 @@ def test_model_required_does_not_promote_local_guard_fallback_after_llm_patch_fa
     monkeypatch.setenv("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "1")
     monkeypatch.setenv("NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL", "0")
     monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", FakeLLMGenerator)
-    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeLocalGenerator)
     monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
 
     cfg = SprintConfig(task="add feature artifact", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
 
     assert res.status == "FAILED"
-    assert res.reason == "model_required_model_delivery_failed"
+    # Only the failing model candidate is left, so the run fails at stage 1.
+    assert res.reason == "stage1_no_passing_candidate"
     assert res.winner_source == "llm"
     assert res.final_score == 0.0
     assert res.model_calls == 1
-    assert res.fallback_used is True
-    assert "model_required_local_support_not_delivery" in res.error_codes
+    # #2339 follow-up: the local guard fallback is deleted, so nothing local is even scored.
+    assert "model_required_local_support_not_delivery" not in res.error_codes
+    assert not any(str(item.source).startswith("local") for item in res.candidates)
     assert "local" not in res.winner_source
     assert "local" not in res.patch
 
@@ -1569,7 +1569,6 @@ def test_model_required_self_heal_can_use_local_support_without_promoting_it(mon
     monkeypatch.setenv("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "1")
     monkeypatch.setenv("NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL", "1")
     monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", FakeLLMGenerator)
-    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeLocalGenerator)
     monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
 
     cfg = SprintConfig(task="add feature artifact", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
@@ -1696,7 +1695,6 @@ def test_llm_self_heal_runs_before_local_guard_fallback(monkeypatch, tmp_path: P
 
     monkeypatch.setenv("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "1")
     monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", FakeLLMGenerator)
-    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeLocalGenerator)
     monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
 
     cfg = SprintConfig(task="add feature artifact", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
@@ -1783,7 +1781,6 @@ def test_failed_local_fallback_gets_emergency_baseline_attempt(monkeypatch, tmp_
             return CandidateEval(seed=kwargs["seed"], score=score, candidate_code=kwargs["code"], source=kwargs["source"])
 
     monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", FakeLLMGenerator)
-    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeLocalGenerator)
     monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
 
     cfg = SprintConfig(task="fix", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
@@ -1792,8 +1789,9 @@ def test_failed_local_fallback_gets_emergency_baseline_attempt(monkeypatch, tmp_
     # #2339: a model run never delivers the local candidate that follows a model failure.
     assert res.status == "FAILED"
     assert res.winner_source == "model_required_no_model_candidate"
-    assert calls["local"] == 2
-    assert res.attempt_count == 2
+    # #2339 follow-up: the local fallback and the emergency valve are deleted.
+    assert calls["local"] == 0
+    assert not any(str(item.source).startswith("local") for item in res.candidates)
 
 
 def test_local_contract_fallback_repairs_phase_evidence_fields(monkeypatch, tmp_path: Path):
@@ -2068,7 +2066,6 @@ def test_llm_mode_blocked_by_learn_slo_guard(monkeypatch, tmp_path: Path):
         def evaluate_candidate(self, **kwargs):
             return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code="print('ok')\n", source=kwargs["source"])
 
-    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeLocalGenerator)
     monkeypatch.setattr("nexus.research.sprint_service.InPlaceSprintExecutor", FakeExecutor)
 
     cfg = SprintConfig(task="fix bug", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
@@ -2076,7 +2073,7 @@ def test_llm_mode_blocked_by_learn_slo_guard(monkeypatch, tmp_path: Path):
     # #2339 follow-up: a run configured for a model never delivers the local candidate, even when
     # the learn-SLO guard withheld the model.
     assert res.status == "FAILED"
-    assert res.winner_source == "model_required_no_model_candidate"
+    assert res.winner_source == "no_local_candidate_generator"
     assert "learn_slo_block" in res.error_codes
     assert res.learning_trace.get("learn_slo_guard", {}).get("active") is True
 
@@ -2201,13 +2198,14 @@ def test_local_mode_uses_inplace_executor(monkeypatch, tmp_path: Path):
         def evaluate_candidate(self, **kwargs):
             return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code="print('ok')\n", source=kwargs["source"])
 
-    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeLocalGenerator)
     monkeypatch.setattr("nexus.research.sprint_service.InPlaceSprintExecutor", FakeInPlaceExecutor)
     monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeSwarmExecutor)
 
     cfg = SprintConfig(task="fix bug", target_file="demo.py", candidate_count=1, llm_mode=False, safe_mode=True)
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
-    assert res.status == "SUCCESS"
+    # #2339 follow-up: local mode selects its executor but has no candidate to score.
+    assert res.status == "FAILED"
+    assert res.reason == "no_local_candidate_generator"
     assert calls["inplace"] == 1
     assert calls["swarm"] == 0
 
@@ -2236,13 +2234,14 @@ def test_local_mode_can_opt_into_swarm_executor(monkeypatch, tmp_path: Path):
             return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code="print('ok')\n", source=kwargs["source"])
 
     monkeypatch.setenv("NEXUS_ENABLE_LOCAL_SWARM_EXECUTOR", "1")
-    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeLocalGenerator)
     monkeypatch.setattr("nexus.research.sprint_service.InPlaceSprintExecutor", FakeInPlaceExecutor)
     monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeSwarmExecutor)
 
     cfg = SprintConfig(task="fix bug", target_file="demo.py", candidate_count=1, llm_mode=False, safe_mode=True)
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
-    assert res.status == "SUCCESS"
+    # #2339 follow-up: local mode selects its executor but has no candidate to score.
+    assert res.status == "FAILED"
+    assert res.reason == "no_local_candidate_generator"
     assert calls["swarm"] == 1
     assert calls["inplace"] == 0
 
@@ -2575,7 +2574,6 @@ def test_run_hyper_sprint_self_heals_when_llm_first_round_falls_back_to_local_fo
     monkeypatch.setenv("NEXUS_MODEL_REQUIRED_EXECUTION_MODE", "model_participation_only")
     monkeypatch.setenv("NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL", "1")
     monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", FakeLLMGenerator)
-    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeLocalGenerator)
     monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
 
     cfg = SprintConfig(

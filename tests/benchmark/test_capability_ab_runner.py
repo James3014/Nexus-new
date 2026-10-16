@@ -40,7 +40,6 @@ from scripts.bench.taskset_contract import (
 from scripts.bench.warning_ledger import annotate_row as annotate_warning_row
 from scripts.bench.warning_ledger import capture_python_warnings
 from scripts.bench.warning_ledger import records_from_text as warning_records_from_text
-from nexus.research.local_sprint_mutator import generate_local_candidate
 from scripts.bench.capability_ab_runner import (
     CapabilityTask,
     _annotate_benchmark_eligibility,
@@ -8344,21 +8343,12 @@ def test_hidden_verifier_assertion_uses_deterministic_pre_retry_before_second_mo
         strict_llm_baseline=True,
     )
 
-    assert len(captured_cmds) == 1
-    assert out["hidden_retry_used"] is True
-    assert out["hidden_retry_reason"] == "hidden_verifier_failure_deterministic_pre_retry"
-    assert out["hidden_retry_lane"] == "minimal_patch"
-    assert out["hidden_retry_classifier"] == "narrow_assertion_failure"
-    assert out["hidden_retry_prompt_budget"] == "deterministic_pre_retry_v1"
-    assert out["hidden_retry_model_calls"] == 0
-    assert out["hidden_retry_tokens"] == 0
-    assert out["model_calls"] == 1
-    assert out["attempt_count"] == 1
-    assert out["total_tokens"] == 10
-    assert out["hidden_pre_retry_used"] is True
-    assert out["hidden_pre_retry_reason"] == "deterministic_pre_retry_passed"
-    assert out["hidden_verifier_passed"] is True
-    assert out["status"] == "SUCCESS"
+    # #2339 follow-up: the deterministic local pre-retry (answer table) is deleted; the hidden
+    # retry can only go back to the model.
+    assert not out.get("hidden_pre_retry_used")
+    assert out.get("hidden_pre_retry_reason") in {"", None, "no_local_candidate_generator"}
+    assert out.get("hidden_retry_reason") != "hidden_verifier_failure_deterministic_pre_retry"
+    assert out.get("hidden_retry_prompt_budget") != "deterministic_pre_retry_v1"
 
 
 def test_hidden_lite_model_required_prefers_baseline_fast_path(tmp_path: Path, monkeypatch):
@@ -8538,7 +8528,7 @@ def test_hidden_lite_failed_model_attempt_uses_deterministic_pre_rescue(tmp_path
     def fake_run_process_group(cmd, *, cwd, env, timeout_sec):
         if cmd[:3] == ["uv", "run", "scripts/engine/nexus_cli.py"]:
             captured_cmds.append(list(cmd))
-            raise AssertionError("supervised bare-first pre-rescue should not invoke Nexus subprocess")
+            return subprocess.CompletedProcess(cmd, 0, stdout=nexus_payload(), stderr="")
         return real_run_process_group(cmd, cwd=cwd, env=env, timeout_sec=timeout_sec)
 
     monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
@@ -8556,25 +8546,14 @@ def test_hidden_lite_failed_model_attempt_uses_deterministic_pre_rescue(tmp_path
         with_llm_mode="all",
     )
 
-    assert captured_cmds == []
-    assert out["deterministic_pre_rescue_used"] is True
-    assert out["deterministic_pre_rescue_reason"] == "deterministic_pre_rescue_passed"
-    assert out["runtime_classification"] == "nexus_supervised_bare_first_deterministic_pre_rescue"
-    assert out["nexus_winner_source"] == "nexus_llm_deterministic_pre_rescue"
-    # S12 (online A/B 2026-10-14): the mutator delivered it, so the row is a local delivery.
-    assert out["local_success_source"] is True
-    assert out["route_cost_policy_supervised_bare_first"] is True
-    assert out["route_cost_policy_supervised_bare_first_reason"] == "hidden_lite_ghost_governance"
-    assert out["nexus_first_call_prompt_mode"] == "bare_equivalent"
-    assert out["prompt_purity_index"] == 1.0
-    assert out["model_uplift_eligible"] is True
-    assert out["capability_claim_verified"] is True
-    assert out["nexus_usage_valid"] is True
-    assert out["hidden_verifier_passed"] is True
-    assert out["status"] == "SUCCESS"
-    assert out["semantic_status"] == "VERIFIED"
-    assert out["model_calls"] == 1
-    assert out["total_tokens"] == 10
+    # #2339 follow-up: the deterministic local pre-rescue (answer table) is deleted, so nothing
+    # local rescues this row; the run is decided by the model path alone.
+    assert not out.get("deterministic_pre_rescue_used")
+    assert out.get("nexus_winner_source") not in {
+        "nexus_llm_deterministic_pre_rescue",
+        "local_deterministic_pre_model_rescue",
+    }
+    assert "deterministic" not in str(out.get("runtime_classification") or "")
 
 
 def test_cost_efficiency_profile_allows_pre_model_rescue_under_required_participation(tmp_path: Path, monkeypatch):
@@ -8611,11 +8590,20 @@ def test_cost_efficiency_profile_allows_pre_model_rescue_under_required_particip
     )
 
     def fake_without(**_kwargs):
-        raise AssertionError("cost-efficiency pre-model rescue should run before the model call")
+        return {
+            "task_id": task.id,
+            "status": "FAILED",
+            "semantic_status": "FAILED",
+            "run_eligible": True,
+            "report_trust_mismatch": False,
+            "wall_duration_sec": 1.0,
+            "total_tokens": 0,
+            "model_calls": 1,
+        }
 
     def fake_run_process_group(cmd, *, cwd, env, timeout_sec):
         if cmd[:3] == ["uv", "run", "scripts/engine/nexus_cli.py"]:
-            raise AssertionError("cost-efficiency pre-model rescue should not invoke Nexus subprocess")
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="model run not simulated")
         return _run_process_group(cmd, cwd=cwd, env=env, timeout_sec=timeout_sec)
 
     monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
@@ -8635,16 +8623,14 @@ def test_cost_efficiency_profile_allows_pre_model_rescue_under_required_particip
         with_llm_mode="all",
     )
 
-    assert out["runtime_classification"] == "nexus_deterministic_pre_model_rescue"
-    assert out["nexus_winner_source"] == "local_deterministic_pre_model_rescue"
-    assert out["model_calls"] == 0
-    assert out["total_tokens"] == 0
-    assert out["token_capture_status"] == "not_applicable_local_only"
-    assert out["provider_token_measured"] is True
-    assert out["route_cost_policy_controls"]["cost_efficiency_pre_model_rescue_profile"] is True
-    assert out["route_execution_policy"]["pre_model_deterministic_rescue_allowed"] is True
-    assert out["status"] == "SUCCESS"
-    assert out["semantic_status"] == "VERIFIED"
+    # #2339 follow-up: the deterministic local pre-rescue (answer table) is deleted, so nothing
+    # local rescues this row; the run is decided by the model path alone.
+    assert not out.get("deterministic_pre_rescue_used")
+    assert out.get("nexus_winner_source") not in {
+        "nexus_llm_deterministic_pre_rescue",
+        "local_deterministic_pre_model_rescue",
+    }
+    assert "deterministic" not in str(out.get("runtime_classification") or "")
 
 
 def test_benchmark_disable_deterministic_rescue_keeps_model_cost_path(tmp_path: Path, monkeypatch):
@@ -8920,7 +8906,10 @@ def test_run_with_nexus_can_supervise_medium_risk_when_policy_explicitly_allows(
         encoding="utf-8",
     )
 
-    def fake_without(**_kwargs):
+    def fake_without(**kwargs):
+        # #2339 follow-up: the bare arm's model delivered this patch; the deterministic local
+        # pre-rescue that used to write it is deleted.
+        Path(kwargs["target_file"]).write_text("def phase_ready(phase):\n    if phase.get('status') != 'pass':\n        return False\n    return bool(phase.get('evidence')) and 'reason' in phase\n", encoding="utf-8")
         return {
             "task_id": task.id,
             "status": "SUCCESS",
@@ -8990,7 +8979,10 @@ def test_run_with_nexus_can_supervise_high_risk_when_policy_explicitly_allows(tm
         encoding="utf-8",
     )
 
-    def fake_without(**_kwargs):
+    def fake_without(**kwargs):
+        # #2339 follow-up: the bare arm's model delivered this patch; the deterministic local
+        # pre-rescue that used to write it is deleted.
+        Path(kwargs["target_file"]).write_text("def redact(record):\n    result = dict(record)\n    for key in ('token', 'password', 'secret', 'api_key'):\n        if key in result:\n            result[key] = '[REDACTED]'\n    return result\n", encoding="utf-8")
         return {
             "task_id": task.id,
             "status": "SUCCESS",
@@ -9059,7 +9051,10 @@ def test_feature_reflex_uses_supervised_bare_first_with_gwt_artifact(tmp_path: P
         encoding="utf-8",
     )
 
-    def fake_without(**_kwargs):
+    def fake_without(**kwargs):
+        # #2339 follow-up: the bare arm's model delivered this patch; the deterministic local
+        # pre-rescue that used to write it is deleted.
+        Path(kwargs["target_file"]).write_text("def phase_ready(phase):\n    if phase.get('status') != 'pass':\n        return False\n    return bool(phase.get('evidence')) and 'reason' in phase\n", encoding="utf-8")
         return {
             "task_id": task.id,
             "status": "SUCCESS",
@@ -9264,15 +9259,15 @@ def test_context_sync_capped_uses_hidden_verified_deterministic_pre_rescue(tmp_p
         strict_llm_baseline=True,
     )
 
-    assert out["status"] == "SUCCESS"
-    assert out["semantic_status"] == "VERIFIED"
-    assert out["runtime_classification"] == "nexus_supervised_bare_first_deterministic_pre_rescue"
-    assert out["deterministic_pre_rescue_used"] is True
-    assert out["hidden_verifier_passed"] is True
+    # #2339 follow-up: the deterministic local pre-rescue (answer table) is deleted, so nothing
+    # local rescues this row; the run is decided by the model path alone.
+    assert not out.get("deterministic_pre_rescue_used")
+    assert out.get("nexus_winner_source") not in {
+        "nexus_llm_deterministic_pre_rescue",
+        "local_deterministic_pre_model_rescue",
+    }
+    assert "deterministic" not in str(out.get("runtime_classification") or "")
     assert out["route_cost_policy_lane"] == "context_sync_capped"
-    assert out["route_cost_policy_supervised_bare_first"] is True
-    assert "route_cost_policy_expected_capability_overrides" not in out
-    assert out["nexus_usage_valid"] is True
 
 
 def test_bounded_rescue_after_model_attempt_without_tokens_is_infra_invalid(tmp_path: Path, monkeypatch):
@@ -9927,67 +9922,19 @@ def test_expected_receipts_backfill_receipt_lite_capabilities():
 
 
 def test_local_mutator_covers_expanded_commercial_contract_helpers():
-    cases = [
-        (
-            "def rlm_harder_v2_choose_candidate(candidates):\n    return max(candidates, key=lambda item: item.get('score', 0)).get('id')\n",
-            "rlm_harder_v2_choose_candidate",
-            lambda fn: fn(
-                [
-                    {"id": "unsupported", "score": 0.99, "evidence_refs": []},
-                    {"id": "winner", "score": 0.7, "status": "pass", "evidence_refs": ["winner.json"]},
-                ]
-            )
-            == "winner",
-        ),
-        (
-            "def rlm_harder_v2_prune_candidates(candidates, max_candidates):\n    return [item.get('id') for item in sorted(candidates, key=lambda item: item.get('score', 0), reverse=True)[:max_candidates]]\n",
-            "rlm_harder_v2_prune_candidates",
-            lambda fn: fn(
-                [
-                    {"id": "safe-high-score", "score": 0.95, "risk": 1},
-                    {"id": "risky-required", "score": 0.5, "risk": 9},
-                    {"id": "middle", "score": 0.7, "risk": 2},
-                ],
-                2,
-            )
-            == ["risky-required", "safe-high-score"],
-        ),
-        (
-            "def rlm_harder_v2_accept_drone_artifacts(artifacts, expected_count):\n    return len(artifacts) == expected_count and all(item.get('path') for item in artifacts)\n",
-            "rlm_harder_v2_accept_drone_artifacts",
-            lambda fn: fn([{"owner": "a"}, {"owner": "b", "path": "reports/b.json"}], 2) is False,
-        ),
-        (
-            "def rlm_harder_v2_accept_nightshift(report):\n    return bool(report.get('recommended') and report.get('invoked') and report.get('recovered'))\n",
-            "rlm_harder_v2_accept_nightshift",
-            lambda fn: fn({"recommended": True, "invoked": True, "recovered": True}) is False,
-        ),
-    ]
+    # #2339 follow-up: the deterministic local answer table is deleted; the bench runner has no
+    # local candidate generator for these contract helpers any more.
+    import importlib.util
 
-    for source, function_name, assertion in cases:
-        patched = generate_local_candidate(source, "expanded commercial contract helper", "local", 0)
-        namespace: dict[str, object] = {}
-        exec(patched, namespace)
-        assert assertion(namespace[function_name])
+    assert importlib.util.find_spec("nexus.research.local_sprint_mutator") is None
+    assert not hasattr(capability_ab_runner, "generate_local_candidate")
 
 
 def test_local_mutator_ddtree_preserves_score_order_when_risk_ties():
-    source = (
-        "def rlm_harder_v2_prune_candidates(candidates, max_candidates):\n"
-        "    ordered = sorted(candidates, key=lambda item: item.get('score', 0), reverse=True)\n"
-        "    return [item.get('id') for item in ordered[:max_candidates]]\n"
-    )
+    # #2339 follow-up: the local mutator (and its DDTree pruning patch) is deleted.
+    import importlib.util
 
-    patched = generate_local_candidate(source, "ddtree pruning", "local", 0)
-    namespace: dict[str, object] = {}
-    exec(patched, namespace)
-
-    candidates = [
-        {"id": "a", "score": 0.2, "risk": 1},
-        {"id": "b", "score": 0.9, "risk": 1},
-        {"id": "c", "score": 0.6, "risk": 1},
-    ]
-    assert namespace["rlm_harder_v2_prune_candidates"](candidates, 2) == ["b", "c"]
+    assert importlib.util.find_spec("nexus.research.local_sprint_mutator") is None
 
 
 def test_public_non_hyper_expected_capability_defers_forced_hyper_to_route():

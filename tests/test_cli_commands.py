@@ -743,6 +743,23 @@ def test_d3_learn_ingest_hard_difficulty_blocks_forced_light_route(tmp_path, mon
     assert os.environ.get("NEXUS_LIGHT_ROUTE") == "0"
 
 
+def _fake_baseline_model(monkeypatch, patch_fn) -> None:
+    """#2339 follow-up: the local answer table is deleted; the baseline patch comes from a model."""
+
+    class _Model:
+        model_chain = ["fake-model"]
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, *, source_code, task="", mutation_hint="", seed=0, **_kwargs):
+            meta = {"source": "llm", "model_calls": 1, "tokens_used": 0, "token_capture_status": "measured"}
+            meta["model_patch_generated"] = True
+            return patch_fn(source_code, task, mutation_hint, seed), meta
+
+    monkeypatch.setattr("nexus.app.research_flow_service.LLMCandidateGenerator", _Model)
+
+
 def test_research_auto_flow_baseline(tmp_path, monkeypatch):
     runner = CliRunner()
     monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
@@ -765,7 +782,7 @@ def test_research_auto_flow_baseline(tmp_path, monkeypatch):
     def fake_subprocess_run(*_args, **_kwargs):
         return _Res(returncode=0)
 
-    monkeypatch.setattr("nexus.app.research_flow_service.generate_local_candidate", fake_generate_local_candidate)
+    _fake_baseline_model(monkeypatch, fake_generate_local_candidate)
     monkeypatch.setattr("nexus.app.research_flow_service.subprocess.run", fake_subprocess_run)
 
     result = runner.invoke(
@@ -773,6 +790,8 @@ def test_research_auto_flow_baseline(tmp_path, monkeypatch):
         [
             "nexus",
             "research:auto-flow",
+            "--llm-mode",
+            "--llm-baseline",
             "--task-desc",
             "fix typo in docs heading",
             "--target-file",
@@ -831,6 +850,8 @@ def test_research_auto_flow_force_hyper(tmp_path, monkeypatch):
         return _Res(returncode=0)
 
     monkeypatch.setattr("nexus.research.sprint_service.run_hyper_sprint", fake_run_hyper_sprint)
+    # #2339 follow-up: the real no-model sprint has no candidate generator; fake the flow's binding too.
+    monkeypatch.setattr("nexus.app.research_flow_service.run_hyper_sprint", fake_run_hyper_sprint)
     monkeypatch.setattr("subprocess.run", fake_subprocess_run)
 
     result = runner.invoke(
@@ -886,7 +907,7 @@ def test_research_auto_flow_early_baseline_shortcut(tmp_path, monkeypatch):
         raise AssertionError("Hyper should not be called when baseline shortcut triggers")
 
     monkeypatch.setattr("nexus.app.research_flow_service.subprocess.run", fake_subprocess_run)
-    monkeypatch.setattr("nexus.app.research_flow_service.generate_local_candidate", fake_generate_local_candidate)
+    _fake_baseline_model(monkeypatch, fake_generate_local_candidate)
     monkeypatch.setattr("nexus.app.research_flow_service.run_hyper_sprint", fake_run_hyper_sprint)
 
     result = runner.invoke(
@@ -894,6 +915,8 @@ def test_research_auto_flow_early_baseline_shortcut(tmp_path, monkeypatch):
         [
             "nexus",
             "research:auto-flow",
+            "--llm-mode",
+            "--llm-baseline",
             "--task-desc",
             "fix flaky websocket timeout race",
             "--target-file",
@@ -940,9 +963,7 @@ def test_research_auto_flow_learn_guard_forces_baseline(tmp_path, monkeypatch):
 
     monkeypatch.setattr("nexus.app.research_flow_service.subprocess.run", fake_subprocess_run)
     monkeypatch.setattr("nexus.app.research_flow_service.run_hyper_sprint", fake_run_hyper_sprint)
-    monkeypatch.setattr(
-        "nexus.app.research_flow_service.generate_local_candidate",
-        lambda source, *_args, **_kwargs: source.replace("buggy", "fixed"),
+    _fake_baseline_model(monkeypatch, lambda source, *_args, **_kwargs: source.replace("buggy", "fixed"),
     )
 
     result = runner.invoke(
@@ -950,6 +971,8 @@ def test_research_auto_flow_learn_guard_forces_baseline(tmp_path, monkeypatch):
         [
             "nexus",
             "research:auto-flow",
+            "--llm-mode",
+            "--llm-baseline",
             "--task-desc",
             "fix flaky websocket timeout race",
             "--target-file",

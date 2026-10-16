@@ -6,6 +6,23 @@ from nexus.app import research_flow_service as rfs
 from nexus.research.sprint_service import SprintResult
 
 
+def _fake_baseline_model(monkeypatch, patch_fn) -> None:
+    """#2339 follow-up: the local answer table is deleted; the baseline patch comes from a model."""
+
+    class _Model:
+        model_chain = ["fake-model"]
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, *, source_code, task="", mutation_hint="", seed=0, **_kwargs):
+            meta = {"source": "llm", "model_calls": 1, "tokens_used": 0, "token_capture_status": "measured"}
+            meta["model_patch_generated"] = True
+            return patch_fn(source_code, task, mutation_hint, seed), meta
+
+    monkeypatch.setattr("nexus.app.research_flow_service.LLMCandidateGenerator", _Model)
+
+
 def _write_task_files(tmp_path: Path) -> None:
     target = tmp_path / "demo.py"
     target.write_text("print('buggy')\n", encoding="utf-8")
@@ -25,9 +42,7 @@ def _patch_common_success(monkeypatch) -> None:
         return _Res(returncode=0)
 
     monkeypatch.setattr("nexus.app.research_flow_service.subprocess.run", fake_subprocess_run)
-    monkeypatch.setattr(
-        "nexus.app.research_flow_service.generate_local_candidate",
-        lambda source, *_args, **_kwargs: source.replace("buggy", "fixed"),
+    _fake_baseline_model(monkeypatch, lambda source, *_args, **_kwargs: source.replace("buggy", "fixed"),
     )
 
 
@@ -65,8 +80,8 @@ def test_hard_task_not_demoted_by_learn_guard_when_phase_slo_missing(tmp_path, m
         candidate_count=1,
         root_cause_confidence=1.0,
         findings_query=None,
-        llm_mode=False,
-        llm_baseline=False,
+        llm_mode=True,
+        llm_baseline=True,
         timeout_sec=30,
         stage1_timeout_sec=20,
         max_time_ratio_guard=1.2,
@@ -88,6 +103,11 @@ def test_hard_task_not_demoted_by_learn_guard_when_phase_slo_missing(tmp_path, m
 def test_hard_task_not_demoted_by_time_ratio_guard_with_tiny_probe(tmp_path, monkeypatch):
     _write_task_files(tmp_path)
     _patch_common_success(monkeypatch)
+    # The model baseline (#2339 follow-up) runs with llm_mode on: keep the learn SLO ready so the
+    # learn guard does not demote the hard task (this test is about the time-ratio guard).
+    slo = tmp_path / ".nexus" / "reports" / "learn" / "phase_slo_summary.json"
+    slo.parent.mkdir(parents=True, exist_ok=True)
+    slo.write_text('{"phase_slo_pass": true, "global": {"required_done_ratio": 1.0}}', encoding="utf-8")
 
     def fake_run_hyper_sprint(*_args, **_kwargs):
         # Keep this above baseline probe runtime to emulate slower hyper execution.
@@ -121,8 +141,8 @@ def test_hard_task_not_demoted_by_time_ratio_guard_with_tiny_probe(tmp_path, mon
         candidate_count=1,
         root_cause_confidence=1.0,
         findings_query=None,
-        llm_mode=False,
-        llm_baseline=False,
+        llm_mode=True,
+        llm_baseline=True,
         timeout_sec=30,
         stage1_timeout_sec=20,
         max_time_ratio_guard=1.01,
@@ -168,8 +188,8 @@ def test_history_forces_baseline_when_recent_hyper_failures_reach_threshold(tmp_
         candidate_count=1,
         root_cause_confidence=1.0,
         findings_query=None,
-        llm_mode=False,
-        llm_baseline=False,
+        llm_mode=True,
+        llm_baseline=True,
         timeout_sec=30,
         stage1_timeout_sec=20,
         max_time_ratio_guard=1.2,
@@ -238,8 +258,8 @@ def test_force_flow_hyper_sprint_bypasses_history_forced_baseline(tmp_path, monk
         candidate_count=1,
         root_cause_confidence=1.0,
         findings_query=None,
-        llm_mode=False,
-        llm_baseline=False,
+        llm_mode=True,
+        llm_baseline=True,
         timeout_sec=30,
         stage1_timeout_sec=20,
         max_time_ratio_guard=1.2,
@@ -295,7 +315,7 @@ def test_skip_baseline_probe_for_hard_task_when_tuning_enabled(tmp_path, monkeyp
             patch="print('fixed')\n",
         )
 
-    monkeypatch.setattr("nexus.app.research_flow_service.generate_local_candidate", fake_generate_local)
+    _fake_baseline_model(monkeypatch, fake_generate_local)
     monkeypatch.setattr("nexus.app.research_flow_service.run_hyper_sprint", fake_run_hyper_sprint)
 
     payload, _ = rfs.run_auto_flow(
@@ -307,8 +327,8 @@ def test_skip_baseline_probe_for_hard_task_when_tuning_enabled(tmp_path, monkeyp
         candidate_count=1,
         root_cause_confidence=1.0,
         findings_query=None,
-        llm_mode=False,
-        llm_baseline=False,
+        llm_mode=True,
+        llm_baseline=True,
         timeout_sec=30,
         stage1_timeout_sec=20,
         max_time_ratio_guard=1.2,
@@ -346,7 +366,7 @@ def test_early_baseline_shortcut_reuses_probe_result_without_second_generation(t
         return source.replace("buggy", "fixed")
 
     monkeypatch.setattr("nexus.app.research_flow_service.subprocess.run", fake_subprocess_run)
-    monkeypatch.setattr("nexus.app.research_flow_service.generate_local_candidate", fake_generate_local)
+    _fake_baseline_model(monkeypatch, fake_generate_local)
 
     payload, _ = rfs.run_auto_flow(
         repo_root=tmp_path,
@@ -357,8 +377,8 @@ def test_early_baseline_shortcut_reuses_probe_result_without_second_generation(t
         candidate_count=1,
         root_cause_confidence=1.0,
         findings_query=None,
-        llm_mode=False,
-        llm_baseline=False,
+        llm_mode=True,
+        llm_baseline=True,
         timeout_sec=30,
         stage1_timeout_sec=20,
         max_time_ratio_guard=1.2,
@@ -415,8 +435,8 @@ def test_dynamic_stage1_timeout_can_shrink_using_baseline_probe(tmp_path, monkey
         candidate_count=1,
         root_cause_confidence=1.0,
         findings_query=None,
-        llm_mode=False,
-        llm_baseline=False,
+        llm_mode=True,
+        llm_baseline=True,
         timeout_sec=30,
         stage1_timeout_sec=20,
         max_time_ratio_guard=1.2,

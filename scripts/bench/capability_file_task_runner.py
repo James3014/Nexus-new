@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any
 
 from scripts.bench.capability_ab_runner import CapabilityTask, _materialize_fixture, load_tasks, select_tasks
-from nexus.research.local_sprint_mutator import generate_local_candidate
 from scripts.bench.ab_eval import compare_datasets
 
 
@@ -478,7 +477,9 @@ def run_without_nexus_baseline(*, repo_root: Path, task: CapabilityTask, timeout
     run_dir.mkdir(parents=True, exist_ok=True)
     output_file = run_dir / "candidate.py"
     source = target_file.read_text(encoding="utf-8")
-    candidate = generate_local_candidate(source, task.task_desc, "file_task_without_baseline", 0)
+    # No model in this arm and no local answer table any more (#2339 follow-up): the arm submits
+    # the unchanged source (no_local_candidate_generator), never a fabricated patch.
+    candidate = source
     output_file.write_text(candidate, encoding="utf-8")
     ok, test_returncode, error = _verify_candidate(
         case_dir=case_dir,

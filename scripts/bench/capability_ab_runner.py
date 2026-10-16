@@ -118,7 +118,6 @@ from nexus.engine.learning_policy_loader import (
 from nexus.engine.route_decision_adapter import build_route_decision
 from nexus.engine.runtime_capability_receipts import emit_harness_runtime_receipts
 from nexus.learning.skill_catalog import SkillCatalog, SkillCatalogEntry
-from nexus.research.local_sprint_mutator import generate_local_candidate
 from nexus.services.gemini_cli import (
     build_gemini_cli_invocation,
     extract_token_info,
@@ -3875,59 +3874,10 @@ def _deterministic_hidden_pre_retry(
     decision: HiddenRetryDecision,
     timeout_sec: int,
 ) -> dict[str, Any]:
-    if decision.classifier != "narrow_assertion_failure" or decision.lane != "minimal_patch":
-        return {"used": False, "reason": "classifier_not_eligible"}
-    if not re.search(r"(assertionerror|e\s+assert)", failure_tail.lower()):
-        return {"used": False, "reason": "not_assertion_diff"}
-    target_path = Path(target_file)
-    if target_path.suffix != ".py" or not target_path.exists():
-        return {"used": False, "reason": "target_not_python"}
-    original = target_path.read_text(encoding="utf-8")
-    pre_retry_start = time.monotonic()
-    patched = generate_local_candidate(
-        original,
-        f"{task.task_desc}\n\nHidden verifier assertion:\n{_bounded_tail(failure_tail, limit=1200)}",
-        "nexus_hidden_pre_retry",
-        1,
-    )
-    if patched == original:
-        return {"used": False, "reason": "no_deterministic_candidate"}
-    try:
-        syntax_warning = _python_syntax_warning(patched, str(target_path))
-    except SyntaxError as exc:
-        return {"used": True, "passed": False, "reason": f"syntax_error:{exc.msg}", "wall_sec": round(time.monotonic() - pre_retry_start, 4)}
-    if syntax_warning:
-        return {"used": True, "passed": False, "reason": f"syntax_warning:{syntax_warning}", "wall_sec": round(time.monotonic() - pre_retry_start, 4)}
-    target_path.write_text(patched, encoding="utf-8")
-    try:
-        verify = _run_process_group(
-            _pytest_verifier_cmd(verification_test_file),
-            cwd=repo_root,
-            env=os.environ.copy(),
-            timeout_sec=timeout_sec,
-        )
-    except subprocess.TimeoutExpired:
-        target_path.write_text(original, encoding="utf-8")
-        return {
-            "used": True,
-            "passed": False,
-            "reason": "deterministic_pre_retry_timeout",
-            "wall_sec": round(time.monotonic() - pre_retry_start, 4),
-            "stdout_tail": "",
-            "stderr_tail": "benchmark_task_deadline",
-        }
-    wall_sec = round(time.monotonic() - pre_retry_start, 4)
-    passed = verify.returncode == 0
-    if not passed:
-        target_path.write_text(original, encoding="utf-8")
-    return {
-        "used": True,
-        "passed": passed,
-        "reason": "deterministic_pre_retry_passed" if passed else "deterministic_pre_retry_failed",
-        "wall_sec": wall_sec,
-        "stdout_tail": _tail_text(verify.stdout, max_chars=1000),
-        "stderr_tail": _tail_text(verify.stderr, max_chars=1000),
-    }
+    # The deterministic local answer table was deleted (#2339 follow-up): there is no local
+    # pre-retry candidate any more, so the hidden retry always goes to the model.
+    del task, repo_root, target_file, verification_test_file, failure_tail, decision, timeout_sec
+    return {"used": False, "reason": "no_local_candidate_generator"}
 
 
 def _deterministic_failed_tests_pre_rescue(
@@ -3938,55 +3888,9 @@ def _deterministic_failed_tests_pre_rescue(
     test_file: str,
     timeout_sec: int,
 ) -> dict[str, Any]:
-    target_path = Path(target_file)
-    if target_path.suffix != ".py" or not target_path.exists():
-        return {"used": False, "reason": "target_not_python"}
-    original = target_path.read_text(encoding="utf-8")
-    pre_rescue_start = time.monotonic()
-    patched = generate_local_candidate(
-        original,
-        f"{task.task_desc}\n\nVisible tests failed after the model attempt. Apply only a deterministic minimal repair.",
-        "nexus_hidden_lite_failed_tests_pre_rescue",
-        1,
-    )
-    if patched == original:
-        return {"used": False, "reason": "no_deterministic_candidate"}
-    try:
-        syntax_warning = _python_syntax_warning(patched, str(target_path))
-    except SyntaxError as exc:
-        return {"used": True, "passed": False, "reason": f"syntax_error:{exc.msg}", "wall_sec": round(time.monotonic() - pre_rescue_start, 4)}
-    if syntax_warning:
-        return {"used": True, "passed": False, "reason": f"syntax_warning:{syntax_warning}", "wall_sec": round(time.monotonic() - pre_rescue_start, 4)}
-    target_path.write_text(patched, encoding="utf-8")
-    try:
-        verify = _run_process_group(
-            _pytest_verifier_cmd(test_file),
-            cwd=repo_root,
-            env=os.environ.copy(),
-            timeout_sec=timeout_sec,
-        )
-    except subprocess.TimeoutExpired:
-        target_path.write_text(original, encoding="utf-8")
-        return {
-            "used": True,
-            "passed": False,
-            "reason": "deterministic_pre_rescue_timeout",
-            "wall_sec": round(time.monotonic() - pre_rescue_start, 4),
-            "stdout_tail": "",
-            "stderr_tail": "benchmark_task_deadline",
-        }
-    wall_sec = round(time.monotonic() - pre_rescue_start, 4)
-    passed = verify.returncode == 0
-    if not passed:
-        target_path.write_text(original, encoding="utf-8")
-    return {
-        "used": True,
-        "passed": passed,
-        "reason": "deterministic_pre_rescue_passed" if passed else "deterministic_pre_rescue_failed",
-        "wall_sec": wall_sec,
-        "stdout_tail": _tail_text(verify.stdout, max_chars=1000),
-        "stderr_tail": _tail_text(verify.stderr, max_chars=1000),
-    }
+    # The deterministic local answer table was deleted (#2339 follow-up): no local pre-rescue.
+    del task, repo_root, target_file, test_file, timeout_sec
+    return {"used": False, "reason": "no_local_candidate_generator"}
 
 
 def _model_required_execution_policy(
@@ -17239,11 +17143,8 @@ def _run_without_nexus_impl(
         start = time.monotonic()
         status = "FAILED"
         try:
-            # Bare baseline: no hyper search; for hard tasks we intentionally do verification-only.
-            if task.difficulty != "hard":
-                patched = generate_local_candidate(original, task.task_desc, "local", 0)
-                if patched != original:
-                    target_path.write_text(patched, encoding="utf-8")
+            # Bare baseline without a model: verification-only. The deterministic local answer
+            # table that used to patch non-hard tasks here was deleted (#2339 follow-up).
             res = _run_process_group(_pytest_verifier_cmd(test_file), cwd=repo_root, env=os.environ.copy(), timeout_sec=timeout_sec)
             status = "SUCCESS" if res.returncode == 0 else "FAILED"
         except Exception:

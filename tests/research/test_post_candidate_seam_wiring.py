@@ -854,7 +854,8 @@ def test_in_place_delivery_writes_while_holding_the_target_lock(
 def test_baseline_apply_refuses_when_a_companion_file_is_held(tmp_path: Path, monkeypatch) -> None:
     """Gemini N3: baseline apply's companion edits are locked with the target; a companion
     held by another task refuses the whole delivery (nothing written). Since #2339 only a
-    no-model local patch carries companion edits, so this runs the local mode."""
+    model patch is delivered and the companion edits were deleted with the answer table, so a
+    held unrelated file neither blocks the delivery nor gets written."""
     original = "def value():\n    return 1\n"
     (tmp_path / "demo.py").write_text(original, encoding="utf-8")
     (tmp_path / "test_demo.py").write_text(
@@ -879,12 +880,7 @@ def test_baseline_apply_refuses_when_a_companion_file_is_held(tmp_path: Path, mo
     monkeypatch.delenv("NEXUS_SYMMETRIC_PROMPT", raising=False)
     monkeypatch.setattr(rfs, "LLMCandidateGenerator", FakeLLMGenerator)
     monkeypatch.setattr(rfs, "_build_codeintel_evidence", lambda *_a, **_k: {"status": "ok"})
-    monkeypatch.setattr(rfs, "generate_local_candidate", lambda *a, **k: "def value():\n    return 2\n")
-    monkeypatch.setattr(
-        rfs,
-        "generate_local_companion_edits",
-        lambda *a, **k: {tmp_path / "helper.py": "X = 2\n"},
-    )
+    assert not hasattr(rfs, "generate_local_companion_edits")
     monkeypatch.setattr(
         rfs.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a[0], 0, "", "")
     )
@@ -899,8 +895,8 @@ def test_baseline_apply_refuses_when_a_companion_file_is_held(tmp_path: Path, mo
             candidate_count=1,
             root_cause_confidence=1.0,
             findings_query=None,
-            llm_mode=False,
-            llm_baseline=False,
+            llm_mode=True,
+            llm_baseline=True,
             timeout_sec=30,
             stage1_timeout_sec=10,
             max_time_ratio_guard=1.5,
@@ -916,9 +912,9 @@ def test_baseline_apply_refuses_when_a_companion_file_is_held(tmp_path: Path, mo
         )
     finally:
         seam.release_target_lock("other-task")
-    assert (tmp_path / "demo.py").read_text(encoding="utf-8") == original
+    assert payload["result"]["error"] != "file_lock_denied"
+    assert payload["result"]["status"] == "SUCCESS"
     assert not (tmp_path / "helper.py").exists()
-    assert payload["result"]["error"] == "file_lock_denied"
 
 
 def test_runtime_visible_verifier_goes_through_confined_evaluation_and_is_refused_on_a_held_lock(

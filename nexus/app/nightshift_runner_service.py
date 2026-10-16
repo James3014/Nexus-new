@@ -24,10 +24,6 @@ from nexus.research.runtime.runtime_resilience import (
 )
 from nexus.research.evaluation.candidate_evaluator import CandidateEvaluator
 from nexus.research.learn.policy_runtime import load_phase_policy
-from nexus.research.local_sprint_mutator import (
-    generate_local_companion_edits,
-    generate_nightshift_bundle_edits,
-)
 from nexus.core.context_hub import ContextHub
 from nexus.services.workspace import WorkspaceManager
 from nexus.core.outcome_schema import NexusOutcomeV2, SprintOutcome
@@ -625,34 +621,14 @@ class AutoResearchNightShift:
             previous_lessons = f"Error: {e}"
             wisdom_patterns = "None."
 
-        target_path = workpath / self.resolved_target_file
-        deterministic_bundle = generate_nightshift_bundle_edits(
-            workpath,
-            target_path,
-            self.task,
-            round_id,
-        )
-        if deterministic_bundle:
-            for bundle_path, bundle_content in deterministic_bundle.items():
-                bundle_path.parent.mkdir(parents=True, exist_ok=True)
-                bundle_path.write_text(bundle_content, encoding="utf-8")
-            tier1_ok, tier1_summary = self._run_tier1_validation(workpath)
-            if tier1_ok:
-                primary_candidate = deterministic_bundle.get(
-                    target_path, target_path.read_text(encoding="utf-8")
-                )
-                return RoundOutcome(1.0, primary_candidate, "SCORED", "nightshift_bundle_repair")
-            if self.git_enabled:
-                subprocess.run(
-                    ["git", "reset", "--hard", "HEAD"], cwd=workpath, capture_output=True
-                )
-
+        # The fixture-keyed deterministic bundle shortcut (scored 1.0 before any model) was
+        # deleted with the local answer table (#2339 follow-up): a round needs the model.
         if self.gateway is None:
             return RoundOutcome(
                 0.0,
                 "",
                 "GENERATION_FAILED",
-                "nightshift_gateway_unavailable_without_deterministic_bundle",
+                "nightshift_gateway_unavailable",
             )
 
         prompt = {"status": "FAIL", "summary": "No model response", "patch": ""}
