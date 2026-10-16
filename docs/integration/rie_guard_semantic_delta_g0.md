@@ -114,3 +114,27 @@ pull-requests read`, `timeout-minutes: 10`, every step `continue-on-error`).
   evidence is rendered as incomplete, never as UNCHANGED.
 - The job is not a required check and owns no policy, Candidate, or merge
   authority.
+
+## Sticky comment surface (#1580 G2 reviewer projection)
+
+The RIE sticky PR comment (`.github/workflows/repository-intelligence-comment.yml`,
+`pull_request_target`) now shows the guard semantic delta, because the sticky
+comment is the one surface reviewers actually read.
+
+- A data-only, `continue-on-error` step runs `scripts/ops/rie_guard_delta_evidence.py`
+  from the default-branch checkout (full history, `git fetch --no-tags origin
+  <base> <head>`) with the RIE engine pinned at `88285acf570688befbc8e36eb73f46987171bd4e`
+  in `.rie-guard-engine`, and writes `$RUNNER_TEMP/rie-guard-delta.json`.
+- `scripts/ops/rie_pr_comment.py --guard-delta-json PATH` loads that file, checks
+  schema, claim ceiling, the `content_sha256` seal and that `new_identity`
+  matches this PR number and head SHA, and renders one line. TIGHTENS, LOOSENS,
+  MIXED and UNKNOWN are flagged lines (so "nothing to flag" is not shown);
+  UNCHANGED is a `Note:`; anything missing, incomplete, tampered or mismatched
+  is a `Note:` "not observed (reason)" and is never shown as UNCHANGED. Without
+  the flag the comment renders exactly as before.
+- Trust argument: all executed code is default-branch code or the pinned engine;
+  base and head guard sources are read as git blobs (data) and never imported or
+  run; the behavioral probes are never enabled here (they would execute PR-head
+  Python with a write token); the output is advisory only, not a required check,
+  merge gate, policy decision or Candidate acceptance. The `pull_request`
+  artifact job in `repository-intelligence.yml` is unchanged.
