@@ -16,7 +16,7 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Mapping, Optional, Tuple
+from typing import Any, Callable, Iterable, Mapping, Optional, Tuple
 
 from nexus.executors.exec_policy import (
     assert_git_repo_config_safe,
@@ -710,6 +710,63 @@ def _sweep_tagged_processes(tag: str) -> bool:
     except Exception as exc:  # noqa: BLE001
         _logger.debug("timeout sweep failed (treated as not clean): %s", exc)
         return False
+
+
+# ---------------------------------------------------------------------------
+# Public descendant-sweep facade (#2260)
+#
+# ``agy_dispatch_boundary`` confines the dispatcher's agy child the way
+# ``run_cli_worker`` confines a CLI worker. It owns no sweep internals: the
+# run-tag env name, the start-tick registry and the kill logic stay here and are
+# reached only through these names.
+# ---------------------------------------------------------------------------
+
+#: Environment variable that carries a run's tag into the worker and its children.
+RUN_TAG_ENV = _RUN_TAG_ENV
+
+
+def sweep_baseline() -> Optional[_SweepBaseline]:
+    """Record the pre-start process facts; ``None`` when they cannot be read."""
+    return _sweep_baseline()
+
+
+def track_run(run_tag: str, pid: int) -> _DescendantTracker:
+    """Register the launched worker ``pid`` for ``run_tag`` and start tracking children.
+
+    The returned tracker has ``stop() -> set[int]`` and ``probe_failed``; pass it
+    to ``sweep_run`` and always pair this call with ``release_run``.
+    """
+    ticks = _proc_start_ticks(Path("/proc") / str(pid))
+    if ticks is not None:
+        _RUN_START_TICKS[run_tag] = ticks
+    return _DescendantTracker(pid)
+
+
+def sweep_run(
+    run_tag: str,
+    tracker: Any,
+    baseline: Optional[_SweepBaseline],
+    roots: Iterable[str],
+) -> bool:
+    """Stop ``tracker`` and SIGKILL every surviving descendant of the run.
+
+    True only when the sweep is provably clean: tracked descendants and
+    processes with a cwd under ``roots`` are dead, no process still carries the
+    run tag, the baseline was readable and no process-table poll failed.
+    """
+    tracked = tracker.stop() - (baseline.preexisting if baseline else frozenset())
+    tagged_clean = _sweep_tagged_processes(run_tag)
+    return bool(
+        _sweep_clean(tracked, _pids_with_cwd_under(tuple(roots), baseline))
+        and tagged_clean
+        and baseline is not None
+        and not tracker.probe_failed
+    )
+
+
+def release_run(run_tag: str) -> None:
+    """Forget the run's start-tick entry (idempotent)."""
+    _RUN_START_TICKS.pop(run_tag, None)
 
 
 # ---------------------------------------------------------------------------
