@@ -1835,3 +1835,18 @@ def test_terminal_record_requires_core_missing_not_just_blocking(tmp_path):
     )
     assert record["record_status"] == "FAILED"
     assert record["candidate_commit_allowed"] is False
+
+
+def test_terminal_record_never_replaces_a_recorded_one(tmp_path, monkeypatch):
+    service = _host_service(tmp_path, _CountingPort(answer={}))
+    recorded = {"attempt_id": "attempt-1", "record_status": "RECORDED", "marker": "kept"}
+    current = _terminal_state(tmp_path, terminal_core_record=recorded)
+    stale = _terminal_state(tmp_path)  # snapshot taken before the record attached
+    monkeypatch.setattr(
+        service,
+        "_build_terminal_core_record",
+        lambda state: {"attempt_id": "attempt-1", "record_status": "FAILED"},
+    )
+    monkeypatch.setattr(service, "_mutate_state", lambda task_id, mutate: mutate(current))
+    service._record_terminal_core_not_covered("verdict-unit", stale)
+    assert current["terminal_core_record"] == recorded

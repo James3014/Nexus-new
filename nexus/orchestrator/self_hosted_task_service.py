@@ -3632,10 +3632,17 @@ class SelfHostedTaskService:
 
             def attach(current: dict[str, Any]) -> None:
                 # Only onto the same attempt, still terminal and receipt-free.
+                current_record = current.get("terminal_core_record")
+                already_recorded = (
+                    isinstance(current_record, Mapping)
+                    and current_record.get("attempt_id") == attempt_id
+                    and current_record.get("record_status") == "RECORDED"
+                )
                 if (
                     current.get("attempt_id") == attempt_id
                     and current.get("status") == status
                     and current.get("verified_receipt") is None
+                    and not already_recorded
                 ):
                     current["terminal_core_record"] = _jsonable(record)
 
