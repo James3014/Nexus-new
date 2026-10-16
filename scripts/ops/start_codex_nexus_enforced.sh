@@ -70,7 +70,8 @@ if [[ -e "$LOCK_FILE" ]]; then
   exit 3
 fi
 
-trap 'rm -f "$LOCK_FILE"' EXIT
+RUN_HOME=""
+trap 'rm -f "$LOCK_FILE"; [[ -z "$RUN_HOME" ]] || rm -rf "$RUN_HOME"' EXIT
 echo "$$" > "$LOCK_FILE"
 
 cd "$NEXUS_ROOT"
@@ -168,9 +169,20 @@ git -C "$CANONICAL_ROOT" worktree add --quiet --detach "$WORK_DIR" HEAD
 WORK_DIR="$(cd "$WORK_DIR" && pwd -P)"
 echo "[nexus-enforced] work_copy=$WORK_DIR"
 
+# Disposable HOME (#2254): codex gets a copy of its auth file only (0600), an
+# allowlisted environment, and never the host HOME (~/.ssh, ~/.config/gh,
+# ~/.gitconfig, ~/.codex history/sessions/memories/MCP config).  The helper
+# runs under python3 -I from this script's own checkout.  Deleted on exit.
+GUARD="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/codex_run_guard.py"
+RUN_HOME="$(mktemp -d "$CODEX_STATE_DIR/home.XXXXXX")"
+python3 -I "$GUARD" home "$RUN_HOME" || exit 2
+# Symlinks escaping the work copy and the .git pointer, before and after.
+TARGET_SNAPSHOT="$RUN_HOME/target-snapshot.json"
+python3 -I "$GUARD" snapshot "$WORK_DIR" "$TARGET_SNAPSHOT" || exit 2
+
 echo "[nexus-enforced] invoke codex-nexus (enforced)"
 set +e
-"$CODEX_BIN" exec --ephemeral --json -C "$WORK_DIR" -m "$MODEL" \
+python3 -I "$GUARD" exec "$RUN_HOME" -- "$CODEX_BIN" exec --ephemeral --json -C "$WORK_DIR" -m "$MODEL" \
   --sandbox "$SANDBOX_MODE" -c 'approval_policy="never"' \
   -c sandbox_workspace_write.exclude_tmpdir_env_var=true \
   -c sandbox_workspace_write.exclude_slash_tmp=true \
@@ -185,6 +197,11 @@ fi
 if [[ "$AFTER" != "$BEFORE" ]]; then
   echo "[nexus-enforced] canonical_checkout_integrity_violation: $CANONICAL_ROOT changed during the run" >&2
   exit 5
+fi
+
+if ! python3 -I "$GUARD" verify "$WORK_DIR" "$TARGET_SNAPSHOT"; then
+  echo "[nexus-enforced] codex_target_symlink_or_git_escape: work copy kept: $WORK_DIR" >&2
+  exit 6
 fi
 
 # Denials are read from the structured `codex exec --json` stream only.
