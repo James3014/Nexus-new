@@ -319,3 +319,53 @@ def test_required_probe_blocks_recovery_until_it_records_verified() -> None:
     assert not _fail_to_pass_blocked(state("VERIFIED", True))
     assert not _fail_to_pass_blocked(state("UNPROVEN", False))
     assert not _fail_to_pass_blocked({})
+
+
+def test_contract_requirement_blocks_recovery_without_probe_record() -> None:
+    from nexus.orchestrator.self_hosted_task_service import _fail_to_pass_blocked
+
+    contract = {"acceptance_profile": {"required_evidence": ["fail_to_pass_base_verifier"]}}
+    # The durable contract decides; a missing or tampered probe record cannot unblock it.
+    assert _fail_to_pass_blocked({"contract": contract})
+    assert _fail_to_pass_blocked({"contract": contract, "fail_to_pass": "VERIFIED"})
+    assert _fail_to_pass_blocked({
+        "contract": contract,
+        "fail_to_pass": {"status": "UNPROVEN", "required": False},
+    })
+    assert not _fail_to_pass_blocked({
+        "contract": contract,
+        "fail_to_pass": {"status": "VERIFIED", "required": True},
+    })
+    assert not _fail_to_pass_blocked({
+        "contract": {"acceptance_profile": {"required_evidence": []}}
+    })
+
+
+def test_probe_with_a_timed_out_base_command_is_not_verified(monkeypatch, tmp_path) -> None:
+    from types import SimpleNamespace
+
+    from nexus.executors.cli_worker import CliWorkerStatus
+    from nexus.orchestrator import self_hosted_task_service as service_module
+    from nexus.orchestrator.candidate_verifier import CandidateVerifier
+
+    evidence = (
+        SimpleNamespace(status=CliWorkerStatus.COMPLETED.value, exit_code=1),
+        SimpleNamespace(status="TIMED_OUT", exit_code=None),
+    )
+    monkeypatch.setattr(
+        CandidateVerifier,
+        "_run_verifiers",
+        staticmethod(
+            lambda *_a, **_k: (False, evidence, ["verifier_failed:a", "verifier_failed:b"])
+        ),
+    )
+    calls: list[list[str]] = []
+    manager = SimpleNamespace(_run_git=lambda args, cwd=None: calls.append(list(args)) or "")
+    contract = SimpleNamespace(
+        target_base_revision="0" * 40,
+        verifier_commands=["python -c 'raise SystemExit(1)'", "python -c 'import time'"],
+        controller_repo_root=str(tmp_path),
+    )
+    probe = service_module.SelfHostedTaskService._run_fail_to_pass_probe(manager, contract)
+    assert probe["status"] == "BASE_NOT_PHYSICAL_FAIL"
+    assert any(call[:2] == ["worktree", "remove"] for call in calls)

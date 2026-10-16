@@ -318,12 +318,20 @@ def _fail_to_pass_blocked(state: Mapping[str, Any]) -> bool:
     between the VERIFIED checkpoint and the probe cannot be recovered into a
     commit that skipped the gate.
     """
-    probe = state.get("fail_to_pass") if isinstance(state, Mapping) else None
-    if not isinstance(probe, Mapping):
+    if not isinstance(state, Mapping):
         return False
+    probe = state.get("fail_to_pass")
+    contract = state.get("contract")
+    profile = contract.get("acceptance_profile") if isinstance(contract, Mapping) else None
+    evidence = profile.get("required_evidence") if isinstance(profile, Mapping) else None
+    # The durable contract, not the probe record, decides whether the gate applies.
+    contract_requires = isinstance(evidence, (list, tuple)) and FAIL_TO_PASS_EVIDENCE_TOKEN in evidence
+    if not isinstance(probe, Mapping):
+        return contract_requires
     if probe.get("status") in _FAIL_TO_PASS_BLOCKED_STATUSES:
         return True
-    return probe.get("required") is True and probe.get("status") != "VERIFIED"
+    required = contract_requires or probe.get("required") is True
+    return required and probe.get("status") != "VERIFIED"
 
 
 def _utc_now() -> str:
@@ -4876,16 +4884,22 @@ class SelfHostedTaskService:
             )
             exit_codes = [item.exit_code for item in evidence]
             probe["base_exit_codes"] = exit_codes
-            normal = all(item.status == CliWorkerStatus.COMPLETED.value for item in evidence)
-            if passed and evidence:
-                probe["status"] = "BASE_ALREADY_PASS"
-            elif any(
-                item.status == CliWorkerStatus.COMPLETED.value and item.exit_code not in (0, None)
+            expected = len(CandidateVerifier.effective_verifier_manifest(commands))
+            normal = bool(evidence) and len(evidence) == expected and all(
+                item.status == CliWorkerStatus.COMPLETED.value and item.exit_code is not None
                 for item in evidence
-            ) and not any(f.startswith(("verifier_invalid", "verifier_evidence_inconsistent")) for f in failures):
-                probe["status"] = "VERIFIED"
-            elif not normal or not evidence:
+            )
+            inconsistent = any(
+                f.startswith(("verifier_invalid", "verifier_evidence_inconsistent")) for f in failures
+            )
+            if not normal or inconsistent:
+                # Every base command must have run to a normal exit; a timeout or
+                # start failure is not evidence that base fails.
                 probe["status"] = "BASE_NOT_PHYSICAL_FAIL"
+            elif passed:
+                probe["status"] = "BASE_ALREADY_PASS"
+            elif any(item.exit_code != 0 for item in evidence):
+                probe["status"] = "VERIFIED"
         except Exception as exc:  # noqa: BLE001 - infrastructure errors fail closed
             probe["status"] = "BASE_NOT_PHYSICAL_FAIL"
             probe["error"] = str(exc)[:500]
@@ -4896,8 +4910,9 @@ class SelfHostedTaskService:
                         ["worktree", "remove", "--force", str(checkout)],
                         cwd=str(Path(contract.controller_repo_root).resolve()),
                     )
-                except Exception:  # noqa: BLE001 - fall through to directory removal
-                    pass
+                except Exception as exc:  # noqa: BLE001 - cleanup failure fails closed
+                    probe["status"] = "BASE_NOT_PHYSICAL_FAIL"
+                    probe["cleanup_error"] = str(exc)[:500]
             shutil.rmtree(scratch, ignore_errors=True)
             if added:
                 try:
@@ -7048,7 +7063,7 @@ class SelfHostedTaskService:
                 "provider", "model", "controller_revision", "target_base_revision",
                 "controller_repo_root", "target_repo_root", "target_worktree_root",
                 "collaboration_realm", "authority_change_candidate_confirmation",
-                "protected_contracts",
+                "fail_to_pass_required", "protected_contracts",
                 "provider_probe_evidence_hash", "provider_binary_path",
                 "provider_binary_sha256", "provider_cli_version_sha256",
                 "provider_probe_expires_at", "provider_authentication_evidence",
@@ -7061,7 +7076,7 @@ class SelfHostedTaskService:
                     raise ValueError("WORKER_CANDIDATE_TASK_ID_CONFLICT")
                 if all(
                     (bool(prior.get(field)) == bool(request.get(field)))
-                    if field == "authority_change_candidate_confirmation"
+                    if field in {"authority_change_candidate_confirmation", "fail_to_pass_required"}
                     else prior.get(field) == request.get(field)
                     for field in semantic_fields
                 ):
