@@ -6799,3 +6799,26 @@ def test_model_rejected_after_rotation_interrupt_is_not_before_provider(
     assert record["phase"] == "TERMINAL"
     assert record["status"] == "OUTCOME_UNKNOWN"
     assert record["reconciliation"]["result"] == "WRAPPER_EXCEPTION_WITH_UNKNOWN_PROVIDER_EFFECT"
+
+
+def test_catalog_admits_bare_alias_without_effort_only_when_a_tier_is_served(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Real `agy models` lists only effort-suffixed ids; Agy resolves a bare
+    # alias to one of them when no --effort is passed.
+    home = _catalog_env(
+        tmp_path,
+        monkeypatch,
+        catalog="gemini-3.8-flash-low\tGemini 3.8 Flash (Low)\n"
+        "gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\n",
+    )
+    env = {"HOME": str(home)}
+    bare = dispatch._agy_model_catalog_admission(
+        model="gemini-3.8-flash", effort=None, env=env, account_alias_hash="a"
+    )
+    unserved = dispatch._agy_model_catalog_admission(
+        model="claude-sonnet-5-5", effort=None, env=env, account_alias_hash="a"
+    )
+    assert bare["admitted"] is True
+    assert unserved["admitted"] is False
+    assert unserved["model_catalog"]["status"] == "MODEL_CAPABILITY_UNAVAILABLE"

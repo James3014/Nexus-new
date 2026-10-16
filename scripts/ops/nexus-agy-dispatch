@@ -562,6 +562,12 @@ def _agy_model_catalog_admission(
     if resolved in ids or (effort and f"{resolved}-{effort}" in ids):
         catalog["status"] = "OK"
         return base
+    # Without an explicit effort Agy resolves a bare alias (e.g.
+    # gemini-3.8-flash) to one of its served effort tiers; admit it only when
+    # the account's catalog actually serves such a tier.
+    if not effort and any(f"{resolved}-{tier}" in ids for tier in ("low", "medium", "high")):
+        catalog["status"] = "OK"
+        return base
     catalog["status"] = "MODEL_CAPABILITY_UNAVAILABLE"
     catalog["mismatch_reason"] = "MODEL_NOT_IN_ACCOUNT_CATALOG"
     base["admitted"] = False
