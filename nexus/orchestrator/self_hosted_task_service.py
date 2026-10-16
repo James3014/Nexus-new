@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Callable, Iterable, Iterator, Mapping, Optional, Sequence
+from typing import Any, Callable, Iterable, Iterator, Mapping, Optional, Sequence, cast
 from uuid import uuid4
 
 from nexus_runtime.execution_state import ExecutionStateStore
@@ -4880,7 +4880,8 @@ class SelfHostedTaskService:
             )
             added = True
             passed, evidence, failures = CandidateVerifier._run_verifiers(
-                SimpleNamespace(verifier_commands=commands), str(checkout), None
+                # Only verifier_commands is read; code_integrity_v1 is excluded above.
+                cast(Any, SimpleNamespace(verifier_commands=commands)), str(checkout), None
             )
             exit_codes = [item.exit_code for item in evidence]
             probe["base_exit_codes"] = exit_codes
