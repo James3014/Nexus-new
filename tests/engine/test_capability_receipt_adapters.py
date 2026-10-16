@@ -312,6 +312,9 @@ def test_semantic_research_runtime_receipts_require_evidence_and_gate():
                 "formal_report_schema_version": "nexus_formal_report_v1",
                 "verification_summary_ref": "pytest:PASS",
                 "formal_report_gate_passed": True,
+                # claim gate (#1869): needs the verifier/source-hash binding
+                "formal_report_verifier_status": "pass",
+                "formal_report_source_hash": "sha256:" + "c" * 64,
             },
         )
     }

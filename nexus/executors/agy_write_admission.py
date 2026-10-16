@@ -28,6 +28,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import pwd
 import shutil
 import subprocess
 import sys
@@ -369,14 +370,90 @@ def run_home_settings_sha256(run_home: Path) -> str:
         return "unreadable"
 
 
+# Credential material under the REAL (source) home that a confined worker must
+# not read by absolute path (#1752/#1841).  The disposable run HOME holds the
+# copies the worker needs; nothing here is required by agy or cline.  A
+# ``literal`` plus ``subpath`` pair covers both files and directories.
+SOURCE_HOME_CREDENTIAL_PATHS = (
+    ".ssh",
+    ".config/gh",
+    ".git-credentials",
+    ".netrc",
+    ".gitconfig",
+    ".config/git/config",
+    ".config/git/credentials",
+    ".config/nexus-agent-bot",
+    ".config/nexus-jev",
+    ".codex",
+    ".cline",
+    ".gemini",
+    ".grok",
+    ".aws",
+    ".docker/config.json",
+    ".npmrc",
+    ".pypirc",
+    "Library/Keychains",
+)
+
+
+class CredentialPathOverlapError(ValueError):
+    """The writable target or run root sits inside a denied credential path."""
+
+
+def _is_within(path: Path, parent: Path) -> bool:
+    if sys.platform == "darwin":  # case-insensitive filesystems
+        path, parent = Path(str(path).casefold()), Path(str(parent).casefold())
+    return path == parent or parent in path.parents
+
+
+def _credential_candidates(unresolved: Path) -> list[Path]:
+    """The credential path, where it resolves to, and where symlinks inside it lead.
+
+    Seatbelt matches resolved vnodes: ``~/.gitconfig -> ~/dotfiles/gitconfig`` or
+    ``~/.ssh/id_rsa -> ~/dotfiles/ssh/id_rsa`` would otherwise stay readable.
+    Only the first level inside a credential directory is scanned.
+    """
+    found = [unresolved, Path(os.path.realpath(unresolved))]
+    if found[1].is_dir():
+        try:
+            with os.scandir(found[1]) as entries:
+                for entry in entries:
+                    if entry.is_symlink():
+                        found.append(Path(os.path.realpath(entry.path)))
+        except OSError:
+            pass
+    return list(dict.fromkeys(found))
+
+
+def _credential_homes(source_home: Optional[Path]) -> list[Path]:
+    """The source HOME plus the account's real home (pool HOMEs differ from it)."""
+    homes = [Path(os.path.realpath(source_home if source_home is not None else worker_home(None)))]
+    try:
+        account_home = Path(os.path.realpath(pwd.getpwuid(os.getuid()).pw_dir))
+    except (KeyError, OSError):
+        return homes
+    if account_home not in homes:
+        homes.append(account_home)
+    return homes
+
+
 def build_seatbelt_profile(
     *,
     run_root: Path,
     writable_target: Optional[Path],
     run_home: Optional[Path] = None,
     extra_protected_target_names: tuple[str, ...] = (),
+    source_home: Optional[Path] = None,
+    target_root: Optional[Path] = None,
 ) -> str:
     """Deny every file write except the target and the per-run root.
+
+    It also denies READS of the credential paths in
+    ``SOURCE_HOME_CREDENTIAL_PATHS`` under ``source_home`` (the real home the
+    run HOME was materialized from; default ``worker_home(None)``).  Only those
+    subpaths are denied: the target and run root stay readable wherever they
+    live.  ``target_root`` is the (possibly read-only) target, checked for overlap.
+    The macOS keychain daemon is not covered (see #1841).
 
     ``run_root`` holds the disposable HOME and TMPDIR, so the real HOME
     (``~/.gemini`` config, projects, OAuth token, memory) and
@@ -409,6 +486,26 @@ def build_seatbelt_profile(
         config = _sbpl_path(run_home / ".gemini" / "config")
         deny += [f'  (literal "{settings}")', f'  (literal "{config}")', f'  (subpath "{config}")']
         reallow = [f'  (subpath "{_sbpl_path(run_home / AGY_RUN_HOME_PROJECTS)}")']
+    credential_denies: list[str] = []
+    for home in _credential_homes(source_home):
+        for relative in SOURCE_HOME_CREDENTIAL_PATHS:
+            unresolved = home / relative
+            for candidate in _credential_candidates(unresolved):
+                entry = _sbpl_path(candidate)
+                for owned in (run_root, writable_target, run_home, target_root):
+                    if owned is None:
+                        continue
+                    resolved = Path(os.path.realpath(owned))
+                    # A target inside a denied path cannot be read.  A symlink
+                    # destination inside a writable target (a dotfiles repo)
+                    # would also be writable, so that direction is refused too.
+                    if _is_within(resolved, candidate) or (
+                        candidate != unresolved and _is_within(candidate, resolved)
+                    ):
+                        raise CredentialPathOverlapError(
+                            "target or run root overlaps a denied credential path"
+                        )
+                credential_denies += [f'  (literal "{entry}")', f'  (subpath "{entry}")']
     lines = [
         "(version 1)",
         "(allow default)",
@@ -424,6 +521,9 @@ def build_seatbelt_profile(
         lines += ["(deny file-write*", *deny, ")"]
     if reallow:
         lines += ["(allow file-write*", *reallow, ")"]
+    # Reads of the real home's credential files (#1752); appended last so the
+    # leading profile lines stay stable.
+    lines += ["(deny file-read*", *credential_denies, ")"]
     return "\n".join(lines) + "\n"
 
 
