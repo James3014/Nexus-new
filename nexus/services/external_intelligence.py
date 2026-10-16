@@ -322,12 +322,15 @@ def build_context_pack(
         })
     normalized.sort(key=lambda item: (item["kind"], item["ref"], item["revision"]))
 
+    # Contract entries (Task Card, mutation-path sources/absences) are budgeted
+    # first and are never truncated: a partial contract file or a dropped Task
+    # Card would mislead the model. They are exempt from per_source_bytes but
+    # still bounded by max_bytes, failing closed when they cannot all fit.
+    # The final entries order stays the deterministic (kind, ref, revision) sort.
     remaining = max_bytes
-    entries: list[dict[str, Any]] = []
-    for source in normalized:
-        raw = source["content"].encode("utf-8")
-        source_limit = min(per_source_bytes, remaining)
-        clipped = _utf8_prefix(source["content"], source_limit)
+    built: dict[int, dict[str, Any]] = {}
+
+    def _entry(source: dict[str, Any], clipped: str, raw: bytes) -> dict[str, Any]:
         clipped_bytes = clipped.encode("utf-8")
         entry = {
             "kind": source["kind"],
@@ -342,10 +345,28 @@ def build_context_pack(
             "truncated": len(clipped_bytes) < len(raw),
         }
         entry["evidence_ref"] = compute_evidence_ref(entry)
-        entries.append(entry)
-        remaining -= len(clipped_bytes)
+        return entry
+
+    contract_order = sorted(
+        (i for i, s in enumerate(normalized) if s["kind"] in CONTRACT_EVIDENCE_KINDS),
+        key=lambda i: (normalized[i]["kind"] != "task_card", i),
+    )
+    for index in contract_order:
+        raw = normalized[index]["content"].encode("utf-8")
+        if len(raw) > remaining:
+            raise ExternalIntelligenceError("CONTRACT_CONTEXT_BUDGET_EXCEEDED")
+        built[index] = _entry(normalized[index], normalized[index]["content"], raw)
+        remaining -= len(raw)
+    for index, source in enumerate(normalized):
+        if index in built:
+            continue
         if remaining <= 0:
             break
+        raw = source["content"].encode("utf-8")
+        clipped = _utf8_prefix(source["content"], min(per_source_bytes, remaining))
+        built[index] = _entry(source, clipped, raw)
+        remaining -= built[index]["included_bytes"]
+    entries = [built[i] for i in sorted(built)]
 
     material = {
         "schema": CONTEXT_SCHEMA,
