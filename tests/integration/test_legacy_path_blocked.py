@@ -64,12 +64,6 @@ NON_MODEL_JSON_PARSE_ALLOWLIST = {
         "run_production_canary",
         "response_path.read_text(encoding='utf-8')",
     ),
-    # File read: execution receipt JSON written by LocalAssistService (receipt_path), not raw model text.
-    (
-        "nexus/services/local_assist_advisor_canary.py",
-        "run_advisor_canary",
-        "Path(response.receipt_path).read_text(encoding='utf-8')",
-    ),
     # Measurement: the Apple FM structured-JSON probe scores whether the model emits strict JSON;
     # a bare json.loads is the measurement itself (a sanctioned lenient parse would hide failures).
     (
