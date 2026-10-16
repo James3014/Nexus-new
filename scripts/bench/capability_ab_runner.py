@@ -103,6 +103,7 @@ from nexus.app.research_flow_service import (
     build_route_executor_flags,
     run_auto_flow,
 )
+from nexus.contracts.model_output_json import ModelOutputParseError, ModelOutputShapeError, parse_model_json
 from nexus.engine.capability_aliases import normalize_capability_name, normalize_capability_names, normalize_capability_receipt
 from nexus.engine.capability_readiness import CORE_CAPABILITIES, build_benchmark_capability_readiness
 from nexus.engine.capability_planner import CapabilityPlanner
@@ -4948,13 +4949,15 @@ def _parse_direct_gemini_json(raw_stdout: str) -> tuple[dict[str, Any], str]:
         outer, _ = json.JSONDecoder().raw_decode(raw_stdout)
     output_text = str(outer.get("output") or outer.get("response") or raw_stdout)
     try:
-        payload = json.loads(output_text)
-    except json.JSONDecodeError:
+        payload = parse_model_json(output_text, expect="object", mode="strict")
+    except ModelOutputShapeError:
+        raise
+    except ModelOutputParseError:
         start = output_text.find("{")
         end = output_text.rfind("}")
         if start == -1 or end == -1:
             raise
-        payload = json.loads(output_text[start : end + 1])
+        payload = parse_model_json(output_text[start : end + 1], expect="object", mode="strict")
     token_info = _extract_token_info_from_payload(outer)
     tokens_total = int(token_info["total_tokens"])
     payload["tokens_used"] = tokens_total

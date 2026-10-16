@@ -92,3 +92,34 @@ def test_gateway_parse_bad_input_is_parse_failure(raw):
     data, returned_raw = _parse(raw)
     assert returned_raw == raw
     assert "Parse Error" in str(data)
+
+
+def _direct_gemini(output_text: str):
+    import json
+
+    from scripts.bench.capability_ab_runner import _parse_direct_gemini_json
+
+    return _parse_direct_gemini_json(json.dumps({"output": output_text}))
+
+
+@pytest.mark.parametrize(
+    "output_text",
+    [
+        '{"status": "APPROVED", "patch": "x"}',
+        'prose {"status": "APPROVED", "patch": "x"} tail',
+        '```json\n{"status": "APPROVED", "patch": "x"}\n```',
+    ],
+)
+def test_direct_gemini_valid_forms(output_text):
+    payload, returned = _direct_gemini(output_text)
+    assert returned == output_text
+    assert payload["status"] == "APPROVED"
+    assert payload["token_capture_status"] == "missing_gateway_stats"
+
+
+@pytest.mark.parametrize(
+    "output_text", ["no json at all", "{broken", "[1, 2]", '"s"', "null", "{'a': 1}"]
+)
+def test_direct_gemini_bad_input_raises(output_text):
+    with pytest.raises(Exception):  # noqa: B017 - caller catches Exception; type may differ
+        _direct_gemini(output_text)
