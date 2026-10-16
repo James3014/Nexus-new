@@ -101,6 +101,8 @@
 | tests/nexus/orchestrator/_evidence_coverage_live_driver.py | tests/nexus/orchestrator/test_evidence_coverage_live_path.py | active | medium | evidence_coverage_live_driver |
 | nexus/orchestrator/bootstrap_agent_authority.py | tests/nexus/orchestrator/test_bootstrap_agent_authority.py, tests/nexus/orchestrator/test_gateway_controller_root.py, tests/nexus/orchestrator/test_owner_confirmation_elicitation.py, tests/nexus/orchestrator/test_task_card_create_expected_evidence.py | active | high | bootstrap_agent_task_card_authority_contract |
 | tests/nexus/orchestrator/test_bootstrap_agent_authority.py | tests/nexus/orchestrator/test_bootstrap_agent_authority.py | active | high | test_contract |
+| nexus/orchestrator/task_card_scope.py | tests/nexus/orchestrator/test_task_card_create_scope.py, tests/nexus/orchestrator/test_bootstrap_agent_authority.py, tests/nexus/orchestrator/test_task_card_create_expected_evidence.py | active | high | task_card_protected_path_scope_contract |
+| tests/nexus/orchestrator/test_task_card_create_scope.py | tests/nexus/orchestrator/test_task_card_create_scope.py | active | high | test_contract |
 | docs/runbooks/declaring_expected_evidence_universe.md | tests/nexus/orchestrator/test_task_card_create_expected_evidence.py, tests/nexus/orchestrator/test_evidence_coverage_live_path.py | active | medium | task_card_expected_evidence_declaration |
 | docs/runbooks/gateway_r1_lost_ledger_runbook.md | tests/ops/test_mcp_gateway_durable.py | active | medium | gateway_r1_lost_ledger_runbook |
 | nexus/orchestrator/candidate_verifier.py | tests/nexus/orchestrator/test_candidate_verifier.py, tests/nexus/orchestrator/test_self_hosted_task_service.py | active | high | verifier_static_contract_and_retry_recovery |
