@@ -2321,6 +2321,12 @@ _SCANNER_DETECTOR_SAMPLES = {
     "openai_api_key": ["sk-" + "proj-" + "E" * 30, "sk-" + "E" * 30],
     "slack_token": ["xo" + "x" + t + "-1234567890-" + "F" * 12 for t in "baprs"],
     "stripe_live_key": ["sk_" + "live_" + "G" * 24, "rk_" + "live_" + "G" * 24],
+    "slack_webhook_url": [
+        "https://hooks.slack" + ".com/services/T" + "0" * 9 + "/B" + "1" * 9 + "/" + "H" * 24
+    ],
+    "sendgrid_api_key": ["SG" + "." + "J" * 22 + "." + "K" * 43],
+    "twilio_api_key": ["SK" + "0123456789abcdef" * 2],
+    "azure_storage_account_key": ["AccountKey=" + "L" * 86 + "=="],
 }
 
 # Keys of the scanner's ASSIGNMENT_PATTERN (regex source -> concrete sample name).
@@ -2688,3 +2694,233 @@ def test_resolver_env_override_wins_over_populated_legacy(tmp_path: Path, monkey
     (legacy / "task.json").write_text("{}")
     monkeypatch.setenv("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR", str(tmp_path / "x"))
     assert resolve_canonical_state_root() == (tmp_path / "x").resolve()
+
+
+_SPLIT_TOKEN = "ghp_" + "A1b2C3d4" * 5
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        # incomplete first fragment, plain newline
+        (f"a {_SPLIT_TOKEN[:10]}\n{_SPLIT_TOKEN[10:]} b", "a [REDACTED] b"),
+        # complete first fragment, explicit backslash continuation
+        (f"a {_SPLIT_TOKEN[:30]} \\\n  {_SPLIT_TOKEN[30:]}\nnext", "a [REDACTED]\nnext"),
+        # CRLF and three fragments
+        (
+            f"x {_SPLIT_TOKEN[:8]}\r\n{_SPLIT_TOKEN[8:20]}\r\n{_SPLIT_TOKEN[20:]} y",
+            "x [REDACTED] y",
+        ),
+        # sk- key wrapped at a "-" boundary
+        ("k sk-ant-api03-" + "D" * 4 + "\n" + "D" * 20 + " z", "k [REDACTED] z"),
+    ],
+)
+def test_redaction_issue_1873_split_known_prefix_token(before, after):
+    assert _redact_value(before) == after
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # a complete token followed by a plain newline does not swallow the next line
+        _SPLIT_TOKEN + "\nplain words here",
+        "see sk-ab\ncd\nef next",  # joined text is not a token
+        "hf_hub_download\nanother line",
+        "sha256:" + "ab" * 32 + "\n" + "ab" * 20,
+        "0123456789abcdef0123456789abcdef01234567\n0123456789",
+    ],
+)
+def test_redaction_issue_1873_split_pass_leaves_other_text(text):
+    out = _redact_value(text)
+    if "ghp_" not in text:
+        assert out == text
+    else:
+        assert out == "[REDACTED]\nplain words here"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "sk-\n" * 300_000,
+        "ghp_" + "a" * 100 + "\n" + "a" * 100 + "\n" * 4000,
+        ("sk-" + "a" * 100 + "\\\n") * 8_000,
+        "eyJ" * 300_000 + "\n",
+        ("hf_" + "a" * 5 + "\n") * 120_000,
+        "\n" * 1_000_000,
+    ],
+    ids=lambda payload: f"{payload[:14]!r}-len{len(payload)}",
+)
+def test_redaction_issue_1873_split_pass_is_linear(payload):
+    import time
+
+    start = time.monotonic()
+    _redact_value(payload)
+    assert time.monotonic() - start < 2.0
+
+
+_B62_1873 = "Zq3Lm9Rt5Vx7Bn2Cd4Fg6"
+
+
+@pytest.mark.parametrize(
+    ("label", "secret", "template"),
+    [
+        ("stripe_sk_test", "sk_" + "test_" + _B62_1873, "pay {s} ok"),
+        ("stripe_pk_live", "pk_" + "live_" + _B62_1873, "pay {s} ok"),
+        ("stripe_whsec", "whsec_" + _B62_1873, "pay {s} ok"),
+        (
+            "slack_webhook",
+            "https://hooks.slack" + ".com/services/T0AB12CD3/B0EF45GH6/" + _B62_1873,
+            "post {s} done",
+        ),
+        (
+            "azure_key",
+            "AccountKey=" + "Lk9" * 28 + "Lk==",
+            "DefaultEndpointsProtocol=https;{s};Blob=x",
+        ),
+        ("sendgrid", "SG" + "." + _B62_1873 + "x." + "K" * 43, "key {s} ok"),
+        ("twilio", "SK" + "0a1b2c3d4e5f6a7b" * 2, "sid {s} ok"),
+        ("google_refresh", "1//0" + _B62_1873 + "-_x", "rt {s} ok"),
+        ("db_pass", "DB_PASS=" + _B62_1873, "env {s} ok"),
+        ("mysql_pwd", "MYSQL_PWD=" + _B62_1873, "env {s} ok"),
+        ("mysql_p", "mysql -u root -p" + _B62_1873, "run {s} ok"),
+        ("client_secret_space", "--client-secret " + _B62_1873, "run {s} ok"),
+        ("client_secret_eq", "--client-secret=" + _B62_1873, "run {s} ok"),
+        ("api_key_flag", "--api_key " + _B62_1873, "run {s} ok"),
+        ("key_flag", "--key=" + _B62_1873, "run {s} ok"),
+        ("auth_token", "Authorization: token " + _B62_1873, "hdr {s}"),
+        ("url_at_password", "https://al:p@ss" + _B62_1873 + "@host.example/x", "go {s} ok"),
+        ("after_underscore", "MY_" + "AKIA" + "B" * 16, "env {s} ok"),
+        ("short_glpat", "glpat-" + "a" * 20, "tok {s} ok"),
+        ("short_github_pat", "github_pat_" + "a" * 12, "tok {s} ok"),
+    ],
+)
+def test_redaction_issue_1873_each_format_before_after(label, secret, template):
+    text = template.format(s=secret)
+    out = _redact_value(text)
+    assert "[REDACTED]" in out, label
+    for fragment in (_B62_1873, "Lk9Lk9", "0a1b2c3d4e5f6a7b", "T0AB12CD3"):
+        assert fragment not in out, label
+    prefix, _, suffix = template.partition("{s}")
+    assert out.startswith(prefix) and out.endswith(suffix.rstrip()), label
+
+
+def _wrap(text: str, width: int) -> str:
+    return "\n".join(text[i : i + width] for i in range(0, len(text), width))
+
+
+_LONG_WRAP_TOKENS = {
+    "sk_proj_164": "sk-" + "proj-" + "Ab3dE6gH9jK2mN5pR8sT1vW4yZ7" * 6,
+    "github_pat_93": "github_pat_" + "11ABCDEFG0aBcDeFgHiJkL_" * 3 + "x" * 13,
+    "jwt": "eyJ"
+    + "hbGciOiJIUzI1NiJ9"
+    + ".eyJ"
+    + "zdWIiOiIxMjM0NTY3ODkwIn0" * 3
+    + "."
+    + "sig_Ab-9" * 9,
+}
+
+
+@pytest.mark.parametrize(
+    ("name", "width"),
+    [
+        ("sk_proj_164", 40),
+        ("sk_proj_164", 72),
+        ("sk_proj_164", 80),
+        ("github_pat_93", 40),
+        ("jwt", 64),
+    ],
+)
+def test_redaction_issue_1873_long_wrapped_token_leaves_no_fragment(name, width):
+    token = _LONG_WRAP_TOKENS[name]
+    out = _redact_value("before\n" + _wrap(token, width) + "\nafter words")
+    assert out == "before\n[REDACTED]\nafter words"
+    for i in range(0, len(token) - 8, 4):
+        assert token[i : i + 8] not in out
+
+
+def test_redaction_issue_1873_long_continuation_fragment_fully_consumed():
+    out = _redact_value("x ghp_ab\n" + "C" * 300 + " y")
+    assert out == "x [REDACTED] y"
+    out = _redact_value("x ghp_ab \\\n" + "C" * 300 + "\nnext")
+    assert out == "x [REDACTED]\nnext"
+
+
+def test_redaction_issue_1873_wrapped_token_after_dash_or_dot():
+    out = _redact_value("auth-" + _wrap(_SPLIT_TOKEN, 20) + "\nnext")
+    assert out == "auth-[REDACTED]\nnext"
+    out = _redact_value("v1." + _wrap(_SPLIT_TOKEN, 20) + "\nnext")
+    assert out == "v1.[REDACTED]\nnext"
+
+
+def test_redaction_issue_1873_continuation_limit_is_documented_bound():
+    from nexus.research.clm_system_one import trajectory_continuity as tc
+
+    n = tc._MAX_SPLIT_CONTINUATIONS
+    lines = ["ghp_" + "A" * 30] + ["B" * 10] * (n + 3)
+    out = _redact_value("\n".join(lines))
+    assert out == "\n".join(["[REDACTED]"] + ["B" * 10] * 3)
+
+
+@pytest.mark.parametrize(
+    ("payload", "bound"),
+    [
+        # single-line payloads: local ~0.2s, bound 1.0s (>=3x headroom)
+        ("_sk-" * 250_000 + "\n", 1.0),
+        ("_ghp_" * 200_000 + "\n", 1.0),
+        ("_xoxa-" * 160_000 + "\n", 1.0),
+        ("x" * 1_000_000 + "\nsk-" + "y" * 100, 1.0),
+        ("sk-" + "a" * 100 + "\n" + "b" * 150 + "\n" * 3000, 1.0),
+        # line-heavy payloads (a prefix on every line): local 0.5-0.75s, bound 3.0s
+        ("sk-\n" * 250_000, 3.0),
+        ("ghp_a\nb\n" * 120_000, 3.0),
+        ("ghp_aaaaaaaa\n" * 80_000, 3.0),
+        ("sk- a\n" * 160_000, 3.0),
+        ("ghp_ x\nsk- y\n" * 80_000, 3.0),
+    ],
+    ids=lambda value: f"{str(value)[:10]!r}-len{len(str(value))}",
+)
+def test_redaction_issue_1873_split_pass_linear_second_round(payload, bound):
+    import time
+
+    start = time.monotonic()
+    _redact_value(payload)
+    assert time.monotonic() - start < bound
+
+
+def test_redaction_issue_1873_failed_join_does_not_hide_next_line_token():
+    text = (
+        "GitHub tokens start with ghp_\n"
+        "and the leaked one is ghp_ABCDEFGHIJ\nKLMNOPQRSTUVWXYZ012345\nend"
+    )
+    assert _redact_value(text) == (
+        "GitHub tokens start with ghp_\nand the leaked one is [REDACTED]\nend"
+    )
+    text = "see AKIA\nkeys like: export K=sk-proj-ABCDEFGH\nIJKLMNOPQRSTUVWXYZ\nend"
+    assert _redact_value(text) == "see AKIA\nkeys like: export K=[REDACTED]\nend"
+
+
+def test_redaction_issue_1873_backslash_joins_short_lowercase_continuation():
+    token = "ghp_" + "A" * 36
+    assert _redact_value(f"x {token} \\\nab\nnext") == "x [REDACTED]\nnext"
+    assert _redact_value(f"x {token} \\\ntail rest") == "x [REDACTED] rest"
+    # without the backslash a bare lowercase word after a complete token is kept
+    assert _redact_value(f"x {token}\nab\nnext") == "x [REDACTED]\nab\nnext"
+    assert _redact_value(f"x {token}\ntail rest") == "x [REDACTED]\ntail rest"
+
+
+def test_redaction_issue_1873_continuation_limit_is_32_lines():
+    from nexus.research.clm_system_one import trajectory_continuity as tc
+
+    assert tc._MAX_SPLIT_CONTINUATIONS == 32
+    lines = ["ghp_" + "A" * 30] + ["B" * 10] * 35
+    assert _redact_value("\n".join(lines)) == "\n".join(["[REDACTED]"] + ["B" * 10] * 3)
+
+
+def test_redaction_issue_1873_long_fragment_with_trailing_text_is_consumed():
+    head = "sk-proj-" + "Ab3dE6gH9jK2mN5pR8sT1vW4yZ7" * 3  # 89 chars
+    tail = "Qw3rT6yU9iO2pA5sD8fG1hJ4kL7zX0cV" * 2 + "Qw3rT6yU9iO2pA5sD8fG1hJ"
+    assert len(head) == 89 and len(tail) == 87
+    out = _redact_value(f'export KEY="{head}\n{tail}"')
+    assert out == 'export KEY="[REDACTED]"'
+    out = _redact_value(f"{head}\n{tail} trailing words")
+    assert out == "[REDACTED] trailing words"
