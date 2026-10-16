@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -246,7 +247,12 @@ def _make_receipt(
         outcome=out,
     )
     if not out:
-        out = {"phase_executed": "", "timestamp": datetime.now(timezone.utc).isoformat()}
+        stamp = (
+            COUNTED_FIXED_TIMESTAMP
+            if _counted_learn_lane()
+            else datetime.now(timezone.utc).isoformat()
+        )
+        out = {"phase_executed": "", "timestamp": stamp}
     evidence_id = f"ev_cap_{cap_name}_{os.urandom(4).hex()}"
     return CapabilityReceipt(
         capability_name=cap_name,
@@ -2574,6 +2580,42 @@ def _exec_ddtree(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRec
         )
 
 
+# Counted A/B lanes (NEXUS_SYMMETRIC_PROMPT): the learn reports reach the with-Nexus prompt
+# (consumer payload -> [NEXUS MODEL CONTEXT]).  Read from the shared project learn store they
+# depended on earlier runs inside the 300-row phase-SLO window and carried wall-clock
+# timestamps and host paths, so back-to-back counted runs differed in prompt text through timing
+# alone.  In counted lanes they run on a fresh, empty, per-call store and carry no timestamp or
+# path, so the fields are identical across runs (empty store: phase_slo_pass=True, all counts 0).
+# Fixed, documented value for wall-clock fields in counted lanes (valid ISO-8601, so the prompt
+# audit's iso8601 format still holds).
+COUNTED_FIXED_TIMESTAMP = "1970-01-01T00:00:00+00:00"
+_NONDETERMINISTIC_REPORT_KEYS = frozenset({"timestamp", "generated_at", "updated_at"})
+
+
+def _counted_learn_lane() -> bool:
+    return os.environ.get("NEXUS_SYMMETRIC_PROMPT", "").strip().lower() in {"1", "true", "yes"}
+
+
+def _without_wall_clock(value: Any, depth: int = 0) -> Any:
+    """Report copy with every timestamp-like key set to ``COUNTED_FIXED_TIMESTAMP``."""
+
+    if depth > 8:
+        return value
+    if isinstance(value, Mapping):
+        return {
+            k: (
+                COUNTED_FIXED_TIMESTAMP
+                if k in _NONDETERMINISTIC_REPORT_KEYS
+                else _without_wall_clock(v, depth + 1)
+            )
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [_without_wall_clock(item, depth + 1) for item in value]
+    return value
+
+
+
 def _exec_learn_mode(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
     start = time.monotonic()
     cls = _try_import_class("nexus.research.learn_mode", "LearnModeService")
@@ -2590,20 +2632,40 @@ def _exec_learn_mode(plan: CapabilityExecutionPlan, task_desc: str) -> Capabilit
             ),
         )
     try:
-        project_root, run_root, run_id = _resolve_learn_store(plan)
-        inst = cls(project_root=project_root, run_root=run_root)
-        if hasattr(inst, "build_report") and callable(inst.build_report):
-            result = inst.build_report()
-            action = "build_report"
-        elif hasattr(inst, "build_phase_slo_report") and callable(inst.build_phase_slo_report):
-            result = inst.build_phase_slo_report(window=1)
-            action = "build_phase_slo_report"
-        else:
-            raise RuntimeError("LearnModeService has no production report method")
+        counted = _counted_learn_lane()
+        isolated = tempfile.TemporaryDirectory(prefix="nexus-counted-learn-") if counted else None
+        try:
+            project_root, run_root, run_id = _resolve_learn_store(plan)
+            if isolated is not None:
+                project_root = run_root = Path(isolated.name)
+            inst = cls(project_root=project_root, run_root=run_root)
+            if hasattr(inst, "build_report") and callable(inst.build_report):
+                result = inst.build_report()
+                action = "build_report"
+            elif hasattr(inst, "build_phase_slo_report") and callable(
+                inst.build_phase_slo_report
+            ):
+                result = inst.build_phase_slo_report(window=1)
+                action = "build_phase_slo_report"
+            else:
+                raise RuntimeError("LearnModeService has no production report method")
+            output_paths = [run_root / ".nexus" / "reports" / "learn"]
+            _assert_outputs_in_run_root(output_paths, run_root)
+        finally:
+            if isolated is not None:
+                isolated.cleanup()
         elapsed = int((time.monotonic() - start) * 1000)
         ok = result is not None
-        output_paths = [run_root / ".nexus" / "reports" / "learn"]
-        _assert_outputs_in_run_root(output_paths, run_root)
+        report = result if isinstance(result, Mapping) else {"value": str(result)[:200]}
+        # Counted lanes: no host path in the outcome (it reaches the prompt; nexus-runtime #218).
+        store_fields: dict[str, Any] = (
+            {}
+            if counted
+            else {
+                "resolved_run_root": str(run_root),
+                "output_paths": [str(p) for p in output_paths],
+            }
+        )
         return _make_receipt(
             "learn_mode",
             plan,
@@ -2613,12 +2675,11 @@ def _exec_learn_mode(plan: CapabilityExecutionPlan, task_desc: str) -> Capabilit
                 action=action,
                 semantic_status="SUCCEEDED" if ok else "FAILED",
                 evidence_refs=[f"ev_learn_mode_{plan.task_id}"],
-                result=result if isinstance(result, Mapping) else {"value": str(result)[:200]},
+                result=_without_wall_clock(report) if counted else report,
                 physical_callable=f"nexus.research.learn_mode.LearnModeService.{action}",
                 task_hint=str(task_desc or "")[:80],
                 run_id=run_id,
-                resolved_run_root=str(run_root),
-                output_paths=[str(p) for p in output_paths],
+                **store_fields,
             ),
         )
     except Exception as exc:
@@ -2642,16 +2703,34 @@ def _exec_learn_phase_slo(plan: CapabilityExecutionPlan, task_desc: str) -> Capa
     try:
         from nexus.research.learn_mode import LearnModeService
 
-        project_root, run_root, run_id = _resolve_learn_store(plan)
-        lm = LearnModeService(project_root=project_root, run_root=run_root)
-        # Same window as ``learn:phase-slo`` (default 300); window=1 judged one row at most.
-        window = max(1, int((plan.constraints or {}).get("phase_slo_window") or 300))
-        result = lm.build_phase_slo_report(window=window)
+        counted = _counted_learn_lane()
+        isolated = tempfile.TemporaryDirectory(prefix="nexus-counted-learn-") if counted else None
+        try:
+            project_root, run_root, run_id = _resolve_learn_store(plan)
+            if isolated is not None:
+                project_root = run_root = Path(isolated.name)
+            lm = LearnModeService(project_root=project_root, run_root=run_root)
+            # Same window as ``learn:phase-slo`` (default 300); window=1 judged one row at most.
+            window = max(1, int((plan.constraints or {}).get("phase_slo_window") or 300))
+            result = lm.build_phase_slo_report(window=window)
+            output_paths = [run_root / ".nexus" / "reports" / "learn" / "phase_slo_summary.json"]
+            _assert_outputs_in_run_root(output_paths, run_root)
+        finally:
+            if isolated is not None:
+                isolated.cleanup()
         physical = "nexus.research.learn_mode.LearnModeService.build_phase_slo_report"
         elapsed = int((time.monotonic() - start) * 1000)
         ok = result is not None
-        output_paths = [run_root / ".nexus" / "reports" / "learn" / "phase_slo_summary.json"]
-        _assert_outputs_in_run_root(output_paths, run_root)
+        report = result if isinstance(result, Mapping) else {"value": str(result)[:200]}
+        # Counted lanes: no host path in the outcome (it reaches the prompt; nexus-runtime #218).
+        store_fields: dict[str, Any] = (
+            {}
+            if counted
+            else {
+                "resolved_run_root": str(run_root),
+                "output_paths": [str(p) for p in output_paths],
+            }
+        )
         return _make_receipt(
             "learn_phase_slo",
             plan,
@@ -2661,11 +2740,10 @@ def _exec_learn_phase_slo(plan: CapabilityExecutionPlan, task_desc: str) -> Capa
                 action="build_phase_slo_report",
                 semantic_status="SUCCEEDED" if ok else "FAILED",
                 evidence_refs=[f"ev_learn_phase_slo_{plan.task_id}"],
-                result=result if isinstance(result, Mapping) else {"value": str(result)[:200]},
+                result=_without_wall_clock(report) if counted else report,
                 physical_callable=physical,
                 run_id=run_id,
-                resolved_run_root=str(run_root),
-                output_paths=[str(p) for p in output_paths],
+                **store_fields,
             ),
         )
     except Exception as exc:

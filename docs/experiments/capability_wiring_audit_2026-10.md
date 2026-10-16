@@ -429,3 +429,17 @@ Re-execution of the fed gates (inputs fed, i.e. what a non-strict lane gets; the
 | codeintel | blocked_missing_inputs 28 | real 28 |
 
 `real` here is the runtime's existing seal: a preflight stage with status `SUCCEEDED` is already sealed `REAL_INVOKED` in the evidence bundle, so #2212's attestation resolves it. An evaluated rejection is not sealed (`INVOKED_NOT_SUCCESS`) and stays `failed_or_refused`. Postflight gates (acceptance_check, artifact/claim/delivery) get their inputs from #2212's verifier proof and are never in the preflight bundle, so they stay `real_self_reported` at best. Both are handled by nexus-runtime Issue #212 / PR #213 (entry status `EVALUATED_REJECTED`, whole-bundle re-seal after postflight with the postflight entries in `entries`, `runtime_evidence_ids`); they take effect after a pin bump. Ahead of it: the strict-lane view also renders `EVALUATED_REJECTED` as `INVOKED_NOT_SUCCESS`, the prompt audit schema accepts `EVALUATED_REJECTED` as an entry status, and `POSTFLIGHT_VERIFIER_PROOF_REQUIRED` is a missing-input code. `tests/research/test_gate_inputs_wiring.py` passes against both the pinned runtime and PR #213's head 19ccc8b, and checks all 12 P16 and 10 hard_v1 tasks: strict prompt identical, and no hidden literal in any gate input. Every with-Nexus row now has real governance gates, so `capability_not_exercised` no longer separates rows; "real" means the gate ran, not that it helped the model.
+
+## Counted-lane determinism of learn evidence (PR-5d, 2026-10-16)
+
+The with-Nexus prompt in counted lanes (`NEXUS_SYMMETRIC_PROMPT=1`) varied between back-to-back runs of the same fixture through timing alone. Three causes, each rendered through the consumer payload into `[NEXUS MODEL CONTEXT]` and partly into `[NEXUS CAPABILITY EVIDENCE]`:
+1. `learn_phase_slo.phase_slo_pass` was read from the shared project learn store. It flipped with the rows earlier runs had left inside the 300-row window.
+2. The learn reports carried wall-clock `timestamp` fields and host paths (`resolved_run_root`, `output_paths`). The paths are the Nexus-new side of nexus-runtime #218.
+3. Not changed here: `ev_cap_<name>_<8 hex>` ids stay `os.urandom`, along with the payload hashes computed over them. The three model-facing hashes (`bundle_hash`, `consumer_projection_hash`, `package_hash`) are computed over the full sealed bundle, which includes the receipt-only gate entries (nexus-runtime #220). With deterministic ids those hashes would become a deterministic function of the gate outcomes, so the ids stay random until #220 is resolved.
+
+Fix, counted lanes only; outside them nothing changes:
+- `learn_mode` and `learn_phase_slo` run on a fresh, empty, per-call store (a temporary directory, removed after the call). On an empty store `phase_slo_pass` is `True` and all counts are 0, which is documented as the fixed value.
+- Every timestamp-like report key is set to `COUNTED_FIXED_TIMESTAMP = "1970-01-01T00:00:00+00:00"`, a valid ISO-8601 value, so the audit's `iso8601` format still holds.
+- The outcome carries no `resolved_run_root` / `output_paths`.
+
+Proof: two consecutive strict counted-shape zero-model runs on the same fixture (fake agy). Their with-Nexus and bare prompts are byte-identical once only these are masked: the three opaque hashes (`bundle_hash` / `capability-evidence:<h>`, `consumer_projection_hash`, `package_hash`), the random `ev_cap` ids, and the payload hashes computed over those ids. No timestamp or path differs. Every symproof check passed in both runs. Numbers are in the PR.
