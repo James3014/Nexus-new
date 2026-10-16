@@ -856,6 +856,7 @@ jobs:
           echo "WITNESS_DIR=$WITNESS_DIR" >> "$GITHUB_ENV"
           mkdir -p "$WITNESS_DIR"
           printf '%s\n' '{"status":"CI_BOOTSTRAP_DEFECT","reason":"physical witness did not reach verification"}' > "$WITNESS_DIR/receipt.json"
+          cp "$WITNESS_DIR/receipt.json" "$WITNESS_DIR/receipt-agy-dispatch.json"
 
       - name: Checkout exact head
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -962,6 +963,46 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           test "$(cat "$WITNESS_DIR/pytest-exit.txt")" = 0
+
+      - name: Run agy dispatch Seatbelt physical witnesses
+        env:
+          NEXUS_TEST_MODE: CI
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          agy_cmd=(
+            .venv/bin/python -m pytest tests/nexus/executors/test_agy_dispatch_seatbelt_physical_witness.py
+            -v -rA --timeout=300 -p no:cacheprovider "--junitxml=$WITNESS_DIR/junit-agy-dispatch.xml"
+          )
+          printf '%q ' "${agy_cmd[@]}" > "$WITNESS_DIR/command-agy-dispatch.txt"
+          date -u +%Y-%m-%dT%H:%M:%S+00:00 > "$WITNESS_DIR/not-before-agy-dispatch.txt"
+          set +e
+          "${agy_cmd[@]}" 2>&1 | tee "$WITNESS_DIR/pytest-agy-dispatch.log"
+          pytest_status="${PIPESTATUS[0]}"
+          set -e
+          echo "$pytest_status" > "$WITNESS_DIR/pytest-exit-agy-dispatch.txt"
+          echo "pytest exit: $pytest_status"
+          exit "$pytest_status"
+
+      - name: Verify agy dispatch physical witness receipt
+        run: |
+          set -euo pipefail
+          .venv/bin/python scripts/ci/verify_physical_witness_junit.py verify \
+            --suite agy-dispatch \
+            --repo-root "$GITHUB_WORKSPACE" \
+            --expected-head-sha "$HEAD_SHA" \
+            --junit "$WITNESS_DIR/junit-agy-dispatch.xml" \
+            --not-before "$(cat "$WITNESS_DIR/not-before-agy-dispatch.txt")" \
+            --command "$(cat "$WITNESS_DIR/command-agy-dispatch.txt")" \
+            --require-github-hosted \
+            --output "$WITNESS_DIR/receipt-agy-dispatch.json"
+          {
+            echo "## agy dispatch Seatbelt physical witness"
+            echo '```json'
+            cat "$WITNESS_DIR/receipt-agy-dispatch.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          test "$(cat "$WITNESS_DIR/pytest-exit-agy-dispatch.txt")" = 0
 
       - name: Install gitlink metadata for checkout post-cleanup
         if: always()
