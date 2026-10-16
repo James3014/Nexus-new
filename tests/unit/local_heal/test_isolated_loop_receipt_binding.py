@@ -7,12 +7,22 @@ import os
 import shutil
 import tempfile
 
+import pytest
+
 from nexus.contracts.hybrid_route import RouteMode
 from nexus.engine.capability_receipt_adapters import RECEIPT_ADAPTERS
 from nexus.services.local_heal.isolated_local_solve_loop import (
     IsolatedLocalSolveRequest,
     run_isolated_local_solve_loop,
 )
+
+
+@pytest.fixture(autouse=True)
+def _armor_root(tmp_path, monkeypatch):
+    # CI checks out under /tmp: the default armor root would be rejected as ephemeral.
+    monkeypatch.setenv("NEXUS_ARMOR_ARTIFACT_ROOT", str(tmp_path / "armor"))
+    monkeypatch.setenv("NEXUS_ARMOR_ALLOW_EPHEMERAL", "1")
+
 
 _DIFF = "--- a/f.py\n+++ b/f.py\n@@ -1 +1 @@\n-print('hello')\n+print('world')\n"
 _PASS_CMD = (
