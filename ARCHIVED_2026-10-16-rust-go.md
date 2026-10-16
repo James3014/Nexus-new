@@ -17,15 +17,14 @@ Deletion guard plus the `owner-approved-deletion` label.
 | --- | ---: | ---: | --- |
 | `nexus_swarm/` | 66 | 5,510 | It has no launchd job, workflow, Taskfile target, `pyproject` package or `python -m` caller on either Mac, and no live tree imports it. The only importers are listed in the next rows, plus three archived CLI modules (#1906) that import it inside function bodies only. |
 | `nexus-swarm-v22-prod/` | 26 | 1,553 | It was marked `# ARCHIVED` in #1763/#1784. Nothing builds it. |
-| `tests/ops/test_swarm_deploy_path.py` | 1 | 55 | It only asserted the layout of the two deleted trees. |
 | `scripts/test_local_swarm.sh` | 1 | 9 | A RETIRED stub that only pointed at `nexus_swarm/manager`. |
 | `scripts/ops/wisdom_daemon.py` | 1 | 39 | Imports `nexus_swarm` at module level. Nothing calls it. |
 | `scripts/ops/v23_1_guard_backtest.py` | 1 | 58 | Same as above. |
 | `scripts/ops/v23_1_hardened_backtest.py` | 1 | 90 | Same as above. |
 | `scripts/ops/v23_1_healing_precision_check.py` | 1 | 66 | Same as above. |
-| **Total** | **98** | **7,380** | |
+| **Total** | **97** | **7,325** | |
 
-`tests/ops/test_retired_go_swarm_removed.py` keeps the deletion deliberate. It checks that
+`tests/ops/test_swarm_deploy_path.py` keeps its six test ids, because the exact-base impact gate reads a vanished parameterized id as an ambiguous change (IMPACT_UNKNOWN); each test now asserts the retired state. `tests/ops/test_retired_go_swarm_removed.py` keeps the deletion deliberate. It checks that
 no source is left in either tree and that the `nexus_swarm` modules cannot be imported. It
 also checks that no module in `nexus/` or `scripts/` imports `nexus_swarm`, and that the
 archived CLI commands fail closed.
