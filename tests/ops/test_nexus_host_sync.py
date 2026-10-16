@@ -145,6 +145,10 @@ def _make_source_repo(tmp_path: Path) -> Path:
             "nexus/services/external_account_pool.py",
         ),
         (
+            ROOT / "nexus/services/agy_failure_signals.py",
+            "nexus/services/agy_failure_signals.py",
+        ),
+        (
             ROOT / "nexus/services/agy_operation_journal.py",
             "nexus/services/agy_operation_journal.py",
         ),
