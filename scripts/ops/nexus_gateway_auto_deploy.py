@@ -64,7 +64,12 @@ the #526 governed rebind.  One cycle (run every few minutes by the LaunchAgent
 The LaunchAgent runs this file from ``gateway-direct/auto-deploy-current``, a
 symlink the installer points at a verified bootstrap worktree of main and that
 every successful deploy moves to the new deployment once that tree's deployer
-passes ``selftest`` with the LaunchAgent's own interpreter.  It needs only the
+passes ``selftest`` with the LaunchAgent's own interpreter.  When main requires
+a check this file cannot bind (``UNKNOWN_REQUIRED_CHECK``), the link moves
+without a deploy (``DEPLOYER_SELF_UPDATED``, #2402) only if the candidate's own
+deployer source knows every such name and every check this file can bind (plus
+``FLOOR_CHECKS``) is green on the candidate; the next cycle's deployer then
+applies the full gate, so a check-set change needs no reinstall.  It needs only the
 stdlib plus the tree's ``scripts/ops/mcp_gateway_durable.py``, which stays the
 single owner of the Gateway launchd effect.  The #526 governed rebind stays
 available as a manual fallback.
@@ -73,6 +78,7 @@ available as a manual fallback.
 from __future__ import annotations
 
 import argparse
+import ast
 import base64
 import contextlib
 import hashlib
@@ -198,6 +204,17 @@ QUIESCENCE_CLASSIFY_TIMEOUT_SECONDS = 120
 # quiescence warning).  It never holds, restarts or switches: the next deploy of
 # a new main commit materializes a fresh Controller and heals it.
 LIVE_DEGRADED_OUTCOME = "LIVE_DEGRADED_CONTROLLER"
+# Deployer-only self-update (#2402).  Main requires a check this file cannot
+# bind, but the candidate's own deployer (on main, read with ``ast``, never
+# imported) knows it, and every check this file CAN bind (+ FLOOR_CHECKS) is
+# green on the candidate: only the ``auto-deploy-current`` link moves to the
+# candidate tree, the Gateway is untouched, and the next cycle runs the new
+# deployer through the normal full gate.  Neither outcome is a deploy attempt:
+# they never move the debounce or backoff clock of a candidate.
+SELF_UPDATED_OUTCOME = "DEPLOYER_SELF_UPDATED"
+SELF_UPDATE_REFUSED_OUTCOME = "DEPLOYER_SELF_UPDATE_REFUSED"
+# Module-level names the candidate's deployer source is read for.
+_KNOWN_CHECK_TABLES = ("REQUIRED_CHECKS", "PR_HEAD_STATUS_CONTEXTS")
 CONTROLLER_ALERT_ISSUE = 2230
 # Runs with the LIVE deployment's interpreter and tree, so tasks are classified
 # by exactly the lifecycle code that owns them.  Read-only: it never takes the
@@ -938,7 +955,6 @@ def required_checks(
     floor check with no bound run) or UNKNOWN_REQUIRED_CHECK (main requires a
     check this deployer cannot bind).
     """
-    detail: Dict[str, Any] = {}
     try:
         live = live_required_checks(api_get, repo=repo, branch=branch)
     except Exception as exc:  # noqa: BLE001 - an unreadable ruleset fails closed
@@ -947,7 +963,51 @@ def required_checks(
     live = {name: issuer for name, issuer in live.items() if name not in merge_time_only}
     unknown = [name for name in live if name not in REQUIRED_CHECKS]
     if unknown:
-        return {"verdict": "UNKNOWN_REQUIRED_CHECK", "unknown_required": unknown, "checks": {}}
+        return {
+            "verdict": "UNKNOWN_REQUIRED_CHECK",
+            "unknown_required": unknown,
+            # What this deployer CAN bind, for the deployer-only self-update (#2402).
+            "known_required": {n: i for n, i in live.items() if n not in unknown},
+            "merge_time_only": merge_time_only,
+            "checks": {},
+        }
+    return _bind_required(
+        api_get, sha, live, repo=repo, branch=branch, merge_time_only=merge_time_only
+    )
+
+
+def bindable_subset_checks(
+    api_get: Callable[[str], Any],
+    sha: str,
+    known_required: Dict[str, Optional[int]],
+    *,
+    repo: str = REPOSITORY,
+    branch: str = "main",
+) -> Dict[str, Any]:
+    """The verdict of ``required_checks`` restricted to the names this deployer can bind.
+
+    Only for the deployer-only self-update (#2402), never for a Gateway switch:
+    every live required check this file can bind, plus ``FLOOR_CHECKS``, must be
+    bound and green on ``sha``.  Nothing this file can verify is skipped.
+    """
+    if any(name not in REQUIRED_CHECKS for name in known_required):
+        return {"verdict": "UNKNOWN", "error": "SUBSET_NOT_BINDABLE"}
+    return _bind_required(
+        api_get, sha, dict(known_required), repo=repo, branch=branch, merge_time_only=[]
+    )
+
+
+def _bind_required(
+    api_get: Callable[[str], Any],
+    sha: str,
+    live: Dict[str, Optional[int]],
+    *,
+    repo: str,
+    branch: str,
+    merge_time_only: List[str],
+) -> Dict[str, Any]:
+    """Bind every name in ``live`` + ``FLOOR_CHECKS`` on ``sha`` (all in REQUIRED_CHECKS)."""
+    detail: Dict[str, Any] = {}
     required = {**live, **{name: live.get(name) for name in FLOOR_CHECKS}}
     floor_added = [name for name in FLOOR_CHECKS if name not in live]
     push_origin = {"kind": "push", "branch": branch, "head_repo": repo}
@@ -1018,6 +1078,65 @@ def on_github_main(
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": f"{type(exc).__name__}:{exc}"[:300]}
     return {"ok": relation in ("ahead", "identical"), "tip": tip, "relation": relation}
+
+
+def deployer_known_checks(source: str) -> Optional[List[str]]:
+    """Check names a deployer source binds or knowingly skips, read without running it.
+
+    ``REQUIRED_CHECKS`` (exactly one module-level literal dict of str -> str)
+    union ``PR_HEAD_STATUS_CONTEXTS`` (at most one module-level literal set or
+    ``frozenset({...})`` of str; absent means none, as before #2370).  Anything
+    else (a syntax error, a computed value, a second assignment) is None: the
+    self-update then fails closed (#2402).
+    """
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return None
+    values: Dict[str, List[ast.expr]] = {name: [] for name in _KNOWN_CHECK_TABLES}
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            targets, value = node.targets, node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets, value = [node.target], node.value
+        else:
+            continue
+        for target in targets:
+            if isinstance(target, ast.Name) and target.id in values:
+                values[target.id].append(value)
+    if len(values["REQUIRED_CHECKS"]) != 1 or len(values["PR_HEAD_STATUS_CONTEXTS"]) > 1:
+        return None
+    try:
+        table = ast.literal_eval(values["REQUIRED_CHECKS"][0])
+    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+        return None
+    if not isinstance(table, dict) or not all(
+        isinstance(k, str) and k and isinstance(v, str) and v for k, v in table.items()
+    ):
+        return None
+    names = list(table)
+    for node in values["PR_HEAD_STATUS_CONTEXTS"]:
+        literal: ast.expr = node
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "frozenset"
+            and len(node.args) <= 1
+            and not node.keywords
+        ):
+            if not node.args:
+                continue
+            literal = node.args[0]
+        try:
+            contexts = ast.literal_eval(literal)
+        except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+            return None
+        if not isinstance(contexts, (set, frozenset, list, tuple)) or not all(
+            isinstance(c, str) and c for c in contexts
+        ):
+            return None
+        names.extend(sorted(c for c in contexts if c not in names))
+    return names
 
 
 def _parse_time(value: Any) -> Optional[float]:
@@ -1792,10 +1911,9 @@ def core_pins_in_use(cfg: Config) -> set:
     return pins
 
 
-def build(cfg: Config, host: Host, commit: str) -> Dict[str, Any]:
-    """Materialize the immutable deployment and its dedicated venv."""
+def materialize_tree(cfg: Config, host: Host, commit: str) -> Path:
+    """The detached ``deployments/a1-<commit>`` worktree, at exactly ``commit``."""
     root = cfg.deployments / f"{DEPLOYMENT_PREFIX}{commit}"
-    venv = cfg.venvs / f"{DEPLOYMENT_PREFIX}{commit}"
     if not root.exists():
         _must(
             host, _git(cfg, "worktree", "add", "--detach", str(root), commit), "WORKTREE_ADD_FAILED"
@@ -1805,6 +1923,13 @@ def build(cfg: Config, host: Host, commit: str) -> Dict[str, Any]:
     ).strip()
     if head != commit:
         raise DeployError(f"WORKTREE_HEAD_MISMATCH:{head}")
+    return root
+
+
+def build(cfg: Config, host: Host, commit: str) -> Dict[str, Any]:
+    """Materialize the immutable deployment and its dedicated venv."""
+    root = materialize_tree(cfg, host, commit)
+    venv = cfg.venvs / f"{DEPLOYMENT_PREFIX}{commit}"
     core = materialize_core(cfg, host, read_core_pin(root))
     core = {**core, **core_source_digest(host, Path(core["root"]), core["revision"])}
     cfg.venvs.mkdir(parents=True, exist_ok=True)
@@ -2749,7 +2874,14 @@ class _Cycle:
         )
         status["required_checks"] = checks
         if checks["verdict"] == "UNKNOWN_REQUIRED_CHECK":
-            # No deploy and no HOLD: retried next cycle once this file knows the check.
+            # Never a deploy and no HOLD.  When the candidate's own deployer knows
+            # the names, only the deployer link moves (#2402); otherwise this is
+            # retried next cycle (and stays here while no main deployer knows them).
+            update = self.self_update(candidate, previous_plist, checks, dry_run=dry_run)
+            status["self_update"] = update["self_update"]
+            if "receipt" in update:
+                status["receipt"] = update["receipt"]
+                return finish(update["receipt"]["outcome"])
             return finish("UNKNOWN_REQUIRED_CHECK:" + ",".join(checks["unknown_required"]))
         if checks["verdict"] != "GREEN":
             return finish(f"CHECKS_{checks['verdict']}")
@@ -2823,6 +2955,116 @@ class _Cycle:
         status["receipt"] = receipt
         return finish(receipt["outcome"])
 
+    # -- deployer-only self-update (#2402) -------------------------------------
+
+    def self_update(
+        self,
+        candidate: str,
+        previous_plist: bytes,
+        checks: Dict[str, Any],
+        *,
+        dry_run: bool,
+    ) -> Dict[str, Any]:
+        """Move only ``auto-deploy-current`` to a candidate deployer that knows the names.
+
+        Called only for UNKNOWN_REQUIRED_CHECK on a candidate already proven on
+        GitHub main.  In order, every step fails closed (no link move, the
+        cycle stays UNKNOWN_REQUIRED_CHECK):
+          1. the link already points at the candidate tree (no self-update loop);
+          2. the candidate's deployer source, read from the fetched commit and
+             parsed with ``ast`` (never imported), knows every unknown name;
+          3. earlier refused attempts for this candidate: capped and backed off;
+          4. every live required check THIS file can bind, plus FLOOR_CHECKS,
+             is bound and green on the candidate (nothing verifiable is skipped);
+          5. the candidate tree is created as a deploy creates it, the
+             candidate deployer passes the same selftests as after a deploy, and
+             only then does the link move.  The Gateway plist is never written.
+        Returns {"self_update": detail} and, when step 5 ran, {"receipt": ...}.
+        """
+        cfg, host = self.cfg, self.host
+        unknown = list(checks.get("unknown_required") or [])
+        detail: Dict[str, Any] = {"unknown_required": unknown}
+        root = cfg.deployments / f"{DEPLOYMENT_PREFIX}{candidate}"
+        if cfg.tool_link.is_symlink() and os.path.realpath(cfg.tool_link) == os.path.realpath(root):
+            return {"self_update": {**detail, "verdict": "ALREADY_CURRENT"}}
+        shown = host.run(_git(cfg, "show", f"{candidate}:{DEPLOYER}"), timeout=60)
+        if shown.returncode != 0:
+            return {"self_update": {**detail, "verdict": "CANDIDATE_SOURCE_UNREADABLE"}}
+        known = deployer_known_checks(shown.stdout or "")
+        if known is None:
+            return {"self_update": {**detail, "verdict": "CANDIDATE_SOURCE_UNPARSEABLE"}}
+        still_unknown = [name for name in unknown if name not in known]
+        detail["candidate_deployer_sha256"] = _sha256((shown.stdout or "").encode("utf-8"))
+        if still_unknown or not unknown:
+            return {
+                "self_update": {
+                    **detail,
+                    "verdict": "CANDIDATE_DOES_NOT_KNOW",
+                    "still_unknown": still_unknown,
+                }
+            }
+        refused = [
+            r
+            for r in read_receipts(cfg.state_dir)
+            if r.get("candidate_commit") == candidate
+            and r.get("outcome") == SELF_UPDATE_REFUSED_OUTCOME
+        ]
+        if len(refused) >= MAX_CANDIDATE_ATTEMPTS:
+            return {"self_update": {**detail, "verdict": "GAVE_UP", "attempts": len(refused)}}
+        if refused:
+            interval = min(
+                float(cfg.min_interval_seconds * (2 ** (len(refused) - 1))),
+                float(MAX_BACKOFF_SECONDS),
+            )
+            wait = interval - (host.now() - float(refused[-1].get("started_epoch", 0)))
+            if wait > 0:
+                return {
+                    "self_update": {**detail, "verdict": "BACKOFF", "retry_in_seconds": int(wait)}
+                }
+        subset = bindable_subset_checks(
+            self.api_get,
+            candidate,
+            checks.get("known_required") or {},
+            repo=cfg.repository,
+            branch=cfg.track_branch,
+        )
+        detail["bindable_checks"] = subset
+        if subset.get("verdict") != "GREEN":
+            return {"self_update": {**detail, "verdict": f"CHECKS_{subset.get('verdict')}"}}
+        if dry_run:
+            return {"self_update": {**detail, "verdict": "PLAN", "deployer_root": str(root)}}
+        held = hold_reason(cfg, self.environ)
+        if held:
+            return {"self_update": {**detail, "verdict": "HELD", "hold": held}}
+        receipt = self.new_receipt(candidate, previous_plist)
+        receipt["attempt_id"] += "-self-update"
+        receipt["required_checks"] = checks
+        previous_link = os.path.realpath(cfg.tool_link) if cfg.tool_link.is_symlink() else None
+        receipt["self_update"] = {**detail, "previous_deployer_root": previous_link}
+        try:
+            tree = materialize_tree(cfg, host, candidate)
+            dirty = _must(
+                host, ["git", "-C", str(tree), "status", "--porcelain"], "WORKTREE_STATUS_FAILED"
+            )
+            if dirty.strip():
+                raise DeployError("SOURCE_TREE_DIRTY")
+            link = self.move_tool_link(tree)
+        except Exception as exc:  # noqa: BLE001 - every failure still leaves a receipt
+            link = {"moved": False, "reason": f"{type(exc).__name__}:{exc}"[:300]}
+        receipt["deployer_link"] = link
+        receipt["outcome"] = (
+            SELF_UPDATED_OUTCOME if link.get("moved") else SELF_UPDATE_REFUSED_OUTCOME
+        )
+        finished = host.now()
+        receipt.update(
+            finished_at=_iso(finished),
+            duration_seconds=round(finished - float(receipt["started_epoch"]), 3),
+        )
+        # Create-only, like every receipt; the plist and the journal are untouched.
+        _append_receipt(cfg, receipt)
+        verdict = "UPDATED" if link.get("moved") else "REFUSED"
+        return {"self_update": {**detail, "verdict": verdict}, "receipt": receipt}
+
     def backoff_remaining(self, failures: List[Dict[str, Any]]) -> float:
         receipts = read_receipts(self.cfg.state_dir)
         if not receipts:
@@ -2831,12 +3073,19 @@ class _Cycle:
         interval = min(float(interval), float(MAX_BACKOFF_SECONDS))
         # Neither a deferral (tasks in flight, or the Controller moved under the
         # carry, #1939) nor a degraded-Controller alert (#2230 F2) is an
-        # attempt: they must not move the debounce or backoff clock.
+        # attempt, and neither is a deployer-only self-update (#2402): they must
+        # not move the debounce or backoff clock.
         attempts = [
             r
             for r in receipts
             if r.get("outcome")
-            not in (DEFERRED_OUTCOME, CONTROLLER_MOVED_OUTCOME, LIVE_DEGRADED_OUTCOME)
+            not in (
+                DEFERRED_OUTCOME,
+                CONTROLLER_MOVED_OUTCOME,
+                LIVE_DEGRADED_OUTCOME,
+                SELF_UPDATED_OUTCOME,
+                SELF_UPDATE_REFUSED_OUTCOME,
+            )
         ]
         if not attempts:
             return 0.0

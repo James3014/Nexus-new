@@ -425,6 +425,7 @@
 | scripts/ops/install_nexus_gateway_auto_deploy.sh | tests/ops/test_nexus_gateway_auto_deploy.py | active | medium | gateway_auto_deploy_launchagent_installer |
 | scripts/ops/check_gateway_source_drift.py | tests/ops/test_check_gateway_source_drift.py, tests/ops/test_nexus_gateway_auto_deploy.py | active | medium | gateway_source_drift_reads_auto_deploy_receipt |
 | tests/ops/test_nexus_gateway_auto_deploy.py | tests/ops/test_nexus_gateway_auto_deploy.py | active | medium | test_contract |
+| tests/ops/fixtures/gateway_auto_deploy_2402 | tests/ops/test_nexus_gateway_auto_deploy.py | active | low | gateway_auto_deploy_self_update_replay_fixture |
 | tests/nexus/orchestrator/test_gateway_controller_root.py | tests/nexus/orchestrator/test_gateway_controller_root.py | active | medium | test_contract |
 | tests/ops/test_gateway_routine_deploy_authority.py | tests/ops/test_gateway_routine_deploy_authority.py | active | medium | test_contract |
 | scripts/ops/eia_scoreboard.py | tests/ops/test_eia_scoreboard.py | active | medium | eia_scoreboard_report |
