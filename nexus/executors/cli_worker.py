@@ -258,6 +258,10 @@ _SANDBOX_EXEC = "/usr/bin/sandbox-exec"
 _SWEEP_DEADLINE_SECONDS = 2.0
 
 
+class _TagScanUnknown(PermissionError):
+    """A process of ours could not be inspected right now; a rescan may resolve it."""
+
+
 def _tagged_pids(tag: str, starts: Optional[dict[int, Optional[int]]] = None) -> set[int]:
     """PIDs (other than ours) whose environment carries ``tag``.
 
@@ -299,8 +303,16 @@ def _tagged_pids(tag: str, starts: Optional[dict[int, Optional[int]]] = None) ->
                 if not environ and _proc_state(entry) in ("Z", "X") and not _proc_is_zombie(entry):
                     # A dead thread-group leader whose other threads still run
                     # reads as an empty environ: that says nothing about the
-                    # tag, so the process is unknown, not clean.
-                    raise PermissionError(f"empty environ of dead leader {entry.name} with threads")
+                    # tag. Unknown (retried by the sweep) unless it is another
+                    # user's or provably older than the run, as in the OSError
+                    # branch above.
+                    try:
+                        same_uid = entry.stat().st_uid == os.getuid()
+                    except (FileNotFoundError, ProcessLookupError):
+                        continue  # exited meanwhile
+                    if same_uid and not _predates_run(entry, tag):
+                        raise _TagScanUnknown(f"empty environ of dead leader {entry.name}")
+                    continue
                 if needle_bytes in environ:
                     found.add(int(entry.name))
                     if starts is not None:
@@ -719,7 +731,14 @@ def _sweep_tagged_processes(tag: str) -> bool:
         deadline = time.monotonic() + _SWEEP_DEADLINE_SECONDS
         while True:
             starts: dict[int, Optional[int]] = {}
-            pids = _tagged_pids(tag, starts)
+            try:
+                pids = _tagged_pids(tag, starts)
+            except _TagScanUnknown:
+                # E.g. a tagged process caught mid-exit after our SIGKILL: retry.
+                if time.monotonic() >= deadline:
+                    return False
+                time.sleep(0.1)
+                continue
             if not pids:
                 return True
             for pid in pids:

@@ -17,6 +17,11 @@ adapter gets from ``run_cli_worker``:
   processes whose cwd is inside the target or the run root; it runs exactly
   once per launched run, also when the launch frame raised.
 
+Limitation: the run-tag part of the sweep finds processes through ``ps -E``,
+which on macOS hides the environment of SIP-protected system binaries (for
+example ``/bin/sleep``); such a process is only caught by the descendant
+tracker or the cwd sweep. Agy's own descendants (node/go) are not restricted.
+
 The ``--log-file`` attestation log is writable by the confined process, so
 attestation parsing must not treat its content as trusted (follow-up #2260).
 

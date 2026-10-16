@@ -937,7 +937,7 @@ def test_timeout_receipt_not_clean_when_survivor_remains(tmp_path, monkeypatch):
 def test_timeout_sweep_exception_is_not_clean(monkeypatch):
     import nexus.executors.cli_worker as module
 
-    def boom(tag):
+    def boom(tag, starts=None):
         raise OSError("no ps")
 
     monkeypatch.setattr(module, "_tagged_pids", boom)
