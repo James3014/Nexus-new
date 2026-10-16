@@ -258,8 +258,13 @@ _SANDBOX_EXEC = "/usr/bin/sandbox-exec"
 _SWEEP_DEADLINE_SECONDS = 2.0
 
 
-def _tagged_pids(tag: str) -> set[int]:
-    """PIDs (other than ours) whose environment carries ``tag``."""
+def _tagged_pids(tag: str, starts: Optional[dict[int, Optional[int]]] = None) -> set[int]:
+    """PIDs (other than ours) whose environment carries ``tag``.
+
+    When ``starts`` is given, each match also records its Linux start time
+    (read before its environ) so the caller can detect PID reuse before it
+    kills; None where no ``/proc`` start time exists.
+    """
     own = os.getpid()
     needle = f"{_RUN_TAG_ENV}={tag}"
     found: set[int] = set()
@@ -269,6 +274,7 @@ def _tagged_pids(tag: str) -> set[int]:
         for entry in proc.iterdir():
             if not entry.name.isdigit() or int(entry.name) == own:
                 continue
+            before = _proc_start_ticks(entry) if starts is not None else None
             try:
                 environ = (entry / "environ").read_bytes()
             except (FileNotFoundError, ProcessLookupError):
@@ -297,6 +303,8 @@ def _tagged_pids(tag: str) -> set[int]:
                     raise PermissionError(f"empty environ of dead leader {entry.name} with threads")
                 if needle_bytes in environ:
                     found.add(int(entry.name))
+                    if starts is not None:
+                        starts[int(entry.name)] = before
         return found
     out = subprocess.run(
         ["ps", "-axww", "-E", "-o", "pid=,command="],
@@ -319,6 +327,8 @@ def _tagged_pids(tag: str) -> set[int]:
             raise ValueError(f"unparseable tagged ps row: {line[:80]!r}")
         if int(parts[0]) != own:
             found.add(int(parts[0]))
+            if starts is not None:
+                starts[int(parts[0])] = None  # ps gives no comparable start tick
     return found
 
 
@@ -708,10 +718,15 @@ def _sweep_tagged_processes(tag: str) -> bool:
     try:
         deadline = time.monotonic() + _SWEEP_DEADLINE_SECONDS
         while True:
-            pids = _tagged_pids(tag)
+            starts: dict[int, Optional[int]] = {}
+            pids = _tagged_pids(tag, starts)
             if not pids:
                 return True
             for pid in pids:
+                # A pid freed and reused since the scan is not ours to kill.
+                before = starts.get(pid)
+                if before is not None and _proc_start_ticks(Path("/proc") / str(pid)) != before:
+                    continue
                 try:
                     os.kill(pid, signal.SIGKILL)
                 except (ProcessLookupError, PermissionError):
