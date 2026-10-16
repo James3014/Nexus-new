@@ -23,7 +23,7 @@ on:
       run_bindings:
         type: boolean
         required: false
-        default: true
+        default: false
 
 permissions: {}
 
@@ -79,6 +79,8 @@ jobs:
       - name: Mark the status pending before anything can fail
         run: |
           set -euo pipefail
+          # A bindings run needs the PR head; refuse rather than guess.
+          [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "head_sha input missing or invalid" >&2; exit 1; }
           gh api -X POST "repos/${REPO}/statuses/${HEAD_SHA}" \
             -f state=pending -f context="$CONTEXT" -f target_url="$RUN_URL" \
             -f description="bindings preflight running" > /dev/null

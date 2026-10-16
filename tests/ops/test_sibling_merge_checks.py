@@ -63,6 +63,9 @@ def test_reusable_bindings_job_fails_closed_and_publishes_status() -> None:
     assert job["env"]["CONTEXT"] == "Bindings preflight (default branch)"
     names = [s.get("name", "") for s in job["steps"]]
     assert names[0] == "Mark the status pending before anything can fail"
+    assert "^[0-9a-f]{40}$" in job["steps"][0]["run"]
+    inputs = _triggers(_yaml(REUSABLE))["workflow_call"]["inputs"]
+    assert inputs["run_bindings"]["default"] is False
     run = job["steps"][-1]["run"]
     assert "python3 -I nexus-tools/scripts/ops/sibling_bindings_check.py" in run
     assert "! grep -q '^PASS  bindings'" in run
@@ -74,6 +77,7 @@ def test_caller_template_calls_main_with_least_privilege() -> None:
     doc = _yaml(CALLER)
     assert set(_triggers(doc)) == {"pull_request_target", "issue_comment"}
     assert "pull_request" not in _triggers(doc)
+    assert _triggers(doc)["pull_request_target"]["branches"] == ["main"]
     job = doc["jobs"]["checks"]
     assert job["uses"] == "James3014/Nexus-new/.github/workflows/sibling-merge-checks.yml@main"
     assert job["permissions"] == {

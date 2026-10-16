@@ -5,6 +5,7 @@ name: Sibling merge checks
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, edited]
+    branches: [main]
   issue_comment:
     types: [created, edited, deleted]
 
