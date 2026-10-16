@@ -343,3 +343,92 @@ def test_runtime_revision_binds_explicit_snapshot_git_head(
     monkeypatch.setattr(dispatch, "SNAPSHOT", repo)
 
     assert dispatch._runtime_revision() == head
+
+
+def _fake_claude_cli(path: Path, *, terminal: bool) -> None:
+    result = (
+        """echo '{"type":"result","subtype":"success","is_error":false,"session_id":"cs-1","total_cost_usd":0.01,"result":"ok"}'"""
+        if terminal
+        else "true"
+    )
+    path.write_text(
+        f"""#!/bin/sh
+case "$1" in
+  --version) echo "2.1.296 (Claude Code)"; exit 0;;
+  auth) echo '{{"loggedIn":true,"accountUuid":"acct-1","organizationUuid":"org-1"}}'; exit 0;;
+esac
+echo '{{"type":"system","subtype":"init","model":"claude-sonnet-5-5","session_id":"cs-1"}}'
+{result}
+""",
+        encoding="utf-8",
+    )
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+
+def _run_claude_operation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, terminal: bool):
+    import json
+
+    from nexus.services.claude_account_pool import (
+        ClaudeAccountPoolManager,
+        identity_fingerprint,
+        set_claude_account_pool_manager,
+    )
+
+    fake = tmp_path / "claude"
+    _fake_claude_cli(fake, terminal=terminal)
+    monkeypatch.setenv("NEXUS_CLAUDE_BIN", str(fake))
+    pool_root = tmp_path / "claude-pool"
+    monkeypatch.setenv("NEXUS_CLAUDE_ACCOUNT_POOL_DIR", str(pool_root))
+    home = tmp_path / "cfg-a"
+    home.mkdir(mode=0o700)
+    ClaudeAccountPoolManager(pool_root).register_local_profile(
+        alias="claude-a",
+        config_dir=home,
+        approved_identity_fingerprint=identity_fingerprint("acct-1", "org-1"),
+    )
+    set_claude_account_pool_manager(None)
+    root = tmp_path / "ops"
+    record = dispatch._spawn_background(
+        provider="claude",
+        model="sonnet",
+        prompt="hello",
+        cwd=str(tmp_path),
+        mode="plan",
+        auto_approve=False,
+        timeout_seconds=10,
+        require_free=False,
+        thinking="none",
+        operation_root=root,
+    )
+    journal = dispatch._journal("claude", root)
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        current = journal.read(record["operation_id"])
+        if current["status"] in {"COMPLETED", "FAILED", "OUTCOME_UNKNOWN"}:
+            break
+        time.sleep(0.05)
+    state = json.loads((pool_root / "state.json").read_text())
+    return record["operation_id"], journal.read(record["operation_id"]), state
+
+
+def test_background_claude_success_attests_and_releases_lease(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    operation_id, current, state = _run_claude_operation(tmp_path, monkeypatch, terminal=True)
+    assert operation_id.startswith("claudeop_")
+    assert current["status"] == "COMPLETED"
+    assert current["observed_provider"] == "claude"
+    assert current["observed_model"] == "claude-sonnet-5-5"
+    assert current["provider_session_id"] == "cs-1"
+    assert state["leases"] == {}
+
+
+def test_background_claude_no_terminal_result_keeps_lease_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, current, state = _run_claude_operation(tmp_path, monkeypatch, terminal=False)
+    assert current["status"] == "OUTCOME_UNKNOWN"
+    assert current["reconciliation"]["retry_permitted"] is False
+    assert current["rotations"] == 0
+    (lease,) = state["leases"].values()
+    assert lease["unknown_outcome"] is True

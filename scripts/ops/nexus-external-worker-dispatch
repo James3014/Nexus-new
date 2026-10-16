@@ -63,6 +63,7 @@ _PROVIDER_PREFIXES = {
     "opencode": "opencodeop_",
     "codex": "codexop_",
     "grok": "grokop_",
+    "claude": "claudeop_",
 }
 
 
@@ -401,6 +402,12 @@ def _run_operation(
             return 1
 
         if timed_out:
+            hold = getattr(account_adapter, "hold_unknown_outcome", None)
+            if hold is not None:
+                try:
+                    hold(binding)
+                except BaseException:
+                    pass
             try:
                 account_adapter.release(binding)
             except BaseException:
@@ -479,6 +486,13 @@ def _run_operation(
                 rotations += 1
                 continue
 
+        if outcome.status == "OUTCOME_UNKNOWN":
+            hold = getattr(account_adapter, "hold_unknown_outcome", None)
+            if hold is not None:
+                try:
+                    hold(binding)
+                except BaseException:
+                    pass
         try:
             account_adapter.release(binding)
         except BaseException:
