@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import dataclasses
 import os
+import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
@@ -12,6 +15,15 @@ from nexus.executors.cli_worker import (
     CliWorkerResult,
     CliWorkerStatus,
     run_cli_worker,
+)
+from nexus.executors.codex_run_boundary import (
+    CODEX_RUN_HOME_UNAVAILABLE,
+    codex_child_env,
+    jsonl_denial,
+    materialize_codex_home,
+    target_integrity_failure,
+    target_integrity_snapshot,
+    write_back_refreshed_auth,
 )
 from nexus.orchestrator.task_contract import SelfHostedTaskContract
 from nexus.orchestrator.worktree_manager import TargetWorktreeLease
@@ -34,6 +46,9 @@ class CodexExecutionReceipt:
     commit_created: bool
     merge_performed: bool
     provider_attempt_count: int | None = None
+    # Typed non-delivery reason when the run boundary failed (#2254); the exit
+    # code is then forced non-zero so adapters that only read it fail the run.
+    failure_reason: str | None = None
 
 
 class CodexCliExecutor:
@@ -137,8 +152,63 @@ class CodexCliExecutor:
             on_process_group=self.on_process_group,
         )
         request = executor._request(contract, lease, prompt)
-        if self.on_process_group is None:
-            result = run_cli_worker(request)
-        else:
-            result = run_cli_worker(request, on_process_group=self.on_process_group)
-        return self._receipt(contract, lease, result)
+        target = Path(lease.target_worktree).resolve()
+        # Disposable HOME carrying only the copied auth file and an allowlisted
+        # environment (#2254): never the host HOME, ~/.ssh, ~/.config/gh or
+        # the ambient tokens.  Removed after the run.
+        run_home = Path(tempfile.mkdtemp(prefix="nexus-codex-home-"))
+        try:
+            refusal = materialize_codex_home(run_home)
+            if refusal is not None:
+                return self._boundary_failure(contract, lease, request, refusal)
+            request = dataclasses.replace(
+                request,
+                env=codex_child_env(os.environ, home=run_home, tmpdir=run_home / "tmp"),
+                exact_env=True,
+                sweep_descendants_on_exit=True,
+                sweep_roots=(str(target), str(run_home)),
+            )
+            before = target_integrity_snapshot(target)
+            if self.on_process_group is None:
+                result = run_cli_worker(request)
+            else:
+                result = run_cli_worker(request, on_process_group=self.on_process_group)
+            receipt = self._receipt(contract, lease, result)
+            failure = target_integrity_failure(before, target_integrity_snapshot(target))
+            if failure is None and receipt.exit_code == 0 and not jsonl_denial(result.stdout):
+                write_back_refreshed_auth(run_home)
+            if failure is not None:
+                receipt = dataclasses.replace(
+                    receipt,
+                    exit_code=receipt.exit_code if receipt.exit_code else 1,
+                    failure_reason=failure,
+                )
+            return receipt
+        finally:
+            shutil.rmtree(run_home, ignore_errors=True)
+
+    def _boundary_failure(
+        self,
+        contract: SelfHostedTaskContract,
+        lease: TargetWorktreeLease,
+        request: CliWorkerRequest,
+        reason: str,
+    ) -> CodexExecutionReceipt:
+        return CodexExecutionReceipt(
+            provider="codex",
+            task_id=contract.task_id,
+            target_worktree=str(Path(lease.target_worktree).resolve()),
+            worker_status=CliWorkerStatus.START_FAILED.value,
+            exit_code=1,
+            executable_identity=request.executable,
+            argv=request.argv,
+            stdout_sha256=CliWorkerResult.hash_bytes(b""),
+            stderr_sha256=CliWorkerResult.hash_bytes(b""),
+            wall_time_ms=0,
+            process_group_id=None,
+            provider_calls=0,
+            provider_attempt_count=0,
+            commit_created=False,
+            merge_performed=False,
+            failure_reason=reason or CODEX_RUN_HOME_UNAVAILABLE,
+        )
