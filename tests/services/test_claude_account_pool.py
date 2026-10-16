@@ -632,7 +632,7 @@ def test_dead_dispatcher_with_live_provider_keeps_lease_as_unknown(tmp_path: Pat
 def test_dead_dispatcher_before_launch_is_reclaimed(tmp_path: Path) -> None:
     manager, _, root = _pool(tmp_path, ["a"])
     adapter = _adapter(manager)
-    binding = adapter.acquire("claudeop_" + "1" * 32)
+    adapter.acquire("claudeop_" + "1" * 32)
     state = json.loads((root / "state.json").read_text())
     (lease_id,) = state["leases"]
     state["leases"][lease_id]["pid"] = 2**22 + 12345
