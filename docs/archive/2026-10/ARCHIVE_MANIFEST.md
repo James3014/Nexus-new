@@ -6,7 +6,7 @@ Target: docs/archive/<rel> -> docs/archive/2026-10/<rel>.
 
 Evidence: ~/Workspace/nexus-handoffs/2026-10-13-online-ab/ARCHIVE_CLASSIFICATION_20261016.md and _docs.tsv (class ARCHIVE). Re-verified at archive time by a one-pass git grep of every basename: referrers in nexus/, scripts/ (non-archive), tests/, .github/, .agents/ or any committed JSON/YAML (other than generated retention inventories) kept files in place. Mentions in other docs, tasks/, wiki vault and the generated inventories are treated as descriptive.
 
-Files: 72
+Files: 55
 
 | original path | new path | class | last commit |
 |---|---|---|---|
@@ -23,23 +23,6 @@ Files: 72
 | docs/archive/ERA-A/14_SKILLS_ROUTER_DECISION_SPEC.md | docs/archive/2026-10/ERA-A/14_SKILLS_ROUTER_DECISION_SPEC.md | ARCHIVE | 2026-03-19 |
 | docs/archive/ERA-A/16_EXECUTION_TIMELINE.md | docs/archive/2026-10/ERA-A/16_EXECUTION_TIMELINE.md | ARCHIVE | 2026-03-19 |
 | docs/archive/ERA-A/17_CAPABILITY_GAP_AND_PRIORITY.md | docs/archive/2026-10/ERA-A/17_CAPABILITY_GAP_AND_PRIORITY.md | ARCHIVE | 2026-04-08 |
-| docs/archive/ERA-A/2026-03-17_Nexus_10Case_Benchmark_比較分析.md | docs/archive/2026-10/ERA-A/2026-03-17_Nexus_10Case_Benchmark_比較分析.md | ARCHIVE | 2026-03-19 |
-| docs/archive/ERA-A/2026-03-17_Nexus_CleanCode_Linus_分析與漸進式重構清單.md | docs/archive/2026-10/ERA-A/2026-03-17_Nexus_CleanCode_Linus_分析與漸進式重構清單.md | ARCHIVE | 2026-03-19 |
-| docs/archive/ERA-A/2026-03-17_Nexus_Flash追近Sonnet4.6_優化計畫與TODO.md | docs/archive/2026-10/ERA-A/2026-03-17_Nexus_Flash追近Sonnet4.6_優化計畫與TODO.md | ARCHIVE | 2026-03-19 |
-| docs/archive/ERA-A/2026-03-17_Nexus_今日更動整理.md | docs/archive/2026-10/ERA-A/2026-03-17_Nexus_今日更動整理.md | ARCHIVE | 2026-03-19 |
-| docs/archive/ERA-A/2026-03-17_Nexus_成績與外部對照評估.md | docs/archive/2026-10/ERA-A/2026-03-17_Nexus_成績與外部對照評估.md | ARCHIVE | 2026-03-19 |
-| docs/archive/ERA-A/2026-03-17_TRU-101_修復任務單.md | docs/archive/2026-10/ERA-A/2026-03-17_TRU-101_修復任務單.md | ARCHIVE | 2026-03-19 |
-| docs/archive/ERA-A/2026-03-17_TRU-101_實跑驗證紀錄.md | docs/archive/2026-10/ERA-A/2026-03-17_TRU-101_實跑驗證紀錄.md | ARCHIVE | 2026-03-19 |
-| docs/archive/ERA-B/2026-03-18_CodexLoop_角色調整與啟用策略.md | docs/archive/2026-10/ERA-B/2026-03-18_CodexLoop_角色調整與啟用策略.md | ARCHIVE | 2026-03-19 |
-| docs/archive/ERA-B/2026-03-18_Nexus_Incident_Copilot_v0.1_計畫與TODO.md | docs/archive/2026-10/ERA-B/2026-03-18_Nexus_Incident_Copilot_v0.1_計畫與TODO.md | ARCHIVE | 2026-03-19 |
-| docs/archive/ERA-B/2026-03-18_Nexus_NightShift_整合分級路線圖.md | docs/archive/2026-10/ERA-B/2026-03-18_Nexus_NightShift_整合分級路線圖.md | ARCHIVE | 2026-03-19 |
-| docs/archive/ERA-B/2026-03-18_Nexus_第二輪精準收斂重構計畫.md | docs/archive/2026-10/ERA-B/2026-03-18_Nexus_第二輪精準收斂重構計畫.md | ARCHIVE | 2026-04-08 |
-| docs/archive/ERA-B/2026-03-18_Nexus_記憶與學習v2_重構後計畫與TODO.md | docs/archive/2026-10/ERA-B/2026-03-18_Nexus_記憶與學習v2_重構後計畫與TODO.md | ARCHIVE | 2026-03-19 |
-| docs/archive/ERA-B/2026-03-18_TRU-101_後續優化與驗證節奏.md | docs/archive/2026-10/ERA-B/2026-03-18_TRU-101_後續優化與驗證節奏.md | ARCHIVE | 2026-03-19 |
-| docs/archive/ERA-B/2026-03-18_TRU-101_驗收修正版與待修清單.md | docs/archive/2026-10/ERA-B/2026-03-18_TRU-101_驗收修正版與待修清單.md | ARCHIVE | 2026-03-19 |
-| docs/archive/ERA-B/2026-03-18_工作區搬遷執行指令.md | docs/archive/2026-10/ERA-B/2026-03-18_工作區搬遷執行指令.md | ARCHIVE | 2026-04-08 |
-| docs/archive/ERA-B/2026-03-18_工作區搬遷規劃.md | docs/archive/2026-10/ERA-B/2026-03-18_工作區搬遷規劃.md | ARCHIVE | 2026-03-19 |
-| docs/archive/ERA-B/2026-03-18_記憶技術棧7選項_取捨與導入順序.md | docs/archive/2026-10/ERA-B/2026-03-18_記憶技術棧7選項_取捨與導入順序.md | ARCHIVE | 2026-03-19 |
 | docs/archive/reports/EXEC_REPORT_20260319_025630.md | docs/archive/2026-10/reports/EXEC_REPORT_20260319_025630.md | ARCHIVE | 2026-04-08 |
 | docs/archive/reports/EXEC_REPORT_20260319_030805.md | docs/archive/2026-10/reports/EXEC_REPORT_20260319_030805.md | ARCHIVE | 2026-03-19 |
 | docs/archive/reports/EXEC_REPORT_20260319_044404.md | docs/archive/2026-10/reports/EXEC_REPORT_20260319_044404.md | ARCHIVE | 2026-04-08 |
@@ -88,3 +71,20 @@ Files: 72
 | path | referrer / reason |
 |---|---|
 | docs/archive/ERA-A/2026-03-17_Nexus_重構PR任務包_超細版.md | docs/DOC_AUTHORITY_MANIFEST.yaml |
+| docs/archive/ERA-A/2026-03-17_Nexus_10Case_Benchmark_比較分析.md | non-ASCII file name: the impact-map coverage tool cannot match quoted git paths |
+| docs/archive/ERA-A/2026-03-17_Nexus_CleanCode_Linus_分析與漸進式重構清單.md | non-ASCII file name: the impact-map coverage tool cannot match quoted git paths |
+| docs/archive/ERA-A/2026-03-17_Nexus_Flash追近Sonnet4.6_優化計畫與TODO.md | non-ASCII file name: the impact-map coverage tool cannot match quoted git paths |
+| docs/archive/ERA-A/2026-03-17_Nexus_今日更動整理.md | non-ASCII file name: the impact-map coverage tool cannot match quoted git paths |
+| docs/archive/ERA-A/2026-03-17_Nexus_成績與外部對照評估.md | non-ASCII file name: the impact-map coverage tool cannot match quoted git paths |
+| docs/archive/ERA-A/2026-03-17_TRU-101_修復任務單.md | non-ASCII file name: the impact-map coverage tool cannot match quoted git paths |
+| docs/archive/ERA-A/2026-03-17_TRU-101_實跑驗證紀錄.md | non-ASCII file name: the impact-map coverage tool cannot match quoted git paths |
+| docs/archive/ERA-B/2026-03-18_CodexLoop_角色調整與啟用策略.md | non-ASCII file name: the impact-map coverage tool cannot match quoted git paths |
+| docs/archive/ERA-B/2026-03-18_Nexus_Incident_Copilot_v0.1_計畫與TODO.md | non-ASCII file name: the impact-map coverage tool cannot match quoted git paths |
+| docs/archive/ERA-B/2026-03-18_Nexus_NightShift_整合分級路線圖.md | non-ASCII file name: the impact-map coverage tool cannot match quoted git paths |
+| docs/archive/ERA-B/2026-03-18_Nexus_第二輪精準收斂重構計畫.md | non-ASCII file name: the impact-map coverage tool cannot match quoted git paths |
+| docs/archive/ERA-B/2026-03-18_Nexus_記憶與學習v2_重構後計畫與TODO.md | non-ASCII file name: the impact-map coverage tool cannot match quoted git paths |
+| docs/archive/ERA-B/2026-03-18_TRU-101_後續優化與驗證節奏.md | non-ASCII file name: the impact-map coverage tool cannot match quoted git paths |
+| docs/archive/ERA-B/2026-03-18_TRU-101_驗收修正版與待修清單.md | non-ASCII file name: the impact-map coverage tool cannot match quoted git paths |
+| docs/archive/ERA-B/2026-03-18_工作區搬遷執行指令.md | non-ASCII file name: the impact-map coverage tool cannot match quoted git paths |
+| docs/archive/ERA-B/2026-03-18_工作區搬遷規劃.md | non-ASCII file name: the impact-map coverage tool cannot match quoted git paths |
+| docs/archive/ERA-B/2026-03-18_記憶技術棧7選項_取捨與導入順序.md | non-ASCII file name: the impact-map coverage tool cannot match quoted git paths |
