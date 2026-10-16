@@ -103,7 +103,7 @@ from nexus.app.research_flow_service import (
     build_route_executor_flags,
     run_auto_flow,
 )
-from nexus.contracts.model_output_json import ModelOutputParseError, ModelOutputShapeError, parse_model_json
+from nexus.contracts.model_output_json import ModelOutputParseError, ModelOutputShapeError, parse_model_json  # noqa: E402
 from nexus.engine.capability_aliases import normalize_capability_name, normalize_capability_names, normalize_capability_receipt
 from nexus.engine.capability_readiness import CORE_CAPABILITIES, build_benchmark_capability_readiness
 from nexus.engine.capability_planner import CapabilityPlanner
