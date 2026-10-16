@@ -47,6 +47,18 @@ MODEL_FAMILY_SCOPED_FAILURES = frozenset({
     AccountFailureKind.QUOTA_EXHAUSTED,
 })
 DEFAULT_FAMILY_UNAVAILABLE_TTL_SECONDS = 300.0
+# #2410: a TIMEOUT cools the account only briefly.  The manager's default
+# mark-bad cooldown (60 min) after every slow task drained the whole pool.
+DEFAULT_TIMEOUT_COOLDOWN_MINUTES = 5
+
+
+def timeout_cooldown_minutes() -> int:
+    raw = os.getenv("NEXUS_AGY_TIMEOUT_COOLDOWN_MINUTES")
+    try:
+        value = int(raw) if raw is not None else DEFAULT_TIMEOUT_COOLDOWN_MINUTES
+    except ValueError:
+        value = DEFAULT_TIMEOUT_COOLDOWN_MINUTES
+    return max(1, value)
 
 
 class AgyAccountPoolError(RuntimeError):
@@ -776,9 +788,10 @@ class AgyAccountPoolManager:
                 raise AgyAccountPoolManagerError(
                     f"Cannot mark account bad: alias for hash {lease.account_alias_hash} not found"
                 )
-            self._call_manager_cli(
-                ["mark-bad", failed_alias, "--reason", failure_kind.value], expect_json=False
-            )
+            mark_args = ["mark-bad", failed_alias, "--reason", failure_kind.value]
+            if failure_kind == AccountFailureKind.TIMEOUT:
+                mark_args += ["--cooldown-minutes", str(timeout_cooldown_minutes())]
+            self._call_manager_cli(mark_args, expect_json=False)
             manager_persisted = True
 
         try:

@@ -679,8 +679,14 @@ def _quota_window_drain_pressure(
     window: object,
     *,
     now_ts: float,
+    remaining_cap: float | None = None,
 ) -> float | None:
-    """Return expiring quota pressure as remaining_pct per hour until reset."""
+    """Return expiring quota pressure as remaining_pct per hour until reset.
+
+    ``remaining_cap`` bounds the usable remainder by a longer window (#2410: a
+    full 5h window on an account whose weekly quota is nearly gone cannot be
+    spent, so it must not outrank an account with real remaining quota).
+    """
     if not isinstance(window, dict) or window.get("status") != "known":
         return None
     remaining = window.get("remaining_pct")
@@ -692,11 +698,50 @@ def _quota_window_drain_pressure(
         or reset_ts <= now_ts
     ):
         return None
+    usable = float(remaining)
+    if remaining_cap is not None:
+        usable = min(usable, max(0.0, float(remaining_cap)))
+        if usable <= 0.0:
+            return None
     hours_to_reset = max(
         (reset_ts - now_ts) / 3600.0,
         MIN_DRAIN_HORIZON_SECONDS / 3600.0,
     )
-    return float(remaining) / hours_to_reset
+    return usable / hours_to_reset
+
+
+def _known_remaining_pct(window: object, *, now_ts: float) -> float | None:
+    """Known remaining percentage of one quota window, or None when unknown/reset."""
+    if not isinstance(window, dict) or window.get("status") != "known":
+        return None
+    remaining = window.get("remaining_pct")
+    if not isinstance(remaining, (int, float)):
+        return None
+    reset_ts = _parse_reset_at(window.get("reset_at"))
+    if reset_ts is not None and reset_ts <= now_ts:
+        return None
+    return float(remaining)
+
+
+def _family_remaining_pct(
+    groups: dict,
+    group_name: str,
+    *,
+    now_ts: float,
+) -> float | None:
+    """Usable remaining quota of one model group: the tightest known window."""
+    group = groups.get(group_name) if isinstance(groups, dict) else None
+    if not isinstance(group, dict):
+        return None
+    known = [
+        value
+        for value in (
+            _known_remaining_pct(group.get("5h"), now_ts=now_ts),
+            _known_remaining_pct(group.get("weekly"), now_ts=now_ts),
+        )
+        if value is not None
+    ]
+    return min(known) if known else None
 
 
 def _family_drain_pressure(
@@ -710,18 +755,30 @@ def _family_drain_pressure(
     if not isinstance(group, dict):
         return None
     if family_state == "five_hour":
-        return _quota_window_drain_pressure(group.get("5h"), now_ts=now_ts)
+        return _quota_window_drain_pressure(
+            group.get("5h"),
+            now_ts=now_ts,
+            remaining_cap=_known_remaining_pct(group.get("weekly"), now_ts=now_ts),
+        )
     if family_state == "weekly":
         return _quota_window_drain_pressure(group.get("weekly"), now_ts=now_ts)
     return None
 
 
 def _order_accounts_by_drain_pressure(
-    entries: list[tuple[str, float | None]],
+    entries: list[tuple[str, float | None]] | list[tuple[str, float | None, float | None]],
 ) -> list[str]:
-    """Prioritize known high burn pressure, then deterministic account identity."""
+    """Prioritize known high burn pressure, then most remaining quota, then identity.
+
+    Entries are ``(name, pressure)`` or ``(name, pressure, remaining_pct)``.
+    """
     deduped: dict[str, float | None] = {}
-    for name, pressure in entries:
+    remaining_by_name: dict[str, float] = {}
+    for entry in entries:
+        name, pressure = entry[0], entry[1]
+        remaining = entry[2] if len(entry) > 2 else None
+        if remaining is not None:
+            remaining_by_name[name] = max(remaining_by_name.get(name, 0.0), float(remaining))
         if name not in deduped:
             deduped[name] = pressure
             continue
@@ -731,9 +788,10 @@ def _order_accounts_by_drain_pressure(
 
     def sort_key(item: tuple[str, float | None]) -> tuple[object, ...]:
         name, pressure = item
+        remaining = -remaining_by_name.get(name, 0.0)
         if pressure is None:
-            return (1, 0.0, name)
-        return (0, -pressure, name)
+            return (1, 0.0, remaining, name)
+        return (0, -pressure, remaining, name)
 
     return [name for name, _pressure in sorted(deduped.items(), key=sort_key)]
 
@@ -1135,9 +1193,9 @@ def _dynamic_availability_state(
         return result
 
     result["snapshot_fresh"] = True
-    preferred: list[tuple[str, float | None]] = []
-    reserve: list[tuple[str, float | None]] = []
-    fallback: list[tuple[str, float | None]] = []
+    preferred: list[tuple[str, float | None, float | None]] = []
+    reserve: list[tuple[str, float | None, float | None]] = []
+    fallback: list[tuple[str, float | None, float | None]] = []
     blocked: list[str] = []
     unknown: list[str] = []
     target_group = "Gemini Models" if family == "gemini" else "Claude and GPT models"
@@ -1181,13 +1239,14 @@ def _dynamic_availability_state(
             target_state,
             now_ts=current,
         )
+        remaining_pct = _family_remaining_pct(groups, target_group, now_ts=current)
         if target_state == "five_hour":
             if other_state == "five_hour":
-                reserve.append((name, drain_pressure))
+                reserve.append((name, drain_pressure, remaining_pct))
             else:
-                preferred.append((name, drain_pressure))
+                preferred.append((name, drain_pressure, remaining_pct))
         elif target_state == "weekly":
-            fallback.append((name, drain_pressure))
+            fallback.append((name, drain_pressure, remaining_pct))
         elif target_state == "blocked":
             blocked.append(name)
         else:
@@ -3252,6 +3311,419 @@ def _run_foreground_hcom_operation(
     return code
 
 
+# #2410: a busy or briefly-cooling pool queues against the dispatch's own total
+# deadline instead of failing after a fixed 15 s; ``pool_exhausted`` is only
+# returned when no eligible account recovers before that deadline, and then it
+# carries the earliest recovery time.
+DEFAULT_POOL_QUEUE_POLL_SECONDS = 2.0
+POOL_QUEUE_MAX_SLEEP_SECONDS = 30.0
+_sleep = time.sleep
+_queue_monotonic = time.monotonic
+
+
+def _pool_queue_poll_seconds() -> float:
+    return _bounded_positive_seconds(
+        "NEXUS_AGY_POOL_QUEUE_POLL_SECONDS",
+        DEFAULT_POOL_QUEUE_POLL_SECONDS,
+    )
+
+
+def _env_pool_wait_timeout() -> float | None:
+    """An explicit NEXUS_AGY_POOL_WAIT_TIMEOUT caps the queue; unset derives it."""
+    raw = os.getenv("NEXUS_AGY_POOL_WAIT_TIMEOUT")
+    if raw is None or not raw.strip():
+        return None
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return None
+
+
+def _pool_wait_budget(*, total_deadline: float, explicit: float | None) -> float:
+    """Seconds a claim may queue: until the attempt floor before the total deadline.
+
+    An explicit ``--pool-wait-timeout`` only shortens the queue; it never lets a
+    dispatch wait past its own total deadline.
+    """
+    remaining = max(0.0, total_deadline - _monotonic() - TOTAL_DEADLINE_MIN_ATTEMPT_SECONDS)
+    if explicit is None:
+        return remaining
+    return max(0.0, min(float(explicit), remaining))
+
+
+def _iso_utc(ts: float | None) -> str | None:
+    if ts is None:
+        return None
+    return datetime.fromtimestamp(float(ts), tz=timezone.utc).isoformat()
+
+
+def _pool_recovery_estimate(
+    coordinator: Any,
+    *,
+    model_family: str | None,
+    exclude_hashes: set[str],
+    quota_snapshot: dict,
+    now_ts: float | None = None,
+) -> dict[str, Any]:
+    """Earliest time an enabled, non-excluded account becomes claimable again.
+
+    Reads only availability metadata (manager cooldowns, family quota markers,
+    quarantine markers and the quota snapshot's reset times); account names are
+    reduced to their 12-hex alias hash and never returned.  An account blocked
+    by anything without a known end (quarantine, disabled) never recovers here.
+    Every lookup is best effort: a coordinator without that metadata yields an
+    unknown recovery time, which callers treat as "not before the deadline".
+    """
+    current = time.time() if now_ts is None else float(now_ts)
+    result: dict[str, Any] = {
+        "earliest_reset_ts": None,
+        "earliest_reset_at": None,
+        "accounts_considered": 0,
+        "accounts_cooling": 0,
+        "accounts_quota_blocked": 0,
+        "accounts_without_known_recovery": 0,
+    }
+    manager = getattr(coordinator, "manager", None)
+    call_cli = getattr(manager, "_call_manager_cli", None)
+    if not callable(call_cli):
+        return result
+    try:
+        status = call_cli(["status", "--json"])
+    except Exception:
+        return result
+    accounts = status.get("accounts") if isinstance(status, dict) else None
+    if isinstance(accounts, dict):
+        entries = list(accounts.items())
+    elif isinstance(accounts, list):
+        entries = [
+            (str(info.get("name")), info)
+            for info in accounts
+            if isinstance(info, dict) and info.get("name")
+        ]
+    else:
+        return result
+
+    family_until: dict[str, float] = {}
+    leases_dir = getattr(coordinator, "leases_dir", None)
+    if model_family in {"gemini", "claude_gpt"} and isinstance(leases_dir, Path):
+        suffix = f".family-unavailable.{model_family}.json"
+        try:
+            marker_paths = list(leases_dir.glob(f"*{suffix}"))
+        except OSError:
+            marker_paths = []
+        for path in marker_paths:
+            alias_hash = path.name[: -len(suffix)]
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                until = float(payload.get("unavailable_until"))
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                until = float("inf")
+            if until > current:
+                family_until[alias_hash] = max(family_until.get(alias_hash, 0.0), until)
+    quarantined: set[str] = set()
+    get_quarantined = getattr(coordinator, "get_quarantined_hashes", None)
+    if callable(get_quarantined):
+        try:
+            quarantined = set(get_quarantined())
+        except Exception:
+            quarantined = set()
+    blocked_names = {
+        name.strip()
+        for name in os.getenv("NEXUS_AGY_BLOCKED_ACCOUNTS", "").split(",")
+        if name.strip()
+    }
+
+    earliest: float | None = None
+    for name, info in entries:
+        if not isinstance(info, dict) or info.get("enabled") is not True:
+            continue
+        alias_hash = hashlib.sha256(str(name).encode("utf-8")).hexdigest()[:12]
+        if alias_hash in exclude_hashes:
+            continue
+        result["accounts_considered"] += 1
+        if alias_hash in quarantined:
+            result["accounts_without_known_recovery"] += 1
+            continue
+        recover_at = current
+        blocker_found = False
+        cooldown_ts = _parse_reset_at(info.get("cooldown_until"))
+        if info.get("cooldown_until") and cooldown_ts is None:
+            result["accounts_without_known_recovery"] += 1
+            continue
+        if cooldown_ts is not None and cooldown_ts > current:
+            blocker_found = True
+            result["accounts_cooling"] += 1
+            recover_at = max(recover_at, cooldown_ts)
+        quota_blocked = False
+        if alias_hash in family_until:
+            quota_blocked = True
+            recover_at = max(recover_at, family_until[alias_hash])
+        if str(name) in blocked_names and model_family in {"gemini", "claude_gpt"}:
+            quota_blocked = True
+            _state, reset_ts, _fresh = _account_family_quota_state(
+                quota_snapshot,
+                account_name=str(name),
+                model_family=model_family,
+                now_ts=current,
+            )
+            recover_at = max(
+                recover_at,
+                reset_ts if reset_ts is not None and reset_ts > current else float("inf"),
+            )
+        if quota_blocked:
+            blocker_found = True
+            result["accounts_quota_blocked"] += 1
+        if not blocker_found or recover_at == float("inf"):
+            # Unavailable for a reason without a known end (missing identity,
+            # missing snapshot, unbounded block): never a reason to queue.
+            result["accounts_without_known_recovery"] += 1
+            continue
+        if earliest is None or recover_at < earliest:
+            earliest = recover_at
+    if earliest is not None:
+        result["earliest_reset_ts"] = earliest
+        result["earliest_reset_at"] = _iso_utc(earliest)
+    return result
+
+
+class _PoolClaimFailure(Exception):
+    """The queue ended without a lease: still busy, or no recovery before the deadline."""
+
+    def __init__(self, *, busy: bool, waited_seconds: float, recovery: dict[str, Any] | None):
+        super().__init__("AGY_ACCOUNT_POOL_BUSY" if busy else "AGY_ACCOUNT_POOL_EXHAUSTED")
+        self.busy = busy
+        self.waited_seconds = waited_seconds
+        self.recovery = dict(recovery or {})
+
+
+POOL_QUEUE_TICKET_STALE_SECONDS = 90.0
+
+
+class _PoolQueueTicket:
+    """One FIFO waiter in ``<leases_dir>/queue`` for one (family, exclusions) queue.
+
+    Without an order, a waiter polling a full pool loses each freed lease to
+    whichever process takes the allocator lock first, so newcomers can starve
+    it until its deadline (seven 900 s waits ended busy on 2026-10-15 while
+    later dispatches leased).  Waiters with the same model family and the same
+    exclusions see the same candidate accounts, so only the oldest live one
+    of them takes allocator passes.  A ticket is live while its process exists
+    and it keeps touching the file; anything else is pruned.
+    """
+
+    @staticmethod
+    def suffix_for(model_family: str | None, exclude_hashes: set[str]) -> str:
+        signature = hashlib.sha256(",".join(sorted(exclude_hashes)).encode("utf-8")).hexdigest()
+        return f".{model_family or 'any'}.{signature[:12]}.ticket"
+
+    def __init__(self, queue_dir: Path, *, model_family: str | None, exclude_hashes: set[str]):
+        self.suffix = self.suffix_for(model_family, exclude_hashes)
+        self.queue_dir = queue_dir
+        queue_dir.mkdir(parents=True, exist_ok=True)
+        self.path = queue_dir / (
+            f"{time.time_ns():020d}-{os.getpid()}-{uuid.uuid4().hex[:8]}{self.suffix}"
+        )
+        self.path.write_text(f"{os.getpid()}\n", encoding="utf-8")
+
+    @staticmethod
+    def _live(path: Path, *, now: float) -> bool:
+        try:
+            pid = int(path.name.split("-", 2)[1])
+            mtime = path.stat().st_mtime
+        except (IndexError, ValueError, OSError):
+            return False
+        if now - mtime > POOL_QUEUE_TICKET_STALE_SECONDS:
+            return False
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+
+    @classmethod
+    def live_tickets(cls, queue_dir: Path, suffix: str) -> list[Path]:
+        now = time.time()
+        live: list[Path] = []
+        try:
+            paths = sorted(queue_dir.glob(f"*{suffix}"))
+        except OSError:
+            return live
+        for path in paths:
+            if cls._live(path, now=now):
+                live.append(path)
+            else:
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+        return live
+
+    def is_head(self) -> bool:
+        live = self.live_tickets(self.queue_dir, self.suffix)
+        return not live or live[0] == self.path or self.path not in live
+
+    def touch(self) -> None:
+        try:
+            os.utime(self.path)
+        except OSError:
+            pass
+
+    def close(self) -> None:
+        try:
+            self.path.unlink()
+        except OSError:
+            pass
+
+
+def _pool_queue_dir(coordinator: Any) -> Path | None:
+    leases_dir = getattr(coordinator, "leases_dir", None)
+    return leases_dir / "queue" if isinstance(leases_dir, Path) else None
+
+
+def _acquire_claim_queued(
+    coordinator: Any,
+    *,
+    consumer_id: str,
+    exclude_hashes: set[str],
+    wait_budget: float,
+    model_family: str | None,
+    quota_snapshot: dict,
+    first_pass: Any = None,
+    on_queue: Any = None,
+) -> tuple[Any, float]:
+    """Claim one account, queueing while the pool is busy or recovers in time.
+
+    Each pass is a single non-blocking allocator pass (``wait_timeout=0``); the
+    queue sleeps between passes so many waiters do not spin on the allocator
+    lock.  ``first_pass`` lets a rotation retire its failed claim exactly once;
+    a rotation is a running task and never waits behind new dispatches.
+    A new dispatch joins the FIFO when older waiters exist instead of barging.
+    """
+    started = _queue_monotonic()
+    deadline = started + max(0.0, float(wait_budget))
+    poll = _pool_queue_poll_seconds()
+    queue_dir = _pool_queue_dir(coordinator)
+    ticket: _PoolQueueTicket | None = None
+
+    def default_pass() -> Any:
+        return coordinator.acquire_claim(
+            consumer_id=consumer_id,
+            exclude_hashes=exclude_hashes,
+            wait_timeout=0.0,
+            model_family=model_family,
+        )
+
+    def join_queue() -> _PoolQueueTicket | None:
+        if queue_dir is None:
+            return None
+        try:
+            return _PoolQueueTicket(
+                queue_dir, model_family=model_family, exclude_hashes=exclude_hashes
+            )
+        except OSError:
+            return None
+
+    if first_pass is None and queue_dir is not None:
+        suffix = _PoolQueueTicket.suffix_for(model_family, exclude_hashes)
+        if _PoolQueueTicket.live_tickets(queue_dir, suffix):
+            ticket = join_queue()
+
+    attempt = first_pass or default_pass
+    passes = 0
+    state = "POOL_BUSY"
+    recovery: dict[str, Any] | None = None
+    try:
+        while True:
+            if ticket is not None and not ticket.is_head():
+                ticket.touch()
+                remaining = deadline - _queue_monotonic()
+                if remaining <= 0:
+                    raise _PoolClaimFailure(
+                        busy=state == "POOL_BUSY",
+                        waited_seconds=_queue_monotonic() - started,
+                        recovery=recovery,
+                    )
+                if on_queue is not None:
+                    on_queue(
+                        state="QUEUED_BEHIND_OLDER_WAITER",
+                        passes=passes,
+                        waited_seconds=_queue_monotonic() - started,
+                        earliest_reset_at=None,
+                    )
+                _sleep(max(0.01, min(poll, remaining)))
+                continue
+            passes += 1
+            try:
+                claim = attempt()
+                return claim, _queue_monotonic() - started
+            except AgyAccountPoolBusyError:
+                busy = True
+                recovery = None
+            except AgyAccountPoolExhaustedError:
+                busy = False
+                recovery = _pool_recovery_estimate(
+                    coordinator,
+                    model_family=model_family,
+                    exclude_hashes=exclude_hashes,
+                    quota_snapshot=quota_snapshot,
+                )
+            attempt = default_pass
+            state = "POOL_BUSY" if busy else "POOL_RECOVERING"
+            remaining = deadline - _queue_monotonic()
+            if busy:
+                if remaining <= 0:
+                    raise _PoolClaimFailure(
+                        busy=True,
+                        waited_seconds=_queue_monotonic() - started,
+                        recovery=None,
+                    )
+                delay = min(poll, remaining)
+            else:
+                assert recovery is not None
+                earliest = recovery.get("earliest_reset_ts")
+                until_reset = None if earliest is None else float(earliest) - time.time()
+                if until_reset is None or until_reset > remaining:
+                    raise _PoolClaimFailure(
+                        busy=False,
+                        waited_seconds=_queue_monotonic() - started,
+                        recovery=recovery,
+                    )
+                delay = min(max(until_reset, 0.0) + 0.5, POOL_QUEUE_MAX_SLEEP_SECONDS, remaining)
+            if ticket is None:
+                ticket = join_queue()
+            else:
+                ticket.touch()
+            if on_queue is not None:
+                reset_at = None if recovery is None else recovery.get("earliest_reset_at")
+                on_queue(
+                    state=state,
+                    passes=passes,
+                    waited_seconds=_queue_monotonic() - started,
+                    earliest_reset_at=reset_at,
+                )
+            _sleep(max(0.01, delay))
+    finally:
+        if ticket is not None:
+            ticket.close()
+
+
+def _rotation_cap(coordinator: Any) -> int:
+    """Rotations allowed: the configured cap, never more than the other pool accounts."""
+    cap = _max_account_failovers()
+    manager = getattr(coordinator, "manager", None)
+    ensure_pool = getattr(manager, "_ensure_pool", None)
+    if callable(ensure_pool):
+        try:
+            pool_size = len(ensure_pool()._accounts)
+        except Exception:
+            pool_size = 0
+        if pool_size > 1:
+            cap = min(cap, pool_size - 1)
+    return cap
+
+
 def dispatch_run(
     *,
     prompt: str,
@@ -3261,7 +3733,7 @@ def dispatch_run(
     effort: str | None = None,
     timeout: int = 900,
     max_calls: int = 3,
-    pool_wait_timeout: float = 15.0,
+    pool_wait_timeout: float | None = None,
     allow: list[str] | None = None,
     deny: list[str] | None = None,
     write_paths: list[str] | None = None,
@@ -3531,22 +4003,100 @@ def dispatch_run(
         return 64
 
     claim: Optional[AccountLeaseClaim] = None
-    try:
-        claim = coordinator.acquire_claim(
-            consumer_id=consumer_id,
-            exclude_hashes=exclude_hashes,
-            wait_timeout=pool_wait_timeout,
-            model_family=scoped_model_family,
+    pool_queue: dict[str, Any] = {
+        "wait_ms": 0,
+        "waits": 0,
+        "state": None,
+        "earliest_reset_at": None,
+    }
+
+    def _on_pool_queue(**event: Any) -> None:
+        pool_queue["state"] = event.get("state")
+        if event.get("earliest_reset_at"):
+            pool_queue["earliest_reset_at"] = event.get("earliest_reset_at")
+        _operation_hook(
+            operation_hook,
+            pool_queue=dict(
+                pool_queue,
+                current_wait_ms=int(float(event.get("waited_seconds") or 0.0) * 1000),
+            ),
         )
-    except (AgyAccountPoolBusyError, AgyAccountPoolExhaustedError) as claim_exc:
-        busy = isinstance(claim_exc, AgyAccountPoolBusyError)
+
+    def _record_pool_wait(waited_seconds: float) -> None:
+        waited_ms = int(max(0.0, waited_seconds) * 1000)
+        pool_queue["wait_ms"] += waited_ms
+        if waited_ms > 0:
+            pool_queue["waits"] += 1
+
+    def _pool_claim_meta(exc: _PoolClaimFailure) -> dict[str, Any]:
+        recovery = exc.recovery
+        meta: dict[str, Any] = {
+            "pool_queue_wait_ms": pool_queue["wait_ms"],
+            "pool_wait_budget_seconds": round(last_wait_budget[0], 3),
+        }
+        if not exc.busy:
+            meta["earliest_reset_at"] = recovery.get("earliest_reset_at")
+            meta["pool_recovery"] = {
+                key: recovery.get(key)
+                for key in (
+                    "accounts_considered",
+                    "accounts_cooling",
+                    "accounts_quota_blocked",
+                    "accounts_without_known_recovery",
+                )
+            }
+        return meta
+
+    last_wait_budget = [0.0]
+
+    def _queued_claim(first_pass: Any = None) -> Any:
+        last_wait_budget[0] = _pool_wait_budget(
+            total_deadline=total_deadline,
+            explicit=pool_wait_timeout,
+        )
+        try:
+            new_claim, waited = _acquire_claim_queued(
+                coordinator,
+                consumer_id=consumer_id,
+                exclude_hashes=exclude_hashes,
+                wait_budget=last_wait_budget[0],
+                model_family=scoped_model_family,
+                quota_snapshot=quota_snapshot,
+                first_pass=first_pass,
+                on_queue=_on_pool_queue,
+            )
+        except _PoolClaimFailure as exc:
+            _record_pool_wait(exc.waited_seconds)
+            pool_queue["state"] = "POOL_BUSY" if exc.busy else "POOL_EXHAUSTED"
+            if not exc.busy:
+                pool_queue["earliest_reset_at"] = exc.recovery.get("earliest_reset_at")
+            raise
+        _record_pool_wait(waited)
+        pool_queue["state"] = "LEASED"
+        return new_claim
+
+    try:
+        claim = _queued_claim()
+    except _PoolClaimFailure as claim_exc:
+        busy = claim_exc.busy
         claim_failure = "AGY_ACCOUNT_POOL_BUSY" if busy else "ACCOUNT_UNAVAILABLE"
+        claim_meta = _pool_claim_meta(claim_exc)
         claim_event: dict[str, Any] = {
             "phase": "ACCOUNT_CLAIM_FAILED",
             "attempts": 0,
             "rotations": 0,
             "failure_kind": claim_failure,
             "provider_effect": False,
+            "pool_queue": dict(pool_queue),
+            "failure_history_entry": {
+                "attempts": 0,
+                "rotations": 0,
+                "failure_kind": claim_failure,
+                "account_alias_hash": None,
+                "lease_id_hash": None,
+                "pool_queue_wait_ms": pool_queue["wait_ms"],
+                "earliest_reset_at": claim_meta.get("earliest_reset_at"),
+            },
         }
         if scoped_model_family is not None:
             claim_event["quota_preflight_progress"] = {
@@ -3566,6 +4116,7 @@ def dispatch_run(
             "failure_kind": claim_failure,
             "provider_effect": False,
             "wall_ms": 0,
+            **claim_meta,
         })
         return 75
 
@@ -3573,7 +4124,7 @@ def dispatch_run(
     work_failures = 0
     work_budget = max(1, max_calls)
     rotations = 0
-    max_failovers = _max_account_failovers()
+    max_failovers = _rotation_cap(coordinator)
     last_kind = None
     total_wall_ms = 0
     active_provider_pid: int | None = None
@@ -3602,6 +4153,7 @@ def dispatch_run(
         lease_id_hash=claim.lease_id_hash,
         attempts=attempts,
         rotations=rotations,
+        pool_queue=dict(pool_queue),
     )
 
     def _budget_exhausted() -> bool:
@@ -3717,14 +4269,27 @@ def dispatch_run(
                             "wall_ms": total_wall_ms,
                         })
                         return 75
+                    blocked_claim = claim
+                    _operation_hook(
+                        operation_hook,
+                        failure_history_entry={
+                            "attempts": attempts,
+                            "rotations": rotations,
+                            "failure_kind": "QUOTA_EXHAUSTED_KNOWN_PRE_ATTEMPT",
+                            "account_alias_hash": blocked_claim.account_alias_hash,
+                            "lease_id_hash": blocked_claim.lease_id_hash,
+                        },
+                    )
                     try:
-                        claim = coordinator.rotate_claim(
-                            current_claim=claim,
-                            failure_kind=AccountFailureKind.QUOTA_EXHAUSTED,
-                            exclude_hashes=exclude_hashes,
-                            wait_timeout=pool_wait_timeout,
-                            model_family=scoped_model_family,
-                            unavailable_until=unavailable_until,
+                        claim = _queued_claim(
+                            first_pass=lambda: coordinator.rotate_claim(
+                                current_claim=blocked_claim,
+                                failure_kind=AccountFailureKind.QUOTA_EXHAUSTED,
+                                exclude_hashes=exclude_hashes,
+                                wait_timeout=0.0,
+                                model_family=scoped_model_family,
+                                unavailable_until=unavailable_until,
+                            )
                         )
                         rotations += 1
                         _operation_hook(
@@ -3744,26 +4309,19 @@ def dispatch_run(
                             },
                         )
                         continue
-                    except AgyAccountPoolBusyError:
+                    except _PoolClaimFailure as rotate_exc:
+                        _operation_hook(operation_hook, pool_queue=dict(pool_queue))
                         emit_meta({
-                            "status": "pool_busy",
+                            "status": "pool_busy" if rotate_exc.busy else "pool_exhausted",
                             "attempts": attempts,
                             "rotations": rotations,
-                            "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
+                            "failure_kind": (
+                                "AGY_ACCOUNT_POOL_BUSY" if rotate_exc.busy else "QUOTA_EXHAUSTED"
+                            ),
                             "wall_ms": total_wall_ms,
                             "permission_profile_sha256": permission_profile_sha256,
                             "permission_profile_kind": permission_profile_kind,
-                        })
-                        return 75
-                    except AgyAccountPoolExhaustedError:
-                        emit_meta({
-                            "status": "pool_exhausted",
-                            "attempts": attempts,
-                            "rotations": rotations,
-                            "failure_kind": "QUOTA_EXHAUSTED",
-                            "wall_ms": total_wall_ms,
-                            "permission_profile_sha256": permission_profile_sha256,
-                            "permission_profile_kind": permission_profile_kind,
+                            **_pool_claim_meta(rotate_exc),
                         })
                         return 75
 
@@ -4162,6 +4720,7 @@ def dispatch_run(
                     "lease_id_hash": claim.lease_id_hash,
                     "parallel_slot": True,
                     "wall_ms": total_wall_ms,
+                    "pool_queue_wait_ms": pool_queue["wait_ms"],
                     "permission_profile_sha256": permission_profile_sha256,
                     "permission_profile_kind": permission_profile_kind,
                 })
@@ -4292,17 +4851,20 @@ def dispatch_run(
             if not is_account_failover_failure(kind):
                 work_failures += 1
 
+            def _retire_current() -> None:
+                coordinator.retire_failed_claim(
+                    claim,
+                    kind,
+                    model_family=scoped_model_family,
+                    unavailable_until=family_unavailable_until,
+                )
+
             if not is_account_failover_failure(kind) and work_failures >= work_budget:
                 # Real work failure budget is independent from account-selection
                 # failover. Retire the current failed scope without acquiring
                 # another account when the model-work budget is exhausted.
                 try:
-                    coordinator.retire_failed_claim(
-                        claim,
-                        kind,
-                        model_family=scoped_model_family,
-                        unavailable_until=family_unavailable_until,
-                    )
+                    _retire_current()
                 except Exception:
                     pass
                 if out:
@@ -4327,12 +4889,7 @@ def dispatch_run(
 
             if rotations >= max_failovers:
                 try:
-                    coordinator.retire_failed_claim(
-                        claim,
-                        kind,
-                        model_family=scoped_model_family,
-                        unavailable_until=family_unavailable_until,
-                    )
+                    _retire_current()
                 except Exception:
                     pass
                 emit_meta({
@@ -4351,16 +4908,30 @@ def dispatch_run(
                 })
                 return 75
 
-            # Rotation eligible: rotate claim
-            try:
-                claim = coordinator.rotate_claim(
-                    current_claim=claim,
+            if total_deadline - _monotonic() < TOTAL_DEADLINE_MIN_ATTEMPT_SECONDS:
+                # No budget is left for another attempt: retire the failed scope
+                # (quota/auth still mark the account) but lease nothing new.
+                try:
+                    _retire_current()
+                except Exception:
+                    pass
+                return _emit_total_deadline_exhausted()
+
+            # Rotation eligible: rotate claim, queueing for the next account.
+            failed_claim = claim
+
+            def _rotation_pass() -> Any:
+                return coordinator.rotate_claim(
+                    current_claim=failed_claim,
                     failure_kind=kind,
                     exclude_hashes=exclude_hashes,
-                    wait_timeout=pool_wait_timeout,
+                    wait_timeout=0.0,
                     model_family=scoped_model_family,
                     unavailable_until=family_unavailable_until,
                 )
+
+            try:
+                claim = _queued_claim(first_pass=_rotation_pass)
                 rotations += 1
                 _operation_hook(
                     operation_hook,
@@ -4370,23 +4941,17 @@ def dispatch_run(
                     failure_kind=last_kind,
                     account_alias_hash=claim.account_alias_hash,
                     lease_id_hash=claim.lease_id_hash,
+                    pool_queue=dict(pool_queue),
                 )
-            except AgyAccountPoolBusyError:
+            except _PoolClaimFailure as rotate_exc:
+                _operation_hook(operation_hook, pool_queue=dict(pool_queue))
                 emit_meta({
-                    "status": "pool_busy",
+                    "status": "pool_busy" if rotate_exc.busy else "pool_exhausted",
                     "attempts": attempts,
                     "rotations": rotations,
-                    "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
+                    "failure_kind": "AGY_ACCOUNT_POOL_BUSY" if rotate_exc.busy else last_kind,
                     "wall_ms": total_wall_ms,
-                })
-                return 75
-            except AgyAccountPoolExhaustedError:
-                emit_meta({
-                    "status": "pool_exhausted",
-                    "attempts": attempts,
-                    "rotations": rotations,
-                    "failure_kind": last_kind,
-                    "wall_ms": total_wall_ms,
+                    **_pool_claim_meta(rotate_exc),
                 })
                 return 75
             except Exception:
@@ -4446,7 +5011,7 @@ def _spawn_background_operation(
     effort: str | None,
     timeout: int,
     max_calls: int,
-    pool_wait_timeout: float,
+    pool_wait_timeout: float | None,
     allow: list[str],
     deny: list[str],
     temp_command_permissions: bool,
@@ -4528,8 +5093,7 @@ def _spawn_background_operation(
         str(timeout),
         "--max-calls",
         str(max_calls),
-        "--pool-wait-timeout",
-        str(pool_wait_timeout),
+        *(["--pool-wait-timeout", str(pool_wait_timeout)] if pool_wait_timeout is not None else []),
         "--provider-stall-seconds",
         str(resolved_provider_stall_seconds),
         "--stream-no-progress-seconds",
@@ -4738,7 +5302,7 @@ def _run_background_operation(
     effort: str | None,
     timeout: int,
     max_calls: int,
-    pool_wait_timeout: float,
+    pool_wait_timeout: float | None,
     allow: list[str],
     deny: list[str],
     temp_command_permissions: bool,
@@ -4824,12 +5388,22 @@ def _run_background_operation(
             requested_model=snapshot.get("requested_model"),
             resolved_model=snapshot.get("resolved_model"),
             model_catalog=snapshot.get("model_catalog"),
+            pool_queue=snapshot.get("pool_queue"),
         )
 
     def on_event(event: dict[str, Any]) -> None:
         with state_lock:
+            event = dict(event)
+            history_entry = event.pop("failure_history_entry", None)
             state.update(event)
             failure_kind = event.get("failure_kind")
+            if isinstance(history_entry, dict):
+                # #2410: pool claim failures and known-quota rotations never
+                # reach CLASSIFYING_FAILURE; record them so failure_history
+                # shows every account the dispatch gave up on.
+                history = list(state.get("failure_history") or [])
+                history.append({"at": _agy_operation_journal.utc_now(), **history_entry})
+                state["failure_history"] = history[-MAX_FAILURE_HISTORY_ENTRIES:]
             if (
                 event.get("phase") == "CLASSIFYING_FAILURE"
                 and isinstance(failure_kind, str)
@@ -5249,8 +5823,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--pool-wait-timeout",
         type=float,
-        default=float(os.getenv("NEXUS_AGY_POOL_WAIT_TIMEOUT", "15.0")),
-        help="Timeout in seconds to wait for an available account slot when the pool is busy",
+        default=_env_pool_wait_timeout(),
+        help=(
+            "Optional cap in seconds on queueing for an account; by default a busy "
+            "pool queues until the --timeout total deadline (#2410)"
+        ),
     )
     ap.add_argument(
         "--provider-stall-seconds",
@@ -5340,7 +5917,9 @@ def main(argv: list[str] | None = None) -> int:
             cwd=cwd,
             hcom_args=hcom_args,
             model=args.model,
-            pool_wait_timeout=args.pool_wait_timeout,
+            pool_wait_timeout=(
+                args.pool_wait_timeout if args.pool_wait_timeout is not None else 15.0
+            ),
             operation_root=operation_root,
             exclude_accounts=args.exclude_account,
         )
