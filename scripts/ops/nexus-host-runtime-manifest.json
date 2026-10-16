@@ -48,6 +48,10 @@
       "mode": "0644"
     },
     {
+      "path": "nexus/services/agy_failure_signals.py",
+      "mode": "0644"
+    },
+    {
       "path": "nexus/services/agy_operation_journal.py",
       "mode": "0644"
     },

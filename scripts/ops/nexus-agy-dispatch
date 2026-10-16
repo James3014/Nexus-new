@@ -85,6 +85,13 @@ AccountFailureKind = _external_account_pool.AccountFailureKind
 is_account_failover_failure = _external_account_pool.is_account_failover_failure
 ACCOUNT_FAILOVER_FAILURES = _external_account_pool.ACCOUNT_FAILOVER_FAILURES
 
+_agy_failure_signals = import_module("nexus.services.agy_failure_signals")
+agy_structured_failure = _agy_failure_signals.agy_structured_failure
+agy_stderr_account_failure = _agy_failure_signals.agy_stderr_account_failure
+is_account_global_retirement = _agy_failure_signals.is_account_global_retirement
+max_account_retirements = _agy_failure_signals.max_account_retirements
+AGY_UPSTREAM_UNAVAILABLE = "AGY_UPSTREAM_UNAVAILABLE"
+
 
 _agy_operation_journal = import_module("nexus.services.agy_operation_journal")
 AgyOperationJournal = _agy_operation_journal.AgyOperationJournal
@@ -1424,6 +1431,14 @@ def _permission_scan_text(text: str, run_homes: list[Path]) -> str:
 def classify_failure(
     returncode: int | None, stdout: str, stderr: str, timed_out: bool
 ) -> AccountFailureKind:
+    """Failure kind of one agy attempt.
+
+    #2415: account-level kinds (quota, rate limit, auth, unavailable,
+    disabled), which retire or cool down the account, come only from agy's
+    own error channel: its ``AGY_ERROR`` JSON line, else its stderr text.
+    stdout is the model's reply in ``--output-format text`` and is never read
+    for them.
+    """
     if timed_out:
         return AccountFailureKind.TIMEOUT
     text = (stdout + "\n" + stderr).lower()
@@ -1431,7 +1446,12 @@ def classify_failure(
     # strip the boundary's expected run-HOME noise first (#2202).
     if _has_permission_failure_signal(text):
         return AccountFailureKind.PERMISSION_OR_SCOPE_ERROR
-    if _has_provider_quota_signal(stderr):
+    structured, structured_kind = agy_structured_failure(
+        "", stderr, stdout_is_envelope=False
+    )
+    if structured_kind is not None:
+        return structured_kind
+    if not structured and _has_provider_quota_signal(stderr):
         return AccountFailureKind.QUOTA_EXHAUSTED
     if (
         "invalid model selection" in text
@@ -1442,33 +1462,10 @@ def classify_failure(
         or "--effort is not supported" in text
     ):
         return AccountFailureKind.MODEL_OR_TASK_ERROR
-    if any(k in text for k in ("429", "rate limit", "ratelimit")):
-        return AccountFailureKind.RATE_LIMITED
-    if any(
-        k in text
-        for k in (
-            "unauthorized",
-            "authenticated",
-            "authentication",
-            "invalid api key",
-            "invalid_api_key",
-            "401",
-            "token expired",
-            "invalid token",
-            "login required",
-        )
-    ):
-        if "expired" in text:
-            return AccountFailureKind.TOKEN_EXPIRED
-        return AccountFailureKind.AUTH_OR_SESSION_INVALID
-    if "refresh failed" in text or "token refresh" in text:
-        return AccountFailureKind.TOKEN_REFRESH_FAILED
-    if "403" in text or "forbidden" in text:
-        return AccountFailureKind.PERMISSION_OR_SCOPE_ERROR
-    if any(k in text for k in ("unavailable", "503", "service unavailable")):
-        return AccountFailureKind.ACCOUNT_UNAVAILABLE
-    if "disabled" in text:
-        return AccountFailureKind.ACCOUNT_DISABLED
+    if not structured:
+        stderr_kind = agy_stderr_account_failure(stderr)
+        if stderr_kind is not None:
+            return stderr_kind
     if "nexus_agy_non_progress:pre_effect_tool_thrash" in text:
         return AccountFailureKind.PRE_EFFECT_TOOL_THRASH
     if "nexus_agy_non_progress:provider_stream_no_progress" in text:
@@ -4283,6 +4280,10 @@ def dispatch_run(
     work_budget = max(1, max_calls)
     rotations = 0
     max_failovers = _rotation_cap(coordinator)
+    # #2415: account-wide retirements (auth, unavailable, rate limit; not a
+    # model-family quota cooldown) this run may make before it stops.
+    account_retirements = 0
+    retirement_cap = max_account_retirements()
     last_kind = None
     total_wall_ms = 0
     active_provider_pid: int | None = None
@@ -5070,6 +5071,38 @@ def dispatch_run(
                     "permission_profile_kind": permission_profile_kind,
                 })
                 return code if isinstance(code, int) and code != 0 else 1
+
+            if is_account_global_retirement(kind, scoped_model_family):
+                account_retirements += 1
+                if account_retirements >= retirement_cap:
+                    # #2415: this many accounts failing account-wide in one run
+                    # is a host-wide cause (outage, upstream 503), not bad
+                    # accounts.  Retire this one (still within the cap) and stop
+                    # instead of marking the rest of the pool bad.
+                    try:
+                        _retire_current()
+                    except Exception:
+                        pass
+                    if err:
+                        sys.stderr.write(err)
+                    emit_meta({
+                        "status": "failed",
+                        "attempts": attempts,
+                        "rotations": rotations,
+                        "work_failures": work_failures,
+                        "work_budget": work_budget,
+                        "failure_kind": AGY_UPSTREAM_UNAVAILABLE,
+                        "last_account_failure_kind": last_kind,
+                        "account_retirements": account_retirements,
+                        "account_retirement_cap": retirement_cap,
+                        "account_alias_hash": claim.account_alias_hash,
+                        "lease_id_hash": claim.lease_id_hash,
+                        "parallel_slot": True,
+                        "wall_ms": total_wall_ms,
+                        "permission_profile_sha256": permission_profile_sha256,
+                        "permission_profile_kind": permission_profile_kind,
+                    })
+                    return 75
 
             if rotations >= max_failovers:
                 try:
