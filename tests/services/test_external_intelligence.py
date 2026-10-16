@@ -1806,3 +1806,73 @@ def test_sidecar_v2_still_rejects_model_forged_source_file_ref(tmp_path):
     with pytest.raises(ExternalIntelligenceError, match="UNKNOWN_EVIDENCE_REF"):
         sidecar.analyze(record(), contract_sources(), selected_worker=worker)
     assert not store._envelope_path(req["request_sha256"]).exists()
+
+
+def _pack_source(kind, ref, content):
+    return {
+        "kind": kind,
+        "ref": ref,
+        "revision": "a" * 40,
+        "provenance": "git",
+        "content": content,
+    }
+
+
+def test_context_pack_contract_entry_exceeding_per_source_cap_is_not_truncated():
+    big = "x" * 300
+    pack = build_context_pack(
+        [_pack_source("source_file", "nexus/big.py", big)],
+        max_bytes=1000,
+        per_source_bytes=100,
+    )
+    entry = pack["entries"][0]
+    assert entry["content"] == big
+    assert entry["truncated"] is False
+    assert entry["included_bytes"] == entry["source_bytes"] == 300
+
+
+def test_context_pack_non_contract_entry_still_truncated_per_source():
+    pack = build_context_pack(
+        [_pack_source("verifier_source", "tests/t.py", "y" * 300)],
+        max_bytes=1000,
+        per_source_bytes=100,
+    )
+    assert pack["entries"][0]["included_bytes"] == 100
+    assert pack["entries"][0]["truncated"] is True
+
+
+def test_context_pack_budgets_task_card_before_large_sources():
+    srcs = [_pack_source("source_file", f"nexus/f{i}.py", "z" * 80) for i in range(3)]
+    srcs.append(_pack_source("task_card", "tasks/t.md", "card"))
+    pack = build_context_pack(srcs, max_bytes=250, per_source_bytes=250)
+    kinds = [e["kind"] for e in pack["entries"]]
+    assert "task_card" in kinds
+    assert [e["ref"] for e in pack["entries"] if e["kind"] == "source_file"] == [
+        "nexus/f0.py",
+        "nexus/f1.py",
+        "nexus/f2.py",
+    ]
+    # Final order stays the deterministic (kind, ref, revision) sort.
+    assert kinds == sorted(kinds)
+    assert sum(e["included_bytes"] for e in pack["entries"]) <= 250
+
+
+def test_context_pack_drops_non_contract_entries_not_task_card_when_over_budget():
+    srcs = [
+        _pack_source("github_issue", "github://r/issues/1", "i" * 100),
+        _pack_source("task_card", "tasks/t.md", "c" * 100),
+    ]
+    pack = build_context_pack(srcs, max_bytes=120, per_source_bytes=120)
+    by_kind = {e["kind"]: e for e in pack["entries"]}
+    assert by_kind["task_card"]["truncated"] is False
+    assert by_kind["github_issue"]["included_bytes"] == 20
+    assert by_kind["github_issue"]["truncated"] is True
+
+
+def test_context_pack_fails_closed_when_contract_entries_exceed_total_budget():
+    srcs = [
+        _pack_source("task_card", "tasks/t.md", "c" * 60),
+        _pack_source("source_file", "nexus/a.py", "a" * 60),
+    ]
+    with pytest.raises(ExternalIntelligenceError, match="CONTRACT_CONTEXT_BUDGET_EXCEEDED"):
+        build_context_pack(srcs, max_bytes=100, per_source_bytes=100)
