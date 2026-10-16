@@ -124,10 +124,35 @@ with an explicit `NOT_APPLICABLE` artifact when the engine is unconfigured, exit
 call. Because `covers` and source paths define `in_scope`, `uncovered_change_refs` is
 structurally empty for this manifest; it reports only declared relations.
 
-### Still open (G3)
+### G3 wiring (done) and what proof remains
 
-Not done here: adding a Planner capability (forbidden by the Issue), wiring into
-UnifiedRuntime/Planner execution, and the physical proof. G3 still needs one real
-Planner-selected `codeintel` task, an RIE report produced and verified in that run, the bounded
-payload serialized into the #472 package, and an Online/WorkerRegistry physical provider-input
-receipt binding the package/payload identity, plus an independent verifier.
+Wired: `nexus/services/rie_knowledge_codeintel_hook.py::knowledge_applicability_evidence`
+is called from the `codeintel` invoker in `build_default_mainchain_invokers` (both the
+real-executor branch and the preflight-only branch) and merges `knowledge_applicability`
+into the invoker `evidence`; the pinned runtime extractor then places it in the codeintel
+`consumer_payload` of the #472 bundle. The invoker only runs when CapabilityPlanner selected
+`codeintel`; no Planner capability, route, approval or merge authority was added.
+
+Identity: RIE is PR-centric, so the caller may supply an optional request field
+`rie_knowledge_identity` = `{repository, pr_number, base_sha, current_main_sha}`
+(`current_main_sha` defaults to `base_sha`). It is forwarded only by the
+`capability_context` construction in
+`SelfHostedTaskService._worker_context_materialization` and validated by the hook
+(`owner/repo`, positive int, 40-hex SHAs). `head_sha` is the lease `target_revision` and must
+equal `git rev-parse HEAD` of the target worktree. The manifest is read from that worktree.
+
+Fail-closed behaviour (sub-evidence only, the codeintel stage is never changed or crashed):
+no/invalid hint, unusable revision, engine not configured (`RIE_ENGINE_ROOT_NOT_CONFIGURED`)
+or HEAD mismatch (`HEAD_REVISION_MISMATCH`) -> `NOT_APPLICABLE`; engine, report or manifest
+integrity failure -> `INCOMPLETE` with gap `RIE_KNOWLEDGE_REJECTED:<code>`. Never `CURRENT`
+without a verified report.
+
+Proof in tests: stubbed-engine seam test through the real #472 materialization and worker
+consumption receipt (`tests/nexus/orchestrator/test_worker_planner_context_input.py`), plus an
+opt-in real-engine test (`NEXUS_RIE_ENGINE_ROOT` set) in
+`tests/services/test_rie_knowledge_codeintel_hook.py`.
+
+Still open (G3): one live Gateway run of a real Planner-selected `codeintel` task that carries
+`rie_knowledge_identity`, with `NEXUS_RIE_ENGINE_ROOT` configured on the host, showing the
+verified RIE report hash inside the serialized package and the WorkerRegistry physical
+provider-input receipt, plus an independent verifier.

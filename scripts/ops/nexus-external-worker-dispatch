@@ -63,6 +63,7 @@ _PROVIDER_PREFIXES = {
     "opencode": "opencodeop_",
     "codex": "codexop_",
     "grok": "grokop_",
+    "claude": "claudeop_",
 }
 
 
@@ -143,6 +144,20 @@ def _kill_process_group(proc: subprocess.Popen[bytes]) -> None:
     try:
         os.killpg(proc.pid, signal.SIGKILL)
     except (ProcessLookupError, PermissionError):
+        pass
+
+
+def _kill_and_reap(proc: subprocess.Popen[bytes]) -> None:
+    """Kill the provider process group by PID and reap the child."""
+
+    _kill_process_group(proc)
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+    try:
+        proc.wait(timeout=5)
+    except (subprocess.TimeoutExpired, OSError):
         pass
 
 
@@ -327,9 +342,63 @@ def _run_operation(
 
         stdout_start = stdout_path.stat().st_size if stdout_path.exists() else 0
         stderr_start = stderr_path.stat().st_size if stderr_path.exists() else 0
+        proc = None
+        mark_pending = getattr(account_adapter, "mark_launch_pending", None)
+        if mark_pending is not None:
+            try:
+                mark_pending(binding)
+            except BaseException as exc:
+                # Pre-effect: nothing launched. Release normally and do not start.
+                try:
+                    account_adapter.release(binding)
+                finally:
+                    journal.mark_terminal(
+                        operation_id,
+                        status="FAILED",
+                        exit_code=None,
+                        failure_kind=f"LAUNCH_PENDING_PERSIST_FAILED:{type(exc).__name__}",
+                        cwd=cwd,
+                        attempts=attempts,
+                        rotations=rotations,
+                        reconciliation={
+                            "at": utc_now(),
+                            "result": "NO_PROVIDER_PROCESS_STARTED",
+                            "retry_permitted": False,
+                        },
+                    )
+                return 1
         started = time.monotonic()
         last_heartbeat = 0.0
         last_sizes = (stdout_start, stderr_start)
+
+        def _fail_closed_after_start(exc: BaseException) -> int:
+            """Kill the provider group, then record an unknown outcome; never release."""
+
+            hold = getattr(account_adapter, "hold_unknown_outcome", None)
+            if proc is not None:
+                _kill_and_reap(proc)
+            failure = f"PROVIDER_SUPERVISION_FAILED_UNKNOWN_OUTCOME:{type(exc).__name__}"
+            if hold is not None:
+                try:
+                    hold(binding)
+                except BaseException as hold_exc:
+                    failure += f":HOLD_FAILED:{type(hold_exc).__name__}"
+                    print(f"ERROR {failure}", file=sys.stderr)
+            journal.mark_terminal(
+                operation_id,
+                status="OUTCOME_UNKNOWN",
+                exit_code=None,
+                failure_kind=failure,
+                cwd=cwd,
+                attempts=attempts,
+                rotations=rotations,
+                reconciliation={
+                    "at": utc_now(),
+                    "result": "PROVIDER_SUPERVISION_FAILED_AFTER_START",
+                    "retry_permitted": False,
+                },
+            )
+            return 1
 
         try:
             with (
@@ -346,6 +415,9 @@ def _run_operation(
                     start_new_session=True,
                     close_fds=True,
                 )
+                attach = getattr(account_adapter, "attach_provider", None)
+                if attach is not None:
+                    attach(binding, proc.pid)
                 journal.heartbeat(
                     operation_id,
                     phase="PROVIDER_RUNNING",
@@ -380,8 +452,15 @@ def _run_operation(
                         last_heartbeat = now
                     time.sleep(0.25)
         except BaseException as exc:
+            if proc is not None and mark_pending is not None:
+                return _fail_closed_after_start(exc)
+            # No child exists (Popen never succeeded): known pre-effect failure.
+            confirm_start_failure = getattr(account_adapter, "confirm_terminal", None)
             try:
-                account_adapter.release(binding)
+                if proc is None and confirm_start_failure is not None:
+                    confirm_start_failure(binding)
+                else:
+                    account_adapter.release(binding)
             except BaseException:
                 pass
             journal.mark_terminal(
@@ -401,10 +480,22 @@ def _run_operation(
             return 1
 
         if timed_out:
-            try:
-                account_adapter.release(binding)
-            except BaseException:
-                pass
+            hold = getattr(account_adapter, "hold_unknown_outcome", None)
+            hold_failed = False
+            if hold is not None:
+                try:
+                    hold(binding)
+                except BaseException as hold_exc:
+                    hold_failed = True
+                    print(
+                        f"ERROR UNKNOWN_OUTCOME_HOLD_FAILED:{type(hold_exc).__name__}",
+                        file=sys.stderr,
+                    )
+            if not hold_failed:
+                try:
+                    account_adapter.release(binding)
+                except BaseException:
+                    pass
             journal.mark_terminal(
                 operation_id,
                 status="OUTCOME_UNKNOWN",
@@ -421,17 +512,22 @@ def _run_operation(
             )
             return 124
 
-        exit_code = int(proc.returncode or 0)
-        stdout_bytes = stdout_path.read_bytes()
-        stderr_bytes = stderr_path.read_bytes()
-        stdout_text = stdout_bytes[stdout_start:].decode("utf-8", errors="replace")
-        stderr_text = stderr_bytes[stderr_start:].decode("utf-8", errors="replace")
-        outcome = adapter.interpret(
-            request,
-            exit_code=exit_code,
-            stdout_text=stdout_text,
-            stderr_text=stderr_text,
-        )
+        try:
+            exit_code = int(proc.returncode or 0)
+            stdout_bytes = stdout_path.read_bytes()
+            stderr_bytes = stderr_path.read_bytes()
+            stdout_text = stdout_bytes[stdout_start:].decode("utf-8", errors="replace")
+            stderr_text = stderr_bytes[stderr_start:].decode("utf-8", errors="replace")
+            outcome = adapter.interpret(
+                request,
+                exit_code=exit_code,
+                stdout_text=stdout_text,
+                stderr_text=stderr_text,
+            )
+        except BaseException as exc:
+            if mark_pending is None:
+                raise
+            return _fail_closed_after_start(exc)
 
         failure_enum = None
         if outcome.failure_kind:
@@ -479,10 +575,33 @@ def _run_operation(
                 rotations += 1
                 continue
 
-        try:
-            account_adapter.release(binding)
-        except BaseException:
-            pass
+        hold_failed = False
+        if outcome.status == "OUTCOME_UNKNOWN":
+            hold = getattr(account_adapter, "hold_unknown_outcome", None)
+            if hold is not None:
+                try:
+                    hold(binding)
+                except BaseException as hold_exc:
+                    hold_failed = True
+                    print(
+                        f"ERROR UNKNOWN_OUTCOME_HOLD_FAILED:{type(hold_exc).__name__}",
+                        file=sys.stderr,
+                    )
+        if not hold_failed:
+            note = getattr(account_adapter, "note_terminal_failure", None)
+            if note is not None and failure_enum is not None and outcome.status == "FAILED":
+                try:
+                    note(binding, failure_enum)
+                except BaseException:
+                    pass
+            confirm = getattr(account_adapter, "confirm_terminal", None)
+            try:
+                if confirm is not None and outcome.status != "OUTCOME_UNKNOWN":
+                    confirm(binding)
+                else:
+                    account_adapter.release(binding)
+            except BaseException:
+                pass
         journal.mark_terminal(
             operation_id,
             status=outcome.status,
@@ -532,11 +651,29 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--background", action="store_true")
     ap.add_argument("--status", metavar="OPERATION_ID")
     ap.add_argument("--reconcile", metavar="OPERATION_ID")
+    ap.add_argument(
+        "--claude-list-unknown",
+        action="store_true",
+        help="list Claude account leases held as UNKNOWN_OUTCOME",
+    )
+    ap.add_argument(
+        "--claude-reconcile-release",
+        metavar="LEASE_ID",
+        help="explicitly release one reconciled UNKNOWN_OUTCOME Claude lease",
+    )
     ap.add_argument("--operation-root", default=str(OPERATION_ROOT))
     ap.add_argument("--operation-run", metavar="OPERATION_ID", help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
 
     operation_root = Path(args.operation_root).expanduser()
+    if args.claude_list_unknown or args.claude_reconcile_release:
+        from nexus.services.claude_account_pool import get_claude_account_pool_manager
+
+        manager = get_claude_account_pool_manager()
+        if args.claude_reconcile_release:
+            manager.reconcile_release(args.claude_reconcile_release)
+        print(json.dumps({"unknown_outcome_leases": list(manager.unknown_outcome_leases())}))
+        return 0
     if args.status or args.reconcile:
         operation_id = args.status or args.reconcile
         provider = _provider_from_operation_id(operation_id)
