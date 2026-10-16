@@ -335,7 +335,13 @@ def _facade_aliases(tree: ast.AST, facades: tuple[str, ...]) -> dict[str, str]:
 
 
 def _patched_names(source: str, facades: tuple[str, ...]) -> set[tuple[str, str]]:
-    """``(facade, name)`` pairs a test source patches as module attributes."""
+    """``(facade, name)`` pairs a test source patches as module attributes.
+
+    ``name`` is ``X`` when the patch rebinds ``facade.X`` and ``M.Y`` when it rebinds
+    attribute ``Y`` of the object the facade binds as ``M`` (``"facade.M.Y"`` strings,
+    ``setattr(facade.M, "Y")``, ``patch.object(facade.M, "Y")``).  Deeper paths patch
+    attributes of objects every module shares and are never stale.
+    """
 
     tree = ast.parse(source)
     aliases = _facade_aliases(tree, facades)
@@ -350,37 +356,104 @@ def _patched_names(source: str, facades: tuple[str, ...]) -> set[tuple[str, str]
         if isinstance(first, ast.Constant) and isinstance(first.value, str):
             for facade in facades:
                 rest = first.value[len(facade) + 1 :]
-                # ``facade.X.Y`` patches attribute Y on the object X, which a part
-                # shares (same module/class object); only ``facade.X`` rebinds X.
-                if first.value.startswith(f"{facade}.") and "." not in rest:
+                if first.value.startswith(f"{facade}.") and rest.count(".") <= 1:
                     found.add((facade, rest))
             continue
-        target = _dotted(first)
-        facade = aliases.get(target or "") or (target if target in facades else None)
+        target = _dotted(first) or ""
+        facade = aliases.get(target) or (target if target in facades else None)
+        attribute_of = None
+        if facade is None and "." in target:
+            head, _, member = target.rpartition(".")
+            facade = aliases.get(head) or (head if head in facades else None)
+            attribute_of = member
         if facade is None or len(node.args) < 2:
             continue
         second = node.args[1]
         if isinstance(second, ast.Constant) and isinstance(second.value, str):
-            found.add((facade, second.value))
+            name = f"{attribute_of}.{second.value}" if attribute_of else second.value
+            found.add((facade, name))
     return found
 
 
-def _stale_patches(
-    test_sources: dict[str, str], part_sources: dict[str, dict[str, str]]
-) -> list[tuple[str, str, str, str]]:
-    """``(test, facade, name, part)`` where ``facade.name`` is patched but a part of that
-    facade loads ``name`` by bare name, so the patch cannot reach the part."""
+def _module_bindings(source: str) -> dict[str, str]:
+    """Top-level ``bound name -> module path`` for the modules a source imports."""
 
+    bindings: dict[str, str] = {}
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.asname:
+                    bindings[alias.asname] = alias.name
+                else:
+                    head = alias.name.split(".")[0]
+                    bindings[head] = head
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            for alias in node.names:
+                bindings[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+    return bindings
+
+
+def _from_imported_bare_uses(source: str) -> set[tuple[str, str]]:
+    """``(module, name)`` for ``from module import name [as bound]`` whose bound name the
+    part itself loads by bare name (patching ``module.name`` cannot reach it)."""
+
+    tree = ast.parse(source)
+    loads = {
+        node.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+    }
+    return {
+        (node.module, alias.name)
+        for node in tree.body
+        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module
+        for alias in node.names
+        if (alias.asname or alias.name) in loads
+    }
+
+
+def _stale_patches(
+    test_sources: dict[str, str],
+    part_sources: dict[str, dict[str, str]],
+    facade_sources: dict[str, str] | None = None,
+) -> list[tuple[str, str, str, str]]:
+    """``(test, facade, name, part)`` for patches that cannot reach a part of the facade:
+
+    * ``facade.X`` is patched while the part loads ``X`` by bare name;
+    * ``facade.M.Y`` is patched while the part does ``from <M's module> import Y`` and
+      loads it by bare name.
+    """
+
+    if facade_sources is None:
+        facade_sources = {
+            facade: path.read_text(encoding="utf-8")
+            for facade, path in ((SHTS_MODULE, SHTS_SOURCE), (GW_MODULE, GW_SOURCE))
+            if facade in part_sources
+        }
     bare = {
         facade: {part: _bare_global_uses(source) for part, source in parts.items()}
         for facade, parts in part_sources.items()
     }
+    from_imported = {
+        facade: {part: _from_imported_bare_uses(source) for part, source in parts.items()}
+        for facade, parts in part_sources.items()
+    }
+    modules = {facade: _module_bindings(source) for facade, source in facade_sources.items()}
     facades = tuple(part_sources)
     stale: list[tuple[str, str, str, str]] = []
     for test, source in sorted(test_sources.items()):
         for facade, name in sorted(_patched_names(source, facades)):
+            if (test, facade, name) in STALE_PATCH_ALLOWLIST:
+                continue
+            if "." in name:
+                bound, _, attribute = name.partition(".")
+                module = modules.get(facade, {}).get(bound, bound)
+                for part, pairs in sorted(from_imported.get(facade, {}).items()):
+                    if (module, attribute) in pairs:
+                        stale.append((test, facade, name, part))
+                continue
             for part, names in sorted(bare.get(facade, {}).items()):
-                if name in names and (test, facade, name) not in STALE_PATCH_ALLOWLIST:
+                if name in names:
                     stale.append((test, facade, name, part))
     return stale
 
@@ -565,6 +638,42 @@ def test_stale_patch_guard_detects_bare_name_call_in_part() -> None:
         }
     }
     assert _stale_patches({"tests/test_x.py": shared_source}, shared_parts) == []
+
+
+def test_stale_patch_guard_detects_facade_module_attribute_from_imported_in_part() -> None:
+    # Issue #2439 (gap found in the #2438 review): ``facade.M.Y`` cannot reach a part
+    # that did ``from <module of M> import Y``.
+    facade_source = (
+        "import subprocess\n"
+        "import nexus.orchestrator.execution_readiness as readiness_module\n"
+        "from nexus.orchestrator import task_contract\n"
+    )
+    test_source = (
+        "import nexus.orchestrator.unified_mcp_gateway as gateway_module\n"
+        "def test_x(monkeypatch):\n"
+        "    monkeypatch.setattr('nexus.orchestrator.unified_mcp_gateway.subprocess.run', 1)\n"
+        "    monkeypatch.setattr(gateway_module.readiness_module, 'evaluate_source_binding', 2)\n"
+        "    monkeypatch.setattr(gateway_module.task_contract, 'parse', 3)\n"
+        "    monkeypatch.setattr('nexus.orchestrator.unified_mcp_gateway.subprocess.PIPE', 4)\n"
+        "    monkeypatch.setattr('nexus.orchestrator.unified_mcp_gateway.subprocess.run.x', 5)\n"
+    )
+    part_sources = {
+        GW_MODULE: {
+            "gw_parts/p.py": (
+                "from subprocess import PIPE, run\n"
+                "from nexus.orchestrator.execution_readiness import evaluate_source_binding as esb\n"
+                "from nexus.orchestrator.task_contract import parse\n"
+                "def go():\n    run()\n    esb()\n"
+            )
+        }
+    }
+    stale = _stale_patches(
+        {"tests/test_x.py": test_source}, part_sources, {GW_MODULE: facade_source}
+    )
+    assert stale == [
+        ("tests/test_x.py", GW_MODULE, "readiness_module.evaluate_source_binding", "gw_parts/p.py"),
+        ("tests/test_x.py", GW_MODULE, "subprocess.run", "gw_parts/p.py"),
+    ]
 
 
 def test_stale_patch_allowlist_entries_are_well_formed() -> None:
