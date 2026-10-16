@@ -284,7 +284,12 @@ class DirectCliWorkerAdapter:
 # reason "Tool execution denied by user." (observed in the cline 3.0.69 CLI).
 # The text markers are trusted on stderr only (as for Agy's headless marker);
 # stdout is read as JSON events and only structural keys are inspected.
-_CLINE_DENIAL_MARKERS = ("execution-denied", "execution denied", "denied by user")
+_CLINE_DENIAL_MARKERS = (
+    "execution-denied",
+    "execution denied",
+    "denied by user",
+    "-- not a tool or system failure",
+)
 CLINE_PERMISSION_MODE = "auto_approve_false"
 # Assumed structured shapes (cline 3.0.69 bundles the AI SDK tool-result
 # model; the exact ``--json`` envelope is not pinned, so any nesting depth is
@@ -322,6 +327,8 @@ def _cline_tool_error_denied(event: dict[str, Any]) -> bool:
     output = event.get("output")
     if isinstance(output, dict):
         candidates.append(output.get("error"))
+    # A structured error object carries its text in ``message`` (#2335 review).
+    candidates += [item.get("message") for item in list(candidates) if isinstance(item, dict)]
     return any(
         isinstance(item, str)
         and (_CLINE_APPROVAL_REQUIRED in item.lower() or _CLINE_SKIP_SUFFIX in item.lower())

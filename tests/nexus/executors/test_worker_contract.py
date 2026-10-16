@@ -2540,3 +2540,29 @@ def test_cline_skip_suffix_in_tool_result_or_model_text_is_not_a_denial():
     }
     stdout = (json.dumps(tool_result) + "\n" + json.dumps(text) + "\n").encode() + _CLINE_OK
     assert cline_delivery_failure(stdout, b"") is None
+
+
+@pytest.mark.parametrize("field", ["event_error", "output_error", "error_object"])
+def test_cline_skip_suffix_in_each_tool_error_field_is_a_denial(field):
+    """#2335 review: each tool error field alone carries the denial."""
+    import json
+
+    from nexus.executors.worker_registry import cline_delivery_failure
+
+    skip = "Tool was not executed -- NOT a tool or system failure. Clarify with user."
+    event = {"type": "content_end", "contentType": "tool", "toolName": "editor"}
+    if field == "event_error":
+        event["error"] = skip
+    elif field == "output_error":
+        event["output"] = {"error": skip}
+    else:
+        event["error"] = {"message": skip}
+    stdout = (json.dumps({"type": "agent_event", "event": event}) + "\n").encode() + _CLINE_OK
+    assert cline_delivery_failure(stdout, b"") == "cline_permission_denied"
+
+
+def test_cline_skip_suffix_on_stderr_is_a_denial():
+    from nexus.executors.worker_registry import cline_delivery_failure
+
+    stderr = b"Tool was not executed -- NOT a tool or system failure. Clarify with user.\n"
+    assert cline_delivery_failure(_CLINE_OK, stderr) == "cline_permission_denied"
