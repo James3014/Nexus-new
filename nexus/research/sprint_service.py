@@ -1472,49 +1472,6 @@ class LocalCandidateGenerator:
         }
 
 
-def _should_try_local_preflight_before_llm(*, task: str, source_code: str) -> bool:
-    if os.environ.get("NEXUS_DISABLE_LOCAL_PREFLIGHT_BEFORE_LLM", "").strip().lower() in {"1", "true", "yes"}:
-        return False
-    combined = f"{task}\n{source_code}".lower()
-    # These contracts are already represented in the deterministic local mutator.
-    # Try that cheap path before waiting on an external model call.
-    return any(
-        marker in combined
-        for marker in (
-            "renamed public field",
-            "canonical field",
-            "build_response",
-            "credential scrubber",
-            "secret redaction",
-            "def redact",
-            "evidence artifact claim rollup",
-            "governance action filter",
-            "rlm_harder_v2_filter_action",
-            "rlm_harder_v2_scope_decision",
-            "rlm_harder_v2_verified_claims",
-            "rlm_harder_v2_accept_receipt",
-            "rlm_harder_v2_select_memory_hits",
-            "rlm_harder_v2_merge_settings",
-            "rlm_harder_v2_repair_budget",
-            "reason governance_block",
-            "phased report summary",
-            "phase_ready",
-        )
-    )
-
-
-def _has_hidden_contract_fast_path(source_code: str) -> bool:
-    """Cheap deterministic contracts that can be verified before spending an LLM call."""
-    return any(
-        marker in source_code
-        for marker in (
-            "def merge_limits",
-            "def remaining_ms",
-            "def rlm_harder_v2_repair_budget",
-        )
-    )
-
-
 class SprintExecutor:
     def __init__(self, repo_root: Path, scope_files: list[str], pytest_cmd: list[str], timeout_sec: int, task: str):
         self.repo_root = repo_root
@@ -2545,102 +2502,6 @@ def _run_hyper_sprint_core(*, repo_root: Path, config: SprintConfig) -> SprintRe
         used_source = "local"
         ev_recorded = False
         try:
-            hidden_fast_path_disabled = os.environ.get(
-                "NEXUS_DISABLE_HIDDEN_CONTRACT_FAST_PATH",
-                "",
-            ).strip().lower() in {"1", "true", "yes"}
-            hidden_invariant_shadow_disabled = os.environ.get(
-                "NEXUS_DISABLE_HIDDEN_INVARIANT_SHADOW",
-                "",
-            ).strip().lower() in {"1", "true", "yes"}
-            if (
-                llm_generator is not None
-                and hidden_verifier_mode
-                and not hidden_fast_path_disabled
-                and _has_hidden_contract_fast_path(source_code)
-            ):
-                fast_code, fast_meta = local_generator.generate(
-                    source_code=source_code,
-                    task=config.task,
-                    mutation_hint=f"{hint}\nhidden_verifier_contract_fast_path",
-                    seed=idx + 5000,
-                )
-                fast_source = str(fast_meta.get("source", "local_hidden_contract_fast_path")) or "local_hidden_contract_fast_path"
-                if fast_source == "local":
-                    fast_source = "local_hidden_contract_fast_path"
-                fast_guard_ok, fast_guard_reason = _semantic_guard(source_code, fast_code, config.task, fast_source)
-                if fast_guard_ok:
-                    fast_ev = sprint_evaluate(
-                        seed=idx + 5000,
-                        hint=f"{hint} | hidden_verifier_contract_fast_path",
-                        code=fast_code,
-                        source=fast_source,
-                    )
-                else:
-                    fast_ev = CandidateEval(
-                        seed=idx + 5000,
-                        score=0.0,
-                        hint=f"{hint} | hidden_verifier_contract_fast_path",
-                        error=fast_guard_reason,
-                        candidate_code=fast_code,
-                        source=fast_source,
-                    )
-                candidates.append(fast_ev)
-                ev_recorded = True
-                learning_trace["hidden_contract_fast_path"] = {
-                    "attempted": True,
-                    "score": fast_ev.score,
-                    "source": fast_source,
-                }
-                if fast_ev.score >= 1.0:
-                    error_codes.append("hidden_contract_fast_path_success")
-                    ev = fast_ev
-                    break
-                error_codes.append("hidden_contract_fast_path_miss")
-            if llm_generator is not None and _should_try_local_preflight_before_llm(task=config.task, source_code=source_code):
-                preflight_code, preflight_meta = local_generator.generate(
-                    source_code=source_code,
-                    task=config.task,
-                    mutation_hint=f"{hint}\nlocal_preflight_before_llm",
-                    seed=idx + 7000,
-                )
-                preflight_source = str(preflight_meta.get("source", "local_preflight")) or "local_preflight"
-                if preflight_source == "local":
-                    preflight_source = "local_preflight"
-                preflight_guard_ok, preflight_guard_reason = _semantic_guard(
-                    source_code,
-                    preflight_code,
-                    config.task,
-                    preflight_source,
-                )
-                if preflight_guard_ok:
-                    preflight_ev = sprint_evaluate(
-                        seed=idx + 7000,
-                        hint=f"{hint} | local_preflight_before_llm",
-                        code=preflight_code,
-                        source=preflight_source,
-                    )
-                else:
-                    preflight_ev = CandidateEval(
-                        seed=idx + 7000,
-                        score=0.0,
-                        hint=f"{hint} | local_preflight_before_llm",
-                        error=preflight_guard_reason,
-                        candidate_code=preflight_code,
-                        source=preflight_source,
-                    )
-                candidates.append(preflight_ev)
-                ev_recorded = True
-                learning_trace["local_preflight_before_llm"] = {
-                    "attempted": True,
-                    "score": preflight_ev.score,
-                    "source": preflight_source,
-                }
-                if preflight_ev.score >= 1.0:
-                    error_codes.append("local_preflight_before_llm_success")
-                    ev = preflight_ev
-                    break
-                error_codes.append("local_preflight_before_llm_miss")
             if llm_generator is not None:
                 try:
                     visible_verifier_binding.update({"hint": hint, "seed": idx})
@@ -2737,26 +2598,6 @@ def _run_hyper_sprint_core(*, repo_root: Path, config: SprintConfig) -> SprintRe
                 )
                 used_source = str(meta.get("source", "local"))
 
-            # Hidden-verifier hardening for known repair contracts:
-            # prefer deterministic local invariant patch over partial LLM edits.
-            if (
-                hidden_verifier_mode
-                and used_source.startswith("llm")
-                and not hidden_fast_path_disabled
-                and not hidden_invariant_shadow_disabled
-                and _has_hidden_contract_fast_path(source_code)
-            ):
-                local_code, local_meta = local_generator.generate(
-                    source_code=source_code,
-                    task=config.task,
-                    mutation_hint=f"{hint}\nhidden_verifier_invariant_shadow",
-                    seed=idx + 5000,
-                )
-                candidate_code = local_code
-                used_source = str(local_meta.get("source", "local_hidden_shadow")) or "local_hidden_shadow"
-                if used_source == "local":
-                    used_source = "local_hidden_shadow"
-                fallback_used = True
             _record_llm_meta(meta)
             if used_source.startswith("local") and llm_generator is not None:
                 fallback_used = True
@@ -2831,46 +2672,6 @@ def _run_hyper_sprint_core(*, repo_root: Path, config: SprintConfig) -> SprintRe
                 # lane (PR-3), where the visible-test self-heal is the treatment being measured.
                 and (not _symmetric_prompt_mode() or _bench_lane.treatment_lane_active())
             )
-            if (
-                hidden_verifier_mode
-                and llm_generator is not None
-                and used_source.startswith("llm")
-                and "quota" not in error_codes
-                and not hidden_invariant_shadow_disabled
-            ):
-                local_code, local_meta = local_generator.generate(
-                    source_code=source_code,
-                    task=config.task,
-                    mutation_hint=f"{hint}\nhidden_verifier_invariant_shadow",
-                    seed=idx + 1000,
-                )
-                local_source = str(local_meta.get("source", "local_hidden_shadow"))
-                if local_source == "local":
-                    local_source = "local_hidden_shadow"
-                fallback_used = True
-                shadow_guard_ok, shadow_guard_reason = _semantic_guard(source_code, local_code, config.task, local_source)
-                if shadow_guard_ok:
-                    shadow_ev = sprint_evaluate(
-                        seed=idx + 1000,
-                        hint=f"{hint} | hidden_verifier_invariant_shadow",
-                        code=local_code,
-                        source=local_source,
-                    )
-                else:
-                    shadow_ev = CandidateEval(
-                        seed=idx + 1000,
-                        score=0.0,
-                        hint=f"{hint} | hidden_verifier_invariant_shadow",
-                        error=shadow_guard_reason,
-                        candidate_code=local_code,
-                        source=local_source,
-                    )
-                candidates.append(ev)
-                candidates.append(shadow_ev)
-                ev_recorded = True
-                error_codes.append("hidden_invariant_shadow_candidate")
-                if shadow_ev.score >= ev.score:
-                    ev = shadow_ev
             if (
                 self_heal_enabled
                 and llm_generator is not None
@@ -2984,7 +2785,7 @@ def _run_hyper_sprint_core(*, repo_root: Path, config: SprintConfig) -> SprintRe
                 and ev.score < 1.0
                 and "quota" not in error_codes
             ):
-                if model_required_final_delivery and not ev_recorded:
+                if not ev_recorded:
                     candidates.append(ev)
                     ev_recorded = True
                 local_code, local_meta = local_generator.generate(
@@ -3024,8 +2825,6 @@ def _run_hyper_sprint_core(*, repo_root: Path, config: SprintConfig) -> SprintRe
             error_codes.append("quota")
         if not ev_recorded:
             candidates.append(ev)
-        if hidden_verifier_mode and ev.source == "local_hidden_shadow" and ev.score >= 1.0:
-            break
         if config.safe_mode and ev.score >= 1.0 and len(candidates) >= routing_min_pool:
             break
 
@@ -3099,7 +2898,9 @@ def _run_hyper_sprint_core(*, repo_root: Path, config: SprintConfig) -> SprintRe
         ddtree_max_candidates=config.ddtree_max_candidates,
     )
     candidates = routed_candidates
-    if model_required_final_delivery and not _is_model_owned_source(best.source):
+    # A run with a model never delivers a locally generated candidate (the strict lane already
+    # required this; #2339 removed the benchmark-keyed local fast paths from every lane).
+    if (model_required_final_delivery or llm_generator is not None) and not _is_model_owned_source(best.source):
         model_candidates = [item for item in candidates if _is_model_owned_source(item.source)]
         best_model = max(model_candidates, key=lambda item: item.score, default=None)
         local_support_code = "model_required_local_support_not_delivery" if best.score >= 1.0 else ""
